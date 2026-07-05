@@ -1,6 +1,11 @@
 #!/bin/sh
 # Forge concept: pr-exists (Gitea via tea CLI)
-# Returns true for open or merged pulls only. Closed-not-merged pulls are excluded.
-# --state all fetches pulls in all states; without it, only open pulls are returned.
-# Gitea: merged PRs have state="closed" + merged=true; abandoned PRs have state="closed" + merged=false
-tea pulls list --state all --fields index --output json | jq "[.[] | select(.head.ref == \"$CODEV_BRANCH_NAME\" and (.state == \"open\" or (.state == \"closed\" and .merged == true)))] | length > 0"
+# Returns true when an open or merged pull exists for the current branch.
+#
+# In `tea pulls list --output json`, `head` is the branch-name STRING (not a
+# {ref} object), and a merged pull is reported as state="merged" (the CLI list
+# output has no `.merged` boolean). `--state all` includes closed pulls;
+# `--limit` is required because the default page size (30) can miss the branch.
+tea pulls list --state all --limit 200 --fields index,head,state --output json \
+  | jq --arg b "$CODEV_BRANCH_NAME" \
+      '[.[] | select(.head == $b and (.state == "open" or .state == "merged"))] | length > 0'

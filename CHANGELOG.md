@@ -9,6 +9,17 @@ For detailed release notes, see [docs/releases/](docs/releases/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **`gitea` forge preset now works against the real `tea` CLI** (#1137): the gitea concept scripts were written against the Gitea REST API JSON shape but invoke the `tea` CLI, whose `--output json` emits a different, flattened shape (and in places references a flag/field/subcommand `tea` doesn't have). Verified against `tea` 0.14.2 + a live Gitea/Forgejo instance:
+  - `user-identity`: `tea whoami --output json` → `tea api user | jq .login` (`tea whoami` has no `--output json` flag).
+  - `pr-exists` / `recently-merged`: `.head.ref` → `.head` (the CLI list output flattens `head` to a branch-name string) and `state=="closed" && .merged` → `state=="merged"`; `pr-exists` also gains `--limit` so the default page can't hide the branch.
+  - `pr-list`: dropped the invalid `description` field (was erroring with `invalid field 'description'`, breaking the whole concept); `body` is `""` since `tea pulls list` exposes no body field.
+  - `pr-view`: `tea pulls view` (returns an empty array) → `tea api repos/:owner/:repo/pulls/:index`, yielding the full PR object incl. additions/deletions and head/base refs.
+  - `issue-view`: `tea issues view` (list-shaped array, no body) → singular `tea issue <id>`.
+  - `issue-comment`: `tea issues comment` (no such subcommand) → `tea comments add`.
+  - `issue-search`: removed the "unverified" caveat — confirmed `--state` and the `body` field work.
+
 ### Added (Spec 786 — Multi-architect lifecycle, persistence, and UX)
 
 - **`afx workspace remove-architect <name>`**: first-class CLI to evict a sibling architect. Refuses to remove `main`. Removing an architect with in-flight builders proceeds; those builders fall back to `main` routing.

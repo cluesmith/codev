@@ -1,3 +1,6 @@
 #!/bin/sh
 # Forge concept: issue-comment (Gitea via tea CLI)
-exec tea issues comment "$CODEV_ISSUE_ID" "$CODEV_COMMENT_BODY"
+#
+# `tea issues` has no `comment` subcommand; comments are managed under
+# `tea comments` (`tea comments add <issue/pr index> <body>`).
+exec tea comments add "$CODEV_ISSUE_ID" "$CODEV_COMMENT_BODY"

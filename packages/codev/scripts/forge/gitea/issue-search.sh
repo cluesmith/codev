@@ -1,11 +1,10 @@
 #!/bin/sh
 # Forge concept: issue-search (Gitea via tea CLI)
 #
-# ⚠️ UNVERIFIED — mirrors gitea/issue-list.sh with `body` added to --fields,
-#    a --state parameter, and `body` mapped in the jq normalization. `tea` is
-#    not available in the authoring environment (#920); smoke-test before
-#    relying on it. Confirm: tea's `--state` accepts open|closed|all and the
-#    issue body field is named `body`.
+# Mirrors gitea/issue-list.sh with `body` added to --fields, a --state
+# parameter, and `body` mapped in the jq normalization. Verified against
+# tea 0.14.2: `--state` accepts open|closed|all and `body` is a valid
+# issues-list field.
 #
 # Input (optional): CODEV_ISSUE_STATE — open|closed|all (default: open)
 # Output: JSON [{number, title, url, labels, createdAt, author, assignees, body}]
