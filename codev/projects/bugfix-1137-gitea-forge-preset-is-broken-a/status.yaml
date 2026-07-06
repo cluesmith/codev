@@ -1,0 +1,14 @@
+id: bugfix-1137
+title: gitea-forge-preset-is-broken-a
+protocol: bugfix
+phase: investigate
+plan_phases: []
+current_plan_phase: null
+gates:
+  merge-approval:
+    status: pending
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-07-06T19:06:00.466Z'
+updated_at: '2026-07-06T19:06:00.469Z'
