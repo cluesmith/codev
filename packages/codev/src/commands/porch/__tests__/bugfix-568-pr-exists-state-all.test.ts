@@ -63,9 +63,12 @@ describe('pr-exists forge scripts', () => {
       expect(fs.existsSync(scriptPath)).toBe(true);
     });
 
-    it('fetches all pull states (--state all) to catch merged pulls (#568)', () => {
+    it('fetches all pull states (state=all) to catch merged pulls (#568)', () => {
       const content = fs.readFileSync(scriptPath, 'utf-8');
-      expect(content).toContain('--state all');
+      // #1137: routed through `tea api …/pulls?state=all` (the raw REST
+      // passthrough) instead of `tea pulls list --state all`, whose flattened
+      // output can't satisfy the `.head.ref` / `.merged` predicate.
+      expect(content).toContain('state=all');
     });
 
     it('filters out closed-not-merged PRs (#653)', () => {
