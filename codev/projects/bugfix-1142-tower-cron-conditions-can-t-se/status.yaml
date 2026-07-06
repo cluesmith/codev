@@ -1,0 +1,14 @@
+id: bugfix-1142
+title: tower-cron-conditions-can-t-se
+protocol: bugfix
+phase: investigate
+plan_phases: []
+current_plan_phase: null
+gates:
+  pr:
+    status: pending
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-07-06T09:41:52.658Z'
+updated_at: '2026-07-06T09:41:52.659Z'
