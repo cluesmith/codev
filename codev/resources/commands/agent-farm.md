@@ -700,6 +700,42 @@ Displays local tower status plus cloud registration details: tower name, ID, con
 
 ---
 
+### afx cron
+
+Manage scheduled tasks defined as YAML files in `.af-cron/` at the workspace root. The Tower scheduler loads these every tick, runs due commands, and delivers messages through the normal send pipeline.
+
+```bash
+afx cron list                   # List all cron tasks
+afx cron status <name>          # Check task status
+afx cron run <name>             # Run immediately
+afx cron enable <name>          # Enable
+afx cron disable <name>         # Disable
+```
+
+There is NO `afx cron add` — create YAML files in `.af-cron/` directly.
+
+**Task YAML format:**
+
+```yaml
+name: Service Health Check      # required, unique per workspace
+schedule: "*/15 * * * *"        # required, cron expression (or @hourly/@daily/@startup)
+command: ./health-check.sh      # required, run via shell
+message: "Health alert: ${output}"  # required, ${output} = trimmed command output
+condition: "exitCode != 0"      # optional JS expression, see below
+target: architect               # optional, default architect
+timeout: 30                     # optional, seconds, default 30
+enabled: true                   # optional, default true
+```
+
+**Condition environment:** `condition` is a JavaScript expression evaluated with two variables in scope:
+
+- `output` (string) — the command's trimmed output
+- `exitCode` (number) — `0` on success, the command's exit code on non-zero exit, `124` on timeout, `-1` on spawn failure
+
+With a `condition`, the message is delivered exactly when the expression evaluates truthy — including on failed runs, so `condition: "exitCode != 0"` alerts when the command fails. Without a `condition`, the message is delivered only when the command exits 0.
+
+---
+
 ### afx db
 
 Database debugging and maintenance commands.
