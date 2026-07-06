@@ -27,3 +27,13 @@ Implemented the prescribed design in `tower-cron.ts` (commit ecf294ae):
 - 8 new regression tests (34 total in tower-cron.test.ts, all pass). Full suite: 3440 passed / 48 pre-existing skips.
 - Docs: condition environment (`output`, `exitCode`) documented in the afx skill `## afx cron` section and a new `### afx cron` section in agent-farm.md — BOTH trees (codev/ + codev-skeleton/, and .claude/skills + skeleton skills).
 - Root `pnpm build` passes.
+
+## PR (2026-07-06)
+
+- Porch checks (build + tests) passed; advanced to pr phase.
+- PR #1143 opened: https://github.com/cluesmith/codev/pull/1143 (Fixes #1142).
+- End-to-end semantics verified against built dist + real Node exec: non-zero exit → `code=3, killed=false, signal=null` (resolves as data); timeout → `code=null, killed=true, signal=SIGTERM` (rejects → 124). Matches the implementation's branch conditions exactly.
+- CMAP note: `consult --protocol bugfix --type pr` needed explicit `--project-id bugfix-1142` (auto-detect hit "Multiple projects found" in the worktree).
+- CMAP verdicts: gemini=APPROVE (HIGH), codex=APPROVE (HIGH), claude=APPROVE (HIGH). No key issues from any reviewer.
+- CI on PR #1143: all 6 checks green, mergeable.
+- Requested the `pr` gate via porch done; waiting for human approval.
