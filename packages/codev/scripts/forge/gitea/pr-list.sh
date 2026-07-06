@@ -1,36 +1,35 @@
 #!/bin/sh
-# Forge concept: pr-list (Gitea via tea CLI)
+# Forge concept: pr-list (Gitea via tea CLI) — open pulls
+# Output: JSON [{number, title, url, reviewDecision, body, createdAt, author,
+#                reviewRequests, isDraft}]  (PrListItem in forge-contracts.ts)
 #
-# Normalize tea's PR shape to the GitHub-compatible shape codev expects
-# (see PrListItem in codev/src/lib/forge-contracts.ts):
-#   index            -> number (int)
-#   description      -> body
-#   created          -> createdAt
-#   author (string)  -> author.login
-#   reviewDecision   -> ""  (Gitea has no GitHub-equivalent review-decision summary)
-#   reviewRequests   -> []  (verified against tea 0.14.1: `pulls list` exposes
-#                            no `reviewers` field, and its JSON output is limited
-#                            to the selectable `--fields`, so requested reviewers
-#                            are unreachable here. The VSCode sort silently skips
-#                            the review-requested bucket when empty.)
-#   isDraft          -> false (verified: tea 0.14.1 `pulls list` exposes no
-#                              `draft` field among its selectable `--fields`.)
-# The underlying Gitea API PR object does carry `draft` and `requested_reviewers`,
-# but only the raw `tea api` passthrough can reach them — populating these two
-# fields for Gitea would mean reworking this concept onto `tea api`, which is a
-# separate, larger change than #787's scope.
-exec tea pulls list --limit 200 \
-  --fields index,title,state,author,url,created,description \
-  --output json \
+# `tea pulls list --fields …,description` errors ("invalid field 'description'")
+# and its flattened output can't carry a PR body, draft flag, or requested
+# reviewers. Route through the raw REST passthrough instead, whose PR objects
+# expose all of them. `tea api` needs an explicit owner/repo in the path (unlike
+# `tea pulls`, which auto-detects it from the local git remote), so resolve it
+# here: honor CODEV_REPO when set, else derive owner/repo from origin's URL
+# (handles https, ssh, and scp-style remotes, with or without a .git suffix).
+#
+# Field mapping:
+#   .number                       -> number (already an int in the REST shape)
+#   .html_url                     -> url (browser page; Gitea `.url` is the API endpoint)
+#   .body                         -> body
+#   .created_at                   -> createdAt
+#   .user.login                   -> author.login
+#   .requested_reviewers[].login  -> reviewRequests (user logins; teams have no login → dropped)
+#   .draft                        -> isDraft
+#   reviewDecision                -> ""  (Gitea has no GitHub-equivalent review-decision summary)
+REPO="${CODEV_REPO:-$(git remote get-url origin 2>/dev/null | sed -E -e 's#\.git$##' -e 's#.*[/:]([^/]+/[^/]+)$#\1#')}"
+tea api "repos/${REPO}/pulls?state=open&limit=200" \
   | jq '[.[] | {
-      number: (.index | tonumber),
+      number,
       title,
-      state,
-      url,
+      url: (.html_url // .url),
       reviewDecision: "",
-      body: (.description // ""),
-      createdAt: .created,
-      author: {login: .author},
-      reviewRequests: [],
-      isDraft: false
+      body: (.body // ""),
+      createdAt: .created_at,
+      author: {login: .user.login},
+      reviewRequests: [ (.requested_reviewers // [])[] | .login // empty ],
+      isDraft: (.draft // false)
     }]'
