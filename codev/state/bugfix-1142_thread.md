@@ -17,3 +17,13 @@ Doc surfaces for the condition environment (`output: string`, `exitCode: number`
 Fix design is prescribed in the issue (carry it as-is): capture `{output, exitCode}` in `runCommand` (resolve on plain non-zero exit, keep rejecting on `error.killed`/`error.signal`/spawn failure), pass `exitCode` as second param to conditions, deliver on condition-true regardless of success/failure split, keep no-condition tasks delivering only on exit 0, keep `last_result` semantics by exit code.
 
 Scope: ~100 LOC in one source file + regression tests + docs. Well within BUGFIX. → PHASE_COMPLETE
+
+## Fix (2026-07-06)
+
+Implemented the prescribed design in `tower-cron.ts` (commit ecf294ae):
+- `runCommand` now resolves `{ output, exitCode }`; plain non-zero exits resolve (exit code is data), only spawn failures / timeout-kills reject (exitCode -1 / 124 in the catch).
+- `evaluateCondition(condition, output, exitCode = 0)` — both variables in Function scope.
+- Delivery: with a condition, the condition alone decides (failure runs can deliver); without one, deliver only on exit 0 (unchanged). `last_result` semantics unchanged.
+- 8 new regression tests (34 total in tower-cron.test.ts, all pass). Full suite: 3440 passed / 48 pre-existing skips.
+- Docs: condition environment (`output`, `exitCode`) documented in the afx skill `## afx cron` section and a new `### afx cron` section in agent-farm.md — BOTH trees (codev/ + codev-skeleton/, and .claude/skills + skeleton skills).
+- Root `pnpm build` passes.
