@@ -37,7 +37,7 @@ export interface DevTarget {
  * Resolve the dev target from the folder *this VSCode window* is rooted at.
  *
  * Path-sniffing against the fixed `<root>/.builders/<id>/` layout that
- * `afx spawn` creates (the same invariant findProjectRoot / openWorktreeWindow
+ * `afx spawn` creates (the same invariant detectWorkspacePath / openWorktreeWindow
  * already rely on) — deterministic, offline, no Tower round-trip:
  *   - parent dir is `.builders` → builder worktree, id = basename
  *   - otherwise                 → the main checkout, id = `main`
