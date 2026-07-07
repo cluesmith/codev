@@ -878,12 +878,12 @@
       {
         "view": "codev.agents",
         "contents": "Open a folder to use Codev.\n[Open Folder](command:workbench.action.files.openFolder)",
-        "when": "!codev.hasWorkspace && !codev.ideMode"
+        "when": "codev.stateKnown && !codev.hasWorkspace && !codev.ideMode"
       },
       {
         "view": "codev.agents",
         "contents": "Welcome to Codev.\nOpen a project to spawn your first builder.\n[Open Folder](command:workbench.action.files.openFolder)\n[Open Recent](command:workbench.action.openRecent)\nNew here? Install the Codev CLI and learn the spawn flow.\n[Get Started](command:codev.openGettingStarted)",
-        "when": "!codev.hasWorkspace && codev.ideMode"
+        "when": "codev.stateKnown && !codev.hasWorkspace && codev.ideMode"
       }
     ],
     "configuration": {

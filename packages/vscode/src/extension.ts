@@ -173,6 +173,15 @@ export async function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(
 		vscode.workspace.onDidChangeWorkspaceFolders(syncHasWorkspaceContext));
 	syncHasWorkspaceContext(); // seed initial state
+	// Set last, after the two keys above: distinguishes "keys computed" from
+	// "extension not activated yet". VS Code treats unset context keys as
+	// false, so between workbench restore and activation the viewsWelcome
+	// clauses would otherwise read `!hasWorkspace && !ideMode` as true and
+	// flash "Open a folder to use Codev" inside a codev workspace for the
+	// couple of seconds activation takes. Both welcome entries require
+	// `codev.stateKnown`, so pre-activation the view is simply blank
+	// (reads as loading) instead of asserting something false.
+	vscode.commands.executeCommand('setContext', 'codev.stateKnown', true);
 
 	// Output Channel for diagnostics
 	outputChannel = vscode.window.createOutputChannel('Codev');

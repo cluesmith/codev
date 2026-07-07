@@ -74,10 +74,10 @@ describe('workspace-bound views are gated on codev.hasWorkspace', () => {
 
 describe('viewsWelcome (empty-window surfaces)', () => {
   const guestWelcome = viewsWelcome.find(
-    w => w.when === '!codev.hasWorkspace && !codev.ideMode',
+    w => w.when === 'codev.stateKnown && !codev.hasWorkspace && !codev.ideMode',
   );
   const ideWelcome = viewsWelcome.find(
-    w => w.when === '!codev.hasWorkspace && codev.ideMode',
+    w => w.when === 'codev.stateKnown && !codev.hasWorkspace && codev.ideMode',
   );
 
   it('contributes exactly the two no-workspace quadrants, both on codev.agents', () => {
@@ -88,6 +88,11 @@ describe('viewsWelcome (empty-window surfaces)', () => {
       // Every welcome entry belongs to a no-workspace quadrant; a workspace
       // window must never show onboarding over its real trees.
       expect(w.when).toContain('!codev.hasWorkspace');
+      // And every entry waits for activation to have computed the keys:
+      // unset context keys evaluate false, so without this gate the guest
+      // welcome flashes "Open a folder" inside a codev workspace during the
+      // workbench-restore → activation gap.
+      expect(w.when).toContain('codev.stateKnown && ');
     }
   });
 
