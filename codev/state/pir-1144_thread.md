@@ -20,3 +20,9 @@
 - Build note for siblings: fresh worktree needed `pnpm --filter @cluesmith/codev-types --filter @cluesmith/codev-core --filter @cluesmith/codev-artifact-canvas build` before `pnpm compile` in packages/vscode would pass (TS2307 on workspace dists).
 - Verified: `pnpm compile` ✓ (check-types + lint + esbuild), `pnpm test:unit` ✓ 570/570 (24 new across `ide-mode.test.ts` + `contributes-view-gating.test.ts`).
 - Sitting at `dev-approval` gate.
+
+## 2026-07-07 — dev-approval feedback iterations
+
+1. **Pre-activation welcome flash** (user observed "Open a folder to use Codev" for ~2s inside a codev workspace): unset context keys evaluate false, so the guest-quadrant viewsWelcome matched during the workbench-restore → activation gap. Fix: third context key `codev.stateKnown` set at top of activate(); both welcome quadrants now require it. (`c18f3a01`)
+2. **Raw "no data provider" message** during the same gap: replaced with a `"Loading Codev…"` viewsWelcome entry on `when: "!codev.stateKnown"` (welcome content also renders pre-provider-registration). (`3a4b2e51`)
+3. **Ancestor-walk leak** (user screenshot: full Workspace view in a non-codev project): `findProjectRoot` walked up to filesystem root and matched the user's codev-enabled HOME (`~/codev` + `~/.codev` both exist), so every window under home computed tier=full and connected Tower. Agreed deviation from plan (Option A, chosen over a git-boundary-bounded walk): detection is now "the opened folder itself contains `codev/` or `.codev/`", no walk; `codev.workspacePath` setting remains the escape hatch for layouts with the marker above the opened folder. Subfolder-of-repo windows go dormant by design; worktrees unaffected (they carry their own `codev/`). Matches CLI semantics (afx runs from workspace root). Regression test added (`workspace-detector.test.ts`).
