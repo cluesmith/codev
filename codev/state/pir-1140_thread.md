@@ -9,3 +9,11 @@ PIR strict mode. Issue #1140: `afx workspace recover` respawns builders with the
 - Design choices: keep `deriveBuilderInfo` pure; add an injectable `deriveBuilderInfoWithArchitect(state, lookup)` wrapper (matches the existing DI style of `evaluateEligibility`); add a pure exported `respawnEnv` helper so the env construction is unit-testable; widen the existing try/finally so DB reads finish before `closeGlobalDb()` (which today runs before the row-building loop that will now do lookups).
 - Null fallback: legacy rows (null/missing `spawned_by_architect`) pass the caller's env through unchanged, reproducing today's behavior for those rows only; no second copy of the `main` default in recover.
 - Plan written to `codev/plans/1140-afx-workspace-recover-respawne.md`, committed, pushed. Sitting at `plan-approval` gate.
+- Gate approved 2026-07-07 with no changes requested.
+
+## Implement phase
+
+- Implemented per plan: `BuilderInfo.spawnedByArchitect` (required, nullable), pure `deriveBuilderInfo` sets null, new injectable `deriveBuilderInfoWithArchitect(state, lookup)` wrapper, new pure `respawnEnv(name, baseEnv)` helper, `respawnBuilder` passes `env: respawnEnv(...)`, and the try/finally widened so all global.db reads (sessions + architect lookups via `lookupBuilderSpawningArchitect`) finish before `closeGlobalDb()`.
+- Worktree was greenfield (no node_modules): ran `pnpm install --frozen-lockfile` + built codev-core before the package build would pass. Note for future recover-adjacent builders: build core first.
+- 11 new tests (6 wrapper, 5 respawnEnv); updated existing `deriveBuilderInfo` expectations and `makeBuilderInfo` for the new field. Targeted file: 57/57 pass. Build clean.
+- Sitting at `dev-approval` gate.
