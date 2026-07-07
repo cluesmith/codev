@@ -11,6 +11,7 @@ import { logger } from '../utils/logger.js';
 import { buildAgentName, stripLeadingZeros } from '../utils/agent-names.js';
 import { processExists, getTerminalSessionsForWorkspace } from '../servers/tower-terminals.js';
 import { closeGlobalDb } from '../db/index.js';
+import { lookupBuilderSpawningArchitect } from '../state.js';
 import { listAllProjects } from '../../commands/porch/state.js';
 import type { ProjectState } from '../../commands/porch/types.js';
 import type { DbTerminalSession } from '../servers/tower-types.js';
@@ -131,6 +132,13 @@ export interface BuilderInfo {
   builderId: string;
   issueArg: string;
   cliProtocol: string;
+  /**
+   * The architect recorded in global.db as having spawned this builder
+   * (Issue #1140). Null for legacy / pre-Spec-755 rows with no recorded
+   * value, or when no builders row exists. `deriveBuilderInfo` is pure and
+   * always sets null; `deriveBuilderInfoWithArchitect` enriches from the DB.
+   */
+  spawnedByArchitect: string | null;
 }
 
 /**
@@ -151,13 +159,36 @@ export function deriveBuilderInfo(state: ProjectState): BuilderInfo | null {
       builderId: buildAgentName('bugfix', numericId),
       issueArg: numericId,
       cliProtocol: 'bugfix',
+      spawnedByArchitect: null,
     };
   }
   return {
     builderId: buildAgentName('spec', state.id, state.protocol),
     issueArg: stripLeadingZeros(state.id),
     cliProtocol: state.protocol,
+    spawnedByArchitect: null,
   };
+}
+
+/**
+ * Enrich the derived builder info with the spawning-architect name recorded in
+ * global.db (Issue #1140). Without this, respawned builders inherit the
+ * recovery shell's CODEV_ARCHITECT_NAME and every builder in a sibling-architect
+ * workspace gets reattributed to whichever architect ran `workspace recover`.
+ *
+ * The lookup is injected so the function stays unit-testable without a real
+ * database, matching `evaluateEligibility`'s isProcessAlive/socketExists style.
+ * A three-valued lookup result (string / null legacy row / undefined no row)
+ * collapses to string-or-null: both null and undefined mean "no recorded
+ * architect" and fall back to the caller's env at respawn time.
+ */
+export function deriveBuilderInfoWithArchitect(
+  state: ProjectState,
+  lookupArchitect: (builderId: string) => string | null | undefined,
+): BuilderInfo | null {
+  const base = deriveBuilderInfo(state);
+  if (base === null) return null;
+  return { ...base, spawnedByArchitect: lookupArchitect(base.builderId) ?? null };
 }
 
 /**
@@ -244,6 +275,26 @@ function printPreview(rows: RecoverRow[]): void {
   }
 }
 
+/**
+ * Build the child environment for the respawn invocation (Issue #1140).
+ *
+ * spawn.ts derives the new builder row's `spawned_by_architect` from
+ * CODEV_ARCHITECT_NAME, so the recorded architect must be forced into the
+ * child env or the respawned builder gets reattributed to the recovery
+ * shell's architect. When no architect was recorded (legacy rows), the base
+ * env passes through untouched, which reproduces the pre-fix behavior for
+ * those rows only (spawn.ts still defaults absent/blank values to 'main').
+ */
+export function respawnEnv(
+  spawnedByArchitect: string | null,
+  baseEnv: NodeJS.ProcessEnv,
+): NodeJS.ProcessEnv {
+  if (spawnedByArchitect === null) {
+    return baseEnv;
+  }
+  return { ...baseEnv, CODEV_ARCHITECT_NAME: spawnedByArchitect };
+}
+
 async function respawnBuilder(info: BuilderInfo): Promise<void> {
   // Use the current node binary and CLI entry point so the respawn invocation
   // matches the install method this command was started under (npm global,
@@ -252,7 +303,7 @@ async function respawnBuilder(info: BuilderInfo): Promise<void> {
     const child = spawn(
       process.execPath,
       [process.argv[1], 'spawn', info.issueArg, '--resume', '--protocol', info.cliProtocol],
-      { stdio: 'inherit' },
+      { stdio: 'inherit', env: respawnEnv(info.spawnedByArchitect, process.env) },
     );
     child.on('error', rejectPromise);
     child.on('exit', (code) => {
@@ -283,37 +334,43 @@ export async function workspaceRecover(options: WorkspaceRecoverOptions = {}): P
     return;
   }
 
-  let sessions: DbTerminalSession[];
+  // All global.db reads (terminal sessions + per-builder architect lookups)
+  // happen inside this try so the connection is closed before any child
+  // `afx spawn` process is launched.
+  let allRows: RecoverRow[];
   try {
-    sessions = getTerminalSessionsForWorkspace(config.workspaceRoot);
+    const sessions = getTerminalSessionsForWorkspace(config.workspaceRoot);
+    // role_id has no UNIQUE constraint in the schema, so collect every matching
+    // row per builder id rather than collapsing to last-write-wins.
+    const sessionsByRoleId = new Map<string, DbTerminalSession[]>();
+    for (const s of sessions) {
+      if (s.type !== 'builder' || !s.role_id) continue;
+      const bucket = sessionsByRoleId.get(s.role_id);
+      if (bucket) bucket.push(s);
+      else sessionsByRoleId.set(s.role_id, [s]);
+    }
+
+    allRows = projects.map(({ state }) => {
+      const builderInfo = deriveBuilderInfoWithArchitect(
+        state,
+        (builderId) => lookupBuilderSpawningArchitect(builderId, config.workspaceRoot),
+      );
+      const matchingSessions = builderInfo ? sessionsByRoleId.get(builderInfo.builderId) ?? [] : [];
+      const worktreePath = resolveWorktreePath(config.buildersDir, state);
+      const ageDays = (Date.now() - Date.parse(state.updated_at)) / 86_400_000;
+      const eligibility = evaluateEligibility({
+        state, builderInfo,
+        sessions: matchingSessions,
+        worktreeExists: worktreePath !== null,
+        ageDays, maxAgeDays, includeStale,
+        isProcessAlive: processExists,
+        socketExists: existsSync,
+      });
+      return { state, builderInfo, worktreePath, eligibility, ageDays };
+    });
   } finally {
     closeGlobalDb();
   }
-  // role_id has no UNIQUE constraint in the schema, so collect every matching
-  // row per builder id rather than collapsing to last-write-wins.
-  const sessionsByRoleId = new Map<string, DbTerminalSession[]>();
-  for (const s of sessions) {
-    if (s.type !== 'builder' || !s.role_id) continue;
-    const bucket = sessionsByRoleId.get(s.role_id);
-    if (bucket) bucket.push(s);
-    else sessionsByRoleId.set(s.role_id, [s]);
-  }
-
-  const allRows: RecoverRow[] = projects.map(({ state }) => {
-    const builderInfo = deriveBuilderInfo(state);
-    const matchingSessions = builderInfo ? sessionsByRoleId.get(builderInfo.builderId) ?? [] : [];
-    const worktreePath = resolveWorktreePath(config.buildersDir, state);
-    const ageDays = (Date.now() - Date.parse(state.updated_at)) / 86_400_000;
-    const eligibility = evaluateEligibility({
-      state, builderInfo,
-      sessions: matchingSessions,
-      worktreeExists: worktreePath !== null,
-      ageDays, maxAgeDays, includeStale,
-      isProcessAlive: processExists,
-      socketExists: existsSync,
-    });
-    return { state, builderInfo, worktreePath, eligibility, ageDays };
-  });
 
   // By default the preview hides projects beyond the recency window — for a
   // large workspace the stale tail dominates the table and obscures the few

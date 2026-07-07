@@ -2,7 +2,8 @@
  * Tests for `afx workspace recover` — eligibility predicate, builder-info
  * derivation, worktree resolution, and listAllProjects precedence.
  *
- * Issue #829.
+ * Issue #829. Architect-attribution preservation (deriveBuilderInfoWithArchitect,
+ * respawnEnv) is Issue #1140.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -13,6 +14,8 @@ import { join } from 'node:path';
 import {
   evaluateEligibility,
   deriveBuilderInfo,
+  deriveBuilderInfoWithArchitect,
+  respawnEnv,
   resolveWorktreePath,
   formatRelativeAge,
   type EligibilityInputs,
@@ -58,7 +61,13 @@ function makeSession(overrides: Partial<DbTerminalSession> = {}): DbTerminalSess
 }
 
 function makeBuilderInfo(overrides: Partial<BuilderInfo> = {}): BuilderInfo {
-  return { builderId: 'builder-spir-87', issueArg: '87', cliProtocol: 'spir', ...overrides };
+  return {
+    builderId: 'builder-spir-87',
+    issueArg: '87',
+    cliProtocol: 'spir',
+    spawnedByArchitect: null,
+    ...overrides,
+  };
 }
 
 function defaults(): Omit<EligibilityInputs, 'state' | 'builderInfo' | 'sessions' | 'worktreeExists' | 'ageDays'> {
@@ -315,6 +324,7 @@ describe('deriveBuilderInfo', () => {
       builderId: 'builder-spir-87',
       issueArg: '87',
       cliProtocol: 'spir',
+      spawnedByArchitect: null,
     });
   });
 
@@ -323,6 +333,7 @@ describe('deriveBuilderInfo', () => {
       builderId: 'builder-bugfix-693',
       issueArg: '693',
       cliProtocol: 'bugfix',
+      spawnedByArchitect: null,
     });
   });
 
@@ -331,6 +342,7 @@ describe('deriveBuilderInfo', () => {
       builderId: 'builder-pir-829',
       issueArg: '829',
       cliProtocol: 'pir',
+      spawnedByArchitect: null,
     });
   });
 
@@ -339,6 +351,7 @@ describe('deriveBuilderInfo', () => {
       builderId: 'builder-aspir-438',
       issueArg: '438',
       cliProtocol: 'aspir',
+      spawnedByArchitect: null,
     });
   });
 
@@ -347,6 +360,7 @@ describe('deriveBuilderInfo', () => {
       builderId: 'builder-air-501',
       issueArg: '501',
       cliProtocol: 'air',
+      spawnedByArchitect: null,
     });
   });
 
@@ -357,6 +371,96 @@ describe('deriveBuilderInfo', () => {
         expect(deriveBuilderInfo(makeState({ protocol }))).toBeNull();
       },
     );
+  });
+});
+
+describe('deriveBuilderInfoWithArchitect (Issue #1140)', () => {
+  it('carries the recorded architect name through to BuilderInfo', () => {
+    const info = deriveBuilderInfoWithArchitect(
+      makeState({ id: '0087', protocol: 'spir' }),
+      () => 'vscode',
+    );
+    expect(info).toEqual({
+      builderId: 'builder-spir-87',
+      issueArg: '87',
+      cliProtocol: 'spir',
+      spawnedByArchitect: 'vscode',
+    });
+  });
+
+  it('passes the derived builderId to the lookup', () => {
+    const seen: string[] = [];
+    deriveBuilderInfoWithArchitect(makeState({ id: 'bugfix-693', protocol: 'bugfix' }), (id) => {
+      seen.push(id);
+      return 'main';
+    });
+    expect(seen).toEqual(['builder-bugfix-693']);
+  });
+
+  it('keeps null for legacy rows with a NULL spawned_by_architect column', () => {
+    const info = deriveBuilderInfoWithArchitect(makeState(), () => null);
+    expect(info?.spawnedByArchitect).toBeNull();
+  });
+
+  it('normalizes undefined (no builders row) to null', () => {
+    const info = deriveBuilderInfoWithArchitect(makeState(), () => undefined);
+    expect(info?.spawnedByArchitect).toBeNull();
+  });
+
+  it('preserves distinct attribution across builders in the same workspace', () => {
+    const byBuilder: Record<string, string> = {
+      'builder-spir-87': 'vscode',
+      'builder-pir-829': 'main',
+    };
+    const a = deriveBuilderInfoWithArchitect(
+      makeState({ id: '0087', protocol: 'spir' }),
+      (id) => byBuilder[id],
+    );
+    const b = deriveBuilderInfoWithArchitect(
+      makeState({ id: '0829', protocol: 'pir' }),
+      (id) => byBuilder[id],
+    );
+    expect(a?.spawnedByArchitect).toBe('vscode');
+    expect(b?.spawnedByArchitect).toBe('main');
+  });
+
+  it('returns null for unsupported protocols without invoking the lookup', () => {
+    let called = false;
+    const info = deriveBuilderInfoWithArchitect(makeState({ protocol: 'experiment' }), () => {
+      called = true;
+      return 'main';
+    });
+    expect(info).toBeNull();
+    expect(called).toBe(false);
+  });
+});
+
+describe('respawnEnv (Issue #1140)', () => {
+  it('overrides an inherited CODEV_ARCHITECT_NAME with the recorded architect', () => {
+    const env = respawnEnv('vscode', { CODEV_ARCHITECT_NAME: 'main', PATH: '/usr/bin' });
+    expect(env.CODEV_ARCHITECT_NAME).toBe('vscode');
+    expect(env.PATH).toBe('/usr/bin');
+  });
+
+  it('sets CODEV_ARCHITECT_NAME even when the base env lacks it', () => {
+    const env = respawnEnv('vscode', { PATH: '/usr/bin' });
+    expect(env.CODEV_ARCHITECT_NAME).toBe('vscode');
+  });
+
+  it('does not mutate the base env when overriding', () => {
+    const base = { CODEV_ARCHITECT_NAME: 'main' };
+    respawnEnv('vscode', base);
+    expect(base.CODEV_ARCHITECT_NAME).toBe('main');
+  });
+
+  it('passes the base env through unchanged when no architect was recorded', () => {
+    const base = { CODEV_ARCHITECT_NAME: 'main', PATH: '/usr/bin' };
+    expect(respawnEnv(null, base)).toBe(base);
+  });
+
+  it('does not invent CODEV_ARCHITECT_NAME for legacy rows when the base env lacks it', () => {
+    const env = respawnEnv(null, { PATH: '/usr/bin' });
+    expect('CODEV_ARCHITECT_NAME' in env).toBe(false);
   });
 });
 
