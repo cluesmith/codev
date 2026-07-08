@@ -54,6 +54,7 @@ In the Codev IDE fork, the `ideMode && !hasWorkspace` quadrant focuses the Codev
 ## Other fixes (dashboard, porch, infrastructure)
 
 - **Codex CMAP lane restored on macOS 26** (#1128, PR #1141). Bumps the bundled codex vendor to a signature Apple hasn't revoked. The previous vendored binary's certificate had been revoked by Apple, and macOS 26 XProtect enforces the revocation by SIGKILL'ing the binary at exec time and auto-Trashing it — every `consult -m codex ...` first-run failed with SIGKILL, and subsequent runs failed with `ENOENT` once the binary was gone. The new vendor ships the same tool with a fresh, non-revoked signature (verified via `spctl` and end-to-end round-trip on macOS 26). Any consult protocol that includes a codex lane (PIR CMAP-2, SPIR CMAP-3, general `consult -m codex`) is unblocked again.
+- **VS Code extension prepublish builds all workspace dependencies** (#1154, PR #1155). The extension's `vscode:prepublish` script was only building two of its three `workspace:*` dependencies, so a fresh clone → `pnpm install` → `pnpm --filter codev-vscode run check-types` failed with `TS2307: Cannot find module '@cluesmith/codev-artifact-canvas'`. New contributors and CI cold caches hit this. Switched to a topological filter (`pnpm --filter 'codev-vscode^...' build`) that builds the whole workspace-dep graph — future-proof against any new workspace dep re-introducing the same bug.
 
 ## Breaking changes
 
