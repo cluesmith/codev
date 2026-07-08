@@ -53,7 +53,7 @@ In the Codev IDE fork, the `ideMode && !hasWorkspace` quadrant focuses the Codev
 
 ## Other fixes (dashboard, porch, infrastructure)
 
-<!-- Non-vscode work that ships in the npm release. Same bullet shape as Polish. -->
+- **Codex CMAP lane restored on macOS 26** (#1128, PR #1141). Bumps the bundled codex vendor to a signature Apple hasn't revoked. The previous vendored binary's certificate had been revoked by Apple, and macOS 26 XProtect enforces the revocation by SIGKILL'ing the binary at exec time and auto-Trashing it — every `consult -m codex ...` first-run failed with SIGKILL, and subsequent runs failed with `ENOENT` once the binary was gone. The new vendor ships the same tool with a fresh, non-revoked signature (verified via `spctl` and end-to-end round-trip on macOS 26). Any consult protocol that includes a codex lane (PIR CMAP-2, SPIR CMAP-3, general `consult -m codex`) is unblocked again.
 
 ## Breaking changes
 
