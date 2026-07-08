@@ -1,5 +1,11 @@
 # Change Log
 
+## [Unreleased]
+
+### What's new
+
+- **Sidebar no longer renders dead actions when no folder is open, and the extension is now safe under `onStartupFinished` for the Codev IDE fork.** Two changes, one layer. First: the Workspace section (Architects / Spawn Builder / New Shell) is now gated on `vscode.workspace.workspaceFolders?.length > 0` — open VS Code with no folder and those rows go quiet instead of pretending Codev is ready to act on an implicit workspace, matching the pattern VS Code's own Source Control and Explorer views use. Empty-view content ("Open a folder to use Codev") takes their place. Second: a new pair of context keys, `codev.hasWorkspace` (whether a folder is open) and `codev.ideMode` (whether the extension is running inside the Codev IDE fork, detected via `vscode.env.appName === 'Codev'`), model the extension's four operating quadrants explicitly. Under `onStartupFinished` activation (so the extension can serve the fork's every-window case), the guest+no-codev-workspace path is provably inert — no Tower spawn, no UI mutation, no state writes — so marketplace users opening non-codev projects see zero side-effects from having the extension installed. In the IDE fork, the `ideMode && !hasWorkspace` quadrant focuses the Codev container on startup, shows Open Folder / Open Recent welcome content, and fires a one-time first-run notification pointing at the CLI-preflight walkthrough. That empty-window surface doubles as the fork's welcome experience — the fork strips VS Code's core onboarding, so this is what users land in on first launch.
+
 ## [3.2.2] - 2026-07-02
 
 ### What's new

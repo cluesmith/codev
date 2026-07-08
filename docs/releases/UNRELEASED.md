@@ -33,6 +33,18 @@
     6. Re-cp the template back to UNRELEASED.md to start the next cycle
 -->
 
+## IDE-mode foundation: dual-mode activation, empty-window surfaces, no more dead actions
+
+(#1144, PR #1148)
+
+Two changes shipped as one layer for the Codev extension.
+
+First: the Workspace section (Architects / Spawn Builder / New Shell) is now gated on `vscode.workspace.workspaceFolders?.length > 0`. Open VS Code with no folder and those rows go quiet instead of pretending Codev is ready to act on an implicit workspace. Empty-view content ("Open a folder to use Codev") takes their place — the same pattern VS Code's own Source Control and Explorer views use for the no-folder state.
+
+Second: a pair of context keys, `codev.hasWorkspace` (whether a folder is open) and `codev.ideMode` (whether the extension is running inside the Codev IDE fork, detected via `vscode.env.appName === 'Codev'`), model the extension's four operating quadrants explicitly. Under `onStartupFinished` activation — required so the extension can serve the fork's every-window case — the guest+no-codev-workspace quadrant is provably inert: no Tower spawn, no UI mutation, no state writes. Marketplace users opening non-codev projects see zero side-effects from having the extension installed, verified by a marketplace-inertness test as part of the PIR review.
+
+In the Codev IDE fork, the `ideMode && !hasWorkspace` quadrant focuses the Codev container on startup, shows Open Folder / Open Recent welcome content, and fires a one-time first-run notification pointing at the CLI-preflight walkthrough. That empty-window surface doubles as the fork's welcome experience — the fork strips VS Code's core onboarding, so this is what users land in on first launch.
+
 ## Polish
 
 <!-- Small vscode items as bullets:
