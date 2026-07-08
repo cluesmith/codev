@@ -47,9 +47,7 @@ In the Codev IDE fork, the `ideMode && !hasWorkspace` quadrant focuses the Codev
 
 ## Polish
 
-<!-- Small vscode items as bullets:
-       - **<Headline>** (#<issue>, PR #<pr>). <One short paragraph of context.>
-     Move out to its own ## section if the entry grows past ~3 sentences. -->
+- **Backlog: "Reference issue in architect" honors the architect QuickPick selection** (#1139, PR #1157). Previously the inline reference button in a multi-architect workspace would show a QuickPick to pick the target architect, then inject the reference into `architect:main` regardless of the pick — the picker was effectively a no-op for the injection. Now the picked architect name flows through to `injectArchitectText`, so the QuickPick selection actually determines which terminal receives the reference. Same fix applied to the sibling "Reference PR in architect" command on Pull Request rows. Single-architect workspaces unchanged — no picker shown, default routing preserved.
 
 ## Other fixes (dashboard, porch, infrastructure)
 
