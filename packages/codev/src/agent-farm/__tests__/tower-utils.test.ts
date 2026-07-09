@@ -29,6 +29,28 @@ vi.mock('../state.js', async (importOriginal) => {
   return { ...actual, getArchitectByName: vi.fn() };
 });
 import { getArchitectByName } from '../state.js';
+import { encodeClaudeProjectDir } from '../utils/claude-session-discovery.js';
+
+/**
+ * Issue #1145: stored-id resume now requires the session jsonl to exist under
+ * the (test-pinned) home dir and to record the launching cwd. This writes a
+ * minimally-real session file so ownership verification passes — or, with a
+ * divergent `recordedCwd`, deliberately fails.
+ */
+function writeSessionFixture(
+  homeDir: string,
+  cwdPath: string,
+  uuid: string,
+  recordedCwd: string = cwdPath,
+): void {
+  const dir = path.join(homeDir, '.claude', 'projects', encodeClaudeProjectDir(cwdPath));
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, `${uuid}.jsonl`),
+    `{"type":"mode","sessionId":"${uuid}"}\n{"type":"user","cwd":"${recordedCwd}","sessionId":"${uuid}"}\n`,
+    'utf-8',
+  );
+}
 
 describe('tower-utils', () => {
   describe('isRateLimited', () => {
@@ -212,22 +234,27 @@ describe('tower-utils', () => {
 
 describe('resolveArchitectLaunch (Issue #832)', () => {
   let workspace: string;
+  let fakeHome: string;
   const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
   beforeEach(() => {
     // A bare temp dir: no codev/roles, so buildArchitectArgs returns baseArgs
     // unchanged (loadRolePrompt → null). Default harness resolves to Claude
-    // (which has the session capability).
+    // (which has the session capability). fakeHome pins the session store the
+    // ownership check (Issue #1145) reads.
     workspace = fs.mkdtempSync(path.join(tmpdir(), 'ral-ws-'));
+    fakeHome = fs.mkdtempSync(path.join(tmpdir(), 'ral-home-'));
   });
 
   afterEach(() => {
     fs.rmSync(workspace, { recursive: true, force: true });
+    fs.rmSync(fakeHome, { recursive: true, force: true });
   });
 
   it('resumes the stored id (no role injection) and echoes it back', () => {
+    writeSessionFixture(fakeHome, workspace, 'stored-abc');
     const { args, env, sessionId, resumed } = resolveArchitectLaunch({
-      workspacePath: workspace, name: 'reviewer', baseArgs: [], storedSessionId: 'stored-abc',
+      workspacePath: workspace, name: 'reviewer', baseArgs: [], storedSessionId: 'stored-abc', homeDir: fakeHome,
     });
     expect(args).toEqual(['--resume', 'stored-abc']);
     expect(env).toEqual({});
@@ -237,7 +264,7 @@ describe('resolveArchitectLaunch (Issue #832)', () => {
 
   it('mints a fresh --session-id when there is no stored id, and returns it', () => {
     const { args, sessionId, resumed } = resolveArchitectLaunch({
-      workspacePath: workspace, name: 'reviewer', baseArgs: [], storedSessionId: null,
+      workspacePath: workspace, name: 'reviewer', baseArgs: [], storedSessionId: null, homeDir: fakeHome,
     });
     expect(args).not.toContain('--resume');
     expect(args).toContain('--session-id');
@@ -248,23 +275,49 @@ describe('resolveArchitectLaunch (Issue #832)', () => {
   });
 
   it('mints distinct ids across fresh spawns', () => {
-    const a = resolveArchitectLaunch({ workspacePath: workspace, name: 'a', baseArgs: [] }).sessionId;
-    const b = resolveArchitectLaunch({ workspacePath: workspace, name: 'b', baseArgs: [] }).sessionId;
+    const a = resolveArchitectLaunch({ workspacePath: workspace, name: 'a', baseArgs: [], homeDir: fakeHome }).sessionId;
+    const b = resolveArchitectLaunch({ workspacePath: workspace, name: 'b', baseArgs: [], homeDir: fakeHome }).sessionId;
     expect(a).not.toBe(b);
   });
 
   it('preserves baseArgs ahead of the session flags', () => {
+    writeSessionFixture(fakeHome, workspace, 'x');
     const { args } = resolveArchitectLaunch({
-      workspacePath: workspace, name: 'main', baseArgs: ['--foo'], storedSessionId: 'x',
+      workspacePath: workspace, name: 'main', baseArgs: ['--foo'], storedSessionId: 'x', homeDir: fakeHome,
     });
     expect(args).toEqual(['--foo', '--resume', 'x']);
   });
 
   it('two siblings with distinct stored ids resume independently (no cross-attachment)', () => {
-    const reviewer = resolveArchitectLaunch({ workspacePath: workspace, name: 'reviewer', baseArgs: [], storedSessionId: 'rev-1' });
-    const casa = resolveArchitectLaunch({ workspacePath: workspace, name: 'casa', baseArgs: [], storedSessionId: 'casa-1' });
+    writeSessionFixture(fakeHome, workspace, 'rev-1');
+    writeSessionFixture(fakeHome, workspace, 'casa-1');
+    const reviewer = resolveArchitectLaunch({ workspacePath: workspace, name: 'reviewer', baseArgs: [], storedSessionId: 'rev-1', homeDir: fakeHome });
+    const casa = resolveArchitectLaunch({ workspacePath: workspace, name: 'casa', baseArgs: [], storedSessionId: 'casa-1', homeDir: fakeHome });
     expect(reviewer.args).toEqual(['--resume', 'rev-1']);
     expect(casa.args).toEqual(['--resume', 'casa-1']);
+  });
+
+  // Issue #1145: ownership verification ahead of the resume branch.
+
+  it('spawns fresh when the stored id has no jsonl on disk (stale stored id)', () => {
+    const { args, sessionId, resumed } = resolveArchitectLaunch({
+      workspacePath: workspace, name: 'main', baseArgs: [], storedSessionId: 'ghost-id', homeDir: fakeHome,
+    });
+    expect(args).not.toContain('--resume');
+    expect(args).toContain('--session-id');
+    expect(resumed).toBe(false);
+    expect(sessionId).toMatch(UUID_RE);          // replacement id for the caller to persist
+    expect(sessionId).not.toBe('ghost-id');
+  });
+
+  it('spawns fresh when the stored session records a different project cwd', () => {
+    writeSessionFixture(fakeHome, workspace, 'foreign-id', '/somewhere/else/entirely');
+    const { args, resumed, sessionId } = resolveArchitectLaunch({
+      workspacePath: workspace, name: 'main', baseArgs: [], storedSessionId: 'foreign-id', homeDir: fakeHome,
+    });
+    expect(args).not.toContain('--resume');
+    expect(resumed).toBe(false);
+    expect(sessionId).not.toBe('foreign-id');
   });
 
   it('no-session harness → plain fresh, returns null sessionId', () => {
@@ -286,26 +339,40 @@ describe('resolveArchitectLaunch (Issue #832)', () => {
 
 describe('resolveArchitectRestart (Issue #832 — shellper auto-restart bake)', () => {
   let workspace: string;
+  let fakeHome: string;
   const mockGet = vi.mocked(getArchitectByName);
 
   beforeEach(() => {
     // Bare temp dir → default Claude harness (has the session capability).
     workspace = fs.mkdtempSync(path.join(tmpdir(), 'rar-ws-'));
+    fakeHome = fs.mkdtempSync(path.join(tmpdir(), 'rar-home-'));
     mockGet.mockReset();
   });
 
   afterEach(() => {
     fs.rmSync(workspace, { recursive: true, force: true });
+    fs.rmSync(fakeHome, { recursive: true, force: true });
   });
 
   it('revives the architect\'s stored session id on restart (--resume, no role injection)', () => {
+    writeSessionFixture(fakeHome, workspace, 'stored-xyz');
     mockGet.mockReturnValue({ name: 'reviewer', cmd: 'claude', startedAt: 'x', sessionId: 'stored-xyz' } as never);
-    const { args, env, resumed, storedSessionId } = resolveArchitectRestart(workspace, 'reviewer', []);
+    const { args, env, resumed, storedSessionId } = resolveArchitectRestart(workspace, 'reviewer', [], { homeDir: fakeHome });
     expect(mockGet).toHaveBeenCalledWith(workspace, 'reviewer');
     expect(args).toEqual(['--resume', 'stored-xyz']);
     expect(env).toEqual({});
     expect(resumed).toBe(true);              // drives the "Resuming…" log line at the bake sites
     expect(storedSessionId).toBe('stored-xyz');
+  });
+
+  it('spawns fresh on restart when the stored session fails ownership verification (#1145)', () => {
+    // No jsonl fixture written → stale stored id.
+    mockGet.mockReturnValue({ name: 'reviewer', cmd: 'claude', startedAt: 'x', sessionId: 'stale-xyz' } as never);
+    const { args, resumed, storedSessionId } = resolveArchitectRestart(workspace, 'reviewer', [], { homeDir: fakeHome });
+    expect(args).not.toContain('--resume');
+    expect(args).toContain('--session-id');
+    expect(resumed).toBe(false);
+    expect(storedSessionId).toBe('stale-xyz'); // still reported for the caller's log line
   });
 
   it('falls back to a fresh session when the row has no stored id (legacy / self-heal)', () => {
@@ -326,9 +393,11 @@ describe('resolveArchitectRestart (Issue #832 — shellper auto-restart bake)', 
   });
 
   it('looks each architect up by its own name — no cross-attachment between siblings', () => {
+    writeSessionFixture(fakeHome, workspace, 'rev-1');
+    writeSessionFixture(fakeHome, workspace, 'casa-1');
     mockGet.mockImplementation((_ws: string, name: string) =>
       (name === 'reviewer' ? { sessionId: 'rev-1' } : { sessionId: 'casa-1' }) as never);
-    expect(resolveArchitectRestart(workspace, 'reviewer', []).args).toEqual(['--resume', 'rev-1']);
-    expect(resolveArchitectRestart(workspace, 'casa', []).args).toEqual(['--resume', 'casa-1']);
+    expect(resolveArchitectRestart(workspace, 'reviewer', [], { homeDir: fakeHome }).args).toEqual(['--resume', 'rev-1']);
+    expect(resolveArchitectRestart(workspace, 'casa', [], { homeDir: fakeHome }).args).toEqual(['--resume', 'casa-1']);
   });
 });

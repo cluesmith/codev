@@ -49,9 +49,10 @@ const {
 
 vi.mock('../db/index.js', () => ({
   getGlobalDb: () => ({ prepare: mockDbPrepare }),
-  // state.getArchitects() (used by launchInstance's safeToResume guard) calls
-  // getDb(), not getGlobalDb — mock it too so the guard doesn't throw and
-  // default to skip-resume. (Issue #929 resume regression tests depend on it.)
+  // state.getArchitectByName() (launchInstance's stored-session lookup) calls
+  // getDb(), not getGlobalDb — mock it too. The default mock has no `.get`,
+  // so the lookup throws and launchInstance treats the workspace as having no
+  // stored session (the fresh-boot cases below rely on that).
   getDb: () => ({ prepare: mockDbPrepare }),
   closeDb: () => {},
 }));
@@ -600,19 +601,26 @@ describe('tower-instances', () => {
   });
 
   // =========================================================================
-  // Issue #929 — architect resume is gated on the configured harness
+  // Issue #929 / #1145 — architect launch never discovery-resumes
   //
-  // Regression guard for the crash-loop: a codex/gemini architect with a stale
-  // Claude jsonl in ~/.claude/projects/<encoded-cwd>/ must NOT launch
-  // `<cmd> --resume <claude-uuid>`. Only the Claude harness implements
-  // buildResume, so codex/gemini relaunch fresh (role-injected) instead.
+  // #929's crash-loop guard (codex/gemini + stale Claude jsonl must not launch
+  // `<cmd> --resume`) is subsumed by #1145: launchInstance no longer consults
+  // the jsonl store at all. Its ONLY resume source is the session id stored on
+  // this workspace's `main` architect row. A fresh workspace with a personal
+  // Claude conversation in the same cwd (the hijack in #1145) must boot fresh.
   // =========================================================================
 
-  describe('Issue #929 — architect resume gated on harness', () => {
-    function writeStaleClaudeSession(fakeHome: string, cwd: string, uuid: string): void {
+  describe('Issue #929/#1145 — architect resume comes only from the stored row', () => {
+    // Shaped like the real store: metadata line, then a user line whose cwd
+    // matches the workspace. Discovery WOULD have accepted this session — the
+    // fresh boot below proves the fallback is gone, not merely cwd-filtered.
+    function writePersonalClaudeSession(fakeHome: string, cwd: string, uuid: string): void {
       const dir = path.join(fakeHome, '.claude', 'projects', encodeClaudeProjectDir(cwd));
       fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(path.join(dir, `${uuid}.jsonl`), `{"sessionId":"${uuid}"}\n`);
+      fs.writeFileSync(
+        path.join(dir, `${uuid}.jsonl`),
+        `{"type":"mode","sessionId":"${uuid}"}\n{"type":"user","cwd":"${cwd}","sessionId":"${uuid}"}\n`,
+      );
     }
 
     function makeCapturingDeps(): { deps: InstanceDeps; createSession: ReturnType<typeof vi.fn> } {
@@ -649,7 +657,7 @@ describe('tower-instances', () => {
               JSON.stringify(configJson),
             );
           }
-          writeStaleClaudeSession(fakeHome, tmpDir, uuid);
+          writePersonalClaudeSession(fakeHome, tmpDir, uuid);
           process.env.HOME = fakeHome;
           await fn(tmpDir, fakeHome, uuid);
         } finally {
@@ -661,7 +669,7 @@ describe('tower-instances', () => {
       };
     }
 
-    it('codex architect + stale Claude jsonl → launches fresh, no --resume', withSetup(
+    it('codex architect + stale Claude jsonl → launches fresh, no --resume (#929)', withSetup(
       { shell: { architect: 'codex' } },
       async (tmpDir, _fakeHome, uuid) => {
         const { deps, createSession } = makeCapturingDeps();
@@ -677,7 +685,7 @@ describe('tower-instances', () => {
       },
     ));
 
-    it('claude architect (default) + stale Claude jsonl → resumes with --resume <uuid>', withSetup(
+    it('fresh workspace + personal Claude session in the same cwd → boots fresh, no --resume (#1145 regression)', withSetup(
       null,
       async (tmpDir, _fakeHome, uuid) => {
         const { deps, createSession } = makeCapturingDeps();
@@ -687,9 +695,47 @@ describe('tower-instances', () => {
         expect(result.success).toBe(true);
         expect(createSession).toHaveBeenCalled();
 
-        const callStr = JSON.stringify(createSession.mock.calls[0]);
-        expect(callStr).toContain('--resume');
-        expect(callStr).toContain(uuid);
+        // Assert on the argv tokens, not the stringified call: the injected
+        // role prompt legitimately mentions "--resume" in its CLI examples.
+        const callArgs = (createSession.mock.calls[0][0] as { args: string[] }).args;
+        expect(callArgs).not.toContain('--resume');
+        expect(callArgs).not.toContain(uuid);
+        // Fresh spawn pins a newly minted session id instead.
+        expect(callArgs).toContain('--session-id');
+      },
+    ));
+
+    it('main row with a stored session id + owned jsonl → resumes that id', withSetup(
+      null,
+      async (tmpDir, _fakeHome, _uuid) => {
+        const storedId = 'stored-main-uuid-5678';
+        writePersonalClaudeSession(_fakeHome, tmpDir, storedId);
+        // getArchitectByName reads via db.prepare(...).get — return a main row
+        // carrying the stored conversation id.
+        const resolvedTmpDir = fs.realpathSync(tmpDir);
+        const mockGet = vi.fn().mockReturnValue({
+          workspace_path: resolvedTmpDir, id: 'main', pid: 0, port: 0,
+          cmd: 'claude', started_at: 'x', terminal_id: null, session_id: storedId,
+        });
+        mockDbPrepare.mockReturnValue({ run: mockDbRun, all: mockDbAll, get: mockGet });
+        try {
+          // The stored session must exist under BOTH path forms the launch code
+          // touches (tmpdir is symlinked on macOS: /var → /private/var).
+          writePersonalClaudeSession(_fakeHome, resolvedTmpDir, storedId);
+
+          const { deps, createSession } = makeCapturingDeps();
+          initInstances(deps);
+
+          const result = await launchInstance(tmpDir);
+          expect(result.success).toBe(true);
+          expect(createSession).toHaveBeenCalled();
+
+          const callArgs = (createSession.mock.calls[0][0] as { args: string[] }).args;
+          expect(callArgs).toContain('--resume');
+          expect(callArgs).toContain(storedId);
+        } finally {
+          mockDbPrepare.mockReturnValue({ run: mockDbRun, all: mockDbAll });
+        }
       },
     ));
 
