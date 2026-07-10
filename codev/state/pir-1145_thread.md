@@ -25,3 +25,11 @@ Implementation:
 Test gotcha worth remembering: asserting `JSON.stringify(spawnCall).not.toContain('--resume')` false-fails because the injected architect role prompt *text* contains `--resume` in its CLI examples. Assert on argv tokens instead.
 
 115 tests green on the four touched files; full suite + push next, then dev-approval gate.
+
+## 2026-07-10 — dev-approval feedback: content scanning removed
+
+Reviewer walked the design back in three steps at the gate: (1) why scan file contents at all → only real justification was lossy-encoding collisions; (2) the fixed 64KB scan window made resume content-dependent → made it streaming/semantic; (3) collisions are contrived for both architects (row-gated) and builders (Agent-Farm-managed worktree paths) → dropped content scanning entirely.
+
+Final shape: architect resume = stored row id + file-*existence* check (both logical/physical path encodings, macOS symlink case); builder discovery = plain newest-by-mtime (pre-#1145 behavior). The #1145 fix proper (no discovery fallback in launchInstance) is untouched. Deviation from the approved plan (which specified cwd-content verification) to be recorded in the review file.
+
+Lesson: when a reviewer asks "why is this here at all", enumerate what each layer actually defends against before defending the layer — two of three protections were against a threat the system's own path conventions already preclude.

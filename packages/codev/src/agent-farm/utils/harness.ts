@@ -71,11 +71,11 @@ export interface HarnessProvider {
     /** Args to RESUME an existing session by id (caller skips role injection). */
     resumeArgs(sessionId: string): string[];
     /**
-     * Optional: verify that `sessionId`'s on-disk session actually belongs to
-     * `cwd` before the caller resumes it (Issue #1145). Returns false for a
-     * missing session file or one whose recorded project scope points at a
-     * different directory; callers then spawn fresh instead of attaching to a
-     * foreign conversation. Harnesses that omit this are trusted as-is.
+     * Optional: verify that `sessionId` still has a resumable session on disk
+     * for `cwd` before the caller resumes it (Issue #1145). Returns false when
+     * the session file is gone (a stored id can outlive its jsonl); callers
+     * then spawn fresh instead of baking a broken resume into a restart loop.
+     * Harnesses that omit this are trusted as-is.
      */
     verifyOwnership?(sessionId: string, cwd: string, opts?: { homeDir?: string }): boolean;
   };
@@ -90,12 +90,11 @@ export interface HarnessProvider {
    * cwd-keyed session store → callers fall back to a fresh launch. Only Claude
    * implements it (store: ~/.claude/projects/<encoded-cwd>/<uuid>.jsonl).
    *
-   * Discovery-based (newest owned jsonl by mtime): used for builder resume
+   * Discovery-based (newest jsonl by mtime): used for builder resume
    * (#831/#929) ONLY. Architect launch never discovers — it resumes solely from
    * the stored session id on the workspace-scoped architect row, else spawns
    * fresh (Issue #1145: discovery on a fresh workspace hijacked whatever Claude
-   * conversation the user last held in that directory). Candidates are verified
-   * against the cwd recorded inside the session file before being offered.
+   * conversation the user last held in that directory).
    */
   buildResume?(absolutePath: string, opts?: { homeDir?: string }): {
     sessionId: string;
@@ -143,8 +142,8 @@ export const CLAUDE_HARNESS: HarnessProvider = {
   session: {
     newSessionArgs: (sessionId) => ['--session-id', sessionId],
     resumeArgs: (sessionId) => ['--resume', sessionId],
-    // Issue #1145: a stored id is only resumed when its jsonl exists under this
-    // cwd's project dir and records this cwd as its project scope.
+    // Issue #1145: a stored id is only resumed when its jsonl still exists
+    // under this cwd's project dir (stale ids degrade to a fresh spawn).
     verifyOwnership: (sessionId, cwd, opts) => verifySessionOwnership(cwd, sessionId, opts),
   },
 };

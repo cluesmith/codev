@@ -2,19 +2,18 @@
  * Tests for Claude session discovery via on-disk jsonl introspection.
  *
  * Issue #829 — conversation resume.
- * Issue #1145 — ownership verification: a candidate jsonl must record a cwd
- * matching the requested path before it may be offered for resume.
+ * Issue #1145 — verifySessionOwnership: a stored session id is only resumable
+ * while its jsonl still exists for the workspace's cwd.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, utimesSync } from 'node:fs';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, utimesSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import {
   encodeClaudeProjectDir,
   findLatestSessionId,
-  readSessionCwd,
   verifySessionOwnership,
 } from '../utils/claude-session-discovery.js';
 
@@ -54,30 +53,11 @@ describe('claude session discovery', () => {
     rmSync(fakeHome, { recursive: true, force: true });
   });
 
-  /**
-   * Write a session jsonl shaped like the real store: leading metadata records
-   * without a cwd, then a user record carrying the launch cwd. `recordedCwd`
-   * defaults to the path the store dir is keyed by; pass a different value to
-   * simulate an encoding-collision foreign session, or null to simulate a
-   * session that never got a user message.
-   */
-  function writeSession(
-    absPath: string,
-    uuid: string,
-    mtime: number,
-    recordedCwd: string | null = absPath,
-  ): void {
+  function writeSession(absPath: string, uuid: string, mtime: number): void {
     const dir = join(projectsRoot, encodeClaudeProjectDir(absPath));
     mkdirSync(dir, { recursive: true });
     const file = join(dir, `${uuid}.jsonl`);
-    const lines = [
-      `{"type":"mode","mode":"default","sessionId":"${uuid}"}`,
-      '{"type":"file-history-snapshot"}',
-    ];
-    if (recordedCwd !== null) {
-      lines.push(`{"type":"user","cwd":"${recordedCwd}","sessionId":"${uuid}"}`);
-    }
-    writeFileSync(file, lines.join('\n') + '\n', 'utf-8');
+    writeFileSync(file, `{"sessionId":"${uuid}"}\n`, 'utf-8');
     const t = mtime / 1000;
     utimesSync(file, t, t);
   }
@@ -118,73 +98,10 @@ describe('claude session discovery', () => {
       writeSession(worktree, 'only-uuid', 1_500_000_000_000);
       expect(findLatestSessionId(worktree, { homeDir: fakeHome })).toBe('only-uuid');
     });
-
-    // Issue #1145: ownership verification.
-
-    it('skips a newer jsonl whose recorded cwd is a different path (encoding collision)', () => {
-      // '/x/foo.bar' and '/x/foo/bar' both encode to '-x-foo-bar'.
-      const requested = '/x/foo/bar';
-      const collider = '/x/foo.bar';
-      writeSession(requested, 'ours-uuid', 1_400_000_000_000);
-      writeSession(requested, 'foreign-uuid', 1_700_000_000_000, collider);
-      expect(findLatestSessionId(requested, { homeDir: fakeHome })).toBe('ours-uuid');
-    });
-
-    it('returns null when the only candidates belong to a different path', () => {
-      const requested = '/x/foo/bar';
-      writeSession(requested, 'foreign-uuid', 1_700_000_000_000, '/x/foo.bar');
-      expect(findLatestSessionId(requested, { homeDir: fakeHome })).toBeNull();
-    });
-
-    it('skips a jsonl that never recorded a cwd (no user message)', () => {
-      const worktree = '/Users/x/repo/.builders/pir-5';
-      writeSession(worktree, 'empty-uuid', 1_700_000_000_000, null);
-      writeSession(worktree, 'real-uuid', 1_400_000_000_000);
-      expect(findLatestSessionId(worktree, { homeDir: fakeHome })).toBe('real-uuid');
-    });
   });
 
-  describe('readSessionCwd', () => {
-    it('returns the cwd from the first record that carries one', () => {
-      const worktree = '/Users/x/repo/.builders/pir-6';
-      writeSession(worktree, 'uuid-6', 1_500_000_000_000);
-      const file = join(projectsRoot, encodeClaudeProjectDir(worktree), 'uuid-6.jsonl');
-      expect(readSessionCwd(file)).toBe(worktree);
-    });
-
-    it('returns null for a cwd-less session', () => {
-      const worktree = '/Users/x/repo/.builders/pir-7';
-      writeSession(worktree, 'uuid-7', 1_500_000_000_000, null);
-      const file = join(projectsRoot, encodeClaudeProjectDir(worktree), 'uuid-7.jsonl');
-      expect(readSessionCwd(file)).toBeNull();
-    });
-
-    it('returns null for a missing file', () => {
-      expect(readSessionCwd(join(fakeHome, 'nope.jsonl'))).toBeNull();
-    });
-
-    it('finds a cwd record sitting beyond the first read chunk (large metadata prefix)', () => {
-      // The scan is semantic, not positional: a session whose first user
-      // record is pushed past 64KB by e.g. a fat file-history-snapshot must
-      // still verify. Build the file by hand with a ~200KB cwd-less record
-      // ahead of the user line.
-      const worktree = '/Users/x/repo/.builders/pir-8';
-      const dir = join(projectsRoot, encodeClaudeProjectDir(worktree));
-      mkdirSync(dir, { recursive: true });
-      const bigSnapshot = JSON.stringify({ type: 'file-history-snapshot', blob: 'x'.repeat(200 * 1024) });
-      const file = join(dir, 'uuid-8.jsonl');
-      writeFileSync(
-        file,
-        `${bigSnapshot}\n{"type":"user","cwd":"${worktree}","sessionId":"uuid-8"}\n`,
-        'utf-8',
-      );
-      expect(readSessionCwd(file)).toBe(worktree);
-      expect(findLatestSessionId(worktree, { homeDir: fakeHome })).toBe('uuid-8');
-    });
-  });
-
-  describe('verifySessionOwnership', () => {
-    it('accepts a session whose jsonl exists and records the same cwd', () => {
+  describe('verifySessionOwnership (Issue #1145)', () => {
+    it('accepts a session whose jsonl exists for the workspace cwd', () => {
       const worktree = '/Users/x/repo/ws-1';
       writeSession(worktree, 'owned-uuid', 1_500_000_000_000);
       expect(verifySessionOwnership(worktree, 'owned-uuid', { homeDir: fakeHome })).toBe(true);
@@ -196,16 +113,24 @@ describe('claude session discovery', () => {
       expect(verifySessionOwnership(worktree, 'gone-uuid', { homeDir: fakeHome })).toBe(false);
     });
 
-    it('rejects a session whose recorded cwd is a different path', () => {
-      const requested = '/x/foo/bar';
-      writeSession(requested, 'foreign-uuid', 1_500_000_000_000, '/x/foo.bar');
-      expect(verifySessionOwnership(requested, 'foreign-uuid', { homeDir: fakeHome })).toBe(false);
+    it('rejects a session id whose jsonl lives under a different cwd', () => {
+      const worktree = '/Users/x/repo/ws-3';
+      writeSession('/Users/x/repo/other-ws', 'other-uuid', 1_500_000_000_000);
+      expect(verifySessionOwnership(worktree, 'other-uuid', { homeDir: fakeHome })).toBe(false);
     });
 
-    it('rejects a session that never recorded a cwd', () => {
-      const worktree = '/Users/x/repo/ws-3';
-      writeSession(worktree, 'empty-uuid', 1_500_000_000_000, null);
-      expect(verifySessionOwnership(worktree, 'empty-uuid', { homeDir: fakeHome })).toBe(false);
+    it('accepts a session stored under the physical form of a symlinked cwd', () => {
+      // macOS: os.tmpdir() is /var/... which is a symlink to /private/var/....
+      // Claude keys the store by its process cwd (physical form); the caller
+      // may hold the logical form. Both must verify.
+      const logicalDir = mkdtempSync(join(tmpdir(), 'csd-sym-'));
+      try {
+        const physicalDir = realpathSync(logicalDir);
+        writeSession(physicalDir, 'sym-uuid', 1_500_000_000_000);
+        expect(verifySessionOwnership(logicalDir, 'sym-uuid', { homeDir: fakeHome })).toBe(true);
+      } finally {
+        rmSync(logicalDir, { recursive: true, force: true });
+      }
     });
   });
 });

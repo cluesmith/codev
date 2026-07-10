@@ -611,16 +611,13 @@ describe('tower-instances', () => {
   // =========================================================================
 
   describe('Issue #929/#1145 — architect resume comes only from the stored row', () => {
-    // Shaped like the real store: metadata line, then a user line whose cwd
-    // matches the workspace. Discovery WOULD have accepted this session — the
-    // fresh boot below proves the fallback is gone, not merely cwd-filtered.
+    // A session in this workspace's own store dir — exactly what the removed
+    // discovery fallback would have picked up and resumed. The fresh boot
+    // below proves the fallback is gone.
     function writePersonalClaudeSession(fakeHome: string, cwd: string, uuid: string): void {
       const dir = path.join(fakeHome, '.claude', 'projects', encodeClaudeProjectDir(cwd));
       fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(
-        path.join(dir, `${uuid}.jsonl`),
-        `{"type":"mode","sessionId":"${uuid}"}\n{"type":"user","cwd":"${cwd}","sessionId":"${uuid}"}\n`,
-      );
+      fs.writeFileSync(path.join(dir, `${uuid}.jsonl`), `{"sessionId":"${uuid}"}\n`);
     }
 
     function makeCapturingDeps(): { deps: InstanceDeps; createSession: ReturnType<typeof vi.fn> } {

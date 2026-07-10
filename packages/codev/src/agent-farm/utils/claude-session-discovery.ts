@@ -8,36 +8,20 @@
 // that ran in this directory" so reviving a dead builder can resume via
 // `claude --resume <uuid>` without any spawn-time bookkeeping.
 //
-// Because the encoding is lossy ('/' and '.' collapse to the same character),
-// two different paths can collide into one store directory. Every candidate is
-// therefore verified against the `cwd` the session itself recorded (Issue
-// #1145): a jsonl whose recorded cwd does not match the requested path is
-// skipped, as is one that never recorded a cwd at all (a session with no user
-// message has nothing worth resuming).
-//
-// This remains a heuristic for shared cwds — multiple matching jsonls mean
-// multiple past sessions in the same directory, and we pick the most recent.
-// For builder worktrees that almost always means the right one; architect
-// launch no longer uses discovery at all (Issue #1145).
+// This is intentionally a heuristic — multiple jsonl files in the same
+// directory mean multiple past sessions, and we pick the most recent. For
+// builder worktrees (Agent-Farm-managed paths, effectively private cwds) that
+// almost always means the right one. Architect launch no longer uses discovery
+// at all (Issue #1145): it resumes solely from the session id stored on the
+// workspace-scoped architect row, after verifySessionOwnership (below)
+// confirms the session still exists on disk.
 
-import { closeSync, existsSync, openSync, readdirSync, readSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, statSync } from 'node:fs';
 import { realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { StringDecoder } from 'node:string_decoder';
 
 const JSONL_EXT = '.jsonl';
-
-// Chunk size for the streaming cwd scan. The scan is semantic, not positional:
-// it reads chunk by chunk until the first record carrying a `cwd` (or EOF), so
-// ownership never depends on the byte offset the record happens to sit at.
-// Real sessions record cwd on the first user message, so one chunk suffices.
-const CWD_SCAN_CHUNK_BYTES = 64 * 1024;
-
-// A single buffered line larger than this is dropped un-parsed (scanning
-// continues on later records). Only guards runaway memory on pathological
-// files; every user record carries a cwd, so a later one still qualifies.
-const CWD_SCAN_MAX_LINE_BYTES = 8 * 1024 * 1024;
 
 /**
  * Encode an absolute path to the directory name Claude uses under
@@ -62,86 +46,9 @@ function realpathOrSelf(p: string): string {
   }
 }
 
-/** Parse one jsonl line and return its top-level `cwd`, or null. */
-function parseCwdLine(line: string): string | null {
-  if (!line.includes('"cwd"')) return null;
-  try {
-    const record = JSON.parse(line) as { cwd?: unknown };
-    if (typeof record.cwd === 'string' && record.cwd.length > 0) {
-      return record.cwd;
-    }
-  } catch {
-    // Malformed or fragmentary line — skip.
-  }
-  return null;
-}
-
-/**
- * Read the `cwd` a session jsonl recorded, or null if the session never
- * recorded one. Session files interleave metadata records (mode,
- * file-history-snapshot, ...) with message records; the first user record
- * carries the launch cwd. Streams the file chunk by chunk with early exit,
- * so the result depends only on the file's records, never on their offsets.
- */
-export function readSessionCwd(filePath: string): string | null {
-  let fd: number;
-  try {
-    fd = openSync(filePath, 'r');
-  } catch {
-    return null;
-  }
-
-  try {
-    const chunk = Buffer.alloc(CWD_SCAN_CHUNK_BYTES);
-    const decoder = new StringDecoder('utf8');
-    let carry = '';
-    let position = 0;
-
-    for (;;) {
-      const bytesRead = readSync(fd, chunk, 0, CWD_SCAN_CHUNK_BYTES, position);
-      if (bytesRead <= 0) break;
-      position += bytesRead;
-      carry += decoder.write(chunk.subarray(0, bytesRead));
-
-      let newlineIdx = carry.indexOf('\n');
-      while (newlineIdx !== -1) {
-        const cwd = parseCwdLine(carry.slice(0, newlineIdx));
-        if (cwd) return cwd;
-        carry = carry.slice(newlineIdx + 1);
-        newlineIdx = carry.indexOf('\n');
-      }
-
-      if (carry.length > CWD_SCAN_MAX_LINE_BYTES) {
-        // Oversized record: drop the buffered prefix and keep scanning. The
-        // remainder of this line arrives in later chunks and fails JSON.parse
-        // as a fragment, which parseCwdLine skips harmlessly.
-        carry = '';
-      }
-    }
-
-    // Final line without a trailing newline.
-    return parseCwdLine(carry + decoder.end());
-  } catch {
-    return null;
-  } finally {
-    closeSync(fd);
-  }
-}
-
-/**
- * True when the session jsonl's recorded cwd matches `absolutePath` (both
- * sides realpath-canonicalized, so symlinked launch paths compare equal).
- */
-function sessionFileOwnedBy(filePath: string, absolutePath: string): boolean {
-  const recordedCwd = readSessionCwd(filePath);
-  if (!recordedCwd) return false;
-  return realpathOrSelf(recordedCwd) === realpathOrSelf(absolutePath);
-}
-
 /**
  * Return the session UUID of the most-recently-modified jsonl in the Claude
- * project dir for the given cwd whose recorded cwd actually matches that path
- * (Issue #1145 ownership check), or null if none qualifies.
+ * project dir for the given cwd, or null if none exists.
  *
  * `opts.homeDir` lets tests pin the home directory; otherwise resolves via
  * `os.homedir()`.
@@ -154,34 +61,35 @@ export function findLatestSessionId(
   const dir = join(home, '.claude', 'projects', encodeClaudeProjectDir(absolutePath));
   if (!existsSync(dir)) return null;
 
-  const candidates: Array<{ name: string; mtime: number }> = [];
+  let bestName: string | null = null;
+  let bestMtime = -Infinity;
 
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     if (!entry.isFile() || !entry.name.endsWith(JSONL_EXT)) continue;
     const fullPath = join(dir, entry.name);
     try {
-      candidates.push({ name: entry.name, mtime: statSync(fullPath).mtimeMs });
+      const mtime = statSync(fullPath).mtimeMs;
+      if (mtime > bestMtime) {
+        bestMtime = mtime;
+        bestName = entry.name;
+      }
     } catch {
       // stat failed (race with deletion, permissions) — skip
     }
   }
 
-  candidates.sort((a, b) => b.mtime - a.mtime);
-
-  for (const candidate of candidates) {
-    if (sessionFileOwnedBy(join(dir, candidate.name), absolutePath)) {
-      return candidate.name.slice(0, -JSONL_EXT.length);
-    }
-  }
-  return null;
+  if (!bestName) return null;
+  return bestName.slice(0, -JSONL_EXT.length);
 }
 
 /**
- * Verify that a specific session id belongs to `absolutePath` (Issue #1145):
- * its jsonl must exist in the cwd-encoded project dir AND its recorded cwd
- * must match. Used before resuming a *stored* session id, so a stale or
- * foreign id degrades to a fresh spawn instead of attaching to someone
- * else's conversation.
+ * Verify that a stored session id still has a session file on disk for
+ * `absolutePath` (Issue #1145). Stored ids are minted by us and persisted
+ * keyed by workspace path, so existence is the meaningful check: a row can
+ * outlive its jsonl (`workspace stop` preserves rows; ~/.claude gets pruned
+ * independently), and resuming a deleted session bakes a broken `--resume`
+ * into a shellper restart loop (the #929 crash-loop class). A failed check
+ * degrades to a fresh spawn.
  */
 export function verifySessionOwnership(
   absolutePath: string,
@@ -197,8 +105,7 @@ export function verifySessionOwnership(
     encodeClaudeProjectDir(realpathOrSelf(absolutePath)),
   ]);
   for (const dir of candidateDirs) {
-    const filePath = join(home, '.claude', 'projects', dir, `${sessionId}${JSONL_EXT}`);
-    if (existsSync(filePath) && sessionFileOwnedBy(filePath, absolutePath)) {
+    if (existsSync(join(home, '.claude', 'projects', dir, `${sessionId}${JSONL_EXT}`))) {
       return true;
     }
   }

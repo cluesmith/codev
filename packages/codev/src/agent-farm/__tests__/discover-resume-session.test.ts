@@ -36,13 +36,7 @@ function writeSession(projectsRoot: string, absPath: string, uuid: string, mtime
   const dir = join(projectsRoot, encodeClaudeProjectDir(absPath));
   mkdirSync(dir, { recursive: true });
   const file = join(dir, `${uuid}.jsonl`);
-  // Shaped like the real store: a user record carrying the launch cwd, which
-  // discovery verifies ownership against (Issue #1145).
-  writeFileSync(
-    file,
-    `{"type":"mode","sessionId":"${uuid}"}\n{"type":"user","cwd":"${absPath}","sessionId":"${uuid}"}\n`,
-    'utf-8',
-  );
+  writeFileSync(file, `{"sessionId":"${uuid}"}\n`, 'utf-8');
   const t = mtimeMs / 1000;
   utimesSync(file, t, t);
 }

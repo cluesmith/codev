@@ -33,23 +33,13 @@ import { encodeClaudeProjectDir } from '../utils/claude-session-discovery.js';
 
 /**
  * Issue #1145: stored-id resume now requires the session jsonl to exist under
- * the (test-pinned) home dir and to record the launching cwd. This writes a
- * minimally-real session file so ownership verification passes — or, with a
- * divergent `recordedCwd`, deliberately fails.
+ * the (test-pinned) home dir. This writes a minimal session file so ownership
+ * verification passes; omit it to simulate a stale stored id.
  */
-function writeSessionFixture(
-  homeDir: string,
-  cwdPath: string,
-  uuid: string,
-  recordedCwd: string = cwdPath,
-): void {
+function writeSessionFixture(homeDir: string, cwdPath: string, uuid: string): void {
   const dir = path.join(homeDir, '.claude', 'projects', encodeClaudeProjectDir(cwdPath));
   fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(
-    path.join(dir, `${uuid}.jsonl`),
-    `{"type":"mode","sessionId":"${uuid}"}\n{"type":"user","cwd":"${recordedCwd}","sessionId":"${uuid}"}\n`,
-    'utf-8',
-  );
+  fs.writeFileSync(path.join(dir, `${uuid}.jsonl`), `{"sessionId":"${uuid}"}\n`, 'utf-8');
 }
 
 describe('tower-utils', () => {
@@ -310,8 +300,8 @@ describe('resolveArchitectLaunch (Issue #832)', () => {
     expect(sessionId).not.toBe('ghost-id');
   });
 
-  it('spawns fresh when the stored session records a different project cwd', () => {
-    writeSessionFixture(fakeHome, workspace, 'foreign-id', '/somewhere/else/entirely');
+  it('spawns fresh when the stored session file lives under a different cwd', () => {
+    writeSessionFixture(fakeHome, '/somewhere/else/entirely', 'foreign-id');
     const { args, resumed, sessionId } = resolveArchitectLaunch({
       workspacePath: workspace, name: 'main', baseArgs: [], storedSessionId: 'foreign-id', homeDir: fakeHome,
     });

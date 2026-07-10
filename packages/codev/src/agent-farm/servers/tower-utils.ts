@@ -226,8 +226,8 @@ function sessionIsOwned(
  *      prompt); echo the same id back.
  *   3. Else fresh → generate a new id, pin the session to it (with role injection),
  *      and return it for the caller to persist. A stored id that fails
- *      ownership verification (stale jsonl, foreign project scope) lands here,
- *      and the fresh id the caller persists replaces it.
+ *      ownership verification (its jsonl no longer exists) lands here, and
+ *      the fresh id the caller persists replaces it.
  *
  * The returned `sessionId` is the value the caller writes onto the architect row,
  * so the column is populated correctly on every spawn.
@@ -249,9 +249,9 @@ export function resolveArchitectLaunch(opts: {
   }
 
   // 2. Resume the persisted conversation (role injection skipped) — but only
-  // when the session on disk verifiably belongs to this workspace. A failed or
-  // throwing check falls through to a fresh spawn (Issue #1145: never attach
-  // to a conversation we cannot prove is ours).
+  // when the session still exists on disk for this workspace. A failed or
+  // throwing check falls through to a fresh spawn (Issue #1145: a stored id
+  // can outlive its jsonl, and resuming it would crash-loop the restart).
   if (storedSessionId && sessionIsOwned(harness, storedSessionId, workspacePath, homeDir)) {
     return {
       args: [...baseArgs, ...harness.session.resumeArgs(storedSessionId)],
