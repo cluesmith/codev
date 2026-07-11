@@ -27,3 +27,14 @@ Rebased onto origin/main, picking up PR #1160 (Issue #1145), which landed in the
 - #1145 added `verifySessionOwnership()` (claude-session-discovery.ts) and `session.verifyOwnership?()` (harness.ts), and wired `resolveArchitectLaunch` to verify a stored id before resuming; stale ids degrade to a fresh spawn. It also removed the architect jsonl-discovery fallback in launchInstance.
 - Consequences: the RC2 crash-loop half of #1150's symptom is already fixed; the resurrection half is not (the reconcile loop still respawns every persisted row, and a dead registration now self-heals into a fresh-id registration on every launch, so pruning is still needed).
 - Plan simplified: Part 2 reuses #1145's primitives instead of adding `sessionFileExists` / `session.sessionExists?`; the liveness helper goes in tower-utils.ts next to `sessionIsOwned` (harness resolution stays out of tower-instances.ts, which #1145 de-imported). Line references refreshed post-rebase. Parts 1 and 3 unchanged.
+
+## 2026-07-11 — Implement phase
+
+Plan approved; implemented in four commits:
+
+- `siblingRegistrationIsLive()` in tower-utils.ts (exempts session-less harnesses, requires jsonl evidence via #1145's verifyOwnership otherwise) + reconcile-loop gate and prune in tower-instances.ts, with `hasArchitectTerminalSession()` as the terminal-evidence check.
+- removeArchitect: delete failures collected and surfaced (`success: false` with retry guidance); not-found branch purges a persisted zombie registration so the command is retryable and doubles as manual recovery.
+- db/index.ts: `synchronous = FULL`.
+- Tests: 6 new in tower-instances.test.ts (prune vs respawn x3, removal failure surfacing x2, stale purge + not-found), 5 new in tower-utils.test.ts for the liveness helper.
+
+Build gotcha worth remembering: `pnpm --filter @cluesmith/codev build | tail` masked a real build failure (pipeline exit code is tail's). Core must be built first; root `pnpm build` orders it correctly. A first full-suite run also showed 32 failures across 7 files that all traced to the missing skeleton copy (fresh worktree, failed build), not to the diff; consolidate.test.ts passes in isolation.
