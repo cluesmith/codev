@@ -13,3 +13,9 @@ Investigated the resurrection path end to end:
 - WAL-loss residual window (removal committed, power lost before fsync) is not closable by any liveness check; mitigated by `synchronous = FULL` (Part 3) and documented in the plan.
 
 Plan written to `codev/plans/1150-afx-removed-sibling-architect-.md`. Sitting at plan-approval gate.
+
+## 2026-07-11 — Plan revision after reviewer challenge
+
+Reviewer questioned whether the silent try/catch was really the cause (SQLite write failures are rare) and asked whether a backup mechanism could be recovering architects. Investigation confirmed the hunch: the #1118 state.db consolidation (shipped ~2026-07-01, one week before the reports) is a deterministic resurrection vector. Pre-#1118 `getDb()` was cwd-dependent, so removals could delete from the wrong state.db file; the #1118 boot one-off and the prescribed satellite sweep (`afx db consolidate --apply`) then merge those stale snapshots into global.db, and `upsertArchitect`'s upsert-if-newer treats a deleted row (absent from global.db) as a plain insert. No tombstones.
+
+Plan updated: Understanding now ranks the three injection paths by probability (consolidation > WAL loss > swallowed delete), Risks now states honestly that the liveness gate cannot stop a resurrected row whose jsonl still exists (retryable purge is the remedy there) and flags consolidation's missing tombstone concept as a possible follow-up issue. The fix parts themselves are unchanged: gate the consumer, make removal loud and retryable, close the WAL window.
