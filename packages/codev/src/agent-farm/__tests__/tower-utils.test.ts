@@ -20,6 +20,7 @@ import {
   serveStaticFile,
   resolveArchitectLaunch,
   resolveArchitectRestart,
+  siblingRegistrationIsLive,
 } from '../servers/tower-utils.js';
 
 // resolveArchitectRestart reads the architect row via getArchitectByName; mock just
@@ -324,6 +325,57 @@ describe('resolveArchitectLaunch (Issue #832)', () => {
     expect(args).not.toContain('--resume');
     expect(sessionId).toBeNull();
     expect(resumed).toBe(false);
+  });
+});
+
+describe('siblingRegistrationIsLive (Issue #1150)', () => {
+  let workspace: string;
+  let fakeHome: string;
+
+  beforeEach(() => {
+    // Bare temp dir → default Claude harness (session-capable, with the
+    // #1145 verifyOwnership check). fakeHome pins the session store.
+    workspace = fs.mkdtempSync(path.join(tmpdir(), 'srl-ws-'));
+    fakeHome = fs.mkdtempSync(path.join(tmpdir(), 'srl-home-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(workspace, { recursive: true, force: true });
+    fs.rmSync(fakeHome, { recursive: true, force: true });
+  });
+
+  function forceCodexHarness(): void {
+    fs.mkdirSync(path.join(workspace, '.codev'), { recursive: true });
+    fs.writeFileSync(
+      path.join(workspace, '.codev', 'config.json'),
+      JSON.stringify({ shell: { architect: 'codex' } }),
+    );
+  }
+
+  it('live when the stored session jsonl exists on disk', () => {
+    writeSessionFixture(fakeHome, workspace, 'sib-1');
+    expect(siblingRegistrationIsLive(workspace, 'sib-1', { homeDir: fakeHome })).toBe(true);
+  });
+
+  it('dead when the stored session jsonl is missing (stale registration)', () => {
+    expect(siblingRegistrationIsLive(workspace, 'gone-1', { homeDir: fakeHome })).toBe(false);
+  });
+
+  it('dead when a session-capable harness row has no stored id (legacy pre-#832 row)', () => {
+    expect(siblingRegistrationIsLive(workspace, null, { homeDir: fakeHome })).toBe(false);
+  });
+
+  it('live for a session-less harness regardless of stored id (Spec 786 persistence preserved)', () => {
+    // Codex has no `session` capability: its rows can never carry session
+    // evidence and respawn is always fresh, so they must not be pruned.
+    forceCodexHarness();
+    expect(siblingRegistrationIsLive(workspace, null, { homeDir: fakeHome })).toBe(true);
+    expect(siblingRegistrationIsLive(workspace, 'whatever', { homeDir: fakeHome })).toBe(true);
+  });
+
+  it('dead when the jsonl lives under a different cwd (not this workspace\'s session)', () => {
+    writeSessionFixture(fakeHome, '/somewhere/else/entirely', 'foreign-1');
+    expect(siblingRegistrationIsLive(workspace, 'foreign-1', { homeDir: fakeHome })).toBe(false);
   });
 });
 

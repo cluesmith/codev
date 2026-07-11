@@ -35,6 +35,7 @@ const {
   mockDbRun,
   mockDbAll,
   mockIsTempDirectory,
+  mockSiblingRegistrationIsLive,
 } = vi.hoisted(() => {
   const mockDbRun = vi.fn();
   const mockDbAll = vi.fn().mockReturnValue([]);
@@ -44,6 +45,10 @@ const {
     mockDbRun,
     mockDbAll,
     mockIsTempDirectory: vi.fn().mockReturnValue(false),
+    // Issue #1150: default live (pre-#1150 behavior) so unrelated launch tests
+    // are unaffected; the liveness-gate tests flip it per-case. The real
+    // implementation is covered in tower-utils.test.ts.
+    mockSiblingRegistrationIsLive: vi.fn().mockReturnValue(true),
   };
 });
 
@@ -62,6 +67,7 @@ vi.mock('../servers/tower-utils.js', async () => {
   return {
     ...actual,
     isTempDirectory: (...args: unknown[]) => mockIsTempDirectory(...args),
+    siblingRegistrationIsLive: (...args: unknown[]) => mockSiblingRegistrationIsLive(...args),
   };
 });
 
@@ -1258,6 +1264,274 @@ describe('tower-instances', () => {
 
       // The flag must NOT be left in the set after the throw.
       expect(isIntentionallyStopping('/project/path')).toBe(false);
+    });
+  });
+
+  // =========================================================================
+  // Issue #1150 — reconcile-loop liveness gate + removeArchitect durability
+  // =========================================================================
+  //
+  // A persisted sibling architect row is only respawned when it carries
+  // liveness evidence (matching terminal_sessions row, or a live verdict from
+  // siblingRegistrationIsLive); otherwise it is pruned. removeArchitect
+  // surfaces DB delete failures instead of swallowing them, and purges stale
+  // registrations on retry.
+
+  describe('Issue #1150 — liveness gate and removal durability', () => {
+    afterEach(() => {
+      // Restore the shared defaults mutated by these tests.
+      mockDbPrepare.mockReturnValue({ run: mockDbRun, all: mockDbAll });
+      mockSiblingRegistrationIsLive.mockReturnValue(true);
+    });
+
+    /** A launch fixture whose workspace entry is shared between the deps map and getter. */
+    function makeLaunchFixture() {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tower-1150-'));
+      fs.mkdirSync(path.join(tmpDir, 'codev'));
+      const resolved = fs.realpathSync(tmpDir);
+      const entry = { architects: new Map(), builders: new Map(), shells: new Map() };
+      const workspaceTerminals = new Map([[resolved, entry]]);
+      const mockManager = {
+        getSession: vi.fn(),
+        killSession: vi.fn(),
+        createSession: vi.fn().mockResolvedValue({ id: 'term-x', pid: 1234 }),
+        createSessionRaw: vi.fn(),
+        listSessions: vi.fn().mockReturnValue([]),
+      };
+      const deps = makeDeps({
+        workspaceTerminals: workspaceTerminals as any,
+        getWorkspaceTerminalsEntry: vi.fn().mockReturnValue(entry) as any,
+        getTerminalManager: vi.fn().mockReturnValue(mockManager) as any,
+      });
+      return { tmpDir, resolved, entry, mockManager, deps };
+    }
+
+    function ghostRow(workspacePath: string) {
+      return {
+        workspace_path: workspacePath,
+        id: 'ghost',
+        pid: 0,
+        port: 0,
+        cmd: 'claude',
+        started_at: '2026-01-01T00:00:00Z',
+        terminal_id: null,
+        session_id: 'dead-session-id',
+      };
+    }
+
+    /**
+     * Route the shared prepare mock by SQL: architect table reads return
+     * `rows`, the terminal_sessions liveness probe honors
+     * `terminalSessionExists`, and every run() is recorded for assertions.
+     */
+    function installDbFixture(rows: Record<string, unknown>[], opts?: { terminalSessionExists?: boolean }) {
+      const runCalls: Array<{ sql: string; args: unknown[] }> = [];
+      mockDbPrepare.mockImplementation((sql: string) => ({
+        all: () => {
+          if (sql.startsWith('SELECT * FROM architect')) return rows;
+          return [];
+        },
+        get: () => {
+          if (sql.includes('FROM terminal_sessions') && opts?.terminalSessionExists) return { 1: 1 };
+          return undefined;
+        },
+        run: (...args: unknown[]) => {
+          runCalls.push({ sql, args });
+          return { changes: 1 };
+        },
+      }));
+      return runCalls;
+    }
+
+    it('prunes a dead sibling registration instead of respawning it', async () => {
+      const { tmpDir, entry, mockManager, deps } = makeLaunchFixture();
+      try {
+        const runCalls = installDbFixture([ghostRow(tmpDir)]);
+        mockSiblingRegistrationIsLive.mockReturnValue(false);
+        initInstances(deps);
+
+        const result = await launchInstance(tmpDir);
+
+        expect(result.success).toBe(true);
+        // The dead row was deleted, not respawned.
+        const pruned = runCalls.filter(
+          (c) => c.sql.startsWith('DELETE FROM architect') && c.args.includes('ghost'),
+        );
+        expect(pruned).toHaveLength(1);
+        expect(entry.architects.has('ghost')).toBe(false);
+        // Only main's terminal was created.
+        expect(mockManager.createSession).toHaveBeenCalledTimes(1);
+        // The gate consulted the session-artifact check with the row's stored id.
+        expect(mockSiblingRegistrationIsLive).toHaveBeenCalledWith(tmpDir, 'dead-session-id');
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    it('respawns a sibling whose terminal_sessions row exists, without consulting the session check', async () => {
+      const { tmpDir, entry, mockManager, deps } = makeLaunchFixture();
+      try {
+        const runCalls = installDbFixture([ghostRow(tmpDir)], { terminalSessionExists: true });
+        mockSiblingRegistrationIsLive.mockReturnValue(false); // must be short-circuited
+        initInstances(deps);
+
+        const result = await launchInstance(tmpDir);
+
+        expect(result.success).toBe(true);
+        expect(entry.architects.has('ghost')).toBe(true);
+        expect(mockManager.createSession).toHaveBeenCalledTimes(2); // main + ghost
+        expect(mockSiblingRegistrationIsLive).not.toHaveBeenCalled();
+        const pruned = runCalls.filter(
+          (c) => c.sql.startsWith('DELETE FROM architect') && c.args.includes('ghost'),
+        );
+        expect(pruned).toHaveLength(0);
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    it('respawns a sibling the session check deems live (no terminal_sessions row)', async () => {
+      const { tmpDir, entry, mockManager, deps } = makeLaunchFixture();
+      try {
+        installDbFixture([ghostRow(tmpDir)]);
+        mockSiblingRegistrationIsLive.mockReturnValue(true);
+        initInstances(deps);
+
+        const result = await launchInstance(tmpDir);
+
+        expect(result.success).toBe(true);
+        expect(entry.architects.has('ghost')).toBe(true);
+        expect(mockManager.createSession).toHaveBeenCalledTimes(2);
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    it('removeArchitect: surfaces an architect-row delete failure instead of reporting success', async () => {
+      const workspaceTerminals = new Map();
+      workspaceTerminals.set('/project/path', {
+        architects: new Map([['main', 'arch-main'], ['ob-refine', 'arch-sibling']]),
+        builders: new Map(),
+        shells: new Map(),
+      });
+      const mockManager = {
+        getSession: vi.fn().mockReturnValue({ pid: 42, shellperBacked: false }),
+        killSession: vi.fn().mockReturnValue(true),
+      };
+      const deps = makeDeps({
+        workspaceTerminals,
+        getTerminalManager: vi.fn().mockReturnValue(mockManager) as any,
+      });
+      initInstances(deps);
+
+      mockDbPrepare.mockImplementation((sql: string) => ({
+        all: () => [],
+        get: () => undefined,
+        run: () => {
+          if (sql.startsWith('DELETE FROM architect')) {
+            throw new Error('SQLITE_BUSY: database is locked');
+          }
+          return { changes: 1 };
+        },
+      }));
+
+      const result = await removeArchitect('/project/path', 'ob-refine');
+
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/resurrect/i);
+      expect(result.error).toMatch(/remove-architect --name ob-refine/);
+      expect(result.error).toMatch(/SQLITE_BUSY/);
+      // The terminal teardown still completed, so a retry hits the purge branch.
+      expect(mockManager.killSession).toHaveBeenCalledWith('arch-sibling');
+      expect(workspaceTerminals.get('/project/path')?.architects.has('ob-refine')).toBe(false);
+    });
+
+    it('removeArchitect: surfaces a terminal-session delete failure', async () => {
+      const workspaceTerminals = new Map();
+      workspaceTerminals.set('/project/path', {
+        architects: new Map([['main', 'arch-main'], ['ob-refine', 'arch-sibling']]),
+        builders: new Map(),
+        shells: new Map(),
+      });
+      const mockManager = {
+        getSession: vi.fn().mockReturnValue({ pid: 42, shellperBacked: false }),
+        killSession: vi.fn().mockReturnValue(true),
+      };
+      const deps = makeDeps({
+        workspaceTerminals,
+        getTerminalManager: vi.fn().mockReturnValue(mockManager) as any,
+        deleteTerminalSession: vi.fn().mockImplementation(() => {
+          throw new Error('disk I/O error');
+        }),
+      });
+      initInstances(deps);
+
+      const result = await removeArchitect('/project/path', 'ob-refine');
+
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/terminal session: disk I\/O error/);
+    });
+
+    it('removeArchitect: purges a stale registration when no live terminal exists', async () => {
+      const workspaceTerminals = new Map();
+      workspaceTerminals.set('/project/path', {
+        architects: new Map([['main', 'arch-main']]),
+        builders: new Map(),
+        shells: new Map(),
+      });
+      const mockManager = {
+        getSession: vi.fn(),
+        killSession: vi.fn(),
+      };
+      const deps = makeDeps({
+        workspaceTerminals,
+        getTerminalManager: vi.fn().mockReturnValue(mockManager) as any,
+      });
+      initInstances(deps);
+
+      const runCalls: Array<{ sql: string; args: unknown[] }> = [];
+      mockDbPrepare.mockImplementation((sql: string) => ({
+        all: () => [],
+        get: () => {
+          if (sql.startsWith('SELECT * FROM architect')) return ghostRow('/project/path');
+          return undefined;
+        },
+        run: (...args: unknown[]) => {
+          runCalls.push({ sql, args });
+          return { changes: 1 };
+        },
+      }));
+
+      const result = await removeArchitect('/project/path', 'ghost');
+
+      expect(result.success).toBe(true);
+      const purged = runCalls.filter(
+        (c) => c.sql.startsWith('DELETE FROM architect') && c.args.includes('ghost'),
+      );
+      expect(purged).toHaveLength(1);
+      // No terminal existed, so nothing was killed.
+      expect(mockManager.killSession).not.toHaveBeenCalled();
+    });
+
+    it('removeArchitect: still reports not-found when neither terminal nor registration exists', async () => {
+      const workspaceTerminals = new Map();
+      workspaceTerminals.set('/project/path', {
+        architects: new Map([['main', 'arch-main']]),
+        builders: new Map(),
+        shells: new Map(),
+      });
+      const deps = makeDeps({ workspaceTerminals });
+      initInstances(deps);
+
+      mockDbPrepare.mockImplementation(() => ({
+        all: () => [],
+        get: () => undefined,
+        run: () => ({ changes: 0 }),
+      }));
+
+      const result = await removeArchitect('/project/path', 'nonexistent');
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/not found/i);
     });
   });
 });
