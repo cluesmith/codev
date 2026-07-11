@@ -115,9 +115,58 @@ VERDICT: APPROVE`;
     expect(parseVerdict(output)).toBe('APPROVE');
   });
 
-  it('returns COMMENT when no verdict is found in a long output (ran but no verdict)', () => {
+  it('returns SKIPPED when no verdict is found in a long output (ran but no verdict)', () => {
+    // Previously this fell back to COMMENT, which counts as an APPROVING
+    // reviewer — so a lane that went off-task or emitted garbage silently
+    // passed the gate (entriq #2467). SKIPPED = not a review: non-blocking
+    // for the other lanes, but never counted as approval.
     const output = `Review text that is long enough to pass the minimum length threshold for parsing.
 But it does not contain any VERDICT: line because the reviewer went off-task or didn't write one.`;
+    expect(parseVerdict(output)).toBe('SKIPPED');
+  });
+
+  it('parses explicit SKIPPED verdict', () => {
+    const output = `---
+VERDICT: SKIPPED
+SUMMARY: Gemini lane skipped — agy CLI not found
+CONFIDENCE: LOW
+---
+
+The reviewer was skipped; no review was produced.`;
+    expect(parseVerdict(output)).toBe('SKIPPED');
+  });
+
+  it('reinterprets a legacy skip stub (VERDICT: COMMENT + skip SUMMARY marker) as SKIPPED', () => {
+    const output = `---
+VERDICT: COMMENT
+SUMMARY: Gemini lane skipped — authentication required (OAuth)
+CONFIDENCE: LOW
+---
+
+The Gemini (Antigravity \`agy\`) reviewer was skipped: authentication required (OAuth).
+This is a non-blocking skip; the remaining reviewers still apply.`;
+    expect(parseVerdict(output)).toBe('SKIPPED');
+  });
+
+  it('does NOT reinterpret a real COMMENT review that merely mentions a skipped lane', () => {
+    const output = `Review text long enough for the threshold. Note: an unrelated CI lane skipped a job.
+
+---
+VERDICT: COMMENT
+SUMMARY: Minor suggestions only
+CONFIDENCE: MEDIUM
+---`;
     expect(parseVerdict(output)).toBe('COMMENT');
+  });
+
+  it('does NOT reinterpret an explicit REQUEST_CHANGES even if a skip marker appears', () => {
+    const output = `Review text long enough for the threshold.
+
+---
+VERDICT: REQUEST_CHANGES
+SUMMARY: Gemini lane skipped — but an earlier pass found real issues
+CONFIDENCE: HIGH
+---`;
+    expect(parseVerdict(output)).toBe('REQUEST_CHANGES');
   });
 });

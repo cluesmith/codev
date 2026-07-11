@@ -317,7 +317,7 @@ describe('consult command', () => {
         expect(threw).toBe(false); // non-blocking: resolves, never throws
 
         const written = stdoutSpy.mock.calls.map(c => String(c[0])).join('');
-        expect(written).toContain('VERDICT: COMMENT');
+        expect(written).toContain('VERDICT: SKIPPED');
         expect(written).toMatch(/skipped/i);
       } finally {
         stdoutSpy.mockRestore();
@@ -862,7 +862,7 @@ describe('consult command', () => {
       }
     });
 
-    it('skips non-blockingly (VERDICT: COMMENT) when agy is unauthenticated', async () => {
+    it('skips non-blockingly (VERDICT: SKIPPED) when agy is unauthenticated', async () => {
       const { consult, spawn } = await loadAgy();
       spawn.mockClear();
       spawn.mockReturnValueOnce(makeFakeAgyProc({
@@ -876,7 +876,7 @@ describe('consult command', () => {
         try { await consult({ model: 'gemini', prompt: 'review' }); } catch { threw = true; }
         expect(threw).toBe(false); // non-blocking
         const written = stdoutSpy.mock.calls.map(c => String(c[0])).join('');
-        expect(written).toContain('VERDICT: COMMENT');
+        expect(written).toContain('VERDICT: SKIPPED');
         expect(written).toMatch(/not authenticated/i);
       } finally {
         stdoutSpy.mockRestore();
@@ -899,7 +899,7 @@ describe('consult command', () => {
         try { await consult({ model: 'gemini', prompt: 'review' }); } catch { threw = true; }
         expect(threw).toBe(false); // non-blocking
         const written = stdoutSpy.mock.calls.map(c => String(c[0])).join('');
-        expect(written).toContain('VERDICT: COMMENT');
+        expect(written).toContain('VERDICT: SKIPPED');
         expect(written).toMatch(/timed out/i);
       } finally {
         stdoutSpy.mockRestore();

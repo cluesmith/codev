@@ -33,7 +33,7 @@ import {
   allPlanPhasesComplete,
 } from './plan.js';
 import { buildPhasePrompt } from './prompts.js';
-import { parseVerdict, allApprove } from './verdict.js';
+import { parseVerdict, allApprove, effectiveReviews } from './verdict.js';
 import { loadCheckOverrides } from './config.js';
 import { loadConfig } from '../../lib/config.js';
 import { getResolver, type ArtifactResolver } from './artifacts.js';
@@ -575,6 +575,32 @@ async function handleBuildVerify(
       };
     }
 
+    // All review FILES are in — but a skip artifact is not a review. If every
+    // lane skipped (agy missing, no parseable VERDICT, ...), zero reviews
+    // actually happened and the gate must not pass on zero evidence. A rebuttal
+    // is the wrong remediation (there is no feedback to rebut); the fix is to
+    // make at least one lane produce a real review. See entriq #2467.
+    if (reviews.length > 0 && effectiveReviews(reviews).length === 0) {
+      const skippedInfo = reviews
+        .map(r => `- ${path.basename(r.file)} (SKIPPED — no review produced)`)
+        .join('\n');
+      return {
+        status: 'tasks',
+        ...baseResponse,
+        tasks: [{
+          subject: `All review lanes were skipped — a real review is required`,
+          activeForm: `Recovering skipped review lanes`,
+          description:
+            `Every consultation lane emitted a skip artifact or unparseable output, so no review actually happened:\n\n${skippedInfo}\n\n` +
+            `Fix at least one lane, then re-run its consultation so the file contains a real VERDICT (APPROVE / REQUEST_CHANGES / COMMENT):\n` +
+            `1. Delete the skip artifact file(s) listed above.\n` +
+            `2. Fix the lane (install/authenticate the CLI) and re-run the consult command, OR run the review manually with a working model and write its output (with a VERDICT line and provenance) to the same file path.\n` +
+            `3. Call \`porch next ${state.id}\` again.\n\n` +
+            `Do NOT hand-write a verdict without running a real review.`,
+        }],
+      };
+    }
+
     // All reviews in — parse verdicts and decide
     if (allApprove(reviews)) {
       // All approve — advance
@@ -766,7 +792,7 @@ async function handleVerifyApproved(
       tasks: [{
         subject: `Request human approval: ${gateName}`,
         activeForm: `Requesting ${gateName} approval`,
-        description: `All reviewers approved!\n\nReviewer verdicts:\n${formatVerdicts(reviews)}\n\nSTOP and wait for human approval.`,
+        description: `${effectiveReviews(reviews).length < reviews.length ? `All effective reviewers approved (${reviews.length - effectiveReviews(reviews).length} lane(s) SKIPPED — reduced review coverage)!` : 'All reviewers approved!'}\n\nReviewer verdicts:\n${formatVerdicts(reviews)}\n\nSTOP and wait for human approval.`,
       }],
     };
   }
@@ -850,6 +876,6 @@ async function handleOncePhase(
  */
 function formatVerdicts(reviews: ReviewResult[]): string {
   return reviews
-    .map(r => `  ${r.model}: ${r.verdict}`)
+    .map(r => `  ${r.model}: ${r.verdict}${r.verdict === 'SKIPPED' ? ' (lane not run — no review produced)' : ''}`)
     .join('\n');
 }

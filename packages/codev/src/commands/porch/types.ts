@@ -116,8 +116,13 @@ export interface PlanPhase {
  *
  * CONSULT_ERROR: Consultation failed (API key missing, network error, timeout)
  *                Not a valid review - triggers retry, not REQUEST_CHANGES
+ * SKIPPED:       The lane emitted a skip artifact (e.g. agy CLI missing) — no
+ *                review was actually produced. Non-blocking for progression,
+ *                but excluded from approval math so a skip can never count as
+ *                an approving reviewer (issue: a skip stub with VERDICT: COMMENT
+ *                masqueraded as a passing third lane).
  */
-export type Verdict = 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT' | 'CONSULT_ERROR';
+export type Verdict = 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT' | 'CONSULT_ERROR' | 'SKIPPED';
 
 /**
  * Review result with file path

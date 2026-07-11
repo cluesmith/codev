@@ -122,7 +122,7 @@ describe('porch progression with a skipped agy/gemini lane (drives next())', () 
     fs.mkdirSync(path.dirname(statusPath), { recursive: true });
     writeState(statusPath, state);
 
-    // gemini lane = the real skip artifact agy emits when unavailable → COMMENT
+    // gemini lane = the real skip artifact agy emits when unavailable → SKIPPED
     writeReviews(testDir, state, {
       gemini: _agySkipContent('agy CLI not found'),
       codex: APPROVE,
@@ -131,13 +131,43 @@ describe('porch progression with a skipped agy/gemini lane (drives next())', () 
 
     const res = await next(testDir, '0778');
 
-    // Porch advanced: it requested the human `pr` gate ("All reviewers approved!"),
-    // NOT a rebuttal/re-iteration. The skipped lane did not block progression.
+    // Porch advanced: it requested the human `pr` gate, NOT a rebuttal /
+    // re-iteration. The skipped lane did not block progression — but the gate
+    // message must disclose the reduced coverage instead of claiming a full
+    // 3-way approval (entriq #2467).
     expect(res.status).toBe('gate_pending');
     expect(res.gate).toBe('pr');
     const subjects = (res.tasks ?? []).map(t => t.subject).join(' | ');
     expect(subjects).not.toMatch(/rebuttal/i);
-    expect((res.tasks ?? []).map(t => t.description).join('\n')).toMatch(/All reviewers approved/);
+    const descriptions = (res.tasks ?? []).map(t => t.description).join('\n');
+    expect(descriptions).toMatch(/All effective reviewers approved/);
+    expect(descriptions).toMatch(/SKIPPED/);
+    expect(descriptions).not.toMatch(/^All reviewers approved!/m);
+  });
+
+  it('does NOT advance when EVERY lane skipped (zero real reviews)', async () => {
+    const state = makeState();
+    const statusPath = getStatusPath(testDir, state.id, state.title);
+    fs.mkdirSync(path.dirname(statusPath), { recursive: true });
+    writeState(statusPath, state);
+
+    // All three lanes emit skip artifacts — no review actually happened.
+    writeReviews(testDir, state, {
+      gemini: _agySkipContent('agy CLI not found'),
+      codex: _agySkipContent('no response before timeout'),
+      claude: _agySkipContent('no response before timeout'),
+    });
+
+    const res = await next(testDir, '0778');
+
+    // The gate must not pass on zero evidence, and the remediation is to
+    // re-run the consultations — not to write a rebuttal against feedback
+    // that does not exist.
+    expect(res.status).toBe('tasks');
+    expect(res.gate).toBeUndefined();
+    const subjects = (res.tasks ?? []).map(t => t.subject).join(' | ');
+    expect(subjects).toMatch(/skipped/i);
+    expect(subjects).not.toMatch(/rebuttal/i);
   });
 
   it('does NOT mask a genuine REQUEST_CHANGES (gemini skipped, codex blocks)', async () => {

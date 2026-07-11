@@ -150,7 +150,8 @@ function buildHistoryHeader(history: IterationRecord[], currentIteration: number
       lines.push('**Reviews:**');
       for (const review of record.reviews) {
         const icon = review.verdict === 'APPROVE' ? '✓' :
-                     review.verdict === 'COMMENT' ? '💬' : '✗';
+                     review.verdict === 'COMMENT' ? '💬' :
+                     review.verdict === 'SKIPPED' ? '⊘' : '✗';
         lines.push(`- ${review.model} (${icon} ${review.verdict}): \`${review.file}\``);
       }
     }

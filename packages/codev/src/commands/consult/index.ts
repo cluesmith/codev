@@ -701,19 +701,26 @@ export function resolveAgyBin(): string | null {
   return null;
 }
 
-/** Non-blocking skip artifact: porch's verdict parser treats COMMENT as non-blocking. */
+/**
+ * Lane-skip artifact: porch parses VERDICT: SKIPPED as "this lane produced no
+ * review" — non-blocking for progression (the remaining reviewers still apply)
+ * but excluded from approval math, so a skip can never masquerade as a passing
+ * review (entriq #2467: a COMMENT stub nearly passed a defective money-critical
+ * spec through a gate). The `SUMMARY: ... lane skipped` marker doubles as the
+ * legacy-stub detector in porch's parseVerdict — keep both in sync.
+ */
 function agySkipContent(reason: string): string {
   return [
     '---',
-    'VERDICT: COMMENT',
+    'VERDICT: SKIPPED',
     `SUMMARY: Gemini lane skipped — ${reason}`,
     'CONFIDENCE: LOW',
     '---',
     '',
-    `The Gemini (Antigravity \`agy\`) reviewer was skipped: ${reason}.`,
-    'This is a non-blocking skip; the remaining reviewers still apply. To enable the',
-    'Gemini lane, install the CLI (https://antigravity.google/cli/install.sh) and run',
-    '`agy` once to sign in.',
+    `The Gemini (Antigravity \`agy\`) reviewer was skipped: ${reason}. No review was`,
+    'produced; porch records this lane as SKIPPED (not run) and the remaining',
+    'reviewers still apply. To enable the Gemini lane, install the CLI',
+    '(https://antigravity.google/cli/install.sh) and run `agy` once to sign in.',
   ].join('\n');
 }
 
