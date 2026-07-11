@@ -1,4 +1,14 @@
+---
+approved: 2026-07-09
+validated: []
+---
+
 # PIR Plan: Stop launchInstance from hijacking unrelated Claude sessions on fresh workspaces
+
+> **Post-approval deviation (dev-approval gate, 2026-07-10)**: the cwd-content
+> ownership verification specified below was narrowed to a file-existence check
+> at the human reviewer's direction. Rationale and final shape are recorded in
+> `codev/reviews/1145-codev-adopt-launchinstance-mai.md` (Things to Look At).
 
 ## Understanding
 

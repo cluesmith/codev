@@ -61,6 +61,12 @@ Not HOT-tier: both are situation-specific recipes, not behavior-changing cross-c
 - **Legacy pre-#832 rows** (row exists, no stored id) now spawn fresh once instead of discovery-resuming — a one-time context loss for workspaces dormant since #832, accepted in plan review.
 - **The name `session.verifyOwnership`** slightly overstates what it now does (existence check). The reviewer was offered a rename (`isResumable`) and did not take it up; flagging in case the PR reviewer feels differently.
 
+### Consultation Verdicts and Dispositions (single advisory pass — PIR does not re-review)
+
+- **Codex: REQUEST_CHANGES** — (1) "implementation drops the approved cwd-based ownership verification; the collision vector remains for builder resume" and (2) "tests for the dropped ownership cases are missing". **Rebutted**: this is the deviation documented above, directed explicitly by the human reviewer at the `dev-approval` gate after a three-step design walk-back; the plan text was deliberately not rewritten to retro-fit the outcome (deviations belong in this review file). The collision vector requires two distinct absolute paths that encode identically AND host codev workspaces/worktrees with matching ids — contrived for Agent-Farm-managed paths, and the reviewer judged the content scan complexity not worth that threat. The dropped tests tested the dropped behavior. (3) "plan file missing approved-plan YAML frontmatter" — **fixed**: frontmatter plus a post-approval deviation note added to the plan file.
+- **Claude: COMMENT** — implementation solid; one real finding: an editing error in `lessons-learned.md` merged the unrelated `[From 1144]` lesson into the new `[From #1145]` bullet. **Fixed**: split back into two bullets with the `[From 1144]` attribution restored.
+- **Gemini: skipped** (non-blocking) — `agy` CLI not installed on this machine.
+
 ## How to Test Locally
 
 - **View diff**: VSCode sidebar → right-click builder `pir-1145` → **View Diff**
