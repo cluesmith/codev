@@ -68,3 +68,39 @@ errors were NOT from this change.
 **Scope note**: did NOT touch packages/vscode/CHANGELOG.md — vscode changelog is accumulated
 on the dedicated changelog branch by the architect after cleanup (repo convention), not in
 feature/bugfix PRs. Surfaced the migration note in the PR body + architect notification instead.
+
+## PR (phase 3)
+
+Two commits (fix+test landed together in the fix commit; the test file is in it) →
+pushed → **PR #1173** (Fixes #1158). porch fix-phase checks passed from main checkout
+(build 4.9s, tests 20.1s). Advanced to `pr` phase. CMAP 3-way (gemini/codex/claude, type pr)
+running. Next: record CMAP verdicts, notify architect, `porch done` to request the `pr` gate,
+then WAIT for human approval (never self-approve).
+
+**porch-from-where gotcha**: this project's porch state lives in the MAIN checkout's
+`codev/projects/`, not the worktree. `porch status` auto-detects from the worktree, but
+stateful cmds (`check`/`done`) must run from the main checkout (`cd ../.. && porch <cmd> bugfix-1158`)
+or they silently no-op / error "not found".
+
+**consult gotcha**: from this worktree, consult's project auto-detect fails ("Multiple
+projects found") because the worktree's `codev/projects/` still holds all historical projects
+and this one's state is in main. Disambiguate with `--issue 1158`. Also: never pipe consult to
+`head` — SIGPIPE kills it before it writes `--output`.
+
+### CMAP outcome — REQUEST_CHANGES → fixed (commit f931aa4e)
+
+All 3 reviewers (gemini/codex/claude) independently caught the SAME real defect: my
+first-pass verification grep `"Dev Server\|dev server"` was case-sensitive and missed the
+mixed-case **"Dev server"** — so 4 user-facing toast strings (dev-shared.ts, stop-worktree-dev.ts)
+still said "Dev server started/stopped/already running". Textbook "trust the protocol — CMAP
+catches what solo review misses." Fixed all 4 + 2 comments + README.md (marketplace doc, ~15
+refs, command titles were mismatching the actual palette) + pir protocol.md:137 (both trees).
+Strengthened the regression guard to scan ALL menu groups + keybindings.
+
+**Rebutted** codex's "add codev.devServer.* deprecated aliases" — the breaking rename is the
+issue's explicit choice (#1158 verify #9: document the no-op, don't preserve old ids).
+
+Re-verified: case-insensitive grep clean (only the intentional enumeration remains); 590 unit
+tests pass; compile clean. Pushed, PR body corrected (the earlier "0 hits" claim was wrong for
+case-insensitive), CMAP verdicts recorded. Next: notify architect, `porch done` → request `pr`
+gate, WAIT for human approval.
