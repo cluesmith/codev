@@ -864,10 +864,10 @@
         { "id": "codev.workspace", "name": "Workspace", "when": "codev.hasWorkspace" },
         { "id": "codev.agents", "name": "Agents" },
         { "id": "codev.backlog", "name": "Backlog", "when": "codev.hasWorkspace" },
-        { "id": "codev.pullRequests", "name": "Pull Requests", "when": "codev.hasWorkspace" },
-        { "id": "codev.recentlyClosed", "name": "Recently Closed", "when": "codev.hasWorkspace" },
-        { "id": "codev.team", "name": "Team", "when": "codev.teamEnabled && codev.hasWorkspace" },
-        { "id": "codev.status", "name": "Status", "when": "codev.hasWorkspace || codev.ideMode" }
+        { "id": "codev.pullRequests", "name": "Pull Requests", "when": "codev.hasWorkspace", "visibility": "collapsed" },
+        { "id": "codev.recentlyClosed", "name": "Recently Closed", "when": "codev.hasWorkspace", "visibility": "collapsed" },
+        { "id": "codev.team", "name": "Team", "when": "codev.teamEnabled && codev.hasWorkspace", "visibility": "collapsed" },
+        { "id": "codev.status", "name": "Status", "when": "codev.hasWorkspace || codev.ideMode", "visibility": "collapsed" }
       ],
       "codevPanel": [
         { "id": "codev.placeholder", "name": "Codev", "when": "codev.panelContainerEmpty", "visibility": "collapsed" },
