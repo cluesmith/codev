@@ -27,8 +27,20 @@ branch, but repo workflow keeps those on the divergent `docs/vscode-changelog` b
 the architect/human: decision = leave changelog to that branch. This builder branch ships
 ONLY the manifest fix. Architect handles CHANGELOG.md [Unreleased] + UNRELEASED.md Polish.
 
-No unit test: declarative manifest-only change, no runtime behavior. Verify via VS Code
-Extension Development Host smoke (first-install shows the 4 views collapsed to headers).
+Verify via VS Code Extension Development Host smoke (first-install shows the 4 views
+collapsed to headers).
+
+## PR
+
+PR #1171 opened. CMAP: gemini=APPROVE, claude=APPROVE, codex=REQUEST_CHANGES.
+
+Codex was right: I'd waved off a regression test as "declarative, nothing to test", but
+the repo already pins manifest contracts with Vitest (`contributes-view-gating.test.ts`,
+`contributes-panel.test.ts`). Added a regression block to `contributes-view-gating.test.ts`
+asserting the 4 lower-priority views carry `visibility: "collapsed"` and the 3 primary
+views keep no override. `visibility` is a first-render-only string VS Code reads at
+runtime — no compile error catches a dropped "collapsed" — so pinning it is warranted.
+21 tests pass. Committed + pushed, PR body updated. Requested `pr` gate via porch done.
 
 **Scope**: single declarative manifest change (4 keys added) + dual-accumulate release
 notes (packages/vscode/CHANGELOG.md `[Unreleased]` + docs/releases/UNRELEASED.md Polish).
