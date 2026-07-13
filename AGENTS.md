@@ -376,7 +376,7 @@ Codev provides five CLI tools. For complete reference documentation, see:
 
 ## Runnable Worktrees
 
-When configured, each builder worktree (`.builders/<id>/`) becomes runnable — reviewers can spin up a dev server against the builder's branch without `cd`'ing, manually installing, or finding the right command. Opt-in via `.codev/config.json`; unconfigured repos see zero behavior change.
+When configured, each builder worktree (`.builders/<id>/`) becomes runnable — reviewers can run whatever your dev command starts against the builder's branch — a dev server, `cargo run`, `expo start`, a test watcher, a build script, whatever iterates on your project — without `cd`'ing, manually installing, or finding the right command. Opt-in via `.codev/config.json`; unconfigured repos see zero behavior change.
 
 ### Config: the `worktree` block
 
@@ -392,15 +392,15 @@ When configured, each builder worktree (`.builders/<id>/`) becomes runnable — 
 
 - `symlinks`: globs resolve from the workspace root; matches symlink into the worktree at the same relative path. Root `.env` and `.codev/config.json` are *always* symlinked regardless. **Symlinks, not copies** — edits to main's env files reflect instantly in any running dev session. A directory match is silently skipped (so a glob can't mask the worktree's own source) **unless** the entry ends with a trailing slash: `".local-user-data/"` is treated as a literal path and symlinks the directory whole (shared with the parent, not branch-isolated; a dangling link is fine if the source doesn't exist yet).
 - `postSpawn`: each command runs sequentially with `cwd` = worktree path. Non-zero exit aborts the spawn loud (half-built worktree stays for inspection).
-- `devCommand`: the foreground command that starts your dev server. Required for `afx dev` to work.
+- `devCommand`: the foreground command that starts your dev process (a server, a watcher, `cargo run`, `expo start`, a build script — whatever iterates on your project). Required for `afx dev` to work.
 
 **Codev does not auto-detect your stack.** Pick the recipe below that matches your toolchain.
 
 ### CLI
 
 ```bash
-afx dev <builder-id>     # start the dev server in <builder-id>'s worktree
-afx dev main             # start the dev server in the MAIN workspace (Codev-managed)
+afx dev <builder-id>     # start dev in <builder-id>'s worktree
+afx dev main             # start dev in the MAIN workspace (Codev-managed)
 afx dev --stop           # stop the currently running dev PTY (builder or main)
 ```
 
@@ -416,19 +416,19 @@ The same actions are available via right-click on any builder row in the Codev s
 - **Codev: Open Worktree Folder** — opens `.builders/<id>/` in the OS file manager (Finder on macOS, Explorer on Windows, xdg-open on Linux).
 - **Codev: Run Worktree Setup** — applies the configured `worktree.symlinks` and runs the `worktree.postSpawn` commands against the existing worktree (mirrors what spawn does, minus the git steps). Idempotent: existing symlinks are skipped, missing ones added. Useful when the lockfile changed (reinstall deps), `symlinks` or `postSpawn` was extended after the builder spawned, a symlink was accidentally deleted, or the original setup aborted mid-run. Opens a fresh VSCode terminal so install output streams live. Available via CLI too: `afx setup <builder-id>`.
 - **Codev: View Diff** — opens a single unified diff editor for `main...HEAD` of that builder's worktree, with a file-list pane on the left (matches VSCode's built-in Source Control "Working Tree" view). Status icons indicate added / modified / deleted. Empty diff → friendly toast.
-- **Codev: Run Dev Server** — reads `worktree.devCommand` from `.codev/config.json`, asks Tower to spawn a dev PTY in the builder's worktree, and opens it as a VSCode terminal tab named `Codev: <name> (dev)`. If another builder's dev is already running, you get a modal asking whether to swap.
-- **Codev: Stop Dev Server** — kills the running dev PTY and closes its tab.
+- **Codev: Run Dev** — reads `worktree.devCommand` from `.codev/config.json`, asks Tower to spawn a dev PTY in the builder's worktree, and opens it as a VSCode terminal tab named `Codev: <name> (dev)`. If another builder's dev is already running, you get a modal asking whether to swap.
+- **Codev: Stop Dev** — kills the running dev PTY and closes its tab.
 
-The Codev sidebar's **Workspace** view also carries a dev server for *whatever folder this VSCode window is rooted at* (it is not "main"-specific):
+The Codev sidebar's **Workspace** view also carries a dev control for *whatever folder this VSCode window is rooted at* (it is not "main"-specific):
 
-- **Start Dev Server** — runs `worktree.devCommand` for the current workspace. Target is resolved from the open folder: the main checkout → `main`; a `.builders/<id>/` worktree opened as its own window (e.g. via *Open Worktree as Workspace*) → that builder. Same single-slot swap model as builder dev (prompts if another dev is running). The row tooltip names the resolved target.
-- **Stop Dev Server** — stops this workspace's dev server; the row appears only while it is running. Scoped to the resolved target — it does not touch other devs.
+- **Start Dev** — runs `worktree.devCommand` for the current workspace. Target is resolved from the open folder: the main checkout → `main`; a `.builders/<id>/` worktree opened as its own window (e.g. via *Open Worktree as Workspace*) → that builder. Same single-slot swap model as builder dev (prompts if another dev is running). The row tooltip names the resolved target.
+- **Stop Dev** — stops this workspace's dev; the row appears only while it is running. Scoped to the resolved target — it does not touch other devs.
 
 The three commands are also available from the command palette (Cmd+Shift+P). No default keybindings; bind via `keybindings.json` if you use them often.
 
 ### URLs are load-bearing
 
-The dev PTY uses **the same ports and URLs as main** intentionally. OAuth callbacks, CORS allowlists, cookie scoping, CSP `connect-src`, webhook URLs are all keyed off origin — running the worktree on a different port would break them. Consequence: stop main's `pnpm dev` before `afx dev`. If you don't, the spawned dev fails at bind time with its own `EADDRINUSE`. Prefer `afx dev main` (or the Workspace view's *Start Dev Server* row) over a hand-run `pnpm dev` so Codev owns the PTY and swap-detection can stop it for you automatically.
+The dev PTY uses **the same ports and URLs as main** intentionally. OAuth callbacks, CORS allowlists, cookie scoping, CSP `connect-src`, webhook URLs are all keyed off origin — running the worktree on a different port would break them. Consequence: stop main's `pnpm dev` before `afx dev`. If you don't, the spawned dev fails at bind time with its own `EADDRINUSE`. Prefer `afx dev main` (or the Workspace view's *Start Dev* row) over a hand-run `pnpm dev` so Codev owns the PTY and swap-detection can stop it for you automatically.
 
 ### Cleanup semantics
 

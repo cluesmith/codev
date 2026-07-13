@@ -48,7 +48,7 @@ const VERB_COMMANDS: Record<string, string> = {
   // Viewport scroll of the focused editor (the Scroll dial). Args carry the
   // built-in editorScroll options { to, by, value, revealCursor }.
   'scroll': 'editorScroll',
-  // Workspace verbs (configurable Codev Action key / Dev Server key).
+  // Workspace verbs (configurable Codev Action key / Dev key).
   'focus-workspace': 'codev.focusWorkspaceWindow',
   'open-architect-terminal': 'codev.openArchitectTerminal',
   'open-builder-terminal': 'codev.openBuilderTerminal',

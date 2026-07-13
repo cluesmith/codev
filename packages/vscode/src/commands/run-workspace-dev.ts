@@ -1,5 +1,5 @@
 /**
- * Codev: Start / Stop Dev Server (Workspace view) — runs the dev server for
+ * Codev: Start / Stop Dev (Workspace view) — runs the dev for
  * whatever folder *this VSCode window is rooted at*. Not "main"-specific:
  *
  *   - window opened on the main checkout      → target `main`, cwd = root

@@ -135,7 +135,7 @@ describe('#804 — builder/shell terminals do not force-create a second editor g
 describe('#921 — dev surface refresh on manual terminal close', () => {
   // Regression guard: a dev terminal closed via the generic onDidCloseTerminal
   // path (tab ✕ / process exit) must clear devStartedAt AND re-fire
-  // onDidChangeDevTerminals, or the chip / Codev Dev tab / devServerRunning
+  // onDidChangeDevTerminals, or the chip / Codev Dev tab / devRunning
   // context strand as "running". The explicit close paths fired the event; the
   // generic path previously only unmapped. Source-level per this file's harness
   // rationale (constructing TerminalManager needs heavy vscode mocking).

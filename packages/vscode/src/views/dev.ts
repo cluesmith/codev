@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import type { ConnectionManager } from '../connection-manager.js';
 import type { TerminalManager } from '../terminal-manager.js';
 import { loadWorktreeConfig } from '../load-worktree-config.js';
-import { formatUptime, extractDevPort, formatTargetName } from './dev-server-format.js';
+import { formatUptime, extractDevPort, formatTargetName } from './dev-format.js';
 
 /**
  * The "Codev Dev" panel tab (#921). A status surface for the single `afx dev`
@@ -16,7 +16,7 @@ import { formatUptime, extractDevPort, formatTargetName } from './dev-server-for
  * at most one dev). We re-derive on every `onDidChangeDevTerminals` and keep a
  * 1s ticker running while a dev is up so the uptime row stays live.
  */
-export class DevServerTreeProvider implements vscode.TreeDataProvider<vscode.TreeItem> {
+export class DevTreeProvider implements vscode.TreeDataProvider<vscode.TreeItem> {
   private readonly _onDidChangeTreeData = new vscode.EventEmitter<void>();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
@@ -37,7 +37,7 @@ export class DevServerTreeProvider implements vscode.TreeDataProvider<vscode.Tre
     this.onDevTerminalsChanged(); // seed from any dev already running at activation
   }
 
-  /** True iff a dev is currently running — drives the `codev.devServerRunning` context key. */
+  /** True iff a dev is currently running — drives the `codev.devRunning` context key. */
   isRunning(): boolean {
     return this.running !== null;
   }

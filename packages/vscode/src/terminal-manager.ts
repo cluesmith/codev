@@ -303,12 +303,12 @@ export class TerminalManager {
   }
 
   /**
-   * Open a dev-server terminal for a builder's worktree (#690).
+   * Open a dev terminal for a builder's worktree (#690).
    * Keyed `dev-<builderId>` so it lives alongside (not on top of) the
    * builder's own AI terminal at `builder-<id>`. Tab label is set by the
    * caller (server-side `'Dev: <id>'` flows through Tower's terminal name).
    *
-   * `focus` defaults to true — `afx dev` / "Run Dev Server" are explicit
+   * `focus` defaults to true — `afx dev` / "Run Dev" are explicit
    * user actions, so activate the tab so they see the spawning output.
    */
   async openDevTerminal(terminalId: string, builderId: string, builderName: string, focus = true): Promise<void> {
@@ -344,7 +344,7 @@ export class TerminalManager {
   }
 
   /**
-   * Dispose the VSCode terminal tab for a builder's dev server, if any.
+   * Dispose the VSCode terminal tab for a builder's dev, if any.
    * Used by `codev.stopWorktreeDev` after killing the Tower-side PTY so the
    * user doesn't see a dead "Process exited" tab lingering.
    */
@@ -361,7 +361,7 @@ export class TerminalManager {
 
   /**
    * Dispose the VSCode terminal tabs for a builder — both the AI terminal
-   * and any companion dev-server terminal — after the builder has been
+   * and any companion dev terminal — after the builder has been
    * cleaned up. Tower kills the PTYs as part of cleanup, so without this
    * the user sees a stale "Process exited" tab until they close it
    * manually. Accepts the canonical builder roleId (e.g. `builder-spir-109`),
@@ -521,7 +521,7 @@ export class TerminalManager {
       // exiting) must refresh the dev surfaces (#921) too — the explicit
       // closeDevTerminal/closeBuilderTerminal paths fire the event, but a manual
       // close reaches only here, which previously just unmapped and left the
-      // chip / tab / `codev.devServerRunning` stranded as "running". Guarded by
+      // chip / tab / `codev.devRunning` stranded as "running". Guarded by
       // `wasTracked` so the explicit-close path (which deletes first, then
       // dispose()s the terminal) doesn't double-fire.
       if (wasTracked && mapKey.startsWith('dev-')) {

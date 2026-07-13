@@ -1,5 +1,5 @@
 /**
- * Codev: Run Dev Server — start a Tower-managed dev PTY for a builder's
+ * Codev: Run Dev — start a Tower-managed dev PTY for a builder's
  * worktree. Right-click a builder row (or palette quick-pick) resolves the
  * builder from Tower's overview, then delegates to the shared dev core
  * (dev-shared.ts), which handles the devCommand read, swap, spawn, and tab

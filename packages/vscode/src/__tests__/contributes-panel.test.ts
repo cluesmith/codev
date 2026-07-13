@@ -7,9 +7,9 @@
  * - the existing sidebar views are unchanged (regression guard);
  * - extension.ts wires the placeholder provider and the context key.
  *
- * Note: once #921 added the real `codev.devServer` view, the panel is no longer
+ * Note: once #921 added the real `codev.dev` view, the panel is no longer
  * empty — the context key is seeded `false` and a second view is present. Those
- * invariants are covered in contributes-dev-server.test.ts; this file keeps the
+ * invariants are covered in contributes-dev.test.ts; this file keeps the
  * #812 scaffolding guards (placeholder shape, sidebar regression).
  */
 

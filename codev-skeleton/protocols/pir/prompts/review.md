@@ -75,7 +75,7 @@ Tricky spots the PR reviewer should focus on. Honest — if a section was hard t
 For reviewers pulling the branch:
 
 - **View diff**: VSCode sidebar → right-click builder pir-{{project_id}} → **Review Diff** (auto-detects the repo's default branch)
-- **Run dev server**: VSCode sidebar → **Run Dev Server**, or `afx dev pir-{{project_id}}`
+- **Run dev**: VSCode sidebar → **Run Dev**, or `afx dev pir-{{project_id}}`
 - **What to verify**: <bullet list mapped to the plan's Test Plan>
 
 ## Flaky Tests (if any)

@@ -42,7 +42,7 @@ export async function loadWorktreeConfig(
  * is reachable and must be treated as absent, not present-but-disabled.
  *
  * Single source of truth for two surfaces: the `codev.hasDevCommand`
- * context key (gates the builder-row Run/Stop Dev Server menu) and the
+ * context key (gates the builder-row Run/Stop Dev menu) and the
  * Workspace view's Start-row visibility. Keeping both on this helper
  * guarantees they agree on every config state.
  */

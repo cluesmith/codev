@@ -125,9 +125,9 @@ describe('commandPalette hiding for view{Spec,Plan,Review}File', () => {
 });
 
 /**
- * `codev.hasDevCommand` gating for the dev-server commands (#975).
+ * `codev.hasDevCommand` gating for the dev commands (#975).
  *
- * The builder-row Run/Stop Dev Server context-menu entries must only
+ * The builder-row Run/Stop Dev context-menu entries must only
  * surface when a runnable `worktree.devCommand` is configured. Previously
  * they gated on view + viewItem family only, so they showed even with no
  * dev command — picking one ran against a missing command. The fix appends
@@ -144,7 +144,7 @@ describe('commandPalette hiding for view{Spec,Plan,Review}File', () => {
  * silently re-expose a command that can't run — no compile/runtime error
  * would catch it.
  */
-describe('codev.hasDevCommand gating for dev-server commands', () => {
+describe('codev.hasDevCommand gating for dev commands', () => {
   const paletteEntries: Array<{ command: string; when?: string }> =
     PKG.contributes.menus.commandPalette;
   const keybindings: Array<{ command: string; when?: string }> =

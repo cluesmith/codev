@@ -17,7 +17,7 @@ import {
 } from './dev-shared.js';
 
 /** Stop the running dev. Single-slot, so this is the one dev in the registry. */
-export async function stopDevServer(
+export async function stopDev(
   connectionManager: ConnectionManager,
   terminalManager: TerminalManager,
 ): Promise<void> {
@@ -25,13 +25,13 @@ export async function stopDevServer(
 }
 
 /** Stop and respawn the dev for whatever target is currently running. */
-export async function restartDevServer(
+export async function restartDev(
   connectionManager: ConnectionManager,
   terminalManager: TerminalManager,
 ): Promise<void> {
   const running = terminalManager.listDevTerminals()[0];
   if (!running) {
-    vscode.window.showInformationMessage('Codev: No dev server is running');
+    vscode.window.showInformationMessage('Codev: No dev is running');
     return;
   }
   const target = await resolveDevTargetById(connectionManager, running.builderId);
@@ -67,7 +67,7 @@ export async function switchDevTarget(
 }
 
 /**
- * Open the Codev sidebar and focus the Workspace view, where the Dev Server row
+ * Open the Codev sidebar and focus the Workspace view, where the Dev row
  * lives. Paired with `hideCodevSidebar` to form a show/hide toggle on the tab's
  * title bar (the two `view/title` entries swap on the sidebar-visibility context
  * keys, mirroring the Backlog view's show-all / mine-only toggle).

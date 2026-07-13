@@ -83,10 +83,10 @@ The builder:
 
 **The reviewer's killer move**: run the worktree locally.
 
-- VSCode: right-click the builder in the Codev sidebar → **Run Dev Server** (spawns `afx dev <builder-id>` via Tower)
+- VSCode: right-click the builder in the Codev sidebar → **Run Dev** (spawns `afx dev <builder-id>` via Tower)
 - CLI: `afx dev <builder-id>`
 
-The dev server uses **the same ports and URLs as main** intentionally (OAuth callbacks, CORS, cookie scoping all depend on consistent origins). Only one dev env runs at a time; stop main's `pnpm dev` before starting the worktree's, or use VSCode's **Stop Dev Server** to swap.
+The dev process uses **the same ports and URLs as main** intentionally (OAuth callbacks, CORS, cookie scoping all depend on consistent origins). Only one dev env runs at a time; stop main's `pnpm dev` before starting the worktree's, or use VSCode's **Stop Dev** to swap.
 
 Reviewer tests the change on real devices / browsers / simulators. When satisfied, approves via Cmd+K G or:
 

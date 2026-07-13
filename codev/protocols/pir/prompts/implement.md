@@ -121,7 +121,7 @@ When the gate goes pending, output a short prose summary in the pane to orient t
 >
 > **Things to look at**: tricky spots, platform-specific behavior, anything you want the reviewer to focus on.
 >
-> **How to test locally**: VSCode → right-click builder → **Run Dev Server**, or `afx dev pir-{{project_id}}`. View diff via VSCode → **View Diff** (auto-detects the repo's default branch).
+> **How to test locally**: VSCode → right-click builder → **Run Dev**, or `afx dev pir-{{project_id}}`. View diff via VSCode → **View Diff** (auto-detects the repo's default branch).
 >
 > Ready for review — type feedback here, or approve with `porch approve {{project_id}} dev-approval --a-human-explicitly-approved-this` (Cmd+K G in VSCode).
 

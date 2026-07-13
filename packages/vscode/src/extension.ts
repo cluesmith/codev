@@ -18,7 +18,7 @@ import { buildBuilderRangeRef, buildBuilderFileRef } from './diff-inject-ref.js'
 import { runWorktreeDev } from './commands/run-worktree-dev.js';
 import { stopWorktreeDev } from './commands/stop-worktree-dev.js';
 import { runWorkspaceDev, stopWorkspaceDev } from './commands/run-workspace-dev.js';
-import { stopDevServer, restartDevServer, switchDevTarget, showCodevSidebar, hideCodevSidebar } from './commands/dev-server-actions.js';
+import { stopDev, restartDev, switchDevTarget, showCodevSidebar, hideCodevSidebar } from './commands/dev-actions.js';
 import { openDevUrl } from './commands/open-dev-url.js';
 import { pasteImage } from './commands/paste-image.js';
 import { openWorktreeFolder } from './commands/open-worktree-folder.js';
@@ -49,8 +49,8 @@ import { RecentlyClosedProvider } from './views/recently-closed.js';
 import { TeamProvider } from './views/team.js';
 import { StatusProvider } from './views/status.js';
 import { PanelPlaceholderProvider } from './views/panel-placeholder.js';
-import { DevServerTreeProvider } from './views/dev-server.js';
-import { formatTargetName } from './views/dev-server-format.js';
+import { DevTreeProvider } from './views/dev.js';
+import { formatTargetName } from './views/dev-format.js';
 import { WorkspaceProvider } from './views/workspace.js';
 import { displayArchitectName, sortArchitectsForPicker } from './views/architect-display.js';
 import { validateArchitectName } from '@cluesmith/codev-core/architect-name';
@@ -297,7 +297,7 @@ export async function activate(context: vscode.ExtensionContext) {
 		// the async hook fetch and publish into an empty cache.
 
 	// Drive the `codev.hasDevCommand` context key so the builder-row Run/Stop
-	// Dev Server menu entries, the dev keybindings, and the workspace-dev palette
+	// Dev menu entries, the dev keybindings, and the workspace-dev palette
 	// entries only surface when a runnable `worktree.devCommand` is configured
 	// (#975). These surfaces are global (the keybindings/palette are invokable
 	// regardless of whether the Builders tree has rendered), so the key is
@@ -509,8 +509,8 @@ export async function activate(context: vscode.ExtensionContext) {
 	// Codev Dev panel tab (#921) — the first real view in #812's codevPanel.
 	// createTreeView (not registerTreeDataProvider) so we hold the handle and can
 	// set TreeView.badge — the activity dot the plan calls for while a dev runs.
-	const devServerProvider = new DevServerTreeProvider(connectionManager, terminalManager!);
-	const devServerView = vscode.window.createTreeView('codev.devServer', { treeDataProvider: devServerProvider });
+	const devProvider = new DevTreeProvider(connectionManager, terminalManager!);
+	const devView = vscode.window.createTreeView('codev.dev', { treeDataProvider: devProvider });
 	context.subscriptions.push(
 		buildersView,
 		pullRequestsView,
@@ -520,12 +520,12 @@ export async function activate(context: vscode.ExtensionContext) {
 		vscode.window.registerTreeDataProvider('codev.team', teamProvider),
 		vscode.window.registerTreeDataProvider('codev.status', statusProvider),
 		vscode.window.registerTreeDataProvider('codev.placeholder', new PanelPlaceholderProvider()),
-		devServerView,
-		{ dispose: () => devServerProvider.dispose() },
+		devView,
+		{ dispose: () => devProvider.dispose() },
 	);
 
 	// Panel container (#812) ships a placeholder signpost gated by
-	// `codev.panelContainerEmpty`. codev.devServer (#921) is a real, always-present
+	// `codev.panelContainerEmpty`. codev.dev (#921) is a real, always-present
 	// panel view, so the container is never empty — flip the key false to hide the
 	// signpost. (Sibling tabs #813/#814/#815 set the same key; idempotent.)
 	vscode.commands.executeCommand('setContext', 'codev.panelContainerEmpty', false);
@@ -538,15 +538,15 @@ export async function activate(context: vscode.ExtensionContext) {
 		if (target) {
 			if (!devChipItem) {
 				devChipItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 99);
-				devChipItem.command = 'codev.devServer.focus'; // VSCode's auto view-focus command
+				devChipItem.command = 'codev.dev.focus'; // VSCode's auto view-focus command
 			}
-			// server-process (a running dev server), not zap — $(zap) reads as AI/sparkle in VSCode.
+			// server-process (a running dev), not zap — $(zap) reads as AI/sparkle in VSCode.
 			devChipItem.text = `$(server-process) Dev: ${target}`;
 			// StatusBarItem.backgroundColor only honors error/warning backgrounds
 			// (VSCode API constraint), so the "prominent, not alarming" look
 			// (#921 design call #4) is applied via the foreground instead.
 			devChipItem.color = new vscode.ThemeColor('statusBarItem.prominentForeground');
-			devChipItem.tooltip = `Codev dev server running for ${target}. Click to focus Codev Dev panel`;
+			devChipItem.tooltip = `Codev dev running for ${target}. Click to focus Codev Dev panel`;
 			devChipItem.show();
 		} else if (devChipItem) {
 			devChipItem.dispose();
@@ -557,11 +557,11 @@ export async function activate(context: vscode.ExtensionContext) {
 		const builderId = terminalManager?.listDevTerminals()[0]?.builderId ?? null;
 		const target = builderId ? formatTargetName(builderId) : null;
 		updateDevChip(target);
-		vscode.commands.executeCommand('setContext', 'codev.devServerRunning', target !== null);
+		vscode.commands.executeCommand('setContext', 'codev.devRunning', target !== null);
 		// Activity dot on the Codev Dev tab while a dev runs — visible when the
 		// user is on another codevPanel tab (plan's tab-badge requirement).
-		devServerView.badge = target
-			? { value: 1, tooltip: `Dev server running for ${target}` }
+		devView.badge = target
+			? { value: 1, tooltip: `Dev running for ${target}` }
 			: undefined;
 	};
 	context.subscriptions.push(
@@ -1228,15 +1228,15 @@ export async function activate(context: vscode.ExtensionContext) {
 			runWorkspaceDev(connectionManager!, terminalManager!)),
 		regCli('codev.stopWorkspaceDev', () =>
 			stopWorkspaceDev(connectionManager!, terminalManager!)),
-		regCli('codev.devServer.stop', () =>
-			stopDevServer(connectionManager!, terminalManager!)),
-		regCli('codev.devServer.restart', () =>
-			restartDevServer(connectionManager!, terminalManager!)),
-		regCli('codev.devServer.switchTarget', () =>
+		regCli('codev.dev.stop', () =>
+			stopDev(connectionManager!, terminalManager!)),
+		regCli('codev.dev.restart', () =>
+			restartDev(connectionManager!, terminalManager!)),
+		regCli('codev.dev.switchTarget', () =>
 			switchDevTarget(connectionManager!, terminalManager!)),
-		reg('codev.devServer.showSidebar', () =>
+		reg('codev.dev.showSidebar', () =>
 			showCodevSidebar()),
-		reg('codev.devServer.hideSidebar', () =>
+		reg('codev.dev.hideSidebar', () =>
 			hideCodevSidebar()),
 		reg('codev.openDevUrl', (urlArg?: unknown) =>
 			openDevUrl(connectionManager!, typeof urlArg === 'string' ? urlArg : undefined)),

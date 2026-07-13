@@ -1,5 +1,5 @@
 /**
- * Shared core for Codev dev-server commands. There is exactly one underlying
+ * Shared core for Codev dev commands. There is exactly one underlying
  * action — "spawn a Tower dev PTY for a {id, cwd} target and open its tab" —
  * with two front-ends that differ only in how they resolve the target:
  *
@@ -243,7 +243,7 @@ export async function stopDevForTarget(
   }
   const found = terminalManager.listDevTerminals().find(d => d.builderId === targetId);
   if (!found) {
-    vscode.window.showInformationMessage(`Codev: No dev server is running for ${name}`);
+    vscode.window.showInformationMessage(`Codev: No dev is running for ${name}`);
     return;
   }
   await client.killTerminal(found.terminalId);

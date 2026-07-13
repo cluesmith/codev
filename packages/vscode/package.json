@@ -250,46 +250,46 @@
       },
       {
         "command": "codev.runWorktreeDev",
-        "title": "Codev: Run Dev Server"
+        "title": "Codev: Run Dev"
       },
       {
         "command": "codev.stopWorktreeDev",
-        "title": "Codev: Stop Dev Server"
+        "title": "Codev: Stop Dev"
       },
       {
         "command": "codev.runWorkspaceDev",
-        "title": "Codev: Start Dev Server (this workspace)"
+        "title": "Codev: Start Dev (this workspace)"
       },
       {
         "command": "codev.stopWorkspaceDev",
-        "title": "Codev: Stop Dev Server (this workspace)"
+        "title": "Codev: Stop Dev (this workspace)"
       },
       {
-        "command": "codev.devServer.stop",
-        "title": "Stop Dev Server",
+        "command": "codev.dev.stop",
+        "title": "Stop Dev",
         "category": "Codev",
         "icon": "$(debug-stop)"
       },
       {
-        "command": "codev.devServer.restart",
-        "title": "Restart Dev Server",
+        "command": "codev.dev.restart",
+        "title": "Restart Dev",
         "category": "Codev",
         "icon": "$(debug-restart)"
       },
       {
-        "command": "codev.devServer.switchTarget",
+        "command": "codev.dev.switchTarget",
         "title": "Switch Target",
         "category": "Codev",
         "icon": "$(arrow-swap)"
       },
       {
-        "command": "codev.devServer.showSidebar",
+        "command": "codev.dev.showSidebar",
         "title": "Show Codev Sidebar",
         "category": "Codev",
         "icon": "$(eye)"
       },
       {
-        "command": "codev.devServer.hideSidebar",
+        "command": "codev.dev.hideSidebar",
         "title": "Hide Codev Sidebar",
         "category": "Codev",
         "icon": "$(eye-closed)"
@@ -484,23 +484,23 @@
           "when": "false"
         },
         {
-          "command": "codev.devServer.stop",
-          "when": "codev.devServerRunning"
+          "command": "codev.dev.stop",
+          "when": "codev.devRunning"
         },
         {
-          "command": "codev.devServer.restart",
-          "when": "codev.devServerRunning"
+          "command": "codev.dev.restart",
+          "when": "codev.devRunning"
         },
         {
-          "command": "codev.devServer.switchTarget",
+          "command": "codev.dev.switchTarget",
           "when": "codev.hasDevCommand"
         },
         {
-          "command": "codev.devServer.showSidebar",
+          "command": "codev.dev.showSidebar",
           "when": "false"
         },
         {
-          "command": "codev.devServer.hideSidebar",
+          "command": "codev.dev.hideSidebar",
           "when": "false"
         }
       ],
@@ -710,28 +710,28 @@
           "group": "navigation"
         },
         {
-          "command": "codev.devServer.stop",
-          "when": "view == codev.devServer && codev.devServerRunning",
+          "command": "codev.dev.stop",
+          "when": "view == codev.dev && codev.devRunning",
           "group": "navigation@1"
         },
         {
-          "command": "codev.devServer.restart",
-          "when": "view == codev.devServer && codev.devServerRunning",
+          "command": "codev.dev.restart",
+          "when": "view == codev.dev && codev.devRunning",
           "group": "navigation@2"
         },
         {
-          "command": "codev.devServer.switchTarget",
-          "when": "view == codev.devServer",
+          "command": "codev.dev.switchTarget",
+          "when": "view == codev.dev",
           "group": "navigation@3"
         },
         {
-          "command": "codev.devServer.showSidebar",
-          "when": "view == codev.devServer && !(sideBarVisible && activeViewlet == 'workbench.view.extension.codev')",
+          "command": "codev.dev.showSidebar",
+          "when": "view == codev.dev && !(sideBarVisible && activeViewlet == 'workbench.view.extension.codev')",
           "group": "navigation@4"
         },
         {
-          "command": "codev.devServer.hideSidebar",
-          "when": "view == codev.devServer && sideBarVisible && activeViewlet == 'workbench.view.extension.codev'",
+          "command": "codev.dev.hideSidebar",
+          "when": "view == codev.dev && sideBarVisible && activeViewlet == 'workbench.view.extension.codev'",
           "group": "navigation@4"
         }
       ],
@@ -871,7 +871,7 @@
       ],
       "codevPanel": [
         { "id": "codev.placeholder", "name": "Codev", "when": "codev.panelContainerEmpty", "visibility": "collapsed" },
-        { "id": "codev.devServer", "name": "Codev Dev" }
+        { "id": "codev.dev", "name": "Codev Dev" }
       ]
     },
     "viewsWelcome": [

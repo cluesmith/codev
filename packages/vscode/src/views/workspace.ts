@@ -132,7 +132,7 @@ export class WorkspaceProvider implements vscode.TreeDataProvider<vscode.TreeIte
     const devTarget = workspacePath ? resolveWorkspaceDevTarget(workspacePath) : null;
 
     // Resolved worktree config (Tower-merged across all 5 layers). One
-    // fetch drives both the dev-server row's visibility (gated on
+    // fetch drives both the dev row's visibility (gated on
     // devCommand presence) and the Open Dev URL row(s) below.
     const worktreeConfig = await loadWorktreeConfig(this.connectionManager);
     const devCommand = worktreeConfig?.devCommand ?? null;
@@ -162,13 +162,13 @@ export class WorkspaceProvider implements vscode.TreeDataProvider<vscode.TreeIte
 
     if (targetDev) {
       // This workspace's own dev is the running one. Today's Stop row.
-      const stopDev = new vscode.TreeItem('Stop Dev Server');
+      const stopDev = new vscode.TreeItem('Stop Dev');
       stopDev.iconPath = new vscode.ThemeIcon('debug-stop');
-      stopDev.tooltip = `Stop the dev server for this workspace (target: ${devTarget!.id})`;
+      stopDev.tooltip = `Stop the dev for this workspace (target: ${devTarget!.id})`;
       stopDev.contextValue = 'workspace-dev-stop';
       stopDev.command = {
         command: 'codev.stopWorkspaceDev',
-        title: 'Stop Dev Server',
+        title: 'Stop Dev',
       };
       items.push(stopDev);
     } else if (otherDev) {
@@ -177,18 +177,18 @@ export class WorkspaceProvider implements vscode.TreeDataProvider<vscode.TreeIte
       // through codev.stopWorktreeDev which targets the dev slot directly
       // (kills every dev in the local registry; single-slot invariant
       // means that's exactly the one running).
-      const stopDev = new vscode.TreeItem('Stop Dev Server');
+      const stopDev = new vscode.TreeItem('Stop Dev');
       stopDev.iconPath = new vscode.ThemeIcon('debug-stop');
-      stopDev.tooltip = `Stop the dev server (currently running for ${otherDev.builderId})`;
+      stopDev.tooltip = `Stop the dev (currently running for ${otherDev.builderId})`;
       stopDev.contextValue = 'workspace-dev-stop-other';
       stopDev.command = {
         command: 'codev.stopWorktreeDev',
-        title: 'Stop Dev Server',
+        title: 'Stop Dev',
       };
       items.push(stopDev);
     } else if (hasRunnableDevCommand(worktreeConfig)) {
       // No dev anywhere AND a runnable devCommand is configured — Start row.
-      const startDev = new vscode.TreeItem('Start Dev Server');
+      const startDev = new vscode.TreeItem('Start Dev');
       startDev.iconPath = new vscode.ThemeIcon('play');
       startDev.tooltip = devTarget
         ? `Run worktree.devCommand (\`${devCommand}\`) for this workspace (target: ${devTarget.id})`
@@ -196,11 +196,11 @@ export class WorkspaceProvider implements vscode.TreeDataProvider<vscode.TreeIte
       startDev.contextValue = 'workspace-dev-start';
       startDev.command = {
         command: 'codev.runWorkspaceDev',
-        title: 'Start Dev Server',
+        title: 'Start Dev',
       };
       items.push(startDev);
     }
-    // else: no dev running and no runnable devCommand → no dev-server row at all.
+    // else: no dev running and no runnable devCommand → no dev row at all.
 
     // Open Dev URL rows: one per entry in `worktree.devUrls`. Visible
     // independent of dev-PTY

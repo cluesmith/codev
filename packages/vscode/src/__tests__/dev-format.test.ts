@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatUptime, extractDevPort, formatTargetName } from '../views/dev-server-format.js';
+import { formatUptime, extractDevPort, formatTargetName } from '../views/dev-format.js';
 
 describe('formatUptime', () => {
   it('renders sub-minute durations as seconds', () => {

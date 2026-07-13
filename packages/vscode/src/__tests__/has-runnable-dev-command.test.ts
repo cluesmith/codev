@@ -3,7 +3,7 @@
  *
  * This helper is the single source of truth for "is there a runnable
  * worktree.devCommand" across two surfaces: the `codev.hasDevCommand`
- * context key (gates the builder-row Run/Stop Dev Server menu) and the
+ * context key (gates the builder-row Run/Stop Dev menu) and the
  * Workspace view's Start-row visibility. The critical case is the empty
  * string: `ResolvedWorktreeConfig.devCommand` is typed `string | null`, so
  * `""` is reachable, and it must be treated as absent (matching

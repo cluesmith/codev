@@ -1,5 +1,5 @@
 /**
- * Codev: Stop Dev Server — kill the currently running Codev-managed dev PTY.
+ * Codev: Stop Dev — kill the currently running Codev-managed dev PTY.
  *
  * Counterpart to `codev.runWorktreeDev`. Asks TerminalManager which dev
  * terminals it has open (its local map is the source of truth — see
@@ -24,7 +24,7 @@ export async function stopWorktreeDev(
 
   const devs = terminalManager.listDevTerminals();
   if (devs.length === 0) {
-    vscode.window.showInformationMessage('Codev: No dev server is running');
+    vscode.window.showInformationMessage('Codev: No dev is running');
     return;
   }
 
@@ -35,6 +35,6 @@ export async function stopWorktreeDev(
 
   const summary = devs.length === 1
     ? `Codev: Dev server stopped for ${devs[0]!.builderId}`
-    : `Codev: Stopped ${devs.length} dev servers`;
+    : `Codev: Stopped ${devs.length} devs`;
   vscode.window.showInformationMessage(summary);
 }
