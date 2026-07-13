@@ -31,6 +31,6 @@ export class AreaGroupTreeItem extends vscode.TreeItem {
   ) {
     super(`${uppercaseAreaName(groupName)} (${count})`, collapsibleState);
     this.id = `${kind}-group:${groupName}`;
-    this.contextValue = `${kind}-group`;
+    this.contextValue = `group-${kind}`;
   }
 }
