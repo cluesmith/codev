@@ -282,7 +282,13 @@ export class BuildersProvider implements vscode.TreeDataProvider<vscode.TreeItem
 
     const now = Date.now();
     const grouping = this.active();
-    const groups = grouping.group(orderForDisplay(data.builders, now));
+    // The registered-architect roster (live sessions, main-first) — sourced from
+    // the overview cache the provider already holds, no second fetch. Only the
+    // architect axis consumes it, to emit a header for every architect including
+    // childless ones (Issue 1174); the other axes ignore the arg. Guard `??` for
+    // a pre-roster overview payload so `.map` never throws.
+    const roster = (data.architects ?? []).map(a => a.name);
+    const groups = grouping.group(orderForDisplay(data.builders, now), roster);
 
     // A repo that doesn't use `area/*` labels yields a single `Uncategorized`
     // group; in area mode its header adds no information, so flatten to root rows
@@ -292,9 +298,10 @@ export class BuildersProvider implements vscode.TreeDataProvider<vscode.TreeItem
       return groups[0].items.map(b => this.makeBuilderRow(b, now));
     }
 
-    // Groups always render Expanded (#913) — no persisted state. VSCode's
+    // Populated groups render Expanded (#913) — no persisted state. VSCode's
     // native per-id memory keeps a user-collapsed group collapsed for the
     // rest of the session; on a fresh session this default applies again.
+    // Childless architect groups (Issue 1174) render as leaf-like rows (`None`).
     //
     // Architect-axis headers get a click-to-open-terminal `command` (#1108):
     // the architect is first-class in this mode, so its header should match the
@@ -306,10 +313,18 @@ export class BuildersProvider implements vscode.TreeDataProvider<vscode.TreeItem
     // already accepts; it warns gracefully on a stale owner not in the roster.
     const isArchitectAxis = grouping.id === 'architect';
     return groups.map(g => {
+      // A childless architect group (Issue 1174) has no builders to expand into,
+      // so render it as a leaf-like row (`None`) rather than an empty accordion.
+      // The click-to-open-terminal command below still fires on the row body.
+      // Populated groups stay Expanded (#913). Only the architect axis ever
+      // yields an empty group; stage/area groups always hold ≥1 builder.
+      const collapsibleState = g.items.length === 0
+        ? vscode.TreeItemCollapsibleState.None
+        : vscode.TreeItemCollapsibleState.Expanded;
       const groupItem = new BuilderGroupTreeItem(
         g.key,
         g.items.length,
-        vscode.TreeItemCollapsibleState.Expanded,
+        collapsibleState,
         rollupGroupState(g.items, now),
       );
       if (isArchitectAxis) {
@@ -332,7 +347,8 @@ export class BuildersProvider implements vscode.TreeDataProvider<vscode.TreeItem
 
     const now = Date.now();
     const ordered = orderForDisplay(data.builders, now);
-    const group = this.active().group(ordered).find(g => g.key === key);
+    const roster = (data.architects ?? []).map(a => a.name);
+    const group = this.active().group(ordered, roster).find(g => g.key === key);
     if (!group) { return []; }
 
     return group.items.map(b => this.makeBuilderRow(b, now));

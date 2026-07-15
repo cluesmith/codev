@@ -52,6 +52,15 @@ export class BuilderGroupTreeItem extends AreaGroupTreeItem {
     rollup: GroupRollup,
   ) {
     super(groupName, 'builder', count, collapsibleState);
+    // An empty rollup means a childless group — only the architect axis produces
+    // one (a registered architect with no builders, Issue 1174). Short-circuit
+    // the worst-of tri-state, which would read all-zero as green `active`, and
+    // use a neutral idle glyph instead (never the yellow "needs attention" bell).
+    if (rollup.blocked + rollup.idle + rollup.active === 0) {
+      this.iconPath = new vscode.ThemeIcon('circle-outline', new vscode.ThemeColor('disabledForeground'));
+      this.tooltip = 'No builders';
+      return;
+    }
     const { icon, color } = BUILDER_STATE_GLYPH[worstBuilderState(rollup)];
     this.iconPath = new vscode.ThemeIcon(icon, new vscode.ThemeColor(color));
     this.tooltip = `${rollup.blocked} blocked · ${rollup.idle} waiting · ${rollup.active} active`;
