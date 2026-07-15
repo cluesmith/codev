@@ -32,8 +32,16 @@ export interface BuilderGroup {
 export interface BuilderGrouping {
   /** Axis id, matching the `codev.buildersGroupBy` setting value. */
   readonly id: BuildersGroupBy;
-  /** Bucket already-ordered builders into display groups (header order preserved). */
-  group(ordered: OverviewBuilder[]): BuilderGroup[];
+  /**
+   * Bucket already-ordered builders into display groups (header order preserved).
+   *
+   * `roster` is the set of registered architect names (from `OverviewData.architects`),
+   * used only by the architect axis to emit a header for every architect — including
+   * childless ones (Issue 1174). The stage and area axes ignore it: their groups are
+   * builder-intrinsic (a phase / an area only exists as a property of a builder), so
+   * there is no "empty stage" or "empty area" to seed.
+   */
+  group(ordered: OverviewBuilder[], roster?: readonly string[]): BuilderGroup[];
   /**
    * The row prefix for this axis — the COMPLEMENTARY axis to the group header,
    * already bracketed with a trailing space (or `''` when omitted). Stage mode
@@ -78,17 +86,23 @@ export function areaGrouping(): BuilderGrouping {
 }
 
 /**
- * Architect axis (Issue 1104): groups are the architects that own in-flight work
- * (`spawnedByArchitect`), `main` first, then the rest alphabetically. Because a
- * flat group only exists when it holds builders, a *childless* architect
- * produces no group and simply doesn't appear — the work view shows owners of
- * work, not the full roster (the full roster lives in Workspace > Architects).
+ * Architect axis (Issue 1104): groups are the workspace's architects, `main`
+ * first, then the rest alphabetically. Every registered architect in `roster`
+ * gets a header even when it currently owns no builders (Issue 1174) — a
+ * childless architect renders as `MAIN (0)` with the same click-to-open-terminal
+ * affordance the populated headers carry, so cleaning up an architect's last
+ * builder no longer makes its row vanish out from under the user mid-session.
+ * (The `roster` reflects live-session architects from `OverviewData.architects`;
+ * when it is absent — e.g. pre-roster callers — only architects owning builders
+ * appear, the pre-1174 behavior.)
  *
  * Every builder has an owner: `afx spawn` always records one, defaulting to
  * `main` (spawn.ts). A null `spawnedByArchitect` is only a data-integrity edge
  * (a discovered worktree with no `state.db` row, or a pre-#755 legacy row), so
  * there is no "unassigned" group — a null owner folds into `main`, matching the
- * affinity router's same fallback (`lookupBuilderSpawningArchitect`).
+ * affinity router's same fallback (`lookupBuilderSpawningArchitect`). A builder
+ * whose owner isn't in `roster` (stale / non-live architect) still gets that
+ * owner's header from the builder loop, so no builder is ever dropped.
  *
  * The row prefix carries the complementary lifecycle stage (`[implement]`, etc.)
  * so a row still reads "where in the lifecycle" under its owner. A lone group is
@@ -97,8 +111,13 @@ export function areaGrouping(): BuilderGrouping {
 export function architectGrouping(): BuilderGrouping {
   return {
     id: 'architect',
-    group: ordered => {
+    group: (ordered, roster = []) => {
       const buckets = new Map<string, OverviewBuilder[]>();
+      // Seed an empty bucket for every registered architect first, so childless
+      // architects still produce a header (Issue 1174).
+      for (const name of roster) {
+        if (!buckets.has(name)) { buckets.set(name, []); }
+      }
       for (const b of ordered) {
         const key = b.spawnedByArchitect || 'main';
         const bucket = buckets.get(key);
