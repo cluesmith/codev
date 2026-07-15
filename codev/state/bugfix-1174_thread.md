@@ -25,3 +25,14 @@ Verification (from worktree): `pnpm vitest run` → 627 pass (53 files); `pnpm c
 No CHANGELOG edit: that workflow lives on the separate docs/vscode-changelog branch (architect's per-PR job post-merge), not this builder branch.
 
 Committed 2 commits (fix + tests). Next: push, open PR, CMAP.
+
+## PR (in progress)
+
+PR #1175 opened (Fixes #1174).
+
+CMAP verdicts:
+- Gemini: APPROVE (HIGH) — no issues
+- Codex: APPROVE (MEDIUM) — no issues
+- Claude: COMMENT (HIGH) — one non-blocking nit: ternary for collapsibleState → if/else per no-ternaries convention. Applied (commit 4). Re-verified check-types + lint + tests clean.
+
+Requesting `pr` gate next; waiting for human approval before merge.
