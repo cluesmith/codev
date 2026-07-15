@@ -1,7 +1,7 @@
 id: bugfix-1182
 title: vscode-group-idle-sibling-arch
 protocol: bugfix
-phase: investigate
+phase: fix
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -11,4 +11,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-07-15T06:35:44.603Z'
-updated_at: '2026-07-15T06:35:44.603Z'
+updated_at: '2026-07-15T06:38:10.956Z'
