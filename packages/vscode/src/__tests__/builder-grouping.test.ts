@@ -92,11 +92,39 @@ describe('architectGrouping (#1104)', () => {
     expect(g.group(builders).map(x => x.key)).toEqual(['main', 'security', 'vscode']);
   });
 
-  it('only produces a group for an architect that owns builders (childless never appears)', () => {
-    // The strategy never sees the roster — it groups by owner present on
-    // builders, so an architect with no builders simply yields no group.
+  it('without a roster, only owners-of-builders produce groups (back-compat)', () => {
+    // No roster passed → the strategy groups by owner present on builders, so an
+    // architect with no builders yields no group (the pre-1174 behavior, still
+    // the path any pre-roster caller takes).
     const builders = [builder({ id: 'a', spawnedByArchitect: 'main' })];
     expect(g.group(builders).map(x => x.key)).toEqual(['main']);
+  });
+
+  it('emits a header for every roster architect, even childless ones (Issue 1174)', () => {
+    // main owns a builder; reviewer and security are registered but childless.
+    const builders = [builder({ id: 'a', spawnedByArchitect: 'main' })];
+    const groups = g.group(builders, ['main', 'reviewer', 'security']);
+    expect(groups.map(x => x.key)).toEqual(['main', 'reviewer', 'security']);
+    expect(groups.find(x => x.key === 'reviewer')!.items).toEqual([]);
+    expect(groups.find(x => x.key === 'security')!.items).toEqual([]);
+    expect(groups.find(x => x.key === 'main')!.items.map(b => b.id)).toEqual(['a']);
+  });
+
+  it('with a roster and zero builders, every architect still gets an empty header', () => {
+    const groups = g.group([], ['main', 'vscode']);
+    expect(groups.map(x => x.key)).toEqual(['main', 'vscode']);
+    expect(groups.every(x => x.items.length === 0)).toBe(true);
+  });
+
+  it('keeps a builder whose owner is absent from the roster (stale/non-live owner)', () => {
+    // `data.architects` lists only live-session architects; a builder can still
+    // reference a non-live owner. That owner must not be dropped — it gets its
+    // own header from the builder loop alongside the roster-seeded ones.
+    const builders = [builder({ id: 'a', spawnedByArchitect: 'ghost' })];
+    const groups = g.group(builders, ['main']);
+    expect(groups.map(x => x.key)).toEqual(['main', 'ghost']);
+    expect(groups.find(x => x.key === 'main')!.items).toEqual([]);
+    expect(groups.find(x => x.key === 'ghost')!.items.map(b => b.id)).toEqual(['a']);
   });
 
   it('folds a null-owner builder (data-integrity edge) into the main group', () => {
