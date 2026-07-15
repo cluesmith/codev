@@ -404,6 +404,22 @@ function hasArchitectTerminalSession(name: string, resolvedPath: string, workspa
 }
 
 /**
+ * Issue #1150: ids of this architect's persisted terminal_sessions rows, for
+ * the removeArchitect stale-state purge. A read failure returns [] — the purge
+ * then covers whatever it can see.
+ */
+function findArchitectTerminalSessionIds(name: string, resolvedPath: string, workspacePath: string): string[] {
+  try {
+    const rows = getGlobalDb().prepare(
+      "SELECT id FROM terminal_sessions WHERE type = 'architect' AND role_id = ? AND workspace_path IN (?, ?)",
+    ).all(name, resolvedPath, workspacePath) as Array<{ id: string }>;
+    return rows.map((r) => r.id);
+  } catch {
+    return [];
+  }
+}
+
+/**
  * Launch a new agent-farm instance.
  * Phase 4 (Spec 0090): Tower manages terminals directly, no dashboard-server.
  * Auto-adopts non-codev directories and creates architect terminal.
@@ -1176,25 +1192,33 @@ export async function removeArchitect(
 
   const terminalId = entry.architects.get(name);
   if (!terminalId) {
-    // Issue #1150: no live terminal, but a persisted registration may still
-    // exist (a prior removal whose DB delete never stuck, or a stale snapshot
-    // row re-inserted by the #1118 consolidation). Purge it so this command
-    // stays retryable after a partial removal and doubles as the recovery
-    // tool for zombie registrations.
+    // Issue #1150: no live terminal, but persisted state may still exist in
+    // EITHER table (a prior removal whose DB delete never stuck, or a stale
+    // snapshot row re-inserted by the #1118 consolidation). Purge both the
+    // registration row and any leftover terminal_sessions rows so this
+    // command stays retryable after any partial removal — including the case
+    // where only the terminal-session delete failed — and doubles as the
+    // recovery tool for zombie state.
     let hasStaleRow = false;
     try {
       hasStaleRow = getArchitectByName(resolvedPath, name) !== null;
     } catch { /* registry unreadable: fall through to not-found */ }
-    if (hasStaleRow) {
+    const staleTerminalIds = findArchitectTerminalSessionIds(name, resolvedPath, workspacePath);
+    if (hasStaleRow || staleTerminalIds.length > 0) {
       try {
-        setArchitectByName(resolvedPath, name, null);
+        if (hasStaleRow) {
+          setArchitectByName(resolvedPath, name, null);
+        }
+        for (const staleId of staleTerminalIds) {
+          _deps.deleteTerminalSession(staleId);
+        }
       } catch (err) {
         return {
           success: false,
-          error: `Architect '${name}' has no live terminal, and deleting its stale registration failed: ${(err as Error).message}. Retry 'afx workspace remove-architect --name ${name}'.`,
+          error: `Architect '${name}' has no live terminal, and deleting its stale state failed: ${(err as Error).message}. Retry 'afx workspace remove-architect --name ${name}'.`,
         };
       }
-      _deps.log('INFO', `Purged stale architect registration '${name}' from workspace ${workspacePath} (no live terminal)`);
+      _deps.log('INFO', `Purged stale architect state for '${name}' from workspace ${workspacePath} (no live terminal; registration=${hasStaleRow}, terminal rows=${staleTerminalIds.length})`);
       return { success: true };
     }
     return { success: false, error: `Architect '${name}' not found in workspace '${workspacePath}'.` };

@@ -1513,6 +1513,79 @@ describe('tower-instances', () => {
       expect(mockManager.killSession).not.toHaveBeenCalled();
     });
 
+    it('removeArchitect: retry purges a stale terminal_sessions row when the registration is already gone (codex consult finding)', async () => {
+      // Partial-removal shape: the first attempt deleted the architect row but
+      // _deps.deleteTerminalSession threw. The retry must purge the leftover
+      // terminal_sessions row instead of reporting not-found.
+      const workspaceTerminals = new Map();
+      workspaceTerminals.set('/project/path', {
+        architects: new Map([['main', 'arch-main']]),
+        builders: new Map(),
+        shells: new Map(),
+      });
+      const mockManager = {
+        getSession: vi.fn(),
+        killSession: vi.fn(),
+      };
+      const deps = makeDeps({
+        workspaceTerminals,
+        getTerminalManager: vi.fn().mockReturnValue(mockManager) as any,
+      });
+      initInstances(deps);
+
+      mockDbPrepare.mockImplementation((sql: string) => ({
+        all: () => {
+          if (sql.includes('FROM terminal_sessions')) return [{ id: 'stale-term-1' }];
+          return [];
+        },
+        get: () => undefined, // architect row already deleted
+        run: () => ({ changes: 1 }),
+      }));
+
+      const result = await removeArchitect('/project/path', 'ghost');
+
+      expect(result.success).toBe(true);
+      expect(deps.deleteTerminalSession).toHaveBeenCalledWith('stale-term-1');
+      expect(mockManager.killSession).not.toHaveBeenCalled();
+    });
+
+    it('removeArchitect: purges both stale layers when registration and terminal rows remain', async () => {
+      const workspaceTerminals = new Map();
+      workspaceTerminals.set('/project/path', {
+        architects: new Map([['main', 'arch-main']]),
+        builders: new Map(),
+        shells: new Map(),
+      });
+      const deps = makeDeps({ workspaceTerminals });
+      initInstances(deps);
+
+      const runCalls: Array<{ sql: string; args: unknown[] }> = [];
+      mockDbPrepare.mockImplementation((sql: string) => ({
+        all: () => {
+          if (sql.includes('FROM terminal_sessions')) return [{ id: 'stale-term-1' }, { id: 'stale-term-2' }];
+          return [];
+        },
+        get: () => {
+          if (sql.startsWith('SELECT * FROM architect')) return ghostRow('/project/path');
+          return undefined;
+        },
+        run: (...args: unknown[]) => {
+          runCalls.push({ sql, args });
+          return { changes: 1 };
+        },
+      }));
+
+      const result = await removeArchitect('/project/path', 'ghost');
+
+      expect(result.success).toBe(true);
+      const purged = runCalls.filter(
+        (c) => c.sql.startsWith('DELETE FROM architect') && c.args.includes('ghost'),
+      );
+      expect(purged).toHaveLength(1);
+      expect(deps.deleteTerminalSession).toHaveBeenCalledWith('stale-term-1');
+      expect(deps.deleteTerminalSession).toHaveBeenCalledWith('stale-term-2');
+    });
+
     it('removeArchitect: still reports not-found when neither terminal nor registration exists', async () => {
       const workspaceTerminals = new Map();
       workspaceTerminals.set('/project/path', {
