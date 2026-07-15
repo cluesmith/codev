@@ -86,15 +86,19 @@ async function groupHeaders(provider: InstanceType<typeof BuildersProvider>): Pr
 }
 
 describe('childless-architect headers under the architect axis (Issue 1174)', () => {
-  it('emits a (0) header for every registered architect when there are no builders', async () => {
+  it('emits a (0) header for a childless architect when it is the only idle sibling', async () => {
+    // A single idle sibling stays a top-level (0) header (Issue 1174). With ≥ 2
+    // idle siblings they fold into the "Idle Architects" container instead (Issue
+    // 1182) — covered by builders-idle-architects-group.test.ts. Here `main` is
+    // its own row and `reviewer` is the lone idle sibling.
     configValues['buildersGroupBy'] = 'architect';
     try {
       const provider = new BuildersProvider(
-        fakeCache([], [architect('main'), architect('reviewer'), architect('security')]),
+        fakeCache([], [architect('main'), architect('reviewer')]),
         fakeDiffCache,
       );
       const headers = await groupHeaders(provider);
-      expect(headers.map(h => h.groupName)).toEqual(['main', 'reviewer', 'security']);
+      expect(headers.map(h => h.groupName)).toEqual(['main', 'reviewer']);
       // Count in the label + leaf-like state (None) — no empty accordion.
       for (const h of headers) {
         expect(h.label).toContain('(0)');

@@ -1,0 +1,17 @@
+id: bugfix-1182
+title: vscode-group-idle-sibling-arch
+protocol: bugfix
+phase: pr
+plan_phases: []
+current_plan_phase: null
+gates:
+  pr:
+    status: approved
+    requested_at: '2026-07-15T06:52:54.782Z'
+    approved_at: '2026-07-15T08:19:06.004Z'
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-07-15T06:35:44.603Z'
+updated_at: '2026-07-15T08:19:06.005Z'
+pr_ready_for_human: false

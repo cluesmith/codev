@@ -66,3 +66,33 @@ export class BuilderGroupTreeItem extends AreaGroupTreeItem {
     this.tooltip = `${rollup.blocked} blocked · ${rollup.idle} waiting · ${rollup.active} active`;
   }
 }
+
+/**
+ * Container header that rolls up idle **sibling** architects (never `main`) under
+ * the architect axis (Issue 1182). Emitted only when ≥ 2 siblings are idle (zero
+ * builders); a lone idle sibling keeps its own top-level row. Without this, a
+ * workspace running several quiet siblings (reviewer, demos, ide, …) accumulates
+ * childless rows (each ~22px) that push actual builder work below the fold — the
+ * proportion cost the childless-visible fix (#1174) traded for never losing a row
+ * mid-session. `main` is exempt: it is the always-present workspace home base, so
+ * burying it behind a chevron is a bad trade for one row of space.
+ *
+ * Distinct from `BuilderGroupTreeItem` (which names one architect and opens its
+ * terminal): this is a pure meta-container of N architects, so it binds NO
+ * command — a header click only toggles expansion. Its children are the
+ * individual idle-architect rows, each a childless `BuilderGroupTreeItem` that
+ * still opens its own terminal. Default `Collapsed`; VSCode persists per-id
+ * expansion off the stable `id`, so a user who expands it stays expanded until
+ * they collapse. The rollup glyph is the same neutral idle glyph a childless
+ * architect carries — idle architects have no builders, so there is no
+ * attention state to roll up.
+ */
+export class IdleArchitectsGroupTreeItem extends vscode.TreeItem {
+  constructor(count: number) {
+    super(`Idle Architects (${count})`, vscode.TreeItemCollapsibleState.Collapsed);
+    this.id = 'idle-architects-group';
+    this.contextValue = 'group-idle-architects';
+    this.iconPath = new vscode.ThemeIcon('circle-outline', new vscode.ThemeColor('disabledForeground'));
+    this.tooltip = `${count} idle architects · no builders attached`;
+  }
+}

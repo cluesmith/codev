@@ -7,12 +7,13 @@ import { UNCATEGORIZED_AREA } from '@cluesmith/codev-core/constants';
 import type { OverviewCache } from './overview-data.js';
 import { builderWithWorktree, type OverviewBuilderWithWorktree } from '../builder-lookup.js';
 import { readBuildersFileViewAsTree } from '../builders-config.js';
-import { BuilderGroupTreeItem, BuilderTreeItem } from './builder-tree-item.js';
+import { BuilderGroupTreeItem, BuilderTreeItem, IdleArchitectsGroupTreeItem } from './builder-tree-item.js';
 import { BuilderFileTreeItem } from './builder-file-tree-item.js';
 import { BuilderFolderTreeItem } from './builder-folder-tree-item.js';
 import { buildFilePathTree, type FilePathNode } from './file-path-tree.js';
 import type { BuilderDiffCache } from './builder-diff-cache.js';
 import {
+  type BuilderGroup,
   type BuilderGrouping,
   type BuildersGroupBy,
   stageGrouping,
@@ -263,6 +264,11 @@ export class BuildersProvider implements vscode.TreeDataProvider<vscode.TreeItem
     if (element instanceof BuilderFileTreeItem) {
       return [];
     }
+    // The Idle Architects container (architect axis, Issue 1182) expands to the
+    // individual idle-sibling architect rows.
+    if (element instanceof IdleArchitectsGroupTreeItem) {
+      return this.idleArchitectRows(Date.now());
+    }
     // Group rows expand to their builders.
     if (element instanceof BuilderGroupTreeItem) {
       return this.rowsForGroup(element.groupName);
@@ -298,50 +304,120 @@ export class BuildersProvider implements vscode.TreeDataProvider<vscode.TreeItem
       return groups[0].items.map(b => this.makeBuilderRow(b, now));
     }
 
+    // The architect axis rolls idle siblings into an "Idle Architects" container
+    // (Issue 1182), so it renders through its own method. Stage/area render every
+    // group as its own header.
+    if (grouping.id === 'architect') {
+      return this.architectRootChildren(groups, now);
+    }
     // Populated groups render Expanded (#913) — no persisted state. VSCode's
     // native per-id memory keeps a user-collapsed group collapsed for the
     // rest of the session; on a fresh session this default applies again.
-    // Childless architect groups (Issue 1174) render as leaf-like rows (`None`).
-    //
-    // Architect-axis headers get a click-to-open-terminal `command` (#1108):
-    // the architect is first-class in this mode, so its header should match the
-    // builder-row affordance (row click opens the terminal; the chevron still
-    // toggles expand/collapse — VSCode routes the two gestures independently).
-    // Stage/area headers stay pure containers — they name no launchable entity.
-    // The `g.key` (architect name; null owners folded into `main` by
-    // architectGrouping) is the optional name arg `codev.openArchitectTerminal`
-    // already accepts; it warns gracefully on a stale owner not in the roster.
-    const isArchitectAxis = grouping.id === 'architect';
-    return groups.map(g => {
-      // A childless architect group (Issue 1174) has no builders to expand into,
-      // so render it as a leaf-like row (`None`) rather than an empty accordion.
-      // The click-to-open-terminal command below still fires on the row body.
-      // Populated groups stay Expanded (#913). Only the architect axis ever
-      // yields an empty group; stage/area groups always hold ≥1 builder.
-      let collapsibleState: vscode.TreeItemCollapsibleState;
-      if (g.items.length === 0) {
-        collapsibleState = vscode.TreeItemCollapsibleState.None;
+    // Stage/area groups always hold ≥1 builder (no empty groups on these axes),
+    // so they never carry a command — they name no launchable entity.
+    return groups.map(g => this.makeGroupRow(g, now, false));
+  }
+
+  /**
+   * Root rows for the architect axis (Issue 1182). `main` and every populated
+   * sibling render as their own top-level group (unchanged from #1174); idle
+   * siblings (zero builders, not `main`) roll up under a single collapsed
+   * "Idle Architects" container — but only when ≥ 2 are idle. A lone idle
+   * sibling keeps its own row (the group would save no space for one row and
+   * only adds a click). Ordering: `main` first, then populated siblings, then
+   * the idle container / lone idle sibling at the bottom — "primary work first,
+   * roster second."
+   *
+   * `groups` arrives from `architectGrouping` already ordered `main`-first then
+   * the rest alphabetically. Iterating it preserves that order for the rows that
+   * stay top-level; the idle siblings are peeled off and re-emitted last.
+   *
+   * `main` is always its own row regardless of builder count: it is the
+   * always-present workspace home base (created by `launchInstance` on any
+   * workspace; every sibling is opt-in via `add-architect`), so burying it
+   * behind a chevron is a bad trade for one row of vertical space.
+   */
+  private architectRootChildren(groups: BuilderGroup[], now: number): vscode.TreeItem[] {
+    const topLevel: vscode.TreeItem[] = [];
+    const idleSiblings: BuilderGroup[] = [];
+    for (const g of groups) {
+      const isIdleSibling = g.key !== 'main' && g.items.length === 0;
+      if (isIdleSibling) {
+        idleSiblings.push(g);
       } else {
-        collapsibleState = vscode.TreeItemCollapsibleState.Expanded;
+        topLevel.push(this.makeGroupRow(g, now, true));
       }
-      const groupItem = new BuilderGroupTreeItem(
-        g.key,
-        g.items.length,
-        collapsibleState,
-        rollupGroupState(g.items, now),
-      );
-      if (isArchitectAxis) {
-        groupItem.command = {
-          command: 'codev.openArchitectTerminal',
-          title: 'Open Architect Terminal',
-          arguments: [g.key],
-        };
+    }
+    if (idleSiblings.length >= 2) {
+      topLevel.push(new IdleArchitectsGroupTreeItem(idleSiblings.length));
+    } else {
+      // 0 → nothing; 1 → the lone idle sibling renders as its own top-level row.
+      for (const g of idleSiblings) {
+        topLevel.push(this.makeGroupRow(g, now, true));
       }
-      for (const b of g.items) {
-        this.groupParentByBuilderId.set(b.id, groupItem);
-      }
-      return groupItem;
-    });
+    }
+    return topLevel;
+  }
+
+  /**
+   * The individual idle-sibling architect rows shown when the "Idle Architects"
+   * container is expanded (Issue 1182). Each is a childless
+   * `BuilderGroupTreeItem` — the same leaf-like `(0)` row #1174 renders at top
+   * level — carrying its own `codev.openArchitectTerminal` command, so clicking a
+   * name inside the group opens that architect's terminal. Recomputed from the
+   * cache (not cached from `rootChildren`) so it stays correct across overview
+   * ticks; harmlessly returns `[]` if the axis is no longer `architect`.
+   */
+  private idleArchitectRows(now: number): vscode.TreeItem[] {
+    const data = this.cache.getData();
+    if (!data) { return []; }
+    const grouping = this.active();
+    if (grouping.id !== 'architect') { return []; }
+    const roster = (data.architects ?? []).map(a => a.name);
+    const groups = grouping.group(orderForDisplay(data.builders, now), roster);
+    return groups
+      .filter(g => g.key !== 'main' && g.items.length === 0)
+      .map(g => this.makeGroupRow(g, now, true));
+  }
+
+  /**
+   * Build one group header row. `isArchitectAxis` headers get a
+   * click-to-open-terminal `command` (#1108): the architect is first-class in
+   * this mode, so its header matches the builder-row affordance (row click opens
+   * the terminal; the chevron still toggles expand/collapse — VSCode routes the
+   * two gestures independently). A childless architect group (Issue 1174) has no
+   * builders to expand into, so it renders as a leaf-like row (`None`) rather
+   * than an empty accordion; the command still fires on the row body. Populated
+   * groups render Expanded (#913). Stage/area headers stay command-less
+   * containers. Registers each builder's parent group for `getParent`.
+   */
+  private makeGroupRow(g: BuilderGroup, now: number, isArchitectAxis: boolean): BuilderGroupTreeItem {
+    let collapsibleState: vscode.TreeItemCollapsibleState;
+    if (g.items.length === 0) {
+      collapsibleState = vscode.TreeItemCollapsibleState.None;
+    } else {
+      collapsibleState = vscode.TreeItemCollapsibleState.Expanded;
+    }
+    const groupItem = new BuilderGroupTreeItem(
+      g.key,
+      g.items.length,
+      collapsibleState,
+      rollupGroupState(g.items, now),
+    );
+    if (isArchitectAxis) {
+      // The `g.key` (architect name; null owners folded into `main` by
+      // architectGrouping) is the optional name arg `codev.openArchitectTerminal`
+      // already accepts; it warns gracefully on a stale owner not in the roster.
+      groupItem.command = {
+        command: 'codev.openArchitectTerminal',
+        title: 'Open Architect Terminal',
+        arguments: [g.key],
+      };
+    }
+    for (const b of g.items) {
+      this.groupParentByBuilderId.set(b.id, groupItem);
+    }
+    return groupItem;
   }
 
   private rowsForGroup(key: string): vscode.TreeItem[] {
