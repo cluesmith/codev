@@ -23,3 +23,20 @@ Investigated the monorepo. Key findings:
 
 Plan written to `codev/plans/855-monorepo-layout-introduce-apps.md`. Awaiting
 plan-approval gate. Presented issue's 4 open questions as reviewer decisions.
+
+## Research: unified Expo/RNW app vs separate apps (2026-07-16)
+
+Architect asked to research whether one Expo/RNW app could cover web + mobile,
+as it "drives monorepo restructuring." Finding: **keep separate apps — reinforces
+#855, does not change it.**
+
+- Existing project research already decided this: `interaction-model.md` §7.1
+  ("Do NOT merge apps/web and apps/mobile") + `feasibility-2026-07.md` §9 Q7.
+  Recommended layout (§7.3) == #855's apps/* split + future `packages/tower-sdk`.
+- External web research (2026-07) corroborates: RNW for feed/touch apps; web-first
+  React DOM for the desktop console. Vite avoids RNW emulation/hydration overhead.
+- Blocker: xterm.js terminal attach is DOM-only, no RN path.
+- Right sharing lever = extract `packages/tower-sdk` (data layer, ~70-75% portable,
+  types already shared) — separate future workstream, #855 enables it.
+
+Decisions 3 (keep Dashboard word) + 4 (keep separate apps) now CONFIRMED in plan.

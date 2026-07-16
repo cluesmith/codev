@@ -55,23 +55,37 @@ then `pnpm build` + tests to confirm the wiring.
    internal (one dependency entry in `packages/codev/package.json` + three test
    imports of `@cluesmith/codev-dashboard/lib/*` in `packages/codev`). Baked into
    "Files to Change" below as a definite change.
-3. **User-facing "Dashboard" brand** — **Recommend keep as-is** (pending final
-   confirm). Scope note: this PR renames only the *directory* (`apps/web`) and the
-   *package name* (`@cluesmith/codev-web`). It does **not** sweep the word
-   "Dashboard" from user-facing/product surfaces — the `area/dashboard` GitHub
-   label, "Tower dashboard" code comments, and UI copy describe the *product
-   concept* and stay untouched. Rebranding that word is a separate cosmetic
-   follow-up if desired.
-4. **Naming + single unified app** — Keep the issue's `web` / `mobile` / `vscode`
-   surface axis for now. The reviewer raised exploring a **single Expo /
-   React Native Web app** covering web + mobile instead of two projects. That is
-   **out of scope for #855** and tracked as a separate RESEARCH/EXPERIMENT track.
-   Crucially, this move does **not** foreclose it: `apps/web` + `apps/mobile` as
-   peers is compatible with a later unified `apps/app`, and the shareable
-   non-terminal surfaces already have a cross-host home in
-   `@cluesmith/codev-artifact-canvas`. (Main blocker for a unified app is that the
-   web surface's load-bearing feature — live xterm.js terminals — is DOM-only and
-   doesn't port to React Native.)
+3. **User-facing "Dashboard" brand** — **CONFIRMED: keep as-is.** This PR renames
+   only the *directory* (`apps/web`) and the *package name* (`@cluesmith/codev-web`).
+   It does **not** sweep the word "Dashboard" from user-facing/product surfaces —
+   the `area/dashboard` GitHub label, "Tower dashboard" code comments, and UI copy
+   describe the *product concept* and stay untouched.
+4. **Naming + single unified app** — **CONFIRMED: keep the issue's
+   `web` / `mobile` / `vscode` surface axis.** The reviewer asked to evaluate a
+   single Expo / React Native Web app covering web + mobile. **Research finding
+   (2026-07-16): keep them as separate apps — do NOT unify, and do NOT collapse
+   `apps/web` + `apps/mobile` into one `apps/app`.** This *reinforces* #855's
+   `apps/*` split as planned rather than changing it. Basis:
+   - The exact question ("could RN + RNW give us one codebase for iOS + Android +
+     web?") was already **considered and rejected** in the project's own mobile
+     research — `codev/research/mobile/interaction-model.md` §7.1 ("Do NOT merge
+     `apps/web` and `apps/mobile`") and `feasibility-2026-07.md` §9 Q7. That
+     research's recommended end-state layout (interaction-model §7.3) is *exactly*
+     #855's `apps/*` split plus a future `packages/tower-sdk`.
+   - Fresh external verification (web research, 2026-07) corroborates it: RNW is
+     suited to feed-based touch-first apps, and industry guidance is explicitly
+     "web-first React DOM for the desktop management console, lightweight RN views
+     for on-the-go mobile" — the codev split precisely. RNW adds an emulation-layer
+     runtime/hydration cost that Vite avoids for the DOM-heavy console.
+   - The load-bearing blocker is concrete: the web surface's live **xterm.js
+     terminal attach** is DOM-only and has no React Native path (RN has no DOM).
+     Unifying would force either a lowest-common-denominator UX or per-platform
+     branches everywhere (defeating the merge's premise).
+   - The *correct* code-sharing lever is not a unified app but extracting the
+     framework-agnostic data layer into `packages/tower-sdk` (~70-75% of `apps/web`'s
+     hooks are portable; wire contracts already in `@cluesmith/codev-types`). That
+     is a **separate future workstream** (mobile Phase S spike) that #855 *enables*
+     (apps/web is the extraction source) and does not conflict with. No #855 change.
 
 ## Files to Change
 
