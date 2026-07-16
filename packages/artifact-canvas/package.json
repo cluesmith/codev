@@ -1,6 +1,6 @@
 {
   "name": "@cluesmith/codev-artifact-canvas",
-  "version": "3.2.2",
+  "version": "3.2.3",
   "description": "Reusable React surface for rendering and reviewing Codev markdown artifacts (specs/plans/reviews) across VSCode, the dashboard, and future mobile hosts.",
   "type": "module",
   "exports": {

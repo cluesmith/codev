@@ -1,5 +1,25 @@
 # Change Log
 
+## [3.2.3] - 2026-07-16
+
+### What's new
+
+- **Agents view (architect axis): childless architects stay visible.** An architect's group header no longer disappears the moment its last builder is cleaned up. The axis now sources headers from the registered-architect roster; childless architects render as `MAIN (0)` etc. with the same click-to-open-terminal affordance and a neutral idle glyph. Stage and area axes unchanged.
+
+- **Agents view: idle sibling architects grouped under 'Idle Architects' collapsed node.** Follow-up to the childless-architects-visible fix. When 2 or more sibling architects are idle they group under a single collapsible node instead of consuming a row each. Main is always its own row. 0 or 1 idle sibling still renders individually to avoid a container of one row. Only affects the architect axis.
+
+- **Backlog "Reference issue in architect" honors the QuickPick selection.** In multi-architect workspaces the inline reference button now injects into the architect the user picked in the QuickPick, instead of always routing to `main`. Same fix applied to `Reference PR in architect`. Single-architect workspaces unchanged.
+
+- **Per-window terminal cap raised from 10 to 25 and now configurable.** The static `MAX_TERMINALS = 10` was impractical in multi-architect workspaces (main + 4 siblings would consume 5 slots before any builder). Exposed as the `codev.maxTerminals` setting (default 25, min 5, max 100 — the max matches Tower's own backstop). The at-limit toast points at the setting so users know they can raise it.
+
+- **Agents tree: group headers no longer surface builder-scoped context-menu entries.** Right-clicking a group header (architect, phase, or area axis) previously offered seven builder-only actions like View Diff and Run/Stop Worktree Dev that silently no-op'd. A `contextValue` rename (`builder-group` → `group-builder`) closes the collision. Backlog group headers get the same symmetric rename.
+
+- **IDE-mode foundation: dual-mode activation, empty-window surfaces, no dead actions.** Two changes as one layer. The Workspace section (Architects / Spawn Builder / New Shell) is gated on `vscode.workspace.workspaceFolders?.length > 0`, so opening VS Code with no folder shows empty-view content ("Open a folder to use Codev") instead of dead rows. Two new context keys — `codev.hasWorkspace` and `codev.ideMode` (via `vscode.env.appName === 'Codev'`) — model the four operating quadrants explicitly. Under `onStartupFinished` activation, the guest+no-codev-workspace path is provably inert (no Tower spawn, no UI mutation, no state writes). In the Codev IDE fork, `ideMode && !hasWorkspace` focuses the Codev container, shows Open Folder / Open Recent welcome content, and fires a one-time first-run notification.
+
+- **Sidebar defaults: Pull Requests / Recently Closed / Team / Status collapse on fresh install.** Reclaims sidebar vertical space for the primary Workspace / Agents / Backlog surfaces. `visibility: "collapsed"` is a first-render default only; existing users' persisted per-view state is respected untouched.
+
+- **Runnable-worktrees terminology: "Dev Server" → "Dev".** The feature is stack-agnostic — your `worktree.devCommand` can start a Vite dev server, `cargo run`, `expo start`, a test watcher, whatever. Palette titles read `Codev: Run Dev` / `Codev: Stop Dev`. Command IDs `codev.devServer.*` → `codev.dev.*`, context key `codev.devServerRunning` → `codev.devRunning`, view id `codev.devServer` → `codev.dev`, source files track the rename. `worktree.devCommand`, `afx dev`, and the terminal tab name were already neutral. **Breaking for keybindings**: `keybindings.json` entries for `codev.devServer.*` must migrate to `codev.dev.*`.
+
 ## [3.2.2] - 2026-07-02
 
 ### What's new
