@@ -28,3 +28,15 @@
 - **B. pnpm `catalog:` entry** (issue asked): recommend adding one to kill future drift; described in plan.
 
 Plan written to `codev/plans/1187-chore-upgrade-typescript-to-6-.md`. Awaiting plan-approval gate.
+
+## Implement phase
+
+- plan-approval **approved**. Architect confirmed both gate decisions: **A = TS 6.0.3**, **B = add pnpm `catalog:`**.
+- Applied the full verified fix set, this time with the catalog (the one path not covered by the plan-time experiment):
+  - `pnpm-workspace.yaml` — new `catalog: { typescript: ^6.0.3 }`; all six manifests set to `"typescript": "catalog:"`. Lockfile resolves `catalogs.default.typescript ^6.0.3 → 6.0.3`, zero tsup refs remain.
+  - `packages/core/tsconfig.json` + `packages/codev/tsconfig.json` — `"types": ["node"]`.
+  - `apps/web/src/vite-env.d.ts` — new, `/// <reference types="vite/client" />`.
+  - artifact-canvas tsup→tsdown: manifest (deps/build script/exports/main/module/types → tsdown `.mjs`/`.cjs`/`.d.mts`/`.d.cts` naming), new `tsdown.config.ts`, deleted `tsup.config.ts`, `scripts/smoke.mjs` retargeted.
+- Three logical commits: (1) catalog unification, (2) TS6 tsconfig fallout, (3) tsdown migration.
+- **Full re-verification green under catalog+tsdown**: `pnpm --recursive build` ✓, `pnpm --recursive check-types` ✓, `vscode:prepublish` ✓, artifact-canvas `build:smoke` ✓, tests: core 41 / artifact-canvas 73 / apps/web 323(+1 skip) / codev 3482(+48 skip).
+- Awaiting **dev-approval** gate.
