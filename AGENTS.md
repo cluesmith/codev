@@ -151,7 +151,7 @@ Key locations:
 |---|---|
 | `area/docs` | Documentation — this repo, CLAUDE/AGENTS, role files, `codev/resources/` |
 | `area/vscode` | VSCode extension — sidebar views, panel-area views, commands, keybindings |
-| `area/dashboard` | Tower web dashboard — the `@cluesmith/codev-dashboard` React/Vite package, served by Tower and opened in a browser (distinct from any VSCode UI) |
+| `area/dashboard` | Tower web dashboard — the `@cluesmith/codev-web` React/Vite package, served by Tower and opened in a browser (distinct from any VSCode UI) |
 | `area/consult` | `consult` CLI and consultation tooling |
 | `area/tower` | Tower server + `afx` / agent-farm CLI. **No separate `area/agent-farm`** — afx work goes here. |
 | `area/cross-cutting` | Multi-area work — used **alone**, never alongside another `area/*` |

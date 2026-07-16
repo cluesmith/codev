@@ -14,8 +14,8 @@ Codev is a Human-Agent Software Development Operating System. This repository se
 **To understand a specific subsystem:**
 - **Agent Farm**: Start with the Architecture Overview diagram in this document, then `packages/codev/src/agent-farm/`
 - **Shared Runtime**: `packages/core/` — TowerClient, auth, workspace encoding, EscapeBuffer, ReconnectPolicy
-- **VS Code Extension**: `packages/vscode/` — thin client over Tower API
-- **Dashboard**: `packages/dashboard/` — React SPA served by Tower
+- **VS Code Extension**: `apps/vscode/` — thin client over Tower API
+- **Dashboard**: `apps/web/` — React SPA served by Tower
 - **Consult Tool**: See `packages/codev/src/commands/consult/` and `codev/roles/consultant.md`
 - **Protocols**: Read the relevant protocol in `codev/protocols/{spir,maintain,experiment}/protocol.md`
 
@@ -117,7 +117,7 @@ Agent Farm orchestrates multiple AI agents working in parallel on a codebase. Tw
 ```
 ┌─────────────────────────────┐  ┌─────────────────────────────┐
 │  Browser Dashboard          │  │  VS Code Extension          │
-│  (React SPA on Tower :4100) │  │  (packages/vscode)          │
+│  (React SPA on Tower :4100) │  │  (apps/vscode)              │
 │                             │  │                             │
 │  xterm.js terminals         │  │  Pseudoterminal ↔ WS        │
 │  Work View (React)          │  │  Sidebar TreeViews          │
@@ -1023,7 +1023,7 @@ const CONFIG = {
 - **tree-kill**: Process cleanup and termination
 - **Shellper processes**: Detached Node.js processes for terminal session persistence (Spec 0104)
 - **node-pty**: Native PTY sessions with WebSocket multiplexing (Spec 0085)
-- **React 19 + Vite 6**: Dashboard SPA at `packages/dashboard/` (standalone workspace member)
+- **React 19 + Vite 6**: Dashboard SPA at `apps/web/` (standalone workspace member)
 - **xterm.js**: Terminal emulator in the browser dashboard (with `customGlyphs: true` for Unicode)
 
 ### VS Code Extension
@@ -1052,7 +1052,8 @@ const CONFIG = {
 
 ## Monorepo Structure
 
-The repository uses pnpm workspaces with the following packages:
+The repository uses pnpm workspaces (`packages/*` + `apps/*`). Shared libraries
+live in `packages/`; end-user client surfaces live in `apps/`:
 
 | Package | npm Name | Purpose |
 |---------|----------|---------|
@@ -1060,8 +1061,9 @@ The repository uses pnpm workspaces with the following packages:
 | `packages/core` | `@cluesmith/codev-core` | Shared runtime: TowerClient, auth, workspace encoding, EscapeBuffer, ReconnectPolicy (published to npm) |
 | `packages/types` | `@cluesmith/codev-types` | Shared TypeScript types: WebSocket protocol, API shapes, SSE events (dev dependency only) |
 | `packages/config` | `@cluesmith/config` | Shared tsconfig base (cross-project) |
-| `packages/dashboard` | `@cluesmith/codev-dashboard` | React dashboard SPA (built into codev package) |
-| `packages/vscode` | `codev` (Marketplace) | VS Code extension |
+| `packages/artifact-canvas` | `@cluesmith/codev-artifact-canvas` | Reusable React surface for rendering/reviewing Codev markdown artifacts |
+| `apps/web` | `@cluesmith/codev-web` | React dashboard SPA (built into codev package) |
+| `apps/vscode` | `codev` (Marketplace) | VS Code extension |
 
 **Dependency graph:**
 ```
@@ -1080,7 +1082,7 @@ codev (CLI + Tower)        vscode (extension)        dashboard (React SPA)
 
 ## VS Code Extension
 
-The VS Code extension (`packages/vscode`) is a thin client over Tower's existing API. It adds VS Code-specific UI on top of `TowerClient` from `@cluesmith/codev-core` — no Tower logic is reimplemented.
+The VS Code extension (`apps/vscode`) is a thin client over Tower's existing API. It adds VS Code-specific UI on top of `TowerClient` from `@cluesmith/codev-core` — no Tower logic is reimplemented.
 
 ### Architecture
 
@@ -1202,9 +1204,9 @@ codev/                                  # Project root (pnpm monorepo)
 │       └── api.ts                     # DashboardState, OverviewData, TeamApiResponse, etc.
 ├── packages/config/                    # @cluesmith/config (shared tsconfig)
 │   └── tsconfig.base.json
-├── packages/dashboard/                 # @cluesmith/codev-dashboard (React SPA)
+├── apps/web/                           # @cluesmith/codev-web (React SPA; end-user surface)
 │   └── src/                           # React 19 + Vite 6 + xterm.js + Recharts
-├── packages/vscode/                    # VS Code extension (Marketplace: cluesmith.codev-vscode)
+├── apps/vscode/                        # VS Code extension (Marketplace: cluesmith.codev-vscode; end-user surface)
 │   └── src/
 │       ├── extension.ts               # Activation, command/view registration
 │       ├── connection-manager.ts      # Singleton wrapping TowerClient
@@ -1281,7 +1283,7 @@ codev/                                  # Project root (pnpm monorepo)
 │   │   ├── team.js                     # team command
 │   │   ├── porch.js                    # porch command
 │   │   └── generate-image.js           # generate-image command
-│   ├── dashboard-dist/                 # Dashboard build output (copied from packages/dashboard/dist)
+│   ├── dashboard-dist/                 # Dashboard build output (copied from apps/web/dist)
 │   ├── skeleton/                       # Embedded codev-skeleton (built)
 │   ├── templates/                      # HTML templates
 │   │   ├── tower.html                  # Multi-project overview
