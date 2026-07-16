@@ -67,3 +67,19 @@ Reviewer spotted `@cluesmith/config` breaks the `@cluesmith/codev-*` convention
 - Zero blast radius: referenced only via relative `extends ../config/tsconfig.base.json`,
   never by name; pnpm-lock doesn't even record the name. Build (full tsc) + tests green.
 - apps/vscode's unscoped `codev-vscode` left as-is (Marketplace publisher model, intentional).
+
+## Review phase (2026-07-16)
+
+- Wrote codev/reviews/855-monorepo-layout-introduce-apps.md (retrospective).
+- Arch: updated COLD arch.md Monorepo Structure (done in implement); no HOT change (cap full, map already points there).
+- Lessons: added one COLD Architecture entry [From #855] (relative-path breakage surface; dead-metadata package names); no HOT change.
+- Ran full CI test matrix locally: unit all green (core/artifact-canvas/codev/web/vscode). Integration+CLI surfaced pre-existing FLAKY failures (terminal-spawn 500s non-deterministic; adopt CLAUDE.md-merge 30s timeout) — documented in review Flaky Tests, not caused by this PR (only non-test codev src change = 1 comment line). Playwright dashboard-e2e NOT run (port 4100 / shared global.db risk to live Tower).
+- PR #1188 opened, recorded with porch. Running 3-way consult (config-scoped to claude+codex).
+
+## Consultation + pr gate (2026-07-16)
+
+3-way (config-scoped 2-way): Claude APPROVE, Codex REQUEST_CHANGES (3 findings, all valid, all fixed):
+1. vscode compile/typecheck never verified → ran check-types (exit 0) + compile (green); proves tsconfig extends fix; added check-types to vscode CI job.
+2. review How-to-Test commands misleading → fixed with per-package cmds.
+3. arch.md vscode marketplace name codev → codev-vscode (cluesmith.codev-vscode).
+Fixes in 4aaa2f68. Rebuttal at 855-review-iter1-rebuttals.md. pr gate now pending.
