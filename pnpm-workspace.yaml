@@ -1,6 +1,8 @@
 packages:
   - packages/*
   - apps/*
+catalog:
+  typescript: ^6.0.3
 onlyBuiltDependencies:
   - better-sqlite3
   - esbuild

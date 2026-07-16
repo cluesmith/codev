@@ -64,7 +64,7 @@
     "jsdom": "^28.1.0",
     "playwright": "^1.58.0",
     "tsx": "^4.19.2",
-    "typescript": "^5.7.2",
+    "typescript": "catalog:",
     "vitest": "^4.0.15"
   },
   "engines": {
