@@ -107,12 +107,43 @@ the cold reference.
   `codev/projectlist.md`, and shipped `docs/releases/v*` still reference old paths
   by design (point-in-time records); only *live* references were updated.
 
+## Consultation (3-way review, single advisory pass)
+
+- **Claude: APPROVE** (HIGH) — "clean mechanical restructuring; all plan items
+  implemented; no stale operational references; CLAUDE.md/AGENTS.md byte-identical."
+- **Codex: REQUEST_CHANGES** (HIGH) — 3 findings, all legitimate, all addressed:
+  1. **`apps/vscode` compile/typecheck path never verified.** Correct and important:
+     root `pnpm build` excludes vscode, and `test:unit` (vitest/esbuild) does not run
+     the tsconfig project chain — so the `extends → ../../packages/config/...` fix was
+     unproven. **Disposition: verified + guarded.** Ran `pnpm --filter codev-vscode
+     check-types` (both `tsc --noEmit` passes) and `compile` (esbuild bundle) — both
+     green from the new location, so the code was correct. Added a **`check-types` step
+     to the vscode CI job** (`.github/workflows/test.yml`) so this path is guarded
+     automatically. No code fix was needed.
+  2. **Review's "How to Test Locally" gave commands that don't exercise the moved
+     suites** (root `pnpm test`/`pnpm build` skip the apps). **Disposition: fixed** —
+     the section now lists per-package commands and calls out `check-types` as the real
+     proof of the tsconfig fix.
+  3. **`arch.md` table cell said `codev (Marketplace)`** but the extension is
+     `codev-vscode` / `cluesmith.codev-vscode`. **Disposition: fixed** — corrected the
+     cell (a pre-existing inaccuracy, corrected since this PR edits that row).
+
+  Per PIR's single-pass design, these fixes were **not** independently re-reviewed —
+  the human at the `pr` gate is the remaining check.
+
 ## How to Test Locally
 
 - **View diff**: VSCode sidebar → right-click builder `pir-855` → **Review Diff**
-- **What to verify**:
-  - `pnpm install && pnpm build && pnpm test` from the worktree — green
-  - `packages/codev/dashboard-dist/` populates after build (index.html + assets)
+- **What to verify** (note: root `pnpm test` runs *only* `--filter @cluesmith/codev`,
+  and root `pnpm build` does *not* build `apps/vscode` — so exercise the moved
+  packages explicitly):
+  - `pnpm install && pnpm build` from the worktree — green; `packages/codev/dashboard-dist/`
+    populates (index.html + assets) — proves the `build:dashboard` path fix + embedding
+  - `pnpm --filter @cluesmith/codev-web test` — the moved web suite (323 tests)
+  - `pnpm --filter codev-vscode check-types && pnpm --filter codev-vscode test:unit` —
+    **`check-types` is the real proof of the `tsconfig extends` fix** (runs `tsc --noEmit`
+    on both tsconfigs from the new location; vitest alone does not typecheck the project)
+  - `pnpm --filter @cluesmith/codev test` — the codev suite (3482 tests)
   - `git log --follow apps/web/package.json` shows history across the rename
   - `grep -rn "packages/dashboard\|packages/vscode" <live files>` returns nothing
     outside historical records

@@ -1063,7 +1063,7 @@ live in `packages/`; end-user client surfaces live in `apps/`:
 | `packages/config` | `@cluesmith/codev-config` | Shared tsconfig base (cross-project) |
 | `packages/artifact-canvas` | `@cluesmith/codev-artifact-canvas` | Reusable React surface for rendering/reviewing Codev markdown artifacts |
 | `apps/web` | `@cluesmith/codev-web` | React dashboard SPA (built into codev package) |
-| `apps/vscode` | `codev` (Marketplace) | VS Code extension |
+| `apps/vscode` | `codev-vscode` (Marketplace: `cluesmith.codev-vscode`) | VS Code extension |
 
 **Dependency graph:**
 ```
