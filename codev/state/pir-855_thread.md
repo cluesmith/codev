@@ -58,3 +58,12 @@ Executed the move. Steps done:
 - projectlist.md line 250 left as historical release-notes prose (not live structure).
 
 Running `pnpm install` to regenerate lockfile, then build + tests.
+
+## Added scope at dev-approval gate (2026-07-16)
+
+Reviewer spotted `@cluesmith/config` breaks the `@cluesmith/codev-*` convention
+(lone member missing `codev-` infix). Included the fix in this PR:
+- `@cluesmith/config` → `@cluesmith/codev-config` (private pkg, ~3 lines).
+- Zero blast radius: referenced only via relative `extends ../config/tsconfig.base.json`,
+  never by name; pnpm-lock doesn't even record the name. Build (full tsc) + tests green.
+- apps/vscode's unscoped `codev-vscode` left as-is (Marketplace publisher model, intentional).

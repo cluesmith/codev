@@ -95,6 +95,15 @@ then `pnpm build` + tests to confirm the wiring.
 
 ## Files to Change
 
+> **Added at dev-approval gate (reviewer request):** rename the private package
+> `@cluesmith/config` → `@cluesmith/codev-config` for workspace naming consistency
+> (it was the lone member missing the `codev-` infix). Zero runtime blast radius —
+> the package is `private` and consumed only via the relative `extends`
+> `../config/tsconfig.base.json`, never by name; the lockfile doesn't even record
+> the name. Edits: `packages/config/package.json` name + 2 `arch.md` mentions.
+> (`apps/vscode`'s unscoped `codev-vscode` name is left as-is — that's forced by
+> the VS Code Marketplace publisher model, not an accidental break.)
+
 ### Directory moves (git mv)
 - `packages/vscode/` → `apps/vscode/`
 - `packages/dashboard/` → `apps/web/`

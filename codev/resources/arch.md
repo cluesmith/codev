@@ -1060,7 +1060,7 @@ live in `packages/`; end-user client surfaces live in `apps/`:
 | `packages/codev` | `@cluesmith/codev` | CLI + Tower server (published to npm) |
 | `packages/core` | `@cluesmith/codev-core` | Shared runtime: TowerClient, auth, workspace encoding, EscapeBuffer, ReconnectPolicy (published to npm) |
 | `packages/types` | `@cluesmith/codev-types` | Shared TypeScript types: WebSocket protocol, API shapes, SSE events (dev dependency only) |
-| `packages/config` | `@cluesmith/config` | Shared tsconfig base (cross-project) |
+| `packages/config` | `@cluesmith/codev-config` | Shared tsconfig base (cross-project) |
 | `packages/artifact-canvas` | `@cluesmith/codev-artifact-canvas` | Reusable React surface for rendering/reviewing Codev markdown artifacts |
 | `apps/web` | `@cluesmith/codev-web` | React dashboard SPA (built into codev package) |
 | `apps/vscode` | `codev` (Marketplace) | VS Code extension |
@@ -1202,7 +1202,7 @@ codev/                                  # Project root (pnpm monorepo)
 │       ├── websocket.ts               # FRAME_CONTROL, FRAME_DATA, ControlMessage
 │       ├── sse.ts                     # SSEEventType, SSENotification
 │       └── api.ts                     # DashboardState, OverviewData, TeamApiResponse, etc.
-├── packages/config/                    # @cluesmith/config (shared tsconfig)
+├── packages/config/                    # @cluesmith/codev-config (shared tsconfig)
 │   └── tsconfig.base.json
 ├── apps/web/                           # @cluesmith/codev-web (React SPA; end-user surface)
 │   └── src/                           # React 19 + Vite 6 + xterm.js + Recharts
