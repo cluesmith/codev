@@ -43,6 +43,8 @@
 
 - **Monorepo layout: end-user surfaces move to `apps/`** (#855, PR #1188). `packages/vscode` is now `apps/vscode` and `packages/dashboard` is now `apps/web`; shared libraries (`packages/core`, `packages/codev`, `packages/types`, `packages/config`, `packages/artifact-canvas`) stay in `packages/`. Contributors and downstream tools referencing the old paths (git submodules, editor bookmarks, `.vscode/launch.json` fragments) may need to update. No user-facing behavior change — the VS Code Marketplace bundle stays `cluesmith.codev-vscode`, the CLI is unaffected, and `workspace:*` deps resolve by package name not path. A new CI step type-checks `apps/vscode` before its unit tests run, so future tsconfig-extends regressions of the class this move surfaced are caught in CI.
 
+- **TypeScript unified at 6.0.3 across the monorepo** (#1187, PR #1193). All workspace packages now pin TypeScript through a single pnpm catalog entry, ending the 5.7/5.9 drift between packages. Contributor-facing only: no runtime or user-visible behavior change. As part of the upgrade, `artifact-canvas` moved its bundler from tsup to tsdown with correct dual-format ESM/CJS output.
+
 <!-- Non-vscode work that ships in the npm release. Same bullet shape as Polish. -->
 
 ## Breaking changes
