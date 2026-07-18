@@ -1,8 +1,9 @@
 /**
  * codev adopt - Add codev to an existing project
  *
- * Creates a codev structure with protocols, roles, consult-types, and
- * resource templates copied from the embedded skeleton.
+ * Creates the minimal user-owned Codev structure and materializes missing
+ * provider skills, root instructions, and governance starters from the
+ * embedded skeleton. Framework files resolve from the package at runtime.
  */
 
 import * as fs from 'node:fs';

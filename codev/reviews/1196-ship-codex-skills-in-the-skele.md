@@ -11,9 +11,10 @@ from silently drifting.
 
 ## Files Changed
 
-The branch changes 59 files (+7,712 / -74) relative to its upstream merge base.
-The large root `.codex/skills/**` addition came from the contributor commit
-that preceded PIR initialization.
+GitHub's canonical PR scope contains 59 files. The large root
+`.codex/skills/**` addition came from the contributor commit that preceded PIR
+initialization; it is part of the upstream PR because that commit is not on
+`cluesmith/codev:main`.
 
 - `.codex/skills/**` (+6,558 / -0) — self-hosted Codex mirror.
 - `codev-skeleton/.codex/skills/**` (+611 / -0) — seven shipped Codex skills.
@@ -85,6 +86,8 @@ guidance but does not displace a HOT lesson.
 
 - `copySkills()` now returns provider-qualified relative paths. Verify init,
   adopt, and update all consume those paths consistently.
+- The init/adopt module headers now distinguish materialized integration and
+  governance files from framework files that continue to resolve at runtime.
 - `skipExisting` protects the complete skill directory independently in each
   provider tree; it intentionally does not merge individual files.
 - `PROVIDER_SPECIFIC_SKILL_EXCEPTIONS` starts empty and exempts a complete
@@ -93,6 +96,9 @@ guidance but does not displace a HOT lesson.
 - The self-hosted root has ten skills, while the shipped skeleton has seven.
   Parity is enforced between providers within each context, not between the
   self-hosted and shipped inventories.
+- The Codex consultation reported a 27-file scope because its local-main
+  baseline already contained contributor commit `25e1a000`; GitHub's actual
+  upstream PR file list contains 59 files, including that root Codex mirror.
 
 ## How to Test Locally
 

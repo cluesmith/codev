@@ -26,3 +26,8 @@
 - Dev approval completed. Review phase routes the current materialization model
   to COLD `arch.md` and the general duplicate-tree parity/preservation pattern
   to COLD `lessons-learned.md`; no HOT displacement is warranted.
+- Single-pass consultation: Gemini APPROVE; Codex REQUEST_CHANGES. Accepted the
+  stale init/adopt module-header finding and corrected both comments. Rebutted
+  the claimed review scope error: GitHub reports 59 PR files, while consult
+  reported 27 because local `main` already contains contributor commit
+  `25e1a000`; the review now explains that baseline difference explicitly.
