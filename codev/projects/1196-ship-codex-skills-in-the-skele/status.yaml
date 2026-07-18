@@ -1,0 +1,18 @@
+id: '1196'
+title: ship-codex-skills-in-the-skele
+protocol: pir
+phase: plan
+plan_phases: []
+current_plan_phase: null
+gates:
+  plan-approval:
+    status: pending
+  dev-approval:
+    status: pending
+  pr:
+    status: pending
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-07-18T06:26:40.103Z'
+updated_at: '2026-07-18T06:26:40.104Z'
