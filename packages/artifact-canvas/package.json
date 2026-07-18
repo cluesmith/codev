@@ -23,7 +23,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsdown",
+    "build": "tsdown --config-loader native",
     "test": "vitest run",
     "build:smoke": "node scripts/smoke.mjs",
     "check-types": "tsc --noEmit",
