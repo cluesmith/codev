@@ -17,5 +17,5 @@
 ## PR
 
 - Published the branch through the contributor fork and opened upstream PR #1200.
-- CMAP results so far: Gemini `APPROVE` (high confidence); Codex `APPROVE` (high confidence).
-- Blocked before the PR gate: the required Claude lane was attempted twice but the Claude CLI quota is exhausted until 9am America/Toronto. The architect was notified; no verdict was fabricated and the gate was not requested.
+- CMAP completed with all three required verdicts: Gemini `APPROVE` (high confidence), Codex `APPROVE` (high confidence), and Claude `APPROVE` (high confidence).
+- The Claude lane initially hit its CLI quota, then succeeded when retried after the quota window reset. No reviewer requested changes.
