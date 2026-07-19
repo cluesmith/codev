@@ -840,6 +840,13 @@ export class SessionManager extends EventEmitter {
       this.log(`Session ${sessionId} removed but shellper pid=${session.pid} is alive; preserving socket`);
       return;
     }
+    // Socket paths are keyed by session id, so if a new session claimed this
+    // id while we awaited (an in-process re-create/re-adopt), the path now
+    // belongs to the new occupant — leave it alone. The caller already
+    // deleted OUR map entry, so any present entry is a successor's.
+    if (this.sessions.has(sessionId)) {
+      return;
+    }
     this.unlinkSocketIfExists(session.socketPath);
   }
 

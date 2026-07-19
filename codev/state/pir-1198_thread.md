@@ -45,4 +45,10 @@ First install of the branch KILLED two architects (shannon/app pid 4509, codev a
 
 PR #1204 opened. Consult (single pass): claude=APPROVE, codex=REQUEST_CHANGES. Codex's finding was a real regression: attachShellper() leaked one disk-log fd per recovery re-attach. Fixed (guard open on logFd===null) + regression test, documented in review + rebuttal file; consult validated the consult-trusting lesson once again. Also caught at final worktree check: the exitInfo.code ?? -1 type fix had been verified by every build but never staged — committed in 0db7c7b7. Waiting at pr gate.
 
-Follow-up filed at the architect's direction: #1205 (replay buffer redesign: store the screen, not the stream — the root condition behind the 16MB+ frames). PR #1204's caps documented there as containment, not cure.
+## Post-incident hardening at the pr gate
+
+Two more findings, both fixed in 65526295:
+- Human-reported interactivity regression: restoring the replay path seeded up to 16MB of newline-free history into ring buffers; every viewer attach shipped it to xterm in one write (multi-second parses, webview restarts). Adoption now caps the ring seed to a 1MB tail (RING_SEED_MAX_BYTES, logged when trimming). The old "fast" behavior was the replay-drop bug acting as accidental UI protection.
+- Architect review finding (Medium, PID reuse): removeDeadSession gated unlink on isProcessAlive alone. Now an async best-effort cleanupDeadSessionSocket using the shared alive+start-time guard (isShellperProcessCurrent); map mutation stays sync.
+
+Follow-up filed at the user's direction: #1205 (replay buffer redesign: store the screen, not the stream — the root condition behind the 16MB+ frames). PR #1204's caps documented there as containment, not cure.
