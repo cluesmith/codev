@@ -146,8 +146,16 @@ export function armSeedKick(
     const state = readState(sessionId);
     // lastPrompt reflects the last SUBMITTED message (observed) — the strong
     // signal. updatedAt also moves on unrelated store writes (TUI open), so
-    // it is deliberately not treated as confirmation.
-    return !!state?.lastPrompt && state.lastPrompt.includes(opts.message);
+    // it is deliberately not treated as confirmation. The comparison must be
+    // normalized EQUALITY, not substring: on a fresh spawn lastPrompt is the
+    // SEED prompt (observed), whose ack-and-wait wrapper itself mentions the
+    // kick word ("wait for BEGIN") — a substring check would report success
+    // before the kick ever submitted, silently defeating the swallowed-Enter
+    // recovery (caught by the PR consultation, PIR #1201). A submitted
+    // message lands in lastPrompt with newlines flattened to spaces
+    // (observed), hence whitespace normalization on both sides.
+    return !!state?.lastPrompt &&
+      normalizeWhitespace(state.lastPrompt) === normalizeWhitespace(opts.message);
   };
 
   function deliverAndVerify(sessionId: string): void {
@@ -191,4 +199,8 @@ export function armSeedKick(
 
 function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function normalizeWhitespace(s: string): string {
+  return s.replace(/\s+/g, ' ').trim();
 }

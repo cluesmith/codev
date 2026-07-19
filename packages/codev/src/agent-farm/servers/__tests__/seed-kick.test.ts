@@ -165,6 +165,45 @@ describe('armSeedKick', () => {
     expect(written()).toBe('BEGIN\r\r');
   });
 
+  it('the SEED prompt containing the kick word is NOT confirmation (fresh-spawn false-positive regression)', () => {
+    // PR-consultation finding (codex, PIR #1201): on a fresh spawn,
+    // lastPrompt initially holds the SEED prompt, whose ack-and-wait wrapper
+    // mentions BEGIN ("wait for BEGIN"). A substring check would report the
+    // kick submitted before it was ever written, so a swallowed Enter would
+    // never be healed. Confirmation must require normalized EQUALITY.
+    arm();
+    session.emit('data', `${SENTINEL} session_seeded\r\n`);
+    // Store state as the seed leaves it: lastPrompt = the full seed prompt.
+    storeState = {
+      workDir: '/tmp/wt',
+      updatedAt: '2026-07-18T10:00:00Z',
+      lastPrompt: 'Strict discipline: wait. You will receive a message "BEGIN" in a later turn.\n=== TASK BRIEFING (do not act until BEGIN) ===\ndo the thing',
+    };
+    vi.advanceTimersByTime(2_500 + 1_000);
+    // The kick's Enter was swallowed; lastPrompt stays the seed prompt.
+    // Stage 1 must exhaust and re-send Enter — NOT report success.
+    vi.advanceTimersByTime(8_000);
+    expect(log).not.toHaveBeenCalledWith('INFO', expect.stringContaining('confirmed submitted'));
+    expect(log).toHaveBeenCalledWith('WARN', expect.stringContaining('re-sending Enter'));
+    expect(written()).toBe('BEGIN\r\r');
+    // The re-sent Enter lands the kick: lastPrompt becomes exactly BEGIN.
+    storeState = { workDir: '/tmp/wt', updatedAt: '2026-07-18T10:00:20Z', lastPrompt: 'BEGIN' };
+    vi.advanceTimersByTime(1_000);
+    expect(log).toHaveBeenCalledWith('INFO', expect.stringContaining('confirmed submitted'));
+  });
+
+  it('confirmation tolerates the observed newline-flattening of submitted messages', () => {
+    // Submitted multi-line messages land in lastPrompt with newlines
+    // flattened to spaces (observed on kimi 0.27.0) — normalized equality
+    // must still confirm a multi-line kick payload.
+    arm(opts({ message: 'line one\nline two' }));
+    session.emit('data', `${SENTINEL} session_flat\r\n`);
+    vi.advanceTimersByTime(2_500 + 1_000);
+    storeState = { workDir: '/tmp/wt', updatedAt: '2026-07-18T10:00:05Z', lastPrompt: 'line one line two' };
+    vi.advanceTimersByTime(1_000);
+    expect(log).toHaveBeenCalledWith('INFO', expect.stringContaining('confirmed submitted'));
+  });
+
   it('updatedAt movement alone is NOT treated as confirmation', () => {
     arm();
     session.emit('data', `${SENTINEL} session_touch\r\n`);
