@@ -606,8 +606,11 @@ async function handleTerminalCreate(
           cols: cols || DEFAULT_COLS,
         });
 
-        const replayData = await client.waitForReplay(); // #1198: fresh shellpers always send REPLAY (possibly empty); awaiting avoids racing early child output
+        // Read session info BEFORE awaiting replay: an instantly-exiting
+        // child's EXIT frame can remove the session from the manager during
+        // the await, and this lookup must not miss (#1198).
         const shellperInfo = shellperManager.getSessionInfo(sessionId)!;
+        const replayData = await client.waitForReplay(); // #1198: fresh shellpers always send REPLAY (possibly empty); awaiting avoids racing early child output
 
         const session = manager.createSessionRaw({
           label: label || `terminal-${sessionId.slice(0, 8)}`,
@@ -2047,8 +2050,11 @@ async function handleWorkspaceShellCreate(
           ...defaultSessionOptions(),
         });
 
-        const replayData = await client.waitForReplay(); // #1198: fresh shellpers always send REPLAY (possibly empty); awaiting avoids racing early child output
+        // Read session info BEFORE awaiting replay: an instantly-exiting
+        // child's EXIT frame can remove the session from the manager during
+        // the await, and this lookup must not miss (#1198).
         const shellperInfo = shellperManager.getSessionInfo(sessionId)!;
+        const replayData = await client.waitForReplay(); // #1198: fresh shellpers always send REPLAY (possibly empty); awaiting avoids racing early child output
 
         const session = manager.createSessionRaw({
           label: `Shell ${shellId.replace('shell-', '')}`,

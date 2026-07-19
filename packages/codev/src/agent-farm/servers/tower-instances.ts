@@ -577,9 +577,10 @@ export async function launchInstance(workspacePath: string): Promise<{ success: 
               ...defaultSessionOptions({ restartOnExit: true, restartDelay: 2000, maxRestarts: 50 }),
             });
 
-            // Get replay data and shellper info
-            const replayData = await client.waitForReplay(); // #1198: fresh shellpers always send REPLAY (possibly empty); awaiting avoids racing early child output
+            // Read session info BEFORE awaiting replay: an instantly-exiting
+            // child's EXIT frame can remove the session during the await (#1198)
             const shellperInfo = _deps.shellperManager.getSessionInfo(sessionId)!;
+            const replayData = await client.waitForReplay(); // #1198: fresh shellpers always send REPLAY (possibly empty)
 
             // Create a PtySession backed by the shellper client
             const session = manager.createSessionRaw({
@@ -1056,8 +1057,10 @@ export async function addArchitect(
         ...defaultSessionOptions({ restartOnExit: true, restartDelay: 2000, maxRestarts: 50 }),
       });
 
-      const replayData = await client.waitForReplay(); // #1198: fresh shellpers always send REPLAY (possibly empty); awaiting avoids racing early child output
+      // Read session info BEFORE awaiting replay: an instantly-exiting
+      // child's EXIT frame can remove the session during the await (#1198)
       const shellperInfo = _deps.shellperManager.getSessionInfo(shellperSessionId)!;
+      const replayData = await client.waitForReplay(); // #1198: fresh shellpers always send REPLAY (possibly empty)
 
       const session = manager.createSessionRaw({ label: `Architect (${name})`, cwd: workspacePath });
       const ptySession = manager.getSession(session.id);
