@@ -308,7 +308,7 @@ export class SessionManager extends EventEmitter {
     // Forward exit events and clean up dead sessions
     client.on('exit', (exitInfo: ExitMessage) => {
       this.log(`Session ${sessionId} exited (code=${exitInfo.code})`);
-      this.logStderrTail(sessionId, session, exitInfo.code);
+      this.logStderrTail(sessionId, session, exitInfo.code ?? -1);
       this.emit('session-exit', sessionId, exitInfo);
       // If not auto-restarting, remove the dead session from the map
       // so listSessions() doesn't report it and cleanupStaleSockets()
