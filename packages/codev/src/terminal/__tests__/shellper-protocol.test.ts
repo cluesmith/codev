@@ -268,20 +268,41 @@ describe('shellper-protocol', () => {
       expect(frames[0].payload.toString()).toBe('test');
     });
 
-    it('rejects oversized frames (>16MB)', async () => {
-      // Craft a header claiming a huge payload
+    it('skips oversized frames (>16MB) and keeps parsing (#1198)', async () => {
+      // #1198: an oversized frame is a per-frame condition, not a fatal
+      // stream error — treating it as fatal deterministically killed every
+      // reconnect to a shellper whose replay buffer outgrew the cap.
+      const oversizedSize = MAX_FRAME_SIZE + 1;
       const header = Buffer.allocUnsafe(HEADER_SIZE);
-      header[0] = FrameType.DATA;
-      header.writeUInt32BE(MAX_FRAME_SIZE + 1, 1);
+      header[0] = FrameType.REPLAY;
+      header.writeUInt32BE(oversizedSize, 1);
+      const oversizedPayload = Buffer.alloc(oversizedSize, 0x42);
+      const followUp = encodeFrame(FrameType.DATA, Buffer.from('after'));
 
       const parser = createFrameParser();
+      const frames: ParsedFrame[] = [];
+      const skipped: Array<{ type: number; size: number }> = [];
+      const errors: Error[] = [];
+      parser.on('data', (f: ParsedFrame) => frames.push(f));
+      parser.on('frame-skipped', (info: { type: number; size: number }) => skipped.push(info));
+      parser.on('error', (err: Error) => errors.push(err));
 
-      await expect(new Promise((resolve, reject) => {
-        parser.on('data', resolve);
-        parser.on('error', reject);
+      await new Promise<void>((resolve) => {
         parser.write(header);
-      })).rejects.toThrow(/exceeds maximum/);
-    });
+        // Deliver the oversized payload in fragments, interleaved with the
+        // next frame in the final chunk (the realistic socket shape).
+        const half = Math.floor(oversizedSize / 2);
+        parser.write(oversizedPayload.subarray(0, half));
+        parser.write(Buffer.concat([oversizedPayload.subarray(half), followUp]));
+        parser.end();
+        setTimeout(resolve, 10);
+      });
+
+      expect(errors).toEqual([]);
+      expect(skipped).toEqual([{ type: FrameType.REPLAY, size: oversizedSize }]);
+      expect(frames).toHaveLength(1);
+      expect(frames[0].payload.toString()).toBe('after');
+    }, 20_000);
 
     it('passes through unknown frame types', async () => {
       const unknownType = 0xff;

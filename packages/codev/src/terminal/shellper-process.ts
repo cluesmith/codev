@@ -21,6 +21,7 @@ import {
   FrameType,
   PROTOCOL_VERSION,
   ALLOWED_SIGNALS,
+  REPLAY_PAYLOAD_MAX,
   createFrameParser,
   encodeData,
   encodeWelcome,
@@ -377,8 +378,18 @@ export class ShellperProcess extends EventEmitter {
     socket.write(welcome);
     this.log(`WELCOME sent: pid=${pid}, version=${PROTOCOL_VERSION}`);
 
-    // Send replay buffer
-    const replayData = this.replayBuffer.getReplayData();
+    // Send replay buffer. #1198: never emit a frame the peer's parser must
+    // drop — a long-lived TUI session's replay (newline-free, unbounded
+    // partial) can exceed MAX_FRAME_SIZE, which is exactly what zombified
+    // long-lived terminals on every reconnect. Send the most recent bytes
+    // that fit; a tail-trimmed replay can render imperfectly for alt-screen
+    // TUIs (#1047), but the client's post-connect resize nudge repaints,
+    // and a truncated replay beats a dead connection.
+    let replayData = this.replayBuffer.getReplayData();
+    if (replayData.length > REPLAY_PAYLOAD_MAX) {
+      this.log(`Replay ${replayData.length} bytes exceeds cap; sending last ${REPLAY_PAYLOAD_MAX}`);
+      replayData = replayData.subarray(replayData.length - REPLAY_PAYLOAD_MAX);
+    }
     if (replayData.length > 0) {
       socket.write(encodeReplay(replayData));
     }

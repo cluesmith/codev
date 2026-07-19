@@ -6,6 +6,7 @@ import os from 'node:os';
 import {
   FrameType,
   PROTOCOL_VERSION,
+  MAX_FRAME_SIZE,
   createFrameParser,
   encodeFrame,
   encodeWelcome,
@@ -753,7 +754,7 @@ describe('ShellperClient', () => {
     }
 
     it('emits close when a post-handshake error path runs cleanup first', async () => {
-      const { getServerSocket } = createCapturingShellper();
+      createCapturingShellper();
 
       const client = new ShellperClient(socketPath);
       cleanup.push(() => client.disconnect());
@@ -763,16 +764,56 @@ describe('ShellperClient', () => {
       client.on('error', (err: Error) => errors.push(err));
       const closed = new Promise<void>((resolve) => client.once('close', resolve));
 
-      // A frame header whose declared payload length exceeds MAX_FRAME_SIZE
-      // makes the client's parser throw. That is the production error path
-      // (safeEmitError then cleanup) whose subsequent socket 'close' was
-      // swallowed before the fix, leaving a silent zombie.
-      getServerSocket()!.write(Buffer.from([FrameType.DATA, 0xff, 0xff, 0xff, 0xff]));
+      // Destroy the client-side socket with an error: the production error
+      // path (socket 'error' → safeEmitError → cleanup) whose subsequent
+      // 'close' was swallowed before the fix, leaving a silent zombie.
+      const socket = (client as unknown as { socket: net.Socket }).socket;
+      socket.destroy(new Error('transient socket error'));
 
       await closed;
       expect(errors.length).toBeGreaterThan(0);
       expect(client.connected).toBe(false);
     });
+
+    it('survives an oversized REPLAY frame: skips it, stays connected, keeps parsing (#1198 incident)', async () => {
+      const { getServerSocket } = createCapturingShellper();
+
+      const client = new ShellperClient(socketPath);
+      cleanup.push(() => client.disconnect());
+      await client.connect();
+
+      let closeEmitted = false;
+      client.on('close', () => { closeEmitted = true; });
+      const errors: Error[] = [];
+      client.on('error', (err: Error) => errors.push(err));
+      const skipped: Array<{ type: number; size: number }> = [];
+      client.on('frame-skipped', (info: { type: number; size: number }) => skipped.push(info));
+      const dataPromise = new Promise<Buffer>((resolve) => client.once('data', resolve));
+
+      // The incident shape: a shellper whose replay outgrew MAX_FRAME_SIZE
+      // sends it anyway (old shellper binaries still do). Before the fix the
+      // parser threw, the connection died on every reconnect, and the
+      // session was eventually orphaned and killed.
+      const oversized = Buffer.alloc(MAX_FRAME_SIZE + 1, 0x41);
+      const header = Buffer.alloc(5);
+      header[0] = FrameType.REPLAY;
+      header.writeUInt32BE(oversized.length, 1);
+      const server = getServerSocket()!;
+      server.write(header);
+      server.write(oversized);
+      // A frame after the oversized one must still be parsed.
+      server.write(encodeData('still alive'));
+
+      const data = await dataPromise;
+      expect(data.toString()).toBe('still alive');
+      expect(skipped).toEqual([{ type: FrameType.REPLAY, size: MAX_FRAME_SIZE + 1 }]);
+      expect(errors).toEqual([]);
+      expect(closeEmitted).toBe(false);
+      expect(client.connected).toBe(true);
+      // Replay waiters resolve with an empty replay instead of hanging.
+      const replay = await client.waitForReplay(100);
+      expect(replay.length).toBe(0);
+    }, 20_000);
 
     it('does not emit close on intentional disconnect', async () => {
       createCapturingShellper();

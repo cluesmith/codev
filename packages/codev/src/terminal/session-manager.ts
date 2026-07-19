@@ -322,6 +322,10 @@ export class SessionManager extends EventEmitter {
       this.emit('session-error', sessionId, err);
     });
 
+    client.on('frame-skipped', (info: { type: number; size: number }) => {
+      this.log(`Session ${sessionId} skipped oversized frame (type=${info.type}, ${info.size} bytes)`);
+    });
+
     // Socket closed without an EXIT frame. Historically treated as "shellper
     // crashed", but #1198 showed it also fires for a transient socket error
     // against a perfectly healthy shellper, so try to reconnect in place
@@ -807,7 +811,14 @@ export class SessionManager extends EventEmitter {
       session.restartResetTimer = null;
     }
     this.sessions.delete(sessionId);
-    this.unlinkSocketIfExists(session.socketPath);
+    // #1198: only unlink the socket when the shellper process is actually
+    // gone. Unlinking a live shellper's socket makes it unreachable AND
+    // flags it for the orphan sweeper's kill path — so a session whose
+    // connection fails deterministically must degrade to a recoverable
+    // orphan (re-adoptable, attachable), never to a killed live process.
+    if (!this.isProcessAlive(session.pid)) {
+      this.unlinkSocketIfExists(session.socketPath);
+    }
   }
 
   private getSocketPath(sessionId: string): string {

@@ -1084,6 +1084,11 @@ describe('SessionManager', () => {
 
       expect(err.message).toContain('Shellper disconnected unexpectedly');
       expect(manager.listSessions().has('recover-exhaust')).toBe(false);
+      // #1198 incident hardening: the process behind this session (the test
+      // process stands in for a live shellper) is alive, so the dead
+      // declaration must NOT unlink the socket — an unlinked socket flags a
+      // live shellper for the orphan sweeper's kill path.
+      expect(fs.existsSync(socketPath)).toBe(true);
     }, 20_000);
   });
 

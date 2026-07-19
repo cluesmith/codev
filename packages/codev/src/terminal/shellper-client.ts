@@ -153,6 +153,18 @@ export class ShellperClient extends EventEmitter implements IShellperClient {
         this.safeEmitError(err);
         this.cleanup();
       });
+      // #1198: the parser drops oversized frames instead of erroring (a
+      // long-lived shellper's replay can exceed the frame cap). The
+      // connection stays healthy; surface what was lost. For a dropped
+      // REPLAY, unblock replay waiters with an empty replay so adoption
+      // proceeds (viewers repaint via the post-connect resize nudge).
+      parser.on('frame-skipped', (info: { type: number; size: number }) => {
+        if (info.type === FrameType.REPLAY && this.replayData === null) {
+          this.replayData = Buffer.alloc(0);
+          this.emit('replay', this.replayData);
+        }
+        this.emit('frame-skipped', info);
+      });
 
       socket.on('connect', () => {
         socket.pipe(parser);

@@ -6,6 +6,7 @@ import os from 'node:os';
 import {
   FrameType,
   PROTOCOL_VERSION,
+  REPLAY_PAYLOAD_MAX,
   encodeHello,
   encodeData,
   encodeResize,
@@ -243,6 +244,42 @@ describe('ShellperProcess', () => {
 
       socket.destroy();
     });
+
+    it('caps an oversized replay to the most recent bytes on connect (#1198)', async () => {
+      shellper = new ShellperProcess(createMockPty, socketPath);
+      await shellper.start('/bin/bash', [], '/tmp', {}, 80, 24);
+
+      // A newline-free stream (full-screen TUI shape) larger than the cap.
+      const chunk = 'x'.repeat(1024 * 1024);
+      for (let i = 0; i < 9; i++) {
+        mockPty.simulateData(chunk);
+      }
+      mockPty.simulateData('TAIL-MARKER');
+      expect(shellper.getReplayData().length).toBeGreaterThan(REPLAY_PAYLOAD_MAX);
+
+      // Raw socket with the parser attached BEFORE the handshake, so the
+      // REPLAY frame cannot be swallowed by a helper's internal reads.
+      const socket = net.createConnection(socketPath);
+      const parser = createFrameParser();
+      socket.pipe(parser);
+      const frames: ParsedFrame[] = [];
+      parser.on('data', (f: ParsedFrame) => frames.push(f));
+      await new Promise<void>((resolve) => socket.on('connect', () => resolve()));
+      socket.write(encodeHello({ version: PROTOCOL_VERSION, clientType: 'tower' }));
+
+      const deadline = Date.now() + 10_000;
+      while (!frames.some((f) => f.type === FrameType.REPLAY) && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      const replayFrame = frames.find((f) => f.type === FrameType.REPLAY);
+      expect(replayFrame).toBeDefined();
+      // Capped to the most recent bytes: fits the frame budget and ends with
+      // the newest output.
+      expect(replayFrame!.payload.length).toBe(REPLAY_PAYLOAD_MAX);
+      expect(replayFrame!.payload.subarray(-11).toString()).toBe('TAIL-MARKER');
+
+      socket.destroy();
+    }, 20_000);
 
     it('new tower connection replaces old tower connection', async () => {
       shellper = new ShellperProcess(createMockPty, socketPath);

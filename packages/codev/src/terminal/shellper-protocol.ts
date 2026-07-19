@@ -33,6 +33,11 @@ export type FrameTypeValue = (typeof FrameType)[keyof typeof FrameType];
 export const PROTOCOL_VERSION = 1;
 export const MAX_FRAME_SIZE = 16 * 1024 * 1024; // 16MB
 export const HEADER_SIZE = 5; // 1 byte type + 4 bytes length
+// #1198: cap on the replay payload a shellper sends on (re)connection. Kept
+// well under MAX_FRAME_SIZE so a REPLAY frame can never be one the peer's
+// parser must drop. When a session's replay outgrows this, the most recent
+// bytes are sent (see ShellperProcess.handleHello).
+export const REPLAY_PAYLOAD_MAX = 8 * 1024 * 1024; // 8MB
 
 // --- Allowed Signals ---
 
@@ -171,12 +176,18 @@ export interface ParsedFrame {
  * Input: raw socket data (may be fragmented across chunks)
  * Output: ParsedFrame objects (in objectMode)
  *
- * Emits 'frame-error' event on protocol violations (oversized frames,
- * malformed headers). The stream is destroyed on error.
+ * An oversized frame (declared payload > MAX_FRAME_SIZE) is NOT a stream
+ * error: it is discarded incrementally and surfaced via a 'frame-skipped'
+ * event ({ type, size }), and parsing continues with the next frame. #1198:
+ * a long-lived shellper's replay buffer can legitimately outgrow the cap;
+ * treating that as fatal killed the connection deterministically on every
+ * reconnect and cascaded into orphaned/killed sessions.
  */
 export class FrameParser extends Transform {
   private chunks: Buffer[] = [];
   private bufferedLength = 0;
+  // Bytes of an oversized frame's payload still to be dropped (#1198).
+  private discardRemaining = 0;
 
   constructor() {
     super({ readableObjectMode: true });
@@ -205,21 +216,41 @@ export class FrameParser extends Transform {
   }
 
   private drainFrames(): void {
-    while (this.bufferedLength >= HEADER_SIZE) {
+    while (true) {
+      // Finish dropping an oversized frame's payload before parsing resumes.
+      if (this.discardRemaining > 0) {
+        const drop = Math.min(this.discardRemaining, this.bufferedLength);
+        if (drop > 0) {
+          this.discard(drop);
+          this.discardRemaining -= drop;
+        }
+        if (this.discardRemaining > 0) {
+          return; // wait for more data to drop
+        }
+      }
+
+      if (this.bufferedLength < HEADER_SIZE) {
+        return;
+      }
+
       // Peek at the header without consuming
       const header = this.peek(HEADER_SIZE);
       const payloadLength = header.readUInt32BE(1);
 
       if (payloadLength > MAX_FRAME_SIZE) {
-        throw new Error(
-          `Frame payload size ${payloadLength} exceeds maximum ${MAX_FRAME_SIZE}`,
-        );
+        // #1198: drop the frame, keep the stream. The consumer learns what
+        // was lost via 'frame-skipped' and decides how to degrade (for a
+        // REPLAY, the terminal repaints via the post-connect resize nudge).
+        this.emit('frame-skipped', { type: header[0], size: payloadLength });
+        this.discard(HEADER_SIZE);
+        this.discardRemaining = payloadLength;
+        continue;
       }
 
       const totalLength = HEADER_SIZE + payloadLength;
       if (this.bufferedLength < totalLength) {
         // Need more data
-        break;
+        return;
       }
 
       // Consume the full frame
@@ -229,6 +260,22 @@ export class FrameParser extends Transform {
 
       this.push({ type, payload } satisfies ParsedFrame);
     }
+  }
+
+  /** Drop n buffered bytes without materializing them (n <= bufferedLength). */
+  private discard(n: number): void {
+    let remaining = n;
+    while (remaining > 0 && this.chunks.length > 0) {
+      const head = this.chunks[0];
+      if (head.length <= remaining) {
+        remaining -= head.length;
+        this.chunks.shift();
+      } else {
+        this.chunks[0] = head.subarray(remaining);
+        remaining = 0;
+      }
+    }
+    this.bufferedLength -= n;
   }
 
   private peek(n: number): Buffer {

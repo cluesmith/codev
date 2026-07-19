@@ -361,7 +361,7 @@ export async function towerStop(options: TowerStopOptions = {}): Promise<void> {
   // #1198: wait for the processes to actually exit before returning.
   // Returning right after SIGTERM let `afx tower stop && afx tower start`
   // overlap the old Tower's shellper teardown with the new Tower's adoption
-  // pass, which is how transient reconnect errors were minted.
+  // pass — an unnecessary race window during every restart.
   const isAlive = (pid: number): boolean => {
     try {
       process.kill(pid, 0);
