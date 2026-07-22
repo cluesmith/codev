@@ -54,6 +54,51 @@ name in a multi-architect workspace).
    on resume. Do not invent a new agenda — resume the one the state file
    describes.
 
+## Saving your state (and knowing when to `/clear`)
+
+Recovery is only half the loop. `/arch-init` reads state; **you** write it. The
+state file is not crash insurance — it is your deliberate memory-management
+mechanism. Auto-compaction happens at an arbitrary moment with content you did
+not choose; a state save happens at a boundary **you** pick, with a summary
+**you** curate. That is strictly better, so use it:
+
+```
+/arch-init (recover) → work → save at a checkpoint → suggest /clear → human /clears → /arch-init → …
+```
+
+**When to save.** Save at a *resumable boundary* — a point a fresh session
+could pick up cleanly from. Good moments, judged by you: a gate approval, a PR
+merge, a completed investigation, the end of a long tool-heavy stretch.
+**Never save mid-task.** The state file must describe a point you can resume
+*from*, not a half-finished action; a mid-task snapshot resumes into confusion.
+
+**How to save (write format = read format).** Recovery reads *the role banner
+plus the most recent dated section*, so a save must leave exactly that behind:
+
+1. **Rewrite the current-state / open-loops section in place** — overwrite it
+   with where things actually stand now (current focus + open loops + how to
+   resume). Do not accumulate stale "current state" blocks.
+2. **Append one short dated log entry** capturing what changed this stretch.
+3. **Keep it to one screen (compaction discipline).** The state file is a
+   summary, not a transcript. When you append, prune stale dated sections so
+   the file stays readable at a glance.
+
+**Content guardrails.** No secrets (tokens, keys, credentials). No transcript
+dumps or raw tool output. Include only: current focus, open loops, and the
+instructions a fresh session needs to resume.
+
+**Then — and only then — suggest `/clear`.** Save first, *then* tell the human
+it is a good time to clear. You cannot clear your own context and must never
+decide unilaterally to lose it; keeping the irreversible step behind a human
+keystroke means accepting the suggestion can never lose anything, because the
+save already happened. Make the suggestion **advisory, never nagging**, and
+only right after a save — e.g.:
+
+> State saved to `codev/state/<name>.md` — good time to `/clear` if this
+> session is feeling heavy.
+
+Do not repeat it, and do not prompt to `/clear` at any other time.
+
 ## Guardrails (architect-wide; the state file may add more)
 
 - **Never auto-approve porch gates.** A gate notification is for the human,
