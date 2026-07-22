@@ -96,6 +96,20 @@ export class SendBuffer {
       const maxAgeExceeded = messages.some(m => now - m.timestamp >= this.maxBufferAgeMs);
       const isIdle = session.isUserIdle(this.idleThresholdMs);
 
+      // #1198: writes to a session whose shellper connection is down are
+      // dropped silently. Hold the messages while the connection recovers
+      // (in-place reconnect takes a few seconds); if it never does, drop
+      // loudly instead of logging a successful delivery.
+      if (!session.writable) {
+        if (forceAll || maxAgeExceeded) {
+          if (this.log) {
+            this.log('ERROR', `Dropping ${messages.length} buffered message(s) for unwritable session ${sessionId.slice(0, 8)}... (shellper connection down)`);
+          }
+          this.buffers.delete(sessionId);
+        }
+        continue;
+      }
+
       // Deliver when: forced, user idle, or max age exceeded.
       // Bugfix #492: removed composing check — it gets stuck true after non-Enter
       // keystrokes (Ctrl+C, arrows, Tab), causing messages to wait 60s max age.

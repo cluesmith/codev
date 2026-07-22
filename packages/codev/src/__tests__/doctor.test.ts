@@ -582,7 +582,29 @@ describe('doctor command', () => {
         return Buffer.from('');
       });
 
-      vi.mocked(spawnSync).mockImplementation((cmd: string) => {
+      vi.mocked(spawnSync).mockImplementation((cmd: string, args?: readonly string[]) => {
+        // Healthy state-file split (#1192): thread files not ignored,
+        // nothing tracked under codev/state/
+        if (cmd === 'git' && args && args[0] === 'check-ignore' && String(args[args.length - 1]).endsWith('_thread.md')) {
+          return {
+            status: 1,
+            stdout: '',
+            stderr: '',
+            signal: null,
+            output: [null, '', ''],
+            pid: 0,
+          };
+        }
+        if (cmd === 'git' && args && args[0] === 'ls-files') {
+          return {
+            status: 0,
+            stdout: '',
+            stderr: '',
+            signal: null,
+            output: [null, '', ''],
+            pid: 0,
+          };
+        }
         const responses: Record<string, string> = {
           'node': 'v20.0.0',
           'tmux': 'tmux 3.4',

@@ -26,6 +26,23 @@ import { TerminalManager, DEFAULT_DISK_LOG_MAX_BYTES } from '../../terminal/inde
  * Extract shellper session UUID from socket path (Spec 468).
  * Socket format: shellper-<UUID>.sock
  */
+/**
+ * #1198: cap the replay seeded into an adopted PtySession's ring buffer.
+ * A long-lived full-screen TUI session's replay can be many MB of
+ * newline-free history; seeding it whole means every subsequent viewer
+ * attach ships the entire payload to xterm.js in one bracketed write
+ * (multi-second parse, webview stalls). Seed only the most recent bytes:
+ * the client's post-connect resize nudge repaints full-screen apps, and the
+ * shellper retains the full history.
+ */
+const RING_SEED_MAX_BYTES = 1024 * 1024; // 1MB
+
+function capRingSeed(replayData: Buffer, sessionId: string): Buffer {
+  if (replayData.length <= RING_SEED_MAX_BYTES) return replayData;
+  _deps?.log('INFO', `Session ${sessionId} replay is ${replayData.length} bytes; seeding the most recent ${RING_SEED_MAX_BYTES}`);
+  return replayData.subarray(replayData.length - RING_SEED_MAX_BYTES);
+}
+
 function extractShellperSessionId(socketPath: string | null): string | null {
   if (!socketPath) return null;
   const match = path.basename(socketPath).match(/^shellper-(.+)\.sock$/);
@@ -708,7 +725,7 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
 
   // Probe shellper sockets in parallel with bounded concurrency (Spec 0122 Phase 2)
   const CONCURRENCY_LIMIT = 5;
-  type ProbeResult = { dbSession: DbTerminalSession; client: import('../../terminal/shellper-client.js').IShellperClient | null; restartOptions?: ReconnectRestartOptions };
+  type ProbeResult = { dbSession: DbTerminalSession; client: import('../../terminal/shellper-client.js').IShellperClient | null; replayData: Buffer | null; restartOptions?: ReconnectRestartOptions };
   const probeResults: ProbeResult[] = [];
 
   for (let i = 0; i < probeTasks.length; i += CONCURRENCY_LIMIT) {
@@ -722,7 +739,20 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
           task.dbSession.shellper_start_time!,
           task.restartOptions,
         );
-        return { dbSession: task.dbSession, client, restartOptions: task.restartOptions };
+        if (!client) {
+          return { dbSession: task.dbSession, client: null, replayData: null, restartOptions: task.restartOptions };
+        }
+        // #1198: the REPLAY frame often arrives in a separate socket read
+        // after WELCOME, so a synchronous getReplayData() here raced it and
+        // adopted terminals rendered blank until new output arrived. Wait
+        // briefly for it. #1215: run this wait inside the same bounded-
+        // concurrency batch as the connect, so waits for up to
+        // CONCURRENCY_LIMIT sessions overlap instead of stacking in the
+        // sequential loop below (worst case for a mostly-idle, pre-upgrade
+        // fleet of shellpers was ~10s serialized; see waitForReplay() for
+        // how the per-session cost itself is also bounded for legacy peers).
+        const replayData = capRingSeed(await client.waitForReplay(), task.dbSession.id);
+        return { dbSession: task.dbSession, client, replayData, restartOptions: task.restartOptions };
       }),
     );
 
@@ -739,7 +769,7 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
   }
 
   // Process probe results sequentially (shared state mutations)
-  for (const { dbSession, client } of probeResults) {
+  for (const { dbSession, client, replayData } of probeResults) {
     if (!client) {
       _deps.log('INFO', `Shellper session ${dbSession.id} is stale (PID/socket dead) — will clean up`);
       continue; // Will be cleaned up in Phase 2
@@ -747,7 +777,6 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
 
     const workspacePath = dbSession.workspace_path;
     const sessionCwd = dbSession.cwd ?? workspacePath;
-    const replayData = client.getReplayData() ?? Buffer.alloc(0);
     const label = dbSession.label || (dbSession.type === 'architect' ? 'Architect' : (dbSession.role_id || 'unknown'));
 
     // Create a PtySession backed by the reconnected shellper client.
@@ -759,7 +788,10 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
     const ptySession = manager.getSession(session.id);
     if (ptySession) {
       const shellperSessId = extractShellperSessionId(dbSession.shellper_socket) ?? dbSession.id;
-      ptySession.attachShellper(client, replayData, dbSession.shellper_pid!, shellperSessId);
+      // replayData is only null when client is null (probe batch above),
+      // which the `if (!client)` guard already excluded — fall back to
+      // empty defensively rather than asserting.
+      ptySession.attachShellper(client, replayData ?? Buffer.alloc(0), dbSession.shellper_pid!, shellperSessId);
       // Architect sessions have auto-restart — keep WebSocket clients connected on exit
       if (dbSession.type === 'architect') {
         ptySession.restartOnExit = true;
@@ -958,7 +990,9 @@ export async function getTerminalsForWorkspace(
           restartOptions,
         );
         if (client) {
-          const replayData = client.getReplayData() ?? Buffer.alloc(0);
+          // #1198: wait for the REPLAY frame instead of racing it (see the
+          // matching change in the startup adoption pass above).
+          const replayData = capRingSeed(await client.waitForReplay(), dbSession.id);
           const label = dbSession.label || (dbSession.type === 'architect' ? 'Architect' : (dbSession.role_id || dbSession.id));
           // Reuse the persisted terminal id (#991) so the session keeps its
           // identity across the reconnect — clients holding `/ws/terminal/<id>`

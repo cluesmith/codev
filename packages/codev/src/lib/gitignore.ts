@@ -11,6 +11,17 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { spawnSync } from 'node:child_process';
+
+/**
+ * Architect state files (`codev/state/<name>.md`) are per-person and must be
+ * gitignored; builder thread files (`codev/state/*_thread.md`) share the
+ * directory but must stay versioned (they ship with each builder PR). Defined
+ * once here and referenced both in the entries block below and in the doctor
+ * audit's warning text (issue #1192), so the two can't drift out of sync.
+ */
+export const STATE_IGNORE_RULE = 'codev/state/*.md';
+export const THREAD_KEEP_RULE = '!codev/state/*_thread.md';
 
 /**
  * Standard gitignore entries for codev projects
@@ -21,6 +32,8 @@ export const CODEV_GITIGNORE_ENTRIES = `# Codev
 codev/.update-hashes.json
 .builders/
 .architect-role.md
+${STATE_IGNORE_RULE}
+${THREAD_KEEP_RULE}
 `;
 
 /**
@@ -148,4 +161,79 @@ export function backfillGitignore(
   fs.appendFileSync(gitignorePath, appended);
 
   return { added, alreadyPresent, skipped: false };
+}
+
+function gitExitStatus(args: string[], cwd: string): number | null {
+  try {
+    const result = spawnSync('git', args, { cwd, stdio: 'pipe', timeout: 5000 });
+    return result.status;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Audit the architect-state-file versioning split for `codev doctor` (issue #1192).
+ *
+ * Architect state files (`codev/state/<name>.md`) are per-person and must be
+ * gitignored; builder thread files (`codev/state/*_thread.md`) share the
+ * directory but must stay versioned (they ship with each builder PR).
+ *
+ * Probes git's actual ignore behavior via `git check-ignore` on phantom paths
+ * (check-ignore does not require the path to exist) rather than string-matching
+ * `.gitignore`, so hand-written equivalent rules pass and rule-ordering bugs
+ * (a shadowed negation) are caught. Returns warning strings; empty outside a
+ * git repository.
+ */
+export function auditStateFileIgnore(workspaceRoot: string): string[] {
+  const warnings: string[] = [];
+
+  if (gitExitStatus(['rev-parse', '--is-inside-work-tree'], workspaceRoot) !== 0) {
+    return warnings;
+  }
+
+  const architectProbe = gitExitStatus(
+    ['check-ignore', '-q', 'codev/state/__doctor-probe__.md'],
+    workspaceRoot
+  );
+  if (architectProbe !== 0) {
+    warnings.push(
+      `Architect state files (codev/state/<name>.md) are not gitignored. They are per-person and must not be committed. Run "codev update" to backfill the rule, or add "${STATE_IGNORE_RULE}" + "${THREAD_KEEP_RULE}" to .gitignore`
+    );
+  }
+
+  const threadProbe = gitExitStatus(
+    ['check-ignore', '-q', 'codev/state/__doctor-probe___thread.md'],
+    workspaceRoot
+  );
+  if (threadProbe === 0) {
+    warnings.push(
+      `Builder thread files (codev/state/*_thread.md) are gitignored. They must stay versioned (they ship with each builder PR). The "${THREAD_KEEP_RULE}" negation is missing or shadowed by a later rule in .gitignore`
+    );
+  }
+
+  // gitignore has no effect on already-tracked files; pre-existing installs may
+  // have committed an architect state file before the rule existed.
+  try {
+    const result = spawnSync('git', ['ls-files', 'codev/state/*.md'], {
+      cwd: workspaceRoot,
+      encoding: 'utf-8',
+      timeout: 5000,
+    });
+    if (result.status === 0) {
+      const tracked = result.stdout
+        .split('\n')
+        .map(line => line.trim())
+        .filter(line => line.length > 0 && !line.endsWith('_thread.md'));
+      for (const file of tracked) {
+        warnings.push(
+          `Architect state file is tracked by git: ${file}. It is per-person and should not be versioned. Run: git rm --cached ${file}`
+        );
+      }
+    }
+  } catch {
+    // git unavailable or timed out; nothing to report
+  }
+
+  return warnings;
 }

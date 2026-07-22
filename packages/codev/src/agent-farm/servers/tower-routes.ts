@@ -606,8 +606,11 @@ async function handleTerminalCreate(
           cols: cols || DEFAULT_COLS,
         });
 
-        const replayData = client.getReplayData() ?? Buffer.alloc(0);
+        // Read session info BEFORE awaiting replay: an instantly-exiting
+        // child's EXIT frame can remove the session from the manager during
+        // the await, and this lookup must not miss (#1198).
         const shellperInfo = shellperManager.getSessionInfo(sessionId)!;
+        const replayData = await client.waitForReplay(); // #1198: fresh shellpers always send REPLAY (possibly empty); awaiting avoids racing early child output
 
         const session = manager.createSessionRaw({
           label: label || `terminal-${sessionId.slice(0, 8)}`,
@@ -1312,6 +1315,19 @@ async function handleSend(
     res.end(JSON.stringify({
       error: 'NOT_FOUND',
       message: `Terminal session ${result.terminalId} not found (agent '${result.agent}' resolved but terminal is gone).`,
+    }));
+    return;
+  }
+
+  // #1198: a session whose shellper connection died still reports status
+  // 'running', but every write to it is dropped. Fail the send loudly
+  // instead of logging "Message sent" for a message that went nowhere.
+  if (!session.writable) {
+    ctx.log('ERROR', `Message DROPPED: ${from ?? 'unknown'} → ${result.agent} (terminal ${result.terminalId.slice(0, 8)}...): terminal not writable (shellper connection down)`);
+    res.writeHead(503, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      error: 'TERMINAL_NOT_WRITABLE',
+      message: `Terminal for '${result.agent}' is not accepting input (its process connection is down). Retry shortly; if this persists, check Tower logs.`,
     }));
     return;
   }
@@ -2034,8 +2050,11 @@ async function handleWorkspaceShellCreate(
           ...defaultSessionOptions(),
         });
 
-        const replayData = client.getReplayData() ?? Buffer.alloc(0);
+        // Read session info BEFORE awaiting replay: an instantly-exiting
+        // child's EXIT frame can remove the session from the manager during
+        // the await, and this lookup must not miss (#1198).
         const shellperInfo = shellperManager.getSessionInfo(sessionId)!;
+        const replayData = await client.waitForReplay(); // #1198: fresh shellpers always send REPLAY (possibly empty); awaiting avoids racing early child output
 
         const session = manager.createSessionRaw({
           label: `Shell ${shellId.replace('shell-', '')}`,

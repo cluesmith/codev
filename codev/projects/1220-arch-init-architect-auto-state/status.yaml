@@ -1,0 +1,17 @@
+id: '1220'
+title: arch-init-architect-auto-state
+protocol: air
+phase: pr
+plan_phases: []
+current_plan_phase: null
+gates:
+  pr:
+    status: approved
+    requested_at: '2026-07-22T11:37:36.782Z'
+    approved_at: '2026-07-22T11:43:42.776Z'
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-07-22T11:31:20.070Z'
+updated_at: '2026-07-22T11:43:42.777Z'
+pr_ready_for_human: false

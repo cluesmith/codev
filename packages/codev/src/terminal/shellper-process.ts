@@ -21,6 +21,7 @@ import {
   FrameType,
   PROTOCOL_VERSION,
   ALLOWED_SIGNALS,
+  REPLAY_PAYLOAD_MAX,
   createFrameParser,
   encodeData,
   encodeWelcome,
@@ -373,15 +374,30 @@ export class ShellperProcess extends EventEmitter {
       rows: this.rows,
       startTime: this.startTime,
       lastDataAt: this.lastDataAt,
+      // #1215: this build always sends REPLAY below, even when empty —
+      // advertise that guarantee so the client can skip its full wait.
+      alwaysSendsReplay: true,
     });
     socket.write(welcome);
     this.log(`WELCOME sent: pid=${pid}, version=${PROTOCOL_VERSION}`);
 
-    // Send replay buffer
-    const replayData = this.replayBuffer.getReplayData();
-    if (replayData.length > 0) {
-      socket.write(encodeReplay(replayData));
+    // Send replay buffer. #1198: never emit a frame the peer's parser must
+    // drop — a long-lived TUI session's replay (newline-free, unbounded
+    // partial) can exceed MAX_FRAME_SIZE, which is exactly what zombified
+    // long-lived terminals on every reconnect. Send the most recent bytes
+    // that fit; a tail-trimmed replay can render imperfectly for alt-screen
+    // TUIs (#1047), but the client's post-connect resize nudge repaints,
+    // and a truncated replay beats a dead connection.
+    let replayData = this.replayBuffer.getReplayData();
+    if (replayData.length > REPLAY_PAYLOAD_MAX) {
+      this.log(`Replay ${replayData.length} bytes exceeds cap; sending last ${REPLAY_PAYLOAD_MAX}`);
+      replayData = replayData.subarray(replayData.length - REPLAY_PAYLOAD_MAX);
     }
+    // #1198: send REPLAY even when empty, so a client awaiting the frame
+    // resolves immediately instead of burning its timeout. Creation-time
+    // attach awaits the frame to avoid racing early child output into a
+    // dropped replay; old clients treat an empty REPLAY as no replay data.
+    socket.write(encodeReplay(replayData));
 
     // If the PTY already exited before this client connected, the original
     // EXIT broadcast missed it. Replay the retained EXIT frame so the client

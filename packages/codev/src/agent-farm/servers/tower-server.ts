@@ -376,6 +376,33 @@ server.listen(port, bindHost, async () => {
     nodeExecutable: process.execPath,
     logger: (msg: string) => log('INFO', msg),
   });
+
+  // #1198: a shellper connection that dies must leave a trace. Before this
+  // subscription existed, 'session-error' had no consumer anywhere, so a
+  // failed reconnect was completely invisible in the Tower log.
+  shellperManager.on('session-error', (sessionId: string, err: Error) => {
+    log('ERROR', `Shellper session ${sessionId}: ${err.message}`);
+  });
+
+  // #1198: SessionManager re-established a session's connection in place
+  // after an unexpected socket close. Re-attach the replacement client to the
+  // PtySession so viewer I/O resumes (attachShellper is idempotent and
+  // cancels the pending close-grace teardown). Replay is deliberately empty:
+  // the ring buffer already holds the session history.
+  shellperManager.on('session-reconnected', (sessionId: string, client: import('../../terminal/shellper-client.js').IShellperClient) => {
+    const ptySession = getTerminalManager().findByShellperSessionId(sessionId);
+    if (!ptySession) {
+      log('WARN', `Shellper session ${sessionId} reconnected but no matching terminal session found`);
+      return;
+    }
+    const info = shellperManager!.getSessionInfo(sessionId);
+    let pid = -1;
+    if (info) {
+      pid = info.pid;
+    }
+    ptySession.attachShellper(client, Buffer.alloc(0), pid, ptySession.shellperSessionId ?? sessionId);
+    log('INFO', `Shellper session ${sessionId} re-attached to terminal ${ptySession.id}`);
+  });
   const staleCleaned = await shellperManager.cleanupStaleSockets();
   if (staleCleaned > 0) {
     log('INFO', `Cleaned up ${staleCleaned} stale shellper socket(s)`);

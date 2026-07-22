@@ -198,6 +198,21 @@ export class TerminalManager {
     return this.sessions.get(id);
   }
 
+  /**
+   * Find the session backed by the given SessionManager session id (#1198).
+   * Adopted sessions are keyed by terminal id in both maps, so the direct
+   * lookup hits; freshly created sessions use a separate shellper UUID, which
+   * PtySession records at attach time.
+   */
+  findByShellperSessionId(shellperSessionId: string): PtySession | undefined {
+    const byId = this.sessions.get(shellperSessionId);
+    if (byId) return byId;
+    for (const session of this.sessions.values()) {
+      if (session.shellperSessionId === shellperSessionId) return session;
+    }
+    return undefined;
+  }
+
   /** Kill and remove a session. */
   killSession(id: string): boolean {
     const session = this.sessions.get(id);

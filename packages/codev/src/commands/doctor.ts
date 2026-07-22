@@ -13,7 +13,14 @@ import { query as claudeQuery } from '@anthropic-ai/claude-agent-sdk';
 import { executeForgeCommandSync, loadForgeConfig, validateForgeConfig, resolveAllConcepts, type ConceptResolution } from '../lib/forge.js';
 import { detectHarnessFromCommand } from '../agent-farm/utils/harness.js';
 import { auditPrGates, formatPrGateWarning } from '../lib/pr-gate-audit.js';
+import { auditStateFileIgnore } from '../lib/gitignore.js';
 import { auditFrameworkRefs, formatFrameworkRefFinding, hasFrameworkOverrides } from '../lib/framework-ref-audit.js';
+import {
+  auditProtocolDrift,
+  checkSkeletonStaleness,
+  formatDriftFinding,
+  formatStaleness,
+} from '../lib/protocol-drift-audit.js';
 import { resolveAgyBin, AGY_OAUTH_MARKERS } from './consult/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -488,6 +495,9 @@ function checkCodevStructure(workspaceRoot: string): { warnings: string[] } {
     warnings.push('No git remote configured - builders cannot push branches or create PRs. Run: git remote add origin <url>');
   }
 
+  // Architect state files must be gitignored; builder thread files versioned (#1192)
+  warnings.push(...auditStateFileIgnore(workspaceRoot));
+
   return { warnings };
 }
 
@@ -789,6 +799,64 @@ export async function doctor(): Promise<number> {
       }
     }
     console.log('');
+
+    // Framework drift (#1210): a project-local copy (tier-1 `.codev/` or tier-2 `codev/`) of a
+    // framework file that also ships in the installed skeleton silently shadows the package — a
+    // stale snapshot of an old default keeps winning resolution forever, with no signal. And the
+    // installed skeleton can itself be a version behind. Both are invisible in normal operation.
+    // Report-only (never mutates a user file), and QUIET BY DEFAULT: the section prints only when it
+    // has something actionable to say — a shadow exists OR the skeleton is behind. No overrides +
+    // up-to-date/offline => true no-op (no section at all).
+    const drift = auditProtocolDrift(workspaceRoot);
+    // Test seam: `CODEV_DOCTOR_FAKE_LATEST` injects the npm-latest version so the
+    // staleness-only "behind" integration branch is e2e-testable without a live
+    // registry. Unset in real use → the actual `npm view` lookup runs.
+    const fakeLatest = process.env.CODEV_DOCTOR_FAKE_LATEST;
+    const staleness = checkSkeletonStaleness(fakeLatest ? () => fakeLatest : undefined);
+    if (drift.length > 0 || staleness.behind) {
+      // Header parenthetical reflects the actual finding: the shadowing subtitle is only accurate
+      // when a local shadow exists; in the staleness-only path (no shadows, skeleton behind) it
+      // would be false, so use a staleness-specific subtitle instead.
+      const subtitle = drift.length > 0
+        ? 'local copies shadowing the installed skeleton'
+        : 'installed skeleton is behind npm latest';
+      console.log(chalk.bold('Framework Drift') + ` (${subtitle})`);
+      console.log('');
+
+      // Staleness line. Only `behind` is a warning; up-to-date / uncheckable lines are informational
+      // and shown only because the section is already open (a shadow or a behind result opened it).
+      if (staleness.behind) {
+        console.log(`  ${chalk.yellow('⚠')} ${formatStaleness(staleness)}`);
+        warnings++;
+        warningDetails.push({
+          name: 'Skeleton staleness',
+          issue: `installed ${staleness.installed} < latest ${staleness.latest}`,
+          recommendation: 'run: codev update (and reinstall @cluesmith/codev if globally out of date)',
+        });
+      } else {
+        console.log(`  ${chalk.dim('○')} ${formatStaleness(staleness)}`);
+      }
+
+      // Shadow drift. `differs` => adjudicate warning; `identical` => informational (redundant copy).
+      // The skeleton version IS the installed package version (the skeleton ships with the
+      // package), which staleness already resolved — name it in each drift line per the spec.
+      const skeletonVersion = staleness.installed;
+      const differs = drift.filter((f) => f.status === 'differs');
+      const identical = drift.filter((f) => f.status === 'identical');
+      for (const f of differs) {
+        console.log(`  ${chalk.yellow('⚠')} ${formatDriftFinding(f, skeletonVersion)}`);
+        warnings++;
+        warningDetails.push({
+          name: 'Framework drift',
+          issue: `${f.tier}/${f.relativePath} differs from installed skeleton v${skeletonVersion} (customized or stale?)`,
+          recommendation: 'review vs the installed skeleton; if unintentional, remove the local copy so resolution falls back to the package',
+        });
+      }
+      for (const f of identical) {
+        console.log(`  ${chalk.dim('○')} ${formatDriftFinding(f, skeletonVersion)}`);
+      }
+      console.log('');
+    }
 
     // Full forge concept reporting: all 15 concepts with resolution source and executable check
     const forgeConfig = loadForgeConfig(workspaceRoot);

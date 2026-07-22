@@ -10,7 +10,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
-import { PtySession } from '../pty-session.js';
+import { PtySession, SHELLPER_CLOSE_GRACE_MS } from '../pty-session.js';
 import type { PtySessionConfig } from '../pty-session.js';
 import { EventEmitter } from 'node:events';
 import type { IShellperClient } from '../shellper-client.js';
@@ -35,12 +35,16 @@ class MockShellperClient extends EventEmitter implements IShellperClient {
 
   disconnect(): void { this._connected = false; }
 
-  write(data: string | Buffer): void {
+  write(data: string | Buffer): boolean {
+    if (!this._connected) return false;
     this.writeData.push(typeof data === 'string' ? data : data.toString('utf-8'));
+    return true;
   }
 
-  resize(cols: number, rows: number): void {
+  resize(cols: number, rows: number): boolean {
+    if (!this._connected) return false;
     this.resizeCalls.push({ cols, rows });
+    return true;
   }
 
   signal(sig: number): void {
@@ -213,15 +217,48 @@ describe('PtySession + ShellperClient integration', () => {
       expect(session.info.exitCode).toBe(0);
     });
 
-    it('emits exit with code -1 on unexpected disconnect', () => {
+    it('emits exit with code -1 when an unexpected disconnect outlives the grace window (#1198)', () => {
+      vi.useFakeTimers();
       session.attachShellper(mockClient, Buffer.alloc(0), 9999);
       const exitSpy = vi.fn();
       session.on('exit', exitSpy);
 
       mockClient.simulateClose();
 
+      // Not torn down immediately: SessionManager gets a grace window to
+      // reconnect in place first.
+      expect(exitSpy).not.toHaveBeenCalled();
+      expect(session.status).toBe('running');
+
+      vi.advanceTimersByTime(SHELLPER_CLOSE_GRACE_MS + 1);
+
       expect(exitSpy).toHaveBeenCalledWith(-1);
       expect(session.status).toBe('exited');
+      vi.useRealTimers();
+    });
+
+    it('a re-attach during the grace window cancels the teardown (#1198)', () => {
+      vi.useFakeTimers();
+      session.attachShellper(mockClient, Buffer.alloc(0), 9999);
+      const exitSpy = vi.fn();
+      session.on('exit', exitSpy);
+
+      mockClient.simulateClose();
+      expect(exitSpy).not.toHaveBeenCalled();
+
+      // SessionManager reconnected in place and Tower re-attached the
+      // replacement client before the grace window expired.
+      const replacement = new MockShellperClient();
+      session.attachShellper(replacement, Buffer.alloc(0), 9999);
+
+      vi.advanceTimersByTime(SHELLPER_CLOSE_GRACE_MS * 2);
+      expect(exitSpy).not.toHaveBeenCalled();
+      expect(session.status).toBe('running');
+
+      // I/O flows through the replacement client.
+      session.write('after recovery');
+      expect(replacement.writeData).toContain('after recovery');
+      vi.useRealTimers();
     });
 
     it('does not double-emit exit on close after exit', () => {

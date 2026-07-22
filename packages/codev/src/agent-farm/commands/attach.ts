@@ -15,7 +15,7 @@ import { openBrowser } from '../utils/shell.js';
 import { loadState } from '../state.js';
 import { getConfig } from '../utils/config.js';
 import { TowerClient } from '../lib/tower-client.js';
-import { ShellperClient } from '../../terminal/shellper-client.js';
+import { ShellperClient, DEFAULT_REPLAY_TIMEOUT_MS } from '../../terminal/shellper-client.js';
 import type { DbTerminalSession } from '../servers/tower-types.js';
 import { normalizeWorkspacePath } from '../servers/tower-utils.js';
 import { getGlobalDb } from '../db/index.js';
@@ -168,7 +168,7 @@ export async function attachTerminal(socketPath: string): Promise<void> {
     logger.blank();
 
     // Write replay buffer to stdout
-    const replay = await client.waitForReplay(500);
+    const replay = await client.waitForReplay(DEFAULT_REPLAY_TIMEOUT_MS);
     if (replay.length > 0) {
       process.stdout.write(replay);
     }

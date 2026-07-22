@@ -74,6 +74,17 @@ export const CRASH_LOOP_WINDOW_MS = 30_000;
 export const CRASH_LOOP_THRESHOLD = 3;
 
 /**
+ * #1198 in-place reconnect tuning. When a session's socket closes without an
+ * EXIT frame but the shellper process is still alive, the connection is
+ * re-established instead of tearing the session down: backoff per attempt
+ * within one recovery round, a stability window that resets the round
+ * counter, and a cap on consecutive unstable rounds.
+ */
+export const RECONNECT_BACKOFF_MS = [500, 1000, 2000];
+export const RECONNECT_STABILITY_MS = 30_000;
+export const MAX_RECOVERY_ROUNDS = 3;
+
+/**
  * Issue #1149: true when the recorded failing-exit timestamps amount to a
  * crash loop (>= CRASH_LOOP_THRESHOLD failures inside the trailing
  * CRASH_LOOP_WINDOW_MS ending at `now`). Pure so the policy is testable
@@ -159,6 +170,14 @@ interface ManagedSession {
   stderrBuffer: StderrBuffer | null;
   stderrStream: Readable | null;
   stderrTailLogged: boolean;
+  /** Consecutive close-triggered recovery rounds without a stable connection (#1198). */
+  recoveryRounds: number;
+  /** Epoch of the last successful in-place reconnect, for the stability reset (#1198). */
+  lastRecoveryAt: number;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export class SessionManager extends EventEmitter {
@@ -260,44 +279,14 @@ export class SessionManager extends EventEmitter {
       stderrBuffer: null, // stderr goes to file, not pipe (Bugfix #324)
       stderrStream: null,
       stderrTailLogged: false,
+      recoveryRounds: 0,
+      lastRecoveryAt: 0,
     };
 
     this.sessions.set(opts.sessionId, session);
     this.log(`Session ${opts.sessionId} created: pid=${info.pid}`);
 
-    // Set up auto-restart if configured
-    if (opts.restartOnExit) {
-      this.setupAutoRestart(session, opts.sessionId);
-    }
-
-    // Forward exit events and clean up dead sessions
-    client.on('exit', (exitInfo) => {
-      this.log(`Session ${opts.sessionId} exited (code=${exitInfo.code})`);
-      this.logStderrTail(opts.sessionId, session, exitInfo.code);
-      this.emit('session-exit', opts.sessionId, exitInfo);
-      // If not auto-restarting, remove the dead session from the map
-      // so listSessions() doesn't report it and cleanupStaleSockets()
-      // can clean its socket file.
-      if (!opts.restartOnExit) {
-        this.removeDeadSession(opts.sessionId);
-      }
-    });
-
-    client.on('error', (err) => {
-      this.emit('session-error', opts.sessionId, err);
-    });
-
-    // Handle shellper crash (socket disconnects without EXIT frame)
-    client.on('close', () => {
-      // If the session is still in the map (wasn't already cleaned up by exit/kill),
-      // the shellper died without sending EXIT. Remove the dead session.
-      if (this.sessions.has(opts.sessionId)) {
-        this.log(`Session ${opts.sessionId} shellper disconnected unexpectedly`);
-        this.logStderrTail(opts.sessionId, session, -1);
-        this.removeDeadSession(opts.sessionId);
-        this.emit('session-error', opts.sessionId, new Error('Shellper disconnected unexpectedly'));
-      }
-    });
+    this.wireClientEvents(opts.sessionId, session);
 
     // Start restart reset timer if configured
     if (opts.restartOnExit) {
@@ -305,6 +294,156 @@ export class SessionManager extends EventEmitter {
     }
 
     return client;
+  }
+
+  /**
+   * Subscribe to a session client's lifecycle events (exit, error, close) and
+   * set up auto-restart when configured. Called on session creation, on
+   * reconnection after a Tower restart, and again for the replacement client
+   * after an in-place reconnect (#1198), so all three paths behave identically.
+   */
+  private wireClientEvents(sessionId: string, session: ManagedSession): void {
+    const client = session.client;
+
+    // Forward exit events and clean up dead sessions
+    client.on('exit', (exitInfo: ExitMessage) => {
+      this.log(`Session ${sessionId} exited (code=${exitInfo.code})`);
+      this.logStderrTail(sessionId, session, exitInfo.code ?? -1);
+      this.emit('session-exit', sessionId, exitInfo);
+      // If not auto-restarting, remove the dead session from the map
+      // so listSessions() doesn't report it and cleanupStaleSockets()
+      // can clean its socket file.
+      if (!session.options.restartOnExit) {
+        this.removeDeadSession(sessionId);
+      }
+    });
+
+    client.on('error', (err: Error) => {
+      this.emit('session-error', sessionId, err);
+    });
+
+    client.on('frame-skipped', (info: { type: number; size: number }) => {
+      this.log(`Session ${sessionId} skipped oversized frame (type=${info.type}, ${info.size} bytes)`);
+    });
+
+    // #1215: surfaces when waitForReplay() actually burned its timeout
+    // instead of getting a REPLAY frame — observability for the next
+    // shellper/Tower protocol-behavior skew, so it shows up in logs
+    // instead of presenting as unexplained adoption lag.
+    client.on('replay-timeout', (info: { alwaysSendsReplay: boolean; timeoutMs: number }) => {
+      this.log(`Session ${sessionId} waitForReplay timed out after ${info.timeoutMs}ms (alwaysSendsReplay=${info.alwaysSendsReplay})`);
+    });
+
+    // Socket closed without an EXIT frame. Historically treated as "shellper
+    // crashed", but #1198 showed it also fires for a transient socket error
+    // against a perfectly healthy shellper, so try to reconnect in place
+    // before declaring the session dead.
+    client.on('close', () => {
+      if (!this.sessions.has(sessionId)) return;
+      // A replaced client's stale wiring must not trigger recovery again.
+      if (session.client !== client) return;
+      this.log(`Session ${sessionId} shellper connection lost unexpectedly`);
+      this.recoverSession(sessionId, session).catch((err) => {
+        this.log(`Session ${sessionId} recovery failed unexpectedly: ${(err as Error).message}`);
+        this.declareSessionDead(sessionId, session);
+      });
+    });
+
+    if (session.options.restartOnExit) {
+      this.setupAutoRestart(session, sessionId);
+    }
+  }
+
+  /**
+   * #1198: attempt to re-establish a session's shellper connection after an
+   * unexpected socket close. The shellper protocol is built for reconnection
+   * (that is how sessions survive Tower restarts), so a transient socket
+   * error must not tear down a healthy shellper: doing so unlinks the live
+   * socket and orphans the process. Falls through to the historical
+   * dead-session path when the process is gone or every attempt fails.
+   */
+  private async recoverSession(sessionId: string, session: ManagedSession): Promise<void> {
+    if (Date.now() - session.lastRecoveryAt > RECONNECT_STABILITY_MS) {
+      session.recoveryRounds = 0;
+    }
+    session.recoveryRounds++;
+
+    if (session.recoveryRounds > MAX_RECOVERY_ROUNDS) {
+      this.log(`Session ${sessionId} gave up reconnecting after ${MAX_RECOVERY_ROUNDS} unstable recovery rounds`);
+      this.declareSessionDead(sessionId, session);
+      return;
+    }
+
+    for (let attempt = 0; attempt < RECONNECT_BACKOFF_MS.length; attempt++) {
+      await sleep(RECONNECT_BACKOFF_MS[attempt]);
+      // The session may have been killed or shut down while we waited.
+      if (this.sessions.get(sessionId) !== session) return;
+      if (!(await this.canReachShellper(session))) {
+        break;
+      }
+
+      const client = new ShellperClient(session.socketPath);
+      try {
+        await client.connect();
+      } catch (err) {
+        this.log(`Session ${sessionId} reconnect attempt ${attempt + 1}/${RECONNECT_BACKOFF_MS.length} failed: ${(err as Error).message}`);
+        continue;
+      }
+
+      if (this.sessions.get(sessionId) !== session) {
+        // Killed while we were connecting
+        client.disconnect();
+        return;
+      }
+
+      session.client = client;
+      session.lastRecoveryAt = Date.now();
+      this.wireClientEvents(sessionId, session);
+      this.log(`Session ${sessionId} shellper connection re-established (round ${session.recoveryRounds}, attempt ${attempt + 1})`);
+      this.emit('session-reconnected', sessionId, client);
+      return;
+    }
+
+    this.declareSessionDead(sessionId, session);
+  }
+
+  /**
+   * Whether the session's recorded shellper process is still the one running
+   * under its PID: alive, and with a matching start time (guards PID reuse).
+   */
+  private async isShellperProcessCurrent(session: ManagedSession): Promise<boolean> {
+    if (!this.isProcessAlive(session.pid)) return false;
+    const actualStartTime = await getProcessStartTime(session.pid);
+    if (actualStartTime === null || Math.abs(actualStartTime - session.startTime) > 2000) {
+      return false;
+    }
+    return true;
+  }
+
+  /**
+   * Whether an in-place reconnect can possibly succeed: the shellper process
+   * is current (alive, same start time) and its socket file still exists.
+   */
+  private async canReachShellper(session: ManagedSession): Promise<boolean> {
+    if (!(await this.isShellperProcessCurrent(session))) return false;
+    try {
+      const stat = fs.lstatSync(session.socketPath);
+      return stat.isSocket();
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * The historical unexpected-death path: remove the session, clean up its
+   * socket, and emit 'session-error' so the Tower layer can log the loss.
+   */
+  private declareSessionDead(sessionId: string, session: ManagedSession): void {
+    if (this.sessions.get(sessionId) !== session) return;
+    this.log(`Session ${sessionId} shellper disconnected unexpectedly`);
+    this.logStderrTail(sessionId, session, -1);
+    this.removeUnreachableSession(sessionId);
+    this.emit('session-error', sessionId, new Error('Shellper disconnected unexpectedly'));
   }
 
   /**
@@ -382,35 +521,14 @@ export class SessionManager extends EventEmitter {
       stderrBuffer: null,
       stderrStream: null,
       stderrTailLogged: false,
+      recoveryRounds: 0,
+      lastRecoveryAt: 0,
     };
 
     this.sessions.set(sessionId, session);
     this.log(`Session ${sessionId} reconnected: pid=${pid}`);
 
-    // Set up auto-restart if configured (e.g. architect sessions after Tower restart)
-    if (hasRestart) {
-      this.setupAutoRestart(session, sessionId);
-    }
-
-    client.on('exit', (exitInfo) => {
-      this.emit('session-exit', sessionId, exitInfo);
-      if (!hasRestart) {
-        this.removeDeadSession(sessionId);
-      }
-    });
-
-    client.on('error', (err) => {
-      this.emit('session-error', sessionId, err);
-    });
-
-    // Handle shellper crash (socket disconnects without EXIT frame)
-    client.on('close', () => {
-      if (this.sessions.has(sessionId)) {
-        this.log(`Session ${sessionId} shellper disconnected unexpectedly`);
-        this.removeDeadSession(sessionId);
-        this.emit('session-error', sessionId, new Error('Shellper disconnected unexpectedly'));
-      }
-    });
+    this.wireClientEvents(sessionId, session);
 
     // Start restart reset timer if auto-restart is enabled
     if (hasRestart) {
@@ -701,14 +819,68 @@ export class SessionManager extends EventEmitter {
    * Remove a dead session from the map, clear its timers, and clean up socket.
    * Called when a session exits naturally (no restart) or exhausts maxRestarts.
    */
+  /**
+   * Removal for sessions whose CHILD process ended (clean exit, or restart
+   * exhaustion). The shellper deliberately lingers after its child exits to
+   * serve late connections (#905), so it is a spent husk here: unlink the
+   * socket unconditionally — that is what marks the lingering shellper
+   * unresponsive so killOrphanedShellpers reaps it. Preserving the socket on
+   * this path leaks an immortal empty shellper per exited session (#1198
+   * e2e regression).
+   */
   private removeDeadSession(sessionId: string): void {
-    const session = this.sessions.get(sessionId);
+    const session = this.detachSessionFromMap(sessionId);
     if (!session) return;
+    this.unlinkSocketIfExists(session.socketPath);
+  }
+
+  /**
+   * #1198: removal for sessions whose CONNECTION died (recovery exhausted or
+   * shellper unreachable). Unlike the child-exit path, the shellper may
+   * still host a live conversation, and unlinking a live shellper's socket
+   * makes it unreachable AND flags it for the orphan sweeper's kill path —
+   * so this path preserves the socket while the recorded process is current,
+   * degrading to a recoverable orphan (re-adoptable, attachable), never a
+   * killed live process.
+   */
+  private removeUnreachableSession(sessionId: string): void {
+    const session = this.detachSessionFromMap(sessionId);
+    if (!session) return;
+    this.cleanupDeadSessionSocket(sessionId, session).catch((err) => {
+      this.log(`Session ${sessionId} socket cleanup failed: ${(err as Error).message}`);
+    });
+  }
+
+  private detachSessionFromMap(sessionId: string): ManagedSession | null {
+    const session = this.sessions.get(sessionId);
+    if (!session) return null;
     if (session.restartResetTimer) {
       clearTimeout(session.restartResetTimer);
       session.restartResetTimer = null;
     }
     this.sessions.delete(sessionId);
+    return session;
+  }
+
+  /**
+   * Socket cleanup for the connection-failure path: unlink only when the
+   * recorded shellper process is gone. The check uses the same start-time
+   * guard as reconnection, so a reused PID counts as "gone" and a dead
+   * shellper's socket/log files do not leak. Async and best-effort by
+   * design; the map mutation stays sync in the caller.
+   */
+  private async cleanupDeadSessionSocket(sessionId: string, session: ManagedSession): Promise<void> {
+    if (await this.isShellperProcessCurrent(session)) {
+      this.log(`Session ${sessionId} removed but shellper pid=${session.pid} is alive; preserving socket`);
+      return;
+    }
+    // Socket paths are keyed by session id, so if a new session claimed this
+    // id while we awaited (an in-process re-create/re-adopt), the path now
+    // belongs to the new occupant — leave it alone. The caller already
+    // deleted OUR map entry, so any present entry is a successor's.
+    if (this.sessions.has(sessionId)) {
+      return;
+    }
     this.unlinkSocketIfExists(session.socketPath);
   }
 

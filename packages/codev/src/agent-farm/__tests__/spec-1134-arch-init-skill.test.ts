@@ -9,6 +9,10 @@
  *   - no Shannon-specific wording (workspace-agnostic)
  *   - builder-thread exclusion in the missing-state-file flow
  *   - the four architect guardrails
+ *
+ * Issue #1220 extends this with the architect auto-state-saving lifecycle:
+ * save at resumable checkpoints (write format = read format), then suggest
+ * `/clear` — never mid-task, no secrets, compaction discipline.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -68,6 +72,49 @@ describe('Spec 1134 — /arch-init skill ships in both trees', () => {
 
     it('never defaults to main', () => {
       expect(text()).toMatch(/do NOT default to `main`/i);
+    });
+
+    // Issue #1220 — architect auto-state-saving lifecycle.
+    it('instructs saving to codev/state/<name>.md at checkpoints', () => {
+      const t = text();
+      // The save target is the same per-name state file, referenced with the
+      // <name> placeholder as in the read flow.
+      expect(t).toMatch(/save/i);
+      expect(t).toContain('codev/state/<name>.md');
+      expect(t).toMatch(/checkpoint|resumable boundary/i);
+    });
+
+    it('suggests /clear only after a save (save-then-suggest ordering)', () => {
+      const t = text();
+      expect(t).toContain('/clear');
+      // Ordering property: save first, then suggest.
+      expect(t).toMatch(/save first.*then|then .*only then.*suggest|good time to `\/clear`/i);
+    });
+
+    it('forbids saving mid-task', () => {
+      expect(text()).toMatch(/never save mid-task/i);
+    });
+
+    it('carries the write-format = read-format symmetry (rewrite + append dated)', () => {
+      const t = text();
+      expect(t).toMatch(/rewrite the current-state/i);
+      expect(t).toMatch(/append.*dated/i);
+    });
+
+    it('carries compaction discipline (one screen / prune stale sections)', () => {
+      const t = text();
+      expect(t).toMatch(/one screen/i);
+      expect(t).toMatch(/prune stale/i);
+    });
+
+    it('carries save content guardrails (no secrets, no transcript dumps)', () => {
+      const t = text();
+      expect(t).toMatch(/no secrets/i);
+      expect(t).toMatch(/transcript/i);
+    });
+
+    it('frames the /clear suggestion as advisory, not nagging', () => {
+      expect(text()).toMatch(/advisory, never nagging/i);
     });
   });
 

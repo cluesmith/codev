@@ -38,6 +38,14 @@ export interface PtySessionInfo {
   persistent?: boolean;
 }
 
+/**
+ * #1198: how long an unexpected shellper disconnect may remain unresolved
+ * before the session is torn down. Sized above SessionManager's full
+ * in-place-reconnect budget (3 rounds of backoff plus connect time) so a
+ * successful recovery always lands before the teardown fires.
+ */
+export const SHELLPER_CLOSE_GRACE_MS = 15_000;
+
 export class PtySession extends EventEmitter {
   readonly id: string;
   label: string;
@@ -51,6 +59,10 @@ export class PtySession extends EventEmitter {
   private _restartOnExit = false;
   private _restartCleanupTimeout: ReturnType<typeof setTimeout> | null = null;
   private _restartCancelFn: (() => void) | null = null;
+  // #1198: pending teardown after an unexpected shellper disconnect. Started
+  // by the client 'close' handler, cancelled by attachShellper() when
+  // SessionManager's in-place reconnect delivers a replacement client.
+  private _closeGraceTimer: ReturnType<typeof setTimeout> | null = null;
   private shellperPid = -1;
   private cols: number;
   private rows: number;
@@ -126,6 +138,12 @@ export class PtySession extends EventEmitter {
       this.shellperClient.removeAllListeners('exit');
       this.shellperClient.removeAllListeners('close');
     }
+    // #1198: a replacement client arriving means the connection recovered.
+    // Cancel any pending unexpected-close teardown.
+    if (this._closeGraceTimer) {
+      clearTimeout(this._closeGraceTimer);
+      this._closeGraceTimer = null;
+    }
     this._shellperBacked = true;
     this.shellperClient = client;
     this.shellperPid = shellperPid;
@@ -136,8 +154,11 @@ export class PtySession extends EventEmitter {
     // keeps it bumped going forward via onPtyData.
     this._lastDataAt = client.lastDataAt;
 
-    // Ensure log directory exists
-    if (this.diskLogEnabled) {
+    // Ensure log directory exists. Guarded on logFd: with #1198 re-attach is
+    // a routine recovery step, and reopening unconditionally would leak one
+    // append handle per reconnect. cleanupShellper() closes and nulls the fd,
+    // so a post-teardown attach still reopens.
+    if (this.diskLogEnabled && this.logFd === null) {
       fs.mkdirSync(path.dirname(this.logPath), { recursive: true });
       this.logFd = fs.openSync(this.logPath, 'a');
     }
@@ -196,12 +217,20 @@ export class PtySession extends EventEmitter {
 
     // Handle shellper disconnect (socket closed without EXIT)
     client.on('close', () => {
-      if (this.exitCode === undefined) {
-        // Unexpected disconnect — shellper may have crashed
+      if (this.exitCode !== undefined) return;
+      if (this.shellperClient !== client) return;
+      if (this._closeGraceTimer) return;
+      // #1198: SessionManager attempts an in-place reconnect first, so give
+      // it a grace window instead of tearing down immediately. A successful
+      // re-attach cancels the timer; expiry means the connection is truly
+      // gone and the historical teardown proceeds.
+      this._closeGraceTimer = setTimeout(() => {
+        this._closeGraceTimer = null;
+        if (this.exitCode !== undefined) return;
         this.exitCode = -1;
         this.emit('exit', -1);
         this.cleanupShellper();
-      }
+      }, SHELLPER_CLOSE_GRACE_MS);
     });
   }
 
@@ -246,6 +275,10 @@ export class PtySession extends EventEmitter {
     if (this.disconnectTimer) {
       clearTimeout(this.disconnectTimer);
       this.disconnectTimer = null;
+    }
+    if (this._closeGraceTimer) {
+      clearTimeout(this._closeGraceTimer);
+      this._closeGraceTimer = null;
     }
     this.clients.clear();
     // Close disk log handle
@@ -302,32 +335,56 @@ export class PtySession extends EventEmitter {
     this.logBytes = 0;
   }
 
-  /** Write user input to the PTY or shellper. */
-  write(data: string): void {
+  /**
+   * Whether input can actually reach the underlying process right now.
+   * For shellper-backed sessions this checks the live socket connection, not
+   * just the session status: a session whose shellper connection died reports
+   * status 'running' until teardown, and writes to it are dropped (#1198).
+   */
+  get writable(): boolean {
+    if (this.status !== 'running') return false;
+    if (this._shellperBacked) {
+      return this.shellperClient !== null && this.shellperClient.connected;
+    }
+    return this.pty !== null;
+  }
+
+  /**
+   * Write user input to the PTY or shellper.
+   * Returns false when the input was dropped (#1198).
+   */
+  write(data: string): boolean {
     if (this._shellperBacked) {
       if (this.shellperClient && this.status === 'running') {
-        this.shellperClient.write(data);
+        return this.shellperClient.write(data);
       }
-      return;
+      return false;
     }
     if (this.pty && this.status === 'running') {
       this.pty.write(data);
+      return true;
     }
+    return false;
   }
 
-  /** Resize the PTY or shellper. */
-  resize(cols: number, rows: number): void {
+  /**
+   * Resize the PTY or shellper.
+   * Returns false when the resize was dropped (#1198).
+   */
+  resize(cols: number, rows: number): boolean {
     this.cols = cols;
     this.rows = rows;
     if (this._shellperBacked) {
       if (this.shellperClient && this.status === 'running') {
-        this.shellperClient.resize(cols, rows);
+        return this.shellperClient.resize(cols, rows);
       }
-      return;
+      return false;
     }
     if (this.pty && this.status === 'running') {
       this.pty.resize(cols, rows);
+      return true;
     }
+    return false;
   }
 
   /** Kill the PTY process or send signal to shellper. */

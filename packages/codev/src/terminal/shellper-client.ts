@@ -34,11 +34,26 @@ import {
   type SpawnMessage,
 } from './shellper-protocol.js';
 
+// Default bound for waitForReplay() against a shellper that advertised
+// `alwaysSendsReplay` on WELCOME — long enough to cover a slow/large REPLAY
+// send (see REPLAY_PAYLOAD_MAX) without the caller having to think about it.
+export const DEFAULT_REPLAY_TIMEOUT_MS = 500;
+
+// #1215: bound on how long waitForReplay() waits for a shellper that hasn't
+// advertised `alwaysSendsReplay` on WELCOME. Short enough that an idle
+// pre-#1215-behavior shellper's stall is negligible even across many
+// sessions; long enough to still catch a busy legacy shellper's REPLAY
+// frame arriving on a later socket read (same-process reads are normally
+// sub-millisecond) — see waitForReplay() for the full rationale.
+export const LEGACY_REPLAY_TIMEOUT_MS = 50;
+
 export interface IShellperClient extends EventEmitter {
   connect(): Promise<WelcomeMessage>;
   disconnect(): void;
-  write(data: string | Buffer): void;
-  resize(cols: number, rows: number): void;
+  /** Returns false when the frame was dropped because the client is not connected (#1198). */
+  write(data: string | Buffer): boolean;
+  /** Returns false when the frame was dropped because the client is not connected (#1198). */
+  resize(cols: number, rows: number): boolean;
   signal(sig: number): void;
   spawn(msg: SpawnMessage): void;
   ping(): void;
@@ -57,6 +72,13 @@ export interface IShellperClient extends EventEmitter {
 export class ShellperClient extends EventEmitter implements IShellperClient {
   private socket: net.Socket | null = null;
   private _connected = false;
+  // #1198: a 'close' emission is owed to consumers. Recorded by cleanup()
+  // when it tears down a live connection that did not ask to die (anything
+  // other than disconnect()); consumed by the socket's 'close' event. The
+  // decision must be captured at teardown time because error paths run
+  // cleanup() before that event fires — reading _connected inside the close
+  // handler is what swallowed the emission.
+  private _closePending = false;
   private replayData: Buffer | null = null;
   // Wall-clock epoch (ms) of the last PTY byte the shellper has seen.
   //
@@ -77,6 +99,11 @@ export class ShellperClient extends EventEmitter implements IShellperClient {
   // own `lastDataAt`; from there, PtySession owns the read side and
   // /api/overview enrichment uses ptySession.lastDataAt.
   private _lastDataAt: number = Date.now();
+  // #1215: whether the connected shellper guarantees a REPLAY frame right
+  // after WELCOME, even when empty. False until WELCOME says otherwise —
+  // an older shellper never sends this field, so waitForReplay() must not
+  // assume an empty REPLAY is coming for it.
+  private _alwaysSendsReplay = false;
 
   constructor(
     private readonly socketPath: string,
@@ -121,6 +148,7 @@ export class ShellperClient extends EventEmitter implements IShellperClient {
         reject(new Error('Already connected'));
         return;
       }
+      this._closePending = false;
 
       const socket = net.createConnection(this.socketPath);
       this.socket = socket;
@@ -143,6 +171,18 @@ export class ShellperClient extends EventEmitter implements IShellperClient {
         this.safeEmitError(err);
         this.cleanup();
       });
+      // #1198: the parser drops oversized frames instead of erroring (a
+      // long-lived shellper's replay can exceed the frame cap). The
+      // connection stays healthy; surface what was lost. For a dropped
+      // REPLAY, unblock replay waiters with an empty replay so adoption
+      // proceeds (viewers repaint via the post-connect resize nudge).
+      parser.on('frame-skipped', (info: { type: number; size: number }) => {
+        if (info.type === FrameType.REPLAY && this.replayData === null) {
+          this.replayData = Buffer.alloc(0);
+          this.emit('replay', this.replayData);
+        }
+        this.emit('frame-skipped', info);
+      });
 
       socket.on('connect', () => {
         socket.pipe(parser);
@@ -151,9 +191,13 @@ export class ShellperClient extends EventEmitter implements IShellperClient {
       });
 
       socket.on('close', () => {
-        const wasConnected = this._connected;
         this.cleanup();
-        if (wasConnected) {
+        // Emit exactly once per unexpectedly lost live connection.
+        // _closePending was recorded by whichever cleanup() ran first — an
+        // error path's or the one just above — so error-path closes are no
+        // longer swallowed (#1198).
+        if (this._closePending) {
+          this._closePending = false;
           this.emit('close');
         }
         if (!handshakeResolved) {
@@ -197,6 +241,10 @@ export class ShellperClient extends EventEmitter implements IShellperClient {
               if (typeof welcome.lastDataAt === 'number') {
                 this._lastDataAt = welcome.lastDataAt;
               }
+              // #1215: hydrate the REPLAY guarantee flag. Old shellpers omit
+              // it (falsy default stands); waitForReplay() uses this to pick
+              // its timeout.
+              this._alwaysSendsReplay = welcome.alwaysSendsReplay === true;
               // Replay any buffered frames received before WELCOME
               for (const buffered of preWelcomeBuffer) {
                 this.handleFrame(buffered);
@@ -260,10 +308,13 @@ export class ShellperClient extends EventEmitter implements IShellperClient {
   }
 
   disconnect(): void {
-    this.cleanup();
+    this.cleanup(true);
   }
 
-  private cleanup(): void {
+  private cleanup(intentional = false): void {
+    if (this._connected && !intentional) {
+      this._closePending = true;
+    }
     this._connected = false;
     if (this.socket && !this.socket.destroyed) {
       this.socket.destroy();
@@ -271,14 +322,16 @@ export class ShellperClient extends EventEmitter implements IShellperClient {
     this.socket = null;
   }
 
-  write(data: string | Buffer): void {
-    if (!this._connected || !this.socket) return;
+  write(data: string | Buffer): boolean {
+    if (!this._connected || !this.socket) return false;
     this.socket.write(encodeData(data));
+    return true;
   }
 
-  resize(cols: number, rows: number): void {
-    if (!this._connected || !this.socket) return;
+  resize(cols: number, rows: number): boolean {
+    if (!this._connected || !this.socket) return false;
     this.socket.write(encodeResize({ cols, rows }));
+    return true;
   }
 
   signal(sig: number): void {
@@ -306,16 +359,29 @@ export class ShellperClient extends EventEmitter implements IShellperClient {
    * The shellper sends REPLAY immediately after WELCOME, but they may
    * arrive in separate reads. Returns the replay data, or empty Buffer
    * if no REPLAY arrives within the timeout (shellper had nothing to replay).
+   *
+   * #1215: a shellper that didn't advertise `alwaysSendsReplay` on WELCOME
+   * only sends REPLAY when it has buffered data — an idle one never sends
+   * it at all, so waiting the full `timeoutMs` (DEFAULT_REPLAY_TIMEOUT_MS
+   * by default) for every such session is pure stall. Bound the wait to
+   * LEGACY_REPLAY_TIMEOUT_MS instead: short enough to keep idle-session
+   * cost low, long enough to still catch a busy legacy shellper's REPLAY
+   * arriving on the later socket read this method exists to wait for in
+   * the first place (#1198).
    */
-  waitForReplay(timeoutMs: number = 500): Promise<Buffer> {
+  waitForReplay(timeoutMs: number = DEFAULT_REPLAY_TIMEOUT_MS): Promise<Buffer> {
     if (this.replayData !== null) {
       return Promise.resolve(this.replayData);
     }
+    const effectiveTimeoutMs = this._alwaysSendsReplay
+      ? timeoutMs
+      : Math.min(timeoutMs, LEGACY_REPLAY_TIMEOUT_MS);
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
         this.removeListener('replay', onReplay);
+        this.emit('replay-timeout', { alwaysSendsReplay: this._alwaysSendsReplay, timeoutMs: effectiveTimeoutMs });
         resolve(Buffer.alloc(0));
-      }, timeoutMs);
+      }, effectiveTimeoutMs);
       const onReplay = (data: Buffer) => {
         clearTimeout(timer);
         resolve(data);

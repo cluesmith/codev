@@ -1,17 +1,24 @@
 # Spike: Expo scaffold + LAN Tower reachability
 
-**Date**: 2026-07-16
-**Status**: Headless phase complete (green). Device phase pending (requires a physical phone + a BRIDGE_MODE Tower; procedure below).
-**Executed by**: mobile architect directly at Amr's instruction (deviation from the spike-as-EXPERIMENT-builder default, recorded per protocol).
+**Date**: 2026-07-16 (headless phase); 2026-07-18 (device phase)
+**Status**: **COMPLETE — both phases green.** Device verification performed on a physical iPhone 14 Pro Max (iOS 26.5.2) against the live Tower (v3.2.3).
+**Executed by**: mobile architect directly at Amr's instruction (deviation from the spike-as-EXPERIMENT-builder default, recorded per protocol); device interaction by Amr.
 **Spike code**: discarded per policy (scaffold lived in a session scratchpad). The recipe and key source below are the deliverable; the real `apps/mobile` starts fresh through PIR gates.
 
 ## Question this spike answers
 
 Can an Expo / React Native app on a phone (1) fetch Tower's REST surface and (2) hold the `/ws/messages` WebSocket, over LAN, with a config a PIR builder can copy verbatim?
 
-## Verdict
+## Verdict: YES — verified end-to-end on device (2026-07-18)
 
-Everything verifiable without a physical device is green:
+All device-phase checks passed on the phone:
+
+- **REST over LAN**: `GET /health` (`healthy`), `GET /api/version` (`3.2.3`), and `GET /api/overview` (live builder list rendered) from the app, with a visible latency reading.
+- **Message bus over LAN**: `/ws/messages` reached `open`; a frame sent from the workspace (`afx send architect:mobile ...`) appeared in the app's feed within a second — the bus is live end-to-end on RN's built-in WebSocket.
+- **Background/foreground reconnect**: after ~30s backgrounded, the `AppState` handler restored the WebSocket to `open`. iOS does suspend the socket; the reconnect seam is mandatory and works.
+- **`NSLocalNetworkUsageDescription` exercised for real**: the iOS local-network permission prompt appeared on first launch of the dev build, showing the configured text. (Expo Go can never show this; only the dev build validates it.)
+
+Headless-phase results (2026-07-16), all green:
 
 - TypeScript strict check passes; Metro produces a 1.4MB Hermes iOS bundle (451 modules) via `npx expo export`.
 - Tower's global `GET /api/overview` requires no parameters (HTTP 200 with cross-workspace builders); `GET /health`, `GET /api/version`, and the workspace-scoped overview route all respond as documented.
@@ -58,20 +65,38 @@ Installed `@cluesmith/codev-core@3.2.3` from a tarball into the spike app and bu
 
 This empirically confirms issue #1189's two claims: core's pure leaves are RN-consumable today, and the `constants` module traps pure values behind Node builtins. The failure is loud (bundle-time), not a silent runtime break.
 
-## Device-verification procedure (remaining half, needs Amr)
+## Device phase — how it actually went (2026-07-18)
 
-1. **Tower on the LAN**: restart Tower with `BRIDGE_MODE=1` so it binds beyond localhost. ⚠️ A Tower restart kills live builder PTYs and any dev PTY: coordinate timing with main, do it between builder sessions.
-2. In the scaffold: `npx expo start`, open in Expo Go on a phone on the same Wi-Fi.
-3. Enter `http://<laptop-lan-ip>:4100`, tap **Probe REST**: expect health/version/builder list + latency reading.
-4. Tap **Connect WS**, then from the laptop run any `afx send`: the frame should appear in the message-bus list within ~a second.
-5. For the permission-prompt validation specifically, use a dev build (`npx expo run:ios`), not Expo Go, and confirm the local-network prompt shows the `NSLocalNetworkUsageDescription` text.
-6. Background the app 30s, foreground it: WS should reconnect via the `AppState` handler.
+The planned procedure assumed a `BRIDGE_MODE=1` Tower restart and Expo Go. Neither survived contact; the working path and its lessons matter more than the plan did.
+
+### Tower exposure: userland relay instead of BRIDGE_MODE
+
+A ~30-line Node TCP relay (`0.0.0.0:4101` → `127.0.0.1:4100`, raw byte pipe, WS upgrades pass through) made Tower LAN-reachable with **zero restart** — no builder/architect disruption, killed immediately after the test. Trade-offs, recorded honestly: `BRIDGE_MODE` itself remains untested (a PoC-phase item), and the security exposure is identical while the relay runs (the unauthenticated control plane is on the LAN either way; the scope-lock's PoC-only stance applies). A connection-logging relay doubled as the decisive diagnostic (below).
+
+### Expo Go: abandoned; dev build is the reliable spike path
+
+- Expo Go failed twice: "failed to download remote update" (cross-network, see below), then "project is incompatible with this version of Expo Go" (device's Expo Go predated SDK 57). Also verified: there is **no `eas go` command** (eas-cli 21.0.2 full command list checked).
+- The dev build (`npx expo run:ios`-equivalent via raw `xcodebuild`) is what worked, and it is the *better* spike vehicle anyway: it exercises the real `infoPlist` keys.
+
+### Dev-build mechanics (the gotchas a PIR builder will hit)
+
+1. `expo run:ios --device` matches the **`xcrun xctrace list devices` UDID namespace**, not `devicectl`'s CoreDevice UUIDs — passing the latter fails with "No device UDID or name matching".
+2. Headless `xcodebuild` needed explicit signing: `DEVELOPMENT_TEAM=<team>` (recoverable from the Apple Development cert's OU field via `security find-certificate` + `openssl x509 -subject`) plus `-allowProvisioningUpdates -allowProvisioningDeviceRegistration`.
+3. **Install + launch worked entirely over Wi-Fi pairing, no cable**: `xcrun devicectl device install app` / `device process launch` against the CoreDevice UUID. Caveat: that tunnel can ride Apple's peer-to-peer link, so a successful `devicectl` install does **not** prove LAN reachability — we proved that the hard way.
+4. Debug builds bake the Mac's IP at build time; switching networks afterwards yields "No script URL provided" on launch. Fix: rebuild (incremental, ~1 min).
+
+### Network diagnosis: the actual blocker and its signature
+
+On the original Wi-Fi, the phone's packets to the Mac **never arrived** (zero connections in the relay log) despite both devices being "on Wi-Fi" — a subnet/client-isolation situation (Mac was on a `172.27.0.0/16` network). The iOS-side signature of dropped LAN packets is a **silent hang**: fetch produces nothing for tens of seconds and WS sticks at `connecting`, with no error surfaced. Moving both devices to a personal `/24` network fixed everything instantly. Diagnostic method worth keeping: a connection-logging relay cleanly splits "packets don't arrive" (phone-side permission or network) from "arrive but fail" (server-side).
+
+Also verified: the iOS local-network permission prompt fired on first launch of the dev build with the configured `NSLocalNetworkUsageDescription` text, and packets are silently dropped (not errored) while permission is undetermined.
 
 ## What this de-risks for the PoC
 
 - The scaffold + LAN config recipe is copy-paste ready for the real `apps/mobile` (which now has a home: #855 merged, `apps/` exists).
-- The client seam list for codev-sdk (#1189) is validated from the consuming side: explicit `baseUrl`, injected storage, WS-not-SSE, `AppState` lifecycle.
+- The client seam list for codev-sdk (#1189) is validated from the consuming side: explicit `baseUrl`, injected storage, WS-not-SSE, `AppState` lifecycle — now including on-device confirmation of the WS bus and the `AppState` reconnect.
 - No third-party networking libraries needed for v0 transport.
+- **New requirement surfaced for the PoC**: an in-app connection doctor. The spike client's raw `fetch` with no timeout gave zero feedback during the network-isolation failure; the real app needs explicit timeouts, reachability states, and a "can't reach Tower: same Wi-Fi? subnet isolation?" diagnostic surface. File into the PoC spec.
 
 ## Appendix: spike client source (App.tsx, 187 lines)
 

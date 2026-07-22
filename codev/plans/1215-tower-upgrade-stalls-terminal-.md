@@ -1,0 +1,64 @@
+# PIR Plan: Fix waitForReplay Stall for Idle Old-Binary Shellpers
+
+## Understanding
+
+After a Tower upgrade, detached shellpers from before the upgrade keep running the old binary (`shellper-main.ts:4`, `session-manager.ts:230` `detached: true`) — Tower restarts don't touch them by design, so live sessions survive.
+
+`#1198` (PR #1204) changed the adoption/reconnect path from a synchronous `getReplayData()` read to `await client.waitForReplay()` (`tower-terminals.ts:770`, `tower-terminals.ts:983`), to fix a real race: the REPLAY frame often arrives on a separate socket read after WELCOME, and reading synchronously could observe `null` and render a blank terminal. As part of that same fix, new-binary shellpers were changed to always send a REPLAY frame after WELCOME, even when empty (`shellper-process.ts:395-397`, commit `7a2f8053`) — specifically so `waitForReplay()` resolves in milliseconds instead of timing out.
+
+**Root cause**: that "always send REPLAY, even empty" guarantee only holds for shellpers built with the new binary. `PROTOCOL_VERSION` (`shellper-protocol.ts:33`) stayed at `1` — the behavioral change was not accompanied by a version bump, and the existing `shellperVersion < PROTOCOL_VERSION` handshake check in `shellper-client.ts:205-210` therefore never fires for this skew (an old shellper self-reports version `1`, matching Tower's `1`). Old-binary shellpers only emit a REPLAY frame when their buffer is non-empty (`shellper-process.ts` before `7a2f8053`) — an **idle** old shellper sends nothing, ever. So `waitForReplay()` burns its full 500ms default timeout (`shellper-client.ts:341`) per idle old-binary shellper.
+
+Compounding this: the adoption loop's probe phase (connect + wait) already uses bounded concurrency 5 (`tower-terminals.ts:723`, "Spec 0122 Phase 2"), but `waitForReplay()` currently runs in the **second, explicitly sequential** loop (`tower-terminals.ts:753`, "Process probe results sequentially (shared state mutations)") — so the 500ms waits stack one after another instead of overlapping. For ~20 adopted sessions, mostly idle pre-upgrade shellpers, that's up to ~10s of serialized stall.
+
+## Proposed Change
+
+Two complementary changes, matching the issue's directions 1+2 (rejecting direction 3 as too heavyweight — see Risks & Alternatives):
+
+### A. Make `waitForReplay()` version-aware (direction 1)
+
+Add a new **optional capability field** to the WELCOME payload rather than bumping the hard-compat-gating `PROTOCOL_VERSION` int. Bumping `PROTOCOL_VERSION` would make every old-binary shellper fail the existing `shellperVersion < PROTOCOL_VERSION` check in `shellper-client.ts:205-210` and get its connection **rejected outright** — which cascades into Phase 2 of reconciliation treating it as stale and SIGTERM-ing the live process (`tower-terminals.ts:` Phase 2 sweep). That's a backdoor into direction 3 (bounce old shellpers), which the issue itself flags as heavyweight/live-conversation-killing and "probably wrong as primary." A capability flag avoids that side effect entirely and matches the existing precedent for this exact kind of forward/backward-compat signal: `WelcomeMessage.lastDataAt` (`shellper-protocol.ts:88`) is already an optional field that new shellpers populate and old shellpers omit, with Tower falling back to legacy behavior when it's absent.
+
+- `WelcomeMessage` gets a new optional field, e.g. `alwaysSendsReplay?: boolean`. New shellpers (`shellper-process.ts`) set it to `true`. Old-binary shellpers omit it (undefined → falsy).
+- `ShellperClient` stores this as `_alwaysSendsReplay` from the WELCOME payload (mirrors the existing `_lastDataAt` hydration pattern at `shellper-client.ts:218-225`).
+- `waitForReplay(timeoutMs = 500)` uses a much shorter timeout when talking to a peer that doesn't guarantee the frame (e.g. 50ms) instead of skipping the wait entirely. Skipping entirely would reopen the exact #1198 race for an old shellper that *does* have buffered data but sends REPLAY on a slightly later read. A short bound keeps that race protection while capping the idle-session cost at 50ms instead of 500ms.
+
+### B. Overlap the waits instead of serializing them (direction 2)
+
+Move `waitForReplay()` (and the `capRingSeed()` call that wraps it) from the sequential "Process probe results sequentially" loop into the parallel probe batch (`tower-terminals.ts:723-750`, inside the `batch.map(...)` that already does `reconnectSession`). The shared-state mutations (creating the `PtySession`, registering in `workspaceTerminals`, SQLite writes) stay in the sequential loop exactly as today — only the two `await`s (connect, then wait-for-replay) move into the concurrency-5 batch together, so replay waits for up to 5 sessions overlap instead of stacking. Apply the same reordering to both reconciliation call sites: the startup batch (`tower-terminals.ts:753-770`) and the on-the-fly single-session reconnect (`tower-terminals.ts:973-983` — already a single await, so this site only benefits from change A, not batching, since there's nothing to overlap with).
+
+Combined effect: worst case for ~20 mostly-idle legacy sessions drops from ~10s (20 × 500ms serialized) to ~4 batches × 50ms ≈ 200ms, plus normal connect latency.
+
+### C. Observability (direction 4, minimal slice)
+
+Log when a `waitForReplay()` call actually burns its allotted timeout (i.e., resolves via the timer, not the `replay` event) — one line identifying whether the peer is legacy (no `alwaysSendsReplay`) or not, so the next protocol-behavior skew shows up in `afx tower log` instead of presenting as unexplained lag. Implemented as a small addition to `ShellperClient.waitForReplay()` itself (it already knows which branch resolved), emitted via a debug-level `log`/event rather than a new dependency — keep this surgical, not a new logging subsystem.
+
+Rejected from direction 4: lowering the global 500ms default. New-binary shellpers already resolve in milliseconds via the guaranteed-REPLAY mechanism, so 500ms is already just a safety ceiling for them; the real fix for the old-peer case is the short-circuit in A, not a global timeout cut that would also shrink the race-protection window for genuinely slow new-shellper replays (e.g. very large buffers near `REPLAY_PAYLOAD_MAX`).
+
+## Files to Change
+
+- `packages/codev/src/terminal/shellper-protocol.ts` — add `alwaysSendsReplay?: boolean` to `WelcomeMessage`, documented like the existing `lastDataAt` field.
+- `packages/codev/src/terminal/shellper-process.ts:371-378` — set `alwaysSendsReplay: true` in the `encodeWelcome(...)` call (new shellpers always guarantee the empty-REPLAY send already; this just advertises that guarantee).
+- `packages/codev/src/terminal/shellper-client.ts`:
+  - `IShellperClient` interface / class: store `_alwaysSendsReplay` (default `false`), hydrate it in the WELCOME handler (`shellper-client.ts:216-225`) alongside the existing `lastDataAt` hydration.
+  - `waitForReplay(timeoutMs = 500)` (`shellper-client.ts:341-356`): when `!this._alwaysSendsReplay`, use a short legacy timeout (new constant, e.g. `LEGACY_REPLAY_TIMEOUT_MS = 50`) instead of the caller-supplied `timeoutMs`. Log when the timer path fires (vs. the `replay` event path).
+- `packages/codev/src/agent-farm/servers/tower-terminals.ts`:
+  - `_reconcileTerminalSessionsInner` (~`tower-terminals.ts:723-770`): move the `client.waitForReplay()` + `capRingSeed()` call into the `batch.map(...)` probe closure so it runs concurrently with the other probes in the batch; carry the resolved `replayData` on `ProbeResult` for the sequential loop to consume.
+  - Leave the on-the-fly path (~`tower-terminals.ts:973-983`) as-is structurally (single session, nothing to batch) — it picks up the change A speedup automatically since it calls the same `waitForReplay()`.
+- Tests (see Test Plan) in `packages/codev/src/terminal/__tests__/shellper-client.test.ts` and a new/extended reconciliation test under `packages/codev/src/agent-farm/servers/__tests__/` (existing suite covering `tower-terminals.ts` reconciliation, exact filename TBD at implement time — locate via `grep -rl reconcileTerminalSessions packages/codev/src/agent-farm/servers/__tests__/`).
+
+## Risks & Alternatives Considered
+
+- **Risk**: the new `ProbeResult` shape carries `replayData` alongside `client`; if a probe's `waitForReplay()` throws (shouldn't — it only resolves) that needs to stay inside the existing `Promise.allSettled` per-item error handling, not escape and fail the whole batch. Mitigation: the promise chain for each batch item already wraps `reconnectSession` in a way that per-item failures land in `result.status === 'rejected'`; extending it to also await `waitForReplay()` inside the same async closure keeps that guarantee — no `try/catch` needed since `Promise.allSettled` already isolates failures per item.
+- **Risk**: a legacy shellper with a genuinely large buffered replay (not idle) could still occasionally miss the shortened 50ms window on a loaded system, reintroducing a milder version of the #1198 blank-render race. Mitigation: 50ms is chosen to be well above normal same-process socket read latency (sub-millisecond in practice) while capping worst-case stall; if this proves too tight in practice it's a one-line constant change, not a design change. Documented as a deliberate tradeoff, not silently accepted.
+- **Alternative (direction 3, bounce old shellpers on upgrade)**: rejected as primary — kills live Claude conversations mid-session unless combined with a resume mechanism that doesn't exist for shell/builder terminals today (only architects have `resolveArchitectRestart` session-resume). Also out of proportion to the actual cost (a few hundred ms to low seconds of stall) versus its blast radius (killing live work). Not part of this fix; could be revisited separately if a resume-safe bounce mechanism is ever built.
+- **Alternative considered for A**: reuse `PROTOCOL_VERSION` directly instead of a new capability field, per the issue's literal wording ("thread [the version] to the client"). Rejected because the only version-comparison codepath (`shellper-client.ts:205-210`) is a hard reject-on-mismatch gate — bumping the shared version int to signal this capability would reject-and-orphan every old shellper's connection attempt (see explanation in Proposed Change A). A separate optional field carries the same "is this an old shellper" signal without touching the compat-gate's blast radius.
+- **Risk**: forgetting to update both reconciliation call sites (startup batch vs. on-the-fly) — mitigated by explicitly listing both in Files to Change and testing both paths.
+
+## Test Plan
+
+- Unit test (`shellper-client.test.ts`): a mock shellper that sends WELCOME **without** `alwaysSendsReplay` and never sends REPLAY — assert `waitForReplay()` resolves with an empty buffer around the short legacy timeout (~50ms), not the full default (500ms). Use fake timers or a tolerant elapsed-time assertion consistent with the existing `resolves with empty buffer on timeout when no replay sent` test (`shellper-client.test.ts:640`).
+- Unit test: a mock shellper that sends WELCOME **with** `alwaysSendsReplay: true` and a REPLAY frame arriving shortly after (simulating the #1198 separate-read race) — assert `waitForReplay()` still resolves with the actual replay data, not an empty buffer, i.e. the short-circuit doesn't clobber the existing race fix for new shellpers.
+- Unit test: legacy shellper (no `alwaysSendsReplay`) that *does* send a REPLAY frame within the short window — assert it's still picked up (the short-circuit shortens the timeout, it doesn't skip the wait).
+- Reconciliation test (`tower-terminals` test suite): simulate N legacy idle sessions in a single reconciliation pass and assert wall-clock time scales with `ceil(N / 5) * LEGACY_REPLAY_TIMEOUT_MS` (overlap within a batch), not `N * LEGACY_REPLAY_TIMEOUT_MS` (serialized) — proves change B actually parallelizes and isn't defeated by an accidental re-serialization.
+- Manual (at `dev-approval`): run the worktree with `afx dev`, start several terminal sessions, restart Tower (or simulate via `afx tower stop && afx tower start`) with the *old* binary still running the underlying shellpers is hard to simulate without an actual prior-version binary — instead, verify via the automated tests above plus a read-through with the reviewer of the exact diff at the call sites, since a true before/after binary-skew repro isn't practical in a single worktree. Note this limitation explicitly at the `dev-approval` gate rather than silently skipping manual verification.
+- Regression: run the full existing `shellper-client.test.ts` and `tower-terminals` reconciliation suites to confirm no existing case (especially the `#1198` oversized-REPLAY and version-mismatch tests at `shellper-client.test.ts:654-736`) regresses.

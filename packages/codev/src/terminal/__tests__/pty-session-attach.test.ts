@@ -1,5 +1,8 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { PtySession, type PtySessionConfig } from '../pty-session.js';
 import type { IShellperClient } from '../shellper-client.js';
 
@@ -10,10 +13,16 @@ import type { IShellperClient } from '../shellper-client.js';
  * re-run onPtyData for every PTY byte (the listener-leak the hardening targets).
  */
 
-function makeFakeClient(): IShellperClient {
-  const emitter = new EventEmitter() as unknown as IShellperClient & { _lastDataAt: number };
+function makeFakeClient(): IShellperClient & { connectedState: boolean } {
+  const emitter = new EventEmitter() as unknown as IShellperClient & { connectedState: boolean };
   // attachShellper reads client.lastDataAt and subscribes data/exit/close.
   Object.defineProperty(emitter, 'lastDataAt', { get: () => Date.now() });
+  // #1198: PtySession.writable and write() consult the client's connection
+  // state; the fake models it with a mutable flag.
+  emitter.connectedState = true;
+  Object.defineProperty(emitter, 'connected', { get: () => emitter.connectedState });
+  emitter.write = () => emitter.connectedState;
+  emitter.resize = () => emitter.connectedState;
   return emitter;
 }
 
@@ -75,5 +84,71 @@ describe('PtySession.attachShellper idempotency (#1047 Fix E)', () => {
     // Guard only fires for a *different* client, so this is a no-op re-subscribe
     // path; the session stays attached and functional.
     expect(clientA.listenerCount('data')).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe('PtySession disk-log handle on re-attach (#1198)', () => {
+  it('does not reopen the disk log when a recovery re-attach arrives', () => {
+    const logDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pty-attach-log-'));
+    const config: PtySessionConfig = {
+      id: 'sess-log',
+      command: '',
+      args: [],
+      cols: 80,
+      rows: 24,
+      cwd: '/tmp',
+      env: {},
+      label: 'test',
+      logDir,
+      diskLogEnabled: true,
+    };
+    const session = new PtySession(config);
+    const openSpy = vi.spyOn(fs, 'openSync');
+    const logOpens = () => openSpy.mock.calls.filter((c) => String(c[0]).startsWith(logDir)).length;
+
+    try {
+      session.attachShellper(makeFakeClient(), Buffer.alloc(0), 1234);
+      expect(logOpens()).toBe(1);
+
+      // In-place recovery delivers a replacement client. Before the guard,
+      // this leaked one append handle per reconnect.
+      session.attachShellper(makeFakeClient(), Buffer.alloc(0), 1234);
+      expect(logOpens()).toBe(1);
+
+      // After a real teardown the handle is closed, so a fresh attach must
+      // reopen it.
+      session.detachShellper();
+      session.attachShellper(makeFakeClient(), Buffer.alloc(0), 1234);
+      expect(logOpens()).toBe(2);
+    } finally {
+      openSpy.mockRestore();
+      session.detachShellper();
+      fs.rmSync(logDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('PtySession.writable (#1198)', () => {
+  it('reflects the shellper client connection state, not just session status', () => {
+    const session = makeSession();
+    const client = makeFakeClient();
+    session.attachShellper(client, Buffer.alloc(0), 1234);
+
+    expect(session.writable).toBe(true);
+    expect(session.write('reaches the pty')).toBe(true);
+
+    // The connection dies but the session still reports status 'running':
+    // this is exactly the zombie state the getter exists to expose.
+    client.connectedState = false;
+    expect(session.status).toBe('running');
+    expect(session.writable).toBe(false);
+    expect(session.write('dropped')).toBe(false);
+    expect(session.resize(100, 50)).toBe(false);
+  });
+
+  it('is false with no backing client', () => {
+    const session = makeSession();
+    expect(session.writable).toBe(false);
+    expect(session.write('nowhere')).toBe(false);
   });
 });

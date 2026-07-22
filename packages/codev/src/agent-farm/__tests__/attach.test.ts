@@ -8,6 +8,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { Builder } from '../types.js';
 import { EventEmitter } from 'node:events';
+import { DEFAULT_REPLAY_TIMEOUT_MS } from '../../terminal/shellper-client.js';
 
 // Mock state module
 const mockBuilders: Builder[] = [];
@@ -99,6 +100,7 @@ const mockShellperWaitForReplay = vi.fn();
 let lastShellperInstance: EventEmitter | null = null;
 
 vi.mock('../../terminal/shellper-client.js', () => ({
+  DEFAULT_REPLAY_TIMEOUT_MS: 500,
   ShellperClient: class MockShellperClient extends EventEmitter {
     socketPath: string;
     clientType: string;
@@ -481,7 +483,7 @@ describe('attach command', () => {
       const connectPromise = attachTerminal('/tmp/test.sock');
       await new Promise((r) => setTimeout(r, 10));
 
-      expect(mockShellperWaitForReplay).toHaveBeenCalledWith(500);
+      expect(mockShellperWaitForReplay).toHaveBeenCalledWith(DEFAULT_REPLAY_TIMEOUT_MS);
 
       lastShellperInstance!.emit('exit', { code: 0, signal: null });
       await new Promise((r) => setTimeout(r, 10));

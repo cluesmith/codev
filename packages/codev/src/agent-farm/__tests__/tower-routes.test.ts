@@ -1241,7 +1241,7 @@ describe('tower-routes', () => {
         agent: 'architect',
       });
       mockGetTerminalManager.mockReturnValue({
-        getSession: () => ({ write: vi.fn(), pid: 1234, isUserIdle: () => true, composing: false }),
+        getSession: () => ({ write: vi.fn(), pid: 1234, writable: true, isUserIdle: () => true, composing: false }),
         listSessions: () => [],
       });
       const req = makeReq('POST', '/api/send');
@@ -1259,7 +1259,7 @@ describe('tower-routes', () => {
         agent: 'architect',
       });
       mockGetTerminalManager.mockReturnValue({
-        getSession: () => ({ write: vi.fn(), pid: 1234, isUserIdle: () => true, composing: false }),
+        getSession: () => ({ write: vi.fn(), pid: 1234, writable: true, isUserIdle: () => true, composing: false }),
         listSessions: () => [],
       });
       const req = makeReq('POST', '/api/send');
@@ -1278,7 +1278,7 @@ describe('tower-routes', () => {
       });
       const mockWrite = vi.fn();
       mockGetTerminalManager.mockReturnValue({
-        getSession: () => ({ write: mockWrite, pid: 1234, isUserIdle: () => true, composing: false }),
+        getSession: () => ({ write: mockWrite, pid: 1234, writable: true, isUserIdle: () => true, composing: false }),
         listSessions: () => [],
       });
       const req = makeReq('POST', '/api/send');
@@ -1295,6 +1295,28 @@ describe('tower-routes', () => {
       expect(mockWrite).toHaveBeenCalled();
     });
 
+    it('returns 503 TERMINAL_NOT_WRITABLE instead of a false success when the shellper connection is down (#1198)', async () => {
+      mockParseJsonBody.mockResolvedValue({ to: 'architect', message: 'hello', workspace: '/tmp/ws' });
+      mockResolveTarget.mockReturnValue({
+        terminalId: 'term-zombie',
+        workspacePath: '/tmp/ws',
+        agent: 'architect',
+      });
+      const mockWrite = vi.fn();
+      mockGetTerminalManager.mockReturnValue({
+        getSession: () => ({ write: mockWrite, pid: 1234, writable: false, isUserIdle: () => true, composing: false }),
+        listSessions: () => [],
+      });
+      const req = makeReq('POST', '/api/send');
+      const { res, statusCode, body } = makeRes();
+
+      await handleRequest(req, res, makeCtx());
+      expect(statusCode()).toBe(503);
+      const parsed = JSON.parse(body());
+      expect(parsed.error).toBe('TERMINAL_NOT_WRITABLE');
+      expect(mockWrite).not.toHaveBeenCalled();
+    });
+
     it('returns deferred:true when user is actively typing (Spec 403)', async () => {
       mockParseJsonBody.mockResolvedValue({ to: 'architect', message: 'hello', workspace: '/tmp/ws' });
       mockResolveTarget.mockReturnValue({
@@ -1304,7 +1326,7 @@ describe('tower-routes', () => {
       });
       const mockWrite = vi.fn();
       mockGetTerminalManager.mockReturnValue({
-        getSession: () => ({ write: mockWrite, pid: 1234, isUserIdle: () => false, composing: false }),
+        getSession: () => ({ write: mockWrite, pid: 1234, writable: true, isUserIdle: () => false, composing: false }),
         listSessions: () => [],
       });
       const req = makeReq('POST', '/api/send');
@@ -1332,7 +1354,7 @@ describe('tower-routes', () => {
       });
       const mockWrite = vi.fn();
       mockGetTerminalManager.mockReturnValue({
-        getSession: () => ({ write: mockWrite, pid: 1234, isUserIdle: () => false, composing: true }),
+        getSession: () => ({ write: mockWrite, pid: 1234, writable: true, isUserIdle: () => false, composing: true }),
         listSessions: () => [],
       });
       const req = makeReq('POST', '/api/send');
@@ -1356,7 +1378,7 @@ describe('tower-routes', () => {
       });
       const mockWrite = vi.fn();
       mockGetTerminalManager.mockReturnValue({
-        getSession: () => ({ write: mockWrite, pid: 1234, isUserIdle: () => true, composing: false }),
+        getSession: () => ({ write: mockWrite, pid: 1234, writable: true, isUserIdle: () => true, composing: false }),
         listSessions: () => [],
       });
       const req = makeReq('POST', '/api/send');
@@ -1383,7 +1405,7 @@ describe('tower-routes', () => {
       });
       const mockWrite = vi.fn();
       mockGetTerminalManager.mockReturnValue({
-        getSession: () => ({ write: mockWrite, pid: 1234, isUserIdle: () => true, composing: false }),
+        getSession: () => ({ write: mockWrite, pid: 1234, writable: true, isUserIdle: () => true, composing: false }),
         listSessions: () => [],
       });
       const req = makeReq('POST', '/api/send');
@@ -1408,7 +1430,7 @@ describe('tower-routes', () => {
       // Bugfix #492: composing gets stuck true after non-Enter keystrokes.
       // Idle threshold alone is sufficient — deliver immediately.
       mockGetTerminalManager.mockReturnValue({
-        getSession: () => ({ write: mockWrite, pid: 1234, isUserIdle: () => true, composing: true }),
+        getSession: () => ({ write: mockWrite, pid: 1234, writable: true, isUserIdle: () => true, composing: true }),
         listSessions: () => [],
       });
       const req = makeReq('POST', '/api/send');

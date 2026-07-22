@@ -1,0 +1,30 @@
+id: '1198'
+title: shellper-reconnect-error-is-sw
+protocol: pir
+phase: verified
+plan_phases: []
+current_plan_phase: null
+gates:
+  plan-approval:
+    status: approved
+    requested_at: '2026-07-18T10:24:16.064Z'
+    approved_at: '2026-07-18T10:25:46.731Z'
+  dev-approval:
+    status: approved
+    requested_at: '2026-07-18T14:59:12.299Z'
+    approved_at: '2026-07-19T01:43:07.193Z'
+  pr:
+    status: approved
+    requested_at: '2026-07-19T01:51:34.055Z'
+    approved_at: '2026-07-21T11:13:39.356Z'
+iteration: 1
+build_complete: true
+history: []
+started_at: '2026-07-18T10:17:40.159Z'
+updated_at: '2026-07-21T11:15:14.553Z'
+pr_history:
+  - phase: review
+    pr_number: 1204
+    branch: builder/pir-1198
+    created_at: '2026-07-19T01:45:52.590Z'
+pr_ready_for_human: false

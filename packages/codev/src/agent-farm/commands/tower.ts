@@ -22,6 +22,11 @@ const LOG_FILE = resolve(AGENT_FARM_DIR, 'tower.log');
 const STARTUP_TIMEOUT_MS = 30000;
 const STARTUP_CHECK_INTERVAL_MS = 200;
 
+// Stop settings (#1198): how long towerStop waits for the SIGTERMed process
+// to exit before escalating to SIGKILL, and how often it polls.
+const STOP_EXIT_TIMEOUT_MS = 8000;
+const STOP_CHECK_INTERVAL_MS = 200;
+
 export interface TowerStartOptions {
   port?: number;
   wait?: boolean; // Defaults to true. Set false for fire-and-forget startup.
@@ -351,6 +356,36 @@ export async function towerStop(options: TowerStopOptions = {}): Promise<void> {
     } catch {
       // Process may have already exited
     }
+  }
+
+  // #1198: wait for the processes to actually exit before returning.
+  // Returning right after SIGTERM let `afx tower stop && afx tower start`
+  // overlap the old Tower's shellper teardown with the new Tower's adoption
+  // pass — an unnecessary race window during every restart.
+  const isAlive = (pid: number): boolean => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const deadline = Date.now() + STOP_EXIT_TIMEOUT_MS;
+  let survivors = pids.filter(isAlive);
+  while (survivors.length > 0 && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, STOP_CHECK_INTERVAL_MS));
+    survivors = survivors.filter(isAlive);
+  }
+
+  if (survivors.length > 0) {
+    for (const pid of survivors) {
+      try {
+        process.kill(pid, 'SIGKILL');
+      } catch {
+        // Exited between the check and the kill
+      }
+    }
+    logger.warn(`Tower did not exit within ${STOP_EXIT_TIMEOUT_MS / 1000}s; sent SIGKILL to PID${survivors.length > 1 ? 's' : ''} ${survivors.join(', ')}`);
   }
 
   if (stopped > 0) {

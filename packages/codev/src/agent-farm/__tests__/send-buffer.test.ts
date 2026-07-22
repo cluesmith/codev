@@ -27,10 +27,11 @@ function makeMsg(sessionId: string, overrides?: Partial<BufferedMessage>): Buffe
   };
 }
 
-function makeSession(idle: boolean, composing = false): PtySession {
+function makeSession(idle: boolean, composing = false, writable = true): PtySession {
   return {
     isUserIdle: () => idle,
     composing,
+    writable,
     write: vi.fn(),
   } as unknown as PtySession;
 }
@@ -55,6 +56,45 @@ describe('SendBuffer', () => {
 
     expect(buf.pendingCount).toBe(3);
     expect(buf.sessionCount).toBe(2);
+  });
+
+  it('holds messages for an unwritable session, then drops loudly at max age (#1198)', () => {
+    const session = makeSession(true, false, false); // idle but unwritable
+    const deliver = vi.fn().mockReturnValue(0);
+    const log = vi.fn();
+
+    buf.start(() => session, deliver, log);
+    buf.enqueue(makeMsg('sess-1'));
+
+    // Idle would normally deliver, but the shellper connection is down:
+    // the message is held, not written into the void.
+    vi.advanceTimersByTime(500);
+    expect(deliver).not.toHaveBeenCalled();
+    expect(buf.pendingCount).toBe(1);
+
+    // Still down at max age: dropped with an ERROR, never "delivered".
+    vi.advanceTimersByTime(10_000);
+    expect(deliver).not.toHaveBeenCalled();
+    expect(buf.pendingCount).toBe(0);
+    expect(log).toHaveBeenCalledWith('ERROR', expect.stringContaining('Dropping'));
+  });
+
+  it('delivers held messages once the session becomes writable again (#1198)', () => {
+    const session = makeSession(true, false, false) as PtySession & { writable: boolean };
+    const deliver = vi.fn().mockReturnValue(0);
+    const log = vi.fn();
+
+    buf.start(() => session, deliver, log);
+    buf.enqueue(makeMsg('sess-1'));
+
+    vi.advanceTimersByTime(500);
+    expect(deliver).not.toHaveBeenCalled();
+
+    // In-place reconnect landed: connection is back before max age.
+    session.writable = true;
+    vi.advanceTimersByTime(500);
+    expect(deliver).toHaveBeenCalledTimes(1);
+    expect(buf.pendingCount).toBe(0);
   });
 
   it('delivers messages when session is idle', () => {

@@ -529,6 +529,7 @@ describe('tower-terminals', () => {
       const reconnectGate = new Promise<void>((r) => { releaseReconnect = r; });
       const makeClient = () => ({
         getReplayData: () => Buffer.alloc(0),
+        waitForReplay: async () => Buffer.alloc(0),
         connected: true,
         connect: vi.fn(), disconnect: vi.fn(), write: vi.fn(), resize: vi.fn(),
         signal: vi.fn(), spawn: vi.fn(), ping: vi.fn(), setReplayData: vi.fn(),
@@ -678,6 +679,7 @@ describe('tower-terminals', () => {
       // Mock a shellper client that returns successfully
       const makeClient = () => ({
         getReplayData: () => Buffer.alloc(0),
+        waitForReplay: async () => Buffer.alloc(0),
         connected: true,
         connect: vi.fn(),
         disconnect: vi.fn(),
@@ -738,6 +740,84 @@ describe('tower-terminals', () => {
 
       // Verify log messages show successful reconnection
       expect(deps.log).toHaveBeenCalledWith('INFO', expect.stringContaining('Reconnected shellper session'));
+
+      vi.restoreAllMocks();
+    });
+
+    it('overlaps waitForReplay calls within a probe batch instead of serializing them (#1215)', async () => {
+      // Reset mocks that may have been set to throw by prior tests
+      mockDbRun.mockReset();
+      mockDbAll.mockReset();
+      mockDbPrepare.mockReturnValue({ run: mockDbRun, all: mockDbAll });
+
+      // Before #1215, waitForReplay() ran in the strictly-sequential
+      // "process probe results" loop, so only one could ever be in flight
+      // at a time regardless of how parallel the connect phase was. Moving
+      // it into the same bounded-concurrency batch as reconnectSession
+      // means several waitForReplay calls now overlap.
+      let activeReplayWaits = 0;
+      let maxActiveReplayWaits = 0;
+
+      const makeClient = () => ({
+        getReplayData: () => Buffer.alloc(0),
+        waitForReplay: vi.fn(async () => {
+          activeReplayWaits++;
+          maxActiveReplayWaits = Math.max(maxActiveReplayWaits, activeReplayWaits);
+          await new Promise((r) => setTimeout(r, 20));
+          activeReplayWaits--;
+          return Buffer.alloc(0);
+        }),
+        connected: true,
+        connect: vi.fn(),
+        disconnect: vi.fn(),
+        write: vi.fn(),
+        resize: vi.fn(),
+        signal: vi.fn(),
+        spawn: vi.fn(),
+        ping: vi.fn(),
+        setReplayData: vi.fn(),
+        on: vi.fn(),
+        emit: vi.fn(),
+        removeAllListeners: vi.fn(),
+        removeListener: vi.fn(),
+        addListener: vi.fn(),
+        once: vi.fn(),
+        off: vi.fn(),
+        listenerCount: vi.fn().mockReturnValue(0),
+      });
+
+      const mockReconnectSession = vi.fn(async () => makeClient());
+      const mockShellperManager = { reconnectSession: mockReconnectSession };
+      const deps = makeDeps({ shellperManager: mockShellperManager as any });
+      initTerminals(deps);
+
+      // 6 sessions — exceeds the concurrency limit of 5, so the first batch
+      // alone should show overlap.
+      const sessions = Array.from({ length: 6 }, (_, i) => ({
+        id: `overlap-${i}`,
+        workspace_path: '/overlap/project',
+        type: 'builder' as const,
+        role_id: `builder-${i}`,
+        pid: 5000 + i,
+        shellper_socket: `/tmp/shellper-overlap-${i}.sock`,
+        shellper_pid: 6000 + i,
+        shellper_start_time: Date.now(),
+        created_at: new Date().toISOString(),
+      }));
+
+      mockDbAll.mockReturnValue(sessions);
+
+      vi.spyOn(fs, 'existsSync').mockImplementation((p: fs.PathLike) => {
+        if (String(p) === '/overlap/project') return true;
+        if (String(p).endsWith('.codev/config.json')) return false;
+        return false;
+      });
+
+      const { reconcileTerminalSessions } = await import('../servers/tower-terminals.js');
+      await reconcileTerminalSessions();
+
+      expect(mockReconnectSession).toHaveBeenCalledTimes(6);
+      expect(maxActiveReplayWaits).toBeGreaterThan(1);
 
       vi.restoreAllMocks();
     });
