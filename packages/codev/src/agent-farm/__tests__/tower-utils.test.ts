@@ -22,6 +22,7 @@ import {
   resolveArchitectRestart,
   siblingRegistrationIsLive,
   buildArchitectCrashLoopFallback,
+  sessionHasLiveHolder,
 } from '../servers/tower-utils.js';
 
 // resolveArchitectRestart reads the architect row via getArchitectByName, and
@@ -373,6 +374,74 @@ describe('resolveArchitectLaunch (Issue #832)', () => {
     } finally {
       vi.unstubAllEnvs();
     }
+  });
+
+  // Issue #1224: a stored id whose jsonl exists but is held by a live process
+  // must NOT be resumed (that bakes `--resume <id>` → "Session ID is already in
+  // use" → shellper crash loop). It mints fresh instead.
+
+  it('mints fresh — not resume — when the owned stored id is held by a live process', () => {
+    writeSessionFixture(fakeHome, workspace, 'stored-abc');
+    const log = vi.fn();
+    const { args, sessionId, resumed, fallback } = resolveArchitectLaunch({
+      workspacePath: workspace, name: 'main', baseArgs: [], storedSessionId: 'stored-abc',
+      homeDir: fakeHome, hasLiveHolder: () => true, log,
+    });
+    expect(args).not.toContain('--resume');       // no collision baked
+    expect(args).toContain('--session-id');
+    expect(resumed).toBe(false);
+    expect(fallback).toBeUndefined();
+    expect(sessionId).toMatch(UUID_RE);
+    expect(sessionId).not.toBe('stored-abc');
+    expect(log).toHaveBeenCalledWith('WARN', expect.stringContaining('held by a live process'));
+  });
+
+  it('still resumes the owned stored id when no live process holds it', () => {
+    writeSessionFixture(fakeHome, workspace, 'stored-abc');
+    const { args, sessionId, resumed } = resolveArchitectLaunch({
+      workspacePath: workspace, name: 'main', baseArgs: [], storedSessionId: 'stored-abc',
+      homeDir: fakeHome, hasLiveHolder: () => false,
+    });
+    expect(args).toEqual(['--resume', 'stored-abc']);
+    expect(sessionId).toBe('stored-abc');
+    expect(resumed).toBe(true);
+  });
+
+  it('does not probe for a live holder when the stored id is stale (no jsonl)', () => {
+    // Ownership fails first, so the (potentially expensive) holder scan is skipped.
+    const hasLiveHolder = vi.fn(() => true);
+    const { resumed } = resolveArchitectLaunch({
+      workspacePath: workspace, name: 'main', baseArgs: [], storedSessionId: 'ghost-id',
+      homeDir: fakeHome, hasLiveHolder,
+    });
+    expect(resumed).toBe(false);
+    expect(hasLiveHolder).not.toHaveBeenCalled();
+  });
+});
+
+describe('sessionHasLiveHolder (Issue #1224)', () => {
+  it('is true when a running process carries the session id in its argv', () => {
+    const list = () => [
+      '/usr/bin/some-daemon',
+      'claude --session-id abc-123-def --append-system-prompt ...',
+      'node server.js',
+    ];
+    expect(sessionHasLiveHolder('abc-123-def', { list })).toBe(true);
+  });
+
+  it('is true for a resume holder (--resume <id>)', () => {
+    const list = () => ['claude --resume abc-123-def'];
+    expect(sessionHasLiveHolder('abc-123-def', { list })).toBe(true);
+  });
+
+  it('is false when no process carries the id', () => {
+    const list = () => ['claude --resume other-id', 'node server.js'];
+    expect(sessionHasLiveHolder('abc-123-def', { list })).toBe(false);
+  });
+
+  it('is false (not throwing) when the process scan fails', () => {
+    const list = () => { throw new Error('ps not found'); };
+    expect(sessionHasLiveHolder('abc-123-def', { list })).toBe(false);
   });
 });
 
