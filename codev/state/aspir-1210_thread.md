@@ -85,3 +85,7 @@ No "Baked Decisions" section in the issue → free to explore the design.
   sandbox (I ran full suite green). No changes made.
 - **STOPPED at pr gate — awaiting human approval.** Not auto-approving (human-only gate). Architect
   notified. Builder will run `porch approve 1210 pr` only after the human explicitly approves.
+
+- pr gate APPROVED (Waleed, relayed by architect) → ran `porch approve 1210 pr --a-human-explicitly-approved-this`.
+- CI: all 6 checks GREEN (Unit, CLI ubuntu/macos, CLI Integration, Tower Integration, Package Install).
+  Not merging — branch protection requires architect admin-merge. Reported to architect.
