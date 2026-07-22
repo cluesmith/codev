@@ -98,3 +98,7 @@ No "Baked Decisions" section in the issue → free to explore the design.
   adjudicate warnings naming skeleton version + [resolved] marker, identical→○ redundant-copy info.
   94 drift findings surfaced against this self-hosted repo's real overrides. Feature works end-to-end.
 - Signaling verify done → verify-approval gate (architect-approved).
+
+- verify-approval gate APPROVED (Waleed) → `porch approve 1210 verify-approval --a-human-explicitly-approved-this`.
+- 🎉 PROTOCOL COMPLETE (aspir). Issue #1210 auto-closed by merge ("Closes #1210"). Worktree clean
+  (only builder-local .builder-*/.claude/hooks untracked). Cleanup authorized — architect will run afx cleanup.
