@@ -63,3 +63,16 @@ short-circuits the scan, and 4 `sessionHasLiveHolder` unit cases incl. scan-fail
   before the full build shows 8 pre-existing env failures (missing `dist/` + copied skeleton
   artifacts — adopt/update/consult/tier-materialization/consolidate/session-manager integration);
   all clear once porch's build check emits those artifacts. None touch changed code.
+
+## PR
+
+PR #1225 opened (`Fixes #1224`), mergeable. CMAP:
+- Codex: APPROVE (HIGH, no issues)
+- Claude: APPROVE (HIGH, no issues) — confirmed TOCTOU windows are safe (mint-fresh or #1149 backstop)
+- Gemini: skipped non-blocking (couldn't emit a `--type pr` VERDICT in this worktree; known lane limitation)
+
+No REQUEST_CHANGES. Requested the `pr` gate via `porch done`; awaiting human approval before merge.
+
+Note for follow-up: consult's project auto-detect fails from a builder worktree that carries the
+full `codev/projects/` tree ("Multiple projects found"); had to pin `--issue 1224 --project-id
+bugfix-1224`. Worth a separate issue if it recurs.
