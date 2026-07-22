@@ -10,7 +10,9 @@
 ## Executive Summary
 
 Implements the spec's **Approach 1** (skeleton-driven diff via a new pure audit lib), combined with
-Approach 2's no-op gating (report nothing when the project ships no framework overrides). The work
+Approach 2's quiet-by-default gating (the Framework Drift section prints nothing unless there is
+something actionable — a local shadow exists **or** the skeleton is behind; see the "no local
+overrides" decision below). The work
 splits into three independently-testable phases:
 
 1. A pure **`protocol-drift-audit` library** that detects shadow drift (local `.codev/` / `codev/`
@@ -59,6 +61,15 @@ a release-time hash-manifest step that would inflate this PR.
   **argv form** (no shell string) with a ~2500ms timeout; any failure/timeout/offline → `latest: null`
   and a neutral "could not check (offline?)" line, never a doctor failure or hang.
 - **Item 2 non-blocking (Codex pt 4)**: deferred; see Notes.
+- **"No local overrides" behavior — single, unambiguous rule (Codex plan review, REQUEST_CHANGES)**:
+  the Framework Drift section is **quiet by default**. doctor computes shadows + staleness, then:
+  - **No shadows AND not-behind** (up-to-date, or offline/uncheckable) → **print nothing** (no header,
+    no lines). This is the spec's "true no-op".
+  - **Otherwise** → print the section: shadow lines (differs=warn, identical=info) and, only if
+    `behind`, a staleness warning. Staleness is **never** printed unconditionally-per-run: it is
+    silent when up-to-date or uncheckable, and a warning only when genuinely behind (the issue's
+    sibling failure mode). This removes the earlier draft's self-contradiction (Exec Summary "no-op"
+    vs Phase 2 "staleness always shown").
 
 ## Phases (Machine Readable)
 
@@ -139,15 +150,23 @@ a release-time hash-manifest step that would inflate this PR.
 #### Deliverables
 - [ ] Edit `packages/codev/src/commands/doctor.ts`:
   - Inside the `if (workspaceRoot && existsSync(codev))` block (alongside the framework-ref and
-    pr-gate sections), add a **"Framework Drift"** section:
-    - Staleness line: always shown when in a project — `installed X; latest Y` (or "could not check").
-      A `behind` result is a warning (→ `warningDetails`, `→ codev update` recommendation).
-    - Shadow drift: gate on `hasFrameworkShadows`; when false, stay a **true no-op** (print nothing,
-      matching the framework-ref audit's silence). When shadows exist:
-      - `differs` findings → `⚠` warning lines ("customized or stale? — adjudicate", named file +
-        tier + resolved-winner marker), each incrementing `warnings` and pushed to `warningDetails`.
-      - `identical` findings → informational `○`/dim lines ("redundant copy — safe to remove; falls
-        back to package"); **not** counted as warnings (informational only, per spec).
+    pr-gate sections), add a **quiet-by-default "Framework Drift"** section. Compute
+    `shadows = auditProtocolDrift(root)` and `staleness = checkSkeletonStaleness()`, then:
+    - **Guard**: if `shadows.length === 0` **and** `staleness.behind !== true` → **print nothing at
+      all** (no header). This is the spec's true no-op (covers no-overrides + up-to-date, and
+      no-overrides + offline). Uses `hasFrameworkShadows`/`shadows` for the shadow half and
+      `staleness.behind` for the staleness half — the section header is only emitted when at least one
+      half has something to say.
+    - When the section IS shown:
+      - Staleness: if `behind` → `⚠` warning line `installed X; latest Y — behind` (→ `warningDetails`,
+        recommend `codev update`). If up-to-date → dim info line `installed X; latest Y (up to date)`.
+        If uncheckable → dim `latest: could not check (offline?)`. **Only `behind` is a warning; the
+        up-to-date / uncheckable lines are informational and shown only because shadows already forced
+        the section open.**
+      - `differs` shadows → `⚠` warning lines ("customized or stale? — adjudicate", named file + tier
+        + resolved-winner marker), each incrementing `warnings` and pushed to `warningDetails`.
+      - `identical` shadows → informational `○`/dim lines ("redundant copy — safe to remove; falls
+        back to package"); **not** counted as warnings (per spec).
 - [ ] Import the new lib; no change to doctor's exit-code contract beyond the added warnings.
 
 #### Implementation Details
@@ -159,7 +178,10 @@ a release-time hash-manifest step that would inflate this PR.
 #### Acceptance Criteria
 - [ ] Running doctor in a project with a differing shadow prints the adjudicate warning and increments
       the warning count; identical shadow prints an info line and does not.
-- [ ] No shadows and up-to-date → no drift warnings; doctor exit code unchanged.
+- [ ] **No shadows AND not-behind (up-to-date or offline) → the Framework Drift section is not printed
+      at all** (true no-op); doctor exit code unchanged.
+- [ ] **No shadows BUT skeleton behind → the staleness warning is printed** (section shown for
+      staleness alone); this is intentionally not a no-op.
 - [ ] `codev/resources/arch.md` modifications are never reported (not in scan set).
 
 #### Test Plan
@@ -194,8 +216,11 @@ a release-time hash-manifest step that would inflate this PR.
   - Scan-set integrity: every `FRAMEWORK_DRIFT_DIRS` entry exists under the skeleton.
 - [ ] `packages/codev/src/__tests__/cli/doctor-drift.e2e.test.ts` (or extend `doctor.e2e.test.ts`):
   - fixture project with a differing `codev/protocols/.../*.md` shadow → doctor output contains the
-    adjudicate warning; with an identical shadow → info line, no warning; with no overrides → no
-    drift lines.
+    adjudicate warning; with an identical shadow → info line, no warning.
+  - **no overrides + skeleton up-to-date (stub `fetchLatest` = installed) → no "Framework Drift"
+    section header in output** (true no-op).
+  - **no overrides + skeleton behind (stub `fetchLatest` > installed) → staleness warning present**
+    even though there are no shadows (section shown for staleness alone).
 
 #### Implementation Details
 - Follow the existing test harness conventions in `packages/codev/src/__tests__/` (fixture temp dirs,

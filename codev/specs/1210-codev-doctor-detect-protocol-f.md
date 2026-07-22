@@ -76,9 +76,14 @@ three checks. All are **report-only** — doctor never deletes or rewrites a loc
    emit a stronger, safe-to-delete recommendation. Optional; see Solution Approaches.
 4. **No auto-delete.** Report only. Adjudication stays human — local copies may be deliberate.
 
-The report is a **true no-op (no section printed / no warnings)** when the project ships no local
-framework overrides, mirroring how the framework-ref audit stays silent for projects with no
-overrides.
+The report is **quiet by default**: the Framework Drift section prints **nothing** unless it has
+something actionable to say — i.e. either (a) at least one local shadow of a skeleton file exists, or
+(b) the installed skeleton is behind npm latest. When the project ships no local framework overrides
+**and** the skeleton is up to date (or the registry can't be reached), the section is a **true no-op
+(no section printed / no warnings)**, mirroring how the framework-ref audit stays silent for projects
+with no overrides. The staleness check is thus silent when up-to-date or offline, and surfaces only
+when the installed skeleton is genuinely behind (the issue's sibling failure mode) — it is *not*
+unconditionally printed just because doctor runs inside a project.
 
 ## Scope
 
@@ -119,9 +124,10 @@ overrides.
 - [ ] Running `codev doctor` in a project with a local shadow that **differs** from the skeleton
       prints a warning flagged "customized or stale? — adjudicate", naming the file and the skeleton
       package version, and increments the doctor warning count.
-- [ ] Running `codev doctor` in a project with **no** local framework overrides prints no drift
-      warnings and does not misreport (true no-op — no false "all clean" when there was nothing to
-      scan, and no crash).
+- [ ] Running `codev doctor` in a project with **no** local framework overrides **and an up-to-date
+      (or unreachable) skeleton** prints no Framework Drift section at all (true no-op — no false "all
+      clean", no warnings, no crash). If the skeleton is behind, the staleness warning still surfaces
+      (that case is not a no-op — it is the issue's sibling failure mode).
 - [ ] Skeleton-staleness check reports the **installed and latest versions explicitly** (e.g.
       `installed 3.2.1; latest 3.2.3` — per Codex, an explicit pair is crisply testable where a
       computed "N versions behind" distance is not) and flags "behind" when installed < latest. It

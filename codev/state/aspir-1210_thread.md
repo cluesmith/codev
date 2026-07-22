@@ -29,4 +29,10 @@ No "Baked Decisions" section in the issue → free to explore the design.
   latest Y` (not "N behind"), item-2 marked non-blocking, ~2.5s timeout, raw-byte compare for EOL.
 - [done] Plan — 3 phases: (1) `lib/protocol-drift-audit.ts` (shadow drift + staleness), (2) wire
   into doctor.ts, (3) unit + e2e tests. Item 2 (historical-hash known-default) deferred to follow-up;
-  `codev update` wiring deferred (spec: optional). Checks pass. Signaling plan done next.
+  `codev update` wiring deferred (spec: optional). Checks pass.
+- Plan 3-way consult: gemini APPROVE, claude APPROVE, **codex REQUEST_CHANGES** (legit): plan
+  self-contradicted — Exec Summary "no-op when no overrides" vs Phase 2 "staleness always shown".
+  Resolved with a single unambiguous rule in both spec + plan: Framework Drift section is
+  **quiet by default** — prints nothing unless a shadow exists OR skeleton is behind. Staleness is
+  silent when up-to-date/offline; warns only when genuinely behind (the issue's sibling failure mode).
+  Re-running plan consult after the fix.
