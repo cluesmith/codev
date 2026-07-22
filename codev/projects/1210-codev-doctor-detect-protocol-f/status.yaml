@@ -22,8 +22,8 @@ gates:
     status: pending
     requested_at: '2026-07-22T14:02:27.130Z'
 iteration: 1
-build_complete: false
+build_complete: true
 history: []
 started_at: '2026-07-22T12:28:50.210Z'
-updated_at: '2026-07-22T14:02:27.130Z'
+updated_at: '2026-07-22T21:53:18.365Z'
 pr_ready_for_human: false
