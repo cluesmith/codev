@@ -89,3 +89,12 @@ No "Baked Decisions" section in the issue → free to explore the design.
 - pr gate APPROVED (Waleed, relayed by architect) → ran `porch approve 1210 pr --a-human-explicitly-approved-this`.
 - CI: all 6 checks GREEN (Unit, CLI ubuntu/macos, CLI Integration, Tower Integration, Package Install).
   Not merging — branch protection requires architect admin-merge. Reported to architect.
+
+## Verify
+- PR #1223 admin-merged to main (merge commit 73638a4b). Integrated main == my branch content
+  (only the merge commit differs; feature files byte-identical). No concurrent divergence.
+- Headline value-prop verified against a fresh build of the merged code: `codev doctor` renders the
+  "Framework Drift" section — staleness line (installed 3.2.3; latest 3.2.3, up to date), differs→⚠
+  adjudicate warnings naming skeleton version + [resolved] marker, identical→○ redundant-copy info.
+  94 drift findings surfaced against this self-hosted repo's real overrides. Feature works end-to-end.
+- Signaling verify done → verify-approval gate (architect-approved).
