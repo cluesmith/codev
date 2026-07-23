@@ -285,6 +285,22 @@ describe('evaluateCondition', () => {
   it('throws on invalid condition', () => {
     expect(() => evaluateCondition("this is not valid js }{", 'test')).toThrow();
   });
+
+  // Regression: #1142 — conditions referencing exitCode threw ReferenceError
+  it('exposes exitCode to conditions', () => {
+    expect(evaluateCondition('exitCode != 0', '', 1)).toBe(true);
+    expect(evaluateCondition('exitCode != 0', '', 0)).toBe(false);
+    expect(evaluateCondition('exitCode === 124', '', 124)).toBe(true);
+  });
+
+  it('defaults exitCode to 0 when omitted', () => {
+    expect(evaluateCondition('exitCode === 0', 'anything')).toBe(true);
+  });
+
+  it('output-only conditions work unchanged alongside exitCode', () => {
+    expect(evaluateCondition("output.includes('FAIL')", 'all FAIL', 0)).toBe(true);
+    expect(evaluateCondition("output.includes('FAIL')", 'all pass', 1)).toBe(false);
+  });
 });
 
 describe('executeTask', () => {
@@ -455,6 +471,194 @@ describe('executeTask', () => {
 
     await executeTask(task);
     expect(mockFormatBuilderMessage).toHaveBeenCalledWith('af-cron', 'Count is 42 items');
+  });
+
+  // Regression: #1142 — "alert me when this command fails" was inexpressible:
+  // exitCode conditions threw ReferenceError and failure runs never delivered.
+  it('delivers when an exitCode condition is true on non-zero exit', async () => {
+    const ws = createTestWorkspace();
+    const mockSession = { write: vi.fn() };
+    const mockDeps = makeMockDeps({
+      getKnownWorkspacePaths: () => [ws],
+      getTerminalManager: () => ({
+        getSession: () => mockSession,
+      }),
+    });
+    initCron(mockDeps);
+
+    mockExec.mockImplementation((_cmd: string, _opts: unknown, cb: Function) => {
+      const err = new Error('Command failed') as Error & { code: number; killed: boolean };
+      err.code = 2;
+      err.killed = false;
+      cb(err, 'service down', '');
+    });
+
+    const task: CronTask = {
+      name: 'Health Check',
+      schedule: '*/15 * * * *',
+      enabled: true,
+      command: './health-check.sh',
+      condition: 'exitCode != 0',
+      message: 'Service Health Alert: ${output}',
+      target: 'architect',
+      timeout: 30,
+      workspacePath: ws,
+    };
+
+    const { result } = await executeTask(task);
+    expect(result).toBe('failure'); // last_result still tracks exit code
+    // No ReferenceError WARN from condition evaluation
+    expect(mockDeps.log).not.toHaveBeenCalledWith(
+      'WARN',
+      expect.stringContaining('Condition evaluation failed'),
+    );
+    expect(mockSession.write).toHaveBeenCalled();
+    expect(mockBroadcastMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ content: 'Service Health Alert: service down' }),
+    );
+  });
+
+  it('does not deliver when an exitCode condition is false on clean exit', async () => {
+    const ws = createTestWorkspace();
+    const mockSession = { write: vi.fn() };
+    const mockDeps = makeMockDeps({
+      getKnownWorkspacePaths: () => [ws],
+      getTerminalManager: () => ({
+        getSession: () => mockSession,
+      }),
+    });
+    initCron(mockDeps);
+
+    mockExec.mockImplementation((_cmd: string, _opts: unknown, cb: Function) => {
+      cb(null, 'all healthy', '');
+    });
+
+    const task: CronTask = {
+      name: 'Health Check',
+      schedule: '*/15 * * * *',
+      enabled: true,
+      command: './health-check.sh',
+      condition: 'exitCode != 0',
+      message: 'Service Health Alert: ${output}',
+      target: 'architect',
+      timeout: 30,
+      workspacePath: ws,
+    };
+
+    const { result } = await executeTask(task);
+    expect(result).toBe('success');
+    expect(mockSession.write).not.toHaveBeenCalled();
+  });
+
+  it('does not deliver on non-zero exit when no condition is set', async () => {
+    const ws = createTestWorkspace();
+    const mockSession = { write: vi.fn() };
+    const mockDeps = makeMockDeps({
+      getKnownWorkspacePaths: () => [ws],
+      getTerminalManager: () => ({
+        getSession: () => mockSession,
+      }),
+    });
+    initCron(mockDeps);
+
+    mockExec.mockImplementation((_cmd: string, _opts: unknown, cb: Function) => {
+      const err = new Error('Command failed') as Error & { code: number; killed: boolean };
+      err.code = 1;
+      err.killed = false;
+      cb(err, '', 'flaky failure');
+    });
+
+    const task: CronTask = {
+      name: 'No Condition',
+      schedule: '*/15 * * * *',
+      enabled: true,
+      command: 'flaky-command',
+      message: 'Done: ${output}',
+      target: 'architect',
+      timeout: 30,
+      workspacePath: ws,
+    };
+
+    const { result, output } = await executeTask(task);
+    expect(result).toBe('failure');
+    expect(output).toBe('flaky failure'); // stderr captured when stdout empty
+    expect(mockSession.write).not.toHaveBeenCalled();
+  });
+
+  it('reports timeout as exitCode 124 so exitCode conditions still fire', async () => {
+    const ws = createTestWorkspace();
+    const mockSession = { write: vi.fn() };
+    const mockDeps = makeMockDeps({
+      getKnownWorkspacePaths: () => [ws],
+      getTerminalManager: () => ({
+        getSession: () => mockSession,
+      }),
+    });
+    initCron(mockDeps);
+
+    mockExec.mockImplementation((_cmd: string, _opts: unknown, cb: Function) => {
+      const err = new Error('Command timed out') as Error & { killed: boolean; signal: string };
+      err.killed = true;
+      err.signal = 'SIGTERM';
+      cb(err, 'partial', '');
+    });
+
+    const task: CronTask = {
+      name: 'Timeout Task',
+      schedule: '*/15 * * * *',
+      enabled: true,
+      command: 'sleep 999',
+      condition: 'exitCode != 0',
+      message: 'Timed out: ${output}',
+      target: 'architect',
+      timeout: 1,
+      workspacePath: ws,
+    };
+
+    const { result } = await executeTask(task);
+    expect(result).toBe('failure');
+    expect(mockSession.write).toHaveBeenCalled();
+    expect(mockBroadcastMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ content: 'Timed out: partial' }),
+    );
+  });
+
+  it('does not deliver a timeout when no condition is set (WARN-only path)', async () => {
+    const ws = createTestWorkspace();
+    const mockSession = { write: vi.fn() };
+    const mockDeps = makeMockDeps({
+      getKnownWorkspacePaths: () => [ws],
+      getTerminalManager: () => ({
+        getSession: () => mockSession,
+      }),
+    });
+    initCron(mockDeps);
+
+    mockExec.mockImplementation((_cmd: string, _opts: unknown, cb: Function) => {
+      const err = new Error('Command timed out') as Error & { killed: boolean; signal: string };
+      err.killed = true;
+      err.signal = 'SIGTERM';
+      cb(err, '', '');
+    });
+
+    const task: CronTask = {
+      name: 'Timeout No Condition',
+      schedule: '*/15 * * * *',
+      enabled: true,
+      command: 'sleep 999',
+      message: 'Done',
+      target: 'architect',
+      timeout: 1,
+      workspacePath: ws,
+    };
+
+    const { result } = await executeTask(task);
+    expect(result).toBe('failure');
+    expect(mockSession.write).not.toHaveBeenCalled();
+    expect(mockDeps.log).toHaveBeenCalledWith(
+      'WARN',
+      expect.stringContaining("Cron command failed for 'Timeout No Condition'"),
+    );
   });
 
   it('uses custom cwd when specified', async () => {

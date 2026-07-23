@@ -166,7 +166,20 @@ afx cron enable <name>          # Enable
 afx cron disable <name>         # Disable
 ```
 
-There is NO `afx cron add` — create YAML files in `.af-cron/` directly.
+There is NO `afx cron add` — create YAML files in `.af-cron/` directly:
+
+```yaml
+name: Service Health Check      # required, unique per workspace
+schedule: "*/15 * * * *"        # required, cron expression (or @hourly/@daily/@startup)
+command: ./health-check.sh      # required, run via shell
+message: "Health alert: ${output}"  # required, ${output} = trimmed command output
+condition: "exitCode != 0"      # optional JS expression, see below
+target: architect               # optional, default architect
+timeout: 30                     # optional, seconds, default 30
+enabled: true                   # optional, default true
+```
+
+`condition` is a JavaScript expression with two variables in scope: `output` (string — the command's trimmed output) and `exitCode` (number — 0 on success, the command's exit code on non-zero exit, 124 on timeout, -1 on spawn failure). With a `condition`, the message is delivered exactly when it evaluates truthy — including on failed runs (e.g. `exitCode != 0` alerts when the command fails). Without a `condition`, the message is delivered only when the command exits 0.
 
 ## Other commands
 
