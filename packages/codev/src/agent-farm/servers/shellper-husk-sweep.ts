@@ -27,7 +27,7 @@ import { listProcessCensus, type ProcessCensusEntry } from './process-census.js'
 import { getProcessStartTime } from '../../terminal/session-manager.js';
 import { reapShellpers } from './architect-session-holder.js';
 
-const SHELLPER_MARKER = 'shellper-main.js';
+export const SHELLPER_MARKER = 'shellper-main.js';
 
 /**
  * Same tolerance `SessionManager.reconnectSession` uses
@@ -116,6 +116,20 @@ export async function findHuskShellpers(opts: FindHuskShellpersOptions): Promise
     candidates.push(entry.pid);
   }
   return candidates;
+}
+
+/**
+ * The husk grace period (env `SHELLPER_HUSK_GRACE_MS`, default 1 hour), shared
+ * by every trigger (startup, periodic, on-demand preview/apply) so a preview
+ * always predicts what the periodic sweep would actually do.
+ *
+ * NaN-checked rather than `parsed || default`: `0` is a legitimate override
+ * (tests want an immediate-eligibility grace period) and `0` is falsy in JS,
+ * so `parsed || default` would silently discard a deliberate zero.
+ */
+export function resolveHuskGraceMs(env: NodeJS.ProcessEnv = process.env): number {
+  const parsed = parseInt(env.SHELLPER_HUSK_GRACE_MS || '3600000', 10);
+  return Math.max(Number.isNaN(parsed) ? 3600000 : parsed, 0);
 }
 
 export interface SweepShellperHusksOptions {

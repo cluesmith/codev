@@ -18,7 +18,7 @@ import { WebSocketServer } from 'ws';
 import { SessionManager } from '../../terminal/session-manager.js';
 import type { SSEClient } from './tower-types.js';
 import { startRateLimitCleanup } from './tower-utils.js';
-import { sweepShellperHusks } from './shellper-husk-sweep.js';
+import { sweepShellperHusks, resolveHuskGraceMs } from './shellper-husk-sweep.js';
 import {
   initTunnel,
   shutdownTunnel,
@@ -429,11 +429,7 @@ server.listen(port, bindHost, async () => {
   // protects any shellper whose socket still responds. A husk (child exited,
   // shellper still listening) answers its socket, so it needs the stricter
   // unregistered+childless+aged predicate instead. See shellper-husk-sweep.ts.
-  // Note: NaN-checked rather than `parsed || default`, since `0` is a legitimate
-  // override (e.g. tests want an immediate-eligibility grace period) and `0` is
-  // falsy in JS — `parsed || default` would silently discard it.
-  const parsedHuskGraceMs = parseInt(process.env.SHELLPER_HUSK_GRACE_MS || '3600000', 10);
-  const huskGraceMs = Math.max(Number.isNaN(parsedHuskGraceMs) ? 3600000 : parsedHuskGraceMs, 0);
+  const huskGraceMs = resolveHuskGraceMs();
   const parsedHuskSweepIntervalMs = parseInt(process.env.SHELLPER_HUSK_SWEEP_INTERVAL_MS || '3600000', 10);
   const huskSweepIntervalMs = Math.max(
     Number.isNaN(parsedHuskSweepIntervalMs) ? 3600000 : parsedHuskSweepIntervalMs,

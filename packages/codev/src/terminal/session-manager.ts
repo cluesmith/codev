@@ -190,6 +190,16 @@ export class SessionManager extends EventEmitter {
   }
 
   /**
+   * This instance's socket directory. Issue #1227: the husk sweep and fleet
+   * observability route handlers need it to reuse the exact scope-marker
+   * technique findShellperProcesses() uses, so they never touch (or count)
+   * another Tower instance's shellpers.
+   */
+  get socketDir(): string {
+    return this.config.socketDir;
+  }
+
+  /**
    * Spawn a new shellper process and connect to it.
    * Returns the connected client.
    */
