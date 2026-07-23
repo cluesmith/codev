@@ -3,7 +3,7 @@
 ## Metadata
 
 - **ID**: 1216
-- **Status**: draft — pending SPIR plan review and human approval
+- **Status**: reviewed — awaiting human plan approval
 - **Specification**: [codev/specs/1216-configurable-porch-gate-artifact-auto-open.md](../specs/1216-configurable-porch-gate-artifact-auto-open.md)
 - **Created**: 2026-07-22
 
@@ -110,7 +110,7 @@ Make the main workspace's per-engineer preference available in Agent Farm builde
 
 1. Add an exported, focused helper that synchronizes `.codev/config.local.json` from `config.workspaceRoot` to the same relative path in a builder worktree using file-copy semantics, never a symlink.
 2. Treat the main workspace file as authoritative when present: create the target directory, refresh the snapshot atomically, and preserve the source file unchanged. If no main personal file exists, do not create or delete a builder-local file; this preserves pre-existing builder-local preferences.
-3. Call the helper after worktree creation in both new-branch and existing-branch spawn paths, and from `afx setup` before post-spawn hooks.
+3. Call the helper after `symlinkConfigFiles()` and before `runPostSpawnHooks()` in both new-branch and existing-branch spawn paths. In `afx setup`, call it immediately after `symlinkConfigFiles()` and before any post-spawn hooks.
 4. Keep the existing `.env`, `.codev/config.json`, and configured `worktree.symlinks` behavior unchanged.
 5. Verify refresh/idempotency with real temporary files: initial copy, main-file update plus repeated setup-equivalent sync, builder snapshot mutation, and proof that the main file's bytes never change.
 
@@ -161,10 +161,10 @@ Document the public setting and prove the complete disabled flow creates no Towe
 
 #### Implementation Details
 
-1. Add matching configuration-reference sections to both documentation trees covering the exact key, default/unset and boolean semantics, scope, manual `afx open` non-effect, and global/project/project-local locations.
+1. Add matching configuration-reference sections to both documentation trees covering the exact key, default/unset and boolean semantics, scope, manual `afx open` non-effect, and global/project/project-local locations. `agent-farm.md` is the canonical target because it already owns the Porch configuration reference (`porch.checks`); verify the overview does not claim an exhaustive key list before deciding that no extra mention is needed.
 2. Document that Agent Farm snapshots the main personal config into builders during spawn/setup so the main personal file is not a write-through target; `afx setup` refreshes the snapshot.
 3. Run focused tests, the package build, the full relevant test suite, and diff/grep both documentation trees for synchronization.
-4. Exercise the actual flow with Tower: keep a non-file tab active, use a builder whose main-workspace personal config disables the feature, invoke `porch gate`, and verify the tabs API/state gains no file tab and the active tab is unchanged. Then invoke manual `afx open` and verify its file tab still appears and receives normal focus.
+4. Exercise the actual flow with Tower from inside the builder worktree: keep a non-file tab active, use a builder whose main-workspace personal config disables the feature, invoke `porch gate` in that builder, and verify the tabs API/state gains no file tab and the active tab is unchanged. Then invoke manual `afx open` and verify its file tab still appears and receives normal focus.
 5. Repeat the disabled gate after changing the main personal preference and running `afx setup` to cover reconfiguration.
 
 #### Acceptance Criteria
@@ -180,7 +180,7 @@ Document the public setting and prove the complete disabled flow creates no Towe
 
 - **Automated:** Run focused Vitest files for config, gate behavior, and worktree snapshot, then the Porch/config/worktree relevant suites and the full package suite.
 - **Build:** Run the repository-supported build command from the repository root.
-- **Manual integration:** Inspect Tower tab state before and after disabled gate and manual open, including the `afx setup` refresh path.
+- **Manual integration:** From inside the builder worktree, inspect Tower tab state before and after disabled gate and manual open, including the `afx setup` refresh path.
 - **Documentation:** Compare the added sections in `codev/` and `codev-skeleton/` and grep for stale key names or dashboard ownership claims.
 
 #### Rollback Strategy
@@ -247,13 +247,13 @@ Phase 3: Documentation + End-to-End Verification
 
 ## Expert Review
 
-- **Status:** Pending Porch-managed Gemini, Codex, and Claude plan review.
-- **Focus requested:** snapshot ownership/removal semantics, gate integration test adequacy, phase boundaries, and documentation location.
+- **Status:** Complete — Gemini and Claude approved; Codex returned a high-confidence comment with two non-blocking clarifications.
+- **Feedback incorporated:** The Tower verification now explicitly runs `porch gate` inside the builder worktree; `agent-farm.md` is confirmed as the canonical Porch config reference, with an overview exhaustiveness check; snapshot insertion ordering is explicit after symlinks and before post-spawn hooks.
 
 ## Approval
 
 - [x] Specification approved
-- [ ] Three-way plan consultation complete
+- [x] Three-way plan consultation complete
 - [ ] Human plan approval
 
 ## Change Log
@@ -261,3 +261,4 @@ Phase 3: Documentation + End-to-End Verification
 | Date | Change | Reason |
 |---|---|---|
 | 2026-07-22 | Initial implementation plan | Translate approved specification into three independently testable phases |
+| 2026-07-22 | Plan updated after three-way review | Clarify builder-cwd verification, canonical docs, and snapshot ordering |
