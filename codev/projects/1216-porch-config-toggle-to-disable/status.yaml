@@ -1,7 +1,7 @@
 id: '1216'
 title: porch-config-toggle-to-disable
 protocol: spir
-phase: verify
+phase: verified
 plan_phases:
   - id: porch_toggle
     title: Producer-Side Porch Toggle
@@ -32,5 +32,9 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-07-23T03:24:00.433Z'
-updated_at: '2026-07-23T04:40:03.717Z'
+updated_at: '2026-07-23T04:40:27.859Z'
 pr_ready_for_human: false
+context:
+  verify_skip_reason: >-
+    Upstream cross-fork PR must be merged by a maintainer; contributor delivery ends with an open PR per the
+    specification
