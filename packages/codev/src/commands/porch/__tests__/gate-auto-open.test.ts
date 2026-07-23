@@ -32,6 +32,11 @@ const phaseCases: Array<{
   { phase: 'review', directory: 'reviews', gateName: 'pr' },
 ];
 
+const enabledCases = phaseCases.flatMap(({ phase, directory, gateName }) => [
+  { phase, directory, gateName, label: 'unset', value: undefined },
+  { phase, directory, gateName, label: 'true', value: true },
+]);
+
 const testProtocol = {
   name: 'gate-auto-open-test',
   version: '1.0.0',
@@ -121,24 +126,28 @@ afterEach(() => {
 });
 
 describe('porch gate artifact auto-open', () => {
-  it.each([
-    { label: 'unset', value: undefined },
-    { label: 'true', value: true },
-  ])('opens an existing artifact when the setting is $label', async ({ value }) => {
-    const artifactPath = writeArtifact('specs');
-    writeProjectState('specify');
-    if (value !== undefined) writeProjectConfig(value);
+  it.each(enabledCases)(
+    'opens the $phase artifact when the setting is $label',
+    async ({ phase, directory, gateName, value }) => {
+      const artifactPath = writeArtifact(directory);
+      const statusPath = writeProjectState(phase);
+      if (value !== undefined) writeProjectConfig(value);
 
-    await gate(testDir, '1216');
+      await gate(testDir, '1216');
 
-    expect(spawnMock).toHaveBeenCalledOnce();
-    expect(spawnMock).toHaveBeenCalledWith('afx', ['open', artifactPath], {
-      stdio: 'inherit',
-      detached: true,
-    });
-    expect(unrefMock).toHaveBeenCalledOnce();
-    expect(output()).toContain('Opening artifact for human review...');
-  });
+      expect(spawnMock).toHaveBeenCalledOnce();
+      expect(spawnMock).toHaveBeenCalledWith('afx', ['open', artifactPath], {
+        stdio: 'inherit',
+        detached: true,
+      });
+      expect(unrefMock).toHaveBeenCalledOnce();
+      expect(output()).toContain('Opening artifact for human review...');
+      expect(readState(statusPath).gates[gateName]).toMatchObject({
+        status: 'pending',
+        requested_at: expect.any(String),
+      });
+    },
+  );
 
   it.each(phaseCases)(
     'does not open the $phase artifact when the setting is false',

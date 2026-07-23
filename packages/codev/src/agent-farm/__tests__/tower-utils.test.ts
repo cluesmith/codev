@@ -5,7 +5,7 @@
  * workspace name extraction, MIME types, static file serving.
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
 import path from 'node:path';
 import fs from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -46,6 +46,27 @@ function writeSessionFixture(homeDir: string, cwdPath: string, uuid: string): vo
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, `${uuid}.jsonl`), `{"sessionId":"${uuid}"}\n`, 'utf-8');
 }
+
+// Harness-default tests must not inherit a developer's global
+// ~/.codev/config.json (for example, shell.architect: "codex"). They verify the
+// product default, so isolate HOME for this file and clean it up afterward.
+let originalHome: string | undefined;
+let isolatedHome: string;
+
+beforeAll(() => {
+  originalHome = process.env.HOME;
+  isolatedHome = fs.mkdtempSync(path.join(tmpdir(), 'tower-utils-home-'));
+  process.env.HOME = isolatedHome;
+});
+
+afterAll(() => {
+  if (originalHome === undefined) {
+    delete process.env.HOME;
+  } else {
+    process.env.HOME = originalHome;
+  }
+  fs.rmSync(isolatedHome, { recursive: true, force: true });
+});
 
 describe('tower-utils', () => {
   describe('isRateLimited', () => {
