@@ -75,6 +75,15 @@ import type { IssueSearchItem, IssueSearchResponse } from '@cluesmith/codev-type
 import { computeAnalytics } from './analytics.js';
 import { getAllTasks, executeTask, getTaskId } from './tower-cron.js';
 import { getGlobalDb } from '../db/index.js';
+import { listProcessCensus } from './process-census.js';
+import {
+  SHELLPER_MARKER,
+  computeRegisteredShellperPids,
+  findHuskShellpers,
+  sweepShellperHusks,
+  resolveHuskGraceMs,
+} from './shellper-husk-sweep.js';
+import { getProcessStartTime } from '../../terminal/session-manager.js';
 import type { CronTask } from './tower-cron.js';
 import {
   getWorkspaceTerminals,
@@ -159,7 +168,9 @@ type RouteEntry = (
 ) => Promise<void> | void;
 
 const ROUTES: Record<string, RouteEntry> = {
-  'GET /health':          (_req, res) => handleHealthCheck(res),
+  'GET /health':          (_req, res, _url, ctx) => handleHealthCheck(res, ctx),
+  'GET /api/shellpers/husks': (_req, res, _url, ctx) => handleHuskPreview(res, ctx),
+  'POST /api/shellpers/husks/sweep': (_req, res, _url, ctx) => handleHuskSweep(res, ctx),
   'GET /api/workspaces':  (_req, res) => handleListWorkspaces(res),
   'POST /api/terminals':  (req, res, _url, ctx) => handleTerminalCreate(req, res, ctx),
   'GET /api/terminals':   (_req, res) => handleTerminalList(res),
@@ -294,9 +305,59 @@ export async function handleRequest(
 // Global route handlers
 // ============================================================================
 
-async function handleHealthCheck(res: http.ServerResponse): Promise<void> {
+/**
+ * Issue #1227: fleet RSS + unregistered-shellper count, scoped to this Tower
+ * instance's socketDir. `fleetRssKb` sums every in-scope shellper AND its
+ * direct children (the full process-group tree Tower manages) regardless of
+ * DB-registration state, so a husk not yet swept still counts toward the
+ * visible cost. `unregisteredShellperCount` is the lighter, ungated signal
+ * ("N shellpers Tower doesn't currently track") — distinct from the stricter
+ * childless+aged reap predicate in shellper-husk-sweep.ts.
+ *
+ * Best-effort: returns undefined fields (never throws) if `ps` or the DB read
+ * fails, so a fleet-accounting hiccup never takes down /health itself.
+ */
+async function computeFleetHealthFields(
+  ctx: RouteContext,
+): Promise<{ fleetRssKb?: number; unregisteredShellperCount?: number }> {
+  const shellperManager = ctx.getShellperManager();
+  if (!shellperManager) return {};
+  try {
+    const census = await listProcessCensus();
+    const scopeMarker = shellperManager.socketDir.endsWith('/')
+      ? shellperManager.socketDir
+      : `${shellperManager.socketDir}/`;
+
+    const inScopePids = new Set<number>();
+    let fleetRssKb = 0;
+    for (const entry of census) {
+      if (entry.cmdline.includes(SHELLPER_MARKER) && entry.cmdline.includes(scopeMarker)) {
+        inScopePids.add(entry.pid);
+        fleetRssKb += entry.rssKb;
+      }
+    }
+    for (const entry of census) {
+      if (inScopePids.has(entry.ppid)) {
+        fleetRssKb += entry.rssKb;
+      }
+    }
+
+    const registered = await computeRegisteredShellperPids(getGlobalDb());
+    let unregisteredShellperCount = 0;
+    for (const pid of inScopePids) {
+      if (!registered.has(pid)) unregisteredShellperCount++;
+    }
+
+    return { fleetRssKb, unregisteredShellperCount };
+  } catch {
+    return {};
+  }
+}
+
+async function handleHealthCheck(res: http.ServerResponse, ctx: RouteContext): Promise<void> {
   const instances = await getInstances();
   const activeCount = instances.filter((i) => i.running).length;
+  const fleetFields = await computeFleetHealthFields(ctx);
   res.writeHead(200, { 'Content-Type': 'application/json' });
   res.end(
     JSON.stringify({
@@ -309,9 +370,87 @@ async function handleHealthCheck(res: http.ServerResponse): Promise<void> {
       activeWorkspaces: activeCount,
       totalWorkspaces: instances.length,
       memoryUsage: process.memoryUsage().heapUsed,
+      ...fleetFields,
       timestamp: new Date().toISOString(),
     })
   );
+}
+
+/**
+ * Issue #1227: GET /api/shellpers/husks — preview, read-only. Returns the
+ * husk candidates the next sweep (periodic or `--apply`) would reap, without
+ * touching anything.
+ */
+async function handleHuskPreview(res: http.ServerResponse, ctx: RouteContext): Promise<void> {
+  const shellperManager = ctx.getShellperManager();
+  if (!shellperManager) {
+    res.writeHead(503, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Shellper manager not initialized' }));
+    return;
+  }
+  try {
+    const graceMs = resolveHuskGraceMs();
+    // One census snapshot, shared between the candidate decision and the
+    // displayed RSS — passing it via the `census` seam avoids a second `ps`
+    // scan and guarantees the RSS shown is for the exact snapshot that decided
+    // candidacy, not a later, possibly-different one (codex #1227 PR review).
+    const census = await listProcessCensus();
+    const rssByPid = new Map(census.map((entry) => [entry.pid, entry.rssKb]));
+
+    const registered = await computeRegisteredShellperPids(getGlobalDb());
+    const pids = await findHuskShellpers({
+      socketDir: shellperManager.socketDir,
+      registeredShellperPids: registered,
+      graceMs,
+      census: () => census,
+    });
+
+    const now = Date.now();
+    const candidates = await Promise.all(
+      pids.map(async (pid) => {
+        const startTime = await getProcessStartTime(pid);
+        return {
+          pid,
+          rssKb: rssByPid.get(pid) ?? 0,
+          ageMs: startTime !== null ? now - startTime : null,
+        };
+      }),
+    );
+
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ candidates, graceMs }));
+  } catch (err) {
+    res.writeHead(500, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: (err as Error).message }));
+  }
+}
+
+/**
+ * Issue #1227: POST /api/shellpers/husks/sweep — apply. Actually reaps the
+ * current husk candidates. Destructive; the `afx tower sweep-husks` CLI is
+ * the only caller expected in practice, and it gates this behind `--apply`
+ * plus a confirmation prompt (unless `--yes`).
+ */
+async function handleHuskSweep(res: http.ServerResponse, ctx: RouteContext): Promise<void> {
+  const shellperManager = ctx.getShellperManager();
+  if (!shellperManager) {
+    res.writeHead(503, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Shellper manager not initialized' }));
+    return;
+  }
+  try {
+    const result = await sweepShellperHusks({
+      socketDir: shellperManager.socketDir,
+      db: getGlobalDb(),
+      graceMs: resolveHuskGraceMs(),
+      log: (msg: string) => ctx.log('INFO', msg),
+    });
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(result));
+  } catch (err) {
+    res.writeHead(500, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: (err as Error).message }));
+  }
 }
 
 /**

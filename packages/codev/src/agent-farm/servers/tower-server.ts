@@ -18,6 +18,7 @@ import { WebSocketServer } from 'ws';
 import { SessionManager } from '../../terminal/session-manager.js';
 import type { SSEClient } from './tower-types.js';
 import { startRateLimitCleanup } from './tower-utils.js';
+import { sweepShellperHusks, resolveHuskGraceMs } from './shellper-husk-sweep.js';
 import {
   initTunnel,
   shutdownTunnel,
@@ -65,6 +66,7 @@ const rateLimitCleanupInterval = startRateLimitCleanup();
 // Shellper session manager (initialized at startup)
 let shellperManager: SessionManager | null = null;
 let shellperCleanupInterval: NodeJS.Timeout | null = null;
+let shellperHuskSweepInterval: NodeJS.Timeout | null = null;
 let terminalPartialMonitorInterval: NodeJS.Timeout | null = null;
 
 // Observability for Issue #1047: the ring-buffer partial is kept whole (no
@@ -165,6 +167,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
   // 4. Stop rate limit cleanup, shellper periodic cleanup, and SSE heartbeat
   clearInterval(rateLimitCleanupInterval);
   if (shellperCleanupInterval) clearInterval(shellperCleanupInterval);
+  if (shellperHuskSweepInterval) clearInterval(shellperHuskSweepInterval);
   if (terminalPartialMonitorInterval) clearInterval(terminalPartialMonitorInterval);
   clearInterval(sseHeartbeatInterval);
 
@@ -421,6 +424,34 @@ server.listen(port, bindHost, async () => {
     }
   }, cleanupIntervalMs);
 
+  // Issue #1227: husk sweep — a stricter second pass that reaps shellpers
+  // killOrphanedShellpers() can never reach, because it unconditionally
+  // protects any shellper whose socket still responds. A husk (child exited,
+  // shellper still listening) answers its socket, so it needs the stricter
+  // unregistered+childless+aged predicate instead. See shellper-husk-sweep.ts.
+  const huskGraceMs = resolveHuskGraceMs();
+  const parsedHuskSweepIntervalMs = parseInt(process.env.SHELLPER_HUSK_SWEEP_INTERVAL_MS || '3600000', 10);
+  const huskSweepIntervalMs = Math.max(
+    Number.isNaN(parsedHuskSweepIntervalMs) ? 3600000 : parsedHuskSweepIntervalMs,
+    1000,
+  );
+  const runHuskSweep = async (): Promise<void> => {
+    try {
+      const result = await sweepShellperHusks({
+        socketDir,
+        db: getGlobalDb(),
+        graceMs: huskGraceMs,
+        log: (msg: string) => log('INFO', msg),
+      });
+      if (result.swept > 0) {
+        log('INFO', `Husk sweep: reaped ${result.swept} shellper husk(s)`);
+      }
+    } catch (err) {
+      log('ERROR', `Husk sweep failed: ${(err as Error).message}`);
+    }
+  };
+  shellperHuskSweepInterval = setInterval(runHuskSweep, huskSweepIntervalMs);
+
   log('INFO', 'Shellper session manager initialized');
 
   // Spec 0105 Phase 4: Initialize terminal management module
@@ -488,6 +519,11 @@ server.listen(port, bindHost, async () => {
   if (orphansKilled > 0) {
     log('INFO', `Killed ${orphansKilled} orphaned shellper process(es)`);
   }
+
+  // Issue #1227: run the stricter husk sweep once at startup too, same
+  // ordering requirement as killOrphanedShellpers (must run after
+  // reconciliation so a reconnected session's shellper is registered).
+  await runHuskSweep();
 
   // Spec 0105 Phase 3: Initialize instance lifecycle module.
   // Placed after reconciliation so getInstances() returns [] during startup

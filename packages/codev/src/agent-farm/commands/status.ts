@@ -123,13 +123,17 @@ function emitStatusJson(params: {
   architects: Array<{ name: string }>;
   builders: Builder[];
   ownerFilter: string | undefined;
+  // Issue #1227: null (not omitted) when Tower is down or the running Tower
+  // predates these fields — same nullable-not-optional contract as `workspace.name`.
+  fleet: { rssKb: number | null; unregisteredShellperCount: number | null };
 }): void {
-  const { towerRunning, workspace, architects, builders, ownerFilter } = params;
+  const { towerRunning, workspace, architects, builders, ownerFilter, fleet } = params;
   const visible = sortByOwner(filterByOwner(builders, ownerFilter));
 
   const payload = {
     tower: { running: towerRunning },
     workspace,
+    fleet,
     ownerFilter: ownerFilter ?? null,
     architects: architects.map((a) => ({ name: a.name ?? 'main' })),
     builders: visible.map((b) => ({
@@ -174,11 +178,22 @@ export async function status(options: StatusOptions = {}): Promise<void> {
   if (options.json) {
     let workspaceName: string | undefined;
     let workspaceActive = false;
+    let fleet: { rssKb: number | null; unregisteredShellperCount: number | null } = {
+      rssKb: null,
+      unregisteredShellperCount: null,
+    };
     if (towerRunning) {
       const ws = await client.getWorkspaceStatus(workspacePath);
       if (ws) {
         workspaceName = ws.name;
         workspaceActive = ws.active;
+      }
+      const health = await client.getHealth();
+      if (health) {
+        fleet = {
+          rssKb: health.fleetRssKb ?? null,
+          unregisteredShellperCount: health.unregisteredShellperCount ?? null,
+        };
       }
     }
     emitStatusJson({
@@ -187,6 +202,7 @@ export async function status(options: StatusOptions = {}): Promise<void> {
       architects,
       builders,
       ownerFilter,
+      fleet,
     });
     return;
   }
@@ -201,6 +217,17 @@ export async function status(options: StatusOptions = {}): Promise<void> {
       logger.kv('  Uptime', `${Math.floor(health.uptime)}s`);
       logger.kv('  Active Workspaces', health.activeWorkspaces);
       logger.kv('  Memory', `${Math.round(health.memoryUsage / 1024 / 1024)}MB`);
+      // Issue #1227: fleet RSS is the real OS-level memory cost of the
+      // shellper/claude process fleet — distinct from `Memory` above, which is
+      // only Tower's own V8 heap. Omitted (not shown as 0) when the running
+      // Tower predates these fields.
+      if (health.fleetRssKb !== undefined) {
+        logger.kv('  Fleet RSS', `${Math.round(health.fleetRssKb / 1024)}MB`);
+      }
+      if (health.unregisteredShellperCount !== undefined) {
+        const count = health.unregisteredShellperCount;
+        logger.kv('  Unregistered Shellpers', count > 0 ? chalk.yellow(String(count)) : String(count));
+      }
     }
 
     showArtifactConfig(workspacePath);

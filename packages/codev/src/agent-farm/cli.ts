@@ -8,6 +8,7 @@
 import { Command } from 'commander';
 import { start, stop } from './commands/index.js';
 import { towerStart, towerStop, towerLog } from './commands/tower.js';
+import { towerSweepHusks } from './commands/tower-sweep-husks.js';
 import { towerRegister, towerDeregister, towerCloudStatus } from './commands/tower-cloud.js';
 import { logger } from './utils/logger.js';
 import { setCliOverrides } from './utils/config.js';
@@ -776,6 +777,21 @@ export async function runAgentFarm(args: string[]): Promise<void> {
           follow: options.follow,
           lines: options.lines ? parseInt(options.lines, 10) : undefined,
         });
+      } catch (error) {
+        logger.error(error instanceof Error ? error.message : String(error));
+        process.exit(1);
+      }
+    });
+
+  // Issue #1227: reap stranded shellper husks (unregistered + childless + aged).
+  towerCmd
+    .command('sweep-husks')
+    .description('Preview or reap stranded shellper husk processes')
+    .option('--apply', 'Actually reap husk shellpers (default: dry-run preview only)')
+    .option('-y, --yes', 'Skip --apply confirmation prompt')
+    .action(async (options: { apply?: boolean; yes?: boolean }) => {
+      try {
+        await towerSweepHusks({ apply: options.apply, yes: options.yes });
       } catch (error) {
         logger.error(error instanceof Error ? error.message : String(error));
         process.exit(1);

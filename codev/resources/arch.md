@@ -858,6 +858,8 @@ async cleanupStaleSockets(): Promise<number> {
 }
 ```
 
+**Husk sweep (Issue #1227).** The "orphaned shellpers are never killed" policy above is deliberately permissive for the reconnectable case, but it also permanently protects a shellper whose PTY child has already exited (a "husk") — a husk's socket still responds, so `killOrphanedShellpers` skips it forever, even though it is not reconnectable. A separate, stricter sweep (`shellper-husk-sweep.ts`) closes that gap: it reaps a shellper only when it is simultaneously **unregistered** (no live PID in `terminal_sessions`), **childless** (no OS child process), and **aged** past a grace period (`SHELLPER_HUSK_GRACE_MS`, default 1h) — three conditions that together are true only for a genuine husk, never a live or reconnectable session. It runs on three triggers: Tower startup, an hourly in-process timer, and on-demand via `afx tower sweep-husks` (dry-run preview by default, `--apply` to reap, mirroring `afx workspace recover`'s UX). Fleet-wide RSS and an unregistered-shellper count are surfaced in `/health` and `afx status` for observability, computed from a shared `process-census.ts` `ps` scan.
+
 #### Dead Process Cleanup
 
 Tower cleans up stale entries on state load:

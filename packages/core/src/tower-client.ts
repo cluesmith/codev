@@ -84,7 +84,44 @@ export interface TowerHealth {
   activeWorkspaces: number;
   totalWorkspaces: number;
   memoryUsage: number;
+  /**
+   * Issue #1227: total RSS (KB) of every shellper process in this Tower
+   * instance's scope plus their direct children — the real OS-level memory
+   * cost of the process fleet, as opposed to `memoryUsage` (Tower's own V8
+   * heap). Includes not-yet-swept husks, since the point is surfacing the
+   * true cost regardless of registration state. Omitted (not `undefined`)
+   * when the underlying `ps` scan or DB read fails — a fleet-accounting
+   * hiccup never fails `/health` itself. Optional for back-compat with older
+   * Tower builds that predate the field.
+   */
+  fleetRssKb?: number;
+  /**
+   * Issue #1227: count of in-scope shellper processes not currently tracked
+   * in `terminal_sessions` — a lighter, ungated signal than the husk-sweep
+   * predicate (no childless/aged requirement), purely informational. Same
+   * omit-on-failure and back-compat notes as `fleetRssKb`.
+   */
+  unregisteredShellperCount?: number;
   timestamp: string;
+}
+
+/** Issue #1227: a shellper the husk sweep would reap (or has reaped). */
+export interface HuskCandidate {
+  pid: number;
+  rssKb: number;
+  /** Milliseconds since the shellper process started, or null if undeterminable. */
+  ageMs: number | null;
+}
+
+export interface HuskPreview {
+  candidates: HuskCandidate[];
+  /** The grace period (ms) that gated this preview — same value the sweep itself uses. */
+  graceMs: number;
+}
+
+export interface HuskSweepResult {
+  swept: number;
+  pids: number[];
 }
 
 export interface TowerTunnelStatus {
@@ -211,6 +248,24 @@ export class TowerClient {
    */
   async getVersion(): Promise<{ ok: boolean; status: number; data?: TowerVersionInfo; error?: string }> {
     return this.request<TowerVersionInfo>('/api/version');
+  }
+
+  /**
+   * Issue #1227: preview which shellpers the husk sweep would reap, without
+   * killing anything. Backs `afx tower sweep-husks`'s default (no-flags) mode.
+   */
+  async findHuskCandidates(): Promise<HuskPreview | null> {
+    const result = await this.request<HuskPreview>('/api/shellpers/husks');
+    return result.ok ? result.data! : null;
+  }
+
+  /**
+   * Issue #1227: actually reap the current husk candidates. Backs `afx tower
+   * sweep-husks --apply`.
+   */
+  async sweepHusks(): Promise<HuskSweepResult | null> {
+    const result = await this.request<HuskSweepResult>('/api/shellpers/husks/sweep', { method: 'POST' });
+    return result.ok ? result.data! : null;
   }
 
   async listWorkspaces(): Promise<TowerWorkspace[]> {
