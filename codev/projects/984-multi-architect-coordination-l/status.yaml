@@ -1,0 +1,23 @@
+id: '984'
+title: multi-architect-coordination-l
+protocol: spir
+phase: plan
+plan_phases: []
+current_plan_phase: null
+gates:
+  spec-approval:
+    status: approved
+    requested_at: '2026-06-04T04:27:13.748Z'
+    approved_at: '2026-06-04T05:54:59.349Z'
+  plan-approval:
+    status: pending
+    requested_at: '2026-06-04T06:11:58.987Z'
+  pr:
+    status: pending
+  verify-approval:
+    status: pending
+iteration: 1
+build_complete: true
+history: []
+started_at: '2026-06-04T04:10:24.406Z'
+updated_at: '2026-06-04T06:11:58.987Z'
