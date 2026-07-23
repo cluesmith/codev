@@ -323,7 +323,7 @@ async function computeFleetHealthFields(
   const shellperManager = ctx.getShellperManager();
   if (!shellperManager) return {};
   try {
-    const census = listProcessCensus();
+    const census = await listProcessCensus();
     const scopeMarker = shellperManager.socketDir.endsWith('/')
       ? shellperManager.socketDir
       : `${shellperManager.socketDir}/`;
@@ -390,15 +390,21 @@ async function handleHuskPreview(res: http.ServerResponse, ctx: RouteContext): P
   }
   try {
     const graceMs = resolveHuskGraceMs();
+    // One census snapshot, shared between the candidate decision and the
+    // displayed RSS — passing it via the `census` seam avoids a second `ps`
+    // scan and guarantees the RSS shown is for the exact snapshot that decided
+    // candidacy, not a later, possibly-different one (codex #1227 PR review).
+    const census = await listProcessCensus();
+    const rssByPid = new Map(census.map((entry) => [entry.pid, entry.rssKb]));
+
     const registered = await computeRegisteredShellperPids(getGlobalDb());
     const pids = await findHuskShellpers({
       socketDir: shellperManager.socketDir,
       registeredShellperPids: registered,
       graceMs,
+      census: () => census,
     });
 
-    const census = listProcessCensus();
-    const rssByPid = new Map(census.map((entry) => [entry.pid, entry.rssKb]));
     const now = Date.now();
     const candidates = await Promise.all(
       pids.map(async (pid) => {

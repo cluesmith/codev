@@ -79,8 +79,13 @@ export interface FindHuskShellpersOptions {
   socketDir: string;
   registeredShellperPids: Set<number>;
   graceMs: number;
-  /** Seam, defaults to `listProcessCensus`. */
-  census?: () => ProcessCensusEntry[];
+  /**
+   * Seam, defaults to `listProcessCensus`. Accepts a plain array too (not just
+   * a function returning one) so a caller that already took a snapshot for
+   * another purpose (e.g. RSS display) can pass it through and avoid a second
+   * `ps` scan — see `handleHuskPreview` in tower-routes.ts.
+   */
+  census?: () => ProcessCensusEntry[] | Promise<ProcessCensusEntry[]>;
   /** Seam, defaults to `Date.now()`. */
   now?: number;
   /** Seam, defaults to `getProcessStartTime`. */
@@ -92,7 +97,7 @@ export interface FindHuskShellpersOptions {
  * are unregistered AND childless AND older than `graceMs`.
  */
 export async function findHuskShellpers(opts: FindHuskShellpersOptions): Promise<number[]> {
-  const census = (opts.census ?? listProcessCensus)();
+  const census = await (opts.census ?? listProcessCensus)();
   const now = opts.now ?? Date.now();
   const getStartTime = opts.getStartTime ?? getProcessStartTime;
 
@@ -137,7 +142,7 @@ export interface SweepShellperHusksOptions {
   db: Database.Database;
   graceMs: number;
   log?: (msg: string) => void;
-  census?: () => ProcessCensusEntry[];
+  census?: () => ProcessCensusEntry[] | Promise<ProcessCensusEntry[]>;
   now?: number;
   getStartTime?: (pid: number) => Promise<number | null>;
   /** Seam, defaults to `reapShellpers`. */
