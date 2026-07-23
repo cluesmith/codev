@@ -1,9 +1,18 @@
 id: '1216'
 title: porch-config-toggle-to-disable
 protocol: spir
-phase: plan
-plan_phases: []
-current_plan_phase: null
+phase: implement
+plan_phases:
+  - id: porch_toggle
+    title: Producer-Side Porch Toggle
+    status: in_progress
+  - id: worktree_local_config
+    title: Safe Builder Personal-Config Snapshot
+    status: pending
+  - id: documentation_verification
+    title: Documentation and End-to-End Verification
+    status: pending
+current_plan_phase: porch_toggle
 gates:
   spec-approval:
     status: approved
@@ -21,4 +30,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-07-23T03:24:00.433Z'
-updated_at: '2026-07-23T03:39:23.666Z'
+updated_at: '2026-07-23T03:39:33.834Z'
