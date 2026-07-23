@@ -52,6 +52,8 @@ import { SendBuffer } from './send-buffer.js';
 import type { BufferedMessage } from './send-buffer.js';
 import type { PtySession } from '../../terminal/pty-session.js';
 import { writeMessageToSession } from './message-write.js';
+import { resolvePacingForSession } from './message-pacing.js';
+import { armSeedKick, parseSeedKick } from './seed-kick.js';
 import {
   getKnownWorkspacePaths,
   getInstances,
@@ -117,7 +119,10 @@ const sendBuffer = new SendBuffer();
 /** Deliver a buffered message to a session (write + broadcast + log).
  *  Returns the ms timestamp when all writes complete (for serialization). */
 function deliverBufferedMessage(session: PtySession, msg: BufferedMessage, delayOffset = 0): number {
-  const endTime = writeMessageToSession(session, msg.formattedMessage, msg.noEnter, delayOffset);
+  // Issue #1201: per-harness Enter pacing (Kimi needs a longer delayed Enter).
+  const endTime = writeMessageToSession(
+    session, msg.formattedMessage, msg.noEnter, delayOffset, resolvePacingForSession(session),
+  );
   broadcastMessage(msg.broadcastPayload as Parameters<typeof broadcastMessage>[0]);
   return endTime;
 }
@@ -796,6 +801,18 @@ async function handleTerminalCreate(
         }
         saveTerminalSession(info.id, workspacePath, termType, roleId, info.pid, null, null, null, null, cwd ?? null);
         ctx.log('WARN', `Terminal ${info.id} for ${workspacePath} is non-persistent (shellper unavailable)`);
+      }
+    }
+
+    // Issue #1201: readiness-gated first-message delivery for seed-style
+    // harnesses (Kimi). Malformed seedKick values are ignored, never fatal.
+    const seedKick = parseSeedKick(body.seedKick);
+    if (seedKick) {
+      const ptySession = manager.getSession(info.id);
+      if (ptySession) {
+        armSeedKick(ptySession, seedKick, (level, message) =>
+          ctx.log(level, `[seed-kick ${info.id.slice(0, 8)}] ${message}`));
+        ctx.log('INFO', `Armed seed kick for terminal ${info.id.slice(0, 8)} (sentinel-gated "${seedKick.message}")`);
       }
     }
 
@@ -1529,7 +1546,8 @@ async function handleSend(
   } else {
     // User is idle (or interrupt) — deliver immediately.
     // Bugfix #584: paces multi-line output to avoid paste detection.
-    writeMessageToSession(session, formattedMessage, noEnter);
+    // Issue #1201: per-harness Enter pacing (Kimi needs a longer delayed Enter).
+    writeMessageToSession(session, formattedMessage, noEnter, 0, resolvePacingForSession(session));
     broadcastMessage(broadcastPayload);
     ctx.log('INFO', logMessage);
   }

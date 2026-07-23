@@ -23,6 +23,29 @@ const REQUEST_TIMEOUT_MS = 10000;
  */
 export type TerminalType = 'architect' | 'builder' | 'shell' | 'dev';
 
+/**
+ * Readiness-gated first-message delivery for seed-style builder harnesses
+ * (Issue #1201 — Kimi). The launch script prints `<sentinel> <session-id>`
+ * between seed completion and TUI start; Tower watches the PTY stream for it,
+ * waits `graceMs`, writes `message`, and (when `verify` is present) confirms
+ * submission against the harness's session store, re-sending on timeout.
+ * Bytes written to the PTY during the seed window are silently lost, so
+ * ungated delivery would drop the message.
+ */
+export interface SeedKickRequest {
+  /** Sentinel line prefix; the token after it is the harness session id. */
+  sentinel: string;
+  /** Single-line kick message (e.g. 'BEGIN'). */
+  message: string;
+  /** Post-sentinel grace before writing, in ms. */
+  graceMs?: number;
+  /** Delayed-Enter override for the kick write (harness pacing). */
+  enterDelayMs?: number;
+  /** Store-verified delivery. `kind` selects the verifier; only the Kimi
+   *  session store is supported today. */
+  verify?: { kind: 'kimi-session-store'; worktreePath: string };
+}
+
 export interface TowerWorkspace {
   path: string;
   name: string;
@@ -500,6 +523,7 @@ export class TowerClient {
     workspacePath?: string;
     type?: TerminalType;
     roleId?: string;
+    seedKick?: SeedKickRequest;
   }): Promise<TowerTerminal | null> {
     const result = await this.request<TowerTerminal>('/api/terminals', {
       method: 'POST',

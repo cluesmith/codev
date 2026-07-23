@@ -67,7 +67,7 @@ vi.mock('../../lib/forge.js', () => ({
 }));
 
 // Mock the harness resolution to return claude harness by default
-import { CLAUDE_HARNESS, OPENCODE_HARNESS } from '../utils/harness.js';
+import { CLAUDE_HARNESS, OPENCODE_HARNESS, KIMI_HARNESS } from '../utils/harness.js';
 const getBuilderHarnessMock = vi.fn(() => CLAUDE_HARNESS);
 const getWorktreeConfigMock = vi.fn(() => ({ symlinks: [], postSpawn: [], devCommand: null, devUrls: [] }));
 vi.mock('../utils/config.js', () => ({
@@ -385,6 +385,134 @@ describe('spawn-worktree', () => {
       expect(script).toBeDefined();
       expect(script).not.toContain('--resume');
       expect(script).toContain('--append-system-prompt');
+    });
+  });
+
+  // =========================================================================
+  // startBuilderSession — kimi provider-owned launch shape (Issue #1201)
+  //
+  // Kimi has no role flag and no positional prompt (both exit 1). The harness
+  // owns the whole script: seed-session bootstrap (role+task via `kimi -p`,
+  // captured session id) + pinned `-S` TUI loop. The #929-class guard here:
+  // with the kimi harness resolved, NO generated script may contain
+  // --append-system-prompt, --resume, or a positional prompt.
+  // =========================================================================
+
+  describe('startBuilderSession kimi script (Issue #1201)', () => {
+    function findWrite(suffix: string): string | undefined {
+      const call = vi.mocked(writeFileSync).mock.calls.find(
+        c => typeof c[0] === 'string' && c[0].endsWith(suffix),
+      );
+      return call ? (call[1] as string) : undefined;
+    }
+
+    it('fresh spawn: seed bootstrap script + seed file + sentinel-gated BEGIN kick', async () => {
+      getBuilderHarnessMock.mockReturnValueOnce(KIMI_HARNESS);
+      await startBuilderSession(
+        { workspaceRoot: '/tmp/ws' } as any,
+        'pir-k1', '/tmp/worktree', 'kimi',
+        'TASK PROMPT', 'ROLE {PORT}', 'codev',
+      );
+
+      const script = findWrite('.builder-start.sh');
+      expect(script).toBeDefined();
+      expect(script).toContain('if [ ! -s .builder-kimi-session ]');
+      expect(script).toContain('--output-format stream-json');
+      expect(script).toContain('__CODEV_KIMI_SEED_DONE__ $SID');
+      expect(script).toContain('kimi --yolo -S "$SID"');
+      // #929/#1062 class: no claude-shaped flags, no positional prompt.
+      expect(script).not.toContain('--append-system-prompt');
+      expect(script).not.toContain('--resume');
+      expect(script).not.toContain('"$(cat \'/tmp/worktree/.builder-prompt.txt\')"');
+
+      // Seed file carries role (PORT-expanded) + task in the ack-and-wait wrapper.
+      const seed = findWrite('.builder-seed.txt');
+      expect(seed).toBeDefined();
+      expect(seed).toContain(`ROLE ${DEFAULT_TOWER_PORT}`);
+      expect(seed).toContain('TASK PROMPT');
+      expect(seed).toContain('BEGIN');
+
+      // Reference files still written for inspection parity with other harnesses.
+      expect(findWrite('.builder-prompt.txt')).toBe('TASK PROMPT');
+      expect(findWrite('.builder-role.md')).toContain(`ROLE ${DEFAULT_TOWER_PORT}`);
+
+      // Tower is asked to arm the readiness-gated kick.
+      const createArgs = createTerminalMock.mock.calls.at(-1)![0];
+      expect(createArgs.seedKick).toEqual({
+        sentinel: '__CODEV_KIMI_SEED_DONE__',
+        message: 'BEGIN',
+        graceMs: 2500,
+        enterDelayMs: KIMI_HARNESS.messagePacing!.enterDelayMs,
+        verify: { kind: 'kimi-session-store', worktreePath: '/tmp/worktree' },
+      });
+    });
+
+    it('resume: provider resume script pins -S on the discovered id; no seed, no kick', async () => {
+      getBuilderHarnessMock.mockReturnValueOnce(KIMI_HARNESS);
+      await startBuilderSession(
+        { workspaceRoot: '/tmp/ws' } as any,
+        'pir-k2', '/tmp/worktree', 'kimi',
+        'PROMPT', 'ROLE', 'codev',
+        { sessionId: 'session_prev-1', scriptFragment: "-S 'session_prev-1'" },
+      );
+
+      const script = findWrite('.builder-start.sh');
+      expect(script).toBeDefined();
+      expect(script).toContain("printf '%s' 'session_prev-1' > .builder-kimi-session");
+      expect(script).toContain('kimi --yolo -S "$SID"');
+      expect(script).not.toContain('stream-json');
+      expect(script).not.toContain('--append-system-prompt');
+      expect(script).not.toContain('--resume');
+
+      const createArgs = createTerminalMock.mock.calls.at(-1)![0];
+      expect(createArgs.seedKick).toBeUndefined();
+    });
+
+    it('claude spawns are unaffected: no seedKick is sent (regression)', async () => {
+      getBuilderHarnessMock.mockReturnValueOnce(CLAUDE_HARNESS);
+      await startBuilderSession(
+        { workspaceRoot: '/tmp/ws' } as any,
+        'pir-k3', '/tmp/worktree', 'claude',
+        'PROMPT', 'ROLE', 'codev',
+      );
+      const createArgs = createTerminalMock.mock.calls.at(-1)![0];
+      expect(createArgs.seedKick).toBeUndefined();
+    });
+  });
+
+  describe('buildWorktreeLaunchScript (kimi harness — interactive mode)', () => {
+    it('role, no prompt → seeds the role with an await-user wrapper; no BEGIN protocol', () => {
+      getBuilderHarnessMock.mockReturnValueOnce(KIMI_HARNESS);
+      const script = buildWorktreeLaunchScript(
+        '/tmp/worktree', 'kimi', { content: 'ROLE BODY', source: 'codev' }, '/tmp/ws',
+      );
+      expect(script).toContain('if [ ! -s .builder-kimi-session ]');
+      expect(script).toContain('kimi --yolo -S "$SID"');
+      expect(script).not.toContain('--append-system-prompt');
+
+      const seedCall = vi.mocked(writeFileSync).mock.calls.find(
+        c => typeof c[0] === 'string' && c[0].endsWith('.builder-seed.txt'),
+      );
+      expect(seedCall).toBeDefined();
+      const seed = seedCall![1] as string;
+      expect(seed).toContain('ROLE BODY');
+      expect(seed).not.toContain('BEGIN');
+    });
+
+    it('no role, no prompt (override spawn) → bare TUI loop without a seed, marker still persisted', () => {
+      getBuilderHarnessMock.mockReturnValueOnce(KIMI_HARNESS);
+      const script = buildWorktreeLaunchScript('/tmp/worktree', 'kimi', null, '/tmp/ws');
+      expect(script).toContain('kimi --yolo');
+      expect(script).not.toContain('stream-json');
+      // PR #1203 review regression: this is exactly the `--builder-cmd kimi`
+      // bare-spawn shape. Without the marker, pacing resolution falls back to
+      // the workspace's config harness (claude in an override spawn) and the
+      // swallowed-Enter bug this feature fixes comes back. The touch must
+      // precede the loop so the marker exists before the first send can land.
+      expect(script).toContain('touch .builder-kimi-session');
+      expect(script).toContain('while true');
+      expect(script.indexOf('touch .builder-kimi-session'))
+        .toBeLessThan(script.indexOf('while true'));
     });
   });
 

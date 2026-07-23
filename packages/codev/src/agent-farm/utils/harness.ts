@@ -12,12 +12,39 @@
  * @see codev/specs/591-af-workspace-failure-with-code.md
  */
 
+import { join } from 'node:path';
+import { readFileSync } from 'node:fs';
 import { findLatestSessionId, verifySessionOwnership } from './claude-session-discovery.js';
+import {
+  findLatestKimiSessionId,
+  verifyKimiSessionOwnership,
+  type KimiDiscoveryOpts,
+} from './kimi-session-discovery.js';
 import { buildWorktreeGuardFiles } from './worktree-write-guard.js';
 
 // =============================================================================
 // Types
 // =============================================================================
+
+/**
+ * Context for provider-owned builder launch scripts (Issue #1201).
+ * Only harnesses whose CLI cannot take a role/prompt via argv implement
+ * `buildBuilderLaunchScript` (currently Kimi); flag-shaped harnesses keep the
+ * generic scripts in spawn-worktree.ts.
+ */
+export interface BuilderLaunchScriptContext {
+  worktreePath: string;
+  /** The resolved builder command string (may include user flags). */
+  baseCmd: string;
+  /**
+   * Absolute path to the seed-prompt file (.builder-seed.txt) written by the
+   * caller from `seedDelivery.buildSeedPrompt(...)`. Null on paths with
+   * nothing to seed (no role, no prompt) and on resume.
+   */
+  seedFile: string | null;
+  /** Present on the resume path: relaunch pinned to this prior session. */
+  resume?: { sessionId: string };
+}
 
 export interface HarnessProvider {
   /**
@@ -101,6 +128,45 @@ export interface HarnessProvider {
     args: string[];
     scriptFragment: string;
   } | null;
+
+  /**
+   * Optional: provider-owned builder launch script (Issue #1201). When
+   * present, spawn-worktree.ts uses this INSTEAD of the generic
+   * `${baseCmd} ${roleFragment} "<prompt>"` script shapes — for CLIs with no
+   * role flag and no positional prompt (Kimi), where the whole launch shape
+   * (seed-session bootstrap + pinned-id TUI loop) belongs to the provider.
+   */
+  buildBuilderLaunchScript?(ctx: BuilderLaunchScriptContext): string;
+
+  /**
+   * Optional: seed-session delivery metadata (Issue #1201), consumed by
+   * spawn-worktree.ts (seed-prompt file) and Tower's seed-kick module
+   * (readiness barrier). Only meaningful alongside buildBuilderLaunchScript.
+   *
+   * The generated script prints `<sentinelPrefix> <session-id>` on its own
+   * line after the seed completes and before the interactive TUI starts.
+   * Tower gates any first-message delivery on that sentinel: bytes written to
+   * the PTY during the seed window have no defined consumer (observed: they
+   * are silently lost), so an ungated write would drop the task kick.
+   */
+  seedDelivery?: {
+    sentinelPrefix: string;
+    /** Single-line kick delivered after the sentinel + grace (e.g. 'BEGIN'). */
+    kickMessage: string;
+    /** Post-sentinel grace before writing the kick (composer warm-up). */
+    graceMs: number;
+    /** Compose the seed-turn prompt from role and/or initial task prompt. */
+    buildSeedPrompt(roleContent: string | null, taskPrompt: string | null): string;
+  };
+
+  /**
+   * Optional: PTY message pacing for this harness's CLI (Issue #1201).
+   * `enterDelayMs` overrides message-write.ts's default delayed-Enter timing —
+   * CLIs with a longer paste-detection window (Kimi) silently swallow an
+   * Enter that arrives too soon after the message body, so `afx send` never
+   * submits without this.
+   */
+  messagePacing?: { enterDelayMs: number };
 }
 
 /** Custom harness definition from .codev/config.json */
@@ -186,11 +252,219 @@ export const OPENCODE_HARNESS: HarnessProvider = {
   }]),
 };
 
+// =============================================================================
+// Kimi (Issue #1201 — builder-only)
+// =============================================================================
+
+/**
+ * Sentinel printed by the generated Kimi launch script between seed completion
+ * and TUI start. Tower's seed-kick module gates first-message delivery on it.
+ */
+export const KIMI_SEED_SENTINEL = '__CODEV_KIMI_SEED_DONE__';
+
+/**
+ * File in the worktree persisting the seeded Kimi session id. Doubles as the
+ * Kimi-shape marker for Tower's pacing probe (message-pacing.ts), so EVERY
+ * launch shape persists it: seed and resume write the captured id; the bare
+ * no-role/no-prompt shape touches it empty (there is no id to pin).
+ */
+export const KIMI_SESSION_FILE = '.builder-kimi-session';
+
+/**
+ * Delayed-Enter timing for Kimi PTYs. Kimi's paste-detection window is longer
+ * than Claude's: an Enter arriving too soon after the message body is treated
+ * as part of a paste and NOT submitted. Bisected live against kimi 0.27.0
+ * (PIR #1201): 80ms and 100ms fail; 120ms, 250ms, 500ms, 1000ms submit —
+ * threshold ≈ 100–120ms. Pinned at 1000ms for ~9x margin (the POC-validated
+ * value; the only cost is submission latency, which is irrelevant for
+ * agent-to-agent messages). Applied via messagePacing below.
+ */
+export const KIMI_ENTER_DELAY_MS = 1000;
+
+/** Map the shared `homeDir` test-seam option onto the Kimi store location. */
+function kimiOpts(opts?: { homeDir?: string }): KimiDiscoveryOpts | undefined {
+  return opts?.homeDir ? { kimiHome: join(opts.homeDir, '.kimi-code') } : undefined;
+}
+
+/**
+ * Compose the seed-turn prompt: role and/or task briefing wrapped in an
+ * ack-and-wait discipline. The role rides a USER turn, not a system prompt
+ * (Kimi documents no system-prompt flag) — the same tradeoff that deferred
+ * agy as an architect (#1063). Validated end-to-end in spike task-Iptx.
+ */
+function buildKimiSeedPrompt(roleContent: string | null, taskPrompt: string | null): string {
+  const waitInstruction = taskPrompt
+    ? '- Reply with exactly "ROLE-OK", then wait. You will receive a message "BEGIN" in a later turn — only then start working on the task briefing, following your role.'
+    : '- Reply with exactly "ROLE-OK", then wait for instructions from the user in the interactive session.';
+  const parts: string[] = [
+    'You are being initialized as an autonomous agent inside a project worktree.',
+    'This initialization turn delivers your ROLE and TASK BRIEFING. Strict discipline for THIS turn:',
+    '- Do NOT start working yet. Do NOT use any tools. Do NOT read or write files.',
+    '- Internalize everything below; it governs the rest of this session.',
+    waitInstruction,
+  ];
+  if (roleContent) {
+    parts.push('', '=== YOUR ROLE ===', roleContent);
+  }
+  if (taskPrompt) {
+    parts.push('', '=== TASK BRIEFING (do not act until BEGIN) ===', taskPrompt);
+  }
+  return parts.join('\n');
+}
+
+/**
+ * Append --yolo (auto-approve tools; the Kimi analog of
+ * `claude --dangerously-skip-permissions`) unless the user already passed it.
+ * `--auto` is deliberately NOT used: it suppresses agent→user questions, which
+ * the gate/Q&A workflow depends on, and it conflicts with --yolo (documented).
+ */
+function kimiTuiCmd(baseCmd: string): string {
+  return baseCmd.includes('--yolo') ? baseCmd : `${baseCmd} --yolo`;
+}
+
+/**
+ * Extract the seeded session id from `kimi -p … --output-format stream-json`
+ * stdout: the machine-readable `session.resume_hint` meta line (UNDOCUMENTED,
+ * observed on kimi 0.27.0 — see kimi-session-discovery.ts header). Reads stdin
+ * to EOF before printing so the pipe never closes early (an early exit would
+ * EPIPE the seed process mid-turn). Exits 1 when no hint line is found — the
+ * session file ends up empty and the script's empty-id bailout fires.
+ */
+const KIMI_SEED_EXTRACTOR =
+  'let b="";process.stdin.on("data",d=>b+=d);process.stdin.on("end",()=>{' +
+  'for(const l of b.split("\\n")){try{const o=JSON.parse(l);' +
+  'if(o&&o.type==="session.resume_hint"&&typeof o.session_id==="string"){process.stdout.write(o.session_id);return}}catch{}}' +
+  'process.exit(1)})';
+
+export const KIMI_HARNESS: HarnessProvider = {
+  buildRoleInjection: () => {
+    throw new Error(
+      'Kimi is only supported as a builder shell, not as an architect shell ' +
+      '(stage 2 — see issue #1201). Kimi has no documented system-prompt flag; ' +
+      'builder role injection uses a seed-session bootstrap owned by the builder ' +
+      'launch script. Configure a different shell for the architect ' +
+      '(e.g., "claude --dangerously-skip-permissions" or "codex").',
+    );
+  },
+  // Role cannot ride argv (no role flag, no positional prompt — both exit 1,
+  // observed). The real shape is provider-owned via buildBuilderLaunchScript.
+  buildScriptRoleInjection: () => ({ fragment: '', env: {} }),
+
+  // Builder resume (afx spawn --resume): prefer the id persisted by the launch
+  // script, ownership-verified so a stale id (store GC, manual deletion) falls
+  // through instead of baking a fast-failing `-S <dead-id>` into the restart
+  // loop; else newest store session recorded for exactly this worktree; else
+  // null → callers take the fresh-with-role seed path (never a roleless fresh
+  // session — the reason explicit-ID is preferred over cwd-scoped --continue).
+  buildResume: (absolutePath, opts) => {
+    const kOpts = kimiOpts(opts);
+    let sessionId: string | null = null;
+    try {
+      const persisted = readFileSync(join(absolutePath, KIMI_SESSION_FILE), 'utf-8').trim();
+      if (persisted && verifyKimiSessionOwnership(persisted, absolutePath, kOpts)) {
+        sessionId = persisted;
+      }
+    } catch {
+      // No persisted session file — fall through to the store scan
+    }
+    if (!sessionId) {
+      sessionId = findLatestKimiSessionId(absolutePath, kOpts);
+    }
+    if (!sessionId) return null;
+    return {
+      sessionId,
+      args: ['-S', sessionId],
+      scriptFragment: `-S '${shellEscapeSingleQuote(sessionId)}'`,
+    };
+  },
+
+  buildBuilderLaunchScript: (ctx) => {
+    const tuiCmd = kimiTuiCmd(ctx.baseCmd);
+    const loop = `while true; do
+  ${tuiCmd} -S "$SID"
+  echo ""
+  echo "Agent exited. Restarting in 2 seconds... (Ctrl+C to quit)"
+  sleep 2
+done
+`;
+
+    if (ctx.resume) {
+      // Resume path: pinned prior session, no seed. Re-persist the id so the
+      // session file regains precedence for the next resume (it may be absent
+      // when the id came from a store scan) and so the file keeps serving as
+      // the Kimi marker for message pacing.
+      const escapedId = shellEscapeSingleQuote(ctx.resume.sessionId);
+      return `#!/bin/bash
+cd "${ctx.worktreePath}"
+printf '%s' '${escapedId}' > ${KIMI_SESSION_FILE}
+SID='${escapedId}'
+echo "${KIMI_SEED_SENTINEL} $SID"
+${loop}`;
+    }
+
+    if (ctx.seedFile) {
+      // Fresh path: seed-session bootstrap (spike task-Iptx, POC 6). The seed
+      // turn carries the role/task briefing; its captured session id pins the
+      // TUI loop, so context survives inner restarts. The `-s` guard makes the
+      // seed idempotent across script relaunches; a failed seed (auth,
+      // network, no resume_hint) leaves the file empty and exits BEFORE the
+      // loop — surfaced once, never restart-looped.
+      return `#!/bin/bash
+cd "${ctx.worktreePath}"
+if [ ! -s ${KIMI_SESSION_FILE} ]; then
+  echo "Seeding Kimi session (role/task briefing via kimi -p)..."
+  ${ctx.baseCmd} -p "$(cat '${shellEscapeSingleQuote(ctx.seedFile)}')" --output-format stream-json \\
+    | node -e '${KIMI_SEED_EXTRACTOR}' > ${KIMI_SESSION_FILE}
+  echo ""
+fi
+SID="$(cat ${KIMI_SESSION_FILE} 2>/dev/null)"
+if [ -z "$SID" ]; then
+  echo "ERROR: Kimi seed failed — no session id captured." >&2
+  echo "Check authentication (kimi login) and network, then relaunch this terminal." >&2
+  rm -f ${KIMI_SESSION_FILE}
+  exit 1
+fi
+echo "${KIMI_SEED_SENTINEL} $SID"
+${loop}`;
+    }
+
+    // Nothing to seed (no role, no prompt): plain TUI loop. No session
+    // pinning — restarts start fresh, matching the bare-mode behavior of
+    // other harnesses. The marker file is still persisted (empty — no id to
+    // pin) so Tower's pacing probe recognizes the worktree as Kimi-shaped;
+    // without it an override-spawned bare builder (`--builder-cmd kimi` in a
+    // claude-configured workspace) resolves the config harness's Enter timing
+    // and `afx send` payloads are swallowed by paste detection. `touch`
+    // preserves a previously seeded id, and an empty file keeps both the seed
+    // guard (`! -s`) and buildResume's empty-id fallthrough intact.
+    return `#!/bin/bash
+cd "${ctx.worktreePath}"
+touch ${KIMI_SESSION_FILE}
+while true; do
+  ${tuiCmd}
+  echo ""
+  echo "Agent exited. Restarting in 2 seconds... (Ctrl+C to quit)"
+  sleep 2
+done
+`;
+  },
+
+  seedDelivery: {
+    sentinelPrefix: KIMI_SEED_SENTINEL,
+    kickMessage: 'BEGIN',
+    graceMs: 2500,
+    buildSeedPrompt: buildKimiSeedPrompt,
+  },
+
+  messagePacing: { enterDelayMs: KIMI_ENTER_DELAY_MS },
+};
+
 const BUILTIN_HARNESSES: Record<string, HarnessProvider> = {
   claude: CLAUDE_HARNESS,
   codex: CODEX_HARNESS,
   gemini: GEMINI_HARNESS,
   opencode: OPENCODE_HARNESS,
+  kimi: KIMI_HARNESS,
 };
 
 // =============================================================================
@@ -317,6 +591,7 @@ export function detectHarnessFromCommand(command: string): string | undefined {
   if (basename.includes('codex')) return 'codex';
   if (basename.includes('gemini')) return 'gemini';
   if (basename.includes('opencode')) return 'opencode';
+  if (basename.includes('kimi')) return 'kimi';
 
   return undefined;
 }

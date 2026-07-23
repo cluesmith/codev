@@ -615,6 +615,27 @@ afx workspace start --architect-cmd "claude --model opus"
 afx spawn 42 --protocol spir --builder-cmd "claude --model haiku"
 ```
 
+### Builder harnesses
+
+The builder CLI's role/prompt mechanics are handled by a harness, auto-detected
+from the command basename (`claude`, `codex`, `gemini`, `opencode`, `kimi`) or
+pinned explicitly via `shell.builderHarness`. Example — Kimi Code CLI as the
+builder (builder-only; requires kimi >= 0.27.0):
+
+```json
+{
+  "shell": {
+    "builder": "kimi"
+  }
+}
+```
+
+Kimi builders use a seed-session bootstrap (role + task delivered via a
+one-shot `kimi -p` call whose session the interactive TUI then resumes), so
+context survives builder restarts. Note: Kimi has no hook seam, so Kimi
+builders do NOT get the worktree write-guard Claude builders have.
+Architect use of kimi and opencode is unsupported (use claude or codex there).
+
 ---
 
 ## Files

@@ -186,4 +186,56 @@ describe('writeMessageToSession (Bugfix #584)', () => {
       expect(enterCount).toBe(2);
     });
   });
+
+  // =========================================================================
+  // Issue #1201 — per-harness Enter-delay override. Kimi's paste-detection
+  // window outlasts the 50/80ms defaults (an 80ms Enter is swallowed; 1s
+  // submits — observed), so callers pass pacing.enterDelayMs for kimi targets.
+  // =========================================================================
+
+  describe('per-harness enterDelayMs override (Issue #1201)', () => {
+    it('short message: Enter waits for the overridden delay', () => {
+      const session = makeSession();
+      const msg = 'BEGIN';
+
+      const endTime = writeMessageToSession(session, msg, false, 0, { enterDelayMs: 1000 });
+      expect(endTime).toBe(1000);
+
+      // Default delay elapses — Enter must NOT have fired yet.
+      vi.advanceTimersByTime(50);
+      expect(session.writeCalls).toEqual([msg]);
+
+      vi.advanceTimersByTime(950);
+      expect(session.writeCalls).toEqual([msg, '\r']);
+    });
+
+    it('multi-line message: final Enter waits for the overridden delay after the last line', () => {
+      const session = makeSession();
+      const msg = 'line1\nline2\nline3\nline4';
+
+      const endTime = writeMessageToSession(session, msg, false, 0, { enterDelayMs: 1000 });
+      // Last line lands at 3 * 10ms; Enter at lastLine + 1000.
+      expect(endTime).toBe(30 + 1000);
+
+      vi.advanceTimersByTime(30 + 80);
+      expect(session.writeCalls).not.toContain('\r');
+
+      vi.advanceTimersByTime(1000 - 80);
+      expect(session.writeCalls).toContain('\r');
+    });
+
+    it('no pacing argument → default delays unchanged (regression)', () => {
+      const session = makeSession();
+      expect(writeMessageToSession(session, 'hi', false)).toBe(50);
+      const paced = makeSession();
+      expect(writeMessageToSession(paced, 'a\nb\nc\nd', false)).toBe(30 + 80);
+    });
+
+    it('noEnter suppresses the Enter even with an override', () => {
+      const session = makeSession();
+      writeMessageToSession(session, 'BEGIN', true, 0, { enterDelayMs: 1000 });
+      vi.advanceTimersByTime(5000);
+      expect(session.writeCalls).toEqual(['BEGIN']);
+    });
+  });
 });

@@ -14,6 +14,7 @@ import type { CronSchedule } from './tower-cron-parser.js';
 import { formatBuilderMessage } from '../utils/message-format.js';
 import { broadcastMessage } from './tower-messages.js';
 import { writeMessageToSession } from './message-write.js';
+import { resolvePacingForSession } from './message-pacing.js';
 import { getGlobalDb } from '../db/index.js';
 
 // ============================================================================
@@ -37,7 +38,9 @@ export interface CronDeps {
   log: (level: 'INFO' | 'ERROR' | 'WARN', message: string) => void;
   getKnownWorkspacePaths: () => string[];
   resolveTarget: (target: string, fallbackWorkspace?: string) => unknown;
-  getTerminalManager: () => { getSession: (id: string) => { write: (data: string) => void } | undefined };
+  // id/cwd feed per-harness pacing resolution (Issue #1201); the real
+  // PtySession provides both.
+  getTerminalManager: () => { getSession: (id: string) => { id: string; cwd?: string; write: (data: string) => void } | undefined };
 }
 
 // ============================================================================
@@ -320,7 +323,8 @@ function deliverMessage(task: CronTask, message: string): void {
 
   const formatted = formatBuilderMessage('af-cron', message);
   // Bugfix #584: pace multi-line output to avoid paste detection.
-  writeMessageToSession(session, formatted, false);
+  // Issue #1201: per-harness Enter pacing (Kimi needs a longer delayed Enter).
+  writeMessageToSession(session, formatted, false, 0, resolvePacingForSession(session));
 
   broadcastMessage({
     type: 'message',

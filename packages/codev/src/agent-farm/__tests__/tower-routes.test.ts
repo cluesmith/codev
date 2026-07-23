@@ -83,6 +83,8 @@ vi.mock('../servers/tower-terminals.js', () => ({
   getTerminalsForWorkspace: mockGetTerminalsForWorkspace,
   getRehydratedTerminalsEntry: mockGetRehydratedTerminalsEntry,
   isStartupReconcileSettled: mockIsStartupReconcileSettled,
+  // Issue #1201: message-pacing resolution reads the persisted row (best-effort)
+  getTerminalSessionById: vi.fn(() => null),
 }));
 
 vi.mock('../servers/tower-tunnel.js', () => ({
