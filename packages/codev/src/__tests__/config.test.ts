@@ -225,6 +225,40 @@ describe('loadConfig', () => {
     expect(config.porch?.checks?.lint).toEqual({ skip: true });
   });
 
+  it('leaves porch artifact auto-open unset by default', () => {
+    const config = loadConfig(tmpDir);
+    expect(config.porch?.autoOpenArtifacts).toBeUndefined();
+  });
+
+  it.each([true, false])('loads porch artifact auto-open value %s from project config', (value) => {
+    writeProjectConfig(tmpDir, {
+      porch: { autoOpenArtifacts: value },
+    });
+    const config = loadConfig(tmpDir);
+    expect(config.porch?.autoOpenArtifacts).toBe(value);
+  });
+
+  it('loads porch artifact auto-open from global config', () => {
+    writeGlobalConfig({ porch: { autoOpenArtifacts: false } });
+    const config = loadConfig(tmpDir);
+    expect(config.porch?.autoOpenArtifacts).toBe(false);
+  });
+
+  it('project porch artifact auto-open overrides the global value', () => {
+    writeGlobalConfig({ porch: { autoOpenArtifacts: false } });
+    writeProjectConfig(tmpDir, { porch: { autoOpenArtifacts: true } });
+    const config = loadConfig(tmpDir);
+    expect(config.porch?.autoOpenArtifacts).toBe(true);
+  });
+
+  it('local porch artifact auto-open overrides project and global values', () => {
+    writeGlobalConfig({ porch: { autoOpenArtifacts: true } });
+    writeProjectConfig(tmpDir, { porch: { autoOpenArtifacts: true } });
+    writeLocalConfig(tmpDir, { porch: { autoOpenArtifacts: false } });
+    const config = loadConfig(tmpDir);
+    expect(config.porch?.autoOpenArtifacts).toBe(false);
+  });
+
   it('layer 5: .codev/config.local.json overrides defaults when project config absent', () => {
     writeLocalConfig(tmpDir, {
       shell: { architect: 'local-only-architect' },

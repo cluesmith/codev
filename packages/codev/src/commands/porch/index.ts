@@ -631,14 +631,17 @@ export async function gate(workspaceRoot: string, projectId: string, resolver?: 
     const fullPath = path.join(workspaceRoot, artifact);
     if (fs.existsSync(fullPath)) {
       console.log(`  Artifact: ${artifact}`);
-      console.log('');
-      console.log(chalk.cyan('  Opening artifact for human review...'));
-      // Use afx open to display in annotation viewer
-      const { spawn } = await import('node:child_process');
-      spawn('afx', ['open', fullPath], {
-        stdio: 'inherit',
-        detached: true
-      }).unref();
+      const config = loadConfig(workspaceRoot);
+      if (config.porch?.autoOpenArtifacts !== false) {
+        console.log('');
+        console.log(chalk.cyan('  Opening artifact for human review...'));
+        // Use afx open to display in annotation viewer
+        const { spawn } = await import('node:child_process');
+        spawn('afx', ['open', fullPath], {
+          stdio: 'inherit',
+          detached: true
+        }).unref();
+      }
     }
   }
 

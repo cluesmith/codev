@@ -11,6 +11,7 @@ import {
   checkDependencies, createWorktree, createWorktreeFromBranch,
   validateBranchName, validateRemoteName, detectForkRemote,
   symlinkConfigFiles,
+  syncLocalConfigSnapshot,
   runPostSpawnHooks,
   checkBugfixCollisions,
   findExistingBugfixWorktree,
@@ -34,6 +35,9 @@ vi.mock('node:fs', async (importOriginal) => {
     chmodSync: vi.fn(),
     symlinkSync: vi.fn(),
     mkdirSync: vi.fn(),
+    copyFileSync: vi.fn(),
+    renameSync: vi.fn(),
+    rmSync: vi.fn(),
     readdirSync: vi.fn(() => []),
   };
 });
@@ -454,6 +458,38 @@ describe('spawn-worktree', () => {
         .mockRejectedValueOnce(new Error('worktree add failed'));
       await expect(createWorktree(config, 'my-branch', '/tmp/wt')).rejects.toThrow('Failed to create worktree');
     });
+
+    it('refreshes the personal config snapshot before post-spawn hooks', async () => {
+      const { existsSync, copyFileSync, renameSync } = await import('node:fs');
+      const { run, runStreaming } = await import('../utils/shell.js');
+      vi.mocked(run).mockResolvedValue({ stdout: '', stderr: '' } as any);
+      vi.mocked(existsSync)
+        .mockReturnValueOnce(false) // root .env
+        .mockReturnValueOnce(false) // root .codev/config.json
+        .mockReturnValueOnce(true); // root .codev/config.local.json
+      const worktreeConfig = {
+        symlinks: [],
+        postSpawn: ['install-deps'],
+        devCommand: null,
+        devUrls: [],
+      };
+      getWorktreeConfigMock
+        .mockReturnValueOnce(worktreeConfig)
+        .mockReturnValueOnce(worktreeConfig);
+
+      await createWorktree(config, 'my-branch', '/tmp/wt');
+
+      expect(copyFileSync).toHaveBeenCalledWith(
+        '/projects/test/.codev/config.local.json',
+        expect.stringMatching(/^\/tmp\/wt\/\.codev\/config\.local\.json\.tmp-/),
+      );
+      expect(renameSync).toHaveBeenCalledWith(
+        expect.stringMatching(/^\/tmp\/wt\/\.codev\/config\.local\.json\.tmp-/),
+        '/tmp/wt/.codev/config.local.json',
+      );
+      expect(vi.mocked(renameSync).mock.invocationCallOrder[0])
+        .toBeLessThan(vi.mocked(runStreaming).mock.invocationCallOrder[0]);
+    });
   });
 
   // =========================================================================
@@ -708,6 +744,42 @@ describe('spawn-worktree', () => {
       await expect(createWorktreeFromBranch(config, 'foo;rm -rf /', '/tmp/wt'))
         .rejects.toThrow('Invalid branch name');
       expect(run).not.toHaveBeenCalled();
+    });
+
+    it('refreshes the personal config snapshot before post-spawn hooks', async () => {
+      const { existsSync, copyFileSync, renameSync } = await import('node:fs');
+      const { run, runStreaming } = await import('../utils/shell.js');
+      vi.mocked(run)
+        .mockResolvedValueOnce({ stdout: '', stderr: '' } as any) // git fetch
+        .mockResolvedValueOnce({ stdout: 'abc123\trefs/heads/my-branch', stderr: '' } as any)
+        .mockResolvedValueOnce({ stdout: 'worktree /projects/test\nbranch refs/heads/main\n', stderr: '' } as any)
+        .mockResolvedValueOnce({ stdout: '', stderr: '' } as any); // git worktree add
+      vi.mocked(existsSync)
+        .mockReturnValueOnce(false) // root .env
+        .mockReturnValueOnce(false) // root .codev/config.json
+        .mockReturnValueOnce(true); // root .codev/config.local.json
+      const worktreeConfig = {
+        symlinks: [],
+        postSpawn: ['install-deps'],
+        devCommand: null,
+        devUrls: [],
+      };
+      getWorktreeConfigMock
+        .mockReturnValueOnce(worktreeConfig)
+        .mockReturnValueOnce(worktreeConfig);
+
+      await createWorktreeFromBranch(config, 'my-branch', '/tmp/wt');
+
+      expect(copyFileSync).toHaveBeenCalledWith(
+        '/projects/test/.codev/config.local.json',
+        expect.stringMatching(/^\/tmp\/wt\/\.codev\/config\.local\.json\.tmp-/),
+      );
+      expect(renameSync).toHaveBeenCalledWith(
+        expect.stringMatching(/^\/tmp\/wt\/\.codev\/config\.local\.json\.tmp-/),
+        '/tmp/wt/.codev/config.local.json',
+      );
+      expect(vi.mocked(renameSync).mock.invocationCallOrder[0])
+        .toBeLessThan(vi.mocked(runStreaming).mock.invocationCallOrder[0]);
     });
   });
 
@@ -1144,6 +1216,18 @@ describe('spawn-worktree', () => {
       expect(logger.warn).toHaveBeenCalled();
     });
 
+  });
+
+  describe('syncLocalConfigSnapshot', () => {
+    const config = { workspaceRoot: '/projects/test' } as any;
+
+    it('does nothing when the main personal config is absent', async () => {
+      const { copyFileSync, renameSync } = await import('node:fs');
+
+      expect(syncLocalConfigSnapshot(config, '/tmp/wt')).toBe(false);
+      expect(copyFileSync).not.toHaveBeenCalled();
+      expect(renameSync).not.toHaveBeenCalled();
+    });
   });
 
   describe('runPostSpawnHooks', () => {

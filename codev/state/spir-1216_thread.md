@@ -1,0 +1,37 @@
+# Builder thread: spir-1216
+
+- Started in strict SPIR mode for issue #1216.
+- Read the builder role, protocol, hot architecture/lessons context, and draft specification.
+- Porch owns phase transitions and reviews; status files will not be edited manually.
+- Architect directed all delivery to `fork`; configured `builder/spir-1216` to track `fork/builder/spir-1216` and pushed the initialized Porch branch there.
+- Specify iteration 1: validated the draft against current gate, config-loader, and worktree setup behavior; added stakeholders, constraints, non-functional requirements, open questions, and a consultation log without changing the baked decisions.
+- Specify consultation completed: Gemini and Claude approved; Codex requested two minor clarifications. Before human approval, updated the spec to protect main-workspace personal config from builder-side mutation and to require explicit fresh-spawn plus `afx setup`/idempotency coverage.
+- Human approved the specification. Pushed the approval and plan-transition Porch commits to `fork` after Porch's hard-coded `origin` push failed, then entered Plan iteration 1.
+- Plan decision: implement the builder personal layer as an atomically refreshed managed copy, not a symlink, so builder edits cannot write through to the main workspace. Split delivery into producer toggle, safe worktree snapshot, and documentation/end-to-end verification phases.
+- Plan consultation completed: Gemini and Claude approved; Codex requested minor clarity on builder-cwd integration verification and canonical documentation placement. Updated the plan accordingly and made snapshot insertion order explicit.
+- Porch reports `plan-approval` pending. Stopped without implementation or state edits, awaiting explicit human approval.
+- Human approved the plan. Pushed the approval and implementation-transition Porch commits to `fork`, then began Phase 1 (`porch_toggle`).
+- Phase 1 implementation and focused tests are complete: config type/precedence coverage plus gate-boundary behavior for default, true, false, missing, and unmapped artifacts. Targeted tests pass (46/46) and the package build passes.
+- Blocker: the full Porch test check has 18 pre-existing `tower-utils.test.ts` failures because that test assumes the default Claude harness but reads the engineer global `shell.architect=codex`. The file passes 50/50 under an isolated HOME. Asked the architect whether to isolate the Porch check environment or permit an out-of-scope test isolation fix.
+- Architect permitted a narrow test-isolation fix: `tower-utils.test.ts` now isolates HOME so default-harness assertions cannot inherit a developer's global `shell.architect` config. Porch build and full tests pass.
+- Phase 1 review iteration 1 exposed an untracked-test visibility issue; the gate-boundary test is now tracked and visible to reviewers. Iteration 2 received two approvals and a legitimate Codex request to cover enabled behavior/state across all mapped phases.
+- Expanded enabled gate tests to the full specify/plan/review × unset/true matrix with persisted-state assertions; focused gate suite passes 13/13. Wrote the iteration-2 rebuttal, completed checks, and pushed the Porch iteration-3 transition (`0abb41df`) to `fork`.
+- Paused at user request before starting iteration-3 consultation. Resume with `porch next 1216`.
+- Phase 1 received unanimous iteration-3 approval. Porch advanced to Phase 2 (`worktree_local_config`); pushed transition commit `32b069f0` to `fork` after the expected upstream-origin permission failure.
+- Phase 2 implementation: added an atomic, non-symlink `.codev/config.local.json` snapshot refresh shared by both spawn paths and `afx setup`. Main remains authoritative when present; absent main config leaves builder-local preferences untouched. Added fresh/refresh/idempotency/source-immutability/config-loader tests plus spawn/setup ordering coverage (89 targeted tests pass; package build passes).
+- Phase 2 consultation iteration 1: implementation was judged correct, but untracked test files were omitted from two review scopes and Claude correctly flagged uncommitted delivery. Committed Phase 1 (`8aa39bad`) and Phase 2 (`b6203560`) changes, added a real-filesystem `setup()` test proving snapshot refresh precedes hooks, and documented the response.
+- Phase 2 consultation iteration 2 completed with unanimous approval (Gemini, Codex, Claude). Paused before running `porch next 1216`; resuming there will let Porch process approvals and advance to Phase 3.
+- Resumed in strict mode at the Phase 2 approval checkpoint; `porch next` advanced to Phase 3. Porch's automatic upstream push was denied, so the committed transition was pushed to the contributor's `fork` remote per the delivery constraints.
+- Phase 3 documented the opt-out, precedence, manual-open behavior, and safe snapshot/refresh behavior in both project and skeleton command references.
+- Focused Vitest coverage passed (140 tests), the package-wide suite passed (3,638 tests; 48 existing skips), and the monorepo build passed.
+- A disposable Porch project plus a headless Tower dashboard verified the integration boundary: a non-symlink personal-config snapshot with the opt-out produced zero new file tabs and left Work active at the gate; a subsequent manual `afx open` created a file tab and focused it normally. The fixture, snapshot, and tab were removed afterward.
+- Phase 3 received APPROVE verdicts from Gemini, Codex, and Claude. Porch advanced to Review; its automatic upstream push was denied again while the local transition remained committed.
+- Review documented full spec compliance, consultation responses, tests, and the
+  fork-push limitation. Worktree snapshot mechanics were routed to the COLD
+  architecture and lessons archives; no HOT-tier update was warranted.
+- PR #1231 opened against upstream from the fork. Architect integration review
+  approved with no implementation changes, then requested the remaining
+  project protocol artifacts be committed. Those artifacts are now tracked;
+  builder harness inputs remain intentionally excluded. The first Porch PR
+  consultation produced two approvals and a Codex process-only request, which
+  was addressed/rebutted without product changes.

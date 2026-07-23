@@ -6,7 +6,9 @@
  *   1. `symlinkConfigFiles` — root `.env`, `.codev/config.json`, and any
  *      `worktree.symlinks` glob matches. Idempotent: skips targets that
  *      already exist; adds missing.
- *   2. `runPostSpawnHooks` — each `worktree.postSpawn` command runs in
+ *   2. `syncLocalConfigSnapshot` — refresh the main workspace's personal
+ *      `.codev/config.local.json` into the builder as a non-symlink copy.
+ *   3. `runPostSpawnHooks` — each `worktree.postSpawn` command runs in
  *      its own bash subshell with cwd = worktree root. Output streams live.
  *
  * Use cases:
@@ -14,6 +16,7 @@
  *   - new entry added to `worktree.symlinks` or `worktree.postSpawn` after
  *     the builder was spawned
  *   - main added a new file matching an existing symlinks glob
+ *   - main changed `.codev/config.local.json`; refresh the builder snapshot
  *   - a symlink was accidentally deleted inside the worktree
  *   - the original spawn aborted mid-setup; recovery
  *   - running setup for the first time on a builder that predates the config
@@ -24,7 +27,11 @@
 import { logger } from '../utils/logger.js';
 import { getConfig, getWorktreeConfig } from '../utils/index.js';
 import { findBuilderById } from '../lib/builder-lookup.js';
-import { runPostSpawnHooks, symlinkConfigFiles } from './spawn-worktree.js';
+import {
+  runPostSpawnHooks,
+  symlinkConfigFiles,
+  syncLocalConfigSnapshot,
+} from './spawn-worktree.js';
 
 export interface SetupOptions {
   builderId?: string;
@@ -48,12 +55,13 @@ export async function setup(options: SetupOptions): Promise<void> {
 
   logger.info(`Applying symlinks for ${builder.id}...`);
   symlinkConfigFiles(config, builder.worktree);
+  const localConfigSynced = syncLocalConfigSnapshot(config, builder.worktree);
 
   if (postSpawn.length === 0) {
-    if (symlinks.length === 0) {
+    if (symlinks.length === 0 && !localConfigSynced) {
       logger.info('No worktree.symlinks or worktree.postSpawn configured. Nothing further to do.');
     } else {
-      logger.success(`Setup complete for ${builder.id} (symlinks only — no postSpawn configured)`);
+      logger.success(`Setup complete for ${builder.id} (no postSpawn configured)`);
     }
     return;
   }

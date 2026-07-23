@@ -830,6 +830,36 @@ Customize commands via `.codev/config.json` (project root):
 }
 ```
 
+### Porch Gate Artifact Auto-Open
+
+When Porch requests a specification, plan, or review gate, it automatically
+opens the phase artifact in Tower. This is enabled when the setting is unset or
+`true`. Set `porch.autoOpenArtifacts` to `false` to prevent that automatic
+`afx open` action:
+
+```json
+{
+  "porch": {
+    "autoOpenArtifacts": false
+  }
+}
+```
+
+This setting controls only Porch's automatic gate artifact opens. A manual
+`afx open <path>` still creates a Tower file tab and follows the dashboard's
+normal focus behavior.
+
+You can set the preference globally in `~/.codev/config.json`, for the team in
+the project's committed `.codev/config.json`, or per engineer and project in
+the gitignored `.codev/config.local.json`. Project settings override global
+settings, and project-local settings override both.
+
+When the main workspace has `.codev/config.local.json`, Agent Farm copies it
+into each builder during spawn and `afx setup`. The builder receives a managed
+regular-file snapshot rather than a write-through symlink, so builder edits
+cannot change the main workspace's personal config. Running `afx setup` again
+refreshes the snapshot from the main workspace.
+
 ### Language-Agnostic Porch Checks
 
 By default, porch protocol checks use `npm run build` and `npm test`. Non-Node.js projects can override these via the `porch.checks` section in `.codev/config.json`:
