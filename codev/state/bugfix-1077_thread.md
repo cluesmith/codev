@@ -98,3 +98,30 @@ explicitly set. The guard is what makes this safe for *future* tests — otherwi
 every new test that reaches `doctor()` silently re-acquires the hazard.
 
 Full suite: 3720 passed, 0 failed, and `~/.cache/codev` is not created by a test run.
+
+## Architect integration review — one real defect
+
+Both architect lanes APPROVE, and both my judgment calls (probe deviation, scope)
+were accepted. One pre-merge change requested, and it was a genuine bug that
+inverted the fail-safe bias I had *claimed* in the PR body:
+
+The lane guesses `auth` after a marker-free grace period (3s) so waiters are not
+stuck behind a long review. That guess went through the once-only `publish`, so a
+banner arriving later than the grace period left the guess standing — caching
+`auth` for the full 30-min TTL and re-opening a tab on every consult in that
+window. The fix silently reverted to the status quo on exactly the slow machines
+that need it most.
+
+Investigating it surfaced a **second** case the architect had not named and I had
+also missed: `publish` is inert for non-probers, so a caller that failed open,
+spawned, and saw the banner wrote *nothing at all*. Even with ordering fixed, a
+misfired guess would sit uncorrected until the TTL lapsed instead of being
+corrected by the next spawn.
+
+Both fixed by recording `unauth` directly from the marker handler (42cf18e8).
+Both new tests confirmed to FAIL against the previous code before restoring the
+fix — a test that only passes with the fix proves much less. Suite now 3722.
+
+Lesson worth carrying: I wrote "only positive marker evidence records unauth" as a
+design invariant, but never tested the *ordering* that invariant depends on. A
+stated invariant with no test pinning it is a comment, not a property.
