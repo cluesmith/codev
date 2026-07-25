@@ -25,6 +25,7 @@ import {
   resolveLogRetentionDays,
   resolveLogSweepIntervalMs,
   formatBytes,
+  MS_PER_DAY,
 } from './session-log-sweep.js';
 import {
   initTunnel,
@@ -546,7 +547,7 @@ server.listen(port, bindHost, async () => {
     try {
       sweepSessionLogs({
         logDir: sessionLogDir,
-        retentionMs: logRetentionDays * 24 * 60 * 60 * 1000,
+        retentionMs: logRetentionDays * MS_PER_DAY,
         activeSessionIds: getTerminalManager().listSessions().map((s) => s.id),
         log: (msg: string) => log('INFO', msg),
       });

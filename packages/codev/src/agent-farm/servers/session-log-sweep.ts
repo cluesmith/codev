@@ -33,7 +33,7 @@ const SESSION_LOG_RE = /^(.+)\.log(\.1)?$/;
 export const DEFAULT_LOG_RETENTION_DAYS = 30;
 export const DEFAULT_LOG_SWEEP_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
-const MS_PER_DAY = 24 * 60 * 60 * 1000;
+export const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 /**
  * Retention window in days (env `AGENT_FARM_LOG_RETENTION_DAYS`, default 30).

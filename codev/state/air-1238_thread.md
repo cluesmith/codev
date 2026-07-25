@@ -69,6 +69,32 @@ builder session in this workspace, and it needs the human's go-ahead. The wiring
 typechecked and the swept function is verified against real data; flagging the gap
 rather than papering over it.
 
+## CMAP at PR (PR #1243)
+
+Ran codex + claude. Skipped the agy/gemini lane deliberately — that lane is known-broken
+for `--type` reviews (returns no VERDICT).
+
+- **claude: APPROVE** (HIGH). One real finding: `MS_PER_DAY` declared but unused.
+  **Accepted** — exported it and used it in `tower-server.ts` for the `retentionMs`
+  computation, replacing an inline `24 * 60 * 60 * 1000`.
+- **codex: REQUEST_CHANGES** (MEDIUM). Two findings:
+  1. *"`doctor.ts` gained user-visible logic with no focused tests; it reads the real
+     user-global `~/.agent-farm/logs`, so it's insufficiently isolated."* — **Accepted the
+     substance.** Extracted `checkSessionLogs(logDir, env)` (exported) so thresholds, the
+     retention-disabled wording, and the remediation hint are unit-testable against a temp
+     dir with an injected env. Added `src/__tests__/doctor-session-logs.test.ts` (8 tests,
+     sparse files via `ftruncate` so the 2 GB threshold case costs no real disk). Verified
+     the rendered output is byte-identical after the refactor. Note `doctor()` itself still
+     reads the real log dir — that is the *feature*, not a defect.
+  2. *"Remove `status.yaml` and `air-1238_thread.md` — workflow/runtime artifacts, not
+     feature code."* — **Rejected; the reviewer doesn't know Codev's conventions.**
+     `status.yaml` is porch-managed and is committed to main at the pr-ready gate by
+     design (it's where project completion stats live for non-bug projects). The thread
+     file's documented default disposition is COMMIT — it ships to `main` in
+     `codev/state/` alongside `codev/reviews/` and becomes part of the historical review
+     record. Stripping either would break the protocol, not clean up the PR. Flagging for
+     the architect rather than silently complying.
+
 ### Unrelated observation (not fixed — out of scope)
 
 `codev doctor` reports "Architect state files (codev/state/<name>.md) are not

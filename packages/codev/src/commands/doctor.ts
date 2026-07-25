@@ -58,7 +58,66 @@ const isMacOS = process.platform === 'darwin';
  * rather than an informational line (#1238). Well past what a healthy retention
  * sweep leaves behind, and well under the 19 GB that prompted the issue.
  */
-const SESSION_LOG_WARN_BYTES = 2 * 1024 * 1024 * 1024;
+export const SESSION_LOG_WARN_BYTES = 2 * 1024 * 1024 * 1024;
+
+export interface SessionLogCheck {
+  status: 'ok' | 'warn';
+  files: number;
+  bytes: number;
+  retentionDays: number;
+  /** Human-readable footprint, e.g. `741 file(s), 2.1 GB`. No colour codes. */
+  summary: string;
+  /** e.g. `retention 30d` / `retention disabled`. */
+  retentionNote: string;
+  /** Present only when `status === 'warn'`. */
+  recommendation?: string;
+}
+
+/**
+ * Decide what the "Session Logs" doctor section should say (#1238).
+ *
+ * Split out from `doctor()` so the decision — thresholds, the retention-disabled
+ * wording, the remediation hint — is unit-testable against a temp directory.
+ * `doctor()` itself passes the real user-global `~/.agent-farm/logs`, which is
+ * the whole point of the check, so the *reporting* path is deliberately not
+ * hermetic; this function is where the logic lives and is pinned by tests.
+ */
+export function checkSessionLogs(
+  logDir: string,
+  env: NodeJS.ProcessEnv = process.env,
+): SessionLogCheck {
+  const { files, bytes } = measureSessionLogs(logDir);
+  const retentionDays = resolveLogRetentionDays(env);
+  const retentionNote = retentionDays === 0 ? 'retention disabled' : `retention ${retentionDays}d`;
+
+  if (files === 0) {
+    return {
+      status: 'ok',
+      files,
+      bytes,
+      retentionDays,
+      summary: 'No PTY session logs on disk',
+      retentionNote,
+    };
+  }
+
+  const summary = `${files} file(s), ${formatBytes(bytes)}`;
+  if (bytes < SESSION_LOG_WARN_BYTES) {
+    return { status: 'ok', files, bytes, retentionDays, summary, retentionNote };
+  }
+
+  return {
+    status: 'warn',
+    files,
+    bytes,
+    retentionDays,
+    summary,
+    retentionNote,
+    recommendation: retentionDays === 0
+      ? 'retention is disabled (AGENT_FARM_LOG_RETENTION_DAYS=0) — unset it and restart Tower to let the sweep run'
+      : 'restart Tower to run the retention sweep (afx tower stop && afx tower start)',
+  };
+}
 
 /**
  * Compare semantic versions: returns true if v1 >= v2
@@ -948,31 +1007,21 @@ export async function doctor(): Promise<number> {
   // reported outside the project-scoped section. Tower sweeps aged-out logs, but
   // a machine that has not run a recent Tower — or has retention disabled — can
   // still be sitting on many GB, and that was invisible until this line existed.
-  const sessionLogDir = resolve(AGENT_FARM_DIR, 'logs');
-  const logFootprint = measureSessionLogs(sessionLogDir);
-  const retentionDays = resolveLogRetentionDays();
+  const sessionLogs = checkSessionLogs(resolve(AGENT_FARM_DIR, 'logs'));
   console.log(chalk.bold('Session Logs') + ' (~/.agent-farm/logs)');
   console.log('');
-  if (logFootprint.files === 0) {
-    console.log(`  ${chalk.green('✓')} No PTY session logs on disk`);
+  if (sessionLogs.status === 'warn') {
+    console.log(`  ${chalk.yellow('⚠')} ${sessionLogs.summary} ${chalk.blue(`(${sessionLogs.retentionNote})`)}`);
+    warnings++;
+    warningDetails.push({
+      name: 'Session logs',
+      issue: `${sessionLogs.summary} in ~/.agent-farm/logs`,
+      recommendation: sessionLogs.recommendation,
+    });
+  } else if (sessionLogs.files === 0) {
+    console.log(`  ${chalk.green('✓')} ${sessionLogs.summary}`);
   } else {
-    const retentionNote = retentionDays === 0
-      ? 'retention disabled'
-      : `retention ${retentionDays}d`;
-    const summary = `${logFootprint.files} file(s), ${formatBytes(logFootprint.bytes)}`;
-    if (logFootprint.bytes >= SESSION_LOG_WARN_BYTES) {
-      console.log(`  ${chalk.yellow('⚠')} ${summary} ${chalk.blue(`(${retentionNote})`)}`);
-      warnings++;
-      warningDetails.push({
-        name: 'Session logs',
-        issue: `${summary} in ~/.agent-farm/logs`,
-        recommendation: retentionDays === 0
-          ? 'retention is disabled (AGENT_FARM_LOG_RETENTION_DAYS=0) — unset it and restart Tower to let the sweep run'
-          : 'restart Tower to run the retention sweep (afx tower stop && afx tower start)',
-      });
-    } else {
-      console.log(`  ${chalk.green('✓')} ${summary} ${chalk.blue(`(${retentionNote})`)}`);
-    }
+    console.log(`  ${chalk.green('✓')} ${sessionLogs.summary} ${chalk.blue(`(${sessionLogs.retentionNote})`)}`);
   }
   console.log('');
 
