@@ -29,6 +29,7 @@ import {
   STALE_BACKUP_AGE_DAYS,
 } from '../lib/migration-backup-audit.js';
 import { resolveAgyBin, AGY_OAUTH_MARKERS } from './consult/index.js';
+import { checkCachedAgyAuth, recordAgyAuthState } from './consult/agy-auth-cache.js';
 import { AGENT_FARM_DIR } from '@cluesmith/codev-core/constants';
 import {
   measureSessionLogs,
@@ -468,10 +469,23 @@ function checkAgy(): CheckResult {
  * unauthenticated agy reports "needs login" promptly (it would otherwise print
  * the URL and wait ~30s) — rather than stalling `codev doctor` for the full
  * auth wait. Always resolves (never throws).
+ *
+ * Shares the consult lane's auth cache (#1077): a fresh verdict is reported
+ * without probing, so `codev doctor` on an unauthenticated agy does not open yet
+ * another OAuth browser tab. When it does probe, it records the result for the
+ * consult lane's benefit.
  */
 function verifyAgy(): Promise<CheckResult> {
   const bin = resolveAgyBin();
   if (!bin) return Promise.resolve({ status: 'skip', version: 'not installed', note: AGY_INSTALL_HINT });
+
+  const cached = checkCachedAgyAuth(bin);
+  if (cached === 'unauth') {
+    return Promise.resolve({ status: 'fail', version: 'needs login', note: 'run `agy` once to sign in (OAuth)' });
+  }
+  if (cached === 'auth') {
+    return Promise.resolve({ status: 'ok', version: 'operational (cached)' });
+  }
 
   return new Promise<CheckResult>((resolve) => {
     const proc = spawn(bin, ['--print-timeout', '20s', '--print', 'Reply with just OK'], {
@@ -502,6 +516,8 @@ function verifyAgy(): Promise<CheckResult> {
         scan += s;
         // Fast path: OAuth URL appears immediately on an unauthenticated run.
         if (AGY_OAUTH_MARKERS.some((m) => scan.includes(m))) {
+          // Share the verdict so a concurrent CMAP burst skips without spawning.
+          recordAgyAuthState('unauth', bin);
           finish({ status: 'fail', version: 'needs login', note: 'run `agy` once to sign in (OAuth)' });
         }
       }
@@ -511,8 +527,14 @@ function verifyAgy(): Promise<CheckResult> {
     proc.on('error', () => finish({ status: 'fail', version: 'error', note: 'run `agy` to verify sign-in' }));
     proc.on('close', (code) => {
       const text = out.join('').trim();
-      if (code === 0 && text.length > 0) finish({ status: 'ok', version: 'operational' });
-      else finish({ status: 'fail', version: 'not responding', note: 'run `agy` to verify sign-in' });
+      if (code === 0 && text.length > 0) {
+        recordAgyAuthState('auth', bin);
+        finish({ status: 'ok', version: 'operational' });
+      } else {
+        // Neither authenticated nor proven signed-out — record nothing, so the
+        // consult lane re-probes rather than skipping a lane that may work.
+        finish({ status: 'fail', version: 'not responding', note: 'run `agy` to verify sign-in' });
+      }
     });
   });
 }
