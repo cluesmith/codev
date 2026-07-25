@@ -51,3 +51,8 @@
 - Moved LAUNCH_LOOP_TAIL from spawn-worktree.ts (module-local) to utils/harness.ts (exported) so Kimi's provider-owned scripts share it without a circular import; both Kimi loops (pinned -S and bare) now use it.
 - Pinned the new tail across all Kimi shapes in harness.test.ts and spawn-worktree.test.ts.
 - Suites green (harness+spawn-worktree 169, message-pacing+seed-kick 22); build clean.
+
+## 2026-07-25T18:07Z — CMAP + live verification of the loop-tail adoption
+- CMAP (gemini, codex, claude) on the change set: unanimous APPROVE, zero findings, clean in one iteration.
+- Full suite: 3802 passed / 48 skipped.
+- Live kimi 0.29.1 verification (tmux PTY, real bare launch script from dist): /quit → exit 0 → keypress gate held (no respawn), Enter relaunched; SIGKILL → code 137 → auto-restart after 2s. Both branches behave per the #1244 contract.
