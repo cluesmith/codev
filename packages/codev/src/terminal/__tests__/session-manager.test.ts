@@ -1318,8 +1318,10 @@ describe('SessionManager', () => {
 
     // Issue #1149: clean exits (code 0) never trigger the fallback — a user
     // quitting a healthy session repeatedly must not lose a valid resumable
-    // conversation. Spawns real shellper processes — skip in CI.
-    it.skipIf(!!process.env.CI)('does not apply crashLoopFallback on clean exits', async () => {
+    // conversation. Bugfix #1241 strengthened this: a clean exit is not
+    // restarted at all, so the session ends instead of exhausting maxRestarts.
+    // Spawns real shellper processes — skip in CI.
+    it.skipIf(!!process.env.CI)('does not restart or apply crashLoopFallback on clean exits', async () => {
       const shellperScript = path.resolve(
         path.dirname(new URL(import.meta.url).pathname),
         '../../../dist/terminal/shellper-main.js',
@@ -1334,6 +1336,13 @@ describe('SessionManager', () => {
       const sentinel = path.join(socketDir, 'fallback-clean-exit');
       const onApply = vi.fn();
       const testEnv = { PATH: process.env.PATH || '/usr/bin:/bin' };
+
+      // Subscribed before the session exists: `exit 0` can land during
+      // createSession's own await.
+      const cleanExits: string[] = [];
+      manager.on('session-clean-exit', (id: string) => cleanExits.push(id));
+      const errors: string[] = [];
+      manager.on('session-error', (_id: string, err: Error) => errors.push(err.message));
 
       await manager.createSession({
         sessionId: 'cleanexit-test',
@@ -1358,20 +1367,16 @@ describe('SessionManager', () => {
         try { await manager.killSession('cleanexit-test'); } catch { /* noop */ }
       });
 
-      // Clean exits still restart; the session exhausts maxRestarts without
-      // ever counting a failing exit.
-      const errorPromise = new Promise<Error>((resolve) => {
-        manager.on('session-error', (_id: string, err: Error) => {
-          if (err.message.includes('Max restarts')) {
-            resolve(err);
-          }
-        });
-      });
-      await Promise.race([
-        errorPromise,
-        new Promise<Error>((_, reject) => setTimeout(() => reject(new Error('timeout waiting for max restarts')), 15000)),
-      ]);
+      // Bugfix #1241: the clean exit ends the session — no respawn, no
+      // give-up error, no fallback.
+      const deadline2 = Date.now() + 10000;
+      while (manager.getSessionInfo('cleanexit-test') && Date.now() < deadline2) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
 
+      expect(manager.getSessionInfo('cleanexit-test')).toBeNull();
+      expect(cleanExits).toContain('cleanexit-test');
+      expect(errors.some((m) => m.includes('Max restarts'))).toBe(false);
       expect(onApply).not.toHaveBeenCalled();
       expect(fs.existsSync(sentinel)).toBe(false);
     }, 20000);
@@ -2308,6 +2313,94 @@ describe('crash-loop give-up (Issue #1224)', () => {
       expect((manager as any).sessions.has('giveup-1')).toBe(false);
     } finally {
       process.kill = originalKill;
+      rmrf(socketDir);
+    }
+  });
+});
+
+describe('deliberate-quit exits are not restarted (Bugfix #1241)', () => {
+  // A double Ctrl+C / `/quit` is the user's decision — auto-restart exists for
+  // crashes, so a clean exit must not respawn. Signal deaths still must, and
+  // node-pty reports those as code 0 with a signal attached, so they are the
+  // interesting negative case.
+  function fakeSession(socketDir: string) {
+    const client = new EventEmitter() as any;
+    client.spawn = vi.fn();
+    return {
+      client,
+      socketPath: path.join(socketDir, 'clean-exit.sock'),
+      pid: 424243,
+      startTime: 0,
+      options: {
+        sessionId: 'clean-1',
+        command: 'claude',
+        args: [],
+        cwd: '/tmp',
+        env: {},
+        restartOnExit: true,
+        restartDelay: 1,
+        maxRestarts: 50,
+      },
+      restartCount: 0,
+      restartResetTimer: null,
+      failingExitTimes: [] as number[],
+      stderrBuffer: null,
+      stderrStream: null,
+      stderrTailLogged: false,
+      recoveryRounds: 0,
+      lastRecoveryAt: 0,
+    };
+  }
+
+  function driveExit(exit: { code: number | null; signal: string | null }) {
+    const socketDir = tmpDir();
+    const manager = new SessionManager({
+      socketDir,
+      shellperScript: '/nonexistent/shellper.js',
+      nodeExecutable: process.execPath,
+    });
+    const session = fakeSession(socketDir);
+    (manager as any).sessions.set('clean-1', session);
+    const cleanExits: string[] = [];
+    manager.on('session-clean-exit', (id: string) => cleanExits.push(id));
+    (manager as any).setupAutoRestart(session, 'clean-1');
+    session.client.emit('exit', exit);
+    return { manager, session, cleanExits, socketDir };
+  }
+
+  it('does not respawn or count a restart on a clean exit', async () => {
+    const { manager, session, cleanExits, socketDir } = driveExit({ code: 0, signal: null });
+    try {
+      // Past the restartDelay: still no SPAWN frame.
+      await new Promise((r) => setTimeout(r, 50));
+      expect(session.client.spawn).not.toHaveBeenCalled();
+      expect(session.restartCount).toBe(0);
+      expect(cleanExits).toEqual(['clean-1']);
+      // The session is dropped, so SessionManager's view matches Tower's.
+      expect((manager as any).sessions.has('clean-1')).toBe(false);
+    } finally {
+      rmrf(socketDir);
+    }
+  });
+
+  it('still respawns after a signal death (code 0 with a signal)', async () => {
+    const { session, socketDir } = driveExit({ code: 0, signal: '9' });
+    try {
+      await new Promise((r) => setTimeout(r, 50));
+      expect(session.client.spawn).toHaveBeenCalledTimes(1);
+      expect(session.restartCount).toBe(1);
+    } finally {
+      rmrf(socketDir);
+    }
+  });
+
+  it('still respawns after a crash (nonzero exit)', async () => {
+    const { session, socketDir } = driveExit({ code: 1, signal: null });
+    try {
+      await new Promise((r) => setTimeout(r, 50));
+      expect(session.client.spawn).toHaveBeenCalledTimes(1);
+      expect(session.restartCount).toBe(1);
+    } finally {
       rmrf(socketDir);
     }
   });
