@@ -7,3 +7,7 @@ Fix broken build on main: `packages/codev/src/commands/doctor.ts` imported `form
 - Confirmed both imports and both call sites: line 111 (session-log summary, uses `measureSessionLogs` data) and line 847 (migration-backup reclaimable bytes).
 - Aliased the session-log-sweep import as `formatBytes as formatLogBytes` and updated line 111 to `formatLogBytes(bytes)`. The migration-backup import and its call site (line 847) are unchanged.
 - Verifying with `npx tsc --noEmit` in `packages/codev` before creating the PR.
+
+## PR
+- PR #1249 created: https://github.com/cluesmith/codev/pull/1249 — verified with `pnpm exec tsc --noEmit` (clean after building codev-core).
+- `afx send architect` failed with NOT_FOUND (workspace not active in Tower from this nested worktree); architect notification could not be delivered via afx.
