@@ -170,6 +170,17 @@ gh pr view <N> --json files | jq '.files[].path'   # See which subsystems
 - **Medium**: SPIR features, new commands, refactors touching 3+ files
 - **High**: Protocol changes, porch state machine, Tower architecture, security model
 
+#### Presenting the decision to the human (PRFT)
+
+When you bring a fix to the human for a decision — a merge word, a `pr` gate, a dev-approval — present it **unprompted** in PRFT form, whatever the risk tier:
+
+- **Problem** — the user-visible symptom, in a sentence or two.
+- **Root Cause** — the verified mechanism. Verify it yourself; a builder's summary is evidence, not ground truth.
+- **Fix** — what changed and why it's safe.
+- **Testing** — the evidence: suites run, live verification, CI state.
+
+Keep each part tight and lead with it — don't bury the decision under process narration. The human should be able to say yes or no from your message alone, without opening the diff.
+
 #### Step 3: Execute Review
 
 **Low risk** — no external models needed:

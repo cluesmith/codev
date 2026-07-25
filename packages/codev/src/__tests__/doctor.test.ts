@@ -717,15 +717,24 @@ describe('doctor command', () => {
   describe('AI model verification (Issue #128)', () => {
     const testBaseDir = path.join(tmpdir(), `codev-doctor-ai-test-${Date.now()}`);
     let originalCwd: string;
+    let savedAgyCacheDir: string | undefined;
 
     beforeEach(() => {
       originalCwd = process.cwd();
       fs.mkdirSync(path.join(testBaseDir, 'codev', 'consult-types'), { recursive: true });
+      // verifyAgy shares the consult lane's auth cache (#1077): pin it to a
+      // per-test directory so these cases neither read a verdict left by a
+      // sibling case (which would suppress the probe they assert on) nor write
+      // into the developer's real ~/.cache/codev.
+      savedAgyCacheDir = process.env.CODEV_AGY_AUTH_CACHE_DIR;
+      process.env.CODEV_AGY_AUTH_CACHE_DIR = path.join(testBaseDir, 'agy-auth-cache');
       process.chdir(testBaseDir);
     });
 
     afterEach(() => {
       process.chdir(originalCwd);
+      if (savedAgyCacheDir === undefined) delete process.env.CODEV_AGY_AUTH_CACHE_DIR;
+      else process.env.CODEV_AGY_AUTH_CACHE_DIR = savedAgyCacheDir;
       if (fs.existsSync(testBaseDir)) {
         fs.rmSync(testBaseDir, { recursive: true });
       }

@@ -386,6 +386,29 @@ describe('spawn-worktree', () => {
       expect(script).not.toContain('--resume');
       expect(script).toContain('--append-system-prompt');
     });
+
+    // Bugfix #1241: every generated variant must gate the relaunch on exit
+    // code, not respawn blindly — this is the assertion that catches a new
+    // launch-script code path being added without the deliberate-quit branch.
+    it.each([
+      ['resume', { sessionId: 'abc', scriptFragment: "--resume 'abc'" }, 'ROLE'],
+      ['role', undefined, 'ROLE'],
+      ['no role', undefined, null],
+    ] as const)('%s → script does not auto-restart on exit 0', async (name, resume, role) => {
+      await startBuilderSession(
+        { workspaceRoot: '/tmp/ws' } as any,
+        `b-${name}`, '/tmp/worktree', 'claude',
+        'PROMPT', role, role ? 'codev' : null, resume,
+      );
+
+      const script = findScript()!;
+      expect(script).toContain('status=$?');
+      expect(script).toContain('if [ "$status" -eq 0 ]; then');
+      expect(script).toContain('Press Enter to relaunch');
+      expect(script).toContain('read -r || exit 0');
+      // The crash path is untouched.
+      expect(script).toContain('Restarting in 2 seconds');
+    });
   });
 
   // =========================================================================

@@ -804,6 +804,34 @@ function buildProviderOwnedScript(
 }
 
 /**
+ * The tail shared by every builder launch loop, appended after the agent
+ * invocation inside `while true; do … done`.
+ *
+ * Issue #1241: exit code 0 is the user deliberately quitting (double Ctrl+C,
+ * `/quit`) — auto-respawning overrides that choice and forces them to race a
+ * second Ctrl+C into the sleep window, where a mistimed one lands in the fresh
+ * agent instead. It also feeds the #1224 class, where a respawn within ~2s
+ * collides with the dying predecessor's session lock. So a clean exit clears
+ * the screen and gates the relaunch on a keypress: recovery stays one keystroke
+ * away without anything happening on its own. Nonzero exits and signal deaths
+ * (bash reports those as 128+N) keep the historical auto-restart — that is what
+ * the loop is for.
+ *
+ * `read` failing means EOF on stdin, i.e. the terminal is gone; exit rather
+ * than spin the loop on an input that will never arrive.
+ */
+const LAUNCH_LOOP_TAIL = `  status=$?
+  if [ "$status" -eq 0 ]; then
+    clear
+    echo "Agent exited at your request. Press Enter to relaunch, or close this terminal."
+    read -r || exit 0
+    continue
+  fi
+  echo ""
+  echo "Agent exited (code $status). Restarting in 2 seconds... (Ctrl+C to quit)"
+  sleep 2`;
+
+/**
  * Start a terminal session for a builder.
  *
  * When `resume` is provided, the launch script invokes the harness's resume
@@ -847,9 +875,7 @@ export async function startBuilderSession(
 cd "${worktreePath}"
 while true; do
   ${baseCmd} ${resume.scriptFragment}
-  echo ""
-  echo "Agent exited. Restarting in 2 seconds... (Ctrl+C to quit)"
-  sleep 2
+${LAUNCH_LOOP_TAIL}
 done
 `;
   } else if (roleContent) {
@@ -881,9 +907,7 @@ done
 cd "${worktreePath}"
 ${envBlock}while true; do
   ${baseCmd} ${fragment} "$(cat '${promptFile}')"
-  echo ""
-  echo "Agent exited. Restarting in 2 seconds... (Ctrl+C to quit)"
-  sleep 2
+${LAUNCH_LOOP_TAIL}
 done
 `;
   } else {
@@ -899,9 +923,7 @@ done
 cd "${worktreePath}"
 while true; do
   ${baseCmd} "$(cat '${promptFile}')"
-  echo ""
-  echo "Agent exited. Restarting in 2 seconds... (Ctrl+C to quit)"
-  sleep 2
+${LAUNCH_LOOP_TAIL}
 done
 `;
   }
@@ -985,9 +1007,7 @@ export function buildWorktreeLaunchScript(
 cd "${worktreePath}"
 ${envBlock}while true; do
   ${baseCmd} ${fragment}
-  echo ""
-  echo "Agent exited. Restarting in 2 seconds... (Ctrl+C to quit)"
-  sleep 2
+${LAUNCH_LOOP_TAIL}
 done
 `;
   }
@@ -998,9 +1018,7 @@ done
 cd "${worktreePath}"
 while true; do
   ${baseCmd}
-  echo ""
-  echo "Agent exited. Restarting in 2 seconds... (Ctrl+C to quit)"
-  sleep 2
+${LAUNCH_LOOP_TAIL}
 done
 `;
 }

@@ -285,7 +285,9 @@ describe('PtySession + ShellperClient integration', () => {
       const exitSpy = vi.fn();
       session.on('exit', exitSpy);
 
-      mockClient.simulateExit(0);
+      // Bugfix #1241: only an unnatural exit is awaiting a restart. A clean
+      // exit takes the deliberate-quit path below instead.
+      mockClient.simulateExit(1);
 
       // Exit event should NOT fire — auto-restart will handle it
       expect(exitSpy).not.toHaveBeenCalled();
@@ -304,8 +306,8 @@ describe('PtySession + ShellperClient integration', () => {
       const exitSpy = vi.fn();
       session.on('exit', exitSpy);
 
-      // Process exits
-      mockClient.simulateExit(0);
+      // Process crashes (Bugfix #1241: only these await a restart)
+      mockClient.simulateExit(1);
       expect(exitSpy).not.toHaveBeenCalled();
       expect(session.status).toBe('exited'); // exitCode is set initially
 
@@ -345,6 +347,45 @@ describe('PtySession + ShellperClient integration', () => {
 
       // Exit should fire now (permanent death)
       expect(exitSpy).toHaveBeenCalledWith(1, null);
+      vi.useRealTimers();
+    });
+
+    it('ends cleanly on a deliberate quit even when restartOnExit is true (Bugfix #1241)', () => {
+      vi.useFakeTimers();
+      session.attachShellper(mockClient, Buffer.alloc(0), 9999);
+      session.restartOnExit = true;
+
+      const exitSpy = vi.fn();
+      session.on('exit', exitSpy);
+
+      mockClient.simulateExit(0);
+
+      // No respawn is coming, so exit fires immediately rather than after the
+      // 10s wait-for-restart window, and the notice says what really happened.
+      expect(exitSpy).toHaveBeenCalledWith(0, null);
+      const ringContent = session.ringBuffer.getAll().join('');
+      expect(ringContent).toContain('Agent exited at your request');
+      expect(ringContent).not.toContain('Process exited');
+
+      // Nothing left armed that could re-fire exit later.
+      vi.advanceTimersByTime(20_000);
+      expect(exitSpy).toHaveBeenCalledTimes(1);
+      vi.useRealTimers();
+    });
+
+    it('treats a signal death as unnatural despite exit code 0 (Bugfix #1241)', () => {
+      vi.useFakeTimers();
+      session.attachShellper(mockClient, Buffer.alloc(0), 9999);
+      session.restartOnExit = true;
+
+      const exitSpy = vi.fn();
+      session.on('exit', exitSpy);
+
+      // node-pty reports SIGKILL as exitCode 0 with signal 9.
+      mockClient.simulateExit(0, '9');
+
+      expect(exitSpy).not.toHaveBeenCalled();
+      expect(session.ringBuffer.getAll().join('')).toContain('restarting');
       vi.useRealTimers();
     });
 

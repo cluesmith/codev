@@ -23,7 +23,21 @@ import {
   formatDriftFinding,
   formatStaleness,
 } from '../lib/protocol-drift-audit.js';
+import {
+  findMigrationBackups,
+  formatMigrationBackup,
+  formatBytes,
+  totalBytes,
+  STALE_BACKUP_AGE_DAYS,
+} from '../lib/migration-backup-audit.js';
 import { resolveAgyBin, AGY_OAUTH_MARKERS } from './consult/index.js';
+import { checkCachedAgyAuth, recordAgyAuthState } from './consult/agy-auth-cache.js';
+import { AGENT_FARM_DIR } from '@cluesmith/codev-core/constants';
+import {
+  measureSessionLogs,
+  resolveLogRetentionDays,
+  formatBytes as formatLogBytes,
+} from '../agent-farm/servers/session-log-sweep.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -48,6 +62,72 @@ interface CheckResult {
 }
 
 const isMacOS = process.platform === 'darwin';
+
+/**
+ * Footprint at which the PTY session log directory becomes a reportable warning
+ * rather than an informational line (#1238). Well past what a healthy retention
+ * sweep leaves behind, and well under the 19 GB that prompted the issue.
+ */
+export const SESSION_LOG_WARN_BYTES = 2 * 1024 * 1024 * 1024;
+
+export interface SessionLogCheck {
+  status: 'ok' | 'warn';
+  files: number;
+  bytes: number;
+  retentionDays: number;
+  /** Human-readable footprint, e.g. `741 file(s), 2.1 GB`. No colour codes. */
+  summary: string;
+  /** e.g. `retention 30d` / `retention disabled`. */
+  retentionNote: string;
+  /** Present only when `status === 'warn'`. */
+  recommendation?: string;
+}
+
+/**
+ * Decide what the "Session Logs" doctor section should say (#1238).
+ *
+ * Split out from `doctor()` so the decision — thresholds, the retention-disabled
+ * wording, the remediation hint — is unit-testable against a temp directory.
+ * `doctor()` itself passes the real user-global `~/.agent-farm/logs`, which is
+ * the whole point of the check, so the *reporting* path is deliberately not
+ * hermetic; this function is where the logic lives and is pinned by tests.
+ */
+export function checkSessionLogs(
+  logDir: string,
+  env: NodeJS.ProcessEnv = process.env,
+): SessionLogCheck {
+  const { files, bytes } = measureSessionLogs(logDir);
+  const retentionDays = resolveLogRetentionDays(env);
+  const retentionNote = retentionDays === 0 ? 'retention disabled' : `retention ${retentionDays}d`;
+
+  if (files === 0) {
+    return {
+      status: 'ok',
+      files,
+      bytes,
+      retentionDays,
+      summary: 'No PTY session logs on disk',
+      retentionNote,
+    };
+  }
+
+  const summary = `${files} file(s), ${formatLogBytes(bytes)}`;
+  if (bytes < SESSION_LOG_WARN_BYTES) {
+    return { status: 'ok', files, bytes, retentionDays, summary, retentionNote };
+  }
+
+  return {
+    status: 'warn',
+    files,
+    bytes,
+    retentionDays,
+    summary,
+    retentionNote,
+    recommendation: retentionDays === 0
+      ? 'retention is disabled (AGENT_FARM_LOG_RETENTION_DAYS=0) — unset it and restart Tower to let the sweep run'
+      : 'restart Tower to run the retention sweep (afx tower stop && afx tower start)',
+  };
+}
 
 /**
  * Compare semantic versions: returns true if v1 >= v2
@@ -463,10 +543,23 @@ function checkAgy(): CheckResult {
  * unauthenticated agy reports "needs login" promptly (it would otherwise print
  * the URL and wait ~30s) — rather than stalling `codev doctor` for the full
  * auth wait. Always resolves (never throws).
+ *
+ * Shares the consult lane's auth cache (#1077): a fresh verdict is reported
+ * without probing, so `codev doctor` on an unauthenticated agy does not open yet
+ * another OAuth browser tab. When it does probe, it records the result for the
+ * consult lane's benefit.
  */
 function verifyAgy(): Promise<CheckResult> {
   const bin = resolveAgyBin();
   if (!bin) return Promise.resolve({ status: 'skip', version: 'not installed', note: AGY_INSTALL_HINT });
+
+  const cached = checkCachedAgyAuth(bin);
+  if (cached === 'unauth') {
+    return Promise.resolve({ status: 'fail', version: 'needs login', note: 'run `agy` once to sign in (OAuth)' });
+  }
+  if (cached === 'auth') {
+    return Promise.resolve({ status: 'ok', version: 'operational (cached)' });
+  }
 
   return new Promise<CheckResult>((resolve) => {
     const proc = spawn(bin, ['--print-timeout', '20s', '--print', 'Reply with just OK'], {
@@ -497,6 +590,8 @@ function verifyAgy(): Promise<CheckResult> {
         scan += s;
         // Fast path: OAuth URL appears immediately on an unauthenticated run.
         if (AGY_OAUTH_MARKERS.some((m) => scan.includes(m))) {
+          // Share the verdict so a concurrent CMAP burst skips without spawning.
+          recordAgyAuthState('unauth', bin);
           finish({ status: 'fail', version: 'needs login', note: 'run `agy` once to sign in (OAuth)' });
         }
       }
@@ -506,8 +601,14 @@ function verifyAgy(): Promise<CheckResult> {
     proc.on('error', () => finish({ status: 'fail', version: 'error', note: 'run `agy` to verify sign-in' }));
     proc.on('close', (code) => {
       const text = out.join('').trim();
-      if (code === 0 && text.length > 0) finish({ status: 'ok', version: 'operational' });
-      else finish({ status: 'fail', version: 'not responding', note: 'run `agy` to verify sign-in' });
+      if (code === 0 && text.length > 0) {
+        recordAgyAuthState('auth', bin);
+        finish({ status: 'ok', version: 'operational' });
+      } else {
+        // Neither authenticated nor proven signed-out — record nothing, so the
+        // consult lane re-probes rather than skipping a lane that may work.
+        finish({ status: 'fail', version: 'not responding', note: 'run `agy` to verify sign-in' });
+      }
     });
   });
 }
@@ -841,8 +942,44 @@ export async function doctor(): Promise<number> {
 
   console.log('');
 
-  // Check codev directory structure (only if we're in a codev project)
   const workspaceRoot = findWorkspaceRoot();
+
+  // Migration backups (#1239): state migrations leave copies of the pre-migration
+  // state behind — whole-directory `~/.agent-farm.bak-*` copies and the
+  // `*.pre-merge-*` renames from db/consolidate.ts — and nothing ever removes
+  // them. One was found at 18 GB three weeks after the migration that made it.
+  // Report-only: these are the user's own state copies, so doctor surfaces age +
+  // size + the removal command and leaves the decision to the human. QUIET BY
+  // DEFAULT — the section prints only when a leftover exists.
+  const migrationBackups = findMigrationBackups({ workspaceRoot });
+  if (migrationBackups.length > 0) {
+    const reclaimable = totalBytes(migrationBackups);
+    console.log(chalk.bold('Migration Backups') + ' (leftover copies of pre-migration state)');
+    console.log('');
+    for (const backup of migrationBackups) {
+      if (backup.stale) {
+        console.log(`  ${chalk.yellow('⚠')} ${formatMigrationBackup(backup)}`);
+        warnings++;
+        warningDetails.push({
+          name: 'Migration backup',
+          issue: formatMigrationBackup(backup),
+          recommendation: `nothing reaps these — if the migrated state is healthy, run: rm -rf "${backup.path}"`,
+        });
+      } else {
+        console.log(
+          `  ${chalk.dim('○')} ${formatMigrationBackup(backup)}` +
+          chalk.dim(` (within the ${STALE_BACKUP_AGE_DAYS}-day verification window)`)
+        );
+      }
+    }
+    if (reclaimable > 0) {
+      console.log('');
+      console.log(chalk.dim(`  ${formatBytes(reclaimable)} reclaimable across ${migrationBackups.length} backup(s).`));
+    }
+    console.log('');
+  }
+
+  // Check codev directory structure (only if we're in a codev project)
   if (workspaceRoot && existsSync(resolve(workspaceRoot, 'codev'))) {
     console.log(chalk.bold('Codev Structure') + ' (project configuration)');
     console.log('');
@@ -1038,6 +1175,28 @@ export async function doctor(): Promise<number> {
 
     console.log('');
   }
+
+  // Session log footprint (#1238). User-global (~/.agent-farm/logs), so this is
+  // reported outside the project-scoped section. Tower sweeps aged-out logs, but
+  // a machine that has not run a recent Tower — or has retention disabled — can
+  // still be sitting on many GB, and that was invisible until this line existed.
+  const sessionLogs = checkSessionLogs(resolve(AGENT_FARM_DIR, 'logs'));
+  console.log(chalk.bold('Session Logs') + ' (~/.agent-farm/logs)');
+  console.log('');
+  if (sessionLogs.status === 'warn') {
+    console.log(`  ${chalk.yellow('⚠')} ${sessionLogs.summary} ${chalk.blue(`(${sessionLogs.retentionNote})`)}`);
+    warnings++;
+    warningDetails.push({
+      name: 'Session logs',
+      issue: `${sessionLogs.summary} in ~/.agent-farm/logs`,
+      recommendation: sessionLogs.recommendation,
+    });
+  } else if (sessionLogs.files === 0) {
+    console.log(`  ${chalk.green('✓')} ${sessionLogs.summary}`);
+  } else {
+    console.log(`  ${chalk.green('✓')} ${sessionLogs.summary} ${chalk.blue(`(${sessionLogs.retentionNote})`)}`);
+  }
+  console.log('');
 
   // Summary
   console.log('============================================');

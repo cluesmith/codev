@@ -19,6 +19,7 @@ import {
   encodeSpawn,
   createFrameParser,
   isKnownFrameType,
+  isDeliberateExit,
   parseJsonPayload,
   type ParsedFrame,
   type FrameTypeValue,
@@ -401,6 +402,29 @@ describe('shellper-protocol', () => {
       expect(ALLOWED_SIGNALS.has(6)).toBe(false);  // SIGABRT
       expect(ALLOWED_SIGNALS.has(11)).toBe(false); // SIGSEGV
       expect(ALLOWED_SIGNALS.has(19)).toBe(false); // SIGSTOP
+    });
+  });
+
+  describe('isDeliberateExit (Bugfix #1241)', () => {
+    it('treats exit code 0 with no signal as deliberate', () => {
+      expect(isDeliberateExit({ code: 0, signal: null })).toBe(true);
+      expect(isDeliberateExit({ code: 0 })).toBe(true);
+      expect(isDeliberateExit({ code: 0, signal: '' })).toBe(true);
+      // node-pty reports "no signal" as 0, which ShellperProcess stringifies.
+      expect(isDeliberateExit({ code: 0, signal: '0' })).toBe(true);
+    });
+
+    it('treats a signal death as unnatural even though its code is 0', () => {
+      // Verified against node-pty: SIGKILL → { exitCode: 0, signal: 9 }.
+      expect(isDeliberateExit({ code: 0, signal: '9' })).toBe(false);
+      expect(isDeliberateExit({ code: 0, signal: '2' })).toBe(false);
+      expect(isDeliberateExit({ code: 0, signal: 'SIGTERM' })).toBe(false);
+    });
+
+    it('treats a nonzero exit as unnatural', () => {
+      expect(isDeliberateExit({ code: 1, signal: null })).toBe(false);
+      expect(isDeliberateExit({ code: 130, signal: null })).toBe(false);
+      expect(isDeliberateExit({ code: null, signal: null })).toBe(false);
     });
   });
 
