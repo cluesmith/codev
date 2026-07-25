@@ -170,6 +170,32 @@ Configure auth:
 - Gemini (`agy`): **OAuth / subscription** — run `agy` once and sign in (no API key). If `agy`
   is missing or unauthenticated, the gemini lane skips non-blockingly (the run proceeds without it).
 
+#### agy auth-state cache (unauthenticated tab burst)
+
+An unauthenticated `agy` opens an OAuth browser tab *before* it prints the URL
+Codev detects, so the lane cannot suppress the tab after spawning — only by not
+spawning. Since a CMAP round is several independent `consult` processes, this used
+to strand one tab per consult (#1077).
+
+Codev keeps a shared auth verdict in `~/.cache/codev/agy-auth.json` (0600,
+honours `XDG_CACHE_HOME`). The first call probes; the rest read the verdict and
+short-circuit, so **an unauthenticated agy is spawned at most once per TTL
+window** instead of once per consult. A file lock keeps parallel consults from
+probing simultaneously. `codev doctor`'s agy check shares the same cache.
+
+Verdicts expire on their own — sign in with `agy` in another terminal and the lane
+recovers within the unauth TTL, no cache clearing required. The cache only ever
+suppresses a lane on positive "signed out" evidence; anything ambiguous falls
+through to a normal spawn.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `CODEV_AGY_AUTH_CACHE_TTL_UNAUTH_MS` | `300000` (5 min) | How long a "signed out" verdict is trusted — the sign-in recovery window. |
+| `CODEV_AGY_AUTH_CACHE_TTL_AUTH_MS` | `1800000` (30 min) | How long a "signed in" verdict is trusted. |
+| `CODEV_AGY_AUTH_CACHE_WAIT_MS` | `6000` | How long a consult waits for another process's in-flight probe before proceeding anyway. |
+| `CODEV_AGY_AUTH_CACHE_DIR` | `~/.cache/codev` | Cache location (mainly for tests). |
+| `CODEV_AGY_AUTH_CACHE_DISABLE` | unset | `1` restores the always-spawn behaviour. |
+
 ### Claude auth: subscription vs. metered API
 
 `consult -m claude` runs on the Claude Agent SDK. When `CLAUDE_CODE_OAUTH_TOKEN`
