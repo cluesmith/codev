@@ -55,3 +55,11 @@ is dropped from SessionManager and PtySession emits `exit`, because Tower's
 registered-but-dead terminal would make the architect unrelaunchable without a
 full workspace stop/start. Ending cleanly clears the architect row, so
 `afx workspace start` brings it back. The shellper husk itself is not killed.
+
+## PR
+
+PR #1244 opened. CMAP 3-way: gemini=APPROVE, codex=APPROVE, claude=APPROVE — all
+HIGH confidence, zero key issues, nothing to address. Results posted as a PR
+comment. Architect notified. Waiting at the `pr` gate.
+
+Full suite green throughout: 3655 passed / 0 failures; build green.
