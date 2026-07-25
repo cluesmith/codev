@@ -85,12 +85,15 @@ plus the most recent dated section*, so a save must leave exactly that behind:
 2. **Append one short dated log entry** capturing what changed this stretch.
 3. **Compact — this is part of the save, not optional polish.** Every save
    both adds AND removes: after writing, keep the recent dated log entries in
-   full and collapse older ones into a single one-line "(compacted — see git
-   log of this file)" entry. The file is a summary a fresh session reads at a
-   glance — one screen is the right order of magnitude, judged by you. If a
-   save has grown it past easy readability, prune as part of that save rather
-   than leaving it for next time. The file's history lives in git; the file
-   itself is only the live summary.
+   full and collapse older ones into a single one-line summary that names
+   where the detail lives (the closed PRs, issues, and reviews it covered).
+   Remember these state files are gitignored — there is no git history to
+   fall back on, so pruned prose is gone for good. Prune by replacing detail
+   with pointers to durable artifacts, never by deleting the only record of
+   something. The file is a summary a fresh session reads at a glance — one
+   screen is the right order of magnitude, judged by you. If a save has grown
+   it past easy readability, prune as part of that save rather than leaving
+   it for next time.
 
 **Content guardrails.** No secrets (tokens, keys, credentials). No transcript
 dumps or raw tool output. Include only: current focus, open loops, and the
