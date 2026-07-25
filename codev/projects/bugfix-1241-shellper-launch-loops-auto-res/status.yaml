@@ -1,7 +1,7 @@
 id: bugfix-1241
 title: shellper-launch-loops-auto-res
 protocol: bugfix
-phase: investigate
+phase: fix
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -11,4 +11,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-07-25T09:40:46.551Z'
-updated_at: '2026-07-25T09:40:46.551Z'
+updated_at: '2026-07-25T09:53:52.063Z'
