@@ -29,6 +29,12 @@ import {
   STALE_BACKUP_AGE_DAYS,
 } from '../lib/migration-backup-audit.js';
 import { resolveAgyBin, AGY_OAUTH_MARKERS } from './consult/index.js';
+import { AGENT_FARM_DIR } from '@cluesmith/codev-core/constants';
+import {
+  measureSessionLogs,
+  resolveLogRetentionDays,
+  formatBytes,
+} from '../agent-farm/servers/session-log-sweep.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -53,6 +59,72 @@ interface CheckResult {
 }
 
 const isMacOS = process.platform === 'darwin';
+
+/**
+ * Footprint at which the PTY session log directory becomes a reportable warning
+ * rather than an informational line (#1238). Well past what a healthy retention
+ * sweep leaves behind, and well under the 19 GB that prompted the issue.
+ */
+export const SESSION_LOG_WARN_BYTES = 2 * 1024 * 1024 * 1024;
+
+export interface SessionLogCheck {
+  status: 'ok' | 'warn';
+  files: number;
+  bytes: number;
+  retentionDays: number;
+  /** Human-readable footprint, e.g. `741 file(s), 2.1 GB`. No colour codes. */
+  summary: string;
+  /** e.g. `retention 30d` / `retention disabled`. */
+  retentionNote: string;
+  /** Present only when `status === 'warn'`. */
+  recommendation?: string;
+}
+
+/**
+ * Decide what the "Session Logs" doctor section should say (#1238).
+ *
+ * Split out from `doctor()` so the decision — thresholds, the retention-disabled
+ * wording, the remediation hint — is unit-testable against a temp directory.
+ * `doctor()` itself passes the real user-global `~/.agent-farm/logs`, which is
+ * the whole point of the check, so the *reporting* path is deliberately not
+ * hermetic; this function is where the logic lives and is pinned by tests.
+ */
+export function checkSessionLogs(
+  logDir: string,
+  env: NodeJS.ProcessEnv = process.env,
+): SessionLogCheck {
+  const { files, bytes } = measureSessionLogs(logDir);
+  const retentionDays = resolveLogRetentionDays(env);
+  const retentionNote = retentionDays === 0 ? 'retention disabled' : `retention ${retentionDays}d`;
+
+  if (files === 0) {
+    return {
+      status: 'ok',
+      files,
+      bytes,
+      retentionDays,
+      summary: 'No PTY session logs on disk',
+      retentionNote,
+    };
+  }
+
+  const summary = `${files} file(s), ${formatBytes(bytes)}`;
+  if (bytes < SESSION_LOG_WARN_BYTES) {
+    return { status: 'ok', files, bytes, retentionDays, summary, retentionNote };
+  }
+
+  return {
+    status: 'warn',
+    files,
+    bytes,
+    retentionDays,
+    summary,
+    retentionNote,
+    recommendation: retentionDays === 0
+      ? 'retention is disabled (AGENT_FARM_LOG_RETENTION_DAYS=0) — unset it and restart Tower to let the sweep run'
+      : 'restart Tower to run the retention sweep (afx tower stop && afx tower start)',
+  };
+}
 
 /**
  * Compare semantic versions: returns true if v1 >= v2
@@ -973,6 +1045,28 @@ export async function doctor(): Promise<number> {
 
     console.log('');
   }
+
+  // Session log footprint (#1238). User-global (~/.agent-farm/logs), so this is
+  // reported outside the project-scoped section. Tower sweeps aged-out logs, but
+  // a machine that has not run a recent Tower — or has retention disabled — can
+  // still be sitting on many GB, and that was invisible until this line existed.
+  const sessionLogs = checkSessionLogs(resolve(AGENT_FARM_DIR, 'logs'));
+  console.log(chalk.bold('Session Logs') + ' (~/.agent-farm/logs)');
+  console.log('');
+  if (sessionLogs.status === 'warn') {
+    console.log(`  ${chalk.yellow('⚠')} ${sessionLogs.summary} ${chalk.blue(`(${sessionLogs.retentionNote})`)}`);
+    warnings++;
+    warningDetails.push({
+      name: 'Session logs',
+      issue: `${sessionLogs.summary} in ~/.agent-farm/logs`,
+      recommendation: sessionLogs.recommendation,
+    });
+  } else if (sessionLogs.files === 0) {
+    console.log(`  ${chalk.green('✓')} ${sessionLogs.summary}`);
+  } else {
+    console.log(`  ${chalk.green('✓')} ${sessionLogs.summary} ${chalk.blue(`(${sessionLogs.retentionNote})`)}`);
+  }
+  console.log('');
 
   // Summary
   console.log('============================================');
