@@ -98,6 +98,47 @@ for `--type` reviews (returns no VERDICT).
 ### Unrelated observation (not fixed — out of scope)
 
 `codev doctor` reports "Architect state files (codev/state/<name>.md) are not
-gitignored" in this worktree, but `.gitignore:15-16` *does* carry
-`codev/state/*.md` + `!codev/state/*_thread.md`. Looks like a false positive in
-`auditStateFileIgnore`. Left alone — nothing to do with #1238.
+gitignored" even though `.gitignore:15-16` carries the rule.
+
+**I first attributed this to `auditStateFileIgnore`. That was wrong** — the architect
+pushed back with `git check-ignore -q codev/state/__doctor-probe__.md` exiting 0 in this
+worktree (it does), and investigating properly found the real cause.
+
+**It's `findWorkspaceRoot()` (`doctor.ts:444-456`), and it reproduces on `main`.** The
+walk tests `existsSync(resolve(current, 'codev'))`. Run from `packages/codev`, it walks up
+to `packages/`, where `resolve('packages', 'codev')` matches **`packages/codev` — the
+package directory, not a codev instance** — and returns `<root>/packages` as the
+workspace root. `auditStateFileIgnore` is then handed that wrong root and probes
+`packages/codev/state/...`, which the root-anchored `codev/state/*.md` rule correctly does
+not match. The audit logic is fine; its input isn't.
+
+Repro is purely about cwd:
+
+```
+cd <repo-root>/packages/codev && codev doctor   → warns
+cd <repo-root>                && codev doctor   → ✓ Project structure OK
+```
+
+I hit it because CLAUDE.md's Directory Map says to work from `packages/codev/`. Calling
+the built audit directly (with node_modules present, so not a no-deps artifact):
+`<worktree>` → `[]`, `<worktree>/packages` → warns, main root → `[]`,
+`main/packages` → **warns**.
+
+Blast radius is wider than this one line: every workspaceRoot-derived doctor check
+(framework-ref, PR-gate, drift, forge config) silently audits the wrong tree when doctor
+is run from `packages/`. Reported to the architect with the repro; awaiting the word on
+filing an issue. Still out of scope for #1238.
+
+### Why this worktree had no node_modules (architect asked me to keep the details)
+
+There is **no `.codev/config.json`** in the main checkout at all — only
+`.codev/config.local.json`, holding just a `shell` block. So no `worktree.symlinks` and
+no `worktree.postSpawn` exist, and a fresh worktree therefore gets no `pnpm install`.
+
+The dangerous part is the failure *mode*: with no node_modules,
+`npx tsc --noEmit -p tsconfig.json` **exits 0 and prints nothing** — it resolves no types
+and checks nothing, indistinguishable from a genuine clean typecheck. Only vitest failed
+loudly (`Cannot find package 'vitest'`). A builder that ran just tsc would have reported
+a green typecheck on entirely unverified code. Suggested guards: assert `node_modules`
+exists before trusting a typecheck, and/or add
+`worktree.postSpawn: ["pnpm install --frozen-lockfile"]`.
