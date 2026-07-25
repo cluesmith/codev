@@ -20,6 +20,14 @@ import type { SSEClient } from './tower-types.js';
 import { startRateLimitCleanup } from './tower-utils.js';
 import { sweepShellperHusks, resolveHuskGraceMs } from './shellper-husk-sweep.js';
 import {
+  sweepSessionLogs,
+  measureSessionLogs,
+  resolveLogRetentionDays,
+  resolveLogSweepIntervalMs,
+  formatBytes,
+  MS_PER_DAY,
+} from './session-log-sweep.js';
+import {
   initTunnel,
   shutdownTunnel,
 } from './tower-tunnel.js';
@@ -53,7 +61,7 @@ import type { RouteContext } from './tower-routes.js';
 import { setCodevConfigNotifier, stopAllCodevConfigWatchers } from './codev-config-watcher.js';
 import { getGlobalDb } from '../db/index.js';
 import { runBootConsolidation } from '../db/consolidate.js';
-import { DEFAULT_TOWER_PORT } from '../lib/tower-client.js';
+import { DEFAULT_TOWER_PORT, AGENT_FARM_DIR } from '../lib/tower-client.js';
 import { validateHost } from '../utils/server-utils.js';
 import { version } from '../../version.js';
 
@@ -68,6 +76,7 @@ let shellperManager: SessionManager | null = null;
 let shellperCleanupInterval: NodeJS.Timeout | null = null;
 let shellperHuskSweepInterval: NodeJS.Timeout | null = null;
 let terminalPartialMonitorInterval: NodeJS.Timeout | null = null;
+let sessionLogSweepInterval: NodeJS.Timeout | null = null;
 
 // Observability for Issue #1047: the ring-buffer partial is kept whole (no
 // byte cap) so reconnection replay stays faithful, which means a no-newline
@@ -169,6 +178,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
   if (shellperCleanupInterval) clearInterval(shellperCleanupInterval);
   if (shellperHuskSweepInterval) clearInterval(shellperHuskSweepInterval);
   if (terminalPartialMonitorInterval) clearInterval(terminalPartialMonitorInterval);
+  if (sessionLogSweepInterval) clearInterval(sessionLogSweepInterval);
   clearInterval(sseHeartbeatInterval);
 
   // 4b. Flush and stop send buffer (Spec 403) — delivers any deferred messages
@@ -524,6 +534,40 @@ server.listen(port, bindHost, async () => {
   // ordering requirement as killOrphanedShellpers (must run after
   // reconciliation so a reconnected session's shellper is registered).
   await runHuskSweep();
+
+  // Issue #1238: PTY session log retention. Session logs are per-session files
+  // in ~/.agent-farm/logs that nothing ever deleted, so they accreted forever
+  // (19 GB / 29,728 files on an audited machine). Sweep aged-out logs at
+  // startup and then daily. Deliberately placed AFTER reconcileTerminalSessions
+  // so surviving sessions are in the terminal manager's map and are excluded by
+  // id — the sweep must never unlink a log whose fd is still open.
+  const logRetentionDays = resolveLogRetentionDays();
+  const sessionLogDir = path.join(AGENT_FARM_DIR, 'logs');
+  const runSessionLogSweep = (): void => {
+    try {
+      sweepSessionLogs({
+        logDir: sessionLogDir,
+        retentionMs: logRetentionDays * MS_PER_DAY,
+        activeSessionIds: getTerminalManager().listSessions().map((s) => s.id),
+        log: (msg: string) => log('INFO', msg),
+      });
+    } catch (err) {
+      log('ERROR', `Session log sweep failed: ${(err as Error).message}`);
+    }
+  };
+  if (logRetentionDays === 0) {
+    log('INFO', 'Session log retention disabled (AGENT_FARM_LOG_RETENTION_DAYS=0)');
+  } else {
+    runSessionLogSweep();
+    const footprint = measureSessionLogs(sessionLogDir);
+    log(
+      'INFO',
+      `Session logs: ${footprint.files} file(s), ${formatBytes(footprint.bytes)} ` +
+      `(retention ${logRetentionDays}d)`,
+    );
+    sessionLogSweepInterval = setInterval(runSessionLogSweep, resolveLogSweepIntervalMs());
+    sessionLogSweepInterval.unref();
+  }
 
   // Spec 0105 Phase 3: Initialize instance lifecycle module.
   // Placed after reconciliation so getInstances() returns [] during startup

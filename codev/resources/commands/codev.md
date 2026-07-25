@@ -102,6 +102,11 @@ Verifies that all required dependencies are installed and properly configured:
 - Gemini (Antigravity CLI, `agy`)
 - Codex (`@openai/codex`)
 
+**Migration Backups (report-only):**
+- Leftover copies of pre-migration state — whole-directory `~/.agent-farm.bak-*` / `~/agent-farm-db-backup-*` copies and the `*.pre-merge-<timestamp>` renames left by `afx db consolidate` — listed with age and size on disk.
+- Nothing reaps these automatically, so doctor surfaces each one together with the exact `rm -rf` command and leaves the decision to you. It never deletes anything.
+- Backups younger than 7 days are listed but not counted as warnings; the section is omitted entirely when there are none.
+
 **Exit Codes:**
 - `0` - All OK or warnings only
 - `1` - Required dependencies missing

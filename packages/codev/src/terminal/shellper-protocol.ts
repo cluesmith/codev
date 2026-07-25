@@ -110,6 +110,27 @@ export interface SpawnMessage {
   env: Record<string, string>;
 }
 
+// --- Exit Classification ---
+
+/**
+ * Issue #1241: whether an exit was the user's own choice (double Ctrl+C,
+ * `/quit`, any clean shutdown) rather than a crash or a kill. Auto-restart
+ * exists for unnatural exits only — respawning after a deliberate quit
+ * overrides the user's decision, and a ~2s respawn can collide with the dying
+ * predecessor's session lock (the #1224 family).
+ *
+ * The code alone is NOT sufficient: node-pty reports a signal death as exit
+ * code 0 with the signal number attached (verified: SIGKILL →
+ * `{exitCode: 0, signal: 9}`), and `ShellperProcess` stringifies that field
+ * before it reaches the EXIT frame. So a deliberate exit is code 0 *and* no
+ * signal, where "no signal" is null/absent, '' or '0'.
+ */
+export function isDeliberateExit(exit: { code: number | null; signal?: string | null }): boolean {
+  if (exit.code !== 0) return false;
+  const signal = exit.signal;
+  return signal === null || signal === undefined || signal === '' || signal === '0';
+}
+
 // --- Frame Encoding ---
 
 /**
