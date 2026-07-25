@@ -45,3 +45,9 @@
 
 - Human authorized resolving PR #1203 against current `origin/main` without merging the PR. The merge had one conflict, in `packages/codev/src/agent-farm/lib/tower-client.ts`; resolved by retaining all four type re-exports required by both branches: `HuskCandidate`, `HuskPreview`, `HuskSweepResult`, and `SeedKickRequest`. `git diff --name-only --diff-filter=U` confirmed no other conflicts.
 - Post-resolution verification: `pnpm build` passed; full `pnpm test` passed (185 files passed, 3 skipped; 3716 tests passed, 48 skipped). Branch is ready to push for CI.
+
+## 2026-07-25T18:04Z — post-approval iteration: adopt #1244 loop tail
+- Merged origin/main (brings PR #1244's keypress-gated launch-loop contract).
+- Moved LAUNCH_LOOP_TAIL from spawn-worktree.ts (module-local) to utils/harness.ts (exported) so Kimi's provider-owned scripts share it without a circular import; both Kimi loops (pinned -S and bare) now use it.
+- Pinned the new tail across all Kimi shapes in harness.test.ts and spawn-worktree.test.ts.
+- Suites green (harness+spawn-worktree 169, message-pacing+seed-kick 22); build clean.

@@ -537,6 +537,23 @@ describe('spawn-worktree', () => {
       expect(script.indexOf('touch .builder-kimi-session'))
         .toBeLessThan(script.indexOf('while true'));
     });
+
+    // Bugfix #1241 / PR #1244: Kimi's provider-owned scripts share the same
+    // exit-code-gated loop tail as the generic shapes — deliberate exit 0
+    // must NOT auto-respawn.
+    it.each([
+      ['seeded (role)', { content: 'ROLE BODY', source: 'codev' }],
+      ['bare (override spawn)', null],
+    ] as const)('%s → script does not auto-restart on exit 0', (_name, role) => {
+      getBuilderHarnessMock.mockReturnValueOnce(KIMI_HARNESS);
+      const script = buildWorktreeLaunchScript('/tmp/worktree', 'kimi', role, '/tmp/ws');
+      expect(script).toContain('status=$?');
+      expect(script).toContain('if [ "$status" -eq 0 ]; then');
+      expect(script).toContain('Press Enter to relaunch');
+      expect(script).toContain('read -r || exit 0');
+      // The crash path is untouched.
+      expect(script).toContain('Restarting in 2 seconds');
+    });
   });
 
   // =========================================================================

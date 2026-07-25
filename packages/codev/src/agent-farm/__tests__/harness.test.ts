@@ -523,6 +523,23 @@ describe('harness', () => {
           .toBeLessThan(script.indexOf('while true'));
       });
 
+      // Bugfix #1241 / PR #1244: Kimi's provider-owned loops must share the
+      // exit-code-gated tail — a deliberate exit 0 gates the relaunch on a
+      // keypress instead of blind auto-respawn; crashes keep the auto-restart.
+      it.each([
+        ['fresh', { ...ctxBase, seedFile: '/tmp/wt/.builder-seed.txt' }],
+        ['resume', { ...ctxBase, seedFile: null, resume: { sessionId: 'session_abc' } }],
+        ['bare', { ...ctxBase, seedFile: null }],
+      ] as const)('%s shape does not auto-restart on exit 0', (_name, ctx) => {
+        const script = KIMI_HARNESS.buildBuilderLaunchScript!(ctx);
+        expect(script).toContain('status=$?');
+        expect(script).toContain('if [ "$status" -eq 0 ]; then');
+        expect(script).toContain('Press Enter to relaunch');
+        expect(script).toContain('read -r || exit 0');
+        // The crash path is untouched.
+        expect(script).toContain('Restarting in 2 seconds');
+      });
+
       it('does not duplicate --yolo when the user already passed it', () => {
         const script = KIMI_HARNESS.buildBuilderLaunchScript!({
           worktreePath: '/tmp/wt', baseCmd: 'kimi --yolo', seedFile: null,
