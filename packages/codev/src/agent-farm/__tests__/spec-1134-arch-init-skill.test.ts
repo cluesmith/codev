@@ -101,10 +101,11 @@ describe('Spec 1134 — /arch-init skill ships in both trees', () => {
       expect(t).toMatch(/append.*dated/i);
     });
 
-    it('carries compaction discipline (one screen / prune stale sections)', () => {
+    it('carries compaction discipline (one screen / hard cap / prune)', () => {
       const t = text();
       expect(t).toMatch(/one screen/i);
-      expect(t).toMatch(/prune stale/i);
+      expect(t).toMatch(/hard cap/i);
+      expect(t).toMatch(/prune/i);
     });
 
     it('carries save content guardrails (no secrets, no transcript dumps)', () => {
