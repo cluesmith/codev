@@ -64,3 +64,28 @@ pre-existing drift is out of scope here.
 PR-phase checks green (`pr_exists`, `e2e_tests`). `porch gate 1239` registered
 the **pr gate — waiting for human approval**. Not running `porch approve`;
 that's the human's call.
+
+## Closed out
+
+Waleed approved the pr gate at 12:37Z (relayed by the architect). Ran
+`porch approve 1239 pr --a-human-explicitly-approved-this`; porch pushed the
+gate-approved commit itself, so the follow-up `git push` was a no-op
+confirming parity — worth knowing so a sibling doesn't think the push failed.
+
+All 6 required CI checks green. Note `mergeStateStatus` stayed `BLOCKED` with
+every check passing — that's the required-review rule, not CI, and it's what
+the architect's admin-merge clears. Don't misread it as a failing check.
+
+I held `porch done` until the merge actually landed: AIR's `pr` phase is
+terminal (`transition.on_complete: null`), so advancing while the PR was still
+open would have flipped the protocol to complete against reality. Merged
+12:41Z (`25b2ef9c`), then `porch done 1239` → PROTOCOL COMPLETE. Issue #1239
+auto-closed on merge; completion stats posted as an issue comment per the
+project convention (bugs/issues → comment on the issue, not status.yaml).
+
+One trap for future AIR builders: the porch "protocol complete" commit lands
+on the builder branch *after* the merge, so it never reaches main. Only the
+gate-approved commit needs to be on the branch pre-merge. That's expected, not
+a missed push.
+
+Worktree cleanup awaits Waleed's word — not mine to call.
