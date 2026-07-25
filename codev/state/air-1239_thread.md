@@ -64,3 +64,55 @@ pre-existing drift is out of scope here.
 PR-phase checks green (`pr_exists`, `e2e_tests`). `porch gate 1239` registered
 the **pr gate — waiting for human approval**. Not running `porch approve`;
 that's the human's call.
+
+## Closed out
+
+Waleed approved the pr gate at 12:37Z (relayed by the architect). Ran
+`porch approve 1239 pr --a-human-explicitly-approved-this`; porch pushed the
+gate-approved commit itself, so the follow-up `git push` was a no-op
+confirming parity — worth knowing so a sibling doesn't think the push failed.
+
+All 6 required CI checks green. Note `mergeStateStatus` stayed `BLOCKED` with
+every check passing — that's the required-review rule, not CI, and it's what
+the architect's admin-merge clears. Don't misread it as a failing check.
+
+I held `porch done` until the merge actually landed: AIR's `pr` phase is
+terminal (`transition.on_complete: null`), so advancing while the PR was still
+open would have flipped the protocol to complete against reality. Merged
+12:41Z (`25b2ef9c`), then `porch done 1239` → PROTOCOL COMPLETE. Issue #1239
+auto-closed on merge; completion stats posted as an issue comment per the
+project convention (bugs/issues → comment on the issue, not status.yaml).
+
+One trap for future AIR builders: the porch "protocol complete" commit lands
+on the builder branch *after* the merge, so it never reaches main. Only the
+gate-approved commit needs to be on the branch pre-merge. That's expected, not
+a missed push.
+
+Worktree cleanup awaits Waleed's word — not mine to call.
+
+**Why this section needed a second PR.** Everything above the "Closed out"
+heading reached main with the #1242 merge; everything below it could not.
+Under AIR the thread is committed on the builder branch and lands on main
+*via the PR merge*, so anything learned during or after the merge —
+gate mechanics, merge-state semantics, the `porch done` timing question — is
+structurally unable to ride that same merge. The cohort knowledge with the
+shortest path to being lost is precisely the knowledge generated last. If you
+finish an AIR run with lessons worth keeping, assume a small follow-up PR is
+part of the job rather than an exception.
+
+**Cross-PR collision found while opening that follow-up.** Branching off a
+freshly-fetched main to carry this file over revealed that `main` did not
+build: #1242 (this project) and #1243 (air-1238, session logs) merged three
+minutes apart, and both added a `formatBytes` helper that `doctor.ts` imports —
+mine from `lib/migration-backup-audit.js`, theirs from
+`agent-farm/servers/session-log-sweep.js`. Two separate import statements, no
+textual conflict, clean auto-merge, `TS2300: Duplicate identifier` on the
+combination. Each PR's required checks were green against its own base, and
+each base predated the other, so nothing in the per-PR gate ever compiled the
+two together. Worth internalising: **green CI on a PR is evidence about that
+PR's base, not about main.** Concurrent builders touching a shared file (here,
+`doctor.ts` — a magnet, since every audit adds a section) should expect this
+class of break, and the cheap tell is that both diffs introduce a same-named
+helper. Reported to the architect rather than fixed unilaterally; it spans two
+projects and the right fix (alias vs. consolidate the duplicate helpers into
+one shared util) is an ownership decision, not a builder's call.
