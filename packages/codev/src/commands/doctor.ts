@@ -22,6 +22,12 @@ import {
   formatStaleness,
 } from '../lib/protocol-drift-audit.js';
 import { resolveAgyBin, AGY_OAUTH_MARKERS } from './consult/index.js';
+import { AGENT_FARM_DIR } from '@cluesmith/codev-core/constants';
+import {
+  measureSessionLogs,
+  resolveLogRetentionDays,
+  formatBytes,
+} from '../agent-farm/servers/session-log-sweep.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -46,6 +52,13 @@ interface CheckResult {
 }
 
 const isMacOS = process.platform === 'darwin';
+
+/**
+ * Footprint at which the PTY session log directory becomes a reportable warning
+ * rather than an informational line (#1238). Well past what a healthy retention
+ * sweep leaves behind, and well under the 19 GB that prompted the issue.
+ */
+const SESSION_LOG_WARN_BYTES = 2 * 1024 * 1024 * 1024;
 
 /**
  * Compare semantic versions: returns true if v1 >= v2
@@ -930,6 +943,38 @@ export async function doctor(): Promise<number> {
 
     console.log('');
   }
+
+  // Session log footprint (#1238). User-global (~/.agent-farm/logs), so this is
+  // reported outside the project-scoped section. Tower sweeps aged-out logs, but
+  // a machine that has not run a recent Tower — or has retention disabled — can
+  // still be sitting on many GB, and that was invisible until this line existed.
+  const sessionLogDir = resolve(AGENT_FARM_DIR, 'logs');
+  const logFootprint = measureSessionLogs(sessionLogDir);
+  const retentionDays = resolveLogRetentionDays();
+  console.log(chalk.bold('Session Logs') + ' (~/.agent-farm/logs)');
+  console.log('');
+  if (logFootprint.files === 0) {
+    console.log(`  ${chalk.green('✓')} No PTY session logs on disk`);
+  } else {
+    const retentionNote = retentionDays === 0
+      ? 'retention disabled'
+      : `retention ${retentionDays}d`;
+    const summary = `${logFootprint.files} file(s), ${formatBytes(logFootprint.bytes)}`;
+    if (logFootprint.bytes >= SESSION_LOG_WARN_BYTES) {
+      console.log(`  ${chalk.yellow('⚠')} ${summary} ${chalk.blue(`(${retentionNote})`)}`);
+      warnings++;
+      warningDetails.push({
+        name: 'Session logs',
+        issue: `${summary} in ~/.agent-farm/logs`,
+        recommendation: retentionDays === 0
+          ? 'retention is disabled (AGENT_FARM_LOG_RETENTION_DAYS=0) — unset it and restart Tower to let the sweep run'
+          : 'restart Tower to run the retention sweep (afx tower stop && afx tower start)',
+      });
+    } else {
+      console.log(`  ${chalk.green('✓')} ${summary} ${chalk.blue(`(${retentionNote})`)}`);
+    }
+  }
+  console.log('');
 
   // Summary
   console.log('============================================');
