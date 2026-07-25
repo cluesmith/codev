@@ -21,6 +21,13 @@ import {
   formatDriftFinding,
   formatStaleness,
 } from '../lib/protocol-drift-audit.js';
+import {
+  findMigrationBackups,
+  formatMigrationBackup,
+  formatBytes,
+  totalBytes,
+  STALE_BACKUP_AGE_DAYS,
+} from '../lib/migration-backup-audit.js';
 import { resolveAgyBin, AGY_OAUTH_MARKERS } from './consult/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -733,8 +740,44 @@ export async function doctor(): Promise<number> {
 
   console.log('');
 
-  // Check codev directory structure (only if we're in a codev project)
   const workspaceRoot = findWorkspaceRoot();
+
+  // Migration backups (#1239): state migrations leave copies of the pre-migration
+  // state behind — whole-directory `~/.agent-farm.bak-*` copies and the
+  // `*.pre-merge-*` renames from db/consolidate.ts — and nothing ever removes
+  // them. One was found at 18 GB three weeks after the migration that made it.
+  // Report-only: these are the user's own state copies, so doctor surfaces age +
+  // size + the removal command and leaves the decision to the human. QUIET BY
+  // DEFAULT — the section prints only when a leftover exists.
+  const migrationBackups = findMigrationBackups({ workspaceRoot });
+  if (migrationBackups.length > 0) {
+    const reclaimable = totalBytes(migrationBackups);
+    console.log(chalk.bold('Migration Backups') + ' (leftover copies of pre-migration state)');
+    console.log('');
+    for (const backup of migrationBackups) {
+      if (backup.stale) {
+        console.log(`  ${chalk.yellow('⚠')} ${formatMigrationBackup(backup)}`);
+        warnings++;
+        warningDetails.push({
+          name: 'Migration backup',
+          issue: formatMigrationBackup(backup),
+          recommendation: `nothing reaps these — if the migrated state is healthy, run: rm -rf "${backup.path}"`,
+        });
+      } else {
+        console.log(
+          `  ${chalk.dim('○')} ${formatMigrationBackup(backup)}` +
+          chalk.dim(` (within the ${STALE_BACKUP_AGE_DAYS}-day verification window)`)
+        );
+      }
+    }
+    if (reclaimable > 0) {
+      console.log('');
+      console.log(chalk.dim(`  ${formatBytes(reclaimable)} reclaimable across ${migrationBackups.length} backup(s).`));
+    }
+    console.log('');
+  }
+
+  // Check codev directory structure (only if we're in a codev project)
   if (workspaceRoot && existsSync(resolve(workspaceRoot, 'codev'))) {
     console.log(chalk.bold('Codev Structure') + ' (project configuration)');
     console.log('');
