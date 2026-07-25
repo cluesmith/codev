@@ -90,10 +90,10 @@ plus the most recent dated section*, so a save must leave exactly that behind:
    Remember these state files are gitignored — there is no git history to
    fall back on, so pruned prose is gone for good. Prune by replacing detail
    with pointers to durable artifacts, never by deleting the only record of
-   something. The file is a summary a fresh session reads at a glance — one
-   screen is the right order of magnitude, judged by you. If a save has grown
-   it past easy readability, prune as part of that save rather than leaving
-   it for next time.
+   something. The file is a summary a fresh session reads at a glance —
+   one screen is the right order of magnitude, judged by you. If a save has
+   grown it past easy readability, prune as part of that save rather than
+   leaving it for next time.
 
 **Content guardrails.** No secrets (tokens, keys, credentials). No transcript
 dumps or raw tool output. Include only: current focus, open loops, and the
