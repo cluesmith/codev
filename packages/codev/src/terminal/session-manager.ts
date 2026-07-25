@@ -21,7 +21,7 @@ import { execFile } from 'node:child_process';
 import { defaultSessionOptions } from './index.js';
 import type { Readable } from 'node:stream';
 import { ShellperClient, type IShellperClient } from './shellper-client.js';
-import type { ExitMessage } from './shellper-protocol.js';
+import { isDeliberateExit, type ExitMessage } from './shellper-protocol.js';
 
 export interface SessionManagerConfig {
   socketDir: string;
@@ -1076,6 +1076,19 @@ export class SessionManager extends EventEmitter {
       if (session.restartResetTimer) {
         clearTimeout(session.restartResetTimer);
         session.restartResetTimer = null;
+      }
+
+      // Issue #1241: a deliberate quit is the user's decision — never override
+      // it with a respawn. Auto-restart is for unnatural exits (crashes, signal
+      // deaths), which keep the behavior below. The shellper husk is left alive
+      // (not SIGTERMed) so its scrollback survives; dropping the session drops
+      // the socket, which is the same thing the non-restarting child-exit path
+      // does and keeps SessionManager's view in step with Tower's.
+      if (isDeliberateExit(exit)) {
+        this.log(`Session ${sessionId} exited cleanly (code 0, no signal); not restarting`);
+        this.emit('session-clean-exit', sessionId, exit);
+        this.removeDeadSession(sessionId);
+        return;
       }
 
       // Issue #1149: a fast-failing process (e.g. an unresumable `--resume`

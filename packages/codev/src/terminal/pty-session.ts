@@ -9,6 +9,7 @@ import { EventEmitter } from 'node:events';
 import type { IPty } from 'node-pty';
 import { RingBuffer } from './ring-buffer.js';
 import type { IShellperClient } from './shellper-client.js';
+import { isDeliberateExit } from './shellper-protocol.js';
 
 export interface PtySessionConfig {
   id: string;
@@ -176,6 +177,17 @@ export class PtySession extends EventEmitter {
     // Handle shellper exit (process inside shellper exited)
     client.on('exit', (exitInfo: { code: number; signal: string | null }) => {
       this.exitCode = exitInfo.code;
+      // Issue #1241: SessionManager does not restart a deliberate quit, so the
+      // "restarting" notice and its 10s wait-for-the-respawn timer would both
+      // be lying. Say what actually happened and end the session cleanly —
+      // which also clears the architect row, so `afx workspace start` can
+      // relaunch (Tower gates that on the terminal being gone).
+      if (this._restartOnExit && isDeliberateExit(exitInfo)) {
+        this.onPtyData('\r\n\x1b[90m[Agent exited at your request — not restarting.]\x1b[0m\r\n');
+        this.emit('exit', exitInfo.code, exitInfo.signal);
+        this.cleanupShellper();
+        return;
+      }
       if (this._restartOnExit) {
         // Clear any pending restart state from a previous exit (crash loop guard)
         if (this._restartCleanupTimeout) {
