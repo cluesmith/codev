@@ -731,6 +731,11 @@ describe('consult command', () => {
       agyBin = path.join(testBaseDir, 'agy-fake');
       fs.writeFileSync(agyBin, '#!/bin/sh\n');
       process.env.CODEV_AGY_BIN = agyBin;
+      // The lane consults a cross-process auth cache before spawning (#1077).
+      // Pin it inside the per-test dir: otherwise a verdict recorded by one case
+      // changes whether the next one spawns at all, and the run would write into
+      // the developer's real ~/.cache/codev.
+      process.env.CODEV_AGY_AUTH_CACHE_DIR = path.join(testBaseDir, 'agy-auth-cache');
       fs.mkdirSync(path.join(testBaseDir, 'codev', 'roles'), { recursive: true });
       fs.writeFileSync(
         path.join(testBaseDir, 'codev', 'roles', 'consultant.md'),
@@ -741,6 +746,7 @@ describe('consult command', () => {
 
     afterEach(() => {
       delete process.env.CODEV_AGY_BIN;
+      delete process.env.CODEV_AGY_AUTH_CACHE_DIR;
     });
 
     async function loadAgy() {
