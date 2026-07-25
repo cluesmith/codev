@@ -33,7 +33,7 @@ import { AGENT_FARM_DIR } from '@cluesmith/codev-core/constants';
 import {
   measureSessionLogs,
   resolveLogRetentionDays,
-  formatBytes,
+  formatBytes as formatLogBytes,
 } from '../agent-farm/servers/session-log-sweep.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -108,7 +108,7 @@ export function checkSessionLogs(
     };
   }
 
-  const summary = `${files} file(s), ${formatBytes(bytes)}`;
+  const summary = `${files} file(s), ${formatLogBytes(bytes)}`;
   if (bytes < SESSION_LOG_WARN_BYTES) {
     return { status: 'ok', files, bytes, retentionDays, summary, retentionNote };
   }
