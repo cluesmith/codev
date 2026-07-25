@@ -126,8 +126,18 @@ the built audit directly (with node_modules present, so not a no-deps artifact):
 
 Blast radius is wider than this one line: every workspaceRoot-derived doctor check
 (framework-ref, PR-gate, drift, forge config) silently audits the wrong tree when doctor
-is run from `packages/`. Reported to the architect with the repro; awaiting the word on
-filing an issue. Still out of scope for #1238.
+is run from `packages/`. Those checks mostly fail *quietly* — a check with nothing to
+audit reports ✓ — so doctor can print a clean bill of health for a tree it never looked
+at. That's worse than the false warning, because it's invisible.
+
+**Filed as issue #1246** (`area/scaffold`) at the architect's direction, with the repro,
+mechanism, evidence table, blast radius, and a fix direction. Two traps I encoded there
+after checking the actual directories: `templates/` is useless as an instance signature
+(`packages/codev/templates/` exists too, so it wouldn't fix the bug), and `protocols/`
+must not be *required* (the four-tier resolver means a project that customizes nothing
+legitimately has no local `codev/protocols/`). Also flagged that `.git` is a **file** in a
+worktree gitlink, so any refactor to `statSync().isDirectory()` would break every builder
+worktree. Deliberately **not** fixed in PR #1243 — keeping that PR scoped.
 
 ### Why this worktree had no node_modules (architect asked me to keep the details)
 
