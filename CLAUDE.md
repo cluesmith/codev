@@ -339,7 +339,11 @@ Use sequential numbering with descriptive names (no leading zeros):
 **DEFAULT BEHAVIOR**: Consultation is ENABLED by default with:
 - **Gemini** via the **Antigravity CLI (`agy`)** for deep analysis (the retired Gemini CLI's
   replacement; OAuth/subscription, agy's default model — no pinned model id). Skips non-blockingly
-  if `agy` is missing/unauthenticated.
+  if `agy` is missing/unauthenticated. An unauthenticated `agy` is spawned **at most once per TTL
+  window** rather than once per consult: the verdict is cached across processes in
+  `~/.cache/codev/agy-auth.json`, because each spawn opens an OAuth browser tab before Codev can
+  detect the missing login (#1077). Sign in with `agy` in any terminal and the lane recovers on its
+  own; see `codev/resources/commands/consult.md` for the TTL/opt-out env vars.
 - **GPT-5.4 Codex** (gpt-5.4-codex) for coding and architecture perspective
 
 To disable: User must explicitly say "without multi-agent consultation"

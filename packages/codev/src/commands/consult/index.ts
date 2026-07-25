@@ -21,6 +21,7 @@ import { getResolver, GitRefResolver, type ArtifactResolver } from '../porch/art
 import { MetricsDB } from './metrics.js';
 import { extractUsage, extractReviewText, type SDKResultLike, type UsageData } from './usage-extractor.js';
 import { executeForgeCommandSync } from '../../lib/forge.js';
+import { preflightAgyAuth, recordAgyAuthState, type AgyAuthState } from './agy-auth-cache.js';
 
 // Content reference — resolved artifact content with a display label
 interface ContentRef {
@@ -635,6 +636,14 @@ const AGY_PRINT_TIMEOUT = '5m';                 // passed to `agy --print-timeou
 const AGY_TIMEOUT_MS = 6 * 60 * 1000;           // Codev-owned hard cap (> agy's own timeout)
 // OAuth banner appears before any review text; only scan the early stream.
 const AGY_MARKER_SCAN_LIMIT = 8192;
+/**
+ * How long a prober waits, marker-free, before publishing `auth` to the shared
+ * cache (#1077). The OAuth banner is the very first thing an unauthenticated agy
+ * emits, so silence this far in is good evidence we are signed in — and it lets
+ * the processes waiting on our verdict get moving instead of stalling behind a
+ * review that may run for minutes.
+ */
+const AGY_AUTH_GRACE_MS = 3000;
 // agy's own print-timeout message: on an agentic task that outruns --print-timeout,
 // it returns this (often with a "monitoring the task" note) instead of a review.
 // Treat it as a non-response → non-blocking skip rather than a garbage "review".
@@ -788,6 +797,21 @@ async function runAgyConsultation(
     return;
   }
 
+  // Pre-flight the shared auth cache BEFORE spawning (#1077). An unauthenticated
+  // agy opens a browser tab before it prints the OAuth URL we detect below, so
+  // post-spawn detection cannot prevent the tab — only not spawning can. Across a
+  // CMAP burst this collapses N stranded tabs into at most one per TTL window.
+  const preflight = await preflightAgyAuth(bin);
+  if (preflight.action === 'skip') {
+    const reason = preflight.reason ?? 'agy unauthenticated (cached)';
+    const content = agySkipContent(reason);
+    process.stdout.write(content);
+    writeConsultOutput(outputPath, content);
+    recordAgyMetrics(metricsCtx, startTime, 0, reason);
+    console.error(`\n[gemini (agy) skipped without spawning: ${reason}]`);
+    return;
+  }
+
   // agy has no system-prompt flag — fold the role into the prompt (hermes precedent).
   // Prepend strict constraint directive to force agy to remain on-task, prevent exploratory actions
   // that lead to wandering off-task, and avoid unrelated local skills/directories (Issue #1032).
@@ -841,12 +865,28 @@ async function runAgyConsultation(
     let scanBuf = '';
     let settled = false;
 
+    // When we hold the probe lock, other consult processes are polling the cache
+    // for our verdict — publish it as soon as it is knowable, and always release
+    // the lock, whatever this run turns into.
+    const graceTimer = preflight.isProber
+      ? setTimeout(() => preflight.publish('auth'), AGY_AUTH_GRACE_MS)
+      : null;
+    const publishAuth = (state?: AgyAuthState) => {
+      if (graceTimer) clearTimeout(graceTimer);
+      if (state) preflight.publish(state);
+      else preflight.release();
+    };
+
     const settleSkip = (reason: string, exitCode = 0) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       try { proc.kill('SIGTERM'); } catch { /* already gone */ }
       cleanup();
+      // No-op if a verdict was already published (e.g. the OAuth-marker path);
+      // otherwise this just releases the lock — a timeout or a spawn failure is
+      // not evidence either way about authentication.
+      publishAuth();
       const content = agySkipContent(reason);
       process.stdout.write(content);
       writeConsultOutput(outputPath, content);
@@ -865,6 +905,19 @@ async function runAgyConsultation(
       if (scanBuf.length < AGY_MARKER_SCAN_LIMIT) {
         scanBuf += buf.toString('utf-8');
         if (AGY_OAUTH_MARKERS.some((m) => scanBuf.includes(m))) {
+          // The one place we have positive proof of being signed out, so it is
+          // written unconditionally rather than through the once-only publish:
+          //   - If our own grace timer already guessed `auth` (agy took longer
+          //     than AGY_AUTH_GRACE_MS to emit its banner), that guess would
+          //     otherwise stand for the full auth TTL and every burst in that
+          //     window would spawn tabs again.
+          //   - A non-prober that failed open and spawned holds real evidence
+          //     too; discarding it would leave a misfired guess uncorrected
+          //     until the TTL lapsed, instead of on the very next spawn.
+          // recordAgyAuthState carries its own disabled-guard, so this is safe
+          // on every path.
+          recordAgyAuthState('unauth', bin);
+          publishAuth('unauth');
           settleSkip('agy not authenticated — run `agy` once to sign in (OAuth)', 1);
         }
       }
@@ -883,6 +936,9 @@ async function runAgyConsultation(
       cleanup();
       const raw = Buffer.concat(outChunks).toString('utf-8').trim();
       if (code !== 0 || raw.length === 0 || raw.includes(AGY_NONRESPONSE_MARKER)) {
+        // A broken run tells us nothing about auth — release without a verdict
+        // and let the next call re-probe.
+        publishAuth();
         const reason = code !== 0
           ? `agy exited with code ${code}`
           : raw.includes(AGY_NONRESPONSE_MARKER)
@@ -896,6 +952,8 @@ async function runAgyConsultation(
         resolve();
         return;
       }
+      // A real review is conclusive proof agy is signed in.
+      publishAuth('auth');
       // Plain-text stdout IS the review.
       process.stdout.write(raw);
       writeConsultOutput(outputPath, raw);
