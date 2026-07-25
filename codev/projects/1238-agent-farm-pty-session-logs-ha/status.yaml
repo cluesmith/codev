@@ -1,7 +1,7 @@
 id: '1238'
 title: agent-farm-pty-session-logs-ha
 protocol: air
-phase: implement
+phase: pr
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -11,4 +11,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-07-25T09:40:38.172Z'
-updated_at: '2026-07-25T09:40:38.173Z'
+updated_at: '2026-07-25T09:49:17.566Z'
