@@ -77,11 +77,19 @@ plus the most recent dated section*, so a save must leave exactly that behind:
 
 1. **Rewrite the current-state / open-loops section in place** — overwrite it
    with where things actually stand now (current focus + open loops + how to
-   resume). Do not accumulate stale "current state" blocks.
+   resume). Do not accumulate stale "current state" blocks, and never leave two
+   sections with the same heading (a duplicated "How to resume" or "Open loops"
+   means you appended where you should have overwritten). **Delete resolved
+   loops entirely** — a closed item's record is the log entry, not a lingering
+   line in current state.
 2. **Append one short dated log entry** capturing what changed this stretch.
-3. **Keep it to one screen (compaction discipline).** The state file is a
-   summary, not a transcript. When you append, prune stale dated sections so
-   the file stays readable at a glance.
+3. **Compact — this is part of the save, not optional polish.** Every save
+   both adds AND removes: after writing, keep only the last 2–3 dated log
+   entries in full and collapse everything older into a single one-line
+   "(compacted — see git log of this file)" entry. Hard cap: the whole file
+   stays under ~80 lines / one screen. If your save pushed it over, the save
+   is not done — prune until it fits. The file's history lives in git; the
+   file itself is only the live summary.
 
 **Content guardrails.** No secrets (tokens, keys, credentials). No transcript
 dumps or raw tool output. Include only: current focus, open loops, and the
