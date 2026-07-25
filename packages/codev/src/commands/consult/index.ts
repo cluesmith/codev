@@ -21,7 +21,7 @@ import { getResolver, GitRefResolver, type ArtifactResolver } from '../porch/art
 import { MetricsDB } from './metrics.js';
 import { extractUsage, extractReviewText, type SDKResultLike, type UsageData } from './usage-extractor.js';
 import { executeForgeCommandSync } from '../../lib/forge.js';
-import { preflightAgyAuth, type AgyAuthState } from './agy-auth-cache.js';
+import { preflightAgyAuth, recordAgyAuthState, type AgyAuthState } from './agy-auth-cache.js';
 
 // Content reference — resolved artifact content with a display label
 interface ContentRef {
@@ -905,8 +905,18 @@ async function runAgyConsultation(
       if (scanBuf.length < AGY_MARKER_SCAN_LIMIT) {
         scanBuf += buf.toString('utf-8');
         if (AGY_OAUTH_MARKERS.some((m) => scanBuf.includes(m))) {
-          // The one place we have positive proof of being signed out. Publish it
-          // so the rest of the burst skips without spawning (and without tabs).
+          // The one place we have positive proof of being signed out, so it is
+          // written unconditionally rather than through the once-only publish:
+          //   - If our own grace timer already guessed `auth` (agy took longer
+          //     than AGY_AUTH_GRACE_MS to emit its banner), that guess would
+          //     otherwise stand for the full auth TTL and every burst in that
+          //     window would spawn tabs again.
+          //   - A non-prober that failed open and spawned holds real evidence
+          //     too; discarding it would leave a misfired guess uncorrected
+          //     until the TTL lapsed, instead of on the very next spawn.
+          // recordAgyAuthState carries its own disabled-guard, so this is safe
+          // on every path.
+          recordAgyAuthState('unauth', bin);
           publishAuth('unauth');
           settleSkip('agy not authenticated — run `agy` once to sign in (OAuth)', 1);
         }

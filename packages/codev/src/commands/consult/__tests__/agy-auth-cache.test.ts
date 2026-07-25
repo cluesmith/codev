@@ -41,6 +41,7 @@ const ENV_KEYS = [
   'CODEV_AGY_AUTH_CACHE_WAIT_MS',
   'FAKE_AGY_LOG',
   'FAKE_AGY_MODE',
+  'FAKE_AGY_BANNER_DELAY_MS',
 ] as const;
 
 let dir: string;
@@ -60,8 +61,13 @@ const FAKE_AGY_SOURCE = `#!/usr/bin/env node
 const fs = require('node:fs');
 fs.appendFileSync(process.env.FAKE_AGY_LOG, process.pid + '\\n');
 if (process.argv[2] === '--version') { console.log('1.0.10-fake'); process.exit(0); }
-if (process.env.FAKE_AGY_MODE === 'unauth') {
-  process.stderr.write('Please visit https://accounts.google.com/o/oauth2/auth?client_id=fake\\n');
+if (process.env.FAKE_AGY_MODE === 'unauth' || process.env.FAKE_AGY_MODE === 'unauth-slow') {
+  // 'unauth-slow' emits the banner *after* the lane's marker-free grace period,
+  // the case that used to leave a false 'auth' verdict cached.
+  const delay = process.env.FAKE_AGY_MODE === 'unauth-slow' ? Number(process.env.FAKE_AGY_BANNER_DELAY_MS) : 0;
+  setTimeout(() => {
+    process.stderr.write('Please visit https://accounts.google.com/o/oauth2/auth?client_id=fake\\n');
+  }, delay);
   setTimeout(() => process.exit(1), 30000);   // hang like real agy; the lane kills us
 } else {
   process.stdout.write('---\\nVERDICT: APPROVE\\nSUMMARY: ok\\nCONFIDENCE: HIGH\\n---\\n');
@@ -339,6 +345,36 @@ describe('gemini lane burst behaviour (#1077 regression)', () => {
     for (let i = 0; i < 5; i++) {
       expect(fs.readFileSync(path.join(dir, `review-${i}.txt`), 'utf-8')).toContain('VERDICT: APPROVE');
     }
+  }, 30_000);
+
+  it('lets a late OAuth banner overwrite the speculative auth verdict', async () => {
+    // The lane guesses `auth` after a marker-free grace period so waiters are not
+    // stuck behind a long review. If agy is merely slow to print its banner, that
+    // guess is wrong — and left standing it would cache `auth` for the full auth
+    // TTL, re-opening a tab on every consult in that window. Positive marker
+    // evidence must win regardless of arrival order.
+    setMode('unauth-slow');
+    process.env.FAKE_AGY_BANNER_DELAY_MS = '3400';   // > the lane's 3s grace
+    muteStdout();
+
+    await runLane(1);
+
+    expect(checkCachedAgyAuth(fakeAgy)).toBe('unauth');
+  }, 30_000);
+
+  it('records the verdict even when the run that sees the banner is not the prober', async () => {
+    // A caller that fails open (another process holds the lock) still spawns, so
+    // it can be the one to observe the banner. Dropping that evidence would leave
+    // a misfired guess uncorrected until the TTL lapsed.
+    fs.mkdirSync(agyAuthCacheDir(), { recursive: true });
+    fs.writeFileSync(path.join(agyAuthCacheDir(), 'agy-auth.lock'), '99999 0\n');
+    process.env.CODEV_AGY_AUTH_CACHE_WAIT_MS = '200';   // fail open promptly
+    setMode('unauth');
+    muteStdout();
+
+    await runLane(1);
+
+    expect(checkCachedAgyAuth(fakeAgy)).toBe('unauth');
   }, 30_000);
 
   it('keeps spawning per call when the cache is disabled (pre-#1077 behaviour)', async () => {
