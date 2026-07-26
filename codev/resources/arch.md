@@ -240,6 +240,22 @@ Tower binds its port and starts serving immediately, but `reconcileTerminalSessi
 
 **Invariant for new Tower-startup work**: any endpoint that reads `workspaceTerminals` to build a response should route through `getRehydratedTerminalsEntry` so it inherits the gate, rather than reading the map directly.
 
+#### Boot Readiness Gate (#1261)
+
+The #997 barrier gates one dependency (reconcile's output) for the readers that name it. Every *other* boot dependency was still unguarded, and the largest of them was `initInstances()` — which sets `tower-instances.ts`'s `_deps` and was the last step of the boot sequence. Requests landing before it got whatever a half-wired Tower could produce: `DELETE /api/terminals/:id` returned **404 for a terminal that existed**, because `killTerminalWithShellper()` returns a bare `false` when `_deps` is null and the route reads that as "not found". The window scaled with disk state — the #1227 husk sweep and #1238 log sweep ran inside it — so a log-heavy machine failed deterministically while CI stayed green.
+
+The fix inverts the default from "serve whatever we have" to "serve nothing until wired":
+
+- The port still binds first. It is the single-Tower mutex (a second `afx tower start` needs `EADDRINUSE`) and what every readiness probe connects to.
+- `tower-server.ts` holds each request in `http.createServer` until `bootSequence()` calls `markBootComplete()`; held requests get 503 + `Retry-After` if boot exceeds `BOOT_READY_TIMEOUT_MS` (20s), so a hung boot fails loud instead of hanging clients forever.
+- `markBootComplete()` fires as soon as the *dependencies* are wired (through `initCron()`). Maintenance and background services — husk sweep, log-retention sweep, `initTunnel()` — deliberately run **after** it. Gating readiness on `initTunnel()` in particular would make an unreachable cloud endpoint look like a broken local Tower.
+
+This also makes `afx tower start`'s readiness signal honest: it polls `/api/status` for a 200, which the pre-fix Tower returned during the window (`getInstances()` returns `[]` when `_deps` is null).
+
+**Invariant for new Tower-startup work**: anything a request handler depends on must be wired *before* `markBootComplete()`; anything else (sweeps, timers, remote connections) goes after it. Do not add work between `server.listen()` and the gate.
+
+**Second line of defence**: `instancesReady()` lets routes distinguish "not wired yet" from "no such thing" — the `_deps`-dependent terminal-delete paths answer 503 rather than 404 or a lying 204. Unreachable while the gate holds, and deliberately so: the failure mode if it is ever bypassed should be honest.
+
 #### Wire Protocol
 
 Binary frame format: `[1-byte type] [4-byte big-endian length] [payload]`
@@ -1713,7 +1729,7 @@ The startup ordering is critical — race conditions have caused real bugs when 
 
 | Step | Operation | Why this order |
 |------|-----------|----------------|
-| 1 | HTTP server binds to `localhost:port` | Must be listening before anything registers routes |
+| 1 | HTTP server binds to `localhost:port` | Single-Tower mutex + what readiness probes connect to. **Requests are held, not served, until step 9** (#1261) |
 | 2 | SessionManager init + stale socket cleanup | Prepares shellper infrastructure |
 | 3 | `initTerminals()` | Terminal management module ready |
 | 4 | `startSendBuffer()` | Typing-aware message delivery ready |
@@ -1721,12 +1737,15 @@ The startup ordering is critical — race conditions have caused real bugs when 
 | 6 | `killOrphanedShellpers()` | **MUST run after step 5** — avoids killing sessions that were just reconnected |
 | 7 | `initInstances()` | Enables workspace API handlers — triggers dashboard polling |
 | 8 | `initCron()` | Scheduler starts after instances ready |
-| 9 | `initTunnel()` | Cloud tunnel connects last |
-| 10 | WebSocket upgrade handler installed | Terminal connections accepted |
+| 9 | **`markBootComplete()`** | **Readiness gate opens** — held requests are released and Tower starts serving (#1261) |
+| 10 | Husk sweep (#1227) + session-log sweep (#1238) | Maintenance: scales with disk state, so it must not gate the API |
+| 11 | `initTunnel()` | Cloud tunnel connects last — a remote endpoint must never gate local readiness |
+| 12 | WebSocket upgrade handler installed | Terminal connections accepted (installed at module load; not gated — see #997 barrier) |
 
 **Known ordering bugs**:
 - **Bugfix #274**: `initInstances()` before `reconcileTerminalSessions()` allowed dashboard polls to race with reconciliation, corrupting shellper sessions
 - **Bugfix #341**: Killing orphaned shellpers before reconciliation killed sessions that were about to be reconnected
+- **Bugfix #1261**: `initInstances()` ran last, *after* the two disk-scaling sweeps, so every `_deps`-dependent route was broken for as long as those scans took — `DELETE /api/terminals/:id` 404'd for a terminal that existed. Fixed by moving the sweeps after readiness and holding requests until step 9
 
 **Defense in depth**: During startup, `getTerminalsForWorkspace()` skips on-the-fly shellper reconnection (via `_reconciling` guard) to prevent races through alternate code paths.
 

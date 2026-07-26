@@ -58,6 +58,7 @@ import {
   getDirectorySuggestions,
   launchInstance,
   killTerminalWithShellper,
+  instancesReady,
   stopInstance,
   addArchitect,
   removeArchitect,
@@ -194,6 +195,25 @@ const ROUTES: Record<string, RouteEntry> = {
   'GET /':                (_req, res, _url, ctx) => handleDashboard(res, ctx),
   'GET /index.html':      (_req, res, _url, ctx) => handleDashboard(res, ctx),
 };
+
+/**
+ * Issue #1261: tell "Tower isn't wired up yet" apart from "no such thing".
+ * A route that needs the instances module must not report a missing terminal
+ * (404) or a successful kill (204) when the truth is that it could not act at
+ * all. 503 + Retry-After says so, and matches what `stopInstance()` already
+ * returns in the same situation.
+ *
+ * Tower's readiness gate holds requests until boot completes, so these guards
+ * should be unreachable in practice — they exist so the failure mode, if the
+ * gate is ever bypassed, is honest rather than misleading.
+ */
+function respondStartingUp(res: http.ServerResponse): void {
+  res.writeHead(503, { 'Content-Type': 'application/json', 'Retry-After': '1' });
+  res.end(JSON.stringify({
+    error: 'STARTING_UP',
+    message: 'Tower is still starting up. Try again shortly.',
+  }));
+}
 
 // ============================================================================
 // Main request handler
@@ -840,6 +860,12 @@ async function handleTerminalRoutes(
 
   // DELETE /api/terminals/:id - Kill terminal (disable shellper auto-restart if applicable)
   if (req.method === 'DELETE' && (!subpath || subpath === '')) {
+    // Issue #1261: without this, a not-yet-wired Tower answers 404 for a
+    // terminal that exists — the exact symptom the issue reports.
+    if (!instancesReady()) {
+      respondStartingUp(res);
+      return;
+    }
     if (!(await killTerminalWithShellper(manager, terminalId))) {
       res.writeHead(404, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'NOT_FOUND', message: `Session ${terminalId} not found` }));
@@ -2531,6 +2557,13 @@ async function handleWorkspaceTabDelete(
   }
 
   if (terminalId) {
+    // Issue #1261: this path discards the kill result and answers 204 either
+    // way, so a not-yet-wired Tower would report a successful close for a
+    // terminal it never touched. Refuse instead.
+    if (!instancesReady()) {
+      respondStartingUp(res);
+      return;
+    }
     // Disable shellper auto-restart if applicable, then kill the PtySession
     await killTerminalWithShellper(manager, terminalId);
 

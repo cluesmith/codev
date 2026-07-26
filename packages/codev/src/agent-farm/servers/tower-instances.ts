@@ -168,6 +168,21 @@ export function shutdownInstances(): void {
   _deps = null;
 }
 
+/**
+ * Whether the module has been wired up.
+ *
+ * Issue #1261: routes that call into this module need to tell "not wired yet"
+ * apart from "no such thing", because those deserve different answers — 503
+ * "try again" versus 404 "it isn't here". `killTerminalWithShellper()` returns
+ * a bare boolean and cannot express the difference, so the DELETE route lands
+ * on 404 for a terminal that exists. Tower's readiness gate now holds requests
+ * until boot completes, so this should never be false at request time; it is
+ * kept as a second line of defence.
+ */
+export function instancesReady(): boolean {
+  return _deps !== null;
+}
+
 // ============================================================================
 // Known workspace registration
 // ============================================================================
