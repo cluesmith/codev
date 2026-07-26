@@ -9,7 +9,21 @@
 
 import { resolve, dirname } from 'node:path';
 import { execSync } from 'node:child_process';
-import { existsSync, lstatSync, statSync, readFileSync, writeFileSync, chmodSync, symlinkSync, readdirSync, mkdirSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import {
+  existsSync,
+  lstatSync,
+  statSync,
+  readFileSync,
+  writeFileSync,
+  chmodSync,
+  symlinkSync,
+  readdirSync,
+  mkdirSync,
+  copyFileSync,
+  renameSync,
+  rmSync,
+} from 'node:fs';
 import { globSync } from 'glob';
 import type { Config, ProtocolDefinition } from '../types.js';
 import { logger, fatal } from '../utils/logger.js';
@@ -132,6 +146,36 @@ export function symlinkConfigFiles(config: Config, worktreePath: string): void {
 }
 
 /**
+ * Refresh the builder's personal project configuration from the main
+ * workspace without creating a write-through symlink.
+ *
+ * The main workspace is authoritative when its config.local.json exists.
+ * Copying through a sibling temporary file keeps replacement atomic. When the
+ * main file is absent, an existing builder-local preference is left untouched.
+ *
+ * @returns true when a snapshot was written, false when no source existed
+ */
+export function syncLocalConfigSnapshot(config: Config, worktreePath: string): boolean {
+  const source = resolve(config.workspaceRoot, '.codev', 'config.local.json');
+  if (!existsSync(source)) return false;
+
+  const targetDir = resolve(worktreePath, '.codev');
+  const target = resolve(targetDir, 'config.local.json');
+  const temporary = `${target}.tmp-${process.pid}-${randomUUID()}`;
+
+  mkdirSync(targetDir, { recursive: true });
+  try {
+    copyFileSync(source, temporary);
+    renameSync(temporary, target);
+  } finally {
+    rmSync(temporary, { force: true });
+  }
+
+  logger.info('Refreshed .codev/config.local.json snapshot from workspace root');
+  return true;
+}
+
+/**
  * Run user-configured post-spawn commands inside a freshly-created worktree.
  *
  * Each command runs sequentially in its own `bash -c` subshell with cwd =
@@ -172,6 +216,7 @@ export async function createWorktree(config: Config, branchName: string, worktre
   }
 
   symlinkConfigFiles(config, worktreePath);
+  syncLocalConfigSnapshot(config, worktreePath);
   await runPostSpawnHooks(worktreePath, getWorktreeConfig(config.workspaceRoot).postSpawn);
 }
 
@@ -404,6 +449,7 @@ export async function createWorktreeFromBranch(
   }
 
   symlinkConfigFiles(config, worktreePath);
+  syncLocalConfigSnapshot(config, worktreePath);
   await runPostSpawnHooks(worktreePath, getWorktreeConfig(config.workspaceRoot).postSpawn);
 }
 

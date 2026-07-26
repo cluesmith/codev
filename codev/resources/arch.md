@@ -486,6 +486,13 @@ When spawning a builder (`afx spawn 3 --protocol spir`):
    - `.builder-prompt.txt`: Initial prompt for the builder
    - `.builder-role.md`: Role definition (from `codev/roles/builder.md`)
    - `.builder-start.sh`: Launch script for builder session
+   - Root `.env` and shared `.codev/config.json`: symlinked into the worktree,
+     along with configured `worktree.symlinks`
+   - Personal `.codev/config.local.json`: when present in the main workspace,
+     copied atomically into the builder as a regular-file snapshot so builder
+     writes cannot mutate the main file; `afx setup` refreshes the snapshot
+   - Configured `worktree.postSpawn` hooks: run after symlinks and the personal
+     config snapshot are ready
 
 #### Worktree Write-Guard (Issue #1018)
 
