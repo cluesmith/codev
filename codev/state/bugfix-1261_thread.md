@@ -88,3 +88,24 @@ firing) and the status-hold assertion 2ms vs the required ≥1200ms.
 Known adjacent case left alone: WebSocket upgrades bypass the gate
 (`setupUpgradeHandler` attaches its own listener). Not reachable in practice —
 every client does an HTTP call first — so out of BUGFIX scope; noted in the PR.
+
+## PR
+
+PR #1263 — "[Bugfix #1261] Hold Tower API requests until boot wiring completes".
+
+CMAP (3-way, `--issue 1261 --project-id bugfix-1261`; note the bare
+`consult --protocol bugfix --type pr` form bails with "Multiple projects
+found" in this repo — it needs the issue/project flags):
+
+| Model  | Verdict | Confidence | Key issues |
+|--------|---------|------------|------------|
+| gemini | APPROVE | HIGH       | None |
+| codex  | APPROVE | HIGH       | None |
+| claude | APPROVE | HIGH       | None |
+
+No REQUEST_CHANGES, so nothing to address or rebut. Claude raised two
+non-blocking observations and dismissed both itself: the `waitForPortImmediate`
+name, and whether the `elapsed >= BOOT_DELAY_MS * 0.8` assertion is CI-timing
+sensitive (it isn't — a slow machine only makes `>=` more true).
+
+Awaiting the human `pr` gate.
