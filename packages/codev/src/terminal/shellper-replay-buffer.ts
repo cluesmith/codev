@@ -7,7 +7,43 @@
  *
  * This module has NO dependencies beyond Node.js built-ins so the shellper
  * process doesn't need to pull in the full package dependency tree.
+ * (shellper-protocol.ts is a sibling module under the same constraint.)
  */
+
+const ESC = 0x1b;
+
+/**
+ * How far past a byte-driven trim point we scan looking for an ESC to align to.
+ * Bounded so alignment can never turn into a long scan over ESC-free data.
+ */
+const ESC_ALIGN_SCAN_LIMIT = 4096;
+
+/**
+ * Nudge a trim offset forward to the next ESC byte, so a cut doesn't land in
+ * the middle of an escape sequence and leave the client rendering its tail as
+ * literal garbage. Returns `offset` unchanged when no ESC is within the scan
+ * window, which is the correct fallback: a raw cut is what we'd have done
+ * anyway, and the post-connect repaint nudge covers the rest.
+ *
+ * Only byte-driven cuts need this. A newline-driven cut lands just past a
+ * `\n`, which can never appear inside an escape sequence, so it is already
+ * safe and aligning it would discard content for nothing.
+ */
+function alignToEscape(buf: Buffer, offset: number): number {
+  const limit = Math.min(buf.length, offset + ESC_ALIGN_SCAN_LIMIT);
+  for (let i = offset; i < limit; i++) {
+    if (buf[i] === ESC) return i;
+  }
+  return offset;
+}
+
+function countNewlines(buf: Buffer): number {
+  let count = 0;
+  for (let i = 0; i < buf.length; i++) {
+    if (buf[i] === 0x0a) count++;
+  }
+  return count;
+}
 
 export class ShellperReplayBuffer {
   private chunks: Buffer[] = [];
@@ -70,13 +106,47 @@ export class ShellperReplayBuffer {
   }
 
   /**
-   * Get all buffered data as a single concatenated Buffer.
-   * Used for the REPLAY frame on reconnection.
+   * Get buffered data as a single Buffer, for the REPLAY frame on reconnection.
+   *
+   * @param maxBytes When given, return at most this many bytes (the most recent
+   *   ones). The tail is collected by walking `chunks` backwards and slicing
+   *   only the boundary chunk, so the allocation is O(maxBytes) rather than
+   *   O(history).
+   *
+   * That distinction is the whole point (#1205). This runs on *every* client
+   * connect, and the caller's cap used to be applied to the result — meaning a
+   * multi-GB buffer allocated a multi-GB copy on top of itself at exactly the
+   * moment a user opened the terminal, then threw almost all of it away. Peak
+   * footprint doubled, and sessions were killed for it. Capping here bounds the
+   * spike regardless of how large the buffer has already grown, which also
+   * makes this correct for a buffer that accumulated before any byte ceiling
+   * existed.
    */
-  getReplayData(): Buffer {
+  getReplayData(maxBytes?: number): Buffer {
     if (this.chunks.length === 0) return Buffer.alloc(0);
-    if (this.chunks.length === 1) return this.chunks[0];
-    return Buffer.concat(this.chunks);
+    if (maxBytes === undefined || this.totalBytes <= maxBytes) {
+      if (this.chunks.length === 1) return this.chunks[0];
+      return Buffer.concat(this.chunks, this.totalBytes);
+    }
+    if (maxBytes <= 0) return Buffer.alloc(0);
+
+    const tail: Buffer[] = [];
+    let collected = 0;
+    for (let i = this.chunks.length - 1; i >= 0 && collected < maxBytes; i--) {
+      const chunk = this.chunks[i];
+      const remaining = maxBytes - collected;
+      if (chunk.length <= remaining) {
+        tail.push(chunk);
+        collected += chunk.length;
+        continue;
+      }
+      // Boundary chunk: take only its tail, aligned off a mid-sequence cut.
+      const piece = chunk.subarray(alignToEscape(chunk, chunk.length - remaining));
+      tail.push(piece);
+      collected += piece.length;
+    }
+    tail.reverse();
+    return Buffer.concat(tail, collected);
   }
 
   /** Current number of bytes stored. */

@@ -1,0 +1,119 @@
+import { describe, it, expect } from 'vitest';
+import { ShellperReplayBuffer } from '../shellper-replay-buffer.js';
+
+/** A buffer with ceilings high enough that no eviction interferes. */
+function unbounded(): ShellperReplayBuffer {
+  return new ShellperReplayBuffer(1_000_000, 1024 * 1024 * 1024);
+}
+
+describe('ShellperReplayBuffer', () => {
+  describe('getReplayData() without a cap', () => {
+    it('returns empty for an empty buffer', () => {
+      expect(unbounded().getReplayData().length).toBe(0);
+    });
+
+    it('returns the concatenation of all chunks', () => {
+      const buf = unbounded();
+      buf.append('one ');
+      buf.append('two ');
+      buf.append('three');
+      expect(buf.getReplayData().toString()).toBe('one two three');
+    });
+
+    it('accepts strings and Buffers interchangeably', () => {
+      const buf = unbounded();
+      buf.append('a');
+      buf.append(Buffer.from('b'));
+      expect(buf.getReplayData().toString()).toBe('ab');
+    });
+  });
+
+  describe('getReplayData(maxBytes) — cap before concat (#1205)', () => {
+    it('returns exactly the last maxBytes across many chunks', () => {
+      const buf = unbounded();
+      for (let i = 0; i < 100; i++) buf.append(Buffer.alloc(100, 0x61));
+      const out = buf.getReplayData(250);
+      expect(out.length).toBe(250);
+      expect(out.every((b) => b === 0x61)).toBe(true);
+    });
+
+    it('returns the true tail content, not merely the right length', () => {
+      const buf = unbounded();
+      buf.append('AAAA');
+      buf.append('BBBB');
+      buf.append('CCCC');
+      expect(buf.getReplayData(6).toString()).toBe('BBCCCC');
+    });
+
+    it('slices the boundary chunk rather than dropping it whole', () => {
+      const buf = unbounded();
+      buf.append('0123456789');
+      buf.append('abcde');
+      // Cap lands inside the first chunk: 3 of its bytes plus all of the second.
+      expect(buf.getReplayData(8).toString()).toBe('789abcde');
+    });
+
+    it('returns everything when the cap exceeds the buffer', () => {
+      const buf = unbounded();
+      buf.append('short');
+      expect(buf.getReplayData(1000).toString()).toBe('short');
+    });
+
+    it('is byte-identical to the uncapped result when the cap is not reached', () => {
+      const buf = unbounded();
+      buf.append('alpha');
+      buf.append('beta');
+      expect(buf.getReplayData(100)).toEqual(buf.getReplayData());
+    });
+
+    it('handles a zero or negative cap without throwing', () => {
+      const buf = unbounded();
+      buf.append('data');
+      expect(buf.getReplayData(0).length).toBe(0);
+      expect(buf.getReplayData(-1).length).toBe(0);
+    });
+
+    it('returns empty for an empty buffer regardless of cap', () => {
+      expect(unbounded().getReplayData(100).length).toBe(0);
+    });
+
+    /**
+     * The #1253 shape: a long-lived full-screen TUI emits no newlines, so the
+     * line ceiling never fires and history accumulates. Asking for a capped
+     * replay must not first materialise that history.
+     */
+    it('caps a large newline-free history down to the requested tail', () => {
+      const buf = unbounded();
+      for (let i = 0; i < 500; i++) buf.append(Buffer.alloc(4096, 0x78));
+      expect(buf.size).toBe(500 * 4096);
+      expect(buf.getReplayData(64 * 1024).length).toBe(64 * 1024);
+    });
+
+    it('moves a mid-sequence cut forward to the next escape boundary', () => {
+      const buf = unbounded();
+      // Layout: AAAA(0-3) ESC[31m(4-8) BBBB(9-12) ESC[0m(13-16) CCCC(17-20).
+      // A cap of 15 cuts at offset 6, i.e. inside the first escape sequence —
+      // emitting from there would send "31mBBBB..." as literal text. Alignment
+      // must advance to the ESC at 13, yielding strictly fewer bytes than asked
+      // for rather than a corrupt prefix.
+      buf.append('AAAA\x1b[31mBBBB\x1b[0mCCCC');
+      const out = buf.getReplayData(15);
+      expect(out.toString()).toBe('\x1b[0mCCCC');
+      expect(out.length).toBeLessThan(15);
+    });
+
+    it('falls back to a raw cut when no escape sequence follows the cut point', () => {
+      const buf = unbounded();
+      buf.append('x'.repeat(10_000));
+      expect(buf.getReplayData(100).length).toBe(100);
+    });
+
+    it('does not scan unboundedly for an escape boundary', () => {
+      const buf = unbounded();
+      // The only ESC sits far beyond the scan window, so the cut stays raw
+      // and the caller gets the full requested tail.
+      buf.append('\x1b[0m' + 'y'.repeat(100_000));
+      expect(buf.getReplayData(1000).length).toBe(1000);
+    });
+  });
+});

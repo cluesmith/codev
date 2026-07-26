@@ -388,7 +388,16 @@ export class ShellperProcess extends EventEmitter {
     // that fit; a tail-trimmed replay can render imperfectly for alt-screen
     // TUIs (#1047), but the client's post-connect resize nudge repaints,
     // and a truncated replay beats a dead connection.
-    let replayData = this.replayBuffer.getReplayData();
+    //
+    // #1205: the cap is passed *into* the buffer rather than applied to its
+    // result. This path runs on every connect, so capping afterwards meant
+    // allocating a copy of the entire session history first — the multi-GB
+    // open-time spike. The guard below is now a no-op for any buffer built by
+    // this binary (its byte ceiling is REPLAY_BUFFER_MAX_BYTES, and
+    // REPLAY_PAYLOAD_MAX is not larger); it is kept deliberately, as the
+    // invariant belongs at the send site and must not depend on a caller
+    // elsewhere remembering to pass the argument.
+    let replayData = this.replayBuffer.getReplayData(REPLAY_PAYLOAD_MAX);
     if (replayData.length > REPLAY_PAYLOAD_MAX) {
       this.log(`Replay ${replayData.length} bytes exceeds cap; sending last ${REPLAY_PAYLOAD_MAX}`);
       replayData = replayData.subarray(replayData.length - REPLAY_PAYLOAD_MAX);
