@@ -39,3 +39,29 @@ Also noted: byte-trimming was rejected in #1047 for mid-escape-sequence corrupti
 **Deployment caveat for release notes:** only shellpers spawned after the upgrade benefit; long-lived pre-upgrade shellpers keep their buffers until restarted.
 
 Plan committed, sitting at `plan-approval`.
+
+## Implement phase
+
+Gate approved 2026-07-26. Three commits, one per phase.
+
+### Two bugs I introduced and caught before the gate
+
+Worth recording because both were invisible to the tests I'd written for the feature itself:
+
+1. **Copy-per-call on the hot path.** My first cut of the `RingBuffer` partial cap trimmed back to exactly the ceiling. That puts the partial over the ceiling again on the *very next* append, so every subsequent `pushData` would copy the whole 2MB partial: precisely the O(|partial|)-per-call cost that #1047 restructured away. Fixed by trimming to *half* the ceiling, which amortises the copy over the next half-ceiling of growth (O(1) per byte). Added a test that counts trims across 200 appends and fails if it's anywhere near one-per-call. A cap that reintroduces the CPU bug it was meant to sit alongside would have been a bad trade.
+2. **`subarray` keeps the whole backing store alive.** Trimming the shellper buffer's sole chunk via `subarray` retains the *original* allocation, so trimming an oversized chunk down to 8MB would have freed nothing. In a PR whose entire point is bounding memory, that's the sort of thing that ships silently. Now copies via `Buffer.from` on that path only (rare, bounded by `maxBytes`).
+
+### Test-quality note
+
+Three of my own tests were wrong rather than the code:
+
+- An ESC-alignment test passed without exercising alignment (the raw cut happened to land exactly on the ESC). Replaced with a case where the cut lands genuinely mid-sequence and alignment must move it. A test that passes for the wrong reason is worse than no test.
+- Two `RingBuffer` tests asserted behaviour that never existed: `getSince` returns `[]` for a caught-up client *by design* (documented at #1047, covered by the repaint nudge). Corrected to assert the documented behaviour, and added an explicit test pinning that gap so a future reader can't mistake the new cap for having introduced it.
+
+### Expected test collision
+
+`shellper-process.test.ts`'s #1198 test grew the buffer past `REPLAY_PAYLOAD_MAX` to exercise the send-path cap. The byte ceiling makes that unreachable at default settings, which is exactly the rot the plan predicted. Fixed by raising *that shellper's* ceiling explicitly via the new constructor arg, so the guard stays exercised, and added a companion test asserting a default shellper can no longer produce an oversized replay at all.
+
+### Pre-existing failures (not mine, not touched)
+
+8 `session-manager.test.ts` integration tests fail with `MODULE_NOT_FOUND` because they spawn the built `dist/terminal/shellper-main.js`. Verified pre-existing by stashing my changes and re-running: identical failures on a clean tree. They pass once `pnpm build` has run. Per protocol, out of scope.
