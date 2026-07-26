@@ -29,7 +29,10 @@ Tower-side `RingBuffer.partial` has the identical shape at smaller magnitude (~2
   - Client-side note for the follow-up: the VSCode extension needs zero changes. It's a pure `vscode.Pseudoterminal` consumer of escape sequences with no emulation dep of its own, so serializing back to bytes keeps the wire contract intact. The "same emulation core on both ends" argument only half-holds: the dashboard pins `@xterm/xterm ^5.5.0`, but the VSCode path renders in VSCode's own bundled xterm at a version we don't control.
 
   Consequence unchanged: AC#2 is **not** delivered by this PR; the other three are. Asked the architect to rule: follow-up issue, or keep #1205 open after merge.
-- **Byte cap = 8MB, not the issue's 16–32MB.** Nothing above `REPLAY_PAYLOAD_MAX` (8MB) can ever leave the process — the send site caps there and Tower seeds only 1MB. Bytes above 8MB are unreadable by any consumer, pure resident cost. One-constant change if the architect wants headroom.
+- **Byte cap = 8MB, not the issue's 16–32MB. DECIDED: architect approved 8MB at the plan gate.** Nothing above `REPLAY_PAYLOAD_MAX` (8MB) can ever leave the process: verified that every send caps at `shellper-process.ts:391-395` and that `ShellperProcess.getReplayData()` (`:477`) has zero production callers. Bytes above 8MB are unreadable by any consumer, pure resident cost. Peak/session 16MB vs 40MB at a 32MB cap, ~480MB across twenty sessions.
+  - Not lower than 8MB because `afx attach` writes the full payload to stdout (`attach.ts:171-174`); the ring-seed path only takes 1MB.
+  - Traced while checking this: `capRingSeed` is applied at only 2 of 6 `waitForReplay()` sites. Not a gap — the other four are creation paths (fresh `createSession`, replay empty by construction). Recording it so the next reader doesn't re-derive it as a bug.
+  - Known cost: buffer cap == wire cap makes the send-path trim at `:392-395` a no-op in new binaries. Keeping it as defense-in-depth; unit tests must cover it so it can't rot silently.
 
 Also noted: byte-trimming was rejected in #1047 for mid-escape-sequence corruption, but every existing containment cap (#1204/#1218) is already a lossy tail-cut relying on the resize nudge. Extending that contract to the buffer is consistent, not a new compromise. Adding optional ESC-boundary alignment on cuts to shrink the garbage window.
 

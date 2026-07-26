@@ -107,7 +107,18 @@ Add a `maxBytes` ceiling alongside `maxLines`; evict oldest chunks whenever *eit
 - Unify the two eviction conditions into one loop so `lineCount` is decremented correctly on byte-driven eviction (the existing loop at `:45-54` already does the newline recount — reuse it, just extend the predicate).
 - Preserve the existing "never evict the last chunk" guard (`chunks.length > 1`), then front-`subarray` that final chunk if it alone exceeds `maxBytes` — mirroring the existing single-chunk line-trim path at `:58-69`.
 
-**Value choice — I propose `REPLAY_BUFFER_MAX_BYTES = 8MB` (= `REPLAY_PAYLOAD_MAX`), not the 16–32MB the issue suggests.** Rationale: nothing above `REPLAY_PAYLOAD_MAX` can *ever* leave the process — the send site caps at 8MB and Tower seeds only 1MB of that. Bytes retained above 8MB are unreadable by any consumer; they are pure resident cost. 8MB also bounds worst-case per-session footprint at 8MB resident + 8MB transient concat = 16MB peak, which matters when a workspace has 20+ sessions. If the architect wants headroom for a future emulator's scrollback, 16MB is the conservative alternative and is a one-constant change — **flagging this as a gate decision.**
+**Value: `REPLAY_BUFFER_MAX_BYTES = 8MB` (= `REPLAY_PAYLOAD_MAX`), not the 16–32MB the issue suggests. Decided by the architect at the plan gate.**
+
+8MB is provably the ceiling on what can ever leave the process, so bytes retained above it are unreadable by every consumer and are pure resident cost. Both halves of that claim were verified against the source, not assumed:
+
+- Every send is capped at `REPLAY_PAYLOAD_MAX` (`shellper-process.ts:391-395`), with no exceptions on that path.
+- `ShellperProcess.getReplayData()` (`:477`) is the only other reader and has **no production callers** — `shellper-process.test.ts` is the sole consumer.
+
+It also bounds worst-case per-session footprint at 8MB resident + 8MB transient concat = 16MB peak, versus 40MB at a 32MB cap. Across twenty sessions that is a ~480MB difference on the same machine the incident report describes hitting memory pressure.
+
+Not lower than 8MB, because downstream consumption is uneven: the adoption and reconcile paths seed only 1MB (`capRingSeed`, `tower-terminals.ts:754,995`), and the four uncapped `waitForReplay()` sites are all creation paths where the shellper was just spawned via `createSession` (replay empty by construction, which is why #1204 correctly capped only the adoption pair). But `afx attach` writes the full payload straight to stdout (`attach.ts:171-174`), and that consumer is what keeps 8MB honest rather than 1MB.
+
+**Known cost of this choice:** with the buffer cap equal to the wire cap, the send-path trim at `:392-395` becomes a permanent no-op in new binaries, so it stops being exercised in production. It is kept regardless (it still guards the accessor and any future caller) and must stay covered by unit tests so it cannot rot silently.
 
 The constant belongs in `shellper-protocol.ts` next to `REPLAY_PAYLOAD_MAX` (same wire-adjacent concern, already imported by `shellper-process.ts`), with the buffer taking it as a constructor default so `shellper-replay-buffer.ts` keeps its zero-import property.
 
@@ -155,7 +166,7 @@ Costs ~10 lines in one shared helper, strictly reduces the garbage window, and c
 This is #1047's objection and it is real. Mitigations: (a) the post-connect resize nudge already repaints full-screen apps and is the mechanism every existing cap relies on; (b) ESC-boundary alignment shrinks the garbage window; (c) the caps are far above a screenful (8MB buffer, 2MB partial vs. a few KB of actual screen), so trimming only engages on sessions that are *already* broken today. Accepted — and it is the same contract the wire already ships.
 
 **Risk: 8MB is too aggressive and someone wants deep scrollback later.**
-One-constant change; called out above as an explicit gate decision.
+Accepted by the architect at the plan gate, on the reasoning above. Remains a one-constant change if a future consumer ever justifies more; note that the deferred emulator is *not* such a consumer, since it would replace this buffer rather than read it.
 
 **Risk: unifying the two eviction paths regresses line-cap behaviour.**
 Mitigated by keeping the existing line tests green and adding byte-cap tests alongside them, not replacing them.
