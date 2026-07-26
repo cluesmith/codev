@@ -43,14 +43,39 @@ Of the issue's four acceptance criteria, this PR fully satisfies three:
 
 The issue names a headless terminal-state emulator as the preferred end-state. **I recommend deferring it to a separate issue** and argue that here so the architect can rule at the gate.
 
-It is not a phase-sized change:
+The obvious case for deferring is size: it needs a spec, a consult pass, and a dependency decision, which is SPIR-shaped rather than PIR-phase-shaped. That case is true but it is the weaker one. The stronger case is that **the emulator does not subsume this work, and its resource profile is a trade rather than a win.**
 
-- It adds a VT emulator to the shellper's **runtime** dependency tree. The shellper is deliberately dependency-light: `shellper-replay-buffer.ts:8-9` states the module has no deps beyond Node built-ins precisely so the detached process doesn't pull the package tree, and `shellper-main.ts:25-27,62-64` loads even node-pty lazily via `createRequire` rather than as a static import. Adding a VT emulator to a detached, long-lived, upgrade-surviving process is an install-path and reliability decision in its own right — and *which* emulator is itself a question the follow-up should answer, not something to presuppose here.
-- Serialization back to escape sequences must faithfully restore alt-screen state, cursor visibility and style (DECSCUSR), mouse-tracking modes, bracketed paste, scroll region, charset, and colors. Getting any one of them wrong silently breaks *input* in the reattached TUI — a worse failure than a rough repaint, and one that would land unnoticed.
-- It changes the per-byte cost of every session from O(1) buffer append to full VT emulation on the Tower host.
-- Resize semantics need an answer: at what cols/rows is the screen serialized when the reconnecting viewer's geometry differs?
+#### It is a CPU-for-memory trade, not a free improvement
 
-That is spec-and-consult work (SPIR-shaped), and it is not on the critical path: the caps below remove the memory pressure and the crash today, and the resize nudge already covers the rendering gap it would close. **Ask at the gate:** file a follow-up issue for the emulator and close #1205 with this PR, or keep #1205 open after merge as the emulator tracker. I'll do whichever the architect picks.
+`append()` today is roughly O(1) per byte: a buffer push plus a newline scan. An emulator replaces that with full parse-and-mutate-grid work on **every byte of every session, continuously, whether or not a viewer is attached**. That cost currently exists only in the client and only while someone is watching; the emulator moves it into the shellper and makes it unconditional. For a workspace running twenty heavily-streaming sessions (token output, test logs) that is a permanent CPU floor where today there is none.
+
+#### Its memory floor is not obviously smaller than the byte cap
+
+This is the part that most needs stating, because "screen-shaped means small" is the intuition the issue is built on and it only holds under a constraint nobody has written down yet.
+
+The dashboard configures `scrollback: 50000` (`apps/web/src/components/Terminal.tsx:232`). At roughly 12 bytes per cell in xterm's typed-array cell layout (order of magnitude; **verify during the follow-up**), a 200-column grid with that scrollback filled is on the order of 100MB+ per session. That is an order of magnitude *worse* than the 8MB byte cap proposed below. Even a modest 1,000-line scrollback lands near 3MB, so the win over 8MB is real but unspectacular.
+
+The emulator is a memory win **only if the shellper's scrollback is deliberately kept tiny**. That is defensible (the shellper needs the current screen plus a little context; the client keeps its own scrollback) but it is an explicit decision that cuts directly against the instinct to match the client's configuration. Copying `50000` server-side would build a worse version of the bug being fixed.
+
+#### It fixes two of the three problems, not all three
+
+The emulator lives in the shellper, so it addresses Defects A and B structurally. It does **nothing** for the Tower-side `RingBuffer.partial`: that is a separate accumulator in a different process, fed by the live stream at `pty-session.ts:310` rather than by replay. A bounded screen-shaped replay bounds the ring *seed*, but the partial still grows unbounded for the session's life exactly as it does today. **Phase 3 below is required whether or not the emulator ever ships**, unless Tower grows an emulator of its own.
+
+#### The remaining design questions
+
+- It adds a VT emulator to the shellper's **runtime** dependency tree. The shellper is deliberately dependency-light: `shellper-replay-buffer.ts:8-9` states the module has no deps beyond Node built-ins precisely so the detached process doesn't pull the package tree, and `shellper-main.ts:25-27,62-64` loads even node-pty lazily via `createRequire` rather than as a static import. Adding one to a detached, long-lived, upgrade-surviving process is an install-path and reliability decision in its own right, and *which* emulator is itself a question the follow-up should answer rather than something to presuppose here.
+- Serialization back to escape sequences must faithfully restore alt-screen state, cursor visibility and style (DECSCUSR), mouse-tracking modes, bracketed paste, scroll region, charset, and colors. Getting any one wrong silently breaks *input* in the reattached TUI: a worse failure than a rough repaint, and one that would land unnoticed.
+- Resize semantics need an answer. A serialized screen is composed at the shellper's current cols/rows; hand a client a pre-composed grid at the wrong width and lines wrap wrong. The connect ordering in the VSCode adapter (auth, resize, replay, resume, `apps/vscode/src/terminal-adapter.ts:202-205`) becomes *more* load-bearing under this design, not less.
+
+#### Conclusion
+
+The emulator's genuine payoff is **correctness**, not resource usage: it delivers AC#2 and would let the repaint nudge (`terminal-adapter.ts:455-460`, the one-row-resize SIGWINCH hack) be deleted. It should be argued and specced on those grounds. Meanwhile Phases 1 and 2 buy the same bounded-memory outcome immediately, at zero CPU cost, with no dependency and no scrollback-sizing decision that can silently regress; Phase 3 is orthogonal to it entirely.
+
+**Ask at the gate:** file a follow-up issue for the emulator and close #1205 with this PR, or keep #1205 open after merge as the emulator tracker. I'll do whichever the architect picks.
+
+#### Note for whoever picks up the follow-up
+
+The client side needs no changes. The extension is a pure consumer of escape sequences (`apps/vscode/src/terminal-adapter.ts:38` implements `vscode.Pseudoterminal`; output is just `writeEmitter.fire()` at `:405`) and carries no terminal-emulation dependency of its own (`apps/vscode/package.json:1065-1072`). Because the emulator design serializes state back to bytes, the `REPLAY` wire contract is unchanged and every client keeps working untouched. Note also that the "use the same emulation core on both ends" argument only half-holds: the dashboard pins `@xterm/xterm ^5.5.0`, but the VSCode path renders in whatever xterm VSCode itself bundles, at a version this repo deliberately does not control. Prior art worth reading: tmux solves exactly this problem as a screen-state server, including which modes must be restored.
 
 ### Deployment reality (must go in the release notes)
 
@@ -138,7 +163,7 @@ Mitigated by keeping the existing line tests green and adding byte-cap tests alo
 **Risk: conflict with #1214 in `pty-session.ts`.**
 Phase 3 is sequenced last and confined to `ring-buffer.ts`; `pty-session.ts` is not edited at all.
 
-**Alternative rejected — O(screen) headless emulator now.** The right end-state; wrong size for this PR. Argued in *Scope decision* above.
+**Alternative rejected — O(screen) headless emulator now.** The right end-state for *correctness*, but it is a CPU-for-memory trade whose memory floor depends entirely on an unwritten scrollback-sizing decision, and it leaves Phase 3 untouched regardless. Argued at length in *Scope decision* above.
 
 **Alternative rejected — reset the buffer at detectable full-frame boundaries (clear-screen / cursor-home).** The issue's "cheaper alternative". Rejected: detecting a *true* full repaint from the byte stream is heuristic (`ESC[2J`, `ESC[H`, `ESC[3J`, alt-screen enter/exit, and app-specific variants), and a wrong positive discards state the app will not redraw — silent corruption with no upper bound on how wrong it gets. A byte cap is dumb, predictable, and cannot be wrong in a way we can't reason about. Genuine screen-shaped storage is the emulator, not a heuristic approximation of it.
 
