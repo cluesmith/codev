@@ -64,4 +64,11 @@ Three of my own tests were wrong rather than the code:
 
 ### Pre-existing failures (not mine, not touched)
 
-8 `session-manager.test.ts` integration tests fail with `MODULE_NOT_FOUND` because they spawn the built `dist/terminal/shellper-main.js`. Verified pre-existing by stashing my changes and re-running: identical failures on a clean tree. They pass once `pnpm build` has run. Per protocol, out of scope.
+The `terminal/` suite is fully green: **295/295 across 11 files**, including the 8 `session-manager.test.ts` integration tests (those fail with `MODULE_NOT_FOUND` until `pnpm build` has produced `dist/terminal/shellper-main.js`, which is a build-ordering artifact, not a defect).
+
+The *package-wide* suite has a large pre-existing red: **108 failing tests across 54 files**, concentrated in `agent-farm` (42 files). Measured rather than assumed — I ran the full suite at HEAD and again with `packages/codev/src/terminal/` reverted to the merge-base, and compared the failing sets:
+
+- Files failing at HEAD but not at base: **none**.
+- Files failing at base but not at HEAD: exactly one, `shellper-replay-buffer.test.ts`, and that is a measurement artifact: the file is new in this branch so `git checkout <base> -- src/terminal/` couldn't remove it, leaving my new tests running against reverted source.
+
+So the failing sets are identical and this branch introduces zero new failures. Per protocol these are out of scope: they're deterministic failures the diff didn't cause, not flakes, so they are neither fixed nor skipped.
