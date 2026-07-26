@@ -132,10 +132,20 @@ export class ShellperReplayBuffer {
     }
   }
 
+  /**
+   * Replace the only chunk with a trimmed version of itself.
+   *
+   * Copies rather than retaining the `subarray` view: a view keeps the entire
+   * original allocation alive, so trimming an oversized chunk down to the
+   * ceiling would free none of the memory this class exists to bound. The copy
+   * is at most `maxBytes` and only happens on the rare path where a single
+   * append exceeded a ceiling by itself.
+   */
   private replaceSoleChunk(next: Buffer): void {
-    this.chunks[0] = next;
-    this.totalBytes = next.length;
-    this.lineCount = countNewlines(next);
+    const owned = Buffer.from(next);
+    this.chunks[0] = owned;
+    this.totalBytes = owned.length;
+    this.lineCount = countNewlines(owned);
   }
 
   /**
