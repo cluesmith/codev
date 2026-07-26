@@ -2,13 +2,17 @@
  * Standalone replay buffer for the shellper process.
  *
  * Unlike RingBuffer (which stores lines), this stores raw byte chunks
- * to preserve exact terminal output including escape sequences. It tracks
- * the total bytes stored and evicts oldest chunks when the limit is exceeded.
+ * to preserve exact terminal output including escape sequences. It evicts
+ * the oldest chunks when either the line or the byte ceiling is exceeded;
+ * both ceilings are needed, because a full-screen TUI emits almost no
+ * newlines and so is bounded only by the byte one (#1205).
  *
  * This module has NO dependencies beyond Node.js built-ins so the shellper
  * process doesn't need to pull in the full package dependency tree.
  * (shellper-protocol.ts is a sibling module under the same constraint.)
  */
+
+import { REPLAY_BUFFER_MAX_BYTES } from './shellper-protocol.js';
 
 const ESC = 0x1b;
 
@@ -49,49 +53,68 @@ export class ShellperReplayBuffer {
   private chunks: Buffer[] = [];
   private totalBytes = 0;
   private readonly maxLines: number;
+  private readonly maxBytes: number;
   private lineCount = 0;
 
   /**
    * @param maxLines Maximum number of lines to retain. Lines are delimited
    *   by newline characters in the raw data stream.
+   * @param maxBytes Maximum bytes to retain. Required because `maxLines` alone
+   *   does not bound anything for a full-screen TUI: such an app redraws in
+   *   place via cursor addressing and emits almost no newlines, so the line
+   *   ceiling never fires and the buffer grows for the life of the session
+   *   (#1205). Defaults to REPLAY_BUFFER_MAX_BYTES.
    */
-  constructor(maxLines: number = 10_000) {
+  constructor(maxLines: number = 10_000, maxBytes: number = REPLAY_BUFFER_MAX_BYTES) {
     this.maxLines = maxLines;
+    this.maxBytes = maxBytes;
   }
 
   /**
    * Append raw PTY output data to the buffer.
-   * Evicts oldest chunks if the line count exceeds maxLines.
+   * Evicts oldest chunks if either the line or the byte ceiling is exceeded.
    */
   append(data: Buffer | string): void {
     const buf = typeof data === 'string' ? Buffer.from(data, 'utf-8') : data;
     if (buf.length === 0) return;
 
-    // Count newlines in this chunk
-    let newLines = 0;
-    for (let i = 0; i < buf.length; i++) {
-      if (buf[i] === 0x0a) newLines++;
-    }
-
     this.chunks.push(buf);
     this.totalBytes += buf.length;
-    this.lineCount += newLines;
+    this.lineCount += countNewlines(buf);
 
-    // Evict oldest chunks if we've exceeded the line limit
-    while (this.lineCount > this.maxLines && this.chunks.length > 1) {
+    this.evict();
+  }
+
+  /**
+   * Drop the oldest data until both ceilings are satisfied.
+   *
+   * Trimming from the front can cut mid-escape-sequence or discard an
+   * alt-screen-enter, which is why it was rejected in #1047. It is accepted
+   * here because every layer above already does exactly this (the send cap,
+   * the ring seed, the frame-skip path) and relies on the client's
+   * post-connect repaint nudge; an unbounded buffer, by contrast, killed
+   * sessions. Byte-driven cuts are ESC-aligned to narrow the window in which
+   * a client renders a truncated sequence as literal text.
+   */
+  private evict(): void {
+    while (
+      (this.lineCount > this.maxLines || this.totalBytes > this.maxBytes) &&
+      this.chunks.length > 1
+    ) {
       const oldest = this.chunks[0];
-      let removedLines = 0;
-      for (let i = 0; i < oldest.length; i++) {
-        if (oldest[i] === 0x0a) removedLines++;
-      }
       this.chunks.shift();
       this.totalBytes -= oldest.length;
-      this.lineCount -= removedLines;
+      this.lineCount -= countNewlines(oldest);
     }
 
-    // Handle edge case: single chunk exceeds line limit.
-    // Trim from the front to keep only the last maxLines lines.
-    if (this.lineCount > this.maxLines && this.chunks.length === 1) {
+    // A single remaining chunk can still exceed either ceiling on its own.
+    if (this.chunks.length !== 1) return;
+
+    // Line ceiling: cut just past the newline that leaves maxLines behind.
+    // A newline never appears inside an escape sequence, so this cut is
+    // inherently safe and must not be ESC-aligned (that would discard content
+    // for no benefit).
+    if (this.lineCount > this.maxLines) {
       const chunk = this.chunks[0];
       let linesToSkip = this.lineCount - this.maxLines;
       let offset = 0;
@@ -99,10 +122,20 @@ export class ShellperReplayBuffer {
         if (chunk[offset] === 0x0a) linesToSkip--;
         offset++;
       }
-      this.chunks[0] = chunk.subarray(offset);
-      this.totalBytes = this.chunks[0].length;
-      this.lineCount = this.maxLines;
+      this.replaceSoleChunk(chunk.subarray(offset));
     }
+
+    // Byte ceiling: keep the tail. This cut can land anywhere, so align it.
+    const chunk = this.chunks[0];
+    if (chunk.length > this.maxBytes) {
+      this.replaceSoleChunk(chunk.subarray(alignToEscape(chunk, chunk.length - this.maxBytes)));
+    }
+  }
+
+  private replaceSoleChunk(next: Buffer): void {
+    this.chunks[0] = next;
+    this.totalBytes = next.length;
+    this.lineCount = countNewlines(next);
   }
 
   /**

@@ -22,6 +22,7 @@ import {
   PROTOCOL_VERSION,
   ALLOWED_SIGNALS,
   REPLAY_PAYLOAD_MAX,
+  REPLAY_BUFFER_MAX_BYTES,
   createFrameParser,
   encodeData,
   encodeWelcome,
@@ -99,9 +100,10 @@ export class ShellperProcess extends EventEmitter {
     private readonly socketPath: string,
     replayBufferLines: number = 10_000,
     private readonly log: (msg: string) => void = () => {},
+    replayBufferBytes: number = REPLAY_BUFFER_MAX_BYTES,
   ) {
     super();
-    this.replayBuffer = new ShellperReplayBuffer(replayBufferLines);
+    this.replayBuffer = new ShellperReplayBuffer(replayBufferLines, replayBufferBytes);
   }
 
   /**

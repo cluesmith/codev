@@ -21,6 +21,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { ShellperProcess, type IShellperPty, type PtyOptions } from './shellper-process.js';
+import { REPLAY_BUFFER_MAX_BYTES } from './shellper-protocol.js';
 
 // createRequire enables importing native/CJS modules (like node-pty) from ESM.
 // The package uses "type": "module", so bare `require()` is not available.
@@ -49,6 +50,8 @@ interface ShellperConfig {
   rows: number;
   socketPath: string;
   replayBufferLines?: number;
+  /** Byte ceiling on the replay buffer (#1205). Defaults to REPLAY_BUFFER_MAX_BYTES. */
+  replayBufferBytes?: number;
 }
 
 function createRealPty(): IShellperPty {
@@ -161,6 +164,7 @@ async function main(): Promise<void> {
     config.socketPath,
     config.replayBufferLines ?? 10_000,
     logStderr,
+    config.replayBufferBytes ?? REPLAY_BUFFER_MAX_BYTES,
   );
 
   logStderr(`Shellper started: pid=${process.pid}, command=${config.command}, socket=${config.socketPath}`);

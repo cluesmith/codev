@@ -38,6 +38,17 @@ export const HEADER_SIZE = 5; // 1 byte type + 4 bytes length
 // parser must drop. When a session's replay outgrows this, the most recent
 // bytes are sent (see ShellperProcess.handleHello).
 export const REPLAY_PAYLOAD_MAX = 8 * 1024 * 1024; // 8MB
+// #1205: byte ceiling on the shellper's replay buffer itself. Until this
+// existed the buffer was bounded only by line count, and a full-screen TUI
+// (which redraws in place and emits almost no newlines) grew it without limit
+// for the life of the session — multi-GB in the field.
+//
+// Set equal to REPLAY_PAYLOAD_MAX rather than above it: every send is capped
+// at REPLAY_PAYLOAD_MAX and ShellperProcess.getReplayData() has no production
+// callers, so REPLAY_PAYLOAD_MAX is provably the most that can ever leave the
+// process. Bytes retained above it are unreadable by any consumer and are pure
+// resident cost.
+export const REPLAY_BUFFER_MAX_BYTES = REPLAY_PAYLOAD_MAX;
 
 // --- Allowed Signals ---
 

@@ -116,4 +116,81 @@ describe('ShellperReplayBuffer', () => {
       expect(buf.getReplayData(1000).length).toBe(1000);
     });
   });
+
+  describe('byte-ceiling eviction (#1205)', () => {
+    /**
+     * The defect this ceiling exists for: a full-screen TUI redraws in place
+     * and emits no newlines at all, so the line ceiling never fires and the
+     * buffer grew for the whole life of the session.
+     */
+    it('bounds a newline-free stream that the line ceiling never touches', () => {
+      const buf = new ShellperReplayBuffer(10_000, 4096);
+      for (let i = 0; i < 200; i++) buf.append(Buffer.alloc(512, 0x7a));
+      expect(buf.lines).toBe(0);
+      expect(buf.size).toBeLessThanOrEqual(4096);
+    });
+
+    it('retains the tail, not the head, when evicting for bytes', () => {
+      const buf = new ShellperReplayBuffer(10_000, 10);
+      buf.append('AAAAA');
+      buf.append('BBBBB');
+      buf.append('CCCCC');
+      expect(buf.getReplayData().toString()).toBe('BBBBBCCCCC');
+    });
+
+    it('stays bounded across many appends rather than growing monotonically', () => {
+      const buf = new ShellperReplayBuffer(10_000, 1000);
+      const sizes: number[] = [];
+      for (let i = 0; i < 100; i++) {
+        buf.append(Buffer.alloc(100, 0x71));
+        sizes.push(buf.size);
+      }
+      expect(Math.max(...sizes)).toBeLessThanOrEqual(1000);
+    });
+
+    it('front-trims a single chunk that alone exceeds the ceiling', () => {
+      const buf = new ShellperReplayBuffer(10_000, 50);
+      buf.append('x'.repeat(500));
+      expect(buf.size).toBe(50);
+      expect(buf.getReplayData().toString()).toBe('x'.repeat(50));
+    });
+
+    it('keeps the line count consistent when evicting for bytes', () => {
+      const buf = new ShellperReplayBuffer(10_000, 20);
+      for (let i = 0; i < 20; i++) buf.append(`line${i}\n`);
+      // Whatever survived, `lines` must equal the newlines actually retained.
+      const retained = buf.getReplayData().toString();
+      expect(buf.lines).toBe((retained.match(/\n/g) ?? []).length);
+      expect(buf.size).toBeLessThanOrEqual(20);
+    });
+
+    it('still enforces the line ceiling independently of the byte ceiling', () => {
+      const buf = new ShellperReplayBuffer(3, 1024 * 1024);
+      for (let i = 0; i < 10; i++) buf.append(`row${i}\n`);
+      expect(buf.lines).toBeLessThanOrEqual(3);
+      expect(buf.getReplayData().toString()).toBe('row7\nrow8\nrow9\n');
+    });
+
+    it('applies both ceilings when both are exceeded', () => {
+      const buf = new ShellperReplayBuffer(5, 12);
+      for (let i = 0; i < 20; i++) buf.append(`aa${i}\n`);
+      expect(buf.size).toBeLessThanOrEqual(12);
+      expect(buf.lines).toBeLessThanOrEqual(5);
+    });
+
+    it('clear() resets both counters', () => {
+      const buf = new ShellperReplayBuffer(10_000, 1000);
+      buf.append('some data\n');
+      buf.clear();
+      expect(buf.size).toBe(0);
+      expect(buf.lines).toBe(0);
+      expect(buf.getReplayData().length).toBe(0);
+    });
+
+    it('defaults the byte ceiling to 8MB', () => {
+      const buf = new ShellperReplayBuffer();
+      for (let i = 0; i < 12; i++) buf.append(Buffer.alloc(1024 * 1024, 0x62));
+      expect(buf.size).toBeLessThanOrEqual(8 * 1024 * 1024);
+    });
+  });
 });
