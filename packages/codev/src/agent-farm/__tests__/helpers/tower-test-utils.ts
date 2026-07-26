@@ -81,6 +81,23 @@ export async function waitForPort(port: number, timeoutMs: number): Promise<bool
 }
 
 /**
+ * Wait for a port to start listening, retrying as tightly as the event loop
+ * allows.
+ *
+ * Issue #1261: waitForPort's 200ms cadence usually lands well after Tower's
+ * boot sequence finishes, which is why the startup-window race stayed
+ * invisible to the test suite. Tests that need to hit the instant of the bind
+ * — before anything else has had a chance to run — use this instead.
+ */
+export async function waitForPortImmediate(port: number, timeoutMs: number): Promise<boolean> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if (await isPortListening(port)) return true;
+  }
+  return false;
+}
+
+/**
  * Find an available port starting from the given port
  */
 async function findAvailablePort(startPort: number): Promise<number> {
@@ -91,11 +108,23 @@ async function findAvailablePort(startPort: number): Promise<number> {
   throw new Error(`No available port found starting from ${startPort}`);
 }
 
+export interface StartTowerOptions {
+  /**
+   * Return the moment the port accepts a connection rather than on the next
+   * 200ms poll tick. Issue #1261 tests need to race the bind itself.
+   */
+  returnAtBind?: boolean;
+}
+
 /**
  * Start the tower server for testing.
  * Creates an isolated socket directory for shellper sessions (Spec 0116).
  */
-export async function startTower(port?: number, extraEnv?: Record<string, string>): Promise<TowerHandle> {
+export async function startTower(
+  port?: number,
+  extraEnv?: Record<string, string>,
+  opts?: StartTowerOptions,
+): Promise<TowerHandle> {
   const actualPort = port ?? (await findAvailablePort(14100));
 
   // Spec 0116: Create isolated socket dir so tests don't pollute ~/.codev/run/
@@ -120,7 +149,9 @@ export async function startTower(port?: number, extraEnv?: Record<string, string
   proc.stderr?.on('data', (d) => (stderr += d.toString()));
 
   // Wait for tower to start
-  const started = await waitForPort(actualPort, TOWER_START_TIMEOUT);
+  const started = opts?.returnAtBind
+    ? await waitForPortImmediate(actualPort, TOWER_START_TIMEOUT)
+    : await waitForPort(actualPort, TOWER_START_TIMEOUT);
   if (!started) {
     proc.kill();
     try { rmSync(socketDir, { recursive: true, force: true }); } catch { /* ignore */ }

@@ -63,6 +63,9 @@ vi.mock('../servers/tower-instances.js', () => ({
   getDirectorySuggestions: vi.fn(async () => []),
   launchInstance: vi.fn(async () => ({ success: true })),
   killTerminalWithShellper: vi.fn(async () => true),
+  // Issue #1261: routes that need the instances module ask this first, so a
+  // wired-up Tower is the default for every route test here.
+  instancesReady: vi.fn(() => true),
   stopInstance: vi.fn(async () => ({ ok: true })),
   addArchitect: vi.fn(async () => ({ success: true, name: 'sibling', terminalId: 'term-arch-sibling' })),
   removeArchitect: vi.fn(async () => ({ success: true })),
@@ -977,6 +980,24 @@ describe('tower-routes', () => {
       const { deleteTerminalSession, removeTerminalFromRegistry } = await import('../servers/tower-terminals.js');
       expect(deleteTerminalSession).not.toHaveBeenCalled();
       expect(removeTerminalFromRegistry).not.toHaveBeenCalled();
+    });
+
+    // Issue #1261: "Tower isn't wired up yet" is not "no such terminal".
+    // Answering 404 sent callers off hunting for a terminal that was there all
+    // along; 503 + Retry-After tells them to try again instead.
+    it('returns 503 rather than 404 when the instances module is not wired yet', async () => {
+      const { instancesReady, killTerminalWithShellper } = await import('../servers/tower-instances.js');
+      (instancesReady as any).mockReturnValueOnce(false);
+
+      const req = makeReq('DELETE', `/api/terminals/${terminalId}`);
+      const { res, statusCode, body, headers } = makeRes();
+      await handleRequest(req, res, makeCtx());
+
+      expect(statusCode()).toBe(503);
+      expect(headers()['Retry-After']).toBe('1');
+      expect(JSON.parse(body()).error).toBe('STARTING_UP');
+      // And it must not have tried to kill anything on the way out.
+      expect(killTerminalWithShellper).not.toHaveBeenCalled();
     });
   });
 
