@@ -177,48 +177,22 @@ export class PtySession extends EventEmitter {
     // Handle shellper exit (process inside shellper exited)
     client.on('exit', (exitInfo: { code: number; signal: string | null }) => {
       this.exitCode = exitInfo.code;
-      // Issue #1241: SessionManager does not restart a deliberate quit, so the
-      // "restarting" notice and its 10s wait-for-the-respawn timer would both
-      // be lying. Say what actually happened and end the session cleanly —
-      // which also clears the architect row, so `afx workspace start` can
-      // relaunch (Tower gates that on the terminal being gone).
+      // Issue #1264: a clean exit reruns the harness in this same PTY with a
+      // fresh conversation, so it takes the restart path below exactly like a
+      // crash does — same wait-for-the-respawn window, same suppressed 'exit'
+      // so WebSocket clients and the terminal's identity survive. Only the
+      // notice differs, because "restarting" would misdescribe what the user
+      // gets back: a new conversation, not the one they just left.
+      // (#1241 ended the session here; #1264 reversed that — a session now
+      // ends only on an explicit kill.)
       if (this._restartOnExit && isDeliberateExit(exitInfo)) {
-        this.onPtyData('\r\n\x1b[90m[Agent exited at your request — not restarting.]\x1b[0m\r\n');
-        this.emit('exit', exitInfo.code, exitInfo.signal);
-        this.cleanupShellper();
+        this.startRestartWait(client, exitInfo, '\r\n\x1b[90m[Agent exited — starting a fresh session...]\x1b[0m\r\n');
         return;
       }
       if (this._restartOnExit) {
-        // Clear any pending restart state from a previous exit (crash loop guard)
-        if (this._restartCleanupTimeout) {
-          clearTimeout(this._restartCleanupTimeout);
-          if (this._restartCancelFn) {
-            client.removeListener('data', this._restartCancelFn);
-          }
-        }
         // Process will auto-restart via SessionManager — keep WebSocket clients
         // connected and don't emit 'exit' so Tower doesn't clear references.
-        this.onPtyData('\r\n\x1b[90m[Process exited — restarting...]\x1b[0m\r\n');
-        // Wait for the process to restart. If new data arrives (process restarted),
-        // cancel the cleanup timer. If no data within 10s (e.g. max restarts
-        // exceeded), fall through to normal exit cleanup.
-        this._restartCleanupTimeout = setTimeout(() => {
-          client.removeListener('data', cancelCleanup);
-          this._restartCleanupTimeout = null;
-          this._restartCancelFn = null;
-          this.emit('exit', exitInfo.code, exitInfo.signal);
-          this.cleanupShellper();
-        }, 10_000);
-        const cancelCleanup = () => {
-          clearTimeout(this._restartCleanupTimeout!);
-          client.removeListener('data', cancelCleanup);
-          this._restartCleanupTimeout = null;
-          this._restartCancelFn = null;
-          // Process restarted — reset exitCode so write/resize work again
-          this.exitCode = undefined;
-        };
-        this._restartCancelFn = cancelCleanup;
-        client.on('data', cancelCleanup);
+        this.startRestartWait(client, exitInfo, '\r\n\x1b[90m[Process exited — restarting...]\x1b[0m\r\n');
         return;
       }
       this.emit('exit', exitInfo.code, exitInfo.signal);
@@ -244,6 +218,50 @@ export class PtySession extends EventEmitter {
         this.cleanupShellper();
       }, SHELLPER_CLOSE_GRACE_MS);
     });
+  }
+
+  /**
+   * Hold the session open while SessionManager respawns the child, printing
+   * `notice` in its place.
+   *
+   * Shared by both relaunch paths (#1264): an unnatural exit restarting with
+   * recovery, and a clean exit rerunning the harness fresh. They differ only in
+   * wording — structurally both keep WebSocket clients attached, suppress
+   * 'exit' so Tower doesn't clear its references, and arm a bounded wait. If
+   * new data arrives the child is back and the teardown is cancelled; if
+   * nothing arrives within the window (e.g. max restarts exhausted) the session
+   * falls through to normal exit cleanup.
+   */
+  private startRestartWait(
+    client: IShellperClient,
+    exitInfo: { code: number; signal: string | null },
+    notice: string,
+  ): void {
+    // Clear any pending restart state from a previous exit (crash loop guard)
+    if (this._restartCleanupTimeout) {
+      clearTimeout(this._restartCleanupTimeout);
+      if (this._restartCancelFn) {
+        client.removeListener('data', this._restartCancelFn);
+      }
+    }
+    this.onPtyData(notice);
+    this._restartCleanupTimeout = setTimeout(() => {
+      client.removeListener('data', cancelCleanup);
+      this._restartCleanupTimeout = null;
+      this._restartCancelFn = null;
+      this.emit('exit', exitInfo.code, exitInfo.signal);
+      this.cleanupShellper();
+    }, 10_000);
+    const cancelCleanup = () => {
+      clearTimeout(this._restartCleanupTimeout!);
+      client.removeListener('data', cancelCleanup);
+      this._restartCleanupTimeout = null;
+      this._restartCancelFn = null;
+      // Process restarted — reset exitCode so write/resize work again
+      this.exitCode = undefined;
+    };
+    this._restartCancelFn = cancelCleanup;
+    client.on('data', cancelCleanup);
   }
 
   /** Whether this session is backed by a shellper process. */

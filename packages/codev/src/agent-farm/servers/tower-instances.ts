@@ -29,6 +29,7 @@ import {
   resolveArchitectLaunch,
   siblingRegistrationIsLive,
   buildArchitectCrashLoopFallback,
+  buildArchitectFreshLaunch,
 } from './tower-utils.js';
 import {
   reconcileArchitectSessionHolder,
@@ -594,6 +595,16 @@ export async function launchInstance(workspacePath: string): Promise<{ success: 
               cwd: workspacePath,
               env: cleanEnv,
               crashLoopFallback,
+              // Issue #1264: a clean exit reruns the harness fresh (no --resume)
+              // instead of ending the session. Built from the ORIGINAL baseArgs,
+              // never from cmdArgs — those may already carry a `--resume`.
+              freshLaunch: buildArchitectFreshLaunch({
+                workspacePath: resolvedPath,
+                architectName: DEFAULT_ARCHITECT_NAME,
+                baseArgs: cmdParts.slice(1),
+                baseEnv: cleanEnv,
+                log: _deps.log,
+              }),
               ...defaultSessionOptions({ restartOnExit: true, restartDelay: 2000, maxRestarts: 50 }),
             });
 
@@ -1089,6 +1100,15 @@ export async function addArchitect(
         cwd: workspacePath,
         env: cleanEnv,
         crashLoopFallback,
+        // Issue #1264: see the `main` launch path — same rule for siblings,
+        // built from baseArgs so a `--resume` can never leak into the rerun.
+        freshLaunch: buildArchitectFreshLaunch({
+          workspacePath: resolvedPath,
+          architectName: name,
+          baseArgs: cmdParts.slice(1),
+          baseEnv: cleanEnv,
+          log: _deps.log,
+        }),
         ...defaultSessionOptions({ restartOnExit: true, restartDelay: 2000, maxRestarts: 50 }),
       });
 
