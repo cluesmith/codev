@@ -1,0 +1,40 @@
+id: '1216'
+title: porch-config-toggle-to-disable
+protocol: spir
+phase: verified
+plan_phases:
+  - id: porch_toggle
+    title: Producer-Side Porch Toggle
+    status: complete
+  - id: worktree_local_config
+    title: Safe Builder Personal-Config Snapshot
+    status: complete
+  - id: documentation_verification
+    title: Documentation and End-to-End Verification
+    status: complete
+current_plan_phase: null
+gates:
+  spec-approval:
+    status: approved
+    requested_at: '2026-07-23T03:29:15.496Z'
+    approved_at: '2026-07-23T03:31:17.163Z'
+  plan-approval:
+    status: approved
+    requested_at: '2026-07-23T03:37:38.866Z'
+    approved_at: '2026-07-23T03:39:23.666Z'
+  pr:
+    status: approved
+    requested_at: '2026-07-23T04:39:07.667Z'
+    approved_at: '2026-07-23T04:39:38.716Z'
+  verify-approval:
+    status: pending
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-07-23T03:24:00.433Z'
+updated_at: '2026-07-23T04:40:27.859Z'
+pr_ready_for_human: false
+context:
+  verify_skip_reason: >-
+    Upstream cross-fork PR must be merged by a maintainer; contributor delivery ends with an open PR per the
+    specification

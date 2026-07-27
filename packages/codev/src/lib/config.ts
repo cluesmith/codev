@@ -36,6 +36,7 @@ export interface CodevConfig {
     roleScriptEnv?: Record<string, string>;
   }>;
   porch?: {
+    autoOpenArtifacts?: boolean;
     checks?: Record<string, CheckOverride>;
     consultation?: {
       models?: string | string[];
