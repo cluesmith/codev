@@ -148,3 +148,58 @@ act" clause under Architect Decisions so the constraint is legible to anyone
 reading the spec, not just to me.
 
 Making no further spec edits until the full decision set arrives.
+
+## Specify iter-2 — decisions D1–D4 absorbed, second 3-way review
+
+Architect relayed the full decision set: D1 skeleton-authoritative, D2 delete
+approved (+ local-unique safeguard), D3 eight scar rules compressed, D4 tiering
+cut. Amended spec (442cc08a), then ran iter-2.
+
+**Verdicts: Gemini APPROVE / Codex REQUEST_CHANGES / Claude APPROVE.**
+6 points, all accepted. Iter-1 drew 9 issues; iter-2 drew 6, only 2 blocking —
+and both were "your enforcement has a hole," not "your analysis is wrong."
+Codex and Claude each independently re-verified the empirical basis; it held.
+
+### The hole worth remembering (Codex CX-1)
+
+M4/T7 iterate over the ownership map's entries and check each has one owner.
+**A map listing 3 of 40 instruction classes passes cleanly.** Tests green,
+artifact looks rigorous, single-owner rule covers a fraction of the surface,
+nothing signals the gap.
+
+I built the exact disease this spec attacks — enforcement that measures only
+what you already told it about — into the fix for it. Fixed with a declared
+inventory boundary + mechanical candidate extraction + mandatory
+mapped/scar/out-of-scope disposition + T12 failing on anything undispositioned.
+
+Added unprompted: T12 must be validated against a *seeded* normative line. A
+completeness test over an empty candidate set passes vacuously and looks
+identical to a healthy one. Having just been caught by one vacuous-pass hole,
+leaving another in would be careless.
+
+### CX-2 — escalation is a transition, not a destination
+
+M11 said "escalate to the architect" and stopped. No terminal state, so the
+criterion couldn't be judged complete or incomplete. Added TS1–TS4, made
+"pending escalation" explicitly non-terminal, completion = all 76 in TS1–TS4
+with zero open escalations.
+
+Judgement call flagged to the architect: unresolved escalation converts to TS3
+(keep local, documented, allowlisted) + follow-up issue, rather than
+hard-blocking. Trades a little residual shadow tree for a guarantee the project
+can't stall on an unanswered question. Also marked TS2 (promote into skeleton)
+as *preferred* over TS3 — TS3 knowingly re-creates a shadow copy, and if it
+became the default the spec would quietly rebuild what it removed.
+
+### Smaller but real (Claude CL-2)
+
+Split T13 into automated CI assembly-check (a) + one manual real spawn (b).
+Keeping (b) matters: (a) can pass while the live spawn path reads different
+files — which is *exactly* how this project's own prompt lost its Verify Phase
+section. An ambiguous "inspect the prompt" would have collapsed into (a) alone.
+
+Gemini independently endorsed the M11 → M3 → M8 sequencing and the M5-before-C
+scar chain — both builder-originated, so worth recording that they survived
+outside review.
+
+No open questions remain. Back to the spec-approval gate.

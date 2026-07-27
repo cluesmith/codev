@@ -253,11 +253,40 @@ unconditional: M8–M10 were promoted from conditional to required by **D2**, an
   `codev/resources/prompt-ownership.md` generated from or validated against it.
   Schema in **Appendix A**. It enumerates every prompt surface and, for each
   instruction class, the single owning surface.
+
+  **Completeness rule** *(added iteration 2, per Codex)*. A map is not credible
+  merely because its entries are correct — it must also be provably exhaustive,
+  or under-listing satisfies M4 trivially. Therefore:
+
+  - The map declares an explicit **inventory boundary**: the exact set of files
+    scanned for instruction candidates. Anything outside it is out of scope *by
+    declaration*, not by omission.
+  - A **candidate extraction** pass over that boundary mechanically collects
+    normative statements (imperative/prohibitive constructions — `MUST`,
+    `NEVER`, `ALWAYS`, `DO NOT`, `don't`, `Never`, and the like), each keyed by a
+    stable id.
+  - **Every candidate carries exactly one disposition**: `mapped` (has an
+    owner), `scar` (in M5's registry), or `out-of-scope` (**with written
+    justification**).
+  - **T12** fails on any candidate with no disposition. Consequence: new
+    normative text added anywhere inside the boundary fails CI until someone
+    dispositions it, so the map cannot silently rot as the prompt surface grows.
+  - Per Claude's iteration-2 note, the map **must** record why
+    `codev/resources/` is excluded from the drift regime (Q7) — this is required
+    M1 coverage, not a trailing nice-to-know.
 - **M2 — Drift cannot pass CI.** A test invoking the existing
   `auditProtocolDrift()` **fails the build** on any `differs` finding not listed
   in an explicit, comment-justified allowlist. *This is the one required
   outcome for the shadow tree* — iteration 1's "delete **or** enforce" ambiguity
   is resolved in favour of enforce.
+
+  **Allowlist lifecycle** *(added iteration 2, per Gemini)*. The allowlist is
+  the obvious way to re-hide drift, so its decay is enforced rather than merely
+  expected: every entry carries a line-item justification comment, and the test
+  asserts the allowlist is **empty once M3 completes** — the sole permitted
+  residue being files with an open M11 escalation, each of which must reference
+  its pending adjudication. An entry that outlives its escalation fails the
+  build.
 - **M3 — Repair the live drift.** All 17 drifted shadow copies are reconciled
   **per decision D1** (skeleton authoritative; file-by-file; anything resembling
   deliberate local content escalated rather than overwritten), so M2's allowlist
@@ -316,6 +345,29 @@ unconditional: M8–M10 were promoted from conditional to required by **D2**, an
   - Where classification is genuinely ambiguous, default to **local-unique** and
     escalate. A needless question is cheap; a silently deleted codev-specific
     behaviour is not.
+
+  **Permitted terminal states** *(added iteration 2, per Codex)*. Every one of
+  the 76 shadow copies must end in exactly one of these four states. **"Pending
+  escalation" is explicitly NOT terminal** — the feature is not complete while
+  any item sits there:
+
+  | # | Terminal state | Applies to | Result |
+  |---|---|---|---|
+  | **TS1** | Reconciled to skeleton, then deleted | `rot` | Skeleton is sole owner |
+  | **TS2** | Promoted — unique content moved *into* `codev-skeleton/`, local copy deleted | `local-unique` the architect wants kept **and** shared with adopters | Skeleton is sole owner; functionality preserved for everyone |
+  | **TS3** | Retained as a deliberate, documented local override | `local-unique` the architect wants kept **codev-only** | Stays in `codev/`, recorded in the ownership map *and* the M2 allowlist with justification |
+  | **TS4** | Dropped | `local-unique` the architect judges obsolete | Deleted, with the ruling recorded |
+
+  **Completion rule**: the spec is complete when every shadow copy is in TS1–TS4
+  and **zero escalations remain open**. TS2 is the preferred outcome for genuine
+  codev-specific functionality, since TS3 knowingly re-creates a (single,
+  documented, allowlisted) shadow copy and should be the exception.
+
+  **Escape hatch — no indefinite block.** If an escalation cannot be resolved
+  (architect unavailable, decision genuinely deferred), it converts to **TS3**
+  and a follow-up issue is filed referencing the audit row. This keeps the
+  conservative outcome — nothing is lost — while guaranteeing the project always
+  reaches a defined end state rather than dangling on an unanswered question.
 
 ### SHOULD
 
@@ -535,7 +587,7 @@ rules verbatim.
 - **Cons**: on its own does nothing about the shadow tree — deduplicating
   *within* a doubled tree is wasted effort.
 - **Complexity**: medium. **Risk**: medium (over-stripping a rule an agent
-  needed in place) — mitigated by M5 and T9.
+  needed in place) — mitigated by M5, T6, and T13.
 
 ### Sequencing: B → A → C *(all three now in scope per D2)*
 
@@ -582,13 +634,14 @@ before **C** begins, since C is the step that could otherwise strip a scar rule.
 - **Q5** — *Resolved and promoted to M7.* Preliminary audit in Appendix B.
 - **Q6** — *Resolved.* The ownership map is machine-readable (Appendix A), per
   Gemini's recommendation and to avoid M4's test restating ownership.
-- **Q7** — Should `codev/resources/` shared files (`arch-critical.md`,
-  `lessons-critical.md`, `workflow-reference.md`, `spikes.md` — all currently
-  differing from skeleton twins) join this regime? These are user-evolved files
-  where divergence is legitimate, so probably not — but the map should say so
-  explicitly, and M2's allowlist must not accidentally cover them.
-  (`FRAMEWORK_DRIFT_DIRS` excludes `resources`, so the default is already
-  correct; the map should record *why*.)
+- **Q7** — *Resolved into M1, per Claude's iteration-2 note.* `codev/resources/`
+  shared files (`arch-critical.md`, `lessons-critical.md`,
+  `workflow-reference.md`, `spikes.md` — all currently differing from their
+  skeleton twins) stay **out** of the drift regime: they are user-evolved files
+  where divergence is legitimate. `FRAMEWORK_DRIFT_DIRS` already excludes
+  `resources`, so the default is correct. Recording *why* is now **required M1
+  coverage** rather than a nice-to-know, and M2's allowlist must not
+  accidentally cover them.
 
 ---
 
@@ -664,21 +717,36 @@ Full suite green: `protocol-drift-audit`, `skeleton`, `hot-tier`,
 `governance-sweep`, `protocol-prompt-audit`, `framework-ref-audit`,
 `skill-parity`, `scaffold`.
 
-### T12 — Local-unique audit completeness (M11)
+### T11 — Local-unique audit completeness (M11)
 
-The committed audit has **one row per shadow copy** (all 76), each classified
-`rot` or `local-unique`. Cross-check: every file listed as deleted under M8
-appears in the audit with a resolved classification, and no file classified
-`local-unique` was deleted or overwritten without a recorded architect ruling.
-This test guards the *process*, not just the outcome — an unaudited deletion
-must fail.
+*Automated.* The committed audit has **one row per shadow copy** (all 76), each
+classified `rot` or `local-unique` and each resolved to a terminal state
+TS1–TS4. Cross-checks: every file deleted under M8 appears in the audit with a
+resolved classification; no file classified `local-unique` was deleted or
+overwritten without a recorded architect ruling; **no row remains in "pending
+escalation."** This test guards the *process*, not just the outcome — an
+unaudited deletion must fail.
 
-### T11 — End-to-end, the real user path
+### T12 — Ownership-map completeness (M1)
 
-Spawn a builder after the change and **inspect the assembled spawn prompt**:
-it must contain the verify-phase instructions and every scar rule. *"Tests pass"
-is not "it works"* — the assembled prompt is the artifact that matters, not the
-source files.
+*Automated.* Every candidate produced by the extraction pass over the declared
+inventory boundary carries exactly one disposition (`mapped`, `scar`, or
+`out-of-scope` with justification). Any undispositioned candidate fails. A
+seeded normative line added inside the boundary must fail the test until
+dispositioned — asserting the guard actually bites rather than passing
+vacuously on an empty candidate set.
+
+### T13 — End-to-end, the real user path
+
+**Part (a), automated**: assemble the builder spawn prompt in-process and assert
+it contains the verify-phase instructions and all eight scar rules in their
+compressed canonical form. This is the regression guard and must be part of CI.
+
+**Part (b), manual, once**: actually spawn a builder against the changed tree
+and read the prompt it receives. *"Tests pass" is not "it works"* — the assembled
+prompt is the artifact that matters. Part (a) can pass while the real spawn path
+diverges, which is precisely the class of failure that produced this project.
+The plan must record the manual run's outcome in the review.
 
 ---
 
@@ -698,10 +766,12 @@ source files.
 | Risk | Impact | Mitigation |
 |---|---|---|
 | A scar rule silently dropped during deduplication | **Critical** — reintroduces a known data-loss incident | M5 registry + T6 mutation tests passing *before* any deduplication; eight rules ratified in D3 |
-| **Codev-specific functionality lost when the shadow tree is deleted** | **Critical** — silent capability regression, and the loss is only visible later | **M11** audit precedes reconciliation *and* deletion; covers content *inside* drifted files; ambiguous cases default to escalate; T12 |
+| **Codev-specific functionality lost when the shadow tree is deleted** | **Critical** — silent capability regression, and the loss is only visible later | **M11** audit precedes reconciliation *and* deletion; covers content *inside* drifted files; ambiguous cases default to escalate; T11 |
 | Compressing a scar wording weakens the rule's force | High | D3 compression is reviewed at the gate; T6 protects the compressed form thereafter; meaning-preservation is a plan-phase review item |
 | Deleting the shadow tree breaks a path-based reader | High | M7 audit precedes deletion; B's gate proves equivalence; T9 checks every deleted file |
-| Over-stripping leaves an agent without a needed rule | High | Deduplicate only non-scar classes; T11 inspects the assembled prompt |
+| Over-stripping leaves an agent without a needed rule | High | Deduplicate only non-scar classes; T13 inspects the assembled prompt |
+| Ownership map under-lists, making M4 pass vacuously | High | M1 completeness rule — declared inventory boundary + mandatory disposition; T12 fails on any undispositioned candidate |
+| An M11 escalation stalls and the project dangles | Medium | "Pending" is not a terminal state; unresolved escalations convert to TS3 with a filed follow-up issue |
 | M3 reconciliation destroys local-unique content before deletion is reached | High | Sequencing is fixed **M11 → M3 → M8**; M3 skips anything M11 escalated |
 | M2's allowlist accretes and re-hides drift | Medium | Allowlist entries require a justification comment; empty at M3 completion; growth is reviewable in diffs |
 | Ownership restated in test code, re-creating duplication | Medium | M4 derives assertions from the map (Q6 resolved) |
@@ -848,7 +918,42 @@ from iteration 1 in five material ways, and reviewers were asked to focus there:
    (**D4**).
 5. New Appendices A and B; Appendix C removed.
 
-Verdicts recorded below.
+**Verdicts:**
+
+| Model | Verdict | Confidence | Issues |
+|---|---|---|---|
+| Gemini | **APPROVE** | HIGH | None (1 non-blocking suggestion) |
+| Codex | **REQUEST_CHANGES** | HIGH | 2 |
+| Claude | **APPROVE** | HIGH | None blocking (3 minor) |
+
+All six points accepted; none disputed. Changes made:
+
+1. **Codex — ownership-map completeness not testably defined.** The sharpest
+   catch of the round: M4 only validated entries *already in* the map, so a map
+   listing 3 of 40 rules would have passed every test. → M1 gains a
+   **completeness rule** (declared inventory boundary + mechanical candidate
+   extraction + mandatory `mapped`/`scar`/`out-of-scope` disposition) and
+   **T12**, which fails on any undispositioned candidate and is itself checked
+   against a seeded line so it cannot pass vacuously.
+2. **Codex — terminal state for escalated `local-unique` files unspecified.**
+   → M11 gains four explicit terminal states (**TS1–TS4**), declares "pending
+   escalation" **non-terminal**, sets the completion rule (all 76 in TS1–TS4,
+   zero open escalations), and adds an escape hatch so an unresolved
+   architect question converts to TS3 + follow-up issue rather than blocking
+   indefinitely.
+3. **Gemini — allowlist lifecycle.** → M2 now *enforces* decay: line-item
+   justifications, empty after M3, sole residue being open M11 escalations that
+   must cite their adjudication.
+4. **Claude — T11/T12 ordering non-sequential.** → Tests renumbered; all
+   cross-references in the risk table and Approach C corrected.
+5. **Claude — T11 automated-vs-manual unclear.** → Now **T13**, split into an
+   automated CI part (a) and a one-time manual spawn (b), with the reasoning
+   stated: part (a) can pass while the real spawn path diverges, which is
+   exactly the failure that produced this project.
+6. **Claude — Q7 should be required M1 coverage.** → Q7 resolved into M1;
+   recording why `codev/resources/` is excluded is now mandatory.
+
+Two risk rows added (vacuous-map, stalled-escalation).
 
 Rebuttal: `codev/projects/1252-prompt-architecture-single-own/1252-specify-iter1-rebuttals.md`
 
@@ -858,7 +963,8 @@ Rebuttal: `codev/projects/1252-prompt-architecture-single-own/1252-specify-iter1
 
 - [ ] Architect approval (gate: `spec-approval`)
 - [x] 3-way consultation, iteration 1 (Gemini APPROVE / Codex REQUEST_CHANGES / Claude COMMENT — all 9 issues accepted)
-- [ ] 3-way consultation, iteration 2 — *not run; porch advanced to the gate*
+- [x] Architect decisions D1–D4 relayed and absorbed (2026-07-27)
+- [x] 3-way consultation, iteration 2 (Gemini APPROVE / Codex REQUEST_CHANGES / Claude APPROVE — all 6 points accepted)
 
 ---
 
