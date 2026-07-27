@@ -5,7 +5,8 @@
 - **Issue**: #1252
 - **Protocol**: SPIR
 - **Area**: `area/cross-cutting`
-- **Status**: draft (iteration 2 — revised after 3-way consultation)
+- **Status**: draft (iteration 2 — revised after 3-way consultation; amended
+  with architect decisions D1–D4, 2026-07-27)
 - **Author**: builder spir-1252
 
 ---
@@ -222,10 +223,8 @@ duplication is unowned — not disclosure.
 2. **Shadow drift cannot pass CI.** The existing `auditProtocolDrift` becomes a
    build-failing gate, with an explicit adjudication allowlist.
 3. **Scar rules stay verbatim and always-on** wherever they apply, in one
-   canonical wording. Deduplication never applies to them.
-4. **Content is tiered by consuming model capability**, with a defined selector
-   and fallback.
-5. **The win is measured** by a reproducible before/after script.
+   compressed canonical wording. Deduplication never applies to them.
+4. **The win is measured** by a reproducible before/after script.
 
 ---
 
@@ -242,11 +241,12 @@ duplication is unowned — not disclosure.
 
 ## Success Criteria
 
-Restructured per Codex: the **required** end state depends on no unanswered
-question. Shadow-tree *deletion* is isolated into conditional criteria that
-activate only on an affirmative architect answer to Q1.
+Restructured per Codex so the end state depends on no unanswered question. With
+decisions **D1–D4** relayed (2026-07-27), every criterion below is now
+unconditional: M8–M10 were promoted from conditional to required by **D2**, and
+**M11** was added by the same decision. Nothing here awaits an architect answer.
 
-### Required — MUST (independent of Q1/Q2)
+### Required — MUST
 
 - **M1 — Ownership map.** A machine-readable map at
   `codev/resources/prompt-ownership.yaml`, with a human-readable companion at
@@ -270,10 +270,13 @@ activate only on an affirmative architect answer to Q1.
   exactly the declared owner. The test **derives assertions from the map file**;
   it must not restate ownership in test code (which would itself violate the
   single-owner rule). Definitions in **Appendix A**.
-- **M5 — Scar-rule registry.** A machine-readable registry naming each scar rule,
-  its **one canonical wording**, and every surface it must appear on. A test
-  asserts verbatim presence on each. **Deleting or rewording a scar rule fails
-  the build.** M5's test must pass before any deduplication work begins.
+- **M5 — Scar-rule registry.** A machine-readable registry of the **eight** scar
+  rules ratified in **D3**, each with its **one compressed canonical wording**
+  (one sentence, two at most) and every surface it must appear on. A test asserts
+  verbatim presence on each. **Deleting or rewording a scar rule fails the
+  build.** M5's test must pass before any deduplication work begins. Rewriting
+  today's banner blocks down to the compressed form is part of this criterion,
+  and every surface must then carry the compressed wording byte-identically.
 - **M6 — Measurement script.** A committed script reporting always-on word
   counts per surface, runnable before and after to quantify the win.
 - **M7 — Compatibility audit.** A repo-wide audit of literal `codev/protocols/`
@@ -281,27 +284,43 @@ activate only on an affirmative architect answer to Q1.
   comment/error-string (safe), or direct-read (must fix). Promoted from Q5 to a
   first-class deliverable per Codex. *Preliminary findings in* **Appendix B**.
 
-### Conditional — MUST, only if the architect answers Q1 "yes"
+### Required — MUST (shadow-tree removal; activated by D2)
 
 - **M8 — Shadow-tree removal.** `codev/protocols/` and `codev/roles/` shadow
   copies are deleted so the skeleton is the single owner, **preserving all
   local-only entries**: `codev/protocols/release/` and
   `codev/protocols/maintain/templates/{audit-report.md,lessons-learned.md}`.
+  **Gated on M11**: no file is deleted until its local-unique audit is complete
+  and any escalations are ruled on.
 - **M9 — Vestigial scaffold cleanup.** `copyProtocols` and `copyRoles` are
   removed from `scaffold.ts` along with their tests, so the shadow tree cannot
   be reintroduced by rewiring dead code.
 - **M10 — Post-deletion equivalence.** For every deleted shadow copy, the
   resolver returns the skeleton counterpart and the assembled spawn prompt is
   byte-identical to the skeleton-sourced expectation.
+- **M11 — Local-unique content audit** *(added by D2)*. Before any file is
+  reconciled or deleted, produce a committed audit — one row per file across all
+  76 shadow copies — classifying every local-vs-skeleton divergence as **rot**
+  (local lags; take skeleton) or **local-unique** (content absent from the
+  skeleton that plausibly encodes codev-specific functionality).
+
+  Requirements:
+  - The audit covers **content inside drifted files**, not just whole files that
+    have no skeleton counterpart. A local-unique paragraph inside an otherwise-rotted
+    file is exactly the loss this criterion exists to prevent, and D1's
+    reconciliation would destroy it first.
+  - Every **local-unique** finding is escalated to the architect with the diff
+    hunk and a short read on what functionality it appears to provide.
+  - **Nothing classified local-unique is overwritten or deleted until the
+    architect rules on it.** Escalation blocks that file only; the rest proceed.
+  - Where classification is genuinely ambiguous, default to **local-unique** and
+    escalate. A needless question is cheap; a silently deleted codev-specific
+    behaviour is not.
 
 ### SHOULD
 
 - **S1** — Non-scar duplicated instruction classes reduced to their single owner
   plus references.
-- **S2** — Model-capability tiering **defined** per **Appendix C**: selector,
-  fallback, and documentation-vs-runtime scope. Shipping more than one populated
-  tier may be deferred; the mechanism and its fallback must be specified and
-  tested.
 
 ### Non-functional
 
@@ -309,7 +328,10 @@ activate only on an affirmative architect answer to Q1.
   the ≈ 24,600 baseline, without deleting any scar rule. A target for the plan to
   interrogate, **not a gate**; the achieved figure is reported either way.
   *Note*: M8 removes ~47k words from the repo but little from *always-on*
-  context, so most of N1 must come from S1.
+  context, so N1 must come from **S1 deduplication plus D3's scar-wording
+  compression** — the latter now contributes directly, since collapsing banner
+  blocks to one-sentence rules shortens always-on text on every surface the
+  rules appear on, without reducing their reach.
 - **N2** — No behavioural regression; full existing suite passes.
 - **N3** — CLAUDE.md and AGENTS.md remain byte-identical.
 - **N4** — Spec 987 HOT-tier caps respected.
@@ -320,6 +342,10 @@ activate only on an affirmative architect answer to Q1.
 - Not touching COLD `arch.md` / `lessons-learned.md` content.
 - Not changing the resolver algorithm.
 - Not making `protocol-drift-audit` auto-remediate; adjudication stays human.
+- **Not implementing multi-model fleet tiering** (the issue's proposed direction
+  #2). Cut by decision **D4** and deferred to its own issue, to be filed once
+  the ownership map exists — the map is the prerequisite that makes tiering
+  specifiable.
 
 ---
 
@@ -334,7 +360,10 @@ issue body and repository invariants.
 - **C2** — Inventory and ownership map precede any restructuring.
 - **C3** — **Scar rules are exempt.** They stay verbatim and always-on wherever
   they apply. Deduplication never applies to them.
-- **C4** — Multi-model fleet tiering by consuming model capability.
+- ~~**C4** — Multi-model fleet tiering by consuming model capability.~~
+  **Cut from this spec by architect decision D4** (2026-07-27) and deferred to
+  its own issue. This is the issue's proposed direction #2, deliberately
+  descoped — not dropped by oversight. See **Non-goals**.
 
 ### From repository invariants
 
@@ -347,19 +376,28 @@ issue body and repository invariants.
 - **C8** — HOT-tier files capped (≤10 facts, ≤12 map topics, ≤35 lines).
 - **C9** — Never `git add -A` / `.` / `--all`.
 
-### Scar rules — exemption list (architect ratification requested, Q3)
+### Scar rules — ratified list (D3; eight rules)
 
-- Never `git add -A` / `.` / `--all`
-- Never destroy builder worktrees (`git worktree remove`, `git branch -D`,
-  `afx cleanup` + respawn); use `--resume`, and when in doubt ask
-- Never `git reset --hard` / `git checkout -- .` / `git clean -fd` / `git stash`
-- Never auto-approve porch gates; only humans approve
-- Never hand-edit `status.yaml`
-- Run `afx` only from the main workspace root
+Ratified by the architect 2026-07-27. Canonical wordings must be **compressed**
+to one sentence (two at most) per **D3**; the drafts below are indicative, and
+the plan registers the final compressed text in M5's registry.
+
+1. Never `git add -A` / `.` / `--all` — stage files explicitly.
+2. Never destroy builder worktrees (`git worktree remove`, `git branch -D`,
+   `afx cleanup` + respawn); use `--resume`, and ask when in doubt.
+3. Never `git reset --hard` / `git checkout -- .` / `git clean -fd` /
+   `git stash` without explicit permission.
+4. Never auto-approve porch gates; only humans approve.
+5. Never hand-edit `status.yaml`.
+6. Run `afx` only from the main workspace root.
+7. **Never kill shellper processes without the verified-orphan procedure.**
+8. **Never restart Tower without explicit human permission.**
+
+Rules 7–8 were added by D3; 1–6 carried over from the builder's proposed list.
 
 The 9 differing wordings of the `git add -A` rule are a **consistency** problem,
-not a duplication problem. The fix is to converge on one canonical wording
-repeated verbatim — **not** to reduce the number of copies.
+not a duplication problem. The fix is to converge on one compressed canonical
+wording repeated verbatim — **not** to reduce the number of copies.
 
 ---
 
@@ -386,13 +424,61 @@ file-by-file, not a bulk overwrite:
 This governs **M3**. It does not decide Q1: reconciling the files and deleting
 the tree are separate acts, and D1 applies whether or not deletion follows.
 
-### Pending — do not act
+### D2 — Shadow-tree deletion approved, with a local-unique safeguard *(answers Q1; 2026-07-27)*
 
-Per architect instruction (2026-07-27), the builder must **not** act on
-shadow-tree deletion (Q1) or fix the scar-registry contents (Q3) until answers
-are relayed. Q4 (tiering selector) is likewise pending. M8–M10 and the
-ratified contents of M5's registry stay frozen in the meantime; the plan may
-*describe* them but must not execute them.
+**Yes — delete the shadow copies.** M8, M9, and M10 are hereby **active and
+required**, no longer conditional.
+
+One strengthening condition, in the architect's words:
+
+> *"mostly delete, but if there are any unique things can we discuss them to
+> make sure we're not losing functionality specific to codev."*
+
+This adds **M11** (below). The safeguard is broader than the local-only file
+list already in A2: it covers **local-unique content anywhere** in
+`codev/protocols/` or `codev/roles/` — including content that lives *inside an
+otherwise-drifted file*, which D1's reconciliation would otherwise overwrite
+before deletion ever runs.
+
+The operative distinction is **local-unique functionality vs. rot**:
+
+| Classification | Meaning | Action |
+|---|---|---|
+| **Rot** | Local lags the skeleton; the difference is stale or missing content | Take the skeleton (D1) |
+| **Local-unique** | Content present locally, absent from the skeleton, that plausibly encodes codev-specific functionality | **Escalate for human discussion before it is lost** |
+
+Escalation is **blocking for that file only** — reconciliation and deletion of
+the remaining files proceed. Nothing classified local-unique is overwritten or
+deleted until the architect rules on it.
+
+### D3 — Scar-rule registry ratified: eight rules, compressed *(answers Q3; 2026-07-27)*
+
+**All eight ratified** — the spec's original six plus two additions:
+
+7. Never kill shellper processes without the verified-orphan procedure.
+8. Never restart Tower without explicit human permission.
+
+**Amendment: canonical wordings must be materially compressed** — one compact
+sentence, two at most, per rule. Not today's multi-line banner blocks (e.g.
+CLAUDE.md's `### 🚨 ABSOLUTE PROHIBITION: NEVER USE git add -A 🚨` block).
+
+Verbatim-replication (C3) and delete/reword CI protection (M5, T6) apply to the
+**compressed canonical form**. Once a compressed wording is registered, it is
+the wording — replicated byte-identically everywhere the rule appears, and
+protected against silent deletion or rewording.
+
+Note the direction of travel: compression **reduces** always-on words while the
+rules stay everywhere they were. Scar rules remain exempt from the single-owner
+rule — this shortens them, it does not deduplicate them.
+
+### D4 — Model-capability tiering cut *(answers Q4; 2026-07-27)*
+
+**Cut entirely from this spec.** Removed: S2, constraint C4, Appendix C, and the
+`tier` field from the Appendix A schema. Tiering becomes its own future issue,
+to be filed once the ownership map exists. Recorded in **Non-goals**.
+
+This descopes the issue's proposed direction #2. It is a deliberate architect
+decision, not an oversight, and is flagged as such wherever C4 appeared.
 
 ---
 
@@ -425,7 +511,7 @@ allowlist, and reconcile the 17 drifted files so the allowlist starts empty.
   drift but not token cost or ambiguity.
 - **Complexity**: low. **Risk**: low.
 
-### Approach A — Delete the shadow tree *(conditional on Q1)*
+### Approach A — Delete the shadow tree *(required; approved by D2)*
 
 Remove the shadow copies, preserving local-only entries, and delete the vestigial
 scaffold functions.
@@ -451,42 +537,45 @@ rules verbatim.
 - **Complexity**: medium. **Risk**: medium (over-stripping a rule an agent
   needed in place) — mitigated by M5 and T9.
 
-### Recommended sequencing: B → (A) → C
+### Sequencing: B → A → C *(all three now in scope per D2)*
 
 Order matters:
 
 1. **B first** — cheap, stops the bleeding, and is the safety net that makes
    deletion auditable. Deleting is far safer once a gate can prove the trees
    agree.
-2. **M3 repair** — required for B's allowlist to start empty.
-3. **A, only if the architect approves Q1** — the largest structural win, now
-   de-risked by B and Appendix B.
-4. **C last** — the durable fix, applied to a surface that is no longer doubled,
+2. **M11 local-unique audit** — before any reconciliation touches a file. This
+   must precede **M3**, not follow it: D1 reconciliation overwrites local content
+   with the skeleton, so an unaudited local-unique paragraph would be destroyed
+   before deletion was ever reached. **M11 → M3 → M8** is the only safe order.
+3. **M3 repair** — reconcile per D1, skipping anything M11 escalated. Required
+   for B's allowlist to start empty (escalated files excepted, with the pending
+   adjudication cited).
+4. **A (M8–M10)** — the largest structural win, de-risked by B, Appendix B, and
+   M11.
+5. **C last** — the durable fix, applied to a surface that is no longer doubled,
    so the map describes one tree.
 
-If Q1 is answered "no," the work is still complete and valuable: B + C ship, M8–M10
-are dropped, and the shadow tree remains under permanent CI enforcement.
+M5's scar registry (with D3's compressed wordings) must be in place and passing
+before **C** begins, since C is the step that could otherwise strip a scar rule.
 
 ---
 
 ## Open Questions
 
-### Critical — architect decisions (do **not** block the required criteria)
+**All four critical/important questions were answered by the architect on
+2026-07-27.** No open question now blocks or shapes the criteria.
 
-- **Q1** — **May the `codev/protocols/` and `codev/roles/` shadow copies be
-  deleted (M8–M10)?** Evidence (Appendix B, A1) supports "yes: historical
-  artifact." *The builder will not delete either tree without explicit architect
-  approval.* A "no" drops M8–M10 and keeps M1–M7 intact.
-- **Q2** — ***ANSWERED by the architect, 2026-07-27.*** See **D1** in
-  *Architect Decisions*. Reconciliation direction is settled; Q1 (whether the
-  shadow copies are then deleted) remains open and independent.
+### Answered — see *Architect Decisions*
 
-### Important
-
-- **Q3** — Is the scar-rule list complete and correct? Needs architect
-  ratification, since the point is that these are never quietly dropped.
-- **Q4** — For **Appendix C** tiering, is a config-key selector the right
-  mechanism, and is documentation-only tiering acceptable for this iteration?
+- **Q1** — ***ANSWERED → D2.*** Delete the shadow copies; M8–M10 promoted to
+  required, plus new **M11** local-unique safeguard.
+- **Q2** — ***ANSWERED → D1.*** Skeleton authoritative; file-by-file; escalate
+  anything resembling deliberate local content.
+- **Q3** — ***ANSWERED → D3.*** Eight scar rules ratified; canonical wordings
+  compressed to one or two sentences.
+- **Q4** — ***ANSWERED → D4.*** Tiering cut from this spec and deferred to its
+  own issue.
 
 ### Nice-to-know
 
@@ -546,10 +635,12 @@ grep -rh "git add -A" codev/protocols codev-skeleton/protocols CLAUDE.md \
 `auditProtocolDrift()` returns zero `differs` findings outside the allowlist;
 a seeded divergence **fails** the test. Asserts the gate actually bites.
 
-### T6 — Scar-rule presence (M5)
+### T6 — Scar-rule presence (M5, D3)
 
-Each registry rule appears verbatim on every required surface. Mutation checks:
-deleting a scar rule fails; rewording it fails.
+All **eight** registry rules appear verbatim — in their **compressed canonical
+form** — on every required surface. Mutation checks: deleting a scar rule fails;
+rewording it fails. Rules 7 (shellper) and 8 (Tower restart) are covered
+identically to the original six.
 
 ### T7 — Single-owner (M4)
 
@@ -572,6 +663,15 @@ counterpart and content matches.
 Full suite green: `protocol-drift-audit`, `skeleton`, `hot-tier`,
 `governance-sweep`, `protocol-prompt-audit`, `framework-ref-audit`,
 `skill-parity`, `scaffold`.
+
+### T12 — Local-unique audit completeness (M11)
+
+The committed audit has **one row per shadow copy** (all 76), each classified
+`rot` or `local-unique`. Cross-check: every file listed as deleted under M8
+appears in the audit with a resolved classification, and no file classified
+`local-unique` was deleted or overwritten without a recorded architect ruling.
+This test guards the *process*, not just the outcome — an unaudited deletion
+must fail.
 
 ### T11 — End-to-end, the real user path
 
@@ -597,10 +697,12 @@ source files.
 
 | Risk | Impact | Mitigation |
 |---|---|---|
-| A scar rule silently dropped during deduplication | **Critical** — reintroduces a known data-loss incident | M5 registry + T6 mutation tests passing *before* any deduplication; architect ratification (Q3) |
+| A scar rule silently dropped during deduplication | **Critical** — reintroduces a known data-loss incident | M5 registry + T6 mutation tests passing *before* any deduplication; eight rules ratified in D3 |
+| **Codev-specific functionality lost when the shadow tree is deleted** | **Critical** — silent capability regression, and the loss is only visible later | **M11** audit precedes reconciliation *and* deletion; covers content *inside* drifted files; ambiguous cases default to escalate; T12 |
+| Compressing a scar wording weakens the rule's force | High | D3 compression is reviewed at the gate; T6 protects the compressed form thereafter; meaning-preservation is a plan-phase review item |
 | Deleting the shadow tree breaks a path-based reader | High | M7 audit precedes deletion; B's gate proves equivalence; T9 checks every deleted file |
 | Over-stripping leaves an agent without a needed rule | High | Deduplicate only non-scar classes; T11 inspects the assembled prompt |
-| A drifted file holds a deliberate local customization | Medium | Q2 file-by-file enumeration; anything non-trivial escalated, never silently overwritten |
+| M3 reconciliation destroys local-unique content before deletion is reached | High | Sequencing is fixed **M11 → M3 → M8**; M3 skips anything M11 escalated |
 | M2's allowlist accretes and re-hides drift | Medium | Allowlist entries require a justification comment; empty at M3 completion; growth is reviewable in diffs |
 | Ownership restated in test code, re-creating duplication | Medium | M4 derives assertions from the map (Q6 resolved) |
 | Local-only files lost during deletion | Medium | T8 explicitly guards all three |
@@ -619,7 +721,6 @@ surfaces:
   - id: claude-md
     path: CLAUDE.md
     load: always-on
-    tier: [strong, weak]        # see Appendix C
 
 instructions:
   - id: git-add-explicit
@@ -665,24 +766,11 @@ non-test hits:
 No direct-read consumer was found. This is preliminary: the plan must complete
 the audit across tests and any non-TypeScript consumers before M8 executes.
 
-## Appendix C — Model-capability tiering (S2, C4)
+## Appendix C — *(removed)*
 
-Specified to the level Codex requires — mechanism, selector, fallback, scope:
-
-- **Tiers**: `strong` (compressed form) and `weak` (fuller scaffolding). Two
-  tiers only; more can be added later without schema change.
-- **Selector**: an explicit config key, `promptTier`, in `.codev/config.json`.
-  Explicit configuration beats model-string sniffing, which breaks on every new
-  model id.
-- **Fallback**: when `promptTier` is absent or unrecognized, **default to
-  `weak`** (fuller scaffolding). Failing toward more instruction is the safe
-  direction: a strong model given extra scaffolding wastes tokens, whereas a
-  weak model denied scaffolding produces wrong work.
-- **Scope for this iteration**: **documentation-only**. The map records a
-  `tier` per surface and the selector plus fallback are specified and tested;
-  no runtime prompt-assembly branching ships under this spec. Runtime tiering
-  is a follow-up, gated on Q4.
-- **Scar rules are tier-invariant** — they appear in full at every tier.
+Model-capability tiering was cut from this spec by decision **D4** and deferred
+to its own issue. Codex's iteration-1 point C-5 (tiering was underspecified) is
+resolved by descoping rather than by specification.
 
 ---
 
@@ -699,14 +787,20 @@ Specified to the level Codex requires — mechanism, selector, fallback, scope:
 **Codex — accepted in full:**
 
 1. *Critical questions gate the end state.* → Success Criteria restructured:
-   M1–M7 required and Q1-independent; M8–M10 conditional on Q1.
+   M1–M7 required and Q1-independent; M8–M10 conditional on Q1. *(Superseded by
+   D2: Q1 answered yes, so M8–M10 are now required. Codex's structural point
+   still stands — the spec was made answer-independent first, which is why the
+   decisions could be absorbed cleanly.)*
 2. *M2 allowed two incompatible outcomes.* → M2 is now solely "drift cannot pass
    CI." Deletion moved to M8.
 3. *M4 under-specified.* → Appendix A defines instruction class, schema, and
    `automated`/`manual` enforcement.
 4. *Approach A feasibility unbounded.* → Q5 promoted to M7 with Appendix B's
    preliminary audit; deletion is conditional and gated behind the parity gate.
-5. *Tiering too vague.* → Appendix C fixes selector, fallback, and scope.
+5. *Tiering too vague.* → Appendix C fixed selector, fallback, and scope.
+   *(Superseded by D4: tiering cut from the spec entirely and deferred to its own
+   issue. Codex's objection is resolved by descoping rather than specification —
+   the cleaner outcome, since it was the least-grounded part of the spec.)*
 
 **Claude — accepted in full:**
 
@@ -738,14 +832,23 @@ success criteria (M1–M7 required / M8–M10 conditional) and the three new
 appendices get reviewer re-validation rather than shipping reviewer-informed
 but unvalidated.
 
-**Not yet run — deliberately held.** The architect subsequently directed
-(2026-07-27) that the spec first be amended with the *complete* decision set
-(Q2 confirmed; Q1/Q3/Q4 to follow), so that a **single** iteration-2 review runs
-against the fully-amended spec rather than reviewing a spec that changes
-underneath it.
+Held until the architect's complete decision set landed (2026-07-27), so that a
+**single** review runs against the fully-amended spec rather than one that
+changes underneath the reviewers.
 
-Current amendment state: **D1 (Q2) recorded; Q1/Q3/Q4 pending.** The review runs
-once those land. Verdicts recorded here.
+Amendment state at review time: **D1–D4 all recorded.** The revised spec differs
+from iteration 1 in five material ways, and reviewers were asked to focus there:
+
+1. Success criteria restructured — M1–M7 required and question-independent.
+2. M8–M10 promoted from conditional to required (**D2**), plus new **M11**
+   local-unique content audit with fixed **M11 → M3 → M8** sequencing.
+3. Scar registry ratified at **eight** rules with **compressed** canonical
+   wordings (**D3**).
+4. Tiering **cut** — S2, C4, Appendix C, and the schema's `tier` field removed
+   (**D4**).
+5. New Appendices A and B; Appendix C removed.
+
+Verdicts recorded below.
 
 Rebuttal: `codev/projects/1252-prompt-architecture-single-own/1252-specify-iter1-rebuttals.md`
 
