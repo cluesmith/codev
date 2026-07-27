@@ -1,14 +1,16 @@
 id: bugfix-1264
 title: regression-3-2-4-double-ctrl-c
 protocol: bugfix
-phase: fix
+phase: pr
 plan_phases: []
 current_plan_phase: null
 gates:
   pr:
     status: pending
+    requested_at: '2026-07-27T01:14:29.680Z'
 iteration: 1
 build_complete: false
 history: []
 started_at: '2026-07-27T00:49:40.123Z'
-updated_at: '2026-07-27T00:56:30.983Z'
+updated_at: '2026-07-27T01:14:29.680Z'
+pr_ready_for_human: true
