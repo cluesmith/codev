@@ -1,7 +1,7 @@
 id: '1252'
 title: prompt-architecture-single-own
 protocol: spir
-phase: specify
+phase: plan
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -16,7 +16,7 @@ gates:
   verify-approval:
     status: pending
 iteration: 1
-build_complete: true
+build_complete: false
 history: []
 started_at: '2026-07-27T07:23:40.596Z'
-updated_at: '2026-07-27T12:54:53.739Z'
+updated_at: '2026-07-27T12:55:02.017Z'
