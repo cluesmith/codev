@@ -472,6 +472,20 @@ async function bootSequence(): Promise<void> {
     log('ERROR', `Shellper session ${sessionId}: ${err.message}`);
   });
 
+  // #1264: SessionManager stopped respawning a session for a reason the user
+  // needs to see. Put it in the terminal itself, not just the Tower log — the
+  // person affected is watching a pane that just went quiet, and has no reason
+  // to go reading server logs to find out why.
+  shellperManager.on('session-gave-up', (sessionId: string, reason: string) => {
+    log('ERROR', `Shellper session ${sessionId} gave up: ${reason}`);
+    const ptySession = getTerminalManager().findByShellperSessionId(sessionId);
+    if (!ptySession) {
+      log('WARN', `Shellper session ${sessionId} gave up but no matching terminal session found to notify`);
+      return;
+    }
+    ptySession.notice(reason);
+  });
+
   // #1198: SessionManager re-established a session's connection in place
   // after an unexpected socket close. Re-attach the replacement client to the
   // PtySession so viewer I/O resumes (attachShellper is idempotent and

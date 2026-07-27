@@ -51,7 +51,7 @@ function extractShellperSessionId(socketPath: string | null): string | null {
 import type { SessionManager, ReconnectRestartOptions } from '../../terminal/session-manager.js';
 import type { PtySession } from '../../terminal/pty-session.js';
 import type { WorkspaceTerminals, TerminalEntry, DbTerminalSession } from './tower-types.js';
-import { normalizeWorkspacePath, resolveArchitectRestart, buildArchitectCrashLoopFallback } from './tower-utils.js';
+import { normalizeWorkspacePath, resolveArchitectRestart, buildArchitectCrashLoopFallback, buildArchitectFreshLaunch } from './tower-utils.js';
 import { setArchitectByName } from '../state.js';
 import { isIntentionallyStopping } from './tower-instances.js';
 
@@ -689,6 +689,17 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
           env: { ...cleanEnv, ...harnessEnv },
           restartDelay: 2000,
           maxRestarts: 50,
+          // Issue #1264: a clean exit inside this reconnected session reruns
+          // the harness fresh rather than ending the session. Built from
+          // cmdParts, not `architectArgs` — the latter has `--resume` baked in
+          // by the #832 restart resolution just above.
+          freshLaunch: buildArchitectFreshLaunch({
+            workspacePath,
+            architectName,
+            baseArgs: cmdParts.slice(1),
+            baseEnv: cleanEnv,
+            log: _deps.log,
+          }),
         };
         // Issue #1149: if the resumed session fast-fails at runtime (jsonl
         // vanished after the bake, or corrupt), degrade to a fresh launch

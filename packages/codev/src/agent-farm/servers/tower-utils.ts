@@ -17,7 +17,7 @@ import { loadRolePrompt, type RoleConfig } from '../utils/roles.js';
 import { getArchitectHarness } from '../utils/config.js';
 import type { HarnessProvider } from '../utils/harness.js';
 import { getArchitectByName, setArchitectSessionId } from '../state.js';
-import type { CrashLoopFallback } from '../../terminal/session-manager.js';
+import type { CrashLoopFallback, FreshLaunch } from '../../terminal/session-manager.js';
 import { cmdlineHoldsSession } from './architect-session-holder.js';
 
 // ============================================================================
@@ -474,6 +474,57 @@ export function buildArchitectCrashLoopFallback(opts: {
       } catch (err) {
         log('WARN', `Failed to persist replacement session id for architect '${architectName}': ${err instanceof Error ? err.message : err}`);
       }
+    },
+  };
+}
+
+/**
+ * Issue #1264: the fresh-launch factory a shellper session uses to rerun the
+ * architect's harness after a *clean* exit (double Ctrl-C, `/quit`, `exit`).
+ *
+ * A clean exit means the user deliberately left that conversation, so the
+ * rerun must NOT carry `--resume`: it mints a brand-new conversation, with the
+ * role re-injected (which the resume path deliberately skips, since a resumed
+ * transcript already contains it).
+ *
+ * The new id is **persisted to the architect row**, so it becomes the identity
+ * a later crash recovers. Without that, an unnatural exit after a clean rerun
+ * would resume the conversation the user just walked away from. A persist
+ * failure is logged and tolerated rather than fatal — the launch itself is
+ * still correct, and the next cold start self-heals.
+ *
+ * Called once per clean exit (never memoized): each rerun is a genuinely new
+ * conversation and needs its own id.
+ */
+export function buildArchitectFreshLaunch(opts: {
+  workspacePath: string;
+  architectName: string;
+  baseArgs: string[];
+  baseEnv: Record<string, string>;
+  log: (level: 'INFO' | 'ERROR' | 'WARN', message: string) => void;
+}): FreshLaunch {
+  const { workspacePath, architectName, baseArgs, baseEnv, log } = opts;
+  return {
+    next: () => {
+      const harness = getArchitectHarness(workspacePath);
+      // No resumable-session concept for this harness: there is no recovery to
+      // disable, so a plain rebuild of the launch args is already "fresh".
+      if (!harness.session) {
+        const built = buildArchitectArgs(baseArgs, workspacePath);
+        return { args: built.args, env: { ...baseEnv, ...built.env } };
+      }
+      const sessionId = crypto.randomUUID();
+      const built = buildArchitectArgs(
+        [...baseArgs, ...harness.session.newSessionArgs(sessionId)],
+        workspacePath,
+      );
+      try {
+        setArchitectSessionId(workspacePath, architectName, sessionId);
+      } catch (err) {
+        log('WARN', `Failed to persist fresh session id for architect '${architectName}': ${err instanceof Error ? err.message : err}`);
+      }
+      log('INFO', `Architect '${architectName}' exited cleanly; rerunning with a fresh session ${sessionId.slice(0, 8)}… in ${workspacePath}`);
+      return { args: built.args, env: { ...baseEnv, ...built.env } };
     },
   };
 }

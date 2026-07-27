@@ -42,6 +42,29 @@ export interface CrashLoopFallback {
   onApply?: () => void;
 }
 
+/**
+ * Issue #1264: how to relaunch the harness after a *clean* exit.
+ *
+ * A clean exit means the user ended the harness on purpose (double Ctrl-C,
+ * `/quit`, `exit`). The session and its shellper survive that — only the
+ * harness is rerun, and it is rerun **without recovery**: a fresh
+ * conversation, not a `--resume` of the one just abandoned. Restarting a
+ * crash is the opposite: that one *should* resume, which is what recovery
+ * exists for.
+ *
+ * A factory rather than a precomputed arg list, because every clean exit
+ * starts a genuinely new conversation and so needs its own freshly minted
+ * session id. This layer stays agnostic of what the args mean; the caller
+ * mints, persists, and returns them.
+ *
+ * Returning null (or omitting the option entirely) means "relaunch with the
+ * args as they stand" — correct for sessions that have no recovery concept,
+ * such as plain shells.
+ */
+export interface FreshLaunch {
+  next: () => { args: string[]; env?: Record<string, string> } | null;
+}
+
 export interface CreateSessionOptions {
   sessionId: string;
   command: string;
@@ -55,6 +78,7 @@ export interface CreateSessionOptions {
   maxRestarts?: number;
   restartResetAfter?: number;
   crashLoopFallback?: CrashLoopFallback;
+  freshLaunch?: FreshLaunch;
 }
 
 export interface ReconnectRestartOptions {
@@ -66,7 +90,25 @@ export interface ReconnectRestartOptions {
   maxRestarts?: number;
   restartResetAfter?: number;
   crashLoopFallback?: CrashLoopFallback;
+  freshLaunch?: FreshLaunch;
 }
+
+/**
+ * Issue #1264 safety valve. Clean-exit reruns are deliberately unlimited —
+ * quitting your agent is a gesture, not a failure, and a long-lived architect
+ * can out-quit any budget. But "unlimited" must not become an infinite spawn
+ * loop when the harness is broken rather than being quit: a misconfigured
+ * command that exits 0 immediately would otherwise respawn forever.
+ *
+ * A human cannot produce a deliberate quit within a couple of seconds of the
+ * harness starting, so a clean exit that fast is evidence of a broken command,
+ * not a gesture. Only those count, and only consecutively — a single fast exit
+ * followed by a healthy session resets the counter. This restores the bound
+ * that both #1241 (end the session) and pre-3.2.4 (maxRestarts) had, without
+ * charging real gestures for it.
+ */
+export const FAST_CLEAN_EXIT_MS = 2_000;
+export const MAX_FAST_CLEAN_EXITS = 5;
 
 /** Failing exits inside this window count toward crash-loop detection. */
 export const CRASH_LOOP_WINDOW_MS = 30_000;
@@ -174,6 +216,10 @@ interface ManagedSession {
   recoveryRounds: number;
   /** Epoch of the last successful in-place reconnect, for the stability reset (#1198). */
   lastRecoveryAt: number;
+  /** Epoch of the most recent (re)spawn, for #1264's fast-clean-exit guard. */
+  lastSpawnAt: number;
+  /** Consecutive clean exits too fast to be a user gesture (#1264). */
+  fastCleanExits: number;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -291,6 +337,8 @@ export class SessionManager extends EventEmitter {
       stderrTailLogged: false,
       recoveryRounds: 0,
       lastRecoveryAt: 0,
+      lastSpawnAt: Date.now(),
+      fastCleanExits: 0,
     };
 
     this.sessions.set(opts.sessionId, session);
@@ -524,6 +572,12 @@ export class SessionManager extends EventEmitter {
           restartResetAfter: restartOptions?.restartResetAfter,
         }),
         crashLoopFallback: restartOptions?.crashLoopFallback,
+        // #1264: must be carried across reconnect. A reconnected architect's
+        // args already contain `--resume` (baked by the #832 restart
+        // resolution), so dropping the factory here would make every clean exit
+        // after a Tower restart relaunch INTO the conversation the user just
+        // quit — the exact thing the fix exists to prevent.
+        freshLaunch: restartOptions?.freshLaunch,
       },
       restartCount: 0,
       restartResetTimer: null,
@@ -533,6 +587,8 @@ export class SessionManager extends EventEmitter {
       stderrTailLogged: false,
       recoveryRounds: 0,
       lastRecoveryAt: 0,
+      lastSpawnAt: Date.now(),
+      fastCleanExits: 0,
     };
 
     this.sessions.set(sessionId, session);
@@ -1078,16 +1134,64 @@ export class SessionManager extends EventEmitter {
         session.restartResetTimer = null;
       }
 
-      // Issue #1241: a deliberate quit is the user's decision — never override
-      // it with a respawn. Auto-restart is for unnatural exits (crashes, signal
-      // deaths), which keep the behavior below. The shellper husk is left alive
-      // (not SIGTERMed) so its scrollback survives; dropping the session drops
-      // the socket, which is the same thing the non-restarting child-exit path
-      // does and keeps SessionManager's view in step with Tower's.
+      // Issue #1264: a clean exit ends the *harness*, not the session. The
+      // shellper and terminal survive and the harness is rerun in the same PTY
+      // with recovery disabled — a fresh conversation, because the user just
+      // deliberately walked away from the old one. (#1241 ended the session
+      // here instead, which made a double Ctrl-C unrecoverable without a manual
+      // respawn; only an explicit kill via afx/UI/DELETE ends a session now.)
+      //
+      // This is NOT counted as a restart: it consumes no part of the
+      // maxRestarts budget and never enters the crash-loop history. Those exist
+      // to stop a *failing* process from spinning forever, and a user quitting
+      // their agent is not a failure — a long-lived architect can easily do it
+      // more times than the restart budget allows.
       if (isDeliberateExit(exit)) {
-        this.log(`Session ${sessionId} exited cleanly (code 0, no signal); not restarting`);
-        this.emit('session-clean-exit', sessionId, exit);
-        this.removeDeadSession(sessionId);
+        // Safety valve: a clean exit this soon after launch is a broken command,
+        // not a user gesture (see FAST_CLEAN_EXIT_MS). Bound those so a harness
+        // that exits 0 on startup can't respawn forever.
+        const uptime = Date.now() - session.lastSpawnAt;
+        session.fastCleanExits = uptime < FAST_CLEAN_EXIT_MS ? session.fastCleanExits + 1 : 0;
+        if (session.fastCleanExits >= MAX_FAST_CLEAN_EXITS) {
+          const reason =
+            `The harness exited immediately (cleanly, within ${FAST_CLEAN_EXIT_MS / 1000}s of launch) ` +
+            `${session.fastCleanExits} times in a row. This looks like a broken or misconfigured ` +
+            `command rather than you quitting it, so respawning has stopped.`;
+          this.log(`Session ${sessionId} gave up: ${reason}`);
+          // The give-up must be visible to the person watching the terminal —
+          // otherwise a misconfigured command reads as a mysteriously dead
+          // session. `session-error` is not a substitute: it also fires for
+          // transient client errors that do NOT end the session, so it cannot
+          // be surfaced to the user as a teardown notice.
+          this.emit('session-gave-up', sessionId, reason);
+          this.emit(
+            'session-error',
+            sessionId,
+            new Error(`Harness exited cleanly ${session.fastCleanExits} times immediately after launch`),
+          );
+          this.removeDeadSession(sessionId);
+          return;
+        }
+        const fresh = session.options.freshLaunch?.next() ?? null;
+        if (fresh) {
+          session.options.args = fresh.args;
+          if (fresh.env) session.options.env = fresh.env;
+        }
+        this.log(
+          `Session ${sessionId} exited cleanly (code 0, no signal); rerunning harness without recovery${fresh ? '' : ' (no fresh-launch factory; reusing current args)'}`,
+        );
+        this.emit('session-fresh-restart', sessionId, exit);
+        setTimeout(() => {
+          if (!this.sessions.has(sessionId)) return;
+          session.lastSpawnAt = Date.now();
+          session.client.spawn({
+            command: session.options.command,
+            args: session.options.args,
+            cwd: session.options.cwd,
+            env: session.options.env,
+          });
+          this.startRestartResetTimer(session);
+        }, session.options.restartDelay ?? 2000);
         return;
       }
 
@@ -1151,6 +1255,7 @@ export class SessionManager extends EventEmitter {
         // Re-check session still exists after delay
         if (!this.sessions.has(sessionId)) return;
 
+        session.lastSpawnAt = Date.now();
         session.client.spawn({
           command: session.options.command,
           args: session.options.args,
