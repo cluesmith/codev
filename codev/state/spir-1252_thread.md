@@ -63,3 +63,65 @@ of scar rules stays off the table per the issue.
 Existing enforcement machinery to build on (not reinvent): `governance-sweep`,
 `hot-tier`, `skeleton`, `protocol-prompt-audit`, `framework-ref-audit`,
 `skill-parity` test suites.
+
+## Specify iter-1 — 3-way consultation
+
+Gemini APPROVE / Codex REQUEST_CHANGES / Claude COMMENT. Codex and Claude each
+found real problems. I accepted all nine issues; two of them corrected factual
+errors of mine.
+
+### The one that mattered most (Claude)
+
+I claimed "no test asserts that codev/protocols/ matches
+codev-skeleton/protocols/." **That was wrong.**
+`packages/codev/src/lib/protocol-drift-audit.ts` (#1210) already exists —
+`auditProtocolDrift()`, `FRAMEWORK_DRIFT_DIRS = ['protocols','consult-types',
+'roles']`, classifying `identical | differs` — and `codev doctor` already calls
+it at `doctor.ts:947`.
+
+So drift has been *detected and reported all along*. Our 17 drifted files were
+visible to `codev doctor` and ignored. The gap is not detection; it is that
+nothing **fails the build**. That narrows M2 enormously: wire the existing
+audit into a CI gate, don't write a detector.
+
+### Count corrections (Claude)
+
+My "19 drifted" conflated drifted files with local-only ones. Actual: **17**
+(16 protocols + 1 roles). Separately there are **3 local-only** entries —
+`release/` and two `maintain/templates/` files — which must survive deletion.
+Added test T8 for that. Clarified 63 `.md` / 73 `md+json` / 76 including roles.
+
+### Structural fixes (Codex)
+
+Codex was right that the spec's end state depended on unanswered critical
+questions, and that M2 permitted two incompatible outcomes. Restructured:
+M1–M7 are required and Q1-independent; M8–M10 (deletion) are conditional on
+architect approval. Added Appendix A (ownership-map schema + what an
+"instruction class" is), Appendix B (compatibility audit), Appendix C (tiering
+selector/fallback/scope).
+
+### What I found while verifying Codex's feasibility concern
+
+Codex claimed many literal `codev/protocols/` references exist. True — 26
+non-test, 95 in tests. But checking them changed the picture twice:
+
+1. **`scaffold.ts` exports `copyProtocols`/`copyRoles`** which copy the skeleton
+   into `codev/`. I briefly thought this meant every adopter has a shadow tree.
+   Then I grepped for callers: **neither is called by init, adopt, or update.**
+   They are dead code. So adopters have NO shadow tree — ours is a historical
+   artifact from when scaffolding did copy. That *strengthens* the deletion
+   case (deleting makes us match adopters) and adds M9: remove the dead
+   functions before someone rewires them.
+2. **Production consumers route through the resolver** (`consult/index.ts:175`
+   → `readCodevFile`; `porch/protocol.ts` → `resolveCodevFile`). The rest are
+   comments and error strings. No direct-read consumer found — deletion is
+   lower-risk than iter-1 judged.
+
+A1 rewritten accordingly: iter-1 asserted "unintentional fork" without
+establishing why; now it is evidence-backed.
+
+### Still architect-owned
+
+Q1 (may the shadow trees be deleted) and Q3 (is the scar list complete) are not
+mine to answer. The spec no longer *depends* on Q1 — a "no" simply drops
+M8–M10 and still ships B + C.
