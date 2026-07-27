@@ -697,15 +697,22 @@ ours is a historical artifact (A1 corrected; M9 added).
 
 ### Iteration 2
 
-Pending — porch will run the second 3-way review.
+Porch advanced directly to the `spec-approval` gate after the iteration-1
+rebuttal, so **no second 3-way review was run**. The revisions above are
+therefore reviewer-informed but not reviewer-re-validated. If the architect
+wants the revised spec re-reviewed before approving — particularly the
+restructured success criteria and the three new appendices — say so and I will
+run a second round.
+
+Rebuttal: `codev/projects/1252-prompt-architecture-single-own/1252-specify-iter1-rebuttals.md`
 
 ---
 
 ## Approval
 
 - [ ] Architect approval (gate: `spec-approval`)
-- [x] 3-way consultation, iteration 1
-- [ ] 3-way consultation, iteration 2
+- [x] 3-way consultation, iteration 1 (Gemini APPROVE / Codex REQUEST_CHANGES / Claude COMMENT — all 9 issues accepted)
+- [ ] 3-way consultation, iteration 2 — *not run; porch advanced to the gate*
 
 ---
 
