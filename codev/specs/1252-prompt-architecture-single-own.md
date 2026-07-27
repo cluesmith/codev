@@ -224,7 +224,9 @@ duplication is unowned — not disclosure.
    build-failing gate, with an explicit adjudication allowlist.
 3. **Scar rules stay verbatim and always-on** wherever they apply, in one
    compressed canonical wording. Deduplication never applies to them.
-4. **The win is measured** by a reproducible before/after script.
+4. **The win is measured** by a reproducible before/after script — in **words**
+   (M6) *and* in **agent behaviour** (M12). A word reduction that degrades
+   compliance is a loss, and the spec must be able to detect that.
 
 ---
 
@@ -313,6 +315,43 @@ unconditional: M8–M10 were promoted from conditional to required by **D2**, an
   comment/error-string (safe), or direct-read (must fix). Promoted from Q5 to a
   first-class deliverable per Codex. *Preliminary findings in* **Appendix B**.
 
+- **M12 — Behavioral-impact measurement** *(added by architect directive D5,
+  2026-07-27)*. M6 counts words; nothing else in this spec observes whether the
+  trims **help or harm agent behaviour**. A word-count reduction is a proxy, and
+  validating only the proxy is not acceptance. M12 closes that gap.
+
+  **(a) Baseline — captured before ANY prompt-content change.** A committed
+  script, `scripts/measure-prompt-behavior.ts`, mines behavioural metrics from
+  existing committed artifacts, with its output committed as
+  `codev/resources/1252-behavior-baseline.md`. Metric set and sample are
+  specified in **Appendix D**, which is grounded in what the repository actually
+  stores — several plausible-sounding metrics turned out not to be minable, and
+  saying so is part of the deliverable.
+
+  **(b) Verify phase.** This project's SPIR verify phase re-runs the same script
+  over the next **N = 10** post-merge builder projects (**≥ 3 of them SPIR** —
+  see Appendix D for why the protocol mix matters), compares against the
+  baseline, and records an explicit **no-regression judgment**. A defined
+  **rollback trigger** (Appendix D §4) states what metric movement reverts
+  which commits.
+
+  **(c) A/B eval — considered and deferred.** A controlled A/B (same task, old
+  vs new prompts, held-out grader) would isolate cause far better than
+  before/after observation, which cannot separate prompt effects from drift in
+  task difficulty, model version, or reviewer behaviour. It is deferred: it
+  needs a task corpus and grading harness that do not exist, and building them
+  is a larger project than this one. A follow-up issue is filed in Phase 8.
+  **This is a real weakness of M12, not a formality** — the observational design
+  supports "no evidence of harm," not "proved beneficial."
+
+  **Confound to state plainly**: this project both **adds** served content
+  (M3 restores the missing `Verify Phase` and `Multi-PR Mechanics` sections) and
+  **removes** it (D3 compression, S1 dedup). The baseline is the **pre-project
+  state** and the verify comparison therefore evaluates the project's **total
+  effect**, not the trims in isolation. A null result could be two real effects
+  cancelling. Appendix D §4 mitigates this by attributing rollback to specific
+  commits rather than to the project as a whole.
+
 ### Required — MUST (shadow-tree removal; activated by D2)
 
 - **M8 — Shadow-tree removal.** `codev/protocols/` and `codev/roles/` shadow
@@ -394,6 +433,10 @@ unconditional: M8–M10 were promoted from conditional to required by **D2**, an
 - Not touching COLD `arch.md` / `lessons-learned.md` content.
 - Not changing the resolver algorithm.
 - Not making `protocol-drift-audit` auto-remediate; adjudication stays human.
+- **Not running a controlled A/B eval** of old vs new prompts (M12c). Considered
+  and deferred — it needs a task corpus and grading harness that do not exist.
+  Follow-up issue filed in Phase 8. The consequence is that M12 can support
+  *"no evidence of harm,"* not *"proved beneficial."*
 - **Not implementing multi-model fleet tiering** (the issue's proposed direction
   #2). Cut by decision **D4** and deferred to its own issue, to be filed once
   the ownership map exists — the map is the prerequisite that makes tiering
@@ -522,6 +565,24 @@ protected against silent deletion or rewording.
 Note the direction of travel: compression **reduces** always-on words while the
 rules stay everywhere they were. Scar rules remain exempt from the single-owner
 rule — this shortens them, it does not deduplicate them.
+
+### D5 — Behavioral-impact measurement required *(2026-07-27)*
+
+The issue's architect-guidance made impact measurement mandatory — *"a trim
+proposal without a way to evaluate it is not accepted."* The spec as approved
+satisfied this only with **M6 word counts and structural tests**, which measure
+the proxy rather than the effect. That is a real gap and the spec did not close
+it.
+
+Directive: add a required criterion covering **(a)** a baseline captured before
+any prompt-content change, **(b)** a defined verify phase re-running the same
+measurement post-merge with a no-regression judgment and rollback trigger, and
+**(c)** a documented decision that a controlled A/B eval was considered and
+deferred, with a follow-up pointer.
+
+Implemented as **M12** with **Appendix D**. Note that M3's drift repair itself
+changes served prompts: the baseline is the **pre-project state**, and the verify
+comparison evaluates the project's **total effect**.
 
 ### D4 — Model-capability tiering cut *(answers Q4; 2026-07-27)*
 
@@ -736,6 +797,16 @@ seeded normative line added inside the boundary must fail the test until
 dispositioned — asserting the guard actually bites rather than passing
 vacuously on an empty candidate set.
 
+### T14 — Behavioural baseline script (M12a)
+
+*Automated.* `scripts/measure-prompt-behavior.ts` runs clean and is
+**deterministic** over a fixed corpus — the same commit must yield the same
+B1–B5 numbers, or before/after comparison is meaningless. Asserts: the SPIR
+sample resolves to the expected project count; B3 emits matched excerpts
+alongside counts; and the script does **not** attempt gate-rejection counts
+(Appendix D §2 — the data does not exist, and a plausible-looking zero would be
+worse than an absent metric).
+
 ### T13 — End-to-end, the real user path
 
 **Part (a), automated**: assemble the builder spawn prompt in-process and assert
@@ -772,6 +843,10 @@ The plan must record the manual run's outcome in the review.
 | Over-stripping leaves an agent without a needed rule | High | Deduplicate only non-scar classes; T13 inspects the assembled prompt |
 | Ownership map under-lists, making M4 pass vacuously | High | M1 completeness rule — declared inventory boundary + mandatory disposition; T12 fails on any undispositioned candidate |
 | An M11 escalation stalls and the project dangles | Medium | "Pending" is not a terminal state; unresolved escalations convert to TS3 with a filed follow-up issue |
+| **Trims degrade agent behaviour while every structural test stays green** | **Critical** — the failure M6 cannot see | M12 baseline + verify; B3 scar-violation mining; hard rollback trigger on a single incident |
+| Baseline captured after content already changed, so there is no clean "before" | High | M12(a) completes in Phase 1, before any phase that alters served prompt content |
+| Verify window closes with too little data and "no regression" is declared vacuously | Medium | Appendix D §4: < N=10 or < 3 SPIR ⇒ **inconclusive**, not success |
+| Add-and-remove effects cancel, hiding a real regression | Medium | Rollback attributed to specific commits (Phases 5/7), not to the project as a whole |
 | M3 reconciliation destroys local-unique content before deletion is reached | High | Sequencing is fixed **M11 → M3 → M8**; M3 skips anything M11 escalated |
 | M2's allowlist accretes and re-hides drift | Medium | Allowlist entries require a justification comment; empty at M3 completion; growth is reviewable in diffs |
 | Ownership restated in test code, re-creating duplication | Medium | M4 derives assertions from the map (Q6 resolved) |
@@ -835,6 +910,85 @@ non-test hits:
 
 No direct-read consumer was found. This is preliminary: the plan must complete
 the audit across tests and any non-TypeScript consumers before M8 executes.
+
+## Appendix D — Behavioral metrics, sample, and rollback trigger (M12)
+
+Every claim here was verified against the repository before being proposed. The
+directive listed candidate metrics; two of them are **not minable**, and
+substituting something measurable is more useful than specifying something
+aspirational.
+
+### 1. What the repository actually stores
+
+| Source | Volume | Usable for baseline? |
+|---|---:|---|
+| `codev/projects/*/status.yaml` — `history[].reviews[].verdict` | 17 projects | **Yes** — the only structured CMAP record |
+| `codev/reviews/*.md` | 211 | **Yes** — prose; keyword-mined |
+| `codev/state/*_thread.md` | 139 | **Yes** — prose; keyword-mined |
+| Gate rejection counts | — | **No** — see §2 |
+| `consult` token/cost stats | 30-day local DB | **Prospective only** — see §2 |
+
+`codev/projects/*/*.txt` (the raw consult logs) are **gitignored**
+(`.gitignore:59`), so no historical consult output survives in the repo. This is
+the single biggest constraint on the baseline.
+
+### 2. Candidate metrics that had to be dropped or re-scoped
+
+- **Gate rejection / re-request counts — NOT MINABLE.** Across all 201 projects,
+  gate `status` only ever takes the values `approved`, `complete`, `in_progress`,
+  `pending`. There is no `rejected` state, and `requested_at` is a single scalar
+  that a re-request overwrites rather than appends to. A rejected-then-approved
+  gate is indistinguishable from a first-time approval. *Recording this so the
+  metric is not silently dropped: it was requested, and it cannot be delivered
+  from committed history.* (A porch change to append gate events would make this
+  minable in future — noted as a possible follow-up, out of scope here.)
+- **Tokens per phase — PROSPECTIVE ONLY.** `consult stats` reports invocations,
+  duration, and cost, but over a rolling 30-day window from a machine-local DB.
+  There is no Feb–Jun history to form a retrospective baseline. It is therefore
+  captured as a **forward baseline snapshot** at Phase 1 and compared in verify —
+  a weaker design than the others, and labelled as such.
+
+### 3. The metric set and sample
+
+**Sample for retrospective metrics (B1–B2): the 17 SPIR projects with non-empty
+`history`**, spanning 2026-02 → 2026-06. Small, and stated as such. `history` is
+populated for SPIR (per-plan-phase review loops) and empty for `pir`/`bugfix`/
+`air`, which is why the sample is protocol-skewed rather than 201-wide.
+
+| ID | Metric | Definition | Source | Sample |
+|---|---|---|---|---|
+| **B1** | CMAP `REQUEST_CHANGES` rate | share of verdicts that are `REQUEST_CHANGES` | `history[].reviews[].verdict` | 17 SPIR |
+| **B2** | Rounds to unanimous approve | iterations per `plan_phase` until all 3 models APPROVE | `history[].iteration` | 17 SPIR |
+| **B3** | Scar-violation incidents | keyword-mined mentions of the eight D3 rules being violated (`git add -A`, worktree destruction, gate auto-approval, `status.yaml` hand-edit, …) | 211 reviews + 139 threads | all |
+| **B4** | Phase-iteration count | total iterations to complete a phase | `status.yaml` | all with history |
+| **B5** | Consult cost/duration per phase | forward snapshot only (§2) | `consult stats` | prospective |
+
+B3 is fuzzy by construction — prose keyword mining, with false positives from
+documentation *about* a rule rather than a violation of it. The script must
+report matched excerpts, not just counts, so a human can adjudicate. **B3 is the
+metric that matters most**: it is the one that would catch a compressed scar rule
+losing its force.
+
+### 4. No-regression judgment and rollback trigger
+
+Rollback targets **the trims, never the repairs**. Phases 1–4 (drift gate, audit,
+reconcile, shadow removal) *restore* correct content; reverting them would
+reintroduce the drift bug this project exists to fix. Only Phases 5 and 7 removed
+text, so only they are rollback candidates.
+
+| Trigger | Threshold | Action |
+|---|---|---|
+| **Hard — scar violation** | **Any single** B3 incident in the verify window attributable to a missing or weakened rule | Revert the **Phase 5** compression commit (and Phase 7 if the rule was a dedup target). n=1 suffices; scar rules exist because the incident already happened once. |
+| **Soft — review friction** | B1 `REQUEST_CHANGES` rate rises **> 25% relative** to baseline, sustained across the N sample | Revert **Phase 7** dedup commits; keep Phases 1–6. Re-measure before any further trimming. |
+| **Advisory** | B2/B4 rise without B1/B3 movement | No revert. Record and investigate — likely confounded by task difficulty. |
+| **Inconclusive** | Fewer than N=10 projects, or < 3 SPIR, complete in the window | **Do not declare success.** Extend the window or record the verify as inconclusive. Absence of data is not a no-regression result. |
+
+The last row matters: with n=17 baseline and N=10 verify, this design detects a
+large regression, not a subtle one. The honest claim available at the end is
+**"no evidence of behavioural harm at this sample size"** — not "the trims were
+beneficial." Anything stronger requires the deferred A/B.
+
+---
 
 ## Appendix C — *(removed)*
 

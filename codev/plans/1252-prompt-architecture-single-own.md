@@ -53,14 +53,15 @@ constraint.
 
 | Phase | Delivers | Verified by |
 |---|---|---|
-| 1 | M2 (gate), M6 | T5, T1 |
+| 1 | M2 (gate), M6, **M12a (behavioural baseline)** | T5, T1, T14 |
 | 2 | M11 (audit + escalations) | T11 |
 | 3 | M3 (D1 reconciliation) | T2, T3, allowlist decay |
 | 4 | M7, M8, M9, M10 | T8, T9, T10 |
 | 5 | M5 (D3 registry, eight compressed rules) | T6 |
 | 6 | M1, M4 | T7, T12 |
 | 7 | S1, N1 | T4, T13(a) |
-| 8 | C6 retirement, N2, N3, N4 | T10, T13(a)+(b) |
+| 8 | C6 retirement, N2, N3, N4, **M12c follow-up** | T10, T13(a)+(b) |
+| verify | **M12b** (post-merge behavioural comparison) | Appendix D §4 |
 
 ---
 
@@ -123,15 +124,44 @@ makes every later phase auditable.
     subtotal, and the ~24,600 baseline arithmetic.
   - Committed and re-run in Phase 7; both outputs recorded in the review.
 
+**Step 1b — behavioural baseline (M12a).** *Added by directive D5.*
+
+This must complete **in Phase 1**, because every later phase alters served
+prompt content — Phase 3 restores sections, Phase 5 compresses scar rules,
+Phase 7 dedups. Once any of those land there is no clean "before."
+
+- **New** `scripts/measure-prompt-behavior.ts`, implementing metrics **B1–B5**
+  from spec Appendix D:
+  - **B1** CMAP `REQUEST_CHANGES` rate and **B2** rounds-to-unanimous-approve,
+    parsed from `codev/projects/*/status.yaml` → `history[].reviews[].verdict`.
+    Sample: **the 17 SPIR projects with non-empty `history`**.
+  - **B3** scar-violation incidents, keyword-mined across **211**
+    `codev/reviews/*.md` and **139** `codev/state/*_thread.md`. Must emit
+    **matched excerpts, not just counts** — the mining is fuzzy (documentation
+    *about* a rule reads much like a violation of it) and a human adjudicates.
+  - **B4** phase-iteration counts from `status.yaml`.
+  - **B5** consult cost/duration — **forward snapshot only**; `consult stats` is
+    a rolling 30-day local DB with no Feb–Jun history.
+- **New** `codev/resources/1252-behavior-baseline.md` — the committed numbers.
+- **Do not implement gate-rejection counts.** Verified unavailable: gate
+  `status` only ever takes `approved | complete | in_progress | pending` across
+  all 201 projects, and `requested_at` is overwritten rather than appended, so a
+  rejected-then-approved gate is indistinguishable from a clean approval. Spec
+  Appendix D §2 records this; the script should not fake it.
+
 #### Success criteria
 
 - `auditProtocolDrift()` is invoked, not duplicated.
 - Seeded-divergence fixture fails; clean tree passes.
-- Baseline measurement committed.
+- Word-count baseline committed.
+- **Behavioural baseline committed** (M12a) — B1–B5 over the stated sample,
+  with B3 excerpts included for adjudication.
+- **No phase altering served prompt content has run yet.**
 
 #### Test approach
 
-T5 (drift gate, incl. the bites-check), T1 (inventory reproduction).
+T5 (drift gate, incl. the bites-check), T1 (inventory reproduction),
+T14 (baseline script runs clean and is deterministic on a fixed corpus).
 
 ---
 
@@ -496,6 +526,9 @@ rather than trusting green tests.
   than repeating it.
 - **File the tiering follow-up issue** (D4) now that the ownership map exists —
   the prerequisite that made it specifiable.
+- **File the A/B eval follow-up issue** (M12c) — controlled same-task old-vs-new
+  prompt comparison with a held-out grader, which M12's observational design
+  cannot substitute for. Link it from the spec's Non-goals.
 - **T13(b) — the manual run.** Spawn a real builder against the changed tree and
   *read the prompt it receives*. Confirm the `Verify Phase` section and all eight
   scar rules are present.
@@ -515,6 +548,53 @@ T10 (regression), T13(a) automated + **T13(b) manual**, `hot-tier`,
 
 ---
 
+---
+
+## Verify Phase (post-merge) — M12b
+
+SPIR's verify phase is optional and this plan originally left it undefined.
+Directive D5 makes it load-bearing: it is where the behavioural claim is settled.
+
+**Trigger**: after the PR merges, the project enters `verify`. The builder stays
+alive through it (`porch done 1252` signals readiness; the architect approves
+`verify-approval`).
+
+**Window**: the next **N = 10** post-merge builder projects, of which **≥ 3 must
+be SPIR**. The SPIR minimum exists because B1/B2 are only minable from SPIR
+projects — `history` is empty for `pir`/`bugfix`/`air`. At recent rates
+(~4 SPIR/month, ~33 projects/month overall) the SPIR minimum, not the total, is
+the binding constraint on how long verify runs.
+
+**Procedure**:
+
+1. Re-run `scripts/measure-prompt-behavior.ts` over the verify-window projects.
+2. Compare B1–B5 against `codev/resources/1252-behavior-baseline.md`.
+3. Adjudicate B3 excerpts by hand — the keyword mining produces false positives,
+   and the count alone is not a finding.
+4. Record an explicit **no-regression judgment** in
+   `codev/reviews/1252-prompt-architecture-single-own.md`.
+
+**Rollback triggers** (spec Appendix D §4 — reproduced so the verify step is
+self-contained):
+
+| Trigger | Threshold | Action |
+|---|---|---|
+| **Hard** — scar violation | **Any single** B3 incident traced to a missing/weakened rule | Revert the **Phase 5** compression commit (+ Phase 7 if the rule was a dedup target) |
+| **Soft** — review friction | B1 rises **> 25% relative** to baseline, sustained | Revert **Phase 7** dedup commits; keep Phases 1–6 |
+| **Advisory** | B2/B4 rise with no B1/B3 movement | No revert; record and investigate |
+| **Inconclusive** | < 10 projects or < 3 SPIR complete | **Do not declare success** — extend the window or record as inconclusive |
+
+**Rollback targets trims, never repairs.** Phases 1–4 restore correct content;
+reverting them would reintroduce the drift bug. Only Phases 5 and 7 removed
+text, so only they are candidates.
+
+**Honest limit**: with a 17-project baseline and a 10-project window, this
+detects a large regression, not a subtle one. The strongest available conclusion
+is *"no evidence of behavioural harm at this sample size."* Proving benefit
+requires the A/B deferred under M12c.
+
+---
+
 ## Risks and Mitigations
 
 | Risk | Phase | Mitigation |
@@ -527,6 +607,9 @@ T10 (regression), T13(a) automated + **T13(b) manual**, `hot-tier`,
 | Allowlist becomes a permanent exemption | 1, 3 | Justification per entry; empties in Phase 3; only open escalations may persist |
 | Hot-tier cap breached while fixing C6 | 8 | `update-arch-docs` skill; demote-on-add displacement |
 | Green tests, broken real spawn | 8 | T13(b) manual spawn — the exact failure that produced this project |
+| Trims degrade behaviour while every structural test stays green | 1, verify | M12 baseline in Phase 1; verify comparison; hard rollback on a single B3 incident |
+| Baseline taken after content changed — no clean "before" | 1 | Step 1b completes before Phase 3/5/7 touch served content |
+| Verify declares "no regression" on too little data | verify | < 10 projects or < 3 SPIR ⇒ inconclusive, not success |
 
 ---
 

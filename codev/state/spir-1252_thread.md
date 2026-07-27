@@ -287,3 +287,54 @@ now owns all scar edits; Phase 8 only parity-checks N3.
 
 Gemini again endorsed the Phase 5-after-Phase 4 placement (my discretionary
 call) and the M11 → M3 → M8 ordering.
+
+## Amendment D5 — behavioural-impact measurement (M12)
+
+Architect surfaced a real gap I'd missed: the issue's guidance made impact
+measurement mandatory ("a trim proposal without a way to evaluate it is not
+accepted"), and my M6 word-counts + structural tests measure the PROXY, not the
+effect. My safeguards were asymmetric — M5/T6 protect against a scar rule being
+deleted or reworded; nothing detected "rule still present, compliance dropped."
+
+### Research first — two requested metrics turned out unminable
+
+Before proposing anything I checked what the repo actually stores. Worth
+recording because the answer shaped the whole design:
+
+- `codev/projects/*/*.txt` (raw consult logs) are **GITIGNORED** (.gitignore:59).
+  No historical consult output survives. Biggest constraint.
+- **Gate rejection counts: NOT MINABLE.** Across all 201 projects gate `status`
+  only ever takes approved|complete|in_progress|pending — there is no `rejected`
+  state, and `requested_at` is a scalar that a re-request overwrites. A
+  rejected-then-approved gate is indistinguishable from a clean one. Said so in
+  Appendix D §2 rather than quietly dropping it.
+- **Tokens/phase: PROSPECTIVE ONLY.** `consult stats` is a rolling 30-day local
+  DB (3239 invocations, $1426). No Feb–Jun history → forward snapshot only.
+- What IS minable: `history[].reviews[].verdict` — but only **17 SPIR projects**
+  have non-empty history (populated for SPIR's per-plan-phase loops, empty for
+  pir/bugfix/air). Plus 211 reviews + 139 threads for keyword mining.
+
+So: B1 REQUEST_CHANGES rate, B2 rounds-to-approve, B3 scar-violation mining,
+B4 phase iterations, B5 forward cost snapshot. Sample n=17. N=10 verify window
+with ≥3 SPIR (the SPIR minimum is the binding constraint, not the total).
+
+### Things I made sure to state rather than paper over
+
+- **The add/remove confound**: this project both restores content (M3) and
+  removes it (D3 compression, S1 dedup). A null result could be two real effects
+  cancelling. Mitigated by attributing rollback to specific commits, not the
+  project as a whole.
+- **Rollback targets trims, never repairs.** Phases 1–4 restore correct content;
+  reverting them reintroduces the drift bug. Only Phases 5 and 7 are candidates.
+- **Inconclusive is a real outcome.** <10 projects or <3 SPIR ⇒ do NOT declare
+  success. Absence of data is not a no-regression result.
+- **B3 is the metric that matters most** and is the fuzziest — it's the one that
+  would catch a compressed scar rule losing force. Script must emit excerpts,
+  not just counts, so a human adjudicates.
+- Honest ceiling: n=17 vs N=10 detects a LARGE regression. The strongest claim
+  available is "no evidence of harm at this sample size," not "proved
+  beneficial." That's why M12c defers a real A/B — and I flagged the deferral as
+  a genuine weakness, not a formality.
+
+Baseline must land in Phase 1 (step 1b) — Phases 3/5/7 all alter served content,
+so any later capture has no clean "before."
