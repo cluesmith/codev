@@ -203,3 +203,35 @@ scar chain — both builder-originated, so worth recording that they survived
 outside review.
 
 No open questions remain. Back to the spec-approval gate.
+
+## Plan phase — 8 phases drafted
+
+Spec approved (human approval relayed via architect; I ran `porch approve` per
+the workspace convention that the builder executes it, architect never does).
+
+**One ordering decision beyond what the spec fixed.** The spec pins
+`M11 → M3 → M8` and "M5 green before Approach C," but says nothing about where
+scar compression sits relative to deletion. Compressing eight rules across ~36
+files when half get deleted two phases later is wasted work — and worse, risks
+reconciling a compression edit against a skeleton that never got it. So
+**Phase 5 (scar compression) runs AFTER Phase 4 (deletion)**, still well before
+Phase 7 (dedup). Satisfies the real constraint; avoids the trap.
+
+Phases: 1 drift gate + baseline · 2 local-unique audit · 3 reconcile ·
+4 compat audit + removal · 5 scar registry · 6 ownership map · 7 dedup +
+measure · 8 governance sync + E2E.
+
+Four of eight phases land before a single duplicated word is removed. That's
+deliberate — the spec's finding is that drift, not token count, is urgent, and
+D2 requires nothing codev-specific be lost.
+
+Notes to self for implementation:
+- Phase 1's allowlist starts POPULATED with the 17 drifts (justified "pending
+  Phase 3"). A gate that fails on commit is a gate someone disables.
+- Phase 5's real risk is meaning loss, not brevity. Each compressed wording must
+  retain prohibition + scope + any escape hatch (rule 2's "use --resume, and ask
+  when in doubt"). Dropping the escape hatch turns guidance into a dead end.
+- Phase 7: report the N1 figure honestly even if under 20%. Likely shortfall is
+  structural — most always-on words are CLAUDE.md prose that's already
+  single-owned, not duplicated rules. Do NOT strip content to hit a number.
+- Phase 8 must file the D4 tiering follow-up issue.
