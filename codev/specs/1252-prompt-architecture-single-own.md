@@ -321,9 +321,13 @@ unconditional: M8–M10 were promoted from conditional to required by **D2**, an
   validating only the proxy is not acceptance. M12 closes that gap.
 
   **(a) Baseline — captured before ANY prompt-content change.** A committed
-  script, `scripts/measure-prompt-behavior.ts`, mines behavioural metrics from
-  existing committed artifacts, with its output committed as
-  `codev/resources/1252-behavior-baseline.md`. Metric set and sample are
+  measurement library, `packages/codev/src/lib/prompt-behavior-metrics.ts` (with
+  CLI runner `packages/codev/scripts/measure-prompt-behavior.ts`), mines
+  behavioural metrics from existing committed artifacts, with its output
+  committed as `codev/resources/1252-behavior-baseline.md`. *It lives beside
+  `protocol-drift-audit.ts` rather than in the root `scripts/` directory because
+  it needs that package's `js-yaml` dependency, which a root-level script cannot
+  resolve in this pnpm workspace.* Metric set and sample are
   specified in **Appendix D**, which is grounded in what the repository actually
   stores — several plausible-sounding metrics turned out not to be minable, and
   saying so is part of the deliverable.

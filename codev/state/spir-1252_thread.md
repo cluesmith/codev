@@ -393,3 +393,57 @@ without it.
 Process note: my first 3 delta consults failed — `--prompt` and `--type` are
 mutually exclusive. Should have checked the consult skill first. Re-ran in
 general mode with a scoped brief file. No artifacts affected.
+
+## Phase 1 COMPLETE — drift gate + both baselines
+
+Plan approved (human, relayed). Phase 1 delivers M2, M6, M12a.
+
+**Drift gate** (`shadow-drift-gate.test.ts`): calls the existing
+`auditProtocolDrift()` — did NOT reimplement detection. 4 tests + 1 skipped
+(Phase-3 lifecycle guard, flips on in Phase 3).
+
+Allowlist seeded with exactly the 17 drifted files, each justified
+`PENDING_RECONCILE → Phase 3 (D1)`. Two guards make it self-limiting: every
+entry needs a non-empty note, and a *stale-entry* test fails if an allowlisted
+file stops drifting. So the allowlist can't outlive its purpose.
+
+The BITES test matters most: seeds a real divergence in a temp workspace and
+requires detection. A gate that has only seen a clean tree is indistinguishable
+from a no-op — which is precisely how #1210 sat unread for months.
+
+**Word baseline**: ALWAYS_ON = **24,614** (CLAUDE.md 5,773 + spawn 4,891 +
+1,395×10 phase tasks). Matches the spec's ~24,600 estimate. Deliberately
+excludes AGENTS.md (byte-identical twin — one loads per session, not both) and
+the hot-tier files (already inlined in CLAUDE.md's count). Double-counting
+either would inflate the baseline and flatter the Phase 7 result.
+
+**Behavioural baseline** (M12a): B1 **51.88%** REQUEST_CHANGES (n=160 verdicts),
+B2 mean 1.12 (n=49 phases), B4 mean 3.06 (n=18 projects). Reproduces the figures
+published in spec Appendix D.
+
+B3: 45 candidate hits across 350 files — and inspection confirms they're mostly
+false positives (discussions *about* auto-approve, not violations). Exactly why
+the script emits excerpts, not counts. A bare "45 violations" would have been
+actively misleading.
+
+### Deviation from plan: script location
+
+Plan said `scripts/measure-prompt-behavior.ts` at repo root. It needs `js-yaml`,
+which a root script **cannot resolve** in this pnpm workspace (root node_modules
+lacks it). Moved logic to `packages/codev/src/lib/prompt-behavior-metrics.ts`
+beside `protocol-drift-audit.ts`/`framework-ref-audit.ts` — same module shape,
+unit-testable, deps resolve — with a thin CLI at
+`packages/codev/scripts/measure-prompt-behavior.ts`. Spec + plan updated to the
+real paths. The bash surface script stays at root (no deps).
+
+### Test-suite investigation worth recording
+
+First full run: 49 files / 62 tests failing. Easy to write off as pre-existing —
+but I verified instead. All were `@cluesmith/codev-core` import errors: the
+workspace wasn't built. Building core fixed 48 files. The last 8 were
+"integration with real shellper" tests needing `dist/terminal/shellper-main.js`;
+`npx tsc` produced it and all 90 passed.
+
+**Full suite now 193 files / 3772 tests green, 0 failures.** No flaky tests to
+skip. Lesson reinforced: "pre-existing failure" is a claim requiring evidence,
+not a default assumption — a fresh worktree just isn't built.

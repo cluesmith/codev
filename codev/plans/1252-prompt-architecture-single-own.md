@@ -130,8 +130,12 @@ This must complete **in Phase 1**, because every later phase alters served
 prompt content — Phase 3 restores sections, Phase 5 compresses scar rules,
 Phase 7 dedups. Once any of those land there is no clean "before."
 
-- **New** `scripts/measure-prompt-behavior.ts`, implementing metrics **B1–B5**
-  from spec Appendix D:
+- **New** `packages/codev/src/lib/prompt-behavior-metrics.ts` (logic) +
+  `packages/codev/scripts/measure-prompt-behavior.ts` (thin CLI runner),
+  implementing metrics **B1–B4** from spec Appendix D. *Placed in the package,
+  not root `scripts/`: it needs `js-yaml`, which a root-level script cannot
+  resolve in this pnpm workspace, and it belongs beside the sibling audit
+  libraries `protocol-drift-audit.ts` / `framework-ref-audit.ts`.*
   - **B1** CMAP `REQUEST_CHANGES` rate (share of all verdicts) and **B2** review
     rounds per plan phase (`max(iteration)` per `plan_phase`), parsed from
     `codev/projects/*/status.yaml` → `history[]`. Sample: **the 17 SPIR projects
