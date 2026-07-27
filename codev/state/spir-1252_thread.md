@@ -235,3 +235,55 @@ Notes to self for implementation:
   structural — most always-on words are CLAUDE.md prose that's already
   single-owned, not duplicated rules. Do NOT strip content to hit a number.
 - Phase 8 must file the D4 tiering follow-up issue.
+
+## Plan iter-1 — 3-way review
+
+**Gemini APPROVE / Codex REQUEST_CHANGES / Claude APPROVE.** 6 points, all
+accepted. None changed phase structure, ordering, or scope — all six were
+"specify this existing phase more precisely."
+
+### Codex CX-1: I implemented half of my own criterion
+
+M10 says resolver equivalence AND byte-identical assembled prompt. Phase 4
+planned only the former — and the gap was *disguised*, because Phase 8's T13
+looks like it covers assembled prompts. A reader would reasonably conclude M10
+was satisfied across two phases when neither asserted byte-identity.
+
+Why it matters: per-file resolution can be correct while assembly still differs
+(template ordering, {{project_id}} interpolation, a fragment from a different
+tier). Phase 4's entire claim is "deletion is a no-op for what agents receive" —
+only byte-identity shows that. Fixed: snapshot each protocol's prompt
+pre-deletion, assert byte-identical after.
+
+Also wrote down that 4d(ii) and T13 have *opposite* expectations — 4d(ii) says
+nothing changed; T13 says the right content is present after compression/dedup
+deliberately changed things. Easy for a later reader to collapse them.
+
+### Codex CX-3: the drift disease, in miniature, in my own plan
+
+I wrote "remove copyProtocols/copyRoles plus their scaffold.test.ts cases."
+But only copyRoles has tests — and **I had established that myself** during the
+spec phase and written it in the iter-1 spec rebuttal. Verified once,
+paraphrased from memory later, drifted in the restatement.
+
+That's exactly what this project is about. Worth remembering: my errors don't
+cluster in analysis, they cluster in *restating things I already verified*.
+
+### Claude CL-1: better than "minor"
+
+T11 parses the Phase 2 audit doc, but I described the doc loosely. A builder
+writing free-form prose would make T11 unimplementable — and the natural fix
+under pressure is to weaken T11, which would quietly remove the guarantee that
+nothing was deleted unaudited. That's the most important safeguard in the plan.
+Now specified as a fixed 5-column table with enumerated values.
+
+### CX-2: phase boundary contradiction
+
+Phase 5 said "replace on every surface"; Phase 8 said "apply Phase 5's wordings
+to CLAUDE.md/AGENTS.md." Two readings, one dangerous: Phase 5 skips the two
+most-read surfaces and still claims M5 green — leaving a hole exactly where the
+most-read scar rules live, right before Phase 7 starts stripping text. Phase 5
+now owns all scar edits; Phase 8 only parity-checks N3.
+
+Gemini again endorsed the Phase 5-after-Phase 4 placement (my discretionary
+call) and the M11 → M3 → M8 ordering.

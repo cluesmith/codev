@@ -154,6 +154,13 @@ safeguard and the phase that protects against silent capability loss.
   | File | Divergence | Classification | Terminal state | Ruling |
   |---|---|---|---|---|
 
+- **The table must be machine-parseable — T11 parses it** (Claude, plan review).
+  Fixed five-column pipe table, one row per file, with `Classification` drawn
+  from exactly `rot | local-unique` and `Terminal state` from exactly
+  `TS1 | TS2 | TS3 | TS4 | pending`. Free-form prose anywhere in the table makes
+  T11 unimplementable. Narrative commentary goes *below* the table, not inside
+  it.
+
 - Classification per D2: **rot** (local lags skeleton) vs **local-unique**
   (content absent from the skeleton that plausibly encodes codev-specific
   functionality).
@@ -261,15 +268,37 @@ becomes the single owner — the spec's Approach A, approved by D2.
 **Step 4c — vestigial cleanup (M9)**:
 
 - Delete `copyProtocols` (`packages/codev/src/lib/scaffold.ts:480`) and
-  `copyRoles` (`:425`), plus their `scaffold.test.ts` cases.
+  `copyRoles` (`:425`).
+- **Test scope, exactly**: `scaffold.test.ts` has a `copyRoles` describe block
+  (~lines 156–195) which is removed with it. **`copyProtocols` has no test
+  cases** — it is referenced nowhere outside its own definition. The first draft
+  of this plan said "their `scaffold.test.ts` cases," implying both; corrected
+  after Codex checked it against the tree.
 - Neither is called by `init`, `adopt`, or `update` — they are dead code that
   would manufacture this problem for every adopter if rewired.
 
 **Step 4d — equivalence (M10)**:
 
+M10 has **two halves**, and the first draft of this plan only covered the first
+(caught by Codex at plan review). Both ship here:
+
 - **New** `packages/codev/src/__tests__/shadow-removal-equivalence.test.ts`:
-  for every deleted path, `resolveCodevFile` returns the skeleton counterpart
-  with matching content.
+  - **(i) Per-file resolution.** For every deleted path, `resolveCodevFile`
+    returns the skeleton counterpart with matching content.
+  - **(ii) Assembled-prompt byte-equivalence.** Assemble the builder spawn
+    prompt for each protocol (spir, aspir, bugfix, air, pir, …) **before**
+    deletion, snapshot it, then assert the post-deletion assembly is
+    **byte-identical** to that snapshot.
+- Why (ii) is not redundant with (i): per-file resolution can be correct while
+  assembly still differs — ordering, interpolation of `{{project_id}}`,
+  or a template picked up from a different tier would all pass (i) and change
+  the prompt. The whole point of Phase 4 is that deletion is a no-op for what
+  agents actually receive, and only (ii) demonstrates that.
+- Distinct from Phase 8's T13, which asserts *content presence* after
+  compression and dedup have deliberately changed the text. Here the assertion
+  is *nothing changed at all*.
+- Snapshots are captured at the start of Phase 4 (pre-deletion tree) and
+  committed as fixtures.
 
 #### Success criteria
 
@@ -323,6 +352,13 @@ single line of duplicated text.
 - Replace all 9 existing `git add -A` variants — and the equivalents for the
   other seven rules — with the byte-identical canonical string on every surface
   in `must_appear_on`.
+- **Phase 5 owns every scar-wording edit, on every surface, with no exceptions.**
+  That explicitly includes `CLAUDE.md` and `AGENTS.md`: they are in
+  `must_appear_on`, so they are rewritten *here*, and the byte-identical pair
+  invariant (N3) is maintained within this phase. Phase 8 does **not** re-apply
+  scar wordings — it only parity-checks N3 and lands the separate Phase 7 dedup
+  edits. Without this split, M5 would claim delivery before all its surfaces
+  were actually updated (Codex, plan review).
 - **New** `packages/codev/src/__tests__/scar-rules.test.ts`: verbatim presence on
   every required surface; **mutation checks** — deleting a rule fails, rewording
   it fails.
@@ -360,7 +396,7 @@ Author the machine-readable ownership map and enforce both single-ownership
   generated from or validated against the YAML.
 - **Declare the inventory boundary** explicitly in the YAML: the exact file set
   scanned. Anything outside is out of scope *by declaration*, not omission.
-- **New** `scripts/extract-instruction-candidates.mjs`: mechanically collects
+- **New** `scripts/extract-instruction-candidates.ts`: mechanically collects
   normative statements (`MUST`, `NEVER`, `ALWAYS`, `DO NOT`, `don't`, …) inside
   the boundary, each with a stable id.
 - Every candidate gets exactly one disposition: `mapped`, `scar`, or
@@ -403,6 +439,13 @@ references, and report the measured win honestly.
 
 - For each `scar: false` class with duplicates: keep the owner's full statement;
   replace other occurrences with a one-line reference.
+- **Reference format** (Claude asked for an example): a single line naming the
+  owning surface and the rule, e.g.
+  `> Plans contain no time estimates — see \`spir/protocol.md\` § Plan.`
+  Prose reference, not a machine pointer: the consumer is a model reading the
+  prompt, and it must be able to act on the reference without resolving it. The
+  exact string per class is recorded in the ownership map's `references` field
+  so T7 can verify placement.
 - **Scar rules are not touched** — C3, and Phase 5's tests would fail anyway.
   Their contribution to N1 came from Phase 5's compression, which shortened them
   without reducing their reach.
@@ -447,8 +490,10 @@ rather than trusting green tests.
 - **`codev/resources/lessons-learned.md`** — the durable lesson: *a detector
   that reports without failing the build is a detector nobody reads.* #1210 saw
   this drift for months.
-- **`CLAUDE.md` + `AGENTS.md`** — apply Phase 5's compressed scar wordings and
-  Phase 7's dedup. **Verify byte-identical** (N3).
+- **`CLAUDE.md` + `AGENTS.md`** — land Phase 7's dedup edits and **verify the
+  pair is byte-identical** (N3). Scar wordings are **not** touched here: Phase 5
+  already rewrote them on both files. This phase parity-checks that work rather
+  than repeating it.
 - **File the tiering follow-up issue** (D4) now that the ownership map exists —
   the prerequisite that made it specifiable.
 - **T13(b) — the manual run.** Spawn a real builder against the changed tree and
@@ -510,11 +555,57 @@ copies except TS3 retentions, which are preserved by construction.
 
 ---
 
+## Expert Consultation
+
+### Plan iteration 1 — 3-way review
+
+| Model | Verdict | Confidence | Issues |
+|---|---|---|---|
+| Gemini | **APPROVE** | HIGH | None |
+| Codex | **REQUEST_CHANGES** | HIGH | 3 |
+| Claude | **APPROVE** | HIGH | None blocking (3 minor) |
+
+All six points accepted, none disputed.
+
+**Codex — accepted in full:**
+
+1. *M10 not fully covered in Phase 4.* The spec requires resolver equivalence
+   **and** byte-identical assembled-prompt output; Phase 4 planned only the
+   former, and Phase 8's T13 checks presence rather than byte-identity. →
+   Step 4d now ships both halves, with snapshots captured pre-deletion and the
+   distinction from T13 stated.
+2. *Phase 5 / Phase 8 ownership of CLAUDE.md/AGENTS.md is blurry.* → Phase 5
+   now explicitly owns **every** scar-wording edit including both root files;
+   Phase 8 only parity-checks N3 and lands Phase 7's dedup. Otherwise M5 would
+   have claimed delivery before all its surfaces were updated.
+3. *`scaffold.test.ts` has `copyRoles` coverage but no `copyProtocols` cases.* →
+   Corrected. (I had established this during the spec phase and then wrote the
+   plan as though both had tests.)
+
+**Claude — accepted in full:**
+
+4. *Phase 2's audit must be machine-parseable for T11.* → Fixed five-column
+   table with enumerated values for `Classification` and `Terminal state`;
+   narrative goes below the table. Free-form prose would make T11
+   unimplementable.
+5. *Phase 7's reference format unspecified.* → Example format given, recorded
+   per-class in the map's `references` field.
+6. *`.mjs` breaks the TypeScript convention.* → `extract-instruction-candidates.ts`.
+
+**Gemini** raised no issues and specifically endorsed the Phase 5 placement
+rationale and the `M11 → M3 → M8` safety ordering.
+
+Both Codex and Claude independently re-verified the plan's technical claims
+against the tree; all held.
+
+---
+
 ## Change Log
 
 | Date | Change | Reason | Author |
 |------|--------|--------|--------|
 | 2026-07-27 | Initial plan | Spec approved at `spec-approval` | builder spir-1252 |
+| 2026-07-27 | Plan with multi-agent review | 3-way iter-1: 6 points accepted | builder spir-1252 |
 
 ---
 
