@@ -264,6 +264,19 @@ export class PtySession extends EventEmitter {
     client.on('data', cancelCleanup);
   }
 
+  /**
+   * Write an out-of-band notice into the terminal, as if the process had
+   * printed it. Goes to the ring buffer and every attached client, so it
+   * survives reconnects and is visible to whoever is watching.
+   *
+   * For lifecycle news the process itself cannot report — #1264's give-up
+   * being the motivating case, where a broken harness would otherwise leave a
+   * silently dead terminal.
+   */
+  notice(text: string): void {
+    this.onPtyData(`\r\n\x1b[33m${text}\x1b[0m\r\n`);
+  }
+
   /** Whether this session is backed by a shellper process. */
   get shellperBacked(): boolean {
     return this._shellperBacked;

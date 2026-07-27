@@ -572,6 +572,12 @@ export class SessionManager extends EventEmitter {
           restartResetAfter: restartOptions?.restartResetAfter,
         }),
         crashLoopFallback: restartOptions?.crashLoopFallback,
+        // #1264: must be carried across reconnect. A reconnected architect's
+        // args already contain `--resume` (baked by the #832 restart
+        // resolution), so dropping the factory here would make every clean exit
+        // after a Tower restart relaunch INTO the conversation the user just
+        // quit — the exact thing the fix exists to prevent.
+        freshLaunch: restartOptions?.freshLaunch,
       },
       restartCount: 0,
       restartResetTimer: null,
@@ -1147,9 +1153,17 @@ export class SessionManager extends EventEmitter {
         const uptime = Date.now() - session.lastSpawnAt;
         session.fastCleanExits = uptime < FAST_CLEAN_EXIT_MS ? session.fastCleanExits + 1 : 0;
         if (session.fastCleanExits >= MAX_FAST_CLEAN_EXITS) {
-          this.log(
-            `Session ${sessionId} exited cleanly ${session.fastCleanExits}x within ${FAST_CLEAN_EXIT_MS}ms of launch; the harness is exiting immediately rather than being quit — giving up`,
-          );
+          const reason =
+            `The harness exited immediately (cleanly, within ${FAST_CLEAN_EXIT_MS / 1000}s of launch) ` +
+            `${session.fastCleanExits} times in a row. This looks like a broken or misconfigured ` +
+            `command rather than you quitting it, so respawning has stopped.`;
+          this.log(`Session ${sessionId} gave up: ${reason}`);
+          // The give-up must be visible to the person watching the terminal —
+          // otherwise a misconfigured command reads as a mysteriously dead
+          // session. `session-error` is not a substitute: it also fires for
+          // transient client errors that do NOT end the session, so it cannot
+          // be surfaced to the user as a teardown notice.
+          this.emit('session-gave-up', sessionId, reason);
           this.emit(
             'session-error',
             sessionId,

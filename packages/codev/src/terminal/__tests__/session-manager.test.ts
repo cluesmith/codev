@@ -4,7 +4,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import net from 'node:net';
-import { SessionManager, StderrBuffer, getProcessStartTime, isCrashLooping, CRASH_LOOP_WINDOW_MS, type CreateSessionOptions } from '../session-manager.js';
+import { SessionManager, StderrBuffer, getProcessStartTime, isCrashLooping, CRASH_LOOP_WINDOW_MS,
+  FAST_CLEAN_EXIT_MS, MAX_FAST_CLEAN_EXITS, type CreateSessionOptions } from '../session-manager.js';
 import { ShellperProcess, type IShellperPty, type PtyOptions } from '../shellper-process.js';
 import { ShellperClient } from '../shellper-client.js';
 
@@ -2365,6 +2366,10 @@ describe('clean exits rerun the harness without recovery (Bugfix #1264)', () => 
       stderrTailLogged: false,
       recoveryRounds: 0,
       lastRecoveryAt: 0,
+      // Just launched: exits driven in these tests count as "fast" unless a
+      // test ages this deliberately (see the valve cases).
+      lastSpawnAt: Date.now(),
+      fastCleanExits: 0,
     };
   }
 
@@ -2457,15 +2462,163 @@ describe('clean exits rerun the harness without recovery (Bugfix #1264)', () => 
     const fresh = fakeFreshLaunch();
     const { session, socketDir } = driveExit({ code: 0, signal: null }, fresh.factory);
     try {
-      for (let i = 0; i < 5; i++) {
-        await new Promise((r) => setTimeout(r, 20));
+      for (let i = 0; i < 8; i++) {
+        // Each rerun stayed up long enough to be genuinely used, so every exit
+        // is a real quit rather than the broken-command case the valve catches.
+        session.lastSpawnAt = Date.now() - (FAST_CLEAN_EXIT_MS + 1000);
         session.client.emit('exit', { code: 0, signal: null });
+        await new Promise((r) => setTimeout(r, 20));
       }
       await new Promise((r) => setTimeout(r, 50));
       expect(session.restartCount).toBe(0);
       expect(session.failingExitTimes).toEqual([]);
-      expect(session.client.spawn.mock.calls.length).toBeGreaterThanOrEqual(5);
+      // 9 = driveExit's own clean exit + the 8 driven above. Well past the
+      // valve's threshold, and past it repeatedly — none of them count.
+      expect(session.client.spawn.mock.calls.length).toBe(9);
     } finally {
+      rmrf(socketDir);
+    }
+  });
+
+  // --- The fast-clean-exit valve (#1264) ---
+  //
+  // Unlimited reruns are correct for gestures but must not become an infinite
+  // spawn loop for a harness that exits 0 on startup. `lastSpawnAt` is set to
+  // "just now" by fakeSession, so every exit driven here counts as fast unless
+  // the test ages it deliberately.
+
+  it('gives up loudly after MAX_FAST_CLEAN_EXITS immediate clean exits', async () => {
+    const fresh = fakeFreshLaunch();
+    const socketDir = tmpDir();
+    const manager = new SessionManager({
+      socketDir,
+      shellperScript: '/nonexistent/shellper.js',
+      nodeExecutable: process.execPath,
+    });
+    const session = fakeSession(socketDir, fresh.factory);
+    (manager as any).sessions.set('clean-1', session);
+    const gaveUp: Array<[string, string]> = [];
+    manager.on('session-gave-up', (id: string, reason: string) => gaveUp.push([id, reason]));
+    const errors: string[] = [];
+    manager.on('session-error', (_id: string, e: Error) => errors.push(e.message));
+    (manager as any).setupAutoRestart(session, 'clean-1');
+
+    try {
+      for (let i = 0; i < MAX_FAST_CLEAN_EXITS; i++) {
+        session.client.emit('exit', { code: 0, signal: null });
+        await new Promise((r) => setTimeout(r, 20));
+      }
+      // Stopped respawning, and the session is gone.
+      expect((manager as any).sessions.has('clean-1')).toBe(false);
+      // Loud: a user-facing reason, not just a log line. It must name the
+      // behavior and say respawning stopped, so a misconfigured command is
+      // diagnosable from the terminal alone.
+      expect(gaveUp.length).toBe(1);
+      expect(gaveUp[0][0]).toBe('clean-1');
+      expect(gaveUp[0][1]).toMatch(/exited immediately/i);
+      expect(gaveUp[0][1]).toMatch(/respawning has stopped/i);
+      expect(errors.some((m) => /immediately after launch/.test(m))).toBe(true);
+    } finally {
+      rmrf(socketDir);
+    }
+  });
+
+  it('resets the valve after one healthy session, so gestures stay unlimited', async () => {
+    const fresh = fakeFreshLaunch();
+    const { manager, session, socketDir } = driveExit({ code: 0, signal: null }, fresh.factory);
+    try {
+      await new Promise((r) => setTimeout(r, 30));
+      expect(session.fastCleanExits).toBe(1);
+
+      // The harness then stayed up long enough to be genuinely used, so the
+      // next clean exit is a real quit and the counter must start over.
+      session.lastSpawnAt = Date.now() - (FAST_CLEAN_EXIT_MS + 1000);
+      session.client.emit('exit', { code: 0, signal: null });
+      await new Promise((r) => setTimeout(r, 30));
+
+      expect(session.fastCleanExits).toBe(0);
+      expect((manager as any).sessions.has('clean-1')).toBe(true);
+    } finally {
+      rmrf(socketDir);
+    }
+  });
+
+  it('never trips the valve for exits that are slow enough to be real quits', async () => {
+    const fresh = fakeFreshLaunch();
+    const { manager, session, socketDir } = driveExit({ code: 0, signal: null }, fresh.factory);
+    try {
+      for (let i = 0; i < MAX_FAST_CLEAN_EXITS * 2; i++) {
+        session.lastSpawnAt = Date.now() - (FAST_CLEAN_EXIT_MS + 1000);
+        session.client.emit('exit', { code: 0, signal: null });
+        await new Promise((r) => setTimeout(r, 20));
+      }
+      expect(session.fastCleanExits).toBe(0);
+      expect((manager as any).sessions.has('clean-1')).toBe(true);
+    } finally {
+      rmrf(socketDir);
+    }
+  });
+
+  // Caught in review: `reconnectSession` accepted `freshLaunch` in its options
+  // type but never copied it onto the session. Because a reconnected
+  // architect's args already carry `--resume` (baked by the #832 restart
+  // resolution), every clean exit AFTER a Tower restart would have relaunched
+  // straight back into the conversation the user had just quit — the spec
+  // violation this fix exists to prevent, on the most common surface there is.
+  it('carries freshLaunch across reconnect, so post-Tower-restart clean exits stay fresh', async () => {
+    const socketDir = tmpDir();
+    let capturedPty: MockPty | null = null;
+    const socketPath = path.join(socketDir, 'reconnect-fresh.sock');
+    const shellper = new ShellperProcess(
+      () => {
+        capturedPty = new MockPty();
+        return capturedPty;
+      },
+      socketPath,
+      100,
+    );
+    await shellper.start('/bin/bash', [], '/tmp', {}, 80, 24);
+
+    const manager = new SessionManager({
+      socketDir,
+      shellperScript: '/nonexistent/shellper.js',
+      nodeExecutable: process.execPath,
+    });
+
+    try {
+      const freshLaunch = { next: () => ({ args: ['--session-id', 'reconnect-fresh'] }) };
+      // Reconnect exactly as Tower's reconciliation does, with the `--resume`
+      // args the #832 restart resolution bakes in for a surviving architect.
+      // The real start time — reconnectSession validates it against the process
+      // table to guard against PID reuse, and returns null on a mismatch.
+      const startTime = getProcessStartTime(process.pid)!;
+      const client = await manager.reconnectSession('reconnect-1', socketPath, process.pid, startTime, {
+        command: 'claude',
+        args: ['--resume', 'abandoned-conversation'],
+        cwd: '/tmp',
+        env: {},
+        restartDelay: 1,
+        maxRestarts: 50,
+        freshLaunch,
+      });
+      expect(client).not.toBeNull();
+
+      const spawnSpy = vi.fn();
+      const realSpawn = client!.spawn.bind(client!);
+      client!.spawn = (msg: any) => { spawnSpy(msg); return realSpawn(msg); };
+
+      capturedPty!.simulateExit(0);
+      await new Promise((r) => setTimeout(r, 200));
+
+      expect(spawnSpy).toHaveBeenCalledTimes(1);
+      const argv = spawnSpy.mock.calls[0][0].args;
+      expect(argv).not.toContain('--resume');
+      expect(argv).not.toContain('abandoned-conversation');
+      expect(argv).toEqual(['--session-id', 'reconnect-fresh']);
+      // And the session survived, as on any other clean exit.
+      expect(manager.getSessionInfo('reconnect-1')).not.toBeNull();
+    } finally {
+      shellper.shutdown();
       rmrf(socketDir);
     }
   });

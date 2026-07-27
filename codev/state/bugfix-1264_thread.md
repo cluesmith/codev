@@ -71,6 +71,30 @@ All the `0x03` machinery deleted. What replaced it:
 conversation and needs its own id. Persisting it means a later crash resumes the post-rerun
 conversation, not the one the user walked away from.
 
+### CMAP round 2 — codex found the bug that mattered most
+
+gemini APPROVE, claude APPROVE, **codex REQUEST_CHANGES** again, and again correctly:
+
+> `reconnectSession()` accepts `restartOptions.freshLaunch` in its type, but never copies it into
+> `session.options`.
+
+Verified in the code — the reconnect path assembled `options` field by field and simply omitted the
+new one. Impact is worse than it sounds: a reconnected architect's args already carry `--resume`
+(baked by the #832 restart resolution), so **after any Tower restart** — which is every
+`local-install` — a clean exit would have relaunched straight back into the conversation the user
+just quit. The headline guarantee, silently broken on the most common surface, with the fresh-path
+tests all still green.
+
+Fixed, plus the regression test codex noted was missing. My first attempt at that test was junk — it
+asserted on a hand-built object literal and never called `reconnectSession`, so it would not have
+caught the bug it was written for. Rewrote it against a real `ShellperProcess` over a real socket.
+(Discovered while fixing it: several pre-existing reconnect tests guard with `if (client)` and pass
+`Date.now()` as the process start time, which never matches, so those bodies silently never run.
+Not mine to fix here — worth an issue.)
+
+That is two rounds where two APPROVEs sat alongside one specific, reproducible codex finding, and
+both times the finding was real.
+
 ### One addition beyond the four decisions — flagged, not smuggled
 
 Making clean-exit reruns unlimited removes a bound that **both** prior versions had (#1241 ended the
@@ -79,6 +103,19 @@ respawn forever. So: a clean exit within `FAST_CLEAN_EXIT_MS` (2s) of launch is 
 command rather than a human gesture — 5 *consecutive* such exits give up. A real quit never trips
 it, and one fast exit followed by a healthy session resets the counter. Genuine gestures stay
 unlimited, exactly as decided.
+
+Architect ruled KEEP, with two requirements, both implemented:
+
+1. **The give-up must be loud.** A new `session-gave-up` event carries a plain-language reason that
+   Tower writes into the terminal itself (`PtySession.notice`) as well as the log — a user with a
+   misconfigured command sees *why* their pane went quiet instead of a mystery dead session.
+   Deliberately NOT reusing `session-error`: that also fires for transient client errors which do
+   not end the session, so surfacing it as a teardown notice would lie.
+   (`maxRestarts` exhaustion has the same silent-death UX and is *not* covered here — out of scope,
+   flagged in the PR as a follow-up candidate rather than quietly widened.)
+2. **Test the valve**: gives up after 5 fast exits with a reason naming the behavior and saying
+   respawning stopped; one healthy session resets the counter; slow (real) quits never trip it even
+   at 2× the threshold.
 
 ### Verification
 
