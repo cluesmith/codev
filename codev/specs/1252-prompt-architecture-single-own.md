@@ -800,12 +800,19 @@ vacuously on an empty candidate set.
 ### T14 — Behavioural baseline script (M12a)
 
 *Automated.* `scripts/measure-prompt-behavior.ts` runs clean and is
-**deterministic** over a fixed corpus — the same commit must yield the same
-B1–B5 numbers, or before/after comparison is meaningless. Asserts: the SPIR
-sample resolves to the expected project count; B3 emits matched excerpts
-alongside counts; and the script does **not** attempt gate-rejection counts
-(Appendix D §2 — the data does not exist, and a plausible-looking zero would be
-worse than an absent metric).
+**deterministic over the committed-artifact metrics B1–B4** — the same commit
+must yield the same B1–B4 numbers, or before/after comparison is meaningless.
+
+**B5 is explicitly excluded from the determinism assertion.** It derives from
+`consult stats`, a rolling 30-day machine-local DB, so it is not reproducible
+from a commit and never will be. Asserting determinism over B1–**B5** (as the
+first draft of T14 did) was internally contradictory — caught by Codex at delta
+review. B5 is reported as advisory context and drives no trigger.
+
+Also asserts: the SPIR sample resolves to the expected project count; B3 emits
+matched excerpts alongside counts; and the script does **not** attempt
+gate-rejection counts (Appendix D §2 — the data does not exist, and a
+plausible-looking zero would be worse than an absent metric).
 
 ### T13 — End-to-end, the real user path
 
@@ -955,19 +962,38 @@ the single biggest constraint on the baseline.
 populated for SPIR (per-plan-phase review loops) and empty for `pir`/`bugfix`/
 `air`, which is why the sample is protocol-skewed rather than 201-wide.
 
-| ID | Metric | Definition | Source | Sample |
-|---|---|---|---|---|
-| **B1** | CMAP `REQUEST_CHANGES` rate | share of verdicts that are `REQUEST_CHANGES` | `history[].reviews[].verdict` | 17 SPIR |
-| **B2** | Rounds to unanimous approve | iterations per `plan_phase` until all 3 models APPROVE | `history[].iteration` | 17 SPIR |
-| **B3** | Scar-violation incidents | keyword-mined mentions of the eight D3 rules being violated (`git add -A`, worktree destruction, gate auto-approval, `status.yaml` hand-edit, …) | 211 reviews + 139 threads | all |
-| **B4** | Phase-iteration count | total iterations to complete a phase | `status.yaml` | all with history |
-| **B5** | Consult cost/duration per phase | forward snapshot only (§2) | `consult stats` | prospective |
+| ID | Metric | Definition | Source | Sample | Baseline (measured 2026-07-27) |
+|---|---|---|---|---|---|
+| **B1** | CMAP `REQUEST_CHANGES` rate | share of all verdicts that are `REQUEST_CHANGES` | `history[].reviews[].verdict` | 17 SPIR | **51.9%** (n=160 verdicts; APPROVE 41.2%, COMMENT 6.9%) |
+| **B2** | Review rounds per plan phase | `max(iteration)` per `plan_phase` | `history[].iteration` | 17 SPIR | mean **1.12**, median 1, max 2 (n=49 phases) |
+| **B3** | Scar-violation incidents | keyword-mined mentions of the eight D3 rules being violated | 211 reviews + 139 threads | all | to be captured in Phase 1 |
+| **B4** | Review rounds per project | sum of B2 across a project's phases | `status.yaml` | 18 with history | mean **3.06**, median 3 |
+| **B5** | Consult cost/duration | forward snapshot only (§2) | `consult stats` | prospective | **non-deterministic — advisory only** |
 
-B3 is fuzzy by construction — prose keyword mining, with false positives from
-documentation *about* a rule rather than a violation of it. The script must
-report matched excerpts, not just counts, so a human can adjudicate. **B3 is the
-metric that matters most**: it is the one that would catch a compressed scar rule
-losing its force.
+**B2 was redefined after the delta review.** It originally read "rounds to
+unanimous approve," which is **not derivable**: across the 17-project baseline,
+**0 of 48 terminal plan phases end with 3× `APPROVE`**. The commonest terminal
+state is 2 × APPROVE + 1 × REQUEST_CHANGES (20/48), and 7/48 advance with three
+REQUEST_CHANGES. Porch advances a phase after the builder rebuts, not on
+consensus, so a "rounds to unanimity" counter would never resolve. Caught by
+Codex and confirmed independently before the redefinition.
+
+**Consequences for how much weight each metric carries:**
+
+- **B1 is the load-bearing metric.** It has a real baseline (51.9%) and genuine
+  variance, so a relative rise is meaningful. The soft rollback trigger keys off
+  it.
+- **B2 and B4 are advisory, not triggers.** B2's observed range is 1–2 with mean
+  1.12 — almost no variance, so it cannot detect a subtle regression. Recording
+  this rather than implying more sensitivity than the data supports.
+- **B3 is the metric that matters most** and is the fuzziest — it is the only one
+  that would catch a compressed scar rule losing its force, which is the specific
+  harm compression risks. Fuzzy by construction: prose keyword mining, with false
+  positives from documentation *about* a rule rather than a violation of it. The
+  script must report **matched excerpts, not just counts**, and a human
+  adjudicates before the hard trigger fires.
+- **B5 is advisory and non-deterministic** — see §2. It is excluded from T14's
+  determinism assertion and from every rollback trigger.
 
 ### 4. No-regression judgment and rollback trigger
 
@@ -979,8 +1005,8 @@ text, so only they are rollback candidates.
 | Trigger | Threshold | Action |
 |---|---|---|
 | **Hard — scar violation** | **Any single** B3 incident in the verify window attributable to a missing or weakened rule | Revert the **Phase 5** compression commit (and Phase 7 if the rule was a dedup target). n=1 suffices; scar rules exist because the incident already happened once. |
-| **Soft — review friction** | B1 `REQUEST_CHANGES` rate rises **> 25% relative** to baseline, sustained across the N sample | Revert **Phase 7** dedup commits; keep Phases 1–6. Re-measure before any further trimming. |
-| **Advisory** | B2/B4 rise without B1/B3 movement | No revert. Record and investigate — likely confounded by task difficulty. |
+| **Soft — review friction** | B1 `REQUEST_CHANGES` rate rises **> 25% relative** to the measured 51.9% baseline — i.e. **above ~64.9%** — sustained across the N sample | Revert **Phase 7** dedup commits; keep Phases 1–6. Re-measure before any further trimming. |
+| **Advisory** | B2/B4/B5 movement without B1/B3 movement | No revert. Record and investigate — B2's observed range (1–2) is too narrow to carry a trigger, and B5 is non-deterministic. |
 | **Inconclusive** | Fewer than N=10 projects, or < 3 SPIR, complete in the window | **Do not declare success.** Extend the window or record the verify as inconclusive. Absence of data is not a no-regression result. |
 
 The last row matters: with n=17 baseline and N=10 verify, this design detects a

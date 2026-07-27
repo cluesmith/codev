@@ -132,16 +132,25 @@ Phase 7 dedups. Once any of those land there is no clean "before."
 
 - **New** `scripts/measure-prompt-behavior.ts`, implementing metrics **B1–B5**
   from spec Appendix D:
-  - **B1** CMAP `REQUEST_CHANGES` rate and **B2** rounds-to-unanimous-approve,
-    parsed from `codev/projects/*/status.yaml` → `history[].reviews[].verdict`.
-    Sample: **the 17 SPIR projects with non-empty `history`**.
+  - **B1** CMAP `REQUEST_CHANGES` rate (share of all verdicts) and **B2** review
+    rounds per plan phase (`max(iteration)` per `plan_phase`), parsed from
+    `codev/projects/*/status.yaml` → `history[]`. Sample: **the 17 SPIR projects
+    with non-empty `history`**.
+  - **Do not implement B2 as "rounds to unanimous approve."** Verified against
+    the corpus: **0 of 48 terminal plan phases end with 3× APPROVE** — porch
+    advances on builder rebuttal, not consensus, so such a counter never
+    resolves. Measured baselines to reproduce: **B1 = 51.9%** (n=160 verdicts),
+    **B2 mean = 1.12** (n=49 phases), **B4 mean = 3.06** (n=18 projects).
+    The script must reproduce these numbers on the current commit.
   - **B3** scar-violation incidents, keyword-mined across **211**
     `codev/reviews/*.md` and **139** `codev/state/*_thread.md`. Must emit
     **matched excerpts, not just counts** — the mining is fuzzy (documentation
     *about* a rule reads much like a violation of it) and a human adjudicates.
-  - **B4** phase-iteration counts from `status.yaml`.
-  - **B5** consult cost/duration — **forward snapshot only**; `consult stats` is
-    a rolling 30-day local DB with no Feb–Jun history.
+  - **B4** review rounds per project (sum of B2 across its phases).
+  - **B5** consult cost/duration — **forward snapshot only, advisory,
+    non-deterministic**; `consult stats` is a rolling 30-day local DB with no
+    Feb–Jun history. **Excluded from T14's determinism assertion and from every
+    rollback trigger** — it cannot be reproduced from a commit.
 - **New** `codev/resources/1252-behavior-baseline.md` — the committed numbers.
 - **Do not implement gate-rejection counts.** Verified unavailable: gate
   `status` only ever takes `approved | complete | in_progress | pending` across
@@ -580,8 +589,8 @@ self-contained):
 | Trigger | Threshold | Action |
 |---|---|---|
 | **Hard** — scar violation | **Any single** B3 incident traced to a missing/weakened rule | Revert the **Phase 5** compression commit (+ Phase 7 if the rule was a dedup target) |
-| **Soft** — review friction | B1 rises **> 25% relative** to baseline, sustained | Revert **Phase 7** dedup commits; keep Phases 1–6 |
-| **Advisory** | B2/B4 rise with no B1/B3 movement | No revert; record and investigate |
+| **Soft** — review friction | B1 rises **> 25% relative** to the 51.9% baseline (i.e. **above ~64.9%**), sustained | Revert **Phase 7** dedup commits; keep Phases 1–6 |
+| **Advisory** | B2/B4/B5 movement with no B1/B3 movement | No revert; record and investigate. B2's range (1–2) is too narrow to trigger; B5 is non-deterministic |
 | **Inconclusive** | < 10 projects or < 3 SPIR complete | **Do not declare success** — extend the window or record as inconclusive |
 
 **Rollback targets trims, never repairs.** Phases 1–4 restore correct content;
@@ -689,6 +698,8 @@ against the tree; all held.
 |------|--------|--------|--------|
 | 2026-07-27 | Initial plan | Spec approved at `spec-approval` | builder spir-1252 |
 | 2026-07-27 | Plan with multi-agent review | 3-way iter-1: 6 points accepted | builder spir-1252 |
+| 2026-07-27 | Behavioural measurement (D5) | Architect directive: M12 baseline + verify phase | builder spir-1252 |
+| 2026-07-27 | Delta review fixes | B2 redefined (unanimity never occurs); B5/T14 determinism reconciled | builder spir-1252 |
 
 ---
 

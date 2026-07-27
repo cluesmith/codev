@@ -338,3 +338,58 @@ with ≥3 SPIR (the SPIR minimum is the binding constraint, not the total).
 
 Baseline must land in Phase 1 (step 1b) — Phases 3/5/7 all alter served content,
 so any later capture has no clean "before."
+
+## D5 delta review — Gemini APPROVE / Codex REQUEST_CHANGES / Claude APPROVE
+
+Codex found two real defects. Gemini and Claude both approved. **The majority
+was not the signal.**
+
+The split is instructive: Gemini and Claude verified the *data-availability*
+claims (correct — all three confirmed gate-rejections unminable, consult
+prospective-only, 17 SPIR sample). Codex went further and checked whether the
+*metric definitions actually resolve against that data*. That's where both
+defects were.
+
+### CX-1: B2 was unmeasurable and would have failed silently
+
+"Rounds to unanimous approve" — but **0 of 48 terminal plan phases end with
+3× APPROVE**. I re-derived it rather than trusting the claim:
+
+    20  (APPROVE, APPROVE, REQUEST_CHANGES)
+    12  (APPROVE, REQUEST_CHANGES, REQUEST_CHANGES)
+     7  (REQUEST_CHANGES × 3)
+
+**Porch advances a phase on builder rebuttal, not consensus.** So B2 would never
+resolve — and would have looked fine: script runs, emits a number, number is
+meaningless.
+
+The lesson worth keeping: "the data exists" ≠ "the metric resolves." I verified
+the former meticulously (all 3 reviewers confirmed Appendix D §1–2) and never
+checked the latter for my own definition.
+
+Redefined B2 = max(iteration) per plan_phase. Then computed real baselines:
+**B1 = 51.9% REQUEST_CHANGES** (n=160), B2 mean 1.12 (n=49), B4 mean 3.06.
+
+That surfaced something else: **B2's range is 1–2, mean 1.12 — nearly no
+variance**, so it can't detect a subtle regression. Demoted B2/B4 to advisory,
+named B1 load-bearing, made the soft threshold concrete (>25% on 51.9% = above
+~64.9%).
+
+### CX-2: T14 contradicted itself
+
+T14 demanded "same commit ⇒ same B1–B5" while B5 comes from a rolling 30-day
+machine-local DB. Both halves written by me in the same amendment. Scoped
+determinism to B1–B4; B5 now explicitly advisory/non-deterministic, drives no
+trigger. Kept rather than dropped — cost/duration is useful context for
+interpreting a B1 move; the failure was pretending it was reproducible.
+
+### Also worth recording
+
+Gemini endorsed the n=1 hard trigger on B3, reasoning scar rules exist BECAUSE
+the catastrophe already happened once — so one verified recurrence justifies
+reverting compression. Good framing; a single-incident trigger looks aggressive
+without it.
+
+Process note: my first 3 delta consults failed — `--prompt` and `--type` are
+mutually exclusive. Should have checked the consult skill first. Re-ran in
+general mode with a scoped brief file. No artifacts affected.
