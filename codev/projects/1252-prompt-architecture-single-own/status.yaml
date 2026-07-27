@@ -1,9 +1,33 @@
 id: '1252'
 title: prompt-architecture-single-own
 protocol: spir
-phase: plan
-plan_phases: []
-current_plan_phase: null
+phase: implement
+plan_phases:
+  - id: phase_1
+    title: Drift gate + measurement baseline
+    status: in_progress
+  - id: phase_2
+    title: Local-unique content audit (M11)
+    status: pending
+  - id: phase_3
+    title: Reconcile the 17 drifted files (M3)
+    status: pending
+  - id: phase_4
+    title: Compatibility audit + shadow-tree removal
+    status: pending
+  - id: phase_5
+    title: Scar-rule registry with compressed wordings
+    status: pending
+  - id: phase_6
+    title: Ownership map + completeness enforcement
+    status: pending
+  - id: phase_7
+    title: Deduplication and measurement
+    status: pending
+  - id: phase_8
+    title: Governance sync + end-to-end verification
+    status: pending
+current_plan_phase: phase_1
 gates:
   spec-approval:
     status: approved
@@ -18,7 +42,7 @@ gates:
   verify-approval:
     status: pending
 iteration: 1
-build_complete: true
+build_complete: false
 history: []
 started_at: '2026-07-27T07:23:40.596Z'
-updated_at: '2026-07-27T19:31:40.566Z'
+updated_at: '2026-07-27T19:31:43.175Z'
