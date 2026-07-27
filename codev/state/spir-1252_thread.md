@@ -125,3 +125,26 @@ establishing why; now it is evidence-backed.
 Q1 (may the shadow trees be deleted) and Q3 (is the scar list complete) are not
 mine to answer. The spec no longer *depends* on Q1 — a "no" simply drops
 M8–M10 and still ships B + C.
+
+## Held at spec-approval gate — awaiting full architect decision set
+
+Architect directed an iter-2 review, then countermanded ~40s later: amend the
+spec with the *complete* decision set first, then run a **single** iter-2
+review against the fully-amended spec. Sensible — reviewing a spec that shifts
+underneath the reviewers wastes a round.
+
+State when the countermand landed: I had made the Q2 amendment but had **not**
+launched any consult. Nothing to abort.
+
+**D1 recorded (answers Q2)**: skeleton is authoritative for all 17 drifted
+files, reconciled file-by-file — classify each divergence as *missing content*
+(take skeleton) or *possible deliberate local content* (**escalate, never
+silently overwrite**). Governs M3. Explicitly does NOT decide Q1: reconciling
+the files and deleting the tree are separate acts, and D1 holds either way.
+
+**Frozen pending answers**: Q1 (shadow-tree deletion → M8–M10) and Q3 (scar
+registry contents → M5) and Q4 (tiering selector). Added a "Pending — do not
+act" clause under Architect Decisions so the constraint is legible to anyone
+reading the spec, not just to me.
+
+Making no further spec edits until the full decision set arrives.

@@ -258,10 +258,13 @@ activate only on an affirmative architect answer to Q1.
   in an explicit, comment-justified allowlist. *This is the one required
   outcome for the shadow tree* — iteration 1's "delete **or** enforce" ambiguity
   is resolved in favour of enforce.
-- **M3 — Repair the live drift.** All 17 drifted shadow copies are reconciled,
-  so M2's allowlist starts empty. In particular the served SPIR builder prompt
-  regains `Multi-PR Mechanics`, `Verify Phase`, and the
-  `"Entering verify phase."` string.
+- **M3 — Repair the live drift.** All 17 drifted shadow copies are reconciled
+  **per decision D1** (skeleton authoritative; file-by-file; anything resembling
+  deliberate local content escalated rather than overwritten), so M2's allowlist
+  starts empty. In particular the served SPIR builder prompt regains
+  `Multi-PR Mechanics`, `Verify Phase`, and the `"Entering verify phase."`
+  string. Files escalated under D1 step 4 may remain in the allowlist, with the
+  pending adjudication cited, until the architect rules.
 - **M4 — Single-owner enforcement.** For every instruction class whose map entry
   sets `enforcement: automated`, a test asserts the class's `pattern` matches on
   exactly the declared owner. The test **derives assertions from the map file**;
@@ -360,6 +363,39 @@ repeated verbatim — **not** to reduce the number of copies.
 
 ---
 
+## Architect Decisions
+
+Decisions relayed by the architect. These are **fixed** and are not to be
+relitigated in the spec, plan, or review — treated with the same standing as a
+`Baked Decisions` section. Remaining open items stay in **Open Questions**.
+
+### D1 — Drift reconciliation direction *(answers Q2; 2026-07-27)*
+
+**The skeleton is authoritative for all 17 drifted files.** Reconciliation is
+file-by-file, not a bulk overwrite:
+
+1. Enumerate all 17 (the 16 protocol files named in the Problem Statement, plus
+   `codev/roles/architect.md`).
+2. For each, diff local against skeleton and classify the divergence as
+   *missing content* (local lags the skeleton) or *possible deliberate local
+   content* (local adds or alters something the skeleton lacks).
+3. *Missing content* → take the skeleton version.
+4. *Possible deliberate local content* → **escalate to the architect; do not
+   silently overwrite.** Reconciliation of those files waits for a ruling.
+
+This governs **M3**. It does not decide Q1: reconciling the files and deleting
+the tree are separate acts, and D1 applies whether or not deletion follows.
+
+### Pending — do not act
+
+Per architect instruction (2026-07-27), the builder must **not** act on
+shadow-tree deletion (Q1) or fix the scar-registry contents (Q3) until answers
+are relayed. Q4 (tiering selector) is likewise pending. M8–M10 and the
+ratified contents of M5's registry stay frozen in the meantime; the plan may
+*describe* them but must not execute them.
+
+---
+
 ## Assumptions
 
 - **A1** *(corrected in iteration 2)* — The shadow tree is a **historical
@@ -441,11 +477,9 @@ are dropped, and the shadow tree remains under permanent CI enforcement.
   deleted (M8–M10)?** Evidence (Appendix B, A1) supports "yes: historical
   artifact." *The builder will not delete either tree without explicit architect
   approval.* A "no" drops M8–M10 and keeps M1–M7 intact.
-- **Q2** — For the 17 drifted files, which side is authoritative? **Default
-  proposal: the skeleton wins** — it is what ships, and 16 of 17 divergences are
-  missing content rather than local additions. The plan will enumerate
-  file-by-file; any file where the local copy carries content worth keeping is
-  flagged for architect adjudication rather than silently overwritten.
+- **Q2** — ***ANSWERED by the architect, 2026-07-27.*** See **D1** in
+  *Architect Decisions*. Reconciliation direction is settled; Q1 (whether the
+  shadow copies are then deleted) remains open and independent.
 
 ### Important
 
@@ -698,11 +732,20 @@ ours is a historical artifact (A1 corrected; M9 added).
 ### Iteration 2
 
 Porch advanced directly to the `spec-approval` gate after the iteration-1
-rebuttal, so **no second 3-way review was run**. The revisions above are
-therefore reviewer-informed but not reviewer-re-validated. If the architect
-wants the revised spec re-reviewed before approving — particularly the
-restructured success criteria and the three new appendices — say so and I will
-run a second round.
+rebuttal. The architect directed (2026-07-27) that a second 3-way review be run
+against the revised spec before the gate decision, so that the restructured
+success criteria (M1–M7 required / M8–M10 conditional) and the three new
+appendices get reviewer re-validation rather than shipping reviewer-informed
+but unvalidated.
+
+**Not yet run — deliberately held.** The architect subsequently directed
+(2026-07-27) that the spec first be amended with the *complete* decision set
+(Q2 confirmed; Q1/Q3/Q4 to follow), so that a **single** iteration-2 review runs
+against the fully-amended spec rather than reviewing a spec that changes
+underneath it.
+
+Current amendment state: **D1 (Q2) recorded; Q1/Q3/Q4 pending.** The review runs
+once those land. Verdicts recorded here.
 
 Rebuttal: `codev/projects/1252-prompt-architecture-single-own/1252-specify-iter1-rebuttals.md`
 
