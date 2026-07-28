@@ -129,11 +129,11 @@ instructions:
     scar: false
     pattern: "skip porch checks or use any workaround"
     enforcement: automated
-    retained_restatements: [bp-air, bp-maintain, bp-pir, bp-spike, pp-implement]
-    manual_justification: >
-      Extracted for the uniform four (spir/aspir/bugfix/experiment). air,
-      maintain, pir, spike keep protocol-specific flaky-handling variants by
-      decision (e.g. AIR documents skips in the PR body, not a review file).
+    references: []
+    # Phase-7 iter-4: line 4's documentation target was harmonized to
+    # protocol-neutral wording ("the artifact where your protocol records
+    # outcomes"), so all nine protocol prompts and the porch implement prompt
+    # now share the single partial — no retentions remain for this class.
 
   - id: no-skip-3way-review
     summary: Never skip the 3-way review; follow the porch next/done cycle.

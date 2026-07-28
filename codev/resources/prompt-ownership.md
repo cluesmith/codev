@@ -42,7 +42,7 @@ justified in the YAML):
 
 | Class | Owner | Enforcement | Refs / retained restatements |
 |---|---|---|---|
-| no-skip-porch-checks | partial-flaky | automated | retained: bp-air, bp-maintain, bp-pir, bp-spike, pp-implement |
+| no-skip-porch-checks | partial-flaky | automated | — |
 | no-skip-3way-review | partial-3way | automated | — |
 | no-advance-phases-manually | partial-strict-restrictions | automated | — |
 | baked-decisions-handling | partial-baked | automated | retained: bp-air, pp-specify, pp-implement, partial-pr-strategy, bp-spir, bp-aspir, spir-protocol-doc |
@@ -55,11 +55,11 @@ justified in the YAML):
 
 ## Phase-6 measurement
 
-<!-- t12-parity: total=169 mapped=20 scar=39 out-of-scope=110 classes=10 -->
-169 normative candidates over the boundary post-Phase-7 (the boundary now
+<!-- t12-parity: total=164 mapped=15 scar=39 out-of-scope=110 classes=10 -->
+164 normative candidates over the boundary post-Phase-7 (the boundary now
 includes the ten shared partials, so text moved there cannot bypass
 extraction; every served prompt still receives the full text at assembly):
-**20 mapped**, **39 scar** (registry-enforced),
+**15 mapped**, **39 scar** (registry-enforced),
 **110 file-local**. Zero undispositioned; zero multi-file texts hiding behind
 the catch-all. The parity marker above is
 asserted against the live extractor by `prompt-ownership.test.ts` — if these
