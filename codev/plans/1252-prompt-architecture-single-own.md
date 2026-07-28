@@ -224,16 +224,34 @@ safeguard and the phase that protects against silent capability loss.
 
 #### Success criteria
 
-- 76 rows, each classified and assigned a terminal state.
-- Every local-unique finding escalated with a recorded ruling, **or** converted
-  to TS3 + a filed follow-up issue (the spec's escape hatch — no indefinite
-  block).
-- Zero rows left "pending."
+*(Amended at Phase 2, per Codex's iteration-1 finding — the original criteria
+contradicted the spec's own sequencing. The spec allows escalations to remain
+open into Phase 3, which "skips anything M11 escalated", and requires resolution
+**before Phase 4's deletion** — M8 is "gated on M11: no file is deleted until …
+any escalations are ruled on." The original "zero rows pending" at Phase 2 close
+would have forced the TS3 escape hatch within minutes of escalating, bypassing
+the architect discussion D2 exists to guarantee. The escape hatch is for
+escalations that *cannot* be resolved, not for skipping the wait.)*
+
+- One row per shadow copy (77 — mechanical enumeration corrected the spec's
+  hand count of 76), each with a valid classification.
+- Every `rot` row assigned a terminal state; zero rows *unclassified*.
+- Every `local-unique` row **escalated** to the architect, with the escalation
+  recorded in the row (`ESCALATED` note). `pending` is permitted **only** for
+  such rows.
+- **Resolution deadline is Phase 4, not Phase 2**: before any deletion
+  executes, every `pending` row must be resolved by architect ruling or — only
+  if a ruling genuinely cannot be obtained — by the TS3 escape hatch with a
+  filed follow-up issue. T11 enforces this mechanically (see below).
 
 #### Test approach
 
-T11 — asserts row count, complete classification, no unresolved escalations, and
-that nothing local-unique was touched without a ruling. Guards the *process*.
+T11 — asserts row count, complete classification, escalation notes on every
+pending row, and that nothing local-unique was touched without a ruling. Two
+completion guards: a phase-gated zero-pending assertion, plus an **automatic**
+one — if any audited file has been deleted from `codev/`, zero pending rows may
+remain anywhere. Deletion is the point of no return, so the guard arms itself
+the moment Phase 4 starts; it cannot be forgotten the way a manual flag can.
 
 ---
 

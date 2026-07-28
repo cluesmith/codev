@@ -389,10 +389,13 @@ unconditional: M8–M10 were promoted from conditional to required by **D2**, an
     escalate. A needless question is cheap; a silently deleted codev-specific
     behaviour is not.
 
-  **Permitted terminal states** *(added iteration 2, per Codex)*. Every one of
-  the 76 shadow copies must end in exactly one of these four states. **"Pending
-  escalation" is explicitly NOT terminal** — the feature is not complete while
-  any item sits there:
+  **Permitted terminal states** *(added iteration 2, per Codex)*. Every shadow
+  copy must end in exactly one of these four states. **"Pending escalation" is
+  explicitly NOT terminal** — the feature is not complete while any item sits
+  there. *(Count correction, Phase 2: the true shadow-copy count is **77**, not
+  76 — mechanical enumeration includes `consult-types/integration-review.md`,
+  which the hand count missed. Every "76" in this spec reads as 77; the audit
+  artifact is authoritative.)*
 
   | # | Terminal state | Applies to | Result |
   |---|---|---|---|

@@ -523,3 +523,26 @@ owned by CLAUDE.md so the skeleton's generalized version loses nothing.
 T11 parses the audit table (6-column contract, enumerated values): 5 tests
 green, completion guard (zero pending) phase-gated like the drift gate's.
 Also armed: a guard that fails if any file vanishes while pending/TS3.
+
+## Phase 2 iter-1: Gemini/Claude APPROVE, Codex REQUEST_CHANGES — accepted, remedy differed
+
+Codex caught my plan contradicting itself: Phase-2 criteria said "zero rows
+pending" while the spec's own sequencing designs for open escalations through
+Phase 3 (M3 "skips anything M11 escalated") with the real deadline at Phase 4
+(M8 "gated on M11 ... escalations ruled on").
+
+The important part: satisfying the criterion AS WRITTEN would have meant
+invoking the TS3 escape hatch on all 4 escalations within the hour of sending
+them — before the architect could realistically rule. The escape hatch is for
+escalations that CANNOT be resolved, not for skipping the wait. A phase
+criterion must never strong-arm a human gate.
+
+Fix: plan criteria amended (deadline = Phase 4); T11 gains an AUTOMATIC guard —
+the moment any audited file is deleted, zero pending rows may remain. Deletion
+arms the assertion; no human has to remember a flag. That answers Codex's
+deeper point (manual skip-flag = phase passes while violating itself) more
+durably than resolving the escalations prematurely would have.
+
+Also: spec count corrected in place (77 shadow copies; hand count missed
+consult-types/integration-review.md) and Claude's cosmetic header arithmetic
+fixed (73 protocol files, not 74).

@@ -140,4 +140,29 @@ describe('shadow-tree audit (M11 / T11)', () => {
       }
     }
   });
+
+  /**
+   * AUTOMATIC completion guard (added after Codex's Phase-2 review): the
+   * manual ALL_ESCALATIONS_RESOLVED flag can be forgotten; this cannot.
+   * Deletion is the point of no return — the moment ANY audited file is gone
+   * from codev/ (i.e. Phase 4 has started), every escalation must already be
+   * resolved, not just the deleted file's own. Escalations may stay open
+   * through Phases 2–3 (the spec's design: M3 skips escalated files), but
+   * never into Phase 4.
+   */
+  it('once deletion has started, zero pending rows may remain anywhere', () => {
+    const rows = parseAudit();
+    const deletionStarted = rows.some(
+      (r) => !fs.existsSync(path.join(REPO_ROOT, 'codev', r.file))
+    );
+    if (!deletionStarted) return; // Phases 2–3: open escalations are legitimate
+    const pending = rows.filter((r) => r.terminalState === 'pending').map((r) => r.file);
+    expect(
+      pending,
+      `Phase 4 deletion has begun but these escalations are unresolved:\n` +
+        pending.map((p) => `  - ${p}`).join('\n') +
+        `\nEvery pending row needs an architect ruling (or the TS3 escape hatch + ` +
+        `follow-up issue) BEFORE any deletion executes (M8 is gated on M11).`
+    ).toEqual([]);
+  });
 });

@@ -15,7 +15,7 @@
 The spec said **76** shadow copies. The mechanical enumeration finds **77**:
 the spec's count missed `consult-types/integration-review.md` (the drift
 audit's `FRAMEWORK_DRIFT_DIRS` covers `protocols`, `roles`, AND
-`consult-types`). 74 protocols-tree files (63 .md + 11 .json), 3 roles, 1
+`consult-types`). 73 protocols-tree files (63 .md + 10 .json), 3 roles, 1
 consult-types. Drifted: 17, matching the spec.
 
 ## Classification method (D1/D2)
