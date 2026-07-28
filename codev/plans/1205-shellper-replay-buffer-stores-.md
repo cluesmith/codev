@@ -219,7 +219,12 @@ This is where the reviewer earns the gate — the failure mode is memory behavio
 1. `pnpm -w run local-install` from the worktree (installs the new shellper binary and restarts Tower).
 2. Spawn a fresh terminal running a full-screen TUI (a Claude session is the exact reported workload) and let it stream for a few minutes.
 3. Confirm the shellper's RSS plateaus instead of climbing: `ps -o rss=,command= -p $(pgrep -f shellper-main)` sampled over time.
-4. Detach and re-attach the terminal repeatedly. **Watch RSS across the attach** — pre-fix it spikes toward 2× the buffer at that instant; post-fix it should barely move. This is the #1253 symptom, and it is the single most important thing to observe.
+4. **Watch the shellper's RSS across a *shellper-client* connect.** Pre-fix it spikes toward 2× the buffer at that instant; post-fix it should barely move. This is the #1253 symptom and the single most important thing to observe.
+
+   Be precise about what triggers it, because two different "attach" actions hit different code:
+
+   - **Does trigger it.** Any new socket connection to the shellper runs `handleHello`, which always calls `getReplayData()` and sends a REPLAY frame. That means: a **Tower restart** (re-adopts every existing shellper — `tower-terminals.ts:805,1016`; this is the "opening an existing session" event from the report, and it hits all sessions at once), an **`afx attach <session>`** from the CLI (its own direct client, `attach.ts:171`), or a shellper socket reconnect after an unexpected close (`tower-server.ts:494` — the shellper still allocates here even though Tower discards the payload).
+   - **Does not trigger it.** Closing and reopening a terminal tab in VSCode or the dashboard. That is a *viewer* attach: WebSocket → `PtySession.attach()` → `ringBuffer.getAll()` (`pty-session.ts:462`), which reads Tower's ring buffer and never contacts the shellper. Useful for exercising Phase 3's partial cap, but it will show nothing for Phases 1–2 — don't read a flat RSS there as evidence the fix is a no-op.
 5. Confirm the reattached screen still renders correctly (the nudge repaint) and that **keyboard input still works** in the TUI — input breakage would be the tell-tale of a bad cut.
 6. Check the shellper log (`<socket>.log`) for the "exceeds cap" line to confirm the cap engaged rather than silently no-op'ing.
 7. Tower log: the 60s partial monitor (`tower-server.ts:483-490`) should show max partial plateauing under 2MB rather than climbing.
