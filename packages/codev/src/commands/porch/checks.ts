@@ -125,6 +125,24 @@ export async function runCheck(
 }
 
 /**
+ * Headings the `spec_has_required_sections` check requires (issue #1279).
+ *
+ * These are guaranteed by the canonical spec template
+ * (`protocols/spir/templates/spec.md`), which the specify prompt now delivers
+ * inline via a `{{> }}` include. Deliberately a core subset, not the template's
+ * full heading list: the gate is a backstop against a wholesale departure from
+ * the template, not a style linter.
+ */
+export const REQUIRED_SPEC_SECTIONS = [
+  '## Problem Statement',
+  '## Current State',
+  '## Desired State',
+  '## Success Criteria',
+  '## Solution Approaches',
+  '## Open Questions',
+] as const;
+
+/**
  * Try to run an artifact-dependent check programmatically via the resolver.
  * Returns a CheckResult if the check name is recognized, null otherwise
  * (caller should fall back to shell execution).
@@ -139,6 +157,40 @@ export function runArtifactCheck(
   const { PROJECT_ID: projectId, PROJECT_TITLE: title } = env;
 
   switch (name) {
+    case 'spec_exists': {
+      const content = resolver.getSpecContent(projectId, title);
+      return {
+        name,
+        command,
+        passed: content !== null,
+        output: content !== null ? 'Spec found via resolver' : undefined,
+        error: content === null ? 'Spec not found' : undefined,
+        duration_ms: Date.now() - startTime,
+      };
+    }
+
+    case 'spec_has_required_sections': {
+      const content = resolver.getSpecContent(projectId, title);
+      if (content === null) {
+        return { name, command, passed: false, error: 'Spec not found', duration_ms: Date.now() - startTime };
+      }
+      const missing = REQUIRED_SPEC_SECTIONS.filter(h => !content.includes(h));
+      return {
+        name,
+        command,
+        passed: missing.length === 0,
+        output: missing.length === 0
+          ? `Found all ${REQUIRED_SPEC_SECTIONS.length} required sections`
+          : undefined,
+        error: missing.length === 0
+          ? undefined
+          : `Spec is missing ${missing.length} required section(s): ${missing.join(', ')}. `
+            + 'The specify prompt delivers the canonical template inline — follow its headings '
+            + 'rather than copying an earlier spec.',
+        duration_ms: Date.now() - startTime,
+      };
+    }
+
     case 'plan_exists': {
       const content = resolver.getPlanContent(projectId, title);
       return {

@@ -32,6 +32,12 @@ If the baked decisions themselves contain contradictions (e.g., two different la
    - Are acceptance criteria testable?
    - Is terminology consistent?
 
+5. **Structure**
+   - The specify prompt delivers a canonical spec template (`protocols/spir/templates/spec.md`) inline. Does the spec actually follow it?
+   - Required headings, in order: `## Metadata`, `## Clarifying Questions Asked`, `## Problem Statement`, `## Current State`, `## Desired State`, `## Stakeholders`, `## Success Criteria`, `## Constraints`, `## Assumptions`, `## Solution Approaches`, `## Open Questions`, `## Performance Requirements`, `## Security Considerations`, `## Test Scenarios`, `## Dependencies`, `## References`, `## Risks and Mitigation`, `## Expert Consultation`, `## Approval`, `## Notes`.
+   - A free-form spec that reads well but ignores the template is a **defect**, not a style preference — it usually means the builder pattern-matched an older spec in `codev/specs/` instead of the delivered template. `REQUEST_CHANGES` for a wholesale departure (most headings missing or renamed).
+   - A section that genuinely does not apply may be reduced to a one-line "N/A — [reason]", but the heading should remain. Do not `REQUEST_CHANGES` over one such section.
+
 ## Verdict Format
 
 After your review, provide your verdict in exactly this format:
