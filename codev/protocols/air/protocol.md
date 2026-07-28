@@ -34,7 +34,6 @@ AIR is a minimal protocol for implementing small features (< 300 LOC) where the 
 
 - Bug fixes → use **BUGFIX**
 - Features needing spec discussion → use **SPIR** or **ASPIR**
-- Amendments to existing specs → use **TICK**
 - Architectural changes → use **SPIR**
 - Complex features with multiple phases → use **SPIR** or **ASPIR**
 
