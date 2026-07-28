@@ -26,6 +26,7 @@ import { createHash } from 'node:crypto';
 import { resolveCodevFile, getSkeletonDir } from '../lib/skeleton.js';
 import {
   buildPromptFromTemplate,
+  builderPreamble,
   type TemplateContext,
 } from '../agent-farm/commands/spawn-roles.js';
 
@@ -108,6 +109,39 @@ describe('shadow-removal equivalence (M10)', () => {
         { ...FIXED_CTX, protocol_name: proto }
       );
       expect(live, `${proto}: assembled prompt changed across the deletion`).toBe(snapshot);
+    }
+  });
+
+  /**
+   * The FULL served prompt is preamble + assembled template (plus per-spawn
+   * notices). The preamble used to instruct "Read codev/roles/builder.md" — a
+   * literal-path fetch of a file Phase 4 deleted (and which never existed in
+   * fresh installs; the #1011 bug class). Caught by Codex at iter-4. The role
+   * is not fetched at all: it is harness-injected and mirrored to
+   * .builder-role.md. Guard both properties.
+   */
+  it('the spawn preamble fetches nothing by literal framework path', () => {
+    const preamble = builderPreamble();
+    expect(preamble).not.toMatch(/codev\/(roles|protocols|consult-types)\//);
+    // and it tells the builder where the role actually is
+    expect(preamble).toContain('.builder-role.md');
+    expect(preamble).toContain('system prompt');
+  });
+
+  it('the full served prompt (preamble + template) references no deleted paths', () => {
+    for (const proto of SNAPSHOT_PROTOCOLS) {
+      const full =
+        builderPreamble() +
+        '\n\n' +
+        buildPromptFromTemplate({ workspaceRoot: REPO_ROOT } as never, proto, {
+          ...FIXED_CTX,
+          protocol_name: proto,
+        });
+      // No instruction to read/cat a codev/roles path (deleted, and never a
+      // valid fetch target in fresh installs).
+      expect(full, `${proto}: full prompt references codev/roles/`).not.toMatch(
+        /codev\/roles\//
+      );
     }
   });
 

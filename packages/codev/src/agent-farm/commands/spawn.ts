@@ -48,6 +48,7 @@ import {
   validateProtocol,
   loadProtocol,
   resolveMode,
+  builderPreamble,
 } from './spawn-roles.js';
 import { getResolver } from '../../commands/porch/artifacts.js';
 import {
@@ -475,7 +476,7 @@ async function spawnSpec(options: SpawnOptions, config: Config): Promise<void> {
   const branchNotice = options.branch
     ? `\n## Existing Branch\nYou are continuing work on existing branch \`${options.branch}\`. This branch may have commits from another contributor. Review the existing commits before making changes.\n`
     : '';
-  const builderPrompt = `You are a Builder. Read codev/roles/builder.md for your full role definition.\n${resumeNotice}${branchNotice}\n${initialPrompt}`;
+  const builderPrompt = `${builderPreamble()}\n${resumeNotice}${branchNotice}\n${initialPrompt}`;
 
   const role = options.noRole ? null : loadRolePrompt(config, 'builder');
   const commands = getResolvedCommands();
@@ -543,12 +544,12 @@ async function spawnTask(options: SpawnOptions, config: Config): Promise<void> {
       project_id: builderId, input_description: 'an ad-hoc task', task_text: taskDescription,
     };
     const prompt = buildPromptFromTemplate(config, protocol, templateContext);
-    builderPrompt = `You are a Builder. Read codev/roles/builder.md for your full role definition.\n${resumeNotice}\n${prompt}`;
+    builderPrompt = `${builderPreamble()}\n${resumeNotice}\n${prompt}`;
     if (!options.resume) {
       await initPorchInWorktree(worktreePath, protocol, builderId, worktreeName);
     }
   } else {
-    builderPrompt = `You are a Builder. Read codev/roles/builder.md for your full role definition.\n${resumeNotice}\n# Task\n\n${taskDescription}`;
+    builderPrompt = `${builderPreamble()}\n${resumeNotice}\n# Task\n\n${taskDescription}`;
   }
 
   const role = options.noRole ? null : loadRolePrompt(config, 'builder');
@@ -845,7 +846,7 @@ async function spawnIssueDrivenBuilder(
   const branchNotice = options.branch
     ? `\n## Existing Branch\nYou are continuing work on existing branch \`${options.branch}\`. This branch may have commits from another contributor. Review the existing commits before making changes.\n`
     : '';
-  const builderPrompt = `You are a Builder. Read codev/roles/builder.md for your full role definition.\n${resumeNotice}${branchNotice}\n${prompt}`;
+  const builderPrompt = `${builderPreamble()}\n${resumeNotice}${branchNotice}\n${prompt}`;
 
   const resume = discoverResumeSession(worktreePath, options.resume, getBuilderHarness(config.workspaceRoot));
   const role = options.noRole ? null : loadRolePrompt(config, 'builder');

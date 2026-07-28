@@ -248,8 +248,16 @@ the deletion is the test.
   tombstone comment; `copyRoles` test block removed.
 - M10 equivalence: `shadow-removal-manifest.json` (77 pre-deletion sha256s) +
   `shadow-removal-equivalence.test.ts` prove the resolver serves byte-identical
-  content post-deletion. Assembled-prompt equivalence follows because
-  `renderTemplate` is a pure function of the resolved template.
+  content post-deletion FROM THE SKELETON TIER (path asserted, not just
+  content), and assembled-prompt equivalence is exercised directly: the real
+  `buildPromptFromTemplate` ran against the pre-deletion tree (git archive) for
+  all nine protocols under a fixed context, snapshots committed, and the live
+  assembly must reproduce them byte-for-byte. The FULL served prompt (preamble
+  + template) is additionally guarded: the spawn preamble had instructed
+  "Read codev/roles/builder.md" — a literal-path fetch of a deleted file
+  (caught by Codex, Phase 4 iter-4) — now replaced by a single-owner
+  `builderPreamble()` that points at the harness-injected role
+  (`.builder-role.md`), with tests asserting no framework path is fetched.
 - Allowlist: **empty**. Drift gate: zero findings. All T11 guards green with
   zero pending rows.
 

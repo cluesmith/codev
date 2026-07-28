@@ -151,3 +151,46 @@ naming the same file). Pairwise equality became single-owner presence
 assertions (clause exists and extracts cleanly).
 
 Suite: 3,726 passed, 0 failures (count reflects vacuous tests deleted).
+
+---
+
+# Iteration 4 addendum
+
+| Model | Verdict | Issues |
+|---|---|---|
+| Gemini | APPROVE | 0 |
+| Codex | REQUEST_CHANGES (MEDIUM) | 2 |
+| Claude | (pending at fix time) | — |
+
+Both accepted — and CX-1 is a genuine live catch, the best of the phase.
+
+## CX-1 — the spawn wrapper told builders to read a deleted file
+
+The wrapper sentence `"You are a Builder. Read codev/roles/builder.md …"` was
+hardcoded at **four** call sites in `spawn.ts` and survived every audit sweep
+because it lives in a template string in *production code*, not in a test or
+doc. After Phase 4 it pointed at a deleted path — and it was already broken
+for fresh installs, where `codev/roles/` never existed (#1011 bug class: the
+role is never fetched by the builder at all; spawn injects it via the harness
+system prompt and writes `.builder-role.md`).
+
+**Fixed with the project's own medicine**: the sentence now has a single owner
+— `builderPreamble()` in `spawn-roles.ts` — used by all four call sites, and it
+points at what is actually delivered ("your system prompt … a copy at
+`.builder-role.md`"). Two new tests: the preamble fetches nothing by literal
+framework path, and the full served prompt (preamble + assembled template)
+for all nine protocols contains no `codev/roles/` reference.
+
+Note on `--no-role` spawns: the preamble mentions a role file that a no-role
+spawn doesn't write. That is strictly better than before (a dangling fetch
+instruction in *all* spawns), and no-role is an explicit operator opt-out.
+
+## CX-2 — the audit overstated the equivalence proof
+
+Accepted. The audit's "follows from renderTemplate purity" sentence described
+the iter-1 inference, not the iter-2 implementation, and either way did not
+cover the wrapper layer where CX-1's bug lived. Rewritten to state exactly what
+is now proven: tier-asserted resolution, direct snapshot-equivalence of the
+assembly for nine protocols, and the preamble/full-prompt guards.
+
+Suite: 3,728 passed, 0 failures.

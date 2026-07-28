@@ -163,6 +163,21 @@ export function buildPromptFromTemplate(
  * Build a resume notice to prepend to the builder prompt.
  * Tells the builder this is a resumed session and to check existing porch state.
  */
+/**
+ * The one-line builder preamble prepended to every spawn prompt.
+ *
+ * Single owner for a sentence that was previously hardcoded at four call
+ * sites in spawn.ts (Spec 1252). It used to say "Read codev/roles/builder.md"
+ * — a literal-path fetch instruction (the #1011 bug class) that broke in
+ * fresh installs and, after Spec 1252 deleted the codev/roles shadow tree,
+ * pointed at a deleted path everywhere. The role is not fetched by the
+ * builder at all: spawn injects it via the harness system prompt and writes a
+ * copy to .builder-role.md in the worktree.
+ */
+export function builderPreamble(): string {
+  return 'You are a Builder. Your full role definition is delivered via your system prompt (a copy is written to `.builder-role.md` in your worktree).';
+}
+
 export function buildResumeNotice(_projectId: string): string {
   return `## RESUME SESSION
 
