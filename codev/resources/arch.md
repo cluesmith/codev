@@ -106,7 +106,7 @@ tail -f ~/.agent-farm/tower.log
 
 2. **Single Tower Port**: All projects are served through Tower on port 4100. Per-project port blocks were removed in Spec 0098. Terminal sessions and workspace metadata are tracked in `~/.agent-farm/global.db`.
 
-3. **Worktree Integrity**: Worktrees in `.builders/` are managed by Agent Farm. Never delete them manually (use `afx cleanup`).
+3. **Worktree Integrity**: Worktrees in `.builders/` are managed by Agent Farm. Never delete them manually or autonomously — architect-driven `afx cleanup` retires *finished* builders; a live worktree is resumed (`afx spawn <id> --resume`), never bulldozed (scar rule: never-destroy-worktrees).
 
 4. **CLAUDE.md ≡ AGENTS.md**: These files MUST be identical. They are the same content for different tool ecosystems.
 

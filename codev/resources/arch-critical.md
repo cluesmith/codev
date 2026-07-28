@@ -12,7 +12,7 @@ and keeps the map in sync with arch.md's top-level sections. See codev/resources
 - Porch is a pure planner: it emits task JSON, Claude Code executes.
 - Never hand-edit `status.yaml` — only porch commands modify project state.
 - State lives in a single user-global ~/.agent-farm/global.db (Issue #1118 retired the per-workspace state.db; architect/builders keyed by workspace_path); one Tower on port 4100. Never modify state by hand.
-- Worktrees in .builders/ are Agent-Farm-managed — never delete manually (use afx cleanup); run afx from the main workspace root only.
+- Worktrees in .builders/ are Agent-Farm-managed: architect-driven `afx cleanup` retires FINISHED builders; never destroy a live one (scar rule — use `afx spawn <id> --resume`, ask when in doubt); run afx from the main workspace root only.
 - Forge concept commands abstract the VCS provider — add a dedicated concept; don't bolt env flags onto a shared one.
 - Two human gates (spec-approval, plan-approval) plus the pr gate; only humans transition conceived→specified and committed→integrated.
 - Never `git add -A` / `--all` / `.` — stage each file explicitly by path.
