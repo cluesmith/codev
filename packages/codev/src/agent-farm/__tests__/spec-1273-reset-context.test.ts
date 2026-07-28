@@ -284,6 +284,156 @@ describe('resolveBuilderContext (Spec 1273)', () => {
     expect(() => resolveBuilderContext({ fs: makeFs({}), ...BASE })).toThrow(/Worktree not found/);
   });
 
+  it('resolves the artifact identity phase 5 needs to rebuild the spawn template context', () => {
+    const projectDir = '1273-builder-context-reset-should-b';
+    const fs = fullWorktree({
+      [join(WORKTREE, 'codev', 'specs', `${projectDir}.md`)]: '# spec',
+      [join(WORKTREE, 'codev', 'plans', `${projectDir}.md`)]: '# plan',
+    });
+    const ctx = resolveBuilderContext({ fs, ...BASE });
+
+    expect(ctx.specName).toBe(projectDir);
+    expect(ctx.specPath).toBe(join('codev', 'specs', `${projectDir}.md`));
+    expect(ctx.planPath).toBe(join('codev', 'plans', `${projectDir}.md`));
+  });
+
+  it('reports a missing plan as null rather than pointing at a file that is not there', () => {
+    // A pointer to a nonexistent plan would send a freshly-reset builder — one
+    // with no memory to cross-check against — chasing a ghost.
+    const projectDir = '1273-builder-context-reset-should-b';
+    const fs = fullWorktree({
+      [join(WORKTREE, 'codev', 'specs', `${projectDir}.md`)]: '# spec',
+    });
+    const ctx = resolveBuilderContext({ fs, ...BASE });
+
+    expect(ctx.specPath).toBe(join('codev', 'specs', `${projectDir}.md`));
+    expect(ctx.planPath).toBeNull();
+  });
+
+  it('has no artifact identity on a non-porch lane', () => {
+    const fs = makeFs({
+      [join(WORKTREE, '.builder-prompt.txt')]: BUILDER_PROMPT,
+      [join(WORKTREE, '.builder-start.sh')]: LAUNCH_SCRIPT,
+    });
+    const ctx = resolveBuilderContext({ fs, ...BASE });
+
+    expect(ctx.specName).toBeNull();
+    expect(ctx.specPath).toBeNull();
+    expect(ctx.planPath).toBeNull();
+  });
+
+  it('falls back to the porch project id for the issue number', () => {
+    // Issue-driven protocols name the porch project after the issue, so this is
+    // the right value when the registry row carries none.
+    const ctx = resolveBuilderContext({ fs: fullWorktree(), ...BASE });
+    expect(ctx.issueNumber).toBe('1273');
+  });
+
+  it('prefers an explicitly supplied issue number over the project id', () => {
+    const ctx = resolveBuilderContext({ fs: fullWorktree(), ...BASE, issueNumber: '999' });
+    expect(ctx.issueNumber).toBe('999');
+  });
+});
+
+// ============================================================================
+// Custom harnesses
+// ============================================================================
+
+describe('custom harness resolution (Spec 1273)', () => {
+  const custom = {
+    'acme-agent': {
+      command: 'acme-agent',
+      roleArgs: ['--system', '${ROLE_FILE}'],
+      roleScriptFragment: "--system '${ROLE_FILE}'",
+    },
+  } as any;
+
+  function customWorktree() {
+    return fullWorktree({
+      [join(WORKTREE, '.builder-start.sh')]: LAUNCH_SCRIPT.replace('claude ', 'acme-agent '),
+    });
+  }
+
+  it('recognises a project-defined harness from the launch script', () => {
+    expect(harnessFromLaunchScript(customWorktree(), WORKTREE, custom)).toBe('acme-agent');
+  });
+
+  it('maps it to a real provider and refuses on the accurate ground', () => {
+    // Without custom-harness support the refusal would be "unrecognisable
+    // launch command", sending the project to debug its config. The accurate
+    // refusal is that this harness cannot clear context in-session.
+    expect(() => resolveBuilderContext({ fs: customWorktree(), ...BASE, customHarnesses: custom }))
+      .toThrow(/no in-session context reset/);
+    expect(() => resolveBuilderContext({ fs: customWorktree(), ...BASE, customHarnesses: custom }))
+      .toThrow(/acme-agent/);
+  });
+
+  it('still reports an unknown harness as unrecognisable when no config defines it', () => {
+    expect(() => resolveBuilderContext({ fs: customWorktree(), ...BASE }))
+      .toThrow(/Cannot determine the harness/);
+  });
+
+  it('prefers a longer custom name over a builtin substring match', () => {
+    const shadowing = { 'claude-experimental': { command: 'claude-experimental', roleArgs: [], roleScriptFragment: '' } } as any;
+    const fs = fullWorktree({
+      [join(WORKTREE, '.builder-start.sh')]: LAUNCH_SCRIPT.replace('claude ', 'claude-experimental '),
+    });
+    expect(harnessFromLaunchScript(fs, WORKTREE, shadowing)).toBe('claude-experimental');
+  });
+});
+
+// ============================================================================
+// Launch-script scanning precision
+// ============================================================================
+
+describe('harness detection matches command position only (Spec 1273)', () => {
+  it('does not false-positive on a harness name inside a conditional', () => {
+    // Naming the wrong harness is not a harmless misread: it either refuses a
+    // resettable builder, or — worse — approves typing /clear into one that
+    // cannot reset. So detection matches the command, not the whole line.
+    const script = [
+      '#!/bin/bash',
+      `cd "${WORKTREE}"`,
+      'if [ "$HARNESS" = "codex" ]; then',
+      '  echo "not this one"',
+      'fi',
+      'while true; do',
+      '  claude --append-system-prompt "$(cat role.md)"',
+      'done',
+    ].join('\n');
+    const fs = fullWorktree({ [join(WORKTREE, '.builder-start.sh')]: script });
+
+    expect(harnessFromLaunchScript(fs, WORKTREE)).toBe('claude');
+  });
+
+  it('does not treat a variable assignment mentioning a harness as an invocation', () => {
+    const script = `#!/bin/bash\nAGENT_KIND=codex\nwhile true; do\n  claude --foo\ndone\n`;
+    const fs = fullWorktree({ [join(WORKTREE, '.builder-start.sh')]: script });
+
+    expect(harnessFromLaunchScript(fs, WORKTREE)).toBe('claude');
+  });
+
+  it('resolves an absolute path to its basename', () => {
+    const script = `#!/bin/bash\nwhile true; do\n  /usr/local/bin/claude --resume abc\ndone\n`;
+    const fs = fullWorktree({ [join(WORKTREE, '.builder-start.sh')]: script });
+
+    expect(harnessFromLaunchScript(fs, WORKTREE)).toBe('claude');
+  });
+
+  it('sees through an env-var prefix and an exec', () => {
+    const script = `#!/bin/bash\nwhile true; do\n  exec FOO=1 claude --resume abc\ndone\n`;
+    const fs = fullWorktree({ [join(WORKTREE, '.builder-start.sh')]: script });
+
+    expect(harnessFromLaunchScript(fs, WORKTREE)).toBe('claude');
+  });
+
+  it('ignores comments that mention a harness', () => {
+    const script = `#!/bin/bash\n# previously ran under codex\nwhile true; do\n  claude --foo\ndone\n`;
+    const fs = fullWorktree({ [join(WORKTREE, '.builder-start.sh')]: script });
+
+    expect(harnessFromLaunchScript(fs, WORKTREE)).toBe('claude');
+  });
+
   it('is read-only — no writes anywhere', () => {
     const calls: string[] = [];
     const base = fullWorktree();

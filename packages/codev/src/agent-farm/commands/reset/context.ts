@@ -29,7 +29,12 @@
 
 import { join } from 'node:path';
 import { parseAgentName } from '../../utils/agent-names.js';
-import { BUILTIN_HARNESSES, type HarnessProvider } from '../../utils/harness.js';
+import {
+  BUILTIN_HARNESSES,
+  buildCustomHarnessProvider,
+  type CustomHarnessConfig,
+  type HarnessProvider,
+} from '../../utils/harness.js';
 
 // ============================================================================
 // Ports
@@ -60,12 +65,26 @@ export interface ResolvedBuilderContext {
   harness: HarnessProvider;
   /** Null for a non-porch lane; that is a branch, not a failure. */
   porch: PorchContext | null;
+  /**
+   * Artifact identity, for phase 5's reconstruction of the spawn TemplateContext.
+   *
+   * Null on a non-porch lane, where there is no spec/plan naming convention to
+   * derive from. `specPath`/`planPath` are worktree-relative and are only set
+   * when the file actually exists — a pointer to a file that is not there would
+   * send a freshly-reset builder chasing a ghost.
+   */
+  specName: string | null;
+  specPath: string | null;
+  planPath: string | null;
+  /** Issue number, from the registry row or the porch project id. */
   issueNumber?: string;
 }
 
 export interface PorchContext {
   projectId: string;
   projectName: string;
+  /** The protocol porch is actually running for this project. */
+  protocol: string;
   phase: string;
   currentPlanPhase: string | null;
   statusPath: string;
@@ -111,6 +130,7 @@ export function readPorchContext(fs: ContextFsPort, worktree: string): PorchCont
     return {
       projectId: id ?? dir.split('-')[0],
       projectName: dir,
+      protocol,
       phase,
       currentPlanPhase: currentPlanPhase && currentPlanPhase !== 'null' ? currentPlanPhase : null,
       statusPath,
@@ -128,18 +148,15 @@ function matchScalar(content: string, key: string): string | null {
   return raw === '' ? null : raw;
 }
 
-/** The protocol recorded in status.yaml, if there is one. */
+/**
+ * The protocol recorded in status.yaml, if there is one.
+ *
+ * Reads through `readPorchContext` rather than re-scanning the project dirs, so
+ * the two cannot disagree about which status.yaml is authoritative when a
+ * worktree somehow holds more than one project directory.
+ */
 export function protocolFromStatus(fs: ContextFsPort, worktree: string): string | null {
-  const projectsDir = join(worktree, 'codev', 'projects');
-  const dirs = fs.listDirs(projectsDir);
-  if (!dirs) return null;
-  for (const dir of dirs) {
-    const content = fs.read(join(projectsDir, dir, 'status.yaml'));
-    if (content === null) continue;
-    const protocol = matchScalar(content, 'protocol');
-    if (protocol) return protocol;
-  }
-  return null;
+  return readPorchContext(fs, worktree)?.protocol ?? null;
 }
 
 // ============================================================================
@@ -172,21 +189,104 @@ export function modeFromBuilderPrompt(fs: ContextFsPort, worktree: string): 'str
  * Per-builder ground truth: the script is what the running process was started
  * with, so it stays right even if workspace config changed since the spawn.
  */
-export function harnessFromLaunchScript(fs: ContextFsPort, worktree: string): string | null {
+export function harnessFromLaunchScript(
+  fs: ContextFsPort,
+  worktree: string,
+  customHarnesses?: Record<string, CustomHarnessConfig>,
+): string | null {
   const content = fs.read(join(worktree, '.builder-start.sh'));
   if (content === null) return null;
 
-  // The launch line is inside the `while true` loop, before the loop tail.
+  // Custom names first: a project may define a custom harness whose name
+  // contains a builtin's (e.g. "claude-experimental"), and the more specific
+  // match is the right one.
+  const names = new Set([
+    ...Object.keys(customHarnesses ?? {}),
+    ...Object.keys(BUILTIN_HARNESSES),
+  ]);
+
   for (const line of content.split('\n')) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#') || trimmed.startsWith('cd ') || trimmed.startsWith('export ')) continue;
-    for (const name of Object.keys(BUILTIN_HARNESSES)) {
-      // Word-boundary match so a path like `/usr/local/bin/claude` still hits
-      // while an unrelated mention inside a prompt path does not.
-      if (new RegExp(`(^|[\\s/])${name}([\\s'"]|$)`).test(trimmed)) return name;
-    }
+    const command = commandNameOf(line);
+    if (command && names.has(command)) return command;
   }
   return null;
+}
+
+/**
+ * The command a shell line invokes, or null if the line invokes nothing.
+ *
+ * Matching on **command position** rather than searching the whole line for a
+ * harness name: a substring search would report a false positive on a line like
+ * `if [ "$HARNESS" = "codex" ]`, and naming the wrong harness would either refuse
+ * a resettable builder or — worse — approve typing into one that cannot be reset.
+ */
+function commandNameOf(line: string): string | null {
+  let rest = line.trim();
+  if (!rest || rest.startsWith('#')) return null;
+
+  // Strip shell control keywords that can prefix a command on the same line.
+  rest = rest.replace(/^(?:while|until|if|then|else|elif|do|done|fi|exec|command|nohup)\s+/, '');
+  // Strip leading `VAR=value ` environment assignments.
+  while (/^[A-Za-z_][A-Za-z0-9_]*=/.test(rest)) {
+    const space = rest.indexOf(' ');
+    if (space === -1) return null; // a bare assignment invokes nothing
+    rest = rest.slice(space + 1).trimStart();
+  }
+
+  const first = rest.split(/\s+/)[0];
+  if (!first || first.includes('=')) return null;
+
+  // Basename, so `/usr/local/bin/claude` resolves like `claude`, with any
+  // surrounding quotes removed.
+  const base = first.replace(/^['"]|['"]$/g, '').split('/').pop();
+  return base && base !== '' ? base : null;
+}
+
+/**
+ * Map a harness name to its provider, honouring project-defined custom harnesses.
+ *
+ * Custom harnesses resolve to a real provider rather than failing as
+ * "unrecognisable", so the refusal a project sees is the accurate one — *this
+ * harness cannot reset in-session* — instead of a misleading "unknown harness".
+ * `buildCustomHarnessProvider` does not set `supportsContextReset`, so custom
+ * harnesses are unsupported by default; letting one declare support would be a
+ * one-field addition to `CustomHarnessConfig`, deliberately out of scope here.
+ */
+export function harnessProviderFor(
+  harnessName: string,
+  customHarnesses?: Record<string, CustomHarnessConfig>,
+): HarnessProvider | null {
+  const builtin = BUILTIN_HARNESSES[harnessName];
+  if (builtin) return builtin;
+  if (customHarnesses && harnessName in customHarnesses) {
+    return buildCustomHarnessProvider(customHarnesses[harnessName]);
+  }
+  return null;
+}
+
+/**
+ * Derive artifact identity from the porch project.
+ *
+ * Porch names its project dir `<id>-<title>`, and spec/plan files share that
+ * stem by convention (`codev/specs/<id>-<title>.md`). Paths are returned only
+ * when the file exists.
+ */
+export function artifactPaths(
+  fs: ContextFsPort,
+  worktree: string,
+  porch: PorchContext | null,
+): { specName: string | null; specPath: string | null; planPath: string | null } {
+  if (!porch) return { specName: null, specPath: null, planPath: null };
+
+  const specName = porch.projectName;
+  const specRel = join('codev', 'specs', `${specName}.md`);
+  const planRel = join('codev', 'plans', `${specName}.md`);
+
+  return {
+    specName,
+    specPath: fs.exists(join(worktree, specRel)) ? specRel : null,
+    planPath: fs.exists(join(worktree, planRel)) ? planRel : null,
+  };
 }
 
 // ============================================================================
@@ -201,6 +301,8 @@ export interface ResolveContextOptions {
   issueNumber?: string;
   /** `--mode` override; wins over the worktree, for when the prompt file is gone. */
   modeOverride?: 'strict' | 'soft';
+  /** Project-defined harnesses from `.codev/config.json`, if any. */
+  customHarnesses?: Record<string, CustomHarnessConfig>;
 }
 
 /**
@@ -211,7 +313,7 @@ export interface ResolveContextOptions {
  * break exactly the lanes the feature targets while the code looked more correct.
  */
 export function resolveBuilderContext(options: ResolveContextOptions): ResolvedBuilderContext {
-  const { fs, builderId, worktree, branch, issueNumber, modeOverride } = options;
+  const { fs, builderId, worktree, branch, issueNumber, modeOverride, customHarnesses } = options;
 
   if (!fs.exists(worktree)) {
     throw new ContextResolutionError(
@@ -252,22 +354,31 @@ export function resolveBuilderContext(options: ResolveContextOptions): ResolvedB
     );
   }
 
-  // --- Harness: .builder-start.sh → capability check → abort --------------
-  const harnessName = harnessFromLaunchScript(fs, worktree);
+  // --- Harness: .builder-start.sh → provider → capability check → abort ---
+  const harnessName = harnessFromLaunchScript(fs, worktree, customHarnesses);
   if (!harnessName) {
     throw new ContextResolutionError(
       `Cannot determine the harness for '${builderId}': no recognisable launch command in ` +
         `${join(worktree, '.builder-start.sh')}. Refusing to type into a terminal whose agent is unknown.`,
     );
   }
-  const harness = BUILTIN_HARNESSES[harnessName];
-  if (!harness?.supportsContextReset) {
+  const harness = harnessProviderFor(harnessName, customHarnesses);
+  if (!harness) {
+    throw new ContextResolutionError(
+      `Harness '${harnessName}' is not a known provider — it is neither built in nor defined under ` +
+        `"harness" in .codev/config.json. Refusing to type into a terminal whose agent is unknown.`,
+    );
+  }
+  if (!harness.supportsContextReset) {
     throw new ContextResolutionError(
       `Harness '${harnessName}' has no in-session context reset, so 'afx reset' cannot clear this ` +
         `builder's context. Only the claude harness supports it today. ` +
         `To give this builder a fresh window, stop it and respawn without --resume.`,
     );
   }
+
+  const porch = readPorchContext(fs, worktree);
+  const { specName, specPath, planPath } = artifactPaths(fs, worktree, porch);
 
   return {
     builderId,
@@ -279,7 +390,12 @@ export function resolveBuilderContext(options: ResolveContextOptions): ResolvedB
     modeSource,
     harnessName,
     harness,
-    porch: readPorchContext(fs, worktree),
-    issueNumber,
+    porch,
+    specName,
+    specPath,
+    planPath,
+    // Issue-driven protocols name the porch project after the issue, so the
+    // project id is the correct value when the registry row has none.
+    issueNumber: issueNumber ?? porch?.projectId,
   };
 }
