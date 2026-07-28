@@ -1,0 +1,210 @@
+# Prompt-ownership map (Spec 1252, M1/M4 — Appendix A).
+#
+# THE SINGLE-OWNER RULE: every instruction has exactly one owning surface; all
+# other surfaces reference or summarize it, never restate it. Scar rules are
+# the ratified exception (see codev/resources/scar-rules.yaml — they replicate
+# verbatim; their enforcement lives there, NOT here, so ownership of scar
+# enforcement itself stays single).
+#
+# COMPLETENESS CONTRACT (T12, prompt-ownership.test.ts): a mechanical extractor
+# collects every normative line (MUST/NEVER/ALWAYS/DO NOT/…) from the
+# inventory_boundary below. Every candidate must resolve to a disposition:
+# `mapped` (an instruction class below), `scar` (registered in
+# scar-rules.yaml), or `out-of-scope` (with justification). No fourth state.
+# The final catch-all may absorb only SINGLE-FILE candidates — any normative
+# text appearing on 2+ boundary files must have a specific disposition, so new
+# cross-surface duplication fails CI the moment it is introduced.
+#
+# Content OUTSIDE the boundary is out of scope BY DECLARATION, not by
+# omission: protocol.md docs, templates, consult-types (on-demand reference,
+# correctly tiered — see spec "What is working"), COLD arch.md /
+# lessons-learned.md (user-evolved reference), and codev/resources/ generally.
+# codev/resources/ is also deliberately excluded from the shadow-drift regime:
+# FRAMEWORK_DRIFT_DIRS omits it because those are user-evolved files where
+# divergence from any template is legitimate (Q7 — recording the WHY is
+# required M1 coverage).
+
+inventory_boundary:
+  # Always-on
+  - CLAUDE.md
+  - codev/resources/arch-critical.md
+  - codev/resources/lessons-critical.md
+  # Spawn-delivered
+  - codev-skeleton/roles/architect.md
+  - codev-skeleton/roles/builder.md
+  - codev-skeleton/roles/consultant.md
+  - codev-skeleton/protocols/air/builder-prompt.md
+  - codev-skeleton/protocols/aspir/builder-prompt.md
+  - codev-skeleton/protocols/bugfix/builder-prompt.md
+  - codev-skeleton/protocols/experiment/builder-prompt.md
+  - codev-skeleton/protocols/maintain/builder-prompt.md
+  - codev-skeleton/protocols/pir/builder-prompt.md
+  - codev-skeleton/protocols/research/builder-prompt.md
+  - codev-skeleton/protocols/spike/builder-prompt.md
+  - codev-skeleton/protocols/spir/builder-prompt.md
+  # Per-phase (porch-injected)
+  - codev-skeleton/porch/prompts/defend.md
+  - codev-skeleton/porch/prompts/diagnose.md
+  - codev-skeleton/porch/prompts/evaluate.md
+  - codev-skeleton/porch/prompts/fix.md
+  - codev-skeleton/porch/prompts/implement.md
+  - codev-skeleton/porch/prompts/plan.md
+  - codev-skeleton/porch/prompts/pr.md
+  - codev-skeleton/porch/prompts/review.md
+  - codev-skeleton/porch/prompts/specify.md
+  - codev-skeleton/porch/prompts/test.md
+  # NOTE: AGENTS.md is byte-identical to CLAUDE.md (enforced by T6); scanning
+  # both would double-count every candidate.
+
+surfaces:
+  - { id: claude-md, path: CLAUDE.md, load: always-on }
+  - { id: agents-md, path: AGENTS.md, load: always-on }
+  - { id: arch-critical, path: codev/resources/arch-critical.md, load: always-on }
+  - { id: lessons-critical, path: codev/resources/lessons-critical.md, load: always-on }
+  - { id: role-architect, path: codev-skeleton/roles/architect.md, load: spawn }
+  - { id: role-builder, path: codev-skeleton/roles/builder.md, load: spawn }
+  - { id: role-consultant, path: codev-skeleton/roles/consultant.md, load: spawn }
+  - { id: bp-air, path: codev-skeleton/protocols/air/builder-prompt.md, load: spawn }
+  - { id: bp-aspir, path: codev-skeleton/protocols/aspir/builder-prompt.md, load: spawn }
+  - { id: bp-bugfix, path: codev-skeleton/protocols/bugfix/builder-prompt.md, load: spawn }
+  - { id: bp-experiment, path: codev-skeleton/protocols/experiment/builder-prompt.md, load: spawn }
+  - { id: bp-maintain, path: codev-skeleton/protocols/maintain/builder-prompt.md, load: spawn }
+  - { id: bp-pir, path: codev-skeleton/protocols/pir/builder-prompt.md, load: spawn }
+  - { id: bp-research, path: codev-skeleton/protocols/research/builder-prompt.md, load: spawn }
+  - { id: bp-spike, path: codev-skeleton/protocols/spike/builder-prompt.md, load: spawn }
+  - { id: bp-spir, path: codev-skeleton/protocols/spir/builder-prompt.md, load: spawn }
+  - { id: pp-defend, path: codev-skeleton/porch/prompts/defend.md, load: phase-prompt }
+  - { id: pp-diagnose, path: codev-skeleton/porch/prompts/diagnose.md, load: phase-prompt }
+  - { id: pp-evaluate, path: codev-skeleton/porch/prompts/evaluate.md, load: phase-prompt }
+  - { id: pp-fix, path: codev-skeleton/porch/prompts/fix.md, load: phase-prompt }
+  - { id: pp-implement, path: codev-skeleton/porch/prompts/implement.md, load: phase-prompt }
+  - { id: pp-plan, path: codev-skeleton/porch/prompts/plan.md, load: phase-prompt }
+  - { id: pp-pr, path: codev-skeleton/porch/prompts/pr.md, load: phase-prompt }
+  - { id: pp-review, path: codev-skeleton/porch/prompts/review.md, load: phase-prompt }
+  - { id: pp-specify, path: codev-skeleton/porch/prompts/specify.md, load: phase-prompt }
+  - { id: pp-test, path: codev-skeleton/porch/prompts/test.md, load: phase-prompt }
+  # Ownership anchors outside the scan boundary (on-demand reference docs)
+  - { id: spir-protocol-doc, path: codev-skeleton/protocols/spir/protocol.md, load: on-demand }
+
+# Non-scar instruction classes with cross-surface duplication, discovered by
+# the extractor at Phase 6. All are `enforcement: manual` until Phase 7
+# replaces the non-owner restatements with references — flipping each to
+# `automated` is part of that phase's deliverable (mirrors the drift gate's
+# staged-activation pattern).
+instructions:
+  - id: no-skip-porch-checks
+    summary: Never skip or work around porch checks to avoid a failure.
+    owner: bp-spir
+    scar: false
+    pattern: "skip porch checks or use any workaround"
+    enforcement: manual
+    manual_justification: >
+      Restated in all 9 builder-prompts (flaky-test protocol, item 2).
+      Phase 7 dedups to owner + references; flipped to automated then.
+    references: [bp-air, bp-aspir, bp-bugfix, bp-experiment, bp-maintain, bp-pir, bp-research, bp-spike]
+
+  - id: no-skip-3way-review
+    summary: Never skip the 3-way review; follow the porch next/done cycle.
+    owner: bp-spir
+    scar: false
+    pattern: "NEVER skip the 3-way review"
+    enforcement: manual
+    manual_justification: >
+      Restated in the strict-mode restriction blocks of 4 builder-prompts.
+      Phase 7 target.
+    references: [bp-aspir, bp-pir, bp-research]
+
+  - id: no-advance-phases-manually
+    summary: Porch advances plan phases; never advance them manually.
+    owner: bp-spir
+    scar: false
+    pattern: "NEVER advance plan phases manually"
+    enforcement: manual
+    manual_justification: Restated in 2 builder-prompts; Phase 7 target.
+    references: [bp-aspir]
+
+  - id: baked-decisions-handling
+    summary: Treat issue-body Baked Decisions as fixed; escalate conflicts, never override.
+    owner: bp-spir
+    scar: false
+    pattern: "Baked Decisions"
+    enforcement: manual
+    manual_justification: >
+      Spec 746 deliberately replicated the full section into spir/aspir/air
+      builder-prompts and drafting prompts, with baked-decisions.test.ts
+      asserting presence per file. Deduplication must coordinate with that
+      suite; Phase 7 evaluates a template include, else records TS3-style
+      retention here.
+    references: [bp-aspir, bp-air, pp-specify, pp-implement]
+
+  - id: pr-single-by-default
+    summary: Builders do not autonomously open per-phase PRs; one PR by default.
+    owner: bp-spir
+    scar: false
+    pattern: "Do not autonomously open a PR per implementation phase"
+    enforcement: manual
+    manual_justification: Restated in spir+aspir builder-prompts (bugfix-744 tests grep both); Phase 7 must move the test with the dedup.
+    references: [bp-aspir]
+
+  - id: porch-workflow-fidelity
+    summary: Strict-mode builders follow the porch-driven workflow without deviation.
+    owner: bp-spir
+    scar: false
+    pattern: "Do not deviate from the porch-driven workflow"
+    enforcement: manual
+    manual_justification: Restated in 3 builder-prompts; Phase 7 target.
+    references: [bp-aspir, bp-pir]
+
+  - id: no-time-estimates
+    summary: Plans and specs carry no time estimates; AI development makes them meaningless.
+    owner: spir-protocol-doc
+    scar: false
+    pattern: "/[Dd]on't estimate time|[Nn]o time estimates|NEVER include time estimates/"
+    enforcement: manual
+    manual_justification: >
+      Owner is the SPIR protocol doc (out-of-boundary reference anchor);
+      boundary occurrences in pp-specify/pp-plan are per-file phrasings.
+      Phase 7 converges them to references.
+    references: [pp-specify, pp-plan]
+
+# Disposition table — first match wins; the catch-all is last and may only
+# absorb single-file candidates (enforced by T12).
+dispositions:
+  # --- scar rules (enforced externally by scar-rules.yaml + T6) ---
+  - { match: "git add -A", disposition: scar }
+  - { match: "hand-edit `status.yaml`", disposition: scar }
+  - { match: "porch gate as approved", disposition: scar }
+  - { match: "destroy builder worktrees", disposition: scar }
+  - { match: "git reset --hard", disposition: scar }
+  - { match: "only from the main workspace root", disposition: scar }
+  - { match: "shellper process", disposition: scar }
+  - { match: "restart or stop Tower", disposition: scar }
+
+  # --- mapped non-scar duplicated classes ---
+  - { match: "skip porch checks or use any workaround", disposition: mapped, class: no-skip-porch-checks }
+  - { match: "NEVER skip the 3-way review", disposition: mapped, class: no-skip-3way-review }
+  - { match: "NEVER advance plan phases manually", disposition: mapped, class: no-advance-phases-manually }
+  - { match: "Baked Decisions", disposition: mapped, class: baked-decisions-handling }
+  - { match: "Do not autonomously open a PR per implementation phase", disposition: mapped, class: pr-single-by-default }
+  - { match: "Do not deviate from the porch-driven workflow", disposition: mapped, class: porch-workflow-fidelity }
+  - { match: "/[Dd]on't estimate time|[Nn]o time estimates|NEVER include time estimates/", disposition: mapped, class: no-time-estimates }
+
+  # --- known multi-file texts that are NOT instruction classes ---
+  - match: "DO NOT start implementation"
+    disposition: out-of-scope
+    note: >
+      Phase-boundary guard in specify/plan porch prompts — each phase prompt
+      legitimately owns its own "you are in phase X, don't do phase Y" line;
+      the duplication is structural to the phase machinery, not a rule restated.
+  - match: "DO NOT start phase_2"
+    disposition: out-of-scope
+    note: Porch runtime banner text, phase-machinery structural.
+
+  # --- catch-all: single-file process instructions only ---
+  - match: "/.*/"
+    disposition: out-of-scope
+    catch_all: true
+    note: >
+      Single-occurrence, file-local process instruction — owned implicitly by
+      its file. T12 forbids this entry from absorbing any text that appears on
+      2+ files, so new cross-surface duplication cannot hide here.

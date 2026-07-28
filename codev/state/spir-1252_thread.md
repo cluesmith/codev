@@ -696,3 +696,27 @@ Meta-lesson accumulating for the review: every iteration's miss was a
 sweep-scope failure — fix-the-instance vs fix-the-class, and grep-for-wording
 vs grep-for-act. The registry+line-exactness machinery is exactly what makes
 these misses eventually impossible instead of eventually repeated.
+
+## Phase 6 — ownership map + completeness enforcement (M1/M4)
+
+Data-first (the B2 lesson): built the extractor, ran it over the declared
+boundary (26 files), THEN authored the map from what it found. 134 normative
+candidates: 23 mapped (7 non-scar duplicated classes), 37 scar
+(registry-enforced externally — no double ownership of scar enforcement),
+74 file-local singles.
+
+Design decision that matters: the catch-all disposition would make T12 vacuous
+(everything matches /.*/), so the resolver tracks catch-all usage and FAILS
+any candidate whose text appears on 2+ files via catch-all. Single-file
+process lines pass cheaply; cross-surface duplication — the thing the
+single-owner rule is about — always demands an explicit disposition. New
+duplication fails CI the moment it's introduced.
+
+The 7 non-scar classes are enforcement:manual with justifications naming
+their Phase-7 flip (a test asserts every manual justification does so). T7's
+machinery is fixture-proven (detects restatement on non-owner) and activates
+per-class as Phase 7 flips them — same staged-activation pattern as the drift
+gate. Two coordination notes recorded in the map: baked-decisions dedup must
+move with Spec 746's test suite; pr-single-by-default with bugfix-744's.
+
+Suite: 3,744 green.
