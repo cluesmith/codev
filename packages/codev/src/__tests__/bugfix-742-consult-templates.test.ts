@@ -22,10 +22,10 @@ import * as path from 'node:path';
 const repoRoot = path.resolve(import.meta.dirname, '../../../..');
 
 const templates = {
-  bugfixPrReview: path.join(repoRoot, 'codev/protocols/bugfix/consult-types/pr-review.md'),
-  bugfixImplReview: path.join(repoRoot, 'codev/protocols/bugfix/consult-types/impl-review.md'),
-  spirPrReview: path.join(repoRoot, 'codev/protocols/spir/consult-types/pr-review.md'),
-  spirImplReview: path.join(repoRoot, 'codev/protocols/spir/consult-types/impl-review.md'),
+  bugfixPrReview: path.join(repoRoot, 'codev-skeleton/protocols/bugfix/consult-types/pr-review.md'),
+  bugfixImplReview: path.join(repoRoot, 'codev-skeleton/protocols/bugfix/consult-types/impl-review.md'),
+  spirPrReview: path.join(repoRoot, 'codev-skeleton/protocols/spir/consult-types/pr-review.md'),
+  spirImplReview: path.join(repoRoot, 'codev-skeleton/protocols/spir/consult-types/impl-review.md'),
   skeletonBugfixPrReview: path.join(
     repoRoot,
     'codev-skeleton/protocols/bugfix/consult-types/pr-review.md',

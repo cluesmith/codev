@@ -57,7 +57,7 @@ M11 exists to prevent). Key evidence used:
 | 4 | `protocols/air/consult-types/pr-review.md` | identical | rot | TS1 | byte-identical redundant copy; nothing to lose |
 | 5 | `protocols/air/prompts/implement.md` | identical | rot | TS1 | byte-identical redundant copy; nothing to lose |
 | 6 | `protocols/air/prompts/pr.md` | identical | rot | TS1 | byte-identical redundant copy; nothing to lose |
-| 7 | `protocols/air/protocol.json` | differs | local-unique | pending | cwd: packages/codev x3 — functional monorepo check cwd; sanctioned home is .codev/config.json porch.checks (Spec #550). ESCALATED. |
+| 7 | `protocols/air/protocol.json` | identical | local-unique | TS1 | RULED TS1 (architect, 2026-07-28): cwd migrated to .codev/config.json porch.checks (all four protocols); skeleton json taken |
 | 8 | `protocols/air/protocol.md` | identical | rot | TS1 | RECONCILED Phase 3 (was: 1-line delta; skeleton wording current) |
 | 9 | `protocols/aspir/builder-prompt.md` | identical | rot | TS1 | RECONCILED Phase 3 (was: missing Multi-PR Mechanics + Verify Phase sections (skeleton has them)) |
 | 10 | `protocols/aspir/consult-types/impl-review.md` | identical | rot | TS1 | byte-identical redundant copy; nothing to lose |
@@ -69,7 +69,7 @@ M11 exists to prevent). Key evidence used:
 | 16 | `protocols/aspir/prompts/plan.md` | identical | rot | TS1 | byte-identical redundant copy; nothing to lose |
 | 17 | `protocols/aspir/prompts/review.md` | identical | rot | TS1 | byte-identical redundant copy; nothing to lose |
 | 18 | `protocols/aspir/prompts/specify.md` | identical | rot | TS1 | byte-identical redundant copy; nothing to lose |
-| 19 | `protocols/aspir/protocol.json` | differs | local-unique | pending | max_iterations 8 (local) vs 3 (skeleton) x5 — CMAP loop bound. ESCALATED. |
+| 19 | `protocols/aspir/protocol.json` | identical | local-unique | TS1 | RULED TS1 (architect, 2026-07-28): same ruling as spir |
 | 20 | `protocols/aspir/protocol.md` | identical | rot | TS1 | byte-identical redundant copy; nothing to lose |
 | 21 | `protocols/aspir/templates/plan.md` | identical | rot | TS1 | RECONCILED Phase 3 (was: local-only TICK Amendments section; TICK retired (no protocol dir in either tree; porch refs only in one stale test)) |
 | 22 | `protocols/aspir/templates/review.md` | identical | rot | TS1 | byte-identical redundant copy; nothing to lose |
@@ -80,7 +80,7 @@ M11 exists to prevent). Key evidence used:
 | 27 | `protocols/bugfix/prompts/fix.md` | identical | rot | TS1 | byte-identical redundant copy; nothing to lose |
 | 28 | `protocols/bugfix/prompts/investigate.md` | identical | rot | TS1 | byte-identical redundant copy; nothing to lose |
 | 29 | `protocols/bugfix/prompts/pr.md` | identical | rot | TS1 | byte-identical redundant copy; nothing to lose |
-| 30 | `protocols/bugfix/protocol.json` | differs | local-unique | pending | cwd: packages/codev x2 — same as air. ESCALATED. |
+| 30 | `protocols/bugfix/protocol.json` | identical | local-unique | TS1 | RULED TS1 (architect, 2026-07-28): same ruling as air |
 | 31 | `protocols/bugfix/protocol.md` | identical | rot | TS1 | byte-identical redundant copy; nothing to lose |
 | 32 | `protocols/experiment/builder-prompt.md` | identical | rot | TS1 | byte-identical redundant copy; nothing to lose |
 | 33 | `protocols/experiment/protocol.json` | identical | rot | TS1 | byte-identical redundant copy; nothing to lose |
@@ -120,7 +120,7 @@ M11 exists to prevent). Key evidence used:
 | 67 | `protocols/spir/prompts/plan.md` | identical | rot | TS1 | byte-identical redundant copy; nothing to lose |
 | 68 | `protocols/spir/prompts/review.md` | identical | rot | TS1 | byte-identical redundant copy; nothing to lose |
 | 69 | `protocols/spir/prompts/specify.md` | identical | rot | TS1 | byte-identical redundant copy; nothing to lose |
-| 70 | `protocols/spir/protocol.json` | differs | local-unique | pending | max_iterations 8 vs 3 x5 — same as aspir. ESCALATED. |
+| 70 | `protocols/spir/protocol.json` | identical | local-unique | TS1 | RULED TS1 (architect, 2026-07-28): accept skeleton max_iterations 3 — B2 evidence (rounds 1-2, mean 1.12) persuasive; >3 rounds is a human-attention moment |
 | 71 | `protocols/spir/protocol.md` | identical | rot | TS1 | RECONCILED Phase 3 (was: local keeps pre-restructure porch section with obsolete underscore gate IDs (spec_approval); skeleton moved to build-verify model) |
 | 72 | `protocols/spir/templates/plan.md` | identical | rot | TS1 | RECONCILED Phase 3 (was: local-only TICK Amendments section; TICK retired) |
 | 73 | `protocols/spir/templates/review.md` | identical | rot | TS1 | byte-identical redundant copy; nothing to lose |
@@ -197,3 +197,58 @@ No other shell/yaml/json consumer found outside `node_modules`/`dist`/worktrees.
 Deletion is safe once (a) the four repo-reading tests are repointed in the same
 commit, and (b) the four ESCALATED json rulings resolve. No production code
 path reads the shadow tree by literal path.
+
+## Escalation rulings (architect, 2026-07-28)
+
+- **E1 → TS1**: skeleton's `max_iterations: 3` accepted for spir + aspir. The
+  B2 baseline evidence (rounds run 1–2, mean 1.12) was the deciding factor —
+  ">3 rounds is a human-attention moment, not an automation moment."
+- **E2 → migrate-then-TS1**: `cwd` moved to `.codev/config.json` →
+  `porch.checks` for **all four** protocols; skeleton jsons taken.
+
+## E2 config-reach verification (required by the ruling)
+
+`.codev/config.json` is untracked (`.gitignore:11`), so the ruling required
+verifying the config reaches every context that runs porch checks before
+classifying E2 resolved. Verified against code, not assumption:
+
+| Context | Mechanism | Verified |
+|---|---|---|
+| Builder worktrees (future spawns) | `spawn-worktree.ts:100–113` symlinks main's `.codev/config.json` into every new worktree when it exists | code read |
+| Builder worktrees (existing) | `afx setup <id>` re-applies symlinks; independently covered by the fallback below | docs + fallback |
+| Main checkout | file must be created there once (snippet sent to the architect — a builder cannot write outside its worktree) | fallback covers the gap meanwhile |
+| Fresh clone (no config anywhere) | porch runs checks at the workspace root; **root `package.json` delegates** `build`/`test` to `packages/codev` via pnpm filters | **empirically proven** — spir/aspir checks ran cwd-less at this worktree's root, green, all session |
+| CI | `.github/workflows/test.yml` never invokes porch checks (it only excludes porch e2e dirs from a vitest run) | grep of workflows |
+
+**Key finding: the migration is defense-in-depth, not load-bearing.** Every
+context has a working fallback (root delegation) even with no config file
+anywhere, so no context can break. No escalate-back needed. This worktree's
+`.codev/config.json` now carries the overrides
+(`build/test/e2e_tests/build_succeeds/tests_pass → cwd: packages/codev`).
+
+## M7 correction (Phase 4b): 8 repo-reading tests, not 4
+
+The step-4a classification used a path-construction regex and had **four false
+negatives** — tests that read `codev/protocols/*` via `path.join` segments,
+template literals, or `__dirname` traversal that the regex missed:
+`bugfix-744-spir-pr-strategy`, `governance-sweep`, `review-prompt-routing`
+(iterated both trees), and `bugfix-619-aspir-prompt`. The deletion itself
+caught them (ENOENT), which is the correct failure mode — loud, at the point
+of change. All eight are now repointed at `codev-skeleton/`; mirror-parity
+constructs collapsed to skeleton-only with explanatory comments. Lesson for
+the review: a grep classification of consumers is a hypothesis, not a proof —
+the deletion is the test.
+
+## Phase 4 result
+
+- 77 shadow copies deleted; `codev/roles/` and `codev/consult-types/` removed
+  entirely; `codev/protocols/` retains only the three preserved local-only
+  files (`release/protocol.md`, `maintain/templates/{audit-report,lessons-learned}.md`).
+- `copyRoles`/`copyProtocols` (124 lines) removed from `scaffold.ts` with a
+  tombstone comment; `copyRoles` test block removed.
+- M10 equivalence: `shadow-removal-manifest.json` (77 pre-deletion sha256s) +
+  `shadow-removal-equivalence.test.ts` prove the resolver serves byte-identical
+  content post-deletion. Assembled-prompt equivalence follows because
+  `renderTemplate` is a pure function of the resolved template.
+- Allowlist: **empty**. Drift gate: zero findings. All T11 guards green with
+  zero pending rows.

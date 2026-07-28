@@ -20,6 +20,14 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { renderTemplate, type TemplateContext } from '../commands/spawn-roles.js';
 
+// Spec 1252 (Phase 4): the codev/protocols shadow tree was DELETED — the
+// skeleton is the single owner and the resolver serves it at tier 4. The
+// codev-vs-skeleton mirror-parity pairs in this file therefore collapsed to
+// skeleton-only paths: where an entry once compared two trees, both sides now
+// name the same skeleton file (trivially equal, kept for structural
+// compatibility with the PHASE tables). The grep-regression value — the baked
+// wording exists in what agents are served — is fully preserved.
+
 // ============================================================================
 // Helpers
 // ============================================================================
@@ -79,17 +87,17 @@ interface BuilderPromptFile {
 const PHASE_1_FILES: BuilderPromptFile[] = [
   {
     label: 'codev SPIR builder-prompt',
-    relPath: 'codev/protocols/spir/builder-prompt.md',
+    relPath: 'codev-skeleton/protocols/spir/builder-prompt.md',
     baselineName: 'spir-builder-prompt.md.baseline',
   },
   {
     label: 'codev ASPIR builder-prompt',
-    relPath: 'codev/protocols/aspir/builder-prompt.md',
+    relPath: 'codev-skeleton/protocols/aspir/builder-prompt.md',
     baselineName: 'aspir-builder-prompt.md.baseline',
   },
   {
     label: 'codev AIR builder-prompt',
-    relPath: 'codev/protocols/air/builder-prompt.md',
+    relPath: 'codev-skeleton/protocols/air/builder-prompt.md',
     baselineName: 'air-builder-prompt.md.baseline',
   },
   {
@@ -192,7 +200,7 @@ describe('Spec 746 Phase 1: builder-prompt baked-decisions instruction', () => {
 
     for (const protocol of PROTOCOLS) {
       it(`${protocol}: codev/ and skeleton Baked Decisions paragraphs match`, () => {
-        const codevContent = readRepoFile(`codev/protocols/${protocol}/builder-prompt.md`);
+        const codevContent = readRepoFile(`codev-skeleton/protocols/${protocol}/builder-prompt.md`);
         const skeletonContent = readRepoFile(`codev-skeleton/protocols/${protocol}/builder-prompt.md`);
         const codevSection = extractBakedSection(`codev ${protocol}`, codevContent);
         const skeletonSection = extractBakedSection(`skeleton ${protocol}`, skeletonContent);
@@ -215,17 +223,17 @@ interface DraftingPromptFile {
 const PHASE_2_FILES: DraftingPromptFile[] = [
   {
     label: 'codev SPIR specify.md',
-    relPath: 'codev/protocols/spir/prompts/specify.md',
+    relPath: 'codev-skeleton/protocols/spir/prompts/specify.md',
     baselineName: 'spir-specify.md.baseline',
   },
   {
     label: 'codev ASPIR specify.md',
-    relPath: 'codev/protocols/aspir/prompts/specify.md',
+    relPath: 'codev-skeleton/protocols/aspir/prompts/specify.md',
     baselineName: 'aspir-specify.md.baseline',
   },
   {
     label: 'codev AIR implement.md',
-    relPath: 'codev/protocols/air/prompts/implement.md',
+    relPath: 'codev-skeleton/protocols/air/prompts/implement.md',
     baselineName: 'air-implement.md.baseline',
   },
   {
@@ -293,17 +301,17 @@ describe('Spec 746 Phase 2: drafting-prompt baked-decisions clause', () => {
     const PAIRS: MirrorPair[] = [
       {
         protocol: 'spir specify.md',
-        codev: 'codev/protocols/spir/prompts/specify.md',
+        codev: 'codev-skeleton/protocols/spir/prompts/specify.md',
         skeleton: 'codev-skeleton/protocols/spir/prompts/specify.md',
       },
       {
         protocol: 'aspir specify.md',
-        codev: 'codev/protocols/aspir/prompts/specify.md',
+        codev: 'codev-skeleton/protocols/aspir/prompts/specify.md',
         skeleton: 'codev-skeleton/protocols/aspir/prompts/specify.md',
       },
       {
         protocol: 'air implement.md',
-        codev: 'codev/protocols/air/prompts/implement.md',
+        codev: 'codev-skeleton/protocols/air/prompts/implement.md',
         skeleton: 'codev-skeleton/protocols/air/prompts/implement.md',
       },
     ];
@@ -359,32 +367,32 @@ interface ReviewerPromptFile {
 const PHASE_3_FILES: ReviewerPromptFile[] = [
   {
     label: 'codev SPIR spec-review',
-    relPath: 'codev/protocols/spir/consult-types/spec-review.md',
+    relPath: 'codev-skeleton/protocols/spir/consult-types/spec-review.md',
     baselineName: 'spir-spec-review.md.baseline',
   },
   {
     label: 'codev ASPIR spec-review',
-    relPath: 'codev/protocols/aspir/consult-types/spec-review.md',
+    relPath: 'codev-skeleton/protocols/aspir/consult-types/spec-review.md',
     baselineName: 'aspir-spec-review.md.baseline',
   },
   {
     label: 'codev SPIR plan-review',
-    relPath: 'codev/protocols/spir/consult-types/plan-review.md',
+    relPath: 'codev-skeleton/protocols/spir/consult-types/plan-review.md',
     baselineName: 'spir-plan-review.md.baseline',
   },
   {
     label: 'codev ASPIR plan-review',
-    relPath: 'codev/protocols/aspir/consult-types/plan-review.md',
+    relPath: 'codev-skeleton/protocols/aspir/consult-types/plan-review.md',
     baselineName: 'aspir-plan-review.md.baseline',
   },
   {
     label: 'codev AIR impl-review',
-    relPath: 'codev/protocols/air/consult-types/impl-review.md',
+    relPath: 'codev-skeleton/protocols/air/consult-types/impl-review.md',
     baselineName: 'air-impl-review.md.baseline',
   },
   {
     label: 'codev AIR pr-review',
-    relPath: 'codev/protocols/air/consult-types/pr-review.md',
+    relPath: 'codev-skeleton/protocols/air/consult-types/pr-review.md',
     baselineName: 'air-pr-review.md.baseline',
   },
   {
@@ -497,32 +505,32 @@ describe('Spec 746 Phase 3: reviewer-prompt baked-decisions clause', () => {
     const PAIRS: MirrorPair[] = [
       {
         protocol: 'spir spec-review',
-        codev: 'codev/protocols/spir/consult-types/spec-review.md',
+        codev: 'codev-skeleton/protocols/spir/consult-types/spec-review.md',
         skeleton: 'codev-skeleton/protocols/spir/consult-types/spec-review.md',
       },
       {
         protocol: 'aspir spec-review',
-        codev: 'codev/protocols/aspir/consult-types/spec-review.md',
+        codev: 'codev-skeleton/protocols/aspir/consult-types/spec-review.md',
         skeleton: 'codev-skeleton/protocols/aspir/consult-types/spec-review.md',
       },
       {
         protocol: 'spir plan-review',
-        codev: 'codev/protocols/spir/consult-types/plan-review.md',
+        codev: 'codev-skeleton/protocols/spir/consult-types/plan-review.md',
         skeleton: 'codev-skeleton/protocols/spir/consult-types/plan-review.md',
       },
       {
         protocol: 'aspir plan-review',
-        codev: 'codev/protocols/aspir/consult-types/plan-review.md',
+        codev: 'codev-skeleton/protocols/aspir/consult-types/plan-review.md',
         skeleton: 'codev-skeleton/protocols/aspir/consult-types/plan-review.md',
       },
       {
         protocol: 'air impl-review',
-        codev: 'codev/protocols/air/consult-types/impl-review.md',
+        codev: 'codev-skeleton/protocols/air/consult-types/impl-review.md',
         skeleton: 'codev-skeleton/protocols/air/consult-types/impl-review.md',
       },
       {
         protocol: 'air pr-review',
-        codev: 'codev/protocols/air/consult-types/pr-review.md',
+        codev: 'codev-skeleton/protocols/air/consult-types/pr-review.md',
         skeleton: 'codev-skeleton/protocols/air/consult-types/pr-review.md',
       },
     ];
@@ -555,9 +563,9 @@ interface ProtocolDocFile {
 }
 
 const PHASE_4_FILES: ProtocolDocFile[] = [
-  { label: 'codev SPIR protocol.md', relPath: 'codev/protocols/spir/protocol.md' },
-  { label: 'codev ASPIR protocol.md', relPath: 'codev/protocols/aspir/protocol.md' },
-  { label: 'codev AIR protocol.md', relPath: 'codev/protocols/air/protocol.md' },
+  { label: 'codev SPIR protocol.md', relPath: 'codev-skeleton/protocols/spir/protocol.md' },
+  { label: 'codev ASPIR protocol.md', relPath: 'codev-skeleton/protocols/aspir/protocol.md' },
+  { label: 'codev AIR protocol.md', relPath: 'codev-skeleton/protocols/air/protocol.md' },
   { label: 'skeleton SPIR protocol.md', relPath: 'codev-skeleton/protocols/spir/protocol.md' },
   { label: 'skeleton ASPIR protocol.md', relPath: 'codev-skeleton/protocols/aspir/protocol.md' },
   { label: 'skeleton AIR protocol.md', relPath: 'codev-skeleton/protocols/air/protocol.md' },
@@ -603,17 +611,17 @@ describe('Spec 746 Phase 4: protocol documentation discoverability paragraph', (
     const PAIRS: DocPair[] = [
       {
         protocol: 'spir protocol.md',
-        codev: 'codev/protocols/spir/protocol.md',
+        codev: 'codev-skeleton/protocols/spir/protocol.md',
         skeleton: 'codev-skeleton/protocols/spir/protocol.md',
       },
       {
         protocol: 'aspir protocol.md',
-        codev: 'codev/protocols/aspir/protocol.md',
+        codev: 'codev-skeleton/protocols/aspir/protocol.md',
         skeleton: 'codev-skeleton/protocols/aspir/protocol.md',
       },
       {
         protocol: 'air protocol.md',
-        codev: 'codev/protocols/air/protocol.md',
+        codev: 'codev-skeleton/protocols/air/protocol.md',
         skeleton: 'codev-skeleton/protocols/air/protocol.md',
       },
     ];
@@ -660,26 +668,26 @@ describe('Spec 746 Phase 4 final sweep: end-to-end regression check', () => {
   // - Phase 4: 3 codev + 3 skeleton protocol.md (6)
   const ALL_TOUCHED_FILES = [
     // Phase 1
-    'codev/protocols/spir/builder-prompt.md',
-    'codev/protocols/aspir/builder-prompt.md',
-    'codev/protocols/air/builder-prompt.md',
+    'codev-skeleton/protocols/spir/builder-prompt.md',
+    'codev-skeleton/protocols/aspir/builder-prompt.md',
+    'codev-skeleton/protocols/air/builder-prompt.md',
     'codev-skeleton/protocols/spir/builder-prompt.md',
     'codev-skeleton/protocols/aspir/builder-prompt.md',
     'codev-skeleton/protocols/air/builder-prompt.md',
     // Phase 2
-    'codev/protocols/spir/prompts/specify.md',
-    'codev/protocols/aspir/prompts/specify.md',
-    'codev/protocols/air/prompts/implement.md',
+    'codev-skeleton/protocols/spir/prompts/specify.md',
+    'codev-skeleton/protocols/aspir/prompts/specify.md',
+    'codev-skeleton/protocols/air/prompts/implement.md',
     'codev-skeleton/protocols/spir/prompts/specify.md',
     'codev-skeleton/protocols/aspir/prompts/specify.md',
     'codev-skeleton/protocols/air/prompts/implement.md',
     // Phase 3
-    'codev/protocols/spir/consult-types/spec-review.md',
-    'codev/protocols/aspir/consult-types/spec-review.md',
-    'codev/protocols/spir/consult-types/plan-review.md',
-    'codev/protocols/aspir/consult-types/plan-review.md',
-    'codev/protocols/air/consult-types/impl-review.md',
-    'codev/protocols/air/consult-types/pr-review.md',
+    'codev-skeleton/protocols/spir/consult-types/spec-review.md',
+    'codev-skeleton/protocols/aspir/consult-types/spec-review.md',
+    'codev-skeleton/protocols/spir/consult-types/plan-review.md',
+    'codev-skeleton/protocols/aspir/consult-types/plan-review.md',
+    'codev-skeleton/protocols/air/consult-types/impl-review.md',
+    'codev-skeleton/protocols/air/consult-types/pr-review.md',
     'codev-skeleton/protocols/spir/consult-types/spec-review.md',
     'codev-skeleton/protocols/aspir/consult-types/spec-review.md',
     'codev-skeleton/protocols/spir/consult-types/plan-review.md',
@@ -687,9 +695,9 @@ describe('Spec 746 Phase 4 final sweep: end-to-end regression check', () => {
     'codev-skeleton/protocols/air/consult-types/impl-review.md',
     'codev-skeleton/protocols/air/consult-types/pr-review.md',
     // Phase 4
-    'codev/protocols/spir/protocol.md',
-    'codev/protocols/aspir/protocol.md',
-    'codev/protocols/air/protocol.md',
+    'codev-skeleton/protocols/spir/protocol.md',
+    'codev-skeleton/protocols/aspir/protocol.md',
+    'codev-skeleton/protocols/air/protocol.md',
     'codev-skeleton/protocols/spir/protocol.md',
     'codev-skeleton/protocols/aspir/protocol.md',
     'codev-skeleton/protocols/air/protocol.md',
@@ -754,7 +762,7 @@ describe('Spec 746 end-to-end smoke: builder-prompt rendering with baked-decisio
 
   for (const protocol of ['spir', 'aspir', 'air']) {
     describe(`${protocol} builder-prompt`, () => {
-      const templatePath = path.resolve(repoRoot, `codev/protocols/${protocol}/builder-prompt.md`);
+      const templatePath = path.resolve(repoRoot, `codev-skeleton/protocols/${protocol}/builder-prompt.md`);
       const template = fs.readFileSync(templatePath, 'utf-8');
       const ctx = makeContext(protocol);
       const rendered = renderTemplate(template, ctx);
@@ -784,7 +792,7 @@ describe('Spec 746 end-to-end smoke: builder-prompt rendering with baked-decisio
     for (const protocol of ['spir', 'aspir', 'air']) {
       it(`${protocol} builder-prompt: instruction paragraph is still present (it's unconditional)`, () => {
         const template = fs.readFileSync(
-          path.resolve(repoRoot, `codev/protocols/${protocol}/builder-prompt.md`),
+          path.resolve(repoRoot, `codev-skeleton/protocols/${protocol}/builder-prompt.md`),
           'utf-8',
         );
         const ctx: TemplateContext = {

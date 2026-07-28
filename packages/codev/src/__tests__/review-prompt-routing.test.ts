@@ -22,7 +22,7 @@ const ROUTING_FILES = [
 ];
 
 const files: string[] = [];
-for (const tree of ['codev', 'codev-skeleton']) {
+for (const tree of ['codev-skeleton']) { // Spec 1252: codev/ shadow tree deleted; skeleton is the single owner
   for (const f of ROUTING_FILES) files.push(`${tree}/${f}`);
 }
 files.push('codev-skeleton/porch/prompts/review.md'); // generic porch review prompt (skeleton-only)

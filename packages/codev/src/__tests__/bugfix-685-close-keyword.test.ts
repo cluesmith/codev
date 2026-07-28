@@ -20,12 +20,12 @@ interface PromptTarget {
 }
 
 const codevTargets: PromptTarget[] = [
-  { protocol: 'spir', relPath: 'codev/protocols/spir/prompts/review.md' },
-  { protocol: 'aspir', relPath: 'codev/protocols/aspir/prompts/review.md' },
-  { protocol: 'air', relPath: 'codev/protocols/air/prompts/pr.md' },
-  { protocol: 'bugfix', relPath: 'codev/protocols/bugfix/prompts/pr.md' },
-  { protocol: 'maintain', relPath: 'codev/protocols/maintain/prompts/review.md' },
-  { protocol: 'experiment', relPath: 'codev/protocols/experiment/builder-prompt.md' },
+  { protocol: 'spir', relPath: 'codev-skeleton/protocols/spir/prompts/review.md' },
+  { protocol: 'aspir', relPath: 'codev-skeleton/protocols/aspir/prompts/review.md' },
+  { protocol: 'air', relPath: 'codev-skeleton/protocols/air/prompts/pr.md' },
+  { protocol: 'bugfix', relPath: 'codev-skeleton/protocols/bugfix/prompts/pr.md' },
+  { protocol: 'maintain', relPath: 'codev-skeleton/protocols/maintain/prompts/review.md' },
+  { protocol: 'experiment', relPath: 'codev-skeleton/protocols/experiment/builder-prompt.md' },
 ];
 
 const skeletonTargets: PromptTarget[] = codevTargets.map((t) => ({
@@ -84,11 +84,11 @@ describe('PR close-keyword directive (#685)', () => {
    * out of scope — this test only guards the PR body template itself.
    */
   const prBodyTargets: PromptTarget[] = [
-    { protocol: 'bugfix', relPath: 'codev/protocols/bugfix/prompts/pr.md' },
-    { protocol: 'air', relPath: 'codev/protocols/air/prompts/pr.md' },
-    { protocol: 'spir', relPath: 'codev/protocols/spir/prompts/review.md' },
-    { protocol: 'aspir', relPath: 'codev/protocols/aspir/prompts/review.md' },
-    { protocol: 'maintain', relPath: 'codev/protocols/maintain/prompts/review.md' },
+    { protocol: 'bugfix', relPath: 'codev-skeleton/protocols/bugfix/prompts/pr.md' },
+    { protocol: 'air', relPath: 'codev-skeleton/protocols/air/prompts/pr.md' },
+    { protocol: 'spir', relPath: 'codev-skeleton/protocols/spir/prompts/review.md' },
+    { protocol: 'aspir', relPath: 'codev-skeleton/protocols/aspir/prompts/review.md' },
+    { protocol: 'maintain', relPath: 'codev-skeleton/protocols/maintain/prompts/review.md' },
   ];
 
   it.each(prBodyTargets)(

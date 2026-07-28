@@ -72,12 +72,15 @@ function actualShadowCopies(): Map<string, 'identical' | 'differs'> {
 }
 
 describe('shadow-tree audit (M11 / T11)', () => {
-  it('audit file exists and parses to exactly one row per shadow copy', () => {
+  it('audit records all 77 copies and covers every shadow copy that still exists', () => {
     const rows = parseAudit();
-    const actual = actualShadowCopies();
-    expect(rows.length, 'one audit row per shadow copy').toBe(actual.size);
+    // The audit is a historical record: rows persist after their files are
+    // deleted (Phase 4). The fixed total pins the record; the subset check
+    // guarantees no shadow copy can exist un-audited (e.g. a reintroduced one
+    // would first trip the drift gate, then this).
+    expect(rows.length, 'the audited record is 77 shadow copies').toBe(77);
     const audited = new Set(rows.map((r) => r.file));
-    for (const rel of actual.keys()) {
+    for (const rel of actualShadowCopies().keys()) {
       expect(audited.has(rel), `shadow copy missing from audit: ${rel}`).toBe(true);
     }
   });
@@ -116,7 +119,7 @@ describe('shadow-tree audit (M11 / T11)', () => {
    * the architect has ruled on all escalations (before M8 deletion executes).
    * The spec's completion rule: all rows in TS1–TS4, zero open escalations.
    */
-  const ALL_ESCALATIONS_RESOLVED = false;
+  const ALL_ESCALATIONS_RESOLVED = true;
 
   it.skipIf(!ALL_ESCALATIONS_RESOLVED)('at completion: zero rows remain pending', () => {
     const pending = parseAudit().filter((r) => r.terminalState === 'pending');

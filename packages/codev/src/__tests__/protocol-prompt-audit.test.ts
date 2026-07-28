@@ -66,7 +66,7 @@ function formatViolations(violations: Violation[]): string {
 
 describe('protocol prompt audit (#777 / #784 regression guards)', () => {
   const protocolDirs = [
-    path.join(repoRoot, 'codev/protocols'),
+    path.join(repoRoot, 'codev-skeleton/protocols'),
     path.join(repoRoot, 'codev-skeleton/protocols'),
   ];
   const files = protocolDirs.flatMap(walkMarkdown);

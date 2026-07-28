@@ -408,127 +408,16 @@ export function copySkills(
   return { copied, skipped, directoriesCreated };
 }
 
-interface CopyRolesOptions {
-  skipExisting?: boolean;
-}
-
-interface CopyRolesResult {
-  copied: string[];
-  skipped: string[];
-  directoryCreated: boolean;
-}
-
-/**
- * Copy roles directory from skeleton to codev/roles/.
- * Contains role prompts (architect, builder, consultant) for agent sessions.
+/*
+ * copyRoles / copyProtocols were removed by Spec 1252 (M9).
+ *
+ * They copied the skeleton's protocols/ and roles/ into a project's codev/,
+ * creating tier-2 shadow copies that silently outrank the installed skeleton
+ * in the four-tier resolver — the exact mechanism behind the drift bug this
+ * spec fixed (17 stale framework files served to this repo's own builders).
+ * Neither function had been called by init/adopt/update for a long time;
+ * they survived only as dead exports. Do not reintroduce them: framework
+ * files resolve from the skeleton at runtime and are never copied into
+ * projects (see arch-critical.md).
  */
-export function copyRoles(
-  targetDir: string,
-  skeletonDir: string,
-  options: CopyRolesOptions = {}
-): CopyRolesResult {
-  const { skipExisting = false } = options;
-  const rolesDir = path.join(targetDir, 'codev', 'roles');
-  const srcDir = path.join(skeletonDir, 'roles');
-  const copied: string[] = [];
-  const skipped: string[] = [];
-  let directoryCreated = false;
 
-  // Ensure roles directory exists
-  if (!fs.existsSync(rolesDir)) {
-    fs.mkdirSync(rolesDir, { recursive: true });
-    directoryCreated = true;
-  }
-
-  // If source directory doesn't exist, return early
-  if (!fs.existsSync(srcDir)) {
-    return { copied, skipped, directoryCreated };
-  }
-
-  // Copy all .md files from skeleton roles
-  const files = fs.readdirSync(srcDir).filter(f => f.endsWith('.md'));
-  for (const file of files) {
-    const destPath = path.join(rolesDir, file);
-    const srcPath = path.join(srcDir, file);
-
-    if (skipExisting && fs.existsSync(destPath)) {
-      skipped.push(file);
-      continue;
-    }
-
-    fs.copyFileSync(srcPath, destPath);
-    copied.push(file);
-  }
-
-  return { copied, skipped, directoryCreated };
-}
-
-interface CopyProtocolsOptions {
-  skipExisting?: boolean;
-}
-
-interface CopyProtocolsResult {
-  copied: string[];
-  skipped: string[];
-  directoryCreated: boolean;
-}
-
-/**
- * Copy protocol definitions from skeleton to codev/protocols/
- * Required for porch orchestration
- */
-export function copyProtocols(
-  targetDir: string,
-  skeletonDir: string,
-  options: CopyProtocolsOptions = {}
-): CopyProtocolsResult {
-  const { skipExisting = false } = options;
-  const protocolsDir = path.join(targetDir, 'codev', 'protocols');
-  const srcDir = path.join(skeletonDir, 'protocols');
-  const copied: string[] = [];
-  const skipped: string[] = [];
-  let directoryCreated = false;
-
-  // Ensure protocols directory exists
-  if (!fs.existsSync(protocolsDir)) {
-    fs.mkdirSync(protocolsDir, { recursive: true });
-    directoryCreated = true;
-  }
-
-  // If source directory doesn't exist, return early
-  if (!fs.existsSync(srcDir)) {
-    return { copied, skipped, directoryCreated };
-  }
-
-  // Copy each protocol directory
-  const protocols = fs.readdirSync(srcDir, { withFileTypes: true });
-  for (const entry of protocols) {
-    if (!entry.isDirectory()) {
-      // Copy top-level files (like protocol-schema.json)
-      const srcPath = path.join(srcDir, entry.name);
-      const destPath = path.join(protocolsDir, entry.name);
-
-      if (skipExisting && fs.existsSync(destPath)) {
-        skipped.push(entry.name);
-        continue;
-      }
-
-      fs.copyFileSync(srcPath, destPath);
-      copied.push(entry.name);
-      continue;
-    }
-
-    const destProtocolDir = path.join(protocolsDir, entry.name);
-    const srcProtocolDir = path.join(srcDir, entry.name);
-
-    if (skipExisting && fs.existsSync(destProtocolDir)) {
-      skipped.push(entry.name + '/');
-      continue;
-    }
-
-    copyDirRecursive(srcProtocolDir, destProtocolDir);
-    copied.push(entry.name + '/');
-  }
-
-  return { copied, skipped, directoryCreated };
-}

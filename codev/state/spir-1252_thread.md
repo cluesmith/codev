@@ -583,3 +583,34 @@ Two durable notes:
    check for the wrong reason. The 746 test's real claim ("the baked section
    is a pure insertion") survives only if the baseline is DERIVED
    (current minus section), not frozen.
+
+## Phase 4 — shadow tree DELETED (77 files), M8–M10 complete
+
+Rulings landed: E1 = TS1 (skeleton's max_iterations 3 — the B2 baseline
+evidence decided it), E2 = migrate cwd to .codev/config.json porch.checks for
+all four protocols, then TS1.
+
+E2 carried a verification requirement (config is untracked — does it reach
+every porch-check context?). Verified against code: spawn symlinks it into new
+worktrees (spawn-worktree.ts:100); CI never runs porch checks; and the decisive
+fact — **the migration is defense-in-depth, not load-bearing**, because root
+package.json delegates build/test to packages/codev, proven green all session
+by spir's cwd-less checks. No context can break. Main-checkout file creation
+handed to the architect (can't write outside worktree); fallback covers the
+interim.
+
+Execution: 4 jsons reconciled → 77 shadow copies deleted → roles/ and
+consult-types/ gone entirely → 3 local-only files preserved →
+copyRoles/copyProtocols removed with a tombstone → M10 manifest (77 sha256s)
++ equivalence test prove deletion was a byte-level no-op for what agents are
+served → allowlist EMPTY → all T11 guards green, zero pending.
+
+**Humbling M7 note**: my step-4a regex classification of test consumers had 4
+false negatives (bugfix-744, governance-sweep, review-prompt-routing,
+bugfix-619 — path.join segments / template literals / dirname traversal). The
+deletion caught them: ENOENT, loud, at the point of change. 8 repo-readers
+total, all repointed at codev-skeleton/. Recorded in the audit: a grep
+classification is a hypothesis; the deletion is the test.
+
+The repo now dogfoods exactly what it ships. C6's mirror-both-trees invariant
+is dead for protocols/roles — Phase 8 updates arch-critical accordingly.

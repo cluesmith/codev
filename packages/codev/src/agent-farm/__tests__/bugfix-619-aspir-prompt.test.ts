@@ -77,8 +77,8 @@ describe('has_phases_json check uses regex', () => {
   const protocolFiles = [
     path.resolve(__dirname, '../../../../../codev-skeleton/protocols/aspir/protocol.json'),
     path.resolve(__dirname, '../../../../../codev-skeleton/protocols/spir/protocol.json'),
-    path.resolve(__dirname, '../../../../../codev/protocols/aspir/protocol.json'),
-    path.resolve(__dirname, '../../../../../codev/protocols/spir/protocol.json'),
+    path.resolve(__dirname, '../../../../../codev-skeleton/protocols/aspir/protocol.json'),
+    path.resolve(__dirname, '../../../../../codev-skeleton/protocols/spir/protocol.json'),
   ];
 
   for (const file of protocolFiles) {

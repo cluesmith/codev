@@ -11,7 +11,6 @@ import {
   createUserDirs,
   copyConsultTypes,
   copyResourceTemplates,
-  copyRoles,
   copyRootFiles,
   copySkills,
 } from '../lib/scaffold.js';
@@ -153,51 +152,6 @@ describe('Scaffold Utilities', () => {
   });
 
   // Regression test for issue #266: codev init does not copy roles/
-  describe('copyRoles', () => {
-    it('should copy all .md files from roles directory', () => {
-      const targetDir = path.join(tempDir, 'project');
-      fs.mkdirSync(targetDir, { recursive: true });
-
-      const result = copyRoles(targetDir, mockSkeletonDir);
-
-      expect(result.copied).toContain('architect.md');
-      expect(result.copied).toContain('builder.md');
-      expect(result.copied).toContain('consultant.md');
-      expect(result.directoryCreated).toBe(true);
-      expect(fs.existsSync(path.join(targetDir, 'codev', 'roles', 'architect.md'))).toBe(true);
-      expect(fs.existsSync(path.join(targetDir, 'codev', 'roles', 'builder.md'))).toBe(true);
-      expect(fs.existsSync(path.join(targetDir, 'codev', 'roles', 'consultant.md'))).toBe(true);
-    });
-
-    it('should skip existing files in adopt mode', () => {
-      const targetDir = path.join(tempDir, 'project');
-      fs.mkdirSync(path.join(targetDir, 'codev', 'roles'), { recursive: true });
-      fs.writeFileSync(path.join(targetDir, 'codev', 'roles', 'architect.md'), 'custom content');
-
-      const result = copyRoles(targetDir, mockSkeletonDir, { skipExisting: true });
-
-      expect(result.copied).toContain('builder.md');
-      expect(result.copied).toContain('consultant.md');
-      expect(result.skipped).toContain('architect.md');
-      expect(result.directoryCreated).toBe(false);
-      // Verify existing file was not overwritten
-      expect(fs.readFileSync(path.join(targetDir, 'codev', 'roles', 'architect.md'), 'utf-8')).toBe('custom content');
-    });
-
-    it('should handle missing source directory gracefully', () => {
-      const targetDir = path.join(tempDir, 'project');
-      fs.mkdirSync(targetDir, { recursive: true });
-      const emptySkeletonDir = path.join(tempDir, 'empty-skeleton');
-      fs.mkdirSync(emptySkeletonDir, { recursive: true });
-
-      const result = copyRoles(targetDir, emptySkeletonDir);
-
-      expect(result.copied).toEqual([]);
-      expect(result.directoryCreated).toBe(true);
-      // Directory should still be created even if source is missing
-      expect(fs.existsSync(path.join(targetDir, 'codev', 'roles'))).toBe(true);
-    });
-  });
 
   describe('copyResourceTemplates', () => {
     it('should copy lessons-learned.md, arch.md, cheatsheet.md, and lifecycle.md', () => {

@@ -30,9 +30,9 @@ describe('Spec 987 — MAINTAIN + skill reference the hot tier (both trees)', ()
   const HOT_TIER_SURFACES = [
     '.claude/skills/update-arch-docs/SKILL.md',
     'codev-skeleton/.claude/skills/update-arch-docs/SKILL.md',
-    'codev/protocols/maintain/protocol.md',
     'codev-skeleton/protocols/maintain/protocol.md',
-    'codev/protocols/maintain/prompts/maintain.md',
+    'codev-skeleton/protocols/maintain/protocol.md',
+    'codev-skeleton/protocols/maintain/prompts/maintain.md',
     'codev-skeleton/protocols/maintain/prompts/maintain.md',
   ];
 

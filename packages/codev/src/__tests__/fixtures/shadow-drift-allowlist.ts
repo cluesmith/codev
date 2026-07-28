@@ -54,29 +54,11 @@ export interface AllowEntry {
  * two can disagree if the skeleton has not been rebuilt.
  */
 export const SHADOW_DRIFT_ALLOWLIST: AllowEntry[] = [
-  // --- The 4 open M11 escalations (Phase 2). Everything else was reconciled
-  // --- to the skeleton in Phase 3 per decision D1; these stay untouched until
-  // --- the architect rules (audit: codev/resources/1252-shadow-tree-audit.md).
-  {
-    relativePath: 'protocols/spir/protocol.json',
-    reason: 'ESCALATED',
-    note: 'max_iterations 8 (local) vs 3 (skeleton) — CMAP loop bound; architect ruling requested Phase 2 (afx send 2026-07-27)',
-  },
-  {
-    relativePath: 'protocols/aspir/protocol.json',
-    reason: 'ESCALATED',
-    note: 'max_iterations 8 vs 3 — same escalation as spir/protocol.json',
-  },
-  {
-    relativePath: 'protocols/air/protocol.json',
-    reason: 'ESCALATED',
-    note: 'cwd packages/codev in check commands — monorepo functionality; recommended migration to .codev/config.json porch.checks, awaiting architect ruling (afx send 2026-07-27)',
-  },
-  {
-    relativePath: 'protocols/bugfix/protocol.json',
-    reason: 'ESCALATED',
-    note: 'cwd packages/codev — same escalation as air/protocol.json',
-  },
+  // EMPTY — and staying that way is the point. Phase 3 reconciled 13 rot
+  // files; Phase 4 resolved all four escalations by architect ruling
+  // (2026-07-28: max_iterations -> skeleton's 3; cwd -> .codev/config.json
+  // porch.checks) and deleted the shadow tree. Any future entry requires a
+  // human-adjudicated justification.
 ];
 
 /** Allowlisted paths as a Set, for O(1) gate lookups. */
