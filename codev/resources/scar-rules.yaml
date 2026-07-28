@@ -66,6 +66,14 @@ scar_rules:
       - .codex/skills/porch/SKILL.md
       - codev-skeleton/.claude/skills/porch/SKILL.md
       - codev-skeleton/.codex/skills/porch/SKILL.md
+      - codev-skeleton/protocols/air/builder-prompt.md
+      - codev-skeleton/protocols/aspir/builder-prompt.md
+      - codev-skeleton/protocols/bugfix/builder-prompt.md
+      - codev-skeleton/protocols/experiment/builder-prompt.md
+      - codev-skeleton/protocols/maintain/builder-prompt.md
+      - codev-skeleton/protocols/pir/builder-prompt.md
+      - codev-skeleton/protocols/research/builder-prompt.md
+      - codev-skeleton/protocols/spir/builder-prompt.md
 
   - id: no-hand-edit-status
     canonical: "Never hand-edit `status.yaml` — only porch commands modify project state."

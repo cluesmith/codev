@@ -120,6 +120,7 @@ describe('scar-rule registry (M5 / T6)', () => {
       'NEVER edit `status.yaml` directly',
       'NEVER edit status.yaml directly',
       'porch manages all state',
+      'NEVER call `porch approve` without explicit human approval',
     ];
     const surfaces = new Set(loadRegistry().flatMap((r) => r.must_appear_on));
     const failures: string[] = [];
