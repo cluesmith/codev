@@ -483,3 +483,19 @@ classifications for the audit:
     reference TICK amendments. Ambiguous → escalate.
   - `max_iterations: 8` (local) vs `3` (skeleton) in spir+aspir protocol.json —
     a real behavioral difference in CMAP loop bounds. Ambiguous → escalate.
+
+## Iter-2 hiccup worth remembering: the baseline measured itself
+
+Porch's checks failed on iter-2: the reproduction test expected 160 verdicts,
+got 163. Cause: **this project's own iter-1 review verdicts landed in its
+status.yaml — the corpus is live and the measuring project was in it.** Same
+for B3: my own thread file (which discusses scar rules constantly) was in the
+prose scan and had already contributed a hit to the committed baseline.
+
+Fix: self-exclusion by default (SELF_PROJECT_DIR, SELF_FILE_PREFIXES).
+Baseline = pre-project state, so the measuring project's artifacts are out of
+scope by definition. Baseline artifact regenerated clean: 160 verdicts, 349
+files, 44 hits. New test pins the exclusion.
+
+Observer effect in the smallest possible lab. The verify phase needs to
+remember this too: when comparing, 1252's own artifacts stay excluded.

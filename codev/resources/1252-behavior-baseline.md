@@ -11,6 +11,13 @@
   The verify phase re-runs the same script over the next N=10 post-merge
   builder projects (>=3 SPIR) and compares against these numbers.
 
+  SELF-EXCLUSION: project 1252's own status.yaml, thread, and review files are
+  excluded from B1–B4 and B3 by default (SELF_PROJECT_DIR / SELF_FILE_PREFIXES
+  in prompt-behavior-metrics.ts). The baseline is the PRE-PROJECT state; the
+  measuring project's own artifacts grow during the run and would otherwise
+  contaminate it — the iter-1 capture had one such B3 hit and 3 of its own
+  verdicts before this exclusion existed.
+
   Sample note: 18 projects carry non-empty `history`. 17 are SPIR and supply
   all 160 verdicts; the 18th (0092, legacy `spider`) has history but zero
   recorded verdicts, so it contributes to B4's project count only.
@@ -45,8 +52,8 @@ mean **3.06**, median 3 (n=18 projects). Advisory.
 
 ## B3 — candidate scar-rule violations
 
-Scanned **350** files (codev/reviews + codev/state threads).
-Candidate hits: **45**
+Scanned **349** files (codev/reviews + codev/state threads).
+Candidate hits: **44**
 
 > **These are CANDIDATES, not findings.** Keyword mining cannot distinguish
 > "we did this" from "never do this". Every hit requires human adjudication
@@ -60,7 +67,6 @@ Candidate hits: **45**
 | auto-approve-gate | 7 |
 | kill-shellper | 6 |
 | afx-from-worktree | 1 |
-| git-add-all | 1 |
 
 ### Excerpts for adjudication
 
@@ -108,7 +114,6 @@ Candidate hits: **45**
 - `codev/state/pir-983_thread.md:34` **[restart-tower]** — - **vscode**: `decideTowerStatus` + `towerDivergenceMessage` (pure, in preflight-core, 8 new unit tests); `probeTowerVersion` fired on each `connected` transition in `extension.ts`; dedicated `showTow
 - `codev/state/pir-983_thread.md:48` **[restart-tower]** — **Rebased on main (picked up PIR #991 / PR #999).** Clean rebase, no conflicts. Re-verified every line ref in the plan — all still accurate (RouteContext tower-routes.ts:131, routeCtx tower-server.ts:
 - `codev/state/pir-991_thread.md:66` **[restart-tower]** — Pending reviewer re-test with a freshly-built vsix (reload window once, then restart Tower only): expect Codev output `Tower reconnected — re-syncing N terminal(s)` → `recoverSuccessor(...): poll 1/5 
-- `codev/state/spir-1252_thread.md:35` **[git-add-all]** — The `git add -A` prohibition appears in **18 logical locations** (36 files
 
 ## B5 — consult cost/duration
 

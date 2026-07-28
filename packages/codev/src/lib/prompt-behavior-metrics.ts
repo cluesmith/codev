@@ -158,11 +158,12 @@ function walk(dir: string, pred: (p: string) => boolean): string[] {
  * review history for protocols that loop that way, so pir/bugfix/air contribute
  * nothing. Sorted for deterministic output.
  */
-function collectReviewMetrics(root: string) {
+function collectReviewMetrics(root: string, excludeProjects: string[]) {
   const projDir = path.join(root, 'codev', 'projects');
   const files = fs.existsSync(projDir)
     ? fs
         .readdirSync(projDir)
+        .filter((d) => !excludeProjects.includes(d))
         .map((d) => path.join(projDir, d, 'status.yaml'))
         .filter((f) => fs.existsSync(f))
         .sort()
@@ -220,11 +221,15 @@ function collectReviewMetrics(root: string) {
  * the filter is conservative by design — it is better to hand a human a false
  * positive than to silently drop a real breach.
  */
-function collectScarHits(root: string) {
+function collectScarHits(root: string, excludeBasenamePrefixes: string[]) {
+  const excluded = (p: string) =>
+    excludeBasenamePrefixes.some((pre) => path.basename(p).startsWith(pre));
   const targets = [
     ...walk(path.join(root, 'codev', 'reviews'), (p) => p.endsWith('.md')),
     ...walk(path.join(root, 'codev', 'state'), (p) => p.endsWith('_thread.md')),
-  ].sort();
+  ]
+    .filter((p) => !excluded(p))
+    .sort();
 
   const hits: ScarHit[] = [];
   for (const file of targets) {
@@ -247,10 +252,34 @@ function collectScarHits(root: string) {
   return { hits, filesScanned: targets.length };
 }
 
+export interface MeasureOptions {
+  /**
+   * Project directory names to exclude from B1/B2/B4.
+   *
+   * The baseline is defined as the PRE-PROJECT state (spec 1252, M12): the
+   * project doing the measuring must not contaminate its own baseline. Its
+   * review verdicts accumulate in its status.yaml *while it runs*, so an
+   * unexcluded rerun mid-project would drift from the committed artifact —
+   * which is exactly how this option came to exist (the Phase-1 reproduction
+   * test failed the moment this project's own iter-1 review landed).
+   */
+  excludeProjects?: string[];
+  /**
+   * Basename prefixes excluded from B3's prose scan, for the same reason: this
+   * project's own thread/review discuss scar rules at length and grow with
+   * every phase, so scanning them makes B3 non-reproducible AND self-inflating.
+   */
+  excludeFilePrefixes?: string[];
+}
+
+/** This project's own artifacts — excluded from its own baseline by default. */
+export const SELF_PROJECT_DIR = '1252-prompt-architecture-single-own';
+export const SELF_FILE_PREFIXES = ['spir-1252_', '1252-'];
+
 /** Collect all behavioural metrics for a repo root. Deterministic over B1–B4. */
-export function measureBehavior(root: string): BehaviorMetrics {
-  const rv = collectReviewMetrics(root);
-  const scar = collectScarHits(root);
+export function measureBehavior(root: string, opts: MeasureOptions = {}): BehaviorMetrics {
+  const rv = collectReviewMetrics(root, opts.excludeProjects ?? [SELF_PROJECT_DIR]);
+  const scar = collectScarHits(root, opts.excludeFilePrefixes ?? SELF_FILE_PREFIXES);
   return {
     b1_requestChangesRate: round2(rv.rcRate * 100),
     b1_verdictCounts: rv.verdictCounts,

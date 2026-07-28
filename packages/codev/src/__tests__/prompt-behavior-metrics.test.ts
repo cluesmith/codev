@@ -163,6 +163,19 @@ describe('behavioural metrics (M12a / T14)', () => {
     expect(JSON.stringify(m)).not.toMatch(/gateReject/i);
   });
 
+  it('excludes the measuring project from its own baseline (B1–B4 and B3)', () => {
+    // The baseline is the PRE-PROJECT state. Project 1252's own status.yaml
+    // accumulates verdicts with every review iteration, and its thread/review
+    // files discuss scar rules at length — scanning either makes the baseline
+    // drift as the project runs. (Discovered live: the reproduction test below
+    // failed the moment this project's own iter-1 review landed, 160 → 163.)
+    const m = measureBehavior(REPO_ROOT);
+    expect(m.sampleProjects).not.toContain('1252-prompt-architecture-single-own');
+    for (const h of m.b3_candidateHits) {
+      expect(h.file).not.toMatch(/spir-1252_|\/1252-/);
+    }
+  });
+
   it('reproduces the committed baseline numbers on this repo', () => {
     // Guards against a refactor silently changing what the baseline means.
     const m = measureBehavior(REPO_ROOT);
