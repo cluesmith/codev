@@ -1,7 +1,7 @@
 id: '1273'
 title: builder-context-reset-should-b
 protocol: aspir
-phase: specify
+phase: plan
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -10,7 +10,7 @@ gates:
   verify-approval:
     status: pending
 iteration: 1
-build_complete: true
+build_complete: false
 history: []
 started_at: '2026-07-28T00:57:25.240Z'
-updated_at: '2026-07-28T01:05:09.498Z'
+updated_at: '2026-07-28T01:12:55.964Z'
