@@ -948,6 +948,51 @@ describe('tower-routes', () => {
   });
 
   // =========================================================================
+  // GET /api/terminals/:id — the wire contract for quiescence (Spec 1273)
+  // =========================================================================
+
+  describe('GET /api/terminals/:id (Spec 1273 — lastDataAt on the wire)', () => {
+    // Testing `session.info` alone would not pin this: the whole point of the
+    // phase is that the field reaches a *client*, so afx reset can measure
+    // output quiescence instead of assuming a builder's turn has ended before
+    // typing /clear into its terminal. This asserts the serialised response.
+    it('serialises lastDataAt as an epoch-ms number', async () => {
+      const lastDataAt = 1_753_660_000_000;
+      mockGetTerminalManager.mockReturnValue({
+        getSession: () => ({
+          info: {
+            id: 'term-42', pid: 4242, cols: 80, rows: 24, label: 'builder',
+            status: 'running', createdAt: '2026-07-28T00:00:00.000Z', lastDataAt,
+          },
+        }),
+        listSessions: () => [],
+      });
+
+      const req = makeReq('GET', '/api/terminals/term-42');
+      const { res, statusCode, body } = makeRes();
+      await handleRequest(req, res, makeCtx());
+
+      expect(statusCode()).toBe(200);
+      const parsed = JSON.parse(body());
+      expect(typeof parsed.lastDataAt).toBe('number');
+      expect(parsed.lastDataAt).toBe(lastDataAt);
+    });
+
+    it('returns 404 for an unknown terminal rather than a body without lastDataAt', async () => {
+      mockGetTerminalManager.mockReturnValue({
+        getSession: () => undefined,
+        listSessions: () => [],
+      });
+
+      const req = makeReq('GET', '/api/terminals/term-gone');
+      const { res, statusCode, body } = makeRes();
+      await handleRequest(req, res, makeCtx());
+
+      expect(statusCode()).toBe(404);
+      expect(JSON.parse(body()).error).toBe('NOT_FOUND');
+    });
+  });
+
   // DELETE /api/terminals/:id (Bugfix #290)
   // =========================================================================
 
