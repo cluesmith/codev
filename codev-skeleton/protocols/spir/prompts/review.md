@@ -263,7 +263,7 @@ changes, you'll be respawned with their feedback.
 - Don't leave uncommitted changes
 - Don't forget to update documentation
 - Don't rush this phase - it's valuable for learning
-- Don't use `git add .` or `git add -A` (security risk)
+- Never `git add -A` / `--all` / `.` — stage each file explicitly by path.
 
 ## Review Prompts for Reflection
 

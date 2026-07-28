@@ -125,7 +125,7 @@ Make commits at these milestones:
 3. `[Spec {{project_id}}] Specification with user feedback`
 4. `[Spec {{project_id}}] Final approved specification`
 
-**CRITICAL**: Never use `git add .` or `git add -A`. Always stage specific files:
+**CRITICAL**: Never `git add -A` / `--all` / `.` — stage each file explicitly by path. For example:
 ```bash
 git add codev/specs/{{artifact_name}}.md
 ```
@@ -142,4 +142,4 @@ git add codev/specs/{{artifact_name}}.md
 - Don't include implementation details (that's for the Plan phase)
 - Don't estimate time (AI makes time estimates meaningless)
 - Don't start coding (you're in Specify, not Implement)
-- Don't use `git add .` or `git add -A` (security risk)
+- Never `git add -A` / `--all` / `.` — stage each file explicitly by path.

@@ -31,6 +31,11 @@ import {
 } from '../agent-farm/commands/spawn-roles.js';
 
 const REPO_ROOT = path.resolve(__dirname, '../../../..');
+// The manifest pins the LAST INTENTIONAL content state of every former shadow
+// path. Originally captured pre-deletion (Phase 4: proved deletion was a
+// no-op); regenerated in Phase 5 when scar-rule compression deliberately
+// changed 24 skeleton files. Updating it is the explicit act that accompanies
+// any intentional prompt-content change — unexplained drift still fails.
 const MANIFEST: Record<string, string> = JSON.parse(
   fs.readFileSync(path.resolve(__dirname, 'fixtures/shadow-removal-manifest.json'), 'utf-8')
 );

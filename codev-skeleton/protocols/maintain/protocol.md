@@ -105,7 +105,7 @@ For each finding from the audit:
 - One removal at a time — don't batch unrelated changes
 - Verify after each removal — build must pass
 - Use soft deletion for untracked files: `mv file codev/maintain/.trash/$(date +%Y-%m-%d)/`
-- Never use `git add -A` or `git add .`
+- Never `git add -A` / `--all` / `.` — stage each file explicitly by path.
 
 ### Step 3: Sync Documentation
 

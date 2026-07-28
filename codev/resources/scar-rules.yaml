@@ -1,0 +1,106 @@
+# Scar-rule registry (Spec 1252, M5 / decision D3).
+#
+# A scar rule is a prohibition written in response to a specific incident where
+# an agent destroyed work or bypassed a human decision. The eight rules below
+# were ratified by the architect (2026-07-28), wordings compressed per D3 to
+# one sentence (two max). Scar rules are EXEMPT from the single-owner rule:
+# they appear verbatim on every surface listed in `must_appear_on` — the
+# canonical wording converges, the number of copies does not shrink.
+#
+# ENFORCEMENT (scar-rules.test.ts / T6):
+#   - each rule's `canonical` string must appear byte-identically in every
+#     file listed under `must_appear_on`;
+#   - deleting a rule from this registry fails the build (the test pins the
+#     count at 8 and the ids);
+#   - rewording a copy on any surface fails the build (byte comparison).
+# Changing a canonical wording is possible ONLY by editing this registry and
+# every listed surface in the same commit — a loud, reviewable act.
+#
+# `must_appear_on` reflects where each rule actually applies today. Rules 3, 7
+# and 8 previously lived only in a user-global CLAUDE.md (not a repo surface);
+# D3's ratification promotes them to the repo's always-on surfaces.
+
+scar_rules:
+  - id: git-add-explicit
+    canonical: "Never `git add -A` / `--all` / `.` — stage each file explicitly by path."
+    must_appear_on:
+      - CLAUDE.md
+      - AGENTS.md
+      - codev/resources/arch-critical.md
+      - codev-skeleton/templates/CLAUDE.md
+      - codev-skeleton/templates/AGENTS.md
+      - codev-skeleton/protocols/air/prompts/implement.md
+      - codev-skeleton/protocols/aspir/prompts/implement.md
+      - codev-skeleton/protocols/aspir/prompts/plan.md
+      - codev-skeleton/protocols/aspir/prompts/review.md
+      - codev-skeleton/protocols/aspir/prompts/specify.md
+      - codev-skeleton/protocols/bugfix/prompts/fix.md
+      - codev-skeleton/protocols/maintain/builder-prompt.md
+      - codev-skeleton/protocols/maintain/prompts/maintain.md
+      - codev-skeleton/protocols/pir/prompts/implement.md
+      - codev-skeleton/protocols/pir/prompts/plan.md
+      - codev-skeleton/protocols/spir/prompts/implement.md
+      - codev-skeleton/protocols/spir/prompts/plan.md
+      - codev-skeleton/protocols/spir/prompts/review.md
+      - codev-skeleton/protocols/spir/prompts/specify.md
+
+  - id: never-destroy-worktrees
+    canonical: "Never destroy builder worktrees (`git worktree remove`, `git branch -D` on builder branches, `afx cleanup` + respawn). Use `afx spawn <id> --resume`; if it fails, ask the human — what is expendable is never your call."
+    must_appear_on:
+      - CLAUDE.md
+      - AGENTS.md
+
+  - id: no-destructive-git
+    canonical: "Never run `git reset --hard`, `git checkout -- .`, `git clean -f`, or `git stash` without explicit human permission — they destroy uncommitted work."
+    must_appear_on:
+      - CLAUDE.md
+      - AGENTS.md
+
+  - id: human-gates
+    canonical: "Never treat a porch gate as approved without an explicit human decision — a gate message is a notification to the human, not authorization."
+    must_appear_on:
+      - CLAUDE.md
+      - AGENTS.md
+      - .claude/skills/porch/SKILL.md
+      - .codex/skills/porch/SKILL.md
+      - codev-skeleton/.claude/skills/porch/SKILL.md
+      - codev-skeleton/.codex/skills/porch/SKILL.md
+
+  - id: no-hand-edit-status
+    canonical: "Never hand-edit `status.yaml` — only porch commands modify project state."
+    must_appear_on:
+      - CLAUDE.md
+      - AGENTS.md
+      - codev/resources/arch-critical.md
+      - .claude/skills/porch/SKILL.md
+      - .codex/skills/porch/SKILL.md
+      - codev-skeleton/.claude/skills/porch/SKILL.md
+      - codev-skeleton/.codex/skills/porch/SKILL.md
+      - codev-skeleton/roles/builder.md
+      - codev-skeleton/protocols/air/builder-prompt.md
+      - codev-skeleton/protocols/aspir/builder-prompt.md
+      - codev-skeleton/protocols/bugfix/builder-prompt.md
+      - codev-skeleton/protocols/experiment/builder-prompt.md
+      - codev-skeleton/protocols/maintain/builder-prompt.md
+      - codev-skeleton/protocols/pir/builder-prompt.md
+      - codev-skeleton/protocols/research/builder-prompt.md
+      - codev-skeleton/protocols/spir/builder-prompt.md
+
+  - id: afx-from-root
+    canonical: "Run `afx` commands only from the main workspace root, never from inside a builder worktree — spawning from a worktree nests builders and breaks the workspace."
+    must_appear_on:
+      - CLAUDE.md
+      - AGENTS.md
+      - codev-skeleton/roles/architect.md
+
+  - id: shellper-verified-orphan
+    canonical: "Never kill a shellper process without verifying it is an orphan (match each PID to its workspace via Tower) — an 'extra' shellper may be a live architect session."
+    must_appear_on:
+      - CLAUDE.md
+      - AGENTS.md
+
+  - id: tower-restart-permission
+    canonical: "Never restart or stop Tower without explicit human permission — it kills every running builder session."
+    must_appear_on:
+      - CLAUDE.md
+      - AGENTS.md

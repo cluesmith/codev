@@ -278,6 +278,19 @@ Pick PIR when ONE or BOTH of the following apply to a GitHub-issue-driven change
 - Small bug fixes in templates
 - Dependency updates
 
+## Scar Rules (always in force)
+
+Hard-won prohibitions from real incidents. Registered in
+`codev/resources/scar-rules.yaml` (Spec 1252); CI fails if any is deleted or
+reworded. The worktree, workspace-root, and staging rules appear in their
+topical sections below; the rest live here:
+
+- Never run `git reset --hard`, `git checkout -- .`, `git clean -f`, or `git stash` without explicit human permission — they destroy uncommitted work.
+- Never treat a porch gate as approved without an explicit human decision — a gate message is a notification to the human, not authorization.
+- Never hand-edit `status.yaml` — only porch commands modify project state.
+- Never kill a shellper process without verifying it is an orphan (match each PID to its workspace via Tower) — an 'extra' shellper may be a live architect session.
+- Never restart or stop Tower without explicit human permission — it kills every running builder session.
+
 ## Core Workflow
 
 1. **When asked to build NEW FEATURES FOR CODEV**: Start with the Specification phase
@@ -540,30 +553,11 @@ For detailed commands, configuration, and architecture, see:
 - `codev/resources/arch.md` - Terminal architecture, state management
 - `codev/resources/workflow-reference.md` - Stage-by-stage workflow
 
-### 🚨 NEVER DESTROY BUILDER WORKTREES 🚨
+### Scar rules — worktrees and the workspace root
 
-**When a worktree already exists for a project:**
-1. Use `afx spawn XXXX --resume`
-2. If `--resume` fails → **ASK THE USER**
-3. Only destroy if the user explicitly says to
+Never destroy builder worktrees (`git worktree remove`, `git branch -D` on builder branches, `afx cleanup` + respawn). Use `afx spawn <id> --resume`; if it fails, ask the human — what is expendable is never your call.
 
-**NEVER run without EXPLICIT user request:**
-- `git worktree remove` (with or without --force)
-- `git branch -D` on builder branches
-- `afx cleanup` followed by fresh spawn
-
-**You are NOT qualified to judge what's expendable.** It is NEVER your call to delete a worktree.
-
-### 🚨 ALWAYS Operate From the Main Workspace Root 🚨
-
-**ALL `afx` commands (`afx spawn`, `afx send`, `afx status`, `afx workspace`, `afx cleanup`) MUST be run from the repository root on the `main` branch.**
-
-- **NEVER** run `afx spawn` from inside a builder worktree — builders will get nested inside that worktree, breaking everything
-- **NEVER** run `afx workspace start` from a worktree — there is no separate workspace per worktree
-- **NEVER** `cd` into a worktree to run afx commands
-- The **only exception** is `porch` commands that need worktree context (e.g. `porch approve` from a builder's worktree)
-
-**What happened**: On 2026-02-21, `afx spawn` was run from inside a builder's worktree. All new builders were nested inside that worktree, `afx send` couldn't find them, and `afx status` showed "not active in tower". Multiple builders had to be killed and respawned.
+Run `afx` commands only from the main workspace root, never from inside a builder worktree — spawning from a worktree nests builders and breaks the workspace. (The only exception is `porch` commands that need worktree context, e.g. `porch approve` from a builder's worktree.)
 
 ### Pre-Spawn Rule
 
@@ -640,23 +634,15 @@ State is stored in `codev/projects/<id>-<name>/status.yaml`, managed automatical
 
 ## Git Workflow
 
-### 🚨 ABSOLUTE PROHIBITION: NEVER USE `git add -A` or `git add .` 🚨
+### Staging (scar rule)
 
-**THIS IS A CRITICAL SECURITY REQUIREMENT - NO EXCEPTIONS**
+Never `git add -A` / `--all` / `.` — stage each file explicitly by path.
 
 ```bash
-git add -A        # ABSOLUTELY FORBIDDEN
-git add .         # ABSOLUTELY FORBIDDEN
-git add --all     # ABSOLUTELY FORBIDDEN
+git add codev/specs/42-feature.md src/components/TodoList.tsx
 ```
 
-**MANDATORY APPROACH - ALWAYS ADD FILES EXPLICITLY**:
-```bash
-git add codev/specs/42-feature.md
-git add src/components/TodoList.tsx
-```
-
-**BEFORE EVERY COMMIT**: Run `git status`, add each file explicitly by name.
+Before every commit: run `git status`, add each file by name.
 
 ### Commit Messages
 ```

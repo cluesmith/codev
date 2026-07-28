@@ -20,7 +20,7 @@ You are running in STRICT mode. This means:
 - Do not deviate from the porch-driven workflow
 
 ### ABSOLUTE RESTRICTIONS (STRICT MODE)
-- **NEVER edit `status.yaml` directly** — only porch commands may modify project state
+- Never hand-edit `status.yaml` — only porch commands modify project state.
 - **NEVER call `porch approve` without explicit human approval** — only run it after the architect says to
 - **NEVER skip consultations** — porch handles them via the verify step
 - **NEVER advance phases manually** — porch handles phase transitions on gate approval

@@ -95,7 +95,7 @@ Make commits at these milestones:
 3. `[Spec {{project_id}}] Plan with user feedback`
 4. `[Spec {{project_id}}] Final approved plan`
 
-**CRITICAL**: Never use `git add .` or `git add -A`. Always stage specific files:
+**CRITICAL**: Never `git add -A` / `--all` / `.` — stage each file explicitly by path. For example:
 ```bash
 git add codev/plans/{{artifact_name}}.md
 ```
@@ -115,4 +115,4 @@ git add codev/plans/{{artifact_name}}.md
 - Don't create phases that can't be independently tested
 - Don't skip dependency analysis
 - Don't make phases too large (if >5 files, split it)
-- Don't use `git add .` or `git add -A` (security risk)
+- Never `git add -A` / `--all` / `.` — stage each file explicitly by path.

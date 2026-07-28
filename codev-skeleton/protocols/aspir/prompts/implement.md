@@ -191,7 +191,7 @@ Your specific questions here
 - Don't add features not in the spec
 - Don't leave TODO comments for later (fix now or note as blocker)
 - Don't skip writing tests
-- Don't use `git add .` or `git add -A` when you commit (security risk)
+- Never `git add -A` / `--all` / `.` — stage each file explicitly by path.
 
 ## Handling Problems
 

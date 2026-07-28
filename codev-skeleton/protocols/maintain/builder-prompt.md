@@ -18,7 +18,7 @@ You are running in STRICT mode. This means:
 - Follow porch signals and gate approvals
 
 ### ABSOLUTE RESTRICTIONS (STRICT MODE)
-- **NEVER edit `status.yaml` directly** — only porch commands may modify project state
+- Never hand-edit `status.yaml` — only porch commands modify project state.
 - **NEVER call `porch approve` without explicit human approval** — only run it after the architect says to
 {{/if}}
 
@@ -38,7 +38,7 @@ Two phases:
 - Don't remove anything actively used
 - One removal at a time — commit after each
 - Document every deletion with justification
-- Never use `git add -A` or `git add .`
+- Never `git add -A` / `--all` / `.` — stage each file explicitly by path.
 
 ## Handling Flaky Tests
 

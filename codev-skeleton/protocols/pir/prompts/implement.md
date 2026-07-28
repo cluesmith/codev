@@ -61,7 +61,7 @@ Follow the plan's "Files to Change" section. Apply the changes.
 [PIR #{{issue.number}}] <Concise description of this commit's change>
 ```
 
-**Never use `git add .` or `git add -A`.** Stage files explicitly:
+Never `git add -A` / `--all` / `.` — stage each file explicitly by path. For example:
 
 ```bash
 git add path/to/changed-file.ts
@@ -143,7 +143,7 @@ Then **stay in the interactive session**. Do not exit. Wait for the user's next 
 - Don't run `porch approve` yourself
 - Don't push to the default branch — only to your builder branch
 - Don't squash commits — let the merge commit preserve history
-- Don't use `git add .` or `git add -A`
+- Never `git add -A` / `--all` / `.` — stage each file explicitly by path.
 - Don't open the PR yet — that's the `review` phase
 - Don't exit the interactive session at the gate
 

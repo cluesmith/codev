@@ -62,7 +62,7 @@ You must:
 
 - **Don't manually follow SPIR steps** - Porch handles this
 - **Don't run consult directly** - Porch runs 3-way reviews
-- **Don't edit status.yaml phase/iteration** - Only porch modifies state
+- Never hand-edit `status.yaml` — only porch commands modify project state.
 - **Don't call porch approve** - Only humans approve gates
 - **Don't skip gates** - Always stop and wait for approval
 
@@ -228,5 +228,5 @@ Rules:
 - **Keep worktree clean** - No untracked files, no debug code
 - **(Strict mode)** Run porch, don't bypass it
 - **(Strict mode)** Stop at gates - Human approval is required
-- **(Strict mode)** NEVER edit status.yaml directly
+- **(Strict mode)** Never hand-edit `status.yaml` — only porch commands modify project state.
 - **(Strict mode)** NEVER call porch approve

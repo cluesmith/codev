@@ -99,7 +99,7 @@ Use sequential numbering with descriptive names:
 
 ## Git Workflow
 
-**NEVER use `git add -A` or `git add .`** - Always add files explicitly.
+Never `git add -A` / `--all` / `.` — stage each file explicitly by path.
 
 Commit messages format:
 ```

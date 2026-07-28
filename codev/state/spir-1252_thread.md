@@ -655,3 +655,28 @@ Also swept the duplicate-entry residue as a real class this time (after
 claiming that once before and missing 742): deduped 744/governance-sweep/
 protocol-prompt-audit AND found three more vacuous pair loops inside
 baked-decisions. 3,726 green.
+
+## Phase 5 — scar registry, eight compressed wordings (M5/D3)
+
+Registry at codev/resources/scar-rules.yaml; T6 (scar-rules.test.ts) enforces:
+count pinned at 8, ids pinned, byte-verbatim presence on every listed surface,
+stale-variant sweep, N3 pair check. 28 skeleton files + CLAUDE/AGENTS +
+arch-critical + 4 skill copies converged to canonical wordings.
+
+Wording judgement calls worth recording:
+- **human-gates**: NOT "never approve gates yourself" — builders legitimately
+  run `porch approve` after the human decision is relayed (workspace
+  convention). Canonical targets the actual sin: treating a gate as approved
+  WITHOUT an explicit human decision.
+- **never-destroy-worktrees** keeps its escape hatch (--resume, then ask) and
+  its teeth ("what is expendable is never your call") in two sentences.
+- Rules 3/7/8 had NO repo surface (lived only in Waleed's user-global
+  CLAUDE.md); D3's ratification promotes them to repo CLAUDE/AGENTS always-on.
+
+Fixture fallout handled as explicit acts: prompt snapshots + manifest
+regenerated (now pin post-compression state; comment documents the contract),
+derived baselines re-derived with the same canonical substitutions.
+
+CLAUDE.md structure: two 🚨 banner blocks collapsed into topical compact rules
++ new "Scar Rules (always in force)" section housing the five without topical
+homes. Net CLAUDE.md shrink measured in Phase 7.

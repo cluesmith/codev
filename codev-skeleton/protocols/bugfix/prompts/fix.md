@@ -52,7 +52,7 @@ Fix any failures before proceeding. If build/test commands don't exist, check `p
 ### 4. Commit
 
 Stage and commit your changes:
-- Use explicit file paths (never `git add -A` or `git add .`)
+- Never `git add -A` / `--all` / `.` — stage each file explicitly by path.
 - Commit message: `Fix #{{issue.number}}: <brief description>`
 
 ## Signals

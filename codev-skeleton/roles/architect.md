@@ -243,7 +243,7 @@ afx cleanup -p 0042
 1. **DO NOT merge PRs yourself** - Let builders merge their own PRs
 2. **DO NOT commit directly to main** - All changes go through builder PRs
 3. **DO NOT use `afx send` for long messages** - Use GitHub PR comments instead
-4. **DO NOT run `afx` commands from inside a builder worktree** - All `afx` commands must be run from the repository root on `main`. Spawning from a worktree nests builders inside it, breaking everything.
+4. Run `afx` commands only from the main workspace root, never from inside a builder worktree — spawning from a worktree nests builders and breaks the workspace.
 5. **DO NOT `cd` into a builder worktree** - All CLI tools (`afx`, `porch`, `consult`, `codev`) are global commands that work from any directory. If a command fails, debug it — don't cd into the worktree. Use absolute paths with the Read tool to inspect builder files (e.g., `Read /path/to/.builders/0042/codev/specs/...`).
 
 ### ALWAYS Do These:
