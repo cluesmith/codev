@@ -33,7 +33,7 @@ const REPO_ROOT = path.resolve(__dirname, '../../../..');
 describe('ownership map — structure (M1)', () => {
   it('loads and passes structural validation', () => {
     const map = loadOwnershipMap(REPO_ROOT);
-    expect(validateMap(map)).toEqual([]);
+    expect(validateMap(map, REPO_ROOT)).toEqual([]);
   });
 
   it('every instruction class has exactly one owner', () => {
@@ -70,6 +70,17 @@ describe('completeness (M1 / T12)', () => {
       'a normative text on 2+ files must have a specific disposition — add one ' +
         '(mapped/scar/out-of-scope) rather than letting the catch-all absorb it'
     ).toEqual([]);
+  });
+
+  it('a missing boundary file fails LOUDLY, never silently shrinking the scan', () => {
+    const root = fs.mkdtempSync(path.join(tmpdir(), 'codev-ownership-'));
+    try {
+      expect(() => extractCandidates(root, ['does/not/exist.md'])).toThrow(
+        /inventory_boundary file missing/
+      );
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('SEEDED: a new normative line is undispositioned until someone dispositions it', () => {
@@ -171,7 +182,11 @@ describe('single-owner enforcement (M4 / T7)', () => {
         if (!fs.existsSync(p)) continue;
         const content = fs.readFileSync(p, 'utf-8');
         const hit = matcher ? matcher.test(content) : content.includes(c.pattern);
-        if (hit && !allowed.has(s.id) && !(c.references ?? []).includes(s.id)) {
+        // No exemption for `references` surfaces: a well-formed reference
+        // points at the owner without reproducing the rule text, so it never
+        // trips the pattern. If it does, that's a restatement — exactly what
+        // T7 exists to catch (Codex, Phase-6 iter-2).
+        if (hit && !allowed.has(s.id)) {
           failures.push(`${c.id}: pattern found on non-owner surface ${s.id}`);
         }
         if (!hit && allowed.has(s.id)) {

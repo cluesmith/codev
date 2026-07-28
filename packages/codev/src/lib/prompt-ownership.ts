@@ -104,7 +104,15 @@ export function extractCandidates(root: string, boundary: string[]): Candidate[]
   const out: Candidate[] = [];
   for (const rel of boundary) {
     const p = path.join(root, rel);
-    if (!fs.existsSync(p)) continue;
+    if (!fs.existsSync(p)) {
+      // Fail fast: a typo'd or renamed boundary file silently falling out of
+      // the scan would break the completeness guarantee while T12 stays green.
+      throw new Error(
+        `inventory_boundary file missing: ${rel} — fix the path in ` +
+          `prompt-ownership.yaml or restore the file; completeness cannot be ` +
+          `computed over a boundary that silently shrank`
+      );
+    }
     const lines = fs.readFileSync(p, 'utf-8').split('\n');
     lines.forEach((text, i) => {
       if (NOISE.test(text)) return;
@@ -131,10 +139,18 @@ export function loadOwnershipMap(root: string): OwnershipMap {
   return doc;
 }
 
-/** Structural validation — throws with a list of every violation. */
-export function validateMap(map: OwnershipMap): string[] {
+/** Structural validation — returns a list of every violation. */
+export function validateMap(map: OwnershipMap, root?: string): string[] {
   const problems: string[] = [];
   const surfaceIds = new Set(map.surfaces.map((s) => s.id));
+  if (root) {
+    for (const rel of map.inventory_boundary) {
+      if (!fs.existsSync(path.join(root, rel))) problems.push(`boundary file missing: ${rel}`);
+    }
+    for (const s2 of map.surfaces) {
+      if (!fs.existsSync(path.join(root, s2.path))) problems.push(`surface ${s2.id}: path missing: ${s2.path}`);
+    }
+  }
   const classIds = new Set<string>();
 
   for (const c of map.instructions) {
