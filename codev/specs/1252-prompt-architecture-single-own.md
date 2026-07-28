@@ -1,3 +1,8 @@
+---
+approved: 2026-07-27
+validated: [gemini, codex, claude]
+---
+
 # Spec 1252: Prompt Architecture — Single-Owner Rule for Instruction Content
 
 ## Metadata
@@ -5,8 +10,8 @@
 - **Issue**: #1252
 - **Protocol**: SPIR
 - **Area**: `area/cross-cutting`
-- **Status**: draft (iteration 2 — revised after 3-way consultation; amended
-  with architect decisions D1–D4, 2026-07-27)
+- **Status**: approved (spec-approval gate, 2026-07-27; amended with architect
+  decisions D1–D5 and the T13(b) verify-phase ruling)
 - **Author**: builder spir-1252
 
 ---

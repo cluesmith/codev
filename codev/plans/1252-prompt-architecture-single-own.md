@@ -1,9 +1,14 @@
+---
+approved: 2026-07-27
+validated: [gemini, codex, claude]
+---
+
 # Plan: Prompt Architecture — Single-Owner Rule for Instruction Content
 
 ## Metadata
 
 - **ID**: plan-2026-07-27-prompt-architecture-single-owner
-- **Status**: draft
+- **Status**: approved (plan-approval gate, 2026-07-28, jointly with the D5 spec delta)
 - **Specification**: [`codev/specs/1252-prompt-architecture-single-own.md`](../specs/1252-prompt-architecture-single-own.md)
 - **Issue**: #1252
 - **Created**: 2026-07-27
