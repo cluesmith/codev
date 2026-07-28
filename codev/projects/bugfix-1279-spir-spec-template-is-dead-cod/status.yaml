@@ -1,7 +1,7 @@
 id: bugfix-1279
 title: spir-spec-template-is-dead-cod
 protocol: bugfix
-phase: investigate
+phase: fix
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -11,4 +11,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-07-28T17:44:57.015Z'
-updated_at: '2026-07-28T17:44:57.015Z'
+updated_at: '2026-07-28T17:49:28.479Z'
