@@ -175,7 +175,7 @@ export function buildPromptFromTemplate(
  * copy to .builder-role.md in the worktree.
  */
 export function builderPreamble(): string {
-  return 'You are a Builder. Your full role definition is delivered via your system prompt (a copy is written to `.builder-role.md` in your worktree).';
+  return 'You are a Builder. Your full role definition is delivered via your system prompt (with default role injection, a copy is also written to `.builder-role.md` in your worktree).';
 }
 
 export function buildResumeNotice(_projectId: string): string {
