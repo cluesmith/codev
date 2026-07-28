@@ -27,6 +27,8 @@ import {
   resolveDisposition,
   type OwnershipMap,
 } from '../lib/prompt-ownership.js';
+import { buildPromptFromTemplate } from '../agent-farm/commands/spawn-roles.js';
+import { resolveCodevIncludes } from '../lib/skeleton.js';
 
 const REPO_ROOT = path.resolve(__dirname, '../../../..');
 
@@ -249,5 +251,69 @@ describe('single-owner enforcement (M4 / T7)', () => {
         ).toMatch(/Phase 7|dedup|include|retention/i);
       }
     }
+  });
+});
+
+describe('served-surface dedup guard (S1 — assembled artifacts)', () => {
+  // The include model means AUTHORED ownership is single while SERVED prompts
+  // each carry the full text once. The failure mode that breaks S1 on the
+  // agent-facing surface is a rule appearing TWICE in one served artifact
+  // (e.g. two lines in one file converged to the same include — caught live
+  // by Codex at the Phase-7 review: plan.md served no-time-estimates twice).
+  // Guard every automated non-scar class across every served artifact.
+  const PROTOCOLS = ['air','aspir','bugfix','experiment','maintain','pir','research','spike','spir'];
+
+  function countMatches(content: string, pattern: string): number {
+    const re = pattern.startsWith('/')
+      ? new RegExp(pattern.slice(1, -1), 'g')
+      : new RegExp(pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
+    return (content.match(re) ?? []).length;
+  }
+
+  it('no automated class appears more than once in any assembled spawn prompt', () => {
+    const map = loadOwnershipMap(REPO_ROOT);
+    const failures: string[] = [];
+    for (const proto of PROTOCOLS) {
+      const prompt = buildPromptFromTemplate(
+        { workspaceRoot: REPO_ROOT } as never,
+        proto,
+        {
+          protocol_name: proto, mode: 'strict', mode_soft: false, mode_strict: true,
+          project_id: '9999', input_description: 'guard', issue: { number: 9999, title: 't', body: 'b' },
+        }
+      );
+      for (const c of map.instructions) {
+        if (c.enforcement !== 'automated' || c.scar) continue;
+        const n = countMatches(prompt, c.pattern);
+        const cap = c.served_max ?? 1;
+        if (n > cap) failures.push(`${proto}: class ${c.id} served ${n}x (cap ${cap}) in the assembled spawn prompt`);
+      }
+    }
+    expect(failures, failures.join('\n')).toEqual([]);
+  });
+
+  it('no automated class appears more than once in any expanded phase prompt', () => {
+    const map = loadOwnershipMap(REPO_ROOT);
+    const failures: string[] = [];
+    const promptFiles = map.inventory_boundary.filter((p) => p.includes('/prompts/') || p.includes('porch/prompts'));
+    const protoPrompts = [
+      ...promptFiles,
+      'codev-skeleton/protocols/spir/prompts/plan.md',
+      'codev-skeleton/protocols/aspir/prompts/plan.md',
+      'codev-skeleton/protocols/spir/prompts/specify.md',
+      'codev-skeleton/protocols/aspir/prompts/specify.md',
+    ];
+    for (const rel of [...new Set(protoPrompts)]) {
+      const p = path.join(REPO_ROOT, rel);
+      if (!fs.existsSync(p)) continue;
+      const expanded = resolveCodevIncludes(fs.readFileSync(p, 'utf-8'), REPO_ROOT);
+      for (const c of map.instructions) {
+        if (c.enforcement !== 'automated' || c.scar) continue;
+        const n = countMatches(expanded, c.pattern);
+        const cap = c.served_max ?? 1;
+        if (n > cap) failures.push(`${rel}: class ${c.id} served ${n}x (cap ${cap}) after expansion`);
+      }
+    }
+    expect(failures, failures.join('\n')).toEqual([]);
   });
 });

@@ -100,10 +100,16 @@ surfaces:
   - { id: partial-pr-strategy, path: codev-skeleton/partials/pr-strategy.md, load: spawn }
 
 # Non-scar instruction classes with cross-surface duplication, discovered by
-# the extractor at Phase 6. All are `enforcement: manual` until Phase 7
-# replaces the non-owner restatements with references — flipping each to
-# `automated` is part of that phase's deliverable (mirrors the drift gate's
-# staged-activation pattern).
+# the extractor at Phase 6 and resolved in Phase 7 by SHARED PARTIALS, not
+# prose references: builder/phase prompts are SERVED surfaces — each agent
+# sees only its own prompt, so removing a rule from one prompt would delete
+# it from that agent's context, not deduplicate it. The partial is the single
+# AUTHORED owner; assembly expands it into every served prompt (per-agent
+# single delivery — a rule appears at most once per served artifact, enforced
+# by the assembled-prompt guard in prompt-ownership.test.ts). `references`
+# remains for cross-tier pointer surfaces (which must never reproduce the
+# rule text); `retained_restatements` declares protocol-specific variants
+# kept by decision.
 instructions:
   - id: no-skip-porch-checks
     summary: Never skip or work around porch checks to avoid a failure.
@@ -137,8 +143,16 @@ instructions:
     summary: Treat issue-body Baked Decisions as fixed; escalate conflicts, never override.
     owner: partial-baked
     scar: false
-    pattern: "Baked Decisions"
+    pattern: "## Baked Decisions"
     enforcement: automated
+    # served_max 3: every spawn prompt legitimately carries (1) the instruction
+    # section from the partial, plus the spir protocol doc's DESCRIPTION of the
+    # convention inlined via protocol_reference — (2) its "## Baked Decisions
+    # (Optional)" section header and (3) a backtick-quoted mention in prose.
+    # The doc is a declared retention (spir-protocol-doc); post-assembly the
+    # guard cannot attribute hits, so the ceiling is explicit. A 4th
+    # appearance still fails.
+    served_max: 3
     retained_restatements: [bp-air, pp-specify, pp-implement, partial-pr-strategy, bp-spir, bp-aspir, spir-protocol-doc]
     manual_justification: >
       Extracted for spir/aspir. bp-air keeps its protocol-specific wording

@@ -59,6 +59,12 @@ export interface InstructionClass {
   retained_restatements?: string[];
   /** Required for enforcement: manual — why no reliable pattern exists. */
   manual_justification?: string;
+  /** Max occurrences of the pattern permitted in ONE served artifact
+   *  (default 1). Raised only with a comment when a declared retention is
+   *  inlined into the same assembly (e.g. the protocol doc's description of
+   *  the baked-decisions convention rides into every spawn prompt beside the
+   *  instruction section itself). */
+  served_max?: number;
 }
 
 export interface Disposition {

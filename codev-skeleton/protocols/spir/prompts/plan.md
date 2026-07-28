@@ -111,7 +111,6 @@ git add codev/plans/{{artifact_name}}.md
 
 - Don't run `consult` commands yourself (porch handles consultations)
 - Don't write code (that's for Implement phase)
-{{> partials/no-time-estimates.md}}
 - Don't create phases that can't be independently tested
 - Don't skip dependency analysis
 - Don't make phases too large (if >5 files, split it)
