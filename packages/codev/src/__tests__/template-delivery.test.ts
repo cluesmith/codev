@@ -73,12 +73,83 @@ function listTemplates(treeRoot: string): string[] {
 }
 
 /**
+ * The only two files whose `{{> }}` includes are actually resolved, and therefore
+ * the only two kinds of file that can *deliver* a template:
+ *
+ *   - `protocols/<p>/prompts/*.md` — porch's `loadPromptFile` runs
+ *     `resolveCodevIncludes` on phase prompts.
+ *   - `protocols/<p>/protocol.md`  — `resolveProtocolReference` runs it at spawn.
+ *
+ * Nothing else does. `consult-types/*.md` in particular are read via plain
+ * `readCodevFile` (`commands/consult/index.ts`), so an include written there is
+ * never expanded — it would reach the model as literal `{{> ... }}` text and
+ * would NOT make the template it names reachable by any builder.
+ */
+const DELIVERY_ROOT_RE = /^protocols\/[^/]+\/(?:prompts\/[^/]+\.md|protocol\.md)$/;
+
+/** Read a tree-relative path, falling back to the sibling tree (mirrors the four-tier resolver). */
+function readAcrossTrees(treeRoot: string, rel: string): string | null {
+  const here = join(treeRoot, rel);
+  if (existsSync(here)) return readFileSync(here, 'utf-8');
+  for (const t of TREES) {
+    const there = join(REPO_ROOT, t, rel);
+    if (existsSync(there)) return readFileSync(there, 'utf-8');
+  }
+  return null;
+}
+
+/**
+ * Templates actually reachable by a builder: walk out from the delivery roots and
+ * follow includes transitively (`resolveCodevIncludes` recurses, so a template
+ * included by a delivered file is itself delivered).
+ *
+ * Reachability — not "is this path mentioned in some include somewhere" — is the
+ * real invariant. An include sitting in a consult-type, or in a template that is
+ * itself orphaned, delivers nothing.
+ */
+function reachableIncludeTargets(treeRoot: string): Set<string> {
+  const reached = new Set<string>();
+  const queue = listMarkdown(treeRoot, 'protocols').filter(p => DELIVERY_ROOT_RE.test(p));
+  const seenFiles = new Set<string>(queue);
+  while (queue.length > 0) {
+    const rel = queue.shift()!;
+    const content = readAcrossTrees(treeRoot, rel);
+    if (content === null) continue;
+    for (const m of content.matchAll(INCLUDE_RE)) {
+      const target = m[1];
+      reached.add(target);
+      if (!seenFiles.has(target)) {   // recurse into the included file
+        seenFiles.add(target);
+        queue.push(target);
+      }
+    }
+  }
+  return reached;
+}
+
+/**
  * The invariant, as a pure predicate so the mutation check can run it against a
- * seeded fixture. Returns templates that no `{{> }}` include delivers.
+ * seeded fixture. Returns templates no builder can actually receive.
  */
 export function findOrphanedTemplates(treeRoot: string, exempt: readonly string[] = []): string[] {
-  const delivered = new Set(collectIncludeTargets(treeRoot).keys());
+  const delivered = reachableIncludeTargets(treeRoot);
   return listTemplates(treeRoot).filter(t => !delivered.has(t) && !exempt.includes(t));
+}
+
+/**
+ * Includes written where nothing resolves them — e.g. a consult-type. These are
+ * silent failures: the directive reaches the reader as literal text.
+ */
+export function findUnresolvedIncludeSites(treeRoot: string): string[] {
+  const bad: string[] = [];
+  for (const [target, sources] of collectIncludeTargets(treeRoot)) {
+    for (const src of sources) {
+      if (!DELIVERY_ROOT_RE.test(src) && !reachableIncludeTargets(treeRoot).has(src)) {
+        bad.push(`${src} includes ${target}, but nothing resolves includes in that file`);
+      }
+    }
+  }
+  return bad.sort();
 }
 
 /**
@@ -118,6 +189,12 @@ describe('#1279 — every protocol template has an owning consumer', () => {
       if (!found) dangling.push(`${target} (included by ${sources.join(', ')})`);
     }
     expect(dangling, `Dangling include target(s) in ${tree}/ — these collapse to '' at delivery`).toEqual([]);
+  });
+
+  it.each(TREES)('%s: no include sits in a file whose includes are never resolved', (tree) => {
+    // Only prompts/*.md and protocol.md get resolveCodevIncludes run over them.
+    // An include anywhere else (a consult-type, say) is served as literal text.
+    expect(findUnresolvedIncludeSites(join(REPO_ROOT, tree))).toEqual([]);
   });
 
   it('the two trees ship the same set of templates (mirror parity, minus known local-only files)', () => {
@@ -242,6 +319,51 @@ describe('#1279 — the orphan detector actually fails on a violation', () => {
         'protocols/aspir/templates/review.md',
         'protocols/aspir/templates/spec.md',
       ]);
+    });
+  });
+
+  it('MUTATION: an include in a consult-type does NOT count as a consumer', () => {
+    // Codex caught this on PR #1283: an earlier version of the detector counted an
+    // include in ANY markdown as delivery. Consult-types are read with plain
+    // readCodevFile — no include resolution — so a template named only there is
+    // still unreachable by every builder, and the directive reaches the reviewing
+    // model as literal text.
+    withTreeCopy(treeRoot => {
+      writeFileSync(join(treeRoot, 'protocols/spir/templates/orphan.md'), '# Nobody delivers me\n');
+      const ct = join(treeRoot, 'protocols/spir/consult-types/spec-review.md');
+      writeFileSync(ct, readFileSync(ct, 'utf-8') + '\n{{> protocols/spir/templates/orphan.md}}\n');
+      // Still orphaned — the consult-type mention buys it nothing.
+      expect(findOrphanedTemplates(treeRoot)).toEqual(['protocols/spir/templates/orphan.md']);
+      // And the misplaced directive itself is reported.
+      expect(findUnresolvedIncludeSites(treeRoot)).toEqual([
+        'protocols/spir/consult-types/spec-review.md includes protocols/spir/templates/orphan.md,'
+        + ' but nothing resolves includes in that file',
+      ]);
+    });
+  });
+
+  it('MUTATION: a template included only by another orphaned template stays orphaned', () => {
+    // Transitive reachability must start from the delivery roots, not from any
+    // include edge — two orphans pointing at each other are still two orphans.
+    withTreeCopy(treeRoot => {
+      writeFileSync(join(treeRoot, 'protocols/spir/templates/orphan-a.md'),
+        '# A\n\n{{> protocols/spir/templates/orphan-b.md}}\n');
+      writeFileSync(join(treeRoot, 'protocols/spir/templates/orphan-b.md'), '# B\n');
+      expect(findOrphanedTemplates(treeRoot)).toEqual([
+        'protocols/spir/templates/orphan-a.md',
+        'protocols/spir/templates/orphan-b.md',
+      ]);
+    });
+  });
+
+  it('a template included by a DELIVERED file is reachable transitively', () => {
+    // The positive counterpart: reachability follows include edges from a root,
+    // because resolveCodevIncludes recurses.
+    withTreeCopy(treeRoot => {
+      writeFileSync(join(treeRoot, 'protocols/spir/templates/nested.md'), '# Nested\n');
+      const tmpl = join(treeRoot, 'protocols/spir/templates/plan.md'); // delivered by prompts/plan.md
+      writeFileSync(tmpl, readFileSync(tmpl, 'utf-8') + '\n{{> protocols/spir/templates/nested.md}}\n');
+      expect(findOrphanedTemplates(treeRoot)).toEqual([]);
     });
   });
 
