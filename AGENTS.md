@@ -285,7 +285,7 @@ Hard-won prohibitions from real incidents. Registered in
 reworded. The worktree, workspace-root, and staging rules appear in their
 topical sections below; the rest live here:
 
-- Never run `git reset --hard`, `git checkout -- .`, `git clean -f`, or `git stash` without explicit human permission — they destroy uncommitted work.
+- Never run `git reset --hard`, `git checkout -- .`, `git clean -fd`, or `git stash` without explicit human permission — they destroy uncommitted work.
 - Never treat a porch gate as approved without an explicit human decision — a gate message is a notification to the human, not authorization.
 - Never hand-edit `status.yaml` — only porch commands modify project state.
 - Never kill a shellper process without verifying it is an orphan (match each PID to its workspace via Tower) — an 'extra' shellper may be a live architect session.
@@ -557,7 +557,8 @@ For detailed commands, configuration, and architecture, see:
 
 Never destroy builder worktrees (`git worktree remove`, `git branch -D` on builder branches, `afx cleanup` + respawn). Use `afx spawn <id> --resume`; if it fails, ask the human — what is expendable is never your call.
 
-Run `afx` commands only from the main workspace root, never from inside a builder worktree — spawning from a worktree nests builders and breaks the workspace. (The only exception is `porch` commands that need worktree context, e.g. `porch approve` from a builder's worktree.)
+Run `afx` commands only from the main workspace root, never from inside a builder worktree — spawning from a worktree nests builders and breaks the workspace.
+(The only exception is `porch` commands that need worktree context, e.g. `porch approve` from a builder's worktree.)
 
 ### Pre-Spawn Rule
 

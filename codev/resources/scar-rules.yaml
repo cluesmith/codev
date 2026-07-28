@@ -36,6 +36,7 @@ scar_rules:
       - codev-skeleton/protocols/aspir/prompts/specify.md
       - codev-skeleton/protocols/bugfix/prompts/fix.md
       - codev-skeleton/protocols/maintain/builder-prompt.md
+      - codev-skeleton/protocols/maintain/protocol.md
       - codev-skeleton/protocols/maintain/prompts/maintain.md
       - codev-skeleton/protocols/pir/prompts/implement.md
       - codev-skeleton/protocols/pir/prompts/plan.md
@@ -51,7 +52,7 @@ scar_rules:
       - AGENTS.md
 
   - id: no-destructive-git
-    canonical: "Never run `git reset --hard`, `git checkout -- .`, `git clean -f`, or `git stash` without explicit human permission — they destroy uncommitted work."
+    canonical: "Never run `git reset --hard`, `git checkout -- .`, `git clean -fd`, or `git stash` without explicit human permission — they destroy uncommitted work."
     must_appear_on:
       - CLAUDE.md
       - AGENTS.md
@@ -68,10 +69,15 @@ scar_rules:
 
   - id: no-hand-edit-status
     canonical: "Never hand-edit `status.yaml` — only porch commands modify project state."
+    # NOTE: codev/resources/arch-critical.md carries this sentence inside its
+    # combined porch fact ("Porch is a pure planner: ... Never hand-edit ...").
+    # The hot tier's <=10-fact cap forbids splitting the fact onto its own
+    # line, and T6 enforces LINE-exactness — so arch-critical is deliberately
+    # not listed here. Its wording is still policed by T6's stale-variant
+    # sweep and by the hot tier's own MAINTAIN regime (Spec 987).
     must_appear_on:
       - CLAUDE.md
       - AGENTS.md
-      - codev/resources/arch-critical.md
       - .claude/skills/porch/SKILL.md
       - .codex/skills/porch/SKILL.md
       - codev-skeleton/.claude/skills/porch/SKILL.md

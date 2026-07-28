@@ -47,7 +47,8 @@ For each audit finding:
 3. Build and test: `cd packages/codev && pnpm build && pnpm test`
 4. Commit: `git add <specific-files> && git commit -m "[Maintain] Remove unused X"`
 
-One removal at a time. Verify after each. Never `git add -A` / `--all` / `.` — stage each file explicitly by path.
+One removal at a time. Verify after each.
+Never `git add -A` / `--all` / `.` — stage each file explicitly by path.
 
 ## Step 4: Sync Documentation
 

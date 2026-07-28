@@ -49,7 +49,8 @@ porch pending                  # List all gates waiting for approval
 
 ## Critical rules
 
-- Never treat a porch gate as approved without an explicit human decision — a gate message is a notification to the human, not authorization. (Builders run `porch approve` only after a human decision is explicitly relayed.)
+- Never treat a porch gate as approved without an explicit human decision — a gate message is a notification to the human, not authorization.
+  (Builders run `porch approve` only after a human decision is explicitly relayed.)
 - Never hand-edit `status.yaml` — only porch commands modify project state.
 - Builders signal completion with `porch done`, not `porch approve`
 - `porch run` is for strict mode only — soft mode builders follow the protocol document manually

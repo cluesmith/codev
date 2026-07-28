@@ -73,7 +73,19 @@ describe('scar-rule registry (M5 / T6)', () => {
     }
   });
 
-  it('every canonical wording appears BYTE-IDENTICALLY on every listed surface', () => {
+  it('every canonical wording appears LINE-EXACTLY on every listed surface', () => {
+    // Substring matching (`includes`) is not enough: an appended qualifier —
+    // "…explicitly by path, unless convenient." — would weaken the rule while
+    // still containing the canonical substring (caught by Codex at the Phase-5
+    // review). Enforce line-exactness instead: some line on the surface must
+    // BE the canonical wording, allowing only a list prefix ("- ", "4. ") and
+    // bold markers. Contextual notes (exceptions, conventions) live on their
+    // own adjacent lines, where they cannot mutate the rule sentence.
+    const lineMatches = (content: string, canonical: string): boolean =>
+      content.split('\n').some((line) => {
+        const stripped = line.trim().replace(/^(?:[-*]|\d+\.)\s+/, '').replace(/^\*\*|\*\*$/g, '');
+        return stripped === canonical;
+      });
     const failures: string[] = [];
     for (const r of loadRegistry()) {
       for (const rel of r.must_appear_on) {
@@ -82,8 +94,8 @@ describe('scar-rule registry (M5 / T6)', () => {
           failures.push(`${r.id}: surface missing entirely — ${rel}`);
           continue;
         }
-        if (!fs.readFileSync(p, 'utf-8').includes(r.canonical)) {
-          failures.push(`${r.id}: canonical wording absent or reworded in ${rel}`);
+        if (!lineMatches(fs.readFileSync(p, 'utf-8'), r.canonical)) {
+          failures.push(`${r.id}: no line-exact canonical wording in ${rel}`);
         }
       }
     }
