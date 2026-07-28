@@ -38,7 +38,7 @@ non-owner restatements with references and flips them to `automated`:
 
 | Class | Owner | Currently restated on |
 |---|---|---|
-| no-skip-porch-checks | bp-spir | 8 other builder-prompts |
+| no-skip-porch-checks | bp-spir | 7 other builder-prompts (not research) |
 | no-skip-3way-review | bp-spir | 3 builder-prompts |
 | no-advance-phases-manually | bp-spir | bp-aspir |
 | baked-decisions-handling | bp-spir | bp-aspir, bp-air, 2 drafting prompts (Spec 746 coordination required) |

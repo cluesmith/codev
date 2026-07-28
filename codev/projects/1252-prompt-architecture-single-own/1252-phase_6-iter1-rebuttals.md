@@ -35,3 +35,20 @@ function over a catch-all-only fixture map, asserting both seeds surface via
 
 Counts: 190 = 37 mapped + 39 scar + 114 file-local; zero undispositioned; zero
 multi-file via catch-all. Full suite: 3,745 passed, 0 failures.
+
+---
+
+## Claude (COMMENT, arrived after the Codex fixes) — both points accepted
+
+1. **References data inaccuracies** — verified by grep before correcting
+   (reviewer claims are evidence, not ground truth — but both held):
+   `no-skip-3way-review` actually lives on spir/aspir/bugfix/experiment (my
+   list wrongly had pir/research); `no-skip-porch-checks` lives on 8 files,
+   not 9 — research lacks it. Both reference lists corrected against grep,
+   with the verification noted in the justifications so Phase 7 consumes
+   accurate data.
+2. **Script-location deviation** — acknowledged and deliberate: the same
+   js-yaml/workspace-resolution constraint that moved the behavioural-metrics
+   logic into `src/lib/` (Phase 1, documented plan deviation) applies here;
+   the extractor is a tested library rather than a loose script. The plan's
+   Phase 6 text already anticipated this shape after the Phase 1 amendment.

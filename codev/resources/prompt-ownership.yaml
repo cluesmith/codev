@@ -99,9 +99,10 @@ instructions:
     pattern: "skip porch checks or use any workaround"
     enforcement: manual
     manual_justification: >
-      Restated in all 9 builder-prompts (flaky-test protocol, item 2).
+      Restated in 8 builder-prompts (flaky-test protocol, item 2; research
+      lacks it — verified by grep at Phase 6 iter-2).
       Phase 7 dedups to owner + references; flipped to automated then.
-    references: [bp-air, bp-aspir, bp-bugfix, bp-experiment, bp-maintain, bp-pir, bp-research, bp-spike]
+    references: [bp-air, bp-aspir, bp-bugfix, bp-experiment, bp-maintain, bp-pir, bp-spike]
 
   - id: no-skip-3way-review
     summary: Never skip the 3-way review; follow the porch next/done cycle.
@@ -110,9 +111,10 @@ instructions:
     pattern: "NEVER skip the 3-way review"
     enforcement: manual
     manual_justification: >
-      Restated in the strict-mode restriction blocks of 4 builder-prompts.
+      Restated in the strict-mode restriction blocks of 4 builder-prompts
+      (spir, aspir, bugfix, experiment — verified by grep at Phase 6 iter-2).
       Phase 7 target.
-    references: [bp-aspir, bp-pir, bp-research]
+    references: [bp-aspir, bp-bugfix, bp-experiment]
 
   - id: no-advance-phases-manually
     summary: Porch advances plan phases; never advance them manually.
