@@ -8,9 +8,9 @@ and keeps the map in sync with arch.md's top-level sections. See codev/resources
 ## Critical facts (consult before deciding)
 - Framework files resolve at RUNTIME via the four-tier chain (.codev/ → codev/ → cache → skeleton); they are NOT copied into projects. Don't wire features to "scaffold copies it."
 - Governance docs are two-tier (Spec 987): HOT arch-critical.md/lessons-critical.md are capped + always-injected; COLD arch.md/lessons-learned.md are reference. Route new facts/lessons by tier; never grow a hot file past its cap (demote to cold).
-- Two trees: codev/ = our instance, codev-skeleton/ = the template shipped to adopters. Mirror every framework change in BOTH.
-- CLAUDE.md and AGENTS.md MUST stay byte-identical (same content, two tool ecosystems).
-- Porch is a pure planner: it emits task JSON, Claude Code executes. Never hand-edit `status.yaml` — only porch commands modify project state.
+- codev-skeleton/ is the single owner of framework protocols/roles/consult-types (Spec 1252 deleted the codev/ shadow tree; shadow drift now fails CI). CLAUDE.md and AGENTS.md MUST stay byte-identical.
+- Porch is a pure planner: it emits task JSON, Claude Code executes.
+- Never hand-edit `status.yaml` — only porch commands modify project state.
 - State lives in a single user-global ~/.agent-farm/global.db (Issue #1118 retired the per-workspace state.db; architect/builders keyed by workspace_path); one Tower on port 4100. Never modify state by hand.
 - Worktrees in .builders/ are Agent-Farm-managed — never delete manually (use afx cleanup); run afx from the main workspace root only.
 - Forge concept commands abstract the VCS provider — add a dedicated concept; don't bolt env flags onto a shared one.

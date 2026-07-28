@@ -77,15 +77,10 @@ scar_rules:
 
   - id: no-hand-edit-status
     canonical: "Never hand-edit `status.yaml` — only porch commands modify project state."
-    # NOTE: codev/resources/arch-critical.md carries this sentence inside its
-    # combined porch fact ("Porch is a pure planner: ... Never hand-edit ...").
-    # The hot tier's <=10-fact cap forbids splitting the fact onto its own
-    # line, and T6 enforces LINE-exactness — so arch-critical is deliberately
-    # not listed here. Its wording is still policed by T6's stale-variant
-    # sweep and by the hot tier's own MAINTAIN regime (Spec 987).
     must_appear_on:
       - CLAUDE.md
       - AGENTS.md
+      - codev/resources/arch-critical.md
       - .claude/skills/porch/SKILL.md
       - .codex/skills/porch/SKILL.md
       - codev-skeleton/.claude/skills/porch/SKILL.md
@@ -98,7 +93,11 @@ scar_rules:
       - codev-skeleton/protocols/maintain/builder-prompt.md
       - codev-skeleton/protocols/pir/builder-prompt.md
       - codev-skeleton/protocols/research/builder-prompt.md
+      - codev-skeleton/protocols/spike/builder-prompt.md
       - codev-skeleton/protocols/spir/builder-prompt.md
+      - codev-skeleton/porch/prompts/implement.md
+      - codev-skeleton/protocols/spir/prompts/implement.md
+      - codev-skeleton/protocols/aspir/prompts/implement.md
 
   - id: afx-from-root
     canonical: "Run `afx` commands only from the main workspace root, never from inside a builder worktree — spawning from a worktree nests builders and breaks the workspace."

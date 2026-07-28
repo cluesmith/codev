@@ -680,3 +680,19 @@ derived baselines re-derived with the same canonical substitutions.
 CLAUDE.md structure: two 🚨 banner blocks collapsed into topical compact rules
 + new "Scar Rules (always in force)" section housing the five without topical
 homes. Net CLAUDE.md shrink measured in Phase 7.
+
+## Phase 5 convergence saga — 4 iterations, each Codex catch real
+
+Iter-1: includes() → line-exactness (appended-qualifier attack); -f → -fd;
+maintain/protocol.md registered. Iter-2: architect.md self-contradiction;
+gate-rule variant on 8 builder-prompts. Iter-3: SECOND afx-anywhere instance
+(fixed the flagged line, hadn't swept the file); sweep extended to the class.
+Iter-4: "bypass checks" variant ×11 (grepped the rule's phrasings, not the
+ACT's); arch-critical exception dissolved by rewriting the now-false two-trees
+fact (freed a cap slot; R5 canonical stands line-exact; pulled a sliver of
+Phase 8's C6 rewrite forward with justification).
+
+Meta-lesson accumulating for the review: every iteration's miss was a
+sweep-scope failure — fix-the-instance vs fix-the-class, and grep-for-wording
+vs grep-for-act. The registry+line-exactness machinery is exactly what makes
+these misses eventually impossible instead of eventually repeated.

@@ -208,7 +208,7 @@ Signal `BLOCKED` with details about what's missing.
 Signal `BLOCKED` with the error message.
 
 **If you encounter pre-existing flaky tests** (tests that fail intermittently but are unrelated to your changes):
-1. **DO NOT** edit `status.yaml` to bypass checks
+1. Never hand-edit `status.yaml` — only porch commands modify project state.
 2. **DO NOT** skip porch checks or use workarounds to avoid the failure
 3. **DO** mark the flaky test as skipped with a clear annotation (e.g., `it.skip('...') // FLAKY: intermittent timeout, skipped pending investigation`)
 4. **DO** document each skipped flaky test in your review under a `## Flaky Tests` section so the team can follow up

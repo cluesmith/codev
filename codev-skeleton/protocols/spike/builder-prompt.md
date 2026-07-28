@@ -50,7 +50,7 @@ Follow this 3-step workflow. You can skip or reorder steps as the investigation 
 ## Handling Flaky Tests
 
 If you encounter **pre-existing flaky tests** (intermittent failures unrelated to your changes):
-1. **DO NOT** edit `status.yaml` to bypass checks
+1. Never hand-edit `status.yaml` — only porch commands modify project state.
 2. **DO NOT** skip porch checks or use any workaround to avoid the failure
 3. **DO** mark the test as skipped with a clear annotation (e.g., `it.skip('...') // FLAKY: skipped pending investigation`)
 4. **DO** document each skipped flaky test in your findings under a `## Flaky Tests` section
