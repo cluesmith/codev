@@ -29,6 +29,7 @@
 
 import { REORIENT_FILE_NAME } from './constants.js';
 import type { ResolvedBuilderContext } from './context.js';
+import type { TemplateContext } from '../spawn-roles.js';
 
 // ============================================================================
 // Ports
@@ -48,20 +49,16 @@ import type { ResolvedBuilderContext } from './context.js';
  */
 export type ResumeNoticePort = (projectId: string) => string;
 
-export type SpawnPromptPort = (
-  protocol: string,
-  context: {
-    protocol_name: string;
-    mode: 'strict' | 'soft';
-    mode_soft: boolean;
-    mode_strict: boolean;
-    project_id?: string;
-    input_description: string;
-    spec?: { path: string; name: string };
-    plan?: { path: string; name: string };
-    issue?: { number: number | string; title: string; body: string };
-  },
-) => string;
+/**
+ * Typed against the REAL `TemplateContext` rather than a hand-rolled copy.
+ *
+ * The local copy was how issue metadata went missing: the port's shape drifted
+ * from what the templates actually consume, and nothing type-checked the gap.
+ * Importing the canonical type means any field added to `TemplateContext` is
+ * visible here, and a field this module fails to populate is a deliberate
+ * omission rather than an oversight nobody can see.
+ */
+export type SpawnPromptPort = (protocol: string, context: TemplateContext) => string;
 
 /**
  * Issue metadata for the spawn template.
