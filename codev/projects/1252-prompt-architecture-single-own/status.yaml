@@ -11,10 +11,10 @@ plan_phases:
     status: complete
   - id: phase_3
     title: Reconcile the 17 drifted files (M3)
-    status: in_progress
+    status: complete
   - id: phase_4
     title: Compatibility audit + shadow-tree removal
-    status: pending
+    status: in_progress
   - id: phase_5
     title: Scar-rule registry with compressed wordings
     status: pending
@@ -27,7 +27,7 @@ plan_phases:
   - id: phase_8
     title: Governance sync + end-to-end verification
     status: pending
-current_plan_phase: phase_3
+current_plan_phase: phase_4
 gates:
   spec-approval:
     status: approved
@@ -42,7 +42,7 @@ gates:
   verify-approval:
     status: pending
 iteration: 1
-build_complete: true
+build_complete: false
 history:
   - iteration: 1
     plan_phase: phase_1
@@ -77,4 +77,4 @@ history:
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/spir-1252/codev/projects/1252-prompt-architecture-single-own/1252-phase_2-iter1-claude.txt
 started_at: '2026-07-27T07:23:40.596Z'
-updated_at: '2026-07-28T01:33:13.899Z'
+updated_at: '2026-07-28T01:38:01.011Z'
