@@ -546,3 +546,20 @@ durably than resolving the escalations prematurely would have.
 Also: spec count corrected in place (77 shadow copies; hand count missed
 consult-types/integration-review.md) and Claude's cosmetic header arithmetic
 fixed (73 protocol files, not 74).
+
+## Phase 3 — 13 rot files reconciled (M3)
+
+Skeleton copied over the 13 rot files per D1. The headline drift is repaired:
+codev/protocols/spir/builder-prompt.md now carries Multi-PR Mechanics, Verify
+Phase, and "Entering verify phase." — the next SPIR builder spawned in this
+repo gets its verify instructions.
+
+Remaining divergence: exactly the 4 escalated json files. Allowlist shrunk
+17 → 4, all re-tagged ESCALATED with adjudication citations. PHASE_3_COMPLETE
+flipped, so the no-PENDING_RECONCILE guard is now live. Audit rows for the 13
+updated to `identical` with "RECONCILED Phase 3 (was: ...)" notes preserving
+the original evidence.
+
+Still waiting on architect rulings for the 4 (max_iterations, cwd). Phase 4
+cannot start until they resolve — enforced by T11's automatic guard, not by my
+memory.

@@ -58,8 +58,8 @@ M11 exists to prevent). Key evidence used:
 | 5 | `protocols/air/prompts/implement.md` | identical | rot | TS1 | byte-identical redundant copy; nothing to lose |
 | 6 | `protocols/air/prompts/pr.md` | identical | rot | TS1 | byte-identical redundant copy; nothing to lose |
 | 7 | `protocols/air/protocol.json` | differs | local-unique | pending | cwd: packages/codev x3 — functional monorepo check cwd; sanctioned home is .codev/config.json porch.checks (Spec #550). ESCALATED. |
-| 8 | `protocols/air/protocol.md` | differs | rot | TS1 | 1-line delta; skeleton wording current |
-| 9 | `protocols/aspir/builder-prompt.md` | differs | rot | TS1 | missing Multi-PR Mechanics + Verify Phase sections (skeleton has them) |
+| 8 | `protocols/air/protocol.md` | identical | rot | TS1 | RECONCILED Phase 3 (was: 1-line delta; skeleton wording current) |
+| 9 | `protocols/aspir/builder-prompt.md` | identical | rot | TS1 | RECONCILED Phase 3 (was: missing Multi-PR Mechanics + Verify Phase sections (skeleton has them)) |
 | 10 | `protocols/aspir/consult-types/impl-review.md` | identical | rot | TS1 | byte-identical redundant copy; nothing to lose |
 | 11 | `protocols/aspir/consult-types/phase-review.md` | identical | rot | TS1 | byte-identical redundant copy; nothing to lose |
 | 12 | `protocols/aspir/consult-types/plan-review.md` | identical | rot | TS1 | byte-identical redundant copy; nothing to lose |
@@ -71,10 +71,10 @@ M11 exists to prevent). Key evidence used:
 | 18 | `protocols/aspir/prompts/specify.md` | identical | rot | TS1 | byte-identical redundant copy; nothing to lose |
 | 19 | `protocols/aspir/protocol.json` | differs | local-unique | pending | max_iterations 8 (local) vs 3 (skeleton) x5 — CMAP loop bound. ESCALATED. |
 | 20 | `protocols/aspir/protocol.md` | identical | rot | TS1 | byte-identical redundant copy; nothing to lose |
-| 21 | `protocols/aspir/templates/plan.md` | differs | rot | TS1 | local-only TICK Amendments section; TICK retired (no protocol dir in either tree; porch refs only in one stale test) |
+| 21 | `protocols/aspir/templates/plan.md` | identical | rot | TS1 | RECONCILED Phase 3 (was: local-only TICK Amendments section; TICK retired (no protocol dir in either tree; porch refs only in one stale test)) |
 | 22 | `protocols/aspir/templates/review.md` | identical | rot | TS1 | byte-identical redundant copy; nothing to lose |
-| 23 | `protocols/aspir/templates/spec.md` | differs | rot | TS1 | same TICK Amendments section |
-| 24 | `protocols/bugfix/builder-prompt.md` | differs | rot | TS1 | local says SPIR/TICK; TICK retired |
+| 23 | `protocols/aspir/templates/spec.md` | identical | rot | TS1 | RECONCILED Phase 3 (was: same TICK Amendments section) |
+| 24 | `protocols/bugfix/builder-prompt.md` | identical | rot | TS1 | RECONCILED Phase 3 (was: local says SPIR/TICK; TICK retired) |
 | 25 | `protocols/bugfix/consult-types/impl-review.md` | identical | rot | TS1 | byte-identical redundant copy; nothing to lose |
 | 26 | `protocols/bugfix/consult-types/pr-review.md` | identical | rot | TS1 | byte-identical redundant copy; nothing to lose |
 | 27 | `protocols/bugfix/prompts/fix.md` | identical | rot | TS1 | byte-identical redundant copy; nothing to lose |
@@ -84,7 +84,7 @@ M11 exists to prevent). Key evidence used:
 | 31 | `protocols/bugfix/protocol.md` | identical | rot | TS1 | byte-identical redundant copy; nothing to lose |
 | 32 | `protocols/experiment/builder-prompt.md` | identical | rot | TS1 | byte-identical redundant copy; nothing to lose |
 | 33 | `protocols/experiment/protocol.json` | identical | rot | TS1 | byte-identical redundant copy; nothing to lose |
-| 34 | `protocols/experiment/protocol.md` | differs | rot | TS1 | local TICK handoff section; TICK retired |
+| 34 | `protocols/experiment/protocol.md` | identical | rot | TS1 | RECONCILED Phase 3 (was: local TICK handoff section; TICK retired) |
 | 35 | `protocols/experiment/templates/notes.md` | identical | rot | TS1 | byte-identical redundant copy; nothing to lose |
 | 36 | `protocols/maintain/builder-prompt.md` | identical | rot | TS1 | byte-identical redundant copy; nothing to lose |
 | 37 | `protocols/maintain/consult-types/impl-review.md` | identical | rot | TS1 | byte-identical redundant copy; nothing to lose |
@@ -102,15 +102,15 @@ M11 exists to prevent). Key evidence used:
 | 49 | `protocols/pir/prompts/review.md` | identical | rot | TS1 | byte-identical redundant copy; nothing to lose |
 | 50 | `protocols/pir/protocol.json` | identical | rot | TS1 | byte-identical redundant copy; nothing to lose |
 | 51 | `protocols/pir/protocol.md` | identical | rot | TS1 | byte-identical redundant copy; nothing to lose |
-| 52 | `protocols/protocol-schema.json` | differs | rot | TS1 | local example lists tick; TICK retired |
+| 52 | `protocols/protocol-schema.json` | identical | rot | TS1 | RECONCILED Phase 3 (was: local example lists tick; TICK retired) |
 | 53 | `protocols/research/builder-prompt.md` | identical | rot | TS1 | byte-identical redundant copy; nothing to lose |
 | 54 | `protocols/research/protocol.json` | identical | rot | TS1 | byte-identical redundant copy; nothing to lose |
 | 55 | `protocols/research/protocol.md` | identical | rot | TS1 | byte-identical redundant copy; nothing to lose |
 | 56 | `protocols/spike/builder-prompt.md` | identical | rot | TS1 | byte-identical redundant copy; nothing to lose |
 | 57 | `protocols/spike/protocol.json` | identical | rot | TS1 | byte-identical redundant copy; nothing to lose |
-| 58 | `protocols/spike/protocol.md` | differs | rot | TS1 | local mentions TICK; TICK retired |
+| 58 | `protocols/spike/protocol.md` | identical | rot | TS1 | RECONCILED Phase 3 (was: local mentions TICK; TICK retired) |
 | 59 | `protocols/spike/templates/findings.md` | identical | rot | TS1 | byte-identical redundant copy; nothing to lose |
-| 60 | `protocols/spir/builder-prompt.md` | differs | rot | TS1 | THE HEADLINE DRIFT: local missing Multi-PR Mechanics + Verify Phase + "Entering verify phase." string |
+| 60 | `protocols/spir/builder-prompt.md` | identical | rot | TS1 | RECONCILED Phase 3 (was: THE HEADLINE DRIFT: local missing Multi-PR Mechanics + Verify Phase + "Entering verify phase." string) |
 | 61 | `protocols/spir/consult-types/impl-review.md` | identical | rot | TS1 | byte-identical redundant copy; nothing to lose |
 | 62 | `protocols/spir/consult-types/phase-review.md` | identical | rot | TS1 | byte-identical redundant copy; nothing to lose |
 | 63 | `protocols/spir/consult-types/plan-review.md` | identical | rot | TS1 | byte-identical redundant copy; nothing to lose |
@@ -121,11 +121,11 @@ M11 exists to prevent). Key evidence used:
 | 68 | `protocols/spir/prompts/review.md` | identical | rot | TS1 | byte-identical redundant copy; nothing to lose |
 | 69 | `protocols/spir/prompts/specify.md` | identical | rot | TS1 | byte-identical redundant copy; nothing to lose |
 | 70 | `protocols/spir/protocol.json` | differs | local-unique | pending | max_iterations 8 vs 3 x5 — same as aspir. ESCALATED. |
-| 71 | `protocols/spir/protocol.md` | differs | rot | TS1 | local keeps pre-restructure porch section with obsolete underscore gate IDs (spec_approval); skeleton moved to build-verify model |
-| 72 | `protocols/spir/templates/plan.md` | differs | rot | TS1 | local-only TICK Amendments section; TICK retired |
+| 71 | `protocols/spir/protocol.md` | identical | rot | TS1 | RECONCILED Phase 3 (was: local keeps pre-restructure porch section with obsolete underscore gate IDs (spec_approval); skeleton moved to build-verify model) |
+| 72 | `protocols/spir/templates/plan.md` | identical | rot | TS1 | RECONCILED Phase 3 (was: local-only TICK Amendments section; TICK retired) |
 | 73 | `protocols/spir/templates/review.md` | identical | rot | TS1 | byte-identical redundant copy; nothing to lose |
-| 74 | `protocols/spir/templates/spec.md` | differs | rot | TS1 | same TICK Amendments section |
-| 75 | `roles/architect.md` | differs | rot | TS1 | skeleton generalized labels section to <prefix>/ placeholders; codev-specific area/ recipes already owned by CLAUDE.md — no content lost |
+| 74 | `protocols/spir/templates/spec.md` | identical | rot | TS1 | RECONCILED Phase 3 (was: same TICK Amendments section) |
+| 75 | `roles/architect.md` | identical | rot | TS1 | RECONCILED Phase 3 (was: skeleton generalized labels section to <prefix>/ placeholders; codev-specific area/ recipes already owned by CLAUDE.md — no content lost) |
 | 76 | `roles/builder.md` | identical | rot | TS1 | byte-identical redundant copy; nothing to lose |
 | 77 | `roles/consultant.md` | identical | rot | TS1 | byte-identical redundant copy; nothing to lose |
 ## Local-only entries (NOT shadow copies — preserved, T8)

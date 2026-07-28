@@ -44,7 +44,9 @@ export interface AllowEntry {
 }
 
 /**
- * The 17 drifted shadow copies present when the gate was introduced (Phase 1).
+ * Phase-1 seeded 17 PENDING_RECONCILE entries (the drift present when the gate
+ * was introduced); Phase 3 reconciled 13 of them to the skeleton and removed
+ * their entries. What remains is exactly the 4 open M11 escalations.
  *
  * Populated from the audit's own output rather than hand-transcribed from
  * `diff -rq`, because the audit compares against the *installed skeleton*
@@ -52,30 +54,29 @@ export interface AllowEntry {
  * two can disagree if the skeleton has not been rebuilt.
  */
 export const SHADOW_DRIFT_ALLOWLIST: AllowEntry[] = [
-  // --- protocols/ (16) --- all PENDING_RECONCILE per D1 (skeleton authoritative)
-  { relativePath: 'protocols/air/protocol.json', reason: 'PENDING_RECONCILE', note: 'Phase 3 (D1)' },
-  { relativePath: 'protocols/air/protocol.md', reason: 'PENDING_RECONCILE', note: 'Phase 3 (D1)' },
-  { relativePath: 'protocols/aspir/builder-prompt.md', reason: 'PENDING_RECONCILE', note: 'Phase 3 (D1)' },
-  { relativePath: 'protocols/aspir/protocol.json', reason: 'PENDING_RECONCILE', note: 'Phase 3 (D1)' },
-  { relativePath: 'protocols/aspir/templates/plan.md', reason: 'PENDING_RECONCILE', note: 'Phase 3 (D1)' },
-  { relativePath: 'protocols/aspir/templates/spec.md', reason: 'PENDING_RECONCILE', note: 'Phase 3 (D1)' },
-  { relativePath: 'protocols/bugfix/builder-prompt.md', reason: 'PENDING_RECONCILE', note: 'Phase 3 (D1)' },
-  { relativePath: 'protocols/bugfix/protocol.json', reason: 'PENDING_RECONCILE', note: 'Phase 3 (D1)' },
-  { relativePath: 'protocols/experiment/protocol.md', reason: 'PENDING_RECONCILE', note: 'Phase 3 (D1)' },
-  { relativePath: 'protocols/protocol-schema.json', reason: 'PENDING_RECONCILE', note: 'Phase 3 (D1)' },
-  { relativePath: 'protocols/spike/protocol.md', reason: 'PENDING_RECONCILE', note: 'Phase 3 (D1)' },
+  // --- The 4 open M11 escalations (Phase 2). Everything else was reconciled
+  // --- to the skeleton in Phase 3 per decision D1; these stay untouched until
+  // --- the architect rules (audit: codev/resources/1252-shadow-tree-audit.md).
   {
-    relativePath: 'protocols/spir/builder-prompt.md',
-    reason: 'PENDING_RECONCILE',
-    note: 'Phase 3 (D1) — the headline drift: missing Multi-PR Mechanics + Verify Phase sections',
+    relativePath: 'protocols/spir/protocol.json',
+    reason: 'ESCALATED',
+    note: 'max_iterations 8 (local) vs 3 (skeleton) — CMAP loop bound; architect ruling requested Phase 2 (afx send 2026-07-27)',
   },
-  { relativePath: 'protocols/spir/protocol.json', reason: 'PENDING_RECONCILE', note: 'Phase 3 (D1)' },
-  { relativePath: 'protocols/spir/protocol.md', reason: 'PENDING_RECONCILE', note: 'Phase 3 (D1)' },
-  { relativePath: 'protocols/spir/templates/plan.md', reason: 'PENDING_RECONCILE', note: 'Phase 3 (D1)' },
-  { relativePath: 'protocols/spir/templates/spec.md', reason: 'PENDING_RECONCILE', note: 'Phase 3 (D1)' },
-
-  // --- roles/ (1) ---
-  { relativePath: 'roles/architect.md', reason: 'PENDING_RECONCILE', note: 'Phase 3 (D1)' },
+  {
+    relativePath: 'protocols/aspir/protocol.json',
+    reason: 'ESCALATED',
+    note: 'max_iterations 8 vs 3 — same escalation as spir/protocol.json',
+  },
+  {
+    relativePath: 'protocols/air/protocol.json',
+    reason: 'ESCALATED',
+    note: 'cwd packages/codev in check commands — monorepo functionality; recommended migration to .codev/config.json porch.checks, awaiting architect ruling (afx send 2026-07-27)',
+  },
+  {
+    relativePath: 'protocols/bugfix/protocol.json',
+    reason: 'ESCALATED',
+    note: 'cwd packages/codev — same escalation as air/protocol.json',
+  },
 ];
 
 /** Allowlisted paths as a Set, for O(1) gate lookups. */

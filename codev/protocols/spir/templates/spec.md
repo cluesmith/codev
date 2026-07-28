@@ -152,31 +152,3 @@ Note: All consultation feedback has been incorporated directly into the relevant
 ## Notes
 [Any additional context or considerations not covered above]
 
----
-
-## Amendments
-
-This section tracks all TICK amendments to this specification. TICKs are lightweight changes that refine an existing spec rather than creating a new one.
-
-<!-- When adding a TICK amendment, add a new entry below this line in chronological order -->
-
-<!--
-### TICK-001: [Amendment Title] (YYYY-MM-DD)
-
-**Summary**: [One-line description of what changed]
-
-**Problem Addressed**:
-[Why this amendment was needed - what gap or issue in the original spec]
-
-**Spec Changes**:
-- [Section modified]: [What changed and why]
-- [New section added]: [Purpose]
-
-**Plan Changes**:
-- [Phase added/modified]: [Description]
-- [Implementation steps]: [What was updated]
-
-**Review**: See `reviews/####-name-tick-001.md`
-
----
--->

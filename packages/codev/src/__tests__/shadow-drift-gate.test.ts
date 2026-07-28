@@ -117,7 +117,7 @@ describe('shadow-drift gate (M2)', () => {
    *
    * Enable by flipping PHASE_3_COMPLETE in Phase 3's commit.
    */
-  const PHASE_3_COMPLETE = false;
+  const PHASE_3_COMPLETE = true;
 
   it.skipIf(!PHASE_3_COMPLETE)(
     'after Phase 3, no PENDING_RECONCILE entries remain',
