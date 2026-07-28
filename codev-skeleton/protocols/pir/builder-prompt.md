@@ -8,7 +8,7 @@ You are running in SOFT mode. This means:
 - You follow the PIR protocol document yourself (no porch orchestration)
 - The architect monitors your work and verifies you're adhering to the protocol
 - Run consultations manually when the protocol calls for them
-- You have flexibility in execution, but must stay compliant with the protocol
+{{> partials/soft-mode-compliance.md}}
 {{/if}}
 
 {{#if mode_strict}}

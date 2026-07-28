@@ -105,7 +105,11 @@ function loadBuilderPromptTemplate(config: Config, protocolName: string): string
   if (!templatePath) {
     return null;
   }
-  return readFileSync(templatePath, 'utf-8');
+  // Spec 1252 (Phase 7): expand {{> partials/...}} includes so template-family
+  // content (shared blocks across protocol builder-prompts) can have a single
+  // authored owner while every served prompt still carries the full text.
+  // Mirrors the existing include expansion on the protocol_reference path.
+  return resolveCodevIncludes(readFileSync(templatePath, 'utf-8'), config.workspaceRoot);
 }
 
 /**

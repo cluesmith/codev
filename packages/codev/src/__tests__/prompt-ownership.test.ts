@@ -182,11 +182,13 @@ describe('single-owner enforcement (M4 / T7)', () => {
         if (!fs.existsSync(p)) continue;
         const content = fs.readFileSync(p, 'utf-8');
         const hit = matcher ? matcher.test(content) : content.includes(c.pattern);
-        // No exemption for `references` surfaces: a well-formed reference
-        // points at the owner without reproducing the rule text, so it never
-        // trips the pattern. If it does, that's a restatement — exactly what
-        // T7 exists to catch (Codex, Phase-6 iter-2).
-        if (hit && !allowed.has(s.id)) {
+        // `references` (pointers) get NO exemption: a well-formed reference
+        // never reproduces the rule text (Codex, Phase-6 iter-2). Declared
+        // TS3-style retentions are exempt — they are full protocol-specific
+        // variants kept by decision, justified per class, and listed under
+        // retained_restatements rather than references.
+        const retained = new Set(c.retained_restatements ?? []);
+        if (hit && !allowed.has(s.id) && !retained.has(s.id)) {
           failures.push(`${c.id}: pattern found on non-owner surface ${s.id}`);
         }
         if (!hit && allowed.has(s.id)) {

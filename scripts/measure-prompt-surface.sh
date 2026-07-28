@@ -67,14 +67,29 @@ resolve() { # two-tier resolve: codev/ wins, else skeleton
   else echo /dev/null; fi
 }
 PHASE_ITERS="${PHASE_ITERS:-10}"
-SPAWN_BP=$(w "$(resolve protocols/spir/builder-prompt.md)")
+# SERVED words, not authored: {{> partials/...}} includes are expanded into
+# every spawn prompt, so the proxy must count them or dedup-by-include would
+# claim phantom always-on savings (it changes authored ownership, not served
+# bytes).
+expanded_w() { # file + its (one-level) partial includes
+  local f="$1"; local total; total=$(w "$f")
+  for inc in $(grep -o '{{> *[^} ]*' "$f" 2>/dev/null | sed 's/{{> *//'); do
+    total=$(( total + $(w "$(resolve "$inc")") ))
+  done
+  echo "$total"
+}
+SPAWN_BP=$(expanded_w "$(resolve protocols/spir/builder-prompt.md)")
 SPAWN_PROTO=$(w "$(resolve protocols/spir/protocol.md)")
 SPAWN_PROMPT=$(( SPAWN_BP + SPAWN_PROTO ))
 PORCH_PROMPT_MEAN=0
 PORCH_DIR="$( [ -d codev/porch/prompts ] && echo codev/porch/prompts || echo codev-skeleton/porch/prompts )"
 if [ -d "$PORCH_DIR" ]; then
   PORCH_N=$(find "$PORCH_DIR" -name '*.md' | wc -l | tr -d ' ')
-  [ "$PORCH_N" -gt 0 ] && PORCH_PROMPT_MEAN=$(( $(wdir "$PORCH_DIR") / PORCH_N ))
+  if [ "$PORCH_N" -gt 0 ]; then
+    PORCH_TOTAL=0
+    for pf in "$PORCH_DIR"/*.md; do PORCH_TOTAL=$(( PORCH_TOTAL + $(expanded_w "$pf") )); done
+    PORCH_PROMPT_MEAN=$(( PORCH_TOTAL / PORCH_N ))
+  fi
 fi
 PHASE_TASK=$(( ARCH_CRIT + LESS_CRIT + PORCH_PROMPT_MEAN ))
 ALWAYS_ON=$(( CLAUDE_MD + SPAWN_PROMPT + PHASE_TASK * PHASE_ITERS ))

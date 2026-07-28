@@ -48,8 +48,15 @@ export interface InstructionClass {
   enforcement: 'automated' | 'manual';
   /** For scar rules: surfaces that must all carry it (mirrors scar-rules.yaml). */
   must_appear_on?: string[];
-  /** For non-scar: surfaces allowed to carry a one-line reference. */
+  /** For non-scar: surfaces allowed to carry a one-line POINTER — pointers
+   *  must NOT reproduce the rule text (they never trip the pattern; T7
+   *  enforces that). */
   references?: string[];
+  /** Declared TS3-style retained restatements: surfaces that keep a full,
+   *  protocol-specific variant by decision. T7 exempts exactly these, and
+   *  each class using this field must justify it. Distinct from `references`
+   *  so pointer surfaces stay pattern-forbidden (Codex, Phase-6 iter-2). */
+  retained_restatements?: string[];
   /** Required for enforcement: manual — why no reliable pattern exists. */
   manual_justification?: string;
 }
@@ -160,7 +167,10 @@ export function validateMap(map: OwnershipMap, root?: string): string[] {
     if (c.enforcement === 'manual' && !c.manual_justification) {
       problems.push(`${c.id}: enforcement:manual requires manual_justification`);
     }
-    for (const ref of [...(c.must_appear_on ?? []), ...(c.references ?? [])]) {
+    if ((c.retained_restatements?.length ?? 0) > 0 && !c.manual_justification) {
+      problems.push(`${c.id}: retained_restatements requires a justification`);
+    }
+    for (const ref of [...(c.must_appear_on ?? []), ...(c.references ?? []), ...(c.retained_restatements ?? [])]) {
       if (!surfaceIds.has(ref)) problems.push(`${c.id}: unknown surface "${ref}"`);
     }
   }

@@ -1,0 +1,1 @@
+- Don't estimate time — AI development makes time estimates meaningless

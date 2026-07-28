@@ -720,3 +720,47 @@ gate. Two coordination notes recorded in the map: baked-decisions dedup must
 move with Spec 746's test suite; pr-single-by-default with bugfix-744's.
 
 Suite: 3,744 green.
+
+## Phase 7 — dedup + measurement: the honest N1 story
+
+**Achieved: 21,856 → 20,314 served always-on words = −7.1% (target was 20%).**
+Reporting the shortfall plainly, per the spec's own instruction, with the
+structural decomposition:
+
+- CLAUDE.md −1,421: the real win. Relocated Runnable Worktrees (1,212w of
+  reference-tier content that existed NOWHERE else — relocation-with-pointer,
+  not dedup) into agent-farm.md (both trees), trimmed Inter-agent messaging to
+  summary+pointer (deep grammar owned by agent-farm.md).
+- Spawn −169 net: drift REPAIR added ~207 served words (Multi-PR + Verify
+  sections the prompt was supposed to have!); protocol.md replacement −384.
+- Phase task ≈ flat: canonical scar lines ≈ old variants in length.
+- D3 compression's CLAUDE.md savings were largely consumed by D3's OWN
+  promotion of rules 3/7/8 into the repo (+~120) — compressing while adding.
+
+Why 20% was never reachable in scope: remaining always-on = protocol.md
+(3,703w, protocol semantics excluded by Non-goals), porch prompts (process
+scaffolding), CLAUDE.md's genuinely-always-on remainder. The 24.6k→20%
+arithmetic assumed more of the surface was duplicated rules; most was
+single-owned prose. The verify phase will tell us if even −7% moved behavior.
+
+**Dedup by include, not by reference** — the key design fact: these are SERVED
+prompts; a bugfix builder never sees spir's prompt, so prose references would
+DELETE content from agents' context. Shared partials
+(codev-skeleton/partials/, expanded via resolveCodevIncludes at assembly) give
+single AUTHORED ownership with unchanged SERVED bytes. Include support added
+to builder-prompt loading (one line, mirroring the protocol_reference path).
+5 partials extracted; 6 classes flipped automated; protocol-specific variants
+kept via a new `retained_restatements` field (distinct from `references` so
+pointer surfaces stay pattern-forbidden — preserving Codex's Phase-6 fix).
+
+**Measurement integrity catch (self-caught)**: after extraction the proxy
+counted AUTHORED builder-prompt words (612) while agents are SERVED the
+expanded form (851). Fixed the script to count expanded words — otherwise N1
+would have claimed 239 phantom words. Dedup-by-include changes ownership, not
+served bytes; the metric must not reward it.
+
+Also: extractor probe corrected my map data twice more (soft-mode carriers =
+spir/aspir/bugfix/pir/air, NOT experiment; notifications = spir/aspir uniform
++ air/bugfix protocol-specific). Every reference list I wrote from memory was
+wrong somewhere; every grep-verified one held. The pattern is now beyond
+dispute.

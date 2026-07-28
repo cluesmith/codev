@@ -33,8 +33,12 @@ why `FRAMEWORK_DRIFT_DIRS` omits `resources` (Q7).
 
 ## Instruction classes (non-scar, cross-surface)
 
-Discovered by the extractor at Phase 6; all `manual` until Phase 7 replaces
-non-owner restatements with references and flips them to `automated`:
+Discovered by the extractor at Phase 6. Phase 7 extracted the uniform blocks
+into shared partials (single authored owner; served prompts still carry the
+full text via `{{> partials/...}}` include expansion) and flipped those
+classes to `automated`. Classes whose remaining copies are protocol-specific
+variants stay `manual` or carry declared `retained_restatements` (each
+justified in the YAML):
 
 | Class | Owner | Currently restated on |
 |---|---|---|
@@ -51,11 +55,12 @@ non-owner restatements with references and flips them to `automated`:
 
 ## Phase-6 measurement
 
-<!-- t12-parity: total=190 mapped=37 scar=39 out-of-scope=114 classes=10 -->
-190 normative candidates over the boundary (case-insensitive extractor):
-**37 mapped** (the 10 classes above), **39 scar** (registry-enforced),
-**114 file-local** (catch-all, all single-file). Zero undispositioned; zero
-multi-file texts hiding behind the catch-all. The parity marker above is
+<!-- t12-parity: total=173 mapped=24 scar=39 out-of-scope=110 classes=10 -->
+173 normative candidates over the boundary post-Phase-7 (down from 190 —
+dedup moved shared blocks into `codev-skeleton/partials/`, expanded into every
+served prompt at assembly): **24 mapped**, **39 scar** (registry-enforced),
+**110 file-local**. Zero undispositioned; zero multi-file texts hiding behind
+the catch-all. The parity marker above is
 asserted against the live extractor by `prompt-ownership.test.ts` — if these
 numbers drift from reality, CI fails until this companion is updated.
 

@@ -1,0 +1,1 @@
+- You have flexibility in execution, but must stay compliant with the protocol

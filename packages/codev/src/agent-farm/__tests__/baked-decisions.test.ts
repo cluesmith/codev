@@ -19,6 +19,7 @@ import { describe, it, expect } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { renderTemplate, type TemplateContext } from '../commands/spawn-roles.js';
+import { resolveCodevIncludes } from '../../lib/skeleton.js';
 
 // Spec 1252 (Phase 4): the codev/protocols shadow tree was DELETED — the
 // skeleton is the single owner and the resolver serves it at tier 4. The
@@ -721,7 +722,12 @@ describe('Spec 746 end-to-end smoke: builder-prompt rendering with baked-decisio
   for (const protocol of ['spir', 'aspir', 'air']) {
     describe(`${protocol} builder-prompt`, () => {
       const templatePath = path.resolve(repoRoot, `codev-skeleton/protocols/${protocol}/builder-prompt.md`);
-      const template = fs.readFileSync(templatePath, 'utf-8');
+      // Spec 1252 (Phase 7): mirror production loading — builder-prompt
+      // templates are include-expanded ({{> partials/...}}) before rendering.
+      const template = resolveCodevIncludes(
+        fs.readFileSync(templatePath, 'utf-8'),
+        repoRoot,
+      );
       const ctx = makeContext(protocol);
       const rendered = renderTemplate(template, ctx);
 

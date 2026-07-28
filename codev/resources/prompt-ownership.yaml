@@ -85,6 +85,14 @@ surfaces:
   - { id: pp-test, path: codev-skeleton/porch/prompts/test.md, load: phase-prompt }
   # Ownership anchors outside the scan boundary (on-demand reference docs)
   - { id: spir-protocol-doc, path: codev-skeleton/protocols/spir/protocol.md, load: on-demand }
+  - { id: agent-farm-doc, path: codev/resources/commands/agent-farm.md, load: on-demand }
+  # Shared partials — single authored owner, expanded into every served prompt
+  # at assembly time via {{> partials/...}} (resolveCodevIncludes)
+  - { id: partial-soft-mode, path: codev-skeleton/partials/soft-mode-compliance.md, load: spawn }
+  - { id: partial-notifications, path: codev-skeleton/partials/builder-notifications.md, load: spawn }
+  - { id: partial-multi-pr, path: codev-skeleton/partials/multi-pr-mechanics.md, load: spawn }
+  - { id: partial-strict-restrictions, path: codev-skeleton/partials/strict-mode-restrictions.md, load: spawn }
+  - { id: partial-no-time-estimates, path: codev-skeleton/partials/no-time-estimates.md, load: phase-prompt }
 
 # Non-scar instruction classes with cross-surface duplication, discovered by
 # the extractor at Phase 6. All are `enforcement: manual` until Phase 7
@@ -106,24 +114,24 @@ instructions:
 
   - id: no-skip-3way-review
     summary: Never skip the 3-way review; follow the porch next/done cycle.
-    owner: bp-spir
+    owner: partial-strict-restrictions
     scar: false
     pattern: "NEVER skip the 3-way review"
-    enforcement: manual
+    enforcement: automated
+    retained_restatements: [bp-bugfix, bp-experiment]
     manual_justification: >
-      Restated in the strict-mode restriction blocks of 4 builder-prompts
-      (spir, aspir, bugfix, experiment — verified by grep at Phase 6 iter-2).
-      Phase 7 target.
-    references: [bp-aspir, bp-bugfix, bp-experiment]
+      AUTOMATED for the extracted pair (spir/aspir include the partial).
+      bp-bugfix and bp-experiment retain protocol-specific restriction blocks
+      carrying this line by decision (their blocks differ structurally);
+      revisit in MAINTAIN.
 
   - id: no-advance-phases-manually
     summary: Porch advances plan phases; never advance them manually.
-    owner: bp-spir
+    owner: partial-strict-restrictions
     scar: false
     pattern: "NEVER advance plan phases manually"
-    enforcement: manual
-    manual_justification: Restated in 2 builder-prompts; Phase 7 target.
-    references: [bp-aspir]
+    enforcement: automated
+    references: []
 
   - id: baked-decisions-handling
     summary: Treat issue-body Baked Decisions as fixed; escalate conflicts, never override.
@@ -159,42 +167,42 @@ instructions:
 
   - id: multi-pr-mechanics
     summary: Sequential-PR mechanics (branch off origin, never checkout the integration branch).
-    owner: bp-spir
+    owner: partial-multi-pr
     scar: false
     pattern: "git checkout <integration-branch>"
-    enforcement: manual
-    manual_justification: Multi-PR Mechanics section restated in bp-aspir; Phase 7 target.
-    references: [bp-aspir]
+    enforcement: automated
+    references: []
 
   - id: notify-architect-key-moments
     summary: Builders notify the architect via afx send at key moments.
-    owner: bp-spir
+    owner: partial-notifications
     scar: false
     pattern: "notify the architect at key moments"
-    enforcement: manual
-    manual_justification: Notifications section restated across 4 builder-prompts; Phase 7 target.
-    references: [bp-aspir, bp-pir, bp-research]
+    enforcement: automated
+    retained_restatements: [bp-air, bp-bugfix]
+    manual_justification: >
+      AUTOMATED for the extracted spir/aspir pair. bp-air and bp-bugfix carry
+      protocol-specific notification templates (issue-number based, no gates)
+      by decision; revisit in MAINTAIN.
 
   - id: soft-mode-protocol-compliance
     summary: Soft-mode builders have execution flexibility but must stay protocol-compliant.
-    owner: bp-spir
+    owner: partial-soft-mode
     scar: false
     pattern: "must stay compliant with the protocol"
-    enforcement: manual
-    manual_justification: Soft-mode blurb restated across 5 builder-prompts; Phase 7 target.
-    references: [bp-aspir, bp-bugfix, bp-pir, bp-experiment]
+    enforcement: automated
+    references: []
 
   - id: no-time-estimates
     summary: Plans and specs carry no time estimates; AI development makes them meaningless.
-    owner: spir-protocol-doc
+    owner: partial-no-time-estimates
     scar: false
-    pattern: "/[Dd]on't estimate time|[Nn]o time estimates|NEVER include time estimates/"
-    enforcement: manual
+    pattern: "estimate time"
+    enforcement: automated
+    retained_restatements: [spir-protocol-doc]
     manual_justification: >
-      Owner is the SPIR protocol doc (out-of-boundary reference anchor);
-      boundary occurrences in pp-specify/pp-plan are per-file phrasings.
-      Phase 7 converges them to references.
-    references: [pp-specify, pp-plan]
+      spir-protocol-doc (on-demand) retains its own No-Time-Estimates
+      section as protocol reference prose by decision.
 
 # Disposition table — first match wins; the catch-all is last and may only
 # absorb single-file candidates (enforced by T12).

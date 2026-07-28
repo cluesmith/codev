@@ -102,7 +102,7 @@ git add codev/plans/{{artifact_name}}.md
 
 ## Important Notes
 
-1. **No time estimates** - Don't include hours/days/weeks
+{{> partials/no-time-estimates.md}}
 3. **Be specific about files** - Exact paths, not "the config file"
 4. **Keep phases small** - 1-3 files per phase is ideal
 5. **Document dependencies clearly** - Prevents blocked work
@@ -111,7 +111,7 @@ git add codev/plans/{{artifact_name}}.md
 
 - Don't run `consult` commands yourself (porch handles consultations)
 - Don't write code (that's for Implement phase)
-- Don't estimate time (meaningless in AI development)
+{{> partials/no-time-estimates.md}}
 - Don't create phases that can't be independently tested
 - Don't skip dependency analysis
 - Don't make phases too large (if >5 files, split it)

@@ -1,0 +1,2 @@
+- **NEVER skip the 3-way review** — always follow porch next → porch done cycle
+- **NEVER advance plan phases manually** — porch handles phase transitions after unanimous review approval
