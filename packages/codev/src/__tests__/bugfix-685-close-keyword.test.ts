@@ -19,7 +19,11 @@ interface PromptTarget {
   relPath: string;
 }
 
-const codevTargets: PromptTarget[] = [
+// Spec 1252 (Phase 4): the codev/protocols shadow tree was deleted — the
+// skeleton is the single owner, so the former codev-vs-skeleton mirror pair
+// collapsed to one target list (and the mirror-parity test below was removed
+// as vacuous: there is no second tree to compare against).
+const allTargets: PromptTarget[] = [
   { protocol: 'spir', relPath: 'codev-skeleton/protocols/spir/prompts/review.md' },
   { protocol: 'aspir', relPath: 'codev-skeleton/protocols/aspir/prompts/review.md' },
   { protocol: 'air', relPath: 'codev-skeleton/protocols/air/prompts/pr.md' },
@@ -27,13 +31,6 @@ const codevTargets: PromptTarget[] = [
   { protocol: 'maintain', relPath: 'codev-skeleton/protocols/maintain/prompts/review.md' },
   { protocol: 'experiment', relPath: 'codev-skeleton/protocols/experiment/builder-prompt.md' },
 ];
-
-const skeletonTargets: PromptTarget[] = codevTargets.map((t) => ({
-  protocol: t.protocol,
-  relPath: t.relPath.replace(/^codev\//, 'codev-skeleton/'),
-}));
-
-const allTargets = [...codevTargets, ...skeletonTargets];
 
 describe('PR close-keyword directive (#685)', () => {
   it.each(allTargets)(
@@ -60,14 +57,6 @@ describe('PR close-keyword directive (#685)', () => {
     },
   );
 
-  it('codev-skeleton copies match codev originals for every edited prompt', () => {
-    for (const { relPath } of codevTargets) {
-      const codevContent = fs.readFileSync(path.join(repoRoot, relPath), 'utf-8');
-      const skeletonPath = relPath.replace(/^codev\//, 'codev-skeleton/');
-      const skeletonContent = fs.readFileSync(path.join(repoRoot, skeletonPath), 'utf-8');
-      expect(skeletonContent, `mismatch: ${skeletonPath}`).toBe(codevContent);
-    }
-  });
 
   /**
    * Porch's phase prompt renderer (packages/codev/src/commands/porch/prompts.ts

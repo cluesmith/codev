@@ -1,0 +1,187 @@
+# aspir Builder (strict mode)
+
+You are implementing M10 equivalence fixture — fixed context.
+
+## Mode: STRICT
+You are running in STRICT mode. This means:
+- Porch orchestrates your work
+- Run: `porch next` to get your next tasks
+- Follow porch signals and gate approvals
+- Do not deviate from the porch-driven workflow
+
+### ABSOLUTE RESTRICTIONS (STRICT MODE)
+- **NEVER edit `status.yaml` directly** — only porch commands may modify project state
+- **NEVER call `porch approve` without explicit human approval** — only run it after the architect says to
+- **NEVER skip the 3-way review** — always follow porch next → porch done cycle
+- **NEVER advance plan phases manually** — porch handles phase transitions after unanimous review approval
+
+## Protocol
+Follow the ASPIR protocol. Read and internalize the protocol before starting any work. The full protocol text is included below under **## Protocol Reference (full text)**.
+
+## Baked Decisions
+
+If the issue body contains a section named "Baked Decisions" (any heading level, case-insensitive), treat its contents as fixed architectural decisions baked in by the architect. Do not autonomously override them in your spec, plan, or implementation. If you discover a serious reason to question a baked decision, surface that concern to the architect via `afx send` rather than relitigating it inside the spec/plan/review.
+
+If the architect's baked-decisions section contains internal contradictions (e.g., two different language choices), do not pick one — pause, flag the contradiction to the architect via `afx send`, and wait for resolution before proceeding.
+
+## Issue #9999
+**Title**: fixture
+
+**Description**:
+fixture body
+
+## PR Strategy
+
+**Do not autonomously open a PR per implementation phase.** Plan phases ship as git commits within a single PR, not as separate PRs. The plan's instruction that "each phase commits independently" refers to git commits, not PRs.
+
+By default, the PR is opened during/after the final implement phase, with all phase-commits already on the branch.
+
+### Architect-requested PRs
+
+The architect MAY request a PR at any point — for spec review, mid-implementation feedback, slicing a large spec into shippable PRs, etc. When the architect explicitly asks for a PR earlier (or for additional PRs), follow that direction. The prohibition is specifically on the *builder* autonomously deciding to open per-phase PRs without architect request.
+
+### Multi-PR Mechanics (when the architect requests sequential PRs)
+
+Your worktree is persistent — it survives across PR merges. When the architect asks for sequential PRs (e.g., to slice a large spec into shippable pieces), use this loop:
+
+1. Cut a branch, open a PR, wait for merge
+2. After merge: `git fetch origin <integration-branch> && git checkout -b <next-branch> origin/<integration-branch>` — where `<integration-branch>` is the branch the architect targets PRs at (usually `main`; check the open PR's `baseRefName` if unsure)
+3. Continue to the next slice, open another PR
+
+**Important**: Do NOT run `git checkout <integration-branch>` — git worktrees cannot check out a branch that's checked out elsewhere. Always branch off `origin/<integration-branch>` via fetch.
+
+Record PRs: `porch done 9999 --pr <N> --branch <name>`
+Record merges: `porch done 9999 --merged <N>`
+
+## Verify Phase
+
+After the final PR merges, the project enters the **verify** phase. You stay alive through verify:
+1. Pull the integration branch into your worktree
+2. Run `porch done 9999` to signal verification is ready
+3. The architect approves `verify-approval` when satisfied
+
+If verification is not needed: `porch verify 9999 --skip "reason"`
+
+## Notifications
+Always use `afx send architect "..."` to notify the architect at key moments:
+- **Gate reached**: `afx send architect "Project 9999: <gate-name> ready for approval"`
+- **PR ready**: `afx send architect "PR #N ready for review (project 9999)"`
+- **PR merged**: `afx send architect "Project 9999 PR merged. Entering verify phase."`
+- **Blocked**: `afx send architect "Blocked on project 9999: [reason]"`
+
+## Handling Flaky Tests
+
+If you encounter **pre-existing flaky tests** (intermittent failures unrelated to your changes):
+1. **DO NOT** edit `status.yaml` to bypass checks
+2. **DO NOT** skip porch checks or use any workaround to avoid the failure
+3. **DO** mark the test as skipped with a clear annotation (e.g., `it.skip('...') // FLAKY: skipped pending investigation`)
+4. **DO** document each skipped flaky test in your review under a `## Flaky Tests` section
+5. Commit the skip and continue with your work
+
+## Getting Started
+1. Read the protocol document thoroughly
+2. Review the spec and plan (if available)
+3. Begin implementation following the protocol phases
+
+---
+
+## Protocol Reference (full text)
+
+# ASPIR Protocol
+
+> **ASPIR** = **A**utonomous **S**pecify → **P**lan → **I**mplement → **R**eview
+>
+> Identical to SPIR but without human approval gates on spec and plan phases.
+> Each phase has one build-verify cycle with 3-way consultation.
+
+## What is ASPIR?
+
+ASPIR is an autonomous variant of the SPIR protocol. It follows the exact same phases (Specify → Plan → Implement → Review) with the same 3-way consultations, checks, and PR flow — but removes the `spec-approval` and `plan-approval` human gates.
+
+This means the builder proceeds automatically from Specify → Plan → Implement without waiting for human approval at each gate. The `pr` gate in the Review phase is preserved — a human still reviews all code before merge.
+
+### Differences from SPIR
+
+| Aspect | SPIR | ASPIR |
+|--------|------|-------|
+| Spec gate (`spec-approval`) | Human must approve | Auto-approved |
+| Plan gate (`plan-approval`) | Human must approve | Auto-approved |
+| PR gate (`pr`) | Human must approve | Human must approve |
+| Phases | Specify → Plan → Implement → Review | Same |
+| 3-way consultations | Yes, every phase | Same |
+| Checks (build, tests, PR) | Yes | Same |
+| Prompts / templates | Full set | Same (copied from SPIR) |
+
+### When to Use ASPIR
+
+Use ASPIR instead of SPIR when:
+
+- The work is **trusted and low-risk** — internal tooling, protocol additions, well-understood features
+- The architect has **pre-written and approved** the spec before spawning
+- The scope is **self-contained** with low blast radius
+- You want **full SPIR discipline** (consultations, phased implementation, review) without waiting at gates
+
+### When NOT to Use ASPIR
+
+Use SPIR instead when:
+
+- The feature involves **novel architecture** or unclear requirements
+- The spec needs **iterative human feedback** during drafting
+- The work is **high-risk** — security-sensitive, user-facing, or broadly impactful
+- You want to **review and adjust** the plan before implementation starts
+
+## Baked Decisions (Optional)
+
+When filing an issue for ASPIR, you can pin architectural decisions you don't want the builder or CMAP reviewers to re-litigate. Include a `## Baked Decisions` section (any heading level is fine) anywhere in the issue body. Useful categories: language, framework, deployment shape, key dependencies, decisions deferred to a later spec. The builder will copy the section verbatim into the spec's Constraints and treat each item as fixed; CMAP reviewers will not propose alternatives unless the spec itself fails to honor a stated decision. Leave the section out for issues where you want the builder to explore freely — absence is the no-op default. You can amend or rescind a baked decision at any time by updating the issue and respawning, or by sending the builder a direct instruction via `afx send`.
+
+## Protocol Phases
+
+ASPIR follows the same four phases as SPIR. For full phase documentation, see the [SPIR protocol](../spir/protocol.md).
+
+### S - Specify
+Write specification with 3-way review (Gemini, Codex, Claude). **No human gate** — proceeds directly to Plan after verification.
+
+### P - Plan
+Write implementation plan with 3-way review. **No human gate** — proceeds directly to Implement after verification and checks pass.
+
+### I - Implement
+Execute each plan phase with build-verify cycle. Same as SPIR — no gate between phases (SPIR also has no gate here).
+
+### R - Review
+Final review, PR preparation, and 3-way review. **PR gate preserved** — builder stops and waits for human approval before merge.
+
+## Usage
+
+```bash
+# Spawn a builder using ASPIR
+afx spawn 42 --protocol aspir
+
+# The builder runs autonomously through Specify → Plan → Implement
+# and stops only at the PR gate in the Review phase
+```
+
+## File Structure
+
+```
+codev/protocols/aspir/
+├── protocol.json          # Protocol definition (SPIR minus gates)
+├── protocol.md            # This file
+├── builder-prompt.md      # Builder instructions (same as SPIR)
+├── prompts/
+│   ├── specify.md         # Specify phase prompt (same as SPIR)
+│   ├── plan.md            # Plan phase prompt (same as SPIR)
+│   ├── implement.md       # Implement phase prompt (same as SPIR)
+│   └── review.md          # Review phase prompt (same as SPIR)
+├── consult-types/
+│   ├── spec-review.md     # Spec consultation guide (same as SPIR)
+│   ├── plan-review.md     # Plan consultation guide (same as SPIR)
+│   ├── impl-review.md     # Impl consultation guide (same as SPIR)
+│   ├── phase-review.md    # Phase consultation guide (same as SPIR)
+│   └── pr-review.md       # PR consultation guide (same as SPIR)
+└── templates/
+    ├── spec.md            # Spec template (same as SPIR)
+    ├── plan.md            # Plan template (same as SPIR)
+    └── review.md          # Review template (same as SPIR)
+```
+
+All files except `protocol.json` and `protocol.md` are identical to their SPIR counterparts.

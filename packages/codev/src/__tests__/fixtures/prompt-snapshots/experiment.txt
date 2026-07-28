@@ -1,0 +1,365 @@
+# experiment Builder (strict mode)
+
+You are executing a disciplined experiment.
+
+## Mode: STRICT
+You are running in STRICT mode. This means:
+- Porch orchestrates your work
+- Run: `porch next` to get your next tasks
+- Follow porch signals and gate approvals
+
+### ABSOLUTE RESTRICTIONS (STRICT MODE)
+- **NEVER edit `status.yaml` directly** — only porch commands may modify project state
+- **NEVER call `porch approve` without explicit human approval** — only run it after the architect says to
+- **NEVER skip the 3-way review** — always follow porch next → porch done cycle
+
+## Protocol
+Follow the EXPERIMENT protocol. Read and internalize the protocol before starting any work. The full protocol text is included below under **## Protocol Reference (full text)**.
+
+## EXPERIMENT Overview
+The EXPERIMENT protocol ensures disciplined experimentation:
+
+1. **Hypothesis Phase**: Define what you're testing and success criteria
+2. **Design Phase**: Plan the experiment approach
+3. **Execute Phase**: Run the experiment and gather data
+4. **Analyze Phase**: Evaluate results and draw conclusions
+
+## Key Principles
+- Start with a clear, falsifiable hypothesis
+- Define success/failure criteria upfront
+- Keep scope minimal for quick iteration
+- Document findings regardless of outcome
+- Separate experiment artifacts from production code
+
+## If You Open a PR
+
+Most experiments are committed to a branch without a PR, but if you do open one
+to integrate findings and the experiment was triggered by a GitHub issue:
+
+**PR body requirements**: The PR body MUST include `Closes #<N>` (for feature
+issues) or `Fixes #<N>` (for bug issues) for the driving issue so GitHub
+auto-closes it on merge. If the PR closes multiple issues, include one keyword
+per issue.
+
+**Exception**: if this PR only partially addresses the issue (e.g. experiment
+validates an approach but production implementation is deferred), use
+`Refs #<N>` or `Part of #<N>` instead — the issue stays open until a follow-up
+PR closes it.
+
+## Handling Flaky Tests
+
+If you encounter **pre-existing flaky tests** (intermittent failures unrelated to your changes):
+1. **DO NOT** edit `status.yaml` to bypass checks
+2. **DO NOT** skip porch checks or use any workaround to avoid the failure
+3. **DO** mark the test as skipped with a clear annotation (e.g., `it.skip('...') // FLAKY: skipped pending investigation`)
+4. **DO** document each skipped flaky test in your review under a `## Flaky Tests` section
+5. Commit the skip and continue with your work
+
+## Getting Started
+1. Read the EXPERIMENT protocol document
+2. Define your hypothesis clearly
+3. Follow the phases in order
+
+---
+
+## Protocol Reference (full text)
+
+# EXPERIMENT Protocol
+
+## Overview
+
+Disciplined experimentation: Each experiment gets its own directory with `notes.md` tracking goals, code, and results.
+
+**Core Principle**: Document what you're trying, what you did, and what you learned.
+
+## When to Use
+
+**Use for**: Testing approaches, evaluating models, prototyping, proof-of-concept work, research spikes
+
+**Skip for**: Production code (use SPIR), simple one-off scripts
+
+## Structure
+
+```
+experiments/
+├── 1_descriptive_name/
+│   ├── notes.md           # Goal, code, results
+│   ├── experiment.py      # Your experiment code
+│   └── data/
+│       ├── input/         # Input data
+│       └── output/        # Results, plots, etc.
+└── 2_another_experiment/
+    ├── notes.md
+    └── ...
+```
+
+## Workflow
+
+### 1. Create Experiment Directory
+
+```bash
+# Create numbered directory
+mkdir -p experiments/1_experiment_name
+cd experiments/1_experiment_name
+
+# Initialize notes.md from template
+touch notes.md   # then fill it from the embedded template at the end of this protocol
+```
+
+Or ask your AI assistant: "Create a new experiment for [goal]"
+
+### 2. Document the Goal
+
+Before writing code, clearly state what you're trying to learn in `notes.md`:
+
+```markdown
+## Goal
+
+What specific question are you trying to answer?
+What hypothesis are you testing?
+```
+
+### 3. Write Experiment Code
+
+- Keep it simple - experiments don't need production polish
+- Reuse existing project modules where possible
+- Any structure is fine - focus on learning, not architecture
+
+**Dependencies**: If your experiment requires libraries not in the main project:
+1. Do NOT add them to the main project's `requirements.txt` or `pyproject.toml`
+2. Create a `requirements.txt` inside your experiment folder
+3. Document installation in `notes.md`
+
+### 4. Run and Observe
+
+Execute your experiment and capture results:
+- Save output files to `data/output/`
+- Take screenshots of visualizations
+- Log key metrics
+
+### 5. Document Results
+
+Update `notes.md` with:
+- What happened (actual results)
+- What you learned (insights)
+- What's next (follow-up actions)
+
+### 6. Commit
+
+```bash
+git add experiments/1_experiment_name/
+git commit -m "[Experiment 1] Brief description of findings"
+```
+
+## Best Practices
+
+### Keep It Simple
+- Experiments don't need production polish
+- Skip comprehensive error handling
+- Focus on answering the question
+
+### Document Honestly
+- Include failures - they're valuable learnings
+- Note dead ends and why they didn't work
+- Be specific about what surprised you
+
+### Track Time Investment
+- Wall clock time: Total elapsed time
+- Developer time: Active working time (excluding waiting)
+- Helps estimate future similar work
+
+### Use Project Modules
+- Don't duplicate existing code
+- Import from your `src/` directory
+- Experiments validate approaches, not reimplement them
+
+### Commit Progress
+- Use `[Experiment ####]` commit prefix
+- Commit intermediate results
+- Include output files when reasonable
+
+## Integration with Other Protocols
+
+### Experiment → SPIR
+When an experiment validates an approach for production use:
+
+1. Create a specification referencing the experiment
+2. Link to experiment results as evidence
+3. Use experiment code as reference implementation
+
+Example spec reference:
+```markdown
+## Background
+
+Experiment 5 validated that [approach] achieves [results].
+See: experiments/5_validation_test/notes.md
+```
+
+## Numbering Convention
+
+Use four-digit sequential numbering (consistent with project list):
+- `1_`, `2_`, `3_`...
+- Shared sequence across all experiments
+- Descriptive name after the number (snake_case)
+
+Examples:
+- `1_api_response_caching`
+- `2_model_comparison`
+- `3_performance_baseline`
+
+## Git Workflow
+
+### Commits
+```
+[Experiment 1] Initial setup and goal
+[Experiment 1] Add baseline measurements
+[Experiment 1] Complete - caching improves latency 40%
+```
+
+### When to Commit
+- After setting up the experiment
+- After significant findings
+- When completing the experiment
+
+**Data Management**:
+- Include `data/output/` ONLY if files are small (summary metrics, small plots)
+- Do NOT commit large datasets, binary model checkpoints, or heavy artifacts
+- Add appropriate entries to `.gitignore` for large files
+- Consider storing large outputs externally and linking in notes
+
+## Example Experiment
+
+```
+experiments/1_caching_strategy/
+├── notes.md
+├── benchmark.py
+├── cache_test.py
+└── data/
+    ├── input/
+    │   └── sample_requests.json
+    └── output/
+        ├── results.csv
+        └── latency_chart.png
+```
+
+**notes.md excerpt:**
+```markdown
+# Experiment 1: Caching Strategy Evaluation
+
+**Status**: Complete
+
+**Date**: 2024-01-15
+
+## Goal
+Determine if Redis caching improves API response times for repeated queries.
+
+## Results
+- 40% latency reduction for cached queries
+- Cache hit rate: 73% after warm-up
+- Memory usage: 50MB for 10k cached responses
+
+## Next Steps
+Create SPIR spec for production caching implementation.
+```
+
+## Template: notes.md
+
+Create `notes.md` with the following content:
+
+# Experiment ####: Name
+
+**Status**: In Progress | Complete | Disproved | Aborted
+
+**Date**: YYYY-MM-DD
+
+## Goal
+
+What are you trying to learn or test? Be specific about:
+- The question you're answering
+- The hypothesis you're testing
+- Success criteria (how will you know if it worked?)
+
+## Effort
+
+**Approximate time spent**: [e.g., "4 hours"]
+
+*(Optional: Break down into setup, coding, analysis if helpful)*
+
+## Approach
+
+Brief description of the approach being tested:
+- Key technique or method
+- Why this approach was chosen
+- Any alternatives considered
+
+## Environment & Reproduction
+
+**How to run**:
+```bash
+# Command to reproduce results
+python experiment.py --input data/input/sample.json
+```
+
+**Dependencies** (if different from main project):
+- List any additional packages required
+- Or reference: `pip install -r requirements.txt`
+
+**Environment notes**:
+- Python version, key library versions if relevant
+- Any seeds or configuration needed for reproducibility
+
+## Code
+
+List your experiment files:
+- [`experiment.py`](experiment.py) - Brief description
+- [Other files as needed]
+
+## Results
+
+### Summary
+
+One-paragraph summary of key findings.
+
+### Key Findings
+
+1. **Finding one**: Description and significance
+2. **Finding two**: Description and significance
+3. **Finding three**: Description and significance
+
+### Metrics
+
+| Metric | Value | Notes |
+|--------|-------|-------|
+| Metric 1 | Value | Context |
+| Metric 2 | Value | Context |
+
+### Output Files
+
+- `data/output/results.csv` - Raw results data
+- `data/output/chart.png` - Visualization of findings
+
+## What Worked
+
+- List things that went well
+- Approaches that proved effective
+- Useful discoveries
+
+## What Didn't Work
+
+- Failed approaches (and why)
+- Dead ends encountered
+- Surprising obstacles
+
+## Next Steps
+
+Based on these findings:
+
+1. **Immediate**: What should happen right after this experiment?
+2. **Follow-up experiments**: What new questions emerged?
+3. **Production path**: If validated, what's needed for production? (SPIR spec?)
+
+## References
+
+- Links to relevant documentation
+- Related experiments
+- External resources consulted

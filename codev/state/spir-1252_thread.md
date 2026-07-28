@@ -614,3 +614,25 @@ classification is a hypothesis; the deletion is the test.
 
 The repo now dogfoods exactly what it ships. C6's mirror-both-trees invariant
 is dead for protocols/roles — Phase 8 updates arch-critical accordingly.
+
+## Phase 4 iter-1: Gemini/Claude APPROVE, Codex REQUEST_CHANGES ×3 — all fixed
+
+Codex caught me delivering less than my own amended plan: M10(ii) promised
+actual assembled-prompt snapshots and I shipped an inference (hashes + purity
+argument). The argument was sound but tested the premises, not the conclusion.
+Fixed properly: pre-deletion tree reconstructed via git archive, real
+buildPromptFromTemplate run against it for all 9 protocols (spir prompt =
+30,593 bytes with inlined protocol reference), snapshots committed, live
+assembly must reproduce them byte-for-byte. Also added the tier assertion
+(resolved path === skeleton path, not just content match).
+
+Third catch: my mechanical repoint left bugfix-685's parity comparing a file
+to itself — a test that can never fail, worse than no test. Removed it AND the
+identical defect in baked-decisions (unflagged — fixing the class, not the
+instance). Suite count drops 3,767→3,746: vacuous tests deleted, not skipped.
+
+Gem for the review: Spec 746's comment explicitly described the drift
+("skeleton has Multi-PR Workflow / Verify Phase sections that codev/ doesn't
+... PRE-EXISTING and not Phase 1's responsibility"). The drift was OBSERVED
+and consciously stepped around months before this project. Detection was never
+the problem — thirdhand confirmation of the spec's core thesis.
