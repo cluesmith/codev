@@ -211,6 +211,32 @@ describe('assembleReorientation — abort rather than partial (Spec 1273)', () =
     ).toThrow(/statePath/);
   });
 
+  it.each([
+    ['projectId', { projectId: '' }],
+    ['projectName', { projectName: '' }],
+    ['phase', { phase: '' }],
+  ])('throws when porch.%s is empty on a porch lane', (field, override) => {
+    // Marker validation matches on LABELS, so an empty projectId still renders
+    // `Project ID:` and passes it — a frame that looks complete and tells the
+    // builder nothing. Presence of a label is not presence of a value.
+    const base = makeContext();
+    expect(() =>
+      assemble({ porch: { ...base.porch!, ...(override as object) } as any }),
+    ).toThrow(ReorientationAssemblyError);
+    expect(() =>
+      assemble({ porch: { ...base.porch!, ...(override as object) } as any }),
+    ).toThrow(new RegExp(`porch.${field}`));
+  });
+
+  it('still assembles when only the optional plan phase is absent', () => {
+    // currentPlanPhase is genuinely optional — a porch lane between plan phases
+    // has none — so it must not be swept into the required set.
+    const base = makeContext();
+    expect(() =>
+      assemble({ porch: { ...base.porch!, currentPlanPhase: null } }),
+    ).not.toThrow();
+  });
+
   it('aborts when a porch lane has no re-entry notice available', () => {
     // A porch-driven builder without its re-entry instruction is the partial
     // frame R3 forbids.

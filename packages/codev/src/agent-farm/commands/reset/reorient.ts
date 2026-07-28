@@ -171,6 +171,17 @@ export function assembleReorientation(options: AssembleOptions): ReorientationPa
   requireField(context.mode, 'mode');
   requireField(statePath, 'statePath');
 
+  // Porch identity is checked field by field, not just for the presence of the
+  // `porch` object. The marker validation below matches on LABELS, so an empty
+  // projectId still renders `Project ID:` and satisfies it — a frame that looks
+  // complete and tells the builder nothing. Presence of a label is not presence
+  // of a value.
+  if (context.porch) {
+    requireField(context.porch.projectId, 'porch.projectId');
+    requireField(context.porch.projectName, 'porch.projectName');
+    requireField(context.porch.phase, 'porch.phase');
+  }
+
   const longForm = buildLongForm(options);
   const inline = buildInline(options);
 
