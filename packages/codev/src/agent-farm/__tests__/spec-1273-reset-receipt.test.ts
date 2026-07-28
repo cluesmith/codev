@@ -12,6 +12,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { join } from 'node:path';
 import {
   generateNonce,
   nonceMarker,
@@ -94,6 +95,7 @@ describe('buildSaveRequest (Spec 1273)', () => {
     const lower = request.toLowerCase();
     expect(lower).toContain('cold reader');
     expect(lower).toContain('role and mission');
+    expect(lower).toContain('position in the protocol');
     expect(lower).toContain('receipts');
     expect(lower).toContain('in-flight');
     expect(lower).toContain('open questions');
@@ -285,13 +287,31 @@ describe('stateFilePath (Spec 1273)', () => {
   it('places the state file at the worktree root with the .builder- prefix', () => {
     // The prefix keeps `afx cleanup` classifying the worktree as clean.
     const p = stateFilePath('/tmp/ws/.builders/aspir-1273');
-    expect(p).toBe(`/tmp/ws/.builders/aspir-1273/${STATE_FILE_NAME}`);
+    expect(p).toBe(join('/tmp/ws/.builders/aspir-1273', STATE_FILE_NAME));
     expect(STATE_FILE_NAME.startsWith('.builder-')).toBe(true);
   });
 
-  it('tolerates a trailing slash on the worktree path', () => {
+  it('tolerates a trailing separator on the worktree path', () => {
     expect(stateFilePath('/tmp/ws/.builders/aspir-1273/')).toBe(
-      `/tmp/ws/.builders/aspir-1273/${STATE_FILE_NAME}`,
+      join('/tmp/ws/.builders/aspir-1273', STATE_FILE_NAME),
     );
+  });
+
+  it('uses platform path joining, not string concatenation', () => {
+    // The path is handed to the builder verbatim in the save request. If it were
+    // built with a hardcoded '/', a Windows worktree would yield
+    // `C:\repo\wt\/.builder-state.md` — the builder would write to one path and
+    // the gate would stat another. Asserting against path.join keeps this test
+    // meaningful on whichever platform it runs.
+    const worktree = join('C:', 'repo', 'wt');
+    expect(stateFilePath(worktree)).toBe(join(worktree, STATE_FILE_NAME));
+    expect(stateFilePath(worktree)).not.toContain('\\/');
+    expect(stateFilePath(worktree)).not.toContain('//');
+  });
+
+  it('produces no doubled separator for any trailing-separator form', () => {
+    for (const wt of ['/a/b', '/a/b/', '/a/b//']) {
+      expect(stateFilePath(wt)).toBe(join('/a/b', STATE_FILE_NAME));
+    }
   });
 });

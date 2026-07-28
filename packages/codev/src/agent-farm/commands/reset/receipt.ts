@@ -18,6 +18,7 @@
  */
 
 import { randomBytes } from 'node:crypto';
+import { join } from 'node:path';
 import {
   DEFAULT_MIN_BYTES,
   DEFAULT_STABILITY_WINDOW_MS,
@@ -203,7 +204,15 @@ export function describeReceiptFailure(
   }
 }
 
-/** Absolute path of the state file for a worktree. */
+/**
+ * Absolute path of the state file for a worktree.
+ *
+ * Uses `path.join` rather than string concatenation: this path is handed to the
+ * builder verbatim in the save request, so on Windows a hand-built
+ * `C:\repo\wt\` + `/` + name would instruct the builder to write to a path that
+ * is not the one the gate then stats. `path.join` also collapses redundant
+ * separators, so a trailing slash on the worktree is harmless.
+ */
 export function stateFilePath(worktreePath: string, fileName = STATE_FILE_NAME): string {
-  return `${worktreePath.replace(/\/+$/, '')}/${fileName}`;
+  return join(worktreePath, fileName);
 }
