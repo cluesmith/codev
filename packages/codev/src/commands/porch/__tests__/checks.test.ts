@@ -7,10 +7,13 @@ import { tmpdir } from 'node:os';
 import {
   runCheck,
   runPhaseChecks,
+  runArtifactCheck,
   formatCheckResults,
   allChecksPassed,
+  REQUIRED_SPEC_SECTIONS,
   type CheckEnv,
 } from '../checks.js';
+import type { ArtifactResolver } from '../artifacts.js';
 
 describe('porch check runner', () => {
   const cwd = tmpdir();
@@ -187,6 +190,63 @@ describe('porch check runner', () => {
       const results = await runPhaseChecks(checks, cwd, defaultEnv);
       expect(results).toHaveLength(2);
       expect(results.every(r => r.passed)).toBe(true);
+    });
+  });
+  describe('spec checks (#1279 — spec-approval used to gate on nothing)', () => {
+    /** Minimal resolver stub: only getSpecContent matters for these two checks. */
+    const resolverWithSpec = (content: string | null): ArtifactResolver => ({
+      getSpecContent: () => content,
+      getPlanContent: () => null,
+      getReviewContent: () => null,
+    } as unknown as ArtifactResolver);
+
+    const specFrom = (sections: readonly string[]): string =>
+      `# Specification: Test\n\n${sections.map(h => `${h}\n\nbody\n`).join('\n')}`;
+
+    it('spec_exists fails when the resolver finds no spec', () => {
+      const r = runArtifactCheck('spec_exists', 'cmd', resolverWithSpec(null), defaultEnv);
+      expect(r?.passed).toBe(false);
+      expect(r?.error).toBe('Spec not found');
+    });
+
+    it('spec_exists passes when a spec is present', () => {
+      const r = runArtifactCheck('spec_exists', 'cmd', resolverWithSpec('# Anything'), defaultEnv);
+      expect(r?.passed).toBe(true);
+    });
+
+    it('spec_has_required_sections passes on a spec that follows the template', () => {
+      const r = runArtifactCheck(
+        'spec_has_required_sections', 'cmd', resolverWithSpec(specFrom(REQUIRED_SPEC_SECTIONS)), defaultEnv);
+      expect(r?.passed).toBe(true);
+      expect(r?.output).toContain(String(REQUIRED_SPEC_SECTIONS.length));
+    });
+
+    it('spec_has_required_sections fails on a free-form spec, naming what is missing', () => {
+      // The exact reported failure mode: a readable spec that ignores the template
+      // because the builder pattern-matched an earlier free-form spec.
+      const r = runArtifactCheck(
+        'spec_has_required_sections', 'cmd',
+        resolverWithSpec('# Spec\n\n## Background\n\n## What We Will Build\n'), defaultEnv);
+      expect(r?.passed).toBe(false);
+      for (const h of REQUIRED_SPEC_SECTIONS) expect(r?.error).toContain(h);
+    });
+
+    it('spec_has_required_sections fails when only some sections are present', () => {
+      const partial = REQUIRED_SPEC_SECTIONS.slice(0, 3);
+      const r = runArtifactCheck(
+        'spec_has_required_sections', 'cmd', resolverWithSpec(specFrom(partial)), defaultEnv);
+      expect(r?.passed).toBe(false);
+      expect(r?.error).toContain('## Solution Approaches');
+      expect(r?.error).not.toContain('missing 6 required');
+    });
+
+    it('spec_has_required_sections fails when the spec is absent entirely', () => {
+      const r = runArtifactCheck('spec_has_required_sections', 'cmd', resolverWithSpec(null), defaultEnv);
+      expect(r?.passed).toBe(false);
+    });
+
+    it('an unrecognized check name still falls through to shell execution', () => {
+      expect(runArtifactCheck('something_else', 'cmd', resolverWithSpec('x'), defaultEnv)).toBeNull();
     });
   });
 });
