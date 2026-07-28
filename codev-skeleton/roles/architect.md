@@ -52,7 +52,7 @@ afx send 0001 "message"                   # Short message to builder
 
 > **Note:** `--protocol` is REQUIRED for all numbered spawns. Only `--task`, `--shell`, and `--worktree` spawns skip it.
 
-**Note:** `afx`, `consult`, `porch`, and `codev` are global commands. They work from any directory.
+**Note:** `consult`, `porch`, and `codev` are global commands that work from any directory. `afx` is installed globally too, but run it only from the main workspace root (scar rule — see Critical Rules).
 
 ### Porch CLI (for strict mode)
 

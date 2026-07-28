@@ -121,6 +121,9 @@ describe('scar-rule registry (M5 / T6)', () => {
       'NEVER edit status.yaml directly',
       'porch manages all state',
       'NEVER call `porch approve` without explicit human approval',
+      // afx-from-root contradictions: any claim that afx works from anywhere
+      '`afx`, `consult`, `porch`, and `codev` are global commands',
+      '`afx`, `porch`, `consult`, `codev`) are global commands',
     ];
     const surfaces = new Set(loadRegistry().flatMap((r) => r.must_appear_on));
     const failures: string[] = [];
