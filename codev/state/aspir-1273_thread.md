@@ -114,11 +114,54 @@ Claude one.
 
 Phase count 6 → 7.
 
+## Implement phase 1 (afx interrupt) — 2026-07-28
+
+Unanimous APPROVE (Gemini, Codex, Claude — all HIGH, no issues). Commit `5ca14db8`.
+
+**Worktree setup gotcha for anyone following**: a fresh worktree has no `node_modules` (needed
+`pnpm install --frozen-lockfile`) AND `tower-routes.test.ts` will not even load until
+`pnpm --filter @cluesmith/codev-core build` has run — the `@cluesmith/codev-core/tower-client` subpath
+export resolves into `dist/`. It presents as "Cannot find package", which reads like a dependency
+problem rather than a build-order one.
+
+**Live verification is blocked, and not by anything in the code.** The running Tower is the globally
+installed build with no `escape` route handler, so my CLI's `escape: true` would be silently ignored and
+the ESC would arrive as an ordinary formatted message — a test that would pass while proving nothing.
+A faithful end-to-end run needs `pnpm -w run local-install`, which restarts Tower and affects every
+builder in the workspace. That is the architect's call; I have not done it and have notified them. The
+same constraint will apply to phase 6's "reset against a disposable builder".
+
+Minor: Claude's review says `message-write.ts` was extracted in this phase and wasn't in the plan. It
+already existed (Bugfix #584); phase 1 only added `writeEscapeToSession` to it. Non-blocking, recorded
+here for accuracy rather than rebutted.
+
+## Implement phase 2 (lastDataAt) — 2026-07-28
+
+Iter 1: Gemini APPROVE, Claude APPROVE, **Codex REQUEST_CHANGES**. Iter 2: unanimous APPROVE.
+Commits `3ded0a26` (impl) + `a6115771` (test fix).
+
+**Worth reading if you ever weigh CMAP verdicts by majority**: the two approvers contradicted each
+other on the exact point at issue. Codex said the wire-contract test was missing; Claude said
+explicitly *"No gap here"* — the handler is a pure `JSON.stringify(session.info)` passthrough, so the
+unit test is the right level. Two APPROVEs would have shipped it.
+
+I sided with the single dissenter. Claude's premise was factually right about today's handler, but
+"pure passthrough" is a property of the current code, not of the contract — a later projection,
+redaction or version envelope at the route would break the wire while every `session.info` test stayed
+green. It was also my own acceptance criterion naming the endpoint. Two cheap tests against a silent
+break in the signal R4 consumes before typing `/clear` into a live terminal is an easy trade. On iter 2
+Claude reviewed the reasoning and agreed.
+
+Lesson candidate for the review: *a majority APPROVE is not consensus — when reviewers disagree, decide
+on the argument, and record why.*
+
 ## Status
 
 - [x] Explored afx/Tower internals
 - [x] Spec drafted → `codev/specs/1273-builder-context-reset-should-b.md`
 - [x] Spec CMAP iteration 1 — 2 APPROVE, 1 REQUEST_CHANGES, all feedback addressed → spec auto-approved
 - [x] Plan drafted → `codev/plans/1273-builder-context-reset-should-b.md`
-- [x] Plan CMAP iteration 1 — 2 APPROVE, 1 REQUEST_CHANGES, all 4 issues addressed
-- [ ] Plan re-verification, then Implement phase 1
+- [x] Plan CMAP iteration 1 — 2 APPROVE, 1 REQUEST_CHANGES, all 4 issues addressed → plan auto-approved
+- [x] Phase 1 (afx interrupt) — implemented, 116 tests green, unanimous CMAP APPROVE
+- [ ] Phase 2 (lastDataAt observability)
+- [ ] Phases 3–7
