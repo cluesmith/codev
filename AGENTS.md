@@ -121,7 +121,7 @@ afx spawn --protocol <name> --help
 This succeeds if the protocol is registered (including via the skeleton fallback in tier 4 of the resolution chain) and errors helpfully otherwise. The CLI is the source of truth — defer to it when in doubt.
 
 Key locations:
-- Protocol details: `codev/protocols/` (Choose appropriate protocol)
+- Protocol details: `codev-skeleton/protocols/` (single owner; the runtime resolves the embedded skeleton — `codev/protocols/` holds only local-only protocols like RELEASE)
 - **Project tracking**: GitHub Issues (source of truth for all projects)
 - Specifications go in: `codev/specs/`
 - Plans go in: `codev/plans/`

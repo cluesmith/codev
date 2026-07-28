@@ -16,12 +16,12 @@ Codev is a Human-Agent Software Development Operating System. This repository se
 - **Shared Runtime**: `packages/core/` — TowerClient, auth, workspace encoding, EscapeBuffer, ReconnectPolicy
 - **VS Code Extension**: `apps/vscode/` — thin client over Tower API
 - **Dashboard**: `apps/web/` — React SPA served by Tower
-- **Consult Tool**: See `packages/codev/src/commands/consult/` and `codev/roles/consultant.md`
-- **Protocols**: Read the relevant protocol in `codev/protocols/{spir,maintain,experiment}/protocol.md`
+- **Consult Tool**: See `packages/codev/src/commands/consult/` and `codev-skeleton/roles/consultant.md` (resolved from the skeleton at runtime; Spec 1252 removed the `codev/roles/` shadow copies)
+- **Protocols**: Read the relevant protocol in `codev-skeleton/protocols/{spir,maintain,experiment}/protocol.md` (the single owner; the runtime resolves the embedded copy)
 
 **To add a new feature to Codev:**
 1. Create a GitHub Issue describing the feature
-2. Create spec using template from `codev/protocols/spir/templates/spec.md`
+2. Create spec using template from `codev-skeleton/protocols/spir/templates/spec.md` (porch delivers it via the resolver at runtime)
 3. Follow SPIR protocol: Specify → Plan → Implement → Review
 
 ## Quick Tracing Guide
@@ -298,7 +298,7 @@ Architect sessions use `restartOnExit: true` in `SessionManager.createSession()`
 
 All architect sessions (at all 3 creation points) receive a role prompt injected via `buildArchitectArgs()` in `tower-utils.ts`. This function:
 
-1. Loads the architect role from `codev/roles/architect.md` (local) or `skeleton/roles/architect.md` (bundled fallback) via `loadRolePrompt()`
+1. Loads the architect role via `loadRolePrompt()` — resolver order `.codev/roles/` → `codev/roles/` → embedded skeleton; since Spec 1252 removed the shadow copies, the skeleton copy is what resolves here
 2. Writes the role content to `.architect-role.md` in the project directory
 3. Delegates the CLI-specific injection to the configured `HarnessProvider` (`agent-farm/utils/harness.ts`, Spec 591): claude `--append-system-prompt`, codex `-c model_instructions_file=`, gemini `GEMINI_SYSTEM_MD` env var
 
@@ -512,7 +512,7 @@ When spawning a builder (`afx spawn 3 --protocol spir`):
 
 4. **Setup Files**:
    - `.builder-prompt.txt`: Initial prompt for the builder
-   - `.builder-role.md`: Role definition (from `codev/roles/builder.md`)
+   - `.builder-role.md`: Role definition (resolved via the four-tier chain; the skeleton's `roles/builder.md` since Spec 1252)
    - `.builder-start.sh`: Launch script for builder session
    - Root `.env` and shared `.codev/config.json`: symlinked into the worktree,
      along with configured `worktree.symlinks`
@@ -1441,7 +1441,7 @@ codev/                                  # Project root (pnpm monorepo)
 
 ### 1. Development Protocols
 
-#### SPIR Protocol (`codev/protocols/spir/`)
+#### SPIR Protocol (`codev-skeleton/protocols/spir/`)
 **Purpose**: Multi-phase development with multi-agent consultation
 
 **Phases**:
@@ -1466,7 +1466,7 @@ codev/                                  # Project root (pnpm monorepo)
 - `templates/plan.md` - Planning template
 - `templates/review.md` - Review template
 
-#### BUGFIX Protocol (`codev/protocols/bugfix/`)
+#### BUGFIX Protocol (`codev-skeleton/protocols/bugfix/`)
 **Purpose**: Lightweight protocol for minor bugfixes using GitHub Issues
 
 **Workflow**:
@@ -1603,7 +1603,7 @@ afx spawn 3 --protocol spir --builder-cmd "claude --model sonnet"
     "dir": "codev/templates"
   },
   "roles": {
-    "dir": "codev/roles"
+    "dir": "codev/roles"  // resolver tier-2 slot; empty since Spec 1252 — falls through to the skeleton
   }
 }
 ```
@@ -1624,7 +1624,7 @@ See the [Port System](#port-system) section above for details on the global regi
 
 #### Role Files
 
-**Location**: `codev/roles/`
+**Location**: `codev-skeleton/roles/` (single owner; `codev/roles/` was removed by Spec 1252 — the resolver's tier-2 slot exists but is empty)
 
 **architect.md** - Comprehensive architect role:
 - Responsibilities: decompose work, spawn builders, monitor progress, review and integrate
@@ -1925,7 +1925,7 @@ consult -m claude spec 42
 **Query building**: Five subcommands (`pr`, `spec`, `plan`, `impl`, `general`) each build a prompt that includes the spec/plan/diff content plus a verdict template (`VERDICT: [APPROVE | REQUEST_CHANGES | COMMENT]`). PR diffs truncated to 50k chars, impl diffs to 80k chars.
 
 **Role resolution** uses `readCodevFile()` with local-first, embedded-skeleton-fallback:
-1. `codev/roles/consultant.md` (local override)
+1. `codev/roles/consultant.md` (tier-2 local override slot — empty since Spec 1252; next tier resolves)
 2. `skeleton/roles/consultant.md` (embedded default)
 
 **Porch integration**: Porch's `next.ts` spawns 3 parallel `consult` commands with `--output` flags, collects results, parses verdicts via `verdict.ts` (scans backward for `VERDICT:` line, defaults to `REQUEST_CHANGES` if not found).
