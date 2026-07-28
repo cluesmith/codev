@@ -23,9 +23,9 @@ import {
   loadOwnershipMap,
   validateMap,
   checkCompleteness,
+  computeCompleteness,
   resolveDisposition,
   type OwnershipMap,
-  type Candidate,
 } from '../lib/prompt-ownership.js';
 
 const REPO_ROOT = path.resolve(__dirname, '../../../..');
@@ -96,24 +96,59 @@ describe('completeness (M1 / T12)', () => {
     }
   });
 
-  it('SEEDED: duplicating a line across two files trips the catch-all guard', () => {
+  it('SEEDED: duplicating a line across two files trips the REAL catch-all guard', () => {
+    // Exercises computeCompleteness itself (not a local re-implementation):
+    // a catch-all-only map over two files sharing one normative line must
+    // report both candidates via multiFileViaCatchAll.
     const root = fs.mkdtempSync(path.join(tmpdir(), 'codev-ownership-'));
     try {
       fs.mkdirSync(path.join(root, 'seed'));
       const line = 'ALWAYS varnish the widget before shipping.\n';
       fs.writeFileSync(path.join(root, 'seed/a.md'), line);
       fs.writeFileSync(path.join(root, 'seed/b.md'), line);
-      const cands = extractCandidates(root, ['seed/a.md', 'seed/b.md']);
+      const map: OwnershipMap = {
+        inventory_boundary: ['seed/a.md', 'seed/b.md'],
+        surfaces: [],
+        instructions: [],
+        dispositions: [
+          { match: '/.*/', disposition: 'out-of-scope', note: 'catch-all', catch_all: true },
+        ],
+      };
+      const cands = extractCandidates(root, map.inventory_boundary);
       expect(cands.length).toBe(2);
-      // Both would resolve via catch-all; the multi-file grouping must flag them.
-      const filesByText = new Map<string, Set<string>>();
-      for (const c of cands) {
-        if (!filesByText.has(c.text)) filesByText.set(c.text, new Set());
-        filesByText.get(c.text)!.add(c.file);
-      }
-      expect(filesByText.get(cands[0].text)!.size).toBe(2);
+      const report = computeCompleteness(map, cands);
+      expect(report.undispositioned).toEqual([]);
+      expect(report.multiFileViaCatchAll.map((c) => c.file).sort()).toEqual([
+        'seed/a.md',
+        'seed/b.md',
+      ]);
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('companion prompt-ownership.md parity marker matches the live extractor', () => {
+    // The human companion must be validated against the YAML/extractor
+    // (Codex, Phase-6 review): its t12-parity marker pins the live counts, so
+    // the .md cannot silently drift from reality.
+    const md = fs.readFileSync(
+      path.join(REPO_ROOT, 'codev/resources/prompt-ownership.md'),
+      'utf-8'
+    );
+    const m = md.match(
+      /<!-- t12-parity: total=(\d+) mapped=(\d+) scar=(\d+) out-of-scope=(\d+) classes=(\d+) -->/
+    );
+    expect(m, 'prompt-ownership.md must carry the t12-parity marker').toBeTruthy();
+    const report = checkCompleteness(REPO_ROOT);
+    const map = loadOwnershipMap(REPO_ROOT);
+    expect(Number(m![1]), 'total').toBe(report.total);
+    expect(Number(m![2]), 'mapped').toBe(report.byDisposition['mapped']);
+    expect(Number(m![3]), 'scar').toBe(report.byDisposition['scar']);
+    expect(Number(m![4]), 'out-of-scope').toBe(report.byDisposition['out-of-scope']);
+    expect(Number(m![5]), 'classes').toBe(map.instructions.length);
+    // and every class id is documented in the companion
+    for (const c of map.instructions) {
+      expect(md, `companion missing class ${c.id}`).toContain(c.id);
     }
   });
 });

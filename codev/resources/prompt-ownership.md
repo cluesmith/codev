@@ -44,14 +44,20 @@ non-owner restatements with references and flips them to `automated`:
 | baked-decisions-handling | bp-spir | bp-aspir, bp-air, 2 drafting prompts (Spec 746 coordination required) |
 | pr-single-by-default | bp-spir | bp-aspir (bugfix-744 tests must move with the dedup) |
 | porch-workflow-fidelity | bp-spir | bp-aspir, bp-pir |
+| multi-pr-mechanics | bp-spir | bp-aspir |
+| notify-architect-key-moments | bp-spir | 3 builder-prompts |
+| soft-mode-protocol-compliance | bp-spir | 4 builder-prompts |
 | no-time-estimates | spir-protocol-doc | pp-specify, pp-plan |
 
 ## Phase-6 measurement
 
-134 normative candidates over the boundary: **23 mapped** (the classes above),
-**37 scar** (registry-enforced), **74 file-local** (catch-all, all
-single-file). Zero undispositioned; zero multi-file texts hiding behind the
-catch-all.
+<!-- t12-parity: total=190 mapped=37 scar=39 out-of-scope=114 classes=10 -->
+190 normative candidates over the boundary (case-insensitive extractor):
+**37 mapped** (the 10 classes above), **39 scar** (registry-enforced),
+**114 file-local** (catch-all, all single-file). Zero undispositioned; zero
+multi-file texts hiding behind the catch-all. The parity marker above is
+asserted against the live extractor by `prompt-ownership.test.ts` — if these
+numbers drift from reality, CI fails until this companion is updated.
 
 ## Enforcement
 

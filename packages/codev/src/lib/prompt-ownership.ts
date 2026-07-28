@@ -95,7 +95,7 @@ export interface Candidate {
  * construction. Deliberately coarse — over-collecting is safe (a candidate
  * just needs a disposition), under-collecting silently exempts content.
  */
-const NORMATIVE = /\b(MUST(?:\s+NOT)?|NEVER|ALWAYS|DO NOT|Don't|don't|Never|never use|Do not)\b/;
+const NORMATIVE = /\b(must(?:\s+not)?|never|always|do(?:\s+|n')t?\s*not?|don't|do not)\b/i;
 
 /** Lines that are markdown noise, not instructions. */
 const NOISE = /^\s*(#|```|\||<!--|\/\/)/;
@@ -189,6 +189,11 @@ export interface CompletenessReport {
 export function checkCompleteness(root: string): CompletenessReport {
   const map = loadOwnershipMap(root);
   const candidates = extractCandidates(root, map.inventory_boundary);
+  return computeCompleteness(map, candidates);
+}
+
+/** Core computation, separated so tests exercise the REAL function over fixtures. */
+export function computeCompleteness(map: OwnershipMap, candidates: Candidate[]): CompletenessReport {
 
   // Group candidate texts across files to detect cross-surface duplication.
   const filesByText = new Map<string, Set<string>>();
