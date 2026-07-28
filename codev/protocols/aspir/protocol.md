@@ -21,7 +21,7 @@ This means the builder proceeds automatically from Specify → Plan → Implemen
 | Phases | Specify → Plan → Implement → Review | Same |
 | 3-way consultations | Yes, every phase | Same |
 | Checks (build, tests, PR) | Yes | Same |
-| Prompts / templates | Full set | Same (copied from SPIR) |
+| Prompts / templates | Full set | Same prompts; templates included from SPIR (no copies) |
 
 ### When to Use ASPIR
 
@@ -83,16 +83,18 @@ codev/protocols/aspir/
 │   ├── plan.md            # Plan phase prompt (same as SPIR)
 │   ├── implement.md       # Implement phase prompt (same as SPIR)
 │   └── review.md          # Review phase prompt (same as SPIR)
-├── consult-types/
-│   ├── spec-review.md     # Spec consultation guide (same as SPIR)
-│   ├── plan-review.md     # Plan consultation guide (same as SPIR)
-│   ├── impl-review.md     # Impl consultation guide (same as SPIR)
-│   ├── phase-review.md    # Phase consultation guide (same as SPIR)
-│   └── pr-review.md       # PR consultation guide (same as SPIR)
-└── templates/
-    ├── spec.md            # Spec template (same as SPIR)
-    ├── plan.md            # Plan template (same as SPIR)
-    └── review.md          # Review template (same as SPIR)
+└── consult-types/
+    ├── spec-review.md     # Spec consultation guide (same as SPIR)
+    ├── plan-review.md     # Plan consultation guide (same as SPIR)
+    ├── impl-review.md     # Impl consultation guide (same as SPIR)
+    ├── phase-review.md    # Phase consultation guide (same as SPIR)
+    └── pr-review.md       # PR consultation guide (same as SPIR)
 ```
+
+ASPIR ships **no `templates/` directory**. Its phase prompts deliver SPIR's canonical
+templates directly, via an include directive pointing at `protocols/spir/templates/`, so
+there is exactly one copy of each template and it cannot drift between the two protocols.
+(Written as a path, not as a literal include: an include directive in prose would be
+expanded — and silently emptied — when this file is delivered to a builder.)
 
 All files except `protocol.json` and `protocol.md` are identical to their SPIR counterparts.

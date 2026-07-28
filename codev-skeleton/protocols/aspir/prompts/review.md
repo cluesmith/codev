@@ -57,55 +57,9 @@ Compare final implementation to original specification:
 
 ### 3. Create Review Document
 
-Create `codev/reviews/{{artifact_name}}.md`:
+Create `codev/reviews/{{artifact_name}}.md`, following the template below. Use these headings and this order — do not invent your own structure, and do not pattern-match an earlier review in `codev/reviews/` that predates this template. Steps 3b and 4 below expand on the `## Consultation Feedback`, `## Architecture Updates`, and `## Lessons Learned Updates` sections; porch's review checks grep for the last two by exact heading.
 
-```markdown
-# Review: {{title}}
-
-## Summary
-Brief description of what was implemented.
-
-## Spec Compliance
-- [x] Requirement 1: Implemented as specified
-- [x] Requirement 2: Implemented with deviation (see below)
-- [x] Requirement 3: Implemented as specified
-
-## Deviations from Plan
-- **Phase X**: [What changed and why]
-
-## Lessons Learned
-
-### What Went Well
-- [Positive observation 1]
-- [Positive observation 2]
-
-### Challenges Encountered
-- [Challenge 1]: [How it was resolved]
-- [Challenge 2]: [How it was resolved]
-
-### What Would Be Done Differently
-- [Insight 1]
-- [Insight 2]
-
-### Methodology Improvements
-- [Suggested improvement to SPIR protocol]
-- [Suggested improvement to tooling]
-
-## Technical Debt
-- [Any shortcuts taken that should be addressed later]
-
-## Consultation Feedback
-
-[See instructions below]
-
-## Flaky Tests
-- [Any pre-existing tests that were skipped as flaky during this project]
-- [Include test name, file path, and observed failure mode]
-- [If none: "No flaky tests encountered"]
-
-## Follow-up Items
-- [Any items identified for future work]
-```
+{{> protocols/spir/templates/review.md}}
 
 ### 3b. Include Consultation Feedback
 

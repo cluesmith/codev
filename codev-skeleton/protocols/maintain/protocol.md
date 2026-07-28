@@ -185,52 +185,9 @@ Both must pass before moving to the review phase.
 
 ## Maintenance Run File
 
-Each run creates `codev/maintain/NNNN.md`:
+Each run creates `codev/maintain/NNNN.md`, following the template below:
 
-```markdown
-# Maintenance Run NNNN
-
-**Date**: YYYY-MM-DD
-**Base Commit**: <hash>
-**PR**: #NNN
-
-## Changes Since Last Run
-
-<key commits summary>
-
-## Audit Findings
-
-Recorded by Step 3a (Audit documentation) as the cuts are applied — one line per cut, with its reason. The diff plus these reasons is the proposal; the architect's PR review is the gate.
-
-### arch.md (cold) / arch-critical.md (hot)
-- <section or hot entry>: <reason for cut / compression / demotion>
-
-### lessons-learned.md (cold) / lessons-critical.md (hot)
-- <entry>: <reason; note hot→cold demotions and any cold-doc-map fixes>
-
-## What Was Done
-
-### Dead Code Removed
-- `path/to/file.ts`: `unusedFunction()` — not imported anywhere
-- Removed `some-package` dependency — zero imports
-
-### Documentation Updated
-- arch.md / arch-critical.md: Added VS Code extension section + removed old dashboard-server refs (cold); routed 1 invariant to the hot tier, demoted 1 stale entry to cold
-- lessons-learned.md / lessons-critical.md: Extracted 3 lessons from reviews 653, 672 (cold); promoted 1 behavior-changer to the hot tier, refreshed its cold-doc map
-
-### Documentation Changes Log
-| Document | Section | Action | Reason |
-|----------|---------|--------|--------|
-| arch.md | "Dashboard Server" | DELETED | OBSOLETE — replaced by Tower |
-
-## Deferred
-
-- Items found but not worth fixing now
-
-## Summary
-
-<2-3 sentences>
-```
+{{> protocols/maintain/templates/maintenance-run.md}}
 
 Keep it factual and short. The run file documents what happened, not what might happen.
 
