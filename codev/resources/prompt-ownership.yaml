@@ -53,6 +53,18 @@ inventory_boundary:
   - codev-skeleton/porch/prompts/review.md
   - codev-skeleton/porch/prompts/specify.md
   - codev-skeleton/porch/prompts/test.md
+  # Shared partials — the single authored owners Phase 7 created; normative
+  # text added here must not bypass extraction (Codex, Phase-7 iter-3)
+  - codev-skeleton/partials/soft-mode-compliance.md
+  - codev-skeleton/partials/builder-notifications.md
+  - codev-skeleton/partials/multi-pr-mechanics.md
+  - codev-skeleton/partials/strict-mode-restrictions.md
+  - codev-skeleton/partials/no-time-estimates.md
+  - codev-skeleton/partials/flaky-test-handling.md
+  - codev-skeleton/partials/porch-workflow-fidelity.md
+  - codev-skeleton/partials/no-skip-3way-review.md
+  - codev-skeleton/partials/baked-decisions.md
+  - codev-skeleton/partials/pr-strategy.md
   # NOTE: AGENTS.md is byte-identical to CLAUDE.md (enforced by T6); scanning
   # both would double-count every candidate.
 

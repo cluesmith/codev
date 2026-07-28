@@ -55,11 +55,11 @@ justified in the YAML):
 
 ## Phase-6 measurement
 
-<!-- t12-parity: total=158 mapped=9 scar=39 out-of-scope=110 classes=10 -->
-158 normative candidates over the boundary post-Phase-7 (down from
-190 at Phase 6 — dedup moved shared blocks into `codev-skeleton/partials/`,
-which the boundary does not scan; every served prompt still receives the full
-text at assembly): **9 mapped**, **39 scar** (registry-enforced),
+<!-- t12-parity: total=169 mapped=20 scar=39 out-of-scope=110 classes=10 -->
+169 normative candidates over the boundary post-Phase-7 (the boundary now
+includes the ten shared partials, so text moved there cannot bypass
+extraction; every served prompt still receives the full text at assembly):
+**20 mapped**, **39 scar** (registry-enforced),
 **110 file-local**. Zero undispositioned; zero multi-file texts hiding behind
 the catch-all. The parity marker above is
 asserted against the live extractor by `prompt-ownership.test.ts` — if these

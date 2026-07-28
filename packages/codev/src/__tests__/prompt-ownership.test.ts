@@ -270,23 +270,67 @@ describe('served-surface dedup guard (S1 — assembled artifacts)', () => {
     return (content.match(re) ?? []).length;
   }
 
-  it('no automated class appears more than once in any assembled spawn prompt', () => {
+  /** Protocols whose builder-prompt includes the given partial (1 nested level). */
+  function protocolsIncluding(partialPath: string): string[] {
+    const token = partialPath.replace('codev-skeleton/', '');
+    return PROTOCOLS.filter((proto) => {
+      const raw = fs.readFileSync(
+        path.join(REPO_ROOT, `codev-skeleton/protocols/${proto}/builder-prompt.md`),
+        'utf-8'
+      );
+      if (raw.includes(token)) return true;
+      // one nested level: any partial the prompt includes that itself includes the target
+      for (const m of raw.matchAll(/\{\{>\s*([^}\s]+)\s*\}\}/g)) {
+        const inner = path.join(REPO_ROOT, 'codev-skeleton', m[1]);
+        if (fs.existsSync(inner) && fs.readFileSync(inner, 'utf-8').includes(token)) return true;
+      }
+      return false;
+    });
+  }
+
+  it('every automated class is PRESENT where its include graph delivers it, and never over-served', () => {
+    // Cap alone is not enough: a broken {{> partials/...}} include yields n=0
+    // and would pass silently — a removed rule is the worst outcome (Codex,
+    // Phase-7 iter-3). Presence is derived from the include graph, absence
+    // fails loudly.
     const map = loadOwnershipMap(REPO_ROOT);
+    const surfaceById = new Map(map.surfaces.map((s2) => [s2.id, s2]));
     const failures: string[] = [];
     for (const proto of PROTOCOLS) {
-      const prompt = buildPromptFromTemplate(
-        { workspaceRoot: REPO_ROOT } as never,
-        proto,
-        {
-          protocol_name: proto, mode: 'strict', mode_soft: false, mode_strict: true,
-          project_id: '9999', input_description: 'guard', issue: { number: 9999, title: 't', body: 'b' },
-        }
-      );
+      // Render BOTH modes: conditional blocks ({{#if mode_soft}}) legitimately
+      // gate content per mode, so presence is asserted over the union while
+      // the over-serve cap applies per render.
+      const base = {
+        protocol_name: proto, project_id: '9999', input_description: 'guard',
+        issue: { number: 9999, title: 't', body: 'b' },
+      };
+      const renders = [
+        buildPromptFromTemplate({ workspaceRoot: REPO_ROOT } as never, proto,
+          { ...base, mode: 'strict', mode_soft: false, mode_strict: true } as never),
+        buildPromptFromTemplate({ workspaceRoot: REPO_ROOT } as never, proto,
+          { ...base, mode: 'soft', mode_soft: true, mode_strict: false } as never),
+      ];
       for (const c of map.instructions) {
         if (c.enforcement !== 'automated' || c.scar) continue;
-        const n = countMatches(prompt, c.pattern);
         const cap = c.served_max ?? 1;
-        if (n > cap) failures.push(`${proto}: class ${c.id} served ${n}x (cap ${cap}) in the assembled spawn prompt`);
+        let anyPresent = false;
+        renders.forEach((prompt, i) => {
+          const n = countMatches(prompt, c.pattern);
+          if (n > cap) {
+            failures.push(`${proto} (${i === 0 ? 'strict' : 'soft'}): class ${c.id} served ${n}x (cap ${cap})`);
+          }
+          if (n > 0) anyPresent = true;
+        });
+        const owner = surfaceById.get(c.owner);
+        if (owner && owner.path.startsWith('codev-skeleton/partials/')) {
+          const expected = protocolsIncluding(owner.path);
+          if (expected.includes(proto) && !anyPresent) {
+            failures.push(
+              `${proto}: class ${c.id} MISSING from both mode renders — its owner ` +
+                `partial is in this protocol's include graph; a broken include?`
+            );
+          }
+        }
       }
     }
     expect(failures, failures.join('\n')).toEqual([]);
