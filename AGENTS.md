@@ -302,10 +302,8 @@ topical sections below; the rest live here:
 ```
 project-root/
 ├── codev/
-│   ├── protocols/           # Development protocols
-│   │   ├── spir/          # Multi-phase development with consultation
-│   │   ├── experiment/     # Disciplined experimentation
-│   │   └── maintain/       # Codebase maintenance (code + docs)
+│   ├── protocols/           # LOCAL-ONLY protocols (e.g. release/) — framework
+│   │   └── release/        #   protocols resolve from codev-skeleton/ (Spec 1252)
 │   ├── maintain/            # MAINTAIN protocol runtime artifacts
 │   │   └── .trash/         # Soft-deleted files (gitignored, 30-day retention)
 │   ├── projects/           # Active project state (managed by porch)

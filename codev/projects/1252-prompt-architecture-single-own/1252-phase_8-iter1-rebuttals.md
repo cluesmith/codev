@@ -23,3 +23,13 @@ doctrine (CLAUDE.md's File Resolution section — those lines are more true
 post-1252 than before). N3 byte-identity maintained.
 
 Suite: 3,744 green.
+
+---
+
+## Claude (COMMENT, late) — accepted
+
+The Directory Structure tree in CLAUDE.md/AGENTS.md still drew the deleted
+protocol subdirectories (spir/experiment/maintain under `codev/protocols/`).
+Fixed: the tree now shows `codev/protocols/` as local-only (release/) with the
+framework-resolution note. Same class as Codex's sweep — a diagram is a
+reference too.
