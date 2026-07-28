@@ -130,3 +130,41 @@ unreferenced, but local-only with no skeleton counterpart, and explicitly
 preserved by an architect T8 ruling in the 1252 shadow-tree audit. Exempted in
 the test with that reason in a comment rather than reversed unilaterally.
 Flagged as follow-up in the PR.
+
+## PR + CMAP
+
+PR #1283. CMAP: gemini=APPROVE, codex=REQUEST_CHANGES, claude=APPROVE.
+
+**Codex was right and I'd overclaimed.** Its finding: my enforcement test scanned
+*every* `.md` under `protocols/` for includes, so an include mentioned in a
+consult-type would have counted as "this template has a consumer" — but only
+`prompts/*.md` and `protocol.md` actually get `resolveCodevIncludes` run over
+them. I verified the premise before acting on it (`commands/consult/index.ts`
+loads consult-types with plain `readCodevFile`), and it holds: an include there
+is never expanded, reaching the model as literal text while the template stays
+unreachable. The test was weaker than the PR body's claim.
+
+Rewrote `findOrphanedTemplates` as reachability-from-delivery-roots with
+transitive include-following, added `findUnresolvedIncludeSites`, and added a
+mutation test reproducing Codex's exact scenario. Re-ran the live seeded-orphan
+demo after tightening to confirm the mutation check still has teeth.
+
+Gemini's APPROVE landed in 11.6s and mostly restated my PR body — logged as
+APPROVE but weighted as low-information. Claude's was substantive (independently
+re-verified mirror parity on disk).
+
+**Self-initiated fix, no reviewer asked for it.** I'd picked the
+`spec_has_required_sections` headings by reading the template rather than by
+measuring anything. Checked the guess against the repo's 166 real specs (last 40,
+the mature-SPIR corpus): `## Solution Approaches` is absent from **30%** of them
+and `## Open Questions` from 15%. Gating on those would have failed a third of
+legitimate specs and taught people to route around the gate. Narrowed the hard
+check to the four headings recent practice honors 88-100% of the time; the other
+two stay advisory in the consult type. Added a calibration guard test.
+
+**Process note worth remembering**: I ran the full suite once from the repo root
+and got "224 failed" — that's vitest picking up all 325 workspace test files, not
+a regression. CLAUDE.md says it: never run npm/test commands from the repo root,
+run them from `packages/codev`. Package-scoped run was green throughout.
+
+Final: 3793 passed / 48 skipped / 0 failed. Awaiting the `pr` gate.
