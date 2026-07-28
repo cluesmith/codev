@@ -62,12 +62,33 @@ The spec left two Important open questions as *numbers only* (semantics were fix
     {"id": "phase_1", "title": "afx interrupt + ESC delivery path"},
     {"id": "phase_2", "title": "Quiescence observability (lastDataAt)"},
     {"id": "phase_3", "title": "Reset receipt gate (nonce, substance, stability)"},
-    {"id": "phase_4", "title": "Re-orientation assembly (complete-or-abort)"},
-    {"id": "phase_5", "title": "Reset orchestrator + CLI wiring"},
-    {"id": "phase_6", "title": "Wait discipline and command documentation"}
+    {"id": "phase_4", "title": "Builder context resolution (protocol, mode, harness capability)"},
+    {"id": "phase_5", "title": "Re-orientation assembly (complete-or-abort)"},
+    {"id": "phase_6", "title": "Reset orchestrator + CLI wiring"},
+    {"id": "phase_7", "title": "Wait discipline and command documentation"}
   ]
 }
 ```
+
+## Where reset's context actually comes from
+
+CMAP iteration 1 exposed a load-bearing assumption in the first draft: it spoke of a "resolved builder
+record" as though the registry carried everything R3 needs. It does not, and the gap is worse than the
+review stated. Verified against the code:
+
+| Fact R3 needs | Actually available where | Not available where |
+|---|---|---|
+| Protocol | porch `status.yaml` in the worktree (`protocol: aspir`); `parseAgentName(builderId)` as a secondary | **`builders.protocol_name` is NULL for spec-type builders** — `spawn.ts:488-492` never passes `protocolName`; only the `protocol`-type spawn path (`:620-625`) does. Every SPIR/ASPIR lane — the exact target of this feature — has a NULL there. |
+| Phase | porch `status.yaml` (`phase`, `current_plan_phase`) | Registry (`builders.phase` is a coarse spawn-time value) |
+| Mode (strict/soft) | The literal `## Mode: STRICT` line in the worktree's `.builder-prompt.txt` — what the builder was actually told | Nowhere in the DB. `resolveMode` computes it at spawn from flags + protocol defaults and discards it; a spawn-time `--soft` is not recoverable from protocol defaults afterwards. |
+| Harness | The launch line in the worktree's `.builder-start.sh` — per-builder ground truth for the process actually running | Workspace config alone is unreliable: a config change after spawn would misreport a running builder's harness. |
+
+**Decision: do not add a `mode` (or `protocol`) column to the `builders` table.** Persisting would only
+help builders spawned *after* this change — every currently-running lane would still read NULL, so the
+worktree derivation is required regardless. Adding the column on top of that creates a second source of
+truth for a fact the worktree already holds authoritatively, which is the duplication the "single source
+of truth" lesson warns against. Phase 4 makes the worktree the single source and terminates every
+resolution chain in a loud abort rather than a guess.
 
 ## Phase Breakdown
 
@@ -79,6 +100,10 @@ The spec left two Important open questions as *numbers only* (semantics were fix
 - Provide the guaranteed-immediate ESC delivery path that phase 5's R4 escalation will reuse.
 
 #### Deliverables
+- [ ] `packages/core/src/tower-client.ts` — add `escape?: boolean` to `TowerClient.sendMessage`'s options
+      and forward it in the request body. **This is the client surface `afx interrupt` rides on**; the
+      first draft claimed the command "reuses the plumbing end-to-end" without listing it (CMAP catch).
+      `packages/codev/src/agent-farm/lib/tower-client.ts` is a pure re-export and needs no change.
 - [ ] `packages/codev/src/agent-farm/commands/interrupt.ts` (new) — resolve target, POST to Tower.
 - [ ] `packages/codev/src/agent-farm/cli.ts` — register `interrupt [builder]` with `--no-enter`.
 - [ ] `packages/codev/src/agent-farm/types.ts` — `InterruptOptions`.
@@ -148,10 +173,12 @@ depends on it until phase 5.
 - Expose the terminal-output timestamp that R4 needs, so quiescence is *measured* rather than assumed.
 
 #### Deliverables
-- [ ] `packages/codev/src/terminal/pty-session.ts` — add `lastDataAt` to the `info` getter.
-- [ ] `packages/codev/src/terminal/types.ts` (or wherever `PtySessionInfo` lives) — add the field.
+- [ ] `packages/codev/src/terminal/pty-session.ts` — add `lastDataAt` to `PtySessionInfo` (declared in
+      the same file, `:30-40`) and to the `info` getter (`:504-516`).
 - [ ] `packages/core/src/tower-client.ts` — add `lastDataAt` to `TowerTerminal`.
-- [ ] Tests: `packages/codev/src/terminal/__tests__/spec-1273-last-data-at.test.ts`.
+- [ ] Tests: **extend the existing** `packages/codev/src/agent-farm/__tests__/pty-last-data-at.test.ts`
+      (Spec 467) rather than creating a parallel file — it already covers `lastDataAt` tracking, and a
+      second file testing the same field invites drift.
 
 #### Implementation Details
 
@@ -240,25 +267,105 @@ Delete the module; nothing imports it until phase 5.
 
 ---
 
-### Phase 4: Re-orientation assembly (complete-or-abort)
+### Phase 4: Builder context resolution (protocol, mode, harness capability)
 **Dependencies**: None
+
+#### Objectives
+- Produce the facts R3 needs from sources that actually hold them, with every chain terminating in a loud
+  abort rather than a guess.
+- Give the harness abstraction an explicit capability flag so "does this harness support in-session
+  context reset?" is a typed question, not an inference.
+
+#### Deliverables
+- [ ] `packages/codev/src/agent-farm/commands/reset/context.ts` (new) — resolve
+      `{ protocol, phase, mode, harness, specName, planPath, issue }` for a builder.
+- [ ] `packages/codev/src/agent-farm/utils/harness.ts` — add a `supportsContextReset` capability to
+      `HarnessProvider` (`:22`); true for `CLAUDE_HARNESS`, false/absent for the others.
+- [ ] Tests: `packages/codev/src/agent-farm/__tests__/spec-1273-reset-context.test.ts`.
+
+#### Implementation Details
+
+Each field has an explicit precedence chain. None ends in a default:
+
+- **Protocol**: porch `status.yaml` under the worktree's `codev/projects/<id>-<name>/` → `parseAgentName(builderId)`
+  → **abort**. The registry's `builders.protocol_name` is deliberately *not* consulted: it is NULL for
+  every spec-type builder (`spawn.ts:488-492`), so reading it would look correct in review and fail on
+  exactly the lanes this feature targets. A comment records that, so a future reader does not "fix" it.
+- **Phase**: `status.yaml` (`phase`, `current_plan_phase`). Absent means a non-porch lane — the porch
+  re-entry block is omitted and the omission is recorded in the report. This is a genuine branch, not a
+  gate failure, so it does **not** abort.
+- **Mode**: `--mode` override → the literal `## Mode: STRICT|SOFT` line in the worktree's
+  `.builder-prompt.txt` (the text the builder was actually given, and correct even after `--resume`,
+  which does not rewrite it) → **abort** with an instruction to pass `--mode`. `resolveMode` cannot be
+  replayed after the fact: a spawn-time `--soft` is unrecoverable from protocol defaults.
+- **Harness**: parse the launch line in the worktree's `.builder-start.sh` → map to a `HarnessProvider` →
+  require `supportsContextReset` → **abort** naming the harness otherwise. Per-builder ground truth beats
+  workspace config, which would misreport a running builder after a config change.
+
+`supportsContextReset` is added as an optional capability so the three non-Claude providers need no edit
+and absence reads as unsupported — the safe direction.
+
+#### Acceptance Criteria
+- [ ] Protocol resolves from `status.yaml` for a porch lane, and from the builder id when `status.yaml`
+      is absent; aborts when neither yields one.
+- [ ] Resolution never consults `builders.protocol_name` (a test asserts a spec-type builder with NULL
+      `protocol_name` still resolves correctly).
+- [ ] Mode resolves from `--mode`, else from `.builder-prompt.txt`; aborts naming `--mode` when neither.
+- [ ] Harness resolves from `.builder-start.sh`; a provider without `supportsContextReset` aborts with
+      the harness named.
+- [ ] A non-porch lane resolves without a phase and records the omission instead of aborting.
+- [ ] Resolution is read-only: no writes, no terminal I/O.
+
+#### Test Plan
+- **Unit**: each precedence chain, each abort, over injected fs ports; the NULL-`protocol_name` case
+  explicitly; `supportsContextReset` present/absent.
+- **Manual**: run resolution against this workspace's own live builders and confirm the resolved
+  protocol/mode match what each was actually spawned with.
+
+#### Rollback Strategy
+Delete `context.ts`; revert the one-line capability addition to `HarnessProvider`. Nothing imports it
+until phase 6.
+
+#### Risks
+- **Risk**: `.builder-prompt.txt` format drifts and the mode line stops parsing.
+  - **Mitigation**: abort (never guess), with `--mode` as the documented escape hatch; a test pins the
+    current rendered format.
+- **Risk**: `HarnessProvider` is a framework interface with several implementations.
+  - **Mitigation**: the capability is optional, so absence means unsupported and no other provider needs
+    to change.
+
+---
+
+### Phase 5: Re-orientation assembly (complete-or-abort)
+**Dependencies**: Phase 4
 
 #### Objectives
 - Implement R3: assembly either produces a frame containing every required element, or it throws. There
   is no code path that returns a partial frame.
 
 #### Deliverables
-- [ ] `packages/codev/src/agent-farm/commands/reset/reorient.ts` (new) — registry → payload.
+- [ ] `packages/codev/src/agent-farm/commands/reset/reorient.ts` (new) — resolved context → payload.
 - [ ] Tests: `packages/codev/src/agent-farm/__tests__/spec-1273-reset-reorient.test.ts`.
 
 #### Implementation Details
 
-A single function takes the resolved builder record (worktree, branch, protocol, mode, project id, issue,
-type) plus the optional addendum, and returns `{ inline, longForm }`. Every required element is read from
-an explicit field; a missing field **throws a named error** identifying the field. Completeness is
-enforced by construction rather than by review: the required-element list is a constant, and assembly
-validates the built payload against it before returning, so adding a required element without producing
-it fails the tests.
+A single function takes the phase-4 resolved context plus the optional addendum and returns
+`{ inline, longForm }`. Every required element is read from an explicit field; a missing field **throws a
+named error** identifying the field. Completeness is enforced by construction rather than by review: the
+required-element list is a constant, and assembly validates the built payload against it before
+returning, so adding a required element without producing it fails the tests.
+
+**The long form is spawn machinery, not a paraphrase of it.** `longForm` is the output of
+`buildPromptFromTemplate(config, protocol, templateContext)` — the same function the fresh-launch spawn
+path uses (`spawn.ts:470`) — wrapped in a reset header and the state-file pointer. The `TemplateContext`
+is reconstructed from phase 4's resolved context: protocol, mode, project id, spec and plan paths, issue
+number and body. The porch re-entry wording in `inline` reuses `buildResumeNotice()` **verbatim** rather
+than restating it, so there is exactly one copy of that text.
+
+This is the concrete discharge of architect directive 4 ("re-inject phase context the way `--resume`
+does"): the builder receives the same protocol/phase framing a fresh launch would deliver, through a file
+rather than a prompt argument. The first draft's "registry → payload" was too vague for an R3-critical
+path — a fair CMAP catch.
 
 **`inline`** (the message, kept compact for the paced channel): reset notice; role frame as an *identity
 block* — that the recipient is a builder and which role document governs it, **not** the role's full
@@ -300,8 +407,8 @@ Delete the module; nothing imports it until phase 5.
 
 ---
 
-### Phase 5: Reset orchestrator + CLI wiring
-**Dependencies**: Phases 1, 2, 3, 4
+### Phase 6: Reset orchestrator + CLI wiring
+**Dependencies**: Phases 1, 2, 3, 4, 5
 
 #### Objectives
 - Compose the verified parts into the `afx reset` state machine, with R1 and R4 enforced by ordering that
@@ -323,10 +430,11 @@ assert over that log, which is what makes "impossible by construction" checkable
 
 Sequence:
 
-1. **Resolve and validate** — reuse `afx send`'s resolver and workspace detection; read the builder record;
-   confirm the terminal exists and is writable; confirm the harness supports in-session context reset.
-   A non-Claude harness **aborts loudly**, naming the harness — no substituted mechanism (fail fast).
-2. **Assemble (R1)** — build the re-orientation via phase 4 and write `.builder-reorient.md`. Any failure
+1. **Resolve and validate** — reuse `afx send`'s resolver and workspace detection; read the builder record
+   for worktree/branch/issue; resolve protocol, mode and harness via phase 4; confirm the terminal exists
+   and is writable; require `supportsContextReset`. A non-Claude harness **aborts loudly**, naming the
+   harness — no substituted mechanism (fail fast).
+2. **Assemble (R1)** — build the re-orientation via phase 5 and write `.builder-reorient.md`. Any failure
    aborts here, with the builder untouched. **Nothing destructive can precede this step.**
 3. **Optional `--interrupt-first`** — for a builder already wedged mid-turn, send ESC via phase 1's path
    before the save request. Default off: the default path assumes an addressable builder and does not
@@ -374,7 +482,7 @@ worktree.
   "it compiled" is not "it works", and this is the headline user path.
 
 #### Rollback Strategy
-Revert the command and its CLI registration; phases 1–4 remain independently valuable (interrupt ships,
+Revert the command and its CLI registration; phases 1–5 remain independently valuable (interrupt ships,
 `lastDataAt` is additive, the reset modules are unreferenced).
 
 #### Risks
@@ -389,7 +497,7 @@ Revert the command and its CLI registration; phases 1–4 remain independently v
 
 ---
 
-### Phase 6: Wait discipline and command documentation
+### Phase 7: Wait discipline and command documentation
 **Dependencies**: Phase 1 (the guidance names `afx interrupt`)
 
 #### Objectives
@@ -401,7 +509,10 @@ Revert the command and its CLI registration; phases 1–4 remain independently v
 - [ ] `codev/roles/builder.md` — the same content as a purely additive block.
 - [ ] `codev-skeleton/resources/commands/agent-farm.md` and `codev/resources/commands/agent-farm.md` —
       `afx reset` and `afx interrupt` reference entries.
-- [ ] `.claude/skills/afx` reference updated so the commands are reachable from the skill.
+- [ ] **Both** skill trees: `.claude/skills/afx/SKILL.md` **and** `.codex/skills/afx/SKILL.md`. The repo
+      maintains parallel Claude and Codex skill trees (verified: both exist with identical skill sets);
+      updating only the Claude one would leave Codex-driven agents unable to discover the commands —
+      a CMAP catch on the first draft.
 
 #### Implementation Details
 
@@ -429,6 +540,7 @@ duplicating guidance across surfaces is what that ownership map exists to preven
 #### Acceptance Criteria
 - [ ] The three rules and the `afx interrupt` escape hatch appear in both role documents.
 - [ ] Command reference documents both commands with their flags in both trees.
+- [ ] Both `.claude/skills/afx/SKILL.md` and `.codex/skills/afx/SKILL.md` list the new commands.
 - [ ] A repo-wide grep confirms no stale references and that skeleton/`codev` copies agree
       (per the standing "grep BOTH trees" lesson).
 
@@ -447,15 +559,16 @@ Revert the doc commits; no code depends on them.
 ## Dependency Map
 
 ```
-Phase 1 (afx interrupt) ─────┐
-Phase 2 (lastDataAt) ────────┤
-Phase 3 (receipt gate) ──────┼──→ Phase 5 (orchestrator + CLI)
-Phase 4 (reorient assembly) ─┘
-        │
-        └──→ Phase 6 (docs, needs Phase 1's command name)
+Phase 1 (afx interrupt) ──────────────────────────┐
+Phase 2 (lastDataAt) ─────────────────────────────┤
+Phase 3 (receipt gate) ───────────────────────────┼──→ Phase 6 (orchestrator + CLI)
+Phase 4 (context resolution) ──→ Phase 5 (reorient assembly)
+   │
+   └── Phase 1 ──→ Phase 7 (docs, needs Phase 1's command name)
 ```
 
-Phases 1–4 are mutually independent and individually shippable. Phase 5 is the only integration point.
+Phases 1–4 are mutually independent and individually shippable. Phase 5 depends only on phase 4's
+resolved-context type. Phase 6 is the only integration point.
 
 ## Resource Requirements
 
@@ -505,9 +618,11 @@ None.
 
 1. **After Phase 1**: `afx interrupt` unwedges a real builder mid-turn (manual), and `afx send` is unchanged.
 2. **After Phase 2**: `lastDataAt` advances and settles as expected against a live terminal.
-3. **After Phase 4**: `--dry-run`-shaped payload inspection shows a complete frame for a real builder record.
-4. **After Phase 5**: full `afx reset` against a disposable builder — the headline path, run for real.
-5. **Before PR**: `pnpm build` + `pnpm test` green; both trees grepped for consistency; every spec success
+3. **After Phase 4**: resolution run against this workspace's live builders returns the protocol and mode
+   each was actually spawned with — the check that would have caught the NULL `protocol_name` assumption.
+4. **After Phase 5**: `--dry-run`-shaped payload inspection shows a complete frame for a real builder.
+5. **After Phase 6**: full `afx reset` against a disposable builder — the headline path, run for real.
+6. **Before PR**: `pnpm build` + `pnpm test` green; both trees grepped for consistency; every spec success
    criterion walked item by item.
 
 ## Monitoring and Observability
@@ -537,7 +652,32 @@ None.
 
 ## Expert Review
 
-Pending — porch runs the 3-way consultation (Gemini, Codex, Claude) at the verify step of this phase.
+**Date**: 2026-07-28
+**Models Consulted**: Gemini (agy), GPT-5.4 Codex, Claude
+**Verdicts (iteration 1)**: Gemini APPROVE (HIGH), Claude APPROVE (HIGH), Codex REQUEST_CHANGES (HIGH)
+
+**Key Feedback and Plan Adjustments**:
+
+- *Codex — phase 1 omits the client surface.* `TowerClient.sendMessage` (`packages/core/src/tower-client.ts`)
+  has no `escape` option; the plan claimed end-to-end reuse without listing it. **Added to phase 1
+  deliverables**, with a note that the `agent-farm/lib` copy is a pure re-export.
+- *Codex — mode/harness are not persisted.* Verified, and the gap is larger than reported:
+  `builders.protocol_name` is NULL for **spec-type builders**, so the DB does not even carry the
+  protocol for SPIR/ASPIR lanes. **Added a "Where reset's context actually comes from" section and a new
+  phase 4** that resolves protocol/phase/mode/harness from the sources that hold them, each chain ending
+  in a loud abort. Explicitly declined to add a `mode` DB column: it would be NULL for every running
+  builder and would duplicate a fact the worktree already holds.
+- *Codex — re-orientation is too hand-wavy for an R3-critical path.* **Anchored concretely**: the long
+  form is `buildPromptFromTemplate`'s output — the same function the fresh-launch path uses — and the
+  porch re-entry text reuses `buildResumeNotice()` verbatim.
+- *Codex — only the Claude skill tree named.* Verified `.codex/skills/afx/` exists too. **Both trees**
+  added to phase 7.
+- *Claude — harness capability gate not deliverable-listed.* **Added** `supportsContextReset` on
+  `HarnessProvider` to phase 4's deliverables.
+- *Claude — an existing `pty-last-data-at.test.ts` already covers the field.* **Changed phase 2** to
+  extend it rather than create a parallel file.
+
+Gemini approved with no issues.
 
 ## Approval
 
@@ -549,6 +689,7 @@ ASPIR: plan-approval is auto-approved; the `pr` gate remains human-approved.
 | Date | Change | Reason | Author |
 |---|---|---|---|
 | 2026-07-28 | Initial plan | Spec 1273 approved (ASPIR auto-approval after CMAP iteration 1) | Builder aspir-1273 |
+| 2026-07-28 | Added phase 4 (context resolution); anchored re-orientation to `buildPromptFromTemplate`/`buildResumeNotice`; added the core client surface to phase 1; both skill trees in phase 7; `supportsContextReset` capability; phase 2 extends the existing test | Plan CMAP iteration 1 — Codex REQUEST_CHANGES (4 issues), Claude non-blocking notes | Builder aspir-1273 |
 
 ## Notes
 

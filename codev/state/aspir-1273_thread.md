@@ -83,9 +83,42 @@ Design decisions locked this iteration:
 - Long-form re-orientation goes to `.builder-reorient.md`; the message carries the compact frame.
   Both `.builder-` prefixed, so `afx cleanup` still sees the worktree as clean.
 
+## Plan CMAP iteration 1 — 2026-07-28
+
+Gemini **APPROVE**, Claude **APPROVE**, Codex **REQUEST_CHANGES** (4 issues). All verified against code
+before acting; all accepted. Full detail in `1273-plan-iter1-rebuttals.md`.
+
+**The one that matters for anyone else working in this area** — the builders registry does NOT carry what
+you'd assume:
+
+- `builders.protocol_name` is **NULL for spec-type builders**. `spawn.ts:488-492` never passes
+  `protocolName`; only the `protocol`-type path (`:620-625`) does. Reading `db/schema.ts` shows the column
+  and looks fine — the persistence path is where the truth is. Every SPIR/ASPIR lane, including this one,
+  has NULL there.
+- **Mode is nowhere in the DB.** `resolveMode` computes it at spawn from flags + protocol defaults and
+  discards it; a spawn-time `--soft` is unrecoverable afterwards.
+- Where the facts actually live: porch `status.yaml` (protocol, phase), `.builder-prompt.txt` (the literal
+  `## Mode: STRICT` line), `.builder-start.sh` (the real harness launch line — per-builder ground truth,
+  unlike workspace config which can change mid-run).
+
+Added **phase 4 (context resolution)** for this, with per-field precedence chains each ending in a loud
+abort. Deliberately did **not** add a `mode` DB column: it would be NULL for every running builder, so the
+worktree derivation is needed anyway, and the column would duplicate a fact the worktree already holds.
+Flagged to the architect in the rebuttal as a reversible call.
+
+Also from this round: `longForm` re-orientation is now literally `buildPromptFromTemplate`'s output (the
+same function the fresh-launch spawn path uses) rather than a paraphrase, with `buildResumeNotice()`
+reused verbatim for the porch re-entry text; `TowerClient.sendMessage` in `packages/core` needs the
+`escape` option (it was missing from phase 1); `.codex/skills/afx/SKILL.md` needs updating alongside the
+Claude one.
+
+Phase count 6 → 7.
+
 ## Status
 
 - [x] Explored afx/Tower internals
 - [x] Spec drafted → `codev/specs/1273-builder-context-reset-should-b.md`
-- [x] porch verify iteration 1 (3-way CMAP) — 2 APPROVE, 1 REQUEST_CHANGES, all feedback addressed
-- [ ] porch verify iteration 2
+- [x] Spec CMAP iteration 1 — 2 APPROVE, 1 REQUEST_CHANGES, all feedback addressed → spec auto-approved
+- [x] Plan drafted → `codev/plans/1273-builder-context-reset-should-b.md`
+- [x] Plan CMAP iteration 1 — 2 APPROVE, 1 REQUEST_CHANGES, all 4 issues addressed
+- [ ] Plan re-verification, then Implement phase 1
