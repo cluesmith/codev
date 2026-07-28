@@ -39,8 +39,9 @@ Execute the MAINTAIN protocol to ensure:
 - CLAUDE.md and AGENTS.md are in sync
 
 ```bash
-# Review what MAINTAIN will do
-cat codev/protocols/maintain/protocol.md
+# Review what MAINTAIN will do (Spec 1252: the codev/protocols shadow tree was
+# deleted — framework protocols live in codev-skeleton/, the single owner)
+cat codev-skeleton/protocols/maintain/protocol.md
 ```
 
 ### 3. Run E2E Tests

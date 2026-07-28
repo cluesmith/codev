@@ -65,3 +65,41 @@ months ago. Detection was never the problem.
 ## Status
 
 Full suite green: 3,746 passed, 0 failures.
+
+---
+
+# Iteration 2 addendum
+
+| Model | Verdict | Issues |
+|---|---|---|
+| Gemini | APPROVE | 0 |
+| Codex | REQUEST_CHANGES | 2 |
+| Claude | APPROVE | 0 |
+
+Both accepted; both are follow-through failures on my own earlier claims.
+
+## CX-1 — preserved `release/protocol.md` still `cat`s a deleted file
+
+Accepted. My M7 sweep covered `packages/*/src`, `scripts/`, workflows — and
+never audited **codev/'s own preserved content**. The RELEASE protocol
+(local-only, explicitly never shipped) told its reader to
+`cat codev/protocols/maintain/protocol.md`, deleted in 4b. Fixed: repointed to
+`codev-skeleton/protocols/maintain/protocol.md` with a one-line explanation —
+legitimate here precisely because RELEASE is codev-local and the skeleton
+source tree is guaranteed present in this repo.
+
+## CX-2 — bugfix-742's parity became file-vs-itself
+
+Accepted, and worth the sting: in iteration 1 I wrote that I fixed the vacuous
+parity defect "as a class, not an instance" — and missed this instance. The
+claim was stronger than the sweep behind it. Fixed the same way as 685: parity
+describe removed with an explanatory comment, the substantive assertions
+(BUGFIX templates must differ from SPIR's) retained against the skeleton, and
+the corrupted `describe.each` table repaired. Suite: 3,730 passed, 0 failures.
+
+Also inventoried while fixing CX-1: `CLAUDE.md`/`AGENTS.md` carry ~10 prose
+references to now-deleted `codev/protocols/...` paths (protocol listing,
+release pointer). Those are *references, not fetches*, and both files are
+already scheduled for Phase 5 (scar wordings) and Phase 7/8 (dedup + governance
+sync) edits — repointing them lands there rather than expanding Phase 4's
+commit. Recorded in the audit doc so it cannot be dropped.

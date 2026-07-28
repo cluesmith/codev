@@ -21,25 +21,21 @@ import * as path from 'node:path';
 
 const repoRoot = path.resolve(import.meta.dirname, '../../../..');
 
+// Spec 1252 (Phase 4): the codev/protocols shadow tree was deleted — the
+// skeleton is the single owner, so the former codev-vs-skeleton parity checks
+// were removed as vacuous (no second tree exists). The substantive assertions
+// (BUGFIX templates must differ from SPIR's) run against the skeleton.
 const templates = {
   bugfixPrReview: path.join(repoRoot, 'codev-skeleton/protocols/bugfix/consult-types/pr-review.md'),
   bugfixImplReview: path.join(repoRoot, 'codev-skeleton/protocols/bugfix/consult-types/impl-review.md'),
   spirPrReview: path.join(repoRoot, 'codev-skeleton/protocols/spir/consult-types/pr-review.md'),
   spirImplReview: path.join(repoRoot, 'codev-skeleton/protocols/spir/consult-types/impl-review.md'),
-  skeletonBugfixPrReview: path.join(
-    repoRoot,
-    'codev-skeleton/protocols/bugfix/consult-types/pr-review.md',
-  ),
-  skeletonBugfixImplReview: path.join(
-    repoRoot,
-    'codev-skeleton/protocols/bugfix/consult-types/impl-review.md',
-  ),
 };
 
 const read = (p: string) => fs.readFileSync(p, 'utf-8');
 
 describe('BUGFIX consult templates (#742)', () => {
-  describe('codev/ (self-hosted)', () => {
+  describe('skeleton templates (single owner)', () => {
     it('pr-review.md must differ from the SPIR version', () => {
       const bugfix = read(templates.bugfixPrReview);
       const spir = read(templates.spirPrReview);
@@ -53,21 +49,9 @@ describe('BUGFIX consult templates (#742)', () => {
     });
   });
 
-  describe('codev-skeleton/ (shipped template)', () => {
-    it('pr-review.md must match the codev/ copy byte-for-byte', () => {
-      expect(read(templates.skeletonBugfixPrReview)).toEqual(read(templates.bugfixPrReview));
-    });
-
-    it('impl-review.md must match the codev/ copy byte-for-byte', () => {
-      expect(read(templates.skeletonBugfixImplReview)).toEqual(read(templates.bugfixImplReview));
-    });
-  });
-
   describe.each([
-    ['codev/ pr-review.md', templates.bugfixPrReview],
-    ['codev/ impl-review.md', templates.bugfixImplReview],
-    ['skeleton pr-review.md', templates.skeletonBugfixPrReview],
-    ['skeleton impl-review.md', templates.skeletonBugfixImplReview],
+    ['skeleton pr-review.md', templates.bugfixPrReview],
+    ['skeleton impl-review.md', templates.bugfixImplReview],
   ])('content of %s', (_label, filePath) => {
     const content = read(filePath);
 

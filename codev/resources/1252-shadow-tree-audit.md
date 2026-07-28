@@ -252,3 +252,14 @@ the deletion is the test.
   `renderTemplate` is a pure function of the resolved template.
 - Allowlist: **empty**. Drift gate: zero findings. All T11 guards green with
   zero pending rows.
+
+## Phase 4 iter-2 additions
+
+- `codev/protocols/release/protocol.md:43` repointed (`cat codev-skeleton/...`)
+  — the M7 sweep had not audited codev/'s own preserved content. Verified no
+  other fetch of deleted paths exists in preserved files.
+- **Deferred to Phase 8 (recorded so it is not lost)**: `CLAUDE.md`/`AGENTS.md`
+  contain ~10 prose references to deleted `codev/protocols/...` paths
+  (available-protocol listing, RELEASE pointer, SPIR instruction). References,
+  not fetches; both files receive Phase 5/7/8 edits where these repoint to
+  `codev-skeleton/` (or resolver-neutral wording) as part of governance sync.
