@@ -40,6 +40,17 @@ export interface HarnessProvider {
   };
 
   /**
+   * Whether this harness can clear its conversation context in-session, without
+   * restarting the process (Spec 1273 — `afx reset`).
+   *
+   * Optional, and absence means "no": a harness that has not declared support
+   * must not be reset, and defaulting to unsupported is the safe direction. Only
+   * Claude declares it today (`/clear`), which is why `afx reset` refuses other
+   * harnesses loudly rather than improvising a substitute mechanism.
+   */
+  supportsContextReset?: boolean;
+
+  /**
    * Optional: files to write in the worktree before launching the agent.
    * Used by harnesses that rely on file-based configuration (e.g., OpenCode
    * uses opencode.json's instructions field for role injection; Claude uses it
@@ -116,6 +127,10 @@ export interface CustomHarnessConfig {
 // =============================================================================
 
 export const CLAUDE_HARNESS: HarnessProvider = {
+  // Spec 1273: `/clear` empties the conversation while leaving the process — and
+  // therefore the --append-system-prompt role below — intact. That is what makes
+  // an in-session reset possible here and nowhere else today.
+  supportsContextReset: true,
   buildRoleInjection: (content, _filePath) => ({
     args: ['--append-system-prompt', content],
     env: {},
@@ -186,7 +201,12 @@ export const OPENCODE_HARNESS: HarnessProvider = {
   }]),
 };
 
-const BUILTIN_HARNESSES: Record<string, HarnessProvider> = {
+/**
+ * Exported for Spec 1273: `afx reset` identifies a running builder's harness from
+ * its launch script and must check `supportsContextReset` before typing into the
+ * terminal. It needs the name→provider map, not just the workspace default.
+ */
+export const BUILTIN_HARNESSES: Record<string, HarnessProvider> = {
   claude: CLAUDE_HARNESS,
   codex: CODEX_HARNESS,
   gemini: GEMINI_HARNESS,
