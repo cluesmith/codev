@@ -20,14 +20,14 @@ plan_phases:
     status: complete
   - id: phase_6
     title: Ownership map + completeness enforcement
-    status: in_progress
+    status: complete
   - id: phase_7
     title: Deduplication and measurement
-    status: pending
+    status: in_progress
   - id: phase_8
     title: Governance sync + end-to-end verification
     status: pending
-current_plan_phase: phase_6
+current_plan_phase: phase_7
 gates:
   spec-approval:
     status: approved
@@ -41,8 +41,8 @@ gates:
     status: pending
   verify-approval:
     status: pending
-iteration: 3
-build_complete: true
+iteration: 1
+build_complete: false
 history:
   - iteration: 1
     plan_phase: phase_1
@@ -205,7 +205,7 @@ history:
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/spir-1252/codev/projects/1252-prompt-architecture-single-own/1252-phase_6-iter2-claude.txt
 started_at: '2026-07-27T07:23:40.596Z'
-updated_at: '2026-07-28T04:32:32.828Z'
+updated_at: '2026-07-28T04:32:41.858Z'
 force_advanced:
   phase: phase_5
   iteration: 3
