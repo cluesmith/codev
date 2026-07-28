@@ -796,3 +796,31 @@ codev/reviews/1252-prompt-architecture-single-own.md carries the honest N1
 (-7.0%), the verify-phase checklist (T13b probe + M12b comparison), and the
 systematic observation that the review loop's recurring value was checking
 that enforcement mechanisms BIND, not that artifacts exist.
+
+## FINAL CHAPTER — harvested, not merged (2026-07-28)
+
+Waleed's pr-gate decision: PR #1278 does NOT merge. Charter-level re-scope,
+not a quality verdict — a successor project will shrink the prompt surface
+radically first (blog-principles judgment rewrite, >50% target,
+frontier-models-only), then rebuild enforcement fit-for-purpose around the
+post-shrink surface. Carrying deletion + registry + map + trims for a surface
+about to be rewritten is the wrong risk/reward.
+
+Harvest executed: a minimal PR off main carrying (1) the 17-file drift
+reconciliation — the live bug — with E1 (max_iterations:3) and E2 (cwd via
+main's .codev/config.json) applied, plus the 746 baseline re-derivations the
+sync forces; (2) the knowledge artifacts: shadow-tree audit, word baselines,
+behavioural baseline, measurement tooling + determinism test, the rewritten
+review, this thread.
+
+Stays on this branch (preserved, PR closed unmerged): deletion + equivalence
+proofs, scar registry + T6, ownership map + T12, partials + served guard,
+CLAUDE.md restructure, all skeleton edits. The scar-registry concept and the
+eight ratified wordings move into the successor charter — deferred, not
+discarded.
+
+Worth saying plainly: the measurement work is what made this decision
+possible. An honest -7.0% against a 20% aspiration, decomposed to show the
+remaining mass was single-owned protocol prose, is exactly the evidence that
+says "shrink the surface first, then enforce." The project's most durable
+output may be that its numbers argued against its own machinery.

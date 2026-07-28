@@ -1,192 +1,152 @@
 # Review 1252: Prompt Architecture — Single-Owner Rule for Instruction Content
 
-## Summary
+## Outcome: harvested, not merged
 
-Issue #1252 asked for a single-owner rule across the ~45k-word prompt surface,
-with an inventory before restructuring. Measurement reshaped the problem: the
-largest duplication axis was one the issue never named — a 77-file shadow tree
-under `codev/protocols|roles|consult-types` that outranked the installed
-skeleton in the resolver and had drifted in 17 files, including the served
-SPIR builder prompt (missing its entire `Verify Phase` section). The project
-filed to fix prompt drift was itself spawned with a drifted prompt, and the
-existing drift detector (#1210) had been reporting the problem to
-`codev doctor`, unread, the whole time.
+The full implementation (8 phases, unanimous CMAP approval at each phase's
+final iteration, PR #1278) reached the pr gate and was **deliberately not
+merged**. Waleed's charter-level call at the gate: the structural machinery
+(shadow-tree deletion, scar registry + CI enforcement, ownership map,
+dedup partials) is not worth carrying for *this* surface, because a successor
+project will first shrink the surface radically (blog-principles judgment
+rewrite; >50% reduction target; frontier-models-only assumption) and
+enforcement should be rebuilt fit-for-purpose around the post-shrink surface.
+This was a risk/reward re-scope, not a quality verdict — the audit and
+measurement work from this project directly shaped the successor's charter.
 
-**Delivered, in eight phases:**
+**What landed on main (this harvest PR):**
 
-1. **Drift now fails CI** — `shadow-drift-gate.test.ts` wires the existing
-   `auditProtocolDrift()` into a build-breaking check with a self-limiting,
-   justification-required allowlist (now empty). Word + behavioural baselines
-   captured before any content changed (M2, M6, M12a).
-2. **77-row local-unique audit** (M11) with TS1–TS4 terminal states; four
-   genuine local-unique findings escalated and ruled by the architect.
-3. **17 drifted files reconciled** to the skeleton per ruling D1 (M3) — the
-   headline repair restored `Multi-PR Mechanics`, `Verify Phase`, and the
-   `"Entering verify phase."` string to served SPIR prompts.
-4. **Shadow tree deleted** (M7–M10): the skeleton is the single owner; this
-   repo now dogfoods exactly what it ships. Equivalence proven at three
-   layers — resolver tier (path-asserted), assembly (nine protocols,
-   byte-identical to pre-deletion snapshots via the real
-   `buildPromptFromTemplate`), and the spawn wrapper (which had instructed
-   builders to read a deleted role path — a live #1011-class bug, now a
-   single-owner `builderPreamble()`). Vestigial `copyProtocols`/`copyRoles`
-   removed. `skeleton-embed-sync.test.ts` byte-locks the source tree to the
-   embedded build copy.
-5. **Eight scar rules** (D3-ratified) registered in
-   `codev/resources/scar-rules.yaml` with compressed canonical wordings,
-   enforced line-exactly on every listed surface; deleting or rewording any
-   fails CI (M5/T6). The `human-gates` rule was deliberately reframed to match
-   the relay convention (the sin is acting without a human decision, not
-   running `porch approve` after one is relayed).
-6. **Machine-readable ownership map** (`prompt-ownership.yaml`, M1/M4) with a
-   completeness contract: every normative line in the declared boundary needs
-   a disposition; the catch-all cannot absorb cross-surface duplication; the
-   human companion is validated against the YAML by a parity marker and
-   per-class row assertions.
-7. **Dedup by shared partials** (S1): ten instruction classes extracted to
-   `codev-skeleton/partials/`, all `enforcement: automated`. Served prompts are
-   per-agent delivery — a prose reference would have deleted content from
-   agents' context, so the partial is the single *authored* owner while
-   assembly expands full text into every served prompt, with a served-surface
-   guard (presence from the include graph + per-artifact over-serve cap).
-8. **Governance sync**: arch.md/arch-critical/lessons-learned updated to the
-   post-1252 world (C6's "mirror both trees" retired — it had been factually
-   false since Phase 4); ~20 stale references and two fetch-by-path
-   instructions swept from the root docs; follow-ups filed (#1276 tiering,
-   #1277 A/B eval).
+- **The 17-file drift reconciliation** — the one live bug. `codev/`'s shadow
+  copies synced to the skeleton content, restoring the served SPIR/ASPIR
+  builder prompts' `Multi-PR Mechanics` and `Verify Phase` sections and the
+  `"Entering verify phase."` notification; architect rulings E1
+  (`max_iterations: 3`, decided on the B2 evidence that review rounds run
+  1–2) and E2 (check `cwd`s moved to main's `.codev/config.json`
+  `porch.checks`; the forked protocol.json files synced) applied. Spec-746
+  pure-addition baselines re-derived for the synced files (a frozen-file
+  baseline breaks on any legitimate edit — see Lessons).
+- **The knowledge artifacts**: `1252-shadow-tree-audit.md` (the 77-row
+  classification with rulings), `1252-word-baseline.md` /
+  `1252-word-after-phase7.md` (M6/N1 record), `1252-behavior-baseline.md`
+  (M12a — B1 51.88% REQUEST_CHANGES over 160 verdicts, with the B5 snapshot),
+  the measurement tooling (`scripts/measure-prompt-surface.sh`,
+  `packages/codev/src/lib/prompt-behavior-metrics.ts` + CLI + its
+  determinism test), this review, and the builder thread
+  (`codev/state/spir-1252_thread.md`).
+
+**What stayed on the branch** (`builder/spir-1252`, PR #1278 closed unmerged,
+preserved for reference — do not delete): shadow-tree deletion + equivalence
+proofs, scar registry + line-exact T6 enforcement, ownership map + T12
+completeness machinery, dedup partials + served-surface guard, CLAUDE.md
+restructure, all skeleton edits, and their ~15 test suites. **The scar-registry
+concept and the eight ratified rule wordings move into the successor charter**
+— they are deferred, not discarded.
+
+## Summary of the full implementation (for the record)
+
+Issue #1252 asked for a single-owner rule with an inventory before
+restructuring. Measurement reshaped the problem: the largest duplication axis
+was a 77-file shadow tree under `codev/protocols|roles|consult-types` that
+outranked the installed skeleton in the resolver and had drifted in 17 files —
+including the served SPIR builder prompt, missing its entire `Verify Phase`
+section. The project filed to fix prompt drift was itself spawned with a
+drifted prompt, and the existing detector (#1210) had been reporting the
+problem to `codev doctor`, unread, the whole time.
+
+The eight phases (all on the reference branch): drift CI gate + baselines;
+77-row local-unique audit with TS1–TS4 terminal states and 4 architect-ruled
+escalations; the 17-file reconciliation; shadow-tree deletion with
+three-layer equivalence proof (resolver tier, byte-identical assembly across
+nine protocols, spawn wrapper — which had instructed builders to read a
+deleted role path, a live #1011-class bug); eight compressed scar rules with
+line-exact enforcement; a machine-readable ownership map whose completeness
+contract makes new cross-surface duplication fail CI; dedup via shared
+partials (served prompts are per-agent delivery — a prose reference would
+delete content from agents' context); and governance sync.
 
 **N1, honestly: 21,856 → 20,324 served always-on words = −7.0%** against an
-aspirational ≥20% target. The decomposition: CLAUDE.md relocations delivered
-−1,443; the drift *repair* added ~207 served words the prompts were always
-supposed to have; D3's promotion of three user-global scar rules added ~120;
-and the remaining surface is single-owned prose whose largest block
-(protocol.md, 3,703 words) is protocol semantics — a spec Non-goal. The 20%
-arithmetic assumed more of the surface was duplicated rules than measurement
-bore out. Whether even −7% moved behaviour is the verify phase's question.
-
-**Test surface added**: 8 new/extended suites (drift gate, shadow-tree audit,
-removal equivalence, embed sync, scar rules, ownership map + served guard,
-behaviour metrics, plus rework of 10 existing suites that read deleted paths).
-Full suite at completion: **3,744 passed, 0 failures**. No flaky tests were
-skipped.
+aspirational ≥20%. The repair *added* ~207 served words the prompts were
+always supposed to have; D3's promotion of three user-global scar rules added
+~120; the remaining surface is single-owned prose whose largest block
+(protocol.md, 3,703 words) was protocol semantics — a spec Non-goal. That
+decomposition is exactly why the successor pivots to shrinking the surface
+itself before rebuilding enforcement.
 
 ## Architecture Updates
 
-Applied during Phase 8 (this section records what and why):
+The harvest changes no architecture: it syncs shadow-copy *content* to what
+the skeleton already ships and lands record-keeping artifacts. The
+resolver, the shadow tree's existence, and all governance docs remain as on
+main. (The branch's arch-doc rewrites — C6 retirement, single-owner
+invariant, glossary corrections — apply to a world where the deletion merged;
+they stay with the branch and inform the successor.)
 
-- **`codev/resources/arch-critical.md`** — the "Two trees … mirror every
-  framework change in BOTH" fact was rewritten (it had been false since the
-  deletion): `codev-skeleton/` is the single owner of framework
-  protocols/roles/consult-types, shadow drift fails CI, CLAUDE.md ≡ AGENTS.md
-  folded into the same fact. The porch fact was split so the `status.yaml`
-  scar canonical stands line-exact. The worktree fact now distinguishes
-  architect-driven `afx cleanup` of *finished* builders from the scar-rule
-  prohibition on bulldozing *live* ones. Caps held: 10 facts, 33 lines.
-- **`codev/resources/arch.md`** — Repository Dual Nature rewritten
-  (`codev/protocols/` holds local-only protocols exclusively; the deletion,
-  its drift history, and the enforcing tests are told in place); a
-  single-owner invariant added to Invariants & Constraints; the Glossary's
-  Skeleton entry corrected from "copied to projects on init/adopt" to
-  source-tree + build-time embed + tier-4 runtime fallback; deep references
-  (Quick Start, protocol section headers, roles location, consultant
-  resolution) repointed or annotated as the now-empty tier-2 slot.
-- **New governance artifacts**: `scar-rules.yaml` (registry),
-  `prompt-ownership.yaml` + `.md` (map + validated companion),
-  `1252-shadow-tree-audit.md` (the 77-row record with rulings),
-  `1252-behavior-baseline.md` / `1252-word-baseline.md` /
-  `1252-word-after-phase7.md` (M12a/M6/N1 records).
+One architectural *fact* the audit established that main's docs do not yet
+state: `copyProtocols`/`copyRoles` in `scaffold.ts` are vestigial (uncalled by
+init/adopt/update), so fresh adopters have no shadow tree — this repo's was a
+historical artifact. Recorded here for the successor rather than edited into
+arch.md out-of-band.
 
 ## Lessons Learned Updates
 
-Routed to `codev/resources/lessons-learned.md` (Critical) during Phase 8:
+Not routed into the shared lessons docs (those edits stayed with the branch);
+recorded here for the successor and for MAINTAIN to promote as it sees fit:
 
 - **A detector that reports without failing is a detector nobody reads.**
-  #1210 saw this drift for months; Spec 746's comments even described it
-  ("PRE-EXISTING and not Phase 1's responsibility") before stepping around it.
-  Detection was never the gap — consequence was. Corollaries recorded with it:
-  frozen-file "pure addition" baselines are drift bombs (derive baselines
-  instead); a grep classification of consumers is a hypothesis, not a proof
-  (the deletion is the test); a metric must not reward moving text between
-  files (measure the served artifact, not the authored one).
-
-Additional lessons for this review (not promoted to the shared doc):
-
+  #1210 saw this drift for months; Spec 746's comments described it
+  ("PRE-EXISTING and not Phase 1's responsibility") before stepping around
+  it. Detection was never the gap — consequence was.
+- **Frozen-file baselines are drift bombs.** Spec 746's pure-addition
+  baselines froze then-drifted files; the legitimate reconciliation broke
+  them twice (branch and harvest). Derive baselines from current content
+  minus the asserted insertion instead of freezing snapshots.
 - **The corpus is live — a baseline can measure itself.** This project's own
   review verdicts contaminated its behavioural baseline (160 → 163) and its
-  thread file contributed a scar-mining hit; self-exclusion had to be built
-  in. The verify phase must keep 1252's artifacts excluded.
-- **"The data exists" ≠ "the metric resolves."** B2 as originally specified
+  thread file contributed a scar-mining hit; self-exclusion
+  (`SELF_PROJECT_DIR` / `SELF_FILE_PREFIXES`) had to be built in.
+- **"The data exists" ≠ "the metric resolves."** B2 as first specified
   ("rounds to unanimous approve") could never resolve: 0 of 48 terminal plan
-  phases end unanimously — porch advances on rebuttal. Check the metric
-  definition against the corpus, not just the sources.
-- **Sweep-scope failures were the dominant review-iteration cause**: fixing
-  the flagged instance instead of the class, grepping for a rule's wording
-  instead of the act's, repointing a path while preserving the fetch
-  instruction. The registry/line-exactness/served-guard machinery exists
-  precisely to convert these recurring misses into impossible states.
-- **Served surfaces dedup by include, not by reference.** Each agent sees only
-  its own prompt; removing a rule from one deletes it from that agent's
-  context. Single *authored* ownership with expansion at assembly is the
-  correct model — and the measurement must count expanded words or the metric
-  rewards the shuffle.
+  phases end unanimously — porch advances on rebuttal.
+- **Served surfaces dedup by include, not by reference** — each agent sees
+  only its own prompt; and the measurement must count expanded words or the
+  metric rewards moving text between files.
+- **Sweep-scope failures dominated review iterations**: fixing the flagged
+  instance instead of the class, grepping for a rule's wording instead of the
+  act's, repointing a path while preserving the fetch instruction.
+- **Gate-rejection counts are not minable** from committed history (no
+  `rejected` state exists; `requested_at` is overwritten) — a porch
+  gate-event append-log would fix this (MAINTAIN candidate).
 
 ## Deviations from the Plan
 
-- **Behavioural-metrics script location** — moved from root `scripts/` into
-  `packages/codev/src/lib/` + thin CLI (root scripts can't resolve `js-yaml`
-  in this workspace). Documented at Phase 1.
-- **B2 metric redefinition and B5 determinism scope** — per delta review
-  (rounds-per-phase instead of rounds-to-unanimity; T14 determinism over
-  B1–B4 only).
-- **Phase-2 escalation deadline** — the plan's original "zero pending at
-  Phase 2 close" contradicted the spec's own sequencing; corrected to
-  resolution-before-Phase-4, which is what happened (architect ruled E1/E2
-  before deletion).
-- **Reference model → include model for S1** — see Lessons; endorsed by
-  reviewers as architecturally superior to the planned prose references.
-- **T13(b) rescheduled to verify** (architect ruling): `afx spawn` has no
-  branch selector, so a pre-merge probe would assemble the pre-change tree.
-  Discovered constraint, not a skipped test; the pre-merge proxy is the nine
-  byte-compared prompt snapshots; the architect runs the real probe
-  post-merge + post-local-install.
+The implementation deviations (metrics-script location, B2 redefinition,
+escalation-deadline correction, reference→include model, T13(b)
+rescheduling) are recorded in the phase rebuttals on the branch. The terminal
+deviation is this outcome itself: plan phases 4–8's deliverables were built,
+reviewed, and then deliberately left unmerged by the pr-gate decision.
 
 ## Flaky Tests
 
-None skipped. The two full-suite failures encountered en route (unbuilt
-`@cluesmith/codev-core`, missing `dist/` for shellper integration tests) were
-build-state issues, verified and resolved rather than skipped.
+None skipped, in either the branch suite (3,744 green at close) or the
+harvest suite.
 
-## Verify Phase (pending, post-merge)
+## Verify Phase
 
-Per M12b and the T13(b) ruling, after merge + local-install:
-
-1. Architect runs a disposable `afx spawn --task` probe from the main root;
-   the assembled prompt must carry the Verify Phase section and all eight scar
-   canonicals; prompt recorded here.
-2. Re-run `packages/codev/scripts/measure-prompt-behavior.ts` over the next
-   **N = 10** post-merge projects (**≥ 3 SPIR**); compare against
-   `1252-behavior-baseline.md` (B1 51.88% is the load-bearing metric; soft
-   trigger above ~64.9%); adjudicate B3 excerpts by hand; keep 1252's own
-   artifacts excluded.
-3. Rollback targets trims only (Phases 5/7), never repairs (Phases 1–4);
-   under-powered windows are recorded as **inconclusive**, never as success.
-
-## Systematic Observations
-
-The 3-way review loop earned its cost on this project: across 8 phases and
-~20 review rounds, Codex alone surfaced 12 accepted defects (several of which
-would have shipped silently — the unmeasurable B2, the spawn wrapper's deleted
-path, the appended-qualifier attack on scar enforcement, the double-served
-rule). Every reviewer claim was verified against the tree before acting, and
-two reviewer claims were rebutted with evidence and survived subsequent
-rounds. The recurring failure mode on the builder side was under-sweeping;
-the recurring value on the reviewer side was checking that enforcement
-mechanisms actually bind, not just that artifacts exist.
+The original verify plan (T13(b) spawn probe + M12b behavioural comparison
+with rollback triggers) applied to the unmerged machinery and does not run.
+The behavioural baseline remains valid as the **pre-successor** measurement:
+the successor project should treat `1252-behavior-baseline.md` (B1 51.88%,
+n=160, self-excluded) as its "before" and re-run
+`packages/codev/scripts/measure-prompt-behavior.ts` after its rewrite lands.
 
 ## Follow-ups
 
-- #1276 — multi-model fleet tiering (D4 deferral; ownership map is the base)
-- #1277 — controlled A/B eval (M12c deferral; observational ceiling recorded)
-- MAINTAIN candidates recorded in the ownership map: the three remaining
-  `retained_restatements` classes (746-coordinated wordings), and porch gate
-  events append-logging to make gate-rejection metrics minable (Appendix D §2).
+- **Successor project** (charter held by Waleed): radical surface shrink
+  (blog-principles judgment rewrite, >50% target, frontier-models-only),
+  then fit-for-purpose enforcement; **carries forward the scar-registry
+  concept and the eight D3-ratified rule wordings**, the ownership-map
+  design, and this project's audit + baselines.
+- #1276 (multi-model tiering) and #1277 (controlled A/B eval) — filed during
+  Phase 8; both now feed the successor rather than this branch.
+- Reference branch: `builder/spir-1252` (PR #1278, closed unmerged) — the
+  complete machinery with its review history, preserved until cleanup is
+  ordered.
