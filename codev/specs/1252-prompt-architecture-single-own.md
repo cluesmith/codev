@@ -447,12 +447,12 @@ unconditional: M8–M10 were promoted from conditional to required by **D2**, an
 - Not making `protocol-drift-audit` auto-remediate; adjudication stays human.
 - **Not running a controlled A/B eval** of old vs new prompts (M12c). Considered
   and deferred — it needs a task corpus and grading harness that do not exist.
-  Follow-up issue filed in Phase 8. The consequence is that M12 can support
+  Filed as **issue #1277** (Phase 8). The consequence is that M12 can support
   *"no evidence of harm,"* not *"proved beneficial."*
 - **Not implementing multi-model fleet tiering** (the issue's proposed direction
-  #2). Cut by decision **D4** and deferred to its own issue, to be filed once
-  the ownership map exists — the map is the prerequisite that makes tiering
-  specifiable.
+  #2). Cut by decision **D4** and deferred — filed as **issue #1276**
+  (Phase 8) now that the ownership map exists, the prerequisite that makes
+  tiering specifiable.
 
 ---
 
