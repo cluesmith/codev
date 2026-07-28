@@ -38,6 +38,16 @@ import type { ResolvedBuilderContext } from './context.js';
  * Renders the protocol's builder prompt. Injected so this module stays pure and
  * so the orchestrator can wire it to the real `buildPromptFromTemplate`.
  */
+/**
+ * Renders the porch re-entry guidance. Wired in phase 6 to `buildResumeNotice`,
+ * so reset and spawn share **one** copy of that text.
+ *
+ * Reuse matters beyond tidiness: `buildResumeNotice` carries the fallback
+ * instruction for when porch reports "not found" (run `porch init`). A restated
+ * version drops it, and the two surfaces then drift apart with no test noticing.
+ */
+export type ResumeNoticePort = (projectId: string) => string;
+
 export type SpawnPromptPort = (
   protocol: string,
   context: {
@@ -74,7 +84,7 @@ export class ReorientationAssemblyError extends Error {
 }
 
 /**
- * Every element the inline frame must contain, as a literal marker.
+ * Elements every inline frame must contain, as literal markers.
  *
  * Assembly validates the rendered payload against this list before returning, so
  * adding an element here without producing it fails the tests rather than
@@ -91,6 +101,23 @@ export const REQUIRED_INLINE_MARKERS = [
   'Full re-orientation:',
 ] as const;
 
+/**
+ * Markers required *when the context supplies the corresponding fact*.
+ *
+ * Project identity and porch re-entry are not universally applicable — a task or
+ * shell builder has neither — but on a porch lane they are as load-bearing as
+ * the protocol name, and omitting them would leave a reset builder unable to
+ * find its own project. So they are required conditionally rather than left
+ * optional: "missing input is an abort, not an omission" applies to whatever the
+ * lane actually has.
+ */
+export function conditionalInlineMarkers(context: ResolvedBuilderContext): string[] {
+  const markers: string[] = [];
+  if (context.porch) markers.push('Project:', 'porch next');
+  if (context.issueNumber) markers.push('Issue:');
+  return markers;
+}
+
 // ============================================================================
 // Assembly
 // ============================================================================
@@ -102,6 +129,8 @@ export interface AssembleOptions {
   /** Architect addendum from --note / --file. */
   addendum?: string;
   buildSpawnPrompt: SpawnPromptPort;
+  /** Porch re-entry guidance; omitted only for non-porch lanes. */
+  buildResumeNotice?: ResumeNoticePort;
 }
 
 export function assembleReorientation(options: AssembleOptions): ReorientationPayload {
@@ -119,7 +148,8 @@ export function assembleReorientation(options: AssembleOptions): ReorientationPa
 
   // R3 is enforced here, not asserted in a comment: a frame that lost an element
   // during a refactor fails at assembly rather than reaching a live builder.
-  const missing = REQUIRED_INLINE_MARKERS.filter(marker => !inline.includes(marker));
+  const expected = [...REQUIRED_INLINE_MARKERS, ...conditionalInlineMarkers(context)];
+  const missing = expected.filter(marker => !inline.includes(marker));
   if (missing.length > 0) {
     throw new ReorientationAssemblyError(
       `Assembled re-orientation is missing required element(s): ${missing.join(', ')}. ` +
@@ -177,9 +207,10 @@ function buildInline(options: AssembleOptions): string {
   );
 
   if (c.porch) {
-    // Mirrors buildResumeNotice's instruction so porch state is re-read from the
-    // authoritative source rather than recalled.
-    lines.push('3. Run `porch next` to confirm where the protocol actually stands, and continue.');
+    // Short pointer inline; the full guidance — including the `porch init`
+    // fallback — is carried verbatim in the long form from buildResumeNotice,
+    // so there is exactly one copy of that text in the codebase.
+    lines.push(`3. Run \`porch next\` to confirm where the protocol actually stands (full re-entry`, `   guidance is in ${REORIENT_FILE_NAME}), and continue.`);
   } else {
     lines.push('3. Continue from the next action named in the state file.');
   }
@@ -201,7 +232,7 @@ function buildInline(options: AssembleOptions): string {
 // ============================================================================
 
 function buildLongForm(options: AssembleOptions): string {
-  const { context: c, statePath, addendum, buildSpawnPrompt } = options;
+  const { context: c, statePath, addendum, buildSpawnPrompt, buildResumeNotice } = options;
 
   let spawnPrompt: string;
   try {
@@ -271,6 +302,20 @@ function buildLongForm(options: AssembleOptions): string {
       '',
       addendum.trim(),
     );
+  }
+
+  // Porch re-entry, verbatim from the single source shared with spawn. Reset must
+  // not restate it: buildResumeNotice carries the `porch init` fallback for when
+  // porch reports "not found", and a restated copy silently drops it.
+  if (c.porch) {
+    if (!buildResumeNotice) {
+      throw new ReorientationAssemblyError(
+        `Cannot assemble a re-orientation for porch project '${c.porch.projectName}' without the ` +
+          `porch re-entry notice. Refusing to emit a frame that leaves a porch-driven builder ` +
+          `without its re-entry instruction (R3).`,
+      );
+    }
+    header.push('', '---', '', buildResumeNotice(c.porch.projectId).trim());
   }
 
   header.push('', '---', '', '## Protocol framing (as delivered at spawn)', '');

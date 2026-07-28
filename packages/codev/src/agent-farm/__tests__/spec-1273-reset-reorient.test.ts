@@ -14,6 +14,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
   assembleReorientation,
+  conditionalInlineMarkers,
   ReorientationAssemblyError,
   REQUIRED_INLINE_MARKERS,
   type SpawnPromptPort,
@@ -30,6 +31,14 @@ const STATE_PATH = '/ws/.builders/aspir-1273/.builder-state.md';
 const SPAWN_PROMPT = '# ASPIR Builder\n\nProtocol reference: ...\n';
 
 const spawnPromptPort: SpawnPromptPort = () => SPAWN_PROMPT;
+
+/** Stand-in for the real `buildResumeNotice`, including its porch init fallback. */
+const RESUME_NOTICE = `## RESUME SESSION
+
+Start by running \`porch next\` to check your current state and get next tasks.
+If porch reports "not found", run \`porch init\` to re-initialize.
+`;
+const resumeNoticePort = () => RESUME_NOTICE;
 
 function makeContext(overrides: Partial<ResolvedBuilderContext> = {}): ResolvedBuilderContext {
   return {
@@ -64,6 +73,7 @@ function assemble(overrides: Partial<ResolvedBuilderContext> = {}, addendum?: st
     statePath: STATE_PATH,
     addendum,
     buildSpawnPrompt: spawnPromptPort,
+    buildResumeNotice: resumeNoticePort,
   });
 }
 
@@ -119,11 +129,42 @@ describe('assembleReorientation — R3 complete frame (Spec 1273)', () => {
   });
 
   it('omits porch re-entry on a non-porch lane and still satisfies R3', () => {
-    const { inline } = assemble({ porch: null, specName: null, specPath: null, planPath: null });
+    const { inline } = assemble({ porch: null, specName: null, specPath: null, planPath: null, issueNumber: undefined });
     expect(inline).not.toContain('porch next');
     for (const marker of REQUIRED_INLINE_MARKERS) {
       expect(inline).toContain(marker);
     }
+  });
+
+  it('names the project and issue on a porch lane', () => {
+    // Without these a reset builder cannot locate its own project — as
+    // load-bearing on a porch lane as the protocol name itself.
+    const { inline } = assemble();
+    expect(inline).toContain('Project:');
+    expect(inline).toContain('1273-builder-context-reset-should-b');
+    expect(inline).toContain('Issue:');
+    expect(inline).toContain('#1273');
+  });
+
+  it('requires project identity and porch re-entry whenever the lane is porch-driven', () => {
+    // Conditional, not optional: the marker list adapts to what the lane has,
+    // so "missing input is an abort, not an omission" still applies.
+    const markers = conditionalInlineMarkers(makeContext());
+    expect(markers).toContain('Project:');
+    expect(markers).toContain('porch next');
+    expect(markers).toContain('Issue:');
+  });
+
+  it('requires no project or porch markers on a non-porch lane', () => {
+    const markers = conditionalInlineMarkers(
+      makeContext({ porch: null, issueNumber: undefined }),
+    );
+    expect(markers).toEqual([]);
+  });
+
+  it('requires the issue marker whenever an issue number is known', () => {
+    const markers = conditionalInlineMarkers(makeContext({ porch: null }));
+    expect(markers).toEqual(['Issue:']);
   });
 });
 
@@ -151,6 +192,18 @@ describe('assembleReorientation — abort rather than partial (Spec 1273)', () =
         buildSpawnPrompt: spawnPromptPort,
       }),
     ).toThrow(/statePath/);
+  });
+
+  it('aborts when a porch lane has no re-entry notice available', () => {
+    // A porch-driven builder without its re-entry instruction is the partial
+    // frame R3 forbids.
+    expect(() =>
+      assembleReorientation({
+        context: makeContext(),
+        statePath: STATE_PATH,
+        buildSpawnPrompt: spawnPromptPort,
+      }),
+    ).toThrow(/re-entry/);
   });
 
   it('aborts when the spawn prompt cannot be rendered', () => {
@@ -191,9 +244,22 @@ describe('long-form re-orientation (Spec 1273)', () => {
     expect(longForm).toContain(SPAWN_PROMPT.trim());
   });
 
+  it('embeds the porch re-entry notice verbatim from the shared source', () => {
+    // Reset must not restate it: buildResumeNotice carries the `porch init`
+    // fallback, and a restated copy drops it while the two surfaces drift.
+    const { longForm } = assemble();
+    expect(longForm).toContain(RESUME_NOTICE.trim());
+    expect(longForm).toContain('porch init');
+  });
+
+  it('omits the re-entry notice on a non-porch lane', () => {
+    const { longForm } = assemble({ porch: null, specName: null, specPath: null, planPath: null });
+    expect(longForm).not.toContain('RESUME SESSION');
+  });
+
   it('calls the spawn prompt port with the resolved protocol and mode flags', () => {
     const port = vi.fn(() => SPAWN_PROMPT) as unknown as SpawnPromptPort;
-    assembleReorientation({ context: makeContext(), statePath: STATE_PATH, buildSpawnPrompt: port });
+    assembleReorientation({ context: makeContext(), statePath: STATE_PATH, buildSpawnPrompt: port, buildResumeNotice: resumeNoticePort });
 
     expect(port).toHaveBeenCalledWith('aspir', expect.objectContaining({
       protocol_name: 'ASPIR',
@@ -206,14 +272,20 @@ describe('long-form re-orientation (Spec 1273)', () => {
 
   it('passes spec and plan into the template context when they exist', () => {
     const port = vi.fn(() => SPAWN_PROMPT) as unknown as SpawnPromptPort;
-    assembleReorientation({ context: makeContext(), statePath: STATE_PATH, buildSpawnPrompt: port });
+    assembleReorientation({ context: makeContext(), statePath: STATE_PATH, buildSpawnPrompt: port, buildResumeNotice: resumeNoticePort });
 
     const ctx = (port as any).mock.calls[0][1];
     expect(ctx.spec).toEqual({
       path: 'codev/specs/1273-builder-context-reset-should-b.md',
       name: '1273-builder-context-reset-should-b',
     });
-    expect(ctx.plan.path).toBe('codev/plans/1273-builder-context-reset-should-b.md');
+    // Assert `name` too, symmetric with `spec`: reusing specName for the plan is
+    // intentional (porch names spec and plan from the same stem), and an
+    // asymmetric assertion would let that convention break unnoticed.
+    expect(ctx.plan).toEqual({
+      path: 'codev/plans/1273-builder-context-reset-should-b.md',
+      name: '1273-builder-context-reset-should-b',
+    });
   });
 
   it('omits spec and plan when the files do not exist', () => {
@@ -222,6 +294,7 @@ describe('long-form re-orientation (Spec 1273)', () => {
       context: makeContext({ specPath: null, planPath: null }),
       statePath: STATE_PATH,
       buildSpawnPrompt: port,
+      buildResumeNotice: resumeNoticePort,
     });
 
     const ctx = (port as any).mock.calls[0][1];
