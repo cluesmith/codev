@@ -71,10 +71,14 @@ PHASE_ITERS="${PHASE_ITERS:-10}"
 # every spawn prompt, so the proxy must count them or dedup-by-include would
 # claim phantom always-on savings (it changes authored ownership, not served
 # bytes).
-expanded_w() { # file + its (one-level) partial includes
+expanded_w() { # file + partial includes, two levels deep (partials may nest)
   local f="$1"; local total; total=$(w "$f")
   for inc in $(grep -o '{{> *[^} ]*' "$f" 2>/dev/null | sed 's/{{> *//'); do
-    total=$(( total + $(w "$(resolve "$inc")") ))
+    local ip; ip="$(resolve "$inc")"
+    total=$(( total + $(w "$ip") ))
+    for inc2 in $(grep -o '{{> *[^} ]*' "$ip" 2>/dev/null | sed 's/{{> *//'); do
+      total=$(( total + $(w "$(resolve "$inc2")") ))
+    done
   done
   echo "$total"
 }

@@ -40,25 +40,26 @@ classes to `automated`. Classes whose remaining copies are protocol-specific
 variants stay `manual` or carry declared `retained_restatements` (each
 justified in the YAML):
 
-| Class | Owner | Currently restated on |
-|---|---|---|
-| no-skip-porch-checks | bp-spir | 7 other builder-prompts (not research) |
-| no-skip-3way-review | bp-spir | 3 builder-prompts |
-| no-advance-phases-manually | bp-spir | bp-aspir |
-| baked-decisions-handling | bp-spir | bp-aspir, bp-air, 2 drafting prompts (Spec 746 coordination required) |
-| pr-single-by-default | bp-spir | bp-aspir (bugfix-744 tests must move with the dedup) |
-| porch-workflow-fidelity | bp-spir | bp-aspir, bp-pir |
-| multi-pr-mechanics | bp-spir | bp-aspir |
-| notify-architect-key-moments | bp-spir | 3 builder-prompts |
-| soft-mode-protocol-compliance | bp-spir | 4 builder-prompts |
-| no-time-estimates | spir-protocol-doc | pp-specify, pp-plan |
+| Class | Owner | Enforcement | Refs / retained restatements |
+|---|---|---|---|
+| no-skip-porch-checks | partial-flaky | automated | retained: bp-air, bp-maintain, bp-pir, bp-spike, pp-implement |
+| no-skip-3way-review | partial-3way | automated | — |
+| no-advance-phases-manually | partial-strict-restrictions | automated | — |
+| baked-decisions-handling | partial-baked | automated | retained: bp-air, pp-specify, pp-implement, partial-pr-strategy, bp-spir, bp-aspir, spir-protocol-doc |
+| pr-single-by-default | partial-pr-strategy | automated | — |
+| porch-workflow-fidelity | partial-fidelity | automated | — |
+| multi-pr-mechanics | partial-multi-pr | automated | — |
+| notify-architect-key-moments | partial-notifications | automated | retained: bp-air, bp-bugfix |
+| soft-mode-protocol-compliance | partial-soft-mode | automated | — |
+| no-time-estimates | partial-no-time-estimates | automated | retained: spir-protocol-doc |
 
 ## Phase-6 measurement
 
-<!-- t12-parity: total=173 mapped=24 scar=39 out-of-scope=110 classes=10 -->
-173 normative candidates over the boundary post-Phase-7 (down from 190 —
-dedup moved shared blocks into `codev-skeleton/partials/`, expanded into every
-served prompt at assembly): **24 mapped**, **39 scar** (registry-enforced),
+<!-- t12-parity: total=158 mapped=9 scar=39 out-of-scope=110 classes=10 -->
+158 normative candidates over the boundary post-Phase-7 (down from
+190 at Phase 6 — dedup moved shared blocks into `codev-skeleton/partials/`,
+which the boundary does not scan; every served prompt still receives the full
+text at assembly): **9 mapped**, **39 scar** (registry-enforced),
 **110 file-local**. Zero undispositioned; zero multi-file texts hiding behind
 the catch-all. The parity marker above is
 asserted against the live extractor by `prompt-ownership.test.ts` — if these

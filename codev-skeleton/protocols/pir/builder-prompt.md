@@ -17,7 +17,7 @@ You are running in STRICT mode. This means:
 - Porch orchestrates your work
 - Run: `porch next` to get your next tasks
 - Follow porch signals and gate approvals
-- Do not deviate from the porch-driven workflow
+{{> partials/porch-workflow-fidelity.md}}
 
 ### ABSOLUTE RESTRICTIONS (STRICT MODE)
 - Never hand-edit `status.yaml` — only porch commands modify project state.

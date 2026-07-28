@@ -93,6 +93,11 @@ surfaces:
   - { id: partial-multi-pr, path: codev-skeleton/partials/multi-pr-mechanics.md, load: spawn }
   - { id: partial-strict-restrictions, path: codev-skeleton/partials/strict-mode-restrictions.md, load: spawn }
   - { id: partial-no-time-estimates, path: codev-skeleton/partials/no-time-estimates.md, load: phase-prompt }
+  - { id: partial-flaky, path: codev-skeleton/partials/flaky-test-handling.md, load: spawn }
+  - { id: partial-fidelity, path: codev-skeleton/partials/porch-workflow-fidelity.md, load: spawn }
+  - { id: partial-3way, path: codev-skeleton/partials/no-skip-3way-review.md, load: spawn }
+  - { id: partial-baked, path: codev-skeleton/partials/baked-decisions.md, load: spawn }
+  - { id: partial-pr-strategy, path: codev-skeleton/partials/pr-strategy.md, load: spawn }
 
 # Non-scar instruction classes with cross-surface duplication, discovered by
 # the extractor at Phase 6. All are `enforcement: manual` until Phase 7
@@ -102,28 +107,23 @@ surfaces:
 instructions:
   - id: no-skip-porch-checks
     summary: Never skip or work around porch checks to avoid a failure.
-    owner: bp-spir
+    owner: partial-flaky
     scar: false
     pattern: "skip porch checks or use any workaround"
-    enforcement: manual
+    enforcement: automated
+    retained_restatements: [bp-air, bp-maintain, bp-pir, bp-spike, pp-implement]
     manual_justification: >
-      Restated in 8 builder-prompts (flaky-test protocol, item 2; research
-      lacks it — verified by grep at Phase 6 iter-2).
-      Phase 7 dedups to owner + references; flipped to automated then.
-    references: [bp-air, bp-aspir, bp-bugfix, bp-experiment, bp-maintain, bp-pir, bp-spike]
+      Extracted for the uniform four (spir/aspir/bugfix/experiment). air,
+      maintain, pir, spike keep protocol-specific flaky-handling variants by
+      decision (e.g. AIR documents skips in the PR body, not a review file).
 
   - id: no-skip-3way-review
     summary: Never skip the 3-way review; follow the porch next/done cycle.
-    owner: partial-strict-restrictions
+    owner: partial-3way
     scar: false
     pattern: "NEVER skip the 3-way review"
     enforcement: automated
-    retained_restatements: [bp-bugfix, bp-experiment]
-    manual_justification: >
-      AUTOMATED for the extracted pair (spir/aspir include the partial).
-      bp-bugfix and bp-experiment retain protocol-specific restriction blocks
-      carrying this line by decision (their blocks differ structurally);
-      revisit in MAINTAIN.
+    references: []
 
   - id: no-advance-phases-manually
     summary: Porch advances plan phases; never advance them manually.
@@ -135,35 +135,33 @@ instructions:
 
   - id: baked-decisions-handling
     summary: Treat issue-body Baked Decisions as fixed; escalate conflicts, never override.
-    owner: bp-spir
+    owner: partial-baked
     scar: false
     pattern: "Baked Decisions"
-    enforcement: manual
+    enforcement: automated
+    retained_restatements: [bp-air, pp-specify, pp-implement, partial-pr-strategy, bp-spir, bp-aspir, spir-protocol-doc]
     manual_justification: >
-      Spec 746 deliberately replicated the full section into spir/aspir/air
-      builder-prompts and drafting prompts, with baked-decisions.test.ts
-      asserting presence per file. Deduplication must coordinate with that
-      suite; Phase 7 evaluates a template include, else records TS3-style
-      retention here.
-    references: [bp-aspir, bp-air, pp-specify, pp-implement]
+      Extracted for spir/aspir. bp-air keeps its protocol-specific wording
+      (Spec 746 wrote per-protocol clauses); the drafting prompts carry their
+      own 0.5-section variants; the pattern phrase also appears incidentally
+      in pr-strategy and the include lines. Retentions by decision, revisit
+      in MAINTAIN.
 
   - id: pr-single-by-default
     summary: Builders do not autonomously open per-phase PRs; one PR by default.
-    owner: bp-spir
+    owner: partial-pr-strategy
     scar: false
     pattern: "Do not autonomously open a PR per implementation phase"
-    enforcement: manual
-    manual_justification: Restated in spir+aspir builder-prompts (bugfix-744 tests grep both); Phase 7 must move the test with the dedup.
-    references: [bp-aspir]
+    enforcement: automated
+    references: []
 
   - id: porch-workflow-fidelity
     summary: Strict-mode builders follow the porch-driven workflow without deviation.
-    owner: bp-spir
+    owner: partial-fidelity
     scar: false
     pattern: "Do not deviate from the porch-driven workflow"
-    enforcement: manual
-    manual_justification: Restated in 3 builder-prompts; Phase 7 target.
-    references: [bp-aspir, bp-pir]
+    enforcement: automated
+    references: []
 
   - id: multi-pr-mechanics
     summary: Sequential-PR mechanics (branch off origin, never checkout the integration branch).

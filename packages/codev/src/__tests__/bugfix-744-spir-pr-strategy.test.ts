@@ -21,10 +21,11 @@ import * as path from 'node:path';
 
 const repoRoot = path.resolve(__dirname, '..', '..', '..', '..');
 
-// Spec 1252: shadow tree deleted; the skeleton is the single owner.
+// Spec 1252: shadow tree deleted; Phase 7 extracted the PR Strategy section
+// to a shared partial (single authored owner, expanded into both spir and
+// aspir served prompts via {{> partials/pr-strategy.md}}).
 const PROMPT_FILES = [
-  'codev-skeleton/protocols/spir/builder-prompt.md',
-  'codev-skeleton/protocols/aspir/builder-prompt.md',
+  'codev-skeleton/partials/pr-strategy.md',
 ];
 
 describe('bugfix-744: SPIR/ASPIR builder-prompt PR strategy', () => {

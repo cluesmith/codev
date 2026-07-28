@@ -134,6 +134,6 @@ git add codev/specs/{{artifact_name}}.md
 
 - Don't run `consult` commands yourself (porch handles consultations)
 - Don't include implementation details (that's for the Plan phase)
-{{> partials/no-time-estimates.md}}
+- Don't estimate time — AI development makes time estimates meaningless
 - Don't start coding (you're in Specify, not Implement)
 - Never `git add -A` / `--all` / `.` — stage each file explicitly by path.

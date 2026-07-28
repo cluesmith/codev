@@ -157,9 +157,14 @@ describe('completeness (M1 / T12)', () => {
     expect(Number(m![3]), 'scar').toBe(report.byDisposition['scar']);
     expect(Number(m![4]), 'out-of-scope').toBe(report.byDisposition['out-of-scope']);
     expect(Number(m![5]), 'classes').toBe(map.instructions.length);
-    // and every class id is documented in the companion
+    // and every class row documents its CURRENT owner and enforcement —
+    // the companion is derived from the YAML, not hand-maintained prose
+    // (Codex, Phase-7 review)
     for (const c of map.instructions) {
-      expect(md, `companion missing class ${c.id}`).toContain(c.id);
+      const row = md.split('\n').find((l) => l.startsWith(`| ${c.id} `));
+      expect(row, `companion missing class row for ${c.id}`).toBeTruthy();
+      expect(row!, `${c.id}: companion row must name owner ${c.owner}`).toContain(c.owner);
+      expect(row!, `${c.id}: companion row must state enforcement`).toContain(c.enforcement);
     }
   });
 });

@@ -17,7 +17,7 @@ You are running in STRICT mode. This means:
 - Porch orchestrates your work
 - Run: `porch next` to get your next tasks
 - Follow porch signals and gate approvals
-- Do not deviate from the porch-driven workflow
+{{> partials/porch-workflow-fidelity.md}}
 
 ### ABSOLUTE RESTRICTIONS (STRICT MODE)
 - Never hand-edit `status.yaml` — only porch commands modify project state.
@@ -29,11 +29,8 @@ You are running in STRICT mode. This means:
 ## Protocol
 Follow the SPIR protocol. Read and internalize the protocol before starting any work. The full protocol text is included below under **## Protocol Reference (full text)**.
 
-## Baked Decisions
+{{> partials/baked-decisions.md}}
 
-If the issue body contains a section named "Baked Decisions" (any heading level, case-insensitive), treat its contents as fixed architectural decisions baked in by the architect. Do not autonomously override them in your spec, plan, or implementation. If you discover a serious reason to question a baked decision, surface that concern to the architect via `afx send` rather than relitigating it inside the spec/plan/review.
-
-If the architect's baked-decisions section contains internal contradictions (e.g., two different language choices), do not pick one — pause, flag the contradiction to the architect via `afx send`, and wait for resolution before proceeding.
 
 {{#if spec}}
 ## Spec
@@ -58,17 +55,7 @@ Follow the implementation plan at: `{{plan.path}}`
 {{task_text}}
 {{/if}}
 
-## PR Strategy
-
-**Do not autonomously open a PR per implementation phase.** Plan phases ship as git commits within a single PR, not as separate PRs. The plan's instruction that "each phase commits independently" refers to git commits, not PRs.
-
-By default, the PR is opened during/after the final implement phase, with all phase-commits already on the branch.
-
-### Architect-requested PRs
-
-The architect MAY request a PR at any point — for spec review, mid-implementation feedback, slicing a large spec into shippable PRs, etc. When the architect explicitly asks for a PR earlier (or for additional PRs), follow that direction. The prohibition is specifically on the *builder* autonomously deciding to open per-phase PRs without architect request.
-
-{{> partials/multi-pr-mechanics.md}}
+{{> partials/pr-strategy.md}}
 
 ## Verify Phase
 
@@ -86,10 +73,7 @@ If verification is not needed: `porch verify {{project_id}} --skip "reason"`
 
 If you encounter **pre-existing flaky tests** (intermittent failures unrelated to your changes):
 1. Never hand-edit `status.yaml` — only porch commands modify project state.
-2. **DO NOT** skip porch checks or use any workaround to avoid the failure
-3. **DO** mark the test as skipped with a clear annotation (e.g., `it.skip('...') // FLAKY: skipped pending investigation`)
-4. **DO** document each skipped flaky test in your review under a `## Flaky Tests` section
-5. Commit the skip and continue with your work
+{{> partials/flaky-test-handling.md}}
 
 ## Getting Started
 1. Read the protocol document thoroughly

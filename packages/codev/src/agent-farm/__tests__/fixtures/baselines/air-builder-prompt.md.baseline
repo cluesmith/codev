@@ -8,7 +8,7 @@ You are running in SOFT mode. This means:
 - You follow the AIR protocol yourself (no porch orchestration)
 - The architect monitors your work and verifies you're adhering to the protocol
 - Consultation is optional — use your judgement based on complexity
-{{> partials/soft-mode-compliance.md}}
+- You have flexibility in execution, but must stay compliant with the protocol
 {{/if}}
 
 {{#if mode_strict}}
@@ -27,7 +27,6 @@ You are running in STRICT mode. This means:
 ## Protocol
 Follow the AIR protocol. Read and internalize the protocol before starting any work. The full protocol text is included below under **## Protocol Reference (full text)**.
 
-{{#if issue}}
 ## Issue #{{issue.number}}
 **Title**: {{issue.title}}
 
@@ -68,3 +67,9 @@ If you encounter **pre-existing flaky tests** (intermittent failures unrelated t
 1. Read the AIR protocol
 2. Review the issue details
 3. Implement the feature
+
+---
+
+## Protocol Reference (full text)
+
+{{protocol_reference}}

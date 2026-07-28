@@ -37,7 +37,14 @@ const repoRoot = path.resolve(__dirname, '../../../../..');
 const baselineDir = path.resolve(__dirname, 'fixtures/baselines');
 
 function readRepoFile(relativePath: string): string {
-  return fs.readFileSync(path.resolve(repoRoot, relativePath), 'utf-8');
+  // Spec 1252 (Phase 7): expand {{> partials/...}} includes so every assertion
+  // in this suite operates on the SERVED text — shared sections (Baked
+  // Decisions, flaky handling, PR strategy) now live in single-owner partials
+  // that assembly expands into each prompt.
+  return resolveCodevIncludes(
+    fs.readFileSync(path.resolve(repoRoot, relativePath), 'utf-8'),
+    repoRoot,
+  );
 }
 
 function readBaseline(baselineName: string): string {
@@ -755,9 +762,13 @@ describe('Spec 746 end-to-end smoke: builder-prompt rendering with baked-decisio
 
     for (const protocol of ['spir', 'aspir', 'air']) {
       it(`${protocol} builder-prompt: instruction paragraph is still present (it's unconditional)`, () => {
-        const template = fs.readFileSync(
-          path.resolve(repoRoot, `codev-skeleton/protocols/${protocol}/builder-prompt.md`),
-          'utf-8',
+        // Spec 1252 (Phase 7): expand includes to mirror production loading.
+        const template = resolveCodevIncludes(
+          fs.readFileSync(
+            path.resolve(repoRoot, `codev-skeleton/protocols/${protocol}/builder-prompt.md`),
+            'utf-8',
+          ),
+          repoRoot,
         );
         const ctx: TemplateContext = {
           protocol_name: protocol.toUpperCase(),

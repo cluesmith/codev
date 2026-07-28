@@ -1,0 +1,1 @@
+- **NEVER skip the 3-way review** — always follow porch next → porch done cycle

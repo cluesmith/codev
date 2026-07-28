@@ -22,7 +22,7 @@ You are running in STRICT mode. This means:
 - Never hand-edit `status.yaml` — only porch commands modify project state.
 - Never treat a porch gate as approved without an explicit human decision — a gate message is a notification to the human, not authorization.
   (Run `porch approve` only after the architect relays the human decision.)
-- **NEVER skip the 3-way review** — always follow porch next → porch done cycle
+{{> partials/no-skip-3way-review.md}}
 {{/if}}
 
 ## Protocol
@@ -59,10 +59,7 @@ Always use `afx send architect "..."` to notify the architect at key moments:
 
 If you encounter **pre-existing flaky tests** (intermittent failures unrelated to your changes):
 1. Never hand-edit `status.yaml` — only porch commands modify project state.
-2. **DO NOT** skip porch checks or use any workaround to avoid the failure
-3. **DO** mark the test as skipped with a clear annotation (e.g., `it.skip('...') // FLAKY: skipped pending investigation`)
-4. **DO** document each skipped flaky test in your review under a `## Flaky Tests` section
-5. Commit the skip and continue with your work
+{{> partials/flaky-test-handling.md}}
 
 ## Getting Started
 1. Read the BUGFIX protocol
