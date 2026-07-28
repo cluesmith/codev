@@ -103,3 +103,51 @@ release pointer). Those are *references, not fetches*, and both files are
 already scheduled for Phase 5 (scar wordings) and Phase 7/8 (dedup + governance
 sync) edits — repointing them lands there rather than expanding Phase 4's
 commit. Recorded in the audit doc so it cannot be dropped.
+
+---
+
+# Iteration 3 addendum
+
+| Model | Verdict | Issues |
+|---|---|---|
+| Gemini | APPROVE | 0 |
+| Codex | REQUEST_CHANGES | 2 |
+| Claude | APPROVE | 0 |
+
+Both accepted — with one remedy that differs from Codex's suggested mechanism,
+explained below.
+
+## CX-1 — repointed tests validate `codev-skeleton/` (source), not what is served
+
+Codex is right about the gap: `resolveCodevFile()` serves the **embedded**
+skeleton (`packages/codev/skeleton`, a build-time copy), so tests reading
+`codev-skeleton/` could pass while a stale embedded copy serves agents old
+content. That is this project's own drift thesis, reappearing at the
+build-copy boundary — a copy relationship with no mechanical sync enforcement.
+
+**Remedy chosen: enforce the boundary once, globally, rather than rerouting
+every test.** New `skeleton-embed-sync.test.ts` asserts every file in
+`codev-skeleton/` is byte-identical to its embedded counterpart, bidirectionally
+(no stale files, no missing files, no extras). With that guard green, a
+source-tree read and a resolver read are the same bytes **by construction** —
+and source-tree tests have a real advantage the resolver reads lack: they fail
+at the commit surface, where the developer edits, *before* a build. The two
+layers now split cleanly: content tests guard the source; the sync guard ties
+source to served.
+
+This is the same single-owner pattern the project applies everywhere else:
+don't chase N consumers into agreement — enforce the one copy boundary.
+
+## CX-2 — collapsed mirror structures left duplicate entries
+
+Accepted, third instance of the mechanical-repoint residue, and this round I
+swept the **whole class with a grep for duplicate array entries** rather than
+trusting the flagged list: deduped `bugfix-744` (3→2 entries),
+`governance-sweep` (6→4), `protocol-prompt-audit` (2 walk roots→1), and
+collapsed **three more vacuous pair loops inside `baked-decisions.test.ts`**
+(PHASE-2 prompts, spec-review consult-types, docs sections — each was
+`readRepoFile(pair.codev) === readRepoFile(pair.skeleton)` with both fields
+naming the same file). Pairwise equality became single-owner presence
+assertions (clause exists and extracts cleanly).
+
+Suite: 3,726 passed, 0 failures (count reflects vacuous tests deleted).

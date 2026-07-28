@@ -21,8 +21,8 @@ import * as path from 'node:path';
 
 const repoRoot = path.resolve(__dirname, '..', '..', '..', '..');
 
+// Spec 1252: shadow tree deleted; the skeleton is the single owner.
 const PROMPT_FILES = [
-  'codev-skeleton/protocols/spir/builder-prompt.md', // Spec 1252: shadow tree deleted; skeleton is the single owner
   'codev-skeleton/protocols/spir/builder-prompt.md',
   'codev-skeleton/protocols/aspir/builder-prompt.md',
 ];

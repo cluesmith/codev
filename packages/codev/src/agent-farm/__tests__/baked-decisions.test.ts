@@ -296,13 +296,15 @@ describe('Spec 746 Phase 2: drafting-prompt baked-decisions clause', () => {
       return sectionLines.join('\n');
     }
 
+    // Spec 1252 (Phase 4): the codev/ tree is deleted — both sides of each
+    // former pair now name the same skeleton file, so clause-equality is
+    // vacuous. What still matters: the clause EXISTS and extracts cleanly on
+    // the single owner. (Source↔embedded parity is enforced globally by
+    // skeleton-embed-sync.test.ts.)
     for (const pair of PAIRS) {
-      it(`${pair.protocol}: codev/ and skeleton clauses match`, () => {
-        const codevContent = readRepoFile(pair.codev);
-        const skeletonContent = readRepoFile(pair.skeleton);
-        const codevClause = extractBakedClause(`codev ${pair.protocol}`, codevContent);
-        const skeletonClause = extractBakedClause(`skeleton ${pair.protocol}`, skeletonContent);
-        expect(skeletonClause).toEqual(codevClause);
+      it(`${pair.protocol}: baked clause present and extractable`, () => {
+        const clause = extractBakedClause(pair.protocol, readRepoFile(pair.skeleton));
+        expect(clause.length).toBeGreaterThan(0);
       });
     }
   });
@@ -494,14 +496,12 @@ describe('Spec 746 Phase 3: reviewer-prompt baked-decisions clause', () => {
       },
     ];
 
+    // Spec 1252 (Phase 4): pairwise equality collapsed to single-owner
+    // presence — see the note on the earlier PAIRS loop.
     for (const pair of PAIRS) {
-      it(`${pair.protocol}: codev/ and skeleton sections match`, () => {
-        const codevContent = readRepoFile(pair.codev);
-        const skeletonContent = readRepoFile(pair.skeleton);
-        // Reuse the same extractBakedSection helper defined at the top of this describe.
-        const codevSection = extractBakedSection(`codev ${pair.protocol}`, codevContent);
-        const skeletonSection = extractBakedSection(`skeleton ${pair.protocol}`, skeletonContent);
-        expect(skeletonSection).toEqual(codevSection);
+      it(`${pair.protocol}: baked section present and extractable`, () => {
+        const section = extractBakedSection(pair.protocol, readRepoFile(pair.skeleton));
+        expect(section.length).toBeGreaterThan(0);
       });
     }
   });
@@ -602,13 +602,12 @@ describe('Spec 746 Phase 4: protocol documentation discoverability paragraph', (
       return sectionLines.join('\n');
     }
 
+    // Spec 1252 (Phase 4): pairwise equality collapsed to single-owner
+    // presence — see the note on the earlier PAIRS loop.
     for (const pair of PAIRS) {
-      it(`${pair.protocol}: codev/ and skeleton sections match`, () => {
-        const codevContent = readRepoFile(pair.codev);
-        const skeletonContent = readRepoFile(pair.skeleton);
-        const codevSection = extractBakedDocsSection(`codev ${pair.protocol}`, codevContent);
-        const skeletonSection = extractBakedDocsSection(`skeleton ${pair.protocol}`, skeletonContent);
-        expect(skeletonSection).toEqual(codevSection);
+      it(`${pair.protocol}: baked docs section present and extractable`, () => {
+        const section = extractBakedDocsSection(pair.protocol, readRepoFile(pair.skeleton));
+        expect(section.length).toBeGreaterThan(0);
       });
     }
   });

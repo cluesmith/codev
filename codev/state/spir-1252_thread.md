@@ -636,3 +636,22 @@ Gem for the review: Spec 746's comment explicitly described the drift
 ... PRE-EXISTING and not Phase 1's responsibility"). The drift was OBSERVED
 and consciously stepped around months before this project. Detection was never
 the problem — thirdhand confirmation of the spec's core thesis.
+
+## Phase 4 iter-3 — Codex found the drift thesis at ANOTHER copy boundary
+
+Codex's catch was architecturally the best of the project: my repointed tests
+validate codev-skeleton/ (source), but resolveCodevFile serves the EMBEDDED
+copy at packages/codev/skeleton (build-time cp). Source tests could pass while
+agents get stale bytes — the project's own disease at the build boundary.
+
+Remedy: skeleton-embed-sync.test.ts — bidirectional byte-parity between source
+and embedded trees. One guard at the copy boundary instead of rerouting N
+tests through the resolver. Source tests keep their commit-surface advantage
+(fail where the dev edits, pre-build); the guard ties commit surface to
+serving surface. Same single-owner pattern as everywhere else: enforce the
+boundary, don't chase consumers.
+
+Also swept the duplicate-entry residue as a real class this time (after
+claiming that once before and missing 742): deduped 744/governance-sweep/
+protocol-prompt-audit AND found three more vacuous pair loops inside
+baked-decisions. 3,726 green.

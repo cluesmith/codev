@@ -27,12 +27,11 @@ describe('Spec 987 — CLAUDE.md ≡ AGENTS.md', () => {
 });
 
 describe('Spec 987 — MAINTAIN + skill reference the hot tier (both trees)', () => {
+  // Spec 1252: shadow tree deleted; former codev/-tree duplicates removed.
   const HOT_TIER_SURFACES = [
     '.claude/skills/update-arch-docs/SKILL.md',
     'codev-skeleton/.claude/skills/update-arch-docs/SKILL.md',
     'codev-skeleton/protocols/maintain/protocol.md',
-    'codev-skeleton/protocols/maintain/protocol.md',
-    'codev-skeleton/protocols/maintain/prompts/maintain.md',
     'codev-skeleton/protocols/maintain/prompts/maintain.md',
   ];
 
