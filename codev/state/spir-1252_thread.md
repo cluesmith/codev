@@ -786,3 +786,13 @@ dispute.
   documented in spec T13 and added to the verify checklist (architect runs the
   disposable probe post-merge + post-local-install and records the prompt).
   Pre-merge proxy: the nine byte-compared prompt snapshots.
+
+## Review phase — all 8 phases closed, review doc written, PR next
+
+Phase 8 closed after 5 rounds (final: unanimous). Full arc: 8 phases,
+~20 review rounds, every Codex REQUEST_CHANGES either fixed or rebutted with
+evidence that survived subsequent rounds. Review doc at
+codev/reviews/1252-prompt-architecture-single-own.md carries the honest N1
+(-7.0%), the verify-phase checklist (T13b probe + M12b comparison), and the
+systematic observation that the review loop's recurring value was checking
+that enforcement mechanisms BIND, not that artifacts exist.
