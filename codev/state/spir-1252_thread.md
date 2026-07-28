@@ -499,3 +499,27 @@ files, 44 hits. New test pins the exclusion.
 
 Observer effect in the smallest possible lab. The verify phase needs to
 remember this too: when comparing, 1252's own artifacts stay excluded.
+
+## Phase 1 iter-2: unanimous APPROVE. Phase 2 (M11 audit) executed.
+
+Audit committed: codev/resources/1252-shadow-tree-audit.md — **77 rows** (spec
+said 76; mechanical enumeration caught consult-types/integration-review.md,
+which my hand count missed). 60 identical→TS1, 13 drifted-rot→TS1, 4
+local-unique→pending, escalated to architect:
+
+1. **max_iterations 8 vs 3** (spir+aspir json) — CMAP loop bound, no config
+   override exists for it. TS1/TS2/TS3 options laid out.
+2. **cwd: packages/codev** (air+bugfix json) — real monorepo functionality;
+   recommended migrating to .codev/config.json porch.checks (Spec #550
+   sanctioned mechanism) then TS1. Noted spir/aspir only pass today because
+   the repo root happens to have build/test scripts.
+
+Key evidence trail in the audit: TICK retired (all local TICK refs = rot,
+though skeleton's own porch prompts still emit TICK-amendment language —
+flagged for Phase 8); obsolete underscore gate IDs prove spir/protocol.md's
+"additions" are pre-restructure leftovers; architect.md's area/ recipes are
+owned by CLAUDE.md so the skeleton's generalized version loses nothing.
+
+T11 parses the audit table (6-column contract, enumerated values): 5 tests
+green, completion guard (zero pending) phase-gated like the drift gate's.
+Also armed: a guard that fails if any file vanishes while pending/TS3.
