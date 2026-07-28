@@ -824,3 +824,23 @@ possible. An honest -7.0% against a 20% aspiration, decomposed to show the
 remaining mass was single-owned protocol prose, is exactly the evidence that
 says "shrink the surface first, then enforce." The project's most durable
 output may be that its numbers argued against its own machinery.
+
+## Harvest executed (2026-07-28)
+
+- PR #1281 created off main (branch builder/1252-harvest, built in a temp
+  worktree — the builder worktree stayed on its branch): 17-file
+  reconciliation + E1/E2 + two 746 baseline re-derivations + the knowledge
+  artifacts. Full suite green from normal paths (3 write-guard failures in
+  the tmp-located build tree are that test's documented /private/tmp
+  allowlist artifact).
+- CMAP pass on #1281: Codex APPROVE (HIGH) / Claude APPROVE (HIGH, verified
+  all 17 byte-identical + no charter leakage) / Gemini lane skipped (agy
+  no-output — known #1032 issue).
+- PR #1278 closed unmerged with the harvest note: machinery preserved here,
+  scar-registry concept + eight ratified wordings transferred to the
+  successor charter.
+- Predicted-and-handled: syncing main's shadows broke main's 746 frozen
+  baselines exactly as it did on this branch in Phase 3 — the frozen-baseline
+  lesson demonstrated a second time, now in the harvest.
+
+At the pr gate for #1281. Waiting for the human decision.
