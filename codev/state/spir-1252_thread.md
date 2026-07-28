@@ -563,3 +563,23 @@ the original evidence.
 Still waiting on architect rulings for the 4 (max_iterations, cwd). Phase 4
 cannot start until they resolve — enforced by T11's automatic guard, not by my
 memory.
+
+## Phase 3 addendum: reconciliation broke Spec 746's frozen baselines — instructive
+
+Porch checks caught baked-decisions.test.ts failing: it froze the THEN-DRIFTED
+codev builder-prompts as "pure-addition baselines" (Spec 746), so my
+reconciliation's line change (Ready for cleanup. → Entering verify phase.)
+violated the pure-addition invariant. First fix attempt (baseline := current)
+broke the pollution check — the baseline's true meaning is "file minus 746's
+insertion". Rebuilt both baselines as current-minus-Baked-Decisions-block;
+all 193 file tests + full suite (3780) green.
+
+Two durable notes:
+1. **M7 catch**: baked-decisions.test.ts reads codev/protocols/* by literal
+   path — a test-tier consumer that Phase 4's deletion WILL break (ENOENT).
+   Added to the Phase 4 compat-audit worklist: repoint its codev/ entries at
+   the skeleton (which after deletion is the single source).
+2. Frozen-file baselines are drift bombs: any legitimate later edit fails the
+   check for the wrong reason. The 746 test's real claim ("the baked section
+   is a pure insertion") survives only if the baseline is DERIVED
+   (current minus section), not frozen.
