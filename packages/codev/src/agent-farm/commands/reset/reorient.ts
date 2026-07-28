@@ -59,8 +59,25 @@ export type SpawnPromptPort = (
     input_description: string;
     spec?: { path: string; name: string };
     plan?: { path: string; name: string };
+    issue?: { number: number | string; title: string; body: string };
   },
 ) => string;
+
+/**
+ * Issue metadata for the spawn template.
+ *
+ * Every issue-driven protocol's builder prompt renders `{{issue.number}}`,
+ * `{{issue.title}}` and `{{issue.body}}` — and for BUGFIX and AIR the issue body
+ * *is* the spec. Omitting it would leave a reset builder on those lanes without
+ * the requirements it is implementing, which is the opposite of spawn-equivalent.
+ *
+ * Fetched by the orchestrator (I/O stays out of this module) and passed in.
+ */
+export interface IssuePayload {
+  number: number | string;
+  title: string;
+  body: string;
+}
 
 // ============================================================================
 // Result
@@ -131,6 +148,12 @@ export interface AssembleOptions {
   buildSpawnPrompt: SpawnPromptPort;
   /** Porch re-entry guidance; omitted only for non-porch lanes. */
   buildResumeNotice?: ResumeNoticePort;
+  /**
+   * Issue metadata, when the orchestrator could fetch it. Absence on an
+   * issue-backed lane is surfaced in the long form with a recovery instruction
+   * rather than silently dropped — see `buildLongForm`.
+   */
+  issue?: IssuePayload;
 }
 
 export function assembleReorientation(options: AssembleOptions): ReorientationPayload {
@@ -232,7 +255,7 @@ function buildInline(options: AssembleOptions): string {
 // ============================================================================
 
 function buildLongForm(options: AssembleOptions): string {
-  const { context: c, statePath, addendum, buildSpawnPrompt, buildResumeNotice } = options;
+  const { context: c, statePath, addendum, buildSpawnPrompt, buildResumeNotice, issue } = options;
 
   let spawnPrompt: string;
   try {
@@ -247,6 +270,10 @@ function buildLongForm(options: AssembleOptions): string {
         : `the ${c.protocol.toUpperCase()} protocol`,
       ...(c.specPath && c.specName ? { spec: { path: c.specPath, name: c.specName } } : {}),
       ...(c.planPath && c.specName ? { plan: { path: c.planPath, name: c.specName } } : {}),
+      // Issue-driven protocols render {{issue.*}} in their builder prompt, and
+      // on BUGFIX/AIR the body IS the spec. Forwarding it is what makes the long
+      // form genuinely spawn-equivalent rather than spawn-shaped.
+      ...(issue ? { issue: { number: issue.number, title: issue.title, body: issue.body } } : {}),
     });
   } catch (err) {
     // Abort rather than degrade: a long form without the protocol framing is the
@@ -294,6 +321,20 @@ function buildLongForm(options: AssembleOptions): string {
     '',
     `Protocol and mode were resolved from ${c.protocolSource} and ${c.modeSource} respectively.`,
   );
+
+  // An issue-backed lane whose issue could not be fetched keeps a VISIBLE gap
+  // with a recovery instruction, rather than a silently shorter prompt. On
+  // BUGFIX/AIR the issue body is the spec, so a reset builder must be told the
+  // requirements are missing instead of inferring them from what remains.
+  if (c.issueNumber && !issue) {
+    header.push(
+      '',
+      `> **Issue #${c.issueNumber} could not be fetched when this file was written**, so the`,
+      `> protocol framing below does not include its title or body. On issue-driven`,
+      `> protocols that body carries the requirements. Read it before continuing:`,
+      `> \`gh issue view ${c.issueNumber}\`.`,
+    );
+  }
 
   if (addendum && addendum.trim() !== '') {
     header.push(

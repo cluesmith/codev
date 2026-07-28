@@ -302,6 +302,65 @@ describe('long-form re-orientation (Spec 1273)', () => {
     expect(ctx.plan).toBeUndefined();
   });
 
+  it('forwards issue number, title and body into the spawn prompt context', () => {
+    // Every issue-driven protocol's builder prompt renders {{issue.number}},
+    // {{issue.title}} and {{issue.body}} — and on BUGFIX/AIR the body IS the
+    // spec. Without this the long form is spawn-shaped, not spawn-equivalent,
+    // and a reset builder on those lanes loses its requirements.
+    const port = vi.fn(() => SPAWN_PROMPT) as unknown as SpawnPromptPort;
+    assembleReorientation({
+      context: makeContext(),
+      statePath: STATE_PATH,
+      buildSpawnPrompt: port,
+      buildResumeNotice: resumeNoticePort,
+      issue: { number: '1273', title: 'Builder context reset', body: 'The problem is...' },
+    });
+
+    const ctx = (port as any).mock.calls[0][1];
+    expect(ctx.issue).toEqual({
+      number: '1273',
+      title: 'Builder context reset',
+      body: 'The problem is...',
+    });
+  });
+
+  it('omits the issue from the prompt context when none was supplied', () => {
+    const port = vi.fn(() => SPAWN_PROMPT) as unknown as SpawnPromptPort;
+    assembleReorientation({
+      context: makeContext(),
+      statePath: STATE_PATH,
+      buildSpawnPrompt: port,
+      buildResumeNotice: resumeNoticePort,
+    });
+
+    expect((port as any).mock.calls[0][1].issue).toBeUndefined();
+  });
+
+  it('makes an unfetchable issue a VISIBLE gap with a recovery instruction', () => {
+    // Silent omission is the dangerous failure here: on BUGFIX/AIR the builder
+    // would infer requirements from whatever framing survived. Reset does not
+    // hard-fail on a forge outage — it says what is missing and how to get it.
+    const { longForm } = assemble();
+    expect(longForm).toContain('could not be fetched');
+    expect(longForm).toContain('gh issue view 1273');
+  });
+
+  it('does not warn about a missing issue when the issue was supplied', () => {
+    const { longForm } = assembleReorientation({
+      context: makeContext(),
+      statePath: STATE_PATH,
+      buildSpawnPrompt: spawnPromptPort,
+      buildResumeNotice: resumeNoticePort,
+      issue: { number: '1273', title: 't', body: 'b' },
+    });
+    expect(longForm).not.toContain('could not be fetched');
+  });
+
+  it('does not warn about a missing issue on a lane that has no issue', () => {
+    const { longForm } = assemble({ porch: null, issueNumber: undefined, specName: null, specPath: null, planPath: null });
+    expect(longForm).not.toContain('could not be fetched');
+  });
+
   it('gives the read order with the state file first', () => {
     // The state file is what the previous session actually knew; protocol
     // framing is reconstructible, working state is not.
