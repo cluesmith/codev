@@ -45,15 +45,43 @@ SKILLS_W=$(wdir .claude/skills);          SKILLS_F=$(fdir .claude/skills)
 #   here (double-counting them would inflate the baseline and flatter the result).
 #   AGENTS.md is the byte-identical twin for other tools — one or the other
 #   loads per session, never both, so it is excluded too.
+#
+# SPAWN_PROMPT and PHASE_TASK are DERIVED from the artifacts that compose them,
+# resolved the way the runtime resolves (tier-2 codev/ first, then the shipped
+# skeleton), so Phase-7 trims to any component show up in the rerun. Hardcoding
+# the one-off measured values (4891 / 1395) broke reproducibility — a rerun
+# after trimming would have reported the pre-trim numbers (caught by Codex at
+# the Phase-1 review).
+#
+#   SPAWN_PROMPT proxy = spir builder-prompt.md + spir protocol.md (inlined into
+#   every spawn prompt). The real spawn prompt adds the issue body (~170 words
+#   here), which varies per project and is not a trimmable prompt surface, so
+#   it is deliberately excluded from the proxy.
+#
+#   PHASE_TASK proxy = hot tier (injected into every porch phase prompt) + the
+#   mean of the porch phase prompts. Task-JSON boilerplate varies per phase and
+#   is porch code, not prompt surface.
+resolve() { # two-tier resolve: codev/ wins, else skeleton
+  if [ -f "codev/$1" ]; then echo "codev/$1"
+  elif [ -f "codev-skeleton/$1" ]; then echo "codev-skeleton/$1"
+  else echo /dev/null; fi
+}
 PHASE_ITERS="${PHASE_ITERS:-10}"
-SPAWN_PROMPT="${SPAWN_PROMPT_WORDS:-4891}"   # measured from a real .builder-prompt.txt
-PHASE_TASK="${PHASE_TASK_WORDS:-1395}"       # measured from a real `porch next`
+SPAWN_BP=$(w "$(resolve protocols/spir/builder-prompt.md)")
+SPAWN_PROTO=$(w "$(resolve protocols/spir/protocol.md)")
+SPAWN_PROMPT=$(( SPAWN_BP + SPAWN_PROTO ))
+PORCH_PROMPT_MEAN=0
+PORCH_DIR="$( [ -d codev/porch/prompts ] && echo codev/porch/prompts || echo codev-skeleton/porch/prompts )"
+if [ -d "$PORCH_DIR" ]; then
+  PORCH_N=$(find "$PORCH_DIR" -name '*.md' | wc -l | tr -d ' ')
+  [ "$PORCH_N" -gt 0 ] && PORCH_PROMPT_MEAN=$(( $(wdir "$PORCH_DIR") / PORCH_N ))
+fi
+PHASE_TASK=$(( ARCH_CRIT + LESS_CRIT + PORCH_PROMPT_MEAN ))
 ALWAYS_ON=$(( CLAUDE_MD + SPAWN_PROMPT + PHASE_TASK * PHASE_ITERS ))
 
 cat <<EOF
 # Prompt-surface measurement
 
-Repo: \`$ROOT\`
 Commit: \`$(git rev-parse --short HEAD 2>/dev/null || echo n/a)\`
 
 ## Per-surface word counts
@@ -73,17 +101,21 @@ Commit: \`$(git rev-parse --short HEAD 2>/dev/null || echo n/a)\`
 | codev/roles/ (shadow) | $SHADOW_ROLES_W | $SHADOW_ROLES_F | wins over skeleton |
 | .claude/skills/** | $SKILLS_W | $SKILLS_F | on demand |
 
-## Always-on load per builder
+## Always-on load per builder (derived from resolved artifacts)
 
-    CLAUDE.md            $CLAUDE_MD
-  + spawn prompt         $SPAWN_PROMPT
-  + phase task x $PHASE_ITERS      $(( PHASE_TASK * PHASE_ITERS ))   ($PHASE_TASK per iteration)
+    CLAUDE.md                     $CLAUDE_MD
+  + spawn prompt (proxy)          $SPAWN_PROMPT   (builder-prompt.md $SPAWN_BP + protocol.md $SPAWN_PROTO)
+  + phase task (proxy) x $PHASE_ITERS       $(( PHASE_TASK * PHASE_ITERS ))   (hot tier $(( ARCH_CRIT + LESS_CRIT )) + porch prompt mean $PORCH_PROMPT_MEAN, per iteration)
   ------------------------------
-  = ALWAYS_ON            $ALWAYS_ON
+  = ALWAYS_ON                     $ALWAYS_ON
 
-AGENTS.md and the hot-tier files are deliberately excluded from this sum:
-AGENTS.md is the byte-identical twin (one loads per session, not both), and the
-hot-tier files are already inlined inside CLAUDE.md's count.
+Proxies deliberately exclude per-project variable content (issue body,
+task-JSON boilerplate) — those are not trimmable prompt surface, and including
+them would let a rerun's delta be polluted by whichever issue happened to spawn
+the measuring builder. AGENTS.md and the hot-tier files are likewise excluded
+from the top-level sum: AGENTS.md is the byte-identical twin (one loads per
+session, not both), and the hot-tier files appear inside CLAUDE.md's count
+(they ARE counted once per phase task, where porch injects them separately).
 
 ALWAYS_ON_WORDS=$ALWAYS_ON
 EOF

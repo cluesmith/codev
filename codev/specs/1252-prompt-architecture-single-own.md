@@ -420,8 +420,13 @@ unconditional: M8–M10 were promoted from conditional to required by **D2**, an
 ### Non-functional
 
 - **N1** — Reduction in always-on words per builder. **Target ≥ 20%** against
-  the ≈ 24,600 baseline, without deleting any scar rule. A target for the plan to
+  the measured baseline, without deleting any scar rule. A target for the plan to
   interrogate, **not a gate**; the achieved figure is reported either way.
+  *Baseline note (Phase 1)*: the reproducible figure is **21,856** — derived
+  from resolved artifacts (CLAUDE.md + spawn-prompt proxy + 10× phase-task
+  proxy). The earlier ≈24,600 estimate additionally counted per-project
+  variable content (issue body, task-JSON boilerplate), which no trim can
+  affect; N1 is evaluated against the reproducible 21,856.
   *Note*: M8 removes ~47k words from the repo but little from *always-on*
   context, so N1 must come from **S1 deduplication plus D3's scar-wording
   compression** — the latter now contributes directly, since collapsing banner

@@ -447,3 +447,39 @@ workspace wasn't built. Building core fixed 48 files. The last 8 were
 **Full suite now 193 files / 3772 tests green, 0 failures.** No flaky tests to
 skip. Lesson reinforced: "pre-existing failure" is a claim requiring evidence,
 not a default assumption — a fresh worktree just isn't built.
+
+## Phase 1 iter-1 review — Gemini/Claude APPROVE, Codex REQUEST_CHANGES ×2, both fixed
+
+Codex again the one checking whether the numbers actually mean anything:
+
+1. **Hardcoded spawn/phase word counts** (4891/1395) would have silently
+   corrupted the Phase 7 N1 delta — reruns would report pre-trim numbers for
+   the two largest components. Now derived from resolved artifacts;
+   sensitivity-verified (shrink protocol.md → ALWAYS_ON drops 21,856→18,048).
+   Reproducible baseline is **21,856** (old 24,614 counted per-project variable
+   content that no trim can touch). Spec N1 note updated.
+2. **B5 never actually captured** — plan said B1–B5, I wrote "capture
+   separately" and didn't. Snapshot now in the baseline artifact, capture-dated,
+   marked non-deterministic, drives no trigger.
+
+Word baseline output now committed too (1252-word-baseline.md).
+
+## Phase 2 prep findings (read-only, ahead of the audit)
+
+Diffed all 17 drifted files against the installed skeleton. Early
+classifications for the audit:
+
+- **spir/protocol.md's 85 "local additions" are ROT**, not local-unique: the
+  old "Porch Orchestration" section uses obsolete underscore gate IDs
+  (`spec_approval`; porch uses `spec-approval`) and skeleton restructured to
+  the build-verify model. Local kept what skeleton deleted.
+- **roles/architect.md area-label section is ROT with a twist**: skeleton
+  GENERALIZED it (`<prefix>/` placeholders for adopters); the codev-specific
+  `area/` version's content is already owned by CLAUDE.md. Skeleton wins,
+  nothing lost.
+- **Genuine escalation candidates**:
+  - TICK "Amendments" sections in spir+aspir spec/plan templates — local-only;
+    no tick protocol dir exists anywhere, but porch's phase prompts still
+    reference TICK amendments. Ambiguous → escalate.
+  - `max_iterations: 8` (local) vs `3` (skeleton) in spir+aspir protocol.json —
+    a real behavioral difference in CMAP loop bounds. Ambiguous → escalate.
