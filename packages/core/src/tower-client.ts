@@ -147,6 +147,13 @@ export interface TowerTerminal {
   status: 'running' | 'exited';
   createdAt: string;
   wsPath: string;
+  /**
+   * Epoch ms of the last PTY output (Spec 1273). Lets a client measure output
+   * quiescence — an agent mid-turn emits continuously, so a stretch with no
+   * advance means the turn ended. Optional: terminals served by an older Tower
+   * omit it, and a consumer that needs it must say so rather than assume 0.
+   */
+  lastDataAt?: number;
 }
 
 // ── Client Options ─────────────────────────────────────────────

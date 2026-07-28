@@ -37,6 +37,15 @@ export interface PtySessionInfo {
   createdAt: string;
   exitCode?: number;
   persistent?: boolean;
+  /**
+   * Epoch ms of the last PTY output (Spec 467's tracking, surfaced by Spec 1273).
+   *
+   * Serialised by `GET /api/terminals/:id`, which makes output quiescence
+   * *measurable* by a client: an agent mid-turn emits continuously (spinner
+   * frames, streamed tokens), so a stretch with no advance means the turn ended.
+   * `afx reset` uses this to avoid typing into a terminal that is still working.
+   */
+  lastDataAt: number;
 }
 
 /**
@@ -512,6 +521,7 @@ export class PtySession extends EventEmitter {
       createdAt: this.createdAt,
       exitCode: this.exitCode,
       persistent: this._shellperBacked,
+      lastDataAt: this._lastDataAt,
     };
   }
 
