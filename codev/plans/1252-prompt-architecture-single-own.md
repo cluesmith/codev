@@ -560,9 +560,9 @@ rather than trusting green tests.
 - **File the A/B eval follow-up issue** (M12c) — controlled same-task old-vs-new
   prompt comparison with a held-out grader, which M12's observational design
   cannot substitute for. Link it from the spec's Non-goals.
-- **T13(b) — the manual run.** Spawn a real builder against the changed tree and
-  *read the prompt it receives*. Confirm the `Verify Phase` section and all eight
-  scar rules are present.
+- **T13(b) — rescheduled to verify** (discovered constraint: spawns branch
+  from main HEAD; a pre-merge probe verifies the wrong tree). Pre-merge proxy:
+  the prompt-snapshot assertions. The architect runs the real probe at verify.
 
 #### Success criteria
 
@@ -598,11 +598,18 @@ the binding constraint on how long verify runs.
 
 **Procedure**:
 
-1. Re-run `scripts/measure-prompt-behavior.ts` over the verify-window projects.
-2. Compare B1–B5 against `codev/resources/1252-behavior-baseline.md`.
-3. Adjudicate B3 excerpts by hand — the keyword mining produces false positives,
+1. **T13(b) real-spawn inspection** *(rescheduled here by architect ruling —
+   `afx spawn` branches from main HEAD, so only a post-merge,
+   post-local-install probe serves the merged tree + freshly built skeleton)*:
+   the architect runs a disposable `afx spawn --task` probe from the main
+   root; confirm the assembled prompt carries the Verify Phase section and all
+   eight scar rules; record the prompt in the review.
+2. Re-run the behavioural measurement over the verify-window projects.
+3. Compare B1–B4 (+ B5 advisory snapshot) against
+   `codev/resources/1252-behavior-baseline.md`.
+4. Adjudicate B3 excerpts by hand — the keyword mining produces false positives,
    and the count alone is not a finding.
-4. Record an explicit **no-regression judgment** in
+5. Record an explicit **no-regression judgment** in
    `codev/reviews/1252-prompt-architecture-single-own.md`.
 
 **Rollback triggers** (spec Appendix D §4 — reproduced so the verify step is

@@ -764,3 +764,25 @@ spir/aspir/bugfix/pir/air, NOT experiment; notifications = spir/aspir uniform
 + air/bugfix protocol-specific). Every reference list I wrote from memory was
 wrong somewhere; every grep-verified one held. The pattern is now beyond
 dispute.
+
+## Phase 8 — governance sync + E2E disposition
+
+- CLAUDE/AGENTS: ~15 dangling `codev/protocols/...` prose refs repointed at
+  codev-skeleton/ (deletion made them point at nothing); RELEASE pointer
+  annotated as codev-local-by-design. N3 byte-identity held.
+- arch.md: Repository Dual Nature rewritten (codev/protocols/ = local-only
+  protocols exclusively; shadow story + enforcement told in place); new
+  single-owner invariant added to Invariants & Constraints.
+- lessons-learned.md (Critical): "A detector that reports without failing is a
+  detector nobody reads" + corollaries (frozen baselines are drift bombs;
+  grep classification is a hypothesis, deletion is the test; measure the
+  served artifact, not the authored one).
+- arch-critical: already restructured in Phase 5 iter-4 (C6 retired there);
+  caps verified 10 facts / 33 lines.
+- Follow-ups filed: #1276 (tiering, D4) and #1277 (A/B eval, M12c).
+- **T13(b) rescheduled to VERIFY by architect ruling** — afx spawn has no
+  branch selector; every spawn branches from main HEAD, so a pre-merge probe
+  assembles the PRE-change tree and verifies nothing. Discovered constraint,
+  documented in spec T13 and added to the verify checklist (architect runs the
+  disposable probe post-merge + post-local-install and records the prompt).
+  Pre-merge proxy: the nine byte-compared prompt snapshots.

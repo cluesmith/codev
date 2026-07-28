@@ -832,11 +832,18 @@ plausible-looking zero would be worse than an absent metric).
 it contains the verify-phase instructions and all eight scar rules in their
 compressed canonical form. This is the regression guard and must be part of CI.
 
-**Part (b), manual, once**: actually spawn a builder against the changed tree
-and read the prompt it receives. *"Tests pass" is not "it works"* — the assembled
-prompt is the artifact that matters. Part (a) can pass while the real spawn path
-diverges, which is precisely the class of failure that produced this project.
-The plan must record the manual run's outcome in the review.
+**Part (b), manual, once — RESCHEDULED TO THE VERIFY PHASE** *(architect
+ruling, 2026-07-28, on a discovered constraint)*: `afx spawn` has no branch
+selector — every spawn branches from main HEAD, so a pre-merge probe would be
+assembled from the PRE-change tree and would verify nothing about this branch;
+the only pre-merge alternative (local-installing the branch build globally +
+Tower restart) is disproportionate. **End-to-end verification of
+resolver-tier changes is inherently post-deploy.** The pre-merge proxy is the
+committed prompt-snapshot assertions (nine protocols, real
+`buildPromptFromTemplate`, byte-compared). At verify — post-merge and
+post-local-install — the architect runs a disposable `afx spawn --task` probe
+from the main root and records the assembled prompt in the review. This is a
+discovered constraint documented as such, not a skipped test.
 
 ---
 

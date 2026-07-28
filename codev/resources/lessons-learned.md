@@ -10,6 +10,21 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 
 ## Critical (Prevent Major Failures)
 
+### A detector that reports without failing is a detector nobody reads (Spec 1252)
+
+`protocol-drift-audit` (#1210) correctly detected 17 drifted framework shadow
+copies and reported them via `codev doctor` for months. Nobody acted. One of
+the drifted files was the served SPIR builder prompt, silently missing its
+Verify Phase section — and Spec 746's test comments even *described* the drift
+("PRE-EXISTING and not Phase 1's responsibility") before stepping around it.
+Detection was never the gap; consequence was. When a check guards an invariant
+that matters, wire it to fail the build — advisory output is background noise.
+Corollaries from the same project: a frozen-file "pure addition" baseline is a
+drift bomb (derive baselines instead); a grep classification of consumers is a
+hypothesis, not a proof (the deletion is the test); and a metric must not
+reward moving text between files (measure the served artifact, not the
+authored one).
+
 - [From 0008] Single source of truth beats distributed state - consolidate to one implementation
 - [From 0009] Check for existing work (PRs, git history) before implementing from scratch
 - [From bug reports] Tests passing does NOT mean requirements are met - manually verify the actual user experience before marking complete

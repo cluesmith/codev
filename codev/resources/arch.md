@@ -88,6 +88,18 @@ tail -f ~/.agent-farm/tower.log
 
 ## Invariants & Constraints
 
+- **Single-owner prompt regime (Spec 1252).** Every instruction on the prompt
+  surface has exactly one owning surface, recorded in
+  `codev/resources/prompt-ownership.yaml` (machine-readable; the .md companion
+  is validated against it). Cross-surface duplication of a normative line
+  fails CI (T12 catch-all guard). Shared template-family content lives in
+  `codev-skeleton/partials/` and is expanded into served prompts by
+  `resolveCodevIncludes` — authored once, served everywhere it applies. Scar
+  rules (codev/resources/scar-rules.yaml, eight, D3-ratified) are the
+  deliberate exception: byte-verbatim replicas on every listed surface,
+  delete/reword fails CI.
+
+
 **These MUST remain true - violating them will break the system:**
 
 1. **State Consistency**: the user-global `~/.agent-farm/global.db` is the single source of truth for architect/builder/util state (Issue #1118 retired the per-workspace `.agent-farm/state.db`; rows are disambiguated by `workspace_path`). Never modify it manually.
@@ -1193,11 +1205,22 @@ This is where the Codev project uses Codev to develop itself:
   - `plans/` - Implementation plans for Codev features
   - `reviews/` - Lessons learned from Codev development
   - `resources/` - Reference materials (this file, testing-guide.md, lessons-learned.md, etc.)
-  - `protocols/` - Working copies of protocols for development
+  - `protocols/` - **local-only protocols exclusively** (e.g. `release/`).
+    Spec 1252 (2026-07) deleted the 77 framework shadow copies this directory
+    used to hold: they were tier-2 copies that outranked the installed
+    skeleton in the resolver, drifted silently for months (17 files stale,
+    including a served SPIR builder prompt missing its Verify Phase), and the
+    drift audit (#1210) reported it to `codev doctor` unread the whole time.
+    Framework protocols and roles now resolve from the skeleton (tier 4) here
+    exactly as they do for adopters; `shadow-drift-gate.test.ts` fails CI on
+    any reintroduced shadow copy, and `skeleton-embed-sync.test.ts` keeps the
+    embedded build copy byte-identical to `codev-skeleton/`.
   - `agents/` - Agent definitions (canonical location)
-  - `roles/` - Role definitions for architect-builder pattern
   - `templates/` - HTML templates for Agent Farm (`afx`) dashboard and annotation viewer
-  - Note: Shell command configuration is in `.codev/config.json` at the project root
+  - Note: `codev/roles/` and `codev/consult-types/` were removed with the
+    shadow tree — roles resolve from the skeleton too. Shell command
+    configuration is in `.codev/config.json` at the project root; porch check
+    cwd overrides live under its `porch.checks` key (Spec #550).
 
 **Example**: `codev/specs/0001-test-infrastructure.md` documents the test infrastructure feature we built for Codev.
 

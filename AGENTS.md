@@ -24,7 +24,7 @@ map to open the full arch.md / lessons-learned.md when relevant.
 
 **THIS IS THE CODEV SOURCE REPOSITORY - WE ARE SELF-HOSTED**
 
-This project IS Codev itself, and we use our own methodology for development. All new features and improvements to Codev should follow the SPIR protocol defined in `codev/protocols/spir/protocol.md`.
+This project IS Codev itself, and we use our own methodology for development. All new features and improvements to Codev should follow the SPIR protocol defined in `codev-skeleton/protocols/spir/protocol.md` (this repo's shadow copies were removed by Spec 1252 — the skeleton is the single owner and the runtime resolves it).
 
 ### Important: Understanding This Repository's Structure
 
@@ -47,7 +47,7 @@ This repository has a dual nature that's important to understand:
 
 ### Release Process
 
-To release a new version, tell the AI: `Let's release v1.6.0`. The AI follows the **RELEASE protocol** (`codev/protocols/release/protocol.md`). Release candidate workflow and local testing procedures are documented there. For local testing shortcuts, see `codev/resources/testing-guide.md`.
+To release a new version, tell the AI: `Let's release v1.6.0`. The AI follows the **RELEASE protocol** (`codev/protocols/release/protocol.md` — a codev-local protocol, deliberately not shipped). Release candidate workflow and local testing procedures are documented there. For local testing shortcuts, see `codev/resources/testing-guide.md`.
 
 ### Local Build Testing
 
@@ -84,14 +84,14 @@ When making changes to UI code (tower, dashboard, terminal), you MUST test using
 You are working in the Codev project itself, with multiple development protocols available:
 
 **Available Protocols**:
-- **SPIR**: Multi-phase development with consultation - `codev/protocols/spir/protocol.md`
-- **ASPIR**: Autonomous SPIR (no human gates on spec/plan) - `codev/protocols/aspir/protocol.md`
-- **AIR**: Autonomous Implement & Review for small features - `codev/protocols/air/protocol.md`
-- **BUGFIX**: Bug fixes from GitHub issues - `codev/protocols/bugfix/protocol.md`
-- **PIR**: Plan / Implement / Review — issue-driven with two pre-PR human gates (plan-approval, dev-approval) plus a post-PR `pr` gate. Lighter than SPIR; stronger than BUGFIX/AIR. Useful when a change needs design review before coding OR pre-PR testing of running code (e.g., mobile / UI / cross-platform). See `codev/protocols/pir/protocol.md`.
-- **EXPERIMENT**: Disciplined experimentation - `codev/protocols/experiment/protocol.md`
-- **MAINTAIN**: Codebase maintenance (code hygiene + documentation sync) - `codev/protocols/maintain/protocol.md`
-- **RESEARCH**: Multi-agent research with 3-way investigation, synthesis, and critique - `codev/protocols/research/protocol.md`
+- **SPIR**: Multi-phase development with consultation - `codev-skeleton/protocols/spir/protocol.md`
+- **ASPIR**: Autonomous SPIR (no human gates on spec/plan) - `codev-skeleton/protocols/aspir/protocol.md`
+- **AIR**: Autonomous Implement & Review for small features - `codev-skeleton/protocols/air/protocol.md`
+- **BUGFIX**: Bug fixes from GitHub issues - `codev-skeleton/protocols/bugfix/protocol.md`
+- **PIR**: Plan / Implement / Review — issue-driven with two pre-PR human gates (plan-approval, dev-approval) plus a post-PR `pr` gate. Lighter than SPIR; stronger than BUGFIX/AIR. Useful when a change needs design review before coding OR pre-PR testing of running code (e.g., mobile / UI / cross-platform). See `codev-skeleton/protocols/pir/protocol.md`.
+- **EXPERIMENT**: Disciplined experimentation - `codev-skeleton/protocols/experiment/protocol.md`
+- **MAINTAIN**: Codebase maintenance (code hygiene + documentation sync) - `codev-skeleton/protocols/maintain/protocol.md`
+- **RESEARCH**: Multi-agent research with 3-way investigation, synthesis, and critique - `codev-skeleton/protocols/research/protocol.md`
 
 ### File Resolution (How Codev Finds Protocols and Templates)
 
@@ -209,7 +209,7 @@ validated: [gemini, codex, claude]
 - No spec/plan artifacts needed
 - Single builder can fix independently
 
-**BUGFIX uses GitHub Issues as source of truth.** See `codev/protocols/bugfix/protocol.md`.
+**BUGFIX uses GitHub Issues as source of truth.** See `codev-skeleton/protocols/bugfix/protocol.md`.
 
 ### Use AIR for (small features from GitHub issues):
 - Small features (< 300 LOC) fully described in a **GitHub Issue**
@@ -217,7 +217,7 @@ validated: [gemini, codex, claude]
 - No spec/plan artifacts — review goes in the PR body
 - Would be overkill for full SPIR/ASPIR ceremony
 
-**AIR uses GitHub Issues as source of truth.** Two phases: Implement → Review. See `codev/protocols/air/protocol.md`.
+**AIR uses GitHub Issues as source of truth.** Two phases: Implement → Review. See `codev-skeleton/protocols/air/protocol.md`.
 
 ### Use PIR for (engineer-judged — based on the nature of the work, not its size):
 
@@ -237,7 +237,7 @@ Pick PIR when ONE or BOTH of the following apply to a GitHub-issue-driven change
 - User-journey changes that need a full-flow exercise
 - Performance-sensitive changes that need profiling on the running app
 
-**PIR uses GitHub Issues as source of truth.** Three phases: Plan (gated by `plan-approval`) → Implement (gated by `dev-approval`) → Review (PR + CMAP-2 at PR, then gated by `pr` for merge synchronization — matching SPIR's pr-gate pattern but with no post-merge verify phase). Plan and review artifacts live in `codev/plans/` and `codev/reviews/` on the builder branch, ship to main with the merge. Review file is shaped identically to SPIR's (Summary + Architecture Updates + Lessons Learned + supporting sections) so `codev/reviews/` stays semantically consistent across protocols. Lighter than SPIR (no spec phase — the issue body is the implicit spec; consult footprint matches BUGFIX/AIR's "one consult at PR" pattern). Stronger than BUGFIX/AIR (two human gates pre-PR — the human reviews the running worktree at the `dev-approval` gate, not the PR diff post-creation). CMAP at the PR is a **single advisory pass** (`max_iterations: 1`) — no iterate-until-APPROVE loop; a `REQUEST_CHANGES` is escalated to the human at the `pr` gate, not auto-re-reviewed. The CMAP-2 footprint is a design invariant: porch's model precedence is *config > protocol*, so a project-wide `porch.consultation.models` (e.g. a SPIR-tuned 3-model list) silently inflates PIR — leave it unset or scope it per-protocol to preserve the BUGFIX/AIR-parity cost. See `codev/protocols/pir/protocol.md`.
+**PIR uses GitHub Issues as source of truth.** Three phases: Plan (gated by `plan-approval`) → Implement (gated by `dev-approval`) → Review (PR + CMAP-2 at PR, then gated by `pr` for merge synchronization — matching SPIR's pr-gate pattern but with no post-merge verify phase). Plan and review artifacts live in `codev/plans/` and `codev/reviews/` on the builder branch, ship to main with the merge. Review file is shaped identically to SPIR's (Summary + Architecture Updates + Lessons Learned + supporting sections) so `codev/reviews/` stays semantically consistent across protocols. Lighter than SPIR (no spec phase — the issue body is the implicit spec; consult footprint matches BUGFIX/AIR's "one consult at PR" pattern). Stronger than BUGFIX/AIR (two human gates pre-PR — the human reviews the running worktree at the `dev-approval` gate, not the PR diff post-creation). CMAP at the PR is a **single advisory pass** (`max_iterations: 1`) — no iterate-until-APPROVE loop; a `REQUEST_CHANGES` is escalated to the human at the `pr` gate, not auto-re-reviewed. The CMAP-2 footprint is a design invariant: porch's model precedence is *config > protocol*, so a project-wide `porch.consultation.models` (e.g. a SPIR-tuned 3-model list) silently inflates PIR — leave it unset or scope it per-protocol to preserve the BUGFIX/AIR-parity cost. See `codev-skeleton/protocols/pir/protocol.md`.
 
 ### Use SPIR for (new features):
 - Creating a **new feature from scratch** (no existing spec to amend)
@@ -252,7 +252,7 @@ Pick PIR when ONE or BOTH of the following apply to a GitHub-issue-driven change
 - Builder runs autonomously through Specify → Plan → Implement → Review (→ Verify)
 - Human approval still required at the PR gate before merge
 
-**ASPIR is identical to SPIR** except `spec-approval` and `plan-approval` gates are removed. Both include an optional verify phase after review. See `codev/protocols/aspir/protocol.md`.
+**ASPIR is identical to SPIR** except `spec-approval` and `plan-approval` gates are removed. Both include an optional verify phase after review. See `codev-skeleton/protocols/aspir/protocol.md`.
 
 ### Use EXPERIMENT for:
 - Testing new approaches or techniques
@@ -559,8 +559,8 @@ git log --oneline --all | grep -i "feature-name"
 
 ## Important Notes
 
-1. **ALWAYS check `codev/protocols/spir/protocol.md`** for detailed phase instructions
-2. **Use provided templates** from `codev/protocols/spir/templates/`
+1. **ALWAYS check `codev-skeleton/protocols/spir/protocol.md`** for detailed phase instructions
+2. **Use provided templates** from `codev-skeleton/protocols/spir/templates/`
 3. **Document all deviations** from the plan with reasoning
 4. **Create atomic commits** for each phase completion
 5. **Maintain >90% test coverage** where possible
