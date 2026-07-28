@@ -14,24 +14,24 @@ plan_phases:
     status: complete
   - id: phase_4
     title: Builder context resolution (protocol, mode, harness capability)
-    status: in_progress
+    status: complete
   - id: phase_5
     title: Re-orientation assembly (complete-or-abort)
-    status: pending
+    status: in_progress
   - id: phase_6
     title: Reset orchestrator + CLI wiring
     status: pending
   - id: phase_7
     title: Wait discipline and command documentation
     status: pending
-current_plan_phase: phase_4
+current_plan_phase: phase_5
 gates:
   pr:
     status: pending
   verify-approval:
     status: pending
-iteration: 2
-build_complete: true
+iteration: 1
+build_complete: false
 history:
   - iteration: 1
     plan_phase: phase_2
@@ -82,4 +82,4 @@ history:
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/aspir-1273/codev/projects/1273-builder-context-reset-should-b/1273-phase_4-iter1-claude.txt
 started_at: '2026-07-28T00:57:25.240Z'
-updated_at: '2026-07-28T02:03:48.961Z'
+updated_at: '2026-07-28T02:07:38.937Z'
