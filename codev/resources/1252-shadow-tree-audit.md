@@ -153,3 +153,47 @@ the 13 rot files proceed to Phase 3 reconciliation.
    config (making spir/aspir/air/bugfix consistent), then take skeleton json —
    TS1-after-migration. Note spir/aspir currently pass only because the repo
    root's package.json happens to have build/test scripts.
+
+## M7 compatibility audit — COMPLETE (Phase 4, step 4a)
+
+Repo-wide classification of every literal `codev/protocols/` / `codev/roles/`
+reference. Production consumers were audited in spec Appendix B (all
+resolver-routed or inert). This completes the test tier and non-TypeScript
+consumers, as M7 requires before any deletion.
+
+### Test tier — 4 real repo-readers (MUST repoint at `codev-skeleton/` in the deletion commit)
+
+| Test | What it reads | Fix |
+|---|---|---|
+| `baked-decisions.test.ts` | `codev/protocols/{spir,aspir,air}/builder-prompt.md` + prompt files (Spec 746 PHASE lists) | repoint `relPath` entries to `codev-skeleton/...`; skeleton mirror entries collapse to the same path |
+| `bugfix-742-consult-templates.test.ts` | 4 consult-type files under `codev/protocols/{bugfix,spir}` | repoint `repoRoot` joins to `codev-skeleton/` |
+| `protocol-prompt-audit.test.ts` | walks `codev/protocols/` wholesale | walk `codev-skeleton/protocols/` |
+| `bugfix-685-close-keyword.test.ts` | 6 prompt files across protocols | repoint table to `codev-skeleton/` |
+
+After deletion, `codev-skeleton/` is the single in-repo source (the installed
+skeleton is its build-time copy), so repointing keeps these tests validating
+the same content agents are served — no assertion weakens.
+
+### Test tier — safe (temp fixtures or string literals only)
+
+`consult.test.ts`, `pr-gate-audit.test.ts` (both build `codev/` trees inside
+temp roots), `porch/protocol.test.ts`, `protocol-overrides.test.ts`,
+`roles.test.ts`, `spawn-roles.test.ts`, `af-architect.test.ts`,
+`tower-utils.test.ts`, `bugfix-527`, `bugfix-744`, `bugfix-619`,
+`governance-sweep.test.ts` (strings/paths in messages only),
+`framework-ref-audit.test.ts` (scans the skeleton by design).
+
+### Non-TypeScript consumers
+
+| File | Kind | Deletion-safe? |
+|---|---|---|
+| `scripts/measure-prompt-surface.sh` | two-tier resolve (`codev/` then `codev-skeleton/`) — this project's own script, built deletion-aware | **Yes** — falls through to skeleton |
+| `apps/vscode/scripts/publish.sh:15` | comment referencing `codev/protocols/release/` | **Yes** — and `release/` is preserved anyway |
+
+No other shell/yaml/json consumer found outside `node_modules`/`dist`/worktrees.
+
+### Verdict
+
+Deletion is safe once (a) the four repo-reading tests are repointed in the same
+commit, and (b) the four ESCALATED json rulings resolve. No production code
+path reads the shadow tree by literal path.
