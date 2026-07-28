@@ -557,8 +557,8 @@ git log --oneline --all | grep -i "feature-name"
 
 ## Important Notes
 
-1. **ALWAYS check `codev-skeleton/protocols/spir/protocol.md`** for detailed phase instructions
-2. **Use provided templates** from `codev-skeleton/protocols/spir/templates/`
+1. **Detailed phase instructions arrive with the work** — the full SPIR protocol text is inlined into every spawn prompt, and porch delivers each phase's instructions. Don't fetch protocol files by path (the resolver serves them; see File Resolution above). For orientation reading, the source is `codev-skeleton/protocols/spir/protocol.md`.
+2. **Templates are delivered by porch phase prompts** — the spec/plan/review structures arrive in the phase task; no need to fetch them from the skeleton by path.
 3. **Document all deviations** from the plan with reasoning
 4. **Create atomic commits** for each phase completion
 5. **Maintain >90% test coverage** where possible

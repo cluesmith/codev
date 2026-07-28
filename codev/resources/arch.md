@@ -84,7 +84,7 @@ tail -f ~/.agent-farm/tower.log
 | **node-pty** | Native PTY session manager, multiplexed over WebSocket |
 | **Shellper** | Detached Node.js process owning a PTY for session persistence across Tower restarts (Spec 0104) |
 | **SessionManager** | Tower-side orchestrator for shellper process lifecycle (spawn, reconnect, kill, auto-restart) |
-| **Skeleton** | Template files (`codev-skeleton/`) copied to projects on init/adopt |
+| **Skeleton** | The framework source tree (`codev-skeleton/`), embedded into the package at build time and served as the resolver's tier-4 fallback at RUNTIME — framework files are not copied into projects (Spec 1252 / arch-critical fact #1); init/adopt copy only root docs, skills, and hot/cold-tier starters |
 
 ## Invariants & Constraints
 
