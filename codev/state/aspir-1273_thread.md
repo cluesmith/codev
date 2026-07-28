@@ -55,8 +55,37 @@ Read of the afx/Tower code before drafting:
   "accepted a stale file from a previous reset" — impossible rather than unlikely.
 - Fail fast on non-Claude harnesses (no in-session clear) rather than inventing a fallback.
 
+## CMAP iteration 1 (spec) — 2026-07-28
+
+Gemini **APPROVE** (HIGH), Claude **APPROVE** (HIGH), Codex **REQUEST_CHANGES** (HIGH).
+
+Codex's two blocking gaps were both real and both closed:
+
+1. *Quiesce had no failure semantics.* I had specified "confirm the terminal stopped producing output"
+   without saying what happens if it never does — which, under "fail fast, no fallbacks", is exactly
+   the kind of hole that becomes a "clear anyway" shortcut at implementation time. Added **R4**:
+   bounded wait → exactly one ESC escalation (legal only *after* the R2 receipt, so nothing is at
+   risk) → bounded wait → abort non-zero, no clear. Plus tests 9a/9b, one of which pins the ESC
+   ordering against R2.
+2. *Re-orientation payload contract ambiguous.* "Role frame" could be read as the full role document
+   (hundreds of paced lines through a paste-detection-prone channel) or as an identity block. Now
+   explicitly the latter, with a fixed inline-vs-referenced division. Also separated `--file`
+   (reads from the *caller's* filesystem, like `afx send --file`) from the state-file path override
+   (must stay inside the target worktree) — I had conflated the two in Security Considerations.
+
+Claude verified all ~10 factual codebase claims in the spec independently and found them accurate;
+its comments (default-path addressability, double-reset, `--resume` wording, content-quality
+trade-off, wedged-builder integration test) are all incorporated.
+
+Design decisions locked this iteration:
+- State file is `.builder-state.md`, **fixed name** — freshness comes from the in-file nonce, not the
+  filename, so resets don't litter the worktree with `.builder-state-<nonce>.md` files.
+- Long-form re-orientation goes to `.builder-reorient.md`; the message carries the compact frame.
+  Both `.builder-` prefixed, so `afx cleanup` still sees the worktree as clean.
+
 ## Status
 
 - [x] Explored afx/Tower internals
 - [x] Spec drafted → `codev/specs/1273-builder-context-reset-should-b.md`
-- [ ] porch verify (3-way CMAP) on the spec
+- [x] porch verify iteration 1 (3-way CMAP) — 2 APPROVE, 1 REQUEST_CHANGES, all feedback addressed
+- [ ] porch verify iteration 2
