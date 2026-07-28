@@ -30,8 +30,8 @@ gates:
     status: pending
   verify-approval:
     status: pending
-iteration: 1
-build_complete: true
+iteration: 2
+build_complete: false
 history:
   - iteration: 1
     plan_phase: phase_2
@@ -81,5 +81,21 @@ history:
         verdict: APPROVE
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/aspir-1273/codev/projects/1273-builder-context-reset-should-b/1273-phase_4-iter1-claude.txt
+  - iteration: 1
+    plan_phase: phase_5
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/aspir-1273/codev/projects/1273-builder-context-reset-should-b/1273-phase_5-iter1-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/aspir-1273/codev/projects/1273-builder-context-reset-should-b/1273-phase_5-iter1-codex.txt
+      - model: claude
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/aspir-1273/codev/projects/1273-builder-context-reset-should-b/1273-phase_5-iter1-claude.txt
 started_at: '2026-07-28T00:57:25.240Z'
-updated_at: '2026-07-28T02:10:19.915Z'
+updated_at: '2026-07-28T02:17:04.699Z'
