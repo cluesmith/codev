@@ -232,12 +232,23 @@ describe('porch check runner', () => {
     });
 
     it('spec_has_required_sections fails when only some sections are present', () => {
-      const partial = REQUIRED_SPEC_SECTIONS.slice(0, 3);
+      const partial = REQUIRED_SPEC_SECTIONS.slice(0, REQUIRED_SPEC_SECTIONS.length - 1);
       const r = runArtifactCheck(
         'spec_has_required_sections', 'cmd', resolverWithSpec(specFrom(partial)), defaultEnv);
       expect(r?.passed).toBe(false);
-      expect(r?.error).toContain('## Solution Approaches');
-      expect(r?.error).not.toContain('missing 6 required');
+      expect(r?.error).toContain('missing 1 required section');
+      expect(r?.error).toContain(REQUIRED_SPEC_SECTIONS[REQUIRED_SPEC_SECTIONS.length - 1]);
+    });
+
+    it('does NOT require the sections a legitimate spec often omits (calibration guard)', () => {
+      // 30% of this repo's recent specs have no '## Solution Approaches' and 15%
+      // no '## Open Questions'. Gating on those would fire on good work, so they
+      // stay advisory in the spec-review consult type. Guard the decision.
+      expect(REQUIRED_SPEC_SECTIONS).not.toContain('## Solution Approaches');
+      expect(REQUIRED_SPEC_SECTIONS).not.toContain('## Open Questions');
+      const spec = specFrom(REQUIRED_SPEC_SECTIONS); // no Solution Approaches / Open Questions
+      expect(runArtifactCheck('spec_has_required_sections', 'cmd', resolverWithSpec(spec), defaultEnv)?.passed)
+        .toBe(true);
     });
 
     it('spec_has_required_sections fails when the spec is absent entirely', () => {

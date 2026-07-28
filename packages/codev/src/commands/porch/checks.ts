@@ -130,16 +130,27 @@ export async function runCheck(
  * These are guaranteed by the canonical spec template
  * (`protocols/spir/templates/spec.md`), which the specify prompt now delivers
  * inline via a `{{> }}` include. Deliberately a core subset, not the template's
- * full heading list: the gate is a backstop against a wholesale departure from
- * the template, not a style linter.
+ * full 20-heading list: the gate is a backstop against a wholesale departure
+ * from the template, not a style linter.
+ *
+ * Calibrated against this repo's 166 existing specs, restricted to the 40 most
+ * recent (the corpus written under mature SPIR). Absence rates there: Success
+ * Criteria 0%, Problem Statement 5%, Desired State 5%, Current State 12% — all
+ * four are near-universal in practice, so requiring them catches a template
+ * departure without punishing normal work.
+ *
+ * `## Solution Approaches` (30% absent) and `## Open Questions` (15%) are
+ * deliberately NOT required here: a spec with one obvious approach and no open
+ * questions is legitimate, and a hard gate that fires on a third of good specs
+ * trains people to route around it. Both are still checked — advisorily, where
+ * judgement is possible — by the Structure focus area in the `spec-review`
+ * consult type.
  */
 export const REQUIRED_SPEC_SECTIONS = [
   '## Problem Statement',
   '## Current State',
   '## Desired State',
   '## Success Criteria',
-  '## Solution Approaches',
-  '## Open Questions',
 ] as const;
 
 /**
