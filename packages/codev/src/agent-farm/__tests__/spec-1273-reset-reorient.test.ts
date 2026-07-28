@@ -136,20 +136,37 @@ describe('assembleReorientation — R3 complete frame (Spec 1273)', () => {
     }
   });
 
-  it('names the project and issue on a porch lane', () => {
+  it('names the project, project ID and issue on a porch lane', () => {
     // Without these a reset builder cannot locate its own project — as
-    // load-bearing on a porch lane as the protocol name itself.
+    // load-bearing on a porch lane as the protocol name itself. The ID is
+    // stated explicitly rather than left implicit in the directory stem:
+    // `porch status`/`porch next` take the id, and a builder with no history
+    // should not have to parse it back out of a slug.
     const { inline } = assemble();
+    expect(inline).toContain('Project ID: 1273');
     expect(inline).toContain('Project:');
     expect(inline).toContain('1273-builder-context-reset-should-b');
     expect(inline).toContain('Issue:');
     expect(inline).toContain('#1273');
   });
 
+  it('names WHICH role document governs the builder, not just that one does', () => {
+    // A builder with no conversation history cannot resolve "your role
+    // document" to a file. The spec requires the identity block to name it.
+    const { inline } = assemble();
+    expect(inline).toContain('.builder-role.md');
+  });
+
+  it('records the porch project ID in the long form too', () => {
+    const { longForm } = assemble();
+    expect(longForm).toContain('Porch project ID: 1273');
+  });
+
   it('requires project identity and porch re-entry whenever the lane is porch-driven', () => {
     // Conditional, not optional: the marker list adapts to what the lane has,
     // so "missing input is an abort, not an omission" still applies.
     const markers = conditionalInlineMarkers(makeContext());
+    expect(markers).toContain('Project ID:');
     expect(markers).toContain('Project:');
     expect(markers).toContain('porch next');
     expect(markers).toContain('Issue:');

@@ -110,6 +110,9 @@ export class ReorientationAssemblyError extends Error {
 export const REQUIRED_INLINE_MARKERS = [
   'CONTEXT RESET',
   'You are a Builder',
+  // The spec requires the identity block to name WHICH role document governs
+  // the builder, not merely that one does.
+  '.builder-role.md',
   'Protocol:',
   'Mode:',
   'Worktree:',
@@ -130,7 +133,9 @@ export const REQUIRED_INLINE_MARKERS = [
  */
 export function conditionalInlineMarkers(context: ResolvedBuilderContext): string[] {
   const markers: string[] = [];
-  if (context.porch) markers.push('Project:', 'porch next');
+  // Project ID is required, not just the directory stem: porch commands take the
+  // id, and a reset builder should not have to parse it out of a slug.
+  if (context.porch) markers.push('Project ID:', 'Project:', 'porch next');
   if (context.issueNumber) markers.push('Issue:');
   return markers;
 }
@@ -205,14 +210,25 @@ function buildInline(options: AssembleOptions): string {
     'Your conversation history was cleared. Everything you knew that was not written',
     'down is gone. Do not try to recall it; read the files below instead.',
     '',
-    'You are a Builder (your role document governs you and is still in effect).',
+    // Name the role document rather than gesturing at it: a builder with no
+    // conversation history cannot resolve "your role document" to a file, and
+    // the spec requires the identity block to say WHICH document governs it.
+    // `.builder-role.md` is the copy the harness actually injected at spawn.
+    'You are a Builder. Your role document is `.builder-role.md` at the worktree root',
+    '(the builder role, injected into your system prompt at spawn and still in effect).',
     '',
     `- Protocol: ${c.protocol.toUpperCase()}`,
     `- Mode: ${c.mode.toUpperCase()}`,
   ];
 
   if (c.issueNumber) lines.push(`- Issue: #${c.issueNumber}`);
-  if (c.porch) lines.push(`- Project: ${c.porch.projectName} (phase: ${c.porch.phase}${c.porch.currentPlanPhase ? `, plan phase: ${c.porch.currentPlanPhase}` : ''})`);
+  if (c.porch) {
+    // Project ID is stated explicitly, not left implicit in the directory stem:
+    // `porch status`/`porch next` take the id, and a reset builder should not
+    // have to parse it back out of a slug to address its own project.
+    lines.push(`- Project ID: ${c.porch.projectId}`);
+    lines.push(`- Project: ${c.porch.projectName} (phase: ${c.porch.phase}${c.porch.currentPlanPhase ? `, plan phase: ${c.porch.currentPlanPhase}` : ''})`);
+  }
   if (c.specPath) lines.push(`- Spec: ${c.specPath}`);
   if (c.planPath) lines.push(`- Plan: ${c.planPath}`);
 
@@ -311,6 +327,7 @@ function buildLongForm(options: AssembleOptions): string {
 
   if (c.porch) {
     header.push(
+      `- Porch project ID: ${c.porch.projectId}`,
       `- Porch project: ${c.porch.projectName}`,
       `- Phase: ${c.porch.phase}${c.porch.currentPlanPhase ? ` (plan phase: ${c.porch.currentPlanPhase})` : ''}`,
     );
