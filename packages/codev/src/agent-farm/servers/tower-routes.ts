@@ -51,7 +51,7 @@ import { formatArchitectMessage, formatBuilderMessage } from '../utils/message-f
 import { SendBuffer } from './send-buffer.js';
 import type { BufferedMessage } from './send-buffer.js';
 import type { PtySession } from '../../terminal/pty-session.js';
-import { writeMessageToSession } from './message-write.js';
+import { writeMessageToSession, writeEscapeToSession } from './message-write.js';
 import {
   getKnownWorkspacePaths,
   getInstances,
@@ -1455,6 +1455,7 @@ async function handleSend(
   const raw = options.raw === true;
   const noEnter = options.noEnter === true;
   const interrupt = options.interrupt === true;
+  const escape = options.escape === true;
 
   // Resolve the target address to a terminal ID.
   // Spec 755: pass `from` so architect resolution is sender-affinity-aware
@@ -1493,6 +1494,33 @@ async function handleSend(
     res.end(JSON.stringify({
       error: 'TERMINAL_NOT_WRITABLE',
       message: `Terminal for '${result.agent}' is not accepting input (its process connection is down). Retry shortly; if this persists, check Tower logs.`,
+    }));
+    return;
+  }
+
+  // Spec 1273: `escape` delivers a bare ESC keystroke and returns. It is handled
+  // before formatting and before the send buffer on purpose — an interrupt that
+  // can be deferred because someone recently typed in this terminal is not an
+  // interrupt. ESC ends the running turn so already-queued messages process; the
+  // trailing Enter is what lets them through, which is why it is the default
+  // (matching the verified recovery `afx send <b> --raw "$(printf '\x1b')"`).
+  if (escape) {
+    writeEscapeToSession(session, noEnter);
+    broadcastMessage({
+      type: 'message',
+      from: { project: path.basename(fromWorkspace ?? workspace ?? 'unknown'), agent: from ?? 'unknown' },
+      to: { project: path.basename(result.workspacePath), agent: result.agent },
+      content: '<ESC>',
+      metadata: { raw: true, source: 'api', escape: true },
+      timestamp: new Date().toISOString(),
+    });
+    ctx.log('INFO', `Interrupt (ESC) sent: ${from ?? 'unknown'} → ${result.agent} (terminal ${result.terminalId.slice(0, 8)}...)`);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      ok: true,
+      terminalId: result.terminalId,
+      resolvedTo: result.agent,
+      deferred: false,
     }));
     return;
   }

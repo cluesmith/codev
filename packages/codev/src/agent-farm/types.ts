@@ -167,6 +167,17 @@ export interface SendOptions {
 }
 
 /**
+ * Options for `afx interrupt` (Spec 1273).
+ *
+ * Sends a bare ESC keystroke into a builder's PTY — the only recovery that
+ * reaches a builder mid-turn, ending the turn so queued messages process.
+ */
+export interface InterruptOptions {
+  builder?: string;     // Builder ID / short id (required)
+  noEnter?: boolean;    // Write ESC alone, without the trailing Enter
+}
+
+/**
  * User-facing config.json structure
  */
 export interface UserConfig {

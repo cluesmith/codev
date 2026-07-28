@@ -470,6 +470,21 @@ export async function runAgentFarm(args: string[]): Promise<void> {
       }
     });
 
+  // Interrupt command (Spec 1273) — ESC into a builder's PTY
+  program
+    .command('interrupt [builder]')
+    .description('Interrupt a builder mid-turn (sends ESC to end the running turn)')
+    .option('--no-enter', 'Send ESC alone, without the trailing Enter')
+    .action(async (builder, options) => {
+      const { interrupt } = await import('./commands/interrupt.js');
+      try {
+        await interrupt({ builder, noEnter: !options.enter });
+      } catch (error) {
+        logger.error(error instanceof Error ? error.message : String(error));
+        process.exit(1);
+      }
+    });
+
   // Bench command - consultation benchmarking
   program
     .command('bench')

@@ -626,6 +626,13 @@ export class TowerClient {
       raw?: boolean;
       noEnter?: boolean;
       interrupt?: boolean;
+      /**
+       * Spec 1273: deliver the message as a bare ESC keystroke (`\x1b`) written
+       * straight to the PTY — no formatting, no send-buffer deferral. This is the
+       * verified mid-turn recovery: ESC ends the running turn so queued messages
+       * can process. Distinct from `interrupt`, which sends Ctrl+C (`\x03`).
+       */
+      escape?: boolean;
     },
   ): Promise<{ ok: boolean; resolvedTo?: string; error?: string }> {
     const result = await this.request<{ ok: boolean; resolvedTo: string }>(
@@ -642,6 +649,7 @@ export class TowerClient {
             raw: options?.raw,
             noEnter: options?.noEnter,
             interrupt: options?.interrupt,
+            escape: options?.escape,
           },
         }),
       },
