@@ -134,6 +134,13 @@ use across shipped protocols are `spec`, `plan`, `impl`, `pr`, `investigation`, 
     },
     "reasoningEffort": {
       "codex": "high"                // currently pinned to "medium"
+    },
+    "pricing": {
+      "codex": {                     // USD per 1M tokens; all three keys required together
+        "inputPer1M":       2.00,
+        "cachedInputPer1M": 1.00,
+        "outputPer1M":      8.00
+      }
     }
   }
 }
@@ -141,6 +148,18 @@ use across shipped protocols are `spec`, `plan`, `impl`, `pr`, `investigation`, 
 
 Every key is optional. An unset lane keeps today's hardcoded default, so an existing workspace with
 no `consult.models` block behaves byte-identically.
+
+**Which lanes accept a model id.** `consult.models` and `consult.reasoningEffort` accept exactly
+`claude`, `codex`, and `gemini`. `hermes` is **not** a valid key in either block: the hermes backend
+is invoked as `hermes chat -q` and exposes no model selector, so accepting the key would silently do
+nothing. `consult.models.hermes` is a hard error naming the three lanes that do accept ids. This is
+independent of `hermes` remaining a valid *lane name* in `porch.consultation.*` lists, which it does.
+
+**`consult.pricing`** exists only because `CODEX_PRICING` is hardcoded to gpt-5.4's rates. It is
+codex-only (Claude's cost comes from the SDK, and the agy lane emits no usage data at all). All
+three rate keys must be supplied together — a partial object is a hard error, because silently
+defaulting one rate to a stale gpt-5.4 number reintroduces the wrong-cost problem this key exists to
+solve.
 
 Because config is loaded through the existing five-layer stack (defaults → framework cache →
 `~/.codev/config.json` → `.codev/config.json` → `.codev/config.local.json`), a user can set model
@@ -196,8 +215,28 @@ implementation — an allowlist of known model ids — is itself the rot being r
   new keys **and** to the `porch done` path, which currently skips validation entirely).
 - Malformed shape anywhere (e.g. `modelsByType` not an object, a lane list that isn't an array of
   strings) → error.
-- Unknown key in `byProtocol` or `modelsByType` → error, validated against protocols/review types
-  discoverable through the four-tier resolver rather than a hardcoded list. See Open Questions.
+- A partial `consult.pricing.codex` object (fewer than all three rate keys) → error.
+- Unknown key in `byProtocol` or `modelsByType` → **hard error**. Both key spaces are validated by
+  discovery, never against a hardcoded list; the discovery rule is defined immediately below. There
+  is no warn-and-continue mode for either — a typo that silently no-ops is precisely the
+  fail-fast violation this spec is closing.
+
+**Key-space discovery (the single definitive rule).** Both new key spaces are derived from the
+protocols on disk, so they cannot go stale the way a hardcoded list would:
+
+- **Valid `byProtocol` keys** = the set of protocol *names* visible at **any** tier of the four-tier
+  chain (`.codev/protocols/` ∪ `codev/protocols/` ∪ runtime cache ∪ installed skeleton). Union, not
+  precedence: a name present at any tier is a name porch can run, so configuring it is legitimate.
+- **Valid `modelsByType` keys** = the union of `verify.type` values declared by the **resolved**
+  `protocol.json` for each of those names — "resolved" meaning the single file the four-tier
+  resolver would actually load for that name (`.codev/` > `codev/` > cache > skeleton). Precedence,
+  not union: only the file that will actually execute defines which review types can occur.
+
+The asymmetry is deliberate and is the answer to "what happens when the local and skeleton protocol
+sets differ": a locally-shadowed protocol contributes its *name* to the first set and *only its own*
+`verify.type` values to the second — the shadowed skeleton copy's types do not leak in, because that
+file will never run. Both sets are computed by the same enumeration used everywhere else in Codev,
+and both are reported in the error message so a typo is self-diagnosing.
 
 **Not validated locally — the provider is the authority:**
 - The model id itself. Codev never asserts an id does or doesn't exist. If the Agent SDK, the Codex
@@ -210,11 +249,15 @@ the user can find it (the id may come from any of five config layers).
 
 ### Cost and observability
 
-- The resolved model id is recorded alongside the lane in consultation metrics, so cost figures
-  remain auditable after ids become configurable.
-- Codex cost math is driven by rates that can be overridden in config; when the codex lane runs a
-  non-default model with no rate override, the recorded cost is marked unknown (`null`) rather than
-  computed from stale rates. Reporting a confidently wrong number is worse than reporting none.
+- The resolved model id is recorded alongside the lane in consultation metrics. This requires a new
+  column on `consultation_metrics`, added by an **idempotent `ALTER TABLE ADD COLUMN` migration**
+  guarded by a `PRAGMA table_info` check — the table is created with `CREATE TABLE IF NOT EXISTS`
+  and has no migration mechanism today, so the migration is part of this work, not a follow-up. The
+  existing `model` column keeps its lane-name meaning, so `consult stats` (which groups on it)
+  is unaffected.
+- Codex cost math uses `consult.pricing.codex` when present. When the codex lane runs a
+  **non-default** model with no rate override, the recorded cost is `null` rather than computed from
+  gpt-5.4's rates. Reporting a confidently wrong number is worse than reporting none.
 
 ### Documentation
 
@@ -246,10 +289,16 @@ Codev does not validate model ids and defers to the provider.
       path** — the duplicated inline resolver in `porch/index.ts` is gone, and the `done` path
       validates config instead of silently falling back to protocol defaults.
 - [ ] Every malformed-config case listed under Fail-fast semantics produces a hard error naming the
-      offending key and the valid alternatives.
+      offending key and the valid alternatives — including an unknown `byProtocol` or `modelsByType`
+      key, which errors rather than warning, against the discovered key spaces defined above.
+- [ ] `consult.models.hermes` (or any non-`{claude,codex,gemini}` lane key) is a hard error, while
+      `hermes` remains accepted in `porch.consultation.*` lane lists.
+- [ ] A partial `consult.pricing.codex` object is a hard error; a complete one drives codex cost math.
 - [ ] A provider-rejected model id fails the consultation loudly and non-zero, writes no review
       file, and never falls back to a hardcoded default.
-- [ ] Consultation metrics record the resolved model id, not only the lane name.
+- [ ] Consultation metrics record the resolved model id, not only the lane name, via an idempotent
+      migration that is safe to run against an existing `~/.codev/metrics.db` and leaves the `model`
+      column's lane-name meaning (and therefore `consult stats`) unchanged.
 - [ ] A codex consultation on a non-default model with no rate override records `cost_usd` as
       unknown rather than a figure computed from gpt-5.4 rates.
 - [ ] The shadow-fork workaround is no longer needed: everything the reporting workspace achieved by
@@ -350,23 +399,29 @@ workspace policy without templating it into protocol files. Complementary, not s
   default that can be implemented and revisited at review.
 
 ### Important (Affects Design)
-- [ ] **How are `byProtocol` and `modelsByType` keys validated without a hardcoded list?**
-      A typo'd key (`"spir "`, `"implement"`) that silently no-ops violates fail-fast. Proposed
-      default: enumerate protocols resolvable through the four-tier chain and the `verify.type`
-      values they declare, and hard-error on a key outside that union. Fallback if enumeration
-      proves unreliable: validate values strictly and emit a loud warning for unmatched keys.
-- [ ] **Should `consult.reasoningEffort` be a general per-lane map or a codex-only key?** Only the
-      codex lane exposes a reasoning-effort knob today. Proposed default: a lane-keyed map with
-      only `codex` honored, erroring on any other lane key — extensible without a rename later.
-- [ ] **Codex cost when the model is overridden**: null-out (proposed) vs. an optional
-      `consult.pricing.codex` rate override vs. keep computing with stale rates (rejected).
-      Proposed default: support the optional override, and record `null` when a non-default model
-      runs with no override.
-- [ ] **Does recording the model id need a metrics schema migration?** `consultation_metrics` is
-      created with `CREATE TABLE IF NOT EXISTS` and has no migration mechanism, so adding a column
-      needs an idempotent `ALTER TABLE`. Proposed default: add the column with an idempotent
-      migration; the existing `model` column keeps its lane-name meaning so `consult stats` is
-      unaffected.
+
+*(All four questions raised in the iteration-1 3-way review are now resolved in Desired State and
+Success Criteria. They are recorded here with their resolutions rather than deleted, so the
+reasoning survives.)*
+
+- [x] **How are `byProtocol` and `modelsByType` keys validated without a hardcoded list?**
+      **Resolved: hard error, keys discovered from disk.** `byProtocol` keys = union of protocol
+      names across all four tiers; `modelsByType` keys = union of `verify.type` in each name's
+      *resolved* protocol.json. No warn-and-continue mode — the earlier draft offered one as a
+      fallback, which contradicted the hard-error requirement stated elsewhere. See "Key-space
+      discovery" under Desired State.
+- [x] **Should `consult.reasoningEffort` be a general per-lane map or a codex-only key?**
+      **Resolved: a lane-keyed map that accepts only `codex`.** Any other lane key is a hard error.
+      Extensible without a rename if another backend exposes the knob.
+- [x] **Codex cost when the model is overridden.** **Resolved:** optional `consult.pricing.codex`
+      with all three per-1M rates required together; `cost_usd` is `null` when a non-default model
+      runs without it. Computing from stale rates is rejected.
+- [x] **Does recording the model id need a metrics schema migration?** **Resolved: yes, and it is
+      in scope** — idempotent `ALTER TABLE ADD COLUMN` guarded by `PRAGMA table_info`. The `model`
+      column keeps its lane-name meaning.
+- [x] **Does the `hermes` lane accept a configured model id?** **Resolved: no.** `hermes chat -q`
+      exposes no model selector, so `consult.models.hermes` is a hard error; `hermes` stays valid as
+      a lane name in `porch.consultation.*`.
 
 ### Nice-to-Know (Optimization)
 - [ ] Should `codev doctor` report the effective per-lane model ids and lane composition? A
@@ -423,9 +478,16 @@ workspace policy without templating it into protocol files. Complementary, not s
 12. **Provider rejection** — backend rejects the configured id → non-zero exit, provider error text
     surfaced, config key named, **no review file written**, no fallback to the default id.
 13. **Metrics** — the resolved model id is recorded; the `model` column still holds the lane name.
+    The migration runs twice against the same DB without error and preserves existing rows.
 14. **Codex cost with an overridden model** — `cost_usd` is `null` absent a rate override, and
-    computed from the override when one is present.
+    computed from the override when one is present. A partial `pricing.codex` object errors.
 15. **Docs parity** — `codev/resources/commands/consult.md` and the skeleton copy stay in sync.
+16. **Key-space discovery** — an unknown `byProtocol` key and an unknown `modelsByType` key each
+    hard-error (never warn). A protocol name present *only* in the skeleton is accepted as a
+    `byProtocol` key; a `verify.type` that appears only in a skeleton copy **shadowed** by a local
+    protocol of the same name is *rejected*, since the shadowed file will never run.
+17. **Hermes lane keys** — `consult.models.hermes` errors; `porch.consultation.models: ["hermes"]`
+    still resolves.
 
 ### Non-Functional Tests
 1. **Performance**: N/A — no hot path is touched. Config resolution is already on the call path.
@@ -459,7 +521,7 @@ workspace policy without templating it into protocol files. Complementary, not s
 | Config widening silently inflates cost on lighter protocols | Medium | Medium | `byProtocol` scoping (scenario 5) is a MUST, not a follow-up |
 | Codex cost figures go stale against the configured model | High | Low | Null-out absent a rate override; record the id for later recomputation |
 | `porch next` and `porch done` disagree on lane composition, wedging a project | Low | High | Shared resolver + scenario 8 as an explicit regression guard |
-| Config-key validation (protocol/type discovery) proves brittle across the four-tier resolver | Medium | Low | Documented fallback: strict value validation plus a loud warning on unmatched keys |
+| Config-key validation (protocol/type discovery) proves brittle across the four-tier resolver | Medium | Low | Discovery rule is pinned exactly (union of names across tiers; `verify.type` from the *resolved* file only) and covered by scenario 16; no warn-and-continue escape hatch that would mask a typo |
 | Skeleton/`codev/` doc drift | Medium | Low | Docs parity is a success criterion (scenario 15) |
 
 ## Expert Consultation
