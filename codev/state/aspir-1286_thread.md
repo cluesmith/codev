@@ -216,3 +216,17 @@ to, and it would blur the phase-review boundary.
 
 On the rebase, also re-check #1288 (defaults → `claude-opus-5` / `gpt-5.6-sol`). The two-layer test
 structure means that change costs one deliberate line, not a scatter of edits.
+
+## Hold update — #1290 is green, waiting on review
+
+Re-checked the blocker: PR #1290 (`fix/1252-baseline-frozen-sample`) now shows **6/6 checks pass** —
+the `send-integration.e2e` "Hook timed out" flake that held it at 5/6 has cleared on a re-run, which
+is itself confirmation the failure was the known flake and not the change. Its `mergeStateStatus` is
+`BLOCKED` for exactly one reason now: `REVIEW_REQUIRED`. That is the architect's call, not mine, so
+I've notified rather than acted.
+
+`origin/main` is still at 54118ef0 (merge of #1283), so nothing has landed that would unblock me by
+another route. Position unchanged and deliberate: not bumping the baseline, not excluding 1286, not
+skipping the test, not starting phase_2. Resume sequence on merge is fixed — rebase onto main →
+`porch done 1286` → phase_2 — with the #1288 defaults re-check (`claude-opus-5` / `gpt-5.6-sol`)
+folded into the same pass.
