@@ -57,9 +57,23 @@ The dashboard configures `scrollback: 50000` (`apps/web/src/components/Terminal.
 
 The emulator is a memory win **only if the shellper's scrollback is deliberately kept tiny**. That is defensible (the shellper needs the current screen plus a little context; the client keeps its own scrollback) but it is an explicit decision that cuts directly against the instinct to match the client's configuration. Copying `50000` server-side would build a worse version of the bug being fixed.
 
-#### It fixes two of the three problems, not all three
+#### Where the emulator has to live is an open question, and the issue's answer is probably wrong
 
-The emulator lives in the shellper, so it addresses Defects A and B structurally. It does **nothing** for the Tower-side `RingBuffer.partial`: that is a separate accumulator in a different process, fed by the live stream at `pty-session.ts:310` rather than by replay. A bounded screen-shaped replay bounds the ring *seed*, but the partial still grows unbounded for the session's life exactly as it does today. **Phase 3 below is required whether or not the emulator ever ships**, unless Tower grows an emulator of its own.
+The issue proposes putting the emulator "inside the shellper." Tracing the actual client data path shows that would not deliver AC#2 to anyone:
+
+```
+shellper --REPLAY--> Tower (seeds RingBuffer) --ringBuffer.getAll()--> client
+```
+
+Clients never see the shellper's REPLAY frame. Both the VSCode adapter and the web dashboard attach via `tower-websocket.ts:56-58`, which calls `PtySession.attach()`/`attachResume()`, takes `ringBuffer.getAll()`/`getSince()`, joins the lines with `\n` (`tower-websocket.ts:66`) and ships that. The shellper's replay is only ever used to *seed* Tower's ring buffer at adoption. So a shellper-side emulator would hand Tower a perfect screen-shaped payload, and Tower would immediately line-split it back into its own line-based representation and serve clients exactly what they get today.
+
+That leaves the follow-up three options:
+
+- **Tower-side.** Probably right: it is where clients attach, it is one process rather than one per session, and it would subsume Phase 3 rather than leaving it separate. Cost: concentrates per-byte emulation for every session into a single process, a worse CPU story than spreading it across shellpers.
+- **Shellper-side.** Keeps CPU distributed, but requires Tower to pass screen state through opaquely instead of re-deriving it, which means changing Tower's replay representation anyway.
+- **Both.** Most faithful, most work.
+
+*Revised during implementation.* This section previously asserted that the emulator "lives in the shellper" and therefore that **Phase 3 is required whether or not the emulator ships**. Both claims were wrong, and the second followed from the first. If the emulator lands Tower-side, Phase 3 is subsumed by it. Phase 3 is correctly characterised as **interim**, not permanent: worth shipping because Tower's partial grows at roughly 1MB/h on a busy session and is copied on every attach, while the emulator is far off — but not as a foundation the emulator will build on.
 
 #### The remaining design questions
 
@@ -69,7 +83,7 @@ The emulator lives in the shellper, so it addresses Defects A and B structurally
 
 #### Conclusion
 
-The emulator's genuine payoff is **correctness**, not resource usage: it delivers AC#2 and would let the repaint nudge (`terminal-adapter.ts:455-460`, the one-row-resize SIGWINCH hack) be deleted. It should be argued and specced on those grounds. Meanwhile Phases 1 and 2 buy the same bounded-memory outcome immediately, at zero CPU cost, with no dependency and no scrollback-sizing decision that can silently regress; Phase 3 is orthogonal to it entirely.
+The emulator's genuine payoff is **correctness**, not resource usage: it delivers AC#2 and would let the repaint nudge (`terminal-adapter.ts:455-460`, the one-row-resize SIGWINCH hack) be deleted from every client. It should be argued and specced on those grounds. Meanwhile Phases 1 and 2 buy the same bounded-memory outcome immediately, at zero CPU cost, with no dependency and no scrollback-sizing decision that can silently regress. Phase 3 is interim: valuable now, likely superseded if the emulator lands Tower-side.
 
 **Ask at the gate:** file a follow-up issue for the emulator and close #1205 with this PR, or keep #1205 open after merge as the emulator tracker. I'll do whichever the architect picks.
 
@@ -132,6 +146,10 @@ Sequenced last per architect guidance: issue #1214 touches `pty-session.ts`'s ex
 
 Update the `#1047` doc comment at `ring-buffer.ts:36-41`, which currently asserts the partial is "kept whole and unbounded" — leaving that comment intact while capping the value would be a lie in the codebase for the next reader.
 
+**Trim to *half* the ceiling, not to the ceiling.** Cutting back to exactly `MAX_PARTIAL_CHARS` puts the partial over it again on the very next append, so every subsequent `pushData` would copy the whole multi-megabyte partial: an O(|partial|)-per-call cost on precisely the hot path #1047 restructured to be O(|data|). Halving amortises the copy over the next half-ceiling of growth, giving O(1) per byte. *Added during implementation* — the first cut of this phase had the naive version and reintroduced the CPU bug the cap was meant to sit alongside. Covered by a test that counts trims across many appends.
+
+**What this actually costs, stated accurately.** An earlier draft of this plan called the reduction from a whole partial (14MB observed) to 2MB "a genuine regression." That overstates it. A full-screen TUI redraws in place, so every byte older than the current frame is a *superseded* repaint; replaying all 14MB and replaying only the tail converge on the same final visual state, because the older frames are overwritten as they are parsed. The same holds for `\r`-style progress output. So the discarded bytes are essentially invisible. The phase also *improves* attach latency: that partial is joined and shipped on every viewer attach (`tower-websocket.ts:66`), and 2MB parses far faster than 14MB — the same stall the `capRingSeed` comment documents. The one real residual risk is escape *state* set early and never re-set (an alt-screen-enter, a mode change) sitting in the discarded prefix; ESC alignment narrows that window and the repaint nudge closes it.
+
 ### Cross-cutting: ESC-boundary alignment on every cut (small, optional)
 
 Every trim above (Phase 1 boundary chunk, Phase 2 final-chunk trim, Phase 3 partial trim) can land mid-escape-sequence, and the first bytes a client renders would then be the tail of a truncated sequence — visible garbage until the nudge repaints. Cheap mitigation: after computing the cut offset, scan **forward** for the next `ESC` (`0x1b`) and start there instead; bound the scan to 4KB and fall back to the raw offset if no ESC is found in that window.
@@ -176,7 +194,7 @@ Mitigated by keeping the existing line tests green and adding byte-cap tests alo
 **Risk: conflict with #1214 in `pty-session.ts`.**
 Phase 3 is sequenced last and confined to `ring-buffer.ts`; `pty-session.ts` is not edited at all.
 
-**Alternative rejected — O(screen) headless emulator now.** The right end-state for *correctness*, but it is a CPU-for-memory trade whose memory floor depends entirely on an unwritten scrollback-sizing decision, and it leaves Phase 3 untouched regardless. Argued at length in *Scope decision* above.
+**Alternative rejected — O(screen) headless emulator now.** The right end-state for *correctness*, but it is a CPU-for-memory trade whose memory floor depends entirely on an unwritten scrollback-sizing decision, and where it should even live is unsettled (the issue's "inside the shellper" would not reach any client). Argued at length in *Scope decision* above.
 
 **Alternative rejected — reset the buffer at detectable full-frame boundaries (clear-screen / cursor-home).** The issue's "cheaper alternative". Rejected: detecting a *true* full repaint from the byte stream is heuristic (`ESC[2J`, `ESC[H`, `ESC[3J`, alt-screen enter/exit, and app-specific variants), and a wrong positive discards state the app will not redraw — silent corruption with no upper bound on how wrong it gets. A byte cap is dumb, predictable, and cannot be wrong in a way we can't reason about. Genuine screen-shaped storage is the emulator, not a heuristic approximation of it.
 

@@ -62,6 +62,16 @@ Three of my own tests were wrong rather than the code:
 
 `shellper-process.test.ts`'s #1198 test grew the buffer past `REPLAY_PAYLOAD_MAX` to exercise the send-path cap. The byte ceiling makes that unreachable at default settings, which is exactly the rot the plan predicted. Fixed by raising *that shellper's* ceiling explicitly via the new constructor arg, so the guard stays exercised, and added a companion test asserting a default shellper can no longer produce an oversized replay at all.
 
+### Findings at the dev-approval gate that changed the plan
+
+Three corrections landed while the architect probed the design. All three were things I had asserted with more confidence than the evidence supported:
+
+1. **`REPLAY_BUFFER_MAX_BYTES` was misfiled.** I put it in `shellper-protocol.ts` beside `REPLAY_PAYLOAD_MAX` and justified it as "the same wire-adjacent concern." It isn't: a retention ceiling is a memory policy, and that module declares itself the wire protocol. It was filed there only because it is *derived from* a wire constant. Moved next to the buffer it configures, still `= REPLAY_PAYLOAD_MAX` so the derivation self-maintains if the send cap moves.
+2. **A shellper-side emulator would not reach any client** — which is what the issue proposes, and what my plan repeated. Clients never see the shellper's REPLAY frame: they attach via `tower-websocket.ts:56-58` → `ringBuffer.getAll()`, and the shellper's replay only *seeds* Tower's ring buffer at adoption. So a screen-shaped payload handed to Tower gets immediately line-split back into today's representation. The emulator most likely belongs **Tower-side**. This is a real error in the issue's proposed direction, not just in my summary of it.
+3. **Consequently "Phase 3 is required regardless of the emulator" was wrong**, since it followed from (2). A Tower-side emulator subsumes Phase 3. It is **interim**, not foundational. Architect confirmed keeping it anyway (Tower's partial grows ~1MB/h and is copied per attach; the emulator is far off).
+
+Also corrected my own overstatement of Phase 3's cost. I called the 14MB→2MB partial reduction "a genuine regression"; it mostly isn't. A TUI redraws in place, so bytes older than the current frame are superseded repaints that get overwritten during parse — replaying the tail converges on the same visual state. And the phase *improves* attach latency, since that partial is shipped on every viewer attach. Real residual risk is only escape *state* set early and never re-set, which ESC alignment narrows and the nudge closes.
+
 ### Pre-existing failures (not mine, not touched)
 
 The `terminal/` suite is fully green: **295/295 across 11 files** (304/304 after merging main, which added 9 tests), including the 8 `session-manager.test.ts` integration tests (those fail with `MODULE_NOT_FOUND` until `pnpm build` has produced `dist/terminal/shellper-main.js`, which is a build-ordering artifact, not a defect).
