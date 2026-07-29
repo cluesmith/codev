@@ -1,0 +1,299 @@
+/**
+ * `afx reset` — the command surface over the reset state machine (Spec 1273).
+ *
+ * This file is deliberately thin. It does three things and nothing else:
+ * resolves the target, binds REAL implementations to the orchestrator's ports,
+ * and prints the report. Every decision, every ordering rule and every refusal
+ * lives in `reset/index.ts`, where it is testable without Tower, a PTY, or a
+ * live builder.
+ *
+ * That split is the point. The dangerous part of reset is the ordering, and
+ * ordering is only provable if the thing that decides it has no I/O in it.
+ *
+ * Addressing, workspace detection and sender identity are reused verbatim from
+ * `afx send` — there is exactly one address resolver (the same rule `afx
+ * interrupt` follows).
+ */
+
+import { existsSync, readFileSync, readdirSync, writeFileSync, statSync } from 'node:fs';
+import { TowerClient } from '../lib/tower-client.js';
+import { logger, fatal } from '../utils/logger.js';
+import { getBuilder } from '../state.js';
+import { getConfig } from '../utils/index.js';
+import { loadConfig } from '../../lib/config.js';
+import { loadForgeConfig } from '../../lib/forge.js';
+import { fetchIssue as fetchForgeIssue } from '../../lib/github.js';
+import { buildPromptFromTemplate, buildResumeNotice } from './spawn-roles.js';
+import { detectWorkspaceRoot, detectCurrentBuilderId } from './send.js';
+import { resolveBuilderContext } from './reset/context.js';
+import {
+  formatResetReport,
+  runReset,
+  ResetPreflightError,
+  type ClockPort,
+  type ResetFsPort,
+  type TerminalPort,
+} from './reset/index.js';
+import type { IssuePayload } from './reset/reorient.js';
+import type { CustomHarnessConfig } from '../utils/harness.js';
+import type { ResetOptions } from '../types.js';
+
+/** Same cap `afx send --file` enforces. One rule for architect-supplied files. */
+const MAX_FILE_SIZE = 48 * 1024;
+
+export async function reset(options: ResetOptions): Promise<void> {
+  const target = options.builder;
+  if (!target) {
+    fatal('Must specify a builder. Usage: afx reset <builder>');
+  }
+
+  logger.header('Builder Context Reset');
+
+  const workspace = detectWorkspaceRoot() ?? undefined;
+
+  let from: string;
+  try {
+    from = detectCurrentBuilderId() ?? 'architect';
+  } catch (err) {
+    fatal(err instanceof Error ? err.message : String(err));
+  }
+
+  const builder = getBuilder(target, workspace);
+  if (!builder) {
+    fatal(
+      `No builder '${target}' in this workspace. Check 'afx status'. ` +
+        `Reset needs the registry row for the worktree and branch.`,
+    );
+  }
+  if (!builder.worktree || !builder.branch) {
+    fatal(
+      `Builder '${target}' has an incomplete registry row (worktree='${builder.worktree}', ` +
+        `branch='${builder.branch}'). Refusing to reset against unresolved state.`,
+    );
+  }
+
+  const client = new TowerClient();
+  if (!(await client.isRunning())) {
+    fatal('Tower is not running. Start it with: afx tower start');
+  }
+
+  const addendum = buildAddendum(options);
+  const config = getConfig();
+  const userConfig = loadConfig(config.workspaceRoot);
+
+  const context = resolveBuilderContext({
+    fs: {
+      exists: (p: string) => existsSync(p),
+      read: (p: string) => safeRead(p),
+      listDirs: (p: string) => {
+        try {
+          return readdirSync(p, { withFileTypes: true })
+            .filter(e => e.isDirectory())
+            .map(e => e.name);
+        } catch {
+          return null;
+        }
+      },
+    },
+    builderId: builder.id,
+    worktree: builder.worktree,
+    branch: builder.branch,
+    issueNumber: builder.issueNumber === undefined ? undefined : String(builder.issueNumber),
+    taskText: builder.taskText,
+    modeOverride: options.mode,
+    customHarnesses: userConfig?.harness as Record<string, CustomHarnessConfig> | undefined,
+  });
+
+  const terminal: TerminalPort = buildTerminalPort(client, builder.terminalId, target, from, workspace);
+
+  try {
+    const result = await runReset({
+      context,
+      fs: buildFsPort(),
+      clock: realClock,
+      terminal,
+      buildSpawnPrompt: (protocol, templateContext) =>
+        buildPromptFromTemplate(config, protocol, templateContext),
+      buildResumeNotice,
+      issue: await fetchIssuePayload(context.issueNumber, config.workspaceRoot),
+      addendum,
+      dryRun: options.dryRun,
+      interruptFirst: options.interruptFirst,
+      receiptTimeoutMs: options.timeout ? options.timeout * 1000 : undefined,
+      minBytes: options.minBytes,
+      quietWindowMs: options.quietWindow,
+    });
+
+    if (result.outcome === 'dry-run') {
+      logger.info('DRY RUN — nothing was written to the builder.\n');
+      logger.info('--- save request ---');
+      console.log(result.payload?.longForm ? '' : '');
+      logger.info('--- inline re-orientation ---');
+      console.log(result.payload?.inline ?? '');
+      logger.info(`--- long form would be written to ${result.reorientPath} ---`);
+      console.log(result.payload?.longForm ?? '');
+      return;
+    }
+
+    console.log(formatResetReport(result));
+
+    if (result.outcome === 'aborted') {
+      // Non-zero: an aborted reset is a failure the caller must see, even though
+      // it is the SAFE outcome. Silence here would let a script treat "refused
+      // to clear" as "cleared".
+      process.exitCode = 1;
+      return;
+    }
+
+    logger.success(`Builder ${target} reset and re-oriented.`);
+    logger.info(`State file: ${result.statePath} (${result.stateBytes} bytes)`);
+  } catch (err) {
+    if (err instanceof ResetPreflightError) {
+      fatal(err.message);
+    }
+    fatal(err instanceof Error ? err.message : String(err));
+  }
+}
+
+// ============================================================================
+// Port bindings
+// ============================================================================
+
+const realClock: ClockPort = {
+  now: () => Date.now(),
+  sleep: (ms: number) => new Promise(resolve => setTimeout(resolve, ms)),
+};
+
+function buildFsPort(): ResetFsPort {
+  return {
+    read: (p: string) => safeRead(p),
+    sizeOf: (p: string) => {
+      try {
+        return statSync(p).size;
+      } catch {
+        return null;
+      }
+    },
+    write: (p: string, content: string) => writeFileSync(p, content, 'utf-8'),
+  };
+}
+
+function safeRead(p: string): string | null {
+  try {
+    return readFileSync(p, 'utf-8');
+  } catch {
+    return null;
+  }
+}
+
+function buildTerminalPort(
+  client: TowerClient,
+  terminalId: string | undefined,
+  target: string,
+  from: string,
+  workspace: string | undefined,
+): TerminalPort {
+  return {
+    async observe() {
+      if (!terminalId) return { exists: false };
+      const t = await client.getTerminal(terminalId);
+      if (!t || t.status !== 'running') return { exists: false };
+      // lastDataAt is forwarded as-is, including undefined. The orchestrator
+      // treats undefined as "unobservable" and refuses to clear; collapsing it
+      // to 0 here would defeat that check at the boundary.
+      return { exists: true, lastDataAt: t.lastDataAt };
+    },
+    async sendMessage(message: string) {
+      const result = await client.sendMessage(target, message, {
+        from,
+        workspace,
+        fromWorkspace: workspace,
+      });
+      if (!result.ok) throw new Error(result.error || 'Message delivery failed');
+    },
+    /**
+     * `raw: true`, NOT `escape: true`.
+     *
+     * Tower's escape route writes a hardcoded ESC and discards the message
+     * body, so binding this to `escape` would silently turn `/clear` into an
+     * interrupt: the run would report success while the builder kept its
+     * entire context. `raw` types the text as literal input, which is what the
+     * verified manual recipe used.
+     */
+    async sendRaw(text: string) {
+      const result = await client.sendMessage(target, text, {
+        from,
+        workspace,
+        fromWorkspace: workspace,
+        raw: true,
+      });
+      if (!result.ok) throw new Error(result.error || 'Raw write failed');
+    },
+    async sendEscape() {
+      const result = await client.sendMessage(target, '\x1b', {
+        from,
+        workspace,
+        fromWorkspace: workspace,
+        escape: true,
+      });
+      if (!result.ok) throw new Error(result.error || 'Interrupt (ESC) failed');
+    },
+  };
+}
+
+// ============================================================================
+// Inputs
+// ============================================================================
+
+/**
+ * Assemble the architect addendum from `--note` and `--file`.
+ *
+ * `--file` reads from the CALLER's filesystem, exactly as `afx send --file`
+ * does, and reuses its 48KB cap. The worktree-containment rule applies to the
+ * state-file path override, not to this — the architect is reading their own
+ * notes, not instructing the builder where to write.
+ */
+function buildAddendum(options: ResetOptions): string | undefined {
+  const parts: string[] = [];
+  if (options.note) parts.push(options.note);
+  if (options.file) {
+    if (!existsSync(options.file)) {
+      fatal(`File not found: ${options.file}`);
+    }
+    const buf = readFileSync(options.file);
+    if (buf.length > MAX_FILE_SIZE) {
+      fatal(`File too large: ${buf.length} bytes (max ${MAX_FILE_SIZE} bytes / 48KB)`);
+    }
+    parts.push(buf.toString('utf-8'));
+  }
+  return parts.length > 0 ? parts.join('\n\n') : undefined;
+}
+
+/**
+ * Fetch issue metadata for the long form, best-effort.
+ *
+ * A forge outage must not block a reset: phase 5 renders an explicit "could not
+ * be fetched" gap with a `gh issue view` recovery line, which is strictly better
+ * than aborting a reset the architect needs, and strictly better than silently
+ * omitting requirements.
+ */
+async function fetchIssuePayload(
+  issueNumber: string | undefined,
+  workspaceRoot: string,
+): Promise<IssuePayload | undefined> {
+  if (!issueNumber) return undefined;
+  try {
+    const issue = await fetchForgeIssue(issueNumber, {
+      cwd: workspaceRoot,
+      forgeConfig: loadForgeConfig(workspaceRoot),
+    });
+    if (!issue) return undefined;
+    return {
+      number: issueNumber,
+      title: issue.title,
+      body: issue.body || '(No description provided)',
+    };
+  } catch {
+    return undefined;
+  }
+}

@@ -193,8 +193,77 @@ unrecorded escalation is indistinguishable from one that never happened.)
 in PIR spawn prompts), with the recommended fix being to drop the placeholder in favour of porch's
 per-phase naming. Keeping it out of 1273's scope was confirmed correct.
 
-Iteration 6: no new work needed — the iteration-5 fix landed in `5f4d768e` before the round closed.
-Re-verified: build clean, **3894 tests passing, 0 failures** (48 pre-existing skips). Signaling complete.
+**Iteration 6 — Codex found a real one, and two APPROVEs would have shipped it.** `{{input_description}}`
+is the *first content line* of `bugfix`/`air`/`aspir`/`spir` `builder-prompt.md`, and spawn populates it
+four different ways (`spawn.ts:455`/`543`/`607`/`837`). My reconstruction produced two. A BUGFIX/AIR lane
+has no spec, so it fell through to the fallback and a reset builder was told it was *"running the BUGFIX
+protocol"* instead of naming its issue — on exactly the lanes where the issue body **is** the spec. The
+fallback also read `the <P> protocol` where spawn writes `running the <P> protocol`, so even the branch I
+did implement was not spawn-equivalent.
+
+Unlike iter 5's `artifact_name`, this field **is** on `TemplateContext` and **is** populated by every
+spawn path. That distinction is the whole difference between the finding I rejected and the one I took.
+
+Found while fixing, and not flagged by anyone: the obvious branch order is wrong. A `--task` builder gets
+a porch project keyed on its *builder id*, so `context.ts`'s `issueNumber ?? porch?.projectId` fallback
+populates `issueNumber` for it too — testing `issueNumber` before `taskText` would announce a GitHub issue
+that does not exist. Order is spec → task → issue → protocol-only, documented at the function.
+
+Honest note on iter 5's structural fix: **typing the port against `TemplateContext` would not have caught
+this.** The field was always present and type-correct, merely *wrong*. Types close the "field went
+missing" class; only tests pinned to spawn's literal strings close the "field carries the wrong value"
+class. Tests 46 → 51, one per spawn entry point. Commit `ecaf401a`.
+
+**Iteration 7: unanimous APPROVE — including Codex, who had dissented all six prior rounds.** Phase 5
+closed at 3899 tests, build clean.
+
+### The phase-5 pattern, for the review
+
+Seven rounds, six genuine defects, every one found by the same reviewer, and every one an instance of a
+single class: **hand-rolled reconstruction of a spawn structure drifting from what spawn actually emits.**
+The marker list that omitted project/issue; the restated resume notice that dropped its `porch init`
+fallback; the identity assertions that matched the weaker string; the completeness check that matched
+labels instead of values; the input framing that covered half the entry points. Twice the majority
+APPROVEd a real defect. Lesson candidate, sharper than phase 2's: *when reviewers split, weigh the
+argument, not the count — and a reviewer who dissents every round may be tracking a defect class rather
+than nitpicking.*
+
+## Implement phase 6 (reset orchestrator + CLI wiring) — 2026-07-29
+
+The orchestrator is a pure state machine over injected ports (`clock`, `fs`, `sendMessage`, `sendRaw`,
+`sendEscape`) that records an ordered **step log** of every externally-visible action. Every invariant
+test asserts over that log, and the important assertions are of *absence*: no `clear` in an aborted run,
+`escalate-esc` never before `receipt-accepted`. A happy-path-only test would pass against an
+implementation that clears first and asks questions later — the ordering is the whole safety story.
+
+**I nearly shipped a silent, total failure, and the phase-5 lesson is what caught it.** I had one
+`writeRaw(data)` port bound to Tower's `escape: true`, used for both the ESC escalation and `/clear`.
+But `writeEscapeToSession` (`servers/message-write.ts:46`) writes a **hardcoded ESC and discards the
+message body**. So `/clear` would have sent an interrupt. Every observable signal still reads as success:
+the send returns ok, the terminal goes quiet (an ESC ends the turn), the re-orientation arrives on
+schedule. The only thing that would not happen is the reset — the builder keeps its entire context, which
+is precisely the outcome the feature exists to prevent, reported as a clean run.
+
+Nothing in the type system or the tests would have caught it, because the port's shape was right and only
+its *binding* was wrong. What caught it was going to read `writeEscapeToSession` instead of trusting that
+"escape means raw write" — the same move that resolved iterations 5 and 6 (verify the claim against the
+file). The fix is structural: three distinct port methods (`sendMessage` / `sendRaw` / `sendEscape`) so
+the confusion is unrepresentable, plus a regression test asserting `/clear` goes down the raw channel and
+`escapes === 0`.
+
+`/clear` via `raw: true` is also what the original manual recipe in the issue used. I had drifted from
+the documented procedure and would have been "spawn-shaped, not spawn-equivalent" all over again.
+
+Also pinned: both artifact names still match `afx cleanup`'s `/^\?\? \.builder-/` scaffold pattern. That
+coupling is by filename convention, not a shared symbol — a rename would quietly report every reset
+builder's worktree as dirty and block cleanup.
+
+CLI verified against the real binary (`node packages/codev/bin/afx.js reset --help`), not just the build.
+
+**Still outstanding, and it is the headline path**: the manual end-to-end run. `afx reset` against a live
+builder needs `pnpm -w run local-install` (restarts Tower, affects every builder in the workspace) —
+the architect's call, flagged since phase 1 and still open. 3926 tests passing is not the same as "it
+works", and I am not claiming otherwise.
 
 ## Status
 
@@ -207,8 +276,8 @@ Re-verified: build clean, **3894 tests passing, 0 failures** (48 pre-existing sk
 - [x] Phase 2 (lastDataAt observability) — 2 iterations, sided with the lone dissenter
 - [x] Phase 3 (reset receipt gate)
 - [x] Phase 4 (builder context resolution)
-- [x] Phase 5 (re-orientation assembly) — 6 iterations, build + 3894 tests green
-- [ ] Phase 6 (reset orchestrator + CLI wiring)
+- [x] Phase 5 (re-orientation assembly) — 7 iterations, unanimous APPROVE, 3899 tests green
+- [x] Phase 6 (reset orchestrator + CLI wiring) — implemented, 3926 tests green, CMAP pending
 - [ ] Phase 7 (wait discipline + command documentation)
 
 **Open for the review phase**: live end-to-end verification of the ESC path and a real reset against a

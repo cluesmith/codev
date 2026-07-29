@@ -485,6 +485,42 @@ export async function runAgentFarm(args: string[]): Promise<void> {
       }
     });
 
+  // Reset command (Spec 1273) — save-state → /clear → re-orient
+  program
+    .command('reset [builder]')
+    .description('Reset a builder\'s context: save working state, clear, then re-orient')
+    .option('--note <text>', 'Extra context to append to the re-orientation')
+    .option('--file <path>', 'Append file content to the re-orientation (48KB max)')
+    .option('--dry-run', 'Print what would be sent; write nothing to the builder')
+    .option('--interrupt-first', 'Send ESC before the save request (for a builder wedged mid-turn)')
+    .option('--mode <mode>', 'Override the builder mode (strict|soft) if it cannot be detected')
+    .option('--timeout <seconds>', 'How long to wait for the save-state receipt')
+    .option('--min-bytes <n>', 'Minimum state-file size to accept as substantive')
+    .option('--quiet-window <ms>', 'Terminal silence that counts as turn-ended')
+    .action(async (builder, options) => {
+      const { reset } = await import('./commands/reset.js');
+      try {
+        if (options.mode && options.mode !== 'strict' && options.mode !== 'soft') {
+          logger.error(`--mode must be 'strict' or 'soft', got '${options.mode}'`);
+          process.exit(1);
+        }
+        await reset({
+          builder,
+          note: options.note,
+          file: options.file,
+          dryRun: options.dryRun,
+          interruptFirst: options.interruptFirst,
+          mode: options.mode,
+          timeout: options.timeout ? parseInt(options.timeout, 10) : undefined,
+          minBytes: options.minBytes ? parseInt(options.minBytes, 10) : undefined,
+          quietWindow: options.quietWindow ? parseInt(options.quietWindow, 10) : undefined,
+        });
+      } catch (error) {
+        logger.error(error instanceof Error ? error.message : String(error));
+        process.exit(1);
+      }
+    });
+
   // Bench command - consultation benchmarking
   program
     .command('bench')
