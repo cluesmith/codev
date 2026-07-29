@@ -97,6 +97,10 @@ Iterations that could have been prevented with better builder behavior:
 ### What Would Be Done Differently
 - [Actionable improvement for future builders]
 
+### Methodology Improvements
+- [Suggested improvement to the SPIR protocol]
+- [Suggested improvement to tooling]
+
 ## Architecture Updates
 
 [What you routed where — HOT `codev/resources/arch-critical.md` (tiny, capped, always-injected) vs COLD `codev/resources/arch.md` (reference) — or why no changes were needed.]
@@ -114,6 +118,11 @@ Iterations that could have been prevented with better builder behavior:
 ## Technical Debt
 
 - [Any shortcuts taken or inconsistencies introduced]
+
+## Flaky Tests
+
+- [Pre-existing tests skipped as flaky during this project — test name, file path, observed failure mode]
+- [If none: "No flaky tests encountered"]
 
 ## Follow-up Items
 
