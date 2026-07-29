@@ -130,3 +130,29 @@ squarely WHAT.
 
 Per the architect's standing instruction (address what's real, then proceed without a round-trip),
 moving on to the Plan phase.
+
+## Incoming: issue #1288 changes shipped defaults (architect FYI, 2026-07-29)
+
+`claude` lane default → `claude-opus-5`; `codex` lane default → **`gpt-5.6-sol`** (live-probed; plain
+`gpt-5.6` is REJECTED under ChatGPT-account auth — the `-sol` suffix is load-bearing). Spec's
+out-of-scope call on defaults stands; #1288 is a separate project.
+
+**Required before implement**: rebase onto main and check whether #1288 landed.
+
+**The real issue is not the rebase — it's that my default-preservation criterion names literal ids**
+(`claude-opus-4-6`, `gpt-5.4` @ medium), so it silently becomes wrong if #1288 merges first and
+nobody remembers to edit it. Making it structurally rebase-proof instead, in two layers:
+
+- **Layer A (behavioral, rebase-proof)**: zero-config → the SDK receives *the module's default
+  constant*. Guards the config plumbing; survives #1288 with no edit.
+- **Layer B (one deliberate pin)**: a single test asserting those constants equal the ids the repo
+  ships at that commit. One-line update when #1288 lands; fails loudly on accidental drift.
+
+Layer A alone is tautological (it would pass even if a default constant were changed by mistake),
+which is exactly why B exists as a separate, intentionally-edited line.
+
+Also: `gpt-5.6-sol` matches the spec's id regex (hyphens permitted) — adding it as an explicit
+accept-vector, since a real id with a load-bearing suffix is a good check that the rule isn't too tight.
+
+Deferred until the in-flight plan consultations finish — editing the plan mid-review would make the
+three reviewers' feedback inconsistent with each other.
