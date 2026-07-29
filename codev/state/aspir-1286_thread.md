@@ -156,3 +156,37 @@ accept-vector, since a real id with a load-bearing suffix is a good check that t
 
 Deferred until the in-flight plan consultations finish — editing the plan mid-review would make the
 three reviewers' feedback inconsistent with each other.
+
+## Implement — phase_1 done, and the behaviour-baseline landmine
+
+Phase 1 shipped: `consult-lanes.ts` (validators + resolvers), `CodevConfig` extensions, cross-tier
+`listProtocolNames`/`canonicalProtocolName`/`listReviewTypes` in `skeleton.ts`, `findConfigSource`.
+65 new tests. Validation is invoked from `loadConfig()` per the plan, matching the existing
+`validateCustomHarnessConfig` precedent.
+
+Verified the `satisfies readonly ModelReasoningEffort[]` binding is genuinely load-bearing rather
+than decorative: temporarily adding `'bogus-effort'` produces
+`TS2322: Type '"bogus-effort"' is not assignable to type 'ModelReasoningEffort'`. That check is the
+difference between the spec's requirement and a comment claiming it.
+
+### The landmine, and getting the disposition wrong then right
+
+`prompt-behavior-metrics.test.ts` pins `b1_totalVerdicts=160` but measures LIVE repo history
+(`codev/projects/*/status.yaml`), so any project running consultations here perturbs it. Measured
+163 with 1286 included, exactly 160 excluded — proving repo content, not a code defect. The test's
+own comment records project 1252 hitting the identical 160→163 and fixing it by self-exclusion.
+
+I flagged it to the architect rather than bumping the number — correct. But when it then blocked
+`porch done`, I followed 1252's precedent and excluded the in-flight project. **The architect ruled
+that wrong** and it is now reverted: a per-PR exclusion/bump treadmill quietly destroys the
+baseline's meaning. Root cause is measuring live history against a frozen number; the real fix is
+freezing the *sample set*, shipped as PR #1290 (`MeasureOptions.includeProjects`, 18 pinned
+projects).
+
+Lesson worth keeping: "follow the existing precedent in the file" was not sufficient here — the
+precedent itself was the unfixed bug, and copying it would have propagated it one project further.
+Rebase onto main once #1290 merges; until then `porch done` will fail this one test, and the answer
+is to wait for the rebase, not to touch the baseline again.
+
+Also confirmed environmental (architect agreed): `session-manager.test.ts`'s 8 failures need a built
+`dist/terminal/shellper-main.js` — they pass after `pnpm build`.
