@@ -158,11 +158,12 @@ function walk(dir: string, pred: (p: string) => boolean): string[] {
  * review history for protocols that loop that way, so pir/bugfix/air contribute
  * nothing. Sorted for deterministic output.
  */
-function collectReviewMetrics(root: string, excludeProjects: string[]) {
+function collectReviewMetrics(root: string, excludeProjects: string[], includeProjects?: string[]) {
   const projDir = path.join(root, 'codev', 'projects');
   const files = fs.existsSync(projDir)
     ? fs
         .readdirSync(projDir)
+        .filter((d) => (includeProjects ? includeProjects.includes(d) : true))
         .filter((d) => !excludeProjects.includes(d))
         .map((d) => path.join(projDir, d, 'status.yaml'))
         .filter((f) => fs.existsSync(f))
@@ -265,6 +266,18 @@ export interface MeasureOptions {
    */
   excludeProjects?: string[];
   /**
+   * Project directory names to measure EXCLUSIVELY (an allowlist), applied
+   * before `excludeProjects`. Unset means "every project on disk".
+   *
+   * A frozen baseline needs a frozen sample: the committed baseline artifact
+   * was computed over the projects that existed at baseline time, so a
+   * reproduction against live history must pin that set — otherwise every
+   * subsequent project that runs consultations perturbs the numbers and the
+   * reproduction fails for reasons that have nothing to do with the metrics
+   * (discovered when project 1286's first review iteration moved B1 160 → 163).
+   */
+  includeProjects?: string[];
+  /**
    * Basename prefixes excluded from B3's prose scan, for the same reason: this
    * project's own thread/review discuss scar rules at length and grow with
    * every phase, so scanning them makes B3 non-reproducible AND self-inflating.
@@ -278,7 +291,7 @@ export const SELF_FILE_PREFIXES = ['spir-1252_', '1252-'];
 
 /** Collect all behavioural metrics for a repo root. Deterministic over B1–B4. */
 export function measureBehavior(root: string, opts: MeasureOptions = {}): BehaviorMetrics {
-  const rv = collectReviewMetrics(root, opts.excludeProjects ?? [SELF_PROJECT_DIR]);
+  const rv = collectReviewMetrics(root, opts.excludeProjects ?? [SELF_PROJECT_DIR], opts.includeProjects);
   const scar = collectScarHits(root, opts.excludeFilePrefixes ?? SELF_FILE_PREFIXES);
   return {
     b1_requestChangesRate: round2(rv.rcRate * 100),

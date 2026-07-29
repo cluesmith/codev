@@ -176,9 +176,40 @@ describe('behavioural metrics (M12a / T14)', () => {
     }
   });
 
+  // The exact project set the committed baseline (n=160) was computed over.
+  // FROZEN by definition: the baseline is a point-in-time artifact, so its
+  // reproduction must pin its sample. Do NOT add new projects here to make a
+  // failure go away — a change in these numbers over THIS set means the
+  // measurement code's semantics changed, which is what this test guards.
+  const BASELINE_SAMPLE = [
+    '0092-terminal-file-links',
+    '0120-codex-sdk-integration',
+    '0124-test-suite-consolidation',
+    '403-af-send-typing-awareness',
+    '456-dashboard-statistics-tab-in-ri',
+    '462-add-spike-protocol-for-technic',
+    '467-add-open-files-shells-section-',
+    '468-af-rename-command-to-rename-cu',
+    '589-support-non-github-repositorie',
+    '723-improve-arch-md-lessons-learne',
+    '746-spir-architect-s-baked-archite',
+    '755-multi-architect-support-per-ar',
+    '761-surface-multiple-architects-in',
+    '778-gemini-cli-antigravity-cli-jun',
+    '786-multi-architect-feature-is-und',
+    '823-multi-architect-coordination-b',
+    '927-needs-attention-surface-prs-vi',
+    '987-engineering-wisdom-is-write-on',
+  ];
+
   it('reproduces the committed baseline numbers on this repo', () => {
     // Guards against a refactor silently changing what the baseline means.
-    const m = measureBehavior(REPO_ROOT);
+    // Pinned to the baseline's own sample so projects that post-date the
+    // baseline (each adding review verdicts to codev/projects/) cannot
+    // perturb the reproduction — the un-pinned form broke the moment any
+    // later project ran its first consultation (160 → 163 via project 1286).
+    const m = measureBehavior(REPO_ROOT, { includeProjects: BASELINE_SAMPLE });
+    expect(m.sampleProjects).toEqual(BASELINE_SAMPLE);
     expect(m.b1_totalVerdicts).toBe(160);
     expect(m.b1_requestChangesRate).toBeCloseTo(51.88, 1);
     expect(m.b2_roundsPerPhaseMean).toBeCloseTo(1.12, 2);
