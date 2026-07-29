@@ -278,6 +278,38 @@ function buildInline(options: AssembleOptions): string {
 // Long form
 // ============================================================================
 
+/**
+ * Reconstruct `input_description` (and `task_text`) the way the matching spawn
+ * entry point would.
+ *
+ * `{{input_description}}` is the FIRST line of every protocol's builder prompt
+ * (`bugfix/air/aspir/spir/builder-prompt.md:3`), so getting it wrong mis-frames
+ * the whole document — the reset builder is told it is doing something other
+ * than what it is doing. Spawn produces four distinct values, one per entry
+ * point, and this mirrors all four rather than approximating with two:
+ *
+ *   - spec-driven   → `spawn.ts:455`  (also the lane that attaches an issue)
+ *   - ad-hoc task   → `spawn.ts:543`  (carries `task_text` as well)
+ *   - issue-driven  → `spawn.ts:837`  (BUGFIX/AIR; the issue body IS the spec)
+ *   - protocol-only → `spawn.ts:607`
+ *
+ * **Order is load-bearing, and not the obvious one.** A `--task` builder gets a
+ * porch project keyed on its own builder id, so `issueNumber` is populated for
+ * it too (`context.ts` falls back to `porch.projectId`). Testing `issueNumber`
+ * before `taskText` would therefore route every task builder down the
+ * issue-driven branch and announce a GitHub issue that does not exist. Spec wins
+ * over both because the spec-driven spawn path sets its own description even
+ * when an issue is attached.
+ */
+function buildInputDescription(
+  c: ResolvedBuilderContext,
+): Pick<TemplateContext, 'input_description' | 'task_text'> {
+  if (c.specPath) return { input_description: `the feature specified in ${c.specPath}` };
+  if (c.taskText) return { input_description: 'an ad-hoc task', task_text: c.taskText };
+  if (c.issueNumber) return { input_description: `work for GitHub Issue #${c.issueNumber}` };
+  return { input_description: `running the ${c.protocol.toUpperCase()} protocol` };
+}
+
 function buildLongForm(options: AssembleOptions): string {
   const { context: c, statePath, addendum, buildSpawnPrompt, buildResumeNotice, issue } = options;
 
@@ -289,9 +321,7 @@ function buildLongForm(options: AssembleOptions): string {
       mode_soft: c.mode === 'soft',
       mode_strict: c.mode === 'strict',
       project_id: c.porch?.projectId,
-      input_description: c.specPath
-        ? `the feature specified in ${c.specPath}`
-        : `the ${c.protocol.toUpperCase()} protocol`,
+      ...buildInputDescription(c),
       ...(c.specPath && c.specName ? { spec: { path: c.specPath, name: c.specName } } : {}),
       ...(c.planPath && c.specName ? { plan: { path: c.planPath, name: c.specName } } : {}),
       // Issue-driven protocols render {{issue.*}} in their builder prompt, and

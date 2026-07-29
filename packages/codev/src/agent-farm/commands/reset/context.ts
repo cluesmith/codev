@@ -78,6 +78,15 @@ export interface ResolvedBuilderContext {
   planPath: string | null;
   /** Issue number, from the registry row or the porch project id. */
   issueNumber?: string;
+  /**
+   * Ad-hoc task text, from the registry row (`builders.task_text`).
+   *
+   * Present only for `afx spawn --task` builders. Phase 5 needs it to tell that
+   * lane apart from the others: a task builder still gets a porch project keyed
+   * on its builder id, so `issueNumber` is populated for it too, and without
+   * this field the task lane is indistinguishable from an issue-driven one.
+   */
+  taskText?: string;
 }
 
 export interface PorchContext {
@@ -299,6 +308,8 @@ export interface ResolveContextOptions {
   worktree: string;
   branch: string;
   issueNumber?: string;
+  /** `builders.task_text`, for `--task` builders. Forwarded verbatim. */
+  taskText?: string;
   /** `--mode` override; wins over the worktree, for when the prompt file is gone. */
   modeOverride?: 'strict' | 'soft';
   /** Project-defined harnesses from `.codev/config.json`, if any. */
@@ -313,7 +324,8 @@ export interface ResolveContextOptions {
  * break exactly the lanes the feature targets while the code looked more correct.
  */
 export function resolveBuilderContext(options: ResolveContextOptions): ResolvedBuilderContext {
-  const { fs, builderId, worktree, branch, issueNumber, modeOverride, customHarnesses } = options;
+  const { fs, builderId, worktree, branch, issueNumber, taskText, modeOverride, customHarnesses } =
+    options;
 
   if (!fs.exists(worktree)) {
     throw new ContextResolutionError(
@@ -397,5 +409,6 @@ export function resolveBuilderContext(options: ResolveContextOptions): ResolvedB
     // Issue-driven protocols name the porch project after the issue, so the
     // project id is the correct value when the registry row has none.
     issueNumber: issueNumber ?? porch?.projectId,
+    taskText,
   };
 }

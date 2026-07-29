@@ -367,6 +367,82 @@ describe('long-form re-orientation (Spec 1273)', () => {
     });
   });
 
+  // ==========================================================================
+  // input_description — one case per spawn entry point.
+  //
+  // This is the FIRST line of every protocol's builder prompt, so a wrong value
+  // mis-frames the entire document. These four tests pin the reconstruction to
+  // spawn's four literal strings; if spawn's wording changes, they fail here
+  // rather than silently drifting apart from it.
+  // ==========================================================================
+
+  it('frames a spec-driven lane exactly as the spec-driven spawn path does', () => {
+    const port = vi.fn(() => SPAWN_PROMPT) as unknown as SpawnPromptPort;
+    assembleReorientation({ context: makeContext(), statePath: STATE_PATH, buildSpawnPrompt: port, buildResumeNotice: resumeNoticePort });
+
+    // spawn.ts:455
+    expect((port as any).mock.calls[0][1].input_description).toBe(
+      'the feature specified in codev/specs/1273-builder-context-reset-should-b.md',
+    );
+  });
+
+  it('frames an issue-driven lane as GitHub-issue work, not as a bare protocol', () => {
+    // BUGFIX/AIR have no spec — the issue body IS the spec. Before this was
+    // fixed, such a lane fell through to the protocol-only wording and a reset
+    // builder was told it was "running the BUGFIX protocol" rather than working
+    // a specific issue.
+    const port = vi.fn(() => SPAWN_PROMPT) as unknown as SpawnPromptPort;
+    assembleReorientation({
+      context: makeContext({ protocol: 'bugfix', specName: null, specPath: null, planPath: null, issueNumber: '1288' }),
+      statePath: STATE_PATH,
+      buildSpawnPrompt: port,
+      buildResumeNotice: resumeNoticePort,
+    });
+
+    // spawn.ts:837
+    expect((port as any).mock.calls[0][1].input_description).toBe('work for GitHub Issue #1288');
+  });
+
+  it('frames an ad-hoc task lane as a task and forwards the task text', () => {
+    // Order regression: a --task builder gets a porch project keyed on its
+    // builder id, so issueNumber is populated for it too. Testing issueNumber
+    // first would announce a GitHub issue that does not exist.
+    const port = vi.fn(() => SPAWN_PROMPT) as unknown as SpawnPromptPort;
+    assembleReorientation({
+      context: makeContext({
+        specName: null, specPath: null, planPath: null,
+        issueNumber: 'task-abc', taskText: 'Audit the retry logic',
+      }),
+      statePath: STATE_PATH,
+      buildSpawnPrompt: port,
+      buildResumeNotice: resumeNoticePort,
+    });
+
+    const ctx = (port as any).mock.calls[0][1];
+    // spawn.ts:543
+    expect(ctx.input_description).toBe('an ad-hoc task');
+    expect(ctx.task_text).toBe('Audit the retry logic');
+  });
+
+  it('frames a protocol-only lane with spawn\'s exact wording', () => {
+    const port = vi.fn(() => SPAWN_PROMPT) as unknown as SpawnPromptPort;
+    assembleReorientation({
+      context: makeContext({ specName: null, specPath: null, planPath: null, issueNumber: undefined, porch: null }),
+      statePath: STATE_PATH,
+      buildSpawnPrompt: port,
+    });
+
+    // spawn.ts:607 — note "running the", which the earlier restatement dropped.
+    expect((port as any).mock.calls[0][1].input_description).toBe('running the ASPIR protocol');
+  });
+
+  it('omits task_text on every lane that is not an ad-hoc task', () => {
+    const port = vi.fn(() => SPAWN_PROMPT) as unknown as SpawnPromptPort;
+    assembleReorientation({ context: makeContext(), statePath: STATE_PATH, buildSpawnPrompt: port, buildResumeNotice: resumeNoticePort });
+
+    expect((port as any).mock.calls[0][1].task_text).toBeUndefined();
+  });
+
   it('omits the issue from the prompt context when none was supplied', () => {
     const port = vi.fn(() => SPAWN_PROMPT) as unknown as SpawnPromptPort;
     assembleReorientation({

@@ -155,6 +155,47 @@ Claude reviewed the reasoning and agreed.
 Lesson candidate for the review: *a majority APPROVE is not consensus — when reviewers disagree, decide
 on the argument, and record why.*
 
+## Implement phase 5 (re-orientation assembly) — iterations 1–6, 2026-07-29
+
+Five CMAP rounds on one phase — the most contested in the project. Gemini APPROVEd every round; Codex
+REQUEST_CHANGES'd every round; Claude split. Worth recording *why* that pattern held rather than reading
+it as reviewer noise: phase 5's contract is "the long form is spawn machinery, not a paraphrase of it",
+and every Codex finding was a different way that hand-rolled reconstruction had drifted from what spawn
+actually delivers. The verdict pattern was tracking a real recurring defect class, not one bug re-reported.
+
+Iterations 1–4 (all Codex findings accepted): partial porch/issue frames were possible (fixed with
+`conditionalInlineMarkers` — markers required *when the lane supplies the fact*); the porch re-entry text
+was restated instead of reusing `buildResumeNotice()` and had silently dropped its `porch init` fallback
+(fixed with a `ResumeNoticePort`, embedded verbatim in the long form); porch identity is now validated
+field by field.
+
+**Iteration 5 is the first finding in this project I partially rejected.** Codex claimed a reset PIR
+builder gets blank artifact filenames instead of fresh-spawn framing, because PIR's `builder-prompt.md`
+consumes `{{artifact_name}}` and my port never supplies it. Checked it: `artifact_name` is not on
+`TemplateContext`, no spawn path in `spawn.ts` sets it, only porch supplies it for per-phase prompts, and
+`renderTemplate` renders a missing key as `''`. So PIR's prompt renders that placeholder **blank at spawn
+today** — reset reproduces spawn exactly, blanks included, which is what spawn-equivalence means. The
+premise ("reset degrades PIR framing") does not hold.
+
+The remedy was adopted anyway, on its own merits: `SpawnPromptPort` is now typed against the canonical
+`TemplateContext` rather than a partial local copy. That copy is exactly how issue metadata went missing
+in iteration 2 — a duplicated type drifts and no compiler complains. Compile-time coverage of every
+present and future field beats the single-field runtime test Codex proposed, which is why the proposed
+regression test was declined: it would have asserted behaviour spawn itself does not have.
+
+**There is a real bug — it is just PIR's, not phase 5's.** PIR's spawn-time prompt has referenced an
+unpopulated placeholder since it was written. Fixing it means changing another protocol's spawn path,
+inside a phase contracted to *match* spawn. Escalated to the architect for a separate issue rather than
+silently widening scope. (Escalation re-sent 2026-07-29 — the original send was not recorded here, and an
+unrecorded escalation is indistinguishable from one that never happened.)
+
+**Resolved 2026-07-29**: architect verified the finding and filed it as **issue #1293** (blank filenames
+in PIR spawn prompts), with the recommended fix being to drop the placeholder in favour of porch's
+per-phase naming. Keeping it out of 1273's scope was confirmed correct.
+
+Iteration 6: no new work needed — the iteration-5 fix landed in `5f4d768e` before the round closed.
+Re-verified: build clean, **3894 tests passing, 0 failures** (48 pre-existing skips). Signaling complete.
+
 ## Status
 
 - [x] Explored afx/Tower internals
@@ -163,5 +204,14 @@ on the argument, and record why.*
 - [x] Plan drafted → `codev/plans/1273-builder-context-reset-should-b.md`
 - [x] Plan CMAP iteration 1 — 2 APPROVE, 1 REQUEST_CHANGES, all 4 issues addressed → plan auto-approved
 - [x] Phase 1 (afx interrupt) — implemented, 116 tests green, unanimous CMAP APPROVE
-- [ ] Phase 2 (lastDataAt observability)
-- [ ] Phases 3–7
+- [x] Phase 2 (lastDataAt observability) — 2 iterations, sided with the lone dissenter
+- [x] Phase 3 (reset receipt gate)
+- [x] Phase 4 (builder context resolution)
+- [x] Phase 5 (re-orientation assembly) — 6 iterations, build + 3894 tests green
+- [ ] Phase 6 (reset orchestrator + CLI wiring)
+- [ ] Phase 7 (wait discipline + command documentation)
+
+**Open for the review phase**: live end-to-end verification of the ESC path and a real reset against a
+disposable builder is still blocked on `pnpm -w run local-install` (restarts Tower, affects every builder
+in the workspace). That is the architect's call, and it remains the gap between "3894 tests pass" and
+"it works" — flagged since phase 1, still unresolved.
