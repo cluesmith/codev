@@ -317,12 +317,11 @@ Two mechanisms deliver this, in order:
 
 ### Cost and observability
 
-- The resolved model id is recorded alongside the lane in consultation metrics. This requires a new
-  column on `consultation_metrics`, added by an **idempotent `ALTER TABLE ADD COLUMN` migration**
-  guarded by a `PRAGMA table_info` check — the table is created with `CREATE TABLE IF NOT EXISTS`
-  and has no migration mechanism today, so the migration is part of this work, not a follow-up. The
-  existing `model` column keeps its lane-name meaning, so `consult stats` (which groups on it)
-  is unaffected.
+- The resolved model id is recorded alongside the lane in consultation metrics. `consultation_metrics`
+  has no schema-migration mechanism today, so **evolving it is part of this work, not a follow-up**;
+  the migration must be idempotent and safe against an existing populated `~/.codev/metrics.db`
+  (mechanism is a plan concern). The existing `model` column keeps its lane-name meaning, so
+  `consult stats` — which groups on it — is unaffected.
 - Codex cost math uses `consult.pricing.codex` when present. When the codex lane runs a
   **non-default** model with no rate override, the recorded cost is `null` rather than computed from
   gpt-5.4's rates. Reporting a confidently wrong number is worse than reporting none.
@@ -512,8 +511,8 @@ reasoning survives.)*
       with all three per-1M rates required together; `cost_usd` is `null` when a non-default model
       runs without it. Computing from stale rates is rejected.
 - [x] **Does recording the model id need a metrics schema migration?** **Resolved: yes, and it is
-      in scope** — idempotent `ALTER TABLE ADD COLUMN` guarded by `PRAGMA table_info`. The `model`
-      column keeps its lane-name meaning.
+      in scope** — it must be idempotent and non-destructive against an existing populated DB; the
+      mechanism is left to the plan. The `model` column keeps its lane-name meaning.
 - [x] **Does the `hermes` lane accept a configured model id?** **Resolved: no.** `hermes chat -q`
       exposes no model selector, so `consult.models.hermes` is a hard error; `hermes` stays valid as
       a lane name in `porch.consultation.*`.
@@ -643,6 +642,13 @@ verify step of this phase.
 - [ ] Expert AI Consultation Complete
 
 ## Notes
+
+**Architect note (2026-07-29, recorded — no spec change required)**: keeping shipped defaults
+unchanged is the correct reading of the issue. This repo will opt into `claude-opus-5` /
+`gpt-5.6` through its own `.codev/config.json` **after merge**; that opt-in is a post-merge step
+owned by the architect and is explicitly **not** part of this project's PR. This is the practical
+demonstration that the mechanism works, and it is deliberately kept out of the diff so the PR
+changes no lane's behavior for anyone by default.
 
 **In-scope drive-by fix**: `packages/codev/src/lib/config.ts`'s file-level doc comment still says the
 loader merges "three layers" and lists only defaults / global / project. The loader has had five
