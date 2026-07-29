@@ -190,3 +190,29 @@ is to wait for the rebase, not to touch the baseline again.
 
 Also confirmed environmental (architect agreed): `session-manager.test.ts`'s 8 failures need a built
 `dist/terminal/shellper-main.js` — they pass after `pnpm build`.
+
+## phase_1 review, and the current hold
+
+gemini APPROVE · claude APPROVE · **codex REQUEST_CHANGES** — and Codex was right twice.
+
+The find that matters: `byProtocol.<name>.modelsByType: null` reached `Object.entries()` and raised
+a bare `TypeError: Cannot convert undefined or null to object` instead of a keyed config error.
+`typeof null === 'object'`, and I had written the `=== null` clause correctly one level up but
+omitted it in the nested copy. Reproduced before fixing. Note what missed it: two other reviewers,
+65 passing tests, and a clean typecheck — it took an adversarial read of the validator itself.
+Response was to fix the family, not the line: a table-driven suite asserting every null position
+raises a keyed `Error` and specifically not a `TypeError`.
+
+Second find, also fair: I claimed four-tier discovery and tested two. The untested ones (cache,
+skeleton) are exactly the tiers a fresh adopter relies on, since neither `.codev/protocols/` nor
+`codev/protocols/` need exist in a fresh install. Added both plus cross-tier shadowing. 65 → 75.
+
+**Held at phase_1 iter2**: `porch done`'s tests check fails on exactly one test
+(1 failed | 3867 passed) — the baseline landmine. Architect ruled bump/exclude/skip all out, and
+#1290 (freezes the sample set via `MeasureOptions.includeProjects`) is 5/6 green, blocked only on a
+known pre-existing `send-integration.e2e` "Hook timed out" flake seen on #1283 and four other
+branches. Waiting for it to merge, then rebase → `porch done`. Not starting phase_2: porch says not
+to, and it would blur the phase-review boundary.
+
+On the rebase, also re-check #1288 (defaults → `claude-opus-5` / `gpt-5.6-sol`). The two-layer test
+structure means that change costs one deliberate line, not a scatter of edits.
