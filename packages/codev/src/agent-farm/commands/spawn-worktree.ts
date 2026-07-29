@@ -28,12 +28,12 @@ import { globSync } from 'glob';
 import type { Config, ProtocolDefinition } from '../types.js';
 import { logger, fatal } from '../utils/logger.js';
 import { getBuilderHarness, getWorktreeConfig } from '../utils/config.js';
-import { shellEscapeSingleQuote, type HarnessProvider } from '../utils/harness.js';
+import { shellEscapeSingleQuote, LAUNCH_LOOP_TAIL, type HarnessProvider } from '../utils/harness.js';
 import { defaultSessionOptions } from '../../terminal/index.js';
 import { run, runStreaming, commandExists } from '../utils/shell.js';
 import { fetchIssueOrThrow, type ForgeIssue } from '../../lib/github.js';
 import { executeForgeCommand, type ForgeConfig } from '../../lib/forge.js';
-import { getTowerClient, DEFAULT_TOWER_PORT } from '../lib/tower-client.js';
+import { getTowerClient, DEFAULT_TOWER_PORT, type SeedKickRequest } from '../lib/tower-client.js';
 
 // =============================================================================
 // Dependency Checks
@@ -696,6 +696,7 @@ export async function createPtySession(
     roleId: string;
     label?: string;
   },
+  seedKick?: SeedKickRequest,
 ): Promise<{ terminalId: string }> {
   const { cols, rows } = defaultSessionOptions();
   const client = getTowerClient();
@@ -706,6 +707,7 @@ export async function createPtySession(
     type: registration?.type,
     roleId: registration?.roleId,
     label: registration?.label,
+    seedKick,
   });
 
   if (!terminal) {
@@ -779,32 +781,73 @@ function installHarnessWorktreeFiles(
 }
 
 /**
- * The tail shared by every builder launch loop, appended after the agent
- * invocation inside `while true; do … done`.
+ * Build the launch script via the harness's provider-owned shape (Issue
+ * #1201 — currently only Kimi implements `buildBuilderLaunchScript`).
  *
- * Issue #1241: exit code 0 is the user deliberately quitting (double Ctrl+C,
- * `/quit`) — auto-respawning overrides that choice and forces them to race a
- * second Ctrl+C into the sleep window, where a mistimed one lands in the fresh
- * agent instead. It also feeds the #1224 class, where a respawn within ~2s
- * collides with the dying predecessor's session lock. So a clean exit clears
- * the screen and gates the relaunch on a keypress: recovery stays one keystroke
- * away without anything happening on its own. Nonzero exits and signal deaths
- * (bash reports those as 128+N) keep the historical auto-restart — that is what
- * the loop is for.
- *
- * `read` failing means EOF on stdin, i.e. the terminal is gone; exit rather
- * than spin the loop on an input that will never arrive.
+ * Fresh paths write the same reference files as the generic shapes
+ * (.builder-prompt.txt, .builder-role.md) plus `.builder-seed.txt` — the
+ * seed-turn payload composed by the harness (role and/or task briefing in an
+ * ack-and-wait wrapper), since seed-style CLIs cannot take either via argv.
+ * When there is an initial task prompt, the returned `seedKick` asks Tower to
+ * deliver the harness's kick message (e.g. 'BEGIN') once the launch script's
+ * seed sentinel appears — writes into the PTY during the seed window are
+ * silently lost, so the kick must be readiness-gated Tower-side.
  */
-const LAUNCH_LOOP_TAIL = `  status=$?
-  if [ "$status" -eq 0 ]; then
-    clear
-    echo "Agent exited at your request. Press Enter to relaunch, or close this terminal."
-    read -r || exit 0
-    continue
-  fi
-  echo ""
-  echo "Agent exited (code $status). Restarting in 2 seconds... (Ctrl+C to quit)"
-  sleep 2`;
+function buildProviderOwnedScript(
+  harness: HarnessProvider,
+  worktreePath: string,
+  baseCmd: string,
+  prompt: string | null,
+  roleContent: string | null,
+  roleSource: string | null,
+  resume?: { sessionId: string },
+): { scriptContent: string; seedKick?: SeedKickRequest } {
+  const build = harness.buildBuilderLaunchScript!;
+
+  if (resume) {
+    // Prior conversation already contains role + task context.
+    logger.info(`Resuming session ${resume.sessionId.slice(0, 8)}…`);
+    return {
+      scriptContent: build({
+        worktreePath, baseCmd, seedFile: null,
+        resume: { sessionId: resume.sessionId },
+      }),
+    };
+  }
+
+  if (prompt) {
+    writeFileSync(resolve(worktreePath, '.builder-prompt.txt'), prompt);
+  }
+
+  let roleWithPort: string | null = null;
+  let roleFile = '';
+  if (roleContent) {
+    roleWithPort = roleContent.replace(/\{PORT\}/g, String(DEFAULT_TOWER_PORT));
+    roleFile = resolve(worktreePath, '.builder-role.md');
+    writeFileSync(roleFile, roleWithPort);
+    logger.info(`Loaded role (${roleSource})`);
+  }
+
+  installHarnessWorktreeFiles(harness, roleWithPort ?? '', roleFile, worktreePath);
+
+  let seedFile: string | null = null;
+  let seedKick: SeedKickRequest | undefined;
+  if (harness.seedDelivery && (roleWithPort || prompt)) {
+    seedFile = resolve(worktreePath, '.builder-seed.txt');
+    writeFileSync(seedFile, harness.seedDelivery.buildSeedPrompt(roleWithPort, prompt || null));
+    if (prompt) {
+      seedKick = {
+        sentinel: harness.seedDelivery.sentinelPrefix,
+        message: harness.seedDelivery.kickMessage,
+        graceMs: harness.seedDelivery.graceMs,
+        enterDelayMs: harness.messagePacing?.enterDelayMs,
+        verify: { kind: 'kimi-session-store', worktreePath },
+      };
+    }
+  }
+
+  return { scriptContent: build({ worktreePath, baseCmd, seedFile }), seedKick };
+}
 
 /**
  * Start a terminal session for a builder.
@@ -813,9 +856,9 @@ const LAUNCH_LOOP_TAIL = `  status=$?
  * form (e.g. `claude --resume <uuid>`) via the pre-escaped `scriptFragment`
  * instead of a fresh prompt+role invocation. The saved conversation contains
  * the system prompt / role context already, so role injection and the initial
- * prompt are intentionally skipped on that path. Only the Claude harness
- * produces a resume object (Issue #929); codex/gemini pass `undefined` here
- * and take the fresh role-injection path.
+ * prompt are intentionally skipped on that path. Only the Claude and Kimi
+ * harnesses produce a resume object (Issues #929, #1201); codex/gemini pass
+ * `undefined` here and take the fresh role-injection path.
  */
 export async function startBuilderSession(
   config: Config,
@@ -831,8 +874,17 @@ export async function startBuilderSession(
 
   const scriptPath = resolve(worktreePath, '.builder-start.sh');
   let scriptContent: string;
+  let seedKick: SeedKickRequest | undefined;
 
-  if (resume) {
+  const sessionHarness = getBuilderHarness(config.workspaceRoot);
+  if (sessionHarness.buildBuilderLaunchScript) {
+    // Provider-owned launch shape (Issue #1201 — Kimi): the harness generates
+    // the entire script (seed bootstrap / pinned-id loop); no role flags, no
+    // positional prompt.
+    ({ scriptContent, seedKick } = buildProviderOwnedScript(
+      sessionHarness, worktreePath, baseCmd, prompt, roleContent, roleSource, resume,
+    ));
+  } else if (resume) {
     // Resume path: load the prior conversation via the harness-provided,
     // shell-escaped resume fragment. No prompt file, no role injection — both
     // are already part of the saved conversation.
@@ -858,7 +910,7 @@ done
     logger.info(`Loaded role (${roleSource})`);
 
     // Resolve harness provider for role injection
-    const harness = getBuilderHarness(config.workspaceRoot);
+    const harness = sessionHarness;
     const { fragment, env } = harness.buildScriptRoleInjection(roleWithPort, roleFile);
     const envExports = Object.entries(env)
       .map(([k, v]) => `export ${k}='${shellEscapeSingleQuote(v)}'`)
@@ -883,7 +935,7 @@ done
 
     // Install harness worktree files even without a role, so the write-guard
     // (Issue #1018) is deterministic across all Claude spawn modes.
-    installHarnessWorktreeFiles(getBuilderHarness(config.workspaceRoot), '', '', worktreePath);
+    installHarnessWorktreeFiles(sessionHarness, '', '', worktreePath);
 
     scriptContent = `#!/bin/bash
 cd "${worktreePath}"
@@ -905,6 +957,7 @@ done
     [scriptPath],
     worktreePath,
     { workspacePath: config.workspaceRoot, type: 'builder', roleId: builderId },
+    seedKick,
   );
   logger.info(`Terminal session created: ${terminalId}`);
   return { terminalId };
@@ -940,6 +993,16 @@ export function buildWorktreeLaunchScript(
   role: { content: string; source: string } | null,
   workspaceRoot?: string,
 ): string {
+  const worktreeHarness = getBuilderHarness(workspaceRoot);
+  if (worktreeHarness.buildBuilderLaunchScript) {
+    // Provider-owned launch shape (Issue #1201 — Kimi). Interactive worktree
+    // mode has no initial prompt, so no seed kick is armed: the seed wrapper
+    // tells the agent to await instructions typed in the session.
+    const { scriptContent } = buildProviderOwnedScript(
+      worktreeHarness, worktreePath, baseCmd, null, role?.content ?? null, role?.source ?? null,
+    );
+    return scriptContent;
+  }
   if (role) {
     const roleFile = resolve(worktreePath, '.builder-role.md');
     const roleWithPort = role.content.replace(/\{PORT\}/g, String(DEFAULT_TOWER_PORT));
@@ -947,7 +1010,7 @@ export function buildWorktreeLaunchScript(
     logger.info(`Loaded role (${role.source})`);
 
     // Resolve harness provider for role injection
-    const harness = getBuilderHarness(workspaceRoot);
+    const harness = worktreeHarness;
     const { fragment, env } = harness.buildScriptRoleInjection(roleWithPort, roleFile);
     const envExports = Object.entries(env)
       .map(([k, v]) => `export ${k}='${shellEscapeSingleQuote(v)}'`)
@@ -968,7 +1031,7 @@ done
   }
   // Install harness worktree files even without a role, so the write-guard
   // (Issue #1018) is deterministic across all Claude spawn modes.
-  installHarnessWorktreeFiles(getBuilderHarness(workspaceRoot), '', '', worktreePath);
+  installHarnessWorktreeFiles(worktreeHarness, '', '', worktreePath);
   return `#!/bin/bash
 cd "${worktreePath}"
 while true; do

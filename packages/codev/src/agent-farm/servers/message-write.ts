@@ -19,6 +19,18 @@ const PACED_ENTER_DELAY_MS = 80;
 const SIMPLE_ENTER_DELAY_MS = 50;
 
 /**
+ * Per-harness pacing override (Issue #1201). Some CLIs have a longer
+ * paste-detection window than the defaults assume — Kimi silently swallows an
+ * Enter that arrives 80ms after the message body (1s works, observed), so
+ * messages to a Kimi PTY never submit under the default delays. When set,
+ * `enterDelayMs` replaces BOTH default Enter delays; all other timing
+ * (line pacing, thresholds) is unchanged.
+ */
+export interface MessagePacing {
+  enterDelayMs?: number;
+}
+
+/**
  * Write a message to a PTY session, pacing multi-line output to prevent
  * the terminal from treating it as a paste (Bugfix #584).
  *
@@ -28,10 +40,12 @@ const SIMPLE_ENTER_DELAY_MS = 50;
  *
  * @param delayOffset  ms offset for all scheduled writes (used to serialize
  *                     multiple messages to the same session without interleaving)
+ * @param pacing       optional per-harness timing override (Issue #1201)
  * @returns            ms timestamp (from call time) when all writes complete
  */
 export function writeMessageToSession(
   session: WritableSession, message: string, noEnter: boolean, delayOffset = 0,
+  pacing?: MessagePacing,
 ): number {
   const lines = message.split('\n');
 
@@ -42,7 +56,7 @@ export function writeMessageToSession(
     } else {
       setTimeout(() => session.write(message), delayOffset);
     }
-    const enterTime = delayOffset + SIMPLE_ENTER_DELAY_MS;
+    const enterTime = delayOffset + (pacing?.enterDelayMs ?? SIMPLE_ENTER_DELAY_MS);
     if (!noEnter) {
       setTimeout(() => session.write('\r'), enterTime);
     }
@@ -64,7 +78,7 @@ export function writeMessageToSession(
 
   const lastLineTime = delayOffset + (lines.length - 1) * INTER_LINE_DELAY_MS;
   if (!noEnter) {
-    const enterTime = lastLineTime + PACED_ENTER_DELAY_MS;
+    const enterTime = lastLineTime + (pacing?.enterDelayMs ?? PACED_ENTER_DELAY_MS);
     setTimeout(() => session.write('\r'), enterTime);
     return enterTime;
   }

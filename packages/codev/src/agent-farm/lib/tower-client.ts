@@ -18,6 +18,7 @@ export {
   type HuskCandidate,
   type HuskPreview,
   type HuskSweepResult,
+  type SeedKickRequest,
 } from '@cluesmith/codev-core/tower-client';
 
 export { encodeWorkspacePath, decodeWorkspacePath } from '@cluesmith/codev-core/workspace';

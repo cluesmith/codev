@@ -860,6 +860,27 @@ regular-file snapshot rather than a write-through symlink, so builder edits
 cannot change the main workspace's personal config. Running `afx setup` again
 refreshes the snapshot from the main workspace.
 
+### Builder harnesses
+
+The builder CLI's role/prompt mechanics are handled by a harness, auto-detected
+from the command basename (`claude`, `codex`, `gemini`, `opencode`, `kimi`) or
+pinned explicitly via `shell.builderHarness`. Example — Kimi Code CLI as the
+builder (builder-only; requires kimi >= 0.27.0, Issue #1201):
+
+```json
+{
+  "shell": {
+    "builder": "kimi"
+  }
+}
+```
+
+Kimi builders use a seed-session bootstrap (role + task delivered via a
+one-shot `kimi -p` call whose session the interactive TUI then resumes), so
+context survives builder restarts. Note: Kimi has no hook seam, so Kimi
+builders do NOT get the worktree write-guard Claude builders have (#1018).
+Architect use of kimi and opencode is unsupported (claude or codex there).
+
 ### Language-Agnostic Porch Checks
 
 By default, porch protocol checks use `npm run build` and `npm test`. Non-Node.js projects can override these via the `porch.checks` section in `.codev/config.json`:

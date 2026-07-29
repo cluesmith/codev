@@ -16,7 +16,7 @@ import { join } from 'node:path';
 
 import { discoverResumeSession } from '../commands/spawn.js';
 import { encodeClaudeProjectDir } from '../utils/claude-session-discovery.js';
-import { CLAUDE_HARNESS, CODEX_HARNESS, GEMINI_HARNESS } from '../utils/harness.js';
+import { CLAUDE_HARNESS, CODEX_HARNESS, GEMINI_HARNESS, KIMI_HARNESS } from '../utils/harness.js';
 
 // discoverResumeSession reads from $HOME via os.homedir() through
 // findLatestSessionId. Override the env var for the duration of the test so
@@ -116,6 +116,55 @@ describe('discoverResumeSession', () => {
     // access happens. Tests pass even if HOME points at /nonexistent.
     pinHome('/nonexistent-home-path', () => {
       expect(discoverResumeSession('/some/worktree', false, CLAUDE_HARNESS)).toBeUndefined();
+    });
+  });
+
+  // =========================================================================
+  // Issue #1201 — kimi. KIMI_HARNESS reads only the Kimi store, so a stale
+  // Claude jsonl for the same worktree must never surface as a kimi resume
+  // (the #929-class guard: `kimi --resume <claude-uuid>` is impossible).
+  // KIMI_CODE_HOME (documented seam) pins the kimi store to the fixture home.
+  // =========================================================================
+
+  function pinKimiHome<T>(kimiHome: string, fn: () => T): T {
+    const original = process.env.KIMI_CODE_HOME;
+    process.env.KIMI_CODE_HOME = kimiHome;
+    try {
+      return fn();
+    } finally {
+      if (original === undefined) delete process.env.KIMI_CODE_HOME;
+      else process.env.KIMI_CODE_HOME = original;
+    }
+  }
+
+  it('returns undefined for kimi when only a stale Claude jsonl exists (#929-class guard)', () => {
+    const worktree = '/Users/x/repo/.builders/pir-kimi';
+    writeSession(projectsRoot, worktree, 'stale-claude-uuid', 1_700_000_000_000);
+    pinKimiHome(join(fakeHome, '.kimi-code'), () => {
+      expect(discoverResumeSession(worktree, true, KIMI_HARNESS)).toBeUndefined();
+    });
+  });
+
+  it('returns the kimi store session as -S resume when one exists for the worktree', () => {
+    const worktree = '/Users/x/repo/.builders/pir-kimi-2';
+    // A stale Claude jsonl AND a kimi session both exist — the kimi id wins
+    // (and the claude uuid never appears in any form).
+    writeSession(projectsRoot, worktree, 'stale-claude-uuid', 1_700_000_000_000);
+    const kimiHome = join(fakeHome, '.kimi-code');
+    const sessionDir = join(kimiHome, 'sessions', 'wd_x_000000000000', 'session_kimi-1');
+    mkdirSync(sessionDir, { recursive: true });
+    writeFileSync(
+      join(sessionDir, 'state.json'),
+      JSON.stringify({ workDir: worktree, updatedAt: '2026-07-18T10:00:00Z' }),
+      'utf-8',
+    );
+    pinKimiHome(kimiHome, () => {
+      const resume = discoverResumeSession(worktree, true, KIMI_HARNESS);
+      expect(resume).toEqual({
+        sessionId: 'session_kimi-1',
+        args: ['-S', 'session_kimi-1'],
+        scriptFragment: "-S 'session_kimi-1'",
+      });
     });
   });
 });

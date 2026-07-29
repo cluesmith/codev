@@ -139,4 +139,16 @@ describe('getArchitectHarness / getBuilderHarness override-awareness (#929)', ()
     setCliOverrides({ builder: 'gemini' });
     expect(getBuilderHarness().buildResume).toBeUndefined();
   });
+
+  // Issue #1201, #929-class config angle: a kimi builder command must resolve
+  // the KIMI harness, not fall through to claude. The distinguishing
+  // properties: provider-owned launch script (kimi-only capability) and an
+  // architect-side buildRoleInjection that throws instead of emitting
+  // --append-system-prompt.
+  it('--builder-cmd kimi → kimi builder harness (provider-owned script, no claude flags)', () => {
+    setCliOverrides({ builder: 'kimi' });
+    const harness = getBuilderHarness();
+    expect(harness.buildBuilderLaunchScript).toBeDefined();
+    expect(() => harness.buildRoleInjection('role', '/tmp/role.md')).toThrow(/builder shell/);
+  });
 });
