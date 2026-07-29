@@ -45,7 +45,8 @@ Inherited from the spec's Success Criteria (all 20), plus implementation-specifi
 - [ ] All specification criteria met
 - [ ] `pnpm build` clean; `pnpm test` green in `packages/codev/`
 - [ ] New unit tests cover all 19 spec test scenarios
-- [ ] Zero behavior change with no config present — verified by assertion, not inspection
+- [ ] Zero behavior change with no config present — verified by assertion, not inspection, and
+      written so it survives issue #1288's defaults change without edits (see Phase 2)
 - [ ] No literal list of model ids anywhere in the diff (grep-verifiable)
 - [ ] Documentation complete and identical across `codev/` and `codev-skeleton/`
 
@@ -78,7 +79,9 @@ Inherited from the spec's Success Criteria (all 20), plus implementation-specifi
 - [ ] `CodevConfig` extended: `consult.models`, `consult.reasoningEffort`, `consult.pricing`,
       `porch.consultation.modelsByType`, `porch.consultation.byProtocol`
 - [ ] New module `packages/codev/src/lib/consult-lanes.ts` — validators + resolvers
-- [ ] Protocol/review-type enumeration helper for key-space discovery
+- [ ] **`listProtocolNames()` added to `lib/skeleton.ts`** — cross-tier protocol + alias enumeration
+      (new API; no existing function does this)
+- [ ] Validators invoked from `loadConfig()`, alongside the existing harness validation
 - [ ] `config.ts` file-header comment corrected: "three layers" → five (in-scope drive-by per spec Notes)
 - [ ] Unit tests for every validation rule and both resolvers
 
@@ -139,14 +142,59 @@ the config file that supplied the value):
 - `validateKeySpaces` — `byProtocol` keys ⊆ discovered protocol names; `modelsByType` keys ⊆
   discovered review types. Hard error, no warn mode.
 
-**Key-space discovery** — the spec's deliberate asymmetry, which is the single most misreadable part
-of this plan, so it is spelled out:
+**Where validation runs — `loadConfig()`, not at point of use.** Every validator above is invoked
+from `loadConfig()` in `lib/config.ts`, immediately after the existing custom-harness validation
+block, so malformed config is a **config-load-time** error as the spec requires. This is not a new
+pattern: `loadConfig` already calls `validateCustomHarnessConfig` for exactly this reason, and that
+call is the precedent to follow.
+
+Deferring validation to consult/porch resolution time would satisfy the phase's unit tests while
+violating the spec — a typo would survive until the moment a consultation runs, which is precisely
+the late failure the fail-fast requirement exists to prevent. Stating it here because a builder
+reading only "pure validators" could reasonably wire them at the call sites instead.
+
+*Accepted blast radius*: because `loadConfig` is shared, a malformed `consult.models` will fail
+unrelated commands (`afx status`, etc.), not just consultations. That is the intended fail-fast
+behavior and matches how a malformed `harness` block already behaves today. It is called out so it
+is recognized as a deliberate choice at review rather than an accident.
+
+**Key-space discovery** — the spec's deliberate asymmetry, and the part of this plan most likely to
+be misread:
 - *Protocol names* = **union across all four tiers** (`.codev/protocols/`, `codev/protocols/`,
   runtime cache, installed skeleton). A name visible anywhere is runnable, so configuring it is legal.
 - *Review types* = `verify.type` values from the **resolved** `protocol.json` per name only (tier
   precedence `.codev/` > `codev/` > cache > skeleton). A shadowed skeleton copy's types must **not**
   leak in — that file will never execute.
-Reuse the existing skeleton resolver (`lib/skeleton.ts`) for both; do not re-implement tier walking.
+
+**This requires a new shared enumeration API — it does not exist today.** Verified: `lib/skeleton.ts`
+exposes `resolveCodevFile` (single file, four tiers) and `listSkeletonFiles` (skeleton tier only);
+neither enumerates protocol names across tiers. `porch/protocol.ts:53-77` walks protocol directories
+for alias lookup, but only three tiers — it **omits the framework cache** — and it stops at the first
+alias match rather than building a set. Neither is reusable as-is, so "reuse the resolver" would have
+left the builder to improvise the most correctness-sensitive part of the phase.
+
+Add to `lib/skeleton.ts`, beside the tier logic it belongs with:
+
+```ts
+/** All protocol names visible at any tier, plus their aliases. Union, not precedence. */
+export function listProtocolNames(workspaceRoot?: string): Set<string>
+```
+
+It walks all **four** tier directories (matching `resolveCodevFile`'s tier list, not
+`findProtocolFile`'s three-tier one) and, for each protocol directory found, includes both the
+directory name and any `alias` declared in its `protocol.json`.
+
+**Aliases must be included**, or the validator rejects legitimate config: protocols may declare an
+`alias`, `porch` resolves by it, and a user may reasonably write `byProtocol.<alias>`. Rejecting an
+alias the CLI itself accepts would be a fail-fast rule that fails correct config — worse than the
+gap it closes.
+
+Review-type discovery then reads the **resolved** `protocol.json` per name via the existing
+`resolveCodevFile` (precedence, one file per name) and unions their `verify.type` values.
+
+*Noted, not fixed here*: `findProtocolFile`'s alias scan skipping the cache tier is a pre-existing
+inconsistency. It is out of scope for this issue; the new API is simply written correctly rather than
+copying the bug. Worth a follow-up issue.
 
 **Resolvers**:
 - `resolveLaneModel(config, lane): { id?: string; source?: string }` — returns the configured id and
@@ -158,9 +206,13 @@ Reuse the existing skeleton resolver (`lib/skeleton.ts`) for both; do not re-imp
 
 #### Acceptance Criteria
 - [ ] Every validator rejects its invalid inputs and accepts its valid ones, with the offending key named
+- [ ] **Malformed config throws from `loadConfig()`**, not at consult/porch resolution time — asserted
+      by a test that calls `loadConfig` alone and expects a throw
+- [ ] `listProtocolNames()` returns names from all four tiers and includes declared aliases
 - [ ] `resolveLaneComposition` reproduces today's behavior when only `porch.consultation.models` is set
 - [ ] Unknown-to-Codev model ids (e.g. `future-model-9`) pass validation — the no-allowlist guarantee
-- [ ] Namespaced / vendor-prefixed / tagged ids pass unmodified
+- [ ] Namespaced / vendor-prefixed / tagged ids pass unmodified, including `gpt-5.6-sol` (a real id
+      whose `-sol` suffix is load-bearing — see Notes on #1288)
 - [ ] Removing a member from the local effort list fails `tsc` (binding is real, verified manually once)
 - [ ] All tests pass
 
@@ -212,9 +264,25 @@ introduce, and it would look like defensive programming in review.
 Keep the hardcoded ids as the literal fallback when config is absent, so zero-config behavior is
 preserved by construction rather than by a default written somewhere new.
 
+**Test the default in two layers, not with literal ids** (see Notes on issue #1288, which changes
+the shipped defaults to `claude-opus-5` and `gpt-5.6-sol`):
+
+- **Layer A — behavioral, rebase-proof**: with no config, assert the SDK receives *the module's
+  default constant*. This is what actually guards the config plumbing, and it stays correct across a
+  defaults change with no edit.
+- **Layer B — one deliberate pin**: a single test asserting those constants equal the ids the repo
+  ships at this commit. One line to update when defaults change, and it fails loudly if a default
+  drifts by accident.
+
+Layer A alone is tautological — it would pass even if someone changed a default constant
+unintentionally — which is exactly why B exists as a separate, intentionally-edited line. Writing
+literal ids into every assertion instead would scatter the same edit across the suite and silently
+rot the moment #1288 lands.
+
 #### Acceptance Criteria
 - [ ] Configured ids reach `claudeQuery({ options: { model } })` and `codex.startThread({ model })`
-- [ ] Unset config → `claude-opus-4-6` and `gpt-5.4` @ `medium`, byte-identical to today
+- [ ] Unset config → the module default constants @ `medium`, byte-identical to pre-change behavior
+      (Layer A), with one pinned test asserting what those constants currently are (Layer B)
 - [ ] `--model-id` outranks config; invalid values rejected by the same syntax rule
 - [ ] Provider rejection → non-zero exit, no output file, error names the config key
 - [ ] All tests pass
@@ -293,7 +361,7 @@ non-blocking-everything.
 ---
 
 ### Phase 4: Cost accounting and metrics model-id column
-**Dependencies**: Phase 2
+**Dependencies**: Phases 2 **and 3**
 
 #### Objectives
 - Record which model actually ran.
@@ -312,6 +380,14 @@ safe against an existing `~/.codev/metrics.db` with rows, and re-runnable.
 
 **The `model` column keeps storing the lane name.** `consult stats` groups on it; repurposing it
 would silently change every existing report. The model id goes in the new column.
+
+**All three lanes must populate it, which is why this phase depends on Phase 3 as well as Phase 2.**
+The agy lane records metrics through its own paths — including `settleSkip`, which writes a metrics
+row for a skipped consultation. If Phase 4 landed on Phase 2 alone, the codex and claude lanes would
+record ids while the gemini lane silently wrote `NULL`, and the resulting gap would look like a data
+bug rather than an unfinished phase. Sequencing after Phase 3 means every call site that can produce
+a metrics row already knows its resolved id. For a skipped agy run the id is recorded when one was
+configured, and left null when none was — null then means "no model was chosen", not "we forgot".
 
 Cost logic, in order: `consult.pricing.codex` if set → use it; else configured non-default model →
 `costUsd: null`; else → today's `CODEX_PRICING`. Claude is untouched (the SDK reports
@@ -435,12 +511,13 @@ Revert; docs-only.
 ## Dependency Map
 ```
 Phase 1 (config + validators + resolvers)
-   ├──→ Phase 2 (claude/codex wiring) ──→ Phase 4 (cost + metrics)
-   ├──→ Phase 3 (agy passthrough + fail-fast split)
-   └──→ Phase 5 (porch resolver consolidation)
-                                              └──→ Phase 6 (docs)
+   ├──→ Phase 2 (claude/codex wiring) ──┐
+   ├──→ Phase 3 (agy passthrough + split)┼──→ Phase 4 (cost + metrics) ──→ Phase 6 (docs)
+   └──→ Phase 5 (porch resolver consolidation) ──────────────────────────────┘
 ```
-Phases 2, 3, and 5 are mutually independent once Phase 1 lands.
+Phases 2, 3, and 5 are mutually independent once Phase 1 lands. **Phase 4 joins 2 and 3**: it must
+record resolved model ids for *every* lane, and the agy lane's metrics call sites (including the
+skip path) only know their id after Phase 3. Phase 6 documents the finished surface, so it comes last.
 
 ## Resource Requirements
 ### Development Resources
@@ -559,3 +636,16 @@ ready: a stale allowlist would block exactly the model this issue was filed to e
 every iteration. This plan does not paper over that. If implementation surfaces a further spec
 defect, the response is to raise it with the architect via `afx send`, not to quietly amend the spec
 mid-phase.
+
+**Issue #1288 changes the shipped defaults** — `claude` → `claude-opus-5`, `codex` → `gpt-5.6-sol`
+(live-probed; plain `gpt-5.6` is rejected under ChatGPT-account auth, so the `-sol` suffix is
+load-bearing). It is a separate project; this spec's out-of-scope call on defaults stands.
+
+**Required before the implement phase**: rebase onto `main` and check whether #1288 has landed. The
+default-preservation tests are structured in two layers (Phase 2) precisely so that this rebase
+touches one deliberate line rather than silently invalidating assertions scattered across the suite.
+`gpt-5.6-sol` is also carried into Phase 1's accept-vectors — a real id with a meaningful suffix is
+a better check that the syntax rule isn't too tight than any invented example.
+
+**Post-merge, architect-owned**: this repo opts into the new ids via its own `.codev/config.json`.
+Deliberately not in this PR, so the PR changes no lane's behavior for anyone by default.
