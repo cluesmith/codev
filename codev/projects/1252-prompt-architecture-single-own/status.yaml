@@ -1,7 +1,7 @@
 id: '1252'
 title: prompt-architecture-single-own
 protocol: spir
-phase: verify
+phase: verified
 plan_phases:
   - id: phase_1
     title: Drift gate + measurement baseline
@@ -305,7 +305,7 @@ history:
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/spir-1252/codev/projects/1252-prompt-architecture-single-own/1252-phase_8-iter3-claude.txt
 started_at: '2026-07-27T07:23:40.596Z'
-updated_at: '2026-07-29T11:29:06.241Z'
+updated_at: '2026-07-29T11:29:08.269Z'
 force_advanced:
   phase: phase_8
   iteration: 3
