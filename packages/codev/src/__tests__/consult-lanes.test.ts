@@ -22,7 +22,13 @@ import {
   resolveReasoningEffort,
   resolveLaneComposition,
 } from '../lib/consult-lanes.js';
-import { listProtocolNames, canonicalProtocolName, listReviewTypes } from '../lib/skeleton.js';
+import {
+  listProtocolNames,
+  canonicalProtocolName,
+  listReviewTypes,
+  setFrameworkCacheDir,
+  getSkeletonDir,
+} from '../lib/skeleton.js';
 import { loadConfig, findConfigSource } from '../lib/config.js';
 
 let tmpDir: string;
@@ -237,6 +243,51 @@ describe('key-space discovery (scenario 16)', () => {
     expect(types.has('shadowed-type')).toBe(false); // that file will never execute
   });
 
+  it('lists protocol names from the framework cache tier', () => {
+    const cacheDir = path.join(tmpDir, 'fake-cache');
+    const dir = path.join(cacheDir, 'protocols', 'cached-proto');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'protocol.json'), JSON.stringify({ name: 'cached-proto', alias: 'cp', phases: [] }));
+
+    setFrameworkCacheDir(cacheDir);
+    try {
+      const names = listProtocolNames(tmpDir);
+      expect(names.has('cached-proto')).toBe(true);
+      expect(names.has('cp')).toBe(true);
+      expect(canonicalProtocolName(tmpDir, 'cp')).toBe('cached-proto');
+    } finally {
+      setFrameworkCacheDir(null);
+    }
+  });
+
+  it('lists protocol names from the installed skeleton tier', () => {
+    // No protocols written into tmpDir at all — anything found comes from the package skeleton.
+    // Skipped when the skeleton has not been copied (it is produced by `pnpm build`).
+    const skeletonProtocols = path.join(getSkeletonDir(), 'protocols');
+    if (!fs.existsSync(skeletonProtocols)) return;
+
+    const names = listProtocolNames(tmpDir);
+    expect(names.has('spir')).toBe(true);
+    expect(names.has('spider')).toBe(true); // spir's shipped alias
+    expect(canonicalProtocolName(tmpDir, 'spider')).toBe('spir');
+    // And the skeleton's review types are discoverable for modelsByType validation.
+    const types = listReviewTypes(tmpDir);
+    for (const t of ['spec', 'plan', 'impl', 'pr']) expect(types.has(t)).toBe(true);
+  });
+
+  it('a local protocol shadows the skeleton copy of the same name for review types', () => {
+    const skeletonProtocols = path.join(getSkeletonDir(), 'protocols');
+    if (!fs.existsSync(path.join(skeletonProtocols, 'spir'))) return;
+
+    // Shadow the shipped `spir` with one declaring a different verify type.
+    writeProtocol(tmpDir, '.codev', 'spir', {
+      name: 'spir',
+      phases: [{ id: 'p', name: 'P', verify: { type: 'local-only-type', models: ['codex'] } }],
+    });
+    const types = listReviewTypes(tmpDir);
+    expect(types.has('local-only-type')).toBe(true);
+  });
+
   it('rejects an unknown byProtocol key', () => {
     writeProtocol(tmpDir, 'codev', 'spir', { name: 'spir', phases: [] });
     expect(() => validateConsultationConfig({ byProtocol: { nosuch: { models: ['codex'] } } }, tmpDir))
@@ -255,6 +306,52 @@ describe('key-space discovery (scenario 16)', () => {
     writeProtocol(tmpDir, 'codev', 'spir', { name: 'spir', alias: 'spider', phases: [] });
     expect(() => validateConsultationConfig({ byProtocol: { spider: { models: ['codex'] } } }, tmpDir))
       .not.toThrow();
+  });
+
+  describe('malformed shapes raise keyed config errors, never a bare TypeError', () => {
+    beforeEach(() => {
+      writeProtocol(tmpDir, 'codev', 'spir', {
+        name: 'spir', phases: [{ id: 'p', name: 'P', verify: { type: 'spec', models: ['codex'] } }],
+      });
+    });
+
+    // typeof null === 'object', so every object guard needs an explicit null check. A null that
+    // slips through reaches Object.entries() and raises an unkeyed TypeError, which tells the user
+    // nothing about which config key is wrong.
+    const nullShapes: [string, unknown][] = [
+      ['byProtocol.<name>.modelsByType', { byProtocol: { spir: { modelsByType: null } } }],
+      ['byProtocol.<name>', { byProtocol: { spir: null } }],
+      ['byProtocol', { byProtocol: null }],
+      ['modelsByType', { modelsByType: null }],
+      ['the consultation block itself', null],
+    ];
+
+    for (const [label, config] of nullShapes) {
+      it(`rejects null at ${label}`, () => {
+        let thrown: unknown;
+        try {
+          validateConsultationConfig(config, tmpDir);
+        } catch (err) {
+          thrown = err;
+        }
+        expect(thrown, `null at ${label} should be rejected`).toBeInstanceOf(Error);
+        expect((thrown as Error).constructor.name).toBe('Error'); // not TypeError
+        expect((thrown as Error).message).toMatch(/porch\.consultation|expected an object/);
+      });
+    }
+
+    it('rejects an array where an object is expected', () => {
+      expect(() => validateConsultationConfig({ modelsByType: [] }, tmpDir)).toThrow(/expected an object/);
+      expect(() => validateConsultationConfig({ byProtocol: [] }, tmpDir)).toThrow(/expected an object/);
+      expect(() => validateConsultationConfig({ byProtocol: { spir: { modelsByType: [] } } }, tmpDir))
+        .toThrow(/expected an object/);
+    });
+
+    it('rejects a malformed nested lane list', () => {
+      expect(() => validateConsultationConfig(
+        { byProtocol: { spir: { modelsByType: { spec: ['nope'] } } } }, tmpDir,
+      )).toThrow(/Invalid consultation model/);
+    });
   });
 
   it('rejects a config naming the same protocol by both alias and canonical name', () => {

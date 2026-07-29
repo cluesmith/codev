@@ -292,8 +292,14 @@ export function validateConsultationConfig(consultation: unknown, workspaceRoot:
       }
       validateLaneList(overrides.models, `porch.consultation.byProtocol.${name}.models`);
       if (overrides.modelsByType !== undefined) {
-        if (typeof overrides.modelsByType !== 'object' || Array.isArray(overrides.modelsByType)) {
-          fail(`Invalid porch.consultation.byProtocol.${name}.modelsByType: expected an object.`);
+        // `=== null` is load-bearing: typeof null === 'object', so without it a null slips through
+        // to Object.entries() and raises a bare TypeError instead of a keyed config error.
+        if (
+          typeof overrides.modelsByType !== 'object' ||
+          overrides.modelsByType === null ||
+          Array.isArray(overrides.modelsByType)
+        ) {
+          fail(`Invalid porch.consultation.byProtocol.${name}.modelsByType: expected an object mapping review type -> lanes.`);
         }
         const knownTypes = listReviewTypes(workspaceRoot);
         for (const [type, lanes] of Object.entries(overrides.modelsByType)) {
