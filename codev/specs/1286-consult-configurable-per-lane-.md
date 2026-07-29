@@ -161,6 +161,25 @@ a reasoning-effort knob (`modelReasoningEffort`), so `claude`, `gemini`, and `he
 errors here. The two blocks therefore have *different* key spaces: `{claude, codex, gemini}` for
 `models`, `{codex}` for `reasoningEffort`.
 
+**Its value space is a closed enum, and — unlike model ids — it IS validated locally.** Accepted
+values are exactly `minimal`, `low`, `medium`, `high`, `xhigh`; anything else is a hard error at
+config-load time, before any consultation runs. Unset means `medium`, today's pinned value.
+
+This is the deliberate opposite of the model-id rule, and the difference is not arbitrary:
+
+| | Model ids | Reasoning effort |
+|---|---|---|
+| Shape of the value space | Open, provider-owned, changes between releases | Closed union, shipped as a type by the SDK Codev already depends on (`ModelReasoningEffort`, `@openai/codex-sdk`) |
+| Can Codev know the valid set? | No — any local list is stale the day a model ships | Yes — it is a compile-time artifact of a pinned dependency |
+| Therefore | No local validation; provider is the authority | Local validation, rejected at load time |
+
+Because the enum is a *pinned-dependency* fact rather than a *remote-catalog* fact, validating it
+locally does not recreate the staleness problem — but only if the accepted set is **bound to the
+SDK's exported type** rather than retyped as a free-standing literal list. The requirement is that a
+future SDK upgrade which changes the union produces a **compile error**, not a silently divergent
+allowlist. A hand-copied list that drifts from the SDK would be the same class of bug as a model-id
+allowlist, just slower-moving.
+
 **`consult.pricing`** exists only because `CODEX_PRICING` is hardcoded to gpt-5.4's rates. It is
 codex-only (Claude's cost comes from the SDK, and the agy lane emits no usage data at all). All
 three rate keys must be supplied together — a partial object is a hard error, because silently
@@ -344,6 +363,10 @@ Codev does not validate model ids and defers to the provider.
       `hermes` remains accepted in `porch.consultation.*` lane lists.
 - [ ] `consult.reasoningEffort` accepts `codex` and hard-errors on every other lane key, including
       `claude` and `gemini` — a key space deliberately narrower than `consult.models`'.
+- [ ] `consult.reasoningEffort.codex` accepts exactly `minimal|low|medium|high|xhigh` and hard-errors
+      on any other value at config-load time; unset yields `medium`. The accepted set is bound to
+      `@openai/codex-sdk`'s exported `ModelReasoningEffort` type such that an SDK upgrade changing
+      the union fails the build rather than silently diverging.
 - [ ] Model ids are validated against `^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,199}$` and nothing else: a
       namespaced or tagged id (`us.anthropic.claude-opus-5`, `openai/gpt-5.6`, `gpt-5.6:latest`)
       passes through unmodified, and no id is rejected for being unknown to Codev.
@@ -473,6 +496,13 @@ reasoning survives.)*
       review caught that Desired State had wrongly given the two blocks the same key space; they are
       now stated separately and differ deliberately. Extensible without a rename if another backend
       exposes the knob.
+- [x] **What values may `consult.reasoningEffort.codex` take, and who validates them?**
+      **Resolved: `minimal|low|medium|high|xhigh`, validated locally at load time**, bound to the
+      SDK's exported `ModelReasoningEffort` union so it cannot drift silently. Raised in the
+      iteration-3 review, which correctly noted the spec had pinned the key space but left the value
+      space to a coin flip between enum-validation, pass-through, and silent acceptance. The reason
+      this validates locally while model ids do not is tabulated in Desired State: a closed union
+      from a pinned dependency is knowable; an open provider catalog is not.
 - [x] **What exactly makes a model id syntactically invalid?** **Resolved:**
       `^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,199}$`. The iteration-2 review correctly flagged that
       "whitespace or shell metacharacters" was both untestable and at risk of rejecting
@@ -524,7 +554,8 @@ reasoning survives.)*
 2. **Default preservation** — with no `consult` block, the three backends receive exactly today's
    arguments: `claude-opus-4-6`; `gpt-5.4` @ `medium`; agy argv containing no `--model`.
 3. **Reasoning effort** — `consult.reasoningEffort.codex: "high"` reaches the Codex SDK; unset →
-   `medium`.
+   `medium`. All five enum values are accepted; `"highest"`, `""`, and a non-string each hard-error
+   at load time, before any consultation runs.
 4. **`modelsByType` selection** — protocol declares three lanes for `impl`; config sets
    `modelsByType.impl: ["codex"]`; `porch next` emits exactly one consult command, and `porch done`
    is satisfied by exactly one review file.
@@ -612,6 +643,13 @@ verify step of this phase.
 - [ ] Expert AI Consultation Complete
 
 ## Notes
+
+**In-scope drive-by fix**: `packages/codev/src/lib/config.ts`'s file-level doc comment still says the
+loader merges "three layers" and lists only defaults / global / project. The loader has had five
+since the cache and `config.local.json` layers landed (the function-level docstring at `:224` is
+correct; the file header is not). This spec's config surface is layered on that stack and its
+documentation refers to five layers, so the stale header is corrected as part of this work rather
+than left to contradict the new docs.
 
 **Explicitly out of scope** (each is a defensible follow-up, none is required to unblock #1286):
 
