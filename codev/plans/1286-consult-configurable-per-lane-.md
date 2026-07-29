@@ -81,6 +81,8 @@ Inherited from the spec's Success Criteria (all 20), plus implementation-specifi
 - [ ] New module `packages/codev/src/lib/consult-lanes.ts` — validators + resolvers
 - [ ] **`listProtocolNames()` added to `lib/skeleton.ts`** — cross-tier protocol + alias enumeration
       (new API; no existing function does this)
+- [ ] **`canonicalProtocolName()`** — alias → canonical, so `byProtocol` lookup can't silently no-op
+- [ ] **`findConfigSource()`** — reports which config layer supplied a key, for error diagnostics
 - [ ] Validators invoked from `loadConfig()`, alongside the existing harness validation
 - [ ] `config.ts` file-header comment corrected: "three layers" → five (in-scope drive-by per spec Notes)
 - [ ] Unit tests for every validation rule and both resolvers
@@ -192,23 +194,65 @@ gap it closes.
 Review-type discovery then reads the **resolved** `protocol.json` per name via the existing
 `resolveCodevFile` (precedence, one file per name) and unions their `verify.type` values.
 
+Reuse `porch/protocol.ts`'s existing `Protocol` types and parsing shape rather than hand-rolling a
+second reader of `protocol.json` — a second parser is how the two drift when the schema changes.
+
 *Noted, not fixed here*: `findProtocolFile`'s alias scan skipping the cache tier is a pre-existing
 inconsistency. It is out of scope for this issue; the new API is simply written correctly rather than
 copying the bug. Worth a follow-up issue.
 
 **Resolvers**:
-- `resolveLaneModel(config, lane): { id?: string; source?: string }` — returns the configured id and
-  a human-readable source for error messages; `undefined` id means "use the backend's current
+- `resolveLaneModel(config, lane): { id?: string; source?: ConfigSource }` — returns the configured
+  id and **which config layer supplied it**; `undefined` id means "use the backend's current
   hardcoded default", which is how zero-config behavior is preserved.
 - `resolveLaneComposition(config, protocol, reviewType, protocolModels)` — the four-level ladder,
   returning `{ models, mode }` exactly like today's `resolveConsultationModels` so Phase 5 is a
   substitution rather than a rewrite.
+
+**Provenance: naming the config *layer*, not just the key.** The spec requires a provider-rejection
+error to name "the config key **and layer** that supplied the id" — the id can come from any of five
+layers, so the key alone often isn't enough to find it. `loadConfig` deep-merges and discards origin,
+so provenance must be recovered rather than read off the merged object.
+
+Do **not** rewrite `deepMerge` to thread provenance through every value — that changes a function the
+entire config system depends on, to serve one error message. Instead add a narrow helper that
+re-reads the five layer files in precedence order and reports the last one defining a given key path:
+
+```ts
+export function findConfigSource(workspaceRoot: string, keyPath: string[]): string | null
+```
+
+Called only on the error path, so its cost is irrelevant and a stale read is impossible in practice.
+Returns `null` when no file defines the key (i.e. it came from a default), and the error text degrades
+to naming just the key — acceptable, because a value that came from a default cannot be the
+user's typo.
+
+**Protocol identity must be canonicalized, or `byProtocol` silently no-ops.** Validation accepts
+alias keys (above), and `porch`'s `loadProtocol` resolves aliases — but `state.protocol` stores
+whatever name the project was initialized with. So `byProtocol.spider` can validate successfully and
+then never match a project whose `state.protocol` is `spir`, or vice versa. That is a config key that
+passes every check and silently does nothing — the exact failure class this spec exists to remove,
+reintroduced by my own alias handling.
+
+The aliases are real and shipped: `spir`↔`spider`, `maintain`↔`maint`, `pir`↔`plan-implement-review`.
+
+Fix: resolve both sides to a canonical protocol name before lookup.
+```ts
+export function canonicalProtocolName(workspaceRoot: string, nameOrAlias: string): string
+```
+`resolveLaneComposition` canonicalizes its `protocol` argument, and `byProtocol` keys are
+canonicalized as they are read, so `byProtocol.spider` and `byProtocol.spir` are the same entry. If
+both spellings appear in one config, that is a hard error — silently picking one would be a coin flip
+over review cost.
 
 #### Acceptance Criteria
 - [ ] Every validator rejects its invalid inputs and accepts its valid ones, with the offending key named
 - [ ] **Malformed config throws from `loadConfig()`**, not at consult/porch resolution time — asserted
       by a test that calls `loadConfig` alone and expects a throw
 - [ ] `listProtocolNames()` returns names from all four tiers and includes declared aliases
+- [ ] `canonicalProtocolName()` maps alias → canonical, so `byProtocol.spider` applies to a project
+      whose `state.protocol` is `spir` (and vice versa); both spellings in one config is a hard error
+- [ ] `findConfigSource()` names the layer file that supplied a key, and returns null for defaults
 - [ ] `resolveLaneComposition` reproduces today's behavior when only `porch.consultation.models` is set
 - [ ] Unknown-to-Codev model ids (e.g. `future-model-9`) pass validation — the no-allowlist guarantee
 - [ ] Namespaced / vendor-prefixed / tagged ids pass unmodified, including `gpt-5.6-sol` (a real id
@@ -247,7 +291,9 @@ to roll back.
 - [ ] `runClaudeConsultation` takes its model from `resolveLaneModel(config, 'claude')`
 - [ ] `runCodexConsultation` takes model + `modelReasoningEffort` from config
 - [ ] Provider-rejection errors name the config key that supplied the id
-- [ ] `consult --model-id <id>` per-invocation override (spec COULD; outranks config)
+- [ ] `consult --model-id <id>` per-invocation override (spec COULD; outranks config) — registered
+      with the other consult options in `cli.ts`, threaded through `ConsultOptions`; one flag, no
+      per-lane variants
 - [ ] Unit tests asserting the id reaching each SDK
 
 #### Implementation Details
@@ -257,9 +303,19 @@ inside each.
 
 Both runners already `throw` on SDK error and their `finally` blocks record metrics with a non-zero
 exit — so the "loud failure, no review file" contract holds *for these two lanes* with no change to
-control flow. The only addition is wrapping the thrown error to name the config key. **Do not add a
-catch that substitutes a default id** — that is the specific regression this phase must not
-introduce, and it would look like defensive programming in review.
+control flow. The only addition is wrapping the thrown error with diagnostics. **Do not add a catch
+that substitutes a default id** — that is the specific regression this phase must not introduce, and
+it would look like defensive programming in review.
+
+**Error contract (all three lanes, pinned here so Phases 2 and 3 implement the same thing).** A
+provider rejection must produce a message carrying all three of:
+1. the **provider's own error text**, verbatim (truncated, not paraphrased);
+2. the **config key** (`consult.models.<lane>`);
+3. the **config layer** that supplied it, via `findConfigSource` — e.g.
+   `~/.codev/config.json` vs `.codev/config.local.json`.
+
+Naming the key without the layer is the case the spec explicitly calls out: with five layers, "your
+`consult.models.codex` is wrong" doesn't tell the user which of five files to edit.
 
 Keep the hardcoded ids as the literal fallback when config is absent, so zero-config behavior is
 preserved by construction rather than by a default written somewhere new.
@@ -335,9 +391,26 @@ Argv order: append `--model <id>` **before** the existing `--print <prompt>` ter
 the file's own comment records that agy parses `--print` as string-valued and its value must
 immediately follow it.
 
+**The hard failure must carry agy's own output, not just its exit code.** The spec requires the
+provider's error text to be surfaced; a bare `agy exited with code 1` satisfies the *control flow*
+while failing the *diagnostic* requirement, and would leave a user with a rejected model id and no
+idea why.
+
+Today `proc.stderr` is piped and watched for auth markers (`index.ts:926`, `watch(b, false)`), but
+only stdout accumulates into `outChunks` — so stderr is inspected and then discarded. Phase 3 must
+retain a bounded tail of stderr (and any stdout) and include it in the hard-failure error, alongside
+the config key and layer from the Phase 2 error contract. Bounded, because agy output can be large
+and this lands in an error message.
+
+This is also the practical path to the spec's *preferred* marker-based rejection detection: once the
+text is retained for diagnostics, recognizing a stable rejection marker later is a small addition
+rather than new plumbing. The deterministic floor still does not depend on it.
+
 #### Acceptance Criteria
 - [ ] Unconfigured lane: unauthenticated/timed-out agy still yields a non-blocking `COMMENT` skip
 - [ ] Configured lane: non-zero exit yields a hard failure, no review file, porch does not advance
+- [ ] The hard-failure message contains agy's captured output, the config key, and the config layer —
+      not merely an exit code
 - [ ] `--model` absent from argv when unconfigured (zero-config parity)
 - [ ] All tests pass
 
