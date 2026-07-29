@@ -1,0 +1,16 @@
+id: '1286'
+title: consult-configurable-per-lane-
+protocol: aspir
+phase: specify
+plan_phases: []
+current_plan_phase: null
+gates:
+  pr:
+    status: pending
+  verify-approval:
+    status: pending
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-07-29T11:33:26.698Z'
+updated_at: '2026-07-29T11:33:26.699Z'
