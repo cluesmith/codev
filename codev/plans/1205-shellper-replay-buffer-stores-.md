@@ -120,7 +120,9 @@ Not lower than 8MB, because downstream consumption is uneven: the adoption and r
 
 **Known cost of this choice:** with the buffer cap equal to the wire cap, the send-path trim at `:392-395` becomes a permanent no-op in new binaries, so it stops being exercised in production. It is kept regardless (it still guards the accessor and any future caller) and must stay covered by unit tests so it cannot rot silently.
 
-The constant belongs in `shellper-protocol.ts` next to `REPLAY_PAYLOAD_MAX` (same wire-adjacent concern, already imported by `shellper-process.ts`), with the buffer taking it as a constructor default so `shellper-replay-buffer.ts` keeps its zero-import property.
+The constant lives in `shellper-replay-buffer.ts`, next to the class it configures, defined as `= REPLAY_PAYLOAD_MAX` so the derivation is self-maintaining if the send cap ever moves (retaining more than can be sent is waste; retaining less makes the send cap unreachable).
+
+*Revised during implementation.* This originally said the constant belonged in `shellper-protocol.ts` beside `REPLAY_PAYLOAD_MAX` as a "wire-adjacent concern." That was wrong: a retention ceiling is a memory policy, not a wire constraint, and `shellper-protocol.ts` declares itself the wire-protocol module. Filing it there would have put a memory-policy constant in the wire module purely because it is *derived from* a wire constant. Moved on review. `shellper-replay-buffer.ts` now imports one sibling module, which does not weaken its "no dependencies beyond Node built-ins" property (`shellper-protocol.ts` is under the same constraint).
 
 ### Phase 3 — Tower-side `RingBuffer` partial cap (implement LAST)
 
@@ -146,7 +148,7 @@ Costs ~10 lines in one shared helper, strictly reduces the garbage window, and c
 - `packages/codev/src/terminal/__tests__/shellper-replay-buffer.test.ts` — **new file** (the class currently has no dedicated test; it is only covered indirectly via `shellper-process.test.ts`).
 
 **Phase 2**
-- `packages/codev/src/terminal/shellper-protocol.ts:40` — add `REPLAY_BUFFER_MAX_BYTES` beside `REPLAY_PAYLOAD_MAX`, with the "nothing above `REPLAY_PAYLOAD_MAX` can ever leave the process" rationale.
+- `packages/codev/src/terminal/shellper-replay-buffer.ts` — add `REPLAY_BUFFER_MAX_BYTES`, defined as `= REPLAY_PAYLOAD_MAX`, with the "nothing above `REPLAY_PAYLOAD_MAX` can ever leave the process" rationale. (Located here rather than in `shellper-protocol.ts` — see the note under *Phase 2* above.)
 - `packages/codev/src/terminal/shellper-replay-buffer.ts:12-70` — `maxBytes` field, unified eviction loop, final-chunk byte trim; update the class doc comment (`:1-10`) which currently claims it "evicts oldest chunks when the limit is exceeded" — true of lines, not bytes, today.
 - `packages/codev/src/terminal/shellper-process.ts:97-105` — thread an optional `replayBufferBytes` constructor arg through to the buffer.
 - `packages/codev/src/terminal/shellper-main.ts:43-52,159-163` — optional `replayBufferBytes` in `ShellperConfig`, defaulted, so the ceiling is tunable without a rebuild if a session ever needs it.

@@ -12,7 +12,26 @@
  * (shellper-protocol.ts is a sibling module under the same constraint.)
  */
 
-import { REPLAY_BUFFER_MAX_BYTES } from './shellper-protocol.js';
+import { REPLAY_PAYLOAD_MAX } from './shellper-protocol.js';
+
+/**
+ * Byte ceiling on what this buffer retains (#1205). Until it existed the buffer
+ * was bounded only by line count, and a full-screen TUI (which redraws in place
+ * and emits almost no newlines) grew it without limit for the life of the
+ * session — multi-GB in the field.
+ *
+ * Derived from REPLAY_PAYLOAD_MAX rather than written as its own literal, and
+ * that derivation is the point: every send is capped at REPLAY_PAYLOAD_MAX and
+ * ShellperProcess.getReplayData() has no production callers, so it is provably
+ * the most that can ever leave the process. Bytes retained above it are
+ * unreadable by any consumer and are pure resident cost. Tying the two together
+ * keeps that true if the send cap ever moves — retaining more than can be sent
+ * would be waste, retaining less would make the send cap unreachable.
+ *
+ * This is a retention policy, not a wire constraint, which is why it lives here
+ * next to the buffer rather than in shellper-protocol.ts.
+ */
+export const REPLAY_BUFFER_MAX_BYTES = REPLAY_PAYLOAD_MAX;
 
 const ESC = 0x1b;
 

@@ -21,7 +21,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { ShellperProcess, type IShellperPty, type PtyOptions } from './shellper-process.js';
-import { REPLAY_BUFFER_MAX_BYTES } from './shellper-protocol.js';
+import { REPLAY_BUFFER_MAX_BYTES } from './shellper-replay-buffer.js';
 
 // createRequire enables importing native/CJS modules (like node-pty) from ESM.
 // The package uses "type": "module", so bare `require()` is not available.

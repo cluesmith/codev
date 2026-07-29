@@ -22,7 +22,6 @@ import {
   PROTOCOL_VERSION,
   ALLOWED_SIGNALS,
   REPLAY_PAYLOAD_MAX,
-  REPLAY_BUFFER_MAX_BYTES,
   createFrameParser,
   encodeData,
   encodeWelcome,
@@ -38,7 +37,7 @@ import {
   type SignalMessage,
   type SpawnMessage,
 } from './shellper-protocol.js';
-import { ShellperReplayBuffer } from './shellper-replay-buffer.js';
+import { ShellperReplayBuffer, REPLAY_BUFFER_MAX_BYTES } from './shellper-replay-buffer.js';
 import { DEFAULT_COLS, DEFAULT_ROWS } from './index.js';
 
 // --- IShellperPty: abstraction over node-pty for testing ---
