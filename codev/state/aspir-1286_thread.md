@@ -94,3 +94,39 @@ Read honestly: Codex found a real defect on every single pass, which is weak evi
 pass would have found a fourth. The spec is not "approved"; it is "out of review budget." Flagged to
 the architect. Proceeding to Plan per ASPIR (no spec-approval gate), with this caveat on record for
 the PR gate.
+
+## Architect-required codex recheck (the 4th pass) — and a lesson about it
+
+Architect endorsed the spec against issue #1286 item by item, with one required step: a codex-only
+re-review of the current spec before planning. Also recorded (no spec change): defaults stay
+unchanged; this repo opts into claude-opus-5/gpt-5.6 via its own `.codev/config.json` **after merge**,
+architect-owned, explicitly not in this PR.
+
+**Trap avoided**: porch had already advanced to `plan`, so a `--project-id` consult would have
+auto-persisted to `1286-plan-iter1-codex.txt` and masqueraded as a plan-phase review — potentially
+letting porch count a spec review as plan verification. Passing an explicit `--output` outside the
+project dir short-circuits auto-persist entirely (`index.ts:2081`: `if (!outputPath && …)`). Verified
+afterward that no `1286-plan-iter1-*` file exists.
+
+**Result: REQUEST_CHANGES, but 2 of 4 findings were factually false** — Codex claimed the spec file
+"contains an entire `## Plan` section after `## Notes`" and therefore breaks the template. Verified
+against disk: the spec has exactly the 20 canonical headings, Metadata → Notes, and no `Plan`
+heading. It also cited `satisfies readonly ModelReasoningEffort[]` and specific module names as spec
+content — those strings appear **only** in the plan file.
+
+Cause: I had just written `codev/plans/1286-*.md`, and a `--type spec` review bundles project
+artifacts, so Codex read spec+plan concatenated as a single file. The three earlier iterations — run
+when no plan file existed — never raised this. Worth knowing generally: **a spec-type consult run
+after the plan exists will report plan content as spec content.**
+
+One finding was real and fixed: `ALTER TABLE ADD COLUMN` / `PRAGMA table_info` were mechanism sitting
+in the spec (Desired State + Open Questions). Trimmed to a requirement ("idempotent, non-destructive
+against a populated DB; mechanism is a plan concern"); the plan carries the mechanism.
+
+Deliberately **not** changed: the model-id regex. Codex's iteration-3 review *demanded* an exact
+syntactic rule; removing it now as "too implementation-detailed" would undo a fix the same reviewer
+required two rounds earlier. It is the acceptance contract for what config is legal, which is
+squarely WHAT.
+
+Per the architect's standing instruction (address what's real, then proceed without a round-trip),
+moving on to the Plan phase.
