@@ -149,11 +149,17 @@ use across shipped protocols are `spec`, `plan`, `impl`, `pr`, `investigation`, 
 Every key is optional. An unset lane keeps today's hardcoded default, so an existing workspace with
 no `consult.models` block behaves byte-identically.
 
-**Which lanes accept a model id.** `consult.models` and `consult.reasoningEffort` accept exactly
-`claude`, `codex`, and `gemini`. `hermes` is **not** a valid key in either block: the hermes backend
-is invoked as `hermes chat -q` and exposes no model selector, so accepting the key would silently do
-nothing. `consult.models.hermes` is a hard error naming the three lanes that do accept ids. This is
-independent of `hermes` remaining a valid *lane name* in `porch.consultation.*` lists, which it does.
+**Which lanes accept a model id.** `consult.models` accepts exactly `claude`, `codex`, and `gemini`.
+`hermes` is **not** a valid key: the hermes backend is invoked as `hermes chat -q` and exposes no
+model selector, so accepting the key would silently do nothing. `consult.models.hermes` is a hard
+error naming the three lanes that do accept ids. This is independent of `hermes` remaining a valid
+*lane name* in `porch.consultation.*` lists, which it does.
+
+**`consult.reasoningEffort` accepts exactly one key: `codex`.** It is a lane-keyed map purely so
+another backend can be added later without a rename — but today the codex lane is the only one with
+a reasoning-effort knob (`modelReasoningEffort`), so `claude`, `gemini`, and `hermes` are all hard
+errors here. The two blocks therefore have *different* key spaces: `{claude, codex, gemini}` for
+`models`, `{codex}` for `reasoningEffort`.
 
 **`consult.pricing`** exists only because `CODEX_PRICING` is hardcoded to gpt-5.4's rates. It is
 codex-only (Claude's cost comes from the SDK, and the agy lane emits no usage data at all). All
@@ -207,10 +213,26 @@ The issue asks for fail-fast on invalid ids. The mechanism matters, because the 
 implementation — an allowlist of known model ids — is itself the rot being reported. The split is:
 
 **Validated strictly (hard error, no fallback):**
-- Unknown *lane key* in `consult.models` / `consult.reasoningEffort` → error naming the valid lanes.
-- Model id that is not a non-empty string, or that contains whitespace or shell metacharacters →
-  error. (The gemini lane passes its id as a CLI argument; the check is a correctness *and* a
-  hygiene requirement.)
+- Unknown *lane key* in `consult.models` (valid: `claude`, `codex`, `gemini`) or in
+  `consult.reasoningEffort` (valid: `codex` only) → error naming that block's valid lanes.
+- Model id that fails the **exact syntactic rule** below → error.
+
+**Model-id syntax rule (exact, deliberately permissive).** A configured model id MUST match
+`^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,199}$` — i.e. 1–200 characters drawn from ASCII alphanumerics and
+`. _ : / @ + -`, and not starting with `-`.
+
+The rule is written as an explicit permitted set rather than a list of "shell metacharacters"
+because a vague blocklist is the wrong shape for two reasons: it is untestable, and — given that
+this spec forbids local allowlists and makes the provider the authority on ids — it risks rejecting
+an id that a future provider considers valid. The permitted set is chosen to already cover the
+naming conventions in use across providers today, including dotted and namespaced forms
+(`us.anthropic.claude-opus-5`), vendor-prefixed forms (`openai/gpt-5.6`), and tag suffixes
+(`gpt-5.6:latest`). The leading-`-` exclusion is the one hard safety requirement: the gemini lane
+passes the id as a CLI argument, and an id beginning with `-` would be parsed by `agy` as a flag.
+
+If a provider ever adopts a character outside this set, the fix is a one-line widening of the
+character class — a change to *syntax*, which does go stale slowly and safely, not to a catalog of
+*ids*, which goes stale immediately. That distinction is the whole point.
 - Unknown *lane name* in any `porch.consultation.*` list → error (today's behavior, extended to the
   new keys **and** to the `porch done` path, which currently skips validation entirely).
 - Malformed shape anywhere (e.g. `modelsByType` not an object, a lane list that isn't an array of
@@ -246,6 +268,33 @@ and both are reported in the error message so a typo is self-diagnosing.
 
 The error message on provider rejection must name the config key and layer that supplied the id, so
 the user can find it (the id may come from any of five config layers).
+
+**Reconciling fail-fast with the agy lane's non-blocking skip.** The gemini lane does not currently
+throw on failure: `runAgyConsultation` funnels *every* failure — missing binary, unauthenticated,
+timeout, non-zero exit — into `settleSkip()`, which writes a `VERDICT: COMMENT` artifact that porch
+treats as non-blocking (`consult/index.ts:938`). Left alone, that would swallow a bad configured
+model id into a silent skip and let the phase advance — exactly the silent downgrade this spec
+forbids. The two behaviors must be separated by *cause*:
+
+- **Environment failures** (agy absent, unauthenticated, timed out, non-responsive) keep today's
+  non-blocking skip. The lane is optional and degraded (#1032 / #1033); nothing about this spec
+  changes that.
+- **Configuration failures** (a model id the user explicitly set) are hard failures on every lane
+  including gemini. The user asked for a specific model; running the phase without it, or with
+  a different one, is the failure being designed against.
+
+Two mechanisms deliver this, in order:
+
+1. **Pre-spawn validation** catches malformed ids deterministically, before any process starts. This
+   covers the syntax rule above and needs no output inspection.
+2. **For a syntactically valid but provider-rejected id**, the lane must not skip. The preferred
+   mechanism is marker-based detection of agy's model-rejection output, mirroring the
+   `AGY_OAUTH_MARKERS` mechanism the file already uses to discriminate one failure cause from
+   another. Because agy's rejection text is not contractual, the **guaranteed floor** is a
+   deterministic rule that needs no markers: *when `consult.models.gemini` is explicitly set, a
+   non-zero agy exit is a hard failure rather than a skip.* Opting into a specific model is opting
+   out of "quietly proceed without this lane." Workspaces that leave the lane unconfigured keep
+   today's skip behavior unchanged.
 
 ### Cost and observability
 
@@ -293,9 +342,17 @@ Codev does not validate model ids and defers to the provider.
       key, which errors rather than warning, against the discovered key spaces defined above.
 - [ ] `consult.models.hermes` (or any non-`{claude,codex,gemini}` lane key) is a hard error, while
       `hermes` remains accepted in `porch.consultation.*` lane lists.
+- [ ] `consult.reasoningEffort` accepts `codex` and hard-errors on every other lane key, including
+      `claude` and `gemini` — a key space deliberately narrower than `consult.models`'.
+- [ ] Model ids are validated against `^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,199}$` and nothing else: a
+      namespaced or tagged id (`us.anthropic.claude-opus-5`, `openai/gpt-5.6`, `gpt-5.6:latest`)
+      passes through unmodified, and no id is rejected for being unknown to Codev.
 - [ ] A partial `consult.pricing.codex` object is a hard error; a complete one drives codex cost math.
 - [ ] A provider-rejected model id fails the consultation loudly and non-zero, writes no review
       file, and never falls back to a hardcoded default.
+- [ ] On the gemini lane specifically, a configured-model failure is a **hard failure**, not a
+      `VERDICT: COMMENT` skip — while agy being absent, unauthenticated, or timed out still produces
+      today's non-blocking skip, unchanged, when no gemini model is configured.
 - [ ] Consultation metrics record the resolved model id, not only the lane name, via an idempotent
       migration that is safe to run against an existing `~/.codev/metrics.db` and leaves the `model`
       column's lane-name meaning (and therefore `consult stats`) unchanged.
@@ -411,8 +468,16 @@ reasoning survives.)*
       fallback, which contradicted the hard-error requirement stated elsewhere. See "Key-space
       discovery" under Desired State.
 - [x] **Should `consult.reasoningEffort` be a general per-lane map or a codex-only key?**
-      **Resolved: a lane-keyed map that accepts only `codex`.** Any other lane key is a hard error.
-      Extensible without a rename if another backend exposes the knob.
+      **Resolved: a lane-keyed map that accepts only `codex`.** Any other lane key — including
+      `claude` and `gemini`, which *are* valid in `consult.models` — is a hard error. The iteration-2
+      review caught that Desired State had wrongly given the two blocks the same key space; they are
+      now stated separately and differ deliberately. Extensible without a rename if another backend
+      exposes the knob.
+- [x] **What exactly makes a model id syntactically invalid?** **Resolved:**
+      `^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,199}$`. The iteration-2 review correctly flagged that
+      "whitespace or shell metacharacters" was both untestable and at risk of rejecting
+      provider-valid ids — the opposite of this spec's intent. Replaced with an explicit permitted
+      character set covering namespaced, vendor-prefixed, and tagged id conventions.
 - [x] **Codex cost when the model is overridden.** **Resolved:** optional `consult.pricing.codex`
       with all three per-1M rates required together; `cost_usd` is `null` when a non-default model
       runs without it. Computing from stale rates is rejected.
@@ -441,8 +506,9 @@ reasoning survives.)*
 
 ## Security Considerations
 - **Argument injection**: the gemini lane's model id becomes a CLI argument to `agy`. It is passed
-  via the existing `spawn(bin, args)` array form (no shell), and the id is additionally validated as
-  a single whitespace-free token, so it cannot expand into extra flags or shell syntax.
+  via the existing `spawn(bin, args)` array form (no shell), so shell metacharacters are inert by
+  construction. The syntax rule adds defence in depth and closes the one attack the array form does
+  *not* cover: an id starting with `-`, which `agy` would parse as a flag rather than a value.
 - **Config trust boundary**: config is read from the repo and the user's home directory — already
   trusted inputs that can set `shell.builder` and `worktree.postSpawn`. A model id is strictly less
   powerful than what config already controls. No new trust boundary is crossed.
@@ -471,8 +537,10 @@ reasoning survives.)*
 8. **next/done agreement** — the lane set `porch next` emits is exactly the set `porch done`
    enforces, under every precedence combination above (regression guard for the removed duplicate).
 9. **Invalid lane key** — `consult.models.gpt` → hard error naming valid lanes.
-10. **Invalid model id shape** — empty string, non-string, embedded whitespace, `; rm -rf /` → hard
-    error before any backend is invoked.
+10. **Model id syntax** — rejected before any backend is invoked: empty string, non-string, embedded
+    whitespace, `; rm -rf /`, a leading `-` (`--print`), and a >200-character id. Accepted and passed
+    through byte-for-byte: `claude-opus-5`, `us.anthropic.claude-opus-5`, `openai/gpt-5.6`,
+    `gpt-5.6:latest`, and an id Codev has never heard of (the no-allowlist guarantee).
 11. **Invalid lane name in `modelsByType`** — `["codexx"]` → hard error, from both `porch next` and
     `porch done`.
 12. **Provider rejection** — backend rejects the configured id → non-zero exit, provider error text
@@ -488,6 +556,12 @@ reasoning survives.)*
     protocol of the same name is *rejected*, since the shadowed file will never run.
 17. **Hermes lane keys** — `consult.models.hermes` errors; `porch.consultation.models: ["hermes"]`
     still resolves.
+18. **Divergent key spaces** — `consult.reasoningEffort.claude` errors even though
+    `consult.models.claude` is valid.
+19. **agy skip vs. hard failure** — with no `consult.models.gemini` set, an unauthenticated or
+    timed-out agy still produces a non-blocking `VERDICT: COMMENT` skip (regression guard for
+    existing behavior). With a gemini model configured, a non-zero agy exit produces a hard failure
+    and **no** review file, so porch does not advance the phase.
 
 ### Non-Functional Tests
 1. **Performance**: N/A — no hot path is touched. Config resolution is already on the call path.
@@ -517,6 +591,7 @@ reasoning survives.)*
 |------|------------|--------|-------------------|
 | A static id allowlist creeps into the implementation and re-rots | Medium | High | Hard constraint in this spec; a test asserting an arbitrary unknown-to-Codev id reaches the backend unmodified |
 | A backend silently substitutes a model instead of erroring, defeating fail-fast | Low | Medium | Record the resolved id in metrics so substitution is detectable after the fact; document the bound |
+| agy's blanket non-blocking skip swallows a configured-model failure, advancing the phase without the requested lane | High if unaddressed | High | Cause-based separation: configured-model failure = hard failure, environment failure = skip; guaranteed floor needs no output parsing; scenario 19 guards both directions |
 | Four-level precedence becomes folklore and is applied inconsistently | Medium | Medium | One shared resolver (no second copy); precedence table in the docs; scenario 6 pins the ladder |
 | Config widening silently inflates cost on lighter protocols | Medium | Medium | `byProtocol` scoping (scenario 5) is a MUST, not a follow-up |
 | Codex cost figures go stale against the configured model | High | Low | Null-out absent a rate override; record the id for later recomputation |
