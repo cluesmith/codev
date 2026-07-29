@@ -60,4 +60,37 @@ decided and in-scope; `consult.models.hermes` rejected (the `hermes chat -q` bac
 selector, so accepting the key would silently do nothing) while `hermes` stays valid as a lane name
 in `porch.consultation.*`.
 
-Iteration 2 consultation running.
+## Specify — iterations 2 and 3, and the force-advance
+
+**iter 2**: gemini/claude APPROVE, codex REQUEST_CHANGES. Two more real catches, both conceded:
+- I had *introduced* a contradiction in iter 1 — Desired State said `consult.reasoningEffort` accepts
+  `{claude,codex,gemini}` while Open Questions said `{codex}` only. Now split into its own paragraph
+  with the two key spaces stated as deliberately divergent.
+- "reject shell metacharacters" was untestable and could reject provider-valid ids — reintroducing
+  staleness one layer down. Replaced with `^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,199}$`.
+
+Claude's iter-2 comment, framed as a plan concern, turned out to be a **hole in the spec's central
+contract** — verified at `consult/index.ts:938`: every non-zero agy exit becomes a `VERDICT: COMMENT`
+non-blocking skip, so a typo'd gemini model id would have silently skipped and let porch advance.
+Fixed in the spec by splitting failures by *cause* (environment → skip, as today; configured-model →
+hard fail), with a guaranteed floor that needs no fragile stderr parsing.
+
+**iter 3**: gemini/claude APPROVE, codex REQUEST_CHANGES — `consult.reasoningEffort.codex` had a
+pinned key space but an undefined *value* space. Resolved to the closed enum read from the installed
+SDK (`@openai/codex-sdk/dist/index.d.ts:237` → `minimal|low|medium|high|xhigh`), validated locally.
+The obvious objection — "you just added the allowlist you spent three paragraphs arguing against" —
+is answered in the spec with a table: an open provider-owned catalog is unknowable to Codev; a closed
+union from a *pinned dependency* is a compile-time fact. Binding requirement: the set must derive
+from the SDK's exported type so an upgrade breaks the build instead of drifting silently.
+
+### ⚠️ The spec was FORCE-ADVANCED, not approved
+
+`status.yaml` records `force_advanced: {phase: specify, iteration: 3, max_iterations: 3}`. Codex
+never returned APPROVE on the spec. Its iter-3 issue *was* fixed and committed — but after the
+review, so **that fix has never been reviewed by anyone**. Gemini and Claude approved iterations
+1–3; Codex requested changes in all three, each time on a genuinely different and valid defect.
+
+Read honestly: Codex found a real defect on every single pass, which is weak evidence that a fourth
+pass would have found a fourth. The spec is not "approved"; it is "out of review budget." Flagged to
+the architect. Proceeding to Plan per ASPIR (no spec-approval gate), with this caveat on record for
+the PR gate.
