@@ -187,6 +187,19 @@ describe('--model-id overrides config (scenario 12)', () => {
     expect(() => resolveLaneModelChoice(tmpDir, 'codex', DEFAULT_CODEX_MODEL, 'has spaces'))
       .toThrow(/Invalid model id/);
   });
+
+  // The shared validator appends "in Codev config", which is actively misleading for a flag —
+  // it sends the user to a file to fix something they typed on the command line.
+  it('is not blamed on Codev config, since a flag is not config', () => {
+    let message = '';
+    try {
+      resolveLaneModelChoice(tmpDir, 'codex', DEFAULT_CODEX_MODEL, 'has spaces');
+    } catch (err) {
+      message = (err as Error).message;
+    }
+    expect(message).toContain('--model-id');
+    expect(message).not.toContain('in Codev config');
+  });
 });
 
 // --- provenance ---------------------------------------------------------------------

@@ -108,14 +108,21 @@ function quoted(values: readonly string[]): string {
   return values.map(v => `"${v}"`).join(', ');
 }
 
-/** Validate a model id's syntax. Never validates existence — that is the provider's job. */
+/**
+ * Validate a model id's syntax. Never validates existence — that is the provider's job.
+ *
+ * `key` is either a config path (`consult.models.codex`) or a CLI flag (`--model-id`). Only the
+ * former lives in a config file, so the "in Codev config" clause is suppressed for flags — telling
+ * someone their `--model-id` is invalid "in Codev config" sends them to the wrong place to fix it.
+ */
 export function validateModelId(id: unknown, key: string): asserts id is string {
+  const location = key.startsWith('-') ? '' : ' in Codev config';
   if (typeof id !== 'string') {
-    fail(`Invalid ${key} in Codev config: expected a string, got ${id === null ? 'null' : typeof id}.`);
+    fail(`Invalid ${key}${location}: expected a string, got ${id === null ? 'null' : typeof id}.`);
   }
   if (!MODEL_ID_RE.test(id)) {
     fail(
-      `Invalid model id ${JSON.stringify(id)} for ${key} in Codev config.\n` +
+      `Invalid model id ${JSON.stringify(id)} for ${key}${location}.\n` +
       `Model ids must be 1-200 characters of letters, digits, and ". _ : / @ + -", ` +
       `and must not start with "-".\n` +
       `Note: Codev does not check whether a model exists — the provider does. This is a syntax error.`
