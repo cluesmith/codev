@@ -344,7 +344,10 @@ Use sequential numbering with descriptive names (no leading zeros):
   `~/.cache/codev/agy-auth.json`, because each spawn opens an OAuth browser tab before Codev can
   detect the missing login (#1077). Sign in with `agy` in any terminal and the lane recovers on its
   own; see `codev/resources/commands/consult.md` for the TTL/opt-out env vars.
-- **GPT-5.4 Codex** (gpt-5.4-codex) for coding and architecture perspective
+- **GPT-5.6 Sol** (`gpt-5.6-sol`, medium reasoning effort) via the Codex SDK for coding and
+  architecture perspective. The `-sol` suffix is load-bearing — plain `gpt-5.6` and
+  `gpt-5.6-codex` are both rejected by Codex on a ChatGPT account.
+- **Claude Opus 5** (`claude-opus-5`) via the Claude Agent SDK for balanced analysis with tool use
 
 To disable: User must explicitly say "without multi-agent consultation"
 

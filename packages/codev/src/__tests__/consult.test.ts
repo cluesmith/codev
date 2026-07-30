@@ -536,7 +536,7 @@ describe('consult command', () => {
       expect(mockQueryFn).toHaveBeenCalledTimes(1);
       const callArgs = mockQueryFn.mock.calls[0][0];
       expect(callArgs.options.allowedTools).toEqual(['Read', 'Glob', 'Grep']);
-      expect(callArgs.options.model).toBe('claude-opus-4-6');
+      expect(callArgs.options.model).toBe('claude-opus-5');
       expect(callArgs.options.maxTurns).toBe(200);
       expect(callArgs.options.maxBudgetUsd).toBe(25);
       expect(callArgs.options.permissionMode).toBe('bypassPermissions');

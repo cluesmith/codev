@@ -6,53 +6,12 @@ import { tmpdir } from 'node:os';
 /**
  * Tests for the Codex SDK integration (Phase 1).
  *
- * Part 1: Cost computation logic (CODEX_PRICING formula)
+ * Part 1: Cost computation logic (the real computeCodexCost() from index.ts)
  * Part 2: Mocked runCodexConsultation() — event handling, error paths, temp file cleanup
+ *
+ * Part 1 exercises the shipped implementation rather than a copy of it, so a
+ * pricing change can't pass here while the real rates drift (#1288).
  */
-
-// Reproduce the CODEX_PRICING constant from index.ts for unit testing
-const CODEX_PRICING = { inputPer1M: 2.00, cachedInputPer1M: 1.00, outputPer1M: 8.00 };
-
-function computeCodexCost(
-  inputTokens: number,
-  cachedInputTokens: number,
-  outputTokens: number,
-): number {
-  const uncached = inputTokens - cachedInputTokens;
-  return (uncached / 1_000_000) * CODEX_PRICING.inputPer1M
-       + (cachedInputTokens / 1_000_000) * CODEX_PRICING.cachedInputPer1M
-       + (outputTokens / 1_000_000) * CODEX_PRICING.outputPer1M;
-}
-
-describe('Codex SDK cost computation', () => {
-  it('computes correct cost for sample token counts', () => {
-    const cost = computeCodexCost(24763, 24448, 122);
-    expect(cost).toBeCloseTo(0.026054, 5);
-  });
-
-  it('computes correct cost when all tokens are uncached', () => {
-    const cost = computeCodexCost(10000, 0, 5000);
-    expect(cost).toBeCloseTo(0.06, 5);
-  });
-
-  it('computes correct cost when all tokens are cached', () => {
-    const cost = computeCodexCost(5000, 5000, 100);
-    expect(cost).toBeCloseTo(0.0058, 5);
-  });
-
-  it('computes zero cost for zero tokens', () => {
-    expect(computeCodexCost(0, 0, 0)).toBe(0);
-  });
-
-  it('handles large token counts correctly', () => {
-    const cost = computeCodexCost(1_000_000, 900_000, 100_000);
-    expect(cost).toBeCloseTo(1.90, 5);
-  });
-});
-
-// ============================================================================
-// Part 2: Mocked runCodexConsultation() tests
-// ============================================================================
 
 // Helper to create an async generator from an array of events
 async function* mockEvents(events: unknown[]): AsyncGenerator<unknown> {
@@ -82,7 +41,44 @@ vi.mock('@openai/codex-sdk', () => {
 });
 
 // Import after mocking
-const { runCodexConsultation } = await import('../index.js');
+const { runCodexConsultation, computeCodexCost, DEFAULT_CODEX_MODEL } = await import('../index.js');
+
+// ============================================================================
+// Part 1: Cost computation
+// ============================================================================
+
+describe('Codex SDK cost computation', () => {
+  // Rates for the default model: $5.00 uncached / $0.50 cached / $30.00 output per 1M.
+  const cost = (input: number, cached: number, output: number): number => {
+    const value = computeCodexCost(DEFAULT_CODEX_MODEL, input, cached, output);
+    if (value === null) throw new Error(`no published rates for ${DEFAULT_CODEX_MODEL}`);
+    return value;
+  };
+
+  it('computes correct cost for sample token counts', () => {
+    expect(cost(24763, 24448, 122)).toBeCloseTo(0.017459, 5);
+  });
+
+  it('computes correct cost when all tokens are uncached', () => {
+    expect(cost(10000, 0, 5000)).toBeCloseTo(0.2, 5);
+  });
+
+  it('computes correct cost when all tokens are cached', () => {
+    expect(cost(5000, 5000, 100)).toBeCloseTo(0.0055, 5);
+  });
+
+  it('computes zero cost for zero tokens', () => {
+    expect(cost(0, 0, 0)).toBe(0);
+  });
+
+  it('handles large token counts correctly', () => {
+    expect(cost(1_000_000, 900_000, 100_000)).toBeCloseTo(3.95, 5);
+  });
+});
+
+// ============================================================================
+// Part 2: Mocked runCodexConsultation() tests
+// ============================================================================
 
 function setupMockCodex(events: unknown[]) {
   mockRunStreamedFn = vi.fn().mockResolvedValue({
@@ -265,7 +261,8 @@ describe('runCodexConsultation() with mocked SDK', () => {
     // Verify startThread receives model, sandboxMode, and workingDirectory
     expect(mockStartThreadArgs).toBeDefined();
     const threadArgs = mockStartThreadArgs as Record<string, unknown>;
-    expect(threadArgs.model).toBe('gpt-5.4');
+    expect(threadArgs.model).toBe('gpt-5.6-sol');
+    expect(threadArgs.modelReasoningEffort).toBe('medium');
     expect(threadArgs.sandboxMode).toBe('read-only');
     expect(threadArgs.workingDirectory).toBe(tmpDir);
   });
