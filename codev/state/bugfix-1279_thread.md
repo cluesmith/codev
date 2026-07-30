@@ -168,3 +168,44 @@ a regression. CLAUDE.md says it: never run npm/test commands from the repo root,
 run them from `packages/codev`. Package-scoped run was green throughout.
 
 Final: 3793 passed / 48 skipped / 0 failed. Awaiting the `pr` gate.
+
+## Merged
+
+PR #1283 merged 2026-07-29T11:26:39Z as merge commit `54118ef0` (regular merge,
+not squash). Issue #1279 auto-closed by `Fixes #1279`.
+
+Verified live on `main` after the merge, not just assumed from a green PR: all
+three new includes are present in the shipped skeleton
+(`spir/prompts/specify.md:95`, `spir/prompts/review.md:62`,
+`maintain/protocol.md:190`) and `codev-skeleton/protocols/aspir/` no longer has
+a `templates/` directory.
+
+### Merge path — worth recording for the next builder
+
+The porch `pr` gate approving is **not** sufficient to merge in this repo.
+GitHub branch protection on `main` independently requires:
+
+- 1 approving review (`reviewDecision: REVIEW_REQUIRED`) — a builder cannot
+  self-approve its own PR; bypass allowance is limited to `waleedkadous` and
+  `amrmelsayed`
+- 6 status checks: Unit Tests, CLI Tests (ubuntu + macos), CLI Integration
+  Tests, Tower Integration Tests, Package Install Verification
+
+`gh pr merge --merge` fails with "the base branch policy prohibits the merge"
+until both clear. I escalated rather than reaching for `--admin` myself; the
+human's explicit ruling ("use admin here") came back and I merged with
+`--admin` only after CI was green, so the bypass covered the review requirement
+alone and never the checks.
+
+### CI flake, resolved
+
+Two `Tests` runs on this branch failed at 18:07:53 and 18:08:09 —
+`send-integration.e2e.test.ts`, "Hook timed out in 10000ms", Tower Integration
+Tests. I called it pre-existing flake on the evidence (file untouched by this
+PR; same workflow failing intermittently on `bugfix-1264`, `bugfix-1077`,
+`docs/arch-init-compaction`, `air-1239` and one `main` merge; same content
+passing at 18:06:56 then failing twice minutes later). The final run confirmed
+it: Tower Integration Tests passed in 1m23s on the same content. Nothing was
+skipped or worked around.
+
+Worktree is clean and stays put — cleanup is the architect's call.
