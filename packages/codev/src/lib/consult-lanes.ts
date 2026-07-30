@@ -130,6 +130,26 @@ export function validateModelId(id: unknown, key: string): asserts id is string 
   }
 }
 
+/**
+ * Reject a per-invocation model override for a lane that cannot honour it.
+ *
+ * Without this, `consult -m hermes --model-id foo` parses, appears in `--help`, and does exactly
+ * nothing — the same "registered, documented, inert" failure this spec's own `--model-id` shipped
+ * with once already. A flag that cannot take effect must say so rather than be quietly ignored.
+ */
+export function assertLaneAcceptsModelOverride(lane: string, flag = '--model-id'): void {
+  if ((MODEL_CONFIGURABLE_LANES as readonly string[]).includes(lane)) return;
+  const extra = lane === 'hermes'
+    ? `\nThe "hermes" backend is invoked as \`hermes chat -q\` and exposes no model selector, ` +
+      `so there is nothing for a model id to set. ` +
+      `("hermes" is still valid in porch.consultation lane lists.)`
+    : '';
+  fail(
+    `${flag} is not supported for the "${lane}" lane. ` +
+    `Lanes that accept a model id: ${quoted(MODEL_CONFIGURABLE_LANES)}.${extra}`
+  );
+}
+
 export function validateConsultModels(models: unknown): void {
   if (models === undefined) return;
   if (typeof models !== 'object' || models === null || Array.isArray(models)) {

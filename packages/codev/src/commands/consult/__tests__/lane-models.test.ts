@@ -17,6 +17,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { assertLaneAcceptsModelOverride } from '../../../lib/consult-lanes.js';
 
 // --- SDK mocks: capture exactly what each provider was asked to run -------------------
 
@@ -199,6 +200,43 @@ describe('--model-id overrides config (scenario 12)', () => {
     }
     expect(message).toContain('--model-id');
     expect(message).not.toContain('in Codev config');
+  });
+});
+
+// --- lanes that cannot honour the override -------------------------------------------
+//
+// Found by codex at the phase_2 review: --model-id was documented as applying to "whichever lane
+// -m selected", but only the claude and codex branches read it, so `-m hermes --model-id foo`
+// parsed, showed in --help, and did nothing. That is the same registered-documented-inert failure
+// this phase existed to eliminate, reintroduced by the flag's own description.
+
+describe('--model-id is refused by lanes with no model selector', () => {
+  it('rejects hermes rather than ignoring the flag', () => {
+    expect(() => assertLaneAcceptsModelOverride('hermes')).toThrow(/not supported for the "hermes" lane/);
+    expect(() => assertLaneAcceptsModelOverride('hermes')).toThrow(/no model selector/);
+  });
+
+  it('names the lanes that do accept a model id', () => {
+    let message = '';
+    try {
+      assertLaneAcceptsModelOverride('hermes');
+    } catch (err) {
+      message = (err as Error).message;
+    }
+    for (const lane of ['claude', 'codex', 'gemini']) expect(message).toContain(lane);
+  });
+
+  it('accepts every configurable lane, gemini included', () => {
+    // gemini is configurable by spec; its passthrough lands in phase_3. Asserting it here means
+    // phase_3 cannot narrow this contract without failing a test.
+    for (const lane of ['claude', 'codex', 'gemini']) {
+      expect(() => assertLaneAcceptsModelOverride(lane)).not.toThrow();
+    }
+  });
+
+  it('names the flag it was given, so other overrides can reuse it', () => {
+    expect(() => assertLaneAcceptsModelOverride('hermes', '--some-other-flag'))
+      .toThrow(/--some-other-flag is not supported/);
   });
 });
 

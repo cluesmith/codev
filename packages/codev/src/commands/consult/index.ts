@@ -21,6 +21,7 @@ import {
   resolveLaneModel,
   resolveReasoningEffort,
   validateModelId,
+  assertLaneAcceptsModelOverride,
   type ConfigurableLane,
 } from '../../lib/consult-lanes.js';
 import type { ModelReasoningEffort } from '@openai/codex-sdk';
@@ -1077,6 +1078,13 @@ async function runConsultation(
   generalMode?: boolean,
   modelIdOverride?: string,
 ): Promise<void> {
+  // Fail before dispatch if the selected lane cannot honour the override. Checked here rather than
+  // per-branch so a lane that never reads it can't silently ignore it (codex caught exactly that for
+  // hermes). Syntax is validated per-lane in resolveLaneModelChoice.
+  if (modelIdOverride !== undefined) {
+    assertLaneAcceptsModelOverride(model);
+  }
+
   // SDK-based models
   if (model === 'claude') {
     const startTime = Date.now();
