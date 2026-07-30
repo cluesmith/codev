@@ -373,3 +373,34 @@ Also: never run `npm run build` while the suite is running here. Its `copy-skele
 exactly that self-inflicted race before re-running clean at 3895 passed / 0 failed.
 
 Final: tsc 0 · unit 3895 passed / 0 failed · CLI integration 93 passed / 0 failed.
+
+## Extracting the cause instead of duplicating the guard
+
+Architect ruled on the coverage gap I flagged: don't mirror the e2e test somewhere porch sees —
+extract the *cause*. The failure class was "cli.ts builds an explicit `ConsultOptions` object and
+silently drops a field", so registration and mapping now live together in
+`commands/consult/cli-options.ts`, and a unit test compares them. Not invasive after all (one module,
+two call sites), so I took the unit-test path rather than accepting the offered CI-only fallback.
+
+The test deliberately **does not restate the flag list** — it reads flags back out of commander via
+`attributeName()`. A hand-written list would drift exactly the way the mapping did; the guard has to
+derive from the thing it's checking. Four properties: registered-but-unforwarded, mapped-but-
+unregistered (catches a one-sided rename), a distinct sentinel per key so a mapping that reads the
+*wrong* source key fails too, and a self-check on the introspection so it can't pass vacuously
+against an empty list — the same trap as the `existsSync` early-return in phase_1. Mutation-verified:
+deleting the `modelId` line fails naming `modelId`.
+
+Fixed a defect I introduced this phase: reusing the config validator for a flag produced
+`Invalid model id "has spaces" for --model-id in Codev config`, which sends someone to a config file
+to fix what they typed on the command line. The clause is now suppressed for flag-shaped keys.
+
+**The build-vs-test race bit me a second time**, and it's worth the embarrassment of recording.
+Having already noted "never run `npm run build` while the suite runs", I launched the next
+verification job — which *starts* with a build — while the previous job's CLI integration tests were
+still spawning `dist/cli.js`. `rm -rf skeleton` plus a dist rewrite mid-run produced 9 failures
+across 2 files that looked exactly like a refactor regression. Clean re-run: 93 passed / 0 failed.
+Knowing a hazard and sequencing around it are different skills. The rule that actually works is
+narrower than the one I wrote: **only one build-or-test job in flight at a time, full stop** — not
+"don't build during tests", because a job that builds counts as a build.
+
+Final: tsc 0 · unit 3901 passed / 0 failed · CLI integration 93 passed / 0 failed.
