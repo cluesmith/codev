@@ -68,7 +68,7 @@ file):
   `TowerClient.getTerminalOutput`. Worth remembering as a class: a missing binding makes an existing
   capability invisible.
 
-## Lessons Learned
+## Lessons Learned Updates
 
 **A majority APPROVE is not consensus.** Across this project, **four times** two reviewers approved code
 that contained a real defect, and each time the single dissenter was correct on the facts. Phase 5's
