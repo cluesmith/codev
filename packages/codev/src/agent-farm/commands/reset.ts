@@ -245,6 +245,20 @@ function buildTerminalPort(
       });
       if (!result.ok) throw new Error(result.error || 'Interrupt (ESC) failed');
     },
+    /**
+     * Bound for real, not left undefined.
+     *
+     * When this was absent the orchestrator's `confirmClear` returned false on
+     * every production run, so the report always said "clear-unconfirmed" — a
+     * step that looked like it had been attempted and could never succeed
+     * outside tests. Either the check works or it should not be in the report;
+     * it works.
+     */
+    async readRecentOutput() {
+      if (!terminalId) return null;
+      const output = await client.getTerminalOutput(terminalId, 50);
+      return output ? output.lines.join('\n') : null;
+    },
   };
 }
 

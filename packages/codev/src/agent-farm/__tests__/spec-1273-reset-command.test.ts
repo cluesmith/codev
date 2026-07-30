@@ -19,6 +19,7 @@ const {
   mockSendMessage,
   mockIsRunning,
   mockGetTerminal,
+  mockGetTerminalOutput,
   mockDetectWorkspaceRoot,
   mockDetectCurrentBuilderId,
   mockFindBuilderById,
@@ -28,6 +29,7 @@ const {
   mockSendMessage: vi.fn(),
   mockIsRunning: vi.fn(),
   mockGetTerminal: vi.fn(),
+  mockGetTerminalOutput: vi.fn(),
   mockDetectWorkspaceRoot: vi.fn(),
   mockDetectCurrentBuilderId: vi.fn(),
   mockFindBuilderById: vi.fn(),
@@ -42,6 +44,7 @@ vi.mock('../lib/tower-client.js', () => ({
     isRunning = mockIsRunning;
     sendMessage = mockSendMessage;
     getTerminal = mockGetTerminal;
+    getTerminalOutput = mockGetTerminalOutput;
   },
 }));
 
@@ -116,6 +119,7 @@ describe('afx reset — command surface (Spec 1273)', () => {
     mockDetectCurrentBuilderId.mockReturnValue(null);
     mockFindBuilderById.mockReturnValue(BUILDER);
     mockGetTerminal.mockResolvedValue({ id: 'term-1', status: 'running', lastDataAt: 0 });
+    mockGetTerminalOutput.mockResolvedValue({ lines: [], total: 0, hasMore: false });
     mockSendMessage.mockResolvedValue({ ok: true, resolvedTo: 'aspir-1273' });
     mockRunReset.mockResolvedValue({
       outcome: 'completed',
@@ -208,6 +212,34 @@ describe('afx reset — command surface (Spec 1273)', () => {
 
     const terminal = mockRunReset.mock.calls[0][0].terminal;
     await expect(terminal.observe()).resolves.toEqual({ exists: true, lastDataAt: undefined });
+  });
+
+  it('binds readRecentOutput so the clear confirmation can actually succeed', async () => {
+    // Left unbound, `confirmClear` returns false on every production run and the
+    // report says "clear-unconfirmed" forever — a check that looks attempted and
+    // can only ever pass in tests.
+    mockGetTerminalOutput.mockResolvedValue({
+      lines: ['> /clear', 'context cleared'],
+      total: 2,
+      hasMore: false,
+    });
+    const { reset } = await import('../commands/reset.js');
+    await reset({ builder: '1273' });
+
+    const terminal = mockRunReset.mock.calls[0][0].terminal;
+    expect(terminal.readRecentOutput).toBeDefined();
+    await expect(terminal.readRecentOutput()).resolves.toContain('context cleared');
+  });
+
+  it('returns null recent output rather than throwing when Tower cannot serve it', async () => {
+    // Confirmation is advisory: an older Tower or a 404 must degrade to
+    // "unconfirmed", never fail the reset that already succeeded.
+    mockGetTerminalOutput.mockResolvedValue(null);
+    const { reset } = await import('../commands/reset.js');
+    await reset({ builder: '1273' });
+
+    const terminal = mockRunReset.mock.calls[0][0].terminal;
+    await expect(terminal.readRecentOutput()).resolves.toBeNull();
   });
 
   it('reports a non-running terminal as absent', async () => {

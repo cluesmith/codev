@@ -525,6 +525,25 @@ export class TowerClient {
     return result.ok ? result.data! : null;
   }
 
+  /**
+   * Recent PTY output for a terminal (Spec 1273).
+   *
+   * The `/output` route has existed since the terminal manager was written; it
+   * simply had no client binding. Reset uses it for the best-effort `/clear`
+   * confirmation — without it that check can never succeed outside tests, and
+   * every real run would report the clear as unconfirmed while looking like it
+   * had tried.
+   */
+  async getTerminalOutput(
+    terminalId: string,
+    lines = 100,
+  ): Promise<{ lines: string[]; total: number; hasMore: boolean } | null> {
+    const result = await this.request<{ lines: string[]; total: number; hasMore: boolean }>(
+      `/api/terminals/${terminalId}/output?lines=${lines}`,
+    );
+    return result.ok ? result.data! : null;
+  }
+
   async writeTerminal(terminalId: string, data: string): Promise<boolean> {
     const result = await this.request(`/api/terminals/${terminalId}/write`, {
       method: 'POST',
