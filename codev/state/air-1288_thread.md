@@ -47,3 +47,29 @@ which the section had simply omitted, and verified the two files stay byte-ident
 
 #1286 has no PR open as of 2026-07-30, so this lands first. Per the issue, #1286's
 "default preservation" vectors must then assert the NEW ids.
+
+## PR — at the `pr` gate
+
+PR #1301. porch checks all green (build, tests, pr_exists, e2e_tests). Stopped at the gate;
+have not run `porch approve`.
+
+**Worth knowing for anyone else building in this repo today:** a fresh builder worktree here has
+**no `node_modules`**. `pnpm build` and `pnpm test` both "succeed" with exit 0 when you pipe them
+through `tail`, because the pipeline reports tail's status — the real output is `sh: tsc: command
+not found`. I briefly believed the build was green off exactly that. Run `pnpm install` from the
+worktree root first, and capture exit codes explicitly (`cmd > log 2>&1; echo $?`) rather than
+piping. Also: `cd packages/codev && pnpm ...` in a backgrounded Bash call didn't take — `pnpm -C
+packages/codev ...` did.
+
+**CI red, not ours.** `Tower Integration Tests` fails on this branch (twice). Diagnosed rather than
+re-rolled: `send-integration.e2e.test.ts` declares its `afterAll` with an explicit `10_000` budget
+(line 273) that overrides the config's `hookTimeout: 300000`. Teardown makes two *unbounded*
+deactivate `fetch`es plus a 2s SIGTERM wait plus four `rmSync` — over 10s on a loaded ubuntu runner.
+All 5 tests pass; only teardown blows up. The suite runs 5/5 in 1.76s locally on this branch, and
+our diff touches no Tower code. Same file already carries a "fix flaky" commit (1546ced5), and its
+`beforeAll` gets `120_000` — the asymmetry reads as an oversight.
+
+Deliberately did **not** fix or skip it: skipping costs 5 real integration tests to land a two-line
+model-id change, and both edits are outside #1288. Escalated to the architect at the gate with the
+PRFT and a fix proposal (raise the budget, bound the fetches). If a sibling builder hits the same
+red job, this is why — it is not your diff.
