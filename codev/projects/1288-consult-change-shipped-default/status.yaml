@@ -1,7 +1,7 @@
 id: '1288'
 title: consult-change-shipped-default
 protocol: air
-phase: pr
+phase: verified
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -13,5 +13,5 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-07-30T09:59:39.378Z'
-updated_at: '2026-07-30T10:33:43.251Z'
+updated_at: '2026-07-30T10:34:08.518Z'
 pr_ready_for_human: false
