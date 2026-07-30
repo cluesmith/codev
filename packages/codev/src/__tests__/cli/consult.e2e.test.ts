@@ -38,6 +38,22 @@ describe('consult command (CLI)', () => {
     expect(result.stdout).toContain('model');
   });
 
+  it('lists --model-id', () => {
+    const result = runConsult(['--help'], env.dir, env.env);
+    expect(result.stdout).toContain('--model-id');
+  });
+
+  // Regression guard (spec 1286): registering an option in cli.ts is NOT enough — the action
+  // builds an explicit ConsultOptions object, so a new field is silently dropped unless it is
+  // forwarded there too. That bug shipped a `--model-id` that parsed and did nothing, and only a
+  // real invocation exposed it. A syntactically invalid id is rejected by the lane resolver before
+  // any provider call, so this proves the flag is threaded without costing a network round-trip.
+  it('--model-id reaches the lane resolver rather than being silently dropped', () => {
+    const result = runConsult(['-m', 'codex', '--model-id', 'has spaces', '--prompt', 'hi'], env.dir, env.env);
+    expect(result.status).not.toBe(0);
+    expect(`${result.stdout}${result.stderr}`).toContain('Invalid model id');
+  });
+
   // === Subcommand Help ===
 
   it('pr --help shows options', () => {

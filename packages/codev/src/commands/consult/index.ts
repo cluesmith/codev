@@ -16,7 +16,14 @@ import { query as claudeQuery } from '@anthropic-ai/claude-agent-sdk';
 import { Codex } from '@openai/codex-sdk';
 import { readCodevFile, findWorkspaceRoot } from '../../lib/skeleton.js';
 import { resolveDefaultBranch } from '../../lib/default-branch.js';
-import { loadConfig } from '../../lib/config.js';
+import { loadConfig, findConfigSource } from '../../lib/config.js';
+import {
+  resolveLaneModel,
+  resolveReasoningEffort,
+  validateModelId,
+  type ConfigurableLane,
+} from '../../lib/consult-lanes.js';
+import type { ModelReasoningEffort } from '@openai/codex-sdk';
 import { getResolver, GitRefResolver, type ArtifactResolver } from '../porch/artifacts.js';
 import { MetricsDB } from './metrics.js';
 import { extractUsage, extractReviewText, type SDKResultLike, type UsageData } from './usage-extractor.js';
@@ -80,6 +87,9 @@ export interface ConsultOptions {
   // this base (origin/<base>...origin/<head>) instead of `gh pr diff` (the
   // PR's host-recorded base). Falls back to config `consult.integrationBranch`.
   base?: string;
+  // Per-invocation model override (spec 1286). Outranks `consult.models.<lane>`; applies to
+  // whichever lane `-m` selected, so there are deliberately no per-lane variants of this flag.
+  modelId?: string;
   // Porch flags
   output?: string;
   planPhase?: string;
@@ -386,6 +396,84 @@ function commandExists(cmd: string): boolean {
 const CODEX_PRICING = { inputPer1M: 2.00, cachedInputPer1M: 1.00, outputPer1M: 8.00 };
 
 /**
+ * Shipped default model ids for the two SDK lanes, and codex's default reasoning effort.
+ *
+ * These are the literal values the lanes used before spec 1286 made them configurable, kept as
+ * named constants so zero-config behavior is preserved *by construction* rather than by a new
+ * default written somewhere else. Config (`consult.models.<lane>`) and `--model-id` override them.
+ *
+ * Tests assert against these constants rather than against literal id strings, so that changing a
+ * shipped default (see issue #1288) stays a one-line edit here instead of a scatter across the
+ * suite. One test deliberately pins the literals — that is the intended place to update.
+ */
+export const DEFAULT_CLAUDE_MODEL = 'claude-opus-4-6';
+export const DEFAULT_CODEX_MODEL = 'gpt-5.4';
+export const DEFAULT_CODEX_REASONING_EFFORT: ModelReasoningEffort = 'medium';
+
+/** A lane's resolved model id plus enough provenance to name the source in an error. */
+export interface LaneModelChoice {
+  id: string;
+  /** The config key that supplied the id, or null for the flag / shipped default. */
+  key: string | null;
+  /** The config file that supplied it, or null when it wasn't config. */
+  source: string | null;
+  /** Set when `--model-id` supplied the id. */
+  fromFlag: boolean;
+}
+
+/**
+ * Resolve which model id an SDK lane runs, and record where it came from.
+ *
+ * Precedence: `--model-id` > `consult.models.<lane>` > the shipped default constant.
+ *
+ * The provenance is not decoration: with five config layers, telling a user their
+ * `consult.models.codex` is wrong doesn't tell them which of five files to edit.
+ */
+export function resolveLaneModelChoice(
+  workspaceRoot: string,
+  lane: ConfigurableLane,
+  defaultId: string,
+  modelIdOverride?: string,
+): LaneModelChoice {
+  if (modelIdOverride !== undefined) {
+    validateModelId(modelIdOverride, '--model-id');
+    return { id: modelIdOverride, key: '--model-id', source: null, fromFlag: true };
+  }
+
+  const { id, key } = resolveLaneModel(loadConfig(workspaceRoot).consult, lane);
+  if (id === undefined || key === undefined) {
+    return { id: defaultId, key: null, source: null, fromFlag: false };
+  }
+  return { id, key, source: findConfigSource(workspaceRoot, ['consult', 'models', lane]), fromFlag: false };
+}
+
+/**
+ * Attach model provenance to a provider rejection.
+ *
+ * Deliberately does NOT substitute a working id or otherwise recover — a bad model id must fail
+ * loudly. The provider's own text is preserved verbatim and merely annotated, because paraphrasing
+ * a provider error is how you lose the one detail that identifies the real problem.
+ */
+function annotateModelError(err: unknown, lane: string, choice: LaneModelChoice): unknown {
+  // A shipped default can't be misconfigured by the user — nothing useful to add.
+  if (choice.key === null) return err;
+
+  const providerText = err instanceof Error ? err.message : String(err);
+  const where = choice.fromFlag
+    ? 'passed via --model-id'
+    : `from \`${choice.key}\`${choice.source ? ` in ${choice.source}` : ''}`;
+
+  const annotated = new Error(
+    `${providerText}\n\n` +
+    `The ${lane} lane requested model "${choice.id}" (${where}).\n` +
+    `If the provider rejected that id, correct it at the source above. ` +
+    `Codev does not fall back to a default model.`
+  );
+  if (err instanceof Error && err.stack) annotated.stack = err.stack;
+  return annotated;
+}
+
+/**
  * Run Codex consultation via @openai/codex-sdk.
  * Mirrors runClaudeConsultation() — streams events, captures usage, records metrics.
  */
@@ -395,7 +483,15 @@ export async function runCodexConsultation(
   workspaceRoot: string,
   outputPath?: string,
   metricsCtx?: MetricsContext,
+  modelChoice?: LaneModelChoice,
+  reasoningEffort?: ModelReasoningEffort,
 ): Promise<void> {
+  // Absent an explicit choice (direct callers), resolve from config so behavior is identical
+  // whether the caller threads it through or not.
+  const choice = modelChoice ?? resolveLaneModelChoice(workspaceRoot, 'codex', DEFAULT_CODEX_MODEL);
+  const effort = reasoningEffort
+    ?? resolveReasoningEffort(loadConfig(workspaceRoot).consult)
+    ?? DEFAULT_CODEX_REASONING_EFFORT;
   const chunks: string[] = [];
   const startTime = Date.now();
   let usageData: UsageData | null = null;
@@ -414,9 +510,9 @@ export async function runCodexConsultation(
     });
 
     const thread = codex.startThread({
-      model: 'gpt-5.4',
+      model: choice.id,
       sandboxMode: 'read-only',
-      modelReasoningEffort: 'medium',
+      modelReasoningEffort: effort,
       workingDirectory: workspaceRoot,
     });
 
@@ -466,7 +562,7 @@ export async function runCodexConsultation(
       errorMessage = (err instanceof Error ? err.message : String(err)).substring(0, 500);
       exitCode = 1;
     }
-    throw err;
+    throw annotateModelError(err, 'codex', choice);
   } finally {
     // Clean up temp file
     if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile);
@@ -526,13 +622,17 @@ export function buildClaudeConsultEnv(
  * Uses the SDK's query() function instead of CLI subprocess.
  * This avoids the CLAUDECODE nesting guard and enables tool use during reviews.
  */
-async function runClaudeConsultation(
+export async function runClaudeConsultation(
   queryText: string,
   role: string,
   workspaceRoot: string,
   outputPath?: string,
   metricsCtx?: MetricsContext,
+  modelChoice?: LaneModelChoice,
 ): Promise<void> {
+  // Absent an explicit choice (direct callers), resolve from config so behavior is identical
+  // whether the caller threads it through or not.
+  const choice = modelChoice ?? resolveLaneModelChoice(workspaceRoot, 'claude', DEFAULT_CLAUDE_MODEL);
   const chunks: string[] = [];
   const startTime = Date.now();
   let sdkResult: SDKResultLike | undefined;
@@ -555,7 +655,7 @@ async function runClaudeConsultation(
         allowedTools: ['Read', 'Glob', 'Grep'],
         permissionMode: 'bypassPermissions',
         allowDangerouslySkipPermissions: true,
-        model: 'claude-opus-4-6',
+        model: choice.id,
         maxTurns: CLAUDE_MAX_TURNS,
         maxBudgetUsd: 25,
         cwd: workspaceRoot,
@@ -595,7 +695,7 @@ async function runClaudeConsultation(
       errorMessage = (err instanceof Error ? err.message : String(err)).substring(0, 500);
       exitCode = 1;
     }
-    throw err;
+    throw annotateModelError(err, 'claude', choice);
   } finally {
     if (savedClaudeCode !== undefined) {
       process.env.CLAUDECODE = savedClaudeCode;
@@ -975,11 +1075,13 @@ async function runConsultation(
   outputPath?: string,
   metricsCtx?: MetricsContext,
   generalMode?: boolean,
+  modelIdOverride?: string,
 ): Promise<void> {
   // SDK-based models
   if (model === 'claude') {
     const startTime = Date.now();
-    await runClaudeConsultation(query, role, workspaceRoot, outputPath, metricsCtx);
+    const choice = resolveLaneModelChoice(workspaceRoot, 'claude', DEFAULT_CLAUDE_MODEL, modelIdOverride);
+    await runClaudeConsultation(query, role, workspaceRoot, outputPath, metricsCtx, choice);
     const duration = (Date.now() - startTime) / 1000;
     logQuery(workspaceRoot, model, query, duration);
     console.error(`\n[${model} completed in ${duration.toFixed(1)}s]`);
@@ -988,7 +1090,9 @@ async function runConsultation(
 
   if (model === 'codex') {
     const startTime = Date.now();
-    await runCodexConsultation(query, role, workspaceRoot, outputPath, metricsCtx);
+    const choice = resolveLaneModelChoice(workspaceRoot, 'codex', DEFAULT_CODEX_MODEL, modelIdOverride);
+    const effort = resolveReasoningEffort(loadConfig(workspaceRoot).consult) ?? DEFAULT_CODEX_REASONING_EFFORT;
+    await runCodexConsultation(query, role, workspaceRoot, outputPath, metricsCtx, choice, effort);
     const duration = (Date.now() - startTime) / 1000;
     logQuery(workspaceRoot, model, query, duration);
     console.error(`\n[${model} completed in ${duration.toFixed(1)}s]`);
@@ -2092,7 +2196,7 @@ export async function consult(options: ConsultOptions): Promise<void> {
   }
 
   const isGeneralMode = !hasType;
-  await runConsultation(model, query, workspaceRoot, role, outputPath, metricsCtx, isGeneralMode);
+  await runConsultation(model, query, workspaceRoot, role, outputPath, metricsCtx, isGeneralMode, options.modelId);
 }
 
 // Exported for testing
