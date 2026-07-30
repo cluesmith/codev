@@ -1,0 +1,14 @@
+id: '1288'
+title: consult-change-shipped-default
+protocol: air
+phase: implement
+plan_phases: []
+current_plan_phase: null
+gates:
+  pr:
+    status: pending
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-07-30T09:59:39.378Z'
+updated_at: '2026-07-30T09:59:39.379Z'
