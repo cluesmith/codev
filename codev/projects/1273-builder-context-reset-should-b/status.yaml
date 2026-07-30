@@ -31,7 +31,7 @@ gates:
   verify-approval:
     status: pending
 iteration: 2
-build_complete: false
+build_complete: true
 history:
   - iteration: 1
     plan_phase: phase_2
@@ -194,4 +194,4 @@ history:
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/aspir-1273/codev/projects/1273-builder-context-reset-should-b/1273-phase_6-iter1-claude.txt
 started_at: '2026-07-28T00:57:25.240Z'
-updated_at: '2026-07-30T10:38:34.511Z'
+updated_at: '2026-07-30T10:40:02.393Z'
