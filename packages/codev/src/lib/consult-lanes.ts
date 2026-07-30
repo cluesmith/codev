@@ -215,6 +215,12 @@ export function validateLaneList(value: unknown, key: string): void {
   if (!Array.isArray(value)) {
     fail(`Invalid ${key} in Codev config: expected a lane name, an array of lane names, or ${quoted(SPECIAL_MODES)}.`);
   }
+  // An empty array would validate and resolve to "zero lanes, normal mode" — a second, undocumented
+  // way to spell "skip consultation". The spec gives exactly one way to say that, so reject `[]`
+  // and point at it rather than silently honouring an ambiguous synonym.
+  if (value.length === 0) {
+    fail(`Invalid ${key} in Codev config: an empty list is not a valid lane selection. Use "none" to skip consultation.`);
+  }
   for (const lane of value) {
     if (typeof lane !== 'string' || !VALID_LANE_NAMES.includes(lane)) {
       fail(
@@ -340,7 +346,7 @@ export function resolveReasoningEffort(consult: ConsultLaneConfig | undefined): 
   return consult?.reasoningEffort?.codex;
 }
 
-function normalizeLaneList(value: LaneList): { models: string[]; mode: ConsultMode } | null {
+function normalizeLaneList(value: LaneList): { models: string[]; mode: ConsultMode } {
   if (typeof value === 'string') {
     if (value === 'none') return { models: [], mode: 'none' };
     if (value === 'parent') return { models: [], mode: 'parent' };
@@ -390,8 +396,7 @@ export function resolveLaneComposition(
 
   for (const candidate of candidates) {
     if (candidate === undefined) continue;
-    const normalized = normalizeLaneList(candidate);
-    if (normalized) return normalized;
+    return normalizeLaneList(candidate);
   }
 
   return fallback;

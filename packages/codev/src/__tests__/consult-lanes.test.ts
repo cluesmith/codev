@@ -204,6 +204,13 @@ describe('lane list validation (scenario 11)', () => {
   it('rejects an unknown lane name', () => {
     expect(() => validateLaneList(['codexx'], 'k')).toThrow(/Invalid consultation model/);
   });
+
+  // `[]` would otherwise validate and resolve to zero lanes in normal mode — an undocumented
+  // synonym for "none". One spelling per intent; the error has to name the sanctioned one.
+  it('rejects an empty lane list and points at "none"', () => {
+    expect(() => validateLaneList([], 'k')).toThrow(/empty list is not a valid lane selection/);
+    expect(() => validateLaneList([], 'k')).toThrow(/"none"/);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -352,6 +359,22 @@ describe('key-space discovery (scenario 16)', () => {
         { byProtocol: { spir: { modelsByType: { spec: ['nope'] } } } }, tmpDir,
       )).toThrow(/Invalid consultation model/);
     });
+
+    // Same failure family as the null guard above: the rejection has to fire in every nested copy,
+    // not just the top-level one. `[]` is the ambiguous synonym for "none" that must not validate.
+    const emptyListPositions: [string, unknown][] = [
+      ['models', { models: [] }],
+      ['modelsByType.<type>', { modelsByType: { spec: [] } }],
+      ['byProtocol.<name>.models', { byProtocol: { spir: { models: [] } } }],
+      ['byProtocol.<name>.modelsByType.<type>', { byProtocol: { spir: { modelsByType: { spec: [] } } } }],
+    ];
+
+    for (const [label, config] of emptyListPositions) {
+      it(`rejects an empty lane list at ${label}`, () => {
+        expect(() => validateConsultationConfig(config as never, tmpDir))
+          .toThrow(/empty list is not a valid lane selection/);
+      });
+    }
   });
 
   it('rejects a config naming the same protocol by both alias and canonical name', () => {
