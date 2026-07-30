@@ -446,6 +446,23 @@ export async function runReset(options: RunResetOptions): Promise<ResetResult> {
   });
 
   if (!quiet.quiet) {
+    if (quiet.reason === 'terminal-gone') {
+      return {
+        outcome: 'aborted',
+        steps,
+        abortReason:
+          `Builder '${context.builderId}' lost its terminal while waiting for its turn to end. ` +
+          `Nothing was cleared. Its saved state is at ${statePath} — that file survives the ` +
+          `terminal, so respawn with 'afx spawn <id> --resume' and point the new session at it.`,
+        nonce,
+        statePath,
+        reorientPath,
+        payload,
+        saveRequest,
+        stateBytes: receipt.bytes,
+      };
+    }
+
     if (quiet.reason === 'unobservable') {
       return {
         outcome: 'aborted',
@@ -606,7 +623,7 @@ interface AwaitQuiescenceOptions {
   pollIntervalMs: number;
 }
 
-type QuiescenceReason = 'timeout' | 'unobservable';
+type QuiescenceReason = 'timeout' | 'unobservable' | 'terminal-gone';
 
 /**
  * Wait until the terminal has produced no output for `quietWindowMs`.
@@ -623,6 +640,13 @@ async function awaitQuiescence(
 
   for (;;) {
     const observation = await terminal.observe();
+    // Checked BEFORE lastDataAt. A terminal that vanished mid-run also reports
+    // no lastDataAt, and conflating the two sends the architect to check their
+    // Tower version when the real event is that the builder's terminal died.
+    // The two need different responses, so they get different reasons.
+    if (!observation.exists) {
+      return { quiet: false, reason: 'terminal-gone' };
+    }
     if (observation.lastDataAt === undefined) {
       return { quiet: false, reason: 'unobservable' };
     }
@@ -635,6 +659,7 @@ async function awaitQuiescence(
     await clock.sleep(pollIntervalMs);
     if (clock.now() >= deadline) {
       const final = await terminal.observe();
+      if (!final.exists) return { quiet: false, reason: 'terminal-gone' };
       if (final.lastDataAt === undefined) return { quiet: false, reason: 'unobservable' };
       if (clock.now() - final.lastDataAt >= quietWindowMs) return { quiet: true };
       return { quiet: false, reason: 'timeout' };

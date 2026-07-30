@@ -422,6 +422,30 @@ describe('Spec 1273 — R4: no clear while the builder is mid-turn', () => {
     expect(result.abortReason).toMatch(/lastDataAt/);
   });
 
+  it('distinguishes a vanished terminal from an old Tower that omits lastDataAt', async () => {
+    // Both surface as "no lastDataAt", but they need opposite responses: one is
+    // "upgrade Tower", the other is "your builder's terminal died, here is where
+    // its saved state lives". Conflating them sends the architect to check a
+    // version number while the builder is gone.
+    let alive = true;
+    const terminal = makeTerminal({});
+    vi.spyOn(terminal, 'observe').mockImplementation(async () => {
+      if (!alive) return { exists: false };
+      alive = false; // dies right after the receipt is accepted
+      return { exists: true, lastDataAt: 0 };
+    });
+
+    const result = await runReset(baseOptions({ terminal }) as never);
+
+    expect(result.outcome).toBe('aborted');
+    expect(names(result.steps)).not.toContain('clear');
+    expect(result.abortReason).toMatch(/lost its terminal/);
+    // Explicitly NOT the old-Tower diagnosis.
+    expect(result.abortReason).not.toMatch(/lastDataAt/);
+    // And it points at the state file, which outlives the terminal.
+    expect(result.abortReason).toMatch(/\.builder-state\.md/);
+  });
+
   it('clears once the terminal goes quiet after being busy', async () => {
     const clock = makeClock();
     let busy = true;
