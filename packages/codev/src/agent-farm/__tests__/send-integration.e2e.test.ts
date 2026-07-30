@@ -254,12 +254,12 @@ describe('send integration (POST /api/send → /ws/messages)', () => {
     // Guard against setup failure — variables may be undefined
     if (workspaceA) {
       const encA = encodeWorkspacePath(workspaceA);
-      await fetch(`http://localhost:${TEST_TOWER_PORT}/api/workspaces/${encA}/deactivate`, { method: 'POST' }).catch(() => {});
+      await fetch(`http://localhost:${TEST_TOWER_PORT}/api/workspaces/${encA}/deactivate`, { method: 'POST', signal: AbortSignal.timeout(10_000) }).catch(() => {});
       cleanupWorkspace(workspaceA);
     }
     if (workspaceB) {
       const encB = encodeWorkspacePath(workspaceB);
-      await fetch(`http://localhost:${TEST_TOWER_PORT}/api/workspaces/${encB}/deactivate`, { method: 'POST' }).catch(() => {});
+      await fetch(`http://localhost:${TEST_TOWER_PORT}/api/workspaces/${encB}/deactivate`, { method: 'POST', signal: AbortSignal.timeout(10_000) }).catch(() => {});
       cleanupWorkspace(workspaceB);
     }
 
@@ -270,7 +270,10 @@ describe('send integration (POST /api/send → /ws/messages)', () => {
     try { rmSync(`${dbBase}.db`, { force: true }); } catch { /* ignore */ }
     try { rmSync(`${dbBase}.db-wal`, { force: true }); } catch { /* ignore */ }
     try { rmSync(`${dbBase}.db-shm`, { force: true }); } catch { /* ignore */ }
-  }, 10_000);
+    // 120s to match beforeAll — the old explicit 10s override was tighter than
+    // the two deactivate calls + stopServer's SIGTERM wait can guarantee on a
+    // loaded CI runner, and a slow teardown failed the whole green suite.
+  }, 120_000);
 
   // ---- Single-workspace send tests ----
 
