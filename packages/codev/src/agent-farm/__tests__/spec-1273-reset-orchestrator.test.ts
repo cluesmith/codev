@@ -261,6 +261,19 @@ describe('Spec 1273 — reset orchestrator: happy path', () => {
     expect(terminal.escapes).toBe(0);
   });
 
+  it('does NOT count the echo of the typed /clear as confirmation', async () => {
+    // The PTY echoes input, so `/clear` is guaranteed to appear in recent
+    // output on every single run. Treating that as confirmation made the check
+    // self-fulfilling — it reported "clear-confirmed" whether or not anything
+    // was cleared. A false "confirmed" is worse than the earlier always-
+    // unconfirmed bug, because the architect trusts it.
+    const terminal = makeTerminal({ quietness: QUIET, recentOutput: '> /clear\n> ' });
+    const result = await runReset(baseOptions({ terminal }) as never);
+
+    expect(names(result.steps)).toContain('clear-unconfirmed');
+    expect(names(result.steps)).not.toContain('clear-confirmed');
+  });
+
   it('reports the clear as confirmed when the terminal echoes it', async () => {
     const terminal = makeTerminal({ quietness: QUIET, recentOutput: 'context cleared' });
     const result = await runReset(baseOptions({ terminal }) as never);

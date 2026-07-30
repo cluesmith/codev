@@ -681,7 +681,15 @@ async function confirmClear(terminal: TerminalPort): Promise<boolean> {
   try {
     const output = await terminal.readRecentOutput();
     if (!output) return false;
-    return /context (?:cleared|reset)|conversation cleared|\/clear/i.test(output);
+    // Matches only what the HARNESS says after clearing — never the echo of the
+    // `/clear` we just typed. Including `/clear` in this pattern made the check
+    // self-fulfilling: the PTY echoes typed input, so every run reported
+    // "clear-confirmed" whether or not anything was cleared. That is the same
+    // defect as the earlier always-unconfirmed bug wearing the opposite mask,
+    // and it is worse, because a false "confirmed" is trusted.
+    return /context (?:cleared|reset)|conversation (?:cleared|reset)|cleared conversation/i.test(
+      output,
+    );
   } catch {
     // Confirmation must never be able to fail the run — it is a report field.
     return false;
