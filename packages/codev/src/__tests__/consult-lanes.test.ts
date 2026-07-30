@@ -214,6 +214,40 @@ describe('lane list validation (scenario 11)', () => {
 });
 
 // ---------------------------------------------------------------------------
+// The config-vs-protocol asymmetry for `[]`
+//
+// Rejecting `[]` in config is only safe because the shipped EXPERIMENT and SPIKE protocols use
+// `defaults.consultation.models: []` to mean "no consultations" and reach the resolver by a
+// different route. These tests pin that boundary: break it and those two protocols break with it.
+// ---------------------------------------------------------------------------
+
+describe('empty lane lists: rejected from config, honoured from a protocol', () => {
+  it('rejects [] as config while resolving [] from a protocol to zero lanes', () => {
+    expect(() => validateLaneList([], 'porch.consultation.models')).toThrow(/empty list/);
+
+    // Same value, protocol route: flows in as `protocolModels` and is returned untouched.
+    expect(resolveLaneComposition(undefined, 'experiment', 'impl', [], os.tmpdir()))
+      .toEqual({ models: [], mode: 'normal' });
+  });
+
+  it('the shipped EXPERIMENT and SPIKE protocols still resolve to zero lanes', () => {
+    const skeletonProtocols = path.join(getSkeletonDir(), 'protocols');
+    if (!fs.existsSync(skeletonProtocols)) return; // bare-source checkout
+
+    for (const name of ['experiment', 'spike']) {
+      const file = path.join(skeletonProtocols, name, 'protocol.json');
+      if (!fs.existsSync(file)) continue;
+      const declared = JSON.parse(fs.readFileSync(file, 'utf8')).defaults?.consultation?.models;
+
+      // Guard the premise: if a protocol stops shipping [], this test is no longer proving anything.
+      expect(declared, `${name} should declare zero-consultation via []`).toEqual([]);
+      expect(resolveLaneComposition(undefined, name, undefined, declared, os.tmpdir()))
+        .toEqual({ models: [], mode: 'normal' });
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Scenario 16 — key-space discovery
 // ---------------------------------------------------------------------------
 

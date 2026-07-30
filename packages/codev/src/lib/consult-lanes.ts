@@ -218,6 +218,15 @@ export function validateLaneList(value: unknown, key: string): void {
   // An empty array would validate and resolve to "zero lanes, normal mode" — a second, undocumented
   // way to spell "skip consultation". The spec gives exactly one way to say that, so reject `[]`
   // and point at it rather than silently honouring an ambiguous synonym.
+  //
+  // DELIBERATE ASYMMETRY: this rejection applies to USER-AUTHORED CONFIG only. The shipped
+  // EXPERIMENT and SPIKE protocols declare `defaults.consultation.models: []` (with
+  // `enabled: false`) to mean "this protocol runs no consultations", and that has always been
+  // their meaning. Protocol JSON is a shipped artifact with established semantics; config is user
+  // input where an ambiguous synonym is a usability bug. Protocol models reach
+  // `resolveLaneComposition` as `protocolModels` and never pass through this validator — so
+  // EXPERIMENT/SPIKE keep working. If you ever route protocol models through here, those two
+  // protocols break on the day it ships.
   if (value.length === 0) {
     fail(`Invalid ${key} in Codev config: an empty list is not a valid lane selection. Use "none" to skip consultation.`);
   }
