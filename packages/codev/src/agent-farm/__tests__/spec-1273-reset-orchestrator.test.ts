@@ -556,6 +556,130 @@ describe('Spec 1273 — CLI-facing behaviour', () => {
 });
 
 // ============================================================================
+// Scenario 14a — the wedged builder (the incident this feature came from)
+// ============================================================================
+
+describe('Spec 1273 scenario 14a — a wedged builder recovers via --interrupt-first', () => {
+  /**
+   * Simulates the failure this whole feature exists for.
+   *
+   * A builder chains foreground waits inside one turn. Every `afx send` —
+   * including the save request — queues UNREAD until the turn ends, so the
+   * state file never appears and the terminal never goes quiet. ESC ends the
+   * turn; the queued messages then process. Verified in production (shannon,
+   * 2026-07-27): a builder wedged 45+ minutes resumed within two minutes of
+   * receiving ESC.
+   *
+   * The wedge is modelled at the only place it is observable to reset: the
+   * builder does not act on messages, and its terminal keeps emitting. The ESC
+   * is what flips both.
+   */
+  function makeWedgedBuilder(clock: ReturnType<typeof makeClock>) {
+    let awake = false;
+    let nonce = '';
+    const raw: string[] = [];
+    const messages: string[] = [];
+    let escapes = 0;
+
+    const terminal: TerminalPort & { raw: string[]; messages: string[]; escapes: number } = {
+      raw,
+      messages,
+      get escapes() {
+        return escapes;
+      },
+      async observe() {
+        // Mid-turn the PTY emits continuously; once the turn ends it falls silent.
+        return { exists: true, lastDataAt: awake ? 0 : clock.now() };
+      },
+      async sendMessage(message: string) {
+        messages.push(message);
+        // A wedged builder RECEIVES the message but never reads it — the whole
+        // point of the wedge. The nonce is only learned once awake.
+        if (awake) {
+          const match = message.match(/([0-9a-f]{12})/);
+          if (match) nonce = match[1];
+        }
+      },
+      async sendRaw(text: string) {
+        raw.push(text);
+      },
+      async sendEscape() {
+        escapes++;
+        awake = true;
+        // The queued save request now processes: re-read what was already sent.
+        for (const m of messages) {
+          const match = m.match(/([0-9a-f]{12})/);
+          if (match) nonce = match[1];
+        }
+      },
+    };
+
+    const fs: ResetFsPort & { writes: Array<{ path: string; content: string }> } = {
+      writes: [],
+      read(path: string) {
+        if (!path.endsWith('.builder-state.md')) return null;
+        return nonce ? `nonce ${nonce}\nworking state, written for a cold reader` : null;
+      },
+      sizeOf(path: string) {
+        if (!path.endsWith('.builder-state.md')) return null;
+        return nonce ? 5000 : null;
+      },
+      write(path: string, content: string) {
+        this.writes.push({ path, content });
+      },
+    };
+
+    return { terminal, fs };
+  }
+
+  it('completes the full flow when --interrupt-first breaks the turn', async () => {
+    const clock = makeClock();
+    const { terminal, fs } = makeWedgedBuilder(clock);
+
+    const result = await runReset(
+      baseOptions({
+        clock,
+        terminal,
+        fs,
+        interruptFirst: true,
+        receiptTimeoutMs: 60_000,
+        quiesceTimeoutMs: 20_000,
+      }) as never,
+    );
+
+    expect(result.outcome).toBe('completed');
+    const order = names(result.steps);
+    // The ESC precedes the save request — that ordering is what makes the
+    // request readable at all.
+    expect(order.indexOf('interrupt-first')).toBeLessThan(order.indexOf('send-save-request'));
+    expect(order).toContain('receipt-accepted');
+    expect(order).toContain('clear');
+    expect(terminal.raw).toContain('/clear');
+  });
+
+  it('aborts without clearing when the same builder is reset WITHOUT the flag', async () => {
+    // The control case, and the more important half: it proves the flag is what
+    // made the difference rather than the harness being permissive. Same wedged
+    // builder, no --interrupt-first — the request is never read, the receipt
+    // never verifies, and nothing is cleared.
+    const clock = makeClock();
+    const { terminal, fs } = makeWedgedBuilder(clock);
+
+    const result = await runReset(
+      baseOptions({ clock, terminal, fs, receiptTimeoutMs: 20_000 }) as never,
+    );
+
+    expect(result.outcome).toBe('aborted');
+    expect(names(result.steps)).not.toContain('clear');
+    expect(terminal.raw).not.toContain('/clear');
+    expect(terminal.escapes).toBe(0);
+    // And the abort message points at the recovery, so an architect hitting
+    // this learns the flag exists at the moment they need it.
+    expect(result.abortReason).toMatch(/--interrupt-first/);
+  });
+});
+
+// ============================================================================
 // Timing parameters cannot be used to switch a gate off
 // ============================================================================
 
