@@ -1,0 +1,17 @@
+id: '1288'
+title: consult-change-shipped-default
+protocol: air
+phase: pr
+plan_phases: []
+current_plan_phase: null
+gates:
+  pr:
+    status: approved
+    requested_at: '2026-07-30T10:11:02.615Z'
+    approved_at: '2026-07-30T10:33:43.250Z'
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-07-30T09:59:39.378Z'
+updated_at: '2026-07-30T10:33:43.251Z'
+pr_ready_for_human: false

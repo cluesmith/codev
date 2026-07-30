@@ -90,6 +90,10 @@ After completing the spec draft, signal completion. Porch will run 3-way consult
 
 Create or update the specification file at `codev/specs/{{artifact_name}}.md`.
 
+Follow the canonical spec template reproduced below. Use these headings, in this order — do not invent your own structure, and do not pattern-match an earlier spec in `codev/specs/` that predates this template. If a section genuinely does not apply, keep the heading and write a one-line "N/A — [reason]" rather than deleting it.
+
+{{> protocols/spir/templates/spec.md}}
+
 **IMPORTANT**: Keep spec/plan/review filenames in sync:
 - Spec: `codev/specs/{{artifact_name}}.md`
 - Plan: `codev/plans/{{artifact_name}}.md`

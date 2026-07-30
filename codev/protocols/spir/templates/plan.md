@@ -182,23 +182,3 @@ Phase 1 ──→ Phase 2 ──→ Phase 3
 ## Notes
 [Additional context, assumptions, or considerations]
 
----
-
-## Amendment History
-
-This section tracks all TICK amendments to this plan. TICKs modify both the spec and plan together as an atomic unit.
-
-<!-- When adding a TICK amendment, add a new entry below this line in chronological order -->
-
-<!--
-### TICK-001: [Amendment Title] (YYYY-MM-DD)
-
-**Changes**:
-- [Phase added]: [Description of new phase]
-- [Phase modified]: [What was updated]
-- [Implementation steps]: [New steps added]
-
-**Review**: See `reviews/####-name-tick-001.md`
-
----
--->

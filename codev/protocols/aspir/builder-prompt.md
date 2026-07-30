@@ -68,11 +68,33 @@ By default, the PR is opened during/after the final implement phase, with all ph
 
 The architect MAY request a PR at any point — for spec review, mid-implementation feedback, slicing a large spec into shippable PRs, etc. When the architect explicitly asks for a PR earlier (or for additional PRs), follow that direction. The prohibition is specifically on the *builder* autonomously deciding to open per-phase PRs without architect request.
 
+### Multi-PR Mechanics (when the architect requests sequential PRs)
+
+Your worktree is persistent — it survives across PR merges. When the architect asks for sequential PRs (e.g., to slice a large spec into shippable pieces), use this loop:
+
+1. Cut a branch, open a PR, wait for merge
+2. After merge: `git fetch origin <integration-branch> && git checkout -b <next-branch> origin/<integration-branch>` — where `<integration-branch>` is the branch the architect targets PRs at (usually `main`; check the open PR's `baseRefName` if unsure)
+3. Continue to the next slice, open another PR
+
+**Important**: Do NOT run `git checkout <integration-branch>` — git worktrees cannot check out a branch that's checked out elsewhere. Always branch off `origin/<integration-branch>` via fetch.
+
+Record PRs: `porch done {{project_id}} --pr <N> --branch <name>`
+Record merges: `porch done {{project_id}} --merged <N>`
+
+## Verify Phase
+
+After the final PR merges, the project enters the **verify** phase. You stay alive through verify:
+1. Pull the integration branch into your worktree
+2. Run `porch done {{project_id}}` to signal verification is ready
+3. The architect approves `verify-approval` when satisfied
+
+If verification is not needed: `porch verify {{project_id}} --skip "reason"`
+
 ## Notifications
 Always use `afx send architect "..."` to notify the architect at key moments:
 - **Gate reached**: `afx send architect "Project {{project_id}}: <gate-name> ready for approval"`
 - **PR ready**: `afx send architect "PR #N ready for review (project {{project_id}})"`
-- **PR merged**: `afx send architect "Project {{project_id}} complete. PR merged. Ready for cleanup."`
+- **PR merged**: `afx send architect "Project {{project_id}} PR merged. Entering verify phase."`
 - **Blocked**: `afx send architect "Blocked on project {{project_id}}: [reason]"`
 
 ## Handling Flaky Tests

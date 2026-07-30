@@ -17,12 +17,24 @@ consult stats [options]
 
 ## Models
 
-| Model | Alias | Backend | Notes |
-|-------|-------|---------|-------|
-| `gemini` | `pro` | Antigravity CLI (`agy`) | Agentic file access (`--sandbox --add-dir`), OAuth/subscription login. Skips non-blockingly if `agy` is missing/unauthed. |
-| `codex` | `gpt` | @openai/codex | Read-only sandbox, thorough |
-| `claude` | `opus` | Claude Agent SDK | Balanced analysis with tool use |
-| `hermes` | - | hermes CLI (`hermes chat -q`) | Uses Hermes agent as consult backend |
+| Model | Alias | Backend | Shipped default model id | Notes |
+|-------|-------|---------|--------------------------|-------|
+| `gemini` | `pro` | Antigravity CLI (`agy`) | *(agy's own default — no pinned id)* | Agentic file access (`--sandbox --add-dir`), OAuth/subscription login. Skips non-blockingly if `agy` is missing/unauthed. |
+| `codex` | `gpt` | @openai/codex | `gpt-5.6-sol` (medium reasoning effort) | Read-only sandbox, thorough |
+| `claude` | `opus` | Claude Agent SDK | `claude-opus-5` | Balanced analysis with tool use |
+| `hermes` | - | hermes CLI (`hermes chat -q`) | *(hermes' own default)* | Uses Hermes agent as consult backend |
+
+> **The codex lane's `-sol` suffix is load-bearing.** Plain `gpt-5.6` and `gpt-5.6-codex` are both
+> rejected by Codex when running on a ChatGPT account (`The '<id>' model is not supported when
+> using Codex with a ChatGPT account.`). Don't "simplify" the id — a unit test pins it.
+
+### Cost reporting
+
+Codex consultation cost is computed from OpenAI's published per-1M-token rates for the lane's
+model. If a model has no rates recorded in Codev, the consultation still runs and its token counts
+are still recorded, but `cost_usd` is stored as `null` rather than billed at some other model's
+rates. Only OpenAI's standard pricing tier is modelled — costs for consultations large enough to
+enter the long-context tier are under-reported.
 
 ## Modes
 

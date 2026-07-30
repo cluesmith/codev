@@ -29,7 +29,7 @@ Builders work autonomously in isolated git worktrees. The Architect:
 
 1. **`git status`** — Ensure worktree is clean (no uncommitted changes)
 2. **Commit if needed** — Builders branch from HEAD; uncommitted specs/plans are invisible
-3. **`afx spawn N --protocol <name>`** — `--protocol` is **REQUIRED** (spir, bugfix, tick, etc.)
+3. **`afx spawn N --protocol <name>`** — `--protocol` is **REQUIRED** (spir, aspir, air, bugfix, etc.)
 
 The spawn command will refuse if the worktree is dirty (override with `--force`, but your builder won't see uncommitted files).
 
@@ -244,13 +244,14 @@ afx cleanup -p 0042
 2. **DO NOT commit directly to main** - All changes go through builder PRs
 3. **DO NOT use `afx send` for long messages** - Use GitHub PR comments instead
 4. **DO NOT run `afx` commands from inside a builder worktree** - All `afx` commands must be run from the repository root on `main`. Spawning from a worktree nests builders inside it, breaking everything.
+5. **DO NOT `cd` into a builder worktree** - All CLI tools (`afx`, `porch`, `consult`, `codev`) are global commands that work from any directory. If a command fails, debug it — don't cd into the worktree. Use absolute paths with the Read tool to inspect builder files (e.g., `Read /path/to/.builders/0042/codev/specs/...`).
 
 ### ALWAYS Do These:
 1. **Create GitHub Issues first** - Track projects as issues before spawning
 2. **Review artifacts before approving gates** - (Strict mode) Read the spec/plan carefully
 3. **Use PR comments for feedback** - Not terminal send-keys
 4. **Let builders own their work** - Guide, don't take over
-5. **Stay on `main` at the repo root** - All architect operations happen from the main workspace
+5. **Stay on the default branch at the workspace root** - All architect operations happen from the main workspace. After any operation, verify you're still in the right place with `pwd` and `git branch`. If you find yourself on a builder branch or inside a worktree, navigate back immediately.
 
 ## Project Tracking
 
@@ -267,28 +268,30 @@ gh issue view 42
 Update status as projects progress:
 - `conceived` → `specified` → `planned` → `implementing` → `committed` → `integrated`
 
-## Working with Area Labels
+## Working with Project Labels
+
+If your project uses prefix-structured labels (e.g. `area/*`, `team/*`, `priority/*`) to organize issues, the recipes below are the architect-specific bulk operations — substitute `<prefix>` and `<value>` for your project's actual labels. (Skip this section if your project doesn't use prefix-structured labels.)
 
 **Operational recipes:**
 
 ```bash
 # Confirm the current label vocabulary (use before any label op to catch drift)
-gh label list --search area/
+gh label list --search "<prefix>/"
 
-# Group: tally open issues by area
+# Group: tally open issues by <prefix>/* label
 gh issue list --state open --limit 500 --json number,title,labels --jq \
-  'group_by([.labels[].name | select(startswith("area/"))]) | .[] | "\(.[0].labels[] | select(.name | startswith("area/")).name): \(length)"'
+  'group_by([.labels[].name | select(startswith("<prefix>/"))]) | .[] | "\(.[0].labels[] | select(.name | startswith("<prefix>/")).name): \(length)"'
 
-# Edit: change area on a single issue
-gh issue edit <N> --remove-label area/old --add-label area/new
+# Edit: change a label on a single issue
+gh issue edit <N> --remove-label <prefix>/<old> --add-label <prefix>/<new>
 
-# Audit: find open issues with no area label
+# Audit: find open issues with no <prefix>/* label
 gh issue list --state open --limit 500 --json number,title,labels \
-  --jq '.[] | select([.labels[].name] | any(startswith("area/")) | not) | "#\(.number) \(.title)"'
+  --jq '.[] | select([.labels[].name] | any(startswith("<prefix>/")) | not) | "#\(.number) \(.title)"'
 
-# Bulk-move: relabel all open `area/<old>` issues to `area/<new>`
-for n in $(gh issue list --state open --limit 500 --label area/old --json number --jq '.[].number'); do
-  gh issue edit "$n" --remove-label area/old --add-label area/new
+# Bulk-move: relabel all open <prefix>/<old> issues to <prefix>/<new>
+for n in $(gh issue list --state open --limit 500 --label <prefix>/<old> --json number --jq '.[].number'); do
+  gh issue edit "$n" --remove-label <prefix>/<old> --add-label <prefix>/<new>
 done
 ```
 

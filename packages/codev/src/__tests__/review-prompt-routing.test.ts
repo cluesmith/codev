@@ -18,7 +18,8 @@ const ROUTING_FILES = [
   'protocols/aspir/prompts/review.md',
   'protocols/pir/prompts/review.md',
   'protocols/spir/templates/review.md',
-  'protocols/aspir/templates/review.md',
+  // aspir/templates/ was deleted in #1279 — ASPIR includes SPIR's templates, so
+  // there is one copy to keep routed rather than two that can drift apart.
 ];
 
 const files: string[] = [];
