@@ -382,8 +382,61 @@ function commandExists(cmd: string): boolean {
   }
 }
 
-// Codex pricing for cost computation (matches values from old SUBPROCESS_MODEL_PRICING)
-const CODEX_PRICING = { inputPer1M: 2.00, cachedInputPer1M: 1.00, outputPer1M: 8.00 };
+/**
+ * Shipped default model id for the codex consult lane (#1288).
+ *
+ * The `-sol` suffix is LOAD-BEARING. Both plain `gpt-5.6` and `gpt-5.6-codex`
+ * were live-probed on 2026-07-29 and rejected by Codex with a ChatGPT account
+ * ("The '<id>' model is not supported when using Codex with a ChatGPT
+ * account."). Do not "simplify" this id — `default-models.test.ts` guards it.
+ */
+export const DEFAULT_CODEX_MODEL = 'gpt-5.6-sol';
+
+/** Shipped default reasoning effort for the codex consult lane. */
+export const DEFAULT_CODEX_REASONING_EFFORT = 'medium' as const;
+
+/** Shipped default model id for the claude consult lane (#1288). */
+export const DEFAULT_CLAUDE_MODEL = 'claude-opus-5';
+
+interface CodexModelPricing {
+  inputPer1M: number;
+  cachedInputPer1M: number;
+  outputPer1M: number;
+}
+
+/**
+ * Per-1M-token codex rates, keyed by model id. Verified against
+ * https://developers.openai.com/api/docs/pricing on 2026-07-30.
+ *
+ * Only OpenAI's *standard* tier is modelled; the separate long-context tier
+ * (charged above the standard context threshold) is not, so cost is
+ * under-reported for unusually large consultations.
+ *
+ * A model id absent from this table yields `costUsd: null` rather than a cost
+ * computed from some other model's rates — a confidently wrong number is worse
+ * than none.
+ */
+const CODEX_PRICING: Record<string, CodexModelPricing> = {
+  'gpt-5.6-sol': { inputPer1M: 5.00, cachedInputPer1M: 0.50, outputPer1M: 30.00 },
+};
+
+/**
+ * Compute codex consultation cost in USD, or null when the model's published
+ * rates are unknown.
+ */
+export function computeCodexCost(
+  model: string,
+  inputTokens: number,
+  cachedInputTokens: number,
+  outputTokens: number,
+): number | null {
+  const pricing = CODEX_PRICING[model];
+  if (!pricing) return null;
+  const uncached = inputTokens - cachedInputTokens;
+  return (uncached / 1_000_000) * pricing.inputPer1M
+       + (cachedInputTokens / 1_000_000) * pricing.cachedInputPer1M
+       + (outputTokens / 1_000_000) * pricing.outputPer1M;
+}
 
 /**
  * Run Codex consultation via @openai/codex-sdk.
@@ -414,9 +467,9 @@ export async function runCodexConsultation(
     });
 
     const thread = codex.startThread({
-      model: 'gpt-5.4',
+      model: DEFAULT_CODEX_MODEL,
       sandboxMode: 'read-only',
-      modelReasoningEffort: 'medium',
+      modelReasoningEffort: DEFAULT_CODEX_REASONING_EFFORT,
       workingDirectory: workspaceRoot,
     });
 
@@ -436,10 +489,7 @@ export async function runCodexConsultation(
         // output_tokens already includes reasoning_output_tokens (OpenAI Responses-API
         // convention) — do NOT add the latter to cost or reasoning is double-billed.
         const output = event.usage.output_tokens;
-        const uncached = input - cached;
-        const cost = (uncached / 1_000_000) * CODEX_PRICING.inputPer1M
-                   + (cached / 1_000_000) * CODEX_PRICING.cachedInputPer1M
-                   + (output / 1_000_000) * CODEX_PRICING.outputPer1M;
+        const cost = computeCodexCost(DEFAULT_CODEX_MODEL, input, cached, output);
         usageData = { inputTokens: input, cachedInputTokens: cached, outputTokens: output, costUsd: cost };
       }
       if (event.type === 'turn.failed') {
@@ -555,7 +605,7 @@ async function runClaudeConsultation(
         allowedTools: ['Read', 'Glob', 'Grep'],
         permissionMode: 'bypassPermissions',
         allowDangerouslySkipPermissions: true,
-        model: 'claude-opus-4-6',
+        model: DEFAULT_CLAUDE_MODEL,
         maxTurns: CLAUDE_MAX_TURNS,
         maxBudgetUsd: 25,
         cwd: workspaceRoot,
