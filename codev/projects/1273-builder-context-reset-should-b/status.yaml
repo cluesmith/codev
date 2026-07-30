@@ -27,8 +27,9 @@ plan_phases:
 current_plan_phase: null
 gates:
   pr:
-    status: pending
+    status: approved
     requested_at: '2026-07-30T10:59:16.086Z'
+    approved_at: '2026-07-30T11:20:42.697Z'
   verify-approval:
     status: pending
 iteration: 1
@@ -275,5 +276,5 @@ history:
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/aspir-1273/codev/projects/1273-builder-context-reset-should-b/1273-phase_6-iter6-claude.txt
 started_at: '2026-07-28T00:57:25.240Z'
-updated_at: '2026-07-30T10:59:16.086Z'
-pr_ready_for_human: true
+updated_at: '2026-07-30T11:20:42.698Z'
+pr_ready_for_human: false
