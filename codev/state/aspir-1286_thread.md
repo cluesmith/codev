@@ -230,3 +230,41 @@ another route. Position unchanged and deliberate: not bumping the baseline, not 
 skipping the test, not starting phase_2. Resume sequence on merge is fixed — rebase onto main →
 `porch done 1286` → phase_2 — with the #1288 defaults re-check (`claude-opus-5` / `gpt-5.6-sol`)
 folded into the same pass.
+
+## Unblocked — rebase onto main, and three things the rebase taught
+
+Architect merged #1290 (admin-authorized). Rebased; phase_1 checks are now **green**
+(build 4.9s ✓, tests 27.6s ✓). The baseline test that held this phase for a day passes 9/9 against
+#1290's frozen sample set, and my copy of `prompt-behavior-metrics.test.ts` is byte-identical to
+main — the "don't touch the baseline" ruling held all the way through.
+
+Three non-obvious things, each worth the next builder's attention:
+
+**1. A commit and its own revert both conflict on rebase.** `8ca1ef48` (exclude in-flight projects)
+and `608baf1a` (its revert) each collided with #1290's rewrite of the same file. Skipping both is
+correct *only if* they truly cancel, so I proved it first rather than assuming the word "Revert" in
+a subject line: `git diff 8ca1ef48~1 608baf1a` touched only an unrelated `status.yaml` and left the
+test file untouched. Pre-rebase tip recorded (`e9405d9e`) before skipping anything.
+
+**2. `origin/main` moved *during* the rebase, and the symptom was alarming and wrong.** #1287
+(bugfix-1279 closeout) landed between my fetch and my verification, so `git diff origin/main --stat`
+showed my branch deleting 41 lines from *another builder's* thread file. What proved it innocent:
+`git log origin/main..HEAD -- <file>` returned no commit, and `git merge-base --is-ancestor` said
+main was not an ancestor of HEAD — i.e. stale ref, not a destructive edit. Re-fetch, rebase again,
+`--is-ancestor` passes. Lesson: when a diff accuses you of deleting someone else's work, check
+ancestry before you check your own conscience.
+
+**3. Rebase then makes `porch done` fail at a step that has nothing to do with your phase.**
+Checks passed, then `writeStateAndCommit failed: git push -u origin HEAD (non-fast-forward)` —
+rewritten history vs. the stale remote branch. Before force-pushing I verified the remote held
+nothing unique: every "lost" commit was an old SHA of my own work, its `status.yaml` was strictly
+older (`build_complete: false`, and bugfix-1279 at `pr` vs main's `verified`), and no PR was open on
+the branch. `--force-with-lease`, not `--force`. Note the ordering trap: the failed run had already
+committed `build_complete: true` locally but aborted the transition, so `porch done` needed a second
+run — the first one's partial success is invisible unless you read the log.
+
+Also re-checked #1288 per the architect: still an open issue with **no PR**, so nothing to fold in.
+Defaults stay as shipped; the two-layer test structure keeps that a one-line change later. Will
+re-check main at each subsequent phase.
+
+Now running the phase_1 iter2 3-way review (gemini/codex/claude, `--type impl`).
