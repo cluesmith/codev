@@ -334,3 +334,42 @@ never ran is worse than no test.
 82 tests, full suite 3875 passed / 0 failed, tsc clean. Per the architect this rides into the
 **phase_2 CMAP explicitly** rather than passing as reviewed — it will be called out in that round's
 context. Now starting phase_2 proper (consult lane model wiring).
+
+## phase_2 — the flag that parsed perfectly and did nothing
+
+Wired both SDK lanes to `consult.models.<lane>`, codex's `modelReasoningEffort`, and a
+`--model-id` per-invocation override. Shipped defaults now live in named constants so zero-config
+behavior is preserved by construction rather than by a new default written elsewhere.
+
+**The finding that justifies the manual test line in the plan.** I had the option registered in
+`cli.ts`, the field on `ConsultOptions`, both runners threaded, and 20 green unit tests asserting the
+configured id reached each SDK. Every one of those was true. The flag still did nothing: `cli.ts`'s
+action builds an **explicit** `ConsultOptions` object, so `modelId` was silently dropped on the way
+through. Registering an option is not wiring it.
+
+The near-miss is the interesting part. My first end-to-end run with
+`--model-id definitely-not-a-real-model-xyz` printed a cheerful `OK` and wrote a review file. The
+plan had *already anticipated* a risk that reads exactly like that symptom — "an SDK swallows a bad
+id and silently substitutes, defeating fail-fast" — so the tempting move was to file this under a
+known, documented, already-mitigated risk and move on. Probing the SDK directly instead killed that
+theory: codex rejects unknown ids with a 400 `invalid_request_error`. The id had never arrived. A
+pre-existing hypothesis that fits the symptom is the most expensive kind of wrong.
+
+Verified after the fix against a genuine provider rejection: verbatim 400 text, the key
+(`consult.models.codex`), the exact config file that supplied it, exit 1, **no review file**. Flag
+path names `--model-id` instead; a default-model failure stays unannotated, since there is no user
+config to correct.
+
+Mutation-tested both guards rather than trusting green: re-hardcoding codex's model fails 2 unit
+tests; removing the `cli.ts` forwarding fails exactly the new regression test. The guard costs no
+network call — a syntax-invalid `--model-id` is rejected by the resolver before any provider call.
+
+**Caveat on that guard's reach**: it lives in `consult.e2e.test.ts`, which the default vitest config
+excludes via `**/*.e2e.test.ts`. It runs in the *CLI Integration Tests* CI job, so it protects the
+merge, but it will NOT fire in porch's local `tests` check during phase iterations.
+
+Also: never run `npm run build` while the suite is running here. Its `copy-skeleton` step is
+`rm -rf skeleton && cp -r`, and skeleton-reading tests fail mid-flight. I reported "2 failed" from
+exactly that self-inflicted race before re-running clean at 3895 passed / 0 failed.
+
+Final: tsc 0 · unit 3895 passed / 0 failed · CLI integration 93 passed / 0 failed.
