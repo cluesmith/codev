@@ -265,6 +265,43 @@ builder needs `pnpm -w run local-install` (restarts Tower, affects every builder
 the architect's call, flagged since phase 1 and still open. 3926 tests passing is not the same as "it
 works", and I am not claiming otherwise.
 
+## Implement phases 6–7 complete — 2026-07-30
+
+Phase 6 took **7 CMAP iterations**, every one a genuine wrapper-level defect, every one found by Codex
+while Gemini and Claude approved. In order: addressing parity (`getBuilder` exact-match, while my own
+docstring claimed `afx send` parity) + a `--dry-run` that printed a blank line under its save-request
+header; numeric flags that silently **switch off R2/R4** (`--quiet-window -1` makes quiescence pass
+instantly; `--timeout nope` yields a NaN deadline that never fires); `readRecentOutput` never bound, so
+`/clear` confirmation could only ever pass in tests; the promised scenario-14a coverage skipped without the
+annotation the plan required; terminal writability never preflighted; and a vanished terminal misreported
+as an old-Tower `lastDataAt` problem.
+
+**The through-line, stated once because it is the project's main output:** the orchestrator — the
+dangerous, carefully-designed part — was right almost immediately. Every defect was in the boring wiring,
+and the state-machine tests were *structurally blind* to all of it. A pure state machine over injected
+ports cannot tell whether `sendRaw` was bound to Tower's `raw` route or its `escape` route, whether the
+builder was found by exact id or the shared resolver, or whether `readRecentOutput` exists in production.
+I proved the hard part thoroughly and left the easy part unproven, which is exactly where the bugs were.
+`spec-1273-reset-command.test.ts` exists because of that and is now carrying its fourth regression.
+
+Two of these were **silent-success** failures — the worst class here. `/clear` bound to the escape route
+would have reported a clean run while the builder kept its entire context. `--quiet-window -1` would have
+cleared a builder mid-turn and printed a tidy step log. Both are the precise outcome the step-log design
+exists to make impossible, and both were reachable without touching the state machine.
+
+**Process bug of my own making, worth recording:** I ran consults directly instead of via `porch next`'s
+task, so porch never registered iterations 2–7 — its counter sat at 2 while I was on 7. The consult files
+were all genuine and correctly named, so walking porch back through the rounds reconstructed the true
+history, but the lesson is plain: **in strict mode, take the consultation task from `porch next`; don't
+run the commands yourself and assume porch is watching.** It is not.
+
+Phase 7 (docs) passed **unanimously on iteration 1** — the only phase to do so. Wait discipline now lives
+in both `roles/builder.md` copies (byte-identical), `afx reset`/`afx interrupt` are in both command-doc
+trees, and both skill trees are updated. 18 docs tests assert the cross-tree agreement, because "updated
+one, forgot the twin" is invisible in review — the file you are reading looks correct.
+
+Suite 3894 → 3976 across the two phases. Build clean throughout.
+
 ## Status
 
 - [x] Explored afx/Tower internals
@@ -277,8 +314,9 @@ works", and I am not claiming otherwise.
 - [x] Phase 3 (reset receipt gate)
 - [x] Phase 4 (builder context resolution)
 - [x] Phase 5 (re-orientation assembly) — 7 iterations, unanimous APPROVE, 3899 tests green
-- [x] Phase 6 (reset orchestrator + CLI wiring) — implemented, 3926 tests green, CMAP pending
-- [ ] Phase 7 (wait discipline + command documentation)
+- [x] Phase 6 (reset orchestrator + CLI wiring) — 7 iterations, unanimous APPROVE
+- [x] Phase 7 (wait discipline + command documentation) — unanimous APPROVE, iteration 1
+- [ ] Review + PR (in progress)
 
 **Open for the review phase**: live end-to-end verification of the ESC path and a real reset against a
 disposable builder is still blocked on `pnpm -w run local-install` (restarts Tower, affects every builder
