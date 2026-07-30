@@ -137,8 +137,18 @@ export interface TerminalPort {
   sendRaw(text: string): Promise<void>;
   /** Send a bare ESC keystroke (Tower's `escape: true`; phase 1's path). */
   sendEscape(): Promise<void>;
-  /** Recent terminal output, for best-effort clear confirmation. Null if unavailable. */
-  readRecentOutput?(): Promise<string | null>;
+  /**
+   * Recent terminal output plus the buffer's total line count, for best-effort
+   * clear confirmation. Null when this Tower cannot serve it.
+   *
+   * `total` is what makes confirmation trustworthy. Reset writes into this same
+   * terminal — the save request, the re-orientation — so any pattern matched
+   * against the whole buffer eventually collides with reset's OWN text. (It did,
+   * twice: first the echoed `/clear`, then the save request's "CONTEXT RESET
+   * INCOMING" header.) Snapshotting `total` before the clear lets the check read
+   * only what the harness emitted AFTERWARDS.
+   */
+  readOutput?(): Promise<{ lines: string[]; total: number } | null>;
 }
 
 // ============================================================================
@@ -521,10 +531,16 @@ export async function runReset(options: RunResetOptions): Promise<ResetResult> {
   // --------------------------------------------------------------------
   // 7–9. Clear, confirm best-effort, re-orient.
   // --------------------------------------------------------------------
+  // Snapshot the buffer size BEFORE clearing, so confirmation can distinguish
+  // the harness's response from the echo of our own keystroke.
+  const totalBeforeClear = terminal.readOutput
+    ? ((await terminal.readOutput())?.total ?? 0)
+    : 0;
+
   await terminal.sendRaw('/clear');
   step('clear');
 
-  const confirmed = await confirmClear(terminal);
+  const confirmed = await confirmClear(terminal, totalBeforeClear);
   step(confirmed ? 'clear-confirmed' : 'clear-unconfirmed');
 
   await terminal.sendMessage(payload.inline);
@@ -676,19 +692,21 @@ async function awaitQuiescence(
  * way. The worst case of a silent no-op is a builder that kept its context and
  * also received a re-orientation, which loses nothing.
  */
-async function confirmClear(terminal: TerminalPort): Promise<boolean> {
-  if (!terminal.readRecentOutput) return false;
+async function confirmClear(terminal: TerminalPort, totalBeforeClear: number): Promise<boolean> {
+  if (!terminal.readOutput) return false;
   try {
-    const output = await terminal.readRecentOutput();
+    const output = await terminal.readOutput();
     if (!output) return false;
-    // Matches only what the HARNESS says after clearing — never the echo of the
-    // `/clear` we just typed. Including `/clear` in this pattern made the check
-    // self-fulfilling: the PTY echoes typed input, so every run reported
-    // "clear-confirmed" whether or not anything was cleared. That is the same
-    // defect as the earlier always-unconfirmed bug wearing the opposite mask,
-    // and it is worse, because a false "confirmed" is trusted.
+
+    // Consider ONLY lines produced after the clear was sent. Everything reset
+    // itself wrote is at or before `totalBeforeClear`, so this excludes reset's
+    // own text by construction rather than by hoping the pattern avoids it.
+    const newLineCount = output.total - totalBeforeClear;
+    if (newLineCount <= 0) return false;
+    const fresh = output.lines.slice(-newLineCount).join('\n');
+
     return /context (?:cleared|reset)|conversation (?:cleared|reset)|cleared conversation/i.test(
-      output,
+      fresh,
     );
   } catch {
     // Confirmation must never be able to fail the run — it is a report field.

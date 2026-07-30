@@ -129,6 +129,19 @@ function makeFs(script: {
  */
 const CURRENT_NONCE = { value: '' };
 
+/**
+ * What the terminal already contains before the clear: reset's own messages.
+ *
+ * Deliberately includes the save request's "CONTEXT RESET INCOMING" header,
+ * because that string matches the confirmation pattern. If the window logic
+ * regresses, these lines leak into the check and confirmation goes true for the
+ * wrong reason — which is exactly the bug this models.
+ */
+const PRE_CLEAR_BUFFER = [
+  'CONTEXT RESET INCOMING — save your working state now.',
+  'Write your complete working state to .builder-state.md',
+];
+
 function makeTerminal(script: {
   exists?: boolean;
   /** Sequence of lastDataAt offsets relative to now; `undefined` = unobservable. */
@@ -170,8 +183,16 @@ function makeTerminal(script: {
     async sendEscape() {
       escapes++;
     },
-    readRecentOutput: script.recentOutput
-      ? async () => script.recentOutput!
+    readOutput: script.recentOutput !== undefined
+      ? async () => {
+          // `total` grows once the clear is sent, so the fresh-window slice is
+          // exactly the scripted post-clear output. Before the clear it reports
+          // the pre-existing buffer only.
+          const post = script.recentOutput!.split('\n');
+          return raw.includes('/clear')
+            ? { lines: [...PRE_CLEAR_BUFFER, ...post], total: PRE_CLEAR_BUFFER.length + post.length }
+            : { lines: [...PRE_CLEAR_BUFFER], total: PRE_CLEAR_BUFFER.length };
+        }
       : undefined,
   };
   return port;
@@ -268,6 +289,23 @@ describe('Spec 1273 — reset orchestrator: happy path', () => {
     // was cleared. A false "confirmed" is worse than the earlier always-
     // unconfirmed bug, because the architect trusts it.
     const terminal = makeTerminal({ quietness: QUIET, recentOutput: '> /clear\n> ' });
+    const result = await runReset(baseOptions({ terminal }) as never);
+
+    expect(names(result.steps)).toContain('clear-unconfirmed');
+    expect(names(result.steps)).not.toContain('clear-confirmed');
+  });
+
+  it('does NOT match reset\'s own save-request text still sitting in the buffer', async () => {
+    // The save request opens with "CONTEXT RESET INCOMING", which matches the
+    // confirmation pattern. It is in the buffer on every run because reset put
+    // it there moments earlier. Scanning the whole buffer therefore confirmed
+    // the clear using reset's own words — the second false-positive in this
+    // check, after the echoed `/clear`.
+    //
+    // The fix is structural rather than a better regex: only output produced
+    // AFTER the clear is considered, so anything reset wrote is excluded by
+    // construction. PRE_CLEAR_BUFFER carries that exact header.
+    const terminal = makeTerminal({ quietness: QUIET, recentOutput: '> ' });
     const result = await runReset(baseOptions({ terminal }) as never);
 
     expect(names(result.steps)).toContain('clear-unconfirmed');

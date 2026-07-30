@@ -140,6 +140,13 @@ files were genuine so the history reconstructed cleanly, but porch does not watc
   architect, this happens in the **post-merge verify window**, with the restart timing possibly waiting on
   the shannon workspace stabilising. **3976 passing tests is not "it works"**, and nothing in this review
   should be read as claiming otherwise.
+- **The clear-confirmation *pattern* is unvalidated.** Confirmation now reads only output produced after
+  the clear, which structurally excludes reset's own text — that class of false positive is closed. But I
+  have never observed what a real Claude Code `/clear` actually emits, so the strings it matches
+  (`context cleared`, `conversation cleared`, …) are still an educated guess. `clear-confirmed` should be
+  read as *"the harness said something clear-like"*, never as proof the context was discarded. The live
+  e2e is what will settle it, and the pattern may need adjusting afterwards. This is why confirmation is
+  advisory and report-only: the re-orientation is correct either way.
 - **`codev/` and `codev-skeleton/` copies of `agent-farm.md` carry ~375 lines of pre-existing drift**
   unrelated to this work. The sections added here are byte-identical across both trees; the existing drift
   is out of scope and left for a reconciliation pass.
