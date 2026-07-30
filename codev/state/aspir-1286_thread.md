@@ -268,3 +268,37 @@ Defaults stay as shipped; the two-layer test structure keeps that a one-line cha
 re-check main at each subsequent phase.
 
 Now running the phase_1 iter2 3-way review (gemini/codex/claude, `--type impl`).
+
+## phase_1 APPROVED (iter2) — and what chasing a "non-blocking nit" turned up
+
+gemini APPROVE · codex APPROVE · claude APPROVE. Codex ran the phase_1 unit suite itself before
+verdicting and returned `KEY_ISSUES: None`; claude gave HIGH confidence and independently confirmed
+both iter1 findings were genuinely fixed (not just claimed fixed). Porch advanced to phase_2.
+
+Claude attached three non-blocking observations. I verified each against the file rather than
+trusting the summary — and the cheapest-looking one was the one that mattered:
+
+1. **`normalizeLaneList`'s `| null` return type is dead** — true, every path returns an object, so
+   `if (normalized)` could never be false. Removed both.
+2. **`VALID_LANE_NAMES` duplicated in `porch/next.ts`** — true, and explicitly phase_5's job. Left it.
+3. **`validateLaneList` accepts a bare string** — intended; mirrors the existing string-or-array
+   shape of `porch.consultation.models`.
+
+Chasing (1) exposed a gap **all three lanes missed**: `[]` validated and resolved to
+`{models: [], mode: 'normal'}` — zero lanes. That is an undocumented second spelling of the spec's
+one explicit skip sentinel, `"none"`. Rejected it per fail-fast with an error that names `"none"`,
+and pinned it at **all four** precedence levels rather than just the top — the same "must fire in
+every nested copy" family as the null guard Codex caught, where a single top-level test would have
+passed while three nested paths stayed broken. 75 → 80 tests, full suite 3873 passed / 0 failed.
+
+Recorded honestly: this is a behavior change made *after* unanimous approval, on my own judgment, so
+it has not been reviewed by anyone. I chose to ship it because tightening is the reversible direction
+(loosening later is safe; the reverse breaks live configs) and because leaving a known ambiguity to
+calcify across five more phases is worse. Disclosed to the architect for scrutiny at the PR gate
+rather than allowed to pass as "reviewed."
+
+Two mechanical notes for whoever rebases next: `porch done` partially succeeds — the run that died
+on the push had **already committed `build_complete: true`**, so a second `porch done` was needed and
+the first run's progress is invisible unless you read its log. And `porch` resolves the project from
+cwd: running it from `packages/codev` (left over from a test run) gives a flat
+`Error: Project 1286 not found.` that looks like state corruption and isn't.
