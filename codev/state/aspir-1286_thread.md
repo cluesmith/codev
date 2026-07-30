@@ -404,3 +404,43 @@ narrower than the one I wrote: **only one build-or-test job in flight at a time,
 "don't build during tests", because a job that builds counts as a build.
 
 Final: tsc 0 · unit 3901 passed / 0 failed · CLI integration 93 passed / 0 failed.
+
+## phase_2 iter1 review — codex 3-for-3
+
+gemini APPROVE (HIGH) · claude APPROVE (HIGH) · **codex REQUEST_CHANGES (HIGH)**. Codex has now
+found the decisive defect in three consecutive review rounds on this project, and this one was the
+sharpest: `--model-id` was documented as applying to "whichever lane `-m` selected", but only the
+claude and codex branches read it — so `consult -m hermes --model-id foo` parsed, appeared in
+`--help`, and did nothing.
+
+That is the *same failure class this phase existed to eliminate*, reintroduced by my own flag
+description within the same phase that fixed it. And the detail that stings: `MODEL_CONFIGURABLE_LANES`
+is `['claude','codex','gemini']`, and phase_1 already carries a bespoke error explaining why hermes
+cannot take a model id — **I wrote that explanation, then wrote help text contradicting it.** Fixing
+the mechanism does not fix the documentation that promises more than the mechanism does; those are two
+artifacts and they drift independently.
+
+Fix placement mattered more than the fix. `assertLaneAcceptsModelOverride()` is called once in
+`runConsultation` **before dispatch**, not per-branch: a per-branch check would leave exactly the same
+hole open for the next lane that doesn't read the override. Structural, not local.
+
+Deliberate call on gemini, recorded so it is a tracked promise rather than an intention: gemini is
+configurable by spec but its passthrough is phase_3's scope, so `-m gemini --model-id` is inert right
+now. I did not add a "not yet wired" error, because nothing ships until the PR carries all six phases
+and a temporary error on a documented-supported combination would be worse. A test asserts all three
+configurable lanes accept the override, so **phase_3 cannot quietly narrow the contract** without
+failing a test.
+
+Also worth noting on review logistics: porch's iter1 command carried no `--context`, so to honour the
+architect's "air the `[]` asymmetry explicitly" I wrote my own note file (named
+`-architect-note.md`, deliberately not porch's `-context.md` convention, to avoid colliding with
+porch's bookkeeping) and passed it via `--context` to all three lanes. Asking pointed questions paid
+off: gemini independently traced the validator's call graph and confirmed "no third paths reach
+protocol-supplied models", which was the one claim resting only on my own single-caller grep. All
+three lanes endorsed the asymmetry and found no vacuous-pass path in the forwarding test. gemini also
+answered the docs question — `"none"` as the skip sentinel belongs in phase_6 user docs, not phase_2.
+**Carry that into phase_6.**
+
+Verified end-to-end, not just unit-tested: hermes+flag exits 1 naming the accepting lanes; hermes
+without the flag is unchanged; gemini is not blocked. tsc 0 · unit 3905 passed / 0 failed ·
+CLI integration 93 passed / 0 failed.
