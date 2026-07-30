@@ -504,6 +504,22 @@ export async function runAgentFarm(args: string[]): Promise<void> {
           logger.error(`--mode must be 'strict' or 'soft', got '${options.mode}'`);
           process.exit(1);
         }
+        // Every one of these tunes a SAFETY GATE, so a bad value does not
+        // degrade the run — it disables a protection while still reporting
+        // success. `--quiet-window -1` makes the quiescence check pass
+        // instantly (R4 gone), `--min-bytes -1` accepts any state file however
+        // empty (R2's substance floor gone), and a non-numeric `--timeout`
+        // yields NaN, whose comparisons are all false, so the receipt wait
+        // never expires and the command hangs. Reject at the boundary.
+        const positiveInt = (raw: string | undefined, flag: string): number | undefined => {
+          if (raw === undefined) return undefined;
+          const parsed = Number(raw);
+          if (!Number.isInteger(parsed) || parsed <= 0) {
+            logger.error(`${flag} must be a positive integer, got '${raw}'`);
+            process.exit(1);
+          }
+          return parsed;
+        };
         await reset({
           builder,
           note: options.note,
@@ -511,9 +527,9 @@ export async function runAgentFarm(args: string[]): Promise<void> {
           dryRun: options.dryRun,
           interruptFirst: options.interruptFirst,
           mode: options.mode,
-          timeout: options.timeout ? parseInt(options.timeout, 10) : undefined,
-          minBytes: options.minBytes ? parseInt(options.minBytes, 10) : undefined,
-          quietWindow: options.quietWindow ? parseInt(options.quietWindow, 10) : undefined,
+          timeout: positiveInt(options.timeout, '--timeout'),
+          minBytes: positiveInt(options.minBytes, '--min-bytes'),
+          quietWindow: positiveInt(options.quietWindow, '--quiet-window'),
         });
       } catch (error) {
         logger.error(error instanceof Error ? error.message : String(error));

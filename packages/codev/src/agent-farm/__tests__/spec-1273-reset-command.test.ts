@@ -249,6 +249,37 @@ describe('afx reset — command surface (Spec 1273)', () => {
     expect(opts.interruptFirst).toBe(true);
   });
 
+  // ==========================================================================
+  // Numeric flag validation — the wrapper must not pass a gate-disabling value
+  // ==========================================================================
+
+  it('rejects a gate-disabling numeric option before runReset is called', async () => {
+    // The CLI layer validates first, but the wrapper is also reachable
+    // programmatically, and `reset()` must not forward a value that would
+    // silently switch off R2 or R4. The orchestrator's own guard is what
+    // enforces it; this asserts the wrapper does not swallow that refusal and
+    // report success anyway.
+    mockRunReset.mockRejectedValue(
+      Object.assign(new Error('Invalid quietWindowMs: -1.'), { name: 'ResetPreflightError' }),
+    );
+    const { reset } = await import('../commands/reset.js');
+
+    await expect(reset({ builder: '1273', quietWindow: -1 })).rejects.toThrow(/FATAL/);
+  });
+
+  it('omits an unset numeric option rather than passing NaN or zero', async () => {
+    // `options.timeout ? ... : undefined` on an absent flag must yield
+    // undefined so the orchestrator's own default applies. Passing 0 or NaN
+    // here would disable the gate the default exists to enforce.
+    const { reset } = await import('../commands/reset.js');
+    await reset({ builder: '1273' });
+
+    const opts = mockRunReset.mock.calls[0][0];
+    expect(opts.receiptTimeoutMs).toBeUndefined();
+    expect(opts.minBytes).toBeUndefined();
+    expect(opts.quietWindowMs ?? opts.quietWindow).toBeUndefined();
+  });
+
   it('exits non-zero when the run aborts, so a script cannot read it as success', async () => {
     mockRunReset.mockResolvedValue({
       outcome: 'aborted',

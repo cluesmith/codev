@@ -556,6 +556,59 @@ describe('Spec 1273 — CLI-facing behaviour', () => {
 });
 
 // ============================================================================
+// Timing parameters cannot be used to switch a gate off
+// ============================================================================
+
+describe('Spec 1273 — a bad timing parameter aborts, it does not weaken a gate', () => {
+  // Each of these does not merely misconfigure the run — it disables a specific
+  // invariant while the run still reports success. That is the failure mode the
+  // whole step-log design exists to make impossible, so it must not be
+  // reachable through a number.
+  const cases: Array<{ label: string; option: string; value: number; gate: string }> = [
+    { label: 'a negative quiet window', option: 'quietWindowMs', value: -1, gate: 'R4' },
+    { label: 'a zero quiet window', option: 'quietWindowMs', value: 0, gate: 'R4' },
+    { label: 'a negative minimum size', option: 'minBytes', value: -1, gate: 'R2' },
+    { label: 'a NaN receipt timeout', option: 'receiptTimeoutMs', value: NaN, gate: 'R2' },
+    { label: 'an infinite receipt timeout', option: 'receiptTimeoutMs', value: Infinity, gate: 'R2' },
+    { label: 'a zero quiesce timeout', option: 'quiesceTimeoutMs', value: 0, gate: 'R4' },
+  ];
+
+  for (const { label, option, value, gate } of cases) {
+    it(`rejects ${label} (${gate}) before touching the builder`, async () => {
+      const terminal = makeTerminal({ quietness: QUIET });
+      const fs = makeFs({});
+
+      await expect(
+        runReset(baseOptions({ terminal, fs, [option]: value }) as never),
+      ).rejects.toThrow(ResetPreflightError);
+
+      expect(terminal.messages).toHaveLength(0);
+      expect(terminal.raw).toHaveLength(0);
+      expect(fs.writes).toHaveLength(0);
+    });
+  }
+
+  it('would otherwise let a negative quiet window pass quiescence instantly', async () => {
+    // Demonstrates WHY the guard matters rather than only that it fires. With a
+    // permanently-busy terminal and no guard, `now - lastDataAt >= -1` is always
+    // true, so R4 would be satisfied without the builder ever going quiet.
+    const clock = makeClock();
+    const terminal = makeTerminal({});
+    vi.spyOn(terminal, 'observe').mockImplementation(async () => ({
+      exists: true,
+      lastDataAt: clock.now(),
+    }));
+
+    await expect(
+      runReset(baseOptions({ clock, terminal, quietWindowMs: -1 }) as never),
+    ).rejects.toThrow(/quietWindowMs/);
+
+    // Never cleared, because the run never started.
+    expect(terminal.raw).not.toContain('/clear');
+  });
+});
+
+// ============================================================================
 // Cross-module coupling: afx cleanup's scaffold classification
 // ============================================================================
 

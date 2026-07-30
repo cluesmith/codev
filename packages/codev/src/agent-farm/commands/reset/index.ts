@@ -259,6 +259,29 @@ export async function runReset(options: RunResetOptions): Promise<ResetResult> {
   const nonce = generateNonce();
 
   // --------------------------------------------------------------------
+  // 0. Timing-parameter sanity.
+  //
+  // Validated HERE as well as at the CLI boundary, because these values do not
+  // merely tune the run — each one can switch OFF a safety gate while the run
+  // still reports success. A negative quiet window makes every quiescence check
+  // pass instantly (R4 gone); a non-positive minimum accepts any state file
+  // however empty (R2's substance floor gone); a NaN timeout produces a NaN
+  // deadline, and since every comparison against NaN is false, the wait never
+  // expires and the command hangs.
+  //
+  // The orchestrator is the component that OWNS these invariants, so it does
+  // not delegate their preconditions to its callers. A programmatic caller must
+  // not be able to disable R2 or R4 by passing a number.
+  // --------------------------------------------------------------------
+  requirePositive(receiptTimeoutMs, 'receiptTimeoutMs');
+  requirePositive(pollIntervalMs, 'pollIntervalMs');
+  requirePositive(minBytes, 'minBytes');
+  requirePositive(stabilityWindowMs, 'stabilityWindowMs');
+  requirePositive(quietWindowMs, 'quietWindowMs');
+  requirePositive(quiesceTimeoutMs, 'quiesceTimeoutMs');
+  requirePositive(quiescePostEscalationTimeoutMs, 'quiescePostEscalationTimeoutMs');
+
+  // --------------------------------------------------------------------
   // 1. Preflight. Everything that can refuse does so before ANY write.
   // --------------------------------------------------------------------
 
@@ -616,6 +639,22 @@ async function confirmClear(terminal: TerminalPort): Promise<boolean> {
 // ============================================================================
 // Helpers
 // ============================================================================
+
+/**
+ * Reject a timing/threshold parameter that would weaken a gate.
+ *
+ * `Number.isFinite` rather than a bare `> 0` comparison: `NaN > 0` is false but
+ * so is `NaN <= 0`, so a NaN slips through any single comparison written the
+ * obvious way. Infinity is rejected too — an infinite deadline is a hang.
+ */
+function requirePositive(value: number, name: string): void {
+  if (!Number.isFinite(value) || value <= 0) {
+    throw new ResetPreflightError(
+      `Invalid ${name}: ${value}. Must be a positive, finite number. ` +
+        `This parameter gates a safety check (R2/R4) — a bad value would disable it silently.`,
+    );
+  }
+}
 
 /**
  * Resolve the state-file path, refusing anything that escapes the worktree.
