@@ -5,10 +5,10 @@ phase: implement
 plan_phases:
   - id: phase_1
     title: Config schema, validators, and resolvers
-    status: in_progress
+    status: complete
   - id: phase_2
     title: Consult lane model wiring (claude, codex)
-    status: pending
+    status: in_progress
   - id: phase_3
     title: Agy lane model passthrough and fail-fast split
     status: pending
@@ -21,14 +21,14 @@ plan_phases:
   - id: phase_6
     title: Documentation and skeleton parity
     status: pending
-current_plan_phase: phase_1
+current_plan_phase: phase_2
 gates:
   pr:
     status: pending
   verify-approval:
     status: pending
-iteration: 2
-build_complete: true
+iteration: 1
+build_complete: false
 history:
   - iteration: 1
     build_output: ''
@@ -62,7 +62,7 @@ history:
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/aspir-1286/codev/projects/1286-consult-configurable-per-lane-/1286-phase_1-iter1-claude.txt
 started_at: '2026-07-29T11:33:26.698Z'
-updated_at: '2026-07-30T10:02:26.528Z'
+updated_at: '2026-07-30T10:09:57.946Z'
 force_advanced:
   phase: specify
   iteration: 3
