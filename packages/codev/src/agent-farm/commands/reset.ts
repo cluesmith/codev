@@ -18,7 +18,7 @@
 import { existsSync, readFileSync, readdirSync, writeFileSync, statSync } from 'node:fs';
 import { TowerClient } from '../lib/tower-client.js';
 import { logger, fatal } from '../utils/logger.js';
-import { getBuilder } from '../state.js';
+import { findBuilderById } from '../lib/builder-lookup.js';
 import { getConfig } from '../utils/index.js';
 import { loadConfig } from '../../lib/config.js';
 import { loadForgeConfig } from '../../lib/forge.js';
@@ -58,11 +58,18 @@ export async function reset(options: ResetOptions): Promise<void> {
     fatal(err instanceof Error ? err.message : String(err));
   }
 
-  const builder = getBuilder(target, workspace);
+  // `findBuilderById`, NOT `getBuilder`: the latter matches the id EXACTLY, so
+  // `afx reset 1273` would fail against a builder registered as `aspir-1273`
+  // while `afx send 1273` reached it fine. Reset must resolve targets the same
+  // way every other builder-addressed command does — a reset that cannot be
+  // addressed the way the architect already types addresses is a reset that
+  // gets typed wrong under pressure. `findBuilderById` also reports AMBIGUOUS
+  // with the candidate list rather than silently picking one.
+  const builder = findBuilderById(target);
   if (!builder) {
     fatal(
-      `No builder '${target}' in this workspace. Check 'afx status'. ` +
-        `Reset needs the registry row for the worktree and branch.`,
+      `No builder '${target}' in this workspace (or the id is ambiguous — see above). ` +
+        `Check 'afx status'. Reset needs the registry row for the worktree and branch.`,
     );
   }
   if (!builder.worktree || !builder.branch) {
@@ -126,8 +133,8 @@ export async function reset(options: ResetOptions): Promise<void> {
 
     if (result.outcome === 'dry-run') {
       logger.info('DRY RUN — nothing was written to the builder.\n');
-      logger.info('--- save request ---');
-      console.log(result.payload?.longForm ? '' : '');
+      logger.info('--- save request (what the builder is asked to write) ---');
+      console.log(result.saveRequest);
       logger.info('--- inline re-orientation ---');
       console.log(result.payload?.inline ?? '');
       logger.info(`--- long form would be written to ${result.reorientPath} ---`);

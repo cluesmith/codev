@@ -487,6 +487,33 @@ describe('Spec 1273 — preflight refusals happen before any write', () => {
 // ============================================================================
 
 describe('Spec 1273 — CLI-facing behaviour', () => {
+  it('--dry-run exposes the save request so the command can print it', async () => {
+    // The command surface prints `result.saveRequest`. When the orchestrator
+    // kept the request internal, `--dry-run` printed an empty line under a
+    // "save request" header — the contract said "print the save request and
+    // both payload parts" and one of the three was silently blank.
+    const result = await runReset(baseOptions({ dryRun: true }) as never);
+
+    expect(result.saveRequest).toBeTruthy();
+    expect(result.saveRequest).toContain('.builder-state.md');
+    // The nonce must be in the request: it is what the R2 gate later verifies,
+    // so a request without it describes a save that could never be accepted.
+    expect(result.saveRequest).toContain(result.nonce);
+  });
+
+  it('sends the builder exactly the save request the dry run advertised', async () => {
+    // Guards the gap between "what --dry-run showed" and "what a real run
+    // sends". A dry run is only useful as a preview if it previews the real
+    // thing.
+    const dry = await runReset(baseOptions({ dryRun: true }) as never);
+    const terminal = makeTerminal({ quietness: QUIET });
+    const live = await runReset(baseOptions({ terminal }) as never);
+
+    // Nonces differ per run, so compare the request with the nonce factored out.
+    const shape = (text: string, nonce: string) => text.split(nonce).join('<NONCE>');
+    expect(shape(terminal.messages[0], live.nonce)).toBe(shape(dry.saveRequest, dry.nonce));
+  });
+
   it('--dry-run performs ZERO writes to the builder', async () => {
     const fs = makeFs({});
     const terminal = makeTerminal({ quietness: QUIET });

@@ -172,6 +172,16 @@ export interface ResetResult {
   statePath: string;
   reorientPath: string;
   payload?: ReorientationPayload;
+  /**
+   * The exact save-state request the builder is asked to act on.
+   *
+   * Exposed rather than kept internal because `--dry-run` must be able to print
+   * it. The request is what the whole R2 gate is verifying compliance with, so
+   * "what exactly will the builder be told to write" is the single most useful
+   * thing a dry run can show — and it cannot be shown if the orchestrator keeps
+   * it to itself.
+   */
+  saveRequest: string;
   /** Size of the accepted state file, for the report. */
   stateBytes?: number;
 }
@@ -314,6 +324,7 @@ export async function runReset(options: RunResetOptions): Promise<ResetResult> {
       statePath,
       reorientPath,
       payload,
+      saveRequest,
     };
   }
 
@@ -363,6 +374,7 @@ export async function runReset(options: RunResetOptions): Promise<ResetResult> {
       statePath,
       reorientPath,
       payload,
+      saveRequest,
     };
   }
   step('receipt-accepted', `${receipt.bytes} bytes`);
@@ -397,6 +409,7 @@ export async function runReset(options: RunResetOptions): Promise<ResetResult> {
         statePath,
         reorientPath,
         payload,
+        saveRequest,
         stateBytes: receipt.bytes,
       };
     }
@@ -431,6 +444,7 @@ export async function runReset(options: RunResetOptions): Promise<ResetResult> {
         statePath,
         reorientPath,
         payload,
+        saveRequest,
         stateBytes: receipt.bytes,
       };
     }
@@ -456,6 +470,7 @@ export async function runReset(options: RunResetOptions): Promise<ResetResult> {
     statePath,
     reorientPath,
     payload,
+    saveRequest,
     stateBytes: receipt.bytes,
   };
 }
