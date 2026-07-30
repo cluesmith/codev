@@ -147,6 +147,23 @@ export interface TowerTerminal {
   status: 'running' | 'exited';
   createdAt: string;
   wsPath: string;
+  /**
+   * Epoch ms of the last PTY output (Spec 1273). Lets a client measure output
+   * quiescence — an agent mid-turn emits continuously, so a stretch with no
+   * advance means the turn ended. Optional: terminals served by an older Tower
+   * omit it, and a consumer that needs it must say so rather than assume 0.
+   */
+  lastDataAt?: number;
+  /**
+   * Whether input can actually reach the process right now (Spec 1273).
+   *
+   * Distinct from `status`, and they disagree in the case that matters: a
+   * session whose shellper connection died reports `status: 'running'` while
+   * every write to it is dropped (#1198). Optional for the same reason
+   * `lastDataAt` is — an older Tower omits it, and a consumer that needs it
+   * must handle absence rather than assume `false`.
+   */
+  writable?: boolean;
 }
 
 // ── Client Options ─────────────────────────────────────────────
@@ -518,6 +535,25 @@ export class TowerClient {
     return result.ok ? result.data! : null;
   }
 
+  /**
+   * Recent PTY output for a terminal (Spec 1273).
+   *
+   * The `/output` route has existed since the terminal manager was written; it
+   * simply had no client binding. Reset uses it for the best-effort `/clear`
+   * confirmation — without it that check can never succeed outside tests, and
+   * every real run would report the clear as unconfirmed while looking like it
+   * had tried.
+   */
+  async getTerminalOutput(
+    terminalId: string,
+    lines = 100,
+  ): Promise<{ lines: string[]; total: number; hasMore: boolean } | null> {
+    const result = await this.request<{ lines: string[]; total: number; hasMore: boolean }>(
+      `/api/terminals/${terminalId}/output?lines=${lines}`,
+    );
+    return result.ok ? result.data! : null;
+  }
+
   async writeTerminal(terminalId: string, data: string): Promise<boolean> {
     const result = await this.request(`/api/terminals/${terminalId}/write`, {
       method: 'POST',
@@ -626,6 +662,13 @@ export class TowerClient {
       raw?: boolean;
       noEnter?: boolean;
       interrupt?: boolean;
+      /**
+       * Spec 1273: deliver the message as a bare ESC keystroke (`\x1b`) written
+       * straight to the PTY — no formatting, no send-buffer deferral. This is the
+       * verified mid-turn recovery: ESC ends the running turn so queued messages
+       * can process. Distinct from `interrupt`, which sends Ctrl+C (`\x03`).
+       */
+      escape?: boolean;
     },
   ): Promise<{ ok: boolean; resolvedTo?: string; error?: string }> {
     const result = await this.request<{ ok: boolean; resolvedTo: string }>(
@@ -642,6 +685,7 @@ export class TowerClient {
             raw: options?.raw,
             noEnter: options?.noEnter,
             interrupt: options?.interrupt,
+            escape: options?.escape,
           },
         }),
       },

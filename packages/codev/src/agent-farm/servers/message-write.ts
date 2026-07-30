@@ -18,6 +18,38 @@ const INTER_LINE_DELAY_MS = 10;
 const PACED_ENTER_DELAY_MS = 80;
 const SIMPLE_ENTER_DELAY_MS = 50;
 
+/** ESC keystroke — ends the agent's current turn (Spec 1273). */
+export const ESC = '\x1b';
+
+/**
+ * Delay between the ESC and the Enter that follows it. Matches the short-message
+ * Enter delay: ESC has to be processed by the TUI before Enter is meaningful.
+ */
+export const ESCAPE_ENTER_DELAY_MS = SIMPLE_ENTER_DELAY_MS;
+
+/**
+ * Write a bare ESC keystroke to a PTY session (Spec 1273).
+ *
+ * This is the verified mid-turn recovery for a wedged agent: ESC interrupts the
+ * running tool and ends the turn, after which queued messages process. It is the
+ * command form of `afx send <builder> --raw "$(printf '\x1b')"`.
+ *
+ * The trailing Enter is sent by default and is load-bearing, not incidental —
+ * it is what lets already-queued input through once ESC has ended the turn. Pass
+ * `noEnter` to write ESC alone.
+ *
+ * Deliberately not routed through `writeMessageToSession`: ESC is a control byte,
+ * not text, so line-pacing and paste-detection logic do not apply to it.
+ *
+ * @returns ms timestamp (from call time) when all writes complete
+ */
+export function writeEscapeToSession(session: WritableSession, noEnter: boolean): number {
+  session.write(ESC);
+  if (noEnter) return 0;
+  setTimeout(() => session.write('\r'), ESCAPE_ENTER_DELAY_MS);
+  return ESCAPE_ENTER_DELAY_MS;
+}
+
 /**
  * Write a message to a PTY session, pacing multi-line output to prevent
  * the terminal from treating it as a paste (Bugfix #584).

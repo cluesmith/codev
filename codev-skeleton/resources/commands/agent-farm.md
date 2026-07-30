@@ -368,6 +368,113 @@ afx send 42 --file src/api.ts "Review this implementation"
 
 ---
 
+### afx interrupt
+
+Interrupt a builder mid-turn by sending an ESC keystroke to its PTY.
+
+```bash
+afx interrupt <builder> [options]
+```
+
+**Arguments:**
+- `builder` - Target builder. Same addressing as `afx send`.
+
+**Options:**
+- `--no-enter` - Send ESC alone, without the trailing Enter
+
+**Description:**
+
+This is the only recovery that reaches a builder **mid-turn**. When a builder chains foreground waits
+inside a single turn, every `afx send` — including your order to stop — queues unread until that turn
+ends. ESC interrupts the running tool and ends the turn, after which the queued messages process. The
+trailing Enter (default) is what lets them through.
+
+Distinct from `afx send --interrupt`, which sends Ctrl+C.
+
+**Examples:**
+
+```bash
+# Builder is wedged on a foreground wait and not reading messages
+afx interrupt 0042
+
+# Then the queued instruction lands
+afx send 0042 "That producer died — stop waiting and report."
+```
+
+---
+
+### afx reset
+
+Reset a builder's context: have it save its working state, clear the conversation, then re-orient it.
+
+```bash
+afx reset <builder> [options]
+```
+
+**Arguments:**
+- `builder` - Target builder. Same addressing as `afx send`.
+
+**Options:**
+- `--note <text>` - Extra context appended to the re-orientation
+- `--file <path>` - Append file content to the re-orientation (48KB max, read from *your* filesystem)
+- `--dry-run` - Print the save request and both re-orientation payloads; write nothing to the builder
+- `--interrupt-first` - Send ESC before the save request, for a builder already wedged mid-turn
+- `--mode <strict|soft>` - Override the builder mode if it cannot be detected
+- `--timeout <seconds>` - How long to wait for the save-state receipt (default 300)
+- `--min-bytes <n>` - Minimum state-file size to accept as substantive (default 1000)
+- `--quiet-window <ms>` - Terminal silence that counts as turn-ended (default 1500)
+
+**Description:**
+
+Long-running builders exhaust their context window. `afx spawn --resume` reattaches the *same*
+conversation, so a deep session resumes deep — it does not give the builder a fresh window. `afx reset`
+does, without losing what the builder knows.
+
+The sequence:
+
+1. Assemble the re-orientation and write it to `.builder-reorient.md` in the worktree.
+2. Ask the builder to write its complete working state to `.builder-state.md`, stamped with a one-time
+   nonce.
+3. Wait for that file and **verify** it: correct nonce (not a stale file from an earlier reset),
+   substantive size, and stable across two observations (not still being written).
+4. Wait for the terminal to fall silent, so the clear is not typed mid-turn. If it does not settle, send
+   **one** ESC and wait again.
+5. Send `/clear`.
+6. Deliver the re-orientation: role, protocol, mode, project, worktree, branch, the porch re-entry
+   instruction, and a pointer to the state file.
+
+**Every gate fails safe.** If the state file never arrives, carries the wrong nonce, is a stub, is still
+growing, or the builder will not go quiet — the command **aborts without clearing** and exits non-zero,
+naming the gate that failed. A builder whose context was not cleared has lost nothing.
+
+Both worktree artifacts use the `.builder-` prefix, so `afx cleanup` still classifies the worktree as
+clean, and both are untracked so `porch done`'s staged-file sweep cannot pick them up.
+
+Requires a harness with in-session context reset (Claude Code). Other harnesses abort loudly rather than
+substituting a different mechanism — use the boundary-recycle pattern instead (let the builder finish,
+then `afx spawn <id> --resume`).
+
+**Examples:**
+
+```bash
+# See exactly what would be sent, without touching the builder
+afx reset 0042 --dry-run
+
+# Standard reset
+afx reset 0042
+
+# Add context that post-dates the builder's saved state
+afx reset 0042 --note "PR #90 merged while you were mid-phase. Rebase before continuing."
+
+# The builder is wedged mid-turn and not reading messages
+afx reset 0042 --interrupt-first
+
+# A builder that legitimately needs longer to write its state
+afx reset 0042 --timeout 600
+```
+
+---
+
 ### afx open
 
 Open file annotation viewer.
