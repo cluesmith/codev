@@ -100,6 +100,16 @@ export interface TerminalObservation {
    * to prevent.
    */
   lastDataAt?: number;
+  /**
+   * Whether input can actually reach the process right now.
+   *
+   * `undefined` means an older Tower did not report it. Unlike `lastDataAt`,
+   * absence here is NOT treated as a refusal, and the asymmetry is deliberate:
+   * an unobservable turn state leads to a SILENT, destructive failure (clearing
+   * a builder mid-turn), whereas an unobservable write path leads to a LOUD,
+   * harmless one (the first send throws). Refuse only what fails quietly.
+   */
+  writable?: boolean;
 }
 
 /**
@@ -302,6 +312,23 @@ export async function runReset(options: RunResetOptions): Promise<ResetResult> {
     throw new ResetPreflightError(
       `Builder '${context.builderId}' has no live terminal. Reset writes to a running ` +
         `session; there is nothing to clear. Check 'afx status'.`,
+    );
+  }
+
+  // Writability is checked HERE, in preflight, not left to fail on the first
+  // send. The plan's contract is validate-before-touch: discovering the problem
+  // later would mean `.builder-reorient.md` had already been written to the
+  // builder's worktree for a reset that could never proceed.
+  //
+  // `status: 'running'` is not sufficient evidence — a session whose shellper
+  // connection died reports exactly that while dropping every write (#1198),
+  // which is the specific case this catches.
+  if (observed.writable === false) {
+    throw new ResetPreflightError(
+      `Builder '${context.builderId}' has a terminal that is not accepting input ` +
+        `(its process connection is down — #1198). Reset would send a save request that ` +
+        `is silently dropped. Nothing has been touched. Check Tower logs, or retry once ` +
+        `the session reconnects.`,
     );
   }
   step('resolve', `${context.protocol}/${context.mode} in ${context.worktree}`);

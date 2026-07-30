@@ -205,10 +205,12 @@ function buildTerminalPort(
       if (!terminalId) return { exists: false };
       const t = await client.getTerminal(terminalId);
       if (!t || t.status !== 'running') return { exists: false };
-      // lastDataAt is forwarded as-is, including undefined. The orchestrator
-      // treats undefined as "unobservable" and refuses to clear; collapsing it
-      // to 0 here would defeat that check at the boundary.
-      return { exists: true, lastDataAt: t.lastDataAt };
+      // Both optional fields are forwarded AS-IS, including undefined. The
+      // orchestrator distinguishes "reported false" from "not reported", and
+      // collapsing either to a concrete value here would defeat that check at
+      // the boundary — `lastDataAt: 0` reads as decades of silence, and
+      // `writable: true` would assert a fact this Tower never supplied.
+      return { exists: true, lastDataAt: t.lastDataAt, writable: t.writable };
     },
     async sendMessage(message: string) {
       const result = await client.sendMessage(target, message, {

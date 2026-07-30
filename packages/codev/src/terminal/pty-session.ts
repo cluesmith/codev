@@ -38,6 +38,16 @@ export interface PtySessionInfo {
   exitCode?: number;
   persistent?: boolean;
   /**
+   * Whether input can actually reach the process RIGHT NOW (Spec 1273).
+   *
+   * Serialised alongside `status` because the two disagree in the case that
+   * matters: a session whose shellper connection died reports status 'running'
+   * until teardown while every write to it is dropped (#1198). `afx reset`
+   * preflights on this so it refuses a terminal it cannot write to BEFORE
+   * touching anything, rather than discovering it on the first send.
+   */
+  writable?: boolean;
+  /**
    * Epoch ms of the last PTY output (Spec 467's tracking, surfaced by Spec 1273).
    *
    * Serialised by `GET /api/terminals/:id`, which makes output quiescence
@@ -522,6 +532,7 @@ export class PtySession extends EventEmitter {
       exitCode: this.exitCode,
       persistent: this._shellperBacked,
       lastDataAt: this._lastDataAt,
+      writable: this.writable,
     };
   }
 

@@ -465,6 +465,41 @@ describe('Spec 1273 — preflight refusals happen before any write', () => {
     expect(fs.writes).toHaveLength(0);
   });
 
+  it('aborts on a non-writable terminal BEFORE writing the re-orientation file', async () => {
+    // #1198: a session whose shellper connection died reports status 'running'
+    // while dropping every write. Without this check the command writes
+    // .builder-reorient.md into the worktree, sends a save request into a void,
+    // and then fails — having already touched the builder for a reset that
+    // could never proceed. The plan's contract is validate-before-touch.
+    const fs = makeFs({});
+    const terminal = makeTerminal({ quietness: QUIET });
+    vi.spyOn(terminal, 'observe').mockResolvedValue({
+      exists: true,
+      lastDataAt: 0,
+      writable: false,
+    });
+
+    await expect(runReset(baseOptions({ terminal, fs }) as never)).rejects.toThrow(
+      /not accepting input/,
+    );
+
+    expect(fs.writes).toHaveLength(0);
+    expect(terminal.messages).toHaveLength(0);
+    expect(terminal.raw).toHaveLength(0);
+  });
+
+  it('proceeds when writability is unreported, since that failure is loud', async () => {
+    // Deliberate asymmetry with lastDataAt. An unobservable TURN STATE fails
+    // silently and destructively (clear a builder mid-turn), so it refuses. An
+    // unobservable WRITE PATH fails loudly and harmlessly (the send throws), so
+    // an older Tower is not blocked from resetting.
+    const terminal = makeTerminal({ quietness: QUIET });
+    vi.spyOn(terminal, 'observe').mockResolvedValue({ exists: true, lastDataAt: 0 });
+
+    const result = await runReset(baseOptions({ terminal }) as never);
+    expect(result.outcome).toBe('completed');
+  });
+
   it('aborts when the builder has no live terminal', async () => {
     const fs = makeFs({});
     await expect(

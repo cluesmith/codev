@@ -157,3 +157,35 @@ describe('PtySession.info.lastDataAt (Spec 1273 — quiescence on the wire)', ()
     expect(session.info.lastDataAt).toBe(session.lastDataAt);
   });
 });
+
+/**
+ * PtySessionInfo.writable (Spec 1273)
+ *
+ * `afx reset` preflights on this field so it refuses a terminal it cannot write
+ * to before touching anything. That only works if `writable` is actually
+ * SERIALISED — the getter existed since #1198 but never reached `info`, so no
+ * client could see it.
+ */
+describe('PtySessionInfo.writable (Spec 1273)', () => {
+  it('is serialised in info, not just available as a getter', () => {
+    const session = createSession();
+    expect(session.info).toHaveProperty('writable');
+  });
+
+  it('agrees with the writable getter', () => {
+    const session = createSession();
+    expect(session.info.writable).toBe(session.writable);
+  });
+
+  it('reports false while status still says running — the #1198 disagreement', () => {
+    // This is the exact shape reset preflights against, and it needs no
+    // contrivance to produce: a session with no live backend has
+    // `exitCode === undefined`, so `status` is 'running', while `writable` is
+    // false because there is nothing to write to. A caller trusting `status`
+    // would send into a void; reset reads `writable` instead.
+    const session = createSession();
+
+    expect(session.info.status).toBe('running');
+    expect(session.info.writable).toBe(false);
+  });
+});

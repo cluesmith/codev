@@ -154,6 +154,16 @@ export interface TowerTerminal {
    * omit it, and a consumer that needs it must say so rather than assume 0.
    */
   lastDataAt?: number;
+  /**
+   * Whether input can actually reach the process right now (Spec 1273).
+   *
+   * Distinct from `status`, and they disagree in the case that matters: a
+   * session whose shellper connection died reports `status: 'running'` while
+   * every write to it is dropped (#1198). Optional for the same reason
+   * `lastDataAt` is — an older Tower omits it, and a consumer that needs it
+   * must handle absence rather than assume `false`.
+   */
+  writable?: boolean;
 }
 
 // ── Client Options ─────────────────────────────────────────────
