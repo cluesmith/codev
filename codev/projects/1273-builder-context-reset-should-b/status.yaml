@@ -1,7 +1,7 @@
 id: '1273'
 title: builder-context-reset-should-b
 protocol: aspir
-phase: implement
+phase: review
 plan_phases:
   - id: phase_1
     title: afx interrupt + ESC delivery path
@@ -23,15 +23,15 @@ plan_phases:
     status: complete
   - id: phase_7
     title: Wait discipline and command documentation
-    status: in_progress
-current_plan_phase: phase_7
+    status: complete
+current_plan_phase: null
 gates:
   pr:
     status: pending
   verify-approval:
     status: pending
 iteration: 1
-build_complete: true
+build_complete: false
 history:
   - iteration: 1
     plan_phase: phase_2
@@ -274,4 +274,4 @@ history:
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/aspir-1273/codev/projects/1273-builder-context-reset-should-b/1273-phase_6-iter6-claude.txt
 started_at: '2026-07-28T00:57:25.240Z'
-updated_at: '2026-07-30T10:47:58.348Z'
+updated_at: '2026-07-30T10:50:08.551Z'
