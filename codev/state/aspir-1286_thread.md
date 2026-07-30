@@ -302,3 +302,35 @@ on the push had **already committed `build_complete: true`**, so a second `porch
 the first run's progress is invisible unless you read its log. And `porch` resolves the project from
 cwd: running it from `packages/codev` (left over from a test run) gives a flat
 `Error: Project 1286 not found.` that looks like state corruption and isn't.
+
+## The `[]` ruling — asymmetric on purpose, and why that's defensible
+
+Architect caught what I'd missed: EXPERIMENT and SPIKE **ship** `defaults.consultation.models: []`
+(paired with `enabled: false`) in both trees — four files — meaning "this protocol runs no
+consultations." If my rejection reached protocol level, every EXPERIMENT/SPIKE project would break
+the day this merges.
+
+Verified the boundary instead of assuming it. Two facts settle it:
+- `validateConsultationConfig` has **exactly one** production caller: `config.ts:326`, on
+  `merged.porch?.consultation` — user config.
+- Protocol models arrive at `resolveLaneComposition` as the `protocolModels` argument and never
+  touch the validator; with no config, `fallback = { models: protocolModels, mode: 'normal' }`
+  returns them unchanged.
+
+So the asymmetry already existed in my implementation. **Keeping it, deliberately**: protocol.json is
+a shipped artifact with established semantics, config is user input where an ambiguous second
+spelling is a usability bug. Now documented at the rejection site with an explicit warning that
+routing protocol models through the validator breaks those two protocols.
+
+Test pins both halves — `[]` rejected as config, `[]` honoured from a protocol — and reads the real
+shipped `experiment`/`spike` protocol.json rather than a fixture. It carries a **premise guard**:
+`expect(declared).toEqual([])` before the resolve assertion, so if a protocol ever stops shipping
+`[]` the test fails loudly instead of quietly passing while proving nothing. That mattered here: the
+test has an `existsSync` early-return for bare-source checkouts, which is exactly the shape that
+passes vacuously — so I confirmed out-of-band that the skeleton path resolves
+(`packages/codev/skeleton/protocols`) and both files exist with `[]`. A green test whose assertions
+never ran is worse than no test.
+
+82 tests, full suite 3875 passed / 0 failed, tsc clean. Per the architect this rides into the
+**phase_2 CMAP explicitly** rather than passing as reviewed — it will be called out in that round's
+context. Now starting phase_2 proper (consult lane model wiring).
