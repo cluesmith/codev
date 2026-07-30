@@ -302,6 +302,50 @@ one, forgot the twin" is invisible in review — the file you are reading looks 
 
 Suite 3894 → 3976 across the two phases. Build clean throughout.
 
+## Review phase + PR #1305 — 2026-07-30
+
+PR opened after all seven phases. Four CMAP rounds at the PR, and the shape changed partway through.
+
+**Rounds 1–3: three real findings, all taken.** Branch was 29 behind `main` (merged, not rebased —
+rebasing would rewrite 50 porch-authored state commits, and the repo rule is "do not squash"). Then two
+successive false-confirmation bugs in `confirmClear`, which deserve recording together because they are one
+defect wearing three masks:
+
+1. `readRecentOutput` unbound → always **unconfirmed**. A check that never looked. (phase 6, iter 3)
+2. Pattern matched `/clear` → always **confirmed**. A check that looked at its own keystroke echo.
+3. Pattern matched the save request's `CONTEXT RESET INCOMING` header → always **confirmed**. A check that
+   looked at its own *message*.
+
+Each fix was a better regex; each time the regex was the wrong layer. The actual defect was scanning a
+buffer that **contains reset's own writes** and hoping the pattern would miss them. Reset writes into that
+terminal three times per run — collision is the default, not a risk. Fixed structurally: `readOutput()` now
+returns `{ lines, total }`, the orchestrator snapshots `total` before the clear, and confirmation reads
+only what came after. Reset's own text is excluded by construction, so no future pattern edit can
+reintroduce the class. `PRE_CLEAR_BUFFER` in the harness carries the real save-request header so a
+windowing regression fails the negative tests.
+
+Honest residual, named in the review: **the pattern itself is still unvalidated.** I have never seen what a
+real `/clear` emits. The window closes the false-positive class; it cannot prove the pattern ever matches
+in production. `clear-confirmed` means "the harness said something clear-like", never proof — which is why
+it stays advisory and report-only, with no invariant depending on it.
+
+**Round 4: first outright rejection of this project.** Two findings, both contradicting documented repo
+convention: that the thread file is runtime state to be dropped (the role doc mandates committing it, and
+`main` already carries **141** thread files), and that seven commits break the format (CLAUDE.md's own
+first example, `[Spec 42] Initial specification draft`, carries no phase segment — spec/plan/review commits
+use the plain form; all seven cited commits are correct, and four are porch-generated). The commit-format
+point was a re-raise of one I rebutted in round 1.
+
+Worth stating the distinction plainly, since "builder rejects reviewer" is exactly the move that hides real
+problems: the previous six findings were all genuine and all taken, several of them safety-critical. These
+two are disagreements with the repo's design, not with my code — so the right response is evidence and an
+architect flag, not a branch change.
+
+Stopping the CMAP loop here. Remaining dissent is a convention disagreement, not an unresolved defect;
+another round would be churn.
+
+**At the pr gate — human approval required. Not approving it myself.**
+
 ## Status
 
 - [x] Explored afx/Tower internals
@@ -316,7 +360,8 @@ Suite 3894 → 3976 across the two phases. Build clean throughout.
 - [x] Phase 5 (re-orientation assembly) — 7 iterations, unanimous APPROVE, 3899 tests green
 - [x] Phase 6 (reset orchestrator + CLI wiring) — 7 iterations, unanimous APPROVE
 - [x] Phase 7 (wait discipline + command documentation) — unanimous APPROVE, iteration 1
-- [ ] Review + PR (in progress)
+- [x] Review + PR — PR #1305, 4 CMAP rounds, at the pr gate
+- [ ] Post-merge: live e2e of `afx reset` in the verify window
 
 **Open for the review phase**: live end-to-end verification of the ESC path and a real reset against a
 disposable builder is still blocked on `pnpm -w run local-install` (restarts Tower, affects every builder
