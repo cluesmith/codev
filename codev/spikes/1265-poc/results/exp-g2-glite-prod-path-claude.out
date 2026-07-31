@@ -1,0 +1,25 @@
+(node:245094) ExperimentalWarning: Transform Types is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+MEASURED claude-idle-attrs: ["❯ " dim=0 bold=0 fgMode=0 fg=-1] ["Try\"fixtypecheckerrors\"" dim=1 bold=0 fgMode=0 fg=-1]
+MEASURED claude-idle-ring: lines=0 partialBytes=1401 replayBytes=1401
+ASSERT g2-claude-idle-recon-matches-live: PASS recon="Try \"fix typecheck errors\"" live="Try \"fix typecheck errors\""
+ASSERT g2-claude-idle-clean: PASS verdict={"clean":true,"reason":"empty","userCells":0,"samples":""}
+MEASURED claude-draft-attrs: ["❯ kqzvbnwmxdrf" dim=0 bold=0 fgMode=0 fg=-1]
+ASSERT g2-claude-draft-recon-matches-live: PASS recon="kqzvbn wmxdrf\n  ptljh gsvycq" live="kqzvbn wmxdrf\n  ptljh gsvycq"
+ASSERT g2-claude-draft-recon-shows-draft: PASS recon="kqzvbn wmxdrf\n  ptljh gsvycq"
+ASSERT g2-claude-draft-not-clean: PASS verdict={"clean":false,"reason":"user-text","userCells":23,"samples":"kqzvbnwmxdrf"}
+ASSERT g2-claude-menu-not-clean: PASS verdict={"clean":false,"reason":"user-text","userCells":4,"samples":"/mod"}
+ASSERT g2-claude-menu-visible-in-recon: PASS menu filter text present in reconstruction
+MEASURED claude-stream-shape: ringLines=0 seq=0 partialBytes=12662
+ASSERT g2-claude-stream-newline-free: PASS lines=0 partialBytes=12662 — claude output accumulates in the unbounded partial (#1047 basin); line-capacity wrap cannot occur
+ASSERT g2-claude-churned-empty-recon-matches-live: PASS recon="Try \"create a util logging.py that...\"" live="Try \"create a util logging.py that...\""
+ASSERT g2-claude-churned-empty-clean: PASS verdict={"clean":true,"reason":"empty","userCells":0,"samples":""}
+ASSERT g2-claude-churned-draft-recon-matches-live: PASS 
+ASSERT g2-claude-churned-draft-not-clean: PASS verdict={"clean":false,"reason":"user-text","userCells":21,"samples":"zvqnrwdrafta"}
+ASSERT g2-claude-bytecut-draft-recon-matches-live: PASS recon="zvqnrw draft after churn"
+ASSERT g2-claude-bytecut-not-clean: PASS verdict={"clean":false,"reason":"user-text","userCells":21,"samples":"zvqnrwdrafta"}
+MEASURED claude-nudge-bytes: postNudgeChunks=4
+ASSERT g2-claude-nudge-occupancy-neutral: PASS before="mfhkzt nudge draft" after="mfhkzt nudge draft"
+ASSERT g2-claude-nudge-recon-matches-live: PASS recon="mfhkzt nudge draft"
+ASSERT g2-claude-nudge-not-clean: PASS verdict={"clean":false,"reason":"user-text","userCells":16,"samples":"mfhkztnudged"}
+ALL ASSERTIONS PASSED

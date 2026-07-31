@@ -1,4 +1,4 @@
 ASSERT a3a-midline-ctrl-u: PASS expected="xyz" actual="xyz"
 ASSERT a3b-midline-backspace: PASS expected="uvwyz" actual="uvwyz"
-ASSERT a3c-ctrlE-ctrlU-clears: PASS composer="Try \"write a test for tower-instances.ts\""
+ASSERT a3c-ctrlE-ctrlU-clears: PASS composer="Try \"fix typecheck errors\""
 ALL ASSERTIONS PASSED

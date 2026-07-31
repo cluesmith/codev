@@ -18,6 +18,17 @@
  *   p5  FIXED variant: rebuild draft → per-line clear → same inject WITHOUT
  *       the trailing ^Y → byte-replay → snapshot; must equal p1 exactly
  *
+ * ISOLATION NOTE (round 8, concern 8): this is a SEQUENCE test — p1–p5 share
+ * one session BY DESIGN, because the subject is a stateful multi-step
+ * maneuver (the kill-ring carries across phases; that carry IS the bug under
+ * test). This differs from the round-4/5 contamination pattern (independent
+ * demos silently sharing state behind fail-open `!includes` checks): here the
+ * terminal assertions are exact-equality against the in-session p1 baseline,
+ * so any inter-phase residue makes p4/p5 FAIL loudly rather than pass for the
+ * wrong reason. Round 8 additionally ASSERTS the intermediate cleanups
+ * (p3-cleaned, p4-cleaned) that were previously snapshot-only, so a dirty
+ * hand-off between phases is caught at the hand-off, not at the end.
+ *
  * Usage: node exp-i5-maxage-fullseq.cjs claude|codex
  * (claude runs on a dead ANTHROPIC_BASE_URL; codex injects /status only)
  */
@@ -112,7 +123,8 @@ function injectAtomic(d, withYank) {
   const ring = await snap(d, 'p3-ring-probe');
   check('p3-ring-holds-first-line', ring === 'first line', `ring=${JSON.stringify(ring)}`);
   await perLineClear(d, 5); // remove whatever the probe yanked
-  await snap(d, 'p3-cleaned');
+  const p3clean = await snap(d, 'p3-cleaned');
+  check('p3-cleaned-no-residue', !p3clean.includes('first') && !p3clean.includes('third'), `composer=${JSON.stringify(p3clean.slice(0, 50))}`);
 
   // ---- p4: BUGGY as-documented sequence
   const cap4 = await buildDraft(d);
@@ -125,7 +137,8 @@ function injectAtomic(d, withYank) {
   const buggy = await snap(d, 'p4-after-replay');
   check('p4-duplication-signature', buggy !== ref && buggy.includes('first linefirst line'), `buggy=${JSON.stringify(buggy)}`);
   await perLineClear(d, 8);
-  await snap(d, 'p4-cleaned');
+  const p4clean = await snap(d, 'p4-cleaned');
+  check('p4-cleaned-no-residue', !p4clean.includes('first') && !p4clean.includes('third') && !p4clean.includes('maxage'), `composer=${JSON.stringify(p4clean.slice(0, 50))}`);
 
   // ---- p5: FIXED — no trailing ^Y on the byte-replay path
   const cap5 = await buildDraft(d);

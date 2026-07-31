@@ -1,0 +1,14 @@
+(node:246176) ExperimentalWarning: Transform Types is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+MEASURED codex-idle-attrs: ["›" dim=0 bold=1 fgMode=50331648 fg=16757314] ["Implement{feature}" dim=1 bold=0 fgMode=0 fg=-1]
+MEASURED codex-idle-ring: lines=16 partialBytes=3399 replayBytes=8407
+ASSERT g2-codex-idle-recon-matches-live: PASS recon="Implement {feature}" live="Implement {feature}"
+ASSERT g2-codex-idle-clean: PASS verdict={"clean":true,"reason":"empty","userCells":0,"samples":""}
+MEASURED codex-draft-attrs: ["›" dim=0 bold=1 fgMode=50331648 fg=16757314] ["kqzvbnwmxdrf" dim=0 bold=0 fgMode=0 fg=-1]
+ASSERT g2-codex-draft-recon-matches-live: PASS recon="kqzvbn wmxdrf\n  ptljh gsvycq" live="kqzvbn wmxdrf\n  ptljh gsvycq"
+ASSERT g2-codex-draft-recon-shows-draft: PASS recon="kqzvbn wmxdrf\n  ptljh gsvycq"
+ASSERT g2-codex-draft-not-clean: PASS verdict={"clean":false,"reason":"user-text","userCells":23,"samples":"kqzvbnwmxdrf"}
+MEASURED codex-esc-on-empty: screenChanged=false idleComposer="Implement {feature}" verdict={"clean":true,"reason":"empty","userCells":0,"samples":""}
+ASSERT g2-codex-esc-recon-matches-live: PASS recon="Implement {feature}"
+ASSERT g2-codex-esc-consistency: PASS changed=false verdict={"clean":true,"reason":"empty","userCells":0,"samples":""}
+ALL ASSERTIONS PASSED

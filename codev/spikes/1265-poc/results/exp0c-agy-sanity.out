@@ -1,0 +1,116 @@
+
+--- agy auth cache: state=auth checkedAt=2026-07-31T06:04:04.824Z
+
+[agy initial screen]
+|Accessing workspace:
+|
+|/home/user/code/codev_root/codev/.builders/spike-1265
+|
+|Do you trust the contents of this project?
+|
+|Antigravity CLI requires permission to read, edit, and execute files here.
+|
+|> Yes, I trust this folder
+|  No, exit
+|
+|  ↑/↓ Navigate · enter Confirm
+|                                                                          accept-edits · Gemini 3.1 Pro · high
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+
+--- composer-marker candidates: "> Yes, I trust this folder"
+
+--- typing probe token (never submitted)
+
+[agy after typing]
+|Accessing workspace:
+|
+|/home/user/code/codev_root/codev/.builders/spike-1265
+|
+|Do you trust the contents of this project?
+|
+|Antigravity CLI requires permission to read, edit, and execute files here.
+|
+|> Yes, I trust this folder
+|  No, exit
+|
+|  ↑/↓ Navigate · enter Confirm
+|                                                                          accept-edits · Gemini 3.1 Pro · high
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+
+--- typed text visible on screen: false
+
+--- clearing with ^E ^U (app-agnostic clear primitive)
+
+[agy after ^E ^U]
+|Accessing workspace:
+|
+|/home/user/code/codev_root/codev/.builders/spike-1265
+|
+|Do you trust the contents of this project?
+|
+|Antigravity CLI requires permission to read, edit, and execute files here.
+|
+|> Yes, I trust this folder
+|  No, exit
+|
+|  ↑/↓ Navigate · enter Confirm
+|                                                                          accept-edits · Gemini 3.1 Pro · high
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+
+--- probe text still visible after ^E ^U: false
+
+--- OBSERVATIONS: composer-renders=false ctrlE-ctrlU-clears=true (idle screen 372 chars)
