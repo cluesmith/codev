@@ -236,3 +236,34 @@ Rebuttal written (all 14 findings accepted, no disagreements defended). `porch d
 passed checks. **SPECIFY COMPLETE — advanced to PLAN.** No spec gate in ASPIR.
 
 Commits: 4150edb7, 1f11f794, de043dfd, 93bd2a9d.
+
+### LESSONS — carry these verbatim into codev/reviews/1307-*.md
+
+Architect asked that the first one be recorded verbatim. Both are review-file material,
+staged here so they survive the phase boundary.
+
+1. **"I closed a hazard with a mechanism that cannot observe what it needs to."**
+   A fix's *implementability against real observables* is part of the fix, not a
+   downstream implementation detail. I answered Claude's clear-after-new-work finding
+   with "fire on the first quiescence transition" — which reads as a real mitigation and
+   is not one, because `lastDataAt` cannot distinguish which turn just ended. The fix
+   survived a full review cycle before Codex caught it. When proposing a mitigation,
+   name the observable it reads and confirm that observable exists.
+
+2. **Verifying reviewer factual claims against source paid off twice in one round.**
+   Codex made two claims about the codebase (`tower-cron`'s tick interval, `lastDataAt`'s
+   semantics). I checked both before acting. Both were correct — and each invalidated a
+   premise I had written into the spec. The habit is usually framed as protection against
+   *wrong* reviewer claims; its larger value here was confirming *right* ones fast enough
+   to act on them with confidence instead of hedging.
+
+3. **"Settled by argument" kept looking like progress.** The reorientation delivery
+   mechanism was settled twice, in opposite directions, before the owner made it an
+   explicit open decision. Neither settlement had an empirical check behind it. A
+   decision with a plausible rationale and no evidence should be *labelled* undecided,
+   not recorded as decided-with-reasons.
+
+Follow-up filed by the architect out of this round: **issue #1310** (monotonic
+per-session input-generation counter). It is the observable that upgrades this spec's
+bounded window to a guarantee, and it fixes the same blind spot in `afx reset`'s R4.
+This spec ships without it and references it where the gap is named.

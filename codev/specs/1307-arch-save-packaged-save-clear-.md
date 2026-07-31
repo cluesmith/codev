@@ -236,7 +236,9 @@ in which a clear is pending against a save that has not happened yet.
       if the terminal's output total has grown beyond tolerance since arming. Stated as
       a bound rather than a guarantee **deliberately**: Tower exposes no turn identifier,
       so "the original turn ended" and "a follow-up turn ended" are observationally
-      identical, and a criterion promising otherwise would be untestable.
+      identical, and a criterion promising otherwise would be untestable. Issue #1310
+      adds the missing observable; this criterion is expected to be *strengthened* to a
+      guarantee once it exists, and should not be written as one before then.
 - [ ] Invoking without the boundary acknowledgment refuses, prints the resumable-boundary
       rule, and touches nothing.
 - [ ] A state file that is missing, stale, a stub (below the size floor), still growing,
@@ -434,8 +436,12 @@ in which a clear is pending against a save that has not happened yet.
     output than an architect simply finishing its turn. It will not catch a one-line
     exchange.
   - What is **not** claimed: that a clear can never land after post-save work. Closing
-    that properly needs an observable the system does not currently expose. See Open
-    Questions.
+    that properly needs an observable the system does not currently expose — **filed as
+    issue #1310** (a monotonic per-session input-generation counter on session info).
+    When that primitive lands, the heuristic below is replaced by a real gate ("refuse to
+    clear if input arrived after arming") and this bound becomes a guarantee. Until then
+    the honest statement is the bound. `afx reset`'s R4 has the same blind spot and is
+    named as the other consumer on #1310.
 
 ### Business Constraints
 
@@ -701,15 +707,15 @@ subset of Approach 1's external path, so choosing 1 does not foreclose it.
 - [ ] **How many jobs may be armed for one architect at once?** Assumed exactly one: a
       second arm either replaces the first with a clear notice or is refused. Two armed
       jobs racing toward one terminal is not a state worth supporting.
-- [ ] **Is a turn/input-generation observable worth adding to Tower?** The clear-after-
-      post-save-work hazard cannot be *closed* with what Tower exposes today — only
-      bounded — because `lastDataAt` is a last-output timestamp with no notion of which
-      turn produced it. A monotonic input-generation counter, or any observable that
-      changes when new input reaches the session, would turn the current bound into an
-      actual guarantee ("refuse to clear if input arrived after arming"). That is a
-      Tower change beyond this spec's scope, so the question here is whether it is worth
-      filing separately. The output-total heuristic is the interim stand-in and should
-      be labelled as such wherever it appears.
+- [x] ~~**Is a turn/input-generation observable worth adding to Tower?**~~ **Resolved —
+      filed as issue #1310** (monotonic per-session input-generation counter, exposed on
+      session info). The clear-after-post-save-work hazard cannot be *closed* with what
+      Tower exposes today, only bounded, because `lastDataAt` carries no notion of which
+      turn produced it. #1310 adds the primitive; both this spec's bounded-window hazard
+      and `afx reset`'s R4 are named as consumers, with the upgrade path from heuristic
+      to guarantee recorded there. **This spec does not depend on #1310** — it ships with
+      the bound and the labelled heuristic, and strengthens later. Kept visible rather
+      than deleted so the dependency is legible to whoever picks up either issue.
 - [ ] **What is the size ceiling for "one screen order of magnitude"?** Deliberately not
       guessed. It should be derived from real architect state files — the live v67
       example is one data point — rather than picked to look reasonable. Too low trains
@@ -976,6 +982,10 @@ transactions per second.
 
 - Issue #1307 — the proposal, four design notes, the v67 state-block template (comment
   1), and the monitor-lifecycle correction (comment 2).
+- Issue #1310 — monotonic per-session input-generation counter. The observable this spec
+  needs to convert its bounded post-save-work window into a guarantee; filed out of this
+  spec's review rather than absorbed into its scope. `afx reset`'s R4 is the other
+  consumer.
 - `codev/specs/1273-builder-context-reset-should-b.md` and PR #1305 — the builder
   flavour of this cycle; source of the reusable machinery and the R1–R4 invariants.
 - `codev/specs/1134-afx-whoami-ship-arch-init-comm.md` — `afx whoami` and the `/arch-init`
@@ -997,7 +1007,7 @@ transactions per second.
 | An architect self-invokes autonomously mid-task and loses live context | Low | High | `--boundary` acknowledgment is mandatory; the skill states the owner-direction rule with a standard override carve-out; the command cannot verify boundary-ness and says so plainly rather than implying it checked. |
 | The CLI blocks in self-invocation, so the turn never ends and the cycle deadlocks | Medium | Medium | Explicit control-return budget with a test; self-invocation is detected from identity, not inferred from a flag the caller might forget. |
 | Forking the reset machinery lets the two flavours' ordering rules drift | Medium | High | Factor shared gates out of `commands/reset/` and consume them from both; the ordering invariant tests run against the shared state machine, not per-flavour copies. |
-| **A new turn starts between the verified save and the clear, so the clear destroys work the save never captured** | Medium | High | **Bounded, not closed** — Tower exposes no turn identifier, so this cannot be fully eliminated today. Write-then-verify removes the receipt window from the self path; the job fires on the first quiescence transition after arming; armed lifetime is bounded and disarms visibly; an output-total heuristic catches a full follow-up turn. Exposure drops from minutes to one quiet window, and the residual gap is named in Open Questions rather than papered over. |
+| **A new turn starts between the verified save and the clear, so the clear destroys work the save never captured** | Medium | High | **Bounded, not closed** — Tower exposes no turn identifier, so this cannot be fully eliminated today. Write-then-verify removes the receipt window from the self path; the job fires on the first quiescence transition after arming; armed lifetime is bounded and disarms visibly; an output-total heuristic catches a full follow-up turn. Exposure drops from minutes to one quiet window. The residual gap is not papered over: issue **#1310** adds the missing observable and converts this row's mitigation from heuristic to gate. |
 | **The skill takes the snapshot but nothing verifies it did** | Medium | High | Moved under machine control: `--begin` takes the snapshot and issues a token that `--boundary` requires. A missing or stale token is refused, so the ordering no longer rests on the skill behaving. |
 | **A Tower restart drops an armed job and nothing records that it happened** | Medium | Low | Execution stays in memory (fail-safe: no clear), but a durable intent record is written at arm time and removed on completion, so a leftover record is unambiguous evidence of an unfinished cycle and is surfaced on the next invocation. |
 | **Quiescence never resolves against a live TUI that repaints while idle, so every run aborts** | Medium | High (feature is inert) | Scope the live e2e to measure real idle behaviour, not just the clear; treat the quiet window as a value to be tuned from observation rather than inherited. Failure is safe but total, so it must be caught before ship, not after. |
