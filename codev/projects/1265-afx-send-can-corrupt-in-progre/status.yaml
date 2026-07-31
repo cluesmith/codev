@@ -1,0 +1,12 @@
+id: '1265'
+title: afx-send-can-corrupt-in-progre
+protocol: spike
+phase: spike
+plan_phases: []
+current_plan_phase: null
+gates: {}
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-07-31T00:15:04.175Z'
+updated_at: '2026-07-31T00:15:04.176Z'
