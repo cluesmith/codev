@@ -193,12 +193,36 @@ function normalizeId(value: string): string {
   return value.trim().toLowerCase().replace(/^0+(?=\d)/, '');
 }
 
-function ownsProject(dir: string, statusId: string | null, candidates: string[]): boolean {
-  const wanted = candidates.map(normalizeId);
-  if (statusId && wanted.includes(normalizeId(statusId))) return true;
+/**
+ * How strongly a project directory claims to belong to this builder.
+ *
+ * `none` — not this builder's.
+ * `weak` — matched on the bare project NUMBER (or a directory prefix). Numbers
+ *          are reused across protocols: issue 799 has both a PIR project
+ *          (`799-vscode-builder-changed-file-ro`) and a bugfix, so a bare-number
+ *          match alone would hand `builder-bugfix-799` the PIR project's
+ *          protocol and porch id. Requires protocol corroboration.
+ * `strong` — matched on a globally unique, non-numeric project id, i.e. the raw
+ *          registry builder id. `spawn --task --protocol X` stores exactly that
+ *          (`builder-task-<id>`), so it identifies one builder and needs no
+ *          corroboration — which matters because that lane's PROTOCOL
+ *          legitimately differs from its id prefix (`task` vs `air`).
+ */
+type ProjectClaim = 'none' | 'weak' | 'strong';
+
+function claimStrength(
+  dir: string,
+  statusId: string | null,
+  identity: PorchProjectIdentity,
+): ProjectClaim {
+  const rawId = normalizeId(identity.builderId);
+  if (statusId && normalizeId(statusId) === rawId && !/^\d+$/.test(rawId)) return 'strong';
+
+  const wanted = candidateProjectIds(identity).map(normalizeId);
+  if (statusId && wanted.includes(normalizeId(statusId))) return 'weak';
 
   const dirNorm = normalizeId(dir);
-  return wanted.some(c => dirNorm === c || dirNorm.startsWith(`${c}-`));
+  return wanted.some(c => dirNorm === c || dirNorm.startsWith(`${c}-`)) ? 'weak' : 'none';
 }
 
 export function readPorchContext(
@@ -210,7 +234,13 @@ export function readPorchContext(
   const dirs = fs.listDirs(projectsDir);
   if (!dirs || dirs.length === 0) return null;
 
-  const candidates = candidateProjectIds(identity);
+  // The protocol the builder id claims, used to corroborate weak (number-only)
+  // matches. Absent for ids that are not in canonical form, in which case a weak
+  // match cannot be corroborated and is not trusted.
+  const expectedProtocol = parseAgentName(identity.builderId)?.protocol ?? null;
+
+  const strong: PorchContext[] = [];
+  const weak: PorchContext[] = [];
 
   for (const dir of dirs) {
     const statusPath = join(projectsDir, dir, 'status.yaml');
@@ -222,13 +252,11 @@ export function readPorchContext(
     const id = matchScalar(content, 'id');
     if (!protocol || !phase) continue;
 
-    // Identity check LAST, after parsing, so a malformed status.yaml belonging
-    // to this builder is skipped the same way any other unparsable one is —
-    // rather than matching on the directory name and then failing.
-    if (!ownsProject(dir, id, candidates)) continue;
+    const claim = claimStrength(dir, id, identity);
+    if (claim === 'none') continue;
 
     const currentPlanPhase = matchScalar(content, 'current_plan_phase');
-    return {
+    const ctx: PorchContext = {
       projectId: id ?? dir.split('-')[0],
       projectName: dir,
       protocol,
@@ -236,9 +264,34 @@ export function readPorchContext(
       currentPlanPhase: currentPlanPhase && currentPlanPhase !== 'null' ? currentPlanPhase : null,
       statusPath,
     };
+
+    if (claim === 'strong') {
+      strong.push(ctx);
+      continue;
+    }
+
+    // A weak match must agree with the protocol the builder id declares.
+    // Without this, `builder-bugfix-799` adopts the PIR project that happens to
+    // share the number — wrong protocol, wrong porch id, and silently so.
+    if (expectedProtocol && protocol.toLowerCase() !== expectedProtocol.toLowerCase()) continue;
+    weak.push(ctx);
   }
 
-  return null;
+  const matches = strong.length > 0 ? strong : weak;
+  if (matches.length === 0) return null;
+
+  if (matches.length > 1) {
+    // Never pick one arbitrarily — that is the bug this whole function exists to
+    // fix, and picking the "least wrong" of several is the same mistake with
+    // better manners.
+    throw new ContextResolutionError(
+      `Ambiguous porch project for '${identity.builderId}': ${matches
+        .map(m => `${m.projectName} (${m.protocol})`)
+        .join(', ')} all claim it. Refusing to guess which one governs this builder.`,
+    );
+  }
+
+  return matches[0];
 }
 
 /** Read a top-level scalar from porch's status.yaml, stripping quotes. */

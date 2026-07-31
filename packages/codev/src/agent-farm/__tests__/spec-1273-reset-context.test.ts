@@ -122,10 +122,38 @@ describe('protocol resolution (Spec 1273)', () => {
     ).toThrow(ContextResolutionError);
   });
 
-  it('prefers status.yaml over the builder id when they disagree', () => {
-    // status.yaml is what porch is actually running.
-    const ctx = resolveBuilderContext({ fs: fullWorktree(), ...BASE, builderId: 'builder-spir-1273' });
+  it('prefers status.yaml over the builder id when they agree on ownership', () => {
+    // status.yaml is what porch is actually running, so it wins for phase,
+    // plan phase and project identity.
+    const ctx = resolveBuilderContext({ fs: fullWorktree(), ...BASE });
     expect(ctx.protocol).toBe('aspir');
+    expect(ctx.protocolSource).toBe('status.yaml');
+  });
+
+  it('treats a PROTOCOL disagreement as "not my project", not as a correction', () => {
+    // DELIBERATE REVERSAL of the original phase-4 behaviour, forced by the
+    // verify-phase e2e.
+    //
+    // Before: a project matching on the number won even when its protocol
+    // disagreed with the builder id, on the principle that status.yaml is
+    // authoritative. That principle is right for a builder's OWN project and
+    // wrong as a way of DECIDING which project is its own — and the two cannot
+    // both hold, because the signal is identical in each case.
+    //
+    // Live harm decided it: issue 799 is used by both a PIR project and a
+    // bugfix, so `builder-bugfix-799` silently adopted the PIR project's
+    // protocol and porch id. A hypothetical id/status protocol disagreement
+    // within one project is the cost; adopting a stranger's project is the
+    // thing actually happening in this repo.
+    const ctx = resolveBuilderContext({
+      fs: fullWorktree(),
+      ...BASE,
+      builderId: 'builder-spir-1273',
+    });
+
+    expect(ctx.protocol).toBe('spir');
+    expect(ctx.protocolSource).toBe('builder-id');
+    expect(ctx.porch).toBeNull();
   });
 
   it('protocolFromStatus returns null when there are no project dirs', () => {
@@ -517,7 +545,22 @@ describe('porch project selection is by identity, never by position (Spec 1273 F
   });
 
   it('matches on the issue number for an issue-driven lane', () => {
-    const porch = readPorchContext(inheritedHistoryWorktree('1279-fix-something'), WORKTREE, {
+    // The builder's own project carries its own protocol — a bugfix builder's
+    // project is a bugfix project. A number match against a project of a
+    // DIFFERENT protocol is rejected; see the number-collision suite below.
+    const fs = makeFs(
+      {
+        [join(WORKTREE, 'codev', 'projects', '0087-old', 'status.yaml')]:
+          "id: '0087'\nprotocol: spider\nphase: implement\n",
+        [join(WORKTREE, 'codev', 'projects', '1279-fix-something', 'status.yaml')]:
+          "id: '1279'\nprotocol: bugfix\nphase: implement\n",
+        [join(WORKTREE, '.builder-prompt.txt')]: BUILDER_PROMPT,
+        [join(WORKTREE, '.builder-start.sh')]: LAUNCH_SCRIPT,
+      },
+      { [join(WORKTREE, 'codev', 'projects')]: ['0087-old', '1279-fix-something'] },
+    );
+
+    const porch = readPorchContext(fs, WORKTREE, {
       builderId: 'builder-bugfix-1279',
       issueNumber: '1279',
     });
@@ -527,18 +570,34 @@ describe('porch project selection is by identity, never by position (Spec 1273 F
   it('tolerates leading zeros between the id and the directory name', () => {
     // Project dirs use `0087-…` while porch ids and CLI arguments use `87`
     // (the same split as `afx cleanup -p 466` vs `0466`).
-    const porch = readPorchContext(inheritedHistoryWorktree(), WORKTREE, {
-      builderId: 'builder-bugfix-87',
-    });
-    expect(porch?.projectName).toBe('0087-porch-timeout-termination-retries');
+    const fs = makeFs(
+      {
+        [join(WORKTREE, 'codev', 'projects', '0087-old-bugfix', 'status.yaml')]:
+          "id: '0087'\nprotocol: bugfix\nphase: implement\n",
+        [join(WORKTREE, '.builder-prompt.txt')]: BUILDER_PROMPT,
+        [join(WORKTREE, '.builder-start.sh')]: LAUNCH_SCRIPT,
+      },
+      { [join(WORKTREE, 'codev', 'projects')]: ['0087-old-bugfix'] },
+    );
+
+    const porch = readPorchContext(fs, WORKTREE, { builderId: 'builder-bugfix-87' });
+    expect(porch?.projectName).toBe('0087-old-bugfix');
   });
 
   it('matches case-insensitively, so a case-sensitive filesystem behaves like macOS', () => {
     // The registry lowercases builder ids while directories preserve case
     // (`builder-task-re_v` vs `.builders/task-RE_V`). macOS hides the mismatch.
-    const porch = readPorchContext(inheritedHistoryWorktree('task-RE_V-probe'), WORKTREE, {
-      builderId: 'builder-task-re_v',
-    });
+    const fs = makeFs(
+      {
+        [join(WORKTREE, 'codev', 'projects', 'task-RE_V-probe', 'status.yaml')]:
+          "id: 'task-RE_V'\nprotocol: task\nphase: implement\n",
+        [join(WORKTREE, '.builder-prompt.txt')]: BUILDER_PROMPT,
+        [join(WORKTREE, '.builder-start.sh')]: LAUNCH_SCRIPT,
+      },
+      { [join(WORKTREE, 'codev', 'projects')]: ['task-RE_V-probe'] },
+    );
+
+    const porch = readPorchContext(fs, WORKTREE, { builderId: 'builder-task-re_v' });
     expect(porch?.projectName).toBe('task-RE_V-probe');
   });
 });
@@ -660,5 +719,96 @@ describe('the --task --protocol lane keeps its porch project (Spec 1273 verify i
     // and an unfollowable `gh issue view` in the re-orientation — sending a
     // reset builder to look up requirements that do not exist.
     expect(ctx.issueNumber).toBeUndefined();
+  });
+});
+
+describe('a bare project NUMBER is not enough to claim a builder (Spec 1273 verify iter 3)', () => {
+  /** Issue 799 really is used by both a PIR project and a bugfix in this repo. */
+  function numberCollisionWorktree() {
+    return makeFs(
+      {
+        [join(WORKTREE, 'codev', 'projects', '799-vscode-builder-changed-file-ro', 'status.yaml')]:
+          "id: '799'\nprotocol: pir\nphase: implement\n",
+        [join(WORKTREE, '.builder-prompt.txt')]: BUILDER_PROMPT,
+        [join(WORKTREE, '.builder-start.sh')]: LAUNCH_SCRIPT,
+      },
+      { [join(WORKTREE, 'codev', 'projects')]: ['799-vscode-builder-changed-file-ro'] },
+    );
+  }
+
+  it('does not hand a bugfix builder the PIR project that shares its number', () => {
+    // The wrong-winner class, second instance: the first fix stopped
+    // alphabetically-first from winning, but a bare-number match still let ONE
+    // project claim any builder sharing the digits — across protocols. Verified
+    // live on builder-bugfix-799.
+    const porch = readPorchContext(numberCollisionWorktree(), WORKTREE, {
+      builderId: 'builder-bugfix-799',
+      issueNumber: '799',
+    });
+
+    expect(porch).toBeNull();
+  });
+
+  it('accepts the same number when the protocol agrees', () => {
+    const porch = readPorchContext(numberCollisionWorktree(), WORKTREE, {
+      builderId: 'builder-pir-799',
+      issueNumber: '799',
+    });
+
+    expect(porch?.projectName).toBe('799-vscode-builder-changed-file-ro');
+    expect(porch?.protocol).toBe('pir');
+  });
+
+  it('falls back to the builder id for the protocol, rather than adopting a foreign one', () => {
+    // The end-to-end consequence: with no project of its own, the bugfix builder
+    // still resolves protocol `bugfix` from its id and simply gets no porch
+    // block — a visible absence, not a confident lie.
+    const ctx = resolveBuilderContext({
+      fs: numberCollisionWorktree(),
+      builderId: 'builder-bugfix-799',
+      worktree: WORKTREE,
+      branch: 'builder/bugfix-799',
+      issueNumber: '799',
+    });
+
+    expect(ctx.protocol).toBe('bugfix');
+    expect(ctx.protocolSource).toBe('builder-id');
+    expect(ctx.porch).toBeNull();
+  });
+
+  it('still lets a non-numeric project id claim across a protocol mismatch', () => {
+    // The --task --protocol lane: id `builder-task-abc` is globally unique, so
+    // it needs no corroboration — which matters because its protocol (air)
+    // legitimately differs from its id prefix (task).
+    const dir = 'builder-task-abc-task-abc';
+    const fs = makeFs(
+      {
+        [join(WORKTREE, 'codev', 'projects', dir, 'status.yaml')]:
+          "id: 'builder-task-abc'\nprotocol: air\nphase: implement\n",
+        [join(WORKTREE, '.builder-prompt.txt')]: BUILDER_PROMPT,
+        [join(WORKTREE, '.builder-start.sh')]: LAUNCH_SCRIPT,
+      },
+      { [join(WORKTREE, 'codev', 'projects')]: [dir] },
+    );
+
+    expect(readPorchContext(fs, WORKTREE, { builderId: 'builder-task-abc' })?.protocol).toBe('air');
+  });
+
+  it('aborts rather than choosing between two equally-strong claims', () => {
+    // Picking the "least wrong" of several is the original bug with better
+    // manners. If two projects genuinely claim a builder, say so.
+    const fs = makeFs(
+      {
+        [join(WORKTREE, 'codev', 'projects', '1273-a', 'status.yaml')]:
+          "id: '1273'\nprotocol: aspir\nphase: implement\n",
+        [join(WORKTREE, 'codev', 'projects', '1273-b', 'status.yaml')]:
+          "id: '1273'\nprotocol: aspir\nphase: review\n",
+        [join(WORKTREE, '.builder-prompt.txt')]: BUILDER_PROMPT,
+        [join(WORKTREE, '.builder-start.sh')]: LAUNCH_SCRIPT,
+      },
+      { [join(WORKTREE, 'codev', 'projects')]: ['1273-a', '1273-b'] },
+    );
+
+    expect(() => readPorchContext(fs, WORKTREE, { builderId: BUILDER_ID })).toThrow(/Ambiguous/);
   });
 });
