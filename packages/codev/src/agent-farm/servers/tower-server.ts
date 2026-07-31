@@ -192,6 +192,13 @@ async function gracefulShutdown(signal: string): Promise<void> {
   // has not arrived", and that moment is chosen relative to a world this restart
   // has already invalidated. Firing them now would land a `/arch-init` in a
   // session that was never cleared. Dropping is recoverable by re-sending.
+  //
+  // Ordering note: 4b runs first, so a delayed message that had ALREADY come
+  // due and re-entered the send buffer is flushed by 4b rather than dropped
+  // here. That is correct rather than a leak in the rule — once a delayed
+  // message re-enters the buffer it has been accepted for delivery and is a
+  // buffered message; "drop, don't flush" governs sends still waiting on their
+  // timer, which is what this call cancels.
   const droppedDelayed = shutdownDelayedSends();
   if (droppedDelayed > 0) {
     log('INFO', `Dropped ${droppedDelayed} pending delayed send(s) — re-send them if still wanted`);

@@ -1772,16 +1772,21 @@ async function deliverOrBuffer(
   // inversion means `/arch-init` landing before its `/clear`, after which the
   // clear wipes the context that just recovered — a failure no re-send repairs.
   //
-  // WHERE THE GUARANTEE STOPS, stated so nobody assumes more than it gives:
-  //   1. `hasPending` sees QUEUED messages, not ones mid-flush. A delayed
-  //      message coming due within ~50ms after a buffer flush can still
-  //      interleave with that flush's pending paced writes. Recoverable — a
-  //      garbled unsubmitted line, never a destroyed context — and inside the
-  //      spec's accepted posture.
-  //   2. Request-order across differing delays is NOT preserved: `--delay 5`
-  //      after `--delay 30` lands first, because that is what --delay means.
-  //   3. Concurrent DELAYED deliveries are serialised separately, by the
-  //      per-terminal chain in delayed-send.ts, which waits out paced writes.
+  // WHAT THIS GUARANTEES, and what it does not:
+  //   COVERED — a delayed message never overtakes one queued for the session,
+  //     and never writes into a buffer flush that is still mid-delivery
+  //     (`SendBuffer.busyUntil` keeps the session "pending" until that flush's
+  //     paced writes land; route test "ORDERING: ... MID-FLUSH").
+  //   COVERED — concurrent DELAYED deliveries, serialised by the per-terminal
+  //     chain in delayed-send.ts, which waits out each other's paced writes.
+  //   NOT COVERED — an IMMEDIATE direct write sets no `busyUntil`, so a delayed
+  //     message coming due inside that write's ~100ms pacing window can still
+  //     interleave with it. Left open deliberately: it is a pre-existing
+  //     property of the immediate path, the damage is a garbled unsubmitted
+  //     line rather than a destroyed context, and `/arch-save` is nowhere near
+  //     it (its `/clear` and `/arch-init` are ~15s apart).
+  //   NOT GUARANTEED — request-order across differing delays: `--delay 5` after
+  //     `--delay 30` lands first, because that is what `--delay` means.
   const shouldDefer = queueAhead
     || (!interrupt && !session.isUserIdle(sendBuffer.idleThresholdMs));
 

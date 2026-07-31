@@ -106,6 +106,15 @@ export class SendBuffer {
   flush(forceAll = false): void {
     if (!this.getSession || !this.deliver) return;
 
+    // Reclaim expired busy markers (Spec 1307). Without this a session that
+    // flushed once and never received another message keeps a stale numeric
+    // entry until some later hasPending() happens to look at it. Bounded work:
+    // the map only holds sessions that have recently been flushed to.
+    const nowTs = Date.now();
+    for (const [id, until] of this.busyUntil) {
+      if (nowTs >= until) this.busyUntil.delete(id);
+    }
+
     for (const [sessionId, messages] of this.buffers) {
       const session = this.getSession(sessionId);
 
