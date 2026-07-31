@@ -1622,9 +1622,14 @@ async function handleSend(
     scheduleDelayedSend(deliverAfter, result.terminalId, async () => {
       const { writeCompletesInMs } = await deliverOrBuffer(deliveryContext);
       // Hold the terminal's chain until the paced writes have actually landed,
-      // so the next due message cannot start mid-write.
+      // so the next due message cannot start mid-write. Unref'd: this is a
+      // settling wait after a completed write, and it must never be the reason
+      // Tower's event loop stays alive at shutdown.
       if (writeCompletesInMs > 0) {
-        await new Promise(resolve => setTimeout(resolve, writeCompletesInMs));
+        await new Promise(resolve => {
+          const t = setTimeout(resolve, writeCompletesInMs);
+          if (typeof t.unref === 'function') t.unref();
+        });
       }
     });
     ctx.log('INFO', `Message scheduled (+${deliverAfter}s): ${from ?? 'unknown'} → ${result.agent} (terminal ${result.terminalId.slice(0, 8)}...)`);

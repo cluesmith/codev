@@ -244,6 +244,49 @@ describe('shutdownDelayedSends', () => {
   it('is safe to call with nothing pending', () => {
     expect(shutdownDelayedSends()).toBe(0);
   });
+
+  it('cancels a DUE-but-not-started delivery waiting behind a slow one', async () => {
+    // The case clearing `chains` cannot handle. Once a delivery has been
+    // appended with `.then()`, that callback is attached to a promise and will
+    // run when its predecessor settles — no matter what the map says. So the
+    // second message here is past its timer (already removed from `pending`)
+    // and merely waiting on the first. Without a generation guard it would be
+    // written AFTER shutdown, which is precisely what "shutdown drops pending
+    // delayed sends" promises cannot happen.
+    const ran: string[] = [];
+    let releaseFirst: () => void = () => {};
+    const firstStarted = new Promise<void>(resolve => { releaseFirst = resolve; });
+
+    scheduleDelayedSend(5, 'term-1', async () => {
+      ran.push('first');
+      await firstStarted; // hold the chain open
+    });
+    scheduleDelayedSend(5, 'term-1', () => { ran.push('second'); });
+
+    // Both timers fire; 'first' starts and blocks, 'second' queues behind it.
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(ran).toEqual(['first']);
+
+    // Shutdown reports 0 pending — both timers had already fired — yet the
+    // queued 'second' must still be cancelled.
+    shutdownDelayedSends();
+
+    releaseFirst();
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(ran).toEqual(['first']);
+  });
+
+  it('does not cancel deliveries scheduled AFTER a shutdown', async () => {
+    // The generation guard must not poison the next Tower lifetime.
+    shutdownDelayedSends();
+
+    const ran: string[] = [];
+    scheduleDelayedSend(5, 'term-1', () => { ran.push('after'); });
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(ran).toEqual(['after']);
+  });
 });
 
 // ============================================================================

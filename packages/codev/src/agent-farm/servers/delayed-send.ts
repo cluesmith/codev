@@ -62,6 +62,22 @@ const pending = new Set<PendingDelayedSend>();
 const chains = new Map<string, Promise<void>>();
 
 /**
+ * Incremented by every shutdown. Each scheduled send captures the value current
+ * when it was scheduled and re-checks it immediately before delivering.
+ *
+ * Clearing `chains` is NOT sufficient to stop work: once a delivery has been
+ * appended to a chain with `.then()`, that callback is already attached to a
+ * promise and will run when its predecessor settles, whatever the map says. So
+ * a message due-but-not-yet-started — queued behind a slow delivery to the same
+ * terminal — would still be written AFTER shutdown, which is exactly what
+ * "shutdown drops pending delayed sends" promises it will not do.
+ *
+ * A generation check is the cheapest way to make an already-scheduled callback
+ * a no-op.
+ */
+let generation = 0;
+
+/**
  * Upper bound on `--delay`, in seconds.
  *
  * One hour. Not a meaningful workflow limit — it exists so a typo (`--delay
@@ -119,6 +135,8 @@ export function scheduleDelayedSend(
     timer: undefined as unknown as ReturnType<typeof setTimeout>,
   };
 
+  const scheduledGeneration = generation;
+
   entry.timer = setTimeout(() => {
     // Deregister BEFORE delivering. If delivery throws, the entry must not be
     // left behind as a phantom pending send that shutdown would then report.
@@ -127,6 +145,10 @@ export function scheduleDelayedSend(
     // Append to this terminal's chain so concurrent due messages serialise.
     const previous = chains.get(terminalId) ?? Promise.resolve();
     const next = previous.then(async () => {
+      // Re-checked HERE, not at timer time: the wait to get here can be long
+      // (a slow predecessor on this terminal), and shutdown may have happened
+      // during it.
+      if (generation !== scheduledGeneration) return;
       try {
         await deliver();
       } catch {
@@ -157,6 +179,9 @@ export function shutdownDelayedSends(): number {
   }
   pending.clear();
   chains.clear();
+  // Invalidate deliveries whose timer already fired but which have not started
+  // yet — clearing `chains` cannot cancel an attached `.then()`.
+  generation++;
   return count;
 }
 

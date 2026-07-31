@@ -115,6 +115,10 @@ export class SendBuffer {
           this.log('WARN', `Discarding ${messages.length} buffered message(s) for dead session ${sessionId.slice(0, 8)}...`);
         }
         this.buffers.delete(sessionId);
+        // Spec 1307: drop the busy marker too — a dead session's write window
+        // is meaningless, and leaving it would keep the entry until some later
+        // hasPending() happens to reclaim it.
+        this.busyUntil.delete(sessionId);
         continue;
       }
 
