@@ -597,3 +597,49 @@ Doc: table rows (printable/^C/Up/Left-Right/Tab), new constraint 17, item 7
 equality clause, 2 new next-steps + corpus amendment note, References + evidence
 map gain the (ref) tier. No verdict/effort change — everything lands in
 existing components (tracker rule table + profile corpus).
+
+## 2026-07-31 — Round 14 (architect request): binding introspection run in all three TUIs; customization now addressed explicitly
+
+Asked: run claude `/keybindings`, codex `/keymap`, agy `/keybindings`, and answer
+whether the spike addresses user-customizable shortcuts. **Answer: it did only
+partially/implicitly** (per-app divergence + version pinning, constraints 9/12;
+vim mode, 17b; and the guard layers) — **now it's explicit** (constraint 17e)
+with measured evidence (`i13`, exploratory tier, all three arms, zero traffic):
+
+- **claude** `/keybindings` = "Open your keyboard shortcuts file" — MODAL
+  (^G-class): drops the session into $EDITOR on the schema'd
+  `~/.claude/keybindings.json`. The live table on THIS box (the box every
+  claude measurement ran on) binds `enter: chat:submit`, `ctrl+j:
+  chat:newline`, `ctrl+l: chat:clearInput` — the last already diverges from
+  the published reference (^L = redraw there): per-install divergence is
+  live, not hypothetical. Line-edit keys (^A ^E ^U ^W ^Y BS) are NOT
+  enumerated (maneuver bytes appear hardcoded).
+- **agy** `/keybindings` = "Set custom keybindings" — same modal-editor
+  pattern on `~/.gemini/antigravity-cli/keybindings.json`; full default table
+  captured: `cli.enter` submit, `cli.escape: [ctrl+c, esc]` (^C is ESCAPE on
+  agy, not clear-draft), `prompt.insert_newline: [alt+enter, ctrl+j,
+  shift+enter]`, `edit.open_editor: ctrl+g`, and the sharpest cross-app
+  divergence measured anywhere in the spike: `subagent.approve_fast:
+  [ctrl+k]` — delete-to-EOL on claude is an APPROVAL ACTION on agy.
+  (Trust dialog did not reappear — worktree previously trusted.)
+- **codex** `/keymap` = "remap TUI shortcuts" — an interactive REBINDING
+  dialog: "110 actions, 0 customized, 3 unbound", grouped All/Common/
+  Customized/Unbound/App/Composer/Editor/Vim/Navigation/Approval/Debug;
+  `ctrl-o` = Copy (vs claude's transcript toggle). Ran in the i12d scratch
+  dead-provider home (pristine defaults).
+
+Doc: constraint 17 title + new (e) — binding tables are per-user config on
+all three apps, SUBMIT INCLUDED; submit-detector + all byte forms restated as
+default-config assumptions; rebound-submit failure mode analyzed (missed
+submit → stale capture → equality aborts; unrecognized submit → pre-Enter/
+verify → held/stranded/unverified — no believed-sent path, but per-target
+liveness dies and telemetry is the surfacing mechanism); introspection
+commands are composer-consuming + modal ⇒ lab-only, never a production probe;
+phase-1 stance = guard layers + telemetry + optional operator-declared
+custom-bindings flag (→ defer-only). Delivery-matrix intro gains the
+default-table caveat; agy next-step notes its captured table; new next-step:
+re-capture binding tables with the version-bump smoke suite. Method/evidence
+map/references gain i13 (exploratory tier).
+
+No verdict/effort change. Runs: i13-claude, i13-codex, i13-agy all exit 0.
+Versions: claude 2.1.212 / codex 0.146.0 / agy 1.1.8 / @xterm 6.0.0.

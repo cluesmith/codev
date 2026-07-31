@@ -1,0 +1,76 @@
+HARNESS @xterm/headless=6.0.0 node=v22.23.1
+
+--- ~/.claude/keybindings.json EXISTS on this box; Chat-context bindable keys: escape, ctrl+l, cmd+k, ctrl+x ctrl+k, shift+tab, meta+p, meta+o, meta+t, meta+w, enter, ctrl+j, up, down, ctrl+_, ctrl+-, ctrl+shift+-, ctrl+shift+_, ctrl+x ctrl+e, ctrl+g, ctrl+s, alt+v, ctrl+v, space
+
+--- Chat submit binding: {"enter":"chat:submit","ctrl+j":"chat:newline","ctrl+l":"chat:clearInput"}
+
+--- low-level edit keys (maneuver bytes) enumerated in Chat bindings: NONE (not bindable via this file, per the live table)
+
+--- typing /keybindings
+
+----- claude-menu-filtered (10 non-empty rows of 45) -----
+ 1|  ▐▛███▜▌   Claude Code v2.1.212
+ 2| ▝▜█████▛▘  claude-opus-5[1m] with high effort · Claude Max
+ 3|   ▘▘ ▝▝    ~/code/codev_root/codev/.builders/spike-1265
+38|   /keybindings                  Open your keyboard shortcuts file
+39| ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+40| ❯ /keybindings
+41| ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+42|   ~/code/codev_root/codev/.builders/spike-1265
+43|   high:opus-5[1m]
+44|   ⏸ manual mode on
+----- end claude-menu-filtered -----
+
+
+----- claude-keybindings-panel (45 non-empty rows of 45) -----
+ 0|         "shift+tab": "confirm:cycleMode",
+ 1|         "ctrl+e": "confirm:toggleExplanation"
+ 2|       }
+ 3|     },
+ 4|     {
+ 5|       "context": "Tabs",
+ 6|       "bindings": {
+ 7|         "tab": "tabs:next",
+ 8|         "shift+tab": "tabs:previous",
+ 9|         "right": "tabs:next",
+10|         "left": "tabs:previous"
+11|       }
+12|     },
+13|     {
+14|       "context": "Transcript",
+15|       "bindings": {
+16|         "ctrl+e": "transcript:toggleShowAll",
+17|         "escape": "transcript:exit",
+18|         "q": "transcript:exit",
+19|         "ctrl+u": "scroll:halfPageUp",
+20|         "ctrl+b": "scroll:fullPageUp",
+21|         "ctrl+f": "scroll:fullPageDown",
+22|         "ctrl+n": "scroll:lineDown",
+23|         "ctrl+p": "scroll:lineUp",
+24|         "g": "scroll:top",
+25|         "shift+g": "scroll:bottom",
+26|         "j": "scroll:lineDown",
+27|         "k": "scroll:lineUp",
+28|         "space": "scroll:fullPageDown",
+29|         "b": "scroll:fullPageUp",
+30|         "up": "scroll:lineUp",
+31|         "down": "scroll:lineDown",
+32|         "home": "scroll:top",
+33|         "end": "scroll:bottom"
+34|       }
+35|     },
+36|     {
+37|       "context": "HistorySearch",
+38|       "bindings": {
+39|         "ctrl+r": "historySearch:next",
+40|         "escape": "historySearch:accept",
+41|         "tab": "historySearch:accept",
+42|         "enter": "historySearch:execute",
+43|         "ctrl+s": "historySearch:cycleScope"
+44| "~/.claude/keybindings.json" 273L, 7845B                                                    108,40        37%
+----- end claude-keybindings-panel -----
+
+
+--- panel mentions: keybind=true shortcut=false customiz=false json=true
+
+EXPLORATORY RUN COMPLETE

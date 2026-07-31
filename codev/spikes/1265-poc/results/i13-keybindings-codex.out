@@ -1,0 +1,57 @@
+HARNESS @xterm/headless=6.0.0 node=v22.23.1
+
+--- scratch CODEX_HOME=/tmp/i13-codex-home-g5kPwY (pristine defaults — no user keymap config)
+
+--- typing /keymap
+
+----- codex-menu-filtered (14 non-empty rows of 45) -----
+ 0| ⚠ Skipped loading 1 skill(s) due to invalid SKILL.md files.
+ 2| ⚠ /home/user/code/codev_root/codev/.builders/spike-1265/.codex/skills/forge/SKILL.md: missing YAML frontmatter
+ 3|   delimited by ---
+ 5| ╭─────────────────────────────────────────────────────────╮
+ 6| │ >_ OpenAI Codex (v0.146.0)                              │
+ 7| │                                                         │
+ 8| │ model:     gpt-5   /model to change                     │
+ 9| │ directory: ~/code/codev_root/codev/.builders/spike-1265 │
+10| ╰─────────────────────────────────────────────────────────╯
+12|   Tip: Our most capable model yet. GPT-5.6 Sol can tackle complex code changes, dig into research, produce
+13|   polished documents, and take on your most ambitious work. Sol is highly capable at lower reasoning efforts—
+14|   try starting lower, then turn it up for harder jobs.
+17| › /keymap
+19|   /keymap  remap TUI shortcuts
+----- end codex-menu-filtered -----
+
+
+----- codex-keymap-panel (26 non-empty rows of 45) -----
+ 0| ⚠ Skipped loading 1 skill(s) due to invalid SKILL.md files.
+ 2| ⚠ /home/user/code/codev_root/codev/.builders/spike-1265/.codex/skills/forge/SKILL.md: missing YAML frontmatter
+ 3|   delimited by ---
+ 5| ╭─────────────────────────────────────────────────────────╮
+ 6| │ >_ OpenAI Codex (v0.146.0)                              │
+ 7| │                                                         │
+ 8| │ model:     gpt-5   /model to change                     │
+ 9| │ directory: ~/code/codev_root/codev/.builders/spike-1265 │
+10| ╰─────────────────────────────────────────────────────────╯
+12|   Tip: Our most capable model yet. GPT-5.6 Sol can tackle complex code changes, dig into research, produce
+13|   polished documents, and take on your most ambitious work. Sol is highly capable at lower reasoning efforts—
+14|   try starting lower, then turn it up for harder jobs.
+17|   Keymap
+18|   All configurable shortcuts.
+19|   110 actions, 0 customized, 3 unbound.
+21|   [All]  Common  Customized (0)  Unbound (3)  App  Composer  Editor  Vim  Navigation  Approval  Debug
+23|   Type to search shortcuts
+24| › Global         Open Transcript            ctrl-t
+25|   Global         Open External Editor       ctrl-g
+26|   Global         Copy                       ctrl-o
+27|   Global         Clear Terminal             ctrl-l
+28|   Global       - Toggle Vim Mode            unbound
+29|   Global       - Toggle Fast Mode           unbound
+30|   Global         Toggle Raw Output          alt-r
+31|   Global         Toggle Side Conversation   ctrl-/
+33|   left/right group · enter edit shortcut · * custom · - unbound · esc close
+----- end codex-keymap-panel -----
+
+
+--- panel mentions: keymap=true shortcut=true customiz=true
+
+EXPLORATORY RUN COMPLETE

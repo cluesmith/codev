@@ -1,0 +1,86 @@
+HARNESS @xterm/headless=6.0.0 node=v22.23.1
+
+--- agy auth cache: state=auth
+
+----- agy-boot (9 non-empty rows of 45) -----
+ 1|       ▄▀▀▄        Antigravity CLI 1.1.8
+ 2|      ▀▀▀▀▀▀       mohidmakhdoomi@gmail.com (Google AI Pro)
+ 3|     ▀▀▀▀▀▀▀▀      Gemini 3.1 Pro (High)
+ 4|    ▄▀▀    ▀▀▄     ~/code/codev_root/codev/.builders/spike-1265
+ 5|   ▄▀▀      ▀▀▄
+ 7| ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ 8| > Accept-edits mode: file edits auto-approved (shift+tab to cycle)
+ 9| ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+10| ? for shortcuts                                                           accept-edits · Gemini 3.1 Pro · high
+----- end agy-boot -----
+
+
+--- typing /keybindings
+
+----- agy-menu-filtered (11 non-empty rows of 45) -----
+ 1|       ▄▀▀▄        Antigravity CLI 1.1.8
+ 2|      ▀▀▀▀▀▀       mohidmakhdoomi@gmail.com (Google AI Pro)
+ 3|     ▀▀▀▀▀▀▀▀      Gemini 3.1 Pro (High)
+ 4|    ▄▀▀    ▀▀▄     ~/code/codev_root/codev/.builders/spike-1265
+ 5|   ▄▀▀      ▀▀▄
+ 7| ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ 8| > /keybindings
+ 9| ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+10| > /keybindings  Set custom keybindings
+12|   ↑/↓ Navigate · enter Select · tab Complete
+13| esc to cancel                                                             accept-edits · Gemini 3.1 Pro · high
+----- end agy-menu-filtered -----
+
+
+----- agy-keybindings-panel (45 non-empty rows of 45) -----
+ 0| {
+ 1|   "cli.clear_screen": ["ctrl+l"],
+ 2|   "cli.cycle_mode": ["shift+tab"],
+ 3|   "cli.enter": ["enter"],
+ 4|   "cli.escape": ["ctrl+c", "esc"],
+ 5|   "cli.exit": ["ctrl+d"],
+ 6|   "cli.suspend": ["ctrl+z"],
+ 7|   "confirm.no": ["n"],
+ 8|   "confirm.yes": ["y"],
+ 9|   "edit.open_editor": ["ctrl+g"],
+10|   "edit.paste": ["alt+v", "ctrl+v"],
+11|   "edit.redo": ["ctrl+shift+z"],
+12|   "edit.undo": ["ctrl+_", "ctrl+shift+-"],
+13|   "edit.yank": ["ctrl+y"],
+14|   "navigation.down": ["down"],
+15|   "navigation.go_to_bottom": ["ctrl+end"],
+16|   "navigation.go_to_top": ["ctrl+home"],
+17|   "navigation.left": ["left"],
+18|   "navigation.page_down": ["pgdown", "shift+down"],
+19|   "navigation.page_up": ["pgup", "shift+up"],
+20|   "navigation.right": ["right"],
+21|   "navigation.tab": ["tab"],
+22|   "navigation.up": ["up"],
+23|   "prompt.insert_newline": ["alt+enter", "ctrl+j", "shift+enter"],
+24|   "subagent.approve_fast": ["ctrl+k"],
+25|   "subagent.jump_to_waiting": ["alt+j"],
+26|   "view.review_artifact": ["ctrl+r"],
+27|   "view.toggle_trajectory": ["ctrl+o"]
+28| }
+29| ~
+30| ~
+31| ~
+32| ~
+33| ~
+34| ~
+35| ~
+36| ~
+37| ~
+38| ~
+39| ~
+40| ~
+41| ~
+42| ~
+43| ~
+44| "~/.gemini/antigravity-cli/keybindings.json" 29L, 967B                                      1,1           All
+----- end agy-keybindings-panel -----
+
+
+--- panel mentions: keybind=true shortcut=false customiz=false
+
+EXPLORATORY RUN COMPLETE
