@@ -27,13 +27,97 @@
  * Case B is MEASURED (exploratory — real claude on a dead ANTHROPIC_BASE_URL;
  * outcome recorded whichever way it lands).
  *
+ * Round 10 additions (i8c/i8d): both loss states are MACHINE-DETECTABLE.
+ * A post-delivery verify — the same G-lite render pass, run ~settle after the
+ * delivery, asking "does the delivery LOOK delivered?" — classifies case A as
+ * `lost` (token nowhere on the rendered screen, no composer marker) and case B
+ * as `stranded` (token rendered as composer text, classifier not-clean).
+ * Neither state can masquerade as a successful delivery, which is what lets
+ * the check→write process-exit race and the wrapper states degrade to
+ * DETECTED loss (row re-held / escalated) instead of silent loss. Verdicts
+ * are asserted on BOTH the live emulator and a raw-stream reconstruction
+ * (the ring-replay shape production would use — recon==live equivalence for
+ * these screens).
+ *
  * Usage: node exp-i8-wrapper-loss.cjs
  */
 'use strict';
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { TuiDriver, sleep, show, WORKTREE_ROOT } = require('./harness.cjs');
+const { TuiDriver, sleep, show, WORKTREE_ROOT, Terminal } = require('./harness.cjs');
+
+// ---- G-lite classifier + post-delivery verify (g2's semantics, .cjs copy) --
+const IGNORE_CHARS = new Set(['❯', '›', '│', '▌', '─', '━', '╌', '┄', '╭', '╰', '┌', '└', '']);
+
+function screenOfTerm(term, rows) {
+  const buf = term.buffer.active;
+  const top = buf.viewportY;
+  const lines = [];
+  for (let i = 0; i < rows; i++) {
+    const line = buf.getLine(top + i);
+    lines.push(line ? line.translateToString(true).trimEnd() : '');
+  }
+  return lines;
+}
+
+function classifyTerm(term, cols, rows) {
+  const buf = term.buffer.active;
+  const lines = screenOfTerm(term, rows);
+  let markerRow = -1;
+  for (let i = 0; i < lines.length; i++) if (/^[❯›]/.test(lines[i])) markerRow = i;
+  if (markerRow === -1) return { clean: false, reason: 'no-composer-marker', userCells: -1 };
+  let endRow = lines.length;
+  for (let i = markerRow + 1; i < lines.length; i++) {
+    if (/^[─━╌┄]{5,}/.test(lines[i]) || /^\s{2,}(gpt|high:|~\/)/.test(lines[i])) { endRow = i; break; }
+  }
+  const top = buf.viewportY;
+  let userCells = 0;
+  const cell = buf.getNullCell();
+  for (let row = markerRow; row < endRow; row++) {
+    const line = buf.getLine(top + row);
+    if (!line) continue;
+    for (let col = 0; col < cols; col++) {
+      line.getCell(col, cell);
+      const ch = cell.getChars();
+      if (!ch || /^\s+$/u.test(ch) || IGNORE_CHARS.has(ch)) continue;
+      if (row === markerRow && col === 0) continue;
+      if (cell.isDim()) continue;
+      userCells++;
+    }
+  }
+  return { clean: userCells === 0, reason: userCells === 0 ? 'empty' : 'user-text', userCells };
+}
+
+/** Reconstruct a screen from the raw output stream (the ring-replay shape). */
+async function reconFromRaw(rawChunks, cols, rows) {
+  const t = new Terminal({ cols, rows, allowProposedApi: true, scrollback: 2000 });
+  await new Promise((r) => t.write(rawChunks.join(''), r));
+  return t;
+}
+
+/**
+ * The post-delivery verify decision procedure: does this delivery LOOK
+ * delivered on the rendered screen?
+ *   lost      — token nowhere on screen (case A: eaten by the wrapper's read)
+ *   stranded  — token rendered inside the composer region (case B: landed as
+ *               unsubmitted draft text; classifier not-clean via user-text)
+ *   delivered-visible — token rendered outside the composer (transcript entry;
+ *               the positive branch, validated separately by i6's transcript
+ *               assertions)
+ * Production maps these to mailbox-row outcomes: verified / re-held /
+ * escalated — never "assume success".
+ */
+function postVerify(term, cols, rows, token) {
+  const cls = classifyTerm(term, cols, rows);
+  const lines = screenOfTerm(term, rows);
+  if (!lines.join('\n').includes(token)) return { verdict: 'lost', cls };
+  let markerRow = -1;
+  for (let i = 0; i < lines.length; i++) if (/^[❯›]/.test(lines[i])) markerRow = i;
+  const inComposer = markerRow >= 0 && lines.slice(markerRow).join('\n').includes(token);
+  if (inComposer) return { verdict: 'stranded', cls };
+  return { verdict: 'delivered-visible', cls };
+}
 
 const failures = [];
 function check(label, ok, detail) {
@@ -102,6 +186,20 @@ function writeWrapper(name, agentCmd, cwd) {
     check('i8a-message-text-vanished', !d.screenText().includes('i8qvzkx'), 'token nowhere on screen — discarded into $REPLY');
     check('i8a-successor-agent-never-saw-it', !fs.existsSync(seenLog), `relaunched agent's stdin drain-probe found nothing${fs.existsSync(seenLog) ? `: ${fs.readFileSync(seenLog, 'utf8')}` : ''}`);
     check('i8a-back-at-prompt', d.screenText().includes('Press Enter to relaunch'), 'fake agent exited again; prompt is back');
+
+    // ---- i8c (round 10): the loss is DETECTABLE — post-delivery verify ----
+    // Pre-gate view: the wrapper screen has no composer marker → not-clean →
+    // a NEXT delivery is held. Post-verify view: this delivery's token is
+    // nowhere on the rendered screen → verdict `lost` → the row is re-held
+    // instead of being believed delivered. Assert on the live emulator AND on
+    // a raw-stream reconstruction (the ring-replay shape production uses).
+    const clsLive = classifyTerm(d.term, d.cols, d.rows);
+    const pvLive = postVerify(d.term, d.cols, d.rows, 'i8qvzkx');
+    const recon = await reconFromRaw(d.rawLog, d.cols, d.rows);
+    const clsRecon = classifyTerm(recon, d.cols, d.rows);
+    const pvRecon = postVerify(recon, d.cols, d.rows, 'i8qvzkx');
+    check('i8c-wrapper-screen-classifies-held', clsLive.clean === false && clsLive.reason === 'no-composer-marker' && clsRecon.clean === false && clsRecon.reason === 'no-composer-marker', `live=${clsLive.reason} recon=${clsRecon.reason} — pre-gate holds the next delivery`);
+    check('i8c-postverify-detects-loss', pvLive.verdict === 'lost' && pvRecon.verdict === 'lost', `live=${pvLive.verdict} recon=${pvRecon.verdict} — the eaten delivery never looks delivered`);
     d.kill();
   }
 
@@ -140,6 +238,19 @@ function writeWrapper(name, agentCmd, cwd) {
     const inComposer = /[❯›].*i8crash/.test(d.screen().join('\n'));
     const anywhere = text.includes('i8crash');
     note('i8b-outcome', `tokenAnywhere=${anywhere} tokenInComposerLine=${inComposer} — where crash-window bytes land is claude init behavior; see snapshot`);
+
+    // ---- i8d (round 10): whatever the landing, it never LOOKS delivered ---
+    // The landing spot stays measured (claude init behavior), but the safety
+    // property is asserted: the post-delivery verify must not return
+    // `delivered-visible` — the round-9 landing (token stranded as composer
+    // text) yields `stranded` (classifier not-clean via user-text); a vanished
+    // token would yield `lost`. Either way the delivery is DETECTED as
+    // not-delivered, on the live emulator and on the ring-replay recon.
+    const pvBLive = postVerify(d.term, d.cols, d.rows, 'i8crash');
+    const reconB = await reconFromRaw(d.rawLog, d.cols, d.rows);
+    const pvBRecon = postVerify(reconB, d.cols, d.rows, 'i8crash');
+    note('i8d-verdicts', `live=${pvBLive.verdict}(${pvBLive.cls.reason}) recon=${pvBRecon.verdict}(${pvBRecon.cls.reason})`);
+    check('i8d-never-looks-delivered', pvBLive.verdict !== 'delivered-visible' && pvBRecon.verdict !== 'delivered-visible', `live=${pvBLive.verdict} recon=${pvBRecon.verdict}`);
     d.kill();
   }
 
@@ -147,6 +258,6 @@ function writeWrapper(name, agentCmd, cwd) {
     console.error(`FAILURES: ${failures.join(', ')}`);
     process.exit(1);
   }
-  console.log('ALL ASSERTIONS PASSED (case B is measured, not asserted)');
+  console.log('ALL ASSERTIONS PASSED (case B landing spot measured; its never-looks-delivered property asserted)');
   process.exit(0);
 })().catch((e) => { console.error(e); process.exit(1); });

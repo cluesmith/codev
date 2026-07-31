@@ -12,6 +12,8 @@ ASSERT i8a-message-triggered-relaunch: PASS boots=2
 ASSERT i8a-message-text-vanished: PASS token nowhere on screen — discarded into $REPLY
 ASSERT i8a-successor-agent-never-saw-it: PASS relaunched agent's stdin drain-probe found nothing
 ASSERT i8a-back-at-prompt: PASS fake agent exited again; prompt is back
+ASSERT i8c-wrapper-screen-classifies-held: PASS live=no-composer-marker recon=no-composer-marker — pre-gate holds the next delivery
+ASSERT i8c-postverify-detects-loss: PASS live=lost recon=lost — the eaten delivery never looks delivered
 ASSERT i8b-countdown-seen: PASS wrapper auto-restart path reached
 MEASURED i8b-sent: message written during the sleep-2 restart window
 
@@ -27,4 +29,6 @@ MEASURED i8b-sent: message written during the sleep-2 restart window
 |  high:opus-5[1m]
 |  ⏸ manual mode on
 MEASURED i8b-outcome: tokenAnywhere=true tokenInComposerLine=true — where crash-window bytes land is claude init behavior; see snapshot
-ALL ASSERTIONS PASSED (case B is measured, not asserted)
+MEASURED i8d-verdicts: live=stranded(user-text) recon=stranded(user-text)
+ASSERT i8d-never-looks-delivered: PASS live=stranded recon=stranded
+ALL ASSERTIONS PASSED (case B landing spot measured; its never-looks-delivered property asserted)

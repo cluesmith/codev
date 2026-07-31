@@ -194,4 +194,4 @@ function show(lines, label = 'screen') {
   process.stdout.write(`\n[${label}]\n${lines.map((l) => `|${l}`).join('\n')}\n`);
 }
 
-module.exports = { TuiDriver, KEYS, sleep, logStep, show, WORKTREE_ROOT, MAIN_ROOT };
+module.exports = { TuiDriver, KEYS, sleep, logStep, show, WORKTREE_ROOT, MAIN_ROOT, Terminal };

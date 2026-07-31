@@ -1,0 +1,21 @@
+HARNESS @xterm/headless=6.0.0 node=v22.23.1
+ASSERT i9a-fits-window: PASS whole draft visible: "zq01 kwvx mtrp jhgd nsbc lfyo wezu qapi "…
+ASSERT i9a-oracle-mechanism: PASS captured 359 chars (build attempt 1)
+ASSERT i9a-oracle-full-content: PASS capture === typed draft (359 vs 359 chars)
+ASSERT i9a-roundtrip-preserves-composer: PASS window after Ctrl+G roundtrip unchanged ("zq01 kwvx mtrp jhgd nsbc lfyo ")
+ASSERT i9a-clear-empties: PASS mode=bulk
+ASSERT i9a-window-oracle-passes: PASS faithful replay: window == ref in 101 ms
+ASSERT i9a-full-verify-complete: PASS post-replay capture === full draft — fits-window verify is COMPLETE (359 chars)
+MEASURED build-infidelity: attempt 1: editor capture 1796 chars vs expected 1799 — clearing and rebuilding at 25 ms/char
+MEASURED i9b-window: first visible token=zq13 of zq01..zq40 — the composer is a window (build attempt 2)
+ASSERT i9b-anchor-tail-visible: PASS tail rendered: "zq13 kwvx mtrp jhgd nsbc lfyo wezu qapi "…
+ASSERT i9b-anchor-oracle-sees-full-draft: PASS pre-maneuver capture has zq01 and zq40 (1799 chars)
+ASSERT i9b-clear-empties: PASS mode=bulk
+ASSERT i9b-window-oracle-blind-to-prefix-loss: PASS window == ref despite zq01 dropped (matched in 0 ms)
+ASSERT i9b-fullcontent-oracle-catches-loss: PASS post-replay capture: zq02 ✓ zq40 ✓ zq01 ABSENT (1754 chars)
+MEASURED i9c-shape: draft=8239 bytes over 41 lines × 199 chars; rendered window shows 14 of 41 line tokens (long lines wrap)
+MEASURED i9c-clear: emptied=true mode=bulk
+MEASURED i9c-replay: form=line-chunked bytes=8239 tReplayMs=3246 windowMatch=true pastedAttachment=false
+ASSERT i9c-oracle-ran: PASS capture 8199 chars
+MEASURED i9c-full-fidelity: editorVerified=true capLen=8199 expectedLen=8199
+ALL ASSERTIONS PASSED (i9c outcomes are measured, not asserted)
