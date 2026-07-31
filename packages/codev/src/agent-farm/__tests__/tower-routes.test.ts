@@ -9,7 +9,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import http from 'node:http';
 import { EventEmitter } from 'node:events';
-import { handleRequest } from '../servers/tower-routes.js';
+import { handleRequest, startSendBuffer, stopSendBuffer } from '../servers/tower-routes.js';
 import type { RouteContext } from '../servers/tower-routes.js';
 import { shutdownDelayedSends, pendingDelayedSendCount } from '../servers/delayed-send.js';
 
@@ -1632,6 +1632,9 @@ describe('tower-routes', () => {
 
     afterEach(() => {
       shutdownDelayedSends();
+      // Drains anything these tests left queued, so the module-level SendBuffer
+      // does not leak state into later describes.
+      stopSendBuffer();
       vi.useRealTimers();
     });
 
@@ -1830,6 +1833,110 @@ describe('tower-routes', () => {
 
       await vi.advanceTimersByTimeAsync(5_000);
       expect(mockWrite.mock.calls[0][0]).toBe('\x03');
+    });
+
+    it('ORDERING: a delayed message never overtakes an earlier buffered one', async () => {
+      // The regression guard for the one hazard in Spec 1307 that a manual
+      // re-send cannot repair. Exercised against the REAL route and the REAL
+      // module-level SendBuffer — an equivalent test that re-implements the
+      // shouldDefer predicate locally would keep passing if the shipped
+      // predicate regressed, which is exactly what review caught.
+      vi.useFakeTimers();
+      const mockWrite = vi.fn();
+      let typing = true;
+      mockGetTerminalManager.mockReturnValue({
+        getSession: () => ({
+          write: mockWrite, pid: 1234, writable: true,
+          isUserIdle: () => !typing, composing: false,
+        }),
+        listSessions: () => [],
+      });
+      mockResolveTarget.mockReturnValue({
+        terminalId: 'term-fifo-001', workspacePath: '/tmp/ws', agent: 'architect',
+      });
+
+      // 1. /clear is sent while the user is typing → buffered by Spec 403.
+      mockParseJsonBody.mockResolvedValue({
+        to: 'architect:main', message: '/clear', workspace: '/tmp/ws', options: { raw: true },
+      });
+      const first = makeRes();
+      await handleRequest(makeReq('POST', '/api/send'), first.res, makeCtx());
+      expect(JSON.parse(first.body()).deferred).toBe(true);
+      expect(mockWrite).not.toHaveBeenCalled();
+
+      // 2. /arch-init is scheduled for +15s.
+      mockParseJsonBody.mockResolvedValue({
+        to: 'architect:main', message: '/arch-init main', workspace: '/tmp/ws',
+        options: { raw: true, deliverAfter: 15 },
+      });
+      const second = makeRes();
+      await handleRequest(makeReq('POST', '/api/send'), second.res, makeCtx());
+      expect(JSON.parse(second.body()).scheduled).toBe(true);
+
+      // 3. The user stops typing BEFORE the delayed message comes due. The
+      //    buffer's flush timer is not running yet, so /clear is still queued.
+      //    This isolates the `hasPending` term specifically: the session is
+      //    idle, so only that term can prevent a direct write.
+      typing = false;
+      await vi.advanceTimersByTimeAsync(15_000);
+
+      // Nothing has bypassed the queue.
+      const writesBeforeFlush = mockWrite.mock.calls.map(c => String(c[0])).join('');
+      expect(writesBeforeFlush).not.toContain('/arch-init');
+
+      // 4. Draining the buffer delivers them in the order they were sent.
+      startSendBuffer(() => {});
+      await vi.advanceTimersByTimeAsync(600);
+      const order = mockWrite.mock.calls.map(c => String(c[0])).join('|');
+      expect(order.indexOf('/clear')).toBeGreaterThanOrEqual(0);
+      expect(order.indexOf('/arch-init')).toBeGreaterThan(order.indexOf('/clear'));
+    });
+
+    it('ORDERING: a delayed --interrupt also queues, carrying its Ctrl+C', async () => {
+      // An immediate --interrupt deliberately bypasses buffering. A DELAYED one
+      // must not, or it reintroduces the same inversion through a side door.
+      vi.useFakeTimers();
+      const mockWrite = vi.fn();
+      let typing = true;
+      mockGetTerminalManager.mockReturnValue({
+        getSession: () => ({
+          write: mockWrite, pid: 1234, writable: true,
+          isUserIdle: () => !typing, composing: false,
+        }),
+        listSessions: () => [],
+      });
+      mockResolveTarget.mockReturnValue({
+        terminalId: 'term-fifo-002', workspacePath: '/tmp/ws', agent: 'architect',
+      });
+
+      mockParseJsonBody.mockResolvedValue({
+        to: 'architect:main', message: 'first', workspace: '/tmp/ws', options: { raw: true },
+      });
+      await handleRequest(makeReq('POST', '/api/send'), makeRes().res, makeCtx());
+
+      mockParseJsonBody.mockResolvedValue({
+        to: 'architect:main', message: 'urgent', workspace: '/tmp/ws',
+        options: { raw: true, interrupt: true, deliverAfter: 5 },
+      });
+      await handleRequest(makeReq('POST', '/api/send'), makeRes().res, makeCtx());
+
+      typing = false;
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      // The Ctrl+C has NOT jumped the queue.
+      expect(mockWrite.mock.calls.map(c => c[0])).not.toContain('\x03');
+
+      startSendBuffer(() => {});
+      await vi.advanceTimersByTimeAsync(1_000);
+      const writes = mockWrite.mock.calls.map(c => c[0]);
+      const ctrlC = writes.indexOf('\x03');
+      const firstIdx = writes.findIndex(w => String(w).includes('first'));
+      const urgentIdx = writes.findIndex(w => String(w).includes('urgent'));
+      // Order: first → Ctrl+C → urgent. The interrupt lands directly ahead of
+      // its own payload, not ahead of the whole queue.
+      expect(firstIdx).toBeGreaterThanOrEqual(0);
+      expect(ctrlC).toBeGreaterThan(firstIdx);
+      expect(urgentIdx).toBeGreaterThan(ctrlC);
     });
 
     it('leaves undelayed sends on the immediate path', async () => {

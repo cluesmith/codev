@@ -119,7 +119,20 @@ const sendBuffer = new SendBuffer();
 /** Deliver a buffered message to a session (write + broadcast + log).
  *  Returns the ms timestamp when all writes complete (for serialization). */
 function deliverBufferedMessage(session: PtySession, msg: BufferedMessage, delayOffset = 0): number {
-  const endTime = writeMessageToSession(session, msg.formattedMessage, msg.noEnter, delayOffset);
+  let offset = delayOffset;
+  // Spec 1307: a queued delayed `--interrupt` carries its Ctrl+C, written just
+  // ahead of its own payload rather than ahead of the whole queue. The 100ms
+  // gap mirrors the immediate path's pause between the interrupt and the text.
+  if (msg.interruptFirst) {
+    if (offset === 0) {
+      session.write('\x03');
+    } else {
+      const at = offset;
+      setTimeout(() => session.write('\x03'), at);
+    }
+    offset += 100;
+  }
+  const endTime = writeMessageToSession(session, msg.formattedMessage, msg.noEnter, offset);
   broadcastMessage(msg.broadcastPayload as Parameters<typeof broadcastMessage>[0]);
   return endTime;
 }
@@ -1704,11 +1717,17 @@ async function deliverOrBuffer(delivery: DeliveryContext): Promise<boolean> {
     return false;
   }
 
+  // Spec 1307: a DELAYED interrupt must still respect per-session order. An
+  // immediate `--interrupt` deliberately bypasses buffering ("an interrupt that
+  // can be deferred is not an interrupt"), but that reasoning does not carry to
+  // one that was already deferred by N seconds — writing it directly would let
+  // it overtake messages queued ahead of it. When that is the situation, the
+  // Ctrl+C rides along with the message instead (`interruptFirst`), so the queue
+  // drains in order AND the interrupt still lands right before its own payload.
+  const queueAhead = enforceFifo && sendBuffer.hasPending(terminalId);
+
   // Optionally interrupt first — bypass buffering entirely.
-  // Spec 1307: for a delayed send this Ctrl+C travels WITH the message rather
-  // than firing at request time, which would interrupt the sender's own turn
-  // and leave the message to arrive alone much later.
-  if (interrupt) {
+  if (interrupt && !queueAhead) {
     session.write('\x03'); // Ctrl+C
     await new Promise(resolve => setTimeout(resolve, 100));
   }
@@ -1723,9 +1742,8 @@ async function deliverOrBuffer(delivery: DeliveryContext): Promise<boolean> {
   // queued for it, or the delayed message overtakes them. For `/arch-save` that
   // inversion means `/arch-init` landing before its `/clear`, after which the
   // clear wipes the context that just recovered — a failure no re-send repairs.
-  const shouldDefer = !interrupt
-    && (!session.isUserIdle(sendBuffer.idleThresholdMs)
-      || (enforceFifo && sendBuffer.hasPending(terminalId)));
+  const shouldDefer = queueAhead
+    || (!interrupt && !session.isUserIdle(sendBuffer.idleThresholdMs));
 
   if (shouldDefer) {
     sendBuffer.enqueue({
@@ -1735,6 +1753,7 @@ async function deliverOrBuffer(delivery: DeliveryContext): Promise<boolean> {
       timestamp: Date.now(),
       broadcastPayload,
       logMessage,
+      interruptFirst: interrupt && queueAhead ? true : undefined,
     });
     ctx.log('INFO', `Message deferred (user typing): ${from ?? 'unknown'} → ${agent} (terminal ${terminalId.slice(0, 8)}...)`);
     return true;

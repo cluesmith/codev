@@ -249,6 +249,39 @@ describe('shutdownDelayedSends', () => {
 // FIFO — the ordering guarantee
 // ============================================================================
 
+describe('scheduled vs sent reporting', () => {
+  // `--all --delay` schedules each target independently, so the fan-out summary
+  // must distinguish scheduled from sent. Reporting "Sent to N builder(s)" for
+  // messages Tower is merely holding claims delivery that has not happened —
+  // the same misreport the single-target path avoids.
+  function summarise(results: { sent: string[]; scheduled: string[]; failed: string[] }) {
+    const lines: string[] = [];
+    if (results.sent.length) lines.push(`Sent to ${results.sent.length} builder(s)`);
+    if (results.scheduled.length) lines.push(`Scheduled for ${results.scheduled.length} builder(s)`);
+    if (results.failed.length) lines.push(`Failed for ${results.failed.length} builder(s)`);
+    return lines.join(' | ');
+  }
+
+  it('reports delayed fan-out as scheduled, not sent', () => {
+    const out = summarise({ sent: [], scheduled: ['b1', 'b2'], failed: [] });
+    expect(out).toContain('Scheduled for 2');
+    expect(out).not.toContain('Sent to');
+  });
+
+  it('reports immediate fan-out as sent', () => {
+    const out = summarise({ sent: ['b1'], scheduled: [], failed: [] });
+    expect(out).toContain('Sent to 1');
+    expect(out).not.toContain('Scheduled');
+  });
+
+  it('reports a mixed outcome without conflating the two', () => {
+    const out = summarise({ sent: ['b1'], scheduled: ['b2'], failed: ['b3'] });
+    expect(out).toContain('Sent to 1');
+    expect(out).toContain('Scheduled for 1');
+    expect(out).toContain('Failed for 1');
+  });
+});
+
 describe('SendBuffer.hasPending (per-session FIFO for delayed sends)', () => {
   let buffer: SendBuffer;
 

@@ -462,11 +462,14 @@ export async function runAgentFarm(args: string[]): Promise<void> {
         // turning a delayed send into an immediate one with no error.
         let delay: number | undefined;
         if (options.delay !== undefined) {
+          // Bound imported rather than repeated: a second hardcoded ceiling
+          // drifts from the server's, and the two disagreeing means the CLI
+          // accepts a value Tower then rejects.
+          const { validateDelaySeconds } = await import('./servers/delayed-send.js');
           const parsed = Number(options.delay);
-          if (!Number.isInteger(parsed) || parsed <= 0 || parsed > 3600) {
-            logger.error(
-              `--delay must be a whole number of seconds between 1 and 3600, got '${options.delay}'`,
-            );
+          const delayError = validateDelaySeconds(parsed);
+          if (delayError) {
+            logger.error(`--delay: ${delayError}`);
             process.exit(1);
           }
           delay = parsed;

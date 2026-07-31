@@ -12,6 +12,17 @@ export interface BufferedMessage {
   sessionId: string;
   formattedMessage: string;
   noEnter: boolean;
+  /**
+   * Write Ctrl+C immediately before THIS message's payload (Spec 1307).
+   *
+   * Only set for a delayed `--interrupt` send that had to queue behind earlier
+   * buffered messages. Without it such a send would have to choose between
+   * interrupting (write directly, overtaking the queue) and preserving order
+   * (queue, losing the interrupt). Carrying the Ctrl+C on the message keeps
+   * both: the queue drains in order, and the interrupt still lands directly
+   * ahead of the payload it belongs to.
+   */
+  interruptFirst?: boolean;
   timestamp: number;
   broadcastPayload: {
     type: string;

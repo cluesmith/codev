@@ -681,8 +681,18 @@ export class TowerClient {
        */
       deliverAfter?: number;
     },
-  ): Promise<{ ok: boolean; resolvedTo?: string; scheduled?: boolean; error?: string }> {
-    const result = await this.request<{ ok: boolean; resolvedTo: string; scheduled?: boolean }>(
+  ): Promise<{
+    ok: boolean;
+    resolvedTo?: string;
+    /** Tower is holding this for later delivery (`deliverAfter`). */
+    scheduled?: boolean;
+    /** Tower buffered this because the user was typing (Spec 403). */
+    deferred?: boolean;
+    error?: string;
+  }> {
+    const result = await this.request<{
+      ok: boolean; resolvedTo: string; scheduled?: boolean; deferred?: boolean;
+    }>(
       '/api/send',
       {
         method: 'POST',
@@ -711,6 +721,7 @@ export class TowerClient {
       ok: true,
       resolvedTo: result.data!.resolvedTo,
       scheduled: result.data!.scheduled === true,
+      deferred: result.data!.deferred === true,
     };
   }
 
