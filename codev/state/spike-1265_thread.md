@@ -241,3 +241,60 @@ introduced or under-specified.
    an explainer paragraph; "occupancy-neutral ≠ safe to inject".
 
 Effort ~1270–1770 (G-lite ~70; cron reroute ~40 moved into phase 1).
+
+## 2026-07-31 — Review round 8: agy, K's async contract, production-path G-lite,
+## builder-convergence deadlock, preemption, cron coalescing, POC isolation
+
+Eight concerns; all valid to some degree, five directly overturned earlier claims.
+All investigated against code + POC; new experiment exp-g2 (production-path G-lite)
++ exp0c (agy probe); a3 restructured, i5 reclassified+hardened; full rerun green.
+
+1. agy: config harness auto-detect (config.ts:256-278, #929) makes agy a send target
+   TODAY. exp0c (agy 1.1.8, authenticated, observational): fresh spawn renders a
+   WORKSPACE TRUST DIALOG — "enter Confirm" on "Yes, I trust this folder"; typed text
+   doesn't render. Blind text+\r delivery = trust grant as a delivery side effect.
+   Unknown-app defer-only+K is now a security posture; doc names agy explicitly.
+2. K sync contract: verified today's response is {deferred:boolean}, outcome never
+   reported. Redefined: rows persist AT ENQUEUE (SendBuffer collapses into mailbox),
+   response speaks enqueue-time truth (delivered|held+id), max-age escalation is a
+   visibility transition on the persisted row, outcomes async by id.
+3. G-lite prod path POC'd: exp-g2 drives the REAL RingBuffer (transform-types import)
+   + the exact client replay join (tower-websocket.ts:66-67) into transient
+   @xterm/headless. recon==live everywhere. KEY MEASUREMENTS: placeholder text is
+   SGR-DIM on both TUIs → classifier = "marker + zero non-dim cells", NO allowlist
+   (kills round-4 rotation-flake worry); claude stream is NEWLINE-FREE (all bytes in
+   the ring's unbounded partial, #1047 basin — capRingSeed byte cut is its real
+   truncation, validated mid-sequence); resize nudge occupancy-neutral, fresh frame
+   alone reconstructs.
+4. Convergence deadlock CONFIRMED — worst round-8 catch: round-7's "user submit"
+   gate starves every builder terminal (no human typist; interrupt/reset/restart all
+   mark dirty). Constraint 9 inverted: the rendered proof IS the convergence; triggers
+   are user-submit OR quiescence poll (no keystroke — validated: every g2 verdict ran
+   on quiescent screens with zero input frames). Residual stated: codex ESC-on-empty
+   fresh = measured no-op (g2h); with-history arming unverified → Next Step.
+5. G-lite siting: @xterm/xterm is devDep-only, headless nowhere → new runtime dep;
+   transient per-check emulator (never per-session); ~70 → ~150-200. Also corrected
+   the effort headline arithmetic: round-7's ~1270-1770 sat below its own component
+   sum; now ~1520-1670 code + ~400-500 tests ⇒ ~1900-2150 by component sum.
+6. Preemption: verified the Spec-1273 comment (tower-routes.ts:1501-1506). Constraint
+   7 queue gains an interrupt preemption lane — abort preemptible transactions at
+   chunk boundary; H aborts into its journal, paced delivery re-holds unwritten tail
+   visibly. Strict FIFO would regress escape's handled-before-buffer contract.
+7. Cron×K: verified deliverMessage fire-and-forget (WARN-drops, run recorded off
+   command result only). Added supersede-key coalescing for machine senders (one held
+   row per cron task, replacement recorded, no-TTL for humans unchanged) + delivery
+   outcome (delivered|held|superseded) in the cron run record.
+8. POC isolation: reviewer right about the overclaim. a3 = 3 independent probes in
+   one session with ^E^U (a3c's own subject!) as cleaner → restructured to fresh
+   session per case, rerun green both TUIs. i5 = sequence test BY DESIGN (kill-ring
+   carry IS the subject) — distinguished from round-4/5 contamination by failure
+   direction (exact-equality oracles fail loudly vs fail-open !includes) + added
+   asserts on the previously unasserted p3/p4 cleanups, rerun green. Tier claim now
+   scoped per suite.
+
+Version event: codex bumped 0.145→0.146 mid-spike. Entire asserted codex suite
+(a3, i5, i6, g2) re-run green on 0.146 — the doc's own version-bump smoke-test
+recommendation exercised for real; no divergence. Claude 2.1.212 unchanged.
+
+Runs: 8/8 exit 0 (g2-claude, g2-codex, agy, a3×2, i5×2, i6-codex). Evidence
+committed under 1265-poc/results/ incl. new exp-g2-*.out and exp0c-agy-sanity.out.
