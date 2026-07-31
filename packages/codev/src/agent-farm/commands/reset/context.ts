@@ -524,8 +524,14 @@ export function resolveBuilderContext(options: ResolveContextOptions): ResolvedB
     specPath,
     planPath,
     // Issue-driven protocols name the porch project after the issue, so the
-    // project id is the correct value when the registry row has none.
-    issueNumber: issueNumber ?? porch?.projectId,
+    // project id is the correct value when the registry row has none — but ONLY
+    // when it is actually an issue number. The `--task --protocol` lane's porch
+    // id is `builder-task-<id>`, which would render `- Issue: #builder-task-abc`
+    // and an unfollowable `gh issue view builder-task-abc` in the
+    // re-orientation. A fabricated issue reference is worse than none: it sends
+    // a freshly-reset builder to look up requirements that do not exist.
+    issueNumber:
+      issueNumber ?? (porch && /^\d+$/.test(porch.projectId) ? porch.projectId : undefined),
     taskText,
   };
 }

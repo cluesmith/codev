@@ -655,5 +655,10 @@ describe('the --task --protocol lane keeps its porch project (Spec 1273 verify i
     expect(ctx.porch).not.toBeNull();
     // Mode comes from the prompt, NOT the task default — this lane has porch.
     expect(ctx.modeSource).toBe('builder-prompt');
+    // And no fabricated issue: this lane's porch id is `builder-task-abc`, not
+    // an issue number. Falling back to it would render `- Issue: #builder-task-abc`
+    // and an unfollowable `gh issue view` in the re-orientation — sending a
+    // reset builder to look up requirements that do not exist.
+    expect(ctx.issueNumber).toBeUndefined();
   });
 });
