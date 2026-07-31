@@ -225,6 +225,14 @@ in which a clear is pending against a save that has not happened yet.
 - [ ] A state file that is missing, stale, a stub (below the size floor), still growing,
       or missing its required monitor marker is refused — the architect keeps its
       context and the abort message names which gate failed.
+- [ ] **The save prunes.** Resolved loops are deleted, older entries are collapsed to
+      one-line pointers at durable artifacts, and the file stays at a one-screen order
+      of magnitude. **A save that only appends fails.** Enforced structurally as far as
+      it can be — a size ceiling, plus a growth comparison against the pre-save snapshot
+      that distinguishes compaction from accumulation — and documented as the
+      architect's responsibility beyond that. The instructions must repeat the
+      prune-by-pointer rule, since these files are gitignored and over-pruning is as
+      unrecoverable as a bad save.
 - [ ] The previous contents of `codev/state/<name>.md` are snapshotted before the
       architect overwrites it, and the snapshot path is reported. **Who takes the
       snapshot differs by path and the ordering is load-bearing**: in the external path
@@ -233,11 +241,14 @@ in which a clear is pending against a save that has not happened yet.
       step — before the architect touches the file. A snapshot taken after the
       overwrite is worthless, and these files are gitignored, so there is no second
       chance to notice.
-- [ ] The re-orientation delivered after the clear is **self-sufficient plain text**: it
-      names the architect's identity and its state-file path, and requests the arch-init
-      skill by name. It contains no typed slash command. A fresh session that never
-      invokes the skill can still recover from the message alone — asserted by reading
-      the payload, not by assuming it.
+- [ ] The re-orientation delivered after the clear is **self-sufficient**: it names the
+      architect's identity and its state-file path, so a fresh session that never invokes
+      the arch-init skill can still recover from the payload alone — asserted by reading
+      the payload, not by assuming it. This holds under whichever delivery mechanism is
+      chosen.
+- [ ] The delivery mechanism is **chosen empirically against a real terminal**, from the
+      candidates named in Open Questions, and the reason is recorded. Shipping a
+      mechanism selected by argument alone does not satisfy this criterion.
 - [ ] The state-block template documents all seven elements validated by the live run,
       carries the `MONITORS:` marker verbatim, and documents the monitor list as serving
       both as a kill-list for the transition and a re-arm list for the resumed instance.
@@ -295,33 +306,46 @@ in which a clear is pending against a save that has not happened yet.
   step and the step-log discipline exist and are tested. Shared logic is factored out of
   `commands/reset/` and consumed by both flavours; `afx reset`'s builder behaviour must
   not change.
-- **The re-orientation payload is plain text, not a typed slash command.** The obvious
-  design — raw-type `/arch-init <name>` so the harness loads the skill deterministically
-  — puts a slash command *with an argument* through a TUI's autocomplete, where Enter
-  may accept a highlighted completion instead of submitting. That step had no safe
-  degradation: a swallowed re-orientation leaves an already-cleared architect with no
-  identity. The payload is therefore an ordinary injected message that names the
-  identity, names the state file, and asks for the arch-init skill by name — no leading
-  slash, no completion surface, skill invocation resolved model-side.
+- **The re-orientation must be self-sufficient, whatever mechanism delivers it.** The
+  *delivery mechanism* is an explicitly open design decision (see Open Questions —
+  Critical), but the property the payload must satisfy is fixed regardless of how that
+  decision lands: the fresh session must be able to identify itself and locate its state
+  file **from the payload alone**, without depending on a skill having been invoked.
+  Skill invocation may then upgrade the recovery — identity validation via `afx whoami`,
+  the architect-wide guardrails — but must never be load-bearing for it. This is what
+  keeps the step from having a single point of failure, and it constrains every
+  candidate mechanism equally.
+- **The payload is constructed from validated inputs only.** No architect-supplied note
+  may alter it, and in particular may not introduce a leading slash or control sequence
+  that changes how the harness interprets it.
+- **`sendMessage`, `sendRaw` and the escape channel remain distinct operations.** Tower's
+  escape route writes a hardcoded ESC and discards the message body, so collapsing raw
+  and escape in any shared extraction would turn `/clear` into a bare interrupt — the run
+  would report success and nothing would be cleared. `/clear` itself is raw-typed under
+  every candidate mechanism; only the re-orientation's channel is open.
+- **Pruning is part of the save, not polish after it.** The write step must *remove* as
+  well as add. A save that only appends fails its acceptance criteria. Concretely, the
+  same compaction discipline `/arch-init`'s skill doc already prescribes for manual
+  saves becomes a requirement here: resolved loops are **deleted outright** (a closed
+  item's record is the log entry, not a lingering line in current state), older dated
+  entries are **collapsed into one-line summaries that point at the durable artifacts**
+  where the detail lives (merged PRs, closed issues, reviews), and the file stays at a
+  **one-screen order of magnitude** — a summary a fresh session reads at a glance.
 
-  **What this trades, and why it is worth it.** It gives up *deterministic* skill
-  loading (a harness mechanism) for *model-side* invocation (a judgment call). That
-  would be a bad trade if the payload depended on the skill — so it must not. The
-  message has to be **self-sufficient**: it states who the architect is and where its
-  state file lives, so that even if the skill is never invoked, the fresh session can
-  recover by reading the state file directly. The skill invocation then upgrades the
-  recovery (identity validation via `afx whoami`, the architect-wide guardrails) rather
-  than being load-bearing for it. Net effect: a step with no safe degradation becomes a
-  step that degrades twice over.
+  **The guardrail that keeps "prune" from meaning "delete freely."** These files are
+  gitignored, so pruned prose is gone for good — there is no history to recover it from.
+  Compaction must therefore proceed by *replacing detail with pointers*, never by
+  deleting the only record of something. The pre-save snapshot provides exactly one
+  cycle of insurance against a prune that went too far, which is a reason to take the
+  snapshot seriously, not a licence to prune carelessly.
 
-  `/clear` itself still goes over the raw channel — it must, and it is a single builtin
-  token with no argument, which is the low-risk end of the same exposure.
-- **`sendMessage` and `sendRaw` remain distinct operations.** With a plain-text
-  re-orientation this command's delivery matches `afx reset`'s, so the two no longer
-  diverge at that step — but the underlying split must survive any shared extraction
-  regardless, because Tower's escape route discards the message body. Collapsing raw
-  and escape would turn `/clear` into a bare interrupt: the run would report success and
-  nothing would be cleared.
+  **What a machine can check here, and what it cannot.** Substance stays with the
+  architect. But because the save is snapshotted first, *growth is computable for free*:
+  comparing the new file against its own immediate predecessor distinguishes a save that
+  compacted from one that merely appended. That plus a ceiling on absolute size gives
+  two cheap structural proxies to sit alongside the existing floor — the file must be
+  substantive without being sprawling. Both are proxies and should be described as such;
+  they catch the append-only failure mode, not a badly-written one.
 - **The monitor marker is a token, not a markdown heading.** The adopted v67 template
   carries its monitor list as numbered lines inside a `#`-comment intent stamp, so
   requiring a `## Monitors` heading would make the shipped validator reject the shipped
@@ -536,7 +560,42 @@ subset of Approach 1's external path, so choosing 1 does not foreclose it.
       loses nothing and is loudly visible. Implementation should therefore proceed, with
       the live run treated as an acceptance gate rather than a precondition, and the
       residual risk surfaced to the owner at the PR gate.
-- [ ] **Does quiescence actually resolve against a live agent TUI?** The same unrun e2e
+- [ ] **How is the re-orientation actually delivered? — EXPLICITLY UNDECIDED.** This is
+      a named open design decision, not a settled constraint, and it must be resolved
+      during plan/implementation **against a real terminal**, with the reason recorded.
+      Earlier drafts of this spec settled it twice, in opposite directions; neither was
+      backed by an empirical check, which is precisely why it is being carried open.
+      Candidates, to be evaluated on evidence rather than argument:
+
+      **(a) Raw-typed slash command** — `sendRaw('/arch-init <name>')`, so the harness
+      loads the skill deterministically. *Known hazard*: a slash command **with an
+      argument** goes through the TUI's autocomplete, where Enter may accept a
+      highlighted completion instead of submitting. `/clear` shares the exposure but is
+      a single builtin token, which is the benign end of it. Strongest mechanism if the
+      hazard proves not to fire; needs a real terminal to know.
+
+      **(b) Plain-text injected instruction** — an ordinary message naming the identity
+      and state file and asking for the arch-init skill by name. *No autocomplete
+      surface at all.* Trades deterministic harness-level skill loading for model-side
+      invocation; acceptable only because the self-sufficiency requirement above means
+      an un-invoked skill degrades to "reads its state directly" rather than "no
+      identity." Currently the leading candidate on reasoning alone — which is exactly
+      the status this decision is meant to stop treating as sufficient.
+
+      **(c) Whatever Spec 1273's re-orientation machinery already established for
+      builders** — its two-part shape is a genuine third option and maps cleanly onto
+      this problem: a long form written to a file on disk, plus a short inline message
+      delivered by `sendMessage`. The arch-save analogue is nearly free, because the
+      state file *is* the long form, so the inline message need only point at it.
+      **Accuracy caveat, load-bearing for how much credit (c) gets**: 1273's live
+      end-to-end run never happened, so this path is proven in *tests and design*, not
+      in production. It carries a chosen, reviewed shape and a working code path — not
+      empirical evidence that the payload lands in a live session.
+
+      *Decision criteria*: does the payload actually arrive and take effect in a real
+      terminal; does the fresh session recover; does it degrade safely when the skill is
+      not invoked. The failure-containment note stands under all three — worst case is
+      manual re-entry, not loss — so this decision governs reliability, not blast radius. The same unrun e2e
       leaves this open, and it is a *separate* unknown from the clear question. The gate
       reads `lastDataAt`; if an idle harness repaints a spinner, a status line or a
       token counter, `lastDataAt` never ages past the quiet window and **every** run
@@ -700,15 +759,21 @@ transactions per second.
     for *content*, not just existence — the snapshot must differ from the post-save
     file when the save changed anything, which is what catches a snapshot mistakenly
     taken after the write.
-14. **Re-orientation payload and channel.** The message delivered after the clear
-    contains no typed slash command, and does contain the architect's name and its
-    state-file path — the two facts that make it recoverable on its own. Separately,
-    `/clear` is asserted to go over the raw channel and *not* the escape channel, since
-    the escape route discards the body and would silently send a bare interrupt.
+14. **Re-orientation payload and channel.** The payload contains the architect's name and
+    its state-file path — the two facts that make it recoverable on its own — and is
+    built only from validated inputs. Separately, `/clear` is asserted to go over the raw
+    channel and *not* the escape channel, since the escape route discards the body and
+    would silently send a bare interrupt.
 14a. **Self-sufficiency under skill failure.** Given the payload and a valid state file,
     a session that never invokes the arch-init skill can still identify itself and
     locate its state. Asserted against the payload's content, so the property cannot
-    quietly regress when the wording is edited.
+    quietly regress when the wording is edited — and asserted mechanism-independently,
+    so it survives the delivery decision landing either way.
+14b. **Delivery-mechanism bake-off.** Each candidate is exercised against a real
+    terminal: does the payload arrive, does it take effect, does the fresh session
+    recover. This is the test that closes the open decision, and it cannot be satisfied
+    by unit tests — the failure modes in question (autocomplete interception, model-side
+    skill invocation) exist only in a live TUI.
 15. **Tower restart with a job armed.** The job is dropped; no clear ever happens; the
     condition is reported rather than silent.
 16. **Disarm.** An armed job can be cancelled explicitly, and cancelling leaves the
@@ -719,6 +784,16 @@ transactions per second.
     rather than clearing work the verified save never captured.
 16b. **Armed lifetime expires.** The architect never goes quiet within the bound; the
     job disarms, says so visibly, and leaves the context intact.
+15a. **Append-only save is refused.** A state file that carries the marker, clears the
+    size floor and is stable, but is simply its predecessor plus a new block — nothing
+    deleted, nothing collapsed — is rejected against the snapshot comparison, and the
+    message names compaction as the failed requirement rather than reporting a generic
+    size complaint.
+15b. **A compacting save is accepted even though it changed a lot.** A save that deletes
+    resolved loops and collapses old entries to pointers passes, including when it is
+    substantially *smaller* than its predecessor. The gate must not mistake healthy
+    pruning for a truncated or stub file — this is the false-rejection direction, and it
+    is the one that would train architects to stop pruning.
 16c. **Stale file, self path.** The architect invokes the CLI without having rewritten
     the state file this cycle (a file left from a previous save). Refused on recency —
     this is the self path's substitute for the nonce, and it is the gate that makes
@@ -797,8 +872,9 @@ transactions per second.
 | Forking the reset machinery lets the two flavours' ordering rules drift | Medium | High | Factor shared gates out of `commands/reset/` and consume them from both; the ordering invariant tests run against the shared state machine, not per-flavour copies. |
 | **A new turn starts between the verified save and the clear, so the clear destroys work the save never captured** | Medium | High | Write-then-verify removes the receipt window from the self path entirely; the job fires on the *first* quiescence transition after arming; armed lifetime is bounded and disarms visibly. Exposure reduced from minutes to one quiet window. |
 | **Quiescence never resolves against a live TUI that repaints while idle, so every run aborts** | Medium | High (feature is inert) | Scope the live e2e to measure real idle behaviour, not just the clear; treat the quiet window as a value to be tuned from observation rather than inherited. Failure is safe but total, so it must be caught before ship, not after. |
-| Slash-command autocomplete swallows the Enter on the re-orientation | Low (designed out) | High if it occurred | **Eliminated rather than mitigated**: the payload is plain text with no leading slash, so there is no completion surface. Residual exposure is limited to `/clear` itself — a single builtin token with no argument — which the live run confirms. |
-| The fresh session does not invoke the arch-init skill from a plain-text request | Medium | Low | The payload is self-sufficient by requirement: it carries identity and state-file path, so an un-invoked skill degrades to "reads the state file directly" rather than "no identity." Verified by inspecting the payload, and exercised in the live run. |
+| Slash-command autocomplete swallows the Enter on the re-orientation | Medium **under candidate (a)**; absent under (b)/(c) | High if it occurred | Not yet eliminated — the delivery mechanism is an open decision, so this risk is *conditional on which candidate wins*. Candidate (b) removes the completion surface entirely; (a) must be empirically cleared against a real terminal before it can be chosen. Residual exposure to `/clear` itself (single builtin token, no argument) exists under all candidates and is covered by the live run. |
+| The fresh session does not invoke the arch-init skill when asked in plain text | Medium **under candidate (b)** | Low | The self-sufficiency requirement applies to every candidate: the payload carries identity and state-file path, so an un-invoked skill degrades to "reads the state file directly" rather than "no identity." Verified by inspecting the payload, and exercised in the live run. |
+| The delivery mechanism is settled by argument rather than evidence | Medium (has already happened twice in this spec's drafting) | Medium | Carried as a named open decision with an explicit empirical acceptance criterion; "chosen on reasoning" is stated as *not* satisfying it. The decision and its reason are recorded at plan/implementation time. |
 | A refactor collapses `sendRaw` and the escape channel | Medium | High | Tower's escape route discards the message body, so a collapsed path turns `/clear` into a bare interrupt that reports success and clears nothing. Constraint stated explicitly; the exact channel is asserted in tests (scenario 14). |
 | An armed job fires against a session that has moved on | Low | High | One armed job per architect; explicit disarm; jobs are in-memory so a Tower restart drops them fail-safe; the quiescence and receipt gates both re-verify at fire time. |
 | Skill ships in one tree and not the others, so adopters silently lack it | Medium | Low | Four-tree mirror is a success criterion, covered by the existing scaffold/init/update test pattern; `CLAUDE.md`/`AGENTS.md` byte-identity is separately asserted. |
@@ -840,16 +916,34 @@ already marked up.
   extraction must preserve, and the slash-command autocomplete exposure.
 - *Current State* — path shorthand expanded to full repo-relative paths.
 
-**Architect design input** (2026-07-31, incorporated): the autocomplete hazard is
-*designable-out* rather than merely mitigable — the re-orientation need not be a typed
-slash command at all. Evaluated and **adopted**: a plain-text injected message has no
-completion surface, and the only thing it gives up is deterministic harness-level skill
-loading. That loss is bought back by requiring the payload to be **self-sufficient**
-(identity + state-file path inline), so an un-invoked skill degrades to "reads its state
-directly" instead of "no identity." The step that previously had no safe degradation now
-has two. The same input noted that even a swallowed re-orientation is recoverable, since
-the state file and terminal both survive — now stated explicitly under Notes, so the
-failure reads as manual re-entry rather than data loss.
+**Architect design input** (2026-07-31): the autocomplete hazard may be *designable-out*
+rather than merely mitigable — the re-orientation need not be a typed slash command at
+all. Evaluated, and the self-sufficiency requirement it prompted was adopted as a
+constraint binding on **every** candidate mechanism: the payload must carry identity and
+state-file path inline, so an un-invoked skill degrades to "reads its state directly"
+instead of "no identity." The same input noted that even a swallowed re-orientation is
+recoverable, since the state file and terminal both survive — now stated explicitly
+under Notes, so the failure reads as manual re-entry rather than data loss.
+
+**Owner directives** (2026-07-31, Waleed, via architect — both incorporated):
+
+1. **Pruning is part of the save, as a requirement rather than guidance.** The write step
+   must remove cruft, not merely append: resolved loops deleted, older entries collapsed
+   to pointers at durable artifacts, one-screen order of magnitude — matching the
+   compaction discipline `/arch-init` already prescribes for manual saves. *A save that
+   only appends fails its acceptance criteria.* Added to Constraints, Success Criteria
+   and tests 15a/15b, with a snapshot-comparison proxy so the append-only failure mode is
+   machine-detectable, and with the prune-by-pointer guardrail repeated because these
+   files are gitignored.
+2. **The re-orientation delivery mechanism is explicitly undecided** — owner's words:
+   *"I'm not sure the best way to send the `/arch-init` again."* Carried as a named open
+   design decision with three candidates evaluated on evidence, to be resolved during
+   plan/implementation against a real terminal with the reason recorded. **This reverses
+   the previous entry's disposition**, and correctly: this spec had settled the question
+   twice in opposite directions, each time on reasoning alone. Both settlements are now
+   demoted to candidates (b) and (a). The self-sufficiency constraint and the
+   failure-containment note survive the reversal, because neither depends on which
+   mechanism wins.
 
 ## Approval
 - [ ] Technical Lead Review
