@@ -1986,6 +1986,65 @@ describe('tower-routes', () => {
       expect(enterAfterFirst).toBeLessThan(secondIdx);
     });
 
+    it('ORDERING: a delayed send due MID-FLUSH does not write into the flush', async () => {
+      // The window `hasPending` used to miss. flush() drops a session's queue as
+      // soon as it has SCHEDULED its paced writes, so between that moment and
+      // the trailing Enter landing, the queue looks empty. A delayed /arch-init
+      // due in that window used to write into the middle of the /clear being
+      // delivered — yielding "/clear/arch-init main" on one line, so the clear
+      // never executes at all.
+      vi.useFakeTimers();
+      const mockWrite = vi.fn();
+      let typing = true;
+      mockGetTerminalManager.mockReturnValue({
+        getSession: () => ({
+          write: mockWrite, pid: 1234, writable: true,
+          isUserIdle: () => !typing, composing: false,
+        }),
+        listSessions: () => [],
+      });
+      mockResolveTarget.mockReturnValue({
+        terminalId: 'term-midflush-001', workspacePath: '/tmp/ws', agent: 'architect',
+      });
+
+      // The /clear must be long enough that its paced writes span a real
+      // window: writeMessageToSession spaces lines 10ms apart and adds the
+      // Enter 80ms after the last one, so 150 lines ≈ 1.57s of writing. A
+      // short message completes in ~0.1s and the delayed send lands cleanly
+      // after it — which is why an earlier version of this test passed with
+      // the guard removed. Mutation testing caught that.
+      const clearBody = Array.from({ length: 150 }, (_, i) => `CLEAR-${i}`).join('\n');
+      mockParseJsonBody.mockResolvedValue({
+        to: 'architect:main', message: clearBody,
+        workspace: '/tmp/ws', options: { raw: true },
+      });
+      await handleRequest(makeReq('POST', '/api/send'), makeRes().res, makeCtx());
+
+      // Due at ~1s: after the flush starts (~0.5s), well before it finishes.
+      mockParseJsonBody.mockResolvedValue({
+        to: 'architect:main', message: 'ARCHINIT', workspace: '/tmp/ws',
+        options: { raw: true, deliverAfter: 1 },
+      });
+      await handleRequest(makeReq('POST', '/api/send'), makeRes().res, makeCtx());
+
+      // User goes idle; the buffer flush starts writing the /clear.
+      typing = false;
+      startSendBuffer(() => {});
+      await vi.advanceTimersByTimeAsync(600);   // flush fires, schedules writes
+      await vi.advanceTimersByTimeAsync(1_000); // /arch-init comes due MID-write
+      await vi.advanceTimersByTimeAsync(5_000); // everything settles
+
+      const writes = mockWrite.mock.calls.map(c => String(c[0]));
+      const joined = writes.join('');
+      const archIdx = joined.indexOf('ARCHINIT');
+      const lastClearIdx = joined.lastIndexOf('CLEAR-149');
+
+      expect(archIdx).toBeGreaterThanOrEqual(0);
+      expect(lastClearIdx).toBeGreaterThanOrEqual(0);
+      // Every part of the clear lands before the re-orientation begins.
+      expect(archIdx).toBeGreaterThan(lastClearIdx);
+    });
+
     it('leaves undelayed sends on the immediate path', async () => {
       mockParseJsonBody.mockResolvedValue({
         to: 'architect:main', message: 'now', workspace: '/tmp/ws', options: { raw: true },
