@@ -184,4 +184,31 @@ Three reviewer concerns, all valid; all three produced doc + POC changes.
    delivered-or-dismissed; eventual delivery or persistent visible escalation, never
    silent loss.
 
-Commits: da7e3cbf (concerns 2+3), + the i6 fix/evidence commit following.
+Commits: da7e3cbf (concerns 2+3), 65daa69b (i6 fix + evidence).
+
+## 2026-07-31 — Review round 6: H crash window, hold-first phasing
+
+Two more reviewer concerns; both correct, both doc-level (no new POC needed — the
+supporting measurements already exist in committed evidence).
+
+1. H crash window CONFIRMED by construction: the per-line clear erases the TUI's draft
+   while the only replay copy is Tower RAM; shellper persistence keeps the TUI (empty
+   composer) alive across a Tower crash but not the buffer. The validated maneuver is
+   ~50+ writes over ~2s (i5: 50ms clear steps, 14ms/char replay, settle waits) — no
+   verified single-write form, and i3's fully-atomic claude attempt SUBMITTED the draft.
+   New constraint 8: journal the capture to disk before the first destructive byte
+   (transient row, deleted on successful replay, never logged — same privacy posture as
+   mailbox content); crash/timeout → recovered session dirty + journal surfaced as a
+   held draft-recovery entry, never auto-replayed. H reclassified GO-best-effort:
+   worst case "composer copy lost, bytes surfaced", never silent loss; doubt → K.
+
+2. Phasing safety CONFIRMED: original phases 1-2 kept today's force-inject at max-age
+   and shutdown until phase-3 K existed, and dirty/recovered/noEnter/unwritable/dead
+   cases have NO safe injection form — their only outlet is a hold. Rework: minimal K
+   hold core pulled into phase 1 (persisted held store, held/delivered responses,
+   drain-on-clean/poll, persist-on-shutdown, hold-at-max-age) — a reallocation of the
+   K estimate, not new scope; inbox surface + cron rerouting stay phase 3. Interim
+   visibility = held response + log + broadcast, acceptable because rows persist and
+   drain automatically. New invariant stated in the doc: NO phase may ever force-inject.
+   Verdict line updated (best-effort H, hold-first phasing); effort ~1200–1700 with the
+   journal (~70) added.
