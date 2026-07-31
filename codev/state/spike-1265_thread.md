@@ -434,3 +434,49 @@ Rewrote codev/spikes/1265-afx-send-line-occupancy.md as final-state facts only:
   delivery-matrix tables, every measured number (gate cost 2/22/67 ms, maneuver
   ~1–3 s, i9c at-cap results, w1 blob, i8 wrapper states), all evidence tags,
   the phasing, and the effort table (~2150–2445 LOC) are intact.
+
+## 2026-07-31 — Round 11 (architect review): attach bypass CONFIRMED + measured; verify oracle re-scoped to differential
+
+Architect flagged two gaps, both verified against the code, then measured:
+
+1. **afx attach bypasses Tower's input path entirely** (`i11`, 8 asserts: real
+   ShellperProcess + the real ShellperClient class in 'terminal' mode + real bash PTY,
+   sources hash-asserted identical to this branch): attach DATA executes on the PTY while
+   the tower client receives ZERO frames of any type about the attach client's
+   connect/input/resize; attach RESIZE mutates geometry Tower learns only at its next
+   handshake; SIGNAL/SPAWN are tower-only but DATA/RESIZE are open by design. PTY output
+   IS broadcast to all clients — the G-lite gate still sees attach drafts; the blindness
+   is input-side only. Doc: constraint 2 scoped (PtySession.write is the choke point for
+   Tower-side writers, not the PTY), new constraint 16 (remedy (a) shellper observation
+   frames — backward-compatible via the ignore-unknown-frames rule — recommended over
+   routing attach through Tower, which would kill its Tower-down recovery role); H gains
+   a no-attached-terminal-client precondition (attach bytes are non-divertable even with
+   observation); phase 1 accepts the blindness knowingly (gate keeps it corruption-safe,
+   deferral-direction degradation only).
+
+2. **The round-10 postVerify (viewport token search) cannot support "no undetected
+   loss"** (`i10`: claude 14/14, codex all-pass, exit 0): duplicate content → false
+   delivered (`i10a`); fused draft+message blob → false delivered — the exact corruption
+   under repair (`i10b`); scrolled-out successful entry → false LOST = the auto-re-hold
+   signature = duplicate redelivery (`i10c`); and scrollback does NOT rescue late
+   verifies on claude — the newline-free repaint leaves no scrollback copy (post any=0
+   in a 2000-row recon). Sound contract, asserted: **differential own-entry delta**
+   between gate render and verify render (delivered-verified ⇔ exactly one NEW line
+   carrying the FULL message with no letters/digits before it — fusion fails it, a real
+   delivery passes it), **one-shot at settle** (late → unverified, never lost), **lost
+   auto-re-holds only on the i8c conjunction** (token absent AND no composer marker —
+   a healthy scrolled session never satisfies it), everything else unverified/surfaced.
+   Codex positive branch validated on a real local /status delivery (consumed clean, new
+   output, zero API traffic). Phase-1 property re-scoped everywhere: **no force-inject
+   path and no BELIEVED-SENT loss path**.
+
+Scaffold notes: differential exactness = "no alphanumerics in the prefix" (glyph
+allowlists rot — the dim-placeholder lesson again); the first cut passed short probe
+tokens instead of the full message and i10c-early caught it by failing on a real
+delivery; i10c's scroll driver needed a cap covering claude's queued-list render mode
+(mid-retry fillers render one row each, not as entries — dead-API family).
+
+Effort: verify 60–80 → 90–120; +observation frames 80–110 (phase 2) ⇒ ~1800–2025 code
++ ~500–630 tests ⇒ ~2300–2655. Versions: claude 2.1.212 / codex 0.146.0 /
+@xterm/headless 6.0.0. Runs: i11 exit 0 (8 asserts), i10-claude exit 0 (14 asserts),
+i10-codex exit 0.
