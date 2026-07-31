@@ -1619,7 +1619,14 @@ async function handleSend(
       // Delayed deliveries queue behind anything already buffered.
       enforceFifo: true,
     };
-    scheduleDelayedSend(deliverAfter, result.terminalId, () => deliverOrBuffer(deliveryContext));
+    scheduleDelayedSend(deliverAfter, result.terminalId, async () => {
+      const { writeCompletesInMs } = await deliverOrBuffer(deliveryContext);
+      // Hold the terminal's chain until the paced writes have actually landed,
+      // so the next due message cannot start mid-write.
+      if (writeCompletesInMs > 0) {
+        await new Promise(resolve => setTimeout(resolve, writeCompletesInMs));
+      }
+    });
     ctx.log('INFO', `Message scheduled (+${deliverAfter}s): ${from ?? 'unknown'} → ${result.agent} (terminal ${result.terminalId.slice(0, 8)}...)`);
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
@@ -1633,7 +1640,7 @@ async function handleSend(
     return;
   }
 
-  const deferred = await deliverOrBuffer({
+  const { deferred } = await deliverOrBuffer({
     terminalId: result.terminalId,
     agent: result.agent,
     from,
@@ -1697,9 +1704,20 @@ interface DeliveryContext {
  * and a retained `PtySession` reference would happily absorb writes that go
  * nowhere.
  *
- * @returns whether the message was buffered rather than written.
+ * @returns `deferred` (buffered rather than written) and `writeCompletesInMs` —
+ *          how long until the paced writes this call scheduled have all landed.
+ *
+ * `writeCompletesInMs` exists because `writeMessageToSession` SCHEDULES writes
+ * (line pacing, the trailing Enter) and returns immediately. A caller that
+ * treats this function's resolution as "delivery finished" would let the next
+ * delivery start mid-write — which for two delayed sends due together produces
+ * interleaved lines, or `firstsecond\r\r` for short ones. The per-terminal
+ * chain waits out this value, so serialisation covers the actual writes rather
+ * than just the scheduling of them.
  */
-async function deliverOrBuffer(delivery: DeliveryContext): Promise<boolean> {
+async function deliverOrBuffer(
+  delivery: DeliveryContext,
+): Promise<{ deferred: boolean; writeCompletesInMs: number }> {
   const {
     terminalId, agent, from, formattedMessage, noEnter, interrupt,
     broadcastPayload, logMessage, ctx, enforceFifo,
@@ -1710,11 +1728,11 @@ async function deliverOrBuffer(delivery: DeliveryContext): Promise<boolean> {
   const session = getTerminalManager().getSession(terminalId);
   if (!session) {
     ctx.log('WARN', `Message DROPPED: ${from ?? 'unknown'} → ${agent} (terminal ${terminalId.slice(0, 8)}...): session gone before delivery`);
-    return false;
+    return { deferred: false, writeCompletesInMs: 0 };
   }
   if (!session.writable) {
     ctx.log('ERROR', `Message DROPPED: ${from ?? 'unknown'} → ${agent} (terminal ${terminalId.slice(0, 8)}...): terminal not writable (shellper connection down)`);
-    return false;
+    return { deferred: false, writeCompletesInMs: 0 };
   }
 
   // Spec 1307: a DELAYED interrupt must still respect per-session order. An
@@ -1727,8 +1745,10 @@ async function deliverOrBuffer(delivery: DeliveryContext): Promise<boolean> {
   let queueAhead = enforceFifo && sendBuffer.hasPending(terminalId);
 
   // Optionally interrupt first — bypass buffering entirely.
+  let wroteInterrupt = false;
   if (interrupt && !queueAhead) {
     session.write('\x03'); // Ctrl+C
+    wroteInterrupt = true;
     await new Promise(resolve => setTimeout(resolve, 100));
     // Re-check: the 100ms pause is a window in which something else can queue
     // for this session, and a decision taken before an await is a decision
@@ -1757,17 +1777,23 @@ async function deliverOrBuffer(delivery: DeliveryContext): Promise<boolean> {
       timestamp: Date.now(),
       broadcastPayload,
       logMessage,
-      interruptFirst: interrupt && queueAhead ? true : undefined,
+      // Only ask the buffer to write Ctrl+C if this call has not already sent
+      // one. Without the guard, an interrupt that found the queue empty, wrote
+      // its Ctrl+C, then discovered a new arrival during its 100ms pause would
+      // send a SECOND one at flush.
+      interruptFirst: interrupt && queueAhead && !wroteInterrupt ? true : undefined,
     });
     ctx.log('INFO', `Message deferred (user typing): ${from ?? 'unknown'} → ${agent} (terminal ${terminalId.slice(0, 8)}...)`);
-    return true;
+    // The buffer serialises its own drain via delayOffset, so a buffered
+    // message imposes no additional wait on this caller.
+    return { deferred: true, writeCompletesInMs: 0 };
   }
 
   // Bugfix #584: paces multi-line output to avoid paste detection.
-  writeMessageToSession(session, formattedMessage, noEnter);
+  const writeCompletesInMs = writeMessageToSession(session, formattedMessage, noEnter);
   broadcastMessage(broadcastPayload);
   ctx.log('INFO', logMessage);
-  return false;
+  return { deferred: false, writeCompletesInMs };
 }
 
 async function handleBrowse(res: http.ServerResponse, url: URL): Promise<void> {

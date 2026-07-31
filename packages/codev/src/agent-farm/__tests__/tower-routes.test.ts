@@ -1799,8 +1799,13 @@ describe('tower-routes', () => {
         to: 'architect:other', message: 'x', workspace: '/tmp/ws', from: 'aspir-1307',
         options: { deliverAfter: 15 },
       });
+      // Mirrors what the real resolver returns for this refusal
+      // (tower-messages.ts:229) — 'NOT_FOUND', not a 'FORBIDDEN' code that does
+      // not exist. `isResolveError` only checks for `code`, so the assertion
+      // held either way, but a mock that does not match production is a
+      // half-truth waiting to mislead the next reader.
       mockResolveTarget.mockReturnValue({
-        code: 'FORBIDDEN',
+        code: 'NOT_FOUND',
         message: 'builder aspir-1307 may only address its own spawning architect',
       });
       const { res, statusCode } = makeRes();
@@ -1937,6 +1942,48 @@ describe('tower-routes', () => {
       expect(firstIdx).toBeGreaterThanOrEqual(0);
       expect(ctrlC).toBeGreaterThan(firstIdx);
       expect(urgentIdx).toBeGreaterThan(ctrlC);
+    });
+
+    it('ORDERING: two simultaneous delayed sends do not interleave their writes', async () => {
+      // Against the REAL route and the REAL paced writer. The unit-level chain
+      // test used an artificially async callback, so it proved the chain waits
+      // for the CALLBACK — not for the writes the callback schedules.
+      // writeMessageToSession returns after SCHEDULING its pacing and trailing
+      // Enter, so without waiting out that window two due messages produce
+      // "firstsecond\r\r" rather than two messages.
+      vi.useFakeTimers();
+      const mockWrite = vi.fn();
+      mockGetTerminalManager.mockReturnValue({
+        getSession: () => idleSession(mockWrite), listSessions: () => [],
+      });
+      mockResolveTarget.mockReturnValue({
+        terminalId: 'term-serial-001', workspacePath: '/tmp/ws', agent: 'architect',
+      });
+
+      for (const text of ['first', 'second']) {
+        mockParseJsonBody.mockResolvedValue({
+          to: 'architect:main', message: text, workspace: '/tmp/ws',
+          options: { raw: true, deliverAfter: 5 },
+        });
+        await handleRequest(makeReq('POST', '/api/send'), makeRes().res, makeCtx());
+      }
+
+      await vi.advanceTimersByTimeAsync(5_000);
+      await vi.advanceTimersByTimeAsync(2_000);
+
+      const writes = mockWrite.mock.calls.map(c => String(c[0]));
+      const firstIdx = writes.findIndex(w => w.includes('first'));
+      const secondIdx = writes.findIndex(w => w.includes('second'));
+
+      expect(firstIdx).toBeGreaterThanOrEqual(0);
+      expect(secondIdx).toBeGreaterThan(firstIdx);
+
+      // The decisive assertion: everything belonging to the FIRST message —
+      // including its trailing Enter — lands before the second begins. An
+      // Enter appearing after 'second' would mean the writes interleaved.
+      const enterAfterFirst = writes.findIndex((w, i) => i > firstIdx && w === '\r');
+      expect(enterAfterFirst).toBeGreaterThan(firstIdx);
+      expect(enterAfterFirst).toBeLessThan(secondIdx);
     });
 
     it('leaves undelayed sends on the immediate path', async () => {
