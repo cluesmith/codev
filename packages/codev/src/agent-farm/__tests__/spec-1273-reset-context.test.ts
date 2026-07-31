@@ -19,6 +19,7 @@ import {
   resolveBuilderContext,
   readPorchContext,
   protocolFromStatus,
+  issueNumberFromPorchId,
   modeFromBuilderPrompt,
   harnessFromLaunchScript,
   ContextResolutionError,
@@ -627,6 +628,7 @@ describe('mode resolution for the ad-hoc task lane (Spec 1273 F2)', () => {
       builderId: 'builder-task-re_v',
       worktree: WORKTREE,
       branch: 'builder/task-RE_V',
+      taskText: 'Be a probe.',
     });
 
     expect(ctx.mode).toBe('soft');
@@ -657,6 +659,7 @@ describe('mode resolution for the ad-hoc task lane (Spec 1273 F2)', () => {
       builderId: 'builder-task-re_v',
       worktree: WORKTREE,
       branch: 'builder/task-RE_V',
+      taskText: 'Be a probe.',
       modeOverride: 'strict',
     });
     expect(ctx.mode).toBe('strict');
@@ -810,5 +813,119 @@ describe('a bare project NUMBER is not enough to claim a builder (Spec 1273 veri
     );
 
     expect(() => readPorchContext(fs, WORKTREE, { builderId: BUILDER_ID })).toThrow(/Ambiguous/);
+  });
+});
+
+// ============================================================================
+// Retroactive codex review of the merged #1308 (2026-07-31)
+// ============================================================================
+
+describe('post-merge codex findings (Spec 1273)', () => {
+  it('a status.yaml that states a DIFFERENT id is not overruled by its directory name', () => {
+    // `codev/projects/1273-old/` holding `id: '999'` belongs to 999, whatever
+    // the directory is called. The dir-name fallback previously overruled that,
+    // letting a renamed or recycled directory claim a builder — and
+    // manufacturing false ambiguities beside the real project.
+    const fs = makeFs(
+      {
+        [join(WORKTREE, 'codev', 'projects', '1273-old', 'status.yaml')]:
+          "id: '999'\nprotocol: aspir\nphase: implement\n",
+        [join(WORKTREE, '.builder-prompt.txt')]: BUILDER_PROMPT,
+        [join(WORKTREE, '.builder-start.sh')]: LAUNCH_SCRIPT,
+      },
+      { [join(WORKTREE, 'codev', 'projects')]: ['1273-old'] },
+    );
+
+    expect(readPorchContext(fs, WORKTREE, { builderId: BUILDER_ID })).toBeNull();
+  });
+
+  it('still falls back to the directory name when the file states no id at all', () => {
+    const fs = makeFs(
+      {
+        [join(WORKTREE, 'codev', 'projects', '1273-x', 'status.yaml')]:
+          'protocol: aspir\nphase: implement\n',
+        [join(WORKTREE, '.builder-prompt.txt')]: BUILDER_PROMPT,
+        [join(WORKTREE, '.builder-start.sh')]: LAUNCH_SCRIPT,
+      },
+      { [join(WORKTREE, 'codev', 'projects')]: ['1273-x'] },
+    );
+
+    expect(readPorchContext(fs, WORKTREE, { builderId: BUILDER_ID })?.projectName).toBe('1273-x');
+  });
+
+  it('rejects a weak claim when the builder id yields no protocol to corroborate with', () => {
+    // The previous code's own comment said a noncanonical id "cannot be
+    // corroborated and is not trusted" while `if (expectedProtocol && mismatch)`
+    // let EVERY weak claim through when expectedProtocol was null. A legacy
+    // builder could adopt any historical project sharing its tail.
+    const fs = makeFs(
+      {
+        [join(WORKTREE, 'codev', 'projects', '1273-x', 'status.yaml')]: STATUS_YAML,
+        [join(WORKTREE, '.builder-prompt.txt')]: BUILDER_PROMPT,
+        [join(WORKTREE, '.builder-start.sh')]: LAUNCH_SCRIPT,
+      },
+      { [join(WORKTREE, 'codev', 'projects')]: ['1273-x'] },
+    );
+
+    expect(readPorchContext(fs, WORKTREE, { builderId: 'some-legacy-name-1273' })).toBeNull();
+  });
+
+  it('recovers a BUGFIX issue number from its <prefix>-<N> porch id', () => {
+    // BUGFIX deliberately stores `bugfix-<N>` (spawn.ts:817). The strict /^\d+$/
+    // guard threw that identity away when the registry row had none — and on
+    // BUGFIX the issue body IS the spec, so the re-orientation lost the
+    // requirements it exists to carry.
+    expect(issueNumberFromPorchId('bugfix-887')).toBe('887');
+    expect(issueNumberFromPorchId('1273')).toBe('1273');
+    // But an ad-hoc task id still cannot masquerade as an issue.
+    expect(issueNumberFromPorchId('builder-task-abc')).toBeUndefined();
+    expect(issueNumberFromPorchId(undefined)).toBeUndefined();
+  });
+
+  it('does not treat a --task --protocol builder as bare when porch init failed', () => {
+    // initPorchInWorktree is deliberately non-fatal, so that lane can have task
+    // text AND no porch. Inferring "bare" from that stripped its real protocol
+    // template. The prompt is written BEFORE porch init, so its rendered
+    // template — and its `## Mode:` line — is the positive evidence.
+    const fs = makeFs(
+      {
+        [join(WORKTREE, '.builder-prompt.txt')]: BUILDER_PROMPT, // rendered template, has Mode
+        [join(WORKTREE, '.builder-start.sh')]: LAUNCH_SCRIPT,
+      },
+      { [join(WORKTREE, 'codev', 'projects')]: [] },
+    );
+
+    const ctx = resolveBuilderContext({
+      fs,
+      builderId: 'builder-task-abc',
+      worktree: WORKTREE,
+      branch: 'builder/task-abc',
+      taskText: 'ad-hoc work',
+    });
+
+    expect(ctx.isBareTask).toBe(false);
+    // And its real mode survives, rather than being defaulted to soft.
+    expect(ctx.mode).toBe('strict');
+    expect(ctx.modeSource).toBe('builder-prompt');
+  });
+
+  it('is bare only with task text AND no rendered template', () => {
+    const bare = makeFs(
+      {
+        [join(WORKTREE, '.builder-prompt.txt')]: 'You are a Builder.\n\n# Task\n\nBe a probe.',
+        [join(WORKTREE, '.builder-start.sh')]: LAUNCH_SCRIPT,
+      },
+      { [join(WORKTREE, 'codev', 'projects')]: [] },
+    );
+
+    const ctx = resolveBuilderContext({
+      fs: bare,
+      builderId: 'builder-task-re_v',
+      worktree: WORKTREE,
+      branch: 'builder/task-RE_V',
+      taskText: 'Be a probe.',
+    });
+
+    expect(ctx.isBareTask).toBe(true);
   });
 });
