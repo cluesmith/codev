@@ -212,3 +212,32 @@ supporting measurements already exist in committed evidence).
    drain automatically. New invariant stated in the doc: NO phase may ever force-inject.
    Verdict line updated (best-effort H, hold-first phasing); effort ~1200–1700 with the
    journal (~70) added.
+
+## 2026-07-31 — Review round 7: cron-forward, convergence definition, axis reconcile
+
+Two concerns, both correct — both were internal inconsistencies my earlier rounds
+introduced or under-specified.
+
+1. Cron contradiction CONFIRMED: round-6 phase 1 claimed "kills every force-inject
+   path" while phase 3 deferred cron rerouting — and constraint 5 documents cron
+   direct-writing the PTY today. Chose move-forward over narrow-claim: the minimal
+   reroute (deliverMessage → shared deliver-or-defer pipeline, ~40 LOC once the
+   pipeline exists) is a phase-1 item; cron-specific inbox attribution stays phase 3.
+   Claim also tightened: "every MESSAGE force-inject path" (the human --interrupt /
+   afx interrupt escape is the documented deliberate exception).
+
+2. Convergence hole CONFIRMED against my own i6c evidence: a menu can predate
+   recovery (TUI survives restart with the menu open), printables FILTER an open
+   slash-menu rather than dispel it, and bare \r then submits the SELECTION — so
+   "bare \r with no suspect frames since recovery" cannot prove clean. New
+   constraint 9: dirty→clean requires user submit + a G-lite rendered composer-empty
+   confirmation from the output ring buffer (fail-toward-dirty asymmetry makes the
+   round-4 chrome-parsing flakiness safe here: unrecognized placeholder → stay dirty
+   → K, degraded not corrupt); explicit human act also converges; tracked-clean
+   sessions need NO G-lite (on-sight dirty-marking keeps their input-side submit
+   classification sound). G row promoted: "G-lite slice required; full G not needed".
+   ESC/Tab reconcile: the table conflated two axes — occupancy (Tab/ESC neutral, the
+   #492 lesson) vs mode confidence (both suspects). Table rows now carry both axes +
+   an explainer paragraph; "occupancy-neutral ≠ safe to inject".
+
+Effort ~1270–1770 (G-lite ~70; cron reroute ~40 moved into phase 1).
