@@ -480,3 +480,73 @@ Effort: verify 60–80 → 90–120; +observation frames 80–110 (phase 2) ⇒ 
 + ~500–630 tests ⇒ ~2300–2655. Versions: claude 2.1.212 / codex 0.146.0 /
 @xterm/headless 6.0.0. Runs: i11 exit 0 (8 asserts), i10-claude exit 0 (14 asserts),
 i10-codex exit 0.
+
+## 2026-07-31 — Round 12 (architect review): mid-write fusion CONFIRMED + closed; verify re-scoped canonical-stream; presence needs census
+
+Architect flagged three findings. All three verified against code/arch first, then
+measured (`i12`: claude 15/15 asserts first-run green; codex 6/6 asserts + 3
+MEASURED after one rig-config iteration; both exit 0):
+
+1. **The text→Enter gap is an attach-reachable corruption window PAST a passing
+   gate** — constraint 16's "degrades scheduling, not safety" was wrong. Every
+   submitting delivery is write(text) + write(\r) at 50–80 ms
+   (`message-write.ts:72-80`); attach bytes are non-divertable (`i11`); `i12a`
+   measured a byte injected at +25 ms being submitted fused ("messageX") after a
+   CLEAN gate — and the round-11 verify said **delivered-verified** on it: its
+   exactness rule tested only the prefix before the token (`exp-i10:139`), so
+   suffix fusion was believed-sent corruption, the exact phase-1 property
+   violation. Fix, both validated: **pre-Enter equality gate** (prevention —
+   Enter releases only once the ring-recon composer equals exactly the message;
+   fused case → Enter withheld, NOTHING submitted, draft stranded visible,
+   `i12c1`; clean case reaches equality in ~42 ms ≈ inside the 50 ms delay it
+   replaces, `i12c2`) + **canonical-stream verify** as detection backstop
+   (boundary-clean both sides → fused-suspect, `i12a`).
+
+2. **"Differential verify asserted on both TUIs" was false** — i10's codex arm
+   never called differentialVerify (classifyTerm + text diff only), and the
+   round-11 oracle searched single buffer rows for the FULL message while
+   production sends are header/body/footer multiline (`message-format.ts:23`)
+   and TUIs re-wrap wide lines at their own layout width — `i12b`: a genuinely
+   delivered production-formatted message → r11 verdict `unverified` (post
+   count=0), long body line on NO single buffer row. Production messages were
+   permanently unverifiable under the round-11 contract. Re-scoped oracle:
+   **canonical-stream differential** — transcript region only (composer
+   excluded, scrollback included), whitespace-stripped (renderer wrap/indent
+   insensitive); delivered-verified ⇔ exactly one NEW boundary-clean occurrence
+   (no letter/digit adjacent on either side). Asserted on claude (`i12a/b`) AND
+   codex (`i12d`) — the codex arm finally has a **dead-provider submit rig**
+   (scratch CODEX_HOME, API-key-mode provider at an unroutable base_url,
+   `wire_api = "responses"` — 0.146 rejects `"chat"` at boot; zero traffic):
+   prod-multiline positive → delivered-verified, fused negative →
+   fused-suspect, r11 verdicts corroborated (`unverified` / `delivered-verified`
+   respectively). Rounds 1–11 had no codex submit rig at all; this also unblocks
+   the codex with-history ESC residual (next-steps item updated).
+
+3. **Observation-frame events alone cannot establish "no attached client"** —
+   arch.md #1215: shellpers keep executing their spawn-time binary for an
+   unbounded period post-Tower-upgrade (no frames ≠ no clients), and a client
+   connecting while Tower is down produces no event Tower ever sees. Remedy
+   folded into constraint 16: **client census in WELCOME** (the #1215
+   optional-field pattern — lastDataAt/alwaysSendsReplay precedent) + events
+   since handshake; pre-census shellpers = attach-state-unknown ⇒ H forbidden
+   there until shellper restart; a connect event mid-maneuver aborts the
+   transaction at its next chunk boundary (journal-resolved).
+
+Doc updated: verdict paragraph, code-audit (text→Enter window bullet), method
+(dead-provider rig; i12 in the asserted-suite list), evidence map, NEW pre-Enter
+gate paragraph, verify section rewritten (canonical-stream contract + honest
+residuals: whitespace-only interleave canonicalizes away — pre-Enter's strict
+equality still catches it; all-punctuation messages lack a boundary signal;
+cross-entry straddle theoretical), constraints 8/16, recommended items 4/7,
+phasing (phase 1 gains pre-Enter gate + canon verify, closes the attach fusion
+window; phase 2 frames+census), effort ~1880–2115 code + ~540–690 tests ⇒
+**~2420–2805**, next steps, references (+#1215, +message-format.ts:23).
+
+Scaffold notes: first codex rig attempt died at boot on `wire_api = "chat"`
+(0.146 config error) — i12d's graceful-skip path surfaced it cleanly (MEASURED
++ skip, exit 0) and one line fixed it; @xterm 6.0.0 reinstalled in this
+session's scratchpad (previous session's XTERM_DIR install was gone; a stray
+5.5.0 from an older session was rejected — the pin matters).
+
+Runs: i12-claude 15/15 exit 0 (first run), i12-codex exit 0 (post-fix).
+Versions: claude 2.1.212 / codex 0.146.0 / @xterm/headless 6.0.0.
