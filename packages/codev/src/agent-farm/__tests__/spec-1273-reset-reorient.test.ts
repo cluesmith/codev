@@ -443,6 +443,58 @@ describe('long-form re-orientation (Spec 1273)', () => {
     expect((port as any).mock.calls[0][1].task_text).toBeUndefined();
   });
 
+  // ==========================================================================
+  // The bare --task lane has no protocol template (Spec 1273 F1, live e2e)
+  // ==========================================================================
+
+  it('builds the long form from task text, without asking for a protocol template', () => {
+    // `afx spawn --task` without `--protocol` takes spawn.ts's else-branch and
+    // builds the prompt straight from the task text — there is no
+    // `protocols/task/builder-prompt.md`. Calling the template port for it is a
+    // category error, and the live e2e died on
+    // `Protocol "task" has no builder-prompt.md`.
+    const port = vi.fn(() => {
+      throw new Error('Protocol "task" has no builder-prompt.md');
+    }) as unknown as SpawnPromptPort;
+
+    const { longForm } = assembleReorientation({
+      context: makeContext({
+        protocol: 'task',
+        porch: null,
+        specName: null,
+        specPath: null,
+        planPath: null,
+        issueNumber: undefined,
+        taskText: 'You are a reset-test probe.',
+      }),
+      statePath: STATE_PATH,
+      buildSpawnPrompt: port,
+    });
+
+    // The template port is never called — selected on a positive fact, not by
+    // catching the error it would have thrown.
+    expect(port).not.toHaveBeenCalled();
+    // And the body matches spawn's bare-task shape (spawn.ts:551).
+    expect(longForm).toContain('# Task');
+    expect(longForm).toContain('You are a reset-test probe.');
+  });
+
+  it('still renders the real template for a --task --protocol lane', () => {
+    // That variant DOES get a porch project, so it must not be swallowed by the
+    // bare-task branch.
+    const port = vi.fn(() => SPAWN_PROMPT) as unknown as SpawnPromptPort;
+
+    const { longForm } = assembleReorientation({
+      context: makeContext({ taskText: 'ad-hoc work' }),
+      statePath: STATE_PATH,
+      buildSpawnPrompt: port,
+      buildResumeNotice: resumeNoticePort,
+    });
+
+    expect(port).toHaveBeenCalled();
+    expect(longForm).toContain(SPAWN_PROMPT);
+  });
+
   it('omits the issue from the prompt context when none was supplied', () => {
     const port = vi.fn(() => SPAWN_PROMPT) as unknown as SpawnPromptPort;
     assembleReorientation({

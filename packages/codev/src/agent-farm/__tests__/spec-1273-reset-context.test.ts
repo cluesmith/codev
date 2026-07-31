@@ -129,7 +129,7 @@ describe('protocol resolution (Spec 1273)', () => {
   });
 
   it('protocolFromStatus returns null when there are no project dirs', () => {
-    expect(protocolFromStatus(makeFs({}), WORKTREE)).toBeNull();
+    expect(protocolFromStatus(makeFs({}), WORKTREE, { builderId: BUILDER_ID })).toBeNull();
   });
 });
 
@@ -139,7 +139,7 @@ describe('protocol resolution (Spec 1273)', () => {
 
 describe('porch context (Spec 1273)', () => {
   it('reads phase and current plan phase', () => {
-    const porch = readPorchContext(fullWorktree(), WORKTREE);
+    const porch = readPorchContext(fullWorktree(), WORKTREE, { builderId: BUILDER_ID });
     expect(porch?.phase).toBe('implement');
     expect(porch?.currentPlanPhase).toBe('phase_4');
     expect(porch?.projectId).toBe('1273');
@@ -150,7 +150,7 @@ describe('porch context (Spec 1273)', () => {
       [join(WORKTREE, 'codev', 'projects', '1273-builder-context-reset-should-b', 'status.yaml')]:
         STATUS_YAML.replace('current_plan_phase: phase_4', 'current_plan_phase: null'),
     });
-    expect(readPorchContext(fs, WORKTREE)?.currentPlanPhase).toBeNull();
+    expect(readPorchContext(fs, WORKTREE, { builderId: BUILDER_ID })?.currentPlanPhase).toBeNull();
   });
 
   it('returns null for a non-porch lane instead of throwing', () => {
@@ -160,7 +160,7 @@ describe('porch context (Spec 1273)', () => {
       [join(WORKTREE, '.builder-prompt.txt')]: BUILDER_PROMPT,
       [join(WORKTREE, '.builder-start.sh')]: LAUNCH_SCRIPT,
     });
-    expect(readPorchContext(fs, WORKTREE)).toBeNull();
+    expect(readPorchContext(fs, WORKTREE, { builderId: BUILDER_ID })).toBeNull();
 
     const ctx = resolveBuilderContext({ fs, ...BASE });
     expect(ctx.porch).toBeNull();
@@ -446,5 +446,161 @@ describe('harness detection matches command position only (Spec 1273)', () => {
     resolveBuilderContext({ fs, ...BASE });
 
     expect(calls.every(c => /^(exists|read|listDirs):/.test(c))).toBe(true);
+  });
+});
+
+// ============================================================================
+// F1 — the wrong-winner blocker found by the live e2e (2026-07-31)
+// ============================================================================
+
+describe('porch project selection is by identity, never by position (Spec 1273 F1)', () => {
+  /**
+   * A worktree shaped like this repo's real ones.
+   *
+   * Porch history is committed to `main`, so every worktree inherits every
+   * project ever run — 203 of them when this bug was found. The
+   * alphabetically-first is a `spider`-era project, and the original
+   * implementation returned the first parsable `status.yaml`, so EVERY builder
+   * resolved protocol `spider` and died on
+   * `Protocol "spider" has no builder-prompt.md`.
+   *
+   * The fixture reproduces the essential shape: historical dirs sorting before
+   * the builder's own, each with a valid but foreign status.yaml.
+   */
+  function inheritedHistoryWorktree(ownDir = '1273-builder-context-reset-should-b') {
+    const historical = [
+      '0087-porch-timeout-termination-retries',
+      '0088-porch-version-constant',
+      '0092-terminal-file-links',
+    ];
+    const files: Record<string, string> = {
+      [join(WORKTREE, '.builder-prompt.txt')]: BUILDER_PROMPT,
+      [join(WORKTREE, '.builder-start.sh')]: LAUNCH_SCRIPT,
+      [join(WORKTREE, 'codev', 'projects', ownDir, 'status.yaml')]: STATUS_YAML,
+    };
+    for (const [i, dir] of historical.entries()) {
+      files[join(WORKTREE, 'codev', 'projects', dir, 'status.yaml')] =
+        `id: '00${87 + i}'\ntitle: ${dir}\nprotocol: spider\nphase: implement\n`;
+    }
+    return makeFs(files, {
+      [join(WORKTREE, 'codev', 'projects')]: [...historical, ownDir],
+    });
+  }
+
+  it('picks the builder\'s own project, not the alphabetically-first', () => {
+    const porch = readPorchContext(inheritedHistoryWorktree(), WORKTREE, {
+      builderId: BUILDER_ID,
+    });
+
+    expect(porch?.projectId).toBe('1273');
+    expect(porch?.protocol).toBe('aspir');
+    // The exact regression: `spider` must never be the answer.
+    expect(porch?.protocol).not.toBe('spider');
+  });
+
+  it('resolves the whole context correctly despite 3 foreign projects', () => {
+    const ctx = resolveBuilderContext({ fs: inheritedHistoryWorktree(), ...BASE });
+    expect(ctx.protocol).toBe('aspir');
+    expect(ctx.protocolSource).toBe('status.yaml');
+    expect(ctx.porch?.projectName).toBe('1273-builder-context-reset-should-b');
+  });
+
+  it('returns null — not a foreign project — when this builder owns none', () => {
+    // The live probe `task-re_v` had no porch project of its own but inherited
+    // 203 others. Returning any of them is a confident lie; null is the truth,
+    // and phase 5 renders a frame without a porch block for it.
+    const porch = readPorchContext(inheritedHistoryWorktree(), WORKTREE, {
+      builderId: 'builder-task-re_v',
+    });
+
+    expect(porch).toBeNull();
+  });
+
+  it('matches on the issue number for an issue-driven lane', () => {
+    const porch = readPorchContext(inheritedHistoryWorktree('1279-fix-something'), WORKTREE, {
+      builderId: 'builder-bugfix-1279',
+      issueNumber: '1279',
+    });
+    expect(porch?.projectName).toBe('1279-fix-something');
+  });
+
+  it('tolerates leading zeros between the id and the directory name', () => {
+    // Project dirs use `0087-…` while porch ids and CLI arguments use `87`
+    // (the same split as `afx cleanup -p 466` vs `0466`).
+    const porch = readPorchContext(inheritedHistoryWorktree(), WORKTREE, {
+      builderId: 'builder-bugfix-87',
+    });
+    expect(porch?.projectName).toBe('0087-porch-timeout-termination-retries');
+  });
+
+  it('matches case-insensitively, so a case-sensitive filesystem behaves like macOS', () => {
+    // The registry lowercases builder ids while directories preserve case
+    // (`builder-task-re_v` vs `.builders/task-RE_V`). macOS hides the mismatch.
+    const porch = readPorchContext(inheritedHistoryWorktree('task-RE_V-probe'), WORKTREE, {
+      builderId: 'builder-task-re_v',
+    });
+    expect(porch?.projectName).toBe('task-RE_V-probe');
+  });
+});
+
+// ============================================================================
+// F2 — the task lane could never auto-detect its mode
+// ============================================================================
+
+describe('mode resolution for the ad-hoc task lane (Spec 1273 F2)', () => {
+  /** A `--task` spawn: bare prompt, no `## Mode:` heading, no porch project. */
+  function taskWorktree() {
+    return makeFs(
+      {
+        [join(WORKTREE, '.builder-prompt.txt')]:
+          'You are a Builder. Read codev/roles/builder.md for your full role definition.\n\n# Task\n\nBe a probe.',
+        [join(WORKTREE, '.builder-start.sh')]: LAUNCH_SCRIPT,
+      },
+      { [join(WORKTREE, 'codev', 'projects')]: [] },
+    );
+  }
+
+  it('defaults a no-porch builder to soft instead of hard-erroring', () => {
+    // Before this, `afx reset <task-builder>` could not run at all without an
+    // explicit --mode: task spawns never render the `## Mode:` line.
+    const ctx = resolveBuilderContext({
+      fs: taskWorktree(),
+      builderId: 'builder-task-re_v',
+      worktree: WORKTREE,
+      branch: 'builder/task-RE_V',
+    });
+
+    expect(ctx.mode).toBe('soft');
+    // The source is recorded, so the report says where it came from rather than
+    // implying the worktree stated it.
+    expect(ctx.modeSource).toBe('task-default');
+  });
+
+  it('still aborts when a PORCH builder is missing its Mode line', () => {
+    // The default is scoped to the no-porch lane. A porch-driven builder with no
+    // `## Mode:` line is a genuine ambiguity — strict vs soft changes whether
+    // porch orchestrates — and must not be guessed.
+    const fs = makeFs(
+      {
+        [join(WORKTREE, 'codev', 'projects', '1273-x', 'status.yaml')]: STATUS_YAML,
+        [join(WORKTREE, '.builder-prompt.txt')]: 'No mode heading here.',
+        [join(WORKTREE, '.builder-start.sh')]: LAUNCH_SCRIPT,
+      },
+      { [join(WORKTREE, 'codev', 'projects')]: ['1273-x'] },
+    );
+
+    expect(() => resolveBuilderContext({ fs, ...BASE })).toThrow(/Cannot determine the mode/);
+  });
+
+  it('lets an explicit --mode win over the task default', () => {
+    const ctx = resolveBuilderContext({
+      fs: taskWorktree(),
+      builderId: 'builder-task-re_v',
+      worktree: WORKTREE,
+      branch: 'builder/task-RE_V',
+      modeOverride: 'strict',
+    });
+    expect(ctx.mode).toBe('strict');
+    expect(ctx.modeSource).toBe('flag');
   });
 });
