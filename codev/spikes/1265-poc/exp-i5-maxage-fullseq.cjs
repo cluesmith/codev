@@ -49,6 +49,12 @@ async function snap(d, label, settleMs = 800) {
   return text;
 }
 
+const failures = [];
+function check(label, ok, detail) {
+  console.log(`ASSERT ${label}: ${ok ? 'PASS' : 'FAIL'} ${detail}`);
+  if (!ok) failures.push(label);
+}
+
 /** Build the reference 3-line draft, returning the captured byte list. */
 async function buildDraft(d) {
   const captured = [];
@@ -99,12 +105,12 @@ function injectAtomic(d, withYank) {
   // ---- p2: per-line clear
   await perLineClear(d, 3);
   const cleared = await snap(d, 'p2-after-perline-clear');
-  console.log(`VERDICT p2-cleared=${!cleared.includes('first line')}`);
+  check('p2-cleared', !cleared.includes('first line') && !cleared.includes('third'), `composer=${JSON.stringify(cleared.slice(0, 50))}`);
 
   // ---- p3: ring probe — bare ^Y on the cleared composer
   d.send(KEYS.CTRL_Y);
   const ring = await snap(d, 'p3-ring-probe');
-  console.log(`VERDICT p3-ring-holds=${JSON.stringify(ring)}`);
+  check('p3-ring-holds-first-line', ring === 'first line', `ring=${JSON.stringify(ring)}`);
   await perLineClear(d, 5); // remove whatever the probe yanked
   await snap(d, 'p3-cleaned');
 
@@ -117,8 +123,7 @@ function injectAtomic(d, withYank) {
   await snap(d, 'p4-after-inject-with-yank');
   await replay(d, cap4);
   const buggy = await snap(d, 'p4-after-replay');
-  console.log(`VERDICT p4-buggy-matches-ref=${buggy === ref}`);
-  console.log(`VERDICT p4-duplication=${buggy !== ref} buggy=${JSON.stringify(buggy)}`);
+  check('p4-duplication-signature', buggy !== ref && buggy.includes('first linefirst line'), `buggy=${JSON.stringify(buggy)}`);
   await perLineClear(d, 8);
   await snap(d, 'p4-cleaned');
 
@@ -131,8 +136,13 @@ function injectAtomic(d, withYank) {
   await snap(d, 'p5-after-inject-no-yank');
   await replay(d, cap5);
   const fixed = await snap(d, 'p5-after-replay');
-  console.log(`VERDICT p5-fixed-byte-identical=${fixed === ref} fixed=${JSON.stringify(fixed)}`);
+  check('p5-fixed-byte-identical', fixed === ref, `fixed=${JSON.stringify(fixed)}`);
 
   d.kill();
+  if (failures.length) {
+    console.error(`FAILURES: ${failures.join(', ')}`);
+    process.exit(1);
+  }
+  console.log('ALL ASSERTIONS PASSED');
   process.exit(0);
 })().catch((e) => { console.error(e); process.exit(1); });

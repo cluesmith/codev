@@ -1,0 +1,49 @@
+RESULT i6b-wrong-order-composer: composer=""
+RESULT i6b-wrong-order-recall: composer="abc[architect] wrongorder"
+ASSERT i6b-blob-submitted: PASS recall="abc[architect] wrongorder"
+RESULT i6b-right-order-composer: composer="Press up to edit queued messages"
+ASSERT i6b-right-order-clean: PASS composer="Press up to edit queued messages"
+RESULT i6a-ungated-draft: composer="first line\n  second line"
+ASSERT i6a-ungated-draft-clean: PASS draft="first line\n  second line"
+RESULT i6a-ungated-result: composer="Zfirst line\n  second lineZ"
+ASSERT i6a-ungated-double-apply: PASS zCount=2 result="Zfirst line\n  second lineZ"
+RESULT i6a-gated-draft: composer="first line\n  second line"
+ASSERT i6a-gated-draft-clean: PASS draft="first line\n  second line"
+RESULT i6a-gated-result: composer="first line\n  second lineZ"
+ASSERT i6a-gated-clean: PASS result="first line\n  second lineZ"
+
+[claude slash menu]
+|
+|
+|
+|
+|  /afx                          Agent Farm CLI — the tool for spawning builders, managing Tower, workspaces,
+|                                and cron tasks. ALWAYS consult this skill BEFORE running any `afx` command …
+|  /porch                        Protocol orchestrator CLI — drives SPIR, ASPIR, AIR, TICK, and BUGFIX
+|                                protocols via a state machine. ALWAYS check this skill before running any `…
+|──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+|❯ /
+|──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+|  ~/code/codev_root/codev/.builders/spike-1265
+|  high:opus-5[1m]
+|  ⏸ manual mode on
+ASSERT i6c-menu-open: PASS slash menu rendered
+RESULT i6c-after-enter: composer=""
+
+[claude after enter on menu]
+|
+|
+|
+|
+|
+|
+|✻ Unable to connect to API (ConnectionRefused) · Retrying in 2s · attempt 3/10
+|                                                                                             ● high · /effort
+|──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+|❯
+|──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+|  ~/code/codev_root/codev/.builders/spike-1265
+|  high:opus-5[1m]
+|  ⏸ manual mode on · ← for agents
+ASSERT i6c-enter-consumed-by-menu: PASS selection /afx submitted
+ALL ASSERTIONS PASSED

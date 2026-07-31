@@ -1,0 +1,36 @@
+
+[codex slash menu]
+|
+|• You have 1 usage limit reset available. Run /usage to use one.
+|
+|
+|› /
+|
+|  /model         choose what model and reasoning effort to use
+|  /fast          1.5x speed, increased usage
+|  /ide           include current selection, open files, and other context from your IDE
+|  /permissions   choose what Codex is allowed to do
+|  /keymap        remap TUI shortcuts
+|  /vim           toggle Vim mode for the composer
+|  /experimental  toggle experimental features
+|  /approve       approve one retry of a recent auto-review denial
+ASSERT i6c-menu-open: PASS slash menu rendered
+RESULT i6c-after-enter: composer="1. gpt-5.6-sol (current)  Latest frontier agentic coding model.\n  2. gpt-5.6-terra          Balanced agentic coding model for everyday work.\n  3. gpt-5.6-luna           Fast and affordable agentic coding model.\n  4. gpt-5.5                Frontier model for complex coding, research, and real-world work.\n  5. gpt-5.4                Strong model for everyday coding.\n  6. gpt-5.4-mini           Small, fast, and cost-efficient model for simpler coding tasks.\n\n  Press enter to confirm or esc to go back"
+
+[codex after enter on menu]
+|• You have 1 usage limit reset available. Run /usage to use one.
+|
+|
+|  Select Model and Effort
+|  Access legacy models by running codex -m <model_name> or in your config.toml
+|
+|› 1. gpt-5.6-sol (current)  Latest frontier agentic coding model.
+|  2. gpt-5.6-terra          Balanced agentic coding model for everyday work.
+|  3. gpt-5.6-luna           Fast and affordable agentic coding model.
+|  4. gpt-5.5                Frontier model for complex coding, research, and real-world work.
+|  5. gpt-5.4                Strong model for everyday coding.
+|  6. gpt-5.4-mini           Small, fast, and cost-efficient model for simpler coding tasks.
+|
+|  Press enter to confirm or esc to go back
+ASSERT i6c-enter-opened-modal: PASS model picker modal open
+ALL ASSERTIONS PASSED

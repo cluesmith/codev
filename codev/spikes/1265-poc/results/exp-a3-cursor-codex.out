@@ -1,0 +1,4 @@
+ASSERT a3a-midline-ctrl-u: PASS expected="xyz" actual="xyz"
+ASSERT a3b-midline-backspace: PASS expected="uvwyz" actual="uvwyz"
+ASSERT a3c-ctrlE-ctrlU-clears: PASS composer="Use /skills to list available skills"
+ALL ASSERTIONS PASSED

@@ -102,3 +102,29 @@ Doc updated: new "Integration constraints (round 3)" section, K upgraded to requ
 DraftTracker respecified as a PtySession.write() tap, effort bumped to upper-Medium with
 explicit phasing. All five concerns were correct calls — none invalidated feasibility, but
 together they materially harden the design.
+
+## 2026-07-31 — Review round 4: cursor semantics, K substrate, POC rigor
+
+Three more reviewer concerns; all three were right.
+
+1. Cursor-aware editing (exp-a3, asserted, both TUIs): Ctrl+U is KILL-TO-START, not
+   kill-whole-line — uvwxyz+Left×3+^U leaves "xyz"; Backspace deletes at cursor. Round-1's
+   "kills whole line" was an end-cursor artifact. A naive clear-buffer-on-^U tracker would
+   declare an occupied line empty → corruption. Design revised: DraftTracker = raw replay log
+   (ground truth for H — replay is immune to modeling errors) + cursor-aware modeled line
+   state (powers occupancy); unmodelable bytes → dirty → K. The per-line clear maneuver is
+   immune by construction (its ^E prefix; asserted from mid-line cursor).
+2. K substrate (code audit): broadcastMessage is live-only fire-and-forget; the ONLY
+   /ws/messages consumers in the repo are e2e tests; no messages table in global.db; and
+   SendBuffer.stop() force-flushes on graceful shutdown (force-injects buffered messages
+   regardless of typing — a today-gap). K rescoped as a real mailbox: persisted before send
+   response, visible surface (dashboard/VSCode/afx inbox), held-vs-delivered send semantics,
+   persist-on-shutdown. Effort now Medium-to-Large phased (~1050–1550 LOC across 3 shippable
+   Mediums).
+3. POC methodology: reviewer's rerun flake (i6a-gated-clean=false) root-caused — cross-demo
+   contamination (i6b's retry queue + claude's ESC-restores-queued-messages) polluting a
+   shared baseline, not a wrong gated result. Fixed structurally: a3/i5/i6 are now
+   regression-grade — self-asserting (exit 1 on failure), fresh session per demo, per-demo
+   baselines, content-based empty checks (never placeholder chrome; also de-flaked 'def' ⊂
+   "default"). Full suite rerun: 6/6 runs exit 0, zero FAILs; stdout committed under
+   1265-poc/results/ as retained evidence. exp0–i4 explicitly tiered as exploratory.
