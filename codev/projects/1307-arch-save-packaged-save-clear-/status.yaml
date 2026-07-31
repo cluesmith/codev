@@ -1,16 +1,25 @@
 id: '1307'
 title: arch-save-packaged-save-clear-
 protocol: aspir
-phase: plan
-plan_phases: []
-current_plan_phase: null
+phase: implement
+plan_phases:
+  - id: phase_1
+    title: afx send --delay (Tower-side deferred delivery)
+    status: in_progress
+  - id: phase_2
+    title: /arch-save skill in four trees + state-block template
+    status: pending
+  - id: phase_3
+    title: Live end-to-end run and documentation
+    status: pending
+current_plan_phase: phase_1
 gates:
   pr:
     status: pending
   verify-approval:
     status: pending
 iteration: 1
-build_complete: true
+build_complete: false
 history: []
 started_at: '2026-07-31T21:42:49.601Z'
-updated_at: '2026-07-31T22:45:10.440Z'
+updated_at: '2026-07-31T22:53:38.619Z'
