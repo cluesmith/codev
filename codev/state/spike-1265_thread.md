@@ -298,3 +298,56 @@ recommendation exercised for real; no divergence. Claude 2.1.212 unchanged.
 
 Runs: 8/8 exit 0 (g2-claude, g2-codex, agy, a3×2, i5×2, i6-codex). Evidence
 committed under 1265-poc/results/ incl. new exp-g2-*.out and exp0c-agy-sanity.out.
+
+## 2026-07-31 — Review round 9: agy re-test, G-lite gaps closed, identity substrate,
+## divert-window bounds, wrapper silent-loss, initial state, inventory sweep
+
+Ten concerns; all valid, several overturning round 7–8 claims. New experiments exp-i7
+(bulk replay) + exp-i8 (wrapper loss); g2 codex arm completed (7→25 asserts); a3
+anchored; g2h made two-sided; exp0c re-run post-trust. Full suite re-captured green
+(claude 2.1.212 / codex 0.146.0 / agy 1.1.8, @xterm/headless pinned 6.0.0 and stamped
+into every .out).
+
+1. agy re-tested post-trust: normal `>` composer, typed text renders (normal-intensity
+   — NOT dim like claude/codex placeholders), ^E^U clears. `>` matches neither G-lite
+   marker profile → never clean → auto-held. Trust is per-folder → fresh worktrees
+   re-trap; born-dirty rule covers spawn-time.
+2. G-lite gaps: g2h claim softened to "no rendered change" (cannot disprove invisible
+   arming), assertion now two-sided (version tripwire). Nudge evidence extended to
+   empty-composer convergence + codex (g2e2/g2k/g2l). Codex churn/byte-cut added (g2m).
+3. Identity substrate CONFIRMED broken for delivery: detectHarnessFromCommand misses
+   agy, resolveHarness falls back CLAUDE_HARNESS, config.ts:256-278 is JSDoc. Delivery
+   matrix requires its own strict allowlist (unknown first-class → defer+K); resolver
+   fallback would aim claude's atomic form at agy.
+4. Divert window: i7 measured bulk clear/replay ~100ms with OPPOSITE per-app failure
+   modes at size (claude: 41-round bulk clear stalls, paced fallback; codex: 1.8KB bulk
+   replay paste-collapses, line-chunked fallback). Window now f(app, lines), ~1–3s
+   typical — fail-open timeout specifiable. Doc's "few hundred ms"/"~2s" both corrected.
+   Bonus finding: tall drafts scroll — the composer render is a window. Also
+   root-caused+fixed an i7 harness settle-staleness race mid-round (condition waits).
+5. Coverage overclaims fixed: doc/method now state i6 codex = 2/11 asserts; g2 case
+   matrix completed on both TUIs; picker mechanism corrected (user-text via `›` rows,
+   not no-marker). Cost measured: 2ms/13KB, 22ms/1MB, 67ms/4MB.
+6. a3c anchored (pre-clear extraction must see draft — old !includes passed on
+   placeholder); g2h unfailable branch fixed. Both re-run green.
+7. Wrapper silent-loss CONFIRMED + measured (i8, production LAUNCH_LOOP_TAIL extracted
+   at runtime): read -r consumes text into $REPLY and the \r RELAUNCHES the agent;
+   successor stdin drain finds nothing; crash-window bytes land in booting claude's
+   composer unsubmitted. → tracked-clean G-lite exemption withdrawn: rendered-empty
+   check is now the UNIVERSAL pre-delivery gate (affordable per cost numbers).
+   New constraint 10; ^C-on-empty-model now dirty-marking (deliberate-quit gesture).
+8. Liveness: classifier profiles = per-app data keyed by the identity table; drift →
+   permanently-dirty → held-forever is fail-safe but a liveness regression → phase-1
+   classifier-health telemetry required. Nudge = on-demand with min-interval, never
+   periodic.
+9. Initial state: EVERY session born dirty (fresh spawns render Enter-traps: agy trust,
+   codex onboarding); converges via first post-boot quiescence poll for known apps.
+10. Inventory: /api/terminals/:id/write (:902) + afx reset added to constraint 5;
+    preemption lane serialized + coalescing (#1264 double-^C); H population narrowed
+    (linear multi-line, tracked-clean only) → phase-2 build/skip gate fed by why-held
+    metadata; DraftTracker line model flagged as the only unprototyped component;
+    @xterm/headless pinned.
+
+Effort now ~1625–1785 code + ~430–530 tests ⇒ ~2050–2320 by component sum (identity
+table +35, G-lite profiles/telemetry +50–60, lane serialization +20; H ~150 phase-2
+gated). Phasing: phase 1 gains universal gate + identity table + born-dirty + telemetry.
