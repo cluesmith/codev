@@ -1,0 +1,5 @@
+HARNESS @xterm/headless=6.0.0 node=v22.23.1
+MEASURED i14f-codex-ctrl-s: composer before="i14f codex stash probe" after="i14f codex stash probe" (1 chunks) — NO visible stash action on codex defaults
+MEASURED i14f-codex-ctrl-s-again: composer="i14f codex stash probe"
+
+ALL ASSERTIONS PASSED

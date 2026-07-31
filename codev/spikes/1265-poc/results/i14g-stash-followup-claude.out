@@ -1,0 +1,11 @@
+HARNESS @xterm/headless=6.0.0 node=v22.23.1
+ASSERT g1-stash-clears: PASS rendered-empty while parked
+ASSERT g1-restore-works-no-submit: PASS restored="g1 control draft" — slot survives idle parking (and the dim-aware extractor reads it clean)
+ASSERT g2-stash-clears: PASS rendered-empty post-stash
+ASSERT g2-preenter-passes: PASS equality in 44 ms
+ASSERT g2-submit-cleared-slot: PASS post-submit restore yields "" — the SUBMIT cleared the stash slot: ^S is not a cross-submit restore primitive (i14a/b root cause, now isolated)
+MEASURED g3-slot-after-type-and-ctrl-c-clear: input-cleared=true; restore yields "g3 parked draft" — slot SURVIVES non-submit composer activity (typing + ^C clear)
+ASSERT g4-tall-draft-built: PASS composer=user-text (187 cells rendered) — a 40-line draft, past the ~13-line bulk-clear stall threshold
+ASSERT g4-one-byte-clear-at-scale: PASS rendered-empty 101 ms after ONE ^S on a 40-line draft — vs the paced per-line clear's ~6000 ms and the >13-line bulk-clear stall (i7/i9c)
+
+ALL ASSERTIONS PASSED

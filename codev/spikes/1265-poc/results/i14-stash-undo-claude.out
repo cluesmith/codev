@@ -1,0 +1,22 @@
+HARNESS @xterm/headless=6.0.0 node=v22.23.1
+ASSERT i14a-draft-on-line: PASS composer="i14draft alpha status" — the busy-line starting state
+ASSERT i14a-output-alive-after-ctrl-s: PASS 1 chunks after ^S — no IXON/XOFF freeze on the PTY path
+ASSERT i14a-stash-clears-rendered: PASS post-^S G-lite=empty — the stash empties the rendered composer (the gate would now pass)
+ASSERT i14a-preenter-passes: PASS equality in 43 ms on the stash-emptied composer
+ASSERT i14a-delivered-verified: PASS canon exact 0→1 — the sandwiched delivery submitted clean
+ASSERT i14a-draft-restored-exact: FAIL composer="" — the stashed draft came back byte-identical in the render
+ASSERT i14a-draft-not-submitted: PASS draft occurrences in transcript=0 — restore did not submit anything
+ASSERT i14b-draft-built: PASS draft="check the tower logs\n  then restart yet\n  ping me after"
+ASSERT i14b-stash-clears-rendered: PASS post-^S G-lite=empty — multi-line draft stashed whole
+ASSERT i14b-preenter-passes: PASS equality in 42 ms
+ASSERT i14b-delivered-verified: PASS canon exact 0→1
+ASSERT i14b-draft-restored-exact: FAIL restored="" vs ref="check the tower logs\n  then restart yet\n  ping me after" — render-equality across the sandwich (edited multi-line draft)
+MEASURED i14c-first-restore: "slotprobe BBB"
+MEASURED i14c-second-restore: "slotprobe BBB"
+MEASURED i14c-slot-semantics: SINGLE-SLOT OVERWRITE — stashing while the slot is occupied DESTROYS the earlier stash (AAA unrecoverable). S-form precondition: no user ^S tracked this session.
+ASSERT i14d-starts-clean: PASS boot composer=empty
+ASSERT i14d-write-rendered: PASS composer="[architect] i14d undo-rollback probe"
+ASSERT i14d-undo-rolls-back: PASS post-^_ composer=empty, transcript occurrences=0 — one undo reverts one injected write, nothing submitted
+MEASURED i14d-fused-undo: fused="[architect] i14d undo-rollback probeX" → ^_ → "Try \"fix lint errors\"" → ^_ → "Try \"fix lint errors\"" — undo granularity under interleave (abort path must verify the render, never assume)
+ASSERT i14d-fused-nothing-submitted: PASS transcript occurrences=0 — no submit happened during the fused-undo probe
+FAILURES: i14a-draft-restored-exact, i14b-draft-restored-exact
