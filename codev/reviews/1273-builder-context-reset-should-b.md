@@ -151,6 +151,56 @@ files were genuine so the history reconstructed cleanly, but porch does not watc
   unrelated to this work. The sections added here are byte-identical across both trees; the existing drift
   is out of scope and left for a reconciliation pass.
 
+## Verify phase — the e2e found it non-functional (2026-07-31)
+
+The live run vindicated the caveat above: **the headline path failed on every lane in production**, and
+every failure was in *resolution*, upstream of the destructive path. The R1–R4 invariants held —
+`--dry-run` wrote nothing, every failure was a refusal rather than a corruption, and no builder ever
+received a wrong re-orientation.
+
+**F1 — wrong-winner project selection (blocker, all lanes).** `readPorchContext` returned the *first*
+directory under `codev/projects` with a parsable `status.yaml`. Correct for a repo with one project dir;
+wrong here, because porch history is committed to `main` and every worktree inherits every project ever
+run — 203 of them. The alphabetically-first is a `spider`-era project, so every builder resolved protocol
+`spider` and died on `Protocol "spider" has no builder-prompt.md`.
+
+The comment I had written at that function — *"when a worktree somehow holds more than one project
+directory"* — named the assumption that broke. It was not "somehow": it is the normal state of every
+worktree in this repo. **Writing down an assumption is not the same as checking it.**
+
+**F1b — the fix's own regressions, both found by review.** Narrowing the match orphaned the
+`--task --protocol` lane (porch stores the raw `builder-task-<id>` there), which produced a *silently
+degraded* frame — a porch-driven builder told it had no porch. That is worse than the loud bug it
+replaced. Then the first fix's bare-number matching still let issue 799's PIR project claim
+`builder-bugfix-799`. **Narrowing a match is as dangerous as widening it**, and the wrong-winner class
+took three passes to actually close: alphabetical → numeric collision → protocol corroboration.
+
+**F2 — the task lane could never auto-detect its mode.** Mode detection requires a `## Mode:` line that
+`--task` spawns never render. Now defaults to soft with `modeSource: 'task-default'`, scoped to the
+no-porch case, because *strict* means porch orchestrates and a builder with no porch project cannot be
+strict.
+
+**F3 — reported, but not a defect here.** The printed path came verbatim from the registry and was
+correct; the id/directory case divergence originates at spawn. Matching is now case-insensitive anyway so
+a case-sensitive filesystem behaves like macOS.
+
+### A deliberate reversal
+
+`status.yaml` is no longer allowed to override the builder id on the **protocol** field. It remains
+authoritative for a builder's own project, but it can no longer *decide which project is its own* — the
+two principles cannot both hold, because the signal is identical in each case. A hypothetical
+protocol disagreement within one project is the cost; adopting a stranger's project was actually
+happening.
+
+### The lesson this phase adds
+
+**"Tests pass" and "CI is green" could not have found any of this.** Every F1 variant was a property of
+*this repo's data shape* — 203 inherited project directories, a number reused across protocols — that no
+unit fixture encoded because I wrote the fixtures from my model of the world rather than from the world.
+The e2e was the first thing to run reset against reality, and it failed instantly on every lane. That is
+the strongest possible restatement of the hot-tier lesson: *"it compiled" / "tests pass" is not "it
+works" — verify the real user path end-to-end.*
+
 ## Flaky Tests
 
 None encountered. No tests were skipped by this work.

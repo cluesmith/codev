@@ -60,7 +60,7 @@ export interface ResolvedBuilderContext {
   /** Where the protocol came from — surfaced in the report so it is auditable. */
   protocolSource: 'status.yaml' | 'builder-id';
   mode: 'strict' | 'soft';
-  modeSource: 'flag' | 'builder-prompt';
+  modeSource: 'flag' | 'builder-prompt' | 'task-default';
   harnessName: string;
   harness: HarnessProvider;
   /** Null for a non-porch lane; that is a branch, not a failure. */
@@ -112,18 +112,135 @@ export class ContextResolutionError extends Error {
 // ============================================================================
 
 /**
- * Locate and parse the worktree's porch status file.
+ * Locate and parse THIS BUILDER's porch status file.
  *
- * Returns null when there is no porch project — a task or shell builder is a
- * legitimate reset target, it simply gets no porch re-entry block.
+ * Returns null when this builder has no porch project — a task or shell builder
+ * is a legitimate reset target, it simply gets no porch re-entry block.
+ *
+ * ## Why this takes an identity instead of picking the first parsable file
+ *
+ * The first implementation returned the first directory under `codev/projects`
+ * with a parsable `status.yaml`. That is correct only for a repo holding exactly
+ * one project directory. **This repo commits porch history to `main`**, so every
+ * worktree inherits every project ever run — 203 of them at the time of writing.
+ * The alphabetically-first is `0087-porch-timeout-termination-retries`, whose
+ * protocol is `spider`, so `afx reset` resolved protocol "spider" for *every*
+ * builder and died on `Protocol "spider" has no builder-prompt.md`. It failed
+ * loudly, which is why nothing was corrupted — but it failed for every lane.
+ *
+ * The fix is to select by identity, never by position: a directory qualifies
+ * only when it belongs to the builder being reset. No match returns null, which
+ * is the honest answer for a genuinely non-porch builder and is also safe for a
+ * porch one — a missing porch block is visible in the re-orientation, whereas
+ * *another project's* protocol is a confident lie.
+ *
+ * (This is the #1235 wrong-winner family: pick-the-first over a set that is
+ * assumed to be a singleton and is not.)
  *
  * Parsed with targeted line matching rather than a YAML dependency: this module
  * needs four scalar fields, and the file is machine-written by porch.
  */
-export function readPorchContext(fs: ContextFsPort, worktree: string): PorchContext | null {
+export interface PorchProjectIdentity {
+  /** Registry builder id, e.g. `aspir-1273`, `builder-task-re_v`. */
+  builderId: string;
+  /** Issue number when the lane has one. */
+  issueNumber?: string;
+}
+
+/**
+ * Project ids this builder could legitimately own, most specific first.
+ *
+ * Three forms, because porch names projects differently per lane:
+ *   - the issue number, for issue-driven lanes;
+ *   - the builder id itself — `spawn.ts` passes `builderId` as the porch project
+ *     id on the `--task` path;
+ *   - the builder id with its protocol prefix stripped (`aspir-1273` → `1273`),
+ *     which is how spec-driven lanes are named.
+ */
+export function candidateProjectIds(identity: PorchProjectIdentity): string[] {
+  const out: string[] = [];
+  if (identity.issueNumber) out.push(identity.issueNumber);
+
+  // The raw registry id, INCLUDING any `builder-` prefix. `spawn --task
+  // --protocol X` passes `builderId` straight to `porch init`
+  // (`spawn.ts:548`), and `initPorchInWorktree` keeps dashes when sanitising
+  // (`spawn-worktree.ts:472`), so that lane's porch project id really is
+  // `builder-task-<id>`. Omitting this form orphaned it: porch resolved to
+  // null, and the builder was re-oriented as protocol TASK with no porch
+  // re-entry — a silently degraded frame rather than a loud failure.
+  out.push(identity.builderId);
+
+  // And without the prefix, which is how spec/bugfix lanes are named.
+  const bare = identity.builderId.replace(/^builder-/, '');
+  if (bare !== identity.builderId) out.push(bare);
+
+  const dash = bare.indexOf('-');
+  if (dash > 0) out.push(bare.slice(dash + 1));
+
+  return out.filter(v => v !== '');
+}
+
+/**
+ * Compare ids ignoring case and leading zeros.
+ *
+ * Case: the registry lowercases builder ids while worktree and directory names
+ * preserve the original (`builder-task-re_v` vs `.builders/task-RE_V`). macOS
+ * hides that; a case-sensitive filesystem would not.
+ * Leading zeros: project dirs use `0087-…` while porch ids and CLI arguments use
+ * `87` (`afx cleanup -p 466` vs `0466` is the same long-standing split).
+ */
+function normalizeId(value: string): string {
+  return value.trim().toLowerCase().replace(/^0+(?=\d)/, '');
+}
+
+/**
+ * How strongly a project directory claims to belong to this builder.
+ *
+ * `none` — not this builder's.
+ * `weak` — matched on the bare project NUMBER (or a directory prefix). Numbers
+ *          are reused across protocols: issue 799 has both a PIR project
+ *          (`799-vscode-builder-changed-file-ro`) and a bugfix, so a bare-number
+ *          match alone would hand `builder-bugfix-799` the PIR project's
+ *          protocol and porch id. Requires protocol corroboration.
+ * `strong` — matched on a globally unique, non-numeric project id, i.e. the raw
+ *          registry builder id. `spawn --task --protocol X` stores exactly that
+ *          (`builder-task-<id>`), so it identifies one builder and needs no
+ *          corroboration — which matters because that lane's PROTOCOL
+ *          legitimately differs from its id prefix (`task` vs `air`).
+ */
+type ProjectClaim = 'none' | 'weak' | 'strong';
+
+function claimStrength(
+  dir: string,
+  statusId: string | null,
+  identity: PorchProjectIdentity,
+): ProjectClaim {
+  const rawId = normalizeId(identity.builderId);
+  if (statusId && normalizeId(statusId) === rawId && !/^\d+$/.test(rawId)) return 'strong';
+
+  const wanted = candidateProjectIds(identity).map(normalizeId);
+  if (statusId && wanted.includes(normalizeId(statusId))) return 'weak';
+
+  const dirNorm = normalizeId(dir);
+  return wanted.some(c => dirNorm === c || dirNorm.startsWith(`${c}-`)) ? 'weak' : 'none';
+}
+
+export function readPorchContext(
+  fs: ContextFsPort,
+  worktree: string,
+  identity: PorchProjectIdentity,
+): PorchContext | null {
   const projectsDir = join(worktree, 'codev', 'projects');
   const dirs = fs.listDirs(projectsDir);
   if (!dirs || dirs.length === 0) return null;
+
+  // The protocol the builder id claims, used to corroborate weak (number-only)
+  // matches. Absent for ids that are not in canonical form, in which case a weak
+  // match cannot be corroborated and is not trusted.
+  const expectedProtocol = parseAgentName(identity.builderId)?.protocol ?? null;
+
+  const strong: PorchContext[] = [];
+  const weak: PorchContext[] = [];
 
   for (const dir of dirs) {
     const statusPath = join(projectsDir, dir, 'status.yaml');
@@ -135,8 +252,11 @@ export function readPorchContext(fs: ContextFsPort, worktree: string): PorchCont
     const id = matchScalar(content, 'id');
     if (!protocol || !phase) continue;
 
+    const claim = claimStrength(dir, id, identity);
+    if (claim === 'none') continue;
+
     const currentPlanPhase = matchScalar(content, 'current_plan_phase');
-    return {
+    const ctx: PorchContext = {
       projectId: id ?? dir.split('-')[0],
       projectName: dir,
       protocol,
@@ -144,9 +264,34 @@ export function readPorchContext(fs: ContextFsPort, worktree: string): PorchCont
       currentPlanPhase: currentPlanPhase && currentPlanPhase !== 'null' ? currentPlanPhase : null,
       statusPath,
     };
+
+    if (claim === 'strong') {
+      strong.push(ctx);
+      continue;
+    }
+
+    // A weak match must agree with the protocol the builder id declares.
+    // Without this, `builder-bugfix-799` adopts the PIR project that happens to
+    // share the number — wrong protocol, wrong porch id, and silently so.
+    if (expectedProtocol && protocol.toLowerCase() !== expectedProtocol.toLowerCase()) continue;
+    weak.push(ctx);
   }
 
-  return null;
+  const matches = strong.length > 0 ? strong : weak;
+  if (matches.length === 0) return null;
+
+  if (matches.length > 1) {
+    // Never pick one arbitrarily — that is the bug this whole function exists to
+    // fix, and picking the "least wrong" of several is the same mistake with
+    // better manners.
+    throw new ContextResolutionError(
+      `Ambiguous porch project for '${identity.builderId}': ${matches
+        .map(m => `${m.projectName} (${m.protocol})`)
+        .join(', ')} all claim it. Refusing to guess which one governs this builder.`,
+    );
+  }
+
+  return matches[0];
 }
 
 /** Read a top-level scalar from porch's status.yaml, stripping quotes. */
@@ -161,11 +306,16 @@ function matchScalar(content: string, key: string): string | null {
  * The protocol recorded in status.yaml, if there is one.
  *
  * Reads through `readPorchContext` rather than re-scanning the project dirs, so
- * the two cannot disagree about which status.yaml is authoritative when a
- * worktree somehow holds more than one project directory.
+ * the two cannot disagree about which status.yaml is authoritative. Worktrees
+ * routinely hold MANY project directories here (porch history is committed to
+ * `main`), which is exactly why both go through one identity-aware selector.
  */
-export function protocolFromStatus(fs: ContextFsPort, worktree: string): string | null {
-  return readPorchContext(fs, worktree)?.protocol ?? null;
+export function protocolFromStatus(
+  fs: ContextFsPort,
+  worktree: string,
+  identity: PorchProjectIdentity,
+): string | null {
+  return readPorchContext(fs, worktree, identity)?.protocol ?? null;
 }
 
 // ============================================================================
@@ -333,8 +483,14 @@ export function resolveBuilderContext(options: ResolveContextOptions): ResolvedB
     );
   }
 
+  // Resolved once, with identity, and reused for both the protocol chain and
+  // the result. Two independent scans could disagree about which project is
+  // this builder's — the exact ambiguity the identity match exists to remove.
+  const identity: PorchProjectIdentity = { builderId, issueNumber };
+  const porch = readPorchContext(fs, worktree, identity);
+
   // --- Protocol: status.yaml → builder id → abort -------------------------
-  let protocol = protocolFromStatus(fs, worktree);
+  let protocol = porch?.protocol ?? null;
   let protocolSource: ResolvedBuilderContext['protocolSource'] = 'status.yaml';
   if (!protocol) {
     const parsed = parseAgentName(builderId);
@@ -358,11 +514,26 @@ export function resolveBuilderContext(options: ResolveContextOptions): ResolvedB
     mode = modeFromBuilderPrompt(fs, worktree);
     modeSource = 'builder-prompt';
   }
+  if (!mode && !porch) {
+    // A `--task` spawn writes a bare prompt with no `## Mode:` heading, so this
+    // lane could never auto-detect and every `afx reset <task>` hard-errored.
+    //
+    // Defaulting to SOFT is not a guess dressed up as a fact: "strict" means
+    // *porch orchestrates this builder*, and a builder with no porch project
+    // cannot be strict. The source is recorded as `task-default` so the report
+    // says where it came from rather than implying the worktree stated it.
+    //
+    // Scoped deliberately to the no-porch case. A porch-driven builder missing
+    // its `## Mode:` line is a genuine ambiguity and still aborts below.
+    mode = 'soft';
+    modeSource = 'task-default';
+  }
   if (!mode) {
     throw new ContextResolutionError(
       `Cannot determine the mode (strict/soft) for '${builderId}': no '## Mode:' line in ` +
-        `${join(worktree, '.builder-prompt.txt')}. Mode is not persisted anywhere else — ` +
-        `pass --mode strict or --mode soft explicitly.`,
+        `${join(worktree, '.builder-prompt.txt')}, and this builder HAS a porch project ` +
+        `(${porch?.projectName}), so it is not the ad-hoc-task lane that defaults to soft. ` +
+        `Mode is not persisted anywhere else — pass --mode strict or --mode soft explicitly.`,
     );
   }
 
@@ -389,7 +560,6 @@ export function resolveBuilderContext(options: ResolveContextOptions): ResolvedB
     );
   }
 
-  const porch = readPorchContext(fs, worktree);
   const { specName, specPath, planPath } = artifactPaths(fs, worktree, porch);
 
   return {
@@ -407,8 +577,14 @@ export function resolveBuilderContext(options: ResolveContextOptions): ResolvedB
     specPath,
     planPath,
     // Issue-driven protocols name the porch project after the issue, so the
-    // project id is the correct value when the registry row has none.
-    issueNumber: issueNumber ?? porch?.projectId,
+    // project id is the correct value when the registry row has none — but ONLY
+    // when it is actually an issue number. The `--task --protocol` lane's porch
+    // id is `builder-task-<id>`, which would render `- Issue: #builder-task-abc`
+    // and an unfollowable `gh issue view builder-task-abc` in the
+    // re-orientation. A fabricated issue reference is worse than none: it sends
+    // a freshly-reset builder to look up requirements that do not exist.
+    issueNumber:
+      issueNumber ?? (porch && /^\d+$/.test(porch.projectId) ? porch.projectId : undefined),
     taskText,
   };
 }
