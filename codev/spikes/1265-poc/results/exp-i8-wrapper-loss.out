@@ -1,0 +1,30 @@
+HARNESS @xterm/headless=6.0.0 node=v22.23.1
+ASSERT i8-tail-extracted: PASS production tail has the read-gated relaunch
+
+[wrapper prompt after deliberate exit]
+|Agent exited at your request. Press Enter to relaunch, or close this terminal.
+ASSERT i8a-prompt-shown: PASS wrapper prompt rendered
+ASSERT i8a-one-boot: PASS boots=1
+
+[after message delivery onto the prompt]
+|Agent exited at your request. Press Enter to relaunch, or close this terminal.
+ASSERT i8a-message-triggered-relaunch: PASS boots=2
+ASSERT i8a-message-text-vanished: PASS token nowhere on screen — discarded into $REPLY
+ASSERT i8a-successor-agent-never-saw-it: PASS relaunched agent's stdin drain-probe found nothing
+ASSERT i8a-back-at-prompt: PASS fake agent exited again; prompt is back
+ASSERT i8b-countdown-seen: PASS wrapper auto-restart path reached
+MEASURED i8b-sent: message written during the sleep-2 restart window
+
+[claude after crash-window delivery]
+| ▐▛███▜▌   Claude Code v2.1.212
+|▝▜█████▛▘  claude-opus-5[1m] with high effort · Claude Max
+|  ▘▘ ▝▝    ~/code/codev_root/codev/.builders/spike-1265
+|                                                                                             ● high · /effort
+|──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+|❯ [architect] i8crash window probe
+|──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+|  ~/code/codev_root/codev/.builders/spike-1265
+|  high:opus-5[1m]
+|  ⏸ manual mode on
+MEASURED i8b-outcome: tokenAnywhere=true tokenInComposerLine=true — where crash-window bytes land is claude init behavior; see snapshot
+ALL ASSERTIONS PASSED (case B is measured, not asserted)

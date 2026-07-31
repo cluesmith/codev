@@ -24,6 +24,34 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
+/**
+ * Round 9 (trust dialog since cleared by the architect): report SGR attribute
+ * runs for rows matching a predicate — feeds the G-lite question "does agy
+ * render a recognizable composer marker, and is its placeholder dim like
+ * claude/codex's?" without asserting anything (exploratory tier).
+ */
+function attrRuns(d, predicate, label) {
+  const buf = d.term.buffer.active;
+  const top = buf.viewportY;
+  const lines = d.screen();
+  const cell = buf.getNullCell();
+  for (let i = 0; i < lines.length; i++) {
+    if (!predicate(lines[i], i)) continue;
+    const line = buf.getLine(top + i);
+    if (!line) continue;
+    const runs = [];
+    let cur = null;
+    for (let col = 0; col < d.cols; col++) {
+      line.getCell(col, cell);
+      const ch = cell.getChars();
+      if (!ch || ch === ' ') continue;
+      const key = `dim=${cell.isDim() ? 1 : 0} bold=${cell.isBold() ? 1 : 0}`;
+      if (cur && cur.key === key) { cur.text += ch; } else { cur = { key, text: ch }; runs.push(cur); }
+    }
+    logStep(`${label} row${i}: ${runs.map((r) => `[${JSON.stringify(r.text.slice(0, 30))} ${r.key}]`).join(' ')}`);
+  }
+}
+
 (async () => {
   // #1077 guard: refuse to spawn an unauthenticated agy (OAuth browser tab).
   try {
@@ -47,6 +75,15 @@ const path = require('node:path');
   const idle = d.screenText();
   logStep(`composer-marker candidates: ${d.screen().filter((l) => /^[❯›>▌]/.test(l)).map((l) => JSON.stringify(l.slice(0, 40))).join(' | ') || '(none)'}`);
 
+  // Round 9: G-lite relevance — does any row match the marker regex the
+  // classifier keys on for claude/codex? (If not, agy stays fail-toward-dirty
+  // by construction: no marker → never clean → defer-only + K.)
+  const gliteMarkerRows = d.screen().filter((l) => /^[❯›]/.test(l));
+  logStep(`G-lite marker regex ^[❯›] matches: ${gliteMarkerRows.length ? gliteMarkerRows.map((l) => JSON.stringify(l.slice(0, 40))).join(' | ') : '(none)'}`);
+  // (agy anchors its UI at the TOP of the screen, unlike claude/codex — dump
+  // every non-empty row's attributes; there are only ~9.)
+  attrRuns(d, (l) => l.trim().length > 0, 'idle-attrs');
+
   logStep('typing probe token (never submitted)');
   await d.type('qwvzkx probe');
   await d.settle(800, 10000);
@@ -54,6 +91,7 @@ const path = require('node:path');
   d.snapshot('agy-typed');
   const typedVisible = d.screenText().includes('qwvzkx');
   logStep(`typed text visible on screen: ${typedVisible}`);
+  attrRuns(d, (l) => l.includes('qwvzkx'), 'probe-attrs');
 
   logStep('clearing with ^E ^U (app-agnostic clear primitive)');
   d.send(KEYS.CTRL_E); await sleep(120);

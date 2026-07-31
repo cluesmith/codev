@@ -1,0 +1,19 @@
+HARNESS @xterm/headless=6.0.0 node=v22.23.1
+ASSERT i7a-anchor-draft-visible: PASS ref="zq01 kwvx mtrp jhgd nsbc lfyo wezu qapi rdgn\n  zq02 kwvx mtr"…
+ASSERT i7a-clear-empties: PASS mode=bulk tClearMs=101 composer="Implement {feature}"
+MEASURED i7a-bulk: bytes=138 clearMode=bulk tClearMs=101 tReplayMs=101 charPacedEstimateMs=1932 match=true
+ASSERT i7a-bulk-replay-byte-identical: PASS got="zq01 kwvx mtrp jhgd nsbc lfyo wezu qapi rdgn\n  zq02 kwvx mtr"
+ASSERT i7b-anchor-draft-visible: PASS ref="zq01 kwvx mtrp jhgd nsbc lfyo wezu qapi rdgn\n  zq02 kwvx mtr"…
+ASSERT i7b-clear-empties: PASS mode=bulk tClearMs=99 composer="Explain this codebase"
+MEASURED i7b-bulk: bytes=552 clearMode=bulk tClearMs=99 tReplayMs=100 charPacedEstimateMs=7728 match=true
+ASSERT i7b-bounded-replay-reconstructs: PASS bulk=true
+ASSERT i7c-anchor-draft-visible: PASS ref="zq13 kwvx mtrp jhgd nsbc lfyo wezu qapi rdgn\n  zq14 kwvx mtr"…
+ASSERT i7c-clear-empties: PASS mode=bulk tClearMs=100 composer="Explain this codebase"
+MEASURED i7c-bulk: bytes=1840 clearMode=bulk tClearMs=100 tReplayMs=-1 charPacedEstimateMs=25760 match=false
+MEASURED i7c-bulk-divergence: firstDiffAt=0 refLen=1311 gotLen=27 refCtx="zq13 kwvx mtrp jhgd nsbc lfyo wezu qapi " gotCtx="[Pasted Content 1002 chars]"
+MEASURED i7c: bulk replay diverged at ~1.8 KB — retrying with line-chunked replay on a fresh session
+ASSERT i7c2-anchor-draft-visible: PASS ref="zq13 kwvx mtrp jhgd nsbc lfyo wezu qapi rdgn\n  zq14 kwvx mtr"…
+ASSERT i7c2-clear-empties: PASS mode=bulk tClearMs=100 composer="Use /skills to list available skills"
+MEASURED i7c2-lines: bytes=1840 clearMode=bulk tClearMs=100 tReplayMs=3168 charPacedEstimateMs=25760 match=true
+ASSERT i7c-bounded-replay-reconstructs: PASS bulk=false lines=true
+ALL ASSERTIONS PASSED

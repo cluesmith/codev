@@ -43,9 +43,35 @@
  *   g2g codex: draft       → NOT-clean
  *   g2h codex: ESC on empty composer — measures whether the round-1 tip's
  *               "edit last message" arming renders a visible signature on a
- *               fresh session (recon fidelity asserted; the mode-visibility
- *               outcome is MEASURED and reported, feeding the round-8
- *               convergence-safety analysis)
+ *               fresh session (recon fidelity asserted). Round 9: the
+ *               consistency check is now TWO-SIDED (screen unchanged ⇒ clean;
+ *               screen changed ⇒ NOT clean) so a future codex that renders
+ *               any ESC signature FAILS the suite loudly — a version-bump
+ *               tripwire, not a tautology (the old `changed ? true : …` form
+ *               could never fail on the changed branch).
+ *
+ * Round-9 additions (evidence-coverage concerns 2 and 5 — the codex side of
+ * the matrix was 7 of 17 assertions and the doc's marquee "no-marker" case,
+ * codex's full-screen model picker, had never been run through the classifier):
+ *   g2e2 claude: resize-nudge on an EMPTY composer → post-nudge-only recon
+ *                classifies CLEAN — the actual production convergence shape
+ *                (a dirty-but-really-empty session must converge via nudge)
+ *   g2i codex: slash-menu with filter text ('/mod') → NOT-clean
+ *   g2j codex: full-screen model picker (the no-marker case) → NOT-clean;
+ *              the REASON is measured and reported (no-marker vs user-text —
+ *              picker rows may start with a selection '›'/'❯' glyph, which
+ *              would find a marker but then fail on normal-intensity rows)
+ *   g2k codex: resize-nudge with a draft → occupancy-neutral + post-nudge
+ *              recon matches live + NOT-clean
+ *   g2l codex: resize-nudge on EMPTY → post-nudge-only recon CLEAN
+ *   g2m codex: churned stream + arbitrary byte truncation (capRingSeed's cut)
+ *              → draft still classifies NOT-clean; stream shape measured
+ *              (codex, unlike claude, emits newline-ful output)
+ *   cost measurement (claude g2d): the reconstruction write is timed at the
+ *              measured session size AND at synthetic 1 MB / 4 MB payloads —
+ *              1 MB is RING_SEED_MAX_BYTES (tower-terminals.ts:38), the
+ *              production worst case a reconnect replay seeds; a live ring's
+ *              unbounded partial can exceed it (#1047 basin), hence 4 MB too.
  *
  * Self-asserting: exit 1 on any assertion failure.
  *
@@ -315,7 +341,49 @@ async function settled(d, quiet = 900) {
       const v3 = classify(t3);
       check('g2-claude-bytecut-draft-recon-matches-live', composerText(screenOf(t3)) === liveDraft, `recon=${JSON.stringify(composerText(screenOf(t3)).slice(0, 60))}`);
       check('g2-claude-bytecut-not-clean', v3.clean === false, `verdict=${JSON.stringify(v3)}`);
+
+      // Round 9 (cost model): time reconstruct+classify at the measured size,
+      // then at synthetic 1 MB (= RING_SEED_MAX_BYTES, the production seed
+      // cap) and 4 MB (a live unbounded partial can exceed the cap, #1047).
+      // Synthetic payload = this real claude stream tiled to size, cut at an
+      // arbitrary offset each time — same byte statistics as production.
+      for (const target of [all.length, 1024 * 1024, 4 * 1024 * 1024]) {
+        let big = all;
+        while (big.length < target) big += all;
+        big = big.slice(big.length - target + 61); // odd cut, likely mid-sequence
+        const t0 = Date.now();
+        const { term: tb } = await reconstruct([big], 1000);
+        const tWrite = Date.now() - t0;
+        const vb = classify(tb);
+        const tTotal = Date.now() - t0;
+        note('glite-cost', `bytes=${big.length} writeMs=${tWrite} totalMs=${tTotal} verdict=${vb.clean}/${vb.reason}`);
+        check(`g2-claude-cost-${Math.round(big.length / 1024)}k-still-classifies`, vb.clean === false && vb.reason === 'user-text', `verdict=${JSON.stringify(vb)}`);
+      }
       d.snapshot('g2-churn');
+      d.kill();
+    }
+
+    // ---- g2e2: resize-nudge on an EMPTY composer — the production
+    // convergence shape (round 9). g2e covered only the draft case; the case
+    // that actually matters for dirty→clean convergence is an EMPTY composer
+    // whose session is marked dirty: the nudge's fresh frame alone must
+    // classify CLEAN.
+    {
+      const d = await freshSession('expG2e2-claude');
+      const liveBefore = await settled(d);
+      const markStart = d.rawLog.length;
+      d.proc.resize(COLS - 1, ROWS); await d.settle(700, 10000);
+      d.proc.resize(COLS, ROWS); await d.settle(900, 12000);
+      const liveAfter = composerText(d.screen());
+      const postNudge = d.rawLog.slice(markStart);
+      const { term } = await reconstruct(postNudge);
+      const recon = composerText(screenOf(term));
+      const verdict = classify(term);
+      note('claude-empty-nudge-bytes', `postNudgeChunks=${postNudge.length}`);
+      check('g2-claude-empty-nudge-occupancy-neutral', liveAfter === liveBefore, `before=${JSON.stringify(liveBefore)} after=${JSON.stringify(liveAfter)}`);
+      check('g2-claude-empty-nudge-recon-matches-live', recon === liveAfter, `recon=${JSON.stringify(recon)}`);
+      check('g2-claude-empty-nudge-clean', verdict.clean === true, `verdict=${JSON.stringify(verdict)}`);
+      d.snapshot('g2-empty-nudge');
       d.kill();
     }
 
@@ -372,11 +440,136 @@ async function settled(d, quiet = 900) {
         }
       }
       check('g2-codex-esc-recon-matches-live', recon === composerText(d.screen()), `recon=${JSON.stringify(recon)}`);
-      // Consistency: if the armed mode renders a signature, the classifier
-      // must NOT report clean on it unless the signature is dim chrome only.
-      // Either measured branch is a finding; assert internal consistency.
-      check('g2-codex-esc-consistency', changed ? true : verdict.clean === true, `changed=${changed} verdict=${JSON.stringify(verdict)}`);
+      // Round 9: TWO-SIDED consistency (the old `changed ? true : …` was
+      // structurally unfailable on the changed branch). Reference behavior on
+      // codex 0.146: ESC on an empty fresh composer changes nothing on screen
+      // and the classifier stays clean. If a future codex renders ANY ESC
+      // signature — even dim-only — this fails and forces re-analysis of the
+      // convergence design; that is exactly what a version-bump smoke test is
+      // for. NOTE (honesty): an unchanged screen proves "no rendered
+      // signature", NOT "no invisible mode armed" — that residual is
+      // input-side unobservable and stays flagged in the findings doc.
+      check('g2-codex-esc-consistency', changed ? verdict.clean === false : verdict.clean === true, `changed=${changed} verdict=${JSON.stringify(verdict)}`);
       d.snapshot('g2-esc');
+      d.kill();
+    }
+
+    // ---- g2i: slash-menu with filter text (round 9) ---------------------
+    {
+      const d = await freshSession('expG2i-codex');
+      await settled(d);
+      await d.type('/mod');
+      await settled(d);
+      const { term } = await reconstruct(d.rawLog);
+      const verdict = classify(term);
+      const reconScreen = screenOf(term).join('\n');
+      check('g2-codex-menu-not-clean', verdict.clean === false, `verdict=${JSON.stringify(verdict)}`);
+      check('g2-codex-menu-visible-in-recon', reconScreen.includes('/mod'), 'menu filter text present in reconstruction');
+      d.snapshot('g2-codex-menu');
+      d.kill();
+    }
+
+    // ---- g2j: full-screen model picker — the marquee marker-less case ----
+    // (round 9: the doc cited this screen as G-lite's "no composer marker →
+    // not clean" example, but it had never been run through the classifier.)
+    {
+      const d = await freshSession('expG2j-codex');
+      await settled(d);
+      await d.type('/');
+      await settled(d);
+      d.send('\r'); // i6c: Enter on the open "/" menu opens the model picker
+      await d.settle(900, 12000);
+      const pickerLive = d.screenText().includes('Select Model');
+      const { term } = await reconstruct(d.rawLog);
+      const reconScreen = screenOf(term).join('\n');
+      const verdict = classify(term);
+      note('codex-picker-verdict', `reason=${verdict.reason} userCells=${verdict.userCells} samples=${JSON.stringify(verdict.samples ?? '')}`);
+      check('g2-codex-picker-open-live', pickerLive, 'model picker rendered on live screen');
+      check('g2-codex-picker-visible-in-recon', reconScreen.includes('Select Model'), 'picker present in reconstruction');
+      check('g2-codex-picker-not-clean', verdict.clean === false, `verdict=${JSON.stringify(verdict)}`);
+      d.snapshot('g2-codex-picker');
+      // Leave the picker via ESC before killing (hygiene only; session dies anyway).
+      d.send(KEYS.ESC); await sleep(300);
+      d.kill();
+    }
+
+    // ---- g2k: resize-nudge with a draft (codex parity with g2e) ----------
+    {
+      const d = await freshSession('expG2k-codex');
+      await settled(d);
+      await d.type('mfhkzt nudge draft');
+      const liveBefore = await settled(d);
+      const markStart = d.rawLog.length;
+      d.proc.resize(COLS - 1, ROWS); await d.settle(700, 10000);
+      d.proc.resize(COLS, ROWS); await d.settle(900, 12000);
+      const liveAfter = composerText(d.screen());
+      const postNudge = d.rawLog.slice(markStart);
+      const { term } = await reconstruct(postNudge);
+      const recon = composerText(screenOf(term));
+      const verdict = classify(term);
+      note('codex-nudge-bytes', `postNudgeChunks=${postNudge.length}`);
+      check('g2-codex-nudge-occupancy-neutral', liveAfter === liveBefore, `before=${JSON.stringify(liveBefore)} after=${JSON.stringify(liveAfter)}`);
+      check('g2-codex-nudge-recon-matches-live', recon === liveAfter, `recon=${JSON.stringify(recon)}`);
+      check('g2-codex-nudge-not-clean', verdict.clean === false, `verdict=${JSON.stringify(verdict)}`);
+      d.snapshot('g2-codex-nudge');
+      d.kill();
+    }
+
+    // ---- g2l: resize-nudge on EMPTY (codex convergence shape) ------------
+    {
+      const d = await freshSession('expG2l-codex');
+      const liveBefore = await settled(d);
+      const markStart = d.rawLog.length;
+      d.proc.resize(COLS - 1, ROWS); await d.settle(700, 10000);
+      d.proc.resize(COLS, ROWS); await d.settle(900, 12000);
+      const liveAfter = composerText(d.screen());
+      const postNudge = d.rawLog.slice(markStart);
+      const { term } = await reconstruct(postNudge);
+      const recon = composerText(screenOf(term));
+      const verdict = classify(term);
+      note('codex-empty-nudge-bytes', `postNudgeChunks=${postNudge.length}`);
+      check('g2-codex-empty-nudge-occupancy-neutral', liveAfter === liveBefore, `before=${JSON.stringify(liveBefore)} after=${JSON.stringify(liveAfter)}`);
+      check('g2-codex-empty-nudge-recon-matches-live', recon === liveAfter, `recon=${JSON.stringify(recon)}`);
+      check('g2-codex-empty-nudge-clean', verdict.clean === true, `verdict=${JSON.stringify(verdict)}`);
+      d.snapshot('g2-codex-empty-nudge');
+      d.kill();
+    }
+
+    // ---- g2m: churned stream + arbitrary byte truncation (codex) ---------
+    // claude's g2d measured a newline-FREE stream (everything in the ring's
+    // unbounded partial); codex is the newline-ful counterpart — measure the
+    // shape and verify the byte-cut reconstruction still classifies.
+    {
+      const d = await freshSession('expG2m-codex');
+      await settled(d);
+      for (let round = 0; round < 6; round++) {
+        await d.type(`churn${round} aaaa bbbb cccc dddd`, 8);
+        d.send(KEYS.ALT_ENTER); await sleep(60);
+        await d.type('second line of churn', 8);
+        for (let i = 0; i < 3; i++) {
+          d.send(KEYS.CTRL_E); await sleep(35);
+          d.send(KEYS.CTRL_U); await sleep(35);
+          d.send(KEYS.BACKSPACE); await sleep(35);
+        }
+        await sleep(120);
+      }
+      const liveEmpty = await settled(d);
+      const { term: t1, ring: r1 } = await reconstruct(d.rawLog, 60);
+      note('codex-stream-shape', `ringLines=${r1.size} seq=${r1.currentSeq} partialBytes=${r1.partialBytes}`);
+      const recon1 = composerText(screenOf(t1));
+      const v1 = classify(t1);
+      check('g2-codex-churned-empty-recon-matches-live', recon1 === liveEmpty, `recon=${JSON.stringify(recon1.slice(0, 60))} live=${JSON.stringify(liveEmpty.slice(0, 60))}`);
+      check('g2-codex-churned-empty-clean', v1.clean === true, `verdict=${JSON.stringify(v1)}`);
+
+      await d.type('zvqnrw draft after churn');
+      const liveDraft = await settled(d);
+      const all = d.rawLog.join('');
+      const cut = all.slice(Math.max(0, all.length - 40000) + 137);
+      const { term: t3 } = await reconstruct([cut], 1000);
+      const v3 = classify(t3);
+      check('g2-codex-bytecut-draft-recon-matches-live', composerText(screenOf(t3)) === liveDraft, `recon=${JSON.stringify(composerText(screenOf(t3)).slice(0, 60))}`);
+      check('g2-codex-bytecut-not-clean', v3.clean === false, `verdict=${JSON.stringify(v3)}`);
+      d.snapshot('g2-codex-churn');
       d.kill();
     }
   }

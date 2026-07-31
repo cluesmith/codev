@@ -1,3 +1,4 @@
+HARNESS @xterm/headless=6.0.0 node=v22.23.1
 RESULT i6b-wrong-order-composer: composer=""
 ASSERT i6b-blob-submitted: PASS transcript-has-blob=true
 ASSERT i6b-wrong-composer-empty: PASS composer=""
@@ -39,8 +40,8 @@ RESULT i6c-after-enter: composer=""
 |
 |
 |
-|✻ Unable to connect to API (ConnectionRefused) · Retrying in 6s · attempt 5/10
-|
+|✻ Unable to connect to API (ConnectionRefused) · Retrying in 1s · attempt 2/10
+|                                                                                             ● high · /effort
 |──────────────────────────────────────────────────────────────────────────────────────────────────────────────
 |❯
 |──────────────────────────────────────────────────────────────────────────────────────────────────────────────

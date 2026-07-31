@@ -93,6 +93,15 @@ async function freshSession(label) {
   {
     const d = await freshSession(`expA3c-${which}`);
     await d.type('uvwxyz');
+    // Round-9 fix: ANCHOR the absence check. The old form asserted only
+    // !includes after the clear — fail-open if the composer extraction ever
+    // returns the wrong region (e.g. rotating placeholder chrome), the check
+    // passes vacuously. Assert the draft is SEEN by the same extraction
+    // BEFORE the clear, so the post-clear absence is meaningful.
+    const before = await snap(d, 'a3c-before');
+    const anchored = before === 'uvwxyz';
+    console.log(`ASSERT a3c-anchor-draft-visible: ${anchored ? 'PASS' : 'FAIL'} composer=${JSON.stringify(before)}`);
+    if (!anchored) failures.push('a3c-anchor');
     for (let i = 0; i < 3; i++) { d.send(KEYS.LEFT); await sleep(70); }
     d.send(KEYS.CTRL_E); await sleep(80);
     d.send(KEYS.CTRL_U);

@@ -1,8 +1,9 @@
-(node:246176) ExperimentalWarning: Transform Types is an experimental feature and might change at any time
+HARNESS @xterm/headless=6.0.0 node=v22.23.1
+(node:290994) ExperimentalWarning: Transform Types is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
-MEASURED codex-idle-attrs: ["›" dim=0 bold=1 fgMode=50331648 fg=16757314] ["Implement{feature}" dim=1 bold=0 fgMode=0 fg=-1]
-MEASURED codex-idle-ring: lines=16 partialBytes=3399 replayBytes=8407
-ASSERT g2-codex-idle-recon-matches-live: PASS recon="Implement {feature}" live="Implement {feature}"
+MEASURED codex-idle-attrs: ["›" dim=0 bold=1 fgMode=50331648 fg=16757314] ["Explainthiscodebase" dim=1 bold=0 fgMode=0 fg=-1]
+MEASURED codex-idle-ring: lines=16 partialBytes=5877 replayBytes=10965
+ASSERT g2-codex-idle-recon-matches-live: PASS recon="Explain this codebase" live="Explain this codebase"
 ASSERT g2-codex-idle-clean: PASS verdict={"clean":true,"reason":"empty","userCells":0,"samples":""}
 MEASURED codex-draft-attrs: ["›" dim=0 bold=1 fgMode=50331648 fg=16757314] ["kqzvbnwmxdrf" dim=0 bold=0 fgMode=0 fg=-1]
 ASSERT g2-codex-draft-recon-matches-live: PASS recon="kqzvbn wmxdrf\n  ptljh gsvycq" live="kqzvbn wmxdrf\n  ptljh gsvycq"
@@ -11,4 +12,23 @@ ASSERT g2-codex-draft-not-clean: PASS verdict={"clean":false,"reason":"user-text
 MEASURED codex-esc-on-empty: screenChanged=false idleComposer="Implement {feature}" verdict={"clean":true,"reason":"empty","userCells":0,"samples":""}
 ASSERT g2-codex-esc-recon-matches-live: PASS recon="Implement {feature}"
 ASSERT g2-codex-esc-consistency: PASS changed=false verdict={"clean":true,"reason":"empty","userCells":0,"samples":""}
+ASSERT g2-codex-menu-not-clean: PASS verdict={"clean":false,"reason":"user-text","userCells":48,"samples":"/mod/modelch"}
+ASSERT g2-codex-menu-visible-in-recon: PASS menu filter text present in reconstruction
+MEASURED codex-picker-verdict: reason=user-text userCells=116 samples="1.gpt-5.6-so"
+ASSERT g2-codex-picker-open-live: PASS model picker rendered on live screen
+ASSERT g2-codex-picker-visible-in-recon: PASS picker present in reconstruction
+ASSERT g2-codex-picker-not-clean: PASS verdict={"clean":false,"reason":"user-text","userCells":116,"samples":"1.gpt-5.6-so"}
+MEASURED codex-nudge-bytes: postNudgeChunks=18
+ASSERT g2-codex-nudge-occupancy-neutral: PASS before="mfhkzt nudge draft" after="mfhkzt nudge draft"
+ASSERT g2-codex-nudge-recon-matches-live: PASS recon="mfhkzt nudge draft"
+ASSERT g2-codex-nudge-not-clean: PASS verdict={"clean":false,"reason":"user-text","userCells":16,"samples":"mfhkztnudged"}
+MEASURED codex-empty-nudge-bytes: postNudgeChunks=16
+ASSERT g2-codex-empty-nudge-occupancy-neutral: PASS before="Use /skills to list available skills" after="Use /skills to list available skills"
+ASSERT g2-codex-empty-nudge-recon-matches-live: PASS recon="Use /skills to list available skills"
+ASSERT g2-codex-empty-nudge-clean: PASS verdict={"clean":true,"reason":"empty","userCells":0,"samples":""}
+MEASURED codex-stream-shape: ringLines=16 seq=16 partialBytes=16972
+ASSERT g2-codex-churned-empty-recon-matches-live: PASS recon="Run /review on my current changes" live="Run /review on my current changes"
+ASSERT g2-codex-churned-empty-clean: PASS verdict={"clean":true,"reason":"empty","userCells":0,"samples":""}
+ASSERT g2-codex-bytecut-draft-recon-matches-live: PASS recon="zvqnrw draft after churn"
+ASSERT g2-codex-bytecut-not-clean: PASS verdict={"clean":false,"reason":"user-text","userCells":21,"samples":"zvqnrwdrafta"}
 ALL ASSERTIONS PASSED

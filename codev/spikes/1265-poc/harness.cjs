@@ -38,6 +38,14 @@ const pty = resolveDep('node-pty');
 const xtermDirs = process.env.XTERM_DIR ? [path.join(process.env.XTERM_DIR, 'node_modules')] : [];
 const { Terminal } = resolveDep('@xterm/headless', xtermDirs);
 
+// Round 9: record the emulator version in every run's output — the suite is
+// the version-bump smoke test, so its own render substrate must be pinned
+// and visible in the evidence (@xterm/headless 6.0.0 is the reference).
+try {
+  const v = resolveDep('@xterm/headless/package.json', xtermDirs).version;
+  console.log(`HARNESS @xterm/headless=${v} node=${process.version}`);
+} catch { console.log('HARNESS @xterm/headless=unknown'); }
+
 // ---------------------------------------------------------------------------
 
 const KEYS = {

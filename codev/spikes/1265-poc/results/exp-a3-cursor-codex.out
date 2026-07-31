@@ -1,4 +1,6 @@
+HARNESS @xterm/headless=6.0.0 node=v22.23.1
 ASSERT a3a-midline-ctrl-u: PASS expected="xyz" actual="xyz"
 ASSERT a3b-midline-backspace: PASS expected="uvwyz" actual="uvwyz"
-ASSERT a3c-ctrlE-ctrlU-clears: PASS composer="Improve documentation in @filename"
+ASSERT a3c-anchor-draft-visible: PASS composer="uvwxyz"
+ASSERT a3c-ctrlE-ctrlU-clears: PASS composer="Summarize recent commits"
 ALL ASSERTIONS PASSED
