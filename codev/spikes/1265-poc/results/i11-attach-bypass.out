@@ -1,0 +1,15 @@
+SOURCE shellper-process.ts main=74693d1c137b worktree=74693d1c137b IDENTICAL
+SOURCE shellper-client.ts main=19b2f67774c8 worktree=19b2f67774c8 IDENTICAL
+SOURCE shellper-protocol.ts main=8402eb5fc5f4 worktree=8402eb5fc5f4 IDENTICAL
+ASSERT i11-setup-welcome: PASS tower WELCOME pid=394812 80x24
+MEASURED i11-attach-welcome: terminal client WELCOME pid=394812 80x24
+ASSERT i11b-no-connect-notification: PASS frames at T during A's connect (non-DATA): [] — the protocol has no client-connect announcement
+ASSERT i11a-attach-input-executes: PASS A's DATA reached the real PTY and ran (output "EXEC_PROOF_i11" ≠ typed bytes)
+ASSERT i11b-no-input-frame-at-tower: PASS frames at T while A typed (non-DATA): [] — input surfaces at Tower ONLY as PTY output (echo), byte-indistinguishable from render
+MEASURED i11b-output-only-visibility: T gained 68 bytes of PTY OUTPUT for A's 29 input bytes; no frame carried the input itself
+ASSERT i11c-attach-resize-applied: PASS PTY is now 30 rows 100 cols (stty size via tower write)
+ASSERT i11c-no-resize-frame-at-tower: PASS frames at T around A's resize (non-DATA): [] — Tower's stored dims are now stale
+ASSERT i11d-signal-toweronly-data-open: PASS A's SIGNAL ignored (bash alive), A's DATA accepted — the open input path is protocol design (terminal may send DATA/RESIZE only)
+ASSERT i11e-geometry-resync-at-reconnect: PASS fresh tower WELCOME reports 100x30 — the resize A made is visible to Tower only via a new handshake
+
+ALL ASSERTIONS PASSED

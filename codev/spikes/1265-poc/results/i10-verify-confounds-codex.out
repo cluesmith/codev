@@ -1,0 +1,34 @@
+HARNESS @xterm/headless=6.0.0 node=v22.23.1
+ASSERT i10d-gate-clean: PASS empty composer at gate time
+
+[codex after /status delivery]
+|│ model:       gpt-5.6-sol max   /model to change       │
+|│ directory:   ~/code/codev_root/…/.builders/spike-1265 │
+|│ permissions: YOLO mode                                │
+|╰───────────────────────────────────────────────────────╯
+|  Tip: Use /fork to branch the current chat into a new thread.
+|• You have 1 usage limit reset available. Run /usage to use one.
+|/status
+|╭────────────────────────────────────────────────────────────────────────────────╮
+|│  >_ OpenAI Codex (v0.146.0)                                                    │
+|│                                                                                │
+|│ Visit https://chatgpt.com/codex/settings/usage for up-to-date                  │
+|│ information on rate limits and credits                                         │
+|│                                                                                │
+|│  Model:                gpt-5.6-sol (reasoning max, summaries auto)             │
+|│  Directory:            ~/code/codev_root/codev/.builders/spike-1265            │
+|│  Permissions:          Full Access                                             │
+|│  Agents.md:            AGENTS.md                                               │
+|│  Account:              mohid_h_m@hotmail.com (Plus)                            │
+|│  Collaboration mode:   Default                                                 │
+|│  Session:              019fb9f0-7a19-7190-a153-2cf7409c369d                    │
+|│                                                                                │
+|│  Weekly limit:         [██████████████░░░░░░] 68% left (resets 14:13 on 5 Aug) │
+|╰────────────────────────────────────────────────────────────────────────────────╯
+|› Implement {feature}
+|  gpt-5.6-sol max · ~/code/codev_root/codev/.builders/spike-1265 · builder/spike-1265 · Context 0% used
+ASSERT i10d-consumed-composer-clean: PASS live=empty recon=empty — the delivery was consumed, nothing stranded
+ASSERT i10d-new-output-rendered: PASS post-write render differs and 19 new chunks arrived — a positive consumed/produced-output signature exists on codex
+MEASURED i10d-naive-verdict: naive on token "/status": delivered-visible (cls=empty) — command echo rendering is codex UI behavior, recorded
+
+ALL ASSERTIONS PASSED

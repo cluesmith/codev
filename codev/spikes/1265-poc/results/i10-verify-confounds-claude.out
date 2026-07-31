@@ -1,0 +1,18 @@
+HARNESS @xterm/headless=6.0.0 node=v22.23.1
+ASSERT i10a-earlier-entry-rendered: PASS identical content already in the transcript
+ASSERT i10a-naive-false-success: PASS recon=delivered-visible live=delivered-visible — token search credits the OLD entry to a delivery that rendered nothing
+ASSERT i10a-differential-not-fooled: PASS differential=unverified (pre exact=1, post exact=1) — no NEW entry ⇒ not delivered
+ASSERT i10b-gate-would-hold: PASS pre-write G-lite=user-text — the fusion below is only reachable when the gate is bypassed/raced (today: always)
+ASSERT i10b-blob-submitted: PASS draft+message fused into ONE transcript entry (e0 baseline mechanics)
+ASSERT i10b-naive-false-success: PASS naive=delivered-visible — the verify blesses the exact corruption this spike exists to remove
+ASSERT i10b-differential-flags-fusion: PASS differential=fused-suspect (post exact=0, post any=1) — message present ONLY with user text before it ⇒ fused, not delivered
+ASSERT i10c-gate-clean: PASS legit delivery: empty composer at gate time
+ASSERT i10c-delivered-for-real: PASS entry rendered
+ASSERT i10c-early-verify-correct: PASS early: naive=delivered-visible differential=delivered-verified — at-settle both oracles are right (and this is the claude positive-branch differential proof)
+ASSERT i10c-scrolled-out: PASS the successful entry left the viewport
+ASSERT i10c-naive-false-loss: PASS late naive=lost — a SUCCESSFUL delivery classifies as the auto-re-hold signature ⇒ duplicate redelivery
+ASSERT i10c-conjunction-refuses: PASS composer marker present on the healthy session — the sound lost rule (token-absent AND no-marker, i8c) does NOT fire
+ASSERT i10c-differential-never-lost: PASS late differential=unverified (post any=0, scrollback-inclusive) — never the auto-re-hold verdict
+MEASURED i10c-late-differential: verdict=unverified — scrollback retention of the entry is claude repaint behavior (g2d: newline-free stream), recorded not assumed
+
+ALL ASSERTIONS PASSED
