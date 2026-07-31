@@ -225,6 +225,8 @@ async function sendToAll(
         raw: options.raw,
         noEnter: options.noEnter,
         interrupt: options.interrupt,
+        // Spec 1307: each target's delivery is scheduled independently.
+        deliverAfter: options.delay,
       });
       if (!result.ok) {
         throw new Error(result.error || 'Unknown error');
@@ -323,13 +325,21 @@ export async function send(options: SendOptions): Promise<void> {
         raw: options.raw,
         noEnter: options.noEnter,
         interrupt: options.interrupt,
+        deliverAfter: options.delay,
       });
 
       if (!result.ok) {
         throw new Error(result.error || 'Unknown error');
       }
 
-      logger.success(`Message sent to ${result.resolvedTo ?? target}`);
+      // Report what actually happened. A delayed message has NOT been sent, and
+      // saying so would hide the one detail that matters when it never arrives.
+      if (result.scheduled) {
+        logger.success(`Message scheduled for ${result.resolvedTo ?? target} (+${options.delay}s)`);
+        logger.info('Pending delayed sends are dropped if Tower restarts.');
+      } else {
+        logger.success(`Message sent to ${result.resolvedTo ?? target}`);
+      }
     } catch (error) {
       fatal(error instanceof Error ? error.message : String(error));
     }

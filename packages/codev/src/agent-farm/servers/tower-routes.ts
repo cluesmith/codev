@@ -52,6 +52,7 @@ import { SendBuffer } from './send-buffer.js';
 import type { BufferedMessage } from './send-buffer.js';
 import type { PtySession } from '../../terminal/pty-session.js';
 import { writeMessageToSession, writeEscapeToSession } from './message-write.js';
+import { scheduleDelayedSend, validateDelaySeconds } from './delayed-send.js';
 import {
   getKnownWorkspacePaths,
   getInstances,
@@ -1457,6 +1458,35 @@ async function handleSend(
   const interrupt = options.interrupt === true;
   const escape = options.escape === true;
 
+  // Spec 1307: optional delayed delivery. Validated here as well as at the CLI
+  // boundary — this is a public HTTP route, so the CLI is not the only caller,
+  // and an unvalidated value becomes a setTimeout that either fires instantly
+  // (NaN) or never (Infinity).
+  let deliverAfter: number | undefined;
+  if (options.deliverAfter !== undefined && options.deliverAfter !== null) {
+    const delayError = validateDelaySeconds(options.deliverAfter);
+    if (delayError) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'INVALID_PARAMS', message: delayError }));
+      return;
+    }
+    deliverAfter = options.deliverAfter as number;
+  }
+
+  // `escape` short-circuits before formatting and before the send buffer, by
+  // design (an interrupt that can be deferred is not an interrupt). Combining it
+  // with a delay is therefore contradictory rather than merely unsupported, and
+  // is refused instead of silently ignoring one of the two — a delay that is
+  // quietly dropped would look like it worked.
+  if (escape && deliverAfter !== undefined) {
+    res.writeHead(400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      error: 'INVALID_PARAMS',
+      message: 'escape cannot be combined with a delay: an ESC keystroke bypasses buffering by design so that it interrupts the CURRENT turn. Send the ESC now, or send a delayed message without escape.',
+    }));
+    return;
+  }
+
   // Resolve the target address to a terminal ID.
   // Spec 755: pass `from` so architect resolution is sender-affinity-aware
   // when the sender is a builder. Non-builder senders see unchanged behavior.
@@ -1557,7 +1587,127 @@ async function handleSend(
   };
   const logMessage = `Message sent: ${from ?? 'unknown'} → ${result.agent} (terminal ${result.terminalId.slice(0, 8)}...)`;
 
-  // Optionally interrupt first — bypass buffering entirely
+  // Spec 1307: `--delay` schedules DELIVERY only. Everything above this point —
+  // target resolution, the builder-spoofing check inside resolveTarget,
+  // writability, formatting — has already happened at REQUEST time, which is the
+  // security-relevant half of the design: a delayed send must not be able to
+  // defer an authorization check past the conditions that would fail it.
+  if (deliverAfter !== undefined) {
+    const deliveryContext: DeliveryContext = {
+      terminalId: result.terminalId,
+      agent: result.agent,
+      from,
+      formattedMessage,
+      noEnter,
+      interrupt,
+      broadcastPayload,
+      logMessage,
+      ctx,
+      // Delayed deliveries queue behind anything already buffered.
+      enforceFifo: true,
+    };
+    scheduleDelayedSend(deliverAfter, result.terminalId, () => deliverOrBuffer(deliveryContext));
+    ctx.log('INFO', `Message scheduled (+${deliverAfter}s): ${from ?? 'unknown'} → ${result.agent} (terminal ${result.terminalId.slice(0, 8)}...)`);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      ok: true,
+      terminalId: result.terminalId,
+      resolvedTo: result.agent,
+      deferred: false,
+      scheduled: true,
+      deliverAfter,
+    }));
+    return;
+  }
+
+  const deferred = await deliverOrBuffer({
+    terminalId: result.terminalId,
+    agent: result.agent,
+    from,
+    formattedMessage,
+    noEnter,
+    interrupt,
+    broadcastPayload,
+    logMessage,
+    ctx,
+    // Immediate sends keep their existing behaviour exactly (Spec 1307).
+    enforceFifo: false,
+  });
+
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({
+    ok: true,
+    terminalId: result.terminalId,
+    resolvedTo: result.agent,
+    deferred,
+    scheduled: false,
+  }));
+}
+
+/** Everything `deliverOrBuffer` needs, captured at request time. */
+interface DeliveryContext {
+  terminalId: string;
+  agent: string;
+  from?: string;
+  formattedMessage: string;
+  noEnter: boolean;
+  interrupt: boolean;
+  broadcastPayload: Parameters<typeof broadcastMessage>[0];
+  logMessage: string;
+  ctx: RouteContext;
+  /**
+   * Whether to queue behind messages already buffered for this session even
+   * when it looks idle. True only for DELAYED deliveries.
+   *
+   * Scoped deliberately rather than applied to every send. An immediate send
+   * races the 500ms buffer flush at worst, which is existing behaviour and not
+   * this spec's to change — Spec 1307 requires undelayed sends to be unchanged.
+   * A delayed send is different in kind: it can come due arbitrarily long after
+   * a message that is still queued, so "the session is idle right now" says
+   * nothing about whether it would overtake something.
+   */
+  enforceFifo: boolean;
+}
+
+/**
+ * Deliver a formatted message: write it now, or hand it to the typing-aware
+ * send buffer (Spec 403).
+ *
+ * Extracted from `handleSend` so the immediate and delayed paths make this
+ * decision through the SAME code (Spec 1307). A delayed message that wrote
+ * straight to the PTY would be deciding "is the user typing?" against a world
+ * observed 15 seconds ago, and — worse — could overtake an earlier message
+ * still sitting in the buffer.
+ *
+ * The session is re-fetched by id rather than captured: between scheduling and
+ * delivery the session can die, be replaced, or lose its shellper connection,
+ * and a retained `PtySession` reference would happily absorb writes that go
+ * nowhere.
+ *
+ * @returns whether the message was buffered rather than written.
+ */
+async function deliverOrBuffer(delivery: DeliveryContext): Promise<boolean> {
+  const {
+    terminalId, agent, from, formattedMessage, noEnter, interrupt,
+    broadcastPayload, logMessage, ctx, enforceFifo,
+  } = delivery;
+
+  // Re-resolve. For the immediate path this is the same session that was just
+  // validated; for the delayed path it is the whole point.
+  const session = getTerminalManager().getSession(terminalId);
+  if (!session) {
+    ctx.log('WARN', `Message DROPPED: ${from ?? 'unknown'} → ${agent} (terminal ${terminalId.slice(0, 8)}...): session gone before delivery`);
+    return false;
+  }
+  if (!session.writable) {
+    ctx.log('ERROR', `Message DROPPED: ${from ?? 'unknown'} → ${agent} (terminal ${terminalId.slice(0, 8)}...): terminal not writable (shellper connection down)`);
+    return false;
+  }
+
+  // Optionally interrupt first — bypass buffering entirely.
+  // Spec 1307: for a delayed send this Ctrl+C travels WITH the message rather
+  // than firing at request time, which would interrupt the sender's own turn
+  // and leave the message to arrive alone much later.
   if (interrupt) {
     session.write('\x03'); // Ctrl+C
     await new Promise(resolve => setTimeout(resolve, 100));
@@ -1567,34 +1717,34 @@ async function handleSend(
   // Defer only when user has typed recently (within idle threshold).
   // Bugfix #492: removed session.composing check — composing gets stuck true
   // after non-Enter keystrokes (Ctrl+C, arrows, Tab), causing 60s delays.
-  const shouldDefer = !interrupt && !session.isUserIdle(sendBuffer.idleThresholdMs);
+  //
+  // Spec 1307 adds the `enforceFifo` term, for DELAYED deliveries only: an idle
+  // session must not be written to directly while earlier messages are still
+  // queued for it, or the delayed message overtakes them. For `/arch-save` that
+  // inversion means `/arch-init` landing before its `/clear`, after which the
+  // clear wipes the context that just recovered — a failure no re-send repairs.
+  const shouldDefer = !interrupt
+    && (!session.isUserIdle(sendBuffer.idleThresholdMs)
+      || (enforceFifo && sendBuffer.hasPending(terminalId)));
 
   if (shouldDefer) {
-    // User is actively typing — buffer for deferred delivery
     sendBuffer.enqueue({
-      sessionId: result.terminalId,
+      sessionId: terminalId,
       formattedMessage,
       noEnter,
       timestamp: Date.now(),
       broadcastPayload,
       logMessage,
     });
-    ctx.log('INFO', `Message deferred (user typing): ${from ?? 'unknown'} → ${result.agent} (terminal ${result.terminalId.slice(0, 8)}...)`);
-  } else {
-    // User is idle (or interrupt) — deliver immediately.
-    // Bugfix #584: paces multi-line output to avoid paste detection.
-    writeMessageToSession(session, formattedMessage, noEnter);
-    broadcastMessage(broadcastPayload);
-    ctx.log('INFO', logMessage);
+    ctx.log('INFO', `Message deferred (user typing): ${from ?? 'unknown'} → ${agent} (terminal ${terminalId.slice(0, 8)}...)`);
+    return true;
   }
 
-  res.writeHead(200, { 'Content-Type': 'application/json' });
-  res.end(JSON.stringify({
-    ok: true,
-    terminalId: result.terminalId,
-    resolvedTo: result.agent,
-    deferred: shouldDefer,
-  }));
+  // Bugfix #584: paces multi-line output to avoid paste detection.
+  writeMessageToSession(session, formattedMessage, noEnter);
+  broadcastMessage(broadcastPayload);
+  ctx.log('INFO', logMessage);
+  return false;
 }
 
 async function handleBrowse(res: http.ServerResponse, url: URL): Promise<void> {

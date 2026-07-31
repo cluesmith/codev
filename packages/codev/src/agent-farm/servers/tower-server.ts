@@ -57,6 +57,7 @@ import {
   setupUpgradeHandler,
 } from './tower-websocket.js';
 import { handleRequest, startSendBuffer, stopSendBuffer } from './tower-routes.js';
+import { shutdownDelayedSends } from './delayed-send.js';
 import type { RouteContext } from './tower-routes.js';
 import { setCodevConfigNotifier, stopAllCodevConfigWatchers } from './codev-config-watcher.js';
 import { getGlobalDb } from '../db/index.js';
@@ -183,6 +184,18 @@ async function gracefulShutdown(signal: string): Promise<void> {
 
   // 4b. Flush and stop send buffer (Spec 403) — delivers any deferred messages
   stopSendBuffer();
+
+  // 4c. Drop pending delayed sends (Spec 1307). Deliberately DROP, not flush —
+  // the opposite of 4b. A buffered message was accepted for immediate delivery
+  // and merely held while someone typed, so delivering it late is better than
+  // losing it. A delayed message's entire meaning is "deliver at a moment that
+  // has not arrived", and that moment is chosen relative to a world this restart
+  // has already invalidated. Firing them now would land a `/arch-init` in a
+  // session that was never cleared. Dropping is recoverable by re-sending.
+  const droppedDelayed = shutdownDelayedSends();
+  if (droppedDelayed > 0) {
+    log('INFO', `Dropped ${droppedDelayed} pending delayed send(s) — re-send them if still wanted`);
+  }
 
   // 5. Stop cron scheduler (Spec 399)
   shutdownCron();

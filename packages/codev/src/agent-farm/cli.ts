@@ -452,9 +452,25 @@ export async function runAgentFarm(args: string[]): Promise<void> {
     .option('--interrupt', 'Send Ctrl+C first')
     .option('--raw', 'Skip structured message formatting')
     .option('--no-enter', 'Do not send Enter after message')
+    .option('--delay <seconds>', 'Deliver after N seconds (Tower-side; dropped if Tower restarts)')
     .action(async (builder, message, options) => {
       const { send } = await import('./commands/send.js');
       try {
+        // Spec 1307: validated here AND server-side. A bad value does not
+        // degrade the send — it silently changes when (or whether) the message
+        // arrives. NaN in particular yields a timer that fires immediately,
+        // turning a delayed send into an immediate one with no error.
+        let delay: number | undefined;
+        if (options.delay !== undefined) {
+          const parsed = Number(options.delay);
+          if (!Number.isInteger(parsed) || parsed <= 0 || parsed > 3600) {
+            logger.error(
+              `--delay must be a whole number of seconds between 1 and 3600, got '${options.delay}'`,
+            );
+            process.exit(1);
+          }
+          delay = parsed;
+        }
         await send({
           builder,
           message,
@@ -463,6 +479,7 @@ export async function runAgentFarm(args: string[]): Promise<void> {
           interrupt: options.interrupt,
           raw: options.raw,
           noEnter: !options.enter,
+          delay,
         });
       } catch (error) {
         logger.error(error instanceof Error ? error.message : String(error));

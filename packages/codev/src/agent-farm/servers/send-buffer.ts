@@ -133,6 +133,23 @@ export class SendBuffer {
     }
   }
 
+  /**
+   * Whether this session already has messages waiting (Spec 1307).
+   *
+   * Used by the delayed-send path to preserve per-session FIFO. A delayed
+   * message that finds the session idle would otherwise write straight to the
+   * PTY and overtake an earlier message still sitting in this buffer — which
+   * for `/arch-save` means `/arch-init` landing before the `/clear` that was
+   * sent first, after which the clear destroys the freshly recovered context.
+   *
+   * Consulting this makes ordering a property of the queue rather than of
+   * flush timing.
+   */
+  hasPending(sessionId: string): boolean {
+    const queue = this.buffers.get(sessionId);
+    return queue !== undefined && queue.length > 0;
+  }
+
   /** Number of buffered messages across all sessions (for testing). */
   get pendingCount(): number {
     let count = 0;

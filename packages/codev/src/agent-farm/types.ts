@@ -164,6 +164,12 @@ export interface SendOptions {
   interrupt?: boolean;  // Send Ctrl+C first to ensure prompt is ready
   raw?: boolean;        // Skip structured formatting
   noEnter?: boolean;    // Don't send Enter after message
+  /**
+   * Spec 1307: hold in Tower and deliver after this many seconds. Resolution
+   * and authorization still happen at request time; only delivery is deferred.
+   * Not persisted — a Tower restart drops pending sends.
+   */
+  delay?: number;
 }
 
 /**
