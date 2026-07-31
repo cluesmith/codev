@@ -1724,12 +1724,16 @@ async function deliverOrBuffer(delivery: DeliveryContext): Promise<boolean> {
   // it overtake messages queued ahead of it. When that is the situation, the
   // Ctrl+C rides along with the message instead (`interruptFirst`), so the queue
   // drains in order AND the interrupt still lands right before its own payload.
-  const queueAhead = enforceFifo && sendBuffer.hasPending(terminalId);
+  let queueAhead = enforceFifo && sendBuffer.hasPending(terminalId);
 
   // Optionally interrupt first — bypass buffering entirely.
   if (interrupt && !queueAhead) {
     session.write('\x03'); // Ctrl+C
     await new Promise(resolve => setTimeout(resolve, 100));
+    // Re-check: the 100ms pause is a window in which something else can queue
+    // for this session, and a decision taken before an await is a decision
+    // about a world that may have moved on.
+    queueAhead = enforceFifo && sendBuffer.hasPending(terminalId);
   }
 
   // Check if user is idle — deliver immediately or buffer (Spec 403, Bugfix #450)

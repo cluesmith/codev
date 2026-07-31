@@ -203,7 +203,7 @@ async function sendToAll(
   workspace: string | undefined,
   from: string,
   options: SendOptions,
-): Promise<{ sent: string[]; scheduled: string[]; failed: string[] }> {
+): Promise<{ sent: string[]; scheduled: string[]; deferred: string[]; failed: string[] }> {
   // Bugfix #826: loadState is workspace-scoped (for the architect read).
   // Builders are global per state.db; use the detected workspace root as
   // scope. `process.cwd()` is a safe fallback when detection fails — the
@@ -212,7 +212,12 @@ async function sendToAll(
   // Spec 1307: `scheduled` is tracked separately from `sent`. Reporting a
   // delayed fan-out as "Sent" would claim delivery that has not happened — the
   // same misreport the single-target path below deliberately avoids.
-  const results = { sent: [] as string[], scheduled: [] as string[], failed: [] as string[] };
+  const results = {
+    sent: [] as string[],
+    scheduled: [] as string[],
+    deferred: [] as string[],
+    failed: [] as string[],
+  };
 
   if (state.builders.length === 0) {
     logger.warn('No active builders found.');
@@ -234,8 +239,12 @@ async function sendToAll(
       if (!result.ok) {
         throw new Error(result.error || 'Unknown error');
       }
+      // Three distinct outcomes, kept distinct. Classifying a buffered or
+      // scheduled message as "sent" claims a delivery that has not happened.
       if (result.scheduled) {
         results.scheduled.push(builder.id);
+      } else if (result.deferred) {
+        results.deferred.push(builder.id);
       } else {
         results.sent.push(builder.id);
       }
@@ -324,6 +333,11 @@ export async function send(options: SendOptions): Promise<void> {
         `Scheduled for ${results.scheduled.length} builder(s) (+${options.delay}s): ${results.scheduled.join(', ')}`,
       );
       logger.info('Pending delayed sends are dropped if Tower restarts.');
+    }
+    if (results.deferred.length > 0) {
+      logger.success(
+        `Queued for ${results.deferred.length} builder(s) being typed in: ${results.deferred.join(', ')}`,
+      );
     }
     if (results.failed.length > 0) {
       logger.error(`Failed for ${results.failed.length} builder(s): ${results.failed.join(', ')}`);

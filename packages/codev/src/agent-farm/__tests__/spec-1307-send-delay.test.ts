@@ -141,36 +141,38 @@ describe('scheduleDelayedSend', () => {
     expect(deliver).not.toHaveBeenCalled();
   });
 
-  it('delivers once the delay elapses', () => {
+  it('delivers once the delay elapses', async () => {
     const deliver = vi.fn();
     scheduleDelayedSend(15, 'term-1', deliver);
 
-    vi.advanceTimersByTime(15_000);
+    // Async advance: delivery runs through the per-terminal chain, so the
+    // callback fires in a microtask rather than synchronously in the timer.
+    await vi.advanceTimersByTimeAsync(15_000);
     expect(deliver).toHaveBeenCalledTimes(1);
   });
 
-  it('delivers exactly once', () => {
+  it('delivers exactly once', async () => {
     const deliver = vi.fn();
     scheduleDelayedSend(5, 'term-1', deliver);
 
-    vi.advanceTimersByTime(60_000);
+    await vi.advanceTimersByTimeAsync(60_000);
     expect(deliver).toHaveBeenCalledTimes(1);
   });
 
-  it('deregisters after delivery, leaving no phantom pending send', () => {
+  it('deregisters after delivery, leaving no phantom pending send', async () => {
     scheduleDelayedSend(5, 'term-1', () => {});
     expect(pendingDelayedSendCount()).toBe(1);
 
-    vi.advanceTimersByTime(5_000);
+    await vi.advanceTimersByTimeAsync(5_000);
     expect(pendingDelayedSendCount()).toBe(0);
   });
 
-  it('deregisters even when delivery throws', () => {
+  it('deregisters even when delivery throws', async () => {
     scheduleDelayedSend(5, 'term-1', () => {
       throw new Error('delivery blew up');
     });
 
-    expect(() => vi.advanceTimersByTime(5_000)).not.toThrow();
+    await expect(vi.advanceTimersByTimeAsync(5_000)).resolves.not.toThrow();
     expect(pendingDelayedSendCount()).toBe(0);
   });
 
@@ -180,20 +182,19 @@ describe('scheduleDelayedSend', () => {
       throw new Error('async delivery blew up');
     });
 
-    vi.advanceTimersByTime(5_000);
-    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(5_000);
     expect(pendingDelayedSendCount()).toBe(0);
   });
 
-  it('tracks several pending sends independently', () => {
+  it('tracks several pending sends independently', async () => {
     scheduleDelayedSend(5, 'term-1', () => {});
     scheduleDelayedSend(10, 'term-2', () => {});
     expect(pendingDelayedSendCount()).toBe(2);
 
-    vi.advanceTimersByTime(5_000);
+    await vi.advanceTimersByTimeAsync(5_000);
     expect(pendingDelayedSendCount()).toBe(1);
 
-    vi.advanceTimersByTime(5_000);
+    await vi.advanceTimersByTimeAsync(5_000);
     expect(pendingDelayedSendCount()).toBe(0);
   });
 });
@@ -209,7 +210,7 @@ describe('shutdownDelayedSends', () => {
     vi.useRealTimers();
   });
 
-  it('DROPS pending sends rather than flushing them', () => {
+  it('DROPS pending sends rather than flushing them', async () => {
     // The deliberate disagreement with SendBuffer.stop(), which flushes. A
     // delayed message's timing was chosen against a world a restart has already
     // invalidated — flushing would land `/arch-init` in a session that was
@@ -220,7 +221,7 @@ describe('shutdownDelayedSends', () => {
     const dropped = shutdownDelayedSends();
 
     expect(dropped).toBe(1);
-    vi.advanceTimersByTime(60_000);
+    await vi.advanceTimersByTimeAsync(60_000);
     expect(deliver).not.toHaveBeenCalled();
   });
 
@@ -249,36 +250,82 @@ describe('shutdownDelayedSends', () => {
 // FIFO — the ordering guarantee
 // ============================================================================
 
-describe('scheduled vs sent reporting', () => {
-  // `--all --delay` schedules each target independently, so the fan-out summary
-  // must distinguish scheduled from sent. Reporting "Sent to N builder(s)" for
-  // messages Tower is merely holding claims delivery that has not happened —
-  // the same misreport the single-target path avoids.
-  function summarise(results: { sent: string[]; scheduled: string[]; failed: string[] }) {
-    const lines: string[] = [];
-    if (results.sent.length) lines.push(`Sent to ${results.sent.length} builder(s)`);
-    if (results.scheduled.length) lines.push(`Scheduled for ${results.scheduled.length} builder(s)`);
-    if (results.failed.length) lines.push(`Failed for ${results.failed.length} builder(s)`);
-    return lines.join(' | ');
-  }
-
-  it('reports delayed fan-out as scheduled, not sent', () => {
-    const out = summarise({ sent: [], scheduled: ['b1', 'b2'], failed: [] });
-    expect(out).toContain('Scheduled for 2');
-    expect(out).not.toContain('Sent to');
+describe('per-terminal delivery chain', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    shutdownDelayedSends();
   });
 
-  it('reports immediate fan-out as sent', () => {
-    const out = summarise({ sent: ['b1'], scheduled: [], failed: [] });
-    expect(out).toContain('Sent to 1');
-    expect(out).not.toContain('Scheduled');
+  afterEach(() => {
+    shutdownDelayedSends();
+    vi.useRealTimers();
   });
 
-  it('reports a mixed outcome without conflating the two', () => {
-    const out = summarise({ sent: ['b1'], scheduled: ['b2'], failed: ['b3'] });
-    expect(out).toContain('Sent to 1');
-    expect(out).toContain('Scheduled for 1');
-    expect(out).toContain('Failed for 1');
+  it('serialises two same-terminal messages due at the same instant', async () => {
+    // Each scheduled message owns its own timer, so two due together would
+    // otherwise start delivering concurrently. Delivery is not atomic —
+    // writeMessageToSession paces multi-line output across several timeouts —
+    // so concurrent deliveries to one PTY interleave LINES, producing two
+    // mangled messages instead of two messages.
+    const order: string[] = [];
+    const slowDeliver = (label: string) => async () => {
+      order.push(`start:${label}`);
+      await new Promise(resolve => setTimeout(resolve, 50));
+      order.push(`end:${label}`);
+    };
+
+    scheduleDelayedSend(5, 'term-1', slowDeliver('a'));
+    scheduleDelayedSend(5, 'term-1', slowDeliver('b'));
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    await vi.advanceTimersByTimeAsync(200);
+
+    // 'a' must fully finish before 'b' starts — no interleaving.
+    expect(order).toEqual(['start:a', 'end:a', 'start:b', 'end:b']);
+  });
+
+  it('does not serialise across different terminals', async () => {
+    // Chaining is per-terminal; an unrelated session must not be held up.
+    const order: string[] = [];
+    const slowDeliver = (label: string) => async () => {
+      order.push(`start:${label}`);
+      await new Promise(resolve => setTimeout(resolve, 50));
+      order.push(`end:${label}`);
+    };
+
+    scheduleDelayedSend(5, 'term-1', slowDeliver('a'));
+    scheduleDelayedSend(5, 'term-2', slowDeliver('b'));
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    await vi.advanceTimersByTimeAsync(200);
+
+    // Both started before either finished.
+    expect(order.slice(0, 2).sort()).toEqual(['start:a', 'start:b']);
+  });
+
+  it('delivers by DUE time, not request order, when delays differ', async () => {
+    // Deliberate and worth pinning: `--delay 30` then `--delay 5` delivers the
+    // 5s one first, because that is what the caller asked for. The ordering
+    // guarantee this feature makes is narrower — a delayed message never
+    // overtakes one already QUEUED for the session — not "request order wins".
+    const order: string[] = [];
+    scheduleDelayedSend(30, 'term-1', () => { order.push('long'); });
+    scheduleDelayedSend(5, 'term-1', () => { order.push('short'); });
+
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    expect(order).toEqual(['short', 'long']);
+  });
+
+  it('a failing delivery does not strand later messages on the same terminal', async () => {
+    const order: string[] = [];
+    scheduleDelayedSend(5, 'term-1', () => { throw new Error('boom'); });
+    scheduleDelayedSend(5, 'term-1', () => { order.push('second'); });
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(order).toEqual(['second']);
   });
 });
 
@@ -332,8 +379,14 @@ describe('delivery ordering under buffering (the inversion this design prevents)
    * something queued. Otherwise write straight through.
    *
    * Reproduced here rather than imported because the real function is bound to
-   * the route's module-level terminal manager and logger. What is under test is
-   * the PREDICATE, and it is stated identically in both places.
+   * the route's module-level terminal manager and logger.
+   *
+   * IMPORTANT — this is a SIMPLIFICATION, not a copy. It omits the shipped
+   * predicate's interrupt handling entirely. These tests document the FIFO rule
+   * readably; they are NOT the regression guard for it. That guard lives in
+   * `tower-routes.test.ts` ("ORDERING: ..."), runs against the real route and
+   * the real SendBuffer, and is mutation-verified. Review caught this file
+   * standing in for that one.
    *
    * `enforceFifo` is scoped to delayed sends on purpose: Spec 1307 requires
    * undelayed sends to behave exactly as before, and applying the FIFO term to

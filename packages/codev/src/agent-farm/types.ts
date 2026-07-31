@@ -168,6 +168,11 @@ export interface SendOptions {
    * Spec 1307: hold in Tower and deliver after this many seconds. Resolution
    * and authorization still happen at request time; only delivery is deferred.
    * Not persisted — a Tower restart drops pending sends.
+   *
+   * Named `delay` here to match the user-facing `--delay` flag; it becomes
+   * `deliverAfter` at the client and wire layers, where the question is *when
+   * to deliver* rather than *how long the caller asked to wait*. The two names
+   * are deliberate, not drift.
    */
   delay?: number;
 }

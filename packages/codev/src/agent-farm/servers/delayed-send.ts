@@ -40,6 +40,28 @@ interface PendingDelayedSend {
 const pending = new Set<PendingDelayedSend>();
 
 /**
+ * Per-terminal delivery chain, so two due messages never interleave.
+ *
+ * Each message gets its own timer, so two scheduled for the same instant (or
+ * near it) would otherwise both start delivering concurrently. Delivery is not
+ * atomic — `writeMessageToSession` paces multi-line output across several
+ * `setTimeout`s — so concurrent deliveries to one PTY can interleave *lines*,
+ * producing two mangled messages rather than two messages.
+ *
+ * Chaining serialises them: each due delivery waits for the previous one to
+ * this terminal to finish. Entries are removed once their chain drains, so this
+ * map does not grow with terminal count over time.
+ *
+ * NOTE what this deliberately does NOT do: reorder by request time. Two sends
+ * with different delays are meant to arrive at different times — `--delay 30`
+ * followed by `--delay 5` delivers the 5s one first, because that is what the
+ * caller asked for. The ordering guarantee this feature makes is narrower and
+ * stated precisely in `deliverOrBuffer`: a delayed message never overtakes one
+ * already QUEUED for that session.
+ */
+const chains = new Map<string, Promise<void>>();
+
+/**
  * Upper bound on `--delay`, in seconds.
  *
  * One hour. Not a meaningful workflow limit — it exists so a typo (`--delay
@@ -101,15 +123,24 @@ export function scheduleDelayedSend(
     // Deregister BEFORE delivering. If delivery throws, the entry must not be
     // left behind as a phantom pending send that shutdown would then report.
     pending.delete(entry);
-    void (async () => {
+
+    // Append to this terminal's chain so concurrent due messages serialise.
+    const previous = chains.get(terminalId) ?? Promise.resolve();
+    const next = previous.then(async () => {
       try {
         await deliver();
       } catch {
         // Delivery reports its own failures through the route's logger. A
         // throw here would otherwise become an unhandled rejection and take
-        // Tower down over one undeliverable message.
+        // Tower down over one undeliverable message. Swallowing also keeps the
+        // chain alive: one failure must not strand later messages.
       }
-    })();
+    });
+    chains.set(terminalId, next);
+    // Drop the entry once drained, so the map tracks active chains only.
+    void next.then(() => {
+      if (chains.get(terminalId) === next) chains.delete(terminalId);
+    });
   }, delaySeconds * 1000);
 
   pending.add(entry);
@@ -125,6 +156,7 @@ export function shutdownDelayedSends(): number {
     clearTimeout(entry.timer);
   }
   pending.clear();
+  chains.clear();
   return count;
 }
 
