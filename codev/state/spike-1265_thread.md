@@ -351,3 +351,65 @@ into every .out).
 Effort now ~1625–1785 code + ~430–530 tests ⇒ ~2050–2320 by component sum (identity
 table +35, G-lite profiles/telemetry +50–60, lane serialization +20; H ~150 phase-2
 gated). Phasing: phase 1 gains universal gate + identity table + born-dirty + telemetry.
+
+## 2026-07-31 — Review round 10: silent-loss claim scoped to "no undetected loss";
+## H bounded to the rendered window; 8 KB claims replaced by measurement
+
+Two reviewer concerns, both valid, both overturning round-9 claims. New exp-i9
+(verification-oracle audit) + i8 extended with i8c/i8d; full doc reconciliation.
+
+1. "Phase 1 eliminates every silent-loss path" contradicted the doc's own admitted
+   residuals (check→write process-exit race; invisible Enter-capturing modes —
+   constraint 9 admitted both while constraint 10/phasing/Next Steps claimed the
+   absolute). Resolution is architectural, not editorial: (a) ring-advance
+   invalidation — gate snapshots the ring offset, delivery re-reads it immediately
+   before the first byte (same event loop); wrapper transitions PRINT, so exits
+   become ring-visible; residual shrinks to pipe latency. (b) post-delivery verify —
+   the same G-lite render re-run after the write settles: i8c/i8d assert both
+   wrapper-loss signatures machine-classify as not-delivered (eaten → `lost`,
+   no marker; boot-window → `stranded`, composer user-text) on the live emulator
+   AND on a raw-stream recon (the ring-replay shape). Verdicts post to the K row
+   as async outcomes; ambiguity never auto-redelivers (duplicate protection).
+   Phase-1 property restated everywhere: **no force-inject path and no UNDETECTED
+   loss path** — prevention where things render, detection where they don't.
+   Invisible modes remain pre-write-undetectable by definition; the verify converts
+   a mis-fire into lost/stranded/unverified, never believed-sent.
+
+2. H's verify oracle was window-bounded and the 8 KB claims extrapolated from a
+   1.84 KB max measurement. Both confirmed and measured. exp-i9 built a LAB-ONLY
+   full-content oracle (Ctrl+G opens $EDITOR; capture script copies the whole
+   draft file; validated byte-identical with a composer-preserving roundtrip, i9a).
+   i9b asserts the blindness AS FACT on both TUIs: a 40-line replay minus its first
+   line passes the window equality (both composers window to the tail) while the
+   capture shows the line gone. Production has no such oracle (^G is modal) →
+   design: **H gains a fits-the-rendered-window entry precondition** (~11 composer
+   rows claude / ~28 codex at 32-row terms, read from the LIVE render; doubles as
+   the capture-consistency proof) and **journal deletion requires a complete
+   verify** — sound exactly when the draft fits (i9a). At-cap probe (i9c, 41×199
+   ≈ 8.2 KB): codex completes the whole maneuver editor-verified byte-identical
+   (bulk clear ~100 ms, line-chunked replay 3.2 s, 8199/8199 chars); claude's
+   CLEAR step fails outright (85 rounds bulk+paced left ~27 wrapped lines; fail-
+   safe — condition-wait aborts, draft intact). Clear degrades with line WIDTH,
+   not just count (i7's paced clear did 41 short lines). The 8 KB figure survives
+   only as a capture/journal memory cap.
+
+Scaffold hardening en route (round-9e's condition-wait medicine extended): ref
+captures now require two identical samples 400 ms apart (a codex ref sampled a
+mid-paint frame one char short → false FAIL on the blindness equality), and
+draft builds verify-and-retry via the editor oracle (codex drops 1–3 chars per
+~1.8 K at 8 ms/char injected typing; the byte enters the capture stream while
+the TUI buffer loses it — exactly the tracked-vs-buffer skew the production
+maneuver-entry consistency check exists to catch; retry at 25 ms/char landed
+byte-exact, visible as a MEASURED note in the committed .out).
+
+Effort: +post-delivery verify (~60–80) + ring-advance invalidation (~10) ⇒
+~1690–1875 code + ~460–570 tests ⇒ ~2150–2445 by component sum. Phase 1 gains
+the invalidation + verify; H's phase-2 number absorbs its fits-window check.
+
+Runs: i9-claude 12/12 exit 0 (no retries), i9-codex 12/12 exit 0 (one visible
+build retry), i8 rerun pending at this entry — updated below. Versions:
+claude 2.1.212 / codex 0.146.0 / agy untouched / @xterm/headless 6.0.0.
+
+i8 rerun landed: 11/11 exit 0 — i8c live=lost/recon=lost + no-composer-marker
+(wrapper screen), i8d live=stranded/recon=stranded (user-text). Round-10 suite
+fully green: i9-claude 12/12, i9-codex 12/12, i8 11/11, all exit 0.
