@@ -267,3 +267,69 @@ Follow-up filed by the architect out of this round: **issue #1310** (monotonic
 per-session input-generation counter). It is the observable that upgrades this spec's
 bounded window to a guarantee, and it fixes the same blind spot in `afx reset`'s R4.
 This spec ships without it and references it where the gap is named.
+
+## 2026-07-31 — OWNER DESCOPE. Spec and plan rewritten; 1164 → 438 lines.
+
+I had just finished a seven-phase plan when the owner's descope landed: *"this is
+overcomplicated way more than it needs to be."* He's right, and the whole architecture is
+gone.
+
+**New target shape — the entire feature:**
+1. `afx send --delay <seconds>` — Tower-side deferred delivery, one parameter on the
+   existing send path. Not a client that sleeps, not a job orchestrator.
+2. `/arch-save` as a SKILL: stop monitors → write the pruned state file → `--raw '/clear'`
+   → `--delay 15 --raw '/arch-init <name>'`.
+
+**Dropped:** Tower-armed quiesce/clear/reorient job, `--begin`/`--boundary` handshake,
+durable intent records, bounded-window machinery, the validation module, the shared
+extraction from `commands/reset/`.
+
+**Kept:** pruning-as-requirement; the empirical check (narrowed to "does raw-typed
+`/arch-init <name>` land," with the production workspace's successful manual runs as
+existing evidence); and the failure-containment posture stated plainly as the *reason*
+heuristics suffice — state file survives, terminal alive, manual re-send recovers
+everything. Tail hazards get one honest RISKS section marking them accepted-as-recoverable,
+with #1310 referenced as the future primitive if evidence ever shows they bite.
+
+### The lesson, and it is the biggest one of this project
+
+**Two CMAP rounds and several owner exchanges all worked on making the design *sound*
+without anyone asking whether it was *proportionate*.** Every round added rigour to
+machinery that should not have existed. The reviewers weren't wrong — their findings were
+sound answers to a question we shouldn't have been asking at that cost. But reviews
+optimise the design *in front of them*; none of them is structurally positioned to ask
+"why is this here at all?"
+
+I was the worst offender: I had the failure-containment analysis in hand — I wrote "the
+worst case is manual re-entry, not data loss" into the spec myself — and did not draw the
+obvious conclusion, which is that machinery to prevent a one-message loss is not worth its
+weight. I treated that analysis as *reassurance about* the design instead of *evidence
+against* it. The descope came from outside the review loop because it could only have come
+from outside.
+
+Concretely worth carrying to the review file: **when you find yourself proving a design is
+safe, check whether the thing it protects is expensive.** A cheap failure plus elaborate
+prevention is the signature of over-design, and it is visible in the spec's own text well
+before anyone says so.
+
+Also: the descope vindicates the earlier "settled by argument kept looking like progress"
+lesson at a larger scale. Same failure mode, one level up — local rigour masking a global
+question nobody asked.
+
+### One thing I did carry forward deliberately
+
+The failure-containment analysis itself. Knowing *precisely* how cheap the failures are is
+what makes the small design defensible rather than merely smaller. That analysis was
+produced by the hardening rounds, so those rounds weren't wasted — they just produced a
+different deliverable than the one they thought they were producing.
+
+### Plan rewritten: 3 phases
+
+phase_1 `afx send --delay` (Tower-side) → phase_2 skill in four trees + template →
+phase_3 live e2e + docs.
+
+**The one security-relevant call in phase 1**, flagged there with its own acceptance
+criterion and test: `--delay` defers *delivery*, never *authorisation*. Target resolution
+and the builder-spoofing check must run at request time, or a delayed send becomes a way
+to defer a check past the conditions that would fail it. Easy to get wrong by treating
+`--delay` as "the same send, later."
