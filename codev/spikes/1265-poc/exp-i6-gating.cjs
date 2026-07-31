@@ -1,21 +1,38 @@
 /**
  * Spike 1265 — review round 3 demos, reworked in round 4 to be self-asserting
- * and session-isolated (reviewer concern: verdicts without assertions, exit 0
- * on failure, and a cross-demo contamination flake).
+ * and session-isolated, and again in round 5 after a reviewer reproduced
+ * failures on fresh reruns of the claude suite.
  *
- * Each demo runs in its OWN fresh TUI session — the original single-session
- * version let i6b's dead-API retry queue contaminate i6a's reference draft
- * via claude's ESC-restores-queued-messages behavior (itself now documented
- * as integration-constraint evidence). Baselines are per-demo. Exit 1 on any
- * assertion failure.
+ * Round-5 changes (reviewer: "retry state contaminates the right-order
+ * scenario; the Up-recall assertion is brittle"):
+ *  - i6b's wrong-order and right-order cases now run in SEPARATE fresh
+ *    sessions. The old shape shared one session: the wrong-order case left the
+ *    dead-API session retrying, and the ESC ESC "cleanup" between cases is
+ *    exactly the gesture that interrupts the in-flight retry and restores
+ *    queued/interrupted content into the composer (integration-constraint 4c)
+ *    — so the right-order case started from an unknowable composer.
+ *  - The Up-recall assertion is gone. Up reads per-project history (shared
+ *    with any OTHER claude session running in this repo — e.g. the reviewer's
+ *    own) and behaves differently while messages are queued ("press up to
+ *    edit queued messages"). Both cases now assert on the TRANSCRIPT: a
+ *    submitted message renders as its own conversation entry, so the blob
+ *    check is "the concatenated string appears on screen" and the clean check
+ *    is "the draft appears on screen, the concatenation does not" — same
+ *    pattern i6c already used for the /afx selection.
+ *  - Draft strings are collision-proof tokens (no 'def' ⊂ "default"-style
+ *    substring collisions with TUI chrome).
  *
- *  i6b (concern 3 flush ordering): message written BEFORE the user's \r
- *      reaches the PTY → blob; then the correct after-ordering → clean.
- *  i6a (concern 2 input gating): ungated keystroke between inject and replay
- *      is applied twice (live + replay-append); gated divert-then-append is
+ * Demos:
+ *  i6b-wrong (own session): message written BEFORE the user's \r reaches the
+ *      PTY → transcript shows ONE blob entry "draft+message".
+ *  i6b-right (own session): user's \r written FIRST, then the message →
+ *      transcript shows the draft alone; no concatenated entry; composer
+ *      clean afterwards.
+ *  i6a (own session): ungated keystroke between inject and replay is applied
+ *      twice (live + replay-append); gated divert-then-append is
  *      byte-identical to draft+key.
- *  i6c (concern 4 Enter-ambiguity): "/" menu open — bare \r is consumed by
- *      the menu (claude submits the SELECTION /afx; codex opens the model
+ *  i6c (own session, both TUIs): "/" menu open — bare \r is consumed by the
+ *      menu (claude submits the SELECTION /afx; codex opens the model
  *      picker), never a plain composer submit.
  *
  * Usage: node exp-i6-gating.cjs claude|codex   (codex runs i6c only)
@@ -83,30 +100,40 @@ async function perLineClear(d, rounds) {
 
 (async () => {
   if (which === 'claude') {
-    // ---------- i6b: flush ordering (own session) ----------
+    // ---------- i6b wrong-order: flush before user's \r (OWN session) ----------
     {
-      const d = await freshSession('expI6b-claude');
-      await d.type('abc');
+      const d = await freshSession('expI6bWrong-claude');
+      await d.type('wrduvq');
       d.send('[architect] wrongorder'); // flush fired before user's \r written
       await sleep(50);
       d.send('\r');
       await sleep(80);
-      d.send('\r');                     // user's Enter arrives after
-      await sleep(1000);
-      await snap(d, 'i6b-wrong-order-composer');
-      d.send(KEYS.UP);
-      const blob = await snap(d, 'i6b-wrong-order-recall');
-      check('i6b-blob-submitted', blob.includes('abc[architect] wrongorder'), `recall=${JSON.stringify(blob.slice(0, 60))}`);
-      d.send(KEYS.ESC); await sleep(200); d.send(KEYS.ESC); await sleep(300);
+      d.send('\r');                     // user's Enter arrives after — line already empty
+      await sleep(1200);
+      const comp = await snap(d, 'i6b-wrong-order-composer');
+      const txt = d.screenText();
+      // The submitted blob renders as ONE transcript entry (no Up-recall — see header).
+      check('i6b-blob-submitted', txt.includes('wrduvq[architect] wrongorder'),
+        `transcript-has-blob=${txt.includes('wrduvq[architect] wrongorder')}`);
+      check('i6b-wrong-composer-empty', !comp.includes('wrduvq'), `composer=${JSON.stringify(comp.slice(0, 60))}`);
+      d.kill();
+    }
 
-      await d.type('def');
+    // ---------- i6b right-order: user's \r first, then message (OWN session) ----------
+    {
+      const d = await freshSession('expI6bRight-claude');
+      await d.type('rtdkzp');
       d.send('\r');                     // user's Enter written FIRST
       d.send('[architect] rightorder');
       await sleep(50);
       d.send('\r');
-      await sleep(1000);
+      await sleep(1200);
       const right = await snap(d, 'i6b-right-order-composer');
-      check('i6b-right-order-clean', !right.includes('def'), `composer=${JSON.stringify(right.slice(0, 60))}`);
+      const txt = d.screenText();
+      check('i6b-right-no-blob', !txt.includes('rtdkzp[architect]'),
+        `concatenated-entry-present=${txt.includes('rtdkzp[architect]')}`);
+      check('i6b-right-draft-own-entry', txt.includes('rtdkzp'), 'draft submitted as its own entry');
+      check('i6b-right-order-clean', !right.includes('rtdkzp'), `composer=${JSON.stringify(right.slice(0, 60))}`);
       d.kill();
     }
 

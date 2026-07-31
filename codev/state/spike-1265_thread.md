@@ -148,3 +148,40 @@ Non-blocking nits recorded in the verdict: (1) header label "Feasible" could rea
 clear-set, K rescoped to built mailbox, effort upgraded); (2) D/L lack explicit rows in
 the per-option table (outside the recommended combination; rescoped K converges toward L
 anyway). Verdict delivered in-terminal: APPROVE / HIGH.
+
+## 2026-07-31 — Review round 5: i6 flake, writer serialization, noEnter/K drain
+
+Three reviewer concerns, all valid; all three produced doc + POC changes.
+
+1. i6 reproducibility (the round-4 6/6 claim challenged). Reviewer's two fresh claude
+   reruns failed. Local repro: 5 whole-suite + 8 isolated-i6b runs of the ORIGINAL, 13/13
+   exit 0 — but every run showed the right-order case executing inside queue-contaminated
+   state ("Press up to edit queued messages" AS the composer extraction), passing only
+   because 'def' doesn't collide with the hint. Pass-by-assertion-weakness, machine-basin
+   dependent. Root causes are all previously-measured behaviors: shared dead-API session
+   across the two i6b cases; inter-case ESC ESC = the constraint-4c restore gesture;
+   Up-recall reads per-project history shared with ANY concurrent claude session in this
+   repo (reviewer's own session, or mine). Fix: i6b split into two fresh sessions,
+   Up-recall + ESC removed, transcript-entry assertions (i6c's pattern), collision-proof
+   tokens. Post-fix 5/5 consecutive claude runs (11 asserts each) + codex pass; committed
+   .out = run 5. Doc no longer claims unconditional 6/6; methodology says why.
+
+2. Writer serialization (concern 2): exp-w1-writer-race.mjs drives the REAL
+   message-write.ts at unit level: concurrent direct sends blob "msg1msg2\r\r" (w1a),
+   paced sends interleave A1,B1,A2,B2 (w1b), send-during-escape lands inside ESC..Enter
+   (w1c), delayOffset chaining serializes when used (w1d) — but only SendBuffer.flush
+   uses it. Today-bug with no draft involved (two builders sending at once can blob).
+   New integration constraint 7: per-session write transaction FIFO with completion
+   chaining for ALL multi-step writers; user-frame divert generalizes i6a's gate; E's
+   ordering becomes structural. Effort ~1130–1630, queue ~140 replaces gate ~60.
+
+3. noEnter/K drain (concern 3): new findings section. Today: max-age writes noEnter text
+   with no occupancy check; dead-session discard (WARN); unwritable drop (ERROR);
+   shutdown force-inject — four corrupt-or-lose paths. Policy: noEnter never injects
+   onto occupied/dirty (K-hold at max-age; staged text counts as occupancy on drain).
+   K drain: agent-keyed rows surviving respawn, clean-event + poll + recovery triggers,
+   oldest-first ahead of SendBuffer, occupancy re-checked at drain, held-until-
+   delivered-or-dismissed; eventual delivery or persistent visible escalation, never
+   silent loss.
+
+Commits: da7e3cbf (concerns 2+3), + the i6 fix/evidence commit following.

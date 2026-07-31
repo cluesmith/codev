@@ -1,7 +1,9 @@
 RESULT i6b-wrong-order-composer: composer=""
-RESULT i6b-wrong-order-recall: composer="abc[architect] wrongorder"
-ASSERT i6b-blob-submitted: PASS recall="abc[architect] wrongorder"
+ASSERT i6b-blob-submitted: PASS transcript-has-blob=true
+ASSERT i6b-wrong-composer-empty: PASS composer=""
 RESULT i6b-right-order-composer: composer="Press up to edit queued messages"
+ASSERT i6b-right-no-blob: PASS concatenated-entry-present=false
+ASSERT i6b-right-draft-own-entry: PASS draft submitted as its own entry
 ASSERT i6b-right-order-clean: PASS composer="Press up to edit queued messages"
 RESULT i6a-ungated-draft: composer="first line\n  second line"
 ASSERT i6a-ungated-draft-clean: PASS draft="first line\n  second line"
@@ -37,8 +39,8 @@ RESULT i6c-after-enter: composer=""
 |
 |
 |
-|✻ Unable to connect to API (ConnectionRefused) · Retrying in 2s · attempt 3/10
-|                                                                                             ● high · /effort
+|✻ Unable to connect to API (ConnectionRefused) · Retrying in 6s · attempt 5/10
+|
 |──────────────────────────────────────────────────────────────────────────────────────────────────────────────
 |❯
 |──────────────────────────────────────────────────────────────────────────────────────────────────────────────
