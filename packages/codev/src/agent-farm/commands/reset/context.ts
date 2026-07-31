@@ -87,6 +87,21 @@ export interface ResolvedBuilderContext {
    * this field the task lane is indistinguishable from an issue-driven one.
    */
   taskText?: string;
+  /**
+   * True only for a BARE `afx spawn --task` builder (no `--protocol`).
+   *
+   * Established from positive evidence — task text present AND the prompt file
+   * carries no `## Mode:` heading — rather than inferred from the absence of a
+   * porch project. `initPorchInWorktree` is deliberately non-fatal, so a
+   * `--task --protocol X` builder whose porch init failed also has task text and
+   * no porch, and inferring from that would strip its real protocol template and
+   * hand it the raw task text instead.
+   *
+   * The prompt is built BEFORE porch init (`spawn.ts:545-548`), so a
+   * `--task --protocol` builder's prompt carries the rendered template — and its
+   * `## Mode:` line — regardless of whether porch init later succeeded.
+   */
+  isBareTask: boolean;
 }
 
 export interface PorchContext {
@@ -219,8 +234,16 @@ function claimStrength(
   if (statusId && normalizeId(statusId) === rawId && !/^\d+$/.test(rawId)) return 'strong';
 
   const wanted = candidateProjectIds(identity).map(normalizeId);
-  if (statusId && wanted.includes(normalizeId(statusId))) return 'weak';
 
+  // A status.yaml that STATES its id is authoritative about what it is. If that
+  // id does not claim this builder, the directory name cannot overrule it —
+  // `codev/projects/1273-old/` holding `id: '999'` belongs to 999, whatever the
+  // directory is called. Falling through to the name here let a renamed or
+  // recycled directory claim a builder, and manufactured false ambiguities
+  // alongside the real project.
+  if (statusId) return wanted.includes(normalizeId(statusId)) ? 'weak' : 'none';
+
+  // Directory-name fallback applies ONLY when the file states no id at all.
   const dirNorm = normalizeId(dir);
   return wanted.some(c => dirNorm === c || dirNorm.startsWith(`${c}-`)) ? 'weak' : 'none';
 }
@@ -273,7 +296,15 @@ export function readPorchContext(
     // A weak match must agree with the protocol the builder id declares.
     // Without this, `builder-bugfix-799` adopts the PIR project that happens to
     // share the number — wrong protocol, wrong porch id, and silently so.
-    if (expectedProtocol && protocol.toLowerCase() !== expectedProtocol.toLowerCase()) continue;
+    //
+    // And when the id is not in canonical form there IS no protocol to
+    // corroborate against, so the claim cannot be trusted at all. The previous
+    // version's comment said exactly that while the code did the opposite —
+    // `if (expectedProtocol && mismatch) continue` let every weak claim through
+    // whenever `expectedProtocol` was null. A legacy or noncanonical builder
+    // could adopt any historical project sharing its tail.
+    if (!expectedProtocol) continue;
+    if (protocol.toLowerCase() !== expectedProtocol.toLowerCase()) continue;
     weak.push(ctx);
   }
 
@@ -336,6 +367,25 @@ export function modeFromBuilderPrompt(fs: ContextFsPort, worktree: string): 'str
   const m = content.match(/^##\s*Mode:\s*(STRICT|SOFT)\s*$/im);
   if (!m) return null;
   return m[1].toLowerCase() as 'strict' | 'soft';
+}
+
+/**
+ * Recover an issue number from a porch project id.
+ *
+ * Porch ids are not uniformly numeric. PIR and SPIR use the bare issue number;
+ * **BUGFIX deliberately uses `<prefix>-<N>`** (`spawn.ts:817`, "historical, kept
+ * untouched"). A strict `/^\d+$/` guard therefore threw away BUGFIX's issue
+ * identity whenever the registry row lacked one — and on BUGFIX the issue body
+ * IS the spec, so the re-orientation lost the requirements it was meant to carry.
+ *
+ * Accepts a bare number or a canonical `<word>-<number>`; rejects anything else,
+ * so an ad-hoc task id (`builder-task-abc`) still cannot masquerade as an issue.
+ */
+export function issueNumberFromPorchId(projectId?: string): string | undefined {
+  if (!projectId) return undefined;
+  if (/^\d+$/.test(projectId)) return projectId;
+  const m = projectId.match(/^[a-z]+-(\d+)$/i);
+  return m ? m[1] : undefined;
 }
 
 // ============================================================================
@@ -508,13 +558,20 @@ export function resolveBuilderContext(options: ResolveContextOptions): ResolvedB
   }
 
   // --- Mode: flag → .builder-prompt.txt → abort ---------------------------
+  const promptMode = modeFromBuilderPrompt(fs, worktree);
+
+  // Positive evidence, not a negative inference: a bare `--task` spawn writes a
+  // prompt with no `## Mode:` heading, while `--task --protocol X` renders the
+  // full template (built BEFORE porch init, so it survives a failed init).
+  const isBareTask = Boolean(taskText) && promptMode === null;
+
   let mode = modeOverride ?? null;
   let modeSource: ResolvedBuilderContext['modeSource'] = 'flag';
   if (!mode) {
-    mode = modeFromBuilderPrompt(fs, worktree);
+    mode = promptMode;
     modeSource = 'builder-prompt';
   }
-  if (!mode && !porch) {
+  if (!mode && isBareTask) {
     // A `--task` spawn writes a bare prompt with no `## Mode:` heading, so this
     // lane could never auto-detect and every `afx reset <task>` hard-errored.
     //
@@ -531,8 +588,8 @@ export function resolveBuilderContext(options: ResolveContextOptions): ResolvedB
   if (!mode) {
     throw new ContextResolutionError(
       `Cannot determine the mode (strict/soft) for '${builderId}': no '## Mode:' line in ` +
-        `${join(worktree, '.builder-prompt.txt')}, and this builder HAS a porch project ` +
-        `(${porch?.projectName}), so it is not the ad-hoc-task lane that defaults to soft. ` +
+        `${join(worktree, '.builder-prompt.txt')}, and this builder is not the bare ad-hoc-task ` +
+        `lane that defaults to soft (no task text, or a rendered protocol template). ` +
         `Mode is not persisted anywhere else — pass --mode strict or --mode soft explicitly.`,
     );
   }
@@ -583,8 +640,8 @@ export function resolveBuilderContext(options: ResolveContextOptions): ResolvedB
     // and an unfollowable `gh issue view builder-task-abc` in the
     // re-orientation. A fabricated issue reference is worse than none: it sends
     // a freshly-reset builder to look up requirements that do not exist.
-    issueNumber:
-      issueNumber ?? (porch && /^\d+$/.test(porch.projectId) ? porch.projectId : undefined),
+    issueNumber: issueNumber ?? issueNumberFromPorchId(porch?.projectId),
     taskText,
+    isBareTask,
   };
 }

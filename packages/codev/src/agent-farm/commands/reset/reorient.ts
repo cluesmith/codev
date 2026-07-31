@@ -322,11 +322,12 @@ function buildLongForm(options: AssembleOptions): string {
   // render, so the live e2e died on
   // `Protocol "task" has no builder-prompt.md`.
   //
-  // Identified by a POSITIVE fact rather than by catching that error: task text
-  // present and no porch project. The `--task --protocol X` variant does get a
-  // porch project (`spawn.ts:548`), so this cannot swallow it — that lane still
-  // renders its real template below.
-  if (c.taskText && !c.porch) {
+  // Identified by a POSITIVE fact rather than by catching that error, and
+  // rather than by `taskText && !porch`: `initPorchInWorktree` is non-fatal, so
+  // a `--task --protocol X` builder whose porch init FAILED also has task text
+  // and no porch. `isBareTask` is established from the prompt file itself (see
+  // context.ts), which carries the rendered template for that lane regardless.
+  if (c.isBareTask) {
     const longFormTask = [
       'You are a Builder. Read codev/roles/builder.md for your full role definition.',
       '',

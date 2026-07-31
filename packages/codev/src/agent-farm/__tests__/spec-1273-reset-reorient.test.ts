@@ -63,6 +63,7 @@ function makeContext(overrides: Partial<ResolvedBuilderContext> = {}): ResolvedB
     specPath: 'codev/specs/1273-builder-context-reset-should-b.md',
     planPath: 'codev/plans/1273-builder-context-reset-should-b.md',
     issueNumber: '1273',
+    isBareTask: false,
     ...overrides,
   };
 }
@@ -466,6 +467,7 @@ describe('long-form re-orientation (Spec 1273)', () => {
         planPath: null,
         issueNumber: undefined,
         taskText: 'You are a reset-test probe.',
+        isBareTask: true,
       }),
       statePath: STATE_PATH,
       buildSpawnPrompt: port,
