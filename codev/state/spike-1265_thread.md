@@ -69,3 +69,36 @@ Findings doc updated: delivery matrix split into non-overlapping single-line (ki
 ^Y) and multi-line (byte-replay, NO ^Y) paths; kill-ring interaction documented as a measured
 constraint. Good catch by the reviewer — exactly the class of cross-primitive interaction this
 spike existed to surface.
+
+## 2026-07-31 — Review round 3: five integration concerns, all confirmed valid
+
+Reviewer raised five integration-semantics concerns. Verified each against code and, where
+testable, the live TUIs (new exp-i6-gating.cjs):
+
+1. Restart amnesia — CONFIRMED (code): shellper keeps the TUI (and its draft) alive across a
+   Tower restart, but reconcile builds fresh PtySession objects; _lastInputAt=0 means TODAY a
+   post-restart send is instantly "idle" and can fire into a surviving draft. Recovered
+   sessions must start dirty → defer + K.
+2. Input gating — CONFIRMED (i6a): ungated user byte during the H maneuver got applied TWICE
+   (live write + replay-append): "Zfirst line\n second lineZ". Gated variant (divert during
+   maneuver, append after replay) reconstructed draft+Z exactly. My earlier "race closed at the
+   protocol level" claim required this gate; doc now says so explicitly.
+3. Flush ordering — CONFIRMED (i6b): flush written before the user's \r reaches the PTY submits
+   the blob ("abc[architect] wrongorder" as one history entry). Flush must fire strictly after
+   session.write(data); FIFO fd writes make that sufficient (clean two-entry result verified).
+4. Enter ≠ empty composer — CONFIRMED (i6c, both TUIs): claude "/" menu + Enter submitted the
+   menu SELECTION (/afx) while capture held "/"; codex "/" menu + Enter opened a full-screen
+   model-picker modal. Bonus finds: claude restores queued messages into the composer on ESC
+   (occupancy with no input frame — observed live when it contaminated an i6a draft), and
+   codex's own tip confirms ESC-on-empty enters edit-last-message mode. Dirty-state machine +
+   K for ambiguity is now a hard requirement; H/I forbidden while dirty (stale capture would
+   replay already-submitted content).
+5. Programmatic writers — CONFIRMED (code): cron deliverMessage (tower-cron.ts:303-323) writes
+   with NO idle check and NO SendBuffer (bypasses even today's protection); noEnter leaves
+   untracked composer text. Fix: hoist the tracker tap to PtySession.write() so every writer
+   feeds it; route cron through the send pipeline.
+
+Doc updated: new "Integration constraints (round 3)" section, K upgraded to required component,
+DraftTracker respecified as a PtySession.write() tap, effort bumped to upper-Medium with
+explicit phasing. All five concerns were correct calls — none invalidated feasibility, but
+together they materially harden the design.
