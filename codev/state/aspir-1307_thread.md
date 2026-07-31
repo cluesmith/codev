@@ -171,3 +171,68 @@ as a raw-typed `/arch-init <name>` (Desired State, success criteria, Approach 1,
 Critical open question's mitigation, Security, test 1, Dependencies). All updated.
 
 Still holding on codex; #1309 queued for the owner's merge word.
+
+## 2026-07-31 — Owner directives, then codex round. SPECIFY COMPLETE.
+
+Two owner directives arrived (via architect), then the codex lane unblocked (#1309
+merged, reinstall done) and codex reviewed the revised spec.
+
+**Owner directive 1 — pruning is a REQUIREMENT.** The save must remove cruft, not just
+append. Resolved loops deleted, older entries collapsed to pointers at durable artifacts,
+one-screen order of magnitude. A save that only appends FAILS acceptance.
+
+**Owner directive 2 — the reorientation delivery mechanism is explicitly UNDECIDED.**
+Owner: "I'm not sure the best way to send the /arch-init again." This *reversed* what I'd
+settled one message earlier. Correctly so: I had settled that question twice, in opposite
+directions, both times on reasoning alone. Now a named open decision with three
+candidates (raw-typed slash command / plain-text instruction / 1273's file+inline shape),
+to be resolved empirically against a real terminal with the reason recorded. Noted
+honestly that candidate (c) is proven in tests and design only — 1273's live e2e never
+ran — so it doesn't get credit it hasn't earned.
+
+Lesson worth keeping: "settled by argument" kept *looking* like progress. Two reviewers
+and an owner all had to push back before it became an explicit open decision.
+
+### Codex round — 7 findings, all accepted, two of my premises were false
+
+I verified codex's two factual claims against source before acting (standing lesson:
+reviewer claims are evidence, not ground truth). Both correct, both fatal to something
+I'd asserted:
+
+- **`tower-cron.ts:70` ticks every 60 SECONDS**, over filesystem-backed definitions. My
+  "the job rides an existing Tower tick" claim was wrong, and 60s cannot observe a 1.5s
+  quiet window. Clear-job now runs its own bounded loop; retracted the claim in-text so
+  the next reader doesn't re-derive it.
+- **`lastDataAt` is a last-output timestamp** (`terminal/shellper-client.ts`); Tower has
+  no turn id or input-generation counter. So "original turn ended" and "follow-up turn
+  ended" are *observationally identical* — my criterion "the clear can never destroy work
+  created after the verified save" was UNIMPLEMENTABLE. Worse: that criterion was my own
+  fix for Claude's C3. I closed a hazard with a mechanism that can't observe what it
+  needs to. Downgraded to a bounded window + an output-total heuristic labelled as a
+  heuristic, with the residual gap named and a Tower observable raised as an open
+  question rather than pulled into scope.
+
+Two findings produced genuine design improvements, not just wording:
+
+- **`--begin`/`--boundary` handshake.** Codex caught that the self-path snapshot was
+  convention-owned — the skill took it, nothing verified it. Fix: `--begin` snapshots
+  under machine control and issues a token `--boundary` requires. Closes the snapshot
+  hole AND restores a machine-proven freshness token to the self path, which I'd traded
+  away arguing self-attestation was equivalent. It wasn't — precisely because it left
+  snapshot ordering unproven.
+- **In-memory execution vs durable intent record.** I'd required a dropped job be
+  "reported rather than silent" while specifying purely in-memory jobs — those can't both
+  hold. Split: execution in memory (fail-safe, a restart can never clear), intent record
+  durable and inert (makes status/cancel/dropped-job reporting implementable).
+
+Also: exact compaction predicate (reject if snapshot survives as an unmodified leading
+section) replacing a vague size comparison — admits the compact-and-grow case a size
+ratio would wrongly reject; no-predecessor case defined; preflight vs post-verification
+failure guarantees split, since "every gate leaves a saved state file" was false for
+preflight; and Test 2 fixed, which still described the superseded nonce-before-write
+sequence because I revised prose without re-reading tests against it.
+
+Rebuttal written (all 14 findings accepted, no disagreements defended). `porch done`
+passed checks. **SPECIFY COMPLETE — advanced to PLAN.** No spec gate in ASPIR.
+
+Commits: 4150edb7, 1f11f794, de043dfd, 93bd2a9d.
