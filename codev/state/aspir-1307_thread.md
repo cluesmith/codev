@@ -333,3 +333,58 @@ criterion and test: `--delay` defers *delivery*, never *authorisation*. Target r
 and the builder-spoofing check must run at request time, or a delayed send becomes a way
 to defer a check past the conditions that would fail it. Easy to get wrong by treating
 `--delay` as "the same send, later."
+
+## 2026-07-31 — Plan CMAP iter 1: both reviewers found the SAME two defects
+
+Both REQUEST_CHANGES, both HIGH. All ~14 findings accepted, none defended. The signal
+worth noting: **codex and claude independently converged on the same two items**, and both
+are outside this design's recoverability posture — the failures a manual re-send does NOT
+repair.
+
+**P1 — `SendBuffer` can invert `/clear` and `/arch-init`.** Verified: `/api/send` already
+buffers when the user is typing (`tower-routes.ts:1570`, `!session.isUserIdle(3000)`, up to
+60s; `isUserIdle` reads `_lastInputAt`, i.e. *input*). The `/arch-save` flow is exactly the
+trip case — the owner just typed a direction, so `/clear` gets buffered:
+
+```
+T+0   /clear → BUFFERED (user typing, up to 60s)
+T+15  /arch-init due → direct write → LANDS FIRST
+T+40  buffer flushes → /clear → wipes the recovered context
+```
+
+My plan literally said it "schedules only the terminal write" — that bypass IS the bug.
+Fix: due messages re-enter the normal delivery path, buffering included, so per-session
+FIFO does the work. Not accepted risk: re-sending `/arch-init` just re-runs the race.
+
+**P2 — `afx send <self>` was a placeholder I never resolved.** Bare `architect` resolves to
+`main`/first-registered for non-builder senders (`tower-messages.ts:371-372`), so a SIBLING
+architect's `/arch-save` would clear MAIN's terminal. Worst possible outcome — destroys a
+session whose owner never invoked anything — and one word from correct. Fix:
+`architect:<name>` explicitly, everywhere, with the reason stated.
+
+Other findings, all real: phase 1 pointed at `agent-farm/lib/tower-client.ts`, a re-export
+shim — the implementation is `packages/core/src/tower-client.ts:655` (cross-package,
+core-first build); delivery must re-fetch by terminal id rather than close over a
+`PtySession`; shutdown needs a registry and must DROP delayed sends, not flush them like
+`SendBuffer` does; `--escape` composition was unsatisfiable (`afx send` has no such flag)
+so it is recorded N/A; `--interrupt` writes Ctrl+C at request time and must be deferred
+WITH the message; `adopt.test.ts` coverage was missing; the spoofing check is at
+`tower-messages.ts:225-234` and only fires on the `architect:<name>` path, so the
+authorisation test must use that form or it proves nothing; `tower-cron` is unsuitable
+because `CronDeps.resolveTarget` takes no `sender` (better reason than the tick interval I
+gave); and the delay budget is measured from send, while the clear only runs after the
+turn ends — so phase 3 must calibrate send→session-ready, not send→clear-sent.
+
+**One I would have shipped**: the four `arch-init` SKILL.md copies still document the
+manual save→suggest-`/clear`→human-clears loop. Adding `/arch-save` without touching them
+ships two contradictory procedures for the same task. Now a phase-2 deliverable.
+
+### Lesson for the review file
+
+**Making a design smaller does not make it easier to get right — it concentrates the
+remaining risk.** After the descope I had ~40 lines of real behaviour change, and both
+genuine defects were in the same seam: where the NEW delivery path meets the EXISTING one
+(`SendBuffer`, address resolution). I wrote the small plan as though small meant safe, and
+under-specified precisely the interaction surface. When scope drops sharply, the remaining
+risk does not spread out — it pools at the integration points with what was already there,
+and that is where the next review should be pointed.

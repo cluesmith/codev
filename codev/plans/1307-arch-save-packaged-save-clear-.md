@@ -70,70 +70,121 @@ Implementation-specific:
 
 #### Deliverables
 - [ ] `--delay <seconds>` on the send command in
-      `packages/codev/src/agent-farm/cli.ts`, with boundary validation.
+      `packages/codev/src/agent-farm/cli.ts:448-454`, with boundary validation.
 - [ ] `deliverAfter` plumbed through `SendOptions`
-      (`packages/codev/src/agent-farm/types.ts`), `commands/send.ts`, and the Tower
-      client (`lib/tower-client.ts`).
-- [ ] Tower-side scheduling in the send route
-      (`servers/tower-routes.ts` → `servers/tower-messages.ts`).
+      (`packages/codev/src/agent-farm/types.ts`), `commands/send.ts`, and **the core
+      client `packages/core/src/tower-client.ts` (`sendMessage`, line 655)** — note
+      `agent-farm/lib/tower-client.ts` is only a re-export shim, so this is a
+      cross-package change with core-first build ordering.
+- [ ] Tower-side scheduling in the send route (`servers/tower-routes.ts`, around the
+      existing `shouldDefer` branch at :1570).
+- [ ] A delayed-send registry with a shutdown function wired into `tower-server.ts`'s
+      graceful-shutdown sequence (~:151).
+- [ ] `deferred`/`scheduled` surfaced in the CLI result (currently discarded in
+      `commands/send.ts`).
 - [ ] `packages/codev/src/agent-farm/__tests__/spec-1307-send-delay.test.ts`
+- [ ] Core-side test coverage for the `sendMessage` parameter.
 
 #### Implementation Details
 
-The send path already resolves the target, applies the builder-spoofing check
-(`servers/tower-messages.ts:213-218`), formats, and writes via
-`servers/message-write.ts`. `--delay` changes **only when the write happens**.
+**Authorise now, deliver later.** Target resolution and the builder-spoofing check
+(`servers/tower-messages.ts:225-234`) run at request time, exactly as today, so a delayed
+send cannot dodge a check by deferring it. Only delivery is scheduled. Note the spoofing
+check fires on the `architect:<name>` path specifically — the bare `architect` path has
+separate affinity logic — so the request-time authorisation test must use
+`architect:<name>` to exercise it.
 
-Order is the whole design: **resolve and authorise immediately, deliver later.** Target
-resolution and the spoofing check run at request time, as they do today, so a delayed send
-cannot dodge a check by deferring it. Only the terminal write is scheduled.
+**Due messages re-enter the normal delivery path — this is the critical rule.** `/api/send`
+already defers messages through `SendBuffer` (Spec 403) when the user is typing:
+`shouldDefer = !interrupt && !session.isUserIdle(3000)` (`tower-routes.ts:1570`), holding
+for up to 60 seconds. If a delayed message wrote directly to the session, this sequence
+would invert the one ordering the whole feature promises:
 
-Validation at the CLI boundary, matching how `reset` validates its tunables
-(`cli.ts:513-522`): positive integer, and a maximum (one hour) so a typo cannot park a
-message indefinitely. Reject NaN explicitly — `NaN > 0` and `NaN <= 0` are both false, so
-a single comparison written the obvious way lets it through.
+```
+T+0    /clear sent → user typing → BUFFERED (up to 60s)
+T+15   /arch-init due → direct write → LANDS FIRST
+T+40   buffer flushes → /clear lands → wipes the recovered context
+```
 
-**Not persisted.** A pending message lives in a Tower-side timer. A restart drops it, and
-that is deliberate: a persisted message could fire into a session that has moved on, and
-the recovery for a dropped one is a manual re-send. Cancelling and listing pending sends
-are explicitly out of scope.
+So a due message re-enters the same path — buffering included — rather than writing to the
+session. Per-session FIFO then does the work, and ordering stops depending on timing luck.
 
-Timer hygiene matters more than it looks: the timer must be cleared on delivery, on
-failure, and on shutdown, and delivery must not throw into an unhandled rejection when the
-target has disappeared in the meantime.
+**Delivery must re-resolve, not close over a session.** Retain the *authorised terminal
+id*; at delivery, re-fetch that exact session and re-check it is writable. Holding a
+`PtySession` reference across a 15-second gap risks writing into a session that has since
+died or been replaced.
+
+**Validation** at the CLI boundary, matching `reset`'s pattern (`cli.ts:513-522`):
+positive integer with a maximum (one hour) so a typo cannot park a message indefinitely.
+Reject NaN explicitly — `NaN > 0` and `NaN <= 0` are both false, so a single comparison
+written the obvious way lets it through.
+
+**Composition** is decided rather than left open: `--raw`, `--file` and `--no-enter` are
+payload/formatting concerns and simply travel with the delayed message. `--all` fans out
+and each delivery is scheduled independently. **`--interrupt` currently writes Ctrl+C at
+request time** — with `--delay` it must be deferred *with* the message, or the interrupt
+lands now and the message 15 seconds later. There is no `--escape` CLI flag
+(`cli.ts:450-454`); interrupts are `afx interrupt`, so the spec's mention is recorded N/A.
+
+**Not persisted.** A pending message is a Tower-side timer. Shutdown **drops** delayed
+sends rather than flushing them — unlike `SendBuffer`, whose flush-on-shutdown is correct
+for messages already accepted for immediate delivery. A dropped `/arch-init` is recovered
+by a manual re-send; a flushed-on-shutdown one could land in a session that has moved on.
+
+**Why not `tower-cron.ts`**: its 60-second tick is too coarse, and `CronDeps.resolveTarget`
+takes no `sender`, so routing through it would drop affinity and the spoofing check.
+Stated here so reviewers do not re-litigate it.
 
 #### Acceptance Criteria
 - [ ] `afx send --delay N` returns immediately; the message lands after ~N seconds.
-- [ ] Works with `--raw`, with formatted messages, and across `<builder-id>`, `architect`,
-      and `architect:<name>` addressing.
+- [ ] **Ordering holds under buffering**: a `/clear` held by `SendBuffer` is delivered
+      before a `/arch-init` whose delay expires while the first is still buffered. Tested
+      with the buffer deliberately engaged, not just with an idle session.
+- [ ] Works with `--raw`, `--file`, `--no-enter`, `--all`, `--interrupt`, formatted
+      messages, and `<builder-id>` / `architect` / `architect:<name>` addressing.
+- [ ] `--interrupt` with `--delay` defers the Ctrl+C **with** the message.
 - [ ] Sends without `--delay` are unchanged in behaviour and timing.
 - [ ] Zero, negative, non-integer, NaN and over-maximum delays rejected before scheduling.
-- [ ] A delayed send from a builder to a non-spawning architect is refused **at request
-      time**, not at delivery time.
-- [ ] Target vanishing before delivery fails gracefully; no unhandled rejection.
-- [ ] No leaked timers after delivery, failure, or shutdown.
+- [ ] A delayed `architect:<name>` send from a builder that does not own that architect is
+      refused **at request time**, not at delivery time.
+- [ ] Delivery re-fetches the session by terminal id and re-checks writability; a target
+      that vanished fails gracefully with no unhandled rejection.
+- [ ] Shutdown **drops** pending delayed sends (does not flush them) and leaks no timers.
+- [ ] The CLI reports "scheduled", not "sent", and surfaces the `deferred` flag.
 - [ ] All tests pass. Code review completed.
 
 #### Test Plan
-- **Unit Tests**: delay validation; scheduling with a fake clock; timer cleanup on all
-  three exit paths; spoofing check applied at request time.
-- **Integration Tests**: real route handler with a fake session — delayed and undelayed
-  sends, plus the vanished-target case.
+- **Unit Tests**: delay validation; scheduling with a fake clock; registry cleanup on
+  delivery, failure and shutdown; request-time spoofing refusal via `architect:<name>`;
+  `--interrupt` deferral.
+- **Integration Tests**: real route handler with a fake session — the buffered-ordering
+  scenario above, delayed vs undelayed, and the vanished-target case.
 - **Manual Testing**: `afx send <builder> --delay 10 "ping"` from a shell that exits
-  immediately; confirm arrival.
+  immediately; then repeat while typing into the target terminal, to see the buffer and
+  the delay interact.
 
 #### Rollback Strategy
 Remove the flag and the `deliverAfter` branch. The change is additive — the undelayed path
 is untouched — so reverting cannot strand callers.
 
 #### Risks
+- **Risk**: a delayed message overtakes a buffered one, inverting `/clear` and
+  `/arch-init` so the clear destroys the recovered context.
+  - **Mitigation**: due messages re-enter the normal delivery path including
+    `SendBuffer`; the inversion scenario is an explicit acceptance test with the buffer
+    engaged. **This is the one hazard here that a manual re-send cannot repair**, so it
+    is designed out rather than accepted.
 - **Risk**: authorisation is accidentally deferred along with delivery, letting a delayed
   send bypass the spoofing check.
-  - **Mitigation**: resolve-and-authorise-now, deliver-later is stated as the phase's
-    central rule, and the request-time refusal is an explicit acceptance criterion and
-    test — not left implicit in "it reuses the existing path."
-- **Risk**: a leaked timer keeps Tower alive at shutdown.
-  - **Mitigation**: cleanup asserted on all three exit paths.
+  - **Mitigation**: resolve-and-authorise-now, deliver-later is the phase's central rule,
+    with the request-time refusal as an explicit criterion and test — not left implicit
+    in "it reuses the existing path."
+- **Risk**: a stale `PtySession` captured at request time is written to 15 seconds later.
+  - **Mitigation**: retain the terminal id, re-fetch and re-check writability at delivery.
+- **Risk**: the cross-package edit is made only in the `agent-farm` shim, so nothing
+  actually changes.
+  - **Mitigation**: `packages/core/src/tower-client.ts:655` named explicitly, with
+    core-first build ordering called out.
 
 ---
 
@@ -149,8 +200,12 @@ is untouched — so reverting cannot strand callers.
 - [ ] `.codex/skills/arch-save/SKILL.md`
 - [ ] `codev-skeleton/.claude/skills/arch-save/SKILL.md`
 - [ ] `codev-skeleton/.codex/skills/arch-save/SKILL.md`
-- [ ] Scaffolding assertions in `packages/codev/src/__tests__/scaffold.test.ts`,
-      `init.test.ts`, `update.test.ts`, mirroring `arch-init`'s existing coverage.
+- [ ] Scaffolding assertions in `packages/codev/src/__tests__/scaffold.test.ts` (:302),
+      `init.test.ts` (:68), `update.test.ts` (:105) **and `adopt.test.ts` (:92)**,
+      mirroring `arch-init`'s existing coverage.
+- [ ] **Updates to the four existing `arch-init` SKILL.md copies**, whose "Saving your
+      state" section still documents the manual save→suggest-`/clear`→human-clears loop.
+      Leaving it unchanged ships two contradictory procedures for the same task.
 
 #### Implementation Details
 
@@ -168,9 +223,16 @@ command.
    place, append one dated entry, **and compact**: resolved loops deleted, older entries
    collapsed into pointers at durable artifacts, one-screen order of magnitude. Optionally
    `cp` the previous version first; these files are gitignored, so a bad save has no undo.
-4. `afx send <self> --raw '/clear'`
-5. `afx send <self> --delay 15 --raw '/arch-init <name>'`
+4. `afx send architect:<name> --raw '/clear'`
+5. `afx send architect:<name> --delay 15 --raw '/arch-init <name>'`
 6. Stop. Do not start new work.
+
+**The address must be `architect:<name>`, never bare `architect`.** For a non-builder
+sender the bare form resolves to `main` or the first registered architect
+(`servers/tower-messages.ts:371-372`), so a sibling architect's `/arch-save` would clear
+**main's** terminal. That is the worst outcome this feature can produce, it lands on
+someone who never invoked anything, and it is one word away from correct. The skill uses
+the resolved name explicitly and says why.
 
 **Why step 3 precedes step 4** must be stated in the doc, not just implied by ordering: the
 context that knows what to write is the one about to be destroyed.
@@ -196,11 +258,17 @@ stamp, monitor list, DONE-with-receipts, active lanes with brief pointers, lates
 queued-with-ordering, authorization envelope.
 
 #### Acceptance Criteria
-- [ ] `codev init` into a clean directory produces the skill in both provider trees.
-- [ ] `codev update` backfills it without touching a customised copy.
-- [ ] All four copies identical.
-- [ ] The doc states the write-before-clear reason, the `--raw` reason, the pruning
-      requirement, the owner-direction carve-out, and the manual-re-send recovery.
+- [ ] `codev init` into a clean directory produces the skill in both provider trees;
+      `codev adopt` and `codev update` backfill it without touching a customised copy.
+- [ ] All four `arch-save` copies identical. (Note: this means *this skill* across the
+      four trees — the skeleton trees deliberately carry a subset of skills overall, so
+      full tree parity is not the claim. `skill-parity.test.ts` already checks
+      provider-tree byte parity dynamically and should pick this up for free.)
+- [ ] The doc states the write-before-clear reason, the `architect:<name>` reason, the
+      `--raw` reason, the pruning requirement, the owner-direction carve-out, and the
+      manual-re-send recovery.
+- [ ] The four `arch-init` copies no longer document a manual loop that contradicts
+      `/arch-save`.
 
 #### Test Plan
 - **Unit Tests**: scaffold/init/update assertions mirroring `arch-init`'s.
@@ -249,8 +317,12 @@ Three questions the live run answers, none of which unit tests can:
    intercept the Enter?** Manual runs succeed, but not over this delivery path. If it
    bites, the fallback is a plain-text message naming identity and state-file path, which
    has no completion surface — a skill edit, not a code change.
-3. **Is 15 seconds right?** Taken from manual practice. Measure a real clear and set the
-   documented default accordingly.
+3. **Is 15 seconds right — and 15 seconds from *when*?** The delay budget starts when the
+   send is issued, but `/clear` cannot execute until the architect's turn ends, and the
+   turn continues for as long as the skill takes to finish. So the interval that actually
+   matters is **send → session-ready-after-clear**, not send → clear-sent. Measure that,
+   and set the documented default from it. A default calibrated against the wrong
+   interval would look right in testing and misfire whenever a turn runs long.
 
 **Exercise the recovery path too**, deliberately: drop the delayed message and re-send
 `/arch-init <name>` by hand. The design's central claim is that this recovers everything,
@@ -322,8 +394,13 @@ None.
 ### Technical Risks
 | Risk | Probability | Impact | Mitigation | Owner |
 |------|------------|--------|------------|-------|
-| A delayed send defers its authorisation check too | L | H | Resolve-and-authorise at request time, schedule only the write; asserted by test | Builder |
-| Leaked timers in Tower | M | L | Cleanup asserted on delivery, failure and shutdown | Builder |
+| **Delayed `/arch-init` overtakes a buffered `/clear`; the clear then wipes the recovered context** | M | **H — manual re-send does not repair it** | Due messages re-enter the normal delivery path including `SendBuffer`; inversion tested with the buffer engaged | Builder |
+| **`/arch-save` clears the wrong architect (bare `architect` → main)** | M | **H — hits an uninvolved session** | Skill addresses `architect:<name>` explicitly, with an acceptance criterion | Builder |
+| A delayed send defers its authorisation check too | L | H | Resolve-and-authorise at request time, schedule only delivery; asserted by test via `architect:<name>` | Builder |
+| A stale `PtySession` is written to at delivery | M | M | Retain terminal id; re-fetch and re-check writability at delivery | Builder |
+| The cross-package edit lands only in the re-export shim | M | M | `packages/core/src/tower-client.ts:655` named; core-first build ordering called out | Builder |
+| Delay calibrated against send→clear-sent instead of send→session-ready | M | M | Phase 3 measures the interval that matters and says which one it is | Builder |
+| Leaked timers in Tower | M | L | Cleanup asserted on delivery, failure and shutdown; shutdown drops rather than flushes | Builder |
 | `/clear` does not take effect over `--raw` | L | H | Manual field evidence; loud and harmless if it fails | Builder |
 | Autocomplete intercepts raw-typed `/arch-init <name>` | L | M | Confirmed in phase 3; fallback is a plain-text payload (skill edit only) | Builder |
 | 15s default is wrong | M | L | Calibrated in phase 3; tunable per invocation | Builder |
@@ -396,6 +473,7 @@ None. This is a human-initiated operation reporting synchronously to the person 
 |------|--------|--------|--------|
 | 2026-07-31 | Initial plan (7 phases, Tower job architecture) | Spec 1307 entered plan phase | Builder aspir-1307 |
 | 2026-07-31 | Rewritten to 3 phases | Owner descope directive: `afx send --delay` + a skill replaces the Tower-owned job, handshake, and intent-record machinery | Builder aspir-1307 |
+| 2026-07-31 | Plan CMAP iteration 1 | Both reviewers independently found the `SendBuffer` ordering inversion and the bare-`architect` addressing bug; plus core-vs-shim file targeting, delivery re-resolution, shutdown wiring, flag composition, `adopt` coverage, `arch-init` doc contradiction, and the delay-budget interval | Builder aspir-1307 |
 
 ## Notes
 
@@ -413,7 +491,17 @@ time, or a delayed send becomes a way to defer a check past the conditions that 
 it. That is the single security-relevant decision in this plan, which is why it has its own
 acceptance criterion and its own test rather than living inside "reuses the existing path."
 
-**On accepted risk.** The hazards this design does not close — mistimed delivery, a dropped
+**On the two hazards that are NOT accepted risk.** The plan review surfaced two failures
+that the manual-re-send posture does not cover, because in both the damage lands on a
+context that is not the one being refreshed: a delayed `/arch-init` overtaking a buffered
+`/clear` (the clear then wipes the recovered session, and re-sending re-runs the race), and
+bare-`architect` addressing clearing main instead of the sibling that invoked it (the
+victim never invoked anything). Both are designed out — FIFO re-entry into the delivery
+path, and explicit `architect:<name>` addressing — not accepted. The recoverability
+argument is load-bearing for this whole design, so its boundary has to be as precise as its
+claim.
+
+**On accepted risk.** The remaining hazards this design does not close — mistimed delivery, a dropped
 message on restart, work started between save and clear — are all recoverable by re-sending
 one message by hand. That recovery is exercised in phase 3 rather than assumed, because the
 entire risk posture rests on it. Issue #1310 is the primitive that would let a future

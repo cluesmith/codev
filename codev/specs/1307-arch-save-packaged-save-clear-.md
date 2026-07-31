@@ -94,8 +94,16 @@ mechanism — which is exactly why it is still a human keystroke today.
 2. **Write the pruned state file** to `codev/state/<name>.md`: rewrite current state in
    place, append one dated entry, **and compact** — resolved loops deleted, older entries
    collapsed into pointers at durable artifacts, one-screen order of magnitude.
-3. `afx send <self> --raw '/clear'`
-4. `afx send <self> --delay 15 --raw '/arch-init <name>'`
+3. `afx send architect:<name> --raw '/clear'`
+4. `afx send architect:<name> --delay 15 --raw '/arch-init <name>'`
+
+**The address must be `architect:<name>`, never bare `architect`.** For a non-builder
+sender the bare form resolves to `main`, or to the first registered architect
+(`servers/tower-messages.ts:371-372`) — so a *sibling* architect running `/arch-save`
+would clear **main's** terminal instead of its own. Clearing the wrong architect's context
+is the single worst outcome this feature could produce, and it is one word away from the
+correct behaviour. The explicit form is safe for architect senders: the spoofing check
+constrains builders, while architects have an open address grammar.
 
 That is the whole feature. Tower holds the fourth message while the clear takes effect,
 then delivers it into the fresh session, which re-adopts its identity and resumes from the
@@ -121,8 +129,17 @@ imprecision everywhere else.
 
 - [ ] `afx send <target> --delay <seconds> --raw '<text>'` delivers the message after the
       stated delay, Tower-side, with the sender's process free to exit immediately.
-- [ ] `--delay` composes with existing send flags (`--raw`, `--escape`, normal messages)
-      and with every addressing form, without changing undelayed behaviour.
+- [ ] `--delay` composes with existing send flags (`--raw`, `--file`, `--no-enter`,
+      `--all`, `--interrupt`) and with every addressing form, without changing undelayed
+      behaviour. (`--escape` is **N/A**: `afx send` has no such flag — interrupts are
+      `afx interrupt`, and `escape` exists only as a client/route option.)
+- [ ] **Per-session delivery order is preserved.** A delayed message never overtakes an
+      earlier message to the same session, including one held by the existing
+      typing-aware send buffer. This is the ordering the whole feature depends on: if
+      `/arch-init` overtakes `/clear`, the clear wipes the re-orientation that already
+      landed.
+- [ ] `/arch-save` addresses its own terminal as `architect:<name>`, never bare
+      `architect`, so a sibling architect cannot clear main's session.
 - [ ] Invalid delays (zero, negative, non-integer, NaN, absurdly large) are rejected at the
       CLI boundary.
 - [ ] `/arch-save` ships as a skill in all four trees (`.claude/skills/`, `.codex/skills/`,
@@ -147,6 +164,16 @@ imprecision everywhere else.
 
 ### Technical Constraints
 
+- **A delayed message must not overtake an earlier one to the same session.** Tower
+  already holds messages for reasons of its own: `SendBuffer` (Spec 403) defers delivery
+  while the user is typing — `shouldDefer = !interrupt && !session.isUserIdle(3000)`
+  (`servers/tower-routes.ts:1570`) — for up to 60 seconds. So a `/clear` sent while
+  someone is at the keyboard can sit buffered while the `/arch-init` timer expires behind
+  it. If the delayed write bypassed the buffer, `/arch-init` would land **first** and the
+  `/clear` would then destroy the freshly-recovered context. The rule that prevents this:
+  a due message **re-enters the normal delivery path**, buffering included, rather than
+  writing directly to the session. Ordering then follows from the existing per-session
+  FIFO rather than from timing luck.
 - **`--delay` is Tower-side, not client-side.** The sending process must be free to exit —
   in the self-invoked case it is a Bash call inside the very session about to be cleared.
   A client that sleeps would die with the clear, which is the failure the whole design
@@ -312,8 +339,15 @@ manually, including raw-typed `/arch-init <name>`, successfully.
 
 1. **Delayed delivery.** `afx send --delay N` returns immediately; the message arrives
    after ~N seconds; the sender's process has already exited.
-2. **Composition.** `--delay` works with `--raw`, with normal formatted messages, and
-   across addressing forms (`<builder-id>`, `architect`, `architect:<name>`).
+2. **Composition.** `--delay` works with `--raw`, `--file`, `--no-enter`, `--all`,
+   `--interrupt`, with normal formatted messages, and across addressing forms
+   (`<builder-id>`, `architect`, `architect:<name>`).
+2a. **Ordering under buffering.** An earlier message held by `SendBuffer` (user typing)
+   is delivered **before** a later delayed message to the same session, even when the
+   delay expires while the first is still buffered. This is the ordering the feature
+   depends on, so it is tested directly rather than inferred from FIFO.
+2b. **Self-addressing.** `/arch-save` targets `architect:<name>`; a sibling architect
+   invoking it does not touch main's terminal.
 3. **Undelayed behaviour unchanged.** Sends without `--delay` are byte-identical in
    behaviour and timing to today.
 4. **Invalid delays rejected**: zero, negative, non-integer, NaN, and above the maximum —
@@ -366,10 +400,24 @@ manually, including raw-typed `/arch-init <name>`, successfully.
 
 **The posture, stated once and applied throughout**: the state file survives the clear,
 the terminal stays alive, and re-sending `/arch-init <name>` by hand recovers everything.
-So the only expensive failure is *clearing without a good save*, which the skill's step
-order prevents. Every hazard below costs at most one manual message. That is why timing
-heuristics suffice here and guarantee-machinery is not worth its weight — the mitigation
-for the tail is **accepted recoverability**, not more mechanism.
+So *most* hazards below cost at most one manual message, and for those the mitigation is
+**accepted recoverability** rather than more mechanism. That is why timing heuristics
+suffice here.
+
+**Two hazards fall outside that posture and must be designed out, not accepted** — both
+surfaced by the plan review, and both share a signature worth naming: the damage lands on
+a context that is *not* the one being refreshed, so "re-send `/arch-init`" does not repair
+it.
+
+1. **A clear that arrives *after* recovery.** If the delayed `/arch-init` overtakes a
+   buffered `/clear`, the clear destroys the context that just recovered. Re-sending
+   produces the same race.
+2. **A clear aimed at the wrong architect.** Bare `architect` addressing resolves to
+   `main`, so a sibling architect's refresh would wipe an uninvolved session whose owner
+   never asked for anything.
+
+The recoverability argument is load-bearing for this design, so where it does not apply
+has to be stated as precisely as where it does.
 
 | Risk | Probability | Impact | Mitigation |
 |------|------------|--------|------------|
@@ -380,7 +428,9 @@ for the tail is **accepted recoverability**, not more mechanism.
 | Phantom monitors survive the clear and fire stale alerts | High (observed live) | Medium | Skill sequences the pre-clear stop (the enforceable half — that context holds the handles); the state block lists them so the resumed instance recognises an unaccountable alert as stale and re-arms deliberately, self-testing before trusting alerts. |
 | A save that only appends, or over-prunes an irreplaceable file | Medium | Medium | Pruning is a stated requirement of the skill, with the prune-by-pointer rule repeated because these files are gitignored. Optionally a one-line `cp` snapshot before the write. |
 | An architect invokes `/arch-save` autonomously mid-task | Low | Medium | Documented owner-direction norm with an override carve-out. Not machine-checked, and the spec says so. |
-| `/clear` sent over `--escape` instead of `--raw` delivers a bare interrupt | Low | High | The escape route discards the message body. Skill uses `--raw` explicitly and says why; asserted in the live run. |
+| `/clear` sent over the escape route instead of `--raw` delivers a bare interrupt | Low | High | The escape route discards the message body. Skill uses `--raw` explicitly and says why; asserted in the live run. |
+| **The delayed `/arch-init` overtakes a buffered `/clear`, so the clear wipes the recovered context** | Medium | **High — not recoverable by re-send** | Due messages re-enter the normal delivery path including `SendBuffer`, so per-session FIFO holds. This is the one hazard here that the manual-re-send posture does **not** cover: the damage is a *second* clear after recovery, so it must be designed out rather than accepted. |
+| **`/arch-save` clears the wrong architect's terminal** | Medium if bare `architect` is used | **High — destroys an uninvolved session** | The skill addresses `architect:<name>` explicitly. Bare `architect` resolves to `main`/first-registered for non-builder senders (`tower-messages.ts:371-372`), so a sibling architect would clear main. Also outside the recoverable posture — the victim never invoked anything. |
 | Skill ships in fewer than four trees, so adopters silently lack it | Medium | Low | Four-tree coverage is a success criterion, using `arch-init`'s existing scaffolding test pattern. |
 
 ## Expert Consultation
