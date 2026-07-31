@@ -6,11 +6,12 @@
  * workspace path decoding, and 404 fallback.
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import http from 'node:http';
 import { EventEmitter } from 'node:events';
 import { handleRequest } from '../servers/tower-routes.js';
 import type { RouteContext } from '../servers/tower-routes.js';
+import { shutdownDelayedSends, pendingDelayedSendCount } from '../servers/delayed-send.js';
 
 // ============================================================================
 // Mocks
@@ -1612,6 +1613,242 @@ describe('tower-routes', () => {
       expect(parsed.ok).toBe(true);
       expect(parsed.deferred).toBe(false);
       // Message SHOULD be written — user is idle (Bugfix #492)
+      expect(mockWrite).toHaveBeenCalled();
+    });
+  });
+
+  // =========================================================================
+  // POST /api/send — delayed delivery (Spec 1307)
+  // =========================================================================
+
+  // These use their own terminal id. The SendBuffer in tower-routes.ts is
+  // module-level state shared across this file, and earlier tests deliberately
+  // leave messages queued for `term-001` — which a delayed send would then
+  // correctly queue behind, masking what these tests are checking.
+  describe('POST /api/send with deliverAfter', () => {
+    beforeEach(() => {
+      shutdownDelayedSends();
+    });
+
+    afterEach(() => {
+      shutdownDelayedSends();
+      vi.useRealTimers();
+    });
+
+    function idleSession(write: ReturnType<typeof vi.fn>) {
+      return { write, pid: 1234, writable: true, isUserIdle: () => true, composing: false };
+    }
+
+    it('responds scheduled:true and writes nothing yet', async () => {
+      vi.useFakeTimers();
+      mockParseJsonBody.mockResolvedValue({
+        to: 'architect:main', message: '/arch-init main', workspace: '/tmp/ws',
+        options: { raw: true, deliverAfter: 15 },
+      });
+      mockResolveTarget.mockReturnValue({
+        terminalId: 'term-delay-001', workspacePath: '/tmp/ws', agent: 'architect',
+      });
+      const mockWrite = vi.fn();
+      mockGetTerminalManager.mockReturnValue({
+        getSession: () => idleSession(mockWrite), listSessions: () => [],
+      });
+      const { res, statusCode, body } = makeRes();
+
+      await handleRequest(makeReq('POST', '/api/send'), res, makeCtx());
+
+      expect(statusCode()).toBe(200);
+      const parsed = JSON.parse(body());
+      expect(parsed.scheduled).toBe(true);
+      expect(parsed.deliverAfter).toBe(15);
+      expect(mockWrite).not.toHaveBeenCalled();
+    });
+
+    it('delivers once the delay elapses', async () => {
+      vi.useFakeTimers();
+      mockParseJsonBody.mockResolvedValue({
+        to: 'architect:main', message: 'later', workspace: '/tmp/ws',
+        options: { raw: true, deliverAfter: 15 },
+      });
+      mockResolveTarget.mockReturnValue({
+        terminalId: 'term-delay-001', workspacePath: '/tmp/ws', agent: 'architect',
+      });
+      const mockWrite = vi.fn();
+      mockGetTerminalManager.mockReturnValue({
+        getSession: () => idleSession(mockWrite), listSessions: () => [],
+      });
+      const { res } = makeRes();
+
+      await handleRequest(makeReq('POST', '/api/send'), res, makeCtx());
+      expect(mockWrite).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(mockWrite).toHaveBeenCalled();
+    });
+
+    it('re-fetches the session at delivery and drops gracefully when it is gone', async () => {
+      // The reason delivery must not close over a PtySession: between scheduling
+      // and delivery the session can die, and writes to a stale reference go
+      // nowhere silently.
+      vi.useFakeTimers();
+      mockParseJsonBody.mockResolvedValue({
+        to: 'architect:main', message: 'later', workspace: '/tmp/ws',
+        options: { raw: true, deliverAfter: 5 },
+      });
+      mockResolveTarget.mockReturnValue({
+        terminalId: 'term-delay-001', workspacePath: '/tmp/ws', agent: 'architect',
+      });
+      const mockWrite = vi.fn();
+      let alive = true;
+      mockGetTerminalManager.mockReturnValue({
+        getSession: () => (alive ? idleSession(mockWrite) : undefined),
+        listSessions: () => [],
+      });
+      const { res, statusCode } = makeRes();
+
+      await handleRequest(makeReq('POST', '/api/send'), res, makeCtx());
+      expect(statusCode()).toBe(200);
+
+      alive = false;
+      await expect(vi.advanceTimersByTimeAsync(5_000)).resolves.not.toThrow();
+      expect(mockWrite).not.toHaveBeenCalled();
+    });
+
+    it('does not write to a session that became unwritable during the wait', async () => {
+      vi.useFakeTimers();
+      mockParseJsonBody.mockResolvedValue({
+        to: 'architect:main', message: 'later', workspace: '/tmp/ws',
+        options: { raw: true, deliverAfter: 5 },
+      });
+      mockResolveTarget.mockReturnValue({
+        terminalId: 'term-delay-001', workspacePath: '/tmp/ws', agent: 'architect',
+      });
+      const mockWrite = vi.fn();
+      let writable = true;
+      mockGetTerminalManager.mockReturnValue({
+        getSession: () => ({ ...idleSession(mockWrite), writable }),
+        listSessions: () => [],
+      });
+      const { res } = makeRes();
+
+      await handleRequest(makeReq('POST', '/api/send'), res, makeCtx());
+      writable = false;
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      expect(mockWrite).not.toHaveBeenCalled();
+    });
+
+    it('rejects an invalid delay before scheduling anything', async () => {
+      mockParseJsonBody.mockResolvedValue({
+        to: 'architect:main', message: 'x', workspace: '/tmp/ws',
+        options: { deliverAfter: 0 },
+      });
+      mockResolveTarget.mockReturnValue({
+        terminalId: 'term-delay-001', workspacePath: '/tmp/ws', agent: 'architect',
+      });
+      const { res, statusCode, body } = makeRes();
+
+      await handleRequest(makeReq('POST', '/api/send'), res, makeCtx());
+
+      expect(statusCode()).toBe(400);
+      expect(JSON.parse(body()).error).toBe('INVALID_PARAMS');
+      expect(pendingDelayedSendCount()).toBe(0);
+    });
+
+    it('rejects NaN delays', async () => {
+      mockParseJsonBody.mockResolvedValue({
+        to: 'architect:main', message: 'x', workspace: '/tmp/ws',
+        options: { deliverAfter: NaN },
+      });
+      mockResolveTarget.mockReturnValue({
+        terminalId: 'term-delay-001', workspacePath: '/tmp/ws', agent: 'architect',
+      });
+      const { res, statusCode } = makeRes();
+
+      await handleRequest(makeReq('POST', '/api/send'), res, makeCtx());
+
+      expect(statusCode()).toBe(400);
+      expect(pendingDelayedSendCount()).toBe(0);
+    });
+
+    it('refuses escape combined with a delay rather than silently ignoring one', async () => {
+      mockParseJsonBody.mockResolvedValue({
+        to: 'architect:main', message: 'x', workspace: '/tmp/ws',
+        options: { escape: true, deliverAfter: 5 },
+      });
+      mockResolveTarget.mockReturnValue({
+        terminalId: 'term-delay-001', workspacePath: '/tmp/ws', agent: 'architect',
+      });
+      const { res, statusCode, body } = makeRes();
+
+      await handleRequest(makeReq('POST', '/api/send'), res, makeCtx());
+
+      expect(statusCode()).toBe(400);
+      expect(JSON.parse(body()).message).toMatch(/escape cannot be combined with a delay/);
+      expect(pendingDelayedSendCount()).toBe(0);
+    });
+
+    it('AUTHORISES at request time: a refused target never schedules', async () => {
+      // The security-relevant property. A delayed send must not be able to defer
+      // an authorization check past the conditions that would fail it — so a
+      // resolveTarget refusal (e.g. the builder-spoofing check on
+      // `architect:<name>`) must stop the request before anything is scheduled.
+      mockParseJsonBody.mockResolvedValue({
+        to: 'architect:other', message: 'x', workspace: '/tmp/ws', from: 'aspir-1307',
+        options: { deliverAfter: 15 },
+      });
+      mockResolveTarget.mockReturnValue({
+        code: 'FORBIDDEN',
+        message: 'builder aspir-1307 may only address its own spawning architect',
+      });
+      const { res, statusCode } = makeRes();
+
+      await handleRequest(makeReq('POST', '/api/send'), res, makeCtx());
+
+      expect(statusCode()).not.toBe(200);
+      expect(pendingDelayedSendCount()).toBe(0);
+    });
+
+    it('defers the interrupt WITH the message rather than firing it now', async () => {
+      // Otherwise the Ctrl+C lands immediately — interrupting the sender's own
+      // turn — and the message arrives alone N seconds later.
+      vi.useFakeTimers();
+      mockParseJsonBody.mockResolvedValue({
+        to: 'architect:main', message: 'later', workspace: '/tmp/ws',
+        options: { raw: true, interrupt: true, deliverAfter: 5 },
+      });
+      mockResolveTarget.mockReturnValue({
+        terminalId: 'term-delay-001', workspacePath: '/tmp/ws', agent: 'architect',
+      });
+      const mockWrite = vi.fn();
+      mockGetTerminalManager.mockReturnValue({
+        getSession: () => idleSession(mockWrite), listSessions: () => [],
+      });
+      const { res } = makeRes();
+
+      await handleRequest(makeReq('POST', '/api/send'), res, makeCtx());
+      expect(mockWrite).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(mockWrite.mock.calls[0][0]).toBe('\x03');
+    });
+
+    it('leaves undelayed sends on the immediate path', async () => {
+      mockParseJsonBody.mockResolvedValue({
+        to: 'architect:main', message: 'now', workspace: '/tmp/ws', options: { raw: true },
+      });
+      mockResolveTarget.mockReturnValue({
+        terminalId: 'term-delay-001', workspacePath: '/tmp/ws', agent: 'architect',
+      });
+      const mockWrite = vi.fn();
+      mockGetTerminalManager.mockReturnValue({
+        getSession: () => idleSession(mockWrite), listSessions: () => [],
+      });
+      const { res, body } = makeRes();
+
+      await handleRequest(makeReq('POST', '/api/send'), res, makeCtx());
+
+      const parsed = JSON.parse(body());
+      expect(parsed.scheduled).toBe(false);
       expect(mockWrite).toHaveBeenCalled();
     });
   });
