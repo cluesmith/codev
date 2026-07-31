@@ -107,7 +107,14 @@ T+40   buffer flushes → /clear lands → wipes the recovered context
 ```
 
 So a due message re-enters the same path — buffering included — rather than writing to the
-session. Per-session FIFO then does the work, and ordering stops depending on timing luck.
+session. The existing per-session queue then does the work, and ordering stops depending
+on timing luck.
+
+The guarantee is deliberately narrow: a delayed message never overtakes one **already
+queued** for that session. It is NOT request-order across differing delays — `--delay 30`
+followed by `--delay 5` delivers the 5s one first, because that is what `--delay` means.
+Separately, concurrent deliveries to one session must not interleave, which requires
+waiting out each other's *paced writes*, not merely their scheduling.
 
 **Delivery must re-resolve, not close over a session.** Retain the *authorised terminal
 id*; at delivery, re-fetch that exact session and re-check it is writable. Holding a

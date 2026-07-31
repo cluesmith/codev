@@ -133,11 +133,23 @@ imprecision everywhere else.
       `--all`, `--interrupt`) and with every addressing form, without changing undelayed
       behaviour. (`--escape` is **N/A**: `afx send` has no such flag — interrupts are
       `afx interrupt`, and `escape` exists only as a client/route option.)
-- [ ] **Per-session delivery order is preserved.** A delayed message never overtakes an
-      earlier message to the same session, including one held by the existing
-      typing-aware send buffer. This is the ordering the whole feature depends on: if
-      `/arch-init` overtakes `/clear`, the clear wipes the re-orientation that already
-      landed.
+- [ ] **A delayed message never overtakes a message already QUEUED for that session** —
+      including one held by the existing typing-aware send buffer. This is the ordering
+      the whole feature depends on: if `/arch-init` overtakes `/clear`, the clear wipes
+      the re-orientation that already landed. In `/arch-save` the `/clear` is sent with
+      no delay and the `/arch-init` with one, so this is exactly the case that matters.
+- [ ] **Concurrent deliveries to one session do not interleave.** Two delayed messages
+      coming due together are written one after the other, waiting out each other's
+      paced writes — not just each other's scheduling.
+- [ ] **Deliberately NOT guaranteed: request-order across differing delays.**
+      `--delay 30` followed by `--delay 5` delivers the 5-second one first, because that
+      is what the caller asked for. `--delay N` is a statement about *when* to deliver;
+      forcing request-order would make the flag silently not mean what it says. This
+      exclusion is stated explicitly because an earlier draft of this criterion said
+      "never overtakes an earlier message," which reads as request-order FIFO and
+      contradicted the implementation — a review caught the disagreement between the two
+      artifacts. The narrow guarantee above is the one the feature needs and the one it
+      makes.
 - [ ] `/arch-save` addresses its own terminal as `architect:<name>`, never bare
       `architect`, so a sibling architect cannot clear main's session.
 - [ ] Invalid delays (zero, negative, non-integer, NaN, absurdly large) are rejected at the
@@ -429,7 +441,7 @@ has to be stated as precisely as where it does.
 | A save that only appends, or over-prunes an irreplaceable file | Medium | Medium | Pruning is a stated requirement of the skill, with the prune-by-pointer rule repeated because these files are gitignored. Optionally a one-line `cp` snapshot before the write. |
 | An architect invokes `/arch-save` autonomously mid-task | Low | Medium | Documented owner-direction norm with an override carve-out. Not machine-checked, and the spec says so. |
 | `/clear` sent over the escape route instead of `--raw` delivers a bare interrupt | Low | High | The escape route discards the message body. Skill uses `--raw` explicitly and says why; asserted in the live run. |
-| **The delayed `/arch-init` overtakes a buffered `/clear`, so the clear wipes the recovered context** | Medium | **High — not recoverable by re-send** | Due messages re-enter the normal delivery path including `SendBuffer`, so per-session FIFO holds. This is the one hazard here that the manual-re-send posture does **not** cover: the damage is a *second* clear after recovery, so it must be designed out rather than accepted. |
+| **The delayed `/arch-init` overtakes a buffered `/clear`, so the clear wipes the recovered context** | Medium | **High — not recoverable by re-send** | Due messages re-enter the normal delivery path including `SendBuffer`, so a delayed message queues behind anything already pending for that session. This is the one hazard here that the manual-re-send posture does **not** cover: the damage is a *second* clear after recovery, so it must be designed out rather than accepted. |
 | **`/arch-save` clears the wrong architect's terminal** | Medium if bare `architect` is used | **High — destroys an uninvolved session** | The skill addresses `architect:<name>` explicitly. Bare `architect` resolves to `main`/first-registered for non-builder senders (`tower-messages.ts:371-372`), so a sibling architect would clear main. Also outside the recoverable posture — the victim never invoked anything. |
 | Skill ships in fewer than four trees, so adopters silently lack it | Medium | Low | Four-tree coverage is a success criterion, using `arch-init`'s existing scaffolding test pattern. |
 
