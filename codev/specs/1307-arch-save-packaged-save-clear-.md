@@ -166,9 +166,9 @@ In both cases the observable outcome is the same:
    machine, and its previous contents are snapshotted first.
 2. Only after verification, and only once the architect's turn has actually ended, is
    `/clear` delivered.
-3. The fresh session receives exactly `/arch-init <name>`, re-adopts its identity, reads
-   the state file, and resumes — including stopping any monitors that survived the clear
-   and re-arming the ones the state block lists.
+3. The fresh session receives a self-sufficient re-orientation message, re-adopts its
+   identity, reads the state file, and resumes — including reconciling against the
+   monitors that survived the clear and re-arming the ones the state block lists.
 
 Every gate that fails aborts **without clearing**, names the gate that failed, and
 leaves the architect with its context and a saved state file. The safe outcome is
@@ -183,7 +183,7 @@ What the architect experiences, concretely, in the self-invoked path:
   floor, required monitor marker, stability, recency — and either refuses on the spot
   with a named gate, or arms Tower and **exits immediately** so the turn can end.
 - The architect stops. Tower waits for the turn to actually end, delivers `/clear`,
-  confirms best-effort, and injects `/arch-init <name>`.
+  confirms best-effort, and injects the re-orientation.
 - The architect wakes up as itself, mid-stream, having lost nothing it wrote down.
 
 The write-before-arm ordering is not a stylistic choice. It makes "no clear without a
@@ -206,8 +206,8 @@ in which a clear is pending against a save that has not happened yet.
 
 - [ ] `afx arch-save <name> --boundary` completes the full cycle against a live
       architect terminal when invoked from a shell other than that architect's own:
-      state verified → turn quiescent → `/clear` delivered → `/arch-init <name>`
-      injected → fresh session reports its identity and resumes from the state file.
+      state verified → turn quiescent → `/clear` delivered → re-orientation injected →
+      fresh session reports its identity and resumes from the state file.
 - [ ] `/arch-save` invoked **inside** the architect's own session completes the same
       cycle. The CLI returns control to the architect (does not block), the architect's
       turn ends, and the remaining steps are carried out by Tower.
@@ -233,8 +233,11 @@ in which a clear is pending against a save that has not happened yet.
       step — before the architect touches the file. A snapshot taken after the
       overwrite is worthless, and these files are gitignored, so there is no second
       chance to notice.
-- [ ] The re-orientation delivered after the clear is exactly `/arch-init <name>` and
-      nothing else, over the raw channel.
+- [ ] The re-orientation delivered after the clear is **self-sufficient plain text**: it
+      names the architect's identity and its state-file path, and requests the arch-init
+      skill by name. It contains no typed slash command. A fresh session that never
+      invokes the skill can still recover from the message alone — asserted by reading
+      the payload, not by assuming it.
 - [ ] The state-block template documents all seven elements validated by the live run,
       carries the `MONITORS:` marker verbatim, and documents the monitor list as serving
       both as a kill-list for the transition and a re-arm list for the resumed instance.
@@ -292,13 +295,33 @@ in which a clear is pending against a save that has not happened yet.
   step and the step-log discipline exist and are tested. Shared logic is factored out of
   `commands/reset/` and consumed by both flavours; `afx reset`'s builder behaviour must
   not change.
-- **The re-orientation channel differs from reset's, and the shared extraction must
-  preserve the difference.** `afx reset` delivers its re-orientation with
-  `sendMessage`, which wraps the body in a `[MESSAGE FROM …]` envelope. This command
-  must use `sendRaw`: a wrapped payload is not a slash command at all, so `/arch-init`
-  would arrive as inert text and the architect would wake up with no identity and no
-  state. A refactor that collapses the two delivery paths into one breaks this
-  silently — the run would report success and the fresh session would sit idle.
+- **The re-orientation payload is plain text, not a typed slash command.** The obvious
+  design — raw-type `/arch-init <name>` so the harness loads the skill deterministically
+  — puts a slash command *with an argument* through a TUI's autocomplete, where Enter
+  may accept a highlighted completion instead of submitting. That step had no safe
+  degradation: a swallowed re-orientation leaves an already-cleared architect with no
+  identity. The payload is therefore an ordinary injected message that names the
+  identity, names the state file, and asks for the arch-init skill by name — no leading
+  slash, no completion surface, skill invocation resolved model-side.
+
+  **What this trades, and why it is worth it.** It gives up *deterministic* skill
+  loading (a harness mechanism) for *model-side* invocation (a judgment call). That
+  would be a bad trade if the payload depended on the skill — so it must not. The
+  message has to be **self-sufficient**: it states who the architect is and where its
+  state file lives, so that even if the skill is never invoked, the fresh session can
+  recover by reading the state file directly. The skill invocation then upgrades the
+  recovery (identity validation via `afx whoami`, the architect-wide guardrails) rather
+  than being load-bearing for it. Net effect: a step with no safe degradation becomes a
+  step that degrades twice over.
+
+  `/clear` itself still goes over the raw channel — it must, and it is a single builtin
+  token with no argument, which is the low-risk end of the same exposure.
+- **`sendMessage` and `sendRaw` remain distinct operations.** With a plain-text
+  re-orientation this command's delivery matches `afx reset`'s, so the two no longer
+  diverge at that step — but the underlying split must survive any shared extraction
+  regardless, because Tower's escape route discards the message body. Collapsing raw
+  and escape would turn `/clear` into a bare interrupt: the run would report success and
+  nothing would be cleared.
 - **The monitor marker is a token, not a markdown heading.** The adopted v67 template
   carries its monitor list as numbered lines inside a `#`-comment intent stamp, so
   requiring a `## Monitors` heading would make the shipped validator reject the shipped
@@ -345,7 +368,7 @@ in which a clear is pending against a save that has not happened yet.
 ### Approach 1: Minimal Tower clear-job + write-then-verify (recommended)
 
 **Description**: The only thing Tower owns is the part that *must* outlive the clear:
-**quiesce → `/clear` → confirm → inject `/arch-init <name>`**. Everything upstream of
+**quiesce → `/clear` → confirm → inject the re-orientation**. Everything upstream of
 that — proving a good save exists — happens before the job is armed, in whichever
 process can actually do it.
 
@@ -509,7 +532,7 @@ subset of Approach 1's external path, so choosing 1 does not foreclose it.
       `afx reset`'s clear-confirmation matcher is a best guess at the harness's output.
       This spec inherits the dependency wholesale. *Mitigation*: the design is
       abort-safe in the failure direction. If the clear silently no-ops, the outcome is
-      an architect that kept its context and also received `/arch-init <name>` — which
+      an architect that kept its context and also received the re-orientation — which
       loses nothing and is loudly visible. Implementation should therefore proceed, with
       the live run treated as an acceptance gate rather than a precondition, and the
       residual risk surfaced to the owner at the PR gate.
@@ -538,6 +561,13 @@ subset of Approach 1's external path, so choosing 1 does not foreclose it.
       window small but will disarm on an architect that takes a while to wind down. The
       assumed answer is a short bound with an explicit, visible disarm notice rather
       than a long silent one; the exact value should come from the live run.
+- [ ] **Does a plain-text request reliably get the arch-init skill invoked?** The
+      re-orientation asks for the skill by name rather than typing it as a slash
+      command. Skill selection is model-side, so this is a behavioural question the live
+      run should answer, not a mechanism that can be unit-tested. The spec deliberately
+      does not depend on the answer — the payload is self-sufficient either way — but if
+      invocation turns out to be unreliable, the wording is worth tuning rather than
+      leaving to chance.
 - [ ] **Can the resumed instance enumerate surviving monitors at all?** Issue comment 2
       establishes that they survive and that `pgrep` cannot see them, because they are
       harness background tasks rather than shell processes. Claude Code exposes a
@@ -622,9 +652,10 @@ transactions per second.
   spec's position on boundary-ness generally: state the limit rather than let the
   ceremony imply a check that is not there.
 - **Injection into a live PTY**: the command writes to a terminal. The only text it
-  writes unattended is `/clear` and `/arch-init <name>`, both constructed from validated
-  inputs — never from unvalidated user content. Any architect-supplied note must not be
-  able to alter the injected slash command.
+  writes unattended is `/clear` and the re-orientation message, both constructed from
+  validated inputs — never from unvalidated user content. Any architect-supplied note
+  must not be able to alter either, and in particular must not be able to introduce a
+  leading slash that would turn the re-orientation back into a typed command.
 - **Audit**: the step log is the audit record for a cycle — what was verified, when the
   clear was sent, whether it was confirmed. It should be reportable after the fact for a
   job that ran without a human watching.
@@ -636,7 +667,7 @@ transactions per second.
 1. **Happy path, external invocation.** Owner runs the command from a non-architect
    shell against a live, idle architect. The architect receives the save request, writes
    a substantive state file carrying the nonce and the `MONITORS:` marker, goes quiet;
-   the clear is delivered, confirmed, and `/arch-init <name>` is injected. The step log
+   the clear is delivered, confirmed, and the re-orientation is injected. The step log
    contains every step in order.
 2. **Happy path, self invocation.** The architect invokes the command in its own
    session. The CLI returns promptly with the nonce and instructions and does *not*
@@ -669,10 +700,15 @@ transactions per second.
     for *content*, not just existence — the snapshot must differ from the post-save
     file when the save changed anything, which is what catches a snapshot mistakenly
     taken after the write.
-14. **Re-orientation payload is exact.** The message delivered after the clear is
-    `/arch-init <name>` and nothing else, over the raw channel — asserted directly,
-    because delivering it over the escape channel would silently send an interrupt
-    instead.
+14. **Re-orientation payload and channel.** The message delivered after the clear
+    contains no typed slash command, and does contain the architect's name and its
+    state-file path — the two facts that make it recoverable on its own. Separately,
+    `/clear` is asserted to go over the raw channel and *not* the escape channel, since
+    the escape route discards the body and would silently send a bare interrupt.
+14a. **Self-sufficiency under skill failure.** Given the payload and a valid state file,
+    a session that never invokes the arch-init skill can still identify itself and
+    locate its state. Asserted against the payload's content, so the property cannot
+    quietly regress when the wording is edited.
 15. **Tower restart with a job armed.** The job is dropped; no clear ever happens; the
     condition is reported rather than silent.
 16. **Disarm.** An armed job can be cancelled explicitly, and cancelling leaves the
@@ -728,8 +764,8 @@ transactions per second.
     rule.
   - `commands/reset/` (Spec 1273, PR #1305) — the receipt gate, quiescence gate,
     clear-and-confirm step, and step-log discipline to be factored out and shared.
-  - `/arch-init` skill — the recovery entry point this command's payload calls into; its
-    read contract constrains the write format.
+  - `/arch-init` skill — the recovery entry point this command's payload requests by
+    name; its read contract constrains the write format.
   - `lib/scaffold.ts` and the `codev init/adopt/update` path — skill distribution.
 - **Libraries/Frameworks**: none new. Existing stack only (TypeScript, Commander,
   better-sqlite3, vitest).
@@ -761,8 +797,9 @@ transactions per second.
 | Forking the reset machinery lets the two flavours' ordering rules drift | Medium | High | Factor shared gates out of `commands/reset/` and consume them from both; the ordering invariant tests run against the shared state machine, not per-flavour copies. |
 | **A new turn starts between the verified save and the clear, so the clear destroys work the save never captured** | Medium | High | Write-then-verify removes the receipt window from the self path entirely; the job fires on the *first* quiescence transition after arming; armed lifetime is bounded and disarms visibly. Exposure reduced from minutes to one quiet window. |
 | **Quiescence never resolves against a live TUI that repaints while idle, so every run aborts** | Medium | High (feature is inert) | Scope the live e2e to measure real idle behaviour, not just the clear; treat the quiet window as a value to be tuned from observation rather than inherited. Failure is safe but total, so it must be caught before ship, not after. |
-| **Raw-typed `/arch-init <name>` hits slash-command autocomplete and Enter accepts a completion instead of submitting** | Medium | High | `/clear` shares the exposure but is a single builtin token; a slash command *with an argument* is the riskier case. Verify both in the live run; if autocomplete interferes, fall back to a delivery form that avoids the completion popup. This is the one step with no safe degradation — a swallowed re-orientation leaves a cleared architect with no identity — so it must be confirmed live, not assumed. |
-| A refactor collapses `sendRaw` and `sendMessage` re-orientation delivery | Medium | High | Constraint is stated explicitly; assert the exact channel and exact payload in tests (scenario 14) rather than relying on the refactor's author reading the comment. |
+| Slash-command autocomplete swallows the Enter on the re-orientation | Low (designed out) | High if it occurred | **Eliminated rather than mitigated**: the payload is plain text with no leading slash, so there is no completion surface. Residual exposure is limited to `/clear` itself — a single builtin token with no argument — which the live run confirms. |
+| The fresh session does not invoke the arch-init skill from a plain-text request | Medium | Low | The payload is self-sufficient by requirement: it carries identity and state-file path, so an un-invoked skill degrades to "reads the state file directly" rather than "no identity." Verified by inspecting the payload, and exercised in the live run. |
+| A refactor collapses `sendRaw` and the escape channel | Medium | High | Tower's escape route discards the message body, so a collapsed path turns `/clear` into a bare interrupt that reports success and clears nothing. Constraint stated explicitly; the exact channel is asserted in tests (scenario 14). |
 | An armed job fires against a session that has moved on | Low | High | One armed job per architect; explicit disarm; jobs are in-memory so a Tower restart drops them fail-safe; the quiescence and receipt gates both re-verify at fire time. |
 | Skill ships in one tree and not the others, so adopters silently lack it | Medium | Low | Four-tree mirror is a success criterion, covered by the existing scaffold/init/update test pattern; `CLAUDE.md`/`AGENTS.md` byte-identity is separately asserted. |
 | Scope creep into a general "reset any agent" abstraction | Medium | Medium | Architect flavour only. Cross-workspace targeting, sibling-architect targeting, and UI surfaces are explicitly out of scope and listed as Nice-to-Know. |
@@ -803,6 +840,17 @@ already marked up.
   extraction must preserve, and the slash-command autocomplete exposure.
 - *Current State* — path shorthand expanded to full repo-relative paths.
 
+**Architect design input** (2026-07-31, incorporated): the autocomplete hazard is
+*designable-out* rather than merely mitigable — the re-orientation need not be a typed
+slash command at all. Evaluated and **adopted**: a plain-text injected message has no
+completion surface, and the only thing it gives up is deterministic harness-level skill
+loading. That loss is bought back by requiring the payload to be **self-sufficient**
+(identity + state-file path inline), so an un-invoked skill degrades to "reads its state
+directly" instead of "no identity." The step that previously had no safe degradation now
+has two. The same input noted that even a swallowed re-orientation is recoverable, since
+the state file and terminal both survive — now stated explicitly under Notes, so the
+failure reads as manual re-entry rather than data loss.
+
 ## Approval
 - [ ] Technical Lead Review
 - [ ] Product Owner Review
@@ -838,6 +886,23 @@ four-tree skill, the state-block template, docs, and roughly twenty functional p
 non-functional tests. The plan should phase it honestly rather than compress it, and the
 `sendRaw` constraint and the ordering invariants should land with the extraction, not
 after it.
+
+**On the worst case, stated plainly.** The failures in the risk table should be read
+against what is actually lost, and the honest answer is: never the state, and never the
+terminal. The three things that survive every failure mode are the state file (written
+and verified before anything destructive happens), the architect's terminal (still
+alive, still addressable), and Tower's record of the run. So the worst realistic
+outcome — a clear that lands while the re-orientation does not — is **a live terminal
+whose session has no identity yet, with its full state sitting on disk one message
+away**. A human, or a watchdog, re-sends the re-orientation and the cycle completes.
+That is recoverable manual re-entry, not data loss.
+
+This matters for how the remaining risks should be weighed. The genuinely expensive
+failure would be *clearing without a good save* — and that is the one the design makes
+true by construction rather than by gate. Everything downstream of a verified save
+degrades to an inconvenience. The spec should not be read as claiming the cycle cannot
+fail; it claims that when it fails, the recovery is a re-send rather than a
+reconstruction.
 
 **On what this command does and does not promise.** It guarantees *ordering* — that a
 verified, substantive, fresh state file exists before any context is destroyed, and that

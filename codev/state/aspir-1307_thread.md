@@ -134,3 +134,40 @@ Directed path: neither "proceed claude-only" nor "wait idle" — keep revising n
 re-run codex against the **revised** spec once the reinstall lands. Strictly better than
 having codex review a draft Claude already marked up. Not re-running consult until the
 architect pings.
+
+## 2026-07-31 — Architect design input: the autocomplete hazard, designed out
+
+Architect offered a design input (explicitly "not a directive") on the one risk I'd
+flagged as having no safe degradation: raw-typing `/arch-init <name>` into a TUI, where
+autocomplete may eat the Enter and leave a *cleared* architect with no identity. Their
+point: the payload doesn't have to be a typed slash command at all.
+
+Evaluated and **adopted**, with one addition of my own.
+
+**What it costs**: deterministic harness-level skill loading, traded for model-side
+invocation. That would be a bad trade if the payload *depended* on the skill firing.
+
+**So I required it not to.** The message must be self-sufficient — identity and
+state-file path stated inline — so a session that never invokes the skill still knows
+who it is and where its state lives, and recovers by reading the file directly. Skill
+invocation becomes an upgrade (whoami validation, architect guardrails) rather than the
+load-bearing step. A step with no safe degradation now has two.
+
+Bonus simplification: with a plain-text payload this command's delivery matches reset's,
+so the `sendRaw`-vs-`sendMessage` divergence I'd recorded as a constraint mostly
+dissolves. The raw/escape split still has to survive extraction — `/clear` itself is
+still raw-typed, and Tower's escape route discards the body — so that constraint stays,
+narrowed to where it actually bites.
+
+Also added, per the same input: an explicit worst-case statement under Notes. State file,
+terminal, and Tower's record all survive every failure mode, so the worst realistic
+outcome is a live terminal with no identity *yet* and its full state one message away —
+recoverable manual re-entry, not data loss. Worth writing down because it reframes how
+the whole risk table should be weighed: the only expensive failure is clearing without a
+good save, and that one is now true by construction.
+
+Swept the spec for stale references afterwards — nine places still described the payload
+as a raw-typed `/arch-init <name>` (Desired State, success criteria, Approach 1, the
+Critical open question's mitigation, Security, test 1, Dependencies). All updated.
+
+Still holding on codex; #1309 queued for the owner's merge word.
