@@ -413,3 +413,24 @@ claude 2.1.212 / codex 0.146.0 / agy untouched / @xterm/headless 6.0.0.
 i8 rerun landed: 11/11 exit 0 — i8c live=lost/recon=lost + no-composer-marker
 (wrapper screen), i8d live=stranded/recon=stranded (user-text). Round-10 suite
 fully green: i9-claude 12/12, i9-codex 12/12, i8 11/11, all exit 0.
+
+## 2026-07-31 — Architect: findings doc too long → tightened to the SPIKE template
+
+Rewrote codev/spikes/1265-afx-send-line-occupancy.md as final-state facts only:
+13,341 → 5,419 words (~60% cut). What changed:
+- Dropped all round-by-round narration and "(round N)" provenance markers — the
+  history lives in this thread and the commit log (previous full version at
+  4b689f34); References now points there explicitly.
+- Deduplicated: fits-window bound, journal rules, the no-^Y rule, and the
+  no-undetected-loss property were each stated 4–6 times across sections; now
+  once each, in their home section.
+- Restructured to the template: Question / Research Summary / Approaches Tried /
+  Constraints Discovered / Recommended Approach / Effort Estimate / Flaky Tests /
+  Next Steps / References. The code audit (six loss/corruption paths in today's
+  pipeline) moved into Research Summary; the ten integration constraints + misc
+  bullets merged into one 15-item Constraints Discovered list; POC-methodology
+  war stories collapsed into the method paragraph + Flaky Tests.
+- Nothing substantive dropped: all per-option verdicts, the keystroke table, both
+  delivery-matrix tables, every measured number (gate cost 2/22/67 ms, maneuver
+  ~1–3 s, i9c at-cap results, w1 blob, i8 wrapper states), all evidence tags,
+  the phasing, and the effort table (~2150–2445 LOC) are intact.
