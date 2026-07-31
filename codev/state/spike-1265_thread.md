@@ -643,3 +643,55 @@ map/references gain i13 (exploratory tier).
 
 No verdict/effort change. Runs: i13-claude, i13-codex, i13-agy all exit 0.
 Versions: claude 2.1.212 / codex 0.146.0 / agy 1.1.8 / @xterm 6.0.0.
+
+## 2026-07-31 — Round 15 (architect request): mine the reference for shortcuts to INCORPORATE — stash + undo measured, one adopted each way
+
+Asked (constructive lens, vs round 13's defensive audit): should any documented
+shortcuts become design primitives? Candidates measured (`i14` hypothesis probe
++ `i14g` asserted resolution, claude dead-API + codex scratch-home; agy cited
+from i13):
+
+1. **^S stash — ADOPTED as claude's H clear primitive; REFUTED as a restore.**
+   The stash-sandwich hypothesis (^S · msg · \r · ^S — would have replaced
+   clear+replay wholesale) died measurably: `i14a/b` restore assertions FAILED
+   (post-submit ^S restored ""), and `i14g2` isolated the cause AS FACT — **any
+   submit clears the stash slot** (slot survives idle parking `i14g1` and
+   non-submit activity incl. typing + ^C clear `i14g3`). The i14 .out is
+   committed RED deliberately — the refutation is the finding. What survives is
+   still a big win: **one ^S clears a 40-line draft in 101 ms** (`i14g4`) where
+   bulk clear stalls (>13 lines) and the paced form needs ~6 s — with ZERO
+   kill-ring writes (constraint 11's ^Y hazard now codex/fallback-only).
+   Single-slot overwrite (`i14c`): stashing over a user's parked stash DESTROYS
+   it → precondition: no user ^S since the last submit-classified \r (slot
+   can't hold anything older). claude-only: codex ^S = rendered no-op
+   (`i14f`), agy unbound (i13 table). Byte-replay + journal-first restore
+   unchanged; abort-BEFORE-submit gains slot-restore as bonus recovery.
+   New constraint 18 carries the lifecycle; delivery-matrix claude row updated
+   (per-line form demoted to fallback); at-cap ^S probe → next step.
+
+2. **^_ undo — ADOPTED as the verified abort-rollback.** One undo reverts one
+   injected write (`i14d` asserted: composer back to empty, nothing
+   submitted). Under interleave the granularity is app-defined (measured) —
+   so the pre-Enter abort attempts ONE ^_ and counts rolled-back only if the
+   re-render equals the pre-write snapshot; else the i12c1 stranded-visible
+   contract stands.
+
+3. **^L repaint nudge — REJECTED** with the sharpest possible evidence: the
+   live keybindings.json on this box rebinds it to chat:clearInput (docs say
+   redraw) — injecting it would destroy drafts. Constraint 17e made concrete;
+   the byte-free resize nudge stays. Options table now carries S / ^_ / ^L
+   verdict rows.
+
+4. Notes: ^O+[ transcript-to-scrollback dump = lab-tier oracle only (modal);
+   ^U-repeat clear variant mooted by the stash-clear; ^B / ^X^K flagged as
+   future afx command forms riding the preemption lane (separate issue).
+
+Scaffold lesson (production-relevant): prompt-suggestion GHOSTS render as dim
+text on an empty composer and polluted i14's text extractor (`"Try \"fix lint
+errors\""` read back as composer content) — i14g's extractor is dim-aware, and
+the doc now states all equality/abort comparisons must filter dim cells (the
+classifier's dim-placeholder family, third appearance).
+
+Runs: i14-claude exit 1 (2 deliberate hypothesis FAILs, preserved), i14-codex
+exit 0, i14g 8/8 exit 0. No net effort change. Versions: claude 2.1.212 /
+codex 0.146.0 / @xterm 6.0.0.
