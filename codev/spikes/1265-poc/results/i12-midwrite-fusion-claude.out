@@ -1,0 +1,20 @@
+HARNESS @xterm/headless=6.0.0 node=v22.23.1
+ASSERT i12a-gate-clean: PASS empty composer at gate time — the fusion below happens AFTER a passing gate (unlike i10b)
+ASSERT i12a-fused-submitted: PASS transcript entry is "messageX" — the gap byte was submitted WITH the message
+ASSERT i12a-r11-oracle-suffix-blind: PASS round-11 differential=delivered-verified — prefix-only exactness blesses the fused submit: believed-sent corruption AS FACT
+ASSERT i12a-canon-oracle-flags: PASS canonical-stream=fused-suspect (raw=1, exact=0) — boundary-clean on BOTH sides refuses the fusion
+ASSERT i12b-gate-clean: PASS empty composer at gate time
+ASSERT i12b-delivered-for-real: PASS the production-formatted message rendered as a transcript entry
+ASSERT i12b-long-line-wrapped: PASS the >110-col body line appears on NO single buffer row — renderer wrapping split it (per-row search cannot see it)
+ASSERT i12b-r11-oracle-structurally-blind: PASS round-11 differential=unverified (post count=0) — a genuinely delivered production message is permanently unverifiable by single-row full-message search
+ASSERT i12b-canon-oracle-verifies: PASS canonical-stream=delivered-verified (pre exact=0, post exact=1) — whitespace-stripped block matched across header/body/footer AND the wrapped line
+ASSERT i12c1-gate-clean: PASS empty composer at gate time
+ASSERT i12c1-preenter-refuses: PASS pre-Enter equality FAILED in 2513 ms (composer="[architect] i12cfuse probeX") — Enter withheld
+ASSERT i12c1-nothing-submitted: PASS transcript region carries zero occurrences (raw=0) — the fused blob was NOT submitted
+ASSERT i12c1-stranded-visible: PASS composer=user-text — the fused draft is stranded VISIBLE; occupancy holds followers; fail-safe direction
+ASSERT i12c2-gate-clean: PASS empty composer at gate time
+ASSERT i12c2-preenter-passes: PASS pre-Enter equality reached in 42 ms — echo latency vs the fixed 50 ms budget, measured
+MEASURED i12c2-echo-latency: 42 ms from text write to composer==message (fixed production delay is 50 ms)
+ASSERT i12c2-delivered-verified: PASS canonical-stream=delivered-verified — the gated Enter delivers and verifies clean
+
+ALL ASSERTIONS PASSED

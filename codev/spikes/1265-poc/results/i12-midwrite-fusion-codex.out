@@ -1,0 +1,12 @@
+HARNESS @xterm/headless=6.0.0 node=v22.23.1
+MEASURED i12d-rig: scratch CODEX_HOME=/tmp/i12-codex-home-yZ3ZKe provider=dead base_url=http://127.0.0.1:9/v1 (zero real traffic)
+MEASURED i12d-rig-status: LIVE — dead-provider codex renders submitted entries; asserting both branches
+ASSERT i12d-pos-gate-clean: PASS empty composer at gate time
+ASSERT i12d-pos-canon-verifies: PASS canonical-stream=delivered-verified (post exact=1) — codex positive differential on a production-formatted multiline message
+MEASURED i12d-pos-r11-verdict: round-11 oracle says unverified on the same delivery (structural multiline blindness, codex arm)
+ASSERT i12d-neg-gate-clean: PASS empty composer at gate time
+ASSERT i12d-neg-fused-submitted: PASS the gap byte fused into the codex submit
+MEASURED i12d-neg-r11-verdict: round-11 oracle on the fused codex submit: delivered-verified (prefix-only exactness)
+ASSERT i12d-neg-canon-flags: PASS canonical-stream=fused-suspect (raw=1, exact=0) — fusion refused on codex too
+
+ALL ASSERTIONS PASSED
