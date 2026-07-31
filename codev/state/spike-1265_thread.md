@@ -550,3 +550,50 @@ session's scratchpad (previous session's XTERM_DIR install was gone; a stray
 
 Runs: i12-claude 15/15 exit 0 (first run), i12-codex exit 0 (post-fix).
 Versions: claude 2.1.212 / codex 0.146.0 / @xterm/headless 6.0.0.
+
+## 2026-07-31 — Round 13 (architect request): keystroke table cross-checked against the official Claude Code interactive-mode reference
+
+Asked to verify the spike doesn't contradict the vendor keyboard-shortcuts
+reference. **Verdict: no contradictions with any measured claim** — the
+reference independently CONFIRMS the load-bearing corrections this spike made:
+^G/^X^E = modal editor (the issue's clear-set was wrong), ^J = newline-insert
+in any terminal (vendor doc itself invalidates today's includes('\n') submit
+heuristic), \+Enter continuation, double-ESC-on-empty = modal rewind menu (why
+ESC never belongs in a clear-set), ^C first-clear/second-exit (#1264), ^U
+logical-line kill + ^Y/Alt+Y newest-first ring (no-^Y rule context), ^A/^E
+logical-line scoping (the maneuver's per-line ops), Up/Down history nav.
+
+Deltas found and absorbed (doc-only round, no POC; all ref-tagged as
+vendor-doc-sourced per the evidence-tier discipline):
+
+1. **Right-as-pure-cursor was wrong** — ref documents Right (like Tab)
+   accepting the prompt suggestion on an empty buffer: composer text with ZERO
+   printable bytes. Table row fixed (Right on model-empty → dirty; Left stays
+   cursor-only). Generalized as constraint 17a: the byteless-materialization
+   class (suggestion accept, ^R accept, ^S stash-restore, ^Y, ^V image chips,
+   voice dictation, :emoji: ≥2.1.217) — input tracking is advisory; the
+   rendered gate + equality + pre-Enter + verify layers are the safety story,
+   and the ref-enumerated unlisted controls (^K ^W ^D ^S ^_ ^V ^T ^O ^R ^B,
+   ^X-chords) stay in the catch-all→dirty.
+2. **^C row refined to always-dirty** — ref: interrupt-first; a running turn's
+   ^C leaves the draft intact, so clear-on-^C alone had a false-empty path
+   (output gate would have caught it; the model is now honest too).
+3. **Leading-! shell mode** (Enter RUNS a shell command), @/?/: popups join
+   leading-/ in the empty-buffer printable exceptions; shell-mode screen needs
+   its own measured G-lite verdict (unmatched marker defaults to held).
+4. **Vim editor mode** (constraint 17b) — never previously mentioned.
+   NORMAL-mode keys are plain printables (input-invisible). Safety by layers:
+   ESC-dirty catches INSERT→NORMAL; equality preconditions abort divergent
+   maneuvers; a delivery typed into NORMAL mode executes as motions, renders ≠
+   message → pre-Enter withholds Enter (held + stranded-visible, the i12c1
+   contract). Consequence: the I/B atomic form (embedded \r — no pre-Enter
+   pause exists) must run tracked==rendered immediately before its write; made
+   explicit in recommended item 7. Vim-mode signatures = new next-step.
+5. **Fullscreen rendering (/tui)** = alternate renderer → profile-drift watch
+   (constraint 9 telemetry backstops); **emoji ≥2.1.217** = version-drift watch
+   (spike tested 2.1.212).
+
+Doc: table rows (printable/^C/Up/Left-Right/Tab), new constraint 17, item 7
+equality clause, 2 new next-steps + corpus amendment note, References + evidence
+map gain the (ref) tier. No verdict/effort change — everything lands in
+existing components (tracker rule table + profile corpus).
