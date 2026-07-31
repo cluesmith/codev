@@ -161,9 +161,18 @@ export function candidateProjectIds(identity: PorchProjectIdentity): string[] {
   const out: string[] = [];
   if (identity.issueNumber) out.push(identity.issueNumber);
 
-  // Registry ids may carry a `builder-` prefix; porch never does.
+  // The raw registry id, INCLUDING any `builder-` prefix. `spawn --task
+  // --protocol X` passes `builderId` straight to `porch init`
+  // (`spawn.ts:548`), and `initPorchInWorktree` keeps dashes when sanitising
+  // (`spawn-worktree.ts:472`), so that lane's porch project id really is
+  // `builder-task-<id>`. Omitting this form orphaned it: porch resolved to
+  // null, and the builder was re-oriented as protocol TASK with no porch
+  // re-entry — a silently degraded frame rather than a loud failure.
+  out.push(identity.builderId);
+
+  // And without the prefix, which is how spec/bugfix lanes are named.
   const bare = identity.builderId.replace(/^builder-/, '');
-  out.push(bare);
+  if (bare !== identity.builderId) out.push(bare);
 
   const dash = bare.indexOf('-');
   if (dash > 0) out.push(bare.slice(dash + 1));

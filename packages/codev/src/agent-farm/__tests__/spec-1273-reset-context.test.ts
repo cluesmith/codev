@@ -604,3 +604,56 @@ describe('mode resolution for the ad-hoc task lane (Spec 1273 F2)', () => {
     expect(ctx.modeSource).toBe('flag');
   });
 });
+
+describe('the --task --protocol lane keeps its porch project (Spec 1273 verify iter 1)', () => {
+  it('matches a porch project id that carries the raw builder- prefix', () => {
+    // `spawn --task --protocol X` passes the FULL builderId to porch init
+    // (spawn.ts:548) and the sanitiser keeps dashes, so the project id really is
+    // `builder-task-<id>`. Matching only the stripped forms orphaned this lane:
+    // porch resolved to null and the builder was re-oriented as protocol TASK
+    // with no porch re-entry — degraded silently rather than failing loudly.
+    const dir = 'builder-task-abc-task-abc';
+    const fs = makeFs(
+      {
+        [join(WORKTREE, 'codev', 'projects', '0087-old', 'status.yaml')]:
+          "id: '0087'\nprotocol: spider\nphase: implement\n",
+        [join(WORKTREE, 'codev', 'projects', dir, 'status.yaml')]:
+          "id: 'builder-task-abc'\nprotocol: air\nphase: implement\n",
+        [join(WORKTREE, '.builder-prompt.txt')]: BUILDER_PROMPT,
+        [join(WORKTREE, '.builder-start.sh')]: LAUNCH_SCRIPT,
+      },
+      { [join(WORKTREE, 'codev', 'projects')]: ['0087-old', dir] },
+    );
+
+    const porch = readPorchContext(fs, WORKTREE, { builderId: 'builder-task-abc' });
+
+    expect(porch?.projectId).toBe('builder-task-abc');
+    expect(porch?.protocol).toBe('air');
+  });
+
+  it('still resolves protocol and porch re-entry for that lane end to end', () => {
+    const dir = 'builder-task-abc-task-abc';
+    const fs = makeFs(
+      {
+        [join(WORKTREE, 'codev', 'projects', dir, 'status.yaml')]:
+          "id: 'builder-task-abc'\nprotocol: air\nphase: implement\n",
+        [join(WORKTREE, '.builder-prompt.txt')]: BUILDER_PROMPT,
+        [join(WORKTREE, '.builder-start.sh')]: LAUNCH_SCRIPT,
+      },
+      { [join(WORKTREE, 'codev', 'projects')]: [dir] },
+    );
+
+    const ctx = resolveBuilderContext({
+      fs,
+      builderId: 'builder-task-abc',
+      worktree: WORKTREE,
+      branch: 'builder/task-abc',
+    });
+
+    expect(ctx.protocol).toBe('air');
+    expect(ctx.protocolSource).toBe('status.yaml');
+    expect(ctx.porch).not.toBeNull();
+    // Mode comes from the prompt, NOT the task default — this lane has porch.
+    expect(ctx.modeSource).toBe('builder-prompt');
+  });
+});
