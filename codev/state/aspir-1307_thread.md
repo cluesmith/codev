@@ -66,3 +66,71 @@ context and also gets `/arch-init` re-injected" — which loses nothing. Proceed
 rather than blocking; called out for the architect at the PR gate.
 
 Next: write `codev/specs/1307-arch-save-packaged-save-clear-.md`, then `porch done`.
+
+## 2026-07-31 — Specify iter 1 review: REQUEST_CHANGES, and it changed the design
+
+Claude returned `REQUEST_CHANGES` (HIGH confidence) after verifying my factual claims
+against the code — all held. Codex could not run (see below). Seven issues raised; I
+agreed with all seven and one of them moved the recommended architecture.
+
+**The one that mattered — write-then-verify.** The review asked why I hadn't considered
+having the architect write the state file *before* invoking the CLI, so the CLI could
+validate synchronously and arm only `quiesce → clear → reorient`. I hadn't, and it wins:
+
+- Removes receipt polling from Tower entirely — the new server-side surface drops to one
+  small job.
+- Makes "no clear without a verified save" **true by construction** in the self path,
+  rather than a gate that could be misordered.
+- Collapses the clear-after-new-work window from up to 300s to a single quiet window.
+
+Kept the original nonce/Tower-armed shape as Approach 1b with explicit rejection reasons
+rather than deleting it. The external (owner-run) path still uses the nonce receipt gate,
+because there a *remote* party is being asked to comply — and that gate already exists
+and works in the CLI process. Two proof-of-save paths, one shared destructive job.
+
+**A consequence I had to chase down myself**: write-then-verify breaks the state-file
+snapshot. The CLI used to run before the overwrite; now it runs after. So in the self
+path the snapshot has to be the *skill's first step*, and the test has to compare
+snapshot content (not just existence) or a snapshot-taken-too-late passes silently.
+These files are gitignored — there is no second chance to notice. Logged as its own risk
+row.
+
+**Other six, all incorporated in place:**
+1. Post-clear "stop stale monitors" was unimplementable as I wrote it — no enumeration
+   mechanism, and comment 2 says `pgrep` can't see harness tasks. Restated: pre-clear
+   stop is the enforceable half (that context holds the handles); post-clear is
+   best-effort reconciliation + disregard-what-you-can't-account-for.
+2. My `## Monitors` heading gate contradicted the v67 template I claimed to adopt
+   (its monitor list lives in a `#`-comment intent stamp). Worse, I mandated a gate
+   while leaving its placement an open question. Now a `MONITORS:` token the template
+   carries verbatim; open question closed.
+3. Clear-after-new-work hazard — absent from risks, questions and tests. Added to all
+   three; mitigated structurally by write-then-verify + first-quiescence-only firing +
+   bounded armed lifetime.
+4. `--boundary` overclaimed as "a recorded human decision" — in the self path the agent
+   types it. Now records invocation mode and states the limit plainly.
+5. Quiescence-against-a-live-TUI is a *second* unrun-e2e unknown, not just `/clear`.
+   Safe but total failure (feature never fires). Live run scoped to both.
+6. `sendRaw` vs `sendMessage` divergence: reset wraps its reorientation in a
+   `[MESSAGE FROM …]` envelope, which would stop `/arch-init` being a slash command at
+   all. Recorded as a constraint the shared extraction must not collapse, plus a test
+   asserting the exact channel and payload.
+
+Also flagged: raw-typing a slash command *with an argument* may hit autocomplete and
+have Enter accept a completion instead of submitting. This is the one step with no safe
+degradation — a swallowed reorientation leaves a *cleared* architect with no identity —
+so it's a risk row demanding live confirmation, not an assumption.
+
+### Codex lane down — escalated, ruled on
+
+`consult -m codex` failed: server rejects `gpt-5.6-sol` as needing a newer Codex. I
+checked the global CLI (0.146.0), judged a global upgrade out of a builder's scope, and
+escalated rather than working around it. Architect's ruling: correct call, but wrong
+culprit — consult's codex lane runs `@openai/codex-sdk` with its own **vendored** binary
+(0.142.5), a different client from the global CLI entirely. PR #1309 bumps it; needs the
+owner's merge word plus a global reinstall.
+
+Directed path: neither "proceed claude-only" nor "wait idle" — keep revising now, and
+re-run codex against the **revised** spec once the reinstall lands. Strictly better than
+having codex review a draft Claude already marked up. Not re-running consult until the
+architect pings.

@@ -110,7 +110,8 @@ and §"Then — and only then — suggest `/clear`"):
 - `afx whoami` (`commands/whoami.ts`) — resolves architect identity from the
   Tower-injected `CODEV_ARCHITECT_NAME`, builders from worktree cwd, and fails loud
   rather than defaulting to `main`.
-- `afx reset` (Spec 1273, PR #1305, `commands/reset/`) — the builder-flavoured version
+- `afx reset` (Spec 1273, PR #1305, `packages/codev/src/agent-farm/commands/reset/`) —
+  the builder-flavoured version
   of exactly this cycle, already built and merged: a save-state request, a nonce-based
   receipt gate that proves the save is *this run's* and is substantive and has stopped
   growing, a quiescence gate that refuses to clear mid-turn, `/clear` over the raw
@@ -118,9 +119,14 @@ and §"Then — and only then — suggest `/clear`"):
   invariants (R1–R4) are enforced through a step log that tests assert over.
 - `codev/state/*.md` is gitignored (`.gitignore:15`), with `*_thread.md` re-included on
   line 16. Architect state files are per-person and never committed.
-- Tower already runs deferred work in-process (`servers/tower-cron.ts`), and already
-  routes messages to a named architect terminal (`servers/tower-messages.ts`,
-  `architect:<name>` addressing).
+- Tower already runs deferred work in-process
+  (`packages/codev/src/agent-farm/servers/tower-cron.ts`), and already routes messages
+  to a named architect terminal
+  (`packages/codev/src/agent-farm/servers/tower-messages.ts`, `architect:<name>`
+  addressing).
+
+*(Paths below are given relative to `packages/codev/src/agent-farm/` where the context
+makes the root unambiguous.)*
 
 **The limitations of the manual recipe:**
 
@@ -171,12 +177,19 @@ always the default.
 What the architect experiences, concretely, in the self-invoked path:
 
 - It runs `/arch-save` on the owner's direction. The skill walks it through stopping its
-  own monitors, writing the resume block in the documented format, and invoking the CLI.
-- The CLI arms Tower, prints the nonce the state file must carry and the checklist the
-  block must satisfy, and **exits immediately** — so the architect's turn can end.
-- The architect writes the file and stops. Tower verifies the receipt, waits for real
-  silence, clears, and injects `/arch-init <name>`.
+  own monitors and writing the resume block in the documented format — **the write comes
+  first, before the CLI is invoked at all.**
+- It then invokes the CLI, which validates the file it just wrote *synchronously* — size
+  floor, required monitor marker, stability, recency — and either refuses on the spot
+  with a named gate, or arms Tower and **exits immediately** so the turn can end.
+- The architect stops. Tower waits for the turn to actually end, delivers `/clear`,
+  confirms best-effort, and injects `/arch-init <name>`.
 - The architect wakes up as itself, mid-stream, having lost nothing it wrote down.
+
+The write-before-arm ordering is not a stylistic choice. It makes "no clear without a
+verified save" **true by construction** in the path that matters most: by the time
+anything is armed, the file is already on disk and already checked. There is no window
+in which a clear is pending against a save that has not happened yet.
 
 ## Stakeholders
 
@@ -200,21 +213,37 @@ What the architect experiences, concretely, in the self-invoked path:
       turn ends, and the remaining steps are carried out by Tower.
 - [ ] The clear can never precede a verified save. Asserted by tests over an ordered
       step log, in the manner of Spec 1273: no `clear` step exists in any run whose log
-      lacks `receipt-accepted` before it.
+      lacks a preceding acceptance step (`state-verified` in the self path,
+      `receipt-accepted` in the external path).
 - [ ] The clear can never happen mid-turn. A run against a terminal that is still
       producing output aborts rather than clearing, after at most one ESC escalation.
+- [ ] **The clear can never destroy work created after the verified save.** The job
+      fires on the *first* quiescence transition after arming and disarms if that
+      transition does not arrive within a bounded armed lifetime.
 - [ ] Invoking without the boundary acknowledgment refuses, prints the resumable-boundary
       rule, and touches nothing.
-- [ ] A state file that is missing, stale (wrong nonce), a stub (below the size floor),
-      still growing, or missing its required `## Monitors` section is refused — the
-      architect keeps its context and the abort message names which gate failed.
+- [ ] A state file that is missing, stale, a stub (below the size floor), still growing,
+      or missing its required monitor marker is refused — the architect keeps its
+      context and the abort message names which gate failed.
 - [ ] The previous contents of `codev/state/<name>.md` are snapshotted before the
-      architect overwrites it, and the snapshot path is reported.
+      architect overwrites it, and the snapshot path is reported. **Who takes the
+      snapshot differs by path and the ordering is load-bearing**: in the external path
+      the CLI takes it, because it runs before the save request is sent; in the self
+      path the CLI runs *after* the write, so the snapshot is the skill's first
+      step — before the architect touches the file. A snapshot taken after the
+      overwrite is worthless, and these files are gitignored, so there is no second
+      chance to notice.
 - [ ] The re-orientation delivered after the clear is exactly `/arch-init <name>` and
       nothing else, over the raw channel.
 - [ ] The state-block template documents all seven elements validated by the live run,
-      and the monitor section is documented as serving both as a kill-list for the
-      transition and a re-arm list for the resumed instance, in that order.
+      carries the `MONITORS:` marker verbatim, and documents the monitor list as serving
+      both as a kill-list for the transition and a re-arm list for the resumed instance.
+- [ ] **Monitors are stopped by the pre-clear architect**, which is the only party
+      holding their handles; the skill sequences this before the state write. The
+      resumed instance's obligation is the best-effort remainder: enumerate via whatever
+      task-listing surface its harness offers, treat any alert it cannot account for
+      from the state block as stale, and stop or disregard it rather than act on it.
+      Re-armed monitors self-test once before their alerts are trusted.
 - [ ] `/arch-save` ships as a skill in all four trees (`.claude/skills/`,
       `.codex/skills/`, and both `codev-skeleton/` mirrors), is picked up by
       `codev init` / `adopt` / `update`, and is covered by the existing scaffolding
@@ -263,6 +292,23 @@ What the architect experiences, concretely, in the self-invoked path:
   step and the step-log discipline exist and are tested. Shared logic is factored out of
   `commands/reset/` and consumed by both flavours; `afx reset`'s builder behaviour must
   not change.
+- **The re-orientation channel differs from reset's, and the shared extraction must
+  preserve the difference.** `afx reset` delivers its re-orientation with
+  `sendMessage`, which wraps the body in a `[MESSAGE FROM …]` envelope. This command
+  must use `sendRaw`: a wrapped payload is not a slash command at all, so `/arch-init`
+  would arrive as inert text and the architect would wake up with no identity and no
+  state. A refactor that collapses the two delivery paths into one breaks this
+  silently — the run would report success and the fresh session would sit idle.
+- **The monitor marker is a token, not a markdown heading.** The adopted v67 template
+  carries its monitor list as numbered lines inside a `#`-comment intent stamp, so
+  requiring a `## Monitors` heading would make the shipped validator reject the shipped
+  template. The gate is therefore a literal `MONITORS:` token, which the template
+  carries verbatim inside the intent stamp and which a machine can check without
+  constraining the block's shape.
+- **The clear fires on the first quiescence transition after arming.** Quiescence proves
+  "not mid-turn"; it does not prove "no new work since the save." Firing on the first
+  transition, plus a bounded armed lifetime, keeps the exposure to a single quiet
+  window rather than to the whole armed period.
 
 ### Business Constraints
 
@@ -280,8 +326,13 @@ What the architect experiences, concretely, in the self-invoked path:
   A harness without it gets a loud refusal naming the harness, exactly as `afx reset`
   does — there is no partial version of this worth doing.
 - The architect writes an honest, substantive resume block. The command can verify
-  structure (freshness, size, stability, required sections); it cannot verify that the
+  structure (freshness, size, stability, required marker); it cannot verify that the
   prose is *good*, and it does not pretend to.
+- In the self path, the architect writes the state file **in the same turn** in which it
+  invokes the CLI. This is what makes recency a sound freshness proof there, and it is
+  the skill's job to sequence it. An architect that writes the file, does other work,
+  and invokes the command much later is outside the assumption — which is exactly what
+  the recency gate is there to catch.
 - `/arch-init` remains the recovery entry point and keeps reading the role banner plus
   the most recent dated section. The re-orientation payload is a call into it, so its
   read contract is this command's write contract.
@@ -291,45 +342,82 @@ What the architect experiences, concretely, in the self-invoked path:
 
 ## Solution Approaches
 
-### Approach 1: Tower-armed job, one state machine, two front doors (recommended)
+### Approach 1: Minimal Tower clear-job + write-then-verify (recommended)
 
-**Description**: A dedicated `afx arch-save [name]` command validates everything it can
-locally, then **arms an in-memory job in Tower** and returns. Tower owns the sequence
-from that point: verify the save receipt, wait for genuine quiescence, deliver `/clear`
-over the raw channel, confirm best-effort, then inject `/arch-init <name>`. The command
-detects whether it is being invoked from the target architect's own terminal
-(`CODEV_ARCHITECT_NAME` matching the resolved target) and adjusts only its *front-end*
-behaviour: self-invocation arms and exits immediately so the turn can end; external
-invocation arms and then tails the job so the human at the shell sees a live report. The
-ordering machinery is identical in both cases because it is the same job.
+**Description**: The only thing Tower owns is the part that *must* outlive the clear:
+**quiesce → `/clear` → confirm → inject `/arch-init <name>`**. Everything upstream of
+that — proving a good save exists — happens before the job is armed, in whichever
+process can actually do it.
 
-The state file is written by the architect itself, not dumped over the wire, because the
-architect is the only party that knows its own state — and it is written *after* arming,
-so it can carry the nonce the job issues. That preserves the Spec 1273 freshness proof
-(a nonce inside the file can only appear in a file written after the request that
-carried it) without inventing a second, weaker mechanism.
+- **Self-invoked** (architect, on the owner's direction): the architect stops its
+  monitors and **writes the state file first**, then invokes
+  `afx arch-save --boundary`. The CLI validates the file *synchronously, on disk* —
+  recency, size floor, monitor marker, stability — and either refuses on the spot or
+  arms the clear-job and exits immediately so the turn can end.
+- **External** (owner, from any other shell): the architect has not written anything
+  yet, so the CLI sends it a save request and polls for the nonce-bearing receipt using
+  Spec 1273's existing gate — **in the CLI's own process, exactly as `afx reset` does
+  today**, which works because the invoker is not the target terminal. On acceptance it
+  arms the same clear-job.
 
 **Pros**:
-- Handles self-invocation, which is the case the whole issue exists to serve, without a
-  detached scheduler — precisely what issue design note 1 asks for.
-- One sequencing implementation, so the ordering invariants are proved once. Two
-  implementations of a destructive ordering is how the ordering diverges.
-- Tower already survives the clear, already holds the terminal id, already runs deferred
-  work. Nothing new is invented.
-- The nonce round-trip is symmetric across both front doors.
-- Aborts are inherently safe: any gate that fails simply never reaches the clear step.
+- The new Tower surface shrinks to one small job: no receipt polling in Tower, no
+  300-second armed window, no nonce lifecycle to manage server-side.
+- In the self path, "never clear without a verified save" is **true by construction** —
+  verification strictly precedes arming, so the invariant is a property of the sequence
+  rather than a gate that could be misordered.
+- Collapses the window between "save verified" and "clear delivered" from minutes to
+  the quiescence window, which is what makes the clear-after-new-work hazard tractable.
+- The receipt gate is *reused* rather than reimplemented, and stays where it already
+  works (the CLI process).
+- Handles self-invocation without a detached scheduler — what issue design note 1 asks.
+- Aborts remain inherently safe: a failed gate simply never arms anything.
 
 **Cons**:
-- Introduces a job concept in Tower (endpoint, in-memory store, runner, status readback)
-  that does not exist yet — the largest single piece of new surface.
-- An armed job is in-memory, so a Tower restart drops it. That is fail-safe (the clear
-  never happens) but it is a state the architect must be told about rather than left to
-  discover.
-- Requires an explicit disarm path, or a stale armed job can fire against a session that
-  has moved on.
+- Two verification paths rather than one. Mitigated by the fact that the *destructive*
+  half — the clear-job — is single and shared; only the proof-of-save differs, and the
+  external path's proof is existing, tested code.
+- Self-path freshness rests on recency + a save stamp rather than a nonce round-trip.
+  Strictly weaker in theory; see the note below on why it is not weaker in practice.
+- Still needs a disarm path and a bounded armed lifetime.
+
+**On the freshness question.** Spec 1273 rejected mtime for builders, correctly: it
+cannot distinguish "rewritten in response to this request" from "touched," and the
+builder is a remote party being asked to comply. The self path inverts that — the party
+attesting freshness *is* the party that would have reproduced a nonce, and it invokes
+the CLI in the same turn as the write. A nonce would prove "written after a request this
+same agent issued to itself," which is not a stronger statement. The external path,
+where a remote party genuinely is being asked to comply, keeps the nonce.
+
+**Estimated Complexity**: Medium
+**Risk Level**: Medium
+
+### Approach 1b: Tower-armed job with a nonce round-trip in both paths
+
+**Description**: The originally-drafted shape, retained here because it is the obvious
+one and the reasons for rejecting it are not obvious. The CLI arms Tower *first*, Tower
+issues a nonce, the architect then writes the file carrying it, and Tower polls for the
+receipt before quiescing and clearing. One mechanism, perfectly symmetric.
+
+**Pros**:
+- A single verification path, so the freshness proof is identical in both modes.
+- The strongest possible freshness statement in both modes.
+
+**Cons**:
+- Pushes receipt polling into Tower, which is the single largest chunk of new
+  server-side surface — a job store, a poll loop, nonce lifecycle, status readback.
+- Opens a window of up to the receipt timeout (300s by default) during which a clear is
+  armed against a save that has not happened yet. That window is precisely where the
+  clear-after-new-work hazard lives, and it is a window Approach 1 does not have.
+- Inverts the natural ordering: the destructive intent is registered before the thing
+  that justifies it exists.
 
 **Estimated Complexity**: Medium-High
-**Risk Level**: Medium
+**Risk Level**: Medium-High
+
+*Rejected in favour of Approach 1.* Credit where due: this comparison exists because the
+spec-phase review asked why write-then-verify had not been considered. It was the right
+question — the answer changed the recommendation.
 
 ### Approach 2: Owner-run only — treat it as `afx reset` with an architect resolver
 
@@ -403,19 +491,21 @@ state file, stops its monitors, and then asks the human to `/clear`. No new code
 **Estimated Complexity**: Low
 **Risk Level**: Low
 
-**Recommendation**: **Approach 1.** It is the only approach that satisfies the issue's
-stated shape (a packaged command, self-invocable on the owner's direction, sequenced by
-Tower rather than by an orphan process). Approach 4's template work is not discarded —
-it is a *component* of Approach 1, since the state-block format has to be documented for
-the architect either way. Approach 2 is the fallback if the Tower job proves unworkable;
-it is a strict subset of Approach 1's front-end, so choosing 1 does not foreclose it.
+**Recommendation**: **Approach 1.** It satisfies the issue's stated shape (a packaged
+command, self-invocable on the owner's direction, sequenced by Tower rather than by an
+orphan process) while keeping the new Tower surface to the one step that genuinely has
+to outlive the clear. Approach 4's template work is not discarded — it is a *component*
+of Approach 1, since the state-block format must be documented for the architect either
+way. Approach 2 is the fallback if the Tower job proves unworkable; it is a strict
+subset of Approach 1's external path, so choosing 1 does not foreclose it.
 
 ## Open Questions
 
 ### Critical (Blocks Progress)
 
 - [ ] **Does `/clear` actually take effect when delivered over Tower's raw channel, and
-      what does a real clear emit?** Spec 1273's live end-to-end run has not happened;
+      what does a real clear emit?** Spec 1273's live end-to-end run has not happened
+      (confirmed in `codev/reviews/1273-builder-context-reset-should-b.md`);
       `afx reset`'s clear-confirmation matcher is a best guess at the harness's output.
       This spec inherits the dependency wholesale. *Mitigation*: the design is
       abort-safe in the failure direction. If the clear silently no-ops, the outcome is
@@ -423,6 +513,14 @@ it is a strict subset of Approach 1's front-end, so choosing 1 does not foreclos
       loses nothing and is loudly visible. Implementation should therefore proceed, with
       the live run treated as an acceptance gate rather than a precondition, and the
       residual risk surfaced to the owner at the PR gate.
+- [ ] **Does quiescence actually resolve against a live agent TUI?** The same unrun e2e
+      leaves this open, and it is a *separate* unknown from the clear question. The gate
+      reads `lastDataAt`; if an idle harness repaints a spinner, a status line or a
+      token counter, `lastDataAt` never ages past the quiet window and **every** run
+      aborts. That failure is safe but total — the feature would simply never work. The
+      live run must be scoped to answer both questions, not just the clear one, and the
+      quiet window may need to be tuned from observed idle behaviour rather than
+      inherited from Spec 1273's defaults.
 
 ### Important (Affects Design)
 
@@ -434,12 +532,19 @@ it is a strict subset of Approach 1's front-end, so choosing 1 does not foreclos
 - [ ] **How many jobs may be armed for one architect at once?** Assumed exactly one: a
       second arm either replaces the first with a clear notice or is refused. Two armed
       jobs racing toward one terminal is not a state worth supporting.
-- [ ] **Does the required `## Monitors` section belong in the state file's stable header
-      or in the dated resume block?** The live v67 template puts the monitor list in the
-      intent-stamp header at the top, which is where a cold reader hits it first. That
-      is the assumed answer, but it interacts with `/arch-init`'s read contract (role
-      banner + most recent dated section) and should be confirmed against a real
-      recovery.
+- [ ] **What bounds the armed lifetime, and what happens at the bound?** The exposure
+      window for a clear destroying post-save work is the time between arming and the
+      first quiescence transition. A short bound (order of a minute or two) keeps that
+      window small but will disarm on an architect that takes a while to wind down. The
+      assumed answer is a short bound with an explicit, visible disarm notice rather
+      than a long silent one; the exact value should come from the live run.
+- [ ] **Can the resumed instance enumerate surviving monitors at all?** Issue comment 2
+      establishes that they survive and that `pgrep` cannot see them, because they are
+      harness background tasks rather than shell processes. Claude Code exposes a
+      task-listing surface, so the answer is plausibly yes *for this harness* — but the
+      spec does not depend on it: the enforceable stop is pre-clear, and the post-clear
+      obligation is deliberately written as best-effort. Worth confirming so the skill
+      can name a concrete mechanism where one exists.
 - [ ] **Should `afx arch-save` also disarm on `afx workspace stop`?** Probably, by
       construction (in-memory jobs die with Tower), but the interaction with the
       architect-session holder is worth checking rather than assuming.
@@ -466,11 +571,18 @@ transactions per second.
   2 seconds. This is functional, not cosmetic — a blocking command prevents the turn
   from ending, and the turn must end before the clear can happen.
 - **Bounded waits**: every gate is bounded and expires into an abort. Reusing the Spec
-  1273 defaults as the starting point: receipt wait 300s, quiescence 60s, post-ESC
-  quiescence 30s, quiet window 1.5s, poll interval 2s, minimum state-file size 1000
-  bytes. All overridable, all validated as positive and finite at the boundary, because
-  each one gates a safety check and a bad value would disable it while still reporting
-  success.
+  1273 defaults as the starting point: quiescence 60s, post-ESC quiescence 30s, quiet
+  window 1.5s, poll interval 2s, minimum state-file size 1000 bytes. The 300s receipt
+  wait applies to the **external path only** — the self path has no receipt wait,
+  because verification happens synchronously before anything is armed. All overridable,
+  all validated as positive and finite at the boundary, because each one gates a safety
+  check and a bad value would disable it while still reporting success.
+- **Armed lifetime**: bounded, and short relative to the receipt timeout. This is a
+  safety parameter, not a convenience one — it caps the window in which a clear is
+  pending against a save that is getting staler.
+- **Quiet window is a tuned value, not an inherited one.** Spec 1273's 1.5s was chosen
+  for builder terminals and has never been validated against an idle agent TUI. If an
+  idle harness repaints, this number decides whether the feature works at all.
 - **Throughput**: N/A — at most one armed job per architect, and a workspace has a
   handful of architects.
 - **Resource Usage**: the armed job is a poll loop on an existing Tower tick; no new
@@ -495,9 +607,20 @@ transactions per second.
   guidance should note that these files are read by whoever has repo access on that
   machine.
 - **Destructive-action authorization**: the clear is irreversible and the state file has
-  no undo. Two independent protections: the `--boundary` acknowledgment (an explicit
-  human decision, recorded), and the pre-write snapshot of the previous state file. An
-  architect must not be able to reach the clear without both.
+  no undo. Two independent protections: the `--boundary` acknowledgment and the
+  pre-write snapshot of the previous state file. An architect must not be able to reach
+  the clear without both.
+
+  **What `--boundary` does and does not prove.** In the external path a human typed it,
+  so it is genuinely a recorded human decision. In the self-invoked path *the agent
+  types it*, and nothing about the flag establishes human provenance — the honest
+  statement is that it forces the boundary rule to be acknowledged, not that it proves
+  the owner directed this run. The audit record therefore captures **invocation mode**
+  (self vs external) alongside the flag, so a reader can tell which of the two a given
+  cycle was. The owner-direction rule remains a documented norm enforced by the skill's
+  wording, and the spec should not imply the machine checked it. This mirrors the
+  spec's position on boundary-ness generally: state the limit rather than let the
+  ceremony imply a check that is not there.
 - **Injection into a live PTY**: the command writes to a terminal. The only text it
   writes unattended is `/clear` and `/arch-init <name>`, both constructed from validated
   inputs — never from unvalidated user content. Any architect-supplied note must not be
@@ -512,7 +635,7 @@ transactions per second.
 
 1. **Happy path, external invocation.** Owner runs the command from a non-architect
    shell against a live, idle architect. The architect receives the save request, writes
-   a substantive state file carrying the nonce and a `## Monitors` section, goes quiet;
+   a substantive state file carrying the nonce and the `MONITORS:` marker, goes quiet;
    the clear is delivered, confirmed, and `/arch-init <name>` is injected. The step log
    contains every step in order.
 2. **Happy path, self invocation.** The architect invokes the command in its own
@@ -528,9 +651,10 @@ transactions per second.
    stub, with the override flag named.
 7. **State file still growing.** Two observations separated by the stability window
    disagree; refused as a partial save.
-8. **Missing `## Monitors` section.** A substantive, fresh, stable file that omits the
-   monitor section is refused, and the message explains that "none armed" must be
-   written explicitly.
+8. **Missing monitor marker.** A substantive, fresh, stable file that omits the
+   `MONITORS:` token is refused, and the message explains that "none armed" must be
+   written explicitly. A file carrying the marker inside the documented intent-stamp
+   comment block is *accepted* — the validator must not reject the shipped template.
 9. **Architect still mid-turn.** Terminal keeps producing output past the quiescence
    window; exactly one ESC escalation is sent; if it is still noisy, abort without
    clearing. No second escalation, no clear-anyway path.
@@ -540,8 +664,11 @@ transactions per second.
     preflight refusal with its own message; nothing is touched.
 12. **Dry run.** Prints the plan, the save instructions and the payload that would be
     injected; arms nothing, writes nothing, sends nothing.
-13. **Snapshot taken.** An existing state file is snapshotted before the architect
-    overwrites it, and the snapshot path appears in the output.
+13. **Snapshot taken, and taken first.** An existing state file is snapshotted before
+    the architect overwrites it, and the snapshot path appears in the output. Tested
+    for *content*, not just existence — the snapshot must differ from the post-save
+    file when the save changed anything, which is what catches a snapshot mistakenly
+    taken after the write.
 14. **Re-orientation payload is exact.** The message delivered after the clear is
     `/arch-init <name>` and nothing else, over the raw channel — asserted directly,
     because delivering it over the escape channel would silently send an interrupt
@@ -550,20 +677,35 @@ transactions per second.
     condition is reported rather than silent.
 16. **Disarm.** An armed job can be cancelled explicitly, and cancelling leaves the
     architect's context intact.
+16a. **A new turn starts after arming.** The architect arms, then a follow-up turn runs
+    in that terminal. The job does not clear on a later quiescence: it fires only on the
+    first transition, and if that is consumed by the follow-up turn the run disarms
+    rather than clearing work the verified save never captured.
+16b. **Armed lifetime expires.** The architect never goes quiet within the bound; the
+    job disarms, says so visibly, and leaves the context intact.
+16c. **Stale file, self path.** The architect invokes the CLI without having rewritten
+    the state file this cycle (a file left from a previous save). Refused on recency —
+    this is the self path's substitute for the nonce, and it is the gate that makes
+    write-then-verify safe, so it is tested directly rather than assumed.
 17. **Skill scaffolding.** `codev init` into a clean directory produces
     `.claude/skills/arch-save/SKILL.md` and `.codex/skills/arch-save/SKILL.md`;
     `codev update` backfills it without touching a customised copy — mirroring the
     existing `arch-init` scaffolding tests.
 18. **Recovery round-trip.** A state file written to the documented template is read back
-    by `/arch-init`, and the resumed instance correctly performs the post-clear monitor
-    steps in order: stop stale monitors first, then re-arm with a first-check self-test.
+    by `/arch-init`, and the resumed instance performs the post-clear monitor steps in
+    the documented order: reconcile against the state block's list and disregard any
+    alert it cannot account for, *then* re-arm, with a first-check self-test before the
+    re-armed monitor's alerts are trusted. The pre-clear *stop* is verified separately,
+    as a step the skill sequences before the state write — it is the enforceable half.
 
 ### Non-Functional Tests
 
 1. **Ordering invariants over the step log.** Property-style assertions in the manner of
-   Spec 1273: no run contains `clear` without `receipt-accepted` preceding it; no run
-   contains an ESC escalation before `receipt-accepted`; an aborted run contains no
-   `clear` at all; a dry run contains no destructive step whatsoever.
+   Spec 1273: no run contains `clear` without an acceptance step (`state-verified` or
+   `receipt-accepted`) preceding it; no run contains an ESC escalation before that
+   acceptance step; an aborted run contains no `clear` at all; a dry run contains no
+   destructive step whatsoever. Asserted against the shared state machine so both
+   flavours are covered by one set of properties.
 2. **Parameter validation.** Every timing and threshold parameter rejects zero, negative,
    non-integer, NaN and infinite values at the CLI boundary *and* at the state machine
    boundary — a programmatic caller must not be able to disable a gate by passing a
@@ -612,20 +754,54 @@ transactions per second.
 |------|------------|--------|-------------------|
 | `/clear` does not take effect over the raw channel (Spec 1273's unrun live e2e) | Medium | High | Design is abort-safe in this direction: a no-op clear yields an architect that kept its context *and* got `/arch-init` — loses nothing. Confirmation is advisory and reported as unconfirmed rather than as success. Make the live run an acceptance gate and surface the residual risk at the PR gate. |
 | A bad save destroys an irreplaceable gitignored state file | Medium | High | Snapshot the previous contents before the architect overwrites, and report the snapshot path. Repeat `/arch-init`'s prune-by-pointer rule in the save instructions. |
-| Phantom monitors survive the clear and fire stale alerts into the fresh context | High (observed live) | Medium | Required `## Monitors` section; skill instructs stopping them pre-clear; the state block's list doubles as a post-clear kill-list, acted on *before* re-arming; re-armed monitors self-test once before their alerts are trusted. |
+| **The self path's snapshot is taken after the overwrite, so it preserves nothing** | Medium | High | A direct consequence of write-then-verify: the CLI no longer runs before the write. The snapshot becomes the skill's first step, ahead of the state write, and is verified as such rather than assumed. Silent when wrong — the snapshot exists, it is just a copy of the new file. |
+| Phantom monitors survive the clear and fire stale alerts into the fresh context | High (observed live) | Medium | Required `MONITORS:` marker; the skill sequences the pre-clear stop, which is the enforceable half since only that context holds the handles; the state block's list lets the resumed instance recognise an unaccountable alert as stale; re-armed monitors self-test once before their alerts are trusted. |
 | An architect self-invokes autonomously mid-task and loses live context | Low | High | `--boundary` acknowledgment is mandatory; the skill states the owner-direction rule with a standard override carve-out; the command cannot verify boundary-ness and says so plainly rather than implying it checked. |
 | The CLI blocks in self-invocation, so the turn never ends and the cycle deadlocks | Medium | Medium | Explicit control-return budget with a test; self-invocation is detected from identity, not inferred from a flag the caller might forget. |
 | Forking the reset machinery lets the two flavours' ordering rules drift | Medium | High | Factor shared gates out of `commands/reset/` and consume them from both; the ordering invariant tests run against the shared state machine, not per-flavour copies. |
+| **A new turn starts between the verified save and the clear, so the clear destroys work the save never captured** | Medium | High | Write-then-verify removes the receipt window from the self path entirely; the job fires on the *first* quiescence transition after arming; armed lifetime is bounded and disarms visibly. Exposure reduced from minutes to one quiet window. |
+| **Quiescence never resolves against a live TUI that repaints while idle, so every run aborts** | Medium | High (feature is inert) | Scope the live e2e to measure real idle behaviour, not just the clear; treat the quiet window as a value to be tuned from observation rather than inherited. Failure is safe but total, so it must be caught before ship, not after. |
+| **Raw-typed `/arch-init <name>` hits slash-command autocomplete and Enter accepts a completion instead of submitting** | Medium | High | `/clear` shares the exposure but is a single builtin token; a slash command *with an argument* is the riskier case. Verify both in the live run; if autocomplete interferes, fall back to a delivery form that avoids the completion popup. This is the one step with no safe degradation — a swallowed re-orientation leaves a cleared architect with no identity — so it must be confirmed live, not assumed. |
+| A refactor collapses `sendRaw` and `sendMessage` re-orientation delivery | Medium | High | Constraint is stated explicitly; assert the exact channel and exact payload in tests (scenario 14) rather than relying on the refactor's author reading the comment. |
 | An armed job fires against a session that has moved on | Low | High | One armed job per architect; explicit disarm; jobs are in-memory so a Tower restart drops them fail-safe; the quiescence and receipt gates both re-verify at fire time. |
 | Skill ships in one tree and not the others, so adopters silently lack it | Medium | Low | Four-tree mirror is a success criterion, covered by the existing scaffold/init/update test pattern; `CLAUDE.md`/`AGENTS.md` byte-identity is separately asserted. |
 | Scope creep into a general "reset any agent" abstraction | Medium | Medium | Architect flavour only. Cross-workspace targeting, sibling-architect targeting, and UI surfaces are explicitly out of scope and listed as Nice-to-Know. |
 
 ## Expert Consultation
 
-**Date**: pending
-**Models Consulted**: Gemini, Codex, Claude — run by porch at the end of this phase.
-**Sections Updated**: to be recorded after the 3-way review; feedback is incorporated
-directly into the sections above rather than summarised here.
+**Date**: 2026-07-31
+**Models Consulted**: Claude (complete, `REQUEST_CHANGES`). Codex pending — its lane was
+down for this round (the `consult` codex path runs `@openai/codex-sdk` with a vendored
+binary that the server rejects for `gpt-5.6-sol`; PR #1309 bumps it). Per architect
+ruling, the codex review runs against *this revised* spec rather than the draft Claude
+already marked up.
+
+**Sections Updated** (all feedback incorporated in place, not summarised):
+
+- *Solution Approaches* — added write-then-verify, which the review correctly noted was
+  missing. On weighing it, **it won**: it removes the receipt loop from Tower, makes
+  "no clear without a verified save" true by construction in the self path, and shrinks
+  the clear-after-new-work window from minutes to one quiet window. The original
+  Tower-armed/nonce design is retained as Approach 1b with its rejection reasons.
+- *Success Criteria, Test 18* — the post-clear "stop stale monitors" requirement was
+  unimplementable as written (no enumeration mechanism; `pgrep` cannot see harness
+  tasks). Restated: pre-clear stop by the architect is the enforceable half; the
+  resumed instance's obligation is best-effort reconciliation and disregarding
+  unaccountable alerts.
+- *Constraints, Success Criteria, Test 8* — the `## Monitors` heading gate contradicted
+  the v67 template it claimed to adopt. Replaced with a `MONITORS:` token the template
+  carries verbatim, and the placement open question is now **closed** rather than
+  mandating a gate over an undecided target.
+- *Constraints, Risks, Tests 16a/16b/16c* — added the clear-after-new-work hazard, which
+  was absent from risks, questions and tests.
+- *Security* — stopped claiming `--boundary` is a recorded human decision in the
+  self-invoked path, where the agent types it; invocation mode is recorded instead.
+- *Open Questions (Critical), Performance, Risks* — added quiescence-against-a-live-TUI
+  as a second inherited unknown. Safe but total failure mode, so the live run is scoped
+  to both questions.
+- *Constraints, Risks* — recorded the `sendRaw` vs `sendMessage` divergence the shared
+  extraction must preserve, and the slash-command autocomplete exposure.
+- *Current State* — path shorthand expanded to full repo-relative paths.
 
 ## Approval
 - [ ] Technical Lead Review
@@ -654,6 +830,14 @@ format, and the re-orientation payload all differ; and `arch-critical.md` record
 rule that a distinct concept gets a dedicated command rather than a mode flag bolted
 onto a shared one. The `/arch-save` slash command remains the primary architect-facing
 surface, with the CLI as both its mechanism and the owner's direct entry point.
+
+**On size, for the plan's benefit.** Even after write-then-verify cut the Tower surface,
+this is not a one-phase change: a small Tower clear-job, a behaviour-preserving
+extraction from ~2.2k LOC of `commands/reset/`, the CLI with both invocation paths, the
+four-tree skill, the state-block template, docs, and roughly twenty functional plus five
+non-functional tests. The plan should phase it honestly rather than compress it, and the
+`sendRaw` constraint and the ordering invariants should land with the extraction, not
+after it.
 
 **On what this command does and does not promise.** It guarantees *ordering* — that a
 verified, substantive, fresh state file exists before any context is destroyed, and that
