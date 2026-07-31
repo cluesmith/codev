@@ -48,3 +48,24 @@ Headlines (full detail in codev/spikes/1265-afx-send-line-occupancy.md):
 
 Committed findings + POC on spike branch. Effort estimate: Medium. Recommended combination:
 DraftTracker (A+E unified), H for max-age, per-app delivery matrix, K valve for unknown apps.
+
+## 2026-07-31 — Review follow-up: kill-ring duplication bug CONFIRMED, recommendation fixed
+
+A reviewer flagged that the documented max-age sequence chained H's per-line clear into the
+atomic inject forms that END in Ctrl+Y — predicting the yank would resurrect a killed draft
+line before the byte-replay, duplicating it. My original POC never ran that combined sequence
+(h/h2 injected with plain writes; atomic forms were only tested on single-line drafts).
+
+Built exp-i5-maxage-fullseq.cjs — full end-to-end sequence on a 3-line draft, both TUIs:
+- Ring probe: after per-line clear, the ring holds exactly "first line" on BOTH TUIs
+  (bottom-up kills, overwrite-not-accumulate semantics).
+- Buggy (as-documented): "first linefirst line\n second line\n third" — duplication CONFIRMED
+  on both, exactly as the reviewer predicted.
+- Fixed (drop trailing Ctrl+Y from the multi-line path): byte-identical reconstruction on both.
+- Bonus: empty-composer Ctrl+U does NOT scrub the ring on either TUI, so fix (b)
+  "neutralize the ring" has no verified primitive — fix (a) is structural and sufficient.
+
+Findings doc updated: delivery matrix split into non-overlapping single-line (kill/yank, ends
+^Y) and multi-line (byte-replay, NO ^Y) paths; kill-ring interaction documented as a measured
+constraint. Good catch by the reviewer — exactly the class of cross-primitive interaction this
+spike existed to surface.
