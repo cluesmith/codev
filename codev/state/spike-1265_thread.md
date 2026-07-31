@@ -128,3 +128,23 @@ Three more reviewer concerns; all three were right.
    baselines, content-based empty checks (never placeholder chrome; also de-flaked 'def' ⊂
    "default"). Full suite rerun: 6/6 runs exit 0, zero FAILs; stdout committed under
    1265-poc/results/ as retained evidence. exp0–i4 explicitly tiered as exploratory.
+
+## 2026-07-31 — Architect-requested findings review (post-reset): APPROVE, high confidence
+
+Architect set a goal: review the findings against the original spike task. Fresh-context
+review performed (context was reset after round 4, so this was effectively fresh eyes):
+re-read issue #1265 in full and confirmed the doc answers its A–L taxonomy without
+re-deriving it; confirmed all task deliverables present (per-option go/no-go on the
+recommended combination, effort estimate, POC on branch only); checked all six committed
+asserted .out files end in ALL ASSERTIONS PASSED; re-verified seven load-bearing code
+claims against the tree (timer-only shouldDefer + #492 comment ~tower-routes.ts:1570,
+_lastInputAt=0 pty-session.ts:98, SendBuffer.stop() force-flush, cron deliverMessage
+unguarded direct write, includes('\r') heuristic + track-before-write ordering in
+tower-websocket.ts, broadcastMessage live-only, /ws/messages consumers = e2e tests only,
+no messages table in db/schema.ts). All held.
+
+Non-blocking nits recorded in the verdict: (1) header label "Feasible" could read
+"Feasible with Caveats" given the material revisions (per-app I forms, corrected
+clear-set, K rescoped to built mailbox, effort upgraded); (2) D/L lack explicit rows in
+the per-option table (outside the recommended combination; rescoped K converges toward L
+anyway). Verdict delivered in-terminal: APPROVE / HIGH.
