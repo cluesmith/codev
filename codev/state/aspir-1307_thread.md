@@ -334,6 +334,74 @@ and the builder-spoofing check must run at request time, or a delayed send becom
 to defer a check past the conditions that would fail it. Easy to get wrong by treating
 `--delay` as "the same send, later."
 
+## 2026-08-01 — Phases 1 and 2 complete; coordination with aspir-1273
+
+**Phase 1 (`afx send --delay`) took EIGHT review rounds**, six finding real defects. Two
+patterns, each repeated three times:
+
+*Artifacts asserting something adjacent to the real thing* — a test against a copied
+predicate, against a replica helper, against a synthetic callback, and a SPEC claiming a
+request-order FIFO guarantee the code deliberately did not make. Each passed self-review
+because the artifact existed.
+
+*Fixes correct about the mechanism, incomplete about its lifetime* — serialising the
+callback but not its writes; guarding `hasPending` but not `flush()`'s own drain; clearing
+the registry but not the already-attached `.then()` continuations. Each worked for the case
+I was picturing and left the adjacent one open.
+
+One cheap check catches both classes: **mutate the guard, confirm the test fails.** By the
+end I ran it before claiming a fix rather than after being told — which is how the
+mid-flush test's vacuous first version (4-line message, writes completing in ~110ms, so the
+delayed send never entered the window it was named for) got caught by me instead of a
+reviewer. Same again in phase 2: I noticed only 4 of 5 test files executed and found
+`init.test.ts` is excluded in `vitest.config.ts`, so an assertion I had just added guarded
+nothing.
+
+**Phase 2 (skill in four trees)** approved in two rounds. Both reviewers caught that my
+"all four copies identical" was verified by hand with md5 and not guarded — `skill-parity`
+only compares providers *within* a tree, never instance vs skeleton. Codex separately caught
+a real overclaim: the skill said Tower "delivers it after the clear has landed" when Tower
+only waits out 15s and never observes the result.
+
+### Coordination with aspir-1273 (submission lock, PR #1320)
+
+Their production e2e found `afx reset`'s `/clear` arriving as literal text welded to the
+next message — never executed, context intact, every layer reporting success. Root cause:
+`writeMessageToSession` schedules its Enter 50–80ms later and `/api/send` responds once the
+write is *scheduled*, so an awaited send resolves before its own submission.
+
+**Ordering is not atomicity.** My FIFO work decides which message goes first; it does not
+make a delivery atomic. Architect ruled 1273 owns the primitive and I adopt it unchanged.
+
+Two things I contributed by checking rather than accepting:
+- Their datum that "reset's own writes bump `_lastInputAt`, so the flow trips its own
+  buffering" is **false** — `recordUserInput()` is called only at `pty-manager.ts:310/:317`,
+  both in the websocket handler. They verified independently and retracted it.
+- Measured the merge surface with `git merge-tree` rather than guessing: merge-base
+  `57c51a6e`, exactly one conflicting file (`tower-routes.ts`), test file auto-merges.
+
+And one correction I received, which changed the work: adopting #1320 is a **replacement,
+not a deletion**. It wires only the escape and immediate paths, so I must ADD two
+`submitToSession` call sites (delayed delivery, `flush()`'s drain) before removing
+`writeCompletesInMs`, `busyUntil`, and `delayed-send.ts`'s chain. Recorded as a six-step
+sequence in the plan.
+
+The line 1273 drew and I am keeping: their test proves the *primitive* supports the
+pattern; it cannot prove *my wiring* of it is correct. Different claims.
+
+### 2026-08-01 — merged origin/main (architect-directed)
+
+PR #1324 landed, skipping `agy-integration.e2e.test.ts` which was opening OAuth browser
+windows on the human's machine during suite runs. Previewed with `git merge-tree` first:
+clean, no conflicts. #1320 had **not** landed, so no adoption work triggered.
+
+Post-merge: install/build clean, 4149 tests passing (up from 4090 — incoming Spec 1280
+tests). Re-ran my own suites explicitly rather than trusting the aggregate: 186 Spec 1307
+codev tests + 48 core, all green, all four `ORDERING:` guards intact.
+
+Note for later: the agy binary is disabled machine-wide, so the gemini consult lane reports
+"not installed" and skips non-blockingly. Expected — not to be fixed.
+
 ## 2026-07-31 — Plan CMAP iter 1: both reviewers found the SAME two defects
 
 Both REQUEST_CHANGES, both HIGH. All ~14 findings accepted, none defended. The signal
