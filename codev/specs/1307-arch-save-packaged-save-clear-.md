@@ -167,8 +167,19 @@ imprecision everywhere else.
       list.
 - [ ] The skill states the owner-direction rule with a standard override carve-out.
 - [ ] A real architect completes save → clear → resume end-to-end in a live workspace.
-- [ ] `CLAUDE.md` and `AGENTS.md` remain byte-identical; the command reference documents
-      `--delay`.
+- [ ] `--delay` is documented in the command reference — `codev/resources/commands/agent-farm.md`
+      **and its `codev-skeleton/` mirror**. `CLAUDE.md` and `AGENTS.md` remain byte-identical
+      and gain **no** `--delay` content.
+
+      **AMENDED 2026-08-01, per architect authorization.** As originally written this
+      criterion required a `--delay` note *in* `CLAUDE.md`/`AGENTS.md`. It was authored
+      against the pre-rewrite world. Spec 1280's Phase 1 has since restructured `CLAUDE.md`
+      so CLI detail lives in skills and reference docs — its Tooling section now says
+      "check the skill, don't guess" and carries no per-flag content. Under that
+      architecture a per-flag pointer in `CLAUDE.md` is a regression to the pattern 1280
+      just deleted, so the detail is relocated to `agent-farm.md` and the always-on surface
+      gains nothing. Recorded rather than silently changed because it moves a success
+      criterion.
 - [ ] Tests pass with >90% coverage of the new delivery path.
 - [ ] Documentation updated.
 

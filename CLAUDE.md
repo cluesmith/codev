@@ -603,8 +603,6 @@ Agents within a workspace communicate through `afx send`. Four addressing forms 
 | `afx send architect:<name> "msg"` | Explicit per-architect addressing. **Architects (including `main`)**: open address grammar — any architect can address any other architect. This is the sibling-architect messaging form. **Builders**: allowed ONLY when `<name>` matches the builder's own `spawnedByArchitect`. Mismatches are rejected by the spoofing check at `tower-messages.ts:213-218`. From a builder, this is an explicit form of the affinity routing, NOT an override. | Any sender (with the spoofing constraint above for builders). |
 | `afx send <workspace>:architect "msg"` | Cross-workspace addressing (e.g. `afx send marketmaker:architect "..."`). | Any sender. |
 
-`afx send --delay <seconds>` (Spec 1307) has Tower hold a message and deliver it later, so the sending process can exit first — this is how a session schedules a message to *itself* for after something that destroys it (`/arch-save` sends `/clear`, then a delayed `/arch-init`). Authorised at request time, not delivery time; not persisted across a Tower restart. Full reference: `codev/resources/commands/agent-farm.md`.
-
 ### Sibling-architect messaging
 
 When a workspace hosts more than one architect (added via `afx workspace add-architect --name <name>`), sibling architects message each other via the `architect:<name>` form. Example:
