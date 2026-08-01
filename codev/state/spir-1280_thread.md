@@ -462,3 +462,20 @@ Artifacts: `1280-word-baseline.md`, `1280-capability-inventory.json`, manifest f
 `1252-word-*.md` annotated in place (originals preserved, marked superseded). Tests: 22 passing
 (T1, T1b, T2, T3, T11, T12, T15, T16). T16 written before any manifest exists — the guard must
 predate what it guards.
+
+### Worktree environment note — `pnpm build` is a precondition for the suite
+
+58 test files / 116 tests failed on first full run. **Not my change.** Cause:
+`Skeleton directory not found. Package may be corrupted.` from `getTemplatesDir` — this
+worktree had never been built, and `pnpm build`'s `copy-skeleton` step is what creates
+`packages/codev/skeleton` from `codev-skeleton/`. After building, the three representative
+failing files (adopt, hot-tier-materialization, cold-tier-materialization) pass 19/19.
+
+**Carry-forward for every later phase**: `packages/codev/skeleton` is a BUILD COPY of
+`codev-skeleton/`. When a phase rewrites skeleton files, the suite will keep testing the stale
+copy until `pnpm build` re-runs. Any phase touching `codev-skeleton/` must rebuild before
+claiming green, or it is asserting against pre-rewrite content — a phantom-green of exactly the
+kind this project exists to stop being fooled by.
+
+I diagnosed this from an actual error message rather than the "probably needs a build" theory,
+which is the same discipline the rest of the project has been applying to instruments.
