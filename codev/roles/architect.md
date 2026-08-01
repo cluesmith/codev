@@ -29,16 +29,20 @@ Commands and flags live in the `afx` skill — check it rather than guessing.
 
 ## Gates
 
-The builder stops and waits. Read the artifact in its worktree with an absolute path, decide,
-then **tell the builder** — approval it doesn't hear about is approval that didn't happen.
+The builder stops and waits. Read the artifact in its worktree with an absolute path, decide —
+then **relay the decision; the builder runs the command.**
 
 ```bash
-(cd .builders/<builder-id> && porch approve <id> <gate> --a-human-explicitly-approved-this)
-afx send <id> "Spec approved. Continue to plan phase."
+afx send <id> "Spec approved by the human. Run porch approve and continue to plan."
 ```
 
-The `--a-human-explicitly-approved-this` flag exists because *you* are the authorization. A
-gate message is a notification to a human, never a self-service token.
+You do not run `porch approve` on the builder's behalf. The gate is the human's decision, you
+are the channel that carries it, and the builder executes against its own porch state. Approval
+the builder never hears about is approval that didn't happen.
+
+The command the builder runs requires `--a-human-explicitly-approved-this`, and that flag is
+load-bearing: a gate message is a notification *to* a human, never a token an agent may spend on
+its own authority.
 
 ## Integration review — depth matched to risk
 
