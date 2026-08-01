@@ -620,3 +620,30 @@ there at ten times the width.
 
 Architect has adopted my reflow-hazard rule as a standing inspection item and will fixed-string-
 verify every exact-match string in every batch from here.
+
+### Hotfix #1321 — main went red on my test (2026-08-01)
+
+`honours PHASE_ITERS` timed out at vitest's 5000ms default on a loaded CI runner (5,690ms),
+blocking green CI for every open PR. Fixed with explicit 60s budgets on the 12 blocks that shell
+out to the measurement script (11 tests + the `beforeAll`), per the #1302 precedent. One file,
+12 lines.
+
+**Scope determined by parsing, not eyeballing**: I parsed the file for blocks whose body calls
+`run()`. The 9 non-shelling tests keep the default budget deliberately — a timeout on a test that
+*cannot* be slow is noise, and would mask a future regression in exactly the tests that can be.
+
+**The honest diagnosis is worse than "flake".** On an *unloaded* machine those tests take
+3.9–4.0s against a 5s default — ~80% of budget before any contention. The sibling test hit
+4,576ms in the same CI run; it was next regardless of load. **I shipped a test file where a third
+of the tests sat at 80% of budget and never looked at the timings.** The failure was latent in
+PR #1319 and a fast runner flattered it. Architect accepted the correction on the record.
+
+**Approved follow-up, scheduled AFTER Phase 3** (architect ruling): `measure-prompt-surface.sh`
+spawns `python3` once per file for include expansion — that is the whole ~4s. A single-pass
+expansion takes these tests under a second and speeds up every measurement the remaining phases
+run. Own small PR. Unblocking main and resuming the rewrite outranks it.
+
+Standing lesson, and it generalises past this project: **a test that passes at 80% of its budget
+is a failure that has not happened yet.** Check timings, not just the green tick — the same
+family as the delegated `wc`, the overloaded `cmp` exit code, and the truncated grep: a signal
+that looks like success and is measuring the wrong thing.
