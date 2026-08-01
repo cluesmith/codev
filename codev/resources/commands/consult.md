@@ -210,15 +210,16 @@ through to a normal spawn.
 
 #### Test isolation
 
-The cache above protects *production* runs. It did not protect the test suites:
-`agyAuthCacheDisabled()` turns itself off under `VITEST` unless a cache directory
-is named, and any test that reached the gemini lane without pinning
-`CODEV_AGY_BIN` resolved the real binary — so a suite run could still open a
-window per spawn (#1323). Codev's vitest harness (`packages/codev/vitest-setup.ts`)
-now pins a fake `agy`, a sandbox auth cache, and a sandbox metrics DB for every
-suite; spawned `codev` / `consult` children inherit the pins. Guards in
-`src/lib/test-env.ts` make a test that escapes the harness fail loudly instead of
-reaching the real binary or the user-global database.
+The cache above protects *production* runs. It did not protect test runs: the
+cache disables itself under `VITEST` unless a cache directory is named, and any
+test that reached the gemini lane without pinning `CODEV_AGY_BIN` resolved the
+real binary — so a suite run could still open a login window per spawn (#1323).
+Consult now treats a test runner as a hard boundary. Under `VITEST` (or
+`CODEV_TEST`) it refuses to resolve an unpinned `agy` and refuses to open the
+user-global metrics database, failing loudly instead of reaching either. Codev's
+own suites pin a fake `agy`, a sandbox auth cache, and a sandbox metrics DB for
+every test; spawned `codev` / `consult` children inherit the pins through the
+environment.
 
 | Variable | Default | Purpose |
 |---|---|---|

@@ -81,14 +81,25 @@ the file, so later `doctor()` calls reached `verifyAgy()` unpinned. **Not** real
 module mock, not the pin, was doing the work). Fixed by restoring the captured value
 instead of deleting; same antipattern fixed in `consult.test.ts`.
 
-### Open: intermittent metrics leak
+### Resolved: the "intermittent metrics leak" was a confounded measurement
 
-Full run #2: 0 rows added. Full run #3: **21 rows** added (hermes/claude/gemini from
-`consult.test.ts`, codex from `codex-sdk.test.ts`). Running those files alone, or paired
-with the obvious suspects (`test-isolation`, `generate-image`), adds 0 rows — so some
-other file in a full run clears `CODEV_METRICS_DB` *and* `VITEST` (the guard throws
-whenever `VITEST` survives, so both must be gone). Tripwire instrumentation is in
-`resolveDbPath` to catch the culprit; it is temporary and must come out before commit.
+Full run #2 added 0 rows; run #3 added **21** (hermes/claude/gemini shaped like
+`consult.test.ts`, codex like `codex-sdk.test.ts`), which looked like my fix failing
+intermittently. It wasn't.
+
+Row-count delta on `~/.codev/metrics.db` is **not** a valid instrument on this machine:
+the DB is user-global and shared, `ls ../` shows ~34 sibling builder worktrees, and
+`ps` showed **101 vitest processes** running concurrently. Sibling builders on
+un-fixed branches were writing exactly those rows while my suite ran. Between run #4
+and run #5 the count rose by 64 with **no test run of mine in between** — proof the
+instrument was measuring other agents.
+
+The correct instrument is "did *my* suite ever open the user-global DB", answered by
+logging every `MetricsDB` path in the constructor. Result on a full unit run: **19
+opens, all to the sandbox; zero to `~/.codev/metrics.db`.** Same run, row delta 0.
+
+Lesson worth keeping: on a shared machine, a global counter is evidence about the
+machine, not about your change. Instrument the code path, not the side effect.
 
 ## Architect instruction (2026-08-01T13:20Z)
 
