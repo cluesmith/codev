@@ -719,3 +719,98 @@ Porch flow this round: `porch next` emitted a "write rebuttal (iter-3)" task →
 / 0 failed** (+1 405 test; note: had to run from packages/codev — a bare `pnpm test` from the worktree root
 hits the root's watch-mode `vitest`). Next: commit fix → `porch done` (re-verify + mark rebuttal) → `porch next`
 (iter-4 consult). Codex 3-for-3 on real issues this phase — the 3-way clearly earning its keep.
+
+### 2026-08-01 — Phase 7 FORCE-ADVANCED at iter-3 safety ceiling → now on phase_8
+`porch done` (iter-3 rebuttal) tests failed ONCE on a flake: `session-manager.test.ts:1386` "bounds a harness
+that exits 0 immediately" — a timing-racy auto-restart test (**untouched by any of my phases**). Verified it
+passes in isolation (472ms) but starved to 41.3s under full-suite parallelism. Retried `porch done` → clean
+(build 14.5s, tests 28.3s). **No skip needed** (didn't repeat).
+Then `porch next` → porch hit its **3-iteration safety ceiling** and **force-advanced** phase_7
+(`58bdb65c chore(porch): implement force-advance (safety ceiling reached at iter 3)` → `1691c0e3 advance plan
+phase → phase_8`). So phase_7 is ✓ complete but did NOT get a clean unanimous iter — each of iters 1/2/3 had a
+distinct, real Codex REQUEST_CHANGES that I fixed (Gemini+Claude APPROVE every round):
+  - iter1: escalation didn't fire overview-changed; liveness log-only + no recent-output gate; thin route tests.
+  - iter2: `afx inbox` defaulted Tower-wide → violated Baked Decision 8 (workspace-scoped).
+  - iter3: `POST /api/inbox/:id/dismiss` had no method guard → GET could dismiss mail.
+All committed (last = `af21e608`, the method-guard fix). **Caveat: `af21e608` was committed just before the
+force-advance, so it was NOT re-reviewed by a 4th consult.** Working tree clean. Notified architect + asked
+whether to proceed into phase_8 (Dashboard + VSCode held-count indicators — UI, needs Playwright) or checkpoint
+to review phase_7 first. Holding on phase_8 implementation pending that steer.
+
+### 2026-08-01 — Architect steer: PROCEED into phase_8
+Architect verified `af21e608` against code+test (405-before-mutation guard + regression test sound) → iter-4
+caveat CLEARED. phase_8 is independent UI; the full phase_7 diff (all iters incl af21e608) still gets its
+complete CMAP at the pr-gate before merge. Proceeding to implement phase_8 (Dashboard + VSCode held-count
+indicators). Note: `porch next` for a phase-1 implement task emits "Implement: Build artifact" (fresh phase),
+not a revision task.
+
+### 2026-08-01 — RESUMED (architect) — phase_8 VSCode side: recon done, design locked
+Re-read snapshot + thread. Verified the uncommitted **dashboard side** before building on it (born-dirty):
+`HeldCountBadge.tsx`+test present; CSS vars (`--status-waiting`/`--text-muted`/`--text-secondary`) + `@keyframes
+cloud-pulse` all exist; `OverviewData.heldCount`(req num)/`mailboxEscalated`(req bool) + `OverviewBuilder.heldCount?`
+in types; `useOverview`→`useSSE(poll)` refetches on EVERY SSE event so attention state is automatic. Dashboard solid.
+**Mapped the VSCode surface** (extension.ts:355-367 `updateStatusBarCounts`, :405-426 `updateActivityBadge`, :453-458
+overview fan-out via `overviewCache.onDidChange`; `OverviewCache.refresh()` fires on EVERY SSE event too →
+held-count badge updates live for free). SSE plumbing: Tower emits `{type,body}` envelopes on the `data:` field (no
+`event:` name); consumers use `parseSseEnvelope`/`parseSseBody` (sse-envelope.ts). Escalation event = **`mailbox-escalation`**
+(confirmed fired at mailbox-wiring.ts:230; payload `MailboxEscalationPayload{workspacePath,toAgent,mailboxId,ageMs,reason}`,
+metadata-only per redaction). Precedents: `builder-spawn-handler.ts` (SSE→toast) + `notifications/gate-toast.ts`
+(`activateGateToasts` + `codev.gateToasts.enabled` setting).
+**Spec Decision 8 (authority):** indicator shows the count of **ALL** currently-held rows (workspace total —
+`data.heldCount`, covers architect-addressed mail per-builder sums miss), count-only/read-only (dismissal CLI-only),
+a **distinct log-free attention state** on escalation whose visual form is my plan-level choice; clears when the row resolves.
+**Design (VSCode):**
+- NEW `src/mailbox-indicators.ts` (pure, vscode-free): `heldStatusSegment(count,escalated)` (` · $(mail) N held` /
+  `$(warning)` when escalated), `heldTooltipClause`, `escalationToastText(payload)` (metadata only), `escalationMatchesWorkspace`.
+- `extension.ts` `updateStatusBarCounts`: append held segment; `statusBarItem.backgroundColor =
+  ThemeColor('statusBarItem.warningBackground')` ONLY when escalated (the persistent attention state; clears on resolve
+  via overview refetch). `updateActivityBadge`: fold held into the numeric total + append held clause to tooltip (existing
+  blocked/idle phrasing preserved verbatim; guard the idle branch for held-only case).
+- NEW `src/notifications/mailbox-escalation-toast.ts` `activateMailboxEscalationToasts` (mirrors gate-toast): subscribe
+  onSSEEvent → parse → type-guard `mailbox-escalation` → workspace-filter → dedupe by mailboxId → `showWarningMessage`;
+  gated by NEW `codev.mailboxEscalationToasts.enabled` (default true, mirrors gateToasts).
+- Tests (`src/__tests__/`, vitest `test:unit`): `mailbox-indicators.test.ts` (pure) + `mailbox-escalation-toast.test.ts`
+  (vi.mock('vscode'): fires/deduped/workspace-filtered/disabled/wrong-type). VSCode source is app code — NOT skeleton-mirrored.
+
+### 2026-08-01 — Phase 8 IMPLEMENTED (VSCode side) — build + all suites green
+Finished the VSCode side per the locked design. Files:
+- NEW `apps/vscode/src/mailbox-indicators.ts` (pure, vscode-free): `heldStatusSegment`/`heldTooltipClause`/
+  `heldBadgeCount`/`escalationToastText`/`escalationMatchesWorkspace`. All guard `!(n>0)` so an older Tower that
+  omits `heldCount` renders nothing (never "undefined held").
+- NEW `apps/vscode/src/notifications/mailbox-escalation-toast.ts` `activateMailboxEscalationToasts` — subscribe
+  onSSEEvent → parse envelope → type-guard `mailbox-escalation` → workspace-filter → dedupe by mailboxId →
+  `showWarningMessage`; gated by NEW setting `codev.mailboxEscalationToasts.enabled` (default true, mirrors gateToasts).
+- `extension.ts`: `updateStatusBarCounts` appends held segment (`$(mail)`/`$(warning)` when escalated) + sets
+  `statusBarItem.backgroundColor = ThemeColor('statusBarItem.warningBackground')` ONLY when escalated (persistent,
+  log-free attention state; auto-clears when the row resolves via overview refetch). `updateActivityBadge` folds
+  `heldCount` into the numeric total + appends the held clause to the tooltip (existing blocked/idle phrasing kept
+  verbatim; idle branch guarded for the held-only case). `activateMailboxEscalationToasts(context, connectionManager)`
+  wired next to `activateGateToasts`. Reads the authoritative workspace `data.heldCount` (covers architect-addressed
+  mail a per-builder sum misses). Both surfaces update live for free — `OverviewCache.refresh()` fires on every SSE event.
+- `apps/vscode/package.json`: `codev.mailboxEscalationToasts.enabled` config after `gateToasts.enabled`.
+- Tests: `src/__tests__/mailbox-indicators.test.ts` (pure, 16) + `src/__tests__/mailbox-escalation-toast.test.ts`
+  (vi.mock('vscode'), 8: fires/deduped/diff-id/workspace-filter/wrong-type/malformed/disabled/missing-id).
+**Verification:** vscode `check-types` clean; `pnpm compile` (check-types+eslint+esbuild) exit 0; **vscode `test:unit`
+667 pass / 56 files** (+24 new); **dashboard `pnpm test` 328 pass / 1 skip / 32 files**; dashboard vite build exit 0;
+**`porch check 1313` → ALL CHECKS PASSED (build 14.6s, tests 28.3s)** — porch's `npm run build` builds the dashboard
+via packages/codev `build:dashboard`, so my apps/web changes are on the gated path. VSCode is NOT in the root build,
+verified via `pnpm compile`.
+**⚠️ Playwright gap (plan Test Plan / CLAUDE.md UI mandate).** Live Playwright NOT run: the `playwright` module is not
+installed in this worktree and no Tower is running on :4100 (only `packages/codev/playwright.config.ts` exists). The
+dashboard delta is a PRESENTATIONAL component (`HeldCountBadge`, RTL-covered: renders count, hides at 0, attention
+class on escalate) + a one-line `useOverview()` wiring; its data path (`heldCount`/`mailboxEscalated` on overview,
+`overview-changed`/`mailbox-escalation` SSE, live refetch) was built+tested server-side in phase 7. Tower-regression
+risk is near-zero — phase 8 touches only apps/web + apps/vscode (no Tower state/server code, cf. Spec 0090). Live
+visual verification is deferred to the **verify phase** (post-merge integration). Flagging to architect; CMAP will see
+this note. If the architect wants live Playwright now, it needs `playwright` installed + a Tower + a route-stubbed
+`/api/overview` (heldCount>0 / mailboxEscalated) — happy to build that harness on request.
+
+### 2026-08-01 — PAUSED (architect) mid-phase_8, dashboard side done + green
+Architect asked to pause at a sensible point. Stopped at a clean boundary: **phase_8 dashboard side complete +
+verified** (`HeldCountBadge.tsx` + test, `App.tsx` header wired via `useOverview()`, `.held-badge` CSS in
+`index.css`; `pnpm --filter @cluesmith/codev-web build` ✓, 328 tests pass). **VSCode side not started; phase_8
+uncommitted.** Explored integration points first via a subagent (data all present from phase_7: `heldCount`/
+`mailboxEscalated` on OverviewData, `overview-changed`/`mailbox-escalation`/`notification` SSE; useOverview
+refetches on any SSE so attention state is free; NO Playwright — dashboard tests are vitest+RTL/jsdom). Saved
+high-level state to `state-snapshot.md` (overwritten) and notified architect. Resume: VSCode side → build/test
+both apps + Tower regression → commit → `porch done`.

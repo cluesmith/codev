@@ -32,6 +32,8 @@ import { connectTunnel, disconnectTunnel } from './commands/tunnel.js';
 import { listCronTasks } from './commands/cron.js';
 import { addReviewComment } from './commands/review.js';
 import { activateGateToasts } from './notifications/gate-toast.js';
+import { activateMailboxEscalationToasts } from './notifications/mailbox-escalation-toast.js';
+import { heldStatusSegment, heldTooltipClause, heldBadgeCount } from './mailbox-indicators.js';
 import { activateReviewDecorations } from './review-decorations.js';
 import { activateReviewComments } from './comments/plan-review.js';
 import { MarkdownPreviewProvider } from './markdown-preview/preview-provider.js';
@@ -360,10 +362,22 @@ export async function activate(context: vscode.ExtensionContext) {
 		const now = Date.now();
 		const blockedCount = data.builders.filter(b => b.blocked).length;
 		const idleCount = data.builders.filter(b => isIdleWaiting(b, now)).length;
+		// Spec 1313 Phase 8: workspace-wide held-mail count (all recipients, incl.
+		// architects — the authoritative `data.heldCount`, not a per-builder sum),
+		// with a warning-flavored attention state once a held row has escalated.
+		const heldCount = data.heldCount;
+		const escalated = data.mailboxEscalated === true;
 		let text = `$(server) Codev: ${builderCount} builders`;
 		if (blockedCount > 0) { text += ` · $(bell) ${blockedCount} blocked`; }
 		if (idleCount > 0) { text += ` · $(comment-discussion) ${idleCount} waiting`; }
+		text += heldStatusSegment(heldCount, escalated);
 		statusBarItem.text = text;
+		// Amber background is the persistent, log-free attention state for the count;
+		// it clears when the escalated row resolves (an overview refetch on the
+		// held-state-change broadcast flips `mailboxEscalated` back to false).
+		statusBarItem.backgroundColor = (heldCount > 0 && escalated)
+			? new vscode.ThemeColor('statusBarItem.warningBackground')
+			: undefined;
 	};
 
 	// List views show their item count in the title: "Agents (3)".
@@ -412,16 +426,24 @@ export async function activate(context: vscode.ExtensionContext) {
 		const now = Date.now();
 		const blockedCount = data.builders.filter(b => b.blocked).length;
 		const idleCount = data.builders.filter(b => isIdleWaiting(b, now)).length;
-		const total = blockedCount + idleCount;
+		// Spec 1313 Phase 8: fold the workspace held-mail count into the badge so the
+		// activity-bar icon reflects it even when the sidebar is collapsed. Held is a
+		// count only (not a per-builder "needs me" gate); the tooltip disambiguates it
+		// from the blocked/idle signals. `heldBadgeCount` absorbs an absent field.
+		const heldCount = heldBadgeCount(data.heldCount);
+		const total = blockedCount + idleCount + heldCount;
 		if (total === 0) {
 			buildersView.badge = undefined;
 			return;
 		}
-		const tooltip = (blockedCount > 0 && idleCount > 0)
+		const builderTip = (blockedCount > 0 && idleCount > 0)
 			? `${blockedCount} blocked, ${idleCount} waiting on input`
 			: blockedCount > 0
 				? (blockedCount === 1 ? '1 builder blocked at a human-approval gate' : `${blockedCount} builders blocked at human-approval gates`)
-				: (idleCount === 1 ? '1 builder waiting on input' : `${idleCount} builders waiting on input`);
+				: idleCount > 0
+					? (idleCount === 1 ? '1 builder waiting on input' : `${idleCount} builders waiting on input`)
+					: '';
+		const tooltip = [builderTip, heldTooltipClause(heldCount)].filter(Boolean).join(' · ');
 		buildersView.badge = { value: total, tooltip };
 	};
 
@@ -1359,6 +1381,11 @@ export async function activate(context: vscode.ExtensionContext) {
 	// Toast on new gate-pending — surfaces blocked builders without forcing the
 	// user to watch the Builders tree. Respects `codev.gateToasts.enabled`.
 	activateGateToasts(context, overviewCache);
+
+	// Spec 1313 Phase 8: toast when a held message crosses the escalation age
+	// (the `mailbox-escalation` SSE event). Visibility only — read/dismiss via
+	// `afx inbox`. Respects `codev.mailboxEscalationToasts.enabled`.
+	activateMailboxEscalationToasts(context, connectionManager);
 
 	// Auto-open builder terminals on Tower spawn events
 	const builderSpawnHandler = new BuilderSpawnHandler(connectionManager, terminalManager, outputChannel);
