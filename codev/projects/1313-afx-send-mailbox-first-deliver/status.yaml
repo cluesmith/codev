@@ -26,11 +26,11 @@ plan_phases:
     status: complete
   - id: phase_8
     title: Dashboard + VSCode held-count indicators
-    status: in_progress
+    status: complete
   - id: phase_9
     title: Documentation + skeleton mirror
-    status: pending
-current_plan_phase: phase_8
+    status: in_progress
+current_plan_phase: phase_9
 gates:
   spec-approval:
     status: approved
@@ -44,8 +44,8 @@ gates:
     status: pending
   verify-approval:
     status: pending
-iteration: 2
-build_complete: true
+iteration: 1
+build_complete: false
 history:
   - iteration: 1
     plan_phase: phase_2
@@ -160,7 +160,7 @@ history:
         file: >-
           /home/user/code/codev_root/codev/.builders/spir-1313/codev/projects/1313-afx-send-mailbox-first-deliver/1313-phase_8-iter1-claude.txt
 started_at: '2026-08-01T01:40:05.008Z'
-updated_at: '2026-08-01T16:53:14.256Z'
+updated_at: '2026-08-01T16:57:01.274Z'
 force_advanced:
   phase: phase_7
   iteration: 3
