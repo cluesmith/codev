@@ -1,7 +1,7 @@
 id: '1313'
 title: afx-send-mailbox-first-deliver
 protocol: spir
-phase: implement
+phase: review
 plan_phases:
   - id: phase_1
     title: Mailbox persistence layer
@@ -29,8 +29,8 @@ plan_phases:
     status: complete
   - id: phase_9
     title: Documentation + skeleton mirror
-    status: in_progress
-current_plan_phase: phase_9
+    status: complete
+current_plan_phase: null
 gates:
   spec-approval:
     status: approved
@@ -44,8 +44,8 @@ gates:
     status: pending
   verify-approval:
     status: pending
-iteration: 2
-build_complete: true
+iteration: 1
+build_complete: false
 history:
   - iteration: 1
     plan_phase: phase_2
@@ -176,7 +176,7 @@ history:
         file: >-
           /home/user/code/codev_root/codev/.builders/spir-1313/codev/projects/1313-afx-send-mailbox-first-deliver/1313-phase_9-iter1-claude.txt
 started_at: '2026-08-01T01:40:05.008Z'
-updated_at: '2026-08-01T17:31:12.010Z'
+updated_at: '2026-08-01T17:34:14.179Z'
 force_advanced:
   phase: phase_7
   iteration: 3
