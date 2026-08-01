@@ -828,3 +828,52 @@ Worth noting *why* it went unnoticed: the assertion that guards this text checks
 presence of category hints, the escape hatch and "no-op default" — it cannot check that the
 instruction makes sense for the protocol carrying it. A grep-shaped guard protects wording, not
 applicability.
+
+### Phase 4 built but BLOCKED on R1 — the suite is red, deliberately (2026-08-01)
+
+Commit `235f012f`. Nine builder-prompts rewritten, both trees. **Verified run at that SHA:
+205 files passed, 1 failed; 4,114 tests passed, 3 failed; EXIT=1.**
+
+**All three failures are R1** — `expectPureAdditionDiff` on the spir/aspir/air builder-prompts —
+and I could have made them green in one command by retiring the assertion myself. I did not.
+**The red suite is the visible cost of that discipline**, and reporting it red is the point:
+a green build here would have meant a prior spec's protection quietly deleted to suit my work.
+
+R1's trace is in `codev/resources/1280-retirements.md`. The crux: 746's baseline is the
+**pre-746** file, so the assertion proves its paragraph was *added* without deleting anything.
+This project deletes deliberately, so the invariant is permanently unsatisfiable — it forbids
+*any* future rewrite of these files. **Re-baselining is not the escape**: 746's own pollution
+check requires the baseline to lack `## Baked Decisions`, so a re-baselined file fails it, and
+silencing that check would gut the anti-vacuity half of the protection.
+
+746's *substance* survives and still passes unmodified — heading, carveout, contradiction
+wording, mirror-parity, verified in all three.
+
+**Kept rather than retired**: #744's four PR-strategy phrases, and #619's
+`Follow the ASPIR protocol` (my first draft swapped it for a template variable; the original bug
+told ASPIR builders to follow SPIR — wrong gates). Added the symmetric SPIR line, since #619 was
+a cross-protocol mixup.
+
+**Kept despite duplicating the role doc**: the Verify Phase. `roles/builder.md` carries it only
+inside a notification string, so deleting it would have repeated the exact bug 1252 found.
+
+### T16 scoped — second cross-project firing of my own guards
+
+Its predicate was **repo-global**: any prompt-bearing path in `origin/main...HEAD` had to appear
+in a *1280* manifest. In the shared suite that blocked **Spec 1307**, which would have had to
+file paperwork in my project's directory to go green. Worse than the pinned literal: it demanded
+foreign projects write into my ledger.
+
+Fixed by **provenance, not paths** — only files touched by `[Spec 1280]`-tagged commits on this
+branch count; other branches skip entirely. Uncommitted-changes checking retained so a
+pre-commit run still cannot pass vacuously.
+
+**Mutation-verified both ways**, because a scoping fix that silently disabled the guard would be
+the vacuous pass again: removing a manifest row still fails; a real branch off `origin/main`
+with **0 `[Spec 1280]` commits** and 2 changed prompt files **passes**.
+
+**My first attempt at that second simulation never ran** — the branch checkout failed silently
+(it would have clobbered uncommitted work), so the test executed on my own branch and "passed"
+meaninglessly. Caught only because the output reported *16* `[Spec 1280]` commits on a branch
+that should have had zero. Eleventh instance of the family, and the tell was a number that made
+no sense for the thing I claimed to be measuring.
