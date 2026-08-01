@@ -38,6 +38,29 @@
  * Deliberately keyed by session id rather than holding a session object: Tower
  * re-fetches sessions by id, and a lock that outlived its session would pin a
  * dead reference.
+ *
+ * ## Exactly what it covers — this is NOT blanket per-session atomicity
+ *
+ * A lock only serialises writers that take it. Currently that is the `escape`
+ * and immediate-delivery paths of `/api/send`. Every other PTY writer still
+ * writes directly, and it is worth being precise about why:
+ *
+ *   - `tower-routes.ts` `deliverBufferedMessage` (buffer flush) — NOT covered.
+ *     Adopting it is Spec 1307's work; the batch form
+ *     (`write` performing the whole drain and returning the final offset) is
+ *     supported and tested, so no API change is needed when they wire it.
+ *   - `tower-cron.ts` cron delivery — NOT covered. Same shape as the buffered
+ *     path; a scheduled message can land beside an in-flight submission.
+ *   - `POST /api/terminals/:id/write` — NOT covered. It is a raw passthrough
+ *     with no Enter semantics of its own.
+ *   - `tower-websocket.ts` keystrokes and the shellper frame relay — DELIBERATELY
+ *     not covered. That is a human typing into their own terminal; serialising
+ *     it behind an agent's message would make the UI feel stuck, and the human
+ *     is the composer's owner.
+ *
+ * So the guarantee is: **two `/api/send` deliveries to one session cannot
+ * interleave**, which is the failure that reached production. Anything stronger
+ * requires the remaining writers to take the lock too.
  */
 
 /**
