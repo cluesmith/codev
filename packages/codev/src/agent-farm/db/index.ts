@@ -142,7 +142,7 @@ function ensureGlobalDatabase(): Database.Database {
   configurePragmas(db);
 
   // Current migration version — bump when adding new migrations
-  const GLOBAL_CURRENT_VERSION = 14;
+  const GLOBAL_CURRENT_VERSION = 15;
 
   // Detect fresh vs existing database by checking if content tables exist.
   // On existing databases, GLOBAL_SCHEMA must NOT run because it references column names
@@ -535,6 +535,43 @@ function ensureGlobalDatabase(): Database.Database {
     console.log('[info] Absorbed state.db tables into global.db (Issue #1118)');
   }
 
+  // Migration v15: Add mailbox table (Spec 1313 — mailbox-first delivery).
+  // Additive new table: every `afx send` is persisted here before the send
+  // response returns, so nothing is lost to a Tower crash/restart/shutdown.
+  // Rows address AGENTS (to_agent), not PTYs, so a respawned terminal drains its
+  // predecessor's mail. No rows to migrate — the retired SendBuffer was in-memory.
+  // Idempotent via CREATE TABLE / CREATE INDEX IF NOT EXISTS (fresh installs
+  // already created it from GLOBAL_SCHEMA and reach the marker as a no-op).
+  const v15 = db.prepare('SELECT version FROM _migrations WHERE version = 15').get();
+  if (!v15) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS mailbox (
+        id TEXT PRIMARY KEY,
+        workspace_path TEXT NOT NULL,
+        to_agent TEXT NOT NULL,
+        terminal_id TEXT,
+        from_agent TEXT,
+        from_workspace TEXT,
+        body TEXT NOT NULL,
+        formatted_message TEXT NOT NULL,
+        no_enter INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'held'
+          CHECK(status IN ('held', 'delivered', 'superseded', 'dismissed')),
+        reason TEXT CHECK(reason IN ('busy', 'no-profile', 'no-live-pty')),
+        supersede_key TEXT,
+        escalated INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        resolved_at INTEGER
+      );
+      CREATE INDEX IF NOT EXISTS idx_mailbox_workspace_status ON mailbox(workspace_path, status);
+      CREATE INDEX IF NOT EXISTS idx_mailbox_agent_drain ON mailbox(workspace_path, to_agent, status);
+      CREATE INDEX IF NOT EXISTS idx_mailbox_supersede ON mailbox(supersede_key);
+    `);
+    db.prepare('INSERT INTO _migrations (version) VALUES (15)').run();
+    console.log('[info] Created mailbox table (Spec 1313)');
+  }
+
   return db;
 }
 
@@ -546,4 +583,7 @@ export type {
   DbBuilder,
   DbUtil,
   DbAnnotation,
+  DbMailbox,
+  MailboxStatus,
+  MailboxReason,
 } from './types.js';

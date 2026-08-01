@@ -1,0 +1,204 @@
+/**
+ * Mailbox repository (Spec 1313 — mailbox-first delivery).
+ *
+ * Pure, unit-testable data operations over the `mailbox` table. Every `afx send`
+ * is persisted here *before* the send response returns, so nothing is lost to a
+ * Tower crash, restart, or shutdown. This module is deliberately decoupled from
+ * delivery: it never writes to a PTY and never runs the render-gate. The delivery
+ * orchestration (Phase 4) wires against these proven operations.
+ *
+ * Design notes:
+ * - Functions take an explicit `db` handle first (matching `db/consolidate.ts`),
+ *   which keeps them trivially testable against any better-sqlite3 database.
+ * - Timestamps are epoch-ms integers supplied by the caller (defaulting to
+ *   `Date.now()`), so ordering and age math are deterministic and test-injectable.
+ * - `workspace_path` is treated as an opaque addressing key: callers pass a
+ *   canonical path (the send boundary canonicalizes in Phase 4), mirroring how
+ *   `cron_tasks` scopes by workspace. This module does not canonicalize.
+ * - The lifecycle state machine (`held → delivered | superseded | dismissed`) is
+ *   enforced here: every transition targets only `held` rows, so a terminal row
+ *   can never revert (no `delivered → held`) and `supersede` only replaces a row
+ *   that is still `held`.
+ */
+
+import type Database from 'better-sqlite3';
+import { randomUUID } from 'node:crypto';
+import type { DbMailbox, MailboxReason } from './types.js';
+
+/**
+ * Fields a caller supplies to persist a new held row. The repository fills in the
+ * id, `held` status, `escalated=0`, and the timestamps.
+ */
+export interface EnqueueInput {
+  workspacePath: string;
+  toAgent: string;
+  /** Raw message body (never logged). */
+  body: string;
+  /** Exact bytes written to the PTY on delivery. */
+  formattedMessage: string;
+  /** Last-known PTY hint; the recipient is the agent, not this terminal. */
+  terminalId?: string | null;
+  fromAgent?: string | null;
+  fromWorkspace?: string | null;
+  /** Stage the text without submitting (no trailing Enter). */
+  noEnter?: boolean;
+  /** Initial why-held reason; null if it will be delivered immediately. */
+  reason?: MailboxReason | null;
+  /** Cron-only coalescing key; null for direct sends. */
+  supersedeKey?: string | null;
+}
+
+const INSERT_SQL = `
+  INSERT INTO mailbox (
+    id, workspace_path, to_agent, terminal_id, from_agent, from_workspace,
+    body, formatted_message, no_enter, status, reason, supersede_key,
+    escalated, created_at, updated_at, resolved_at
+  ) VALUES (
+    @id, @workspace_path, @to_agent, @terminal_id, @from_agent, @from_workspace,
+    @body, @formatted_message, @no_enter, @status, @reason, @supersede_key,
+    @escalated, @created_at, @updated_at, @resolved_at
+  )
+`;
+
+function buildRow(input: EnqueueInput, now: number): DbMailbox {
+  return {
+    id: randomUUID(),
+    workspace_path: input.workspacePath,
+    to_agent: input.toAgent,
+    terminal_id: input.terminalId ?? null,
+    from_agent: input.fromAgent ?? null,
+    from_workspace: input.fromWorkspace ?? null,
+    body: input.body,
+    formatted_message: input.formattedMessage,
+    no_enter: input.noEnter ? 1 : 0,
+    status: 'held',
+    reason: input.reason ?? null,
+    supersede_key: input.supersedeKey ?? null,
+    escalated: 0,
+    created_at: now,
+    updated_at: now,
+    resolved_at: null,
+  };
+}
+
+/**
+ * Persist a new `held` row and return it. This is the persist-first step: the row
+ * exists (and survives a crash) before any delivery is attempted.
+ */
+export function enqueue(db: Database.Database, input: EnqueueInput, now: number = Date.now()): DbMailbox {
+  const row = buildRow(input, now);
+  db.prepare(INSERT_SQL).run(row);
+  return row;
+}
+
+/** Fetch a single row by id, or null if it does not exist. */
+export function getById(db: Database.Database, id: string): DbMailbox | null {
+  const row = db.prepare('SELECT * FROM mailbox WHERE id = ?').get(id) as DbMailbox | undefined;
+  return row ?? null;
+}
+
+/**
+ * List all currently-held rows, oldest first. Scoped to `workspacePath` when
+ * provided, else workspace-wide (for `afx inbox`). `id` breaks created_at ties
+ * for deterministic ordering.
+ */
+export function listHeld(db: Database.Database, workspacePath?: string): DbMailbox[] {
+  if (workspacePath !== undefined) {
+    return db
+      .prepare(
+        "SELECT * FROM mailbox WHERE workspace_path = ? AND status = 'held' ORDER BY created_at ASC, id ASC"
+      )
+      .all(workspacePath) as DbMailbox[];
+  }
+  return db
+    .prepare("SELECT * FROM mailbox WHERE status = 'held' ORDER BY created_at ASC, id ASC")
+    .all() as DbMailbox[];
+}
+
+/**
+ * Held rows addressed to a specific agent, in enqueue order (`created_at ASC`).
+ * This is the per-agent drain order a delivery pass walks.
+ */
+export function findHeldForAgent(
+  db: Database.Database,
+  workspacePath: string,
+  toAgent: string
+): DbMailbox[] {
+  return db
+    .prepare(
+      "SELECT * FROM mailbox WHERE workspace_path = ? AND to_agent = ? AND status = 'held' ORDER BY created_at ASC, id ASC"
+    )
+    .all(workspacePath, toAgent) as DbMailbox[];
+}
+
+/**
+ * Transition a held row to `delivered` (clearing its why-held reason and stamping
+ * `resolved_at`). Returns true if it transitioned; false if the row was already
+ * terminal or does not exist — so a re-delivery attempt (backstop racing a submit
+ * trigger) is a safe no-op and can never revert or double-deliver a row.
+ */
+export function markDelivered(db: Database.Database, id: string, now: number = Date.now()): boolean {
+  const info = db
+    .prepare(
+      "UPDATE mailbox SET status = 'delivered', reason = NULL, updated_at = ?, resolved_at = ? WHERE id = ? AND status = 'held'"
+    )
+    .run(now, now, id);
+  return info.changes > 0;
+}
+
+/**
+ * Transition a held row to `dismissed` (operator-cleared via `afx inbox dismiss`).
+ * The why-held reason is preserved for audit. Returns true if it transitioned;
+ * a dismissed row is never delivered.
+ */
+export function dismiss(db: Database.Database, id: string, now: number = Date.now()): boolean {
+  const info = db
+    .prepare(
+      "UPDATE mailbox SET status = 'dismissed', updated_at = ?, resolved_at = ? WHERE id = ? AND status = 'held'"
+    )
+    .run(now, now, id);
+  return info.changes > 0;
+}
+
+/**
+ * Replace the held row sharing `(workspacePath, supersedeKey)` — if any — with a
+ * fresh held row carrying the same key, atomically. Only `held` rows are
+ * superseded (a delivered/dismissed row is untouched), so a newer cron run
+ * collapses a stale backlog without disturbing history. When no held row matches,
+ * this is just an enqueue. Returns the newly-enqueued replacement row.
+ */
+export function supersede(
+  db: Database.Database,
+  workspacePath: string,
+  supersedeKey: string,
+  input: EnqueueInput,
+  now: number = Date.now()
+): DbMailbox {
+  const run = db.transaction(() => {
+    db.prepare(
+      "UPDATE mailbox SET status = 'superseded', updated_at = ?, resolved_at = ? WHERE workspace_path = ? AND supersede_key = ? AND status = 'held'"
+    ).run(now, now, workspacePath, supersedeKey);
+    return enqueue(db, { ...input, workspacePath, supersedeKey }, now);
+  });
+  return run();
+}
+
+/**
+ * Delete terminal rows (delivered/superseded/dismissed) whose `resolved_at` is
+ * older than `retentionDays`. Held rows are never removed — the `status != 'held'`
+ * and `resolved_at IS NOT NULL` guards make that impossible even if a held row
+ * somehow carried a stale timestamp. Returns the number of rows deleted.
+ */
+export function pruneTerminal(
+  db: Database.Database,
+  retentionDays: number,
+  now: number = Date.now()
+): number {
+  const cutoff = now - retentionDays * 24 * 60 * 60 * 1000;
+  const info = db
+    .prepare(
+      "DELETE FROM mailbox WHERE status != 'held' AND resolved_at IS NOT NULL AND resolved_at < ?"
+    )
+    .run(cutoff);
+  return info.changes;
+}

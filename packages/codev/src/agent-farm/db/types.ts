@@ -74,6 +74,53 @@ export interface DbAnnotation {
 }
 
 /**
+ * Mailbox lifecycle status (Spec 1313).
+ *
+ * A row is born `held` and moves to exactly one terminal state:
+ *   - `delivered`  — written to the recipient's PTY after a clean render-gate pass
+ *   - `superseded` — replaced by a newer row sharing its supersede_key (cron only)
+ *   - `dismissed`  — cleared by an operator via `afx inbox dismiss`
+ * Terminal states are final; the repository enforces `held → *` only.
+ */
+export type MailboxStatus = 'held' | 'delivered' | 'superseded' | 'dismissed';
+
+/**
+ * Why a mailbox row is currently held (Spec 1313). Null once delivered.
+ *   - `busy`        — the target PTY's prompt is not a clean, empty prompt (draft/menu/etc.)
+ *   - `no-profile`  — the target app has no render-gate classifier profile (unknown app)
+ *   - `no-live-pty` — the recipient agent has no live terminal right now
+ */
+export type MailboxReason = 'busy' | 'no-profile' | 'no-live-pty';
+
+/**
+ * Database row type for the mailbox table (Spec 1313).
+ *
+ * Rows address AGENTS (`to_agent` within `workspace_path`), not PTYs, so a
+ * respawned terminal drains its predecessor's mail. Timestamps are epoch-ms
+ * integers set by the repository at the call site (not SQLite `datetime`), so
+ * ordering and age math are trivial and test-injectable. `body` is the raw
+ * message (never logged); `formatted_message` is what gets written to the PTY.
+ */
+export interface DbMailbox {
+  id: string;
+  workspace_path: string;
+  to_agent: string;
+  terminal_id: string | null;
+  from_agent: string | null;
+  from_workspace: string | null;
+  body: string;
+  formatted_message: string;
+  no_enter: number;        // 0 | 1 (SQLite has no boolean)
+  status: MailboxStatus;
+  reason: MailboxReason | null;
+  supersede_key: string | null;
+  escalated: number;       // 0 | 1 — set once escalation age crossed (visibility only)
+  created_at: number;      // epoch ms; per-agent enqueue order
+  updated_at: number;      // epoch ms
+  resolved_at: number | null;  // delivered/superseded/dismissed timestamp; null while held
+}
+
+/**
  * Convert database architect row to application type
  */
 export function dbArchitectToArchitectState(row: DbArchitect): ArchitectState {

@@ -243,4 +243,37 @@ CREATE TABLE IF NOT EXISTS annotations (
   parent_id TEXT,
   started_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- Mailbox (Spec 1313): durable home for every 'afx send'.
+-- Persist-first delivery — a row is written before the send response returns, so
+-- nothing is lost to a Tower crash/restart/shutdown (the retired in-memory
+-- SendBuffer lost held messages on both). Rows address AGENTS (to_agent within
+-- workspace_path), not PTYs, so a respawned terminal drains its predecessor's
+-- mail. Delivery is authorized elsewhere by the render-gate (Phases 2/4); this
+-- table is pure durable state. Timestamps are epoch-ms integers (not SQLite
+-- datetime) so ordering and age math are trivial. Additive new table — fresh
+-- installs get it here; existing installs get it from migration v15.
+CREATE TABLE IF NOT EXISTS mailbox (
+  id TEXT PRIMARY KEY,                    -- uuid
+  workspace_path TEXT NOT NULL,           -- addressing scope
+  to_agent TEXT NOT NULL,                 -- recipient agent identity (drains across respawn)
+  terminal_id TEXT,                       -- last-known PTY hint (nullable; not the identity)
+  from_agent TEXT,
+  from_workspace TEXT,
+  body TEXT NOT NULL,                     -- raw message (never logged)
+  formatted_message TEXT NOT NULL,        -- what gets written to the PTY
+  no_enter INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'held'
+    CHECK(status IN ('held', 'delivered', 'superseded', 'dismissed')),
+  reason TEXT CHECK(reason IN ('busy', 'no-profile', 'no-live-pty')),  -- why-held; null once delivered
+  supersede_key TEXT,                     -- cron-only; null for direct sends
+  escalated INTEGER NOT NULL DEFAULT 0,   -- set once escalation age crossed (visibility only)
+  created_at INTEGER NOT NULL,            -- epoch ms (enqueue order per agent)
+  updated_at INTEGER NOT NULL,
+  resolved_at INTEGER                     -- delivered/superseded/dismissed timestamp
+);
+
+CREATE INDEX IF NOT EXISTS idx_mailbox_workspace_status ON mailbox(workspace_path, status);
+CREATE INDEX IF NOT EXISTS idx_mailbox_agent_drain ON mailbox(workspace_path, to_agent, status);
+CREATE INDEX IF NOT EXISTS idx_mailbox_supersede ON mailbox(supersede_key);
 `;
