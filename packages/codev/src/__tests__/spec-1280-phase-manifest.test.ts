@@ -30,6 +30,21 @@ interface Manifest {
   rows: { path: string; oldWords: string; newWords: string; principles: string }[];
 }
 
+/**
+ * Expand `{a,b}/rest` into `a/rest`, `b/rest`.
+ *
+ * DELIBERATE FORMAT DECISION (Spec 1280, Phase 3): the plan's inspection model is per
+ * DECISION, not per file — twins are byte-identical and T7 verifies the sync mechanically, so
+ * the architect reads ~66 decisions rather than 131 diffs. One manifest row therefore names
+ * both tree paths, and the ≤12 batch cap counts decisions. The parser has to understand that
+ * notation or the skeleton twins read as uninspectable — which is exactly what it reported.
+ */
+function expandBraces(p: string): string[] {
+  const m = p.match(/^\{([^}]+)\}(.*)$/);
+  if (!m) return [p];
+  return m[1].split(',').map((alt) => alt.trim() + m[2]);
+}
+
 function parseManifest(file: string): Manifest {
   const body = fs.readFileSync(file, 'utf-8');
   const rows: Manifest['rows'] = [];
@@ -37,12 +52,13 @@ function parseManifest(file: string): Manifest {
     // | path | old | new | principles | rationale |
     const m = line.match(/^\|\s*`?([^`|]+?)`?\s*\|\s*(\d+)\s*\|\s*(\d+)\s*\|\s*([^|]*)\|/);
     if (m && !/^-+$/.test(m[1].trim())) {
-      rows.push({
-        path: m[1].trim(),
+      for (const expanded of expandBraces(m[1].trim())) rows.push({
+        path: expanded,
         oldWords: m[2],
         newWords: m[3],
         principles: m[4].trim(),
       });
+
     }
   }
   return { file, phase: path.basename(file, '.md'), rows };
@@ -97,10 +113,25 @@ describe('T16 — manifest completeness (M11)', () => {
   it('every prompt-bearing file changed on this branch appears in some manifest', () => {
     let changed: string[];
     try {
-      changed = execFileSync('git', ['diff', '--name-only', 'origin/main...HEAD'], {
+      // BOTH committed and uncommitted changes.
+      //
+      // `origin/main...HEAD` alone sees only COMMITTED work. Running the suite before
+      // committing therefore made this test pass VACUOUSLY — it diffed a HEAD that did not
+      // yet contain the rewrite, and a green run was reported for a state that did not exist.
+      // (Spec 1280 Phase 3; the architect caught the claim, and this is the root cause.)
+      // A guard that is green because it looked at the wrong tree is worse than no guard.
+      const committed = execFileSync('git', ['diff', '--name-only', 'origin/main...HEAD'], {
+        cwd: repoRoot,
+        encoding: 'utf-8',
+      });
+      const working = execFileSync('git', ['status', '--porcelain'], {
         cwd: repoRoot,
         encoding: 'utf-8',
       })
+        .split('\n')
+        .map((l) => l.slice(3).trim())
+        .join('\n');
+      changed = [committed, working].join('\n')
         .split('\n')
         .map((s) => s.trim())
         .filter((s) => PROMPT_BEARING.test(s));
