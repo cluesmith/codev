@@ -877,3 +877,35 @@ with **0 `[Spec 1280]` commits** and 2 changed prompt files **passes**.
 meaninglessly. Caught only because the output reported *16* `[Spec 1280]` commits on a branch
 that should have had zero. Eleventh instance of the family, and the tell was a number that made
 no sense for the thing I claimed to be measuring.
+
+### R1 approved and executed; Phase 4 green (2026-08-01)
+
+**Verified run: HEAD `4062e9ad`, 207 files passed / 3 skipped, 4,126 tests passed / 48 skipped,
+EXIT=0.** HEAD unchanged since the run; tree clean.
+
+Two commits, deliberately separate per the approval's third condition:
+
+- **`0b9be85f` — the retirement.** Exactly two files. Names Spec 746, records the architect's
+  three grounds, and carries the per-assertion behaviour-re-asserted mapping. Retired precisely
+  the three `PHASE_1_FILES` instances; `PHASE_2_FILES`/`PHASE_3_FILES` guards and the pollution
+  check are untouched.
+- **`4062e9ad` — the replacement.** Post-1280 baselines, same machinery, plus an **inverted
+  anti-vacuity check**: 746's version proved its baseline *predated* the edit; mine requires the
+  post-1280 baseline to *contain* `## Baked Decisions`, so stripping 746's content and
+  re-baselining to hide it fires the guard.
+
+**Mutation-verified both ways**: deleting a line fails; laundering by re-baselining fails;
+restored passes 12/12.
+
+**A correction I owed and recorded rather than quietly fixed**: my retirements file described
+the replacement as *"implemented, inert until approved"*. It was **designed, not implemented**.
+The architect read that file before approving, so the overstatement is corrected in the document
+itself. The lesson generalises past this project: **a governance artifact is read as evidence,
+so a claim inside it must be true when written, not merely true by the time anyone checks.**
+
+The architect's framing of R1 is worth preserving: the invariant was **construction-time
+scaffolding that hardened into a change-freeze** — it proved a thing at the moment of addition,
+then silently became a prohibition on all future editing of those files. That is a distinct
+failure shape from the ones this project has been cataloguing, and it is a good candidate for
+the lessons ledger: *an assertion written to prove one change was safe can outlive its purpose
+and start forbidding change in general.*
