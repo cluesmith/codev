@@ -30,23 +30,39 @@ CREATE TABLE IF NOT EXISTS consultation_metrics (
   cost_usd REAL,
   exit_code INTEGER NOT NULL,
   workspace_path TEXT NOT NULL,
-  error_message TEXT
+  error_message TEXT,
+  model_id TEXT
 )`;
+
+/**
+ * The provider model id that actually ran, e.g. `gpt-5.6-sol` (spec 1286).
+ *
+ * Deliberately a NEW column rather than a repurposing of `model`: `model` stores the LANE name
+ * (`codex`, `claude`, `gemini`) and `consult stats` groups on it, so overloading it would silently
+ * change the meaning of every existing report and every historical row.
+ *
+ * `NULL` means "no model id was chosen for this run" — an unconfigured agy skip, or a row written
+ * before this column existed. It does not mean "we forgot to record it".
+ */
+const MODEL_ID_COLUMN = 'model_id';
 
 const INSERT_ROW = `
 INSERT INTO consultation_metrics (
   timestamp, model, review_type, subcommand, protocol, project_id,
   duration_seconds, input_tokens, cached_input_tokens, output_tokens,
-  cost_usd, exit_code, workspace_path, error_message
+  cost_usd, exit_code, workspace_path, error_message, model_id
 ) VALUES (
   @timestamp, @model, @reviewType, @subcommand, @protocol, @projectId,
   @durationSeconds, @inputTokens, @cachedInputTokens, @outputTokens,
-  @costUsd, @exitCode, @workspacePath, @errorMessage
+  @costUsd, @exitCode, @workspacePath, @errorMessage, @modelId
 )`;
 
 export interface MetricsRecord {
   timestamp: string;
+  /** The LANE name (codex/claude/gemini/hermes) — `consult stats` groups on this. */
   model: string;
+  /** The provider model id that actually ran; null when no model was chosen (spec 1286). */
+  modelId: string | null;
   reviewType: string | null;
   subcommand: string;
   protocol: string;
@@ -87,6 +103,7 @@ export interface MetricsRow {
   exit_code: number;
   workspace_path: string;
   error_message: string | null;
+  model_id: string | null;
 }
 
 export interface ModelStats {
@@ -181,6 +198,25 @@ export class MetricsDB {
     this.db.pragma('busy_timeout = 5000');
 
     this.db.exec(CREATE_TABLE);
+    this.migrateAddModelId();
+  }
+
+  /**
+   * Add the `model_id` column to a database created before it existed.
+   *
+   * The table is created with `CREATE TABLE IF NOT EXISTS` and there is no migration framework, so
+   * an existing `~/.codev/metrics.db` would never gain the column from the DDL above. Guarded by
+   * `PRAGMA table_info` rather than a try/catch on the error string, so it is re-runnable by
+   * construction and does not depend on SQLite's message text.
+   *
+   * `ADD COLUMN` is non-destructive: existing rows keep their data and get NULL for the new column.
+   * There is deliberately no down-migration — dropping a column with data is a far worse failure
+   * mode than leaving an unused one in place.
+   */
+  private migrateAddModelId(): void {
+    const columns = this.db.pragma('table_info(consultation_metrics)') as { name: string }[];
+    if (columns.some((c) => c.name === MODEL_ID_COLUMN)) return;
+    this.db.exec(`ALTER TABLE consultation_metrics ADD COLUMN ${MODEL_ID_COLUMN} TEXT`);
   }
 
   record(entry: MetricsRecord): void {
@@ -188,6 +224,7 @@ export class MetricsDB {
       this.db.prepare(INSERT_ROW).run({
         timestamp: entry.timestamp,
         model: entry.model,
+        modelId: entry.modelId,
         reviewType: entry.reviewType,
         subcommand: entry.subcommand,
         protocol: entry.protocol,

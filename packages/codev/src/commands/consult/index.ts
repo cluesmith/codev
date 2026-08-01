@@ -111,6 +111,13 @@ interface MetricsContext {
 
 // Helper to record a metrics entry, opening and closing the DB
 function recordMetrics(ctx: MetricsContext, extra: {
+  /**
+   * The provider model id that actually ran; null when no model was chosen (spec 1286).
+   *
+   * Required, not optional, so the compiler names every call site that produces a metrics row —
+   * an optional field would let a lane silently record NULL and look like a data bug later.
+   */
+  modelId: string | null;
   durationSeconds: number;
   inputTokens: number | null;
   cachedInputTokens: number | null;
@@ -125,6 +132,7 @@ function recordMetrics(ctx: MetricsContext, extra: {
       db.record({
         timestamp: ctx.timestamp,
         model: ctx.model,
+        modelId: extra.modelId,
         reviewType: ctx.reviewType,
         subcommand: ctx.subcommand,
         protocol: ctx.protocol,
@@ -397,6 +405,32 @@ function commandExists(cmd: string): boolean {
 const CODEX_PRICING = { inputPer1M: 2.00, cachedInputPer1M: 1.00, outputPer1M: 8.00 };
 
 /**
+ * Cost for a codex run, in order: configured `consult.pricing.codex` → a non-default model with no
+ * pricing → `null` → otherwise the shipped `CODEX_PRICING`.
+ *
+ * The `null` branch is the point of this function. `CODEX_PRICING` describes the *default* model, so
+ * applying it to a model the user configured would report a confidently wrong number — and a wrong
+ * cost is worse than a missing one, because it aggregates silently into `consult stats` totals that
+ * look authoritative. Null means "not known for this model", which stats already renders as absent.
+ */
+function computeCodexCost(
+  uncachedTokens: number,
+  cachedTokens: number,
+  outputTokens: number,
+  choice: LaneModelChoice,
+  workspaceRoot: string,
+): number | null {
+  const configured = loadConfig(workspaceRoot).consult?.pricing?.codex;
+  const rates = configured
+    ?? (choice.id === DEFAULT_CODEX_MODEL ? CODEX_PRICING : null);
+  if (!rates) return null;
+
+  return (uncachedTokens / 1_000_000) * rates.inputPer1M
+       + (cachedTokens / 1_000_000) * rates.cachedInputPer1M
+       + (outputTokens / 1_000_000) * rates.outputPer1M;
+}
+
+/**
  * Shipped default model ids for the two SDK lanes, and codex's default reasoning effort.
  *
  * These are the literal values the lanes used before spec 1286 made them configurable, kept as
@@ -582,9 +616,7 @@ export async function runCodexConsultation(
         // convention) — do NOT add the latter to cost or reasoning is double-billed.
         const output = event.usage.output_tokens;
         const uncached = input - cached;
-        const cost = (uncached / 1_000_000) * CODEX_PRICING.inputPer1M
-                   + (cached / 1_000_000) * CODEX_PRICING.cachedInputPer1M
-                   + (output / 1_000_000) * CODEX_PRICING.outputPer1M;
+        const cost = computeCodexCost(uncached, cached, output, choice, workspaceRoot);
         usageData = { inputTokens: input, cachedInputTokens: cached, outputTokens: output, costUsd: cost };
       }
       if (event.type === 'turn.failed') {
@@ -621,6 +653,7 @@ export async function runCodexConsultation(
     if (metricsCtx) {
       const duration = (Date.now() - startTime) / 1000;
       recordMetrics(metricsCtx, {
+        modelId: choice.id,
         durationSeconds: duration,
         inputTokens: usageData?.inputTokens ?? null,
         cachedInputTokens: usageData?.cachedInputTokens ?? null,
@@ -757,6 +790,7 @@ export async function runClaudeConsultation(
       const duration = (Date.now() - startTime) / 1000;
       const usage = sdkResult ? extractUsage('claude', '', sdkResult) : null;
       recordMetrics(metricsCtx, {
+        modelId: choice.id,
         durationSeconds: duration,
         inputTokens: usage?.inputTokens ?? null,
         cachedInputTokens: usage?.cachedInputTokens ?? null,
@@ -912,9 +946,12 @@ function recordAgyMetrics(
   startTime: number,
   exitCode: number,
   errorMessage: string | null,
+  modelId: string | null = null,
 ): void {
   if (!metricsCtx) return;
   recordMetrics(metricsCtx, {
+    // Null on a skip with no model configured — "no model was chosen", not "we forgot".
+    modelId,
     durationSeconds: (Date.now() - startTime) / 1000,
     // agy --print emits plain text, no token usage → cost rows degrade gracefully (null).
     inputTokens: null,
@@ -954,7 +991,7 @@ async function runAgyConsultation(
     const content = agySkipContent(reason);
     process.stdout.write(content);
     writeConsultOutput(outputPath, content);
-    recordAgyMetrics(metricsCtx, startTime, 0, reason);
+    recordAgyMetrics(metricsCtx, startTime, 0, reason, choice?.id ?? null);
     console.error(`\n[gemini (agy) skipped: ${reason}]`);
     return;
   }
@@ -969,7 +1006,7 @@ async function runAgyConsultation(
     const content = agySkipContent(reason);
     process.stdout.write(content);
     writeConsultOutput(outputPath, content);
-    recordAgyMetrics(metricsCtx, startTime, 0, reason);
+    recordAgyMetrics(metricsCtx, startTime, 0, reason, choice?.id ?? null);
     console.error(`\n[gemini (agy) skipped without spawning: ${reason}]`);
     return;
   }
@@ -1061,7 +1098,7 @@ async function runAgyConsultation(
       const content = agySkipContent(reason);
       process.stdout.write(content);
       writeConsultOutput(outputPath, content);
-      recordAgyMetrics(metricsCtx, startTime, exitCode, reason);
+      recordAgyMetrics(metricsCtx, startTime, exitCode, reason, choice?.id ?? null);
       console.error(`\n[gemini (agy) skipped: ${reason}]`);
       resolve();
     };
@@ -1139,7 +1176,7 @@ async function runAgyConsultation(
       // for null and would misfile it. (Found by claude at review.)
       if (code !== null && code !== 0 && choice && !timedOutProducing) {
         publishAuth();
-        recordAgyMetrics(metricsCtx, startTime, code, `agy exited with code ${code}`);
+        recordAgyMetrics(metricsCtx, startTime, code, `agy exited with code ${code}`, choice?.id ?? null);
         console.error(`\n[gemini (agy) FAILED: configured model "${choice.id}" — see error]`);
         // "No review file" must mean none EXISTS, not merely that this run wrote none.
         discardStaleOutput(outputPath);
@@ -1163,7 +1200,7 @@ async function runAgyConsultation(
         const content = agySkipContent(reason);
         process.stdout.write(content);
         writeConsultOutput(outputPath, content);
-        recordAgyMetrics(metricsCtx, startTime, code ?? 1, reason);
+        recordAgyMetrics(metricsCtx, startTime, code ?? 1, reason, choice?.id ?? null);
         console.error(`\n[gemini (agy) skipped: ${reason}]`);
         resolve();
         return;
@@ -1173,7 +1210,7 @@ async function runAgyConsultation(
       // Plain-text stdout IS the review.
       process.stdout.write(raw);
       writeConsultOutput(outputPath, raw);
-      recordAgyMetrics(metricsCtx, startTime, 0, null);
+      recordAgyMetrics(metricsCtx, startTime, 0, null, choice?.id ?? null);
       console.error(`\n[gemini (agy) completed in ${((Date.now() - startTime) / 1000).toFixed(1)}s]`);
       resolve();
     });
@@ -1318,6 +1355,8 @@ async function runConsultation(
       if (metricsCtx) {
         const usage = extractUsage(model, rawOutput);
         recordMetrics(metricsCtx, {
+          // Subprocess lanes (hermes) expose no model selector — see MODEL_CONFIGURABLE_LANES.
+          modelId: null,
           durationSeconds: duration,
           inputTokens: usage?.inputTokens ?? null,
           cachedInputTokens: usage?.cachedInputTokens ?? null,
@@ -1346,6 +1385,7 @@ async function runConsultation(
       if (metricsCtx) {
         const duration = (Date.now() - startTime) / 1000;
         recordMetrics(metricsCtx, {
+          modelId: null,
           durationSeconds: duration,
           inputTokens: null,
           cachedInputTokens: null,
@@ -2338,4 +2378,5 @@ export {
   MODEL_ALIASES as _MODEL_ALIASES,
   runAgyConsultation as _runAgyConsultation,
   agySkipContent as _agySkipContent,
+  computeCodexCost as _computeCodexCost,
 };

@@ -59,6 +59,7 @@ const {
   DEFAULT_CLAUDE_MODEL,
   DEFAULT_CODEX_MODEL,
   DEFAULT_CODEX_REASONING_EFFORT,
+  _computeCodexCost,
 } = await import('../index.js');
 
 // --- fixture ------------------------------------------------------------------------
@@ -237,6 +238,49 @@ describe('--model-id is refused by lanes with no model selector', () => {
   it('names the flag it was given, so other overrides can reuse it', () => {
     expect(() => assertLaneAcceptsModelOverride('hermes', '--some-other-flag'))
       .toThrow(/--some-other-flag is not supported/);
+  });
+});
+
+// --- codex cost accounting (scenario 14) ---------------------------------------------
+//
+// CODEX_PRICING describes the DEFAULT model. Applying it to a model the user configured would
+// report a confidently wrong number that aggregates silently into `consult stats` totals — and a
+// wrong cost is worse than a missing one, because it looks authoritative.
+
+describe('codex cost accounting', () => {
+  /** A choice carrying just the id — the only field cost depends on. */
+  const forModel = (id: string) => ({ id, key: null, source: null, fromFlag: false });
+  const cost = (uncached: number, cached: number, out: number, id: string) =>
+    _computeCodexCost(uncached, cached, out, forModel(id), tmpDir);
+
+  it('uses the shipped pricing for the default model', () => {
+    // 1M uncached input @ $2 + 1M output @ $8 = $10 exactly.
+    expect(cost(1_000_000, 0, 1_000_000, DEFAULT_CODEX_MODEL)).toBeCloseTo(10, 5);
+  });
+
+  it('returns null for a non-default model with no configured pricing', () => {
+    // The heart of the phase: refuse to price a model whose rates we do not know, rather than
+    // reporting the default model's rates as though they applied.
+    expect(cost(1_000_000, 0, 1_000_000, 'gpt-5.6-sol')).toBeNull();
+  });
+
+  it('uses configured pricing for a non-default model', () => {
+    writeConfig({
+      consult: {
+        models: { codex: 'gpt-5.6-sol' },
+        pricing: { codex: { inputPer1M: 1, cachedInputPer1M: 0.5, outputPer1M: 3 } },
+      },
+    });
+    expect(cost(1_000_000, 0, 1_000_000, 'gpt-5.6-sol')).toBeCloseTo(4, 5); // 1M @ $1 + 1M @ $3
+  });
+
+  it('configured pricing also overrides the shipped rates for the default model', () => {
+    writeConfig({ consult: { pricing: { codex: { inputPer1M: 1, cachedInputPer1M: 0.5, outputPer1M: 3 } } } });
+    expect(cost(1_000_000, 0, 1_000_000, DEFAULT_CODEX_MODEL)).toBeCloseTo(4, 5);
+  });
+
+  it('counts cached input at the cached rate', () => {
+    expect(cost(0, 1_000_000, 0, DEFAULT_CODEX_MODEL)).toBeCloseTo(1, 5); // cachedInputPer1M = $1
   });
 });
 
