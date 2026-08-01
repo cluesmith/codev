@@ -116,3 +116,55 @@ Architect approved spec-approval gate + told me to continue to Plan. Grounded th
 - On approval → `porch next 1313` → **Implement phase**. Phase 1 (mailbox store) first.
 - Reminder to self before implementing: fetch branch `spike-1265` for the classifier fixtures + POC harness
   (spec Dependencies); this is needed by Phase 2/3.
+
+### 2026-08-01 — ✅ plan-approval APPROVED → Implement phase
+- Architect approved plan-approval gate (commit 36582b2d). Architect decisions:
+  1. **Keep 9-phase structure as planned — NO merges.** (Declined the 2+3 / 4+5 / 7+8 collapse knobs I offered.)
+  2. **Standing constraint: we are NOT cluesmith/codev maintainers.** Single PR at the very end (after Phase 9),
+     do NOT self-merge — maintainers merge. (Overrides the generic "merge your own PR after approval" role text.)
+- `porch next 1313` → implement / phase_1 / iteration 1. Porch scope-restricts to phase_1 ONLY.
+- Starting Phase 1 (Mailbox persistence layer): mailbox table in GLOBAL_SCHEMA + migration v15 (bump 14→15) +
+  db/mailbox.ts repo + db/types.ts row types + __tests__/mailbox.test.ts (+ v14→v15 migration test).
+- Note: spike-1265 fetch is a Phase 2/3 need (classifier fixtures), NOT Phase 1 — Phase 1 is pure DB/store work.
+
+### 2026-08-01 — Phase 1 (Mailbox persistence layer) — code written
+- Followed existing DB conventions closely (read schema.ts, index.ts, types.ts, consolidate.ts, and the
+  migration-test trio spec-755/bugfix-826/pir-832 before writing):
+  - **schema.ts**: `mailbox` table + 3 indexes appended to `GLOBAL_SCHEMA` (agent-addressed, additive).
+  - **index.ts**: `GLOBAL_CURRENT_VERSION` 14→15; migration v15 block (CREATE TABLE/INDEX IF NOT EXISTS +
+    `_migrations` row) mirroring v10/v14; re-exported DbMailbox/MailboxStatus/MailboxReason types.
+  - **types.ts**: `DbMailbox` interface + `MailboxStatus`/`MailboxReason` unions.
+  - **db/mailbox.ts** (new): repo fns take an explicit `db` handle FIRST (matches consolidate.ts, not
+    state.ts's implicit getDb — chosen for testability). enqueue/getById/listHeld/findHeldForAgent/
+    markDelivered/dismiss/supersede/pruneTerminal. State machine enforced via `WHERE ... AND status='held'`
+    (markDelivered/dismiss/supersede only touch held rows → no delivered→held, supersede only replaces held).
+    Timestamps injected via optional `now` param (default Date.now()) → deterministic tests. workspace_path
+    treated as opaque key (canonicalization is Phase 4's boundary concern; mirrors cron_tasks).
+  - **__tests__/mailbox.test.ts** (new): lifecycle unit tests vs a real GLOBAL_SCHEMA-seeded file DB
+    (enqueue/list/deliver/dismiss/supersede/prune, per-agent ordering, state-machine no-ops, crash/reopen
+    recovery, respawn-drain-by-agent).
+  - **__tests__/spec-1313-migration.test.ts** (new): v15 migration test mirroring pir-832 convention
+    (pre-v15 → v15 creates table+indexes; idempotent; CHECK rejects bad status; **fresh GLOBAL_SCHEMA vs
+    migrated shapes converge** — ties the test to production so schema/migration drift fails loudly).
+- ⚠️ Worktree had NO node_modules (`.codev` config absent → postSpawn `pnpm install` never ran; also no
+  porch.checks override, so checks are protocol defaults `npm run build` + `npm test --exclude e2e`). Running
+  `pnpm install --frozen-lockfile` from worktree root now (background). Then build types→core→codev + run tests.
+
+### 2026-08-01 — Phase 1 verified GREEN
+- Fixed one self-inflicted bug: a backtick inside a SQL comment (`'afx send'`) in the GLOBAL_SCHEMA **template
+  literal** terminated the JS string → tsc/esbuild syntax error. Removed backticks. (Lesson: no backticks in
+  SQL comments living inside a JS template-literal schema string.)
+- Built types + core (their dist was missing); `tsc --noEmit` on codev src → clean; targeted vitest on the two
+  new test files → **25/25 pass**.
+- Full `npm run build` (incl. dashboard vite + copy-skeleton) → **exit 0**.
+- ⚠️ Lesson: do NOT run `npm run build` and `vitest` **concurrently**. First combined run showed 56 "failures";
+  they were an artifact — the build's `pnpm clean` + `rm -rf skeleton && cp -r` mutate dist/skeleton that tests
+  read (hot-tier-injection reads skeleton/), and vite CPU contention timed out the real-shellper integration
+  test. Re-running the suite ALONE → **203 files pass / 0 fail; 4066 tests pass, 48 pre-existing skips, 0 fail.**
+  No DB-layer test failed in either run. Porch runs its build/test checks sequentially, so it won't hit the race.
+- Committed Phase 1 code+tests: **aa51e85a** (6 files, +854/-1). Builder authors the `[Spec 1313]` code
+  commits; porch authors `chore(porch): … build-complete` (status.yaml only, via writeStateAndCommit — verified
+  in porch/state.ts:184-210). So I commit code myself, then `porch done` runs checks + 3-way implement review
+  on `main...HEAD`.
+- `porch done 1313` next → implement iteration-1 review (Gemini/Codex/Claude). STRICT mode: porch drives
+  iterate-until-approve; I do not self-approve. On unanimous approve, porch advances to phase_2.
