@@ -321,3 +321,29 @@ artifact; flagged, not edited. Left unchanged it will keep drawing "doesn't meet
 goal" findings from every future CMAP round.
 
 Spec 8,212w. Gate remains pending and untouched.
+
+### Charter amended by the architect (2026-08-01 UTC / 2026-07-31 local)
+
+Issue #1280 retitled "Prompt-surface judgment rewrite: acceptance = blog-principles conformance
+per file (size is reporting-only)" with a dated AMENDMENT block superseding the original Goal.
+Original Goal preserved above it and marked superseded — history stays honest.
+
+**Verified rather than assumed** (the spec quotes Baked Decisions verbatim, so an amendment
+touching them would silently invalidate a Constraints section):
+
+- All **four Baked Decisions are byte-intact** — diffed the issue's bullets against the spec's
+  Constraints, all four match. No re-quoting needed.
+- The amendment cites the spec's P7-vs-scar-rules resolution and states architect inspection as
+  charter-level, matching what the spec specifies.
+
+One residual, not worth raising: the Protocol section still reads "the per-surface cut plan with
+word targets." Amendment point 2 (size reporting-only) supersedes the "word targets" clause, and
+the spec already handles it explicitly — targets withdrawn, disposition mapping retained. No
+action.
+
+Fifth self-audit instance confirmed for the lessons ledger by the architect: **"trusting a
+convenient signal over the authoritative thing"** — `cmp -s` exit codes joining truncated greps
+and skeleton-only enumeration. Named pattern; the review phase routes it to lessons-learned.
+
+**Gate presentation to Waleed is out with the architect's recommendation. Nothing is pending on
+me. Not touching the gate; waiting.**
