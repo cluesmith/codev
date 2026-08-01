@@ -10,7 +10,7 @@ Nothing in this file is self-approved.
 
 ## R1 — `expectPureAdditionDiff` on the three builder-prompts
 
-**Status: PROPOSED — awaiting architect approval. Not yet applied.**
+**Status: APPROVED by the architect, 2026-08-01. Applied.**
 
 | | |
 |---|---|
@@ -55,7 +55,15 @@ of 746's protection. I am not proposing that.
 So 746's *substance* is intact and still guarded. What is being retired is the **no-deletion**
 property, which Spec 1280 exists to violate.
 
-### Proposed replacement (implemented, inert until approved)
+### Correction to this document
+
+An earlier revision of this entry described the replacement guard as *"implemented, inert until
+approved"*. **It was not implemented** — it was designed and described. The architect read and
+approved this file partly on its contents, so the overstatement is corrected here rather than
+quietly fixed. The replacement ships as its own commit, separate from the retirement, per the
+approval's third condition.
+
+### Replacement guard (ships separately)
 
 `spec-1280-prompt-deletion-guard.test.ts` — the same machinery, re-anchored:
 
@@ -69,10 +77,35 @@ property, which Spec 1280 exists to violate.
 Net effect: 746 keeps its content guarantee and gains a deletion guard that survives rewrites,
 instead of one that forbids them.
 
+### Behaviour-re-asserted mapping (approval condition 2)
+
+One row per retired assertion. "Still asserted by" names the *surviving* test that carries the
+behaviour, so a future reader can check the claim rather than trust it.
+
+| Retired assertion | Behaviour it carried | Survives? | Still asserted by |
+|---|---|---|---|
+| `codev SPIR builder-prompt: post-edit file is a pure-addition diff of its baseline` | (a) 746's paragraph present; (b) no pre-746 line ever deleted | (a) **yes** / (b) **no, by design** | (a) `contains the "## Baked Decisions" heading`, `uses the carveout phrasing "do not autonomously"`, contradiction-handling and mirror-parity assertions — all passing unmodified |
+| `codev ASPIR builder-prompt: post-edit file is a pure-addition diff of its baseline` | same | same | same, plus `bugfix-619-aspir-prompt.test.ts` (`Follow the ASPIR protocol`, no `protocol.md` reference) |
+| `codev AIR builder-prompt: post-edit file is a pure-addition diff of its baseline` | same | same | same |
+
+**Anti-vacuity preserved**: the pollution check (`baseline does NOT contain '## Baked
+Decisions'`) is **untouched and still passing**. It is the half of 746's protection that stops a
+future builder silently re-baselining away the guarantee, and retiring the pure-addition half
+does not weaken it.
+
+**Not retired, explicitly**: the identical `expectPureAdditionDiff` guards over `PHASE_2_FILES`
+(drafting prompts) and `PHASE_3_FILES` (reviewer prompts) remain in force. This retirement is
+scoped to the three builder-prompt instances only.
+
 ### Architect decision
 
-- [ ] **Approved** — retire R1 and enable the replacement
-- [ ] **Rejected** — keep the pre-746 baselines (implies Spec 1280 cannot rewrite these three
-      files, and the phase is rescoped)
-
-*Recorded by the builder; approval is the architect's alone.*
+- [x] **APPROVED — 2026-08-01.** Grounds, recorded as given:
+  1. The invariant is **construction-time scaffolding that hardened into a change-freeze** — it
+     proved 746's paragraph was added non-destructively *at the moment of addition*, but as a
+     standing assertion it forbids any future deletion-rewrite of those files forever, which is
+     **not a behaviour 746 ever claimed to protect**.
+  2. 746's actual protection — the Baked Decisions sections present and substantive, plus the
+     anti-vacuity pollution check — **survives in the assertions that still pass unmodified**.
+  3. The analysis that re-baselining guts the anti-vacuity half is **verified sound**, so
+     retirement-with-trace is strictly more honest than the silent re-baseline a less careful
+     builder would have shipped.

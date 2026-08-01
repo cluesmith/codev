@@ -136,16 +136,24 @@ describe('Spec 746 Phase 1: builder-prompt baked-decisions instruction', () => {
     }
   });
 
-  describe('pure-addition diff: baseline lines are preserved in order', () => {
-    for (const file of PHASE_1_FILES) {
-      if (file.baselineName === null) continue; // skeleton mirrors don't have a baseline; codev/ is the source of truth
-      it(`${file.label}: post-edit file is a pure-addition diff of its baseline`, () => {
-        const baseline = readBaseline(file.baselineName!);
-        const current = readRepoFile(file.relPath);
-        expectPureAdditionDiff(file.label, baseline, current);
-      });
-    }
-  });
+  // RETIRED under Spec 1280 (retirement R1, architect-approved 2026-08-01).
+  //
+  // This asserted a pure-addition diff of each builder-prompt against its PRE-746 baseline —
+  // proving Spec 746's Baked Decisions paragraph was ADDED without destroying prior content.
+  // That was construction-time scaffolding: true and useful at the moment of addition, but as
+  // a standing assertion it forbids ANY future deletion-rewrite of these files forever, which
+  // is not a behaviour Spec 746 ever claimed to protect.
+  //
+  // Spec 746's actual protection is untouched and still asserted below: the Baked Decisions
+  // sections are present and substantive in all three prompts and both trees, and the
+  // pollution check still guards against a vacuous baseline.
+  //
+  // Re-baselining was considered and rejected: a post-rewrite baseline would contain
+  // '## Baked Decisions', which the pollution check (correctly) forbids — and silencing that
+  // check to make a re-baseline pass would gut the anti-vacuity half of 746's protection.
+  //
+  // Full trace, including the per-assertion behaviour-re-asserted mapping:
+  //   codev/resources/1280-retirements.md  (R1)
 
   it('codev SPIR builder-prompt baseline does NOT contain the new heading (pollution check)', () => {
     // Catches the failure mode where the baseline was captured AFTER an edit.
