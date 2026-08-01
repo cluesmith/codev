@@ -221,7 +221,9 @@ function buildInline(options: AssembleOptions): string {
     // Name the role document rather than gesturing at it: a builder with no
     // conversation history cannot resolve "your role document" to a file, and
     // the spec requires the identity block to say WHICH document governs it.
-    // `.builder-role.md` is the copy the harness actually injected at spawn.
+    // `.builder-role.md` is the copy the harness actually injected at launch
+  // (written on spawn, and refreshed on resume since #1267 — the clean-exit
+  // relaunch injects it too).
     'You are a Builder. Your role document is `.builder-role.md` at the worktree root',
     '(the builder role, injected into your system prompt at spawn and still in effect).',
     '',
