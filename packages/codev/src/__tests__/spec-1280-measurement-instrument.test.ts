@@ -251,6 +251,29 @@ describe('T15 — relocation is visible, never reported as deletion (M0c)', () =
   });
 });
 
+describe('portability — the count must not depend on the host', () => {
+  it('does not delegate word counting to `wc -w`', () => {
+    // BSD wc (macOS, UTF-8 locale) counts `⚠️` (U+26A0 U+FE0F) as two words; GNU wc
+    // and Python's str.split() count one. Four such banners in spir/protocol.md
+    // made the same commit measure 34,235 locally and 34,231 in CI. An instrument
+    // whose before/after must be comparable across machines cannot delegate its
+    // core definition to a platform-variant tool.
+    const code = fs
+      .readFileSync(script, 'utf-8')
+      .split('\n')
+      .filter((l) => !/^\s*#/.test(l))
+      .join('\n');
+    expect(code).not.toMatch(/wc -w/);
+    expect(code).toMatch(/_count\(\)/);
+  });
+
+  it('reports the same total under a C locale as under UTF-8', () => {
+    const utf8 = num(run(repoRoot, { LC_ALL: 'en_US.UTF-8' }), 'ALWAYS_ON_WORDS');
+    const c = num(run(repoRoot, { LC_ALL: 'C' }), 'ALWAYS_ON_WORDS');
+    expect(c).toBe(utf8);
+  });
+});
+
 describe('T12 — determinism', () => {
   it('emits byte-identical output twice at the same commit', () => {
     expect(run()).toBe(run());
@@ -261,14 +284,16 @@ describe('the corrected baseline is what the spec claims', () => {
   let out: string;
   beforeAll(() => { out = run(); });
 
-  it('reproduces ALWAYS_ON_WORDS = 34,255 for a SPIR builder at I=10', () => {
-    // 34,235 — not the 34,255 quoted in the spec. The spec's figure came from the
-    // 1252 additive include model, which counted the `{{> path}}` directive's own
-    // tokens AND the content substituted for them (~2 words per include, x10
-    // iterations = 20). This instrument substitutes, so the figure is 20 lower and
-    // more honest. Size is reporting-only under the amended charter, so no
-    // criterion moves; the delta is recorded in 1280-word-baseline.md.
-    expect(num(out, 'ALWAYS_ON_WORDS')).toBe(34235);
+  it('reproduces ALWAYS_ON_WORDS = 34,231 for a SPIR builder at I=10', () => {
+    // 34,231 — not the 34,255 quoted in the spec. Two corrections, both making the
+    // instrument more honest and neither moving an acceptance criterion (size is
+    // reporting-only under the amended charter):
+    //   -20  the 1252 additive include model counted a `{{> path}}` directive's own
+    //        tokens AND the content substituted for them; this one substitutes.
+    //    -4  `wc -w` is not portable: BSD wc in a UTF-8 locale splits `⚠️` into two
+    //        words where GNU wc and Python's split() see one. Counting is now
+    //        defined explicitly rather than delegated to the platform's wc.
+    expect(num(out, 'ALWAYS_ON_WORDS')).toBe(34231);
   });
 
   it('reproduces the architect load (8,599)', () => {
@@ -278,6 +303,6 @@ describe('the corrected baseline is what the spec claims', () => {
   it('honours PHASE_ITERS as a comparison constant', () => {
     const one = num(run(repoRoot, { PHASE_ITERS: '1' }), 'ALWAYS_ON_WORDS');
     const two = num(run(repoRoot, { PHASE_ITERS: '2' }), 'ALWAYS_ON_WORDS');
-    expect(two - one).toBe(736 + 1396); // HOT + spir phase mean (substituted)
+    expect(two - one).toBe(736 + 1396); // HOT + spir phase mean
   });
 });

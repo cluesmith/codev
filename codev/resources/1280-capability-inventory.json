@@ -3,7 +3,7 @@
   "_criterion": "M5",
   "_basis": "served prompt text (includes expanded); protocol.json supplies the expected set only",
   "_detection_limit": "detects deletion, not inversion or gutting — see M11 and O4",
-  "_commit": "1056834d",
+  "_commit": "5c962b7a",
   "gates": [
     {"name": "dev-approval", "present_in_served_prompts": true},
     {"name": "experiment-complete", "present_in_served_prompts": false},

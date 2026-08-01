@@ -42,11 +42,33 @@ set -euo pipefail
 ROOT="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 cd "$ROOT"
 
+# WORD COUNT IS DEFINED HERE, NOT DELEGATED TO `wc -w`.
+#
+# `wc -w` is NOT portable for this corpus. macOS/BSD wc in a UTF-8 locale counts
+# `⚠️` (U+26A0 WARNING SIGN + U+FE0F VARIATION SELECTOR-16) as TWO words; GNU wc
+# on Linux, `LC_ALL=C wc`, and Python's str.split() all count it as one. There
+# are four such banners in spir/protocol.md alone, so the same commit measured
+# 34,235 on a developer's Mac and 34,231 in CI.
+#
+# For an instrument whose entire purpose is an honest before/after comparison,
+# a platform-dependent count is a correctness defect: measure "before" on one
+# machine and "after" on another and the delta is fiction. So the definition is
+# made explicit and deterministic — a word is a whitespace-delimited token of
+# the UTF-8 decoded text, per Python's str.split().
+#
+# (The irony is recorded rather than smoothed over: the characters that broke
+# portability are the `⚠️ BLOCKING` worst-case-padding banners that principle P7
+# exists to delete.)
+_count() { # count words on stdin, deterministically
+  python3 -c 'import sys; print(len(sys.stdin.read().split()))'
+}
 w() { # word count of a file, 0 if absent
-  [ -f "$1" ] && wc -w < "$1" | tr -d ' ' || echo 0
+  [ -f "$1" ] || { echo 0; return; }
+  _count < "$1"
 }
 wdir() { # word count of all .md under a dir, 0 if absent
-  [ -d "$1" ] && find "$1" -name '*.md' -exec cat {} + 2>/dev/null | wc -w | tr -d ' ' || echo 0
+  [ -d "$1" ] || { echo 0; return; }
+  find "$1" -name '*.md' -exec cat {} + 2>/dev/null | _count
 }
 fdir() { # count of .md files under a dir
   [ -d "$1" ] && find "$1" -name '*.md' | wc -l | tr -d ' ' || echo 0
@@ -109,7 +131,7 @@ if os.path.isfile(path):
         sys.stdout.write(expand(fh.read()))
 PY
 }
-expanded_w() { [ -f "$1" ] && expand_text "$1" | wc -w | tr -d ' ' || echo 0; }
+expanded_w() { [ -f "$1" ] && expand_text "$1" | _count || echo 0; }
 
 CLAUDE_MD=$(w CLAUDE.md)
 AGENTS_MD=$(w AGENTS.md)
