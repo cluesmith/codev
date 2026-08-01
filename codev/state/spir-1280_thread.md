@@ -712,3 +712,30 @@ block closes on its own line. Caught in seconds by reading the actual line. The 
 reliable — check the raw text before believing any summary I wrote, including my own tooling's.
 
 Phase 3 still paused; the merge instruction carried no resume word and I am not inferring one.
+
+### Two instrument PRs queued; a seventh family instance (2026-08-01)
+
+`#1321` (test budgets) and `#1327` (invariant-form reproduction tests) both green, queued in that
+order. Phase 3 held on #1321's merge word.
+
+**#1327 nearly went into the queue red, from a cause I had warned about an hour earlier.** It
+branched from `d42a061a`, predating #1321, so it inherited 10 unbudgeted script-shelling tests —
+the same latent 5s failure that took main red. My three new tests carried budgets; the ten I did
+not touch did not. Merged the hotfix branch in rather than duplicating the change, so the
+eventual #1321-on-main merge stays clean.
+
+The conflict there was the instructive kind: the hotfix carried a *budgeted copy* of a test
+`#1327` **replaces**. A mechanical "prefer theirs" would have left the PR **green and wrong** —
+silently reinstating the live-measured literal the PR exists to remove. Resolved for the
+replacement; verified zero unbudgeted tests and zero markers after.
+
+**Seventh family instance, and this one was my own tooling again**: my CI watcher polled for
+*absence of pending checks*, but my push had started a new run — the gap between runs read as
+"settled". Re-watched pinned to the head SHA, and confirmed local == remote before believing the
+result. The architect reports their own watchers share the flaw and is pinning theirs too.
+
+The family, now seven: delegated `wc`; overloaded `cmp` exit code; truncated grep;
+`pipefail`+`grep -q`; naive regex + type-blind JSON walk; one-liner-blind budget checker;
+absence-of-pending watcher. Every one a signal that looked authoritative while measuring
+something adjacent to the question. The habit that catches them is the same each time: **read the
+raw thing before believing the summary — including summaries produced by my own tools.**
