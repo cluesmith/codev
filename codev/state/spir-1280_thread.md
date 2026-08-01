@@ -211,3 +211,29 @@ it is the argument for making M3's "enumerate from disk" a *test* rather than an
 Belongs in the review's lessons learned.
 
 Spec now 9,415w (iteration 3). Porch remains at spec-approval; I have not touched the gate.
+
+### Compression for signal (2026-07-31) — 9,415 → 6,860 words (−27%)
+
+Architect-directed before the gate; I had flagged the length myself. Rule applied: **fold,
+don't drop.**
+
+**Kept whole**: all 14 M-criteria, all 16 tests, 5 outcomes, 7 rollback groups, the full
+per-audience inventory, the rollout contract, the A/B design, and the four Baked Decisions
+verbatim.
+
+**Cut**: the narration of how the spec got here — the two round-by-round finding tables
+(~1,400w), "(round-2 finding)" asides threaded through the criteria, the superseded 33,519
+figure, and the withdrawn HOLD-band arithmetic. That record lives in the iter1/iter2 rebuttal
+files and this thread, which is where the architect said it belongs.
+
+**Self-verified mechanically** (diffed old vs new): 14/14 criteria, 16/16 tests, 5/5 outcomes,
+7/7 groups, all 20 template headings in order, porch's `spec_has_required_sections` passes.
+Diffed every number too — eleven appeared to vanish; ten were from the deleted narration or
+the withdrawn HOLD band (correctly gone). **One was a real loss**: the margin figure (−53.2%
+clears >50% by 3.2 points ≈ 1,100 words), which was Claude's thin-margin warning and is real
+information for an approver. Folded back into M1 as a clause rather than left dropped.
+
+That number-level diff is the compression analogue of principle 7 — "I kept the criteria" is
+not the same claim as "I kept the content," and only the diff distinguishes them.
+
+Gate remains pending; still not touched.
