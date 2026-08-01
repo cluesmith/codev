@@ -483,3 +483,19 @@ pre-start no-op), pty-session-delivery-signals (submit/quiescence emit, re-arm m
 spec-1313-resolve-agent-for-session (builder/architect/shell reverse-map + null cases). **Full unit 4123 pass / 48
 skip / 0 fail; tsc clean.** (Aside: session cwd drifted into packages/codev mid-run — a `cd x && …` re-`cd x` failed
 once; harmless, re-ran from the right dir.) Next: commit thread → `porch done 1313` → phase_5 3-way consult.
+
+### 2026-08-01 — Phase 5 review iter1 (Gemini APPROVE, Claude APPROVE, Codex REQUEST_CHANGES) → 1 fix landed (0fc26555)
+`porch done` iter1 checks green (build 15s, tests 28s); 3-way consult. Codex (HIGH) raised one real issue I'd
+actually noted during design: the **submit trigger only fired on the tower-websocket path**, not the pty-manager
+standalone terminal-server WS handler (`pty-manager.ts:306-318` did only `recordUserInput()`+`write()`, no
+`stopComposing()`). Root cause = composing/submit detection **duplicated inline** (tower-websocket had it twice) →
+a 2nd input path drifted. Gemini+Claude APPROVE, no issues (Claude: "No issues found").
+**Fixed by consolidation, not a 3rd copy** (SST — the lesson this bug proves): new `PtySession.handleUserInput(data)`
+= the one chokepoint (recordUserInput → composing/submit detect → write); both branches of BOTH WS handlers
+(tower-websocket + pty-manager) now route through it. pty-manager path now fires `'submit'` on Enter like the Tower
+path; neither can drift. Delivery still calls `write()` directly → never trips submit. Verified `composing` getter has
+NO prod readers (safe). tower-websocket.test.ts uses a MOCK session asserting recordUserInput/write → updated to
+assert delegation to handleUserInput + added `handleUserInput` to the mock; new PtySession test drives the chokepoint
+(composing tracked, both chunks written, submit only on Enter). pty-manager + typing-awareness suites unaffected.
+Evidence: **tsc clean; full unit 4124 pass / 48 skip / 0 fail**; affected-4 files 55/55. Response doc written
+(`1313-phase_5-iter1-rebuttals.md`, concurrence — agreed+fixed, no dispute). Next: commit thread → `porch done` (iter2 re-consult).
