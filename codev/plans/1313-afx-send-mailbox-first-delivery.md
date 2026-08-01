@@ -154,6 +154,10 @@ Revert the phase commit. The table is additive and unread by any live path until
 - [ ] `packages/codev/src/agent-farm/servers/gate-profiles.ts` — profile registry + `resolveProfile(session)`
       (maps a session to claude/codex/`null` via its command/args/label); claude + codex profiles
       (marker regex, composer region, text-intensity/dim-placeholder rule) from spike facts.
+- [ ] **App-identity seam on `PtySession`** (`packages/codev/src/terminal/pty-session.ts`): today only `label`
+      and `cwd` are public getters — `command`/`args` are private — so `resolveProfile` has no authoritative
+      source yet. Expose the app identity: a `get command()` / `get launchArgs()` getter, or a `appProfileKey`
+      recorded at spawn. (This is the concrete metadata seam `resolveProfile` depends on.)
 - [ ] Screen fixtures under `packages/codev/src/agent-farm/__tests__/fixtures/gate/` (claude + codex: idle,
       draft, menu, picker, wrapper/boot).
 - [ ] Unit tests: `packages/codev/src/agent-farm/__tests__/render-gate.test.ts`.
@@ -170,8 +174,9 @@ into a `@xterm/headless` `Terminal` sized to the session's cols/rows, then inspe
 input-idleness; a wrong scheduling trigger only costs a failed check (message stays held — the safe direction).
 Classifier design and per-app constants are lifted from spike 1265 (fetched branch `spike-1265`; see Dependencies).
 
-**App detection** is an explicit sub-task: derive app identity from the session's launch command/args/label.
-If detection is ambiguous, treat as unknown (`no-profile`) — fail-safe.
+**App detection** is an explicit sub-task: derive app identity from the session's launch command/args/label —
+which requires the `PtySession` app-identity seam above, since `command`/`args` are not public today. If
+detection is ambiguous, treat as unknown (`no-profile`) — fail-safe.
 
 #### Acceptance Criteria
 - [ ] claude + codex fixtures classify correctly across idle/draft/menu/picker/wrapper/boot.
@@ -256,10 +261,18 @@ hard code dependency — delivery treats a missing profile as `no-profile`)
 - [ ] Additive response fields on `POST /api/send` (`held`, `mailboxId`, `reason`) preserving `ok`/`terminalId`/
       `deferred` for old binaries (`held` ⇒ still `ok:true`).
 - [ ] Dead-session → held (`no-live-pty`), unknown-app → held (`no-profile`) — the WARN/ERROR drop paths removed.
+- [ ] **Dead-session targeting seam** (so a message to an agent with no live PTY is *held*, not 404'd): today
+      `resolveTarget` (`packages/codev/src/agent-farm/servers/tower-messages.ts:152`) resolves only against live
+      `getWorkspaceTerminals()`, and `handleSend` 404s when no live PTY exists — so the `no-live-pty` hold isn't
+      reachable as-is. Add an agent-registry fallback (resolve a known agent from the global.db `builders`/
+      `architect` registry via `state.ts` when no live terminal matches) and restructure `handleSend` so a
+      resolved-but-no-live-PTY target **persists a `no-live-pty` held row instead of 404ing**.
 - [ ] **Client-side send contract** (so the sender sees the real outcome): extend the send return type in
-      `packages/core/src/tower-client.ts` (add `held`, `reason`, `mailboxId` alongside `ok`/`resolvedTo`/`terminalId`)
-      and change `packages/codev/src/agent-farm/commands/send.ts:332` to print `delivered` vs `held (<reason>) — id <id>`
-      instead of the unconditional "Message sent".
+      `packages/core/src/tower-client.ts` (add `held`, `reason`, `mailboxId` alongside the existing `ok`/`resolvedTo`/`error`)
+      and change `packages/codev/src/agent-farm/commands/send.ts` to report the real outcome on **both** paths —
+      the single-send output (`:332`, today an unconditional "Message sent") **and the `--all` path**
+      (`sendToAll()` at `:200`, which today pushes to `sent` on any `ok`): report `delivered` vs
+      `held (<reason>) — id <id>` per target, and aggregate held vs delivered counts for `--all`.
 - [ ] **`pruneTerminal` invocation** wired here (defined in Phase 1): call it on Tower boot and once per backstop
       drain so terminal rows don't accumulate.
 - [ ] **Liveness-telemetry tracking** instrumented in the drainer (per-session repeated not-clean verdict counter);
@@ -629,6 +642,16 @@ either order; Phase 3 needs Phase 2; Phase 4 needs 1 & 2 (and wants 3 done so ag
 - **Phase 5**: added the drain-coalescing test.
 - **Exec summary**: "WS events" → "SSE events". **Integration Points** + **Notes** updated; optional Phase 7 split offered.
 
+**Iteration 2** (Gemini APPROVE, Codex REQUEST_CHANGES, Claude APPROVE — all HIGH; Gemini + Claude verified every iter-1 fix landed and all file refs are accurate):
+- **Phase 4 — dead-session targeting seam**: Codex verified `resolveTarget` (`tower-messages.ts:152`) resolves
+  only live `getWorkspaceTerminals()` and `handleSend` 404s with no live PTY — so the `no-live-pty` hold wasn't
+  reachable. Added the agent-registry fallback + `handleSend` restructure (persist held instead of 404).
+- **Phase 4 — `--all` contract**: extended the honest-outcome reporting to `sendToAll()` (`send.ts:200`), not
+  just single-send; corrected the existing `tower-client` return shape to `{ok, resolvedTo, error}` (Claude).
+- **Phase 2 — `PtySession` app-identity seam**: named the concrete metadata source (`command`/`args` are private
+  today; add a getter or `appProfileKey`) that `resolveProfile` depends on (Codex).
+- Cosmetic (Claude): confirmed `GLOBAL_CURRENT_VERSION` lives in `db/index.ts` (already correctly targeted).
+
 ## Approval
 - [ ] Technical Lead Review
 - [ ] Engineering Manager Approval
@@ -640,6 +663,7 @@ either order; Phase 3 needs Phase 2; Phase 4 needs 1 & 2 (and wants 3 done so ag
 |------|--------|--------|--------|
 | 2026-08-01 | Initial implementation plan | Spec 1313 approved | builder spir-1313 |
 | 2026-08-01 | Plan with multi-agent review | 3-way plan consult — Codex REQUEST_CHANGES addressed (client contract, e2e, config loader, WS→SSE); Gemini + Claude minors | builder spir-1313 |
+| 2026-08-01 | Plan iter-2 review | Dead-session resolver seam + `--all` contract + `PtySession` app-identity seam (Codex); Gemini + Claude APPROVE | builder spir-1313 |
 
 ## Notes
 - **PR strategy** (architect direction): all phases ship as git commits within a **single PR**, opened

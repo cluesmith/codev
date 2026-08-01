@@ -89,4 +89,21 @@ Architect approved spec-approval gate + told me to continue to Plan. Grounded th
   4. Exec summary "WS events" → "SSE events".
 - Gemini: pruneTerminal invocation (boot + backstop, Ph4) + liveness telemetry tracked in Ph4 drainer. Fixed.
 - Claude: Phase 5 coalescing test + optional Phase 7 split (7a inbox/API, 7b overview/SSE/escalation). Added.
-- Next: commit "Plan with multi-agent review" + rebuttal, `porch done` → STOP at plan-approval gate.
+- Committed "Plan with multi-agent review" (5989fa48). `porch done` → porch ran iteration-2 re-consult.
+
+### 2026-08-01 — Plan 3-way consult (iteration 2)
+- Verdicts: Gemini APPROVE, Codex REQUEST_CHANGES, Claude APPROVE — all HIGH. Gemini + Claude verified every
+  iter-1 fix landed + all file refs accurate. Codex found 3 deeper implementation-seam gaps (all verified in code,
+  all fixed):
+  1. **Dead-session resolver seam**: `resolveTarget` (tower-messages.ts:152) resolves only LIVE terminals;
+     handleSend 404s with no PTY (tower-routes.ts:1479-1486). So `no-live-pty` hold was unreachable. Added
+     agent-registry fallback (global.db builders/architect via state.ts) + handleSend restructure (persist, not 404).
+  2. **PtySession app-identity seam**: command/args are PRIVATE (only label/cwd public). Named the getter/
+     appProfileKey seam resolveProfile needs. Phase 2.
+  3. **`afx send --all`**: sendToAll (send.ts:200) pushes to sent on any ok (line 232). Extended client contract
+     to cover --all, not just single-send. Phase 4.
+- Claude cosmetic: GLOBAL_CURRENT_VERSION is in index.ts (already targeted); tower-client shape is
+  {ok,resolvedTo,error} not ...terminalId (fixed description).
+- Two of three already APPROVE. Committing iter-2 revisions + rebuttal; `porch done` → porch decides (re-consult
+  iter-3 or gate). Codex's seams are legit + finite; if it keeps finding ever-finer detail, that's implement-phase
+  territory and the human gate decides "good enough."
