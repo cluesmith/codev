@@ -99,17 +99,26 @@ plus the most recent dated section*, so a save must leave exactly that behind:
 dumps or raw tool output. Include only: current focus, open loops, and the
 instructions a fresh session needs to resume.
 
-**Then — and only then — suggest `/clear`.** Save first, *then* tell the human
-it is a good time to clear. You cannot clear your own context and must never
-decide unilaterally to lose it; keeping the irreversible step behind a human
-keystroke means accepting the suggestion can never lose anything, because the
-save already happened. Make the suggestion **advisory, never nagging**, and
-only right after a save — e.g.:
+**Then — and only then — suggest the refresh.** Save first, *then* tell the
+human it is a good time to clear. You must never decide unilaterally to lose
+your context; keeping the irreversible step behind a human decision means
+accepting the suggestion can never lose anything, because the save already
+happened. Make the suggestion **advisory, never nagging**, and only right
+after a save — e.g.:
 
-> State saved to `codev/state/<name>.md` — good time to `/clear` if this
+> State saved to `codev/state/<name>.md` — good time to refresh if this
 > session is feeling heavy.
 
-Do not repeat it, and do not prompt to `/clear` at any other time.
+Do not repeat it, and do not prompt for it at any other time.
+
+**`/arch-save` packages this whole loop**, and is the preferred path when the
+owner directs a refresh: it stops your monitors, writes the pruned state file,
+clears, and schedules `/arch-init` to bring you back — in that order, which is
+the part that matters. The save discipline above is what it performs at its
+step 3, so this section remains the source of truth for *how to write the
+file*; `/arch-save` is the source of truth for *the sequence*. The manual path
+(save → human clears → `/arch-init`) stays valid and is the fallback when
+Tower is unavailable.
 
 ## Guardrails (architect-wide; the state file may add more)
 
