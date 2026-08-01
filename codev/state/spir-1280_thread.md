@@ -556,3 +556,42 @@ relocated table and a per-cut justification column. Suite 205 files / 4,083 test
 (rebuilt first — skeleton edits are invisible until `copy-skeleton` reruns).
 
 Awaiting architect per-file inspection before Phase 2.
+
+### Phase 2 built — three role files, three group-pure commits (2026-08-01)
+
+architect 2,048 → 761 (G6, cc2398c2) · builder 1,837 → 849 (G3, 20567714) · consultant 252 →
+**unchanged** (G5, no commit). ALWAYS_ON 29,833 → **28,844**.
+
+**Consultant left alone deliberately.** It is already conformant — a contract, not a procedure.
+Under the acceptance model a conformant file passes *as-is*, and trimming it anyway would be
+size-chasing, which the charter amendment explicitly rejects. Recording the non-change as a
+decision rather than an omission.
+
+**Resolved the plan's open question by checking, not assuming**: `architect.md` carries nothing
+load-bearing for multi-architect coordination (Specs 755/786/823) — grepped for
+`architect:<name>`, sibling language, `spawnedByArchitect`, `whoami`: zero matches. That
+contract lives in CLAUDE.md, kept there in Phase 1.
+
+**Found while cutting**: the architect role's command block was a *stale second owner* — it
+still showed `porch approve <id> spec-approval` without the
+`--a-human-explicitly-approved-this` flag the command now requires. Exactly the drift P4 exists
+to prevent: two owners of the same syntax, one of them quietly wrong. Deleting the copy fixes
+the drift as a side effect.
+
+**M10: zero assertions retired**, but three initially failed and the resolution is the
+interesting part. `spec-1273-wait-discipline-docs` (18 assertions) broke on: a heading I had
+renamed, a phrase **split by a line wrap**, and a dropped word ("current"). In all three the
+*behaviour* survived — only the strings moved. **I adjusted my prose rather than the
+assertions.** Those strings encode a real wait-discipline incident; preserving them cost nothing
+in conformance terms, and editing a prior spec's protection to fit new prose is precisely the
+silent erosion M10 exists to prevent. Writing to the test would have been the easy call and the
+wrong one.
+
+**Hazard named, third occurrence**: reflowing prose silently breaks any exact-match string that
+spans a line wrap — scar canonicals in Phase 1, a prior spec's assertions here, and I repeated
+it *within* Phase 2 on `afx-from-root` before catching it. Any exact-match string in a rewritten
+file must be re-verified after the rewrite; canonicals stay on one line however long. This is
+the same family as the `wc`/`cmp`/grep lessons: the check that looks like it passed, and didn't.
+
+Suite 205 files / 4,083 tests green. Manifest at `manifests/phase-2-roles.md`. Awaiting
+inspection.
