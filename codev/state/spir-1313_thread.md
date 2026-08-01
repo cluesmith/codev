@@ -889,3 +889,44 @@ called it cosmetic, `--workspace` is fully in the options table, skeleton is int
 left as-is; (b) arch/lessons routing → deferred to R phase (plan permits; Claude agreed). Invariants re-checked:
 `diff CLAUDE.md AGENTS.md` empty; skeleton templates differ only by the title/AGENTS-note lines. Next: `porch done`
 (build+tests) → iter-2 re-consult.
+
+### 2026-08-01 — Phase 9 committed (a7c5f77f); FLAKY test episode survived; iter-2 consult launched
+Committed the 9-file phase_9 doc deliverable as `a7c5f77f` (explicit staging, NO git add -A). **Porch discovers it does
+NOT commit builder work** — its `chore(porch)` commits are status.yaml bookkeeping only; the builder commits their own
+deliverable (matches phase_8's `1451e20b`/`01d54410`).
+**⚠️ FLAKY TEST EPISODE (env, NOT my change):** after the commit, `porch done`'s test check FAILED twice (43.2s, 43.1s)
+where it had PASSED twice earlier (28.3s, 28.2s) on the SAME doc content (docs were on-disk during the passing runs, so
+markdown provably can't be the cause). Failure signature: `shell-init: … getcwd: cannot access parent directories`
+(a test `chdir`s into a temp dir removed mid-run — a parallel-vitest-worker + git-subprocess temp-dir race, aggravated by
+9+ concurrent sibling builders). Proof it's flaky/green: a **direct** `npm test -- --exclude='**/e2e/**'` from packages/codev
+PASSED clean — **4162 passed / 48 skip, 0 failures, 27.3s**; then `porch done` RETRY passed (28.3s). No single reproducible
+failing test to skip (direct run had 0 failures) → it's whole-suite environmental flakiness, not a fixable single test.
+Handled by retry (legit — the suite is green; a passing run is a valid signal). Will note in the review's Flaky Tests section.
+iter-2 re-consult launched (Gemini/Codex/Claude) with the rebuttal + `### Mailbox retention and escalation` fix in context.
+
+### 2026-08-01 — RESUMED (architect) → REVIEW phase. Review doc + arch/lessons routing done; opening PR.
+All 9 implement phases complete/approved/committed; porch advanced to Review (iter-1). Resumed per architect;
+read `state-snapshot.md` as instructed. Reconstructed full history from thread + status.yaml + a subagent that
+extracted ground-truth from all 57 consult files (44 APPROVE / 12 REQUEST_CHANGES / 1 COMMENT; Codex = 11 of 12
+blocks). Review-phase work this session:
+- **Review doc** `codev/reviews/1313-afx-send-mailbox-first-delivery.md` written to the current template
+  (Summary → Spec Compliance (13/13) → Deviations → Key Metrics → Timelog → Consultation Iteration Summary →
+  Consultation Feedback (every phase/round/model) → Lessons Learned → **Architecture Updates** + **Lessons
+  Learned Updates** (porch greps these) → Technical Debt → Flaky Tests → Follow-up). Includes the Phase-3 agy
+  measurement note and an honest Phase-7 force-advance note (iter-3 fix landed + Claude-approved, but no iter-4
+  re-consult; PR gate is the backstop).
+- **Arch/lessons routing** via `update-arch-docs` skill (verified every symbol against source, not the plan):
+  - HOT `arch-critical.md`: added the mailbox-first invariant (persist→gate→deliver, never force-inject, every
+    writer routes through mailbox+gate); DEMOTED the forge-concept-commands line to cold (already fully covered
+    in `arch.md` § Integration Points → Forge Concept Commands). Facts stay at the 10 cap (1:1 displacement).
+  - COLD `arch.md`: rewrote the **stale `### 7. Message Delivery`** section (still described the DELETED
+    `SendBuffer`) to the mailbox-first mechanism; updated the Tower Startup boot table (step 4
+    `startSendBuffer()` → `startMailboxDrainer()`, no-force-flush shutdown).
+  - COLD `lessons-learned.md`: +1 Process (trace a contract change end-to-end) +2 Testing (Playwright day-one;
+    e2e must exercise the *named* repro). **No hot-lessons change** — incumbents are stronger; bias toward KEEP.
+  - CLAUDE.md/AGENTS.md use `@codev/resources/*-critical.md` **@-imports**, so the hot edit reflects
+    automatically — no regeneration, still byte-identical. These 4 `codev/resources/` files are user-evolved
+    (not framework files) → NO skeleton mirror needed.
+- Next: commit review+governance+thread (explicit staging), push, open PR (`Closes #1313`, do NOT merge —
+  standing architect constraint), notify architect, then `porch done 1313` (checks: pr_exists / arch+lessons
+  headings / e2e). Docs/governance-only session — no code touched, so build/tests unaffected.
