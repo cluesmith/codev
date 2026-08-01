@@ -256,3 +256,28 @@ Architect approved spec-approval gate + told me to continue to Plan. Grounded th
   test updated), `tsc --noEmit` clean. No claude/codex regression. agy is now a working, fail-safe target
   (Baked Decision 12 blocking criterion satisfied at the gate level; live delivery smoke is Phase 4/verify).
 - Next: commit phase_3, `porch done 1313` → 3-way review.
+
+### 2026-08-01 — ✅ Phase 3 APPROVED (unanimous) → advanced to phase_4
+- Iter-1 re-consult: **Gemini/Codex/Claude all APPROVE, HIGH, zero KEY_ISSUES.** Gemini confirmed all 4
+  deliverables (profile, fixtures, tests, measurement note in thread). No iteration needed. Committed:
+  code **04b7959a**, thread **98ae1b79**. porch advanced to **phase_4** (iteration 1).
+- **Phase 4 — Delivery orchestration + write serialization** now open. THE big integration phase (changes LIVE
+  behavior; "makes the whole feature correct"). Scope (from plan):
+  - `handleSend` rewrite (tower-routes.ts): **persist → serialize → gate → deliver|hold**; return `delivered` |
+    `held`+id+reason. Persist row BEFORE the HTTP response.
+  - Per-session **write serialization** (FIFO, completion-chained) in message-write.ts (or write-queue.ts) — a
+    message's text + its Enter are one unit.
+  - **Retire SendBuffer**: delete send-buffer.ts + its test; startSendBuffer/stopSendBuffer (tower-server.ts
+    587/185) become the mailbox drainer lifecycle. Delivery moments this phase = enqueue-time + poll backstop
+    (submit/quiescence triggers are Phase 5).
+  - **Dead-session seam**: resolveTarget (tower-messages.ts:152) only resolves LIVE terminals + handleSend 404s
+    → add agent-registry fallback (global.db builders/architect via state.ts) so no-live-PTY → held(`no-live-pty`),
+    not 404. (Codex flagged this seam back in the plan consult.)
+  - **Client contract**: extend tower-client.ts send return (+held/reason/mailboxId) + send.ts report real
+    outcome on BOTH single-send (:332) and `--all` (sendToAll :200).
+  - pruneTerminal wiring (boot + per-drain); liveness telemetry counter in the drainer (Phase 7 surfaces it).
+  - Additive `POST /api/send` fields (held/mailboxId/reason) preserving ok/terminalId/deferred for old binaries.
+  - Tests: send-delivery.test.ts + **automated e2e** for the #1265 repro (draft→send→held(busy)→submit→clean).
+  - `--interrupt` stays the explicit human bypass (unchanged); no force paths, no shutdown flush.
+- Starting with code reconnaissance (handleSend, send-buffer, message-write, resolveTarget, tower-server
+  lifecycle, tower-client/send) before implementing. This phase will likely need >1 review iteration.
