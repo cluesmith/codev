@@ -237,3 +237,51 @@ That number-level diff is the compression analogue of principle 7 — "I kept th
 not the same claim as "I kept the content," and only the diff distinguishes them.
 
 Gate remains pending; still not touched.
+
+### Acceptance model redirected (2026-07-31) — principles, not size
+
+**Gate NOT APPROVED.** Waleed: *"I don't think the goal should be a particular size. That's not
+the right criteria. It should be to stick to the principles outlined in the blog post."*
+
+Rewrote the acceptance model (commit 0821c7ab). Fetched the blog rather than paraphrasing from
+the issue charter, and quoted its principles **verbatim** as P1–P7, each restated as a per-file
+question answerable from a diff.
+
+Two honest complications I surfaced rather than smoothed over:
+
+- **P5 (auto-memory) does not apply.** It is a Claude Code harness feature; Baked Decision 1's
+  fleet includes GPT 5.6 / Gemini 3.6 consumers with no equivalent. Declared N/A with reason
+  rather than listing six principles and hoping nobody counted seven.
+- **P7 collides with the scar-rule exemption.** The blog deletes worst-case guardrails and its
+  own example is "such as deleting files" — exactly what our scar rules guard. Named the
+  collision: the blog's guardrails protected against *bad output* (judgment now handles it);
+  scar rules protect against *irreversible acts*, where being wrong once is unbounded.
+
+Demoted to observability: >50%, all ceilings, per-segment goals, thin-margin analysis. M1/M2
+are reporting obligations that cannot fail on a number. M0/M0b/M0c survive — they keep us
+honest about what happened.
+
+**M11** (architect per-file inspection) added with the load sized rather than assumed, and
+**T16** fails a phase whose manifest omits a changed file.
+
+### CMAP round 3 — Codex: fifth self-audit finding, same root cause
+
+REQUEST_CHANGES (HIGH), five findings. The factual one lands squarely on me again:
+
+**My twin-file table was wrong.** I reported "3 codev/protocols copies that differ". In fact
+**zero differ** — all three (`maintain/templates/audit-report.md`,
+`maintain/templates/lessons-learned.md`, `release/protocol.md`) are **local-only, no skeleton
+twin**. Cause: my `cmp -s` loop treated a nonzero exit as "differs", but `cmp` also exits
+nonzero when a file is missing. I read an exit code without distinguishing its two causes.
+
+That is the **fifth** self-audit finding of this spec phase and the fourth sharing one root
+cause: *trusting a convenient signal instead of checking the authoritative thing* (truncated
+grep; skeleton-only enumeration; the script's stale comment; now an overloaded exit code). The
+pattern is now well-evidenced enough that it belongs in lessons-learned as its own entry, not
+just as this project's review note.
+
+Three other findings are sharp and structural: MP/M3 scope contradicts the hot-tier and skills
+exclusions; the A/B cannot both use "the same base commit" and "pre-/post-rewrite commits";
+and **M5 conflicts with P6** — P6 permits replacing narrated gate/check names with a reference
+to structured truth, while M5 demands those names remain in served prose, so a conformant P6
+rewrite would fail M5. Fixing after Claude's round-3 lands.
