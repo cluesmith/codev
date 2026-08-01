@@ -1827,14 +1827,22 @@ async function handleSend(
 }
 
 /**
- * GET /api/inbox — list held (undelivered) mailbox rows, workspace-wide by default or
- * scoped to `?workspace=<path>`. Backs `afx inbox`. Metadata-only projection (Spec 1313
+ * GET /api/inbox — list held (undelivered) mailbox rows for a workspace. Backs the
+ * workspace-scoped `afx inbox` (Spec 1313 decision 8): `?workspace=<path>` selects the
+ * workspace (the CLI passes the current one by default); the path is normalized to the
+ * same realpath form the enqueue path stores, so a raw workspace root still matches its
+ * held rows. Omitting `?workspace=` lists every workspace — an API-level convenience the
+ * CLI never triggers, kept for direct callers. Metadata-only projection (Spec 1313
  * redaction rule): id, addresses, why-held reason, escalation flag, and enqueue time —
  * the message BODY is deliberately never surfaced here (it travels only over the live
  * terminal stream on delivery). `escalated` is normalized from SQLite's 0/1 to a bool.
  */
 function handleInboxList(res: http.ServerResponse, url: URL): void {
-  const workspace = url.searchParams.get('workspace') ?? undefined;
+  const rawWorkspace = url.searchParams.get('workspace');
+  // Normalize to the stored realpath key (mailbox workspace_path is normalized at
+  // enqueue — tower-routes handleSend / holdAndRespond — matching overview.ts). Without
+  // this a symlinked workspace root would miss its own held rows.
+  const workspace = rawWorkspace ? normalizeWorkspacePath(rawWorkspace) : undefined;
   const rows = listHeldMailbox(getGlobalDb(), workspace);
   const projected = rows.map((r) => ({
     id: r.id,

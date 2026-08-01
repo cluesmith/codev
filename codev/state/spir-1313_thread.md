@@ -673,3 +673,29 @@ escalated 0/1→bool, `?workspace=` scope, list→dismiss→gone integration, 40
 none. **Build exit 0; full unit suite 4160 passed / 48 skipped / 0 failed.** Committing iter-2 delta (2 src + 5
 test files + thread), then `porch done 1313` → iter-2 3-way consult. Porch artifacts under codev/projects/ and the
 ephemeral state-snapshot.md stay untracked (matches prior phases' pattern).
+
+### 2026-08-01 — Phase 7 iter-2 review: Gemini APPROVE, Claude APPROVE(HIGH), Codex REQUEST_CHANGES → fixed
+iter-2 fixes committed (`18ba65b4`); `porch done` green (build 14.6s, tests 28.3s) → build-complete; ran the
+iter-2 3-way. Codex accepted all 3 iter-1 fixes and raised **one NEW issue** (Gemini+Claude both APPROVE):
+`afx inbox` **defaulted to Tower-wide** (all workspaces), but spec **Decision 8** (lines 148/241) pins it
+**workspace-scoped**. Verified against spec+plan+code — VALID, and it's an autonomous override of a Baked
+Decision (forbidden). The plan's "workspace-**wide**" = all recipient agents *within one workspace*, not
+Tower-wide; and line 241 shows Codex already settled this at spec review ("resolves Codex's scope question").
+No rebuttal — accepted + fixed.
+**Fix (3 src + 2 test files):**
+- `commands/inbox.ts`: `inboxList` defaults to the current workspace (`getConfig().workspaceRoot`, same
+  resolver `afx status` uses) when no `--workspace`; always sends `?workspace=`. `--workspace <path>` = a
+  different workspace. Updated interface/docstrings.
+- `cli.ts`: `-w, --workspace` help "default: all workspaces" → "default: current workspace".
+- `servers/tower-routes.ts` `handleInboxList`: **normalizes** the `?workspace=` param via
+  `normalizeWorkspacePath` (realpath) before `listHeld` — matches the enqueue-time normalized `workspace_path`
+  key (mirrors overview.ts); without it a symlinked root would miss its own rows. No-param→all retained as an
+  API convenience the CLI never triggers.
+- `inbox-cli.test.ts`: mock `getConfig`; default query now asserts `?workspace=<current root>`; explicit
+  `--workspace` test unchanged.
+- `inbox-routes.test.ts`: +1 normalization test (trailing-slash param still matches); scoping/redaction tests
+  unchanged.
+No `--all`/admin mode (spec intends none; YAGNI). Visibility/corruption invariants untouched (CLI scope +
+route normalization only). Verified: build exit 0; **full unit suite 4161 passed / 48 skipped / 0 failed**
+(+1 = the new route test). Rebuttal/response at `1313-phase_7-iter2-rebuttals.md`. Next: `porch next` (enter
+iter-3) → commit fix → `porch done` → `porch next` (iter-3 consult).

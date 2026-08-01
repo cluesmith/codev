@@ -771,7 +771,7 @@ export async function runAgentFarm(args: string[]): Promise<void> {
   const inboxCmd = program
     .command('inbox')
     .description('List held (undelivered) messages; dismiss by id')
-    .option('-w, --workspace <path>', 'Scope to a single workspace (default: all workspaces)')
+    .option('-w, --workspace <path>', 'Workspace to list held messages for (default: current workspace)')
     .option('-p, --port <port>', 'Tower port (default: 4100)')
     .action(async (options) => {
       const { inboxList } = await import('./commands/inbox.js');

@@ -32,10 +32,17 @@ vi.mock('../utils/logger.js', () => ({
   }),
 }));
 
+// Config drives the workspace-scoped default (decision 8): `afx inbox` with no
+// --workspace lists the current workspace, so the handler queries getConfig().workspaceRoot.
+const CURRENT_WS = '/home/user/project';
+const mockGetConfig = vi.hoisted(() => vi.fn());
+vi.mock('../utils/config.js', () => ({ getConfig: mockGetConfig }));
+
 import { inboxList, inboxDismiss } from '../commands/inbox.js';
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockGetConfig.mockReturnValue({ workspaceRoot: CURRENT_WS });
 });
 
 /** One held row as GET /api/inbox returns it (metadata only — never a body). */
@@ -66,7 +73,7 @@ describe('inboxList', () => {
 
     await inboxList();
 
-    expect(mockRequest).toHaveBeenCalledWith('/api/inbox');
+    expect(mockRequest).toHaveBeenCalledWith('/api/inbox?workspace=%2Fhome%2Fuser%2Fproject');
     expect(mockLogger.header).toHaveBeenCalledWith('Held messages (2)');
     // Header row + separator + 2 data rows = 4 row() calls.
     expect(mockLogger.row).toHaveBeenCalledTimes(4);
@@ -89,12 +96,13 @@ describe('inboxList', () => {
     expect(mockRequest).toHaveBeenCalledWith('/api/inbox?workspace=%2Fws1');
   });
 
-  it('lists workspace-wide (no query) by default', async () => {
+  it('defaults to the current workspace (from config) when --workspace is omitted', async () => {
     mockRequest.mockResolvedValue({ ok: true, status: 200, data: [] });
 
     await inboxList();
 
-    expect(mockRequest).toHaveBeenCalledWith('/api/inbox');
+    // Decision 8: workspace-scoped — the default query carries the current workspace root.
+    expect(mockRequest).toHaveBeenCalledWith('/api/inbox?workspace=%2Fhome%2Fuser%2Fproject');
   });
 
   it('marks an escalated row with a trailing "!" on its reason', async () => {

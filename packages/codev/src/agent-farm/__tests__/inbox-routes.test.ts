@@ -196,6 +196,19 @@ describe('GET /api/inbox', () => {
     expect(rows[0].workspacePath).toBe(WS);
   });
 
+  it('normalizes the ?workspace= param so a non-canonical path still matches its held rows', async () => {
+    seedHeld({ workspacePath: WS });
+    // A trailing-slash variant of the same workspace: normalizeWorkspacePath (resolve)
+    // canonicalizes it back to WS, so the row still matches. This is what lets the CLI
+    // pass a raw workspace root (decision 8's default) that may differ from the stored
+    // realpath key.
+    const res = makeRes();
+    await handleRequest(makeReq('GET', `/api/inbox?workspace=${encodeURIComponent(`${WS}/`)}`), res, makeCtx());
+    const rows = JSON.parse(res._body) as Array<{ workspacePath: string }>;
+    expect(rows).toHaveLength(1);
+    expect(rows[0].workspacePath).toBe(WS);
+  });
+
   it('returns an empty array when nothing is held', async () => {
     const res = makeRes();
     await handleRequest(makeReq('GET', '/api/inbox'), res, makeCtx());

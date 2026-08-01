@@ -13,6 +13,7 @@
 
 import { getTowerClient, DEFAULT_TOWER_PORT } from '../lib/tower-client.js';
 import { logger, fatal } from '../utils/logger.js';
+import { getConfig } from '../utils/config.js';
 
 /** One held row as returned by GET /api/inbox — metadata only, never the body. */
 interface InboxRow {
@@ -26,7 +27,12 @@ interface InboxRow {
 }
 
 interface InboxListOptions {
-  /** Scope to a single workspace path; default lists every held row Tower-wide. */
+  /**
+   * Workspace path to list. Defaults to the current workspace — `afx inbox` is
+   * workspace-scoped (Spec 1313 decision 8), not Tower-wide. Tower normalizes this
+   * to the same realpath form the mailbox stores, so the raw config workspace root
+   * (or a `--workspace` path in any form) matches its held rows.
+   */
   workspace?: string;
   port?: number;
 }
@@ -47,18 +53,20 @@ function formatAge(createdAt: number, now: number): string {
 }
 
 /**
- * `afx inbox` — list held messages. Workspace-wide by default (each row shows its
- * workspace); `--workspace <path>` scopes to one workspace (decision 8's
- * workspace-scoping). A `!` after the reason marks a row that has crossed the
- * escalation age.
+ * `afx inbox` — list held messages for a workspace. Workspace-scoped per spec
+ * decision 8: defaults to the current workspace (`getConfig().workspaceRoot`);
+ * `--workspace <path>` lists a different one. Tower normalizes the path, so rows
+ * enqueued under the workspace's realpath still match. A `!` after the reason marks
+ * a row that has crossed the escalation age.
  */
 export async function inboxList(options: InboxListOptions = {}): Promise<void> {
   const client = getTowerClient(options.port || DEFAULT_TOWER_PORT);
 
-  let path = '/api/inbox';
-  if (options.workspace) {
-    path += `?workspace=${encodeURIComponent(options.workspace)}`;
-  }
+  // Decision 8: workspace-scoped. Default to the current workspace when no explicit
+  // --workspace was given, so `afx inbox` shows this workspace's held mail — not
+  // every workspace Tower knows about.
+  const workspace = options.workspace ?? getConfig().workspaceRoot;
+  const path = `/api/inbox?workspace=${encodeURIComponent(workspace)}`;
 
   const result = await client.request<InboxRow[]>(path);
   if (!result.ok) {
