@@ -56,3 +56,30 @@ largest block (protocol.md, 3,703 words) is protocol semantics — excluded by
 the spec's Non-goals. The 20% arithmetic assumed more of the surface was
 duplicated rules than measurement bore out. Whether even −7% moved behaviour
 is the verify phase's question (M12b).
+
+---
+
+## SUPERSEDED by Spec 1280 (2026-08-01)
+
+**The figures above were produced by an instrument with three defects and should not be
+cited.** They are preserved unaltered because the record of what was believed, and when,
+is part of the history — not because they are correct.
+
+The instrument (`scripts/measure-prompt-surface.sh` as of Spec 1252):
+
+1. derived its phase-task term from `codev-skeleton/porch/prompts/`, a dead Ralph-SPIR-era
+   tree with **no runtime consumer**, while the live resolver
+   (`commands/porch/prompts.ts`, `loadPromptFile`) loads `protocols/<p>/prompts/`. Real SPIR
+   phase prompts average ~1,396 words; the dead tree averaged 400;
+2. omitted `roles/builder.md` (1,837 words), which `spawn-worktree.ts:854` injects into
+   **every** builder spawn;
+3. asserted in its own comments that `CLAUDE.md` "already inlines" the hot tier. Since #1119
+   it carries `@import` lines, which are **transcluded** at session launch — so `wc -w
+   CLAUDE.md` excludes 736 always-loaded words.
+
+**Corrected pre-rewrite baseline: `codev/resources/1280-word-baseline.md`
+(ALWAYS_ON_WORDS = 34,235 for a SPIR builder at I=10, versus the 21,702 implied here).**
+
+The behavioural baseline in `1252-behavior-baseline.md` is **unaffected** — it uses a
+different instrument (`measure-prompt-behavior.ts`) and remains the valid "before" for
+Spec 1280's M8.
