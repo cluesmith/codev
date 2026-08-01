@@ -1,7 +1,7 @@
 id: bugfix-1323
 title: test-suite-consult-runs-escape
 protocol: bugfix
-phase: investigate
+phase: fix
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -11,4 +11,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-08-01T13:07:26.835Z'
-updated_at: '2026-08-01T13:07:26.836Z'
+updated_at: '2026-08-01T13:10:51.247Z'
