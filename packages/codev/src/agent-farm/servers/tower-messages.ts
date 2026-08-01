@@ -448,9 +448,12 @@ export interface RegistryResolveResult {
  * - `architect` / `architect:<name>` — resolved to a SPECIFIC architect name via
  *   the persisted architect rows, preserving the Spec 755 spoofing constraint
  *   (a builder sender may only address its own spawning architect).
- * - `project:<agent>` cross-workspace forms are intentionally NOT resolved here
- *   (the caller falls through to the original 404): holding cross-workspace mail
- *   for an offline agent has no sender context and is out of scope for this phase.
+ * - `project:<agent>` cross-workspace — the target workspace is resolved by
+ *   basename (the same mapping the live resolver uses) and the agent held against
+ *   ITS registry, so the mailbox-first hold applies across every address form.
+ *   Boundary: workspace resolution reads the live workspace map, so the target
+ *   workspace must be active (its agent's PTY may be dead); a fully-inactive
+ *   workspace still NOT_FOUNDs, exactly as the live resolver does.
  *
  * A cleaned-up builder (`afx cleanup`) is deleted from global.db too, so it
  * correctly resolves to NOT_FOUND here — mail is only held for agents that still
@@ -475,15 +478,22 @@ export function resolveAgentInRegistry(
     return resolveRegistryArchitectByName(agent, fallbackWorkspace, sender);
   }
 
-  // project:<agent> cross-workspace — out of scope for the offline-hold fallback.
+  // Determine the workspace to resolve the agent within. An explicit `project:`
+  // maps to that workspace by basename (the same mapping the live resolver uses),
+  // so a cross-workspace send to a known agent whose PTY is down is held against
+  // ITS registry rather than dropped; otherwise the agent resolves within the
+  // sender's workspace.
+  let ws: string;
   if (project) {
-    return { code: 'NOT_FOUND', message: `Project '${project}' agent '${agent}' has no live terminal and cross-workspace offline hold is not supported.` };
+    const wsResult = findWorkspaceByBasename(project);
+    if (isResolveError(wsResult)) return wsResult;
+    ws = wsResult.workspacePath;
+  } else {
+    if (!fallbackWorkspace) {
+      return { code: 'NO_CONTEXT', message: 'Cannot resolve agent without project context.' };
+    }
+    ws = fallbackWorkspace;
   }
-
-  if (!fallbackWorkspace) {
-    return { code: 'NO_CONTEXT', message: 'Cannot resolve agent without project context.' };
-  }
-  const ws = fallbackWorkspace;
 
   // Bare architect / arch.
   if (agent === 'architect' || agent === 'arch') {

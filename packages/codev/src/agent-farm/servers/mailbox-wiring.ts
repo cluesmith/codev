@@ -13,6 +13,8 @@
  */
 
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { loadConfig } from '../../lib/config.js';
 import type { PtySession } from '../../terminal/pty-session.js';
 import { getWorkspaceTerminals, getTerminalManager } from './tower-terminals.js';
 import { broadcastMessage } from './tower-messages.js';
@@ -136,8 +138,30 @@ export function makeDeliveryPorts(log: LogFn): DeliveryPorts {
   };
 }
 
-// The single backstop drainer instance (replaces the retired SendBuffer).
-const drainer = new MailboxDrainer();
+// The single backstop drainer instance (replaces the retired SendBuffer). Created
+// lazily so it picks up the configured retention window (below) at first use.
+let drainer: MailboxDrainer | undefined;
+
+/**
+ * The terminal-row retention window (days) for the prune. This is a Tower-GLOBAL
+ * policy — the drainer prunes rows across every workspace in the user-global
+ * `global.db` — so it is read from the user-global `~/.codev/config.json` layer via
+ * `loadConfig` (rooted at home), not any single workspace's config. Spec default 30
+ * (already `DEFAULT_CONFIG.mailbox.retentionDays`). A malformed config never stops
+ * the drainer from booting — it falls back to the default.
+ */
+function configuredRetentionDays(): number {
+  try {
+    return loadConfig(homedir()).mailbox?.retentionDays ?? 30;
+  } catch {
+    return 30;
+  }
+}
+
+function ensureDrainer(): MailboxDrainer {
+  if (!drainer) drainer = new MailboxDrainer({ pruneRetentionDays: configuredRetentionDays() });
+  return drainer;
+}
 
 /**
  * Start the mailbox backstop drainer (replaces `startSendBuffer`). Called once on
@@ -146,7 +170,7 @@ const drainer = new MailboxDrainer();
  * triggers are layered on in Phase 5.
  */
 export function startMailboxDrainer(log: LogFn): void {
-  drainer.start(makeDeliveryPorts(log), getGlobalDb());
+  ensureDrainer().start(makeDeliveryPorts(log), getGlobalDb());
   log('INFO', '[mailbox] backstop drainer started');
 }
 
@@ -156,10 +180,10 @@ export function startMailboxDrainer(log: LogFn): void {
  * persisted in SQLite and will be redelivered after restart on a clean gate.
  */
 export function stopMailboxDrainer(): void {
-  drainer.stop();
+  drainer?.stop();
 }
 
 /** The live drainer (liveness-telemetry streaks; Phase 7 surfaces them). */
 export function getMailboxDrainer(): MailboxDrainer {
-  return drainer;
+  return ensureDrainer();
 }

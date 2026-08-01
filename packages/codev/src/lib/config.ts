@@ -102,6 +102,19 @@ export interface CodevConfig {
   terminal?: {
     backend?: 'node-pty';
   };
+  /**
+   * Mailbox delivery settings (Spec 1313). Tower-global — the drainer prunes
+   * terminal rows across all workspaces in the user-global `global.db`, so this is
+   * read from the user-global `~/.codev/config.json` layer, not a per-workspace one.
+   */
+  mailbox?: {
+    /**
+     * Days a *terminal* mailbox row (delivered/superseded/dismissed) is retained
+     * before the backstop prune drops it. Held rows are never TTL-dropped. Spec
+     * default 30. (Phase 7 adds escalation-age to this same section.)
+     */
+    retentionDays?: number;
+  };
   dashboard?: {
     frontend?: 'react' | 'legacy';
   };
@@ -133,6 +146,9 @@ const DEFAULT_CONFIG: CodevConfig = {
     consultation: {
       models: ['gemini', 'codex', 'claude'],
     },
+  },
+  mailbox: {
+    retentionDays: 30,
   },
   framework: {
     source: 'local',

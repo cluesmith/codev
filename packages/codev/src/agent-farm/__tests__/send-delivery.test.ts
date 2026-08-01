@@ -282,4 +282,24 @@ describe('MailboxDrainer (Spec 1313, Phase 4)', () => {
     expect(mailbox.getById(db, old.id)).toBeNull(); // pruned
     drainer.stop();
   });
+
+  it('the default retention window is 30 days (spec) — keeps a 10-day row, prunes a 31-day one', async () => {
+    // Guards the corrected default (was a wrong 7d): a default-constructed drainer
+    // must NOT prune a row aged 10 days, but MUST prune it once past 30.
+    const day = 24 * 60 * 60 * 1000;
+    const h = harness();
+    const row = mailbox.enqueue(db, { workspacePath: '/ws', toAgent: 'A', body: 'x', formattedMessage: 'X' }, 1000);
+    mailbox.markDelivered(db, row.id, 1000);
+    const drainer = new MailboxDrainer(); // no override → the 30-day default
+
+    h.now = 1000 + 10 * day;
+    drainer.start(h.ports, db);
+    expect(mailbox.getById(db, row.id)).not.toBeNull(); // within 30d → kept (would have been pruned at 7d)
+    drainer.stop();
+
+    h.now = 1000 + 31 * day;
+    drainer.start(h.ports, db);
+    expect(mailbox.getById(db, row.id)).toBeNull(); // beyond 30d → pruned
+    drainer.stop();
+  });
 });

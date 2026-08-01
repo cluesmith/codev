@@ -193,7 +193,11 @@ export function deliverAgentMailSerialized(
 }
 
 const DEFAULT_BACKSTOP_INTERVAL_MS = 1500;
-const DEFAULT_PRUNE_RETENTION_DAYS = 7;
+// Spec 1313 (baked decision 7): terminal rows are pruned after a bounded window,
+// default 30 days, configurable via `.codev/config.json` (mailbox.retentionDays) —
+// `startMailboxDrainer` reads it and passes it in. This constant is the fallback
+// when the drainer is constructed without an explicit value (e.g. unit tests).
+const DEFAULT_PRUNE_RETENTION_DAYS = 30;
 
 /**
  * The poll backstop that replaces `SendBuffer`'s flush timer. On each tick it walks
