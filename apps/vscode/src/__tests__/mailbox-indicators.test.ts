@@ -8,6 +8,8 @@ import {
   heldStatusSegment,
   heldTooltipClause,
   heldBadgeCount,
+  composeStatusBarText,
+  composeActivityBadge,
   escalationToastText,
   escalationMatchesWorkspace,
 } from '../mailbox-indicators.js';
@@ -71,6 +73,62 @@ describe('heldBadgeCount', () => {
 
   it('passes a positive count through unchanged', () => {
     expect(heldBadgeCount(5)).toBe(5);
+  });
+});
+
+describe('composeStatusBarText', () => {
+  it('renders the base builder count with no extras when nothing needs attention', () => {
+    expect(composeStatusBarText(2, 0, 0, 0, false)).toBe('$(server) Codev: 2 builders');
+  });
+
+  it('appends blocked, waiting, and held segments in order', () => {
+    expect(composeStatusBarText(3, 1, 2, 4, false)).toBe(
+      '$(server) Codev: 3 builders · $(bell) 1 blocked · $(comment-discussion) 2 waiting · $(mail) 4 held',
+    );
+  });
+
+  it('uses the warning icon for the held segment when escalated', () => {
+    expect(composeStatusBarText(1, 0, 0, 2, true)).toBe('$(server) Codev: 1 builders · $(warning) 2 held');
+  });
+
+  it('omits the held segment entirely when nothing is held', () => {
+    expect(composeStatusBarText(5, 1, 0, 0, true)).toBe('$(server) Codev: 5 builders · $(bell) 1 blocked');
+  });
+});
+
+describe('composeActivityBadge', () => {
+  it('is undefined when nothing needs the user', () => {
+    expect(composeActivityBadge(0, 0, 0)).toBeUndefined();
+    // A negative/absent held count is clamped, so it cannot fabricate a badge.
+    expect(composeActivityBadge(0, 0, -2)).toBeUndefined();
+  });
+
+  it('folds held-only into the badge with a held tooltip', () => {
+    expect(composeActivityBadge(0, 0, 3)).toEqual({ value: 3, tooltip: '3 held messages' });
+  });
+
+  it('preserves the singular/plural blocked-only phrasing', () => {
+    expect(composeActivityBadge(1, 0, 0)).toEqual({ value: 1, tooltip: '1 builder blocked at a human-approval gate' });
+    expect(composeActivityBadge(2, 0, 0)).toEqual({ value: 2, tooltip: '2 builders blocked at human-approval gates' });
+  });
+
+  it('preserves the idle-only phrasing', () => {
+    expect(composeActivityBadge(0, 1, 0)).toEqual({ value: 1, tooltip: '1 builder waiting on input' });
+  });
+
+  it('combines blocked + idle with the compact phrasing', () => {
+    expect(composeActivityBadge(2, 3, 0)).toEqual({ value: 5, tooltip: '2 blocked, 3 waiting on input' });
+  });
+
+  it('folds held into blocked + idle and joins the clauses', () => {
+    expect(composeActivityBadge(1, 1, 2)).toEqual({
+      value: 4,
+      tooltip: '1 blocked, 1 waiting on input · 2 held messages',
+    });
+    expect(composeActivityBadge(2, 0, 1)).toEqual({
+      value: 3,
+      tooltip: '2 builders blocked at human-approval gates · 1 held message',
+    });
   });
 });
 

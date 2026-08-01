@@ -33,7 +33,7 @@ import { listCronTasks } from './commands/cron.js';
 import { addReviewComment } from './commands/review.js';
 import { activateGateToasts } from './notifications/gate-toast.js';
 import { activateMailboxEscalationToasts } from './notifications/mailbox-escalation-toast.js';
-import { heldStatusSegment, heldTooltipClause, heldBadgeCount } from './mailbox-indicators.js';
+import { composeStatusBarText, composeActivityBadge } from './mailbox-indicators.js';
 import { activateReviewDecorations } from './review-decorations.js';
 import { activateReviewComments } from './comments/plan-review.js';
 import { MarkdownPreviewProvider } from './markdown-preview/preview-provider.js';
@@ -365,13 +365,10 @@ export async function activate(context: vscode.ExtensionContext) {
 		// Spec 1313 Phase 8: workspace-wide held-mail count (all recipients, incl.
 		// architects — the authoritative `data.heldCount`, not a per-builder sum),
 		// with a warning-flavored attention state once a held row has escalated.
+		// The text/fold logic is pure + unit-tested in `composeStatusBarText`.
 		const heldCount = data.heldCount;
 		const escalated = data.mailboxEscalated === true;
-		let text = `$(server) Codev: ${builderCount} builders`;
-		if (blockedCount > 0) { text += ` · $(bell) ${blockedCount} blocked`; }
-		if (idleCount > 0) { text += ` · $(comment-discussion) ${idleCount} waiting`; }
-		text += heldStatusSegment(heldCount, escalated);
-		statusBarItem.text = text;
+		statusBarItem.text = composeStatusBarText(builderCount, blockedCount, idleCount, heldCount, escalated);
 		// Amber background is the persistent, log-free attention state for the count;
 		// it clears when the escalated row resolves (an overview refetch on the
 		// held-state-change broadcast flips `mailboxEscalated` back to false).
@@ -429,22 +426,9 @@ export async function activate(context: vscode.ExtensionContext) {
 		// Spec 1313 Phase 8: fold the workspace held-mail count into the badge so the
 		// activity-bar icon reflects it even when the sidebar is collapsed. Held is a
 		// count only (not a per-builder "needs me" gate); the tooltip disambiguates it
-		// from the blocked/idle signals. `heldBadgeCount` absorbs an absent field.
-		const heldCount = heldBadgeCount(data.heldCount);
-		const total = blockedCount + idleCount + heldCount;
-		if (total === 0) {
-			buildersView.badge = undefined;
-			return;
-		}
-		const builderTip = (blockedCount > 0 && idleCount > 0)
-			? `${blockedCount} blocked, ${idleCount} waiting on input`
-			: blockedCount > 0
-				? (blockedCount === 1 ? '1 builder blocked at a human-approval gate' : `${blockedCount} builders blocked at human-approval gates`)
-				: idleCount > 0
-					? (idleCount === 1 ? '1 builder waiting on input' : `${idleCount} builders waiting on input`)
-					: '';
-		const tooltip = [builderTip, heldTooltipClause(heldCount)].filter(Boolean).join(' · ');
-		buildersView.badge = { value: total, tooltip };
+		// from the blocked/idle signals. The fold + tooltip composition (and the
+		// undefined-when-empty clear) is pure + unit-tested in `composeActivityBadge`.
+		buildersView.badge = composeActivityBadge(blockedCount, idleCount, data.heldCount);
 	};
 
 	// Close builder/dev terminal tabs when their builder disappears from the

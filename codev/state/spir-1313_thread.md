@@ -772,6 +772,25 @@ a **distinct log-free attention state** on escalation whose visual form is my pl
 - Tests (`src/__tests__/`, vitest `test:unit`): `mailbox-indicators.test.ts` (pure) + `mailbox-escalation-toast.test.ts`
   (vi.mock('vscode'): fires/deduped/workspace-filtered/disabled/wrong-type). VSCode source is app code — NOT skeleton-mirrored.
 
+### 2026-08-01 — Phase 8 iter-1 review: Gemini RC, Codex RC, Claude APPROVE → BOTH points fixed
+3-way consult (all HIGH): **Gemini REQUEST_CHANGES** (missing Playwright dashboard test — a hard repo constraint),
+**Codex REQUEST_CHANGES** (1: no Playwright for the live indicator; 2: extension.ts badge/status-bar *wiring* untested —
+only pure helpers were), **Claude APPROVE** (logic sound; flagged Playwright as a non-blocking minor). 2/3 RC on test
+coverage; the logic itself was unanimously called correct. **I was wrong that Playwright was infeasible** — `@playwright/test`
+IS installed + chromium cached (`~/.cache/ms-playwright`); the CMAP earned its keep (trust-the-protocol). Fixed BOTH:
+- **Playwright (Gemini+Codex-1):** NEW `packages/codev/src/agent-farm/__tests__/e2e/spec-1313-held-count-indicator.test.ts`
+  (mirrors spec-823's route-stub pattern): stubs `/api/overview`, asserts the badge across **absent(0) / held(3,no-attn) /
+  escalated(1,attn+pulsing-dot) / live-update(2→4 via the useOverview poll, no reload)**. Real chromium, real built
+  dashboard bundle. Ran on an **isolated fresh Tower** (port 4137 + isolated `$HOME` so it can't touch the real Tower's
+  global.db; `PLAYWRIGHT_BROWSERS_PATH` → real cache; `TOWER_ARCHITECT_CMD=bash`). **First run: 3/4 failed on a
+  `route.fetch()` race** (my `/api/state` passthrough was in-flight when the page closed) — NOT an assertion failure. Fix:
+  made `/api/state` a STATIC minimal `DashboardState` stub (no passthrough). **Re-run: 4/4 PASS (35.5s).** globalSetup's
+  "architect terminal not ready" warning is benign (my tests stub state+overview; no terminal needed).
+- **Wiring test (Codex-2):** extracted the inline extension.ts composition into pure `composeStatusBarText` +
+  `composeActivityBadge` (mailbox-indicators.ts); the two closures are now thin one-liners calling tested logic. +10 unit
+  tests (segment order, `$(warning)` swap, singular/plural blocked/idle phrasing preserved, held fold, undefined-when-empty).
+- Verified: vscode check-types clean; indicators+toast **34 pass** (was 24). Rebuttal = concurrence (agreed+fixed both, no dispute).
+
 ### 2026-08-01 — Phase 8 IMPLEMENTED (VSCode side) — build + all suites green
 Finished the VSCode side per the locked design. Files:
 - NEW `apps/vscode/src/mailbox-indicators.ts` (pure, vscode-free): `heldStatusSegment`/`heldTooltipClause`/
