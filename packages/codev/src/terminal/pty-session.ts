@@ -511,6 +511,23 @@ export class PtySession extends EventEmitter {
     return this.config.cwd;
   }
 
+  /**
+   * Launch command of this session's process (Spec 1313 — render-gate identity seam).
+   *
+   * `command` and `args` live in the private `config`; the render-gate's
+   * `resolveProfile` needs an authoritative source to map a session to its
+   * classifier profile (claude/codex/unknown). Exposed as read-only getters so
+   * the gate never guesses app identity from the label alone.
+   */
+  get command(): string {
+    return this.config.command;
+  }
+
+  /** Launch arguments of this session's process (Spec 1313 — paired with `command`). */
+  get launchArgs(): string[] {
+    return this.config.args;
+  }
+
   get status(): 'running' | 'exited' {
     return this.exitCode === undefined ? 'running' : 'exited';
   }
