@@ -518,3 +518,41 @@ principle P7 exists to delete.** Recorded rather than smoothed over.
 build.* The delegated tool — like the overloaded exit code, the truncated grep, the
 skeleton-only enumeration, and the stale script comment before it — looked authoritative and
 wasn't. CI was the authoritative signal here, and it existed all along.
+
+### Phase 1 built — CLAUDE.md/AGENTS.md + four-tree relocation (2026-08-01)
+
+PR #1319 merged; re-branched `builder/1280-rewrite` from `origin/main` (no duplicate Phase-0
+commits — verified). Commit f9cd93c6.
+
+CLAUDE.md 5,815 → **1,417**. ALWAYS_ON 34,231 → **29,833**.
+
+**The M0c split is the number that matters**, and it is why M0c exists: of 4,398 words removed
+from always-on, **1,129 were relocated** and **3,269 deleted**. Authored total fell only 4,294
+because relocation writes to four trees. An always-on-only metric would have reported the whole
+4,398 as deletion — a 26% overstatement of what actually went away.
+
+Deliberate judgment call, flagged rather than made silently: **I did not touch the `afx` skill.**
+Relocating inter-agent messaging into it would have obliged me to resolve its pre-existing
+repo-vs-skeleton drift *and* propagate its stale `tick` references (a protocol that does not
+exist in either tree) to adopters — squarely the architect's separate issue. The addressing
+*contract* stayed in CLAUDE.md instead: it is policy, not a how-to, so P4 does not apply.
+
+**M10: zero assertions retired.** All four collision candidates pass unmodified.
+
+**Two of my own mistakes, both caught by verification rather than review:**
+
+1. **Reflowing broke the scar canonicals.** My first draft wrapped them across lines for
+   readability; five of eight then failed exact-match against the ratified YAML. Canonicals must
+   be single-line. Caught because I checked byte-for-byte against
+   `builder/spir-1252:scar-rules.yaml` rather than eyeballing that they "looked present".
+2. **My Phase 0 test pinned a moving number.** It asserted ALWAYS_ON == 34,231 — a literal this
+   project changes *every phase*. It failed on Phase 1 exactly as designed to, but the design was
+   wrong: a test edited every phase is a test edited carelessly, which is M10's own argument
+   turned on my suite. Replaced with arithmetic invariants that hold at any surface size, plus an
+   immutable assertion that the FROZEN baseline artifact still records 34,231.
+
+Manifest at `manifests/phase-1-shared-skills.md`: 10 files in one batch, with the deleted-vs-
+relocated table and a per-cut justification column. Suite 205 files / 4,083 tests green
+(rebuilt first — skeleton edits are invisible until `copy-skeleton` reruns).
+
+Awaiting architect per-file inspection before Phase 2.
