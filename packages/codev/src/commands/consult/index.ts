@@ -449,6 +449,28 @@ export function resolveLaneModelChoice(
 }
 
 /**
+ * Resolve a model for a lane that has **no built-in default** — agy picks its own model when
+ * `--model` is absent, so there is nothing to fall back to.
+ *
+ * `null` means "omit the flag entirely", which is what preserves zero-config parity: an
+ * unconfigured gemini lane must produce byte-identical argv to before this spec.
+ */
+export function resolveOptionalLaneModelChoice(
+  workspaceRoot: string,
+  lane: ConfigurableLane,
+  modelIdOverride?: string,
+): LaneModelChoice | null {
+  if (modelIdOverride !== undefined) {
+    validateModelId(modelIdOverride, '--model-id');
+    return { id: modelIdOverride, key: '--model-id', source: null, fromFlag: true };
+  }
+
+  const { id, key } = resolveLaneModel(loadConfig(workspaceRoot).consult, lane);
+  if (id === undefined || key === undefined) return null;
+  return { id, key, source: findConfigSource(workspaceRoot, ['consult', 'models', lane]), fromFlag: false };
+}
+
+/**
  * Attach model provenance to a provider rejection.
  *
  * Deliberately does NOT substitute a working id or otherwise recover — a bad model id must fail
@@ -737,6 +759,10 @@ const AGY_PRINT_TIMEOUT = '5m';                 // passed to `agy --print-timeou
 const AGY_TIMEOUT_MS = 6 * 60 * 1000;           // Codev-owned hard cap (> agy's own timeout)
 // OAuth banner appears before any review text; only scan the early stream.
 const AGY_MARKER_SCAN_LIMIT = 8192;
+// Bounded tail of agy's own output retained for a configured-lane hard failure. agy's rejection
+// text is the only thing that explains WHY a model id was refused, but it lands in an error
+// message, so it is capped rather than accumulated.
+const AGY_FAILURE_TAIL_MAX_CHARS = 2000;
 /**
  * How long a prober waits, marker-free, before publishing `auth` to the shared
  * cache (#1077). The OAuth banner is the very first thing an unauthenticated agy
@@ -884,8 +910,15 @@ async function runAgyConsultation(
   workspaceRoot: string,
   outputPath?: string,
   metricsCtx?: MetricsContext,
+  modelChoice?: LaneModelChoice | null,
 ): Promise<void> {
   const startTime = Date.now();
+
+  // `undefined` means "resolve it yourself" (direct callers); an explicit `null` means "no model
+  // configured", which must stay distinguishable from "not yet resolved".
+  const choice = modelChoice === undefined
+    ? resolveOptionalLaneModelChoice(workspaceRoot, 'gemini')
+    : modelChoice;
 
   const bin = resolveAgyBin();
   if (!bin) {
@@ -946,6 +979,10 @@ async function runAgyConsultation(
 
   const args = ['--sandbox', '--print-timeout', AGY_PRINT_TIMEOUT];
   for (const d of addDirs) args.push('--add-dir', d);
+  // Omitted entirely when unconfigured, so an unconfigured lane's argv is byte-identical to
+  // pre-1286 and agy keeps choosing its own model. Must precede --print: agy parses --print as a
+  // string-valued option, so its value has to be the immediately following argument.
+  if (choice) args.push('--model', choice.id);
   // agy 1.0.10 defines --print as a string-valued option, so its prompt must
   // immediately follow the flag rather than another option such as --sandbox.
   args.push('--print', promptArg);
@@ -956,7 +993,7 @@ async function runAgyConsultation(
     }
   };
 
-  return new Promise<void>((resolve) => {
+  return new Promise<void>((resolve, reject) => {
     const proc = spawn(bin, args, {
       cwd: workspaceRoot,
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -965,6 +1002,11 @@ async function runAgyConsultation(
     const outChunks: Buffer[] = [];
     let scanBuf = '';
     let settled = false;
+    // stderr is watched for auth markers but otherwise discarded today, so a hard failure would
+    // have nothing but an exit code to report. Retain a bounded tail of BOTH streams: agy's own
+    // text is the only thing that explains *why* a model was rejected, and this lands in an error
+    // message, so it must not be unbounded.
+    let outputTail = '';
 
     // When we hold the probe lock, other consult processes are polling the cache
     // for our verdict — publish it as soon as it is knowable, and always release
@@ -1003,6 +1045,7 @@ async function runAgyConsultation(
 
     const watch = (buf: Buffer, isStdout: boolean) => {
       if (isStdout) outChunks.push(buf);
+      outputTail = (outputTail + buf.toString('utf-8')).slice(-AGY_FAILURE_TAIL_MAX_CHARS);
       if (scanBuf.length < AGY_MARKER_SCAN_LIMIT) {
         scanBuf += buf.toString('utf-8');
         if (AGY_OAUTH_MARKERS.some((m) => scanBuf.includes(m))) {
@@ -1036,6 +1079,31 @@ async function runAgyConsultation(
       clearTimeout(timer);
       cleanup();
       const raw = Buffer.concat(outChunks).toString('utf-8').trim();
+
+      // THE PHASE 3 INVARIANT: a skip may only be reached for an ENVIRONMENT cause.
+      //
+      // Configuring `consult.models.gemini` is opting out of "quietly proceed without this lane" —
+      // a non-zero exit then means the model was probably rejected, and swallowing that as a
+      // COMMENT skip would let a typo'd model id silently reduce every review to two lanes.
+      //
+      // Deliberately narrow: ONLY a non-zero exit hard-fails. Auth, timeout, non-response and
+      // empty output stay skips even when configured, because those are environment causes and the
+      // degraded-agy lane (#1032/#1033) must keep its non-blocking property. Widening this to
+      // "any failure" would wedge phases for workspaces whose agy is merely unauthenticated.
+      if (code !== 0 && choice) {
+        publishAuth();
+        recordAgyMetrics(metricsCtx, startTime, code ?? 1, `agy exited with code ${code}`);
+        console.error(`\n[gemini (agy) FAILED: configured model "${choice.id}" — see error]`);
+        // No review file: a hard failure must not leave an artifact porch could mistake for a
+        // completed review.
+        const providerError = new Error(
+          `agy exited with code ${code}.` +
+          (outputTail.trim() ? `\n\nagy output (last ${AGY_FAILURE_TAIL_MAX_CHARS} chars):\n${outputTail.trim()}` : '')
+        );
+        reject(annotateModelError(providerError, 'gemini', choice));
+        return;
+      }
+
       if (code !== 0 || raw.length === 0 || raw.includes(AGY_NONRESPONSE_MARKER)) {
         // A broken run tells us nothing about auth — release without a verdict
         // and let the next call re-probe.
@@ -1111,7 +1179,8 @@ async function runConsultation(
   // and non-blocking skip (see runAgyConsultation).
   if (model === 'gemini') {
     const startTime = Date.now();
-    await runAgyConsultation(query, role, workspaceRoot, outputPath, metricsCtx);
+    const choice = resolveOptionalLaneModelChoice(workspaceRoot, 'gemini', modelIdOverride);
+    await runAgyConsultation(query, role, workspaceRoot, outputPath, metricsCtx, choice);
     logQuery(workspaceRoot, model, query, (Date.now() - startTime) / 1000);
     return;
   }
