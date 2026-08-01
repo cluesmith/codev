@@ -80,3 +80,28 @@ uncommitted-changes check is retained, so a pre-commit run still cannot pass vac
 
 Mutation-verified in both directions — a scoping fix that silently disabled the guard would be
 the vacuous pass all over again.
+
+## Incidental fix: closes #1293 (blank artifact filename)
+
+**Found by the architect at inspection; independently verified before recording here.**
+
+The PIR builder-prompt carried **2** `{{artifact_name}}` references before this phase and **0**
+after. That resolves #1293's blank-filename symptom **by deletion**, and the verification shows
+why the bug existed at all:
+
+- `artifact_name` is substituted by **porch**, in `commands/porch/prompts.ts:102`, when it
+  builds a **phase prompt**.
+- The **spawn path never substitutes it** — `grep artifact_name spawn-roles.ts` returns nothing.
+
+So a `{{artifact_name}}` placeholder in a *builder-prompt* could only ever render empty. Porch's
+per-phase prompts were always the real owner of artifact naming; the builder-prompt was
+referencing a variable nobody filled in for it.
+
+**#1293 should be closed against this merge** rather than lingering fixed-but-open.
+
+### Constraint this creates for Phase 5
+
+The same placeholder is **legitimate and load-bearing in phase prompts** — 51 references across
+the eleven Phase 5 targets. Deleting it there would break artifact naming outright. The rule is
+positional, not textual: **remove `{{artifact_name}}` from spawn-time prompts, preserve it in
+porch-substituted phase prompts.**
