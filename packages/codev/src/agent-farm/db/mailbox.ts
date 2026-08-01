@@ -147,6 +147,25 @@ export function markDelivered(db: Database.Database, id: string, now: number = D
 }
 
 /**
+ * Refresh the why-held `reason` on a still-held row (informational — the value
+ * `afx inbox` shows and the send response reports). Only touches `held` rows, so
+ * it can never relabel or resurrect a terminal row. Returns true if a held row was
+ * updated. The delivery pass calls this so a held row's reason tracks the current
+ * gate verdict (e.g. `busy` → `no-live-pty` when the terminal dies).
+ */
+export function setHeldReason(
+  db: Database.Database,
+  id: string,
+  reason: MailboxReason | null,
+  now: number = Date.now()
+): boolean {
+  const info = db
+    .prepare("UPDATE mailbox SET reason = ?, updated_at = ? WHERE id = ? AND status = 'held'")
+    .run(reason, now, id);
+  return info.changes > 0;
+}
+
+/**
  * Transition a held row to `dismissed` (operator-cleared via `afx inbox dismiss`).
  * The why-held reason is preserved for audit. Returns true if it transitioned;
  * a dismissed row is never delivered.

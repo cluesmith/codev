@@ -737,9 +737,27 @@ export class TowerClient {
     /** Tower buffered this because the user was typing (Spec 403). */
     deferred?: boolean;
     error?: string;
+    /**
+     * Spec 1313 mailbox-first delivery. `delivered` = written to the PTY now;
+     * `held` = persisted to the durable mailbox and awaiting a clean prompt
+     * (`reason` says why: `busy` | `no-profile` | `no-live-pty`), with `mailboxId`
+     * the row id. Older Tower binaries omit all four — a bare `{ ok, resolvedTo }`
+     * response then reads as delivered (`held` undefined), preserving behavior.
+     */
+    delivered?: boolean;
+    held?: boolean;
+    reason?: string;
+    mailboxId?: string;
   }> {
     const result = await this.request<{
-      ok: boolean; resolvedTo: string; scheduled?: boolean; deferred?: boolean;
+      ok: boolean;
+      resolvedTo: string;
+      scheduled?: boolean;
+      deferred?: boolean;
+      delivered?: boolean;
+      held?: boolean;
+      reason?: string | null;
+      mailboxId?: string;
     }>(
       '/api/send',
       {
@@ -770,6 +788,10 @@ export class TowerClient {
       resolvedTo: result.data!.resolvedTo,
       scheduled: result.data!.scheduled === true,
       deferred: result.data!.deferred === true,
+      delivered: result.data!.delivered,
+      held: result.data!.held,
+      reason: result.data!.reason ?? undefined,
+      mailboxId: result.data!.mailboxId,
     };
   }
 

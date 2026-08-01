@@ -153,14 +153,31 @@ async function registerTerminal(
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
+      // Spec 1313: an inert shell renders no agent composer, so the render-gate
+      // (correctly) HOLDS a normal send to it. These routing tests therefore use
+      // the explicit `interrupt` delivery path (gate-bypass, broadcasts as before);
+      // the shell traps SIGINT and re-loops so it survives the Ctrl+C and stays
+      // registered across sends. Gated deliver/hold is covered by
+      // send-mailbox-repro.test.ts and tower-routes.test.ts.
       command: '/bin/sh',
-      args: ['-c', 'sleep 3600'],
+      args: ['-c', 'trap "" INT; while true; do sleep 3600; done'],
       cwd: workspacePath,
       cols: 80,
       rows: 24,
       workspacePath,
       type,
       roleId,
+      // Register via the shellper (persistent) backend — the same path Tower
+      // uses for real builders/architects. The non-persistent fallback spawns
+      // node-pty directly via `await import('node-pty')`, which resolves the
+      // module's live named bindings to `undefined` inside Tower's deep ESM
+      // graph when run from the built `dist/` (a pre-existing Node ESM↔CJS
+      // interop quirk in `terminal/pty-session.ts`, unrelated to Spec 1313 —
+      // `terminal/shellper-main.ts` already works around it with createRequire).
+      // Shellper spawns in its own process, so it is immune. A shellper-backed
+      // session reports `command: ''` (see pty-manager.createSessionRaw), which
+      // still resolves to `no-profile` for the held-behavior assertion below.
+      persistent: true,
     }),
   });
   expect(res.status).toBe(201);
@@ -290,6 +307,7 @@ describe('send integration (POST /api/send → /ws/messages)', () => {
         from: 'architect',
         workspace: workspaceA,
         fromWorkspace: workspaceA,
+        options: { interrupt: true }, // Spec 1313: explicit-delivery path (see registerTerminal)
       }),
     });
     expect(sendRes.ok).toBe(true);
@@ -321,6 +339,7 @@ describe('send integration (POST /api/send → /ws/messages)', () => {
         from: 'architect',
         workspace: workspaceA,
         fromWorkspace: workspaceA,
+        options: { interrupt: true }, // Spec 1313: explicit-delivery path (see registerTerminal)
       }),
     });
     expect(sendRes.ok).toBe(true);
@@ -349,6 +368,7 @@ describe('send integration (POST /api/send → /ws/messages)', () => {
         from: 'architect',
         workspace: workspaceA,
         fromWorkspace: workspaceA,
+        options: { interrupt: true }, // Spec 1313: explicit-delivery path (see registerTerminal)
       }),
     });
 
@@ -387,6 +407,7 @@ describe('send integration (POST /api/send → /ws/messages)', () => {
         from: 'architect',
         workspace: workspaceA,
         fromWorkspace: workspaceA,
+        options: { interrupt: true }, // Spec 1313: explicit-delivery path (see registerTerminal)
       }),
     });
     expect(sendRes.ok).toBe(true);
@@ -428,6 +449,7 @@ describe('send integration (POST /api/send → /ws/messages)', () => {
         from: 'builder-spir-42',
         workspace: workspaceA,
         fromWorkspace: workspaceA,
+        options: { interrupt: true }, // Spec 1313: explicit-delivery path (see registerTerminal)
       }),
     });
 
@@ -438,5 +460,32 @@ describe('send integration (POST /api/send → /ws/messages)', () => {
     expect(frame.content).toBe('Filtered cross-project');
 
     busProjB.close();
+  });
+
+  // ---- Spec 1313: mailbox-first hold behavior (HTTP contract) ----
+
+  it('holds a NORMAL (gated) send to an inert terminal instead of writing to it (Spec 1313)', async () => {
+    // No `interrupt` here: the render-gate sees a shell with no agent composer and
+    // holds the message rather than corrupting the line. The send is persisted and
+    // the response reports the real first outcome — held, with a why-held reason.
+    const sendRes = await fetch(`http://localhost:${TEST_TOWER_PORT}/api/send`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        to: 'builder-spir-109',
+        message: 'this should be held, not written',
+        from: 'architect',
+        workspace: workspaceA,
+        fromWorkspace: workspaceA,
+      }),
+    });
+    expect(sendRes.ok).toBe(true);
+    const data = await sendRes.json();
+    expect(data.ok).toBe(true);
+    expect(data.held).toBe(true);
+    expect(data.resolvedTo).toBe('builder-spir-109');
+    expect(typeof data.mailboxId).toBe('string');
+    // An inert shell resolves to no measured agent profile → held `no-profile`.
+    expect(data.reason).toBe('no-profile');
   });
 });
