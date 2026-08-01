@@ -98,6 +98,14 @@ describe('Spec 1307 — required content', () => {
     expect(text()).toMatch(/Tower does not know whether the clear landed/);
   });
 
+  it('tells the architect not to end its turn if scheduling the re-init fails', () => {
+    // The gap review found: step 4 queues the /clear but it only takes effect
+    // when the turn ends, so a step-5 failure is still recoverable — unless the
+    // architect ends its turn anyway, which converts it into a cleared session
+    // with no re-init scheduled and nobody informed.
+    expect(text()).toMatch(/If this send fails, do not end your turn/);
+  });
+
   it('tells the reader what a non-executing /clear looks like', () => {
     expect(text()).toMatch(/literal text on the front of the next message/);
   });

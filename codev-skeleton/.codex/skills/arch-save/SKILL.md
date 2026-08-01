@@ -110,6 +110,13 @@ whole reason this cycle can be built on a delay rather than on machinery.
 Delayed sends are **not persisted** — if Tower restarts inside the window, the message is
 dropped. That is recoverable; see below.
 
+**If this send fails, do not end your turn.** Step 4 queued the `/clear`, but it does not
+take effect until your turn ends — so at this moment you still have your full context and
+the failure is recoverable. Retry the send; if it keeps failing (Tower down, for example),
+tell the owner that the clear is queued with no re-init scheduled, and give them the
+command to send by hand once Tower is back. Ending the turn here is the one way to turn a
+recoverable failure into a cleared session nobody is coming back for.
+
 ### 6. Stop
 
 Do not start new work. End your turn so the clear can take effect.
