@@ -32,6 +32,11 @@ let dir: string;
  * of one assertion below is that `"$(cat …)"` reaches the agent as a SINGLE
  * argument, and `"$*"` would join two arguments into text indistinguishable
  * from one.
+ *
+ * Running past the scripted codes exits 0, not `exit ""` (which bash rejects
+ * with 255 — a *crash*, so the loop would auto-restart and spin until the
+ * runner's timeout). A future regression that adds an unexpected relaunch
+ * should surface as a wrong invocation list, not a 30-second hang.
  */
 function writeFakeAgent(exitCodes: number[]): string {
   const agent = join(dir, 'fake-agent');
@@ -41,7 +46,8 @@ function writeFakeAgent(exitCodes: number[]): string {
 { printf '%s|' "$@"; printf '\\n'; } >> '${dir}/argv.log'
 n=$(cat '${dir}/count')
 echo $((n + 1)) > '${dir}/count'
-exit "$(sed -n "$((n + 1))p" '${dir}/codes')"
+code=$(sed -n "$((n + 1))p" '${dir}/codes')
+exit "\${code:-0}"
 `,
   );
   chmodSync(agent, '755');
