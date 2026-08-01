@@ -22,6 +22,14 @@ encodes the expected verdict: `<app>-<state>.<clean|busy>.txt`.
   separate a non-de-emphasized placeholder from user text (and the spike deliberately
   rejected text allowlists), so this one clean-state fixture is modeled on the
   spike-measured real-claude attributes instead of the shim's atypical output.
+- **claude-picker.busy.txt** — **synthesized** claude `/model` picker (same reason
+  as claude-idle: the sandbox `claude` is the shim, so no real picker to capture).
+  Its highlighted row begins with the **same `❯` glyph** claude uses for the
+  composer marker; model names render normal-intensity. This pins the guard that a
+  picker's selection-cursor `❯` + list is classified **busy** (via the user-text
+  path — the marker matches the cursor, the model names count as occupancy), never
+  mistaken for an empty composer. Mirrors the real **codex-picker** capture, whose
+  `› 1. …` selection cursor exercises the same path.
 - **wrapper-boot.busy.txt** — **synthetic** builder launch-loop screen (a born-dirty
   state with no composer marker). App-agnostic: no marker → busy under any profile.
 

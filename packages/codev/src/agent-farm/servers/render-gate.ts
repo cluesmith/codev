@@ -25,7 +25,18 @@
  * cap), 67 ms @ 4 MB — cheap enough to gate every delivery.
  */
 
-import { Terminal } from '@xterm/headless';
+// `@xterm/headless` resolves to its CommonJS entry (no `exports` map, no
+// `type: module`), and its named exports are not statically analyzable, so a
+// native-node ESM `import { Terminal }` throws "Named export 'Terminal' not
+// found" when the compiled dist runs under node (production; masked under vitest
+// by vite's CJS interop). Default-import the module object — the codebase's
+// convention for CJS deps (cf. `import Database from 'better-sqlite3'`).
+import xtermHeadless from '@xterm/headless';
+// Type-only: erased at compile time, so it adds no runtime import (the named
+// runtime binding is unavailable — see above); the .d.ts still provides the type.
+import type { Terminal as HeadlessTerminal } from '@xterm/headless';
+
+const { Terminal } = xtermHeadless;
 
 /**
  * The seed-capped ring snapshot the gate classifies — the production
@@ -96,7 +107,7 @@ function capReplay(replay: string): string {
 }
 
 /** Rendered viewport lines, right-trimmed — the same extraction the spike asserts on. */
-function screenLines(term: Terminal, rows: number): string[] {
+function screenLines(term: HeadlessTerminal, rows: number): string[] {
   const buf = term.buffer.active;
   const top = buf.viewportY;
   const lines: string[] = [];

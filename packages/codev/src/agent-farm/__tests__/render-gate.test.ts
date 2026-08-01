@@ -49,11 +49,12 @@ function profileForFixture(name: string): GateProfile {
 describe('render-gate — real captured fixtures (Spec 1313)', () => {
   const fixtures = readdirSync(FIXTURE_DIR).filter((f) => f.endsWith('.txt')).sort();
 
-  it('the required states are all captured (claude+codex idle/draft/menu, codex picker, wrapper/boot)', () => {
+  it('the required states are all captured (claude+codex idle/draft/menu/picker, wrapper/boot)', () => {
     for (const required of [
       'claude-idle.clean',
       'claude-draft.busy',
       'claude-menu.busy',
+      'claude-picker.busy',
       'codex-idle.clean',
       'codex-draft.busy',
       'codex-menu.busy',
@@ -125,7 +126,7 @@ describe('render-gate — synthetic branch coverage (Spec 1313)', () => {
 });
 
 describe('render-gate — performance at the seed cap (Spec 1313)', () => {
-  it('classifies an over-cap (>1MB) snapshot within a safe upper bound', async () => {
+  it('classifies an over-cap (>1MB) snapshot within the spec ≤~50ms seed-cap budget', async () => {
     // Build > RING_SEED_MAX_BYTES of newline-free filler so it lands in the
     // ring's unbounded `partial` (the claude full-screen-TUI shape, #1047) rather
     // than being truncated by the 1000-line cap. A busy composer tail follows so
@@ -135,15 +136,26 @@ describe('render-gate — performance at the seed cap (Spec 1313)', () => {
     const snap = snapshotFromRaw(raw);
     expect(snap.replay.length).toBeGreaterThan(RING_SEED_MAX_BYTES);
 
-    const t0 = performance.now();
-    const verdict = await classifyScreen(snap, CLAUDE_PROFILE);
-    const ms = performance.now() - t0;
+    // Warm up (JIT + first-parse), then assert the MIN over several runs. The min
+    // strips GC/scheduling outliers, approximating the classifier's steady-state
+    // compute cost — the stable basis a budget assertion needs so it validates the
+    // bound instead of flaking in CI. (Spike: 22ms @ 1MB; this env: ~15ms native /
+    // ~30ms under vitest — comfortably inside the spec's ≤~50ms seed-cap bound.)
+    await classifyScreen(snap, CLAUDE_PROFILE); // warm-up (discarded)
+    let best = Infinity;
+    let verdict;
+    for (let i = 0; i < 5; i++) {
+      const t0 = performance.now();
+      verdict = await classifyScreen(snap, CLAUDE_PROFILE);
+      best = Math.min(best, performance.now() - t0);
+    }
     // eslint-disable-next-line no-console
-    console.log(`[render-gate] classify @${Math.round(snap.replay.length / 1024)}KB replay = ${ms.toFixed(1)}ms`);
-    expect(verdict.clean).toBe(false); // the tail is a busy prompt
-    // Spike measured ~22ms @ 1MB; assert a generous CI-safe ceiling to catch a
-    // catastrophic (e.g. O(n²)) regression without flaking on slow machines.
-    expect(ms).toBeLessThan(500);
+    console.log(`[render-gate] classify @${Math.round(snap.replay.length / 1024)}KB best-of-5 = ${best.toFixed(1)}ms`);
+    expect(verdict?.clean).toBe(false); // the tail is a busy prompt
+    // Validates the spec's ≤~50ms seed-cap budget with headroom for slower/loaded
+    // CI than the spike's machine, while staying an order of magnitude below a
+    // catastrophic (e.g. O(n²)) regression. Tightened from a prior 500ms ceiling.
+    expect(best).toBeLessThan(75);
   });
 });
 
