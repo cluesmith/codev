@@ -778,3 +778,36 @@ table parsing as manifest rows. All three were deviations from a format I define
 manifest each time rather than loosening the guard.
 
 Suite verified green **after** the repairs: 206 files, 4,117 tests.
+
+### Phase 3 FAILED inspection, and the reason was my run discipline (2026-08-01)
+
+Architect ran T16 in my worktree after a fresh build: **it failed on the pushed state** — seven
+`codev-skeleton/protocols/*/protocol.md` paths reported as absent from every manifest. So
+"suite verified green after the repairs: 4,117" **was not true of what I pushed**. Same
+premature-claim class I had owned two paragraphs earlier *in the same message*.
+
+**Diagnosis — I ran the suite before committing.** T16 diffs `origin/main...HEAD`, which sees
+**committed changes only**. Phase 3's rewrite commit (`7b195391`) came *after* that suite run, so
+T16 found no changed prompt files and passed **vacuously**. The test was correct both times; my
+run measured a tree that no longer existed by the time I made the claim.
+
+Two fixes, one of each kind:
+
+1. **Format decision** (mine to own): the parser learns brace notation. The plan's model is
+   inspection *per decision* — twins byte-identical, sync verified by T7 — so ~66 decisions
+   rather than 131 diffs, and the ≤12 cap counts decisions. One row naming both paths is the
+   right semantics. Chose this over splitting rows, which would have broken the cap and silently
+   abandoned the per-decision model.
+2. **Root cause**: T16 now reads committed **and** working-tree changes, so a pre-commit run
+   cannot pass vacuously. *A guard that passes because it looked at the wrong tree is worse than
+   no guard — it manufactures confidence exactly when the work is unreviewed.*
+
+**Mutation-verified**: removing the spir row fails it, restoring passes. After a vacuous pass I
+do not treat a green tick as evidence a guard bites.
+
+**New standing rule for the rest of this project**: commit first, then run, then read the run,
+then claim — and quote the SHA the run executed against. No green statement about a run still in
+flight, ever again.
+
+Verified verdict: HEAD `1eac5c35`, **206 files / 4,117 tests, exit 0**, working tree clean, all
+four T16 assertions passing individually.
