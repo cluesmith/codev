@@ -167,10 +167,12 @@ Group **G1**. No prompt surface has changed.
 #### Deliverables
 - [ ] `CLAUDE.md` + `AGENTS.md` rewritten (1 decision, 2 byte-identical files)
 - [ ] Relocated how-to content written to **all four skill trees**, not one
-- [ ] **T17 — skills parity**: `.claude/skills` ≡ `.codex/skills`; every skill present in the
-      repo that the skeleton ships is in sync. Pre-existing drift (`afx`, `porch`) and
-      skeleton-absent skills (`forge`, `skill-creator`, `team`) are recorded as known state, not
-      silently "fixed" — but any skill this project *touches* must be four-way consistent
+- [ ] **T17 — skills parity, scoped by the plan-gate ruling (2026-08-01)**: every skill this
+      project **touches** must be four-tree consistent (`.claude/skills`, `.codex/skills`, and
+      both `codev-skeleton/` copies). Untouched skills are **exempt** — T17 asserts over the
+      touched set only, so pre-existing drift (`afx`, `porch`) and skeleton-absent skills
+      (`forge`, `skill-creator`, `team`) cannot fail it. Those go to the architect's separate
+      issue and are recorded here as known state
 - [ ] All eight scar canonicals present byte-identically
 - [ ] **M10 here, not Phase 4**: `spec-1273-wait-discipline-docs.test.ts:31` asserts on
       `.claude/skills/afx/SKILL.md` + `.codex/skills/afx/SKILL.md` — relocation into `afx` breaks
@@ -430,9 +432,12 @@ G6); all others are mutually independent. T10 rehearses **every** group touched.
 - **Batch size** — ≤12 is the spec's cap; smaller grows the phase count, not the batches.
 - **`roles/consultant.md`** — *inspected-but-unchanged (expected)*; rewritten only on finding.
 - **Hot tier** — out of scope by the spec's disposition table; a reviewer may argue P3 applies.
-- **Pre-existing skills drift** (`afx`, `porch` repo-vs-skeleton; `forge`/`skill-creator`/`team`
-  skeleton-absent) — recorded as known state. Fixing it is arguably in scope for P3/P4
-  relocation and arguably a separate concern; **architect's call at the plan gate.**
+- ~~**Pre-existing skills drift**~~ — **RULED at the plan gate (2026-08-01)**: any skill this
+  project **touches** gets full four-tree parity as part of touching it (**T17** enforces).
+  Pre-existing drift on **untouched** skills (`afx`, `porch` repo-vs-skeleton) and the
+  skeleton-absence product question (`forge`, `skill-creator`, `team`) go to a **separate
+  issue**, filed by the architect. This plan treats them as **recorded known state, nothing
+  more** — they are not repaired here and their presence must not fail T17.
 
 ## Notes
 
