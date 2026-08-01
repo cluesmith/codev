@@ -444,3 +444,40 @@ answered the docs question — `"none"` as the skip sentinel belongs in phase_6 
 Verified end-to-end, not just unit-tested: hermes+flag exits 1 naming the accepting lanes; hermes
 without the flag is unchanged; gemini is not blocked. tsc 0 · unit 3905 passed / 0 failed ·
 CLI integration 93 passed / 0 failed.
+
+## phase_3 — the split, and why stderr mattered more than the exit code
+
+Implemented `--model` passthrough plus the environment-vs-configuration failure split. The plan
+called this "the phase with the quiet failure mode" and it was right to state the rule as an
+invariant: **a skip may only be reached for an environment cause.**
+
+Deliberately narrow. Only a non-zero exit hard-fails, and only when a model is configured. Auth,
+timeout, non-response and empty output stay skips *even when configured*, because a degraded agy
+(#1032/#1033) must never wedge a phase. Mutation-verified rather than asserted: widening the
+condition to `if (code !== 0)` fails the unconfigured-lane test — which is precisely the risk the
+plan named ("breaking the degraded-lane property for unconfigured workspaces").
+
+**The stderr detail turned out to be the substance of the phase.** stderr was already piped and
+scanned for auth markers, then thrown away — only stdout accumulated. So a hard failure would have
+reported `agy exited with code 1` and nothing else, satisfying the control flow while failing the
+diagnostic requirement completely. Retaining a bounded 2000-char tail changes the character of the
+error: against real agy the captured text **lists the valid model ids**, so the failure tells you
+what to use instead of merely that you were wrong. Bounded because it lands in an error message.
+
+Verified against the real `agy`, not just the fake subprocess — this is the plan's manual test, and
+it is not observable from a unit test:
+
+| case | exit | review file |
+|---|---|---|
+| configured + bogus id | 1 | none → porch cannot advance |
+| unconfigured | 0 | written → non-blocking preserved |
+
+Also closed the gemini `--model-id` gap I recorded as a tracked promise in phase_2.
+`resolveOptionalLaneModelChoice` returns `null` when unconfigured, so the flag is *omitted* rather
+than defaulted — gemini has no default to fall back to, agy picks its own.
+
+Kept the argv-order guard the plan flagged: `--model` must precede `--print`, since agy parses
+`--print` as string-valued and its value must immediately follow. A test asserts the ordering, because
+getting it wrong would silently feed `--model` to `--print` as the prompt.
+
+14 new tests · tsc 0 · unit 3919 passed / 0 failed · CLI integration 93 passed / 0 failed.
