@@ -412,3 +412,25 @@ Did NOT touch `pty-session.ts` (out of phase_4 scope; the createRequire fix for 
 noting for a possible follow-up issue). Diagnostics (dist patch, probe scripts) fully reverted; worktree clean.
 Phase_4 evidence complete: build green, full unit green, deterministic #1265 repro green, subprocess e2e green. Committing, then
 `porch done 1313` → 3-way review.
+
+### 2026-08-01 — Phase 4 review iter1 (Gemini APPROVE, Claude APPROVE, Codex REQUEST_CHANGES) → 3 fixes landed
+Committed phase_4 (ff3b66eb) + thread (7988a06a); `porch done` → checks green → 3-way consult. Codex (HIGH) raised 3, all
+verified against spec/plan and fixed:
+1. **Prune retention default 7 → 30 (spec:147, plan:116).** Both Codex AND Claude flagged the 7-day default as a regression
+   (prunes audit rows 4× too early). Fix: `DEFAULT_PRUNE_RETENTION_DAYS = 30`; added `mailbox.retentionDays` to CodevConfig +
+   DEFAULT_CONFIG (30); `startMailboxDrainer` now reads it from the **user-global** `~/.codev/config.json` layer via
+   `loadConfig(homedir())` (the drainer is Tower-global — prunes every workspace's rows in global.db — so a per-workspace
+   config is the wrong source; malformed config falls back to 30). Test: default drainer keeps a 10-day row, prunes a 31-day one.
+2. **project:agent cross-workspace offline hold (plan:264-269).** `resolveAgentInRegistry` returned NOT_FOUND (→404) for
+   `project:<agent>`, so cross-workspace sends lost the mailbox hold when the recipient was offline. Fix: resolve the target
+   workspace via `findWorkspaceByBasename` (the SAME mapping live `resolveTarget` uses) then hold against ITS registry. Boundary
+   documented: needs the target workspace active (its agent's PTY may be dead) — same limitation live resolution has. New
+   focused unit file `spec-1313-registry-resolve.test.ts` (7 cases: bare hold, tail-match, cross-ws hold, boundary NOT_FOUNDs).
+3. **Subprocess #1265 full-cycle e2e (plan:313).** Plan wanted an e2e via vitest.e2e.config.ts doing draft→held(busy)→clear→
+   deliver; the deterministic repro (send-mailbox-repro) does the full cycle but in the UNIT suite. Added the real subprocess
+   e2e: a dedicated ws with `.builder-start.sh`=claude (so the gate resolves the claude profile for a shellper session whose
+   command=''), an `stty raw -echo; cat` echo terminal whose composer bytes we drive via `/write`. De-risked with a throwaway
+   Node probe FIRST (proved held(busy) then delivered-via-broadcast) before writing the test — captured raw data beats guessing.
+   Result: send-integration.e2e **7/7** (draft→`held/busy`→clear→backstop redelivers `ship it` via source:'mailbox' broadcast).
+Did NOT touch pty-session.ts (the node-pty quirk stays a documented pre-existing issue; the e2e uses the shellper path prod uses).
+Verify: tsc clean; e2e 7/7; full unit suite re-running. Next: commit fixes → `porch next` (iter2 re-consult).
