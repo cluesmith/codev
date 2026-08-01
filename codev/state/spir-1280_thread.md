@@ -647,3 +647,35 @@ Standing lesson, and it generalises past this project: **a test that passes at 8
 is a failure that has not happened yet.** Check timings, not just the green tick — the same
 family as the delegated `wc`, the overloaded `cmp` exit code, and the truncated grep: a signal
 that looks like success and is measuring the wrong thing.
+
+### Pre-Phase-3 convention audit — and my own instrument was the defect (2026-08-01)
+
+Ran the cross-batch convention diff I committed to after Phase 2, read-only, while waiting on the
+#1321 merge word. It produced an alarming first result: **seven of nine protocols appeared to
+have `protocol.md` contradicting `protocol.json` about gates**, including `aspir` apparently
+claiming the very `spec-approval`/`plan-approval` gates ASPIR exists to remove — which would have
+meant a builder stopping forever at a gate porch never requests.
+
+**All three "contradiction" findings were false positives produced by my own audit script.**
+
+| Apparent finding | Reality | My script's flaw |
+|---|---|---|
+| `aspir` claims spec/plan gates | Prose says it **removes** them — correct | Read a *mention* as a *claim* |
+| `pir` claims spec/verify-approval | A **SPIR-vs-PIR comparison table row** — correct | Same |
+| `research` claims undefined `scope-approval` | It **is** defined — as a dict, not a string | Extractor only handled string-valued `gate` |
+
+The real, much weaker finding after fixing the extractor: five protocols never *mention* a gate
+their JSON defines (`verify-approval` in spir/aspir; the `*-complete` gates in
+experiment/maintain/research). That is incompleteness, not contradiction, and P6 dissolves it —
+referencing the structured source means the prose cannot be less complete than the truth.
+
+**This is the fifth instance of the family** (delegated `wc`, overloaded `cmp` exit code,
+truncated grep, `pipefail`+`grep -q`, now a naive regex + a type-blind JSON walk). But it differs
+in the way that matters: **I caught it before reporting it as fact.** Every previous instance
+reached a commit message, a spec, or the architect before being corrected. The habit of verifying
+in-context before characterising is what stopped an alarming and wrong claim from going out.
+
+Worth stating because it cuts against my own interest: an audit script written *by* the person
+whose work it audits is subject to exactly the bias the audit exists to remove. Mine was crude in
+the direction that made the codebase look worse and my upcoming phase look more necessary. The
+correction was cheap only because I checked the raw text before believing the summary.
