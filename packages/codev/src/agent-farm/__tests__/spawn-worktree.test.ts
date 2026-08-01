@@ -354,7 +354,12 @@ describe('spawn-worktree', () => {
       return scriptCall ? (scriptCall[1] as string) : undefined;
     }
 
-    it('resume → script uses the escaped scriptFragment, no prompt/role injection', async () => {
+    /** The body of a generated `codev_launch_<name>() { … }` launcher. */
+    function launcherBody(script: string, name: 'initial' | 'fresh'): string | undefined {
+      return script.match(new RegExp(`codev_launch_${name}\\(\\) \\{\\n(.*)\\n\\}`))?.[1].trim();
+    }
+
+    it('resume → entry command is the escaped scriptFragment, with no role injection', async () => {
       const resume = { sessionId: 'abc-1234-uuid', scriptFragment: "--resume 'abc-1234-uuid'" };
       await startBuilderSession(
         { workspaceRoot: '/tmp/ws' } as any,
@@ -365,17 +370,66 @@ describe('spawn-worktree', () => {
       const script = findScript();
       expect(script).toBeDefined();
       // Exact escaped fragment appended verbatim — not an unquoted or
-      // comma-joined argv form.
-      expect(script).toContain("claude --resume 'abc-1234-uuid'");
+      // comma-joined argv form. Bugfix #1267 gave the resume script a second,
+      // fresh command, so this asserts on the *entry* launcher specifically:
+      // the resumed conversation carries its own system prompt, so role
+      // injection and the initial prompt stay off this path.
+      expect(launcherBody(script!, 'initial')).toBe("claude --resume 'abc-1234-uuid'");
       expect(script).not.toContain('--resume,');
       expect(script).toContain('while true');
-      // Resume path skips role injection and the prompt file.
-      expect(script).not.toContain('--append-system-prompt');
+      // Resume never rewrites the prompt file: `afx reset` reads the spawn-time
+      // `## Mode:` heading out of it, and it cannot be regenerated faithfully.
       const writeCalls = vi.mocked(writeFileSync).mock.calls;
       const promptCall = writeCalls.find(
         call => typeof call[0] === 'string' && call[0].endsWith('.builder-prompt.txt'),
       );
       expect(promptCall).toBeUndefined();
+    });
+
+    // Bugfix #1267: the Enter-gated relaunch after a *clean* exit must start a
+    // new conversation — resuming the one the user just deliberately ended is
+    // the bug. The fresh command is the ordinary role-injected, prompt-carrying
+    // invocation a non-resume spawn would have used.
+    it('resume → clean-exit relaunch is fresh: role-injected, prompted, no --resume', async () => {
+      const resume = { sessionId: 'abc-1234-uuid', scriptFragment: "--resume 'abc-1234-uuid'" };
+      await startBuilderSession(
+        { workspaceRoot: '/tmp/ws' } as any,
+        'pir-1b', '/tmp/worktree', 'claude',
+        'PROMPT', 'ROLE', 'codev', resume,
+      );
+
+      const fresh = launcherBody(findScript()!, 'fresh');
+      expect(fresh).toBeDefined();
+      expect(fresh).not.toContain('--resume');
+      expect(fresh).toContain('--append-system-prompt');
+      expect(fresh).toContain('.builder-prompt.txt');
+      // …and the loop actually switches to it on the clean-exit branch.
+      expect(findScript()).toContain('codev_launch=codev_launch_fresh');
+    });
+
+    it('resume → the role file the fresh relaunch injects is (re)written', async () => {
+      const resume = { sessionId: 'abc-1234-uuid', scriptFragment: "--resume 'abc-1234-uuid'" };
+      await startBuilderSession(
+        { workspaceRoot: '/tmp/ws' } as any,
+        'pir-1c', '/tmp/worktree', 'claude',
+        'PROMPT', 'ROLE {PORT}', 'codev', resume,
+      );
+
+      const roleCall = vi.mocked(writeFileSync).mock.calls.find(
+        call => typeof call[0] === 'string' && call[0].endsWith('.builder-role.md'),
+      );
+      expect(roleCall).toBeDefined();
+      expect(roleCall![1]).toBe(`ROLE ${DEFAULT_TOWER_PORT}`);
+    });
+
+    it('no resume → single-command loop, unchanged (no launcher indirection)', async () => {
+      await startBuilderSession(
+        { workspaceRoot: '/tmp/ws' } as any,
+        'pir-1d', '/tmp/worktree', 'claude',
+        'PROMPT', 'ROLE', 'codev',
+      );
+
+      expect(findScript()).not.toContain('codev_launch');
     });
 
     it('no resume + role → fresh role-injected script, no --resume', async () => {
