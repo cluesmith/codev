@@ -285,3 +285,39 @@ exclusions; the A/B cannot both use "the same base commit" and "pre-/post-rewrit
 and **M5 conflicts with P6** — P6 permits replacing narrated gate/check names with a reference
 to structured truth, while M5 demands those names remain in served prose, so a conformant P6
 rewrite would fail M5. Fixing after Claude's round-3 lands.
+
+### CMAP round 3 complete — 11 findings, none disputed (2026-07-31)
+
+Codex REQUEST_CHANGES (HIGH, 5) · Claude COMMENT (HIGH, 6). Commit be95ef40.
+
+**The two structural ones would have surfaced in implement as confusion, not as clean defects:**
+
+1. **The A/B was impossible as written.** It said both "both arms from the same base commit"
+   AND "control = pre-rewrite commit, treatment = post-rewrite commit." Rebuilt as a
+   **prompt-only overlay**: both arms branch from source commit `S`; control applies one overlay
+   reverting G2–G6 and nothing else; each run records source hash AND prompt-surface hash. Also
+   fixes the latent bug Codex spotted — later pairs would otherwise inherit source changes the
+   pinned control commit lacked.
+2. **M5 conflicted with P6.** P6 permits replacing narrated gate/check names with a reference to
+   structured truth; M5 demanded the names stay in prose. A *conformant* rewrite would have
+   failed the capability check. Representation now means name-in-text OR an explicit resolvable
+   reference to a source that still defines it. Claude hit the same criterion from the other
+   side — it detects deletion, not inversion — so both fixes composed: the limit is now stated
+   outright and the gap assigned to M11/O4 plus a short set of semantic invariants.
+
+**Claude's best process catch**: the issue-mandated **per-surface cut plan** was missing. Word
+targets died with the redirect; the *disposition mapping* survived it and I had dropped both.
+Added as a disposition table marking every category rewritten / inspected-but-unchanged /
+excluded-with-reason — which also resolved Codex's scope contradiction (hot tier, .claude/skills).
+
+**Also**: M12 (no release between merge and SHIP verdict — adopters would otherwise consume an
+unvalidated skeleton); the A/B's unstated resolver precondition (tier-2 shadows tier-4; verified
+0 skeleton files lack a codev/ twin) now asserted pre-flight in T14, voiding a pair on failure
+rather than producing a comparison that looks valid and isn't.
+
+**Not actioned by me**: issue #1280's title/Goal still state ">50% reduction… measured with
+1252's committed measurement script" — superseded on both counts. That is the architect's
+artifact; flagged, not edited. Left unchanged it will keep drawing "doesn't meet the stated
+goal" findings from every future CMAP round.
+
+Spec 8,212w. Gate remains pending and untouched.
