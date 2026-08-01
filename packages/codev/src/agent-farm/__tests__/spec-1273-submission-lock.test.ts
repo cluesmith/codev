@@ -145,6 +145,48 @@ describe('Spec 1273 — submission lock', () => {
     expect(ran).toBe(true);
   });
 
+  it('reserves the session for a whole BATCH, so a direct send cannot interleave', async () => {
+    // The flush-drain case (raised by aspir-1307 for SendBuffer.busyUntil).
+    //
+    // No API extension is needed: `write` may perform MANY writes and return
+    // the final completion offset, so one submission can cover an entire
+    // buffer flush with its existing offset threading intact. A direct send
+    // arriving mid-drain queues behind the whole batch rather than writing into
+    // a partially-delivered message.
+    //
+    // Without that reservation the interleave is the same shape as the
+    // production failure one layer down: a message landing inside a
+    // half-delivered `/clear` yields `/clear<other>` on one line.
+    const composer = makeComposer();
+
+    const batch = () => {
+      // Mirrors SendBuffer.flush: several paced writes, offsets threaded.
+      composer.write('buffered-1');
+      setTimeout(() => composer.enter(), 0);
+      composer.write('buffered-2');
+      setTimeout(() => composer.enter(), 1);
+      return ENTER_DELAY;
+    };
+
+    const direct = () => {
+      composer.write('/clear');
+      setTimeout(() => composer.enter(), 0);
+      return ENTER_DELAY;
+    };
+
+    const flush = submitToSession('term-1', batch, clock);
+    const send = submitToSession('term-1', direct, clock);
+
+    await Promise.all([flush, send]);
+    await new Promise(r => setTimeout(r, 5));
+
+    // The direct send is never welded into the batch's pending text.
+    expect(composer.submitted.some(m => m.includes('buffered') && m.includes('/clear'))).toBe(
+      false,
+    );
+    expect(composer.submitted).toContain('/clear');
+  });
+
   it('drains its bookkeeping so a long-lived Tower does not leak', async () => {
     await submitToSession('term-1', () => 0);
     await new Promise(r => setTimeout(r, 0));
