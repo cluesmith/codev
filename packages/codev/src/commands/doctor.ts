@@ -468,7 +468,13 @@ function checkAgy(): CheckResult {
  * Streams output and detects the OAuth URL on the *early* stream so an
  * unauthenticated agy reports "needs login" promptly (it would otherwise print
  * the URL and wait ~30s) — rather than stalling `codev doctor` for the full
- * auth wait. Always resolves (never throws).
+ * auth wait.
+ *
+ * Resolves rather than rejecting for every agy outcome. The one exception is the
+ * test-isolation guard inside `resolveAgyBin` (#1323), which throws
+ * *synchronously* — before the promise exists — when a suite reaches this path
+ * with no pinned `CODEV_AGY_BIN`. That is intentional loudness, but it means a
+ * caller cannot catch it via `.catch()` on the returned promise.
  *
  * Shares the consult lane's auth cache (#1077): a fresh verdict is reported
  * without probing, so `codev doctor` on an unauthenticated agy does not open yet

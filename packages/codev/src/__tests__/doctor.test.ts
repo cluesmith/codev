@@ -94,6 +94,22 @@ vi.mock('chalk', () => {
   };
 });
 
+/**
+ * Restore an env var to its captured value, honouring "was unset" (#1323).
+ *
+ * A bare `delete process.env.CODEV_AGY_BIN` drops the vitest harness's fake-agy
+ * pin for the rest of the file, leaving every later `doctor()` call to reach
+ * `verifyAgy()` with nothing pinned. Nothing real spawned here — this file mocks
+ * `node:child_process` wholesale — but that made the file safe *by accident*
+ * rather than by construction: the module mock, not the pin, was doing the work.
+ * Restoring keeps the pin intact so the lane guard stays satisfied on its own
+ * terms.
+ */
+function restoreEnv(key: string, prior: string | undefined): void {
+  if (prior === undefined) delete process.env[key];
+  else process.env[key] = prior;
+}
+
 describe('doctor command', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -217,6 +233,7 @@ describe('doctor command', () => {
 
     it('should return 1 when no AI CLI is available', async () => {
       // Mock all core deps present but no AI CLIs (incl. agy unavailable).
+      const priorAgyBin = process.env.CODEV_AGY_BIN;
       process.env.CODEV_AGY_BIN = path.join(tmpdir(), `no-such-agy-${Date.now()}`);
       vi.mocked(execSync).mockImplementation((cmd: string) => {
         if (cmd.includes('which claude') || cmd.includes('which gemini') || cmd.includes('which codex')) {
@@ -261,7 +278,7 @@ describe('doctor command', () => {
       try {
         result = await doctor();
       } finally {
-        delete process.env.CODEV_AGY_BIN;
+        restoreEnv('CODEV_AGY_BIN', priorAgyBin);
       }
       expect(result).toBe(1);
     });
@@ -861,6 +878,7 @@ describe('doctor command', () => {
       // early stream (not stall for the full timeout), reporting "needs login".
       const agyBin = path.join(testBaseDir, 'agy-fake');
       fs.writeFileSync(agyBin, '#!/bin/sh\n');
+      const priorAgyBin = process.env.CODEV_AGY_BIN;
       process.env.CODEV_AGY_BIN = agyBin;
 
       vi.mocked(execSync).mockImplementation((cmd: string) => {
@@ -897,7 +915,7 @@ describe('doctor command', () => {
         );
         expect(hasNeedsLogin).toBe(true);
       } finally {
-        delete process.env.CODEV_AGY_BIN;
+        restoreEnv('CODEV_AGY_BIN', priorAgyBin);
         vi.mocked(spawn).mockReset();
       }
     });
@@ -905,6 +923,7 @@ describe('doctor command', () => {
     it('passes the probe text immediately after --print and retains the print timeout', async () => {
       const agyBin = path.join(testBaseDir, 'agy-fake');
       fs.writeFileSync(agyBin, '#!/bin/sh\n');
+      const priorAgyBin = process.env.CODEV_AGY_BIN;
       process.env.CODEV_AGY_BIN = agyBin;
 
       vi.mocked(execSync).mockImplementation((cmd: string) => {
@@ -937,7 +956,7 @@ describe('doctor command', () => {
         expect(args.slice(0, printIndex)).toContain('--print-timeout');
         expect(args[args.indexOf('--print-timeout') + 1]).toBe('20s');
       } finally {
-        delete process.env.CODEV_AGY_BIN;
+        restoreEnv('CODEV_AGY_BIN', priorAgyBin);
       }
     });
 

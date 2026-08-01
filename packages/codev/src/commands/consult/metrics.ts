@@ -10,9 +10,35 @@ import Database from 'better-sqlite3';
 import { existsSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
+import { isUnderTestRunner } from '../../lib/test-env.js';
 
 const CODEV_DIR = join(homedir(), '.codev');
 const DB_PATH = join(CODEV_DIR, 'metrics.db');
+
+/**
+ * Where metrics actually get written.
+ *
+ * `CODEV_METRICS_DB` redirects the database — the vitest harness points it at a
+ * sandbox so suite runs stop appending junk rows (temp-dir workspace paths, 0.0s
+ * durations) to the developer's real `~/.codev/metrics.db` and skewing
+ * `consult stats` (#1323).
+ *
+ * Under a test runner with no redirect, we refuse rather than fall back: a
+ * future suite that escapes the harness should surface as a failure, not as
+ * silent pollution nobody notices for months.
+ */
+function resolveDbPath(): string {
+  const override = process.env.CODEV_METRICS_DB;
+  if (override) return override;
+  if (isUnderTestRunner()) {
+    throw new Error(
+      'Refusing to open the user-global consult metrics database under a test ' +
+      'runner (#1323). Set CODEV_METRICS_DB to a path inside the test\'s temp ' +
+      'directory — the vitest harness in vitest-setup.ts does this for every suite.',
+    );
+  }
+  return DB_PATH;
+}
 
 const CREATE_TABLE = `
 CREATE TABLE IF NOT EXISTS consultation_metrics (
@@ -166,7 +192,7 @@ export class MetricsDB {
   private db: Database.Database;
 
   constructor(dbPath?: string) {
-    const path = dbPath ?? DB_PATH;
+    const path = dbPath ?? resolveDbPath();
     const dir = dirname(path);
     if (!existsSync(dir)) {
       mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -375,7 +401,11 @@ export class MetricsDB {
     this.db.close();
   }
 
+  /**
+   * The path `new MetricsDB()` opens. Honours `CODEV_METRICS_DB` so that
+   * `consult stats`' existence check and its subsequent open agree on one file.
+   */
   static get defaultPath(): string {
-    return DB_PATH;
+    return resolveDbPath();
   }
 }
