@@ -626,6 +626,26 @@ export class PtySession extends EventEmitter {
     this._lastInputAt = Date.now();
   }
 
+  /**
+   * Handle one chunk of user keyboard input from a live terminal client: record it for
+   * typing-awareness (Spec 403), track composing/submit state (Bugfix #450 — Enter
+   * submits any draft), then write it to the PTY. This is the single chokepoint every
+   * live terminal input path routes through — the Tower WS handler and the standalone
+   * pty-manager server — so submit detection (and thus the Spec 1313 Phase 5 `'submit'`
+   * fast-delivery trigger emitted by {@link stopComposing}) can never diverge between
+   * clients. Automated mailbox delivery calls {@link write} directly and so, correctly,
+   * never trips a submit signal.
+   */
+  handleUserInput(data: string): void {
+    this.recordUserInput();
+    if (data.includes('\r') || data.includes('\n')) {
+      this.stopComposing();
+    } else {
+      this.startComposing();
+    }
+    this.write(data);
+  }
+
   /** Whether the user has been idle (no input) for at least thresholdMs. */
   isUserIdle(thresholdMs: number): boolean {
     return Date.now() - this._lastInputAt >= thresholdMs;

@@ -63,6 +63,28 @@ describe('PtySession delivery signals (Spec 1313 Phase 5)', () => {
     expect(got).toEqual(['sess-42']);
   });
 
+  it('handleUserInput tracks composing, writes, and fires submit on Enter (the shared input chokepoint)', () => {
+    // Regression guard for the phase-5 review: EVERY live input path (Tower WS +
+    // pty-manager server) routes through handleUserInput, so submit detection can't
+    // diverge between clients. Here we drive the chokepoint directly.
+    const session = makeSession('sess-input');
+    const client = makeFakeClient();
+    session.attachShellper(client, Buffer.alloc(0), 1);
+    const writeSpy = vi.fn(() => true);
+    client.write = writeSpy; // spy only post-hydration user-input writes
+    const submits: string[] = [];
+    terminalDeliverySignals.on('submit', (id: string) => submits.push(id));
+
+    session.handleUserInput('ls -la'); // typing, no newline
+    expect(session.composing).toBe(true);
+    expect(submits).toEqual([]); // still composing → no submit
+
+    session.handleUserInput('\r'); // Enter
+    expect(session.composing).toBe(false);
+    expect(submits).toEqual(['sess-input']); // submit fired
+    expect(writeSpy).toHaveBeenCalledTimes(2); // both chunks reached the PTY
+  });
+
   it("emits 'quiescence' with the session id once output has been idle for the window", () => {
     vi.useFakeTimers();
     const session = makeSession('sess-q');

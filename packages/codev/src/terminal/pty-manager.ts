@@ -307,15 +307,16 @@ export class TerminalManager {
       try {
         const frame = decodeFrame(Buffer.from(rawData));
         if (frame.type === 'data') {
-          session.recordUserInput();
-          session.write(frame.data.toString('utf-8'));
+          // Route through the shared input chokepoint so this path tracks composing/
+          // submit like the Tower WS handler does (Spec 1313 Phase 5 — previously this
+          // path skipped composing, so Enter here never fired the submit trigger).
+          session.handleUserInput(frame.data.toString('utf-8'));
         } else if (frame.type === 'control') {
           this.handleControlMessage(session, ws, frame.message);
         }
       } catch {
         // If decode fails, treat as raw data (for simpler clients)
-        session.recordUserInput();
-        session.write(rawData.toString('utf-8'));
+        session.handleUserInput(rawData.toString('utf-8'));
       }
     });
 

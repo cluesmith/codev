@@ -57,6 +57,10 @@ function makeSession(seq = 0): any {
     recordUserInput: vi.fn(),
     startComposing: vi.fn(),
     stopComposing: vi.fn(),
+    // Spec 1313 Phase 5: the WS handler now delegates all user input (record + composing
+    // + write) to this single chokepoint; the record/composing/write behavior itself is
+    // covered by the PtySession unit tests.
+    handleUserInput: vi.fn(),
     ringBuffer: { currentSeq: seq },
   };
 }
@@ -170,11 +174,12 @@ describe('tower-websocket', () => {
       // Emit a data frame (0x01 prefix)
       ws.emit('message', encodeDataFrame('hello'));
 
-      expect(session.recordUserInput).toHaveBeenCalledTimes(1);
-      expect(session.write).toHaveBeenCalledWith('hello');
+      // The handler delegates the whole record + composing + write to handleUserInput.
+      expect(session.handleUserInput).toHaveBeenCalledTimes(1);
+      expect(session.handleUserInput).toHaveBeenCalledWith('hello');
     });
 
-    it('does not record user input for control frames', () => {
+    it('does not treat control frames as user input', () => {
       const ws = makeWs();
       const session = makeSession();
       const req = makeReq();
@@ -186,7 +191,7 @@ describe('tower-websocket', () => {
         payload: { cols: 120, rows: 40 },
       }));
 
-      expect(session.recordUserInput).not.toHaveBeenCalled();
+      expect(session.handleUserInput).not.toHaveBeenCalled();
     });
 
     it('handles resize control frames', () => {
@@ -231,7 +236,7 @@ describe('tower-websocket', () => {
       // Send raw text without protocol prefix — will fail decode, fallback to UTF-8
       ws.emit('message', Buffer.from('raw text'));
 
-      expect(session.write).toHaveBeenCalledWith('raw text');
+      expect(session.handleUserInput).toHaveBeenCalledWith('raw text');
     });
 
     it('detaches client on close', () => {
