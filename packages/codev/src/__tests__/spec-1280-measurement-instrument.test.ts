@@ -280,29 +280,93 @@ describe('T12 — determinism', () => {
   }, 60_000);
 });
 
-describe('the corrected baseline is what the spec claims', () => {
+describe('instrument correctness — asserted without pinning the live surface', () => {
+  // WHY THERE ARE NO LIVE ABSOLUTE NUMBERS IN THIS FILE
+  //
+  // The original form asserted `ALWAYS_ON_WORDS === 34231` against the REAL repo. That fires
+  // on every always-on edit by every project — Spec 1307 hit it on day one, correctly checked
+  // causality and bumped it. But the incentive it creates for the NEXT project is
+  // bump-without-checking, which is exactly the regression this test exists to catch: the
+  // number moves for two different reasons (the instrument broke / the surface changed) and
+  // the test cannot tell them apart, so it delegates that judgement to whoever is least able
+  // to spend time on it.
+  //
+  // Three layers replace it, none of which a legitimate surface edit can disturb:
+  //   1. INVARIANTS on the live repo — the composition arithmetic, true at any surface size.
+  //   2. ABSOLUTE values on a synthetic FIXTURE — pins the instrument's correctness without
+  //      pinning the repo's content. This is what invariants alone cannot do: a component
+  //      that is silently wrong (say SHARED omitting the hot tier) still satisfies every
+  //      internal identity, because the wrong value propagates consistently.
+  //   3. BYTE-assertions on the frozen baseline artifacts — historical record, and editing
+  //      one should be a deliberate act.
+  //
+  // Live absolute numbers belong in the phase manifests and generated artifacts, where a
+  // human reads them as findings rather than maintaining them as expectations.
+
   let out: string;
   beforeAll(() => { out = run(); }, 60_000);
 
-  it('reproduces ALWAYS_ON_WORDS = 34,231 for a SPIR builder at I=10', () => {
-    // 34,231 — not the 34,255 quoted in the spec. Two corrections, both making the
-    // instrument more honest and neither moving an acceptance criterion (size is
-    // reporting-only under the amended charter):
-    //   -20  the 1252 additive include model counted a `{{> path}}` directive's own
-    //        tokens AND the content substituted for them; this one substitutes.
-    //    -4  `wc -w` is not portable: BSD wc in a UTF-8 locale splits `⚠️` into two
-    //        words where GNU wc and Python's split() see one. Counting is now
-    //        defined explicitly rather than delegated to the platform's wc.
-    expect(num(out, 'ALWAYS_ON_WORDS')).toBe(34231);
+  describe('layer 1 — invariants over the live repo (hold at any surface size)', () => {
+    it('ALWAYS_ON = SHARED + BUILDER_SPAWN[spir] + I x (HOT + PHASE mean[spir])', () => {
+      const shared = Number(out.match(/\| SHARED [^|]*\| (\d+) \|/)![1]);
+      const spir = out.match(/^\| spir \| (\d+) \| (\d+) \| \d+ \|$/m)!;
+      const hot = Number(out.match(/lessons-critical\(\d+\) = (\d+)/)![1]);
+      expect(num(out, 'ALWAYS_ON_WORDS')).toBe(
+        shared + Number(spir[1]) + 10 * (hot + Number(spir[2])),
+      );
+    });
+
+    it('architect load = SHARED + ARCHITECT', () => {
+      const shared = Number(out.match(/\| SHARED [^|]*\| (\d+) \|/)![1]);
+      const architect = Number(out.match(/\| ARCHITECT [^|]*\| (\d+) \|/)![1]);
+      expect(Number(out.match(/\| Architect \(per session\) \| (\d+) \|/)![1])).toBe(
+        shared + architect,
+      );
+    });
+
+    it('PHASE_ITERS is a linear comparison constant', () => {
+      const one = num(run(repoRoot, { PHASE_ITERS: '1' }), 'ALWAYS_ON_WORDS');
+      const two = num(run(repoRoot, { PHASE_ITERS: '2' }), 'ALWAYS_ON_WORDS');
+      const spir = out.match(/^\| spir \| \d+ \| (\d+) \| \d+ \|$/m)!;
+      const hot = Number(out.match(/lessons-critical\(\d+\) = (\d+)/)![1]);
+      expect(two - one).toBe(hot + Number(spir[1]));
+    }, 60_000);
   });
 
-  it('reproduces the architect load (8,599)', () => {
-    expect(out).toMatch(/\| Architect \(per session\) \| 8599 \|/);
+  describe('layer 2 — absolute values on a fixture whose arithmetic a human can check', () => {
+    // Fixture contents (see makeFixture): CLAUDE.md 3 words, hot tier 2+2, builder role 3,
+    // spir wrapper 3, spir protocol.md 4, one spir prompt 5, consultant role 2, one
+    // consult-type 2, architect role 3.
+    //   SHARED  = 3 + 4                     =   7
+    //   SPAWN   = 3 + 3 + 4                 =  10
+    //   ALWAYS_ON = 7 + 10 + 10 x (4 + 5)   = 107
+    it('reports the hand-computed total for a known surface', () => {
+      const out2 = run(makeFixture());
+      expect(num(out2, 'ALWAYS_ON_WORDS')).toBe(107);
+    }, 60_000);
+
+    it('reports the hand-computed architect and consultant loads', () => {
+      const out2 = run(makeFixture());
+      expect(out2).toMatch(/\| Architect \(per session\) \| 10 \|/);
+      expect(out2).toMatch(/\| Consultant \(per review, spir\) \| 4 \|/);
+    }, 60_000);
+
+    it('a component silently omitted would fail here even though invariants still hold', () => {
+      // The blind spot invariants cannot see: drop the hot tier from SHARED and every
+      // internal identity still balances, because the wrong value propagates consistently.
+      // Only an externally-known expected value catches it.
+      const out2 = run(makeFixture());
+      expect(Number(out2.match(/\| SHARED [^|]*\| (\d+) \|/)![1])).toBe(7);
+    }, 60_000);
   });
 
-  it('honours PHASE_ITERS as a comparison constant', () => {
-    const one = num(run(repoRoot, { PHASE_ITERS: '1' }), 'ALWAYS_ON_WORDS');
-    const two = num(run(repoRoot, { PHASE_ITERS: '2' }), 'ALWAYS_ON_WORDS');
-    expect(two - one).toBe(736 + 1396); // HOT + spir phase mean
-  }, 60_000);
+  describe('layer 3 — the frozen baseline artifacts are historical records', () => {
+    it('the pre-rewrite baseline still records 34,231', () => {
+      const baseline = fs.readFileSync(
+        path.join(repoRoot, 'codev/resources/1280-word-baseline.md'),
+        'utf-8',
+      );
+      expect(baseline).toMatch(/^ALWAYS_ON_WORDS=34231$/m);
+    });
+  });
 });
