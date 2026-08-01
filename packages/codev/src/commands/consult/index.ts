@@ -462,7 +462,16 @@ function discardStaleOutput(outputPath?: string): void {
   if (!outputPath) return;
   try {
     if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
-  } catch { /* best-effort: failing to unlink must not mask the underlying error */ }
+  } catch (err) {
+    // Best-effort — failing to unlink must not mask the underlying error. But it must not be
+    // silent either: this is precisely the state where porch could accept a stale review, so it
+    // has to be visible rather than undetectable.
+    console.error(
+      `\n[warning] could not remove stale review at ${outputPath}: ` +
+      `${err instanceof Error ? err.message : String(err)}\n` +
+      `Delete it manually — porch may otherwise accept it as this iteration's review.`
+    );
+  }
 }
 
 /**
@@ -1118,14 +1127,19 @@ async function runAgyConsultation(
       // environment cause would make the hard failure unreachable for the exact case it exists to
       // catch. (My own stale-review test caught that overcorrection.) Empty stdout still means
       // "no review" on the zero-exit path below.
-      const timedOutProducing = raw.includes(AGY_NONRESPONSE_MARKER);
+      // Checked against BOTH streams: agy may print its timeout notice to stderr, and matching
+      // stdout alone would hard-fail a configured lane on a plain timeout — the same invariant hole
+      // twice over. `outputTail` is capped, but a timeout notice is by nature near the end of the
+      // stream, so the tail is where it lands. (Found by claude at review.)
+      const timedOutProducing =
+        raw.includes(AGY_NONRESPONSE_MARKER) || outputTail.includes(AGY_NONRESPONSE_MARKER);
 
       // `code === null` means agy was killed by a signal (OOM, external kill) — an environment
       // cause, not a rejected model, so it must not hard-fail either. `code !== 0` alone is true
       // for null and would misfile it. (Found by claude at review.)
       if (code !== null && code !== 0 && choice && !timedOutProducing) {
         publishAuth();
-        recordAgyMetrics(metricsCtx, startTime, code ?? 1, `agy exited with code ${code}`);
+        recordAgyMetrics(metricsCtx, startTime, code, `agy exited with code ${code}`);
         console.error(`\n[gemini (agy) FAILED: configured model "${choice.id}" — see error]`);
         // "No review file" must mean none EXISTS, not merely that this run wrote none.
         discardStaleOutput(outputPath);

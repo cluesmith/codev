@@ -52,6 +52,11 @@ if (mode === 'nonresponse') {
   process.exit(1);
 }
 if (mode === 'signal') { process.kill(process.pid, 'SIGKILL'); return; }
+if (mode === 'nonresponse-stderr') {
+  // Same timeout, announced on stderr instead of stdout.
+  process.stderr.write('agy: timed out waiting for response\\n');
+  process.exit(1);
+}
 if (mode === 'unauth') {
   process.stderr.write('Please visit https://accounts.google.com/o/oauth2/auth?client_id=fake\\n');
   setTimeout(() => process.exit(1), 30000);
@@ -214,6 +219,17 @@ describe('configured lane hard-fails on a non-zero exit', () => {
   // non-blocking property protects.
   it('a non-response that also exits non-zero stays a skip', async () => {
     process.env.FAKE_AGY_MODE = 'nonresponse';
+    const outputPath = path.join(dir, 'review.txt');
+
+    await expect(_runAgyConsultation('q', 'role', dir, outputPath)).resolves.toBeUndefined();
+
+    expect(fs.readFileSync(outputPath, 'utf-8')).toContain('VERDICT: COMMENT');
+  });
+
+  // Found by claude: the marker was matched on stdout only. agy may announce its timeout on
+  // stderr, and missing it there would hard-fail a configured lane on a plain timeout.
+  it('a non-response announced on stderr also stays a skip', async () => {
+    process.env.FAKE_AGY_MODE = 'nonresponse-stderr';
     const outputPath = path.join(dir, 'review.txt');
 
     await expect(_runAgyConsultation('q', 'role', dir, outputPath)).resolves.toBeUndefined();
