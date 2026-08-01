@@ -160,14 +160,24 @@ them is a target.**
 | | Count |
 |---|---:|
 | Prompt-bearing `.md` files, both trees + `CLAUDE.md`/`AGENTS.md` | **131** |
-| Of which `codev/protocols` copies **byte-identical** to their skeleton twin | **60** |
-| `codev/protocols` copies that differ | 3 (`maintain/templates/audit-report.md`, `maintain/templates/lessons-learned.md`, `release/protocol.md` — the last has no skeleton twin) |
+| `codev/protocols` copies **byte-identical** to their skeleton twin | **60** |
+| `codev/protocols` copies that **differ** from a twin | **0** |
+| `codev/protocols` files with **no skeleton twin** (local-only) | 3 — `maintain/templates/audit-report.md`, `maintain/templates/lessons-learned.md`, `release/protocol.md` |
 | `roles/*.md` — all three byte-identical across trees | 3 pairs |
 | `CLAUDE.md` ≡ `AGENTS.md` | verified identical |
 | **Distinct content decisions** | **~66** |
 
 This matters for M11: reviewing all 131 diffs would mean re-reading ~65 byte-identical copies.
-The inspection is over **distinct content decisions**, with twin sync verified mechanically.
+The inspection is over **distinct content decisions**, with twin sync verified mechanically
+(**T7**), which must therefore operate on the **intersection of files that have twins** — the
+three local-only files are inspected once and are not twin-parity candidates.
+
+**Resolver precondition (load-bearing for the A/B).** Every `codev-skeleton/protocols/**` and
+`roles/*.md` file currently has a `codev/` twin — verified: **0 skeleton files lack one** — so
+tier 2 shadows the installed-package skeleton (tier 4) for every surface under test. The
+control arm only genuinely serves the old surface while this holds. **Deleting a `codev/` file
+while keeping its skeleton twin would silently drop the control arm through to the new
+skeleton**, invalidating the comparison without any error. Asserted as a pre-flight in T14.
 
 ### Coverage is per-surface, not per-protocol × surface-type
 
@@ -236,6 +246,37 @@ protected against *bad output*, which judgment now handles; scar rules protect a
 *irreversible acts* — destroyed worktrees, killed sessions, bypassed human gates — where the
 cost of being wrong once is unbounded and no amount of judgment makes the wager sensible. Every
 other P7 candidate goes.
+
+### Per-surface disposition and cut plan
+
+Issue #1280's Protocol section requires the spec phase to produce "the per-surface cut plan…,
+the A/B eval design, and the scar-rule carriage plan." The *word targets* are withdrawn by the
+acceptance-model redirect; the **disposition mapping survives it**, and is the authoritative
+answer to "which surfaces are in scope, and what is expected to change in each."
+
+Every category is marked **rewritten**, **inspected-but-unchanged**, or **excluded with
+reason** — no category is left implicit.
+
+| Bucket | Disposition | Dominant non-conformance today | Governing principles | Relocation destination |
+|---|---|---|---|---|
+| `CLAUDE.md` / `AGENTS.md` | **rewritten** | CLI walkthroughs, worktree recipes, protocol-selection prose — all needed rarely, loaded always | P3, P4, P1 | `.claude/skills/` (afx, codev, porch, consult), `--help` |
+| hot tier (`arch-critical`, `lessons-critical`) | **inspected-but-unchanged** | none — already capped, judgment-shaped, displacement-enforced (Spec 987) | — | — |
+| `roles/architect.md` | **rewritten** | procedure narration for coordination already covered by skills | P1, P3 | `arch-init` / `afx` skills |
+| `roles/builder.md` | **rewritten** | ordered procedure + repeated prohibitions | P1, P7 | — |
+| `roles/consultant.md` | **inspected-but-unchanged (expected)** | already lean at 252w; rewritten only if inspection finds non-conformance | P1 | — |
+| `protocols/*/protocol.md` | **rewritten** | narrates the state machine that `protocol.json` already defines; checklists restate phase bodies | **P6**, P1, P7 | reference `protocol.json` |
+| `protocols/*/builder-prompt.md` | **rewritten** | worst-case padding, all-caps prohibitions | P1, P7 | — |
+| `protocols/*/prompts/*.md` | **rewritten** | step-by-step process; annotated templates inlined via `{{> …}}` | **P2**, P1 | heading interfaces |
+| `protocols/*/templates/*.md` | **rewritten** | annotated examples with filler prose | **P2** | heading interfaces |
+| `protocols/*/consult-types/*.md` | **rewritten** | process prose around a rubric + verdict contract | P1, P2 | — |
+| `.claude/skills/**` | **excluded from rewrite; in scope for measurement** | on-demand already — P3 working as intended. Receives relocated content, so it is measured (M0(g)) and grows by design | — | — |
+| `codev-skeleton/porch/prompts/**` | **deleted** (M6) | dead — no runtime consumer | — | — |
+| `codev/protocols/release/protocol.md` | **rewritten** | human-invoked prose, no skeleton twin, missed by earlier inventories | P1, P3 | — |
+
+**Scope is exactly this table.** MP and M3 apply to every row marked *rewritten*; rows marked
+*inspected-but-unchanged* are still inspected under M11 (the architect confirms conformance
+rather than approving a diff); the one *excluded* row is excluded for a stated reason and is
+still measured.
 
 ### Conformance is judged per file, by the architect
 
@@ -314,8 +355,15 @@ cannot fail on a number.**
       full four-tier chain** as `resolveCodevFile` does; (c) counts the inlined
       `roles/builder.md`; (d) counts hot-tier `@import` transclusion **and corrects the stale
       inlining comment**; (e) expands `{{> …}}` includes; (f) reports exclusive bucket subtotals
-      and derived audience loads separately; (g) reports **total authored prompt-surface words**
-      (both trees + `.claude/skills/`). Tests assert (a) and (b) against the real resolver.
+      and derived audience loads separately; (g) reports **total authored prompt-surface words**, defined
+      unambiguously as **physical files on disk** — every `.md` under `codev/protocols`,
+      `codev-skeleton/protocols`, `codev/roles`, `codev-skeleton/roles`, `.claude/skills`, plus
+      `CLAUDE.md` and `AGENTS.md`, each counted once, **no deduplication of twins and no
+      transclusion expansion**. This is deliberately a *different* basis from the always-on
+      buckets (which dedupe twins and expand `@import`/`{{> …}}`), because its job is to detect
+      relocation — content moved out of an always-on file must still show up somewhere. Both
+      figures are reported side by side and labelled with their basis, so T11 and T15 have
+      deterministic expected values. Tests assert (a) and (b) against the real resolver.
 - [ ] **M0b — the corrected instrument and baseline land on `main` early**, as a small
       standalone PR (precedent #1290), per **Rollout**.
 - [ ] **M0c — deleted words are distinguished from relocated words.** P3 authorizes moving
@@ -343,7 +391,26 @@ cannot fail on a number.**
       **The inventory is over the resolved, expanded prompt surface, not over `protocol.json` or
       source call sites** — extracting gate names from an unchanged `protocol.json` would report
       every capability present even if every corresponding instruction vanished from the served
-      prompts. Each item must be evidenced as represented in served prompt text.
+      prompts.
+
+      **Representation, defined so M5 does not contradict P6.** P6 explicitly permits replacing
+      narrated gate/check/phase names with a reference to the structured source. A naive
+      "every extracted name must still appear in prose" rule would make a *conformant* P6
+      rewrite fail. A capability is therefore **represented** if either (a) it is named in
+      served prompt text, **or** (b) the served text carries an explicit, resolvable reference
+      to the structured source that defines it (e.g. "gates, checks and phase order are defined
+      in `protocol.json`; read it") **and** that source still defines it. (b) satisfies M5.
+
+      **Detection limit, stated rather than implied.** Set-inclusion over names catches the
+      *deletion* of a capability; it does **not** catch *inversion or gutting* of the
+      instruction attached to one. "A gate message is a notification to the human, not
+      authorization" could collapse to a bare mention of the gate name and still pass M5 and
+      T6. That gap is covered by **M11** (the architect reads the actual diff) and **O4** (the
+      A/B's zero-tolerance compliance checklist), not by M5. To narrow it further, a small
+      hand-curated set of **semantic invariants** — human-gate semantics, artifact-contract
+      obligations, the scar prohibitions — is asserted as *behaviour present in the served
+      text*, not as name presence. This is a short list by design; the honest claim is that M5
+      is a deletion detector, not a meaning detector.
 
       **Severity**: a removal is a hard failure **unless** the retired name appears in a
       committed `codev/resources/1280-retirements.md` in the same commit, naming the capability,
@@ -372,6 +439,11 @@ cannot fail on a number.**
       (ii) whether the protected behaviour survives in the rewritten prose, (iii) the replacement
       assertion, or an explicit architect-visible retirement. Silent deletion to make the suite
       green is a project failure, not a test fix.
+- [ ] **M12 — no release between the rewrite merge and the SHIP verdict.** M7 gates
+      `verify-approval`, not merge, so the rewritten skeleton is on `main` — and therefore
+      shippable to adopters via `codev update` — before the A/B has validated it. "Pin the prior
+      version" is a reactive remedy for a problem this criterion prevents. If a release must cut
+      inside the window, it ships from a commit predating the rewrite merge.
 - [ ] All tests pass **after M10's enumerated re-baselining**; no coverage reduction. New tests
       cover M0, M3, M4, M5.
 - [ ] Documentation routed by tier; `CLAUDE.md`/`AGENTS.md` byte-identical.
@@ -535,9 +607,11 @@ not asserted by a test** — that is the point of the revised acceptance model.
 7. **T6 — Sweep completeness (M3).** Surfaces enumerated from disk across both trees and
    unioned; absence of `prompts/`/`consult-types/` for a protocol that has none must **not**
    fail; a new surface fails until rewritten and inspected. Covers `release`.
-8. **T7 — Twin parity.** `CLAUDE.md` ≡ `AGENTS.md`; every `codev/protocols` copy byte-identical
-   to its skeleton twin. **Load-bearing for M11**: it is what makes inspecting ~66 files instead
-   of 131 sound.
+8. **T7 — Twin parity.** `CLAUDE.md` ≡ `AGENTS.md`; every `codev/protocols` file **that has a
+   skeleton twin** is byte-identical to it — the assertion runs on the intersection, so the
+   three local-only files (`maintain/templates/audit-report.md`,
+   `maintain/templates/lessons-learned.md`, `release/protocol.md`) are not failures.
+   **Load-bearing for M11**: it is what makes inspecting ~66 files instead of 131 sound.
 9. **T8 — Dead-tree removal (M6).** Tree absent; no runtime reference; the Spec 987 routing test
    updated per M10.
 10. **T9 — Live spawn probe.** A builder spawned end-to-end on the rewritten surface receives a
@@ -559,7 +633,11 @@ not asserted by a test** — that is the point of the revised acceptance model.
 1. **T12 — Determinism.** Two runs at the same commit emit byte-identical output.
 2. **T13 — Behavioural re-measurement (M8).** `measure-prompt-behavior.ts` re-run post-merge with
    self-exclusion; B1/B2/B4 committed and compared directionally.
-3. **T14 — A/B execution (M7).** The full pre-registered protocol below.
+3. **T14 — A/B execution (M7).** The full pre-registered protocol below, including a
+   **pre-flight assertion per pair**: every surface under test resolves from tier 2 (`codev/`),
+   i.e. no skeleton file lacks a `codev/` twin. If that fails, the control arm would silently
+   serve the *new* skeleton and the pair is void — so the pre-flight aborts the pair rather than
+   producing a comparison that looks valid and is not.
 
 ## A/B Validation Design
 
@@ -571,8 +649,28 @@ not degrade outcomes", not "it improves them".)*
 ### Unit and arms
 
 The unit is an **issue-pair**: one GitHub issue executed twice, by two freshly-spawned builders
-in separate worktrees, from the same base commit. **Control (A)** = pre-rewrite commit;
-**treatment (B)** = post-rewrite. No code differs — the prompt surface is file-resolved.
+in separate worktrees.
+
+**Arms are a prompt-only overlay on one source snapshot — not two different commits.** An
+earlier draft said both "from the same base commit" *and* "control = pre-rewrite commit,
+treatment = post-rewrite commit." Those are incompatible, and the naive reading also lets later
+pairs inherit source changes the pinned control commit does not have. The construction is:
+
+1. Both arms branch from the **same source commit** `S` (current `main` at pair start).
+2. The **treatment** arm uses `S` unmodified — the rewritten prompt surface.
+3. The **control** arm applies one **prompt-only overlay commit** on top of `S`: the rollback
+   groups (G2–G6) reverted, restoring the pre-rewrite prompt surface and touching nothing else.
+4. Each run records **both hashes** — source commit `S` and a `prompt-surface hash` (a digest
+   over every file in the disposition table) — so any later audit can prove the arms differed
+   in prompts and only in prompts.
+
+This keeps source identical within a pair, lets `S` advance between pairs without contaminating
+comparisons, and makes "no code differs" literally true rather than approximately true.
+
+**Precondition**: control-arm isolation depends on tier 2 (`codev/`) shadowing the installed
+skeleton (tier 4) for every surface under test — true today (0 skeleton files lack a `codev/`
+twin) but silently breakable if the rewrite *deletes* a `codev/` file while keeping its
+skeleton twin. Asserted pre-flight in T14.
 
 ### Sample and eligibility
 
@@ -605,6 +703,11 @@ in separate worktrees, from the same base commit. **Control (A)** = pre-rewrite 
   reviews**, each SPIR gate requiring O1 rubric scoring at approval time — *on top of* M11's ~66
   file inspections. This is the project's binding constraint and why the pair count is the
   architect's call.
+- **Release hold (M12).** Because M7 gates `verify-approval` rather than merge, the rewritten
+  skeleton reaches `main` before the A/B runs, and adopters would consume it on the next npm
+  release. "Pin the prior version" is purely reactive. Therefore: **no `@cluesmith/codev`
+  release between the rewrite merge and the SHIP verdict.** If a release must cut inside that
+  window, it ships from a commit predating the rewrite merge.
 
 ### Pre-registered outcomes
 
@@ -717,7 +820,7 @@ Prompts, included templates, registry mappings and integrity tests are coupled, 
 | A/B underpowered; subtle regression ships | Medium | Medium | Power statement; O4 binary compliance; T13 post-merge behavioural re-measurement |
 | A further instrument defect ships undetected | Medium | Medium | T1/T1b/T11/T15 assert the instrument against the live resolver; M0b puts it under public review early; the script gets its first tests |
 | Surface re-grows after the project | Medium | Medium | No ceiling test exists under the revised model; re-growth is caught by the same principle review at the next MAINTAIN |
-| `builder/spir-1252` deleted, losing the registry | Low | High | Registry content quoted in this project's thread; rebuilt registry committed to `main` early |
+| `builder/spir-1252` deleted, losing the registry | Low | Medium | The branch exists on `origin` (verified), not only locally; registry content is also quoted in this project's thread; rebuilt registry committed to `main` early |
 
 ## Expert Consultation
 
@@ -725,17 +828,23 @@ Prompts, included templates, registry mappings and integrity tests are coupled, 
 **13 findings, none disputed**.
 **Round 2** — 2026-07-31, architect-directed re-review · same models · both REQUEST_CHANGES
 (HIGH) · **9 findings, none disputed**.
-**Round 3** — pending: one CMAP pass on this acceptance-model revision.
+**Round 3** — 2026-07-31, on the acceptance-model revision · Codex REQUEST_CHANGES (HIGH, 5) ·
+Claude COMMENT (HIGH, 6) · **11 findings, none disputed**. Both independently caught a
+twin-file mislabel in this spec's own inventory (0 files differ; 3 are twinless — my `cmp -s`
+loop conflated "differs" with "absent"), and both landed on M5's weakness from different angles
+(P6 conflict / inversion-not-detected), which composed into one fix.
 
 Every finding was verified against source (both arithmetic claims independently recomputed)
 before acceptance; all are folded into the sections above. The finding-by-finding record is in
 `codev/projects/1280-prompt-surface-judgment-not-ru/1280-specify-iter{1,2}-rebuttals.md`.
 
-Four corrections were errors in this spec's own analysis, three sharing one root cause —
-**enumerating from a convenient source instead of the authoritative one** (a truncated grep;
-skeleton-only protocol enumeration; the measurement script's stale comment). That is the
-sweep-scope class 1252 named as its dominant review cost, and it is why M3's "enumerate from
-disk" is specified as a **test** rather than an instruction.
+Five corrections were errors in this spec's own analysis, four sharing one root cause —
+**trusting a convenient signal instead of checking the authoritative thing**: a truncated grep;
+skeleton-only protocol enumeration; the measurement script's stale comment; and an overloaded
+`cmp` exit code read as "differs" when it also means "absent". That is the sweep-scope class
+1252 named as its dominant review cost, it is why M3's "enumerate from disk" is a **test**
+rather than an instruction, and at five instances it is a `lessons-learned.md` entry the review
+phase will route.
 
 Gemini/`agy` did not participate: the known `--type` review limitation (#1032/#1033). Per
 current lane policy this 2-way review is correct.
