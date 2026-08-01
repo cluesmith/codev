@@ -320,6 +320,38 @@ Delete the four directories; no code depends on them.
 
 **Dependencies**: Phase 2
 
+#### Adopting Spec 1273's submission lock (added 2026-08-01)
+
+PR #1320 (`builder/1273-submission-lock`) adds
+`submitToSession(sessionId, write, clock?)` in `servers/session-submit.ts` — a per-session
+promise chain where each submission waits out its own Enter. It is wired into `/api/send`'s
+escape and immediate paths, deliberately **not** the buffered path (awaiting a message that
+can sit 60s would hang callers).
+
+**Merge state, measured not assumed** (`git merge-tree`, 2026-08-01): merge-base
+`57c51a6e`; their branch has none of this project's 36 phase-1 commits. Exactly one
+conflicting file — `servers/tower-routes.ts`, where both sides edited `handleSend` and
+`deliverBufferedMessage`. `tower-routes.test.ts` auto-merges. **This project merges second
+and therefore resolves.** Both sides must survive: their `submitToSession` wiring, and this
+project's `--delay` parsing/validation, `escape`+`delay` rejection, and `interruptFirst`.
+Verify by running both mutation-verified suites, not by inspecting the resolution.
+
+**Then delete the three narrower mechanisms** built here before the primitive existed —
+`deliverOrBuffer`'s `writeCompletesInMs` wait, `SendBuffer.busyUntil` (and its `flush()`
+busy-gate), and the per-terminal chain in `delayed-send.ts`. One mechanism, not two.
+
+**One thing to test before deleting `busyUntil`, not assume**: it guards writes initiated by
+a buffer *flush*, and `flush()` is on the path #1320 deliberately left alone. If
+`submitToSession` does not cover flush-initiated writes, deleting `busyUntil` reopens the
+mid-flush interleave closed in `17db2e9e` — a delayed message writing into a
+partially-delivered `/clear`, producing `/clear/arch-init` on one line, which is the same
+shape as the production failure #1320 exists to fix. If it does reopen, ask 1273 to extend
+`submitToSession` to the flush drain rather than keeping a local workaround.
+
+If #1320 has not landed when this project is ready to open its PR, ship as-is and do the
+adoption as a follow-up — but say so explicitly in the PR rather than leaving two
+mechanisms unremarked.
+
 #### Objectives
 - Run the real cycle, fix the documented default delay from observation, and document the
   command.
