@@ -1,7 +1,7 @@
 id: bugfix-1267
 title: builder-launch-loop-clean-exit
 protocol: bugfix
-phase: investigate
+phase: fix
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -11,4 +11,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-08-01T02:46:14.901Z'
-updated_at: '2026-08-01T02:46:14.902Z'
+updated_at: '2026-08-01T02:50:33.728Z'
