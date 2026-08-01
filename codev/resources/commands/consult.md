@@ -208,6 +208,24 @@ through to a normal spawn.
 | `CODEV_AGY_AUTH_CACHE_DIR` | `~/.cache/codev` | Cache location (mainly for tests). |
 | `CODEV_AGY_AUTH_CACHE_DISABLE` | unset | `1` restores the always-spawn behaviour. |
 
+#### Test isolation
+
+The cache above protects *production* runs. It did not protect the test suites:
+`agyAuthCacheDisabled()` turns itself off under `VITEST` unless a cache directory
+is named, and any test that reached the gemini lane without pinning
+`CODEV_AGY_BIN` resolved the real binary — so a suite run could still open a
+window per spawn (#1323). Codev's vitest harness (`packages/codev/vitest-setup.ts`)
+now pins a fake `agy`, a sandbox auth cache, and a sandbox metrics DB for every
+suite; spawned `codev` / `consult` children inherit the pins. Guards in
+`src/lib/test-env.ts` make a test that escapes the harness fail loudly instead of
+reaching the real binary or the user-global database.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `CODEV_AGY_BIN` | auto-resolved | Pin the agy binary. The harness sets this to a fake for every test. |
+| `CODEV_ALLOW_REAL_AGY` | unset | `1` opts a test run into the REAL agy binary — the guarded integration smoke and real-AI e2e runs. Expect a browser window if agy's login has lapsed. |
+| `CODEV_METRICS_DB` | `~/.codev/metrics.db` | Redirect the consult metrics database. Required under a test runner; the harness points it at a temp dir so suite runs stop skewing `consult stats`. |
+
 ### Claude auth: subscription vs. metered API
 
 `consult -m claude` runs on the Claude Agent SDK. When `CLAUDE_CODE_OAUTH_TOKEN`

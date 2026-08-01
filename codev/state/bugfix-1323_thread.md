@@ -1,0 +1,97 @@
+# bugfix-1323 — Test-suite consult runs escape isolation
+
+Issue #1323: test suites spawn the real `agy` binary (login-window burst) and write
+into the user-global consult metrics DB.
+
+## Investigate — root cause
+
+Two **independent** escapes. Both are "unsafe by omission": nothing in the harness
+pins anything, so a test that simply *doesn't* set an env var reaches the real world.
+
+### 1. Real `agy` spawn (the login-window burst)
+
+- None of the three vitest configs (`vitest.config.ts`, `vitest.cli.config.ts`,
+  `vitest.e2e.config.ts`) declares `setupFiles`. **There is no global test harness at all.**
+- `resolveAgyBin()` (`commands/consult/index.ts:743`) falls back to `~/.local/bin/agy`
+  and then PATH when `CODEV_AGY_BIN` is unset. A test that reaches the gemini lane
+  without pinning therefore resolves the developer's real binary.
+- `src/__tests__/cli/agy-integration.e2e.test.ts` does exactly this **by design** — it
+  deliberately does not mock `node:child_process`, calls `resolveAgyBin()` and
+  `_runAgyConsultation()` directly (2 tests), and spawns the built `consult` CLI as a
+  subprocess (1 test). That is the CLI-integration lane the issue points at.
+- The #1250 burst protection is inert here: `agyAuthCacheDisabled()`
+  (`agy-auth-cache.ts:113`) returns true whenever `VITEST` is set and
+  `CODEV_AGY_AUTH_CACHE_DIR` is not. Child `consult` processes inherit `VITEST`
+  (`helpers.ts:setupCliEnv` spreads `process.env`), so they are inert too.
+  Pre-flight off + real binary = unconditional spawn = one browser tab per spawn.
+
+### 2. Metrics-DB pollution (a *separate* bug, same timestamp window)
+
+- `MetricsDB`'s path is hardcoded: `join(homedir(), '.codev', 'metrics.db')`
+  (`metrics.ts:14-15`), **no env override**.
+- Unit tests run in-process under the developer's real `HOME`, so every
+  `recordMetrics()` call lands in the real user-global DB.
+- The junk rows map exactly: `codev-consult-test-<ts>` → `src/__tests__/consult.test.ts`
+  (the gemini rows), `codex-test-XXXXXX` →
+  `commands/consult/__tests__/codex-sdk.test.ts` (the codex rows).
+
+**Correction to the issue's reading:** the 0.0s gemini rows — including the one carrying
+`error_message: "agy timed out producing the review"` — come from `consult.test.ts`,
+which mocks `node:child_process` at module scope. That message is emitted by the test's
+own fake process, not by a real agy spawn. So the fingerprint in `consult stats` is
+evidence of escape #2, not escape #1; escape #1 is real but lives in the CLI-integration
+lane and leaves no metrics rows (its subprocesses run under a sandboxed `HOME`). Both
+bugs are real, they just aren't the same event.
+
+`preflightAgyAuth()` itself never spawns agy — it only reads the cache and takes a lock —
+so enabling the auth cache under test (with a sandboxed dir) is safe.
+
+## Fix shape (est. well under 300 LOC)
+
+1. New shared vitest `setupFiles` harness wired into all three configs: unconditionally
+   pin `CODEV_AGY_BIN` to a generated fake, `CODEV_AGY_AUTH_CACHE_DIR`, and a new
+   `CODEV_METRICS_DB`, all inside a per-run temp dir. Subprocess helpers inherit these
+   for free via `...process.env`.
+2. Belt-and-braces guard in `runAgyConsultation`: under a test runner, with no pinned
+   `CODEV_AGY_BIN` and no explicit opt-in, **throw** instead of spawning.
+3. `CODEV_METRICS_DB` override in `metrics.ts`; refuse the user-global path under a
+   test runner.
+4. `CODEV_ALLOW_REAL_AGY=1` opt-in for deliberate real-agy runs; gate
+   `agy-integration.e2e.test.ts` behind it.
+
+Order of work follows the architect's instruction: **pin first**, verify with the canary,
+then iterate. agy is authenticated right now but that is not something to rely on.
+
+## Fix — progress
+
+Pin landed first, as instructed, before running any suite.
+
+Implemented: `vitest-setup.ts` harness wired into all three configs; `src/lib/test-env.ts`
+guards; `CODEV_METRICS_DB` in `metrics.ts`; guard at both real-spawn sites
+(`runAgyConsultation` **and** `doctor.ts:verifyAgy` — doctor is a second way into
+agy that the issue didn't mention); `agy-integration.e2e.test.ts` gated behind
+`CODEV_ALLOW_REAL_AGY=1`.
+
+### What the guard caught
+
+First guarded run failed 11 tests in `doctor.test.ts`. Cause: `delete
+process.env.CODEV_AGY_BIN` in `finally` blocks wiped the harness pin for the rest of
+the file, so later `doctor()` calls reached `verifyAgy()` unpinned. **Not** real spawns
+— that file mocks `node:child_process` wholesale — so it was safe *by accident* (the
+module mock, not the pin, was doing the work). Fixed by restoring the captured value
+instead of deleting; same antipattern fixed in `consult.test.ts`.
+
+### Open: intermittent metrics leak
+
+Full run #2: 0 rows added. Full run #3: **21 rows** added (hermes/claude/gemini from
+`consult.test.ts`, codex from `codex-sdk.test.ts`). Running those files alone, or paired
+with the obvious suspects (`test-isolation`, `generate-image`), adds 0 rows — so some
+other file in a full run clears `CODEV_METRICS_DB` *and* `VITEST` (the guard throws
+whenever `VITEST` survives, so both must be gone). Tripwire instrumentation is in
+`resolveDbPath` to catch the culprit; it is temporary and must come out before commit.
+
+## Architect instruction (2026-08-01T13:20Z)
+
+PR #1324 is a stopgap that `describe.skip`s `agy-integration.e2e.test.ts`. Once it
+merges: merge main into this branch and **re-enable that suite** under the fake-agy pin
+/ no-browser guard, so the coverage comes back. Added to acceptance criteria.

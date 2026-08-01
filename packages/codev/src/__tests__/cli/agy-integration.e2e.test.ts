@@ -7,6 +7,14 @@
  * — so the test is a no-op there rather than a failure. When agy is installed
  * and signed in, it provides real acceptance evidence that `consult -m gemini`
  * (agy backend) returns a review that actually used file contents.
+ *
+ * OPT-IN ONLY (#1323). This file is the one place in the suites that means to
+ * spawn the real binary, and a real spawn against a lapsed agy login opens a
+ * browser window per invocation. Without the opt-in the vitest harness pins a
+ * fake agy, which would make these assertions meaningless anyway, so every case
+ * no-ops instead:
+ *
+ *   CODEV_ALLOW_REAL_AGY=1 pnpm --filter @cluesmith/codev test:e2e:cli
  */
 import { describe, it, expect } from 'vitest';
 import { execFileSync } from 'node:child_process';
@@ -14,6 +22,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { resolveAgyBin, _runAgyConsultation } from '../../commands/consult/index.js';
+import { realAgyOptIn } from '../../lib/test-env.js';
 import { CONSULT_BIN } from './helpers.js';
 
 /** A review file is the non-blocking skip artifact (agy unavailable/unauthed/timeout). */
@@ -21,9 +30,14 @@ function isSkip(out: string): boolean {
   return out.includes('VERDICT: COMMENT') && /Skipped/i.test(out);
 }
 
+/** True when a real, usable agy is available AND the suite is allowed to spawn it. */
+function realAgyAvailable(): boolean {
+  return realAgyOptIn() && Boolean(resolveAgyBin());
+}
+
 describe('agy lane integration (guarded; real agy)', () => {
   it('delivers the complete inline prompt under the agy 1.0.10 argument contract', async () => {
-    if (!resolveAgyBin()) return;
+    if (!realAgyAvailable()) return;
 
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agy-print-contract-'));
     try {
@@ -45,8 +59,8 @@ describe('agy lane integration (guarded; real agy)', () => {
   }, 90_000);
 
   it('returns a review that used file contents, or skips non-blockingly', async () => {
-    if (!resolveAgyBin()) {
-      // agy CLI not installed in this environment — nothing to verify.
+    if (!realAgyAvailable()) {
+      // agy CLI not installed, or the real-agy opt-in is off — nothing to verify.
       return;
     }
 
@@ -83,8 +97,8 @@ describe('agy lane integration (guarded; real agy)', () => {
   // agy. Guarded the same way: a missing/unauthed agy yields the non-blocking
   // skip and the assertion is bypassed.
   it('`consult -m gemini --prompt` (real binary) reads files or skips non-blockingly', async () => {
-    if (!resolveAgyBin() || !fs.existsSync(CONSULT_BIN)) {
-      // agy not installed, or the CLI hasn't been built — nothing to verify.
+    if (!realAgyAvailable() || !fs.existsSync(CONSULT_BIN)) {
+      // agy not installed / opt-in off, or the CLI hasn't been built — nothing to verify.
       return;
     }
 
