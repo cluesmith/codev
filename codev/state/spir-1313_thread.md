@@ -281,3 +281,45 @@ Architect approved spec-approval gate + told me to continue to Plan. Grounded th
   - `--interrupt` stays the explicit human bypass (unchanged); no force paths, no shutdown flush.
 - Starting with code reconnaissance (handleSend, send-buffer, message-write, resolveTarget, tower-server
   lifecycle, tower-client/send) before implementing. This phase will likely need >1 review iteration.
+
+### 2026-08-01 — Phase 4 DESIGN (from full code map; recovery anchor)
+Key existing shapes (verified via mapping subagent):
+- `handleSend` tower-routes.ts:1425-1598 → responds `{ok, terminalId, resolvedTo, deferred}`. `shouldDefer` (:1570)
+  = `!interrupt && !session.isUserIdle(3000)` (the bad 3s proxy to replace). Module singleton `sendBuffer` (:116),
+  `deliverBufferedMessage` (:120) = writeMessageToSession + broadcastMessage → returns write-completion ms.
+- `getGlobalDb` ALREADY imported in tower-routes.ts:78 (no RouteContext plumbing needed for the db handle).
+- `writeMessageToSession(session, msg, noEnter, delayOffset=0): number` (message-write.ts) — returns completion-ms
+  (NOT a promise); offset-chaining already serializes consecutive writes (#584). `WritableSession={write(data)}`.
+- `resolveTarget(to, ws, from)` tower-messages.ts:152 — LIVE-ONLY (getWorkspaceTerminals in-memory map) → NOT_FOUND
+  when no live terminal. Spoofing check in resolveArchitectByName (~213). handleSend 404s on getSession miss (:1479).
+- PtySession: `ringBuffer.getAll()`; **cols/rows via `session.info.cols/rows` (NO get cols/rows getter!)**;
+  `command`/`launchArgs`/`cwd`/`writable`/`isUserIdle` getters exist.
+- mailbox.ts (Phase 1): enqueue(db, EnqueueInput, now)→row; findHeldForAgent(db,ws,agent) drain-order; markDelivered/
+  dismiss/supersede(cron-only)/pruneTerminal(db,retentionDays,now); listHeld(db,ws?). reason∈busy|no-profile|no-live-pty.
+- render-gate: `classifyScreen(snapshot,profile): Promise<verdict>` (ASYNC); `resolveProfile({command,args,label})`.
+  ⚠ @xterm/headless MUST stay default-import (already fixed) — don't "fix" to named import.
+- Client: tower-client.ts `sendMessage` DROPS deferred/terminalId (returns {ok,resolvedTo,error}). send.ts single
+  (:332) + sendToAll (:200). `deferred` never shown to CLI today.
+
+DECISIONS (non-obvious):
+1. **Order of ops in handleSend** = resolve → format → gate-check (READ-ONLY) → `enqueue(db,{…,reason})` (persist
+   BEFORE response) → if clean: writeMessageToSession + broadcast + `markDelivered` → respond. Gate BEFORE enqueue so
+   the row carries the right reason (no updateReason API needed). Read-only gate means a crash before enqueue loses
+   nothing writable; once enqueued, backstop redelivers. Row ALWAYS created (delivered ones markDelivered — audit).
+2. **Wrapped-launch resolution** (CRITICAL — real builders run `.builder-start.sh`, so session.command='bash' →
+   resolveProfile null → every builder send would hold no-profile). Fix in the DELIVERY layer (keep resolveProfile
+   pure): `resolveProfile({command,args})` → if null, `harnessFromLaunchScript(fs, session.cwd)` (reset/context.ts:401,
+   parses .builder-start.sh command-position) → `resolveProfile({command: harnessName})`. Reuse, don't reinvent.
+3. **Dead-session seam**: resolveTarget NOT_FOUND → registry fallback (state.ts getBuilder/getArchitectByName by
+   workspace+name) → enqueue(reason='no-live-pty'), respond held (NOT 404). Preserve spoofing constraint for architect:.
+4. **Drainer replaces SendBuffer**: new `mailbox-delivery.ts` (deliverToSession/drainAgent/start+stopMailboxDrainer).
+   start/stopSendBuffer hooks (tower-server.ts 587/185; tower-routes wrappers) → drainer lifecycle. Poll backstop
+   (enqueue-time + periodic; submit/quiescence = Phase 5). pruneTerminal on boot + per-drain. Liveness counter
+   (per-session repeated not-clean) lives in the drainer (Phase 7 surfaces). DELETE send-buffer.ts + its test; no
+   shutdown force-flush (persistence subsumes it).
+5. **Client contract**: widen tower-client.ts sendMessage return (+held,reason,mailboxId) + send.ts BOTH paths
+   (single :332, --all sendToAll :200) report delivered vs held(reason)+id. Additive POST /api/send fields
+   (held/mailboxId/reason) keep ok/terminalId/deferred for old binaries (held ⇒ ok:true).
+6. `--interrupt` unchanged (Ctrl+C + write, no gate). `escape` unchanged. `noEnter` = staged write → delivered.
+Build order: (a) mailbox-delivery.ts + unit tests → (b) handleSend rewrite + dead-session seam + wrapper resolve →
+(c) client contract → (d) retire SendBuffer + lifecycle → (e) e2e #1265 repro. Commit once coherent+green.
