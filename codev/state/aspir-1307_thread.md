@@ -399,8 +399,50 @@ Post-merge: install/build clean, 4149 tests passing (up from 4090 — incoming S
 tests). Re-ran my own suites explicitly rather than trusting the aggregate: 186 Spec 1307
 codev tests + 48 core, all green, all four `ORDERING:` guards intact.
 
-Note for later: the agy binary is disabled machine-wide, so the gemini consult lane reports
-"not installed" and skips non-blockingly. Expected — not to be fixed.
+Note for later: the agy binary was briefly disabled machine-wide (gemini lane skipping);
+that was reverted the same day and agy is back on PATH.
+
+## 2026-08-01 — Phase 3 docs; a cross-project collision with Spec 1280
+
+Documented `--delay` in `codev/resources/commands/agent-farm.md` (full reference) and
+`CLAUDE.md`/`AGENTS.md` (pointer, byte-identical).
+
+**The collision.** Spec 1280 landed on main mid-flight. Its measurement instrument asserts
+*exact* word counts of the always-on prompt surface, and CLAUDE.md/AGENTS.md are part of
+that surface — which is exactly where my deliverable lives. My first draft (+125 words)
+broke two of its assertions.
+
+**Checked the cause instead of assuming it**: backed the two files up, restored them from
+HEAD, re-ran the instrument, got exactly 34231 — their asserted value. So their instrument
+was unchanged and correct; its *input* had grown. Then restored my edits. Worth the two
+minutes: the alternative reading ("their new test is broken") would have sent me editing
+the wrong thing.
+
+**Two responses.** Shrank the always-on addition 125 → 62 words, because Spec 1280 exists
+to *measure and reduce* that surface and spending 125 words of it on a CLI flag with an
+on-demand full reference is disproportionate — that judgement stands independent of the
+test failure. Then updated their baselines (34231 → 34293, 8599 → 8661) with their
+derivation comment preserved and my causal note appended.
+
+**Flagged rather than decided**: an absolute pinned count breaks on *every* future edit to
+*any* always-on doc, by any project. I hit it on day one of 1280 being merged, and the
+natural reaction for the next person is to bump the number without checking whether the
+instrument itself regressed — the exact failure the test exists to prevent. Routed to 1280
+as their call. Architect approved the handling in full and confirmed the routing.
+
+### Live run: HELD, deliberately
+
+`#1320` (1273's submission lock) is not on main. My live run's first question — *does the
+`/clear` actually EXECUTE* — is precisely what that PR fixes, so running now would test the
+pre-fix world. Architect confirmed the hold: my e2e batches with 1273's probe retest in one
+window after #1320 merges and installs.
+
+Wrote the **live-run runbook** into plan phase 3 while waiting, so the window is mechanical
+rather than improvised. The load-bearing step is the canary: plant a secret word before the
+cycle, and check it is gone afterwards. "The send returned 200" is not evidence of a clear —
+it returned 200 in 1273's failing run too.
+
+Everything else in phase 3 is done. Phases 1 and 2 approved by both reviewers.
 
 ## 2026-07-31 — Plan CMAP iter 1: both reviewers found the SAME two defects
 

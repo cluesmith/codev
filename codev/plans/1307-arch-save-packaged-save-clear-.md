@@ -407,6 +407,47 @@ Three questions the live run answers, none of which unit tests can:
 and a claim the whole risk posture rests on should be run at least once rather than
 assumed.
 
+#### Live-run runbook
+
+Written ahead of the window so execution is mechanical. The run is batched with Spec
+1273's probe retest after #1320 merges (architect ruling, 2026-08-01) — running before that
+would test the pre-fix world, in which a `/clear` can arrive without executing.
+
+**Precondition**: #1320 on main, merged into this branch, `pnpm install`, clean build.
+
+1. **Plant a canary.** Before anything, have the architect commit a distinctive fact to
+   memory (a secret word). The post-clear check is whether it can still recite it — the
+   only observation that distinguishes "context cleared" from "looks cleared". 1273's probe
+   used exactly this and it is what caught their silent failure.
+2. **Record the pre-state**: `codev/state/<name>.md` size and its last dated entry;
+   `afx status` for the architect's terminal id.
+3. **Run `/arch-save`** on the architect, on the owner's direction.
+4. **Q1 — did the state file get written AND pruned?** Compare against step 2: new dated
+   entry present, resolved loops gone, `MONITORS:` line present, not merely longer.
+5. **Q2 — did the `/clear` EXECUTE?** The decisive question, and the one that looked green
+   in 1273's run while failing. Check all three:
+   - a harness clear announcement / `<command-name>` block in the terminal output;
+   - the canary from step 1 is **gone**;
+   - the `/clear` did **not** appear as literal text welded to the front of another
+     message.
+   "The send returned 200" is not evidence. It was 200 in the failing run too.
+6. **Q3 — did `/arch-init` arrive, and at the right moment?** Measure **send →
+   session-ready-after-clear**, not send → clear-sent. The delay budget starts at the send
+   while the clear cannot execute until the turn ends, so the interval that matters is the
+   one that spans both.
+7. **Q4 — did the fresh session recover?** Reports its identity, resumes from the state
+   file, and performs the monitor steps in order (reconcile/disregard, then re-arm with a
+   self-test).
+8. **Exercise the recovery path deliberately**: drop the delayed message (or let it expire)
+   and re-send `/arch-init <name>` by hand. The whole risk posture rests on this working,
+   so it gets run once rather than assumed.
+9. **Set the documented default** from step 6's measurement, in all four skill copies, and
+   re-run the drift guard.
+
+Record the answers in the review even if the run is clean — a live run with no findings is
+still the evidence that the headline path works, and its absence is what let 1273 ship a
+`/clear` that never executed.
+
 #### Acceptance Criteria
 - [ ] A real architect completes the cycle and reports its identity from the state file.
 - [ ] Default delay set from observation.
