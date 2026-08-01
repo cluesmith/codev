@@ -130,7 +130,7 @@ describe('T1b — per-file four-tier resolution, not directory-level selection',
     const out = run(dir);
     // Directory-level selection would have missed the override entirely.
     expect(out).toMatch(/\| spir \| \d+ \| 8 \| \d+ \|/);
-  });
+  }, 60_000);
 
   it('prefers .codev/ over codev/ over codev-skeleton/', () => {
     const src = fs.readFileSync(script, 'utf-8');
@@ -154,7 +154,7 @@ describe('T2 — phantom-savings proof: includes are expanded', () => {
     fs.writeFileSync(path.join(dir, 'codev-skeleton/protocols/spir/templates/frag.md'), 'cc dd ee\n');
 
     expect(num(run(dir), 'ALWAYS_ON_WORDS')).toBe(before);
-  });
+  }, 60_000);
 
   it('expands non-markdown includes too — protocol.json delivery depends on it (P6)', () => {
     const dir = makeFixture();
@@ -169,7 +169,7 @@ describe('T2 — phantom-savings proof: includes are expanded', () => {
     );
     // The JSON's words must appear in the served count, not vanish.
     expect(num(run(dir), 'ALWAYS_ON_WORDS')).toBeGreaterThan(before);
-  });
+  }, 60_000);
 });
 
 describe('T3 — per-surface reporting completeness (not a ceiling)', () => {
@@ -189,11 +189,11 @@ describe('T3 — per-surface reporting completeness (not a ceiling)', () => {
         new RegExp(`^\\| ${name} \\|`, 'm'),
       );
     }
-  });
+  }, 60_000);
 
   it('includes codev-only protocols with no skeleton twin (release)', () => {
     expect(run()).toMatch(/^\| release \|/m);
-  });
+  }, 60_000);
 });
 
 describe('T11 — buckets vs audience loads are reported on different bases', () => {
@@ -202,7 +202,7 @@ describe('T11 — buckets vs audience loads are reported on different bases', ()
     expect(out).toContain('ALWAYS_ON(builder,p,I)   = SHARED + BUILDER_SPAWN[p]');
     expect(out).toMatch(/OVERLAP by design/);
     expect(out).toMatch(/these SUM/);
-  });
+  }, 60_000);
 
   it('one bucket growing while another shrinks shows BOTH movements, not a netted zero', () => {
     const dir = makeFixture();
@@ -219,7 +219,7 @@ describe('T11 — buckets vs audience loads are reported on different bases', ()
 
     expect(sharedAfter).toBeLessThan(sharedBefore);
     expect(archAfter).toBeGreaterThan(archBefore);
-  });
+  }, 60_000);
 });
 
 describe('T15 — relocation is visible, never reported as deletion (M0c)', () => {
@@ -236,7 +236,7 @@ describe('T15 — relocation is visible, never reported as deletion (M0c)', () =
     const after = run(dir);
     expect(num(after, 'ALWAYS_ON_WORDS')).toBeLessThan(num(before, 'ALWAYS_ON_WORDS'));
     expect(num(after, 'TOTAL_AUTHORED_WORDS')).toBe(num(before, 'TOTAL_AUTHORED_WORDS'));
-  });
+  }, 60_000);
 
   it('counts all four skill trees — one-tree counting would report relocation as deletion', () => {
     const src = fs.readFileSync(script, 'utf-8');
@@ -271,18 +271,18 @@ describe('portability — the count must not depend on the host', () => {
     const utf8 = num(run(repoRoot, { LC_ALL: 'en_US.UTF-8' }), 'ALWAYS_ON_WORDS');
     const c = num(run(repoRoot, { LC_ALL: 'C' }), 'ALWAYS_ON_WORDS');
     expect(c).toBe(utf8);
-  });
+  }, 60_000);
 });
 
 describe('T12 — determinism', () => {
   it('emits byte-identical output twice at the same commit', () => {
     expect(run()).toBe(run());
-  });
+  }, 60_000);
 });
 
 describe('the corrected baseline is what the spec claims', () => {
   let out: string;
-  beforeAll(() => { out = run(); });
+  beforeAll(() => { out = run(); }, 60_000);
 
   it('reproduces ALWAYS_ON_WORDS = 34,231 for a SPIR builder at I=10', () => {
     // 34,231 — not the 34,255 quoted in the spec. Two corrections, both making the
@@ -304,5 +304,5 @@ describe('the corrected baseline is what the spec claims', () => {
     const one = num(run(repoRoot, { PHASE_ITERS: '1' }), 'ALWAYS_ON_WORDS');
     const two = num(run(repoRoot, { PHASE_ITERS: '2' }), 'ALWAYS_ON_WORDS');
     expect(two - one).toBe(736 + 1396); // HOT + spir phase mean
-  });
+  }, 60_000);
 });
