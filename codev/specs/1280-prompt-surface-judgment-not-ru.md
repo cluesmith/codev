@@ -291,6 +291,36 @@ prompts (2,414 / 1,957 — the two fattest phase prompts in the fleet).
 Note the shape: the phase term is 73% of the post-rewrite builder budget and the **exempt**
 hot tier is 63% of that term. What survives is overwhelmingly curated judgment, not process.
 
+### Rollout: the corrected instrument lands on `main` first (M0b)
+
+*(Architect-directed 2026-07-31. Recorded here as a contract — the phase decomposition
+belongs in the plan.)*
+
+**No prompt-surface word is cut before the corrected instrument is on `main`.** The
+sequencing is not administrative: a cut scored by the current script is unfalsifiable, and
+1252's published baselines cite figures derived from the dead tree while being shared
+knowledge other work reads. The record gets corrected while this project builds, not after.
+
+**PR-1 (early, standalone) contains exactly:**
+
+| In | Out (deliberately) |
+|---|---|
+| Corrected `scripts/measure-prompt-surface.sh` — all six M0 fixes (served directory · per-file four-tier resolution · inlined `roles/builder.md` · hot-tier `@import` transclusion **and** the stale comment that caused defect 3 · include expansion · per-segment subtotals) | Any edit to any prompt surface |
+| Its tests — T1, T1b, T2, T11, T12. The script currently has **no test at all**, which is how three defects survived in a "committed and reproducible" instrument | The scar registry (rebuilt *after* the shrink, per Baked Decision 2) |
+| `codev/resources/1280-word-baseline.md` — the corrected, segmented pre-rewrite baseline (34,255) as a generated artifact | The dead-tree deletion — it has a test consumer and goes through M10 governance |
+| In-place annotation of `1252-word-baseline.md` and `1252-word-after-phase7.md`: original figures **preserved**, marked superseded, with the reason and a pointer to the corrected artifact | Any re-derivation of 1252's behavioural baseline (B1 stands; M8 re-runs it post-merge) |
+
+**Timing**: opened at the end of the first implement phase — after the instrument is correct
+and tested, before any surface is cut. **Verified safe**: no test asserts on either 1252
+word-count artifact (the frozen-sample test at `prompt-behavior-metrics.test.ts:184` pins the
+*behavioural* sample, a different instrument), so the annotation carries no re-baselining
+cost.
+
+**Why this is not pushback.** The one argument against early landing is that the corrected
+baseline is only meaningful alongside the cuts it scores. That argument fails: the baseline's
+value is precisely that it is *pre-cut*, and publishing it early is what makes the eventual
+−53.2% claim checkable by someone who did not watch it being produced.
+
 ### Scar-rule carriage plan
 
 The eight rules ratified 2026-07-28 (`git show
@@ -337,7 +367,8 @@ canonical text total).
       `1252-word-baseline.md` and `1252-word-after-phase7.md` cite figures derived from the
       dead tree and are shared knowledge other work reads; the correction annotates them in
       place — original figures preserved, marked superseded, with the reason — and does not
-      rewrite their history.
+      rewrite their history. PR-1's exact contents, timing, and safety verification are
+      specified in **Desired State → Rollout**.
 - [ ] **M1 — >50% reduction (derived).** Builder always-on falls from the corrected baseline
       (34,255) to **≤16,100**, measured before and after by the same corrected script, both
       figures committed as generated artifacts. Per-segment figures reported and none
