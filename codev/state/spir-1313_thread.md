@@ -32,4 +32,10 @@ Builder for Issue #1313 / Spec 1313. STRICT mode (porch-orchestrated). SPIR prot
   3. Decision 6: stated supersede keys are cron-only; non-cron sends never supersede (Claude).
   4. Test scenarios: added #16 dedicated escalation-age-threshold scenario (Claude).
 - Codex verified `@xterm/headless` gap + ring-buffer path independently against the repo; matched the spec.
-- Next: commit "Specification with multi-agent review", then `porch next 1313`. Then STOP at spec-approval gate.
+- Committed "Specification with multi-agent review" (c483f88b) + rebuttal (6697add8). Ran `porch done` →
+  advanced to **spec-approval gate** (porch commit ba58c147).
+
+### 2026-07-31 — ⛔ STOPPED at spec-approval gate (awaiting human)
+- `porch gate 1313` registered the gate. Architect notified via `afx send architect`.
+- **Waiting for human**: `porch approve 1313 spec-approval --a-human-explicitly-approved-this`.
+- I will NOT call porch approve (human-only). On approval I resume with `porch next 1313` → Plan phase.
