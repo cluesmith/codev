@@ -1,7 +1,7 @@
 id: bugfix-759
 title: forge-github-pr-search-sh-defa
 protocol: bugfix
-phase: fix
+phase: pr
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -11,4 +11,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-08-01T20:42:19.622Z'
-updated_at: '2026-08-01T20:44:19.667Z'
+updated_at: '2026-08-01T20:48:18.555Z'
