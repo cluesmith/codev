@@ -8,8 +8,8 @@
 
 | File | Old | New | Principles | Rationale |
 |---|---:|---:|---|---|
-| `codev/roles/architect.md` | 2048 | 761 | P1, P4, P7 | Command walkthroughs → the `afx`/`porch`/`consult` skills that already own them. Risk-triage table, PRFT contract, UX-verification rule and boundaries kept. |
-| `codev-skeleton/roles/architect.md` | 2048 | 761 | P1, P4, P7 | Byte-identical twin. |
+| `codev/roles/architect.md` | 2048 | 807 | P1, P4, P7 | Command walkthroughs → the `afx`/`porch`/`consult` skills that already own them. Risk-triage table, PRFT contract, UX-verification rule and boundaries kept. |
+| `codev-skeleton/roles/architect.md` | 2048 | 807 | P1, P4, P7 | Byte-identical twin. |
 | `codev/roles/builder.md` | 1837 | 849 | P1, P7 | Mode contract, gates, deliverables, thread, notifications, wait discipline, worktree path discipline, scope, flaky-test rule all kept. Numbered "core loop" walkthroughs and repeated ALL-CAPS prohibitions deleted. |
 | `codev-skeleton/roles/builder.md` | 1837 | 849 | P1, P7 | Byte-identical twin. |
 | `codev/roles/consultant.md` | 252 | 252 | none | **Inspected, unchanged.** Already conformant — states a contract, not a procedure. Under the acceptance model a conformant file passes *as-is*; shrinking it further would be size-chasing, which the charter amendment explicitly rejects. |
@@ -74,3 +74,27 @@ Reflowing prose silently breaks any string match that spans a line wrap — it h
 scar canonicals (Phase 1) and a prior spec's test assertions (here). **Any exact-match string in
 a rewritten file must be verified after the rewrite, not assumed**, and canonicals must stay on
 one line however long.
+
+## Post-inspection fix (architect-required, same phase, G6-pure)
+
+**Finding**: my rewrite created a cross-file contradiction. `builder.md` correctly encoded the
+relay convention — *"Approval reaches you as a message from the architect. Then you run
+`porch approve`; the architect does not run it for you"* — while `architect.md` kept the **old**
+worked example showing the architect running
+`(cd .builders/<id> && porch approve ...)`. The two roles disagreed on who the approval actor is.
+
+`builder.md` was correct: it matches the owner's standing convention, and it is what actually
+happened at both of this project's own gates — so `architect.md`'s example contradicted observed
+behaviour.
+
+**Fix** (`21ac428c`): the Gates section is now relay-shaped — read, decide, `afx send` the
+approval; the builder executes against its own porch state. The
+`--a-human-explicitly-approved-this` explanation is kept because the *why* is load-bearing.
+architect.md 761 → 807 words: **the fix made the file longer, which is fine** — conformance is
+the criterion, not size.
+
+**Worth recording plainly**: this is the same stale-second-owner class I had just caught on the
+porch-approve flag syntax, one level up — and I introduced it, by fixing one owner and leaving
+the other. Catching a class of defect is not the same as being immune to it. The general form:
+*when a rewrite changes a convention, every file that documents that convention is in scope,
+not just the one being edited.*

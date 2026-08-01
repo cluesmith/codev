@@ -595,3 +595,28 @@ the same family as the `wc`/`cmp`/grep lessons: the check that looks like it pas
 
 Suite 205 files / 4,083 tests green. Manifest at `manifests/phase-2-roles.md`. Awaiting
 inspection.
+
+### Phase 2 post-inspection fix — the contradiction I introduced (2026-08-01)
+
+Architect PASSED Phase 2 with one required fix, and it was a good catch on a defect **I
+created**: `builder.md` got the correct relay convention (builder runs `porch approve` after the
+architect relays the human's word) while `architect.md` kept the old example showing the
+*architect* running it. Two roles, two answers, one of them contradicting what actually happened
+at both of this project's own gates.
+
+Fixed in `21ac428c`, G6-pure. architect.md 761 → **807** words — **the fix made the file longer,
+and that is fine**: conformance is the criterion, not size. Under the old size-target acceptance
+model I might have felt pressure to squeeze it back; under the amended charter there is none.
+
+**The uncomfortable part is worth stating.** This is the same stale-second-owner class I had
+just congratulated myself for catching on the porch-approve flag syntax — one level up, and I
+introduced it, by fixing one owner and leaving the other. Catching a class of defect is not the
+same as being immune to it.
+
+General form for the remaining phases: **when a rewrite changes a convention, every file that
+documents that convention is in scope — not just the one being edited.** Phase 3 touches ten
+`protocol.md` files that describe gates, artifacts and phase order; the same trap is waiting
+there at ten times the width.
+
+Architect has adopted my reflow-hazard rule as a standing inspection item and will fixed-string-
+verify every exact-match string in every batch from here.
