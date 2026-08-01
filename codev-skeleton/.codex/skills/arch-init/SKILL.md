@@ -63,7 +63,11 @@ not choose; a state save happens at a boundary **you** pick, with a summary
 **you** curate. That is strictly better, so use it:
 
 ```
-/arch-init (recover) → work → save at a checkpoint → suggest /clear → human /clears → /arch-init → …
+/arch-init (recover) → work → save at a checkpoint → refresh → /arch-init (recover) → …
+                                                       │
+              packaged:  /arch-save  ─────────────────┤  stops monitors, saves, clears,
+                                                       │  schedules /arch-init
+              manual:    suggest /clear → human clears ┘  then human runs /arch-init
 ```
 
 **When to save.** Save at a *resumable boundary* — a point a fresh session

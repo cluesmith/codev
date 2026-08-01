@@ -98,8 +98,14 @@ succeed and nothing is cleared.
 afx send architect:<name> --delay 15 --raw '/arch-init <name>'
 ```
 
-Tower holds this and delivers it after the clear has landed. It has to come from outside
-the session, because the clear destroys the context that would otherwise send it.
+Tower holds this for 15 seconds and then delivers it. It has to come from outside the
+session, because the clear destroys the context that would otherwise send it.
+
+**Tower does not know whether the clear landed** — it waits out a delay, it does not
+observe the result. 15 seconds is a value chosen because it works in practice, not a
+guarantee about the clear's completion. If the timing is wrong the re-init arrives at the
+wrong moment, which costs one manual message (see below) and nothing else. That is the
+whole reason this cycle can be built on a delay rather than on machinery.
 
 Delayed sends are **not persisted** — if Tower restarts inside the window, the message is
 dropped. That is recoverable; see below.
