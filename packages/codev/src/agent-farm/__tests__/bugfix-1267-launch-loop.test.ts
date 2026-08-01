@@ -27,13 +27,18 @@ let dir: string;
  * A stand-in for the harness binary: appends its argv to `argv.log` and exits
  * with the next code from `codes` (one per line), so a test can script an exact
  * sequence of clean exits and crashes.
+ *
+ * Arguments are logged one-per-`|` from `"$@"`, not as `"$*"`: the whole point
+ * of one assertion below is that `"$(cat …)"` reaches the agent as a SINGLE
+ * argument, and `"$*"` would join two arguments into text indistinguishable
+ * from one.
  */
 function writeFakeAgent(exitCodes: number[]): string {
   const agent = join(dir, 'fake-agent');
   writeFileSync(
     agent,
     `#!/bin/bash
-printf '%s\\n' "$*" >> '${dir}/argv.log'
+{ printf '%s|' "$@"; printf '\\n'; } >> '${dir}/argv.log'
 n=$(cat '${dir}/count')
 echo $((n + 1)) > '${dir}/count'
 exit "$(sed -n "$((n + 1))p" '${dir}/codes')"
@@ -82,8 +87,8 @@ describe('buildLaunchLoop — clean exit reruns fresh (Bugfix #1267)', () => {
     const invocations = runLoop(loop, 1);
 
     expect(invocations).toEqual([
-      "--resume abc-1234-uuid", // entry: recover the prior conversation
-      '--fresh-args',           // relaunch after the user quit: a NEW conversation
+      '--resume|abc-1234-uuid|', // entry: recover the prior conversation
+      '--fresh-args|',           // relaunch after the user quit: a NEW conversation
     ]);
   });
 
@@ -95,7 +100,7 @@ describe('buildLaunchLoop — clean exit reruns fresh (Bugfix #1267)', () => {
     // exits cleanly and EOF ends it.
     const invocations = runLoop(loop, 0);
 
-    expect(invocations).toEqual(['--resume abc', '--resume abc']);
+    expect(invocations).toEqual(['--resume|abc|', '--resume|abc|']);
   });
 
   it('the switch to fresh is sticky: a later crash restarts FRESH, not the abandoned session', () => {
@@ -105,14 +110,14 @@ describe('buildLaunchLoop — clean exit reruns fresh (Bugfix #1267)', () => {
     // clean exit → Enter → fresh → crash → auto-restart → fresh again → EOF.
     const invocations = runLoop(loop, 1);
 
-    expect(invocations).toEqual(['--resume abc', '--fresh-args', '--fresh-args']);
+    expect(invocations).toEqual(['--resume|abc|', '--fresh-args|', '--fresh-args|']);
   });
 
   it('EOF at the relaunch prompt exits without relaunching anything', () => {
     const agent = writeFakeAgent([0]);
     const loop = buildLaunchLoop(`${agent} --resume 'abc'`, `${agent} --fresh-args`);
 
-    expect(runLoop(loop, 0)).toEqual(['--resume abc']);
+    expect(runLoop(loop, 0)).toEqual(['--resume|abc|']);
   });
 
   it('preserves quoting in the fresh command (the reason it is a function, not a variable)', () => {
@@ -126,8 +131,8 @@ describe('buildLaunchLoop — clean exit reruns fresh (Bugfix #1267)', () => {
 
     const invocations = runLoop(loop, 1);
 
-    // One argument, not word-split into two.
-    expect(invocations[1]).toBe('--append-system-prompt two words');
+    // One argument, not word-split into two: `two words|` and not `two|words|`.
+    expect(invocations[1]).toBe('--append-system-prompt|two words|');
   });
 
   // `afx reset` refuses to type into a builder whose harness it cannot name, and
@@ -156,6 +161,6 @@ describe('buildLaunchLoop — clean exit reruns fresh (Bugfix #1267)', () => {
 
     expect(loop).not.toContain('codev_launch');
     expect(loop).toContain('while true; do');
-    expect(runLoop(loop, 1)).toEqual(['--same', '--same']);
+    expect(runLoop(loop, 1)).toEqual(['--same|', '--same|']);
   });
 });
