@@ -17,10 +17,10 @@ plan_phases:
     status: complete
   - id: phase_5
     title: Fast delivery triggers (submit + quiescence)
-    status: in_progress
+    status: complete
   - id: phase_6
     title: Cron rerouting through mailbox + gate
-    status: pending
+    status: in_progress
   - id: phase_7
     title: afx inbox CLI + broadcasts + escalation
     status: pending
@@ -30,7 +30,7 @@ plan_phases:
   - id: phase_9
     title: Documentation + skeleton mirror
     status: pending
-current_plan_phase: phase_5
+current_plan_phase: phase_6
 gates:
   spec-approval:
     status: approved
@@ -44,8 +44,8 @@ gates:
     status: pending
   verify-approval:
     status: pending
-iteration: 2
-build_complete: true
+iteration: 1
+build_complete: false
 history:
   - iteration: 1
     plan_phase: phase_2
@@ -96,4 +96,4 @@ history:
         file: >-
           /home/user/code/codev_root/codev/.builders/spir-1313/codev/projects/1313-afx-send-mailbox-first-deliver/1313-phase_5-iter1-claude.txt
 started_at: '2026-08-01T01:40:05.008Z'
-updated_at: '2026-08-01T08:25:21.173Z'
+updated_at: '2026-08-01T08:29:49.047Z'
