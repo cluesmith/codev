@@ -423,3 +423,42 @@ Phase count 10 → 11. Decisions still 67, max batch 11.
 **Notable**: Claude caught that my rollback mapping contradicted the spec I wrote — Phase 1
 claimed G2/G6 while rewriting roles/builder.md (G3) and roles/consultant.md (G5). A G3 revert
 would have silently pulled Phase 1 work out and T10 would have rehearsed the wrong map.
+
+### plan-approval APPROVED → Phase 0 (2026-08-01)
+
+Waleed approved; ran `porch approve 1280 plan-approval` myself. Recorded the architect's
+skills-drift ruling in the plan first: skills this project TOUCHES get four-tree parity (T17,
+scoped to the touched set); pre-existing drift on untouched skills → separate architect-filed
+issue, recorded-known-state, and must not fail T17.
+
+**Phase 0 (PR-1) built. Commit 9d8c2569. No prompt-surface file touched.**
+
+Corrected the three known defects; the reported baseline moves **21,702 → 34,235**.
+
+**A fourth inaccuracy found while writing the tests — mine, not 1252's.** Include expansion was
+*additive*: it counted the `{{> path}}` directive's own tokens PLUS the content substituted for
+them, over-reporting ~2 words per include. `expand_text` now does real substitution mirroring
+`resolveCodevIncludes` (regex replace in place, recursive, depth-guarded, unresolved → empty).
+That is why the figure is 34,235 and not the 34,255 the spec quotes — a 20-word delta across 10
+iterations. Size is reporting-only, so no criterion moves, but the spec's number is now
+superseded and the baseline artifact says so explicitly.
+
+Two of my own bugs, both caught by testing rather than by reading:
+
+1. **`set -o pipefail` + `grep -q`** in the capability extractor reported **all 57 capabilities
+   as absent** — grep exits on first match, printf takes SIGPIPE, and the pipeline reports
+   failure *because the match succeeded*. An exit code with two causes, read as one: the exact
+   pattern this project has now logged six times. Fixed with a here-string.
+2. **Line-wise include expansion dropped text sharing a line with a directive** — `aa bb {{> x}}`
+   lost `aa bb`. Only surfaced because T2 asserts exact neutrality.
+
+Frozen capability inventory: **57 capabilities, 47 present in served prompts, 10 absent
+pre-existing** (porch delivers gates/checks via task JSON, not authored prompt text). That
+asymmetry is baseline state, correctly captured — M5 compares post ⊇ pre, so nothing must be
+invented. It also validates the instrument: an inventory reporting 100% present would have been
+suspicious.
+
+Artifacts: `1280-word-baseline.md`, `1280-capability-inventory.json`, manifest format README,
+`1252-word-*.md` annotated in place (originals preserved, marked superseded). Tests: 22 passing
+(T1, T1b, T2, T3, T11, T12, T15, T16). T16 written before any manifest exists — the guard must
+predate what it guards.
