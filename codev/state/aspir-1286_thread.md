@@ -481,3 +481,36 @@ Kept the argv-order guard the plan flagged: `--model` must precede `--print`, si
 getting it wrong would silently feed `--model` to `--print` as the prompt.
 
 14 new tests · tsc 0 · unit 3919 passed / 0 failed · CLI integration 93 passed / 0 failed.
+
+## phase_3 APPROVED — one mistake in four costumes
+
+codex APPROVE (HIGH) · claude APPROVE (HIGH). Reached after an iter1 REQUEST_CHANGES that produced
+four findings, plus three more minor ones at iter2 that I fixed rather than banked with the approval.
+
+The through-line is worth more than any individual fix. Every finding in this phase — codex's marker
+ordering, codex's stale review file, claude's `code === null`, claude's stdout-only marker match —
+is the **same mistake wearing different clothes: an invariant asserted in a comment and enforced
+more narrowly in code.** I wrote "auth, timeout, non-response and empty output stay skips even when
+configured" and then wrote three separate conditions that didn't. A comment claiming an invariant is
+documentation; only a test pins it. Each direction now has its own test.
+
+**My own test caught my own overcorrection**, which is the part I'd want a future builder to notice.
+Fixing the ordering, I first classified *empty stdout* as an environment cause — but a rejected model
+writes to **stderr** and exits non-zero with empty stdout. That is the rejection signature, so the
+"fix" made the hard failure unreachable for the exact case the phase exists to catch. The stale-review
+test I happened to be writing for a *different* finding failed instantly and exposed it. Fixing two
+findings at once is what caught it; fixing them serially might not have.
+
+Codex's critique of my *test* was as sharp as its critique of the code: asserting the fresh-path case
+proves only that this run wrote nothing, not that nothing exists. "No review file" and "we didn't
+write one" are indistinguishable in green. Seeded a stale `VERDICT: APPROVE` before the failing run.
+
+Applied `discardStaleOutput` to **all three lanes**, not just the reviewed one — codex and claude
+runners throw with identical exposure. Same family-not-line principle as the phase_1 null guard.
+
+On #1323 (architect filed after real-agy OAuth windows during suite runs): verified rather than
+assumed that this branch's agy tests pin `CODEV_AGY_BIN` to a generated fake, pin
+`CODEV_AGY_AUTH_CACHE_DIR` per-test, and pass no `metricsCtx` — so they cannot spawn real agy, touch
+the shared auth cache, or write the metrics DB. Real-agy verification stayed manual, outside suites.
+
+19 tests in the phase file · tsc 0 · unit 3924 passed / 0 failed · CLI integration 93 passed.
