@@ -1,4 +1,4 @@
-# Render-gate fixtures (Spec 1313, Phase 2)
+# Render-gate fixtures (Spec 1313, Phases 2–3)
 
 Each `*.txt` is the **raw PTY byte stream** for one composer state. `render-gate.test.ts`
 pushes it through the production `RingBuffer` (`pushData` → `getAll().join('\n')`) and
@@ -30,13 +30,28 @@ encodes the expected verdict: `<app>-<state>.<clean|busy>.txt`.
   path — the marker matches the cursor, the model names count as occupancy), never
   mistaken for an empty composer. Mirrors the real **codex-picker** capture, whose
   `› 1. …` selection cursor exercises the same path.
+- **agy-idle.clean.txt, agy-draft.busy.txt, agy-trust.busy.txt** — **synthesized** to
+  the **Phase 3 live measurement** of agy (Antigravity CLI 1.1.8). agy was captured
+  under the spike harness (`agy-measure.cjs`), but its banner embeds the authenticated
+  **account email**, so the raw capture is not committed; the fixtures reproduce the
+  measured *attributes* with sanitized content. Measured facts they encode: agy's
+  marker is `> ` (palette-12 bright blue), its idle mode-hint (`Accept-edits mode: …`)
+  renders in **palette-8 (gray)** at normal intensity (dim=0), user-typed text is
+  **default-fg**, and the per-folder trust dialog's selected `> Yes, I trust this
+  folder` option is **palette-12**. So idle → clean (gray hint ignored), draft → busy
+  (default-fg text counts), trust → busy (palette-12 option counts — a blind Enter
+  never confirms filesystem trust). The raw measurement (with real render + per-cell
+  fg attributes) is archived in the Phase 3 review.
 - **wrapper-boot.busy.txt** — **synthetic** builder launch-loop screen (a born-dirty
   state with no composer marker). App-agnostic: no marker → busy under any profile.
 
 ## Classifier assumption
 
 CLEAN requires a composer marker **and** zero normal-intensity, non-whitespace,
-non-chrome cells in the composer region. It relies on real claude/codex rendering
-placeholder/hint text de-emphasized (dim). A future TUI (or a shim) that renders a
-plain placeholder trips it toward *busy* (fail-safe: a message is held, never
-misdelivered); classifier-health telemetry (Phase 4/7) surfaces such a profile drift.
+non-chrome cells in the composer region. Placeholder/hint text is excluded by an
+**attribute** the profile names: claude/codex de-emphasize it with SGR-**dim**
+(universal skip); agy uses a **foreground color** instead (palette-8), declared per
+profile as `placeholderFgPalette`. Either way the exclusion is attribute-based, never
+a text allowlist. A future TUI (or a shim) that renders a plain, un-de-emphasized
+placeholder trips toward *busy* (fail-safe: a message is held, never misdelivered);
+classifier-health telemetry (Phase 4/7) surfaces such a profile drift.

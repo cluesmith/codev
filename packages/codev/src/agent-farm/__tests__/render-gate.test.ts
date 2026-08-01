@@ -19,13 +19,16 @@ import { fileURLToPath } from 'node:url';
 import { RingBuffer } from '../../terminal/ring-buffer.js';
 import { classifyScreen, RING_SEED_MAX_BYTES } from '../servers/render-gate.js';
 import type { RingSnapshot, GateProfile } from '../servers/render-gate.js';
-import { CLAUDE_PROFILE, CODEX_PROFILE, resolveProfile } from '../servers/gate-profiles.js';
+import { CLAUDE_PROFILE, CODEX_PROFILE, AGY_PROFILE, resolveProfile } from '../servers/gate-profiles.js';
 
 const COLS = 110;
 const ROWS = 32;
 const DIM = '\x1b[2m';
 const RESET = '\x1b[0m';
 const BOLD = '\x1b[1m';
+const PAL8 = '\x1b[38;5;8m'; // agy's placeholder gray
+const PAL12 = '\x1b[38;5;12m'; // agy's marker / selected-option bright blue
+const FG = '\x1b[39m'; // reset foreground to default
 
 /** Production data path: raw PTY bytes → RingBuffer.pushData → getAll().join('\n'). */
 function snapshotFromRaw(raw: string, cols = COLS, rows = ROWS): RingSnapshot {
@@ -43,13 +46,14 @@ const FIXTURE_DIR = fileURLToPath(new URL('./fixtures/gate', import.meta.url));
 
 function profileForFixture(name: string): GateProfile {
   if (name.startsWith('codex')) return CODEX_PROFILE;
+  if (name.startsWith('agy')) return AGY_PROFILE;
   return CLAUDE_PROFILE; // claude-* and the marker-less wrapper/boot fixture
 }
 
 describe('render-gate — real captured fixtures (Spec 1313)', () => {
   const fixtures = readdirSync(FIXTURE_DIR).filter((f) => f.endsWith('.txt')).sort();
 
-  it('the required states are all captured (claude+codex idle/draft/menu/picker, wrapper/boot)', () => {
+  it('the required states are all captured (claude+codex idle/draft/menu/picker, agy idle/draft/trust, wrapper/boot)', () => {
     for (const required of [
       'claude-idle.clean',
       'claude-draft.busy',
@@ -59,6 +63,9 @@ describe('render-gate — real captured fixtures (Spec 1313)', () => {
       'codex-draft.busy',
       'codex-menu.busy',
       'codex-picker.busy',
+      'agy-idle.clean',
+      'agy-draft.busy',
+      'agy-trust.busy',
       'wrapper-boot.busy',
     ]) {
       expect(fixtures.some((f) => f.startsWith(required))).toBe(true);
@@ -120,6 +127,26 @@ describe('render-gate — synthetic branch coverage (Spec 1313)', () => {
     expect(v.detail).toBe('no-composer-marker');
   });
 
+  it('agy: `> ` marker + palette-8 (gray) hint → clean; default-fg draft → busy', async () => {
+    // agy de-emphasizes its idle hint with a FOREGROUND COLOR (palette-8), not
+    // SGR-dim — so the placeholder rule is color-keyed for agy (placeholderFgPalette).
+    const idle = snapshotFromRaw(screen(`${PAL12}>${FG} ${PAL8}Accept-edits mode: file edits auto-approved${FG}`, '──────'));
+    const draft = snapshotFromRaw(screen(`${PAL12}>${FG} review the mailbox change`, '──────'));
+    expect((await classifyScreen(idle, AGY_PROFILE)).clean).toBe(true);
+    expect((await classifyScreen(draft, AGY_PROFILE)).clean).toBe(false);
+  });
+
+  it('agy: only palette-8 is placeholder — a non-gray (palette-12) option still counts (trust-dialog guard)', async () => {
+    // The trust dialog's selected `> Yes, I trust this folder` renders palette-12,
+    // NOT gray — so it must count as occupancy (busy), else a blind Enter would
+    // confirm a filesystem-trust decision. Pins that the color rule ignores ONLY
+    // the profile's placeholder palette, not every non-default color.
+    const trust = snapshotFromRaw(screen(`${PAL12}>${FG} ${PAL12}Yes, I trust this folder${FG}`, '  No, exit'));
+    const v = await classifyScreen(trust, AGY_PROFILE);
+    expect(v.clean).toBe(false);
+    expect(v.detail).toBe('user-text');
+  });
+
   it('an empty replay is busy (a session with no output is not a verified-empty prompt)', async () => {
     expect((await classifyScreen(snapshotFromRaw(''), CLAUDE_PROFILE)).clean).toBe(false);
   });
@@ -168,9 +195,9 @@ describe('resolveProfile — strict, fail-safe app identity (Spec 1313)', () => 
     expect(resolveProfile({ command: '/home/u/.nvm/bin/codex', args: ['-c', 'foo=bar'] })?.app).toBe('codex');
   });
 
-  it('agy resolves to null — NOT claude (spike constraint 10: no claude fallback)', () => {
-    expect(resolveProfile({ command: 'agy' })).toBeNull();
-    expect(resolveProfile({ command: '/usr/local/bin/antigravity', label: 'main' })).toBeNull();
+  it('agy resolves to the agy profile — NOT claude (Phase 3 measured; constraint 10: no claude fallback)', () => {
+    expect(resolveProfile({ command: 'agy' })?.app).toBe('agy');
+    expect(resolveProfile({ command: '/usr/local/bin/antigravity', label: 'main' })?.app).toBe('agy');
   });
 
   it('a wrapped builder launch (bash .builder-start.sh) resolves to null (fail-safe, deferred to Phase 4)', () => {

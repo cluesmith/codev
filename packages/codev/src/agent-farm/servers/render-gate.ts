@@ -67,6 +67,16 @@ export interface GateProfile {
    * below the composer is never counted as user text.
    */
   regionEndPatterns: RegExp[];
+  /**
+   * Optional per-app placeholder signal: a 16-color palette index whose cells are
+   * treated as placeholder/hint chrome (ignored), NOT user text. This is the
+   * color-attribute analogue of the universal dim-placeholder skip. claude/codex
+   * de-emphasize their placeholder with SGR-dim (handled universally); agy instead
+   * renders its idle mode-hint in palette-8 (gray) while user-typed text is
+   * default-fg — measured, Spec 1313 Phase 3 — so agy sets this to 8. Left unset,
+   * only the dim rule applies (claude/codex behavior is unchanged).
+   */
+  placeholderFgPalette?: number;
 }
 
 /** The gate's verdict. `reason` is the mailbox why-held reason when not clean. */
@@ -174,7 +184,14 @@ export async function classifyScreen(snapshot: RingSnapshot, profile: GateProfil
         const ch = cell.getChars();
         if (!ch || WHITESPACE.test(ch) || IGNORE_CHARS.has(ch)) continue;
         if (row === markerRow && col === 0) continue; // the marker glyph itself
-        if (cell.isDim()) continue; // placeholder / hint chrome renders dim
+        if (cell.isDim()) continue; // placeholder / hint chrome renders dim (claude/codex)
+        if (
+          profile.placeholderFgPalette !== undefined &&
+          cell.isFgPalette() &&
+          cell.getFgColor() === profile.placeholderFgPalette
+        ) {
+          continue; // per-app placeholder color: agy renders its idle hint in palette-8 (gray)
+        }
         userCells++;
       }
     }
