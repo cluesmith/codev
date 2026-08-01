@@ -1,7 +1,7 @@
 id: '1280'
 title: prompt-surface-judgment-not-ru
 protocol: spir
-phase: specify
+phase: plan
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -16,7 +16,7 @@ gates:
   verify-approval:
     status: pending
 iteration: 1
-build_complete: true
+build_complete: false
 history: []
 started_at: '2026-08-01T02:46:36.457Z'
-updated_at: '2026-08-01T03:48:22.600Z'
+updated_at: '2026-08-01T03:48:30.711Z'
