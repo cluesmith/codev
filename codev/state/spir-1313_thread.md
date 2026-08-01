@@ -642,3 +642,34 @@ events stay exactly {overview-changed, mailbox-escalation}. Escalation fires ONL
 from overview-changed per decision 8; Phase 8 client refetches on both).
 Verified: types build clean, `tsc --noEmit` on codev **exit 0**, targeted 58/58 green. Full unit suite running.
 Next: confirm full suite green → commit phase_7 (impl+tests+thread) → `porch done 1313`.
+
+### 2026-08-01 — Phase 7 iter-1 review: Gemini APPROVE, Claude APPROVE(HIGH), Codex REQUEST_CHANGES → fixed
+Committed phase_7 as `8ba22a02`; `porch check` green (build 14.7s, tests 28.3s); `porch done` → build-complete;
+`porch next` → ran the 3-way. **Codex raised 3 issues; verified all 3 valid against the code and fixed them**
+(the 3-way earning its keep — Gemini+Claude both missed these). Rebuttal at `1313-phase_7-iter1-rebuttals.md`.
+1. **Escalation didn't refresh the overview-derived `mailboxEscalated`** (only fired `mailbox-escalation`, not
+   `overview-changed`) → a client refetching overview on `overview-changed` sees a stale attention bit. FIX:
+   `escalateOverdue` now also calls `ports.onHeldStateChange()` once when any row escalated (both events fire).
+2. **Liveness was log-only + ignored spec's "with recent output"** (spec line 91: "loud log/broadcast" +
+   "with recent output"). FIX: new `onLiveness(info)` port — pure module just REPORTS the no-profile streak
+   crossing (metadata only); wiring's `surfaceLiveness` applies the recent-output gate (session `lastDataAt` ≤ 30s)
+   then does loud WARN log + broadcast. Broadcast rides the EXISTING generic `notification` SSE event (no new type,
+   immediately visible, doesn't expand decision-8's two-event indicator contract). Still `no-profile`-scoped.
+3. **No route-level/integration coverage** (plan's Test Plan explicitly wanted "held → afx inbox → dismiss → gone,
+   not delivered"). FIX: NEW `inbox-routes.test.ts` (real `handleRequest` dispatch + real in-memory DB; only
+   getGlobalDb remapped) — projection+body-redaction, escalated 0/1→bool, `?workspace=` scope, full dismiss
+   integration + overview-changed fire, 404s; +`mailbox.test.ts` db tests for findEscalatable/markEscalated/
+   heldSummaryForWorkspace; + escalation test asserts overview-changed fires.
+Design note: reused `notification` (not a new `mailbox-liveness` type) for the liveness broadcast — simpler, no
+Phase-8 client dependency, keeps the SSE surface minimal. Verified: tsc exit 0; targeted 6 files 75/75 green.
+Full suite re-running. Next: full green → commit iter-2 fixes → `porch done 1313` (re-verify → iter2 consult).
+
+### 2026-08-01 — RESUMED after architect pause — iter-2 fixes verified, committing
+Architect resumed the paused session ("read state-snapshot.md for current state"). Re-verified the uncommitted
+iter-2 fixes against the actual working tree before trusting the snapshot: (1) `escalateOverdue` fires
+`onHeldStateChange()` once when any row escalated; (2) `onLiveness` port + `surfaceLiveness` recent-output gate
+(`lastDataAt ≤ 30s`) → loud WARN + `notification` broadcast; (3) `inbox-routes.test.ts` (250 LOC: body-redaction,
+escalated 0/1→bool, `?workspace=` scope, list→dismiss→gone integration, 404s). Rebuttal accepts all 3, disputes
+none. **Build exit 0; full unit suite 4160 passed / 48 skipped / 0 failed.** Committing iter-2 delta (2 src + 5
+test files + thread), then `porch done 1313` → iter-2 3-way consult. Porch artifacts under codev/projects/ and the
+ephemeral state-snapshot.md stay untracked (matches prior phases' pattern).

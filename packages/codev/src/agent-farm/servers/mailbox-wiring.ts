@@ -23,14 +23,26 @@ import { classifyScreen, type GateProfile } from './render-gate.js';
 import { resolveProfile } from './gate-profiles.js';
 import { harnessFromLaunchScript, type ContextFsPort } from '../commands/reset/context.js';
 import { getGlobalDb } from '../db/index.js';
+import path from 'node:path';
 import {
   MailboxDrainer,
   type DeliveryPorts,
   type DeliverySession,
   type DeliveredBroadcast,
   type EscalationInfo,
+  type LivenessInfo,
 } from './mailbox-delivery.js';
 import type { MailboxEscalationPayload } from '@cluesmith/codev-types';
+
+/**
+ * "Recent output" window for the liveness diagnostic (Spec 1313, Phase 7 — spec line
+ * 91). A `no-profile` streak only raises the loud log/broadcast when the session emitted
+ * output within this window: that distinguishes a genuinely broken/unknown classifier on
+ * a LIVE, producing app (worth alarming) from a dormant unknown session (still visible in
+ * `afx inbox`, but no loud alarm). Sized well above the streak's own duration
+ * (threshold × backstop interval ≈ 15s) so an actively-failing app comfortably qualifies.
+ */
+const LIVENESS_RECENT_OUTPUT_MS = 30_000;
 
 type LogFn = (level: 'INFO' | 'ERROR' | 'WARN', message: string) => void;
 
@@ -179,6 +191,7 @@ export function makeDeliveryPorts(log: LogFn): DeliveryPorts {
     broadcast: (frame) => broadcastDelivered(frame),
     onHeldStateChange: () => broadcastHeldStateChange(),
     onEscalation: (info) => broadcastEscalation(info),
+    onLiveness: (info) => surfaceLiveness(info, log),
     log: (m) => log('INFO', m),
     now: () => Date.now(),
   };
@@ -217,6 +230,34 @@ function broadcastEscalation(info: EscalationInfo): void {
     type: 'mailbox-escalation',
     title: 'Message held past escalation age',
     body: JSON.stringify(payload),
+    workspace: info.workspacePath,
+  });
+}
+
+/**
+ * Surface the liveness diagnostic (Spec 1313, Phase 7 — spec line 91). Applies the spec's
+ * "with recent output" gate: only when the agent's live session emitted output within
+ * {@link LIVENESS_RECENT_OUTPUT_MS} — proving a genuinely broken/unknown classifier on a
+ * PRODUCING app, not a dormant unknown session — does it raise the loud log AND a broadcast.
+ * The broadcast rides the existing generic `notification` SSE channel (human title/body, no
+ * body-of-message), so it is immediately visible in the dashboard's notification surface
+ * without any new event type or client wiring. An idle unknown session raises nothing here —
+ * its held row is still discoverable in `afx inbox`, per the metadata-only visibility model.
+ */
+function surfaceLiveness(info: LivenessInfo, log: LogFn): void {
+  const session = resolveLiveSessionForAgent(info.workspacePath, info.toAgent);
+  const hasRecentOutput = session != null && Date.now() - session.lastDataAt <= LIVENESS_RECENT_OUTPUT_MS;
+  if (!hasRecentOutput) return; // dormant unknown session → no loud alarm (still in `afx inbox`)
+  const where = `${info.toAgent} @ ${path.basename(info.workspacePath)}`;
+  log(
+    'WARN',
+    `[mailbox] LIVENESS: ${where} held no-profile for ${info.streak} consecutive checks with recent output — ` +
+      `unrecognized app; its mail will not deliver until a classifier profile matches (check for a TUI update)`
+  );
+  mailboxBroadcaster?.({
+    type: 'notification',
+    title: 'Mailbox: delivery blocked (unrecognized app)',
+    body: `${where} — its screen never classifies as a ready prompt, so held messages will not deliver. A classifier profile may need updating.`,
     workspace: info.workspacePath,
   });
 }

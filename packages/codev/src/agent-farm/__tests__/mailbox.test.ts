@@ -290,4 +290,58 @@ describe('Mailbox repository (Spec 1313)', () => {
     expect(found).toHaveLength(1);
     expect(found[0].body).toBe('for the agent');
   });
+
+  // ---------------------------------------------------------------------------
+  // findEscalatable / markEscalated (Phase 7 — escalation age)
+  // ---------------------------------------------------------------------------
+
+  it('findEscalatable returns only held, not-yet-escalated rows older than the age, oldest first', () => {
+    const old1 = mailbox.enqueue(db, input({ body: 'old1' }), 1000);
+    const old2 = mailbox.enqueue(db, input({ body: 'old2' }), 2000);
+    mailbox.enqueue(db, input({ body: 'young' }), 9000);
+    // now=10000, age=5000 → cutoff 5000: old1/old2 (created ≤2000) qualify; young (9000) does not.
+    const due = mailbox.findEscalatable(db, 5000, 10000);
+    expect(due.map((r) => r.id)).toEqual([old1.id, old2.id]); // created_at ASC
+    expect(due.map((r) => r.body)).not.toContain('young');
+  });
+
+  it('markEscalated flips a held row once (idempotent); findEscalatable then excludes it', () => {
+    const row = mailbox.enqueue(db, input(), 1000);
+    expect(mailbox.markEscalated(db, row.id, 10000)).toBe(true);
+    expect(mailbox.getById(db, row.id)?.escalated).toBe(1);
+    expect(mailbox.markEscalated(db, row.id, 10000)).toBe(false); // already escalated → no-op
+    expect(mailbox.findEscalatable(db, 5000, 10000)).toHaveLength(0); // excluded once escalated
+  });
+
+  it('markEscalated never touches a terminal (delivered) row', () => {
+    const row = mailbox.enqueue(db, input(), 1000);
+    mailbox.markDelivered(db, row.id, 2000);
+    expect(mailbox.markEscalated(db, row.id, 10000)).toBe(false);
+    expect(mailbox.getById(db, row.id)?.escalated).toBe(0);
+  });
+
+  // ---------------------------------------------------------------------------
+  // heldSummaryForWorkspace (Phase 7 — the overview indicator's data source)
+  // ---------------------------------------------------------------------------
+
+  it('heldSummaryForWorkspace totals held rows per agent with an escalation flag; delivered rows excluded', () => {
+    mailbox.enqueue(db, input({ toAgent: 'spir-1', body: 'a' }), 1000);
+    mailbox.enqueue(db, input({ toAgent: 'spir-1', body: 'b' }), 1100);
+    const esc = mailbox.enqueue(db, input({ toAgent: 'spir-2', body: 'c' }), 1200);
+    mailbox.markEscalated(db, esc.id, 2000);
+    const delivered = mailbox.enqueue(db, input({ toAgent: 'spir-1', body: 'd' }), 1300);
+    mailbox.markDelivered(db, delivered.id, 1400);
+
+    const summary = mailbox.heldSummaryForWorkspace(db, '/ws/a');
+    expect(summary.total).toBe(3); // 2×spir-1 + 1×spir-2 (delivered excluded)
+    expect(summary.escalated).toBe(true); // spir-2's row escalated
+    const byAgent = new Map(summary.byAgent.map((a) => [a.toAgent, a]));
+    expect(byAgent.get('spir-1')).toMatchObject({ count: 2, escalated: false });
+    expect(byAgent.get('spir-2')).toMatchObject({ count: 1, escalated: true });
+  });
+
+  it('heldSummaryForWorkspace is workspace-scoped and zeroed when nothing is held', () => {
+    mailbox.enqueue(db, input({ workspacePath: '/ws/other', toAgent: 'x' }), 1000);
+    expect(mailbox.heldSummaryForWorkspace(db, '/ws/a')).toEqual({ total: 0, escalated: false, byAgent: [] });
+  });
 });

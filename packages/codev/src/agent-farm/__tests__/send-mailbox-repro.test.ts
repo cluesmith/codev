@@ -82,6 +82,7 @@ function realGatePorts(
     broadcast: (f) => broadcasts.push(f),
     onHeldStateChange: () => {},
     onEscalation: () => {},
+    onLiveness: () => {},
     log: () => {},
     now: () => 1000,
   };

@@ -91,8 +91,30 @@ export interface DeliveryPorts {
    * no-op in unit fakes.
    */
   onEscalation(info: EscalationInfo): void;
+  /**
+   * Raise the liveness-telemetry diagnostic when an agent's mail has been held
+   * `no-profile` for a sustained streak (Spec 1313, Phase 7 — spec line 91). The pure
+   * module just reports the streak crossing; the live binding applies the spec's "with
+   * recent output" condition (only a session actively producing output is a genuinely
+   * broken/unknown classifier worth alarming) and does the loud log + broadcast. A
+   * no-op in unit fakes.
+   */
+  onLiveness(info: LivenessInfo): void;
   log(message: string): void;
   now(): number;
+}
+
+/**
+ * A sustained `no-profile` hold streak for an agent — carried to the liveness-telemetry
+ * binding (Spec 1313, Phase 7). Metadata only (no body): the diagnostic names the agent
+ * and how many consecutive checks failed to classify, so a broken/unknown classifier is
+ * discoverable rather than silent.
+ */
+export interface LivenessInfo {
+  workspacePath: string;
+  toAgent: string;
+  /** Consecutive not-clean (`no-profile`) checks at the moment the streak crossed the threshold. */
+  streak: number;
 }
 
 /**
@@ -332,8 +354,10 @@ export class MailboxDrainer {
    */
   private escalateOverdue(ports: DeliveryPorts, db: Database.Database): void {
     const now = ports.now();
+    let escalatedAny = false;
     for (const row of findEscalatable(db, this.escalationMs, now)) {
       if (!markEscalated(db, row.id, now)) continue;
+      escalatedAny = true;
       const ageMs = now - row.created_at;
       ports.onEscalation({
         workspacePath: row.workspace_path,
@@ -347,6 +371,11 @@ export class MailboxDrainer {
           `(held ${Math.round(ageMs / 1000)}s, reason ${row.reason ?? 'held'}) — visibility only, not delivered`
       );
     }
+    // A row's escalated flag flipped → the overview-derived `mailboxEscalated` attention
+    // bit changed. Fire the held-state-change event too (in addition to the per-row
+    // `mailbox-escalation` above) so a client that refetches /api/overview on
+    // `overview-changed` picks up the new attention state and never shows a stale flag.
+    if (escalatedAny) ports.onHeldStateChange();
   }
 
   /**
@@ -364,19 +393,17 @@ export class MailboxDrainer {
     this.notCleanStreak.set(key, next);
     // Liveness telemetry (Spec 1313, Phase 7 — spec line 91): a sustained `no-profile`
     // streak means the session's app is unrecognized (a net-new or drifted classifier),
-    // so its mail will NEVER deliver — surface it loudly instead of holding silently.
-    // Scoped to `no-profile` on purpose: a `busy` streak is a human present at the line
-    // (Constraint 1 — legitimate, must not false-alarm), and `no-live-pty` is no session
-    // at all (not the "repeated not-clean with recent output" the diagnostic targets).
-    // Fired once, exactly at the crossing, so a persistently-unknown app logs one warning
-    // rather than one per tick. The threshold filters transient boot/relaunch screens,
-    // which resolve well before it.
+    // so its mail will NEVER deliver — surface it instead of holding silently. Scoped to
+    // `no-profile` on purpose: a `busy` streak is a human present at the line (Constraint
+    // 1 — legitimate, must not false-alarm), and `no-live-pty` is no session at all.
+    // Reported once, exactly at the crossing, so a persistently-unknown app raises one
+    // diagnostic rather than one per tick; the threshold filters transient boot/relaunch
+    // screens. The pure module only reports the crossing — the live binding
+    // ({@link DeliveryPorts.onLiveness}) applies the spec's "with recent output" gate and
+    // does the loud log + broadcast, so an idle unknown session does not false-alarm.
     if (outcome.reason === 'no-profile' && next === LIVENESS_STREAK_THRESHOLD) {
       const [ws, agent] = key.split('\0');
-      this.ports?.log(
-        `[mailbox] LIVENESS: ${agent} @ ${path.basename(ws)} held no-profile for ${next} consecutive checks — ` +
-          `unrecognized app; its mail will not deliver until a classifier profile matches (check for a TUI update)`
-      );
+      this.ports?.onLiveness({ workspacePath: ws, toAgent: agent, streak: next });
     }
   }
 

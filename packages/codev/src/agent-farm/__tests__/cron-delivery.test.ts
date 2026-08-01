@@ -88,6 +88,7 @@ function harness(): Harness {
         h.heldChanges++;
       },
       onEscalation: () => {},
+      onLiveness: () => {},
       log: (m) => logs.push(m),
       now: () => h.now,
     },

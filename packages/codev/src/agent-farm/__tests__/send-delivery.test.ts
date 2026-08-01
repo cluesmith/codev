@@ -22,6 +22,7 @@ import {
   type DeliverySession,
   type DeliveredBroadcast,
   type EscalationInfo,
+  type LivenessInfo,
 } from '../servers/mailbox-delivery.js';
 import type { GateProfile, GateVerdict, RingSnapshot } from '../servers/render-gate.js';
 
@@ -56,6 +57,8 @@ interface Harness {
   heldChanges: number;
   /** onEscalation payloads (the escalation SSE trigger — metadata only). */
   escalations: EscalationInfo[];
+  /** onLiveness payloads (the no-profile-streak diagnostic — metadata only). */
+  livenessCalls: LivenessInfo[];
   setSession(agent: string, session: DeliverySession | null): void;
   setProfile(p: GateProfile | null): void;
   setVerdict(v: GateVerdict): void;
@@ -75,6 +78,7 @@ function harness(): Harness {
     logs,
     heldChanges: 0,
     escalations: [],
+    livenessCalls: [],
     now: 1000,
     setSession: (agent, s) => sessions.set(agent, s),
     setProfile: (p) => {
@@ -93,6 +97,7 @@ function harness(): Harness {
         h.heldChanges++;
       },
       onEscalation: (info) => h.escalations.push(info),
+      onLiveness: (info) => h.livenessCalls.push(info),
       log: (m) => logs.push(m),
       now: () => h.now,
     },
@@ -451,6 +456,9 @@ describe('MailboxDrainer escalation + liveness telemetry (Spec 1313, Phase 7)', 
     ]);
     // Redaction: the escalation payload carries no message body.
     expect(Object.keys(h.escalations[0])).not.toContain('body');
+    // The escalated flag flipped → the overview-derived attention bit changed, so the
+    // held-state-change event fired too (keeps `mailboxEscalated` from going stale).
+    expect(h.heldChanges).toBeGreaterThanOrEqual(1);
     drainer.stop();
   });
 
@@ -493,7 +501,7 @@ describe('MailboxDrainer escalation + liveness telemetry (Spec 1313, Phase 7)', 
     drainer.stop();
   });
 
-  it('liveness: a sustained no-profile streak logs exactly one LIVENESS warning, at the threshold crossing', async () => {
+  it('liveness: a sustained no-profile streak reports onLiveness exactly once, at the threshold crossing', async () => {
     const h = harness();
     h.setSession('spir-1', fakeSession());
     h.setProfile(null); // unknown app → held no-profile on every pass
@@ -501,16 +509,16 @@ describe('MailboxDrainer escalation + liveness telemetry (Spec 1313, Phase 7)', 
     const drainer = new MailboxDrainer({ intervalMs: 999999, escalationMs: 999999 });
     drainer.start(h.ports, db);
     for (let i = 0; i < 9; i++) await drainer.tick(); // one short of the threshold
-    expect(h.logs.filter((l) => l.includes('LIVENESS'))).toHaveLength(0);
-    await drainer.tick(); // 10th consecutive no-profile → warn once
+    expect(h.livenessCalls).toHaveLength(0);
+    await drainer.tick(); // 10th consecutive no-profile → report once
     await drainer.tick(); // still exactly one (fires only at the crossing, not per tick)
-    const liveness = h.logs.filter((l) => l.includes('LIVENESS'));
-    expect(liveness).toHaveLength(1);
-    expect(liveness[0]).toContain('no-profile');
+    // The pure module only REPORTS the crossing (metadata, no body); the "recent output"
+    // gate + loud log + broadcast live in the wiring binding.
+    expect(h.livenessCalls).toEqual([{ workspacePath: '/ws/a', toAgent: 'spir-1', streak: 10 }]);
     drainer.stop();
   });
 
-  it('liveness: a busy streak never raises a LIVENESS warning (a busy line is a human present)', async () => {
+  it('liveness: a busy streak never reports onLiveness (a busy line is a human present)', async () => {
     const h = harness();
     h.setSession('spir-1', fakeSession());
     h.setVerdict(BUSY);
@@ -518,7 +526,7 @@ describe('MailboxDrainer escalation + liveness telemetry (Spec 1313, Phase 7)', 
     const drainer = new MailboxDrainer({ intervalMs: 999999, escalationMs: 999999 });
     drainer.start(h.ports, db);
     for (let i = 0; i < 15; i++) await drainer.tick();
-    expect(h.logs.filter((l) => l.includes('LIVENESS'))).toHaveLength(0);
+    expect(h.livenessCalls).toHaveLength(0);
     drainer.stop();
   });
 });
