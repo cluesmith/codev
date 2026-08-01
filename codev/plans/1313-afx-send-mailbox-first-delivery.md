@@ -22,7 +22,7 @@ higher-surface-area pieces (cron, CLI, UI, docs) layer on afterward:
    `SendBuffer` and every force path; response vocabulary `delivered | held+id+reason`.
 5. **Fast delivery triggers** — submit + quiescence, so held mail delivers near-immediately once the human clears the line.
 6. **Cron rerouting** — the most-unguarded writer joins the one gated path; per-task supersede.
-7. **`afx inbox` + broadcasts + escalation** — visibility backend (CLI + API + WS events + escalation age).
+7. **`afx inbox` + broadcasts + escalation** — visibility backend (CLI + API + SSE events + escalation age).
 8. **Dashboard + VSCode indicators** — count-only held indicators consuming the broadcasts.
 9. **Docs + skeleton mirror** — send vocabulary, `afx inbox`, CLAUDE/AGENTS (byte-identical), skeleton.
 
@@ -112,7 +112,9 @@ Mirror `cron_tasks`' workspace-scoping style. **New table only** → fresh insta
 existing installs get it from migration v15. No rows to migrate (the old buffer was in-memory).
 
 Timestamps are epoch-ms integers set by the repository (`Date.now()` at the call site), not SQLite `datetime`,
-so ordering and age math are trivial and test-injectable.
+so ordering and age math are trivial and test-injectable. `pruneTerminal(retentionDays)` is defined here but
+**invoked in Phase 4** (Tower boot + once per backstop drain); the retention window (default 30 days) is read
+from `.codev/config.json` via `packages/codev/src/lib/config.ts` (`CodevConfig` / `DEFAULT_CONFIG` / `loadConfig`).
 
 #### Acceptance Criteria
 - [ ] Fresh DB and a simulated pre-v15 DB both converge on the `mailbox` table (migration test, mirrors
@@ -254,7 +256,17 @@ hard code dependency — delivery treats a missing profile as `no-profile`)
 - [ ] Additive response fields on `POST /api/send` (`held`, `mailboxId`, `reason`) preserving `ok`/`terminalId`/
       `deferred` for old binaries (`held` ⇒ still `ok:true`).
 - [ ] Dead-session → held (`no-live-pty`), unknown-app → held (`no-profile`) — the WARN/ERROR drop paths removed.
-- [ ] Tests: `packages/codev/src/agent-farm/__tests__/send-delivery.test.ts` (+ update send-buffer callers).
+- [ ] **Client-side send contract** (so the sender sees the real outcome): extend the send return type in
+      `packages/core/src/tower-client.ts` (add `held`, `reason`, `mailboxId` alongside `ok`/`resolvedTo`/`terminalId`)
+      and change `packages/codev/src/agent-farm/commands/send.ts:332` to print `delivered` vs `held (<reason>) — id <id>`
+      instead of the unconditional "Message sent".
+- [ ] **`pruneTerminal` invocation** wired here (defined in Phase 1): call it on Tower boot and once per backstop
+      drain so terminal rows don't accumulate.
+- [ ] **Liveness-telemetry tracking** instrumented in the drainer (per-session repeated not-clean verdict counter);
+      the state lives with the gate loop here — Phase 7 surfaces it (loud log/broadcast).
+- [ ] Tests: `packages/codev/src/agent-farm/__tests__/send-delivery.test.ts` (+ update send-buffer callers);
+      **automated e2e** for the #1265 repro at `packages/codev/src/agent-farm/__tests__/send-mailbox.e2e.test.ts`
+      (or extend the existing `send-integration.e2e.test.ts`), run via `vitest.e2e.config.ts`.
 
 #### Implementation Details
 - **Persist-first**: enqueue the mailbox row before writing the HTTP response; the response reports the real
@@ -285,7 +297,8 @@ hard code dependency — delivery treats a missing profile as `no-profile`)
 - **Unit**: gate-pass → write; gate-fail → held with reason; serialization ordering; response field shape.
 - **Integration**: full `handleSend` against a fake session + gate (idle/draft/menu); restart recovery;
   respawn drain; concurrent-send serialization.
-- **Manual**: reproduce #1265 by hand against a live builder terminal (draft, pause, send from a sibling).
+- **E2E** (automated, `vitest.e2e.config.ts`): the #1265 repro — draft → send → held(`busy`) → submit → clean delivery.
+- **Manual**: also reproduce #1265 by hand against a live builder terminal as a sanity check.
 
 #### Rollback Strategy
 This phase changes live behavior. Rollback = revert the phase commit, which restores `SendBuffer` (kept in git
@@ -328,7 +341,8 @@ detection reuses existing input tracking (`recordUserInput`/composing signals); 
 - [ ] A missed/spurious trigger never delivers onto a non-clean screen (gate still decides).
 
 #### Test Plan
-- **Unit**: trigger → drain scheduled → gate decides. **Integration**: submit-then-deliver; quiesce-then-deliver;
+- **Unit**: trigger → drain scheduled → gate decides; **drain coalescing** (a pending drain supersedes another →
+  the gate runs once, not once per trigger). **Integration**: submit-then-deliver; quiesce-then-deliver;
   spurious trigger on a dirty screen → still held.
 
 #### Rollback Strategy
@@ -397,9 +411,11 @@ Revert the phase commit; cron returns to its prior direct write (regains its old
 - [ ] **Escalation event**: a distinct SSE `notification` event (per the `packages/types/src/sse.ts` contract)
       plus an attention flag in the overview payload — the spec's **escalation broadcast**.
 - [ ] Escalation-age handling in the mailbox drainer: a held row past the threshold (default 60s; configurable
-      via `.codev/config.json`) → set `escalated`, emit the escalation `notification` + a loud log; **never** deliver.
-- [ ] Liveness telemetry: repeated not-clean verdicts with recent output → loud log/broadcast (broken-profile
-      discoverability, spec Constraint).
+      via `.codev/config.json`, read through `packages/codev/src/lib/config.ts` — add the key to `CodevConfig` +
+      `DEFAULT_CONFIG`) → set `escalated`, emit the escalation `notification` + a loud log; **never** deliver.
+- [ ] Liveness telemetry **surfacing**: the drainer's per-session not-clean verdict counter (instrumented in
+      Phase 4) crossing a threshold with recent output → loud log/broadcast (broken-profile discoverability,
+      spec Constraint).
 - [ ] Tests: `…/__tests__/inbox.test.ts` + escalation-age test.
 
 #### Implementation Details
@@ -541,6 +557,9 @@ either order; Phase 3 needs Phase 2; Phase 4 needs 1 & 2 (and wants 3 done so ag
   *message* delivery keeps using `tower-messages.ts:broadcastMessage`, unchanged.
 - **Cron runner** (`tower-cron.ts`) — rerouted delivery (Phase 6).
 - **`afx` CLI** (`cli.ts`, `commands/`) — `afx inbox` + extended send response (Phase 7).
+- **Send client + config loader** — `packages/core/src/tower-client.ts` + `commands/send.ts` surface the new
+  outcome to senders (Phase 4); `packages/codev/src/lib/config.ts` (`CodevConfig`/`DEFAULT_CONFIG`/`loadConfig`)
+  holds escalation-age (Phase 7) + retention-days (Phase 1).
 
 ## Risk Analysis
 ### Technical Risks
@@ -589,13 +608,26 @@ either order; Phase 3 needs Phase 2; Phase 4 needs 1 & 2 (and wants 3 done so ag
 - [ ] Verify-phase check in the integrated codebase (post-merge)
 
 ## Expert Review
-**Date**: _pending_
-**Model**: _pending (porch runs Gemini + Codex + Claude at plan verify)_
+**Date**: 2026-08-01
+**Models Consulted**: Gemini (APPROVE), Codex (REQUEST_CHANGES), Claude (APPROVE) — all HIGH confidence; SPIR plan-phase 3-way review, iteration 1.
 **Key Feedback**:
-- _to be filled after 3-way plan consultation_
+- **Codex** (verified against the repo): the plan covered the *server* send response but not the *client-side*
+  contract (`tower-client.ts` / `commands/send.ts:332` still prints unconditional "Message sent"); no *automated*
+  e2e for the #1265 repro (only manual); the config loader (`lib/config.ts`) for escalation/retention keys was
+  unnamed (a real code gap, not doc-only); the executive summary said "WS events" while the repo is SSE.
+- **Gemini**: `pruneTerminal` was defined but never invoked; liveness-telemetry state belongs in the Phase 4 drainer.
+- **Claude** (full file-reference verification, APPROVE): complete spec coverage confirmed; suggested a Phase 5
+  drain-coalescing test and flagged Phase 7 as the densest phase.
 
 **Plan Adjustments**:
-- _to be filled_
+- **Phase 4**: added the client-side contract deliverable (`tower-client.ts` return type + `commands/send.ts`
+  output), an automated e2e (`__tests__/send-mailbox.e2e.test.ts` via `vitest.e2e.config.ts`), the
+  `pruneTerminal` invocation site (Tower boot + backstop), and liveness-telemetry verdict tracking in the drainer.
+- **Phase 7**: named `lib/config.ts` (`CodevConfig`/`DEFAULT_CONFIG`) as the escalation-age loader; clarified
+  liveness telemetry is *tracked* in Phase 4 and *surfaced* here.
+- **Phase 1**: named `lib/config.ts` for retention-days; cross-referenced the pruneTerminal invocation.
+- **Phase 5**: added the drain-coalescing test.
+- **Exec summary**: "WS events" → "SSE events". **Integration Points** + **Notes** updated; optional Phase 7 split offered.
 
 ## Approval
 - [ ] Technical Lead Review
@@ -607,6 +639,7 @@ either order; Phase 3 needs Phase 2; Phase 4 needs 1 & 2 (and wants 3 done so ag
 | Date | Change | Reason | Author |
 |------|--------|--------|--------|
 | 2026-08-01 | Initial implementation plan | Spec 1313 approved | builder spir-1313 |
+| 2026-08-01 | Plan with multi-agent review | 3-way plan consult — Codex REQUEST_CHANGES addressed (client contract, e2e, config loader, WS→SSE); Gemini + Claude minors | builder spir-1313 |
 
 ## Notes
 - **PR strategy** (architect direction): all phases ship as git commits within a **single PR**, opened
@@ -618,6 +651,10 @@ either order; Phase 3 needs Phase 2; Phase 4 needs 1 & 2 (and wants 3 done so ag
   split because agy is a blocking net-new measurement (isolating it surfaces schedule risk), delivery-core is the
   safety-critical unit that should be verified alone, and the UI surfaces need a different test harness (Playwright)
   than the CLI/API. **Open for the architect to collapse at the plan-approval gate.**
+- **Phase 7 split option** (per plan review — Claude): if Phase 7 grows during implementation, split it into
+  **7a** (`afx inbox` CLI + `GET`/`POST /api/inbox` routes) and **7b** (overview `heldCount` + `overview-changed`
+  SSE + escalation `notification` + liveness surfacing). The current single-phase "visibility backend" grouping is
+  defensible; left as one phase unless it bloats.
 - **UI mechanism (confirmed by exploration)**: both surfaces update via **SSE** (`/api/events` → refetch
   `/api/overview`), not WebSocket. Held state is therefore surfaced by adding `heldCount` to the shared
   `OverviewData`/`OverviewBuilder` shape (`packages/types/src/api.ts`), populated in `overview.ts`, and signalled

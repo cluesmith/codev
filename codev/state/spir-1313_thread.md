@@ -74,4 +74,19 @@ Architect approved spec-approval gate + told me to continue to Plan. Grounded th
   architect in plan Notes. All plan checks pass.
 - ⚠️ Watch cwd: porch resolves project from worktree ROOT — a stray `cd` into packages/ made `porch check` fail
   with "Project not found." Always run porch from the worktree root.
-- Next: commit "Initial implementation plan", `porch done 1313` → 3-way plan consult.
+- Committed "Initial implementation plan" (0884addb). `porch done` → 3-way plan consult.
+
+### 2026-08-01 — Plan 3-way consult (iteration 1)
+- Verdicts: Gemini APPROVE, Codex REQUEST_CHANGES, Claude APPROVE — all HIGH. Claude verified every file ref +
+  full spec coverage. Codex's 4 blockers were all real (repo-verified); addressed all:
+  1. Client-side send contract: `tower-client.ts` return type + `commands/send.ts:332` (was unconditional
+     "Message sent") → print delivered vs held+reason. Added to Phase 4.
+  2. Automated e2e for #1265: added Phase 4 deliverable `__tests__/send-mailbox.e2e.test.ts` via
+     `vitest.e2e.config.ts`. (Real e2e path = `src/agent-farm/__tests__/*.e2e.test.ts`, NOT the
+     `packages/codev/tests/e2e/` CLAUDE.md cites — doc drift, flag in Phase 9.)
+  3. Config loader named: `packages/codev/src/lib/config.ts` (CodevConfig/DEFAULT_CONFIG/loadConfig) for
+     escalation-age (Ph7) + retention-days (Ph1).
+  4. Exec summary "WS events" → "SSE events".
+- Gemini: pruneTerminal invocation (boot + backstop, Ph4) + liveness telemetry tracked in Ph4 drainer. Fixed.
+- Claude: Phase 5 coalescing test + optional Phase 7 split (7a inbox/API, 7b overview/SSE/escalation). Added.
+- Next: commit "Plan with multi-agent review" + rebuttal, `porch done` → STOP at plan-approval gate.
