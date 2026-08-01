@@ -215,7 +215,7 @@ cache disables itself under `VITEST` unless a cache directory is named, and any
 test that reached the gemini lane without pinning `CODEV_AGY_BIN` resolved the
 real binary — so a suite run could still open a login window per spawn (#1323).
 Consult now treats a test runner as a hard boundary. Under `VITEST` (or
-`CODEV_TEST`) it refuses to resolve an unpinned `agy` and refuses to open the
+`CODEV_TEST_ISOLATION`) it refuses to resolve an unpinned `agy` and refuses to open the
 user-global metrics database, failing loudly instead of reaching either. Codev's
 own suites pin a fake `agy`, a sandbox auth cache, and a sandbox metrics DB for
 every test; spawned `codev` / `consult` children inherit the pins through the

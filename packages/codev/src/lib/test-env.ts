@@ -17,13 +17,18 @@
 /**
  * True when this process is running under a test runner.
  *
- * `VITEST` is set by the runner; CLI-integration and e2e tests spawn `codev` /
- * `consult` child processes with `{ ...process.env }`, so children inherit it
- * and are covered by the same guards. `CODEV_TEST` is an explicit marker for
- * harnesses that are not vitest.
+ * `VITEST` is set by the runner and covers every suite Codev actually has;
+ * CLI-integration and e2e tests spawn `codev` / `consult` children with
+ * `{ ...process.env }`, so children inherit it and fall under the same guards.
+ *
+ * `CODEV_TEST_ISOLATION` is the opt-in for a harness that is not vitest. It is
+ * deliberately a name Codev owns: these guards make `consult` *throw*, so a
+ * false positive breaks a real consultation. A generic marker like `CODEV_TEST`
+ * or `CI` could already be exported in an adopter's environment for unrelated
+ * reasons, and inheriting someone else's variable is not worth the blast radius.
  */
 export function isUnderTestRunner(): boolean {
-  return Boolean(process.env.VITEST || process.env.CODEV_TEST);
+  return Boolean(process.env.VITEST || process.env.CODEV_TEST_ISOLATION);
 }
 
 /**

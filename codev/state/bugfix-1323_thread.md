@@ -101,8 +101,46 @@ opens, all to the sandbox; zero to `~/.codev/metrics.db`.** Same run, row delta 
 Lesson worth keeping: on a shared machine, a global counter is evidence about the
 machine, not about your change. Instrument the code path, not the side effect.
 
+## Canary result (acceptance criterion 1)
+
+Temporarily instrumented `resolveAgyBin()` to log every resolution, and the
+`MetricsDB` constructor to log every path, then ran the full unit + CLI-integration
+suites. Instrumentation removed afterwards; the permanent equivalents are the guards
+plus `test-isolation.test.ts`.
+
+- **Every** `resolveAgyBin()` call across both suites had `override=` set to a
+  temp-dir fake. Zero calls with no override — and no override is the only way to
+  reach `~/.local/bin/agy` or PATH. Three distinct pids, all `VITEST=true`.
+- **Zero** `MetricsDB` opens against `~/.codev/metrics.db`; 19 opens, all sandbox
+  or explicit test paths.
+- Unit: 205 files / 4085 tests pass. CLI-integration: 8 files / 91 tests pass.
+
+`spec-1280-measurement-instrument.test.ts` failed intermittently along the way. Not
+mine: it shells out to `measure-prompt-surface.sh` (~2.0s per call, 2-3 calls per test,
+5s default timeout) and the machine was running 100+ concurrent vitest processes. A
+back-to-back A/B against a clean clone of `main` had both trees pass with identical
+duration (23.79s vs 23.71s), and the script itself times the same in both. Left alone.
+
 ## Architect instruction (2026-08-01T13:20Z)
 
 PR #1324 is a stopgap that `describe.skip`s `agy-integration.e2e.test.ts`. Once it
 merges: merge main into this branch and **re-enable that suite** under the fake-agy pin
 / no-browser guard, so the coverage comes back. Added to acceptance criteria.
+
+## Late correction (2026-08-01T13:31Z)
+
+Architect reverted the machine-wide agy rename; agy is back on PATH. No effect on this
+work — the canary above shows every resolution goes through a pinned fake regardless of
+whether a real agy exists, and the real-agy suite needs `CODEV_ALLOW_REAL_AGY=1`.
+
+Also renamed the non-vitest detection knob `CODEV_TEST` → `CODEV_TEST_ISOLATION`. These
+guards make `consult` *throw*, so a false positive breaks a real consultation; a generic
+name an adopter might already export is not worth that blast radius.
+
+## Note on PR #1324
+
+The merge conflict in `agy-integration.e2e.test.ts` was resolved by **re-enabling** the
+suite (`describe`, not `describe.skip`), per the architect's 13:20Z instruction to make
+restoring that coverage part of this fix. #1324's stated re-enable condition — "once the
+suite pins a fake agy (or an equivalent no-browser guard)" — is exactly what landed here.
+Flagging it explicitly since the merge undoes a hotfix that is only minutes old.
