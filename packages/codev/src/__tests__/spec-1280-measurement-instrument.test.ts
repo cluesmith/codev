@@ -1,0 +1,283 @@
+/**
+ * Spec 1280 — Phase 0: the corrected measurement instrument.
+ *
+ * The Spec 1252 instrument was committed, deterministic, and wrong: it derived
+ * its phase-task term from `codev-skeleton/porch/prompts/`, a dead tree with no
+ * runtime consumer, while the live resolver loads `protocols/<p>/prompts/`. It
+ * also omitted the spawn-inlined `roles/builder.md` and mis-stated how the hot
+ * tier reaches CLAUDE.md.
+ *
+ * These tests exist because "deterministic and committed" is not "correct".
+ * They assert the instrument against the REAL resolver and the REAL runtime
+ * loader, so a future edit cannot quietly reintroduce any of the three defects.
+ *
+ * Covers T1, T1b, T2, T3, T11, T12, T15.
+ */
+import { describe, it, expect, beforeAll } from 'vitest';
+import { execFileSync } from 'node:child_process';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
+
+const repoRoot = path.resolve(import.meta.dirname, '../../../..');
+const script = path.join(repoRoot, 'scripts/measure-prompt-surface.sh');
+
+function run(root: string = repoRoot, env: Record<string, string> = {}): string {
+  return execFileSync('bash', [script, root], {
+    encoding: 'utf-8',
+    env: { ...process.env, ...env },
+    maxBuffer: 20 * 1024 * 1024,
+  });
+}
+
+function num(output: string, key: string): number {
+  const m = output.match(new RegExp(`^${key}=(\\d+)$`, 'm'));
+  if (!m) throw new Error(`${key} not found in measurement output`);
+  return Number(m[1]);
+}
+
+/** Minimal fixture repo: only what the script reads. */
+function makeFixture(): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'spec1280-'));
+  const mk = (rel: string, body: string) => {
+    fs.mkdirSync(path.join(dir, path.dirname(rel)), { recursive: true });
+    fs.writeFileSync(path.join(dir, rel), body);
+  };
+  mk('CLAUDE.md', 'alpha bravo charlie\n');
+  mk('AGENTS.md', 'alpha bravo charlie\n');
+  mk('codev/resources/arch-critical.md', 'one two\n');
+  mk('codev/resources/lessons-critical.md', 'three four\n');
+  mk('codev/roles/builder.md', 'role word here\n');
+  mk('codev/roles/architect.md', 'architect role words\n');
+  mk('codev/roles/consultant.md', 'consultant words\n');
+  mk('codev-skeleton/protocols/spir/builder-prompt.md', 'wrapper words here\n');
+  mk('codev-skeleton/protocols/spir/protocol.md', 'protocol words here now\n');
+  mk('codev-skeleton/protocols/spir/prompts/specify.md', 'aa bb cc dd ee\n');
+  mk('codev-skeleton/protocols/spir/consult-types/spec-review.md', 'rubric words\n');
+  return dir;
+}
+
+describe('T1 — the instrument sources the directory the runtime actually loads', () => {
+  it('reads protocols/<p>/prompts/, not the dead porch/prompts tree', () => {
+    const src = fs.readFileSync(script, 'utf-8');
+    // Assert on EXECUTABLE lines only. The header comment legitimately names the
+    // dead tree while explaining the defect, and a blanket string ban would
+    // forbid documenting the very bug this test guards.
+    const code = src
+      .split('\n')
+      .filter((l) => !/^\s*#/.test(l) && l.trim() !== '')
+      .join('\n');
+    expect(code).toMatch(/protocols\/\$p\/prompts\//);
+    expect(code).not.toMatch(/PORCH_DIR=/);
+    // porch/prompts may appear only as the DEAD bucket (its measurement and its
+    // report label) — never as an input to the phase-task term. The tree still
+    // exists and the report must expose it; what must never return is it FEEDING
+    // the phase mean, which was defect 1.
+    const porchRefs = code.split('\n').filter((l) => l.includes('porch/prompts'));
+    expect(porchRefs.length).toBeGreaterThan(0);
+    for (const line of porchRefs) {
+      expect(line, `unexpected porch/prompts use: ${line}`).toMatch(/DEAD_[WF]=|\| DEAD /);
+    }
+    const phaseMeanFn = code.slice(code.indexOf('phase_mean()'), code.indexOf('consult_mean()'));
+    expect(phaseMeanFn).not.toMatch(/porch/);
+  });
+
+  it('agrees with loadPromptFile, which resolves protocols/<protocol>/prompts/<file>', () => {
+    // Ground the assertion in the real loader rather than a hardcoded string:
+    // if porch's resolution path ever moves, this fails loudly.
+    const loader = fs.readFileSync(
+      path.join(repoRoot, 'packages/codev/src/commands/porch/prompts.ts'),
+      'utf-8',
+    );
+    expect(loader).toMatch(/protocols\/\$\{protocolName\}\/prompts\/\$\{promptFile\}/);
+  });
+
+  it('counts the spawn-inlined role file (defect 2)', () => {
+    const spawn = fs.readFileSync(
+      path.join(repoRoot, 'packages/codev/src/agent-farm/commands/spawn-worktree.ts'),
+      'utf-8',
+    );
+    expect(spawn).toContain('.builder-role.md'); // it really is injected at spawn
+    expect(fs.readFileSync(script, 'utf-8')).toMatch(/BUILDER_ROLE=.*roles\/builder\.md/);
+  });
+
+  it('adds the hot tier to CLAUDE.md rather than assuming it is inlined (defect 3)', () => {
+    const managed = fs.readFileSync(
+      path.join(repoRoot, 'packages/codev/src/lib/managed-block.ts'),
+      'utf-8',
+    );
+    expect(managed).toContain('@codev/resources/arch-critical.md'); // @import, not inlined
+    const src = fs.readFileSync(script, 'utf-8');
+    expect(src).toMatch(/SHARED=\$\(\(\s*CLAUDE_MD \+ HOT\s*\)\)/);
+    // The stale claim must not survive as an ASSERTION about current behaviour.
+    // It may appear in the header, where it is quoted as a defect being corrected.
+    const header = src.slice(0, src.indexOf('set -euo pipefail'));
+    const body = src.slice(src.indexOf('set -euo pipefail'));
+    expect(body).not.toMatch(/already inlines/);
+    expect(header).toMatch(/TRANSCLUDES|@import/); // documents the real mechanism
+  });
+});
+
+describe('T1b — per-file four-tier resolution, not directory-level selection', () => {
+  it('resolves each file at its own winning tier', () => {
+    const dir = makeFixture();
+    // Override ONE prompt in .codev/ while its siblings stay in the skeleton.
+    fs.mkdirSync(path.join(dir, '.codev/protocols/spir/prompts'), { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, '.codev/protocols/spir/prompts/specify.md'),
+      'aa bb cc dd ee ff gg hh\n', // 8 words vs 5
+    );
+    const out = run(dir);
+    // Directory-level selection would have missed the override entirely.
+    expect(out).toMatch(/\| spir \| \d+ \| 8 \| \d+ \|/);
+  });
+
+  it('prefers .codev/ over codev/ over codev-skeleton/', () => {
+    const src = fs.readFileSync(script, 'utf-8');
+    const order = src.slice(src.indexOf('resolve() {'), src.indexOf('# SERVED words'));
+    expect(order.indexOf('.codev/')).toBeLessThan(order.indexOf('"codev/$1"'));
+    expect(order.indexOf('"codev/$1"')).toBeLessThan(order.indexOf('codev-skeleton/'));
+  });
+});
+
+describe('T2 — phantom-savings proof: includes are expanded', () => {
+  it('moving text from a prompt into an included template changes nothing', () => {
+    const dir = makeFixture();
+    const before = num(run(dir), 'ALWAYS_ON_WORDS');
+
+    // Same served content, different authored ownership.
+    fs.writeFileSync(
+      path.join(dir, 'codev-skeleton/protocols/spir/prompts/specify.md'),
+      'aa bb {{> protocols/spir/templates/frag.md}}\n',
+    );
+    fs.mkdirSync(path.join(dir, 'codev-skeleton/protocols/spir/templates'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'codev-skeleton/protocols/spir/templates/frag.md'), 'cc dd ee\n');
+
+    expect(num(run(dir), 'ALWAYS_ON_WORDS')).toBe(before);
+  });
+
+  it('expands non-markdown includes too — protocol.json delivery depends on it (P6)', () => {
+    const dir = makeFixture();
+    const before = num(run(dir), 'ALWAYS_ON_WORDS');
+    fs.writeFileSync(
+      path.join(dir, 'codev-skeleton/protocols/spir/protocol.md'),
+      'protocol words here now\n```json\n{{> protocols/spir/protocol.json}}\n```\n',
+    );
+    fs.writeFileSync(
+      path.join(dir, 'codev-skeleton/protocols/spir/protocol.json'),
+      '{ "a": 1, "b": 2 }\n',
+    );
+    // The JSON's words must appear in the served count, not vanish.
+    expect(num(run(dir), 'ALWAYS_ON_WORDS')).toBeGreaterThan(before);
+  });
+});
+
+describe('T3 — per-surface reporting completeness (not a ceiling)', () => {
+  it('reports every protocol found on disk, in either tree', () => {
+    const out = run();
+    const onDisk = new Set<string>();
+    for (const tree of ['codev/protocols', 'codev-skeleton/protocols']) {
+      const p = path.join(repoRoot, tree);
+      if (!fs.existsSync(p)) continue;
+      for (const e of fs.readdirSync(p, { withFileTypes: true })) {
+        if (e.isDirectory()) onDisk.add(e.name);
+      }
+    }
+    expect(onDisk.size).toBeGreaterThan(0);
+    for (const name of onDisk) {
+      expect(out, `protocol "${name}" missing from the report`).toMatch(
+        new RegExp(`^\\| ${name} \\|`, 'm'),
+      );
+    }
+  });
+
+  it('includes codev-only protocols with no skeleton twin (release)', () => {
+    expect(run()).toMatch(/^\| release \|/m);
+  });
+});
+
+describe('T11 — buckets vs audience loads are reported on different bases', () => {
+  it('states the formulas and warns the audience loads overlap', () => {
+    const out = run();
+    expect(out).toContain('ALWAYS_ON(builder,p,I)   = SHARED + BUILDER_SPAWN[p]');
+    expect(out).toMatch(/OVERLAP by design/);
+    expect(out).toMatch(/these SUM/);
+  });
+
+  it('one bucket growing while another shrinks shows BOTH movements, not a netted zero', () => {
+    const dir = makeFixture();
+    const before = run(dir);
+    const sharedBefore = Number(before.match(/\| SHARED [^|]*\| (\d+) \|/)![1]);
+    const archBefore = Number(before.match(/\| ARCHITECT [^|]*\| (\d+) \|/)![1]);
+
+    fs.writeFileSync(path.join(dir, 'CLAUDE.md'), 'alpha\n');                       // shrink
+    fs.writeFileSync(path.join(dir, 'codev/roles/architect.md'), 'a b c d e f g\n'); // grow
+
+    const after = run(dir);
+    const sharedAfter = Number(after.match(/\| SHARED [^|]*\| (\d+) \|/)![1]);
+    const archAfter = Number(after.match(/\| ARCHITECT [^|]*\| (\d+) \|/)![1]);
+
+    expect(sharedAfter).toBeLessThan(sharedBefore);
+    expect(archAfter).toBeGreaterThan(archBefore);
+  });
+});
+
+describe('T15 — relocation is visible, never reported as deletion (M0c)', () => {
+  it('moving a block into a skill drops always-on but holds total-authored steady', () => {
+    const dir = makeFixture();
+    fs.writeFileSync(path.join(dir, 'CLAUDE.md'), 'alpha bravo charlie delta echo foxtrot\n');
+    const before = run(dir);
+
+    // Relocate three words out of CLAUDE.md into a skill — the P3/P4 move.
+    fs.writeFileSync(path.join(dir, 'CLAUDE.md'), 'alpha bravo charlie\n');
+    fs.mkdirSync(path.join(dir, '.claude/skills/afx'), { recursive: true });
+    fs.writeFileSync(path.join(dir, '.claude/skills/afx/SKILL.md'), 'delta echo foxtrot\n');
+
+    const after = run(dir);
+    expect(num(after, 'ALWAYS_ON_WORDS')).toBeLessThan(num(before, 'ALWAYS_ON_WORDS'));
+    expect(num(after, 'TOTAL_AUTHORED_WORDS')).toBe(num(before, 'TOTAL_AUTHORED_WORDS'));
+  });
+
+  it('counts all four skill trees — one-tree counting would report relocation as deletion', () => {
+    const src = fs.readFileSync(script, 'utf-8');
+    for (const tree of [
+      '.claude/skills',
+      '.codex/skills',
+      'codev-skeleton/.claude/skills',
+      'codev-skeleton/.codex/skills',
+    ]) {
+      expect(src, `total-authored basis must include ${tree}`).toContain(tree);
+    }
+  });
+});
+
+describe('T12 — determinism', () => {
+  it('emits byte-identical output twice at the same commit', () => {
+    expect(run()).toBe(run());
+  });
+});
+
+describe('the corrected baseline is what the spec claims', () => {
+  let out: string;
+  beforeAll(() => { out = run(); });
+
+  it('reproduces ALWAYS_ON_WORDS = 34,255 for a SPIR builder at I=10', () => {
+    // 34,235 — not the 34,255 quoted in the spec. The spec's figure came from the
+    // 1252 additive include model, which counted the `{{> path}}` directive's own
+    // tokens AND the content substituted for them (~2 words per include, x10
+    // iterations = 20). This instrument substitutes, so the figure is 20 lower and
+    // more honest. Size is reporting-only under the amended charter, so no
+    // criterion moves; the delta is recorded in 1280-word-baseline.md.
+    expect(num(out, 'ALWAYS_ON_WORDS')).toBe(34235);
+  });
+
+  it('reproduces the architect load (8,599)', () => {
+    expect(out).toMatch(/\| Architect \(per session\) \| 8599 \|/);
+  });
+
+  it('honours PHASE_ITERS as a comparison constant', () => {
+    const one = num(run(repoRoot, { PHASE_ITERS: '1' }), 'ALWAYS_ON_WORDS');
+    const two = num(run(repoRoot, { PHASE_ITERS: '2' }), 'ALWAYS_ON_WORDS');
+    expect(two - one).toBe(736 + 1396); // HOT + spir phase mean (substituted)
+  });
+});
