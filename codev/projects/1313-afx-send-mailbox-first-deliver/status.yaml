@@ -1,9 +1,36 @@
 id: '1313'
 title: afx-send-mailbox-first-deliver
 protocol: spir
-phase: plan
-plan_phases: []
-current_plan_phase: null
+phase: implement
+plan_phases:
+  - id: phase_1
+    title: Mailbox persistence layer
+    status: in_progress
+  - id: phase_2
+    title: Rendered-empty gate + claude/codex profiles
+    status: pending
+  - id: phase_3
+    title: agy classifier profile (blocking measurement)
+    status: pending
+  - id: phase_4
+    title: Delivery orchestration + write serialization
+    status: pending
+  - id: phase_5
+    title: Fast delivery triggers (submit + quiescence)
+    status: pending
+  - id: phase_6
+    title: Cron rerouting through mailbox + gate
+    status: pending
+  - id: phase_7
+    title: afx inbox CLI + broadcasts + escalation
+    status: pending
+  - id: phase_8
+    title: Dashboard + VSCode held-count indicators
+    status: pending
+  - id: phase_9
+    title: Documentation + skeleton mirror
+    status: pending
+current_plan_phase: phase_1
 gates:
   spec-approval:
     status: approved
@@ -17,23 +44,8 @@ gates:
     status: pending
   verify-approval:
     status: pending
-iteration: 2
-build_complete: true
-history:
-  - iteration: 1
-    build_output: ''
-    reviews:
-      - model: gemini
-        verdict: APPROVE
-        file: >-
-          /home/user/code/codev_root/codev/.builders/spir-1313/codev/projects/1313-afx-send-mailbox-first-deliver/1313-plan-iter1-gemini.txt
-      - model: codex
-        verdict: REQUEST_CHANGES
-        file: >-
-          /home/user/code/codev_root/codev/.builders/spir-1313/codev/projects/1313-afx-send-mailbox-first-deliver/1313-plan-iter1-codex.txt
-      - model: claude
-        verdict: APPROVE
-        file: >-
-          /home/user/code/codev_root/codev/.builders/spir-1313/codev/projects/1313-afx-send-mailbox-first-deliver/1313-plan-iter1-claude.txt
+iteration: 1
+build_complete: false
+history: []
 started_at: '2026-08-01T01:40:05.008Z'
-updated_at: '2026-08-01T02:20:04.744Z'
+updated_at: '2026-08-01T02:22:01.450Z'
