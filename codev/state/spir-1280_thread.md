@@ -384,3 +384,42 @@ Design decisions worth recording:
   plausible casualties of P2 applied carelessly. Both get live integration checks, not fixtures.
 
 Porch checks pass: plan_exists, has_phases_json, min_two_phases (10).
+
+### Plan CMAP round 1 — 15 findings, none disputed (2026-07-31)
+
+Codex REQUEST_CHANGES (8) · Claude REQUEST_CHANGES (7). Both independently reproduced the 67
+decision count — **the accounting held; what failed was everything riding alongside it.** A plan
+drawn purely by inspection load under-specifies the supporting work, and that is precisely what
+both reviewers found.
+
+**Two blocking mechanism gaps, both verified against source before accepting:**
+
+1. **P6 had no adopter-resolvable mechanism.** `protocol.md` is inlined at spawn via
+   `{{protocol_reference}}` (spawn-roles.ts:112-124); **protocol.json is inlined nowhere** (:267
+   reads it only for validation). In a fresh adopter project the file isn't on disk. So my
+   "reference protocol.json" was the fetch-by-path CLAUDE.md forbids — carrying the largest cut
+   in the project. Resolved by *checking the resolver rather than guessing*:
+   `resolveCodevIncludes` is extension-agnostic, so a fenced ```json block with
+   `{{> protocols/<p>/protocol.json}}` resolves through all four tiers with no porch change.
+   New T18 tests strict AND soft mode — soft-mode builders have only the prompt, no porch tasks.
+
+2. **Skill relocation is a FOUR-tree sync** (Claude). `.claude/skills` (10), `.codex/skills` (10,
+   byte-identical), and both skeleton copies (7 each) — with existing drift (afx, porch) and
+   three skeleton-absent skills. M0(g) counted only `.claude/skills`, so relocated content would
+   have left Codex agents and adopters without it **and been reported as deleted** — inverting
+   the project's own honesty artifact. Phase 0 widens the basis; new T17 asserts parity.
+
+**Other structural fixes**: pre-rewrite capability inventory frozen in Phase 0 (was first
+extracted in the final phase, while Phase 2 already asserted against it); verify phase given an
+explicit home for M7/M8/M12/T13/T14; T3/T16 into Phase 0 (T16 guards M11 and had to exist before
+the first manifest); "review batch" *defined* to include tests/registry/retirements, with Phases
+4 and 9 declaring two batches each; scar canonicals verified against the ratified YAML in Phase 1
+with T4 deferred to Phase 9; commit-level group purity replacing the broken phase-level mapping;
+per-phase green suite; M10 reassigned to where each collision actually lands
+(spec-1273 → roles phase and Phase 1, not Phase 4; bugfix-742 → Phases 7/8).
+
+Phase count 10 → 11. Decisions still 67, max batch 11.
+
+**Notable**: Claude caught that my rollback mapping contradicted the spec I wrote — Phase 1
+claimed G2/G6 while rewriting roles/builder.md (G3) and roles/consultant.md (G5). A G3 revert
+would have silently pulled Phase 1 work out and T10 would have rehearsed the wrong map.
