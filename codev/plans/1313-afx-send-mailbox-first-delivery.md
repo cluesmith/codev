@@ -1,3 +1,8 @@
+---
+approved: 2026-08-01
+validated: [gemini, codex, claude]
+---
+
 # Plan: afx send — Mailbox-First Delivery (Never Force-Inject)
 
 ## Metadata

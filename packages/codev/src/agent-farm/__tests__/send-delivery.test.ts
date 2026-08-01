@@ -39,6 +39,7 @@ function fakeSession(overrides: Partial<DeliverySession> = {}): DeliverySession 
     command: 'claude',
     launchArgs: [],
     cwd: '/ws/a',
+    writable: true,
     write: (data: string) => {
       writes.push(data);
       return true;
@@ -178,6 +179,45 @@ describe('deliverAgentMail (Spec 1313, Phase 4)', () => {
     enqueue();
     const out = await deliverAgentMail(h.ports, db, '/ws/a', 'spir-1');
     expect(out.reason).toBe('no-profile');
+  });
+
+  it('clean gate but PTY unwritable (torn-down shellper) → holds no-live-pty, writes nothing, not delivered', async () => {
+    // Spec 1313 iter-1 review (Codex): a session can go unwritable (#1198: a dead
+    // shellper socket still reports status 'running', writes are dropped) after it is
+    // resolved. Delivering off the paced-write timer would mark such a row delivered;
+    // the write-instant `writable` re-check must hold it instead ("an errored PTY
+    // write leaves the row held").
+    const h = harness();
+    h.setSession('spir-1', fakeSession({ writable: false }));
+    const row = enqueue();
+    const out = await deliverAgentMail(h.ports, db, '/ws/a', 'spir-1');
+
+    expect(out.reason).toBe('no-live-pty');
+    expect(out.delivered).toEqual([]);
+    expect(h.writes).toHaveLength(0); // no bytes on the wire
+    expect(h.broadcasts).toHaveLength(0); // no delivered broadcast
+    expect(mailbox.getById(db, row.id)?.status).toBe('held');
+    expect(mailbox.getById(db, row.id)?.reason).toBe('no-live-pty');
+  });
+
+  it('row dismissed during the gate check → not written, not delivered, stays dismissed (resolve/deliver race)', async () => {
+    // Spec 1313 iter-1 review (Codex): dismiss/supersede run outside the per-agent
+    // delivery serializer, so one landing in the gate→write window must not still put
+    // bytes on the wire. Here the gate `classify` dismisses the row mid-check; the
+    // write-instant getById re-read must see it is no longer held and skip the write.
+    const h = harness();
+    h.setSession('spir-1', fakeSession());
+    const row = enqueue();
+    h.ports.classify = async () => {
+      mailbox.dismiss(db, row.id, 1001); // operator dismisses while the gate runs
+      return CLEAN;
+    };
+    const out = await deliverAgentMail(h.ports, db, '/ws/a', 'spir-1');
+
+    expect(out.delivered).toEqual([]);
+    expect(h.writes).toHaveLength(0); // never written after dismissal
+    expect(h.broadcasts).toHaveLength(0);
+    expect(mailbox.getById(db, row.id)?.status).toBe('dismissed'); // delivery left it terminal
   });
 
   it('delivers only ONE message per clean pass (oldest first) — the rest wait for the next clean gate', async () => {

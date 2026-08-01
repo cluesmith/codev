@@ -23,6 +23,7 @@ import path from 'node:path';
 import type Database from 'better-sqlite3';
 import {
   findHeldForAgent,
+  getById,
   listHeld,
   markDelivered,
   setHeldReason,
@@ -46,6 +47,15 @@ export interface DeliverySession {
   readonly command: string;
   readonly launchArgs: string[];
   readonly cwd: string;
+  /**
+   * Whether input can reach the process right now (Spec 1313 iter-1 review). A
+   * shellper-backed session whose socket died still reports status 'running' until
+   * teardown, and writes to it are silently dropped (#1198) — `PtySession.writable`
+   * checks the live connection, not just status. The delivery path re-checks this at
+   * the write instant so a torn-down PTY holds the row (spec: "an errored PTY write
+   * leaves the row held") instead of being marked delivered off the paced-write timer.
+   */
+  readonly writable: boolean;
   write(data: string): boolean;
 }
 
@@ -215,9 +225,36 @@ export async function deliverAgentMail(
   // write's paced completion so a serialized follow-up delivery never begins
   // until this message's text + Enter is fully on the wire.
   const row = held[0];
-  await ports.writeMessage(session, row.formatted_message, row.no_enter === 1);
-  ports.broadcast(broadcastForRow(row, ports.now()));
-  markDelivered(db, row.id, ports.now());
+
+  // Re-validate at the delivery instant (Spec 1313 iter-1 review, Codex). The held
+  // list and the gate verdict were read before this point, and dismiss/supersede are
+  // independent DB writes NOT routed through the per-agent delivery serializer — so a
+  // resolve that landed in the gate→write window must not still put bytes on the wire.
+  // better-sqlite3 is synchronous, so this re-read reflects any dismiss/supersede
+  // committed up to now; the irreducible residual (a resolve during the paced write
+  // itself) is the accepted gate→write race in the spec's Risks table.
+  const current = getById(db, row.id);
+  if (!current || current.status !== 'held') {
+    ports.onHeldStateChange(); // the held set changed under us → refresh the indicator
+    return { delivered: [], reason: null };
+  }
+
+  // The PTY can go unwritable between session resolution and here (#1198: a dead
+  // shellper socket still reports status 'running', and its writes are dropped). The
+  // spec requires an errored PTY write to leave the row held, so don't deliver into a
+  // torn-down session off the paced-write timer — hold and retry on a later gate pass.
+  if (!session.writable) return hold('no-live-pty');
+
+  await ports.writeMessage(session, current.formatted_message, current.no_enter === 1);
+
+  // markDelivered is guarded (held→delivered only). If it did NOT transition, the row
+  // was dismissed/superseded during the paced write — accept that terminal state and
+  // do not broadcast a delivery for it.
+  if (!markDelivered(db, row.id, ports.now())) {
+    ports.onHeldStateChange();
+    return { delivered: [], reason: null };
+  }
+  ports.broadcast(broadcastForRow(current, ports.now()));
   ports.onHeldStateChange(); // a held row left the set → refresh the indicator count
   ports.log(`[mailbox] delivered ${row.id} → ${toAgent} @ ${path.basename(workspacePath)}`);
   return { delivered: [row.id], reason: null };

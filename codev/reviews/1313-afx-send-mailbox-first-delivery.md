@@ -103,9 +103,10 @@ All times America/New_York (EDT, −0400), 2026-07-31 → 2026-08-01.
 
 ## Consultation Iteration Summary
 
-57 consultation files produced (19 phase-iterations × 3 models). **44 APPROVE, 12 REQUEST_CHANGES,
-1 COMMENT.** Every REQUEST_CHANGES was accepted and fixed (verified against code); only one minor note
-was rebutted and one deferred (both cosmetic/process, with the reviewer concurring).
+60 consultation files produced through review round 1 (20 phase-iterations × 3 models). **45 APPROVE,
+13 REQUEST_CHANGES, 1 COMMENT, 1 skip** (Gemini review-round: agy unauthenticated). Every REQUEST_CHANGES
+was accepted and fixed (verified against code); two minor process notes were rebutted (commit-message
+format, a cosmetic skeleton-example count) with the reviewer concurring, and one was deferred.
 
 | Phase | Iters | Who Blocked | What They Caught |
 |-------|-------|-------------|------------------|
@@ -120,7 +121,7 @@ was rebutted and one deferred (both cosmetic/process, with the reviewer concurri
 | Phase 7 | 3 | Codex (RC ×3) | Escalation didn't refresh overview + liveness broadcast + route tests (iter1); workspace-scoping (iter2); `POST dismiss` method guard (iter3) |
 | Phase 8 | 2 | Gemini + Codex (RC) | Missing Playwright e2e for the indicator; untested `extension.ts` wiring (extracted pure composers) |
 | Phase 9 | 2 | Codex (RC) | Undocumented `mailbox.retentionDays`/`escalationSeconds` config knobs |
-| Review | 1 | (this document) | — |
+| Review | 1+ | Codex | Two mailbox races (dismiss/deliver + write-completed⇒delivered) + missing approval frontmatter |
 
 **Most frequent blocker**: **Codex — 11 of 12 REQUEST_CHANGES** (sole blocker in 10 rounds; co-blocked
 Phase 8 with Gemini). Focus pattern: **contract completeness and test rigor** — client-side send contract,
@@ -340,6 +341,23 @@ Response types: **Addressed** (fixed), **Rebutted** (disagreed with reasoning), 
 #### Gemini / Codex / Claude — all APPROVE (HIGH)
 - No concerns raised. Codex confirmed the config knobs now documented; Claude verified CLAUDE≡AGENTS byte-identical and the config subsection byte-identical across trees.
 
+### Review Phase (Round 1) — PR #1330
+
+#### Claude — APPROVE (HIGH)
+- No concerns raised. Confirmed the "never force-inject" guarantee is **structurally** enforced (single gated write path, `KeyedSerializer`, `SendBuffer` deleted).
+
+#### Codex — REQUEST_CHANGES (HIGH)
+- **Concern**: `deliverAgentMail` can put bytes on the wire for a row dismissed/superseded in the gate→write window (dismiss/supersede run outside the delivery serializer).
+  - **Addressed**: re-read the row via `getById` at the write instant and skip if no longer `held`; also check `markDelivered`'s guarded return before broadcasting. New test covers a dismiss during the gate check.
+- **Concern**: "write completed ⇒ delivered" is unsound — `writeMessageToSession` ignores `write()`'s boolean and `writeMessagePaced` resolves on a `setTimeout` timer, so a torn-down PTY is marked delivered.
+  - **Addressed**: re-check `session.writable` (the #1198 live-connection signal) at the write instant → hold `no-live-pty` instead of delivering. Residual (disconnect *during* the paced write) documented as the spec's accepted post-delivery-verification non-goal. New test covers an unwritable session.
+- **Concern**: the merged plan/spec lack approval frontmatter; some commits deviate from `[Spec NNNN][Phase]`.
+  - **Addressed**: added `approved`/`validated` frontmatter to spec + plan (reflecting the recorded gate approvals).
+  - **Rebutted** (commit format): the deviating commits are `[Spec 1313] Thread:` records; rewriting pushed history conflicts with the repo's "preserve individual commits" policy and doesn't justify a force-push. Non-blocking.
+
+#### Gemini — skipped
+- Non-blocking skip (`agy` exited 1, unauthenticated). No review content.
+
 ## Lessons Learned
 
 ### What Went Well
@@ -435,6 +453,11 @@ discipline). The one hot-tier addition this project earned is architectural (the
 - **Synthesized agy fixtures**, not raw captures (the raw capture leaks the authenticated account email). They are
   verified through the real classifier path, but a version bump should re-measure against live agy (the spike
   harness is the smoke test) rather than trusting the synthesized bytes indefinitely.
+- **Intra-paced-write delivery residual** (review iter-1, Codex issue 2): the delivery path now re-checks
+  `session.writable` and row-status at the write instant, but a disconnect (or dismiss) landing *during* the
+  sub-100ms paced setTimeout writes can still drop the trailing Enter / later lines while the row is marked
+  delivered. Closing this fully needs post-delivery / canonical-stream verification — an explicit spec non-goal
+  ("no believed-sent claim is made"). Accepted residual, same class as the spec's wrapper-transition race.
 
 ## Flaky Tests
 

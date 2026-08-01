@@ -54,6 +54,7 @@ function flipSession(command = 'claude'): DeliverySession & { setScreen(raw: str
     command,
     launchArgs: [],
     cwd: '/ws/a',
+    writable: true,
     write: (d: string) => {
       writes.push(d);
       return true;

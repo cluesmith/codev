@@ -37,6 +37,7 @@ function fakeSession(): DeliverySession {
     command: 'claude',
     launchArgs: [],
     cwd: WS,
+    writable: true,
     write: () => true,
   };
 }

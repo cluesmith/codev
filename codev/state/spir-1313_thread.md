@@ -930,3 +930,23 @@ blocks). Review-phase work this session:
 - Next: commit review+governance+thread (explicit staging), push, open PR (`Closes #1313`, do NOT merge —
   standing architect constraint), notify architect, then `porch done 1313` (checks: pr_exists / arch+lessons
   headings / e2e). Docs/governance-only session — no code touched, so build/tests unaffected.
+
+### 2026-08-01 — REVIEW iter-1 3-way: Claude APPROVE, Codex RC (2 real races), Gemini skip → FIXED
+PR #1330 opened; `porch done` checks green; review 3-way ran. **Claude APPROVE/HIGH** (safety invariant
+structurally enforced). **Gemini skipped** (agy exit 1, unauthenticated — non-blocking). **Codex
+REQUEST_CHANGES/HIGH** — 3 points, all verified against source before acting:
+1. **Dismiss/deliver race** (real): `deliverAgentMail` wrote `held[0]` from a stale read before the guarded
+   `markDelivered`; dismiss/supersede run OUTSIDE the delivery serializer, so a resolve in the gate→write
+   window could still write bytes for a dismissed row. **Fixed**: `getById` re-check at the write instant
+   (skip if not held) + check `markDelivered`'s guarded boolean return before broadcasting.
+2. **write-completed⇒delivered unsound** (real): `write()` returns bool (#1198 dropped write) but it's
+   discarded; `writeMessagePaced` resolves on a setTimeout timer → torn-down PTY marked delivered, violating
+   spec's "errored write → held". **Fixed**: re-check `session.writable` at the write instant → hold
+   `no-live-pty` instead. Added `writable` to `DeliverySession` (PtySession getter satisfies it; 3 fakes
+   updated). Intra-paced-write residual documented (spec non-goal: no post-delivery verification).
+3. **Process**: (a) spec/plan lacked approval frontmatter → **Fixed** (added, reflecting recorded gate
+   approvals). (b) some commits deviate from `[Spec][Phase]` → **Rebutted** (pushed history; repo preserves
+   individual commits; no force-push warranted).
+**Verify**: tsc --noEmit exit 0; send-delivery+cron-delivery+send-mailbox-repro 37 pass (+2 new race tests);
+tower-routes 96 pass. Rebuttal → `1313-review-iter1-rebuttals.md`. Review doc updated (Consultation Feedback
+→ Review Phase; Technical Debt residual). Next: commit → push (updates PR) → `porch done` → iter-2 re-consult.
