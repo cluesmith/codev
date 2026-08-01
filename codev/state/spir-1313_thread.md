@@ -211,3 +211,48 @@ Architect approved spec-approval gate + told me to continue to Plan. Grounded th
   **(1313-phase_2-iter1-rebuttals.md)** committed separately (plan-phase precedent). Consult verdict .txt files are
   gitignored (transient) — not committed.
 - `porch done 1313` next → iteration-2 re-consult. STRICT: porch decides re-review vs advance; I do not self-approve.
+
+### 2026-07-31 — ✅ Phase 2 APPROVED (unanimous) → advanced to phase_3
+- Iter-2 re-consult: **Gemini APPROVE, Codex APPROVE, Claude APPROVE — all HIGH, zero KEY_ISSUES.** Codex flipped
+  from REQUEST_CHANGES after running the test file directly to verify behavior. My two fixes cleared its concerns.
+- porch advanced: `57938efd chore(porch): 1313 advance plan phase → phase_3`. No human gate between implement
+  phases, so no architect notification due.
+- **Phase 3 — agy classifier profile (blocking measurement)** now open (iteration 1). This is net-new/empirical:
+  agy's `> ` marker + NORMAL-intensity hint text break the claude/codex dim-placeholder rule, so agy needs its
+  own profile/rule. Baked Decision 12 = blocking. Acceptance: agy **trust dialog → NOT clean** (a blind Enter
+  there confirms a filesystem-trust decision), agy idle → clean, agy draft → not-clean, no claude/codex regression.
+- Assets: spike-1265 branch exists (`builder/spike-1265`, checked out in another worktree → read via git, do NOT
+  check out here). Spike POC harness at `codev/spikes/1265-poc/` on that branch. `agy` is on PATH
+  (`~/.local/bin/agy`) — live smoke is OPTIONAL (fixtures + measurement note if unauthenticated; must NOT blindly
+  spawn agy — #1077: an unauthed spawn opens an OAuth browser tab).
+
+### 2026-08-01 — Phase 3 agy MEASUREMENT NOTE (how the rule was derived) + implementation
+- **Method**: spawned real `agy` (Antigravity CLI 1.1.8, authenticated) under the spike harness
+  (`harness.cjs` via a scratch `agy-measure.cjs`), rendered through `@xterm/headless` 6.0.0, and dumped
+  per-cell SGR attributes (dim/bold/italic/inverse + **fg color mode/index**) for the composer row across
+  idle/draft, plus a fresh-untrusted-dir spawn for the trust dialog. **Never sent Enter** (a blind Enter on
+  the trust dialog confirms filesystem trust). exp0c only measured dim/bold (both 0 → looked identical); the
+  decisive signal was **foreground color**, which I added to the probe.
+- **Measured facts** (agy 1.1.8, this box):
+  - Marker: `> ` at composer-row col 0, rendered **palette-12** (bright blue). NOT `❯`/`›` — own marker.
+  - Idle composer: `> <Mode> mode: <hint> (shift+tab to cycle)` — hint at **palette-8 (gray), dim=0**.
+  - Draft composer: `> <user text>` — text at **default fg** (fg=def).
+  - Trust dialog: no rule-line composer; `> Yes, I trust this folder` selected option at **palette-12**;
+    `  No, exit` at palette-8.
+  - ⇒ dim/bold cannot separate idle-hint from draft (both dim=0); **fg color does** (pal8 gray = placeholder,
+    default = user text, pal12 = marker/selected).
+- **Derived rule**: profile gains optional `placeholderFgPalette` (agy: 8). Classifier ignores cells whose fg
+  is that palette index (the color analogue of the universal `isDim()` skip). Idle → clean (gray hint ignored);
+  draft → busy (default-fg counted); trust → busy (pal12 "Yes…" counted → **blind Enter can't confirm trust**).
+  Only pal8 is ignored, so a non-gray option (pal12) still counts — pinned by a dedicated test (trust guard).
+- **resolveProfile**: agy matched by binary basename (`agy`/`antigravity`) directly — NOT via
+  `detectHarnessFromCommand` (which doesn't know agy and whose claude fallback is exactly the misID to avoid,
+  constraint 10). Updated the Phase-2 "agy → null" comment + test (now agy → AGY_PROFILE, still NOT claude).
+- **Fixtures**: SYNTHESIZED (idle/draft/trust) to the measured attributes with **sanitized** content — the raw
+  agy capture embeds the authenticated **account email** in its banner, so it is NOT committed (scratchpad only).
+  Synthesis verified through the real RingBuffer→classifier path before writing (`agy-synth.mjs`): idle=clean,
+  draft=busy, trust=busy. README documents provenance + the color rule.
+- **Verified**: render-gate **28/28** (was 23; +3 fixtures, +2 synthetic agy color-rule tests, agy resolveProfile
+  test updated), `tsc --noEmit` clean. No claude/codex regression. agy is now a working, fail-safe target
+  (Baked Decision 12 blocking criterion satisfied at the gate level; live delivery smoke is Phase 4/verify).
+- Next: commit phase_3, `porch done 1313` → 3-way review.
