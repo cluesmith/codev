@@ -1,7 +1,7 @@
 id: '1313'
 title: afx-send-mailbox-first-deliver
 protocol: spir
-phase: review
+phase: verify
 plan_phases:
   - id: phase_1
     title: Mailbox persistence layer
@@ -47,138 +47,10 @@ gates:
   verify-approval:
     status: pending
 iteration: 1
-build_complete: true
-history:
-  - iteration: 1
-    plan_phase: phase_2
-    build_output: ''
-    reviews:
-      - model: gemini
-        verdict: APPROVE
-        file: >-
-          /home/user/code/codev_root/codev/.builders/spir-1313/codev/projects/1313-afx-send-mailbox-first-deliver/1313-phase_2-iter1-gemini.txt
-      - model: codex
-        verdict: REQUEST_CHANGES
-        file: >-
-          /home/user/code/codev_root/codev/.builders/spir-1313/codev/projects/1313-afx-send-mailbox-first-deliver/1313-phase_2-iter1-codex.txt
-      - model: claude
-        verdict: APPROVE
-        file: >-
-          /home/user/code/codev_root/codev/.builders/spir-1313/codev/projects/1313-afx-send-mailbox-first-deliver/1313-phase_2-iter1-claude.txt
-  - iteration: 1
-    plan_phase: phase_4
-    build_output: ''
-    reviews:
-      - model: gemini
-        verdict: APPROVE
-        file: >-
-          /home/user/code/codev_root/codev/.builders/spir-1313/codev/projects/1313-afx-send-mailbox-first-deliver/1313-phase_4-iter1-gemini.txt
-      - model: codex
-        verdict: REQUEST_CHANGES
-        file: >-
-          /home/user/code/codev_root/codev/.builders/spir-1313/codev/projects/1313-afx-send-mailbox-first-deliver/1313-phase_4-iter1-codex.txt
-      - model: claude
-        verdict: APPROVE
-        file: >-
-          /home/user/code/codev_root/codev/.builders/spir-1313/codev/projects/1313-afx-send-mailbox-first-deliver/1313-phase_4-iter1-claude.txt
-  - iteration: 1
-    plan_phase: phase_5
-    build_output: ''
-    reviews:
-      - model: gemini
-        verdict: APPROVE
-        file: >-
-          /home/user/code/codev_root/codev/.builders/spir-1313/codev/projects/1313-afx-send-mailbox-first-deliver/1313-phase_5-iter1-gemini.txt
-      - model: codex
-        verdict: REQUEST_CHANGES
-        file: >-
-          /home/user/code/codev_root/codev/.builders/spir-1313/codev/projects/1313-afx-send-mailbox-first-deliver/1313-phase_5-iter1-codex.txt
-      - model: claude
-        verdict: APPROVE
-        file: >-
-          /home/user/code/codev_root/codev/.builders/spir-1313/codev/projects/1313-afx-send-mailbox-first-deliver/1313-phase_5-iter1-claude.txt
-  - iteration: 1
-    plan_phase: phase_7
-    build_output: ''
-    reviews:
-      - model: gemini
-        verdict: APPROVE
-        file: >-
-          /home/user/code/codev_root/codev/.builders/spir-1313/codev/projects/1313-afx-send-mailbox-first-deliver/1313-phase_7-iter1-gemini.txt
-      - model: codex
-        verdict: REQUEST_CHANGES
-        file: >-
-          /home/user/code/codev_root/codev/.builders/spir-1313/codev/projects/1313-afx-send-mailbox-first-deliver/1313-phase_7-iter1-codex.txt
-      - model: claude
-        verdict: APPROVE
-        file: >-
-          /home/user/code/codev_root/codev/.builders/spir-1313/codev/projects/1313-afx-send-mailbox-first-deliver/1313-phase_7-iter1-claude.txt
-  - iteration: 2
-    plan_phase: phase_7
-    build_output: ''
-    reviews:
-      - model: gemini
-        verdict: APPROVE
-        file: >-
-          /home/user/code/codev_root/codev/.builders/spir-1313/codev/projects/1313-afx-send-mailbox-first-deliver/1313-phase_7-iter2-gemini.txt
-      - model: codex
-        verdict: REQUEST_CHANGES
-        file: >-
-          /home/user/code/codev_root/codev/.builders/spir-1313/codev/projects/1313-afx-send-mailbox-first-deliver/1313-phase_7-iter2-codex.txt
-      - model: claude
-        verdict: APPROVE
-        file: >-
-          /home/user/code/codev_root/codev/.builders/spir-1313/codev/projects/1313-afx-send-mailbox-first-deliver/1313-phase_7-iter2-claude.txt
-  - iteration: 3
-    plan_phase: phase_7
-    build_output: ''
-    reviews:
-      - model: gemini
-        verdict: APPROVE
-        file: >-
-          /home/user/code/codev_root/codev/.builders/spir-1313/codev/projects/1313-afx-send-mailbox-first-deliver/1313-phase_7-iter3-gemini.txt
-      - model: codex
-        verdict: REQUEST_CHANGES
-        file: >-
-          /home/user/code/codev_root/codev/.builders/spir-1313/codev/projects/1313-afx-send-mailbox-first-deliver/1313-phase_7-iter3-codex.txt
-      - model: claude
-        verdict: APPROVE
-        file: >-
-          /home/user/code/codev_root/codev/.builders/spir-1313/codev/projects/1313-afx-send-mailbox-first-deliver/1313-phase_7-iter3-claude.txt
-  - iteration: 1
-    plan_phase: phase_8
-    build_output: ''
-    reviews:
-      - model: gemini
-        verdict: REQUEST_CHANGES
-        file: >-
-          /home/user/code/codev_root/codev/.builders/spir-1313/codev/projects/1313-afx-send-mailbox-first-deliver/1313-phase_8-iter1-gemini.txt
-      - model: codex
-        verdict: REQUEST_CHANGES
-        file: >-
-          /home/user/code/codev_root/codev/.builders/spir-1313/codev/projects/1313-afx-send-mailbox-first-deliver/1313-phase_8-iter1-codex.txt
-      - model: claude
-        verdict: APPROVE
-        file: >-
-          /home/user/code/codev_root/codev/.builders/spir-1313/codev/projects/1313-afx-send-mailbox-first-deliver/1313-phase_8-iter1-claude.txt
-  - iteration: 1
-    plan_phase: phase_9
-    build_output: ''
-    reviews:
-      - model: gemini
-        verdict: APPROVE
-        file: >-
-          /home/user/code/codev_root/codev/.builders/spir-1313/codev/projects/1313-afx-send-mailbox-first-deliver/1313-phase_9-iter1-gemini.txt
-      - model: codex
-        verdict: REQUEST_CHANGES
-        file: >-
-          /home/user/code/codev_root/codev/.builders/spir-1313/codev/projects/1313-afx-send-mailbox-first-deliver/1313-phase_9-iter1-codex.txt
-      - model: claude
-        verdict: APPROVE
-        file: >-
-          /home/user/code/codev_root/codev/.builders/spir-1313/codev/projects/1313-afx-send-mailbox-first-deliver/1313-phase_9-iter1-claude.txt
+build_complete: false
+history: []
 started_at: '2026-08-01T01:40:05.008Z'
-updated_at: '2026-08-01T19:02:58.636Z'
+updated_at: '2026-08-01T19:03:15.452Z'
 force_advanced:
   phase: phase_7
   iteration: 3
