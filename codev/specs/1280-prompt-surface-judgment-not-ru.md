@@ -1,20 +1,22 @@
-# Specification: Prompt surface — judgment-not-rules rewrite (>50% always-on reduction)
+# Specification: Prompt surface — judgment-not-rules rewrite (principle conformance)
 
 <!--
 SPEC vs PLAN BOUNDARY:
 This spec defines WHAT and WHY. The plan defines HOW and WHEN.
-Per-surface WORD CEILINGS are stated here because they are the measurable
-acceptance criteria. WHICH sentences get cut, in what order, over how many
-phases, belongs in codev/plans/1280-prompt-surface-judgment-not-ru.md.
 
-The record of how this spec evolved (13 findings in CMAP round 1, 9 in round 2,
-none disputed) lives in codev/projects/1280-*/1280-specify-iter{1,2}-rebuttals.md
-and codev/state/spir-1280_thread.md — deliberately not narrated here.
+ACCEPTANCE MODEL (Waleed, 2026-07-31): "I don't think the goal should be a
+particular size. That's not the right criteria. It should be to stick to the
+principles outlined in the blog post." Principle conformance is pass/fail.
+Word counts are measured and reported, but nothing passes or fails on them.
+
+Round-by-round review history lives in
+codev/projects/1280-*/1280-specify-iter{1,2}-rebuttals.md and
+codev/state/spir-1280_thread.md — deliberately not narrated here.
 -->
 
 ## Metadata
 - **ID**: spec-2026-07-31-prompt-surface-judgment-not-rules
-- **Status**: draft (compressed; CMAP rounds 1–2 incorporated)
+- **Status**: draft (acceptance model revised to principle conformance)
 - **Created**: 2026-07-31
 - **Issue**: #1280
 - **Protocol**: SPIR
@@ -22,66 +24,68 @@ and codev/state/spir-1280_thread.md — deliberately not narrated here.
 ## Clarifying Questions Asked
 
 Issue #1280 carries a complete charter, so no clarifying questions were put to the architect
-before drafting. Four were resolved against the repository or by architect ruling:
+before drafting. Five were resolved against the repository or by architect ruling:
 
 1. **What is the always-on surface, as served?** — Read the live composition path
    (`commands/porch/prompts.ts`, `lib/skeleton.ts`, `lib/managed-block.ts`,
    `agent-farm/commands/spawn-worktree.ts`) and measured this builder's own served artifacts
    (`.builder-prompt.txt` 4,921w, `.builder-role.md` 1,837w). See **Inventory**.
-2. **Is the committed measurement script fit to score this project?** — No; three defects, one
+2. **Is the committed measurement script fit for this project?** — No; three defects, one
    disqualifying. Criterion **M0**; architect verified against source and endorsed.
-3. **How wide is the rewrite target?** — Architect scope directive: the **entire** prompt
-   surface — architect roles, builder roles and spawn wrappers, consultant/CMAP prompts, phase
-   prompts and their template includes, `protocol.md` texts — with the instrument **segmented
-   by audience** so a cut in one segment masking growth in another stays visible.
+3. **How wide is the rewrite target?** — The **entire** prompt surface: architect roles,
+   builder roles and spawn wrappers, consultant/CMAP prompts, phase prompts and their template
+   includes, `protocol.md` texts.
 4. **Where are the eight ratified scar rules?** — Recovered verbatim from
    `builder/spir-1252:codev/resources/scar-rules.yaml`.
+5. **What is the acceptance criterion?** — **Principle conformance, not size** (Waleed, above).
+   Measurement is retained for honesty, not for grading.
 
 ## Problem Statement
 
-A Codev builder consumes **34,255 served always-on words** before reading a line of the code it
-was spawned to change. Almost none is information it could not derive; it is *process
-narration* — recipes for how to be an agent, written when the fleet could not be trusted to
-infer them.
+Codev's prompt surface was written for a fleet that could not be trusted to infer process. It
+tells agents how to be agents: ordered procedures, all-caps prohibitions, checklists restating
+the phase body, annotated templates. A builder consumes **34,255 served always-on words**
+before reading a line of the code it was spawned to change.
 
 Spec 1252 proved the obvious remedy fails: deduplication yields **−7.0%**, because the surface
-is not duplicated, it is **over-instructed**. Three compounding costs:
+is not duplicated, it is **over-instructed**. Anthropic's published account of the
+Claude-5-generation rewrite reports:
+
+> "We removed over 80% of Claude Code's system prompt for models like Claude Opus 5 and Claude
+> Fable 5 with no measurable loss on our coding evaluations."
+
+Three compounding costs:
 
 1. **It crowds out judgment.** A model given a 3,703-word procedure follows the procedure;
-   given a 700-word contract and a goal, it reasons about the goal. Anthropic's published
-   account of the Claude-5-generation rewrite reports >80% of Claude Code's system prompt
-   deleted with no measurable performance loss.
+   given a contract and a goal, it reasons about the goal.
 2. **Nobody reads it, so it rots.** 1252 found the *served* SPIR builder prompt had silently
    lost its entire `Verify Phase` section, with a detector reporting the drift, unread, for
    months. A surface too large to read is too large to maintain.
-3. **It makes its own success unmeasurable.** The committed script scores a directory the
-   runtime never loads.
+3. **It makes its own success unmeasurable.** The committed measurement script scores a
+   directory the runtime never loads.
 
 Deletion on judgment-trust grounds was an explicit **Non-goal** of Spec 1252.
 
 ### Principle: the instrument is part of the deliverable
 
-This is the second measurement defect in the 1252 lineage — the first being that 1252
-originally shipped with no measurement plan at all, caught at a human gate, not by CMAP.
-Neither was found by reading the instrument's code; both by asking *what does this claim to
-measure, and does it?*
+This is the second measurement defect in the 1252 lineage — the first being that 1252 shipped
+without a measurement plan at all, caught at a human gate, not by CMAP. Neither was found by
+reading the instrument's code; both by asking *what does this claim to measure, and does it?*
 
 > **The instrument is part of the deliverable, and instruments get reviewed against what they
-> claim to measure — not merely against whether they run.** A measurement script, check, or
-> baseline artifact is subject to the same adversarial review as the feature it scores.
-> "Deterministic and committed" is not "correct."
+> claim to measure — not merely against whether they run.** "Deterministic and committed" is
+> not "correct."
 
-Load-bearing here because this project's headline criterion is a number one shell script emits.
-It is why **M0 precedes M1**, why **M0c** exists (an always-on metric cannot tell deletion from
-relocation), and why **M5** inventories prompt text rather than the config files this project
-does not touch.
+Under the revised acceptance model the instrument no longer *grades* the work — but it still
+keeps the project honest about what actually happened, which is why **M0**, **M0b** and
+**M0c** survive the demotion of every word target.
 
 ## Current State
 
 ### Inventory — every prompt-bearing surface, by audience
 
 Served and expanded words (`{{> …}}` includes resolved `codev/` → `codev-skeleton/`), captured
-2026-07-31 at `047f92f7`.
+2026-07-31 at `047f92f7`. **Reported for observability; no figure here is a target.**
 
 **SHARED — every agent in this repo**
 
@@ -94,9 +98,8 @@ Served and expanded words (`{{> …}}` includes resolved `codev/` → `codev-ske
 
 **Session shared total: 6,551.**
 
-**ARCHITECT** — `roles/architect.md` 2,048 (read at `arch-init`, every session);
-`.claude/skills/*/SKILL.md` ×10 = 6,672 (on-demand — progressive disclosure working as
-intended).
+**ARCHITECT** — `roles/architect.md` 2,048 (read at `arch-init`); `.claude/skills/*/SKILL.md`
+×10 = 6,672 (on-demand — progressive disclosure already working as intended).
 
 **BUILDER — spawn, once per builder**
 
@@ -113,13 +116,13 @@ intended).
 | `protocols/bugfix/builder-prompt.md` | 429 | | `protocols/air/protocol.md` | 643 |
 | `protocols/spike/builder-prompt.md` | 400 | | `protocols/maintain/builder-prompt.md` | 374 |
 
-**SPIR builder spawn total: 6,364** (role 1,837 + wrapper 824 + protocol 3,703).
+**SPIR builder spawn total: 6,364.**
 
 **PHASE — per porch task delivery, ×I.** Hot tier (736) rides on *every* phase prompt.
 
 | Protocol | Prompts (expanded) | Mean |
 |---|---|---:|
-| spir / aspir | specify 1,402 · plan 1,169 · implement 1,065 · review 1,957 | **1,398** |
+| spir / aspir | specify 1,402 · plan 1,169 · implement 1,065 · review 1,957 | 1,398 |
 | pir | review 2,414 · implement 1,151 · plan 741 | 1,435 |
 | bugfix | pr 491 · fix 352 · investigate 290 | 378 |
 | air | pr 471 · implement 442 | 457 |
@@ -127,15 +130,16 @@ intended).
 
 **CONSULTANT — per CMAP review.** `roles/consultant.md` 252 + one consult-type: spir/aspir spec
 514 · impl 421 · phase 421 · plan 406 · pr 392; bugfix pr 726 / impl 641; pir pr 475 / impl
-507; air pr 455 / impl 420; maintain 421 / 392. **SPIR per review: 683.**
+507; air pr 455 / impl 420; maintain 421 / 392. **SPIR per review: 683.** Fleet-wide ≈ 683 × 3
+models × ~10 reviews ≈ **20,500 words/project**.
 
 **DEAD** — `codev-skeleton/porch/prompts/**`, 10 files, 4,009 words, no runtime consumer.
 
-### Buckets and audience loads are different things
+### How the reported figures are composed
 
-**Surface buckets are exclusive** and partition the authored surface with no overlap or gap:
-`SHARED` (6,551) · `ARCHITECT` (2,048) · `BUILDER_SPAWN[p]` · `PHASE[p]` · `CONSULTANT[p]` ·
-`DEAD` (4,009). **Audience loads are derived** and deliberately overlap:
+Buckets are **exclusive** and partition the authored surface: `SHARED` (6,551) · `ARCHITECT`
+(2,048) · `BUILDER_SPAWN[p]` · `PHASE[p]` · `CONSULTANT[p]` · `DEAD` (4,009). Audience loads
+are **derived** and deliberately overlap — so they are reported separately, never summed:
 
 ```
 HOT                      = arch-critical + lessons-critical                    = 736
@@ -144,27 +148,35 @@ ALWAYS_ON(architect)     = SHARED + ARCHITECT
 ALWAYS_ON(consultant,p)  = roles/consultant.md + mean CONSULTANT-type[p]
 
 ALWAYS_ON_WORDS  ≡  ALWAYS_ON(builder, spir, 10)
-                 =  6,551 + 6,364 + 10 × (736 + 1,398)  =  34,255      ← the headline
+                 =  6,551 + 6,364 + 10 × (736 + 1,398)  =  34,255
 ```
 
-Architect load 8,599; consultant 683. `I = 10` is 1252's proxy, consistent with B4's 3.06
-review rounds/project across 4–6 phases — a comparison constant, identical before and after.
+Architect load 8,599; consultant 683. `I = 10` is 1252's proxy — a comparison constant,
+identical before and after. These definitions exist so M0's report is unambiguous; **none of
+them is a target.**
 
-Fleet-wide the consultant surface is not small: 683 × 3 models × ~10 reviews ≈ **20,500
-words/project**, comparable to the entire builder load. It sits outside the headline because it
-is per-review, not because it is negligible.
+### File counts — what the architect will personally inspect
+
+| | Count |
+|---|---:|
+| Prompt-bearing `.md` files, both trees + `CLAUDE.md`/`AGENTS.md` | **131** |
+| Of which `codev/protocols` copies **byte-identical** to their skeleton twin | **60** |
+| `codev/protocols` copies that differ | 3 (`maintain/templates/audit-report.md`, `maintain/templates/lessons-learned.md`, `release/protocol.md` — the last has no skeleton twin) |
+| `roles/*.md` — all three byte-identical across trees | 3 pairs |
+| `CLAUDE.md` ≡ `AGENTS.md` | verified identical |
+| **Distinct content decisions** | **~66** |
+
+This matters for M11: reviewing all 131 diffs would mean re-reading ~65 byte-identical copies.
+The inspection is over **distinct content decisions**, with twin sync verified mechanically.
 
 ### Coverage is per-surface, not per-protocol × surface-type
 
-Verified on disk: `codev/protocols/` holds **ten** protocols, `codev-skeleton/protocols/`
-**nine** — `release` is project-local by design, has only `protocol.md` (1,626w, no
-`protocol.json`, no `builder-prompt.md`), is human-invoked prose an agent reads, and is
-therefore in scope but not porch-orchestrated. `experiment`, `research`, `spike` and `release`
-have no `prompts/` or `consult-types/`; those absences are intentional.
-
-Ceilings and sweep criteria therefore apply to **each surface that exists after resolution**,
-enumerated from disk across both trees and unioned. Absence never fails a check; an
-**unmeasured** present surface does.
+`codev/protocols/` holds **ten** protocols, `codev-skeleton/protocols/` **nine** — `release` is
+project-local by design, has only `protocol.md` (1,626w, no `protocol.json`, no
+`builder-prompt.md`), is human-invoked prose an agent reads, and is in scope but not
+porch-orchestrated. `experiment`, `research`, `spike` and `release` have no `prompts/` or
+`consult-types/`; those absences are intentional. Coverage criteria therefore apply to **each
+surface that exists after resolution**, enumerated from disk across both trees and unioned.
 
 ### The measurement defects (why M0 exists)
 
@@ -180,13 +192,8 @@ enumerated from disk across both trees and unioned. Absence never fails a check;
    session launch, so `wc -w CLAUDE.md` **excludes** 736 always-loaded words.
 
 Net: the reported baseline (21,702) understates the phase term ~3.5×, omits the role file, and
-under-counts the session term by 736. **And the metric cannot see this project's primary
-target** — cutting SPIR phase prompts 1,398 → 430 moves `ALWAYS_ON_WORDS` by exactly zero. A
->50% claim scored on it would be phantom savings.
-
-The dead tree has no *runtime* consumer but does have a **test** consumer:
-`review-prompt-routing.test.ts:29` asserts on `codev-skeleton/porch/prompts/review.md` (a Spec
-987 hot/cold-routing protection). M6 handles it.
+under-counts the session term by 736. The dead tree has no *runtime* consumer but does have a
+**test** consumer: `review-prompt-routing.test.ts:29` (a Spec 987 hot/cold-routing protection).
 
 ### What landed, what is deferred
 
@@ -195,204 +202,176 @@ behavioural baseline (B1 = 51.88% REQUEST_CHANGES, n=160, self-excluded; B2 1.12
 and the measurement tooling. Deferred here by architect ruling: the **scar registry and its
 eight ratified wordings**, with enforcement rebuilt *after* the shrink.
 
-Issue #1279 is partly overtaken — SPIR prompts now inline templates via `{{> …}}`, which is what
-makes each phase prompt ~600 words heavier than it reads. Two *separate* constraints govern
-template shape and must not be conflated: `checks.ts:149-154` (`REQUIRED_SPEC_SECTIONS`)
-requires only **four** headings; the 20-heading pressure comes from the `spec-review` consult
-type, advisorily.
+Issue #1279 is partly overtaken — SPIR prompts now inline templates via `{{> …}}`. Two separate
+constraints govern template shape and must not be conflated: `checks.ts:149-154`
+(`REQUIRED_SPEC_SECTIONS`) requires only **four** headings; the 20-heading pressure comes from
+the `spec-review` consult type, advisorily.
 
 ## Desired State
 
-**One prompt form, written for frontier models, that states contracts and trusts judgment.** A
-builder's always-on context says what it owns, what artifacts it must produce and their shape,
-where the human gates are, and what is irreversible — then gets out of the way. Everything else
-is reachable on demand.
+**Every prompt-bearing file conforms to the blog's principles.** Not "is smaller" — conformant.
+A file that is principle-conformant at more words passes; a file that hits any size one might
+have hoped for while still narrating procedure fails.
 
-### Rewrite principles
+### The principles, verbatim
 
-1. **Contract, not recipe.** State the required outcome and its shape; delete the procedure.
-2. **Interface, not example.** A heading skeleton with one line of intent per heading replaces
-   an annotated template with filler prose.
-3. **No worst-case padding.** Delete instructions guarding failure modes frontier models do not
-   exhibit (all-caps prohibitions, "⚠️ BLOCKING" banners, checklists restating the body).
-4. **Progressive disclosure.** How-to content moves to skills / on-demand files, addressed by
-   name. Relocation is *not* deletion and is measured separately (M0c).
-5. **Budgets are cheap words worth keeping.** Frontier models honour stated budgets precisely
-   but never invent them; budget/scope lines are exempt from cuts.
-6. **Scar rules are verbatim and exempt from rewriting** — but **counted** in ceilings.
-7. **The instrument is part of the deliverable.** A ceiling not measured on served words is not
-   a ceiling.
+Quoted from *The new rules of context engineering for Claude-5-generation models*. These are
+the acceptance basis; each is restated as a per-file question the architect can answer from a
+diff.
 
-### Per-surface ceilings (GROSS — scar words count inside every ceiling)
+| # | Blog transition | Verbatim rationale | Per-file conformance question |
+|---|---|---|---|
+| **P1** | "Give Claude rules" → **"Let Claude use judgement"** | "newer models have better judgement and can handle these decisions well without explicit rules." | Does this file state a *contract* (what must be true) rather than a *procedure* (what steps to take)? Is every remaining rule one a frontier model would get wrong without it? |
+| **P2** | "Give Claude examples" → **"Design interfaces"** | "giving examples actually constrains them to a certain exploration space. Instead of using examples, think more about the design of your tools, scripts and files." | Has each illustrative example been replaced by an interface — a heading skeleton, a schema, a named artifact contract? |
+| **P3** | "Put it all upfront" → **"Use progressive disclosure"** | "Claude Code has gotten very competent at using progressive disclosure- loading the right context at the right times." | Is everything in this always-on file needed *every* time? Has look-it-up content moved to a skill or on-demand file, addressed by name? |
+| **P4** | "Repeat yourself" → **"Simple tool descriptions"** | "We found we could delete these repeat examples and put instructions on how to use tools in the tool descriptions rather than the system prompt." | Do CLI/tool how-tos live with the tool (skills, `--help`) rather than in the prompt? Is anything repeated here that another surface already owns? |
+| **P5** | "Memory in CLAUDE.md files" → **"Auto-memory"** | "Claude now automatically saves memories that are relevant to the work and to you." | **N/A for this project, with reason** — auto-memory is a Claude Code harness feature, and Baked Decision 1's fleet includes GPT 5.6 and Gemini 3.6 consumers with no equivalent. Codev's governance content stays in the hot tier rather than relying on it. Declared rather than silently skipped. |
+| **P6** | "Simple specs" → **"Rich references"** | "Claude can handle increasingly more complicated references. Instead of simple markdown files, Claude can reference HTML artifacts." | Where prose restates machine-readable truth (`protocol.json` gates, checks, phases), does the file reference the structured source instead of narrating it? |
+| **P7** | **"Unhobbling"** — worst-case guardrails | Old guardrails existed because "we needed to be sure that Claude avoided worst case scenarios, such as deleting files." | Has defensive padding written for weaker models been deleted — **except** the ratified scar rules (below)? |
 
-Applied to the SPIR instance as the measured proxy and swept across every existing surface in
-both trees.
+**P7 and the scar rules — the one deliberate exception.** The blog's worst-case example
+("deleting files") is precisely the class Codev's scar rules guard. Baked Decision 2 keeps all
+eight verbatim. This is a knowing departure from P7, not an oversight: the blog's guardrails
+protected against *bad output*, which judgment now handles; scar rules protect against
+*irreversible acts* — destroyed worktrees, killed sessions, bypassed human gates — where the
+cost of being wrong once is unbounded and no amount of judgment makes the wager sensible. Every
+other P7 candidate goes.
 
-| Segment | Surface | Now | Ceiling (gross) | Scar carriage inside |
-|---|---|---:|---:|---:|
-| shared | `CLAUDE.md` / `AGENTS.md` | 5,815 | **≤1,900** | ~190 (all 8) |
-| shared | hot tier (`@import`) | 736 | **736 unchanged** | — |
-| architect | `roles/architect.md` | 2,048 | **≤700** | ~30 |
-| builder | `roles/builder.md` | 1,837 | **≤600** | ~12 |
-| builder | `protocols/*/protocol.md` (SPIR) | 3,703 | **≤700** | — |
-| builder | `protocols/*/builder-prompt.md` (SPIR) | 824 | **≤420** | ~40 |
-| phase | `protocols/*/prompts/*.md` expanded (SPIR mean) | 1,398 | **≤430** | ~14 |
-| consultant | `protocols/*/consult-types/*.md` (SPIR mean) | 431 | **≤200** | — |
-| consultant | `roles/consultant.md` | 252 | **≤252 unchanged** | — |
-| dead | `codev-skeleton/porch/prompts/**` | 4,009 | **0 (deleted)** | — |
+### Conformance is judged per file, by the architect
 
-### Post-rewrite always-on, by audience
+Acceptance is not a number and not a CMAP verdict. Each rewritten file carries a
+**conformance record** — principles applied, what was cut and why, old and new word counts —
+and the architect inspects the actual old-vs-new diff. See **M11**.
 
-```
-BUILDER (SPIR, I=10)
-    session   (1,900 + 736)                    2,636
-  + spawn     (600 + 700 + 420)                1,720
-  + phase ×10 (736 + 430)                     11,660
-    -----------------------------------------------
-    34,255 → 16,016                          −53.2%
+### Word counts: measured, reported, never a gate
 
-ARCHITECT   8,599 → 3,336  (2,636 session + 700 role)      −61.2%
-CONSULTANT    683 →   452  (252 role + 200 consult-type)   −33.8%
-```
+The corrected instrument still runs before and after, still reports per-audience loads, and
+still separates deletion from relocation (**M0c**) — because a project that deletes 20,000
+words should be able to say truthfully where they went. **No criterion passes or fails on any
+of these numbers.** The rewrite's own projection, kept purely so the reported figures have
+something to be compared against, is roughly 34,255 → ~16,000 for a SPIR builder; if principle
+conformance lands somewhere else, the number moves and the spec does not.
 
-No segment grows. Consultant cuts least because `roles/consultant.md` is already lean at 252 —
-reported rather than averaged into the headline.
+### Scar-rule carriage plan
 
-The phase term is 73% of the post-rewrite builder budget, and the **exempt** hot tier is 7,360
-of the 16,016 total (46%). What survives is overwhelmingly curated judgment, not process — and
-that exemption bounds how far this project can go without reopening it.
+The eight rules ratified 2026-07-28 ship **verbatim** (~188 words): `git-add-explicit`,
+`never-destroy-worktrees`, `no-destructive-git`, `human-gates`, `no-hand-edit-status`,
+`afx-from-root`, `shellper-verified-orphan`, `tower-restart-permission`.
+
+- The registry is **rebuilt after the shrink** — each rule's `must_appear_on` re-derived against
+  the post-rewrite surface.
+- Enforcement is a byte-identical-presence test, pinned at 8 rules and their ids.
+- A scar rule may be compressed **only by architect ratification**, never by a builder applying
+  P1 or P7.
 
 ### Rollout: the corrected instrument lands on `main` first (M0b)
 
-**No prompt-surface word is cut before the corrected instrument is on `main`.** A cut scored by
-the current script is unfalsifiable, and 1252's published baselines cite dead-tree figures while
-being shared knowledge other work reads.
+**No prompt-surface word is rewritten before the corrected instrument is on `main`.** 1252's
+published baselines cite dead-tree figures while being shared knowledge other work reads.
 
 **PR-1 (early, standalone) contains exactly:**
 
 | In | Out (deliberately) |
 |---|---|
 | Corrected `measure-prompt-surface.sh` — all seven M0 items | Any edit to any prompt surface |
-| Its tests (T1, T1b, T2, T11, T12, T15). The script has **no test at all** today, which is how three defects survived in a "committed and reproducible" instrument | The scar registry (rebuilt after the shrink, per Baked Decision 2) |
-| `codev/resources/1280-word-baseline.md` — corrected, segmented pre-rewrite baseline (34,255) | The dead-tree deletion (has a test consumer → M10 governance) |
+| Its tests (T1, T1b, T2, T11, T12, T15). The script has **no test at all** today, which is how three defects survived in a "committed and reproducible" instrument | The scar registry (rebuilt after the shrink) |
+| `codev/resources/1280-word-baseline.md` — corrected, segmented pre-rewrite baseline | The dead-tree deletion (has a test consumer → M10 governance) |
 | In-place annotation of `1252-word-baseline.md` and `1252-word-after-phase7.md`: originals **preserved**, marked superseded, reason + pointer | Re-derivation of 1252's behavioural baseline (B1 stands; M8 re-runs post-merge) |
 
-**Timing**: end of the first implement phase — instrument correct and tested, before any cut.
 **Verified safe**: no test asserts on either 1252 word-count artifact (the frozen-sample test at
-`prompt-behavior-metrics.test.ts:184` pins the *behavioural* sample, a different instrument), so
-the annotation carries no re-baselining cost.
-
-The one argument against early landing — that the corrected baseline is meaningful only
-alongside the cuts it scores — fails: the baseline's value is precisely that it is *pre-cut*,
-and publishing it early is what makes the eventual −53.2% claim checkable by someone who did not
-watch it being produced.
-
-### Scar-rule carriage plan
-
-The eight rules ratified 2026-07-28 ship **verbatim** (~188 words of canonical text):
-`git-add-explicit`, `never-destroy-worktrees`, `no-destructive-git`, `human-gates`,
-`no-hand-edit-status`, `afx-from-root`, `shellper-verified-orphan`, `tower-restart-permission`.
-
-- The registry is **rebuilt after the shrink** — each rule's `must_appear_on` re-derived against
-  the post-rewrite surface, since most 1252-listed files will be rewritten or deleted.
-- Carriage is **exempt from rewriting but counted in ceilings**: a ceiling a surface cannot meet
-  while carrying its scar rules is a wrong ceiling, raised deliberately — never met by trimming
-  scar text.
-- Enforcement is a byte-identical-presence test, pinned at 8 rules and their ids.
-- A scar rule may be compressed **only by architect ratification**, never by a builder applying
-  principle 1.
+`prompt-behavior-metrics.test.ts:184` pins the *behavioural* sample, a different instrument).
 
 ## Stakeholders
 
 - **Primary Users**: builder agents; CMAP reviewer agents; architect agents.
-- **Secondary Users**: humans who must read and maintain the surface (protected by M2b);
-  downstream adopters receiving it via `codev update`.
-- **Technical Team**: this builder; the architect at both gates.
-- **Business Owners**: Waleed — ratifies scar wordings, rules on the A/B verdict and on any
-  ceiling change.
+- **Secondary Users**: humans who must read and maintain the surface (M2b); downstream adopters
+  receiving it via `codev update`.
+- **Technical Team**: this builder; the architect, who personally inspects every changed file.
+- **Business Owners**: Waleed — sets the acceptance model, ratifies scar wordings, rules on the
+  A/B verdict.
 
 ## Success Criteria
 
-- [ ] **M0 — the metric measures what is served, segmented by audience.** The corrected script
-      (a) sources phase prompts from the directory `loadPromptFile` resolves; (b) resolves
-      **per-file through the full four-tier chain** as `resolveCodevFile` does, not two-tier
-      directory-level selection, so mixed per-file overrides measure correctly; (c) counts the
-      inlined `roles/builder.md`; (d) counts hot-tier `@import` transclusion in the session term
-      **and corrects the stale inlining comment**; (e) expands `{{> …}}` includes; (f) reports
-      **exclusive bucket subtotals and derived audience loads separately**, per the stated
-      formulas, never presenting overlapping audience figures as a sum; (g) reports **total
-      authored prompt-surface words** (both trees + `.claude/skills/`) alongside always-on.
-      Tests assert (a) and (b) against the real resolver.
+**Acceptance basis: MP1–MP7 (principle conformance) plus M11 (architect inspection). The
+measurement criteria M0/M0b/M0c exist for honesty; M1 and M2 are reporting obligations that
+cannot fail on a number.**
+
+- [ ] **MP — every prompt-bearing file conforms to P1, P2, P3, P4, P6 and P7** (P5 declared
+      N/A with reason), judged per file by the architect against the verbatim principle table.
+      A file passes on conformance regardless of its word count. Non-conformance at any size is
+      a failure.
+- [ ] **M11 — architect personal inspection of every changed file.** Each implement phase ends
+      with a **per-file manifest**: path · old word count · new word count · principles applied ·
+      one-line rationale for what was cut. The architect reviews **actual old-vs-new diffs, file
+      by file** — not samples, not summaries, not CMAP-mediated — before the phase advances.
+      Batches are humanly sized: **≤12 distinct files per review batch**. Inspection is over the
+      **~66 distinct content decisions**, not all 131 file-diffs — 60 `codev/protocols` copies
+      are byte-identical mirrors of their skeleton twins, so reviewing both would be re-reading
+      the same bytes; twin sync is verified mechanically by **T7** instead. Any file the
+      architect judges non-conformant returns to the builder before the phase advances.
+- [ ] **M0 — the metric measures what is served.** The corrected script (a) sources phase
+      prompts from the directory `loadPromptFile` resolves; (b) resolves **per-file through the
+      full four-tier chain** as `resolveCodevFile` does; (c) counts the inlined
+      `roles/builder.md`; (d) counts hot-tier `@import` transclusion **and corrects the stale
+      inlining comment**; (e) expands `{{> …}}` includes; (f) reports exclusive bucket subtotals
+      and derived audience loads separately; (g) reports **total authored prompt-surface words**
+      (both trees + `.claude/skills/`). Tests assert (a) and (b) against the real resolver.
 - [ ] **M0b — the corrected instrument and baseline land on `main` early**, as a small
-      standalone PR (precedent #1290), per **Desired State → Rollout**.
-- [ ] **M0c — deleted words are distinguished from relocated words.** Relocation to skills
-      scores identically to deletion under an always-on-only metric — the phantom-savings class
-      T2 catches on the *include* axis, unmonitored on the *relocation* axis. A −53% headline is
-      equally consistent with −30% deleted + −23% relocated, and only deleted content satisfies
-      Problem Statement claim 1. The review **decomposes the always-on reduction into deleted vs
-      relocated**, evidenced by M0(g).
-- [ ] **M1 — >50% reduction (derived, arithmetically implied by M2).** `ALWAYS_ON_WORDS` falls
-      from 34,255 to **≤16,100**, measured before and after by the same corrected script, both
-      figures committed; audience loads reported, none regressed. Meeting every ceiling yields
-      ≤16,016 (−53.2%), so M1 cannot fail while M2 passes — but it clears >50% by only **3.2
-      points ≈ 1,100 words**, so no ceiling has slack to give away. The reachable contingency is
-      **denominator movement**: if correcting the instrument surfaces always-on content not yet
-      found, the baseline and every ceiling are re-derived to preserve >50%, and that
-      re-derivation goes to the architect rather than being absorbed silently.
-- [ ] **M2 — per-surface ceilings met (binding).** Every ceiling, **gross**, on **every surface
-      existing after resolution**, enumerated from disk across both trees and unioned. Absence
-      never fails; an unmeasured present surface does.
-- [ ] **M2b — CLAUDE.md stays human-readable.** At 5,815 → ≤1,900 the rewritten file must retain
-      a navigable heading structure and be reviewed by the architect for human usability at the
-      gate — twin-parity bytes are not a readability check.
+      standalone PR (precedent #1290), per **Rollout**.
+- [ ] **M0c — deleted words are distinguished from relocated words.** P3 authorizes moving
+      content to skills, and relocation scores identically to deletion under an always-on-only
+      metric. The review **decomposes the reduction into deleted vs relocated**, evidenced by
+      M0(g). This is a reporting obligation, not a threshold.
+- [ ] **M1 — before/after figures measured and published.** Same corrected script both sides;
+      both committed as generated artifacts; per-audience loads reported. **No pass/fail
+      threshold attaches to any of them.**
+- [ ] **M2 — per-file word counts appear in every manifest** (M11), so the architect sees the
+      size effect of each decision while judging conformance. **Reporting only; no ceilings.**
+- [ ] **M2b — CLAUDE.md stays human-readable.** The rewritten file retains a navigable heading
+      structure and is reviewed by the architect for human usability — twin-parity bytes are not
+      a readability check.
 - [ ] **M3 — sweep completeness.** Surfaces enumerated from disk (both trees, unioned), never a
-      hardcoded list; no surface retains pre-rewrite content. Includes
-      `codev/protocols/release/protocol.md` (1,626w), which has no skeleton twin.
+      hardcoded list; every existing surface is rewritten and inspected. Includes
+      `codev/protocols/release/protocol.md`, which has no skeleton twin.
 - [ ] **M4 — scar rules intact.** Eight canonicals byte-identical on every registered surface;
       test fails on reword or deletion; count pinned at 8.
 - [ ] **M5 — no capability lost, proven against the prompt text.** A committed
       `capability-inventory.json` extracted pre-rewrite with explicit recognition rules —
-      artifact paths (`codev/(specs|plans|reviews)/…` literals and `{{artifact_name}}` forms),
-      gate names, signal names (`<signal …>` tags), porch check names, notification triggers —
-      normalized (lowercase, strip backticks/punctuation, dedupe).
+      artifact paths, gate names, signal names (`<signal …>` tags), porch check names,
+      notification triggers — normalized (lowercase, strip backticks/punctuation, dedupe).
 
       **The inventory is over the resolved, expanded prompt surface, not over `protocol.json` or
-      source call sites.** Extracting gate and check names from an unchanged `protocol.json`, or
-      notifications from unchanged `afx send` call sites, would report every capability present
-      even if every corresponding instruction vanished from the served prompts. Each item must
-      be evidenced as **represented in served prompt text** via a contract-presence assertion.
-      This is the primary defence for the most aggressive row, `protocol.md` 3,703 → ≤700
-      (−81%), the builder's only map of gates, artifacts and phases.
+      source call sites** — extracting gate names from an unchanged `protocol.json` would report
+      every capability present even if every corresponding instruction vanished from the served
+      prompts. Each item must be evidenced as represented in served prompt text.
 
       **Severity**: a removal is a hard failure **unless** the retired name appears in a
       committed `codev/resources/1280-retirements.md` in the same commit, naming the capability,
-      why it is obsolete, and the architect approval. Retirements will occur (M6 deletes a tree;
-      `protocol.md` drops ~3,000 words), so the exception path is explicit rather than
-      improvised.
+      why it is obsolete, and the architect approval.
 - [ ] **M6 — the dead tree is gone, with its consumer handled.**
       `codev-skeleton/porch/prompts/` deleted. Verification is **not** a bare grep: an
       untruncated repo-wide search reconciled against the full hit list shows zero *runtime*
       consumers, and the one **test** consumer (`review-prompt-routing.test.ts:29`, a Spec 987
       protection) is updated under M10 naming Spec 987.
 - [ ] **M7 — A/B non-inferiority passes** per the pre-registered decision rule; gates
-      `verify-approval`.
+      `verify-approval`. Mandatory per the charter: behavioural outcomes are the evidence the
+      principles are working.
 - [ ] **M8 — behavioural baseline re-run.** `measure-prompt-behavior.ts` re-run and committed;
-      B1 compared directionally to 51.88% (n=160) with the sample documented.
+      B1 compared directionally to 51.88% (n=160).
 - [ ] **M9 — rollback rehearsed** by group, per **Rollback Plan**.
 - [ ] **M10 — prose-pinned test re-baselining is deliberate and enumerated.** ~25 test files
-      assert exact prose in the surfaces being cut; the hardest is
+      assert exact prose in the surfaces being rewritten; the hardest is
       `agent-farm/__tests__/baked-decisions.test.ts:143-148`, enforcing a **pure-addition diff**
-      against committed baselines for `protocols/{spir,aspir,air}/builder-prompt.md` —
-      incompatible with 824 → ≤420. Also `bugfix-744-spir-pr-strategy.test.ts`,
-      `spec-1273-wait-discipline-docs.test.ts`, `bugfix-619-aspir-prompt.test.ts`,
-      `template-delivery.test.ts`, `framework-ref-audit.test.ts`, `governance-sweep.test.ts`,
+      against committed baselines for `protocols/{spir,aspir,air}/builder-prompt.md`. Also
+      `bugfix-744-spir-pr-strategy.test.ts`, `spec-1273-wait-discipline-docs.test.ts`,
+      `bugfix-619-aspir-prompt.test.ts`, `template-delivery.test.ts`,
+      `framework-ref-audit.test.ts`, `governance-sweep.test.ts`,
       `review-prompt-routing.test.ts`. **Each assertion is a prior spec's protection encoded as a
-      grep, so retiring one is a governance act.** Every modified or retired assertion is listed
-      in the review with (i) the originating spec, (ii) whether the protected behaviour survives
-      in the rewritten prose, (iii) the replacement assertion, or an explicit architect-visible
-      retirement. Pure-addition re-baselining only with the originating spec named and the new
-      baseline committed in the same commit. Silent deletion to make the suite green is a
-      project failure, not a test fix.
+      grep, so retiring one is a governance act** — a principle matter, not a size matter. Every
+      modified or retired assertion is listed in the review with (i) the originating spec,
+      (ii) whether the protected behaviour survives in the rewritten prose, (iii) the replacement
+      assertion, or an explicit architect-visible retirement. Silent deletion to make the suite
+      green is a project failure, not a test fix.
 - [ ] All tests pass **after M10's enumerated re-baselining**; no coverage reduction. New tests
       cover M0, M3, M4, M5.
 - [ ] Documentation routed by tier; `CLAUDE.md`/`AGENTS.md` byte-identical.
@@ -417,9 +396,9 @@ plan, or CMAP reviewers:
 - Spec must define a rollback story (prompt surfaces are files; reverting is cheap — say so
   concretely).
 
-Arising from the repository and the scope directive:
+Arising from the repository and architect rulings:
 
-- **Scope is the full prompt surface, segmented**; measurement reports per-segment.
+- **Principle conformance is the acceptance criterion; size is not.**
 - **Both trees**; `CLAUDE.md` ≡ `AGENTS.md`.
 - **Four-tier resolution, per file.** No fetch-by-path instruction for a file that may not exist
   on disk (deliver-don't-fetch).
@@ -431,172 +410,173 @@ Arising from the repository and the scope directive:
 
 - Two human gates (`spec-approval`, `plan-approval`) plus `pr`; the A/B verdict is the
   architect's call.
-- Adopters consume the skeleton via `codev update`, so rollback is a revertible unit per
-  **group**.
+- **The architect personally inspects every changed file** (M11) — this is the binding
+  throughput constraint on phase design.
+- Adopters consume the skeleton via `codev update`, so rollback is a revertible unit per group.
 - Scar wordings are architect-ratified; a builder may not compress them.
-- **The corrected instrument ships early, as its own PR** (M0b); remaining phase-commits ship as
-  a single later PR.
+- **The corrected instrument ships early, as its own PR** (M0b).
 
 ## Assumptions
 
 - The eight scar wordings on `builder/spir-1252` remain the ratified set.
-- `I = 10` remains the agreed proxy — a comparison constant, identical both sides.
 - Frontier-model behaviour is stable across the A/B window (mitigated by pairing, same base
   commit, pinned model/config versions).
 - `builder/spir-1252` stays undeleted — sole source of the ratified registry.
 - CMAP reviewers are blind to the builder's prompt surface by construction.
+- The architect has capacity for ~66 file inspections across the implement phases; if not, the
+  phase count grows rather than the batch size.
 
 ## Solution Approaches
 
-### Approach 1: In-place judgment rewrite, surface by surface (RECOMMENDED)
+### Approach 1: In-place principle rewrite, surface by surface (RECOMMENDED)
 
-Rewrite each file to the seven principles, keeping file layout, resolver and porch untouched.
-Templates become heading interfaces; how-to content relocates to skills; the dead tree goes; the
+Rewrite each file to P1–P7, keeping file layout, resolver and porch untouched. Templates become
+interfaces (P2); how-to content moves to skills (P3, P4); prose restating `protocol.json`
+becomes a reference to it (P6); worst-case padding goes except the scar rules (P7). The
 instrument is corrected first.
 
-**Pros**: zero mechanism risk; every change a reviewable text diff; rollback granularity equals
-cut granularity; compatible with deliver-don't-fetch.
-**Cons**: discipline-dependent (mitigated by T3); large diff across 10 protocols × 2 trees, so
-sweep completeness is the main risk; collides with ~25 prose-pinned test files (M10).
+**Pros**: zero mechanism risk; every change is a reviewable text diff — which is exactly what
+M11's per-file inspection requires; rollback granularity equals cut granularity.
+**Cons**: discipline-dependent; ~66 distinct files to inspect; collides with ~25 prose-pinned
+test files (M10).
 **Complexity**: Medium · **Risk**: Low-Medium
 
 ### Approach 2: Generate prompts from `protocol.json`
 
 Synthesize phase prompts at runtime from the state machine, with a small per-phase prose delta.
 
-**Pros**: structurally prevents re-growth and drift; would have made the 1252 drift bug
-impossible.
-**Cons**: introduces a code path between authoring and serving — new failure mode, harder to
-review and revert — and changes porch behaviour (an explicit constraint). Couples the shrink to
-a mechanism change, making any A/B regression un-attributable: deletion or generator?
-**Complexity**: High · **Risk**: Medium-High
-**Verdict**: right idea, wrong project; a plausible successor over a 16,000-word surface.
+**Pros**: the purest expression of P6; structurally prevents drift.
+**Cons**: introduces a code path between authoring and serving, changes porch behaviour (an
+explicit constraint), and **defeats M11** — the architect cannot inspect old-vs-new diffs of
+files that no longer exist as authored artifacts. Couples the rewrite to a mechanism change,
+making any A/B regression un-attributable.
+**Verdict**: right idea, wrong project — and now also incompatible with the inspection mandate.
 
 ### Approach 3: Shared kernel + per-protocol deltas
 
 One protocol-agnostic builder kernel included by every protocol, plus a short per-protocol delta.
 
-**Pros**: attacks cross-protocol duplication the per-surface table does not; uses the existing
-include mechanism, so it is served-word-honest.
-**Cons**: 1252 proved dedup buys ~7% on *served* words — an include expands, so moving text
-changes ownership, not the bill. Risks re-creating the shadow-tree bug class.
-**Verdict**: adopt selectively *inside* Approach 1 where a kernel reduces served words for the
-reader, and only after the shrink.
+**Pros**: directly serves P4 (stop repeating yourself across ten protocols).
+**Cons**: 1252 proved dedup buys ~7% on *served* words — an include expands, so it changes
+ownership, not the reader's bill. Risks re-creating the shadow-tree bug class, where one edit
+silently changes ten protocols' served prompts — which also complicates per-file inspection.
+**Verdict**: adopt selectively *inside* Approach 1 where a kernel genuinely serves P4, and only
+where the architect can still see what each protocol serves.
 
 ## Open Questions
 
 ### Critical (Blocks Progress)
 
-*None outstanding.* Both former Critical questions are resolved: the corrected baseline is
-architect-endorsed; and gate friction (not minable from history — no `rejected` state,
-`requested_at` overwritten) is scored prospectively by the architect and demoted to
-**advisory-with-a-tripwire**, so incomplete scoring cannot block the decision.
+*None outstanding.*
 
 ### Important (Affects Design)
 
-- [ ] **A/B sample size.** ≥6 pairs specified; more buys power at real builder and consult cost
-      (~$1,478/30d at current rates). The architect sets the ceiling — see architect load under
-      **Execution and sequencing**.
-- [ ] **Do SPIR templates survive as interfaces, or disappear?** Recommendation: survive as
-      ≤150-word heading interfaces — porch requires only 4 headings, but the interface is what
-      makes the artifact contract legible without narration.
-- [ ] **Is the hot tier's 736 genuinely exempt?** It is the one surface already built to these
-      principles, but it is 7,360 of the 16,016-word post-rewrite builder budget (46%), so it
-      bounds how far this project can go without reopening the exemption.
-- [ ] **`roles/architect.md` 2,048 → ≤700** — the architect segment was outside 1252's analysis
-      entirely. Confirm nothing in it is load-bearing for multi-architect coordination (Specs
-      755/786/823) before cutting.
+- [ ] **Batch size for M11.** ≤12 distinct files per review batch is this spec's proposal,
+      giving ~6–7 inspection batches. The architect may want smaller.
+- [ ] **Do SPIR templates survive as interfaces, or disappear?** P2 says design interfaces;
+      porch requires only 4 headings, while the `spec-review` consult type advisorily expects 20.
+      Recommendation: survive as heading interfaces.
+- [ ] **Is the hot tier in scope?** It is the one surface already written to these principles.
+      This spec leaves it unchanged; a reviewer may argue P3 applies to it too.
+- [ ] **`roles/architect.md`** — outside 1252's analysis entirely. Confirm nothing in it is
+      load-bearing for multi-architect coordination (Specs 755/786/823) before rewriting.
+- [ ] **A/B sample size.** ≥6 pairs specified; the architect sets the ceiling given the
+      inspection load already on them.
 
 ### Nice-to-Know (Optimization)
 
-- [ ] Does trimming consult-type prompts move CMAP verdict *quality*, or only cost?
-- [ ] Are the ~17,000 words of `.claude/skills/` the right destination for relocated how-tos, or
-      does that surface need its own budget?
+- [ ] Does rewriting consult-type prompts move CMAP verdict *quality*, or only cost?
+- [ ] Are the ~17,000 words of `.claude/skills/` the right destination for P3/P4 relocations,
+      or does that surface need its own conformance pass?
 
 ## Performance Requirements
 
-- **Builder always-on**: ≤16,100 words (from 34,255) — M1.
-- **Per-segment**: architect ≤3,400 (from 8,599); consultant ≤460 (from 683); none regresses.
-- **Per-surface ceilings**: as tabulated — M2, binding.
-- **Measurement runtime**: <5s, deterministic — same commit ⇒ byte-identical output.
-- **Token/cost effect** (advisory): ~18,200 fewer always-on words ≈ ~24,000 tokens per
-  builder-project; recorded before/after, keying no threshold.
+No runtime-performance requirement. Reporting obligations only:
+
+- Before/after `ALWAYS_ON_WORDS` and per-audience loads, measured by the corrected script and
+  committed (M1).
+- Deleted-vs-relocated decomposition (M0c).
+- Per-file word counts in every manifest (M2).
+- Measurement runtime <5s and deterministic — same commit ⇒ byte-identical output.
+
+None of these is a threshold.
 
 ## Security Considerations
 
-- **The scar rules are the security surface.** All eight guard irreversible acts (destroying
-  uncommitted work or worktrees, killing live sessions, bypassing a human gate). Weakening one is
-  the highest-severity failure this project can produce — hence verbatim carriage,
-  byte-identical enforcement, counted-not-exempt ceilings, and a hard rollback trigger on any
-  observed violation.
+- **The scar rules are the security surface.** All eight guard irreversible acts. Weakening one
+  is the highest-severity failure this project can produce — hence verbatim carriage, the
+  explicit P7 exception, byte-identical enforcement, and a hard rollback trigger on any observed
+  violation.
 - **Human-gate integrity.** The rewrite must not weaken "a gate message is a notification to the
   human, not authorization." Gate semantics are content, and this project edits content.
-- **No secrets in prompt surfaces** — existing property, re-verified after the rewrite.
+- **No secrets in prompt surfaces** — existing property, re-verified.
 - **Adopter blast radius.** Skeleton changes ship on `codev update`; a weakened prohibition
   propagates silently. Hence grouped, rehearsed rollback.
 
 ## Test Scenarios
 
+Tests verify *mechanical* properties. **Principle conformance is judged by the architect (M11),
+not asserted by a test** — that is the point of the revised acceptance model.
+
 ### Functional Tests
 
-1. **T1 — Instrument sources the served directory** (M0 item a). Asserted against the real
-   resolver, not a hardcoded string.
+1. **T1 — Instrument sources the served directory** (M0 item a), asserted against the real
+   resolver.
 2. **T1b — Instrument resolves per-file, four-tier** (M0 item b). A fixture with a `.codev/`
-   override of *one* prompt while others resolve from the skeleton measures each file at its
-   winning tier — kills the directory-level-selection defect class.
+   override of *one* prompt while others resolve from the skeleton.
 3. **T2 — Include expansion (phantom-savings proof).** Moving text from prompt into template
    produces **zero** change in the reported total.
-4. **T3 — Ceilings (M1/M2).** Each surface at or under its gross ceiling, per protocol, per
-   tree; failure names surface and overage. Runs in CI as the anti-re-growth guard.
+4. **T3 — Word-count reporting.** The script emits a per-file table covering every resolved
+   surface. **Asserts completeness of the report, not any ceiling.**
 5. **T4 — Scar integrity (M4).** Every canonical byte-identical on every registered surface;
    count pinned at 8; reword or deletion fails.
 6. **T5 — Capability inventory (M5).** Post-rewrite extraction over served prompt text ⊇
-   pre-rewrite, using M5's recognition and normalization rules; unlisted removals fail.
+   pre-rewrite; unlisted removals fail.
 7. **T6 — Sweep completeness (M3).** Surfaces enumerated from disk across both trees and
-   unioned; each existing surface satisfies T3. Absence of `prompts/`/`consult-types/` for a
-   protocol that has none must **not** fail; a newly added protocol or surface fails until
-   written to budget. Covers `release` (`codev/` only).
-8. **T7 — Twin parity.** `CLAUDE.md` ≡ `AGENTS.md`; `codev/` and `codev-skeleton/` copies
-   consistent.
+   unioned; absence of `prompts/`/`consult-types/` for a protocol that has none must **not**
+   fail; a new surface fails until rewritten and inspected. Covers `release`.
+8. **T7 — Twin parity.** `CLAUDE.md` ≡ `AGENTS.md`; every `codev/protocols` copy byte-identical
+   to its skeleton twin. **Load-bearing for M11**: it is what makes inspecting ~66 files instead
+   of 131 sound.
 9. **T8 — Dead-tree removal (M6).** Tree absent; no runtime reference; the Spec 987 routing test
-   updated per M10 and still protecting hot/cold routing on its remaining files.
+   updated per M10.
 10. **T9 — Live spawn probe.** A builder spawned end-to-end on the rewritten surface receives a
     spawn prompt containing every element of the artifact contract, and its first `porch next`
     returns a well-formed task. ("It compiled" is not "it works.")
-11. **T10 — Rollback rehearsal (M9).** Reverting a rollback **group** on a scratch branch
-    restores that group byte-for-byte and leaves the suite green.
-12. **T11 — Bucket and audience reporting** (M0 item f). The script emits the six **exclusive
-    bucket** subtotals, which sum to the authored total, *and separately* the derived audience
-    loads, which overlap by design and are asserted against the stated formulas rather than a
-    naive sum. A fixture where one bucket grows and another shrinks shows both movements, not a
-    netted zero.
+11. **T10 — Rollback rehearsal (M9).** Reverting a rollback group restores it byte-for-byte and
+    leaves the suite green.
+12. **T11 — Bucket and audience reporting** (M0 item f). Exclusive bucket subtotals sum to the
+    authored total; derived audience loads are asserted against the stated formulas, never a
+    naive sum.
 13. **T15 — Relocation visibility (M0c).** A fixture moving a block from an always-on surface
-    into `.claude/skills/` shows always-on falling **and** total-authored holding steady — so
-    relocation can never be reported as deletion.
+    into `.claude/skills/` shows always-on falling **and** total-authored holding steady.
+14. **T16 — Manifest completeness (M11).** Every file changed in a phase appears in that phase's
+    manifest with all four fields. A changed file missing from the manifest fails the phase —
+    the architect cannot inspect what is not listed.
 
 ### Non-Functional Tests
 
 1. **T12 — Determinism.** Two runs at the same commit emit byte-identical output.
-2. **T13 — Behavioural re-measurement (M8).** `measure-prompt-behavior.ts` re-run post-merge
-   with self-exclusion; B1/B2/B4 committed and compared directionally.
+2. **T13 — Behavioural re-measurement (M8).** `measure-prompt-behavior.ts` re-run post-merge with
+   self-exclusion; B1/B2/B4 committed and compared directionally.
 3. **T14 — A/B execution (M7).** The full pre-registered protocol below.
 
 ## A/B Validation Design
 
-*(First-class section per Baked Decision 3. A **non-inferiority** trial: the claim under test is
-"deleting ~53% of the always-on surface does not degrade outcomes", not "it improves them".)*
+*(First-class section per Baked Decision 3, and unchanged by the acceptance-model revision: the
+A/B is how we learn whether principle conformance actually holds up behaviourally. A
+**non-inferiority** trial — the claim under test is "a principle-conformant prompt surface does
+not degrade outcomes", not "it improves them".)*
 
 ### Unit and arms
 
 The unit is an **issue-pair**: one GitHub issue executed twice, by two freshly-spawned builders
 in separate worktrees, from the same base commit. **Control (A)** = pre-rewrite commit;
-**treatment (B)** = post-rewrite. No code differs — the prompt surface is file-resolved, so the
-arms are two checkouts.
+**treatment (B)** = post-rewrite. No code differs — the prompt surface is file-resolved.
 
 ### Sample and eligibility
 
-- **≥6 pairs (12 runs)**, stratified: ≥3 SPIR/ASPIR (exercises spec/plan/implement/review
-  prompts, both gates, templates) and ≥3 lighter protocols (BUGFIX/AIR).
+- **≥6 pairs (12 runs)**, stratified: ≥3 SPIR/ASPIR and ≥3 lighter protocols (BUGFIX/AIR).
 - Issues drawn from the backlog, selected **before** either arm runs, then frozen.
 - **Eligibility exclusion**: an issue is ineligible if it modifies any surface under test —
   otherwise the treatment arm's prompt surface is simultaneously instrument and subject.
@@ -605,61 +585,56 @@ arms are two checkouts.
 
 - **Pin the environment**: model ids and reasoning efforts, consult backend versions, and
   `.codev/config.json` frozen for the trial window and recorded with the results.
-- **Arm isolation**: the second arm of a pair must not see the first arm's branch, PR, or thread.
-  Sequential with the intervening branch unpushed, or concurrent in isolated worktrees; which was
-  used is recorded per pair.
+- **Arm isolation**: the second arm must not see the first arm's branch, PR, or thread.
+  Sequential with the intervening branch unpushed, or concurrent in isolated worktrees; which
+  was used is recorded per pair.
 - **Arm order alternates** per pair.
 - **Recording**: one committed artifact (`codev/resources/1280-ab-results.md`), a row per run —
   pair id, arm, protocol, issue, base commit, order, isolation mode, every outcome, and any
-  exclusion with its reason. Post-hoc exclusions must be justified there, never silently dropped.
+  exclusion with its reason.
 
 ### Execution and sequencing
 
-- **M7 gates `verify-approval`, not the PR merge.** The rewrite PR merges on M0–M6 and M8–M10
-  plus architect review; the A/B then runs against merged `main` as treatment and a pinned
-  pre-rewrite commit as control. This matches where the rollback triggers point, keeps a 12-run
-  trial off the PR's critical path, and is the only ordering under which "treatment arm = what
-  builders actually get" is literally true. Consequence, stated plainly: a SHIP failure means
-  rolling back a merged change — which is what the grouped, rehearsed rollback plan is for.
+- **M7 gates `verify-approval`, not the PR merge.** The rewrite PR merges on principle
+  conformance (MP, M11) plus the mechanical criteria; the A/B then runs against merged `main` as
+  treatment and a pinned pre-rewrite commit as control. A SHIP failure means rolling back a
+  merged change — which is what the grouped, rehearsed rollback plan is for.
 - **Arm disposition**: the treatment arm's PR is the merge candidate; the control arm's closes
-  unmerged once its outcomes are recorded (and vice versa if the treatment arm is defective on
-  O3). So **~6 of 12 runs produce merged work, not 12** — the trial's real cost is 6 duplicated
-  implementations plus consult spend.
-- **Architect load is a scheduling dependency**: 6 pairs with ≥3 SPIR-class implies up to **~24
-  gate approvals and 12 PR reviews by one person**, each SPIR gate requiring O1 rubric scoring at
-  approval time. This is the trial's binding constraint and why the pair count is the architect's
-  call. If capacity forces a smaller n, the consequence is stated in the power paragraph — not a
-  quietly reduced sample.
+  unmerged once outcomes are recorded. **~6 of 12 runs produce merged work, not 12.**
+- **Architect load**: 6 pairs with ≥3 SPIR-class implies up to **~24 gate approvals and 12 PR
+  reviews**, each SPIR gate requiring O1 rubric scoring at approval time — *on top of* M11's ~66
+  file inspections. This is the project's binding constraint and why the pair count is the
+  architect's call.
 
 ### Pre-registered outcomes
 
 | ID | Outcome | Instrument | Role |
 |---|---|---|---|
-| **O1** | Gate friction | Architect scores each gate at approval time on a 3-item rubric — *artifact complete as specified? / rework required before approval? / clarifying message needed?* — each 0 (none) / 1 (minor) / 2 (blocking), recorded at scoring time | advisory + tripwire |
+| **O1** | Gate friction | Architect scores each gate at approval time on a 3-item rubric — *artifact complete as specified? / rework required before approval? / clarifying message needed?* — each 0 (none) / 1 (minor) / 2 (blocking) | advisory + tripwire |
 | **O2** | Review rounds | Iterations to terminal state per phase from `status.yaml`; CMAP REQUEST_CHANGES rate (comparable to B1 = 51.88%) | gate |
-| **O3** | Correctness | **At the SHIP decision**: architect PR-review findings by severity, observable pre-merge on both arms. **Post-merge defects are excluded from the SHIP gate** — they cannot be evaluated when the decision is made — and act as a **14-day rollback signal** after the merged arm lands | gate (pre-merge) + rollback signal (post-merge) |
+| **O3** | Correctness | **At the SHIP decision**: architect PR-review findings by severity, observable pre-merge on both arms. **Post-merge defects are excluded from the SHIP gate** and act as a **14-day rollback signal** | gate (pre-merge) + rollback signal (post-merge) |
 | **O4** | Protocol compliance | Binary per-run checklist: required artifacts with required headings · stopped at every human gate · no `status.yaml` hand-edit · no `git add -A` · no scar violation · thread committed | **zero tolerance** |
 | **O5** | Cost & duration | Tokens, wall-clock, `consult stats` delta | advisory |
 
 ### Blinding
 
-CMAP reviewers are blind by construction. The architect is not and cannot be; mitigations: O2 and
-O4 are extracted mechanically from committed artifacts, and O1/O3 are scored against a rubric
-written **before** any run.
+CMAP reviewers are blind by construction. The architect is not and cannot be; mitigations: O2
+and O4 are extracted mechanically from committed artifacts, and O1/O3 are scored against a
+rubric written **before** any run.
 
 ### Decision rule (pre-registered)
 
 **SHIP** iff all of:
 
 1. **O4 = zero violations** in the treatment arm. Any scar violation, skipped gate, or missing
-   required artifact is an immediate hard stop, independent of everything else.
+   required artifact is an immediate hard stop.
 2. **O2**: treatment mean review rounds ≤ control **+ 0.5 rounds/phase**, and treatment
    REQUEST_CHANGES rate ≤ control **+ 10 percentage points**.
 3. **O3 (pre-merge part only)**: no treatment-arm finding of severity ≥ "would block merge"
    absent from its paired control run.
 4. **O1 tripwire**: no pair where the treatment arm scored **2 (blocking)** at a gate its control
-   scored 0, for the same reason. If O1 scoring is incomplete for any pair, O1 reports incomplete
-   and SHIP rests on 1–3.
+   scored 0, for the same reason. If O1 scoring is incomplete, O1 reports incomplete and SHIP
+   rests on 1–3.
 
 Otherwise **HOLD** (fix and re-run the failing pairs) or **ROLLBACK**.
 
@@ -667,10 +642,10 @@ Otherwise **HOLD** (fix and re-run the failing pairs) or **ROLLBACK**.
 
 With n=6 pairs this detects only **large** effects — roughly a doubling of review rounds or a
 ≥20-point REQUEST_CHANGES shift. It cannot certify the absence of a subtle regression, and this
-spec does not claim it can. It is nonetheless strictly stronger than 1252's observational
-baseline, because each pair is matched on the issue itself — the dominant variance source.
-**O4's zero-tolerance criterion is where the real protection lives**: compliance is binary,
-observable in every run, and is the failure mode deletion would plausibly cause.
+spec does not claim it can. It is nonetheless stronger than 1252's observational baseline,
+because each pair is matched on the issue itself. **O4's zero-tolerance criterion is where the
+real protection lives**: compliance is binary, observable in every run, and is the failure mode
+an aggressive rewrite would plausibly cause.
 
 ## Rollback Plan
 
@@ -688,15 +663,15 @@ Prompts, included templates, registry mappings and integrity tests are coupled, 
 | **G7 scar registry** | `scar-rules.yaml` + its enforcement test |
 
 - **Dependency rule**: reverting **G7** requires reverting every group carrying scar text (G2,
-  G3, G4, G6) — registry and copies must agree. All other groups are mutually independent.
+  G3, G4, G6). All other groups are mutually independent.
 - **Mechanism**: `git revert` restores prior bytes. No migration, state, schema, or data.
   Rehearsed under T10 before the PR merges.
 - **Blast radius**: effective for the next spawned builder — in-flight builders keep the surface
-  they were spawned with (prompts read at spawn/phase time). For adopters the revert ships in the
-  next release; an adopter can also pin the prior `@cluesmith/codev` version.
-- **Triggers**: (a) any O4 violation — immediate, no deliberation; (b) an observed scar violation
-  in any real project post-merge; (c) O2/O3 outside pre-registered margins; (d) the 14-day
-  post-merge O3 window; (e) architect judgment at the `pr` or `verify-approval` gate.
+  they were spawned with. For adopters the revert ships in the next release; an adopter can also
+  pin the prior `@cluesmith/codev` version.
+- **Triggers**: (a) any O4 violation — immediate; (b) an observed scar violation in any real
+  project post-merge; (c) O2/O3 outside pre-registered margins; (d) the 14-day post-merge O3
+  window; (e) architect judgment at any gate.
 - **Partial rollback is the expected shape** — revert the offending group, keep the rest.
 - **Cost**: one revert, one release. No irreversible step exists anywhere in this project.
 
@@ -710,8 +685,10 @@ Prompts, included templates, registry mappings and integrity tests are coupled, 
   consult-type resolution (`commands/consult/index.ts`); both measurement scripts.
 - **Artifacts**: `builder/spir-1252` (ratified registry — must not be deleted);
   `codev/resources/1252-*.md` baselines.
-- **Test suites**: the ~25 prose-pinned files in M10 — a dependency in the real sense that the
-  cuts cannot land without deliberately re-baselining them.
+- **Test suites**: the ~25 prose-pinned files in M10 — the rewrite cannot land without
+  deliberately re-baselining them.
+- **Architect availability**: M11's per-file inspection is a hard dependency on one person's
+  time, not a background activity.
 - **Libraries/Frameworks**: none new.
 
 ## References
@@ -723,45 +700,45 @@ Prompts, included templates, registry mappings and integrity tests are coupled, 
   `codev/state/spir-1252_thread.md`.
 - *The new rules of context engineering for Claude-5-generation models* —
   https://claude.com/blog/the-new-rules-of-context-engineering-for-claude-5-generation-models
-- `codev/resources/arch.md` (four-tier resolution, include directive, hot-tier injection);
-  `codev/resources/lessons-learned.md` (sweep-scope failures, served-surface dedup).
+  (P1–P7 quoted verbatim in **Desired State**).
+- `codev/resources/arch.md`; `codev/resources/lessons-learned.md`.
 
 ## Risks and Mitigation
 
 | Risk | Probability | Impact | Mitigation Strategy |
 |------|------------|--------|-------------------|
-| A deleted instruction was load-bearing; loss is silent | Medium | High | M5 inventory over served prompt text (unlisted removals fail); O4 zero-tolerance; grouped rollback |
-| A scar rule weakened or dropped | Low | **Critical** | Verbatim carriage; counted-in-ceiling so it is never trimmed to fit; byte-identical enforcement pinned at 8; hard rollback trigger; architect-only rewording |
-| Prose-pinned tests silently gutted to go green | **High** | **High** | M10: every retired assertion named with its originating spec and its behaviour re-asserted or explicitly retired; pure-addition re-baselining only with spec named and baseline committed together |
-| Sweep misses a protocol, tree, or segment | High | Medium | T6 enumerates from disk (both trees, unioned); T7 twin parity; T11 bucket reporting. Sweep-scope failure was 1252's dominant review cost |
-| Relocation reported as deletion, inflating the claim | Medium | Medium | M0c + M0(g) + T15 |
-| A/B underpowered; subtle regression ships | Medium | Medium | Power statement; O4 binary compliance carries the protection; T13 post-merge behavioural re-measurement as a second net |
-| A further instrument defect ships undetected | Medium | High | Principle 7; T1/T1b/T11/T15 assert the instrument against the live resolver; M0b puts it under public review early; the script gets its first tests |
-| A/B costs more than the shrink saves | Medium | Low | ~6 of 12 runs produce merged work; O5 tracks it; architect sets the pair ceiling |
-| Architect review capacity is the trial's bottleneck | High | Medium | Load stated explicitly (~24 gates + 12 PR reviews); pair count is the architect's call; smaller n reported honestly in the power statement |
-| Surface re-grows after the project | High | Medium | T3 runs the ceilings in CI |
+| "Principle conformance" is judged inconsistently across ~66 files | **High** | High | P1–P7 quoted verbatim with a per-file conformance question each; one architect judges all of them; the manifest records which principles were applied per file |
+| A deleted instruction was load-bearing; loss is silent | Medium | High | M5 inventory over served prompt text; O4 zero-tolerance; M11 per-file inspection; grouped rollback |
+| A scar rule weakened or dropped under P1/P7 | Low | **Critical** | The P7 exception is stated explicitly; verbatim carriage; byte-identical enforcement pinned at 8; architect-only rewording; hard rollback trigger |
+| Prose-pinned tests silently gutted to go green | **High** | **High** | M10: every retired assertion named with its originating spec and its behaviour re-asserted or explicitly retired |
+| M11 inspection load stalls the project | **High** | Medium | ≤12 files per batch; inspection scoped to ~66 distinct decisions via T7 twin parity, not 131 diffs; phase count grows rather than batch size |
+| Sweep misses a protocol, tree, or surface | High | Medium | T6 enumerates from disk (both trees, unioned); T7 twin parity; T16 manifest completeness |
+| Relocation reported as deletion | Medium | Low | M0c + M0(g) + T15 (now a reporting-honesty concern, not a grading one) |
+| A/B underpowered; subtle regression ships | Medium | Medium | Power statement; O4 binary compliance; T13 post-merge behavioural re-measurement |
+| A further instrument defect ships undetected | Medium | Medium | T1/T1b/T11/T15 assert the instrument against the live resolver; M0b puts it under public review early; the script gets its first tests |
+| Surface re-grows after the project | Medium | Medium | No ceiling test exists under the revised model; re-growth is caught by the same principle review at the next MAINTAIN |
 | `builder/spir-1252` deleted, losing the registry | Low | High | Registry content quoted in this project's thread; rebuilt registry committed to `main` early |
 
 ## Expert Consultation
 
 **Round 1** — 2026-07-31 · Codex (GPT-5.6 Sol) + Claude Opus 5 · both REQUEST_CHANGES (HIGH) ·
 **13 findings, none disputed**.
-**Round 2** — 2026-07-31, architect-directed re-review of the revision · same models · both
-REQUEST_CHANGES (HIGH) · **9 findings, none disputed**.
+**Round 2** — 2026-07-31, architect-directed re-review · same models · both REQUEST_CHANGES
+(HIGH) · **9 findings, none disputed**.
+**Round 3** — pending: one CMAP pass on this acceptance-model revision.
 
-Every finding was verified against source (and both arithmetic claims independently recomputed)
-before acceptance; all are folded into the criteria, tests, and design sections above rather than
-narrated here. The finding-by-finding record is in
+Every finding was verified against source (both arithmetic claims independently recomputed)
+before acceptance; all are folded into the sections above. The finding-by-finding record is in
 `codev/projects/1280-prompt-surface-judgment-not-ru/1280-specify-iter{1,2}-rebuttals.md`.
 
-Four of the corrections were errors in this spec's own analysis, three sharing a single root
-cause — **enumerating from a convenient source instead of the authoritative one** (a truncated
-grep; skeleton-only protocol enumeration; the measurement script's stale comment). That is the
+Four corrections were errors in this spec's own analysis, three sharing one root cause —
+**enumerating from a convenient source instead of the authoritative one** (a truncated grep;
+skeleton-only protocol enumeration; the measurement script's stale comment). That is the
 sweep-scope class 1252 named as its dominant review cost, and it is why M3's "enumerate from
 disk" is specified as a **test** rather than an instruction.
 
-Gemini/`agy` did not participate: the known `--type` review limitation (#1032/#1033). Per current
-lane policy this 2-way review is correct and needs no remedy.
+Gemini/`agy` did not participate: the known `--type` review limitation (#1032/#1033). Per
+current lane policy this 2-way review is correct.
 
 ## Approval
 - [ ] Technical Lead Review
@@ -771,13 +748,19 @@ lane policy this 2-way review is correct and needs no remedy.
 
 ## Notes
 
-**What this project deliberately does not do.** No prompt generator (Approach 2), no tiering of
-any kind (Baked Decision 1), no porch behaviour changes, and not 1252's full enforcement
-machinery — only the minimum scar-integrity check the deletion makes necessary, plus the ceiling
-test that prevents re-growth. Enforcement built around a still-moving surface is enforcement
-built twice.
+**On the acceptance model.** An earlier draft made ">50% reduction" the headline criterion, with
+per-surface word ceilings as the binding test. Waleed's redirect removed that: *"I don't think
+the goal should be a particular size. That's not the right criteria. It should be to stick to
+the principles outlined in the blog post."* This is a better criterion for a reason worth
+recording — a word ceiling can be met by a file that still narrates procedure, and can be missed
+by a file that is perfectly conformant but genuinely needs the words. Size was a proxy;
+conformance is the thing.
+
+**What this project deliberately does not do.** No prompt generator (Approach 2 — now also
+incompatible with M11), no tiering of any kind (Baked Decision 1), no porch behaviour changes,
+and not 1252's full enforcement machinery — only the scar-integrity check the rewrite makes
+necessary. Enforcement built around a still-moving surface is enforcement built twice.
 
 **On the deferred decision from 1252.** The architect's pr-gate ruling was that structural
-machinery is not worth carrying for a surface about to halve. That sequencing is honoured: shrink
-first, then enforce what remains. T3 is the smallest useful enforcement primitive, and it only
-becomes meaningful once the ceilings exist.
+machinery is not worth carrying for a surface about to be rewritten. That sequencing is honoured:
+rewrite first, then enforce what remains.
