@@ -280,45 +280,93 @@ describe('T12 — determinism', () => {
   }, 60_000);
 });
 
-describe('the instrument is self-consistent and the frozen baseline is immutable', () => {
+describe('instrument correctness — asserted without pinning the live surface', () => {
+  // WHY THERE ARE NO LIVE ABSOLUTE NUMBERS IN THIS FILE
+  //
+  // The original form asserted `ALWAYS_ON_WORDS === 34231` against the REAL repo. That fires
+  // on every always-on edit by every project — Spec 1307 hit it on day one, correctly checked
+  // causality and bumped it. But the incentive it creates for the NEXT project is
+  // bump-without-checking, which is exactly the regression this test exists to catch: the
+  // number moves for two different reasons (the instrument broke / the surface changed) and
+  // the test cannot tell them apart, so it delegates that judgement to whoever is least able
+  // to spend time on it.
+  //
+  // Three layers replace it, none of which a legitimate surface edit can disturb:
+  //   1. INVARIANTS on the live repo — the composition arithmetic, true at any surface size.
+  //   2. ABSOLUTE values on a synthetic FIXTURE — pins the instrument's correctness without
+  //      pinning the repo's content. This is what invariants alone cannot do: a component
+  //      that is silently wrong (say SHARED omitting the hot tier) still satisfies every
+  //      internal identity, because the wrong value propagates consistently.
+  //   3. BYTE-assertions on the frozen baseline artifacts — historical record, and editing
+  //      one should be a deliberate act.
+  //
+  // Live absolute numbers belong in the phase manifests and generated artifacts, where a
+  // human reads them as findings rather than maintaining them as expectations.
+
   let out: string;
   beforeAll(() => { out = run(); }, 60_000);
 
-  // NOT a hardcoded live total. This project rewrites the prompt surface phase by phase, so
-  // pinning ALWAYS_ON to a literal would force an edit every phase — and a test edited every
-  // phase is a test edited carelessly. (That is M10's own argument turned on this suite.)
-  // Instead: assert the arithmetic the report claims, which holds at ANY surface size.
-  it('ALWAYS_ON equals SHARED + BUILDER_SPAWN[spir] + I x (HOT + PHASE mean[spir])', () => {
-    const shared = Number(out.match(/\| SHARED [^|]*\| (\d+) \|/)![1]);
-    const spirRow = out.match(/^\| spir \| (\d+) \| (\d+) \| \d+ \|$/m)!;
-    const spawn = Number(spirRow[1]);
-    const phaseMean = Number(spirRow[2]);
-    const hot = Number(out.match(/= arch-critical\((\d+)\) \+ lessons-critical\((\d+)\) = (\d+)/)![3]);
-    expect(num(out, 'ALWAYS_ON_WORDS')).toBe(shared + spawn + 10 * (hot + phaseMean));
+  describe('layer 1 — invariants over the live repo (hold at any surface size)', () => {
+    it('ALWAYS_ON = SHARED + BUILDER_SPAWN[spir] + I x (HOT + PHASE mean[spir])', () => {
+      const shared = Number(out.match(/\| SHARED [^|]*\| (\d+) \|/)![1]);
+      const spir = out.match(/^\| spir \| (\d+) \| (\d+) \| \d+ \|$/m)!;
+      const hot = Number(out.match(/lessons-critical\(\d+\) = (\d+)/)![1]);
+      expect(num(out, 'ALWAYS_ON_WORDS')).toBe(
+        shared + Number(spir[1]) + 10 * (hot + Number(spir[2])),
+      );
+    });
+
+    it('architect load = SHARED + ARCHITECT', () => {
+      const shared = Number(out.match(/\| SHARED [^|]*\| (\d+) \|/)![1]);
+      const architect = Number(out.match(/\| ARCHITECT [^|]*\| (\d+) \|/)![1]);
+      expect(Number(out.match(/\| Architect \(per session\) \| (\d+) \|/)![1])).toBe(
+        shared + architect,
+      );
+    });
+
+    it('PHASE_ITERS is a linear comparison constant', () => {
+      const one = num(run(repoRoot, { PHASE_ITERS: '1' }), 'ALWAYS_ON_WORDS');
+      const two = num(run(repoRoot, { PHASE_ITERS: '2' }), 'ALWAYS_ON_WORDS');
+      const spir = out.match(/^\| spir \| \d+ \| (\d+) \| \d+ \|$/m)!;
+      const hot = Number(out.match(/lessons-critical\(\d+\) = (\d+)/)![1]);
+      expect(two - one).toBe(hot + Number(spir[1]));
+    }, 60_000);
   });
 
-  it('architect load equals SHARED + ARCHITECT', () => {
-    const shared = Number(out.match(/\| SHARED [^|]*\| (\d+) \|/)![1]);
-    const architect = Number(out.match(/\| ARCHITECT [^|]*\| (\d+) \|/)![1]);
-    const reported = Number(out.match(/\| Architect \(per session\) \| (\d+) \|/)![1]);
-    expect(reported).toBe(shared + architect);
+  describe('layer 2 — absolute values on a fixture whose arithmetic a human can check', () => {
+    // Fixture contents (see makeFixture): CLAUDE.md 3 words, hot tier 2+2, builder role 3,
+    // spir wrapper 3, spir protocol.md 4, one spir prompt 5, consultant role 2, one
+    // consult-type 2, architect role 3.
+    //   SHARED  = 3 + 4                     =   7
+    //   SPAWN   = 3 + 3 + 4                 =  10
+    //   ALWAYS_ON = 7 + 10 + 10 x (4 + 5)   = 107
+    it('reports the hand-computed total for a known surface', () => {
+      const out2 = run(makeFixture());
+      expect(num(out2, 'ALWAYS_ON_WORDS')).toBe(107);
+    }, 60_000);
+
+    it('reports the hand-computed architect and consultant loads', () => {
+      const out2 = run(makeFixture());
+      expect(out2).toMatch(/\| Architect \(per session\) \| 10 \|/);
+      expect(out2).toMatch(/\| Consultant \(per review, spir\) \| 4 \|/);
+    }, 60_000);
+
+    it('a component silently omitted would fail here even though invariants still hold', () => {
+      // The blind spot invariants cannot see: drop the hot tier from SHARED and every
+      // internal identity still balances, because the wrong value propagates consistently.
+      // Only an externally-known expected value catches it.
+      const out2 = run(makeFixture());
+      expect(Number(out2.match(/\| SHARED [^|]*\| (\d+) \|/)![1])).toBe(7);
+    }, 60_000);
   });
 
-  it('honours PHASE_ITERS as a comparison constant', () => {
-    const one = num(run(repoRoot, { PHASE_ITERS: '1' }), 'ALWAYS_ON_WORDS');
-    const two = num(run(repoRoot, { PHASE_ITERS: '2' }), 'ALWAYS_ON_WORDS');
-    const spirRow = out.match(/^\| spir \| \d+ \| (\d+) \| \d+ \|$/m)!;
-    const hot = Number(out.match(/= arch-critical\(\d+\) \+ lessons-critical\(\d+\) = (\d+)/)![1]);
-    expect(two - one).toBe(hot + Number(spirRow[1]));
-  }, 60_000);
-
-  // The frozen PRE-REWRITE baseline is a historical record, not a live measurement. It must
-  // never drift: every later reduction claim is measured against this number.
-  it('the frozen pre-rewrite baseline still records 34,231', () => {
-    const baseline = fs.readFileSync(
-      path.join(repoRoot, 'codev/resources/1280-word-baseline.md'),
-      'utf-8',
-    );
-    expect(baseline).toMatch(/^ALWAYS_ON_WORDS=34231$/m);
+  describe('layer 3 — the frozen baseline artifacts are historical records', () => {
+    it('the pre-rewrite baseline still records 34,231', () => {
+      const baseline = fs.readFileSync(
+        path.join(repoRoot, 'codev/resources/1280-word-baseline.md'),
+        'utf-8',
+      );
+      expect(baseline).toMatch(/^ALWAYS_ON_WORDS=34231$/m);
+    });
   });
 });
