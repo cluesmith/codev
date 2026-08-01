@@ -186,6 +186,16 @@ imprecision everywhere else.
   a due message **re-enters the normal delivery path**, buffering included, rather than
   writing directly to the session. Ordering then follows from the existing per-session
   FIFO rather than from timing luck.
+- **Submission atomicity is Spec 1273's per-session submission lock, adopted unchanged.**
+  Architect ruling, 2026-08-01. Ordering and atomicity are separate layers: this spec's
+  FIFO guarantee decides *which message goes first*, the lock guarantees *each one is
+  submitted alone*. `writeMessageToSession` schedules its Enter via `setTimeout`
+  (`message-write.ts:16-19`) and `/api/send` returns once the write is scheduled, so two
+  correctly-ordered sends can still merge into a single user turn. Spec 1273 hit this in
+  production — its `/clear` arrived as literal text on the front of the next message and
+  never executed. `--delay 15` keeps this skill's two sends far outside that window, but
+  that is a property of the delay rather than of the send path, and this spec must not
+  grow a second mechanism to cover it.
 - **`--delay` is Tower-side, not client-side.** The sending process must be free to exit —
   in the self-invoked case it is a Bash call inside the very session about to be cleared.
   A client that sleeps would die with the clear, which is the failure the whole design

@@ -234,6 +234,24 @@ command.
 5. `afx send architect:<name> --delay 15 --raw '/arch-init <name>'`
 6. Stop. Do not start new work.
 
+**Submission atomicity comes from Spec 1273's per-session submission lock — adopt it,
+do not build a rival.** (Architect ruling, 2026-08-01; aspir-1273 owns the primitive.)
+
+Ordering and atomicity are different layers, and this plan only solved the first.
+`writeMessageToSession` writes the text and schedules its Enter via `setTimeout`
+(`message-write.ts:16-19`: 50ms short, 80ms paced), and `/api/send` responds once the
+write is *scheduled*, not once it is *submitted*. So two correctly-ordered sends can still
+coalesce into one user turn if the second is written before the first's Enter fires — which
+is exactly what happened to `afx reset` in production: its `/clear` arrived as literal text
+welded to the front of the next message, never executed, context fully intact.
+
+`--delay 15` puts ~15 seconds between this skill's two sends, so it does not sit in the
+50ms coalescing window. That is a property of the delay, not a guarantee of the send path:
+if the delay is ever shortened, or a caller sequences two undelayed sends, the hazard is
+live. When 1273's lock lands, this sequence adopts it unchanged and phase 1's narrower
+`writeCompletesInMs` wait on the delayed path should be **deleted** rather than kept
+alongside it — one mechanism, not two.
+
 **The address must be `architect:<name>`, never bare `architect`.** For a non-builder
 sender the bare form resolves to `main` or the first registered architect
 (`servers/tower-messages.ts:371-372`), so a sibling architect's `/arch-save` would clear
@@ -324,6 +342,13 @@ Three questions the live run answers, none of which unit tests can:
    intercept the Enter?** Manual runs succeed, but not over this delivery path. If it
    bites, the fallback is a plain-text message naming identity and state-file path, which
    has no completion surface — a skill edit, not a code change.
+0. **Does the `/clear` actually get SUBMITTED, not just written?** Spec 1273's production
+   e2e found its `/clear` welded to the front of the next message as literal text, never
+   executed — the coalescing failure described in phase 2. The live run must confirm the
+   clear *executed* (a harness clear announcement, context genuinely gone), not merely
+   that the text arrived. "It was written" is the exact thing that looked like success in
+   1273's run and was not. If 1273's submission lock has landed by then, verify through
+   it; if not, this is the check that would catch the same failure here.
 3. **Is 15 seconds right — and 15 seconds from *when*?** The delay budget starts when the
    send is issued, but `/clear` cannot execute until the architect's turn ends, and the
    turn continues for as long as the skill takes to finish. So the interval that actually
