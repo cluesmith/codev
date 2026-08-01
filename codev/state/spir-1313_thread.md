@@ -39,3 +39,39 @@ Builder for Issue #1313 / Spec 1313. STRICT mode (porch-orchestrated). SPIR prot
 - `porch gate 1313` registered the gate. Architect notified via `afx send architect`.
 - **Waiting for human**: `porch approve 1313 spec-approval --a-human-explicitly-approved-this`.
 - I will NOT call porch approve (human-only). On approval I resume with `porch next 1313` → Plan phase.
+
+### 2026-08-01 — Plan phase start (spec-approval PASSED)
+Architect approved spec-approval gate + told me to continue to Plan. Grounded the architecture for the plan:
+- **Mailbox store**: new `mailbox` table → add `CREATE TABLE IF NOT EXISTS` to `GLOBAL_SCHEMA` (db/schema.ts)
+  AND a new migration v15 in `db/index.ts` (bump `GLOBAL_CURRENT_VERSION` 14→15). `cron_tasks` is the
+  workspace-scoped table to mirror. Repository → new `agent-farm/db/mailbox.ts` (pure SQL, unit-testable).
+- **Gate**: new `agent-farm/servers/render-gate.ts` (@xterm/headless replay→classify) + `gate-profiles.ts`
+  (claude/codex/agy marker+region+intensity rules). `@xterm/headless` NOT yet a prod dep — add to
+  packages/codev/package.json. Open design point: session→app-profile resolver (from session command/args/label).
+- **Delivery**: `tower-routes.ts` handleSend (1425-1598) rewrite; `SendBuffer` lifecycle = `start/stopSendBuffer`
+  in tower-server.ts (587 start / 185 stop); retire send-buffer.ts. Write serialization near message-write.ts.
+- **Cron**: `tower-cron.ts` deliverMessage (303-323) blind `writeMessageToSession` → route through mailbox+gate,
+  supersede key = task.name.
+- **Broadcasts**: `tower-messages.ts:430 broadcastMessage(MessageFrame)`.
+- **afx inbox**: commander pattern in `cli.ts` + new `agent-farm/commands/inbox.ts` (mirror commands/send.ts) +
+  new Tower API routes in tower-routes.ts.
+- **Indicators (dashboard + VSCode)**: Explore agent mapping exact paths now.
+- Leaning toward ~8-9 small phases (store → gate → agy → delivery-core → fast-triggers → cron → inbox/broadcasts
+  → indicators → docs). Will offer merge options to architect at plan-approval gate.
+
+### 2026-08-01 — Plan drafted (9 phases). Key correction from UI exploration:
+- **UIs use SSE, not WebSocket.** Both dashboard (`apps/web/`) and VSCode (`apps/vscode/`) live-update via
+  `/api/events` (SSE) → refetch `/api/overview`. So the held-count indicator is surfaced by adding `heldCount`
+  to shared `OverviewData` (`packages/types/src/api.ts`), populated in `overview.ts`, signalled by
+  `overview-changed` (`ctx.broadcastNotification`, precedent tower-routes.ts:1307). Escalation = distinct SSE
+  `notification` event. The inter-agent `broadcastMessage` (tower-messages.ts) stays for message delivery only.
+- VSCode badge has an exact precedent: `updateActivityBadge()` (extension.ts:405-426) + fan-out at
+  extension.ts:453-458. Mailbox being agent-addressed makes per-builder heldCount clean (old SendBuffer was
+  sessionId-keyed).
+- Package layout (real): dashboard `apps/web/`, VSCode `apps/vscode/`, types `packages/types/`, Tower `packages/codev/`.
+- 9 phases: 1 store, 2 gate+claude/codex, 3 agy(blocking), 4 delivery-core+serialization, 5 fast-triggers,
+  6 cron, 7 inbox+SSE+escalation, 8 indicators, 9 docs+skeleton. Offered merge knobs (2+3, 4+5, 7+8 → 6) to
+  architect in plan Notes. All plan checks pass.
+- ⚠️ Watch cwd: porch resolves project from worktree ROOT — a stray `cd` into packages/ made `porch check` fail
+  with "Project not found." Always run porch from the worktree root.
+- Next: commit "Initial implementation plan", `porch done 1313` → 3-way plan consult.
