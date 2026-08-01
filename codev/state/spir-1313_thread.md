@@ -168,3 +168,24 @@ Architect approved spec-approval gate + told me to continue to Plan. Grounded th
   on `main...HEAD`.
 - `porch done 1313` next → implement iteration-1 review (Gemini/Codex/Claude). STRICT mode: porch drives
   iterate-until-approve; I do not self-approve. On unanimous approve, porch advances to phase_2.
+
+### 2026-07-31 — Resumed after `afx reset` → Phase 2 committed + re-verified GREEN
+- Context was reset mid-Phase-2 (left `state-snapshot.md`). Recovered state: Phase 1 done/reviewed/advanced;
+  Phase 2 code+tests written but **uncommitted** and `porch done` not yet run.
+- Re-verified before trusting the snapshot (reset happened after the work): `@xterm/headless@6.0.0` installed;
+  targeted `vitest run render-gate.test.ts` → **22/22 pass**; `tsc --noEmit` → **clean (exit 0)**.
+- Audited every Phase 2 deliverable against the plan — all present & correct:
+  - `render-gate.ts` (pure G-lite `classifyScreen`: marker AND zero normal-intensity composer cells → clean;
+    seed-cap replay of the reconnect data path; dim placeholder OK; no force path).
+  - `gate-profiles.ts` (claude/codex profiles + strict `resolveProfile` via `detectHarnessFromCommand`; NO claude
+    fallback → agy/gemini/opencode/wrapped-launch/unknown all → null/`no-profile`). Verified `detectHarnessFromCommand`
+    exists (harness.ts:329) and returns claude/codex/gemini/opencode by basename.
+  - `pty-session.ts` identity seam (`get command()`/`get launchArgs()` — read-only getters over private config).
+  - `@xterm/headless ^6.0.0` in package.json; pnpm-lock diff is xterm-only (verified).
+  - Fixtures (real codex idle/draft/menu/picker; real claude draft/menu; **synthesized** claude-idle — sandbox
+    claude is the ez-cli proxy shim that renders the idle placeholder without dim, documented in fixtures README).
+- Staged EXPLICITLY (never `git add -A`); spawn/reset artifacts (`.builder-*`, `.claude/hooks/`,
+  `state-snapshot.md`) deliberately left unstaged. Committed **3a79651f**.
+- `porch check 1313` → **ALL CHECKS PASSED** (✓ build 14.9s, ✓ tests 28.3s — full non-e2e regression clean).
+- Next: `porch done 1313` for the 3-way implement review. STRICT: porch drives iterate-until-approve; I do not
+  self-approve.
