@@ -189,3 +189,25 @@ Architect approved spec-approval gate + told me to continue to Plan. Grounded th
 - `porch check 1313` → **ALL CHECKS PASSED** (✓ build 14.9s, ✓ tests 28.3s — full non-e2e regression clean).
 - Next: `porch done 1313` for the 3-way implement review. STRICT: porch drives iterate-until-approve; I do not
   self-approve.
+
+### 2026-07-31 — Phase 2 implement review iter-1: Gemini+Claude APPROVE, Codex REQUEST_CHANGES → fixed
+- Verdicts (all HIGH): Gemini APPROVE, Claude APPROVE (thorough, all deliverables present), Codex REQUEST_CHANGES
+  with 2 legit, plan-grounded points. Fixed both rather than rebut (Codex was right):
+  1. **Missing claude-picker fixture** — plan's matrix lists picker for BOTH apps; only codex had one. Added
+     synthesized `claude-picker.busy.txt` (sandbox claude = ez-cli shim, so synthesized like claude-idle). Its
+     highlighted row starts with the same `❯` glyph as the composer marker → pins that a picker's selection-cursor
+     + list classifies busy via user-text, never false-clean. Mirrors the real codex-picker (`› 1. …`). Suite 22→23.
+  2. **Perf assertion too loose** — was single cold-run <500ms. Replaced with warm-up + best-of-5 **min** <75ms.
+     Min strips JIT/GC/scheduling noise (measured 42.7ms cold vs 14.5ms native steady-state). Logged best-of-5 =
+     **19.2ms** — inside the spec's ≤~50ms. 75ms is the CI-noise ceiling (protocol forbids flaky tests), not a
+     near-budget claim; the logged value is the evidence. 5x tighter than 500ms.
+- **BONUS latent prod bug found while grounding the measurement** (ran the compiled dist under native node, not just
+  vitest): `@xterm/headless` resolves to its CJS entry (no exports map / type:module) with non-analyzable named
+  exports → `import { Terminal }` throws "Named export not found" under native-node ESM = how the compiled bins run
+  in prod. Masked by vitest's vite interop; dormant until Phase 4 wires the gate. Fixed to default-import form
+  (codebase convention, cf. `import Database from 'better-sqlite3'`) + type-only alias for the one type position.
+  Lesson reaffirmed: "it compiled / vitest passes" ≠ "it works" — vitest's transform hid a real native-ESM bug.
+- Verified: render-gate **23/23**, `tsc --noEmit` clean. Committed code fix **9cc8d852**; rebuttal artifact
+  **(1313-phase_2-iter1-rebuttals.md)** committed separately (plan-phase precedent). Consult verdict .txt files are
+  gitignored (transient) — not committed.
+- `porch done 1313` next → iteration-2 re-consult. STRICT: porch decides re-review vs advance; I do not self-approve.
