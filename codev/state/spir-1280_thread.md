@@ -739,3 +739,42 @@ The family, now seven: delegated `wc`; overloaded `cmp` exit code; truncated gre
 absence-of-pending watcher. Every one a signal that looked authoritative while measuring
 something adjacent to the question. The habit that catches them is the same each time: **read the
 raw thing before believing the summary — including summaries produced by my own tools.**
+
+### Phase 3 — protocol.md ×10 via P6 (2026-08-01)
+
+Commit 7b195391. ALWAYS_ON 28,844 → **26,384**; TOTAL_AUTHORED 144,465 → **126,155**.
+spir 3,699 → 671 authored / 1,239 served.
+
+**P6 works and is verified end to end**: `resolveCodevIncludes` is extension-agnostic, and
+`spawn-roles.ts:127` runs `protocol.md` through the same resolver, so strict *and* soft mode get
+the JSON. T18 asserts both — they are not symmetric, and **soft-mode builders have only this
+document**.
+
+**Resolver model corrected** (found by writing T18): tier 4 is `getSkeletonDir()` — the
+*installed npm package* — not `<root>/codev-skeleton/`, which is a build source the resolver
+never reads. My first fresh-install test planted files in a temp `codev-skeleton/` and "passed"
+against the real installed package. Rewritten to assert the adopter guarantee instead.
+
+`release/protocol.md` inspected and **unchanged**: no `protocol.json`, and 36% exact commands
+where the sequence *is* the contract.
+
+**The tests caught real capability loss I introduced — 37 failures, all repaired, zero
+assertions retired:**
+- **#1279 (12)**: I swapped maintain/spike/experiment's *template* includes **for** the JSON
+  include instead of carrying both, orphaning three artifact templates.
+- **Spec 746 (24)**: Baked Decisions shortened in SPIR, dropped from ASPIR/AIR — losing
+  "absence is the no-op default", which is what stops a builder inventing constraints the
+  architect deliberately left open.
+
+**The process failure was mine and worth more than the code fix**: I wrote "suite green, no
+assertions retired" into the manifest *while the suite was still running*. Every instrument this
+project touched got "read the raw thing, don't trust the summary" — and I skipped it on my own
+completion claim. Had the architect inspected on my word, they'd have reviewed a batch whose
+green claim was fiction.
+
+**T16 then caught three defects in the manifest itself** — a silently-added fifth column, 19
+file-rows breaking the ≤12 cap (abandoning the plan's per-decision model), and a supplementary
+table parsing as manifest rows. All three were deviations from a format I defined. Conformed the
+manifest each time rather than loosening the guard.
+
+Suite verified green **after** the repairs: 206 files, 4,117 tests.
