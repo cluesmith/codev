@@ -479,3 +479,42 @@ kind this project exists to stop being fooled by.
 
 I diagnosed this from an actual error message rather than the "probably needs a build" theory,
 which is the same discipline the rest of the project has been applying to instruments.
+
+### CI caught a portability defect the local suite could not (2026-08-01)
+
+PR #1319 Unit Tests failed: **CI measured 34,231, my Mac measured 34,235.** Same commit.
+
+Diagnosed by narrowing rather than guessing:
+1. Fetched `refs/pull/1319/merge`, diffed every measured file against my HEAD — **tracked
+   content identical**, so not a content delta.
+2. Exported that merge ref to a clean tree and measured it locally — **still 34,235**, so not
+   the tree either. That left the platform.
+3. Compared `wc -w` / `LC_ALL=C wc -w` / Python `split()` per file: `spir/protocol.md` gave
+   3703 / 3699 / 3699.
+4. Diffed per-LINE counts to find the exact characters.
+
+**Root cause: `⚠️` (U+26A0 WARNING SIGN + U+FE0F VARIATION SELECTOR-16).** macOS/BSD `wc -w` in
+a UTF-8 locale splits it into two words; GNU `wc`, `LC_ALL=C wc`, and Python's `str.split()`
+count one. Four such banners in `spir/protocol.md` — exactly the 4-word delta.
+
+**Why this mattered rather than being a test nuisance**: the instrument's entire purpose is an
+honest before/after comparison. A count that depends on the host means measuring "before" on a
+laptop and "after" in CI produces a fictional delta — the phantom-savings failure this whole
+instrument exists to prevent, in a new disguise. It would have been invisible until the final
+report, and then unfalsifiable.
+
+Fix: word counting is now **defined by the script** (whitespace-delimited tokens of UTF-8
+decoded text) rather than delegated to the host's `wc`. Worktree, clean merge-ref export, and
+`LC_ALL=C` now all report **34,231**. Two regression tests added: no delegation to `wc -w`, and
+identical totals under `LC_ALL=C` vs UTF-8.
+
+Baseline restated 34,255 → 34,231, with both corrections documented in the artifact header
+(−20 additive-include model, −4 `wc` portability). Size is reporting-only, so no criterion moves.
+
+**The characters that broke portability are the `⚠️ BLOCKING` worst-case-padding banners that
+principle P7 exists to delete.** Recorded rather than smoothed over.
+
+**Lesson for the ledger** (seventh instance of the family): *a green local suite is not a green
+build.* The delegated tool — like the overloaded exit code, the truncated grep, the
+skeleton-only enumeration, and the stale script comment before it — looked authoritative and
+wasn't. CI was the authoritative signal here, and it existed all along.
