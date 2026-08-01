@@ -171,3 +171,43 @@ Architect directed two items before the gate goes to Waleed:
 
 Porch remains at the spec-approval gate throughout; running consults manually does not move
 state, and I am not touching the gate.
+
+### CMAP round 2 (2026-07-31) — the round porch skipped, and why it mattered
+
+Both REQUEST_CHANGES (HIGH). **Nine findings, none disputed, two of them arithmetic errors
+that would otherwise have shipped.** The architect's insistence on running a round porch had
+skipped is fully vindicated.
+
+The two that would have shipped:
+
+1. **M1's HOLD branch was unreachable.** M1 is fully derived from the M2 ceilings: meeting
+   every ceiling yields ≤16,016 (−53.2%), while the "HOLD at 50–52%" band needs
+   16,442–17,128 — i.e. ceilings already exceeded and M2 already failing. Recomputed and
+   confirmed before accepting. Dead prose replaced with the reachable contingency
+   (denominator movement).
+2. **M5 proved nothing about prompts.** It extracted gate/check names from `protocol.json`
+   and notification names from source call sites — files this project does not touch. Every
+   capability would have reported present even if every corresponding instruction vanished
+   from the served prompts. Now inventories the resolved, expanded *prompt surface* with a
+   contract-presence assertion per capability.
+
+Claude's best structural catch: **the metric cannot tell deletion from relocation.**
+Principle 4 authorizes moving how-to content to skills, and relocation scores identically to
+deletion under an always-on-only metric — the phantom-savings class T2 catches on the include
+axis, unmonitored on the relocation axis. −53.2% is equally consistent with −30% deleted +
+−23% relocated, and only deleted content supports the "crowds out judgment" claim. Added M0(g),
+M0c, T15.
+
+Codex's best: **"all ten protocols in both trees" is impossible** — `release` is project-local
+(10 in `codev/`, 9 in the skeleton), and four protocols intentionally have no `prompts/` or
+`consult-types/`. Which exposed that **my inventory missed `release/protocol.md` (1,626w)
+entirely**, because I enumerated `codev-skeleton/protocols/*/`.
+
+**Fourth self-audit finding of this spec phase, and three share one root cause**: enumerating
+from a convenient source instead of the authoritative one (truncated grep → false "no
+consumers"; skeleton-only enumeration → missing protocol; script's stale comment → wrong
+baseline). This is exactly the sweep-scope class 1252 named as its dominant review cost, and
+it is the argument for making M3's "enumerate from disk" a *test* rather than an instruction.
+Belongs in the review's lessons learned.
+
+Spec now 9,415w (iteration 3). Porch remains at spec-approval; I have not touched the gate.

@@ -10,7 +10,7 @@ phases, belongs in codev/plans/1280-prompt-surface-judgment-not-ru.md.
 
 ## Metadata
 - **ID**: spec-2026-07-31-prompt-surface-judgment-not-rules
-- **Status**: draft (iteration 2 — CMAP round 1 incorporated)
+- **Status**: draft (iteration 3 — CMAP rounds 1 and 2 incorporated)
 - **Created**: 2026-07-31
 - **Issue**: #1280
 - **Protocol**: SPIR
@@ -83,11 +83,15 @@ It is load-bearing: this project's headline criterion is a number one shell scri
 Discovering *before* drafting that the metric was structurally blind to the project's own
 largest target is the correct order of operations, and is why M0 precedes M1.
 
-**The principle applied to this spec, iteration 1 → 2.** CMAP round 1 found two further
-instrument-class errors in my own Current State — a stale claim inherited from the script's
-comments, and a conclusion drawn from a truncated grep. Both are corrected below and both
-are recorded, not quietly fixed: a spec that argues instruments get audited must show its
-own being audited.
+**The principle applied to this spec.** CMAP round 1 found two instrument-class errors in my
+own Current State — a stale claim inherited from the script's comments, and a conclusion drawn
+from a truncated grep. Round 2 found two more: an inventory that missed a whole protocol
+(enumerated from the skeleton, where `release` does not exist) and a metric that could not
+tell deletion from relocation. All four are corrected below and all four are recorded, not
+quietly patched: a spec that argues instruments get audited must show its own being audited.
+The pattern in three of the four is identical — **enumerating from a convenient source instead
+of the authoritative one** — which is the sweep-scope failure class 1252 named as its dominant
+review cost.
 
 ## Current State
 
@@ -153,17 +157,70 @@ air pr 455 / impl 420; maintain 421 / 392. **SPIR consultant per review: 683.**
 
 `codev-skeleton/porch/prompts/**` — 10 files, 4,009 words, no runtime consumer.
 
-### Always-on load, by audience
+### Buckets and audience loads — two different things, defined separately
 
-| Audience | Composition | Words |
+*(CMAP round 2 found the iteration-2 table conflated them: audience loads overlap — SHARED
+rides in both the architect's and the builder's load — and use different multipliers, so
+"subtotals sum to the total" was false as written.)*
+
+**Surface buckets are exclusive.** Every prompt-bearing surface belongs to exactly one, and
+the buckets partition the authored prompt surface with no overlap and no gap:
+
+| Bucket | Contents | Words |
 |---|---|---:|
-| **Builder** (SPIR, I=10) | 6,551 session + 6,364 spawn + 10×(736 + 1,398) | **34,255** |
-| **Architect** (per session) | 6,551 session + 2,048 role | **8,599** |
-| **Consultant** (per review) | 252 role + 431 mean consult-type | **683** |
+| `SHARED` | `CLAUDE.md` + transcluded hot tier (`AGENTS.md` excluded — twin) | 6,551 |
+| `ARCHITECT` | `roles/architect.md` (skills are on-demand, tracked but not always-on) | 2,048 |
+| `BUILDER_SPAWN[p]` | `roles/builder.md` + `protocols/p/builder-prompt.md` + `protocols/p/protocol.md` | per protocol |
+| `PHASE[p]` | `protocols/p/prompts/*.md` expanded (hot tier counted separately as `HOT`) | per protocol |
+| `CONSULTANT[p]` | `roles/consultant.md` + `protocols/p/consult-types/*.md` | per protocol |
+| `DEAD` | `codev-skeleton/porch/prompts/**` | 4,009 |
 
-The builder figure is the headline. `I = 10` phase-task deliveries is 1252's proxy,
-consistent with B4's 3.06 review rounds/project across 4–6 phases; it is a *comparison*
-constant, identical before and after.
+**Audience loads are derived** by explicit formula and deliberately overlap:
+
+```
+HOT                      = arch-critical + lessons-critical                    = 736
+ALWAYS_ON(builder,p,I)   = SHARED + BUILDER_SPAWN[p] + I × (HOT + mean PHASE[p])
+ALWAYS_ON(architect)     = SHARED + ARCHITECT
+ALWAYS_ON(consultant,p)  = roles/consultant.md + mean CONSULTANT-type[p]
+
+ALWAYS_ON_WORDS  ≡  ALWAYS_ON(builder, spir, 10)     ← the single headline number
+                 =  6,551 + 6,364 + 10 × (736 + 1,398)  =  34,255
+```
+
+| Audience | Value |
+|---|---:|
+| **Builder** (SPIR, I=10) — *the headline* | **34,255** |
+| Architect (per session) | 8,599 |
+| Consultant (per review) | 683 |
+
+Fleet-wide the consultant surface is not negligible: 683 × 3 models × ~10 reviews ≈ **20,500
+words per project**, comparable to the entire builder always-on load. It sits outside the
+headline because it is per-review rather than per-builder, not because it is small.
+
+`I = 10` is 1252's proxy, consistent with B4's 3.06 review rounds/project across 4–6 phases.
+It is a *comparison* constant, identical before and after.
+
+### Protocol coverage is per-surface, not per-protocol × surface-type
+
+*(CMAP round 2: "all ten protocols in both trees" is impossible in this repository, and
+demanding it would make M2/M3 unsatisfiable.)* Verified on disk:
+
+- `codev/protocols/` holds **ten** protocols; `codev-skeleton/protocols/` holds **nine** —
+  `release` is **project-local by design** and has no skeleton twin.
+- `release` has *only* `protocol.md` (1,626 words): no `protocol.json`, no
+  `builder-prompt.md`. It is human-invoked prose an agent reads ("Let's release v1.6.0"), so
+  it **is** prompt surface and **is** in scope — but it is not porch-orchestrated or
+  spawnable. **My iteration-2 inventory missed it entirely**, because I enumerated
+  `codev-skeleton/protocols/*/` and `release` lives only in `codev/`. Second sweep-scope
+  failure of this spec phase, same root cause as the truncated grep: enumerating from a
+  convenient source instead of the authoritative one.
+- `experiment`, `research`, `spike`, `release` have **no** `prompts/`; `experiment`,
+  `research`, `spike`, `release` have **no** `consult-types/`. These absences are
+  intentional, not gaps.
+
+Therefore ceilings and sweep criteria apply to **each surface that exists after resolution**,
+enumerated from disk across both trees and unioned. Absence of a surface is legitimate and
+must never fail a check; presence of an unmeasured surface must.
 
 ### The measurement defects (why M0 exists)
 
@@ -359,9 +416,21 @@ canonical text total).
       selection, so mixed per-file overrides measure correctly; (c) counts the inlined
       `roles/builder.md`; (d) counts hot-tier `@import` transclusion in the session term and
       **corrects the stale inlining comment**; (e) expands `{{> …}}` includes; (f) reports
-      **per-segment subtotals — architect / builder / phase / consultant — alongside the
-      total**. Tests assert (a) and (b) against the real resolver, so these defects cannot
-      silently return.
+      **exclusive bucket subtotals and the derived audience loads separately**, per the
+      formulas in Current State, never presenting overlapping audience figures as a sum;
+      (g) reports **total authored prompt-surface words** (both trees + `.claude/skills/`)
+      alongside always-on, so relocation is visible. Tests assert (a) and (b) against the
+      real resolver, so these defects cannot silently return.
+- [ ] **M0c — deleted words are distinguished from relocated words.** Principle 4 authorizes
+      moving how-to content into skills, and relocation scores identically to deletion under
+      an always-on-only metric — the phantom-savings class T2 catches on the *include* axis,
+      unmonitored on the *relocation* axis. A −53% headline is equally consistent with −30%
+      deleted + −23% relocated, and only deleted content satisfies Problem Statement claim 1
+      ("it crowds out judgment"); relocated content still enters context when looked up. The
+      review therefore **decomposes the always-on reduction into deleted vs relocated**,
+      evidenced by the total-authored figure from M0(g). Required by this spec's own
+      principle 7. *(Round-2 finding; the script already computes the skeleton and skills
+      totals, so this is a reporting line, not new machinery.)*
 - [ ] **M0b — the corrected instrument and baseline land on `main` early**, as a small
       standalone PR (precedent: #1290), not at the end of this branch.
       `1252-word-baseline.md` and `1252-word-after-phase7.md` cite figures derived from the
@@ -369,25 +438,59 @@ canonical text total).
       place — original figures preserved, marked superseded, with the reason — and does not
       rewrite their history. PR-1's exact contents, timing, and safety verification are
       specified in **Desired State → Rollout**.
-- [ ] **M1 — >50% reduction (derived).** Builder always-on falls from the corrected baseline
-      (34,255) to **≤16,100**, measured before and after by the same corrected script, both
-      figures committed as generated artifacts. Per-segment figures reported and none
-      regressed.
-- [ ] **M2 — per-surface ceilings met (binding).** Every row of the ceiling table, gross, in
-      **both** trees, for **all ten protocols**.
-- [ ] **M3 — sweep completeness.** Protocols enumerated from disk, not a hardcoded list; no
-      protocol retains a pre-rewrite `protocol.md`, `builder-prompt.md`, prompt set, or
-      consult-type set.
+- [ ] **M1 — >50% reduction (derived, arithmetically implied by M2).** `ALWAYS_ON_WORDS`
+      falls from 34,255 to **≤16,100**, measured before and after by the same corrected
+      script, both figures committed. Audience loads reported; none regressed.
+      **Reachability, stated honestly** *(round-2 finding)*: M1 is fully derived from the M2
+      ceilings — meeting every ceiling yields ≤16,016 (−53.2%), so M1 cannot fail while M2
+      passes. Iteration 2's "HOLD at 50–52%" branch was dead prose and is withdrawn. The
+      *reachable* contingency is **denominator movement**: if correcting the instrument
+      surfaces always-on content not yet found — as it already has twice — the baseline and
+      every ceiling are re-derived to preserve >50%, and the re-derivation goes to the
+      architect rather than being absorbed silently.
+- [ ] **M2 — per-surface ceilings met (binding).** Every ceiling, **gross**, on **every
+      surface that exists after resolution**, enumerated from disk across both trees and
+      unioned — not a per-protocol × surface-type cross product. *(Round-2 correction:
+      `codev/protocols/` has ten protocols and `codev-skeleton/protocols/` nine — `release`
+      is project-local by design — and `experiment`/`research`/`spike`/`release` have no
+      `prompts/` or `consult-types/`. Demanding "all ten in both trees" was unsatisfiable.)*
+      Absence of a surface never fails; presence of an **unmeasured** surface does.
+- [ ] **M2b — CLAUDE.md stays human-readable.** Humans are named stakeholders, and no
+      criterion protected them at 5,815 → ≤1,900. The rewritten file must retain a
+      navigable heading structure and be reviewed by the architect for human usability at
+      the gate — not merely pass the twin-parity byte check. *(Round-2 finding.)*
+- [ ] **M3 — sweep completeness.** Surfaces enumerated from disk (both trees, unioned), not
+      a hardcoded list; no surface retains pre-rewrite content. Includes
+      `codev/protocols/release/protocol.md` (1,626w) — human-invoked prose an agent reads,
+      no skeleton twin, missed by iteration 2's inventory.
 - [ ] **M4 — scar rules intact.** Eight canonicals byte-identical on every registered
       surface; test fails on reword or deletion; count pinned at 8.
-- [ ] **M5 — no capability lost, deterministically checked.** A committed
-      `capability-inventory.json` is extracted pre-rewrite by a script with **explicit
-      recognition rules**: artifact paths (`codev/(specs|plans|reviews)/…` literals and
-      `{{artifact_name}}` forms), gate names (from `protocol.json` `gate:` fields), signal
-      names (`<signal …>` tags), porch check names (`protocol.json` `checks:` ids),
-      notification triggers (`afx send architect` call sites). Normalization: lowercase,
-      strip backticks/punctuation, dedupe. Post-rewrite extraction must be a superset;
-      **any removal fails** and must be justified in the review as a deliberate retirement.
+- [ ] **M5 — no capability lost, proven against the *prompt text*.** A committed
+      `capability-inventory.json` is extracted pre-rewrite with **explicit recognition
+      rules** — artifact paths (`codev/(specs|plans|reviews)/…` literals and
+      `{{artifact_name}}` forms), gate names, signal names (`<signal …>` tags), porch check
+      names, notification triggers — normalized (lowercase, strip backticks/punctuation,
+      dedupe).
+
+      **The inventory is over the resolved, expanded prompt surface, not over
+      `protocol.json` or source call sites** *(round-2 correction)*. Extracting gate and
+      check names from an unchanged `protocol.json`, or notification names from unchanged
+      `afx send` call sites, would report every capability as present even if every
+      corresponding instruction vanished from the served prompts — proving nothing about the
+      thing being cut. Each inventory item must therefore be evidenced as **represented in
+      the served prompt text**: for every gate, check, artifact contract, signal, and
+      notification trigger, a contract-presence assertion that the rewritten prompts still
+      tell the agent about it. This is also the primary defence for the most aggressive row
+      in the table, `protocol.md` 3,703 → ≤700 (−81%), which is the builder's only map of
+      gates, artifacts, and phases.
+
+      **Severity, unambiguous** *(both reviewers, independently)*: "any removal fails" and
+      "justified as a deliberate retirement" are mutually exclusive. Resolved on M10's
+      pattern — **a removal is a hard failure unless the retired name appears in a committed
+      `codev/resources/1280-retirements.md` in the same commit**, naming the capability, why
+      it is obsolete, and the architect approval. An approved, listed retirement passes M5;
+      anything else fails. Retirements *will* occur (M6 deletes a tree; `protocol.md` drops
+      3,000 words), so the exception path must be explicit rather than improvised.
 - [ ] **M6 — the dead tree is gone, with its consumer handled.**
       `codev-skeleton/porch/prompts/` deleted. Verification is **not** a bare grep: an
       untruncated repo-wide search (`grep -rn … | wc -l` reconciled against the full hit
@@ -549,7 +652,9 @@ the reader, and only after the shrink.
       what makes the artifact contract legible without narration.
 - [ ] **Is the hot tier's 736 genuinely exempt?** It is the one surface already built to
       these principles. The spec exempts it; a reviewer may argue it should be re-derived
-      post-shrink, and it is 63% of the phase term.
+      post-shrink. Note the ceiling this imposes: the exempt hot tier is **7,360 of the
+      16,016-word post-rewrite builder budget (46%)**, so it bounds how far this project can
+      go without reopening the exemption.
 - [ ] **`roles/architect.md` 2,048 → ≤700** — the architect segment was outside 1252's
       analysis entirely. Confirm nothing in it is load-bearing for multi-architect
       coordination (Specs 755/786/823) before cutting.
@@ -604,8 +709,10 @@ which already runs the ceilings as a test. T3 stands.)*
    count pinned at 8; reword or deletion fails.
 6. **T5 — Capability inventory (M5).** Post-rewrite extraction ⊇ pre-rewrite, using M5's
    recognition and normalization rules; removals fail.
-7. **T6 — Sweep completeness (M3).** Protocols enumerated from disk; each satisfies T3; a
-   newly added protocol fails until written to budget.
+7. **T6 — Sweep completeness (M3).** Surfaces enumerated from disk across both trees and
+   unioned; each existing surface satisfies T3. Absence of `prompts/`/`consult-types/` for a
+   protocol that has none must **not** fail; a newly added protocol or surface fails until
+   written to budget. Covers `release` (project-local, `codev/` only).
 8. **T7 — Twin parity.** `CLAUDE.md` ≡ `AGENTS.md`; `codev/` and `codev-skeleton/` copies
    consistent.
 9. **T8 — Dead-tree removal (M6).** Tree absent; no runtime reference; the Spec 987 routing
@@ -615,9 +722,14 @@ which already runs the ceilings as a test. T3 stands.)*
     `porch next` returns a well-formed task. ("It compiled" is not "it works.")
 11. **T10 — Rollback rehearsal (M9).** Reverting a rollback **group** on a scratch branch
     restores that group byte-for-byte and leaves the suite green.
-12. **T11 — Segment reporting (M0f).** The script emits architect/builder/phase/consultant
-    subtotals that sum to the total; a fixture where one segment grows and another shrinks
-    shows both movements, not a netted zero.
+12. **T11 — Bucket and audience reporting (M0f).** The script emits the six **exclusive
+    bucket** subtotals, which sum to the authored prompt-surface total, *and separately* the
+    derived audience loads, which overlap by design and are asserted against the stated
+    formulas rather than against a naive sum. A fixture where one bucket grows and another
+    shrinks shows both movements, not a netted zero.
+13. **T15 — Relocation visibility (M0c).** A fixture that moves a block from an always-on
+    surface into `.claude/skills/` shows always-on falling **and** total-authored holding
+    steady — so relocation can never be reported as deletion.
 
 ### Non-Functional Tests
 
@@ -667,13 +779,38 @@ checkouts.
   base commit, order, isolation mode, every outcome value, and any exclusion with its
   reason. Exclusions after the fact must be justified in that file, not silently dropped.
 
+### Execution and sequencing
+
+*(Round-2 finding, raised independently by both reviewers: M7 sat among the criteria with no
+stated position in the sequence, and three operational questions had no answer.)*
+
+- **M7 gates `verify-approval`, not the PR merge.** The rewrite PR merges on the strength of
+  M0–M6 and M8–M10 plus architect review; the A/B then runs against merged `main` as the
+  treatment arm and a pinned pre-rewrite commit as control. This matches where the rollback
+  triggers already point, keeps a 12-run trial off the PR's critical path, and is the only
+  ordering under which "treatment arm = what builders actually get" is literally true.
+  Consequence, stated plainly: a SHIP failure means **rolling back a merged change**, which
+  is precisely what the grouped, rehearsed rollback plan exists for.
+- **Arm disposition — one arm merges per pair.** Each pair produces two real implementations
+  of one backlog issue. **The treatment arm's PR is the candidate for merge; the control
+  arm's is closed unmerged after its outcomes are recorded** (and vice versa if the treatment
+  arm's work is defective on O3). The discarded arm is not wasted — it is the comparison —
+  but the cost defence must be stated accurately: **≈6 of 12 runs produce merged work, not
+  12.** The trial's real cost is 6 duplicated implementations plus consult spend.
+- **Architect load is a scheduling dependency, not a footnote.** 6 pairs with ≥3 SPIR-class
+  implies up to **~24 gate approvals and 12 PR reviews by one person**, each SPIR gate
+  requiring O1 rubric scoring *at approval time*. This is the trial's binding constraint and
+  the reason the pair count is the architect's call, not the builder's. If capacity forces a
+  smaller n, the honest consequence is stated in the power paragraph — not a quietly reduced
+  sample.
+
 ### Pre-registered outcomes
 
 | ID | Outcome | Instrument | Role in decision |
 |---|---|---|---|
 | **O1** | Gate friction | Architect scores each gate at approval time on a 3-item rubric — *artifact complete as specified? / rework required before approval? / clarifying message needed?* — each scored 0 (no friction) / 1 (minor) / 2 (blocking), recorded in the results artifact at scoring time | **advisory + tripwire** |
 | **O2** | Review rounds | Iterations to terminal state per phase from `status.yaml` history; CMAP REQUEST_CHANGES rate (comparable to B1 = 51.88%) | gate |
-| **O3** | Correctness | Architect PR-review findings by severity; any post-merge defect attributable to the run | gate |
+| **O3** | Correctness | **At the SHIP decision**: architect PR-review findings by severity, observable pre-merge on both arms. **Post-merge defects are excluded from the SHIP gate** — they cannot be evaluated when the decision is made — and instead act as a **later rollback signal over a 14-day window** after the merged arm lands *(round-2 correction: the original wording asked one metric to be evaluated at two incompatible times)* | gate (pre-merge part) + rollback signal (post-merge part) |
 | **O4** | Protocol compliance | Binary per-run checklist: required artifacts with required headings · stopped at every human gate · no `status.yaml` hand-edit · no `git add -A` · no scar violation · thread committed | **zero tolerance** |
 | **O5** | Cost & duration | Tokens, wall-clock, `consult stats` delta | advisory |
 
@@ -691,8 +828,9 @@ a rubric written **before** any run.
    missing required artifact is an immediate hard stop, independent of everything else.
 2. **O2**: treatment mean review rounds ≤ control **+ 0.5 rounds/phase**, and treatment
    REQUEST_CHANGES rate ≤ control **+ 10 percentage points**.
-3. **O3**: no treatment-arm finding of severity ≥ "would block merge" absent from its paired
-   control run.
+3. **O3 (pre-merge part only)**: no treatment-arm architect finding of severity ≥ "would
+   block merge" absent from its paired control run. Post-merge defects do not enter this
+   decision; they are a 14-day rollback signal.
 4. **O1 tripwire**: no pair where the treatment arm scored **2 (blocking)** at a gate its
    control scored 0, for the same reason. If O1 scoring is incomplete for any pair, O1 is
    reported incomplete and SHIP rests on 1–3.
@@ -811,6 +949,37 @@ porch's model set for this consultation — the known `--type` review limitation
 
 **Not disputed.** Every round-1 finding was accepted; no rebuttal was filed. Two were
 factual errors in my own Current State, both verified against source before correction.
+
+### Round 2 — 2026-07-31 (architect-directed re-review of the revised spec)
+
+Porch had advanced to the gate after the round-1 rebuttal without re-reviewing; the architect
+directed a round 2 on the grounds that a revision absorbing 13 findings — including a
+structural net→gross ceiling change — needs re-reading, and that porch advancing was
+permissive machinery rather than a judgment. Correct call: round 2 found nine further issues,
+two of them arithmetic errors that would have shipped.
+
+**Verdicts**: Codex REQUEST_CHANGES (HIGH) · Claude REQUEST_CHANGES (HIGH). Both again
+verified the spec's factual claims against source before judging; Claude re-confirmed every
+word count and the `REQUIRED_SPEC_SECTIONS`, `spawn-worktree.ts:854`, and
+no-test-on-1252-artifacts claims.
+
+| Finding | Raised by | Resolution |
+|---|---|---|
+| Segment arithmetic underspecified — audience loads overlap and use different multipliers, so "subtotals sum to the total" is false | Codex | Current State split into **exclusive buckets** (partition, summable) vs **derived audience loads** (overlap by design), with the exact `ALWAYS_ON_WORDS` formula; M0(f) and **T11** restated |
+| "All ten protocols in both trees" is impossible — `release` is project-local (10 vs 9), and several protocols intentionally lack `prompts/`/`consult-types/` | Codex | **Verified on disk.** Coverage restated as per-**surface**, enumerated from disk and unioned; absence never fails, unmeasured presence does. M2/M3/T6 rewritten |
+| `release/protocol.md` (1,626w) missing from the inventory entirely | *(consequence of the above)* | Added; cause recorded — I enumerated the skeleton, where `release` does not exist. Second sweep-scope failure this phase, same root cause as the truncated grep |
+| M5 proves nothing about prompts — gates/checks come from unchanged `protocol.json`, notifications from unchanged call sites | Codex | M5 rewritten to inventory the **resolved, expanded prompt surface** with contract-presence assertions per capability; named as the primary defence for the −81% `protocol.md` row |
+| M5 self-contradictory: "any removal fails" vs "justified retirement" | **both** | Resolved on M10's pattern — hard fail unless the name is in a committed `1280-retirements.md` in the same commit, with architect approval |
+| O3 timing ambiguous — post-merge defects cannot be evaluated at a pre-merge SHIP decision | Codex | Split: pre-merge architect findings gate SHIP; post-merge defects are a **14-day rollback signal** |
+| A/B execution model undefined — what M7 gates, which arm merges, architect load | **both** | New **Execution and sequencing** subsection: M7 gates `verify-approval` (not the PR); treatment arm merges, control closes; cost restated honestly as ~6 of 12 runs producing merged work; ~24 gate approvals + 12 PR reviews named as the binding scheduling constraint |
+| Relocation to skills scores identically to deletion — phantom savings on an axis T2 does not cover | Claude | **New M0c + M0(g) + T15**: report total authored surface, decompose the cut into deleted vs relocated. Caught by this spec's own principle 7 |
+| M1's "HOLD at 50–52%" branch is arithmetically unreachable — M1 is fully derived from M2 | Claude | **Verified** (ceilings met ⇒ ≤16,016 = −53.2%; the HOLD band needs 16,442–17,128, i.e. M2 already failing). Dead prose withdrawn; replaced with the reachable contingency, **denominator movement** |
+| No criterion protects CLAUDE.md's human readability at 5,815 → 1,900 | Claude | **New M2b** — architect reviews human usability at the gate; twin-parity bytes are not a readability check |
+| Consultant surface reads as negligible at "−33.8% on 683" | Claude | Fleet-wide figure added: ≈20,500 words/project, comparable to the whole builder load |
+| Exempt hot tier bounds the achievable cut | Claude | Quantified in the open question: 7,360 of 16,016 post-rewrite builder words (46%) |
+
+**Not disputed.** Every round-2 finding was accepted; no rebuttal filed. Both arithmetic
+claims (M1 reachability, ceiling landing) were independently recomputed before acceptance.
 
 ## Approval
 - [ ] Technical Lead Review
