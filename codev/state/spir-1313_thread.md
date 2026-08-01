@@ -323,3 +323,92 @@ DECISIONS (non-obvious):
 6. `--interrupt` unchanged (Ctrl+C + write, no gate). `escape` unchanged. `noEnter` = staged write → delivered.
 Build order: (a) mailbox-delivery.ts + unit tests → (b) handleSend rewrite + dead-session seam + wrapper resolve →
 (c) client contract → (d) retire SendBuffer + lifecycle → (e) e2e #1265 repro. Commit once coherent+green.
+
+### 2026-08-01 — Phase 4 RESUMED (recovery from snapshot) — foundation verified + latent bug fixed
+- Re-read snapshot + thread. Verified the uncommitted foundation: `tsc --noEmit` clean, `send-delivery.test.ts` **9/10** initially.
+- **FOUND + FIXED a real latent bug in mailbox-delivery.ts**: the drainer's streak-map key template literal contained an
+  **invisible NUL byte** (`\x00`) where a space appeared visually — `` `${workspace_path}<NUL>${to_agent}` ``. Rendered as a
+  space in every editor/Read; runtime key was `/ws\0B`. The test asserted `get('/ws B')` (space) → got undefined. A NUL
+  separator is actually the *right* (collision-proof) choice, but an invisible one is a trap. Fix: extracted an explicit,
+  exported `agentKey(ws, agent)` helper using a visible `\0`, used by the drainer + shared with the test + Phase 7. Now **10/10**.
+  Lesson: born-dirty applies to source too — verify inherited/uncommitted code before building on it.
+- Build order for the rest (unchanged): write-queue serialization → mailbox-delivery serialize wrapper → handleSend rewrite +
+  dead-session seam + wrapper-profile resolve → retire SendBuffer + lifecycle → client contract → e2e #1265.
+- Verified via grep: **no consumer** reads broadcast `metadata.source`/`raw` → delivered-broadcast `source:'mailbox'` is safe.
+
+### 2026-08-01 — Phase 4 RECON complete (dead-session semantics nailed down)
+Recon subagent mapped the exact surface. Decisions locked:
+- **Dead-session = TWO cases.** (A) bare PTY death while Tower runs → routing entry STALE → `getSession()` returns exited
+  (<30s: !writable→was 503) or undefined (>30s→was 404). resolveTarget SUCCEEDS; I already have result.workspacePath+agent →
+  hold no-live-pty, NO registry needed. (B) `afx cleanup`/tab-close/tower-restart → routing entry REMOVED → resolveTarget
+  NOT_FOUND → registry fallback.
+- **`afx cleanup` also deletes the global.db builder row** (cleanup.ts:382 removeBuilder). So a cleaned-up builder is gone from
+  BOTH registries → fallback finds nothing → 404 (correct: don't hold for a deleted builder). The registry fallback's REAL job:
+  hold mail for a builder that's registered in global.db but has no live terminal (Tower restart / spawned-but-PTY-not-up).
+- **Respawn (launch-loop) is NEVER dead** — `.builder-start.sh` runs `while true; do <agent>; …; done`; the harness exiting does
+  not kill the PTY (bash wrapper stays live). No between-PTYs gap. The "respawned agent drains predecessor mail" criterion is the
+  `afx cleanup`+new-spawn-same-id case (agent-addressed drain to the NEW terminal).
+- interrupt/escape = explicit human bypass; require a LIVE writable session (no gate, no hold). Only NORMAL msg sends hold.
+- to_agent stores the SPECIFIC agent name: builder id, or architect name (reverse-map result.terminalId→name via entry.architects,
+  fallback 'main'). Makes getSessionForAgent + drainer redelivery deterministic across respawns.
+- Wiring lives in NEW `servers/mailbox-wiring.ts`: makeDeliveryPorts + resolveLiveSessionForAgent + resolveProfileForSession
+  (resolveProfile → if null, harnessFromLaunchScript(nodeFsPort, session.cwd) → resolveProfile({command:harness})) + drainer
+  singleton + start/stopMailboxDrainer. resolveAgentInRegistry goes in tower-messages.ts next to resolveTarget (shares
+  parseAddress + spoofing). Scope of registry fallback: bare-agent + architect/architect:<name> forms; project:agent NOT_FOUND
+  falls through to 404 (rare cross-ws-to-dead edge; documented).
+
+### 2026-08-01 — Phase 4 IMPLEMENTED (all deliverables) — build+unit green, e2e verifying
+Full mailbox-first send path landed. Files:
+- NEW `servers/write-queue.ts` — `KeyedSerializer` (per-agent FIFO, completion-chained). +`write-queue.test.ts` (6).
+- `servers/mailbox-delivery.ts` — writeMessage port now completion-aware (awaited); added `deliverAgentMailSerialized`
+  (module-singleton serializer) used by BOTH handleSend and the drainer; drainer tick routes through it. `agentKey` helper.
+- NEW `servers/mailbox-wiring.ts` — `makeDeliveryPorts` (live session resolve + wrapper-profile fallback via
+  harnessFromLaunchScript(nodeFsPort, session.cwd) + real classifyScreen + paced completion-aware write + broadcast) +
+  `MailboxDrainer` lifecycle `start/stopMailboxDrainer` (replaces start/stopSendBuffer). NODE_FS_PORT (faithful 3-method).
+- `servers/tower-messages.ts` — `resolveAgentInRegistry` (+`RegistryResolveResult{workspacePath,agent,kind}`): registry
+  fallback for NOT_FOUND (bare builder exact/tail, architect/architect:<name> with spoofing; project:agent → 404, documented).
+  `isResolveError` made generic `<T extends object>`.
+- `servers/tower-routes.ts` — handleSend REWRITTEN: parse → resolveTarget → (NOT_FOUND→registry fallback→hold no-live-pty |
+  else error) → getSession (dead/!writable → hold no-live-pty for normal; 404/503 kept for escape/interrupt) → escape (live,
+  no row) → interrupt (Ctrl+C, gate-BYPASS, enqueue+write+broadcast+markDelivered, audit row) → NORMAL: enqueue(persist-first)
+  → deliverAgentMailSerialized with a **request-scoped port override** delivering to the ALREADY-RESOLVED session (avoids a
+  redundant/possibly-divergent re-resolve; also makes endpoint tests exercise the real gate) → getById → delivered|held resp.
+  try/catch around delivery ⇒ gate/write error leaves row held (not 500). Helpers: sendJson, architectNameForTerminal
+  (reverse-map tid→specific architect name so to_agent is concrete), liveTargetIdentity, formatMessageForTarget, holdAndRespond.
+  Retired SendBuffer: deleted send-buffer.ts + send-buffer.test.ts; removed sendBuffer singleton/deliverBufferedMessage.
+- `tower-server.ts` — start/stopSendBuffer → start/stopMailboxDrainer (mailbox-wiring).
+- Client contract: `packages/core/src/tower-client.ts` sendMessage return +{delivered,held,reason,mailboxId} (additive, old
+  binaries omit → reads as delivered). **REBUILT core** so codev typechecks against new .d.ts. `commands/send.ts` — single-send
+  (:332) + sendToAll report delivered vs held(reason)+id, aggregate counts. lib/tower-client.ts just re-exports core (correct file).
+- Response shape (POST /api/send success): {ok, terminalId|null, resolvedTo, deferred(=held), delivered, held, reason, mailboxId}.
+- **Additive-field back-compat verified**; no consumer reads broadcast metadata.source → delivered broadcast uses source:'mailbox'.
+
+Tests: `send-delivery.test.ts` (11: +serialized concurrency no-blob), `write-queue.test.ts` (6), NEW `send-mailbox-repro.test.ts`
+(5: **#1265 vs the REAL gate** draft→held(busy)→clean→deliver, menu-hold, no-profile-hold, restart-recovery, respawn-drain),
+`tower-routes.test.ts` (rewrote 7 send tests for gated delivery + 2 new: dead-session hold, held-busy; added in-memory getGlobalDb
+mock + resolveAgentInRegistry mock + gateSession helper). **Full unit suite: 4097 pass / 48 skip / 0 fail. tsc clean.**
+Existing `send-integration.e2e.test.ts` fixed (inert shells now hold; routing tests use interrupt gate-bypass path + trap-survive
+shell; +1 held-behavior HTTP test). e2e runs vs dist (rebuilt) — verifying in background.
+Next: confirm e2e, commit phase_4, `porch done 1313` → 3-way review. Expect >1 review iteration (big integration phase).
+
+### 2026-08-01 — Phase 4 RESUMED (recovery) — e2e open item ROOT-CAUSED + RESOLVED; all green
+Resumed from snapshot. Re-verified the uncommitted foundation: `tsc --noEmit` clean; **full unit suite 4102 pass / 48 skip /
+0 fail**; phase_4 unit set (send-delivery + write-queue + send-mailbox-repro + tower-routes) 118/118.
+**Resolved the one open item — the subprocess e2e (`send-integration.e2e.test.ts`).** Root cause (reproduced deterministically,
+then instrumented the dist): `registerTerminal` → `POST /api/terminals` → non-persistent path → `pty-session.ts`
+`const nodePty = await import('node-pty'); nodePty.spawn(...)` → **`nodePty.spawn is not a function`**. Instrumenting the dist
+inside the running Tower showed the namespace has KEY `spawn` (cjs-module-lexer detected it) but `typeof nodePty.spawn === undefined`
+AND `typeof nodePty.default.spawn === undefined` — a Node ESM↔CJS interop quirk where node-pty's live named bindings resolve
+undefined inside Tower's deep ESM graph when loaded from built `dist/`. The SAME `await import('node-pty')` works standalone
+(probed from the package tree: spawns a real PTY). This is **pre-existing and unrelated to Spec 1313**: `pty-session.ts` is
+byte-identical to main (untouched by phase_4); the base e2e used the same non-persistent `/bin/sh` path (only the args differ),
+so it failed identically on main. The codebase already knows this trap — `terminal/shellper-main.ts` deliberately loads node-pty
+via `createRequire` with an ESM→CJS-interop comment; `pty-session.ts` does not.
+**Fix (in-scope, test-only):** register the e2e terminals via the **shellper (persistent) backend** (`persistent: true`) — the
+same path Tower uses for real builders/architects, which spawns in its own process and is immune to the quirk. A shellper session
+reports `command: ''` (pty-manager.createSessionRaw), which still resolves to `no-profile`, so the held-behavior assertion holds.
+**Result: `send-integration.e2e.test.ts` 6/6 PASS** (incl. the new mailbox-first held HTTP contract: held+mailboxId+reason=no-profile).
+Did NOT touch `pty-session.ts` (out of phase_4 scope; the createRequire fix for the non-persistent path is a separate concern —
+noting for a possible follow-up issue). Diagnostics (dist patch, probe scripts) fully reverted; worktree clean.
+Phase_4 evidence complete: build green, full unit green, deterministic #1265 repro green, subprocess e2e green. Committing, then
+`porch done 1313` → 3-way review.
