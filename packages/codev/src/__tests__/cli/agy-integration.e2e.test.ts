@@ -30,7 +30,17 @@ function isSkip(out: string): boolean {
   return out.includes('VERDICT: COMMENT') && /Skipped/i.test(out);
 }
 
-/** True when a real, usable agy is available AND the suite is allowed to spawn it. */
+/**
+ * True when a real, usable agy is available AND the suite is allowed to spawn it.
+ *
+ * This is the no-browser guard PR #1324's `describe.skip` was waiting on, so the
+ * skip is lifted and the coverage comes back. #1324 was right that the old
+ * "unavailable/unauthed → harmless skip" check only notices the problem *after*
+ * the OAuth window is already open — detection can never prevent the window,
+ * only not spawning can. The opt-in moves the decision before the spawn: without
+ * `CODEV_ALLOW_REAL_AGY` the harness has pinned a fake agy, `realAgyOptIn()` is
+ * false, and every case below no-ops without reaching the binary at all.
+ */
 function realAgyAvailable(): boolean {
   return realAgyOptIn() && Boolean(resolveAgyBin());
 }
