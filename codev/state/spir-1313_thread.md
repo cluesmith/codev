@@ -950,3 +950,26 @@ REQUEST_CHANGES/HIGH** — 3 points, all verified against source before acting:
 **Verify**: tsc --noEmit exit 0; send-delivery+cron-delivery+send-mailbox-repro 37 pass (+2 new race tests);
 tower-routes 96 pass. Rebuttal → `1313-review-iter1-rebuttals.md`. Review doc updated (Consultation Feedback
 → Review Phase; Technical Debt residual). Next: commit → push (updates PR) → `porch done` → iter-2 re-consult.
+
+### 2026-08-01 — RESUMED (architect: "read state-snapshot") → implemented the held-gate change: `afx inbox show <id>`
+Picked up the paused pr-gate reconciliation. Architect's directive (from snapshot): spec self-contradiction —
+Redaction §183 names `afx inbox` a legit body-display surface, but the list impl is metadata-only. Fix = keep list
+metadata-only, ADD `afx inbox show <id>` (per-id body view). Implemented (NOT relitigated):
+- **Route** (was already uncommitted from prior session): `GET /api/inbox/:id` → `handleInboxShow` in tower-routes.ts
+  (full row incl body; 404 unknown; 405 non-GET; dispatched AFTER the dismiss match so `/:id/dismiss` can't fall
+  through). Verified `getById`→`getMailboxById` alias + all `DbMailbox` field mappings against source.
+- **CLI**: `inboxShow(id, opts)` in commands/inbox.ts (renders metadata via logger.kv + raw body via console.log —
+  the deliberate, spec-sanctioned redaction exception; bodies surface only here + live terminal). Header comment +
+  list footer updated. `show <id>` subcommand registered in cli.ts (mirrors dismiss).
+- **Tests**: +5 route (inbox-routes.test.ts: body returned, escalated bool, any-status/dismissed inspectable,
+  404, 405-non-GET) +4 CLI (inbox-cli.test.ts: body printed via console.log spy, escalated+fromWorkspace,
+  id-encoding, 404 fatal). **27 pass** (was 18). tsc --noEmit exit 0.
+- **Spec**: Decision 8 + Redaction bullet amended (list=metadata-only; `show <id>`=body view; works any status).
+  Added a dated review-phase amendment note to the Expert Consultation changelog.
+- **Docs**: both agent-farm.md trees (full `show` subsection + synopsis + example; skeleton keeps its leaner
+  2-example set), both overview.md tables (List/**show**/dismiss), arch.md §mailbox line (was "never bodies" —
+  now names show as the body-surfacing view), and the messaging pointers in root CLAUDE/AGENTS + skeleton
+  templates. Invariants re-checked: `diff CLAUDE.md AGENTS.md` empty; skeleton templates differ only by title/note.
+- **Review doc**: Deviations entry + Review-Phase Round-2 stub (verdicts filled after iter-2 re-consult).
+Next: commit (explicit staging, NO git add -A) → push (updates PR #1330) → `porch done 1313` (re-consult delta) →
+write iter-2 rebuttal from feedback. Strict mode: do NOT self-approve pr gate; do NOT merge.

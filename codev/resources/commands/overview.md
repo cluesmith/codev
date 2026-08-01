@@ -61,7 +61,7 @@ See [codev.md](codev.md) for full documentation.
 | `afx status` | Show status of all agents |
 | `afx cleanup` | Clean up a builder worktree |
 | `afx send` | Send instructions to a builder |
-| `afx inbox` | List/dismiss held (undelivered) messages |
+| `afx inbox` | List/show/dismiss held (undelivered) messages |
 | `afx open` | Open file annotation viewer |
 | `afx shell` | Spawn a utility shell |
 | `afx tower` | Cross-project dashboard |

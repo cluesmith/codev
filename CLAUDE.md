@@ -610,7 +610,7 @@ Agents within a workspace communicate through `afx send`. Four addressing forms 
 - **delivered** — written to the recipient's prompt after a clean render-gate pass (a verified-empty prompt).
 - **held** — the prompt wasn't clear, so the message is persisted in Tower's durable mailbox and delivers automatically once the prompt is clean (after a submit, on output quiescence, or a poll backstop). The response carries a why-held reason — `busy` (a draft/menu/dialog/wrapper occupies the prompt), `no-profile` (unknown app; only `claude`, `codex`, and `agy` are modeled), or `no-live-pty` (no live terminal — delivers on respawn, since rows address agents not PTYs) — plus a mailbox id.
 
-A held message is **never force-injected** onto a busy line, so it can't fuse with a half-typed draft, and held rows survive Tower restart/shutdown. See held mail with `afx inbox` and clear one with `afx inbox dismiss <id>` (dismissal is CLI-only; the dashboard and VSCode held-count indicators are read-only). `afx send --interrupt` remains the explicit, deliberate bypass (it interrupts the agent and skips holding).
+A held message is **never force-injected** onto a busy line, so it can't fuse with a half-typed draft, and held rows survive Tower restart/shutdown. See held mail with `afx inbox`, read one (including its body) with `afx inbox show <id>`, and clear one with `afx inbox dismiss <id>` (dismissal is CLI-only; the dashboard and VSCode held-count indicators are read-only). `afx send --interrupt` remains the explicit, deliberate bypass (it interrupts the agent and skips holding).
 
 ### Sibling-architect messaging
 

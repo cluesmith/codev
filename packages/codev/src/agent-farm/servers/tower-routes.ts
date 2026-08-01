@@ -304,6 +304,14 @@ export async function handleRequest(
       return handleInboxDismiss(req, res, ctx, inboxDismissMatch);
     }
 
+    // Inbox show: GET /api/inbox/:id — a single row INCLUDING its body (Spec 1313 §178).
+    // Checked AFTER the dismiss match, so /:id/dismiss never falls through here (its
+    // trailing segment can't match this single-segment pattern anyway).
+    const inboxShowMatch = url.pathname.match(/^\/api\/inbox\/([^/]+)$/);
+    if (inboxShowMatch) {
+      return handleInboxShow(req, res, inboxShowMatch);
+    }
+
     // Workspace routes: /workspace/:base64urlPath/* (Spec 0090 Phase 4)
     if (url.pathname.startsWith('/workspace/')) {
       return await handleWorkspaceRoutes(req, res, ctx, url);
@@ -1888,6 +1896,46 @@ function handleInboxDismiss(
   ctx.broadcastNotification({ type: 'overview-changed', title: 'Held mail changed', body: 'dismissed' });
   ctx.log('INFO', `Inbox: dismissed held message ${id.slice(0, 8)}...`);
   sendJson(res, 200, { ok: true });
+}
+
+/**
+ * GET /api/inbox/:id — return a single mailbox row INCLUDING its body. Backs
+ * `afx inbox show <id>` (Spec 1313 §178: `afx inbox` is a UI surface that legitimately
+ * displays message bodies over the local Tower connection — the redaction rule applies to
+ * logs/diagnostics/telemetry only, never this view). Mirrors dismiss's addressing model:
+ * by unique id at the workspace-human trust level, no per-recipient/workspace ownership
+ * check (decision 8). GET-only (the path match in the dispatch is method-agnostic, so a
+ * non-GET is rejected here); 404 when the id names no row. The body is returned to the
+ * caller but never logged.
+ */
+function handleInboxShow(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  match: RegExpMatchArray,
+): void {
+  if (req.method !== 'GET') {
+    sendJson(res, 405, { error: 'Method not allowed' });
+    return;
+  }
+  const id = decodeURIComponent(match[1]);
+  const row = getMailboxById(getGlobalDb(), id);
+  if (!row) {
+    sendJson(res, 404, { error: 'NOT_FOUND', message: `No message with id '${id}'` });
+    return;
+  }
+  sendJson(res, 200, {
+    id: row.id,
+    workspacePath: row.workspace_path,
+    toAgent: row.to_agent,
+    fromAgent: row.from_agent,
+    fromWorkspace: row.from_workspace,
+    status: row.status,
+    reason: row.reason,
+    escalated: row.escalated === 1,
+    body: row.body,
+    createdAt: row.created_at,
+    resolvedAt: row.resolved_at,
+  });
 }
 
 async function handleBrowse(res: http.ServerResponse, url: URL): Promise<void> {

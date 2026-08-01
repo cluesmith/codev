@@ -560,7 +560,7 @@ Sends text to a builder's terminal. Useful for:
   - `no-profile` — the target app has no render-gate classifier profile (only `claude`, `codex`, and `agy` are modeled);
   - `no-live-pty` — the recipient agent has no live terminal right now (it delivers when the agent respawns — rows address agents, not PTYs).
 
-A held message is **never force-injected** onto a busy line: a message body is only ever written to a verified-empty prompt, so it cannot fuse with a half-typed draft, and held rows survive Tower restart/shutdown (no shutdown force-flush). See held mail with `afx inbox` and clear one with `afx inbox dismiss <id>`. `--interrupt` is the explicit, deliberate bypass: it interrupts the agent and writes without holding (unchanged semantics).
+A held message is **never force-injected** onto a busy line: a message body is only ever written to a verified-empty prompt, so it cannot fuse with a half-typed draft, and held rows survive Tower restart/shutdown (no shutdown force-flush). See held mail with `afx inbox`, read one (including its body) with `afx inbox show <id>`, and clear one with `afx inbox dismiss <id>`. `--interrupt` is the explicit, deliberate bypass: it interrupts the agent and writes without holding (unchanged semantics).
 
 **Examples:**
 
@@ -600,18 +600,19 @@ afx send 0042 --file src/api.ts "Review this implementation"
 
 ### afx inbox
 
-List and dismiss **held** (undelivered) messages — the human-facing visibility surface for Spec 1313's mailbox. `afx send` persists a message it can't deliver immediately as a held row that delivers automatically once the recipient's prompt is clear; `afx inbox` lets a human see and clear what is still waiting, without reading Tower logs.
+List, inspect, and dismiss **held** (undelivered) messages — the human-facing visibility surface for Spec 1313's mailbox. `afx send` persists a message it can't deliver immediately as a held row that delivers automatically once the recipient's prompt is clear; `afx inbox` lets a human see what is still waiting, read a specific message body, and clear rows — without reading Tower logs.
 
 ```bash
 afx inbox [options]
+afx inbox show <id> [options]
 afx inbox dismiss <id> [options]
 ```
 
-**`afx inbox`** — list every currently-held message in the workspace. Metadata only — message bodies are never shown here (or in logs):
+**`afx inbox`** — list every currently-held message in the workspace. Metadata only — message bodies are never shown in the list (or in logs); use `afx inbox show <id>` to read one:
 
 | Column | Meaning |
 |---|---|
-| `ID` | Mailbox row id (pass to `dismiss`) |
+| `ID` | Mailbox row id (pass to `show` / `dismiss`) |
 | `AGE` | How long the message has been held (`5s`, `3m`, `2h`, `1d`) |
 | `REASON` | Why-held: `busy`, `no-profile`, or `no-live-pty`; a trailing `!` marks a row past the escalation age |
 | `FROM → TO` | Sender → recipient agent |
@@ -619,6 +620,11 @@ afx inbox dismiss <id> [options]
 
 **Options:**
 - `-w, --workspace <path>` - Workspace to list (default: current workspace — `afx inbox` is workspace-scoped, not Tower-wide)
+- `-p, --port <port>` - Tower port (default: 4100)
+
+**`afx inbox show <id>`** — display a single message by id, **including its body**. This is the one CLI surface that surfaces a body: the redaction rule keeps bodies out of logs, diagnostics, and telemetry — not out of this local operator view, which travels over the same local Tower connection the message already uses. `show` works on a row of **any** status (held / delivered / superseded / dismissed), so a resolved row stays inspectable by id for audit until it is pruned. Prints the metadata (status, why-held reason, from → to, workspace, timestamps) followed by the raw body.
+
+**Options:**
 - `-p, --port <port>` - Tower port (default: 4100)
 
 **`afx inbox dismiss <id>`** — mark a held message dismissed. A soft, auditable transition (the row is marked `dismissed`, not deleted) that **never delivers** the message. Any workspace operator may dismiss any held row (same local-human trust level as `afx send`).
@@ -634,6 +640,9 @@ afx inbox
 
 # List held messages for a different workspace
 afx inbox --workspace /path/to/other/workspace
+
+# Show one message including its body (works for any status, held or resolved)
+afx inbox show 5f3c9a2b-1e4d-4c7a-9f21-8b6d0e2a1c33
 
 # Dismiss a held message by id (never delivers it)
 afx inbox dismiss 5f3c9a2b-1e4d-4c7a-9f21-8b6d0e2a1c33

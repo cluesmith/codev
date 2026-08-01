@@ -38,7 +38,7 @@ const CURRENT_WS = '/home/user/project';
 const mockGetConfig = vi.hoisted(() => vi.fn());
 vi.mock('../utils/config.js', () => ({ getConfig: mockGetConfig }));
 
-import { inboxList, inboxDismiss } from '../commands/inbox.js';
+import { inboxList, inboxShow, inboxDismiss } from '../commands/inbox.js';
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -124,6 +124,76 @@ describe('inboxList', () => {
     mockRequest.mockResolvedValue({ ok: false, status: 0, error: 'Tower not running' });
 
     await expect(inboxList()).rejects.toThrow('FATAL: Tower not running');
+  });
+});
+
+// ============================================================================
+// inboxShow
+// ============================================================================
+
+describe('inboxShow', () => {
+  /** A full row as GET /api/inbox/:id returns it — INCLUDING the body. */
+  function fullRow(overrides: Record<string, unknown> = {}) {
+    return {
+      id: 'abcdef01-2345-6789-abcd-ef0123456789',
+      workspacePath: '/home/user/project',
+      toAgent: 'spir-1',
+      fromAgent: 'architect',
+      fromWorkspace: null,
+      status: 'held',
+      reason: 'busy',
+      escalated: false,
+      body: 'the full secret message body',
+      createdAt: 1_700_000_000_000,
+      resolvedAt: null,
+      ...overrides,
+    };
+  }
+
+  it('prints the message body verbatim (the show view surfaces the body, unlike the list)', async () => {
+    // The body is printed raw via console.log (no [info]/indent decoration). The logger
+    // mock's methods don't reach console, so console.log carries only the body here.
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    mockRequest.mockResolvedValue({ ok: true, status: 200, data: fullRow() });
+
+    await inboxShow('abcdef01-2345-6789-abcd-ef0123456789');
+
+    expect(mockRequest).toHaveBeenCalledWith('/api/inbox/abcdef01-2345-6789-abcd-ef0123456789');
+    expect(logSpy).toHaveBeenCalledWith('the full secret message body');
+    // Metadata renders through logger.kv.
+    expect(mockLogger.kv).toHaveBeenCalledWith('Status', 'held');
+    logSpy.mockRestore();
+  });
+
+  it('marks an escalated row and shows fromWorkspace when present', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    mockRequest.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: fullRow({ escalated: true, fromWorkspace: 'marketmaker' }),
+    });
+
+    await inboxShow('abc');
+
+    expect(mockLogger.kv).toHaveBeenCalledWith('Status', 'held (escalated)');
+    expect(mockLogger.kv).toHaveBeenCalledWith('From → To', 'architect (marketmaker) → spir-1');
+    logSpy.mockRestore();
+  });
+
+  it('URL-encodes the id in the path', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    mockRequest.mockResolvedValue({ ok: true, status: 200, data: fullRow() });
+
+    await inboxShow('a b/c');
+
+    expect(mockRequest).toHaveBeenCalledWith('/api/inbox/a%20b%2Fc');
+    logSpy.mockRestore();
+  });
+
+  it('calls fatal when the id names no row (404)', async () => {
+    mockRequest.mockResolvedValue({ ok: false, status: 404, error: "No message with id 'nope'" });
+
+    await expect(inboxShow('nope')).rejects.toThrow("FATAL: No message with id 'nope'");
   });
 });
 

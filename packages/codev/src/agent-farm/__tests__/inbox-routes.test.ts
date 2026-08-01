@@ -272,3 +272,62 @@ describe('POST /api/inbox/:id/dismiss', () => {
     expect(ctx.broadcastNotification).not.toHaveBeenCalled();
   });
 });
+
+describe('GET /api/inbox/:id', () => {
+  it('returns the full row INCLUDING the body (the show view surfaces bodies, unlike the list)', async () => {
+    const row = seedHeld({ reason: 'no-live-pty' });
+    const res = makeRes();
+    await handleRequest(makeReq('GET', `/api/inbox/${row.id}`), res, makeCtx());
+
+    expect(res._statusCode).toBe(200);
+    const body = JSON.parse(res._body) as Record<string, unknown>;
+    expect(body).toMatchObject({
+      id: row.id,
+      workspacePath: WS,
+      toAgent: 'spir-1',
+      fromAgent: 'architect',
+      status: 'held',
+      reason: 'no-live-pty',
+      escalated: false,
+      // The single-row view DELIBERATELY carries the body — the exact contrast with the
+      // list's redaction. This is the reconciled behavior (Spec 1313 Redaction rule +
+      // decision 8): `afx inbox show <id>` is the sanctioned body-display surface.
+      body: 'SECRET BODY — must never appear in the inbox list',
+    });
+  });
+
+  it('normalizes the escalated flag from SQLite 0/1 to a boolean', async () => {
+    const row = seedHeld();
+    mailbox.markEscalated(holder.db, row.id, 2000);
+    const res = makeRes();
+    await handleRequest(makeReq('GET', `/api/inbox/${row.id}`), res, makeCtx());
+    expect((JSON.parse(res._body) as { escalated: boolean }).escalated).toBe(true);
+  });
+
+  it('shows a row of ANY status — a dismissed row is still inspectable by id (audit)', async () => {
+    const row = seedHeld();
+    mailbox.dismiss(holder.db, row.id, 5000);
+    const res = makeRes();
+    await handleRequest(makeReq('GET', `/api/inbox/${row.id}`), res, makeCtx());
+    expect(res._statusCode).toBe(200);
+    const body = JSON.parse(res._body) as { status: string; resolvedAt: number | null };
+    expect(body.status).toBe('dismissed');
+    expect(body.resolvedAt).toBe(5000);
+  });
+
+  it('404s when the id names no row', async () => {
+    const res = makeRes();
+    await handleRequest(makeReq('GET', '/api/inbox/does-not-exist'), res, makeCtx());
+    expect(res._statusCode).toBe(404);
+    expect(JSON.parse(res._body)).toMatchObject({ error: 'NOT_FOUND' });
+  });
+
+  it('rejects a non-GET method with 405 (the single-row view is read-only)', async () => {
+    const row = seedHeld();
+    const res = makeRes();
+    // PUT /api/inbox/:id has no /dismiss suffix, so it falls through to the show route,
+    // which must reject any non-GET method rather than act on it.
+    await handleRequest(makeReq('PUT', `/api/inbox/${row.id}`), res, makeCtx());
+    expect(res._statusCode).toBe(405);
+  });
+});

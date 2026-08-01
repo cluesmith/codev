@@ -787,6 +787,22 @@ export async function runAgentFarm(args: string[]): Promise<void> {
     });
 
   inboxCmd
+    .command('show <id>')
+    .description('Show a single message by id, including its body (metadata + body)')
+    .option('-p, --port <port>', 'Tower port (default: 4100)')
+    .action(async (id, options) => {
+      const { inboxShow } = await import('./commands/inbox.js');
+      try {
+        await inboxShow(id, {
+          port: options.port ? parseInt(options.port, 10) : undefined,
+        });
+      } catch (error) {
+        logger.error(error instanceof Error ? error.message : String(error));
+        process.exit(1);
+      }
+    });
+
+  inboxCmd
     .command('dismiss <id>')
     .description('Dismiss a held message by id — marks it dismissed, never delivers it')
     .option('-p, --port <port>', 'Tower port (default: 4100)')

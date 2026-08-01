@@ -52,6 +52,17 @@ smoke is deferred to the verify phase per the plan.
 - **arch/lessons routing** deferred from Phase 9 to this Review phase (the plan explicitly permits this; the
   Review phase has the dedicated `update-arch-docs` step). Applied in this review — see Architecture Updates
   and Lessons Learned Updates below.
+- **Review phase — `afx inbox show <id>` added (architect-directed, at the `pr` gate)**: the architect held the
+  `pr` gate on one reconciliation. The spec's Redaction rule (Security Considerations) named `afx inbox` as a
+  legitimate body-display surface, but the implemented `afx inbox` list is deliberately metadata-only — a
+  self-contradiction. Resolution (the architect's call, implemented rather than relitigated): keep the **list**
+  metadata-only and add an explicit **`afx inbox show <id>`** single-row view that surfaces the body over the same
+  local Tower connection the message already uses. Backed by a new `GET /api/inbox/:id` route (returns a full row
+  including its body; 404 on unknown id; 405 on non-GET) and an `inboxShow` CLI handler. Spec Decision 8 + the
+  Redaction bullet were amended to match; docs updated across both `agent-farm.md` trees, both `overview.md`
+  tables, the CLAUDE/AGENTS messaging sections (root + skeleton templates), and `arch.md`. `show` works on a row
+  of **any** status, so a resolved (delivered/superseded/dismissed) row stays inspectable by id for audit until it
+  is pruned. +9 tests (5 route, 4 CLI).
 
 ## Key Metrics
 
@@ -357,6 +368,13 @@ Response types: **Addressed** (fixed), **Rebutted** (disagreed with reasoning), 
 
 #### Gemini — skipped
 - Non-blocking skip (`agy` exited 1, unauthenticated). No review content.
+
+### Review Phase (Round 2) — `afx inbox show <id>` reconciliation (architect-directed)
+
+Not a consult finding: the architect held the `pr` gate to direct one change (see Deviations — `afx inbox show
+<id>`). The reconciliation was implemented (new `GET /api/inbox/:id` route + `inboxShow` CLI handler + 9 tests +
+spec/doc amendments) and re-submitted for the review-phase iter-2 3-way. Verdicts are recorded here after that
+re-consult completes; the corresponding rebuttal lives in `1313-review-iter2-rebuttals.md`.
 
 ## Lessons Learned
 
