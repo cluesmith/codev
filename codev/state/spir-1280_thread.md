@@ -811,3 +811,20 @@ flight, ever again.
 
 Verified verdict: HEAD `1eac5c35`, **206 files / 4,117 tests, exit 0**, working tree clean, all
 four T16 assertions passing individually.
+
+### Phase 3 PASSED (2026-08-01) — plus a 746-amendment candidate for the review file
+
+Architect verified T16 green at `a8e4518f` themselves, confirmed all three #1279 template
+includes present, and content-read all ten decisions. `release` non-change endorsed on its own
+reasoning: **where the sequence is the contract, P1 protects the procedure.**
+
+**Architect observation, non-blocking, to carry into the review file:** AIR's Baked Decisions
+text — 746-pinned and shared verbatim across protocols — instructs copying the section "into the
+spec's Constraints". **AIR has no spec phase.** That is a pre-existing seam in the *ratified*
+text, not something Phase 3 introduced and not mine to fix unilaterally (the wording is
+architect-ratified). **Recorded as a Spec 746 amendment candidate** for the review's follow-ups.
+
+Worth noting *why* it went unnoticed: the assertion that guards this text checks for the
+presence of category hints, the escape hatch and "no-op default" — it cannot check that the
+instruction makes sense for the protocol carrying it. A grep-shaped guard protects wording, not
+applicability.
