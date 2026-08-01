@@ -1,0 +1,280 @@
+id: '1273'
+title: builder-context-reset-should-b
+protocol: aspir
+phase: verify
+plan_phases:
+  - id: phase_1
+    title: afx interrupt + ESC delivery path
+    status: complete
+  - id: phase_2
+    title: Quiescence observability (lastDataAt)
+    status: complete
+  - id: phase_3
+    title: Reset receipt gate (nonce, substance, stability)
+    status: complete
+  - id: phase_4
+    title: Builder context resolution (protocol, mode, harness capability)
+    status: complete
+  - id: phase_5
+    title: Re-orientation assembly (complete-or-abort)
+    status: complete
+  - id: phase_6
+    title: Reset orchestrator + CLI wiring
+    status: complete
+  - id: phase_7
+    title: Wait discipline and command documentation
+    status: complete
+current_plan_phase: null
+gates:
+  pr:
+    status: approved
+    requested_at: '2026-07-30T10:59:16.086Z'
+    approved_at: '2026-07-30T11:20:42.697Z'
+  verify-approval:
+    status: pending
+iteration: 1
+build_complete: false
+history:
+  - iteration: 1
+    plan_phase: phase_2
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/aspir-1273/codev/projects/1273-builder-context-reset-should-b/1273-phase_2-iter1-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/aspir-1273/codev/projects/1273-builder-context-reset-should-b/1273-phase_2-iter1-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/aspir-1273/codev/projects/1273-builder-context-reset-should-b/1273-phase_2-iter1-claude.txt
+  - iteration: 1
+    plan_phase: phase_3
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/aspir-1273/codev/projects/1273-builder-context-reset-should-b/1273-phase_3-iter1-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/aspir-1273/codev/projects/1273-builder-context-reset-should-b/1273-phase_3-iter1-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/aspir-1273/codev/projects/1273-builder-context-reset-should-b/1273-phase_3-iter1-claude.txt
+  - iteration: 1
+    plan_phase: phase_4
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/aspir-1273/codev/projects/1273-builder-context-reset-should-b/1273-phase_4-iter1-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/aspir-1273/codev/projects/1273-builder-context-reset-should-b/1273-phase_4-iter1-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/aspir-1273/codev/projects/1273-builder-context-reset-should-b/1273-phase_4-iter1-claude.txt
+  - iteration: 1
+    plan_phase: phase_5
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/aspir-1273/codev/projects/1273-builder-context-reset-should-b/1273-phase_5-iter1-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/aspir-1273/codev/projects/1273-builder-context-reset-should-b/1273-phase_5-iter1-codex.txt
+      - model: claude
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/aspir-1273/codev/projects/1273-builder-context-reset-should-b/1273-phase_5-iter1-claude.txt
+  - iteration: 2
+    plan_phase: phase_5
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/aspir-1273/codev/projects/1273-builder-context-reset-should-b/1273-phase_5-iter2-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/aspir-1273/codev/projects/1273-builder-context-reset-should-b/1273-phase_5-iter2-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/aspir-1273/codev/projects/1273-builder-context-reset-should-b/1273-phase_5-iter2-claude.txt
+  - iteration: 3
+    plan_phase: phase_5
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/aspir-1273/codev/projects/1273-builder-context-reset-should-b/1273-phase_5-iter3-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/aspir-1273/codev/projects/1273-builder-context-reset-should-b/1273-phase_5-iter3-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/aspir-1273/codev/projects/1273-builder-context-reset-should-b/1273-phase_5-iter3-claude.txt
+  - iteration: 4
+    plan_phase: phase_5
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/aspir-1273/codev/projects/1273-builder-context-reset-should-b/1273-phase_5-iter4-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/aspir-1273/codev/projects/1273-builder-context-reset-should-b/1273-phase_5-iter4-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/aspir-1273/codev/projects/1273-builder-context-reset-should-b/1273-phase_5-iter4-claude.txt
+  - iteration: 5
+    plan_phase: phase_5
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/aspir-1273/codev/projects/1273-builder-context-reset-should-b/1273-phase_5-iter5-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/aspir-1273/codev/projects/1273-builder-context-reset-should-b/1273-phase_5-iter5-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/aspir-1273/codev/projects/1273-builder-context-reset-should-b/1273-phase_5-iter5-claude.txt
+  - iteration: 6
+    plan_phase: phase_5
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/aspir-1273/codev/projects/1273-builder-context-reset-should-b/1273-phase_5-iter6-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/aspir-1273/codev/projects/1273-builder-context-reset-should-b/1273-phase_5-iter6-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/aspir-1273/codev/projects/1273-builder-context-reset-should-b/1273-phase_5-iter6-claude.txt
+  - iteration: 1
+    plan_phase: phase_6
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/aspir-1273/codev/projects/1273-builder-context-reset-should-b/1273-phase_6-iter1-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/aspir-1273/codev/projects/1273-builder-context-reset-should-b/1273-phase_6-iter1-codex.txt
+      - model: claude
+        verdict: COMMENT
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/aspir-1273/codev/projects/1273-builder-context-reset-should-b/1273-phase_6-iter1-claude.txt
+  - iteration: 2
+    plan_phase: phase_6
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/aspir-1273/codev/projects/1273-builder-context-reset-should-b/1273-phase_6-iter2-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/aspir-1273/codev/projects/1273-builder-context-reset-should-b/1273-phase_6-iter2-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/aspir-1273/codev/projects/1273-builder-context-reset-should-b/1273-phase_6-iter2-claude.txt
+  - iteration: 3
+    plan_phase: phase_6
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/aspir-1273/codev/projects/1273-builder-context-reset-should-b/1273-phase_6-iter3-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/aspir-1273/codev/projects/1273-builder-context-reset-should-b/1273-phase_6-iter3-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/aspir-1273/codev/projects/1273-builder-context-reset-should-b/1273-phase_6-iter3-claude.txt
+  - iteration: 4
+    plan_phase: phase_6
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/aspir-1273/codev/projects/1273-builder-context-reset-should-b/1273-phase_6-iter4-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/aspir-1273/codev/projects/1273-builder-context-reset-should-b/1273-phase_6-iter4-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/aspir-1273/codev/projects/1273-builder-context-reset-should-b/1273-phase_6-iter4-claude.txt
+  - iteration: 5
+    plan_phase: phase_6
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/aspir-1273/codev/projects/1273-builder-context-reset-should-b/1273-phase_6-iter5-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/aspir-1273/codev/projects/1273-builder-context-reset-should-b/1273-phase_6-iter5-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/aspir-1273/codev/projects/1273-builder-context-reset-should-b/1273-phase_6-iter5-claude.txt
+  - iteration: 6
+    plan_phase: phase_6
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/aspir-1273/codev/projects/1273-builder-context-reset-should-b/1273-phase_6-iter6-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/aspir-1273/codev/projects/1273-builder-context-reset-should-b/1273-phase_6-iter6-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/aspir-1273/codev/projects/1273-builder-context-reset-should-b/1273-phase_6-iter6-claude.txt
+started_at: '2026-07-28T00:57:25.240Z'
+updated_at: '2026-07-30T11:24:12.936Z'
+pr_ready_for_human: false

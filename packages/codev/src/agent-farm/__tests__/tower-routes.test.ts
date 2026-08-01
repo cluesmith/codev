@@ -948,6 +948,51 @@ describe('tower-routes', () => {
   });
 
   // =========================================================================
+  // GET /api/terminals/:id — the wire contract for quiescence (Spec 1273)
+  // =========================================================================
+
+  describe('GET /api/terminals/:id (Spec 1273 — lastDataAt on the wire)', () => {
+    // Testing `session.info` alone would not pin this: the whole point of the
+    // phase is that the field reaches a *client*, so afx reset can measure
+    // output quiescence instead of assuming a builder's turn has ended before
+    // typing /clear into its terminal. This asserts the serialised response.
+    it('serialises lastDataAt as an epoch-ms number', async () => {
+      const lastDataAt = 1_753_660_000_000;
+      mockGetTerminalManager.mockReturnValue({
+        getSession: () => ({
+          info: {
+            id: 'term-42', pid: 4242, cols: 80, rows: 24, label: 'builder',
+            status: 'running', createdAt: '2026-07-28T00:00:00.000Z', lastDataAt,
+          },
+        }),
+        listSessions: () => [],
+      });
+
+      const req = makeReq('GET', '/api/terminals/term-42');
+      const { res, statusCode, body } = makeRes();
+      await handleRequest(req, res, makeCtx());
+
+      expect(statusCode()).toBe(200);
+      const parsed = JSON.parse(body());
+      expect(typeof parsed.lastDataAt).toBe('number');
+      expect(parsed.lastDataAt).toBe(lastDataAt);
+    });
+
+    it('returns 404 for an unknown terminal rather than a body without lastDataAt', async () => {
+      mockGetTerminalManager.mockReturnValue({
+        getSession: () => undefined,
+        listSessions: () => [],
+      });
+
+      const req = makeReq('GET', '/api/terminals/term-gone');
+      const { res, statusCode, body } = makeRes();
+      await handleRequest(req, res, makeCtx());
+
+      expect(statusCode()).toBe(404);
+      expect(JSON.parse(body()).error).toBe('NOT_FOUND');
+    });
+  });
+
   // DELETE /api/terminals/:id (Bugfix #290)
   // =========================================================================
 
@@ -1336,6 +1381,109 @@ describe('tower-routes', () => {
       const parsed = JSON.parse(body());
       expect(parsed.error).toBe('TERMINAL_NOT_WRITABLE');
       expect(mockWrite).not.toHaveBeenCalled();
+    });
+
+    // Spec 1273: `escape` delivers a bare ESC keystroke straight to the PTY.
+    // The buffer-bypass assertion is the load-bearing one — an interrupt that can
+    // be deferred because someone recently typed in that terminal is not an
+    // interrupt, and a wedged builder is precisely the case where you cannot wait.
+    it('writes a bare ESC and never defers it, even when the user is actively typing (Spec 1273)', async () => {
+      mockParseJsonBody.mockResolvedValue({
+        to: '1273', message: '\x1b', workspace: '/tmp/ws', options: { escape: true },
+      });
+      mockResolveTarget.mockReturnValue({
+        terminalId: 'term-wedged',
+        workspacePath: '/tmp/ws',
+        agent: 'builder-aspir-1273',
+      });
+      const mockWrite = vi.fn();
+      mockGetTerminalManager.mockReturnValue({
+        // isUserIdle() === false is what forces deferral on the normal send path.
+        getSession: () => ({ write: mockWrite, pid: 1234, writable: true, isUserIdle: () => false, composing: false }),
+        listSessions: () => [],
+      });
+      const req = makeReq('POST', '/api/send');
+      const { res, statusCode, body } = makeRes();
+
+      await handleRequest(req, res, makeCtx());
+
+      expect(statusCode()).toBe(200);
+      const parsed = JSON.parse(body());
+      expect(parsed.ok).toBe(true);
+      expect(parsed.deferred).toBe(false);
+      // ESC written immediately and unformatted — no header/wrapper text.
+      expect(mockWrite).toHaveBeenCalledWith('\x1b');
+      expect(mockWrite.mock.calls[0][0]).toBe('\x1b');
+    });
+
+    it('accepts a lone ESC message body without tripping the non-empty guard (Spec 1273)', async () => {
+      // The ESC recovery depends on `\x1b` surviving handleSend's trim(); a 400
+      // here would mean the only mid-turn recovery had been silently broken.
+      mockParseJsonBody.mockResolvedValue({
+        to: '1273', message: '\x1b', workspace: '/tmp/ws', options: { escape: true },
+      });
+      mockResolveTarget.mockReturnValue({
+        terminalId: 'term-wedged',
+        workspacePath: '/tmp/ws',
+        agent: 'builder-aspir-1273',
+      });
+      mockGetTerminalManager.mockReturnValue({
+        getSession: () => ({ write: vi.fn(), pid: 1234, writable: true, isUserIdle: () => true, composing: false }),
+        listSessions: () => [],
+      });
+      const req = makeReq('POST', '/api/send');
+      const { res, statusCode } = makeRes();
+
+      await handleRequest(req, res, makeCtx());
+
+      expect(statusCode()).toBe(200);
+    });
+
+    it('fails loudly on a non-writable terminal instead of reporting a delivered ESC (Spec 1273)', async () => {
+      mockParseJsonBody.mockResolvedValue({
+        to: '1273', message: '\x1b', workspace: '/tmp/ws', options: { escape: true },
+      });
+      mockResolveTarget.mockReturnValue({
+        terminalId: 'term-zombie',
+        workspacePath: '/tmp/ws',
+        agent: 'builder-aspir-1273',
+      });
+      const mockWrite = vi.fn();
+      mockGetTerminalManager.mockReturnValue({
+        getSession: () => ({ write: mockWrite, pid: 1234, writable: false, isUserIdle: () => true, composing: false }),
+        listSessions: () => [],
+      });
+      const req = makeReq('POST', '/api/send');
+      const { res, statusCode, body } = makeRes();
+
+      await handleRequest(req, res, makeCtx());
+
+      expect(statusCode()).toBe(503);
+      expect(JSON.parse(body()).error).toBe('TERMINAL_NOT_WRITABLE');
+      expect(mockWrite).not.toHaveBeenCalled();
+    });
+
+    it('leaves normal sends unaffected when escape is absent (Spec 1273 regression guard)', async () => {
+      mockParseJsonBody.mockResolvedValue({ to: 'architect', message: 'hello', workspace: '/tmp/ws' });
+      mockResolveTarget.mockReturnValue({
+        terminalId: 'term-001',
+        workspacePath: '/tmp/ws',
+        agent: 'architect',
+      });
+      const mockWrite = vi.fn();
+      mockGetTerminalManager.mockReturnValue({
+        getSession: () => ({ write: mockWrite, pid: 1234, writable: true, isUserIdle: () => true, composing: false }),
+        listSessions: () => [],
+      });
+      const req = makeReq('POST', '/api/send');
+      const { res, statusCode } = makeRes();
+
+      await handleRequest(req, res, makeCtx());
+
+      expect(statusCode()).toBe(200);
+      // Formatted, not a bare ESC.
+      expect(mockWrite).toHaveBeenCalled();
+      expect(mockWrite.mock.calls[0][0]).not.toBe('\x1b');
     });
 
     it('returns deferred:true when user is actively typing (Spec 403)', async () => {

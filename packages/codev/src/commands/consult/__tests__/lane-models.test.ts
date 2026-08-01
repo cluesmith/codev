@@ -59,7 +59,7 @@ const {
   DEFAULT_CLAUDE_MODEL,
   DEFAULT_CODEX_MODEL,
   DEFAULT_CODEX_REASONING_EFFORT,
-  _computeCodexCost,
+  computeCodexCost,
 } = await import('../index.js');
 
 // --- fixture ------------------------------------------------------------------------
@@ -156,8 +156,11 @@ describe('unset config preserves pre-change behavior (Layer A)', () => {
 
 describe('shipped defaults (Layer B — update this test when defaults change)', () => {
   it('pins the model ids this commit ships', () => {
-    expect(DEFAULT_CLAUDE_MODEL).toBe('claude-opus-4-6');
-    expect(DEFAULT_CODEX_MODEL).toBe('gpt-5.4');
+    // #1288 landed on main mid-branch and changed both defaults. This is the ONE line the
+    // two-layer design exists to make it — every other assertion reads the constants and needed
+    // no edit. `default-models.test.ts` (from #1288) is the primary guard; this is the local one.
+    expect(DEFAULT_CLAUDE_MODEL).toBe('claude-opus-5');
+    expect(DEFAULT_CODEX_MODEL).toBe('gpt-5.6-sol');
     expect(DEFAULT_CODEX_REASONING_EFFORT).toBe('medium');
   });
 });
@@ -248,39 +251,39 @@ describe('--model-id is refused by lanes with no model selector', () => {
 // wrong cost is worse than a missing one, because it looks authoritative.
 
 describe('codex cost accounting', () => {
-  /** A choice carrying just the id — the only field cost depends on. */
-  const forModel = (id: string) => ({ id, key: null, source: null, fromFlag: false });
-  const cost = (uncached: number, cached: number, out: number, id: string) =>
-    _computeCodexCost(uncached, cached, out, forModel(id), tmpDir);
+  // Signature is main's (#1288): (model, input, cached, output, workspaceRoot?). The optional
+  // workspaceRoot is spec 1286's addition — it enables the config-pricing override.
+  const cost = (model: string, input: number, cached: number, out: number) =>
+    computeCodexCost(model, input, cached, out, tmpDir);
 
-  it('uses the shipped pricing for the default model', () => {
-    // 1M uncached input @ $2 + 1M output @ $8 = $10 exactly.
-    expect(cost(1_000_000, 0, 1_000_000, DEFAULT_CODEX_MODEL)).toBeCloseTo(10, 5);
+  it('prices the default model from the shipped table', () => {
+    // 1M uncached @ $5 + 1M output @ $30 = $35.
+    expect(cost(DEFAULT_CODEX_MODEL, 1_000_000, 0, 1_000_000)).toBeCloseTo(35, 5);
   });
 
-  it('returns null for a non-default model with no configured pricing', () => {
-    // The heart of the phase: refuse to price a model whose rates we do not know, rather than
-    // reporting the default model's rates as though they applied.
-    expect(cost(1_000_000, 0, 1_000_000, 'gpt-5.6-sol')).toBeNull();
+  it('returns null for a model with no known rates and no configured pricing', () => {
+    // The heart of this phase: refuse to price a model whose rates we do not know, rather than
+    // borrowing another model's and reporting a confidently wrong number.
+    expect(cost('some-unpriced-model', 1_000_000, 0, 1_000_000)).toBeNull();
   });
 
-  it('uses configured pricing for a non-default model', () => {
+  it('uses configured pricing for a model absent from the shipped table', () => {
     writeConfig({
       consult: {
-        models: { codex: 'gpt-5.6-sol' },
+        models: { codex: 'some-unpriced-model' },
         pricing: { codex: { inputPer1M: 1, cachedInputPer1M: 0.5, outputPer1M: 3 } },
       },
     });
-    expect(cost(1_000_000, 0, 1_000_000, 'gpt-5.6-sol')).toBeCloseTo(4, 5); // 1M @ $1 + 1M @ $3
+    expect(cost('some-unpriced-model', 1_000_000, 0, 1_000_000)).toBeCloseTo(4, 5); // $1 + $3
   });
 
-  it('configured pricing also overrides the shipped rates for the default model', () => {
+  it('configured pricing outranks the shipped table even for the default model', () => {
     writeConfig({ consult: { pricing: { codex: { inputPer1M: 1, cachedInputPer1M: 0.5, outputPer1M: 3 } } } });
-    expect(cost(1_000_000, 0, 1_000_000, DEFAULT_CODEX_MODEL)).toBeCloseTo(4, 5);
+    expect(cost(DEFAULT_CODEX_MODEL, 1_000_000, 0, 1_000_000)).toBeCloseTo(4, 5);
   });
 
   it('counts cached input at the cached rate', () => {
-    expect(cost(0, 1_000_000, 0, DEFAULT_CODEX_MODEL)).toBeCloseTo(1, 5); // cachedInputPer1M = $1
+    expect(cost(DEFAULT_CODEX_MODEL, 1_000_000, 1_000_000, 0)).toBeCloseTo(0.5, 5);
   });
 });
 

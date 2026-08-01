@@ -794,28 +794,88 @@ function installHarnessWorktreeFiles(
  *
  * `read` failing means EOF on stdin, i.e. the terminal is gone; exit rather
  * than spin the loop on an input that will never arrive.
+ *
+ * `onCleanExit` (Issue #1267) is an extra statement run just after the keypress,
+ * before the loop repeats — how the resume variant switches itself over to the
+ * fresh invocation. It sits *after* the `read`, so a terminal that went away
+ * (EOF → `exit 0`) never mutates state on its way out.
  */
-const LAUNCH_LOOP_TAIL = `  status=$?
+function launchLoopTail(onCleanExit?: string): string {
+  const switchToFresh = onCleanExit ? `\n    ${onCleanExit}` : '';
+  return `  status=$?
   if [ "$status" -eq 0 ]; then
     clear
-    echo "Agent exited at your request. Press Enter to relaunch, or close this terminal."
-    read -r || exit 0
+    echo "Agent exited at your request. Press Enter to relaunch fresh, or close this terminal."
+    read -r || exit 0${switchToFresh}
     continue
   fi
   echo ""
   echo "Agent exited (code $status). Restarting in 2 seconds... (Ctrl+C to quit)"
   sleep 2`;
+}
+
+/**
+ * Build the `while true; do … done` launch loop for a builder script.
+ *
+ * `initial` is what the loop runs on entry, and what a crash restart reruns —
+ * on the resume path that is `<cmd> --resume <id>`, because recovering the
+ * conversation is exactly right after an unnatural death.
+ *
+ * `fresh` is what the Enter-gated relaunch runs after a *clean* exit. Issue
+ * #1267: a clean exit means the user deliberately ended that conversation, so
+ * relaunching it is the one thing the relaunch must not do — the same rule
+ * #1264 established for architect terminals. `fresh` is the plain
+ * role-injected, prompt-carrying invocation a non-resume spawn would have used,
+ * so "fresh" needs no definition of its own.
+ *
+ * The switch is one-way and sticky: once a clean exit has moved the loop to
+ * `fresh`, a later crash restarts the *fresh* invocation, never the superseded
+ * session the user walked away from.
+ *
+ * The two commands differ only on the resume path. Every other variant passes
+ * the same string twice and gets the historical single-command loop back,
+ * byte for byte.
+ */
+export function buildLaunchLoop(initial: string, fresh: string): string {
+  if (initial === fresh) {
+    return `while true; do
+  ${initial}
+${launchLoopTail()}
+done
+`;
+  }
+  // Functions, not a re-expanded string: the commands carry their own quoting
+  // (`--append-system-prompt "$(cat '…')"`), which would not survive being
+  // stuffed through a variable and word-split at call time.
+  return `codev_launch_initial() {
+  ${initial}
+}
+codev_launch_fresh() {
+  ${fresh}
+}
+codev_launch=codev_launch_initial
+while true; do
+  "$codev_launch"
+${launchLoopTail('codev_launch=codev_launch_fresh')}
+done
+`;
+}
 
 /**
  * Start a terminal session for a builder.
  *
- * When `resume` is provided, the launch script invokes the harness's resume
+ * When `resume` is provided, the launch script *enters* on the harness's resume
  * form (e.g. `claude --resume <uuid>`) via the pre-escaped `scriptFragment`
- * instead of a fresh prompt+role invocation. The saved conversation contains
- * the system prompt / role context already, so role injection and the initial
- * prompt are intentionally skipped on that path. Only the Claude harness
- * produces a resume object (Issue #929); codex/gemini pass `undefined` here
- * and take the fresh role-injection path.
+ * rather than a prompt+role invocation: the saved conversation already contains
+ * the system prompt and role context. Only the Claude harness produces a resume
+ * object (Issue #929); codex/gemini pass `undefined` here and enter fresh.
+ *
+ * Issue #1267: the script still *carries* the fresh invocation, because a clean
+ * exit relaunches with it (see `buildLaunchLoop`). That is why role injection
+ * and the harness worktree files are prepared on the resume path too — the
+ * relaunch is a genuine fresh launch and needs everything one needs.
+ * `.builder-prompt.txt` is the deliberate exception: it is read, never
+ * rewritten, on resume (see below).
  */
 export async function startBuilderSession(
   config: Config,
@@ -830,26 +890,30 @@ export async function startBuilderSession(
   logger.info('Creating terminal session...');
 
   const scriptPath = resolve(worktreePath, '.builder-start.sh');
-  let scriptContent: string;
+  const promptFile = resolve(worktreePath, '.builder-prompt.txt');
 
-  if (resume) {
-    // Resume path: load the prior conversation via the harness-provided,
-    // shell-escaped resume fragment. No prompt file, no role injection — both
-    // are already part of the saved conversation.
-    logger.info(`Resuming session ${resume.sessionId.slice(0, 8)}…`);
-    scriptContent = `#!/bin/bash
-cd "${worktreePath}"
-while true; do
-  ${baseCmd} ${resume.scriptFragment}
-${LAUNCH_LOOP_TAIL}
-done
-`;
-  } else if (roleContent) {
-    // Fresh spawn with role injection.
-    // Write initial prompt to a file for reference.
-    const promptFile = resolve(worktreePath, '.builder-prompt.txt');
-    writeFileSync(promptFile, prompt);
+  // Write the initial prompt to a file the launch command reads back.
+  //
+  // Issue #1267: a resume must NOT rewrite it. `afx reset` reads the literal
+  // `## Mode: STRICT|SOFT` heading out of this file as spawn-time ground truth
+  // (reset/context.ts: modeFromBuilderPrompt) precisely *because* `--resume`
+  // never regenerates it — `resolveMode` cannot recover a spawn-time `--soft`
+  // from protocol defaults, so regenerating here would silently flip a soft
+  // builder to strict. The fresh relaunch reads what the original spawn wrote,
+  // which is also the more correct prompt: it is that builder's real mission.
+  //
+  // That the file exists on the resume path is an invariant of this function,
+  // not an assumption about the worktree: every non-resume branch writes it, and
+  // a resume is by definition a second launch into a worktree a prior one set
+  // up. Worktree-mode spawns, which have no prompt file, are generated by
+  // `buildWorktreeLaunchScript` and never reach here.
+  if (!resume) writeFileSync(promptFile, prompt);
 
+  const harness = getBuilderHarness(config.workspaceRoot);
+  let envBlock = '';
+  let freshCommand: string;
+
+  if (roleContent) {
     // Write role to a file for harness-based injection
     const roleFile = resolve(worktreePath, '.builder-role.md');
     // Inject the actual dashboard port into the role prompt
@@ -857,42 +921,36 @@ done
     writeFileSync(roleFile, roleWithPort);
     logger.info(`Loaded role (${roleSource})`);
 
-    // Resolve harness provider for role injection
-    const harness = getBuilderHarness(config.workspaceRoot);
     const { fragment, env } = harness.buildScriptRoleInjection(roleWithPort, roleFile);
     const envExports = Object.entries(env)
       .map(([k, v]) => `export ${k}='${shellEscapeSingleQuote(v)}'`)
       .join('\n');
-    const envBlock = envExports ? `${envExports}\n` : '';
+    envBlock = envExports ? `${envExports}\n` : '';
 
     // Write any harness-specific worktree files (e.g., opencode.json for OpenCode,
     // the write-guard hook for Claude — Issue #1018)
     installHarnessWorktreeFiles(harness, roleWithPort, roleFile, worktreePath);
 
-    scriptContent = `#!/bin/bash
-cd "${worktreePath}"
-${envBlock}while true; do
-  ${baseCmd} ${fragment} "$(cat '${promptFile}')"
-${LAUNCH_LOOP_TAIL}
-done
-`;
+    freshCommand = `${baseCmd} ${fragment} "$(cat '${promptFile}')"`;
   } else {
-    // Fresh spawn without role injection.
-    const promptFile = resolve(worktreePath, '.builder-prompt.txt');
-    writeFileSync(promptFile, prompt);
-
     // Install harness worktree files even without a role, so the write-guard
     // (Issue #1018) is deterministic across all Claude spawn modes.
-    installHarnessWorktreeFiles(getBuilderHarness(config.workspaceRoot), '', '', worktreePath);
+    installHarnessWorktreeFiles(harness, '', '', worktreePath);
 
-    scriptContent = `#!/bin/bash
-cd "${worktreePath}"
-while true; do
-  ${baseCmd} "$(cat '${promptFile}')"
-${LAUNCH_LOOP_TAIL}
-done
-`;
+    freshCommand = `${baseCmd} "$(cat '${promptFile}')"`;
   }
+
+  let initialCommand = freshCommand;
+  if (resume) {
+    // Resume path: enter on the prior conversation via the harness-provided,
+    // shell-escaped resume fragment.
+    logger.info(`Resuming session ${resume.sessionId.slice(0, 8)}…`);
+    initialCommand = `${baseCmd} ${resume.scriptFragment}`;
+  }
+
+  const scriptContent = `#!/bin/bash
+cd "${worktreePath}"
+${envBlock}${buildLaunchLoop(initialCommand, freshCommand)}`;
 
   writeFileSync(scriptPath, scriptContent);
   chmodSync(scriptPath, '755');
@@ -958,22 +1016,17 @@ export function buildWorktreeLaunchScript(
     // the write-guard hook for Claude — Issue #1018)
     installHarnessWorktreeFiles(harness, roleWithPort, roleFile, worktreePath);
 
+    // Worktree mode never resumes, so entry and clean-exit relaunch are the
+    // same invocation — `buildLaunchLoop` collapses to the single-command loop.
+    const command = `${baseCmd} ${fragment}`;
     return `#!/bin/bash
 cd "${worktreePath}"
-${envBlock}while true; do
-  ${baseCmd} ${fragment}
-${LAUNCH_LOOP_TAIL}
-done
-`;
+${envBlock}${buildLaunchLoop(command, command)}`;
   }
   // Install harness worktree files even without a role, so the write-guard
   // (Issue #1018) is deterministic across all Claude spawn modes.
   installHarnessWorktreeFiles(getBuilderHarness(workspaceRoot), '', '', worktreePath);
   return `#!/bin/bash
 cd "${worktreePath}"
-while true; do
-  ${baseCmd}
-${LAUNCH_LOOP_TAIL}
-done
-`;
+${buildLaunchLoop(baseCmd, baseCmd)}`;
 }

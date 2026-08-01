@@ -401,49 +401,67 @@ function commandExists(cmd: string): boolean {
   }
 }
 
-// Codex pricing for cost computation (matches values from old SUBPROCESS_MODEL_PRICING)
-const CODEX_PRICING = { inputPer1M: 2.00, cachedInputPer1M: 1.00, outputPer1M: 8.00 };
-
 /**
- * Cost for a codex run, in order: configured `consult.pricing.codex` → a non-default model with no
- * pricing → `null` → otherwise the shipped `CODEX_PRICING`.
+ * Shipped default model id for the codex consult lane (#1288).
  *
- * The `null` branch is the point of this function. `CODEX_PRICING` describes the *default* model, so
- * applying it to a model the user configured would report a confidently wrong number — and a wrong
- * cost is worse than a missing one, because it aggregates silently into `consult stats` totals that
- * look authoritative. Null means "not known for this model", which stats already renders as absent.
+ * The `-sol` suffix is LOAD-BEARING. Both plain `gpt-5.6` and `gpt-5.6-codex`
+ * were live-probed on 2026-07-29 and rejected by Codex with a ChatGPT account
+ * ("The '<id>' model is not supported when using Codex with a ChatGPT
+ * account."). Do not "simplify" this id — `default-models.test.ts` guards it.
  */
-function computeCodexCost(
-  uncachedTokens: number,
-  cachedTokens: number,
-  outputTokens: number,
-  choice: LaneModelChoice,
-  workspaceRoot: string,
-): number | null {
-  const configured = loadConfig(workspaceRoot).consult?.pricing?.codex;
-  const rates = configured
-    ?? (choice.id === DEFAULT_CODEX_MODEL ? CODEX_PRICING : null);
-  if (!rates) return null;
+export const DEFAULT_CODEX_MODEL = 'gpt-5.6-sol';
 
-  return (uncachedTokens / 1_000_000) * rates.inputPer1M
-       + (cachedTokens / 1_000_000) * rates.cachedInputPer1M
-       + (outputTokens / 1_000_000) * rates.outputPer1M;
+/** Shipped default reasoning effort for the codex consult lane. */
+export const DEFAULT_CODEX_REASONING_EFFORT = 'medium' as const;
+
+/** Shipped default model id for the claude consult lane (#1288). */
+export const DEFAULT_CLAUDE_MODEL = 'claude-opus-5';
+
+interface CodexModelPricing {
+  inputPer1M: number;
+  cachedInputPer1M: number;
+  outputPer1M: number;
 }
 
 /**
- * Shipped default model ids for the two SDK lanes, and codex's default reasoning effort.
+ * Per-1M-token codex rates, keyed by model id. Verified against
+ * https://developers.openai.com/api/docs/pricing on 2026-07-30.
  *
- * These are the literal values the lanes used before spec 1286 made them configurable, kept as
- * named constants so zero-config behavior is preserved *by construction* rather than by a new
- * default written somewhere else. Config (`consult.models.<lane>`) and `--model-id` override them.
+ * Only OpenAI's *standard* tier is modelled; the separate long-context tier
+ * (charged above the standard context threshold) is not, so cost is
+ * under-reported for unusually large consultations.
  *
- * Tests assert against these constants rather than against literal id strings, so that changing a
- * shipped default (see issue #1288) stays a one-line edit here instead of a scatter across the
- * suite. One test deliberately pins the literals — that is the intended place to update.
+ * A model id absent from this table yields `costUsd: null` rather than a cost
+ * computed from some other model's rates — a confidently wrong number is worse
+ * than none.
  */
-export const DEFAULT_CLAUDE_MODEL = 'claude-opus-4-6';
-export const DEFAULT_CODEX_MODEL = 'gpt-5.4';
-export const DEFAULT_CODEX_REASONING_EFFORT: ModelReasoningEffort = 'medium';
+const CODEX_PRICING: Record<string, CodexModelPricing> = {
+  'gpt-5.6-sol': { inputPer1M: 5.00, cachedInputPer1M: 0.50, outputPer1M: 30.00 },
+};
+
+/**
+ * Compute codex consultation cost in USD, or null when the model's published
+ * rates are unknown.
+ */
+export function computeCodexCost(
+  model: string,
+  inputTokens: number,
+  cachedInputTokens: number,
+  outputTokens: number,
+  workspaceRoot?: string,
+): number | null {
+  // `consult.pricing.codex` (spec 1286) outranks the shipped table, so a workspace running a model
+  // Codev has no rates for can still get real costs instead of nulls. Optional param: main's
+  // 4-arg callers and tests are unaffected.
+  const configured = workspaceRoot ? loadConfig(workspaceRoot).consult?.pricing?.codex : undefined;
+  const pricing = configured ?? CODEX_PRICING[model];
+  if (!pricing) return null;
+  const uncached = inputTokens - cachedInputTokens;
+  return (uncached / 1_000_000) * pricing.inputPer1M
+       + (cachedInputTokens / 1_000_000) * pricing.cachedInputPer1M
+       + (outputTokens / 1_000_000) * pricing.outputPer1M;
+}
+
 
 /** A lane's resolved model id plus enough provenance to name the source in an error. */
 export interface LaneModelChoice {
@@ -615,8 +633,7 @@ export async function runCodexConsultation(
         // output_tokens already includes reasoning_output_tokens (OpenAI Responses-API
         // convention) — do NOT add the latter to cost or reasoning is double-billed.
         const output = event.usage.output_tokens;
-        const uncached = input - cached;
-        const cost = computeCodexCost(uncached, cached, output, choice, workspaceRoot);
+        const cost = computeCodexCost(choice.id, input, cached, output, workspaceRoot);
         usageData = { inputTokens: input, cachedInputTokens: cached, outputTokens: output, costUsd: cost };
       }
       if (event.type === 'turn.failed') {
@@ -2378,5 +2395,4 @@ export {
   MODEL_ALIASES as _MODEL_ALIASES,
   runAgyConsultation as _runAgyConsultation,
   agySkipContent as _agySkipContent,
-  computeCodexCost as _computeCodexCost,
 };

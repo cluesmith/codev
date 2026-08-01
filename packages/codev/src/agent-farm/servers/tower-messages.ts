@@ -65,7 +65,7 @@ export interface MessageFrame {
   from: { project: string; agent: string };
   to: { project: string; agent: string };
   content: string;
-  metadata: { raw?: boolean; source?: string };
+  metadata: { raw?: boolean; source?: string; escape?: boolean };
 }
 
 // ============================================================================

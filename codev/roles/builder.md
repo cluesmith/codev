@@ -193,6 +193,33 @@ Can't find the auth helper mentioned in spec. Options:
 Waiting for Architect guidance.
 ```
 
+## Waiting on external work
+
+The section above covers being blocked on *the architect*. This one covers being blocked on *an
+artifact* — a file another agent is producing, a build, a queue, a sibling builder's output. That case
+has its own failure mode, and it is the one that strands builders.
+
+**A wait is a claim that a producer exists.** Before waiting on an artifact, confirm the process meant to
+produce it is actually alive. In the incident that motivated this guidance (2026-07-27), a builder waited
+45+ minutes on a file whose producing process had already died. The wait could never have succeeded; it
+was not slow, it was unsatisfiable. Checking first costs seconds.
+
+**Run waits as tracked background tasks that end your turn.** Start the wait in the background and finish
+your turn. You are re-invoked when it completes, so the lane keeps moving *and* you stay addressable in
+the meantime. A turn that ends is a turn someone can interrupt.
+
+**Never chain foreground poll loops.** This is the rule that matters most, and the reason is not
+efficiency. Every `afx send` to you — including the architect's order to stop, including a reset
+request — **queues unread until your current turn ends**. A turn that never ends is a builder that cannot
+be reached by anyone, doing work nobody can redirect. You will not notice, because from inside the turn
+everything looks fine.
+
+**If you are wedged anyway, you are not unreachable.** The architect can send you an ESC keystroke with
+`afx interrupt <your-id>`, which ends the running turn so your queued messages process. They can also run
+`afx reset <your-id>` to have you save your working state, clear your context, and be re-oriented — the
+supported recovery when your context window is exhausted rather than merely stuck. Neither requires you
+to do anything; both are worth knowing exist, so you can suggest them when you notice you are in trouble.
+
 ## Multi-PR Workflow
 
 Builders may submit multiple sequential PRs within a single worktree session. The worktree persists across PRs -- it is not cleaned up automatically after merge. This allows builders to do follow-up work (e.g., addressing review feedback in a second PR, or splitting large features across checkpoint PRs).
