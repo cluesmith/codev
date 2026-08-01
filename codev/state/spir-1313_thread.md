@@ -434,3 +434,28 @@ verified against spec/plan and fixed:
    Result: send-integration.e2e **7/7** (draft→`held/busy`→clear→backstop redelivers `ship it` via source:'mailbox' broadcast).
 Did NOT touch pty-session.ts (the node-pty quirk stays a documented pre-existing issue; the e2e uses the shellper path prod uses).
 Verify: tsc clean; e2e 7/7; full unit suite re-running. Next: commit fixes → `porch next` (iter2 re-consult).
+
+### 2026-08-01 — Phase 4 RESUMED (recovery) — iter1 fixes re-verified green; iter2 re-consult triggered
+Resumed session. `porch next` confirms **iteration 2** of phase_4; the 3 iter1 Codex fixes are already committed
+(`cd4a4cfd`) + thread (`a62c25b5`); working tree carries only untracked porch artifacts (iter contexts, the
+`1313-phase_4-iter1-rebuttals.md` porch feeds to reviewers next round) + builder-session dotfiles.
+**Independently re-verified the committed state before signaling** (born-dirty applies to inherited/uncommitted state):
+- `tsc --noEmit` (packages/codev): clean, exit 0.
+- Full unit suite (`vitest run --exclude '**/e2e/**'`): **4109 pass / 48 skip / 0 fail**, exit 0 — matches iter1's count.
+- Confirmed both fixes in *source* (not just the commit msg): `DEFAULT_PRUNE_RETENTION_DAYS = 30` +
+  `config.ts` `retentionDays: 30` + `mailbox-wiring.ts` reads `loadConfig(homedir()).mailbox?.retentionDays ?? 30`;
+  `resolveAgentInRegistry` now resolves `project:<agent>` via `findWorkspaceByBasename` and holds against that registry.
+- Core client contract present in built `.d.ts` (held/reason/mailboxId).
+Ran `porch done 1313` (background) → re-runs checks + fires the iter2 3-way consult. Awaiting verdicts.
+Rebuttals file is a *concurrence* doc (agreed + fixed all 3; no disputes) — passed to reviewers as iter2 context.
+
+### 2026-08-01 — Phase 4 APPROVED (unanimous iter2) — advancing to phase_5
+`porch done` iter2 checks green (build 14.9s, tests 28.3s). 3-way consult: **Gemini APPROVE, Codex APPROVE
+(flipped from iter1 REQUEST_CHANGES), Claude APPROVE** — unanimous. Porch advanced phase_4 → **phase_5**
+(commits `c2b6590a` re-iter → `e4a4e452` build-complete → `5bcdd8e3` advance). Phase_4 (the "correct by
+construction" integration phase) is locked in: mailbox-first persist→serialize→gate→deliver|hold, SendBuffer
+retired, no force paths, dead-session/no-profile → held, additive client contract.
+**Starting phase_5: Fast delivery triggers (submit + quiescence).** Scope: schedule a per-session held-row
+drain on user-submit (Enter) and on output quiescence (Spec 467 `lastDataAt`), coalesced per session. Triggers
+are schedulers, never authority — the Phase-4 gate still decides; a missed trigger only defers to the backstop
+poll. Wiring in pty-session.ts (emit signals) + the drainer (consume/coalesce). No new gate logic.
