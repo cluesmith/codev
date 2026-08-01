@@ -140,3 +140,34 @@ Two caveats flagged to the architect rather than silently accepted:
 
 State at the gate: spec + review-response committed; worktree clean apart from the
 harness-generated `.builder-*` files.
+
+### Pre-gate directives (2026-07-31)
+
+Architect directed two items before the gate goes to Waleed:
+
+1. **Run CMAP round 2** on the revised spec — budget allows (1 of 3 consumed), the revision
+   absorbed 13 findings incl. two factual corrections and a structural net→gross ceiling
+   change, and blast radius is every prompt every agent reads. Porch advancing without
+   round 2 was permissive machinery, not a judgment. Launched codex + claude in parallel
+   against the post-revision spec (7,306w). 2-way is correct per current lane policy;
+   gemini's absence needs no remedy.
+2. **Answer the early-landing directive in the spec**, which I had carried only as criterion
+   M0b with no concrete plan. Fair catch — a criterion is not a rollout. Added
+   **Desired State → Rollout**: PR-1 contains the corrected script, its **first-ever tests**
+   (the instrument has none today — which is how three defects survived in something
+   "committed and reproducible"), the corrected segmented baseline artifact, and in-place
+   annotation of the two 1252 artifacts (originals preserved, marked superseded, reason +
+   pointer). Deliberately excluded: any prompt-surface edit, the scar registry, the dead-tree
+   deletion. Timing: end of first implement phase, before any cut.
+
+   Verified the annotation is safe: no test asserts on either 1252 word-count artifact — the
+   frozen-sample test (`prompt-behavior-metrics.test.ts:184`) pins the *behavioural* sample,
+   a different instrument. So no re-baselining cost.
+
+   Considered pushback and rejected it: the only argument against early landing is that the
+   corrected baseline is meaningful only alongside the cuts it scores, and that fails —
+   the baseline's value is that it is *pre-cut*, and publishing early is what makes the
+   eventual −53.2% claim checkable by someone who didn't watch it being produced.
+
+Porch remains at the spec-approval gate throughout; running consults manually does not move
+state, and I am not touching the gate.
