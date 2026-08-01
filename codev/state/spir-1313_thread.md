@@ -459,3 +459,27 @@ retired, no force paths, dead-session/no-profile → held, additive client contr
 drain on user-submit (Enter) and on output quiescence (Spec 467 `lastDataAt`), coalesced per session. Triggers
 are schedulers, never authority — the Phase-4 gate still decides; a missed trigger only defers to the backstop
 poll. Wiring in pty-session.ts (emit signals) + the drainer (consume/coalesce). No new gate logic.
+
+### 2026-08-01 — Phase 5 IMPLEMENTED (commit 62855a88) — build+unit green
+Design recon first (drainer, pty-session input/output signals, wiring, test harness). Key findings that shaped it:
+submit is already detected at `tower-websocket.ts:96-97` (`stopComposing()` on `\r`/`\n`, Bugfix #450) — the human
+terminal path; `onPtyData` already tracks `_lastDataAt` (Spec 467) + emits `'data'`. PtyManager is NOT an
+EventEmitter (no session-created hook) and `PtySession.id` is public → chose a **module-singleton signal bus**
+(`terminalDeliverySignals`) over per-session subscription: sessions emit `{kind, sessionId}`, wiring subscribes once
+and reverse-maps id→agent lazily. This keeps pty-session ignorant of the mailbox layer (no import) and is consistent
+with the single global drainer. Files:
+- `pty-session.ts`: `terminalDeliverySignals` bus + `QUIESCENCE_DEBOUNCE_MS=500`. `stopComposing()`→emit `'submit'`;
+  self-rescheduling unref'd debounce keyed on `_lastDataAt`→emit `'quiescence'`, armed only when a subscriber exists
+  (zero-cost when drainer off), cleared in `cleanup()`.
+- `mailbox-delivery.ts`: `MailboxDrainer.scheduleDrain(ws,agent)` — coalescing per-agent (burst→one pending promise→
+  one gate check; slot released just before the pass so an in-pass trigger queues exactly one follow-up; KeyedSerializer
+  prevents overlap). Never rejects (logs, leaves for backstop). `recordStreak` extracted, shared with `tick`.
+- `mailbox-wiring.ts`: `resolveAgentForSession` (inverse of resolveLiveSessionForAgent); subscribe/unsubscribe the bus
+  in start/stopMailboxDrainer (idempotent; detaches on stop so restarts don't leak listeners).
+Triggers are schedulers never authority (spec Constraint): same gated `deliverAgentMailSerialized`; missed/spurious
+trigger can't corrupt — gate decides, backstop is safety net.
+Tests (+14): send-delivery (trigger-delivers-no-tick, spurious→held, burst coalesces to 1 gate check, held-then-clear,
+pre-start no-op), pty-session-delivery-signals (submit/quiescence emit, re-arm mid-stream, lazy zero-cost),
+spec-1313-resolve-agent-for-session (builder/architect/shell reverse-map + null cases). **Full unit 4123 pass / 48
+skip / 0 fail; tsc clean.** (Aside: session cwd drifted into packages/codev mid-run — a `cd x && …` re-`cd x` failed
+once; harmless, re-ran from the right dir.) Next: commit thread → `porch done 1313` → phase_5 3-way consult.
