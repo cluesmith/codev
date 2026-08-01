@@ -221,7 +221,9 @@ function buildInline(options: AssembleOptions): string {
     // Name the role document rather than gesturing at it: a builder with no
     // conversation history cannot resolve "your role document" to a file, and
     // the spec requires the identity block to say WHICH document governs it.
-    // `.builder-role.md` is the copy the harness actually injected at spawn.
+    // `.builder-role.md` is the copy the harness actually injected at launch
+  // (written on spawn, and refreshed on resume since #1267 — the clean-exit
+  // relaunch injects it too).
     'You are a Builder. Your role document is `.builder-role.md` at the worktree root',
     '(the builder role, injected into your system prompt at spawn and still in effect).',
     '',
@@ -314,6 +316,30 @@ function buildLongForm(options: AssembleOptions): string {
   const { context: c, statePath, addendum, buildSpawnPrompt, buildResumeNotice, issue } = options;
 
   let spawnPrompt: string;
+
+  // The bare `--task` lane has NO protocol template, and asking for one is not a
+  // near-miss — it is a category error. `afx spawn --task` without `--protocol`
+  // takes spawn.ts's `else` branch and builds the prompt directly from the task
+  // text (`spawn.ts:551`); there is no `protocols/task/builder-prompt.md` to
+  // render, so the live e2e died on
+  // `Protocol "task" has no builder-prompt.md`.
+  //
+  // Identified by a POSITIVE fact rather than by catching that error, and
+  // rather than by `taskText && !porch`: `initPorchInWorktree` is non-fatal, so
+  // a `--task --protocol X` builder whose porch init FAILED also has task text
+  // and no porch. `isBareTask` is established from the prompt file itself (see
+  // context.ts), which carries the rendered template for that lane regardless.
+  if (c.isBareTask) {
+    const longFormTask = [
+      'You are a Builder. Read codev/roles/builder.md for your full role definition.',
+      '',
+      '# Task',
+      '',
+      c.taskText,
+    ].join('\n');
+    return assembleLongFormDocument(options, longFormTask);
+  }
+
   try {
     spawnPrompt = buildSpawnPrompt(c.protocol, {
       protocol_name: c.protocol.toUpperCase(),
@@ -338,6 +364,21 @@ function buildLongForm(options: AssembleOptions): string {
         `${err instanceof Error ? err.message : String(err)}. Refusing to clear without it (R1/R3).`,
     );
   }
+
+  return assembleLongFormDocument(options, spawnPrompt);
+}
+
+/**
+ * Wrap a rendered prompt body in the reset header, state-file pointer, addendum
+ * and porch re-entry.
+ *
+ * Shared by both lanes so the framing cannot drift between them: the bare
+ * `--task` lane supplies spawn's task prompt, every other lane supplies the
+ * rendered protocol template. Only the BODY differs — everything R3 requires is
+ * assembled here, once.
+ */
+function assembleLongFormDocument(options: AssembleOptions, promptBody: string): string {
+  const { context: c, statePath, addendum, buildResumeNotice, issue } = options;
 
   const header = [
     '<!-- Written by `afx reset` (Spec 1273). Untracked; regenerated on every reset. -->',
@@ -416,5 +457,5 @@ function buildLongForm(options: AssembleOptions): string {
 
   header.push('', '---', '', '## Protocol framing (as delivered at spawn)', '');
 
-  return `${header.join('\n')}\n${spawnPrompt}\n`;
+  return `${header.join('\n')}\n${promptBody}\n`;
 }

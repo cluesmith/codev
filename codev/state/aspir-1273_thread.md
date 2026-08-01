@@ -346,6 +346,53 @@ another round would be churn.
 
 **At the pr gate — human approval required. Not approving it myself.**
 
+## Verify phase — the e2e found it non-functional, now fixed (2026-07-31)
+
+**The caveat was right.** The live run failed on every lane. PR #1308 merged (`eb5333d6`).
+
+**F1, the blocker.** `readPorchContext` returned the first parsable `status.yaml` under `codev/projects`.
+This repo commits porch history to `main`, so every worktree inherits 203 project dirs; the
+alphabetically-first is a `spider`-era project, and every builder resolved protocol `spider`. My own
+comment on that function said *"when a worktree somehow holds more than one project directory"* — it was
+not "somehow", it is the normal state of every worktree here. **Writing an assumption down is not
+checking it.**
+
+**Closing it took three passes, and passes 2 and 3 were regressions I introduced:**
+
+1. alphabetically-first wins → matched by identity instead
+2. …which orphaned the `--task --protocol` lane (porch stores the raw `builder-task-<id>` there) → a
+   porch builder told it had no porch. **Silently degraded, i.e. worse than the loud bug it replaced.**
+3. …and bare-number matching still let issue 799's PIR project claim `builder-bugfix-799` → weak
+   (number) claims now require protocol corroboration; strong (non-numeric id) claims don't need it;
+   two survivors abort.
+
+**Narrowing a match is as dangerous as widening it.** Both regressions were found by review, not by me.
+
+Also: the task lane could never auto-detect mode (`--task` spawns render no `## Mode:` line) → defaults to
+soft with `modeSource: 'task-default'`, scoped to no-porch, because *strict* means porch orchestrates.
+And a non-numeric porch id was being rendered as `- Issue: #builder-task-abc` with an unfollowable
+`gh issue view` — a fabricated issue reference is worse than none.
+
+**Deliberate reversal, recorded because it undoes a phase-4 behaviour:** `status.yaml` no longer overrides
+the builder id on *protocol*. It stays authoritative for a builder's own project but can no longer decide
+*which* project is its own — the two cannot both hold, and the live harm settles it.
+
+### What this phase adds to the project's lessons
+
+**"Tests pass" and "CI green" could not have found any of it.** Every F1 variant was a property of this
+repo's real data shape — 203 inherited dirs, a number reused across protocols — that no fixture encoded,
+because I wrote the fixtures from my model of the world rather than from the world. The e2e was the first
+thing to run reset against reality and it failed instantly on every lane.
+
+Every failure was a **refusal, not a corruption**: `--dry-run` wrote nothing, no builder received a wrong
+re-orientation. The R-invariants held while the resolution upstream of them was completely wrong — which
+is the good outcome, and also a reminder that invariants protect the destructive step, not the inputs.
+
+**Codex lane is down repo-wide** (`gpt-5.6-sol requires a newer version of Codex`), so this PR was
+reviewed 2-way. Reported to the architect.
+
+Remaining: the live reset against the planted-context probe, for the architect to re-run after install.
+
 ## Status
 
 - [x] Explored afx/Tower internals
@@ -361,7 +408,8 @@ another round would be churn.
 - [x] Phase 6 (reset orchestrator + CLI wiring) — 7 iterations, unanimous APPROVE
 - [x] Phase 7 (wait discipline + command documentation) — unanimous APPROVE, iteration 1
 - [x] Review + PR — PR #1305, 4 CMAP rounds, at the pr gate
-- [ ] Post-merge: live e2e of `afx reset` in the verify window
+- [x] Verify e2e — found F1/F2/F3; fixes merged in PR #1308
+- [ ] Re-run live reset against the planted-context probe (architect, after install)
 
 **Open for the review phase**: live end-to-end verification of the ESC path and a real reset against a
 disposable builder is still blocked on `pnpm -w run local-install` (restarts Tower, affects every builder
