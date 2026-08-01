@@ -340,13 +340,27 @@ Verify by running both mutation-verified suites, not by inspecting the resolutio
 `deliverOrBuffer`'s `writeCompletesInMs` wait, `SendBuffer.busyUntil` (and its `flush()`
 busy-gate), and the per-terminal chain in `delayed-send.ts`. One mechanism, not two.
 
-**One thing to test before deleting `busyUntil`, not assume**: it guards writes initiated by
-a buffer *flush*, and `flush()` is on the path #1320 deliberately left alone. If
-`submitToSession` does not cover flush-initiated writes, deleting `busyUntil` reopens the
-mid-flush interleave closed in `17db2e9e` — a delayed message writing into a
-partially-delivered `/clear`, producing `/clear/arch-init` on one line, which is the same
-shape as the production failure #1320 exists to fix. If it does reopen, ask 1273 to extend
-`submitToSession` to the flush drain rather than keeping a local workaround.
+**The deletion is not a deletion — it is a replacement, and 1273 corrected my framing
+here.** #1320 wires `submitToSession` into the escape and immediate paths only; the
+buffered and delayed paths are deliberately left to whoever owns them. So this project must
+**add two `submitToSession` call sites** — one in the delayed delivery path, one wrapping
+`flush()`'s drain — *before* removing anything. `write: () => number` may perform many
+writes and return the final offset, so a whole flush batch is one reservation with the
+existing offset threading intact (1273 pinned that with a batch test; mutation-verified on
+their side).
+
+**Verify the replacement with this project's own test, not theirs.** Their test proves the
+*primitive* supports the pattern; it cannot prove this project's *wiring* of it is correct.
+Those are different claims. Concretely: re-run the mid-flush ordering test after wiring and
+before deleting `busyUntil`. If the property does not survive, take the specific failing
+case back to 1273 rather than reinventing a local guard.
+
+Sequence: (1) #1320 lands; (2) merge main, resolve `tower-routes.ts` keeping both sides;
+(3) send the resolved `handleSend` to 1273 for a diff against their intent — the failure
+mode of a bad resolution is silent; (4) run both mutation-verified suites; (5) wire the two
+call sites, re-run the mid-flush test, *then* delete `writeCompletesInMs`, `busyUntil` +
+its `flush()` busy-gate, and `delayed-send.ts`'s chain; (6) report back whether any
+`ORDERING:` test broke, either way.
 
 If #1320 has not landed when this project is ready to open its PR, ship as-is and do the
 adoption as a follow-up — but say so explicitly in the PR rather than leaving two
