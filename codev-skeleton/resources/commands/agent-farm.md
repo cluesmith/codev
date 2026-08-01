@@ -379,6 +379,18 @@ Sends text to a builder's terminal. Useful for:
 - Interrupting long-running processes
 - Sending instructions or context
 
+**Outcome (Spec 1313 — mailbox-first delivery):**
+
+`afx send` reports the real first outcome instead of an unconditional "delivered":
+
+- **delivered** — the message was written to the recipient's prompt after a clean render-gate pass (an empty, render-verified prompt).
+- **held** — the prompt was not clear, so the message is persisted in Tower's durable mailbox and **delivers automatically** the moment the recipient's prompt is clean (after a submit, on output quiescence, or a poll backstop). The response carries a **why-held reason** and a mailbox id:
+  - `busy` — a draft, menu, dialog, or wrapper screen occupies the prompt;
+  - `no-profile` — the target app has no render-gate classifier profile (only `claude`, `codex`, and `agy` are modeled);
+  - `no-live-pty` — the recipient agent has no live terminal right now (it delivers when the agent respawns — rows address agents, not PTYs).
+
+A held message is **never force-injected** onto a busy line: a message body is only ever written to a verified-empty prompt, so it cannot fuse with a half-typed draft, and held rows survive Tower restart/shutdown (no shutdown force-flush). See held mail with `afx inbox` and clear one with `afx inbox dismiss <id>`. `--interrupt` is the explicit, deliberate bypass: it interrupts the agent and writes without holding (unchanged semantics).
+
 **Examples:**
 
 ```bash
@@ -394,6 +406,48 @@ afx send --all "Time to wrap up, create PRs"
 # Include file content
 afx send 42 --file src/api.ts "Review this implementation"
 ```
+
+---
+
+### afx inbox
+
+List and dismiss **held** (undelivered) messages — the human-facing visibility surface for Spec 1313's mailbox. `afx send` persists a message it can't deliver immediately as a held row that delivers automatically once the recipient's prompt is clear; `afx inbox` lets a human see and clear what is still waiting, without reading Tower logs.
+
+```bash
+afx inbox [options]
+afx inbox dismiss <id> [options]
+```
+
+**`afx inbox`** — list every currently-held message in the workspace. Metadata only — message bodies are never shown here (or in logs):
+
+| Column | Meaning |
+|---|---|
+| `ID` | Mailbox row id (pass to `dismiss`) |
+| `AGE` | How long the message has been held (`5s`, `3m`, `2h`, `1d`) |
+| `REASON` | Why-held: `busy`, `no-profile`, or `no-live-pty`; a trailing `!` marks a row past the escalation age |
+| `FROM → TO` | Sender → recipient agent |
+| `WORKSPACE` | Owning workspace |
+
+**Options:**
+- `-w, --workspace <path>` - Workspace to list (default: current workspace — `afx inbox` is workspace-scoped, not Tower-wide)
+- `-p, --port <port>` - Tower port (default: 4100)
+
+**`afx inbox dismiss <id>`** — mark a held message dismissed. A soft, auditable transition (the row is marked `dismissed`, not deleted) that **never delivers** the message. Any workspace operator may dismiss any held row (same local-human trust level as `afx send`).
+
+**Options:**
+- `-p, --port <port>` - Tower port (default: 4100)
+
+**Examples:**
+
+```bash
+# List held messages in the current workspace
+afx inbox
+
+# Dismiss a held message by id (never delivers it)
+afx inbox dismiss 5f3c9a2b-1e4d-4c7a-9f21-8b6d0e2a1c33
+```
+
+Dismissal is CLI-only; the dashboard and VSCode held-count indicators surface the count but are read-only (Spec 1313 decision 8).
 
 ---
 
@@ -816,6 +870,24 @@ Or override via CLI flags:
 afx workspace start --architect-cmd "claude --model opus"
 afx spawn 42 --protocol spir --builder-cmd "claude --model haiku"
 ```
+
+### Mailbox retention and escalation
+
+`afx send`'s mailbox (Spec 1313) has two Tower-global knobs under a `mailbox` key:
+
+```json
+{
+  "mailbox": {
+    "retentionDays": 30,
+    "escalationSeconds": 60
+  }
+}
+```
+
+- `mailbox.retentionDays` (default `30`) — how long a **terminal** mailbox row (delivered, superseded, or dismissed) is retained before Tower prunes it. **Held** rows are never pruned — they persist until they deliver, are superseded, or are dismissed via `afx inbox`.
+- `mailbox.escalationSeconds` (default `60`) — how long a row may stay **held** before it crosses the escalation age. At that point the drainer marks the row `escalated`, emits the escalation broadcast, and moves the dashboard / VSCode held-count indicator into its attention state. This is **visibility only** — crossing the escalation age never triggers delivery (there is no force path; a held message still delivers only onto a verified-empty prompt).
+
+Both are Tower-global (they apply to the whole Tower, not per-project) and optional — omit them to use the defaults above.
 
 ---
 

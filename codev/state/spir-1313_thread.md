@@ -833,3 +833,59 @@ uncommitted.** Explored integration points first via a subagent (data all presen
 refetches on any SSE so attention state is free; NO Playwright — dashboard tests are vitest+RTL/jsdom). Saved
 high-level state to `state-snapshot.md` (overwritten) and notified architect. Resume: VSCode side → build/test
 both apps + Tower regression → commit → `porch done`.
+
+### 2026-08-01 — RESUMED (architect) at phase_8 iter-2; driving `porch done` → re-consult
+Resumed session. Architect asked me to read `state-snapshot.md`. Reconciled state from snapshot + git + porch:
+phase_8 is at porch **iteration 2**, and the iter-1 3-way feedback is **already fixed and committed** (`01d54410`):
+(1) Playwright dashboard e2e `spec-1313-held-count-indicator.test.ts` (4/4 real chromium) for the missing-Playwright
+RC (Gemini + Codex-1); (2) `composeStatusBarText`/`composeActivityBadge` extraction + 10 unit tests for the untested
+`extension.ts` wiring RC (Codex-2). Rebuttal = concurrence (agreed + fixed both, no disputes). Porch already
+force-advanced to iter-2 (`413a9762`); tree clean. Only pending action was the iter-2 build-complete signal, so I
+kicked off `porch done 1313` (validates build+tests on the committed tree). Next: `porch next 1313` → iter-2 3-way
+re-consult → drive iterate-until-approve. No re-implementation needed; the iter-2 fix work was done pre-pause.
+
+### 2026-08-01 — Phase 8 UNANIMOUS APPROVE (iter-2); porch advanced → phase_9 (final impl phase)
+iter-2 3-way all HIGH-confidence APPROVE, no key issues: **Gemini** (flipped from RC — fixes "comprehensively
+addressed"), **Codex** (flipped from 2×RC — accepts both the Playwright e2e + the `composeStatusBarText`/
+`composeActivityBadge` extraction), **Claude** (APPROVE again; one non-blocking note: the escalation-toast `seen`
+Set grows unbounded over extension lifetime — negligible, escalations are rare). Porch committed phase_8 (build 15.2s,
+tests 28.3s green) and advanced to **phase_9 (Documentation + skeleton mirror)** — `2b084e5e`. This is the last
+implement phase. Scope (docs-only, NO code): (1) `codev/resources/commands/agent-farm.md` — send response vocab
+(`delivered` | `held`+id+reason ∈ {busy,no-profile,no-live-pty}) + `afx inbox`; (2) CLAUDE.md + AGENTS.md
+inter-agent messaging section, kept **byte-identical** (`diff` must be empty); (3) mirror every changed framework/doc
+file into `codev-skeleton/`; (4) arch/lessons routing via update-arch-docs skill (may defer to Review). Discipline:
+document REAL implemented behavior (verify field names/reason tokens against code, not just the plan), grep BOTH trees.
+
+### 2026-08-01 — Phase 9 IMPLEMENTED (docs + skeleton mirror); build/test running
+Docs-only, NO code. Verified every fact against the real impl before writing (not just the plan):
+- **Send vocab** (`commands/send.ts` + `tower-routes.ts` handleSend): `afx send` prints **delivered** (`logger.success`)
+  or **held** (`logger.info`) + why-held reason + mailbox id. Wire response additive: `ok:true` always, `deferred` kept
+  for old binaries, new `delivered`/`held`/`reason`/`mailboxId`. Reasons ∈ {`busy`,`no-profile`,`no-live-pty`}
+  (`db/types.ts` MailboxReason). Never force-injected.
+- **`afx inbox`** (`commands/inbox.ts` + `cli.ts`): `afx inbox [-w <ws>] [-p <port>]` lists held rows (cols
+  ID/AGE/REASON/FROM→TO/WORKSPACE; trailing `!`=escalated; metadata-only, no bodies; workspace-scoped default);
+  `afx inbox dismiss <id> [-p]` soft-marks dismissed (never delivers; any workspace operator).
+Edited **8 files**: (1-2) `agent-farm.md` root+skeleton — new **Outcome** block in `### afx send` + new `### afx inbox`
+section; (3-4) root `CLAUDE.md`+`AGENTS.md` — new `### Send outcomes: delivered vs held` subsection, applied
+IDENTICALLY (`diff CLAUDE.md AGENTS.md` empty ✓); (5-6) skeleton `templates/CLAUDE.md`+`AGENTS.md` — condensed
+**Send outcomes** paragraph, applied identically (templates diff = ONLY the pre-existing title+AGENTS-note delta ✓);
+(7-8) `overview.md` root+skeleton — `afx inbox` row in the afx command table.
+**Scope decisions (for Review):** (a) arch/lessons routing DEFERRED to R phase (plan allows; R has the dedicated
+update-arch-docs step). (b) `.codev/config.json` escalation-threshold/retention fields NOT documented — no existing
+config-field reference doc to extend, not in phase_9's named deliverables. Phases 1–8 committed ZERO doc changes
+(branch-diff confirmed) → phase_9 is the sole doc-sync phase, no missed mirrors. Next: `porch done` (build+tests,
+docs-only so expect green) → iter-1 3-way consult.
+
+### 2026-08-01 — Phase 9 iter-1 review: Gemini APPROVE, Codex RC, Claude APPROVE → config-knob gap FIXED
+2/3 APPROVE, but BOTH Codex (RC, HIGH) and Claude (APPROVE + minor note) flagged the SAME real gap: the new
+`.codev/config.json` mailbox knobs were undocumented. **My earlier defer was wrong** — verified against source (not
+just the plan): `lib/config.ts:75-126` declares `mailbox.{retentionDays:30, escalationSeconds:60}`, read at
+`mailbox-wiring.ts:279,293`; and `agent-farm.md` already HAS a `## Configuration` section (shell / porch.* knobs) —
+the right home. **Fixed (concurrence):** added `### Mailbox retention and escalation` to BOTH agent-farm.md trees
+(body byte-identical): retentionDays prunes only TERMINAL rows — held rows are NEVER pruned (mailbox.ts:301);
+escalationSeconds is visibility-only, NEVER a delivery trigger (mailbox-delivery.ts:348-358). Rebuttal written to
+`1313-phase_9-iter1-rebuttals.md`. Non-fixes (documented in rebuttal): (a) skeleton's 2-vs-3 inbox examples — Claude
+called it cosmetic, `--workspace` is fully in the options table, skeleton is intentionally leaner (19KB vs 33KB) →
+left as-is; (b) arch/lessons routing → deferred to R phase (plan permits; Claude agreed). Invariants re-checked:
+`diff CLAUDE.md AGENTS.md` empty; skeleton templates differ only by the title/AGENTS-note lines. Next: `porch done`
+(build+tests) → iter-2 re-consult.
