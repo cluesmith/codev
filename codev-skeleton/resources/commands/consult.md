@@ -226,6 +226,14 @@ environment.
 | `CODEV_AGY_BIN` | auto-resolved | Pin the agy binary. The harness sets this to a fake for every test. |
 | `CODEV_ALLOW_REAL_AGY` | unset | `1` opts a test run into the REAL agy binary — the guarded integration smoke and real-AI e2e runs. Expect a browser window if agy's login has lapsed. |
 | `CODEV_METRICS_DB` | `~/.codev/metrics.db` | Redirect the consult metrics database. Required under a test runner; the harness points it at a temp dir so suite runs stop skewing `consult stats`. |
+| `CODEV_TEST_ISOLATION` | unset | `1` applies the same guards to a harness that is not vitest. |
+
+**Adopters:** `VITEST` is exported by *any* vitest run, including yours. If your
+project's own suite deliberately shells out to `consult -m gemini`, that call now
+throws until you set `CODEV_ALLOW_REAL_AGY=1` (and `CODEV_METRICS_DB` if you want
+the metrics recorded somewhere). This is intentional — a suite reaching the real
+agy is what #1323 was about — but it is a behaviour change, not a silent one: the
+error names the variable to set.
 
 ### Claude auth: subscription vs. metered API
 

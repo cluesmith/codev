@@ -144,3 +144,48 @@ suite (`describe`, not `describe.skip`), per the architect's 13:20Z instruction 
 restoring that coverage part of this fix. #1324's stated re-enable condition — "once the
 suite pins a fake agy (or an equivalent no-browser guard)" — is exactly what landed here.
 Flagging it explicitly since the merge undoes a hotfix that is only minutes old.
+
+## CMAP + architect integration review
+
+CMAP 3/3 APPROVE (gemini HIGH, codex HIGH, claude HIGH). Gemini and codex reported
+`KEY_ISSUES: None`; claude approved with five non-blocking nits. The architect's own
+integration review (codex + claude lanes) independently flagged two of the same items
+as required-before-merge, plus three optional.
+
+All addressed:
+
+1. **Guard ordering / `checkAgy`** (required). Rather than moving the assert above the
+   resolve at each call site, the guard now lives *inside* `resolveAgyBin()`, in the
+   no-override branch — the single chokepoint every route passes through. This is
+   strictly stronger than per-call-site ordering: it covers `runAgyConsultation`,
+   `verifyAgy`, **and** `checkAgy`, and it closes the hole both reviewers found
+   independently — the unpinned lookup runs `agyRespondsToVersion()`, which *executes*
+   the candidate binary, so guarding only the spawn sites still let a suite run real agy.
+   The now-redundant per-site asserts were removed.
+2. **`skipIf`** (required). `describe.skipIf(!REAL_AGY)` on `agy-integration.e2e.test.ts`,
+   with `REAL_AGY` resolved once at module scope and short-circuited on the opt-in (so
+   `resolveAgyBin()` is never called against the harness pin). Three cases that reported
+   as *passing while executing nothing* now report as skipped.
+3. **`packages/core` / `artifact-canvas` setupFiles** — **declined, with reason.** Neither
+   package references consult, agy, or MetricsDB (the single grep hit is the word
+   "consult" inside a code comment). Wiring codev's harness into them would invert the
+   workspace dependency (core is a dependency *of* codev, not the reverse), and
+   duplicating the pin logic adds maintenance surface for a hypothetical. If one ever
+   does shell into consult, the guard's error names the variable to set.
+4. **`metrics.test.ts:512`** — was passing only because the sandbox mirrors the
+   `.codev/metrics.db` layout. Now asserts against `process.env.CODEV_METRICS_DB`
+   directly, plus a second case pinning the refusal behaviour.
+5. **Map note in `test-env.ts`** — added, but with the *corrected* rationale. The
+   architect's note suggested explaining why the guard is per-call-site "because the
+   resolution tests need the unpinned path". That premise does not hold: every
+   resolution test pins `CODEV_AGY_BIN` first (they are testing override handling), and
+   `agy-integration` short-circuits on the opt-in. So the guard moved to the resolver and
+   the note documents the three routes into agy instead.
+
+Also corrected the `verifyAgy()` docblock ("Always resolves (never throws)" — it can now
+throw synchronously via the resolver) and made `vitest-setup.ts` one-shot per process via
+a `globalThis` cache, since `setupFiles` re-executes per test file and `singleFork` would
+otherwise stack ~200 `process.on('exit')` listeners on one emitter.
+
+Out of scope, filed by the architect as #1326: `~/.agent-farm/global.db` has no env
+override, so the harness cannot pin it.

@@ -746,6 +746,13 @@ export function resolveAgyBin(): string | null {
   const override = process.env.CODEV_AGY_BIN;
   if (override) return isRealAgyCli(override) ? override : null;
 
+  // Past this point we go looking for the developer's real install, so this is
+  // the true chokepoint for the test-isolation guard (#1323) — not the spawn
+  // sites. Resolution is not passive: the PATH branch below runs
+  // `agyRespondsToVersion`, which *executes* the candidate binary. Guarding only
+  // the spawn would still let a suite run the real agy.
+  assertAgyLaneAllowedUnderTest();
+
   // Canonical install path — trusted location; realpath-reject the IDE only.
   const preferred = path.join(homedir(), '.local', 'bin', 'agy');
   if (isRealAgyCli(preferred)) return preferred;
@@ -837,13 +844,11 @@ async function runAgyConsultation(
 ): Promise<void> {
   const startTime = Date.now();
 
-  // Belt and braces for the test harness (#1323): under a test runner, refuse to
-  // resolve a binary the suite never pinned. Throwing here — rather than falling
-  // through to the non-blocking skip below — is deliberate: a misconfigured test
-  // must fail loudly instead of passing on a machine that happens not to have agy
-  // installed while spawning the real CLI on one that does.
-  assertAgyLaneAllowedUnderTest();
-
+  // The test-isolation guard (#1323) lives inside resolveAgyBin, at the point
+  // where an unpinned lookup would reach the real install. It throws rather than
+  // falling through to the non-blocking skip below — deliberately: a misconfigured
+  // test must fail loudly instead of passing on a machine that happens not to have
+  // agy installed while spawning the real CLI on one that does.
   const bin = resolveAgyBin();
   if (!bin) {
     const reason = 'agy CLI not found (install: https://antigravity.google/cli/install.sh)';

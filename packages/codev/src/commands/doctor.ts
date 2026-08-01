@@ -30,7 +30,6 @@ import {
 } from '../lib/migration-backup-audit.js';
 import { resolveAgyBin, AGY_OAUTH_MARKERS } from './consult/index.js';
 import { checkCachedAgyAuth, recordAgyAuthState } from './consult/agy-auth-cache.js';
-import { assertAgyLaneAllowedUnderTest } from '../lib/test-env.js';
 import { AGENT_FARM_DIR } from '@cluesmith/codev-core/constants';
 import {
   measureSessionLogs,
@@ -469,7 +468,13 @@ function checkAgy(): CheckResult {
  * Streams output and detects the OAuth URL on the *early* stream so an
  * unauthenticated agy reports "needs login" promptly (it would otherwise print
  * the URL and wait ~30s) — rather than stalling `codev doctor` for the full
- * auth wait. Always resolves (never throws).
+ * auth wait.
+ *
+ * Resolves rather than rejecting for every agy outcome. The one exception is the
+ * test-isolation guard inside `resolveAgyBin` (#1323), which throws
+ * *synchronously* — before the promise exists — when a suite reaches this path
+ * with no pinned `CODEV_AGY_BIN`. That is intentional loudness, but it means a
+ * caller cannot catch it via `.catch()` on the returned promise.
  *
  * Shares the consult lane's auth cache (#1077): a fresh verdict is reported
  * without probing, so `codev doctor` on an unauthenticated agy does not open yet
@@ -487,12 +492,6 @@ function verifyAgy(): Promise<CheckResult> {
   if (cached === 'auth') {
     return Promise.resolve({ status: 'ok', version: 'operational (cached)' });
   }
-
-  // About to spawn for real. The consult lane is not the only way into agy —
-  // `codev doctor` probes it too, so it needs the same test-isolation guard
-  // (#1323): under a test runner with no pinned CODEV_AGY_BIN, fail loudly
-  // rather than open an OAuth browser window from a suite run.
-  assertAgyLaneAllowedUnderTest();
 
   return new Promise<CheckResult>((resolve) => {
     const proc = spawn(bin, ['--print-timeout', '20s', '--print', 'Reply with just OK'], {

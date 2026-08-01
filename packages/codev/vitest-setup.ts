@@ -44,7 +44,18 @@ esac
 exit 0
 `;
 
-const sandbox = mkdtempSync(join(tmpdir(), 'codev-test-sandbox-'));
+/**
+ * setupFiles re-executes for every test file, but with `singleFork` all ~200 unit
+ * files share one process. Creating a sandbox (and registering an exit hook) per
+ * file would mean ~200 temp dirs and ~200 listeners on the same emitter — enough
+ * to trip Node's MaxListenersExceededWarning. Cache on globalThis so the setup is
+ * genuinely one-shot per process.
+ */
+const SANDBOX_KEY = '__codevTestSandbox1323';
+const g = globalThis as Record<string, unknown>;
+const firstRun = typeof g[SANDBOX_KEY] !== 'string';
+if (firstRun) g[SANDBOX_KEY] = mkdtempSync(join(tmpdir(), 'codev-test-sandbox-'));
+const sandbox = g[SANDBOX_KEY] as string;
 
 // Pin the gemini lane to a fake binary. Unconditional by design: a shell that
 // already exports CODEV_AGY_BIN must not be able to feed the real CLI back into
@@ -71,10 +82,12 @@ if (!process.env.CODEV_METRICS_DB) {
   process.env.CODEV_METRICS_DB = join(metricsDir, 'metrics.db');
 }
 
-process.on('exit', () => {
-  try {
-    rmSync(sandbox, { recursive: true, force: true });
-  } catch {
-    // A sandbox we cannot remove is temp-dir litter, never a failed test run.
-  }
-});
+if (firstRun) {
+  process.on('exit', () => {
+    try {
+      rmSync(sandbox, { recursive: true, force: true });
+    } catch {
+      // A sandbox we cannot remove is temp-dir litter, never a failed test run.
+    }
+  });
+}

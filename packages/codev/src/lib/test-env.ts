@@ -49,13 +49,34 @@ export function realAgyOptIn(): boolean {
 }
 
 /**
- * Guard the gemini (agy) lane against spawning the real binary from a test.
+ * Guard the gemini (agy) lane against reaching the real binary from a test.
  *
  * Throws when running under a test runner with neither an explicit
  * `CODEV_AGY_BIN` pin nor the real-agy opt-in. Deliberately louder than the
  * lane's usual non-blocking skip: a misconfigured test must fail the suite, not
  * quietly degrade to a COMMENT verdict (which would hide the misconfiguration
  * on a machine where agy simply isn't installed).
+ *
+ * **Where this is called, and why there.** There is exactly one call site:
+ * `resolveAgyBin()`, in the branch taken when `CODEV_AGY_BIN` is unset. That is
+ * the chokepoint — every route to the real binary passes through it, and there
+ * is more than one route:
+ *
+ *   - `runAgyConsultation()` — the consult lane (`consult -m gemini`)
+ *   - `doctor.ts:verifyAgy()` — `codev doctor`'s OAuth probe, a second spawn
+ *     site that issue #1323 did not mention
+ *   - `doctor.ts:checkAgy()` — presence check; does not spawn, but resolution
+ *     itself is not passive
+ *
+ * That last point is the reason the guard sits at resolution rather than at the
+ * spawn sites: the unpinned lookup runs `agyRespondsToVersion()`, which
+ * *executes* the candidate binary with `--version`. Guarding only the spawns
+ * would leave a suite executing the developer's real agy — no browser window
+ * from a version print, but a violation of the invariant all the same.
+ *
+ * Guarding here is safe for the resolution tests because they all pin
+ * `CODEV_AGY_BIN` before calling (they are testing override handling), and
+ * `agy-integration.e2e.test.ts` short-circuits on the opt-in before resolving.
  */
 export function assertAgyLaneAllowedUnderTest(): void {
   if (!isUnderTestRunner()) return;
