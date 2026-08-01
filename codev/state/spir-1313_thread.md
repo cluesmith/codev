@@ -565,3 +565,80 @@ Confirmed no consumer keys on the old cron broadcast `source:'cron'` — deliver
 `npm run build` CONCURRENTLY with vitest (that test spawns the built shellper). Re-ran the suite ALONE → green.
 Lesson: don't run the dist-rebuilding `npm run build` concurrently with the suite that spawns from `dist/`.
 Next: commit phase_6 (impl+tests+thread) → `porch done 1313` (build-complete + phase_6 3-way consult).
+
+### 2026-08-01 — Phase 6 APPROVED (unanimous iter-1) — porch advanced to phase_7
+Committed `e38d892d`; `porch done` checks green (build 14.7s, tests 28.3s). Phase_6 iter-1 3-way consult:
+**Gemini APPROVE, Codex APPROVE, Claude APPROVE — all HIGH, zero KEY_ISSUES** (first-iteration unanimous;
+Claude praised the cron-delivery.ts/deliverCronMessage split mirroring Phase-4 handleSend/mailbox-delivery).
+`porch next` advanced phase_6 → **phase_7: afx inbox CLI + broadcasts + escalation** (iteration 1).
+Phase_6 locked: cron = ordinary mailbox sender on the one gated path; busy→held, per-task supersede, honest outcomes.
+**Starting phase_7 (largest phase).** Deliverables: (A) `commands/inbox.ts` `afx inbox` list + `dismiss <id>` +
+cli.ts registration; (B) Tower `GET /api/inbox` + `POST /api/inbox/:id/dismiss`; (C) overview `heldCount`
+(workspace + per-agent) in packages/types api.ts + overview.ts, fire `overview-changed` on every held-state
+change (hold/deliver/supersede/dismiss) = the held-state-change broadcast; (D) escalation: config threshold
+(default 60s) + drainer escalation-age → set `escalated` + emit SSE escalation notification + loud log, NEVER
+deliver; (E) liveness-telemetry surfacing (drainer not-clean streak threshold → loud log/broadcast); (F) tests
+(inbox.test.ts + escalation). Recon first: 2 Explore agents map (CLI→route flow) + (overview/SSE surface) while
+I read spec decisions 7/8/9 + config.ts + db/mailbox current state + the drainer.
+
+### 2026-08-01 — Phase 7 recon complete (2 agents) → full plan → implementing
+Both Explore briefs in. Landed isolated pieces already: config `escalationSeconds` (default 60) + db
+`findEscalatable`/`markEscalated`/`heldSummaryForWorkspace` (count-only, body-safe) + `commands/inbox.ts`
+(list + dismiss, mirrors cron.ts; metadata-only rows, full id shown, global-default + `--workspace` scope,
+`!` escalation marker). **Full plan (remaining):**
+- sse.ts: add `'mailbox-escalation'` to SSEEventType + `MailboxEscalationPayload` (JSON in body).
+- api.ts: OverviewData += `heldCount:number` + `mailboxEscalated:boolean` (required); OverviewBuilder +=
+  `heldCount?:number` (OPTIONAL — plan says "optional per-agent"; avoids churn in discoverBuilders' 3 literals).
+- mailbox-delivery.ts: DeliveryPorts += `onHeldStateChange()` (→SSE overview-changed) + `onEscalation(info)`
+  (→SSE mailbox-escalation); deliverAgentMail fires onHeldStateChange after markDelivered; MailboxDrainer gets
+  `escalationMs` + an escalation pass in tick() (findEscalatable→markEscalated→onEscalation+loud log; NEVER
+  delivers) + liveness surfacing in recordStreak (streak crosses threshold → loud `[mailbox] LIVENESS:` log).
+- mailbox-wiring.ts: `setMailboxBroadcaster(fn)` module singleton (mirrors setCodevConfigNotifier) + bind the 2
+  new ports in makeDeliveryPorts + read escalationSeconds in ensureDrainer.
+- cron-delivery.ts: fire ports.onHeldStateChange() after supersede.
+- tower-routes.ts: import listHeld/dismiss; `handleInboxList` (GET /api/inbox, metadata-only projection) +
+  `handleInboxDismiss` (POST /api/inbox/:id/dismiss, 404 if not held, fires overview-changed); register both
+  (exact-match + regex); fire overview-changed in holdAndRespond + handleSend-held path; add heldCount/
+  mailboxEscalated to the no-workspace overview literal (~:1070).
+- overview.ts: in getOverview's existing readonly-DB block, `heldSummaryForWorkspace(db, normWs)` → set
+  result.heldCount/mailboxEscalated + per-builder heldCount (case-normalized to_agent→roleId).
+- cli.ts: register `inbox` parent (.action=list) + `dismiss <id>` child (lazy import, try/catch).
+- tower-server.ts: `setMailboxBroadcaster(broadcastNotification)` at boot.
+- Tests: inbox.test.ts (list/dismiss/404) + escalation test (age→escalated+broadcast, no delivery) + body-
+  redaction assert; update send-delivery.test.ts + cron-delivery.test.ts fakes for the 2 new ports.
+"one gated path" + "no force" invariants untouched; escalation is visibility-only.
+
+### 2026-08-01 — RESUMED (architect) — Phase 7 IMPLEMENTED, build + full unit green
+Resumed the paused Phase-7 session (state-snapshot.md confirmed: paused mid-edit, tree intentionally
+non-compiling). Finished every remaining piece from the recon plan. **Files landed this session:**
+- `mailbox-delivery.ts`: drainer `escalationMs` field+ctor; `tick()` now runs `escalateOverdue()` after the
+  delivery loop (findEscalatable→markEscalated→`onEscalation`+loud ESCALATED log; **never delivers**, once per
+  row via the `escalated=0` guard); `recordStreak` emits ONE loud `LIVENESS:` log when a **no-profile** streak
+  hits `LIVENESS_STREAK_THRESHOLD` (busy streaks deliberately NOT alarmed — Constraint 1: busy = human present).
+- `mailbox-wiring.ts`: `setMailboxBroadcaster(fn)` module singleton (mirrors setCodevConfigNotifier); bound
+  `onHeldStateChange`→`overview-changed` + `onEscalation`→`mailbox-escalation` in makeDeliveryPorts;
+  `configuredEscalationMs()` read into ensureDrainer.
+- `cron-delivery.ts`: fire `onHeldStateChange()` after supersede (new held row → indicator refetch).
+- `overview.ts`: `heldSummaryForWorkspace(db, normWs)` folded into getOverview's existing readonly-DB block →
+  `result.heldCount`/`.mailboxEscalated` + per-builder `heldCount` (roleId = to_agent.toLowerCase(), the same key
+  handleOverview uses). Defaults 0/false survive a missing/unreadable DB.
+- `tower-routes.ts`: `handleInboxList` (GET /api/inbox, metadata-only projection — NO body) + `handleInboxDismiss`
+  (POST /api/inbox/:id/dismiss, 404 if not held, fires overview-changed); registered (exact GET + regex POST);
+  `holdAndRespond` now takes `ctx` and fires overview-changed; handleSend held-branch fires it too; no-workspace
+  overview literal gets heldCount:0/mailboxEscalated:false.
+- `cli.ts`: `inbox` parent (.action=list) + `dismiss <id>` child (lazy import, try/catch — mirrors cron).
+- `tower-server.ts`: `setMailboxBroadcaster(broadcastNotification)` at boot (next to setCodevConfigNotifier).
+- `packages/types/src/index.ts`: **re-export `MailboxEscalationPayload`** (was defined in sse.ts but NOT in the
+  index's explicit named re-export list — the one real compile error; `BuilderSpawnedPayload` masked it by looking
+  fine). api.ts/sse.ts/config.ts/inbox.ts/db were already landed by the prior session.
+- Tests: NEW `inbox-cli.test.ts` (list table/empty/workspace-scope/escalation-`!`/404 — mirrors cron-cli fake-client
+  pattern); `send-delivery.test.ts` +6 (escalate-past-age→onEscalation metadata+never-deliver, fire-once, young-row-
+  not-escalated, delivery→onHeldStateChange, no-profile-streak→1 LIVENESS log, busy-streak→0); both delivery harnesses
+  gained the 2 new ports; cron-delivery asserts onHeldStateChange fired.
+**Design note (liveness scope):** spec line 91 says "repeated not-clean verdicts → loud log/broadcast." Scoped the
+loud warning to `no-profile` (the actionable broken/unknown-classifier signal) — a busy line is a legitimate human
+present (Constraint 1) and must not false-alarm. Implemented as a loud LOG (no new SSE event); the two decision-8
+events stay exactly {overview-changed, mailbox-escalation}. Escalation fires ONLY mailbox-escalation (kept distinct
+from overview-changed per decision 8; Phase 8 client refetches on both).
+Verified: types build clean, `tsc --noEmit` on codev **exit 0**, targeted 58/58 green. Full unit suite running.
+Next: confirm full suite green → commit phase_7 (impl+tests+thread) → `porch done 1313`.

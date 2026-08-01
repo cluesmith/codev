@@ -132,6 +132,65 @@ export function findHeldForAgent(
 }
 
 /**
+ * Held rows whose age (`now − created_at`) has crossed `maxAgeMs` and that have NOT yet
+ * been escalated. Tower-global (every workspace) — the drainer's escalation pass walks
+ * these once per tick to flip `escalated` and emit the visibility broadcast. Bounded by
+ * the (small) held set, so a full scan is fine. `created_at ASC` escalates the oldest
+ * first. A row is born held at `created_at`, so that timestamp is exactly "held since".
+ */
+export function findEscalatable(
+  db: Database.Database,
+  maxAgeMs: number,
+  now: number = Date.now()
+): DbMailbox[] {
+  const cutoff = now - maxAgeMs;
+  return db
+    .prepare(
+      "SELECT * FROM mailbox WHERE status = 'held' AND escalated = 0 AND created_at < ? ORDER BY created_at ASC, id ASC"
+    )
+    .all(cutoff) as DbMailbox[];
+}
+
+/** Per-agent held tally within a workspace (drives the overview's live indicator). */
+export interface HeldAgentCount {
+  toAgent: string;
+  count: number;
+  /** True if any of this agent's held rows has crossed the escalation age. */
+  escalated: boolean;
+}
+
+/** Workspace-level held summary: total, whether any row is escalated, and the per-agent split. */
+export interface WorkspaceHeldSummary {
+  total: number;
+  escalated: boolean;
+  byAgent: HeldAgentCount[];
+}
+
+/**
+ * Count currently-held rows for a workspace, grouped by recipient agent, with an
+ * escalation flag. Counts only — **no message bodies** are read or returned, so this is
+ * safe to fold into the overview payload that the dashboard/VSCode indicator renders
+ * (spec: the indicator is count-only; bodies live only in `afx inbox`). Aggregated in
+ * SQL so cost is bounded by the (small) held set, not the row bodies.
+ */
+export function heldSummaryForWorkspace(db: Database.Database, workspacePath: string): WorkspaceHeldSummary {
+  const rows = db
+    .prepare(
+      "SELECT to_agent AS toAgent, COUNT(*) AS count, MAX(escalated) AS esc FROM mailbox WHERE workspace_path = ? AND status = 'held' GROUP BY to_agent"
+    )
+    .all(workspacePath) as Array<{ toAgent: string; count: number; esc: number }>;
+  let total = 0;
+  let escalated = false;
+  const byAgent: HeldAgentCount[] = rows.map((r) => {
+    total += r.count;
+    const rowEsc = r.esc === 1;
+    if (rowEsc) escalated = true;
+    return { toAgent: r.toAgent, count: r.count, escalated: rowEsc };
+  });
+  return { total, escalated, byAgent };
+}
+
+/**
  * Transition a held row to `delivered` (clearing its why-held reason and stamping
  * `resolved_at`). Returns true if it transitioned; false if the row was already
  * terminal or does not exist — so a re-delivery attempt (backstop racing a submit
@@ -162,6 +221,20 @@ export function setHeldReason(
   const info = db
     .prepare("UPDATE mailbox SET reason = ?, updated_at = ? WHERE id = ? AND status = 'held'")
     .run(reason, now, id);
+  return info.changes > 0;
+}
+
+/**
+ * Flag a still-held row as escalated — **visibility only, NEVER affects delivery**. The
+ * drainer's escalation pass calls this when a row crosses the escalation age, then emits
+ * the escalation broadcast; the row still delivers only on a later clean gate pass.
+ * Held-only and idempotent (the `escalated = 0` guard), so a terminal or already-escalated
+ * row is untouched. Returns true if it flipped.
+ */
+export function markEscalated(db: Database.Database, id: string, now: number = Date.now()): boolean {
+  const info = db
+    .prepare("UPDATE mailbox SET escalated = 1, updated_at = ? WHERE id = ? AND status = 'held' AND escalated = 0")
+    .run(now, id);
   return info.changes > 0;
 }
 

@@ -56,7 +56,7 @@ import {
   setupUpgradeHandler,
 } from './tower-websocket.js';
 import { handleRequest, deliverCronMessage } from './tower-routes.js';
-import { startMailboxDrainer, stopMailboxDrainer } from './mailbox-wiring.js';
+import { startMailboxDrainer, stopMailboxDrainer, setMailboxBroadcaster } from './mailbox-wiring.js';
 import { shutdownDelayedSends } from './delayed-send.js';
 import type { RouteContext } from './tower-routes.js';
 import { setCodevConfigNotifier, stopAllCodevConfigWatchers } from './codev-config-watcher.js';
@@ -375,6 +375,13 @@ const routeCtx: RouteContext = {
 // events. The actual watcher is installed lazily by any config-resolving
 // route handler (/api/worktree-config, /api/activity-hooks) on first request.
 setCodevConfigNotifier(broadcastNotification);
+
+// Spec 1313 Phase 7: wire the same SSE broadcaster into the mailbox delivery path so
+// its held-set events reach clients — `overview-changed` on a held-state change (keeps
+// the held-count indicator live) and `mailbox-escalation` when a row crosses the
+// escalation age (moves the indicator into its attention state). The pure delivery
+// module and the boot-time drainer have no RouteContext, so they fan out through here.
+setMailboxBroadcaster(broadcastNotification);
 
 // ============================================================================
 // Readiness gate (Issue #1261)

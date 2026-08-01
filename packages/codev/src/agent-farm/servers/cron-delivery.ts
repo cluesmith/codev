@@ -102,6 +102,10 @@ export async function deliverCronMail(
     },
     ports.now()
   );
+  // The held set changed (a new row enqueued, possibly replacing a prior held one) →
+  // refresh the indicator count (Spec 1313, Phase 7). A clean delivery below fires it
+  // again when the row leaves the set; both are cheap, idempotent refetch triggers.
+  ports.onHeldStateChange();
 
   try {
     await deliverAgentMailSerialized(ports, db, workspacePath, toAgent);

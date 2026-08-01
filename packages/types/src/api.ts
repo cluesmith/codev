@@ -222,6 +222,12 @@ export interface OverviewBuilder {
    * gate, and the gate read avoids the sticky-`false` rollback hazard.)
    */
   prReady: boolean;
+  /**
+   * Spec 1313: count of currently-held mailbox rows addressed to THIS builder (its
+   * `roleId`). Optional — `undefined` (or absent) means none held, so existing
+   * consumers/producers need no change. Count only, never message bodies.
+   */
+  heldCount?: number;
 }
 
 export interface OverviewPR {
@@ -297,6 +303,18 @@ export interface OverviewData {
    * the overview cache without a second fetch.
    */
   architects: ArchitectState[];
+  /**
+   * Spec 1313: count of currently-*held* mailbox rows across this workspace (all
+   * recipient agents — builders and architects). Drives the dashboard/VSCode
+   * held-count indicator. Count only, never message bodies. 0 when nothing is held.
+   */
+  heldCount: number;
+  /**
+   * Spec 1313: true when at least one held row in this workspace has crossed the
+   * escalation age — puts the indicator into its attention state. Visibility only;
+   * escalation never triggers delivery.
+   */
+  mailboxEscalated: boolean;
   /** Auto-detected GitHub login of the current user (via the user-identity forge concept). */
   currentUser?: string;
   errors?: { prs?: string; issues?: string };

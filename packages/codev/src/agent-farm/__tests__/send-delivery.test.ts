@@ -21,6 +21,7 @@ import {
   type DeliveryPorts,
   type DeliverySession,
   type DeliveredBroadcast,
+  type EscalationInfo,
 } from '../servers/mailbox-delivery.js';
 import type { GateProfile, GateVerdict, RingSnapshot } from '../servers/render-gate.js';
 
@@ -51,6 +52,10 @@ interface Harness {
   broadcasts: DeliveredBroadcast[];
   writes: Array<{ formattedMessage: string; noEnter: boolean }>;
   logs: string[];
+  /** Count of onHeldStateChange fires (held-set-change SSE trigger). */
+  heldChanges: number;
+  /** onEscalation payloads (the escalation SSE trigger — metadata only). */
+  escalations: EscalationInfo[];
   setSession(agent: string, session: DeliverySession | null): void;
   setProfile(p: GateProfile | null): void;
   setVerdict(v: GateVerdict): void;
@@ -68,6 +73,8 @@ function harness(): Harness {
     broadcasts,
     writes,
     logs,
+    heldChanges: 0,
+    escalations: [],
     now: 1000,
     setSession: (agent, s) => sessions.set(agent, s),
     setProfile: (p) => {
@@ -82,6 +89,10 @@ function harness(): Harness {
       classify: (_snap: RingSnapshot, _p: GateProfile): Promise<GateVerdict> => Promise.resolve(verdict),
       writeMessage: (_s, formattedMessage, noEnter) => writes.push({ formattedMessage, noEnter }),
       broadcast: (f) => broadcasts.push(f),
+      onHeldStateChange: () => {
+        h.heldChanges++;
+      },
+      onEscalation: (info) => h.escalations.push(info),
       log: (m) => logs.push(m),
       now: () => h.now,
     },
@@ -402,5 +413,112 @@ describe('MailboxDrainer.scheduleDrain — fast delivery triggers (Spec 1313, Ph
   it('no-ops (resolved) before the drainer is started — needs the bound ports + db', async () => {
     const drainer = new MailboxDrainer({ intervalMs: 999999 });
     await expect(drainer.scheduleDrain('/ws/a', 'spir-1')).resolves.toBeUndefined();
+  });
+});
+
+describe('MailboxDrainer escalation + liveness telemetry (Spec 1313, Phase 7)', () => {
+  let db: Database.Database;
+  beforeEach(() => {
+    db = new Database(':memory:');
+    db.exec(GLOBAL_SCHEMA);
+  });
+  afterEach(() => db.close());
+
+  const enqueue = (overrides: Partial<mailbox.EnqueueInput> = {}, now = 1000) =>
+    mailbox.enqueue(
+      db,
+      { workspacePath: '/ws/a', toAgent: 'spir-1', body: 'hi', formattedMessage: 'M', ...overrides },
+      now
+    );
+
+  it('escalates a held row past the escalation age → fires onEscalation (metadata only), never delivers', async () => {
+    const h = harness();
+    h.setSession('spir-1', fakeSession());
+    h.setVerdict(BUSY); // held on a busy line (a human is present)
+    const row = enqueue({}, 1000);
+    const drainer = new MailboxDrainer({ intervalMs: 999999, escalationMs: 5000 });
+    drainer.start(h.ports, db);
+
+    h.now = 1000 + 6000; // past the 5s escalation age
+    await drainer.tick();
+
+    // Flagged escalated and broadcast with metadata — but the row is NOT delivered.
+    expect(mailbox.getById(db, row.id)?.escalated).toBe(1);
+    expect(mailbox.getById(db, row.id)?.status).toBe('held'); // visibility only, no delivery
+    expect(h.writes).toHaveLength(0);
+    expect(h.escalations).toEqual([
+      { workspacePath: '/ws/a', toAgent: 'spir-1', mailboxId: row.id, ageMs: 6000, reason: 'busy' },
+    ]);
+    // Redaction: the escalation payload carries no message body.
+    expect(Object.keys(h.escalations[0])).not.toContain('body');
+    drainer.stop();
+  });
+
+  it('escalation fires exactly once — a second tick does not re-escalate or re-broadcast', async () => {
+    const h = harness();
+    h.setSession('spir-1', fakeSession());
+    h.setVerdict(BUSY);
+    enqueue({}, 1000);
+    const drainer = new MailboxDrainer({ intervalMs: 999999, escalationMs: 5000 });
+    drainer.start(h.ports, db);
+    h.now = 1000 + 6000;
+    await drainer.tick();
+    await drainer.tick(); // findEscalatable excludes already-escalated rows
+    expect(h.escalations).toHaveLength(1);
+    drainer.stop();
+  });
+
+  it('a row younger than the escalation age is not escalated', async () => {
+    const h = harness();
+    h.setSession('spir-1', fakeSession());
+    h.setVerdict(BUSY);
+    const row = enqueue({}, 1000);
+    const drainer = new MailboxDrainer({ intervalMs: 999999, escalationMs: 60000 });
+    drainer.start(h.ports, db);
+    h.now = 1000 + 5000; // well within the 60s age
+    await drainer.tick();
+    expect(mailbox.getById(db, row.id)?.escalated).toBe(0);
+    expect(h.escalations).toHaveLength(0);
+    drainer.stop();
+  });
+
+  it('a delivery fires onHeldStateChange (a held row left the set → indicator refetch)', async () => {
+    const h = harness();
+    h.setSession('spir-1', fakeSession()); // clean by default → delivers
+    enqueue();
+    const drainer = new MailboxDrainer({ intervalMs: 999999 });
+    drainer.start(h.ports, db);
+    await drainer.tick();
+    expect(h.heldChanges).toBeGreaterThanOrEqual(1);
+    drainer.stop();
+  });
+
+  it('liveness: a sustained no-profile streak logs exactly one LIVENESS warning, at the threshold crossing', async () => {
+    const h = harness();
+    h.setSession('spir-1', fakeSession());
+    h.setProfile(null); // unknown app → held no-profile on every pass
+    enqueue();
+    const drainer = new MailboxDrainer({ intervalMs: 999999, escalationMs: 999999 });
+    drainer.start(h.ports, db);
+    for (let i = 0; i < 9; i++) await drainer.tick(); // one short of the threshold
+    expect(h.logs.filter((l) => l.includes('LIVENESS'))).toHaveLength(0);
+    await drainer.tick(); // 10th consecutive no-profile → warn once
+    await drainer.tick(); // still exactly one (fires only at the crossing, not per tick)
+    const liveness = h.logs.filter((l) => l.includes('LIVENESS'));
+    expect(liveness).toHaveLength(1);
+    expect(liveness[0]).toContain('no-profile');
+    drainer.stop();
+  });
+
+  it('liveness: a busy streak never raises a LIVENESS warning (a busy line is a human present)', async () => {
+    const h = harness();
+    h.setSession('spir-1', fakeSession());
+    h.setVerdict(BUSY);
+    enqueue();
+    const drainer = new MailboxDrainer({ intervalMs: 999999, escalationMs: 999999 });
+    drainer.start(h.ports, db);
+    for (let i = 0; i < 15; i++) await drainer.tick();
+    expect(h.logs.filter((l) => l.includes('LIVENESS'))).toHaveLength(0);
+    drainer.stop();
   });
 });

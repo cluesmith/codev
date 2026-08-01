@@ -57,6 +57,8 @@ import {
   enqueue as enqueueMailbox,
   getById as getMailboxById,
   markDelivered as markMailboxDelivered,
+  listHeld as listHeldMailbox,
+  dismiss as dismissMailbox,
   type EnqueueInput,
 } from '../db/mailbox.js';
 import type { MailboxReason } from '../db/types.js';
@@ -180,6 +182,7 @@ const ROUTES: Record<string, RouteEntry> = {
   'POST /api/launch':     (req, res) => handleLaunchInstance(req, res),
   'POST /api/stop':       (req, res) => handleStopInstance(req, res),
   'POST /api/send':       (req, res, _url, ctx) => handleSend(req, res, ctx),
+  'GET /api/inbox':       (_req, res, url) => handleInboxList(res, url),
   'GET /api/cron/tasks':  (_req, res, url) => handleCronList(res, url),
   'GET /':                (_req, res, _url, ctx) => handleDashboard(res, ctx),
   'GET /index.html':      (_req, res, _url, ctx) => handleDashboard(res, ctx),
@@ -293,6 +296,12 @@ export async function handleRequest(
     const cronTaskMatch = url.pathname.match(/^\/api\/cron\/tasks\/([^/]+)\/(status|run|enable|disable)$/);
     if (cronTaskMatch) {
       return await handleCronTaskAction(req, res, url, cronTaskMatch);
+    }
+
+    // Inbox dismiss: POST /api/inbox/:id/dismiss (Spec 1313, Phase 7)
+    const inboxDismissMatch = url.pathname.match(/^\/api\/inbox\/([^/]+)\/dismiss$/);
+    if (inboxDismissMatch) {
+      return handleInboxDismiss(req, res, ctx, inboxDismissMatch);
     }
 
     // Workspace routes: /workspace/:base64urlPath/* (Spec 0090 Phase 4)
@@ -1067,7 +1076,7 @@ async function handleOverview(res: http.ServerResponse, url: URL, workspaceOverr
     // every collection field is required ('never undefined' for `architects`,
     // Issue 1104), so emit them all empty rather than a partial payload.
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ builders: [], pendingPRs: [], backlog: [], recentlyClosed: [], architects: [] }));
+    res.end(JSON.stringify({ builders: [], pendingPRs: [], backlog: [], recentlyClosed: [], architects: [], heldCount: 0, mailboxEscalated: false }));
     return;
   }
 
@@ -1521,15 +1530,17 @@ export async function deliverCronMessage(
  */
 function holdAndRespond(
   res: http.ServerResponse,
-  log: RouteContext['log'],
+  ctx: RouteContext,
   input: EnqueueInput,
   reason: MailboxReason,
 ): void {
   const row = enqueueMailbox(getGlobalDb(), { ...input, reason });
-  log(
+  ctx.log(
     'INFO',
     `Message held (${reason}) → ${input.toAgent} @ ${path.basename(input.workspacePath)} (mailbox ${row.id.slice(0, 8)}...)`,
   );
+  // A new held row appeared → refresh the held-count indicator (Spec 1313, Phase 7).
+  ctx.broadcastNotification({ type: 'overview-changed', title: 'Held mail changed', body: `held ${reason}` });
   sendJson(res, 200, {
     ok: true,
     terminalId: input.terminalId ?? null,
@@ -1596,7 +1607,7 @@ async function handleSend(
       if (!isResolveError(reg)) {
         holdAndRespond(
           res,
-          ctx.log,
+          ctx,
           {
             workspacePath: reg.workspacePath,
             toAgent: reg.agent,
@@ -1641,7 +1652,7 @@ async function handleSend(
     }
     holdAndRespond(
       res,
-      ctx.log,
+      ctx,
       {
         workspacePath: result.workspacePath,
         toAgent,
@@ -1672,7 +1683,7 @@ async function handleSend(
     }
     holdAndRespond(
       res,
-      ctx.log,
+      ctx,
       {
         workspacePath: result.workspacePath,
         toAgent,
@@ -1799,6 +1810,10 @@ async function handleSend(
   }
   const reason: MailboxReason = stored?.reason ?? 'busy';
   ctx.log('INFO', `Message held (${reason}): ${from ?? 'unknown'} → ${toAgent} (mailbox ${row.id.slice(0, 8)}...)`);
+  // The message stayed held → a new held row is in the set; refresh the indicator
+  // count (Spec 1313, Phase 7). The delivered branch above needs no fire — the
+  // delivery path's onHeldStateChange already broadcast when the row left the set.
+  ctx.broadcastNotification({ type: 'overview-changed', title: 'Held mail changed', body: `held ${reason}` });
   sendJson(res, 200, {
     ok: true,
     terminalId: result.terminalId,
@@ -1809,6 +1824,53 @@ async function handleSend(
     reason,
     mailboxId: row.id,
   });
+}
+
+/**
+ * GET /api/inbox — list held (undelivered) mailbox rows, workspace-wide by default or
+ * scoped to `?workspace=<path>`. Backs `afx inbox`. Metadata-only projection (Spec 1313
+ * redaction rule): id, addresses, why-held reason, escalation flag, and enqueue time —
+ * the message BODY is deliberately never surfaced here (it travels only over the live
+ * terminal stream on delivery). `escalated` is normalized from SQLite's 0/1 to a bool.
+ */
+function handleInboxList(res: http.ServerResponse, url: URL): void {
+  const workspace = url.searchParams.get('workspace') ?? undefined;
+  const rows = listHeldMailbox(getGlobalDb(), workspace);
+  const projected = rows.map((r) => ({
+    id: r.id,
+    workspacePath: r.workspace_path,
+    toAgent: r.to_agent,
+    fromAgent: r.from_agent,
+    reason: r.reason,
+    escalated: r.escalated === 1,
+    createdAt: r.created_at,
+  }));
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify(projected));
+}
+
+/**
+ * POST /api/inbox/:id/dismiss — mark a held row `dismissed` (operator-cleared via
+ * `afx inbox dismiss`). Soft transition: the row is marked, not deleted, and NEVER
+ * delivered. 404 when the id names no currently-held row (already terminal or unknown),
+ * so the CLI reports a clean error. On success, fires `overview-changed` so the held-
+ * count indicator drops immediately. Authorized at the workspace-human trust level —
+ * any local operator may dismiss any held row (Spec 1313 decision 8); no ownership check.
+ */
+function handleInboxDismiss(
+  _req: http.IncomingMessage,
+  res: http.ServerResponse,
+  ctx: RouteContext,
+  match: RegExpMatchArray,
+): void {
+  const id = decodeURIComponent(match[1]);
+  if (!dismissMailbox(getGlobalDb(), id)) {
+    sendJson(res, 404, { error: 'NOT_FOUND', message: `No held message with id '${id}'` });
+    return;
+  }
+  ctx.broadcastNotification({ type: 'overview-changed', title: 'Held mail changed', body: 'dismissed' });
+  ctx.log('INFO', `Inbox: dismissed held message ${id.slice(0, 8)}...`);
+  sendJson(res, 200, { ok: true });
 }
 
 async function handleBrowse(res: http.ServerResponse, url: URL): Promise<void> {

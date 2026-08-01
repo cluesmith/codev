@@ -28,9 +28,29 @@ import {
   type DeliveryPorts,
   type DeliverySession,
   type DeliveredBroadcast,
+  type EscalationInfo,
 } from './mailbox-delivery.js';
+import type { MailboxEscalationPayload } from '@cluesmith/codev-types';
 
 type LogFn = (level: 'INFO' | 'ERROR' | 'WARN', message: string) => void;
+
+/**
+ * The SSE broadcast fn (Tower's `broadcastNotification`), wired once at boot via
+ * {@link setMailboxBroadcaster}. Mirrors `codev-config-watcher.ts`'s
+ * `setCodevConfigNotifier` pattern: the pure delivery module and the boot-time drainer
+ * have no `RouteContext`, so the two held-set SSE events they raise
+ * (`overview-changed` on a held-state change, `mailbox-escalation` on an age crossing)
+ * are fanned out through this module singleton instead. Undefined until boot wires it,
+ * so `makeDeliveryPorts` is safe to call before Tower is up (unit tests never set it,
+ * making the ports genuine no-ops).
+ */
+type MailboxBroadcastFn = (n: { type: string; title: string; body: string; workspace?: string }) => void;
+let mailboxBroadcaster: MailboxBroadcastFn | undefined;
+
+/** Wire the SSE broadcast fn once at Tower startup (see {@link MailboxBroadcastFn}). */
+export function setMailboxBroadcaster(fn: MailboxBroadcastFn): void {
+  mailboxBroadcaster = fn;
+}
 
 /**
  * A node-fs adapter for {@link harnessFromLaunchScript}. Only `.read` is exercised
@@ -157,9 +177,48 @@ export function makeDeliveryPorts(log: LogFn): DeliveryPorts {
     classify: (snapshot, profile) => classifyScreen(snapshot, profile),
     writeMessage: (session, msg, noEnter) => writeMessagePaced(session, msg, noEnter),
     broadcast: (frame) => broadcastDelivered(frame),
+    onHeldStateChange: () => broadcastHeldStateChange(),
+    onEscalation: (info) => broadcastEscalation(info),
     log: (m) => log('INFO', m),
     now: () => Date.now(),
   };
+}
+
+/**
+ * Fire the `overview-changed` SSE event so the held-count indicator refetches its
+ * count (Spec 1313, Phase 7). Cheap and idempotent (it only triggers a refetch), so
+ * the delivery path fires it freely on any held-set change. No-op until the broadcaster
+ * is wired at boot.
+ */
+function broadcastHeldStateChange(): void {
+  mailboxBroadcaster?.({
+    type: 'overview-changed',
+    title: 'Held mail changed',
+    body: 'Mailbox held-set changed',
+  });
+}
+
+/**
+ * Fire the `mailbox-escalation` SSE event when a held row crosses the escalation age
+ * (Spec 1313, Phase 7) — a VISIBILITY signal that moves the dashboard/VSCode indicator
+ * into its attention state; it never triggers delivery. Carries metadata only (ids +
+ * age + reason), never the message body, per the spec's redaction rule. No-op until the
+ * broadcaster is wired at boot.
+ */
+function broadcastEscalation(info: EscalationInfo): void {
+  const payload: MailboxEscalationPayload = {
+    workspacePath: info.workspacePath,
+    toAgent: info.toAgent,
+    mailboxId: info.mailboxId,
+    ageMs: info.ageMs,
+    reason: info.reason,
+  };
+  mailboxBroadcaster?.({
+    type: 'mailbox-escalation',
+    title: 'Message held past escalation age',
+    body: JSON.stringify(payload),
+    workspace: info.workspacePath,
+  });
 }
 
 // The single backstop drainer instance (replaces the retired SendBuffer). Created
@@ -182,8 +241,27 @@ function configuredRetentionDays(): number {
   }
 }
 
+/**
+ * The held-row escalation age in ms (Spec 1313, Phase 7). Like the retention window
+ * this is a Tower-GLOBAL policy read from the user-global config layer, default 60s
+ * (matching today's max-age; `DEFAULT_CONFIG.mailbox.escalationSeconds`). A malformed
+ * config never stops the drainer from booting — it falls back to the default.
+ */
+function configuredEscalationMs(): number {
+  try {
+    return (loadConfig(homedir()).mailbox?.escalationSeconds ?? 60) * 1000;
+  } catch {
+    return 60_000;
+  }
+}
+
 function ensureDrainer(): MailboxDrainer {
-  if (!drainer) drainer = new MailboxDrainer({ pruneRetentionDays: configuredRetentionDays() });
+  if (!drainer) {
+    drainer = new MailboxDrainer({
+      pruneRetentionDays: configuredRetentionDays(),
+      escalationMs: configuredEscalationMs(),
+    });
+  }
   return drainer;
 }
 

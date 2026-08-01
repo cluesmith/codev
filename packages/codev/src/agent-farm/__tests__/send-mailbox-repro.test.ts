@@ -80,6 +80,8 @@ function realGatePorts(
       writes.push({ msg, noEnter });
     },
     broadcast: (f) => broadcasts.push(f),
+    onHeldStateChange: () => {},
+    onEscalation: () => {},
     log: () => {},
     now: () => 1000,
   };

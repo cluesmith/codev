@@ -21,7 +21,15 @@
 
 import path from 'node:path';
 import type Database from 'better-sqlite3';
-import { findHeldForAgent, listHeld, markDelivered, setHeldReason, pruneTerminal } from '../db/mailbox.js';
+import {
+  findHeldForAgent,
+  listHeld,
+  markDelivered,
+  setHeldReason,
+  pruneTerminal,
+  findEscalatable,
+  markEscalated,
+} from '../db/mailbox.js';
 import type { DbMailbox, MailboxReason } from '../db/types.js';
 import type { GateProfile, RingSnapshot, GateVerdict } from './render-gate.js';
 import { KeyedSerializer } from './write-queue.js';
@@ -69,8 +77,36 @@ export interface DeliveryPorts {
   writeMessage(session: DeliverySession, formattedMessage: string, noEnter: boolean): void | Promise<void>;
   /** Emit the delivered-message broadcast frame. */
   broadcast(frame: DeliveredBroadcast): void;
+  /**
+   * Fire the SSE `overview-changed` event so the held-count indicator refetches (Spec
+   * 1313, Phase 7). Called whenever the held SET changes via this module — a delivery
+   * here removes a held row; the other transitions (hold/supersede/dismiss) fire it
+   * from their own call sites. Cheap and idempotent (it only triggers a refetch), so an
+   * extra fire is harmless. A no-op in unit fakes.
+   */
+  onHeldStateChange(): void;
+  /**
+   * Fire the SSE `mailbox-escalation` event when a held row crosses the escalation age
+   * (Spec 1313, Phase 7). VISIBILITY ONLY — the caller never delivers as a result. A
+   * no-op in unit fakes.
+   */
+  onEscalation(info: EscalationInfo): void;
   log(message: string): void;
   now(): number;
+}
+
+/**
+ * Metadata for a held row that has crossed the escalation age. Carries NO message body
+ * (ids + metadata only, per the spec's redaction rule) — this rides the SSE bus to the
+ * dashboard/VSCode indicator, which is count/attention only.
+ */
+export interface EscalationInfo {
+  workspacePath: string;
+  toAgent: string;
+  mailboxId: string;
+  /** How long the row had been held when it escalated, in ms. */
+  ageMs: number;
+  reason: MailboxReason | null;
 }
 
 /** Outcome of one delivery pass over an agent's held mail. */
@@ -160,6 +196,7 @@ export async function deliverAgentMail(
   await ports.writeMessage(session, row.formatted_message, row.no_enter === 1);
   ports.broadcast(broadcastForRow(row, ports.now()));
   markDelivered(db, row.id, ports.now());
+  ports.onHeldStateChange(); // a held row left the set → refresh the indicator count
   ports.log(`[mailbox] delivered ${row.id} → ${toAgent} @ ${path.basename(workspacePath)}`);
   return { delivered: [row.id], reason: null };
 }
@@ -198,6 +235,16 @@ const DEFAULT_BACKSTOP_INTERVAL_MS = 1500;
 // `startMailboxDrainer` reads it and passes it in. This constant is the fallback
 // when the drainer is constructed without an explicit value (e.g. unit tests).
 const DEFAULT_PRUNE_RETENTION_DAYS = 30;
+// Spec 1313 (Phase 7): a held row older than this crosses the escalation age — the
+// drainer flags it `escalated` and emits the visibility broadcast (NEVER delivers).
+// Default 60s (matches today's max-age); `startMailboxDrainer` overrides from config.
+const DEFAULT_ESCALATION_MS = 60_000;
+// Spec 1313 (Phase 7): after this many consecutive not-clean gate verdicts for an agent
+// whose reason is `no-profile`, the drainer logs a loud liveness warning — a sustained
+// no-profile streak means the session's app is unrecognized (broken/unknown classifier),
+// so its mail will never deliver. The threshold filters transient boot/relaunch screens,
+// which resolve well before it.
+const LIVENESS_STREAK_THRESHOLD = 10;
 
 /**
  * The poll backstop that replaces `SendBuffer`'s flush timer. On each tick it walks
@@ -215,15 +262,17 @@ export class MailboxDrainer {
   private db: Database.Database | undefined;
   private readonly intervalMs: number;
   private readonly retentionDays: number;
+  private readonly escalationMs: number;
   private readonly notCleanStreak = new Map<string, number>();
   // Spec 1313 Phase 5: agents with a fast-trigger drain already queued. A burst of
   // submit/quiescence signals for one agent coalesces onto the same pending promise
   // (one gate check, not one per trigger); the slot is released when the pass begins.
   private readonly scheduledDrains = new Map<string, Promise<void>>();
 
-  constructor(opts: { intervalMs?: number; pruneRetentionDays?: number } = {}) {
+  constructor(opts: { intervalMs?: number; pruneRetentionDays?: number; escalationMs?: number } = {}) {
     this.intervalMs = opts.intervalMs ?? DEFAULT_BACKSTOP_INTERVAL_MS;
     this.retentionDays = opts.pruneRetentionDays ?? DEFAULT_PRUNE_RETENTION_DAYS;
+    this.escalationMs = opts.escalationMs ?? DEFAULT_ESCALATION_MS;
   }
 
   start(ports: DeliveryPorts, db: Database.Database): void {
@@ -265,9 +314,38 @@ export class MailboxDrainer {
         const outcome = await deliverAgentMailSerialized(ports, db, workspacePath, toAgent);
         this.recordStreak(key, outcome);
       }
+      this.escalateOverdue(ports, db);
       pruneTerminal(db, this.retentionDays, ports.now());
     } finally {
       this.ticking = false;
+    }
+  }
+
+  /**
+   * Escalation pass (Spec 1313, Phase 7). Flags every held row that has crossed the
+   * escalation age (`escalationMs`, default 60s) as `escalated` and emits the
+   * `onEscalation` visibility broadcast + a loud log. **VISIBILITY ONLY — it never
+   * delivers.** `findEscalatable` returns only not-yet-escalated held rows and
+   * `markEscalated` is idempotent, so each row escalates (and broadcasts) exactly
+   * once; the row still delivers only on a later clean gate pass, and the attention
+   * state clears when it resolves (the row leaves the held set).
+   */
+  private escalateOverdue(ports: DeliveryPorts, db: Database.Database): void {
+    const now = ports.now();
+    for (const row of findEscalatable(db, this.escalationMs, now)) {
+      if (!markEscalated(db, row.id, now)) continue;
+      const ageMs = now - row.created_at;
+      ports.onEscalation({
+        workspacePath: row.workspace_path,
+        toAgent: row.to_agent,
+        mailboxId: row.id,
+        ageMs,
+        reason: row.reason,
+      });
+      ports.log(
+        `[mailbox] ESCALATED ${row.id.slice(0, 8)}… → ${row.to_agent} @ ${path.basename(row.workspace_path)} ` +
+          `(held ${Math.round(ageMs / 1000)}s, reason ${row.reason ?? 'held'}) — visibility only, not delivered`
+      );
     }
   }
 
@@ -280,8 +358,25 @@ export class MailboxDrainer {
   private recordStreak(key: string, outcome: DeliveryOutcome): void {
     if (outcome.delivered.length > 0 || outcome.reason === null) {
       this.notCleanStreak.delete(key);
-    } else {
-      this.notCleanStreak.set(key, (this.notCleanStreak.get(key) ?? 0) + 1);
+      return;
+    }
+    const next = (this.notCleanStreak.get(key) ?? 0) + 1;
+    this.notCleanStreak.set(key, next);
+    // Liveness telemetry (Spec 1313, Phase 7 — spec line 91): a sustained `no-profile`
+    // streak means the session's app is unrecognized (a net-new or drifted classifier),
+    // so its mail will NEVER deliver — surface it loudly instead of holding silently.
+    // Scoped to `no-profile` on purpose: a `busy` streak is a human present at the line
+    // (Constraint 1 — legitimate, must not false-alarm), and `no-live-pty` is no session
+    // at all (not the "repeated not-clean with recent output" the diagnostic targets).
+    // Fired once, exactly at the crossing, so a persistently-unknown app logs one warning
+    // rather than one per tick. The threshold filters transient boot/relaunch screens,
+    // which resolve well before it.
+    if (outcome.reason === 'no-profile' && next === LIVENESS_STREAK_THRESHOLD) {
+      const [ws, agent] = key.split('\0');
+      this.ports?.log(
+        `[mailbox] LIVENESS: ${agent} @ ${path.basename(ws)} held no-profile for ${next} consecutive checks — ` +
+          `unrecognized app; its mail will not deliver until a classifier profile matches (check for a TUI update)`
+      );
     }
   }
 

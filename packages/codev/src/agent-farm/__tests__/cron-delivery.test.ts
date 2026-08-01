@@ -46,6 +46,8 @@ interface Harness {
   broadcasts: DeliveredBroadcast[];
   writes: Array<{ formattedMessage: string; noEnter: boolean }>;
   logs: string[];
+  /** Count of onHeldStateChange fires (held-set-change SSE trigger). */
+  heldChanges: number;
   setSession(session: DeliverySession | null): void;
   setProfile(p: GateProfile | null): void;
   setVerdict(v: GateVerdict): void;
@@ -63,6 +65,7 @@ function harness(): Harness {
     broadcasts,
     writes,
     logs,
+    heldChanges: 0,
     now: 1000,
     setSession: (s) => {
       session = s;
@@ -81,6 +84,10 @@ function harness(): Harness {
         writes.push({ formattedMessage, noEnter });
       },
       broadcast: (f) => broadcasts.push(f),
+      onHeldStateChange: () => {
+        h.heldChanges++;
+      },
+      onEscalation: () => {},
       log: (m) => logs.push(m),
       now: () => h.now,
     },
@@ -149,6 +156,8 @@ describe('deliverCronMail', () => {
     expect(held[0].reason).toBe('busy');
     expect(held[0].from_agent).toBe(CRON_SENDER);
     expect(held[0].supersede_key).toBe('nightly-ci');
+    // A new held row entered the set → the indicator-refresh port fired (Phase 7).
+    expect(h.heldChanges).toBeGreaterThanOrEqual(1);
   });
 
   it('holds when there is no live PTY (outcome=held, reason=no-live-pty)', async () => {

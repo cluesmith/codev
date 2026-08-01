@@ -111,9 +111,18 @@ export interface CodevConfig {
     /**
      * Days a *terminal* mailbox row (delivered/superseded/dismissed) is retained
      * before the backstop prune drops it. Held rows are never TTL-dropped. Spec
-     * default 30. (Phase 7 adds escalation-age to this same section.)
+     * default 30.
      */
     retentionDays?: number;
+    /**
+     * Seconds a row may stay *held* before it crosses the escalation age: the drainer
+     * sets `escalated`, emits the escalation broadcast, and moves the dashboard/VSCode
+     * indicator into its attention state. Visibility only — escalation NEVER triggers
+     * delivery (the row still delivers only on a later clean gate pass, and the
+     * attention state clears when it resolves). Spec default 60, matching today's
+     * max-age. Tower-global, like `retentionDays`.
+     */
+    escalationSeconds?: number;
   };
   dashboard?: {
     frontend?: 'react' | 'legacy';
@@ -149,6 +158,7 @@ const DEFAULT_CONFIG: CodevConfig = {
   },
   mailbox: {
     retentionDays: 30,
+    escalationSeconds: 60,
   },
   framework: {
     source: 'local',
