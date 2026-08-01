@@ -52,6 +52,7 @@ import type { PtySession } from '../../terminal/pty-session.js';
 import { writeMessageToSession, writeEscapeToSession } from './message-write.js';
 import { makeDeliveryPorts } from './mailbox-wiring.js';
 import { deliverAgentMailSerialized, type DeliveryPorts } from './mailbox-delivery.js';
+import { deliverCronMail, CRON_SENDER, type CronDeliveryResult } from './cron-delivery.js';
 import {
   enqueue as enqueueMailbox,
   getById as getMailboxById,
@@ -1452,6 +1453,64 @@ function formatMessageForTarget(
   if (isArchitectTarget && from) return formatBuilderMessage(from, message, undefined, raw); // builder → architect
   if (!isArchitectTarget) return formatArchitectMessage(message, undefined, raw); // any → builder
   return raw ? message : formatArchitectMessage(message, undefined, false); // unknown → architect
+}
+
+/**
+ * Route a cron notification through the Spec 1313 mailbox + gate — the Tower-wired
+ * front half of {@link deliverCronMail} (Phase 6). Resolves the task's target to a
+ * canonical recipient agent: a live terminal via {@link resolveTarget} plus the
+ * architect reverse-map ({@link liveTargetIdentity}, because a bare `architect`
+ * target resolves to the generic id, which the mailbox can't address), or — when the
+ * agent is known but has no live PTY — via {@link resolveAgentInRegistry}, so the
+ * message HOLDS as `no-live-pty` instead of vanishing (spec decision 9). Then it
+ * hands off to the registry-free core. Cron is a non-builder sender, so no
+ * sender-affinity or spoofing check applies. Wired into the cron scheduler as its
+ * `deliver` port (see `initCron`), keeping the scheduler ignorant of mailbox
+ * internals and giving cron exactly one gated path shared with `handleSend`.
+ */
+export async function deliverCronMessage(
+  task: Pick<CronTask, 'name' | 'target' | 'workspacePath'>,
+  message: string,
+  log: (level: 'INFO' | 'ERROR' | 'WARN', msg: string) => void,
+): Promise<CronDeliveryResult> {
+  const db = getGlobalDb();
+  const ports = makeDeliveryPorts(log);
+  // Preserve the pre-1313 cron framing: a message FROM the `af-cron` pseudo-builder,
+  // regardless of whether the target is an architect or a builder.
+  const base = {
+    body: message,
+    formattedMessage: formatBuilderMessage(CRON_SENDER, message),
+    supersedeKey: task.name,
+  };
+
+  const live = resolveTarget(task.target, task.workspacePath);
+  if (!isResolveError(live)) {
+    const { toAgent } = liveTargetIdentity(live);
+    return deliverCronMail(ports, db, {
+      ...base,
+      workspacePath: live.workspacePath,
+      toAgent,
+      terminalId: live.terminalId,
+    });
+  }
+
+  // Live resolution failed. A NOT_FOUND target may still be a known agent with no
+  // live PTY (Tower restarting, builder between respawns) — hold its mail so a
+  // respawn drains it, instead of the old blind drop-with-WARN (decision 9).
+  if (live.code === 'NOT_FOUND') {
+    const reg = resolveAgentInRegistry(task.target, task.workspacePath);
+    if (!isResolveError(reg)) {
+      return deliverCronMail(ports, db, {
+        ...base,
+        workspacePath: reg.workspacePath,
+        toAgent: reg.agent,
+        terminalId: null,
+      });
+    }
+  }
+
+  log('WARN', `Cron '${task.name}': target '${task.target}' not found — message not delivered`);
+  return { outcome: 'unresolved', reason: null, mailboxId: null };
 }
 
 /**

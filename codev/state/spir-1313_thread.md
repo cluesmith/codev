@@ -499,3 +499,69 @@ assert delegation to handleUserInput + added `handleUserInput` to the mock; new 
 (composing tracked, both chunks written, submit only on Enter). pty-manager + typing-awareness suites unaffected.
 Evidence: **tsc clean; full unit 4124 pass / 48 skip / 0 fail**; affected-4 files 55/55. Response doc written
 (`1313-phase_5-iter1-rebuttals.md`, concurrence — agreed+fixed, no dispute). Next: commit thread → `porch done` (iter2 re-consult).
+
+### 2026-08-01 — Phase 5 RESUMED (recovery) — iter-2 3-way consult launched
+Resumed after architect pause (state-snapshot.md, 08:24Z). Re-oriented: phases 1–4 done+approved;
+phase_5 implemented+committed (`62855a88`), iter-1 Codex fix landed (`0fc26555`, handleUserInput
+chokepoint consolidation), porch already advanced to iteration 2 (`3df31816` re-iter → `eb21352f`
+build-complete, green). Working tree clean except the usual untracked builder-infra/porch artifacts.
+`porch next 1313` → emitted the phase_5 **iter-2** 3-way consult task. Verified the porch-generated
+context file exists (`1313-phase_5-iter2-context.md`, carries iter-1 verdicts + my concurrence
+response) and `consult` is on PATH, then launched all three in background (gemini/codex/claude).
+Did NOT re-implement phase_5 — the fix is committed + green (tsc clean, 4124 pass/48 skip/0 fail);
+only the iter-2 re-consult remained. Awaiting verdicts → then `porch next 1313` to evaluate.
+
+### 2026-08-01 — Phase 5 APPROVED (unanimous iter-2) — porch advanced to phase_6
+iter-2 3-way consult: **Gemini APPROVE (HIGH), Codex APPROVE (HIGH, flipped from iter-1
+REQUEST_CHANGES), Claude APPROVE (HIGH)** — unanimous, zero KEY_ISSUES. The `handleUserInput`
+chokepoint consolidation resolved Codex's one iter-1 point. `porch next 1313` advanced phase_5 →
+**phase_6 (Cron rerouting through mailbox + gate)**, iteration 1. Phase_5 (fast delivery triggers)
+locked in: submit + quiescence signals schedule a coalesced, gated drain; triggers are schedulers,
+never authority; single input chokepoint across both live WS paths.
+**Starting phase_6.** Scope (from plan): route cron's `deliverMessage` (tower-cron.ts:303-323)
+through the Phase-4 mailbox+gate entrypoint instead of blind `writeMessageToSession`; add a
+per-task **supersede key = task name** (Baked Decision 6, cron-only) so a newer run replaces an
+older *held* row; make the cron run log record the real outcome (delivered/held/superseded).
+Recon first (understand-before-coding) before touching anything.
+
+### 2026-08-01 — Phase 6 recon done → design locked → implementing
+Read the whole delivery stack: `db/mailbox.ts` already ships `enqueue`/`supersede`(atomic held-replace by
+`(ws,key)`)/`getById` + the `supersede_key` column & index (Phase 1); `mailbox-delivery.ts` exposes the ONE
+gated path `deliverAgentMailSerialized` (persist→serialize→gate→deliver|hold, no force path); `mailbox-wiring.ts`
+`makeDeliveryPorts(log)` binds it to the live Tower; `handleSend` (tower-routes) is the reference caller
+(enqueue→makeDeliveryPorts→deliverAgentMailSerialized→getById→respond). Confirmed `resolveTarget("architect")`
+returns generic `agent:'architect'`, so cron — like handleSend — must reverse-map via `liveTargetIdentity`
+(terminalId→specific architect name) or the mailbox can't resolve the recipient.
+**Design (cron = ordinary mailbox sender, one gated path):**
+- `db/mailbox.ts`: add `countHeldWithKey(db,ws,key)` — lets cron log delivered/held/**superseded** honestly.
+  Race-free: better-sqlite3 is synchronous, so count-then-`supersede` with no await between is atomic.
+- NEW `servers/cron-delivery.ts`: registry-free core `deliverCronMail(ports,db,target)` — supersede-enqueue
+  (key=task.name, sender=`af-cron`) → the SHARED `deliverAgentMailSerialized` → real outcome from row status.
+  Fake-ports + in-memory-DB testable (mirrors send-delivery.test.ts harness). No force path; busy→held.
+- `tower-routes.ts`: thin exported `deliverCronMessage(task,msg,log)` — resolves identity (resolveTarget +
+  liveTargetIdentity; NOT_FOUND-but-known → `resolveAgentInRegistry` dead-session fallback per spec decision 9,
+  hold `no-live-pty`), formats via `formatBuilderMessage('af-cron',…)` (preserves current cron formatting).
+- `tower-cron.ts`: `CronDeps` drops `resolveTarget`+`getTerminalManager` (delivery-only, now vestigial) for one
+  `deliver` port; `deliverMessage` awaits it + logs the real outcome. `tower-server.ts`: wire deliver→deliverCronMessage.
+- Tests: NEW cron-delivery.test.ts (core: clean→delivered, busy→held, 2nd run supersedes/no-backlog, no-pty→held);
+  update tower-cron.test.ts delivery tests to assert the `deliver` port + outcome logging (drop session.write asserts).
+"one gated path" = the shared `deliverAgentMailSerialized` (the sole place a body is written); cron & handleSend
+each do their own address→agent resolution but funnel into it. Triggers/schedulers unchanged.
+
+### 2026-08-01 — Phase 6 IMPLEMENTED — build + full unit green (4133 pass / 48 skip / 0 fail)
+Landed as designed. Files: `db/mailbox.ts` (+`countHeldWithKey`), NEW `servers/cron-delivery.ts`
+(`deliverCronMail` core + `CRON_SENDER`/`CronDeliveryResult`/`CronTarget`), `tower-routes.ts`
+(+exported `deliverCronMessage` wrapper), `tower-cron.ts` (CronDeps: dropped resolveTarget+getTerminalManager
+→ one `deliver` port; `deliverMessage` now async, logs delivered/held/superseded; dropped now-unused
+formatBuilderMessage/broadcastMessage/writeMessageToSession/basename imports), `tower-server.ts` (wire
+`deliver`→`deliverCronMessage`; dropped now-unused `resolveTarget` import). Tests: NEW cron-delivery.test.ts
+(7: clean→delivered, busy→held-no-write, no-pty→held, no-profile→held, 2nd-run→superseded+no-backlog,
+supersede-then-clear→delivered, distinct-keys-independent) + tower-cron.test.ts rewired (deliver-port +
+outcome-logging asserts; dropped the retired tower-messages/message-format mocks the SUT no longer imports). +9 tests.
+Verified: tsc clean; `npm run build` green; full unit **4133 pass / 48 skip / 0 fail**.
+Confirmed no consumer keys on the old cron broadcast `source:'cron'` — delivered broadcast now unifies to
+`source:'mailbox'` (consistent with "same mailbox+gate"). **Process note:** first full-suite run showed 2
+`session-manager` failures = `dist/terminal/shellper-main.js` "cannot find module" — a build-race from running
+`npm run build` CONCURRENTLY with vitest (that test spawns the built shellper). Re-ran the suite ALONE → green.
+Lesson: don't run the dist-rebuilding `npm run build` concurrently with the suite that spawns from `dist/`.
+Next: commit phase_6 (impl+tests+thread) → `porch done 1313` (build-complete + phase_6 3-way consult).

@@ -180,6 +180,27 @@ export function dismiss(db: Database.Database, id: string, now: number = Date.no
 }
 
 /**
+ * Count currently-`held` rows sharing `(workspacePath, supersedeKey)`. Cron reads
+ * this immediately before {@link supersede} — with no `await` between the two calls,
+ * so on better-sqlite3's synchronous, single-threaded handle the pair cannot
+ * interleave with another run — to log an honest outcome: a newer run that finds a
+ * prior held row of the same task reports `superseded`, otherwise `held`. The
+ * `(supersede_key)` index keeps this cheap.
+ */
+export function countHeldWithKey(
+  db: Database.Database,
+  workspacePath: string,
+  supersedeKey: string
+): number {
+  const row = db
+    .prepare(
+      "SELECT COUNT(*) AS n FROM mailbox WHERE workspace_path = ? AND supersede_key = ? AND status = 'held'"
+    )
+    .get(workspacePath, supersedeKey) as { n: number };
+  return row.n;
+}
+
+/**
  * Replace the held row sharing `(workspacePath, supersedeKey)` — if any — with a
  * fresh held row carrying the same key, atomically. Only `held` rows are
  * superseded (a delivered/dismissed row is untouched), so a newer cron run

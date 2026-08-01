@@ -32,7 +32,6 @@ import {
   shutdownTunnel,
 } from './tower-tunnel.js';
 import { initCron, shutdownCron } from './tower-cron.js';
-import { resolveTarget } from './tower-messages.js';
 import {
   initInstances,
   shutdownInstances,
@@ -56,7 +55,7 @@ import {
 import {
   setupUpgradeHandler,
 } from './tower-websocket.js';
-import { handleRequest } from './tower-routes.js';
+import { handleRequest, deliverCronMessage } from './tower-routes.js';
 import { startMailboxDrainer, stopMailboxDrainer } from './mailbox-wiring.js';
 import { shutdownDelayedSends } from './delayed-send.js';
 import type { RouteContext } from './tower-routes.js';
@@ -666,12 +665,13 @@ async function bootSequence(): Promise<void> {
     getTerminalsForWorkspace,
   });
 
-  // Spec 399: Initialize cron scheduler after instances are ready
+  // Spec 399: Initialize cron scheduler after instances are ready.
+  // Spec 1313 (Phase 6): cron delivers through the mailbox + gate via `deliverCronMessage`
+  // (the same single gated path as `handleSend`) instead of a blind PTY write.
   initCron({
     log,
     getKnownWorkspacePaths,
-    resolveTarget,
-    getTerminalManager: () => getTerminalManager(),
+    deliver: (task, message) => deliverCronMessage(task, message, log),
   });
 
   // Issue #1261: dependency wiring is complete — open the gate. Everything

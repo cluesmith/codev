@@ -32,18 +32,10 @@ vi.mock('../db/index.js', () => ({
   getGlobalDb: mockGetGlobalDb,
 }));
 
-// Mock tower-messages — broadcastMessage and isResolveError
-const mockBroadcastMessage = vi.fn();
-vi.mock('../servers/tower-messages.js', () => ({
-  broadcastMessage: (...args: unknown[]) => mockBroadcastMessage(...args),
-  isResolveError: (r: unknown) => typeof r === 'object' && r !== null && 'code' in r,
-}));
-
-// Mock message-format
-const mockFormatBuilderMessage = vi.fn((id: string, msg: string) => `[${id}] ${msg}`);
-vi.mock('../utils/message-format.js', () => ({
-  formatBuilderMessage: (...args: unknown[]) => mockFormatBuilderMessage(...(args as [string, string])),
-}));
+// Spec 1313 Phase 6: cron delivery goes through the injected `deliver` port (the real
+// impl is `deliverCronMessage`, covered in cron-delivery.test.ts). The scheduler no
+// longer imports tower-messages / message-format / message-write, so nothing here
+// mocks them — the tests assert the port is called and the run outcome is logged.
 
 import {
   loadWorkspaceTasks,
@@ -74,18 +66,11 @@ function writeTaskFile(ws: string, filename: string, content: string): void {
 }
 
 function makeMockDeps(overrides?: Partial<CronDeps>): CronDeps {
-  const mockSession = { write: vi.fn() };
   return {
     log: vi.fn(),
     getKnownWorkspacePaths: () => [],
-    resolveTarget: vi.fn().mockReturnValue({
-      terminalId: 'term-123',
-      workspacePath: '/test/ws',
-      agent: 'architect',
-    }),
-    getTerminalManager: () => ({
-      getSession: vi.fn().mockReturnValue(mockSession),
-    }),
+    // Default: the mailbox+gate delivered the message immediately.
+    deliver: vi.fn().mockResolvedValue({ outcome: 'delivered', reason: null, mailboxId: 'mbx-test' }),
     ...overrides,
   };
 }
@@ -373,13 +358,8 @@ describe('executeTask', () => {
 
   it('skips notification when condition is falsy', async () => {
     const ws = createTestWorkspace();
-    const mockSession = { write: vi.fn() };
-    const mockDeps = makeMockDeps({
-      getKnownWorkspacePaths: () => [ws],
-      getTerminalManager: () => ({
-        getSession: () => mockSession,
-      }),
-    });
+    const deliver = vi.fn().mockResolvedValue({ outcome: 'delivered', reason: null, mailboxId: 'm' });
+    const mockDeps = makeMockDeps({ getKnownWorkspacePaths: () => [ws], deliver });
     initCron(mockDeps);
 
     mockExec.mockImplementation((_cmd: string, _opts: unknown, cb: Function) => {
@@ -399,19 +379,14 @@ describe('executeTask', () => {
     };
 
     await executeTask(task);
-    // Session.write should NOT be called (condition is false)
-    expect(mockSession.write).not.toHaveBeenCalled();
+    // Delivery should NOT be attempted (condition is false).
+    expect(deliver).not.toHaveBeenCalled();
   });
 
-  it('sends notification when condition is truthy', async () => {
+  it('routes the rendered message through the mailbox+gate when the condition is truthy', async () => {
     const ws = createTestWorkspace();
-    const mockSession = { write: vi.fn() };
-    const mockDeps = makeMockDeps({
-      getKnownWorkspacePaths: () => [ws],
-      getTerminalManager: () => ({
-        getSession: () => mockSession,
-      }),
-    });
+    const deliver = vi.fn().mockResolvedValue({ outcome: 'delivered', reason: null, mailboxId: 'm' });
+    const mockDeps = makeMockDeps({ getKnownWorkspacePaths: () => [ws], deliver });
     initCron(mockDeps);
 
     mockExec.mockImplementation((_cmd: string, _opts: unknown, cb: Function) => {
@@ -431,27 +406,18 @@ describe('executeTask', () => {
     };
 
     await executeTask(task);
-    // Session.write should be called (condition met)
-    expect(mockSession.write).toHaveBeenCalled();
-    // Verify broadcastMessage was called
-    expect(mockBroadcastMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        type: 'message',
-        from: expect.objectContaining({ agent: 'af-cron' }),
-        content: 'Found 3 issues',
-      }),
+    // The scheduler hands the task + rendered message to the single gated path;
+    // it no longer writes to a PTY or broadcasts itself (that happens inside deliver).
+    expect(deliver).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'Notify', target: 'architect' }),
+      'Found 3 issues',
     );
   });
 
-  it('replaces ${output} in message template', async () => {
+  it('replaces ${output} in the delivered message template', async () => {
     const ws = createTestWorkspace();
-    const mockSession = { write: vi.fn() };
-    const mockDeps = makeMockDeps({
-      getKnownWorkspacePaths: () => [ws],
-      getTerminalManager: () => ({
-        getSession: () => mockSession,
-      }),
-    });
+    const deliver = vi.fn().mockResolvedValue({ outcome: 'delivered', reason: null, mailboxId: 'm' });
+    const mockDeps = makeMockDeps({ getKnownWorkspacePaths: () => [ws], deliver });
     initCron(mockDeps);
 
     mockExec.mockImplementation((_cmd: string, _opts: unknown, cb: Function) => {
@@ -470,7 +436,60 @@ describe('executeTask', () => {
     };
 
     await executeTask(task);
-    expect(mockFormatBuilderMessage).toHaveBeenCalledWith('af-cron', 'Count is 42 items');
+    expect(deliver).toHaveBeenCalledWith(expect.anything(), 'Count is 42 items');
+  });
+
+  it('logs the real outcome — held (busy), not an unconditional "delivered"', async () => {
+    const ws = createTestWorkspace();
+    const log = vi.fn();
+    const deliver = vi.fn().mockResolvedValue({ outcome: 'held', reason: 'busy', mailboxId: 'm' });
+    const mockDeps = makeMockDeps({ getKnownWorkspacePaths: () => [ws], deliver, log });
+    initCron(mockDeps);
+
+    mockExec.mockImplementation((_cmd: string, _opts: unknown, cb: Function) => {
+      cb(null, 'ok', '');
+    });
+
+    const task: CronTask = {
+      name: 'Busy',
+      schedule: '*/30 * * * *',
+      enabled: true,
+      command: 'echo ok',
+      message: 'ping',
+      target: 'architect',
+      timeout: 30,
+      workspacePath: ws,
+    };
+
+    await executeTask(task);
+    expect(log).toHaveBeenCalledWith('INFO', expect.stringContaining('held (busy)'));
+    expect(log).not.toHaveBeenCalledWith('INFO', expect.stringContaining('delivered'));
+  });
+
+  it('logs a superseded outcome when a newer run replaces a held one', async () => {
+    const ws = createTestWorkspace();
+    const log = vi.fn();
+    const deliver = vi.fn().mockResolvedValue({ outcome: 'superseded', reason: 'busy', mailboxId: 'm' });
+    const mockDeps = makeMockDeps({ getKnownWorkspacePaths: () => [ws], deliver, log });
+    initCron(mockDeps);
+
+    mockExec.mockImplementation((_cmd: string, _opts: unknown, cb: Function) => {
+      cb(null, 'ok', '');
+    });
+
+    const task: CronTask = {
+      name: 'Nightly',
+      schedule: '*/30 * * * *',
+      enabled: true,
+      command: 'echo ok',
+      message: 'ping',
+      target: 'architect',
+      timeout: 30,
+      workspacePath: ws,
+    };
+
+    await executeTask(task);
+    expect(log).toHaveBeenCalledWith('INFO', expect.stringContaining('superseding the prior held run'));
   });
 
   // Regression: #1142 — "alert me when this command fails" was inexpressible:
