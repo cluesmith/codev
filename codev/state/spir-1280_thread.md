@@ -121,3 +121,22 @@ Post-rewrite, by segment: builder 34,255 → 16,016 (−53.2%) · architect 8,59
 `roles/consultant.md` is already lean at 252 — reported, not averaged away.
 
 Spec now 6,942w. Iteration 2 ready for CMAP round 2.
+
+### spec-approval gate reached (2026-07-31)
+
+`porch done` → `porch gate 1280`. **STOPPED, waiting for human approval.** Not running
+`porch approve` — human-only gate.
+
+Two caveats flagged to the architect rather than silently accepted:
+
+1. **No CMAP round 2 ran.** Porch advanced straight from the iteration-1 rebuttal to the
+   gate, though `specify` has `max_iterations: 3` and only iteration 1 was consumed. The
+   revised spec (6,942w, substantially restructured — gross ceilings, M10, segmented
+   inventory, rollback groups) has therefore not been reviewed by anyone but me. Offered to
+   re-run round 2 if the architect wants it before the plan phase.
+2. **Gemini/agy did not participate.** Porch's model set for this consult was codex+claude
+   only — the known `--type` review limitation (#1032/#1033). This was a 2-way, not a 3-way
+   review. Recorded in the spec's Expert Consultation section rather than left implicit.
+
+State at the gate: spec + review-response committed; worktree clean apart from the
+harness-generated `.builder-*` files.
