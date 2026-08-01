@@ -469,7 +469,10 @@ export async function runAgentFarm(args: string[]): Promise<void> {
           const parsed = Number(options.delay);
           const delayError = validateDelaySeconds(parsed);
           if (delayError) {
-            logger.error(`--delay: ${delayError}`);
+            // Echo what the USER typed, not the parse result. `--delay abc`
+            // becoming "got 'NaN'" tells them about an intermediate value they
+            // never entered and cannot search for.
+            logger.error(`--delay '${options.delay}': ${delayError.replace(/, got .*$/, '')}`);
             process.exit(1);
           }
           delay = parsed;
