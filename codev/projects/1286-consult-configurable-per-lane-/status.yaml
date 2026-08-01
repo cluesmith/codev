@@ -11,24 +11,24 @@ plan_phases:
     status: complete
   - id: phase_3
     title: Agy lane model passthrough and fail-fast split
-    status: in_progress
+    status: complete
   - id: phase_4
     title: Cost accounting and metrics model-id column
-    status: pending
+    status: in_progress
   - id: phase_5
     title: Porch lane-selection resolver consolidation
     status: pending
   - id: phase_6
     title: Documentation and skeleton parity
     status: pending
-current_plan_phase: phase_3
+current_plan_phase: phase_4
 gates:
   pr:
     status: pending
   verify-approval:
     status: pending
-iteration: 2
-build_complete: true
+iteration: 1
+build_complete: false
 history:
   - iteration: 1
     build_output: ''
@@ -86,7 +86,7 @@ history:
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/aspir-1286/codev/projects/1286-consult-configurable-per-lane-/1286-phase_3-iter1-claude.txt
 started_at: '2026-07-29T11:33:26.698Z'
-updated_at: '2026-08-01T13:08:53.143Z'
+updated_at: '2026-08-01T13:14:53.221Z'
 force_advanced:
   phase: specify
   iteration: 3
