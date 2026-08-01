@@ -110,41 +110,58 @@ describe('T16 — manifest completeness (M11)', () => {
     }
   });
 
-  it('every prompt-bearing file changed on this branch appears in some manifest', () => {
-    let changed: string[];
-    try {
-      // BOTH committed and uncommitted changes.
-      //
-      // `origin/main...HEAD` alone sees only COMMITTED work. Running the suite before
-      // committing therefore made this test pass VACUOUSLY — it diffed a HEAD that did not
-      // yet contain the rewrite, and a green run was reported for a state that did not exist.
-      // (Spec 1280 Phase 3; the architect caught the claim, and this is the root cause.)
-      // A guard that is green because it looked at the wrong tree is worse than no guard.
-      const committed = execFileSync('git', ['diff', '--name-only', 'origin/main...HEAD'], {
-        cwd: repoRoot,
-        encoding: 'utf-8',
-      });
-      const working = execFileSync('git', ['status', '--porcelain'], {
-        cwd: repoRoot,
-        encoding: 'utf-8',
-      })
-        .split('\n')
-        .map((l) => l.slice(3).trim())
-        .join('\n');
-      changed = [committed, working].join('\n')
-        .split('\n')
-        .map((s) => s.trim())
-        .filter((s) => PROMPT_BEARING.test(s));
-    } catch {
-      return; // no origin/main to diff against (fresh clone / CI shallow) — skip
+  it('every prompt-bearing file THIS PROJECT changed appears in some manifest', () => {
+    // SCOPED TO THIS PROJECT'S OWN CHANGES — and that scoping is a bug fix, not a convenience.
+    //
+    // The first version's predicate was repo-global: "any prompt-bearing path in
+    // origin/main...HEAD must appear in a 1280 manifest". Since this test lives in the SHARED
+    // suite, it fired on other projects — Spec 1307 was blocked by it and would have had to
+    // file paperwork in 1280's project directory to go green. A guard that taxes work it does
+    // not govern is a broken guard, however well it protects its own project.
+    //
+    // Provenance, not paths, is the right predicate: only files touched by THIS project's
+    // commits are this project's to document. Attribution is by commit-subject tag, which is
+    // the same marker the protocol already requires of every commit here.
+    const gitOut = (args: string[]): string => {
+      try {
+        return execFileSync('git', args, { cwd: repoRoot, encoding: 'utf-8' });
+      } catch {
+        return '';
+      }
+    };
+
+    // Commits on this branch, not on main, that belong to Spec 1280.
+    const ownCommits = gitOut(['log', '--format=%H %s', 'origin/main..HEAD'])
+      .split('\n')
+      .filter((l) => /\[Spec 1280\]/.test(l))
+      .map((l) => l.split(' ')[0])
+      .filter(Boolean);
+
+    const onThisProjectsBranch =
+      ownCommits.length > 0 || /1280/.test(gitOut(['rev-parse', '--abbrev-ref', 'HEAD']));
+
+    // Any other project's branch: this test has nothing to say. Skip, taxing nobody.
+    if (!onThisProjectsBranch) return;
+
+    const changed = new Set<string>();
+    for (const sha of ownCommits) {
+      for (const f of gitOut(['show', '--name-only', '--format=', sha]).split('\n')) {
+        if (PROMPT_BEARING.test(f.trim())) changed.add(f.trim());
+      }
     }
-    if (changed.length === 0) return;
+    // Uncommitted work counts too: running before committing must not pass vacuously (the
+    // failure that cost an inspection cycle in Phase 3).
+    for (const l of gitOut(['status', '--porcelain']).split('\n')) {
+      const f = l.slice(3).trim();
+      if (f && PROMPT_BEARING.test(f)) changed.add(f);
+    }
+    if (changed.size === 0) return;
 
     const listed = new Set(manifests().flatMap((m) => m.rows.map((r) => r.path)));
-    const missing = changed.filter((f) => !listed.has(f));
+    const missing = [...changed].filter((f) => !listed.has(f));
     expect(
       missing,
-      `changed but absent from every manifest — the architect cannot inspect what is not listed:\n${missing.join('\n')}`,
+      `changed by Spec 1280 but absent from every manifest — the architect cannot inspect what is not listed:\n${missing.join('\n')}`,
     ).toEqual([]);
   });
 });
