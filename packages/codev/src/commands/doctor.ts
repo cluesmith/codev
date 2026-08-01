@@ -30,6 +30,7 @@ import {
 } from '../lib/migration-backup-audit.js';
 import { resolveAgyBin, AGY_OAUTH_MARKERS } from './consult/index.js';
 import { checkCachedAgyAuth, recordAgyAuthState } from './consult/agy-auth-cache.js';
+import { assertAgyLaneAllowedUnderTest } from '../lib/test-env.js';
 import { AGENT_FARM_DIR } from '@cluesmith/codev-core/constants';
 import {
   measureSessionLogs,
@@ -486,6 +487,12 @@ function verifyAgy(): Promise<CheckResult> {
   if (cached === 'auth') {
     return Promise.resolve({ status: 'ok', version: 'operational (cached)' });
   }
+
+  // About to spawn for real. The consult lane is not the only way into agy —
+  // `codev doctor` probes it too, so it needs the same test-isolation guard
+  // (#1323): under a test runner with no pinned CODEV_AGY_BIN, fail loudly
+  // rather than open an OAuth browser window from a suite run.
+  assertAgyLaneAllowedUnderTest();
 
   return new Promise<CheckResult>((resolve) => {
     const proc = spawn(bin, ['--print-timeout', '20s', '--print', 'Reply with just OK'], {

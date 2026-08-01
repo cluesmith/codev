@@ -22,6 +22,7 @@ import { MetricsDB } from './metrics.js';
 import { extractUsage, extractReviewText, type SDKResultLike, type UsageData } from './usage-extractor.js';
 import { executeForgeCommandSync } from '../../lib/forge.js';
 import { preflightAgyAuth, recordAgyAuthState, type AgyAuthState } from './agy-auth-cache.js';
+import { assertAgyLaneAllowedUnderTest } from '../../lib/test-env.js';
 
 // Content reference — resolved artifact content with a display label
 interface ContentRef {
@@ -835,6 +836,13 @@ async function runAgyConsultation(
   metricsCtx?: MetricsContext,
 ): Promise<void> {
   const startTime = Date.now();
+
+  // Belt and braces for the test harness (#1323): under a test runner, refuse to
+  // resolve a binary the suite never pinned. Throwing here — rather than falling
+  // through to the non-blocking skip below — is deliberate: a misconfigured test
+  // must fail loudly instead of passing on a machine that happens not to have agy
+  // installed while spawning the real CLI on one that does.
+  assertAgyLaneAllowedUnderTest();
 
   const bin = resolveAgyBin();
   if (!bin) {
