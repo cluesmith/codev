@@ -303,3 +303,104 @@ describe('MailboxDrainer (Spec 1313, Phase 4)', () => {
     drainer.stop();
   });
 });
+
+describe('MailboxDrainer.scheduleDrain — fast delivery triggers (Spec 1313, Phase 5)', () => {
+  let db: Database.Database;
+  beforeEach(() => {
+    db = new Database(':memory:');
+    db.exec(GLOBAL_SCHEMA);
+  });
+  afterEach(() => db.close());
+
+  const enqueue = (formattedMessage = 'M') =>
+    mailbox.enqueue(
+      db,
+      { workspacePath: '/ws/a', toAgent: 'spir-1', body: 'hi', formattedMessage },
+      1000
+    );
+
+  it('a trigger delivers a held message on a clean line, without a backstop tick', async () => {
+    const h = harness(); // default verdict is CLEAN
+    h.setSession('spir-1', fakeSession());
+    enqueue('[from architect] hi');
+    const drainer = new MailboxDrainer({ intervalMs: 999999 }); // backstop effectively disabled
+    drainer.start(h.ports, db);
+
+    await drainer.scheduleDrain('/ws/a', 'spir-1'); // no tick() — the trigger alone delivers
+
+    expect(h.writes).toHaveLength(1);
+    expect(h.writes[0].formattedMessage).toBe('[from architect] hi');
+    expect(drainer.streaks.get(agentKey('/ws/a', 'spir-1'))).toBeUndefined();
+    drainer.stop();
+  });
+
+  it('a spurious trigger on a busy screen re-holds — the gate still decides, nothing delivered', async () => {
+    const h = harness();
+    h.setSession('spir-1', fakeSession());
+    h.setVerdict(BUSY);
+    const row = enqueue();
+    const drainer = new MailboxDrainer({ intervalMs: 999999 });
+    drainer.start(h.ports, db);
+
+    await drainer.scheduleDrain('/ws/a', 'spir-1');
+
+    expect(h.writes).toHaveLength(0);
+    expect(mailbox.getById(db, row.id)?.status).toBe('held');
+    expect(mailbox.getById(db, row.id)?.reason).toBe('busy');
+    expect(drainer.streaks.get(agentKey('/ws/a', 'spir-1'))).toBe(1);
+    drainer.stop();
+  });
+
+  it('coalesces a burst of triggers into one gated pass (gate runs once, not once per trigger)', async () => {
+    const h = harness();
+    h.setSession('spir-1', fakeSession());
+    // Stay held so EVERY pass would re-run the gate — makes the coalescing observable.
+    let classifyCalls = 0;
+    h.ports.classify = () => {
+      classifyCalls++;
+      return Promise.resolve(BUSY);
+    };
+    enqueue();
+    const drainer = new MailboxDrainer({ intervalMs: 999999 });
+    drainer.start(h.ports, db);
+
+    // A submit+quiescence storm: five synchronous triggers for the same agent.
+    const p1 = drainer.scheduleDrain('/ws/a', 'spir-1');
+    const p2 = drainer.scheduleDrain('/ws/a', 'spir-1');
+    expect(p2).toBe(p1); // same in-flight promise → coalesced, not re-queued
+    await Promise.all([
+      p1,
+      p2,
+      drainer.scheduleDrain('/ws/a', 'spir-1'),
+      drainer.scheduleDrain('/ws/a', 'spir-1'),
+      drainer.scheduleDrain('/ws/a', 'spir-1'),
+    ]);
+
+    expect(classifyCalls).toBe(1); // one gate check for the whole burst
+    drainer.stop();
+  });
+
+  it('a later trigger delivers what an earlier busy trigger held (line cleared between triggers)', async () => {
+    const h = harness();
+    h.setSession('spir-1', fakeSession());
+    h.setVerdict(BUSY);
+    const row = enqueue();
+    const drainer = new MailboxDrainer({ intervalMs: 999999 });
+    drainer.start(h.ports, db);
+
+    await drainer.scheduleDrain('/ws/a', 'spir-1'); // busy → held
+    expect(mailbox.getById(db, row.id)?.status).toBe('held');
+
+    h.setVerdict(CLEAN);
+    await drainer.scheduleDrain('/ws/a', 'spir-1'); // line cleared → delivered
+    expect(mailbox.getById(db, row.id)?.status).toBe('delivered');
+    expect(h.writes).toHaveLength(1);
+    expect(drainer.streaks.get(agentKey('/ws/a', 'spir-1'))).toBeUndefined();
+    drainer.stop();
+  });
+
+  it('no-ops (resolved) before the drainer is started — needs the bound ports + db', async () => {
+    const drainer = new MailboxDrainer({ intervalMs: 999999 });
+    await expect(drainer.scheduleDrain('/ws/a', 'spir-1')).resolves.toBeUndefined();
+  });
+});

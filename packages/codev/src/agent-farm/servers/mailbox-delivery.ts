@@ -216,6 +216,10 @@ export class MailboxDrainer {
   private readonly intervalMs: number;
   private readonly retentionDays: number;
   private readonly notCleanStreak = new Map<string, number>();
+  // Spec 1313 Phase 5: agents with a fast-trigger drain already queued. A burst of
+  // submit/quiescence signals for one agent coalesces onto the same pending promise
+  // (one gate check, not one per trigger); the slot is released when the pass begins.
+  private readonly scheduledDrains = new Map<string, Promise<void>>();
 
   constructor(opts: { intervalMs?: number; pruneRetentionDays?: number } = {}) {
     this.intervalMs = opts.intervalMs ?? DEFAULT_BACKSTOP_INTERVAL_MS;
@@ -259,15 +263,63 @@ export class MailboxDrainer {
       }
       for (const [key, { workspacePath, toAgent }] of agents) {
         const outcome = await deliverAgentMailSerialized(ports, db, workspacePath, toAgent);
-        if (outcome.delivered.length > 0 || outcome.reason === null) {
-          this.notCleanStreak.delete(key);
-        } else {
-          this.notCleanStreak.set(key, (this.notCleanStreak.get(key) ?? 0) + 1);
-        }
+        this.recordStreak(key, outcome);
       }
       pruneTerminal(db, this.retentionDays, ports.now());
     } finally {
       this.ticking = false;
     }
+  }
+
+  /**
+   * Update the per-agent liveness streak from a delivery outcome (Phase 7 surfaces
+   * it): a delivered or empty pass clears the streak; a held pass grows it. Shared by
+   * the backstop {@link tick} and the fast {@link scheduleDrain} trigger so both feed
+   * the same telemetry.
+   */
+  private recordStreak(key: string, outcome: DeliveryOutcome): void {
+    if (outcome.delivered.length > 0 || outcome.reason === null) {
+      this.notCleanStreak.delete(key);
+    } else {
+      this.notCleanStreak.set(key, (this.notCleanStreak.get(key) ?? 0) + 1);
+    }
+  }
+
+  /**
+   * Fast, event-driven delivery trigger (Spec 1313, Phase 5). A submit (Enter) or
+   * output-quiescence signal for a session schedules a single coalesced delivery pass
+   * for that agent, so a held message delivers within a microtask of the line
+   * clearing instead of waiting up to one backstop interval.
+   *
+   * Triggers are schedulers, never authority (spec Constraint): this runs the SAME
+   * gated {@link deliverAgentMailSerialized} the backstop does, so a spurious trigger
+   * on a still-busy screen simply re-holds, and a missed trigger only defers delivery
+   * to the next backstop tick — a trigger can never corrupt anything.
+   *
+   * Coalescing: while a pass is already queued for an agent, further triggers return
+   * the same in-flight promise (the gate runs once, not once per trigger). The slot is
+   * released just before the pass runs, so a trigger arriving *during* a pass queues
+   * exactly one follow-up; the per-agent {@link KeyedSerializer} keeps passes from
+   * overlapping. No-op (resolved) until the drainer is started, and never rejects — a
+   * gate/write error is logged and left for the backstop, mirroring the tick.
+   */
+  scheduleDrain(workspacePath: string, toAgent: string): Promise<void> {
+    const ports = this.ports;
+    const db = this.db;
+    if (!ports || !db) return Promise.resolve();
+    const key = agentKey(workspacePath, toAgent);
+    const existing = this.scheduledDrains.get(key);
+    if (existing) return existing;
+    const run = Promise.resolve().then(async () => {
+      this.scheduledDrains.delete(key);
+      try {
+        const outcome = await deliverAgentMailSerialized(ports, db, workspacePath, toAgent);
+        this.recordStreak(key, outcome);
+      } catch (err) {
+        ports.log(`[mailbox] scheduled drain failed for ${toAgent}: ${String(err)}`);
+      }
+    });
+    this.scheduledDrains.set(key, run);
+    return run;
   }
 }

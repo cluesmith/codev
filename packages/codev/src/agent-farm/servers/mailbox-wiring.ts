@@ -15,7 +15,7 @@
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { loadConfig } from '../../lib/config.js';
-import type { PtySession } from '../../terminal/pty-session.js';
+import { terminalDeliverySignals, type PtySession } from '../../terminal/pty-session.js';
 import { getWorkspaceTerminals, getTerminalManager } from './tower-terminals.js';
 import { broadcastMessage } from './tower-messages.js';
 import { writeMessageToSession } from './message-write.js';
@@ -77,6 +77,30 @@ export function resolveLiveSessionForAgent(workspacePath: string, toAgent: strin
   const session = getTerminalManager().getSession(tid);
   if (!session || !session.writable) return null;
   return session;
+}
+
+/**
+ * The inverse of {@link resolveLiveSessionForAgent}: reverse-map a live session id to
+ * the agent it serves (`{ workspacePath, toAgent }`), or `null` when the id belongs to
+ * no registered agent — a plain shell nobody addresses, or a session already torn
+ * down. Drives the Phase 5 fast triggers: a submit/quiescence signal carries only the
+ * session id, and delivery is keyed on the canonical agent, so the id must be resolved
+ * back before scheduling a drain. Iterates the routing registry (agents per active
+ * workspace — small) which is cheap at trigger frequency and coalesced downstream. The
+ * agent name it returns is the same canonical identity the row is addressed to, so a
+ * respawned terminal's signal still resolves to the right held mail.
+ */
+export function resolveAgentForSession(
+  sessionId: string
+): { workspacePath: string; toAgent: string } | null {
+  for (const [workspacePath, entry] of getWorkspaceTerminals()) {
+    for (const registry of [entry.builders, entry.architects, entry.shells]) {
+      for (const [agent, tid] of registry) {
+        if (tid === sessionId) return { workspacePath, toAgent: agent };
+      }
+    }
+  }
+  return null;
 }
 
 /**
@@ -163,23 +187,57 @@ function ensureDrainer(): MailboxDrainer {
   return drainer;
 }
 
+// Phase 5 fast-trigger bus handler. Held at module scope so `stopMailboxDrainer` can
+// detach it: re-subscribing on every start would accumulate duplicate listeners across
+// Tower restarts within one process (and the tests do start/stop/start).
+let deliverySignalHandler: ((sessionId: string) => void) | undefined;
+
 /**
- * Start the mailbox backstop drainer (replaces `startSendBuffer`). Called once on
- * Tower boot: prunes terminal rows and begins the periodic held-row drain that
- * redelivers on the first clean gate after a line clears. Fast submit/quiescence
- * triggers are layered on in Phase 5.
+ * Subscribe the fast submit/quiescence triggers (Spec 1313 Phase 5) to the drainer.
+ * Each signal names only the emitting session; we reverse-map it to its agent and
+ * schedule a coalesced, gated drain. Idempotent — a second call while already
+ * subscribed is a no-op, so the single-listener invariant (which arms the
+ * per-session quiescence timers) holds.
+ */
+function subscribeDeliverySignals(): void {
+  if (deliverySignalHandler) return;
+  const handler = (sessionId: string): void => {
+    const target = resolveAgentForSession(sessionId);
+    if (target) void ensureDrainer().scheduleDrain(target.workspacePath, target.toAgent);
+  };
+  deliverySignalHandler = handler;
+  terminalDeliverySignals.on('submit', handler);
+  terminalDeliverySignals.on('quiescence', handler);
+}
+
+/** Detach the Phase 5 trigger handler so a subsequent start re-subscribes cleanly. */
+function unsubscribeDeliverySignals(): void {
+  if (!deliverySignalHandler) return;
+  terminalDeliverySignals.off('submit', deliverySignalHandler);
+  terminalDeliverySignals.off('quiescence', deliverySignalHandler);
+  deliverySignalHandler = undefined;
+}
+
+/**
+ * Start the mailbox drainer (replaces `startSendBuffer`). Called once on Tower boot:
+ * prunes terminal rows, begins the periodic held-row backstop that redelivers on the
+ * first clean gate after a line clears, and subscribes the Phase 5 fast triggers so a
+ * held message drains within a microtask of a user submit or output quiescence rather
+ * than waiting for the next backstop tick.
  */
 export function startMailboxDrainer(log: LogFn): void {
   ensureDrainer().start(makeDeliveryPorts(log), getGlobalDb());
+  subscribeDeliverySignals();
   log('INFO', '[mailbox] backstop drainer started');
 }
 
 /**
- * Stop the mailbox backstop drainer (replaces `stopSendBuffer`). Just stops the
- * timer — there is NO shutdown force-flush, because every held row is already
- * persisted in SQLite and will be redelivered after restart on a clean gate.
+ * Stop the mailbox drainer (replaces `stopSendBuffer`). Detaches the fast triggers and
+ * stops the backstop timer — there is NO shutdown force-flush, because every held row
+ * is already persisted in SQLite and will be redelivered after restart on a clean gate.
  */
 export function stopMailboxDrainer(): void {
+  unsubscribeDeliverySignals();
   drainer?.stop();
 }
 

@@ -11,6 +11,33 @@ import { RingBuffer } from './ring-buffer.js';
 import type { IShellperClient } from './shellper-client.js';
 import { isDeliberateExit } from './shellper-protocol.js';
 
+/**
+ * Terminal delivery-signal bus (Spec 1313, Phase 5).
+ *
+ * Sessions emit two fast delivery triggers on this module-singleton emitter, each
+ * carrying only the signalling session's id:
+ *   - `'submit'`     — the user pressed Enter (submitting any draft), so the composer
+ *                      may now be a clean prompt.
+ *   - `'quiescence'` — PTY output has been idle for {@link QUIESCENCE_DEBOUNCE_MS}, so
+ *                      an agent that was streaming has likely settled.
+ *
+ * The mailbox wiring subscribes once and schedules a coalesced, gated drain for the
+ * signalling session's agent. A single global bus (mirroring the single global
+ * drainer) is what lets `pty-session` stay ignorant of the mailbox layer: it only
+ * announces occupancy-relevant transitions and never decides delivery. A signal with
+ * no subscriber is a no-op, and the quiescence timer is armed only while a subscriber
+ * is present, so this is zero-cost when the drainer is not running.
+ */
+export const terminalDeliverySignals = new EventEmitter();
+
+/**
+ * Output-idle window after which a session emits `'quiescence'` (Spec 1313 Phase 5).
+ * Comfortably under the backstop interval so held mail delivers sooner, yet long
+ * enough to ride over the sub-second gaps in a streaming agent's output (a premature
+ * fire is harmless — the gate still decides — so this favours fewer wasted checks).
+ */
+export const QUIESCENCE_DEBOUNCE_MS = 500;
+
 export interface PtySessionConfig {
   id: string;
   command: string;
@@ -94,6 +121,8 @@ export class PtySession extends EventEmitter {
   private readonly diskLogMaxBytes: number;
   private readonly reconnectTimeoutMs: number;
   private disconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  // Spec 1313 Phase 5: self-rescheduling output-quiescence trigger (see armQuiescence).
+  private _quiescenceTimer: ReturnType<typeof setTimeout> | null = null;
   private clients: Set<{ send: (data: Buffer | string) => void }> = new Set();
   private _lastInputAt = 0;
   private _lastDataAt = Date.now();
@@ -356,6 +385,10 @@ export class PtySession extends EventEmitter {
     // Track last output activity for idle detection (Spec 467)
     this._lastDataAt = Date.now();
 
+    // Spec 1313 Phase 5: (re)arm the output-quiescence trigger so held mail drains
+    // shortly after a streaming agent settles, rather than at the next backstop tick.
+    this.armQuiescence();
+
     // Store in ring buffer
     this.ringBuffer.pushData(data);
 
@@ -382,6 +415,32 @@ export class PtySession extends EventEmitter {
     }
 
     this.emit('data', data);
+  }
+
+  /**
+   * Arm (or leave armed) the output-quiescence trigger (Spec 1313 Phase 5). Uses a
+   * single self-rescheduling timer keyed on {@link lastDataAt} instead of a
+   * clear/reset on every byte, so high-throughput output costs nothing extra: when it
+   * fires it either emits `'quiescence'` (output idle long enough) or re-arms for the
+   * remaining window. Armed only while a subscriber is present, so idle/unwatched
+   * sessions pay nothing. The timer is unref'd — a pending quiescence check never
+   * keeps the process alive.
+   */
+  private armQuiescence(): void {
+    if (this._quiescenceTimer) return;
+    if (terminalDeliverySignals.listenerCount('quiescence') === 0) return;
+    const check = (): void => {
+      const idleMs = Date.now() - this._lastDataAt;
+      if (idleMs >= QUIESCENCE_DEBOUNCE_MS) {
+        this._quiescenceTimer = null;
+        terminalDeliverySignals.emit('quiescence', this.id);
+      } else {
+        this._quiescenceTimer = setTimeout(check, QUIESCENCE_DEBOUNCE_MS - idleMs);
+        if (typeof this._quiescenceTimer.unref === 'function') this._quiescenceTimer.unref();
+      }
+    };
+    this._quiescenceTimer = setTimeout(check, QUIESCENCE_DEBOUNCE_MS);
+    if (typeof this._quiescenceTimer.unref === 'function') this._quiescenceTimer.unref();
   }
 
   private rotateDiskLog(): void {
@@ -590,6 +649,9 @@ export class PtySession extends EventEmitter {
   /** Mark the user as done composing (pressed Enter to submit). */
   stopComposing(): void {
     this._composing = false;
+    // Spec 1313 Phase 5: the submit may have cleared a draft, exposing a clean
+    // prompt — announce it so held mail can drain now, not at the next backstop tick.
+    terminalDeliverySignals.emit('submit', this.id);
   }
 
   /** Whether the user is currently composing input (typed but not yet submitted). */
@@ -601,6 +663,10 @@ export class PtySession extends EventEmitter {
     if (this.disconnectTimer) {
       clearTimeout(this.disconnectTimer);
       this.disconnectTimer = null;
+    }
+    if (this._quiescenceTimer) {
+      clearTimeout(this._quiescenceTimer);
+      this._quiescenceTimer = null;
     }
     // Release all WebSocket clients
     this.clients.clear();
