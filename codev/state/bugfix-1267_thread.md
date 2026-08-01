@@ -57,3 +57,26 @@ have caught this bug, since the old string was "correct" and the loop semantics
 were wrong. Verified they fail against the pre-fix single-command loop (3 of 7
 fail, restored after). Plus a guard that `afx reset`'s harness detection still
 identifies `claude` through the new dual-launcher shape.
+
+## PR
+
+PR #1317. CMAP: gemini=APPROVE, codex=COMMENT, claude=APPROVE — no blocking
+issues, four findings, all addressed and pushed:
+
+- **codex**: the quoting test's fake agent logged `"$*"`, so one argument
+  `"two words"` and two arguments `"two" "words"` rendered identically — the
+  assertion proved nothing. Logs `"$@"` one-per-`|` now.
+- **claude**: past the scripted exit codes the fake agent hit `exit ""` → bash
+  255 → the loop auto-restarted and spun to the 30s timeout. A future regression
+  should fail as a wrong invocation list, not a hang. Defaults to 0.
+- **claude**: documented why `.builder-prompt.txt` is guaranteed present on the
+  resume path (an invariant of `startBuilderSession`, not a worktree
+  assumption) rather than adding a runtime guard that would mask a broken tree.
+- **claude**: `reset/reorient.ts` called `.builder-role.md` "the copy injected
+  at spawn"; resume refreshes it now too.
+
+claude's one unreproducible `6 failed` run of `src/agent-farm` it closed itself
+(3 clean directory runs, 10 clean isolated runs, clean `main` baseline).
+
+Full suite after the fixes: 4051 passed / 0 failed / 48 skipped.
+Awaiting the `pr` gate — human approval, then merge.
