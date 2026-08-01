@@ -320,6 +320,22 @@ Delete the four directories; no code depends on them.
 
 **Dependencies**: Phase 2
 
+#### Queued merge actions — all three in one place
+
+Three separate pending merges is exactly where one gets forgotten, so they are listed
+together and each says what "done" looks like.
+
+| # | Waiting on | Action | Verified? |
+|---|---|---|---|
+| 1 | PR #1320 (1273 submission lock) | Merge; resolve `tower-routes.ts` keeping BOTH sides; **add** two `submitToSession` call sites (delayed delivery, `flush()` drain); *then* delete `writeCompletesInMs`, `busyUntil` + its flush busy-gate, and `delayed-send.ts`'s chain | Conflict surface measured (`git merge-tree`): one file, `tower-routes.ts` |
+| 2 | PR #1327 (1280 invariant tests) | **Drop this project's baseline bump** to `spec-1280-measurement-instrument.test.ts` — take theirs wholesale for that file | **Yes.** Ran their new file against this branch's docs: 24/24 pass unchanged, so the drop is safe |
+| 3 | #1320 merged + installed | Live e2e, batched with 1273's probe retest (architect ruling) | Runbook below |
+
+On (2): the bump exists only because 1280's original form pinned live absolute counts, which
+fire on any always-on edit. #1327 replaces that with invariants plus a synthetic fixture, so
+a +62-word real-repo change keeps all 24 green by design. Their new file comments on this
+case by name. Carrying the bump past that merge would be a conflicting edit with no purpose.
+
 #### Adopting Spec 1273's submission lock (added 2026-08-01)
 
 PR #1320 (`builder/1273-submission-lock`) adds
