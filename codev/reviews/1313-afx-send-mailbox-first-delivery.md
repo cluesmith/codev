@@ -486,6 +486,16 @@ discipline). The one hot-tier addition this project earned is architectural (the
   skipped, 0 failures), and `porch done` passed on retry. No single reproducible failing test existed to skip
   (the direct run had zero failures), so nothing was `it.skip`-ped — it is whole-suite environmental flakiness,
   handled by retry (a passing run is a valid signal). See Follow-up Items for a suggested porch-level mitigation.
+- **`render-gate.test.ts` over-cap seed-cap perf assertion** (surfaced at PR-merge CI, review phase) — the
+  wall-clock timing assertion (`best-of-5 classifyScreen(>1MB) < 75ms`) flaked on shared/loaded GitHub Actions
+  runners: best-of-5 measured **125ms** then **142ms** on a rerun, vs the ~15–30ms this-env / ~22ms spike baseline.
+  Both review-phase integration reviewers flagged this exact assertion as CI-flaky, matching the test's own
+  "headroom for slower/loaded CI" caveat. **Mitigation (architect-directed — a CI-aware guard, not a blanket skip,
+  so local perf signal survives):** `const budgetMs = process.env.CI ? 500 : 75` — the tight ≤75ms bound stays the
+  real steady-state signal **locally**, while CI asserts only a looser catastrophic-regression ceiling (the
+  pre-tightening 500ms bound — still an order of magnitude below an O(n²) blow-up at >1MB). Verified passing in both
+  modes (local 75ms and `CI=true` 500ms), 28/28. The classifier code is untouched — this is purely a test-side
+  bound adjustment. Follow-up below.
 
 ## Follow-up Items
 
@@ -496,5 +506,8 @@ discipline). The one hot-tier addition this project earned is architectural (the
 - **Bound the escalation-toast `seen` Set** (Technical Debt above) — small, out of this spec's scope.
 - **Porch/vitest cwd isolation** to remove the `getcwd`-race flakiness under concurrent builders (retry-on-`getcwd`
   or per-worker cwd) — infrastructure, not this spec.
+- **Deterministic perf guard for the render-gate seed-cap test** — replace the CI-aware wall-clock bound (added to
+  stop CI flakiness) with an operation-count / complexity-based check so CI regains a tight regression guard without
+  runner-load sensitivity. Test infrastructure, not this spec's scope.
 - **VSCode Needs-Attention view** could optionally surface held messages (spec Open Question, nice-to-have) —
   deferred; the count indicator + attention state ship now.

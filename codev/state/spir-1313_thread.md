@@ -973,3 +973,53 @@ metadata-only, ADD `afx inbox show <id>` (per-id body view). Implemented (NOT re
 - **Review doc**: Deviations entry + Review-Phase Round-2 stub (verdicts filled after iter-2 re-consult).
 Next: commit (explicit staging, NO git add -A) → push (updates PR #1330) → `porch done 1313` (re-consult delta) →
 write iter-2 rebuttal from feedback. Strict mode: do NOT self-approve pr gate; do NOT merge.
+
+**AWAITING ARCHITECT (2026-08-01):** held-gate change is committed (46400950) + pushed to PR #1330; 123 tests
+pass, tsc clean. Porch is at the `pr` gate (gate_pending, iter-1) and says "STOP and wait for human approval."
+Sent the architect the status + a decision point: run `porch done 1313` to re-consult the delta (review iter-2),
+OR they review the PR and approve the pr gate directly. NOT running `porch done` on my own — porch says wait, and
+the re-consult-vs-approve choice (with its consult cost) is the architect's. Strict mode: not self-approving, not
+advancing, not merging. iter-2 rebuttal (`1313-review-iter2-rebuttals.md`) will be written only if a re-consult runs.
+
+**ARCHITECT DIRECTIVE (2026-08-01T18:50Z):** "Hold — verifying the delta (46400950) + re-consulting the updated
+PR myself; do NOT run porch done or advance. I'll approve the pr gate directly when it's clean." → Complying.
+Architect chose direct-PR-review + direct-gate-approval over the porch-driven re-consult path, so the iter-2
+rebuttal is OBVIATED (no builder-run consult this round). Builder is idle/holding at the pr gate. Nothing further
+to do until the architect either approves the gate (→ porch advances to verify) or sends feedback. Not polling.
+
+### 2026-08-01 — pr gate APPROVED → porch advanced to VERIFY. Blocked on merge-authorization ambiguity.
+Architect approved the pr gate + said "run porch next". Did so — porch is now PHASE: verify (iter-1). The verify
+task's step 1 is "merge PR #1330 (regular merge, no squash)". CONFLICT: the standing project constraint (recorded
+earlier) was "do NOT merge — maintainers merge", and the gate approval didn't explicitly lift it. Merging is
+irreversible/outward-facing (lands on main, closes #1313), so NOT merging on an implicit signal. Asked the architect
+to confirm: (a) they/maintainers merge then I verify, or (b) they authorize me to merge now. Holding.
+
+### 2026-08-01 — MERGE BLOCKED by branch protection (2 blockers). Did NOT merge/force. Reported to architect.
+Architect authorized me to merge #1330 (pr gate approved lifts the 'maintainers merge' constraint; builders merge
+own PRs post-gate). Ran `porch done 1313` → porch now wants `porch gate 1313` (verify-approval). BUT `gh pr view`
+shows mergeStateStatus=BLOCKED, mergeable=MERGEABLE. Two real blockers:
+  1. **CI `Unit Tests` FAILED** = FLAKY PERF test `render-gate.test.ts:185` ("classifies over-cap snapshot
+     ≤~50ms budget") — asserted best-of-5 <75ms, got **125ms** on a loaded CI runner. Phase-2 timing test (comment
+     explicitly anticipates "slower/loaded CI"); my inbox-show delta touches NONE of the classifier path, and it
+     passed in earlier CI. → Classic CI-load timing flake, not a regression. Triggered `gh run rerun 30714025828
+     --failed`. If it recurs → skip+annotate per flaky-test protocol + document in review Flaky Tests.
+  2. **`reviewDecision=REVIEW_REQUIRED`** — main's branch protection requires a formal GitHub "Approve" review on
+     #1330. A builder CANNOT self-approve its own PR; this is SEPARATE from the Codev pr gate. Needs a maintainer's
+     GitHub review approval (or an admin merge).
+Did NOT `--admin` force past a failed check + missing review (irreversible/outward-facing; architect said "regular
+merge", not admin override). Reported both + the plan to the architect. Holding until rerun is green AND a maintainer
+approves the GitHub review, then `gh pr merge 1330 --merge` → verify phase. Not polling.
+
+### 2026-08-01 — Blocker-1 (flaky CI perf test) MITIGATED: CI-aware bound (architect-directed). Local signal survives.
+CI rerun 30714025828 re-failed on EXACTLY render-gate.test.ts:185 (best-of-5 125ms then 142ms vs 75ms ceiling;
+everything else green 215/1/3). Architect PRE-AUTHORIZED the flaky-test-protocol mitigation for that one assertion,
+then refined: **prefer a CI-aware guard over a blanket skip so LOCAL perf signal survives.** Implemented:
+`const budgetMs = process.env.CI ? 500 : 75; expect(best).toBeLessThan(budgetMs)`. Tight ≤75ms local signal kept
+(real steady-state check); CI asserts only the looser pre-tightening 500ms catastrophic-regression ceiling (3.5x the
+worst-observed 142ms → won't re-flake; still 10x below an O(n²) blow-up at >1MB). Annotated with the spec's own
+"slower/loaded CI" caveat + both reviewers flagging it. **Classifier code untouched — test-side bound only.**
+Verified BOTH modes pass 28/28 (local 75ms; CI=true 500ms). Documented in review Flaky Tests + a Follow-up (swap the
+wall-clock guard for a deterministic op-count check). Reverted my earlier interim `it.skip` (architect preferred the
+CI-aware bound). Next: commit (render-gate.test.ts + review + thread, explicit staging) → push (re-triggers CI) →
+report to architect. Blocker 2 (REVIEW_REQUIRED) stays PARKED — architect is the PR author (can't self-approve) +
+no admin; needs a 2nd maintainer (e.g. waleedkadous) to Approve/admin-merge. Holding the merge + verify per directive.

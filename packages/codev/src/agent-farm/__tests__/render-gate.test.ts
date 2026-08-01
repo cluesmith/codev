@@ -179,10 +179,16 @@ describe('render-gate — performance at the seed cap (Spec 1313)', () => {
     // eslint-disable-next-line no-console
     console.log(`[render-gate] classify @${Math.round(snap.replay.length / 1024)}KB best-of-5 = ${best.toFixed(1)}ms`);
     expect(verdict?.clean).toBe(false); // the tail is a busy prompt
-    // Validates the spec's ≤~50ms seed-cap budget with headroom for slower/loaded
-    // CI than the spike's machine, while staying an order of magnitude below a
-    // catastrophic (e.g. O(n²)) regression. Tightened from a prior 500ms ceiling.
-    expect(best).toBeLessThan(75);
+    // Perf guard with a CI-aware bound. Locally this asserts the spec's tight ≤~50ms
+    // seed-cap budget (75ms with headroom) — the real steady-state perf signal. On shared/
+    // loaded GitHub runners this best-of-5 measured 125–142ms and flaked the tight bound
+    // repeatedly (both integration reviewers flagged THIS assertion as CI-flaky), matching
+    // the spec's own "headroom for slower/loaded CI than the spike's machine" caveat. So in
+    // CI we assert only a looser catastrophic-regression ceiling (the pre-tightening 500ms
+    // bound — still an order of magnitude below an O(n²) blow-up at >1MB), preserving the
+    // tight local signal without flaking CI. See review doc "Flaky Tests".
+    const budgetMs = process.env.CI ? 500 : 75;
+    expect(best).toBeLessThan(budgetMs);
   });
 });
 
