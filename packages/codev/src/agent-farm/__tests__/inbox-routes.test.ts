@@ -260,4 +260,15 @@ describe('POST /api/inbox/:id/dismiss', () => {
     await handleRequest(makeReq('POST', `/api/inbox/${row.id}/dismiss`), res, makeCtx());
     expect(res._statusCode).toBe(404);
   });
+
+  it('rejects a non-POST method with 405 and does not dismiss (state-changing route must not be GET-reachable)', async () => {
+    const row = seedHeld();
+    const ctx = makeCtx();
+    const res = makeRes();
+    await handleRequest(makeReq('GET', `/api/inbox/${row.id}/dismiss`), res, ctx);
+    expect(res._statusCode).toBe(405);
+    // The row is untouched — still held, never dismissed — and no indicator broadcast fired.
+    expect(mailbox.getById(holder.db, row.id)?.status).toBe('held');
+    expect(ctx.broadcastNotification).not.toHaveBeenCalled();
+  });
 });

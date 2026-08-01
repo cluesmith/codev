@@ -1860,17 +1860,26 @@ function handleInboxList(res: http.ServerResponse, url: URL): void {
 /**
  * POST /api/inbox/:id/dismiss — mark a held row `dismissed` (operator-cleared via
  * `afx inbox dismiss`). Soft transition: the row is marked, not deleted, and NEVER
- * delivered. 404 when the id names no currently-held row (already terminal or unknown),
- * so the CLI reports a clean error. On success, fires `overview-changed` so the held-
- * count indicator drops immediately. Authorized at the workspace-human trust level —
- * any local operator may dismiss any held row (Spec 1313 decision 8); no ownership check.
+ * delivered. The dispatch matches this path for ANY method, so the method is guarded
+ * here: a non-POST request (e.g. GET) must not mutate state → 405. 404 when the id names
+ * no currently-held row (already terminal or unknown), so the CLI reports a clean error.
+ * On success, fires `overview-changed` so the held-count indicator drops immediately.
+ * Authorized at the workspace-human trust level — any local operator may dismiss any held
+ * row (Spec 1313 decision 8); no ownership check.
  */
 function handleInboxDismiss(
-  _req: http.IncomingMessage,
+  req: http.IncomingMessage,
   res: http.ServerResponse,
   ctx: RouteContext,
   match: RegExpMatchArray,
 ): void {
+  // Dismissal mutates state — only POST may reach it. The path match in the dispatch is
+  // method-agnostic, so without this guard a GET (or any method) to this URL would dismiss
+  // mail. Matches the method-guard convention used by the cron action routes.
+  if (req.method !== 'POST') {
+    sendJson(res, 405, { error: 'Method not allowed' });
+    return;
+  }
   const id = decodeURIComponent(match[1]);
   if (!dismissMailbox(getGlobalDb(), id)) {
     sendJson(res, 404, { error: 'NOT_FOUND', message: `No held message with id '${id}'` });

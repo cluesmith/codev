@@ -699,3 +699,23 @@ No `--all`/admin mode (spec intends none; YAGNI). Visibility/corruption invarian
 route normalization only). Verified: build exit 0; **full unit suite 4161 passed / 48 skipped / 0 failed**
 (+1 = the new route test). Rebuttal/response at `1313-phase_7-iter2-rebuttals.md`. Next: `porch next` (enter
 iter-3) → commit fix → `porch done` → `porch next` (iter-3 consult).
+
+### 2026-08-01 — Phase 7 iter-3 review: Gemini APPROVE, Claude APPROVE(HIGH), Codex REQUEST_CHANGES → fixed
+iter-3 fix committed (`905f7071`) → `porch done` green → iter-3 3-way. Architect flagged the Claude consult
+truncated on a session limit (empty output); re-ran it → APPROVE/HIGH, no issues. **Codex found a THIRD real
+bug** (Gemini+Claude both missed it, both APPROVE): `POST /api/inbox/:id/dismiss` was matched by URL path only
+(`tower-routes.ts:302`), and `handleInboxDismiss` took `_req` (unused) with **no method check** — so
+`GET /api/inbox/<id>/dismiss` (any method) would dismiss mail. State mutation reachable by GET. Verified against
+code — VALID (the GET *list* route is safe: it's in the method-keyed exact-match map; only the dynamic dismiss
+route bypassed it). No dispute.
+**Fix (1 src + 1 test):**
+- `tower-routes.ts` `handleInboxDismiss`: `_req`→`req`; guard `if (req.method !== 'POST') → 405
+  { error: 'Method not allowed' }` before any DB mutation — matches the cron action routes' convention
+  (`handleCronTaskAction` run/enable/disable, and :515/:582). Docstring notes the dispatch is method-agnostic.
+- `inbox-routes.test.ts`: +1 regression test — `GET /api/inbox/<id>/dismiss` → 405, row still `held`, no
+  `overview-changed` broadcast.
+Porch flow this round: `porch next` emitted a "write rebuttal (iter-3)" task → wrote
+`1313-phase_7-iter3-rebuttals.md` (accept+fixed). Verified: build exit 0; **full suite 4162 passed / 48 skipped
+/ 0 failed** (+1 405 test; note: had to run from packages/codev — a bare `pnpm test` from the worktree root
+hits the root's watch-mode `vitest`). Next: commit fix → `porch done` (re-verify + mark rebuttal) → `porch next`
+(iter-4 consult). Codex 3-for-3 on real issues this phase — the 3-way clearly earning its keep.
