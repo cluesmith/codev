@@ -21,7 +21,11 @@ function isSkip(out: string): boolean {
   return out.includes('VERDICT: COMMENT') && /Skipped/i.test(out);
 }
 
-describe('agy lane integration (guarded; real agy)', () => {
+// Disabled pending #1323: when agy is unauthenticated, every real spawn opens an
+// OAuth browser window on the developer's machine — the "unavailable/unauthed →
+// harmless skip" guard below detects that state only AFTER the window is open.
+// Re-enable once the suite pins a fake agy (or an equivalent no-browser guard).
+describe.skip('agy lane integration (guarded; real agy)', () => {
   it('delivers the complete inline prompt under the agy 1.0.10 argument contract', async () => {
     if (!resolveAgyBin()) return;
 
