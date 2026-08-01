@@ -679,3 +679,36 @@ Worth stating because it cuts against my own interest: an audit script written *
 whose work it audits is subject to exactly the bias the audit exists to remove. Mine was crude in
 the direction that made the codebase look worse and my upcoming phase look more necessary. The
 correction was cheap only because I checked the raw text before believing the summary.
+
+### Merged main + the unlanded hotfix into the rewrite branch (2026-08-01)
+
+Architect instruction: merge `origin/main` before the next test run — #1324 skips
+`agy-integration.e2e.test.ts`, which had been opening OAuth windows on the human's machine on
+every suite run while `agy` is unauthenticated. Merged (`fbdc0f45`); `describe.skip` pending
+#1323 confirmed present. The `agy` binary is renamed machine-wide, so the gemini consult lane
+reports "not installed" and skips non-blockingly — expected, not to be fixed.
+
+**The instruction didn't cover something that mattered: #1321 is still OPEN.** Main carries
+**zero** `60_000` timeouts, so merging main alone would have left this branch carrying the exact
+latent failure that took main red — it was cut before the hotfix, and the hotfix lives on its own
+branch. The next test run here would have been rolling the same dice.
+
+So I merged `origin/hotfix/1280-test-timeouts` too (`3b0b2a4f`). **Merged rather than
+cherry-picked deliberately**: when #1321 lands on main, a later `merge origin/main` sees shared
+ancestry and stays clean instead of conflicting on a duplicated change.
+
+**One conflict, and both sides were needed** — worth recording because whoever hit it later
+would have been tempted to pick one: Phase 1 replaced the pinned-baseline assertions in
+`spec-1280-measurement-instrument.test.ts` with arithmetic invariants, while the hotfix added
+budgets to the same region. Resolution keeps **Phase 1's invariants AND the 60s budget**. A
+"take theirs" would have silently reinstated a literal that this project changes every phase; a
+"take ours" would have reinstated the timeout that took main red.
+
+Suite after both merges: **205 files, 4,083 tests, green.**
+
+Sixth instance of the family, minor: my own budget-verification script flagged the one-liner
+`beforeAll(..., 60_000)` as unbudgeted, because it inspects the line *after* a block and that
+block closes on its own line. Caught in seconds by reading the actual line. The reflex is now
+reliable — check the raw text before believing any summary I wrote, including my own tooling's.
+
+Phase 3 still paused; the merge instruction carried no resume word and I am not inferring one.
