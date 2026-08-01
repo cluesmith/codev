@@ -107,3 +107,12 @@ Architect approved spec-approval gate + told me to continue to Plan. Grounded th
 - Two of three already APPROVE. Committing iter-2 revisions + rebuttal; `porch done` → porch decides (re-consult
   iter-3 or gate). Codex's seams are legit + finite; if it keeps finding ever-finer detail, that's implement-phase
   territory and the human gate decides "good enough."
+- Committed iter-2 revisions (0d2855ee). `porch done` → advanced straight to **plan-approval gate** (porch did
+  NOT force iter-3; 2 APPROVE + all Codex concerns addressed was enough).
+
+### 2026-08-01 — ⛔ STOPPED at plan-approval gate (awaiting human)
+- `porch gate 1313` registered. Architect notified via `afx send`.
+- **Waiting for human**: `porch approve 1313 plan-approval --a-human-explicitly-approved-this`.
+- On approval → `porch next 1313` → **Implement phase**. Phase 1 (mailbox store) first.
+- Reminder to self before implementing: fetch branch `spike-1265` for the classifier fixtures + POC harness
+  (spec Dependencies); this is needed by Phase 2/3.
