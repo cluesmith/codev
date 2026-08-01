@@ -347,3 +347,40 @@ and skeleton-only enumeration. Named pattern; the review phase routes it to less
 
 **Gate presentation to Waleed is out with the architect's recommendation. Nothing is pending on
 me. Not touching the gate; waiting.**
+
+### spec-approval APPROVED → plan phase (2026-07-31)
+
+Waleed approved; architect relayed. Ran `porch approve 1280 spec-approval` myself per the flow
+(porch required the `--a-human-explicitly-approved-this` flag — correct guard). Advanced to plan.
+
+**Plan drafted: 10 phases, 67 decisions, max batch 11 (cap 12).**
+
+Phase boundaries are drawn by **inspection load, not subsystem elegance** — M11 makes the
+architect's per-file review the throughput constraint, so the boundary that matters is "a batch
+a human can review in one sitting."
+
+```
+P0 (PR-1) → P1(4) → P2(10) → P3(9) → P4(11) → P5(10) → P6(10) → P7(9) → P8(4) → P9
+                                                                     sum = 67
+```
+
+Verified the enumeration against disk rather than trusting the spec's "~66": protocol.md 10
+(9 skeleton + release local) · builder-prompt 9 · prompts 18 · templates 8 (6 + 2 codev-local) ·
+consult-types 18 · roles 3 · CLAUDE/AGENTS 1 = **67**.
+
+Design decisions worth recording:
+
+- **P0 ships as PR-1 before any prompt word changes.** Not administrative sequencing — rewriting
+  first would make every later measurement unfalsifiable (principle 7).
+- **P1 is deliberately small (4).** Highest blast radius (CLAUDE.md carries all 8 scar rules),
+  and it calibrates the architect's conformance standard for the seven phases after it.
+- **P3 is only 9 decisions but is the riskiest phase**, because it carries the whole M10 burden:
+  `baked-decisions.test.ts` enforces a pure-addition diff on three `builder-prompt.md` files,
+  structurally incompatible with rewriting them. Kept separate from P1 for that reason alone.
+- **P8 rebuilds the scar registry last**, against the settled surface — Baked Decision 2 defers
+  enforcement until the surface stops moving, and `must_appear_on` derived earlier would be stale.
+- **Capability risks named per phase** rather than deferred: the plan template's phases-JSON block
+  (P5) and the consult verdict format (P6/P7) are *capabilities*, not examples, and would be
+  plausible casualties of P2 applied carelessly. Both get live integration checks, not fixtures.
+
+Porch checks pass: plan_exists, has_phases_json, min_two_phases (10).
