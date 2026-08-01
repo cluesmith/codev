@@ -46,6 +46,12 @@ if (mode === 'reject') {
   process.exit(1);
 }
 if (mode === 'empty') { process.exit(0); }
+if (mode === 'nonresponse') {
+  // agy's own non-response text AND a non-zero exit — the combination that must stay a skip.
+  process.stdout.write('agy: timed out waiting for response\\n');
+  process.exit(1);
+}
+if (mode === 'signal') { process.kill(process.pid, 'SIGKILL'); return; }
 if (mode === 'unauth') {
   process.stderr.write('Please visit https://accounts.google.com/o/oauth2/auth?client_id=fake\\n');
   setTimeout(() => process.exit(1), 30000);
@@ -189,6 +195,54 @@ describe('configured lane hard-fails on a non-zero exit', () => {
     await expect(_runAgyConsultation('q', 'role', dir, outputPath)).resolves.toBeUndefined();
 
     expect(fs.readFileSync(outputPath, 'utf-8')).toContain('VERDICT: COMMENT');
+  });
+
+  // Found by codex: "no review file" must mean none EXISTS. consult writes to a deterministic
+  // per-iteration path, so a review from an earlier run of the same iteration would otherwise
+  // survive the failure and let porch advance on a stale verdict.
+  it('removes a stale review left by an earlier run of the same iteration', async () => {
+    const outputPath = path.join(dir, 'review.txt');
+    fs.writeFileSync(outputPath, '---\nVERDICT: APPROVE\nSUMMARY: stale\n---\n');
+
+    await _runAgyConsultation('q', 'role', dir, outputPath).catch(() => {});
+
+    expect(fs.existsSync(outputPath)).toBe(false);
+  });
+
+  // Found by codex: agy can emit its non-response marker AND exit non-zero. Checking the exit code
+  // first would misfile that timeout as a configuration failure — wedging the very lane the
+  // non-blocking property protects.
+  it('a non-response that also exits non-zero stays a skip', async () => {
+    process.env.FAKE_AGY_MODE = 'nonresponse';
+    const outputPath = path.join(dir, 'review.txt');
+
+    await expect(_runAgyConsultation('q', 'role', dir, outputPath)).resolves.toBeUndefined();
+
+    expect(fs.readFileSync(outputPath, 'utf-8')).toContain('VERDICT: COMMENT');
+  });
+
+  // Found by claude: `code !== 0` is also true for `code === null`, which is a signal kill —
+  // an environment cause, not a rejected model.
+  it('a signal-killed agy stays a skip rather than hard-failing', async () => {
+    process.env.FAKE_AGY_MODE = 'signal';
+    const outputPath = path.join(dir, 'review.txt');
+
+    await expect(_runAgyConsultation('q', 'role', dir, outputPath)).resolves.toBeUndefined();
+
+    expect(fs.readFileSync(outputPath, 'utf-8')).toContain('VERDICT: COMMENT');
+  });
+
+  // Found by claude: the fixture defined an `unauth` mode that no test used — dead fixture code
+  // that reads like coverage. This is the direction that would wedge a phase if inverted.
+  it('an unauthenticated agy stays a skip even when a model is configured', async () => {
+    process.env.FAKE_AGY_MODE = 'unauth';
+    const outputPath = path.join(dir, 'review.txt');
+
+    await expect(_runAgyConsultation('q', 'role', dir, outputPath)).resolves.toBeUndefined();
+
+    const content = fs.readFileSync(outputPath, 'utf-8');
+    expect(content).toContain('VERDICT: COMMENT');
+    expect(content).toMatch(/not authenticated/i);
   });
 });
 

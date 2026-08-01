@@ -449,6 +449,23 @@ export function resolveLaneModelChoice(
 }
 
 /**
+ * Remove a stale review file before failing a consultation.
+ *
+ * "No review file" has to mean none *exists*, not merely that this run declined to write one.
+ * Porch keys off the file's presence, and consult writes to a deterministic per-iteration path — so
+ * a review left by an earlier run of the same iteration would be accepted as though the failed run
+ * had succeeded, and the phase would advance on a stale verdict. Found by codex reviewing the agy
+ * lane; applied to all three lanes because the exposure is identical wherever a runner throws after
+ * a previous run wrote output.
+ */
+function discardStaleOutput(outputPath?: string): void {
+  if (!outputPath) return;
+  try {
+    if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
+  } catch { /* best-effort: failing to unlink must not mask the underlying error */ }
+}
+
+/**
  * Resolve a model for a lane that has **no built-in default** — agy picks its own model when
  * `--model` is absent, so there is nothing to fall back to.
  *
@@ -585,6 +602,7 @@ export async function runCodexConsultation(
       errorMessage = (err instanceof Error ? err.message : String(err)).substring(0, 500);
       exitCode = 1;
     }
+    discardStaleOutput(outputPath);
     throw annotateModelError(err, 'codex', choice);
   } finally {
     // Clean up temp file
@@ -718,6 +736,7 @@ export async function runClaudeConsultation(
       errorMessage = (err instanceof Error ? err.message : String(err)).substring(0, 500);
       exitCode = 1;
     }
+    discardStaleOutput(outputPath);
     throw annotateModelError(err, 'claude', choice);
   } finally {
     if (savedClaudeCode !== undefined) {
@@ -1090,12 +1109,26 @@ async function runAgyConsultation(
       // empty output stay skips even when configured, because those are environment causes and the
       // degraded-agy lane (#1032/#1033) must keep its non-blocking property. Widening this to
       // "any failure" would wedge phases for workspaces whose agy is merely unauthenticated.
-      if (code !== 0 && choice) {
+      // Environment causes are classified FIRST. agy can emit its non-response marker *and* exit
+      // non-zero, and checking the exit code before the marker would misfile that timeout as a
+      // configuration failure — breaking the "timeout stays a skip in both cases" half of the
+      // invariant for exactly the degraded lane it exists to protect. (Found by codex at review.)
+      // ONLY the non-response marker, deliberately — NOT empty stdout. A rejected model id writes
+      // its error to stderr and exits non-zero with empty stdout, so treating "no stdout" as an
+      // environment cause would make the hard failure unreachable for the exact case it exists to
+      // catch. (My own stale-review test caught that overcorrection.) Empty stdout still means
+      // "no review" on the zero-exit path below.
+      const timedOutProducing = raw.includes(AGY_NONRESPONSE_MARKER);
+
+      // `code === null` means agy was killed by a signal (OOM, external kill) — an environment
+      // cause, not a rejected model, so it must not hard-fail either. `code !== 0` alone is true
+      // for null and would misfile it. (Found by claude at review.)
+      if (code !== null && code !== 0 && choice && !timedOutProducing) {
         publishAuth();
         recordAgyMetrics(metricsCtx, startTime, code ?? 1, `agy exited with code ${code}`);
         console.error(`\n[gemini (agy) FAILED: configured model "${choice.id}" — see error]`);
-        // No review file: a hard failure must not leave an artifact porch could mistake for a
-        // completed review.
+        // "No review file" must mean none EXISTS, not merely that this run wrote none.
+        discardStaleOutput(outputPath);
         const providerError = new Error(
           `agy exited with code ${code}.` +
           (outputTail.trim() ? `\n\nagy output (last ${AGY_FAILURE_TAIL_MAX_CHARS} chars):\n${outputTail.trim()}` : '')
@@ -1104,7 +1137,7 @@ async function runAgyConsultation(
         return;
       }
 
-      if (code !== 0 || raw.length === 0 || raw.includes(AGY_NONRESPONSE_MARKER)) {
+      if (code !== 0 || raw.length === 0 || timedOutProducing) {
         // A broken run tells us nothing about auth — release without a verdict
         // and let the next call re-probe.
         publishAuth();
