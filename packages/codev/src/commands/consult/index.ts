@@ -963,7 +963,9 @@ function recordAgyMetrics(
   startTime: number,
   exitCode: number,
   errorMessage: string | null,
-  modelId: string | null = null,
+  // No default: every caller states the id or states null. A default would quietly reintroduce
+  // the silent-NULL path that making modelId required on MetricsRecord exists to prevent.
+  modelId: string | null,
 ): void {
   if (!metricsCtx) return;
   recordMetrics(metricsCtx, {
@@ -1235,6 +1237,19 @@ async function runAgyConsultation(
 }
 
 /**
+ * Record the model a lane actually ran, so a transcript answers "what did this use?".
+ *
+ * Logged from the dispatch branch that owns the resolved `choice`, NOT re-derived for display: a
+ * second resolution path is exactly how `--model-id` came to be documented, parsed, and inert.
+ * Naming the source too means a surprising id points at the file to edit.
+ */
+function logResolvedModel(lane: string, id: string, key: string | null, effort?: string): void {
+  const from = key ? ` (from ${key})` : '';
+  const at = effort ? ` at ${effort} reasoning effort` : '';
+  console.error(`[${lane.toUpperCase()}] model: ${id}${at}${from}`);
+}
+
+/**
  * Run the consultation — dispatches to the correct model runner.
  */
 async function runConsultation(
@@ -1258,6 +1273,7 @@ async function runConsultation(
   if (model === 'claude') {
     const startTime = Date.now();
     const choice = resolveLaneModelChoice(workspaceRoot, 'claude', DEFAULT_CLAUDE_MODEL, modelIdOverride);
+    logResolvedModel(model, choice.id, choice.key);
     await runClaudeConsultation(query, role, workspaceRoot, outputPath, metricsCtx, choice);
     const duration = (Date.now() - startTime) / 1000;
     logQuery(workspaceRoot, model, query, duration);
@@ -1269,6 +1285,7 @@ async function runConsultation(
     const startTime = Date.now();
     const choice = resolveLaneModelChoice(workspaceRoot, 'codex', DEFAULT_CODEX_MODEL, modelIdOverride);
     const effort = resolveReasoningEffort(loadConfig(workspaceRoot).consult) ?? DEFAULT_CODEX_REASONING_EFFORT;
+    logResolvedModel(model, choice.id, choice.key, effort);
     await runCodexConsultation(query, role, workspaceRoot, outputPath, metricsCtx, choice, effort);
     const duration = (Date.now() - startTime) / 1000;
     logQuery(workspaceRoot, model, query, duration);
@@ -1281,6 +1298,8 @@ async function runConsultation(
   if (model === 'gemini') {
     const startTime = Date.now();
     const choice = resolveOptionalLaneModelChoice(workspaceRoot, 'gemini', modelIdOverride);
+    // No configured id means agy chooses; say so rather than printing a value we did not set.
+    logResolvedModel(model, choice?.id ?? "agy's own default", choice?.key ?? null);
     await runAgyConsultation(query, role, workspaceRoot, outputPath, metricsCtx, choice);
     logQuery(workspaceRoot, model, query, (Date.now() - startTime) / 1000);
     return;

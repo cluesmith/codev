@@ -18,6 +18,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import Database from 'better-sqlite3';
 import { _runAgyConsultation, resolveOptionalLaneModelChoice } from '../index.js';
 
 const ENV_KEYS = [
@@ -28,6 +29,7 @@ const ENV_KEYS = [
   'FAKE_AGY_ARGV_LOG',
   'FAKE_AGY_MODE',
   'HOME',
+  'CODEV_METRICS_DB',
 ] as const;
 
 /**
@@ -259,6 +261,57 @@ describe('configured lane hard-fails on a non-zero exit', () => {
     const content = fs.readFileSync(outputPath, 'utf-8');
     expect(content).toContain('VERDICT: COMMENT');
     expect(content).toMatch(/not authenticated/i);
+  });
+});
+
+// --- metrics (phase_4's stated reason for depending on phase_3) ----------------------
+//
+// Found by claude: nothing asserted that the agy lane actually populates model_id. If it silently
+// wrote NULL while codex and claude wrote ids, the gap would read as a data bug rather than an
+// unfinished phase — which is exactly why the plan sequenced phase_4 after phase_3.
+
+describe('the agy lane records the resolved model id', () => {
+  function metricsCtx(): Record<string, unknown> {
+    return {
+      timestamp: new Date(0).toISOString(),
+      model: 'gemini',
+      reviewType: null,
+      subcommand: 'general',
+      protocol: 'aspir',
+      projectId: null,
+      workspacePath: dir,
+    };
+  }
+
+  /** model_id values recorded into an isolated metrics DB. */
+  function recordedModelIds(): (string | null)[] {
+    const db = new Database(path.join(dir, 'metrics.db'));
+    const rows = db.prepare('SELECT model_id FROM consultation_metrics').all() as { model_id: string | null }[];
+    db.close();
+    return rows.map((r) => r.model_id);
+  }
+
+  beforeEach(() => {
+    // Point the metrics DB at the temp dir rather than ~/.codev (issue #1323 isolation).
+    process.env.CODEV_METRICS_DB = path.join(dir, 'metrics.db');
+  });
+
+  it('records the configured id on a successful run', async () => {
+    writeConfig({ consult: { models: { gemini: 'gemini-3-pro' } } });
+    await _runAgyConsultation('q', 'role', dir, undefined, metricsCtx() as never);
+    expect(recordedModelIds()).toContain('gemini-3-pro');
+  });
+
+  it('records the configured id even when the run skips', async () => {
+    writeConfig({ consult: { models: { gemini: 'gemini-3-pro' } } });
+    process.env.FAKE_AGY_MODE = 'empty';
+    await _runAgyConsultation('q', 'role', dir, undefined, metricsCtx() as never);
+    expect(recordedModelIds()).toContain('gemini-3-pro');
+  });
+
+  it('records null when no model was configured — "none chosen", not "forgotten"', async () => {
+    await _runAgyConsultation('q', 'role', dir, undefined, metricsCtx() as never);
+    expect(recordedModelIds()).toEqual([null]);
   });
 });
 

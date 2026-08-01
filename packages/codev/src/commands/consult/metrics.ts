@@ -14,6 +14,18 @@ import { join, dirname } from 'node:path';
 const CODEV_DIR = join(homedir(), '.codev');
 const DB_PATH = join(CODEV_DIR, 'metrics.db');
 
+/**
+ * Redirect the metrics database, for tests.
+ *
+ * Without this, anything exercising a code path that records metrics writes into the developer's
+ * real `~/.codev/metrics.db` — polluting their `consult stats` with fixture rows. Callers that
+ * construct `MetricsDB` explicitly can pass a path, but `recordMetrics()` deliberately does not
+ * take one, so a lane-level test has no other way to isolate itself (see #1323).
+ */
+function resolveDbPath(explicit?: string): string {
+  return explicit ?? process.env.CODEV_METRICS_DB ?? DB_PATH;
+}
+
 const CREATE_TABLE = `
 CREATE TABLE IF NOT EXISTS consultation_metrics (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -183,7 +195,7 @@ export class MetricsDB {
   private db: Database.Database;
 
   constructor(dbPath?: string) {
-    const path = dbPath ?? DB_PATH;
+    const path = resolveDbPath(dbPath);
     const dir = dirname(path);
     if (!existsSync(dir)) {
       mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -213,10 +225,34 @@ export class MetricsDB {
    * There is deliberately no down-migration — dropping a column with data is a far worse failure
    * mode than leaving an unused one in place.
    */
-  private migrateAddModelId(): void {
+  private hasModelIdColumn(): boolean {
     const columns = this.db.pragma('table_info(consultation_metrics)') as { name: string }[];
-    if (columns.some((c) => c.name === MODEL_ID_COLUMN)) return;
-    this.db.exec(`ALTER TABLE consultation_metrics ADD COLUMN ${MODEL_ID_COLUMN} TEXT`);
+    return columns.some((c) => c.name === MODEL_ID_COLUMN);
+  }
+
+  private migrateAddModelId(): void {
+    // Fast path: already migrated, so take no write lock. This is every run after the first.
+    if (this.hasModelIdColumn()) return;
+
+    try {
+      // A plain check-then-ALTER is a race, and this codebase runs straight into it: a CMAP opens
+      // three MetricsDB connections in parallel, so on the FIRST consultation after upgrading, all
+      // three can observe the column as absent. One adds it; the others fail with "duplicate column
+      // name" — and because recordMetrics swallows errors, those lanes' rows vanish silently.
+      //
+      // BEGIN IMMEDIATE takes the write lock up front, so a concurrent opener blocks on
+      // busy_timeout and then re-checks INSIDE the lock instead of racing us.
+      const migrate = this.db.transaction(() => {
+        if (this.hasModelIdColumn()) return; // another process won while we waited for the lock
+        this.db.exec(`ALTER TABLE consultation_metrics ADD COLUMN ${MODEL_ID_COLUMN} TEXT`);
+      });
+      migrate.immediate();
+    } catch (err) {
+      // Belt and braces. If the column exists now, someone else added it and that is success, not
+      // failure — worth tolerating explicitly because the alternative is a silently dropped metrics
+      // row, which is invisible until someone notices a gap in `consult stats`.
+      if (!this.hasModelIdColumn()) throw err;
+    }
   }
 
   record(entry: MetricsRecord): void {

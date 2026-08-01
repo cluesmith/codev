@@ -15,7 +15,11 @@ import Database from 'better-sqlite3';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { MetricsDB, type MetricsRecord } from '../metrics.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 /** The schema exactly as it stood before spec 1286 — no `model_id`. */
 const OLD_SCHEMA = `
@@ -128,6 +132,54 @@ describe('model_id migration against a pre-1286 database', () => {
     new MetricsDB(dbPath).close();
     expect(columnNames()).toContain('model_id');
   });
+
+  // Found by codex: a CMAP opens three MetricsDB connections in PARALLEL, so on the first
+  // consultation after upgrading, all three can see the column as absent. A plain check-then-ALTER
+  // lets one win and the others fail with "duplicate column name" — and recordMetrics swallows
+  // errors, so those lanes' rows disappear without a trace.
+  //
+  // Uses real child processes: better-sqlite3 is synchronous, so nothing in-process can reproduce
+  // two connections interleaving.
+  it('survives concurrent first-open by several processes, losing no rows', () => {
+    seedOldSchemaDb();
+
+    const runner = path.join(dir, 'open.mjs');
+    const distMetrics = path.resolve(__dirname, '../../../../dist/commands/consult/metrics.js');
+    fs.writeFileSync(runner, `
+      import { MetricsDB } from ${JSON.stringify(distMetrics)};
+      const db = new MetricsDB(process.argv[2]);
+      db.record({
+        timestamp: new Date(0).toISOString(), model: 'codex', modelId: process.argv[3],
+        reviewType: null, subcommand: 'general', protocol: 'aspir', projectId: null,
+        durationSeconds: 1, inputTokens: null, cachedInputTokens: null, outputTokens: null,
+        costUsd: null, exitCode: 0, workspacePath: '/tmp/ws', errorMessage: null,
+      });
+      db.close();
+    `);
+
+    // Spawn together so they contend on the very first open.
+    const procs = ['a', 'b', 'c'].map((tag) =>
+      spawn(process.execPath, [runner, dbPath, tag], { stdio: 'pipe' }));
+    const results = procs.map((p) => {
+      const chunks: Buffer[] = [];
+      p.stderr.on('data', (b: Buffer) => chunks.push(b));
+      return new Promise<{ code: number | null; err: string }>((resolve) =>
+        p.on('close', (code) => resolve({ code, err: Buffer.concat(chunks).toString() })));
+    });
+
+    return Promise.all(results).then((outcomes) => {
+      for (const o of outcomes) {
+        expect(o.err).not.toMatch(/duplicate column name/i);
+        expect(o.code).toBe(0);
+      }
+      // The point of the fix: every racer's row survives. Losing one is the silent failure.
+      const raw = new Database(dbPath);
+      const tags = (raw.prepare('SELECT model_id FROM consultation_metrics WHERE model_id IS NOT NULL')
+        .all() as { model_id: string }[]).map((r) => r.model_id).sort();
+      raw.close();
+      expect(tags).toEqual(['a', 'b', 'c']);
+    });
+  }, 30_000);
 });
 
 describe('recording the resolved model id (scenario 13)', () => {
