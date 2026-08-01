@@ -284,7 +284,7 @@ describe('the corrected baseline is what the spec claims', () => {
   let out: string;
   beforeAll(() => { out = run(); });
 
-  it('reproduces ALWAYS_ON_WORDS = 34,231 for a SPIR builder at I=10', () => {
+  it('reproduces ALWAYS_ON_WORDS = 34,293 for a SPIR builder at I=10', () => {
     // 34,231 — not the 34,255 quoted in the spec. Two corrections, both making the
     // instrument more honest and neither moving an acceptance criterion (size is
     // reporting-only under the amended charter):
@@ -293,11 +293,16 @@ describe('the corrected baseline is what the spec claims', () => {
     //    -4  `wc -w` is not portable: BSD wc in a UTF-8 locale splits `⚠️` into two
     //        words where GNU wc and Python's split() see one. Counting is now
     //        defined explicitly rather than delegated to the platform's wc.
-    expect(num(out, 'ALWAYS_ON_WORDS')).toBe(34231);
+    //   +62  Spec 1307 documented `afx send --delay` in CLAUDE.md/AGENTS.md, which
+    //        are part of the always-on surface. The instrument is unchanged and
+    //        still correct — its INPUT grew. Verified causally: reverting just
+    //        those two files reproduces 34231 exactly.
+    expect(num(out, 'ALWAYS_ON_WORDS')).toBe(34293);
   });
 
-  it('reproduces the architect load (8,599)', () => {
-    expect(out).toMatch(/\| Architect \(per session\) \| 8599 \|/);
+  it('reproduces the architect load (8,661)', () => {
+    // 8,599 + the same 62 words (Spec 1307's --delay note in CLAUDE.md/AGENTS.md).
+    expect(out).toMatch(/\| Architect \(per session\) \| 8661 \|/);
   });
 
   it('honours PHASE_ITERS as a comparison constant', () => {
