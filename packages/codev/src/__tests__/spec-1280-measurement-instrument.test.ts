@@ -280,29 +280,45 @@ describe('T12 — determinism', () => {
   });
 });
 
-describe('the corrected baseline is what the spec claims', () => {
+describe('the instrument is self-consistent and the frozen baseline is immutable', () => {
   let out: string;
   beforeAll(() => { out = run(); });
 
-  it('reproduces ALWAYS_ON_WORDS = 34,231 for a SPIR builder at I=10', () => {
-    // 34,231 — not the 34,255 quoted in the spec. Two corrections, both making the
-    // instrument more honest and neither moving an acceptance criterion (size is
-    // reporting-only under the amended charter):
-    //   -20  the 1252 additive include model counted a `{{> path}}` directive's own
-    //        tokens AND the content substituted for them; this one substitutes.
-    //    -4  `wc -w` is not portable: BSD wc in a UTF-8 locale splits `⚠️` into two
-    //        words where GNU wc and Python's split() see one. Counting is now
-    //        defined explicitly rather than delegated to the platform's wc.
-    expect(num(out, 'ALWAYS_ON_WORDS')).toBe(34231);
+  // NOT a hardcoded live total. This project rewrites the prompt surface phase by phase, so
+  // pinning ALWAYS_ON to a literal would force an edit every phase — and a test edited every
+  // phase is a test edited carelessly. (That is M10's own argument turned on this suite.)
+  // Instead: assert the arithmetic the report claims, which holds at ANY surface size.
+  it('ALWAYS_ON equals SHARED + BUILDER_SPAWN[spir] + I x (HOT + PHASE mean[spir])', () => {
+    const shared = Number(out.match(/\| SHARED [^|]*\| (\d+) \|/)![1]);
+    const spirRow = out.match(/^\| spir \| (\d+) \| (\d+) \| \d+ \|$/m)!;
+    const spawn = Number(spirRow[1]);
+    const phaseMean = Number(spirRow[2]);
+    const hot = Number(out.match(/= arch-critical\((\d+)\) \+ lessons-critical\((\d+)\) = (\d+)/)![3]);
+    expect(num(out, 'ALWAYS_ON_WORDS')).toBe(shared + spawn + 10 * (hot + phaseMean));
   });
 
-  it('reproduces the architect load (8,599)', () => {
-    expect(out).toMatch(/\| Architect \(per session\) \| 8599 \|/);
+  it('architect load equals SHARED + ARCHITECT', () => {
+    const shared = Number(out.match(/\| SHARED [^|]*\| (\d+) \|/)![1]);
+    const architect = Number(out.match(/\| ARCHITECT [^|]*\| (\d+) \|/)![1]);
+    const reported = Number(out.match(/\| Architect \(per session\) \| (\d+) \|/)![1]);
+    expect(reported).toBe(shared + architect);
   });
 
   it('honours PHASE_ITERS as a comparison constant', () => {
     const one = num(run(repoRoot, { PHASE_ITERS: '1' }), 'ALWAYS_ON_WORDS');
     const two = num(run(repoRoot, { PHASE_ITERS: '2' }), 'ALWAYS_ON_WORDS');
-    expect(two - one).toBe(736 + 1396); // HOT + spir phase mean
+    const spirRow = out.match(/^\| spir \| \d+ \| (\d+) \| \d+ \|$/m)!;
+    const hot = Number(out.match(/= arch-critical\(\d+\) \+ lessons-critical\(\d+\) = (\d+)/)![1]);
+    expect(two - one).toBe(hot + Number(spirRow[1]));
+  });
+
+  // The frozen PRE-REWRITE baseline is a historical record, not a live measurement. It must
+  // never drift: every later reduction claim is measured against this number.
+  it('the frozen pre-rewrite baseline still records 34,231', () => {
+    const baseline = fs.readFileSync(
+      path.join(repoRoot, 'codev/resources/1280-word-baseline.md'),
+      'utf-8',
+    );
+    expect(baseline).toMatch(/^ALWAYS_ON_WORDS=34231$/m);
   });
 });
