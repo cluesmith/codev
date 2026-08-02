@@ -1627,19 +1627,10 @@ async function handleSend(
       // Delayed deliveries queue behind anything already buffered.
       enforceFifo: true,
     };
-    scheduleDelayedSend(deliverAfter, result.terminalId, async () => {
-      const { writeCompletesInMs } = await deliverOrBuffer(deliveryContext);
-      // Hold the terminal's chain until the paced writes have actually landed,
-      // so the next due message cannot start mid-write. Unref'd: this is a
-      // settling wait after a completed write, and it must never be the reason
-      // Tower's event loop stays alive at shutdown.
-      if (writeCompletesInMs > 0) {
-        await new Promise(resolve => {
-          const t = setTimeout(resolve, writeCompletesInMs);
-          if (typeof t.unref === 'function') t.unref();
-        });
-      }
-    });
+    // A due message re-enters deliverOrBuffer, which submits under Spec 1273's
+    // per-session lock — so serialisation against other writes to this session
+    // is the lock's job, and this scheduler only owns WHEN delivery starts.
+    scheduleDelayedSend(deliverAfter, result.terminalId, () => deliverOrBuffer(deliveryContext));
     ctx.log('INFO', `Message scheduled (+${deliverAfter}s): ${from ?? 'unknown'} → ${result.agent} (terminal ${result.terminalId.slice(0, 8)}...)`);
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
@@ -1653,7 +1644,7 @@ async function handleSend(
     return;
   }
 
-  const { deferred } = await deliverOrBuffer({
+  const deferred = await deliverOrBuffer({
     terminalId: result.terminalId,
     agent: result.agent,
     from,
@@ -1717,20 +1708,15 @@ interface DeliveryContext {
  * and a retained `PtySession` reference would happily absorb writes that go
  * nowhere.
  *
- * @returns `deferred` (buffered rather than written) and `writeCompletesInMs` —
- *          how long until the paced writes this call scheduled have all landed.
+ * @returns whether the message was buffered rather than written now.
  *
- * `writeCompletesInMs` exists because `writeMessageToSession` SCHEDULES writes
- * (line pacing, the trailing Enter) and returns immediately. A caller that
- * treats this function's resolution as "delivery finished" would let the next
- * delivery start mid-write — which for two delayed sends due together produces
- * interleaved lines, or `firstsecond\r\r` for short ones. The per-terminal
- * chain waits out this value, so serialisation covers the actual writes rather
- * than just the scheduling of them.
+ * The write itself goes through Spec 1273's `submitToSession`, so it is
+ * submitted — Enter included — before the session's next write begins. Callers
+ * therefore need no settling wait of their own; "delivered" means delivered.
  */
 async function deliverOrBuffer(
   delivery: DeliveryContext,
-): Promise<{ deferred: boolean; writeCompletesInMs: number }> {
+): Promise<boolean> {
   const {
     terminalId, agent, from, formattedMessage, noEnter, interrupt,
     broadcastPayload, logMessage, ctx, enforceFifo,
@@ -1741,11 +1727,11 @@ async function deliverOrBuffer(
   const session = getTerminalManager().getSession(terminalId);
   if (!session) {
     ctx.log('WARN', `Message DROPPED: ${from ?? 'unknown'} → ${agent} (terminal ${terminalId.slice(0, 8)}...): session gone before delivery`);
-    return { deferred: false, writeCompletesInMs: 0 };
+    return false;
   }
   if (!session.writable) {
     ctx.log('ERROR', `Message DROPPED: ${from ?? 'unknown'} → ${agent} (terminal ${terminalId.slice(0, 8)}...): terminal not writable (shellper connection down)`);
-    return { deferred: false, writeCompletesInMs: 0 };
+    return false;
   }
 
   // Spec 1307: a DELAYED interrupt must still respect per-session order. An
@@ -1781,18 +1767,15 @@ async function deliverOrBuffer(
   // clear wipes the context that just recovered — a failure no re-send repairs.
   //
   // WHAT THIS GUARANTEES, and what it does not:
-  //   COVERED — a delayed message never overtakes one queued for the session,
-  //     and never writes into a buffer flush that is still mid-delivery
-  //     (`SendBuffer.busyUntil` keeps the session "pending" until that flush's
-  //     paced writes land; route test "ORDERING: ... MID-FLUSH").
-  //   COVERED — concurrent DELAYED deliveries, serialised by the per-terminal
-  //     chain in delayed-send.ts, which waits out each other's paced writes.
-  //   NOT COVERED — an IMMEDIATE direct write sets no `busyUntil`, so a delayed
-  //     message coming due inside that write's ~100ms pacing window can still
-  //     interleave with it. Left open deliberately: it is a pre-existing
-  //     property of the immediate path, the damage is a garbled unsubmitted
-  //     line rather than a destroyed context, and `/arch-save` is nowhere near
-  //     it (its `/clear` and `/arch-init` are ~15s apart).
+  //   `enforceFifo` (this predicate) decides ORDER: a delayed message never
+  //     bypasses one already queued for the session. ATOMICITY — that each
+  //     delivery, Enter included, completes before the next write to that
+  //     session begins — is Spec 1273's `submitToSession`, which every write
+  //     from here goes through, immediate and delayed alike. Order and
+  //     atomicity are separate layers; this term is the first, the lock is the
+  //     second. Together they close the mid-flush interleave (route test
+  //     "ORDERING: ... MID-FLUSH", mutation-verified against the flush's
+  //     submitToSession reservation) and the two-simultaneous-delayed case.
   //   NOT GUARANTEED — request-order across differing delays: `--delay 5` after
   //     `--delay 30` lands first, because that is what `--delay` means.
   const shouldDefer = queueAhead
@@ -1813,9 +1796,7 @@ async function deliverOrBuffer(
       interruptFirst: interrupt && queueAhead && !wroteInterrupt ? true : undefined,
     });
     ctx.log('INFO', `Message deferred (user typing): ${from ?? 'unknown'} → ${agent} (terminal ${terminalId.slice(0, 8)}...)`);
-    // The buffer serialises its own drain via delayOffset, so a buffered
-    // message imposes no additional wait on this caller.
-    return { deferred: true, writeCompletesInMs: 0 };
+    return true;
   }
 
   // Bugfix #584: paces multi-line output to avoid paste detection.
@@ -1835,10 +1816,7 @@ async function deliverOrBuffer(
   );
   broadcastMessage(broadcastPayload);
   ctx.log('INFO', logMessage);
-  // The lock has already waited out this write's Enter, so the caller needs no
-  // further settling wait. Kept in the return shape because the buffered branch
-  // above still reports 0 and callers destructure it.
-  return { deferred: false, writeCompletesInMs: 0 };
+  return false;
 }
 
 async function handleBrowse(res: http.ServerResponse, url: URL): Promise<void> {

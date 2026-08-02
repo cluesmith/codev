@@ -49,17 +49,20 @@ const pending = new Set<PendingDelayedSend>();
 
 /**
  * Incremented by every shutdown. Each scheduled send captures the value current
- * when it was scheduled and re-checks it immediately before delivering.
+ * when it was scheduled and re-checks it at delivery.
  *
- * Clearing `chains` is NOT sufficient to stop work: once a delivery has been
- * appended to a chain with `.then()`, that callback is already attached to a
- * promise and will run when its predecessor settles, whatever the map says. So
- * a message due-but-not-yet-started — queued behind a slow delivery to the same
- * terminal — would still be written AFTER shutdown, which is exactly what
- * "shutdown drops pending delayed sends" promises it will not do.
+ * Clearing the pending timers is not sufficient on its own. A message whose
+ * timer has already fired is out of `pending` but its delivery may not have
+ * started yet — it can be waiting on the session's `submitToSession` lock
+ * behind an in-flight write. That queued delivery would otherwise run AFTER
+ * shutdown, which is exactly what "shutdown drops pending delayed sends"
+ * promises it will not. The generation check re-read at delivery time makes
+ * such an already-scheduled delivery a no-op.
  *
- * A generation check is the cheapest way to make an already-scheduled callback
- * a no-op.
+ * Honest bound: a delivery that has ALREADY begun its write when shutdown fires
+ * still completes — the lock does not interrupt a write in progress. "Drops on
+ * shutdown" therefore means "does not START anything new," not "aborts what is
+ * mid-flight." See the shutdown function.
  */
 let generation = 0;
 
@@ -147,8 +150,14 @@ export function scheduleDelayedSend(
 }
 
 /**
- * Cancel every pending delayed send without delivering. Returns the count
- * dropped, so shutdown can log it rather than losing messages silently.
+ * Cancel every pending delayed send without delivering. Returns the count of
+ * still-timing sends dropped, so shutdown can log it rather than losing
+ * messages silently.
+ *
+ * Covers two states: sends still on their timer (cleared here) and sends whose
+ * timer has fired but whose delivery has not started — invalidated by bumping
+ * `generation`, which the delivery callback re-checks. A delivery already
+ * writing when this runs is NOT interrupted; see `generation`'s note.
  */
 export function shutdownDelayedSends(): number {
   const count = pending.size;
@@ -156,8 +165,6 @@ export function shutdownDelayedSends(): number {
     clearTimeout(entry.timer);
   }
   pending.clear();
-  // Invalidate deliveries whose timer already fired but which have not started
-  // yet — clearing `chains` cannot cancel an attached `.then()`.
   generation++;
   return count;
 }
