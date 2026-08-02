@@ -444,6 +444,62 @@ it returned 200 in 1273's failing run too.
 
 Everything else in phase 3 is done. Phases 1 and 2 approved by both reviewers.
 
+## 2026-08-02 — phase 2 closed; `--delay` relocated; main found red
+
+**A drift I caused myself, worth recording.** Asked "what are you waiting for?", I checked
+instead of restating — and found I was only *partly* blocked. #1327 had merged (my queued
+baseline-bump drop was actionable), and porch had been sitting on phase_2 waiting for *my*
+verification consults while I had wandered into phase-3 work during a run of interleaved
+instructions. Phase 2 is now properly closed and porch is on phase 3.
+
+Lesson: when several instructions arrive mid-turn, the orchestrator's own state is the
+thread most likely to be dropped, because nothing prompts for it. `porch status` is cheap.
+
+**`--delay` documentation relocated** (ruling, ratified). Zero words in
+`CLAUDE.md`/`AGENTS.md`; full reference in `codev/resources/commands/agent-farm.md` **and
+its skeleton mirror**. I had only edited the `codev/` copy — checked whether the skeleton
+was a mirror rather than blind-copying, found it legitimately differs on main, and wrote
+the equivalent content in its own shape. Spec criterion amended in place with a dated
+supersession note: it was authored against the pre-1280-rewrite world, where CLI detail
+still lived in `CLAUDE.md`.
+
+One self-inflicted detour: after reverting the two files the guard still failed, because
+`origin/main...HEAD` compares **committed** state and my revert was uncommitted. Reads as
+"the fix didn't work" when it is "the fix isn't in the commit yet."
+
+**Merged #1143 proactively** — it touches both copies of `agent-farm.md`, which I had just
+edited. Previewed with `merge-tree` (clean), merged, verified both my `--delay` section and
+their cron content survived. So the conflict 1273 hit between #1320 and #1143 does not
+repeat here.
+
+### main was red, and it was not mine
+
+That merge turned the suite red on three parity tests. Checked `origin/main` **directly**
+rather than assuming my merge caused it:
+
+    git show origin/main:.claude/skills/afx/SKILL.md | md5 -q  -> 667efc64…
+    git show origin/main:.codex/skills/afx/SKILL.md  | md5 -q  -> 32c9692c…
+
+#1143 updated the two `.claude` copies of the afx skill and neither `.codex` copy. Main was
+already broken; my branch inherited it, as would every builder merging next.
+
+**Did not fix it.** The file is the one I had been told not to touch (`#1318`'s), and I
+would have been guessing whether #1318 had a fix in flight that mine would conflict with.
+Escalated with the md5 evidence and three options instead. Architect took it, fixed it
+themselves (#1332), and confirmed the hold was right on both layers.
+
+**Their root cause, recorded because it generalises:** #1143's green CI was from July 6,
+predating the parity guards the repo has grown since. The gate check confirmed no drift in
+the files #1143 *touched*, but not against invariants added *after* its run. New standing
+rule: a stale CI green gets re-validated against current main's guards before merge.
+
+That is the same shape as this project's recurring lesson, one level up — **an artifact
+(a CI result) asserting something adjacent to the truth**. It was true when produced and
+false when used.
+
+Currently blocked on #1332 landing. #1320 also still open, its own conflict with #1143
+being resolved by 1273, so the live-run window has moved but is still coming.
+
 ## 2026-07-31 — Plan CMAP iter 1: both reviewers found the SAME two defects
 
 Both REQUEST_CHANGES, both HIGH. All ~14 findings accepted, none defended. The signal
