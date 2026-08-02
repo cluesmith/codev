@@ -400,6 +400,28 @@ manually, including raw-typed `/arch-init <name>`, successfully.
     `/arch-init <name>` and the session recovers fully — the property the whole design
     leans on, so it is exercised rather than assumed.
 
+### Why the live e2e has the shape it does (architect-only, sibling probe)
+
+`/arch-save` is an **architect-session skill**: its step 1 requires a *builder* to stop and
+report the mismatch rather than proceed. This is deliberate — the cycle clears its own
+session's context, and only an architect has a context worth clearing this way. Two
+consequences fix the shape of scenario 9's live run, and both are constraints, not choices:
+
+- **The builder implementing this feature cannot run its own live e2e.** By design it must
+  refuse. So the run is executed by an architect, in the **verify phase**, not by the
+  builder during implement.
+- **Running it destroys the invoking architect's context.** Using the workspace's `main`
+  architect as the fixture would wipe the coordinating context mid-project. The run
+  therefore uses a *throwaway sibling architect* (`afx workspace add-architect --name
+  probe-1307`, an architect-only action from the main root): plant a canary, have the
+  sibling invoke `/arch-save`, verify the canary is gone and the state file recovered, then
+  `remove-architect`. Non-destructive to `main`, and it exercises the `architect:<name>`
+  addressing the skill's own worst-case warning is about.
+
+This is modelled on Spec 1273's probe retest, which proved the same shape works. The e2e is
+scheduled for verify and **disclosed as unrun at the PR gate** rather than discovered
+missing later — the 1273 lesson applied forward.
+
 ### Non-Functional Tests
 
 1. **Timer hygiene**: no leaked timers after delivery, after failure, and after shutdown.
