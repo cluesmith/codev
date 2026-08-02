@@ -144,6 +144,11 @@ export function startSendBuffer(log: (level: 'INFO' | 'ERROR' | 'WARN', message:
     (id) => getTerminalManager().getSession(id),
     deliverBufferedMessage,
     log,
+    // Spec 1307: drain each session's batch under Spec 1273's submission lock,
+    // so a direct or delayed send cannot write into a flush that has scheduled
+    // its paced writes but not finished them. Fire-and-forget: flush() is
+    // synchronous, and the lock orders by CALL rather than by await.
+    (sessionId, write) => { void submitToSession(sessionId, write); },
   );
 }
 

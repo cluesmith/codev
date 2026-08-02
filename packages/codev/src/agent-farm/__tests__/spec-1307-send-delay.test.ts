@@ -245,36 +245,23 @@ describe('shutdownDelayedSends', () => {
     expect(shutdownDelayedSends()).toBe(0);
   });
 
-  it('cancels a DUE-but-not-started delivery waiting behind a slow one', async () => {
-    // The case clearing `chains` cannot handle. Once a delivery has been
-    // appended with `.then()`, that callback is attached to a promise and will
-    // run when its predecessor settles — no matter what the map says. So the
-    // second message here is past its timer (already removed from `pending`)
-    // and merely waiting on the first. Without a generation guard it would be
-    // written AFTER shutdown, which is precisely what "shutdown drops pending
-    // delayed sends" promises cannot happen.
+  it('cancels a delivery whose timer has not fired yet', async () => {
+    // The generation guard still matters after the chain was removed: a
+    // delivery can now be waiting on the SUBMISSION LOCK rather than on a
+    // predecessor in this module, and shutdown must still stop it. The
+    // observable case that remains here is the simpler one — a scheduled send
+    // whose due time arrives after shutdown must not deliver.
     const ran: string[] = [];
-    let releaseFirst: () => void = () => {};
-    const firstStarted = new Promise<void>(resolve => { releaseFirst = resolve; });
+    scheduleDelayedSend(5, 'term-1', () => { ran.push('early'); });
+    scheduleDelayedSend(30, 'term-1', () => { ran.push('late'); });
 
-    scheduleDelayedSend(5, 'term-1', async () => {
-      ran.push('first');
-      await firstStarted; // hold the chain open
-    });
-    scheduleDelayedSend(5, 'term-1', () => { ran.push('second'); });
-
-    // Both timers fire; 'first' starts and blocks, 'second' queues behind it.
     await vi.advanceTimersByTimeAsync(5_000);
-    expect(ran).toEqual(['first']);
+    expect(ran).toEqual(['early']);
 
-    // Shutdown reports 0 pending — both timers had already fired — yet the
-    // queued 'second' must still be cancelled.
     shutdownDelayedSends();
+    await vi.advanceTimersByTimeAsync(60_000);
 
-    releaseFirst();
-    await vi.advanceTimersByTimeAsync(1_000);
-
-    expect(ran).toEqual(['first']);
+    expect(ran).toEqual(['early']);
   });
 
   it('does not cancel deliveries scheduled AFTER a shutdown', async () => {
@@ -304,27 +291,26 @@ describe('per-terminal delivery chain', () => {
     vi.useRealTimers();
   });
 
-  it('serialises two same-terminal messages due at the same instant', async () => {
-    // Each scheduled message owns its own timer, so two due together would
-    // otherwise start delivering concurrently. Delivery is not atomic —
-    // writeMessageToSession paces multi-line output across several timeouts —
-    // so concurrent deliveries to one PTY interleave LINES, producing two
-    // mangled messages instead of two messages.
-    const order: string[] = [];
-    const slowDeliver = (label: string) => async () => {
-      order.push(`start:${label}`);
-      await new Promise(resolve => setTimeout(resolve, 50));
-      order.push(`end:${label}`);
-    };
+  it('does NOT serialise on its own — that is the submission lock\'s job now', () => {
+    // This module used to hold a per-terminal promise chain. Spec 1273's
+    // `submitToSession` now owns serialisation, and every due message re-enters
+    // `deliverOrBuffer`, which submits under the lock. One mechanism, not two.
+    //
+    // So scheduling alone is deliberately concurrent here. The property that
+    // two same-terminal deliveries do not interleave is REAL but lives at the
+    // route level, where the real writes happen — see tower-routes.test.ts
+    // "ORDERING: two simultaneous delayed sends do not interleave their
+    // writes", which runs against the actual handler and is mutation-verified.
+    // Asserting it here again would re-create the replica-test mistake this
+    // project hit four times.
+    const started: string[] = [];
+    scheduleDelayedSend(5, 'term-1', () => { started.push('a'); });
+    scheduleDelayedSend(5, 'term-1', () => { started.push('b'); });
 
-    scheduleDelayedSend(5, 'term-1', slowDeliver('a'));
-    scheduleDelayedSend(5, 'term-1', slowDeliver('b'));
+    vi.advanceTimersByTime(5_000);
 
-    await vi.advanceTimersByTimeAsync(5_000);
-    await vi.advanceTimersByTimeAsync(200);
-
-    // 'a' must fully finish before 'b' starts — no interleaving.
-    expect(order).toEqual(['start:a', 'end:a', 'start:b', 'end:b']);
+    // Both timers fired; ordering of the WRITES is the lock's guarantee.
+    expect(started.sort()).toEqual(['a', 'b']);
   });
 
   it('does not serialise across different terminals', async () => {

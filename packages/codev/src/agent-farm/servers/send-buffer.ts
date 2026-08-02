@@ -40,31 +40,32 @@ export type GetSessionFn = (id: string) => PtySession | undefined;
 export type DeliverFn = (session: PtySession, msg: BufferedMessage, delayOffset?: number) => number;
 export type LogFn = (level: 'INFO' | 'ERROR' | 'WARN', message: string) => void;
 
+/**
+ * Reserves a session for the duration of one batch (Spec 1273's submission
+ * lock, adopted per Spec 1307).
+ *
+ * `write` may perform MANY writes and returns the FINAL completion offset, so a
+ * whole flush drains as ONE reservation with the existing `delayOffset`
+ * threading intact. That is what stops a direct or delayed send writing into a
+ * flush that has scheduled its paced writes but not finished them — the
+ * `busyUntil` bookkeeping this replaces.
+ *
+ * Injected rather than imported so this module keeps no dependency on the
+ * server layer, and so tests can drive it without Tower.
+ */
+export type SubmitFn = (sessionId: string, write: () => number) => void;
+
 const DEFAULT_IDLE_THRESHOLD_MS = 3000;
 const DEFAULT_MAX_BUFFER_AGE_MS = 60_000;
 const FLUSH_INTERVAL_MS = 500;
 
 export class SendBuffer {
   private buffers = new Map<string, BufferedMessage[]>();
-  /**
-   * Per-session epoch-ms at which the last flush's paced writes finish
-   * (Spec 1307).
-   *
-   * `flush()` removes a session's queue as soon as it has SCHEDULED its writes,
-   * but `writeMessageToSession` paces lines and the trailing Enter across
-   * several timeouts. Without this, `hasPending()` goes false while `/clear` is
-   * still mid-delivery, and a delayed `/arch-init` coming due in that window
-   * writes into the middle of it — producing `/clear/arch-init main` on one
-   * line, so the clear never executes.
-   *
-   * Tracking the completion time keeps a session "busy" until its writes have
-   * actually landed.
-   */
-  private busyUntil = new Map<string, number>();
   private flushTimer: ReturnType<typeof setInterval> | null = null;
   private getSession: GetSessionFn | null = null;
   private deliver: DeliverFn | null = null;
   private log: LogFn | null = null;
+  private submit: SubmitFn = (_id, write) => { write(); };
   readonly idleThresholdMs: number;
   readonly maxBufferAgeMs: number;
 
@@ -84,11 +85,14 @@ export class SendBuffer {
   }
 
   /** Start the periodic flush timer. Clears any existing timer first. */
-  start(getSession: GetSessionFn, deliver: DeliverFn, log: LogFn): void {
+  start(getSession: GetSessionFn, deliver: DeliverFn, log: LogFn, submit?: SubmitFn): void {
     if (this.flushTimer) clearInterval(this.flushTimer);
     this.getSession = getSession;
     this.deliver = deliver;
     this.log = log;
+    // Default runs the batch inline — used by tests that drive flush() directly
+    // and do not care about cross-path serialisation.
+    this.submit = submit ?? ((_id, write) => { write(); });
     this.flushTimer = setInterval(() => this.flush(), FLUSH_INTERVAL_MS);
   }
 
@@ -106,14 +110,6 @@ export class SendBuffer {
   flush(forceAll = false): void {
     if (!this.getSession || !this.deliver) return;
 
-    // Reclaim expired busy markers (Spec 1307). Without this a session that
-    // flushed once and never received another message keeps a stale numeric
-    // entry until some later hasPending() happens to look at it. Bounded work:
-    // the map only holds sessions that have recently been flushed to.
-    const nowTs = Date.now();
-    for (const [id, until] of this.busyUntil) {
-      if (nowTs >= until) this.busyUntil.delete(id);
-    }
 
     for (const [sessionId, messages] of this.buffers) {
       const session = this.getSession(sessionId);
@@ -124,10 +120,6 @@ export class SendBuffer {
           this.log('WARN', `Discarding ${messages.length} buffered message(s) for dead session ${sessionId.slice(0, 8)}...`);
         }
         this.buffers.delete(sessionId);
-        // Spec 1307: drop the busy marker too — a dead session's write window
-        // is meaningless, and leaving it would keep the entry until some later
-        // hasPending() happens to reclaim it.
-        this.busyUntil.delete(sessionId);
         continue;
       }
 
@@ -149,18 +141,6 @@ export class SendBuffer {
         continue;
       }
 
-      // Spec 1307: do not start a new delivery while the PREVIOUS flush's paced
-      // writes are still landing. Without this, a message queued during that
-      // window is picked up by the next 500ms tick and written into the middle
-      // of the message already being delivered. `hasPending` alone is not
-      // enough — it stops writers from bypassing the queue, but the queue's own
-      // drain has to wait too. `forceAll` (shutdown) overrides: delivering late
-      // beats losing the message.
-      if (!forceAll) {
-        const busy = this.busyUntil.get(sessionId);
-        if (busy !== undefined && now < busy) continue;
-      }
-
       // Deliver when: forced, user idle, or max age exceeded.
       // Bugfix #492: removed composing check — it gets stuck true after non-Enter
       // keystrokes (Ctrl+C, arrows, Tab), causing messages to wait 60s max age.
@@ -168,20 +148,25 @@ export class SendBuffer {
         // Deliver all messages in order, serializing paced writes (Bugfix #584).
         // Each delivery returns the ms when its writes complete; the next message
         // starts after that to prevent interleaved lines.
-        let offset = 0;
-        for (const msg of messages) {
-          offset = this.deliver(session, msg, offset);
-          if (this.log && msg.logMessage) {
-            this.log('INFO', msg.logMessage);
+        // Spec 1307: the whole drain is ONE reservation. `write` may perform
+        // many writes and returns the final offset, so the existing offset
+        // threading is untouched while nothing else can write into this
+        // session mid-batch.
+        this.submit(sessionId, () => {
+          let offset = 0;
+          for (const msg of messages) {
+            offset = this.deliver!(session, msg, offset);
+            if (this.log && msg.logMessage) {
+              this.log('INFO', msg.logMessage);
+            }
           }
-        }
+          return offset;
+        });
         if (this.log && !forceAll) {
           const reason = maxAgeExceeded ? 'max age exceeded' : 'user idle';
           this.log('INFO', `Delivered ${messages.length} deferred message(s) to session ${sessionId.slice(0, 8)}... (${reason})`);
         }
         this.buffers.delete(sessionId);
-        // Stay "busy" until the paced writes actually land (Spec 1307).
-        if (offset > 0) this.busyUntil.set(sessionId, Date.now() + offset);
       }
     }
   }
@@ -200,16 +185,7 @@ export class SendBuffer {
    */
   hasPending(sessionId: string): boolean {
     const queue = this.buffers.get(sessionId);
-    if (queue !== undefined && queue.length > 0) return true;
-
-    // A flush that has scheduled but not finished its writes still counts:
-    // writing into that window interleaves with a message already being
-    // delivered, which is the same hazard as overtaking a queued one.
-    const busy = this.busyUntil.get(sessionId);
-    if (busy === undefined) return false;
-    if (Date.now() < busy) return true;
-    this.busyUntil.delete(sessionId); // expired — clean up lazily
-    return false;
+    return queue !== undefined && queue.length > 0;
   }
 
   /** Number of buffered messages across all sessions (for testing). */
