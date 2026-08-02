@@ -63,6 +63,7 @@ interface Harness {
   setSession(agent: string, session: DeliverySession | null): void;
   setProfile(p: GateProfile | null): void;
   setVerdict(v: GateVerdict): void;
+  setClassify(fn: ((snap: RingSnapshot, p: GateProfile) => Promise<GateVerdict>) | null): void;
   now: number;
 }
 
@@ -70,6 +71,7 @@ function harness(): Harness {
   const sessions = new Map<string, DeliverySession | null>();
   let profile: GateProfile | null = PROFILE;
   let verdict: GateVerdict = CLEAN;
+  let classifyOverride: ((snap: RingSnapshot, p: GateProfile) => Promise<GateVerdict>) | null = null;
   const broadcasts: DeliveredBroadcast[] = [];
   const writes: Array<{ formattedMessage: string; noEnter: boolean }> = [];
   const logs: string[] = [];
@@ -88,10 +90,14 @@ function harness(): Harness {
     setVerdict: (v) => {
       verdict = v;
     },
+    setClassify: (fn) => {
+      classifyOverride = fn;
+    },
     ports: {
       getSessionForAgent: (_ws, agent) => sessions.get(agent) ?? null,
       resolveProfile: () => profile,
-      classify: (_snap: RingSnapshot, _p: GateProfile): Promise<GateVerdict> => Promise.resolve(verdict),
+      classify: (snap: RingSnapshot, p: GateProfile): Promise<GateVerdict> =>
+        classifyOverride ? classifyOverride(snap, p) : Promise.resolve(verdict),
       writeMessage: (_s, formattedMessage, noEnter) => writes.push({ formattedMessage, noEnter }),
       broadcast: (f) => broadcasts.push(f),
       onHeldStateChange: () => {
@@ -155,7 +161,9 @@ describe('deliverAgentMail (Spec 1313, Phase 4)', () => {
     const row = enqueue();
     const out = await deliverAgentMail(h.ports, db, '/ws/a', 'spir-1');
 
-    expect(out).toEqual({ delivered: [], reason: 'busy' });
+    // The gate's detail rides the outcome (Spec 1313 render-gate hardening) so a
+    // classifier-stuck streak can escalate to liveness telemetry; a plain draft is `user-text`.
+    expect(out).toEqual({ delivered: [], reason: 'busy', detail: 'user-text' });
     expect(h.writes).toHaveLength(0);
     const stored = mailbox.getById(db, row.id);
     expect(stored?.status).toBe('held');
@@ -249,6 +257,47 @@ describe('deliverAgentMail (Spec 1313, Phase 4)', () => {
     const out2 = await deliverAgentMail(h.ports, db, '/ws/a', 'spir-1');
     expect(out2).toEqual({ delivered: [], reason: null });
     expect(h.writes).toHaveLength(1); // not re-delivered
+  });
+
+  it('re-validates the SCREEN after the classify: a keystroke landing during the render → holds, never writes (Spec 1313 render-gate hardening)', async () => {
+    // The whole-ring classify is async (~tens of ms); if the user starts typing during
+    // it, the clean verdict is for a screen that no longer exists. The delivery path
+    // samples the ring change-token before the classify and re-checks it after — a
+    // change means "screen moved under us" → hold, never write the message onto the
+    // now-present draft (the false-clean the gate exists to prevent).
+    let seq = 0;
+    const session: DeliverySession = {
+      ringBuffer: {
+        getAll: () => ['❯ '],
+        get currentSeq() {
+          return seq;
+        },
+        get partialBytes() {
+          return 0;
+        },
+      },
+      info: { cols: 110, rows: 32 },
+      command: 'claude',
+      launchArgs: [],
+      cwd: '/ws/a',
+      writable: true,
+      write: () => true,
+    };
+    const h = harness();
+    h.setSession('spir-1', session);
+    // Model the keystroke: the ring token advances *during* the classify, which still
+    // returns CLEAN for the (now stale) screen it was handed.
+    h.setClassify(async () => {
+      seq++;
+      return CLEAN;
+    });
+    const row = enqueue();
+
+    const out = await deliverAgentMail(h.ports, db, '/ws/a', 'spir-1');
+    expect(out.delivered).toEqual([]);
+    expect(out.reason).toBe('busy'); // held: the screen moved under the gate
+    expect(h.writes).toHaveLength(0); // never wrote onto the draft that appeared
+    expect(mailbox.getById(db, row.id)?.status).toBe('held');
   });
 });
 

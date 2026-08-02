@@ -15,9 +15,10 @@
 
 import { describe, it, expect } from 'vitest';
 import { readdirSync, readFileSync } from 'node:fs';
+import { gunzipSync } from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import { RingBuffer } from '../../terminal/ring-buffer.js';
-import { classifyScreen, RING_SEED_MAX_BYTES } from '../servers/render-gate.js';
+import { classifyScreen, RENDER_CEILING_UNITS } from '../servers/render-gate.js';
 import type { RingSnapshot, GateProfile } from '../servers/render-gate.js';
 import { CLAUDE_PROFILE, CODEX_PROFILE, AGY_PROFILE, resolveProfile } from '../servers/gate-profiles.js';
 
@@ -127,6 +128,18 @@ describe('render-gate — synthetic branch coverage (Spec 1313)', () => {
     expect(v.detail).toBe('no-composer-marker');
   });
 
+  it('marker + NO region-end boundary, only dim/empty below → busy (no-region-end; closes a latent false-CLEAN)', async () => {
+    // Spec 1313 D1 hardening. Previously an unbounded region scanned to lines.length;
+    // with only dim/empty rows below (no rule/status line to bound the composer) it
+    // counted 0 user cells and returned CLEAN — a false-clean on a partial/mid-repaint
+    // frame. Now a missing lower bound is indeterminate ⇒ hold. (Marker + dim below,
+    // NO `─────` rule.)
+    const snap = snapshotFromRaw(screen(`❯ ${DIM}Try "refactor doctor.ts"${RESET}`, `${DIM}dim tail, no rule line${RESET}`));
+    const v = await classifyScreen(snap, CLAUDE_PROFILE);
+    expect(v.clean).toBe(false);
+    expect(v.detail).toBe('no-region-end');
+  });
+
   it('agy: `> ` marker + palette-8 (gray) hint → clean; default-fg draft → busy', async () => {
     // agy de-emphasizes its idle hint with a FOREGROUND COLOR (palette-8), not
     // SGR-dim — so the placeholder rule is color-keyed for agy (placeholderFgPalette).
@@ -140,8 +153,11 @@ describe('render-gate — synthetic branch coverage (Spec 1313)', () => {
     // The trust dialog's selected `> Yes, I trust this folder` renders palette-12,
     // NOT gray — so it must count as occupancy (busy), else a blind Enter would
     // confirm a filesystem-trust decision. Pins that the color rule ignores ONLY
-    // the profile's placeholder palette, not every non-default color.
-    const trust = snapshotFromRaw(screen(`${PAL12}>${FG} ${PAL12}Yes, I trust this folder${FG}`, '  No, exit'));
+    // the profile's placeholder palette, not every non-default color. A rule line
+    // bounds the region so the color-counting branch runs and palette-12 is the sole
+    // occupancy signal. (Dual protection: a real dialog with NO rule below fails safe
+    // the OTHER way — via the no-region-end guard — also busy, never a blind confirm.)
+    const trust = snapshotFromRaw(screen(`${PAL12}>${FG} ${PAL12}Yes, I trust this folder${FG}`, '──────'));
     const v = await classifyScreen(trust, AGY_PROFILE);
     expect(v.clean).toBe(false);
     expect(v.detail).toBe('user-text');
@@ -152,22 +168,22 @@ describe('render-gate — synthetic branch coverage (Spec 1313)', () => {
   });
 });
 
-describe('render-gate — performance at the seed cap (Spec 1313)', () => {
-  it('classifies an over-cap (>1MB) snapshot within the spec ≤~50ms seed-cap budget', async () => {
-    // Build > RING_SEED_MAX_BYTES of newline-free filler so it lands in the
-    // ring's unbounded `partial` (the claude full-screen-TUI shape, #1047) rather
-    // than being truncated by the 1000-line cap. A busy composer tail follows so
-    // the capped-to-1MB reconstruction still finds a marker and classifies.
-    const filler = 'x'.repeat(RING_SEED_MAX_BYTES + 100_000);
+describe('render-gate — whole-ring render performance (Spec 1313 D2)', () => {
+  it('renders a realistic large (~4MB) ring WHOLE within a CI-aware budget', async () => {
+    // The D2 fix renders the whole coherent ring (no 1MB tail slice). Build ~4MB of
+    // newline-free filler so it lands in the ring's unbounded `partial` (the claude
+    // full-screen-TUI shape, #1047) rather than being truncated by the 1000-line cap;
+    // a busy composer tail follows. This stays below RENDER_CEILING_UNITS, so it
+    // renders WHOLE — the real steady-state path (largest real capture ≈ 3MB).
+    const filler = 'x'.repeat(4 * 1024 * 1024);
     const raw = filler + '\r\n' + screen('❯ occupied prompt tail', '──────');
     const snap = snapshotFromRaw(raw);
-    expect(snap.replay.length).toBeGreaterThan(RING_SEED_MAX_BYTES);
+    expect(snap.replay.length).toBeGreaterThan(4 * 1024 * 1024);
+    expect(snap.replay.length).toBeLessThan(RENDER_CEILING_UNITS); // renders whole, not capped
 
     // Warm up (JIT + first-parse), then assert the MIN over several runs. The min
     // strips GC/scheduling outliers, approximating the classifier's steady-state
-    // compute cost — the stable basis a budget assertion needs so it validates the
-    // bound instead of flaking in CI. (Spike: 22ms @ 1MB; this env: ~15ms native /
-    // ~30ms under vitest — comfortably inside the spec's ≤~50ms seed-cap bound.)
+    // compute cost. (Spike: 67ms @4MB; this env under vitest ~90ms.)
     await classifyScreen(snap, CLAUDE_PROFILE); // warm-up (discarded)
     let best = Infinity;
     let verdict;
@@ -177,18 +193,65 @@ describe('render-gate — performance at the seed cap (Spec 1313)', () => {
       best = Math.min(best, performance.now() - t0);
     }
     // eslint-disable-next-line no-console
-    console.log(`[render-gate] classify @${Math.round(snap.replay.length / 1024)}KB best-of-5 = ${best.toFixed(1)}ms`);
+    console.log(`[render-gate] whole-render @${Math.round(snap.replay.length / 1024)}KB best-of-5 = ${best.toFixed(1)}ms`);
     expect(verdict?.clean).toBe(false); // the tail is a busy prompt
-    // Perf guard with a CI-aware bound. Locally this asserts the spec's tight ≤~50ms
-    // seed-cap budget (75ms with headroom) — the real steady-state perf signal. On shared/
-    // loaded GitHub runners this best-of-5 measured 125–142ms and flaked the tight bound
-    // repeatedly (both integration reviewers flagged THIS assertion as CI-flaky), matching
-    // the spec's own "headroom for slower/loaded CI than the spike's machine" caveat. So in
-    // CI we assert only a looser catastrophic-regression ceiling (the pre-tightening 500ms
-    // bound — still an order of magnitude below an O(n²) blow-up at >1MB), preserving the
-    // tight local signal without flaking CI. See review doc "Flaky Tests".
-    const budgetMs = process.env.CI ? 500 : 75;
+    // CI-aware bound: locally a tight-but-safe bound (the real steady-state signal);
+    // on shared/loaded GitHub runners only a catastrophic-regression ceiling (an order
+    // of magnitude below an O(n²) blow-up at 4MB). Retuned from the old 1MB seed-cap
+    // bound now that the whole ring renders. See review doc "Flaky Tests".
+    const budgetMs = process.env.CI ? 800 : 250;
     expect(best).toBeLessThan(budgetMs);
+  });
+
+  it('holds an over-ceiling ring UNRENDERED — even one whose clean-looking tail would classify clean', async () => {
+    // A >RENDER_CEILING_UNITS #1047 basin is NEVER rendered from an arbitrary tail:
+    // that could reconstruct a clean composer while the whole ring holds a draft (a
+    // false CLEAN — Codex/Claude diff review). So the gate hard-holds over-ceiling,
+    // content-independent and without rendering. Here the ring ENDS in a clean empty
+    // composer (marker + rule) that WOULD classify clean if rendered — yet it must be
+    // held busy/over-ceiling. (Short-circuits before xterm, so the 8M string is cheap.)
+    const over = 'x'.repeat(RENDER_CEILING_UNITS + 100) + '\r\n❯ \r\n──────────';
+    expect(over.length).toBeGreaterThan(RENDER_CEILING_UNITS);
+    const v = await classifyScreen({ replay: over, cols: 110, rows: 32 }, CLAUDE_PROFILE);
+    expect(v.clean).toBe(false);
+    expect(v.detail).toBe('over-ceiling');
+  });
+});
+
+describe('render-gate — real >1MB captures render WHOLE (Spec 1313 D2 root fix)', () => {
+  // Real claude ring captures (gzipped; cols×rows as captured). The false-`busy` was
+  // a capReplay slice artifact: the WHOLE render classifies CLEAN, but the old 1MB
+  // tail slice tore the alt-screen frame → BUSY. Source: codev/spir-1313-captures.
+  const load = (name: string) => gunzipSync(readFileSync(`${FIXTURE_DIR}/${name}`)).toString('utf8');
+  const CAP_1MB = 1024 * 1024;
+
+  for (const { file, cols, rows } of [
+    { file: 'claude-bgtask-empty.replay.bin.gz', cols: 139, rows: 65 }, // field "monitor→busy" ring (region-spill)
+    { file: 'claude-bigring-empty.replay.bin.gz', cols: 139, rows: 65 }, // field "empty held; ↑↓ delivers" ring (marker-loss)
+  ]) {
+    it(`${file}: WHOLE → CLEAN, but a 1MB tail slice → BUSY (proves the fix, not a big-ring rubber-stamp)`, async () => {
+      const whole = load(file);
+      expect(whole.length).toBeGreaterThan(CAP_1MB);
+      // The fix: the real gate renders the whole ring → CLEAN. Regression guard — this
+      // fails if any tail cap ≤ the ring size is reintroduced.
+      expect((await classifyScreen({ replay: whole, cols, rows }, CLAUDE_PROFILE)).clean).toBe(true);
+      // Honesty: the OLD 1MB-cap slice genuinely tears (marker/rule lost) → BUSY, so
+      // the fixture exercises the artifact rather than just being a clean big ring.
+      const oldCapSlice = whole.slice(whole.length - CAP_1MB);
+      expect((await classifyScreen({ replay: oldCapSlice, cols, rows }, CLAUDE_PROFILE)).clean).toBe(false);
+    });
+  }
+
+  it('claude-justover-cap (1.07MB): CLEAN whole AND under a 1MB slice (negative control — the fix does NOT blindly clean big rings)', async () => {
+    const whole = load('claude-justover-cap.replay.bin.gz');
+    expect(whole.length).toBeGreaterThan(CAP_1MB);
+    expect((await classifyScreen({ replay: whole, cols: 139, rows: 65 }, CLAUDE_PROFILE)).clean).toBe(true);
+    expect((await classifyScreen({ replay: whole.slice(whole.length - CAP_1MB), cols: 139, rows: 65 }, CLAUDE_PROFILE)).clean).toBe(true);
+  });
+
+  it('claude-smallring-idle (6KB, 139×63): CLEAN (small-ring idle baseline — no regression)', async () => {
+    const whole = load('claude-smallring-idle.replay.bin.gz');
+    expect((await classifyScreen({ replay: whole, cols: 139, rows: 63 }, CLAUDE_PROFILE)).clean).toBe(true);
   });
 });
 

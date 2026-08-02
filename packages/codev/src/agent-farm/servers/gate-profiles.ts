@@ -37,6 +37,16 @@ const COMPOSER_MARKER = /^[❯›]/;
  * patterns are carried by both profiles (harmless: a claude screen has no
  * `gpt|high:|~/` status line, a codex screen has no long rule line under input),
  * exactly as the validated spike classifier applied them.
+ *
+ * Load-bearing since the Spec 1313 render-gate hardening: when NONE of these matches
+ * below the marker, the gate now HOLDS (`no-region-end`) rather than scanning to the
+ * screen bottom — so this list is the sole lower-bound signal, and it is FAIL-SAFE but
+ * DRIFT-FRAGILE. The rule pattern requires the line to *start* with `─/━/╌/┄`; a claude
+ * reversion to a rounded box (`╰────╯`, note `╰`/`└` are ignorable glyphs but NOT in
+ * this class) or an indented rule would stop matching and hold every send to that app.
+ * That is the safe direction (never a false-clean), and a sustained hold now escalates
+ * to liveness telemetry (mailbox-delivery `recordStreak`), but broaden this list ONLY
+ * from a real capture — a too-loose pattern that matches draft content is a false-clean.
  */
 const REGION_END_PATTERNS = [/^[─━╌┄]{5,}/, /^\s{2,}(gpt|high:|~\/)/];
 

@@ -42,7 +42,22 @@ import { KeyedSerializer } from './write-queue.js';
  * imports the terminal layer.
  */
 export interface DeliverySession {
-  readonly ringBuffer: { getAll(): string[] };
+  readonly ringBuffer: {
+    getAll(): string[];
+    /**
+     * Cheap, monotone change signals for the gate (Spec 1313 render-gate hardening).
+     * `currentSeq` bumps on each completed (newline-terminated) line; `partialBytes`
+     * is the length of the unbounded partial (the current no-newline alt-screen frame)
+     * and resets to 0 when a newline flushes it — which also bumps `currentSeq`. So the
+     * pair advances on ANY new output and never repeats for different content. The
+     * delivery path samples it around the async whole-ring classify to re-validate that
+     * the screen hasn't moved (a keystroke landing mid-render) before writing onto it.
+     * (A verdict memo keyed on this same signal — to skip re-rendering a static ring
+     * every backstop tick — is a deferred follow-up.) `RingBuffer` exposes both getters.
+     */
+    readonly currentSeq: number;
+    readonly partialBytes: number;
+  };
   readonly info: { cols: number; rows: number };
   readonly command: string;
   readonly launchArgs: string[];
@@ -147,6 +162,15 @@ export interface DeliveryOutcome {
   delivered: string[];
   /** When nothing was delivered, why the agent's mail stays held; null if delivered or the mailbox was empty. */
   reason: MailboxReason | null;
+  /**
+   * The gate's internal detail when a `busy` hold came from the render-gate (Spec 1313
+   * render-gate hardening) — telemetry only. Distinguishes a legitimately-occupied line
+   * (`user-text`, a human present) from a classifier that CANNOT verify the composer
+   * (`no-region-end`/`no-composer-marker`/`over-ceiling` = a drifted profile or a
+   * pathological ring), which {@link MailboxDrainer.recordStreak} escalates to liveness
+   * telemetry. Absent for non-gate holds (`no-live-pty`/`no-profile`) and deliveries.
+   */
+  detail?: GateVerdict['detail'];
 }
 
 /**
@@ -161,13 +185,27 @@ export function agentKey(workspacePath: string, toAgent: string): string {
   return `${workspacePath}\0${toAgent}`;
 }
 
-/** The seed-capped reconnect-replay snapshot the gate classifies. */
+/** The WHOLE-ring reconnect-replay snapshot the gate classifies (rendered in full; an over-ceiling ring is held unrendered — see render-gate.ts). */
 function snapshotOf(session: DeliverySession): RingSnapshot {
   return {
     replay: session.ringBuffer.getAll().join('\n'),
     cols: session.info.cols,
     rows: session.info.rows,
   };
+}
+
+/**
+ * A cheap, monotone token of the ring's rendered state plus the classify inputs
+ * (dimensions + resolved app). It advances on ANY new output (see
+ * {@link DeliverySession.ringBuffer}), so two samples that match mean the classified
+ * screen is unchanged. Used to re-validate, after the async whole-ring classify, that
+ * the screen hasn't moved (a keystroke landing during the ~tens-of-ms render) before
+ * writing onto it. (A verdict memo on this same token — to skip re-rendering a static
+ * ring every backstop tick — is a deferred follow-up; see the review's Technical Debt.)
+ */
+function ringToken(session: DeliverySession, profile: GateProfile): string {
+  const { currentSeq, partialBytes } = session.ringBuffer;
+  return `${currentSeq}:${partialBytes}:${session.info.cols}x${session.info.rows}:${profile.app}`;
 }
 
 /** Reconstruct the delivered-message broadcast frame from a persisted row. */
@@ -218,8 +256,28 @@ export async function deliverAgentMail(
   const profile = ports.resolveProfile(session);
   if (!profile) return hold('no-profile');
 
+  // Sample the ring's change-token BEFORE the async classify, so we can re-validate
+  // afterward that the screen didn't move under us (below).
+  const tokenBefore = ringToken(session, profile);
   const verdict = await ports.classify(snapshotOf(session), profile);
-  if (!verdict.clean) return hold(verdict.reason ?? 'busy');
+  if (!verdict.clean) {
+    // Carry the gate detail so a sustained classifier-stuck streak (a drifted profile
+    // or a pathological ring) escalates to liveness telemetry instead of holding silently.
+    const reason = verdict.reason ?? 'busy';
+    for (const row of held) {
+      if (row.reason !== reason) setHeldReason(db, row.id, reason, ports.now());
+    }
+    return { delivered: [], reason, detail: verdict.detail };
+  }
+
+  // Re-validate the SCREEN before writing (Spec 1313 render-gate diff review). The
+  // classify above may have awaited (a whole-ring render is tens–130ms, and xterm
+  // yields between parse slices); if the ring advanced since we sampled `tokenBefore`,
+  // a draft may have started under us and the clean verdict is now stale. Writing then
+  // would fuse the message into that draft — the exact false-clean the gate prevents.
+  // Hold instead; it delivers on the next clean tick. (On a memo hit no await occurred,
+  // so the token is unchanged and this passes trivially.)
+  if (ringToken(session, profile) !== tokenBefore) return hold('busy');
 
   // Clean, verified-empty prompt → deliver the oldest held message. Await the
   // write's paced completion so a serialized follow-up delivery never begins
@@ -428,17 +486,25 @@ export class MailboxDrainer {
     }
     const next = (this.notCleanStreak.get(key) ?? 0) + 1;
     this.notCleanStreak.set(key, next);
-    // Liveness telemetry (Spec 1313, Phase 7 — spec line 91): a sustained `no-profile`
-    // streak means the session's app is unrecognized (a net-new or drifted classifier),
-    // so its mail will NEVER deliver — surface it instead of holding silently. Scoped to
-    // `no-profile` on purpose: a `busy` streak is a human present at the line (Constraint
-    // 1 — legitimate, must not false-alarm), and `no-live-pty` is no session at all.
-    // Reported once, exactly at the crossing, so a persistently-unknown app raises one
-    // diagnostic rather than one per tick; the threshold filters transient boot/relaunch
-    // screens. The pure module only reports the crossing — the live binding
+    // Liveness telemetry (Spec 1313, Phase 7 — spec line 91; extended in the render-gate
+    // hardening): a sustained streak that the gate CANNOT verify means the mail will
+    // NEVER deliver on its own — surface it instead of holding silently. Two such classes:
+    //   • `no-profile` — the app is unrecognized (a net-new or drifted classifier);
+    //   • a classifier-stuck gate detail — a recognized app whose composer can't be bounded
+    //     (`no-region-end`/`no-composer-marker` = a drifted TUI layout; `over-ceiling` = a
+    //     pathological #1047 ring that never shrinks).
+    // Scoped to those on purpose: a `busy`/`user-text` streak is a human legitimately at the
+    // line (Constraint 1 — must not false-alarm), and `no-live-pty` is no session at all.
+    // Reported once at the crossing (not per tick); the threshold filters transient boot/
+    // relaunch screens. The pure module only reports the crossing — the live binding
     // ({@link DeliveryPorts.onLiveness}) applies the spec's "with recent output" gate and
     // does the loud log + broadcast, so an idle unknown session does not false-alarm.
-    if (outcome.reason === 'no-profile' && next === LIVENESS_STREAK_THRESHOLD) {
+    const classifierStuck =
+      outcome.reason === 'no-profile' ||
+      outcome.detail === 'no-region-end' ||
+      outcome.detail === 'no-composer-marker' ||
+      outcome.detail === 'over-ceiling';
+    if (classifierStuck && next === LIVENESS_STREAK_THRESHOLD) {
       const [ws, agent] = key.split('\0');
       this.ports?.onLiveness({ workspacePath: ws, toAgent: agent, streak: next });
     }

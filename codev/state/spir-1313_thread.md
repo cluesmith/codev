@@ -1142,3 +1142,147 @@ STATUS: code fix complete + approved by all 3; PR #1330 has both commits (f59c71
 tests pass. Ready for the architect's pr-gate decision. Committing the doc updates now; then reporting the decision
 point to the architect. External gates unchanged + theirs: un-draft PR, maintainer GitHub approval (REVIEW_REQUIRED),
 live afx-send-architect check after install.
+
+### 2026-08-02 — RESUMED. Architect directive: 3 render-gate false-`busy` blockers (do NOT approve verify gate).
+Live testing of the built code (`pnpm -w run local-install`) found the render-gate reports `busy` for prompts that
+are actually EMPTY+READY — 3 defects in `render-gate.ts`, all reproduced against REAL claude output (the classifier
+was only ever validated against SYNTHESIZED `claude-idle` fixtures, so none were exercised). Report saved at
+`codev/spir-1313-render-gate-bugs.md` (main checkout). Architect wants my fix PLAN (root-cause + approach + real-ring
+testing) BEFORE coding; consult before big classifier changes. Verified all 3 against source:
+  - **D1** (field "monitor→busy"): a bg-task live-output panel displaces the composer's lower `─────` rule AND
+    `~/cwd` line → `findRegionEnd` finds no boundary → `endRow=lines.length` → scan runs into status chrome; that
+    chrome renders TRUECOLOR (isFgRGB), which the `isDim()`/one-palette skip doesn't catch → counted as user text.
+  - **D2** (field "empty held; ↑↓ delivers"): `capReplay` slices last 1MB of `getAll().join('\n')` mid-`partial`
+    (the unbounded alt-screen stream ring-buffer keeps WHOLE precisely so it isn't corrupted) → marker lost →
+    `no-composer-marker` busy. Existing >1MB test asserts only PERF on synthetic busy-tail filler.
+  - **D3**: idle false-busy is permanent — delivery path re-reads the same static ring; no repaint nudge (reconnect
+    clients get one via `resize()`→SIGWINCH, pty-session.ts:495 / shellper-process.ts:389).
+PLAN written → `codev/projects/1313-.../1313-render-gate-fix-plan.md`. Approach: D1 = positively BOUND the composer
+region (never fall through to lines.length; recognize the displaced panel boundary; truecolor-chrome recog as
+defense-in-depth) — keeps fail direction SAFE (a draft's 1st cell is on the marker row, so bounded-region can't
+false-clean). D2 = frame-aware cap (start render at most-recent full-repaint boundary; whole-ring backstop; pin the
+boundary token from a REAL >1MB capture). D3 = throttled reconnect-style resize/SIGWINCH nudge for an idle
+sustained-not-clean live PTY, then re-gate (re-prove, never force). Testing = capture REAL fixtures (bg-task panel +
+>1MB) from my own live claude session, fixture regression tests → CLEAN, D2 marker-survives unit, D3 nudge unit,
+live e2e re-verify. Sent plan summary + open questions to architect; NOT coding until approved. Strict-mode holds:
+not approving verify gate, not merging, not editing status.yaml.
+
+### 2026-08-02 — PLAN APPROVED by architect (Q1-Q4 answered). CMAP on approach launched. Gemini in (REQUEST_CHANGES).
+Architect approved + refined: D1 = P2 (footer/top-rule boundary) PRIMARY, MAX_COMPOSER_ROWS safety-cap ONLY;
+MUST-test collision (draft+panel→BUSY, empty+panel→CLEAN). D2 = render-whole-ring baseline within a generous
+ceiling, frame-aware slice only as tearing-safe fallback. D3 = transient ±1-row resize nudge (same-dims is a
+CONFIRMED no-op per ring-buffer.ts:41), idle+throttled, re-prove only. Q4 = gzip fixture ~1.1MB. Also capture codex
+(+agy) bg-panel; architect runs live e2e on main (I can't restart shared Tower from worktree) — I build fixtures +
+unit/integration + hand them the checklist. Order: CMAP → implement D1→D2→D3.
+Launched 3-way CMAP on the approach brief (codev/projects/1313-.../1313-render-gate-approach-cmap.md). No
+.gitattributes/LFS here → will gunzip-in-test via zlib. Probed self-capture: claude/codex/agy binaries + node-pty
+ALL present (self-capture harness is feasible as a fallback). Requested the architect's raw bug captures (delivered)
+to build fixtures against the EXACT rings vs a re-derived state.
+GEMINI CMAP = REQUEST_CHANGES, 3 substantive points I'm adopting/surfacing:
+  - D1: my proposed "count only default-fg normal" INVERSION is UNSAFE (colored user input — syntax hl, /help blue,
+    red validation, accepted autocomplete — would be ignored → userCells=0 → FALSE-CLEAN/corruption). KEEP the
+    fail-safe BLOCKLIST (skip known chrome); the panel IS scanned (sits above the footer boundary) so explicitly
+    skip its truecolor/palette chrome. Aligns with the gate's existing fail-safe design. ADOPTING.
+  - D2: don't require a full-repaint boundary (brittle); just avoid slicing MID-ESCAPE-SEQUENCE (scan back to last
+    \x1b). Tearing plain text = safe false-busy; breaking the parser mid-seq = lost marker. Ceiling 8MB (~130ms) not
+    16MB (250ms every 1.5s too much CPU). ADOPTING.
+  - D3: RECOMMENDS ABANDONING — ±1-row resize can reflow-LOSE a draft (idle session w/ an abandoned draft) →
+    FALSE-CLEAN. Contradicts architect's explicit directive. Will surface to architect w/ a narrower option: scope
+    the nudge to `no-composer-marker` ONLY (no marker ⇒ no draft to lose ⇒ no reflow-corruption), never to
+    `user-text` busy. Awaiting Codex+Claude before synthesizing + returning to architect. NOT implementing yet.
+
+### 2026-08-02 — CODEX + CLAUDE CMAP in (3-way complete). Then ARCHITECT CAP-SWEEP REFRAME (captures delivered).
+CODEX (converges w/ Gemini: reject inversion) ADDS: MAX_COMPOSER_ROWS must NOT "scan capped rows then CLEAN" —
+cap exhaustion w/o a trusted boundary → BUSY/hold (a draft can have arbitrary leading blanks). Count ALL unexplained
+cells; skip truecolor only when STRUCTURALLY chrome. Content end-patterns can match DRAFT content (pre-existing).
+D2: deterministic SIZE ceiling not time; JS .length is UTF-16 code units NOT bytes; lone 2J/H isn't a full frame.
+D3: KEEP as recovery (vs Gemini abandon) done right — "no OUTPUT" ≠ "no INPUT" (track input-gen), re-gate only after
+OBSERVED post-restore output+quiescence. NEW FALSE-CLEAN: gate→write INPUT race (human keystroke between snapshot &
+write lands msg on a nascent draft) — "corruption eliminated by construction" is stronger than the code supports.
+CLAUDE (instrumented the REAL fixtures) = the standout: PROVED the inversion false-cleans agy-trust (0 default-fg
+cells → auto-confirms filesystem-trust dialog; breaks existing test :139-148). R2 (DOMINATES): D1 root cause is
+findRegionEnd→lines.length; fix = "no region-end boundary ⇒ BUSY" + add footer/progress/cwd boundary patterns —
+verified preserves ALL 12 fixtures, ~5-line diff, closes a LATENT false-clean. R3: DROP MAX_COMPOSER_ROWS (narrowing
+always fails toward CLEAN). R4: test if D1 is D2-in-disguise (torn replay, not a real layout). R5: track repaint
+offset at PUSH time + verdict caching on currentSeq+partialBytes (kills per-1.5s-tick re-render). R6: resize is
+SHARED viewer state — skip nudge when a viewer attached, scope to `busy`, re-read restore dims, absolute throttle
+floor, sequence after D2. R7: no staleness check — "ring grew in last ~200ms ⇒ hold" (cheapest remaining safety).
+R8: AGY_MARKER /^> / too loose.
+
+**ARCHITECT CAP-SWEEP (supersedes part of D1/D2 framing) — CONFIRMS Claude R4:** ran a cap-sweep on real captures;
+the false-busy is a **capReplay ARTIFACT**. WHOLE-ring render → ALL captures CLEAN (incl. the bg-task/monitor ring);
+verdict flips purely with slice size (bgtask 2.79MB: BUSY≤2MB, CLEAN≥2.5MB; bigring 2.99MB: CLEAN only WHOLE — setup
+in oldest ~0.5MB). So "D1" (panel displaces rule → truecolor counted) is a DOWNSTREAM SYMPTOM of the slice, NOT a
+faithful claude layout. REFRAME: **D2 (render whole ring, don't slice) = THE ROOT FIX** (fixes BOTH field bugs) —
+primary; **D1 = minimal DEFENSE-IN-DEPTH** (mid-repaint/partial guards), don't over-invest. DROP frame-aware-boundary
+for correctness (no full-repaint boundary exists for an alt-screen app): remove/greatly-raise RING_SEED_MAX_BYTES,
+keep only a generous absolute ceiling as #1047 backstop, retune perf test. Captures at codev/spir-1313-captures/
+(main checkout): claude bgtask-empty/bigring-empty (D2 fixtures), justover-cap (1.07MB negative control), smallring-
+idle. Trim CAREFULLY (tear needs setup >1MB back; verify w/ fixture-report.mjs). Self-capture codex/agy (architect
+only has claude). "Not urgent to reply; fold into CMAP+impl" → PROCEEDING.
+
+**SYNTHESIZED PLAN (folding architect reframe + 3-way CMAP):**
+- **D2 = ROOT FIX (primary):** render whole coherent ring; raise/remove the 1MB cap; keep a generous absolute ceiling
+  (#1047 backstop only) + retune perf test. + Claude R5 verdict-caching on currentSeq+partialBytes (avoid re-render
+  of an unchanged idle ring every tick — matters now that whole-render is the norm).
+- **D1 = minimal hardening:** DROP the inversion (unanimous; proven false-clean); adopt Claude R2 ("no region-end
+  boundary ⇒ BUSY" + distinctive footer boundary pattern); DROP MAX_COMPOSER_ROWS; keep fail-safe blocklist. Small,
+  strictly-safer, preserves all 12 fixtures. (Maybe R8 AGY_MARKER tighten while here.)
+- **D3 = judgment call (flag to architect):** D2 fixes the field bugs, so D3 is residual robustness. Gemini=abandon,
+  Codex+Claude=keep-with-rigor. LEANING: defer heavy D3; instead add the cheap **R7 staleness guard** ("ring grew in
+  last ~200ms ⇒ hold") — a real remaining false-clean flagged by BOTH Codex & Claude, higher value than D3. Will
+  state this decision in the report; not blocking.
+Fixtures: process architect's claude captures (trim+gzip, verify w/ fixture-report) + self-capture codex/agy. Order:
+verify headline → D2 → D1 → tests (12-fixture preservation + cap→BUSY/whole→CLEAN + negative control) → self-capture
+codex/agy → decide D3/R7 → full suite → CMAP on diff → push PR #1330 → hand architect live checklist.
+
+### 2026-08-02 — IMPLEMENTED D2+D1. Full suite GREEN (4189 pass). Verified architect cap-sweep myself. Diff-CMAP running.
+Verified the headline against the real captures myself (capsweep/fixture-report): whole→CLEAN, cap-1MB→BUSY for
+bgtask(no-region-end after D1) + bigring(no-marker); justover-cap CLEAN both (neg control); smallring CLEAN.
+IMPLEMENTED (render-gate.ts, ~100 lines w/ docs):
+- **D2 root fix:** RING_SEED_MAX_BYTES(1MB)→RENDER_CEILING_UNITS(8M UTF-16 units); capReplay→capForRender renders
+  WHOLE below the ceiling, and at the ceiling slices at the next ESC (never mid-\x1b[…]); a torn cap fails SAFE.
+- **D1 hardening:** findRegionEnd no-boundary returns -1 (was lines.length); classifyScreen → busy/`no-region-end`.
+  Closes a latent false-clean (unbounded region + dim/empty below used to return CLEAN). Detail union +no-region-end.
+- DROPPED the inversion (unanimous CMAP; Claude PROVED it false-cleans agy-trust) and MAX_COMPOSER_ROWS (fail-danger).
+FIXTURES: 4 real claude rings gzipped into __tests__/fixtures/gate/ (bgtask 248KB, bigring 266KB, justover 90KB,
+smallring 1KB; ~9% of raw, verified reproduce after round-trip).
+TESTS: render-gate.test.ts — perf retuned to whole-4MB budget (CI 800/local 250); capForRender ceiling+ESC unit;
+D2 real-capture block (WHOLE→CLEAN + 1MB-slice→BUSY + neg control + baseline); D1 no-region-end unit; fixed the
+agy-trust synthetic (added a bounding rule so the palette-12 counting branch still runs). tower-routes.test.ts —
+`gateSession` helper now builds a realistically-bounded composer with **CR-terminated lines** (the LF-only join
+rendered the appended rule INDENTED → missed the region-end pattern; real ring lines carry trailing \r — that was
+the 5-failure root cause, not a logic bug). tsc clean; FULL unit suite 4189 pass / 48 skip / 0 fail.
+D3/R7/R8 DECISION: **DEFER D3** (D2 fixes the field bugs → D3 is residual; Gemini's reflow→false-clean risk; safe
+impl cost per Codex/Claude R6 is disproportionate + widens the R7 window). Recommend **R7** (gate→write input race,
+a real pre-existing false-clean flagged independently by Codex & Claude) as the top follow-up + **R8** (agy /^> /
+loose) as minor — surfacing to architect, not unilaterally expanding scope. Also flagging **verdict-caching**
+(Claude R5) as a follow-up since whole-render every 1.5s-tick for held-mail agents raises per-tick CPU.
+NEXT: 3-way CMAP on the DIFF running (background) → address → review-doc Round-4 section + tech-debt → commit
+(explicit staging incl. .gz fixtures) → push PR #1330 → report to architect w/ decisions + live e2e checklist.
+
+### 2026-08-02 — DIFF-CMAP: 2 real false-clean paths from D2 (both fixed) + observability. Suite GREEN (4190). Ready to push.
+3-way diff-CMAP (gemini/codex/claude) on the render-gate diff. All 3 confirmed whole-ring + no-region-end + CR-fix +
+negative-control SAFE/SOUND. But found 2 REAL false-clean paths my D2 introduced/amplified — FIXED both:
+  1. **Over-ceiling false-clean** (Codex+Claude, independent): my first-cut capForRender sliced an over-ceiling ring
+     at an ESC boundary + RENDERED the tail — an arbitrary tail can reconstruct a clean composer while the whole ring
+     holds a draft → false-CLEAN. FIX: over-ceiling → HELD UNRENDERED (detail 'over-ceiling'), content-independent;
+     removed capForRender entirely. Adversarial test: >ceiling ring w/ a clean-looking tail → still busy.
+  2. **gate→write staleness amplified 3-5x** (Claude, blocking-ish): whole-ring classify awaits ~tens-130ms; a
+     keystroke landing during it makes the clean verdict stale (code re-validated the ROW, not the SCREEN). FIX:
+     sample a ring change-token (currentSeq+partialBytes+dims+app) before classify, re-check after → change ⇒ hold,
+     never write onto the draft. Dedicated test (classify bumps the token → held, no write).
+  3. **Observability** (Claude): no-region-end detail was dropped at the hold → a D1 profile-drift = SILENT total
+     outage. FIX: detail rides DeliveryOutcome; liveness-streak escalation extended from no-profile-only to also
+     no-region-end/no-composer-marker/over-ceiling (classifier-stuck), distinct from a legit user-text hold.
+DEFERRED w/ rationale (in review Technical Debt): verdict MEMOIZATION on the same token (Gemini=blocker, Codex+Claude
+=deferrable-only-with-a-real-≥5-held-agent-measurement; over-ceiling hard-hold caps worst-case per-tick render
+meanwhile; kept the token plumbing) — reverted the memo, kept the re-validation. Real >1MB-WITH-DRAFT fixture (risk
+covered by composition: empty captures prove reconstruction, 4MB perf test proves large-render+draft→busy). Fixed
+stale docstrings (snapshotOf, regionEndPatterns drift-fragility, tower-terminals separate-const note).
+Also fixed: tower-routes gateSession fake (bare `❯ ` → CR-terminated marker+rule; the LF-only join rendered the rule
+indented) + 2 toEqual→detail assertions. tsc clean; FULL suite 4190 pass / 48 skip / 0 fail.
+D3/R7/R8 decisions FINAL: DEFER D3 (residual after D2; reflow risk), flag R7 (input-race fuller close) + R8 (agy
+marker) as follow-ups — all in review Technical Debt. Committing now (explicit staging, 9 files + 4 .gz) → push PR
+#1330 → report architect w/ live e2e checklist. PR still 83 behind origin/main (DIRTY) — flag rebase-before-merge.
+NOT self-approving verify gate, NOT merging.

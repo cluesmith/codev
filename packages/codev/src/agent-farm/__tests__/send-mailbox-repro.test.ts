@@ -115,7 +115,9 @@ describe('Spec 1313 — #1265 repro against the real render-gate', () => {
     // 1. A draft occupies the composer → the real gate classifies it busy → HOLD.
     session.setScreen(DRAFT_SCREEN);
     const held = await deliverAgentMail(ports, db, '/ws/a', 'spir-1');
-    expect(held).toEqual({ delivered: [], reason: 'busy' });
+    // toMatchObject: the outcome now also carries the gate's telemetry `detail` (Spec
+    // 1313 render-gate hardening); this test pins only the delivered/held decision.
+    expect(held).toMatchObject({ delivered: [], reason: 'busy' });
     expect(writes).toHaveLength(0); // nothing written onto the occupied line
     expect(mailbox.getById(db, row.id)?.status).toBe('held');
     expect(mailbox.getById(db, row.id)?.reason).toBe('busy');

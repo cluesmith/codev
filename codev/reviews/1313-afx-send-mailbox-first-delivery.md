@@ -417,6 +417,64 @@ restart; new `send-architect-identity.test.ts` drives delivery through a REAL `c
   SSOT (needs a shellper-protocol change + old-shellper fallback); tightening `resolveProfile`'s substring match
   to exact basenames; persisting `args` if wrapper launches (`env codex`, `npx claude`) ever need support.
 
+### Review Phase (Round 4) — render-gate whole-ring hardening (architect-directed, post-merge live testing)
+
+Found in the architect's **live** testing of the built code (`pnpm -w run local-install`), not by the suite:
+`afx send` reported **busy** for prompts that were actually **empty and ready** — a running background task held
+the message ("monitor → busy"); a long-running builder's send held then delivered only after a manual ↑↓. Three
+defects were filed against `render-gate.ts`, all reproduced against REAL claude TUI output — the classifier had
+only ever been validated against *synthesized* `claude-idle` fixtures.
+
+**The decisive experiment (architect cap-sweep).** Before any code, the architect swept the classifier over real
+captures at varying `capReplay` slice sizes and proved the false-busy is a **`capReplay` slice artifact**: on a
+WHOLE-ring render *every* capture classifies CLEAN, including the bg-task ring; the verdict flips purely with slice
+size (bgtask 2.79 MB: BUSY ≤2 MB, CLEAN ≥2.5 MB; bigring 2.99 MB: CLEAN only WHOLE). claude runs on the alt-screen
+(`\x1b[?1049h`), whose frame only reconstructs from the full cumulative stream, and there is **no** "most-recent
+full-repaint boundary" to slice at. Reframe: **D2 (render the whole ring) is the root fix; D1 (positive region
+bounding) is defense-in-depth.** I verified the cap-sweep independently before coding.
+
+**Approach 3-way CMAP (before the classifier change).** All three reviewers **rejected** the initially-proposed
+cell-attribute *inversion* ("count only default-fg normal") — Claude *proved* it false-cleans the `agy-trust`
+fixture (0 default-fg cells → a blind Enter would confirm a filesystem-trust dialog); Gemini/Codex flagged colored
+drafts and syntax highlighting. They also rejected a `MAX_COMPOSER_ROWS` scan-cap (a "scan capped rows then CLEAN"
+is itself a false-clean path). Adopted instead: **keep the fail-safe blocklist** + **"no region-end boundary ⇒
+busy"** (Claude's simpler dominating fix — verified to preserve all 12 fixture verdicts and to close a *latent*
+false-clean where an unbounded region with only dim/empty rows below returned CLEAN).
+
+**Implementation.** D2: replaced the 1 MB `capReplay` with a generous `RENDER_CEILING_UNITS` (8 M units) — realistic
+rings (≤3 M) render whole. D1: `findRegionEnd` returns −1 (→ `no-region-end` hold) instead of scanning to the screen
+bottom. Committed **real gzipped claude fixtures** (bgtask/bigring, + a just-over-cap negative control and a
+small-ring baseline) with the honesty structure *whole→CLEAN / old-1 MB-slice→BUSY* (the negative control is CLEAN
+both ways, so the fix isn't "classify every big ring clean"). Fixed the `tower-routes` gate fake, which built a bare
+`❯ ` ring with no rule — a real composer is bounded by its rule line, and the `getAll().join('\n')` needs the real
+trailing CR or the rule renders indented and misses the pattern.
+
+**Diff 3-way CMAP (after implementation) — found two real false-clean paths my change introduced/amplified, both
+fixed:**
+- **Over-ceiling render could false-clean** (Codex + Claude, independently): the first-cut `capForRender` sliced an
+  over-ceiling ring at an ESC boundary and rendered the tail — but an arbitrary tail can reconstruct a clean-looking
+  composer while the whole ring holds a draft. **Fixed:** an over-ceiling ring is held UNRENDERED
+  (`detail: 'over-ceiling'`), content-independent — the strictly-safe direction. Added an adversarial test (a
+  >ceiling ring whose clean-looking tail *would* classify clean → still held).
+- **gate→write staleness amplified 3–5×** (Claude, "blocking-ish"): the whole-ring classify awaits ~tens–130 ms (vs
+  ~20 ms under the old cap); a keystroke landing during it made the clean verdict stale, and the code re-validated
+  the mailbox *row* but not the *screen*. **Fixed:** sample a cheap ring change-token
+  (`currentSeq`+`partialBytes`+dims+app) before the classify and re-check it after — a change → hold, never write
+  onto the draft that appeared. Added a dedicated test.
+- **Observability** (Claude): the new `no-region-end` detail was dropped at the hold, so a profile drift under D1
+  would be a *silent* total outage. **Fixed:** the gate detail now rides `DeliveryOutcome`, and the liveness-streak
+  escalation (was `no-profile`-only) now also fires for a sustained classifier-stuck streak
+  (`no-region-end`/`no-composer-marker`/`over-ceiling`), distinct from a legitimately-long `user-text` hold.
+- **Deferred with rationale (Technical Debt):** verdict **memoization** on the same change-token (Gemini rated it a
+  blocker; Codex + Claude "deferrable only with a real multi-agent measurement" — the over-ceiling hard-hold already
+  caps the worst-case per-tick render); a **real >1 MB-with-a-draft** fixture (the risk is covered by composition —
+  real empty captures prove whole-render reconstruction fidelity, the 4 MB perf test proves large-render + draft →
+  busy). Confirmed safe by all three: whole-ring rendering, `no-region-end ⇒ busy`, the CR fix, and the negative
+  control.
+
+tsc clean; full unit suite **4190 pass / 48 skip / 0 fail**. Live end-to-end re-verification is architect-run (a
+shared-Tower restart can't be driven from a worktree) — acceptance checklist handed over.
+
 ## Lessons Learned
 
 ### What Went Well
@@ -459,6 +517,17 @@ restart; new `send-architect-identity.test.ts` drives delivery through a REAL `c
   test built its session as a plain object with `command` set, so the real `createSessionRaw` path (which hardcoded
   `command: ''`) was never driven. "Tests pass" was true and "it works" was false — the exact lesson-critical
   trap. A double is fine for branch coverage, but the seam itself needs one test that constructs the real object.
+- **A screen classifier's INPUT is a seam too — validate it against REAL captured output at REAL sizes, not
+  synthesized fixtures.** The render-gate shipped validated only against small synthesized `claude-idle` fixtures;
+  the field false-busy was a `capReplay` slice artifact that manifests only on a real >1 MB alt-screen ring, and
+  "does a real large ring with a draft still classify busy?" had no fixture at all. Same "exercise the real seam"
+  trap as the `afx send architect` bug, now applied to the classifier's *input*: capture the real states (idle,
+  draft, menu, bg-task panel, >1 MB) under a PTY and assert both directions. The architect's cap-sweep — running the
+  real classifier over real captures at varying slice sizes — is the model, and the POC harness should be the
+  version-bump smoke test.
+- **When a review's own "what would be done differently" names a discipline, apply it to the very next change.** This
+  project's Round-3 lesson was "exercise the real seam"; the render-gate false-busy was that lesson unlearned for the
+  classifier itself. The retro is only worth writing if the next commit reads it.
 
 ### Methodology Improvements
 - **SPIR/porch**: the 3-iteration force-advance ceiling worked as a safety valve but can advance a phase whose
@@ -537,6 +606,42 @@ discipline). The one hot-tier addition this project earned is architectural (the
   Extracting a `runGlobalMigrations(db)` that both `getGlobalDb()` and tests call would let all migration tests
   exercise the real code. Deferred here (a DB-init-critical-path refactor is out of scope for a delivery bugfix);
   worth doing once, repo-wide, because it benefits every migration.
+- **Render-gate verdict memoization (deferred — CPU)** (Round 4 diff-CMAP): D2 renders the WHOLE ring on every
+  1.5 s backstop pass for each held-mail agent; an idle held ring is byte-identical tick over tick, so re-rendering
+  is waste. A verdict memo keyed on the ring change-token (`currentSeq`+`partialBytes` — already plumbed for the
+  gate→write re-validation) makes the steady state free. Gemini rated it a merge blocker; Codex + Claude "deferrable
+  only with a real ≥5-held-agent Tower RSS/CPU measurement". The over-ceiling hard-hold bounds the worst-case
+  per-tick render (~130 ms) meanwhile. **Implement + measure in a focused follow-up** (the WeakMap-on-session shape
+  is sound; the risk is a stale verdict in the delivery-critical path, so it needs its own tests before shipping).
+- **No real >1 MB-with-a-draft gate fixture** (Round 4, Claude): every committed real capture is an *empty*
+  composer (whole→CLEAN). The false-clean risk is covered by *composition* — real empty captures prove whole-render
+  reconstruction fidelity, and the 4 MB perf test proves large-render + a draft → busy — but a single real capture
+  of a >1 MB ring with three typed chars, asserted BUSY on the whole render, would be direct evidence. Capture one
+  during live testing (`type three chars, don't hit Enter, snapshot the ring`).
+- **codex/agy >1 MB captures not taken** (Round 4): the D2 fix is app-agnostic (the ring-render path, not app
+  chrome), and the existing 12 fixtures cover codex/agy small-ring profiles, so a codex/agy large-ring capture
+  (which needs a long session) adds low marginal value. Add if cross-app large-ring evidence is wanted.
+- **D3 (idle repaint-nudge) deferred** (Round 4): the field bugs are D2/D1; D3's residual value — self-healing a
+  *stuck* idle false-busy via a transient ±1-row SIGWINCH nudge — is outweighed by its reflow→false-clean risk
+  (Gemini) and safe-impl cost (Codex/Claude: observable-completion re-gate + inbound-input-generation tracking +
+  skip-when-a-viewer-is-attached + absolute throttle). Reconsider only if a residual idle false-busy is observed
+  after D2/D1. (An over-ceiling #1047 basin never shrinks, so that specific permanent hold relies on the
+  liveness/escalation surface, which now fires for it.)
+- **`findMarkerRow` "last match wins" (pre-existing, Round 4 Claude)**: a bottom-of-screen notification line
+  starting with `❯` would shadow a drafted composer above it. Not introduced here; note before any composer-anchor
+  rework (a positive top-rule anchor would fix it).
+- **`regionEndPatterns` is now the sole lower-bound signal and is drift-fragile** (Round 4): a claude reversion to
+  a rounded box (`╰──╯`, not in the class) or an indented rule would hold every send to claude — fail-safe and now
+  liveness-escalated, but a total outage. The version-bump smoke test must re-measure the boundary against a live
+  capture; broaden the pattern ONLY from a real capture (a too-loose pattern matching draft content is a false-clean).
+- **gate→write INPUT race, fuller close (pre-existing; Round 4 Codex/Claude)**: the Round-4 re-validation closes the
+  *output-observed* window (a keystroke that reached the ring during the render); a keystroke that reaches the PTY
+  but hasn't echoed to the ring by the write instant is still a residual (same class as the intra-paced-write race
+  above). Fully closing it needs inbound-input-generation coordination on the PTY ingress.
+- **`AGY_MARKER = /^> /` is loose (pre-existing; Round 4 Claude)**: matches any transcript line starting with
+  `"> "` (a markdown blockquote, a quoted diff), and `findMarkerRow` takes the last. Fails safe today (transcript
+  text is default-fg → busy) but a dim match could false-clean; tighten to require the palette-12 marker cell,
+  measured from a capture.
 
 ## Flaky Tests
 
@@ -556,7 +661,10 @@ discipline). The one hot-tier addition this project earned is architectural (the
   real steady-state signal **locally**, while CI asserts only a looser catastrophic-regression ceiling (the
   pre-tightening 500ms bound — still an order of magnitude below an O(n²) blow-up at >1MB). Verified passing in both
   modes (local 75ms and `CI=true` 500ms), 28/28. The classifier code is untouched — this is purely a test-side
-  bound adjustment. Follow-up below.
+  bound adjustment. Follow-up below. **(Round 4 update:** the whole-ring fix retired the 1 MB seed-cap, so this
+  test was retuned to render a realistic **4 MB** ring whole — the real steady-state path — with a retuned CI-aware
+  bound `process.env.CI ? 800 : 250` ms; same catastrophic-regression-guard intent. The still-open follow-up — a
+  deterministic, load-insensitive complexity guard — applies unchanged.)**
 
 ## Follow-up Items
 

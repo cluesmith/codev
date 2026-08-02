@@ -215,7 +215,16 @@ function gateSession(mockWrite: (data: string) => void, ring: string, writable =
     launchArgs: [] as string[],
     cwd: '/tmp/ws',
     info: { cols: 80, rows: 24 },
-    ringBuffer: { getAll: () => [ring] },
+    // A real composer is bounded BELOW the input by the rule line the TUI draws (the
+    // composer box border). The render-gate requires that proven lower bound — a bare
+    // marker with nothing beneath it is indeterminate (a partial/mid-repaint frame)
+    // and is held (Spec 1313 D1 hardening + the spec's "born dirty" convergence). So
+    // represent the realistic clean-composer shape: the caller's content line plus the
+    // bounding rule. Each line carries a trailing CR exactly as real ring lines do (the
+    // PTY emits \r\n; RingBuffer splits on \n and keeps the \r), so getAll().join('\n')
+    // renders each from column 0 — without it the LF-only join would render the rule
+    // indented and it would miss the region-end pattern. `ring` = the composer line.
+    ringBuffer: { getAll: () => [`${ring}\r`, `${'─'.repeat(20)}\r`] },
   };
 }
 
