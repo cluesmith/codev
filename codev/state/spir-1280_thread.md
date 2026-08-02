@@ -1034,3 +1034,29 @@ at 12 **brace-EXPANDED** rows (so 11 brace-decisions = 22 → fails), but a mani
 it *had* a `## Batch A` heading. Don't write a braced manifest without explicit `## Batch` headings.
 
 Full suite running against 533ff99c; will report the exact numbers it executed.
+
+### Phase 5 — M10 hit: R2 proposed, suite left RED (commit 862508e4, 2026-08-02)
+
+Full packages/codev suite surfaced a real red in `baked-decisions.test.ts` (Spec 746 Phase 2) when
+I rewrote `specify.md`. Two failure families, opposite treatments:
+
+1. **Behaviour grep (8 failures) — FIXED in-phase, not a retirement.** My first draft reworded the
+   Baked Decisions clause and dropped `do not autonomously` / `pause`. Restored the canonical
+   carveout literals (which are the preferred phrasing anyway). All 188 behaviour/mirror/pollution
+   assertions green.
+2. **Pure-addition diff (2 failures) — R2, PROPOSED, NOT applied.** A P1/P2 rewrite that deletes
+   prose can't be a line-superset of the pre-746 baseline — identical wall to R1, which R1
+   **explicitly foresaw and left in force** ("PHASE_2_FILES guards remain in force"). Per M10 I did
+   NOT re-baseline or edit the test. Left the 2 assertions RED, wrote R2 in
+   `codev/resources/1280-retirements.md` (full trace + behaviour-re-asserted mapping + replacement
+   design: extend `spec-1280-prompt-deletion-guard.test.ts` with post-1280 specify baselines +
+   inverted anti-vacuity), scoped to the 2 specify.md files only (air/implement.md untouched → its
+   Phase 2 guard stays in force).
+
+**Committed suite state (862508e4): 2 RED by design** (`codev SPIR/ASPIR specify.md pure-addition`),
+308 other guard assertions green. This mirrors exactly how R1 was handled (report red, wait for
+approval) — endorsed in Phase 4 as the system working.
+
+specify served recomputed after the wording restore: 1063→1077 (manifest updated). Reported R2 to
+architect; **blocked on the R2 decision** before the phase can go fully green. On approval I execute
+R2 in a separate commit (retire the 2 assertions + ship the replacement guard), like R1's 2-commit split.
