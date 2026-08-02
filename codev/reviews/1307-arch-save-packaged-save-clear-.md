@@ -56,14 +56,15 @@ per-caller — belongs to Spec 1273's review, which owns the primitive.
    1273's own lesson: proportionate machinery.)
 
 2. **An artifact can assert something adjacent to the truth, and pass self-review because
-   it exists.** This recurred in five materials this project: a test asserting against a
+   it exists.** This recurred in six materials this project: a test asserting against a
    copied predicate; a test against a replica helper; a test against a synthetic callback; a
-   test whose timing missed the window it was named for; and a *spec* claiming a
-   request-order guarantee the code did not make. Plus comments crediting deleted mechanisms.
-   The cheap check that catches all of them: **mutate the guard, confirm the test fails** —
-   applied before claiming a fix, not after being told. By the phase's end this was routine,
-   and it caught the vacuous mid-flush test and the flush-lock regression before a reviewer
-   did.
+   test whose *timing* missed the window it was named for; a shutdown-flush test given too
+   few ticks to actually exercise the wait; and a *spec* claiming a request-order guarantee
+   the code did not make. Plus comments — and one review claim — crediting a guarantee the
+   code did not yet back. The cheap check that catches all of them: **mutate the guard,
+   confirm the test fails.** The lesson is not that I learned it once; it is that I had to
+   apply it repeatedly, and the times it caught the defect before a reviewer did were the
+   times I ran it *before* claiming the fix rather than after.
 
 3. **A stale CI green is the same failure one level up.** A merge landed on main whose
    July-6 green predated the parity guards the repo had since grown — true when produced,
@@ -78,7 +79,7 @@ per-caller — belongs to Spec 1273's review, which owns the primitive.
 
 ## Deviations from the plan
 
-- The plan's Approach 1 (Tower-owned job) was replaced wholesale by owner directive before
+- The spec's Approach 2 (Tower-owned job) was rejected wholesale by owner directive before
   implementation; the plan was rewritten to match. Recorded in the spec's Notes.
 - `--delay` documentation was removed from `CLAUDE.md`/`AGENTS.md` and placed only in the
   command reference, per architect ruling — Spec 1280's Phase 1 restructured `CLAUDE.md` so
@@ -122,6 +123,34 @@ as Spec 1273's successful probe retest:
 
 The runbook with the exact checks is in the plan's phase 3.
 
+## Per-phase review history (including phase_3's force-advance)
+
+Stated explicitly so the gate reader needs no `status.yaml` archaeology.
+
+| Phase | Rounds | Outcome |
+|---|---|---|
+| phase_1 (`--delay`) | 8 iterations | Clean: iter-3 recorded double-review resolution; six of the eight found real defects |
+| phase_2 (skill) | 2 iterations | Clean double-approve |
+| phase_3 (adoption + docs) | 3 iterations **+ confirming round** | **Force-advanced at porch's 3-iteration cap** |
+
+**phase_3 did not reach a clean double-APPROVE within the cap.** Its three iterations each
+returned `REQUEST_CHANGES` from both lanes; every finding was a real regression introduced
+adopting Spec 1273's submission lock, each fixed with mutation-verification, but porch's
+`max_iterations: 3` was reached before a fourth consult could confirm the iter-3 fixes.
+Porch force-advanced (recorded in `status.yaml` as `force_advanced`), which is its designed
+behaviour at the cap — it hands adjudication to the human gate rather than looping.
+
+Because force-advance is not approval, a **confirming review round** was run after the cap
+(architect ruling, 2026-08-02): both lanes returned `REQUEST_CHANGES` on the iter-3 state —
+a vacuous shutdown-flush test and a shutdown-ordering race — which were treated as a real
+fourth iteration, fixed (`await`-drain of all in-flight submissions; `shutdownDelayedSends`
+ordered before the buffer flush; both fixes mutation-verified), and re-confirmed clean
+before this PR was prepared. The full round-by-round record and rebuttals are in
+`codev/projects/1307-arch-save-packaged-save-clear-/`.
+
+The honest read: the lock adoption was a leaky seam and took more than three rounds to
+settle. Nothing here shipped on the strength of a force-advance alone.
+
 ## Flaky Tests
 
 None introduced. One self-inflicted test-isolation issue found and fixed: delayed-send tests
@@ -132,7 +161,7 @@ writes complete).
 
 ## Testing
 
-- Full suite green: 4182 passed, 0 failed, 48 skipped.
+- Full suite green: 4186 passed, 0 failed, 48 skipped.
 - New coverage: `spec-1307-send-delay.test.ts` (validation, scheduling, shutdown-drop,
   shutdown-during-lock-wait, FIFO), `spec-1307-arch-save-skill.test.ts` (four-tree drift +
   content), and route-level `ORDERING:` tests (buffered-inversion, two-simultaneous-delayed,

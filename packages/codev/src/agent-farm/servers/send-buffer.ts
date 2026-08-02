@@ -66,6 +66,14 @@ export class SendBuffer {
   private deliver: DeliverFn | null = null;
   private log: LogFn | null = null;
   private submit: SubmitFn = (_id, write) => { write(); return Promise.resolve(); };
+  /**
+   * Every submission started by a flush and not yet settled — periodic AND
+   * final (Spec 1307). `stop()` awaits these so a periodic `flush(false)` whose
+   * submission is still queued behind the lock is not lost when the buffer is
+   * already empty (its buffered entry was deleted the moment the batch was
+   * handed to `submit`). A per-`flush()`-call list could not see it.
+   */
+  private outstanding = new Set<Promise<void>>();
   readonly idleThresholdMs: number;
   readonly maxBufferAgeMs: number;
 
@@ -111,8 +119,11 @@ export class SendBuffer {
       clearInterval(this.flushTimer);
       this.flushTimer = null;
     }
-    // Final flush — deliver everything remaining, and wait for it to land.
-    await this.flush(true);
+    // Final flush — deliver everything remaining — then wait for EVERY in-flight
+    // submission (this flush's and any periodic one still queued behind the
+    // lock) to land before returning.
+    this.flush(true);
+    await this.drainOutstanding();
   }
 
   /** Check and deliver messages for sessions that are idle or aged out. */
@@ -164,7 +175,7 @@ export class SendBuffer {
         // many writes and returns the final offset, so the existing offset
         // threading is untouched while nothing else can write into this
         // session mid-batch.
-        submissions.push(this.submit(sessionId, () => {
+        const submitted = this.submit(sessionId, () => {
           let offset = 0;
           for (const msg of messages) {
             offset = this.deliver!(session, msg, offset);
@@ -173,7 +184,11 @@ export class SendBuffer {
             }
           }
           return offset;
-        }));
+        });
+        // Track instance-wide so stop() awaits it even if this flush() call has
+        // long returned (the periodic-flush case). Self-removes on settle.
+        this.outstanding.add(submitted);
+        void submitted.catch(() => undefined).finally(() => this.outstanding.delete(submitted));
         if (this.log && !forceAll) {
           const reason = maxAgeExceeded ? 'max age exceeded' : 'user idle';
           this.log('INFO', `Delivered ${messages.length} deferred message(s) to session ${sessionId.slice(0, 8)}... (${reason})`);
@@ -182,6 +197,13 @@ export class SendBuffer {
       }
     }
     return submissions.length ? Promise.all(submissions).then(() => undefined) : Promise.resolve();
+  }
+
+  /** Await every in-flight flush submission (Spec 1307 — used by stop()). */
+  private async drainOutstanding(): Promise<void> {
+    // Snapshot: a submission settling during the await removes itself, and new
+    // ones cannot appear once the flush timer is stopped.
+    await Promise.all([...this.outstanding].map(p => p.catch(() => undefined)));
   }
 
   /**

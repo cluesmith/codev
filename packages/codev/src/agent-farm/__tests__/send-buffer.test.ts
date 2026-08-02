@@ -307,12 +307,49 @@ describe('SendBuffer', () => {
       // The batch has been written but the submission has not settled.
       expect(submit).toHaveBeenCalledTimes(1);
       expect(deliver).toHaveBeenCalledTimes(1);
-      await Promise.resolve();
+      // Flush enough microtasks/timers that stop()'s drain WOULD resolve if it
+      // were not actually waiting. `await Promise.resolve()` gave only one tick
+      // — too few for the chain — so the test passed even with the fix reverted
+      // (Claude, phase-3 confirm). advanceTimersByTimeAsync drains the queue.
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(1000);
       expect(stopped).toBe(false); // stop() must still be waiting
 
       release();
       await stopping;
       expect(stopped).toBe(true); // and resolves once the submission does
+    });
+
+    it('awaits a periodic-flush submission still queued at stop (Codex)', async () => {
+      // The deeper case: a periodic flush(false) hands a batch to submit and
+      // deletes its buffer entry immediately. If that submission is still queued
+      // behind the lock when stop() runs, stop() finds an EMPTY buffer — so it
+      // must await instance-tracked outstanding submissions, not just the ones
+      // its own final flush(true) starts.
+      const session = makeSession(/* idle */ true);
+      const deliver = vi.fn(() => 0);
+      const log = vi.fn();
+      let release!: () => void;
+      const gate = new Promise<void>(resolve => { release = resolve; });
+      const submit = vi.fn((_id: string, write: () => number) => { write(); return gate; });
+
+      buf.start(() => session, deliver, log, submit);
+      buf.enqueue(makeMsg('sess-1'));
+
+      // Periodic flush drives the submission and clears the buffer.
+      await vi.advanceTimersByTimeAsync(600);
+      expect(submit).toHaveBeenCalledTimes(1);
+      expect(buf.pendingCount).toBe(0); // buffer already empty
+
+      // stop() must still block on the un-settled periodic submission.
+      let stopped = false;
+      const stopping = buf.stop().then(() => { stopped = true; });
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(stopped).toBe(false);
+
+      release();
+      await stopping;
+      expect(stopped).toBe(true);
     });
 
     it('resolves promptly when nothing is buffered', async () => {
