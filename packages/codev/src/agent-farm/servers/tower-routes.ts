@@ -1824,7 +1824,13 @@ async function deliverOrBuffer(
     // Cancellation is re-checked HERE, holding the lock, not before the wait for
     // it: a delayed delivery can acquire the lock only after a shutdown that
     // fired while it queued. `stillLive` is undefined on the immediate path.
-    if (stillLive && !stillLive()) return 0;
+    if (stillLive && !stillLive()) {
+      // Cancelled by a shutdown that landed while this delayed delivery waited
+      // for the lock. Logged like every other drop path — a silent return here
+      // was the one drop this feature did not record (Claude, PR review).
+      ctx.log('INFO', `Delayed send cancelled at shutdown: ${from ?? 'unknown'} → ${agent} (terminal ${terminalId.slice(0, 8)}...)`);
+      return 0;
+    }
     try {
       let offset = 0;
       if (interrupt) {
