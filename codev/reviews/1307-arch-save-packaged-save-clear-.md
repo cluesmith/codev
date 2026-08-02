@@ -46,7 +46,7 @@ through the existing four-tier chain. The one cross-cutting fact worth carrying 
 that submission atomicity is now a shared Tower primitive (`submitToSession`) rather than
 per-caller — belongs to Spec 1273's review, which owns the primitive.
 
-## Lessons Learned
+## Lessons Learned Updates
 
 1. **Descoping concentrates risk into the seams; review the seams hardest.** The feature
    shrank from a job orchestrator to a send flag, and every genuine defect across eight
