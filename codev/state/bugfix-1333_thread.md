@@ -66,4 +66,50 @@ Scope: ~10 LOC + regression test. Comfortably within BUGFIX.
 → cases 1 & 2 fail with `Received: "NOT_FOUND"` (the exact bug); 4 guards still
 pass. Restored + rebuilt → all 6 pass.
 
-Next: full build + full codev suite, then PR + CMAP.
+Full build + full codev suite: 4047 passed, 48 skipped, 0 failed. porch check ✓.
+
+## PR (in progress)
+
+Two atomic commits (Fix, Test). Pushed to `origin` (cluesmith/codev).
+**PR #1334** → https://github.com/cluesmith/codev/pull/1334 (base main, "Fixes #1333").
+Remote topology: origin = cluesmith/codev (PR target), fork = mohidmakhdoomi/codev.
+
+CMAP (gemini/codex/claude, --protocol bugfix --type pr) run in background.
+NOTE: `consult` couldn't auto-resolve the project in this worktree — the
+disambiguator regex expects `.builders/<digits>-<suffix>` but our worktree is
+`.builders/bugfix-1333` (no suffix after the digits), so it errored "Multiple
+projects found". Worked around with `--project-id 1333` (matches `bugfix-1333-…`
+via the `bugfix-` branch in consult/index.ts:285). Possible separate bug.
+
+⚠️ BASE-SCOPE FLAG (for architect, not mine to fix): this branch was spawned
+from an architect HEAD that is 2 commits ahead of origin/main — `fef6bddf
+[Spec 1313] Initial specification draft` sits BELOW the porch-init commit. So
+`origin/main...HEAD` includes `codev/specs/1313-afx-send-mailbox-first-delivery.md`
+(+240 lines) — unrelated to #1333. Merging PR #1334 with --merge would land that
+spec in main too. Not rewriting porch-tracked history unilaterally; flagged the
+architect to decide (drop via rebase onto origin/main, or intentionally land it).
+My own diff is exactly: tower-client.ts, the new test, the thread, + porch's
+status.yaml.
+
+### CMAP verdicts (PR #1334)
+- **gemini = REQUEST_CHANGES** (HIGH): code + tests "excellent"; sole blocker =
+  the unrelated Spec 1313 file.
+- **codex = REQUEST_CHANGES** (HIGH): implementation "correct", tests "sound";
+  sole blocker = same Spec 1313 file.
+- **claude = APPROVE** (HIGH): independently verified the root-cause chain +
+  blast radius against source (confirmed no client-side `result.error===CODE`
+  consumers; the `.error?.includes` sites at tower-routes 562/621/1923/2580 are
+  server-side; typeof guards are genuine hardening). Spec 1313 flagged
+  NON-blocking.
+
+**Unanimous on the code: fix + test are correct and well-scoped.** The only
+blocker is the inherited Spec 1313 file. Key de-risking fact (from claude):
+`fef6bddf` is ALSO an ancestor of open PR #1330 (builder/spir-1313), so dropping
+it here is LOSSLESS — the spec still lands via #1330.
+
+### Escalated to architect (queued via mailbox, main busy)
+Asked for go-ahead before `git rebase --onto origin/main fef6bddf
+builder/bugfix-1333` + force-with-lease — because that force-pushes already-pushed
+history on a shared branch (outward-facing / hard-to-reverse → confirm first).
+HOLDING the porch `pr`-gate request (`porch done`) until the base-scope question
+is resolved. Awaiting architect decision: rebase-to-clean vs. merge-as-is.
