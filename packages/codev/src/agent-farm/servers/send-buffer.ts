@@ -126,12 +126,17 @@ export class SendBuffer {
     await this.drainOutstanding();
   }
 
-  /** Check and deliver messages for sessions that are idle or aged out. */
-  flush(forceAll = false): Promise<void> {
-    if (!this.getSession || !this.deliver) return Promise.resolve();
-    // Only the shutdown flush (forceAll) needs to be awaited; the periodic
-    // timer is fire-and-forget, as before.
-    const submissions: Promise<void>[] = [];
+  /**
+   * Check and deliver messages for sessions that are idle or aged out.
+   *
+   * Delivery is fire-and-forget from flush()'s perspective: each batch is
+   * handed to `submit` and tracked in `outstanding` (Spec 1307). Callers that
+   * need to wait for delivery — only `stop()` does — drain `outstanding`; flush
+   * itself does not return a promise, because a returned-but-ignored one is the
+   * kind of latent trap this project kept tripping over.
+   */
+  flush(forceAll = false): void {
+    if (!this.getSession || !this.deliver) return;
 
 
     for (const [sessionId, messages] of this.buffers) {
@@ -196,7 +201,6 @@ export class SendBuffer {
         this.buffers.delete(sessionId);
       }
     }
-    return submissions.length ? Promise.all(submissions).then(() => undefined) : Promise.resolve();
   }
 
   /** Await every in-flight flush submission (Spec 1307 — used by stop()). */
