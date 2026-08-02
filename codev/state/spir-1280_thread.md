@@ -1002,3 +1002,35 @@ close-keyword guard there (keeps Fixes/Refs anyway as correct behavior).
 lighter on the three PIR files — they were recently rewritten and are largely load-bearing contract
 (single-pass max_iterations:1, gate-not-prose merge auth). Consolidate PIR's thrice-repeated
 gate-not-prose rule (P4) and trim padding; preserve the mechanics.
+
+### Phase 5 implemented — commit 533ff99c (2026-08-02)
+
+All 11 phase prompts rewritten, both trees (22 files) + manifest. Group-pure G4.
+
+- **SPIR ×4** heavy rewrite: procedure→contract (P1), examples→interfaces (P2). spir/implement was
+  the biggest cut (served 1064→386): dropped PISC checklist, Trust-Hierarchy ASCII, Fixing-Mode
+  narration, and the flaky-tests block (builder.md owns it now — P4). spir/plan swapped the good/bad
+  phase-example lists for the phase-quality interface. spir/specify deleted the "Include examples"
+  line (literally anti-P2).
+- **ASPIR ×4**: SPIR body verbatim + a real correctness fix — the ASPIR headers read "the SPIR
+  protocol" (0 "ASPIR" before). Same #619 mislabel class Phase 4 fixed in the ASPIR builder-prompt.
+  Flagged prominently in the manifest since it's content, not economy.
+- **PIR ×3** light P4 touch: they were recently written and largely load-bearing contract
+  (single-pass max_iterations:1, gate-not-prose auth). Removed the git-add prohibition repeats
+  builder.md owns; consolidated pir/review's thrice-stated gate-not-prose rule to one back-reference.
+  Served barely moved (pir/review 2413→2380) — correct under the acceptance model.
+
+**Served deltas** (still carry unchanged template words for spir specify/plan/review — templates are
+Phases 6–7): specify 1400→1063, plan 1167→946, review 1955→1228, spir/implement 1064→386.
+
+**Guards green** (verified against committed HEAD): T16 phase-manifest, bugfix-685 close-keyword,
+review-prompt-routing, template-delivery, spec-1280 measurement/p6/deletion-guard.
+`{{artifact_name}}` 51→57 (nothing deleted; all naming preserved). Skeleton==codev on all 11.
+
+**T16 gotcha, recorded**: the batch-cap check is asymmetric — a **single-batch** manifest is capped
+at 12 **brace-EXPANDED** rows (so 11 brace-decisions = 22 → fails), but a manifest with explicit
+`## Batch N` headings counts **raw rows per batch**. Fix was to declare two `## Batch` sections
+(SPIR+ASPIR = 8, PIR = 3). Phase 4's precedent (9 brace-decisions in one Batch A) only worked because
+it *had* a `## Batch A` heading. Don't write a braced manifest without explicit `## Batch` headings.
+
+Full suite running against 533ff99c; will report the exact numbers it executed.

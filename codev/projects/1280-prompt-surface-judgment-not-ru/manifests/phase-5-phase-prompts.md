@@ -1,8 +1,9 @@
 # Phase 5 — phase prompts: spir, aspir, pir (G4)
 
 **Decisions**: 11 (spir ×4, aspir ×4, pir ×3) · **Rollback group**: G4, commit-pure
-**Batches**: 2 — (1) SPIR + ASPIR, 8 decisions; (2) PIR, 3 decisions. No test/retirement rows
-(include wiring untouched, so no M10). The SPIR/ASPIR pairs are near-identical (ASPIR = the SPIR
+**Batches**: 2 — (1) SPIR + ASPIR, 8 decisions; (2) PIR, 3 decisions. Include wiring untouched
+(no `template-delivery` M10), but the `specify.md` rewrite triggers **one M10 retirement, R2,
+PROPOSED and left RED** — see the M10 section below. The SPIR/ASPIR pairs are near-identical (ASPIR = the SPIR
 body + a one-line header fix), so Batch 1's per-file inspection is effectively four distinct diffs
 mirrored, not sixteen.
 
@@ -21,8 +22,8 @@ have served == raw.
 
 | File (both trees) | Old | New | Principles | Rationale |
 |---|---:|---:|---|---|
-| `{codev,codev-skeleton}/protocols/spir/prompts/specify.md` | 1400 | 1063 | P1, P2, P4 | Step-by-step "Process" → a "What must be true when you finish" contract. Kept the existing-spec / Baked-Decisions / contradiction-pause rules (a model gets these wrong without them), the `{{> …/spec.md}}` interface, all `<signal>` capabilities, the filename-sync and commit cadence. Deleted the "Include examples" note (**directly anti-P2**), the PISC-style padding and the What-NOT-to-do list already owned elsewhere. |
-| `{codev,codev-skeleton}/protocols/aspir/prompts/specify.md` | 1400 | 1063 | P1, P2, P4 | SPIR body verbatim **plus a correctness fix**: the header said "the SPIR protocol" (see note below). Still includes SPIR's `spec.md` template (ASPIR ships no `templates/`). |
+| `{codev,codev-skeleton}/protocols/spir/prompts/specify.md` | 1400 | 1077 | P1, P2, P4 | Step-by-step "Process" → a "What must be true when you finish" contract. Kept the existing-spec / Baked-Decisions / contradiction-pause rules (a model gets these wrong without them) **in the canonical carveout wording** — `do not autonomously` / `pause` / `flag` (see M10 / R2 below), the `{{> …/spec.md}}` interface, all `<signal>` capabilities, the filename-sync and commit cadence. Deleted the "Include examples" note (**directly anti-P2**), the PISC-style padding and the What-NOT-to-do list already owned elsewhere. |
+| `{codev,codev-skeleton}/protocols/aspir/prompts/specify.md` | 1400 | 1077 | P1, P2, P4 | SPIR body verbatim **plus a correctness fix**: the header said "the SPIR protocol" (see note below). Still includes SPIR's `spec.md` template (ASPIR ships no `templates/`). |
 | `{codev,codev-skeleton}/protocols/spir/prompts/plan.md` | 1167 | 946 | P1, P2 | Replaced the "Good/Bad phase examples" lists (**P2 examples**) with the phase-quality **interface** — self-contained / independently-testable / valuable / committable — and the per-phase contract fields. Kept the `{{> …/plan.md}}` include, `PLAN_DRAFTED`, commit cadence. |
 | `{codev,codev-skeleton}/protocols/aspir/prompts/plan.md` | 1167 | 946 | P1, P2 | SPIR body verbatim + the ASPIR header fix. |
 | `{codev,codev-skeleton}/protocols/spir/prompts/implement.md` | 1064 | 386 | P1, P4 | Heaviest cut. Dropped the PISC emoji checklist, the Trust-Hierarchy ASCII, the "Avoiding Fixing Mode" narration and the **flaky-tests block (now owned by `roles/builder.md`)**. **Kept as contract**: the this-phase-only scope restriction (load-bearing — porch drives per phase), spec-as-source-of-truth, build+tests-must-pass, and every signal (`PHASE_COMPLETE` / `BLOCKED` / `AWAITING_INPUT`). |
@@ -55,6 +56,26 @@ frontier model genuinely needs (PIR's consultation is single-pass, so the human 
 the only re-check — that is not padding). Under the acceptance model (**principle conformance, size
 reporting-only; a conformant file passes unchanged**) the honest action was the P4 de-duplication
 above, not a rewrite for its own sake.
+
+## M10 — one retirement PROPOSED (R2), suite deliberately left RED
+
+Rewriting `specify.md` to P1/P2 trips Spec 746's **Phase 2** `expectPureAdditionDiff` guard on the
+two SPIR/ASPIR `specify.md` files — the identical wall R1 hit, which R1 **explicitly foresaw and
+left in force** ("the `PHASE_2_FILES` … guards remain in force"). Two responses, opposite kinds:
+
+- **Behaviour grep — fixed in-phase, not retired.** My first draft reworded the Baked Decisions
+  clause and dropped the canonical literals. Restored to `do not autonomously` / `pause` / `flag`
+  (the preferred carveout phrasing anyway). All 188 behaviour/mirror/pollution assertions pass.
+- **Pure-addition diff — proposed for retirement (R2), NOT applied.** A P1/P2 rewrite that deletes
+  prose can never be a line-superset of the pre-746 baseline. Per M10 I do **not** re-baseline or
+  edit the test unilaterally: the two assertions are **left RED** and R2 is written up in
+  `codev/resources/1280-retirements.md` with the full trace, the behaviour-re-asserted mapping, and
+  a replacement guard (extend `spec-1280-prompt-deletion-guard.test.ts` with post-1280 `specify.md`
+  baselines + inverted anti-vacuity) that ships **only on approval**, in its own commit, mirroring R1.
+
+**Current suite state: 2 RED** (`codev SPIR/ASPIR specify.md pure-addition diff`), by design,
+pending the architect's R2 decision. `air/implement.md`'s Phase 2 guard and all Phase 3 guards stay
+in force.
 
 ## Guards held green (verified, not assumed)
 

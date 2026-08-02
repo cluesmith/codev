@@ -16,7 +16,7 @@ Produce a specification at `codev/specs/{{artifact_name}}.md` that explores the 
 ## What must be true when you finish
 
 - **An existing spec is honored, not rewritten.** If `codev/specs/{{project_id}}-*.md` already exists, it carries the architect's decisions — read it fully and refine it in place. Clarifying questions are for the case where no spec exists yet; when one does, the spec is the answer.
-- **Baked Decisions are fixed.** If the issue body has a "Baked Decisions" section (any heading level, case-insensitive), copy it verbatim into the spec's Constraints and treat each item as settled — do not relitigate it in Solution Exploration. Raise a genuine problem with a baked decision via `afx send architect`; if two baked decisions contradict, stop and flag it via `afx send` rather than choosing.
+- **Baked Decisions are fixed.** If the issue body has a "Baked Decisions" section (any heading level, case-insensitive), copy it verbatim into the spec's Constraints and treat each item as settled — **do not autonomously override** the architect's choices in Solution Exploration. Raise a genuine problem with a baked decision via `afx send architect` rather than overriding it. If two baked decisions contradict each other, do not choose — **pause**, **flag** the contradiction via `afx send`, and wait for resolution.
 - **The problem is characterized before solutions are.** Current state vs desired state, stakeholders, assumptions, and constraints are explicit.
 - **Solutions are explored, not assumed.** More than one approach is considered, each with its trade-offs and risks, before one is recommended.
 - **Open questions are surfaced and ranked** by whether they block progress, shape the design, or are merely nice to know.
