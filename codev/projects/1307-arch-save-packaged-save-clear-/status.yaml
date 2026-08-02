@@ -106,10 +106,15 @@ history:
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/aspir-1307/codev/projects/1307-arch-save-packaged-save-clear-/1307-phase_3-iter3-claude.txt
 started_at: '2026-07-31T21:42:49.601Z'
-updated_at: '2026-08-02T05:03:29.946Z'
+updated_at: '2026-08-02T05:22:40.840Z'
 force_advanced:
   phase: phase_3
   iteration: 3
   max_iterations: 3
   rebuttal_file: 1307-phase_3-iter3-rebuttals.md
   at: '2026-08-02T05:03:27.880Z'
+pr_history:
+  - phase: review
+    pr_number: 1335
+    branch: builder/aspir-1307
+    created_at: '2026-08-02T05:22:40.839Z'
