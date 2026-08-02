@@ -926,3 +926,43 @@ the Phase 5 targets). Same string, opposite meaning, two files apart.
 Also flagged: **porch's plan-phase pointer is stale** — it still reads `phase_0_instrument`
 because phases have been gated by architect inspection rather than by `porch done`. That needs
 an architect decision, not a hand-edit of `status.yaml`.
+
+### Phase 5 started (2026-08-02) — resumed after context clear
+
+Architect ack'd the status.yaml reconciliation (commit 9c67aa86: phases 0–4 `complete`,
+phase_5 `in_progress`, pointer → phase_5_prompts_heavy). `porch status 1280` renders 0–4 ✓,
+phase_5 ►. Measurement-script perf follow-up is with Waleed to decide issue-vs-task and owner;
+architect: **do not pick it up in this worktree unless told.**
+
+**Phase 5 scope map (measured, not assumed):**
+- 11 decisions = spir×4 + aspir×4 + pir×3, each "both trees" (brace notation, 1 decision).
+- **All 11 codev/ copies are byte-identical to their codev-skeleton/ twins** → brace notation valid.
+- **spir prompts are byte-identical to aspir prompts** (implement/plan/review/specify all ==).
+  A conformance rewrite is not a behavior change, so I keep them identical: **7 distinct rewrites**
+  (4 shared spir/aspir + 3 pir), fanned to the 11×2=… actually 22 physical files.
+- pir has **no specify** (Plan-Implement-Review).
+
+**Served vs raw counts (served = include-expanded, the manifest's Old/New basis):**
+| file | served | raw | include delta |
+|---|---:|---:|---:|
+| spir/aspir implement | 1064 | 1064 | 0 |
+| spir/aspir plan | 1167 | 520 | 647 |
+| spir/aspir review | 1955 | 1316 | 639 |
+| spir/aspir specify | 1400 | 770 | 630 |
+| pir implement | 1151 | 1151 | 0 |
+| pir plan | 741 | 741 | 0 |
+| pir review | 2413 | 2413 | 0 |
+
+The include delta IS the `{{> …templates/…}}` inlining. **Templates are Phases 6–7, out of scope
+here** — I edit prompt bodies, not the included templates. Served counts will still carry the
+(unchanged) template words.
+
+**Constraints re-confirmed against the tree, not the note:**
+- `{{artifact_name}}`: **51 refs across the 11**, load-bearing (porch substitutes at
+  prompts.ts:102). Preserve every one. (spir/aspir implement carry 0; the other 9 files hold all 51.)
+- Levers per spec row `protocols/*/prompts/*.md`: **P2 (examples→interfaces), P1**.
+- Porch needs only 4 headings (REQUIRED_SPEC_SECTIONS, checks.ts); the 20-heading pressure is the
+  advisory spec-review consult type. Don't conflate.
+- plan.md phases-JSON block is a **capability** (has_phases_json/min_two_phases) — survives untouched.
+- `<signal>` tags are capability-inventory (M5) — preserve or retire explicitly.
+- Rollback group **G4**; commits group-pure.
