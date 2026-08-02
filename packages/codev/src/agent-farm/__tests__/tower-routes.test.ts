@@ -12,6 +12,7 @@ import { EventEmitter } from 'node:events';
 import { handleRequest, startSendBuffer, stopSendBuffer } from '../servers/tower-routes.js';
 import type { RouteContext } from '../servers/tower-routes.js';
 import { shutdownDelayedSends, pendingDelayedSendCount } from '../servers/delayed-send.js';
+import { submitToSession, resetSubmissionChains } from '../servers/session-submit.js';
 
 // ============================================================================
 // Mocks
@@ -2108,6 +2109,49 @@ describe('tower-routes', () => {
       expect(lastClear).toBeGreaterThanOrEqual(0);
       expect(ctrlCIdx).toBeGreaterThan(lastClear);
       expect(urgentIdx).toBeGreaterThan(ctrlCIdx);
+    });
+
+    it('CANCELLATION: a delayed send whose lock wait outlasts shutdown does not write', async () => {
+      // The route-site `stillLive` guard, exercised where it lives. The
+      // delayed-send unit test only checks the predicate's value; this drives
+      // the real deliverOrBuffer and asserts the WRITE is skipped.
+      //
+      // Window: the delayed timer fires (generation check passes), delivery
+      // enters deliverOrBuffer and calls submitToSession, which QUEUES behind an
+      // occupier already holding this session's lock. Shutdown then bumps the
+      // generation. When the lock frees, the guard inside the reservation sees
+      // stillLive() === false and returns without writing.
+      vi.useFakeTimers();
+      resetSubmissionChains();
+      const mockWrite = vi.fn();
+      mockGetTerminalManager.mockReturnValue({
+        getSession: () => ({
+          write: mockWrite, pid: 1234, writable: true,
+          isUserIdle: () => true, composing: false,
+        }),
+        listSessions: () => [],
+      });
+      mockResolveTarget.mockReturnValue({
+        terminalId: 'term-cancel-lock', workspacePath: '/tmp/ws', agent: 'architect',
+      });
+
+      // Occupy the session's lock for 10s so any later submission queues behind it.
+      void submitToSession('term-cancel-lock', () => 10_000);
+
+      // A delayed send due at 1s — it will queue behind the occupier.
+      mockParseJsonBody.mockResolvedValue({
+        to: 'architect:main', message: 'CANARYMSG', workspace: '/tmp/ws',
+        options: { raw: true, deliverAfter: 1 },
+      });
+      await handleRequest(makeReq('POST', '/api/send'), makeRes().res, makeCtx());
+
+      await vi.advanceTimersByTimeAsync(1_000); // delayed timer fires, queues on the lock
+      shutdownDelayedSends();                    // shutdown while it waits
+      await vi.advanceTimersByTimeAsync(15_000); // occupier frees; queued delivery runs its guard
+
+      // The guard skipped the write: CANARYMSG never reached the session.
+      const wrote = mockWrite.mock.calls.map(c => String(c[0])).join('');
+      expect(wrote).not.toContain('CANARYMSG');
     });
 
     it('leaves undelayed sends on the immediate path', async () => {

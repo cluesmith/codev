@@ -139,4 +139,10 @@ writes complete).
   mid-flush, mid-flush-interrupt), plus core-side `tower-client-send.test.ts` for the wire
   contract.
 - Every ordering and cancellation guard is mutation-verified: the fix is confirmed to be the
-  thing the test depends on, not incidental.
+  thing the test depends on, not incidental. This includes the route-site `stillLive`
+  cancellation guard, which an earlier draft of this review claimed was mutation-verified
+  when it was not — the test then covered only the predicate's return value, not that the
+  write was skipped. That gap (Claude, phase-3 iter 3) is now closed by a route-level test
+  that drives `deliverOrBuffer` with a shutdown landing during the `submitToSession` wait,
+  and deleting the guard fails it. Recorded because claiming a check that did not exist is
+  precisely the failure mode lesson 2 is about.

@@ -279,4 +279,45 @@ describe('SendBuffer', () => {
       expect(buf.pendingCount).toBe(0);
     });
   });
+
+  describe('stop() awaits outstanding flush submissions (Spec 1307)', () => {
+    it('does not resolve until the injected submit settles', async () => {
+      // Codex regression: once the drain goes through submitToSession, a flush
+      // batch can be queued behind an in-flight write. If stop() returns before
+      // that submission settles, graceful shutdown tears down terminals and the
+      // buffered message — accepted for delivery — is lost. stop() must await.
+      const session = makeSession(/* idle */ true);
+      const deliver = vi.fn(() => 0);
+      const log = vi.fn();
+
+      // An injected submit that runs the batch but only settles when released.
+      let release!: () => void;
+      const gate = new Promise<void>(resolve => { release = resolve; });
+      const submit = vi.fn((_id: string, write: () => number) => {
+        write();
+        return gate;
+      });
+
+      buf.start(() => session, deliver, log, submit);
+      buf.enqueue(makeMsg('sess-1'));
+
+      let stopped = false;
+      const stopping = buf.stop().then(() => { stopped = true; });
+
+      // The batch has been written but the submission has not settled.
+      expect(submit).toHaveBeenCalledTimes(1);
+      expect(deliver).toHaveBeenCalledTimes(1);
+      await Promise.resolve();
+      expect(stopped).toBe(false); // stop() must still be waiting
+
+      release();
+      await stopping;
+      expect(stopped).toBe(true); // and resolves once the submission does
+    });
+
+    it('resolves promptly when nothing is buffered', async () => {
+      buf.start(() => makeSession(true), vi.fn(() => 0), vi.fn(), (_id, w) => { w(); return Promise.resolve(); });
+      await expect(buf.stop()).resolves.toBeUndefined();
+    });
+  });
 });

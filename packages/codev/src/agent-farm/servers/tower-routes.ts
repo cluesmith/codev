@@ -146,15 +146,19 @@ export function startSendBuffer(log: (level: 'INFO' | 'ERROR' | 'WARN', message:
     log,
     // Spec 1307: drain each session's batch under Spec 1273's submission lock,
     // so a direct or delayed send cannot write into a flush that has scheduled
-    // its paced writes but not finished them. Fire-and-forget: flush() is
-    // synchronous, and the lock orders by CALL rather than by await.
-    (sessionId, write) => { void submitToSession(sessionId, write); },
+    // its paced writes but not finished them. Returns the promise so the
+    // shutdown flush can be awaited; the catch keeps a throwing batch from
+    // becoming an unhandled rejection (the periodic flush ignores the return).
+    (sessionId, write) =>
+      submitToSession(sessionId, write).catch(() => {
+        /* a failed batch is logged by the write path; do not crash Tower */
+      }),
   );
 }
 
 /** Stop the send buffer and deliver remaining messages (called from tower-server during shutdown). */
-export function stopSendBuffer(): void {
-  sendBuffer.stop();
+export async function stopSendBuffer(): Promise<void> {
+  await sendBuffer.stop();
 }
 
 // ============================================================================

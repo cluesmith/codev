@@ -53,7 +53,7 @@ export type LogFn = (level: 'INFO' | 'ERROR' | 'WARN', message: string) => void;
  * Injected rather than imported so this module keeps no dependency on the
  * server layer, and so tests can drive it without Tower.
  */
-export type SubmitFn = (sessionId: string, write: () => number) => void;
+export type SubmitFn = (sessionId: string, write: () => number) => Promise<void>;
 
 const DEFAULT_IDLE_THRESHOLD_MS = 3000;
 const DEFAULT_MAX_BUFFER_AGE_MS = 60_000;
@@ -65,7 +65,7 @@ export class SendBuffer {
   private getSession: GetSessionFn | null = null;
   private deliver: DeliverFn | null = null;
   private log: LogFn | null = null;
-  private submit: SubmitFn = (_id, write) => { write(); };
+  private submit: SubmitFn = (_id, write) => { write(); return Promise.resolve(); };
   readonly idleThresholdMs: number;
   readonly maxBufferAgeMs: number;
 
@@ -92,23 +92,35 @@ export class SendBuffer {
     this.log = log;
     // Default runs the batch inline — used by tests that drive flush() directly
     // and do not care about cross-path serialisation.
-    this.submit = submit ?? ((_id, write) => { write(); });
+    this.submit = submit ?? ((_id, write) => { write(); return Promise.resolve(); });
     this.flushTimer = setInterval(() => this.flush(), FLUSH_INTERVAL_MS);
   }
 
-  /** Stop the flush timer and deliver all remaining messages. */
-  stop(): void {
+  /**
+   * Stop the flush timer and deliver all remaining messages.
+   *
+   * Awaits the final flush's submissions (Spec 1307): once the drain goes
+   * through `submitToSession`, a batch can be queued behind an in-flight write
+   * and NOT yet delivered when this returns. Graceful shutdown must await this
+   * before tearing down terminals, or a buffered message accepted for delivery
+   * is silently lost — the guarantee that held before the lock adoption and had
+   * to be restored after it.
+   */
+  async stop(): Promise<void> {
     if (this.flushTimer) {
       clearInterval(this.flushTimer);
       this.flushTimer = null;
     }
-    // Final flush — deliver everything remaining
-    this.flush(true);
+    // Final flush — deliver everything remaining, and wait for it to land.
+    await this.flush(true);
   }
 
   /** Check and deliver messages for sessions that are idle or aged out. */
-  flush(forceAll = false): void {
-    if (!this.getSession || !this.deliver) return;
+  flush(forceAll = false): Promise<void> {
+    if (!this.getSession || !this.deliver) return Promise.resolve();
+    // Only the shutdown flush (forceAll) needs to be awaited; the periodic
+    // timer is fire-and-forget, as before.
+    const submissions: Promise<void>[] = [];
 
 
     for (const [sessionId, messages] of this.buffers) {
@@ -152,7 +164,7 @@ export class SendBuffer {
         // many writes and returns the final offset, so the existing offset
         // threading is untouched while nothing else can write into this
         // session mid-batch.
-        this.submit(sessionId, () => {
+        submissions.push(this.submit(sessionId, () => {
           let offset = 0;
           for (const msg of messages) {
             offset = this.deliver!(session, msg, offset);
@@ -161,7 +173,7 @@ export class SendBuffer {
             }
           }
           return offset;
-        });
+        }));
         if (this.log && !forceAll) {
           const reason = maxAgeExceeded ? 'max age exceeded' : 'user idle';
           this.log('INFO', `Delivered ${messages.length} deferred message(s) to session ${sessionId.slice(0, 8)}... (${reason})`);
@@ -169,6 +181,7 @@ export class SendBuffer {
         this.buffers.delete(sessionId);
       }
     }
+    return submissions.length ? Promise.all(submissions).then(() => undefined) : Promise.resolve();
   }
 
   /**

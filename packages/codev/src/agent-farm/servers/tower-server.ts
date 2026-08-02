@@ -182,8 +182,12 @@ async function gracefulShutdown(signal: string): Promise<void> {
   if (sessionLogSweepInterval) clearInterval(sessionLogSweepInterval);
   clearInterval(sseHeartbeatInterval);
 
-  // 4b. Flush and stop send buffer (Spec 403) — delivers any deferred messages
-  stopSendBuffer();
+  // 4b. Flush and stop send buffer (Spec 403) — delivers any deferred messages.
+  // Awaited (Spec 1307): the flush drains under the submission lock now, so a
+  // batch can be queued behind an in-flight write. Awaiting here — before the
+  // terminal teardown below — is what keeps a buffered message accepted for
+  // delivery from being lost when the process exits.
+  await stopSendBuffer();
 
   // 4c. Drop pending delayed sends (Spec 1307). Deliberately DROP, not flush —
   // the opposite of 4b. A buffered message was accepted for immediate delivery
