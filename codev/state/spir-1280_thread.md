@@ -1060,3 +1060,15 @@ approval) — endorsed in Phase 4 as the system working.
 specify served recomputed after the wording restore: 1063→1077 (manifest updated). Reported R2 to
 architect; **blocked on the R2 decision** before the phase can go fully green. On approval I execute
 R2 in a separate commit (retire the 2 assertions + ship the replacement guard), like R1's 2-commit split.
+
+### Phase 5 — M11 inspection PASSED; holding for Waleed's R2 decision (2026-08-02)
+
+Architect completed M11: read the manifest + R2 in full, spot-checked rewritten specify.md
+(canonical carveout wording, spec.md include intact), confirmed the ASPIR header fix in all 8 files
+both trees, and independently reran baked-decisions + deletion-guard: **2 RED / 200 green, matching
+my report**. R2 mirrors R1's approved grounds but retirement decisions on 1280 get a human call, so
+it's with Waleed.
+
+**HOLD**: architect instruction — do not execute R2, do not advance the phase pointer, until the
+R2 decision comes back. State frozen at 862508e4 (2 pure-addition assertions RED by design).
+Blocked on a human decision; nothing further to do until then.
