@@ -652,13 +652,22 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
     // Build restart options for architect sessions (synchronous, no I/O)
     let restartOptions: ReconnectRestartOptions | undefined;
     if (dbSession.type === 'architect') {
-      let architectCmd = 'claude';
-      try {
-        const config = loadConfig(workspacePath);
-        const shellArchitect = config.shell?.architect;
-        if (typeof shellArchitect === 'string') architectCmd = shellArchitect;
-        else if (Array.isArray(shellArchitect)) architectCmd = shellArchitect.join(' ');
-      } catch { /* use default */ }
+      // Spec 1313: resolve with the SAME precedence as fresh launch
+      // (TOWER_ARCHITECT_CMD env override > config > 'claude'). restartOptions.command
+      // is now also the legacy-row identity heal, so omitting the env tier would heal
+      // a `TOWER_ARCHITECT_CMD=agy` architect (with no matching config) to the wrong
+      // profile — and agy would then never deliver. It also keeps auto-restart itself
+      // consistent with how the session was originally launched.
+      let architectCmd = process.env.TOWER_ARCHITECT_CMD || '';
+      if (!architectCmd) {
+        architectCmd = 'claude';
+        try {
+          const config = loadConfig(workspacePath);
+          const shellArchitect = config.shell?.architect;
+          if (typeof shellArchitect === 'string') architectCmd = shellArchitect;
+          else if (Array.isArray(shellArchitect)) architectCmd = shellArchitect.join(' ');
+        } catch { /* use default */ }
+      }
       const cmdParts = architectCmd.split(/\s+/);
       const cleanEnv = { ...process.env } as Record<string, string>;
       delete cleanEnv['CLAUDECODE'];
@@ -950,13 +959,19 @@ export async function getTerminalsForWorkspace(
         // Restore auto-restart for architect sessions (same as startup reconciliation)
         let restartOptions: ReconnectRestartOptions | undefined;
         if (dbSession.type === 'architect') {
-          let architectCmd = 'claude';
-          try {
-            const config = loadConfig(dbSession.workspace_path);
-            const shellArchitect = config.shell?.architect;
-            if (typeof shellArchitect === 'string') architectCmd = shellArchitect;
-            else if (Array.isArray(shellArchitect)) architectCmd = shellArchitect.join(' ');
-          } catch { /* use default */ }
+          // Spec 1313: same precedence as fresh launch (env override > config >
+          // 'claude') — restartOptions.command doubles as the legacy-row identity
+          // heal, so the env tier must be honored here too (see reconcile path).
+          let architectCmd = process.env.TOWER_ARCHITECT_CMD || '';
+          if (!architectCmd) {
+            architectCmd = 'claude';
+            try {
+              const config = loadConfig(dbSession.workspace_path);
+              const shellArchitect = config.shell?.architect;
+              if (typeof shellArchitect === 'string') architectCmd = shellArchitect;
+              else if (Array.isArray(shellArchitect)) architectCmd = shellArchitect.join(' ');
+            } catch { /* use default */ }
+          }
           const cmdParts = architectCmd.split(/\s+/);
           const cleanEnv = { ...process.env } as Record<string, string>;
           delete cleanEnv['CLAUDECODE'];

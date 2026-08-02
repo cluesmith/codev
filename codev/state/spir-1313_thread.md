@@ -1099,3 +1099,26 @@ needs protocol change); substring→exact matcher; args persistence for wrapper 
 RESULT: tsc clean; full unit suite 4179 passed / 48 skipped; new test 6/6. Review doc updated (Round 3 CMAP +
 lesson "exercise the real seam, not a double" + tech-debt). NEXT: commit (explicit staging) → push (updates PR
 #1330) → report to architect + offer a focused re-CMAP on the remediation delta before the pr gate.
+
+### 2026-08-01 — Round-2 re-CMAP on the remediation: Codex RC (1 narrow hole) + Claude/Gemini APPROVE → fixed.
+Ran a focused round-2 3-way on the pushed fix (f59c719e). Claude APPROVE (verified against working tree: version
+bump converges both paths, PRAGMA gate idempotent, self-heal real at all 4 sites, no cross-architect bleed).
+Gemini APPROVE. Codex REQUEST_CHANGES on ONE verified new hole:
+  - The reconcile self-heal derives restartOptions.command from loadConfig()/'claude' but does NOT honor the
+    `TOWER_ARCHITECT_CMD` env override that FRESH-LAUNCH honors (tower-instances.ts:505/1034: env > config >
+    claude). So a legacy (command=NULL) architect launched via `TOWER_ARCHITECT_CMD=agy` with no matching config
+    would heal to 'claude' → agy marker mismatch → still never delivers. Same class as the round-1 legacy gap.
+    Verified in source before acting.
+  FIX: mirrored fresh-launch's exact precedence (env > config > 'claude') in BOTH reconcile derivations
+  (tower-terminals.ts ~654 + ~945). Also fixes a pre-existing divergence — auto-restart itself now relaunches
+  with the same command fresh-launch would use.
+Also addressed Claude/Codex's shared "add a functional migration test" ask: added a `command column migration
+(v16)` describe to spec-1313-migration.test.ts (repo's established pattern — build pre-v16 DB, run a faithful
+PRAGMA-gated replica, assert: column added + v16 recorded + value round-trips; idempotent re-run; PRAGMA gate
+skips ALTER on fresh-install shape; fresh GLOBAL_SCHEMA matches migrated shape). Plus Claude's comment nit
+(tower-routes shell comment — a builder-worktree-cwd shell resolves via the launch-script fallback).
+Nullish-'' edge (Claude): left `??` — precedence is correct (persisted = the running process's actual command;
+restartOptions is the legacy fallback), and a persisted '' architect is unreachable.
+RESULT: tsc clean; migration+identity files 16/16; full suite running. NEXT: commit round-2 remediation → push
+(new commit, no force — repo policy) → report convergence to architect (2 prior APPROVE + Codex's sole RC point
+now fixed).

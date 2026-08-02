@@ -2599,8 +2599,10 @@ async function handleWorkspaceShellCreate(
           label: `Shell ${shellId.replace('shell-', '')}`,
           cwd: workspacePath,
           // Spec 1313: thread/persist for reconstruction symmetry with the other
-          // createSessionRaw sites. A plain shell still resolves to no-profile
-          // (its command is a shell, not an agent), so `afx send` correctly holds.
+          // createSessionRaw sites. A workspace-root shell resolves to no-profile
+          // (its command is a shell, not an agent, and the cwd has no launch script),
+          // so `afx send` correctly holds. (A shell whose cwd happened to be a builder
+          // worktree would resolve that worktree's harness via the launch-script fallback.)
           command: shellCmd,
           args: shellArgs,
         });

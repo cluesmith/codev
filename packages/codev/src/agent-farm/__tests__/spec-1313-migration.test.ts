@@ -234,3 +234,112 @@ describe('Spec 1313 — mailbox table migration (v15)', () => {
     }
   });
 });
+
+describe('Spec 1313 — command column migration (v16)', () => {
+  const testDir = resolve(process.cwd(), '.test-spec-1313-v16-migration');
+  let db: Database.Database;
+
+  beforeEach(() => {
+    if (existsSync(testDir)) rmSync(testDir, { recursive: true });
+    mkdirSync(testDir, { recursive: true });
+    db = new Database(resolve(testDir, 'global.db'));
+    db.pragma('journal_mode = WAL');
+  });
+  afterEach(() => {
+    db.close();
+    if (existsSync(testDir)) rmSync(testDir, { recursive: true });
+  });
+
+  /** The pre-v16 terminal_sessions shape (v15 schema: label + cwd, NO command). */
+  const PRE_V16_TERMINAL_SESSIONS_DDL = `
+    CREATE TABLE IF NOT EXISTS terminal_sessions (
+      id TEXT PRIMARY KEY,
+      workspace_path TEXT NOT NULL,
+      type TEXT NOT NULL CHECK(type IN ('architect', 'builder', 'shell')),
+      role_id TEXT,
+      pid INTEGER,
+      shellper_socket TEXT,
+      shellper_pid INTEGER,
+      shellper_start_time INTEGER,
+      label TEXT,
+      cwd TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+  `;
+
+  function buildPreV16Db(): void {
+    db.exec(`CREATE TABLE _migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL DEFAULT (datetime('now')));`);
+    for (let v = 1; v <= 15; v++) db.prepare('INSERT INTO _migrations (version) VALUES (?)').run(v);
+    db.exec(PRE_V16_TERMINAL_SESSIONS_DDL);
+  }
+
+  /**
+   * Faithful replica of the v16 block in db/index.ts: PRAGMA-gated (only ALTER
+   * when the column is genuinely absent, so a real failure surfaces instead of
+   * being marked migrated), then the version marker.
+   */
+  function runV16Migration(): void {
+    const v16 = db.prepare('SELECT version FROM _migrations WHERE version = 16').get();
+    if (!v16) {
+      const hasCommand = (db.prepare(`PRAGMA table_info(terminal_sessions)`).all() as Array<{ name: string }>)
+        .some((c) => c.name === 'command');
+      if (!hasCommand) db.exec(`ALTER TABLE terminal_sessions ADD COLUMN command TEXT`);
+      db.prepare('INSERT INTO _migrations (version) VALUES (16)').run();
+    }
+  }
+
+  const termCols = () =>
+    (db.prepare("SELECT name FROM pragma_table_info('terminal_sessions')").all() as Array<{ name: string }>)
+      .map((c) => c.name).sort();
+
+  it('adds the command column to a pre-v16 terminal_sessions and records v16', () => {
+    buildPreV16Db();
+    expect(termCols()).not.toContain('command');
+
+    runV16Migration();
+
+    expect(termCols()).toContain('command');
+    expect(db.prepare('SELECT version FROM _migrations WHERE version = 16').get()).toBeTruthy();
+    // The healed column round-trips a value (what reconcile persists for identity).
+    db.prepare(`INSERT INTO terminal_sessions (id, workspace_path, type, command) VALUES ('t', '/ws', 'architect', 'claude')`).run();
+    expect((db.prepare("SELECT command FROM terminal_sessions WHERE id='t'").get() as { command: string }).command).toBe('claude');
+  });
+
+  it('is idempotent: re-running does not throw, double-add, or duplicate the marker', () => {
+    buildPreV16Db();
+    runV16Migration();
+    expect(() => runV16Migration()).not.toThrow();
+    const markers = db.prepare('SELECT COUNT(*) AS n FROM _migrations WHERE version = 16').get() as { n: number };
+    expect(markers.n).toBe(1);
+    expect(termCols().filter((c) => c === 'command')).toHaveLength(1);
+  });
+
+  it('the PRAGMA gate skips the ALTER when the column already exists (fresh-install shape)', () => {
+    // Simulate a fresh install: GLOBAL_SCHEMA already created `command`, but the
+    // v16 marker was not yet stamped. The gate must NOT attempt a duplicate ALTER.
+    db.exec(`CREATE TABLE _migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL DEFAULT (datetime('now')));`);
+    for (let v = 1; v <= 15; v++) db.prepare('INSERT INTO _migrations (version) VALUES (?)').run(v);
+    db.exec(PRE_V16_TERMINAL_SESSIONS_DDL.replace('cwd TEXT,', 'cwd TEXT,\n      command TEXT,'));
+    expect(termCols()).toContain('command');
+
+    expect(() => runV16Migration()).not.toThrow();
+    expect(db.prepare('SELECT version FROM _migrations WHERE version = 16').get()).toBeTruthy();
+  });
+
+  it('a fresh install (GLOBAL_SCHEMA) has the command column, matching the migrated shape', () => {
+    buildPreV16Db();
+    runV16Migration();
+    const migratedCols = termCols();
+
+    const fresh = new Database(resolve(testDir, 'fresh.db'));
+    try {
+      fresh.exec(GLOBAL_SCHEMA);
+      const freshCols = (fresh.prepare("SELECT name FROM pragma_table_info('terminal_sessions')").all() as Array<{ name: string }>)
+        .map((c) => c.name).sort();
+      expect(freshCols).toContain('command');
+      expect(freshCols).toEqual(migratedCols);
+    } finally {
+      fresh.close();
+    }
+  });
+});
