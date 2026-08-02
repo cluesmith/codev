@@ -2154,6 +2154,35 @@ describe('tower-routes', () => {
       expect(wrote).not.toContain('CANARYMSG');
     });
 
+    it('logs a write that throws instead of swallowing it (Codex/Claude PR review)', async () => {
+      // A torn-down session can make the write throw. The submission lock's
+      // callers only .catch to keep Tower alive; without logging here the drop
+      // is silent, which is exactly the delivery-outcome the log must record.
+      vi.useFakeTimers();
+      const ctxLog = vi.fn();
+      const throwingWrite = vi.fn(() => { throw new Error('session gone'); });
+      mockGetTerminalManager.mockReturnValue({
+        getSession: () => ({
+          write: throwingWrite, pid: 1234, writable: true,
+          isUserIdle: () => true, composing: false,
+        }),
+        listSessions: () => [],
+      });
+      mockResolveTarget.mockReturnValue({
+        terminalId: 'term-throw', workspacePath: '/tmp/ws', agent: 'architect',
+      });
+      mockParseJsonBody.mockResolvedValue({
+        to: 'architect:main', message: 'x', workspace: '/tmp/ws', options: { raw: true },
+      });
+      await handleRequest(makeReq('POST', '/api/send'), makeRes().res, makeCtx({ log: ctxLog }));
+      await vi.advanceTimersByTimeAsync(200);
+
+      const errorLogged = ctxLog.mock.calls.some(
+        c => c[0] === 'ERROR' && String(c[1]).includes('write threw'),
+      );
+      expect(errorLogged).toBe(true);
+    });
+
     it('leaves undelayed sends on the immediate path', async () => {
       mockParseJsonBody.mockResolvedValue({
         to: 'architect:main', message: 'now', workspace: '/tmp/ws', options: { raw: true },

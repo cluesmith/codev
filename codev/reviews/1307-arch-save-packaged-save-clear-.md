@@ -161,7 +161,7 @@ writes complete).
 
 ## Testing
 
-- Full suite green: 4186 passed, 0 failed, 48 skipped.
+- Full suite green: 4187 passed, 0 failed, 48 skipped.
 - New coverage: `spec-1307-send-delay.test.ts` (validation, scheduling, shutdown-drop,
   shutdown-during-lock-wait, FIFO), `spec-1307-arch-save-skill.test.ts` (four-tree drift +
   content), and route-level `ORDERING:` tests (buffered-inversion, two-simultaneous-delayed,
