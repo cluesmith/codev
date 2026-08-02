@@ -150,8 +150,11 @@ export function startSendBuffer(log: (level: 'INFO' | 'ERROR' | 'WARN', message:
     // shutdown flush can be awaited; the catch keeps a throwing batch from
     // becoming an unhandled rejection (the periodic flush ignores the return).
     (sessionId, write) =>
-      submitToSession(sessionId, write).catch(() => {
-        /* a failed batch is logged by the write path; do not crash Tower */
+      submitToSession(sessionId, write).catch((err) => {
+        // deliverBufferedMessage's own writes do not throw synchronously, but a
+        // torn-down session could; log rather than swallow silently, and never
+        // crash Tower over one batch.
+        log('ERROR', `Buffered flush submission failed for ${sessionId.slice(0, 8)}...: ${err instanceof Error ? err.message : String(err)}`);
       }),
   );
 }
@@ -1822,13 +1825,23 @@ async function deliverOrBuffer(
     // it: a delayed delivery can acquire the lock only after a shutdown that
     // fired while it queued. `stillLive` is undefined on the immediate path.
     if (stillLive && !stillLive()) return 0;
-    wrote = true;
-    let offset = 0;
-    if (interrupt) {
-      session.write('\x03'); // Ctrl+C, inside the reservation
-      offset = 100; // same pause the buffered interruptFirst path uses
+    try {
+      let offset = 0;
+      if (interrupt) {
+        session.write('\x03'); // Ctrl+C, inside the reservation
+        offset = 100; // same pause the buffered interruptFirst path uses
+      }
+      const endTime = writeMessageToSession(session, formattedMessage, noEnter, offset);
+      wrote = true;
+      return endTime;
+    } catch (err) {
+      // A write can throw if the session is torn down between the writability
+      // check and here. Log it — the caller's catch (delayed-send, or the flush
+      // submit) only swallows to keep Tower alive, and a silently-dropped
+      // scheduled message is exactly the failure the delivery log must record.
+      ctx.log('ERROR', `Message DROPPED: ${from ?? 'unknown'} → ${agent} (terminal ${terminalId.slice(0, 8)}...): write threw: ${err instanceof Error ? err.message : String(err)}`);
+      return 0;
     }
-    return writeMessageToSession(session, formattedMessage, noEnter, offset);
   });
   if (wrote) {
     broadcastMessage(broadcastPayload);

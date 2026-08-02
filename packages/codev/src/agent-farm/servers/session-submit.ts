@@ -41,14 +41,16 @@
  *
  * ## Exactly what it covers — this is NOT blanket per-session atomicity
  *
- * A lock only serialises writers that take it. Currently that is the `escape`
- * and immediate-delivery paths of `/api/send`. Every other PTY writer still
+ * A lock only serialises writers that take it. That is the `escape` and
+ * immediate-delivery paths of `/api/send`, and — since Spec 1307 (#1335) — the
+ * buffer flush and delayed-delivery paths too. Every other PTY writer still
  * writes directly, and it is worth being precise about why:
  *
- *   - `tower-routes.ts` `deliverBufferedMessage` (buffer flush) — NOT covered.
- *     Adopting it is Spec 1307's work; the batch form
- *     (`write` performing the whole drain and returning the final offset) is
- *     supported and tested, so no API change is needed when they wire it.
+ *   - `tower-routes.ts` `deliverBufferedMessage` (buffer flush) — COVERED as of
+ *     Spec 1307: the whole drain is one reservation via the batch form (`write`
+ *     performing the drain and returning the final offset), which needed no API
+ *     change here. (This bullet previously said "NOT covered; adopting it is
+ *     Spec 1307's work" — that work is #1335.)
  *   - `tower-cron.ts` cron delivery — NOT covered, and RE-VERIFIED against
  *     #1143's rewrite of that region rather than assumed. `deliverMessage`
  *     still calls `writeMessageToSession` directly (`tower-cron.ts:338`), so a

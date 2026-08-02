@@ -44,8 +44,8 @@ describe('SendBuffer', () => {
     buf = new SendBuffer({ idleThresholdMs: 3000, maxBufferAgeMs: 10_000 });
   });
 
-  afterEach(() => {
-    buf.stop();
+  afterEach(async () => {
+    await buf.stop(); // stop() is async (Spec 1307); await before real timers
     vi.useRealTimers();
   });
 
@@ -180,7 +180,7 @@ describe('SendBuffer', () => {
     expect(log).toHaveBeenCalledWith('WARN', expect.stringContaining('Discarding'));
   });
 
-  it('stop() delivers all remaining messages (force flush)', () => {
+  it('stop() delivers all remaining messages (force flush)', async () => {
     const session = makeSession(false); // not idle — normally wouldn't deliver
     const deliver = vi.fn().mockReturnValue(0);
     const log = vi.fn();
@@ -190,7 +190,7 @@ describe('SendBuffer', () => {
     buf.enqueue(makeMsg('sess-1'));
 
     // Stop forces delivery of everything
-    buf.stop();
+    await buf.stop();
 
     expect(deliver).toHaveBeenCalledTimes(2);
     expect(buf.pendingCount).toBe(0);

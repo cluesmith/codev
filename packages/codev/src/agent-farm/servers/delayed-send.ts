@@ -143,9 +143,10 @@ export function scheduleDelayedSend(
         // lock is held — closing the shutdown-during-lock-wait window.
         await deliver(() => generation === scheduledGeneration);
       } catch {
-        // Delivery reports its own failures through the route's logger. A
-        // throw here would otherwise become an unhandled rejection and take
-        // Tower down over one undeliverable message.
+        // deliverOrBuffer logs a write failure at its own site with terminal
+        // context; this catch is a last-resort guard so an unexpected throw
+        // cannot become an unhandled rejection that takes Tower down over one
+        // undeliverable message.
       }
     })();
   }, delaySeconds * 1000);

@@ -57,6 +57,8 @@ export type SubmitFn = (sessionId: string, write: () => number) => Promise<void>
 
 const DEFAULT_IDLE_THRESHOLD_MS = 3000;
 const DEFAULT_MAX_BUFFER_AGE_MS = 60_000;
+/** Cap on how long stop() waits for in-flight submissions to drain (Spec 1307). */
+const DEFAULT_DRAIN_TIMEOUT_MS = 5_000;
 const FLUSH_INTERVAL_MS = 500;
 
 export class SendBuffer {
@@ -76,10 +78,12 @@ export class SendBuffer {
   private outstanding = new Set<Promise<void>>();
   readonly idleThresholdMs: number;
   readonly maxBufferAgeMs: number;
+  private readonly drainTimeoutMs: number;
 
-  constructor(opts?: { idleThresholdMs?: number; maxBufferAgeMs?: number }) {
+  constructor(opts?: { idleThresholdMs?: number; maxBufferAgeMs?: number; drainTimeoutMs?: number }) {
     this.idleThresholdMs = opts?.idleThresholdMs ?? DEFAULT_IDLE_THRESHOLD_MS;
     this.maxBufferAgeMs = opts?.maxBufferAgeMs ?? DEFAULT_MAX_BUFFER_AGE_MS;
+    this.drainTimeoutMs = opts?.drainTimeoutMs ?? DEFAULT_DRAIN_TIMEOUT_MS;
   }
 
   /** Buffer a message for deferred delivery. */
@@ -207,7 +211,16 @@ export class SendBuffer {
   private async drainOutstanding(): Promise<void> {
     // Snapshot: a submission settling during the await removes itself, and new
     // ones cannot appear once the flush timer is stopped.
-    await Promise.all([...this.outstanding].map(p => p.catch(() => undefined)));
+    const drained = Promise.all([...this.outstanding].map(p => p.catch(() => undefined)));
+    // Bounded: graceful shutdown must not hang if a submission never settles
+    // (a wedged PTY, a lost shellper). Better to exit having delivered what
+    // landed in time than to block teardown forever. The paced writes complete
+    // in well under a second, so this cap is generous.
+    const timeout = new Promise<void>(resolve => {
+      const t = setTimeout(resolve, this.drainTimeoutMs);
+      if (typeof t.unref === 'function') t.unref();
+    });
+    await Promise.race([drained.then(() => undefined), timeout]);
   }
 
   /**

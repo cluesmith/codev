@@ -387,11 +387,24 @@ mechanisms unremarked.
   command.
 
 #### Deliverables
-- [ ] A completed live run: a real architect saves, clears, and resumes.
-- [ ] Confirmed or corrected default delay in the skill.
-- [ ] `codev/resources/commands/agent-farm.md` — `--delay` reference.
-- [ ] `CLAUDE.md` and `AGENTS.md` updated byte-identically.
-- [ ] `codev/reviews/1307-*.md`.
+
+**AMENDED 2026-08-02** (architect ruling; recorded in place rather than left as
+misleading checkboxes, the way the spec's byte-identical criterion was). The live run and
+delay calibration are **moved to the verify phase** — `/arch-save` is architect-only and a
+builder must refuse it, so its live cycle cannot run during implement; it runs post-merge as
+a throwaway-sibling probe. The `CLAUDE.md`/`AGENTS.md` item is **superseded**: Spec 1280's
+Phase 1 restructured `CLAUDE.md` so per-flag CLI detail no longer belongs there, so the
+correct outcome is *no* `--delay` content in the always-on surface and the reference in
+`agent-farm.md` (both trees) instead.
+
+- [→ verify] A completed live run: a real architect saves, clears, and resumes.
+- [→ verify] Confirmed or corrected default delay in the skill (needs the live
+  send→session-ready measurement).
+- [x] `codev/resources/commands/agent-farm.md` — `--delay` reference (both `codev/` and
+  `codev-skeleton/`).
+- [x] `CLAUDE.md`/`AGENTS.md` remain byte-identical with **no** `--delay` content
+  (superseded, per above).
+- [x] `codev/reviews/1307-*.md`.
 
 #### Implementation Details
 
