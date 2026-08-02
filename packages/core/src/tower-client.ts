@@ -179,6 +179,31 @@ export interface TowerClientOptions {
 
 import { encodeWorkspacePath } from './workspace.js';
 
+/**
+ * Extract a human-facing error string from a Tower error response body (#1333).
+ *
+ * Tower error responses carry a machine `error` code and, for many cases, a
+ * human-readable `message` explaining *why* (e.g. the builder spoofing guard:
+ * "builder <id> may only address its own spawning architect"). The previous
+ * extraction preferred the bare code and discarded the message, so the CLI
+ * surfaced an opaque `NOT_FOUND` with no reason. Surface the descriptive
+ * message when present, keeping the code as a parenthetical suffix so both the
+ * human reason and the machine code reach the caller. Falls back to the code
+ * alone, then to the raw (non-JSON) body text.
+ */
+function extractTowerError(text: string): string {
+  try {
+    const json = JSON.parse(text) as { error?: unknown; message?: unknown };
+    const code = typeof json.error === 'string' ? json.error : undefined;
+    const detail = typeof json.message === 'string' ? json.message : undefined;
+    return detail && code && detail !== code
+      ? `${detail} (${code})`
+      : detail || code || text;
+  } catch {
+    return text;
+  }
+}
+
 export class TowerClient {
   private readonly baseUrl: string;
   private readonly getAuthKey: () => string | null;
@@ -215,13 +240,7 @@ export class TowerClient {
 
       if (!response.ok) {
         const text = await response.text();
-        let error: string;
-        try {
-          const json = JSON.parse(text);
-          error = json.error || json.message || text;
-        } catch {
-          error = text;
-        }
+        const error = extractTowerError(text);
         return { ok: false, status: response.status, error };
       }
 
@@ -624,13 +643,7 @@ export class TowerClient {
       });
       if (!response.ok) {
         const text = await response.text();
-        let error: string;
-        try {
-          const json = JSON.parse(text);
-          error = json.error || json.message || text;
-        } catch {
-          error = text;
-        }
+        const error = extractTowerError(text);
         return { ok: false, error };
       }
       const data = (await response.json()) as { path: string };
