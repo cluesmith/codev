@@ -1,36 +1,36 @@
 id: '1313'
 title: afx-send-mailbox-first-deliver
 protocol: spir
-phase: verify
+phase: implement
 plan_phases:
   - id: phase_1
     title: Mailbox persistence layer
-    status: complete
+    status: in_progress
   - id: phase_2
     title: Rendered-empty gate + claude/codex profiles
-    status: complete
+    status: pending
   - id: phase_3
     title: agy classifier profile (blocking measurement)
-    status: complete
+    status: pending
   - id: phase_4
     title: Delivery orchestration + write serialization
-    status: complete
+    status: pending
   - id: phase_5
     title: Fast delivery triggers (submit + quiescence)
-    status: complete
+    status: pending
   - id: phase_6
     title: Cron rerouting through mailbox + gate
-    status: complete
+    status: pending
   - id: phase_7
     title: afx inbox CLI + broadcasts + escalation
-    status: complete
+    status: pending
   - id: phase_8
     title: Dashboard + VSCode held-count indicators
-    status: complete
+    status: pending
   - id: phase_9
     title: Documentation + skeleton mirror
-    status: complete
-current_plan_phase: null
+    status: pending
+current_plan_phase: phase_1
 gates:
   spec-approval:
     status: approved
@@ -41,17 +41,14 @@ gates:
     requested_at: '2026-08-01T02:17:35.649Z'
     approved_at: '2026-08-01T02:20:04.744Z'
   pr:
-    status: approved
-    requested_at: '2026-08-01T18:19:08.116Z'
-    approved_at: '2026-08-01T19:02:58.635Z'
+    status: pending
   verify-approval:
     status: pending
-    requested_at: '2026-08-01T19:05:50.101Z'
 iteration: 1
 build_complete: false
 history: []
 started_at: '2026-08-01T01:40:05.008Z'
-updated_at: '2026-08-01T19:05:50.101Z'
+updated_at: '2026-08-02T23:24:01.954Z'
 force_advanced:
   phase: phase_7
   iteration: 3
