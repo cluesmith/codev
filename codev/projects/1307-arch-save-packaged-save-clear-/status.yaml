@@ -18,8 +18,8 @@ gates:
     status: pending
   verify-approval:
     status: pending
-iteration: 1
-build_complete: true
+iteration: 2
+build_complete: false
 history:
   - iteration: 1
     plan_phase: phase_1
@@ -69,8 +69,20 @@ history:
         verdict: COMMENT
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/aspir-1307/codev/projects/1307-arch-save-packaged-save-clear-/1307-phase_2-iter1-claude.txt
+  - iteration: 1
+    plan_phase: phase_3
+    build_output: ''
+    reviews:
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/aspir-1307/codev/projects/1307-arch-save-packaged-save-clear-/1307-phase_3-iter1-codex.txt
+      - model: claude
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/aspir-1307/codev/projects/1307-arch-save-packaged-save-clear-/1307-phase_3-iter1-claude.txt
 started_at: '2026-07-31T21:42:49.601Z'
-updated_at: '2026-08-02T04:26:07.005Z'
+updated_at: '2026-08-02T04:34:45.983Z'
 force_advanced:
   phase: phase_1
   iteration: 3
