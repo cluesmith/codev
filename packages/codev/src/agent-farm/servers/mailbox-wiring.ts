@@ -143,6 +143,17 @@ export function resolveAgentForSession(
  * command and resolve against that. Still `null` → the delivery holds `no-profile`
  * (fail-safe by construction: an unknown agent is held and surfaced, never guessed
  * — this is what correctly trips on wrapper/boot/relaunch screens too).
+ *
+ * Stale-identity note (Spec 1313): `session.command` is now sourced from the
+ * persisted `terminal_sessions.command` on reconnect. If it ever goes stale (a
+ * user re-points `shell.architect` at a different harness and the shellper later
+ * auto-restarts into it while the row still names the old one), this can resolve
+ * the WRONG profile — but it fails CLOSED today, not misdelivered: CLAUDE_PROFILE
+ * and CODEX_PROFILE are behaviourally identical (same marker + region patterns),
+ * and any cross-family mismatch (e.g. agy's `> ` marker) fails the composer-marker
+ * test → not clean → held. That safety is a property of the current profile TABLE,
+ * not of this design; the day codex/claude markers diverge, stale identity becomes
+ * a live bug and the authoritative fix is WELCOME-frame hydration (see review).
  */
 export function resolveProfileForSession(session: DeliverySession): GateProfile | null {
   const direct = resolveProfile({ command: session.command, args: session.launchArgs });

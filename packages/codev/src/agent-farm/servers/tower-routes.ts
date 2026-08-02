@@ -780,6 +780,11 @@ async function handleTerminalCreate(
         const session = manager.createSessionRaw({
           label: label || `terminal-${sessionId.slice(0, 8)}`,
           cwd,
+          // Spec 1313: thread the launch command so the render-gate can resolve
+          // this session's profile (builders keep the `.builder-start.sh` backstop
+          // too; this makes identity direct and restart-safe via the persisted row).
+          command,
+          args,
         });
         const ptySession = manager.getSession(session.id);
         if (ptySession) {
@@ -798,7 +803,7 @@ async function handleTerminalCreate(
             entry.shells.set(roleId, session.id);
           }
           saveTerminalSession(session.id, workspacePath, termType, roleId, shellperInfo.pid,
-            shellperInfo.socketPath, shellperInfo.pid, shellperInfo.startTime, label ?? null, cwd ?? null);
+            shellperInfo.socketPath, shellperInfo.pid, shellperInfo.startTime, label ?? null, cwd ?? null, command ?? null);
           ctx.log('INFO', `Registered shellper terminal ${session.id} as ${termType} "${roleId}" for workspace ${workspacePath}`);
         }
       } catch (shellperErr) {
@@ -820,7 +825,7 @@ async function handleTerminalCreate(
         } else {
           entry.shells.set(roleId, info.id);
         }
-        saveTerminalSession(info.id, workspacePath, termType, roleId, info.pid, null, null, null, null, cwd ?? null);
+        saveTerminalSession(info.id, workspacePath, termType, roleId, info.pid, null, null, null, null, cwd ?? null, command ?? null);
         ctx.log('WARN', `Terminal ${info.id} for ${workspacePath} is non-persistent (shellper unavailable)`);
       }
     }
@@ -2593,6 +2598,11 @@ async function handleWorkspaceShellCreate(
         const session = manager.createSessionRaw({
           label: `Shell ${shellId.replace('shell-', '')}`,
           cwd: workspacePath,
+          // Spec 1313: thread/persist for reconstruction symmetry with the other
+          // createSessionRaw sites. A plain shell still resolves to no-profile
+          // (its command is a shell, not an agent), so `afx send` correctly holds.
+          command: shellCmd,
+          args: shellArgs,
         });
         const ptySession = manager.getSession(session.id);
         if (ptySession) {
@@ -2602,7 +2612,7 @@ async function handleWorkspaceShellCreate(
         const entry = getWorkspaceTerminalsEntry(workspacePath);
         entry.shells.set(shellId, session.id);
         saveTerminalSession(session.id, workspacePath, 'shell', shellId, shellperInfo.pid,
-          shellperInfo.socketPath, shellperInfo.pid, shellperInfo.startTime, session.label, workspacePath);
+          shellperInfo.socketPath, shellperInfo.pid, shellperInfo.startTime, session.label, workspacePath, shellCmd);
 
         shellCreated = true;
         res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -2633,7 +2643,7 @@ async function handleWorkspaceShellCreate(
 
       const entry = getWorkspaceTerminalsEntry(workspacePath);
       entry.shells.set(shellId, session.id);
-      saveTerminalSession(session.id, workspacePath, 'shell', shellId, session.pid, null, null, null, session.label, workspacePath);
+      saveTerminalSession(session.id, workspacePath, 'shell', shellId, session.pid, null, null, null, session.label, workspacePath, shellCmd);
       ctx.log('WARN', `Shell ${shellId} for ${workspacePath} is non-persistent (shellper unavailable)`);
 
       res.writeHead(200, { 'Content-Type': 'application/json' });

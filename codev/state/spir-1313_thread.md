@@ -1023,3 +1023,79 @@ wall-clock guard for a deterministic op-count check). Reverted my earlier interi
 CI-aware bound). Next: commit (render-gate.test.ts + review + thread, explicit staging) → push (re-triggers CI) →
 report to architect. Blocker 2 (REVIEW_REQUIRED) stays PARKED — architect is the PR author (can't self-approve) +
 no admin; needs a 2nd maintainer (e.g. waleedkadous) to Approve/admin-merge. Holding the merge + verify per directive.
+
+### 2026-08-01 — PUSHED 549f50cd + CI GREEN. Blocker 1 cleared. Only REVIEW_REQUIRED remains (parked).
+New CI run 30714533930 on head 549f50cd: ALL 6 checks PASS, incl. 'Unit Tests' (2m1s) — the CI-aware perf bound
+held (no re-flake). Blocker 1 (flaky perf test) CLEARED. `gh pr view 1330`: mergeStateStatus=BLOCKED but now for
+ONE reason only — reviewDecision=REVIEW_REQUIRED (every status check green). PR #1330 is ready-to-merge pending
+ONLY a 2nd maintainer's GitHub "Approve" (or admin-merge). Reported pushed+green to architect. HOLDING merge +
+verify per directive; will `gh pr merge 1330 --merge` → verify (agy trust-dialog smoke + #1265 repro) once the
+review lands or the architect says go. Blocker 2 is external (maintainer-dependent), architect parked it → I end my
+turn and stay addressable rather than long-poll for an open-ended review approval. Not merging, not --admin, not
+self-approving, not running afx cleanup / closing #1313 (architect owns post-verify).
+
+### 2026-08-01 — Architect pinged (delivery smoke test on empty prompt). Feature worked; status reported.
+Architect sent "hi" / "hey" / "testing while builder prompt is empty" — exercising Spec 1313's own mechanism
+(mailbox-first delivery onto a render-gate-verified empty prompt). All three landed cleanly on my idle prompt =
+the feature in action during verify. Re-checked PR #1330 fresh: OPEN, all 6 CI checks SUCCESS (green), but
+isDraft=True AND reviewDecision=REVIEW_REQUIRED → mergeState UNKNOWN. So merge is gated by (1) draft status
+(`gh pr ready 1330`) and (2) a maintainer GitHub Approve (I can't self-approve; no admin). Both are architect/
+maintainer actions; Blocker 2 was already parked. Still holding at verify-approval per strict mode + earlier
+directive. Not merging, not un-drafting, not self-approving, not polling. Reported status to architect in-terminal.
+
+### 2026-08-01 — VERIFY-phase bug (architect-directed): `afx send architect` always no-profile. Fix implemented.
+Architect found in live PR #1330 testing: sends to ANY architect (main + siblings, claude+codex) return
+held(no-profile) and NEVER deliver; sends to builders deliver fine. My heads-up `afx send architect` ALSO got
+held(no-profile) — the bug reproducing itself. Confirmed root cause in code (matches architect's diagnosis):
+  - `pty-manager.ts createSessionRaw` hardcoded `command: ''` for ALL shellper-backed sessions.
+  - `resolveProfileForSession` (mailbox-wiring.ts:147) then falls back to `harnessFromLaunchScript(cwd)` which reads
+    `.builder-start.sh` — ONLY builder worktrees have it. Architects run in the workspace root -> null -> no-profile,
+    permanently. Suite stayed green because gate/repro tests use a command-populated DOUBLE (never the real
+    createSessionRaw empty-command path).
+
+FINDING BEYOND THE DIAGNOSIS (flagged to architect via afx, held): architects have NO `.builder-start.sh` backstop,
+so a creation-site-only fix makes them deliver until the FIRST Tower restart, then silently revert to no-profile —
+the reconcile path (tower-terminals.ts:798) rebuilds architects from the DB, which stored no command. So I made
+identity a single-source-of-truth on the session row + restart-safe.
+
+FIX (11 edits, tsc clean, new regression test 3/3 green):
+  1. schema.ts + db/index.ts migration v16: `terminal_sessions.command TEXT` (mirrors label v11 / cwd v12).
+  2. pty-manager.ts createSessionRaw: accept `command?`/`args?`, use in PtySessionConfig (default '' / []).
+  3. tower-types.ts DbTerminalSession: +`command: string | null`.
+  4. tower-terminals.ts saveTerminalSession: +`command` param + INSERT column/value.
+  5. Architect fresh launch (tower-instances.ts:632 main, :1135 sibling): thread `command: cmd, args: cmdArgs`;
+     persist `cmd` at all 4 architect saves (646/711/1143/1203).
+  6. Reconstruction paths restore `dbSession.command`: reconcile (798 + re-save 827), on-the-fly reconnect
+     (1012 + re-save 1050).
+  7. tower-routes.ts create route (780): thread `command,args`; persist at both saves (800/823). Builders keep
+     the script backstop too. Shells resolve to no-profile correctly (not delivery targets).
+NEW TEST: send-architect-identity.test.ts — drives delivery against a REAL createSessionRaw session (fake shellper,
+real ring buffer, real PtySession.command) through the REAL resolveProfileForSession: (a) threaded command ->
+delivered; (b) no command + no script -> no-profile held (locks the bug); (c) command round-trips terminal_sessions
+-> reconstructed session resolves (restart-safe). NOT a command-populated double, per architect's ask.
+NEXT: full unit suite (running) -> CMAP 3-way on the diff -> address -> commit -> push (updates PR #1330). Architect
+verifies live `afx send architect` in their env after install (I can't restart the shared Tower from a worktree).
+
+### 2026-08-01 — CMAP on the architect-bug fix: Codex REQUEST_CHANGES + Claude approve-after-fixes → all addressed.
+3-way CMAP verdicts: Gemini APPROVE (missed the restart gap); Claude approve-after-fixes (HIGH); Codex
+REQUEST_CHANGES. The two rigorous reviewers CONVERGED on real blockers (Gemini's "acceptable self-healing" was
+wrong). Verified every reviewer claim against source before acting. Blockers + remediation:
+  1. `GLOBAL_CURRENT_VERSION` was still 15 (I missed the version constant) → bumped to 16. Both flagged.
+  2. **Legacy upgrade trap (the big one):** deploying the fix RESTARTS Tower; pre-existing architect rows have
+     command=NULL → reconcile rebuilds them with '' → STILL no-profile (would look like the fix didn't work).
+     Claude's insight: reconcile ALREADY computes `restartOptions.command = cmdParts[0]` from LIVE config but the
+     loop never destructured it. Fix: `dbSession.command ?? restartOptions?.command` at BOTH reconstruction paths
+     (reconcile 798/827 + on-the-fly 1012/1050) → upgraded architects heal on the FIRST restart. Verified the
+     ProbeResult plumbing (740/767) carries restartOptions.
+  3. Migration blanket-swallowed ALL ALTER errors → a real failure would mark v16 done with no column, breaking
+     every future saveTerminalSession INSERT. Fixed: gate on `PRAGMA table_info` (add only if genuinely absent).
+  4. `not.toBeNull()` can't tell claude from codex (shared marker/region) → exact `.app` assertions + a codex
+     delivery test (strict harness→profile mapping, constraint-10).
+  5. Missed shell call site (tower-routes.ts:2598) → threaded/persisted shellCmd (shell still no-profile, harmless).
+  6. Docs: fail-closed/stale-identity note on resolveProfileForSession; args-creation-only note on createSessionRaw.
+  7. Source guards (bugfix-506 style, Claude-endorsed): migration (v16+bump+column) and the 4-occurrence self-heal.
+DEFERRED (documented in review Technical Debt, fail-closed today): WELCOME-frame hydration (authoritative SSOT,
+needs protocol change); substring→exact matcher; args persistence for wrapper launches.
+RESULT: tsc clean; full unit suite 4179 passed / 48 skipped; new test 6/6. Review doc updated (Round 3 CMAP +
+lesson "exercise the real seam, not a double" + tech-debt). NEXT: commit (explicit staging) → push (updates PR
+#1330) → report to architect + offer a focused re-CMAP on the remediation delta before the pr gate.

@@ -127,6 +127,7 @@ CREATE TABLE IF NOT EXISTS terminal_sessions (
   shellper_start_time INTEGER,            -- shellper process start time (epoch ms)
   label TEXT,                             -- custom display label (Spec 468)
   cwd TEXT,                               -- working directory of the terminal (Bugfix #506)
+  command TEXT,                           -- launch command; render-gate identity seam (Spec 1313)
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

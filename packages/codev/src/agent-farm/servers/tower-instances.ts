@@ -60,7 +60,7 @@ export interface InstanceDeps {
     id: string, workspacePath: string, type: TerminalType,
     roleId: string | null, pid: number | null,
     shellperSocket?: string | null, shellperPid?: number | null, shellperStartTime?: number | null,
-    label?: string | null, cwd?: string | null,
+    label?: string | null, cwd?: string | null, command?: string | null,
   ) => void;
   /** Delete a terminal session row from SQLite */
   deleteTerminalSession: (id: string) => void;
@@ -628,10 +628,15 @@ export async function launchInstance(workspacePath: string): Promise<{ success: 
             const shellperInfo = _deps.shellperManager.getSessionInfo(sessionId)!;
             const replayData = await client.waitForReplay(); // #1198: fresh shellpers always send REPLAY (possibly empty)
 
-            // Create a PtySession backed by the shellper client
+            // Create a PtySession backed by the shellper client. Spec 1313:
+            // thread the harness command/args so the render-gate resolves this
+            // architect's profile directly (architects have no `.builder-start.sh`
+            // backstop; without this, `afx send architect` always holds no-profile).
             const session = manager.createSessionRaw({
               label: 'Architect',
               cwd: workspacePath,
+              command: cmd,
+              args: cmdArgs,
             });
             const ptySession = manager.getSession(session.id);
             if (ptySession) {
@@ -644,7 +649,7 @@ export async function launchInstance(workspacePath: string): Promise<{ success: 
             // Spec 755: default architect is named 'main'; role_id stores the name.
             entry.architects.set('main', session.id);
             _deps.saveTerminalSession(session.id, resolvedPath, 'architect', 'main', shellperInfo.pid,
-              shellperInfo.socketPath, shellperInfo.pid, shellperInfo.startTime, null, workspacePath);
+              shellperInfo.socketPath, shellperInfo.pid, shellperInfo.startTime, null, workspacePath, cmd);
 
             // Spec 755: persist to local state.db (architect table) so afx
             // status / stop see the architect via loadState's scalar shim.
@@ -708,7 +713,7 @@ export async function launchInstance(workspacePath: string): Promise<{ success: 
 
           // Spec 755: default architect is named 'main'; role_id stores the name.
           entry.architects.set('main', session.id);
-          _deps.saveTerminalSession(session.id, resolvedPath, 'architect', 'main', session.pid, null, null, null, null, workspacePath);
+          _deps.saveTerminalSession(session.id, resolvedPath, 'architect', 'main', session.pid, null, null, null, null, workspacePath, cmd);
 
           // Spec 755: persist to local state.db so afx status / stop see it.
           // Bugfix #826: scoped by workspace_path.
@@ -1132,7 +1137,9 @@ export async function addArchitect(
       const shellperInfo = _deps.shellperManager.getSessionInfo(shellperSessionId)!;
       const replayData = await client.waitForReplay(); // #1198: fresh shellpers always send REPLAY (possibly empty)
 
-      const session = manager.createSessionRaw({ label: `Architect (${name})`, cwd: workspacePath });
+      // Spec 1313: thread the harness command/args so the render-gate resolves
+      // this sibling architect's profile directly (no `.builder-start.sh` backstop).
+      const session = manager.createSessionRaw({ label: `Architect (${name})`, cwd: workspacePath, command: cmd, args: cmdArgs });
       const ptySession = manager.getSession(session.id);
       if (ptySession) {
         ptySession.attachShellper(client, replayData, shellperInfo.pid, shellperSessionId);
@@ -1142,7 +1149,7 @@ export async function addArchitect(
       entry.architects.set(name, session.id);
       _deps.saveTerminalSession(
         session.id, resolvedPath, 'architect', name, shellperInfo.pid,
-        shellperInfo.socketPath, shellperInfo.pid, shellperInfo.startTime, null, workspacePath,
+        shellperInfo.socketPath, shellperInfo.pid, shellperInfo.startTime, null, workspacePath, cmd,
       );
 
       // Spec 755: persist to local state.db so the architect appears in
@@ -1200,7 +1207,7 @@ export async function addArchitect(
       });
 
       entry.architects.set(name, session.id);
-      _deps.saveTerminalSession(session.id, resolvedPath, 'architect', name, session.pid, null, null, null, null, workspacePath);
+      _deps.saveTerminalSession(session.id, resolvedPath, 'architect', name, session.pid, null, null, null, null, workspacePath, cmd);
 
       try {
         // Bugfix #826: scoped by workspace_path.

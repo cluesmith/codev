@@ -142,7 +142,7 @@ function ensureGlobalDatabase(): Database.Database {
   configurePragmas(db);
 
   // Current migration version — bump when adding new migrations
-  const GLOBAL_CURRENT_VERSION = 15;
+  const GLOBAL_CURRENT_VERSION = 16;
 
   // Detect fresh vs existing database by checking if content tables exist.
   // On existing databases, GLOBAL_SCHEMA must NOT run because it references column names
@@ -570,6 +570,31 @@ function ensureGlobalDatabase(): Database.Database {
     `);
     db.prepare('INSERT INTO _migrations (version) VALUES (15)').run();
     console.log('[info] Created mailbox table (Spec 1313)');
+  }
+
+  // Migration v16: Add command column to terminal_sessions (Spec 1313).
+  // The render-gate resolves an agent's classifier profile from its launch
+  // command (PtySession.command). Shellper-backed sessions were created with
+  // command: '' and the profile fell back to reading `.builder-start.sh` —
+  // which only builder worktrees have. Architects run in the workspace root
+  // (no launch script), so they never resolved and every `afx send architect`
+  // held `no-profile`. Persisting the command lets the reconcile/reconnect
+  // paths restore identity after a Tower restart, so architects resolve
+  // directly and survive restart (builders keep the launch-script backstop).
+  // Mirrors the label (v11) / cwd (v12) column adds.
+  const v16 = db.prepare('SELECT version FROM _migrations WHERE version = 16').get();
+  if (!v16) {
+    // Only skip the ALTER when the column genuinely exists already (fresh install
+    // ran GLOBAL_SCHEMA). A blanket try/catch would let a REAL alter failure be
+    // recorded as "migrated" — and since saveTerminalSession's INSERT now names
+    // `command`, every future write would then fail against a table missing it.
+    const hasCommand = (db.prepare(`PRAGMA table_info(terminal_sessions)`).all() as Array<{ name: string }>)
+      .some((c) => c.name === 'command');
+    if (!hasCommand) {
+      db.exec(`ALTER TABLE terminal_sessions ADD COLUMN command TEXT`);
+    }
+    db.prepare('INSERT INTO _migrations (version) VALUES (16)').run();
+    console.log('[info] Added command column to terminal_sessions (Spec 1313 restart-safe render-gate identity)');
   }
 
   return db;

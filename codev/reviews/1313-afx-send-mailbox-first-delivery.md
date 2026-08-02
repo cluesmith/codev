@@ -376,6 +376,32 @@ Not a consult finding: the architect held the `pr` gate to direct one change (se
 spec/doc amendments) and re-submitted for the review-phase iter-2 3-way. Verdicts are recorded here after that
 re-consult completes; the corresponding rebuttal lives in `1313-review-iter2-rebuttals.md`.
 
+### Review Phase (Round 3) — architect-directed bugfix: `afx send architect` always no-profile
+
+Found in the architect's **live** PR testing (not by the suite): every `afx send` to an architect terminal held
+`no-profile` and never delivered, while builders delivered fine. Root cause: `createSessionRaw` hardcoded
+`command: ''`, so `resolveProfileForSession` fell back to `.builder-start.sh` — which only builder worktrees
+have. Architects run in the workspace root, so they never resolved. The suite stayed green because the gate/repro
+tests use a **command-populated double**, never the real empty-command `createSessionRaw` path. Fix: thread the
+launch command onto the identity seam and persist it on `terminal_sessions` (migration v16) so it survives Tower
+restart; new `send-architect-identity.test.ts` drives delivery through a REAL `createSessionRaw` session.
+
+3-way CMAP on the fix:
+- **Gemini — APPROVE.** Missed the restart/upgrade gap (accepted legacy NULL rows as "acceptable self-healing").
+- **Claude — approve-after-fixes (HIGH).** Flagged the missing `GLOBAL_CURRENT_VERSION` bump and, decisively,
+  that reconcile already computes `restartOptions.command` from live config but doesn't use it — the clean
+  self-heal for pre-existing NULL rows.
+- **Codex — REQUEST_CHANGES.** Same two blockers plus: the migration blanket-swallowed ALTER failures; the
+  `not.toBeNull()` assertions can't tell claude from codex (shared marker/region); a missed shell call site.
+- **Addressed (all converged findings):** bumped `GLOBAL_CURRENT_VERSION` 15→16; hardened the v16 migration to
+  gate on `PRAGMA table_info` instead of swallowing every error; added the `?? restartOptions?.command` self-heal
+  at both reconstruction paths (reconcile + on-the-fly) so an upgraded architect resolves on the **first** restart;
+  threaded/persisted the shell call site; strengthened tests to exact `.app` assertions (claude AND codex) + added
+  migration/self-heal source guards. tsc clean; 4179 unit tests pass.
+- **Deferred (documented follow-ups, fail-closed today):** WELCOME-frame command hydration as the authoritative
+  SSOT (needs a shellper-protocol change + old-shellper fallback); tightening `resolveProfile`'s substring match
+  to exact basenames; persisting `args` if wrapper launches (`env codex`, `npx claude`) ever need support.
+
 ## Lessons Learned
 
 ### What Went Well
@@ -413,6 +439,11 @@ re-consult completes; the corresponding rebuttal lives in `1313-review-iter2-reb
   escalation keys lagged across three phases.
 - **Treat Playwright as day-one for any dashboard-visible change**, not a follow-up — it's a CLAUDE.md mandate and
   cost a Phase 8 iteration.
+- **Exercise an identity/seam through its REAL construction path in at least one test — never only a hand-populated
+  double.** The `afx send architect` no-profile bug shipped past a fully green suite because every gate/delivery
+  test built its session as a plain object with `command` set, so the real `createSessionRaw` path (which hardcoded
+  `command: ''`) was never driven. "Tests pass" was true and "it works" was false — the exact lesson-critical
+  trap. A double is fine for branch coverage, but the seam itself needs one test that constructs the real object.
 
 ### Methodology Improvements
 - **SPIR/porch**: the 3-iteration force-advance ceiling worked as a safety valve but can advance a phase whose
@@ -476,6 +507,14 @@ discipline). The one hot-tier addition this project earned is architectural (the
   sub-100ms paced setTimeout writes can still drop the trailing Enter / later lines while the row is marked
   delivered. Closing this fully needs post-delivery / canonical-stream verification — an explicit spec non-goal
   ("no believed-sent claim is made"). Accepted residual, same class as the spec's wrapper-transition race.
+- **Render-gate identity is command-string-derived, not authoritative** (Round 3 bugfix follow-ups): the session's
+  classifier profile is resolved from the persisted `terminal_sessions.command`. Three deferred hardenings, all
+  fail-closed today: (1) **WELCOME-frame hydration** — the shellper owns the actually-running command and stays
+  correct across `freshLaunch`/`crashLoopFallback` swaps that the DB row goes stale on; the cleaner SSOT, but needs
+  a shellper-protocol field + old-shellper fallback (DB-now / WELCOME-later). (2) **Substring→exact-basename
+  matching** in `resolveProfile` — `claude-wrapper` matches claude today; safe only because the profile table is
+  behaviourally uniform. (3) **`args` persistence** — needed only if wrapper launches (`env codex`, `npx claude`)
+  must resolve; deliberately not scanned to avoid misclassification.
 
 ## Flaky Tests
 
