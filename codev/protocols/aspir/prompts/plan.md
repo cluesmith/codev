@@ -1,10 +1,10 @@
 # PLAN Phase Prompt
 
-You are executing the **PLAN** phase of the SPIR protocol.
+You are executing the **PLAN** phase of the ASPIR protocol.
 
-## Your Goal
+## Goal
 
-Transform the approved specification into an executable implementation plan with clear phases.
+Turn the approved spec into an executable plan at `codev/plans/{{artifact_name}}.md`: a phase breakdown a builder can implement one phase at a time.
 
 ## Context
 
@@ -14,105 +14,41 @@ Transform the approved specification into an executable implementation plan with
 - **Spec File**: `codev/specs/{{artifact_name}}.md`
 - **Plan File**: `codev/plans/{{artifact_name}}.md`
 
-## Prerequisites
+## What must be true when you finish
 
-Before planning, verify:
-1. The specification exists and has been approved
-2. You've read and understood the entire spec
-3. Success criteria are clear and measurable
+- **The plan derives from the spec.** You have read the whole spec — its functional and non-functional requirements, constraints, and success criteria — and the plan validates against them.
+- **The work is decomposed into phases, each of which is:**
+  - **self-contained** — a complete unit of functionality;
+  - **independently testable** — verifiable on its own;
+  - **valuable** — delivers observable progress;
+  - **committable** — a single atomic commit.
 
-## Process
-
-### 1. Analyze the Specification
-
-Read the spec thoroughly. Identify:
-- All functional requirements
-- Non-functional requirements
-- Dependencies and constraints
-- Success criteria to validate against
-
-### 2. Identify Implementation Phases
-
-Break the work into logical phases. Each phase should be:
-- **Self-contained** - A complete unit of functionality
-- **Independently testable** - Can be verified on its own
-- **Valuable** - Delivers observable progress
-- **Committable** - Can be a single atomic commit
-
-Good phase examples:
-- "Database Schema" - Creates all tables/migrations
-- "Core API Endpoints" - Implements main REST routes
-- "Authentication Flow" - Handles login/logout/session
-
-Bad phase examples:
-- "Setup" - Too vague
-- "Part 1" - Not descriptive
-- "Everything" - Not broken down
-
-### 3. Define Each Phase
-
-For each phase, document:
-- **Objective** - Single clear goal
-- **Files to modify/create** - Specific paths
-- **Dependencies** - Which phases must complete first
-- **Success criteria** - How to know it's done
-- **Test approach** - What tests will verify it
-
-### 4. Order Phases by Dependencies
-
-Arrange phases so dependencies are satisfied:
-```
-Phase 1: Database Schema (no dependencies)
-Phase 2: Data Models (depends on Phase 1)
-Phase 3: API Endpoints (depends on Phase 2)
-Phase 4: Frontend Integration (depends on Phase 3)
-```
-
-### 5. Finalize
-
-After completing the plan draft, signal completion. Porch will run 3-way consultation (Gemini, Codex, Claude) automatically via the verify step. If reviewers request changes, you'll be respawned with their feedback.
+  A phase name states what it delivers ("Database schema", "Authentication flow"), not a position ("Setup", "Part 1").
+- **Each phase carries its own contract:** objective, the specific files it creates or modifies, which earlier phases it depends on, its success criteria, and how it will be tested.
+- **Phases are ordered so dependencies are satisfied before the phase that needs them.**
 
 ## Output
 
-Create the plan file at `codev/plans/{{artifact_name}}.md`, following the template below:
+Write the plan to `codev/plans/{{artifact_name}}.md` using the template below as its interface:
 
 {{> protocols/spir/templates/plan.md}}
 
 ## Signals
 
-Emit appropriate signals based on your progress:
-
-- After completing the plan draft:
+- Draft done:
   ```
   <signal>PLAN_DRAFTED</signal>
   ```
 
-## Commit Cadence
+## Commit cadence
 
-Make commits at these milestones:
+Commit at each milestone, staging the plan file explicitly:
+```bash
+git add codev/plans/{{artifact_name}}.md
+```
 1. `[Spec {{project_id}}] Initial implementation plan`
 2. `[Spec {{project_id}}] Plan with multi-agent review`
 3. `[Spec {{project_id}}] Plan with user feedback`
 4. `[Spec {{project_id}}] Final approved plan`
 
-**CRITICAL**: Never use `git add .` or `git add -A`. Always stage specific files:
-```bash
-git add codev/plans/{{artifact_name}}.md
-```
-
-## Important Notes
-
-1. **No time estimates** - Don't include hours/days/weeks
-3. **Be specific about files** - Exact paths, not "the config file"
-4. **Keep phases small** - 1-3 files per phase is ideal
-5. **Document dependencies clearly** - Prevents blocked work
-
-## What NOT to Do
-
-- Don't run `consult` commands yourself (porch handles consultations)
-- Don't write code (that's for Implement phase)
-- Don't estimate time (meaningless in AI development)
-- Don't create phases that can't be independently tested
-- Don't skip dependency analysis
-- Don't make phases too large (if >5 files, split it)
-- Don't use `git add .` or `git add -A` (security risk)
+Porch runs the 3-way consultation itself after you signal — do not run `consult`. This is the Plan phase: decompose and sequence the work, do not write code, and do not estimate time.

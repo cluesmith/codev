@@ -2,9 +2,9 @@
 
 You are executing the **SPECIFY** phase of the SPIR protocol.
 
-## Your Goal
+## Goal
 
-Create a comprehensive specification document that thoroughly explores the problem space and proposed solution.
+Produce a specification at `codev/specs/{{artifact_name}}.md` that explores the problem space and the proposed solution well enough that the plan and implementation can follow without re-deciding anything.
 
 ## Context
 
@@ -13,137 +13,47 @@ Create a comprehensive specification document that thoroughly explores the probl
 - **Current State**: {{current_state}}
 - **Spec File**: `codev/specs/{{artifact_name}}.md`
 
-## Process
+## What must be true when you finish
 
-### 0. Check for Existing Spec (ALWAYS DO THIS FIRST)
-
-**Before asking ANY questions**, check if a spec already exists:
-
-```bash
-ls codev/specs/{{project_id}}-*.md
-```
-
-**If a spec file exists:**
-1. READ IT COMPLETELY - the answers to your questions are already there
-2. The spec author has already made the key decisions
-3. DO NOT ask clarifying questions - proceed directly to consultation
-4. Your job is to REVIEW and IMPROVE the existing spec, not rewrite it from scratch
-
-**If no spec exists:** Proceed to Step 1 below.
-
-### 0.5 Baked Decisions
-
-Before exploring solution approaches, check the issue body for a section named "Baked Decisions" (any heading level, case-insensitive). If present, copy its content verbatim into the spec's Constraints section and treat each item as fixed. Do not autonomously relitigate the architect's choices in your Solution Exploration. If you discover a serious problem with a baked decision, raise it via `afx send architect` rather than overriding it in the spec.
-
-If two baked decisions contradict each other (e.g., two different language choices), do not pick one — pause, flag the contradiction via `afx send`, and wait for resolution before drafting.
-
-### 1. Clarifying Questions (ONLY IF NO SPEC EXISTS)
-
-Before writing anything, ask clarifying questions to understand:
-- What problem is being solved?
-- Who are the stakeholders?
-- What are the constraints?
-- What's in scope vs out of scope?
-- What does success look like?
-
-If this is your first iteration AND no spec exists, ask these questions now and wait for answers.
-
-**CRITICAL**: Do NOT ask questions if a spec already exists. The spec IS the answer.
-
-**On subsequent iterations**: If questions were already answered, acknowledge the answers and proceed to the next step.
-
-### 2. Problem Analysis
-
-Once you have answers, document:
-- The problem being solved (clearly articulated)
-- Current state vs desired state
-- Stakeholders and their needs
-- Assumptions and constraints
-
-### 3. Solution Exploration
-
-Generate multiple solution approaches. For each:
-- Technical design overview
-- Trade-offs (pros/cons)
-- Complexity assessment
-- Risk assessment
-
-### 4. Open Questions
-
-List uncertainties categorized as:
-- **Critical** - blocks progress
-- **Important** - affects design
-- **Nice-to-know** - optimization
-
-### 5. Success Criteria
-
-Define measurable acceptance criteria:
-- Functional requirements (MUST, SHOULD, COULD)
-- Non-functional requirements (performance, security)
-- Test scenarios
-
-### 6. Finalize
-
-After completing the spec draft, signal completion. Porch will run 3-way consultation (Gemini, Codex, Claude) automatically via the verify step. If reviewers request changes, you'll be respawned with their feedback.
+- **An existing spec is honored, not rewritten.** If `codev/specs/{{project_id}}-*.md` already exists, it carries the architect's decisions — read it fully and refine it in place. Clarifying questions are for the case where no spec exists yet; when one does, the spec is the answer.
+- **Baked Decisions are fixed.** If the issue body has a "Baked Decisions" section (any heading level, case-insensitive), copy it verbatim into the spec's Constraints and treat each item as settled — do not relitigate it in Solution Exploration. Raise a genuine problem with a baked decision via `afx send architect`; if two baked decisions contradict, stop and flag it via `afx send` rather than choosing.
+- **The problem is characterized before solutions are.** Current state vs desired state, stakeholders, assumptions, and constraints are explicit.
+- **Solutions are explored, not assumed.** More than one approach is considered, each with its trade-offs and risks, before one is recommended.
+- **Open questions are surfaced and ranked** by whether they block progress, shape the design, or are merely nice to know.
+- **Success is measurable.** Acceptance criteria are concrete enough to test against.
 
 ## Output
 
-Create or update the specification file at `codev/specs/{{artifact_name}}.md`.
-
-Follow the canonical spec template reproduced below. Use these headings, in this order — do not invent your own structure, and do not pattern-match an earlier spec in `codev/specs/` that predates this template. If a section genuinely does not apply, keep the heading and write a one-line "N/A — [reason]" rather than deleting it.
+Write the spec to `codev/specs/{{artifact_name}}.md` using the template below as its interface — these headings, in this order. A section that genuinely does not apply keeps its heading with a one-line `N/A — [reason]` rather than being deleted. Do not pattern-match an older spec in `codev/specs/` that predates this template.
 
 {{> protocols/spir/templates/spec.md}}
 
-**IMPORTANT**: Keep spec/plan/review filenames in sync:
-- Spec: `codev/specs/{{artifact_name}}.md`
-- Plan: `codev/plans/{{artifact_name}}.md`
-- Review: `codev/reviews/{{artifact_name}}.md`
+Keep the three artifact filenames in sync: spec `codev/specs/{{artifact_name}}.md`, plan `codev/plans/{{artifact_name}}.md`, review `codev/reviews/{{artifact_name}}.md`.
 
 ## Signals
 
-Emit appropriate signals based on your progress:
-
-- When waiting for clarifying question answers, **include your questions in the signal**:
+- Waiting on clarifying-question answers — **put the questions inside the signal**, which is displayed prominently to the user:
   ```
   <signal type=AWAITING_INPUT>
-  Please answer these questions:
-  1. What should the primary use case be - internal tooling or customer-facing?
-  2. What are the key constraints we should consider?
-  3. Who are the main stakeholders?
+  Please answer:
+  1. ...
+  2. ...
   </signal>
   ```
-
-  The content inside the signal tag is displayed prominently to the user.
-
-- After completing the initial spec draft:
+- Initial draft done:
   ```
   <signal>SPEC_DRAFTED</signal>
   ```
 
+## Commit cadence
 
-## Commit Cadence
-
-Make commits at these milestones:
+Commit at each milestone, staging the spec file explicitly:
+```bash
+git add codev/specs/{{artifact_name}}.md
+```
 1. `[Spec {{project_id}}] Initial specification draft`
 2. `[Spec {{project_id}}] Specification with multi-agent review`
 3. `[Spec {{project_id}}] Specification with user feedback`
 4. `[Spec {{project_id}}] Final approved specification`
 
-**CRITICAL**: Never use `git add .` or `git add -A`. Always stage specific files:
-```bash
-git add codev/specs/{{artifact_name}}.md
-```
-
-## Important Notes
-
-1. **Be thorough** - A good spec prevents implementation problems
-3. **Be specific** - Vague specs lead to wrong implementations
-4. **Include examples** - Concrete examples clarify intent
-
-## What NOT to Do
-
-- Don't run `consult` commands yourself (porch handles consultations)
-- Don't include implementation details (that's for the Plan phase)
-- Don't estimate time (AI makes time estimates meaningless)
-- Don't start coding (you're in Specify, not Implement)
-- Don't use `git add .` or `git add -A` (security risk)
+Porch runs the 3-way consultation itself after you signal — do not run `consult`. This is the Specify phase: no implementation detail (that is the plan), no code, no time estimates.
