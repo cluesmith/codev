@@ -909,3 +909,20 @@ then silently became a prohibition on all future editing of those files. That is
 failure shape from the ones this project has been cataloguing, and it is a good candidate for
 the lessons ledger: *an assertion written to prove one change was safe can outlive its purpose
 and start forbidding change in general.*
+
+### Context cleared 2026-08-01 — state saved
+
+Wrote `codev/state/spir-1280_RESUME.md` as the cold-start entry point: current HEAD/branch,
+phase status, the acceptance model, Phase 5's scope and its constraints, the seven standing
+rules (each earned by a specific failure), M10 discipline, the four guards I own, and open items.
+
+Phases 0–4 inspected PASS. **Phase 5 next: phase prompts for spir/aspir/pir, 11 decisions.**
+
+The single most important thing for the next session to not get wrong: **`{{artifact_name}}` is
+positional.** Removing it from builder-prompts fixed #1293; removing it from phase prompts would
+break artifact naming outright (porch substitutes it at `prompts.ts:102`, 51 references across
+the Phase 5 targets). Same string, opposite meaning, two files apart.
+
+Also flagged: **porch's plan-phase pointer is stale** — it still reads `phase_0_instrument`
+because phases have been gated by architect inspection rather than by `porch done`. That needs
+an architect decision, not a hand-edit of `status.yaml`.
