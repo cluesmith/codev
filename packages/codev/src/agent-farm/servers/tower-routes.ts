@@ -52,6 +52,7 @@ import { SendBuffer } from './send-buffer.js';
 import type { BufferedMessage } from './send-buffer.js';
 import type { PtySession } from '../../terminal/pty-session.js';
 import { writeMessageToSession, writeEscapeToSession } from './message-write.js';
+import { submitToSession } from './session-submit.js';
 import {
   getKnownWorkspacePaths,
   getInstances,
@@ -1505,7 +1506,9 @@ async function handleSend(
   // trailing Enter is what lets them through, which is why it is the default
   // (matching the verified recovery `afx send <b> --raw "$(printf '\x1b')"`).
   if (escape) {
-    writeEscapeToSession(session, noEnter);
+    // Awaited: the response must not claim delivery before the ESC and its
+    // Enter have actually been written (Spec 1273 verify).
+    await submitToSession(result.terminalId, () => writeEscapeToSession(session, noEnter));
     broadcastMessage({
       type: 'message',
       from: { project: path.basename(fromWorkspace ?? workspace ?? 'unknown'), agent: from ?? 'unknown' },
@@ -1583,7 +1586,20 @@ async function handleSend(
   } else {
     // User is idle (or interrupt) — deliver immediately.
     // Bugfix #584: paces multi-line output to avoid paste detection.
-    writeMessageToSession(session, formattedMessage, noEnter);
+    //
+    // AWAITED (Spec 1273 verify). `writeMessageToSession` schedules the Enter
+    // 50–80ms out and returns immediately; responding on that meant a caller's
+    // `await send(...)` resolved BEFORE its message was submitted. Two sends in
+    // quick succession then landed in the same composer and were submitted as
+    // one message — which is how `afx reset` sent
+    // `/clear### [ARCHITECT INSTRUCTION...` and never cleared anything.
+    //
+    // Only the immediate path is awaited. The buffered path above must NOT be:
+    // a deferred message can sit up to 60s, and awaiting that would hang the
+    // caller instead of returning `deferred: true`.
+    await submitToSession(result.terminalId, () =>
+      writeMessageToSession(session, formattedMessage, noEnter),
+    );
     broadcastMessage(broadcastPayload);
     ctx.log('INFO', logMessage);
   }
