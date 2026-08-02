@@ -1122,3 +1122,23 @@ restartOptions is the legacy fallback), and a persisted '' architect is unreacha
 RESULT: tsc clean; migration+identity files 16/16; full suite running. NEXT: commit round-2 remediation → push
 (new commit, no force — repo policy) → report convergence to architect (2 prior APPROVE + Codex's sole RC point
 now fixed).
+
+### 2026-08-01 — Round-3 targeted Codex re-check: code APPROVED; sole remaining point (migration-test methodology) rebutted+deferred.
+Ran a targeted Codex-only re-check on the round-2 delta. Codex: TOWER_ARCHITECT_CMD finding RESOLVED, no new
+inconsistency introduced — i.e. **the code fix is approved by all three reviewers now**. Codex's ONE remaining
+blocker is test-methodology: the v16 migration test drives a faithful *replica* of the block, not the production
+runner. Verified the facts before deciding:
+  - `ensureGlobalDatabase` is PRIVATE; the v1→vN chain is inline on the DB-init critical path. Driving it directly
+    needs an export/refactor of that path = high blast radius, out of scope for a delivery bugfix.
+  - Repo precedent is replica-based: v15, bugfix-826, pir-832 migration tests all replicate the block; state/
+    spec-755 MOCK getGlobalDb. NO existing test drives the real runner. My v16 test matches this pattern (which
+    Claude explicitly endorsed as the model).
+  - Drift IS caught: source guards pin the exact production v16 statements (GLOBAL_CURRENT_VERSION=16, the ALTER,
+    the PRAGMA gate); the replica proves the logic; GLOBAL_SCHEMA convergence proves fresh-install correctness.
+DECISION: rebut + defer, NOT refactor the DB-init path chasing a lone reviewer's methodology preference on
+already-approved code (2 APPROVE + repo precedent). Filed "extract runGlobalMigrations(db) for real migration
+tests" as a repo-wide follow-up in Technical Debt. Recorded rounds 2-3 + the rebuttal in the review doc.
+STATUS: code fix complete + approved by all 3; PR #1330 has both commits (f59c719e + 05bf08c7); tsc clean; 4183
+tests pass. Ready for the architect's pr-gate decision. Committing the doc updates now; then reporting the decision
+point to the architect. External gates unchanged + theirs: un-draft PR, maintainer GitHub approval (REVIEW_REQUIRED),
+live afx-send-architect check after install.

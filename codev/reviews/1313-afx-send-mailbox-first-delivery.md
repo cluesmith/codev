@@ -397,7 +397,22 @@ restart; new `send-architect-identity.test.ts` drives delivery through a REAL `c
   gate on `PRAGMA table_info` instead of swallowing every error; added the `?? restartOptions?.command` self-heal
   at both reconstruction paths (reconcile + on-the-fly) so an upgraded architect resolves on the **first** restart;
   threaded/persisted the shell call site; strengthened tests to exact `.app` assertions (claude AND codex) + added
-  migration/self-heal source guards. tsc clean; 4179 unit tests pass.
+  migration/self-heal source guards.
+- **Re-CMAP round 2** (on the remediation): Claude + Gemini **APPROVE**; Codex **REQUEST_CHANGES** on one verified
+  new hole — the self-heal derived the command from config/`claude` but not the `TOWER_ARCHITECT_CMD` env override
+  that *fresh launch* honors, so a legacy `agy` architect launched that way (no matching config) would heal to the
+  wrong profile. **Fixed** by mirroring fresh-launch's exact `env > config > claude` precedence at both
+  reconstruction paths (also repairs a pre-existing auto-restart divergence); added a functional v16 migration test.
+- **Re-CMAP round 3** (targeted Codex re-check): the command-resolution fix is **approved** ("finding resolved, no
+  new inconsistency"). Codex's sole remaining point is test-methodology — the v16 migration test drives a faithful
+  *replica* of the block rather than the production runner. **Rebutted / deferred**, because: (a) `ensureGlobalDatabase`
+  is private and the migration chain is inline on the DB-init critical path, so exercising it directly needs an
+  export/refactor of that path — high blast radius, out of scope for a delivery bugfix; (b) it matches established
+  repo precedent — the v15, bugfix-826, and pir-832 migration tests are all replica-based, and `state`/`spec-755`
+  *mock* `getGlobalDb`; no existing test drives the real runner; (c) production drift is already caught — the source
+  guards pin the exact production v16 statements (`GLOBAL_CURRENT_VERSION = 16`, the `ALTER`, the `PRAGMA` gate), the
+  replica proves the logic, and the `GLOBAL_SCHEMA` convergence proves fresh-install correctness. Filed as a
+  follow-up (see Technical Debt). tsc clean; **4183** unit tests pass.
 - **Deferred (documented follow-ups, fail-closed today):** WELCOME-frame command hydration as the authoritative
   SSOT (needs a shellper-protocol change + old-shellper fallback); tightening `resolveProfile`'s substring match
   to exact basenames; persisting `args` if wrapper launches (`env codex`, `npx claude`) ever need support.
@@ -515,6 +530,13 @@ discipline). The one hot-tier addition this project earned is architectural (the
   matching** in `resolveProfile` — `claude-wrapper` matches claude today; safe only because the profile table is
   behaviourally uniform. (3) **`args` persistence** — needed only if wrapper launches (`env codex`, `npx claude`)
   must resolve; deliberately not scanned to avoid misclassification.
+- **Migrations aren't independently testable** (Round 3 re-CMAP, Codex): the whole v1→vN migration chain is inline
+  in the private `ensureGlobalDatabase`, reachable only through the `getGlobalDb()` singleton, so every migration
+  test in the repo (v15, bugfix-826, pir-832) drives a hand-kept *replica* of its block rather than the production
+  runner — a replica can drift from production (source guards on the exact statements are the current mitigation).
+  Extracting a `runGlobalMigrations(db)` that both `getGlobalDb()` and tests call would let all migration tests
+  exercise the real code. Deferred here (a DB-init-critical-path refactor is out of scope for a delivery bugfix);
+  worth doing once, repo-wide, because it benefits every migration.
 
 ## Flaky Tests
 
