@@ -113,3 +113,17 @@ builder/bugfix-1333` + force-with-lease — because that force-pushes already-pu
 history on a shared branch (outward-facing / hard-to-reverse → confirm first).
 HOLDING the porch `pr`-gate request (`porch done`) until the base-scope question
 is resolved. Awaiting architect decision: rebase-to-clean vs. merge-as-is.
+
+### Architect approved rebase-to-clean (2026-08-02)
+Verified lossless (fef6bddf ⊂ PR #1330) + conflict-free (tower-client.ts untouched
+on origin/main across 05b2f766..3f622fe6; test is a clean add). Executed:
+1. committed the thread update (clean tree for rebase)
+2. `git fetch origin` → origin/main = 3f622fe6
+3. `git rebase --onto origin/main fef6bddf builder/bugfix-1333` → 6 commits
+   replayed cleanly, NO conflicts, fef6bddf dropped
+4. `git push --force-with-lease` → e26ce59a…2164b4bc (forced)
+Pre-rebase HEAD saved: scratchpad/pre-rebase-head.txt (e26ce59a) for recovery.
+
+**PR #1334 now clean** — 4 files, no spec: status.yaml, thread, the test,
+tower-client.ts (+249/-14). Re-verifying build+test on the rebased branch (base
+moved), then re-request the `pr` gate.
