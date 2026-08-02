@@ -221,17 +221,21 @@ export async function executeTask(task: CronTask): Promise<{ result: string; out
   deps.log('INFO', `Executing cron task: ${task.name}`);
 
   let output: string;
+  let exitCode: number;
   let result: string;
 
   try {
-    output = await runCommand(task.command, {
+    ({ output, exitCode } = await runCommand(task.command, {
       cwd: task.cwd ?? task.workspacePath,
       timeout: task.timeout * 1000,
-    });
-    result = 'success';
+    }));
+    result = exitCode === 0 ? 'success' : 'failure';
   } catch (err: unknown) {
-    const execErr = err as { stdout?: string; stderr?: string; message?: string };
-    output = execErr.stdout ?? execErr.stderr ?? execErr.message ?? String(err);
+    // Infrastructure error: spawn failure or timeout/kill. 124 mirrors the
+    // coreutils `timeout` convention; -1 means the process never ran cleanly.
+    const execErr = err as { stdout?: string; stderr?: string; message?: string; killed?: boolean };
+    output = execErr.stdout || execErr.stderr || execErr.message || String(err);
+    exitCode = execErr.killed ? 124 : -1;
     result = 'failure';
   }
 
@@ -242,23 +246,25 @@ export async function executeTask(task: CronTask): Promise<{ result: string; out
   // Update SQLite state
   updateTaskState(taskId, task.workspacePath, task.name, nowSeconds, result, truncatedOutput);
 
-  // Evaluate condition
-  let shouldNotify = true;
+  // Decide delivery. With a condition, the condition alone decides (a non-zero
+  // exit is data the condition can inspect via exitCode, not noise). Without
+  // one, deliver only on clean exit so flaky commands don't alert-spam.
+  let shouldNotify: boolean;
   if (task.condition) {
     try {
-      shouldNotify = evaluateCondition(task.condition, output.trim());
+      shouldNotify = evaluateCondition(task.condition, output.trim(), exitCode);
     } catch (err) {
       deps.log('WARN', `Condition evaluation failed for '${task.name}': ${err}`);
       shouldNotify = false;
     }
+  } else {
+    shouldNotify = result === 'success';
   }
 
-  if (shouldNotify && result === 'success') {
+  if (shouldNotify) {
     const renderedMessage = task.message.replace(/\$\{output\}/g, output.trim());
     deliverMessage(task, renderedMessage);
   } else if (result === 'failure') {
-    // Command itself errored (non-zero exit, timeout, etc.) — log but don't alert.
-    // Command errors are infrastructure noise, not actionable CI failures.
     deps.log('WARN', `Cron command failed for '${task.name}': ${output.trim().slice(0, 200)}`);
   }
 
@@ -266,7 +272,10 @@ export async function executeTask(task: CronTask): Promise<{ result: string; out
   return { result, output: truncatedOutput };
 }
 
-function runCommand(command: string, options: { cwd: string; timeout: number }): Promise<string> {
+function runCommand(
+  command: string,
+  options: { cwd: string; timeout: number },
+): Promise<{ output: string; exitCode: number }> {
   return new Promise((resolve, reject) => {
     exec(command, {
       cwd: options.cwd,
@@ -274,14 +283,20 @@ function runCommand(command: string, options: { cwd: string; timeout: number }):
       maxBuffer: 1024 * 1024, // 1MB
       env: process.env,
     }, (error, stdout, stderr) => {
-      if (error) {
-        // Attach stdout/stderr for the caller
-        (error as unknown as Record<string, string>).stdout = stdout;
-        (error as unknown as Record<string, string>).stderr = stderr;
-        reject(error);
-      } else {
-        resolve(stdout);
+      if (!error) {
+        resolve({ output: stdout, exitCode: 0 });
+        return;
       }
+      // A numeric code with no kill signal means the process ran and exited
+      // non-zero — that's data for conditions, not an infrastructure error.
+      if (typeof error.code === 'number' && !error.killed && !error.signal) {
+        resolve({ output: stdout || stderr, exitCode: error.code });
+        return;
+      }
+      // Spawn failure or timeout/kill — attach stdout/stderr for the caller
+      (error as unknown as Record<string, string>).stdout = stdout;
+      (error as unknown as Record<string, string>).stderr = stderr;
+      reject(error);
     });
   });
 }
@@ -290,10 +305,10 @@ function runCommand(command: string, options: { cwd: string; timeout: number }):
 // Condition evaluation
 // ============================================================================
 
-export function evaluateCondition(condition: string, output: string): boolean {
+export function evaluateCondition(condition: string, output: string, exitCode = 0): boolean {
   // eslint-disable-next-line no-new-func
-  const fn = new Function('output', 'return ' + condition);
-  return !!fn(output);
+  const fn = new Function('output', 'exitCode', 'return ' + condition);
+  return !!fn(output, exitCode);
 }
 
 // ============================================================================
