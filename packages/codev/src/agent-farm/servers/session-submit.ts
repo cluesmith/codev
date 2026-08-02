@@ -49,8 +49,17 @@
  *     Adopting it is Spec 1307's work; the batch form
  *     (`write` performing the whole drain and returning the final offset) is
  *     supported and tested, so no API change is needed when they wire it.
- *   - `tower-cron.ts` cron delivery — NOT covered. Same shape as the buffered
- *     path; a scheduled message can land beside an in-flight submission.
+ *   - `tower-cron.ts` cron delivery — NOT covered, and RE-VERIFIED against
+ *     #1143's rewrite of that region rather than assumed. `deliverMessage`
+ *     still calls `writeMessageToSession` directly (`tower-cron.ts:338`), so a
+ *     scheduled message can still land beside an in-flight submission.
+ *
+ *     What #1143 changed is how OFTEN that happens. Delivery used to require a
+ *     clean exit; a conditioned task now delivers whenever its condition is
+ *     truthy, failures included, because a non-zero exit is data the condition
+ *     inspects via `exitCode` rather than noise. So the uncovered-writer risk
+ *     here is exercised on more occasions than when this list was first
+ *     written — the claim is unchanged, its weight is not.
  *   - `POST /api/terminals/:id/write` — NOT covered. It is a raw passthrough
  *     with no Enter semantics of its own.
  *   - `tower-websocket.ts` keystrokes and the shellper frame relay — DELIBERATELY
