@@ -966,3 +966,39 @@ here** — I edit prompt bodies, not the included templates. Served counts will 
 - plan.md phases-JSON block is a **capability** (has_phases_json/min_two_phases) — survives untouched.
 - `<signal>` tags are capability-inventory (M5) — preserve or retire explicitly.
 - Rollback group **G4**; commits group-pure.
+
+### Phase 5 guard map (extracted from the tests, not assumed) — 2026-08-02
+
+Four tests assert on the phase prompts. Rewrites must keep every literal below.
+
+**template-delivery.test.ts** (`#1279 WIRINGS`, both trees) — these include directives must survive verbatim:
+- spir/specify, aspir/specify → `{{> protocols/spir/templates/spec.md}}`
+- spir/plan, aspir/plan → `{{> protocols/spir/templates/plan.md}}`
+- spir/review, aspir/review → `{{> protocols/spir/templates/review.md}}`
+- pir prompts have **no** includes (not in WIRINGS) — served==raw confirms it.
+- The *resolved* content assertions (## Problem Statement, SPEC vs PLAN BOUNDARY, ## Flaky Tests,
+  ### Methodology Improvements) come from the **templates** (Phases 6–7), not my prompt edits.
+
+**review-prompt-routing.test.ts** — reads **raw** (unexpanded) content of spir/aspir/**pir** review.md
+(+ spir/templates/review.md, skeleton copies). Each raw file must literally contain:
+`arch-critical.md`, `lessons-critical.md`, `## Architecture Updates`, `## Lessons Learned Updates`;
+must **NOT** contain `add entries to lessons-learned.md`.
+
+**bugfix-685-close-keyword.test.ts** — targets spir/aspir **review.md** (not specify/plan/implement).
+Each must contain: `` `Closes #`` or `` `Fixes #``; `` `Refs #`` or `` `Part of #``; `auto-close` (i).
+PLUS a `--body "$(cat <<'EOF' … EOF"` heredoc that contains **no** `{{issue.` token. So the SPIR/ASPIR
+review PR-body heredoc is **load-bearing shape** — keep the `gh pr create … --body "$(cat <<'EOF'`
+form; it is a capability the guard pins, not a P2 example I may delete. It also byte-checks
+skeleton==codev for the six edited prompts.
+
+**spec-1280-measurement-instrument.test.ts** — mine; measures, doesn't pin prompt prose.
+
+**P4 relocations confirmed** (builder.md, rewritten Phase 2, now owns these — so drop the repeats
+from phase prompts): git add -A prohibition (builder.md:106), flaky tests (112–116), consult
+handling (14), never-edit-status.yaml (16). pir/review is **not** in bugfix-685's set → no
+close-keyword guard there (keeps Fixes/Refs anyway as correct behavior).
+
+**Touch calibration**: heavy rewrite on the four 1252-era SPIR files (specify/plan/implement/review);
+lighter on the three PIR files — they were recently rewritten and are largely load-bearing contract
+(single-pass max_iterations:1, gate-not-prose merge auth). Consolidate PIR's thrice-repeated
+gate-not-prose rule (P4) and trim padding; preserve the mechanics.
