@@ -240,6 +240,56 @@ look interchangeable in a design discussion and are not.
 `/api/send` paths. Buffer flush, cron delivery and the raw write endpoint still write directly; human
 keystrokes deliberately always will.
 
+### The confirmation seam: four patterns, four failure modes, then stop
+
+The `/clear` confirmation check is the most instructive artefact this project produced, because it failed
+four different ways and every fix was a better guess at the same wrong layer:
+
+| # | Attempt | What it reported | Why |
+|---|---|---|---|
+| 1 | `readRecentOutput` left unbound | always **unconfirmed** | The check never looked. Its tests passed because the mock supplied what production didn't. |
+| 2 | Pattern matched `/clear` | always **confirmed** | It matched the echo of its own keystroke. |
+| 3 | Pattern matched `context reset` | always **confirmed** | It matched the save request's own `CONTEXT RESET INCOMING` header — reset's own words. |
+| 4 | Pattern matched the structured command markers | would match **discussion of `/clear`** | Those markers are in the agent's conversation payload, never in the PTY bytes. |
+
+Attempt 4 was the specified fix, derived from the probe's conversation-side transcript. Measuring the
+actual PTY stream the check reads ended it: every `command-name` occurrence in the probe's 10,001-line
+scrollback was the probe *writing about* the markers; no screen-wipe escape (ED2/ED3/home+clear/RIS) is
+emitted at all; and the stream is ANSI-fragmented with per-word cursor positioning
+(`CONTEXT\x1b[11GRESET`), which defeats substring matching for anything displayed.
+
+**The fifth answer was to stop answering.** After four wrong answers, removing the check is the honest
+engineering move — a step that can only ever report one answer manufactures confidence, and a false
+"confirmed" on the one line that speaks to whether the destructive step landed is the worst version of
+that. The check, its two step names, the `readOutput` port and its binding are gone.
+
+The generalisable form: **when a check keeps producing wrong answers, stop improving the check and go
+measure the thing it reads.** Three of the four failures would have been caught by one look at the real
+stream, which cost about ten minutes when it was finally done.
+
+### If confirmation is ever wanted again
+
+It needs a **real observable**, not scrollback scraping. The registered primitive for that class is
+**#1310's input-generation counter** — a monotonic signal the harness owns, rather than text a consumer
+has to infer intent from. Scrollback is a rendering, and renderings are lossy by design.
+
+### Two norms this project put on the record
+
+- **A majority APPROVE is not consensus.** Five times a lone dissenter was right on the facts while two
+  reviewers approved; every one was a real defect.
+- **A builder verifies a specified fix against reality and declines it when the premise fails.** This
+  happened twice on the final day — once here (markers not in the stream), once on the merge-order
+  resolution. Now doctrine-grade: an instruction's premise is checkable, and checking it is the job.
+
+### The probe's line
+
+The verify e2e's own closing sentence, recorded verbatim because it is the cleanest statement of what the
+feature is *for*:
+
+> **"I did not remember PINEAPPLE. I read it."**
+
+Recovery from disk, not from memory. That is the whole deliverable in seven words.
+
 ## Flaky Tests
 
 None encountered. No tests were skipped by this work.
