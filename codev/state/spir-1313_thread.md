@@ -1286,3 +1286,18 @@ D3/R7/R8 decisions FINAL: DEFER D3 (residual after D2; reflow risk), flag R7 (in
 marker) as follow-ups — all in review Technical Debt. Committing now (explicit staging, 9 files + 4 .gz) → push PR
 #1330 → report architect w/ live e2e checklist. PR still 83 behind origin/main (DIRTY) — flag rebase-before-merge.
 NOT self-approving verify gate, NOT merging.
+
+### 2026-08-02 — VERIFY: architect ran the LIVE e2e on built+installed code (e6d238b2, Tower restarted) = ALL PASS.
+Architect verification results (the checklist at 1313-render-gate-live-checklist.md, exercised live):
+  1. idle prompt → DELIVERED.
+  2. draft present → HELD `busy`; draft UNTOUCHED & NOT fused; clear the draft → DELIVERED on quiescence.
+  3. monitor/bg-task running → DELIVERED (whole-ring renders CLEAN, no false-busy).
+  4. real >1MB rings: both captured bug rings classify CLEAN via the new whole-ring classifier, AND a LIVE 1.63MB
+     architect terminal that was stuck `no-marker` PRE-fix now classifies CLEAN.
+  No held-message regressions; inbox clean. The whole-ring root fix (D2) + the two diff-CMAP false-clean closes
+  (over-ceiling hard-hold, gate→write change-token re-validation) + liveness observability all hold up live.
+Architect: "No action needed from you — verify-gate approval is the human's, the 83-behind rebase is maintainer-side."
+Status delta I surfaced: PR #1330 is now mergeable=CONFLICTING (not just DIRTY/behind) — real conflicts to resolve
+before it lands; maintainer-side, I won't touch it. Deferred follow-ups (D3, verdict memoization, >1MB-with-draft
+fixture, R7 input-race, R8 agy-marker) remain flagged in the review's Technical Debt. HOLDING at verify-approval
+(strict mode: no self-approve, no merge, no rebase, no status.yaml edits). Awaiting further instructions.
