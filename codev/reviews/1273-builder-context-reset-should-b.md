@@ -140,7 +140,19 @@ files were genuine so the history reconstructed cleanly, but porch does not watc
   architect, this happens in the **post-merge verify window**, with the restart timing possibly waiting on
   the shannon workspace stabilising. **3976 passing tests is not "it works"**, and nothing in this review
   should be read as claiming otherwise.
-- **The clear-confirmation *pattern* is unvalidated.** Confirmation now reads only output produced after
+- **RESOLVED (2026-08-02): clear-confirmation removed, because the signal does not exist in that stream.**
+  The live e2e passed — the clear executes — and it finally supplied the calibration data. Measured
+  against the probe's real 10,001-line scrollback rather than reasoned about: the structured markers an
+  executed `/clear` produces (`<command-name>/clear</command-name>`) live in the **agent's conversation
+  payload, not the PTY bytes** — every occurrence in the buffer was the probe *writing about* them, none
+  was the harness emitting one, so matching on them would fire when a builder *discusses* `/clear` and
+  never when one executes it. No screen-wipe escape is emitted either (zero hits for ED2/ED3/home+clear/
+  RIS across the whole buffer). And the stream is ANSI-fragmented with per-word cursor positioning
+  (`CONTEXT\x1b[11GRESET`), so plain substring matching is unreliable even for text that *is* displayed.
+  `confirmClear`, both confirmation step names and the `readOutput` port are gone. Four attempts at this
+  check produced four wrong answers; the fifth was to stop answering. **A step that can only ever report
+  one answer manufactures confidence**, and the honest report says nothing rather than something false.
+- ~~**The clear-confirmation *pattern* is unvalidated.**~~ Confirmation now reads only output produced after
   the clear, which structurally excludes reset's own text — that class of false positive is closed. But I
   have never observed what a real Claude Code `/clear` actually emits, so the strings it matches
   (`context cleared`, `conversation cleared`, …) are still an educated guess. `clear-confirmed` should be

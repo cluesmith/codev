@@ -247,22 +247,6 @@ function buildTerminalPort(
       });
       if (!result.ok) throw new Error(result.error || 'Interrupt (ESC) failed');
     },
-    /**
-     * Bound for real, not left undefined.
-     *
-     * When this was absent the orchestrator's `confirmClear` returned false on
-     * every production run, so the report always said "clear-unconfirmed" — a
-     * step that looked attempted and could never succeed outside tests.
-     *
-     * Returns `total` alongside the lines so confirmation can look only at
-     * output produced AFTER the clear. Reset writes into this same terminal, so
-     * without that window any pattern eventually matches reset's own text.
-     */
-    async readOutput() {
-      if (!terminalId) return null;
-      const output = await client.getTerminalOutput(terminalId, 200);
-      return output ? { lines: output.lines, total: output.total } : null;
-    },
   };
 }
 

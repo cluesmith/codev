@@ -138,17 +138,29 @@ export interface TerminalPort {
   /** Send a bare ESC keystroke (Tower's `escape: true`; phase 1's path). */
   sendEscape(): Promise<void>;
   /**
-   * Recent terminal output plus the buffer's total line count, for best-effort
-   * clear confirmation. Null when this Tower cannot serve it.
+   * NO clear-confirmation port.
    *
-   * `total` is what makes confirmation trustworthy. Reset writes into this same
-   * terminal — the save request, the re-orientation — so any pattern matched
-   * against the whole buffer eventually collides with reset's OWN text. (It did,
-   * twice: first the echoed `/clear`, then the save request's "CONTEXT RESET
-   * INCOMING" header.) Snapshotting `total` before the clear lets the check read
-   * only what the harness emitted AFTERWARDS.
+   * Four attempts at confirming the clear from terminal output all failed, and
+   * the live e2e (2026-08-02) finally showed why: **the signal is not in that
+   * stream.** Measured against the probe's real 10,001-line scrollback:
+   *
+   *   - The structured markers an executed `/clear` produces
+   *     (`<command-name>/clear</command-name>`) live in the AGENT'S CONVERSATION
+   *     payload, not the PTY bytes. All four occurrences in the probe's
+   *     scrollback were the probe *writing about* them; none was the harness
+   *     emitting one. Matching on them would fire when a builder DISCUSSES
+   *     `/clear` and never when one executes it — a false-positive generator.
+   *   - No screen-wipe escape is emitted either: zero hits for ED2 (`\x1b[2J`),
+   *     ED3, home+clear or RIS across the whole buffer.
+   *   - And the stream is ANSI-fragmented with per-word cursor positioning
+   *     (`CONTEXT\x1b[11GRESET\x1b[17GINCOMING`), so plain substring matching is
+   *     unreliable even for text that IS displayed.
+   *
+   * So the honest answer is that reset cannot observe whether the clear took
+   * effect, and it no longer pretends to. A step that can only ever report one
+   * answer is worse than no step: it manufactures confidence. Execution was
+   * verified out-of-band by the e2e, which is where that evidence belongs.
    */
-  readOutput?(): Promise<{ lines: string[]; total: number } | null>;
 }
 
 // ============================================================================
@@ -171,8 +183,6 @@ export type ResetStepName =
   | 'quiescent'
   | 'escalate-esc'
   | 'clear'
-  | 'clear-confirmed'
-  | 'clear-unconfirmed'
   | 'send-reorientation';
 
 export interface ResetStep {
@@ -531,17 +541,8 @@ export async function runReset(options: RunResetOptions): Promise<ResetResult> {
   // --------------------------------------------------------------------
   // 7–9. Clear, confirm best-effort, re-orient.
   // --------------------------------------------------------------------
-  // Snapshot the buffer size BEFORE clearing, so confirmation can distinguish
-  // the harness's response from the echo of our own keystroke.
-  const totalBeforeClear = terminal.readOutput
-    ? ((await terminal.readOutput())?.total ?? 0)
-    : 0;
-
   await terminal.sendRaw('/clear');
   step('clear');
-
-  const confirmed = await confirmClear(terminal, totalBeforeClear);
-  step(confirmed ? 'clear-confirmed' : 'clear-unconfirmed');
 
   await terminal.sendMessage(payload.inline);
   step('send-reorientation');
@@ -683,36 +684,6 @@ async function awaitQuiescence(
   }
 }
 
-/**
- * Best-effort check that `/clear` took effect.
- *
- * Deliberately advisory. There is no reliable cross-version signal that Claude
- * Code cleared its context, and an unconfirmed clear is reported as unconfirmed
- * rather than as failure — the re-orientation that follows is correct either
- * way. The worst case of a silent no-op is a builder that kept its context and
- * also received a re-orientation, which loses nothing.
- */
-async function confirmClear(terminal: TerminalPort, totalBeforeClear: number): Promise<boolean> {
-  if (!terminal.readOutput) return false;
-  try {
-    const output = await terminal.readOutput();
-    if (!output) return false;
-
-    // Consider ONLY lines produced after the clear was sent. Everything reset
-    // itself wrote is at or before `totalBeforeClear`, so this excludes reset's
-    // own text by construction rather than by hoping the pattern avoids it.
-    const newLineCount = output.total - totalBeforeClear;
-    if (newLineCount <= 0) return false;
-    const fresh = output.lines.slice(-newLineCount).join('\n');
-
-    return /context (?:cleared|reset)|conversation (?:cleared|reset)|cleared conversation/i.test(
-      fresh,
-    );
-  } catch {
-    // Confirmation must never be able to fail the run — it is a report field.
-    return false;
-  }
-}
 
 // ============================================================================
 // Helpers
