@@ -110,11 +110,13 @@ export function scheduleDelayedSend(
   delaySeconds: number,
   terminalId: string,
   /**
-   * Return value is ignored — the immediate path's `deliverOrBuffer` reports
-   * whether it buffered, and that answer has no consumer once delivery is
-   * asynchronous. Typed loosely so callers need not discard it at every site.
+   * Invoked when the send comes due. Receives `isStillLive`, which it must
+   * re-check at the moment it actually writes (inside the submission lock): a
+   * delivery can acquire the lock only AFTER a shutdown that fired while it
+   * queued, and the generation check below only guards the moment BEFORE it
+   * enters the lock. Return value is ignored.
    */
-  deliver: () => unknown,
+  deliver: (isStillLive: () => boolean) => unknown,
 ): void {
   const entry: PendingDelayedSend = {
     terminalId,
@@ -137,7 +139,9 @@ export function scheduleDelayedSend(
       // write can outlast a shutdown.
       if (generation !== scheduledGeneration) return;
       try {
-        await deliver();
+        // Passed through to the write site, where it is re-checked while the
+        // lock is held — closing the shutdown-during-lock-wait window.
+        await deliver(() => generation === scheduledGeneration);
       } catch {
         // Delivery reports its own failures through the route's logger. A
         // throw here would otherwise become an unhandled rejection and take

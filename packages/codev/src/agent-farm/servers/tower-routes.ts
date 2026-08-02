@@ -1630,7 +1630,10 @@ async function handleSend(
     // A due message re-enters deliverOrBuffer, which submits under Spec 1273's
     // per-session lock — so serialisation against other writes to this session
     // is the lock's job, and this scheduler only owns WHEN delivery starts.
-    scheduleDelayedSend(deliverAfter, result.terminalId, () => deliverOrBuffer(deliveryContext));
+    // `stillLive` is re-checked inside the lock so a shutdown during the wait
+    // for it cancels the write (delayed-send.ts passes the generation check).
+    scheduleDelayedSend(deliverAfter, result.terminalId, (stillLive) =>
+      deliverOrBuffer({ ...deliveryContext, stillLive }));
     ctx.log('INFO', `Message scheduled (+${deliverAfter}s): ${from ?? 'unknown'} → ${result.agent} (terminal ${result.terminalId.slice(0, 8)}...)`);
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
@@ -1691,6 +1694,18 @@ interface DeliveryContext {
    * nothing about whether it would overtake something.
    */
   enforceFifo: boolean;
+  /**
+   * Re-checked at the moment of the write, INSIDE the submission reservation —
+   * for DELAYED deliveries only (Spec 1307).
+   *
+   * A delayed delivery can sit behind an in-flight write to this session while
+   * it waits for the submission lock, and a shutdown can land in that wait. The
+   * generation check in `delayed-send.ts` fires before the delivery enters the
+   * lock, so without this second check a message that acquired the lock AFTER
+   * shutdown would still write — contradicting "shutdown starts nothing new".
+   * Undefined on the immediate path, which has no shutdown-cancellation notion.
+   */
+  stillLive?: () => boolean;
 }
 
 /**
@@ -1719,7 +1734,7 @@ async function deliverOrBuffer(
 ): Promise<boolean> {
   const {
     terminalId, agent, from, formattedMessage, noEnter, interrupt,
-    broadcastPayload, logMessage, ctx, enforceFifo,
+    broadcastPayload, logMessage, ctx, enforceFifo, stillLive,
   } = delivery;
 
   // Re-resolve. For the immediate path this is the same session that was just
@@ -1738,22 +1753,10 @@ async function deliverOrBuffer(
   // immediate `--interrupt` deliberately bypasses buffering ("an interrupt that
   // can be deferred is not an interrupt"), but that reasoning does not carry to
   // one that was already deferred by N seconds — writing it directly would let
-  // it overtake messages queued ahead of it. When that is the situation, the
-  // Ctrl+C rides along with the message instead (`interruptFirst`), so the queue
-  // drains in order AND the interrupt still lands right before its own payload.
-  let queueAhead = enforceFifo && sendBuffer.hasPending(terminalId);
-
-  // Optionally interrupt first — bypass buffering entirely.
-  let wroteInterrupt = false;
-  if (interrupt && !queueAhead) {
-    session.write('\x03'); // Ctrl+C
-    wroteInterrupt = true;
-    await new Promise(resolve => setTimeout(resolve, 100));
-    // Re-check: the 100ms pause is a window in which something else can queue
-    // for this session, and a decision taken before an await is a decision
-    // about a world that may have moved on.
-    queueAhead = enforceFifo && sendBuffer.hasPending(terminalId);
-  }
+  // it overtake messages queued ahead of it. When there IS a queue ahead, the
+  // Ctrl+C rides along with the message (`interruptFirst`); otherwise it is
+  // written INSIDE the payload's submission reservation below, never before it.
+  const queueAhead = enforceFifo && sendBuffer.hasPending(terminalId);
 
   // Check if user is idle — deliver immediately or buffer (Spec 403, Bugfix #450)
   // Defer only when user has typed recently (within idle threshold).
@@ -1789,33 +1792,44 @@ async function deliverOrBuffer(
       timestamp: Date.now(),
       broadcastPayload,
       logMessage,
-      // Only ask the buffer to write Ctrl+C if this call has not already sent
-      // one. Without the guard, an interrupt that found the queue empty, wrote
-      // its Ctrl+C, then discovered a new arrival during its 100ms pause would
-      // send a SECOND one at flush.
-      interruptFirst: interrupt && queueAhead && !wroteInterrupt ? true : undefined,
+      // A deferred interrupt carries its Ctrl+C on the message, written just
+      // ahead of its own payload at flush time rather than ahead of the whole
+      // queue. Nothing is pre-written, so there is no double-Ctrl+C to guard.
+      interruptFirst: interrupt ? true : undefined,
     });
     ctx.log('INFO', `Message deferred (user typing): ${from ?? 'unknown'} → ${agent} (terminal ${terminalId.slice(0, 8)}...)`);
     return true;
   }
 
-  // Bugfix #584: paces multi-line output to avoid paste detection.
+  // Direct delivery, through Spec 1273's submission lock. Everything this
+  // message writes — an optional Ctrl+C, the payload, its Enter — happens in
+  // ONE reservation, so nothing else can write to this session mid-delivery and
+  // the interrupt cannot be separated from the payload it belongs to.
   //
-  // AWAITED through Spec 1273's submission lock. `writeMessageToSession`
-  // schedules its Enter 50-80ms out and returns immediately, so responding on
-  // that return meant an awaited send resolved BEFORE its message was
-  // submitted — two sends in quick succession landed in one composer and were
-  // submitted as a single message. That is how `afx reset` sent
-  // `/clear### [ARCHITECT INSTRUCTION...` and cleared nothing.
-  //
-  // Spec 1307 routes BOTH its paths through here, so both inherit the
-  // guarantee: the immediate path (as on main) and the delayed path, whose due
-  // messages re-enter this function rather than writing directly.
-  await submitToSession(terminalId, () =>
-    writeMessageToSession(session, formattedMessage, noEnter),
-  );
-  broadcastMessage(broadcastPayload);
-  ctx.log('INFO', logMessage);
+  // AWAITED: `writeMessageToSession` schedules its Enter 50-80ms out and returns
+  // immediately, so responding on that return meant an awaited send resolved
+  // BEFORE its message was submitted — two sends in quick succession landed in
+  // one composer and were submitted as one. That is how `afx reset` sent
+  // `/clear### [ARCHITECT INSTRUCTION...` and cleared nothing. Both of Spec
+  // 1307's paths route through here, so both inherit the guarantee.
+  let wrote = false;
+  await submitToSession(terminalId, () => {
+    // Cancellation is re-checked HERE, holding the lock, not before the wait for
+    // it: a delayed delivery can acquire the lock only after a shutdown that
+    // fired while it queued. `stillLive` is undefined on the immediate path.
+    if (stillLive && !stillLive()) return 0;
+    wrote = true;
+    let offset = 0;
+    if (interrupt) {
+      session.write('\x03'); // Ctrl+C, inside the reservation
+      offset = 100; // same pause the buffered interruptFirst path uses
+    }
+    return writeMessageToSession(session, formattedMessage, noEnter, offset);
+  });
+  if (wrote) {
+    broadcastMessage(broadcastPayload);
+    ctx.log('INFO', logMessage);
+  }
   return false;
 }
 

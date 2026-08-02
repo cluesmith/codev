@@ -2058,6 +2058,58 @@ describe('tower-routes', () => {
       expect(archIdx).toBeGreaterThan(lastClearIdx);
     });
 
+    it('ORDERING: a delayed --interrupt due MID-FLUSH does not split into the flush', async () => {
+      // Review regression: deleting busyUntil made hasPending queue-only, and a
+      // delayed --interrupt wrote its Ctrl+C DIRECTLY (outside the lock) before
+      // its payload. Due mid-flush, that Ctrl+C landed inside the flush's
+      // stream, separated from its own payload. The fix folds the Ctrl+C into
+      // the payload's submitToSession reservation, so the whole interrupt+
+      // message queues behind the flush as a unit.
+      vi.useFakeTimers();
+      const mockWrite = vi.fn();
+      let typing = true;
+      mockGetTerminalManager.mockReturnValue({
+        getSession: () => ({
+          write: mockWrite, pid: 1234, writable: true,
+          isUserIdle: () => !typing, composing: false,
+        }),
+        listSessions: () => [],
+      });
+      mockResolveTarget.mockReturnValue({
+        terminalId: 'term-midflush-int', workspacePath: '/tmp/ws', agent: 'architect',
+      });
+
+      const clearBody = Array.from({ length: 150 }, (_, i) => `CLEAR-${i}`).join('\n');
+      mockParseJsonBody.mockResolvedValue({
+        to: 'architect:main', message: clearBody, workspace: '/tmp/ws', options: { raw: true },
+      });
+      await handleRequest(makeReq('POST', '/api/send'), makeRes().res, makeCtx());
+
+      // A delayed INTERRUPT due mid-flush.
+      mockParseJsonBody.mockResolvedValue({
+        to: 'architect:main', message: 'URGENT', workspace: '/tmp/ws',
+        options: { raw: true, interrupt: true, deliverAfter: 1 },
+      });
+      await handleRequest(makeReq('POST', '/api/send'), makeRes().res, makeCtx());
+
+      typing = false;
+      startSendBuffer(() => {});
+      await vi.advanceTimersByTimeAsync(600);
+      await vi.advanceTimersByTimeAsync(1_000);
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      const writes = mockWrite.mock.calls.map(c => String(c[0]));
+      const ctrlCIdx = writes.indexOf('\x03');
+      const lastClear = writes.map((w, i) => w.includes('CLEAR-149') ? i : -1).filter(i => i >= 0).pop() ?? -1;
+      const urgentIdx = writes.findIndex(w => w.includes('URGENT'));
+
+      // The Ctrl+C did not jump into the flush: it lands after the whole clear,
+      // and directly ahead of its own payload.
+      expect(lastClear).toBeGreaterThanOrEqual(0);
+      expect(ctrlCIdx).toBeGreaterThan(lastClear);
+      expect(urgentIdx).toBeGreaterThan(ctrlCIdx);
+    });
+
     it('leaves undelayed sends on the immediate path', async () => {
       mockParseJsonBody.mockResolvedValue({
         to: 'architect:main', message: 'now', workspace: '/tmp/ws', options: { raw: true },

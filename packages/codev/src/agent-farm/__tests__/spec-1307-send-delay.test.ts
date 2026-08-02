@@ -264,6 +264,27 @@ describe('shutdownDelayedSends', () => {
     expect(ran).toEqual(['early']);
   });
 
+  it('cancels a delivery whose lock wait outlasts a shutdown (isStillLive)', async () => {
+    // Codex's finding: the timer-time generation check passes, delivery is
+    // handed to deliverOrBuffer, and THERE it can block on submitToSession
+    // behind an in-flight write to the same session. If shutdown fires during
+    // that block, the write must still be cancelled — the timer check already
+    // passed, so only the write-time `isStillLive()` re-check catches it.
+    let liveWhenWritten: boolean | undefined;
+    scheduleDelayedSend(5, 'term-1', (isStillLive) => {
+      // Simulate reaching the write site (as deliverOrBuffer does inside the
+      // lock) only after shutdown has run.
+      shutdownDelayedSends();
+      liveWhenWritten = isStillLive();
+    });
+
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    // The predicate the write site consults reports "not live", so
+    // deliverOrBuffer's `if (!stillLive()) return 0` skips the write.
+    expect(liveWhenWritten).toBe(false);
+  });
+
   it('does not cancel deliveries scheduled AFTER a shutdown', async () => {
     // The generation guard must not poison the next Tower lifetime.
     shutdownDelayedSends();
