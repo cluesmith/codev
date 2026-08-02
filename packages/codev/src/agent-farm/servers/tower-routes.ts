@@ -53,6 +53,7 @@ import type { BufferedMessage } from './send-buffer.js';
 import type { PtySession } from '../../terminal/pty-session.js';
 import { writeMessageToSession, writeEscapeToSession } from './message-write.js';
 import { scheduleDelayedSend, validateDelaySeconds } from './delayed-send.js';
+import { submitToSession } from './session-submit.js';
 import {
   getKnownWorkspacePaths,
   getInstances,
@@ -1548,7 +1549,9 @@ async function handleSend(
   // trailing Enter is what lets them through, which is why it is the default
   // (matching the verified recovery `afx send <b> --raw "$(printf '\x1b')"`).
   if (escape) {
-    writeEscapeToSession(session, noEnter);
+    // Awaited: the response must not claim delivery before the ESC and its
+    // Enter have actually been written (Spec 1273 verify).
+    await submitToSession(result.terminalId, () => writeEscapeToSession(session, noEnter));
     broadcastMessage({
       type: 'message',
       from: { project: path.basename(fromWorkspace ?? workspace ?? 'unknown'), agent: from ?? 'unknown' },
@@ -1811,10 +1814,26 @@ async function deliverOrBuffer(
   }
 
   // Bugfix #584: paces multi-line output to avoid paste detection.
-  const writeCompletesInMs = writeMessageToSession(session, formattedMessage, noEnter);
+  //
+  // AWAITED through Spec 1273's submission lock. `writeMessageToSession`
+  // schedules its Enter 50-80ms out and returns immediately, so responding on
+  // that return meant an awaited send resolved BEFORE its message was
+  // submitted — two sends in quick succession landed in one composer and were
+  // submitted as a single message. That is how `afx reset` sent
+  // `/clear### [ARCHITECT INSTRUCTION...` and cleared nothing.
+  //
+  // Spec 1307 routes BOTH its paths through here, so both inherit the
+  // guarantee: the immediate path (as on main) and the delayed path, whose due
+  // messages re-enter this function rather than writing directly.
+  await submitToSession(terminalId, () =>
+    writeMessageToSession(session, formattedMessage, noEnter),
+  );
   broadcastMessage(broadcastPayload);
   ctx.log('INFO', logMessage);
-  return { deferred: false, writeCompletesInMs };
+  // The lock has already waited out this write's Enter, so the caller needs no
+  // further settling wait. Kept in the return shape because the buffered branch
+  // above still reports 0 and callers destructure it.
+  return { deferred: false, writeCompletesInMs: 0 };
 }
 
 async function handleBrowse(res: http.ServerResponse, url: URL): Promise<void> {
