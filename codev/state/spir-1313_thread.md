@@ -1683,3 +1683,23 @@ send-delivery mid-pace-drop hold test.
   delivery e2e (`send-integration`) **7/7**. PR #1330 still DRAFT; porch still parked at the **pr gate** (no rollback,
   no porch state change). Architect notified for the re-run integration consult. Strict mode: NOT self-approving/merging.
   Ending turn addressable; resume on architect steer or gate approval.
+
+### 2026-08-03 — REDIRECT: spec-1280 T16 is a LIVE guard (1280 is OPEN) → restored, conflict escalated
+Architect corrected the spec-1280 call with new info: Issue #1280 is **OPEN** (status.yaml: `phase_0_instrument` in
+progress, phases 1–10 pending; phase_1 edits CLAUDE/AGENTS). So T16 is a LIVE guard 1280 pre-positioned in Phase 0 —
+NOT vestigial. Must not delete/scope another active project's guard.
+- **Restored** `spec-1280-phase-manifest.test.ts` to main exactly (`git checkout main -- …`), which undid BOTH my
+  deletion this session AND the earlier `isProject1280` scoping in one shot. Verified: staged `git diff --cached main`
+  for the file is EMPTY (matches main); the T16 completeness guard + `execFileSync` + `PROMPT_BEARING` are back;
+  `isProject1280` is gone (0 occurrences).
+- **Intended consequence**: T16 now FAILS on this branch (1313's arch-critical→CLAUDE/AGENTS propagation is flagged for
+  absence from a 1280 manifest). Left failing DELIBERATELY. Per architect: do NOT make it pass / scope / skip; do NOT run
+  `porch check`/`porch done` (would choke on the failing test). HOLD at the pr gate.
+- **Escalated** the T16-vs-1313 conflict to the 1280 owner (@waleedkadous) via a PR #1330 comment
+  (issuecomment-5164430013), with 3 resolution options (1280 scopes T16 / a shared opt-in exemption for Spec-987 hot-tier
+  propagation / 1313 waits).
+- Review doc updated: Deviations (touched→restored), Consultation Feedback round-3 spec-1280 bullet (REVERSED on new
+  info), Technical Debt (guard restored + conflict escalated), Follow-up (escalation item). The silent-loss fix
+  (becc6e1a) is untouched.
+- Committed **f00322b5** (restore + review doc), pushed. PR #1330 still DRAFT. Strict: NOT self-approving/merging, NOT
+  running porch. Ending turn addressable; resume on 1280-owner guidance or architect steer.
