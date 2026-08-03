@@ -760,3 +760,39 @@ Force-advance is not approval. Corrected in the review, this thread, and a PR co
 precisely which changes went unreviewed (the iter3 docs fixes) and how I verified them alone.
 
 **Waiting for Waleed at the pr gate. Not merging.**
+
+## Confirming pass — codex APPROVE; the force-advance is now closed out
+
+Architect applied the **1307 precedent** before letting this reach Waleed: force-advance is not
+approval, and a builder's self-verification does not discharge a reviewer's standing
+`REQUEST_CHANGES`. Two requirements, both done.
+
+**1. One scoped confirming codex pass** over exactly the un-re-reviewed surface — phase_6's iter3
+docs fixes (`2cb1e2f7`) and the three PR-gate CMAP fixes (`251c867f`, incl. the reverse
+exhaustiveness assertion).
+
+**Verdict: codex `APPROVE` (HIGH), KEY_ISSUES: None** — "Both commits correctly resolve the
+outstanding findings without introducing defects." It independently confirmed the strict-JSON
+examples parse, the doc trees are byte-identical, documented values match the implementation, the
+SDK guard is bidirectional, and the replacement tests are non-circular.
+
+**Reused the trap I hit during the specify 4th pass**: ran with an explicit `--output` outside the
+porch project directory, so the consult could not auto-persist into
+`1286-review-iter1-codex.txt` and be miscounted as a phase review. Copied in afterwards under
+`1286-confirming-codex-scoped.txt`, a name deliberately outside porch's
+`<id>-<phase>-iter<N>-<model>.txt` glob. Worth noting the earlier version of this mistake is what
+made the trap memorable enough to avoid unprompted.
+
+**2. Force-advance history is now in the PR body**, not only the review file — a table of what was
+and was not reviewer-approved (phases 1–5 unanimous; phase_6 and the spec force-advanced), what
+specifically went unreviewed, and the confirming verdict that closes it.
+
+Net: every change on this branch is now reviewer-approved, in-phase or by the confirming pass.
+
+**The generalizable bit.** My instinct at the gate was that self-verification plus full disclosure
+was enough — disclose the force-advance, show my own checks, let the gate reader judge. The
+architect's rule is stricter and better: **disclosure is necessary but does not substitute for the
+review that was skipped.** Honest reporting of a gap is not the same as closing it. The confirming
+pass cost one consult and converted "trust the builder's self-check" into an independent verdict.
+
+**Still waiting for Waleed at the pr gate. Not merging.**

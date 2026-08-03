@@ -12,6 +12,27 @@ at PR review — see Lessons):
   the iter3 ones: JSON examples made parseable, real pricing rates, and PIR example consistency —
   all verified by me (all six JSON blocks run through `json.loads`, skeleton `diff` empty), none
   verified by a reviewer. A `force_advanced` record is in `status.yaml`.
+- **Confirming pass (architect-required)**: because force-advance is not approval and a builder's
+  self-verification does not close out a standing `REQUEST_CHANGES`, a scoped codex pass was run
+  over exactly the un-re-reviewed surface — phase 6's iter3 docs fixes (`2cb1e2f7`) plus the three
+  PR-gate CMAP fixes (`251c867f`, including the reverse exhaustiveness assertion).
+
+  **Verdict: codex `APPROVE` (HIGH)** — *"Both commits correctly resolve the outstanding findings
+  without introducing defects."* KEY_ISSUES: None. Codex confirmed independently that the strict-JSON
+  examples parse, the two doc trees are byte-identical, documented values match the implementation,
+  the SDK exhaustiveness guard is bidirectional, and the replacement tests are non-circular.
+
+  Verdict reproduced verbatim, with scope and invocation notes, in
+  `codev/projects/1286-consult-configurable-per-lane-/1286-confirming-codex-scoped.md`. It was run
+  with an explicit `--output` outside the porch project directory so it could not auto-persist and
+  be miscounted as a phase review. (Raw consult `.txt` outputs are gitignored repo-wide —
+  `.gitignore:59` — so no phase review on this project is committed as a raw file either; the `.md`
+  keeps the evidence in-repo without departing from that convention.)
+
+**Net**: every change on this branch has now been reviewer-approved, either in its phase or by the
+confirming pass. The spec itself was also force-advanced (codex requested changes on all three
+passes, with an architect-required 4th pass before planning) — that history is on file in the
+`*-rebuttals.md` artifacts.
 
 ## Summary
 
