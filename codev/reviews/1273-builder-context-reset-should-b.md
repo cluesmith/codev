@@ -201,6 +201,33 @@ The e2e was the first thing to run reset against reality, and it failed instantl
 the strongest possible restatement of the hot-tier lesson: *"it compiled" / "tests pass" is not "it
 works" — verify the real user path end-to-end.*
 
+### The delivery seam — `/clear` was never executed (2026-08-01)
+
+The live e2e's forensics closed the loop on the headline path. `afx reset`'s `/clear` **never ran**: it
+arrived as literal text welded onto the front of the re-orientation, one merged user turn beginning
+`/clear### [ARCHITECT INSTRUCTION...`. The probe's context was fully intact — it could still recite a
+secret word planted before the "reset" — while every layer reported success.
+
+**Root cause.** `writeMessageToSession` schedules the Enter that submits a message 50–80ms out and
+returns that offset without awaiting it; `/api/send` responded off that. So an awaited send resolved
+*before its own message was submitted*. Reset awaited the `/clear` write, sampled output, then wrote the
+re-orientation — inside the window, into the same composer, ahead of the Enter. One Enter submitted both.
+
+This also retro-explains the phase-6 clear-confirmation defect: at the moment the check sampled output,
+the clear had not been submitted. **Two bugs, one seam.**
+
+**Fix**: a per-session submission lock (`servers/session-submit.ts`), wired to the escape and
+immediate-delivery paths. `await submitToSession(...)` means *submitted*, not *scheduled*.
+
+**Ordering is not atomicity.** `SendBuffer` already serialises within a flush, and Spec 1307's per-session
+FIFO fixes delivery *order*. Neither would have prevented this — the two writes were correctly ordered
+and still coalesced. Being second is not the same as being separate. Worth carrying: the two properties
+look interchangeable in a design discussion and are not.
+
+**Scope, stated because the first framing was overbroad**: the lock covers what takes it — the two
+`/api/send` paths. Buffer flush, cron delivery and the raw write endpoint still write directly; human
+keystrokes deliberately always will.
+
 ## Flaky Tests
 
 None encountered. No tests were skipped by this work.

@@ -1555,11 +1555,24 @@ describe('tower-routes', () => {
       const { res } = makeRes();
 
       await handleRequest(req, res, ctx);
-      // Message is written first, then \r is sent separately after a 50ms delay
-      // so the PTY processes the multi-line paste before receiving Enter (Bugfix #492).
-      const writeCalls = mockWrite.mock.calls;
-      expect(writeCalls.length).toBe(1); // Initial write (message only)
-      expect(writeCalls[0][0]).not.toMatch(/\r$/); // No \r in initial write
+      // Message is written first, then \r is sent SEPARATELY after a delay, so
+      // the PTY processes the paste before receiving Enter (Bugfix #492/#481).
+      // That separation is the property this test exists to protect.
+      const writeCalls = mockWrite.mock.calls.map(c => c[0] as string);
+      expect(writeCalls[0]).toContain('hello');
+      expect(writeCalls[0]).not.toMatch(/\r$/); // Enter is never appended
+
+      // UPDATED (Spec 1273 verify): this previously asserted `length === 1` —
+      // i.e. that the route returned BEFORE the Enter was written. That was the
+      // bug, not the contract: an awaited send resolving before its own
+      // submission is how `afx reset` got `/clear` welded onto the front of the
+      // next message and never cleared anything. `/api/send` now awaits the
+      // submission, so by the time the request resolves the Enter HAS landed.
+      //
+      // Asserted as properties rather than an exact count, because the
+      // formatted message may be paced line-by-line (Bugfix #584).
+      expect(writeCalls.length).toBeGreaterThan(1);
+      expect(writeCalls.at(-1)).toBe('\r');
     });
 
     it('delivers message without Enter when noEnter is set (Bugfix #481)', async () => {

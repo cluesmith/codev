@@ -393,6 +393,60 @@ reviewed 2-way. Reported to the architect.
 
 Remaining: the live reset against the planted-context probe, for the architect to re-run after install.
 
+## The delivery seam — `/clear` was never executed (2026-08-01)
+
+The e2e's forensics closed the loop, and the answer was worse than "the fix was wrong": **the `/clear`
+never ran at all.** It arrived as literal text welded onto the front of the re-orientation — one merged
+user turn beginning `/clear### [ARCHITECT INSTRUCTION...`, no separator. The probe's context was fully
+intact; it could still recite a secret word planted before the "reset". Every layer reported success.
+
+**Root cause.** `writeMessageToSession` schedules the Enter that submits a message 50–80ms out and
+returns that offset *without awaiting it*; `/api/send` responded off that. So an awaited send resolved
+**before its own message was submitted**. Reset awaited the `/clear` write, sampled output, then wrote
+the re-orientation — inside the window, into the same composer, ahead of the Enter. One Enter submitted
+both.
+
+The channel was right. The mistake was treating an awaited send as proof of submission when it only
+proved *scheduling*. The architect's ledger has this as a family now — *an operation that reports success
+at a point earlier than the thing it claims* — and this is its third member.
+
+It also retro-explains phase 6's clear-confirmation defect: at the moment the check sampled output, the
+clear had not been submitted. **Two bugs, one seam.** I spent three CMAP rounds patching the confirmation
+regex when the thing it was checking had not happened yet.
+
+**Ordering is not atomicity.** This is the piece worth carrying furthest. `SendBuffer` already serialises
+within a flush, and 1307's per-session FIFO fixes delivery *order* — and neither would have prevented
+this, because my two writes were correctly ordered and still coalesced. **Being second is not the same as
+being separate.** In a design conversation the two properties sound interchangeable; they are not, and
+the distinction is invisible until something concatenates.
+
+**Fix**: a per-session submission lock (`servers/session-submit.ts`) — a promise chain where each
+submission waits out its own Enter before the next write to that session begins. `await
+submitToSession(...)` means *submitted*.
+
+### Working with a sibling builder
+
+The architect assigned me the primitive and 1307 adopts it. Two things came out of that exchange that
+neither of us would have got alone:
+
+- **They corrected me.** I had claimed reset's own writes bump `_lastInputAt` and so trip their own
+  buffering. False — `recordUserInput()` is called only from the websocket handler. It did not affect the
+  diagnosis, but it was load-bearing in how I was *describing* the failure, which is its own kind of
+  wrong. They told me to verify rather than take their word; I did.
+- **I corrected the scope of my own fix.** They asked whether deleting their `busyUntil` would reopen a
+  mid-flush interleave. Rather than assert the primitive covered it, I checked: the existing signature
+  already supports a whole-batch reservation, and I pinned it with a mutation-verified test so their
+  deletion rests on a failing-on-mutation test rather than my assurance. Their reply — *a test adjacent to
+  the real path is not coverage of it* — is the right line, and they are re-verifying with their own
+  flush test regardless.
+
+Codex's CMAP then caught that my framing of the primitive was overbroad: a lock only serialises writers
+that *take* it. The uncovered writers are now enumerated with reasons, including the one that should
+never be covered — human keystrokes, because the human owns their own composer.
+
+**Still unproven**: that the clear now actually clears, and what a real clear emits. The confirmation
+pattern remains an educated guess until the live re-run.
+
 ## Status
 
 - [x] Explored afx/Tower internals

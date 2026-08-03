@@ -512,10 +512,28 @@ describe('Concurrent MetricsDB writes', () => {
 
 // Test 13: Cold start (no DB)
 describe('Cold start with no database', () => {
-  it('MetricsDB.defaultPath points to ~/.codev/metrics.db', () => {
-    const path = MetricsDB.defaultPath;
-    expect(path).toContain('.codev');
-    expect(path).toContain('metrics.db');
+  it('MetricsDB.defaultPath honours CODEV_METRICS_DB', () => {
+    // Under the vitest harness the sandbox redirect is always set, so this is
+    // what defaultPath resolves to in a test run. The old assertion here checked
+    // only for the substrings `.codev` and `metrics.db`, which the sandbox layout
+    // happens to satisfy — so it passed without testing what its name claimed.
+    const redirect = process.env.CODEV_METRICS_DB;
+    expect(redirect, 'vitest-setup.ts must pin a sandbox metrics DB').toBeTruthy();
+    expect(MetricsDB.defaultPath).toBe(redirect);
+  });
+
+  it('MetricsDB.defaultPath refuses the user-global path under a test runner', () => {
+    // The documented production fallback is ~/.codev/metrics.db, but a test
+    // runner must never reach it (#1323) — clearing the redirect is a failure,
+    // not a route back to the developer's real database.
+    const prior = process.env.CODEV_METRICS_DB;
+    delete process.env.CODEV_METRICS_DB;
+    try {
+      expect(() => MetricsDB.defaultPath).toThrow(/CODEV_METRICS_DB/);
+    } finally {
+      if (prior === undefined) delete process.env.CODEV_METRICS_DB;
+      else process.env.CODEV_METRICS_DB = prior;
+    }
   });
 
   it('handleStats prints "No metrics data found" when database does not exist', async () => {
