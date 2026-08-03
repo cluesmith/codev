@@ -1503,3 +1503,102 @@ REVERT-CHECKED both: rejecting-write test fails on reverting the finally (classi
 fails on reverting the post-await guard (streaks 0→1) — previously green even fully reverted (that was the vacuity).
 Cooldown test GREEN (classifyCalls=4). Full suite 4267 pass / 48 skip / 0 fail; tsc clean. NEXT: commit → push #1330 →
 round-4 PR comment. Strict mode: NOT approving any gate, NOT merging.
+
+### 2026-08-03 — Human superseded the "don't invoke porch" guardrail → drove porch forward to the FIRST wall, PARKED (no code written).
+Human instruction (via architect): run `porch check 1313` and continue porch forward over already-done work; STOP the
+instant it wants new code / re-implementation / a consult-requested change / a human gate; ping + wait; do NOT modify
+code or decide unilaterally; still NO gh pr merge / NO self-approve pr/verify.
+DID (following porch's own breadcrumbs):
+  • `porch check 1313` → phase_1 ✓build ✓tests PASSED (already-shipped code) → "run porch done".
+  • `porch done 1313` → ✓build ✓tests "BUILD COMPLETE. Ready for verification." → advanced phase_1 → phase_2 → "run porch next".
+  • `porch next 1313` → returns an IMPLEMENT phase_2 prompt (render-gate.ts, gate-profiles.ts, PtySession app-identity
+    seam, fixtures, render-gate.test.ts).
+WALL = exactly the human's stop-trigger ("porch prompts you to (re)implement a phase"). phase_2 is ALREADY SHIPPED in
+#1330 — verified all four artifacts exist on disk. Wrote/modified NOTHING; did NOT run the implement task.
+MECHANISM: phase_1 was `in_progress` in porch's model, so check→done just validated+completed it (no implement prompt
+in my path); phase_2..9 are `pending`, so `porch next` emits a full implement prompt per phase. Current porch state:
+phase=implement, current_plan_phase=phase_2. PR #1330 still MERGEABLE, 0-behind, CI green; PR-event monitor armed.
+PINGED architect (delivered) with the A/B decision: (A) keep advancing via check→done ONLY (validates build+tests on
+shipped code, advances w/o new code — how phase_1 went; caveat: unknown if `porch done` on a pending phase triggers the
+per-phase 3-way consult → another wall if it requests changes) → stop at the pr/verify human gate; or (B) hold here.
+Regardless: NO code changes, NO re-implementation, NO self-approve pr/verify, NO merge. HOLDING for the architect's call.
+
+### 2026-08-03 — Architect authorized a ONE-PHASE PROBE (phase_2, check→done only). Result: clean but NON-advancing. PARKED for A/B.
+Ran (phase_2, per architect "advance ONLY phase_2 via check→done, ignore the implement prompt, write no code, then STOP+report"):
+  • `porch check 1313` → ✓build ✓tests "ALL CHECKS PASSED" → "run porch done". (no consult, no code, no gate)
+  • `porch done 1313`  → ✓build ✓tests "BUILD COMPLETE. Ready for verification. Run: porch next 1313". (no consult, no code, no gate)
+KEY MECHANISM FINDING: `porch done` does NOT advance/complete the phase. Post-done: phase_1=complete, phase_2=IN_PROGRESS
+(unchanged), current_plan_phase=phase_2 (unchanged). The advancer is `porch next` — which ALSO emits the next phase's
+IMPLEMENT prompt (the wall). So check→done alone parks a phase at "ready for verification"; it does NOT walk 2→3.
+phase_1 advanced earlier only because I ran ITS `porch next` (pre-probe). Answers the architect's explicit Q: `porch done`
+on this phase did NOT trigger a 3-way consultation. Wrote NO code (tree clean except this thread). Did NOT run `porch next`.
+PINGED architect (delivered) with A/B: (A) authorize full clean-advance per phase = check→done→**next**, where next
+advances + shows the implement prompt which I IGNORE (no code), walking 3→9 → STOP at review/pr or verify human gate (or
+any consult-requested change / build-test failure / ambiguity); (B) hold here. HOLDING for the call. NO self-approve pr/
+verify, NO merge, NO re-implementation. PR #1330 still MERGEABLE, 0-behind, CI green; monitor armed.
+
+### 2026-08-03 — Architect authorized (A): walked phases 3→9 via check→done→next (ignore implement prompts, no code). Result below. PARKED at phase_9 entry.
+Ran a guarded script (aborts on any anomaly): bootstrap `porch next` (phase_2) then per phase `porch check`→`porch done`→`porch next`.
+OUTCOME: phase_1..phase_8 = COMPLETE; phase_9 = IN_PROGRESS (at "Build artifact", not yet check+done'd); current_plan_phase=phase_9,
+iteration=1. Gates: spec/plan approved, pr=pending, verify=pending. Tree CLEAN (only this thread log). NO code written. NO
+consultation executed (no consult subprocess; next calls were instant JSON). Every check/done passed (✓build ✓tests, ~14 runs).
+UNEXPECTED (benign, handled): porch's `next` interleaves "Implement: Fix issues from iteration N" prompts between the "Build
+artifact" prompts (seen: phase_2 i1, phase_4 i1, phase_5 i1, phase_7 i1 AND i2, phase_8 i1) — it replays each phase's stored
+SPIR iteration history from the ORIGINAL real implementation. I IGNORED every implement/fix prompt; check→done→next still
+advanced each phase to COMPLETE (build+tests green). Phases took 2-3 next-cycles each → tripped my conservative 12-iter loop
+guard right after next advanced INTO phase_9 (hence parked at phase_9 entry, not at phase_9 "ready for verification").
+POSITION vs boundary: one `porch check`→`porch done` would validate phase_9 + park it at "ready for verification"; the NEXT
+`porch next` after that would cross implement→REVIEW = the STOP boundary. Did NOT force it. Pinged architect (delivered) A/B:
+(A) finish phase_9 check→done to park exactly at the boundary + report; (B) hold at phase_9 in_progress. HOLDING.
+Unchanged: NO code, NO re-implement, NO review CMAP, NO touching #1330, NO self-approve pr/verify, NO merge. #1330 MERGEABLE,
+0-behind, CI green; monitor armed.
+
+### 2026-08-03 — Architect (A): finished phase_9 check→done → PARKED at review boundary. + discovered porch AUTO-PUSHED bookkeeping to #1330.
+phase_9 `porch check` → ✓build ✓tests "ALL CHECKS PASSED"; `porch done` → ✓build ✓tests "BUILD COMPLETE. Ready for verification".
+Did NOT run `porch next`. PORCH FINAL PARKED STATE: phase=implement, current_plan_phase=phase_9, iteration=1; phase_1..8=COMPLETE,
+phase_9=IN_PROGRESS (ready-for-verification); gates spec/plan approved, pr=pending, verify=pending. Tree clean (thread only). NO
+code, NO consult. Exactly the boundary the architect set.
+⚠️ SIDE EFFECT DISCOVERED: driving porch forward made porch STRICT MODE auto-commit AND AUTO-PUSH. Since round-4 commit
+9c3ae2a3, porch created + pushed **30 `chore(porch)` commits** (status.yaml ONLY, +126/-14, ZERO code) → **PR #1330 HEAD moved
+9c3ae2a3 → af554530**. I did NOT push manually. CI re-triggered on af554530 and is GREEN (all 6 SUCCESS); PR still MERGEABLE,
+0-behind main. Notable: a phase_7 "force-advance (safety ceiling reached at iter 3)" commit (porch hit its per-phase iteration
+ceiling; benign — code already shipped/green). This conflicts with the architect's "don't touch #1330" but was porch's auto-push,
+not manual. Substance benign (status.yaml-only, CI green), but #1330 now carries 30 noise commits.
+PINGED architect (delivered) A/B/C: (A) leave as-is [lowest risk; matches "leave PR as terminal"]; (B) reset origin branch to
+9c3ae2a3 + FORCE-PUSH to strip the noise [I do ONLY on explicit say-so — rewrites a maintainer-facing PR]; (C) other. Also asked
+whether status.yaml is even meant to ride in the PR / merge to main. Did NOT reset/force-push. HOLDING.
+Unchanged: no further porch commands, no self-approve pr/verify, no merge. Branch 0-behind main, CI green; monitor armed.
+
+### 2026-08-03 — RESOLUTION (architect): the 30 chore(porch) commits are EXPECTED, not noise. (A) leave-as-is confirmed; nothing to clean up.
+Architect verified empirically: codev/projects/ is NOT gitignored; status.yaml is TRACKED (194 on main) and these chore(porch)
+commits RIDE TO MAIN by design — main already carries identical ones (e.g. "chore(porch): bugfix-1323 pr gate-approved / protocol
+complete"); repo keeps that history (--merge, never squash). So my 30 status.yaml-only commits are NORMAL idiomatic protocol
+bookkeeping. The walk IMPROVED PR #1330: status.yaml now reflects phases 1-9 done instead of the stale phase_1 it carried at
+9c3ae2a3 — the correct state to merge. (B) force-push REJECTED (rewriting a maintainer-facing branch to strip legitimate history
+= risky + pointless). The earlier "don't touch #1330" meant no code/CMAP/new-PR; porch auto-pushing its OWN bookkeeping is benign
++ expected, not a violation. CORRECTION to my prior entry: NOT "noise" — it's supposed to be there.
+FINAL PARKED STATE (unchanged, holding): porch phase_9 ready-for-verification (phases 1-8 complete), pr gate PENDING; PR #1330
+HEAD af554530, CI 6/6 GREEN, MERGEABLE, 0-behind main; tree clean. NO further porch commands, NO self-approve pr/verify, NO merge.
+PR-event monitor (maintainer merge / change-request / main-drift) armed. Awaiting an external maintainer decision or architect steer.
+
+### 2026-08-03 — ARCHITECT DIRECTIVE (06:36Z): finish phase_9 → cross to REVIEW; REWRITE the review doc FROM SCRATCH.
+Resumed (fresh context). Architect directive supersedes the "walk-and-park" posture: **complete phase_9 and advance to Review via
+the normal porch flow** (commit phase_9 work → `porch check 1313` → `porch done 1313`), then do the Review phase. **CRITICAL:
+`codev/reviews/1313-afx-send-mailbox-first-delivery.md` is STALE** — authored pre-rollback, only half-swept by the post-rollback
+implement commits (over-ceiling hold removal, ringToken verdict memo, CMAP rounds 1-2). Do NOT trust/reuse/patch it. FIRST Review
+step = `git rm` it, then author FROM SCRATCH off the SPIR review template, reconstructing EVERY section (Summary, Consultation
+Feedback all phases/rounds/models, Architecture Updates, Lessons Learned Updates) against the CURRENT impl + actual git history.
+FYI from architect: the human intentionally deleted ALL PR comments — an empty thread is EXPECTED; porch's Review verification will
+post fresh 3-way feedback.
+GROUND TRUTH VERIFIED before acting (not trusting summaries):
+  - Post-rollback implement work fully committed: last real commit `9c3ae2a3` (CMAP round-4). Fix A try/finally memo-invalidation
+    present (mailbox-delivery.ts:397). Real-commit spine intact (6f925381 over-ceiling+memo → 44be6ba9 r1 → 5bc7d56e r2 →
+    9ba8b5b7 r3 → 9c3ae2a3 r4).
+  - phase_9 docs complete on disk: `### Mailbox retention and escalation` in BOTH agent-farm.md trees (root:1072, skeleton:854);
+    `diff CLAUDE.md AGENTS.md` empty. The porch iter-2 "Fix issues from iteration 1" task is a REPLAY of the original phase_9 iter-1
+    (config-knobs-undocumented) — already fixed. No new phase_9 code to write.
+  - Stale review file exists (68KB, to be git-rm'd + rewritten). PR #1330 diff = 102 files, +12540/-869.
+PLAN: (1) commit thread; (2) `porch check 1313` (build+tests) → `porch done 1313`; (3) `porch next` → cross to Review; (4) git rm
+the stale review + author new one from scratch (thread = contemporaneous consult log + git history + current code as sources);
+(5) commit review + arch/lessons routing; (6) `porch done` → porch's fresh Review 3-way. Strict mode: NOT self-approving pr/verify,
+NOT merging.
