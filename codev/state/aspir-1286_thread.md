@@ -681,10 +681,19 @@ asked for.
 
 tsc 0 · 387 porch tests green · full suite green · build ✓.
 
-## phase_6 APPROVED — all six phases done; the docs were the buggiest phase
+## phase_6 FORCE-ADVANCED (not approved) — the docs were the buggiest phase
 
-codex APPROVE · claude APPROVE at iter4, after three rounds. A docs-only phase took more iterations
-than any code phase, which is the finding worth keeping.
+**Correction, added after codex caught it at PR review.** I originally wrote this section as
+"phase_6 APPROVED — codex APPROVE · claude APPROVE at iter4". That is wrong and there was no iter4.
+Phase 6 ended at **iteration 3 with codex `REQUEST_CHANGES` / claude `APPROVE`**, hit
+`max_iterations: 3`, and porch **force-advanced** — `status.yaml` has the `force_advanced` record.
+My iter3 fixes were committed but never re-reviewed. I then carried the false "all six approved"
+claim into the review file, where a reviewer had to catch it.
+
+Worth sitting with: the whole phase below is about writing things from memory instead of checking
+them, and I closed it by writing *its own outcome* from memory instead of reading `status.yaml`.
+
+A docs-only phase took more iterations than any code phase, which is the finding worth keeping.
 
 Round by round, every defect was the same shape: **the parts I verified were right; the parts I
 wrote from memory were wrong.** I loaded the example config for real and read every constant out of

@@ -1,6 +1,17 @@
 # Review: Spec 1286 — consult: configurable per-lane models and per-review-type lane selection
 
-**Protocol**: ASPIR · **Phases**: 6, all approved unanimously (codex + claude) · **Commits**: 93
+**Protocol**: ASPIR · **Phases**: 6 · **PR**: #1341
+
+**Review status, stated precisely** (the first version of this line overclaimed, and codex caught it
+at PR review — see Lessons):
+
+- **Phases 1–5**: ended with a unanimous codex + claude `APPROVE`.
+- **Phase 6 (docs)**: **force-advanced at the iteration cap**, not unanimously approved. Iteration 3
+  ended codex `REQUEST_CHANGES` / claude `APPROVE`; the fixes for those findings were made and
+  committed but never re-reviewed, because `max_iterations: 3` was reached. The unreviewed fixes are
+  the iter3 ones: JSON examples made parseable, real pricing rates, and PIR example consistency —
+  all verified by me (all six JSON blocks run through `json.loads`, skeleton `diff` empty), none
+  verified by a reviewer. A `force_advanced` record is in `status.yaml`.
 
 ## Summary
 
@@ -117,6 +128,28 @@ signal permanently.
 
 ---
 
+## Known limitations and follow-up candidates
+
+Raised by claude at PR review as non-blocking. Each is in-scope-adjacent but *not* in this spec's
+scope, so they are recorded rather than fixed — changing them here would mean overriding an explicit
+spec requirement without an architect decision.
+
+1. **`byProtocol` protocol-name validation is workspace-scoped, but config can be global.** Names
+   are checked against the protocols visible in the *current* workspace. A `byProtocol.<name>` entry
+   set in `~/.codev/config.json` for a protocol that exists in only one workspace will hard-fail
+   `loadConfig` in every other workspace on that machine. This follows directly from the spec's
+   requirement that unknown keys be errors and never warnings — the alternative (scoping strictness
+   by config layer) is a design change, and the fail-fast rule is deliberate. Worth an architect
+   decision if anyone hits it in practice; the workaround today is to set `byProtocol` per project
+   rather than globally.
+2. **`model_id` is write-only.** The column is populated by every lane but is not surfaced by
+   `consult stats` or `analytics.ts`. Spec scenario 13 required only that it be recorded and that
+   `model` keep grouping reports by lane, so exposing it is a natural follow-up rather than an
+   omission — the data is there from the day this merges.
+3. **Cosmetic**: `loadConfig` is called ~3× per codex consultation and `listReviewTypes` is
+   recomputed inside the `byProtocol` validation loop. Both are cheap and off the hot path;
+   noted so a future reader knows it was seen, not missed.
+
 ## Architecture Updates
 
 Proposed for `codev/resources/arch.md` (COLD tier — none of these belong in the capped hot tier):
@@ -179,3 +212,18 @@ Proposed for `codev/resources/lessons-learned.md` (COLD tier):
 - **When a test fails in a file your branch never touched, compare file *contents* with `main`
   before assuming flakiness.** `git log HEAD..origin/main -- <file>` showed nothing; the two
   checkouts had different test counts, which exposed that the fix already existed upstream.
+- **`satisfies` binds a local list to an SDK union in one direction only.** It proves every local
+  value is legal upstream, so removals and renames break the build — but a value the SDK *adds*
+  leaves the list a valid subset, compiles clean, and gets hard-rejected at runtime as invalid.
+  Pair it with an `Exclude<Union, (typeof LIST)[number]> extends never` assertion for the other
+  direction. The comment above this code claimed all three cases were covered while the code caught
+  two; the claim was the only thing holding the third.
+- **A test that iterates the list it is validating is circular** and passes regardless of contents.
+  Enumerating a compile-time union at runtime is impossible — pin the values as literals and let a
+  type-level assertion carry the drift check.
+- **Report your own results as precisely as you'd report someone else's.** The first draft of this
+  review said "6 phases, all approved unanimously, 93 commits". Phase 6 was force-advanced at the
+  iteration cap with codex still at `REQUEST_CHANGES`, and the branch had 96 commits. Nobody had
+  lied to me — I summarized my own work from memory rather than reading `status.yaml`, the exact
+  habit that produced every docs defect in phase 6. A reviewer had to catch it. **Force-advance is
+  not approval, and a review that blurs the two removes the signal the pr-gate reader most needs.**

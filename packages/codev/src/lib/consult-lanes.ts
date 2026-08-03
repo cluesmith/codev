@@ -33,15 +33,28 @@ export type ConfigurableLane = (typeof MODEL_CONFIGURABLE_LANES)[number];
 export const REASONING_EFFORT_LANES = ['codex'] as const;
 
 /**
- * Accepted reasoning-effort values.
+ * Accepted reasoning-effort values, bound to the SDK's union in BOTH directions.
  *
- * `satisfies` is load-bearing: it binds this list to the SDK's exported union so that an SDK upgrade
- * which adds/removes/renames a member is a COMPILE ERROR here. A plain `string[]` would type-check
- * and pass tests while silently drifting — the same class of bug as a stale model-id allowlist.
+ * `satisfies` proves every value here is legal in the SDK, so a member the SDK **removes or
+ * renames** is a compile error. On its own that is only half the binding, and the missing half is
+ * the one that fails open: a member the SDK **adds** leaves this list a valid subset, so it still
+ * compiles — and `validateReasoningEffort` then hard-rejects a value the SDK considers legal, with
+ * nothing to indicate why. The spec requires drift in *either* direction to break the build.
+ * (Found by codex at PR review; the original comment here claimed "adds/removes/renames" while the
+ * code caught only two of the three.)
+ *
+ * `UncoveredEffort` closes it: it is `never` exactly when this list covers the whole union, and
+ * assigning `true` to `never` is a compile error otherwise. A type-level check rather than a test,
+ * because no runtime test can enumerate a union that exists only at compile time — see the circular
+ * test this replaced.
  */
 export const REASONING_EFFORTS = [
   'minimal', 'low', 'medium', 'high', 'xhigh',
 ] as const satisfies readonly ModelReasoningEffort[];
+
+type UncoveredEffort = Exclude<ModelReasoningEffort, (typeof REASONING_EFFORTS)[number]>;
+const _REASONING_EFFORTS_ARE_EXHAUSTIVE: UncoveredEffort extends never ? true : never = true;
+void _REASONING_EFFORTS_ARE_EXHAUSTIVE;
 
 /** Lane names accepted in `porch.consultation.*` lists (includes hermes — it IS a review backend). */
 export const VALID_LANE_NAMES = ['gemini', 'codex', 'claude', 'hermes'];

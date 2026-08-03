@@ -139,10 +139,24 @@ describe('consult.models key space (scenarios 9, 17)', () => {
 });
 
 describe('consult.reasoningEffort key/value space (scenarios 3, 18)', () => {
-  it('accepts every SDK enum value for codex', () => {
-    for (const effort of REASONING_EFFORTS) {
+  // Pinned as LITERALS, not by iterating REASONING_EFFORTS.
+  //
+  // The previous version looped over REASONING_EFFORTS and asserted each was accepted — which is
+  // circular: it validates the list against itself, so it passes no matter what the list contains
+  // and can never notice a value the SDK has and we lack. Found by codex at PR review.
+  //
+  // Splitting the concern: this runtime test pins the accepted VALUES (an accidental edit here
+  // fails it), while the SDK binding is enforced at compile time by `UncoveredEffort` in
+  // consult-lanes.ts. No runtime test can enumerate a union that only exists at compile time —
+  // trying to is exactly what made the old test circular.
+  it('accepts each documented effort value for codex', () => {
+    for (const effort of ['minimal', 'low', 'medium', 'high', 'xhigh'] as const) {
       expect(() => validateReasoningEffort({ codex: effort })).not.toThrow();
     }
+  });
+
+  it('the accepted set is exactly the documented five', () => {
+    expect([...REASONING_EFFORTS]).toEqual(['minimal', 'low', 'medium', 'high', 'xhigh']);
   });
 
   it('rejects claude — key space is narrower than consult.models', () => {
