@@ -1660,3 +1660,26 @@ commit+push onto `builder/spir-1313`, update review doc, re-verify (build+tests)
    `__tests__/spec-1280-phase-manifest.test.ts` (1280 integrated → main-resident no-op; architect: delete, cleaner than re-scoping).
 3. **🟡 Cleanup — stale SendBuffer comments** in `session-submit.ts` (~lines 22, 48): rewritten to the mailbox-delivery model.
 NOT in scope: Codex's gate→write input-echo race — already-documented, architect-ratified follow-up (do not widen scope).
+
+**Landed (becc6e1a, pushed to PR #1330).** Threaded the write boolean end-to-end: `WritableSession.write(): boolean`;
+drop-aware `writeMessagePaced(): Promise<boolean>` in message-write.ts (wraps the session, records any dropped write
+across the paced text→lines→Enter; the resolve fires after the Enter so every result is observed);
+`DeliveryPorts.writeMessage(): boolean | Promise<boolean>`; `deliverAgentMail` holds `no-live-pty` on a false result
+(memo still invalidated in `finally`; a genuine reject still propagates). New `spec-1313-paced-write-drop.test.ts`
+(9 cases: first-write drop, delayed Enter drop, multiline mid-line drop, all-ok short/multiline, noEnter) + a
+send-delivery mid-pace-drop hold test.
+- **Test-double conformance:** a `Promise<void>`/`vi.fn()` double now reads as a DROP (the safe failure mode), which
+  surfaced 3 pre-existing doubles `tsc` missed (tests are excluded from `tsc --noEmit`): the send-delivery concurrency
+  override, and the tower-routes `gateSession` helper (2 `/api/send` HTTP tests). Fixed all — the fix belongs in the
+  helper so every gate-clean delivery models a live PTY. Lesson: threading a boolean that was previously discarded can
+  break test doubles the typechecker never sees; run the FULL suite, not just the obviously-related files.
+- **Cleanups:** deleted the spec-1280 vestigial completeness guard (+ orphaned `execFileSync`/`PROMPT_BEARING`), kept the
+  structural validators; rewrote session-submit.ts `SendBuffer`/`deliverBufferedMessage` comments to the mailbox model —
+  and fixed the adjacent now-false cron bullet (Phase 6 of THIS spec removed cron's blind `writeMessageToSession`) + the
+  `escape and immediate-delivery` wording (normal sends route through the per-agent mailbox serializer, not this lock).
+- **Review doc:** Review round 3 recorded in Consultation Feedback + Iteration Summary; Technical Debt (spec-1280 guard
+  removed; benign partial-write residual) + Follow-up updated.
+- **VERIFY:** `tsc --noEmit` clean; unit **4275 pass / 48 skip / 0 fail**; full build exit 0 (dashboard+skeleton);
+  delivery e2e (`send-integration`) **7/7**. PR #1330 still DRAFT; porch still parked at the **pr gate** (no rollback,
+  no porch state change). Architect notified for the re-run integration consult. Strict mode: NOT self-approving/merging.
+  Ending turn addressable; resume on architect steer or gate approval.
