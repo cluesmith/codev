@@ -646,3 +646,37 @@ review files, because otherwise "done accepted one file" is equally consistent w
 accepts anything.
 
 tsc 0 · 468 porch + consult-lane tests green · build ✓ · full suite green.
+
+## phase_5 APPROVED — two tests that could not fail
+
+codex APPROVE · claude APPROVE at iter2, after codex blocked at iter1. Both iter1 findings were
+about my *tests*, and both were the same failure in different clothes: **an assertion that was
+structurally incapable of failing, sitting inside a green suite.**
+
+**codex's blocker.** `done()` reports a missing review with `process.exit(1)`, not a throw, so my
+`.rejects.toThrow()` had nothing to intercept — it tore down the vitest worker. The test reported
+pass. I had cited that pass as evidence in the phase_5 commit message. Mocked `process.exit`
+following the existing `done-verification.test.ts` convention, then made the assertion specific
+(`.toThrow('process.exit(1)')`) because a bare `.toThrow()` would also be satisfied by an unrelated
+crash during fixture setup — the same false-green class I had just been caught by.
+
+**claude's iter2 note**, which I'd rank higher than its "minor" label: my new "malformed config fails
+`done` loudly" test does not pin what its comment claimed. `done` reaches
+`loadCheckOverrides` → `loadConfig` *before* lane resolution, so the validator throws at the earlier
+call whether or not the removed `catch` is still there. The test still proves the acceptance
+criterion; it just doesn't prove the thing I wrote next to it. Kept the test, corrected the comment,
+and named the test that actually pins the call site (the narrowing one). Worth doing rather than
+quietly deleting: **a comment that overstates a test's reach is how false coverage survives review** —
+the next reader trusts the comment, not the mechanism.
+
+The through-line for the whole phase: I mutation-verified the phase_4 tests and caught real problems,
+then wrote three phase_5 assertions that couldn't fail and didn't check any of them until a reviewer
+did. Mutation testing isn't a technique for hard cases — a test only counts once you've seen it fail.
+Every end-to-end assertion here is now mutation-verified: `done` ignoring config fails the narrowing
+test, `done` never refusing fails the enforcement test.
+
+Also fixed the hardcoded "3-way review" string, which this phase made wrong — once config selects
+lanes, a 2-lane PIR was told to expect three, with no way to distinguish a failed lane from one never
+asked for.
+
+tsc 0 · 387 porch tests green · full suite green · build ✓.
