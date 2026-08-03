@@ -1,7 +1,7 @@
 id: '1286'
 title: consult-configurable-per-lane-
 protocol: aspir
-phase: implement
+phase: review
 plan_phases:
   - id: phase_1
     title: Config schema, validators, and resolvers
@@ -20,15 +20,15 @@ plan_phases:
     status: complete
   - id: phase_6
     title: Documentation and skeleton parity
-    status: in_progress
-current_plan_phase: phase_6
+    status: complete
+current_plan_phase: null
 gates:
   pr:
     status: pending
   verify-approval:
     status: pending
-iteration: 3
-build_complete: true
+iteration: 1
+build_complete: false
 history:
   - iteration: 1
     build_output: ''
@@ -158,7 +158,7 @@ history:
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/aspir-1286/codev/projects/1286-consult-configurable-per-lane-/1286-phase_6-iter3-claude.txt
 started_at: '2026-07-29T11:33:26.698Z'
-updated_at: '2026-08-03T06:56:31.505Z'
+updated_at: '2026-08-03T06:56:33.314Z'
 force_advanced:
   phase: phase_6
   iteration: 3
