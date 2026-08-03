@@ -730,3 +730,33 @@ Skeleton parity `diff`-verified empty at every iteration.
 All 6 plan phases approved. Next: review artifact, e2e, PR. Architect notified, with the one
 user-visible behavior change called out — `porch done` no longer swallows malformed
 `porch.consultation` config.
+
+## PR #1341 open — pr gate reached, waiting for human
+
+CMAP-2 at the gate: codex `REQUEST_CHANGES`, claude `APPROVE`. All three codex findings fixed
+(`251c867f`); claude's three non-blocking ones recorded as known limitations rather than fixed,
+since each would override a spec requirement or widen scope at the gate.
+
+**The code finding was real and the comment was the bug.** `satisfies` binds the reasoning-effort
+list to the SDK union in ONE direction — it proves our values are legal upstream, so a removal or
+rename breaks the build, but a value the SDK *adds* leaves the list a valid subset, compiles clean,
+and then gets hard-rejected at runtime as invalid. That fails **open**, in exactly the direction the
+spec required to break the build. The comment above it asserted "adds/removes/renames"; the claim
+was the only thing holding the third case. Fixed with an `Exclude<...> extends never` assertion and
+mutation-verified, because a type-level guard that never fires is indistinguishable from no guard.
+
+Its test was the **fourth** structurally-unable-to-fail assertion this project produced: it iterated
+`REASONING_EFFORTS` to prove `REASONING_EFFORTS` was accepted. Values are now pinned as literals;
+drift is a compile-time concern because no runtime test can enumerate a compile-time union.
+
+**And codex caught me overclaiming about my own work.** My review header said "6 phases, all
+approved unanimously, 93 commits". `status.yaml` says phase_6 **force-advanced** at
+`max_iterations: 3` with codex still at `REQUEST_CHANGES`, over 96 commits. I wrote my own project's
+outcome from memory instead of reading the state file — the identical habit behind every phase_6
+docs defect, which I had already written up as a lesson *in this file*. Knowing a lesson and
+applying it to yourself are different things, and the second one is what a reviewer had to supply.
+
+Force-advance is not approval. Corrected in the review, this thread, and a PR comment, each naming
+precisely which changes went unreviewed (the iter3 docs fixes) and how I verified them alone.
+
+**Waiting for Waleed at the pr gate. Not merging.**
