@@ -44,8 +44,8 @@ gates:
     status: pending
   verify-approval:
     status: pending
-iteration: 1
-build_complete: true
+iteration: 2
+build_complete: false
 history:
   - iteration: 1
     plan_phase: phase_2
@@ -63,8 +63,24 @@ history:
         verdict: APPROVE
         file: >-
           /home/user/code/codev_root/codev/.builders/spir-1313/codev/projects/1313-afx-send-mailbox-first-deliver/1313-phase_2-iter1-claude.txt
+  - iteration: 1
+    plan_phase: phase_4
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: APPROVE
+        file: >-
+          /home/user/code/codev_root/codev/.builders/spir-1313/codev/projects/1313-afx-send-mailbox-first-deliver/1313-phase_4-iter1-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /home/user/code/codev_root/codev/.builders/spir-1313/codev/projects/1313-afx-send-mailbox-first-deliver/1313-phase_4-iter1-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /home/user/code/codev_root/codev/.builders/spir-1313/codev/projects/1313-afx-send-mailbox-first-deliver/1313-phase_4-iter1-claude.txt
 started_at: '2026-08-01T01:40:05.008Z'
-updated_at: '2026-08-03T05:26:19.604Z'
+updated_at: '2026-08-03T05:26:20.937Z'
 force_advanced:
   phase: phase_7
   iteration: 3
