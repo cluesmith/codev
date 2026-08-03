@@ -216,4 +216,15 @@ config loader, no mocks) → threw RetiredHarnessError + 0 `.builders/` + 0 code
 Results: `pnpm --filter @cluesmith/codev build` exit 0 (tsc clean). Full unit suite 4128 passed / 48
 pre-existing skips / 0 failed (was 4116; +12 mine). freshLaunch(:509) left untouched — unreachable for
 gemini (launchInstance/addArchitect throw at resolveArchitectLaunch BEFORE buildArchitectFreshLaunch is
-even constructed). Next: porch check → porch done → 3-way consult.
+even constructed).
+
+### phase_2 committed + integration test added
+- d200edf6 `[Spec 1338][Phase: phase_2] feat: fail closed at spawn/launch boundaries` (prod + 3 unit files).
+- porch check/done → build+tests green → build-complete chore (906ff8ca).
+- Promoted the scratchpad e2e proof into a COMMITTED regression test: spawn-retirement.test.ts drives the
+  REAL spawn() (real temp git workspace, real config loader, no mocks) → rejects gemini with the
+  retirement AND asserts 0 `.builders/` + 0 codev/projects afterward. Catches the regression class the
+  unit tests miss (guard moved below state creation). Confirmed importing real spawn() in vitest is clean
+  (no side-effect hang) — the spawn.test.ts "avoid side-effect import" caution doesn't bite here because
+  the guard throws before Tower/GitHub are touched. Committed as a 2nd phase_2 commit (porch chore was on
+  top of d200edf6, so amend wasn't clean). Next: porch next → 3-way consult (verification).
