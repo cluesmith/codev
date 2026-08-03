@@ -514,3 +514,41 @@ assumed that this branch's agy tests pin `CODEV_AGY_BIN` to a generated fake, pi
 the shared auth cache, or write the metrics DB. Real-agy verification stayed manual, outside suites.
 
 19 tests in the phase file · tsc 0 · unit 3924 passed / 0 failed · CLI integration 93 passed.
+
+## phase_4 checks — the failure was upstream, not mine
+
+`porch check` failed with 5 tests red in `spec-1280-measurement-instrument.test.ts` — a file this
+branch never touches. The tempting reads were both wrong, and worth recording because the protocol's
+flaky-test escape hatch (`it.skip` + document it) would have been the wrong tool here.
+
+Read 1, "my change broke it": ruled out — phase_4 touches metrics/cost accounting; that file shells
+out to `scripts/measure-prompt-surface.sh` and measures prompt surface. No contact.
+
+Read 2, "pre-existing flake, skip it": also wrong, and this is the part I'd nearly acted on. Every
+failure was `Test timed out in 5000ms`, the script takes ~2.7s per invocation, and the failing tests
+call it **twice** — so they exceed the default budget deterministically, not intermittently. Skipping
+would have suppressed a real signal and shipped a permanent `it.skip` into main.
+
+What actually settled it: running the same file in the **main checkout**, where it passed — with
+**24** tests against my 20. Different test counts meant different file contents, which is a much
+louder signal than a red/green diff. `origin/main` carries `216b7932 fix(test): give script-shelling
+measurement tests explicit 60s budgets` plus `38d18296`, which stops pinning live-measured totals.
+My branch was 36 commits behind. The fix was already written by someone else; my job was to merge it.
+
+Note for the next builder: `git log HEAD..origin/main -- <file>` returned **empty** and I nearly took
+that as "no upstream change." It lied because I ran it before the fetch had settled the ref I was
+comparing. Comparing file *contents* across the two checkouts is what exposed the truth. Prefer
+content comparison over log archaeology when the two disagree.
+
+**Merge conflicts — both were convergent evolution on #1323.** Main and I independently added
+`CODEV_METRICS_DB`. I took main's wholesale in both hunks, because main's is strictly better:
+- `resolveDbPath()` *throws* under a test runner with no redirect instead of falling back to the
+  real `~/.codev/metrics.db`. Mine silently defaulted — the exact silent-pollution failure mode
+  #1323 exists to close.
+- Constructor: main's `dbPath ?? resolveDbPath()` lets an explicit path win; mine had the env var
+  outrank an explicit argument, which is backwards for a caller that already chose its isolation.
+
+The `index.ts` conflict was not a real conflict — my model-choice resolution and main's comment about
+`resolveAgyBin`'s guard are adjacent and independent. Kept both.
+
+tsc 0 · consult suites 254 passed / 0 failed · full suite green · build ✓.
