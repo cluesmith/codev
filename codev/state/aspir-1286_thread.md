@@ -680,3 +680,44 @@ lanes, a 2-lane PIR was told to expect three, with no way to distinguish a faile
 asked for.
 
 tsc 0 · 387 porch tests green · full suite green · build ✓.
+
+## phase_6 APPROVED — all six phases done; the docs were the buggiest phase
+
+codex APPROVE · claude APPROVE at iter4, after three rounds. A docs-only phase took more iterations
+than any code phase, which is the finding worth keeping.
+
+Round by round, every defect was the same shape: **the parts I verified were right; the parts I
+wrote from memory were wrong.** I loaded the example config for real and read every constant out of
+`consult-lanes.ts` — those were all correct first time. Then:
+
+- **iter1**: the config-layer list ("defaults → global → project → per-engineer → env") was invented
+  from how config stacks usually look. There is no env layer and I'd dropped the framework cache.
+  Both reviewers caught it. Also missed `--model-id` entirely — a flag that ships, parses, and is in
+  `--help`, whose own code comment cites "registered, documented, inert" as the failure it exists to
+  avoid. It then went into the reference as undocumented. Same gap, one layer out.
+- **iter2**: the section's only shell example didn't run. `cli.ts` takes an optional positional
+  subcommand, so a bare prompt string binds to it. I had verified the JSON by loading it and never
+  ran the one command I wrote.
+- **iter3**: `//` comments in a `.codev/config.json` example that `JSON.parse` rejects. And invented
+  pricing rates ~4× below the shipped ones, unlabelled — the doc was teaching the exact
+  confidently-wrong-cost bug the feature exists to prevent.
+
+**A wrong example is worse than a missing one.** The reader has no reason to doubt it, so the
+failure reads as "the tool is broken" rather than "the doc is stale". Three separate instances here.
+
+What actually fixed the class, rather than the instances: after the third, I stopped re-reading and
+**extracted all six JSON blocks and ran `json.loads` over them**. Eyeballing is what let the first
+one through. Sweeping instead of spot-fixing also caught a pre-existing broken example (#1113's
+`integrationBranch` block) that no reviewer had reported.
+
+claude's two "nits" both turned out to be substantive: the pricing rates above, and two PIR examples
+that disagreed — where the worked one silently *changed* PIR's lane composition while its own prose
+claimed to preserve it. PIR's shipped pair is `["gemini","codex"]`; both now say so.
+
+Skeleton parity `diff`-verified empty at every iteration.
+
+## → review phase
+
+All 6 plan phases approved. Next: review artifact, e2e, PR. Architect notified, with the one
+user-visible behavior change called out — `porch done` no longer swallows malformed
+`porch.consultation` config.
