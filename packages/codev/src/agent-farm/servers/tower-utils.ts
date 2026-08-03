@@ -17,7 +17,7 @@ import { loadRolePrompt, type RoleConfig } from '../utils/roles.js';
 import { getArchitectHarness } from '../utils/config.js';
 import { RetiredHarnessError, type HarnessProvider } from '../utils/harness.js';
 import { getArchitectByName, setArchitectSessionId } from '../state.js';
-import type { CrashLoopFallback, FreshLaunch } from '../../terminal/session-manager.js';
+import type { CrashLoopFallback, FreshLaunch, ReconnectRestartOptions } from '../../terminal/session-manager.js';
 import { cmdlineHoldsSession } from './architect-session-holder.js';
 
 // ============================================================================
@@ -530,7 +530,23 @@ export function buildArchitectFreshLaunch(opts: {
   const { workspacePath, architectName, baseArgs, baseEnv, log } = opts;
   return {
     next: () => {
-      const harness = getArchitectHarness(workspacePath);
+      let harness: HarnessProvider;
+      try {
+        harness = getArchitectHarness(workspacePath);
+      } catch (err) {
+        // Issue #1338: the architect's configured harness was retired AFTER this
+        // session launched (a config edit before a clean exit). SessionManager
+        // invokes next() with no try/catch (session-manager.ts), so a throw here
+        // would become an uncaught Tower exception. Fail closed instead: rerun the
+        // ORIGINAL launch command with no harness injection — baseArgs come from
+        // the original supported-harness launch, so nothing re-injects or relaunches
+        // the retired harness. Any non-retirement error is a real fault, rethrown.
+        if (err instanceof RetiredHarnessError) {
+          log('WARN', `Architect '${architectName}' harness is retired; rerunning without harness injection in ${workspacePath}: ${err.message}`);
+          return { args: baseArgs, env: baseEnv };
+        }
+        throw err;
+      }
       // No resumable-session concept for this harness: there is no recovery to
       // disable, so a plain rebuild of the launch args is already "fresh".
       if (!harness.session) {
@@ -551,6 +567,79 @@ export function buildArchitectFreshLaunch(opts: {
       return { args: built.args, env: { ...baseEnv, ...built.env } };
     },
   };
+}
+
+/**
+ * Issue #832 / #1149 / #1264 / #1338: resolve the shellper auto-restart options for
+ * an architect session being reconciled at startup or reconnected on the fly.
+ * Consolidates the two previously-duplicated blocks in tower-terminals.ts;
+ * `includeFreshLaunch` is the only behavioral difference between them (the startup
+ * reconcile path also wires the #1264 clean-exit rerun; the on-the-fly reconnect
+ * path does not).
+ *
+ * Fail-closed retirement (#1338): if the configured harness is retired,
+ * `resolveArchitectRestart` throws and this returns `undefined` — the caller
+ * reconnects to a live shellper if one exists, but NEVER configures an
+ * auto-restart into the retired binary. This replaces the previous fail-OPEN
+ * behavior, where the generic catch relaunched `cmdParts[0]` (the retired command
+ * itself) with no role injection. Any OTHER harness-resolution error still
+ * degrades to the plain configured command so a transient failure can reconnect
+ * (identity preserved via `cleanEnv`, Spec 786).
+ */
+export function buildArchitectReconnectRestartOptions(opts: {
+  workspacePath: string;
+  architectName: string;
+  cmdParts: string[];
+  cleanEnv: Record<string, string>;
+  includeFreshLaunch: boolean;
+  log: (level: 'INFO' | 'WARN' | 'ERROR', message: string) => void;
+}): ReconnectRestartOptions | undefined {
+  const { workspacePath, architectName, cmdParts, cleanEnv, includeFreshLaunch, log } = opts;
+  const command = cmdParts[0];
+  const baseArgs = cmdParts.slice(1);
+  try {
+    // Issue #832: revive the same conversation on auto-restart via the stored id.
+    const { args: architectArgs, env: harnessEnv, resumed, storedSessionId, fallback } =
+      resolveArchitectRestart(workspacePath, architectName, baseArgs);
+    if (resumed && storedSessionId) {
+      log('INFO', `Resuming architect '${architectName}' session ${storedSessionId.slice(0, 8)}… on shellper restart in ${workspacePath}`);
+    }
+    const restartOptions: ReconnectRestartOptions = {
+      command,
+      args: architectArgs,
+      cwd: workspacePath,
+      env: { ...cleanEnv, ...harnessEnv },
+      restartDelay: 2000,
+      maxRestarts: 50,
+    };
+    // Issue #1264: a clean exit reruns the harness fresh (no --resume). Built from
+    // the ORIGINAL baseArgs, never `architectArgs` — the latter may carry --resume.
+    if (includeFreshLaunch) {
+      restartOptions.freshLaunch = buildArchitectFreshLaunch({
+        workspacePath, architectName, baseArgs, baseEnv: cleanEnv, log,
+      });
+    }
+    // Issue #1149: degrade a fast-failing resume to a fresh launch.
+    if (resumed && storedSessionId && fallback) {
+      restartOptions.crashLoopFallback = buildArchitectCrashLoopFallback({
+        workspacePath, architectName, storedSessionId, fallback, baseEnv: cleanEnv, log,
+      });
+    }
+    return restartOptions;
+  } catch (err) {
+    if (err instanceof RetiredHarnessError) {
+      // Fail closed: do NOT relaunch the retired command. The session reconnects
+      // to its existing process if alive, but no auto-restart into the retired
+      // harness is configured.
+      log('WARN', `Architect '${architectName}' harness is retired; not configuring auto-restart into it in ${workspacePath}: ${err.message}`);
+      return undefined;
+    }
+    // Fall back to the plain command without harness role-prompt args so the
+    // session can still reconnect. `cleanEnv` carries CODEV_ARCHITECT_NAME
+    // (Spec 786 Phase 2), so identity is preserved even on harness failure.
+    log('WARN', `Harness resolution failed for workspace ${workspacePath}: ${err instanceof Error ? err.message : err}`);
+    return { command, args: baseArgs, cwd: workspacePath, env: cleanEnv, restartDelay: 2000, maxRestarts: 50 };
+  }
 }
 
 /**

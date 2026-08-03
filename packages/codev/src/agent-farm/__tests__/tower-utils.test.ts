@@ -23,6 +23,8 @@ import {
   resolveArchitectRestart,
   siblingRegistrationIsLive,
   buildArchitectCrashLoopFallback,
+  buildArchitectFreshLaunch,
+  buildArchitectReconnectRestartOptions,
   sessionHasLiveHolder,
 } from '../servers/tower-utils.js';
 
@@ -577,6 +579,120 @@ describe('buildArchitectArgs retirement (#1338)', () => {
 
   it('does not throw for the default (claude) architect (regression)', () => {
     expect(() => buildArchitectArgs([], workspace)).not.toThrow();
+  });
+});
+
+// Issue #1338 — the clean-exit relaunch path. SessionManager invokes
+// freshLaunch.next() WITHOUT a try/catch, so if the architect's harness was
+// retired after launch (a config edit before a clean exit), next() must not throw
+// and must not re-inject/relaunch the retired harness.
+describe('buildArchitectFreshLaunch retirement (#1338)', () => {
+  let workspace: string;
+
+  beforeEach(() => {
+    workspace = fs.mkdtempSync(path.join(tmpdir(), 'bafl-ws-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(workspace, { recursive: true, force: true });
+  });
+
+  function writeArchitectConfig(architect: string): void {
+    fs.mkdirSync(path.join(workspace, '.codev'), { recursive: true });
+    fs.writeFileSync(
+      path.join(workspace, '.codev', 'config.json'),
+      JSON.stringify({ shell: { architect } }),
+    );
+  }
+
+  it('next() for a retired gemini architect returns the plain launch and does not throw', () => {
+    writeArchitectConfig('gemini');
+    const fl = buildArchitectFreshLaunch({
+      workspacePath: workspace, architectName: 'main', baseArgs: ['--base'], baseEnv: { FOO: 'bar' }, log: vi.fn(),
+    });
+    expect(() => fl.next()).not.toThrow();
+    // Plain rerun of the ORIGINAL launch: baseArgs preserved, baseEnv only, and
+    // no harness role injection (nothing relaunches the retired harness).
+    expect(fl.next()).toEqual({ args: ['--base'], env: { FOO: 'bar' } });
+  });
+
+  it('next() for a supported (codex) architect resolves normally (regression)', () => {
+    writeArchitectConfig('codex');
+    const fl = buildArchitectFreshLaunch({
+      workspacePath: workspace, architectName: 'main', baseArgs: ['--base'], baseEnv: {}, log: vi.fn(),
+    });
+    expect(() => fl.next()).not.toThrow();
+    expect(fl.next().args[0]).toBe('--base');
+  });
+});
+
+// Issue #1338 — the shellper reconnect / startup-reconcile path. A retired harness
+// must NOT produce restart options that relaunch the retired command (the previous
+// fail-OPEN bug); it fails closed by returning undefined (reconnect only, never an
+// auto-restart into the retired binary). Non-retirement harness errors still
+// degrade to the plain configured command so a transient failure can reconnect.
+describe('buildArchitectReconnectRestartOptions retirement (#1338)', () => {
+  let workspace: string;
+
+  beforeEach(() => {
+    workspace = fs.mkdtempSync(path.join(tmpdir(), 'barro-ws-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(workspace, { recursive: true, force: true });
+  });
+
+  function writeConfig(cfg: object): void {
+    fs.mkdirSync(path.join(workspace, '.codev'), { recursive: true });
+    fs.writeFileSync(path.join(workspace, '.codev', 'config.json'), JSON.stringify(cfg));
+  }
+
+  it('returns undefined (fail closed) for a retired gemini architect', () => {
+    writeConfig({ shell: { architect: 'gemini' } });
+    const opts = buildArchitectReconnectRestartOptions({
+      workspacePath: workspace, architectName: 'main', cmdParts: ['gemini', '--yolo'], cleanEnv: {}, includeFreshLaunch: true, log: vi.fn(),
+    });
+    expect(opts).toBeUndefined();
+  });
+
+  it('returns undefined for a retired gemini architect regardless of includeFreshLaunch', () => {
+    writeConfig({ shell: { architect: 'gemini' } });
+    expect(buildArchitectReconnectRestartOptions({
+      workspacePath: workspace, architectName: 'main', cmdParts: ['gemini'], cleanEnv: {}, includeFreshLaunch: false, log: vi.fn(),
+    })).toBeUndefined();
+  });
+
+  it('returns restart options for a supported (codex) architect (regression)', () => {
+    writeConfig({ shell: { architect: 'codex' } });
+    const opts = buildArchitectReconnectRestartOptions({
+      workspacePath: workspace, architectName: 'main', cmdParts: ['codex', '--flag'], cleanEnv: { CODEV_ARCHITECT_NAME: 'main' }, includeFreshLaunch: false, log: vi.fn(),
+    });
+    expect(opts).toBeDefined();
+    expect(opts!.command).toBe('codex');
+    expect(opts!.env.CODEV_ARCHITECT_NAME).toBe('main');
+    expect(opts!.freshLaunch).toBeUndefined();
+  });
+
+  it('wires freshLaunch only when includeFreshLaunch is true', () => {
+    writeConfig({ shell: { architect: 'codex' } });
+    const base = { workspacePath: workspace, architectName: 'main', cmdParts: ['codex'], cleanEnv: {}, log: vi.fn() };
+    expect(buildArchitectReconnectRestartOptions({ ...base, includeFreshLaunch: true })!.freshLaunch).toBeDefined();
+    expect(buildArchitectReconnectRestartOptions({ ...base, includeFreshLaunch: false })!.freshLaunch).toBeUndefined();
+  });
+
+  it('falls back to the plain command for a non-retirement harness error', () => {
+    // An unknown harness name throws a generic error (not the retirement), so the
+    // helper degrades to the plain configured command so the session can reconnect
+    // (identity preserved via cleanEnv). This must NOT change for retired harnesses.
+    writeConfig({ shell: { architectHarness: 'no-such-harness', architect: 'weirdcmd' } });
+    const opts = buildArchitectReconnectRestartOptions({
+      workspacePath: workspace, architectName: 'main', cmdParts: ['weirdcmd', '--x'], cleanEnv: { CODEV_ARCHITECT_NAME: 'main' }, includeFreshLaunch: true, log: vi.fn(),
+    });
+    expect(opts).toBeDefined();
+    expect(opts!.command).toBe('weirdcmd');
+    expect(opts!.args).toEqual(['--x']);
+    expect(opts!.env.CODEV_ARCHITECT_NAME).toBe('main');
+    expect(opts!.freshLaunch).toBeUndefined();
   });
 });
 
