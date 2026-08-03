@@ -86,7 +86,7 @@ either without touching a checked-in file.
 Per-lane model id. Absent → the shipped default in the [Models](#models) table. Outranked for a
 single invocation by [`--model-id`](#model-selection-options).
 
-```jsonc
+```json
 { "consult": { "models": { "claude": "claude-opus-5", "codex": "gpt-5.6-sol" } } }
 ```
 
@@ -98,7 +98,7 @@ The `gemini` lane passes the id to `agy --model`, so the id space is agy's, not 
 
 ### `consult.reasoningEffort`
 
-```jsonc
+```json
 { "consult": { "reasoningEffort": { "codex": "high" } } }
 ```
 
@@ -113,9 +113,15 @@ Per-1M-token rates for the codex lane. Set this when Codev has no rates for the 
 **It outranks the shipped rate table for every model, not only unknown ones** — once set, it is
 used for whatever the codex lane runs, so it is worth revisiting if you later change the model.
 
-```jsonc
-{ "consult": { "pricing": { "codex": { "inputPer1M": 1.25, "cachedInputPer1M": 0.125, "outputPer1M": 10.0 } } } }
+```json
+{ "consult": { "pricing": { "codex": { "inputPer1M": 5.00, "cachedInputPer1M": 0.50, "outputPer1M": 30.00 } } } }
 ```
+
+> **Take the numbers from the provider, not from here.** Those are the rates Codev ships for
+> `gpt-5.6-sol` at the time of writing, shown so the shape is concrete — they are not right for
+> whatever model you are configuring, and published rates change. Copying a plausible-looking wrong
+> rate produces a confidently wrong cost, which is the exact failure this key exists to prevent;
+> a `null` cost is the better outcome of the two.
 
 - **`codex` is the only accepted lane.** Claude reports its own cost directly and the gemini/agy
   lane reports no usage data at all, so a pricing override for either would be inert. Any other
@@ -130,12 +136,15 @@ Lane lists accept a single name (`"codex"`), an array (`["codex", "claude"]`), o
 special mode: `"none"` (skip consultation) or `"parent"` (emit a gate for the architect instead).
 An **empty array is rejected** — use `"none"`, so there is exactly one way to say it.
 
-```jsonc
+`models` is the workspace-wide default, `modelsByType` narrows by review type, and `byProtocol`
+scopes either of those to one protocol:
+
+```json
 {
   "porch": {
     "consultation": {
-      "models": ["gemini", "codex", "claude"],        // workspace-wide default
-      "modelsByType": { "pr": ["codex", "claude"] },  // by review type
+      "models": ["gemini", "codex", "claude"],
+      "modelsByType": { "pr": ["codex", "claude"] },
       "byProtocol": {
         "pir": {
           "models": ["gemini", "codex"],
@@ -170,19 +179,21 @@ run are exactly the lanes it will require review files for.
 PIR is deliberately a 2-lane (CMAP-2) protocol. A workspace-wide 3-lane default silently inflates
 it, because config outranks protocol. Scope PIR back down explicitly:
 
-```jsonc
+```json
 {
   "porch": {
     "consultation": {
       "models": ["gemini", "codex", "claude"],
-      "byProtocol": { "pir": { "models": ["codex", "claude"] } }
+      "byProtocol": { "pir": { "models": ["gemini", "codex"] } }
     }
   }
 }
 ```
 
-SPIR and ASPIR reviews now run three lanes; PIR runs two. Without the `byProtocol` entry, PIR would
-run three and cost 50% more per review with no change to the protocol file.
+`["gemini", "codex"]` is PIR's own shipped pair, so this restores exactly what the protocol declares
+rather than substituting a different two. SPIR and ASPIR reviews run three lanes; PIR runs two.
+Without the `byProtocol` entry, PIR would run three and cost 50% more per review with no change to
+the protocol file.
 
 ### The fail-fast contract, and where it stops
 
@@ -267,10 +278,11 @@ consult -m codex --type integration --issue 42 --base ci
 - `--base <ref>` — **`--type integration` only.** Anchor the diff on this base branch (e.g. `ci`), computed locally as `git diff origin/<base>...origin/<head>` (three-dot, merge-base anchored). Use in repos with a long-lived integration branch ahead of the default branch so the review sees only the PR's actual change, not the whole integration-over-trunk delta. Unresolvable refs fail loudly with a `git fetch` hint (no silent fallback to the local checkout). Defaults to config `consult.integrationBranch`; with neither set, the integration review uses the PR's host-recorded base (`gh pr diff`), unchanged.
 
 **Config (`.codev/config.json`):**
-```jsonc
+`integrationBranch` is the repo-wide default base for `--type integration`, overridden by `--base`.
+
+```json
 {
   "consult": {
-    // Repo-wide default base for `--type integration` (overridden by --base).
     "integrationBranch": "ci"
   }
 }
