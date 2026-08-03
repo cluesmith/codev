@@ -36,6 +36,138 @@ are still recorded, but `cost_usd` is stored as `null` rather than billed at som
 rates. Only OpenAI's standard pricing tier is modelled — costs for consultations large enough to
 enter the long-context tier are under-reported.
 
+Supply rates for a model Codev doesn't know with [`consult.pricing.codex`](#consultpricingcodex).
+
+## Configuration
+
+Everything below lives in `.codev/config.json` and flows through the standard five-layer config
+stack (defaults → global → project → per-engineer → env), so any key can be set globally and
+narrowed per project.
+
+**Two independent axes**, easy to confuse:
+
+| Axis | Key | Answers |
+|------|-----|---------|
+| *Which model* a lane runs | `consult.models` | "run `claude-opus-5` on the claude lane" |
+| *Which lanes* run at all | `porch.consultation.*` | "review PIR with two lanes, not three" |
+
+### `consult.models`
+
+Per-lane model id. Absent → the shipped default in the [Models](#models) table.
+
+```jsonc
+{ "consult": { "models": { "claude": "claude-opus-5", "codex": "gpt-5.6-sol" } } }
+```
+
+Valid lanes: `claude`, `codex`, `gemini`. **`hermes` is rejected** — it is invoked as
+`hermes chat -q` and exposes no model selector, so configuring one would silently do nothing.
+(`hermes` remains valid in `porch.consultation` lane lists; the two key spaces differ on purpose.)
+
+The `gemini` lane passes the id to `agy --model`, so the id space is agy's, not Google's API's.
+
+### `consult.reasoningEffort`
+
+```jsonc
+{ "consult": { "reasoningEffort": { "codex": "high" } } }
+```
+
+Only `codex` exposes this. Values: `minimal`, `low`, `medium`, `high`, `xhigh` (default `medium`).
+Unlike model ids, this **is** a closed set Codev validates locally — see the asymmetry below.
+
+### `consult.pricing.codex`
+
+Per-1M-token rates for a codex model Codev has no rates for. All three keys are required together;
+a partial object is an error rather than a half-priced estimate.
+
+```jsonc
+{ "consult": { "pricing": { "codex": { "inputPer1M": 1.25, "cachedInputPer1M": 0.125, "outputPer1M": 10.0 } } } }
+```
+
+### `porch.consultation` — which lanes run
+
+Lane lists accept a single name (`"codex"`), an array (`["codex", "claude"]`), or a whole-value
+special mode: `"none"` (skip consultation) or `"parent"` (emit a gate for the architect instead).
+An **empty array is rejected** — use `"none"`, so there is exactly one way to say it.
+
+```jsonc
+{
+  "porch": {
+    "consultation": {
+      "models": ["gemini", "codex", "claude"],        // workspace-wide default
+      "modelsByType": { "pr": ["codex", "claude"] },  // by review type
+      "byProtocol": {
+        "pir": {
+          "models": ["gemini", "codex"],
+          "modelsByType": { "impl": ["codex"] }
+        }
+      }
+    }
+  }
+}
+```
+
+Review-type keys are the protocol's own `verify.type` values (`spec`, `plan`, `impl`, `pr`, …);
+protocol keys are protocol names, and aliases are canonicalized so `byProtocol.spider` matches a
+project running as `spir`. Unknown keys in either space are **errors, not warnings** — a typo that
+merely warned would silently leave you on the defaults you were trying to override.
+
+#### Precedence
+
+Highest first. The first level that is present wins outright; levels do not merge.
+
+1. `porch.consultation.byProtocol[<protocol>].modelsByType[<type>]`
+2. `porch.consultation.byProtocol[<protocol>].models`
+3. `porch.consultation.modelsByType[<type>]`
+4. `porch.consultation.models`
+5. the protocol's own `verify.models` (i.e. no config at all)
+
+Both `porch next` and `porch done` resolve through this one ladder, so the lanes porch asks you to
+run are exactly the lanes it will require review files for.
+
+#### Worked example: keeping PIR cheap while widening the default
+
+PIR is deliberately a 2-lane (CMAP-2) protocol. A workspace-wide 3-lane default silently inflates
+it, because config outranks protocol. Scope PIR back down explicitly:
+
+```jsonc
+{
+  "porch": {
+    "consultation": {
+      "models": ["gemini", "codex", "claude"],
+      "byProtocol": { "pir": { "models": ["codex", "claude"] } }
+    }
+  }
+}
+```
+
+SPIR and ASPIR reviews now run three lanes; PIR runs two. Without the `byProtocol` entry, PIR would
+run three and cost 50% more per review with no change to the protocol file.
+
+### The fail-fast contract, and where it stops
+
+Config errors are raised when config is **loaded** — before any consultation starts — and name the
+offending key and the valid alternatives. Nothing falls back to a default on error.
+
+**The asymmetry worth knowing about:** these two are validated very differently.
+
+| | Validated by | When you find out |
+|---|---|---|
+| `reasoningEffort` | **Codev**, against a closed enum | Config load, before anything runs |
+| Model ids | **The provider** | When the lane runs |
+
+Codev checks a model id's *syntax* only (ASCII alphanumerics plus `. _ : / @ + -`, 1–200 characters,
+no leading punctuation) — never its existence. **There is no allowlist of model ids anywhere in
+Codev, by design**: a new model must work the day the provider ships it, without a Codev release.
+
+So a typo'd model id is not caught at config time. It reaches the backend, which rejects it; that
+lane exits non-zero, the provider's error text is surfaced, the config key that supplied the id is
+named, and **no review file is written** — so porch cannot advance on a lane that never ran. What
+you do *not* get is a silent substitution of the default model.
+
+One deliberate exception: an **unconfigured** `gemini` lane still skips non-blockingly when `agy` is
+missing or unauthenticated (consultation is best-effort there). Configure `consult.models.gemini`
+and a rejected id becomes a hard failure for that lane, because you have asked for a specific model.
+
 ## Modes
 
 ### General Mode
