@@ -47,7 +47,7 @@ import {
   allChecksPassed,
   type CheckEnv,
 } from './checks.js';
-import { loadCheckOverrides } from './config.js';
+import { loadCheckOverrides, resolveConsultationModels } from './config.js';
 import { notifyTerminal, gateApprovedMessage } from './notify.js';
 import { loadConfig } from '../../lib/config.js';
 import { version } from '../../version.js';
@@ -429,27 +429,19 @@ export async function done(workspaceRoot: string, projectId: string, resolver?: 
   // Enforce verification for build_verify phases (config-aware)
   const verifyConfig = getVerifyConfig(protocol, state.phase);
   if (verifyConfig) {
-    // Resolve effective models from config (overrides protocol defaults)
-    let effectiveModels = verifyConfig.models;
-    let consultMode: 'normal' | 'none' | 'parent' = 'normal';
-
-    try {
-      const config = loadConfig(workspaceRoot);
-      const configModels = config.porch?.consultation?.models;
-      if (configModels !== undefined) {
-        if (configModels === 'none') {
-          consultMode = 'none';
-        } else if (configModels === 'parent') {
-          consultMode = 'parent';
-        } else if (Array.isArray(configModels)) {
-          effectiveModels = configModels;
-        } else if (typeof configModels === 'string') {
-          effectiveModels = [configModels];
-        }
-      }
-    } catch {
-      // Config load failed — use protocol defaults
-    }
+    // Resolve effective models through the SAME resolver `porch next` uses, so the lanes demanded
+    // here are exactly the lanes that were emitted. The former local copy silently disagreed with
+    // `next` on single-string values and on invalid lane names.
+    //
+    // The `catch` that used to wrap this is deliberately gone. Swallowing a config error and
+    // continuing on protocol defaults meant a typo in `porch.consultation` changed which lanes
+    // porch required without saying so — `next` would refuse to run while `done` quietly demanded
+    // a different set. Config errors now surface here as they already did in `next`. This is a
+    // real behavior change: a workspace whose config is malformed today limps along on protocol
+    // defaults and will now fail loudly.
+    const { models: effectiveModels, mode: consultMode } = resolveConsultationModels(
+      workspaceRoot, verifyConfig.models, state.protocol, verifyConfig.type
+    );
 
     // "none" mode: skip verification
     if (consultMode === 'none') {

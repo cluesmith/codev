@@ -34,8 +34,7 @@ import {
 } from './plan.js';
 import { buildPhasePrompt } from './prompts.js';
 import { parseVerdict, allApprove } from './verdict.js';
-import { loadCheckOverrides } from './config.js';
-import { loadConfig } from '../../lib/config.js';
+import { loadCheckOverrides, resolveConsultationModels } from './config.js';
 import { getResolver, type ArtifactResolver } from './artifacts.js';
 
 import type {
@@ -46,50 +45,6 @@ import type {
   PorchTask,
   ReviewResult,
 } from './types.js';
-
-/** Valid model backends for consultation. */
-const VALID_MODELS = ['gemini', 'codex', 'claude', 'hermes'];
-
-/**
- * Resolve the effective consultation models for a verify step.
- *
- * Priority: config porch.consultation.models > protocol verify.models
- *
- * Special modes:
- * - "none": skip consultations entirely
- * - "parent": emit a gate instead of running consult (for #614)
- * - string[]: validate each name is a registered backend
- */
-function resolveConsultationModels(workspaceRoot: string, protocolModels: string[]): { models: string[]; mode: 'normal' | 'none' | 'parent' } {
-  let configModels: string | string[] | undefined;
-  const config = loadConfig(workspaceRoot);
-  configModels = config.porch?.consultation?.models;
-
-  if (configModels === undefined) {
-    return { models: protocolModels, mode: 'normal' };
-  }
-
-  // Handle special string modes
-  if (typeof configModels === 'string') {
-    if (configModels === 'none') return { models: [], mode: 'none' };
-    if (configModels === 'parent') return { models: [], mode: 'parent' };
-    // Single model name as a string — normalize to array
-    configModels = [configModels];
-  }
-
-  // Validate model names
-  for (const model of configModels) {
-    if (!VALID_MODELS.includes(model)) {
-      throw new Error(
-        `Invalid consultation model "${model}" in .codev/config.json. ` +
-        `Valid models: ${VALID_MODELS.join(', ')}. ` +
-        `Special modes: "none", "parent".`
-      );
-    }
-  }
-
-  return { models: configModels, mode: 'normal' };
-}
 
 
 /**
@@ -476,7 +431,7 @@ async function handleBuildVerify(
   if (state.build_complete && verifyConfig) {
     // Resolve effective models from config (overrides protocol defaults)
     const { models: effectiveModels, mode: consultMode } = resolveConsultationModels(
-      workspaceRoot, verifyConfig.models
+      workspaceRoot, verifyConfig.models, state.protocol, verifyConfig.type
     );
 
     // "none" mode: skip verification entirely
