@@ -541,19 +541,49 @@ describe('siblingRegistrationIsLive (Issue #1150)', () => {
   });
 });
 
+// Issue #1338 tests write a workspace `.codev/config.json` and assert the harness
+// resolves from it. But `getArchitectHarness` → `getResolvedCommands` gives
+// `TOWER_ARCHITECT_CMD` precedence over workspace config, and `loadUserConfig` can
+// pick up a global `~/.codev/config.json` (HOME) — either set locally would mask
+// the fixture with a loud, misleading failure (phase_2 iter2 review nit). Isolate
+// both for every retirement describe below.
+function isolateHarnessEnv(): { restore: () => void } {
+  const home = fs.mkdtempSync(path.join(tmpdir(), 'ret-home-'));
+  const saved: Record<string, string | undefined> = {
+    HOME: process.env.HOME,
+    TOWER_ARCHITECT_CMD: process.env.TOWER_ARCHITECT_CMD,
+    TOWER_BUILDER_CMD: process.env.TOWER_BUILDER_CMD,
+  };
+  process.env.HOME = home;
+  delete process.env.TOWER_ARCHITECT_CMD;
+  delete process.env.TOWER_BUILDER_CMD;
+  return {
+    restore: () => {
+      fs.rmSync(home, { recursive: true, force: true });
+      for (const [k, v] of Object.entries(saved)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    },
+  };
+}
+
 // Issue #1338 — buildArchitectArgs is the shared launch-injection boundary every
 // architect launch funnels through. A retired architect harness (gemini) must
 // fail closed here with the retirement message (a retired architect must not
 // launch); a supported harness resolves unchanged.
 describe('buildArchitectArgs retirement (#1338)', () => {
   let workspace: string;
+  let envGuard: { restore: () => void };
 
   beforeEach(() => {
+    envGuard = isolateHarnessEnv();
     workspace = fs.mkdtempSync(path.join(tmpdir(), 'baa-ws-'));
   });
 
   afterEach(() => {
     fs.rmSync(workspace, { recursive: true, force: true });
+    envGuard.restore();
   });
 
   function writeArchitectConfig(architect: string): void {
@@ -588,13 +618,16 @@ describe('buildArchitectArgs retirement (#1338)', () => {
 // and must not re-inject/relaunch the retired harness.
 describe('buildArchitectFreshLaunch retirement (#1338)', () => {
   let workspace: string;
+  let envGuard: { restore: () => void };
 
   beforeEach(() => {
+    envGuard = isolateHarnessEnv();
     workspace = fs.mkdtempSync(path.join(tmpdir(), 'bafl-ws-'));
   });
 
   afterEach(() => {
     fs.rmSync(workspace, { recursive: true, force: true });
+    envGuard.restore();
   });
 
   function writeArchitectConfig(architect: string): void {
@@ -605,15 +638,18 @@ describe('buildArchitectFreshLaunch retirement (#1338)', () => {
     );
   }
 
-  it('next() for a retired gemini architect returns the plain launch and does not throw', () => {
+  it('next() for a retired gemini architect signals stop (fail closed) and does not throw', () => {
     writeArchitectConfig('gemini');
     const fl = buildArchitectFreshLaunch({
       workspacePath: workspace, architectName: 'main', baseArgs: ['--base'], baseEnv: { FOO: 'bar' }, log: vi.fn(),
     });
+    // next() can only change args/env, not the retained launch command — which
+    // may itself be the retired binary. So returning baseArgs would still let
+    // SessionManager respawn it (fail-open). Fail closed by signalling stop; the
+    // clean-exit handler then ends the session instead of relaunching. No throw
+    // (SessionManager calls next() without a try/catch).
     expect(() => fl.next()).not.toThrow();
-    // Plain rerun of the ORIGINAL launch: baseArgs preserved, baseEnv only, and
-    // no harness role injection (nothing relaunches the retired harness).
-    expect(fl.next()).toEqual({ args: ['--base'], env: { FOO: 'bar' } });
+    expect(fl.next()).toEqual({ stop: true });
   });
 
   it('next() for a supported (codex) architect resolves normally (regression)', () => {
@@ -633,13 +669,16 @@ describe('buildArchitectFreshLaunch retirement (#1338)', () => {
 // degrade to the plain configured command so a transient failure can reconnect.
 describe('buildArchitectReconnectRestartOptions retirement (#1338)', () => {
   let workspace: string;
+  let envGuard: { restore: () => void };
 
   beforeEach(() => {
+    envGuard = isolateHarnessEnv();
     workspace = fs.mkdtempSync(path.join(tmpdir(), 'barro-ws-'));
   });
 
   afterEach(() => {
     fs.rmSync(workspace, { recursive: true, force: true });
+    envGuard.restore();
   });
 
   function writeConfig(cfg: object): void {

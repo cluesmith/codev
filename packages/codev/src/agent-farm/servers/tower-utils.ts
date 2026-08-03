@@ -535,15 +535,20 @@ export function buildArchitectFreshLaunch(opts: {
         harness = getArchitectHarness(workspacePath);
       } catch (err) {
         // Issue #1338: the architect's configured harness was retired AFTER this
-        // session launched (a config edit before a clean exit). SessionManager
-        // invokes next() with no try/catch (session-manager.ts), so a throw here
-        // would become an uncaught Tower exception. Fail closed instead: rerun the
-        // ORIGINAL launch command with no harness injection — baseArgs come from
-        // the original supported-harness launch, so nothing re-injects or relaunches
-        // the retired harness. Any non-retirement error is a real fault, rethrown.
+        // session launched (a custom `gemini` harness removed, or a config edit
+        // before this clean exit). Two hazards, both handled by failing closed:
+        //   1. SessionManager invokes next() with no try/catch (session-manager.ts),
+        //      so a raw throw here becomes an uncaught Tower exception.
+        //   2. next() can only change the args/env — the launch `command` is
+        //      retained by SessionManager. The retained command may itself be the
+        //      retired binary (a custom `gemini` command), so returning baseArgs
+        //      would still relaunch it (fail-open).
+        // Signal STOP: SessionManager ends the session and surfaces the retirement
+        // in the pane instead of respawning. Non-retirement errors are real faults,
+        // rethrown.
         if (err instanceof RetiredHarnessError) {
-          log('WARN', `Architect '${architectName}' harness is retired; rerunning without harness injection in ${workspacePath}: ${err.message}`);
-          return { args: baseArgs, env: baseEnv };
+          log('WARN', `Architect '${architectName}' harness is retired; not relaunching on clean exit in ${workspacePath}: ${err.message}`);
+          return { stop: true };
         }
         throw err;
       }

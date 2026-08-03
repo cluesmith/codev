@@ -2339,7 +2339,7 @@ describe('clean exits rerun the harness without recovery (Bugfix #1264)', () => 
   //
   // (#1241 ended the session on a clean exit, which made double Ctrl-C
   // unrecoverable without a manual respawn — the #1264 regression.)
-  function fakeSession(socketDir: string, freshLaunch?: { next: () => any }) {
+  function fakeSession(socketDir: string, freshLaunch?: { next: () => any }, command = 'claude') {
     const client = new EventEmitter() as any;
     client.spawn = vi.fn();
     return {
@@ -2349,7 +2349,7 @@ describe('clean exits rerun the harness without recovery (Bugfix #1264)', () => 
       startTime: 0,
       options: {
         sessionId: 'clean-1',
-        command: 'claude',
+        command,
         args: ['--resume', 'old-conversation-id'],
         cwd: '/tmp',
         env: { KEEP: '1' },
@@ -2376,6 +2376,7 @@ describe('clean exits rerun the harness without recovery (Bugfix #1264)', () => 
   function driveExit(
     exit: { code: number | null; signal: string | null },
     freshLaunch?: { next: () => any },
+    command = 'claude',
   ) {
     const socketDir = tmpDir();
     const manager = new SessionManager({
@@ -2383,15 +2384,17 @@ describe('clean exits rerun the harness without recovery (Bugfix #1264)', () => 
       shellperScript: '/nonexistent/shellper.js',
       nodeExecutable: process.execPath,
     });
-    const session = fakeSession(socketDir, freshLaunch);
+    const session = fakeSession(socketDir, freshLaunch, command);
     (manager as any).sessions.set('clean-1', session);
     const cleanExits: string[] = [];
     manager.on('session-clean-exit', (id: string) => cleanExits.push(id));
     const freshRestarts: string[] = [];
     manager.on('session-fresh-restart', (id: string) => freshRestarts.push(id));
+    const gaveUp: Array<{ id: string; reason: string }> = [];
+    manager.on('session-gave-up', (id: string, reason: string) => gaveUp.push({ id, reason }));
     (manager as any).setupAutoRestart(session, 'clean-1');
     session.client.emit('exit', exit);
-    return { manager, session, cleanExits, freshRestarts, socketDir };
+    return { manager, session, cleanExits, freshRestarts, gaveUp, socketDir };
   }
 
   /** A fresh-launch factory that mints a new id per call, like the real one. */
@@ -2475,6 +2478,36 @@ describe('clean exits rerun the harness without recovery (Bugfix #1264)', () => 
       // 9 = driveExit's own clean exit + the 8 driven above. Well past the
       // valve's threshold, and past it repeatedly — none of them count.
       expect(session.client.spawn.mock.calls.length).toBe(9);
+    } finally {
+      rmrf(socketDir);
+    }
+  });
+
+  // Issue #1338 — a freshLaunch factory may signal `{ stop: true }` when the
+  // architect harness was retired after launch (buildArchitectFreshLaunch does
+  // this). next() cannot change the retained launch command, only the args/env —
+  // and here the retained command IS the retired binary (a custom `gemini` command
+  // whose harness was later removed). So the ONLY fail-closed move is to not
+  // respawn at all. This is the end-to-end regression Codex asked for: exercise the
+  // retained `command: "gemini"`, not just the returned args.
+  it('does NOT respawn a retired-harness command on clean exit; ends the session with a visible reason (#1338)', async () => {
+    const stopFactory = { next: () => ({ stop: true }) };
+    const { manager, session, freshRestarts, gaveUp, socketDir } = driveExit(
+      { code: 0, signal: null },
+      stopFactory,
+      'gemini', // the retained launch command is the retired binary itself
+    );
+    try {
+      await new Promise((r) => setTimeout(r, 50));
+      // Fail closed: the retired command is never relaunched...
+      expect(session.client.spawn).not.toHaveBeenCalled();
+      // ...the session is torn down rather than left half-alive with no process...
+      expect((manager as any).sessions.has('clean-1')).toBe(false);
+      expect(freshRestarts).toEqual([]);
+      // ...and the reason is surfaced to the pane (session-gave-up → PtySession.notice).
+      expect(gaveUp).toHaveLength(1);
+      expect(gaveUp[0].reason).toMatch(/retired/i);
+      expect(gaveUp[0].reason).toContain('gemini');
     } finally {
       rmrf(socketDir);
     }
