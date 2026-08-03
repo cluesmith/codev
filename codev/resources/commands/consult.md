@@ -15,6 +15,28 @@ consult stats [options]
 -m, --model <model>    Model to use (required for all modes except stats)
 ```
 
+## Model Selection Options
+
+```
+--model-id <id>        Override the provider model id for THIS invocation
+```
+
+`-m/--model` picks the **lane** (`claude`, `codex`, `gemini`, `hermes`); `--model-id` picks the
+**model that lane runs**. The two are independent — see [Configuration](#configuration) for setting
+an id persistently instead.
+
+```bash
+consult -m codex --model-id gpt-5.6-sol "Review this design"
+```
+
+- **Precedence**: `--model-id` > `consult.models.<lane>` > the lane's shipped default.
+- **Supported lanes**: `claude`, `codex`, `gemini`. Using it with `hermes` is an **error**, not a
+  silent no-op — `hermes chat -q` has no model selector, so accepting the flag there would mean
+  ignoring it.
+- **Validation is syntax-only.** Whether the id exists is the provider's call; a rejection fails
+  loudly with no fallback to the default. See
+  [the fail-fast contract](#the-fail-fast-contract-and-where-it-stops).
+
 ## Models
 
 | Model | Alias | Backend | Shipped default model id | Notes |
@@ -41,8 +63,16 @@ Supply rates for a model Codev doesn't know with [`consult.pricing.codex`](#cons
 ## Configuration
 
 Everything below lives in `.codev/config.json` and flows through the standard five-layer config
-stack (defaults → global → project → per-engineer → env), so any key can be set globally and
-narrowed per project.
+stack, lowest priority to highest:
+
+1. built-in defaults
+2. `<cache>/config.json` — remote framework base config
+3. `~/.codev/config.json` — global, per-user, across all projects
+4. `.codev/config.json` — project, checked in
+5. `.codev/config.local.json` — project, per-engineer, gitignored
+
+So any key can be set globally and narrowed per project, and an individual engineer can override
+either without touching a checked-in file.
 
 **Two independent axes**, easy to confuse:
 
@@ -53,7 +83,8 @@ narrowed per project.
 
 ### `consult.models`
 
-Per-lane model id. Absent → the shipped default in the [Models](#models) table.
+Per-lane model id. Absent → the shipped default in the [Models](#models) table. Outranked for a
+single invocation by [`--model-id`](#model-selection-options).
 
 ```jsonc
 { "consult": { "models": { "claude": "claude-opus-5", "codex": "gpt-5.6-sol" } } }
@@ -76,12 +107,22 @@ Unlike model ids, this **is** a closed set Codev validates locally — see the a
 
 ### `consult.pricing.codex`
 
-Per-1M-token rates for a codex model Codev has no rates for. All three keys are required together;
-a partial object is an error rather than a half-priced estimate.
+Per-1M-token rates for the codex lane. Set this when Codev has no rates for the model you run
+(otherwise `cost_usd` is `null`), or to correct rates that have gone stale.
+
+**It outranks the shipped rate table for every model, not only unknown ones** — once set, it is
+used for whatever the codex lane runs, so it is worth revisiting if you later change the model.
 
 ```jsonc
 { "consult": { "pricing": { "codex": { "inputPer1M": 1.25, "cachedInputPer1M": 0.125, "outputPer1M": 10.0 } } } }
 ```
+
+- **`codex` is the only accepted lane.** Claude reports its own cost directly and the gemini/agy
+  lane reports no usage data at all, so a pricing override for either would be inert. Any other
+  lane key is an error.
+- **All three rates are required together**, and each must be a finite, non-negative number. A
+  partial object is an error, not a half-priced estimate: defaulting any one rate to a stale
+  built-in would reintroduce exactly the wrong-cost problem this override exists to fix.
 
 ### `porch.consultation` — which lanes run
 
@@ -164,9 +205,12 @@ lane exits non-zero, the provider's error text is surfaced, the config key that 
 named, and **no review file is written** — so porch cannot advance on a lane that never ran. What
 you do *not* get is a silent substitution of the default model.
 
-One deliberate exception: an **unconfigured** `gemini` lane still skips non-blockingly when `agy` is
-missing or unauthenticated (consultation is best-effort there). Configure `consult.models.gemini`
-and a rejected id becomes a hard failure for that lane, because you have asked for a specific model.
+One deliberate exception: a `gemini` lane **with no model id resolved** still skips non-blockingly
+when `agy` is missing or unauthenticated (consultation is best-effort there). Once an id *is*
+resolved — from either `consult.models.gemini` **or** `--model-id` — a rejected model becomes a hard
+failure for that lane, because you asked for a specific model and did not get it. What still skips
+rather than fails, even with an id, are environment causes that are not the model's fault: `agy`
+absent, unauthenticated, timed out, or killed by a signal.
 
 ## Modes
 
