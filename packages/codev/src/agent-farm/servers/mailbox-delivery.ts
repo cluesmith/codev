@@ -392,17 +392,27 @@ export async function deliverAgentMail(
   // torn-down session off the paced-write timer — hold and retry on a later gate pass.
   if (!session.writable) return hold('no-live-pty');
 
-  await ports.writeMessage(session, current.formatted_message, current.no_enter === 1);
-  // Invalidate the memo the instant the write completes — BEFORE the markDelivered guard
-  // (CMAP round 3 — Codex/Claude). The write is what makes the cached CLEAN verdict stale (it put
-  // the submitted line + a fresh prompt on the wire), and it happened regardless of whether the row
-  // then transitions. If a dismiss/supersede landed during the paced write, markDelivered returns
-  // false and we early-return below — but the bytes are already out, so leaving the stale CLEAN in
-  // the memo would let a follow-up held message memo-hit the SAME token (PTY INPUT does not advance
-  // the ring — only OUTPUT does) and deliver m2 onto the not-yet-echoed line. Deleting here, above
-  // the guard, closes that window. (The deeper input-echo-lag window — a fresh classify racing the
-  // echo — is the pre-existing gate→write INPUT race in the review's Technical Debt.)
-  memo?.delete(cacheKey);
+  try {
+    await ports.writeMessage(session, current.formatted_message, current.no_enter === 1);
+  } finally {
+    // Invalidate the memo on EVERY write attempt — a clean return OR a rejection — and BEFORE the
+    // markDelivered guard below (CMAP round 3 moved it above the guard; round 4 — Codex — made it
+    // rejection-safe via this finally). The write is what makes the cached CLEAN verdict stale (it
+    // put the submitted line + a fresh prompt on the wire), regardless of whether the row then
+    // transitions OR the write completes cleanly. Two ways the round-3 placement still leaked the
+    // stale CLEAN, both closed here: (a) a dismiss/supersede lands during the paced write →
+    // markDelivered returns false and we early-return below, bytes already out; (b) writeMessage
+    // REJECTS after putting some bytes on the wire — its port contract is `void | Promise<void>`, so
+    // a binding may do exactly that, and a bare throw would skip a delete placed after the await.
+    // Either way a leftover CLEAN would let a follow-up held message memo-hit the SAME token (PTY
+    // INPUT does not advance the ring — only OUTPUT does) and write onto the not-yet-echoed line.
+    // (Today's `writeMessagePaced` binding rejects only on the synchronous FIRST write = zero bytes
+    // out, so its CLEAN would still be valid; but this module defends the PORT contract, not one
+    // binding's current behavior. Deleting after a zero-byte failure only forces a harmless fresh
+    // classify next pass.) The deeper input-echo-lag window — a fresh classify racing the echo — is
+    // the pre-existing gate→write INPUT race in the review's Technical Debt.
+    memo?.delete(cacheKey);
+  }
 
   // markDelivered is guarded (held→delivered only). If it did NOT transition, the row
   // was dismissed/superseded during the paced write — accept that terminal state and

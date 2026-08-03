@@ -503,6 +503,34 @@ describe('MailboxDrainer verdict memo (Spec 1313 render-gate follow-up)', () => 
     expect(h.writes.map((w) => w.formattedMessage)).toEqual(['m1', 'm2']);
   });
 
+  it('invalidates the memo even when writeMessage REJECTS after partial output (CMAP round 4 — Codex)', async () => {
+    const h = harness();
+    // Round-4 completion of Fix 1: memo.delete must run on a write REJECTION too (via try/finally),
+    // not only a clean return. writeMessage's port contract is void|Promise<void>, so a binding could
+    // reject after putting bytes on the wire; without the finally the stale CLEAN survives and a
+    // follow-up could memo-hit it. Here writeMessage records partial output then rejects → the row
+    // stays held (deliverAgentMail throws, caught by the per-agent tick guard) → the NEXT tick must
+    // re-classify fresh, not memo-hit. Static ring, so a re-classify can only come from invalidation.
+    h.setSession('spir-1', fakeSession({ ringBuffer: { getAll: () => ['❯ '], currentSeq: 3, partialBytes: 0 } }));
+    let classifyCalls = 0;
+    h.ports.classify = async () => { classifyCalls++; return CLEAN; };
+    let writeAttempts = 0;
+    h.ports.writeMessage = async () => {
+      writeAttempts++;
+      h.writes.push({ formattedMessage: 'partial', noEnter: false }); // some bytes on the wire...
+      throw new Error('pty write failed mid-message');                 // ...then reject
+    };
+    const m1 = held('spir-1', 'm1', 1000);
+    const drainer = new MailboxDrainer({ intervalMs: 999999 });
+    drainer.start(h.ports, db);
+    await drainer.tick(); // classify #1 → CLEAN → write rejects → finally deletes the memo → row stays held
+    await drainer.tick(); // memo invalidated → classify #2 (fresh), NOT a stale memo-hit
+    drainer.stop();
+    expect(writeAttempts).toBe(2);                            // retried on the second tick (row still held)
+    expect(classifyCalls).toBe(2);                           // fresh classify each tick; revert the try/finally → 1
+    expect(mailbox.getById(db, m1.id)?.status).toBe('held'); // never delivered (the write kept failing)
+  });
+
   it('bounds the memo: an agent whose mail clears is pruned from the memo on the next tick', async () => {
     const h = harness();
     h.setSession('spir-1', fakeSession({ ringBuffer: { getAll: () => ['❯ '], currentSeq: 1, partialBytes: 0 } }));
@@ -646,9 +674,16 @@ describe('MailboxDrainer verdict memo (Spec 1313 render-gate follow-up)', () => 
     held('spir-1');
     const drainer = new MailboxDrainer({ intervalMs: 999999 });
     drainer.start(h.ports, db);
-    const inFlight = drainer.scheduleDrain('/ws', 'spir-1'); // parks at the classify await
-    drainer.stop();                                          // bumps the generation
-    release();
+    const inFlight = drainer.scheduleDrain('/ws', 'spir-1');
+    // scheduleDrain's body is a microtask (Promise.resolve().then(...)); WITHOUT draining, stop()
+    // below would run before the body even starts, so it would bail at the pre-existing top-of-
+    // callback generation check and never reach the post-await guard under test (CMAP round 4 —
+    // Claude, who proved the un-drained version stays green even with the whole fix reverted). Drain
+    // microtasks so the body runs up to and PARKS at the classify await (a real unresolved gate
+    // promise) before we stop() — only then does resuming past the await exercise the guard.
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    drainer.stop();                                          // bumps the generation while parked at the await
+    release();                                               // classify resolves → the drain resumes PAST the await
     await inFlight;                                          // the post-await generation check must bail before recordStreak
     expect(drainer.streaks.size).toBe(0); // pre-fix: the resumed recordStreak seeds a stale streak (size 1)
   });

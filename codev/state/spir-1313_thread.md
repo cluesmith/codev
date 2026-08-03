@@ -1456,3 +1456,50 @@ ARCHITECT RATIFIED the two open deferrals this session: (1) NO OOM guard — con
 pre-existing gate→write INPUT race, TD — distinct from the memo hole fixed in #1.)
 Full unit suite 4266 pass / 48 skip / 0 fail; tsc clean. NEXT: commit round-3 fixes → push PR #1330 → PR-comment
 summary. Strict mode: NOT approving any gate, NOT merging.
+
+### 2026-08-03 — CMAP round 4 COMPLETE (verifying round-3 fixes @ 9ba8b5b7). Gemini APPROVE; Codex + Claude 1 finding each. HOLDING on an architect decision.
+Round 4 reviewed the pushed/committed 9ba8b5b7 (correct code). Verdicts:
+  • Gemini APPROVE — all six round-3 fixes verified, no new regressions. "Ship it."
+  • Codex REQUEST_CHANGES (1): Fix-1 `memo?.delete` is skipped if `writeMessage` REJECTS. Adjudicated against the live
+    binding: `writeMessagePaced` (mailbox-wiring.ts:185) runs writeMessageToSession sync (first write sync, rest via
+    setTimeout) then returns `new Promise(resolve=>setTimeout(resolve,doneMs))` — it NEVER rejects after a partial
+    write; only the sync first-write throw rejects it = ZERO bytes out = cached CLEAN still valid. So Codex's scenario
+    is NOT reachable via today's binding (Claude's analysis) — BUT it's real at the PORT CONTRACT (`void|Promise<void>`)
+    and this module is written against the port, not the binding. Both reviewers call the `try{await}finally{memo.delete}`
+    harmless → applying it as contract-level defense + a rejecting-write test.
+  • Claude REQUEST_CHANGES (test-only, 1): the round-3 `scheduleDrain` generation test is VACUOUS — the drain body is a
+    microtask that never parks at the classify await before stop()/release() run sync, so it bails at the pre-existing
+    top-of-cb gen check (never reaches the post-await guard). Claude proved it (reverting the whole fix keeps suite green)
+    AND proved the runtime fix is load-bearing via a probe. 1-line fix: drain ~20 microtasks to actually park. + revert-check.
+  Both findings = completeness/coverage, NOT regressions in the round-3 code. All 6 runtime fixes verified correct
+  (Gemini+Claude fully; Codex 5/6 + the contract edge). Claude minor TD note: a forced classify that returns `busy` lets
+  the streak advance past 10 so escalation can't re-fire that episode — accuracy-vs-eager-alarm, escalateOverdue backstops.
+
+⚠️ WORKING-TREE ANOMALY / DECISION PENDING: mailbox-delivery.ts has Fix 6 (round-3 cooldown fresh-classify) replaced with
+`if (true) {` in the WORKING TREE (uncommitted; not mine). It reverts the force-classify-at-threshold, FAILS the cooldown
+test (functionally identical to the `false &&` revert I already showed fails `expected 3 to be 4`), and contradicts its
+comment. PR #1330 @ 9ba8b5b7 + all round-4 reviewers have the CORRECT code. Per guidance I have NOT reverted the edit.
+Sent the decision to the architect via `afx send architect` (DELIVERED): (A) restore Fix 6 [recommended — all 3 verified
+it correct; closes a visibility-only false-escalation] or (B) drop it [I finalize the revert: kill dead comment, drop/adjust
+the cooldown test, record the tradeoff]. HOLDING the two round-4 fixes + the commit until the architect steers.
+Strict mode: NOT approving any gate, NOT merging.
+
+### 2026-08-03 — CORRECTION + round-4 fixes applied. Suite 4267 GREEN. Ready to push #1330.
+CORRECTION to the prior entry's ⚠️ anomaly: the architect verified (and I re-confirmed against ground truth) that the
+`if (true)` edit is NOT on disk — `git diff HEAD -- mailbox-delivery.ts` is EMPTY (byte-identical to committed 9ba8b5b7),
+git status shows ONLY the thread modified, and lines 624/627 read `const wouldCrossOnStale =` / `if (!wouldCrossOnStale) {`.
+Fix 6 is PRESENT and CORRECT; there was nothing to restore. Whatever I saw earlier via git diff was a transient/phantom
+that resolved back to HEAD before I acted — I did NOT revert or restore anything in mailbox-delivery.ts. Architect
+directed: proceed with ONLY the two round-4 completeness fixes. Done:
+  • Fix A (Codex, rejection-safety): wrapped the delivery write in `try{ await writeMessage }finally{ memo?.delete }` so
+    the memo is invalidated on a REJECTION too, not only a clean return (round 3 had moved the delete above the
+    markDelivered guard but a throw would skip it). Adjudicated: not reachable via today's `writeMessagePaced` binding
+    (rejects only on the sync first write = 0 bytes) but real at the port contract (`void|Promise<void>`); module defends
+    the port, not the binding. + rejecting-write regression test.
+  • Fix B (Claude, test-only): the scheduleDrain generation test was VACUOUS — its drain body is a microtask that never
+    parked at the classify await before stop() ran. Added `for(i<20) await Promise.resolve()` to actually park before
+    stop(). Runtime fix was already correct (Claude proved via probe); only the test needed to reach it.
+REVERT-CHECKED both: rejecting-write test fails on reverting the finally (classifyCalls 2→1); scheduleDrain gen test now
+fails on reverting the post-await guard (streaks 0→1) — previously green even fully reverted (that was the vacuity).
+Cooldown test GREEN (classifyCalls=4). Full suite 4267 pass / 48 skip / 0 fail; tsc clean. NEXT: commit → push #1330 →
+round-4 PR comment. Strict mode: NOT approving any gate, NOT merging.
