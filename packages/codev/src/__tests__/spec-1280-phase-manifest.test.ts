@@ -9,9 +9,15 @@
  *
  * This test is written in Phase 0, before the first manifest exists, precisely
  * because the guard must predate the thing it guards.
+ *
+ * Post-integration note (Spec 1313 integration review): the branch-diff completeness
+ * guard has been removed. Once Spec 1280 integrated, it lived on `main` where its
+ * `origin/main...HEAD` predicate made it a silent no-op on every unrelated branch;
+ * deleting it is cleaner than re-scoping. What remains here validates manifest
+ * *structure* (required row fields, per-batch cap, known directory) against the
+ * committed 1280 manifests.
  */
 import { describe, it, expect } from 'vitest';
-import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
@@ -20,9 +26,6 @@ const manifestDir = path.join(
   repoRoot,
   'codev/projects/1280-prompt-surface-judgment-not-ru/manifests',
 );
-
-/** Files a manifest is responsible for listing: prompt-bearing surfaces only. */
-const PROMPT_BEARING = /^(CLAUDE\.md|AGENTS\.md|codev(-skeleton)?\/(protocols|roles)\/.*\.md)$/;
 
 interface Manifest {
   file: string;
@@ -92,53 +95,5 @@ describe('T16 — manifest completeness (M11)', () => {
         }
       }
     }
-  });
-
-  it('every prompt-bearing file changed on this branch appears in some manifest', () => {
-    let names: string[];
-    try {
-      names = execFileSync('git', ['diff', '--name-only', 'origin/main...HEAD'], {
-        cwd: repoRoot,
-        encoding: 'utf-8',
-      })
-        .split('\n')
-        .map((s) => s.trim());
-    } catch {
-      return; // no origin/main to diff against (fresh clone / CI shallow) — skip
-    }
-
-    // Scope this guard to the 1280 project (CMAP round 1 — Gemini/Codex/Claude). As a permanent
-    // suite test living on `main`, an unscoped `origin/main...HEAD` diff fires on EVERY unrelated
-    // feature branch that touches a prompt surface — e.g. Spec 1313's arch-critical→CLAUDE/AGENTS
-    // propagation tripped it the moment main was merged in. Enforce only when this IS 1280 work:
-    // the branch name references 1280, or the diff touches the 1280 project tree. Branch-name
-    // detection keeps the guard armed on the 1280 branch from its first prompt change (a
-    // manifest-dir-touch predicate would silently skip the "changed a prompt file, forgot the
-    // manifest entirely" case — the exact failure T16 exists to catch). `git diff` paths are
-    // always '/'-separated, so this is Windows-safe (unlike a `path.relative()` compare).
-    // NOTE: Spec 1280 is already integrated, so this dev-time guard is now largely vestigial —
-    // its owner should remove or re-scope it (e.g. to explicit per-phase commit ranges). Flagged
-    // in the PR; not owned by Spec 1313.
-    let branch = '';
-    try {
-      branch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
-        cwd: repoRoot,
-        encoding: 'utf-8',
-      }).trim();
-    } catch {
-      /* detached HEAD / no git — fall through to the file-touch signal */
-    }
-    const isProject1280 = /1280/.test(branch) || names.some((f) => f.startsWith('codev/projects/1280'));
-    if (!isProject1280) return;
-
-    const changed = names.filter((s) => PROMPT_BEARING.test(s));
-    if (changed.length === 0) return;
-
-    const listed = new Set(manifests().flatMap((m) => m.rows.map((r) => r.path)));
-    const missing = changed.filter((f) => !listed.has(f));
-    expect(
-      missing,
-      `changed but absent from every manifest — the architect cannot inspect what is not listed:\n${missing.join('\n')}`,
-    ).toEqual([]);
   });
 });

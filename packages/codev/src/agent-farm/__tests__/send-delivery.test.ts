@@ -65,6 +65,12 @@ interface Harness {
   setVerdict(v: GateVerdict): void;
   setClassify(fn: ((snap: RingSnapshot, p: GateProfile) => Promise<GateVerdict>) | null): void;
   now: number;
+  /**
+   * Result the fake `writeMessage` port returns (Spec 1313 silent-loss test). Default true
+   * (the write landed); set false to model a dropped PTY write (#1198) and assert the row
+   * is HELD `no-live-pty`, not marked delivered.
+   */
+  writeResult: boolean;
 }
 
 function harness(): Harness {
@@ -83,6 +89,7 @@ function harness(): Harness {
     escalations: [],
     livenessCalls: [],
     now: 1000,
+    writeResult: true,
     setSession: (agent, s) => sessions.set(agent, s),
     setProfile: (p) => {
       profile = p;
@@ -98,7 +105,10 @@ function harness(): Harness {
       resolveProfile: () => profile,
       classify: (snap: RingSnapshot, p: GateProfile): Promise<GateVerdict> =>
         classifyOverride ? classifyOverride(snap, p) : Promise.resolve(verdict),
-      writeMessage: (_s, formattedMessage, noEnter) => writes.push({ formattedMessage, noEnter }),
+      writeMessage: (_s, formattedMessage, noEnter) => {
+        writes.push({ formattedMessage, noEnter });
+        return h.writeResult;
+      },
       broadcast: (f) => broadcasts.push(f),
       onHeldStateChange: () => {
         h.heldChanges++;
@@ -205,6 +215,30 @@ describe('deliverAgentMail (Spec 1313, Phase 4)', () => {
     expect(h.writes).toHaveLength(0); // no bytes on the wire
     expect(h.broadcasts).toHaveLength(0); // no delivered broadcast
     expect(mailbox.getById(db, row.id)?.status).toBe('held');
+    expect(mailbox.getById(db, row.id)?.reason).toBe('no-live-pty');
+  });
+
+  it('clean gate, writable at t=0, but the paced write is dropped mid-pace → holds no-live-pty, not delivered', async () => {
+    // Spec 1313 integration review (Codex — silent-loss fix): the write-instant `writable`
+    // precheck cannot see a shellper socket that dies DURING the paced text→…→Enter sequence
+    // (#1198: writes then return false). writeMessage threads that per-write result; a `false`
+    // result must HOLD the row (`no-live-pty`), NOT mark it delivered — the exact silent loss
+    // this spec exists to eliminate. This is the complement of the t=0-precheck case above:
+    // there the session was dead before the write (0 writes); here it is writable when we start
+    // and the write itself is dropped (1 write attempted, 0 delivered). The paced-write drop
+    // threading itself — for BOTH the first and the delayed Enter/multiline writes — is covered
+    // end-to-end in spec-1313-paced-write-drop.test.ts; here writeMessage returns the aggregate.
+    const h = harness();
+    h.setSession('spir-1', fakeSession()); // writable: true → the t=0 precheck PASSES
+    h.writeResult = false; // ...but the write drops (socket died mid-pace)
+    const row = enqueue();
+    const out = await deliverAgentMail(h.ports, db, '/ws/a', 'spir-1');
+
+    expect(out.reason).toBe('no-live-pty');
+    expect(out.delivered).toEqual([]);
+    expect(h.writes).toHaveLength(1); // the write WAS attempted (unlike the t=0-precheck case)
+    expect(h.broadcasts).toHaveLength(0); // but no delivered broadcast
+    expect(mailbox.getById(db, row.id)?.status).toBe('held'); // never markDelivered
     expect(mailbox.getById(db, row.id)?.reason).toBe('no-live-pty');
   });
 
@@ -316,6 +350,7 @@ describe('deliverAgentMailSerialized — concurrent-send serialization (Spec 131
     h.ports.writeMessage = (_s, formattedMessage, noEnter) =>
       Promise.resolve().then(() => {
         h.writes.push({ formattedMessage, noEnter });
+        return true; // the write landed (Spec 1313: writeMessage reports delivery success)
       });
     h.setSession('spir-1', fakeSession());
     mailbox.enqueue(db, { workspacePath: '/ws/a', toAgent: 'spir-1', body: '1', formattedMessage: 'F' }, 1000);
@@ -506,8 +541,8 @@ describe('MailboxDrainer verdict memo (Spec 1313 render-gate follow-up)', () => 
   it('invalidates the memo even when writeMessage REJECTS after partial output (CMAP round 4 — Codex)', async () => {
     const h = harness();
     // Round-4 completion of Fix 1: memo.delete must run on a write REJECTION too (via try/finally),
-    // not only a clean return. writeMessage's port contract is void|Promise<void>, so a binding could
-    // reject after putting bytes on the wire; without the finally the stale CLEAN survives and a
+    // not only a clean return. writeMessage's port contract is boolean|Promise<boolean>, so a binding
+    // could reject after putting bytes on the wire; without the finally the stale CLEAN survives and a
     // follow-up could memo-hit it. Here writeMessage records partial output then rejects → the row
     // stays held (deliverAgentMail throws, caught by the per-agent tick guard) → the NEXT tick must
     // re-classify fresh, not memo-hit. Static ring, so a re-classify can only come from invalidation.

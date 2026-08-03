@@ -18,7 +18,7 @@ import { loadConfig } from '../../lib/config.js';
 import { terminalDeliverySignals, type PtySession } from '../../terminal/pty-session.js';
 import { getWorkspaceTerminals, getTerminalManager } from './tower-terminals.js';
 import { broadcastMessage } from './tower-messages.js';
-import { writeMessageToSession } from './message-write.js';
+import { writeMessagePaced } from './message-write.js';
 import { classifyScreen, type GateProfile } from './render-gate.js';
 import { resolveProfile } from './gate-profiles.js';
 import { harnessFromLaunchScript, type ContextFsPort } from '../commands/reset/context.js';
@@ -173,18 +173,6 @@ function broadcastDelivered(frame: DeliveredBroadcast): void {
     metadata: { source: 'mailbox' },
     timestamp: new Date(frame.timestamp).toISOString(),
   });
-}
-
-/**
- * Paced write of a message (text + trailing Enter unless `noEnter`), returning a
- * promise that resolves when the last scheduled write fires. `writeMessageToSession`
- * schedules its writes via `setTimeout` and returns the ms offset of the final one;
- * awaiting that is what makes the per-agent serializer's completion-chaining real —
- * the next delivery cannot begin until this submit is entirely on the wire.
- */
-function writeMessagePaced(session: DeliverySession, formattedMessage: string, noEnter: boolean): Promise<void> {
-  const doneMs = writeMessageToSession(session, formattedMessage, noEnter);
-  return new Promise((resolve) => setTimeout(resolve, doneMs));
 }
 
 /**

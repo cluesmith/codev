@@ -77,7 +77,7 @@ Granular per-event timestamps were not reliably tracked across a multi-day, many
 | Phase 7 (inbox + escalation) | 3 (force-adv) | Codex (RC ×3) | Escalation not firing `overview-changed`; workspace-scope Baked Decision; dismiss reachable by GET |
 | Phase 8 (indicators) | 2 | Gemini + Codex (RC) | Missing Playwright e2e; untested extension wiring |
 | Phase 9 (docs + skeleton) | 2 | Codex (RC) | Undocumented `mailbox.retentionDays`/`escalationSeconds` config knobs |
-| Review | 2 | Codex (r1 RC, r2 COMMENT) | r1: two mailbox delivery races + missing frontmatter → fixed. r2 (fresh, post-rewrite): 2 APPROVE + non-blocking hygiene COMMENT (Status/PR-body) |
+| Review | 3 | Codex (r1 RC, r2 COMMENT, r3 RC) | r1: two mailbox delivery races + missing frontmatter → fixed. r2 (fresh, post-rewrite): 2 APPROVE + non-blocking hygiene COMMENT (Status/PR-body). r3 (architect integration CMAP on PR #1330): silent-loss on a dropped PTY write (`delivered`→`held`) + two comment-staleness cleanups → fixed |
 | Verify: architect-identity bug | 3 | Codex (RC ×2) | Version-constant miss; legacy-upgrade heal trap; `TOWER_ARCHITECT_CMD` precedence in reconcile |
 | Verify: render-gate false-`busy` | 2 (approach+diff) | Gemini (RC), all 3 | Reject the count-default-fg inversion (proven false-clean); whole-ring reframe; over-ceiling + gate→write staleness false-cleans |
 | Post-rollback: over-ceiling + memo | 4 | all 3 (RC r1/r3) | Memo staleness across PTY respawn; CPU regression (backstop backoff); interrupt outside the lock; generation TOCTOU; cooldown stale alarm |
@@ -223,6 +223,21 @@ Re-run on the current PR #1330 diff + the rewritten review doc (the verify→imp
 - **Concern**: numerous untracked consultation artifacts. **N/A (deliberate)** — the review doc is the canonical consultation record; the transient per-round evidence files + builder-session dotfiles stay untracked.
 - Environmental (the review sandbox could not rerun Vitest or refetch the remote) — not defects; the last direct run was 0 failures / 48 pre-existing skips.
 
+### Review Phase — Round 3 (architect integration review on PR #1330)
+A 3-way integration CMAP on the PR diff; the architect verified every claim against source (Claude and Codex contradicted each other on a TOCTOU point, so the code was read directly). **Outcome: Gemini APPROVE · Claude COMMENT · Codex REQUEST_CHANGES (HIGH) → CHANGES REQUESTED — the pr gate stayed parked, not approved.** One blocking defect + two cleanups. Fixed on-branch at the pr-gate state (no rollback, per architect direction); full unit suite **4275 pass / 48 skip / 0 fail** after the fix.
+#### Gemini — APPROVE (HIGH)
+- No blocking concerns.
+#### Claude — COMMENT (non-blocking)
+- Flagged the `spec-1280` vestigial guard and (with Codex) the stale `SendBuffer` comments in `session-submit.ts`.
+#### Codex — REQUEST_CHANGES (HIGH)
+- **🔴 Blocking — a dropped PTY write was reported `delivered` (silent loss).** `PtySession.write()` returns `false` on a dropped shellper write (#1198), but `WritableSession.write()` was typed `void`, so `writeMessagePaced` resolved on a pure timer and `deliverAgentMail` called `markDelivered` unconditionally. The `!session.writable` precheck is t=0 only, so a socket dying *during* the paced text→…→Enter sequence (10–130ms+) lost the message silently — the exact failure this spec exists to eliminate, and it was **not** in the disclosed Technical Debt (never a conscious risk-accept).
+  - **Addressed**: threaded the boolean end-to-end. `WritableSession.write(): boolean`; a new drop-aware `writeMessagePaced(): Promise<boolean>` in `message-write.ts` wraps the session and records ANY dropped write across the whole paced sequence (the resolve fires after the Enter, so every write's result is observed); `DeliveryPorts.writeMessage(): boolean | Promise<boolean>`; `deliverAgentMail` now holds `no-live-pty` on a `false` result instead of marking delivered (the memo is still invalidated in the `finally`, and a genuine reject still propagates). New tests cover **BOTH** the synchronous first write and the delayed Enter/multiline writes (`spec-1313-paced-write-drop.test.ts`, 9 cases) plus the delivery-decision hold (`send-delivery.test.ts`); the four `writeMessage` port doubles and the tower-routes gate-session double were updated to the boolean contract.
+  - **N/A (deferred, architect-ratified)**: Codex's companion gate→write **input-echo race** stays the tracked Follow-up item — not widened here, per architect direction.
+- **🟡 Cleanup — vestigial `spec-1280` guard.** The branch-scoped `origin/main...HEAD` completeness guard is a `main`-resident no-op now that 1280 is integrated.
+  - **Addressed**: deleted the guard `it()` (with its now-orphaned `execFileSync` import and `PROMPT_BEARING` const); kept the structural manifest validators. Cleaner than re-scoping (architect direction). Resolves the standing Technical-Debt / Follow-up item.
+- **🟡 Cleanup — stale `SendBuffer`/`deliverBufferedMessage` comments** in `session-submit.ts`.
+  - **Addressed**: rewrote the "Ordering is not atomicity" and "Exactly what it covers" passages to the mailbox-delivery model. Also corrected two adjacent staleness bugs of the same class in that doc-block: the cron bullet (Phase 6 of *this* spec removed cron's blind `writeMessageToSession`, so its "writes directly" claim was likewise false) and the "escape and immediate-delivery" wording (the normal immediate send now routes through the per-agent mailbox serializer, not this per-session lock — only `escape`/`interrupt` still take it).
+
 ## Lessons Learned
 
 ### What Went Well
@@ -257,7 +272,8 @@ Re-run on the current PR #1330 diff + the rewritten review doc (the verify→imp
 
 ## Technical Debt
 
-- **`spec-1280` T16 manifest-guard predicate edited** to avoid mis-firing on branches that touch a prompt surface after merging main. It edits another spec's test — **flagged for the 1280 owner** to confirm the scoping is acceptable.
+- **`spec-1280` T16 vestigial completeness guard removed** (architect integration review, Review round 3). The branch-scoped `origin/main...HEAD` completeness `it()` became a `main`-resident silent no-op once 1280 integrated; it was deleted (with its orphaned `execFileSync` import and `PROMPT_BEARING` const), keeping the structural manifest validators. This **resolves** the earlier "predicate edited — flagged for the 1280 owner" item; no scoping remains to confirm.
+- **Silent-loss fix — benign partial-write residual.** If the text lands but the Enter is dropped mid-pace, the row is held `no-live-pty` while a draft sits in the composer. This never loses or double-delivers a message: a dead session is torn down and the agent-addressed row drains to its respawn; a recovered session shows a draft, so the render gate holds until the next clean prompt and delivers then. Recorded for completeness — no action needed.
 - **Architect-identity SSOT is fail-closed, not fully authoritative**: the durable fix persists `command` on the session row + a legacy self-heal; a WELCOME-frame hydration (the fully-authoritative source) was deferred (needs a protocol change).
 - **Migration tests use a faithful replica** of the production migration block, not the private `ensureGlobalDatabase` runner (repo precedent; source guards pin the real statements). Filed: extract `runGlobalMigrations(db)` for real migration tests.
 - **`#1047` unbounded `partial`**: whole-ring rendering accepts an OOM residual on a pathological runaway (mitigated by the memo + backoff; never a delivery-blocking cap). The root cause (persistent xterm) is a separate future project.
@@ -271,7 +287,6 @@ Re-run on the current PR #1330 diff + the rewritten review doc (the verify→imp
 
 ## Follow-up Items
 
-- Confirm the `spec-1280` T16 predicate scoping with the 1280 owner.
 - Replace the render-gate perf wall-clock assertion with a deterministic op-count check.
 - Bound the VSCode escalation-toast `seen` Set (dedupe by mailboxId with eviction) — negligible today.
 - Fuller close of the gate→write **input** race (a human keystroke between snapshot and write — `R7` staleness guard) and the input-echo-lag residual.

@@ -99,6 +99,7 @@ function realSeamPorts(
     writeMessage: (s, msg, noEnter) => {
       writes.push({ msg, noEnter });
       s.write(msg); // drive the real session's write path (fake shellper records it)
+      return true; // the write landed (Spec 1313: writeMessage reports delivery success)
     },
     broadcast: (f) => broadcasts.push(f),
     onHeldStateChange: () => {},

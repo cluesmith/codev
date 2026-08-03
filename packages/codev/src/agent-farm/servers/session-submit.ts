@@ -19,13 +19,13 @@
  *
  * ## Ordering is not atomicity
  *
- * `SendBuffer` already serializes messages *within one flush* by threading a
- * delay offset between them, and per-session FIFO (Spec 1307) fixes the *order*
- * in which queued messages are delivered. Neither would have prevented this: the
- * two writes were correctly ordered and still coalesced, because being second is
- * not the same as being separate. What was missing is a guarantee that a
- * submission completes — Enter included — before the next write to that session
- * begins.
+ * The paced writer already threads a delay offset between consecutive writes, and the
+ * mailbox delivery path serialises messages to one agent (`deliverAgentMailSerialized`
+ * chains each delivery on the prior one's paced completion). Both fix the *order* in
+ * which queued messages reach a session. Neither would have prevented this: the two
+ * writes were correctly ordered and still coalesced, because being second is not the
+ * same as being separate. What was missing is a guarantee that a submission completes —
+ * Enter included — before the next write to that session begins.
  *
  * ## What this provides
  *
@@ -41,27 +41,21 @@
  *
  * ## Exactly what it covers — this is NOT blanket per-session atomicity
  *
- * A lock only serialises writers that take it. That is the `escape` and
- * immediate-delivery paths of `/api/send`, and — since Spec 1307 (#1335) — the
- * buffer flush and delayed-delivery paths too. Every other PTY writer still
- * writes directly, and it is worth being precise about why:
+ * A lock only serialises writers that take it. Currently that is the `escape`
+ * and `interrupt` paths of `/api/send`. Every other PTY writer still writes
+ * directly, and it is worth being precise about why:
  *
- *   - `tower-routes.ts` `deliverBufferedMessage` (buffer flush) — COVERED as of
- *     Spec 1307: the whole drain is one reservation via the batch form (`write`
- *     performing the drain and returning the final offset), which needed no API
- *     change here. (This bullet previously said "NOT covered; adopting it is
- *     Spec 1307's work" — that work is #1335.)
- *   - `tower-cron.ts` cron delivery — NOT covered, and RE-VERIFIED against
- *     #1143's rewrite of that region rather than assumed. `deliverMessage`
- *     still calls `writeMessageToSession` directly (`tower-cron.ts:338`), so a
- *     scheduled message can still land beside an in-flight submission.
- *
- *     What #1143 changed is how OFTEN that happens. Delivery used to require a
- *     clean exit; a conditioned task now delivers whenever its condition is
- *     truthy, failures included, because a non-zero exit is data the condition
- *     inspects via `exitCode` rather than noise. So the uncovered-writer risk
- *     here is exercised on more occasions than when this list was first
- *     written — the claim is unchanged, its weight is not.
+ *   - The mailbox delivery path (`deliverAgentMailSerialized`, Spec 1313) — every
+ *     normal `/api/send` AND every cron notification (Phase 6 rerouted cron here; the
+ *     old blind `writeMessageToSession` is gone). NOT covered by this lock, and does not
+ *     need it: it runs its OWN per-agent write serializer that completion-chains each
+ *     delivery on the prior one's paced write (text + Enter), so two mailbox deliveries
+ *     to one agent cannot interleave. That is a disjoint lock from this per-session one,
+ *     so a mailbox delivery is not serialised against a concurrent `escape`/`interrupt`
+ *     here — but a normal mailbox delivery only ever writes onto a render-gate-verified
+ *     empty prompt, and `interrupt` is the explicit gate-bypassing human action (see
+ *     tower-routes.ts), so that residual cross-path race is an accepted, documented
+ *     boundary, not a regression this lock must close.
  *   - `POST /api/terminals/:id/write` — NOT covered. It is a raw passthrough
  *     with no Enter semantics of its own.
  *   - `tower-websocket.ts` keystrokes and the shellper frame relay — DELIBERATELY
@@ -69,9 +63,9 @@
  *     it behind an agent's message would make the UI feel stuck, and the human
  *     is the composer's owner.
  *
- * So the guarantee is: **two `/api/send` deliveries to one session cannot
- * interleave**, which is the failure that reached production. Anything stronger
- * requires the remaining writers to take the lock too.
+ * So the guarantee is: **two lock-taking `/api/send` submissions (escape/interrupt)
+ * to one session cannot interleave**, which is the failure that reached production.
+ * Anything stronger requires the remaining writers to take the lock too.
  */
 
 /**

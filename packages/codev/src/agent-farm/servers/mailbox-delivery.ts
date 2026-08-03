@@ -94,13 +94,17 @@ export interface DeliveryPorts {
   /** The render-gate: classify a rendered ring snapshot against a profile. */
   classify(snapshot: RingSnapshot, profile: GateProfile): Promise<GateVerdict>;
   /**
-   * Write a formatted message (text + Enter, unless `noEnter`) to the session.
-   * May return a promise that resolves when the paced write — including the
-   * trailing Enter — has fully completed. The delivery `await`s it so the
-   * per-agent serializer holds the line until the submit is entirely on the wire
-   * (completion chaining): the next delivery therefore never starts mid-write.
+   * Write a formatted message (text + Enter, unless `noEnter`) to the session and
+   * report whether every byte reached the terminal. Resolves `true` when the paced
+   * write — including the trailing Enter — has fully completed; `false` when any
+   * write was dropped (#1198: a shellper socket that died mid-pace). The delivery
+   * `await`s it for two reasons: (1) completion chaining — the per-agent serializer
+   * holds the line until the submit is entirely on the wire, so the next delivery
+   * never starts mid-write; (2) the boolean gates markDelivered — a dropped write
+   * holds the row (`no-live-pty`) instead of falsely reporting delivery (Spec 1313
+   * integration review — the silent-loss finding).
    */
-  writeMessage(session: DeliverySession, formattedMessage: string, noEnter: boolean): void | Promise<void>;
+  writeMessage(session: DeliverySession, formattedMessage: string, noEnter: boolean): boolean | Promise<boolean>;
   /** Emit the delivered-message broadcast frame. */
   broadcast(frame: DeliveredBroadcast): void;
   /**
@@ -386,33 +390,48 @@ export async function deliverAgentMail(
     return { delivered: [], reason: null };
   }
 
-  // The PTY can go unwritable between session resolution and here (#1198: a dead
-  // shellper socket still reports status 'running', and its writes are dropped). The
-  // spec requires an errored PTY write to leave the row held, so don't deliver into a
-  // torn-down session off the paced-write timer — hold and retry on a later gate pass.
+  // Fast-path an already-dead session (#1198: a dead shellper socket still reports
+  // status 'running', and its writes are dropped). This t=0 precheck avoids a pointless
+  // paced write when the PTY is unwritable before we even start; it is NOT the whole
+  // guard — a socket that dies DURING the paced text→…→Enter sequence is invisible here
+  // and surfaces instead as a dropped-write `false` from writeMessage (handled below).
+  // Either way the row is held ("an errored PTY write leaves the row held"), never marked
+  // delivered off the paced-write timer.
   if (!session.writable) return hold('no-live-pty');
 
+  // Default false so an unobserved result is the SAFE failure mode (hold, never a false
+  // delivery); the try either assigns the real boolean or throws past this point.
+  let written = false;
   try {
-    await ports.writeMessage(session, current.formatted_message, current.no_enter === 1);
+    written = await ports.writeMessage(session, current.formatted_message, current.no_enter === 1);
   } finally {
-    // Invalidate the memo on EVERY write attempt — a clean return OR a rejection — and BEFORE the
-    // markDelivered guard below (CMAP round 3 moved it above the guard; round 4 — Codex — made it
-    // rejection-safe via this finally). The write is what makes the cached CLEAN verdict stale (it
-    // put the submitted line + a fresh prompt on the wire), regardless of whether the row then
-    // transitions OR the write completes cleanly. Two ways the round-3 placement still leaked the
-    // stale CLEAN, both closed here: (a) a dismiss/supersede lands during the paced write →
-    // markDelivered returns false and we early-return below, bytes already out; (b) writeMessage
-    // REJECTS after putting some bytes on the wire — its port contract is `void | Promise<void>`, so
-    // a binding may do exactly that, and a bare throw would skip a delete placed after the await.
-    // Either way a leftover CLEAN would let a follow-up held message memo-hit the SAME token (PTY
-    // INPUT does not advance the ring — only OUTPUT does) and write onto the not-yet-echoed line.
-    // (Today's `writeMessagePaced` binding rejects only on the synchronous FIRST write = zero bytes
-    // out, so its CLEAN would still be valid; but this module defends the PORT contract, not one
-    // binding's current behavior. Deleting after a zero-byte failure only forces a harmless fresh
-    // classify next pass.) The deeper input-echo-lag window — a fresh classify racing the echo — is
+    // Invalidate the memo on EVERY write outcome — a clean `true`, a dropped-write `false`, OR a
+    // rejection — and BEFORE the markDelivered/held decisions below (CMAP round 3 moved it above the
+    // guard; round 4 — Codex — made it rejection-safe via this finally). The write is what makes the
+    // cached CLEAN verdict stale (it put the submitted line + a fresh prompt on the wire, or some of
+    // its bytes), regardless of whether the row then transitions, holds, or the write completes
+    // cleanly. Ways a leftover CLEAN would leak, all closed here: (a) a dismiss/supersede lands during
+    // the paced write → markDelivered returns false and we early-return below, bytes already out;
+    // (b) a dropped write reports `false` (Spec 1313 integration review — silent-loss fix) after
+    // putting SOME bytes on the wire, e.g. the text landed but the Enter dropped → we hold below;
+    // (c) writeMessage REJECTS after partial bytes — its port contract (`boolean | Promise<boolean>`)
+    // permits a binding to throw, and a bare throw would skip a delete placed after the await. In
+    // every case a leftover CLEAN would let a follow-up held message memo-hit the SAME token (PTY
+    // INPUT does not advance the ring — only OUTPUT does) and write onto the not-yet-echoed line, so
+    // the memo must die here. The deeper input-echo-lag window — a fresh classify racing the echo — is
     // the pre-existing gate→write INPUT race in the review's Technical Debt.
     memo?.delete(cacheKey);
   }
+
+  // A dropped PTY write (#1198) means zero-or-partial bytes reached the terminal — the exact silent
+  // loss this spec exists to prevent (Spec 1313 integration review — Codex). The t=0 `writable`
+  // precheck above cannot catch a socket that dies mid-pace (the text/lines/Enter fire across
+  // setTimeout gaps), so writeMessage threads the per-write result: `false` → no complete submit
+  // landed. Hold the row (`no-live-pty`, retried on the next clean gate pass) instead of marking it
+  // delivered. Any bytes already on the wire only make the line dirty; the render gate then holds on
+  // that draft until the session recovers or is torn down — it can never be marked delivered on a
+  // dead PTY.
+  if (!written) return hold('no-live-pty');
 
   // markDelivered is guarded (held→delivered only). If it did NOT transition, the row
   // was dismissed/superseded during the paced write — accept that terminal state and

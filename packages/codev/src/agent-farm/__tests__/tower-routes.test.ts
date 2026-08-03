@@ -206,7 +206,11 @@ function makeRes(): { res: http.ServerResponse; body: () => string; statusCode: 
  */
 function gateSession(mockWrite: (data: string) => void, ring: string, writable = true) {
   return {
-    write: mockWrite,
+    // Model a live PTY: every write lands. The delivery path now threads the write's
+    // boolean (Spec 1313 silent-loss fix), so a double whose write returned undefined
+    // would read as a DROPPED write and be held. Wrap mockWrite so call-assertions still
+    // see it while the write reports success.
+    write: (data: string): boolean => { mockWrite(data); return true; },
     pid: 1234,
     writable,
     isUserIdle: () => true,

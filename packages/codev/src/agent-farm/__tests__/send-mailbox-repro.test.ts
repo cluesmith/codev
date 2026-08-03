@@ -79,6 +79,7 @@ function realGatePorts(
     classify: (snap, prof) => classifyScreen(snap, prof),
     writeMessage: (_s, msg, noEnter) => {
       writes.push({ msg, noEnter });
+      return true; // the write landed (Spec 1313: writeMessage reports delivery success)
     },
     broadcast: (f) => broadcasts.push(f),
     onHeldStateChange: () => {},

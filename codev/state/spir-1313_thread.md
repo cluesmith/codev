@@ -1644,3 +1644,19 @@ doc's Consultation Feedback + Iteration Summary. Committing spec/plan/review/thr
 851b4846, pushed; PR #1330 body refreshed. Architect notified (delivered to main). Awaiting the HUMAN: `porch approve 1313 pr
 --a-human-explicitly-approved-this`. Strict mode: NOT self-approving pr/verify, NOT merging (standing constraint: maintainers merge). Not
 polling — I end my turn addressable; resume on gate approval, review feedback, or architect steer.
+
+### 2026-08-03 — Architect integration-review round on PR #1330: CHANGES REQUESTED (gate NOT approved)
+Architect ran a 3-way integration CMAP: **Gemini APPROVE · Claude COMMENT · Codex REQUEST_CHANGES (HIGH)**. Verified all Codex claims
+against source. Net = **1 blocking + 2 cleanups**. Directive (corrected): **NO rollback** — fix directly at the current pr-gate state,
+commit+push onto `builder/spir-1313`, update review doc, re-verify (build+tests), re-park at the pr gate; PR stays draft until approved.
+1. **🔴 MUST FIX — dropped PTY write reported `delivered` (silent loss).** `PtySession.write()` returns false on dropped shellper input
+   (#1198, pty-session.ts:477) but `WritableSession.write()` was typed `void` (message-write.ts:10) → `writeMessagePaced` resolved on a
+   pure timer, `deliverAgentMail` markDelivered'd unconditionally. The `!session.writable` precheck is t=0 only, so a socket dying during
+   the paced text→lines→Enter (10–130ms+) lost the message silently. FIX: thread the boolean (`WritableSession.write(): boolean`), move a
+   drop-aware `writeMessagePaced(): Promise<boolean>` into message-write.ts (wraps the session, records ANY dropped write across the paced
+   sequence), `DeliveryPorts.writeMessage(): boolean | Promise<boolean>`, `deliverAgentMail` holds `no-live-pty` on a false result instead
+   of markDelivered. Tested BOTH the synchronous first write AND the delayed Enter/multiline writes.
+2. **🟡 Cleanup — spec-1280 vestigial guard**: deleted the branch-scoped completeness `it()` (+ its now-unused execFileSync import) in
+   `__tests__/spec-1280-phase-manifest.test.ts` (1280 integrated → main-resident no-op; architect: delete, cleaner than re-scoping).
+3. **🟡 Cleanup — stale SendBuffer comments** in `session-submit.ts` (~lines 22, 48): rewritten to the mailbox-delivery model.
+NOT in scope: Codex's gate→write input-echo race — already-documented, architect-ratified follow-up (do not widen scope).

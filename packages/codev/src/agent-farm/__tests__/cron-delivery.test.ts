@@ -83,6 +83,7 @@ function harness(): Harness {
       classify: (_snap: RingSnapshot, _p: GateProfile): Promise<GateVerdict> => Promise.resolve(verdict),
       writeMessage: (_s, formattedMessage, noEnter) => {
         writes.push({ formattedMessage, noEnter });
+        return true; // the write landed (Spec 1313: writeMessage reports delivery success)
       },
       broadcast: (f) => broadcasts.push(f),
       onHeldStateChange: () => {
