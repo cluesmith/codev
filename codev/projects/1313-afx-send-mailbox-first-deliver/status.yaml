@@ -8,10 +8,10 @@ plan_phases:
     status: complete
   - id: phase_2
     title: Rendered-empty gate + claude/codex profiles
-    status: in_progress
+    status: complete
   - id: phase_3
     title: agy classifier profile (blocking measurement)
-    status: pending
+    status: in_progress
   - id: phase_4
     title: Delivery orchestration + write serialization
     status: pending
@@ -30,7 +30,7 @@ plan_phases:
   - id: phase_9
     title: Documentation + skeleton mirror
     status: pending
-current_plan_phase: phase_2
+current_plan_phase: phase_3
 gates:
   spec-approval:
     status: approved
@@ -44,8 +44,8 @@ gates:
     status: pending
   verify-approval:
     status: pending
-iteration: 2
-build_complete: true
+iteration: 1
+build_complete: false
 history:
   - iteration: 1
     plan_phase: phase_2
@@ -64,7 +64,7 @@ history:
         file: >-
           /home/user/code/codev_root/codev/.builders/spir-1313/codev/projects/1313-afx-send-mailbox-first-deliver/1313-phase_2-iter1-claude.txt
 started_at: '2026-08-01T01:40:05.008Z'
-updated_at: '2026-08-03T05:23:29.896Z'
+updated_at: '2026-08-03T05:23:31.283Z'
 force_advanced:
   phase: phase_7
   iteration: 3
