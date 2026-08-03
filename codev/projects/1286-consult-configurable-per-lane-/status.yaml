@@ -14,21 +14,21 @@ plan_phases:
     status: complete
   - id: phase_4
     title: Cost accounting and metrics model-id column
-    status: in_progress
+    status: complete
   - id: phase_5
     title: Porch lane-selection resolver consolidation
-    status: pending
+    status: in_progress
   - id: phase_6
     title: Documentation and skeleton parity
     status: pending
-current_plan_phase: phase_4
+current_plan_phase: phase_5
 gates:
   pr:
     status: pending
   verify-approval:
     status: pending
-iteration: 3
-build_complete: true
+iteration: 1
+build_complete: false
 history:
   - iteration: 1
     build_output: ''
@@ -110,7 +110,7 @@ history:
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/aspir-1286/codev/projects/1286-consult-configurable-per-lane-/1286-phase_4-iter2-claude.txt
 started_at: '2026-07-29T11:33:26.698Z'
-updated_at: '2026-08-03T06:13:36.490Z'
+updated_at: '2026-08-03T06:19:20.186Z'
 force_advanced:
   phase: specify
   iteration: 3
