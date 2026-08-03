@@ -2,820 +2,265 @@
 
 ## Summary
 
-Replaced `afx send`'s timer-based, in-memory, force-flushing delivery with a **mailbox-first**
-pipeline: every message is persisted to `global.db` before the send returns, and its body is only
-ever written to a prompt a headless-terminal replay proves is empty. Nine implement phases landed
-the durable store, the rendered-empty gate (claude/codex/agy profiles), delivery orchestration with
-per-PTY write serialization, fast delivery triggers, cron rerouting, the `afx inbox` visibility
-surface, dashboard/VSCode held-count indicators, and docs. Corruption is eliminated **by
-construction** — there is no force path — and no accepted message is ever silently lost.
+Replaced Spec 403's in-memory, timer-based, force-flushing `SendBuffer` with a **mailbox-first** `afx send` pipeline: every message is persisted to `global.db` at enqueue, then delivered **only** onto a prompt that a headless-terminal render-gate proves empty — never force-injected onto a busy line. Delivered across 9 implement phases (mailbox store → render-gate + claude/codex profiles → agy profile → delivery orchestration + write serialization → fast triggers → cron rerouting → `afx inbox` + escalation → dashboard/VSCode indicators → docs/skeleton), plus a substantial post-pr-gate hardening arc (architect-identity resolution, whole-ring render-gate rewrite, over-ceiling removal + verdict memo) folded into the same PR after live testing found real defects. Net: corruption is eliminated **by construction** (a body is only ever written to a verified-empty prompt), silent loss is killed by persistence, and holds are surfaced honestly (`delivered` | `held`+reason ∈ {`busy`, `no-profile`, `no-live-pty`}).
 
 ## Spec Compliance
 
-- [x] AC1: The #1265 repro is dead — draft held (`busy`), untouched, delivers after the line clears (Phase 4; automated e2e `send-mailbox-repro.test.ts`)
-- [x] AC2: Idle delivery unchanged in feel — gate measured 19.2ms (bound ≤ ~50ms at seed cap) (Phase 2)
-- [x] AC3: No loss across Tower crash/shutdown; no shutdown force-flush — `SendBuffer` deleted, rows persist in SQLite (Phase 1, Phase 4)
-- [x] AC4: Wrapper screens (relaunch / crash-restart) don't eat messages — gate holds on non-clean screens (Phase 2, Phase 4)
-- [x] AC5: Concurrent sends serialize — per-PTY FIFO `write-queue.ts`, completion-chained (Phase 4)
-- [x] AC6: Cron parity — busy → held, per-task supersede, honest run-log outcomes (Phase 6)
-- [x] AC7: Escalation is visible — `afx inbox` + dashboard/VSCode attention state; no log-reading needed (Phase 7, Phase 8)
-- [x] AC8: Held reasons distinguishable — `busy` / `no-profile` / `no-live-pty` in response, `afx inbox`, logs (Phase 4, Phase 7)
-- [x] AC9: **agy is a working target (blocking)** — trust dialog → not-clean via color-keyed rule; idle → clean (Phase 3)
-- [x] AC10: `--interrupt` / `noEnter` behave as documented; unknown-app targets hold visibly (`no-profile`) (Phase 4)
-- [x] AC11: Unit tests cover mailbox lifecycle + gate classification vs fixtures (claude/codex/agy); e2e covers the repro (Phases 1–4)
-- [x] AC12: Docs updated — afx reference (send vocab, `afx inbox`, mailbox config), CLAUDE/AGENTS byte-identical, skeleton mirrors (Phase 9)
-- [x] AC13: No test-coverage reduction; build/lint/typecheck green (all phases; validated by porch build-complete each phase)
-
-All 13 spec success criteria met. The blocking agy criterion (Baked Decision 12) was satisfied at
-the gate level via a net-new empirical measurement (see Phase 3 note below); a live agy delivery
-smoke is deferred to the verify phase per the plan.
+- [x] SC1 — **#1265 repro is dead**: draft/menu/picker in the recipient → message `held(busy)`, draft untouched, delivers on submit/quiescence (Phase 4 deterministic repro + subprocess e2e; verify-phase live test). (Phases 2, 4, 5)
+- [x] SC2 — **Idle delivery unchanged in feel**: idle empty prompt delivers immediately; gate cost well under the ~50ms budget (best-of-5 ≈ 19ms measured). (Phase 2; verify live)
+- [x] SC3 — **No loss across Tower lifecycle**: rows persist to `global.db` before the response; restart-recovery covered; shutdown never force-flushes (`stopMailboxDrainer()` just stops the loop). (Phases 1, 4)
+- [x] SC4 — **Wrapper screens don't eat messages**: `wrapper-boot` fixture classifies not-clean → held, delivered once the agent is back at a clean prompt. (Phases 2, 4)
+- [x] SC5 — **Concurrent sends serialize**: per-PTY `write-queue.ts` FIFO chains text+Enter as one unit; N parallel sends produce N cleanly separated submissions in enqueue order. (Phase 4)
+- [x] SC6 — **Cron parity**: cron routes through the same gate (`deliverCronMessage`); busy → held, superseded by the next run of the same task, honest outcome logged. (Phase 6)
+- [x] SC7 — **Escalation is visible**: `afx inbox` lists every held row from the moment it is held; past the escalation age it emits `mailbox-escalation` and puts the dashboard/VSCode indicator into a distinct attention state. (Phases 7, 8)
+- [x] SC8 — **Held reasons distinguishable**: response, `afx inbox`, and logs distinguish `busy` / `no-profile` / `no-live-pty`. (Phases 4, 7)
+- [x] SC9 — **No new corruption vector**: `--interrupt` (explicit bypass) and `noEnter` (gate-checked staging) behave as documented; unknown-app targets receive nothing and hold visibly. (Phases 2, 4)
+- [x] SC10 — **agy is a working target (blocking)**: agy profile measured empirically (color-keyed `placeholderFgPalette`); trust dialog → not-clean (a blind Enter cannot confirm filesystem trust); idle → clean. (Phase 3; verify live)
+- [x] SC11 — **Tests + docs**: unit coverage for the mailbox lifecycle and gate classification against captured claude/codex/agy fixtures (idle/draft/menu/picker/trust/wrapper/boot); e2e drives the #1265 cycle; `afx` reference, CLAUDE.md/AGENTS.md messaging section, and skeleton mirrors updated. (all phases; Phase 9)
 
 ## Deviations from Plan
 
-- **Phase 4 — helper module split**: the plan named `message-write.ts (extend) or a sibling write-queue.ts`
-  and folded delivery into `handleSend`. Implementation extracted three focused new modules —
-  `write-queue.ts` (per-PTY FIFO), `mailbox-delivery.ts` (the gated drain driver + escalation), and
-  `mailbox-wiring.ts` (Tower-boot lifecycle + trigger wiring) — rather than growing `handleSend` and
-  `message-write.ts`. Cleaner separation; same behavior. `send-buffer.ts` and its test were deleted as planned.
-- **Phase 6 — dedicated `cron-delivery.ts`**: the plan routed cron through Phase 4's entrypoint in place
-  (`tower-cron.ts`). Implementation added a thin `cron-delivery.ts` seam so cron's supersede-key path and
-  outcome-logging are unit-testable in isolation; it calls the same single gated enqueue path (one gate, as required).
-- **Phase 5 — user-input consolidation (from review)**: Codex found the submit trigger was wired only through
-  `tower-websocket.ts`, not the `pty-manager.ts` input path, so "deliver on submit" was inconsistent across
-  clients. Root cause was duplicated input handling; the fix consolidated both paths through a single
-  `handleUserInput` chokepoint on `PtySession`. Not a plan deviation per se — a correctness fix that also
-  removed pre-existing duplication.
-- **Phase 3 — fixtures synthesized, not raw-captured**: the raw agy capture embeds the authenticated account
-  email in its banner, so committed fixtures are synthesized to the measured SGR attributes with sanitized
-  content, verified through the real RingBuffer→classifier path before writing. Provenance documented in the
-  fixtures README. (Consistent with the plan's fixture approach; the sanitization is the only twist.)
-- **arch/lessons routing** deferred from Phase 9 to this Review phase (the plan explicitly permits this; the
-  Review phase has the dedicated `update-arch-docs` step). Applied in this review — see Architecture Updates
-  and Lessons Learned Updates below.
-- **Review phase — `afx inbox show <id>` added (architect-directed, at the `pr` gate)**: the architect held the
-  `pr` gate on one reconciliation. The spec's Redaction rule (Security Considerations) named `afx inbox` as a
-  legitimate body-display surface, but the implemented `afx inbox` list is deliberately metadata-only — a
-  self-contradiction. Resolution (the architect's call, implemented rather than relitigated): keep the **list**
-  metadata-only and add an explicit **`afx inbox show <id>`** single-row view that surfaces the body over the same
-  local Tower connection the message already uses. Backed by a new `GET /api/inbox/:id` route (returns a full row
-  including its body; 404 on unknown id; 405 on non-GET) and an `inboxShow` CLI handler. Spec Decision 8 + the
-  Redaction bullet were amended to match; docs updated across both `agent-farm.md` trees, both `overview.md`
-  tables, the CLAUDE/AGENTS messaging sections (root + skeleton templates), and `arch.md`. `show` works on a row
-  of **any** status, so a resolved (delivered/superseded/dismissed) row stays inspectable by id for audit until it
-  is pruned. +9 tests (5 route, 4 CLI).
+- **Phase 7 force-advanced at the 3-iteration safety ceiling.** Each of iters 1–3 had a distinct, real Codex `REQUEST_CHANGES` (escalation not firing `overview-changed`; `afx inbox` defaulting Tower-wide vs the workspace-scoped Baked Decision 8; `POST /api/inbox/:id/dismiss` reachable by GET) that was fixed; Gemini + Claude approved every round. The final fix (`af21e608`) landed just before porch's ceiling force-advance, so it was not re-consulted by a 4th round — the architect verified it against source and the full diff is re-reviewed at the pr gate.
+- **Major post-pr-gate scope, same PR (#1330).** After the pr gate was first approved and the project entered verify, live testing on installed code surfaced real defects that were fixed in-branch rather than deferred: (a) `afx send architect` always `held(no-profile)` — architect sessions had no persisted `command`, so identity resolution fell through (migration v16 + restart-safe identity SSOT); (b) render-gate false-`busy` on real claude output — the classifier had only ever been validated against a *synthesized* `claude-idle` fixture (whole-ring rewrite; over-ceiling hold removed; per-`ringToken` verdict memo). The architect authorized a **verify→implement rollback** to fold these in; this review reflects the CURRENT implementation after that arc.
+- **Merged `origin/main` into the branch** (was 83 behind; PR had gone CONFLICTING). Send-path conflicts resolved preserving Spec 1273's `submitToSession` per-terminal lock on the human-bypass paths (escape/interrupt) — not a regression (main already serialized interrupt via the old else-branch).
+- **Edited another spec's test** (`spec-1280` T16 manifest guard) during the main-merge: its `origin/main...HEAD` diff mis-fires on any branch that touches a prompt surface after merging main. Scoped the predicate to branches that actually touch the 1280 manifest dir — **flagged for the 1280 owner** (see Follow-up).
 
 ## Key Metrics
 
-- **Commits**: 80 on the branch (36 `[Spec 1313]` builder commits — 16 phase feat/fix + thread/rebuttal commits; the rest porch bookkeeping)
-- **Tests**: last verified green — `packages/codev` 4162 passing / 48 skipped; VSCode 667 passing (56 files, +24 new); dashboard (`apps/web`) 328 passing / 1 skipped; render-gate 28/28; dashboard Playwright e2e 4/4. New test files: 17 (see below).
-- **Files created**: 11 new source modules —
-  `db/mailbox.ts`, `servers/render-gate.ts`, `servers/gate-profiles.ts`, `servers/write-queue.ts`,
-  `servers/mailbox-delivery.ts`, `servers/mailbox-wiring.ts`, `servers/cron-delivery.ts`,
-  `commands/inbox.ts`, `apps/web/src/components/HeldCountBadge.tsx`, `apps/vscode/src/mailbox-indicators.ts`,
-  `apps/vscode/src/notifications/mailbox-escalation-toast.ts`; plus 17 test files and 13 gate fixtures.
-- **Files deleted**: `servers/send-buffer.ts`, `__tests__/send-buffer.test.ts` (behavior migrated to the mailbox).
-- **Net LOC impact**: +8346 total (+8351/−749 across 88 files). Code only: **+6784/−746 across 69 files** (`packages/` + `apps/`); docs/specs/plans/skeleton: +2302/−2 across 18 files. Code delta is within the spec's ~400–700 LOC *net-new-logic* estimate once tests (17 files), fixtures (13), and the migration/type churn are excluded — the production-logic core is small; tests and fixtures dominate the count.
+- **Commits**: 54 `[Spec 1313]` commits on the branch (137 total including porch `chore(porch)` status.yaml bookkeeping), `origin/main..HEAD`.
+- **Tests**: full unit suite ~4267 passing (48 pre-existing skips, 0 failures) at last green. New suites: `mailbox`, `render-gate`, `send-delivery`, `send-mailbox-repro`, `write-queue`, `cron-delivery`, `inbox-cli`, `inbox-routes`, `spec-1313-migration`, `spec-1313-registry-resolve`, `spec-1313-resolve-agent-for-session`, `send-architect-identity`, `pty-session-delivery-signals`, plus dashboard `HeldCountBadge`, VSCode `mailbox-indicators`/`mailbox-escalation-toast`, and the Playwright `spec-1313-held-count-indicator` e2e.
+- **Files created** (selected): `db/mailbox.ts`, `servers/render-gate.ts`, `servers/gate-profiles.ts`, `servers/write-queue.ts`, `servers/mailbox-delivery.ts`, `servers/mailbox-wiring.ts`, `servers/cron-delivery.ts`, `commands/inbox.ts`, `apps/web/src/components/HeldCountBadge.tsx`, `apps/vscode/src/mailbox-indicators.ts`, `apps/vscode/src/notifications/mailbox-escalation-toast.ts`, gate fixtures (`__tests__/fixtures/gate/`, incl. 4 gzipped real claude rings).
+- **Files deleted**: `servers/send-buffer.ts`, `__tests__/send-buffer.test.ts` (the retired `SendBuffer`).
+- **Net LOC impact**: 102 files, **+12,540 / −869** (`origin/main...HEAD`, includes docs, fixtures, spec/plan/review/thread).
 
 ## Timelog
 
-All times America/New_York (EDT, −0400), 2026-07-31 → 2026-08-01.
+Granular per-event timestamps were not reliably tracked across a multi-day, many-resume effort; this is a date/milestone log. All dates 2026, UTC.
 
-| Time | Event |
+| Date | Event |
 |------|-------|
-| Jul 31 21:40 | First commit: porch init spir; Specify phase begins |
-| Jul 31 21:48 | Spec drafted; spec-approval requested |
-| — | **GATE: spec-approval** (human approval required) |
-| Jul 31 21:52 | Spec approved (~4m wait); Plan phase begins |
-| Jul 31 22:17 | Plan drafted (2 consult rounds); plan-approval requested |
-| — | **GATE: plan-approval** (human approval required) |
-| Jul 31 22:20 | Plan approved (~3m wait); Implementation begins (Phase 1) |
-| Jul 31 22:46 | Phase 1 (mailbox store) complete → Phase 2 |
-| Jul 31 23:51 | Phase 2 (render-gate + claude/codex) complete after 2 iters → Phase 3 |
-| Aug 1 00:15 | Phase 3 (agy profile, blocking) complete unanimous → Phase 4 |
-| Aug 1 03:44 | Phase 4 (delivery orchestration) complete after 2 iters → Phase 5 |
-| Aug 1 04:29 | Phase 5 (fast triggers) complete after 2 iters → Phase 6 |
-| Aug 1 04:57 | Phase 6 (cron) complete unanimous → Phase 7 |
-| Aug 1 08:01 | Phase 7 (inbox/broadcasts/escalation) — 3 iters, **force-advanced at iter-3 ceiling** → Phase 8 |
-| Aug 1 12:57 | Phase 8 (dashboard/VSCode indicators) complete after 2 iters (incl. architect pause) → Phase 9 |
-| Aug 1 13:34 | Phase 9 (docs + skeleton) complete after 2 iters → Review |
-| — | **GATE: pr** (pending) |
+| 07-31 | Specify: spec grounded against the codebase; 3-way spec consult; **GATE: spec-approval** (human approved) |
+| 08-01 | Plan: 9-phase plan; 2 rounds of 3-way plan consult; **GATE: plan-approval** (human approved) |
+| 08-01 | Implement phases 1–9 (build-verify per phase; iterate-until-approve) |
+| 08-01 | Review (pre-rollback): review doc + arch/lessons routing; PR #1330 opened; review 3-way; `afx inbox show` held-gate change |
+| 08-01 | **GATE: pr** approved → verify |
+| 08-01 → 08-02 | Verify live testing → real defects found → architect-identity fix (CMAP r1–3); render-gate false-`busy` fix (approach + diff CMAP) |
+| 08-02 | Architect-authorized **rollback verify→implement**; merged `origin/main`; over-ceiling removal + verdict memo folded in |
+| 08-02 → 08-03 | Post-rollback CMAP rounds 1–4 on the render-gate change; all addressed |
+| 08-03 | Walked porch forward over already-done phases → re-entered Review; review doc rewritten from scratch (this document) |
 
 ### Autonomous Operation
 
 | Period | Duration | Activity |
 |--------|----------|----------|
-| Spec + Plan | ~40m | Spec (1 round, COMMENT/APPROVE/RC) + Plan (2 rounds) |
-| Human gate waits | ~7m total | spec-approval ~4m + plan-approval ~3m — fast turnaround |
-| Implementation → Review | ~15h 14m wall | 9 phases, 13 consultation rounds; includes ≥1 architect-requested pause during Phase 8 |
+| Spec + Plan | ~part of a day | Spec grounding, 9-phase plan, 3 consult rounds |
+| Human gate waits | multiple, hours each | Idle waiting for spec-approval, plan-approval, and pr-gate approvals |
+| Implementation → PR | multi-day | 9 phases + review + a large post-pr-gate hardening arc, ~30 consultation rounds |
 
-**Total wall clock** (init to review entry): **~15h 54m**
-**Total autonomous work time** (excluding gate waits + architect pauses): materially less than wall clock; Phase 8's 5h span is inflated by an architect pause between its dashboard and VSCode sides.
-**Context window resets / resumes**: multiple (9 PAUSED/RESUMED markers in the thread — mix of architect-requested pauses and session resumes; all recovered from `state-snapshot.md` + thread + porch state without losing work).
+**Total wall clock**: multi-day (07-31 → 08-03), dominated by human-gate waits and a live-testing-driven rollback.
+**Context window resets**: many — 10+ architect pauses / resumes across the effort, plus one explicit `afx reset`; every resume re-verified the uncommitted/inherited state against source before trusting it (born-dirty discipline).
 
 ## Consultation Iteration Summary
 
-60 consultation files produced through review round 1 (20 phase-iterations × 3 models). **45 APPROVE,
-13 REQUEST_CHANGES, 1 COMMENT, 1 skip** (Gemini review-round: agy unauthenticated). Every REQUEST_CHANGES
-was accepted and fixed (verified against code); two minor process notes were rebutted (commit-message
-format, a cosmetic skeleton-example count) with the reviewer concurring, and one was deferred.
+~30 consultation rounds across Specify, Plan, 9 implement phases, Review, verify-phase bug fixes, and the post-rollback render-gate arc (3 models per round: Gemini via `agy`, GPT-5 Codex, Claude). The overwhelming majority of blocking feedback came from **Codex**; Gemini and Claude approved most rounds, with Claude occasionally instrumenting real fixtures to catch subtle false-clean paths and Gemini skipping non-blockingly when `agy` was unauthenticated.
 
-| Phase | Iters | Who Blocked | What They Caught |
-|-------|-------|-------------|------------------|
-| Specify | 1 | Codex (RC), Gemini/Claude minor | Missing `## Expert Consultation` heading; `afx inbox` scope/authz to pin |
-| Plan | 2 | Codex (RC ×2) | Client-side send contract + automated e2e + config loader unnamed (iter1); dead-session resolver seam + `--all` contract + `PtySession` app-identity seam (iter2) |
-| Phase 1 | 1 | — (unanimous APPROVE) | — |
-| Phase 2 | 2 | Codex (RC) | Incomplete fixture matrix (claude-picker); perf assertion too loose (<500ms vs ≤50ms bound) |
-| Phase 3 | 1 | — (unanimous APPROVE) | — |
-| Phase 4 | 2 | Codex (RC) | Missing full-cycle #1265 e2e; retention default 7d vs 30d; cross-workspace offline fallback |
-| Phase 5 | 2 | Codex (RC) | Submit trigger not wired through all input paths (consolidated to one chokepoint) |
-| Phase 6 | 1 | — (unanimous APPROVE) | — |
-| Phase 7 | 3 | Codex (RC ×3) | Escalation didn't refresh overview + liveness broadcast + route tests (iter1); workspace-scoping (iter2); `POST dismiss` method guard (iter3) |
-| Phase 8 | 2 | Gemini + Codex (RC) | Missing Playwright e2e for the indicator; untested `extension.ts` wiring (extracted pure composers) |
-| Phase 9 | 2 | Codex (RC) | Undocumented `mailbox.retentionDays`/`escalationSeconds` config knobs |
-| Review | 1+ | Codex | Two mailbox races (dismiss/deliver + write-completed⇒delivered) + missing approval frontmatter |
+| Phase | Rounds | Who Blocked | What They Caught |
+|-------|--------|-------------|------------------|
+| Specify | 1 | Codex (RC), Claude (COMMENT) | Missing `## Expert Consultation` heading; `afx inbox` scope + dismiss authorization |
+| Plan | 2 | Codex (RC ×2) | Client-side send contract; automated #1265 e2e; dead-session resolver seam; private `command/args` identity seam; `--all` client contract |
+| Phase 1 (mailbox store) | 1 | — | Unanimous APPROVE (advanced first iteration) |
+| Phase 2 (gate + claude/codex) | 2 | Codex (RC) | Missing claude-picker fixture; loose perf assertion; (bonus) latent native-ESM named-import bug |
+| Phase 3 (agy profile) | 1 | — | Unanimous APPROVE |
+| Phase 4 (delivery + serialization) | 2 | Codex (RC) | Prune retention 7→30; `project:agent` cross-workspace hold; the named #1265 subprocess e2e |
+| Phase 5 (fast triggers) | 2 | Codex (RC) | Submit trigger only fired on one of two live-input paths (consolidated to `handleUserInput`) |
+| Phase 6 (cron rerouting) | 1 | — | Unanimous APPROVE |
+| Phase 7 (inbox + escalation) | 3 (force-adv) | Codex (RC ×3) | Escalation not firing `overview-changed`; workspace-scope Baked Decision; dismiss reachable by GET |
+| Phase 8 (indicators) | 2 | Gemini + Codex (RC) | Missing Playwright e2e; untested extension wiring |
+| Phase 9 (docs + skeleton) | 2 | Codex (RC) | Undocumented `mailbox.retentionDays`/`escalationSeconds` config knobs |
+| Review (pre-rollback) | 1 | Codex (RC) | Two mailbox delivery races (dismiss/deliver, write-completed⇒delivered); missing approval frontmatter |
+| Verify: architect-identity bug | 3 | Codex (RC ×2) | Version-constant miss; legacy-upgrade heal trap; `TOWER_ARCHITECT_CMD` precedence in reconcile |
+| Verify: render-gate false-`busy` | 2 (approach+diff) | Gemini (RC), all 3 | Reject the count-default-fg inversion (proven false-clean); whole-ring reframe; over-ceiling + gate→write staleness false-cleans |
+| Post-rollback: over-ceiling + memo | 4 | all 3 (RC r1/r3) | Memo staleness across PTY respawn; CPU regression (backstop backoff); interrupt outside the lock; generation TOCTOU; cooldown stale alarm |
 
-**Most frequent blocker**: **Codex — 11 of 12 REQUEST_CHANGES** (sole blocker in 10 rounds; co-blocked
-Phase 8 with Gemini). Focus pattern: **contract completeness and test rigor** — client-side send contract,
-automated e2e presence, config-loader wiring, route-method guards, workspace-scoping, and coverage gaps.
-Gemini issued 1 RC (Phase 8 Playwright). Claude issued 0 RC (its one non-APPROVE was the Specify COMMENT).
+**Most frequent blocker**: **Codex** — the dominant `REQUEST_CHANGES` source in nearly every round it reviewed, consistently on real implementation seams (dead-session resolution, race windows, TOCTOU, contract completeness). The 3-way earned its keep repeatedly: Gemini and Claude approved rounds where Codex found genuine blockers, and Claude's fixture instrumentation caught false-cleans the others missed.
 
 ### Avoidable Iterations
 
-1. **Client-vs-server contract completeness**: the plan described the *server* send response but not the
-   *client-side* (`tower-client.ts` / `commands/send.ts`) surfacing, and Codex blocked twice (plan + implicit)
-   before it was covered on both single-send and `--all` paths. A future builder should trace a contract change
-   end-to-end (wire → client → both CLI paths) before claiming it's specified.
-2. **"Automated e2e" means full-cycle, not a smoke**: Phase 4's first e2e only checked an inert shell yielding
-   `held/no-profile`, not the actual draft→held(busy)→submit→clean-delivery repro Codex expected. When a spec
-   names a specific repro scenario, the e2e must exercise *that* scenario, not an adjacent easy one.
-3. **Config knobs are code, not just docs**: retention/escalation values were introduced in code but the config
-   loader (`lib/config.ts`) and later the docs lagged, drawing RCs in the plan, Phase 4, and Phase 9. Wire a new
-   config key through loader + defaults + docs in the same phase it's first read.
-4. **UI needs Playwright, not just unit tests** (CLAUDE.md mandate): Phase 8 shipped a React unit test first;
-   both Gemini and Codex blocked for the missing Playwright e2e. Treat the Playwright requirement as non-optional
-   for any dashboard-visible change from the first commit.
-5. **Route method guards**: Phase 7 iter-3 caught `POST /api/inbox/:id/dismiss` accepting any HTTP method — a
-   real state-changing bug. Add method guards + a non-POST regression test when introducing any mutating route.
+1. **Trace a contract change through every layer before claiming it specified.** The `delivered`-vs-`held`+reason send outcome was specified server-side but not on the client (`tower-client.ts` + `commands/send.ts`, single-send *and* `--all`), drawing repeat blocks across Plan and Phase 4. Naming every layer a contract crosses in the plan deliverable would have pre-empted them.
+2. **Validate a classifier against real captured output from day one.** The render-gate was only ever exercised against a *synthesized* `claude-idle` fixture (the sandbox `claude` was a shim), so two field false-`busy` defects surfaced only during live install testing after the pr gate — the single most expensive avoidable iteration (it forced a verify→implement rollback). Capturing real rings up front would have caught them in Phase 2.
+3. **Exercise the *named* repro, not an adjacent easy one.** Phase 4's first e2e checked an inert shell (`held/no-profile`) instead of the #1265 draft→held(busy)→submit→deliver cycle; Codex blocked until the real cycle was driven end-to-end.
 
 ## Consultation Feedback
 
-Response types: **Addressed** (fixed), **Rebutted** (disagreed with reasoning), **N/A** (out of scope/moot).
+Response tags: **Addressed** (changed to resolve), **Rebutted** (explained why current approach is correct), **N/A** (out of scope / moot). Round verdicts as recorded contemporaneously; a background extraction cross-checked these against the per-iteration evidence files in `codev/projects/1313-afx-send-mailbox-first-deliver/`.
 
 ### Specify Phase (Round 1)
-
-#### Gemini — APPROVE (HIGH)
-- **Concern**: Missing `## Expert Consultation` heading required by the template.
-  - **Addressed**: Added the section recording all three verdicts.
-
-#### Codex — REQUEST_CHANGES (HIGH)
-- **Concern**: Missing required `## Expert Consultation` section.
-  - **Addressed**: Added in canonical order.
-- **Concern**: `afx inbox` scope/query + dismissal semantics should be explicit if testable.
-  - **Addressed**: Pinned in Baked Decision 8 (workspace-scoped; lists row id + why-held reason; dismiss by row id).
-
-#### Claude — COMMENT (HIGH)
-- **Concern**: Missing heading; `afx inbox` dismiss authz in multi-architect workspaces; supersede-key scope implicit; "attention state" visual unspecified; no escalation-age test scenario.
-  - **Addressed**: All five — Decision 8 (any workspace operator, no ownership check), Decision 6 (supersede cron-only), plan-level UI note, and new Functional Test Scenario 16.
+#### Gemini — APPROVE
+- No blocking concerns; spec technically sound and well-grounded.
+#### Codex — REQUEST_CHANGES
+- **Concern**: Missing `## Expert Consultation` section; `afx inbox` scope + dismiss-authorization under-specified.
+  - **Addressed**: Added the Expert Consultation log; made Decision 8 workspace-scoped with explicit dismiss authorization; verified the `@xterm/headless` gap + ring-buffer path independently.
+#### Claude — COMMENT
+- **Concern**: Which human sees escalation; the indicator visual contract; supersede keys should be cron-only; add a dedicated escalation-age scenario.
+  - **Addressed**: Clarified supersede keys are cron-only; noted the attention-state visual is a plan-level choice; added test scenario #16 (escalation-age threshold).
 
 ### Plan Phase (Round 1)
-
-#### Gemini — APPROVE (HIGH)
-- **Concern**: `pruneTerminal` defined but never invoked; liveness telemetry placement.
-  - **Addressed**: Phase 4 wires the Tower-boot + backstop invocation; telemetry tracking moved to the Phase 4 drainer.
-
-#### Codex — REQUEST_CHANGES (HIGH)
-- **Concern**: Client-side send contract not covered (`send.ts` hardcodes "Message sent"); no automated #1265 e2e in a concrete file; config loader for escalation/retention unnamed; exec summary says "WS" but repo is SSE.
-  - **Addressed**: All — Phase 4 client-contract + e2e deliverables added; `lib/config.ts` named in Phases 1 & 7; "WS"→"SSE".
-
-#### Claude — APPROVE (HIGH)
-- **Concern**: (No key issues) minor — Phase 5 drain-coalescing test; Phase 7 density.
-  - **Addressed**: Added the coalescing test; noted optional 7a/7b split.
+#### Gemini — APPROVE
+- Noted `pruneTerminal` invocation points + liveness telemetry tracking. **Addressed** (folded into Phase 4).
+#### Codex — REQUEST_CHANGES
+- **Concern**: Client-side send contract unaddressed; no automated #1265 e2e; config-loader unnamed; "WS events" mislabel.
+  - **Addressed**: Added the `tower-client.ts` + `commands/send.ts` contract work to Phase 4; added the `send-mailbox.e2e` deliverable; named `lib/config.ts`; corrected to SSE.
+#### Claude — APPROVE
+- Verified every file reference + full spec coverage; suggested a Phase 5 coalescing test + optional Phase 7 split. **Addressed**.
 
 ### Plan Phase (Round 2)
-
 #### Gemini — APPROVE
-- No concerns raised (independently verified all iter-1 fixes + file refs landed).
-
-#### Codex — REQUEST_CHANGES (HIGH)
-- **Concern**: Dead-session persistence not implementable as written (`resolveTarget` resolves only live terminals; `handleSend` 404s); Phase 2 omits the `resolveProfile` metadata seam (`command`/`args` private); `--all` would misreport held as "sent".
-  - **Addressed**: Added the agent-registry fallback + `handleSend` restructure; named the `PtySession` app-identity seam; extended honest reporting to `sendToAll()`.
-
-#### Claude — APPROVE (HIGH)
-- **Concern**: Cosmetic — `GLOBAL_CURRENT_VERSION` lives in `db/index.ts`; `tower-client` return shape.
-  - **N/A / Addressed**: Migration already targeted `index.ts` (no change); corrected the Phase 4 return-shape description.
-
-### Phase 1 — Mailbox persistence layer (Round 1)
-
-#### Gemini — APPROVE (HIGH); Codex — APPROVE (MEDIUM); Claude — APPROVE (HIGH)
-- No concerns raised — all consultations approved. (Claude's non-blocking observations on pruneTerminal deferral, retention config boundary, and supersede atomicity confirmed the design.)
-
-### Phase 2 — Rendered-empty gate + claude/codex profiles (Round 1)
-
-#### Gemini — APPROVE (HIGH)
-- No concerns raised.
-
-#### Codex — REQUEST_CHANGES (HIGH)
-- **Concern**: Fixture matrix incomplete (only `codex-picker`, no claude picker); perf test asserts <500ms vs the spec's ≤~50ms bound.
-  - **Addressed**: Added `claude-picker` fixture (suite 22→23); replaced perf assertion with warm-up + best-of-5 min <75ms (measured 19.2ms).
-
-#### Claude — APPROVE (HIGH)
-- **Concern**: Non-blocking — `RING_SEED_MAX_BYTES` local definition; synthesized `claude-idle` fixture.
-  - **Addressed / N/A**: Reconciled in Phase 4; synthesized fixture accepted as the right tradeoff. (Builder also fixed a latent `@xterm/headless` CJS-interop bug found while grounding the perf measurement.)
-
-### Phase 2 (Round 2)
-
-#### Gemini / Codex / Claude — all APPROVE (HIGH)
-- No concerns raised (2 cosmetic Claude notes, no change needed).
-
-### Phase 3 — agy classifier profile (Round 1)
-
-#### Gemini / Codex / Claude — all APPROVE (HIGH)
-- No concerns raised. Gemini confirmed the agy marker `/^> /`, the `placeholderFgPalette: 8` rule, and resolver priority. Claude's non-blocking notes (shared region-end patterns, synthesized fixtures) are accepted-risk per spec.
-
-### Phase 4 — Delivery orchestration + write serialization (Round 1)
-
-#### Gemini — APPROVE
-- No concerns raised.
-
-#### Codex — REQUEST_CHANGES (HIGH)
-- **Concern**: Added e2e checks only an inert shell (`held/no-profile`), not the planned #1265 full cycle; drainer hardcodes 7-day retention vs the 30-day config default; offline fallback refuses cross-workspace `project:agent` targets.
-  - **Addressed**: Added the full-cycle subprocess e2e (draft→held→submit→clean delivery); set retention to 30 via `mailbox.retentionDays` config + regression test; offline fallback resolves via `findWorkspaceByBasename` and holds against the target workspace registry.
-
-#### Claude — APPROVE (HIGH)
-- **Concern**: Minor — retention 7d vs 30d.
-  - **Addressed**: Same fix as Codex.
-
-### Phase 4 (Round 2)
-
-#### Gemini / Codex / Claude — all APPROVE (HIGH)
-- No concerns raised; all three iter-1 items verified fixed.
-
-### Phase 5 — Fast delivery triggers (Round 1)
-
-#### Gemini — APPROVE (HIGH)
-- No concerns raised.
-
-#### Codex — REQUEST_CHANGES (HIGH)
-- **Concern**: Submit trigger wired only through `tower-websocket.ts`, not `pty-manager.ts` — "deliver after submit" inconsistent across live clients.
-  - **Addressed**: Root cause was duplicated input handling; consolidated both paths through a single `handleUserInput` chokepoint on `PtySession`.
-
-#### Claude — APPROVE (HIGH)
-- No concerns raised (praised the self-rescheduling quiescence timer + coalescing).
-
-### Phase 5 (Round 2)
-
-#### Gemini / Codex / Claude — all APPROVE (HIGH)
-- No concerns raised.
-
-### Phase 6 — Cron rerouting (Round 1)
-
-#### Gemini / Codex / Claude — all APPROVE (HIGH)
-- No concerns raised. Confirmed mailbox routing, task-name supersede key, honest logging. (Claude's non-blocking notes on a shared `CronOutcome` type and a `reason` fallback are accepted.)
-
-### Phase 7 — afx inbox CLI + broadcasts + escalation (Round 1)
-
-#### Gemini — APPROVE
-- No concerns raised.
-
-#### Codex — REQUEST_CHANGES (HIGH)
-- **Concern**: Escalation doesn't fire `overview-changed` (so `mailboxEscalated` can go stale); liveness telemetry is log-only and ignores the "with recent output" condition; no route-level tests for `GET /api/inbox`, `POST dismiss`, or the SSE interaction.
-  - **Addressed**: `escalateOverdue()` now fires `onHeldStateChange()`; liveness split across a pure/wired boundary via an `onLiveness` port with the 30s recent-output gate (WARN log + `notification` SSE); added `inbox-routes.test.ts` + db-level cases + tightened `send-delivery.test.ts`.
-
-#### Claude — APPROVE (HIGH)
-- No concerns raised (2 non-blocking notes).
-
-### Phase 7 (Round 2)
-
-#### Gemini — APPROVE
-- No concerns raised.
-
-#### Codex — REQUEST_CHANGES (HIGH)
-- **Concern**: `afx inbox` defaults to all workspaces, but Decision 8 pins it workspace-scoped.
-  - **Addressed**: Defaults to the current workspace via `getConfig().workspaceRoot`; route normalizes `?workspace=`; no admin/`--all` mode added (YAGNI).
-
-#### Claude — APPROVE (HIGH)
-- No concerns raised (confirmed all four prior issues resolved).
-
-### Phase 7 (Round 3)
-
-#### Gemini — APPROVE
-- No concerns raised.
-
-#### Codex — REQUEST_CHANGES (HIGH)
-- **Concern**: `POST /api/inbox/:id/dismiss` has no method guard — any HTTP method dismisses mail (real state-changing bug); no non-POST regression test.
-  - **Addressed**: Added a `req.method !== 'POST'` → 405 guard before any DB mutation, plus a 405 regression test.
-
-#### Claude — APPROVE (HIGH)
-- No concerns raised. **Note**: after this iter-3 fix landed, porch reached its 3-iteration ceiling and
-  **force-advanced** rather than running a 4th consult round. The iter-3 Codex fix (method guard + regression
-  test) *was* committed before the force-advance (`af21e608`), and Claude approved iter-3; there was simply no
-  iter-4 re-consult to convert Codex's verdict to APPROVE. The fix is a clear-cut, tested method guard — low
-  residual risk — but this is flagged honestly as the one phase that ended on a force-advance rather than a
-  unanimous re-consult.
-
-### Phase 8 — Dashboard + VSCode held-count indicators (Round 1)
-
-#### Gemini — REQUEST_CHANGES
-- **Concern**: Missing Playwright test for the dashboard indicator (UI has a hard Playwright requirement).
-  - **Addressed**: Added `spec-1313-held-count-indicator.test.ts` (4/4 on real chromium, incl. a live-update test).
-
-#### Codex — REQUEST_CHANGES (HIGH)
-- **Concern**: Dashboard indicator only unit-tested (no Playwright); VSCode coverage stops at helpers/toast — the actual `extension.ts` badge/status-bar wiring is untested.
-  - **Addressed**: Added the Playwright spec; extracted `composeStatusBarText`/`composeActivityBadge` pure functions with +10 unit tests (VSCode suite → 677).
-
-#### Claude — APPROVE (HIGH)
-- **Concern**: Minor — a Playwright smoke would be belt-and-suspenders, not blocking.
-  - **Addressed**: That spec is the added Playwright test.
-
-### Phase 8 (Round 2)
-
-#### Gemini / Codex / Claude — all APPROVE (HIGH)
-- No concerns raised. (Claude non-blocking: reused `cloud-pulse` keyframe; unbounded escalation-toast `seen` Set — see Technical Debt.)
-
-### Phase 9 — Documentation + skeleton mirror (Round 1)
-
-#### Gemini — APPROVE (HIGH)
-- No concerns raised (confirmed CLAUDE/AGENTS mirrored in both trees; `agent-farm.md` + `overview.md` updated).
-
-#### Codex — REQUEST_CHANGES (HIGH)
-- **Concern**: New `mailbox.retentionDays` / `mailbox.escalationSeconds` config knobs undocumented in the command reference.
-  - **Addressed**: Added a `### Mailbox retention and escalation` subsection to both `agent-farm.md` trees (body byte-identical), documenting that retention prunes only terminal rows (held rows never pruned) and escalation is visibility-only (never a delivery trigger).
-
-#### Claude — APPROVE (HIGH)
-- **Concern**: Minor — skeleton inbox examples show 2 vs codev/'s 3; config keys not in a config reference; arch/lessons routing not done.
-  - **Rebutted**: Skeleton example count is intentional (option is in the options table; skeleton is deliberately leaner) — Claude concurred it's cosmetic.
-  - **Addressed**: Config keys — same fix as Codex.
-  - **N/A (deferred)**: arch/lessons routing deferred to this Review phase per the plan's explicit permission.
-
-### Phase 9 (Round 2)
-
-#### Gemini / Codex / Claude — all APPROVE (HIGH)
-- No concerns raised. Codex confirmed the config knobs now documented; Claude verified CLAUDE≡AGENTS byte-identical and the config subsection byte-identical across trees.
-
-### Review Phase (Round 1) — PR #1330
-
-#### Claude — APPROVE (HIGH)
-- No concerns raised. Confirmed the "never force-inject" guarantee is **structurally** enforced (single gated write path, `KeyedSerializer`, `SendBuffer` deleted).
-
-#### Codex — REQUEST_CHANGES (HIGH)
-- **Concern**: `deliverAgentMail` can put bytes on the wire for a row dismissed/superseded in the gate→write window (dismiss/supersede run outside the delivery serializer).
-  - **Addressed**: re-read the row via `getById` at the write instant and skip if no longer `held`; also check `markDelivered`'s guarded return before broadcasting. New test covers a dismiss during the gate check.
-- **Concern**: "write completed ⇒ delivered" is unsound — `writeMessageToSession` ignores `write()`'s boolean and `writeMessagePaced` resolves on a `setTimeout` timer, so a torn-down PTY is marked delivered.
-  - **Addressed**: re-check `session.writable` (the #1198 live-connection signal) at the write instant → hold `no-live-pty` instead of delivering. Residual (disconnect *during* the paced write) documented as the spec's accepted post-delivery-verification non-goal. New test covers an unwritable session.
-- **Concern**: the merged plan/spec lack approval frontmatter; some commits deviate from `[Spec NNNN][Phase]`.
-  - **Addressed**: added `approved`/`validated` frontmatter to spec + plan (reflecting the recorded gate approvals).
-  - **Rebutted** (commit format): the deviating commits are `[Spec 1313] Thread:` records; rewriting pushed history conflicts with the repo's "preserve individual commits" policy and doesn't justify a force-push. Non-blocking.
-
-#### Gemini — skipped
-- Non-blocking skip (`agy` exited 1, unauthenticated). No review content.
-
-### Review Phase (Round 2) — `afx inbox show <id>` reconciliation (architect-directed)
-
-Not a consult finding: the architect held the `pr` gate to direct one change (see Deviations — `afx inbox show
-<id>`). The reconciliation was implemented (new `GET /api/inbox/:id` route + `inboxShow` CLI handler + 9 tests +
-spec/doc amendments) and re-submitted for the review-phase iter-2 3-way. Verdicts are recorded here after that
-re-consult completes; the corresponding rebuttal lives in `1313-review-iter2-rebuttals.md`.
-
-### Review Phase (Round 3) — architect-directed bugfix: `afx send architect` always no-profile
-
-Found in the architect's **live** PR testing (not by the suite): every `afx send` to an architect terminal held
-`no-profile` and never delivered, while builders delivered fine. Root cause: `createSessionRaw` hardcoded
-`command: ''`, so `resolveProfileForSession` fell back to `.builder-start.sh` — which only builder worktrees
-have. Architects run in the workspace root, so they never resolved. The suite stayed green because the gate/repro
-tests use a **command-populated double**, never the real empty-command `createSessionRaw` path. Fix: thread the
-launch command onto the identity seam and persist it on `terminal_sessions` (migration v16) so it survives Tower
-restart; new `send-architect-identity.test.ts` drives delivery through a REAL `createSessionRaw` session.
-
-3-way CMAP on the fix:
-- **Gemini — APPROVE.** Missed the restart/upgrade gap (accepted legacy NULL rows as "acceptable self-healing").
-- **Claude — approve-after-fixes (HIGH).** Flagged the missing `GLOBAL_CURRENT_VERSION` bump and, decisively,
-  that reconcile already computes `restartOptions.command` from live config but doesn't use it — the clean
-  self-heal for pre-existing NULL rows.
-- **Codex — REQUEST_CHANGES.** Same two blockers plus: the migration blanket-swallowed ALTER failures; the
-  `not.toBeNull()` assertions can't tell claude from codex (shared marker/region); a missed shell call site.
-- **Addressed (all converged findings):** bumped `GLOBAL_CURRENT_VERSION` 15→16; hardened the v16 migration to
-  gate on `PRAGMA table_info` instead of swallowing every error; added the `?? restartOptions?.command` self-heal
-  at both reconstruction paths (reconcile + on-the-fly) so an upgraded architect resolves on the **first** restart;
-  threaded/persisted the shell call site; strengthened tests to exact `.app` assertions (claude AND codex) + added
-  migration/self-heal source guards.
-- **Re-CMAP round 2** (on the remediation): Claude + Gemini **APPROVE**; Codex **REQUEST_CHANGES** on one verified
-  new hole — the self-heal derived the command from config/`claude` but not the `TOWER_ARCHITECT_CMD` env override
-  that *fresh launch* honors, so a legacy `agy` architect launched that way (no matching config) would heal to the
-  wrong profile. **Fixed** by mirroring fresh-launch's exact `env > config > claude` precedence at both
-  reconstruction paths (also repairs a pre-existing auto-restart divergence); added a functional v16 migration test.
-- **Re-CMAP round 3** (targeted Codex re-check): the command-resolution fix is **approved** ("finding resolved, no
-  new inconsistency"). Codex's sole remaining point is test-methodology — the v16 migration test drives a faithful
-  *replica* of the block rather than the production runner. **Rebutted / deferred**, because: (a) `ensureGlobalDatabase`
-  is private and the migration chain is inline on the DB-init critical path, so exercising it directly needs an
-  export/refactor of that path — high blast radius, out of scope for a delivery bugfix; (b) it matches established
-  repo precedent — the v15, bugfix-826, and pir-832 migration tests are all replica-based, and `state`/`spec-755`
-  *mock* `getGlobalDb`; no existing test drives the real runner; (c) production drift is already caught — the source
-  guards pin the exact production v16 statements (`GLOBAL_CURRENT_VERSION = 16`, the `ALTER`, the `PRAGMA` gate), the
-  replica proves the logic, and the `GLOBAL_SCHEMA` convergence proves fresh-install correctness. Filed as a
-  follow-up (see Technical Debt). tsc clean; **4183** unit tests pass.
-- **Deferred (documented follow-ups, fail-closed today):** WELCOME-frame command hydration as the authoritative
-  SSOT (needs a shellper-protocol change + old-shellper fallback); tightening `resolveProfile`'s substring match
-  to exact basenames; persisting `args` if wrapper launches (`env codex`, `npx claude`) ever need support.
-
-### Review Phase (Round 4) — render-gate whole-ring hardening (architect-directed, post-merge live testing)
-
-Found in the architect's **live** testing of the built code (`pnpm -w run local-install`), not by the suite:
-`afx send` reported **busy** for prompts that were actually **empty and ready** — a running background task held
-the message ("monitor → busy"); a long-running builder's send held then delivered only after a manual ↑↓. Three
-defects were filed against `render-gate.ts`, all reproduced against REAL claude TUI output — the classifier had
-only ever been validated against *synthesized* `claude-idle` fixtures.
-
-**The decisive experiment (architect cap-sweep).** Before any code, the architect swept the classifier over real
-captures at varying `capReplay` slice sizes and proved the false-busy is a **`capReplay` slice artifact**: on a
-WHOLE-ring render *every* capture classifies CLEAN, including the bg-task ring; the verdict flips purely with slice
-size (bgtask 2.79 MB: BUSY ≤2 MB, CLEAN ≥2.5 MB; bigring 2.99 MB: CLEAN only WHOLE). claude runs on the alt-screen
-(`\x1b[?1049h`), whose frame only reconstructs from the full cumulative stream, and there is **no** "most-recent
-full-repaint boundary" to slice at. Reframe: **D2 (render the whole ring) is the root fix; D1 (positive region
-bounding) is defense-in-depth.** I verified the cap-sweep independently before coding.
-
-**Approach 3-way CMAP (before the classifier change).** All three reviewers **rejected** the initially-proposed
-cell-attribute *inversion* ("count only default-fg normal") — Claude *proved* it false-cleans the `agy-trust`
-fixture (0 default-fg cells → a blind Enter would confirm a filesystem-trust dialog); Gemini/Codex flagged colored
-drafts and syntax highlighting. They also rejected a `MAX_COMPOSER_ROWS` scan-cap (a "scan capped rows then CLEAN"
-is itself a false-clean path). Adopted instead: **keep the fail-safe blocklist** + **"no region-end boundary ⇒
-busy"** (Claude's simpler dominating fix — verified to preserve all 12 fixture verdicts and to close a *latent*
-false-clean where an unbounded region with only dim/empty rows below returned CLEAN).
-
-**Implementation.** D2: replaced the 1 MB `capReplay` with a generous `RENDER_CEILING_UNITS` (8 M units) — realistic
-rings (≤3 M) render whole. D1: `findRegionEnd` returns −1 (→ `no-region-end` hold) instead of scanning to the screen
-bottom. Committed **real gzipped claude fixtures** (bgtask/bigring, + a just-over-cap negative control and a
-small-ring baseline) with the honesty structure *whole→CLEAN / old-1 MB-slice→BUSY* (the negative control is CLEAN
-both ways, so the fix isn't "classify every big ring clean"). Fixed the `tower-routes` gate fake, which built a bare
-`❯ ` ring with no rule — a real composer is bounded by its rule line, and the `getAll().join('\n')` needs the real
-trailing CR or the rule renders indented and misses the pattern.
-
-**Diff 3-way CMAP (after implementation) — found two real false-clean paths my change introduced/amplified, both
-fixed:**
-- **Over-ceiling render could false-clean** (Codex + Claude, independently): the first-cut `capForRender` sliced an
-  over-ceiling ring at an ESC boundary and rendered the tail — but an arbitrary tail can reconstruct a clean-looking
-  composer while the whole ring holds a draft. **Fixed (interim — superseded in Round 5, which removes the cap
-  entirely):** an over-ceiling ring is held UNRENDERED (`detail: 'over-ceiling'`), content-independent — the
-  strictly-safe direction. Added an adversarial test (a >ceiling ring whose clean-looking tail *would* classify
-  clean → still held).
-- **gate→write staleness amplified 3–5×** (Claude, "blocking-ish"): the whole-ring classify awaits ~tens–130 ms (vs
-  ~20 ms under the old cap); a keystroke landing during it made the clean verdict stale, and the code re-validated
-  the mailbox *row* but not the *screen*. **Fixed:** sample a cheap ring change-token
-  (`currentSeq`+`partialBytes`+dims+app) before the classify and re-check it after — a change → hold, never write
-  onto the draft that appeared. Added a dedicated test.
-- **Observability** (Claude): the new `no-region-end` detail was dropped at the hold, so a profile drift under D1
-  would be a *silent* total outage. **Fixed:** the gate detail now rides `DeliveryOutcome`, and the liveness-streak
-  escalation (was `no-profile`-only) now also fires for a sustained classifier-stuck streak
-  (`no-region-end`/`no-composer-marker`/`over-ceiling`), distinct from a legitimately-long `user-text` hold.
-- **Deferred with rationale (Technical Debt):** verdict **memoization** on the same change-token (Gemini rated it a
-  blocker; Codex + Claude "deferrable only with a real multi-agent measurement" — the over-ceiling hard-hold already
-  caps the worst-case per-tick render); a **real >1 MB-with-a-draft** fixture (the risk is covered by composition —
-  real empty captures prove whole-render reconstruction fidelity, the 4 MB perf test proves large-render + draft →
-  busy). Confirmed safe by all three: whole-ring rendering, `no-region-end ⇒ busy`, the CR fix, and the negative
-  control.
-
-tsc clean; full unit suite **4190 pass / 48 skip / 0 fail**. Live end-to-end re-verification is architect-run (a
-shared-Tower restart can't be driven from a worktree) — acceptance checklist handed over.
-
-### Round 5 (post-merge follow-up) — over-ceiling permanent-hold removed + verdict memo implemented
-
-Architect+user-directed follow-up folded into PR #1330 after the branch was brought current with `main`.
-
-**The over-ceiling hold was a latent outage, now removed.** Round 4 held any ring over `RENDER_CEILING_UNITS`
-(8 M units) UNRENDERED (`detail: 'over-ceiling'`) as the strictly-safe direction against a sliced-tail false-clean.
-But because `partial` is unbounded (#1047), a long-lived claude/codex/agy terminal accretes its whole alt-screen
-frame past 8 M in *normal* use — a live ~14 M-unit architect terminal with an empty composer was stuck, its mail
-undeliverable until relaunch. A size cap that HOLDS is a permanent delivery outage for exactly the busiest agents.
-**Fix (Option 1): render the WHOLE ring at any size — no cap.** Whole-ring render is already correct at any size
-(it is *why* everything under the old cap rendered whole), so removing the short-circuit just extends correct
-classification; no slice is introduced, so there is no new false-clean. Removed `RENDER_CEILING_UNITS`, the
-`'over-ceiling'` verdict member, and the over-ceiling arm of the liveness escalation. An unclassifiable huge ring
-still HOLDS and escalates via the surviving classifier-stuck net (`no-region-end`/`no-composer-marker`), so a
-genuinely-broken screen is never a silent loss.
-
-**Verdict memo — the Round-4 deferred CPU follow-up, now implemented.** The 1.5 s backstop re-rendered every held
-agent's whole ring each tick; for a static ring that is pure waste (and now that whole-ring render is unbounded,
-the worst-case single render is larger). The memo caches the gate verdict keyed on the same `ringToken`
-(`currentSeq:partialBytes:cols×rows:app`) the gate→write TOCTOU re-validation already trusts: a token match means a
-byte-identical screen, so the cached verdict is reused without re-rendering. It composes with the TOCTOU guard by
-construction — a memo hit performs no `await`, so the post-classify `ringToken !== tokenBefore` re-check passes
-trivially. Owned + bounded by `MailboxDrainer` (pruned to the held-agent set each tick); the fast `scheduleDrain`
-trigger deliberately does NOT use it — an event-driven re-check fires *because* the ring changed, so it must always
-re-classify. (That decision also fixed a real interaction: a pre-existing scheduleDrain test flips the verdict
-without advancing the ring token, which the memo — correctly — would otherwise treat as unchanged; confining the
-memo to the periodic tick left that test's asserted behavior intact.)
-
-**OOM open question (raised for the phase consult).** With no cap and an unbounded `partial`, a pathological runaway
-dump could make one whole-ring render allocate/parse hundreds of MB and stall the loop. Decision: keep NO
-delivery-blocking cap — any cap that HOLDS just reintroduces the outage under a bigger number (the architect's
-explicit constraint). The risk is mitigated by the memo (repeated renders are rare) and is ultimately the #1047
-root cause (retire the unbounded `partial` for a persistent headless screen — a separate future project, out of
-scope here). Documented as accepted residual risk in the render-gate module header.
-
-**Merge-integration fixes (semantic conflicts `git` auto-merged textually).** Bringing `main` in (the branch was
-83 behind; PR #1330 CONFLICTING) surfaced two suite failures that were NOT flagged as conflicts but were
-semantically incompatible:
-- **cron `#1142` tests vs Phase 6 delivery.** `main`'s #1142 (expose `exitCode` to cron conditions) shipped tests
-  written against the OLD direct-delivery model (`mockSession.write` + `mockBroadcastMessage`); this branch's Phase 6
-  rerouted cron through the `deps.deliver` mailbox+gate port. The merged *source* integrates both correctly
-  (`evaluateCondition(…, exitCode)` + `deliverMessage → deps.deliver`); only the merged *tests* asserted a delivery
-  mechanism that no longer exists. Converted the four #1142 tests to assert on the `deliver` port (preserving their
-  exitCode-condition intent). Their old `mockSession.write` "not called" assertions had passed *vacuously* under
-  Phase 6 (that write never happens); the converted `deliver`-port assertions are meaningful.
-- **spec-1280 T16 manifest guard mis-fires on any prompt-touching branch.** `main`'s spec-1280 shipped a permanent
-  test that diffs `origin/main...HEAD`, finds prompt-bearing files (CLAUDE.md/AGENTS.md/protocols/roles), and demands
-  each appear in a *1280* manifest. It passes trivially on `main` and on the 1280 branch, but fails on EVERY feature
-  branch that legitimately changes a prompt surface after merging main — here, 1313's arch-critical→CLAUDE/AGENTS
-  propagation. Scoped the guard to actual 1280 work (branches that touch the 1280 manifest dir), preserving it for
-  1280 while removing the landmine for all future branches. **Flagged for architect / spec-1280-owner review** — it
-  edits another project's test.
-
-The Spec-1273 `submitToSession` per-terminal submission lock (added on `main`) was preserved across the merge on both
-explicit human-bypass paths (`escape` + `interrupt`), which do NOT route through the mailbox's per-agent serializer
-and so need their own anti-fusion lock.
-
-### Round 6 (CMAP round 1 on the Round-5 diff) — three-way REQUEST_CHANGES, all addressed
-
-Gemini + Codex + Claude all returned REQUEST_CHANGES (all three agreed the over-ceiling removal itself is correct and
-shippable). Findings and fixes:
-
-- **Memo could serve a stale verdict across a same-`agentKey` PTY respawn / `RingBuffer.clear()`** (all three, HIGH).
-  The `ringToken` (`currentSeq:partialBytes:…`) is only unique WITHIN one monotonic ring; a replacement `PtySession`
-  restarts `currentSeq` at 0 and `clear()` leaves it untouched while wiping content, so a token can alias across
-  session instances. My "diverges on first output" claim was not airtight (counters don't encode content). **Fixed:**
-  `CachedVerdict` now binds the live `session` instance too — a hit requires `cached.session === session && token`.
-  `getSession(tid)` returns a stable object per live terminal, so this HITS across ticks and MISSES after a respawn.
-  Test added (same token, different session object → re-classifies).
-- **The memo does NOT bound the expensive case — a CPU regression** (Claude #1; Codex: possible OOM). My "the memo
-  makes renders rare" claim was *inverted*: a message is held because the line is BUSY → the app repaints every tick →
-  `partialBytes` advances every tick → the token changes every tick → **the memo always misses exactly when the ring
-  is largest**. A 14 M-unit busy ring is ~230 ms of parse per held agent per 1.5 s tick, and `tick`'s loop is
-  await-serial. **Fixed:** a cost-aware **backstop backoff** — after a big (> `BIG_RING_UNITS` = 4 M) not-clean
-  *render*, the backstop skips re-classifying that agent for an exponentially-growing span (capped at 8 ticks). NEVER
-  a hold: `scheduleDrain` (submit/quiescence) still classifies fresh the instant the line clears, so real delivery
-  latency is unaffected — only the wasteful polling of a known-busy giant ring is throttled. Test added.
-- **OOM doc was inaccurate** (Codex + Claude). Corrected the render-gate header: the residual is a possible Tower
-  **OOM/crash** (unbounded allocation), not merely an event-loop stall (xterm chunks its parse and yields); the memo
-  helps only STATIC rings and the backoff only the recurring cost — neither bounds a single first render of a giant
-  ring; the robust fix (off-thread classify with a memory bound, or the #1047 persistent-xterm that retires the
-  unbounded `partial`) stays out of scope. **No holding cap** was added (it would just reintroduce the outage).
-- **Interrupt `\x03` was written OUTSIDE the `submitToSession` lock** (all three). A concurrent submission's Ctrl+C
-  could land inside another submission's text→Enter window (killing that composer), or run during the 100 ms settle.
-  **Fixed:** the Ctrl+C, its settle (via `writeMessageToSession`'s `delayOffset`), and the message write are now one
-  atomic locked critical section. The anti-fusion claim was also **overstated** — corrected to note this serializes
-  interrupt vs escape/interrupt only, NOT vs a concurrent mailbox delivery (a disjoint per-agent lock); interrupt is
-  the explicit gate-bypass, and full cross-path serialization is flagged as a separate, larger change.
-- **spec-1280 T16 scoping** (all three): my manifest-dir-touch predicate silently skipped the "changed a prompt file,
-  forgot the manifest entirely" case (T16's raison d'être) and had a Windows `path.sep` portability bug (always
-  skipped). **Fixed:** adopted Claude's portable predicate — enforce when the branch name references 1280 OR the diff
-  touches the 1280 project tree (git paths are '/'-separated). Still flagged: 1280 is integrated, so the guard is
-  vestigial and its owner should remove/re-scope it.
-- **`stop()` didn't clear the memo** (Codex + Claude): now clears `verdictMemo`/`notCleanStreak`/`scheduledDrains`/
-  `classifyBackoff` (hygiene for a stopped-then-restarted drainer).
-- **cron test used `expect.anything()` for the delivered task** (Claude): a wrong-target routing regression would have
-  passed. Now asserts `expect.objectContaining({ target: 'architect' })`.
-
-**Deferred/flagged (surfaced in the PR comment for the architect):** off-thread/memory-bounded classify as the real
-OOM guard (#1047); having the mailbox write edge also take the per-terminal `submitToSession` lock to make
-interrupt-vs-delivery fusion impossible (a larger change); the interrupt-throw → held-row re-delivery duplicate
-(minor, error path only).
-
-### Round 7 (CMAP round 2 — verification of the round-1 fixes) — Gemini APPROVE, Claude "fixes hold", Codex REQUEST_CHANGES
-
-A second 3-way pass verified the round-1 fixes and found real issues in the NEW code (backoff + memo + interrupt
-restructure). Gemini approved; Claude/Codex flagged the following, all fixed:
-
-- **Interrupt row could be delivered twice** (Codex HIGH; Claude flagged): moving `enqueueMailbox` before the Ctrl+C
-  (round 1) left the row `held` and drainable during the write, so a concurrent backstop/scheduleDrain could
-  gate-deliver the SAME row → double bytes. **Fixed:** the interrupt now `markMailboxDelivered`s the row SYNCHRONOUSLY
-  right after enqueue (before any await), so it is never drainable; the bypass owns the write.
-- **Memo cached a CLEAN verdict across a delivery** (Codex HIGH): PTY INPUT doesn't advance the ring (only OUTPUT
-  does), so a follow-up held message could memo-hit the same token before the submission echoes and deliver onto an
-  un-echoed line. **Fixed:** the memo is invalidated after every delivery — a follow-up re-classifies fresh (restores
-  the pre-memo behavior; the deeper input-echo-lag window stays the pre-existing gate→write INPUT race in the
-  Technical Debt). Test updated.
-- **Backoff delayed the classifier-stuck liveness escalation** (Claude merge-ask; Codex): the backoff's tick-skip
-  also skipped `recordStreak`, so the `no-region-end`/`no-composer-marker` escalation — the liveness net that
-  *replaces* the removed over-ceiling hold — fired at ~98 s instead of ~15 s for exactly the pathological population
-  it guards. **Fixed:** the backoff entry carries the last classification, and a skipped tick re-feeds it to
-  `recordStreak`, so the streak advances on schedule. Test added.
-- **`bigRing` was lost on the TOCTOU-hold path** (Claude + Codex): a big ring that renders clean then moves
-  mid-render never backed off (the fast-repaint case). **Fixed:** the TOCTOU hold now carries `bigRing`.
-- **`stop()`/restart lifecycle race** (Codex; Claude): the drainer instance is REUSED across stop()/start(), so an
-  in-flight tick/drain could repopulate the cleared maps or act on old ports/db. **Fixed:** a `generation` counter,
-  bumped in `stop()`, that tick/scheduleDrain check before mutating.
-- Doc accuracy: the `CachedVerdict` comment overstated (the session guard closes the RESPAWN route; `RingBuffer.clear()`
-  is closed by the `!writable` filter); the `stop()` comment now notes clearing `scheduledDrains` doesn't cancel an
-  in-flight drain. cron test asserts the delivered target.
-
-**Still flagged (unchanged):** off-thread/memory-bounded classify (#1047); full interrupt-vs-mailbox-delivery
-cross-path serialization; the input-echo-lag residual (gate→write INPUT race, pre-existing Technical Debt).
+- Confirmed iter-1 fixes landed; file refs accurate.
+#### Codex — REQUEST_CHANGES
+- **Concern**: Dead-session resolver seam (`resolveTarget` is live-only → `no-live-pty` hold unreachable); `PtySession` `command`/`args` are private (identity seam); `afx send --all` client contract.
+  - **Addressed**: Added the agent-registry fallback + `handleSend` restructure (persist, not 404); named the getter/`appProfileKey` seam; extended the client contract to `--all`. Advanced to plan-approval gate.
+#### Claude — APPROVE
+- Cosmetic corrections (version-constant location; tower-client shape). **Addressed**.
+
+### Implement Phase 1 — Mailbox persistence layer (Round 1)
+- **Unanimous APPROVE.** No blocking concerns; DB conventions followed (schema + migration v15 + repository + lifecycle tests).
+
+### Implement Phase 2 — Render-gate + claude/codex profiles (Round 1)
+#### Gemini — APPROVE · #### Claude — APPROVE (all deliverables present)
+#### Codex — REQUEST_CHANGES
+- **Concern**: The plan's fixture matrix lists a picker for *both* apps but only codex had one; the perf assertion (single cold-run <500ms) was too loose.
+  - **Addressed**: Added a synthesized `claude-picker` fixture; replaced with warm-up + best-of-5 min <75ms (logged ≈19ms). **Bonus**: grounding the measurement under native node exposed a latent `@xterm/headless` named-import failure under native-ESM (masked by vitest interop) — fixed to default-import.
+
+### Implement Phase 2 (Round 2)
+- **Unanimous APPROVE.** Codex flipped from RC after running the test file to verify behavior.
+
+### Implement Phase 3 — agy classifier profile (Round 1)
+- **Unanimous APPROVE.** agy profile derived empirically (color-keyed `placeholderFgPalette`, fg palette-8 gray = placeholder); trust dialog classifies not-clean.
+
+### Implement Phase 4 — Delivery orchestration + write serialization (Round 1)
+#### Gemini — APPROVE · #### Claude — APPROVE
+#### Codex — REQUEST_CHANGES
+- **Concern**: Prune retention default 7 vs spec's 30 (prunes audit rows 4× early); `project:agent` cross-workspace offline hold returned 404; the named #1265 subprocess e2e was only in the unit suite.
+  - **Addressed**: `DEFAULT_PRUNE_RETENTION_DAYS = 30` + config knob read from user-global config; `resolveAgentInRegistry` resolves `project:<agent>` via `findWorkspaceByBasename`; added the real subprocess e2e driving draft→held(busy)→clear→backstop-redeliver.
+
+### Implement Phase 4 (Round 2)
+- **Unanimous APPROVE.** Codex flipped from RC; the three fixes cleared its concerns.
+
+### Implement Phase 5 — Fast delivery triggers (Round 1)
+#### Gemini — APPROVE · #### Claude — APPROVE ("No issues found")
+#### Codex — REQUEST_CHANGES
+- **Concern**: The submit trigger only fired on the tower-websocket input path, not the pty-manager standalone path — composing/submit detection was duplicated inline and drifted.
+  - **Addressed**: Consolidated both paths through a single `PtySession.handleUserInput` chokepoint (SST), so neither can drift.
+
+### Implement Phase 5 (Round 2)
+- **Unanimous APPROVE.**
+
+### Implement Phase 6 — Cron rerouting (Round 1)
+- **Unanimous APPROVE.** Cron routes through the one gated path (`deliverCronMessage`); busy→held, per-task supersede, honest outcomes.
+
+### Implement Phase 7 — afx inbox + broadcasts + escalation (Rounds 1–3; force-advanced)
+Gemini + Claude APPROVE every round; **Codex REQUEST_CHANGES each round**, all real, all fixed:
+- **Round 1** — Escalation didn't also fire `overview-changed` (stale attention bit); liveness was log-only and ignored the "recent output" gate; thin route coverage. **Addressed** (fire both events; `onLiveness` port + recent-output gate + broadcast; `inbox-routes.test.ts` integration).
+- **Round 2** — `afx inbox` defaulted Tower-wide, violating Baked Decision 8 (workspace-scoped). **Addressed** (default to current workspace; normalize the `?workspace=` param).
+- **Round 3** — `POST /api/inbox/:id/dismiss` had no method guard → a GET could dismiss mail. **Addressed** (405 before any mutation). Porch force-advanced at the 3-iteration ceiling; the final fix was architect-verified and is re-reviewed in the pr-gate diff.
+
+### Implement Phase 8 — Dashboard + VSCode indicators (Round 1)
+#### Claude — APPROVE (logic sound)
+#### Gemini — REQUEST_CHANGES · #### Codex — REQUEST_CHANGES
+- **Concern**: Missing a Playwright dashboard e2e (repo UI mandate); extension badge/status-bar wiring untested (only pure helpers were).
+  - **Addressed**: Added the real-chromium `spec-1313-held-count-indicator` e2e (absent/held/escalated/live-update); extracted `composeStatusBarText`/`composeActivityBadge` pure composers + 10 wiring unit tests. (The builder's initial "Playwright infeasible" claim was wrong — it was installed; the CMAP earned its keep.)
+
+### Implement Phase 8 (Round 2)
+- **Unanimous APPROVE.** One non-blocking Claude note: the escalation-toast `seen` Set grows unbounded over extension lifetime (negligible; escalations rare) — see Follow-up.
+
+### Implement Phase 9 — Documentation + skeleton mirror (Round 1)
+#### Gemini — APPROVE · #### Claude — APPROVE (with the same minor note)
+#### Codex — REQUEST_CHANGES
+- **Concern**: The new `.codev/config.json` mailbox knobs (`mailbox.retentionDays`, `mailbox.escalationSeconds`) were undocumented despite being in scope.
+  - **Addressed**: Added `### Mailbox retention and escalation` to both `agent-farm.md` trees (retentionDays prunes only terminal rows — held rows never pruned; escalationSeconds is visibility-only, never a delivery trigger).
+
+### Implement Phase 9 (Round 2)
+- **Unanimous APPROVE.**
+
+### Review Phase — pre-rollback (Round 1)
+#### Claude — APPROVE (safety invariant structurally enforced)
+#### Gemini — SKIPPED (agy unauthenticated; non-blocking)
+#### Codex — REQUEST_CHANGES
+- **Concern**: Two real races — `deliverAgentMail` wrote `held[0]` from a stale read (a dismiss/supersede in the gate→write window could still write a resolved row); `write-completed⇒delivered` was unsound (a torn-down PTY could be marked delivered, violating "errored write → held"). Plus process: missing approval frontmatter; some commits deviate from `[Spec][Phase]`.
+  - **Addressed**: `getById` re-check at the write instant + honor `markDelivered`'s guarded boolean; re-check `session.writable` at the write instant → hold `no-live-pty`; added spec/plan approval frontmatter. **Rebutted**: commit-message format — history is pushed; the repo preserves individual commits; no force-push warranted.
+
+### Review Phase — `afx inbox show <id>` held-gate change
+- Architect-directed resolution of a spec self-contradiction (Redaction named `afx inbox` a body-display surface, but the list is metadata-only). **Addressed**: kept the list metadata-only and added `afx inbox show <id>` (per-id body view, any status), amended Decision 8 + Redaction, updated both `agent-farm.md`/`overview.md` trees and `arch.md`.
+
+### Verify Phase — `afx send architect` always `no-profile` (CMAP Rounds 1–3)
+Live PR testing found sends to any architect returned `held(no-profile)` (architect sessions had no persisted `command`, so identity fell through `harnessFromLaunchScript`, which only builder worktrees carry).
+- **Round 1** — Gemini APPROVE (missed the restart gap); Claude approve-after-fixes; **Codex REQUEST_CHANGES**: `GLOBAL_CURRENT_VERSION` not bumped; legacy architects (command=NULL) heal to `''` on restart → still no-profile; migration blanket-swallowed ALTER errors; `not.toBeNull()` can't tell claude from codex. **Addressed** all (bump to 16; `dbSession.command ?? restartOptions.command` self-heal at both reconstruction paths; PRAGMA-gated migration; exact `.app` assertions).
+- **Round 2** — Gemini + Claude APPROVE; **Codex REQUEST_CHANGES**: the reconcile self-heal ignored `TOWER_ARCHITECT_CMD` precedence that fresh-launch honors. **Addressed** (mirror env > config > 'claude' in both reconcile derivations).
+- **Round 3** — a targeted **Codex-only** re-check (Gemini + Claude had already approved the code in round 2): Codex confirmed the code APPROVED, so all three now approve the fix. Its sole remaining point was migration-test methodology (replica vs the private production runner). **Rebutted + deferred**: repo precedent is replica-based; source guards pin the exact production statements; filed "extract `runGlobalMigrations(db)`" as a repo-wide follow-up.
+
+### Verify Phase — render-gate false-`busy` fix (Approach CMAP + Diff CMAP)
+The gate reported `busy` for prompts that were actually empty (only ever validated against synthesized fixtures).
+- **Approach CMAP** — all three REQUEST_CHANGES-equivalent (Gemini explicit; Codex & Claude substantively rejecting the core proposal): the proposed "count only default-fg" inversion is **unsafe** (colored user input → false-clean); Claude *instrumented the real fixtures* and proved the inversion false-cleans the agy-trust dialog. **Addressed**: dropped the inversion; adopted the architect's cap-sweep finding that the false-`busy` is a **slice artifact** → render the **whole** ring; hardened the region boundary ("no region-end ⇒ busy").
+- **Diff CMAP** — all three REQUEST_CHANGES (whole-ring itself confirmed safe, but each with a pre-merge blocking ask): two false-clean paths the change introduced — an over-ceiling slice could reconstruct a clean composer while the whole ring holds a draft (**Addressed**: over-ceiling → held unrendered, then removed entirely post-rollback); gate→write staleness amplified 3–5× (**Addressed**: sample a ring change-token before classify, re-check after → change ⇒ hold). Plus observability (liveness escalation extended to classifier-stuck reasons).
+
+### Post-rollback — over-ceiling removal + `ringToken` verdict memo (CMAP Rounds 1–4)
+Folded into PR #1330 after the verify→implement rollback.
+- **Round 1** — all three REQUEST_CHANGES (the removal itself endorsed as ship-worthy): memo stale across PTY respawn / `RingBuffer.clear()` (**Addressed**: bind the cache to the live session instance); CPU regression — the memo misses exactly when the ring is biggest (**Addressed**: cost-aware backstop backoff, never a hold); interrupt `\x03` outside the submission lock (**Addressed**: atomic interrupt+settle+write in one callback); the `spec-1280` predicate skipped the forgot-manifest case + a Windows path bug (**Addressed**: portable predicate); `stop()` must clear all drainer maps.
+- **Round 2** — Gemini APPROVE, Claude "fixes hold", **Codex REQUEST_CHANGES**: interrupt double-delivery (enqueue-before-Ctrl+C left the row drainable — **Addressed**: sync `markDelivered` before any await); memo cached CLEAN across a delivery (input doesn't advance the ring — **Addressed**: invalidate memo after every delivery); backoff delayed the classifier-stuck escalation (**Addressed**: skipped tick re-feeds `recordStreak`); bigRing lost on TOCTOU-hold; `stop()`/`start()` lifecycle race (**Addressed**: `generation` counter).
+- **Round 3** — all three REQUEST_CHANGES (verification round earned its keep): memo invalidation sat *below* the `markDelivered` guard (a row resolved mid-write skipped `memo.delete` — **Addressed**: move it above the guard); generation check preceded the await but the mutations followed it (**Addressed**: post-await gen guard in both tick + scheduleDrain); cooldown re-fed a *stale* classifier-stuck detail (**Addressed**: one fresh classify at the crossing tick); the backstop tick had no catch → an unhandled rejection could kill Tower (**Addressed**: try/catch).
+- **Round 4** — Gemini APPROVE ("ship it"); **Codex REQUEST_CHANGES** (contract-level): `memo.delete` is skipped if `writeMessage` rejects — not reachable via today's binding but real at the port contract (**Addressed**: `try{await}finally{memo.delete}` + a rejecting-write test); **Claude REQUEST_CHANGES** (test-only): the round-3 `scheduleDrain` generation test was vacuous (never parked at the await) — **Addressed** (drain microtasks to actually park; revert-checked). All six round-3 runtime fixes verified correct.
 
 ## Lessons Learned
 
 ### What Went Well
-- **Safety-critical-core-first decomposition paid off.** Landing the durable store (Phase 1) and the gate
-  (Phase 2) before any behavior change meant the corruption-elimination invariant was provably in force at the
-  end of Phase 4, and nothing after it could reintroduce a force path (there was none to reintroduce). Phases 1,
-  3, and 6 passed all-APPROVE on the first round — evidence the units were well-scoped.
-- **Front-loading the blocking agy measurement (Phase 3) surfaced no schedule risk** — the net-new color-keyed
-  rule was derived, tested, and unanimously approved in a single round, well before delivery wiring depended on it.
-- **The gate is a single mechanism that answers many questions.** One rendered-empty check correctly handles
-  drafts, menus, model pickers, trust dialogs, wrapper/boot screens, and attach-typed input — exactly the
-  "born dirty, converge only via rendered proof" model the spec argued for.
-- **Deleting `SendBuffer` outright** (rather than adapting it) removed the in-memory buffer, the shutdown
-  force-flush, and the max-age force path in one move — the "single source of truth beats distributed state" lesson in practice.
+- **The safety invariant held under pressure.** "A body is only ever written to a gate-verified-empty prompt, no force path" survived every review round and every post-rollback refactor — reviewers verified it *structurally* rather than case-by-case. Designing for correctness-by-construction (vs detect-and-repair) is what made the many delivery-race fixes local and bounded.
+- **The 3-way consult repeatedly caught what solo review missed.** Codex found real seams (dead-session resolution, TOCTOU windows, contract gaps) round after round; Claude *instrumented the real fixtures* to prove a proposed inversion would false-clean the agy trust dialog. Trusting the protocol paid off — most blocks were genuine.
+- **Born-dirty discipline on every resume.** With 10+ context resets, re-verifying inherited/uncommitted state against source (not the snapshot) caught real bugs (an invisible NUL in a serializer key; a native-ESM import failure masked by vitest).
 
 ### Challenges Encountered
-- **agy's placeholder breaks the dim-placeholder assumption** (1 phase, resolved in-round): agy renders its idle
-  hint at *normal* intensity but in palette-8 gray, so dim/bold couldn't separate idle from draft. The decisive
-  signal was foreground color; the fix added an optional `placeholderFgPalette` to the profile (the color analogue
-  of the universal `isDim()` skip). Required adding fg-color mode/index to the measurement probe.
-- **Phase 7 took 3 iterations** — Codex found a *distinct* real issue each round (stale escalation refresh →
-  workspace-scoping → an unguarded mutating route). None were repeats; each was a genuine gap. It ended on a
-  force-advance at the iteration ceiling (fix landed + Claude-approved, but no iter-4 re-consult).
-- **Environmental flaky test** (see Flaky Tests): a temp-dir/`chdir` race under concurrent sibling-builder load
-  intermittently failed `porch done`'s test check; the suite is green on direct run and on retry. Cost a couple
-  of retry cycles, no code change.
-- **Client-vs-server contract split** cost two avoidable RCs before the send outcome was surfaced end-to-end
-  (wire → `tower-client.ts` → both `send.ts` single and `--all` paths).
+- **A classifier validated only against synthesized fixtures shipped latent field bugs** — cost a full verify→implement rollback + ~7 post-rollback CMAP rounds. Resolved by capturing real rings and rendering the whole ring.
+- **Architect-identity resolution had a restart-durability trap** — a creation-site-only fix would have silently reverted on the first Tower restart (reconcile rebuilds from a DB that stored no command). Resolved by making identity a persisted, restart-safe SSOT with a legacy self-heal (migration v16). Cost 3 CMAP rounds.
+- **Performance of whole-ring rendering** — rendering the whole ring every 1.5s backstop tick for a large busy ring is expensive; the naive memo missed exactly the expensive case. Resolved with a cost-aware backstop backoff + session-bound `ringToken` memo.
 
 ### What Would Be Done Differently
-- **Trace every contract change end-to-end in the plan.** The send-outcome contract was specified server-side but
-  not client-side, and "automated e2e" was under-specified — both drew repeat RCs. Name the client surfaces and
-  the exact repro scenario in the plan deliverable.
-- **Wire config knobs through loader + defaults + docs in the same phase they're first read** — the retention/
-  escalation keys lagged across three phases.
-- **Treat Playwright as day-one for any dashboard-visible change**, not a follow-up — it's a CLAUDE.md mandate and
-  cost a Phase 8 iteration.
-- **Exercise an identity/seam through its REAL construction path in at least one test — never only a hand-populated
-  double.** The `afx send architect` no-profile bug shipped past a fully green suite because every gate/delivery
-  test built its session as a plain object with `command` set, so the real `createSessionRaw` path (which hardcoded
-  `command: ''`) was never driven. "Tests pass" was true and "it works" was false — the exact lesson-critical
-  trap. A double is fine for branch coverage, but the seam itself needs one test that constructs the real object.
-- **A screen classifier's INPUT is a seam too — validate it against REAL captured output at REAL sizes, not
-  synthesized fixtures.** The render-gate shipped validated only against small synthesized `claude-idle` fixtures;
-  the field false-busy was a `capReplay` slice artifact that manifests only on a real >1 MB alt-screen ring, and
-  "does a real large ring with a draft still classify busy?" had no fixture at all. Same "exercise the real seam"
-  trap as the `afx send architect` bug, now applied to the classifier's *input*: capture the real states (idle,
-  draft, menu, bg-task panel, >1 MB) under a PTY and assert both directions. The architect's cap-sweep — running the
-  real classifier over real captures at varying slice sizes — is the model, and the POC harness should be the
-  version-bump smoke test.
-- **When a review's own "what would be done differently" names a discipline, apply it to the very next change.** This
-  project's Round-3 lesson was "exercise the real seam"; the render-gate false-busy was that lesson unlearned for the
-  classifier itself. The retro is only worth writing if the next commit reads it.
+- Capture **real** terminal fixtures for any output-classifier from the first phase, not synthesized proxies.
+- In the plan, enumerate **every layer a contract crosses** (wire → client → each CLI path) as an explicit deliverable, so client surfacing isn't discovered at review time.
+- When a spec names a repro, write the e2e for **that** repro immediately.
 
 ### Methodology Improvements
-- **SPIR/porch**: the 3-iteration force-advance ceiling worked as a safety valve but can advance a phase whose
-  last fix wasn't re-consulted. Consider a "final fix landed after the blocking review — re-consult once even at
-  the ceiling, or flag prominently for the PR gate" nudge so the human reviewer knows to look. (Flagged here in
-  the review; the PR gate is the backstop.)
-- **Tooling**: the environmental temp-dir/`chdir` flakiness under many concurrent builders is worth a porch-level
-  mitigation (retry-once-on-`getcwd`-failure, or isolating vitest worker cwd) so it doesn't masquerade as a real
-  test failure. Noted in Follow-up Items.
+- **Protocol**: porch's 3-iteration force-advance ceiling let a real (fixed but un-re-consulted) change through on Phase 7 — the pr-gate diff review is the intended backstop, and it worked here, but a "final fix landed at the ceiling → require one confirming pass or explicit human sign-off" rule would tighten the seam.
+- **Tooling**: a repo convention for capturing/gzipping real terminal rings as fixtures (now demonstrated in `__tests__/fixtures/gate/`) would help any future TUI-classifier work.
 
 ## Architecture Updates
 
-Routed one hot-tier fact (behavior-changing + cross-cutting: it changes the contract every agent relies on when
-sending), and reference detail to the cold archive. Applied via the `update-arch-docs` skill's discipline.
-
-- **Routed: hot** — `codev/resources/arch-critical.md`, Critical facts — added: *"`afx send` is mailbox-first
-  (Spec 1313): every send persists to `global.db` before responding, and a message body is only ever written to a
-  prompt a headless-terminal render-gate proves empty — never force-injected. Response is `delivered` | `held`+reason
-  (`busy`/`no-profile`/`no-live-pty`)."* This is a cross-cutting invariant a future builder must know before
-  touching the send path or adding a message writer. To honor the cap, demoted the weaker forge-concept-commands
-  line to `arch.md` (it is a narrower how-to already covered in the cold Integration Points).
-- **Routed: cold** — `codev/resources/arch.md`, Core Components — **rewrote the stale `### 7. Message Delivery`
-  section** (it still described the deleted `SendBuffer` — a retired-component graveyard) to the mailbox-first
-  mechanism: the `mailbox` table (agent-addressed rows), `render-gate.ts` + `gate-profiles.ts` (claude/codex
-  dim-placeholder + agy color-keyed `placeholderFgPalette` rules), per-PTY `write-queue.ts` serialization, the
-  `mailbox-delivery.ts` drainer (enqueue/submit/quiescence/backstop triggers; escalation as visibility-only via
-  `mailbox-escalation` + held-count via `overview-changed` SSE), cron rerouting via `cron-delivery.ts`, and the
-  honest `delivered`/`held`+reason response. Also updated the **Tower Startup Sequence** boot table (Agent Farm
-  Internals): step 4 `startSendBuffer()` → `startMailboxDrainer()` with no-force-flush shutdown.
+- **Routed: HOT** (`arch-critical.md`) — added the mailbox-first invariant: "`afx send` is mailbox-first (Spec 1313): persist to global.db first, then deliver only onto a render-gate-verified empty prompt. Any new message writer routes through the mailbox+gate — never write a PTY directly, never force-inject. Response: `delivered` | `held`+reason." Displaced the weaker forge-concept-commands line to cold `arch.md` (already fully covered there) to respect the 10-fact cap (1:1 displacement). *(Committed during the original Review; verified present.)*
+- **Routed: COLD** (`arch.md`) — rewrote the stale `### 7. Message Delivery` section (which still described the deleted `SendBuffer`) into the full mailbox-first mechanism; updated the Tower Startup boot table (`startSendBuffer()` → `startMailboxDrainer()`, no-force-flush shutdown). **This session** additionally corrected §7 for the post-rollback change: the gate renders the **whole** output ring at any size (was "seed-capped") — never a tail slice, never a delivery-blocking cap — with a per-`ringToken` verdict memo + cost-aware backstop backoff to keep whole-ring classification cheap.
+- These four `codev/resources/` governance files are user-evolved (not framework files), so **no `codev-skeleton/` mirror is required** (CLAUDE.md/AGENTS.md pull the hot files via `@`-import, so they reflect the hot edit automatically and stay byte-identical).
 
 ## Lessons Learned Updates
 
-Routed three lessons to the COLD archive. **No hot-tier (`lessons-critical.md`) change** — the incumbent 10
-lessons are all stronger/more general than this project's takeaways, and the contract-completeness lesson, while
-cross-cutting, is not decision-changing enough to displace one (bias toward KEEP per the `update-arch-docs` cap
-discipline). The one hot-tier addition this project earned is architectural (the mailbox invariant), not a lesson.
-
-- **Routed: cold** — `codev/resources/lessons-learned.md`, Process — added: *"Trace a contract change end-to-end
-  before calling it specified — a send-outcome change specified server-side but not client-side
-  (`tower-client.ts` + `commands/send.ts`, single AND `--all` paths) drew repeat REQUEST_CHANGES across the plan
-  and Phase 4. Name every layer the contract crosses (wire → client → each CLI path) in the plan deliverable."*
-- **Routed: cold** — `codev/resources/lessons-learned.md`, Testing — added two recipes: *"A dashboard-visible
-  change needs a Playwright e2e from the first commit (CLAUDE.md mandate), not a follow-up; a unit test alone drew
-  a Phase-8 block. Extract vscode-free pure composers so extension wiring is unit-testable."* and *"When a spec
-  names a specific repro, the automated e2e must exercise *that* scenario, not an adjacent easy one (Spec 1313
-  Phase 4)."* Both are spec-narrow recipes → cold, not hot.
+- **Routed: COLD** (`lessons-learned.md`) — Process: "Trace a contract change end-to-end before calling it specified" (the `delivered`/`held` client-surfacing gap). Testing: "When a spec names a specific repro, the automated e2e must exercise *that* scenario." **This session** added a third: "Validate a screen/output classifier against REAL captured terminal output across real app states, not synthesized fixtures" — the single most expensive lesson of the project (it forced the rollback).
+- **No HOT (`lessons-critical.md`) change** — the incumbent hot lessons ("'tests pass' is not 'it works' — verify the real user path end-to-end" and "when guessing fails, build a minimal repro — captured raw data beats speculation") already dominate; the new render-gate lesson is a spec-narrow refinement of them and belongs in the cold archive. Bias toward KEEP at the cap.
 
 ## Technical Debt
 
-- **Unbounded `seen` Set in the VSCode escalation toast** (`mailbox-escalation-toast.ts`): dedupes escalation
-  toasts by `mailboxId` for the extension's lifetime; grows without bound. Negligible in practice (escalations are
-  rare; entries are small strings), flagged by Claude in Phase 8. Bound it (LRU or resolved-row eviction) if
-  escalation volume ever grows.
-- **Phase 7 ended on a force-advance**, not a unanimous re-consult (see Consultation Feedback → Phase 7 Round 3).
-  The final fix is tested and Claude-approved; the residual is the absence of a Codex re-confirmation.
-- **Synthesized agy fixtures**, not raw captures (the raw capture leaks the authenticated account email). They are
-  verified through the real classifier path, but a version bump should re-measure against live agy (the spike
-  harness is the smoke test) rather than trusting the synthesized bytes indefinitely.
-- **Intra-paced-write delivery residual** (review iter-1, Codex issue 2): the delivery path now re-checks
-  `session.writable` and row-status at the write instant, but a disconnect (or dismiss) landing *during* the
-  sub-100ms paced setTimeout writes can still drop the trailing Enter / later lines while the row is marked
-  delivered. Closing this fully needs post-delivery / canonical-stream verification — an explicit spec non-goal
-  ("no believed-sent claim is made"). Accepted residual, same class as the spec's wrapper-transition race.
-- **Render-gate identity is command-string-derived, not authoritative** (Round 3 bugfix follow-ups): the session's
-  classifier profile is resolved from the persisted `terminal_sessions.command`. Three deferred hardenings, all
-  fail-closed today: (1) **WELCOME-frame hydration** — the shellper owns the actually-running command and stays
-  correct across `freshLaunch`/`crashLoopFallback` swaps that the DB row goes stale on; the cleaner SSOT, but needs
-  a shellper-protocol field + old-shellper fallback (DB-now / WELCOME-later). (2) **Substring→exact-basename
-  matching** in `resolveProfile` — `claude-wrapper` matches claude today; safe only because the profile table is
-  behaviourally uniform. (3) **`args` persistence** — needed only if wrapper launches (`env codex`, `npx claude`)
-  must resolve; deliberately not scanned to avoid misclassification.
-- **Migrations aren't independently testable** (Round 3 re-CMAP, Codex): the whole v1→vN migration chain is inline
-  in the private `ensureGlobalDatabase`, reachable only through the `getGlobalDb()` singleton, so every migration
-  test in the repo (v15, bugfix-826, pir-832) drives a hand-kept *replica* of its block rather than the production
-  runner — a replica can drift from production (source guards on the exact statements are the current mitigation).
-  Extracting a `runGlobalMigrations(db)` that both `getGlobalDb()` and tests call would let all migration tests
-  exercise the real code. Deferred here (a DB-init-critical-path refactor is out of scope for a delivery bugfix);
-  worth doing once, repo-wide, because it benefits every migration.
-- **Render-gate verdict memoization (RESOLVED in Round 5)** (Round 4 diff-CMAP): D2 renders the WHOLE ring on every
-  1.5 s backstop pass for each held-mail agent; an idle held ring is byte-identical tick over tick, so re-rendering
-  is waste. A verdict memo keyed on the ring change-token (`currentSeq`+`partialBytes` — already plumbed for the
-  gate→write re-validation) makes the steady state free. Gemini rated it a merge blocker; Codex + Claude "deferrable
-  only with a real ≥5-held-agent Tower RSS/CPU measurement". **Implemented in Round 5** (see the post-merge follow-up
-  above): the memo is owned + bounded by `MailboxDrainer` (pruned to the held-agent set each tick), keyed on
-  `ringToken`, and confined to the backstop tick — the fast `scheduleDrain` trigger always re-classifies. It composes
-  with the gate→write re-validation by construction (a memo hit does no `await`, so the token re-check passes
-  trivially), with dedicated tests: static ring classified once, re-classify after the token advances, memo-hit-on-
-  clean still delivers, memo pruned when an agent's mail clears.
-- **No real >1 MB-with-a-draft gate fixture** (Round 4, Claude): every committed real capture is an *empty*
-  composer (whole→CLEAN). The false-clean risk is covered by *composition* — real empty captures prove whole-render
-  reconstruction fidelity, and the 4 MB perf test proves large-render + a draft → busy — but a single real capture
-  of a >1 MB ring with three typed chars, asserted BUSY on the whole render, would be direct evidence. Capture one
-  during live testing (`type three chars, don't hit Enter, snapshot the ring`).
-- **codex/agy >1 MB captures not taken** (Round 4): the D2 fix is app-agnostic (the ring-render path, not app
-  chrome), and the existing 12 fixtures cover codex/agy small-ring profiles, so a codex/agy large-ring capture
-  (which needs a long session) adds low marginal value. Add if cross-app large-ring evidence is wanted.
-- **D3 (idle repaint-nudge) deferred** (Round 4): the field bugs are D2/D1; D3's residual value — self-healing a
-  *stuck* idle false-busy via a transient ±1-row SIGWINCH nudge — is outweighed by its reflow→false-clean risk
-  (Gemini) and safe-impl cost (Codex/Claude: observable-completion re-gate + inbound-input-generation tracking +
-  skip-when-a-viewer-is-attached + absolute throttle). Reconsider only if a residual idle false-busy is observed
-  after D2/D1. (The over-ceiling hard-hold this parenthetical referenced was REMOVED in Round 5 — the gate now
-  renders the whole ring at any size; a genuinely-unclassifiable huge ring still holds + liveness-escalates via
-  `no-region-end`/`no-composer-marker`.)
-- **`findMarkerRow` "last match wins" (pre-existing, Round 4 Claude)**: a bottom-of-screen notification line
-  starting with `❯` would shadow a drafted composer above it. Not introduced here; note before any composer-anchor
-  rework (a positive top-rule anchor would fix it).
-- **`regionEndPatterns` is now the sole lower-bound signal and is drift-fragile** (Round 4): a claude reversion to
-  a rounded box (`╰──╯`, not in the class) or an indented rule would hold every send to claude — fail-safe and now
-  liveness-escalated, but a total outage. The version-bump smoke test must re-measure the boundary against a live
-  capture; broaden the pattern ONLY from a real capture (a too-loose pattern matching draft content is a false-clean).
-- **gate→write INPUT race, fuller close (pre-existing; Round 4 Codex/Claude)**: the Round-4 re-validation closes the
-  *output-observed* window (a keystroke that reached the ring during the render); a keystroke that reaches the PTY
-  but hasn't echoed to the ring by the write instant is still a residual (same class as the intra-paced-write race
-  above). Fully closing it needs inbound-input-generation coordination on the PTY ingress.
-- **`AGY_MARKER = /^> /` is loose (pre-existing; Round 4 Claude)**: matches any transcript line starting with
-  `"> "` (a markdown blockquote, a quoted diff), and `findMarkerRow` takes the last. Fails safe today (transcript
-  text is default-fg → busy) but a dim match could false-clean; tighten to require the palette-12 marker cell,
-  measured from a capture.
+- **`spec-1280` T16 manifest-guard predicate edited** to avoid mis-firing on branches that touch a prompt surface after merging main. It edits another spec's test — **flagged for the 1280 owner** to confirm the scoping is acceptable.
+- **Architect-identity SSOT is fail-closed, not fully authoritative**: the durable fix persists `command` on the session row + a legacy self-heal; a WELCOME-frame hydration (the fully-authoritative source) was deferred (needs a protocol change).
+- **Migration tests use a faithful replica** of the production migration block, not the private `ensureGlobalDatabase` runner (repo precedent; source guards pin the real statements). Filed: extract `runGlobalMigrations(db)` for real migration tests.
+- **`#1047` unbounded `partial`**: whole-ring rendering accepts an OOM residual on a pathological runaway (mitigated by the memo + backoff; never a delivery-blocking cap). The root cause (persistent xterm) is a separate future project.
+- **agy `AGY_MARKER` (`/^> /`) is loose** and the interrupt-vs-mailbox-delivery cross-path is not fully serialized (architect-ratified as leave-as-is).
 
 ## Flaky Tests
 
-- **Environmental temp-dir/`chdir` race** (not a specific named test): under concurrent sibling-builder load,
-  `porch done`'s test check intermittently failed with `shell-init: … getcwd: cannot access parent directories` —
-  a test that `chdir`s into a temp dir removed mid-run by a parallel vitest worker + git subprocess. **Not a code
-  defect**: a *direct* `npm test -- --exclude='**/e2e/**'` from `packages/codev` passed clean (4162 passed / 48
-  skipped, 0 failures), and `porch done` passed on retry. No single reproducible failing test existed to skip
-  (the direct run had zero failures), so nothing was `it.skip`-ped — it is whole-suite environmental flakiness,
-  handled by retry (a passing run is a valid signal). See Follow-up Items for a suggested porch-level mitigation.
-- **`render-gate.test.ts` over-cap seed-cap perf assertion** (surfaced at PR-merge CI, review phase) — the
-  wall-clock timing assertion (`best-of-5 classifyScreen(>1MB) < 75ms`) flaked on shared/loaded GitHub Actions
-  runners: best-of-5 measured **125ms** then **142ms** on a rerun, vs the ~15–30ms this-env / ~22ms spike baseline.
-  Both review-phase integration reviewers flagged this exact assertion as CI-flaky, matching the test's own
-  "headroom for slower/loaded CI" caveat. **Mitigation (architect-directed — a CI-aware guard, not a blanket skip,
-  so local perf signal survives):** `const budgetMs = process.env.CI ? 500 : 75` — the tight ≤75ms bound stays the
-  real steady-state signal **locally**, while CI asserts only a looser catastrophic-regression ceiling (the
-  pre-tightening 500ms bound — still an order of magnitude below an O(n²) blow-up at >1MB). Verified passing in both
-  modes (local 75ms and `CI=true` 500ms), 28/28. The classifier code is untouched — this is purely a test-side
-  bound adjustment. Follow-up below. **(Round 4 update:** the whole-ring fix retired the 1 MB seed-cap, so this
-  test was retuned to render a realistic **4 MB** ring whole — the real steady-state path — with a retuned CI-aware
-  bound `process.env.CI ? 800 : 250` ms; same catastrophic-regression-guard intent. The still-open follow-up — a
-  deterministic, load-insensitive complexity guard — applies unchanged.)**
+- **`render-gate.test.ts` perf assertion** — the seed-cap/whole-ring render-budget assertion flaked on loaded CI runners (best-of-5 125–142ms vs a 75ms local ceiling). Per architect direction, mitigated with a **CI-aware bound** (`process.env.CI ? 800 : 250` ms; earlier 500 for the seed-cap era) rather than a blanket skip, so the tight local steady-state signal survives while CI asserts only a catastrophic-regression ceiling. Documented; a deterministic op-count check is the intended replacement (Follow-up).
+- **Whole-suite environmental flakiness** (not a single test): a `getcwd: cannot access parent directories` signature from a parallel-vitest-worker + git-subprocess temp-dir race (aggravated by 9+ concurrent sibling builders), and a build-race when `npm run build` (which `rm -rf`s `dist/`/`skeleton`) runs *concurrently* with vitest. Handled by not running the build concurrently with the suite and by retry; a direct suite run was always clean (0 failures). No individual test was skipped (none reproduced in isolation).
+- **`session-manager.test.ts` auto-restart timing test** starved under full-suite parallelism (passed in isolation, ~472ms). No skip needed — it did not repeat.
 
 ## Follow-up Items
 
-- **Live agy delivery smoke** in the verify phase: the blocking agy criterion is satisfied at the gate level
-  (fixtures + measurement); a live fresh-agy trust-dialog-held → accept → clean-delivery run belongs in post-merge verification.
-- **Live #1265 hand-repro** against a real builder terminal (plan Post-Implementation task) — the automated e2e
-  covers it; a manual sanity check in the integrated codebase is the verify-phase belt-and-suspenders.
-- **Bound the escalation-toast `seen` Set** (Technical Debt above) — small, out of this spec's scope.
-- **Porch/vitest cwd isolation** to remove the `getcwd`-race flakiness under concurrent builders (retry-on-`getcwd`
-  or per-worker cwd) — infrastructure, not this spec.
-- **Deterministic perf guard for the render-gate seed-cap test** — replace the CI-aware wall-clock bound (added to
-  stop CI flakiness) with an operation-count / complexity-based check so CI regains a tight regression guard without
-  runner-load sensitivity. Test infrastructure, not this spec's scope.
-- **VSCode Needs-Attention view** could optionally surface held messages (spec Open Question, nice-to-have) —
-  deferred; the count indicator + attention state ship now.
+- Confirm the `spec-1280` T16 predicate scoping with the 1280 owner.
+- Replace the render-gate perf wall-clock assertion with a deterministic op-count check.
+- Bound the VSCode escalation-toast `seen` Set (dedupe by mailboxId with eviction) — negligible today.
+- Fuller close of the gate→write **input** race (a human keystroke between snapshot and write — `R7` staleness guard) and the input-echo-lag residual.
+- Tighten `AGY_MARKER`; consider WELCOME-frame identity hydration; `#1047` persistent-xterm root cause.
+- Extract `runGlobalMigrations(db)` so migration tests can drive the real production runner.

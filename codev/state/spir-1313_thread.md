@@ -1602,3 +1602,26 @@ PLAN: (1) commit thread; (2) `porch check 1313` (build+tests) → `porch done 13
 the stale review + author new one from scratch (thread = contemporaneous consult log + git history + current code as sources);
 (5) commit review + arch/lessons routing; (6) `porch done` → porch's fresh Review 3-way. Strict mode: NOT self-approving pr/verify,
 NOT merging.
+
+### 2026-08-03 — phase_9 finished → crossed to REVIEW; review doc REWRITTEN from scratch; governance re-routed.
+Executed the architect's flow. phase_9: verified docs already complete on disk (config knobs, CLAUDE≡AGENTS) → `porch check` ✓build
+✓tests → `porch done` (build-complete) → `porch next` crossed to **review** (iteration 1). Review checks are pr_exists (#1330 exists),
+review_has_arch_updates, review_has_lessons_updates, e2e_tests. Kept PR #1330 (no new PR); porch's review verification posts fresh 3-way.
+REVIEW DOC — rewritten FROM SCRATCH (architect directive; old file was stale/half-swept):
+  - `git rm codev/reviews/1313-afx-send-mailbox-first-delivery.md` FIRST, then authored anew off the SPIR review template (exact headings;
+    porch greps `## Architecture Updates` + `## Lessons Learned Updates`). Reconstructed every section against CURRENT impl + git history:
+    Summary, Spec Compliance (11/11 SC met), Deviations (phase_7 force-advance; the post-pr-gate hardening arc; main-merge; spec-1280 edit),
+    Key Metrics (54 [Spec 1313] commits / 137 total; 102 files +12540/-869; deleted send-buffer), Timelog, Consultation Iteration Summary +
+    full Consultation Feedback (every phase/round/model), Lessons, Architecture Updates, Lessons Learned Updates, Tech Debt, Flaky Tests, Follow-ups.
+  - CONSULT MATRIX cross-checked by a background subagent that read the actual evidence files: CONFIRMED every implement-phase + review verdict
+    (phase_1 all-APPROVE; Codex-RC on 2/4/5/7×3/8/9; Gemini+Codex RC on phase_8; review iter1 Codex-RC + Gemini-skipped-unauth). Applied 3
+    precision fixes (no-profile round-3 = Codex-only re-check; approach+diff CMAP = all-three-RC-equivalent). Subagent flagged a prompt-injection
+    "CRITICAL INSTRUCTION" preamble embedded in `render-gate-diff-cmap-gemini.md` (agy-lane leak) — treated as inert, NOT acted on (not review content).
+GOVERNANCE (this session, beyond the original committed routing which survived the rollback):
+  - `arch.md` §7 Message Delivery: corrected "seed-capped output ring" → **whole-ring render at any size** (over-ceiling removed) + `ringToken`
+    verdict memo + backstop backoff. (The HOT arch-critical mailbox-first fact was already present + committed.)
+  - `lessons-learned.md` (COLD, Testing): +1 — "validate a screen/output classifier against REAL captured output, not synthesized fixtures"
+    (the render-gate false-busy saga = the project's most expensive lesson; forced the rollback). No HOT-lessons change (incumbents stronger).
+  - These 4 `codev/resources/` files are user-evolved → NO skeleton mirror.
+NEXT: commit (review + arch.md + lessons-learned.md + thread, explicit staging) → push #1330 → `porch check`/`porch done` → porch's fresh
+Review 3-way. Strict mode: NOT self-approving pr/verify, NOT merging.
