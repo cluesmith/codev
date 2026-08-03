@@ -23,14 +23,14 @@ plan_phases:
     status: complete
   - id: phase_7
     title: afx inbox CLI + broadcasts + escalation
-    status: in_progress
+    status: complete
   - id: phase_8
     title: Dashboard + VSCode held-count indicators
-    status: pending
+    status: in_progress
   - id: phase_9
     title: Documentation + skeleton mirror
     status: pending
-current_plan_phase: phase_7
+current_plan_phase: phase_8
 gates:
   spec-approval:
     status: approved
@@ -44,8 +44,8 @@ gates:
     status: pending
   verify-approval:
     status: pending
-iteration: 3
-build_complete: true
+iteration: 1
+build_complete: false
 history:
   - iteration: 1
     plan_phase: phase_2
@@ -144,7 +144,7 @@ history:
         file: >-
           /home/user/code/codev_root/codev/.builders/spir-1313/codev/projects/1313-afx-send-mailbox-first-deliver/1313-phase_7-iter3-claude.txt
 started_at: '2026-08-01T01:40:05.008Z'
-updated_at: '2026-08-03T05:36:15.516Z'
+updated_at: '2026-08-03T05:36:17.084Z'
 force_advanced:
   phase: phase_7
   iteration: 3
