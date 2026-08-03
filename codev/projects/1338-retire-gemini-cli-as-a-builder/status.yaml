@@ -5,17 +5,17 @@ phase: implement
 plan_phases:
   - id: phase_1
     title: Retire gemini in the shared resolver (core + resolver/config tests)
-    status: in_progress
+    status: complete
   - id: phase_2
     title: Fail closed at spawn/launch boundaries (no orphaned state, no Tower crash)
-    status: pending
+    status: in_progress
   - id: phase_3
     title: 'codev doctor: retirement guidance + builder-side flagging'
     status: pending
   - id: phase_4
     title: 'User-facing docs: README + CHANGELOG'
     status: pending
-current_plan_phase: phase_1
+current_plan_phase: phase_2
 gates:
   spec-approval:
     status: approved
@@ -30,7 +30,7 @@ gates:
   verify-approval:
     status: pending
 iteration: 1
-build_complete: true
+build_complete: false
 history: []
 started_at: '2026-08-03T19:12:09.462Z'
-updated_at: '2026-08-03T20:17:50.493Z'
+updated_at: '2026-08-03T20:20:42.454Z'
