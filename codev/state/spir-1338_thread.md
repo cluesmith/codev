@@ -272,3 +272,26 @@ suites tower-terminals+tower-instances+bugfix-430-tower-restart 133/133 (refacto
 NOTE: line refs in the iter1 consult note above are pre-fix (tower-utils.ts:455/533, etc.); post-fix
 refs are in the rebuttal (helper def :589, freshLaunch guard :544, reconnect guard :630).
 Next: porch done 1338 → re-verification → iter2 3-way consult on the fixed code.
+
+### phase_2 CONSULT iter2: Gemini APPROVE, Claude APPROVE/HIGH, Codex REQUEST_CHANGES/HIGH
+Codex found a THIRD, deeper gap (C3) that the iter1 C2 fix missed AND both approving reviewers missed.
+Verified real against source:
+- C3 FAIL-OPEN (clean-exit relaunch): my iter1 C2 fix returned {args,baseEnv} from
+  buildArchitectFreshLaunch.next() on retirement — stops the throw but NOT the relaunch. FreshLaunch.next()
+  can only change args/env; session-manager.ts RETAINS session.options.command and respawns it. If the
+  retained command IS the retired binary (custom `gemini` harness later removed, or config flip before a
+  clean exit), gemini is respawned. Claude's iter2 "safe: freshLaunch only wired when harness resolved
+  cleanly" reasoning missed that a CUSTOM gemini resolves cleanly at wire time.
+FIX (commit 9ec14c4d):
+- Extended FreshLaunch contract with a fail-closed `{ stop: true }` (session-manager.ts:73) — the only way
+  a factory can prevent a respawn it can't re-command. Clean-exit handler honors it (:1184): no respawn,
+  removeDeadSession, surface reason via session-gave-up → PtySession.notice (same UX as fast-exit valve).
+- buildArchitectFreshLaunch.next() returns { stop: true } on RetiredHarnessError (tower-utils.ts:551).
+- E2E regression (session-manager.test.ts:2493): real clean-exit handler, retained command:"gemini",
+  {stop:true} freshLaunch → spawn NOT called, session removed, `retired` reason surfaced. (iter1 test only
+  checked returned args — missed the retained command, exactly Codex's ask.)
+- Addressed Claude's non-blocking nit: isolateHarnessEnv() (HOME + TOWER_ARCHITECT_CMD/TOWER_BUILDER_CMD)
+  wired into all three retirement describes in tower-utils.test.ts.
+- Blast radius: FreshLaunch is architect-only (1 implementer, 1 consumer) — contained core change.
+- Verified: build exit 0; tower-utils+session-manager 152/152; consumers 133/133.
+Wrote 1338-phase_2-iter2-rebuttals.md. Next: porch done → re-verify → iter3 consult.
