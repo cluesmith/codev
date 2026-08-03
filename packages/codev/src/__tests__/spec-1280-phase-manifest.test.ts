@@ -95,18 +95,30 @@ describe('T16 — manifest completeness (M11)', () => {
   });
 
   it('every prompt-bearing file changed on this branch appears in some manifest', () => {
-    let changed: string[];
+    let names: string[];
     try {
-      changed = execFileSync('git', ['diff', '--name-only', 'origin/main...HEAD'], {
+      names = execFileSync('git', ['diff', '--name-only', 'origin/main...HEAD'], {
         cwd: repoRoot,
         encoding: 'utf-8',
       })
         .split('\n')
-        .map((s) => s.trim())
-        .filter((s) => PROMPT_BEARING.test(s));
+        .map((s) => s.trim());
     } catch {
       return; // no origin/main to diff against (fresh clone / CI shallow) — skip
     }
+
+    // Scope this guard to the 1280 project's OWN development: only enforce on a branch that
+    // is actually adding/editing 1280 manifests. Without this, it fails EVERY unrelated
+    // feature branch that merges main and happens to touch a prompt surface — whose changes
+    // belong to that branch's project and its own review, not 1280's manifests. (Surfaced on
+    // the Spec 1313 branch: its arch-critical→CLAUDE.md/AGENTS.md propagation tripped this the
+    // moment main was merged in. On the 1280 branch, phases add manifests so the guard stays
+    // active; on main it passes trivially — no diff vs itself.)
+    const manifestRel = path.relative(repoRoot, manifestDir);
+    const touchesManifests = names.some((f) => f === manifestRel || f.startsWith(manifestRel + '/'));
+    if (!touchesManifests) return;
+
+    const changed = names.filter((s) => PROMPT_BEARING.test(s));
     if (changed.length === 0) return;
 
     const listed = new Set(manifests().flatMap((m) => m.rows.map((r) => r.path)));

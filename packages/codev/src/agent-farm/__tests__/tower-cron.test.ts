@@ -496,12 +496,10 @@ describe('executeTask', () => {
   // exitCode conditions threw ReferenceError and failure runs never delivered.
   it('delivers when an exitCode condition is true on non-zero exit', async () => {
     const ws = createTestWorkspace();
-    const mockSession = { write: vi.fn() };
+    const deliver = vi.fn().mockResolvedValue({ outcome: 'delivered', reason: null, mailboxId: 'm' });
     const mockDeps = makeMockDeps({
       getKnownWorkspacePaths: () => [ws],
-      getTerminalManager: () => ({
-        getSession: () => mockSession,
-      }),
+      deliver,
     });
     initCron(mockDeps);
 
@@ -531,20 +529,18 @@ describe('executeTask', () => {
       'WARN',
       expect.stringContaining('Condition evaluation failed'),
     );
-    expect(mockSession.write).toHaveBeenCalled();
-    expect(mockBroadcastMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ content: 'Service Health Alert: service down' }),
-    );
+    // Phase 6 delivery model: the message goes through the mailbox+gate `deliver` port
+    // (which broadcasts internally), not a direct PTY write. #1142's point still stands:
+    // a condition-true failure run delivers.
+    expect(deliver).toHaveBeenCalledWith(expect.anything(), 'Service Health Alert: service down');
   });
 
   it('does not deliver when an exitCode condition is false on clean exit', async () => {
     const ws = createTestWorkspace();
-    const mockSession = { write: vi.fn() };
+    const deliver = vi.fn().mockResolvedValue({ outcome: 'delivered', reason: null, mailboxId: 'm' });
     const mockDeps = makeMockDeps({
       getKnownWorkspacePaths: () => [ws],
-      getTerminalManager: () => ({
-        getSession: () => mockSession,
-      }),
+      deliver,
     });
     initCron(mockDeps);
 
@@ -566,17 +562,15 @@ describe('executeTask', () => {
 
     const { result } = await executeTask(task);
     expect(result).toBe('success');
-    expect(mockSession.write).not.toHaveBeenCalled();
+    expect(deliver).not.toHaveBeenCalled();
   });
 
   it('does not deliver on non-zero exit when no condition is set', async () => {
     const ws = createTestWorkspace();
-    const mockSession = { write: vi.fn() };
+    const deliver = vi.fn().mockResolvedValue({ outcome: 'delivered', reason: null, mailboxId: 'm' });
     const mockDeps = makeMockDeps({
       getKnownWorkspacePaths: () => [ws],
-      getTerminalManager: () => ({
-        getSession: () => mockSession,
-      }),
+      deliver,
     });
     initCron(mockDeps);
 
@@ -601,17 +595,15 @@ describe('executeTask', () => {
     const { result, output } = await executeTask(task);
     expect(result).toBe('failure');
     expect(output).toBe('flaky failure'); // stderr captured when stdout empty
-    expect(mockSession.write).not.toHaveBeenCalled();
+    expect(deliver).not.toHaveBeenCalled();
   });
 
   it('reports timeout as exitCode 124 so exitCode conditions still fire', async () => {
     const ws = createTestWorkspace();
-    const mockSession = { write: vi.fn() };
+    const deliver = vi.fn().mockResolvedValue({ outcome: 'delivered', reason: null, mailboxId: 'm' });
     const mockDeps = makeMockDeps({
       getKnownWorkspacePaths: () => [ws],
-      getTerminalManager: () => ({
-        getSession: () => mockSession,
-      }),
+      deliver,
     });
     initCron(mockDeps);
 
@@ -636,20 +628,15 @@ describe('executeTask', () => {
 
     const { result } = await executeTask(task);
     expect(result).toBe('failure');
-    expect(mockSession.write).toHaveBeenCalled();
-    expect(mockBroadcastMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ content: 'Timed out: partial' }),
-    );
+    expect(deliver).toHaveBeenCalledWith(expect.anything(), 'Timed out: partial');
   });
 
   it('does not deliver a timeout when no condition is set (WARN-only path)', async () => {
     const ws = createTestWorkspace();
-    const mockSession = { write: vi.fn() };
+    const deliver = vi.fn().mockResolvedValue({ outcome: 'delivered', reason: null, mailboxId: 'm' });
     const mockDeps = makeMockDeps({
       getKnownWorkspacePaths: () => [ws],
-      getTerminalManager: () => ({
-        getSession: () => mockSession,
-      }),
+      deliver,
     });
     initCron(mockDeps);
 
@@ -673,7 +660,7 @@ describe('executeTask', () => {
 
     const { result } = await executeTask(task);
     expect(result).toBe('failure');
-    expect(mockSession.write).not.toHaveBeenCalled();
+    expect(deliver).not.toHaveBeenCalled();
     expect(mockDeps.log).toHaveBeenCalledWith(
       'WARN',
       expect.stringContaining("Cron command failed for 'Timeout No Condition'"),
