@@ -217,14 +217,49 @@ export class MetricsDB {
 
     this.db = new Database(path);
 
-    const journalMode = this.db.pragma('journal_mode = WAL', { simple: true });
-    if (journalMode !== 'wal') {
-      console.error('[warn] WAL mode unavailable for metrics database');
-    }
+    // busy_timeout must come FIRST: everything below (the journal-mode switch, CREATE TABLE, the
+    // migration, INSERTs) can contend, and without it each one fails instantly instead of waiting.
     this.db.pragma('busy_timeout = 5000');
+
+    this.enableWal();
 
     this.db.exec(CREATE_TABLE);
     this.migrateAddModelId();
+  }
+
+  /**
+   * Put the database in WAL mode, tolerating a concurrent opener doing the same.
+   *
+   * `busy_timeout` does NOT rescue this one. Switching journal mode needs an exclusive lock that
+   * no busy-handler will wait for, so when several processes open a non-WAL database at once —
+   * a CMAP opening one connection per lane — the losers get SQLITE_BUSY *immediately*. The
+   * unconditional `pragma('journal_mode = WAL')` therefore threw straight out of the constructor,
+   * and since `recordMetrics` swallows constructor failures the symptom was a silently missing
+   * metrics row, not an error anyone would see.
+   *
+   * Two changes make it safe. Read the mode first and skip the switch when it is already `wal`,
+   * which is every open after the first and removes the contention entirely in the common case.
+   * And treat SQLITE_BUSY as success-by-someone-else: another process is mid-switch, so re-read
+   * rather than fail.
+   *
+   * WAL is a performance choice, not a correctness one — `busy_timeout` above is what actually
+   * makes concurrent writes safe. So if the mode genuinely cannot be changed we warn and continue
+   * instead of taking the whole consultation down over a journal setting.
+   */
+  private enableWal(): void {
+    if (this.db.pragma('journal_mode', { simple: true }) === 'wal') return;
+
+    try {
+      if (this.db.pragma('journal_mode = WAL', { simple: true }) === 'wal') return;
+    } catch (err) {
+      if ((err as { code?: string }).code !== 'SQLITE_BUSY') throw err;
+    }
+
+    // Either the switch reported a non-WAL mode or it lost the race. Re-read: if a concurrent
+    // opener already made it WAL, that is the outcome we wanted and there is nothing to warn about.
+    if (this.db.pragma('journal_mode', { simple: true }) !== 'wal') {
+      console.error('[warn] WAL mode unavailable for metrics database');
+    }
   }
 
   /**
