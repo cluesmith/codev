@@ -337,3 +337,36 @@ builder+codex architect) → no "harness retired". Workspace fixture: codev/ mar
 chdir, mocked child_process (modeled on existing structure-checks describe).
 VERIFIED: build exit 0; doctor.test.ts 21/21 (17 existing + 4 new). Doctor never calls resolveHarness so
 it never throws — detects+reports only. Next: porch check → done → iter1 3-way consult.
+
+### phase_3 CONSULT iter1: Gemini APPROVE, Codex REQUEST_CHANGES/HIGH, Claude REQUEST_CHANGES/HIGH
+Two blockers, both accepted; the reviewers converged:
+1. CORRECTNESS (Codex C1 + Claude #1): doctor false-flagged the sanctioned custom-`gemini` escape
+   hatch — `resolvedShellHarness` returned only a name and the caller ran `getRetirement` on it
+   unconditionally, ignoring `config.harness`. So explicit `builderHarness/architectHarness: "gemini"`
+   backed by a custom `harness.gemini` def was reported retired even though it resolves + spawns fine
+   (contradicts resolveHarness precedence built-in→custom→retired, and the retirement msg's own
+   "configure a custom harness" advice).
+2. TEST-QUALITY (Claude #2): the new negative test was vacuous — chalk mock lacked `gray`, so the
+   codex-architect "supported" branch (`chalk.gray`) threw into the shell-section `catch {}` BEFORE the
+   builder branch ran; the "supported-config not flagged" test asserted nothing about its guarded path.
+Also: Claude #3 recommendation misdirects on the explicit-harness path (explicit <role>Harness beats
+the command); Claude #4 nits (no array-form test; duplicate retirement paragraph when both roles gemini).
+
+### phase_3 iter1 fixes IMPLEMENTED + VERIFIED (resumed from state-snapshot.md)
+Production (doctor.ts): `resolveShell(role)` now returns `{ name, retirement }` and encodes the
+resolver's precedence so doctor can't drift from spawn:
+- explicit `shell.<role>Harness` with a `config.harness` own-prop of that name ⇒ retirement suppressed
+  (escape hatch honored; prototype-safe hasOwnProperty check);
+- auto-detected `shell.<role>` command ⇒ retirement ALWAYS applies (never consults custom harnesses —
+  mirrors resolveHarness's auto-detect-is-always-retired rule);
+- both role recommendations + inline guidance now name `shell.<role>` AND `shell.<role>Harness`.
+Tests (doctor.test.ts): +`gray` to chalk mock; STRENGTHENED the supported-config test with a POST-gray
+assertion (`Select the architect harness via .codev/config.json …`) — the `✓ supported` line prints
+BEFORE the gray call so it can't detect the vacuity; the post-gray line proves the section completed and
+the builder branch was reached. Empirically confirmed: removing `gray` makes the test FAIL on that
+assertion, restore → green. Added escape-hatch tests (builder + architect), the crucial
+auto-detect-gemini-with-custom-harness-STILL-flagged distinction, and an array-form test; updated the 2
+recommendation assertions to both-selector wording.
+VERIFIED: build exit 0; doctor.test.ts 25/25; full unit suite (excl e2e) 4145 passed / 48 skipped / 0
+failed. Wrote 1338-phase_3-iter1-rebuttals.md. Next: commit fix + docs → porch check → done → next →
+iter2 3-way consult on the fixed code.
