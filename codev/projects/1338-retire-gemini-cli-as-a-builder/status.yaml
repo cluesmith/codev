@@ -1,0 +1,20 @@
+id: '1338'
+title: retire-gemini-cli-as-a-builder
+protocol: spir
+phase: specify
+plan_phases: []
+current_plan_phase: null
+gates:
+  spec-approval:
+    status: pending
+  plan-approval:
+    status: pending
+  pr:
+    status: pending
+  verify-approval:
+    status: pending
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-08-03T19:12:09.462Z'
+updated_at: '2026-08-03T19:12:09.463Z'
