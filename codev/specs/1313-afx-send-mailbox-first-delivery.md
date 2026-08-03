@@ -8,7 +8,7 @@ validated: [gemini, codex, claude]
 ## Metadata
 
 - **ID**: 1313
-- **Status**: draft
+- **Status**: specified
 - **Created**: 2026-07-31
 - **Issue**: [cluesmith/codev#1313](https://github.com/cluesmith/codev/issues/1313)
 - **Area**: Cross-cutting (`area/cross-cutting`) — the substance is the Tower send pipeline, but scope also includes the dashboard and VSCode sidebar indicators (decision 8), so per label policy the issue carries `area/cross-cutting` alone

@@ -7,7 +7,7 @@ validated: [gemini, codex, claude]
 
 ## Metadata
 - **ID**: 1313
-- **Status**: draft
+- **Status**: approved
 - **Specification**: [codev/specs/1313-afx-send-mailbox-first-delivery.md](../specs/1313-afx-send-mailbox-first-delivery.md)
 - **Created**: 2026-08-01
 

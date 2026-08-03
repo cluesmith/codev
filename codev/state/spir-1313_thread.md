@@ -1625,3 +1625,17 @@ GOVERNANCE (this session, beyond the original committed routing which survived t
   - These 4 `codev/resources/` files are user-evolved → NO skeleton mirror.
 NEXT: commit (review + arch.md + lessons-learned.md + thread, explicit staging) → push #1330 → `porch check`/`porch done` → porch's fresh
 Review 3-way. Strict mode: NOT self-approving pr/verify, NOT merging.
+
+### 2026-08-03 — Fresh Review 3-way (round 2): 2 APPROVE + 1 non-blocking COMMENT → PASS. Advancing to pr gate.
+porch replayed the pre-rollback review iter-1 (Codex RC: 2 mailbox races + frontmatter) as an iter-2 "fix issues" task; verified ALL
+addressed in CURRENT source (getById re-check mailbox-delivery.ts:383, session.writable :393, spec/plan frontmatter present) + the original
+rebuttal is accurate → `porch done` → `porch next` emitted the FRESH 3-way consult task. Ran gemini/codex/claude (SPIR pr). Verdicts:
+  - **Gemini APPROVE (HIGH)** — didn't skip this time (agy lane worked); race fixes + frontmatter confirmed.
+  - **Claude APPROVE (HIGH)** — verified BOTH iter-1 race fixes vs source + independent checks (tsc clean, 123/123 mailbox suites,
+    CLAUDE≡AGENTS, send-buffer deleted). 2 non-blocking notes = spec-1280 re-scope (already flagged) + Phase-7 force-advance (disclosed).
+  - **Codex COMMENT (MEDIUM, non-blocking)** — only hygiene, no RC.
+Addressed Codex's hygiene: spec Status draft→specified, plan draft→approved; refreshed PR #1330 body (4162→~4267 tests, agy "deferred"→
+live-verified, +post-gate hardening arc). spec-1280 = already flagged for owner (N/A, revert would break the guard here). Untracked consult
+artifacts = deliberate exclusion (review doc canonical; builder dotfiles/state-snapshot stay untracked). Documented round 2 in the review
+doc's Consultation Feedback + Iteration Summary. Committing spec/plan/review/thread → push → `gh pr edit` body → `porch next` → **pr gate
+(HUMAN)**. Strict: NOT self-approving pr/verify, NOT merging.

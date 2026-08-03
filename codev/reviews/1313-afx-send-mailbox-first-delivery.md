@@ -77,7 +77,7 @@ Granular per-event timestamps were not reliably tracked across a multi-day, many
 | Phase 7 (inbox + escalation) | 3 (force-adv) | Codex (RC ×3) | Escalation not firing `overview-changed`; workspace-scope Baked Decision; dismiss reachable by GET |
 | Phase 8 (indicators) | 2 | Gemini + Codex (RC) | Missing Playwright e2e; untested extension wiring |
 | Phase 9 (docs + skeleton) | 2 | Codex (RC) | Undocumented `mailbox.retentionDays`/`escalationSeconds` config knobs |
-| Review (pre-rollback) | 1 | Codex (RC) | Two mailbox delivery races (dismiss/deliver, write-completed⇒delivered); missing approval frontmatter |
+| Review | 2 | Codex (r1 RC, r2 COMMENT) | r1: two mailbox delivery races + missing frontmatter → fixed. r2 (fresh, post-rewrite): 2 APPROVE + non-blocking hygiene COMMENT (Status/PR-body) |
 | Verify: architect-identity bug | 3 | Codex (RC ×2) | Version-constant miss; legacy-upgrade heal trap; `TOWER_ARCHITECT_CMD` precedence in reconcile |
 | Verify: render-gate false-`busy` | 2 (approach+diff) | Gemini (RC), all 3 | Reject the count-default-fg inversion (proven false-clean); whole-ring reframe; over-ceiling + gate→write staleness false-cleans |
 | Post-rollback: over-ceiling + memo | 4 | all 3 (RC r1/r3) | Memo staleness across PTY respawn; CPU regression (backstop backoff); interrupt outside the lock; generation TOCTOU; cooldown stale alarm |
@@ -209,6 +209,19 @@ Folded into PR #1330 after the verify→implement rollback.
 - **Round 2** — Gemini APPROVE, Claude "fixes hold", **Codex REQUEST_CHANGES**: interrupt double-delivery (enqueue-before-Ctrl+C left the row drainable — **Addressed**: sync `markDelivered` before any await); memo cached CLEAN across a delivery (input doesn't advance the ring — **Addressed**: invalidate memo after every delivery); backoff delayed the classifier-stuck escalation (**Addressed**: skipped tick re-feeds `recordStreak`); bigRing lost on TOCTOU-hold; `stop()`/`start()` lifecycle race (**Addressed**: `generation` counter).
 - **Round 3** — all three REQUEST_CHANGES (verification round earned its keep): memo invalidation sat *below* the `markDelivered` guard (a row resolved mid-write skipped `memo.delete` — **Addressed**: move it above the guard); generation check preceded the await but the mutations followed it (**Addressed**: post-await gen guard in both tick + scheduleDrain); cooldown re-fed a *stale* classifier-stuck detail (**Addressed**: one fresh classify at the crossing tick); the backstop tick had no catch → an unhandled rejection could kill Tower (**Addressed**: try/catch).
 - **Round 4** — Gemini APPROVE ("ship it"); **Codex REQUEST_CHANGES** (contract-level): `memo.delete` is skipped if `writeMessage` rejects — not reachable via today's binding but real at the port contract (**Addressed**: `try{await}finally{memo.delete}` + a rejecting-write test); **Claude REQUEST_CHANGES** (test-only): the round-3 `scheduleDrain` generation test was vacuous (never parked at the await) — **Addressed** (drain microtasks to actually park; revert-checked). All six round-3 runtime fixes verified correct.
+
+### Review Phase — Round 2 (fresh 3-way after the review-doc rewrite)
+Re-run on the current PR #1330 diff + the rewritten review doc (the verify→implement rollback reset review to iteration 1; this is the fresh verification the pr gate rests on). **Outcome: 2 APPROVE + 1 non-blocking COMMENT — no REQUEST_CHANGES.**
+#### Gemini — APPROVE (HIGH)
+- Confirmed the iter-1 races are fixed and the spec/plan approval frontmatter was added. No key issues.
+#### Claude — APPROVE (HIGH)
+- Verified both iter-1 race fixes against source (`getById` re-check at `mailbox-delivery.ts:383`; `session.writable` re-check at `:393`) and independent checks (tsc clean; 123/123 mailbox suites; CLAUDE≡AGENTS byte-identical; `send-buffer.ts` actually deleted). Two non-blocking notes: the `spec-1280` re-scope (already flagged) and the Phase-7 force-advance (disclosed).
+#### Codex — COMMENT (MEDIUM, non-blocking)
+- **Concern**: spec/plan still declare `Status: draft`. **Addressed** — spec→`specified`, plan→`approved`.
+- **Concern**: PR #1330 body stale (4162 tests; agy smoke "deferred"). **Addressed** — refreshed to ~4267 passing, completed live verification, and the post-gate hardening arc.
+- **Concern**: the `spec-1280` T16 re-scope makes its guard branch-dependent. **N/A** — already flagged for the 1280 owner in Technical Debt; reverting it would break the manifest guard on this branch.
+- **Concern**: numerous untracked consultation artifacts. **N/A (deliberate)** — the review doc is the canonical consultation record; the transient per-round evidence files + builder-session dotfiles stay untracked.
+- Environmental (the review sandbox could not rerun Vitest or refetch the remote) — not defects; the last direct run was 0 failures / 48 pre-existing skips.
 
 ## Lessons Learned
 
