@@ -254,12 +254,26 @@ export function getRetirement(name: string): string | undefined {
 }
 
 /**
- * Throw the consistent retirement Error for retired harness `name`. Returns
+ * Error thrown when a retired harness name is selected. A distinct type lets a
+ * caller scope a `catch` to the retirement — return a safe default, or abort a
+ * spawn before it creates state — and rethrow every other error unchanged. Used
+ * by the spawn pre-flight and the Tower-side `siblingRegistrationIsLive`
+ * predicate (Issue #1338). `harnessName` is the retired name that triggered it.
+ */
+export class RetiredHarnessError extends Error {
+  constructor(public readonly harnessName: string, message: string) {
+    super(message);
+    this.name = 'RetiredHarnessError';
+  }
+}
+
+/**
+ * Throw the consistent retirement error for retired harness `name`. Returns
  * `never` so callers can use it as a resolver exit on any branch and keep one
  * identical message regardless of which path selected the retired name.
  */
 export function throwRetired(name: string): never {
-  throw new Error(getRetirement(name) ?? `The "${name}" harness is retired.`);
+  throw new RetiredHarnessError(name, getRetirement(name) ?? `The "${name}" harness is retired.`);
 }
 
 // =============================================================================

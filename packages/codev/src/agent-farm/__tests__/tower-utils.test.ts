@@ -18,6 +18,7 @@ import {
   normalizeWorkspacePath,
   isTempDirectory,
   serveStaticFile,
+  buildArchitectArgs,
   resolveArchitectLaunch,
   resolveArchitectRestart,
   siblingRegistrationIsLive,
@@ -490,6 +491,14 @@ describe('siblingRegistrationIsLive (Issue #1150)', () => {
     );
   }
 
+  function forceGeminiHarness(): void {
+    fs.mkdirSync(path.join(workspace, '.codev'), { recursive: true });
+    fs.writeFileSync(
+      path.join(workspace, '.codev', 'config.json'),
+      JSON.stringify({ shell: { architect: 'gemini' } }),
+    );
+  }
+
   it('live when the stored session jsonl exists on disk', () => {
     writeSessionFixture(fakeHome, workspace, 'sib-1');
     expect(siblingRegistrationIsLive(workspace, 'sib-1', { homeDir: fakeHome })).toBe(true);
@@ -514,6 +523,60 @@ describe('siblingRegistrationIsLive (Issue #1150)', () => {
   it('dead when the jsonl lives under a different cwd (not this workspace\'s session)', () => {
     writeSessionFixture(fakeHome, '/somewhere/else/entirely', 'foreign-1');
     expect(siblingRegistrationIsLive(workspace, 'foreign-1', { homeDir: fakeHome })).toBe(false);
+  });
+
+  // Issue #1338: a retired gemini architect makes getArchitectHarness throw. This
+  // predicate must NOT propagate that throw (it would abort the whole
+  // sibling-reconcile pass for every architect in the workspace); a retired
+  // registration can never launch, so it is not live → false, and the reconcile
+  // loop prunes the dead row.
+  it('dead (returns false, no throw) for a retired gemini architect config', () => {
+    forceGeminiHarness();
+    expect(() => siblingRegistrationIsLive(workspace, 'sib-1', { homeDir: fakeHome })).not.toThrow();
+    expect(siblingRegistrationIsLive(workspace, 'sib-1', { homeDir: fakeHome })).toBe(false);
+    // Also false with no stored id (the reconcile loop's other liveness input).
+    expect(siblingRegistrationIsLive(workspace, null, { homeDir: fakeHome })).toBe(false);
+  });
+});
+
+// Issue #1338 — buildArchitectArgs is the shared launch-injection boundary every
+// architect launch funnels through. A retired architect harness (gemini) must
+// fail closed here with the retirement message (a retired architect must not
+// launch); a supported harness resolves unchanged.
+describe('buildArchitectArgs retirement (#1338)', () => {
+  let workspace: string;
+
+  beforeEach(() => {
+    workspace = fs.mkdtempSync(path.join(tmpdir(), 'baa-ws-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(workspace, { recursive: true, force: true });
+  });
+
+  function writeArchitectConfig(architect: string): void {
+    fs.mkdirSync(path.join(workspace, '.codev'), { recursive: true });
+    fs.writeFileSync(
+      path.join(workspace, '.codev', 'config.json'),
+      JSON.stringify({ shell: { architect } }),
+    );
+  }
+
+  it('throws the retirement for a gemini architect config', () => {
+    writeArchitectConfig('gemini');
+    expect(() => buildArchitectArgs([], workspace)).toThrow(/retired/i);
+  });
+
+  it('does not throw for a codex architect config (regression)', () => {
+    writeArchitectConfig('codex');
+    // Codex resolves normally (no retirement); baseArgs stay at the front, with
+    // any role injection (from the bundled skeleton architect role) appended.
+    expect(() => buildArchitectArgs(['--base'], workspace)).not.toThrow();
+    expect(buildArchitectArgs(['--base'], workspace).args[0]).toBe('--base');
+  });
+
+  it('does not throw for the default (claude) architect (regression)', () => {
+    expect(() => buildArchitectArgs([], workspace)).not.toThrow();
   });
 });
 

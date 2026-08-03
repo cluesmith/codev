@@ -8,6 +8,7 @@ import {
   ensureDirectories,
   getArchitectHarness,
   getBuilderHarness,
+  assertBuilderHarnessNotRetired,
   setCliOverrides,
 } from '../utils/config.js';
 import { existsSync } from 'node:fs';
@@ -202,5 +203,54 @@ describe('gemini harness retirement (#1338)', () => {
     setCliOverrides({ builder: 'gemini' });
     expect(() => getBuilderHarness()).toThrow(/2026-06-18/);
     expect(() => getBuilderHarness()).toThrow(/claude/);
+  });
+});
+
+// Issue #1338 — the spawn preflight. `assertBuilderHarnessNotRetired` is called
+// in the spawn() dispatcher BEFORE any worktree/porch/db state is created, so a
+// retired builder harness aborts with no orphaned state. It must abort on the
+// retirement for every config form (explicit *Harness, --builder-cmd override,
+// auto-detected command in string OR array form), stay a no-op for supported
+// harnesses, and — crucially — defer (NOT abort) on any non-retirement error so
+// an unknown harness still surfaces at its normal resolution call site.
+describe('assertBuilderHarnessNotRetired spawn preflight (#1338)', () => {
+  afterEach(() => {
+    setCliOverrides({});
+    configMock.shell.architect = 'claude';
+    configMock.shell.builder = 'claude';
+    delete configMock.shell.architectHarness;
+    delete configMock.shell.builderHarness;
+  });
+
+  it('aborts on --builder-cmd gemini with the retirement', () => {
+    setCliOverrides({ builder: 'gemini' });
+    expect(() => assertBuilderHarnessNotRetired()).toThrow(/retired/i);
+  });
+
+  it('aborts on explicit builderHarness "gemini" with the retirement', () => {
+    configMock.shell.builderHarness = 'gemini';
+    expect(() => assertBuilderHarnessNotRetired()).toThrow(/retired/i);
+  });
+
+  it('aborts on array-form builder ["gemini", "--yolo"] with the retirement', () => {
+    configMock.shell.builder = ['gemini', '--yolo'];
+    expect(() => assertBuilderHarnessNotRetired()).toThrow(/retired/i);
+  });
+
+  it('is a no-op for a supported builder harness (claude default)', () => {
+    expect(() => assertBuilderHarnessNotRetired()).not.toThrow();
+  });
+
+  it('is a no-op for a supported builder harness (codex)', () => {
+    setCliOverrides({ builder: 'codex' });
+    expect(() => assertBuilderHarnessNotRetired()).not.toThrow();
+  });
+
+  it('defers (does NOT abort) on an unknown builder harness — surfaces later', () => {
+    // An unknown name throws a generic "Unknown harness" (not the retirement).
+    // The preflight only aborts spawns for retired harnesses; every other
+    // resolution error is left to surface at the real getBuilderHarness call.
+    configMock.shell.builderHarness = 'no-such-harness';
+    expect(() => assertBuilderHarnessNotRetired()).not.toThrow();
   });
 });

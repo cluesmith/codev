@@ -15,7 +15,7 @@ import type { RateLimitEntry } from './tower-types.js';
 import crypto from 'node:crypto';
 import { loadRolePrompt, type RoleConfig } from '../utils/roles.js';
 import { getArchitectHarness } from '../utils/config.js';
-import type { HarnessProvider } from '../utils/harness.js';
+import { RetiredHarnessError, type HarnessProvider } from '../utils/harness.js';
 import { getArchitectByName, setArchitectSessionId } from '../state.js';
 import type { CrashLoopFallback, FreshLaunch } from '../../terminal/session-manager.js';
 import { cmdlineHoldsSession } from './architect-session-holder.js';
@@ -176,6 +176,16 @@ export function buildArchitectArgs(baseArgs: string[], workspacePath: string): {
   const bundledRolesDir = path.resolve(import.meta.dirname, '../../../skeleton/roles');
   const config: RoleConfig = { codevDir, bundledRolesDir, workspaceRoot: workspacePath };
 
+  // Launch-boundary fail-closed (Issue #1338): this is the shared launch-injection
+  // helper every architect launch funnels through (fresh/reconnect/add-architect/
+  // no-Tower `afx architect`). A retired architect harness (e.g. gemini) makes
+  // getArchitectHarness throw RetiredHarnessError — that throw IS the intended
+  // behavior: a retired architect must not launch, and the error's message is the
+  // full retirement explanation. Do NOT catch-and-swallow it here; the launch
+  // entry points surface it cleanly (launchInstance → {success:false, error},
+  // addArchitect → {success:false, error}, the `afx architect` CLI prints
+  // .message). The non-launch liveness predicate is handled separately in
+  // siblingRegistrationIsLive.
   const harness = getArchitectHarness(workspacePath);
 
   const role = loadRolePrompt(config, 'architect');
@@ -282,13 +292,27 @@ export function sessionHasLiveHolder(
  * A session-capable harness row with no stored id, or an id whose session
  * artifact is gone, is a dead registration: the reconcile loop prunes it
  * instead of resurrecting a removed architect (the #1150 bug class).
+ *
+ * Issue #1338: a retired architect harness (e.g. gemini) makes getArchitectHarness
+ * throw. This is a Tower-side liveness predicate, NOT a launch, so it must not let
+ * that throw escape — an uncaught throw here aborts the whole sibling-reconcile
+ * pass (tower-instances.ts) for every architect in the workspace. A retired
+ * registration can never launch, so it is by definition not live: catch the
+ * retirement and return `false` (the reconcile loop then prunes the dead row).
+ * Any other error is a real fault and is rethrown unchanged.
  */
 export function siblingRegistrationIsLive(
   workspacePath: string,
   sessionId: string | null,
   opts?: { homeDir?: string },
 ): boolean {
-  const harness = getArchitectHarness(workspacePath);
+  let harness: HarnessProvider;
+  try {
+    harness = getArchitectHarness(workspacePath);
+  } catch (err) {
+    if (err instanceof RetiredHarnessError) return false;
+    throw err;
+  }
   if (!harness.session) return true;
   if (!sessionId) return false;
   return sessionIsOwned(harness, sessionId, workspacePath, opts?.homeDir);

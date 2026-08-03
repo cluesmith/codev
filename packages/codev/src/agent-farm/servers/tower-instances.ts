@@ -41,6 +41,7 @@ import {
   validateArchitectName,
   DEFAULT_ARCHITECT_NAME,
 } from '../utils/architect-name.js';
+import { RetiredHarnessError } from '../utils/harness.js';
 import { setArchitect, setArchitectByName, getArchitects, getArchitectByName } from '../state.js';
 
 // ============================================================================
@@ -1067,14 +1068,30 @@ export async function addArchitect(
       log: _deps.log,
     }));
   }
-  const { args: cmdArgs, env: harnessEnv, sessionId: conversationSessionId, resumed, fallback } = resolveArchitectLaunch({
-    workspacePath,
-    name,
-    baseArgs: cmdParts.slice(1),
-    storedSessionId,
-    hasLiveHolder: () => foreignHolder,
-    log: _deps.log,
-  });
+  // Issue #1338: a retired architect harness (e.g. gemini) makes
+  // resolveArchitectLaunch throw at the launch boundary. This entry point (the
+  // `add-architect` CLI / HTTP route) returns a result object rather than
+  // throwing, so convert the retirement into a clean `{ success: false }` — the
+  // caller in tower-routes.ts awaits this without its own try/catch, so an
+  // uncaught throw would become an opaque 500 instead of the retirement message.
+  // Scope the catch to the retirement only (mirrors launchInstance's fail path,
+  // narrowed): every other error propagates unchanged. No worktree/porch/db
+  // state is created before this point, so bailing here leaves nothing behind.
+  let launch;
+  try {
+    launch = resolveArchitectLaunch({
+      workspacePath,
+      name,
+      baseArgs: cmdParts.slice(1),
+      storedSessionId,
+      hasLiveHolder: () => foreignHolder,
+      log: _deps.log,
+    });
+  } catch (err) {
+    if (err instanceof RetiredHarnessError) return { success: false, error: err.message };
+    throw err;
+  }
+  const { args: cmdArgs, env: harnessEnv, sessionId: conversationSessionId, resumed, fallback } = launch;
   if (resumed && conversationSessionId) {
     _deps.log('INFO', `Resuming architect '${name}' session ${conversationSessionId.slice(0, 8)}… in ${workspacePath}`);
   }

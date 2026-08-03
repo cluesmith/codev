@@ -157,3 +157,63 @@ defer to later call). Call it at top of each worktree-creating spawn fn BEFORE e
 createWorktree/initPorch. Architect: guard siblingRegistrationIsLive (catch retirement→false,
 rethrow others); launch boundary (buildArchitectArgs) already throws retirement via getArchitectHarness
 — make it a clean scoped error. Regression-test claude/codex both roles.
+
+### phase_2 FINALIZED design (post source-trace, 2026-08-03)
+Traced every caller of the 5 spawn handlers + 4 getArchitectHarness sites. Refinements vs draft:
+- **SPAWN preflight = ONE guard in the `spawn()` DISPATCHER** (spawn.ts:921, after getSpawnMode),
+  gated `if (mode !== 'shell')`, before `handlers[mode]()`. Cleaner + safer than per-fn: ALL 7
+  createWorktree calls live in the 5 handlers, ALL under the dispatcher; shell is the only
+  worktree-less mode. CRUCIAL: `createWorktree` internally calls getBuilderHarness at
+  spawn-worktree.ts:912 (BEFORE spawn.ts:471) — so the preflight MUST precede handler dispatch or a
+  gemini spawn orphans a half-built worktree. `assertBuilderHarnessNotRetired` already in config.ts
+  (uncommitted), re-exported via utils barrel (`export * from './config.js'`). Add to spawn.ts:20 import.
+- **siblingRegistrationIsLive (tower-utils.ts:291)**: real guard — try getArchitectHarness, catch
+  RetiredHarnessError→return false (retired reg not live → reconcile prunes it), rethrow others.
+  Verified: uncaught throw here is caught by tower-instances.ts:809 `catch(siblingErr)` but aborts the
+  WHOLE sibling-reconcile pass for ALL architects — guard also stops the gemini row from reaching the
+  addArchitect launch at :804 (pruned+continue at :797/:802 first).
+- **Launch sites throw = correct fail-closed** (retired architect must not launch; RetiredHarnessError
+  .message IS the full retirement text). Entry-point surfacing:
+  · launchInstance (tower-instances.ts:564) → already clean via try/catch :814 → `{success:false,
+    error:"Failed to launch: <msg>"}`. No change.
+  · **addArchitect (tower-instances.ts:1070)** → NOT wrapped; throws out to tower-routes.ts:547 (HTTP)
+    + workspace-add-architect CLI. GAP the snapshot missed. FIX: scoped try/catch around
+    resolveArchitectLaunch → RetiredHarnessError→return `{success:false, error: err.message}`, rethrow
+    others. Mirrors launchInstance, scoped. No persistent state created before :1070 (name/cmd resolve
+    only) → clean bail.
+  · architect() no-Tower CLI (architect.ts:31 buildArchitectArgs) → throw propagates to afx top-level
+    (prints .message, same path as today's "Unknown harness"). No new gap; leave as-is.
+  · freshLaunch.next() (tower-utils.ts:509) → only a shellper rerun of an ALREADY-running architect;
+    unreachable for gemini (initial launch threw first). No change.
+- **buildArchitectArgs (:179)**: fail-closed DOC COMMENT only — the getArchitectHarness throw is
+  intentional; re-wrapping would just duplicate the message. Callers surface `.message`.
+- Imports: tower-utils.ts:18 add `RetiredHarnessError` (value) from ../utils/harness.js;
+  tower-instances.ts add same import.
+- Reset consumers (reset/context.ts:414/:468): NO change (plan-verified degrade).
+
+### phase_2 IMPLEMENTED + VERIFIED (2026-08-03)
+Production edits:
+- spawn.ts: import `assertBuilderHarnessNotRetired`; dispatcher guard `if (mode !== 'shell')` before
+  `handlers[mode]()`.
+- tower-utils.ts: import `RetiredHarnessError`; siblingRegistrationIsLive try/catch
+  (RetiredHarnessError→false, rethrow); buildArchitectArgs fail-closed doc comment.
+- tower-instances.ts: import `RetiredHarnessError`; addArchitect scoped try/catch around
+  resolveArchitectLaunch (retirement→`{success:false,error}`, rethrow others).
+- (config.ts assertBuilderHarnessNotRetired + harness.ts RetiredHarnessError were the pre-existing
+  uncommitted phase_2 groundwork — now part of this commit.)
+Tests (+12, coverage-by-addition):
+- config.test.ts (+6): assertBuilderHarnessNotRetired — aborts on gemini (cmd/explicit/array),
+  no-op for claude+codex, DEFERS (no throw) on unknown harness.
+- tower-utils.test.ts (+4): siblingRegistrationIsLive→false (no throw) for gemini; buildArchitectArgs
+  throws retirement for gemini, no-throw for codex+claude. (Fixed 1 over-strict assert: buildArchitectArgs
+  loads the role from BUNDLED skeleton roles, so codex injects `-c model_instructions_file` — assert
+  baseArgs preserved at front, not equality.)
+- tower-instances.test.ts (+2): launchInstance + addArchitect both return `{success:false,/retired/i}`
+  for a gemini architect, createSession NOT called (HOME isolated so global config can't mask).
+E2E manual verify (strongest "no orphaned state" proof): scratchpad/verify-spawn-gemini.mjs drives the
+REAL built `spawn()` against a REAL temp workspace (`.codev/config.json` builderHarness=gemini, real
+config loader, no mocks) → threw RetiredHarnessError + 0 `.builders/` + 0 codev/projects state. PASS.
+Results: `pnpm --filter @cluesmith/codev build` exit 0 (tsc clean). Full unit suite 4128 passed / 48
+pre-existing skips / 0 failed (was 4116; +12 mine). freshLaunch(:509) left untouched — unreachable for
+gemini (launchInstance/addArchitect throw at resolveArchitectLaunch BEFORE buildArchitectFreshLaunch is
+even constructed). Next: porch check → porch done → 3-way consult.

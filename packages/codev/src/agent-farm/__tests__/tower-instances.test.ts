@@ -18,6 +18,7 @@ import {
   getInstances,
   getDirectorySuggestions,
   launchInstance,
+  addArchitect,
   killTerminalWithShellper,
   stopInstance,
   removeArchitect,
@@ -602,6 +603,103 @@ describe('tower-instances', () => {
         );
       } finally {
         fs.rmSync(tmpDir, { recursive: true });
+      }
+    });
+  });
+
+  // =========================================================================
+  // Issue #1338 — a retired architect harness (gemini) must fail closed at the
+  // launch entry points WITHOUT crashing Tower: launchInstance and addArchitect
+  // both return a result object, so the retirement throw from resolveArchitectLaunch
+  // must be converted to a clean `{ success: false, error }` (not an uncaught
+  // throw / opaque 500). No architect terminal is created on the rejected path.
+  // =========================================================================
+  describe('architect launch retirement (#1338)', () => {
+    const originalHome = process.env.HOME;
+    let isoHome: string;
+
+    beforeEach(() => {
+      // Isolate HOME so a developer's global ~/.codev/config.json cannot mask the
+      // workspace's gemini architect config through the shared config loader.
+      isoHome = fs.mkdtempSync(path.join(os.tmpdir(), 'inst-home-'));
+      process.env.HOME = isoHome;
+    });
+
+    afterEach(() => {
+      if (originalHome === undefined) delete process.env.HOME;
+      else process.env.HOME = originalHome;
+      fs.rmSync(isoHome, { recursive: true, force: true });
+    });
+
+    function writeGeminiArchitect(dir: string): void {
+      fs.mkdirSync(path.join(dir, '.codev'), { recursive: true });
+      fs.writeFileSync(
+        path.join(dir, '.codev', 'config.json'),
+        JSON.stringify({ shell: { architect: 'gemini' } }),
+      );
+    }
+
+    it('launchInstance fails cleanly (no crash) for a gemini main architect', async () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'inst-launch-gemini-'));
+      fs.mkdirSync(path.join(tmpDir, 'codev'));
+      writeGeminiArchitect(tmpDir);
+      try {
+        const createSession = vi.fn();
+        const deps = makeDeps({
+          getTerminalManager: vi.fn().mockReturnValue({
+            getSession: vi.fn(),
+            killSession: vi.fn(),
+            createSession,
+            createSessionRaw: vi.fn(),
+            listSessions: vi.fn().mockReturnValue([]),
+          }) as any,
+        });
+        initInstances(deps);
+
+        const result = await launchInstance(tmpDir);
+        expect(result.success).toBe(false);
+        expect(result.error).toMatch(/retired/i);
+        // Fail closed BEFORE the architect terminal is created.
+        expect(createSession).not.toHaveBeenCalled();
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    it('addArchitect returns a clean retirement error (no uncaught throw) for a gemini architect', async () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'inst-add-gemini-'));
+      fs.mkdirSync(path.join(tmpDir, 'codev'));
+      writeGeminiArchitect(tmpDir);
+      const resolvedPath = fs.realpathSync(tmpDir);
+      try {
+        const createSession = vi.fn();
+        // addArchitect early-returns unless the workspace already has ≥1
+        // architect; seed a 'main' row so it reaches the launch boundary.
+        const workspaceTerminals = new Map([
+          [resolvedPath, {
+            architects: new Map([['main', { terminalId: 'main-t' }]]),
+            builders: new Map(),
+            shells: new Map(),
+          }],
+        ]);
+        const deps = makeDeps({
+          workspaceTerminals: workspaceTerminals as any,
+          getTerminalManager: vi.fn().mockReturnValue({
+            getSession: vi.fn(),
+            killSession: vi.fn(),
+            createSession,
+            createSessionRaw: vi.fn(),
+            listSessions: vi.fn().mockReturnValue([]),
+          }) as any,
+        });
+        initInstances(deps);
+
+        const result = await addArchitect(tmpDir, 'reviewer');
+        expect(result.success).toBe(false);
+        expect(result.error).toMatch(/retired/i);
+        expect(createSession).not.toHaveBeenCalled();
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
       }
     });
   });
