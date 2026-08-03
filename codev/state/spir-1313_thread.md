@@ -1639,3 +1639,8 @@ live-verified, +post-gate hardening arc). spec-1280 = already flagged for owner 
 artifacts = deliberate exclusion (review doc canonical; builder dotfiles/state-snapshot stay untracked). Documented round 2 in the review
 doc's Consultation Feedback + Iteration Summary. Committing spec/plan/review/thread → push → `gh pr edit` body → `porch next` → **pr gate
 (HUMAN)**. Strict: NOT self-approving pr/verify, NOT merging.
+
+**⛔ STOPPED at the pr gate.** `porch next` → gate_pending on `pr` ("All reviewers approved!"); `porch gate 1313` registered it. Committed
+851b4846, pushed; PR #1330 body refreshed. Architect notified (delivered to main). Awaiting the HUMAN: `porch approve 1313 pr
+--a-human-explicitly-approved-this`. Strict mode: NOT self-approving pr/verify, NOT merging (standing constraint: maintainers merge). Not
+polling — I end my turn addressable; resume on gate approval, review feedback, or architect steer.
