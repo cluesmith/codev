@@ -608,3 +608,41 @@ Also took claude's non-blocking catch that my barrier leaked CPU-pinned orphans 
 children never killed) — a hang risk I introduced. Now yields via `Atomics.wait` and reaps on timeout.
 
 tsc 0 · build ✓ · full unit suite green · phase file 5 runs / 5 green.
+
+## phase_5 — deleting the second copy, and refusing the tautology it invited
+
+The substitution itself was small. What made it worth care was that the two copies had drifted in
+three specific ways, and only one of them is the kind of thing anyone notices: `done` did no lane
+validation, didn't normalize a single-string value into a list, and wrapped config loading in a bare
+`catch` that turned every config error into a silent fall-back to protocol defaults.
+
+The single-string one is the sharpest. `next` normalized `"codex"` to `["codex"]`; `done` assigned
+the string straight through — so `done` iterated its *characters* looking for review files. A user
+who writes the documented single-string form gets a deadlock where `next` emits one lane and `done`
+demands review files for `c`, `o`, `d`, `e`, `x`. Neither command prints the set it derived, so
+there is nothing to debug from. That is the real cost of a duplicated resolver: not the duplication,
+the silent disagreement.
+
+Put the shared function in `porch/config.ts` rather than exporting it from `next.ts`, because
+`index.ts` and `next.ts` already both import `./config.js` — consolidating there adds no new edge to
+the import graph, whereas index→next would.
+
+**Removing the `catch` is a real behavior change**, not a cleanup: a workspace whose config is
+malformed today limps along on protocol defaults and will now fail loudly at `porch done`. The plan
+called for this and I've flagged it for the review so it isn't read as an accident.
+
+**All 453 pre-existing porch tests passed unmodified.** The plan explicitly warned that needing to
+change them would be a signal to re-examine the code rather than the test — worth stating that the
+net held, since "I loosened the test" is exactly what that warning anticipates.
+
+**The part I nearly got wrong.** My first scenario-8 test resolved the lanes twice through the same
+shared function and asserted the two results were equal. That is a tautology — it passes on any
+implementation, including a broken one, because both sides are the same call. I'd even written a
+comment rationalizing it ("agreement is structural rather than coincidental"), which is the tell: if
+a test needs prose explaining why it counts, it probably doesn't. Replaced with tests that drive the
+real `next()` and `done()` end-to-end, and mutation-verified by making `done` ignore config again —
+the narrowing test fails. Paired it with an unconfigured case where `done` must REJECT two of three
+review files, because otherwise "done accepted one file" is equally consistent with a `done` that
+accepts anything.
+
+tsc 0 · 468 porch + consult-lane tests green · build ✓ · full suite green.
