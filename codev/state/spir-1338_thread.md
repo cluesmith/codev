@@ -48,3 +48,25 @@ BOTH resolution paths — explicit `builderHarness: "gemini"` AND auto-detected
 explicit path (no retirement explanation) and (b) SILENTLY falls back to CLAUDE_HARNESS on
 the auto-detect path (#929-class dangerous mismatch). Recommend a retirement-sentinel in
 the resolver + correct doctor's stale builder-support message + fix README example.
+
+## Specify — consult iteration 1 (2026-08-03)
+Verdicts: Gemini APPROVE; Codex REQUEST_CHANGES; Claude REQUEST_CHANGES. All substantive
+points accepted + incorporated (rebuttal: `codev/projects/.../1338-specify-iter1-rebuttals.md`).
+Key decisions locked into the spec:
+- **Role-agnostic retirement**: `resolveHarness` (harness.ts:358) has NO role param and is shared
+  by getArchitectHarness + getBuilderHarness → sentinel retires gemini for BOTH roles. Correct
+  because the CLI is dead for both tiers regardless of role AND gemini-architect is already
+  unsupported (doctor warns). Slight broadening beyond "builder-only" mechanism — will flag to
+  architect at the gate.
+- **Two footgun modes** (not one): remove detector+registry → silent CLAUDE_HARNESS fallback
+  (harness.ts:392); remove registry only → undefined/TypeError (harness.ts:387). Sentinel must
+  guard BEFORE both exits.
+- **Codev product retirement** framing (Codex): consumer tiers (free/Pro/Ultra) ended 2026-06-18;
+  Standard/Enterprise + API-key remain → served via CUSTOM HARNESS escape hatch. Not "CLI is gone."
+- **Doctor**: redefine the gemini branch (premise inverts), ADD builder-side flagging, assert on
+  structured issue:/recommendation: fields (doctor.ts:826), not console text.
+- **afx reset**: DECIDED/accepted — gemini leaves BUILTIN_HARNESSES → reset won't recognize a
+  pre-existing gemini builder → declines. Fine (retired harness can't reset anyway).
+- **Tests**: cover getBuilderHarness, --builder-cmd gemini, array-form builder cmd, architect twin;
+  coverage-by-replacement; doc-consistency criterion scoped (exempt historical + consult lane).
+Next: porch done → re-verification. Expecting spec-approval gate soon → STOP for human approval.

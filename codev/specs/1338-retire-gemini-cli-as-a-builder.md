@@ -4,6 +4,7 @@
 SPEC vs PLAN BOUNDARY:
 This spec defines WHAT and WHY. The plan defines HOW and WHEN.
 Implementation phases, file-level edits, and code belong in codev/plans/1338-*.md.
+Line-number references below are orientation for reviewers, not edit instructions.
 -->
 
 ## Metadata
@@ -14,138 +15,198 @@ Implementation phases, file-level edits, and code belong in codev/plans/1338-*.m
 
 ## Clarifying Questions Asked
 <!-- This spec is authored from a well-specified GitHub issue (#1338) plus an architect
-constraint delivered at spawn time. No live human Q&A was needed; the questions below are
-the ones the issue/constraint already answer, recorded to show the discovery process. -->
+constraint delivered at spawn time, then refined by a 3-way consultation. No live human Q&A
+was needed; the questions below are the ones the issue/constraint/review already answer,
+recorded to show the discovery process. -->
 
 1. **What exactly is being retired — the Gemini *builder* harness, the `gemini` *consult* lane, or `agy`?**
    Only the standalone **Gemini CLI (`gemini`) builder harness**. The `agy`/Antigravity consult
    lane, `consult -m gemini`, and any `agy` architect support are explicitly **out of scope**
    (issue Non-goals).
 
-2. **Should Gemini be hard-removed, or retired-with-a-message?**
+2. **Is this "the CLI no longer exists," or a Codev product decision?**
+   A **Codev product retirement**. Google ended Gemini CLI access for **consumer accounts**
+   (free/Pro/Ultra tiers) on **2026-06-18**; Standard/Enterprise subscriptions and API-key
+   authentication reportedly remain. Codev is retiring the *built-in* `gemini` harness as a
+   *supported* option because it is unavailable to most users — not asserting the binary is gone
+   everywhere. Users who retain access can still wire it via a **custom harness** (see Assumptions).
+
+3. **Should Gemini be hard-removed, or retired-with-a-message?**
    Retired with a **clear explanation**. Acceptance criterion 2 requires that a user selecting
    Gemini CLI as a builder "receive a clear explanation that the option has been retired" — a
    silent removal or a generic error does not satisfy this.
 
-3. **What must remain unaffected?**
-   Claude, Codex, OpenCode, and custom builder harnesses (acceptance criterion 3).
+4. **`resolveHarness` is role-agnostic — does retirement affect the architect path too?**
+   Yes, and that is **intended**. The single `resolveHarness` (harness.ts:358) takes no role
+   parameter and is shared by both `getArchitectHarness` and `getBuilderHarness` (config.ts:261,
+   280). Because the CLI is unavailable for the same tiers regardless of role — and gemini is
+   *already* unsupported as an architect (doctor warns today) — the retirement is applied
+   **role-agnostically** rather than threading a role parameter through a shared signature. This is
+   broader in *mechanism* than "builder-only," but consistent with the issue's intent and with the
+   existing architect stance. (Surfaced by the Claude review; flagged to the architect at the gate.)
 
-4. **Are there pinned architectural decisions (Baked Decisions) to honor verbatim?**
+5. **What must remain unaffected?**
+   Claude, Codex, OpenCode, and custom builder harnesses (acceptance criterion 3), and the entire
+   `agy` / `consult -m gemini` subsystem.
+
+6. **Are there pinned architectural decisions (Baked Decisions) to honor verbatim?**
    No. Issue #1338 contains no "Baked Decisions" section.
 
-5. **Can this PR self-merge once approved?**
+7. **Can this PR self-merge once approved?**
    No. We are not upstream maintainers on this repo; the PR requires an external maintainer to
-   approve/merge (architect constraint, 2026-08-03). The change must stand on its own for
-   external review.
+   approve/merge (architect constraint, 2026-08-03). The change must stand on its own for external
+   review.
 
 ## Problem Statement
 Codev still presents and wires the standalone **Gemini CLI (`gemini`)** as a supported *builder*
-harness. On **2026-06-18** Google discontinued Gemini CLI availability for Pro, Ultra, and free
-tiers, so for most users the CLI no longer exists to launch. Continuing to advertise it as a
-supported builder — in the harness registry, in command auto-detection, in `codev doctor`
+harness. On **2026-06-18** Google ended Gemini CLI availability for **consumer accounts** (Pro,
+Ultra, and free tiers), so for most users the option no longer works. Continuing to advertise it as
+a supported builder — in the harness registry, in command auto-detection, in `codev doctor`
 guidance, and in the README configuration example — is misleading: users who follow that guidance
-configure a builder that cannot run, and the failure they hit today is not a clear "this is
-retired" explanation.
+configure a builder that cannot launch for them, and the failure they hit today is not a clear
+"this is retired" explanation. This is therefore a **Codev product retirement** of the built-in
+`gemini` harness, not a claim that the Gemini binary is gone for everyone (Standard/Enterprise and
+API-key access reportedly persist — see Assumptions for the custom-harness escape hatch).
 
-Worse, the current resolution logic has a latent footgun for the retirement: if the `gemini`
-harness were naively deleted, a config that auto-detects the harness from `builder: "gemini …"`
-would **silently fall back to the Claude harness** and inject Claude-specific arguments
-(`--append-system-prompt`) into a non-Claude command — the same class of silent mismatch that
-Issue #929 fixed for architects. Any retirement must fail *clearly and closed*, not silently.
+Compounding the case, the retirement must be done carefully because the shared resolver has two
+distinct latent failure modes if `gemini` is naively removed (verified against `harness.ts`):
+
+- **Remove the auto-detect case *and* the registry entry** → `detectHarnessFromCommand` no longer
+  returns `'gemini'`, so a config with `builder: "gemini …"` falls through to the final
+  `return CLAUDE_HARNESS` (harness.ts:392). Result: Codev **silently launches the Claude harness**
+  for a gemini command, injecting Claude-only args (`--append-system-prompt`) into a non-Claude
+  binary — the same class of silent mismatch Issue #929 fixed for architects.
+- **Remove *only* the registry entry** (leave the detector) → `detected === 'gemini'` (truthy), so
+  `return BUILTIN_HARNESSES[detected]` (harness.ts:387) returns **`undefined`** typed as a
+  `HarnessProvider` → a downstream `TypeError`, not a clean failure.
+
+Both are unacceptable. The retirement must fail **clearly and closed** on every resolution path —
+never a silent Claude fallback, never an `undefined`/TypeError.
 
 ## Current State
 Today the `gemini` builder harness is a first-class, supported option:
 
 - **Harness registry & provider.** A `GEMINI_HARNESS` provider (role injection via the
   `GEMINI_SYSTEM_MD` environment variable) is registered under the name `gemini` in the built-in
-  harness registry that enumerates all valid builder harnesses (`claude`, `codex`, `gemini`,
-  `opencode`).
-- **Command auto-detection.** The command-basename detector maps any command whose first token
-  contains `gemini` to the `gemini` harness, so `builder: "gemini --yolo"` resolves to
+  harness registry (`BUILTIN_HARNESSES`, harness.ts:209-214) that enumerates all valid harness
+  names (`claude`, `codex`, `gemini`, `opencode`).
+- **Command auto-detection.** `detectHarnessFromCommand` (harness.ts:336-341) maps any command whose
+  first token contains `gemini` to the `gemini` harness, so `builder: "gemini --yolo"` resolves to
   `GEMINI_HARNESS` even without an explicit `builderHarness` setting.
-- **Resolver behavior.** The resolver throws a **generic** "Unknown harness" error for names it
-  does not recognize, and — on the *auto-detect* path only — **defaults to the Claude harness**
-  when no name is detected. Neither behavior communicates "retired."
-- **`codev doctor`.** Doctor warns when `gemini` is configured as an *architect*, and its message
-  explicitly states "gemini is supported **for builders**, not architects." After retirement this
-  message is actively wrong: it affirms builder support that no longer exists. Doctor does not
-  currently flag `gemini` configured as a *builder*.
+- **Shared, role-agnostic resolver.** `resolveHarness(harnessName, customHarnesses, command)`
+  (harness.ts:358) has **no role parameter** and is called by *both* `getArchitectHarness` and
+  `getBuilderHarness` (config.ts:261, 280). It throws a **generic** "Unknown harness" error for
+  unrecognized explicit names (harness.ts:376-380), returns `BUILTIN_HARNESSES[detected]` for
+  auto-detected names (:387), and otherwise **defaults to the Claude harness** (:392). None of these
+  communicates "retired," and two of them are the failure modes described above.
+- **`codev doctor`.** Doctor warns when `gemini` is configured as an *architect* and its message
+  explicitly states "gemini is supported **for builders**, not architects" (doctor.ts:816-826),
+  emitting a structured `issue:`/`recommendation:` pair at :826. After retirement this premise fully
+  **inverts** — there is no supported builder either — so the branch needs a *defined new end state*,
+  not just a reworded sentence. Doctor does not currently flag `gemini` configured as a *builder* at
+  all.
 - **README.** The README presents Gemini as a supported shell ("Other shells (Codex, Gemini) are
-  also supported"), lists the Gemini CLI `--yolo` autonomous flag, and shows a `.codev/config.json`
-  example with `"builder": "gemini --yolo"`. A soft caveat already notes the CLI "will stop
+  also supported", README:392), lists the Gemini CLI `--yolo` autonomous flag (README:436), and
+  shows a `.codev/config.json` example with **both** `"architect": "gemini --yolo"` *and*
+  `"builder": "gemini --yolo"` (README:456-457). A soft caveat already notes the CLI "will stop
   working" for retired tiers and is "tracked as a follow-up" — this spec is that follow-up.
-- **Governance docs.** `codev/resources/arch.md` and `lessons-learned.md` describe gemini as
-  "builder-only," reflecting the pre-retirement state.
+- **`afx reset`.** `harnessFromLaunchScript` (reset/context.ts:405-421) builds its
+  recognizable-name set from `Object.keys(BUILTIN_HARNESSES)`, so removing `gemini` changes how
+  reset treats a pre-existing gemini builder (see Assumptions — decided outcome).
+- **Governance docs.** `codev/resources/arch.md` (291, 311-317) and `lessons-learned.md` (80)
+  describe gemini as "builder-only," reflecting the pre-retirement state.
 - **Tests.** Several unit/integration tests assert `GEMINI_HARNESS` behavior, `GEMINI_SYSTEM_MD`
   injection, gemini auto-detection, and `--builder-cmd gemini` resolution.
 
-Scope confirmation: the `agy` consult lane and `consult -m gemini` are a **separate** subsystem and
-are already migrated off the retired CLI; they are out of scope here and remain untouched.
+Scope confirmation: the `agy` consult lane and `consult -m gemini` are a **separate** subsystem,
+already migrated off the retired CLI; they are out of scope here and remain untouched.
 
 ## Desired State
-The standalone Gemini CLI is no longer offered or treated as a supported builder harness, and every
-path a user could take to select it produces a **clear, specific retirement explanation** rather
-than a silent fallback, a generic error, or a broken launch:
+The standalone Gemini CLI is no longer offered or treated as a supported harness (builder **or**
+architect, since the resolver is shared), and every path a user could take to select it produces a
+**clear, specific retirement explanation** rather than a silent fallback, a generic error, an
+`undefined`/TypeError, or a broken launch:
 
-- Selecting `gemini` as a builder — whether via an explicit `shell.builderHarness: "gemini"` or by
-  auto-detection from `shell.builder: "gemini …"` — fails **loudly and closed** with a message that
-  states the option has been retired (Google discontinued the Gemini CLI on 2026-06-18 for
-  Pro/Ultra/free tiers) and names the supported alternatives (claude, codex, opencode, or a custom
-  harness). No silent fallback to the Claude harness on any path.
-- `gemini` is no longer enumerated among the supported/available built-in builder harnesses.
-- `codev doctor` no longer claims gemini is "supported for builders"; its guidance reflects the
-  retirement (and, ideally, flags `gemini` configured as a builder with the same clear explanation).
-- The README no longer presents Gemini as a supported builder shell; the configuration example and
-  autonomous-flags guidance point users to supported harnesses, with a plain statement that the
-  Gemini CLI builder is retired.
-- Governance docs (`arch.md`, `lessons-learned.md`) reflect that gemini is retired as a builder
+- Selecting `gemini` — via explicit `shell.builderHarness`/`shell.architectHarness: "gemini"` **or**
+  by auto-detection from `shell.builder`/`shell.architect: "gemini …"` (string or array form) —
+  fails **loudly and closed** with a message stating the option has been retired (Google ended
+  consumer-tier Gemini CLI access on 2026-06-18) and naming the supported alternatives (claude,
+  codex, opencode, or a custom harness). No silent Claude fallback and no `undefined` return on any
+  path — the retired name is intercepted before both harness.ts:387 and :392.
+- `gemini` is no longer enumerated among the supported/available built-in harnesses (it disappears
+  from `BUILTIN_HARNESSES` and from the resolver's "Available harnesses" error listing).
+- `codev doctor` no longer claims gemini is "supported for builders." Its `gemini` branch is
+  redefined to present the **retirement** for both roles, and it additionally **flags a `gemini`
+  builder configuration** with the same explanation (so users learn at config-check time, not only
+  when a spawn fails). The structured `issue:`/`recommendation:` fields are updated accordingly.
+- The README no longer presents Gemini as a supported shell: the "other shells" line, the
+  autonomous-flags table, and the config example (both the architect and builder lines) are updated
+  to supported harnesses, with a plain statement that the built-in Gemini CLI harness is retired.
+- Governance docs (`arch.md`, `lessons-learned.md`) reflect that gemini is retired as a harness
   (updated in the Review phase per the hot/cold routing discipline).
-- **Claude, Codex, OpenCode, and custom builder harnesses behave exactly as before.**
+- **Claude, Codex, OpenCode, and custom harnesses behave exactly as before**, and the entire
+  `agy` / `consult -m gemini` subsystem is untouched.
 
 ## Stakeholders
-- **Primary Users**: Codev users configuring a builder harness in `.codev/config.json` (especially
-  anyone with an existing `gemini` builder config who will now get a clear retirement message).
+- **Primary Users**: Codev users configuring a builder (or architect) harness in
+  `.codev/config.json` — especially anyone with an existing `gemini` config who will now get a clear
+  retirement message.
 - **Secondary Users**: Architects spawning builders; adopters reading the README to choose a shell.
 - **Technical Team**: Codev maintainers of the agent-farm harness subsystem (this builder) and the
   external upstream maintainer who will review/merge the PR.
 - **Business Owners**: Codev project owners (issue author / architect).
 
 ## Success Criteria
-- [ ] `gemini` is no longer registered or enumerated as a supported built-in builder harness
-      (acceptance criterion 1).
-- [ ] Selecting `gemini` as a builder via **explicit** `shell.builderHarness: "gemini"` fails with a
-      clear message that the option is **retired**, naming supported alternatives (criterion 2).
-- [ ] Selecting `gemini` via **auto-detection** from `shell.builder: "gemini …"` fails with the same
-      clear retirement message — and specifically does **not** silently resolve to the Claude
-      harness (criterion 1 + 2; closes the #929-class footgun).
-- [ ] `codev doctor` no longer states gemini is "supported for builders"; its output reflects the
-      retirement (criterion 1/2).
-- [ ] The README no longer presents Gemini as a supported builder shell; its config example and
-      autonomous-flag guidance are updated to supported harnesses with a plain retirement note.
-- [ ] Claude, Codex, OpenCode, and custom builder harnesses resolve and spawn unchanged
-      (criterion 3), demonstrated by existing green tests for those paths.
-- [ ] The harness test suite is updated to assert **retirement behavior** (clear error on both
-      resolution paths) instead of `GEMINI_HARNESS` injection; no reduction in overall coverage.
+- [ ] `gemini` is no longer registered or enumerated as a supported built-in harness — removed from
+      `BUILTIN_HARNESSES` and absent from the resolver's "Available harnesses" listing (criterion 1).
+- [ ] Selecting `gemini` via **explicit** `builderHarness: "gemini"` fails with a clear message that
+      the option is **retired**, naming supported alternatives (criterion 2).
+- [ ] Selecting `gemini` via **auto-detection** from `builder: "gemini …"` (string form) fails with
+      the same clear retirement message — specifically **not** the Claude harness and **not**
+      `undefined` (criterion 1 + 2; closes both #929-class footguns).
+- [ ] The retirement holds through the real config integration paths, not just direct
+      `resolveHarness` calls: `getBuilderHarness`, the `--builder-cmd gemini` CLI override, and the
+      **array-form** builder command (`builder: ["gemini", "--yolo"]`) all fail closed with the
+      retirement message.
+- [ ] The **architect** path is defined and covered: `getArchitectHarness` / `--architect-cmd gemini`
+      also fail closed with the retirement message (consequence of the shared resolver; stated
+      explicitly rather than left undefined).
+- [ ] `codev doctor` no longer states gemini is "supported for builders"; its `gemini` branch
+      presents the retirement and **also flags a `gemini` builder config**, verified via the
+      structured `issue:`/`recommendation:` fields (a stabler assertion target than console text).
+- [ ] The README no longer presents Gemini as a supported shell; the "other shells" line, the
+      autonomous-flags table, and **both** the architect and builder lines of the config example are
+      updated, with a plain retirement note.
+- [ ] Claude, Codex, OpenCode, and custom harnesses resolve and spawn unchanged (criterion 3),
+      demonstrated by existing green tests for those paths.
+- [ ] Each removed gemini test is **replaced by a retirement-behavior test** (rather than merely
+      deleted), so the retired paths are positively asserted. (Coverage is measured by
+      replacement, not by an absolute baseline delta.)
 - [ ] Governance docs (`arch.md` / `lessons-learned.md`) updated to reflect the retirement.
-- [ ] Documentation updated (README + governance docs); no lingering presentation of gemini as a
-      supported builder across the repo.
+- [ ] No *current, user-facing harness-selection* documentation still presents gemini as a supported
+      builder (see the scoped documentation criterion in Test Scenarios — historical artifacts and
+      the `consult -m gemini` lane are exempt).
 
 ## Constraints
 ### Technical Constraints
-- **Two resolution paths must both be covered**: explicit harness name and command auto-detection.
-  Correctness requires the retirement message on *both*; the auto-detect path must not degrade to
-  the default Claude harness.
-- **Fail closed, never mis-inject**: a retired builder must never launch under another harness's
-  role-injection mechanism (no Claude args into a `gemini` command).
+- **Shared, role-agnostic resolver.** The retirement is implemented once in the shared
+  `resolveHarness` and therefore applies to *both* architect and builder resolution. This is a
+  deliberate design choice (see Clarifying Question 4), not a threaded role parameter.
+- **Both resolution branches must be covered on the retired name**: the explicit-name path, the
+  auto-detected-name path (must not return `BUILTIN_HARNESSES['gemini']` → `undefined`, harness.ts:387),
+  and the no-match default (must not degrade to `CLAUDE_HARNESS`, :392). Intercept `gemini` before
+  both.
+- **Fail closed, never mis-inject**: a retired harness must never launch under another harness's
+  role-injection mechanism, and must never resolve to `undefined`.
 - **No changes to the `agy` consult lane, `consult -m gemini`, or `agy` architect support** (issue
-  Non-goals). This is strictly the builder harness.
+  Non-goals). This is strictly the harness resolver + its presentation.
 - **Existing harnesses untouched**: claude/codex/opencode/custom resolution and spawning must be
   behavior-identical after the change.
 - **Framework-file mirroring**: any change to a framework doc shipped in `codev-skeleton/` must be
-  mirrored in both trees. (Note: verified that **no** skeleton doc currently presents gemini as a
-  builder, so the doc changes here are self-hosted `codev/resources/*` governance docs + the
-  top-level README, which have no skeleton twin — but this must be re-confirmed during
-  implementation, not assumed.)
+  mirrored in both trees. (Verified: **no** skeleton doc currently presents gemini as a builder, so
+  the doc changes here are the top-level README + self-hosted `codev/resources/*` governance docs,
+  which have no skeleton twin — but re-grep both trees during implementation before claiming done,
+  per lessons-critical.)
 
 ### Business Constraints
 - **No self-merge**: the PR must be approved/merged by an external upstream maintainer; the change
@@ -153,41 +214,48 @@ than a silent fallback, a generic error, or a broken launch:
 - No time estimates (per protocol).
 
 ## Assumptions
-- The retirement is a **hard retirement**, not a temporary deprecation: there is no supported path
-  that keeps the Gemini CLI builder working, because the upstream CLI is gone for the affected
-  tiers. (An enterprise Gemini CLI may still exist, but Codev will not present or affirm the
-  built-in `gemini` builder harness as supported; users needing it can define a **custom harness**.)
-- Users who need Gemini-style behavior are directed to supported harnesses (claude/codex/opencode)
-  or the existing **custom harness** mechanism, which remains available and is the sanctioned
-  extension point (this is the escape hatch that keeps criterion 3's "custom builder support"
-  intact).
-- Already-running gemini builders (spawned before this change) are out of scope — they are already
-  launched; only *new* selections are gated. This is acceptable because such sessions cannot be
-  re-created once the upstream CLI is unavailable.
-- The `custom harness` path can still *name* a harness `gemini`-like via a distinct custom key; the
-  retirement applies to the built-in `gemini` name, not to a user's own custom definition.
+- The retirement is a **hard retirement of the built-in option**, not a temporary deprecation:
+  Codev will not present or affirm the built-in `gemini` harness as supported.
+- **Standard/Enterprise and API-key access is served via a custom harness.** Users who still have a
+  working Gemini CLI (enterprise subscription or API-key auth) can define a **custom harness** in
+  `.codev/config.json` — the sanctioned extension point, which remains fully available (this is what
+  keeps criterion 3's "custom builder support" intact). The retirement targets the built-in `gemini`
+  *name*, not a user's own custom definition.
+- **Already-running gemini builders are unaffected** — they are already launched; only *new*
+  selections are gated. Such sessions cannot be re-created once the upstream CLI is unavailable to
+  the user.
+- **`afx reset` outcome — DECIDED (accepted).** After `gemini` leaves `BUILTIN_HARNESSES`,
+  `harnessFromLaunchScript` (reset/context.ts:414) will no longer recognize a pre-existing gemini
+  builder's launch script and will return `null` → `afx reset` reports "cannot determine harness"
+  and declines. This is acceptable and requires no extra handling: a retired harness cannot
+  context-reset anyway (only Claude declares `supportsContextReset`), and reset already refuses
+  unrecognized harnesses loudly. Recorded here as a decided outcome, not an open question.
 
 ## Solution Approaches
 
-### Approach 1: Retirement sentinel in the resolver (Recommended)
-**Description**: Introduce an explicit notion of a **retired harness name** (e.g. a small
-retired-names registry carrying a per-name explanation). The harness resolver consults it early on
-**both** entry paths — when a name is supplied explicitly and after command auto-detection resolves
-a name — and fails with a clear, specific retirement message. Command auto-detection continues to
-recognize `gemini` (so the auto-detect path lands on the retirement message rather than silently
-defaulting to Claude). The `GEMINI_HARNESS` provider and its registry entry are removed, so gemini
-no longer appears among supported harnesses.
+### Approach 1: Retirement sentinel in the shared resolver (Recommended)
+**Description**: Introduce an explicit notion of a **retired harness name** (a small
+retired-names registry carrying a per-name explanation). The shared `resolveHarness` consults it
+early on **both** entry paths — when a name is supplied explicitly, and after command auto-detection
+resolves a name (intercepting *before* the `return BUILTIN_HARNESSES[detected]` at harness.ts:387
+and the `return CLAUDE_HARNESS` default at :392) — and fails with a clear, specific retirement
+message. `detectHarnessFromCommand` continues to recognize `gemini` so the auto-detect path lands on
+the retirement message rather than falling through. The `GEMINI_HARNESS` provider and its registry
+entry are removed, so gemini no longer appears among supported harnesses. Because the resolver is
+role-agnostic, this covers architect and builder paths in one place.
 
 **Pros**:
 - Single source of truth for "what is retired and why."
-- Clear, identical retirement message on *every* selection path (explicit + auto-detect).
+- Clear, identical retirement message on *every* selection path (explicit + auto-detect, builder +
+  architect), and guards the `undefined`-return path at :387.
 - Eliminates the silent Claude fallback footgun (fails closed).
 - Extensible: future retirements slot into the same mechanism.
 - gemini disappears from the "available harnesses" enumeration → satisfies "no longer presented."
 
 **Cons**:
-- Slightly more than a one-line delete; must ensure *both* resolver branches consult the retired
-  set (a partial implementation would reopen the footgun).
+- Slightly more than a one-line delete; a partial implementation (covering only one branch) would
+  reopen a footgun, so all three resolver exits must be handled.
+- Retires the architect path too — correct here, but a design point to state explicitly (done).
 
 **Estimated Complexity**: Low–Medium
 **Risk Level**: Low
@@ -195,7 +263,7 @@ no longer appears among supported harnesses.
 ### Approach 2: Throwing provider (mirror the OpenCode-architect pattern)
 **Description**: Keep a `gemini` entry in the built-in registry but replace its provider with one
 whose role-injection methods **throw** the retirement error (mirroring how the OpenCode harness
-throws when misused as an architect). Auto-detection is unchanged.
+throws when misused as an architect). Auto-detection unchanged.
 
 **Pros**:
 - Minimal structural change; reuses an existing in-repo precedent.
@@ -205,8 +273,8 @@ throws when misused as an architect). Auto-detection is unchanged.
 - Fails **late** (deep in the spawn path at role-injection time) rather than at resolution — worse
   diagnostics and a later failure point.
 - Keeps a "live-looking" registry entry: gemini still appears in the resolver's "available
-  harnesses" list and in other consumers that enumerate built-in harnesses, which contradicts "no
-  longer presented as supported."
+  harnesses" list and in every consumer that enumerates `BUILTIN_HARNESSES` (e.g. `afx reset`),
+  contradicting "no longer presented as supported."
 - The error only surfaces on paths that actually call role injection.
 
 **Estimated Complexity**: Low
@@ -223,76 +291,87 @@ retirement sentinel.
 - Explicit `builderHarness: "gemini"` → generic "Unknown harness" error (no retirement explanation
   → **fails criterion 2**).
 - Auto-detected `builder: "gemini …"` → **silently** resolves to the Claude harness and injects
-  Claude args into the gemini command (**fails criterion 1**, dangerous #929-class mismatch).
+  Claude args into the gemini command (**fails criterion 1**, dangerous #929-class mismatch). If
+  instead only the registry entry is removed, the auto-detect path returns `undefined` → TypeError.
 
 **Rejected**: does not meet the acceptance criteria and reintroduces a known footgun.
 
 **Recommendation**: **Approach 1.** It is the only approach that satisfies all three acceptance
-criteria and closes the silent-fallback footgun, at modest cost. The plan will also correct the
-stale `codev doctor` builder-support message and the README presentation as part of the same change.
+criteria, closes both silent-failure footguns, and covers the shared architect/builder paths in one
+place, at modest cost. The plan also corrects the stale `codev doctor` messaging (redefining its
+`gemini` branch and adding builder-side flagging) and the README presentation as part of the same
+change.
 
 ## Open Questions
 
 ### Critical (Blocks Progress)
-- [ ] None. The recommended approach and scope are determined by the issue and verified surface.
+- [ ] None. Approach, scope, and the architect-path/doctor/afx-reset decisions are all resolved
+      above.
 
 ### Important (Affects Design)
-- [ ] Should `codev doctor` additionally **flag `gemini` configured as a *builder*** (proactively,
-      at config-check time) with the retirement explanation, or is failing at spawn time sufficient?
-      (Recommendation: do both — correct the stale architect-facing message *and* surface a
-      builder-facing retirement note in doctor, since doctor is the natural "clear explanation"
-      surface. Final call deferred to the plan/consultation.)
+- [ ] None outstanding. (The doctor question — "should a `gemini` *builder* config be flagged?" — is
+      **decided: yes**, and is now a success criterion. The architect-path outcome is **decided:
+      role-agnostic retirement**.)
 
 ### Nice-to-Know (Optimization)
-- [ ] Should `afx reset` on a pre-existing `gemini` builder emit the retirement message rather than
-      simply not recognizing the harness once gemini leaves the built-in registry? (Edge case; a
-      retired harness cannot context-reset anyway. Likely "leave as-is, note in review.")
+- [ ] Exact wording of the single retirement message string (must name the 2026-06-18 consumer-tier
+      end-of-availability and the alternatives). Deferred to the plan; not blocking.
 
 ## Performance Requirements
-N/A — this change removes/gates a code path and edits docs; it has no runtime performance
-dimension (no measurable response-time, throughput, or resource-usage impact).
+N/A — this change removes/gates a code path and edits docs; it has no runtime performance dimension
+(no measurable response-time, throughput, or resource-usage impact).
 
 ## Security Considerations
 - **Fail closed (primary safety property)**: the retirement must never cause a `gemini` command to
-  be launched under another harness's role-injection mechanism. Silently injecting Claude's
-  `--append-system-prompt` (or any mismatched arguments) into a non-Claude command is the class of
-  bug Issue #929 addressed; this change must not reintroduce it. Clear, early failure is the safe
-  behavior.
-- **No new input surfaces, auth, or data-handling changes.** Authentication/authorization model:
-  N/A (unchanged).
+  be launched under another harness's role-injection mechanism (no Claude `--append-system-prompt`
+  into a non-Claude command — the Issue #929 class of bug), and must never resolve to `undefined`
+  (a TypeError is an unclean failure, not a safe one). Clear, early failure on every resolver exit
+  is the safe behavior, and is encoded as explicit tests.
+- **No new input surfaces, auth, or data-handling changes.** Authentication/authorization model: N/A
+  (unchanged).
 
 ## Test Scenarios
 ### Functional Tests
-1. **Explicit retired name (happy-path for the retirement)**: resolving a builder harness with an
-   explicit `builderHarness: "gemini"` throws a clear error containing the retirement explanation
-   and supported alternatives (not a generic "Unknown harness").
-2. **Auto-detected retired command (edge case + footgun guard)**: resolving a builder harness from
-   `builder: "gemini --yolo"` (no explicit `builderHarness`) throws the **same** retirement error —
-   and specifically does **not** return the Claude harness.
-3. **Error condition — unrelated unknown harness still generic**: an unrelated unknown name (e.g.
-   `"frobnicate"`) still throws the ordinary "Unknown harness" error (retirement handling is
-   specific to retired names, not a catch-all).
-4. **Unaffected harnesses**: claude, codex, opencode, and a representative custom harness each still
-   resolve to their correct provider and produce their correct role injection (regression guard for
+1. **Explicit retired name**: resolving with explicit `builderHarness: "gemini"` throws a clear
+   error containing the retirement explanation and supported alternatives (not a generic "Unknown
+   harness").
+2. **Auto-detected retired command (string form)**: resolving from `builder: "gemini --yolo"` (no
+   explicit `builderHarness`) throws the **same** retirement error — asserting it returns neither
+   `CLAUDE_HARNESS` nor `undefined`.
+3. **Config integration paths** (per the "every path" concern): `getBuilderHarness` with a gemini
+   config, the `--builder-cmd gemini` CLI override, and the **array-form** builder command
+   (`builder: ["gemini", "--yolo"]`) each fail closed with the retirement message.
+4. **Architect path**: `getArchitectHarness` / `--architect-cmd gemini` also fail closed with the
+   retirement message (shared-resolver consequence).
+5. **Unrelated unknown harness still generic**: an unrelated unknown name (e.g. `"frobnicate"`)
+   still throws the ordinary "Unknown harness" error (retirement handling is specific to retired
+   names, not a catch-all).
+6. **Unaffected harnesses**: claude, codex, opencode, and a representative custom harness each still
+   resolve to their correct provider and produce correct role injection (regression guard for
    criterion 3).
-5. **Doctor guidance**: `codev doctor` output no longer asserts gemini is "supported for builders,"
-   and reflects the retirement (assert on the emitted text).
+7. **Doctor guidance**: `codev doctor` no longer asserts gemini is "supported for builders"; for a
+   gemini config it emits the retirement via its structured `issue:`/`recommendation:` fields
+   (assert on those fields, not console text).
 
 ### Non-Functional Tests
-1. **Documentation consistency**: a repo-wide check confirms no user-facing doc still presents
-   `gemini` as a supported builder shell (README config example / autonomous-flags / "other shells"
-   line updated; governance docs updated).
-2. **Coverage non-regression**: overall test coverage does not drop; gemini-specific tests are
-   replaced by retirement-behavior tests rather than merely deleted.
-3. **Security/behavioral**: an explicit assertion that the auto-detect path for `gemini` never
-   returns `CLAUDE_HARNESS` (encodes the fail-closed property as a test).
+1. **Scoped documentation consistency**: a check confirms no **current, user-facing
+   harness-selection** doc still presents `gemini` as a supported builder shell (README config
+   example / autonomous-flags / "other shells" line; governance harness docs). **Explicitly
+   exempt**: historical artifacts (`codev/specs`, `plans`, `reviews`, `projects`, `docs/releases/*`,
+   release notes) and every `consult -m gemini` / `agy` consult-lane reference (out of scope by the
+   Non-goals).
+2. **Coverage by replacement**: each removed gemini-specific test has a corresponding
+   retirement-behavior test (measured as replacement, since an absolute coverage baseline is not
+   meaningful for a removal).
+3. **Security/behavioral (fail-closed encoded as tests)**: explicit assertions that the retired
+   paths return neither `CLAUDE_HARNESS` nor `undefined` on both the auto-detect and default exits.
 
 ## Dependencies
 - **External Services**: None.
-- **Internal Systems**: The agent-farm harness subsystem (`agent-farm/utils/harness.ts` resolver
-  and registry), `codev doctor`, and the config typing for `builderHarness`. The `afx reset`
-  harness-recognition path (`reset/context.ts`) consumes the built-in registry and should be sanity-
-  checked for the edge case above.
+- **Internal Systems**: The agent-farm harness subsystem (`agent-farm/utils/harness.ts` resolver,
+  registry, and detector), `codev doctor` (`commands/doctor.ts`), the config typing for
+  `builderHarness`/`architectHarness` (`agent-farm/types.ts`, `lib/config.ts`), and the `afx reset`
+  harness-recognition path (`reset/context.ts`, sanity-checked for the decided edge case).
 - **Libraries/Frameworks**: None added.
 
 ## References
@@ -301,37 +380,54 @@ dimension (no measurable response-time, throughput, or resource-usage impact).
 - Issue #929 — gemini made builder-only; introduced override-aware harness resolution (the
   silent-mismatch class of bug this spec must avoid reopening).
 - Issue #1063 — possible `agy` architect support (out of scope; does not cover builder support).
-- `packages/codev/src/agent-farm/utils/harness.ts` — current harness registry, provider, detector,
-  and resolver (orientation only; edits belong in the plan).
+- Google Gemini Code Assist deprecations (consumer-tier CLI access ended 2026-06-18;
+  Standard/Enterprise + API-key reportedly remain) — basis for the "Codev product retirement" framing.
+- `packages/codev/src/agent-farm/utils/harness.ts` — current registry, provider, detector, resolver
+  (orientation only; edits belong in the plan).
 - `codev/resources/arch.md` (harness section) — governance description of harness support.
 
 ## Risks and Mitigation
 | Risk | Probability | Impact | Mitigation Strategy |
 |------|------------|--------|---------------------|
-| Partial fix covers only the explicit path, leaving the auto-detect path to silently fall back to Claude | Medium | High | Test scenario 2 + 3 explicitly assert the auto-detect path fails closed with the retirement message; make it a required success criterion. |
-| Scope creep into the `agy`/`consult -m gemini` lanes | Low | Medium | Constraints + Non-goals pin the boundary; reviewers instructed the consult lane is out of scope. |
-| Stale `doctor` message left asserting "supported for builders" | Medium | Medium | Explicit success criterion + functional test for doctor output. |
-| A framework doc in `codev-skeleton/` missed during doc updates | Low | Low | Verified no skeleton doc presents gemini as a builder; re-grep both trees during implementation before claiming done (per lessons-critical). |
-| Breaking an existing user's running gemini builder | Low | Low | Only *new* selections are gated; running sessions are unaffected. Documented in Assumptions. |
+| Partial fix covers only one resolver exit, leaving `builder: "gemini …"` to silently return Claude (harness.ts:392) or `undefined` (harness.ts:387) | Medium | High | Test scenarios 2 + 3 + Non-Functional 3 assert the retired paths return neither `CLAUDE_HARNESS` nor `undefined`; made a required success criterion. |
+| Retiring the shared resolver unintentionally breaks a *supported* architect (codex/claude) | Low | High | Sentinel keys only on the retired name (`gemini`); scenario 6 regression-guards claude/codex/opencode/custom for both roles. |
+| Scope creep into the `agy`/`consult -m gemini` lanes | Low | Medium | Constraints + Non-goals pin the boundary; documentation criterion explicitly exempts the consult lane. |
+| Stale `doctor` message left asserting "supported for builders" | Medium | Medium | Explicit success criterion + functional test 7 on doctor's structured fields. |
+| Over-broad "no lingering presentation" criterion flags historical artifacts / consult refs | Medium | Low | Documentation criterion is scoped to *current user-facing harness-selection* docs; historical + consult refs explicitly exempt. |
+| A framework doc in `codev-skeleton/` missed during doc updates | Low | Low | Verified no skeleton doc presents gemini as a builder; re-grep both trees during implementation before claiming done. |
 
 ## Expert Consultation
-<!-- Populated by porch's 3-way consultation (Gemini via agy, Codex, Claude) after this draft. -->
-**Date**: (pending porch consultation)
-**Models Consulted**: (pending)
-**Sections Updated**: (pending)
+**Date**: 2026-08-03
+**Models Consulted**: Gemini (via agy), Codex (GPT-5.6 Sol), Claude Opus 5 — SPIR spec review, iteration 1.
+**Verdicts**: Gemini APPROVE; Codex REQUEST_CHANGES; Claude REQUEST_CHANGES.
+**Sections Updated (this iteration)**:
+- *Problem Statement / Clarifying Questions*: reframed as a **Codev product retirement** and corrected
+  the availability wording (consumer tiers ended; Standard/Enterprise + API-key remain) — Codex.
+- *Problem Statement / Approaches / Security*: split the naive-removal footgun into its **two** precise
+  failure modes (silent Claude fallback vs. `undefined`/TypeError) and required guarding both — Claude.
+- *Desired State / Success Criteria / Constraints / Clarifying Q4*: made the **role-agnostic** (shared
+  `resolveHarness`) retirement explicit, covering the architect path and the README architect line — Claude.
+- *Desired State / Success Criteria / Test 7*: defined doctor's new end state, added **builder-side
+  flagging**, and switched assertions to the structured `issue:`/`recommendation:` fields — Codex + Claude.
+- *Success Criteria / Test Scenarios*: added `getBuilderHarness`, `--builder-cmd gemini`, and
+  **array-form** builder-command coverage; reframed coverage as **replacement** — Codex + Claude.
+- *Assumptions*: recorded the **`afx reset`** outcome as a decided/accepted result (moved out of Open
+  Questions) — Claude + Gemini.
+- *Test Scenarios (Non-Functional 1)*: scoped the documentation criterion to exempt historical
+  artifacts and the `consult -m gemini` lane — Codex.
 
-Note: All consultation feedback will be incorporated directly into the relevant sections above.
+Note: All consultation feedback has been incorporated directly into the relevant sections above; the
+rebuttal document records the point-by-point disposition.
 
 ## Approval
 - [ ] Technical Lead Review
 - [ ] Product Owner Review
 - [ ] Stakeholder Sign-off
-- [ ] Expert AI Consultation Complete
+- [x] Expert AI Consultation Complete (iteration 1; re-verification pending after this revision)
 
 ## Notes
 - The **custom harness** mechanism remains the sanctioned extension point for any user who still has
-  access to an (e.g. enterprise) Gemini CLI: the retirement targets the built-in `gemini` name, not
-  a user's own custom harness definition.
-- This spec deliberately keeps implementation mechanics (exact files, the shape of the retired-name
-  registry, the precise message string) for the plan; it fixes the *behavior* and *acceptance*, not
-  the code.
+  access to a (e.g. enterprise / API-key) Gemini CLI: the retirement targets the built-in `gemini`
+  name, not a user's own custom harness definition.
+- This spec fixes *behavior* and *acceptance*, deliberately leaving implementation mechanics (exact
+  files, the shape of the retired-name registry, the precise message string) to the plan.
