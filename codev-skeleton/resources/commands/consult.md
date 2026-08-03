@@ -26,7 +26,7 @@ consult stats [options]
 an id persistently instead.
 
 ```bash
-consult -m codex --model-id gpt-5.6-sol "Review this design"
+consult -m codex --model-id gpt-5.6-sol --prompt "Review this design"
 ```
 
 - **Precedence**: `--model-id` > `consult.models.<lane>` > the lane's shipped default.
@@ -209,8 +209,9 @@ One deliberate exception: a `gemini` lane **with no model id resolved** still sk
 when `agy` is missing or unauthenticated (consultation is best-effort there). Once an id *is*
 resolved — from either `consult.models.gemini` **or** `--model-id` — a rejected model becomes a hard
 failure for that lane, because you asked for a specific model and did not get it. What still skips
-rather than fails, even with an id, are environment causes that are not the model's fault: `agy`
-absent, unauthenticated, timed out, or killed by a signal.
+rather than fails, even with an id, are causes that are not the model's fault: `agy` absent,
+unauthenticated, timed out, killed by a signal, or exiting **successfully** having produced no
+output at all.
 
 ## Modes
 
