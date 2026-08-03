@@ -18,7 +18,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import { RingBuffer } from '../../terminal/ring-buffer.js';
-import { classifyScreen, RENDER_CEILING_UNITS } from '../servers/render-gate.js';
+import { classifyScreen } from '../servers/render-gate.js';
 import type { RingSnapshot, GateProfile } from '../servers/render-gate.js';
 import { CLAUDE_PROFILE, CODEX_PROFILE, AGY_PROFILE, resolveProfile } from '../servers/gate-profiles.js';
 
@@ -168,18 +168,17 @@ describe('render-gate — synthetic branch coverage (Spec 1313)', () => {
   });
 });
 
-describe('render-gate — whole-ring render performance (Spec 1313 D2)', () => {
+describe('render-gate — whole-ring render at any size (Spec 1313 D2 + over-ceiling removal)', () => {
   it('renders a realistic large (~4MB) ring WHOLE within a CI-aware budget', async () => {
     // The D2 fix renders the whole coherent ring (no 1MB tail slice). Build ~4MB of
     // newline-free filler so it lands in the ring's unbounded `partial` (the claude
     // full-screen-TUI shape, #1047) rather than being truncated by the 1000-line cap;
-    // a busy composer tail follows. This stays below RENDER_CEILING_UNITS, so it
-    // renders WHOLE — the real steady-state path (largest real capture ≈ 3MB).
+    // a busy composer tail follows. The whole ring renders (no slice, no size cap) — the
+    // real steady-state path (largest real capture ≈ 3MB).
     const filler = 'x'.repeat(4 * 1024 * 1024);
     const raw = filler + '\r\n' + screen('❯ occupied prompt tail', '──────');
     const snap = snapshotFromRaw(raw);
     expect(snap.replay.length).toBeGreaterThan(4 * 1024 * 1024);
-    expect(snap.replay.length).toBeLessThan(RENDER_CEILING_UNITS); // renders whole, not capped
 
     // Warm up (JIT + first-parse), then assert the MIN over several runs. The min
     // strips GC/scheduling outliers, approximating the classifier's steady-state
@@ -203,18 +202,20 @@ describe('render-gate — whole-ring render performance (Spec 1313 D2)', () => {
     expect(best).toBeLessThan(budgetMs);
   });
 
-  it('holds an over-ceiling ring UNRENDERED — even one whose clean-looking tail would classify clean', async () => {
-    // A >RENDER_CEILING_UNITS #1047 basin is NEVER rendered from an arbitrary tail:
-    // that could reconstruct a clean composer while the whole ring holds a draft (a
-    // false CLEAN — Codex/Claude diff review). So the gate hard-holds over-ceiling,
-    // content-independent and without rendering. Here the ring ENDS in a clean empty
-    // composer (marker + rule) that WOULD classify clean if rendered — yet it must be
-    // held busy/over-ceiling. (Short-circuits before xterm, so the 8M string is cheap.)
-    const over = 'x'.repeat(RENDER_CEILING_UNITS + 100) + '\r\n❯ \r\n──────────';
-    expect(over.length).toBeGreaterThan(RENDER_CEILING_UNITS);
-    const v = await classifyScreen({ replay: over, cols: 110, rows: 32 }, CLAUDE_PROFILE);
-    expect(v.clean).toBe(false);
-    expect(v.detail).toBe('over-ceiling');
+  it('renders a ring ABOVE the old over-ceiling WHOLE and classifies its empty composer CLEAN', async () => {
+    // The removed `over-ceiling` hold used to reject any ring past a fixed 8M-unit size
+    // UNRENDERED → a permanent delivery outage for the busiest agents (a live ~14M-unit
+    // empty-composer terminal was stuck until relaunch). Now the whole ring renders at any
+    // size: a >8M-unit #1047 basin (newline-free filler in the partial — the claude
+    // alt-screen shape) that ENDS in a clean empty composer classifies CLEAN and delivers.
+    // Deliberately past the old ceiling — this is exactly the regression the change fixes.
+    const filler = 'x'.repeat(9 * 1024 * 1024);
+    const raw = filler + '\r\n' + screen(`❯ ${DIM}Try "refactor doctor.ts"${RESET}`, '──────────────────────');
+    const snap = snapshotFromRaw(raw);
+    expect(snap.replay.length).toBeGreaterThan(8 * 1024 * 1024); // past the removed 8M ceiling
+    const v = await classifyScreen(snap, CLAUDE_PROFILE);
+    expect(v.clean).toBe(true);
+    expect(v.detail).toBe('empty');
   });
 });
 

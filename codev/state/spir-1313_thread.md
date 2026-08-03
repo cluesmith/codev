@@ -1301,3 +1301,69 @@ Status delta I surfaced: PR #1330 is now mergeable=CONFLICTING (not just DIRTY/b
 before it lands; maintainer-side, I won't touch it. Deferred follow-ups (D3, verdict memoization, >1MB-with-draft
 fixture, R7 input-race, R8 agy-marker) remain flagged in the review's Technical Debt. HOLDING at verify-approval
 (strict mode: no self-approve, no merge, no rebase, no status.yaml edits). Awaiting further instructions.
+
+### 2026-08-02 — RESUMED (fresh context) for architect-directed follow-up: remove over-ceiling permanent hold + verdict memo.
+CHANNEL CORRECTION (architect): the architect's own terminal is itself OVER-CEILING, so `afx send architect`
+is HELD by the render gate and never lands. Report surfaces are now (1) PR #1330 comments (`gh pr comment 1330`)
+and (2) this thread. Architect polls both; no afx-send notifications. (Poetic: the bug we're removing is currently
+gagging the architect's mailbox.)
+
+SCOPE (architect+user-directed, folds into PR #1330 — NOT verify-done):
+  1. Remove the render-gate over-ceiling PERMANENT hold — Option 1: render the WHOLE ring unbounded (a >8M-unit
+     #1047 basin used to hold `busy`/over-ceiling FOREVER until terminal relaunch — a real outage; a 14M-unit
+     empty-composer architect terminal hit it live). Whole-ring render is already correct at any size, so removing
+     the cap just extends correct classification; no slice ⇒ no new false-CLEAN.
+  2. Add the ringToken-keyed verdict memo (currently flagged "deferred follow-up"): skip re-rendering a STATIC ring
+     every 1500ms backstop tick; must compose with the existing gate→write TOCTOU re-validation (on a memo hit no
+     await occurs ⇒ token unchanged ⇒ re-check passes trivially). Bounded, pruned to the held-agent set.
+  3. OOM open question (raise in CMAP): partial is unbounded (#1047) ⇒ a pathological runaway could OOM one whole-
+     ring render. Any cap that crosses must RECOVER/escalate (visibility, retry), NEVER permanently hold — don't
+     reintroduce the defect under a bigger number. #1047 root-cause (persistent xterm) is a SEPARATE future project.
+
+DONE THIS SESSION so far:
+  • MERGE origin/main → builder/spir-1313 (was 83 behind; PR #1330 CONFLICTING). 2 conflicts, both send-path:
+    - tower-routes.ts: kept 1313 mailbox-first normal path; PRESERVED Spec 1273 submitToSession per-terminal lock on
+      BOTH human-bypass paths (escape auto-merged to it; interrupt now routes through it too — origin/main serialized
+      interrupt via the old else-branch, so not a regression). Bypass paths skip the per-agent serializer ⇒ need it.
+    - tower-routes.test.ts: kept the gate-path un-split-write/separate-Enter assertion (+>1 write).
+    Verified: tsc --noEmit clean; tower-routes + spec-1273-submission-lock suites GREEN (104). Commit 6a50091a.
+    HEAD now 0-behind/96-ahead of origin/main ⇒ PR #1330 CONFLICTING clears on push (pushing once at end, green+CMAP'd).
+  • porch rollback verify→implement (architect-authorized). SIDE EFFECT: reset all 9 plan_phases to pending
+    (phase_1 in_progress) + reset pr + verify-approval gates to pending (spec/plan-approval still approved). Will
+    re-flow implement→review→pr→verify; HUMAN approves pr + verify-approval at the end. NOT running `porch run`
+    (would strict-drive re-implementation of done phases) — folding a focused change manually per architect direction.
+NEXT: implement render-gate change (render whole ring, drop over-ceiling; add drainer-owned verdict memo) → tests →
+docs → full suite → 3-way CMAP on the diff (raise OOM Q) → commit → push PR #1330 → PR-comment report. NOT approving
+any gate, NOT merging.
+
+### 2026-08-02 — IMPLEMENTED over-ceiling removal + verdict memo. Full suite GREEN (4259 pass / 48 skip / 0 fail). CMAP next.
+IMPLEMENTED (render-gate.ts + mailbox-delivery.ts):
+- **Over-ceiling removal (Option 1):** deleted the `RENDER_CEILING_UNITS` short-circuit in classifyScreen + the const
+  + the `'over-ceiling'` GateVerdict.detail member + the over-ceiling arm of the classifierStuck liveness escalation.
+  The gate now renders the WHOLE ring at ANY size. Module header rewritten (no-cap + accepted #1047 OOM residual).
+  Liveness net for an unclassifiable huge ring survives via `no-region-end`/`no-composer-marker`.
+- **Verdict memo:** `CachedVerdict {token,verdict}`, owned by MailboxDrainer (`verdictMemo` map), keyed on `ringToken`,
+  pruned to the held-agent set each tick. On a token match → reuse verdict, NO re-render, NO await → the existing
+  gate→write TOCTOU re-validation passes trivially (honored the line-279 intent). Threaded `memo?` through
+  deliverAgentMail(Serialized). **Confined to the backstop tick** — scheduleDrain (fast trigger) always re-classifies
+  (fires because the ring changed). Test-observability getter `memoizedAgents`.
+- **OOM open Q (for CMAP):** NO delivery-blocking cap (a cap that HOLDS just re-creates the outage). Mitigated by the
+  memo + deferred to #1047 (unbounded partial → persistent xterm, separate project). Documented in module header.
+TESTS: render-gate.test.ts (over-ceiling→busy REPLACED with >8M-unit ring → renders WHOLE → CLEAN; perf test
+de-`RENDER_CEILING`'d). send-delivery.test.ts +4 memo tests (static→classify once; re-classify after token change;
+memo-hit-on-clean still delivers; prune when mail clears).
+
+MERGE-INTEGRATION FINDINGS (semantic conflicts git auto-merged TEXTUALLY — 3 suite failures, all FIXED; NOT caused
+by the render-gate change):
+  1. cron #1142 tests (from main) asserted the OLD direct-delivery model (mockSession.write + UNDEFINED
+     mockBroadcastMessage) while my Phase 6 rerouted cron through `deps.deliver`. Merged SOURCE is correct
+     (evaluateCondition(...,exitCode) + deliverMessage→deps.deliver); converted the 4 #1142 tests to assert the
+     deliver port. (Their old `.write` "not called" asserts were VACUOUS under Phase 6.)
+  2. spec-1280 T16 manifest guard (from main) diffs origin/main...HEAD and demands every prompt-bearing file be in a
+     *1280* manifest → mis-fires on EVERY branch that touches a prompt surface after merging main (here 1313's
+     arch-critical→CLAUDE/AGENTS propagation). SCOPED it to branches that touch the 1280 manifest dir. **Edits
+     another spec's test — FLAGGED for architect/1280-owner review.**
+  3. (merge send-path) preserved Spec 1273 submitToSession on escape + interrupt bypass paths (not a regression).
+Full suite: 4259 pass / 48 skip / 0 fail. tsc clean. NEXT: commit (2 parts: merge-fixes, then feature) → 3-way CMAP
+on the diff (raise OOM Q + the spec-1280 cross-spec edit) → push PR #1330 → PR-comment report. NOT approving gates,
+NOT merging.

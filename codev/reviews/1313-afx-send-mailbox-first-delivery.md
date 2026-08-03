@@ -453,9 +453,10 @@ trailing CR or the rule renders indented and misses the pattern.
 fixed:**
 - **Over-ceiling render could false-clean** (Codex + Claude, independently): the first-cut `capForRender` sliced an
   over-ceiling ring at an ESC boundary and rendered the tail — but an arbitrary tail can reconstruct a clean-looking
-  composer while the whole ring holds a draft. **Fixed:** an over-ceiling ring is held UNRENDERED
-  (`detail: 'over-ceiling'`), content-independent — the strictly-safe direction. Added an adversarial test (a
-  >ceiling ring whose clean-looking tail *would* classify clean → still held).
+  composer while the whole ring holds a draft. **Fixed (interim — superseded in Round 5, which removes the cap
+  entirely):** an over-ceiling ring is held UNRENDERED (`detail: 'over-ceiling'`), content-independent — the
+  strictly-safe direction. Added an adversarial test (a >ceiling ring whose clean-looking tail *would* classify
+  clean → still held).
 - **gate→write staleness amplified 3–5×** (Claude, "blocking-ish"): the whole-ring classify awaits ~tens–130 ms (vs
   ~20 ms under the old cap); a keystroke landing during it made the clean verdict stale, and the code re-validated
   the mailbox *row* but not the *screen*. **Fixed:** sample a cheap ring change-token
@@ -474,6 +475,63 @@ fixed:**
 
 tsc clean; full unit suite **4190 pass / 48 skip / 0 fail**. Live end-to-end re-verification is architect-run (a
 shared-Tower restart can't be driven from a worktree) — acceptance checklist handed over.
+
+### Round 5 (post-merge follow-up) — over-ceiling permanent-hold removed + verdict memo implemented
+
+Architect+user-directed follow-up folded into PR #1330 after the branch was brought current with `main`.
+
+**The over-ceiling hold was a latent outage, now removed.** Round 4 held any ring over `RENDER_CEILING_UNITS`
+(8 M units) UNRENDERED (`detail: 'over-ceiling'`) as the strictly-safe direction against a sliced-tail false-clean.
+But because `partial` is unbounded (#1047), a long-lived claude/codex/agy terminal accretes its whole alt-screen
+frame past 8 M in *normal* use — a live ~14 M-unit architect terminal with an empty composer was stuck, its mail
+undeliverable until relaunch. A size cap that HOLDS is a permanent delivery outage for exactly the busiest agents.
+**Fix (Option 1): render the WHOLE ring at any size — no cap.** Whole-ring render is already correct at any size
+(it is *why* everything under the old cap rendered whole), so removing the short-circuit just extends correct
+classification; no slice is introduced, so there is no new false-clean. Removed `RENDER_CEILING_UNITS`, the
+`'over-ceiling'` verdict member, and the over-ceiling arm of the liveness escalation. An unclassifiable huge ring
+still HOLDS and escalates via the surviving classifier-stuck net (`no-region-end`/`no-composer-marker`), so a
+genuinely-broken screen is never a silent loss.
+
+**Verdict memo — the Round-4 deferred CPU follow-up, now implemented.** The 1.5 s backstop re-rendered every held
+agent's whole ring each tick; for a static ring that is pure waste (and now that whole-ring render is unbounded,
+the worst-case single render is larger). The memo caches the gate verdict keyed on the same `ringToken`
+(`currentSeq:partialBytes:cols×rows:app`) the gate→write TOCTOU re-validation already trusts: a token match means a
+byte-identical screen, so the cached verdict is reused without re-rendering. It composes with the TOCTOU guard by
+construction — a memo hit performs no `await`, so the post-classify `ringToken !== tokenBefore` re-check passes
+trivially. Owned + bounded by `MailboxDrainer` (pruned to the held-agent set each tick); the fast `scheduleDrain`
+trigger deliberately does NOT use it — an event-driven re-check fires *because* the ring changed, so it must always
+re-classify. (That decision also fixed a real interaction: a pre-existing scheduleDrain test flips the verdict
+without advancing the ring token, which the memo — correctly — would otherwise treat as unchanged; confining the
+memo to the periodic tick left that test's asserted behavior intact.)
+
+**OOM open question (raised for the phase consult).** With no cap and an unbounded `partial`, a pathological runaway
+dump could make one whole-ring render allocate/parse hundreds of MB and stall the loop. Decision: keep NO
+delivery-blocking cap — any cap that HOLDS just reintroduces the outage under a bigger number (the architect's
+explicit constraint). The risk is mitigated by the memo (repeated renders are rare) and is ultimately the #1047
+root cause (retire the unbounded `partial` for a persistent headless screen — a separate future project, out of
+scope here). Documented as accepted residual risk in the render-gate module header.
+
+**Merge-integration fixes (semantic conflicts `git` auto-merged textually).** Bringing `main` in (the branch was
+83 behind; PR #1330 CONFLICTING) surfaced two suite failures that were NOT flagged as conflicts but were
+semantically incompatible:
+- **cron `#1142` tests vs Phase 6 delivery.** `main`'s #1142 (expose `exitCode` to cron conditions) shipped tests
+  written against the OLD direct-delivery model (`mockSession.write` + `mockBroadcastMessage`); this branch's Phase 6
+  rerouted cron through the `deps.deliver` mailbox+gate port. The merged *source* integrates both correctly
+  (`evaluateCondition(…, exitCode)` + `deliverMessage → deps.deliver`); only the merged *tests* asserted a delivery
+  mechanism that no longer exists. Converted the four #1142 tests to assert on the `deliver` port (preserving their
+  exitCode-condition intent). Their old `mockSession.write` "not called" assertions had passed *vacuously* under
+  Phase 6 (that write never happens); the converted `deliver`-port assertions are meaningful.
+- **spec-1280 T16 manifest guard mis-fires on any prompt-touching branch.** `main`'s spec-1280 shipped a permanent
+  test that diffs `origin/main...HEAD`, finds prompt-bearing files (CLAUDE.md/AGENTS.md/protocols/roles), and demands
+  each appear in a *1280* manifest. It passes trivially on `main` and on the 1280 branch, but fails on EVERY feature
+  branch that legitimately changes a prompt surface after merging main — here, 1313's arch-critical→CLAUDE/AGENTS
+  propagation. Scoped the guard to actual 1280 work (branches that touch the 1280 manifest dir), preserving it for
+  1280 while removing the landmine for all future branches. **Flagged for architect / spec-1280-owner review** — it
+  edits another project's test.
+
+The Spec-1273 `submitToSession` per-terminal submission lock (added on `main`) was preserved across the merge on both
+explicit human-bypass paths (`escape` + `interrupt`), which do NOT route through the mailbox's per-agent serializer
+and so need their own anti-fusion lock.
 
 ## Lessons Learned
 
@@ -606,13 +664,16 @@ discipline). The one hot-tier addition this project earned is architectural (the
   Extracting a `runGlobalMigrations(db)` that both `getGlobalDb()` and tests call would let all migration tests
   exercise the real code. Deferred here (a DB-init-critical-path refactor is out of scope for a delivery bugfix);
   worth doing once, repo-wide, because it benefits every migration.
-- **Render-gate verdict memoization (deferred — CPU)** (Round 4 diff-CMAP): D2 renders the WHOLE ring on every
+- **Render-gate verdict memoization (RESOLVED in Round 5)** (Round 4 diff-CMAP): D2 renders the WHOLE ring on every
   1.5 s backstop pass for each held-mail agent; an idle held ring is byte-identical tick over tick, so re-rendering
   is waste. A verdict memo keyed on the ring change-token (`currentSeq`+`partialBytes` — already plumbed for the
   gate→write re-validation) makes the steady state free. Gemini rated it a merge blocker; Codex + Claude "deferrable
-  only with a real ≥5-held-agent Tower RSS/CPU measurement". The over-ceiling hard-hold bounds the worst-case
-  per-tick render (~130 ms) meanwhile. **Implement + measure in a focused follow-up** (the WeakMap-on-session shape
-  is sound; the risk is a stale verdict in the delivery-critical path, so it needs its own tests before shipping).
+  only with a real ≥5-held-agent Tower RSS/CPU measurement". **Implemented in Round 5** (see the post-merge follow-up
+  above): the memo is owned + bounded by `MailboxDrainer` (pruned to the held-agent set each tick), keyed on
+  `ringToken`, and confined to the backstop tick — the fast `scheduleDrain` trigger always re-classifies. It composes
+  with the gate→write re-validation by construction (a memo hit does no `await`, so the token re-check passes
+  trivially), with dedicated tests: static ring classified once, re-classify after the token advances, memo-hit-on-
+  clean still delivers, memo pruned when an agent's mail clears.
 - **No real >1 MB-with-a-draft gate fixture** (Round 4, Claude): every committed real capture is an *empty*
   composer (whole→CLEAN). The false-clean risk is covered by *composition* — real empty captures prove whole-render
   reconstruction fidelity, and the 4 MB perf test proves large-render + a draft → busy — but a single real capture
@@ -625,8 +686,9 @@ discipline). The one hot-tier addition this project earned is architectural (the
   *stuck* idle false-busy via a transient ±1-row SIGWINCH nudge — is outweighed by its reflow→false-clean risk
   (Gemini) and safe-impl cost (Codex/Claude: observable-completion re-gate + inbound-input-generation tracking +
   skip-when-a-viewer-is-attached + absolute throttle). Reconsider only if a residual idle false-busy is observed
-  after D2/D1. (An over-ceiling #1047 basin never shrinks, so that specific permanent hold relies on the
-  liveness/escalation surface, which now fires for it.)
+  after D2/D1. (The over-ceiling hard-hold this parenthetical referenced was REMOVED in Round 5 — the gate now
+  renders the whole ring at any size; a genuinely-unclassifiable huge ring still holds + liveness-escalates via
+  `no-region-end`/`no-composer-marker`.)
 - **`findMarkerRow` "last match wins" (pre-existing, Round 4 Claude)**: a bottom-of-screen notification line
   starting with `❯` would shadow a drafted composer above it. Not introduced here; note before any composer-anchor
   rework (a positive top-rule anchor would fix it).

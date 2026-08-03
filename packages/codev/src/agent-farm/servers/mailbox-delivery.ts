@@ -51,9 +51,10 @@ export interface DeliverySession {
      * and resets to 0 when a newline flushes it — which also bumps `currentSeq`. So the
      * pair advances on ANY new output and never repeats for different content. The
      * delivery path samples it around the async whole-ring classify to re-validate that
-     * the screen hasn't moved (a keystroke landing mid-render) before writing onto it.
-     * (A verdict memo keyed on this same signal — to skip re-rendering a static ring
-     * every backstop tick — is a deferred follow-up.) `RingBuffer` exposes both getters.
+     * the screen hasn't moved (a keystroke landing mid-render) before writing onto it,
+     * and the drainer memoizes the gate verdict on this same signal so a STATIC ring is
+     * classified once, not re-rendered every backstop tick (see {@link ringToken} and
+     * {@link MailboxDrainer}). `RingBuffer` exposes both getters.
      */
     readonly currentSeq: number;
     readonly partialBytes: number;
@@ -166,9 +167,9 @@ export interface DeliveryOutcome {
    * The gate's internal detail when a `busy` hold came from the render-gate (Spec 1313
    * render-gate hardening) — telemetry only. Distinguishes a legitimately-occupied line
    * (`user-text`, a human present) from a classifier that CANNOT verify the composer
-   * (`no-region-end`/`no-composer-marker`/`over-ceiling` = a drifted profile or a
-   * pathological ring), which {@link MailboxDrainer.recordStreak} escalates to liveness
-   * telemetry. Absent for non-gate holds (`no-live-pty`/`no-profile`) and deliveries.
+   * (`no-region-end`/`no-composer-marker` = a drifted profile or an unrenderable frame),
+   * which {@link MailboxDrainer.recordStreak} escalates to liveness telemetry. Absent
+   * for non-gate holds (`no-live-pty`/`no-profile`) and deliveries.
    */
   detail?: GateVerdict['detail'];
 }
@@ -185,7 +186,7 @@ export function agentKey(workspacePath: string, toAgent: string): string {
   return `${workspacePath}\0${toAgent}`;
 }
 
-/** The WHOLE-ring reconnect-replay snapshot the gate classifies (rendered in full; an over-ceiling ring is held unrendered — see render-gate.ts). */
+/** The WHOLE-ring reconnect-replay snapshot the gate classifies (rendered in full at any size — see render-gate.ts). */
 function snapshotOf(session: DeliverySession): RingSnapshot {
   return {
     replay: session.ringBuffer.getAll().join('\n'),
@@ -198,14 +199,30 @@ function snapshotOf(session: DeliverySession): RingSnapshot {
  * A cheap, monotone token of the ring's rendered state plus the classify inputs
  * (dimensions + resolved app). It advances on ANY new output (see
  * {@link DeliverySession.ringBuffer}), so two samples that match mean the classified
- * screen is unchanged. Used to re-validate, after the async whole-ring classify, that
- * the screen hasn't moved (a keystroke landing during the ~tens-of-ms render) before
- * writing onto it. (A verdict memo on this same token — to skip re-rendering a static
- * ring every backstop tick — is a deferred follow-up; see the review's Technical Debt.)
+ * screen is unchanged. Two consumers rely on that:
+ *   1. gate→write TOCTOU re-validation — sampled before the async whole-ring classify
+ *      and re-checked after, so a keystroke landing during the ~tens-of-ms render holds
+ *      instead of writing onto the new draft;
+ *   2. the drainer's verdict memo ({@link CachedVerdict}) — a cached verdict is reused
+ *      only while this token is unchanged, so a static ring is classified once instead
+ *      of re-rendered every 1.5 s backstop tick.
+ * Both trust the same property: an unchanged token means a byte-for-byte unchanged
+ * classified screen.
  */
 function ringToken(session: DeliverySession, profile: GateProfile): string {
   const { currentSeq, partialBytes } = session.ringBuffer;
   return `${currentSeq}:${partialBytes}:${session.info.cols}x${session.info.rows}:${profile.app}`;
+}
+
+/**
+ * A gate verdict cached against the {@link ringToken} that produced it (Spec 1313
+ * render-gate verdict memo). The drainer keeps one per held agent and reuses it only
+ * while the token is unchanged, so a cached verdict can never be served for a screen
+ * that has moved. Keyed/bounded by {@link MailboxDrainer}; see {@link deliverAgentMail}.
+ */
+interface CachedVerdict {
+  token: string;
+  verdict: GateVerdict;
 }
 
 /** Reconstruct the delivered-message broadcast frame from a persisted row. */
@@ -238,7 +255,8 @@ export async function deliverAgentMail(
   ports: DeliveryPorts,
   db: Database.Database,
   workspacePath: string,
-  toAgent: string
+  toAgent: string,
+  memo?: Map<string, CachedVerdict>
 ): Promise<DeliveryOutcome> {
   const held = findHeldForAgent(db, workspacePath, toAgent);
   if (held.length === 0) return { delivered: [], reason: null };
@@ -256,10 +274,33 @@ export async function deliverAgentMail(
   const profile = ports.resolveProfile(session);
   if (!profile) return hold('no-profile');
 
-  // Sample the ring's change-token BEFORE the async classify, so we can re-validate
-  // afterward that the screen didn't move under us (below).
+  // Sample the ring's change-token BEFORE the (possibly memoized) classify, so we can
+  // re-validate afterward that the screen didn't move under us (below).
   const tokenBefore = ringToken(session, profile);
-  const verdict = await ports.classify(snapshotOf(session), profile);
+
+  // Verdict memo (Spec 1313 render-gate follow-up). The 1.5 s backstop re-renders every
+  // held agent's WHOLE ring each tick; for a static ring that whole-render is pure waste.
+  // Reuse the cached verdict while the token is unchanged since we last classified this
+  // agent — the token advances on ANY new output, so a match means the screen is
+  // byte-for-byte what we already rendered. A memo hit does NO await, so the post-classify
+  // re-validation below (`ringToken(...) !== tokenBefore`) passes trivially: no keystroke
+  // can land in a render window that never opened. The memo is owned + bounded by the
+  // drainer's backstop {@link MailboxDrainer.tick} (pruned to the held-agent set each tick);
+  // every OTHER caller — the request/cron paths and the fast scheduleDrain trigger — passes
+  // none and classifies fresh, so an event-driven re-check is never served a cached verdict.
+  // (Same-agentKey respawn: a fresh PTY's token diverges on its first output, so a stale hit
+  // is not reachable for a live session — the same token-uniqueness the TOCTOU re-validation
+  // already trusts.)
+  const cacheKey = agentKey(workspacePath, toAgent);
+  const cached = memo?.get(cacheKey);
+  let verdict: GateVerdict;
+  if (cached && cached.token === tokenBefore) {
+    verdict = cached.verdict;
+  } else {
+    verdict = await ports.classify(snapshotOf(session), profile);
+    memo?.set(cacheKey, { token: tokenBefore, verdict });
+  }
+
   if (!verdict.clean) {
     // Carry the gate detail so a sustained classifier-stuck streak (a drifted profile
     // or a pathological ring) escalates to liveness telemetry instead of holding silently.
@@ -339,10 +380,11 @@ export function deliverAgentMailSerialized(
   ports: DeliveryPorts,
   db: Database.Database,
   workspacePath: string,
-  toAgent: string
+  toAgent: string,
+  memo?: Map<string, CachedVerdict>
 ): Promise<DeliveryOutcome> {
   return deliverySerializer.run(agentKey(workspacePath, toAgent), () =>
-    deliverAgentMail(ports, db, workspacePath, toAgent)
+    deliverAgentMail(ports, db, workspacePath, toAgent, memo)
   );
 }
 
@@ -385,6 +427,10 @@ export class MailboxDrainer {
   // submit/quiescence signals for one agent coalesces onto the same pending promise
   // (one gate check, not one per trigger); the slot is released when the pass begins.
   private readonly scheduledDrains = new Map<string, Promise<void>>();
+  // Spec 1313 render-gate verdict memo: a cached gate verdict per agent, keyed on the ring
+  // change-token, so a static held ring skips its whole-ring re-render every tick. Owned
+  // here so it stays bounded — {@link tick} prunes it to the current held-agent set.
+  private readonly verdictMemo = new Map<string, CachedVerdict>();
 
   constructor(opts: { intervalMs?: number; pruneRetentionDays?: number; escalationMs?: number } = {}) {
     this.intervalMs = opts.intervalMs ?? DEFAULT_BACKSTOP_INTERVAL_MS;
@@ -413,6 +459,15 @@ export class MailboxDrainer {
     return this.notCleanStreak;
   }
 
+  /**
+   * Agent keys that currently hold a cached gate verdict (render-gate memo).
+   * Observability/test only: {@link tick} prunes this to the current held-agent set, so
+   * it never grows past the number of agents holding mail.
+   */
+  get memoizedAgents(): ReadonlyArray<string> {
+    return [...this.verdictMemo.keys()];
+  }
+
   /** One backstop pass. Guarded against re-entry so a slow gate can't overlap ticks. */
   async tick(): Promise<void> {
     const ports = this.ports;
@@ -427,8 +482,14 @@ export class MailboxDrainer {
           toAgent: row.to_agent,
         });
       }
+      // Prune the verdict memo to the current held-agent set before the pass: an agent
+      // whose mail all delivered/dismissed is no longer walked here, so its cached verdict
+      // would otherwise leak for the life of the process. Bounds the memo to |held agents|.
+      for (const key of this.verdictMemo.keys()) {
+        if (!agents.has(key)) this.verdictMemo.delete(key);
+      }
       for (const [key, { workspacePath, toAgent }] of agents) {
-        const outcome = await deliverAgentMailSerialized(ports, db, workspacePath, toAgent);
+        const outcome = await deliverAgentMailSerialized(ports, db, workspacePath, toAgent, this.verdictMemo);
         this.recordStreak(key, outcome);
       }
       this.escalateOverdue(ports, db);
@@ -491,8 +552,9 @@ export class MailboxDrainer {
     // NEVER deliver on its own — surface it instead of holding silently. Two such classes:
     //   • `no-profile` — the app is unrecognized (a net-new or drifted classifier);
     //   • a classifier-stuck gate detail — a recognized app whose composer can't be bounded
-    //     (`no-region-end`/`no-composer-marker` = a drifted TUI layout; `over-ceiling` = a
-    //     pathological #1047 ring that never shrinks).
+    //     (`no-region-end`/`no-composer-marker` = a drifted TUI layout or an unrenderable
+    //     frame — e.g. a pathological #1047 ring whose whole-render yields no bounded
+    //     composer; this is the liveness net that replaced the removed over-ceiling hold).
     // Scoped to those on purpose: a `busy`/`user-text` streak is a human legitimately at the
     // line (Constraint 1 — must not false-alarm), and `no-live-pty` is no session at all.
     // Reported once at the crossing (not per tick); the threshold filters transient boot/
@@ -502,8 +564,7 @@ export class MailboxDrainer {
     const classifierStuck =
       outcome.reason === 'no-profile' ||
       outcome.detail === 'no-region-end' ||
-      outcome.detail === 'no-composer-marker' ||
-      outcome.detail === 'over-ceiling';
+      outcome.detail === 'no-composer-marker';
     if (classifierStuck && next === LIVENESS_STREAK_THRESHOLD) {
       const [ws, agent] = key.split('\0');
       this.ports?.onLiveness({ workspacePath: ws, toAgent: agent, streak: next });
@@ -538,6 +599,10 @@ export class MailboxDrainer {
     const run = Promise.resolve().then(async () => {
       this.scheduledDrains.delete(key);
       try {
+        // NB: the fast trigger classifies FRESH (no verdict memo). A submit/quiescence
+        // trigger fires precisely because the ring just changed, so it must re-check the
+        // gate — the memo is the backstop tick's optimization for a STATIC ring, not this
+        // event-driven re-check. tick owns and prunes the memo alone.
         const outcome = await deliverAgentMailSerialized(ports, db, workspacePath, toAgent);
         this.recordStreak(key, outcome);
       } catch (err) {

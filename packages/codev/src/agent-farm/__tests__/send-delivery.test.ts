@@ -409,6 +409,88 @@ describe('MailboxDrainer (Spec 1313, Phase 4)', () => {
   });
 });
 
+describe('MailboxDrainer verdict memo (Spec 1313 render-gate follow-up)', () => {
+  let db: Database.Database;
+  beforeEach(() => {
+    db = new Database(':memory:');
+    db.exec(GLOBAL_SCHEMA);
+  });
+  afterEach(() => db.close());
+
+  const held = (toAgent: string, body = 'hi', now = 1000) =>
+    mailbox.enqueue(db, { workspacePath: '/ws', toAgent, body, formattedMessage: body }, now);
+
+  it('classifies a STATIC ring once: a second backstop tick reuses the cached verdict (no re-render)', async () => {
+    const h = harness();
+    // Stable ring token across ticks (currentSeq/partialBytes constant) + a busy verdict,
+    // so the message stays held and both ticks attempt delivery for the same agent.
+    h.setSession('spir-1', fakeSession({ ringBuffer: { getAll: () => ['❯ '], currentSeq: 7, partialBytes: 0 } }));
+    let classifyCalls = 0;
+    h.ports.classify = async () => { classifyCalls++; return BUSY; };
+    held('spir-1');
+    const drainer = new MailboxDrainer({ intervalMs: 999999 });
+    drainer.start(h.ports, db);
+    await drainer.tick(); // classify #1 — memo miss
+    await drainer.tick(); // static token → memo hit, NOT re-rendered
+    drainer.stop();
+    expect(classifyCalls).toBe(1);
+  });
+
+  it('re-classifies after the ring CHANGES — the memo is keyed on the ring token', async () => {
+    const h = harness();
+    let seq = 7;
+    h.setSession('spir-1', fakeSession({
+      ringBuffer: { getAll: () => ['❯ '], get currentSeq() { return seq; }, partialBytes: 0 },
+    }));
+    let classifyCalls = 0;
+    h.ports.classify = async () => { classifyCalls++; return BUSY; };
+    held('spir-1');
+    const drainer = new MailboxDrainer({ intervalMs: 999999 });
+    drainer.start(h.ports, db);
+    await drainer.tick(); // classify #1 (miss)
+    await drainer.tick(); // memo hit (token unchanged)
+    seq = 8;              // new output → token advances
+    await drainer.tick(); // classify #2 (token changed → re-render)
+    drainer.stop();
+    expect(classifyCalls).toBe(2);
+  });
+
+  it('a memo hit on a CLEAN line still delivers — TOCTOU re-validation passes trivially (no await on a hit)', async () => {
+    const h = harness();
+    // Two held messages, static ring: tick 1 classifies CLEAN and delivers the oldest;
+    // tick 2 memo-hits the same CLEAN verdict and delivers the next WITHOUT re-classifying.
+    // (The fake ring is static across the delivery; a real ring would move after the Enter
+    // and re-classify — this isolates the memo-hit delivery path and its trivial TOCTOU.)
+    h.setSession('spir-1', fakeSession({ ringBuffer: { getAll: () => ['❯ '], currentSeq: 3, partialBytes: 0 } }));
+    let classifyCalls = 0;
+    h.ports.classify = async () => { classifyCalls++; return CLEAN; };
+    held('spir-1', 'm1', 1000);
+    held('spir-1', 'm2', 1001);
+    const drainer = new MailboxDrainer({ intervalMs: 999999 });
+    drainer.start(h.ports, db);
+    await drainer.tick(); // delivers m1 (classify #1)
+    await drainer.tick(); // memo hit → delivers m2, no re-classify
+    drainer.stop();
+    expect(classifyCalls).toBe(1);
+    expect(h.writes.map((w) => w.formattedMessage)).toEqual(['m1', 'm2']);
+  });
+
+  it('bounds the memo: an agent whose mail clears is pruned from the memo on the next tick', async () => {
+    const h = harness();
+    h.setSession('spir-1', fakeSession({ ringBuffer: { getAll: () => ['❯ '], currentSeq: 1, partialBytes: 0 } }));
+    h.setVerdict(BUSY); // held → a memo entry is created
+    const row = held('spir-1');
+    const drainer = new MailboxDrainer({ intervalMs: 999999 });
+    drainer.start(h.ports, db);
+    await drainer.tick();
+    expect(drainer.memoizedAgents).toHaveLength(1);
+    mailbox.markDelivered(db, row.id, h.now); // clear the row out-of-band → no held agents next tick
+    await drainer.tick();
+    expect(drainer.memoizedAgents).toHaveLength(0); // pruned to the (now empty) held-agent set
+    drainer.stop();
+  });
+});
+
 describe('MailboxDrainer.scheduleDrain — fast delivery triggers (Spec 1313, Phase 5)', () => {
   let db: Database.Database;
   beforeEach(() => {

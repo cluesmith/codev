@@ -24,22 +24,35 @@
  * wrapper/boot screen) → NOT clean → the message stays held. There is no force path.
  *
  * Replay fidelity (Spec 1313 render-gate hardening): the gate renders the WHOLE
- * coherent ring, not a fixed tail slice. A claude/codex TUI on the alternate
- * screen (`\x1b[?1049h`) encodes its state in the cumulative byte stream from the
- * alt-screen-enter onward (why `ring-buffer.ts` keeps the `partial` whole), so a
- * mid-stream tail slice corrupts the reconstruction — dropping the composer marker
- * (→ false `no-composer-marker`) or the composer's lower rule (→ the region spills
- * into status chrome → false `user-text`). Both were real fields bugs traced to the
- * old 1 MB `capReplay` slice (architect cap-sweep: every whole render classifies
+ * coherent ring at any size, not a fixed tail slice. A claude/codex TUI on the
+ * alternate screen (`\x1b[?1049h`) encodes its state in the cumulative byte stream
+ * from the alt-screen-enter onward (why `ring-buffer.ts` keeps the `partial` whole),
+ * so a mid-stream tail slice corrupts the reconstruction — dropping the composer
+ * marker (→ false `no-composer-marker`) or the composer's lower rule (→ the region
+ * spills into status chrome → false `user-text`). Both were real field bugs traced to
+ * the old 1 MB `capReplay` slice (architect cap-sweep: every whole render classifies
  * CLEAN; the verdict flipped purely with slice size). There is no "most-recent
- * full-repaint boundary" to slice at for an alt-screen app, so the correctness path
- * is: render the whole ring; a ring that exceeds {@link RENDER_CEILING_UNITS} (a
- * pathological #1047 unbounded-partial basin) is NOT rendered from an arbitrary tail
- * — an arbitrary slice can reconstruct a clean-looking composer while the whole ring
- * holds a draft (a false CLEAN), so an over-ceiling ring is held unconditionally.
+ * full-repaint boundary" to slice at for an alt-screen app, so the whole ring is the
+ * only faithful input — every time, regardless of size.
+ *
+ * No size cap on delivery (Spec 1313 over-ceiling removal): the gate never holds a
+ * ring for being large. A long-lived session accretes its whole alt-screen frame into
+ * the unbounded `partial` (#1047), so a busy terminal grows past any fixed size in
+ * normal use — an earlier `over-ceiling` hold therefore meant a permanent delivery
+ * outage for exactly the busiest agents (a live ~14 M-unit empty-composer architect
+ * terminal was stuck, its mail undeliverable until relaunch). Whole-ring render is
+ * correct at any size, so the fix is simply to render it; the verdict memo in
+ * `mailbox-delivery.ts` keeps the 1.5 s backstop from re-rendering a STATIC large ring
+ * every tick. Residual risk (accepted, deferred to #1047): a pathological runaway dump
+ * could make one render allocate/parse hundreds of MB and stall the loop — NOT
+ * mitigated by a hold cap (that just reintroduces the outage under a bigger number),
+ * but by the memo's rarity and, ultimately, by retiring the unbounded `partial` for a
+ * persistent headless screen (a separate project, #1047). An unclassifiable huge ring
+ * still HOLDS and escalates via the classifier-stuck liveness surface
+ * (`no-region-end`/`no-composer-marker`), so it is never a silent loss.
  *
  * Cost (spike g2, @xterm/headless 6.0.0): 2 ms @ 13 KB, 67 ms @ 4 MB — cheap enough
- * to gate every delivery for realistic rings; the ceiling bounds the worst case.
+ * to gate every delivery for realistic rings.
  */
 
 // `@xterm/headless` resolves to its CommonJS entry (no `exports` map, no
@@ -57,10 +70,9 @@ const { Terminal } = xtermHeadless;
 
 /**
  * The ring snapshot the gate classifies — the production reconnect-replay shape.
- * `replay` is the WHOLE `ringBuffer.getAll().join('\n')` (rendered in full; only a
- * pathological over-{@link RENDER_CEILING_UNITS} basin is capped); `cols`/`rows`
- * size the headless terminal to match the live session so wrapping reconstructs
- * identically.
+ * `replay` is the WHOLE `ringBuffer.getAll().join('\n')`, rendered in full at any size
+ * (no cap — see the module header); `cols`/`rows` size the headless terminal to match
+ * the live session so wrapping reconstructs identically.
  */
 export interface RingSnapshot {
   replay: string;
@@ -107,34 +119,11 @@ export interface GateVerdict {
    * reason). `no-composer-marker` = wrapper/boot/picker/unknown screen (or a torn
    * replay that dropped the marker); `no-region-end` = a marker with no rule/status
    * line beneath it to bound the composer (a partial/mid-repaint frame) — held
-   * rather than scanning into status chrome; `over-ceiling` = the ring exceeds
-   * {@link RENDER_CEILING_UNITS} and is held unrendered (an arbitrary tail could
-   * false-clean); `user-text` = a draft or menu occupies the composer; `empty` = clean.
+   * rather than scanning into status chrome; `user-text` = a draft or menu occupies
+   * the composer; `empty` = clean.
    */
-  detail: 'no-composer-marker' | 'no-region-end' | 'over-ceiling' | 'user-text' | 'empty';
+  detail: 'no-composer-marker' | 'no-region-end' | 'user-text' | 'empty';
 }
-
-/**
- * Absolute render ceiling for a gate check, in JS string length units (UTF-16 code
- * units — NOT bytes; a multibyte glyph is 1–2 units). The gate renders the WHOLE
- * ring for correctness (an alt-screen frame only reconstructs from its full stream —
- * see the module header). A ring larger than this — a pathological #1047
- * unbounded-partial basin — is NOT rendered from an arbitrary tail: no reliable
- * repaint boundary exists to slice at, and an arbitrary slice can reconstruct a
- * clean-looking composer while the whole ring holds a draft (a false CLEAN). So an
- * over-ceiling ring is held UNRENDERED (`detail: 'over-ceiling'`, the fail-safe
- * direction), bounding worst-case classify cost to a whole render just under the
- * ceiling (~130 ms @ 8 M units). Set generously above realistic rings (largest
- * observed ≈ 3 M units) so real sessions always render whole. Caveat: an #1047 basin
- * never shrinks, so a genuinely-empty over-ceiling prompt would stay held
- * indefinitely — that agent needs the held-mail escalation/liveness surface (see
- * mailbox-delivery.ts), which flags a sustained hold for a human.
- */
-// NB: distinct from tower-terminals.ts's own `RING_SEED_MAX_BYTES` (1 MB), which caps
-// the WEBSOCKET RECONNECT SEED (bandwidth to a reconnecting browser). The two were once
-// the same value; they now intentionally diverge — the gate renders the whole ring for
-// correctness, the reconnect seed stays small — so keep them SEPARATE, not a shared const.
-export const RENDER_CEILING_UNITS = 8 * 1024 * 1024; // 8 M UTF-16 units (~8 MB ASCII)
 
 /**
  * Box-drawing / prompt chrome that is never "user text". The composer marker
@@ -194,14 +183,10 @@ export async function classifyScreen(snapshot: RingSnapshot, profile: GateProfil
   const { cols, rows } = snapshot;
   const replay = snapshot.replay;
 
-  // An over-ceiling ring is held UNRENDERED (never sliced): no reliable repaint
-  // boundary exists to slice an alt-screen stream at, and an arbitrary tail can
-  // reconstruct a clean-looking composer while the whole ring holds a draft — a
-  // false CLEAN. Hold in the safe direction. This also bounds the render cost below.
-  if (replay.length > RENDER_CEILING_UNITS) {
-    return { clean: false, reason: 'busy', detail: 'over-ceiling' };
-  }
-
+  // Render the WHOLE ring at any size — never a slice, never a size-based hold. An
+  // alt-screen frame only reconstructs from its full cumulative stream, so a tail
+  // slice would false-clean and a size cap would strand the busiest agents' mail
+  // (see the module header): there is no size at which holding beats rendering.
   const term = new Terminal({ cols, rows, allowProposedApi: true, scrollback: 2000 });
   try {
     await new Promise<void>((resolve) => term.write(replay, resolve));
