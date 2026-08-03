@@ -9,15 +9,9 @@
  *
  * This test is written in Phase 0, before the first manifest exists, precisely
  * because the guard must predate the thing it guards.
- *
- * Post-integration note (Spec 1313 integration review): the branch-diff completeness
- * guard has been removed. Once Spec 1280 integrated, it lived on `main` where its
- * `origin/main...HEAD` predicate made it a silent no-op on every unrelated branch;
- * deleting it is cleaner than re-scoping. What remains here validates manifest
- * *structure* (required row fields, per-batch cap, known directory) against the
- * committed 1280 manifests.
  */
 import { describe, it, expect } from 'vitest';
+import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
@@ -26,6 +20,9 @@ const manifestDir = path.join(
   repoRoot,
   'codev/projects/1280-prompt-surface-judgment-not-ru/manifests',
 );
+
+/** Files a manifest is responsible for listing: prompt-bearing surfaces only. */
+const PROMPT_BEARING = /^(CLAUDE\.md|AGENTS\.md|codev(-skeleton)?\/(protocols|roles)\/.*\.md)$/;
 
 interface Manifest {
   file: string;
@@ -95,5 +92,28 @@ describe('T16 — manifest completeness (M11)', () => {
         }
       }
     }
+  });
+
+  it('every prompt-bearing file changed on this branch appears in some manifest', () => {
+    let changed: string[];
+    try {
+      changed = execFileSync('git', ['diff', '--name-only', 'origin/main...HEAD'], {
+        cwd: repoRoot,
+        encoding: 'utf-8',
+      })
+        .split('\n')
+        .map((s) => s.trim())
+        .filter((s) => PROMPT_BEARING.test(s));
+    } catch {
+      return; // no origin/main to diff against (fresh clone / CI shallow) — skip
+    }
+    if (changed.length === 0) return;
+
+    const listed = new Set(manifests().flatMap((m) => m.rows.map((r) => r.path)));
+    const missing = changed.filter((f) => !listed.has(f));
+    expect(
+      missing,
+      `changed but absent from every manifest — the architect cannot inspect what is not listed:\n${missing.join('\n')}`,
+    ).toEqual([]);
   });
 });
