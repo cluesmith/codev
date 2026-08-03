@@ -1,9 +1,14 @@
 /**
  * Agent harness abstraction.
  *
- * Encapsulates how different agent CLI tools (Claude, Codex, Gemini, etc.)
+ * Encapsulates how different agent CLI tools (Claude, Codex, etc.)
  * handle role/system prompt injection. Built-in providers cover Claude, Codex,
- * and Gemini. Custom providers can be defined in .codev/config.json.
+ * and OpenCode. Custom providers can be defined in .codev/config.json.
+ *
+ * The built-in Gemini CLI harness was retired in Issue #1338 (Google ended
+ * consumer-tier Gemini CLI availability on 2026-06-18); selecting it now fails
+ * closed with a retirement message instead of resolving a provider. See
+ * RETIRED_HARNESSES below.
  *
  * Two integration patterns exist:
  * - Node spawn() call sites: use buildRoleInjection() → returns args + env
@@ -174,17 +179,6 @@ export const CODEX_HARNESS: HarnessProvider = {
   }),
 };
 
-export const GEMINI_HARNESS: HarnessProvider = {
-  buildRoleInjection: (_content, filePath) => ({
-    args: [],
-    env: { GEMINI_SYSTEM_MD: filePath },
-  }),
-  buildScriptRoleInjection: (_content, filePath) => ({
-    fragment: '',
-    env: { GEMINI_SYSTEM_MD: filePath },
-  }),
-};
-
 export const OPENCODE_HARNESS: HarnessProvider = {
   buildRoleInjection: () => {
     throw new Error(
@@ -209,9 +203,64 @@ export const OPENCODE_HARNESS: HarnessProvider = {
 export const BUILTIN_HARNESSES: Record<string, HarnessProvider> = {
   claude: CLAUDE_HARNESS,
   codex: CODEX_HARNESS,
-  gemini: GEMINI_HARNESS,
   opencode: OPENCODE_HARNESS,
 };
+
+// =============================================================================
+// Retired harnesses
+// =============================================================================
+
+/**
+ * Built-in harness names Codev no longer supports, each mapped to the
+ * explanation shown when a user still selects it.
+ *
+ * A retired name is intercepted on *every* `resolveHarness` exit — the explicit
+ * path and the command auto-detect path — so it fails loudly and closed rather
+ * than silently falling back to Claude (the Issue #929 mis-injection class) or
+ * returning `undefined` (a `BUILTIN_HARNESSES[name]` miss → downstream
+ * TypeError). See `resolveHarness` and Issue #1338.
+ *
+ * Escape hatch: a user who retains access to a retired CLI (e.g. an
+ * enterprise/API-key Gemini subscription) can still wire it as a *custom*
+ * harness in .codev/config.json — the retirement targets the built-in name,
+ * not a user's own definition.
+ */
+export const RETIRED_HARNESSES: Record<string, string> = {
+  gemini:
+    'The built-in Gemini CLI harness is retired. Google ended Gemini CLI ' +
+    'availability for consumer accounts (free, Pro, and Ultra tiers) on ' +
+    '2026-06-18, so it no longer works for most users. Use a supported harness ' +
+    'instead: claude, codex, or opencode. If you still have Gemini CLI access ' +
+    '(a Standard/Enterprise subscription or API-key auth), configure it as a ' +
+    'custom harness in .codev/config.json under the "harness" section. ' +
+    'See issue #1338.',
+};
+
+/**
+ * Whether `name` is a retired built-in harness. Uses an own-property check so
+ * inherited Object keys (`constructor`, `toString`, …) are never misread as
+ * retired.
+ */
+export function isRetiredHarness(name: string): boolean {
+  return Object.prototype.hasOwnProperty.call(RETIRED_HARNESSES, name);
+}
+
+/**
+ * The retirement explanation for `name`, or `undefined` when `name` is not a
+ * retired harness.
+ */
+export function getRetirement(name: string): string | undefined {
+  return isRetiredHarness(name) ? RETIRED_HARNESSES[name] : undefined;
+}
+
+/**
+ * Throw the consistent retirement Error for retired harness `name`. Returns
+ * `never` so callers can use it as a resolver exit on any branch and keep one
+ * identical message regardless of which path selected the retired name.
+ */
+export function throwRetired(name: string): never {
+  throw new Error(getRetirement(name) ?? `The "${name}" harness is retired.`);
+}
 
 // =============================================================================
 // Template expansion
@@ -349,11 +398,15 @@ export function detectHarnessFromCommand(command: string): string | undefined {
  * Resolve a harness name to a HarnessProvider.
  *
  * Resolution order:
- * 1. Explicit harnessName → built-in or custom provider
- * 2. Auto-detect from command string basename (if command provided)
- * 3. Default to claude (backward compatible)
+ * 1. Explicit harnessName → built-in provider, else custom provider
+ * 2. Retired name → throw the retirement error (fail closed). A same-named
+ *    custom harness still wins for an *explicit* name (the escape hatch), but an
+ *    auto-detected retired command is always retired — auto-detection never
+ *    consults custom harnesses (Issue #1338).
+ * 3. Auto-detect from command string basename (if command provided)
+ * 4. Default to claude (backward compatible)
  *
- * Throws if harnessName is set but doesn't match any known provider.
+ * Throws if harnessName is retired, or is set but doesn't match any provider.
  */
 export function resolveHarness(
   harnessName: string | undefined,
@@ -368,6 +421,11 @@ export function resolveHarness(
     if (customHarnesses && harnessName in customHarnesses) {
       return buildCustomHarnessProvider(customHarnesses[harnessName]);
     }
+
+    // A retired name with no custom override fails closed with a clear message.
+    // Checked after the custom lookup so an explicit custom `gemini` (the
+    // escape hatch for retained enterprise/API-key access) still resolves.
+    if (isRetiredHarness(harnessName)) throwRetired(harnessName);
 
     const knownNames = Object.keys(BUILTIN_HARNESSES);
     const customNames = customHarnesses ? Object.keys(customHarnesses) : [];
@@ -384,6 +442,12 @@ export function resolveHarness(
   if (command) {
     const detected = detectHarnessFromCommand(command);
     if (detected) {
+      // Intercept a retired detected name BEFORE the BUILTIN_HARNESSES lookup:
+      // it must never return undefined (removed registry entry) nor fall through
+      // to the Claude default below (the #929 silent-mismatch class). Auto-detect
+      // resolves the built-in namespace only, so a detected `gemini` is retired
+      // even when a custom `gemini` exists.
+      if (isRetiredHarness(detected)) throwRetired(detected);
       return BUILTIN_HARNESSES[detected];
     }
   }

@@ -17,9 +17,24 @@ import { resolve } from 'node:path';
 // Mock loadConfig to avoid depending on the real workspace's config files.
 // The agent-farm config.ts imports from lib/config.ts which would detect
 // af-config.json in the real workspace and error.
+//
+// The shell block is a mutable, hoisted object so the retirement tests (#1338)
+// can drive builder/architect to a gemini command (string OR array form) or an
+// explicit gemini *Harness. Every retirement test resets it in afterEach, so
+// the default (claude everywhere) is what all other tests observe.
+const configMock = vi.hoisted(() => ({
+  shell: { architect: 'claude', builder: 'claude', shell: 'bash' } as {
+    architect: string | string[];
+    builder: string | string[];
+    shell: string;
+    architectHarness?: string;
+    builderHarness?: string;
+  },
+}));
+
 vi.mock('../../lib/config.js', () => ({
   loadConfig: () => ({
-    shell: { architect: 'claude', builder: 'claude', shell: 'bash' },
+    shell: configMock.shell,
     porch: { consultation: { models: ['gemini', 'codex', 'claude'] } },
     framework: { source: 'local' },
   }),
@@ -135,8 +150,57 @@ describe('getArchitectHarness / getBuilderHarness override-awareness (#929)', ()
     expect(getArchitectHarness().buildResume).toBeUndefined();
   });
 
-  it('--builder-cmd gemini → gemini builder harness (no claude resume)', () => {
-    setCliOverrides({ builder: 'gemini' });
+  it('--builder-cmd codex → codex builder harness (no claude resume)', () => {
+    setCliOverrides({ builder: 'codex' });
     expect(getBuilderHarness().buildResume).toBeUndefined();
+  });
+});
+
+// Issue #1338 — the built-in gemini harness is retired. Every config path that
+// resolves to gemini (an explicit *Harness, a --*-cmd override, or an
+// auto-detected gemini command in string OR array form) must fail closed with
+// the retirement, never silently resolve the Claude harness (#929-class
+// mismatch) or undefined.
+describe('gemini harness retirement (#1338)', () => {
+  const savedArchitectCmd = process.env.TOWER_ARCHITECT_CMD;
+
+  afterEach(() => {
+    setCliOverrides({});
+    configMock.shell.architect = 'claude';
+    configMock.shell.builder = 'claude';
+    delete configMock.shell.architectHarness;
+    delete configMock.shell.builderHarness;
+    if (savedArchitectCmd === undefined) {
+      delete process.env.TOWER_ARCHITECT_CMD;
+    } else {
+      process.env.TOWER_ARCHITECT_CMD = savedArchitectCmd;
+    }
+  });
+
+  it('--builder-cmd gemini fails closed with the retirement', () => {
+    setCliOverrides({ builder: 'gemini' });
+    expect(() => getBuilderHarness()).toThrow(/retired/i);
+  });
+
+  it('--architect-cmd gemini fails closed with the retirement', () => {
+    delete process.env.TOWER_ARCHITECT_CMD;
+    setCliOverrides({ architect: 'gemini' });
+    expect(() => getArchitectHarness()).toThrow(/retired/i);
+  });
+
+  it('explicit builderHarness "gemini" fails closed with the retirement', () => {
+    configMock.shell.builderHarness = 'gemini';
+    expect(() => getBuilderHarness()).toThrow(/retired/i);
+  });
+
+  it('array-form builder ["gemini", "--yolo"] fails closed with the retirement', () => {
+    configMock.shell.builder = ['gemini', '--yolo'];
+    expect(() => getBuilderHarness()).toThrow(/retired/i);
+  });
+
+  it('the retirement message names the cause and a supported alternative', () => {
+    setCliOverrides({ builder: 'gemini' });
+    expect(() => getBuilderHarness()).toThrow(/2026-06-18/);
+    expect(() => getBuilderHarness()).toThrow(/claude/);
   });
 });

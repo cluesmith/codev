@@ -97,3 +97,63 @@ re-verified against source):
 4 phases: (1) resolver core+tests (2) fail-closed spawn/launch (no orphaned state / no Tower crash)
 (3) doctor (4) README+CHANGELOG. Governance arch/lessons → Review phase.
 Next: porch done → re-verify → plan-approval gate → STOP for human approval.
+
+## Plan APPROVED (2026-08-03) → Implement phase_1
+Architect cleared plan-approval and locked two decisions (do NOT re-open):
+1. Role-agnostic retirement via shared resolver — no role param.
+2. Full architect-side handling in tower-utils.ts: guard siblingRegistrationIsLive (:291)
+   → return false AND fail gemini-architect launches with the retirement (scope catch to the
+   retirement error, rethrow others; regression-test claude/codex). [phase 2]
+Governance arch/lessons deferred to Review. Small self-contained commits (external merge).
+
+### phase_1 — retire gemini in the shared resolver (harness.ts + resolver/config tests)
+Blast radius verified: GEMINI_HARNESS imported only by harness.ts (prod) + harness.test.ts,
+harness-integration.test.ts, discover-resume-session.test.ts. config.test.ts uses the 'gemini'
+STRING (not the export). All other gemini test refs = consult/bench/image lanes (out of scope)
+or doctor.ts (phases 2–3). Two comment-only refs to sweep: spawn-worktree.test.ts:344,
+tower-instances.test.ts:612 ("codex/gemini builders…").
+Implementation:
+- harness.ts: + RETIRED_HARNESSES registry (gemini→message w/ 2026-06-18 cause, claude/codex/
+  opencode alternatives, custom-harness escape hatch, #1338) + isRetiredHarness/getRetirement/
+  throwRetired (own-property check, prototype-safe). Removed GEMINI_HARNESS + its BUILTIN entry.
+  Kept gemini in detectHarnessFromCommand. resolveHarness: explicit = builtin→custom→retired→
+  generic throw; auto-detect = retired-check BEFORE BUILTIN_HARNESSES[detected]. Fail closed —
+  never CLAUDE_HARNESS, never undefined. Updated module header + resolver doc comment.
+- Tests updated: harness.test.ts (retirement + escape-hatch + built-in-not-shadowed +
+  isRetiredHarness/getRetirement incl. prototype-safety), harness-integration.test.ts
+  (Scenario 3 → retirement; kept codex no-GEMINI_SYSTEM_MD guard; Scenario 8 → call-site
+  propagates retirement via mockImplementationOnce(throwRetired)), discover-resume-session.test.ts
+  (gemini regression guard → opencode, same intent), config.test.ts (vi.hoisted mutable shell
+  mock → --builder-cmd/--architect-cmd/explicit builderHarness/array-form all fail closed +
+  message content; #929 builder test re-pointed gemini→codex to keep override-awareness).
+  Swept 2 comment-only refs (spawn-worktree.test.ts, tower-instances.test.ts).
+- Env gotcha (recorded for siblings): fresh worktree had NO node_modules and codev-core
+  was unbuilt. Fix: `pnpm install --frozen-lockfile` (root) then build codev-core BEFORE codev
+  (`pnpm --filter @cluesmith/codev-core build`). Without core built, ~all unit suites fail with
+  `Cannot find package '@cluesmith/codev-core/*'` + `Skeleton directory not found` — purely
+  environmental, not code. Also: `pnpm test -- run <files>` injects a stray `--` that makes
+  vitest ignore path filters; use `pnpm --filter @cluesmith/codev exec vitest run <files>`.
+- VERIFIED: `pnpm --filter @cluesmith/codev build` exit 0 (tsc clean). 4 target files 98/98.
+  Full unit suite (excl. e2e) 4116 passed / 48 pre-existing skips / 0 failed. GEMINI_HARNESS
+  fully gone (grep clean). Next: porch check → porch done (build-complete) → 3-way consult.
+
+### phase_1 CONSULT — iter1 UNANIMOUS APPROVE (2026-08-03)
+Gemini APPROVE/HIGH, Codex APPROVE/HIGH, Claude APPROVE/HIGH. No change requests. Porch advanced
+to phase_2. NOTE: porch's chore commits only touch status.yaml — the builder commits the phase CODE
+(phase_2 precondition: "previous phase committed"). Committing phase_1 code as its own commit.
+
+## phase_2 — fail closed at spawn/launch boundaries (no orphaned state, no Tower crash)
+Confirmed line refs vs source:
+- spawn.ts worktree-creating entry points: spawnSpec(:314), spawnTask(:500), spawnProtocol(:575),
+  spawnWorktree(:658), spawnIssueDrivenBuilder(:718). spawnShell(:633) creates NO worktree.
+  getBuilderHarness currently at :471 / :850 (AFTER state creation). Plan's ~:506/:583/:662/:764
+  drifted; real functions above.
+- tower-utils.ts getArchitectHarness sites: buildArchitectArgs(:174 def,:179 call),
+  siblingRegistrationIsLive(:286 def,:291 call — PREDICATE, guard→false),
+  resolveArchitectLaunch(:334 def,:357 call), freshLaunch closure(:509 call).
+Design: new `assertBuilderHarnessNotRetired(workspaceRoot?)` in config.ts (mirrors resolveHarness
+precedence: builtin→return, custom-same-name→return escape hatch, retired→throwRetired, unknown→
+defer to later call). Call it at top of each worktree-creating spawn fn BEFORE ensureDirectories/
+createWorktree/initPorch. Architect: guard siblingRegistrationIsLive (catch retirement→false,
+rethrow others); launch boundary (buildArchitectArgs) already throws retirement via getArchitectHarness
+— make it a clean scoped error. Regression-test claude/codex both roles.

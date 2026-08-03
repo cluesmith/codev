@@ -609,7 +609,7 @@ describe('tower-instances', () => {
   // =========================================================================
   // Issue #929 / #1145 — architect launch never discovery-resumes
   //
-  // #929's crash-loop guard (codex/gemini + stale Claude jsonl must not launch
+  // #929's crash-loop guard (a non-claude architect like codex + stale Claude jsonl must not launch
   // `<cmd> --resume`) is subsumed by #1145: launchInstance no longer consults
   // the jsonl store at all. Its ONLY resume source is the session id stored on
   // this workspace's `main` architect row. A fresh workspace with a personal

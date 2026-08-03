@@ -2,14 +2,25 @@ import { describe, it, expect } from 'vitest';
 import {
   CLAUDE_HARNESS,
   CODEX_HARNESS,
-  GEMINI_HARNESS,
   OPENCODE_HARNESS,
   buildCustomHarnessProvider,
   validateCustomHarnessConfig,
   resolveHarness,
   detectHarnessFromCommand,
+  isRetiredHarness,
+  getRetirement,
   type CustomHarnessConfig,
 } from '../utils/harness.js';
+
+// Capture whether resolveHarness returned a provider or threw — lets a test
+// assert a retired path returns NEITHER a provider NOR undefined (it throws).
+function resolveResult(fn: () => unknown): { returned?: unknown; threw?: Error } {
+  try {
+    return { returned: fn() };
+  } catch (e) {
+    return { threw: e as Error };
+  }
+}
 
 describe('harness', () => {
   const ROLE_CONTENT = '# Role\n\nYou are an architect.';
@@ -61,22 +72,7 @@ describe('harness', () => {
     // so architects on Codex spawn fresh and nothing is persisted.
     it('has no session capability', () => {
       expect(CODEX_HARNESS.session).toBeUndefined();
-      expect(GEMINI_HARNESS.session).toBeUndefined();
       expect(OPENCODE_HARNESS.session).toBeUndefined();
-    });
-  });
-
-  describe('GEMINI_HARNESS', () => {
-    it('buildRoleInjection returns GEMINI_SYSTEM_MD env var', () => {
-      const result = GEMINI_HARNESS.buildRoleInjection(ROLE_CONTENT, ROLE_FILE);
-      expect(result.args).toEqual([]);
-      expect(result.env).toEqual({ GEMINI_SYSTEM_MD: ROLE_FILE });
-    });
-
-    it('buildScriptRoleInjection returns env with empty fragment', () => {
-      const result = GEMINI_HARNESS.buildScriptRoleInjection(ROLE_CONTENT, ROLE_FILE);
-      expect(result.fragment).toBe('');
-      expect(result.env).toEqual({ GEMINI_SYSTEM_MD: ROLE_FILE });
     });
   });
 
@@ -115,10 +111,6 @@ describe('harness', () => {
 
     it('CODEX_HARNESS does not have getWorktreeFiles', () => {
       expect(CODEX_HARNESS.getWorktreeFiles).toBeUndefined();
-    });
-
-    it('GEMINI_HARNESS does not have getWorktreeFiles', () => {
-      expect(GEMINI_HARNESS.getWorktreeFiles).toBeUndefined();
     });
   });
 
@@ -271,9 +263,14 @@ describe('harness', () => {
       expect(provider).toBe(CODEX_HARNESS);
     });
 
-    it('resolves built-in gemini', () => {
-      const provider = resolveHarness('gemini');
-      expect(provider).toBe(GEMINI_HARNESS);
+    it('explicit gemini fails closed with the retirement (never claude, never undefined)', () => {
+      // Fail closed: a retired name resolves to NEITHER CLAUDE_HARNESS (the #929
+      // silent-mismatch class) NOR undefined. Throwing is that guarantee.
+      const r = resolveResult(() => resolveHarness('gemini'));
+      expect(r.returned).toBeUndefined();
+      expect(r.returned).not.toBe(CLAUDE_HARNESS);
+      expect(r.threw?.message).toMatch(/retired/i);
+      expect(r.threw?.message).toContain('2026-06-18');
     });
 
     it('resolves built-in opencode', () => {
@@ -307,14 +304,59 @@ describe('harness', () => {
       expect(() => resolveHarness('bad', customHarnesses)).toThrow('my-agent');
     });
 
+    it('unrelated unknown name throws the generic error, not the retirement', () => {
+      expect(() => resolveHarness('frobnicate')).toThrow('Unknown harness "frobnicate"');
+      expect(() => resolveHarness('frobnicate')).not.toThrow(/retired/i);
+    });
+
+    it('the available-harnesses listing no longer includes gemini', () => {
+      expect(() => resolveHarness('frobnicate')).toThrow(/claude/);
+      expect(() => resolveHarness('frobnicate')).toThrow(/codex/);
+      expect(() => resolveHarness('frobnicate')).toThrow(/opencode/);
+      expect(() => resolveHarness('frobnicate')).not.toThrow(/gemini/);
+    });
+
+    it('explicit custom gemini resolves to the custom provider (retained-access escape hatch)', () => {
+      const customHarnesses: Record<string, CustomHarnessConfig> = {
+        gemini: {
+          roleArgs: ['--system', '${ROLE_FILE}'],
+          roleScriptFragment: "--system '${ROLE_FILE}'",
+        },
+      };
+      const provider = resolveHarness('gemini', customHarnesses);
+      expect(provider.buildRoleInjection(ROLE_CONTENT, ROLE_FILE).args).toEqual(['--system', ROLE_FILE]);
+    });
+
+    it('auto-detected gemini is retired even when a custom gemini exists', () => {
+      // Auto-detection never consults custom harnesses, so a `gemini …` command
+      // is retired regardless of a same-named custom definition.
+      const customHarnesses: Record<string, CustomHarnessConfig> = {
+        gemini: { roleArgs: [], roleScriptFragment: '' },
+      };
+      expect(() => resolveHarness(undefined, customHarnesses, 'gemini --yolo')).toThrow(/retired/i);
+    });
+
+    it('built-in harnesses are never shadowed by same-named custom harnesses', () => {
+      const customHarnesses: Record<string, CustomHarnessConfig> = {
+        claude: { roleArgs: ['x'], roleScriptFragment: 'x' },
+        codex: { roleArgs: ['x'], roleScriptFragment: 'x' },
+        opencode: { roleArgs: ['x'], roleScriptFragment: 'x' },
+      };
+      expect(resolveHarness('claude', customHarnesses)).toBe(CLAUDE_HARNESS);
+      expect(resolveHarness('codex', customHarnesses)).toBe(CODEX_HARNESS);
+      expect(resolveHarness('opencode', customHarnesses)).toBe(OPENCODE_HARNESS);
+    });
+
     it('auto-detects codex from command string', () => {
       const provider = resolveHarness(undefined, undefined, 'codex');
       expect(provider).toBe(CODEX_HARNESS);
     });
 
-    it('auto-detects gemini from full path', () => {
-      const provider = resolveHarness(undefined, undefined, '/opt/homebrew/bin/gemini');
-      expect(provider).toBe(GEMINI_HARNESS);
+    it('auto-detected gemini command fails closed with the retirement (never claude, never undefined)', () => {
+      const r = resolveResult(() => resolveHarness(undefined, undefined, '/opt/homebrew/bin/gemini'));
+      expect(r.returned).toBeUndefined();
+      expect(r.returned).not.toBe(CLAUDE_HARNESS);
+      expect(r.threw?.message).toMatch(/retired/i);
     });
 
     it('auto-detects claude from command with flags', () => {
@@ -328,8 +370,8 @@ describe('harness', () => {
     });
 
     it('explicit harnessName takes priority over auto-detection', () => {
-      const provider = resolveHarness('gemini', undefined, 'codex');
-      expect(provider).toBe(GEMINI_HARNESS);
+      const provider = resolveHarness('codex', undefined, 'claude');
+      expect(provider).toBe(CODEX_HARNESS);
     });
 
     it('falls back to claude for unknown command', () => {
@@ -385,6 +427,36 @@ describe('harness', () => {
 
     it('returns undefined for empty string', () => {
       expect(detectHarnessFromCommand('')).toBeUndefined();
+    });
+  });
+
+  // ===========================================================================
+  // Retired harnesses (Issue #1338)
+  // ===========================================================================
+
+  describe('retired harnesses', () => {
+    it('isRetiredHarness is true for gemini, false for supported and unknown names', () => {
+      expect(isRetiredHarness('gemini')).toBe(true);
+      expect(isRetiredHarness('claude')).toBe(false);
+      expect(isRetiredHarness('codex')).toBe(false);
+      expect(isRetiredHarness('opencode')).toBe(false);
+      expect(isRetiredHarness('frobnicate')).toBe(false);
+    });
+
+    it('isRetiredHarness is not fooled by inherited Object.prototype keys', () => {
+      expect(isRetiredHarness('constructor')).toBe(false);
+      expect(isRetiredHarness('toString')).toBe(false);
+      expect(isRetiredHarness('hasOwnProperty')).toBe(false);
+    });
+
+    it('getRetirement returns the gemini explanation and undefined otherwise', () => {
+      const msg = getRetirement('gemini');
+      expect(msg).toMatch(/retired/i);
+      expect(msg).toContain('2026-06-18');
+      expect(msg).toContain('claude');
+      expect(getRetirement('claude')).toBeUndefined();
+      expect(getRetirement('frobnicate')).toBeUndefined();
+      expect(getRetirement('constructor')).toBeUndefined();
     });
   });
 });
