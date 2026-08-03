@@ -1413,3 +1413,46 @@ STILL FLAGGED (unchanged): off-thread/bounded classify (#1047); full interrupt-v
 input-echo-lag residual (gate→write INPUT race, TD). tsc clean; FULL suite 4262 pass / 48 skip / 0 fail.
 NEXT: commit round-2 fixes → push → PR comment. Considering a light round-3 verify on the round-2 fixes before handoff.
 NOT approving gates, NOT merging.
+
+### 2026-08-02 — CMAP round 3 LAUNCHED (architect-directed verification of the round-2 fixes)
+Architect (fresh instruction, this session): "read thread + PR #1330 comments for current state. Do a third 3-way CMAP round."
+State confirmed before launch: PR #1330 OPEN, MERGEABLE, 0-behind/101-ahead of main; HEAD `5bc7d56e` pushed; tracked
+tree clean; `tsc --noEmit` clean (exit 0); full suite last GREEN 4262/48/0. pr-gate previously approved for the base
+feature; over-ceiling+memo folded in AFTER that (rounds 1+2 done).
+ROUND-3 SCOPE = verify the six round-2 fixes (commit `5bc7d56e`, delta `44be6ba9..5bc7d56e`, 149 LOC across
+mailbox-delivery.ts + tower-routes.ts + send-delivery.test.ts): (1) interrupt double-delivery — sync markDelivered
+before any await; (2) memo invalidation after every delivery (un-echoed-line guard); (3) backoff re-feeds recordStreak
+so classifier-stuck liveness escalation isn't delayed during cooldown; (4) bigRing carried on the TOCTOU-hold; (5)
+lifecycle `generation` counter (stop()/start() reuse); (6) CachedVerdict doc-accuracy. Prompt carries the three
+KNOWN-DEFERRED items (OOM→#1047, full interrupt-vs-delivery serialization, input-echo-lag TD) so reviewers don't
+re-raise them as blockers. Prompt: scratchpad/round3-prompt.md. Outputs → 1313-round3-cmap-{gemini,codex,claude}.md
+(project dir, untracked evidence, per prior-round pattern). Running in background now; will address findings with
+follow-up commits and post a PR-comment summary. Strict mode: NOT approving any gate, NOT merging.
+
+### 2026-08-03 — CMAP round 3 COMPLETE: 3× REQUEST_CHANGES (verification round earned its keep). All addressed. Suite 4266 GREEN.
+The architect-directed third pass verified the round-2 fixes (`5bc7d56e`). ALL THREE returned REQUEST_CHANGES —
+converging on two real defects in the round-2 code + smaller items. All fixed (mailbox-delivery.ts + tower-routes.ts):
+  1. **Memo invalidation sat BELOW the markDelivered guard** (Codex HIGH, Claude blocker): a row dismissed/superseded
+     DURING the paced write (bytes already out) early-returns without `memo.delete` → follow-up memo-hits the stale
+     CLEAN and writes onto the un-echoed line. FIX: moved `memo?.delete(cacheKey)` to right AFTER writeMessage, above
+     the guard (the write is what stales the verdict, regardless of the row's transition). + test (dismiss mid-write).
+  2. **Generation TOCTOU** (ALL THREE): the `gen` check precedes the await in BOTH tick + scheduleDrain, but
+     recordStreak/updateBackoff FOLLOW it → an in-flight pass resuming after stop()/start() re-seeds the freshly-cleared
+     streak/backoff maps. FIX: post-await `if (generation !== gen) return` before the mutations in both; scheduleDrain
+     also guards its slot delete with `=== run` + checks gen BEFORE the delete (Codex — can't drop a new gen's slot).
+     + 2 deferred-classifier tests (tick + scheduleDrain across stop/start).
+  3. **Cooldown stale classifier-stuck alarm** (Codex MED, Claude LOW): skipped-tick recordStreak re-feeds the CACHED
+     no-region-end; a ring that cleared mid-cooldown (no fast trigger) still crosses threshold on the stale detail →
+     spurious onLiveness. FIX: force ONE fresh classify on the exact tick the streak would cross the threshold on a
+     classifier-stuck reason (escalation fires once → one render at the crossing; cleared→delivers, stuck→confirmed). +test.
+Smaller (same commit): tick had NO catch → a backstop throw = unhandledRejection → process.exit(1) = Tower death
+(Claude MED; the round-2 stop() comment wrongly called it "harmless") — wrapped per-agent work + escalate/prune in
+try/catch, corrected the comment. Interrupt claim-before-write lost-on-crash tradeoff documented (Codex+Claude).
+Stale memo-block comment re: session-guard vs RingBuffer.clear() corrected to match the CachedVerdict header (Codex).
+VERIFIED CLEAN by all three: interrupt double-delivery, bigRing-on-TOCTOU, CachedVerdict header. Revert-checked the
+two new-logic tests (cooldown + gen-guard) — BOTH fail on revert (have teeth).
+ARCHITECT RATIFIED the two open deferrals this session: (1) NO OOM guard — confirmed (no delivery-blocking cap; #1047);
+(2) interrupt-vs-mailbox-delivery cross-path serialization — confirmed leave as-is. (input-echo-lag residual = separate
+pre-existing gate→write INPUT race, TD — distinct from the memo hole fixed in #1.)
+Full unit suite 4266 pass / 48 skip / 0 fail; tsc clean. NEXT: commit round-3 fixes → push PR #1330 → PR-comment
+summary. Strict mode: NOT approving any gate, NOT merging.

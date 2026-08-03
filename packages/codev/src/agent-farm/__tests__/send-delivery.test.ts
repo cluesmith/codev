@@ -476,6 +476,33 @@ describe('MailboxDrainer verdict memo (Spec 1313 render-gate follow-up)', () => 
     expect(h.writes.map((w) => w.formattedMessage)).toEqual(['m1', 'm2']);
   });
 
+  it('invalidates the memo even when the delivered row was DISMISSED mid-write (CMAP round 3 — Codex/Claude)', async () => {
+    const h = harness();
+    // The memo delete must sit ABOVE the markDelivered guard: the write already put bytes on the
+    // wire, so the cached CLEAN is stale regardless of whether the row then transitions. Here m1 is
+    // dismissed DURING its paced write → markDelivered returns false and deliverAgentMail early-
+    // returns; if the delete sat below that guard (round-2 placement) the stale CLEAN would survive,
+    // and tick 2 would memo-hit and write m2 onto the not-yet-echoed line. Static ring, so the ONLY
+    // thing that can force a re-classify on tick 2 is the invalidation.
+    h.setSession('spir-1', fakeSession({ ringBuffer: { getAll: () => ['❯ '], currentSeq: 3, partialBytes: 0 } }));
+    let classifyCalls = 0;
+    h.ports.classify = async () => { classifyCalls++; return CLEAN; };
+    const m1 = held('spir-1', 'm1', 1000);
+    held('spir-1', 'm2', 1001);
+    h.ports.writeMessage = (_s, formattedMessage, noEnter) => {
+      h.writes.push({ formattedMessage, noEnter });
+      if (formattedMessage === 'm1') mailbox.dismiss(db, m1.id, 1002); // operator dismisses during the paced write
+    };
+    const drainer = new MailboxDrainer({ intervalMs: 999999 });
+    drainer.start(h.ports, db);
+    await drainer.tick(); // classify #1 (miss) → writes m1, m1 dismissed mid-write → memo invalidated ANYWAY
+    await drainer.tick(); // memo invalidated → classify #2 (fresh) → delivers m2 (NOT a stale memo-hit)
+    drainer.stop();
+    expect(classifyCalls).toBe(2); // revert the fix (delete below the guard) → 1, and m2 rides a stale CLEAN
+    expect(mailbox.getById(db, m1.id)?.status).toBe('dismissed');
+    expect(h.writes.map((w) => w.formattedMessage)).toEqual(['m1', 'm2']);
+  });
+
   it('bounds the memo: an agent whose mail clears is pruned from the memo on the next tick', async () => {
     const h = harness();
     h.setSession('spir-1', fakeSession({ ringBuffer: { getAll: () => ['❯ '], currentSeq: 1, partialBytes: 0 } }));
@@ -556,6 +583,74 @@ describe('MailboxDrainer verdict memo (Spec 1313 render-gate follow-up)', () => 
     drainer.stop();
     expect(h.livenessCalls.length).toBeGreaterThan(0);
     expect(h.livenessCalls[0]).toMatchObject({ toAgent: 'spir-1', streak: 10 });
+  });
+
+  it('forces a fresh classify at the liveness-threshold crossing — a ring that CLEARED mid-cooldown does not false-escalate (CMAP round 3 — Codex/Claude)', async () => {
+    const h = harness();
+    let seq = 1;
+    const bigReplay = 'x'.repeat(4 * 1024 * 1024 + 16); // big → backoff throttles re-classify
+    h.setSession('spir-1', fakeSession({
+      ringBuffer: { getAll: () => [bigReplay], get currentSeq() { return seq; }, partialBytes: 0 },
+    }));
+    // Backoff schedule (threshold 10): classify on ticks 1,3,6; every tick (classified OR skipped)
+    // advances the streak, so it is 9 after tick 9 with a cooldown skip still pending. Tick 10 is the
+    // crossing. PRE-fix it would SKIP and re-feed the STALE `no-region-end`, firing a spurious
+    // onLiveness even though the ring has since cleared. The fix forces a real classify at exactly
+    // that crossing tick, so the escalation reflects the CURRENT screen (here: cleared → delivers).
+    let stuck = true;
+    let classifyCalls = 0;
+    h.ports.classify = async () => {
+      classifyCalls++;
+      return stuck ? { clean: false, reason: 'busy', detail: 'no-region-end' } : CLEAN;
+    };
+    held('spir-1');
+    const drainer = new MailboxDrainer({ intervalMs: 999999 });
+    drainer.start(h.ports, db);
+    for (let i = 0; i < 9; i++) { seq++; await drainer.tick(); } // streak → 9, still stuck, backoff active
+    expect(h.livenessCalls).toHaveLength(0);
+    expect(drainer.streaks.get(agentKey('/ws', 'spir-1'))).toBe(9);
+    stuck = false;               // the ring clears — but NO fast trigger is observed (backstop only)
+    const callsBefore = classifyCalls;
+    seq++; await drainer.tick(); // tick 10 = the crossing → MUST force a fresh classify, not skip
+    drainer.stop();
+    expect(classifyCalls).toBe(callsBefore + 1);    // a real classify happened at the crossing (pre-fix: skipped, +0)
+    expect(h.livenessCalls).toHaveLength(0);         // fresh CLEAN → NO false classifier-stuck escalation
+    expect(h.writes.map((w) => w.formattedMessage)).toEqual(['hi']); // the cleared line actually delivered
+  });
+
+  it('generation guard (tick): an in-flight pass that resumes after stop() does not seed the new generation (CMAP round 3 — all three)', async () => {
+    const h = harness();
+    const bigReplay = 'x'.repeat(4 * 1024 * 1024 + 16); // big → a resumed pass WOULD seed a backoff entry
+    h.setSession('spir-1', fakeSession({ ringBuffer: { getAll: () => [bigReplay], currentSeq: 1, partialBytes: 0 } }));
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    h.ports.classify = async () => { await gate; return { clean: false, reason: 'busy', detail: 'no-region-end' }; };
+    held('spir-1');
+    const drainer = new MailboxDrainer({ intervalMs: 999999 });
+    drainer.start(h.ports, db);
+    const inFlight = drainer.tick(); // parks at the classify await
+    drainer.stop();                  // bumps the generation + clears the streak/backoff maps
+    release();                       // classify resolves → the tick resumes PAST the await
+    await inFlight;                  // the post-await generation check must bail before recordStreak/updateBackoff
+    expect(drainer.streaks.size).toBe(0);          // pre-fix: the resumed recordStreak seeds a stale streak (size 1)
+    expect(drainer.backoffAgents).toHaveLength(0); // pre-fix: the resumed updateBackoff seeds a stale backoff entry
+  });
+
+  it('generation guard (scheduleDrain): a queued drain that resumes after stop() does not seed the new generation (CMAP round 3 — Codex)', async () => {
+    const h = harness();
+    const bigReplay = 'x'.repeat(4 * 1024 * 1024 + 16);
+    h.setSession('spir-1', fakeSession({ ringBuffer: { getAll: () => [bigReplay], currentSeq: 1, partialBytes: 0 } }));
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    h.ports.classify = async () => { await gate; return { clean: false, reason: 'busy', detail: 'no-region-end' }; };
+    held('spir-1');
+    const drainer = new MailboxDrainer({ intervalMs: 999999 });
+    drainer.start(h.ports, db);
+    const inFlight = drainer.scheduleDrain('/ws', 'spir-1'); // parks at the classify await
+    drainer.stop();                                          // bumps the generation
+    release();
+    await inFlight;                                          // the post-await generation check must bail before recordStreak
+    expect(drainer.streaks.size).toBe(0); // pre-fix: the resumed recordStreak seeds a stale streak (size 1)
   });
 });
 

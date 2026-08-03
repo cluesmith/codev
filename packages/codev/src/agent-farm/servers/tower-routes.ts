@@ -1755,6 +1755,12 @@ async function handleSend(
     // the mailbox drainer as `held`, or a concurrent backstop/scheduleDrain pass could gate-deliver
     // the SAME row and put the bytes on the wire twice. enqueue→markDelivered are both synchronous
     // (no await between), so there is no window for the drainer to pick it up before we own it.
+    // Tradeoff (CMAP round 3 — Codex/Claude): claiming BEFORE the write below means that if
+    // submitToSession throws/crashes, the row reads `delivered` for audit though no bytes reached
+    // the PTY — the message is lost, not retried. This is the deliberate choice: the write is not
+    // transactional, so a partial write may already have put bytes on the wire, and re-holding (the
+    // alternative) would let the backstop gate-deliver a SECOND copy. Losing a crashed interrupt is
+    // preferred over double-delivering it; `--interrupt` is the explicit human gate-bypass anyway.
     markMailboxDelivered(db, row.id);
     // Deliver the interrupt as ONE atomic critical section under the Spec 1273 per-terminal
     // submission lock (CMAP round 1 — Gemini/Codex/Claude): the Ctrl+C, its 100 ms settle, and

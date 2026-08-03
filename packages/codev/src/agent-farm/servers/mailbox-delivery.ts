@@ -183,6 +183,23 @@ export interface DeliveryOutcome {
 }
 
 /**
+ * A gate outcome the render gate CANNOT bound to a decision — an unrecognized app
+ * (`no-profile`) or a recognized app whose composer region can't be found
+ * (`no-region-end`/`no-composer-marker` = a drifted TUI layout or an unrenderable #1047
+ * ring). A sustained streak of these means the mail will NEVER deliver on its own, so it
+ * is the class {@link MailboxDrainer.recordStreak} escalates to liveness telemetry; a
+ * `busy`/`user-text` streak is deliberately excluded (a human legitimately at the line).
+ * Shared by `recordStreak` and the cooldown branch of {@link MailboxDrainer.tick} so a
+ * skipped tick and a real pass agree on what counts as classifier-stuck (CMAP round 3).
+ */
+function isClassifierStuck(
+  reason: MailboxReason | null,
+  detail: GateVerdict['detail'] | undefined
+): boolean {
+  return reason === 'no-profile' || detail === 'no-region-end' || detail === 'no-composer-marker';
+}
+
+/**
  * Composite key identifying an agent within a workspace, used to dedupe the
  * backstop's per-agent work and to key the liveness-telemetry streak map (which
  * Phase 7 consumes). Joined on a NUL — a byte that can appear in neither a
@@ -301,8 +318,10 @@ export async function deliverAgentMail(
   // agent's WHOLE ring each tick; for a STATIC ring that whole-render is pure waste. Reuse the
   // cached verdict while BOTH the live session instance AND the token are unchanged — the token
   // advances on ANY new output, so a match means the screen is byte-for-byte what we already
-  // rendered, and the session guard prevents a token aliasing across a PTY respawn / RingBuffer
-  // .clear() (see {@link CachedVerdict}). A memo hit does NO await, so the post-classify
+  // rendered, and the session guard closes the PTY-respawn aliasing route (a replacement session
+  // is a DIFFERENT object); the same-object `RingBuffer.clear()` route is closed upstream by the
+  // `!session.writable` filter, not by this guard (see {@link CachedVerdict}). A memo hit does NO
+  // await, so the post-classify
   // re-validation below (`ringToken(...) !== tokenBefore`) passes trivially: no keystroke can
   // land in a render window that never opened. The memo is owned + bounded by the drainer's
   // backstop {@link MailboxDrainer.tick} (pruned to the held-agent set each tick); every OTHER
@@ -374,6 +393,16 @@ export async function deliverAgentMail(
   if (!session.writable) return hold('no-live-pty');
 
   await ports.writeMessage(session, current.formatted_message, current.no_enter === 1);
+  // Invalidate the memo the instant the write completes — BEFORE the markDelivered guard
+  // (CMAP round 3 — Codex/Claude). The write is what makes the cached CLEAN verdict stale (it put
+  // the submitted line + a fresh prompt on the wire), and it happened regardless of whether the row
+  // then transitions. If a dismiss/supersede landed during the paced write, markDelivered returns
+  // false and we early-return below — but the bytes are already out, so leaving the stale CLEAN in
+  // the memo would let a follow-up held message memo-hit the SAME token (PTY INPUT does not advance
+  // the ring — only OUTPUT does) and deliver m2 onto the not-yet-echoed line. Deleting here, above
+  // the guard, closes that window. (The deeper input-echo-lag window — a fresh classify racing the
+  // echo — is the pre-existing gate→write INPUT race in the review's Technical Debt.)
+  memo?.delete(cacheKey);
 
   // markDelivered is guarded (held→delivered only). If it did NOT transition, the row
   // was dismissed/superseded during the paced write — accept that terminal state and
@@ -384,14 +413,6 @@ export async function deliverAgentMail(
   }
   ports.broadcast(broadcastForRow(current, ports.now()));
   ports.onHeldStateChange(); // a held row left the set → refresh the indicator count
-  // Invalidate the memo after a delivery (CMAP round 2 — Codex): the write we just made will
-  // change the screen (the submitted line + a fresh prompt), so the cached CLEAN verdict is
-  // known-stale. Without this, a follow-up held message could memo-hit the SAME token before
-  // the PTY echoes the submission and deliver onto a not-yet-repainted line. (PTY INPUT does not
-  // advance the ring — only OUTPUT does — so the token alone can lag a delivery; forcing a fresh
-  // classify next pass restores the pre-memo behavior. The deeper input-echo-lag window is the
-  // pre-existing gate→write INPUT race, tracked in the review's Technical Debt.)
-  memo?.delete(cacheKey);
   ports.log(`[mailbox] delivered ${row.id} → ${toAgent} @ ${path.basename(workspacePath)}`);
   return { delivered: [row.id], reason: null };
 }
@@ -521,9 +542,16 @@ export class MailboxDrainer {
     // REUSED across stop()/start(), so a restart must not carry a stale verdict/streak/backoff, nor
     // let a post-restart trigger coalesce onto a dead scheduled-drain promise. NB clearing
     // `scheduledDrains` does NOT cancel an already-running drain — its promise captured the old
-    // ports/db and runs to completion (throwing harmlessly on a closed DB); it only stops a new
-    // trigger from coalescing onto it. The `generation` bump is what stops an in-flight tick/drain
-    // from mutating THIS generation's state after it resumes.
+    // ports/db and runs to completion; it only stops a new trigger from coalescing onto it. Two
+    // guards make that resumption safe (CMAP round 3): (1) the `generation` bump below — checked by
+    // both `tick` and `scheduleDrain` right after each await — stops an in-flight pass from re-seeding
+    // THIS generation's freshly-cleared streak/backoff/scheduled-drain slot. (The verdict memo can
+    // still be seeded from INSIDE a resumed `deliverAgentMail`, before that check, but that is benign:
+    // the memo is bound to its session instance + ring token and re-pruned to the held-agent set at
+    // the top of every tick, so a cross-generation entry is self-correcting, not a leak.) And (2) both
+    // passes now run their work under a try/catch, so a throw on the old (closed) DB is logged, not an
+    // unhandledRejection that would exit(1). (Pre-round-3, `tick` had no catch, so a closed-DB throw
+    // there was NOT harmless.)
     this.verdictMemo.clear();
     this.notCleanStreak.clear();
     this.scheduledDrains.clear();
@@ -572,28 +600,59 @@ export class MailboxDrainer {
       }
       for (const [key, { workspacePath, toAgent }] of agents) {
         if (this.generation !== gen) return; // stop() ran mid-tick → bail before more work
-        // Backstop backoff (CMAP round 1): while an agent is cooling down after a big not-clean
-        // render, skip re-classifying it this tick — the whole-ring render is the cost and the
-        // ring is busy anyway. This is NOT a hold: scheduleDrain fires the instant the line
-        // clears (submit/quiescence) and classifies fresh, so delivery is not delayed by it.
-        const cooldown = this.classifyBackoff.get(key);
-        if (cooldown && cooldown.skip > 0) {
-          cooldown.skip--;
-          // Keep the liveness streak advancing during cooldown (CMAP round 2 — Claude/Codex): the
-          // backoff throttles re-CLASSIFY, but the mail is still not delivering, and a classifier-
-          // stuck streak (no-region-end/no-composer-marker) must still cross its threshold on
-          // schedule — the backoff throttles exactly the pathological population that escalation
-          // guards. Re-feed the last classification so the streak counts this skipped tick too.
-          this.recordStreak(key, { delivered: [], reason: cooldown.reason, detail: cooldown.detail });
-          continue;
+        // Isolate each agent's pass (CMAP round 3 — Claude): a throw from classify/writeMessage/DB
+        // for ONE agent must not abort the others, and — critically — must never escape this
+        // setInterval-invoked tick, where the tower-server `unhandledRejection` handler would
+        // exit(1) and take Tower + every terminal down. scheduleDrain already wraps its drain the
+        // same way; this mirrors it so the round-2 stop() comment's "throws harmlessly" is true
+        // for the backstop tick too, not just the scheduled drain.
+        try {
+          // Backstop backoff (CMAP round 1): while an agent is cooling down after a big not-clean
+          // render, skip re-classifying it this tick — the whole-ring render is the cost and the
+          // ring is busy anyway. This is NOT a hold: scheduleDrain fires the instant the line
+          // clears (submit/quiescence) and classifies fresh, so delivery is not delayed by it.
+          const cooldown = this.classifyBackoff.get(key);
+          if (cooldown && cooldown.skip > 0) {
+            // Force a real classify on the ONE tick where the streak would cross the liveness
+            // threshold on a classifier-stuck reason (CMAP round 3 — Codex/Claude): otherwise a big
+            // ring that went `no-region-end` and then CLEARED mid-cooldown (with no fast trigger
+            // observed) would keep advancing the streak on the STALE detail and fire a spurious
+            // `onLiveness` at the crossing. Escalation fires exactly once (recordStreak: next ===
+            // THRESHOLD), so this spends a single render at the crossing — every other cooldown tick
+            // still just re-feeds the cached classification. If the ring actually cleared, the fresh
+            // pass delivers (streak resets) or reclassifies; if still stuck, escalation is confirmed.
+            const wouldCrossOnStale =
+              isClassifierStuck(cooldown.reason, cooldown.detail) &&
+              (this.notCleanStreak.get(key) ?? 0) + 1 === LIVENESS_STREAK_THRESHOLD;
+            if (!wouldCrossOnStale) {
+              cooldown.skip--;
+              // Keep the liveness streak advancing during cooldown (CMAP round 2 — Claude/Codex):
+              // the backoff throttles re-CLASSIFY, but the mail is still not delivering, and a
+              // classifier-stuck streak (no-region-end/no-composer-marker) must still cross its
+              // threshold on schedule — the backoff throttles exactly the pathological population
+              // that escalation guards. Re-feed the last classification so the streak counts this
+              // skipped tick too.
+              this.recordStreak(key, { delivered: [], reason: cooldown.reason, detail: cooldown.detail });
+              continue;
+            }
+          }
+          const outcome = await deliverAgentMailSerialized(ports, db, workspacePath, toAgent, this.verdictMemo);
+          if (this.generation !== gen) return; // stop() landed during the await → do NOT mutate the
+                                               // NEW generation's freshly-cleared streak/backoff maps
+          this.recordStreak(key, outcome);
+          this.updateBackoff(key, outcome);
+        } catch (err) {
+          ports.log(`[mailbox] backstop delivery failed for ${toAgent}: ${String(err)}`);
         }
-        const outcome = await deliverAgentMailSerialized(ports, db, workspacePath, toAgent, this.verdictMemo);
-        this.recordStreak(key, outcome);
-        this.updateBackoff(key, outcome);
       }
       if (this.generation !== gen) return; // stop() ran during the loop → skip escalation/prune
       this.escalateOverdue(ports, db);
       pruneTerminal(db, this.retentionDays, ports.now());
+    } catch (err) {
+      // Backstop for escalateOverdue/pruneTerminal (DB ops) or anything the per-agent guard missed:
+      // a tick runs under setInterval, so an unhandled throw becomes an unhandledRejection → exit(1)
+      // (tower-server). Log and let the next tick retry (CMAP round 3 — Claude).
+      ports?.log(`[mailbox] backstop tick failed: ${String(err)}`);
     } finally {
       this.ticking = false;
     }
@@ -661,11 +720,7 @@ export class MailboxDrainer {
     // relaunch screens. The pure module only reports the crossing — the live binding
     // ({@link DeliveryPorts.onLiveness}) applies the spec's "with recent output" gate and
     // does the loud log + broadcast, so an idle unknown session does not false-alarm.
-    const classifierStuck =
-      outcome.reason === 'no-profile' ||
-      outcome.detail === 'no-region-end' ||
-      outcome.detail === 'no-composer-marker';
-    if (classifierStuck && next === LIVENESS_STREAK_THRESHOLD) {
+    if (isClassifierStuck(outcome.reason, outcome.detail) && next === LIVENESS_STREAK_THRESHOLD) {
       const [ws, agent] = key.split('\0');
       this.ports?.onLiveness({ workspacePath: ws, toAgent: agent, streak: next });
     }
@@ -724,14 +779,21 @@ export class MailboxDrainer {
     const existing = this.scheduledDrains.get(key);
     if (existing) return existing;
     const run = Promise.resolve().then(async () => {
-      this.scheduledDrains.delete(key);
-      if (this.generation !== gen) return; // stopped/restarted before we ran → don't act on old ports/db
+      // Bail before touching ANY shared state if the generation moved (stopped/restarted before we
+      // ran → old ports/db), and release our coalescing slot only if it is still OURS (CMAP round 3
+      // — Codex). The old code deleted `scheduledDrains[key]` unconditionally and BEFORE the
+      // generation check: a stop()/start()+new scheduleDrain for the same key installs a NEW-
+      // generation run in that slot, and the unconditional delete would drop that live slot.
+      if (this.generation !== gen) return;
+      if (this.scheduledDrains.get(key) === run) this.scheduledDrains.delete(key);
       try {
         // NB: the fast trigger classifies FRESH (no verdict memo). A submit/quiescence
         // trigger fires precisely because the ring just changed, so it must re-check the
         // gate — the memo is the backstop tick's optimization for a STATIC ring, not this
         // event-driven re-check. tick owns and prunes the memo alone.
         const outcome = await deliverAgentMailSerialized(ports, db, workspacePath, toAgent);
+        if (this.generation !== gen) return; // stop() landed during the await → do NOT mutate the
+                                             // NEW generation's freshly-cleared streak/backoff maps
         this.recordStreak(key, outcome);
         // A fast-trigger delivery means the line cleared — clear any backstop backoff so the
         // periodic tick resumes normal cadence (CMAP round 1). A trigger that still HOLDS
