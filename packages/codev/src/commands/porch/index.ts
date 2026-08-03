@@ -508,9 +508,8 @@ export async function done(workspaceRoot: string, projectId: string, resolver?: 
       // Say how many lanes will actually run. "3-way" was hardcoded, which stopped being true the
       // moment config could select lanes — a workspace running a 2-lane PIR was told to expect a
       // 3-way review and had no way to tell whether the third had failed or was never asked for.
-      const verify = getVerifyConfig(protocol, state.phase);
-      const laneCount = verify
-        ? resolveConsultationModels(workspaceRoot, verify.models, state.protocol, verify.type).models.length
+      const laneCount = verifyConfig
+        ? resolveConsultationModels(workspaceRoot, verifyConfig.models, state.protocol, verifyConfig.type).models.length
         : 0;
       console.log('');
       console.log(chalk.green(

@@ -327,12 +327,18 @@ describe('scenario 8 — next emits exactly the lanes done enforces (end to end)
   });
 
   it('malformed config fails done LOUDLY instead of falling back to protocol defaults', async () => {
-    // The phase's one deliberate behavior change, and the only part with real regression risk, so
-    // it is pinned through `done()` itself rather than through the resolver alone (claude's point:
-    // testing the wrapper cannot prove the deleted `catch` is gone from the call site).
+    // Pins the phase's acceptance criterion — malformed config must fail `done`, not be absorbed.
     //
-    // Before: `done` swallowed this and quietly demanded the protocol's three lanes, while `next`
-    // refused to run at all — a config typo split the two commands with no message explaining why.
+    // Scope note (claude, iter2): this does NOT uniquely pin the deleted `catch`. `done` reaches
+    // `loadCheckOverrides` -> `loadConfig` before it reaches lane resolution, so the validator
+    // throws at the earlier call either way. What proves the removed `catch` no longer swallows
+    // anything at the resolution site is the narrowing test above, where `done` must act on a
+    // config value rather than fall back to the protocol's three lanes. Recorded rather than
+    // quietly deleted, because a test whose comment overstates its reach is how a false sense of
+    // coverage survives review.
+    //
+    // Before this phase: `done` swallowed the error and quietly demanded the protocol's three
+    // lanes while `next` refused to run at all — a typo split the two commands with no message.
     setupProject();
     writeConfig({ porch: { consultation: { models: ['codexx'] } } });
 
