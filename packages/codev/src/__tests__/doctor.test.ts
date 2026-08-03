@@ -657,6 +657,91 @@ describe('doctor command', () => {
     });
   });
 
+  // Issue #1338 — codev doctor flags a retired harness (gemini) on BOTH the
+  // architect and builder shells, and no longer claims gemini is "supported for
+  // builders". The structured issue/recommendation (rendered in the warning
+  // summary) is the assertion target — stabler than the inline console text.
+  describe('shell-harness retirement flagging (#1338)', () => {
+    const testBaseDir = path.join(tmpdir(), `codev-doctor-1338-${Date.now()}`);
+    let originalCwd: string;
+
+    beforeEach(() => {
+      originalCwd = process.cwd();
+      // `codev/` marks the workspace root for doctor's findWorkspaceRoot;
+      // `.codev/config.json` is what loadConfig reads for the shell config.
+      fs.mkdirSync(path.join(testBaseDir, 'codev'), { recursive: true });
+      fs.mkdirSync(path.join(testBaseDir, '.codev'), { recursive: true });
+    });
+
+    afterEach(() => {
+      process.chdir(originalCwd);
+      if (fs.existsSync(testBaseDir)) {
+        fs.rmSync(testBaseDir, { recursive: true });
+      }
+    });
+
+    // Every dependency present so doctor() runs through to the shell-config
+    // section without bailing early on a missing tool.
+    async function runDoctorWith(config: object): Promise<string[]> {
+      fs.writeFileSync(path.join(testBaseDir, '.codev', 'config.json'), JSON.stringify(config));
+      process.chdir(testBaseDir);
+      vi.mocked(execSync).mockImplementation((cmd: string) => {
+        if (cmd.includes('gh auth status')) return Buffer.from('Logged in');
+        return Buffer.from('/usr/bin/command');
+      });
+      vi.mocked(spawnSync).mockImplementation((cmd: string) => {
+        const responses: Record<string, string> = {
+          node: 'v20.0.0', tmux: 'tmux 3.4', git: 'git version 2.40.0',
+          claude: '1.0.0', codex: '0.60.0',
+        };
+        return {
+          status: 0,
+          stdout: responses[cmd] || 'working',
+          stderr: '',
+          signal: null,
+          output: [null, responses[cmd] || 'working', ''],
+          pid: 0,
+        };
+      });
+      vi.resetModules();
+      const logOutput: string[] = [];
+      vi.spyOn(console, 'log').mockImplementation((...args) => {
+        logOutput.push(args.join(' '));
+      });
+      const { doctor } = await import('../commands/doctor.js');
+      await doctor();
+      return logOutput;
+    }
+
+    it('flags a gemini BUILDER config as retired via the structured issue/recommendation', async () => {
+      const out = await runDoctorWith({ shell: { builder: 'gemini --yolo' } });
+      expect(out.some((l) => l.includes('gemini configured as builder shell (harness retired)'))).toBe(true);
+      expect(out.some((l) => l.includes('Set shell.builder to a supported harness'))).toBe(true);
+      // The single-source-of-truth retirement explanation is surfaced (2026-06-18 cause).
+      expect(out.some((l) => l.includes('2026-06-18'))).toBe(true);
+    });
+
+    it('flags a gemini ARCHITECT config as retired and never claims builder support', async () => {
+      const out = await runDoctorWith({ shell: { architect: 'gemini --yolo' } });
+      expect(out.some((l) => l.includes('gemini configured as architect shell (harness retired)'))).toBe(true);
+      expect(out.some((l) => l.includes('Set shell.architect to "codex"'))).toBe(true);
+      // The inverted pre-retirement message must be gone.
+      expect(out.some((l) => l.includes('supported for builders'))).toBe(false);
+      expect(out.some((l) => l.includes('builder-only'))).toBe(false);
+    });
+
+    it('detects gemini via explicit builderHarness, not only the command form', async () => {
+      const out = await runDoctorWith({ shell: { builder: 'some-wrapper', builderHarness: 'gemini' } });
+      expect(out.some((l) => l.includes('gemini configured as builder shell (harness retired)'))).toBe(true);
+    });
+
+    it('does NOT flag a supported-harness config (claude builder + codex architect)', async () => {
+      const out = await runDoctorWith({ shell: { builder: 'claude', architect: 'codex' } });
+      expect(out.some((l) => l.includes('harness retired'))).toBe(false);
+      expect(out.some((l) => l.includes('supported for builders'))).toBe(false);
+    });
+  });
+
   describe('protocol PR-gate audit (#943)', () => {
     const testBaseDir = path.join(tmpdir(), `codev-doctor-prgate-${Date.now()}`);
     let originalCwd: string;

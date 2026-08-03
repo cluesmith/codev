@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 import chalk from 'chalk';
 import { query as claudeQuery } from '@anthropic-ai/claude-agent-sdk';
 import { executeForgeCommandSync, loadForgeConfig, validateForgeConfig, resolveAllConcepts, type ConceptResolution } from '../lib/forge.js';
-import { detectHarnessFromCommand } from '../agent-farm/utils/harness.js';
+import { detectHarnessFromCommand, getRetirement } from '../agent-farm/utils/harness.js';
 import { auditPrGates, formatPrGateWarning } from '../lib/pr-gate-audit.js';
 import { auditStateFileIgnore } from '../lib/gitignore.js';
 import { auditFrameworkRefs, formatFrameworkRefFinding, hasFrameworkOverrides } from '../lib/framework-ref-audit.js';
@@ -794,15 +794,27 @@ export async function doctor(): Promise<number> {
     if (root) {
       const config = loadConfig(root) as Record<string, unknown>;
       const shell = config?.shell as Record<string, unknown> | undefined;
-      // Check explicit architectHarness or auto-detect from architect command
-      const architectHarness = shell?.architectHarness as string | undefined;
-      const architectCmd = Array.isArray(shell?.architect)
-        ? (shell.architect as string[]).join(' ')
-        : (shell?.architect as string ?? '');
-      const resolvedHarness = architectHarness ||
-        (architectCmd ? detectHarnessFromCommand(architectCmd) : undefined);
-      const isOpencode = resolvedHarness === 'opencode';
-      if (isOpencode) {
+      // Resolve the harness NAME a PERSISTED shell config selects for a role,
+      // WITHOUT CLI/env overrides — doctor diagnoses the persisted config, not a
+      // one-off `--architect-cmd`/`TOWER_*_CMD` run. Mirrors resolveHarness's
+      // command auto-detect but never throws (doctor reports; it does not launch).
+      // Shared by both role branches below so architect/builder detection can't drift.
+      const resolvedShellHarness = (role: 'architect' | 'builder'): string | undefined => {
+        const explicit = shell?.[`${role}Harness`] as string | undefined;
+        const raw = shell?.[role];
+        const cmd = Array.isArray(raw) ? (raw as string[]).join(' ') : (raw as string ?? '');
+        return explicit || (cmd ? detectHarnessFromCommand(cmd) : undefined);
+      };
+      const architectResolved = resolvedShellHarness('architect');
+      const builderResolved = resolvedShellHarness('builder');
+      // getRetirement() is the single source of truth for "retired" (#1338): it
+      // returns the retirement message iff the harness is retired, undefined
+      // otherwise — so its truthiness doubles as the retired-harness test.
+      const architectRetirement = architectResolved ? getRetirement(architectResolved) : undefined;
+      const builderRetirement = builderResolved ? getRetirement(builderResolved) : undefined;
+
+      // --- Architect shell ---
+      if (architectResolved === 'opencode') {
         console.log('');
         console.log(chalk.yellow('  ⚠') + ' OpenCode is configured as architect shell — this is unsupported.');
         console.log(chalk.yellow('    ') + 'OpenCode uses file-based role injection that requires an ephemeral worktree.');
@@ -813,25 +825,43 @@ export async function doctor(): Promise<number> {
           issue: 'OpenCode configured as architect shell (unsupported)',
           recommendation: 'Set shell.architect to "claude --dangerously-skip-permissions" in .codev/config.json',
         });
-      } else if (resolvedHarness === 'gemini') {
-        // Issue #929: gemini is builder-only; the Gemini CLI is retiring (#778),
-        // so it is no longer supported as an architect.
+      } else if (architectRetirement) {
+        // Issue #1338: the built-in gemini harness is retired for BOTH roles
+        // (Google ended consumer Gemini CLI access 2026-06-18). This branch
+        // previously claimed gemini was "supported for builders, not architects";
+        // that premise is now wrong — it is retired for builders too.
         console.log('');
-        console.log(chalk.yellow('  ⚠') + ' Gemini is configured as architect shell — this is unsupported.');
-        console.log(chalk.yellow('    ') + 'The Gemini CLI is retiring (#778); gemini is supported for builders, not architects.');
+        console.log(chalk.yellow('  ⚠') + ` ${architectResolved} is configured as the architect shell — this harness is retired.`);
+        console.log(chalk.yellow('    ') + architectRetirement);
         console.log(chalk.yellow('    ') + 'Use codex or claude for the architect (e.g., "codex" or "claude --dangerously-skip-permissions").');
         warnings++;
         warningDetails.push({
           name: 'Shell config',
-          issue: 'Gemini configured as architect shell (builder-only, not architect)',
+          issue: `${architectResolved} configured as architect shell (harness retired)`,
           recommendation: 'Set shell.architect to "codex" or "claude --dangerously-skip-permissions" in .codev/config.json',
         });
-      } else if (resolvedHarness === 'codex') {
+      } else if (architectResolved === 'codex') {
         // Issue #929: codex is a supported architect (config-driven).
         console.log('');
         console.log(chalk.green('  ✓') + ' codex is configured as architect shell — supported.');
         console.log(chalk.gray('    ') + 'Conversation resume is Claude-main-only; codex architects relaunch fresh with role injection.');
         console.log(chalk.gray('    ') + 'Select the architect harness via .codev/config.json (shell.architect / shell.architectHarness).');
+      }
+
+      // --- Builder shell (#1338) ---
+      // A retired builder harness fails closed at spawn (Phase 2); doctor flags
+      // the persisted config proactively so users learn before a spawn is rejected.
+      if (builderRetirement) {
+        console.log('');
+        console.log(chalk.yellow('  ⚠') + ` ${builderResolved} is configured as the builder shell — this harness is retired.`);
+        console.log(chalk.yellow('    ') + builderRetirement);
+        console.log(chalk.yellow('    ') + 'Use claude, codex, or opencode for builders (set shell.builder in .codev/config.json).');
+        warnings++;
+        warningDetails.push({
+          name: 'Shell config',
+          issue: `${builderResolved} configured as builder shell (harness retired)`,
+          recommendation: 'Set shell.builder to a supported harness (claude, codex, or opencode) in .codev/config.json, or configure a custom harness',
+        });
       }
     }
   } catch {

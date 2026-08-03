@@ -295,3 +295,45 @@ FIX (commit 9ec14c4d):
 - Blast radius: FreshLaunch is architect-only (1 implementer, 1 consumer) — contained core change.
 - Verified: build exit 0; tower-utils+session-manager 152/152; consumers 133/133.
 Wrote 1338-phase_2-iter2-rebuttals.md. Next: porch done → re-verify → iter3 consult.
+
+### phase_2 CONSULT iter3: UNANIMOUS APPROVE (Gemini APPROVE, Codex APPROVE/HIGH, Claude APPROVE/HIGH)
+Codex (the C1/C2/C3 finder) now: "Phase 2 fails closed across builder spawn, architect launch, reconnect,
+and clean-exit paths, with adequate regression coverage. KEY_ISSUES: None." Claude independently verified
+tsc exit 0 + 283/283 affected suites. All four retirement boundaries fail closed: spawn preflight (builder),
+buildArchitectArgs launch (architect), buildArchitectReconnectRestartOptions→undefined (reconnect),
+buildArchitectFreshLaunch.next()→{stop:true} (clean-exit). Phase_2 DONE.
+CLAUDE's 4 non-blocking notes → carry to REVIEW doc (codev/reviews/1338-*.md), do NOT fix now (all 3
+approved; fixing = wasteful re-consult of an approved phase):
+1. siblingRegistrationIsLive→false PRUNES persisted sibling rows for a retired-architect config (matches
+   approved plan; deliberate trade-off; `true`="unlaunchable not dead" is the conservative alt if it bites).
+2. CRASH-restart path (non-clean exit) respawns launch-time-baked args, never re-resolves harness → a
+   retained custom-`gemini` (later removed) can crash-restart gemini. IN-SPEC ("already-running sessions
+   unaffected"), no mis-injection risk (baked args are from that custom harness). Documented trade-off,
+   NOT a gap — distinct from C3's clean-exit path which MINTS a fresh session (re-resolves → retirement matters).
+3. --shell exemption correct (startShellSession resolves no harness; gemini shell.builder runs bare; Phase 3
+   doctor covers user education).
+4. Minor test gap: no POSITIVE test that a supported-harness config PASSES the preflight — optional 1-liner
+   in spawn-retirement.test.ts to lock the "doesn't over-block" half. Consider in Review-phase refinement.
+Next: porch next → advance to phase_3 (doctor: retirement guidance + builder-side flagging).
+
+## phase_3 — codev doctor: retirement guidance + builder-side flagging
+Porch advanced phase_2→phase_3 (89d25fca). doctor.ts is at packages/codev/src/commands/doctor.ts
+(NOT commands/doctor.ts under agent-farm — plan/spec path was loose); stale gemini branch was at :816-828
+("The Gemini CLI is retiring (#778); gemini is supported for builders, not architects").
+IMPLEMENTED (packages/codev/src/commands/doctor.ts):
+- Added getRetirement to the harness import (already had detectHarnessFromCommand).
+- Factored a shared local `resolvedShellHarness(role)` helper (raw shell.<role>/<role>Harness, array-or-string,
+  via detectHarnessFromCommand) used by BOTH architect+builder branches → no drift. NOT override-aware
+  (reads raw persisted config, not CLI/env) — matches spec's persisted-config scope.
+- getRetirement() truthiness = single source of truth for "retired" (returns msg iff retired). Architect
+  branch: opencode (unchanged) → retired (both-role framing + full retirement msg, replaces the inverted
+  "builder-only" text) → codex (unchanged). NEW builder branch: flags a retired builder harness.
+- Updated structured issue:/recommendation: strings (stable assertion target): "<h> configured as
+  {architect,builder} shell (harness retired)".
+TESTS (doctor.test.ts, +4, new describe 'shell-harness retirement flagging (#1338)'): gemini builder →
+structured issue/rec + 2026-06-18 surfaced; gemini architect → structured issue/rec + asserts NO
+"supported for builders"/"builder-only"; explicit builderHarness:gemini detected; supported (claude
+builder+codex architect) → no "harness retired". Workspace fixture: codev/ marker + .codev/config.json,
+chdir, mocked child_process (modeled on existing structure-checks describe).
+VERIFIED: build exit 0; doctor.test.ts 21/21 (17 existing + 4 new). Doctor never calls resolveHarness so
+it never throws — detects+reports only. Next: porch check → done → iter1 3-way consult.
