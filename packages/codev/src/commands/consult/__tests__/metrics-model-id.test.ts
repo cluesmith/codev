@@ -10,7 +10,7 @@
  * pass without the migration ever running.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
@@ -177,9 +177,16 @@ describe('model_id migration against a pre-1286 database', () => {
 
     const holder = new Database(dbPath);
     holder.exec('BEGIN IMMEDIATE'); // take the write lock and keep it
+
+    // The constructor legitimately warns here (it could not reach WAL while the lock was held).
+    // Assert it rather than letting it print: it is the evidence the degraded path was taken and
+    // survived, and an unasserted warning is just noise that trains readers to ignore stderr.
+    const warn = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
       expect(() => new MetricsDB(dbPath).close()).not.toThrow();
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('WAL mode unavailable'));
     } finally {
+      warn.mockRestore();
       holder.exec('ROLLBACK');
       holder.close();
     }
@@ -215,7 +222,11 @@ describe('model_id migration against a pre-1286 database', () => {
       import * as fs from 'node:fs';
       import { MetricsDB } from ${JSON.stringify(METRICS_SRC)};
       fs.writeFileSync(process.argv[4] + '.' + process.argv[3], 'ready');
-      while (!fs.existsSync(process.argv[4])) { /* spin — sub-ms release, unlike setTimeout */ }
+      // Sleep 1ms per turn rather than spinning hot: six busy-looping children peg six cores and
+      // slow down the very startup we are waiting on. Atomics.wait blocks synchronously, which
+      // setTimeout cannot do here — the open must happen on this tick, not in a callback.
+      const idle = new Int32Array(new SharedArrayBuffer(4));
+      while (!fs.existsSync(process.argv[4])) { Atomics.wait(idle, 0, 0, 1); }
       const db = new MetricsDB(process.argv[2]);
       db.record({
         timestamp: new Date(0).toISOString(), model: 'codex', modelId: process.argv[3],
@@ -248,6 +259,9 @@ describe('model_id migration against a pre-1286 database', () => {
           resolve();
         } else if (Date.now() > deadline) {
           clearInterval(poll);
+          // Reap them: a child still waiting on `go` waits forever, and six orphans left behind
+          // keep vitest from exiting — a timeout here would otherwise hang the whole run.
+          procs.forEach((p) => p.kill());
           // Never silently proceed: without the barrier the test still "passes", but it would be
           // measuring startup order rather than lock contention.
           reject(new Error('children did not reach the barrier within 20s'));

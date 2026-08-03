@@ -552,3 +552,59 @@ The `index.ts` conflict was not a real conflict — my model-choice resolution a
 `resolveAgyBin`'s guard are adjacent and independent. Kept both.
 
 tsc 0 · consult suites 254 passed / 0 failed · full suite green · build ✓.
+
+## phase_4 APPROVED (iter3) — the blocker was in my test, not my code
+
+codex APPROVE (HIGH) · claude APPROVE (HIGH), after an iter2 where **both reviewers independently
+named the same defect**. That convergence is the strongest signal a CMAP gives, and it was not about
+the feature at all — it was about the test I wrote to defend the feature.
+
+**The finding: my concurrency test spawned its children against `dist/`.** The unit CI job runs
+`copy-skeleton` then vitest and never builds `packages/codev`, so on a clean checkout every child
+would have died with ERR_MODULE_NOT_FOUND. But the CI break is the *lesser* half. With a `dist/`
+present but stale, the children exercise the previous build and the test goes green while the source
+is broken. **A regression test that can pass against code it isn't running is worse than no test**,
+because it is trusted. I had even mutation-verified this test at iter1 — against a freshly built
+dist, which is exactly the condition that hides the flaw.
+
+**Fixing it uncovered a second real bug.** With the children finally on current source the test
+failed on a *different* error: SQLITE_BUSY from `pragma('journal_mode = WAL')`. Two defects, neither
+mine: `busy_timeout` was set *after* the WAL pragma, and — the part I had wrong at first — busy_timeout
+does not rescue a journal-mode switch at all, because that needs an exclusive lock no busy-handler
+waits for. So concurrent opens of a non-WAL database (what a CMAP does) threw out of the constructor,
+and `recordMetrics` swallows that. Same silent-missing-row symptom codex blocked on at iter1, reached
+by a completely different route. Fixed in `enableWal()`: timeout first, skip when already WAL, treat
+SQLITE_BUSY as success-by-someone-else.
+
+**Mutation testing is the only reason I know any of this works.** The numbers, because they were
+counter-intuitive twice:
+
+| variant | regression caught |
+|---|---|
+| spawn-and-hope | 2 / 5 |
+| shared wall-clock deadline | 4 / 5 |
+| ten racers instead of six | 2 / 6 — **worse** |
+| readiness barrier + WAL-seeded fixture | 5 / 6 |
+
+More racers made detection *worse*: more concurrent tsx starts means more startup skew, and a late
+child finds the work done and never contends. And **my own WAL fix weakened the migration test** —
+serializing openers at the journal switch stopped them reaching the migration together. Seeding the
+fixture already in WAL (as a real `~/.codev/metrics.db` is) puts the contention back on the migration.
+
+Since a race test is probabilistic by nature, the WAL fix also got a **deterministic** guard that
+removes timing entirely: hold the write lock outright, assert the constructor survives. 5/5 against
+the old code. Pairing a probabilistic reproduction with a deterministic assertion is the pattern I'd
+reuse — neither alone is sufficient.
+
+**One reviewer claim I disputed after checking.** claude reported that omitting `modelId` in
+`test-isolation.test.ts` silently drops the row via better-sqlite3's missing-parameter error. The
+better-sqlite3 behavior is real (omitted throws; explicitly-undefined binds NULL) but the conclusion
+is not: `record()` re-materializes every named parameter, so the property is always present. I only
+caught it because I mutation-tested the fix and it *still passed*, which contradicted the mechanism.
+The real gap is type-level only — `__tests__` is outside tsconfig. Fixed anyway, with the verified
+mechanism in the comment rather than the reported one. Verify reviewer claims against the file.
+
+Also took claude's non-blocking catch that my barrier leaked CPU-pinned orphans on timeout (hot spin,
+children never killed) — a hang risk I introduced. Now yields via `Atomics.wait` and reaps on timeout.
+
+tsc 0 · build ✓ · full unit suite green · phase file 5 runs / 5 green.
