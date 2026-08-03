@@ -228,3 +228,47 @@ even constructed).
   (no side-effect hang) — the spawn.test.ts "avoid side-effect import" caution doesn't bite here because
   the guard throws before Tower/GitHub are touched. Committed as a 2nd phase_2 commit (porch chore was on
   top of d200edf6, so amend wasn't clean). Next: porch next → 3-way consult (verification).
+
+### phase_2 CONSULT iter1: Gemini APPROVE, Claude APPROVE/HIGH, Codex REQUEST_CHANGES/HIGH
+Codex found TWO REAL gaps my "unreachable" analysis missed — both on RESTART/RECONNECT paths (not
+initial launch), reachable when a config is edited to gemini mid-session OR Tower restarts reading a
+gemini config. Verified against source (both confirmed):
+1. FAIL-OPEN: resolveArchitectRestart (tower-utils.ts:455) propagates RetiredHarnessError, but BOTH
+   consumers (tower-terminals.ts:717 _reconcileTerminalSessionsInner, :982 getTerminalsForWorkspace)
+   catch ALL harness errors and fall back to restartOptions = { command: cmdParts[0] (= gemini),
+   args: cmdParts.slice(1) } — actually relaunching the retired gemini binary (no role injection).
+2. UNCAUGHT THROW: buildArchitectFreshLaunch.next() (tower-utils.ts:533) resolves the harness unguarded;
+   session-manager.ts:1175 calls freshLaunch?.next() with NO try/catch → clean-exit relaunch of an
+   architect whose config flipped to gemini throws into the exit handler → Tower exception.
+Claude(APPROVE) flagged #2 as non-blocking ("unreachable in practice"); Codex(HIGH) is right it IS
+reachable via config-change-before-clean-exit. Fixing both (Codex asks: fail closed + clean error
+surfacing + regression tests for reconnect AND clean-exit paths).
+FIX (all logic in tower-utils.ts; tower-terminals just calls the new helper):
+- Fix 2: guard getArchitectHarness in buildArchitectFreshLaunch.next() → RetiredHarnessError → log +
+  return plain { args: baseArgs, env: baseEnv } (no throw, no retired injection; baseArgs are the ORIGINAL
+  supported-harness launch's, so never gemini).
+- Fix 1: extract the 2 duplicated consumer try/catch blocks into ONE exported helper
+  buildArchitectReconnectRestartOptions({workspacePath, architectName, cmdParts, cleanEnv,
+  includeFreshLaunch, log}) in tower-utils (co-located w/ resolveArchitectRestart family; imports
+  ReconnectRestartOptions type from session-manager — no cycle). Fails CLOSED on RetiredHarnessError
+  (return undefined → session reconnects to a live process if any, but NEVER auto-restarts into gemini);
+  keeps the plain-command fallback for OTHER harness errors. Both tower-terminals sites call it
+  (includeFreshLaunch: site1=true, site2=false — preserves each site's behavior; unifies only the
+  cosmetic Resuming-log text).
+- Tests (tower-utils.test.ts): buildArchitectFreshLaunch.next gemini→plain/no-throw + codex/claude
+  unchanged; buildArchitectReconnectRestartOptions gemini→undefined, codex/claude→opts w/ command,
+  unknown→plain fallback, includeFreshLaunch toggles freshLaunch.
+
+### phase_2 iter1 fixes COMMITTED + rebuttal written (2026-08-03, resumed session)
+Resumed from state-snapshot.md. Re-verified the uncommitted Codex fixes against source (diffs clean;
+no stray usages of the 3 dropped tower-terminals imports) and independently re-ran checks BEFORE
+committing: build exit 0 (tsc+vite); tower-utils.test.ts 61/61 (incl. +7 new #1338 tests); consumer
+suites tower-terminals+tower-instances+bugfix-430-tower-restart 133/133 (refactor = no regression).
+- Committed `11527838` [Spec 1338][Phase: phase_2] fix: fail closed on architect restart/reconnect.
+- Wrote 1338-phase_2-iter1-rebuttals.md: both Codex points accepted+fixed; Claude's non-blocking
+  (a) dispatcher-centralized preflight + (b) session-manager.ts:1175 freshLaunch.next() — note (b) is
+  the SAME site as Codex C2, now actively guarded (not "unreachable by design"). Both recorded for the
+  final review doc. Gemini/Claude approvals stand.
+NOTE: line refs in the iter1 consult note above are pre-fix (tower-utils.ts:455/533, etc.); post-fix
+refs are in the rebuttal (helper def :589, freshLaunch guard :544, reconnect guard :630).
+Next: porch done 1338 → re-verification → iter2 3-way consult on the fixed code.
