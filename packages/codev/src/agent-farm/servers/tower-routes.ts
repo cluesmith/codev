@@ -1750,6 +1750,12 @@ async function handleSend(
       noEnter,
       terminalId: result.terminalId,
     });
+    // Claim the row as delivered SYNCHRONOUSLY, before any await (CMAP round 2 — Codex): the
+    // interrupt writes the message itself (a gate bypass), so the row must never be visible to
+    // the mailbox drainer as `held`, or a concurrent backstop/scheduleDrain pass could gate-deliver
+    // the SAME row and put the bytes on the wire twice. enqueue→markDelivered are both synchronous
+    // (no await between), so there is no window for the drainer to pick it up before we own it.
+    markMailboxDelivered(db, row.id);
     // Deliver the interrupt as ONE atomic critical section under the Spec 1273 per-terminal
     // submission lock (CMAP round 1 — Gemini/Codex/Claude): the Ctrl+C, its 100 ms settle, and
     // the message write all occur inside a single lock acquisition. Previously the \x03 + the
@@ -1776,7 +1782,6 @@ async function handleSend(
       metadata: { raw, source: 'api' },
       timestamp: new Date().toISOString(),
     });
-    markMailboxDelivered(db, row.id);
     ctx.log('INFO', `Message delivered (interrupt): ${from ?? 'unknown'} → ${toAgent} (terminal ${result.terminalId.slice(0, 8)}...)`);
     sendJson(res, 200, {
       ok: true,

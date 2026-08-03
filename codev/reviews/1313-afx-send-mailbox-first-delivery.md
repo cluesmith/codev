@@ -579,6 +579,37 @@ OOM guard (#1047); having the mailbox write edge also take the per-terminal `sub
 interrupt-vs-delivery fusion impossible (a larger change); the interrupt-throw → held-row re-delivery duplicate
 (minor, error path only).
 
+### Round 7 (CMAP round 2 — verification of the round-1 fixes) — Gemini APPROVE, Claude "fixes hold", Codex REQUEST_CHANGES
+
+A second 3-way pass verified the round-1 fixes and found real issues in the NEW code (backoff + memo + interrupt
+restructure). Gemini approved; Claude/Codex flagged the following, all fixed:
+
+- **Interrupt row could be delivered twice** (Codex HIGH; Claude flagged): moving `enqueueMailbox` before the Ctrl+C
+  (round 1) left the row `held` and drainable during the write, so a concurrent backstop/scheduleDrain could
+  gate-deliver the SAME row → double bytes. **Fixed:** the interrupt now `markMailboxDelivered`s the row SYNCHRONOUSLY
+  right after enqueue (before any await), so it is never drainable; the bypass owns the write.
+- **Memo cached a CLEAN verdict across a delivery** (Codex HIGH): PTY INPUT doesn't advance the ring (only OUTPUT
+  does), so a follow-up held message could memo-hit the same token before the submission echoes and deliver onto an
+  un-echoed line. **Fixed:** the memo is invalidated after every delivery — a follow-up re-classifies fresh (restores
+  the pre-memo behavior; the deeper input-echo-lag window stays the pre-existing gate→write INPUT race in the
+  Technical Debt). Test updated.
+- **Backoff delayed the classifier-stuck liveness escalation** (Claude merge-ask; Codex): the backoff's tick-skip
+  also skipped `recordStreak`, so the `no-region-end`/`no-composer-marker` escalation — the liveness net that
+  *replaces* the removed over-ceiling hold — fired at ~98 s instead of ~15 s for exactly the pathological population
+  it guards. **Fixed:** the backoff entry carries the last classification, and a skipped tick re-feeds it to
+  `recordStreak`, so the streak advances on schedule. Test added.
+- **`bigRing` was lost on the TOCTOU-hold path** (Claude + Codex): a big ring that renders clean then moves
+  mid-render never backed off (the fast-repaint case). **Fixed:** the TOCTOU hold now carries `bigRing`.
+- **`stop()`/restart lifecycle race** (Codex; Claude): the drainer instance is REUSED across stop()/start(), so an
+  in-flight tick/drain could repopulate the cleared maps or act on old ports/db. **Fixed:** a `generation` counter,
+  bumped in `stop()`, that tick/scheduleDrain check before mutating.
+- Doc accuracy: the `CachedVerdict` comment overstated (the session guard closes the RESPAWN route; `RingBuffer.clear()`
+  is closed by the `!writable` filter); the `stop()` comment now notes clearing `scheduledDrains` doesn't cancel an
+  in-flight drain. cron test asserts the delivered target.
+
+**Still flagged (unchanged):** off-thread/memory-bounded classify (#1047); full interrupt-vs-mailbox-delivery
+cross-path serialization; the input-echo-lag residual (gate→write INPUT race, pre-existing Technical Debt).
+
 ## Lessons Learned
 
 ### What Went Well

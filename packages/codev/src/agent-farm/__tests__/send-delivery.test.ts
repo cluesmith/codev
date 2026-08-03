@@ -455,12 +455,13 @@ describe('MailboxDrainer verdict memo (Spec 1313 render-gate follow-up)', () => 
     expect(classifyCalls).toBe(2);
   });
 
-  it('a memo hit on a CLEAN line still delivers — TOCTOU re-validation passes trivially (no await on a hit)', async () => {
+  it('invalidates the memo after a delivery — a follow-up message re-classifies, never reuses a stale CLEAN', async () => {
     const h = harness();
-    // Two held messages, static ring: tick 1 classifies CLEAN and delivers the oldest;
-    // tick 2 memo-hits the same CLEAN verdict and delivers the next WITHOUT re-classifying.
-    // (The fake ring is static across the delivery; a real ring would move after the Enter
-    // and re-classify — this isolates the memo-hit delivery path and its trivial TOCTOU.)
+    // Two held messages, static fake ring. Round-2 fix (Codex): after delivering m1 the memo is
+    // invalidated (the write WILL change the screen), so tick 2 does NOT reuse the stale CLEAN —
+    // it re-classifies fresh before delivering m2. PTY INPUT doesn't advance the ring, so the token
+    // alone would wrongly look unchanged; the invalidation prevents delivering onto an un-echoed
+    // line. Both still deliver, in order — but via TWO classifies, not a stale reuse.
     h.setSession('spir-1', fakeSession({ ringBuffer: { getAll: () => ['❯ '], currentSeq: 3, partialBytes: 0 } }));
     let classifyCalls = 0;
     h.ports.classify = async () => { classifyCalls++; return CLEAN; };
@@ -468,10 +469,10 @@ describe('MailboxDrainer verdict memo (Spec 1313 render-gate follow-up)', () => 
     held('spir-1', 'm2', 1001);
     const drainer = new MailboxDrainer({ intervalMs: 999999 });
     drainer.start(h.ports, db);
-    await drainer.tick(); // delivers m1 (classify #1)
-    await drainer.tick(); // memo hit → delivers m2, no re-classify
+    await drainer.tick(); // classify #1 (miss) → delivers m1 → invalidates the memo
+    await drainer.tick(); // memo invalidated → classify #2 (fresh) → delivers m2
     drainer.stop();
-    expect(classifyCalls).toBe(1);
+    expect(classifyCalls).toBe(2);
     expect(h.writes.map((w) => w.formattedMessage)).toEqual(['m1', 'm2']);
   });
 
@@ -534,6 +535,27 @@ describe('MailboxDrainer verdict memo (Spec 1313 render-gate follow-up)', () => 
     await drainer.scheduleDrain('/ws', 'spir-1');
     drainer.stop();
     expect(drainer.backoffAgents).toHaveLength(0);
+  });
+
+  it('backoff does NOT delay the classifier-stuck liveness escalation — the streak advances during cooldown', async () => {
+    const h = harness();
+    let seq = 1;
+    const bigReplay = 'x'.repeat(4 * 1024 * 1024 + 16); // big → backoff throttles re-classify
+    h.setSession('spir-1', fakeSession({
+      ringBuffer: { getAll: () => [bigReplay], get currentSeq() { return seq; }, partialBytes: 0 },
+    }));
+    // A big ring the gate can't bound → `no-region-end` (classifier-stuck): the SAME population
+    // the backoff throttles is the one the liveness net guards. The streak must still cross its
+    // threshold (10) on schedule even though most re-classifies are skipped — via the cached
+    // classification re-fed on each skipped tick (CMAP round 2 — Claude/Codex).
+    h.ports.classify = async () => ({ clean: false, reason: 'busy', detail: 'no-region-end' });
+    held('spir-1');
+    const drainer = new MailboxDrainer({ intervalMs: 999999 });
+    drainer.start(h.ports, db);
+    for (let i = 0; i < 12; i++) { seq++; await drainer.tick(); } // > threshold, even with skips
+    drainer.stop();
+    expect(h.livenessCalls.length).toBeGreaterThan(0);
+    expect(h.livenessCalls[0]).toMatchObject({ toAgent: 'spir-1', streak: 10 });
   });
 });
 

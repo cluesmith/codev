@@ -226,12 +226,16 @@ function ringToken(session: DeliverySession, profile: GateProfile): string {
  * A gate verdict cached against BOTH the live session instance and the {@link ringToken}
  * that produced it (Spec 1313 render-gate verdict memo). Reuse requires the SAME session
  * object AND an unchanged token, so a cached verdict can never be served for a screen that
- * has moved. The `session` guard is load-bearing: the token (`currentSeq:partialBytes:…`) is
- * only unique WITHIN one monotonic ring — a replacement `PtySession` for the same `agentKey`
- * restarts `currentSeq` at 0, and `RingBuffer.clear()` (session teardown) leaves `currentSeq`
- * untouched while wiping content — so a token can alias across session instances. Reference
- * identity closes both routes structurally (CMAP round 1: Gemini/Codex/Claude). Holding the
- * session pins it for at most one tick (the drainer prunes to the held-agent set each tick).
+ * has moved. The `session` guard closes the RESPAWN route: the token (`currentSeq:partialBytes:…`)
+ * is only unique WITHIN one monotonic ring, so a replacement `PtySession` for the same `agentKey`
+ * (its `currentSeq` restarts at 0) can transiently reproduce an old token — but it is a DIFFERENT
+ * object, so `cached.session === session` misses. (The other aliasing route — `RingBuffer.clear()`
+ * on the SAME object during `PtySession` teardown, which leaves `currentSeq` untouched while
+ * wiping content — is NOT closed by this guard, which the same object trivially satisfies; it is
+ * closed upstream by the `!session.writable` filter in the resolver, so a cleaned-up session never
+ * reaches the memo, plus the `partialBytes` change when a non-empty partial is wiped.) CMAP round
+ * 1/2: Gemini/Codex/Claude. Holding the session pins it for at most one tick (the drainer prunes
+ * to the held-agent set each tick).
  * Keyed/bounded by {@link MailboxDrainer}; see {@link deliverAgentMail}.
  */
 interface CachedVerdict {
@@ -339,7 +343,11 @@ export async function deliverAgentMail(
   // would fuse the message into that draft — the exact false-clean the gate prevents.
   // Hold instead; it delivers on the next clean tick. (On a memo hit no await occurred,
   // so the token is unchanged and this passes trivially.)
-  if (ringToken(session, profile) !== tokenBefore) return hold('busy');
+  // Carry `bigRing` into this hold too (CMAP round 2 — Claude/Codex): a large ring can render
+  // CLEAN and then move mid-render (this is the fast-repaint case), so the backoff must see it
+  // as an expensive not-clean pass just like the `!verdict.clean` path above — otherwise a
+  // constantly-repainting big ring would re-render every tick and never back off.
+  if (ringToken(session, profile) !== tokenBefore) return { ...hold('busy'), bigRing };
 
   // Clean, verified-empty prompt → deliver the oldest held message. Await the
   // write's paced completion so a serialized follow-up delivery never begins
@@ -376,6 +384,14 @@ export async function deliverAgentMail(
   }
   ports.broadcast(broadcastForRow(current, ports.now()));
   ports.onHeldStateChange(); // a held row left the set → refresh the indicator count
+  // Invalidate the memo after a delivery (CMAP round 2 — Codex): the write we just made will
+  // change the screen (the submitted line + a fresh prompt), so the cached CLEAN verdict is
+  // known-stale. Without this, a follow-up held message could memo-hit the SAME token before
+  // the PTY echoes the submission and deliver onto a not-yet-repainted line. (PTY INPUT does not
+  // advance the ring — only OUTPUT does — so the token alone can lag a delivery; forcing a fresh
+  // classify next pass restores the pre-memo behavior. The deeper input-echo-lag window is the
+  // pre-existing gate→write INPUT race, tracked in the review's Technical Debt.)
+  memo?.delete(cacheKey);
   ports.log(`[mailbox] delivered ${row.id} → ${toAgent} @ ${path.basename(workspacePath)}`);
   return { delivered: [row.id], reason: null };
 }
@@ -466,9 +482,20 @@ export class MailboxDrainer {
   // Spec 1313 (CMAP round 1): per-agent exponential backoff for a BIG ring that stays not-clean.
   // The memo only helps a STATIC ring; a busy big ring changes every tick and re-renders fully.
   // `span` is the current backoff length (doubling, capped at MAX_CLASSIFY_BACKOFF_TICKS);
-  // `skip` counts down the ticks still to skip. NEVER a hold — scheduleDrain still delivers on
-  // the real submit/quiescence event; this only throttles the wasteful backstop polling.
-  private readonly classifyBackoff = new Map<string, { span: number; skip: number }>();
+  // `skip` counts down the ticks still to skip. `reason`/`detail` carry the last not-clean
+  // classification so the liveness streak keeps advancing during cooldown (CMAP round 2 — the
+  // backoff throttles re-classify, not the classifier-stuck escalation). NEVER a hold —
+  // scheduleDrain still delivers on the real submit/quiescence event; this only throttles the
+  // wasteful backstop polling.
+  private readonly classifyBackoff = new Map<
+    string,
+    { span: number; skip: number; reason: MailboxReason | null; detail?: GateVerdict['detail'] }
+  >();
+  // Lifecycle generation (CMAP round 2 — Codex/Claude): the drainer instance is REUSED across
+  // stop()/start() (mailbox-wiring `ensureDrainer`), and the tests do start/stop/start. Bumped on
+  // stop() so an in-flight tick/scheduleDrain that resumes after a restart bails before mutating
+  // this generation's state.
+  private generation = 0;
 
   constructor(opts: { intervalMs?: number; pruneRetentionDays?: number; escalationMs?: number } = {}) {
     this.intervalMs = opts.intervalMs ?? DEFAULT_BACKSTOP_INTERVAL_MS;
@@ -490,14 +517,18 @@ export class MailboxDrainer {
     this.timer = undefined;
     this.ports = undefined;
     this.db = undefined;
-    // Drop all per-agent transient state (CMAP round 1 — Codex/Claude): a stopped drainer
-    // that is later restarted with a different DB/ports binding must not carry a stale
-    // verdict, streak, backoff, or in-flight-drain slot across the restart. All are bounded,
-    // so this is correctness hygiene, not a leak fix.
+    // Drop all per-agent transient state (CMAP round 1/2 — Codex/Claude): the drainer instance is
+    // REUSED across stop()/start(), so a restart must not carry a stale verdict/streak/backoff, nor
+    // let a post-restart trigger coalesce onto a dead scheduled-drain promise. NB clearing
+    // `scheduledDrains` does NOT cancel an already-running drain — its promise captured the old
+    // ports/db and runs to completion (throwing harmlessly on a closed DB); it only stops a new
+    // trigger from coalescing onto it. The `generation` bump is what stops an in-flight tick/drain
+    // from mutating THIS generation's state after it resumes.
     this.verdictMemo.clear();
     this.notCleanStreak.clear();
     this.scheduledDrains.clear();
     this.classifyBackoff.clear();
+    this.generation++;
   }
 
   /** Per-agent consecutive not-clean count (liveness telemetry; Phase 7 reads this). */
@@ -520,6 +551,7 @@ export class MailboxDrainer {
     const db = this.db;
     if (!ports || !db || this.ticking) return;
     this.ticking = true;
+    const gen = this.generation; // bail if stop() runs mid-tick (the drainer instance is reused)
     try {
       const agents = new Map<string, { workspacePath: string; toAgent: string }>();
       for (const row of listHeld(db)) {
@@ -539,6 +571,7 @@ export class MailboxDrainer {
         if (!agents.has(key)) this.classifyBackoff.delete(key);
       }
       for (const [key, { workspacePath, toAgent }] of agents) {
+        if (this.generation !== gen) return; // stop() ran mid-tick → bail before more work
         // Backstop backoff (CMAP round 1): while an agent is cooling down after a big not-clean
         // render, skip re-classifying it this tick — the whole-ring render is the cost and the
         // ring is busy anyway. This is NOT a hold: scheduleDrain fires the instant the line
@@ -546,12 +579,19 @@ export class MailboxDrainer {
         const cooldown = this.classifyBackoff.get(key);
         if (cooldown && cooldown.skip > 0) {
           cooldown.skip--;
+          // Keep the liveness streak advancing during cooldown (CMAP round 2 — Claude/Codex): the
+          // backoff throttles re-CLASSIFY, but the mail is still not delivering, and a classifier-
+          // stuck streak (no-region-end/no-composer-marker) must still cross its threshold on
+          // schedule — the backoff throttles exactly the pathological population that escalation
+          // guards. Re-feed the last classification so the streak counts this skipped tick too.
+          this.recordStreak(key, { delivered: [], reason: cooldown.reason, detail: cooldown.detail });
           continue;
         }
         const outcome = await deliverAgentMailSerialized(ports, db, workspacePath, toAgent, this.verdictMemo);
         this.recordStreak(key, outcome);
         this.updateBackoff(key, outcome);
       }
+      if (this.generation !== gen) return; // stop() ran during the loop → skip escalation/prune
       this.escalateOverdue(ports, db);
       pruneTerminal(db, this.retentionDays, ports.now());
     } finally {
@@ -644,7 +684,9 @@ export class MailboxDrainer {
     if (!delivered && outcome.bigRing) {
       const prev = this.classifyBackoff.get(key)?.span ?? 0;
       const span = Math.min(prev > 0 ? prev * 2 : 1, MAX_CLASSIFY_BACKOFF_TICKS);
-      this.classifyBackoff.set(key, { span, skip: span });
+      // Carry the classification so the skipped-tick recordStreak (in tick) can keep the
+      // liveness streak advancing on schedule (CMAP round 2).
+      this.classifyBackoff.set(key, { span, skip: span, reason: outcome.reason, detail: outcome.detail });
     } else {
       this.classifyBackoff.delete(key);
     }
@@ -677,11 +719,13 @@ export class MailboxDrainer {
     const ports = this.ports;
     const db = this.db;
     if (!ports || !db) return Promise.resolve();
+    const gen = this.generation; // bail if stop() runs before this queued drain executes
     const key = agentKey(workspacePath, toAgent);
     const existing = this.scheduledDrains.get(key);
     if (existing) return existing;
     const run = Promise.resolve().then(async () => {
       this.scheduledDrains.delete(key);
+      if (this.generation !== gen) return; // stopped/restarted before we ran → don't act on old ports/db
       try {
         // NB: the fast trigger classifies FRESH (no verdict memo). A submit/quiescence
         // trigger fires precisely because the ring just changed, so it must re-check the

@@ -1390,3 +1390,26 @@ DEFERRED/FLAGGED (in PR comment): off-thread/memory-bounded classify = real OOM 
 taking the per-terminal lock to kill interrupt-vs-delivery fusion (larger); interrupt-throw→re-deliver duplicate (minor).
 tsc clean; FULL suite 4261 pass / 48 skip / 0 fail. Committing CMAP-round-1 fixes → push PR #1330 → update PR comment.
 NOT approving gates, NOT merging.
+
+### 2026-08-02 — CMAP round 2 (verify the round-1 fixes): Gemini APPROVE, Claude "fixes hold", Codex REQUEST_CHANGES. All addressed. Suite 4262 GREEN.
+Verification pass on the round-1 fixes found real issues in the NEW code (backoff/memo/interrupt restructure):
+- **Interrupt double-delivery** (Codex HIGH): round-1's enqueue-before-Ctrl+C left the row held+drainable during the
+  write → concurrent drainer could gate-deliver the SAME row (double bytes). FIX: markMailboxDelivered SYNCHRONOUSLY
+  right after enqueue (before any await) → never drainable; bypass owns the write.
+- **Memo cached CLEAN across a delivery** (Codex HIGH): PTY INPUT doesn't advance the ring (only OUTPUT), so a
+  follow-up could memo-hit the same token before echo and deliver onto an un-echoed line. FIX: invalidate memo after
+  every delivery → follow-up re-classifies fresh. (Deeper input-echo-lag = pre-existing gate→write INPUT race, TD.)
+- **Backoff delayed the classifier-stuck liveness escalation** (Claude merge-ask; Codex): the tick-skip skipped
+  recordStreak too → no-region-end/no-composer-marker escalation (the net that REPLACES over-ceiling) fired ~98s vs
+  ~15s for exactly the throttled population. FIX: backoff entry carries last (reason,detail); skipped tick re-feeds
+  recordStreak. Test added.
+- **bigRing lost on TOCTOU-hold** (Claude+Codex): big ring that renders clean then moves mid-render never backed off.
+  FIX: TOCTOU hold carries bigRing.
+- **stop()/restart lifecycle race** (Codex; Claude): drainer instance is REUSED across stop/start (ensureDrainer);
+  in-flight tick/drain could repopulate cleared maps / act on old ports/db. FIX: `generation` counter bumped in
+  stop(); tick + scheduleDrain bail on mismatch.
+- Doc accuracy (CachedVerdict session-guard scope; stop() scheduledDrains note); cron test asserts target.
+STILL FLAGGED (unchanged): off-thread/bounded classify (#1047); full interrupt-vs-delivery cross-path serialization;
+input-echo-lag residual (gate→write INPUT race, TD). tsc clean; FULL suite 4262 pass / 48 skip / 0 fail.
+NEXT: commit round-2 fixes → push → PR comment. Considering a light round-3 verify on the round-2 fixes before handoff.
+NOT approving gates, NOT merging.
