@@ -50,6 +50,7 @@ import { handleCommandRoute, COMMAND_ROUTE } from './command-relay.js';
 import { formatArchitectMessage, formatBuilderMessage } from '../utils/message-format.js';
 import type { PtySession } from '../../terminal/pty-session.js';
 import { writeMessageToSession, writeEscapeToSession } from './message-write.js';
+import { submitToSession } from './session-submit.js';
 import { makeDeliveryPorts } from './mailbox-wiring.js';
 import { deliverAgentMailSerialized, type DeliveryPorts } from './mailbox-delivery.js';
 import { deliverCronMail, CRON_SENDER, type CronDeliveryResult } from './cron-delivery.js';
@@ -1739,8 +1740,6 @@ async function handleSend(
   // WITHOUT the render-gate (the operator is looking at this terminal). A row is
   // still persisted and marked delivered for audit parity — every send is a row.
   if (interrupt) {
-    session.write('\x03'); // Ctrl+C
-    await new Promise((resolve) => setTimeout(resolve, 100));
     const row = enqueueMailbox(db, {
       workspacePath: result.workspacePath,
       toAgent,
@@ -1751,7 +1750,24 @@ async function handleSend(
       noEnter,
       terminalId: result.terminalId,
     });
-    writeMessageToSession(session, formattedMessage, noEnter);
+    // Deliver the interrupt as ONE atomic critical section under the Spec 1273 per-terminal
+    // submission lock (CMAP round 1 — Gemini/Codex/Claude): the Ctrl+C, its 100 ms settle, and
+    // the message write all occur inside a single lock acquisition. Previously the \x03 + the
+    // settle sat OUTSIDE the lock, so a concurrent submission to the same terminal could land
+    // its Ctrl+C inside another submission's text→Enter window (killing that composer) or run
+    // during the 100 ms gap. `writeMessageToSession(..., 100)` schedules the text 100 ms after
+    // the ^C (the settle) and returns the completion offset, so the lock is held until the
+    // whole interrupt is on the wire; uncontended, it runs at once.
+    //   Scope of the guarantee: this serializes interrupt against interrupt/escape — the only
+    //   /api/send writers that take this per-terminal lock. It does NOT serialize against a
+    //   concurrent mailbox/backstop delivery (which writes through the per-AGENT serializer, a
+    //   disjoint lock); interrupt is the explicit gate-bypassing human action, and closing that
+    //   cross-path race would require the mailbox write edge to take this lock too (a separate,
+    //   larger change — flagged, not done here).
+    await submitToSession(result.terminalId, () => {
+      session.write('\x03'); // Ctrl+C
+      return writeMessageToSession(session, formattedMessage, noEnter, 100);
+    });
     broadcastMessage({
       type: 'message',
       from: { project: path.basename(senderWorkspace), agent: from ?? 'unknown' },

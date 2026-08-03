@@ -107,16 +107,29 @@ describe('T16 — manifest completeness (M11)', () => {
       return; // no origin/main to diff against (fresh clone / CI shallow) — skip
     }
 
-    // Scope this guard to the 1280 project's OWN development: only enforce on a branch that
-    // is actually adding/editing 1280 manifests. Without this, it fails EVERY unrelated
-    // feature branch that merges main and happens to touch a prompt surface — whose changes
-    // belong to that branch's project and its own review, not 1280's manifests. (Surfaced on
-    // the Spec 1313 branch: its arch-critical→CLAUDE.md/AGENTS.md propagation tripped this the
-    // moment main was merged in. On the 1280 branch, phases add manifests so the guard stays
-    // active; on main it passes trivially — no diff vs itself.)
-    const manifestRel = path.relative(repoRoot, manifestDir);
-    const touchesManifests = names.some((f) => f === manifestRel || f.startsWith(manifestRel + '/'));
-    if (!touchesManifests) return;
+    // Scope this guard to the 1280 project (CMAP round 1 — Gemini/Codex/Claude). As a permanent
+    // suite test living on `main`, an unscoped `origin/main...HEAD` diff fires on EVERY unrelated
+    // feature branch that touches a prompt surface — e.g. Spec 1313's arch-critical→CLAUDE/AGENTS
+    // propagation tripped it the moment main was merged in. Enforce only when this IS 1280 work:
+    // the branch name references 1280, or the diff touches the 1280 project tree. Branch-name
+    // detection keeps the guard armed on the 1280 branch from its first prompt change (a
+    // manifest-dir-touch predicate would silently skip the "changed a prompt file, forgot the
+    // manifest entirely" case — the exact failure T16 exists to catch). `git diff` paths are
+    // always '/'-separated, so this is Windows-safe (unlike a `path.relative()` compare).
+    // NOTE: Spec 1280 is already integrated, so this dev-time guard is now largely vestigial —
+    // its owner should remove or re-scope it (e.g. to explicit per-phase commit ranges). Flagged
+    // in the PR; not owned by Spec 1313.
+    let branch = '';
+    try {
+      branch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
+        cwd: repoRoot,
+        encoding: 'utf-8',
+      }).trim();
+    } catch {
+      /* detached HEAD / no git — fall through to the file-touch signal */
+    }
+    const isProject1280 = /1280/.test(branch) || names.some((f) => f.startsWith('codev/projects/1280'));
+    if (!isProject1280) return;
 
     const changed = names.filter((s) => PROMPT_BEARING.test(s));
     if (changed.length === 0) return;

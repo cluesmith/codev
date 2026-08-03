@@ -41,14 +41,20 @@
  * normal use — an earlier `over-ceiling` hold therefore meant a permanent delivery
  * outage for exactly the busiest agents (a live ~14 M-unit empty-composer architect
  * terminal was stuck, its mail undeliverable until relaunch). Whole-ring render is
- * correct at any size, so the fix is simply to render it; the verdict memo in
- * `mailbox-delivery.ts` keeps the 1.5 s backstop from re-rendering a STATIC large ring
- * every tick. Residual risk (accepted, deferred to #1047): a pathological runaway dump
- * could make one render allocate/parse hundreds of MB and stall the loop — NOT
- * mitigated by a hold cap (that just reintroduces the outage under a bigger number),
- * but by the memo's rarity and, ultimately, by retiring the unbounded `partial` for a
- * persistent headless screen (a separate project, #1047). An unclassifiable huge ring
- * still HOLDS and escalates via the classifier-stuck liveness surface
+ * correct at any size, so the fix is simply to render it. Two mechanisms in
+ * `mailbox-delivery.ts` bound the recurring cost: the verdict memo skips re-rendering a
+ * STATIC large ring, and a cost-aware backstop backoff throttles re-classifying a BUSY big
+ * ring that repaints every tick — the case the memo can NOT help, because a busy ring's token
+ * changes every tick and the memo always misses exactly when the render is most expensive.
+ * Residual risk (accepted, deferred to #1047): because `partial` is unbounded, a pathological
+ * runaway (a huge no-newline dump) can make ONE whole-ring render allocate and parse a
+ * multi-hundred-MB string — a real risk of exhausting the Tower heap (an OOM CRASH, not merely
+ * a stall: @xterm/headless chunks its parse and yields, so the event loop is not monolithically
+ * blocked, but the allocation is unbounded). Neither the memo nor the backoff bounds that first
+ * giant render; a hold cap is NOT the answer (it just reintroduces the outage under a bigger
+ * number). The robust fix — classify off-thread with a memory bound, or retire the unbounded
+ * `partial` for a persistent headless screen — is #1047, out of scope here. An unclassifiable
+ * huge ring still HOLDS and escalates via the classifier-stuck liveness surface
  * (`no-region-end`/`no-composer-marker`), so it is never a silent loss.
  *
  * Cost (spike g2, @xterm/headless 6.0.0): 2 ms @ 13 KB, 67 ms @ 4 MB — cheap enough

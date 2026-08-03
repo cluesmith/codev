@@ -533,6 +533,52 @@ The Spec-1273 `submitToSession` per-terminal submission lock (added on `main`) w
 explicit human-bypass paths (`escape` + `interrupt`), which do NOT route through the mailbox's per-agent serializer
 and so need their own anti-fusion lock.
 
+### Round 6 (CMAP round 1 on the Round-5 diff) — three-way REQUEST_CHANGES, all addressed
+
+Gemini + Codex + Claude all returned REQUEST_CHANGES (all three agreed the over-ceiling removal itself is correct and
+shippable). Findings and fixes:
+
+- **Memo could serve a stale verdict across a same-`agentKey` PTY respawn / `RingBuffer.clear()`** (all three, HIGH).
+  The `ringToken` (`currentSeq:partialBytes:…`) is only unique WITHIN one monotonic ring; a replacement `PtySession`
+  restarts `currentSeq` at 0 and `clear()` leaves it untouched while wiping content, so a token can alias across
+  session instances. My "diverges on first output" claim was not airtight (counters don't encode content). **Fixed:**
+  `CachedVerdict` now binds the live `session` instance too — a hit requires `cached.session === session && token`.
+  `getSession(tid)` returns a stable object per live terminal, so this HITS across ticks and MISSES after a respawn.
+  Test added (same token, different session object → re-classifies).
+- **The memo does NOT bound the expensive case — a CPU regression** (Claude #1; Codex: possible OOM). My "the memo
+  makes renders rare" claim was *inverted*: a message is held because the line is BUSY → the app repaints every tick →
+  `partialBytes` advances every tick → the token changes every tick → **the memo always misses exactly when the ring
+  is largest**. A 14 M-unit busy ring is ~230 ms of parse per held agent per 1.5 s tick, and `tick`'s loop is
+  await-serial. **Fixed:** a cost-aware **backstop backoff** — after a big (> `BIG_RING_UNITS` = 4 M) not-clean
+  *render*, the backstop skips re-classifying that agent for an exponentially-growing span (capped at 8 ticks). NEVER
+  a hold: `scheduleDrain` (submit/quiescence) still classifies fresh the instant the line clears, so real delivery
+  latency is unaffected — only the wasteful polling of a known-busy giant ring is throttled. Test added.
+- **OOM doc was inaccurate** (Codex + Claude). Corrected the render-gate header: the residual is a possible Tower
+  **OOM/crash** (unbounded allocation), not merely an event-loop stall (xterm chunks its parse and yields); the memo
+  helps only STATIC rings and the backoff only the recurring cost — neither bounds a single first render of a giant
+  ring; the robust fix (off-thread classify with a memory bound, or the #1047 persistent-xterm that retires the
+  unbounded `partial`) stays out of scope. **No holding cap** was added (it would just reintroduce the outage).
+- **Interrupt `\x03` was written OUTSIDE the `submitToSession` lock** (all three). A concurrent submission's Ctrl+C
+  could land inside another submission's text→Enter window (killing that composer), or run during the 100 ms settle.
+  **Fixed:** the Ctrl+C, its settle (via `writeMessageToSession`'s `delayOffset`), and the message write are now one
+  atomic locked critical section. The anti-fusion claim was also **overstated** — corrected to note this serializes
+  interrupt vs escape/interrupt only, NOT vs a concurrent mailbox delivery (a disjoint per-agent lock); interrupt is
+  the explicit gate-bypass, and full cross-path serialization is flagged as a separate, larger change.
+- **spec-1280 T16 scoping** (all three): my manifest-dir-touch predicate silently skipped the "changed a prompt file,
+  forgot the manifest entirely" case (T16's raison d'être) and had a Windows `path.sep` portability bug (always
+  skipped). **Fixed:** adopted Claude's portable predicate — enforce when the branch name references 1280 OR the diff
+  touches the 1280 project tree (git paths are '/'-separated). Still flagged: 1280 is integrated, so the guard is
+  vestigial and its owner should remove/re-scope it.
+- **`stop()` didn't clear the memo** (Codex + Claude): now clears `verdictMemo`/`notCleanStreak`/`scheduledDrains`/
+  `classifyBackoff` (hygiene for a stopped-then-restarted drainer).
+- **cron test used `expect.anything()` for the delivered task** (Claude): a wrong-target routing regression would have
+  passed. Now asserts `expect.objectContaining({ target: 'architect' })`.
+
+**Deferred/flagged (surfaced in the PR comment for the architect):** off-thread/memory-bounded classify as the real
+OOM guard (#1047); having the mailbox write edge also take the per-terminal `submitToSession` lock to make
+interrupt-vs-delivery fusion impossible (a larger change); the interrupt-throw → held-row re-delivery duplicate
+(minor, error path only).
+
 ## Lessons Learned
 
 ### What Went Well

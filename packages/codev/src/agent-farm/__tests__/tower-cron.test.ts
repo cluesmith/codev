@@ -531,8 +531,12 @@ describe('executeTask', () => {
     );
     // Phase 6 delivery model: the message goes through the mailbox+gate `deliver` port
     // (which broadcasts internally), not a direct PTY write. #1142's point still stands:
-    // a condition-true failure run delivers.
-    expect(deliver).toHaveBeenCalledWith(expect.anything(), 'Service Health Alert: service down');
+    // a condition-true failure run delivers — and to the RIGHT target (CMAP round 1 — Claude:
+    // `expect.anything()` for the task arg would let a wrong-target routing regression pass).
+    expect(deliver).toHaveBeenCalledWith(
+      expect.objectContaining({ target: 'architect' }),
+      'Service Health Alert: service down',
+    );
   });
 
   it('does not deliver when an exitCode condition is false on clean exit', async () => {
@@ -628,7 +632,10 @@ describe('executeTask', () => {
 
     const { result } = await executeTask(task);
     expect(result).toBe('failure');
-    expect(deliver).toHaveBeenCalledWith(expect.anything(), 'Timed out: partial');
+    expect(deliver).toHaveBeenCalledWith(
+      expect.objectContaining({ target: 'architect' }),
+      'Timed out: partial',
+    );
   });
 
   it('does not deliver a timeout when no condition is set (WARN-only path)', async () => {

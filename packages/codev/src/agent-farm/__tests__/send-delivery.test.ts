@@ -489,6 +489,52 @@ describe('MailboxDrainer verdict memo (Spec 1313 render-gate follow-up)', () => 
     expect(drainer.memoizedAgents).toHaveLength(0); // pruned to the (now empty) held-agent set
     drainer.stop();
   });
+
+  it('does NOT reuse a cached verdict across a session swap with an identical token (respawn safety)', async () => {
+    const h = harness();
+    h.setSession('spir-1', fakeSession({ ringBuffer: { getAll: () => ['❯ '], currentSeq: 5, partialBytes: 0 } }));
+    let classifyCalls = 0;
+    h.ports.classify = async () => { classifyCalls++; return BUSY; };
+    held('spir-1');
+    const drainer = new MailboxDrainer({ intervalMs: 999999 });
+    drainer.start(h.ports, db);
+    await drainer.tick(); // classify #1 — caches {sessionA, token}
+    // Swap in a DIFFERENT session object carrying the SAME token — models a respawned PTY whose
+    // fresh ring (currentSeq restarts at 0) transiently reproduces the cached currentSeq/partial.
+    // Token-only matching would serve the stale verdict; the session guard forces a re-classify.
+    h.setSession('spir-1', fakeSession({ ringBuffer: { getAll: () => ['❯ '], currentSeq: 5, partialBytes: 0 } }));
+    await drainer.tick();
+    drainer.stop();
+    expect(classifyCalls).toBe(2);
+  });
+
+  it('backs off re-classifying a BIG busy ring in the backstop; scheduleDrain still delivers on clear', async () => {
+    const h = harness();
+    let seq = 1;
+    const bigReplay = 'x'.repeat(4 * 1024 * 1024 + 16); // > BIG_RING_UNITS (4 M units)
+    h.setSession('spir-1', fakeSession({
+      ringBuffer: { getAll: () => [bigReplay], get currentSeq() { return seq; }, partialBytes: 0 },
+    }));
+    let classifyCalls = 0;
+    h.ports.classify = async () => { classifyCalls++; return BUSY; };
+    held('spir-1');
+    const drainer = new MailboxDrainer({ intervalMs: 999999 });
+    drainer.start(h.ports, db);
+    // Each tick the busy ring changes (token advances → the memo always misses). Without backoff
+    // that is one whole-render per tick; with backoff the backstop skips ticks after a big
+    // not-clean render (span 1, 2, 4…). 4 ticks ⇒ fewer than 4 classifies.
+    for (let i = 0; i < 4; i++) { seq++; await drainer.tick(); }
+    expect(classifyCalls).toBeLessThan(4);
+    expect(drainer.backoffAgents).toContain(agentKey('/ws', 'spir-1'));
+
+    // The line clears and a submit/quiescence trigger fires. scheduleDrain classifies FRESH
+    // (ignores the backoff) and delivers, resetting the backoff so the backstop resumes.
+    h.ports.classify = async () => { classifyCalls++; return CLEAN; };
+    seq++;
+    await drainer.scheduleDrain('/ws', 'spir-1');
+    drainer.stop();
+    expect(drainer.backoffAgents).toHaveLength(0);
+  });
 });
 
 describe('MailboxDrainer.scheduleDrain — fast delivery triggers (Spec 1313, Phase 5)', () => {

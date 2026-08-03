@@ -1367,3 +1367,26 @@ by the render-gate change):
 Full suite: 4259 pass / 48 skip / 0 fail. tsc clean. NEXT: commit (2 parts: merge-fixes, then feature) → 3-way CMAP
 on the diff (raise OOM Q + the spec-1280 cross-spec edit) → push PR #1330 → PR-comment report. NOT approving gates,
 NOT merging.
+
+### 2026-08-02 — 3-way CMAP round 1: ALL THREE REQUEST_CHANGES (over-ceiling removal itself = ship). All addressed. Suite 4261 GREEN.
+CMAP (gemini/codex/claude) on the Round-5 diff. Strong convergence. Fixes:
+- **Memo stale-verdict across PTY respawn / RingBuffer.clear()** (all 3, HIGH): ringToken aliases across session
+  instances (currentSeq restarts at 0; clear() doesn't reset seq). My "diverges on first output" was NOT airtight.
+  FIX: CachedVerdict binds the live `session` instance — hit needs `cached.session===session && token`. getSession(tid)
+  is stable per live terminal → hits across ticks, misses after respawn. + test.
+- **CPU regression — memo doesn't help the expensive case** (Claude #1; Codex=possible Tower OOM): my "renders rare"
+  was INVERTED — a BUSY held ring repaints every tick → token changes every tick → memo ALWAYS misses when the ring is
+  biggest (14M ≈ 230ms/tick/agent, await-serial). FIX: cost-aware **backstop backoff** (big+not-clean render → skip
+  1,2,4…≤8 ticks). NEVER a hold — scheduleDrain still delivers on clear. + test. + accurate OOM doc (possible Tower
+  OOM/crash not just stall; xterm yields; no holding cap).
+- **Interrupt \x03 OUTSIDE the lock** (all 3): concurrent submission's Ctrl+C could kill another's composer / run in
+  the 100ms gap. FIX: atomic — \x03 + settle (writeMessageToSession delayOffset=100) + write in ONE submitToSession
+  callback. Corrected the overstated anti-fusion claim (serializes interrupt-vs-escape only, NOT vs mailbox delivery).
+- **spec-1280 predicate** (all 3): my manifest-dir-touch skipped the forgot-manifest-entirely case + Windows path.sep
+  bug (always skipped). FIX: Claude's portable predicate (/1280/ branch OR touches codev/projects/1280; git slashes).
+- **stop() clears** verdictMemo/notCleanStreak/scheduledDrains/classifyBackoff (Codex+Claude).
+- **cron test** expect.anything()→objectContaining({target}) (Claude — wrong-target regression would've passed).
+DEFERRED/FLAGGED (in PR comment): off-thread/memory-bounded classify = real OOM guard (#1047); mailbox write edge
+taking the per-terminal lock to kill interrupt-vs-delivery fusion (larger); interrupt-throw→re-deliver duplicate (minor).
+tsc clean; FULL suite 4261 pass / 48 skip / 0 fail. Committing CMAP-round-1 fixes → push PR #1330 → update PR comment.
+NOT approving gates, NOT merging.
