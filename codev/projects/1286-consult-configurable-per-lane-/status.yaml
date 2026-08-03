@@ -17,18 +17,18 @@ plan_phases:
     status: complete
   - id: phase_5
     title: Porch lane-selection resolver consolidation
-    status: in_progress
+    status: complete
   - id: phase_6
     title: Documentation and skeleton parity
-    status: pending
-current_plan_phase: phase_5
+    status: in_progress
+current_plan_phase: phase_6
 gates:
   pr:
     status: pending
   verify-approval:
     status: pending
-iteration: 2
-build_complete: true
+iteration: 1
+build_complete: false
 history:
   - iteration: 1
     build_output: ''
@@ -122,7 +122,7 @@ history:
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/aspir-1286/codev/projects/1286-consult-configurable-per-lane-/1286-phase_5-iter1-claude.txt
 started_at: '2026-07-29T11:33:26.698Z'
-updated_at: '2026-08-03T06:32:36.341Z'
+updated_at: '2026-08-03T06:37:00.770Z'
 force_advanced:
   phase: specify
   iteration: 3
