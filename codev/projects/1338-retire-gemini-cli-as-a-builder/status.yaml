@@ -1,7 +1,7 @@
 id: '1338'
 title: retire-gemini-cli-as-a-builder
 protocol: spir
-phase: specify
+phase: plan
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -16,7 +16,7 @@ gates:
   verify-approval:
     status: pending
 iteration: 1
-build_complete: true
+build_complete: false
 history: []
 started_at: '2026-08-03T19:12:09.462Z'
-updated_at: '2026-08-03T19:35:31.931Z'
+updated_at: '2026-08-03T19:35:44.399Z'
