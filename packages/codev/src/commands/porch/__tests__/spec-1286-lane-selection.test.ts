@@ -16,7 +16,7 @@
  * precedence ladder into something a test can address directly.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
@@ -226,6 +226,25 @@ describe('scenario 8 — next emits exactly the lanes done enforces (end to end)
   // `next()` and `done()`, so they would still fail if a future edit reintroduced a private copy
   // in either command — which is the regression the consolidation exists to prevent.
 
+  // `done()` reports a missing review by calling `process.exit(1)`, NOT by throwing (index.ts,
+  // the missingModels branch). An unmocked `.rejects.toThrow()` therefore cannot intercept it —
+  // it tears down the vitest worker instead, and the suite's green tick means nothing. Found by
+  // codex; same convention as done-verification.test.ts.
+  let exitSpy: ReturnType<typeof vi.spyOn>;
+  let logSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+      throw new Error(`process.exit(${code})`);
+    }) as never);
+    logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    exitSpy.mockRestore();
+    logSpy.mockRestore();
+  });
+
   const protocol = {
     name: 'spir',
     version: '1.0.0',
@@ -302,6 +321,21 @@ describe('scenario 8 — next emits exactly the lanes done enforces (end to end)
     fs.writeFileSync(path.join(projectDir, '0001-specify-iter1-codex.txt'), 'VERDICT: APPROVE\n');
     fs.writeFileSync(path.join(projectDir, '0001-specify-iter1-claude.txt'), 'VERDICT: APPROVE\n');
 
-    await expect(done(root, '0001')).rejects.toThrow();
+    // Specifically the exit-1 verification refusal, not any error: asserting a bare throw would
+    // also be satisfied by an unrelated crash during setup.
+    await expect(done(root, '0001')).rejects.toThrow('process.exit(1)');
+  });
+
+  it('malformed config fails done LOUDLY instead of falling back to protocol defaults', async () => {
+    // The phase's one deliberate behavior change, and the only part with real regression risk, so
+    // it is pinned through `done()` itself rather than through the resolver alone (claude's point:
+    // testing the wrapper cannot prove the deleted `catch` is gone from the call site).
+    //
+    // Before: `done` swallowed this and quietly demanded the protocol's three lanes, while `next`
+    // refused to run at all — a config typo split the two commands with no message explaining why.
+    setupProject();
+    writeConfig({ porch: { consultation: { models: ['codexx'] } } });
+
+    await expect(done(root, '0001')).rejects.toThrow(/codexx/);
   });
 });

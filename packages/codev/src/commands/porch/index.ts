@@ -499,14 +499,23 @@ export async function done(workspaceRoot: string, projectId: string, resolver?: 
     return;
   }
 
-  // For phased protocols: plan phase advancement requires 3-way review.
+  // For phased protocols: plan phase advancement requires multi-lane review.
   // The isBuildVerify block above already marked build_complete=true.
-  // Redirect to porch next for verification (3-way review + unanimous verdict).
+  // Redirect to porch next for verification (lane review + unanimous verdict).
   if (isPhased(protocol, state.phase) && state.plan_phases.length > 0) {
     const currentPlanPhase = getCurrentPlanPhase(state.plan_phases);
     if (currentPlanPhase && !allPlanPhasesComplete(state.plan_phases)) {
+      // Say how many lanes will actually run. "3-way" was hardcoded, which stopped being true the
+      // moment config could select lanes — a workspace running a 2-lane PIR was told to expect a
+      // 3-way review and had no way to tell whether the third had failed or was never asked for.
+      const verify = getVerifyConfig(protocol, state.phase);
+      const laneCount = verify
+        ? resolveConsultationModels(workspaceRoot, verify.models, state.protocol, verify.type).models.length
+        : 0;
       console.log('');
-      console.log(chalk.green('BUILD COMPLETE. Ready for 3-way review.'));
+      console.log(chalk.green(
+        laneCount > 0 ? `BUILD COMPLETE. Ready for ${laneCount}-way review.` : 'BUILD COMPLETE. Ready for review.'
+      ));
       console.log(`\n  Run: porch next ${state.id} (to trigger verification)`);
       return;
     }
