@@ -848,7 +848,7 @@ export async function doctor(): Promise<number> {
           issue: `${architect.name} configured as architect shell (harness retired)`,
           // Cover both selectors: an explicit shell.architectHarness beats the
           // shell.architect command, so switching only the command wouldn't help.
-          recommendation: 'Set shell.architect / shell.architectHarness to "codex" or "claude --dangerously-skip-permissions" in .codev/config.json',
+          recommendation: 'Set shell.architect / shell.architectHarness to "codex" or "claude --dangerously-skip-permissions" in .codev/config.json, or define a custom "gemini" harness and select it explicitly via shell.architectHarness (a bare shell.architect command stays retired)',
         });
       } else if (architect.name === 'codex') {
         // Issue #929: codex is a supported architect (config-driven).
@@ -872,7 +872,7 @@ export async function doctor(): Promise<number> {
           issue: `${builder.name} configured as builder shell (harness retired)`,
           // Cover both selectors: an explicit shell.builderHarness beats the
           // shell.builder command, so switching only the command wouldn't help.
-          recommendation: 'Set shell.builder / shell.builderHarness to a supported harness (claude, codex, or opencode) in .codev/config.json, or configure a custom harness',
+          recommendation: 'Set shell.builder / shell.builderHarness to a supported harness (claude, codex, or opencode) in .codev/config.json, or define a custom "gemini" harness and select it explicitly via shell.builderHarness (a bare shell.builder command stays retired)',
         });
       }
     }

@@ -724,6 +724,10 @@ describe('doctor command', () => {
       // Recommendation names BOTH selectors — an explicit shell.builderHarness beats
       // the shell.builder command, so switching only one wouldn't clear it (#1338).
       expect(out.some((l) => l.includes('Set shell.builder / shell.builderHarness to a supported harness'))).toBe(true);
+      // The custom-harness escape hatch names the EXPLICIT selector (#1338): a bare
+      // shell.builder "gemini" stays retired, so the rec points at shell.builderHarness.
+      // ("via" is unique to the recommendation; the retirement message uses "with".)
+      expect(out.some((l) => l.includes('select it explicitly via shell.builderHarness'))).toBe(true);
       // The single-source-of-truth retirement explanation is surfaced (2026-06-18 cause).
       expect(out.some((l) => l.includes('2026-06-18'))).toBe(true);
     });
@@ -732,6 +736,8 @@ describe('doctor command', () => {
       const out = await runDoctorWith({ shell: { architect: 'gemini --yolo' } });
       expect(out.some((l) => l.includes('gemini configured as architect shell (harness retired)'))).toBe(true);
       expect(out.some((l) => l.includes('Set shell.architect / shell.architectHarness to "codex"'))).toBe(true);
+      // The custom-harness escape hatch names the EXPLICIT architect selector (#1338).
+      expect(out.some((l) => l.includes('select it explicitly via shell.architectHarness'))).toBe(true);
       // The inverted pre-retirement message must be gone.
       expect(out.some((l) => l.includes('supported for builders'))).toBe(false);
       expect(out.some((l) => l.includes('builder-only'))).toBe(false);

@@ -231,9 +231,10 @@ export const RETIRED_HARNESSES: Record<string, string> = {
     'availability for consumer accounts (free, Pro, and Ultra tiers) on ' +
     '2026-06-18, so it no longer works for most users. Use a supported harness ' +
     'instead: claude, codex, or opencode. If you still have Gemini CLI access ' +
-    '(a Standard/Enterprise subscription or API-key auth), configure it as a ' +
-    'custom harness in .codev/config.json under the "harness" section. ' +
-    'See issue #1338.',
+    '(a Standard/Enterprise subscription or API-key auth), define a custom ' +
+    'harness named "gemini" in .codev/config.json under the "harness" section ' +
+    'and select it explicitly with shell.builderHarness / shell.architectHarness ' +
+    '— a bare auto-detected "gemini" command stays retired. See issue #1338.',
 };
 
 /**

@@ -465,6 +465,11 @@ describe('harness', () => {
       expect(msg).toMatch(/retired/i);
       expect(msg).toContain('2026-06-18');
       expect(msg).toContain('claude');
+      // The escape-hatch guidance names the EXPLICIT selector (#1338), matching the
+      // README + doctor: a bare auto-detected `gemini` stays retired, so a custom
+      // `gemini` def must be selected via shell.builderHarness / shell.architectHarness.
+      expect(msg).toContain('shell.builderHarness');
+      expect(msg).toContain('shell.architectHarness');
       expect(getRetirement('claude')).toBeUndefined();
       expect(getRetirement('frobnicate')).toBeUndefined();
       expect(getRetirement('constructor')).toBeUndefined();
