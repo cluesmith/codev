@@ -389,7 +389,7 @@ OpenCode supports 75+ LLM providers (OpenAI, Anthropic, Google, Ollama, etc.). W
 - OpenCode reads `AGENTS.md` for project instructions (already present in Codev projects)
 - OpenCode is only supported as a **builder** shell, not as an architect shell
 
-Other shells (Codex) are also supported via the harness system. See `packages/codev/src/agent-farm/utils/harness.ts` for details, or define a custom harness in `.codev/config.json`. (The built-in **Gemini CLI** harness is **retired** — see the note under Autonomous Builder Flags below.)
+Codex is also supported via the harness system. See `packages/codev/src/agent-farm/utils/harness.ts` for details, or define a custom harness in `.codev/config.json`. (The built-in **Gemini CLI** harness is **retired** — see the note under Autonomous Builder Flags below.)
 
 ## Architect-Builder Pattern
 
@@ -446,8 +446,9 @@ Configure in `.codev/config.json` (created by `codev init` or `codev adopt`):
 
 The built-in **Gemini CLI** harness is **retired** as a builder/architect shell: Google ended
 consumer Gemini CLI access (Pro, Ultra, and free tiers) on 2026-06-18, so it is no longer offered as
-a supported built-in shell. Use a supported harness (`claude`, `codex`, or `opencode`) — for example
-Codex:
+a supported built-in shell. Switch to a supported harness — `claude` or `codex` for either role, or
+`opencode` for builders (OpenCode is not supported as an architect shell). For example, Codex for
+both roles:
 ```json
 {
   "shell": {
@@ -456,10 +457,24 @@ Codex:
   }
 }
 ```
-If you retain Gemini CLI access (an enterprise or API-key plan), you can still run it by defining a
-**custom harness** named `gemini` in `.codev/config.json` (keep `--yolo` for autonomous mode); see
-`packages/codev/src/agent-farm/utils/harness.ts`. This is separate from the `gemini` **consult lane**,
-which is unaffected and now uses the Antigravity CLI `agy`.
+If you retain Gemini CLI access (a Standard/Enterprise subscription or API-key auth), you can still
+run it by defining a **custom harness** named `gemini` in `.codev/config.json` **and selecting it
+explicitly** with `shell.builderHarness` / `shell.architectHarness`. The explicit selector is
+**required**: a bare auto-detected `gemini` command (e.g. `shell.builder: "gemini --yolo"` with no
+`builderHarness`) stays retired, because auto-detection resolves the built-in namespace only.
+```json
+{
+  "shell": {
+    "builder": "gemini --yolo",
+    "builderHarness": "gemini"
+  },
+  "harness": {
+    "gemini": { "roleArgs": ["--system", "${ROLE_FILE}"], "roleScriptFragment": "--system '${ROLE_FILE}'" }
+  }
+}
+```
+See `packages/codev/src/agent-farm/utils/harness.ts` for the custom-harness fields. This is separate
+from the `gemini` **consult lane**, which is unaffected and now uses the Antigravity CLI `agy`.
 
 **Warning**: These flags allow the AI to execute commands and modify files without asking. Only use in development environments where you trust the AI's actions.
 
