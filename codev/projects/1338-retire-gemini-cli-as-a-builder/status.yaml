@@ -1,7 +1,7 @@
 id: '1338'
 title: retire-gemini-cli-as-a-builder
 protocol: spir
-phase: implement
+phase: review
 plan_phases:
   - id: phase_1
     title: Retire gemini in the shared resolver (core + resolver/config tests)
@@ -14,8 +14,8 @@ plan_phases:
     status: complete
   - id: phase_4
     title: 'User-facing docs: README + CHANGELOG'
-    status: in_progress
-current_plan_phase: phase_4
+    status: complete
+current_plan_phase: null
 gates:
   spec-approval:
     status: approved
@@ -29,8 +29,8 @@ gates:
     status: pending
   verify-approval:
     status: pending
-iteration: 3
-build_complete: true
+iteration: 1
+build_complete: false
 history:
   - iteration: 1
     plan_phase: phase_2
@@ -113,4 +113,4 @@ history:
         file: >-
           /home/user/code/codev_root/codev/.builders/spir-1338/codev/projects/1338-retire-gemini-cli-as-a-builder/1338-phase_4-iter2-claude.txt
 started_at: '2026-08-03T19:12:09.462Z'
-updated_at: '2026-08-04T00:51:53.348Z'
+updated_at: '2026-08-04T00:56:00.264Z'
