@@ -728,6 +728,10 @@ describe('doctor command', () => {
       // shell.builder "gemini" stays retired, so the rec points at shell.builderHarness.
       // ("via" is unique to the recommendation; the retirement message uses "with".)
       expect(out.some((l) => l.includes('select it explicitly via shell.builderHarness'))).toBe(true);
+      // The custom-harness clause names the configured (retired) harness, rendered
+      // from role.name — not a hard-coded literal — so the advice stays correct if a
+      // second harness is ever retired (#1338, RETIRED_HARNESSES extensibility).
+      expect(out.some((l) => l.includes('define a custom "gemini" harness'))).toBe(true);
       // The single-source-of-truth retirement explanation is surfaced (2026-06-18 cause).
       expect(out.some((l) => l.includes('2026-06-18'))).toBe(true);
     });
@@ -738,6 +742,9 @@ describe('doctor command', () => {
       expect(out.some((l) => l.includes('Set shell.architect / shell.architectHarness to "codex"'))).toBe(true);
       // The custom-harness escape hatch names the EXPLICIT architect selector (#1338).
       expect(out.some((l) => l.includes('select it explicitly via shell.architectHarness'))).toBe(true);
+      // The custom-harness clause names the configured (retired) harness, rendered
+      // from role.name — not a hard-coded literal (#1338 extensibility).
+      expect(out.some((l) => l.includes('define a custom "gemini" harness'))).toBe(true);
       // The inverted pre-retirement message must be gone.
       expect(out.some((l) => l.includes('supported for builders'))).toBe(false);
       expect(out.some((l) => l.includes('builder-only'))).toBe(false);
