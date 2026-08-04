@@ -469,10 +469,18 @@ explicitly** with `shell.builderHarness` / `shell.architectHarness`. The explici
     "builderHarness": "gemini"
   },
   "harness": {
-    "gemini": { "roleArgs": ["--system", "${ROLE_FILE}"], "roleScriptFragment": "--system '${ROLE_FILE}'" }
+    "gemini": {
+      "roleArgs": [],
+      "roleEnv": { "GEMINI_SYSTEM_MD": "${ROLE_FILE}" },
+      "roleScriptFragment": "",
+      "roleScriptEnv": { "GEMINI_SYSTEM_MD": "${ROLE_FILE}" }
+    }
   }
 }
 ```
+The Gemini CLI reads its system prompt from the `GEMINI_SYSTEM_MD` environment variable pointing at
+the role file, so the custom harness injects via `roleEnv` / `roleScriptEnv` (with empty `roleArgs`) —
+reproducing exactly what the retired built-in harness did.
 See `packages/codev/src/agent-farm/utils/harness.ts` for the custom-harness fields. This is separate
 from the `gemini` **consult lane**, which is unaffected and now uses the Antigravity CLI `agy`.
 

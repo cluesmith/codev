@@ -317,14 +317,25 @@ describe('harness', () => {
     });
 
     it('explicit custom gemini resolves to the custom provider (retained-access escape hatch)', () => {
+      // Mirrors the documented escape hatch (README) and the retired built-in GEMINI_HARNESS:
+      // the Gemini CLI reads its system prompt from the GEMINI_SYSTEM_MD env var (empty args /
+      // fragment), not a --system flag. Keeping the asserted shape identical to the documented one
+      // prevents the docs from drifting back to a launch line the CLI would reject.
       const customHarnesses: Record<string, CustomHarnessConfig> = {
         gemini: {
-          roleArgs: ['--system', '${ROLE_FILE}'],
-          roleScriptFragment: "--system '${ROLE_FILE}'",
+          roleArgs: [],
+          roleEnv: { GEMINI_SYSTEM_MD: '${ROLE_FILE}' },
+          roleScriptFragment: '',
+          roleScriptEnv: { GEMINI_SYSTEM_MD: '${ROLE_FILE}' },
         },
       };
       const provider = resolveHarness('gemini', customHarnesses);
-      expect(provider.buildRoleInjection(ROLE_CONTENT, ROLE_FILE).args).toEqual(['--system', ROLE_FILE]);
+      const spawn = provider.buildRoleInjection(ROLE_CONTENT, ROLE_FILE);
+      expect(spawn.args).toEqual([]);
+      expect(spawn.env).toEqual({ GEMINI_SYSTEM_MD: ROLE_FILE });
+      const script = provider.buildScriptRoleInjection(ROLE_CONTENT, ROLE_FILE);
+      expect(script.fragment).toBe('');
+      expect(script.env).toEqual({ GEMINI_SYSTEM_MD: ROLE_FILE });
     });
 
     it('auto-detected gemini is retired even when a custom gemini exists', () => {
