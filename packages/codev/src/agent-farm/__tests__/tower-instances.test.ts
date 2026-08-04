@@ -1459,8 +1459,14 @@ describe('tower-instances', () => {
         expect(entry.architects.has('ghost')).toBe(false);
         // Only main's terminal was created.
         expect(mockManager.createSession).toHaveBeenCalledTimes(1);
-        // The gate consulted the session-artifact check with the row's stored id.
-        expect(mockSiblingRegistrationIsLive).toHaveBeenCalledWith(tmpDir, 'dead-session-id');
+        // The gate consulted the session-artifact check with the row's stored id,
+        // and threaded the reconcile logger so a retired-harness prune (Issue #1338)
+        // surfaces its real reason instead of the generic "no resumable session" line.
+        expect(mockSiblingRegistrationIsLive).toHaveBeenCalledWith(
+          tmpDir,
+          'dead-session-id',
+          { log: expect.any(Function) },
+        );
       } finally {
         fs.rmSync(tmpDir, { recursive: true, force: true });
       }

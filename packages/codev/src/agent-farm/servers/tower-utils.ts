@@ -304,13 +304,24 @@ export function sessionHasLiveHolder(
 export function siblingRegistrationIsLive(
   workspacePath: string,
   sessionId: string | null,
-  opts?: { homeDir?: string },
+  opts?: { homeDir?: string; log?: (level: 'INFO' | 'WARN' | 'ERROR', message: string) => void },
 ): boolean {
   let harness: HarnessProvider;
   try {
     harness = getArchitectHarness(workspacePath);
   } catch (err) {
-    if (err instanceof RetiredHarnessError) return false;
+    if (err instanceof RetiredHarnessError) {
+      // The reconcile caller's prune log ("no live terminal and no resumable
+      // session") would misattribute the reason: this registration is pruned
+      // because its architect harness is retired, not because a session went
+      // stale. Surface the accurate reason so the prune stays diagnosable
+      // (Issue #1338). Callers that pass no `log` keep the fail-closed `false`.
+      opts?.log?.(
+        'INFO',
+        `Sibling architect registration under '${workspacePath}' selects a retired harness; treating as not live so reconciliation prunes it (${err.message.split('\n')[0]})`,
+      );
+      return false;
+    }
     throw err;
   }
   if (!harness.session) return true;

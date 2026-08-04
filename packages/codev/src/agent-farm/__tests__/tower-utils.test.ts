@@ -539,6 +539,30 @@ describe('siblingRegistrationIsLive (Issue #1150)', () => {
     // Also false with no stored id (the reconcile loop's other liveness input).
     expect(siblingRegistrationIsLive(workspace, null, { homeDir: fakeHome })).toBe(false);
   });
+
+  // Issue #1338: the reconcile caller's prune line ("no live terminal and no
+  // resumable session") would misattribute the reason for a retired-harness row.
+  // The catch surfaces the real reason through the injected logger.
+  it('logs the retirement reason (INFO) when pruning a retired gemini architect', () => {
+    forceGeminiHarness();
+    const logged: Array<{ level: string; message: string }> = [];
+    const log = (level: 'INFO' | 'WARN' | 'ERROR', message: string) => logged.push({ level, message });
+    expect(siblingRegistrationIsLive(workspace, 'sib-1', { homeDir: fakeHome, log })).toBe(false);
+    expect(logged).toHaveLength(1);
+    expect(logged[0].level).toBe('INFO');
+    expect(logged[0].message).toMatch(/retired harness/i);
+  });
+
+  it('does NOT log for a live (supported) sibling registration', () => {
+    // Session-less codex is always live → the retirement catch is never reached,
+    // so no diagnostic line is emitted (non-vacuity: the log is retirement-specific,
+    // not emitted on every call).
+    forceCodexHarness();
+    const logged: string[] = [];
+    const log = (_level: 'INFO' | 'WARN' | 'ERROR', message: string) => logged.push(message);
+    expect(siblingRegistrationIsLive(workspace, null, { homeDir: fakeHome, log })).toBe(true);
+    expect(logged).toEqual([]);
+  });
 });
 
 // Issue #1338 tests write a workspace `.codev/config.json` and assert the harness

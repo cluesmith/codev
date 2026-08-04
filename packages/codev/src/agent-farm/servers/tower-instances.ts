@@ -792,7 +792,10 @@ export async function launchInstance(workspacePath: string): Promise<{ success: 
         if (entry.architects.has(a.name)) continue;
         if (
           !hasArchitectTerminalSession(a.name, resolvedPath, workspacePath) &&
-          !siblingRegistrationIsLive(workspacePath, a.sessionId ?? null)
+          // Pass the reconcile logger so a retired-harness prune (Issue #1338) logs
+          // its real reason instead of being misattributed to the generic
+          // "no resumable session" line below.
+          !siblingRegistrationIsLive(workspacePath, a.sessionId ?? null, { log: _deps.log })
         ) {
           try {
             setArchitectByName(resolvedPath, a.name, null);
