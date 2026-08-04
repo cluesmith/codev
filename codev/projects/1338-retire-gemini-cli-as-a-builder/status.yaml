@@ -11,11 +11,11 @@ plan_phases:
     status: complete
   - id: phase_3
     title: 'codev doctor: retirement guidance + builder-side flagging'
-    status: in_progress
+    status: complete
   - id: phase_4
     title: 'User-facing docs: README + CHANGELOG'
-    status: pending
-current_plan_phase: phase_3
+    status: in_progress
+current_plan_phase: phase_4
 gates:
   spec-approval:
     status: approved
@@ -29,8 +29,8 @@ gates:
     status: pending
   verify-approval:
     status: pending
-iteration: 2
-build_complete: true
+iteration: 1
+build_complete: false
 history:
   - iteration: 1
     plan_phase: phase_2
@@ -81,4 +81,4 @@ history:
         file: >-
           /home/user/code/codev_root/codev/.builders/spir-1338/codev/projects/1338-retire-gemini-cli-as-a-builder/1338-phase_3-iter1-claude.txt
 started_at: '2026-08-03T19:12:09.462Z'
-updated_at: '2026-08-04T00:00:21.787Z'
+updated_at: '2026-08-04T00:05:01.242Z'
