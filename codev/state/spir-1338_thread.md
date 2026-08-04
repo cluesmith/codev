@@ -451,3 +451,55 @@ FIX (docs + test; resumed session, "unpause" from architect):
 Verified: build exit 0 (tsc clean, realigned fixture type-checks); harness.test.ts 59/59. Wrote
 1338-phase_4-iter2-rebuttals.md. Next: commit → porch done (re-verify) → iter3 3-way consult on fixed
 docs. Unanimous approve → phase_4 done → porch advances to Review (where the deferred touchpoints land).
+
+### phase_4 CONSULT iter3: UNANIMOUS APPROVE (Gemini APPROVE/HIGH, Codex APPROVE/HIGH, Claude APPROVE/HIGH)
+Codex (the every-iteration blocker) now clean: escape-hatch example matches the retired built-in's
+env-based injection. Claude re-verified the fix END-TO-END from disk (not trusting the rebuttal): README
+snippet == GEMINI_HARNESS shape (e222b9ef^), validateCustomHarnessConfig accepts empty args/fragment,
+${ROLE_FILE} expands in roleEnv/roleScriptEnv (harness.ts:311-330), spawn-worktree.ts:924-928 emits
+`export GEMINI_SYSTEM_MD=...`, explicit selector required+works (resolveHarness:431-467), Phase-2 spawn
+preflight does NOT reject the documented hatch (assertBuilderHarnessNotRetired honors explicit selector),
+harness+integration tests 78/78. phase_4 DONE. porch advanced → REVIEW phase (iter1).
+
+## REVIEW phase (started) — deferred touchpoints land here
+porch REVIEW task = build review artifact + PR + `## Architecture Updates`/`## Lessons Learned Updates`
+(porch greps both headings) + porch done → PR consult → pr gate (HUMAN).
+Review-phase work plan (accepted+deferred across iters, endorsed by all 3 reviewers):
+- Align the THIRD/second touchpoints to the README's explicit-selector requirement:
+  · harness.ts RETIRED_HARNESSES.gemini msg (:228-244) + resolveHarness generic custom-harness string (:451).
+  · doctor.ts builder rec (:875) + architect rec (:851) "or configure a custom harness" tail.
+  Both name shell.builderHarness/architectHarness (bare auto-detect stays retired). Update asserting tests.
+- Governance (update-arch-docs, hot/cold): arch.md :291 (gemini built-in provider) + :311-317 ("Gemini is
+  builder-only" → RETIRED both roles); lessons-learned.md :80 (#929 lesson's gemini-architect example).
+- Optional (Claude iter3 non-blocking): CHANGELOG pointer to the README GEMINI_SYSTEM_MD snippet.
+Then: build+full suite green → review doc → commit → PR (Closes #1338) → porch done → notify architect.
+NOTE: doctor.ts:875 recommendation ALREADY names shell.builderHarness for the *supported* path; the gap is
+the "or configure a custom harness" tail omitting the explicit-selector requirement. Check tests assert
+current message strings before editing (harness.test.ts + doctor.test.ts) — verify vs file, don't guess.
+
+### REVIEW phase — deferred touchpoints landed + governance refreshed + review doc (DONE, pre-PR)
+All Review edits made + verified (build exit 0; full unit suite 4145 pass / 48 skip / 0 fail — unchanged
+baseline, my additions were assertions WITHIN existing tests):
+- Touchpoint alignment (all 3 now name the EXPLICIT selector; verified message strings vs file first):
+  · harness.ts RETIRED_HARNESSES.gemini msg → "define a custom harness named 'gemini' … and select it
+    explicitly with shell.builderHarness / shell.architectHarness — a bare auto-detected 'gemini' stays
+    retired." Kept asserted substrings (/retired/i, 2026-06-18). +assertion: msg contains
+    shell.builderHarness + shell.architectHarness.
+  · doctor.ts BOTH recs (:851 architect, :875 builder) → appended "or define a custom 'gemini' harness and
+    select it explicitly via shell.{builder,architect}Harness (a bare shell.{builder,architect} command
+    stays retired)". Preserved asserted prefixes (test :726/:734). +assertions on 'explicitly via
+    shell.*Harness' ("via" is unique to the rec; retirement msg uses "with" → non-vacuous).
+  · README already fixed in phase_4. (:451 generic unknown-harness error left as-is — not a flagged
+    gemini touchpoint; fires for any unknown name. Noted as optional follow-up in review doc.)
+- CHANGELOG: added pointer to README's GEMINI_SYSTEM_MD snippet (Claude iter3 optional note).
+- Governance (update-arch-docs, COLD routing; no HOT change — retirement narrower than any hot fact,
+  maps unchanged): arch.md :291 (dropped gemini from built-in provider list) + :311 ("Gemini is
+  builder-only" → RETIRED both roles, fail-closed, custom-only via explicit selector) + fixed a NOW-STALE
+  override example (`--builder-cmd gemini` → `--builder-cmd opencode`, since bare gemini now fails closed).
+  lessons-learned.md +2 COLD (Architecture: fail-closed-at-every-resolution-path; Documentation:
+  doc-snippet-must-reproduce-real-mechanism). Left historical #929 lesson (:80) intact (accurate history).
+- Review doc: codev/reviews/1338-retire-gemini-cli-as-a-builder.md (full template; ## Architecture Updates
+  + ## Lessons Learned Updates present — porch greps both). Metrics: 47 branch commits, 4145 tests, 11
+  consult rounds × 3, 7 rebuttals.
+Next: commit (3 logical commits) → PR (Closes #1338) → porch done 1338 (PR consult + pr gate) → afx send
+architect "PR ready". pr gate = HUMAN. External maintainer merges (no self-merge — architect constraint).
