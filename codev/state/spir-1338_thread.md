@@ -370,3 +370,35 @@ recommendation assertions to both-selector wording.
 VERIFIED: build exit 0; doctor.test.ts 25/25; full unit suite (excl e2e) 4145 passed / 48 skipped / 0
 failed. Wrote 1338-phase_3-iter1-rebuttals.md. Next: commit fix + docs → porch check → done → next →
 iter2 3-way consult on the fixed code.
+Committed `3119e93f` (fix: escape hatch + non-vacuous tests) + `92d1f5d8` (docs: rebuttal + thread).
+NOTE on porch flow: on resume, porch was still at iter1 pre-re-iteration (the earlier session had
+launched the iter1 consult but paused before porch recorded verdicts). Running porch check→done→next
+consumed the on-disk iter1 verdicts, re-iterated to iter2, and emitted the "fix iter1 issues" task —
+which my committed fixes already satisfy. Re-ran porch check→done→next for iter2 → fresh 3-way consult
+on the fixed HEAD (rebuttal passed as reviewer context).
+
+### phase_3 CONSULT iter2: UNANIMOUS APPROVE (Gemini APPROVE/HIGH, Codex APPROVE/HIGH, Claude APPROVE/HIGH)
+Codex (the C1 finder): "correctly diagnoses retired Gemini harnesses for both roles, preserves the
+explicit custom-harness escape hatch, robust regression tests. KEY_ISSUES: None." Gemini: all iter1
+feedback addressed. Claude INDEPENDENTLY re-verified both disputed findings from disk — including
+empirically commenting out the gray mock and confirming the supported-config test fails at the POST-gray
+assertion (doctor.test.ts:756) while the 'supported' line still passes → validated the strengthened guard
+is the correct one, not just the mock addition. Build + full suite green (4145/0).
+CLAUDE's 3 non-blocking notes → carry to REVIEW doc (do NOT fix in approved phase_3; fixing = wasteful
+re-consult):
+1. doctor.ts:790 block comment still reads "Warn if OpenCode… (unsupported)" but the block now covers
+   opencode + retirement (both roles) + codex + builder flagging. One-line comment refresh next time the
+   file is touched.
+2. resolveShell uses hasOwnProperty vs resolveHarness's `in` — harmless (doctor's form is safer under
+   prototype pollution). Leave it.
+3. Doctor is persisted-config-only by design (TOWER_BUILDER_CMD=gemini not flagged; spawn still rejects
+   it) — decided at plan review + documented in the code comment. Don't re-litigate at PR.
+porch advanced phase_3 → phase_4 (chore 1648db64). phase_3 DONE.
+
+## phase_4 — user-facing docs: README + CHANGELOG (started)
+Final implement phase. Scope: README (:392 "other shells" line; :433-436 autonomous-flags table gemini
+row; :448-460 config example — both architect+builder lines + prose → retired framing with custom-harness
+pointer, PRESERVE the agy consult-lane note) + CHANGELOG [Unreleased] Removed/breaking-change entry with
+migration pointer + scoped doc-consistency grep (EXEMPT historical artifacts codev/specs|plans|reviews|
+projects|docs/releases + every `consult -m gemini`/`agy` ref; re-grep BOTH codev/ AND codev-skeleton/).
+Governance arch/lessons (arch.md :291/:311-317, lessons-learned.md :80) → Review phase via update-arch-docs.
