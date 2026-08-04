@@ -389,7 +389,7 @@ OpenCode supports 75+ LLM providers (OpenAI, Anthropic, Google, Ollama, etc.). W
 - OpenCode reads `AGENTS.md` for project instructions (already present in Codev projects)
 - OpenCode is only supported as a **builder** shell, not as an architect shell
 
-Other shells (Codex, Gemini) are also supported via the harness system. See `packages/codev/src/agent-farm/utils/harness.ts` for details, or define a custom harness in `.codev/config.json`.
+Other shells (Codex) are also supported via the harness system. See `packages/codev/src/agent-farm/utils/harness.ts` for details, or define a custom harness in `.codev/config.json`. (The built-in **Gemini CLI** harness is **retired** — see the note under Autonomous Builder Flags below.)
 
 ## Architect-Builder Pattern
 
@@ -433,7 +433,6 @@ Builders need permission-skipping flags to run autonomously without human approv
 | CLI Tool | Flag | Purpose |
 |----------|------|---------|
 | Claude Code | `--dangerously-skip-permissions` | Skip permission prompts for file/command operations |
-| Gemini CLI | `--yolo` | Enable autonomous mode without confirmations |
 
 Configure in `.codev/config.json` (created by `codev init` or `codev adopt`):
 ```json
@@ -445,19 +444,22 @@ Configure in `.codev/config.json` (created by `codev init` or `codev adopt`):
 }
 ```
 
-Or for Gemini (the standalone **Gemini CLI** as a *builder/architect* coding agent — a separate
-concern from the `gemini` **consult lane**, which now uses the Antigravity CLI `agy`). Note: Google
-retired the Gemini CLI for Pro/Ultra/free tiers on 2026-06-18, so this builder harness will stop
-working for those tiers — prefer a Claude or Codex builder, or an enterprise Gemini CLI. (Tracked as
-a follow-up; out of scope for the consult-lane migration.)
+The built-in **Gemini CLI** harness is **retired** as a builder/architect shell: Google ended
+consumer Gemini CLI access (Pro, Ultra, and free tiers) on 2026-06-18, so it is no longer offered as
+a supported built-in shell. Use a supported harness (`claude`, `codex`, or `opencode`) — for example
+Codex:
 ```json
 {
   "shell": {
-    "architect": "gemini --yolo",
-    "builder": "gemini --yolo"
+    "architect": "codex",
+    "builder": "codex"
   }
 }
 ```
+If you retain Gemini CLI access (an enterprise or API-key plan), you can still run it by defining a
+**custom harness** named `gemini` in `.codev/config.json` (keep `--yolo` for autonomous mode); see
+`packages/codev/src/agent-farm/utils/harness.ts`. This is separate from the `gemini` **consult lane**,
+which is unaffected and now uses the Antigravity CLI `agy`.
 
 **Warning**: These flags allow the AI to execute commands and modify files without asking. Only use in development environments where you trust the AI's actions.
 

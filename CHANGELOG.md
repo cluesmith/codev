@@ -30,6 +30,10 @@ For detailed release notes, see [docs/releases/](docs/releases/).
 
 - Callers of `afx workspace stop` that depended on the architect registry being wiped should switch to `afx workspace stop-all` (full wipe) or call `clearState()` directly. The new graceful-stop semantics are the documented design; the old wipe-on-stop behaviour was an accident of Spec 755's incomplete persistence story.
 
+### Removed (Spec 1338 — retire the built-in Gemini CLI builder/architect harness)
+
+- **Built-in `gemini` harness retired** (breaking change): the standalone **Gemini CLI** is no longer a supported built-in builder or architect shell. Google ended consumer Gemini CLI access (Pro, Ultra, and free tiers) on 2026-06-18. A `gemini` shell now **fails closed** at spawn/launch with a retirement message (no orphaned worktree, no Tower crash), and `codev doctor` flags a persisted `gemini` builder/architect config. **Migration**: set `shell.architect` / `shell.builder` to a supported harness (`claude`, `codex`, or `opencode`); if you retain Gemini access (enterprise / API-key), define a **custom harness** named `gemini` in `.codev/config.json` — the sanctioned escape hatch. This does **not** affect the `gemini` **consult lane**, which uses the Antigravity CLI `agy`.
+
 ## [2.0.6] - 2026-02-16 "Hagia Sophia"
 
 Major stabilization release with project management rework, shellper reliability improvements, and multi-agent consultation metrics.
