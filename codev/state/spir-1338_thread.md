@@ -512,3 +512,31 @@ porch done 1338 --pr 1342 --branch builder/spir-1338 recorded the PR in pr_histo
 ONLY records the PR; it does NOT run the review checks/advance — must still porch check → done → next).
 porch review CRITERIA: pr_exists / review_has_arch_updates / review_has_lessons_updates / e2e_tests.
 Running porch check now. Then porch done → next → PR 3-way consult → pr gate (HUMAN). Do NOT self-merge.
+
+### REVIEW — integration-review adjustments (2026-08-04, resumed after architect unpause)
+Architect integration review of PR #1342 (Codex REQUEST_CHANGES, architect-verified): 2 required + 2
+recommended. Architect approved doing ALL FOUR. Implemented + verified: build exit 0 (tsc + dashboard +
+skeleton copy); full unit suite 4148 pass / 48 skip / 0 fail (was 4145; +3 test cases).
+- REQUIRED (1) Revert CHANGELOG: dropped the `### Removed (Spec 1338)` block — contributors don't edit the
+  upstream release changelog. Scrubbed stale CHANGELOG claims from the review doc (summary/AC/consult-log,
+  lines 10/17/153/199/211) + PR #1342 body; recorded the revert + rationale in the review's Deviations.
+- REQUIRED (2) Close the --shell fail-closed gap: preflight was gated `if (mode !== 'shell')`, but
+  spawnShell runs commands.builder (startShellSession=PTY) + upsertBuilder (shell row). Made the preflight
+  UNCONDITIONAL (delegates escape-hatch decision to getBuilderHarness). Regression test in
+  spawn-retirement.test.ts: `spawn({shell:true})` w/ gemini builderHarness rejects /retired/i + leaves no
+  state. GOTCHA: `force` is invalid for shell mode (validateSpawnOptions:187 requires issue/task/protocol);
+  dropped it — the untracked `.codev/config.json` is ignored by the tracked-changes cleanliness check (:900).
+- RECOMMENDED (3) doctor role.name interpolation (doctor.ts:851 architect / :875 builder): custom-harness
+  clause hard-coded "gemini"; now interpolates architect.name/builder.name (matches the already-tested
+  console/issue lines two lines up). Byte-identical for gemini → existing tests pass; +regression
+  assertions lock the `define a custom "gemini" harness` clause. Keeps advice correct as RETIRED_HARNESSES
+  grows (architect's rationale). No fragile second-retired-harness mock (that's the phase_3 vacuous-mock
+  anti-pattern) — interpolation proven by the shared `${role.name}` pattern the issue/console lines test.
+- RECOMMENDED (4) sibling-prune retirement log: siblingRegistrationIsLive returned false silently on
+  retirement → tower-instances.ts:799 prune log misattributed the reason ("no resumable session").
+  Threaded an optional `log` into opts (idiomatic — tower-utils uses injected loggers, no module logger)
+  + emit the retirement reason in the catch; caller (tower-instances.ts:795) passes `_deps.log`. +2 tests
+  (fires w/ reason on retired; does NOT fire for a live codex sibling). Updated the pre-existing #1150
+  caller test (tower-instances.test.ts:1463) to include the new 3rd `{ log }` arg.
+Next: commit (5 atomic) → push → update PR body → re-run porch PR 3-way consult on fixed HEAD → porch next
+(record verdicts) → pr gate (HUMAN). External maintainer merges — no self-merge.

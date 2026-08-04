@@ -9,7 +9,7 @@ Line-number references below are orientation for reviewers, not edit instruction
 
 ## Metadata
 - **ID**: spec-2026-08-03-retire-gemini-cli-builder
-- **Status**: draft
+- **Status**: Approved (spec-approval gate 2026-08-03) — implemented (PR #1342)
 - **Created**: 2026-08-03
 - **Issue**: #1338
 

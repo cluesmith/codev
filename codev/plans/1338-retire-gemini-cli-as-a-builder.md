@@ -2,7 +2,7 @@
 
 ## Metadata
 - **ID**: plan-2026-08-03-retire-gemini-cli-builder
-- **Status**: draft
+- **Status**: Approved (plan-approval gate 2026-08-03) — implemented (PR #1342)
 - **Specification**: [codev/specs/1338-retire-gemini-cli-as-a-builder.md](../specs/1338-retire-gemini-cli-as-a-builder.md)
 - **Created**: 2026-08-03
 - **Issue**: #1338

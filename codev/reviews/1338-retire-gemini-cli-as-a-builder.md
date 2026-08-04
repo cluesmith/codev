@@ -7,14 +7,14 @@ Delivered across four implementation phases: a retirement sentinel in the shared
 fails closed on both the explicit and auto-detect paths; fail-closed guards at every spawn / architect
 launch / reconnect / clean-exit boundary (no orphaned worktree, no Tower crash); `codev doctor`
 retirement flagging for both roles with the sanctioned custom-harness escape hatch preserved; and
-user-facing docs (README + CHANGELOG). The Review phase aligned the three retirement-guidance
+user-facing docs (README). The Review phase aligned the three retirement-guidance
 touchpoints (runtime message, `doctor` recommendation, README) to name the explicit
 `shell.builderHarness` / `shell.architectHarness` selector, and refreshed the governance docs.
 
 ## Spec Compliance
 
 - [x] AC1: Gemini CLI is no longer presented or treated as a supported builder option (Phases 1, 4) —
-      built-in `GEMINI_HARNESS` removed from the registry; README/CHANGELOG no longer present it as a
+      built-in `GEMINI_HARNESS` removed from the registry; README no longer presents it as a
       built-in shell.
 - [x] AC2: A user selecting Gemini CLI as a builder receives a clear explanation that the option has
       been retired (Phases 1–3) — `resolveHarness` throws a `RetiredHarnessError` carrying a specific
@@ -41,6 +41,16 @@ touchpoints (runtime message, `doctor` recommendation, README) to name the expli
   routed arch/lessons updates to Review; the cross-phase runtime-message/doctor-rec selector alignment
   was accepted-and-deferred across phase_4 iterations with all three reviewers' endorsement, and landed
   here.
+- **Integration-review adjustments (post-PR #1342, architect review).** Four changes after the PR opened:
+  (1) the drafted CHANGELOG `[Unreleased]` retirement entry was **reverted** — contributors don't edit the
+  upstream release changelog; the breaking change is documented via README + the runtime/`doctor`
+  retirement messaging instead. (2) The spawn preflight was made **unconditional** (previously gated
+  `if (mode !== 'shell')`): `spawnShell` still runs `commands.builder` and persists a shell row, so a
+  retired `gemini` `shell.builder` now fails closed too — regression-tested (no PTY, no row). (3) The
+  `doctor` custom-harness recommendations interpolate `role.name` instead of a hard-coded `"gemini"`, so
+  the advice stays correct as `RETIRED_HARNESSES` grows. (4) `siblingRegistrationIsLive` logs the
+  retirement reason when it prunes a retired-architect row, so the reconcile loop's generic "no resumable
+  session" line can't misattribute the cause.
 
 ## Key Metrics
 
@@ -152,7 +162,10 @@ reachability of "unreachable" failure paths (restart/reconnect/clean-exit) and e
 #### Claude
 - **Concern (COMMENT)**: CHANGELOG `[Unreleased]` is live — add a breaking-change entry; the escape hatch
   resolves only via the explicit selector.
-  - **Addressed**: Folded into Phase 4 scope.
+  - **Addressed**: The explicit-selector guidance landed in Phase 4 (README). The CHANGELOG `[Unreleased]`
+    entry was drafted in Phase 4 and later **reverted** at integration review — contributors don't edit
+    the upstream release changelog (see Deviations); the breaking change is documented via README + the
+    runtime/`doctor` retirement messaging.
 
 ### Phase 1 (Round 1)
 - No concerns raised — all three APPROVE (HIGH). The resolver retirement + coverage-by-replacement tests
@@ -196,7 +209,7 @@ reachability of "unreachable" failure paths (restart/reconnect/clean-exit) and e
 #### Codex
 - **Concern (iter1)**: Escape-hatch guidance needs the explicit `shell.builderHarness`/`architectHarness`
   selector; `opencode` is builder-only.
-  - **Addressed**: README + CHANGELOG require the explicit selector and are role-specific.
+  - **Addressed**: README requires the explicit selector and is role-specific.
 - **Concern (iter2)**: README snippet used `roleArgs: ["--system", …]`; the retired built-in injected via
   the `GEMINI_SYSTEM_MD` env var.
   - **Addressed**: Snippet reproduces the retired provider verbatim (`roleEnv`/`roleScriptEnv`); the
@@ -208,7 +221,9 @@ reachability of "unreachable" failure paths (restart/reconnect/clean-exit) and e
   the runtime message + doctor rec omit the explicit selector.
   - **Addressed**: Blockers fixed in-phase; the deferred touchpoints landed in this Review phase.
 - **Concern (iter3)**: None blocking — verified the fix end-to-end from disk (validation, template
-  expansion, script emission, spawn preflight). Optional CHANGELOG `GEMINI_SYSTEM_MD` pointer — **added**.
+  expansion, script emission, spawn preflight). (An optional CHANGELOG `GEMINI_SYSTEM_MD` pointer was
+  added in Phase 4, then reverted with the rest of the CHANGELOG entry at integration review — see
+  Deviations.)
 
 #### Gemini
 - APPROVE every round.
