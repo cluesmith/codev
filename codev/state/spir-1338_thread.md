@@ -424,3 +424,30 @@ Note: the corrected README escape-hatch snippet DOES contain `"builder": "gemini
 gemini-as-supported-built-in; framed as retired-built-in + custom-only. Doc-consistency criterion still holds.
 Wrote 1338-phase_4-iter1-rebuttals.md. Docs-only; build+suite green. Next: commit fix+docs → porch next
 (record iter1 verdicts, re-iter to iter2) → porch check→done→next → iter2 consult on the fixed docs.
+
+### phase_4 CONSULT iter2: Gemini APPROVE, Codex REQUEST_CHANGES/HIGH, Claude REQUEST_CHANGES/HIGH
+Codex + Claude CONVERGED (both HIGH) on one real bug iter1's selector-fix left behind: the README
+custom-`gemini` escape-hatch snippet injected the role via `--system`, but Gemini CLI reads its system
+prompt from the **GEMINI_SYSTEM_MD env var** (retired GEMINI_HARNESS CONFIRMED via
+`git show e222b9ef^:...harness.ts:177-186` → `args:[] + env:{GEMINI_SYSTEM_MD:filePath}`, empty script
+fragment + same env). Copy-paste user → `gemini --yolo --system '<role>'` → config validates+resolves,
+then the CLI rejects the unknown flag. Same broken-escape-hatch *outcome* as iter1, different cause.
+FIX (docs + test; resumed session, "unpause" from architect):
+- README.md:472 snippet → `roleArgs:[]` + `roleEnv`/`roleScriptEnv:{GEMINI_SYSTEM_MD:"${ROLE_FILE}"}` +
+  `roleScriptFragment:""` (reproduces retired built-in verbatim) + 1 prose sentence explaining the
+  env-var mechanism. Verified plumbing: validateCustomHarnessConfig accepts empty args/fragment;
+  buildCustomHarnessProvider expands `${ROLE_FILE}` in roleEnv/roleScriptEnv (harness.ts:311-330);
+  spawn-worktree.ts:923-927 emits `export GEMINI_SYSTEM_MD=...`.
+- harness.test.ts:319-328 — the test LITERALLY NAMED "retained-access escape hatch" — realigned from the
+  `--system` shape to assert GEMINI_SYSTEM_MD env injection on BOTH buildRoleInjection ({args:[],env}) and
+  buildScriptRoleInjection ({fragment:'',env}). Non-blocking per BOTH reviewers; done anyway because an
+  asserted-but-wrong shape invites the docs to drift back. Generic `--system` template-expansion coverage
+  PRESERVED (harness.test.ts:122-149 + harness-integration.test.ts:150-165 are generic mechanism tests,
+  not gemini escape-hatch) — no coverage loss.
+- Kept: `--yolo` in the example (user's OWN retained CLI invocation, not a Codev-presented row).
+- Deferred (both reviewers ENDORSE landing in REVIEW): runtime-message/doctor-rec selector alignment
+  (harness.ts:233-236, doctor.ts:874) + governance arch.md/lessons-learned.md.
+- CHANGELOG needs NO change (its [Unreleased] entry is prose-only, no `--system` snippet).
+Verified: build exit 0 (tsc clean, realigned fixture type-checks); harness.test.ts 59/59. Wrote
+1338-phase_4-iter2-rebuttals.md. Next: commit → porch done (re-verify) → iter3 3-way consult on fixed
+docs. Unanimous approve → phase_4 done → porch advances to Review (where the deferred touchpoints land).
