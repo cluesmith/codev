@@ -11,6 +11,12 @@
  *
  * Tower/GitHub are never reached: the retirement throws before the dispatcher
  * hands off to a handler, so no server mocks are needed.
+ *
+ * A second case covers `--shell` (Issue #1338 follow-up): shell mode creates no
+ * worktree, but `spawnShell` still starts a PTY (`startShellSession`) and persists
+ * a shell row (`upsertBuilder`). The preflight is now unconditional (it used to be
+ * gated `if (mode !== 'shell')`), so a retired gemini shell.builder must also fail
+ * closed — no PTY, no row.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -64,6 +70,34 @@ describe('spawn retirement preflight (#1338)', () => {
 
     // The preflight aborts above ensureDirectories / createWorktree / initPorch:
     // no worktree and no porch project may exist afterward.
+    const builders = existsSync(join(ws, '.builders')) ? readdirSync(join(ws, '.builders')) : [];
+    const porch = existsSync(join(ws, 'codev', 'projects')) ? readdirSync(join(ws, 'codev', 'projects')) : [];
+    expect(builders).toEqual([]);
+    expect(porch).toEqual([]);
+  });
+
+  it('rejects a gemini --shell spawn (shell mode is NOT exempt) and creates no PTY / db row', async () => {
+    writeBuilderHarness('gemini');
+
+    // `--shell` was previously exempt from the preflight (`if (mode !== 'shell')`).
+    // The guard is now unconditional, so a retired gemini `shell.builder` is rejected
+    // at the dispatcher. This `/retired/i` rejection IS the regression guard: the old
+    // exempt code fell through to `spawnShell` and did NOT throw the retirement — it
+    // would have started a PTY and persisted a shell row instead.
+    //
+    // No `force` here: `--force` is invalid for shell mode (validateSpawnOptions
+    // requires an issue/task/protocol alongside it) and isn't needed — the workspace
+    // has no uncommitted *tracked* changes (the untracked `.codev/config.json` that
+    // `writeBuilderHarness` creates is ignored by the pre-spawn cleanliness check).
+    await expect(spawn({ shell: true })).rejects.toThrow(/retired/i);
+
+    // The preflight is the statement immediately before `handlers[mode]()`, and
+    // `spawnShell` is the only shell-mode side-effect producer: `startShellSession`
+    // (the PTY) and `upsertBuilder` (the shell row) both run only via that dispatch.
+    // A thrown preflight therefore guarantees neither ran — no PTY, no row — and, as
+    // on the worktree path, no on-disk builder/porch state. (The global db lives
+    // under a HOME resolved at import time and is shared across the test run, so it
+    // is intentionally not introspected here; the pre-dispatch throw is the proof.)
     const builders = existsSync(join(ws, '.builders')) ? readdirSync(join(ws, '.builders')) : [];
     const porch = existsSync(join(ws, 'codev', 'projects')) ? readdirSync(join(ws, 'codev', 'projects')) : [];
     expect(builders).toEqual([]);

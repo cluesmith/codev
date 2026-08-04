@@ -921,18 +921,17 @@ export async function spawn(options: SpawnOptions): Promise<void> {
   const mode = getSpawnMode(options);
 
   // Fail closed on a retired builder harness (Issue #1338) BEFORE dispatching to
-  // any handler. Every mode except `shell` creates worktree/porch/db state — and
-  // `createWorktree` itself resolves the builder harness (spawn-worktree.ts), so
-  // a raw throw from that resolution would orphan a half-built worktree. This
-  // preflight runs above every `ensureDirectories`/`createWorktree`/
-  // `initPorchInWorktree` call, so a rejected gemini spawn leaves zero state.
-  // `shell` spawns a plain terminal with no builder harness, so it is exempt.
-  // Only the retirement aborts here; an unknown-harness name still surfaces at
-  // its existing resolution call site (assertBuilderHarnessNotRetired swallows
-  // non-retirement errors), so behavior is unchanged for every supported harness.
-  if (mode !== 'shell') {
-    assertBuilderHarnessNotRetired(config.workspaceRoot);
-  }
+  // any handler, for EVERY mode. Worktree modes create worktree/porch/db state,
+  // and `createWorktree` itself resolves the builder harness (spawn-worktree.ts),
+  // so a guard placed below dispatch would orphan a half-built worktree. `shell`
+  // mode has no worktree, but `spawnShell` still runs `commands.builder` via
+  // `startShellSession` and persists a shell row — so a retired `gemini`
+  // shell.builder would otherwise launch the retired CLI AND leave a shell row.
+  // The retirement decision (including the custom-harness escape hatch) is
+  // delegated to `getBuilderHarness`; only the retirement aborts here — an
+  // unknown-harness name still surfaces at its existing resolution call site, so
+  // behavior is unchanged for every supported harness and every mode.
+  assertBuilderHarnessNotRetired(config.workspaceRoot);
 
   const handlers: Record<BuilderType, () => Promise<void>> = {
     spec: () => spawnSpec(options, config),
