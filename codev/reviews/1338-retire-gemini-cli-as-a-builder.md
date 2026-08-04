@@ -54,8 +54,9 @@ touchpoints (runtime message, `doctor` recommendation, README) to name the expli
 
 ## Key Metrics
 
-- **Commits**: 47 on the branch (≈21 `[Spec 1338]` artifact/code commits + porch orchestration chores).
-- **Tests**: 4145 passing, 48 pre-existing skips, 0 failing (full unit suite, e2e excluded). Substantial
+- **Commits**: ≈60 on the branch (`[Spec 1338]` artifact/code commits + porch orchestration chores + the
+  PR integration-review round). Approximate — grows as review iterations land.
+- **Tests**: 4148 passing, 48 pre-existing skips, 0 failing (full unit suite, e2e excluded). Substantial
   new coverage added: `spawn-retirement.test.ts` (new — real `spawn()` against a real temp workspace,
   asserts 0 orphaned state), plus additions across `harness`, `config`, `doctor`, `tower-utils`,
   `tower-instances`, and `session-manager` tests.
@@ -102,8 +103,8 @@ recovered from `state-snapshot.md` + the thread log; all resumed automatically w
 
 ## Consultation Iteration Summary
 
-33 consultation files (11 rounds × 3 models) + 7 rebuttal files. Verdicts trended APPROVE as iterations
-converged; every phase ended unanimous APPROVE.
+36 consultation files (12 rounds × 3 models) + 8 rebuttal files, through the first PR integration-review
+round. Verdicts trended APPROVE as iterations converged; every implement phase ended unanimous APPROVE.
 
 | Phase | Iters | Who Blocked | What They Caught |
 |-------|-------|-------------|------------------|
@@ -305,7 +306,7 @@ intact — its `gemini` mention is an accurate record of a past bug, not a curre
 
 ## Flaky Tests
 
-- No flaky tests encountered. The full unit suite ran deterministically (4145 passed / 48 pre-existing
+- No flaky tests encountered. The full unit suite ran deterministically (4148 passed / 48 pre-existing
   skips / 0 failed) across every phase and Review verification.
 
 ## Follow-up Items
@@ -317,3 +318,11 @@ intact — its `gemini` mention is an accurate record of a past bug, not a curre
   any unknown name), so intentionally left as-is; a candidate for a small consistency follow-up.
 - **`arch.md:1062` caveat** — the pre-existing "unrecognized override commands default to the claude
   harness" footgun (cluesmith/codev#1062) is untouched by this work and remains tracked upstream.
+- **Prototype-chain lookups in `resolveHarness`** (Claude, PR review) — `BUILTIN_HARNESSES[name]` and
+  `name in customHarnesses` walk the prototype chain (so e.g. `toString` resolves to a truthy provider),
+  unlike the new `isRetiredHarness` which uses `hasOwnProperty`. Pre-existing and out of scope here; an
+  `Object.hasOwn`/own-property hardening follow-up candidate.
+- **Stale Gemini-CLI mentions outside harness-selection docs** (Claude, PR review) — `INSTALL.md:245` and
+  `.claude/skills/codev/SKILL.md:48` (+ skeleton twin) still list "Gemini CLI" as a satisfying AI-CLI
+  dependency. Stale since #778 (not this PR); the spec scopes the doc-consistency criterion to
+  harness-selection docs, so intentionally excluded — a follow-up doc-sweep candidate.

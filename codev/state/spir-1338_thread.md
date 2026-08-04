@@ -540,3 +540,24 @@ skeleton copy); full unit suite 4148 pass / 48 skip / 0 fail (was 4145; +3 test 
   caller test (tower-instances.test.ts:1463) to include the new 3rd `{ log }` arg.
 Next: commit (5 atomic) → push → update PR body → re-run porch PR 3-way consult on fixed HEAD → porch next
 (record verdicts) → pr gate (HUMAN). External maintainer merges — no self-merge.
+
+### REVIEW iter1 CONSULT (fresh, on integration-review HEAD f009d11c): Gemini APPROVE, Claude APPROVE, Codex REQUEST_CHANGES
+Forced a fresh consult by clearing the 3 stale old-HEAD review-iter1 verdict files (unrecorded in
+status.yaml; porch then reported "3-way review not completed") → `porch next` emitted the consult task →
+ran all 3 on f009d11c.
+- Gemini APPROVE (no issues). Claude APPROVE/HIGH (independently reproduced tsc + 4148/0; verified all 4
+  architect fixes in code; non-blocking notes only). Codex REQUEST_CHANGES/HIGH but "no production
+  correctness or security blockers" — 2 audit-record asks.
+iter2 fixes (committed):
+- Codex#1 — commit the 5 `*-context.md` audit artifacts (convention: 11 tracked across prior projects;
+  verdict `.txt` files are gitignored, context/rebuttals committed).
+- Codex#2 — refresh stale review metrics (47→≈60 commits, 4145→4148 tests, 33/11/7→36/12/8 consult counts).
+- Claude#1 (non-blocking; my --shell change made it relevant): `assertBuilderHarnessNotRetired` swallowed
+  non-retirement errors silently, and shell mode never re-resolves downstream → added a `console.debug` in
+  the catch (fires only on a real error).
+- Claude#3 (cosmetic): reworded the doctor interpolation-assertion comments (a single RETIRED_HARNESSES
+  entry can't prove interpolation — don't overstate).
+- Claude#2 (resolveHarness prototype-chain) + Claude#4 (INSTALL.md/SKILL.md stale gemini, pre-existing
+  #778) → Follow-up Items (out of scope).
+Build exit 0; full suite 4148/48/0 (unchanged — behavior-preserving, no new tests). Wrote
+1338-review-iter1-rebuttals.md. Next: commit+push → porch done → next → iter2 3-way consult on updated HEAD.
