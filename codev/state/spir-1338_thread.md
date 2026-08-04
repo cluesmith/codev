@@ -503,3 +503,12 @@ baseline, my additions were assertions WITHIN existing tests):
   consult rounds × 3, 7 rebuttals.
 Next: commit (3 logical commits) → PR (Closes #1338) → porch done 1338 (PR consult + pr gate) → afx send
 architect "PR ready". pr gate = HUMAN. External maintainer merges (no self-merge — architect constraint).
+
+### PR OPENED — #1342 (2026-08-03 EDT / resumed session)
+3 Review commits (d660c92c touchpoints, 62dfcd07 governance, 0a915bd1 review doc+thread) pushed to
+origin/builder/spir-1338 (origin=cluesmith upstream; fork=mohidmakhdoomi). PR #1342
+https://github.com/cluesmith/codev/pull/1342 → base main, head builder/spir-1338, OPEN, Closes #1338.
+porch done 1338 --pr 1342 --branch builder/spir-1338 recorded the PR in pr_history (note: the --pr form
+ONLY records the PR; it does NOT run the review checks/advance — must still porch check → done → next).
+porch review CRITERIA: pr_exists / review_has_arch_updates / review_has_lessons_updates / e2e_tests.
+Running porch check now. Then porch done → next → PR 3-way consult → pr gate (HUMAN). Do NOT self-merge.
