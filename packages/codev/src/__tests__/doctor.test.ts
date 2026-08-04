@@ -728,9 +728,11 @@ describe('doctor command', () => {
       // shell.builder "gemini" stays retired, so the rec points at shell.builderHarness.
       // ("via" is unique to the recommendation; the retirement message uses "with".)
       expect(out.some((l) => l.includes('select it explicitly via shell.builderHarness'))).toBe(true);
-      // The custom-harness clause names the configured (retired) harness, rendered
-      // from role.name — not a hard-coded literal — so the advice stays correct if a
-      // second harness is ever retired (#1338, RETIRED_HARNESSES extensibility).
+      // Locks the RENDERED custom-harness clause for the configured retired harness.
+      // (This assertion can't by itself prove the `${role.name}` interpolation — with a
+      // single RETIRED_HARNESSES entry it reads identically to a hard-coded literal; the
+      // interpolation is verified by inspection and shares the pattern of the
+      // already-asserted console/issue lines above. #1338.)
       expect(out.some((l) => l.includes('define a custom "gemini" harness'))).toBe(true);
       // The single-source-of-truth retirement explanation is surfaced (2026-06-18 cause).
       expect(out.some((l) => l.includes('2026-06-18'))).toBe(true);
@@ -742,8 +744,8 @@ describe('doctor command', () => {
       expect(out.some((l) => l.includes('Set shell.architect / shell.architectHarness to "codex"'))).toBe(true);
       // The custom-harness escape hatch names the EXPLICIT architect selector (#1338).
       expect(out.some((l) => l.includes('select it explicitly via shell.architectHarness'))).toBe(true);
-      // The custom-harness clause names the configured (retired) harness, rendered
-      // from role.name — not a hard-coded literal (#1338 extensibility).
+      // Locks the RENDERED custom-harness clause for the configured retired harness
+      // (not a proof of the `${role.name}` interpolation — see the builder test's note). #1338.
       expect(out.some((l) => l.includes('define a custom "gemini" harness'))).toBe(true);
       // The inverted pre-retirement message must be gone.
       expect(out.some((l) => l.includes('supported for builders'))).toBe(false);

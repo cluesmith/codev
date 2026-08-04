@@ -305,6 +305,15 @@ export function assertBuilderHarnessNotRetired(workspaceRoot?: string): void {
     getBuilderHarness(workspaceRoot);
   } catch (err) {
     if (err instanceof RetiredHarnessError) throw err;
+    // A non-retirement resolution error (e.g. an unknown harness name) is left to
+    // re-surface at the real `getBuilderHarness` call site for worktree modes.
+    // Shell mode never resolves a harness downstream (`spawnShell` runs
+    // `commands.builder` as a raw command), so this preflight is the only place
+    // such an error is seen — log it rather than swallowing it silently, so a
+    // misconfigured `builderHarness` stays diagnosable (Issue #1338 review).
+    console.debug(
+      `[spawn preflight] builder harness resolution error (non-retirement, deferred): ${(err as Error).message}`,
+    );
   }
 }
 
