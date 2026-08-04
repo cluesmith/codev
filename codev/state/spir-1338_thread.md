@@ -402,3 +402,25 @@ pointer, PRESERVE the agy consult-lane note) + CHANGELOG [Unreleased] Removed/br
 migration pointer + scoped doc-consistency grep (EXEMPT historical artifacts codev/specs|plans|reviews|
 projects|docs/releases + every `consult -m gemini`/`agy` ref; re-grep BOTH codev/ AND codev-skeleton/).
 Governance arch/lessons (arch.md :291/:311-317, lessons-learned.md :80) → Review phase via update-arch-docs.
+Committed `9bc6398b` (README+CHANGELOG) + `a7cc65b4` (thread). Ran porch check→done→next → phase_4 iter1 consult.
+
+### phase_4 CONSULT iter1: Gemini APPROVE, Codex REQUEST_CHANGES/HIGH, Claude REQUEST_CHANGES/HIGH
+Codex + Claude CONVERGED on the primary bug; both accepted + fixed (README + CHANGELOG only):
+- **B1 escape-hatch selector** (Codex C1 + Claude): my draft said "define a custom harness named gemini
+  (keep --yolo)" — but that FAILS. Auto-detected `gemini` stays retired even with a custom def; the escape
+  hatch needs the EXPLICIT `shell.builderHarness`/`architectHarness: "gemini"` selector (exactly the
+  Phase 1/3 resolver behavior). Fixed: README + CHANGELOG now require the explicit selector + explain why;
+  README has a working snippet (builder + builderHarness + harness.gemini def w/ roleArgs/roleScriptFragment).
+- **B2 opencode builder-only** (Codex C2): migration guidance listed opencode for BOTH roles; opencode is
+  builder-only (README already says so). Fixed: role-specific (claude/codex either role; opencode builder-only).
+- Minor (Claude): README :392 "Other shells (Codex)" → "Codex is also supported". Fixed.
+CROSS-PHASE (Claude, EXPLICITLY non-blocking — "not asking you to re-open them"): the SAME omission is in
+the runtime message (harness.ts RETIRED_HARNESSES.gemini) + doctor rec (doctor.ts:875) — both say "configure
+a custom harness" without the explicit selector. ACCEPTED, DEFERRED to Review phase (phase_4 scope = README/
+CHANGELOG only; harness.ts/doctor.ts are approved Phase 1/3 code; neither reviewer blocks). Will align all 3
+touchpoints in Review (reviewed at PR consult). Governance arch/lessons also → Review.
+Note: the corrected README escape-hatch snippet DOES contain `"builder": "gemini --yolo"` + `"builderHarness":
+"gemini"` — that's the reviewer-REQUESTED custom-harness example (retained-access, explicit selector), NOT
+gemini-as-supported-built-in; framed as retired-built-in + custom-only. Doc-consistency criterion still holds.
+Wrote 1338-phase_4-iter1-rebuttals.md. Docs-only; build+suite green. Next: commit fix+docs → porch next
+(record iter1 verdicts, re-iter to iter2) → porch check→done→next → iter2 consult on the fixed docs.
