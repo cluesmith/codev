@@ -590,3 +590,7 @@ Tower, which is the architect's call and not mine to make unilaterally — asked
 than running it. Holding `porch done 1307` until the two probes actually run; signalling
 verify-ready on an uninstalled build would be the "asserting something adjacent to the
 truth" failure this thread already recorded once.
+
+**Hold confirmed (04:31Z).** Architect: the local-install / Tower restart is queued with
+Waleed and won't run without his explicit go-ahead; they'll message when the new build is
+live. So the verify wait is tracked, not dropped — no polling from me. Idle until then.
