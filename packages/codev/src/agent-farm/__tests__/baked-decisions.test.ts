@@ -281,9 +281,32 @@ describe('Spec 746 Phase 2: drafting-prompt baked-decisions clause', () => {
     }
   });
 
+  // RETIRED under Spec 1280 (retirement R2, approved by Waleed 2026-08-04) — SCOPED to the two
+  // SPIR/ASPIR specify.md drafting prompts only.
+  //
+  // Phase 5 rewrites specify.md to P1/P2, deleting the pre-746 "Process" walkthrough that the
+  // baseline captured. "No pre-746 line was ever removed" is therefore false by design and
+  // permanently — the identical change-freeze failure R1 named. R1 explicitly left the
+  // PHASE_2_FILES pure-addition guard "in force"; Phase 5 is the phase that touches specify.md, so
+  // R2 retires it for those two files exactly as R1 did for the builder-prompts.
+  //
+  // 746's substance survives and is still asserted, all passing: the grep regression above
+  // (`Baked Decisions`, `do not autonomously`, `contradict`+`pause`+`flag`, `afx send`), the
+  // byte-identical-clause mirror-parity below, and the pollution check at the end of this describe.
+  // The deletion protection is re-anchored on POST-1280 baselines in
+  // spec-1280-prompt-deletion-guard.test.ts (inverted anti-vacuity), so future silent deletion is
+  // still caught.
+  //
+  // NOT retired: air/implement.md — Phase 5 does not touch it, so its pure-addition guard stays in
+  // force below. Full trace: codev/resources/1280-retirements.md (R2).
+  const RETIRED_UNDER_R2 = new Set([
+    'codev/protocols/spir/prompts/specify.md',
+    'codev/protocols/aspir/prompts/specify.md',
+  ]);
   describe('pure-addition diff: baseline lines preserved in order', () => {
     for (const file of PHASE_2_FILES) {
       if (file.baselineName === null) continue;
+      if (RETIRED_UNDER_R2.has(file.relPath)) continue; // R2 — see comment above
       it(`${file.label}: post-edit file is a pure-addition diff of its baseline`, () => {
         const baseline = readBaseline(file.baselineName!);
         const current = readRepoFile(file.relPath);

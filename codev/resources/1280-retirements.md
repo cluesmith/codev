@@ -114,8 +114,7 @@ scoped to the three builder-prompt instances only.
 
 ## R2 — `expectPureAdditionDiff` on the two SPIR/ASPIR `specify.md` drafting prompts
 
-**Status: PROPOSED, Phase 5, 2026-08-02. Awaiting architect approval. Nothing applied; the suite
-is deliberately left RED on these two assertions until a decision is recorded.**
+**Status: APPROVED by Waleed (human decision, relayed by the architect), 2026-08-04. Applied.**
 
 This is the retirement **R1 explicitly foresaw**: R1 closed by scoping itself to the three
 builder-prompts and stating *"the identical `expectPureAdditionDiff` guards over `PHASE_2_FILES`
@@ -181,5 +180,10 @@ Phase 5 actually rewrote.
 
 ### Architect decision
 
-- [ ] **PENDING.** Rejection is a legitimate outcome — it means Phase 5 cannot rewrite the two
-  `specify.md` files to P1/P2 and that decision is rescoped to leave them pure-addition.
+- [x] **APPROVED — Waleed, 2026-08-04** (human call, relayed by the architect; retirement decisions
+  on 1280 get a human decision even when they mirror an approved precedent). Grounds: R2 is the
+  retirement R1 explicitly foresaw and scoped out ("`PHASE_2_FILES` guards remain in force"), and
+  its analysis mirrors R1's approved grounds — construction-time additive scaffolding that hardened
+  into a change-freeze, with 746's substance surviving in the grep / mirror-parity / pollution
+  assertions that still pass, and the anti-vacuity half preserved. Applied in two commits (retirement,
+  then replacement guard), mirroring R1's split.
