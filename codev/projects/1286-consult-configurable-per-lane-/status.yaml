@@ -29,6 +29,7 @@ gates:
     approved_at: '2026-08-05T04:27:12.811Z'
   verify-approval:
     status: pending
+    requested_at: '2026-08-05T04:30:17.186Z'
 iteration: 1
 build_complete: false
 history:
@@ -160,7 +161,7 @@ history:
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/aspir-1286/codev/projects/1286-consult-configurable-per-lane-/1286-phase_6-iter3-claude.txt
 started_at: '2026-07-29T11:33:26.698Z'
-updated_at: '2026-08-05T04:30:10.793Z'
+updated_at: '2026-08-05T04:30:17.187Z'
 force_advanced:
   phase: phase_6
   iteration: 3
