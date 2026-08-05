@@ -20,8 +20,13 @@
 #   .requested_reviewers[].login  -> reviewRequests (user logins; teams have no login → dropped)
 #   .draft                        -> isDraft
 #   reviewDecision                -> ""  (Gitea has no GitHub-equivalent review-decision summary)
-REPO="${CODEV_REPO:-$(git remote get-url origin 2>/dev/null | sed -E -e 's#\.git$##' -e 's#.*[/:]([^/]+/[^/]+)$#\1#')}"
-tea api "repos/${REPO}/pulls?state=open&limit=200" \
+#
+# The open-pulls list is paginated (Gitea caps a page at max_response_items,
+# default 50), so tea_api_paged walks every page rather than silently truncating
+# at ~50 open PRs (see _lib.sh).
+. "$(dirname "$0")/_lib.sh"
+REPO="$(gitea_repo)" || exit 1
+tea_api_paged "repos/${REPO}/pulls" "state=open" \
   | jq '[.[] | {
       number,
       title,

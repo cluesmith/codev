@@ -15,7 +15,8 @@
 # API endpoint (would render raw JSON in a browser), so map `html_url` and fall
 # back to `url` only if it's absent — the same choice PIR #1179 made when this
 # concept still went through `tea pulls view`.
-REPO="${CODEV_REPO:-$(git remote get-url origin 2>/dev/null | sed -E -e 's#\.git$##' -e 's#.*[/:]([^/]+/[^/]+)$#\1#')}"
+. "$(dirname "$0")/_lib.sh"
+REPO="$(gitea_repo)" || exit 1
 tea api "repos/${REPO}/pulls/${CODEV_PR_NUMBER}" | jq '{
   title,
   body: (.body // ""),
