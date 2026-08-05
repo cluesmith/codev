@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- sdpi-components binds the <sdpi-select setting="verb"> to this action's
+         persisted settings over the Stream Deck property-inspector protocol. The
+         value is a canonical verb the active editor provider maps to its own
+         command, so the same key drives VSCode or any future provider. -->
+    <script src="https://sdpi-components.dev/releases/v4/sdpi-components.js"></script>
+  </head>
+  <body>
+    <sdpi-item label="Action">
+      <sdpi-select setting="verb" placeholder="Choose a Codev action">
+        <option value="open-architect-terminal">Open Architect Terminal</option>
+        <option value="open-builder-terminal">Open Builder Terminal</option>
+        <option value="view-diff">View Diff</option>
+        <option value="send-message">Send Message</option>
+        <option value="spawn-builder">Spawn Builder</option>
+        <option value="refresh-overview">Refresh Overview</option>
+      </sdpi-select>
+    </sdpi-item>
+  </body>
+</html>

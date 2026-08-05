@@ -1,0 +1,33 @@
+{
+  "$schema": "https://schemas.elgato.com/streamdeck/plugins/layout.json",
+  "id": "codev-dial",
+  "items": [
+    {
+      "key": "title",
+      "type": "text",
+      "rect": [8, 8, 184, 28],
+      "font": { "size": 18 },
+      "alignment": "left",
+      "text-overflow": "ellipsis",
+      "color": "#ffffff"
+    },
+    {
+      "key": "value",
+      "type": "text",
+      "rect": [8, 40, 184, 22],
+      "font": { "size": 13 },
+      "alignment": "left",
+      "text-overflow": "ellipsis",
+      "color": "#a0a0a0"
+    },
+    {
+      "key": "bar",
+      "type": "bar",
+      "rect": [8, 74, 184, 12],
+      "value": 0,
+      "subtype": 0,
+      "bar_bg_c": "#3a3a3a",
+      "bar_fill_c": "#3aa0ff"
+    }
+  ]
+}
