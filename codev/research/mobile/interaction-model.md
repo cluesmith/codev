@@ -256,7 +256,7 @@ Not mobile-specific — benefits web dashboard equally. **All of §8.1–8.3 is 
 
 ### 8.1 `AskUserQuestion` detection
 
-Tower listens for `AskUserQuestion` tool call events in each architect / builder's stream. (Note: Tower does **not** currently parse PTY content at all — this introduces content-derived structured events for the first time, so the detection mechanism itself is a design question: PTY-stream parsing vs. harness-side hooks emitting to Tower. The spike should evaluate both.) When one is detected:
+**Decided (2026-07-19, main's rulings on #1206 — see `decisions/askuserquestion-detection.md`)**: detection is **harness-side hooks**, not PTY parsing. A generated `PreToolUse` hook emits `question_pending` with the structured payload from `tool_input`; `PostToolUse` emits `question_resolved`. v1 covers builders only (the spawn path already writes per-builder hook config — the #1018 write-guard precedent); the architect bridge comes later and blocks nothing. The Tower contract stays harness-neutral: the hook is just the first emitter. Transport per ruling Q3: the pending *notification* rides #1194's `BusEventMeta` bus frame; the resolution *lifecycle* gets a dedicated endpoint with REST backfill; #1194 lands first. When a question is detected:
 
 1. Extract `{question, options[], multiSelect, preview?}` from the tool call
 2. Emit a `question_pending` WebSocket event with the structured payload + a message id + the source (which architect / builder asked)
@@ -272,12 +272,12 @@ Consumed by:
 
 All three consume through `codev-sdk`'s pending-question client (#1189; framework-free — each surface wraps it in its own state idiom).
 
-### 8.3 Response routing
+### 8.3 Response routing — corrected (2026-07-19)
 
-- User selects an option (or types "other" free-form) on any surface
-- Response sent to Tower with `{message_id, selected_option_index, other_text?}`
-- Tower injects into the AI's context as a `tool_result`, conversation continues
-- Other subscribers get a `question_resolved` event so they can update their UI
+An earlier revision of this section claimed Tower "injects into the AI's context as a `tool_result`". **That was wrong.** Hooks (and any external observer) can only *detect* a question; the question itself is held by the harness's interactive TUI, and no Tower-side channel exists to hand it a tool result. Answering from another surface therefore means **synthesizing PTY input** (driving the TUI's own menu), which is materially harder than it sounds — "Other" free-text entry, multi-select, and the race against someone answering at the desk all complicate it. Per main's ruling (Q2, #1206):
+
+- **v0 ships detect-and-notify**: every surface shows the pending question; answering happens at the desk. The mobile card renders read-only with an "answer at your desk" state until injection exists.
+- **Remote answering is its own gated spike**, sequenced after detection ships. When it lands: response sent to Tower with `{message_id, selected_option_index, other_text?}`, resolution is compare-and-set on the dedicated lifecycle endpoint (§8.1), and other subscribers get `question_resolved` to dismiss their cards — that consumer contract is unchanged from the original design; only the injection mechanism was mischaracterized.
 
 ### 8.4 Push notification delivery
 
