@@ -1,7 +1,7 @@
 id: '1352'
 title: packages-codev-build-doesn-t-b
 protocol: air
-phase: implement
+phase: pr
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -11,4 +11,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-08-05T07:51:58.758Z'
-updated_at: '2026-08-05T07:51:58.758Z'
+updated_at: '2026-08-05T08:01:05.284Z'
