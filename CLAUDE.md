@@ -63,7 +63,7 @@ pnpm build
 pnpm -w run local-install
 ```
 
-- `pnpm build` builds types, sdk, core, and artifact-canvas, then codev (including dashboard)
+- `pnpm build` builds artifact-canvas (needed by the VS Code extension, not part of codev's dependency closure), then the codev CLI; codev's own build script first builds its graph-derived workspace-dependency closure (types, sdk, core, dashboard) via `pnpm --filter "@cluesmith/codev^..." build`
 - `pnpm -w run local-install` runs `scripts/local-install.sh`, which:
   - Packs the `@cluesmith/codev-core`, `@cluesmith/codev-sdk`, and `@cluesmith/codev` tarballs into their package directories
   - Globally installs all three in one `npm install -g` (separate installs fail because `@cluesmith/codev-core` isn't on the public npm registry)
@@ -317,7 +317,7 @@ project-root/
 
 ## Directory Map
 - pnpm install → always run from the repository root (installs all workspace packages)
-- pnpm build / pnpm test → run from `packages/codev/` or use `pnpm --filter @cluesmith/codev build`
+- pnpm build / pnpm test → run from `packages/codev/` or use `pnpm --filter @cluesmith/codev build` (the build script first builds codev's workspace deps via the graph-derived `pnpm --filter "@cluesmith/codev^..." build` closure, so a missing or stale dep `dist/` can't surface as false TS errors in codev's own sources)
 - E2E tests → `packages/codev/tests/e2e/`
 - Unit tests → `packages/codev/tests/unit/`
 - Never run npm commands from the repository root unless explicitly told to.
