@@ -111,7 +111,7 @@ getReplayData(maxBytes?: number): Buffer
 
 - `maxBytes` omitted → today's behaviour exactly (existing callers and tests unaffected).
 - `maxBytes` given → tail-walk: iterate `chunks` from the end summing lengths until the cap is reached; `subarray` the boundary chunk to take only its tail; `Buffer.concat` the collected slice.
-- `shellper-process.ts:391` passes `REPLAY_PAYLOAD_MAX`. The existing post-hoc `subarray` guard at `:392-395` **stays** — it costs nothing and keeps the invariant local to the send site (defense in depth if a future caller forgets the argument).
+- `shellper-process.ts:391` passes `REPLAY_PAYLOAD_MAX`, and the existing post-hoc `subarray` guard at `:392-395` is **removed**. *Revised after the PR consultation (Codex, `REQUEST_CHANGES`).* This originally said the guard "stays — defense in depth if a future caller forgets the argument." That was wrong: passing the cap in makes the branch unreachable, since `getReplayData` never returns more than its argument. The invariant lives in that contract and is pinned by the oversized-retention test, verified to fail if the argument is dropped.
 
 ### Phase 2 — Byte-cap eviction in the buffer itself
 
@@ -132,7 +132,7 @@ It also bounds worst-case per-session footprint at 8MB resident + 8MB transient 
 
 Not lower than 8MB, because downstream consumption is uneven: the adoption and reconcile paths seed only 1MB (`capRingSeed`, `tower-terminals.ts:754,995`), and the four uncapped `waitForReplay()` sites are all creation paths where the shellper was just spawned via `createSession` (replay empty by construction, which is why #1204 correctly capped only the adoption pair). But `afx attach` writes the full payload straight to stdout (`attach.ts:171-174`), and that consumer is what keeps 8MB honest rather than 1MB.
 
-**Known cost of this choice:** with the buffer cap equal to the wire cap, the send-path trim at `:392-395` becomes a permanent no-op in new binaries, so it stops being exercised in production. It is kept regardless (it still guards the accessor and any future caller) and must stay covered by unit tests so it cannot rot silently.
+**Known cost of this choice:** with the buffer cap equal to the wire cap, the send-path trim at `:392-395` can never fire. *Revised after the PR consultation:* the original plan proposed keeping it and covering it with tests. It is unreachable by construction (the cap is passed into `getReplayData`, which never returns more than its argument), so no test can reach it and it was removed instead. The protection that matters is the oversized-retention test, which fails if the cap argument is dropped from the call.
 
 The constant lives in `shellper-replay-buffer.ts`, next to the class it configures, defined as `= REPLAY_PAYLOAD_MAX` so the derivation is self-maintaining if the send cap ever moves (retaining more than can be sent is waste; retaining less makes the send cap unreachable).
 
@@ -162,7 +162,7 @@ Costs ~10 lines in one shared helper, strictly reduces the garbage window, and c
 
 **Phase 1**
 - `packages/codev/src/terminal/shellper-replay-buffer.ts:76-80` — `getReplayData(maxBytes?: number)`, tail-walk implementation.
-- `packages/codev/src/terminal/shellper-process.ts:391` — pass `REPLAY_PAYLOAD_MAX`; keep the `:392-395` guard; update the comment block at `:384-390` to say the cap is now applied *before* allocation.
+- `packages/codev/src/terminal/shellper-process.ts:391` — pass `REPLAY_PAYLOAD_MAX`; **remove** the now-unreachable `:392-395` guard (see the revision note under *Phase 1*); update the comment block at `:384-390` to say the cap is now applied *before* allocation.
 - `packages/codev/src/terminal/__tests__/shellper-replay-buffer.test.ts` — **new file** (the class currently has no dedicated test; it is only covered indirectly via `shellper-process.test.ts`).
 
 **Phase 2**

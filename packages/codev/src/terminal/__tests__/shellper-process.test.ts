@@ -272,11 +272,12 @@ describe('ShellperProcess', () => {
     }, 10_000);
 
     it('caps an oversized replay to the most recent bytes on connect (#1198)', async () => {
-      // #1205 gave the buffer a byte ceiling equal to REPLAY_PAYLOAD_MAX, so a
-      // default shellper can no longer build a replay large enough to exercise
-      // the send-path cap (see the test below, which asserts exactly that).
-      // The guard still has to work for any caller that doesn't pass the cap,
-      // so raise this shellper's ceiling to keep the oversized case reachable.
+      // Retention ceiling deliberately raised ABOVE REPLAY_PAYLOAD_MAX so the
+      // buffer can hold more than the wire allows. That is the only way to pin
+      // the real invariant: the send path caps the payload independently of how
+      // much the buffer retains. If the REPLAY_PAYLOAD_MAX argument at the send
+      // site is ever dropped, this test fails (the frame would carry the full
+      // 9MB), which is what makes a post-hoc guard there unnecessary.
       shellper = new ShellperProcess(createMockPty, socketPath, 10_000, undefined, 16 * 1024 * 1024);
       await shellper.start('/bin/bash', [], '/tmp', {}, 80, 24);
 

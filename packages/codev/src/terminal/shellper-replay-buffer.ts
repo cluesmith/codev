@@ -187,6 +187,11 @@ export class ShellperReplayBuffer {
   getReplayData(maxBytes?: number): Buffer {
     if (this.chunks.length === 0) return Buffer.alloc(0);
     if (maxBytes === undefined || this.totalBytes <= maxBytes) {
+      // Single-chunk fast path returns the internal Buffer *by reference*
+      // rather than copying. Safe because nothing mutates chunks in place and
+      // callers only read, but it is an aliasing property the old
+      // always-concat version did not have: a caller that mutated the result
+      // would corrupt the buffer. Copy here if that ever stops being true.
       if (this.chunks.length === 1) return this.chunks[0];
       return Buffer.concat(this.chunks, this.totalBytes);
     }
@@ -203,9 +208,18 @@ export class ShellperReplayBuffer {
         continue;
       }
       // Boundary chunk: take only its tail, aligned off a mid-sequence cut.
+      //
+      // `break` is load-bearing. ESC alignment moves the cut *forward*, so the
+      // piece is usually shorter than `remaining` — without breaking, the loop
+      // would see spare capacity and keep taking bytes from still-older chunks,
+      // stitching fragments across a gap into what must be one contiguous
+      // suffix. That also re-admits the unaligned mid-sequence prefix this
+      // alignment exists to prevent. Returning fewer than `maxBytes` is the
+      // accepted contract; returning a spliced stream is not.
       const piece = chunk.subarray(alignToEscape(chunk, chunk.length - remaining));
       tail.push(piece);
       collected += piece.length;
+      break;
     }
     tail.reverse();
     return Buffer.concat(tail, collected);

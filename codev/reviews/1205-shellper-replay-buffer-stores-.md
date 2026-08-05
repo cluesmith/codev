@@ -33,8 +33,8 @@ Plus `codev/plans/1205-*.md`, `codev/reviews/1205-*.md`, `codev/state/pir-1205_t
 ## Test Results
 
 - `pnpm build` (from repo root): ✓ pass
-- `pnpm vitest run`: ✓ **4390 passed, 0 failed**, 48 skipped (216 files)
-- `terminal/` suite: ✓ **304 passed** (11 files), **31 new**
+- `pnpm vitest run`: ✓ **4392 passed, 0 failed**, 48 skipped (216 files)
+- `terminal/` suite: ✓ **306 passed** (11 files), **33 new** (2 added as consultation regressions)
 - Manual: human approved the running worktree at the `dev-approval` gate.
 
 ## Architecture Updates
@@ -68,11 +68,27 @@ Routed **COLD** (`codev/resources/lessons-learned.md`); same cap reasoning as ab
 
 **2. Three of my tests were wrong rather than the code.** An ESC-alignment test passed without exercising alignment (the raw cut happened to land exactly on the ESC, so the assertion would have held with the feature deleted). Two `RingBuffer` tests asserted behaviour that never existed — `getSince` returning `[]` for a caught-up client is deliberate and documented at #1047. All corrected, and I added a test pinning that documented gap so the new cap can't later be blamed for it.
 
-**3. `REPLAY_BUFFER_MAX_BYTES = REPLAY_PAYLOAD_MAX` makes the #1198 send-path trim (`shellper-process.ts:392-395`) a no-op at default settings.** It's kept deliberately (it still guards the accessor and any future caller), and its test raises that shellper's ceiling explicitly via the new constructor arg so the guard stays exercised rather than rotting. Reasonable people could argue for dropping it instead.
+**3. Consultation finding (Claude, `REQUEST_CHANGES`) — a real bug, fixed.** The capped tail-walk in `getReplayData()` sliced the boundary chunk but did not stop there. Because ESC alignment moves the cut *forward*, the piece is shorter than the remaining budget, so the loop saw spare capacity and kept taking bytes from still-older chunks — **stitching fragments across a gap into what must be one contiguous suffix**, and re-admitting the unaligned mid-sequence prefix that alignment exists to prevent. Reproduced before fixing:
 
-**4. Phase 3 (`ring-buffer.ts`) is the only genuine behaviour change for viewers**, and it's the one to scrutinise: fresh attaches now receive 1–2MB of the partial instead of up to 14MB. The discarded bytes are superseded repaint frames that get overwritten during parse, so the tail converges on the same visual state, and attach gets measurably faster. But the residual risk is real: escape *state* set early and never re-set (an alt-screen-enter, a mode change) sitting in the discarded prefix renders wrong until the nudge fires. ESC alignment narrows that window; it does not close it.
+```
+chunks: 6 × "BODY-N-abcdefg\x1b[m", cap 25
+before: "[m\x1b[m\x1b[mBODY-5-abcdefg\x1b[m"   ← 3 fragments, unaligned prefix
+after:  contiguous suffix, ≤ cap
+```
 
-**5. Line-count semantics changed subtly.** The byte ceiling can now bite before the line ceiling — crossover is ~840 bytes/line. Ordinary shell output still hits the line cap first; long-line output (verbose logs, JSON dumps) will retain fewer than 10,000 lines. Invisible to consumers, since nothing above 8MB could ever be sent, but "10,000 lines" is no longer a guarantee.
+One-line fix (`break` after the boundary piece) plus two regression tests, both verified to fail without it: an ESC-dense fixture, and a sweep asserting `whole.endsWith(capped)` for *every* cap from 1 to the buffer length.
+
+Reachability was limited but real: with `REPLAY_BUFFER_MAX_BYTES === REPLAY_PAYLOAD_MAX` the capped branch never runs on a default shellper, so this was only live when `replayBufferBytes` is configured above 8MB — the config knob this PR itself introduced. The existing tests missed it because their fixtures were ESC-free.
+
+**4. Consultation finding (Codex, `REQUEST_CHANGES`) — fixed, and it caught a genuine error in my reasoning.** I had kept the post-hoc `replayData.length > REPLAY_PAYLOAD_MAX` trim at the send site as "defense in depth," and claimed the #1198 test exercised it by raising that shellper's retention ceiling. **Both claims were false.** Passing the cap *into* `getReplayData` makes the branch unreachable by construction: the method never returns more than its argument, so the condition cannot be true regardless of how much the buffer retains. Raising the ceiling makes the *buffer* exceed the wire cap, which is a different thing entirely.
+
+Fix (`<this commit>`): the unreachable guard is **removed**. An unreachable branch that looks load-bearing is worse than none — it invites a future reader to trust a check that cannot fire. The invariant now rests where it is actually enforced (`getReplayData`'s contract) and is pinned by the oversized-retention test, which I verified fails if the cap argument is ever dropped: temporarily changing the call to `getReplayData()` produces `expected 9437195 to be 8388608`. That is the regression protection the guard was pretending to be.
+
+Worth reviewers' attention as a reasoning failure, not just a code one: I asserted this in the plan, in this review, and verbally, without checking the branch was reachable. PIR's consultation is single-pass, so this fix has had no independent AI re-review.
+
+**5. Phase 3 (`ring-buffer.ts`) is the only genuine behaviour change for viewers**, and it's the one to scrutinise: fresh attaches now receive 1–2MB of the partial instead of up to 14MB. The discarded bytes are superseded repaint frames that get overwritten during parse, so the tail converges on the same visual state, and attach gets measurably faster. But the residual risk is real: escape *state* set early and never re-set (an alt-screen-enter, a mode change) sitting in the discarded prefix renders wrong until the nudge fires. ESC alignment narrows that window; it does not close it.
+
+**6. Line-count semantics changed subtly.** The byte ceiling can now bite before the line ceiling — crossover is ~840 bytes/line. Ordinary shell output still hits the line cap first; long-line output (verbose logs, JSON dumps) will retain fewer than 10,000 lines. Invisible to consumers, since nothing above 8MB could ever be sent, but "10,000 lines" is no longer a guarantee.
 
 ## How to Test Locally
 

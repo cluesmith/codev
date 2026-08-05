@@ -102,6 +102,38 @@ describe('ShellperReplayBuffer', () => {
       expect(out.length).toBeLessThan(15);
     });
 
+    /**
+     * Regression (#1205, caught by PR consultation): the tail-walk sliced the
+     * boundary chunk but did not stop there. Because ESC alignment moves the
+     * cut forward, the piece is shorter than the remaining budget, so the loop
+     * kept consuming *older* chunks and stitched fragments across a gap —
+     * emitting a non-contiguous stream that also began mid-escape-sequence.
+     * Only reachable with ESC-dense data spanning several chunks, which is why
+     * the original ESC-free fixtures missed it.
+     */
+    it('returns a contiguous suffix, never fragments stitched across chunks', () => {
+      const buf = unbounded();
+      for (let i = 0; i < 6; i++) buf.append(`BODY-${i}-abcdefg\x1b[m`);
+
+      const whole = buf.getReplayData().toString();
+      const capped = buf.getReplayData(25).toString();
+
+      expect(whole.endsWith(capped)).toBe(true);
+      expect(capped.length).toBeLessThanOrEqual(25);
+    });
+
+    it('keeps the suffix contiguous across a range of caps', () => {
+      const buf = unbounded();
+      for (let i = 0; i < 10; i++) buf.append(`\x1b[3${i % 8}mframe-${i}\x1b[0m`);
+      const whole = buf.getReplayData().toString();
+
+      for (let cap = 1; cap <= whole.length; cap++) {
+        const capped = buf.getReplayData(cap).toString();
+        expect(whole.endsWith(capped)).toBe(true);
+        expect(capped.length).toBeLessThanOrEqual(cap);
+      }
+    });
+
     it('falls back to a raw cut when no escape sequence follows the cut point', () => {
       const buf = unbounded();
       buf.append('x'.repeat(10_000));

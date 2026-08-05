@@ -113,11 +113,16 @@ describe('RingBuffer', () => {
     expect(buf.getAll()).toEqual(['hello', '', 'world']);
   });
 
-  it('keeps a no-newline stream whole for faithful replay (Issue #1047)', () => {
+  it('keeps a no-newline stream whole below the partial ceiling (Issue #1047)', () => {
     const buf = new RingBuffer(10);
     // 100 KB with no newline, in 1 KB frames — mimics a full-screen TUI that
-    // redraws in place and never emits \n. The whole stream must be preserved
-    // (not truncated) so a reconnection replay can reconstruct the screen.
+    // redraws in place and never emits \n.
+    //
+    // NOTE (#1205): "whole" is no longer an unconditional guarantee — the
+    // partial is now capped (2MB by default). This fixture stays whole only
+    // because 100 KB is well under that ceiling. See the "partial ceiling"
+    // suite below for the capped behaviour; don't read this test as promising
+    // unbounded retention.
     const frame = 'x'.repeat(1024);
     for (let i = 0; i < 100; i++) {
       buf.pushData(frame);
