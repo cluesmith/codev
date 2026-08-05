@@ -63,7 +63,7 @@ pnpm build
 pnpm -w run local-install
 ```
 
-- `pnpm build` builds core first, then codev (including dashboard)
+- `pnpm build` builds types, sdk, core, and artifact-canvas, then codev (including dashboard)
 - `pnpm -w run local-install` runs `scripts/local-install.sh`, which:
   - Packs the `@cluesmith/codev-core`, `@cluesmith/codev-sdk`, and `@cluesmith/codev` tarballs into their package directories
   - Globally installs all three in one `npm install -g` (separate installs fail because `@cluesmith/codev-core` isn't on the public npm registry)

@@ -1136,7 +1136,7 @@ duplication: Tower's own reconnect backoff + WS close code live in a private
 copy at `packages/codev/src/agent-farm/lib/reconnect-backoff.ts` because the
 server must not import the client sdk.
 
-**Build order:** `pnpm build` from root builds types → sdk → core → codev (including dashboard). `codev-types` is built first because the VS Code extension's esbuild bundle resolves the package's runtime `exports.default` (`./dist/index.js`); a missing `types/dist` breaks the extension build even though tsc and vite resolve it from source via `exports.types` (`./src/index.ts`).
+**Build order:** `pnpm build` from root builds types → sdk → core → artifact-canvas → codev (including dashboard). `codev-types` is built first because the VS Code extension's esbuild bundle resolves the package's runtime `exports.default` (`./dist/index.js`); a missing `types/dist` breaks the extension build even though tsc and vite resolve it from source via `exports.types` (`./src/index.ts`).
 
 **Publishing:** `codev-core` and `codev-sdk` must be published to npm before `codev` (runtime dependencies).
 

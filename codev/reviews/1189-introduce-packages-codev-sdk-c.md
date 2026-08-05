@@ -97,6 +97,10 @@ both import only codev-types) is enforced by CI tests on both sides.
 5. **No facades**: the moved subpaths are gone from codev-core. Out-of-repo consumers
    of `@cluesmith/codev-core`'s removed subpaths (if any exist) would break on the next
    release — the known consumers (CLI, vscode, dashboard) all migrated in this PR.
+6. **Consultation findings (Codex, COMMENT verdict) — fixed in-branch**: the release
+   protocol's `git add` command omitted `packages/sdk/package.json`, and the
+   build-order lines in CLAUDE.md/AGENTS.md and arch.md lagged the real root script.
+   All three corrected; both findings were doc accuracy, no code impact.
 
 ## How to Test Locally
 

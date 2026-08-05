@@ -73,7 +73,7 @@ Replace `X.Y.Z` below with the version the script just wrote (it prints it as `B
 pnpm bump-version            # or: pnpm bump-version minor / major / 3.1.0-rc.1
 
 # Commit and tag (root package.json is the version anchor — Vue/Babel pattern)
-git add package.json packages/codev/package.json packages/core/package.json packages/types/package.json packages/artifact-canvas/package.json apps/vscode/package.json pnpm-lock.yaml
+git add package.json packages/codev/package.json packages/core/package.json packages/sdk/package.json packages/types/package.json packages/artifact-canvas/package.json apps/vscode/package.json pnpm-lock.yaml
 git commit -m "Release @cluesmith/codev@X.Y.Z (Codename)"
 git tag -a vX.Y.Z -m "vX.Y.Z Codename - Brief description"
 git push && git push origin vX.Y.Z
