@@ -1,7 +1,7 @@
 id: '1286'
 title: consult-configurable-per-lane-
 protocol: aspir
-phase: review
+phase: verify
 plan_phases:
   - id: phase_1
     title: Config schema, validators, and resolvers
@@ -30,7 +30,7 @@ gates:
   verify-approval:
     status: pending
 iteration: 1
-build_complete: true
+build_complete: false
 history:
   - iteration: 1
     build_output: ''
@@ -160,7 +160,7 @@ history:
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/aspir-1286/codev/projects/1286-consult-configurable-per-lane-/1286-phase_6-iter3-claude.txt
 started_at: '2026-07-29T11:33:26.698Z'
-updated_at: '2026-08-05T04:27:12.811Z'
+updated_at: '2026-08-05T04:30:05.778Z'
 force_advanced:
   phase: phase_6
   iteration: 3
