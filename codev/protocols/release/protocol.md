@@ -231,11 +231,11 @@ Starting with v1.7.0, minor releases use a release candidate workflow for testin
 ```bash
 # Set version to RC. bump-all.sh auto-skips apps/vscode for pre-release
 # versions (VS Code Marketplace rejects semver pre-release suffixes), so
-# codev, core, types, and artifact-canvas are bumped here. vscode catches up at RC → stable.
+# codev, core, sdk, types, and artifact-canvas are bumped here. vscode catches up at RC → stable.
 pnpm bump-version 1.7.0-rc.1
 
 # Commit and tag (note: no apps/vscode/package.json — it wasn't bumped)
-git add package.json packages/codev/package.json packages/core/package.json packages/types/package.json packages/artifact-canvas/package.json pnpm-lock.yaml
+git add package.json packages/codev/package.json packages/core/package.json packages/sdk/package.json packages/types/package.json packages/artifact-canvas/package.json pnpm-lock.yaml
 git commit -m "v1.7.0-rc.1"
 git tag -a v1.7.0-rc.1 -m "v1.7.0-rc.1 - Release candidate"
 git push && git push origin v1.7.0-rc.1
