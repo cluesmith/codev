@@ -11,3 +11,15 @@ Investigated the post-#1244/#1267 launch-loop code. Key findings that shaped the
 - Scope coordination: #1112 (persisted builder session ids) gets `.builder-session-id` written by the wrapper as its accurate current-id surface; storage/consumption stays out of this PR.
 
 Plan written to `codev/plans/1233-builder-crash-restart-loses-al.md`; sitting at plan-approval gate.
+
+Gate discussion (recorded for the review): blast radius (every Claude builder spawn; contained by session-less byte-identity, untouched architect path, spawn-time-only script generation), and why `.builder-session-id` is a worktree file rather than a DB row — builders have no session row today (#1112's scope), and after spawn only the bash wrapper knows the current id (re-mints on clean exit / degrade), so DB writes would go stale and bash writing global.db would violate the never-modify-state-by-hand invariant. Also why crash-resume can't reuse recover's mtime discovery: the session to resume doesn't exist yet at spawn time (pin-then-resume is the only way to name it), discovery-in-bash would bake Claude's storage layout into every worktree, and unattended newest-jsonl resume risks hijacking a human's stray session (#1145 lesson).
+
+## Implement phase (2026-08-05)
+
+- Empirically verified pin-then-resume round trip: `claude -p --session-id <uuid>` then `claude -p --resume <uuid> "<prompt>"` restores context AND accepts a positional prompt (codeword test). The crash-resume nudge design is sound.
+- Harness seam: added optional `newSessionScriptFragment`/`resumeScriptFragment` to `HarnessProvider.session` (dual-form convention); Claude only.
+- `buildSessionLaunchLoop` in spawn-worktree.ts: pin at entry → resume-with-nudge on unnatural exit → 3-consecutive-fast-failures degrade to prompt-replay under a re-minted id → clean exit stays fresh (per #1267) but pinned to a new id. `CODEV_LAUNCH_FAST_FAIL_SECS` (default 15) drives the fast-fail threshold. uuidgen→/proc→unpinned fallback chain for runtime minting.
+- Deviation from plan (minor): Node does NOT write `.builder-session-id` at spawn — bash is the sole writer (runs `codev_persist_session_id` before the first launch). One writer beats two writers of the same value; the file exists within milliseconds of PTY start.
+- Byte-identity subtlety: kept the historical double-space in role-bearing commands with empty fragments (gemini) so session-less scripts are truly byte-identical.
+- 13 new executed-bash tests green (crash→resume, clean-exit re-mint, sticky switch, degrade, threshold gating, recover variant, harness gating, reset detection).
+- Docs: PIR builder-prompt + protocol "crash relaunches you with the same prompt" wording updated to resume semantics, mirrored to codev-skeleton (verified byte-identical).
