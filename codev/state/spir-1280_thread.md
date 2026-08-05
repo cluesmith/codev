@@ -1157,3 +1157,19 @@ for each PHASE_3 consult-type file). All other guards green (bugfix-685, templat
 review-prompt-routing, baked-decisions grep/mirror, measurement, deletion-guard). T16 green.
 
 Full packages/codev suite running against 19b14242 (expect 1 red = R3). Then report + await R3 decision.
+
+### Phase 6 — #335 guard caught + fixed; clean R3-pending state (HEAD 56f5dfd1)
+
+Full suite first showed 3 red, not 1: besides R3, my bugfix/pr.md rewrite dropped two phrases the
+**#335 regression guard** pins verbatim ("ALL THREE consultations have returned results",
+"DO NOT send this notification until you have all three CMAP verdicts"). That guard exists because
+bugfix builders once notified the architect before CMAP returned — so those ALL-CAPS strings are
+load-bearing behavior, not P7 padding. Restored them (conformance, not an M10 retirement), like the
+baked-decisions canonical wording. bugfix/pr 391→402; manifest updated; amended into the phase commit.
+
+Lesson (again): grep the test suite for per-file guards on EVERY file I rewrite, not just the ones I
+remember. #335 wasn't in my Phase 6 guard map because I built the map from the tests I'd already read
+in Phase 5; a fresh file (bugfix/pr) had its own guard I didn't re-scan for.
+
+**Clean state now: 1 RED = R3** (air/implement pure-addition, by design), 4131 passed / 48 skipped,
+EXIT 1. Reporting to architect; holding for the R3 (or class-preapproval) decision.
