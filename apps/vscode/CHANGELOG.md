@@ -1,5 +1,16 @@
 # Change Log
 
+## [Unreleased]
+
+### What's new
+
+- **Annotation viewer: keyboard-first review.** A spec or plan can now be reviewed without the mouse: Tab between blocks, Enter/Space to open the comment box, Cmd/Ctrl+Enter to submit, Esc to cancel. Jump keys move between commented blocks (`n`/`p`) and headings (`[`/`]`), Home/End jump to the document ends, minimap dots are keyboard-reachable, and `?` shows a keys legend.
+
+### Fixes
+
+- **Annotation viewer: the add-comment "+" button no longer vanishes en route.** Moving the mouse toward the button could dismiss or relocate it; it now stays put while you travel to it. It is also larger — sized to the document font with a comfortable click target.
+- **Annotation viewer: arrow cursor over document content.** The content area no longer shows the text-editing I-beam; the document is read-only and comments are added via the "+" button. Links still show the pointing hand, and text selection/copy work unchanged.
+
 ## [3.2.3] - 2026-07-16
 
 ### What's new

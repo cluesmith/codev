@@ -39,6 +39,10 @@
        - **<Headline>** (#<issue>, PR #<pr>). <One short paragraph of context.>
      Move out to its own ## section if the entry grows past ~3 sentences. -->
 
+- **Annotation viewer: keyboard-first review** (#1237, PR #1344). Review a spec or plan entirely from the keyboard: Tab between blocks, Enter to comment, Cmd/Ctrl+Enter to submit, Esc to cancel, jump keys for commented blocks and headings, keyboard-reachable minimap, and a `?` keys legend.
+- **Annotation viewer: steadier, larger add-comment button** (#1236, PR #1344). The "+" no longer disappears or jumps away while the mouse travels toward it, and it's sized to the document font with a comfortable click target.
+- **Annotation viewer: arrow cursor over read-only content** (#1232, PR #1344). Content shows the standard arrow instead of the text-editing I-beam; comments are added via the "+" button, links keep the pointing hand, selection/copy unchanged.
+
 ## Other fixes (dashboard, porch, infrastructure)
 
 <!-- Non-vscode work that ships in the npm release. Same bullet shape as Polish. -->
