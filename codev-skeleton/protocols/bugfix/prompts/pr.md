@@ -50,11 +50,11 @@ consult -m codex --protocol bugfix --type pr &
 consult -m claude --protocol bugfix --type pr &
 ```
 
-Then wait for **all three** to return before doing anything else — retrieve each with `TaskOutput` (`block: true`), record its verdict (APPROVE / REQUEST_CHANGES), fix real issues, push, and re-run CMAP if the changes were substantial. You must hold three concrete verdicts before you notify.
+Do not proceed until **ALL THREE consultations have returned results** — retrieve each with `TaskOutput` (`block: true`), record its verdict (APPROVE / REQUEST_CHANGES), fix real issues, push, and re-run CMAP if the changes were substantial. You must hold three concrete verdicts before you notify.
 
 ## Notify and hand off at the gate
 
-Send a **single** notification with the PR link and all three verdicts, then request the gate:
+**DO NOT send this notification until you have all three CMAP verdicts.** Send a **single** notification with the PR link and all three verdicts, then request the gate:
 
 ```bash
 afx send architect "PR #<number> ready for review (fixes issue #{{issue.number}}). CMAP: gemini=<APPROVE|REQUEST_CHANGES>, codex=<APPROVE|REQUEST_CHANGES>, claude=<APPROVE|REQUEST_CHANGES>"

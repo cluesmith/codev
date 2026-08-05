@@ -1137,3 +1137,23 @@ canonical literals so the grep stays green), propose R3 in 1280-retirements.md, 
 pure-addition assertion RED, report for the human decision — same endorsed pattern as R2. The other
 9 files go green. Will flag to Waleed/architect whether to keep approving these one-by-one or
 pre-approve the foreseen class.
+
+### Phase 6 implemented — commit 19b14242, R3 proposed, suite left RED (1) (2026-08-04)
+
+10 decisions, both trees. 9 files rewritten + maintain/review.md kept (inspected conformant).
+- **bugfix ×3, air ×2**: P1 contract; kept close-keyword heredocs (bugfix/pr, air/pr) + the
+  BUGFIX/AIR **CMAP self-dispatch** (these protocols run consult themselves). air/implement kept the
+  Baked Decisions clause in canonical wording.
+- **maintain ×2**: maintain.md P4 git-add drop only (command runbook, mostly capability); review.md
+  unchanged (conformant).
+- **spir templates ×3** (P2, big cuts): spec 632→246 (kept porch-required + delivery headings +
+  SPEC vs PLAN BOUNDARY), plan 649→201 (kept phases-JSON capability, ≥2 phases), review 641→293
+  (kept routing + Flaky Tests + Methodology Improvements).
+
+**R3** — air/implement.md rewrite trips Spec 746 Phase 2 pure-addition (3rd/last PHASE_2 file, foreseen
+by R1). Proposed in 1280-retirements.md, mirror of R2, **left RED (1 assertion)**, awaiting human
+decision. Also asked the human whether to **pre-approve the class** (Phases 7–9 will produce the same
+for each PHASE_3 consult-type file). All other guards green (bugfix-685, template-delivery,
+review-prompt-routing, baked-decisions grep/mirror, measurement, deletion-guard). T16 green.
+
+Full packages/codev suite running against 19b14242 (expect 1 red = R3). Then report + await R3 decision.
