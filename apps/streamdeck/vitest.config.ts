@@ -1,16 +1,10 @@
 import { defineConfig } from 'vitest/config';
-import { fileURLToPath } from 'node:url';
 
+// No resolve alias needed: outside plugin.ts (the entry, not under test) every
+// sdk import is type-only, so the suite runs without the sdk's dist built.
 export default defineConfig({
   test: {
     environment: 'node',
     include: ['src/__tests__/**/*.test.ts'],
-  },
-  resolve: {
-    // Resolve the workspace SDK to its source so tests run without first building
-    // the client's dist (the package's `default` export points at dist for consumers).
-    alias: {
-      '@cluesmith/codev-client': fileURLToPath(new URL('../client/src/index.ts', import.meta.url)),
-    },
   },
 });

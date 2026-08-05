@@ -9,7 +9,7 @@ import {
   type WillDisappearEvent,
   type DidReceiveSettingsEvent,
 } from '@elgato/streamdeck';
-import type { OverviewBuilder } from '@cluesmith/codev-client';
+import type { OverviewBuilder } from '@cluesmith/codev-sdk/controller';
 import type { CodevStore } from './store.js';
 
 /**

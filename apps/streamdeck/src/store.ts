@@ -1,11 +1,11 @@
-import {
+import type {
   TowerClient,
-  type WorkspaceSummary,
-  type OverviewData,
-  type OverviewBuilder,
-  type OverviewPR,
-  type OverviewBacklogItem,
-} from '@cluesmith/codev-client';
+  TowerWorkspace,
+  OverviewData,
+  OverviewBuilder,
+  OverviewPR,
+  OverviewBacklogItem,
+} from '@cluesmith/codev-sdk/controller';
 import { initialCursor, rotate, descend, ascend, type CursorState, type LevelCounts } from './nav/cursor.js';
 
 /**
@@ -29,7 +29,7 @@ export class CodevStore {
 
   cursor: CursorState = initialCursor();
   online = false;
-  workspaces: WorkspaceSummary[] = [];
+  workspaces: TowerWorkspace[] = [];
   overview: OverviewData | null = null;
   /** True while the selected workspace's overview is being (re)fetched after a switch. */
   loadingOverview = false;
