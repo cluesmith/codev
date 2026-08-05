@@ -187,3 +187,72 @@ Phase 5 actually rewrote.
   into a change-freeze, with 746's substance surviving in the grep / mirror-parity / pollution
   assertions that still pass, and the anti-vacuity half preserved. Applied in two commits (retirement,
   then replacement guard), mirroring R1's split.
+
+---
+
+## R3 — `expectPureAdditionDiff` on `air/implement.md` (the third and last PHASE_2 file)
+
+**Status: PROPOSED, Phase 6, 2026-08-04. Awaiting a human decision. Nothing applied; the suite is
+deliberately left RED on this one assertion until the decision is recorded.**
+
+The third instance of the pattern R1 foresaw and scoped out. R1 retired the PHASE_1 builder-prompts
+and left PHASE_2 in force; R2 retired two of PHASE_2's three files (spir/aspir specify.md); R3 is the
+remaining one. **After R3 there are no PHASE_2 pure-addition guards left** — PHASE_3 (reviewer /
+consult-type prompts) is Phases 7–9 and stays in force until those phases touch it.
+
+| | |
+|---|---|
+| **Assertion** | `baked-decisions.test.ts` → Phase 2 *"pure-addition diff: baseline lines preserved in order"* |
+| **File (the last of 3)** | `codev/protocols/air/prompts/implement.md` |
+| **Originating spec** | **Spec 746 — Baked Architectural Decisions** |
+| **Baseline** | `fixtures/baselines/air-implement.md.baseline` (**pre-746**) |
+
+### Why it cannot survive Spec 1280 (same shape as R1/R2)
+
+The baseline is the **pre-746** `air/implement.md` with the full numbered "Process" walkthrough.
+Phase 6 rewrites it to a "What must be true when you finish" contract (P1), deleting that prose, so
+"no pre-746 line was ever removed" is false by design. Even the P4 git-add cleanup alone would trip
+it — any deletion does. Re-baselining is rejected for R1/R2's reason: the new baseline would contain
+`Baked Decisions`, which 746's pollution check (`air-implement.md.baseline` must NOT contain it)
+correctly forbids; silencing that would gut the anti-vacuity half.
+
+### Does the protected behaviour survive?
+
+**Yes.** The Baked Decisions clause is kept in the rewrite with the canonical literals, so every
+behaviour assertion passes unmodified:
+
+| 746 protected | Survives? | Evidence (passing) |
+|---|---|---|
+| Baked Decisions **content present** in air/implement.md | **YES** | Phase 2 grep: `Baked Decisions`, `do not autonomously`, `contradict`+`pause`+`flag`, `afx send` |
+| clause **byte-identical across codev/ ↔ skeleton** | **YES** | Phase 2 mirror-parity for air implement.md |
+| baseline **anti-vacuity** (pollution check) | **YES — untouched** | `air-implement`-relevant pollution guard still passes |
+| **no prior content deleted** | **NO — by design** | this is the phase |
+
+### Replacement guard (ships on approval, separate commit — mirrors R1/R2)
+
+Extend `spec-1280-prompt-deletion-guard.test.ts` with a post-1280 baseline for `air/implement.md`,
+pure-addition against it, inverted anti-vacuity (the baseline **must** contain `Baked Decisions`).
+
+### Behaviour-re-asserted mapping
+
+| Retired assertion | Behaviour it carried | Survives? | Still asserted by |
+|---|---|---|---|
+| `codev AIR implement.md: post-edit file is a pure-addition diff of its baseline` | (a) 746's clause present; (b) no pre-746 line deleted | (a) **yes** / (b) **no, by design** | (a) Phase 2 grep (`Baked Decisions`, `do not autonomously`, `contradict`+`pause`+`flag`, `afx send`) + mirror-parity — passing |
+
+**Still in force, explicitly**: all `PHASE_3_FILES` reviewer/consult-type pure-addition guards
+(untouched until Phases 7–9 rewrite them).
+
+### A process question for the human, raised not assumed
+
+R3 is the third identical retirement (R1→R2→R3), and Phases 7–9 will produce the same for each
+PHASE_3 consult-type file rewritten. Rather than one approval per file, you may prefer to **pre-approve
+the class** — "any Spec 1280 rewrite that deletes pre-746 prose from a Spec 746 baked-decisions file
+is an approved retirement, provided (a) the behaviour grep + mirror-parity still pass and (b) a
+post-1280 replacement guard with inverted anti-vacuity ships in the same PR." That would let the
+remaining phases proceed without a per-file gate while keeping the same evidentiary bar. Entirely your
+call — I am not assuming it; R3 is written up in full either way.
+
+### Architect / human decision
+
+- [ ] **PENDING.** Rejection is legitimate — it means Phase 6 cannot rewrite `air/implement.md` to
+  P1 and that decision is rescoped to leave it pure-addition.

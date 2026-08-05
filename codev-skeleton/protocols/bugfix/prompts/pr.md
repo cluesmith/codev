@@ -2,32 +2,18 @@
 
 You are executing the **PR** phase of the BUGFIX protocol.
 
-## Your Goal
+## Goal
 
-Create a pull request, run CMAP review, and address feedback.
+Open the PR, run CMAP review on it, address feedback, and hand off to the architect at the `pr` gate.
 
 ## Context
 
 - **Issue**: #{{issue.number}} — {{issue.title}}
 - **Current State**: {{current_state}}
 
-## Process
+## Create the PR
 
-### 1. Create the Pull Request
-
-Create a PR that links to the issue.
-
-**PR body requirements**: The PR body MUST include `Fixes #<N>` (where `<N>` is
-the driving issue number) so GitHub auto-closes the issue on merge. If the PR
-fixes multiple issues (e.g. duplicates consolidated), include one `Fixes #<N>`
-per issue. Without this, GitHub will not auto-close the issue.
-
-**Exception**: if this PR only partially addresses the issue, use `Refs #<N>`
-or `Part of #<N>` instead of `Fixes` — the issue stays open until a
-follow-up PR closes it.
-
-**Note**: substitute the real issue number for `<N>` — do not leave the
-placeholder or any `{{...}}` template tag in the committed PR body.
+The PR body must carry `Fixes #<N>` for the driving issue — one per issue if several — so GitHub auto-closes it on merge. **Exception:** a PR that only partially addresses the issue uses `Refs #<N>` or `Part of #<N>` instead, leaving it open for the follow-up. Substitute the real number for `<N>`; leave no `{{...}}` tag or `<N>` placeholder in the committed body.
 
 ```bash
 gh pr create --title "Fix #<N>: <brief description>" --body "$(cat <<'EOF'
@@ -35,15 +21,15 @@ gh pr create --title "Fix #<N>: <brief description>" --body "$(cat <<'EOF'
 
 <1-2 sentence description of the bug and fix>
 
-Fixes #<N>  <!-- Substitute <N> with the real issue number -->
+Fixes #<N>  <!-- Substitute <N>; use "Refs #<N>" for a partial fix -->
 
 ## Root Cause
 
-<Brief explanation of why the bug occurred>
+<why the bug occurred>
 
 ## Fix
 
-<Brief explanation of what was changed>
+<what changed>
 
 ## Test Plan
 
@@ -54,9 +40,9 @@ EOF
 )"
 ```
 
-### 2. Run CMAP Review
+## Run CMAP review
 
-Run 3-way parallel consultation on the PR:
+BUGFIX runs its own 3-way consultation on the PR (porch does not do it for you). Dispatch all three in the background:
 
 ```bash
 consult -m gemini --protocol bugfix --type pr &
@@ -64,47 +50,26 @@ consult -m codex --protocol bugfix --type pr &
 consult -m claude --protocol bugfix --type pr &
 ```
 
-All three should run in the background (`run_in_background: true`).
+Then wait for **all three** to return before doing anything else — retrieve each with `TaskOutput` (`block: true`), record its verdict (APPROVE / REQUEST_CHANGES), fix real issues, push, and re-run CMAP if the changes were substantial. You must hold three concrete verdicts before you notify.
 
-### 3. Wait for Results and Address Feedback
+## Notify and hand off at the gate
 
-**DO NOT proceed to step 4 until ALL THREE consultations have returned results.**
-
-Wait for each background consultation to complete, then read the results:
-- Use `TaskOutput` (with `block: true`) to retrieve each consultation result
-- Record each model's verdict (APPROVE or REQUEST_CHANGES)
-- Fix any issues identified by reviewers
-- Push updates to the PR branch
-- Re-run CMAP if substantial changes were made
-
-You must have three concrete verdicts (e.g., "gemini: APPROVE, codex: APPROVE, claude: APPROVE") before continuing.
-
-### 4. Notify Architect
-
-**DO NOT send this notification until you have all three CMAP verdicts from step 3.**
-
-Send a **single** notification that includes the PR link and each model's verdict:
+Send a **single** notification with the PR link and all three verdicts, then request the gate:
 
 ```bash
 afx send architect "PR #<number> ready for review (fixes issue #{{issue.number}}). CMAP: gemini=<APPROVE|REQUEST_CHANGES>, codex=<APPROVE|REQUEST_CHANGES>, claude=<APPROVE|REQUEST_CHANGES>"
+porch done <project-id>
 ```
 
-Then run `porch done <project-id>` to auto-request the `pr` gate. The PR surfaces
-in Needs Attention from this point; **STOP and wait** for the architect to call
-`porch approve <project-id> pr`. After gate approval, porch will emit a merge task
-(via the next `porch next` call) — follow it to merge the PR and advance to
-`verified`.
+`porch done` fires the `pr` gate and surfaces the PR in Needs Attention. Wait for the architect to approve it (`porch approve <project-id> pr`) — a CMAP APPROVE is not merge authorization. After gate approval, follow the merge task from `porch next` to merge and advance to `verified`.
 
 ## Signals
 
-When PR is created and reviews are complete:
-
-```
-<signal>PHASE_COMPLETE</signal>
-```
-
-If you're blocked:
-
-```
-<signal>BLOCKED:reason goes here</signal>
-```
+- PR created and reviews complete:
+  ```
+  <signal>PHASE_COMPLETE</signal>
+  ```
+- Blocked:
+  ```
+  <signal>BLOCKED:reason goes here</signal>
+  ```
