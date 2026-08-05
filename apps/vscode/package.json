@@ -1064,7 +1064,7 @@
   },
   "dependencies": {
     "@cluesmith/codev-artifact-canvas": "workspace:*",
-    "@cluesmith/codev-core": "workspace:*",
+    "@cluesmith/codev-sdk": "workspace:*",
     "@cluesmith/codev-types": "workspace:*",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

@@ -17,7 +17,7 @@
 
 import * as vscode from 'vscode';
 import { existsSync } from 'node:fs';
-import type { TowerClient } from '@cluesmith/codev-core/tower-client';
+import type { TowerClient } from '@cluesmith/codev-sdk/tower-client';
 import {
   decidePreflight,
   decideTowerStatus,

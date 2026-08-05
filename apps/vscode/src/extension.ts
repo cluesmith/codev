@@ -40,7 +40,7 @@ import { BuilderTerminalLinkProvider, ReconnectTerminalLinkProvider } from './te
 import { computeBuildersToClose, roleIdsFromBuilders } from './prune-builder-terminals.js';
 import { buildBuilderPickRows } from './builder-pick-rows.js';
 import { readBuildersFileViewAsTree } from './builders-config.js';
-import { isIdleWaiting } from '@cluesmith/codev-core/builder-helpers';
+import { isIdleWaiting } from '@cluesmith/codev-sdk/builder-helpers';
 import { BuildersProvider, AccordionGate } from './views/builders.js';
 import { PullRequestsProvider, PullRequestTreeItem } from './views/pull-requests.js';
 import { BacklogProvider } from './views/backlog.js';
@@ -53,7 +53,7 @@ import { DevTreeProvider } from './views/dev.js';
 import { formatTargetName } from './views/dev-format.js';
 import { WorkspaceProvider } from './views/workspace.js';
 import { displayArchitectName, sortArchitectsForPicker } from './views/architect-display.js';
-import { validateArchitectName } from '@cluesmith/codev-core/architect-name';
+import { validateArchitectName } from '@cluesmith/codev-sdk/architect-name';
 import { resolveMainArchitect, addArchitectRequestMessage, ADD_ARCHITECT_RECIPIENT } from './commands/add-architect.js';
 import { BuilderTreeItem } from './views/builder-tree-item.js';
 import { BuilderFileTreeItem } from './views/builder-file-tree-item.js';
@@ -350,7 +350,7 @@ export async function activate(context: vscode.ExtensionContext) {
 	// Update status bar with builder + needs-attention counts.
 	// Two "needs me" signals: blocked (formal gate) and idle-waiting
 	// (PTY silent past threshold, likely paused at a non-gate question
-	// — see isIdleWaiting in @cluesmith/codev-core/builder-helpers).
+	// — see isIdleWaiting in @cluesmith/codev-sdk/builder-helpers).
 	// Each is shown only when > 0, with its own icon.
 	const updateStatusBarCounts = () => {
 		if (!statusBarItem || connectionManager?.getState() !== 'connected') { return; }
@@ -914,7 +914,7 @@ export async function activate(context: vscode.ExtensionContext) {
 				prompt: 'Name for the new architect (main decides whether to create it)',
 				placeHolder: 'e.g. web, mobile, security',
 				// Validate with the exact rule Tower enforces server-side
-				// (Issue 841 — shared validator in codev-core). Parity with
+				// (Issue 841 — shared validator in codev-sdk). Parity with
 				// `afx workspace add-architect`'s own check.
 				validateInput: value => validateArchitectName(value.trim()),
 			});

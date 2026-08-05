@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { readLocalKey } from '@cluesmith/codev-core/auth';
+import { readLocalKey } from '@cluesmith/codev-sdk/node';
 
 const SECRET_KEY = 'codev-local-key';
 

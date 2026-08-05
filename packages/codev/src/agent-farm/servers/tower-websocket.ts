@@ -9,7 +9,7 @@
 import http from 'node:http';
 import type net from 'node:net';
 import { WebSocketServer, WebSocket } from 'ws';
-import { WS_CLOSE_SESSION_UNKNOWN } from '@cluesmith/codev-core/reconnect-policy';
+import { WS_CLOSE_SESSION_UNKNOWN } from '../lib/reconnect-backoff.js';
 import { encodeData, encodeControl, decodeFrame } from '../../terminal/ws-protocol.js';
 import type { PtySession } from '../../terminal/pty-session.js';
 import { getTerminalManager, isStartupReconcileSettled, whenStartupReconcileSettled } from './tower-terminals.js';

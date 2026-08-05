@@ -4,9 +4,9 @@
  * This suite exists because of a specific gap: `--delay` travels
  * CLI → SendOptions → TowerClient → HTTP body → Tower. Every hop except this
  * one is covered from `packages/codev`, and this one *cannot* be — the
- * agent-farm `tower-client.ts` is a re-export shim that resolves to core's
- * built `dist`, so a codev-side test exercises compiled output, not this
- * source.
+ * agent-farm `tower-client.ts` is a thin wrapper that resolves to the sdk's
+ * built `dist` (post-#1189), so a codev-side test exercises compiled output,
+ * not this source.
  *
  * The consequence, before this file existed: deleting `deliverAfter` from the
  * request body left all 4059 codev tests green while `--delay` silently

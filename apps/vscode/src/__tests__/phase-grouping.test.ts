@@ -1,8 +1,8 @@
 /**
  * Unit tests for the pure stage-grouping helper backing the VSCode Builders
  * tree's action axis (#952). Lives in `__tests__/` (vitest) since the helper
- * touches no `vscode` APIs; imports from `@cluesmith/codev-core/phase-grouping`
- * (resolves via the package `exports` map → built `dist`, so `codev-core` must
+ * touches no `vscode` APIs; imports from `@cluesmith/codev-sdk/phase-grouping`
+ * (resolves via the package `exports` map → built `dist`, so `codev-sdk` must
  * be built first — the standard pipeline order).
  */
 
@@ -13,7 +13,7 @@ import {
   PHASE_TO_STAGE,
   STAGE_ORDER,
   type BuilderStage,
-} from '@cluesmith/codev-core/phase-grouping';
+} from '@cluesmith/codev-sdk/phase-grouping';
 
 /** Minimal item shape — groupByStage is generic; it only needs a phase getter. */
 const phase = (p: string) => ({ phase: p });

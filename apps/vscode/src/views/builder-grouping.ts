@@ -12,9 +12,9 @@
  */
 
 import type { OverviewBuilder } from '@cluesmith/codev-types';
-import { UNCATEGORIZED_AREA } from '@cluesmith/codev-core/constants';
-import { groupByArea } from '@cluesmith/codev-core/area-grouping';
-import { groupByStage, stageForPhase } from '@cluesmith/codev-core/phase-grouping';
+import { UNCATEGORIZED_AREA } from '@cluesmith/codev-sdk/constants';
+import { groupByArea } from '@cluesmith/codev-sdk/area-grouping';
+import { groupByStage, stageForPhase } from '@cluesmith/codev-sdk/phase-grouping';
 
 /** The grouping axes the Agents view offers. Persisted as `codev.buildersGroupBy`. */
 export type BuildersGroupBy = 'stage' | 'area' | 'architect';

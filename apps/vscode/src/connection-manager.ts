@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
-import { TowerClient } from '@cluesmith/codev-core/tower-client';
-import { backoffDelayMs } from '@cluesmith/codev-core/reconnect-policy';
+import { TowerClient } from '@cluesmith/codev-sdk/tower-client';
+import { backoffDelayMs } from '@cluesmith/codev-sdk/reconnect-policy';
 import { AuthWrapper } from './auth-wrapper.js';
 import { detectWorkspacePath, getTowerAddress } from './workspace-detector.js';
 import { SSEClient } from './sse-client.js';
@@ -11,7 +11,7 @@ export type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'rec
 /**
  * Singleton managing Tower communication from the VS Code extension.
  *
- * Wraps TowerClient from @cluesmith/codev-core with VS Code-specific
+ * Wraps TowerClient from @cluesmith/codev-sdk with VS Code-specific
  * concerns: state machine, Output Channel, SecretStorage auth, settings.
  */
 export class ConnectionManager {

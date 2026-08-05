@@ -4,14 +4,28 @@
  * Provides a client for interacting with the Tower daemon.
  * Handles authentication and common API operations.
  *
- * Extracted from packages/codev/src/agent-farm/lib/tower-client.ts
+ * Environment-agnostic (issue #1189): runs unmodified in browser, Node, and
+ * React Native. Auth and transport arrive as injected adapters; there is no
+ * disk, environment, or fetch-implementation assumption in this module. Node
+ * consumers that want the local-key default compose it themselves (the CLI
+ * wrapper in packages/codev injects `ensureLocalKey`; the VS Code extension
+ * injects its SecretStorage-cached reader; `@cluesmith/codev-sdk/node` offers
+ * the read-only reader for standalone Node controllers).
  */
 
-import type { DashboardState, OverviewData, IssueView, IssueSearchResponse, ResolvedWorktreeConfig, ResolvedActivityHooks, TowerVersionInfo } from '@cluesmith/codev-types';
+import type { DashboardState, OverviewData, IssueView, IssueSearchResponse, ResolvedWorktreeConfig, ResolvedActivityHooks, TowerVersionInfo, CommandRequest } from '@cluesmith/codev-types';
 import { DEFAULT_TOWER_PORT } from './constants.js';
-import { ensureLocalKey } from './auth.js';
+import { parseSseText, type SseEnvelope } from './sse.js';
 
 const REQUEST_TIMEOUT_MS = 10000;
+
+/**
+ * The command-relay route. Mirrors `COMMAND_ROUTE` in `@cluesmith/codev-types`
+ * (the provider side) rather than importing it: the sdk's zero-runtime-deps
+ * contract keeps codev-types type-only, and the mirror is one string literal.
+ * Recorded in issue #1189; the boundary test enforces the type-only rule.
+ */
+export const COMMAND_ROUTE = '/api/command';
 
 // ── Types ──────────────────────────────────────────────────────
 
@@ -171,8 +185,17 @@ export interface TowerTerminal {
 export interface TowerClientOptions {
   port?: number;
   host?: string;
-  /** Injectable auth key provider. Defaults to ensureLocalKey() from disk. */
+  /**
+   * Injectable auth key provider. Defaults to no auth (requests carry no
+   * `codev-web-key` header). Consumers entitled to the local key inject a
+   * reader; see the module header for the per-environment profiles.
+   */
   getAuthKey?: () => string | null;
+  /**
+   * Injectable transport (the test seam and the environment seam). Defaults
+   * to the global fetch, which exists in browsers, Node 18+, and React Native.
+   */
+  fetchFn?: typeof fetch;
 }
 
 // ── Client ─────────────────────────────────────────────────────
@@ -207,15 +230,20 @@ function extractTowerError(text: string): string {
 export class TowerClient {
   private readonly baseUrl: string;
   private readonly getAuthKey: () => string | null;
+  private readonly fetchFn: typeof fetch;
 
   constructor(portOrOptions?: number | TowerClientOptions) {
-    const options: TowerClientOptions = typeof portOrOptions === 'number'
-      ? { port: portOrOptions }
-      : portOrOptions ?? {};
-    const host = options.host ?? process.env.BRIDGE_TOWER_HOST ?? 'localhost';
+    let options: TowerClientOptions;
+    if (typeof portOrOptions === 'number') {
+      options = { port: portOrOptions };
+    } else {
+      options = portOrOptions ?? {};
+    }
+    const host = options.host ?? 'localhost';
     const port = options.port ?? DEFAULT_TOWER_PORT;
     this.baseUrl = `http://${host}:${port}`;
-    this.getAuthKey = options.getAuthKey ?? ensureLocalKey;
+    this.getAuthKey = options.getAuthKey ?? (() => null);
+    this.fetchFn = options.fetchFn ?? globalThis.fetch.bind(globalThis);
   }
 
   async request<T>(
@@ -232,7 +260,7 @@ export class TowerClient {
         headers['codev-web-key'] = authKey;
       }
 
-      const response = await fetch(`${this.baseUrl}${path}`, {
+      const response = await this.fetchFn(`${this.baseUrl}${path}`, {
         ...options,
         headers,
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
@@ -618,7 +646,7 @@ export class TowerClient {
    */
   async pasteImage(
     workspacePath: string,
-    bytes: Buffer,
+    bytes: Uint8Array,
     mime: string,
   ): Promise<{ ok: boolean; path?: string; error?: string }> {
     try {
@@ -627,15 +655,15 @@ export class TowerClient {
       if (authKey) {
         headers['codev-web-key'] = authKey;
       }
-      // Buffer isn't reliably assignable to fetch's BodyInit across
-      // @types/node lib versions; an ArrayBuffer slice always is.
+      // A typed-array view isn't reliably assignable to fetch's BodyInit
+      // across lib versions; an ArrayBuffer slice always is.
       const body = bytes.buffer.slice(
         bytes.byteOffset, bytes.byteOffset + bytes.byteLength,
       ) as ArrayBuffer;
       // The paste-image handler is workspace-scoped (same router as
       // /workspace/<enc>/api/state) — a global /api/paste-image has no route.
       const encoded = encodeWorkspacePath(workspacePath);
-      const response = await fetch(`${this.baseUrl}/workspace/${encoded}/api/paste-image`, {
+      const response = await this.fetchFn(`${this.baseUrl}/workspace/${encoded}/api/paste-image`, {
         method: 'POST',
         headers,
         body,
@@ -768,15 +796,90 @@ export class TowerClient {
   getTerminalWsUrl(terminalId: string): string {
     return `ws://localhost:${new URL(this.baseUrl).port}/ws/terminal/${terminalId}`;
   }
-}
 
-// ── Default client ─────────────────────────────────────────────
-
-let defaultClient: TowerClient | null = null;
-
-export function getTowerClient(port?: number): TowerClient {
-  if (!defaultClient || (port && port !== DEFAULT_TOWER_PORT)) {
-    defaultClient = new TowerClient({ port });
+  /**
+   * POST /api/command: ask the active provider to run a canonical verb.
+   * `workspace` (when known) scopes it so a multi-workspace Tower routes to
+   * the right provider. Lifted from `@cluesmith/codev-client` (issue #1189
+   * absorption); this client owns the controller side of the command relay.
+   */
+  async sendCommand(
+    verb: string,
+    args: unknown[] = [],
+    workspace?: string,
+  ): Promise<{ ok: boolean; status: number; data?: { ok: boolean }; error?: string }> {
+    const body: CommandRequest = { verb, args };
+    if (workspace) {
+      body.workspace = workspace;
+    }
+    return this.request<{ ok: boolean }>(COMMAND_ROUTE, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
   }
-  return defaultClient;
+
+  /**
+   * Subscribe to Tower's SSE stream (`/api/events`). Calls `onEnvelope` for
+   * each decoded event and `onStatus(true|false)` as the connection comes up
+   * or drops. Reconnects with backoff until the returned disposer is called.
+   * Consumers typically ignore the event body and re-fetch overview on any
+   * event (the established Tower-client pattern). `sleep` is injectable for
+   * tests. Lifted from `@cluesmith/codev-client` (issue #1189 absorption).
+   */
+  subscribeEvents(handlers: {
+    onEnvelope?: (env: SseEnvelope) => void;
+    onStatus?: (online: boolean) => void;
+    sleep?: (ms: number) => Promise<void>;
+  }): () => void {
+    const sleep = handlers.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
+    let stopped = false;
+    let abort: AbortController | null = null;
+
+    const run = async (): Promise<void> => {
+      let backoffMs = 500;
+      while (!stopped) {
+        abort = new AbortController();
+        try {
+          const authKey = this.getAuthKey();
+          const headers: Record<string, string> = { Accept: 'text/event-stream' };
+          if (authKey) {
+            headers['codev-web-key'] = authKey;
+          }
+          const res = await this.fetchFn(`${this.baseUrl}/api/events`, {
+            headers,
+            signal: abort.signal,
+          });
+          if (!res.ok || !res.body) throw new Error(`SSE HTTP ${res.status}`);
+          handlers.onStatus?.(true);
+          backoffMs = 500;
+          const reader = res.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = '';
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            buffer = parseSseText(buffer, (env) => handlers.onEnvelope?.(env));
+          }
+        } catch {
+          // fall through to reconnect
+        }
+        if (stopped) break;
+        handlers.onStatus?.(false);
+        await sleep(backoffMs);
+        backoffMs = Math.min(backoffMs * 2, 10_000);
+      }
+    };
+
+    run();
+    return () => {
+      stopped = true;
+      abort?.abort();
+    };
+  }
+
+  /** The base URL, exposed for opening browser links (e.g. a PR url) and tests. */
+  get url(): string {
+    return this.baseUrl;
+  }
 }

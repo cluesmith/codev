@@ -20,7 +20,7 @@ import { getGlobalDb } from '../db/index.js';
 import type { TerminalManager } from '../../terminal/pty-manager.js';
 import type { SessionManager } from '../../terminal/session-manager.js';
 import { defaultSessionOptions } from '../../terminal/index.js';
-import type { TerminalType } from '@cluesmith/codev-core/tower-client';
+import type { TerminalType } from '@cluesmith/codev-sdk/tower-client';
 import type { WorkspaceTerminals, TerminalEntry, InstanceStatus } from './tower-types.js';
 import {
   normalizeWorkspacePath,

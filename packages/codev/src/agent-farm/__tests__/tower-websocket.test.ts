@@ -11,7 +11,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import http from 'node:http';
 import { EventEmitter } from 'node:events';
 import { handleTerminalWebSocket, setupUpgradeHandler } from '../servers/tower-websocket.js';
-import { WS_CLOSE_SESSION_UNKNOWN } from '@cluesmith/codev-core/reconnect-policy';
+import { WS_CLOSE_SESSION_UNKNOWN } from '../lib/reconnect-backoff.js';
 
 // ============================================================================
 // Mocks

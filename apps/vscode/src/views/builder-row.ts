@@ -6,7 +6,7 @@
  */
 
 import type { OverviewBuilder } from '@cluesmith/codev-types';
-import { isIdleWaiting } from '@cluesmith/codev-core/builder-helpers';
+import { isIdleWaiting } from '@cluesmith/codev-sdk/builder-helpers';
 
 /**
  * Blocked-gate → codicon name. Keyed off the CANONICAL gate name

@@ -1,5 +1,5 @@
 import * as assert from 'assert';
-import { groupByArea, uppercaseAreaName } from '@cluesmith/codev-core/area-grouping';
+import { groupByArea, uppercaseAreaName } from '@cluesmith/codev-sdk/area-grouping';
 
 interface AreaItem {
 	id: string;

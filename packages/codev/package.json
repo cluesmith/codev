@@ -38,6 +38,7 @@
   },
   "dependencies": {
     "@cluesmith/codev-core": "workspace:*",
+    "@cluesmith/codev-sdk": "workspace:*",
     "@anthropic-ai/claude-agent-sdk": "^0.2.41",
     "@google/genai": "^1.0.0",
     "@openai/codex-sdk": "^0.146.0",
