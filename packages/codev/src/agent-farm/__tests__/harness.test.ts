@@ -9,6 +9,7 @@ import {
   detectHarnessFromCommand,
   isRetiredHarness,
   getRetirement,
+  getBuiltinHarness,
   type CustomHarnessConfig,
 } from '../utils/harness.js';
 
@@ -388,6 +389,45 @@ describe('harness', () => {
     it('falls back to claude for unknown command', () => {
       const provider = resolveHarness(undefined, undefined, 'my-custom-agent');
       expect(provider).toBe(CLAUDE_HARNESS);
+    });
+
+    it('inherited Object keys are not providers — throws Unknown harness, never a bogus provider (#1338)', () => {
+      // `harnessName` is user-controlled (config `shell.builderHarness` / a builder
+      // launch script). A bare `BUILTIN_HARNESSES[name]` for an inherited Object
+      // member returns a truthy value (`Object` for 'constructor', a function for
+      // 'toString'/'hasOwnProperty', `Object.prototype` for '__proto__'), which the
+      // pre-#1338 `if (builtin) return builtin` handed back as a bogus provider that
+      // TypeErrors at the first buildRoleInjection. The own-property guard makes
+      // these fail closed with the generic "Unknown harness" error instead.
+      for (const protoKey of ['constructor', 'toString', 'hasOwnProperty', 'valueOf', '__proto__']) {
+        const r = resolveResult(() => resolveHarness(protoKey));
+        expect(r.returned, `${protoKey} must not resolve to a provider`).toBeUndefined();
+        expect(r.threw?.message, `${protoKey} must throw Unknown harness`).toMatch(/Unknown harness/);
+      }
+    });
+  });
+
+  // ===========================================================================
+  // getBuiltinHarness (own-property accessor — #1338)
+  // ===========================================================================
+
+  describe('getBuiltinHarness', () => {
+    it('returns the provider for each built-in name', () => {
+      expect(getBuiltinHarness('claude')).toBe(CLAUDE_HARNESS);
+      expect(getBuiltinHarness('codex')).toBe(CODEX_HARNESS);
+      expect(getBuiltinHarness('opencode')).toBe(OPENCODE_HARNESS);
+    });
+
+    it('returns undefined for an unknown name', () => {
+      expect(getBuiltinHarness('nonexistent')).toBeUndefined();
+    });
+
+    it('returns undefined for inherited Object keys (the footgun the guard closes)', () => {
+      // Mirrors isRetiredHarness's own-property check: these must never resolve to
+      // Object.prototype members even though `BUILTIN_HARNESSES[key]` would be truthy.
+      for (const protoKey of ['constructor', 'toString', 'hasOwnProperty', 'valueOf', '__proto__']) {
+        expect(getBuiltinHarness(protoKey)).toBeUndefined();
+      }
     });
   });
 

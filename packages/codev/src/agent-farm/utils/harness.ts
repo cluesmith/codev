@@ -206,6 +206,23 @@ export const BUILTIN_HARNESSES: Record<string, HarnessProvider> = {
   opencode: OPENCODE_HARNESS,
 };
 
+/**
+ * The built-in provider for `name`, or `undefined` when `name` is not a built-in
+ * harness. Uses an own-property check — the same guard `isRetiredHarness` gives
+ * `RETIRED_HARNESSES` — so inherited Object members (`constructor`, `toString`,
+ * `hasOwnProperty`, `valueOf`, …) on a *user-controlled* name are never misread as
+ * a provider. A bare `BUILTIN_HARNESSES[name]` for `name = 'constructor'` returns
+ * `Object`'s constructor (a truthy function), which a `if (builtin) return builtin`
+ * check would then hand back as a bogus "provider" that TypeErrors at the first
+ * `buildRoleInjection` call. The name reaches here straight from config
+ * (`shell.builderHarness` / a builder launch script), so the key is untrusted.
+ */
+export function getBuiltinHarness(name: string): HarnessProvider | undefined {
+  return Object.prototype.hasOwnProperty.call(BUILTIN_HARNESSES, name)
+    ? BUILTIN_HARNESSES[name]
+    : undefined;
+}
+
 // =============================================================================
 // Retired harnesses
 // =============================================================================
@@ -430,7 +447,9 @@ export function resolveHarness(
 ): HarnessProvider {
   // Explicit harness name takes priority
   if (harnessName) {
-    const builtin = BUILTIN_HARNESSES[harnessName];
+    // Own-property lookup: `harnessName` is user-controlled, so a bare index could
+    // return an inherited Object member (`constructor`, …) as a bogus provider.
+    const builtin = getBuiltinHarness(harnessName);
     if (builtin) return builtin;
 
     if (customHarnesses && harnessName in customHarnesses) {

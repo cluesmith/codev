@@ -31,6 +31,7 @@ import { join } from 'node:path';
 import { parseAgentName } from '../../utils/agent-names.js';
 import {
   BUILTIN_HARNESSES,
+  getBuiltinHarness,
   buildCustomHarnessProvider,
   type CustomHarnessConfig,
   type HarnessProvider,
@@ -465,7 +466,10 @@ export function harnessProviderFor(
   harnessName: string,
   customHarnesses?: Record<string, CustomHarnessConfig>,
 ): HarnessProvider | null {
-  const builtin = BUILTIN_HARNESSES[harnessName];
+  // Own-property lookup (see getBuiltinHarness): `harnessName` comes from a running
+  // builder's launch script — a user-controlled key — so a bare index could hand
+  // back an inherited Object member as a bogus provider.
+  const builtin = getBuiltinHarness(harnessName);
   if (builtin) return builtin;
   if (customHarnesses && harnessName in customHarnesses) {
     return buildCustomHarnessProvider(customHarnesses[harnessName]);
