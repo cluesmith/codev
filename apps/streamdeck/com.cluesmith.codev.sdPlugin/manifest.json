@@ -1,0 +1,139 @@
+{
+  "UUID": "com.cluesmith.codev",
+  "Name": "Codev",
+  "Version": "0.1.0.0",
+  "Author": "Cluesmith",
+  "Category": "Codev",
+  "CategoryIcon": "icons/category",
+  "Description": "Codev architect surface: pending-gate badge, builder / PR / backlog navigators, diff-review dials, and configurable action keys.",
+  "Icon": "icons/plugin",
+  "URL": "https://github.com/cluesmith/codev",
+  "SDKVersion": 2,
+  "Software": { "MinimumVersion": "6.5" },
+  "OS": [
+    { "Platform": "mac", "MinimumVersion": "10.15" },
+    { "Platform": "windows", "MinimumVersion": "10" }
+  ],
+  "Nodejs": { "Version": "20", "Debug": "enabled" },
+  "CodePath": "bin/plugin.js",
+  "Actions": [
+    {
+      "Name": "Approve Gate",
+      "UUID": "com.cluesmith.codev.approve-gate",
+      "Tooltip": "Badge of pending gates; press to surface the next gate's review for confirmation in VSCode.",
+      "Icon": "icons/approve-gate",
+      "Controllers": ["Keypad"],
+      "States": [{ "Image": "icons/approve-gate", "TitleAlignment": "bottom" }]
+    },
+    {
+      "Name": "Codev Action",
+      "UUID": "com.cluesmith.codev.action",
+      "Tooltip": "Run a Codev command (open terminals, view diff, send, spawn, refresh).",
+      "Icon": "icons/action",
+      "Controllers": ["Keypad"],
+      "PropertyInspectorPath": "ui/codev-action.html",
+      "States": [{ "Image": "icons/action", "TitleAlignment": "bottom" }]
+    },
+    {
+      "Name": "Dev Server",
+      "UUID": "com.cluesmith.codev.dev-server",
+      "Tooltip": "Start / stop the workspace dev server.",
+      "Icon": "icons/dev-server",
+      "Controllers": ["Keypad"],
+      "States": [
+        { "Image": "icons/dev-server-off" },
+        { "Image": "icons/dev-server-on" }
+      ]
+    },
+    {
+      "Name": "Builder Action",
+      "UUID": "com.cluesmith.codev.builder-action",
+      "Tooltip": "A phase-aware verb for the selected builder; assign a slot in the property inspector.",
+      "Icon": "icons/builder-action",
+      "Controllers": ["Keypad"],
+      "PropertyInspectorPath": "ui/builder-action.html",
+      "States": [{ "Image": "icons/builder-action", "TitleAlignment": "bottom" }]
+    },
+    {
+      "Name": "Fleet Slot",
+      "UUID": "com.cluesmith.codev.fleet-slot",
+      "Tooltip": "A live fleet board: one builder per key, coloured by state. Assign a slot in the property inspector.",
+      "Icon": "icons/fleet-slot",
+      "Controllers": ["Keypad"],
+      "PropertyInspectorPath": "ui/fleet-slot.html",
+      "States": [{ "Image": "icons/fleet-slot", "TitleAlignment": "bottom" }]
+    },
+    {
+      "Name": "Zoom Navigator",
+      "UUID": "com.cluesmith.codev.zoom-nav",
+      "Tooltip": "Zoom navigator: rotate to browse workspaces / builders, tap the touch strip to zoom in (open the diff), press the dial to zoom back out / reset.",
+      "Icon": "icons/zoom-nav",
+      "Controllers": ["Encoder"],
+      "Encoder": {
+        "layout": "layouts/dial.json",
+        "TriggerDescription": { "Rotate": "Browse this level", "Touch": "Zoom in (open diff)", "Push": "Zoom out / reset" }
+      },
+      "States": [{ "Image": "icons/zoom-nav" }]
+    },
+    {
+      "Name": "PR Navigator",
+      "UUID": "com.cluesmith.codev.pr-nav",
+      "Tooltip": "Browse open pull requests and open the selected one in the browser.",
+      "Icon": "icons/pr-nav",
+      "Controllers": ["Encoder"],
+      "Encoder": {
+        "layout": "layouts/dial.json",
+        "TriggerDescription": { "Rotate": "Browse PRs", "Push": "Open in browser" }
+      },
+      "States": [{ "Image": "icons/pr-nav" }]
+    },
+    {
+      "Name": "Spawn from Backlog",
+      "UUID": "com.cluesmith.codev.spawn-nav",
+      "Tooltip": "Browse the backlog and spawn a builder for the selected issue (VSCode prompts the protocol).",
+      "Icon": "icons/spawn-nav",
+      "Controllers": ["Encoder"],
+      "Encoder": {
+        "layout": "layouts/dial.json",
+        "TriggerDescription": { "Rotate": "Browse backlog", "Push": "Spawn builder" }
+      },
+      "States": [{ "Image": "icons/spawn-nav" }]
+    },
+    {
+      "Name": "Diff File Navigator",
+      "UUID": "com.cluesmith.codev.diff-file-nav",
+      "Tooltip": "Step across files in a builder diff review; press to jump to the first file.",
+      "Icon": "icons/diff-file-nav",
+      "Controllers": ["Encoder"],
+      "Encoder": {
+        "layout": "layouts/dial.json",
+        "TriggerDescription": { "Rotate": "Next / previous file", "Push": "Forward file to builder", "Touch": "First file" }
+      },
+      "States": [{ "Image": "icons/diff-file-nav" }]
+    },
+    {
+      "Name": "Diff Hunk Navigator",
+      "UUID": "com.cluesmith.codev.diff-hunk-nav",
+      "Tooltip": "Step across changes within a diff; press to jump to the first change.",
+      "Icon": "icons/diff-hunk-nav",
+      "Controllers": ["Encoder"],
+      "Encoder": {
+        "layout": "layouts/dial.json",
+        "TriggerDescription": { "Rotate": "Next / previous change", "Push": "Forward hunk to builder", "Touch": "First change" }
+      },
+      "States": [{ "Image": "icons/diff-hunk-nav" }]
+    },
+    {
+      "Name": "Scroll & Forward Selection",
+      "UUID": "com.cluesmith.codev.scroll-nav",
+      "Tooltip": "Rotate to scroll the active editor; tap the touch strip to forward the current selection to the builder.",
+      "Icon": "icons/scroll",
+      "Controllers": ["Encoder"],
+      "Encoder": {
+        "layout": "layouts/label.json",
+        "TriggerDescription": { "Rotate": "Scroll up / down", "Push": "Forward selection to builder" }
+      },
+      "States": [{ "Image": "icons/scroll" }]
+    }
+  ]
+}
