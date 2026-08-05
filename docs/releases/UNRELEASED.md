@@ -47,6 +47,9 @@
 
 <!-- Non-vscode work that ships in the npm release. Same bullet shape as Polish. -->
 
+- **`@cluesmith/codev-sdk`: new client SDK package** (#1189, PR #1346). The single client implementation of how anything talks to Tower — environment-agnostic (browser, Node, React Native), subpath exports, auth/transport injected. `codev-core` becomes server-only; CI-enforced boundary tests keep the two from ever importing each other. First npm publish rides this release; groundwork for the Stream Deck and mobile clients.
+
+
 ## Breaking changes
 
 None.
