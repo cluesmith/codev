@@ -70,8 +70,10 @@
     "test": "vitest run",
     "prepublishOnly": "pnpm build"
   },
+  "dependencies": {
+    "@cluesmith/codev-types": "workspace:*"
+  },
   "devDependencies": {
-    "@cluesmith/codev-types": "workspace:*",
     "@types/node": "22.x",
     "typescript": "catalog:",
     "vitest": "^4.0.15"
