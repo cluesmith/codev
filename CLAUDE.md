@@ -65,8 +65,8 @@ pnpm -w run local-install
 
 - `pnpm build` builds core first, then codev (including dashboard)
 - `pnpm -w run local-install` runs `scripts/local-install.sh`, which:
-  - Packs both `@cluesmith/codev-core` and `@cluesmith/codev` tarballs into their package directories
-  - Globally installs both in one `npm install -g` (separate installs fail because `@cluesmith/codev-core` isn't on the public npm registry)
+  - Packs the `@cluesmith/codev-core`, `@cluesmith/codev-sdk`, and `@cluesmith/codev` tarballs into their package directories
+  - Globally installs all three in one `npm install -g` (separate installs fail because `@cluesmith/codev-core` isn't on the public npm registry)
   - Restores the executable bit on `scripts/forge/**/*.sh` (pnpm pack strips it, causing "GitHub CLI unavailable" errors otherwise)
   - Restarts Tower so it picks up the new code
 - Install runs while Tower is up — only the final restart causes downtime
