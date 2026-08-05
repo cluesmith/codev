@@ -1,7 +1,7 @@
 id: '1357'
 title: codev-sdk-controller-subpath-d
 protocol: air
-phase: pr
+phase: verified
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -13,5 +13,5 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-08-05T22:31:40.320Z'
-updated_at: '2026-08-05T22:39:37.068Z'
+updated_at: '2026-08-05T23:09:57.628Z'
 pr_ready_for_human: false
