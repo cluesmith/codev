@@ -1089,3 +1089,20 @@ Waleed approved R2 (human call, relayed by architect). Executed mirroring R1's s
   `Baked Decisions` from the baseline fires anti-vacuity. 20/20 green restored.
 
 Full packages/codev suite running against 265b4b65 to confirm fully green, then continue to Phase 6.
+
+### Phase 5 COMPLETE — fully green, pointer advanced to Phase 6 (2026-08-04)
+
+Full packages/codev suite against 265b4b65: **207 files passed / 3 skipped, 4132 tests passed /
+48 skipped, EXIT 0.** R2 executed cleanly; no reds. Architect M11 already signed off Phase 5.
+Advanced status.yaml pointer: phase_5 → complete, phase_6 → in_progress (architect instruction
+"continue to phase 6"; Waleed's standing permission to set the pointer to the right phase).
+
+**Phase 6 scope** (G4, 10 decisions): bugfix ×3, air ×2, maintain ×2 phase prompts + spir
+templates spec.md / plan.md / review.md ×3. Key constraints from the plan:
+- Lighter protocols are already closer to conformant (means 356–457w) — **a conformant file passes
+  unchanged**.
+- **plan.md's phases-JSON block is a CAPABILITY** (has_phases_json / min_two_phases) — survives P2.
+- Editing spir templates touches the `{{> }}` include TARGETS (template-delivery resolved-content
+  assertions: ## Problem Statement, SPEC vs PLAN BOUNDARY, ## Flaky Tests, ### Methodology
+  Improvements must survive). Re-check bugfix-685 heredoc + review-prompt-routing for the review
+  template.
