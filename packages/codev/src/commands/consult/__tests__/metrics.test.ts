@@ -14,6 +14,9 @@ function sampleRecord(overrides: Partial<MetricsRecord> = {}): MetricsRecord {
   return {
     timestamp: '2026-02-15T14:32:01.000Z',
     model: 'gemini',
+    // Required on MetricsRecord (spec 1286). tsconfig excludes **/__tests__/**, so omitting it
+    // type-checks clean and better-sqlite3 binds undefined as NULL — i.e. it fails silently.
+    modelId: null,
     reviewType: 'impl-review',
     subcommand: 'impl',
     protocol: 'spir',

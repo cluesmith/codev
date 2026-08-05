@@ -52,6 +52,7 @@ import { SendBuffer } from './send-buffer.js';
 import type { BufferedMessage } from './send-buffer.js';
 import type { PtySession } from '../../terminal/pty-session.js';
 import { writeMessageToSession, writeEscapeToSession } from './message-write.js';
+import { scheduleDelayedSend, validateDelaySeconds } from './delayed-send.js';
 import { submitToSession } from './session-submit.js';
 import {
   getKnownWorkspacePaths,
@@ -119,7 +120,20 @@ const sendBuffer = new SendBuffer();
 /** Deliver a buffered message to a session (write + broadcast + log).
  *  Returns the ms timestamp when all writes complete (for serialization). */
 function deliverBufferedMessage(session: PtySession, msg: BufferedMessage, delayOffset = 0): number {
-  const endTime = writeMessageToSession(session, msg.formattedMessage, msg.noEnter, delayOffset);
+  let offset = delayOffset;
+  // Spec 1307: a queued delayed `--interrupt` carries its Ctrl+C, written just
+  // ahead of its own payload rather than ahead of the whole queue. The 100ms
+  // gap mirrors the immediate path's pause between the interrupt and the text.
+  if (msg.interruptFirst) {
+    if (offset === 0) {
+      session.write('\x03');
+    } else {
+      const at = offset;
+      setTimeout(() => session.write('\x03'), at);
+    }
+    offset += 100;
+  }
+  const endTime = writeMessageToSession(session, msg.formattedMessage, msg.noEnter, offset);
   broadcastMessage(msg.broadcastPayload as Parameters<typeof broadcastMessage>[0]);
   return endTime;
 }
@@ -130,12 +144,24 @@ export function startSendBuffer(log: (level: 'INFO' | 'ERROR' | 'WARN', message:
     (id) => getTerminalManager().getSession(id),
     deliverBufferedMessage,
     log,
+    // Spec 1307: drain each session's batch under Spec 1273's submission lock,
+    // so a direct or delayed send cannot write into a flush that has scheduled
+    // its paced writes but not finished them. Returns the promise so the
+    // shutdown flush can be awaited; the catch keeps a throwing batch from
+    // becoming an unhandled rejection (the periodic flush ignores the return).
+    (sessionId, write) =>
+      submitToSession(sessionId, write).catch((err) => {
+        // deliverBufferedMessage's own writes do not throw synchronously, but a
+        // torn-down session could; log rather than swallow silently, and never
+        // crash Tower over one batch.
+        log('ERROR', `Buffered flush submission failed for ${sessionId.slice(0, 8)}...: ${err instanceof Error ? err.message : String(err)}`);
+      }),
   );
 }
 
 /** Stop the send buffer and deliver remaining messages (called from tower-server during shutdown). */
-export function stopSendBuffer(): void {
-  sendBuffer.stop();
+export async function stopSendBuffer(): Promise<void> {
+  await sendBuffer.stop();
 }
 
 // ============================================================================
@@ -1458,6 +1484,35 @@ async function handleSend(
   const interrupt = options.interrupt === true;
   const escape = options.escape === true;
 
+  // Spec 1307: optional delayed delivery. Validated here as well as at the CLI
+  // boundary — this is a public HTTP route, so the CLI is not the only caller,
+  // and an unvalidated value becomes a setTimeout that either fires instantly
+  // (NaN) or never (Infinity).
+  let deliverAfter: number | undefined;
+  if (options.deliverAfter !== undefined && options.deliverAfter !== null) {
+    const delayError = validateDelaySeconds(options.deliverAfter);
+    if (delayError) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'INVALID_PARAMS', message: delayError }));
+      return;
+    }
+    deliverAfter = options.deliverAfter as number;
+  }
+
+  // `escape` short-circuits before formatting and before the send buffer, by
+  // design (an interrupt that can be deferred is not an interrupt). Combining it
+  // with a delay is therefore contradictory rather than merely unsupported, and
+  // is refused instead of silently ignoring one of the two — a delay that is
+  // quietly dropped would look like it worked.
+  if (escape && deliverAfter !== undefined) {
+    res.writeHead(400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      error: 'INVALID_PARAMS',
+      message: 'escape cannot be combined with a delay: an ESC keystroke bypasses buffering by design so that it interrupts the CURRENT turn. Send the ESC now, or send a delayed message without escape.',
+    }));
+    return;
+  }
+
   // Resolve the target address to a terminal ID.
   // Spec 755: pass `from` so architect resolution is sender-affinity-aware
   // when the sender is a builder. Non-builder senders see unchanged behavior.
@@ -1560,57 +1615,245 @@ async function handleSend(
   };
   const logMessage = `Message sent: ${from ?? 'unknown'} → ${result.agent} (terminal ${result.terminalId.slice(0, 8)}...)`;
 
-  // Optionally interrupt first — bypass buffering entirely
-  if (interrupt) {
-    session.write('\x03'); // Ctrl+C
-    await new Promise(resolve => setTimeout(resolve, 100));
-  }
-
-  // Check if user is idle — deliver immediately or buffer (Spec 403, Bugfix #450)
-  // Defer only when user has typed recently (within idle threshold).
-  // Bugfix #492: removed session.composing check — composing gets stuck true
-  // after non-Enter keystrokes (Ctrl+C, arrows, Tab), causing 60s delays.
-  const shouldDefer = !interrupt && !session.isUserIdle(sendBuffer.idleThresholdMs);
-
-  if (shouldDefer) {
-    // User is actively typing — buffer for deferred delivery
-    sendBuffer.enqueue({
-      sessionId: result.terminalId,
+  // Spec 1307: `--delay` schedules DELIVERY only. Everything above this point —
+  // target resolution, the builder-spoofing check inside resolveTarget,
+  // writability, formatting — has already happened at REQUEST time, which is the
+  // security-relevant half of the design: a delayed send must not be able to
+  // defer an authorization check past the conditions that would fail it.
+  if (deliverAfter !== undefined) {
+    const deliveryContext: DeliveryContext = {
+      terminalId: result.terminalId,
+      agent: result.agent,
+      from,
       formattedMessage,
       noEnter,
-      timestamp: Date.now(),
+      interrupt,
       broadcastPayload,
       logMessage,
-    });
-    ctx.log('INFO', `Message deferred (user typing): ${from ?? 'unknown'} → ${result.agent} (terminal ${result.terminalId.slice(0, 8)}...)`);
-  } else {
-    // User is idle (or interrupt) — deliver immediately.
-    // Bugfix #584: paces multi-line output to avoid paste detection.
-    //
-    // AWAITED (Spec 1273 verify). `writeMessageToSession` schedules the Enter
-    // 50–80ms out and returns immediately; responding on that meant a caller's
-    // `await send(...)` resolved BEFORE its message was submitted. Two sends in
-    // quick succession then landed in the same composer and were submitted as
-    // one message — which is how `afx reset` sent
-    // `/clear### [ARCHITECT INSTRUCTION...` and never cleared anything.
-    //
-    // Only the immediate path is awaited. The buffered path above must NOT be:
-    // a deferred message can sit up to 60s, and awaiting that would hang the
-    // caller instead of returning `deferred: true`.
-    await submitToSession(result.terminalId, () =>
-      writeMessageToSession(session, formattedMessage, noEnter),
-    );
-    broadcastMessage(broadcastPayload);
-    ctx.log('INFO', logMessage);
+      ctx,
+      // Delayed deliveries queue behind anything already buffered.
+      enforceFifo: true,
+    };
+    // A due message re-enters deliverOrBuffer, which submits under Spec 1273's
+    // per-session lock — so serialisation against other writes to this session
+    // is the lock's job, and this scheduler only owns WHEN delivery starts.
+    // `stillLive` is re-checked inside the lock so a shutdown during the wait
+    // for it cancels the write (delayed-send.ts passes the generation check).
+    scheduleDelayedSend(deliverAfter, result.terminalId, (stillLive) =>
+      deliverOrBuffer({ ...deliveryContext, stillLive }));
+    ctx.log('INFO', `Message scheduled (+${deliverAfter}s): ${from ?? 'unknown'} → ${result.agent} (terminal ${result.terminalId.slice(0, 8)}...)`);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      ok: true,
+      terminalId: result.terminalId,
+      resolvedTo: result.agent,
+      deferred: false,
+      scheduled: true,
+      deliverAfter,
+    }));
+    return;
   }
+
+  const deferred = await deliverOrBuffer({
+    terminalId: result.terminalId,
+    agent: result.agent,
+    from,
+    formattedMessage,
+    noEnter,
+    interrupt,
+    broadcastPayload,
+    logMessage,
+    ctx,
+    // Immediate sends keep their existing behaviour exactly (Spec 1307).
+    enforceFifo: false,
+  });
 
   res.writeHead(200, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify({
     ok: true,
     terminalId: result.terminalId,
     resolvedTo: result.agent,
-    deferred: shouldDefer,
+    deferred,
+    scheduled: false,
   }));
+}
+
+/** Everything `deliverOrBuffer` needs, captured at request time. */
+interface DeliveryContext {
+  terminalId: string;
+  agent: string;
+  from?: string;
+  formattedMessage: string;
+  noEnter: boolean;
+  interrupt: boolean;
+  broadcastPayload: Parameters<typeof broadcastMessage>[0];
+  logMessage: string;
+  ctx: RouteContext;
+  /**
+   * Whether to queue behind messages already buffered for this session even
+   * when it looks idle. True only for DELAYED deliveries.
+   *
+   * Scoped deliberately rather than applied to every send. An immediate send
+   * races the 500ms buffer flush at worst, which is existing behaviour and not
+   * this spec's to change — Spec 1307 requires undelayed sends to be unchanged.
+   * A delayed send is different in kind: it can come due arbitrarily long after
+   * a message that is still queued, so "the session is idle right now" says
+   * nothing about whether it would overtake something.
+   */
+  enforceFifo: boolean;
+  /**
+   * Re-checked at the moment of the write, INSIDE the submission reservation —
+   * for DELAYED deliveries only (Spec 1307).
+   *
+   * A delayed delivery can sit behind an in-flight write to this session while
+   * it waits for the submission lock, and a shutdown can land in that wait. The
+   * generation check in `delayed-send.ts` fires before the delivery enters the
+   * lock, so without this second check a message that acquired the lock AFTER
+   * shutdown would still write — contradicting "shutdown starts nothing new".
+   * Undefined on the immediate path, which has no shutdown-cancellation notion.
+   */
+  stillLive?: () => boolean;
+}
+
+/**
+ * Deliver a formatted message: write it now, or hand it to the typing-aware
+ * send buffer (Spec 403).
+ *
+ * Extracted from `handleSend` so the immediate and delayed paths make this
+ * decision through the SAME code (Spec 1307). A delayed message that wrote
+ * straight to the PTY would be deciding "is the user typing?" against a world
+ * observed 15 seconds ago, and — worse — could overtake an earlier message
+ * still sitting in the buffer.
+ *
+ * The session is re-fetched by id rather than captured: between scheduling and
+ * delivery the session can die, be replaced, or lose its shellper connection,
+ * and a retained `PtySession` reference would happily absorb writes that go
+ * nowhere.
+ *
+ * @returns whether the message was buffered rather than written now.
+ *
+ * The write itself goes through Spec 1273's `submitToSession`, so it is
+ * submitted — Enter included — before the session's next write begins. Callers
+ * therefore need no settling wait of their own; "delivered" means delivered.
+ */
+async function deliverOrBuffer(
+  delivery: DeliveryContext,
+): Promise<boolean> {
+  const {
+    terminalId, agent, from, formattedMessage, noEnter, interrupt,
+    broadcastPayload, logMessage, ctx, enforceFifo, stillLive,
+  } = delivery;
+
+  // Re-resolve. For the immediate path this is the same session that was just
+  // validated; for the delayed path it is the whole point.
+  const session = getTerminalManager().getSession(terminalId);
+  if (!session) {
+    ctx.log('WARN', `Message DROPPED: ${from ?? 'unknown'} → ${agent} (terminal ${terminalId.slice(0, 8)}...): session gone before delivery`);
+    return false;
+  }
+  if (!session.writable) {
+    ctx.log('ERROR', `Message DROPPED: ${from ?? 'unknown'} → ${agent} (terminal ${terminalId.slice(0, 8)}...): terminal not writable (shellper connection down)`);
+    return false;
+  }
+
+  // Spec 1307: a DELAYED interrupt must still respect per-session order. An
+  // immediate `--interrupt` deliberately bypasses buffering ("an interrupt that
+  // can be deferred is not an interrupt"), but that reasoning does not carry to
+  // one that was already deferred by N seconds — writing it directly would let
+  // it overtake messages queued ahead of it. When there IS a queue ahead, the
+  // Ctrl+C rides along with the message (`interruptFirst`); otherwise it is
+  // written INSIDE the payload's submission reservation below, never before it.
+  const queueAhead = enforceFifo && sendBuffer.hasPending(terminalId);
+
+  // Check if user is idle — deliver immediately or buffer (Spec 403, Bugfix #450)
+  // Defer only when user has typed recently (within idle threshold).
+  // Bugfix #492: removed session.composing check — composing gets stuck true
+  // after non-Enter keystrokes (Ctrl+C, arrows, Tab), causing 60s delays.
+  //
+  // Spec 1307 adds the `enforceFifo` term, for DELAYED deliveries only: an idle
+  // session must not be written to directly while earlier messages are still
+  // queued for it, or the delayed message overtakes them. For `/arch-save` that
+  // inversion means `/arch-init` landing before its `/clear`, after which the
+  // clear wipes the context that just recovered — a failure no re-send repairs.
+  //
+  // WHAT THIS GUARANTEES, and what it does not:
+  //   `enforceFifo` (this predicate) decides ORDER: a delayed message never
+  //     bypasses one already queued for the session. ATOMICITY — that each
+  //     delivery, Enter included, completes before the next write to that
+  //     session begins — is Spec 1273's `submitToSession`, which every write
+  //     from here goes through, immediate and delayed alike. Order and
+  //     atomicity are separate layers; this term is the first, the lock is the
+  //     second. Together they close the mid-flush interleave (route test
+  //     "ORDERING: ... MID-FLUSH", mutation-verified against the flush's
+  //     submitToSession reservation) and the two-simultaneous-delayed case.
+  //   NOT GUARANTEED — request-order across differing delays: `--delay 5` after
+  //     `--delay 30` lands first, because that is what `--delay` means.
+  const shouldDefer = queueAhead
+    || (!interrupt && !session.isUserIdle(sendBuffer.idleThresholdMs));
+
+  if (shouldDefer) {
+    sendBuffer.enqueue({
+      sessionId: terminalId,
+      formattedMessage,
+      noEnter,
+      timestamp: Date.now(),
+      broadcastPayload,
+      logMessage,
+      // A deferred interrupt carries its Ctrl+C on the message, written just
+      // ahead of its own payload at flush time rather than ahead of the whole
+      // queue. Nothing is pre-written, so there is no double-Ctrl+C to guard.
+      interruptFirst: interrupt ? true : undefined,
+    });
+    ctx.log('INFO', `Message deferred (user typing): ${from ?? 'unknown'} → ${agent} (terminal ${terminalId.slice(0, 8)}...)`);
+    return true;
+  }
+
+  // Direct delivery, through Spec 1273's submission lock. Everything this
+  // message writes — an optional Ctrl+C, the payload, its Enter — happens in
+  // ONE reservation, so nothing else can write to this session mid-delivery and
+  // the interrupt cannot be separated from the payload it belongs to.
+  //
+  // AWAITED: `writeMessageToSession` schedules its Enter 50-80ms out and returns
+  // immediately, so responding on that return meant an awaited send resolved
+  // BEFORE its message was submitted — two sends in quick succession landed in
+  // one composer and were submitted as one. That is how `afx reset` sent
+  // `/clear### [ARCHITECT INSTRUCTION...` and cleared nothing. Both of Spec
+  // 1307's paths route through here, so both inherit the guarantee.
+  let wrote = false;
+  await submitToSession(terminalId, () => {
+    // Cancellation is re-checked HERE, holding the lock, not before the wait for
+    // it: a delayed delivery can acquire the lock only after a shutdown that
+    // fired while it queued. `stillLive` is undefined on the immediate path.
+    if (stillLive && !stillLive()) {
+      // Cancelled by a shutdown that landed while this delayed delivery waited
+      // for the lock. Logged like every other drop path — a silent return here
+      // was the one drop this feature did not record (Claude, PR review).
+      ctx.log('INFO', `Delayed send cancelled at shutdown: ${from ?? 'unknown'} → ${agent} (terminal ${terminalId.slice(0, 8)}...)`);
+      return 0;
+    }
+    try {
+      let offset = 0;
+      if (interrupt) {
+        session.write('\x03'); // Ctrl+C, inside the reservation
+        offset = 100; // same pause the buffered interruptFirst path uses
+      }
+      const endTime = writeMessageToSession(session, formattedMessage, noEnter, offset);
+      wrote = true;
+      return endTime;
+    } catch (err) {
+      // A write can throw if the session is torn down between the writability
+      // check and here. Log it — the caller's catch (delayed-send, or the flush
+      // submit) only swallows to keep Tower alive, and a silently-dropped
+      // scheduled message is exactly the failure the delivery log must record.
+      ctx.log('ERROR', `Message DROPPED: ${from ?? 'unknown'} → ${agent} (terminal ${terminalId.slice(0, 8)}...): write threw: ${err instanceof Error ? err.message : String(err)}`);
+      return 0;
+    }
+  });
+  if (wrote) {
+    broadcastMessage(broadcastPayload);
+    ctx.log('INFO', logMessage);
+  }
+  return false;
 }
 
 async function handleBrowse(res: http.ServerResponse, url: URL): Promise<void> {

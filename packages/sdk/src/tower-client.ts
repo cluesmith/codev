@@ -202,6 +202,31 @@ export interface TowerClientOptions {
 
 import { encodeWorkspacePath } from './workspace.js';
 
+/**
+ * Extract a human-facing error string from a Tower error response body (#1333).
+ *
+ * Tower error responses carry a machine `error` code and, for many cases, a
+ * human-readable `message` explaining *why* (e.g. the builder spoofing guard:
+ * "builder <id> may only address its own spawning architect"). The previous
+ * extraction preferred the bare code and discarded the message, so the CLI
+ * surfaced an opaque `NOT_FOUND` with no reason. Surface the descriptive
+ * message when present, keeping the code as a parenthetical suffix so both the
+ * human reason and the machine code reach the caller. Falls back to the code
+ * alone, then to the raw (non-JSON) body text.
+ */
+function extractTowerError(text: string): string {
+  try {
+    const json = JSON.parse(text) as { error?: unknown; message?: unknown };
+    const code = typeof json.error === 'string' ? json.error : undefined;
+    const detail = typeof json.message === 'string' ? json.message : undefined;
+    return detail && code && detail !== code
+      ? `${detail} (${code})`
+      : detail || code || text;
+  } catch {
+    return text;
+  }
+}
+
 export class TowerClient {
   private readonly baseUrl: string;
   private readonly getAuthKey: () => string | null;
@@ -243,13 +268,7 @@ export class TowerClient {
 
       if (!response.ok) {
         const text = await response.text();
-        let error: string;
-        try {
-          const json = JSON.parse(text);
-          error = json.error || json.message || text;
-        } catch {
-          error = text;
-        }
+        const error = extractTowerError(text);
         return { ok: false, status: response.status, error };
       }
 
@@ -652,13 +671,7 @@ export class TowerClient {
       });
       if (!response.ok) {
         const text = await response.text();
-        let error: string;
-        try {
-          const json = JSON.parse(text);
-          error = json.error || json.message || text;
-        } catch {
-          error = text;
-        }
+        const error = extractTowerError(text);
         return { ok: false, error };
       }
       const data = (await response.json()) as { path: string };
@@ -697,9 +710,30 @@ export class TowerClient {
        * can process. Distinct from `interrupt`, which sends Ctrl+C (`\x03`).
        */
       escape?: boolean;
+      /**
+       * Spec 1307: hold the message in Tower and deliver it after this many
+       * seconds. Resolution and authorization still happen at request time —
+       * only delivery is deferred.
+       *
+       * Tower-side rather than a sleeping client because the caller may be the
+       * session being written to: `/arch-save` sends its own `/clear` and then a
+       * delayed `/arch-init`, and the process issuing them does not survive the
+       * clear. Not persisted; a Tower restart drops pending sends.
+       */
+      deliverAfter?: number;
     },
-  ): Promise<{ ok: boolean; resolvedTo?: string; error?: string }> {
-    const result = await this.request<{ ok: boolean; resolvedTo: string }>(
+  ): Promise<{
+    ok: boolean;
+    resolvedTo?: string;
+    /** Tower is holding this for later delivery (`deliverAfter`). */
+    scheduled?: boolean;
+    /** Tower buffered this because the user was typing (Spec 403). */
+    deferred?: boolean;
+    error?: string;
+  }> {
+    const result = await this.request<{
+      ok: boolean; resolvedTo: string; scheduled?: boolean; deferred?: boolean;
+    }>(
       '/api/send',
       {
         method: 'POST',
@@ -714,6 +748,7 @@ export class TowerClient {
             noEnter: options?.noEnter,
             interrupt: options?.interrupt,
             escape: options?.escape,
+            deliverAfter: options?.deliverAfter,
           },
         }),
       },
@@ -723,7 +758,12 @@ export class TowerClient {
       return { ok: false, error: result.error };
     }
 
-    return { ok: true, resolvedTo: result.data!.resolvedTo };
+    return {
+      ok: true,
+      resolvedTo: result.data!.resolvedTo,
+      scheduled: result.data!.scheduled === true,
+      deferred: result.data!.deferred === true,
+    };
   }
 
   async signalTunnel(action: 'connect' | 'disconnect'): Promise<void> {
