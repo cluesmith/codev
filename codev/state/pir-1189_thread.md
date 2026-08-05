@@ -53,3 +53,20 @@ recording:
 
 All suites green: sdk 65, core 1, codev 4106, web 323, vscode 643. Boundary test
 negative-checked (planted node:os import fails the suite). Sitting at dev-approval.
+
+## 2026-08-05 - Review phase: PR #1346, consultation clean, at pr gate
+
+dev-approval approved. Retrospective written (codev/reviews/1189-...md, doubles as
+PR #1346 body). Governance routing: the isolation invariant went HOT into
+arch-critical.md (displaced the forge-concept rule down into arch.md's Forge section);
+two testing lessons went COLD (escaped-regex sweep blindness; boundary-test-first +
+byte-exact codec parity).
+
+One porch-check surprise worth remembering: Spec 1280's T16 manifest guard fails any
+branch touching prompt-bearing files (CLAUDE/AGENTS/protocols) that lacks a manifest
+row - added codev/projects/1280-.../manifests/pir-1189-codev-sdk.md.
+
+Consultation (PIR CMAP-2: codex + claude, single pass): both COMMENT, zero code
+defects. All findings were doc-accuracy (release-protocol git-add sets missing the sdk
+in stable AND RC sections; stale build-order lines). Fixed in c1e866b2 + 04204fcf.
+Architect notified. Waiting at the pr gate for human merge authorization.
