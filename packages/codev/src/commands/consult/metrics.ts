@@ -56,23 +56,39 @@ CREATE TABLE IF NOT EXISTS consultation_metrics (
   cost_usd REAL,
   exit_code INTEGER NOT NULL,
   workspace_path TEXT NOT NULL,
-  error_message TEXT
+  error_message TEXT,
+  model_id TEXT
 )`;
+
+/**
+ * The provider model id that actually ran, e.g. `gpt-5.6-sol` (spec 1286).
+ *
+ * Deliberately a NEW column rather than a repurposing of `model`: `model` stores the LANE name
+ * (`codex`, `claude`, `gemini`) and `consult stats` groups on it, so overloading it would silently
+ * change the meaning of every existing report and every historical row.
+ *
+ * `NULL` means "no model id was chosen for this run" — an unconfigured agy skip, or a row written
+ * before this column existed. It does not mean "we forgot to record it".
+ */
+const MODEL_ID_COLUMN = 'model_id';
 
 const INSERT_ROW = `
 INSERT INTO consultation_metrics (
   timestamp, model, review_type, subcommand, protocol, project_id,
   duration_seconds, input_tokens, cached_input_tokens, output_tokens,
-  cost_usd, exit_code, workspace_path, error_message
+  cost_usd, exit_code, workspace_path, error_message, model_id
 ) VALUES (
   @timestamp, @model, @reviewType, @subcommand, @protocol, @projectId,
   @durationSeconds, @inputTokens, @cachedInputTokens, @outputTokens,
-  @costUsd, @exitCode, @workspacePath, @errorMessage
+  @costUsd, @exitCode, @workspacePath, @errorMessage, @modelId
 )`;
 
 export interface MetricsRecord {
   timestamp: string;
+  /** The LANE name (codex/claude/gemini/hermes) — `consult stats` groups on this. */
   model: string;
+  /** The provider model id that actually ran; null when no model was chosen (spec 1286). */
+  modelId: string | null;
   reviewType: string | null;
   subcommand: string;
   protocol: string;
@@ -113,6 +129,7 @@ export interface MetricsRow {
   exit_code: number;
   workspace_path: string;
   error_message: string | null;
+  model_id: string | null;
 }
 
 export interface ModelStats {
@@ -200,13 +217,91 @@ export class MetricsDB {
 
     this.db = new Database(path);
 
-    const journalMode = this.db.pragma('journal_mode = WAL', { simple: true });
-    if (journalMode !== 'wal') {
-      console.error('[warn] WAL mode unavailable for metrics database');
-    }
+    // busy_timeout must come FIRST: everything below (the journal-mode switch, CREATE TABLE, the
+    // migration, INSERTs) can contend, and without it each one fails instantly instead of waiting.
     this.db.pragma('busy_timeout = 5000');
 
+    this.enableWal();
+
     this.db.exec(CREATE_TABLE);
+    this.migrateAddModelId();
+  }
+
+  /**
+   * Put the database in WAL mode, tolerating a concurrent opener doing the same.
+   *
+   * `busy_timeout` does NOT rescue this one. Switching journal mode needs an exclusive lock that
+   * no busy-handler will wait for, so when several processes open a non-WAL database at once —
+   * a CMAP opening one connection per lane — the losers get SQLITE_BUSY *immediately*. The
+   * unconditional `pragma('journal_mode = WAL')` therefore threw straight out of the constructor,
+   * and since `recordMetrics` swallows constructor failures the symptom was a silently missing
+   * metrics row, not an error anyone would see.
+   *
+   * Two changes make it safe. Read the mode first and skip the switch when it is already `wal`,
+   * which is every open after the first and removes the contention entirely in the common case.
+   * And treat SQLITE_BUSY as success-by-someone-else: another process is mid-switch, so re-read
+   * rather than fail.
+   *
+   * WAL is a performance choice, not a correctness one — `busy_timeout` above is what actually
+   * makes concurrent writes safe. So if the mode genuinely cannot be changed we warn and continue
+   * instead of taking the whole consultation down over a journal setting.
+   */
+  private enableWal(): void {
+    if (this.db.pragma('journal_mode', { simple: true }) === 'wal') return;
+
+    try {
+      if (this.db.pragma('journal_mode = WAL', { simple: true }) === 'wal') return;
+    } catch (err) {
+      if ((err as { code?: string }).code !== 'SQLITE_BUSY') throw err;
+    }
+
+    // Either the switch reported a non-WAL mode or it lost the race. Re-read: if a concurrent
+    // opener already made it WAL, that is the outcome we wanted and there is nothing to warn about.
+    if (this.db.pragma('journal_mode', { simple: true }) !== 'wal') {
+      console.error('[warn] WAL mode unavailable for metrics database');
+    }
+  }
+
+  /**
+   * Add the `model_id` column to a database created before it existed.
+   *
+   * The table is created with `CREATE TABLE IF NOT EXISTS` and there is no migration framework, so
+   * an existing `~/.codev/metrics.db` would never gain the column from the DDL above. Guarded by
+   * `PRAGMA table_info` rather than a try/catch on the error string, so it is re-runnable by
+   * construction and does not depend on SQLite's message text.
+   *
+   * `ADD COLUMN` is non-destructive: existing rows keep their data and get NULL for the new column.
+   * There is deliberately no down-migration — dropping a column with data is a far worse failure
+   * mode than leaving an unused one in place.
+   */
+  private hasModelIdColumn(): boolean {
+    const columns = this.db.pragma('table_info(consultation_metrics)') as { name: string }[];
+    return columns.some((c) => c.name === MODEL_ID_COLUMN);
+  }
+
+  private migrateAddModelId(): void {
+    // Fast path: already migrated, so take no write lock. This is every run after the first.
+    if (this.hasModelIdColumn()) return;
+
+    try {
+      // A plain check-then-ALTER is a race, and this codebase runs straight into it: a CMAP opens
+      // three MetricsDB connections in parallel, so on the FIRST consultation after upgrading, all
+      // three can observe the column as absent. One adds it; the others fail with "duplicate column
+      // name" — and because recordMetrics swallows errors, those lanes' rows vanish silently.
+      //
+      // BEGIN IMMEDIATE takes the write lock up front, so a concurrent opener blocks on
+      // busy_timeout and then re-checks INSIDE the lock instead of racing us.
+      const migrate = this.db.transaction(() => {
+        if (this.hasModelIdColumn()) return; // another process won while we waited for the lock
+        this.db.exec(`ALTER TABLE consultation_metrics ADD COLUMN ${MODEL_ID_COLUMN} TEXT`);
+      });
+      migrate.immediate();
+    } catch (err) {
+      // Belt and braces. If the column exists now, someone else added it and that is success, not
+      // failure — worth tolerating explicitly because the alternative is a silently dropped metrics
+      // row, which is invisible until someone notices a gap in `consult stats`.
+      if (!this.hasModelIdColumn()) throw err;
+    }
   }
 
   record(entry: MetricsRecord): void {
@@ -214,6 +309,7 @@ export class MetricsDB {
       this.db.prepare(INSERT_ROW).run({
         timestamp: entry.timestamp,
         model: entry.model,
+        modelId: entry.modelId,
         reviewType: entry.reviewType,
         subcommand: entry.subcommand,
         protocol: entry.protocol,

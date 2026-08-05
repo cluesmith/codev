@@ -1,10 +1,12 @@
 /**
  * Unified configuration loader for Codev.
  *
- * Loads and merges config from three layers (lowest → highest priority):
+ * Loads and merges config from five layers (lowest → highest priority):
  *   1. Hardcoded defaults
- *   2. ~/.codev/config.json  (global)
- *   3. .codev/config.json    (project)
+ *   2. <cache>/config.json        (remote framework base config)
+ *   3. ~/.codev/config.json       (global, per-user, across all projects)
+ *   4. .codev/config.json         (project, committed, shared with the team)
+ *   5. .codev/config.local.json   (project, per-engineer, gitignored)
  *
  * af-config.json is no longer supported — its presence triggers a hard error
  * directing the user to run `codev update` to migrate.
@@ -15,6 +17,14 @@ import { resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { getFrameworkCacheDir as _getFrameworkCacheDir } from './skeleton.js';
 import { validateCustomHarnessConfig } from '../agent-farm/utils/harness.js';
+import {
+  validateConsultModels,
+  validateReasoningEffort,
+  validatePricing,
+  validateConsultationConfig,
+  type CodexPricing,
+} from './consult-lanes.js';
+import type { ModelReasoningEffort } from '@openai/codex-sdk';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -38,8 +48,21 @@ export interface CodevConfig {
   porch?: {
     autoOpenArtifacts?: boolean;
     checks?: Record<string, CheckOverride>;
+    /**
+     * Which lanes run a consultation. Precedence, highest first:
+     *   byProtocol[P].modelsByType[T] > byProtocol[P].models > modelsByType[T] > models
+     *   > the protocol's own verify.models
+     *
+     * `byProtocol` exists so widening review coverage globally does not silently inflate lighter
+     * protocols (e.g. PIR's 2-model CMAP footprint).
+     */
     consultation?: {
       models?: string | string[];
+      modelsByType?: Record<string, string | string[]>;
+      byProtocol?: Record<string, {
+        models?: string | string[];
+        modelsByType?: Record<string, string | string[]>;
+      }>;
     };
   };
   consult?: {
@@ -51,6 +74,18 @@ export interface CodevConfig {
      * by the `--base <ref>` flag. Unset → default behavior (`gh pr diff`).
      */
     integrationBranch?: string;
+    /**
+     * Per-lane model ids. Unset lanes keep the backend's own default.
+     *
+     * Ids are validated for SYNTAX only — Codev never checks whether a model exists, because any
+     * local catalog of ids goes stale the moment a provider ships a new model. The provider is the
+     * authority: a rejected id fails the consultation loudly, with no fallback to the default.
+     */
+    models?: Partial<Record<'claude' | 'codex' | 'gemini', string>>;
+    /** Codex-only; a closed enum bound to the SDK's ModelReasoningEffort union. */
+    reasoningEffort?: { codex?: ModelReasoningEffort };
+    /** Codex-only per-1M token rates; all three required together. */
+    pricing?: { codex?: CodexPricing };
   };
   forge?: Record<string, string | null> & { provider?: string };
   templates?: {
@@ -279,7 +314,62 @@ export function loadConfig(workspaceRoot: string): CodevConfig {
     }
   }
 
+  // Validate consult lane config at LOAD time, alongside harness validation above.
+  //
+  // Deliberately here rather than at the point of use: a typo must fail before anything runs, not
+  // when a consultation is finally dispatched. Consequence, accepted: malformed consult config
+  // fails unrelated commands (`afx status` etc.), exactly as a malformed `harness` block already
+  // does. That is the fail-fast contract, not a regression.
+  validateConsultModels(merged.consult?.models);
+  validateReasoningEffort(merged.consult?.reasoningEffort);
+  validatePricing(merged.consult?.pricing);
+  validateConsultationConfig(merged.porch?.consultation, workspaceRoot);
+
   return merged;
+}
+
+/**
+ * Report which config file supplied a given key path, for diagnostics.
+ *
+ * `loadConfig` deep-merges and discards origin, so provenance is recovered by re-reading the layers
+ * rather than by threading it through `deepMerge` — that function underpins the whole config system
+ * and should not grow this concern for the sake of an error message.
+ *
+ * Called only on error paths, so the extra reads are irrelevant. Returns null when no file defines
+ * the key (i.e. it came from a hardcoded default), in which case there is nothing for a user to fix.
+ */
+export function findConfigSource(workspaceRoot: string, keyPath: string[]): string | null {
+  const cacheDir = _getFrameworkCacheDir();
+  const layers: string[] = [];
+  if (cacheDir) layers.push(resolve(cacheDir, 'config.json'));
+  layers.push(resolve(homedir(), '.codev', 'config.json'));
+  const projectPath = resolveProjectConfigPath(workspaceRoot);
+  if (projectPath) layers.push(projectPath);
+  const localPath = resolveLocalConfigPath(workspaceRoot);
+  if (localPath) layers.push(localPath);
+
+  let found: string | null = null;
+  for (const layer of layers) {
+    let parsed: Record<string, unknown> | null;
+    try {
+      parsed = readJsonFile(layer);
+    } catch {
+      continue; // a layer we can't parse can't be the source we name
+    }
+    if (!parsed) continue;
+
+    let cursor: unknown = parsed;
+    let defined = true;
+    for (const key of keyPath) {
+      if (typeof cursor !== 'object' || cursor === null || !(key in (cursor as Record<string, unknown>))) {
+        defined = false;
+        break;
+      }
+      cursor = (cursor as Record<string, unknown>)[key];
+    }
+    if (defined) found = layer; // later layers win, matching merge precedence
+  }
+  return found;
 }
 
 /**

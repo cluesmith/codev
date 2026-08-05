@@ -135,6 +135,13 @@ describe('test-suite isolation (#1323)', () => {
           db.record({
             timestamp: new Date().toISOString(),
             model: 'gemini',
+            // Required since spec 1286. Supplied explicitly because `__tests__` is excluded from
+            // tsconfig, so a missing required field on a `MetricsRecord` literal is never
+            // typechecked here. (No row is lost if it is omitted — `record()` re-materializes
+            // every named parameter, so `undefined` binds NULL rather than raising better-sqlite3's
+            // missing-parameter error. Verified, because the two failure modes look identical
+            // in a passing test.)
+            modelId: null,
             reviewType: null,
             subcommand: 'general',
             protocol: 'bugfix',
@@ -148,6 +155,10 @@ describe('test-suite isolation (#1323)', () => {
             workspacePath: dir,
             errorMessage: null,
           });
+          // Assert the row LANDED, not merely that a file appeared. `record()` swallows write
+          // errors by design (a metrics failure must never take down a consultation), so a
+          // file-existence check alone stays green even when every insert is being dropped.
+          expect(db.query({}).map((r) => r.model)).toEqual(['gemini']);
         } finally {
           db.close();
         }
