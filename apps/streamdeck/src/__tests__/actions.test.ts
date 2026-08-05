@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { CodevStore } from '../store.js';
-import type { TowerClient } from '@cluesmith/codev-sdk/controller';
+import type { TowerClient, TowerWorkspace } from '@cluesmith/codev-sdk/controller';
 import {
   CodevAction,
   BuilderAction,
@@ -17,6 +17,11 @@ import {
 
 type Sent = { verb: string; args: unknown[]; ws?: string };
 
+/** A full TowerWorkspace fixture (the sdk type carries proxyUrl + terminals on top of the old WorkspaceSummary). */
+function workspace(path: string, name: string, active: boolean): TowerWorkspace {
+  return { path, name, active, proxyUrl: `http://localhost:4100/proxy/${name}`, terminals: 0 };
+}
+
 function makeStore() {
   const sent: Sent[] = [];
   const opened: string[] = [];
@@ -31,7 +36,7 @@ function makeStore() {
     listWorkspaces,
   } as unknown as TowerClient;
   const store = new CodevStore({ client, openUrl: (u) => { opened.push(u); } });
-  store.workspaces = [{ path: '/work/alpha', name: 'alpha', active: true }];
+  store.workspaces = [workspace('/work/alpha', 'alpha', true)];
   store.overview = {
     builders: [
       { id: 'pir-1', roleId: 'builder-pir-1', issueId: '101', issueTitle: 'Add the relay', blocked: 'plan review', blockedGate: 'plan-approval', protocolPhase: 'plan', progress: 45, worktreePath: '/work/alpha/.builders/pir-1' },
@@ -188,8 +193,8 @@ describe('encoders', () => {
 
 describe('CodevStore.syncToWorkspace (focus following)', () => {
   const twoWorkspaces = () => [
-    { path: '/work/a', name: 'a', active: true },
-    { path: '/work/b', name: 'b', active: false },
+    workspace('/work/a', 'a', true),
+    workspace('/work/b', 'b', false),
   ];
 
   it('re-points the cursor + reloads overview for the focused workspace, resetting the builder', async () => {
@@ -272,8 +277,8 @@ describe('CodevStore.syncToBuilder (builder follow)', () => {
 describe('ZoomNav zoom gesture', () => {
   const multiWorkspace = (ctx: ReturnType<typeof makeStore>) => {
     ctx.store.workspaces = [
-      { path: '/work/a', name: 'a', active: true },
-      { path: '/work/b', name: 'b', active: false },
+      workspace('/work/a', 'a', true),
+      workspace('/work/b', 'b', false),
     ];
   };
 
