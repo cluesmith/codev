@@ -561,3 +561,45 @@ iter2 fixes (committed):
   #778) → Follow-up Items (out of scope).
 Build exit 0; full suite 4148/48/0 (unchanged — behavior-preserving, no new tests). Wrote
 1338-review-iter1-rebuttals.md. Next: commit+push → porch done → next → iter2 3-way consult on updated HEAD.
+
+### PR GATE + UPSTREAM MAINTAINER REVIEW (2026-08-05, resumed session)
+Prior session pushed iter2 and requested the `pr` gate (status.yaml gates.pr=pending, pr_ready_for_human=
+true; commit 7bd4267f). PR #1342 OPEN, base main. THIS resumed session received an ARCHITECT INSTRUCTION
+relaying upstream maintainer (waleedkadous) review: approve-with-one-change — 1 BLOCKING + 3 OPTIONAL;
+architect approved TAKE ALL FOUR. Implemented + verified against the ACTUAL diff (not from memory):
+
+- BLOCKING — restartOnExit inconsistency. Both tower-terminals.ts reconnect paths forced
+  `ptySession.restartOnExit = true` for EVERY architect. A retired-harness architect resolves
+  `restartOptions` to undefined (buildArchitectReconnectRestartOptions fail-closed), so PtySession held
+  WebSocket clients in a "restarting…" wait (startRestartWait) for a process SessionManager will never
+  restart (`restartOnExit: hasRestart`, session-manager.ts:577). Fix: gate BOTH sites on
+  `dbSession.type === 'architect' && restartOptions` (site 1 reconcile — added restartOptions to the
+  probeResults destructure; site 2 on-the-fly — restartOptions already in scope). Aligns the PTY flag with
+  SessionManager's hasRestart.
+  TEST (consumer path, per maintainer's explicit ask): NEW file tower-terminals-restart-gating.test.ts —
+  mocks buildArchitectReconnectRestartOptions and drives BOTH real reconnect paths (reconcile +
+  on-the-fly) × {undefined→false, defined→true} = 4 tests. GOTCHA: a real-config end-to-end version
+  tripped a vitest module-duplication artifact — the helper's `err instanceof RetiredHarnessError` bound a
+  DIFFERENT harness.js instance than config.ts's throw under this file's vi.mock graph, so instanceof
+  failed → generic fallback → restartOptions DEFINED. NOT a production bug (tower-utils.test.ts retirement
+  tests + a throwaway diag file both confirm the real chain returns undefined in a single module graph).
+  Mocking the helper isolates and tests the consumer's gating branch — exactly what was asked.
+- OPTIONAL 1 — siblingRegistrationIsLive returns TRUE on retirement (was false). false → reconcile DELETEs
+  the sibling config row (setArchitectByName null); true → routes to addArchitect, which fails closed on
+  the same retirement (tower-instances.ts:1094, "no state created before this point") and LEAVES the row
+  so the user can repair the harness. Same launch safety, non-destructive. Updated docstring + the 2
+  tower-utils.test.ts tests (false→true, log "pruning"→"keeping the row"); fixed a now-stale
+  "retired-harness prune" comment in tower-instances.test.ts (the reconcile tests mock the predicate, so
+  behavior unaffected).
+- OPTIONAL 2 — console.debug → logger.debug in config.ts assertBuilderHarnessNotRetired catch (Tower
+  imports the module; bare console.debug always writes stdout and pollutes Tower's stream; logger.debug is
+  DEBUG-gated). Strengthened config.test.ts "defers on unknown harness" to spy logger.debug.
+- OPTIONAL 3 — added getBuiltinHarness(name) own-property accessor (mirrors isRetiredHarness) and used it
+  at the two USER-CONTROLLED lookups: resolveHarness:433 (config shell.builderHarness) and harnessProviderFor
+  context.ts:468 (builder launch-script name). Closes the inherited-key footgun (BUILTIN_HARNESSES
+  ['constructor'] → Object ctor, truthy → bogus provider that TypeErrors downstream). +tests in
+  harness.test.ts (resolveHarness proto-keys throw Unknown; getBuiltinHarness describe).
+
+6 affected test files green (279 pass). Next: full build + full unit suite → commit (grouped by fix) →
+push → reply on PR #1342 summarizing each fix (verified vs diff). Do NOT self-merge (upstream maintainer's
+call); do NOT approve the pr gate.
