@@ -1,56 +1,16 @@
 {
   "name": "@cluesmith/codev-core",
   "version": "3.2.4",
-  "description": "Core runtime utilities for Codev — Tower client, auth, workspace helpers, escape buffer",
+  "description": "Server-side runtime for Codev — local-key issuance and homedir-derived paths. Client-side Tower access lives in @cluesmith/codev-sdk; the two packages never import each other.",
   "type": "module",
   "exports": {
-    "./tower-client": {
-      "types": "./dist/tower-client.d.ts",
-      "default": "./dist/tower-client.js"
-    },
     "./auth": {
       "types": "./dist/auth.d.ts",
       "default": "./dist/auth.js"
     },
-    "./workspace": {
-      "types": "./dist/workspace.d.ts",
-      "default": "./dist/workspace.js"
-    },
     "./constants": {
       "types": "./dist/constants.d.ts",
       "default": "./dist/constants.js"
-    },
-    "./escape-buffer": {
-      "types": "./dist/escape-buffer.d.ts",
-      "default": "./dist/escape-buffer.js"
-    },
-    "./reconnect-policy": {
-      "types": "./dist/reconnect-policy.d.ts",
-      "default": "./dist/reconnect-policy.js"
-    },
-    "./agent-names": {
-      "types": "./dist/agent-names.d.ts",
-      "default": "./dist/agent-names.js"
-    },
-    "./architect-name": {
-      "types": "./dist/architect-name.d.ts",
-      "default": "./dist/architect-name.js"
-    },
-    "./builder-helpers": {
-      "types": "./dist/builder-helpers.d.ts",
-      "default": "./dist/builder-helpers.js"
-    },
-    "./area-grouping": {
-      "types": "./dist/area-grouping.d.ts",
-      "default": "./dist/area-grouping.js"
-    },
-    "./phase-grouping": {
-      "types": "./dist/phase-grouping.d.ts",
-      "default": "./dist/phase-grouping.js"
-    },
-    "./review-markers": {
-      "types": "./dist/review-markers.d.ts",
-      "default": "./dist/review-markers.js"
     }
   },
   "files": [

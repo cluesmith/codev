@@ -1,4 +1,4 @@
-import { isIdleWaiting } from '@cluesmith/codev-core/builder-helpers';
+import { isIdleWaiting } from '@cluesmith/codev-sdk/builder-helpers';
 import type { OverviewBuilder } from '../lib/api.js';
 
 interface BuilderCardProps {

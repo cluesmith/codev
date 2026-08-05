@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { TowerClient } from '@cluesmith/codev-core/tower-client';
+import { TowerClient } from '@cluesmith/codev-sdk/tower-client';
 import { getTowerAddress } from './workspace-detector.js';
 
 /**

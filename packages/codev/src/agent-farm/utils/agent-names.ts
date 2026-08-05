@@ -15,8 +15,8 @@
  */
 
 import type { BuilderType } from '../types.js';
-export { stripLeadingZeros, resolveAgentName } from '@cluesmith/codev-core/agent-names';
-import { stripLeadingZeros } from '@cluesmith/codev-core/agent-names';
+export { stripLeadingZeros, resolveAgentName } from '@cluesmith/codev-sdk/agent-names';
+import { stripLeadingZeros } from '@cluesmith/codev-sdk/agent-names';
 
 /**
  * Build a canonical agent name from builder type and ID.

@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { uppercaseAreaName } from '@cluesmith/codev-core/area-grouping';
+import { uppercaseAreaName } from '@cluesmith/codev-sdk/area-grouping';
 
 export type AreaGroupKind = 'backlog' | 'builder';
 

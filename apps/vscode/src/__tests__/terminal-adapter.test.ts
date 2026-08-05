@@ -56,7 +56,7 @@ vi.mock('ws', () => {
   return { default: FakeWebSocket };
 });
 
-vi.mock('@cluesmith/codev-core/escape-buffer', () => ({
+vi.mock('@cluesmith/codev-sdk/escape-buffer', () => ({
   EscapeBuffer: class {
     constructor() { hoisted.escapeBufferCount++; }
     write(data: string): string { return data; }

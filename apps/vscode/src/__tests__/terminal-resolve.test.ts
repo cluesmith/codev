@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { backoffDelayMs } from '@cluesmith/codev-core/reconnect-policy';
+import { backoffDelayMs } from '@cluesmith/codev-sdk/reconnect-policy';
 import {
   resolveBuilderTerminal,
   mainCheckoutRoot,

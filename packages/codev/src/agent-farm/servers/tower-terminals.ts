@@ -9,7 +9,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { AGENT_FARM_DIR, encodeWorkspacePath } from '../lib/tower-client.js';
-import type { TerminalType } from '@cluesmith/codev-core/tower-client';
+import type { TerminalType } from '@cluesmith/codev-sdk/tower-client';
 import { loadConfig } from '../../lib/config.js';
 import { getGlobalDb } from '../db/index.js';
 import {

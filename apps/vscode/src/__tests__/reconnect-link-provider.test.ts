@@ -10,7 +10,7 @@
 import { describe, it, expect, vi } from 'vitest';
 
 vi.mock('vscode', () => ({}));
-vi.mock('@cluesmith/codev-core/escape-buffer', () => ({ EscapeBuffer: class {} }));
+vi.mock('@cluesmith/codev-sdk/escape-buffer', () => ({ EscapeBuffer: class {} }));
 vi.mock('@cluesmith/codev-types', () => ({ FRAME_CONTROL: 0x00, FRAME_DATA: 0x01 }));
 
 const { ReconnectTerminalLinkProvider } = await import('../terminal-link-provider.js');

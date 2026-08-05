@@ -9,7 +9,7 @@
  * @see codev/specs/589-non-github-repository-support.md
  */
 
-import { UNCATEGORIZED_AREA } from '@cluesmith/codev-core/constants';
+import { UNCATEGORIZED_AREA } from '@cluesmith/codev-sdk/constants';
 import { executeForgeCommand, type ForgeConfig } from './forge.js';
 import { getRepoInfo } from './team-github.js';
 import type { IssueViewResult, PrListItem, IssueListItem } from './forge-contracts.js';

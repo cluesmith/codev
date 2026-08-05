@@ -18,8 +18,8 @@ export {
   DEFAULT_ARCHITECT_NAME,
   validateArchitectName,
   autoNumberArchitectName,
-} from '@cluesmith/codev-core/architect-name';
-import { DEFAULT_ARCHITECT_NAME } from '@cluesmith/codev-core/architect-name';
+} from '@cluesmith/codev-sdk/architect-name';
+import { DEFAULT_ARCHITECT_NAME } from '@cluesmith/codev-sdk/architect-name';
 
 /**
  * Resolve the *current* terminal session's architect name (Spec 1057).

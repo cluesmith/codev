@@ -7,7 +7,7 @@
  * Tower may know about builders that were never written to local state.db
  * (Bugfix #717).
  *
- * Matching delegates to `resolveAgentName` in @cluesmith/codev-core, so
+ * Matching delegates to `resolveAgentName` in @cluesmith/codev-sdk, so
  * VSCode, agent-farm, and any other consumer share identical semantics:
  * case-insensitive exact match (with leading zeros stripped), then
  * tail-match (e.g. "109" → "builder-spir-109").
@@ -19,7 +19,7 @@ import { getBuilder, getBuilders } from '../state.js';
 import { getConfig } from '../utils/config.js';
 import { normalizeWorkspacePath } from '../servers/tower-utils.js';
 import { getGlobalDb } from '../db/index.js';
-import { resolveAgentName } from '@cluesmith/codev-core/agent-names';
+import { resolveAgentName } from '@cluesmith/codev-sdk/agent-names';
 
 /**
  * Find a builder by issue number. Local state first, then Tower fallback.

@@ -9,7 +9,7 @@
  * validates the payload fields at runtime before acting. These types document the shape of a
  * well-formed message; they do not vouch that a given runtime value conforms.
  */
-import type { ReviewMarker } from '@cluesmith/codev-core/review-markers';
+import type { ReviewMarker } from '@cluesmith/codev-sdk/review-markers';
 
 /** Host → webview: push the current document text + parsed markers for rendering. */
 export interface HostToWebviewMessage {

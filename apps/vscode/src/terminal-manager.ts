@@ -2,9 +2,9 @@ import * as vscode from 'vscode';
 import { CodevPseudoterminal } from './terminal-adapter.js';
 import type { ConnectionManager } from './connection-manager.js';
 import type { OverviewCache } from './views/overview-data.js';
-import { encodeWorkspacePath } from '@cluesmith/codev-core/workspace';
-import { resolveAgentName } from '@cluesmith/codev-core/agent-names';
-import type { TerminalType } from '@cluesmith/codev-core/tower-client';
+import { encodeWorkspacePath } from '@cluesmith/codev-sdk/workspace';
+import { resolveAgentName } from '@cluesmith/codev-sdk/agent-names';
+import type { TerminalType } from '@cluesmith/codev-sdk/tower-client';
 import { resolveBuilderTerminal, mainCheckoutRoot } from './terminal-resolve.js';
 
 /**
