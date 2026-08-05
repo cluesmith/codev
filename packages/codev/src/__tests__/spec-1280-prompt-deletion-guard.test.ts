@@ -18,6 +18,12 @@
  * content and someone re-baselines to hide it, the new baseline lacks the heading and this
  * fails. Without that check, re-baselining would silently launder a deletion — which is exactly
  * the failure mode R1's analysis identified and declined to ship.
+ *
+ * R2 (approved 2026-08-04) extends the same machinery to the two SPIR/ASPIR specify.md drafting
+ * prompts, whose Phase 2 pure-addition guard R1 left in force and Phase 5 retired. Their
+ * anti-vacuity string is the literal `Baked Decisions` (specify.md carries the clause as a bullet,
+ * not a `## Baked Decisions` heading like the builder-prompts). Full trace:
+ * codev/resources/1280-retirements.md (R2).
  */
 import { describe, it, expect } from 'vitest';
 import * as fs from 'node:fs';
@@ -78,6 +84,52 @@ describe('Spec 1280 — builder-prompts do not silently lose content (replaces R
         const ours = fs.readFileSync(currentPath(p), 'utf-8');
         const skeleton = fs.readFileSync(
           path.join(repoRoot, 'codev-skeleton/protocols', p, 'builder-prompt.md'),
+          'utf-8',
+        );
+        expect(skeleton).toBe(ours);
+      });
+    });
+  }
+});
+
+// R2 (Spec 1280, approved 2026-08-04): the two SPIR/ASPIR specify.md drafting prompts, re-anchored
+// on post-1280 baselines after Phase 5's P1/P2 rewrite retired their pre-746 pure-addition guard.
+const GUARDED_SPECIFY = ['spir', 'aspir'] as const;
+const specifyBaselinePath = (p: string) => path.join(baselineDir, `${p}-specify.md.baseline`);
+const specifyCurrentPath = (p: string) =>
+  path.join(repoRoot, 'codev/protocols', p, 'prompts/specify.md');
+
+describe('Spec 1280 — SPIR/ASPIR specify.md do not silently lose content (replaces R2)', () => {
+  for (const p of GUARDED_SPECIFY) {
+    describe(`${p} specify.md`, () => {
+      it('has a post-1280 baseline committed', () => {
+        expect(
+          fs.existsSync(specifyBaselinePath(p)),
+          `missing baseline for ${p} specify.md; the guard cannot protect what it has no reference for`,
+        ).toBe(true);
+      });
+
+      it('anti-vacuity: the baseline carries Spec 746 content', () => {
+        // specify.md carries the Baked Decisions clause as a bullet, not a `## Baked Decisions`
+        // heading — so the anti-vacuity string is the literal `Baked Decisions`. If someone strips
+        // it and re-baselines to hide the deletion, the new baseline fails here rather than passing.
+        const baseline = fs.readFileSync(specifyBaselinePath(p), 'utf-8');
+        expect(baseline).toContain('Baked Decisions');
+        expect(baseline.toLowerCase()).toContain('do not autonomously');
+      });
+
+      it('no baseline line has been deleted', () => {
+        expectNoDeletion(
+          `${p} specify.md`,
+          fs.readFileSync(specifyBaselinePath(p), 'utf-8'),
+          fs.readFileSync(specifyCurrentPath(p), 'utf-8'),
+        );
+      });
+
+      it('the skeleton twin still matches', () => {
+        const ours = fs.readFileSync(specifyCurrentPath(p), 'utf-8');
+        const skeleton = fs.readFileSync(
+          path.join(repoRoot, 'codev-skeleton/protocols', p, 'prompts/specify.md'),
           'utf-8',
         );
         expect(skeleton).toBe(ours);
