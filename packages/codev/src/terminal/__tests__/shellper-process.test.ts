@@ -272,7 +272,13 @@ describe('ShellperProcess', () => {
     }, 10_000);
 
     it('caps an oversized replay to the most recent bytes on connect (#1198)', async () => {
-      shellper = new ShellperProcess(createMockPty, socketPath);
+      // Retention ceiling deliberately raised ABOVE REPLAY_PAYLOAD_MAX so the
+      // buffer can hold more than the wire allows. That is the only way to pin
+      // the real invariant: the send path caps the payload independently of how
+      // much the buffer retains. If the REPLAY_PAYLOAD_MAX argument at the send
+      // site is ever dropped, this test fails (the frame would carry the full
+      // 9MB), which is what makes a post-hoc guard there unnecessary.
+      shellper = new ShellperProcess(createMockPty, socketPath, 10_000, undefined, 16 * 1024 * 1024);
       await shellper.start('/bin/bash', [], '/tmp', {}, 80, 24);
 
       // A newline-free stream (full-screen TUI shape) larger than the cap.
@@ -302,6 +308,42 @@ describe('ShellperProcess', () => {
       // Capped to the most recent bytes: fits the frame budget and ends with
       // the newest output.
       expect(replayFrame!.payload.length).toBe(REPLAY_PAYLOAD_MAX);
+      expect(replayFrame!.payload.subarray(-11).toString()).toBe('TAIL-MARKER');
+
+      socket.destroy();
+    }, 20_000);
+
+    it('keeps replay bounded for a newline-free session at default settings (#1205)', async () => {
+      shellper = new ShellperProcess(createMockPty, socketPath);
+      await shellper.start('/bin/bash', [], '/tmp', {}, 80, 24);
+
+      // The reported shape: a full-screen TUI redraws in place, emits no
+      // newlines, and used to grow the buffer for the life of the session.
+      const chunk = 'x'.repeat(1024 * 1024);
+      for (let i = 0; i < 24; i++) {
+        mockPty.simulateData(chunk);
+      }
+      mockPty.simulateData('TAIL-MARKER');
+
+      // The buffer itself is bounded now, not merely the frame sent from it.
+      expect(shellper.getReplayData().length).toBeLessThanOrEqual(REPLAY_PAYLOAD_MAX);
+
+      const socket = net.createConnection(socketPath);
+      const parser = createFrameParser();
+      socket.pipe(parser);
+      const frames: ParsedFrame[] = [];
+      parser.on('data', (f: ParsedFrame) => frames.push(f));
+      await new Promise<void>((resolve) => socket.on('connect', () => resolve()));
+      socket.write(encodeHello({ version: PROTOCOL_VERSION, clientType: 'tower' }));
+
+      const deadline = Date.now() + 10_000;
+      while (!frames.some((f) => f.type === FrameType.REPLAY) && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      const replayFrame = frames.find((f) => f.type === FrameType.REPLAY);
+      expect(replayFrame).toBeDefined();
+      expect(replayFrame!.payload.length).toBeLessThanOrEqual(REPLAY_PAYLOAD_MAX);
+      // Bounded, and still the *newest* output rather than a stale head.
       expect(replayFrame!.payload.subarray(-11).toString()).toBe('TAIL-MARKER');
 
       socket.destroy();

@@ -3,6 +3,27 @@
  * Used for reconnection replay — stores last N lines in memory.
  */
 
+/**
+ * Ceiling on the incomplete-line partial (#1205). Sits between the 1MB replay
+ * seed and the 4MB level at which Tower's partial monitor warns, so a partial
+ * that trips this cap is already far past anything a viewer needs.
+ */
+const MAX_PARTIAL_CHARS = 2 * 1024 * 1024;
+
+/** Bound on how far past a trim point we scan for an ESC to align to. */
+const ESC_ALIGN_SCAN_LIMIT = 4096;
+
+/**
+ * Nudge a trim offset forward to the next ESC, so the retained tail doesn't
+ * begin partway through an escape sequence. Falls back to the raw offset when
+ * no ESC is within the scan window.
+ */
+function alignToEscape(text: string, offset: number): number {
+  const found = text.indexOf('\x1b', offset);
+  if (found !== -1 && found - offset <= ESC_ALIGN_SCAN_LIMIT) return found;
+  return offset;
+}
+
 export class RingBuffer {
   private buffer: string[];
   private head: number = 0;
@@ -10,7 +31,10 @@ export class RingBuffer {
   private seq: number = 0; // monotonically increasing sequence number
   private partial: string = ''; // incomplete line from previous pushData call
 
-  constructor(private readonly capacity: number = 1000) {
+  constructor(
+    private readonly capacity: number = 1000,
+    private readonly maxPartialChars: number = MAX_PARTIAL_CHARS,
+  ) {
     this.buffer = new Array(capacity);
   }
 
@@ -34,11 +58,17 @@ export class RingBuffer {
    * Scans only the incoming `data` for newlines (never re-splits the whole
    * accumulated `partial + data`), so per-call work is O(|data|) rather than
    * O(|partial|) — the O(n²) re-scan that pegged Tower's CPU on no-newline
-   * full-screen-TUI streams (Issue #1047). The `partial` is kept whole and
-   * unbounded so a reconnection replay faithfully reconstructs the screen: a
-   * TUI in the alternate screen buffer encodes its state in the cumulative
-   * byte stream from the alt-screen-enter onward, so truncating the front
-   * would corrupt the replay (the app won't repaint on a same-size reconnect).
+   * full-screen-TUI streams (Issue #1047).
+   *
+   * The `partial` was originally kept whole and unbounded, on the reasoning
+   * that a TUI in the alternate screen buffer encodes its state in the
+   * cumulative byte stream from the alt-screen-enter onward, so truncating the
+   * front would corrupt the replay. That is true, but the growth it licensed
+   * was unbounded for the life of the session (#1205), and every layer above
+   * already accepts exactly this trade: the replay seed, the send cap, and the
+   * frame-skip path are all lossy tail-cuts that rely on the client's
+   * post-connect repaint nudge. So the partial is now capped too, with cuts
+   * ESC-aligned to avoid starting the tail inside an escape sequence.
    *
    * Returns last sequence number.
    */
@@ -56,8 +86,26 @@ export class RingBuffer {
     // Remainder has no newline — append to the partial (cons-string, O(|data|)).
     if (start < data.length) {
       this.partial += data.slice(start);
+      this.trimPartial();
     }
     return this.seq;
+  }
+
+  /**
+   * Enforce the partial ceiling, keeping the most recent characters.
+   *
+   * Trimming back to *half* the ceiling rather than exactly to it is what makes
+   * this affordable. Cutting to the ceiling would put the partial back over it
+   * on the very next append, so every subsequent call would copy the whole
+   * multi-megabyte partial: an O(|partial|)-per-call cost on the hot path that
+   * #1047 specifically restructured to be O(|data|). Halving amortises the copy
+   * over the next half-ceiling of growth, giving O(1) per byte, and bounds the
+   * partial at the ceiling rather than letting it drift above it.
+   */
+  private trimPartial(): void {
+    if (this.partial.length <= this.maxPartialChars) return;
+    const target = Math.floor(this.maxPartialChars / 2);
+    this.partial = this.partial.slice(alignToEscape(this.partial, this.partial.length - target));
   }
 
   /** Get all stored lines in order, including any incomplete trailing line. */

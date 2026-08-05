@@ -113,11 +113,16 @@ describe('RingBuffer', () => {
     expect(buf.getAll()).toEqual(['hello', '', 'world']);
   });
 
-  it('keeps a no-newline stream whole for faithful replay (Issue #1047)', () => {
+  it('keeps a no-newline stream whole below the partial ceiling (Issue #1047)', () => {
     const buf = new RingBuffer(10);
     // 100 KB with no newline, in 1 KB frames — mimics a full-screen TUI that
-    // redraws in place and never emits \n. The whole stream must be preserved
-    // (not truncated) so a reconnection replay can reconstruct the screen.
+    // redraws in place and never emits \n.
+    //
+    // NOTE (#1205): "whole" is no longer an unconditional guarantee — the
+    // partial is now capped (2MB by default). This fixture stays whole only
+    // because 100 KB is well under that ceiling. See the "partial ceiling"
+    // suite below for the capped behaviour; don't read this test as promising
+    // unbounded retention.
     const frame = 'x'.repeat(1024);
     for (let i = 0; i < 100; i++) {
       buf.pushData(frame);
@@ -166,5 +171,99 @@ describe('RingBuffer', () => {
     expect(buf.getAll()[0]).toBe('line-900');
     expect(buf.getAll()[99]).toBe('line-999');
     expect(buf.currentSeq).toBe(1000);
+  });
+
+  describe('partial ceiling (#1205)', () => {
+    /**
+     * The defect: a full-screen TUI emits no newlines, so every byte lands in
+     * the partial and it grew for the life of the session.
+     */
+    it('bounds a newline-free stream', () => {
+      const buf = new RingBuffer(1000, 1000);
+      for (let i = 0; i < 200; i++) {
+        buf.pushData('z'.repeat(100));
+      }
+      expect(buf.partialBytes).toBeLessThanOrEqual(1000);
+      expect(buf.size).toBe(0);
+    });
+
+    it('retains the newest characters, not the oldest', () => {
+      const buf = new RingBuffer(1000, 100);
+      buf.pushData('A'.repeat(100));
+      buf.pushData('B'.repeat(60));
+      // Trimming targets half the ceiling, so the 50 most recent characters
+      // survive — all of them from the newest write, none from the oldest.
+      const partial = buf.getAll()[0];
+      expect(partial).toBe('B'.repeat(50));
+    });
+
+    it('never exceeds the ceiling across many appends', () => {
+      const buf = new RingBuffer(1000, 512);
+      let peak = 0;
+      for (let i = 0; i < 500; i++) {
+        buf.pushData('q'.repeat(37));
+        peak = Math.max(peak, buf.partialBytes);
+      }
+      expect(peak).toBeLessThanOrEqual(512);
+    });
+
+    /**
+     * Trimming back to exactly the ceiling would re-trim on every subsequent
+     * append, making each call copy the whole partial — the O(|partial|)
+     * per-call cost #1047 removed. Trimming to half the ceiling amortises it,
+     * so the number of trims must stay proportional to growth, not to calls.
+     */
+    it('amortises trimming rather than copying on every append', () => {
+      const ceiling = 1000;
+      const buf = new RingBuffer(1000, ceiling);
+      buf.pushData('x'.repeat(ceiling));
+
+      let trims = 0;
+      let previous = buf.partialBytes;
+      for (let i = 0; i < 200; i++) {
+        buf.pushData('y');
+        if (buf.partialBytes < previous) trims++;
+        previous = buf.partialBytes;
+      }
+      // 200 single-char appends past the ceiling: one trim per ~half-ceiling of
+      // growth, so a small handful — emphatically not one per call.
+      expect(trims).toBeLessThan(5);
+    });
+
+    it('leaves newline-terminated streams untouched', () => {
+      const buf = new RingBuffer(1000, 10);
+      buf.pushData('one\ntwo\nthree\n');
+      expect(buf.partialBytes).toBe(0);
+      expect(buf.getAll()).toEqual(['one', 'two', 'three']);
+    });
+
+    it('keeps getAll terminating with the capped partial', () => {
+      const buf = new RingBuffer(1000, 100);
+      buf.pushData('done\n');
+      buf.pushData('W'.repeat(500));
+      expect(buf.getAll()[0]).toBe('done');
+      expect(buf.getAll()[1].length).toBeLessThanOrEqual(100);
+    });
+
+    it('does not change the documented getSince gap for caught-up clients', () => {
+      const buf = new RingBuffer(1000, 100);
+      buf.pushData('done\n');
+      buf.pushData('W'.repeat(500));
+      // Pre-existing #1047 behaviour, unchanged by the cap: seq only advances
+      // on completed lines, so a client caught up to the last line gets nothing
+      // and relies on the post-connect repaint nudge. Asserted here so capping
+      // the partial can't be mistaken for having introduced the gap.
+      expect(buf.getSince(1)).toEqual([]);
+      // A client behind the last line still receives the capped partial.
+      expect(buf.getSince(0)[1].length).toBeLessThanOrEqual(100);
+    });
+
+    it('defaults the ceiling to 2MB', () => {
+      const buf = new RingBuffer(1000);
+      for (let i = 0; i < 10; i++) {
+        buf.pushData('m'.repeat(512 * 1024));
+      }
+      expect(buf.partialBytes).toBeLessThanOrEqual(2 * 1024 * 1024);
+    });
   });
 });
