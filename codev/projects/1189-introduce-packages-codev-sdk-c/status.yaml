@@ -1,7 +1,7 @@
 id: '1189'
 title: introduce-packages-codev-sdk-c
 protocol: pir
-phase: review
+phase: verified
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -21,7 +21,7 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-08-05T00:24:28.625Z'
-updated_at: '2026-08-05T06:36:53.354Z'
+updated_at: '2026-08-05T06:37:03.408Z'
 pr_history:
   - phase: review
     pr_number: 1346
