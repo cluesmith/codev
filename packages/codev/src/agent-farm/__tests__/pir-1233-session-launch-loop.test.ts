@@ -20,6 +20,7 @@ import { tmpdir } from 'node:os';
 import {
   buildSessionLaunchLoop,
   buildLaunchLoop,
+  buildWorktreeLaunchScript,
   scriptSessionForms,
   CRASH_RESUME_NUDGE,
   SESSION_ID_EXPR,
@@ -237,5 +238,14 @@ describe('PIR #1233 — downstream consumers of the generated script', () => {
 
   it('the nudge prompt contains no single quotes (it is embedded single-quoted in bash)', () => {
     expect(CRASH_RESUME_NUDGE).not.toContain("'");
+  });
+
+  // Consultation follow-up: the worktree-mode (no-prompt) path gets the
+  // session-aware loop too — asserted directly, not incidentally.
+  it('buildWorktreeLaunchScript (claude, no role) generates the session-aware loop', () => {
+    const script = buildWorktreeLaunchScript(dir, 'claude', null, dir);
+    expect(script).toContain(`--session-id ${SESSION_ID_EXPR}`);
+    expect(script).toContain('codev_launch_resume()');
+    expect(script).toContain(CRASH_RESUME_NUDGE);
   });
 });

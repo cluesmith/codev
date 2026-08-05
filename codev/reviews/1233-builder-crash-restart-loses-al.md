@@ -50,6 +50,7 @@ Routed **COLD** (`codev/resources/lessons-learned.md`, Protocol Orchestration): 
 - **Test-layer discipline** (#1244 finding): the wrapper sees bash's 128+N for signal deaths; node-pty reports `{exitCode: 0, signal}`. All new tests execute real bash and assert wrapper-layer codes only.
 - **Deviation from the approved plan** (minor, deliberate): Node does not pre-write `.builder-session-id` at spawn; the bash script is the sole writer (runs `codev_persist_session_id` before the first launch). One writer beats two writers of the same value.
 - Behavioral side effects flagged at the plan gate, on the record for reviewers: crash-restart no longer re-reads `.builder-prompt.txt`/`.builder-role.md` (edits land only on a clean-exit relaunch), and crashes no longer accidentally "solve" a near-full context window (use `afx reset` for that).
+- **Consultation outcome (single pass, both APPROVE/HIGH):** Codex — no issues. Claude — no blocking issues; its one substantive note (no direct test on the worktree-mode claude path) was fixed post-consult with a dedicated assertion. Remaining minor notes, acknowledged as-is: the builder-shaped nudge wording also reaches human-driven worktree-mode sessions (harmless); `.builder-session-id` joins the existing untracked `.builder-*` family (a `.builder-*` gitignore is a candidate follow-up for #1112); the degrade message wording is imprecise when the pinned-fresh launcher is itself the fast-failing one (behavior correct, wording only).
 
 ## How to Test Locally
 
