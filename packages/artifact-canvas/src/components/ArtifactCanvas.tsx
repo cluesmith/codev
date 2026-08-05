@@ -80,6 +80,14 @@ function buildMarkerCards(
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
 /**
+ * Grace window (#1236) for the hover overlay: how long a pending dismiss (pointer left the canvas)
+ * or re-anchor (pointer crossed another block) waits before applying, giving the pointer time to
+ * reach the "+" — entering the overlay cancels the pending transition. One tunable knob: raise it
+ * if the button still vanishes en route, lower it if block-to-block hover feels laggy.
+ */
+const OVERLAY_GRACE_MS = 200;
+
+/**
  * A 16-grid stroke icon built from static path data (no user input, so no injection surface). We
  * draw our own SVGs rather than reuse a font glyph or the host's icon set: the package is
  * host-agnostic (it can't assume VS Code's codicon font is present in the webview), and emoji
@@ -156,6 +164,17 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
   // Latest markers, readable synchronously from the delegated click handler without re-binding it.
   const markersRef = React.useRef<ReviewMarker[]>(markers);
   markersRef.current = markers;
+  // Hover grace (#1236): ONE pending timer covers both transitions that used to fire instantly and
+  // yank the "+" out from under a pointer traveling toward it: the canvas-mouseleave dismiss and
+  // the block-crossing re-anchor. Only one can be pending at a time; any fresh hover, focus, or
+  // overlay-enter cancels it.
+  const graceTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  // True while the pointer is inside the overlay: nothing re-anchors or dismisses under the cursor.
+  const overlayPinnedRef = React.useRef(false);
+  // Block line to focus after the next body rebuild (#1237): submit/delete trigger a host write,
+  // the watch reload rebuilds the body, and the previously-focused element is destroyed. The
+  // decoration effect consumes this to put the reviewer back on the block they were working on.
+  const pendingFocusLineRef = React.useRef<number | null>(null);
 
   const report = React.useCallback(
     (err: unknown) => {
@@ -350,7 +369,13 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
   // Comment-intent seam (#1107): clicking "+" / pressing Enter opens the inline composer for the
   // line; submitting emits `onAddComment(line, text)` (the host writes the marker); cancel/Esc just
   // closes it and restores focus to the block so keyboard users aren't stranded.
-  const openComposer = (line: number): void => { setEditingMarker(null); setComposingLine(line); };
+  const openComposer = (line: number): void => {
+    // Opening the composer unmounts the overlay without a mouseleave, so drop any pointer pin.
+    overlayPinnedRef.current = false;
+    clearGraceTimer();
+    setEditingMarker(null);
+    setComposingLine(line);
+  };
   const submitComposer = (text: string): void => {
     if (composingLine === null) { return; }
     // Edit vs add (#1055): when a marker is being edited, route to `onEditComment` with the marker's
@@ -402,18 +427,29 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
     return Number.isNaN(n) ? null : n;
   };
 
-  // Activate the hovered/focused block AND anchor the overlay to it: record the block's vertical
-  // offset so the `+` affordance renders beside that block. We anchor to the *first line's vertical
-  // center* (offsetTop + half the line height) rather than the block's top edge, and the overlay
-  // CSS applies `translateY(-50%)` so the `+` lands centered on the first line, not floating above
-  // it (#863 bundled polish from the issue comment). (`offsetTop` is relative to
-  // `.codev-artifact-canvas`, the positioned ancestor.)
-  const activateFromTarget = (target: EventTarget | null): void => {
+  const resolveBlock = (target: EventTarget | null): { el: HTMLElement; line: number } | null => {
     const el = (target as HTMLElement | null)?.closest?.('[data-line]') as HTMLElement | null;
-    if (!el) return;
+    if (!el) return null;
     const n = Number(el.getAttribute('data-line'));
-    if (Number.isNaN(n)) return;
-    setActiveLine(n);
+    if (Number.isNaN(n)) return null;
+    return { el, line: n };
+  };
+
+  const clearGraceTimer = (): void => {
+    if (graceTimerRef.current !== null) {
+      clearTimeout(graceTimerRef.current);
+      graceTimerRef.current = null;
+    }
+  };
+  React.useEffect(() => clearGraceTimer, []);
+
+  // Anchor the overlay to a block: record the block's vertical offset so the `+` affordance renders
+  // beside it. We anchor to the *first line's vertical center* (offsetTop + half the line height)
+  // rather than the block's top edge, and the overlay CSS applies `translateY(-50%)` so the `+`
+  // lands centered on the first line, not floating above it (#863 bundled polish from the issue
+  // comment). (`offsetTop` is relative to `.codev-artifact-canvas`, the positioned ancestor.)
+  const anchorOverlay = (el: HTMLElement, line: number): void => {
+    setActiveLine(line);
     const cs = getComputedStyle(el);
     let lineHeight = parseFloat(cs.lineHeight);
     if (!Number.isFinite(lineHeight)) {
@@ -423,15 +459,55 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
     setOverlayTop(el.offsetTop + lineHeight / 2);
   };
 
+  // Keyboard path: a focus move re-anchors INSTANTLY. The grace below exists to absorb pointer
+  // travel geometry; lagging a deliberate focus change 200ms would just feel broken.
+  const activateFromFocus = (target: EventTarget | null): void => {
+    const b = resolveBlock(target);
+    if (!b) return;
+    clearGraceTimer();
+    anchorOverlay(b.el, b.line);
+  };
+
+  // Mouse path (#1236). First hover (no overlay up) anchors instantly, but once an overlay is
+  // showing for another line, crossing a block only re-anchors after the grace elapses, so a
+  // diagonal path toward the "+" can cross neighbors without the button jumping away. While the
+  // pointer is inside the overlay itself, everything is pinned. A stale pin (the overlay was
+  // unmounted under the pointer, so its mouseleave never fired) is ignored when no overlay is up.
+  const activateFromHover = (target: EventTarget | null): void => {
+    const b = resolveBlock(target);
+    if (!b) return;
+    if (overlayPinnedRef.current && activeLine !== null) return;
+    overlayPinnedRef.current = false;
+    clearGraceTimer();
+    if (activeLine === null || activeLine === b.line) {
+      anchorOverlay(b.el, b.line);
+      return;
+    }
+    graceTimerRef.current = setTimeout(() => {
+      graceTimerRef.current = null;
+      if (!overlayPinnedRef.current && b.el.isConnected) anchorOverlay(b.el, b.line);
+    }, OVERLAY_GRACE_MS);
+  };
+
+  // Canvas mouseleave: dismiss after the grace, not instantly, so a pixel of overshoot past the
+  // canvas edge (the overlay hugs left: 0) no longer unmounts the button under the cursor (#1236).
+  const scheduleDismiss = (): void => {
+    clearGraceTimer();
+    graceTimerRef.current = setTimeout(() => {
+      graceTimerRef.current = null;
+      if (!overlayPinnedRef.current) setActiveLine(null);
+    }, OVERLAY_GRACE_MS);
+  };
+
   return (
-    <div className="codev-artifact-canvas" onMouseLeave={() => setActiveLine(null)}>
+    <div className="codev-artifact-canvas" onMouseLeave={scheduleDismiss}>
       {/* No `dangerouslySetInnerHTML`: the body's content is set imperatively in the effect above so
           React never re-commits it (which would wipe the injected cards). Rendered with no children. */}
       <div
         ref={bodyRef}
         className="codev-artifact-canvas-body"
-        onMouseOver={(e) => activateFromTarget(e.target)}
-        onFocus={(e) => activateFromTarget(e.target)}
+        onMouseOver={(e) => activateFromHover(e.target)}
+        onFocus={(e) => activateFromFocus(e.target)}
         onClick={onBodyClick}
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') {
@@ -448,7 +524,19 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
           that's the layout fix that stopped the cards overlapping the block content (#863). The "+"
           is suppressed for the line whose composer is open (the composer is shown there instead). */}
       {activeLine !== null && activeLine !== composingLine ? (
-        <div className="codev-canvas-overlay" style={{ top: overlayTop }}>
+        <div
+          className="codev-canvas-overlay"
+          style={{ top: overlayTop }}
+          // Pin while the pointer is on the overlay (#1236): cancel any pending dismiss/re-anchor
+          // so the "+" can't move or vanish under a cursor that has reached it.
+          onMouseEnter={() => {
+            overlayPinnedRef.current = true;
+            clearGraceTimer();
+          }}
+          onMouseLeave={() => {
+            overlayPinnedRef.current = false;
+          }}
+        >
           <CommentAffordance line={activeLine} onActivate={openComposer} />
         </div>
       ) : null}

@@ -83,9 +83,13 @@
 }
 
 /* Left gutter so the anchored "+" affordance sits beside a block, not over its text. Composed
-   surface only — the gutter exists for the overlay, which MarkdownView doesn't render. */
+   surface only — the gutter exists for the overlay, which MarkdownView doesn't render.
+   `cursor: default` (#1232): the content is read-only and comments are button-driven (hover →
+   "+"), so the arrow — not the I-beam — is the honest signal, uniformly including code blocks.
+   Links keep the pointing hand via the UA's `a[href]` rule; selection/copy still work. */
 .codev-artifact-canvas-body {
   padding-left: 1.9rem;
+  cursor: default;
 }
 
 /*
@@ -215,7 +219,9 @@
   max-width: 100%;
 }
 
-/* Phase 3 — comment overlay + minimal marker rendering */
+/* Phase 3 — comment overlay + minimal marker rendering. Min 24×24px hit target (#1236, WCAG
+   2.5.8 floor): the small button compounded the hover-geometry bug — a tiny target demands the
+   precise travel that maximized exposure to the re-anchor/overshoot dismissal. */
 .codev-canvas-add-comment {
   border: 1px solid var(--codev-canvas-border);
   background: var(--codev-canvas-background);
@@ -224,6 +230,8 @@
   border-radius: 4px;
   line-height: 1;
   padding: 0 6px;
+  min-width: 24px;
+  min-height: 24px;
 }
 .codev-canvas-add-comment:hover,
 .codev-canvas-add-comment:focus-visible {
@@ -257,6 +265,9 @@
   left: 0;
   z-index: 5;
   transform: translateY(-50%);
+  /* The overlay lives OUTSIDE the font-sized prose containers, so without this the "+" renders
+     at the host default (13px in VS Code webviews) beside 16px prose (#1236). */
+  font-size: var(--codev-canvas-font-size);
 }
 
 /* Inline-below comment cards (#863): rendered in flow beneath the annotated block, so they push
