@@ -564,3 +564,29 @@ install). `porch status` reports `pr` gate pending since 05:46Z.
 Nothing further for me to do autonomously: the gate is a human decision and I do not call
 `porch approve`. Architect notified. Stopping until approval arrives, then I merge and
 enter verify.
+
+## 2026-08-05 — PR #1335 MERGED. Entering verify.
+
+Waleed approved the `pr` gate; architect relayed. `porch approve 1307 pr
+--a-human-explicitly-approved-this` passed all four criteria (incl. a fresh 41s e2e).
+That approval commit re-triggered CI — all six checks green again — and #1335 merged as
+`63ea19e9` at 04:29Z with a real merge commit (never squash).
+
+Worktree is now `origin/main` + this branch (`78fbf301`), so verification runs against the
+integrated tree, not my branch in isolation.
+
+**Verify items still outstanding, both gated on a local install:**
+1. Live sibling-architect `/arch-save` probe — the one thing unit tests structurally cannot
+   prove. The P2 defect from plan CMAP (bare `architect` resolving to main/first-registered,
+   so a sibling's save would clear MAIN's terminal) is fixed by addressing
+   `architect:<name>` explicitly; only a real two-architect run demonstrates the fix holds
+   end-to-end. This is exactly the lessons-critical "it compiled ≠ it works" case.
+2. 15s delay calibration — the budget is measured from send, while the clear only lands
+   after the turn ends, so the number has to be checked against real send→session-ready
+   timing, not send→clear-sent.
+
+Both need `pnpm -w run local-install` for Tower to be running the merged code. That restarts
+Tower, which is the architect's call and not mine to make unilaterally — asked for it rather
+than running it. Holding `porch done 1307` until the two probes actually run; signalling
+verify-ready on an uninstalled build would be the "asserting something adjacent to the
+truth" failure this thread already recorded once.
