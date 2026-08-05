@@ -1971,6 +1971,8 @@ consult -m claude spec 42
 
 All interactions with the repository hosting platform (GitHub by default) are routed through **forge concept commands** — configurable external processes that produce JSON on stdout. This abstraction enables non-GitHub repository support.
 
+**Rule (demoted from arch-critical, still binding):** when new forge behavior is needed, add a **dedicated concept** — never bolt environment flags onto an existing shared one. (Example: `issue-search` was added as its own concept instead of widening `issue-list`.)
+
 **Core module**: `src/lib/forge.ts`
 - `executeForgeCommand(concept, envVars, options)` — async dispatcher
 - `executeForgeCommandSync(concept, envVars, options)` — sync variant

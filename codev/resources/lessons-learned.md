@@ -247,6 +247,8 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 
 ## Testing
 
+- [From #1189] A repo-wide rename sweep (`grep "@scope/old-name"`) misses tests that assert import lines via **escaped regexes** (`@scope\/old-name\/module`) — the backslashes defeat a plain-string match. Sweep greps after a package/module rename must also cover the escaped form (e.g. grep for `old-name` bare, not the full specifier), and the real backstop is running the consumer's own test suite, which is what actually caught it.
+- [From #1189] Write the import-boundary test **before** porting modules into a constrained package: the sdk's boundary test caught a Node-only `Buffer` dependency (base64url codec in workspace.ts) on its first run — precisely the Metro-breaking class the package split existed to prevent, hiding in an already-"pure-looking" module. When replacing a platform codec with a hand-rolled one, pin **byte-exact parity against the platform implementation** in tests, not just round-tripping.
 - [From #1150] Piping a build through a filter (`pnpm build 2>&1 | tail -5`) reports the **filter's** exit code — a hard TS build failure read as "passed", and 32 downstream test failures then masqueraded as real regressions when they were just an unbuilt fresh worktree (missing core dist + skeleton copy). Check the build's own status (`set -o pipefail`, or echo `$?` explicitly), and in a fresh `.builders/` worktree run the root `pnpm build` (types → core → codev, incl. copy-skeleton) before trusting any suite result.
 - [From 0009] Verify dependencies actually export what you expect before using them
 - [From 0041] Tarball-based E2E testing catches packaging issues that unit tests miss
