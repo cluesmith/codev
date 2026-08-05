@@ -55,6 +55,16 @@ preserve two commits of near-zero archaeology value. Instead:
 - `apps/streamdeck/README.md` gets a short **History** section pointing at the old repo as the
   pre-migration archive.
 
+**Fidelity discipline — verbatim first, edit second.** The import commit copies the old repo's
+tracked file set **byte-for-byte, zero edits**, and is verified mechanically before committing:
+`git -C codev-integrations ls-files packages/streamdeck` drives the copy, then a `diff -r` of each
+tracked file against the imported tree must come back empty. All migration edits (import swaps,
+package.json deps, tsconfig extends path, alias removal) land in *separate commits on top*, so
+`git diff <import-commit>..HEAD -- apps/streamdeck` is exactly the intended migration delta —
+reviewable as a small diff against a machine-checked baseline, with no way for functionality to be
+silently dropped inside a combined copy+edit blob. The old tests migrate verbatim under the same
+rule and must pass with only their import line changed, pinning behavior independently.
+
 ### 2. Move the plugin source → `apps/streamdeck`
 
 Files migrated (the old repo's tracked set, paths preserved under `apps/streamdeck/`):
