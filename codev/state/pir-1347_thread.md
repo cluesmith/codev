@@ -25,3 +25,10 @@ test.yml unit job; canary as separate workflow_dispatch-only workflow using
 defaults false).
 
 Plan written to `codev/plans/1347-migrate-the-stream-deck-plugin.md`; sitting at plan-approval gate.
+
+Gate-wait updates:
+- Reviewer feedback folded in: verbatim-import-first fidelity discipline made explicit (commit 4457b192).
+- 2026-08-05T23:11Z architect: **#1357 merged to main via PR #1358** — sequencing dependency resolved.
+  First implementation step after plan-approval: merge origin/main into this branch so check-types
+  sees the controller's Overview* re-exports. Architect verified the plan's factual claims; gate
+  awaiting Amr.
