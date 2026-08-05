@@ -296,10 +296,14 @@ export function sessionHasLiveHolder(
  * Issue #1338: a retired architect harness (e.g. gemini) makes getArchitectHarness
  * throw. This is a Tower-side liveness predicate, NOT a launch, so it must not let
  * that throw escape — an uncaught throw here aborts the whole sibling-reconcile
- * pass (tower-instances.ts) for every architect in the workspace. A retired
- * registration can never launch, so it is by definition not live: catch the
- * retirement and return `false` (the reconcile loop then prunes the dead row).
- * Any other error is a real fault and is rethrown unchanged.
+ * pass (tower-instances.ts) for every architect in the workspace. Catch the
+ * retirement and return `true`: NOT because the registration can launch (it cannot;
+ * addArchitect fails closed on the same retirement), but because returning `false`
+ * makes the reconcile loop DELETE the user's sibling row (setArchitectByName null),
+ * destroying a registration they can still repair (fix the harness, or wire a custom
+ * "gemini"). Returning `true` routes to addArchitect, which fails closed with the
+ * retirement message and leaves the row intact — same launch safety, non-destructive
+ * to user config. Any other error is a real fault and is rethrown unchanged.
  */
 export function siblingRegistrationIsLive(
   workspacePath: string,
@@ -311,16 +315,16 @@ export function siblingRegistrationIsLive(
     harness = getArchitectHarness(workspacePath);
   } catch (err) {
     if (err instanceof RetiredHarnessError) {
-      // The reconcile caller's prune log ("no live terminal and no resumable
-      // session") would misattribute the reason: this registration is pruned
-      // because its architect harness is retired, not because a session went
-      // stale. Surface the accurate reason so the prune stays diagnosable
-      // (Issue #1338). Callers that pass no `log` keep the fail-closed `false`.
+      // Don't prune: returning `true` keeps the user's sibling row so a later
+      // harness fix can revive it. The reconcile loop then calls addArchitect,
+      // which fails closed on the same retirement (no partial state created) and
+      // logs that failure itself — so this INFO explains why the retired row is
+      // KEPT rather than pruned. Callers that pass no `log` still get `true`.
       opts?.log?.(
         'INFO',
-        `Sibling architect registration under '${workspacePath}' selects a retired harness; treating as not live so reconciliation prunes it (${err.message.split('\n')[0]})`,
+        `Sibling architect registration under '${workspacePath}' selects a retired harness; keeping the row (addArchitect fails closed) rather than pruning it, so it survives a harness fix (${err.message.split('\n')[0]})`,
       );
-      return false;
+      return true;
     }
     throw err;
   }

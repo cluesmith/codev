@@ -529,28 +529,34 @@ describe('siblingRegistrationIsLive (Issue #1150)', () => {
 
   // Issue #1338: a retired gemini architect makes getArchitectHarness throw. This
   // predicate must NOT propagate that throw (it would abort the whole
-  // sibling-reconcile pass for every architect in the workspace); a retired
-  // registration can never launch, so it is not live → false, and the reconcile
-  // loop prunes the dead row.
-  it('dead (returns false, no throw) for a retired gemini architect config', () => {
+  // sibling-reconcile pass for every architect in the workspace). It returns `true`
+  // — not because a retired registration can launch (it cannot; addArchitect fails
+  // closed on the same retirement), but so the reconcile loop routes to addArchitect
+  // and leaves the user's config row intact instead of DELETEing it. Same launch
+  // safety, non-destructive to a registration the user can still repair.
+  it('live (returns true, no throw) for a retired gemini architect config so its row survives', () => {
     forceGeminiHarness();
     expect(() => siblingRegistrationIsLive(workspace, 'sib-1', { homeDir: fakeHome })).not.toThrow();
-    expect(siblingRegistrationIsLive(workspace, 'sib-1', { homeDir: fakeHome })).toBe(false);
-    // Also false with no stored id (the reconcile loop's other liveness input).
-    expect(siblingRegistrationIsLive(workspace, null, { homeDir: fakeHome })).toBe(false);
+    expect(siblingRegistrationIsLive(workspace, 'sib-1', { homeDir: fakeHome })).toBe(true);
+    // Also true with no stored id (the reconcile loop's other liveness input): the
+    // decision is harness retirement, independent of any session evidence.
+    expect(siblingRegistrationIsLive(workspace, null, { homeDir: fakeHome })).toBe(true);
   });
 
-  // Issue #1338: the reconcile caller's prune line ("no live terminal and no
-  // resumable session") would misattribute the reason for a retired-harness row.
-  // The catch surfaces the real reason through the injected logger.
-  it('logs the retirement reason (INFO) when pruning a retired gemini architect', () => {
+  // Issue #1338: returning true keeps the row, but the reason must stay diagnosable.
+  // The catch emits an INFO explaining the row is KEPT (addArchitect fails closed)
+  // rather than pruned, so a retired sibling that re-fails on every reconcile is
+  // traceable to its harness instead of a misattributed "no resumable session".
+  it('logs the retirement reason (INFO) for a retired gemini architect (row kept, not pruned)', () => {
     forceGeminiHarness();
     const logged: Array<{ level: string; message: string }> = [];
     const log = (level: 'INFO' | 'WARN' | 'ERROR', message: string) => logged.push({ level, message });
-    expect(siblingRegistrationIsLive(workspace, 'sib-1', { homeDir: fakeHome, log })).toBe(false);
+    expect(siblingRegistrationIsLive(workspace, 'sib-1', { homeDir: fakeHome, log })).toBe(true);
     expect(logged).toHaveLength(1);
     expect(logged[0].level).toBe('INFO');
     expect(logged[0].message).toMatch(/retired harness/i);
+    // The message describes keeping the row, not pruning it (the behavior change).
+    expect(logged[0].message).toMatch(/keeping the row/i);
   });
 
   it('does NOT log for a live (supported) sibling registration', () => {

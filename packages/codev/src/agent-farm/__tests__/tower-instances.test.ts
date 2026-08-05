@@ -1460,8 +1460,9 @@ describe('tower-instances', () => {
         // Only main's terminal was created.
         expect(mockManager.createSession).toHaveBeenCalledTimes(1);
         // The gate consulted the session-artifact check with the row's stored id,
-        // and threaded the reconcile logger so a retired-harness prune (Issue #1338)
-        // surfaces its real reason instead of the generic "no resumable session" line.
+        // and threaded the reconcile logger so a prune's real reason stays
+        // diagnosable (Issue #1338 wired the log through; note a *retired* harness
+        // now KEEPS its row and logs that itself — see siblingRegistrationIsLive).
         expect(mockSiblingRegistrationIsLive).toHaveBeenCalledWith(
           tmpDir,
           'dead-session-id',
