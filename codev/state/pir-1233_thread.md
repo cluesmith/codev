@@ -23,3 +23,11 @@ Gate discussion (recorded for the review): blast radius (every Claude builder sp
 - Byte-identity subtlety: kept the historical double-space in role-bearing commands with empty fragments (gemini) so session-less scripts are truly byte-identical.
 - 13 new executed-bash tests green (crash→resume, clean-exit re-mint, sticky switch, degrade, threshold gating, recover variant, harness gating, reset detection).
 - Docs: PIR builder-prompt + protocol "crash relaunches you with the same prompt" wording updated to resume semantics, mirrored to codev-skeleton (verified byte-identical).
+- Spec 1280's T16 manifest guard fired on the doc touches; registered them in `manifests/pir-1233-crash-resume.md` (pir-1189 precedent).
+
+## Review phase (2026-08-05)
+
+- dev-approval approved after gate Q&A (blast radius, file-vs-DB persistence, discovery-vs-pin, nudge rationale, death-capture mechanics, test procedure). Review file written; arch routed COLD (arch.md Agent Farm Internals paragraph), lesson routed COLD (lessons-learned.md Protocol Orchestration: resume restores transcript, not momentum).
+- PR #1356 opened with review as body; recorded via porch done --pr.
+- CMAP (2-way, single pass): claude=APPROVE/HIGH, codex=APPROVE/HIGH, none blocking. Claude's substantive minor (no direct worktree-mode loop assertion) fixed in 06e8a9e3; nudge-in-worktree-mode wording, `.builder-*` gitignore idea, and degrade-message wording acknowledged in review (gitignore noted as #1112-adjacent follow-up).
+- Sitting at the pr gate.
