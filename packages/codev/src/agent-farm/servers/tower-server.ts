@@ -57,6 +57,7 @@ import {
   setupUpgradeHandler,
 } from './tower-websocket.js';
 import { handleRequest, startSendBuffer, stopSendBuffer } from './tower-routes.js';
+import { shutdownDelayedSends } from './delayed-send.js';
 import type { RouteContext } from './tower-routes.js';
 import { setCodevConfigNotifier, stopAllCodevConfigWatchers } from './codev-config-watcher.js';
 import { getGlobalDb } from '../db/index.js';
@@ -181,8 +182,25 @@ async function gracefulShutdown(signal: string): Promise<void> {
   if (sessionLogSweepInterval) clearInterval(sessionLogSweepInterval);
   clearInterval(sseHeartbeatInterval);
 
-  // 4b. Flush and stop send buffer (Spec 403) — delivers any deferred messages
-  stopSendBuffer();
+  // 4b. Drop pending delayed sends FIRST (Spec 1307). Ordering is load-bearing:
+  // this runs before the awaited buffer flush below, not after. If it ran after,
+  // a delayed timer could fire DURING that await, pass the generation guard
+  // (not yet bumped), and write or enqueue after shutdown had begun. Dropping
+  // first bumps the generation up front, so any timer that fires during the
+  // flush is cancelled at its write site. A delayed message that had ALREADY
+  // re-entered the buffer before now is a buffered message and is still flushed
+  // by 4c — this cancels only sends still waiting on their timer.
+  const droppedDelayed = shutdownDelayedSends();
+  if (droppedDelayed > 0) {
+    log('INFO', `Dropped ${droppedDelayed} pending delayed send(s) — re-send them if still wanted`);
+  }
+
+  // 4c. Flush and stop the send buffer (Spec 403) — deliver deferred messages.
+  // Awaited (Spec 1307): the flush drains under the submission lock, so a batch
+  // can be queued behind an in-flight write. Awaiting here — before the terminal
+  // teardown below — is what keeps a buffered message accepted for delivery from
+  // being lost when the process exits.
+  await stopSendBuffer();
 
   // 5. Stop cron scheduler (Spec 399)
   shutdownCron();

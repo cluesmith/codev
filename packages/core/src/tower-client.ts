@@ -682,9 +682,30 @@ export class TowerClient {
        * can process. Distinct from `interrupt`, which sends Ctrl+C (`\x03`).
        */
       escape?: boolean;
+      /**
+       * Spec 1307: hold the message in Tower and deliver it after this many
+       * seconds. Resolution and authorization still happen at request time —
+       * only delivery is deferred.
+       *
+       * Tower-side rather than a sleeping client because the caller may be the
+       * session being written to: `/arch-save` sends its own `/clear` and then a
+       * delayed `/arch-init`, and the process issuing them does not survive the
+       * clear. Not persisted; a Tower restart drops pending sends.
+       */
+      deliverAfter?: number;
     },
-  ): Promise<{ ok: boolean; resolvedTo?: string; error?: string }> {
-    const result = await this.request<{ ok: boolean; resolvedTo: string }>(
+  ): Promise<{
+    ok: boolean;
+    resolvedTo?: string;
+    /** Tower is holding this for later delivery (`deliverAfter`). */
+    scheduled?: boolean;
+    /** Tower buffered this because the user was typing (Spec 403). */
+    deferred?: boolean;
+    error?: string;
+  }> {
+    const result = await this.request<{
+      ok: boolean; resolvedTo: string; scheduled?: boolean; deferred?: boolean;
+    }>(
       '/api/send',
       {
         method: 'POST',
@@ -699,6 +720,7 @@ export class TowerClient {
             noEnter: options?.noEnter,
             interrupt: options?.interrupt,
             escape: options?.escape,
+            deliverAfter: options?.deliverAfter,
           },
         }),
       },
@@ -708,7 +730,12 @@ export class TowerClient {
       return { ok: false, error: result.error };
     }
 
-    return { ok: true, resolvedTo: result.data!.resolvedTo };
+    return {
+      ok: true,
+      resolvedTo: result.data!.resolvedTo,
+      scheduled: result.data!.scheduled === true,
+      deferred: result.data!.deferred === true,
+    };
   }
 
   async signalTunnel(action: 'connect' | 'disconnect'): Promise<void> {

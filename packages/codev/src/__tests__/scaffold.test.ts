@@ -309,6 +309,21 @@ describe('Scaffold Utilities', () => {
       ).toBe(true);
     });
 
+    // Spec 1307: /arch-save is useless to an adopter if it ships in some trees
+    // and not others — the failure is silent, since nothing errors, the command
+    // simply is not there.
+    it('installs the arch-save skill for both providers', () => {
+      const result = copySkills(tempDir, realSkeletonDir);
+      expect(result.copied).toContain('.claude/skills/arch-save/');
+      expect(result.copied).toContain('.codex/skills/arch-save/');
+      expect(
+        fs.existsSync(path.join(tempDir, '.claude', 'skills', 'arch-save', 'SKILL.md'))
+      ).toBe(true);
+      expect(
+        fs.existsSync(path.join(tempDir, '.codex', 'skills', 'arch-save', 'SKILL.md'))
+      ).toBe(true);
+    });
+
     it('enumerates every skill directory dynamically for both providers', () => {
       const result = copySkills(tempDir, realSkeletonDir);
       const expected = ['claude', 'codex'].flatMap((provider) =>

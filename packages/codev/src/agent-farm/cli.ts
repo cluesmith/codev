@@ -452,9 +452,31 @@ export async function runAgentFarm(args: string[]): Promise<void> {
     .option('--interrupt', 'Send Ctrl+C first')
     .option('--raw', 'Skip structured message formatting')
     .option('--no-enter', 'Do not send Enter after message')
+    .option('--delay <seconds>', 'Deliver after N seconds (Tower-side; dropped if Tower restarts)')
     .action(async (builder, message, options) => {
       const { send } = await import('./commands/send.js');
       try {
+        // Spec 1307: validated here AND server-side. A bad value does not
+        // degrade the send — it silently changes when (or whether) the message
+        // arrives. NaN in particular yields a timer that fires immediately,
+        // turning a delayed send into an immediate one with no error.
+        let delay: number | undefined;
+        if (options.delay !== undefined) {
+          // Bound imported rather than repeated: a second hardcoded ceiling
+          // drifts from the server's, and the two disagreeing means the CLI
+          // accepts a value Tower then rejects.
+          const { validateDelaySeconds } = await import('./servers/delayed-send.js');
+          const parsed = Number(options.delay);
+          const delayError = validateDelaySeconds(parsed);
+          if (delayError) {
+            // Echo what the USER typed, not the parse result. `--delay abc`
+            // becoming "got 'NaN'" tells them about an intermediate value they
+            // never entered and cannot search for.
+            logger.error(`--delay '${options.delay}': ${delayError.replace(/, got .*$/, '')}`);
+            process.exit(1);
+          }
+          delay = parsed;
+        }
         await send({
           builder,
           message,
@@ -463,6 +485,7 @@ export async function runAgentFarm(args: string[]): Promise<void> {
           interrupt: options.interrupt,
           raw: options.raw,
           noEnter: !options.enter,
+          delay,
         });
       } catch (error) {
         logger.error(error instanceof Error ? error.message : String(error));
