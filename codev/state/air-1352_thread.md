@@ -21,3 +21,8 @@ Acceptance: clean-tree (rm -rf packages/*/dist apps/web/dist) builds succeed fro
 - All three clean-tree acceptance builds passed: `pnpm --filter @cluesmith/codev build` from root, `pnpm build` from packages/codev, root `pnpm build` (check-main-fresh is a no-op off main).
 - Added `packages/codev/src/__tests__/build-scripts.test.ts`: asserts the closure prefix on codev's build and that the root script no longer hand-lists codev's workspace deps. governance-sweep byte-identity test covers the CLAUDE.md/AGENTS.md edits.
 - `porch check 1352`: build + tests green. Moving to PR phase.
+
+## PR gate
+
+- PR #1355 created with the review embedded in the body (AIR: no spec/plan/review files). Follow-up noted in the PR body: TypeScript project references for the stale-dist case, out of scope per architect guidance.
+- PR-phase checks green (pr_exists, e2e_tests). `porch gate 1352` requested; architect notified via afx send. Waiting for human approval of the pr gate.
