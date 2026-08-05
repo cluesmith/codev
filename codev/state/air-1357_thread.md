@@ -37,3 +37,11 @@ Lockfile updated (dep group move). Building + testing next.
 - PR #1358 created with review in the body (AIR: no spec/plan/review files).
 - Running porch PR-phase checks (pr_exists + e2e_tests), then notifying the
   architect and stopping at the pr gate.
+
+## Gate approved, merge held
+
+- PR-phase checks green; pr gate approved by the architect after review.
+- Merge NOT yet authorized: workspace policy requires Amr's explicit per-PR
+  word. Holding until the architect relays it.
+- Architect confirmed the consult-skip was within AIR's builder discretion;
+  the protocol-doc contradiction that made it ambiguous is tracked as #1359.
