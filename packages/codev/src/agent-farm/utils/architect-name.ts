@@ -6,7 +6,7 @@
  *   (smallest unused integer ≥ 2) given the set of already-registered names.
  *
  * `validateArchitectName`, `autoNumberArchitectName`, and the name constants
- * live in codev-core (Issue 841) so the VS Code extension's "Add Architect"
+ * live in codev-sdk (Issue 841) so the VS Code extension's "Add Architect"
  * InputBox validates with the exact same rule Tower enforces server-side; we
  * re-export them here so existing agent-farm callsites are unaffected.
  * `currentArchitectName` reads the process env and stays local to this package.

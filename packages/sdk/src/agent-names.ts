@@ -1,7 +1,7 @@
 /**
  * Agent naming utilities shared across packages.
  *
- * Lives in codev-core so the VS Code extension and the agent-farm server
+ * Lives in codev-sdk so the VS Code extension and the agent-farm server
  * can both resolve bare numeric IDs (e.g. '153') against canonical builder
  * IDs (e.g. 'builder-spir-153') with identical semantics.
  */

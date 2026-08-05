@@ -9,7 +9,7 @@
  *
  * All names are stored and compared in lowercase per spec.
  *
- * `stripLeadingZeros` and `resolveAgentName` live in codev-core so the
+ * `stripLeadingZeros` and `resolveAgentName` live in codev-sdk so the
  * VS Code extension can use the same matching semantics; we re-export
  * them here so existing agent-farm callsites are unaffected.
  */

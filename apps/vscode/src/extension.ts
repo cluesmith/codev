@@ -914,7 +914,7 @@ export async function activate(context: vscode.ExtensionContext) {
 				prompt: 'Name for the new architect (main decides whether to create it)',
 				placeHolder: 'e.g. web, mobile, security',
 				// Validate with the exact rule Tower enforces server-side
-				// (Issue 841 — shared validator in codev-core). Parity with
+				// (Issue 841 — shared validator in codev-sdk). Parity with
 				// `afx workspace add-architect`'s own check.
 				validateInput: value => validateArchitectName(value.trim()),
 			});

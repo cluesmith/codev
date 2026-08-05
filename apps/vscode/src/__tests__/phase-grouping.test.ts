@@ -2,7 +2,7 @@
  * Unit tests for the pure stage-grouping helper backing the VSCode Builders
  * tree's action axis (#952). Lives in `__tests__/` (vitest) since the helper
  * touches no `vscode` APIs; imports from `@cluesmith/codev-sdk/phase-grouping`
- * (resolves via the package `exports` map → built `dist`, so `codev-core` must
+ * (resolves via the package `exports` map → built `dist`, so `codev-sdk` must
  * be built first — the standard pipeline order).
  */
 

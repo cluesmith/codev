@@ -1,7 +1,7 @@
 /**
  * Architect-name utilities shared across packages (Spec 755 / 786).
  *
- * Lives in codev-core so the VS Code extension and the agent-farm server can
+ * Lives in codev-sdk so the VS Code extension and the agent-farm server can
  * both validate architect names with identical semantics — the extension's
  * "Add Architect" InputBox (Issue 841) reuses the same rule Tower enforces
  * server-side, instead of duplicating the regex.
