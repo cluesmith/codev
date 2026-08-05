@@ -1,7 +1,7 @@
 id: '1205'
 title: shellper-replay-buffer-stores-
 protocol: pir
-phase: implement
+phase: review
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -19,4 +19,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-07-26T06:02:59.224Z'
-updated_at: '2026-08-05T07:27:02.362Z'
+updated_at: '2026-08-05T07:27:31.459Z'
