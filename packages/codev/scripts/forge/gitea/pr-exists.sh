@@ -18,7 +18,12 @@
 # original branch name, so a branch-name match won't hit a merged+deleted
 # branch. That doesn't affect the "does an open/merged PR exist for the branch
 # I'm about to push" use case.
-REPO="${CODEV_REPO:-$(git remote get-url origin 2>/dev/null | sed -E -e 's#\.git$##' -e 's#.*[/:]([^/]+/[^/]+)$#\1#')}"
-tea api "repos/${REPO}/pulls?state=all&limit=200" \
+#
+# `state=all` is paginated (Gitea caps a page at max_response_items, default 50)
+# so a branch whose PR isn't in the most recent ~50 would false-negative and
+# block a porch pr_exists gate — tea_api_paged walks every page (see _lib.sh).
+. "$(dirname "$0")/_lib.sh"
+REPO="$(gitea_repo)" || exit 1
+tea_api_paged "repos/${REPO}/pulls" "state=all" \
   | jq --arg branch "$CODEV_BRANCH_NAME" \
       '[.[] | select(.head.ref == $branch and (.state == "open" or .merged == true))] | length > 0'

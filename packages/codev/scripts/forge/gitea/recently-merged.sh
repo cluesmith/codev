@@ -12,8 +12,13 @@
 # auto-detects it from the local git remote), so resolve it here: honor
 # CODEV_REPO when set, else derive owner/repo from origin's URL (handles https,
 # ssh, and scp-style remotes, with or without a .git suffix).
-REPO="${CODEV_REPO:-$(git remote get-url origin 2>/dev/null | sed -E -e 's#\.git$##' -e 's#.*[/:]([^/]+/[^/]+)$#\1#')}"
-tea api "repos/${REPO}/pulls?state=closed&limit=200" \
+#
+# The closed-pulls list is paginated (Gitea caps a page at max_response_items,
+# default 50), so on a busy repo the most-recent merges could push older ones
+# past the first page — tea_api_paged walks every page (see _lib.sh).
+. "$(dirname "$0")/_lib.sh"
+REPO="$(gitea_repo)" || exit 1
+tea_api_paged "repos/${REPO}/pulls" "state=closed" \
   | jq '[.[] | select(.merged == true) | {
       number,
       title,

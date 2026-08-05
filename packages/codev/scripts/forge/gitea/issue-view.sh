@@ -17,10 +17,16 @@
 # Gitea's issue object reports `comments` as an integer count, not the array
 # the contract requires (consumers call `.comments.filter(...)`), so the
 # comments array is fetched separately and merged in. A failed/empty comments
-# fetch degrades to [].
-REPO="${CODEV_REPO:-$(git remote get-url origin 2>/dev/null | sed -E -e 's#\.git$##' -e 's#.*[/:]([^/]+/[^/]+)$#\1#')}"
+# fetch degrades to [], but warns on stderr so the degraded path is
+# distinguishable from a genuinely uncommented issue (stdout stays pure JSON —
+# it's parsed by forge.ts).
+. "$(dirname "$0")/_lib.sh"
+REPO="$(gitea_repo)" || exit 1
 COMMENTS_JSON="$(tea api "repos/${REPO}/issues/${CODEV_ISSUE_ID}/comments" 2>/dev/null)"
-[ -n "$COMMENTS_JSON" ] || COMMENTS_JSON="[]"
+if [ -z "$COMMENTS_JSON" ]; then
+  echo "gitea forge: comments fetch failed for issue ${CODEV_ISSUE_ID}; reporting 0 comments" >&2
+  COMMENTS_JSON="[]"
+fi
 tea api "repos/${REPO}/issues/${CODEV_ISSUE_ID}" \
   | jq --argjson comments "$COMMENTS_JSON" '{
       title,

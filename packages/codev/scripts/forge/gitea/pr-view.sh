@@ -10,7 +10,8 @@
 # auto-detects it from the local git remote), so resolve it here: honor
 # CODEV_REPO when set, else derive owner/repo from origin's URL (handles
 # https, ssh, and scp-style remotes, with or without a .git suffix).
-REPO="${CODEV_REPO:-$(git remote get-url origin 2>/dev/null | sed -E -e 's#\.git$##' -e 's#.*[/:]([^/]+/[^/]+)$#\1#')}"
+. "$(dirname "$0")/_lib.sh"
+REPO="$(gitea_repo)" || exit 1
 tea api "repos/${REPO}/pulls/${CODEV_PR_NUMBER}" | jq '{
   title,
   body: (.body // ""),
