@@ -11,6 +11,7 @@ import {
   assertBuilderHarnessNotRetired,
   setCliOverrides,
 } from '../utils/config.js';
+import { logger } from '../utils/logger.js';
 import { existsSync } from 'node:fs';
 import { rm, mkdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -250,7 +251,15 @@ describe('assertBuilderHarnessNotRetired spawn preflight (#1338)', () => {
     // An unknown name throws a generic "Unknown harness" (not the retirement).
     // The preflight only aborts spawns for retired harnesses; every other
     // resolution error is left to surface at the real getBuilderHarness call.
+    // The deferred error is routed through `logger.debug` (NOT `console.debug`),
+    // so it stays out of Tower's stdout log stream unless DEBUG is set (#1338
+    // review): Tower imports this module and a bare console.debug always prints.
     configMock.shell.builderHarness = 'no-such-harness';
+    const debugSpy = vi.spyOn(logger, 'debug').mockImplementation(() => {});
     expect(() => assertBuilderHarnessNotRetired()).not.toThrow();
+    expect(debugSpy).toHaveBeenCalledWith(
+      expect.stringMatching(/non-retirement, deferred/),
+    );
+    debugSpy.mockRestore();
   });
 });

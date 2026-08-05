@@ -12,6 +12,7 @@ import { getSkeletonDir } from '../../lib/skeleton.js';
 import { loadConfig } from '../../lib/config.js';
 import type { CodevConfig } from '../../lib/config.js';
 import { resolveHarness, RetiredHarnessError, type HarnessProvider, type CustomHarnessConfig } from './harness.js';
+import { logger } from './logger.js';
 import type { ResolvedWorktreeConfig, WorktreeDevUrl, ResolvedActivityHooks, ActivityHook, ActivityEvent } from '@cluesmith/codev-types';
 
 // Re-export so existing internal callers that import the resolved types
@@ -310,8 +311,11 @@ export function assertBuilderHarnessNotRetired(workspaceRoot?: string): void {
     // Shell mode never resolves a harness downstream (`spawnShell` runs
     // `commands.builder` as a raw command), so this preflight is the only place
     // such an error is seen — log it rather than swallowing it silently, so a
-    // misconfigured `builderHarness` stays diagnosable (Issue #1338 review).
-    console.debug(
+    // misconfigured `builderHarness` stays diagnosable (Issue #1338 review). Route
+    // through `logger.debug` (DEBUG-gated), not `console.debug`: Tower imports this
+    // module, and a bare console.debug always writes to stdout and pollutes Tower's
+    // log stream. `logger.debug` stays silent unless DEBUG is set.
+    logger.debug(
       `[spawn preflight] builder harness resolution error (non-retirement, deferred): ${(err as Error).message}`,
     );
   }
