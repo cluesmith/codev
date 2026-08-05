@@ -1106,3 +1106,34 @@ templates spec.md / plan.md / review.md ×3. Key constraints from the plan:
   assertions: ## Problem Statement, SPEC vs PLAN BOUNDARY, ## Flaky Tests, ### Methodology
   Improvements must survive). Re-check bugfix-685 heredoc + review-prompt-routing for the review
   template.
+
+### Phase 6 plan (2026-08-04) — 10 decisions, both trees, G4
+
+All 10 targets byte-identical across trees (brace notation valid). Baselines (served=raw for
+prompts; templates have no includes):
+bugfix fix 352 / investigate 290 / pr 491 · air implement 442 / pr 471 · maintain maintain 402 /
+review 310 · spir templates spec 632 / plan 649 / review 641.
+
+**Guard map (Phase 6):**
+- **bugfix-685 close-keyword**: bugfix/pr, air/pr, maintain/review — each needs `Closes #`|`Fixes #`,
+  `Refs #`|`Part of #`, `auto-close`, and a `--body "$(cat <<'DELIM' … DELIM"` heredoc with no
+  `{{issue.` inside. These heredocs are load-bearing shape — keep them.
+- **CMAP dispatch is a capability**: bugfix/pr + air/pr run `consult -m … --protocol … --type pr`
+  THEMSELVES (unlike SPIR where porch consults). Preserve the dispatch blocks + the wait/verdict flow.
+- **spir/templates/spec.md** (template-delivery resolved): keep `## Problem Statement`,
+  `## Solution Approaches`, `SPEC vs PLAN BOUNDARY`.
+- **spir/templates/plan.md**: the `## Phases (Machine Readable)` JSON block is a CAPABILITY
+  (has_phases_json / min_two_phases) — keep it with ≥2 phases.
+- **spir/templates/review.md**: review-prompt-routing (raw) needs `arch-critical.md`,
+  `lessons-critical.md`, `## Architecture Updates`, `## Lessons Learned Updates`, no
+  `add entries to lessons-learned.md`; template-delivery resolved also needs `## Flaky Tests` +
+  `### Methodology Improvements`.
+
+**R3 anticipated — air/implement.md.** It carries the baked-decisions clause and is under Spec 746's
+PHASE_2 pure-addition guard, STILL IN FORCE (R1 foresaw it; R2 retired only specify). ANY deletion
+from it — even the P4 git-add cleanup — trips pure-addition. A real P1 rewrite deletes the Process
+prose, so rewriting air/implement = R3, identical shape to R2. Plan: rewrite it (keep baked-decisions
+canonical literals so the grep stays green), propose R3 in 1280-retirements.md, leave the 1
+pure-addition assertion RED, report for the human decision — same endorsed pattern as R2. The other
+9 files go green. Will flag to Waleed/architect whether to keep approving these one-by-one or
+pre-approve the foreseen class.
