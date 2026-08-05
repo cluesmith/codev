@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { CodevStore } from '../store.js';
-import type { TowerClient } from '@cluesmith/codev-client';
+import type { TowerClient } from '@cluesmith/codev-sdk/controller';
 import {
   CodevAction,
   BuilderAction,
