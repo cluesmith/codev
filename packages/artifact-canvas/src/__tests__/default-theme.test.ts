@@ -96,4 +96,19 @@ describe('default-theme.css token vocabulary', () => {
     // `.codev-artifact-canvas-body` padding rule must NOT pull in the standalone root.
     expect(css).toMatch(/^\.codev-artifact-canvas-body\s*\{[^}]*padding-left/m);
   });
+
+  it('shows the arrow cursor (not the I-beam) over the composed content body (#1232)', () => {
+    // Read-only content with button-driven comments: the I-beam's editing connotation misleads.
+    // Composed body only — the standalone MarkdownView surface is deliberately untouched.
+    expect(css).toMatch(/^\.codev-artifact-canvas-body\s*\{[^}]*cursor:\s*default/m);
+    expect(css).not.toMatch(/\.codev-artifact-canvas-rendered[^{]*\{[^}]*cursor:\s*default/);
+  });
+
+  it('sizes the "+" affordance against the prose, with a 24px hit-target floor (#1236)', () => {
+    // The overlay lives outside the font-sized prose containers; without an explicit font-size
+    // token the button renders at the host default (13px in VS Code webviews) beside 16px prose.
+    expect(css).toMatch(/\.codev-canvas-overlay\s*\{[^}]*font-size:\s*var\(--codev-canvas-font-size\)/);
+    expect(css).toMatch(/\.codev-canvas-add-comment\s*\{[^}]*min-width:\s*24px/);
+    expect(css).toMatch(/\.codev-canvas-add-comment\s*\{[^}]*min-height:\s*24px/);
+  });
 });

@@ -5,6 +5,7 @@ import { renderMarkdown } from '../renderer/renderer.js';
 import { CommentAffordance } from '../overlays/CommentAffordance.js';
 import { CommentComposer } from '../overlays/CommentComposer.js';
 import { MarkerMinimap } from '../overlays/MarkerMinimap.js';
+import { KeyboardHelp } from '../overlays/KeyboardHelp.js';
 
 /**
  * ArtifactCanvas — the composed review surface (Phase 3).
@@ -160,6 +161,8 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
   // The marker currently being edited (#1055): the composer opens prefilled with its body and
   // submit routes to `onEditComment` instead of `onAddComment`. null → the empty add composer.
   const [editingMarker, setEditingMarker] = React.useState<ReviewMarker | null>(null);
+  // Keys legend visibility (#1237): toggled with `?` while a block has focus.
+  const [helpOpen, setHelpOpen] = React.useState(false);
   const bodyRef = React.useRef<HTMLDivElement>(null);
   // Latest markers, readable synchronously from the delegated click handler without re-binding it.
   const markersRef = React.useRef<ReviewMarker[]>(markers);
@@ -327,6 +330,26 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
     setActiveLine((cur) =>
       cur !== null && !root.querySelector(`[data-line="${cur}"]`) ? null : cur,
     );
+    // Focus restoration (#1237): submit/delete recorded the block being worked on before emitting
+    // the intent; the host's write led back here via the watch reload, which rebuilt the body and
+    // dropped focus to the document root. Exact line first; if the write shifted lines, the nearest
+    // preceding block keeps the reviewer in place rather than stranding them at the top.
+    const pendingLine = pendingFocusLineRef.current;
+    if (pendingLine !== null) {
+      pendingFocusLineRef.current = null;
+      let target = root.querySelector<HTMLElement>(`[data-line="${pendingLine}"]`);
+      if (target === null) {
+        let bestLine = -1;
+        for (const el of Array.from(root.querySelectorAll<HTMLElement>('[data-line]'))) {
+          const l = Number(el.getAttribute('data-line'));
+          if (!Number.isNaN(l) && l < pendingLine && l > bestLine) {
+            bestLine = l;
+            target = el;
+          }
+        }
+      }
+      if (target) target.focus({ preventScroll: true });
+    }
   }, [html, markers, canEdit, canDelete]);
 
   // Manage the in-flow composer placeholder (#1107). When `composingLine` is set, inject a
@@ -381,9 +404,13 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
     // Edit vs add (#1055): when a marker is being edited, route to `onEditComment` with the marker's
     // identity (physical line) + the expected author/body for the host's optimistic-concurrency
     // check; otherwise emit the add intent. The host verifies then writes either way.
+    // The host's write triggers a watch reload that rebuilds the body and destroys the focused
+    // element; record where the reviewer was so the decoration effect can put them back (#1237).
     if (editingMarker && editingMarker.markerLine !== undefined) {
+      pendingFocusLineRef.current = editingMarker.line;
       onEditComment?.(editingMarker.markerLine, editingMarker.author, editingMarker.text, text);
     } else {
+      pendingFocusLineRef.current = composingLine;
       onAddComment(composingLine, text);
     }
     setEditingMarker(null);
@@ -413,6 +440,9 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
     const marker = markersRef.current.find((m) => m.markerLine === markerLine);
     if (!marker) { return; }
     if (action === 'delete') {
+      // Focus was on the delete button, which the post-write reload destroys with the card; land
+      // the reviewer back on the annotated block, the stable anchor jump keys resume from (#1237).
+      pendingFocusLineRef.current = marker.line;
       onDeleteComment?.(marker.markerLine as number, marker.author, marker.text);
     } else if (action === 'edit') {
       setEditingMarker(marker);
@@ -425,6 +455,99 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
     if (!el) return null;
     const n = Number(el.getAttribute('data-line'));
     return Number.isNaN(n) ? null : n;
+  };
+
+  // Navigable blocks in tree order, deduped to the FIRST element per line: the renderer stamps the
+  // same `data-line` on nested blocks (a `ul` and its `li`), and the first match is the outermost —
+  // the same outermost-wins rule the marker decoration uses, so `n`/`p` land where the class is.
+  const collectBlocks = (root: HTMLElement): HTMLElement[] => {
+    const blocks: HTMLElement[] = [];
+    const seen = new Set<string>();
+    root.querySelectorAll<HTMLElement>('[data-line]').forEach((el) => {
+      const line = el.getAttribute('data-line') ?? '';
+      if (seen.has(line)) return;
+      seen.add(line);
+      blocks.push(el);
+    });
+    return blocks;
+  };
+
+  const focusBlock = (el: HTMLElement): void => {
+    el.focus({ preventScroll: true });
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    // Focusing fires the body's onFocus → activateFromFocus, so the "+" follows the jump for free.
+  };
+
+  // Keyboard handling on the body (#1107 activation + #1237 jump navigation). Every branch below
+  // requires the event to originate on a `[data-line]` block, so keystrokes inside the composer
+  // textarea, the card action buttons, or the minimap are never intercepted — typing "n" in a
+  // comment types "n".
+  const onBodyKeyDown = (e: React.KeyboardEvent<HTMLDivElement>): void => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      const l = lineFromEvent(e.target);
+      if (l !== null) {
+        e.preventDefault();
+        openComposer(l); // open the inline composer for this block (#1107)
+      }
+      return;
+    }
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    const root = bodyRef.current;
+    const current = (e.target as HTMLElement | null)?.closest?.('[data-line]') as HTMLElement | null;
+    if (!root || !current) return;
+
+    if (e.key === '?') {
+      e.preventDefault();
+      setHelpOpen((open) => !open);
+      return;
+    }
+    if (e.key === 'Escape') {
+      // Esc during composition is handled by the composer itself (its target is not a block).
+      if (helpOpen) {
+        e.preventDefault();
+        setHelpOpen(false);
+      }
+      return;
+    }
+
+    if (e.key === 'Home' || e.key === 'End') {
+      e.preventDefault();
+      const blocks = collectBlocks(root);
+      let target: HTMLElement | undefined;
+      if (e.key === 'Home') {
+        target = blocks[0];
+      } else {
+        target = blocks[blocks.length - 1];
+      }
+      if (target) focusBlock(target);
+      return;
+    }
+
+    const isMarked = (el: HTMLElement): boolean => el.classList.contains('codev-canvas-has-marker');
+    const isHeading = (el: HTMLElement): boolean => /^H[1-6]$/.test(el.tagName);
+    let match: (el: HTMLElement) => boolean;
+    let step: number;
+    switch (e.key) {
+      case 'n': match = isMarked; step = 1; break;
+      case 'p': match = isMarked; step = -1; break;
+      case ']': match = isHeading; step = 1; break;
+      case '[': match = isHeading; step = -1; break;
+      default: return;
+    }
+    e.preventDefault();
+    const blocks = collectBlocks(root);
+    const curLine = current.getAttribute('data-line');
+    // Match by line value, not element identity: the focused element may be an inner nested block
+    // that the dedupe dropped in favor of its outermost sibling for the same line.
+    const start = blocks.findIndex((b) => b.getAttribute('data-line') === curLine);
+    if (start === -1) return;
+    for (let i = start + step; i >= 0 && i < blocks.length; i += step) {
+      if (match(blocks[i])) {
+        focusBlock(blocks[i]);
+        return;
+      }
+    }
+    // No match in that direction: deliberate no-op, no wrap-around — predictable at the edges.
   };
 
   const resolveBlock = (target: EventTarget | null): { el: HTMLElement; line: number } | null => {
@@ -509,15 +632,7 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
         onMouseOver={(e) => activateFromHover(e.target)}
         onFocus={(e) => activateFromFocus(e.target)}
         onClick={onBodyClick}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            const l = lineFromEvent(e.target);
-            if (l !== null) {
-              e.preventDefault();
-              openComposer(l); // open the inline composer for this block (#1107)
-            }
-          }
-        }}
+        onKeyDown={onBodyKeyDown}
       />
       {/* The overlay carries ONLY the "+" add-comment affordance. Existing markers render as
           always-visible inline cards below their block (injected above), not in this hover overlay —
@@ -560,6 +675,7 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
             composerHost,
           )
         : null}
+      {helpOpen ? <KeyboardHelp /> : null}
       <MarkerMinimap markers={markers} bodyRef={bodyRef} />
     </div>
   );

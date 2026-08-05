@@ -426,3 +426,41 @@
   outline: 2px solid var(--codev-canvas-accent);
   outline-offset: 1px;
 }
+
+/* Keys legend (#1237): a small non-modal panel toggled with `?` while a block has focus. Fixed
+   bottom-right, above the minimap column; focus never moves into it, so no trap is needed. */
+.codev-canvas-keyboard-help {
+  position: fixed;
+  right: 20px;
+  bottom: 16px;
+  z-index: 6;
+  background: var(--codev-canvas-background);
+  color: var(--codev-canvas-foreground);
+  border: 1px solid var(--codev-canvas-border);
+  border-radius: 6px;
+  padding: 10px 14px;
+  font-family: var(--codev-canvas-font-family);
+  font-size: 12px;
+  line-height: 1.6;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+.codev-canvas-keyboard-help ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.codev-canvas-keyboard-help li {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+}
+.codev-canvas-keyboard-help kbd {
+  flex: 0 0 auto;
+  min-width: 96px;
+  font-family: var(--codev-canvas-code-font-family);
+  font-size: 11px;
+  color: var(--codev-canvas-muted);
+}
+.codev-canvas-keyboard-help span {
+  flex: 1 1 auto;
+}
