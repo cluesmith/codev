@@ -1,7 +1,7 @@
 id: '1237'
 title: artifact-canvas-keyboard-first
 protocol: pir
-phase: review
+phase: verified
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -21,7 +21,7 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-08-05T00:26:05.394Z'
-updated_at: '2026-08-05T04:26:56.672Z'
+updated_at: '2026-08-05T04:27:18.530Z'
 pr_history:
   - phase: review
     pr_number: 1344
