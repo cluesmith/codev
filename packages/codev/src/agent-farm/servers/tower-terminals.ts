@@ -735,7 +735,7 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
   }
 
   // Process probe results sequentially (shared state mutations)
-  for (const { dbSession, client, replayData } of probeResults) {
+  for (const { dbSession, client, replayData, restartOptions } of probeResults) {
     if (!client) {
       _deps.log('INFO', `Shellper session ${dbSession.id} is stale (PID/socket dead) — will clean up`);
       continue; // Will be cleaned up in Phase 2
@@ -758,8 +758,14 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
       // which the `if (!client)` guard already excluded — fall back to
       // empty defensively rather than asserting.
       ptySession.attachShellper(client, replayData ?? Buffer.alloc(0), dbSession.shellper_pid!, shellperSessId);
-      // Architect sessions have auto-restart — keep WebSocket clients connected on exit
-      if (dbSession.type === 'architect') {
+      // Architect sessions with a live auto-restart config keep WebSocket clients
+      // connected on exit. Gate on `restartOptions`: a retired-harness architect
+      // (#1338) resolves to `undefined` here, so `reconnectSession` was told NOT to
+      // configure an auto-restart (SessionManager mirrors this exactly with
+      // `restartOnExit: hasRestart`). Setting the PTY flag true anyway would make
+      // PtySession hold WebSocket clients in a "restarting…" wait for a process that
+      // can never come back — the flag must track whether a restart is real.
+      if (dbSession.type === 'architect' && restartOptions) {
         ptySession.restartOnExit = true;
       }
     }
@@ -944,8 +950,12 @@ export async function getTerminalsForWorkspace(
           if (ptySession) {
             const shellperSessId = extractShellperSessionId(dbSession.shellper_socket) ?? dbSession.id;
             ptySession.attachShellper(client, replayData, dbSession.shellper_pid!, shellperSessId);
-            // Architect sessions have auto-restart — keep WebSocket clients connected on exit
-            if (dbSession.type === 'architect') {
+            // Gate on `restartOptions` (same rationale as the reconcile path above):
+            // a retired-harness architect (#1338) resolves to `undefined`, so holding
+            // clients for an auto-restart that was never configured would strand the
+            // pane in a "restarting…" wait. `restartOptions` is in scope from the
+            // architect block above.
+            if (dbSession.type === 'architect' && restartOptions) {
               ptySession.restartOnExit = true;
             }
 
