@@ -1072,3 +1072,20 @@ it's with Waleed.
 **HOLD**: architect instruction — do not execute R2, do not advance the phase pointer, until the
 R2 decision comes back. State frozen at 862508e4 (2 pure-addition assertions RED by design).
 Blocked on a human decision; nothing further to do until then.
+
+### R2 APPROVED by Waleed and executed — two-commit split (2026-08-04)
+
+Waleed approved R2 (human call, relayed by architect). Executed mirroring R1's split:
+
+- **5149ad11 — the retirement.** Recorded the approval in 1280-retirements.md (checkbox + grounds);
+  retired the 2 SPIR/ASPIR specify.md pure-addition assertions in baked-decisions.test.ts via a
+  `RETIRED_UNDER_R2` set. **Verified air/implement.md's Phase 2 guard still RUNS and passes**
+  (verbose reporter named it) — retirement is scoped, not vacuous. 190→188 tests (exactly 2 removed).
+- **265b4b65 — the replacement.** Captured post-1280 baselines
+  (fixtures/spec-1280-baselines/{spir,aspir}-specify.md.baseline) and extended
+  spec-1280-prompt-deletion-guard.test.ts with a GUARDED_SPECIFY block. Anti-vacuity uses the
+  literal `Baked Decisions` (specify carries it as a bullet, not a `## Baked Decisions` heading).
+  **Mutation-verified both ways**: deleting a specify line fires the deletion check; stripping
+  `Baked Decisions` from the baseline fires anti-vacuity. 20/20 green restored.
+
+Full packages/codev suite running against 265b4b65 to confirm fully green, then continue to Phase 6.
