@@ -19,3 +19,17 @@ export {
 } from './tower-client.js';
 export { parseSseText, type SseEnvelope } from './sse.js';
 export { DEFAULT_TOWER_PORT } from './constants.js';
+
+/*
+ * The overview wire types a controller reads (issue #1357): `getOverview`
+ * returns `OverviewData`, so the contract ships with the client — one import,
+ * no direct `@cluesmith/codev-types` dependency for integrations. Must stay
+ * the `export type` form (erased at build) so the sdk keeps zero runtime
+ * dependencies; the import-boundary test pins this.
+ */
+export type {
+  OverviewData,
+  OverviewBuilder,
+  OverviewPR,
+  OverviewBacklogItem,
+} from '@cluesmith/codev-types';

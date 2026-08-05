@@ -17,6 +17,13 @@ import type { DashboardState, OverviewData, IssueView, IssueSearchResponse, Reso
 import { DEFAULT_TOWER_PORT } from './constants.js';
 import { parseSseText, type SseEnvelope } from './sse.js';
 
+/*
+ * `getOverview` returns `OverviewData`, so the subpath carries the contract
+ * with the client (issue #1357). `export type` only — erased at build, keeping
+ * the zero-runtime-deps posture; the import-boundary test pins the form.
+ */
+export type { OverviewData } from '@cluesmith/codev-types';
+
 const REQUEST_TIMEOUT_MS = 10000;
 
 /**

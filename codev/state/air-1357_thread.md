@@ -1,0 +1,31 @@
+# air-1357 — codev-sdk controller subpath: overview wire type re-exports
+
+## 2026-08-06 — Implement phase
+
+AIR strict mode, issue #1357. Two-part scope per architect instruction:
+
+1. **Type-only re-exports** of `OverviewData`, `OverviewBuilder`, `OverviewPR`,
+   `OverviewBacklogItem` from `@cluesmith/codev-types` on the sdk's
+   `./controller` subpath (the streamdeck migration's import-boundary
+   criterion in #1347 depends on this). Also added `OverviewData` to
+   `./tower-client` since `getOverview` returns it. Both use the
+   whole-statement `export type { ... } from` form — the mixed
+   `export { type X } from` form still emits a runtime re-export statement,
+   so the boundary test pins the erased form specifically.
+
+2. **Packaging fix**: `@cluesmith/codev-types` moved from devDependencies to
+   dependencies. Published `.d.ts` files reference it (`import type ... from
+   '@cluesmith/codev-types'` in tower-client.d.ts), so a fresh npm consumer
+   running tsc could not resolve it as a devDep. codev-types is published
+   (3.2.4 on npm) and types-only, so the zero-RUNTIME-deps posture holds.
+   The import-boundary test's `dependencies` assertion restated: exactly
+   `['@cluesmith/codev-types']` allowed, with the intent documented (zero
+   runtime deps; contract-types dep permitted for .d.ts resolution).
+
+Boundary test extensions:
+- New UNIVERSAL rule: value re-exports of codev-types forbidden
+  (`export type` form required), mirroring the existing `import type` rule.
+- New pin test: controller.ts must re-export the four overview types via
+  `export type { ... } from '@cluesmith/codev-types'`.
+
+Lockfile updated (dep group move). Building + testing next.
