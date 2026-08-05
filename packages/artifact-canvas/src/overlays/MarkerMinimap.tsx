@@ -78,7 +78,12 @@ export function MarkerMinimap({ markers, bodyRef }: MarkerMinimapProps): React.R
             const el = bodyRef.current?.querySelector<HTMLElement>(
               `[data-line="${dot.marker.line}"]`,
             );
-            el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            if (!el) return;
+            // Hand the position to the target block, not just the viewport (#1237): a keyboard
+            // user's next Tab / jump key then resumes from the block, not from this dot. Focus
+            // first with preventScroll so the smooth scroll below stays the only scroller.
+            el.focus({ preventScroll: true });
+            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
           }}
         />
       ))}
