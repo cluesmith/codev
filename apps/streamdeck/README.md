@@ -10,7 +10,8 @@ and runs it. The plugin holds no Tower state and never edits files directly.
 - **Auth**: reads `~/.agent-farm/local-key` and sends it as the `codev-web-key`
   header (never generates it — Tower owns the key).
 
-Architecture and design decisions live in [PLAN.md](./PLAN.md).
+Architecture and design decisions live in the pre-migration repo's `PLAN.md`
+(see [History](#history)).
 
 ## Hardware
 
@@ -110,13 +111,14 @@ renders no artifact content on the device):
 ## Install & develop (sideload)
 
 Requires the Elgato Stream Deck app and the `streamdeck` CLI (a dev dependency
-here; or `npm i -g @elgato/cli`). **Build from the repo root** so the
-`@cluesmith/codev-client` dependency is built before the plugin bundles it.
+here; or `npm i -g @elgato/cli`). **Build the sdk first** so the
+`@cluesmith/codev-sdk` dependency's dist exists before the plugin bundles it.
 
 ```bash
-# from the codev-integrations repo root
+# from the monorepo root
 pnpm install
-pnpm build                                   # client (tsc) → then plugin (esbuild) → bin/plugin.js
+pnpm --filter @cluesmith/codev-sdk build           # sdk (tsc) → dist/
+pnpm --filter @cluesmith/codev-streamdeck build    # plugin (esbuild) → bin/plugin.js
 ```
 
 Link the bundle into Stream Deck and start it (the plugin UUID is
@@ -126,13 +128,13 @@ Link the bundle into Stream Deck and start it (the plugin UUID is
 streamdeck dev                               # enable developer mode (one-time)
 # if a build is already linked (e.g. from another checkout), unlink it first:
 streamdeck unlink com.cluesmith.codev
-streamdeck link packages/streamdeck/com.cluesmith.codev.sdPlugin   # run from the repo root
+streamdeck link apps/streamdeck/com.cluesmith.codev.sdPlugin   # run from the repo root
 streamdeck restart com.cluesmith.codev       # start it (UUID, not the folder)
 streamdeck list                              # confirm it points at this checkout
 ```
 
 Iterate: `pnpm --filter @cluesmith/codev-streamdeck watch` (rebuilds on save; the
-client must be built once via `pnpm build`), then `streamdeck restart
+sdk must be built once as above), then `streamdeck restart
 com.cluesmith.codev` to reload. Logs: `com.cluesmith.codev.sdPlugin/logs/` and
 `~/Library/Logs/ElgatoStreamDeck/` (macOS). Uninstall: `streamdeck unlink
 com.cluesmith.codev`.
@@ -141,7 +143,7 @@ Validate / pack a distributable:
 
 ```bash
 pnpm --filter @cluesmith/codev-streamdeck validate
-pnpm --filter @cluesmith/codev-streamdeck pack    # → packages/streamdeck/dist/*.streamDeckPlugin
+pnpm --filter @cluesmith/codev-streamdeck pack    # → apps/streamdeck/dist/*.streamDeckPlugin
 ```
 
 ## Follow-focus (optional)
@@ -182,7 +184,17 @@ the activity-hooks support merged.
 V0.1 — functional, build/type/unit-verified. Not yet validated end-to-end on
 physical hardware. The dial touch strips render title + a live value via
 `setFeedback`; a richer SVG/icon render layer (badges, colour by state) is still
-out of scope. Also deliberately out of scope (see PLAN.md): editor scrolling
-(use native Stream Deck keystrokes — PageUp/PageDown) and silent one-touch gate
-approval. The `/api/command` route inherits Tower's current auth posture; a
-Tower-auth follow-up is tracked separately.
+out of scope. Also deliberately out of scope (see the pre-migration `PLAN.md`):
+editor scrolling (use native Stream Deck keystrokes — PageUp/PageDown) and silent
+one-touch gate approval. The `/api/command` route inherits Tower's current auth
+posture; a Tower-auth follow-up is tracked separately.
+
+## History
+
+This plugin was imported into the monorepo (issue #1347) from
+[`cluesmith/codev-integrations`](https://github.com/cluesmith/codev-integrations)
+at commit `77be3d0` (`packages/streamdeck`), as part of the #1189 SDK
+consolidation: its `@cluesmith/codev-client` dependency was absorbed into
+`@cluesmith/codev-sdk`, and the plugin became the sdk's first
+outside-the-original-trio consumer. Pre-migration history (including the
+original `PLAN.md` design document) lives in that repo.
