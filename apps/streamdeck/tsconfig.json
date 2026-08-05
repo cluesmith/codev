@@ -1,5 +1,5 @@
 {
-  "extends": "../../config/tsconfig.base.json",
+  "extends": "../../packages/config/tsconfig.base.json",
   "compilerOptions": {
     "rootDir": "src",
     "outDir": "com.cluesmith.codev.sdPlugin/bin",
