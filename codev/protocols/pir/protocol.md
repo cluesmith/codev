@@ -128,7 +128,7 @@ The same pattern works at both gates.
 
 ## Builder Session Lifetime
 
-The builder is a long-running interactive Claude Code session in a PTY pane managed by Tower. The session is launched as `claude "<prompt>"` (no `--print`) inside a `while true` restart loop. That form starts an interactive Claude REPL with the prompt as the first user message; after Claude finishes the prompted work it sits at the input prompt awaiting next user input. The outer `while true` loop only fires if Claude crashes — it is a crash-recovery safety net, not the gate-wait mechanism.
+The builder is a long-running interactive Claude Code session in a PTY pane managed by Tower. The session is launched as `claude "<prompt>"` (no `--print`) inside a restart loop, pinned to a session id minted at spawn. That form starts an interactive Claude REPL with the prompt as the first user message; after Claude finishes the prompted work it sits at the input prompt awaiting next user input. The outer loop only fires if Claude crashes — it is a crash-recovery safety net, not the gate-wait mechanism — and it **resumes the pinned conversation** (context intact, plus a re-orientation nudge) rather than replaying the prompt; an unresumable session degrades to a fresh prompt-replay relaunch after repeated fast failures. A deliberate quit (clean exit) gates on Enter and relaunches a fresh conversation.
 
 This means typed input in the builder pane reaches the live Claude session immediately, exactly like any other interactive Claude Code conversation. There is no "session ended at gate" state to worry about under normal operation.
 
