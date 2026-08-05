@@ -29,3 +29,11 @@ Boundary test extensions:
   `export type { ... } from '@cluesmith/codev-types'`.
 
 Lockfile updated (dep group move). Building + testing next.
+
+## PR phase
+
+- Implement checks green (build 8.4s, tests 28.1s). Emit inspection confirmed
+  the re-exports are erased from dist JS and present in the .d.ts.
+- PR #1358 created with review in the body (AIR: no spec/plan/review files).
+- Running porch PR-phase checks (pr_exists + e2e_tests), then notifying the
+  architect and stopping at the pr gate.
