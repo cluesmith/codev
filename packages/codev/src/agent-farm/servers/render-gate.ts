@@ -16,7 +16,9 @@
  *   (b) a positively-bounded composer region (a rule/status line BELOW the
  *       marker — never a scan to the screen bottom), AND
  *   (c) zero normal-intensity (non-dim), non-whitespace, non-chrome cells in that
- *       region.
+ *       region — with one measured exemption: claude's suggested-command *ghost* cursor
+ *       cell (an inverse, non-dim char at the cursor followed by a dim/empty run), which
+ *       is composer chrome, not typed text (see `isGhostCursorCell`).
  * The placeholder-vs-user-text distinction is an SGR attribute — both TUIs
  * render rotating placeholder/hint text DIM while typed text is normal-intensity
  * (measured, spike g2) — so no placeholder allowlist is needed. Anything
@@ -73,6 +75,13 @@ import xtermHeadless from '@xterm/headless';
 import type { Terminal as HeadlessTerminal } from '@xterm/headless';
 
 const { Terminal } = xtermHeadless;
+
+// Buffer cell/line types derived from the public Terminal type rather than imported by
+// name: `@xterm/headless`'s `IBufferCell`/`IBufferLine` are declared without `export`
+// inside its ambient module, so a named `import type` is not guaranteed to resolve —
+// deriving via the exported `Terminal` surface is import-stable.
+type BufferCell = ReturnType<HeadlessTerminal['buffer']['active']['getNullCell']>;
+type BufferLine = NonNullable<ReturnType<HeadlessTerminal['buffer']['active']['getLine']>>;
 
 /**
  * The ring snapshot the gate classifies — the production reconnect-replay shape.
@@ -178,6 +187,56 @@ function findRegionEnd(lines: string[], markerRow: number, endPatterns: RegExp[]
 }
 
 /**
+ * Ghost-suggestion cursor cell (Spec 1313 render-gate hardening — false-`busy` on an idle
+ * claude composer). When claude's own last reply mentioned a runnable command it paints
+ * that command into the otherwise-empty composer as a *suggested-command ghost*, and the
+ * ghost's first character doubles as the software block cursor: it is rendered SGR-7
+ * INVERSE at normal intensity while the rest of the ghost is SGR-2 dim
+ * (`❯ ␛[7m a ␛[27m␛[2mfx cleanup …␛[22m`, measured live — captured as
+ * `claude-ghost-suggestion-empty.replay.bin`). The universal dim rule already skips the
+ * ghost body, but the lone inverse cursor cell was counted as user text → the composer
+ * classified `user-text`/`busy` FOREVER while genuinely empty, so mail to an idle
+ * (unattended) agent was never delivered (fail-safe becomes fail-forever for an idle
+ * recipient — the exact agent `afx send` exists to wake).
+ *
+ * This exempts exactly that cell: the cell at the headless buffer's cursor position,
+ * rendered inverse at normal intensity, whose following run on the same row is dim or
+ * empty (the measured ghost tail). It is deliberately NARROW — NOT the blanket inverse
+ * skip the finding warns against — and does not false-clean a real draft:
+ *   - measured, claude renders the block cursor inverse only on the trailing WHITESPACE
+ *     past a real draft (already skipped as whitespace) and never inverse-renders typed
+ *     characters, so a real draft's typed cells are non-inverse and still counted;
+ *   - an inverse *selection* over real multi-char text fails the dim-tail test (its
+ *     following cells are non-dim) and, even if it passed, only this one cell is skipped
+ *     while every other selected cell keeps the verdict `busy`.
+ * Sole residual (accepted, documented in the review's Technical Debt): a 1-char draft with
+ * the cursor relocated onto its only char inside the exact delivery window — identical to
+ * the plain cursor-skip option's residual; a multi-char draft always holds.
+ */
+function isGhostCursorCell(
+  line: BufferLine,
+  row: number,
+  col: number,
+  cols: number,
+  cursorRow: number,
+  cursorCol: number,
+  cell: BufferCell,
+  probe: BufferCell,
+): boolean {
+  if (row !== cursorRow || col !== cursorCol) return false;
+  if (!cell.isInverse()) return false; // typed text is never inverse-rendered; only the software cursor is
+  // The ghost tail: every following non-whitespace, non-chrome cell on this row must be
+  // dim (the SGR-2 suggestion body). Any non-dim text to the right ⇒ real content, not a ghost.
+  for (let c = col + 1; c < cols; c++) {
+    line.getCell(c, probe);
+    const ch = probe.getChars();
+    if (!ch || WHITESPACE.test(ch) || IGNORE_CHARS.has(ch)) continue;
+    if (!probe.isDim()) return false;
+  }
+  return true;
+}
+
+/**
  * Classify a rendered ring snapshot against a profile.
  *
  * Returns `{ clean: true, detail: 'empty' }` only when a composer marker is
@@ -217,6 +276,10 @@ export async function classifyScreen(snapshot: RingSnapshot, profile: GateProfil
     }
     const top = buf.viewportY;
     const cell = buf.getNullCell();
+    const probe = buf.getNullCell(); // scratch cell for the ghost-tail look-ahead (never clobbers `cell`)
+    // Cursor position is viewport-relative (matching `row`, which indexes from `viewportY`).
+    const cursorRow = buf.cursorY;
+    const cursorCol = buf.cursorX;
     let userCells = 0;
 
     for (let row = markerRow; row < endRow; row++) {
@@ -234,6 +297,9 @@ export async function classifyScreen(snapshot: RingSnapshot, profile: GateProfil
           cell.getFgColor() === profile.placeholderFgPalette
         ) {
           continue; // per-app placeholder color: agy renders its idle hint in palette-8 (gray)
+        }
+        if (isGhostCursorCell(line, row, col, cols, cursorRow, cursorCol, cell, probe)) {
+          continue; // claude's suggested-command ghost cursor cell (see isGhostCursorCell)
         }
         userCells++;
       }

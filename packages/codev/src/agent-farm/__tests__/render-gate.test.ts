@@ -27,6 +27,8 @@ const ROWS = 32;
 const DIM = '\x1b[2m';
 const RESET = '\x1b[0m';
 const BOLD = '\x1b[1m';
+const INV = '\x1b[7m'; // SGR-7 inverse (claude's software block cursor over the ghost's first char)
+const INV_OFF = '\x1b[27m'; // SGR-27 inverse off
 const PAL8 = '\x1b[38;5;8m'; // agy's placeholder gray
 const PAL12 = '\x1b[38;5;12m'; // agy's marker / selected-option bright blue
 const FG = '\x1b[39m'; // reset foreground to default
@@ -253,6 +255,73 @@ describe('render-gate — real >1MB captures render WHOLE (Spec 1313 D2 root fix
   it('claude-smallring-idle (6KB, 139×63): CLEAN (small-ring idle baseline — no regression)', async () => {
     const whole = load('claude-smallring-idle.replay.bin.gz');
     expect((await classifyScreen({ replay: whole, cols: 139, rows: 63 }, CLAUDE_PROFILE)).clean).toBe(true);
+  });
+});
+
+describe('render-gate — claude suggested-command ghost (Spec 1313 render-gate hardening)', () => {
+  // Live-found 2026-08-06 (PR #1330 architect integration test). An IDLE claude composer
+  // paints a *suggested-command ghost* when the agent's own last reply mentioned a runnable
+  // command. The ghost's first character doubles as the software block cursor: rendered SGR-7
+  // INVERSE at normal intensity while the rest of the ghost is SGR-2 dim
+  // (`❯ ␛[7ma␛[27m␛[2mfx cleanup…␛[22m`). The universal dim rule skipped the ghost body but
+  // COUNTED the lone inverse cursor cell → `user-text`/`busy` FOREVER while the composer was
+  // genuinely empty, so mail to an idle (unattended) agent was never delivered. classifyScreen
+  // now exempts exactly that cell (inverse + non-dim + at the cursor + dim/empty tail).
+  const loadGz = (name: string) => gunzipSync(readFileSync(`${FIXTURE_DIR}/${name}`)).toString('utf8');
+
+  it('the real captured ghost ring (claude 2.1.220, 139×63) → CLEAN (pre-fix was busy/user-text with 1 counted cell)', async () => {
+    // Captured live from a stuck main-architect terminal whose mail held on `busy` while the
+    // composer was visibly empty (held mailbox row a21b6c64). The only would-be-counted cell is
+    // the inverse block cursor over the ghost's first char; every other ghost cell is dim. The
+    // whole ring renders (0.09 MB — nowhere near any size concern); the fix is the cursor-cell
+    // exemption, not a slice change.
+    const whole = loadGz('claude-ghost-suggestion-empty.replay.bin.gz');
+    const v = await classifyScreen({ replay: whole, cols: 139, rows: 63 }, CLAUDE_PROFILE);
+    expect(v).toMatchObject({ clean: true, detail: 'empty' });
+  });
+
+  // The exemption keys off the headless cursor cell, so these synthetic cases must leave the
+  // cursor ON the composer marker row — `screen()` alone parks it on the line below. A trailing
+  // CUP (`ESC[row;colH`, 1-based) parks it precisely; it rides through the RingBuffer as the
+  // partial, exactly as the production `getAll().join('\n')` path would carry it.
+  const withCursor = (row: number, col: number, ...lines: string[]) =>
+    snapshotFromRaw(screen(...lines) + `\x1b[${row};${col}H`);
+
+  it('the ghost signature (inverse non-dim cursor char + dim tail) → clean', async () => {
+    const snap = withCursor(1, 3, `❯ ${INV}a${INV_OFF}${DIM}fx cleanup -p task-VdfD${RESET}`, '──────────');
+    expect(await classifyScreen(snap, CLAUDE_PROFILE)).toMatchObject({ clean: true, detail: 'empty' });
+  });
+
+  it('an inverse cursor char with REAL (non-dim) text following → busy (no new corruption vector; NOT a blanket inverse skip)', async () => {
+    // The cursor sits (inverse) on the first char of a real multi-char draft. The dim-tail test
+    // fails — the following text is normal-intensity — so the cell is NOT exempted and every
+    // draft cell counts. This is the guard the finding demands: the exemption cannot false-clean
+    // a real draft, and an inverse selection over real text keeps every other cell counted.
+    const snap = withCursor(1, 3, `❯ ${INV}d${INV_OFF}eploy the hotfix`, '──────────');
+    const v = await classifyScreen(snap, CLAUDE_PROFILE);
+    expect(v.clean).toBe(false);
+    expect(v.detail).toBe('user-text');
+  });
+
+  it('a real draft with the inverse block cursor on trailing whitespace → busy (claude never inverse-renders typed text)', async () => {
+    // Models claude's ACTUAL real-draft rendering (measured live, task-vdfd draft "dfsd"): typed
+    // characters are non-inverse and the inverse block cursor rests on the empty cell past them.
+    // The whitespace cursor cell is skipped as whitespace (the exemption never even evaluates);
+    // the typed cells count → busy. The sole accepted residual is a 1-char draft with the cursor
+    // relocated onto its only char — documented in the review's Technical Debt.
+    const snap = withCursor(1, 14, `❯ deploy prod${INV} ${INV_OFF}`, '──────────');
+    const v = await classifyScreen(snap, CLAUDE_PROFILE);
+    expect(v.clean).toBe(false);
+    expect(v.detail).toBe('user-text');
+  });
+
+  it('cross-app: a codex-style ghost of the same signature → clean (the exemption is profile-agnostic)', async () => {
+    // Measured live (task-shxz), codex renders its OWN suggestion ghost ("Write tests for
+    // @filename") WHOLLY dim — already clean via the dim rule, never hit by this bug. But the
+    // exemption is generic, so were codex to adopt claude's inverse-cursor rendering it is handled
+    // identically. Pins that generality without committing a live builder capture.
+    const snap = withCursor(1, 3, `${BOLD}›${RESET} ${INV}W${INV_OFF}${DIM}rite tests for @filename${RESET}`, '  gpt-5.6-sol   high: on   ~/repo');
+    expect(await classifyScreen(snap, CODEX_PROFILE)).toMatchObject({ clean: true, detail: 'empty' });
   });
 });
 
