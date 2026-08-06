@@ -17,7 +17,7 @@ import https from 'node:https';
 import { Duplex } from 'node:stream';
 import { URL } from 'node:url';
 import WebSocket, { createWebSocketStream } from 'ws';
-import { backoffDelayMs } from '@cluesmith/codev-core/reconnect-policy';
+import { backoffDelayMs } from './reconnect-backoff.js';
 
 export interface TunnelClientOptions {
   serverUrl: string;      // codevos.ai URL (e.g. "https://codevos.ai")

@@ -9,7 +9,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { UNCATEGORIZED_AREA } from '@cluesmith/codev-core/constants';
+import { UNCATEGORIZED_AREA } from '@cluesmith/codev-sdk/constants';
 import {
   fetchPRList,
   fetchIssueList,

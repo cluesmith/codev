@@ -9,14 +9,14 @@
  *
  * All names are stored and compared in lowercase per spec.
  *
- * `stripLeadingZeros` and `resolveAgentName` live in codev-core so the
+ * `stripLeadingZeros` and `resolveAgentName` live in codev-sdk so the
  * VS Code extension can use the same matching semantics; we re-export
  * them here so existing agent-farm callsites are unaffected.
  */
 
 import type { BuilderType } from '../types.js';
-export { stripLeadingZeros, resolveAgentName } from '@cluesmith/codev-core/agent-names';
-import { stripLeadingZeros } from '@cluesmith/codev-core/agent-names';
+export { stripLeadingZeros, resolveAgentName } from '@cluesmith/codev-sdk/agent-names';
+import { stripLeadingZeros } from '@cluesmith/codev-sdk/agent-names';
 
 /**
  * Build a canonical agent name from builder type and ID.

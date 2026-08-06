@@ -14,6 +14,7 @@ import { update } from './commands/update.js';
 import { sync, getFrameworkCacheDir as _getFrameworkCacheDir } from './commands/sync.js';
 import { setFrameworkCacheDir } from './lib/skeleton.js';
 import { consult } from './commands/consult/index.js';
+import { registerConsultOptions, buildConsultOptions } from './commands/consult/cli-options.js';
 import { handleStats } from './commands/consult/stats.js';
 import { cli as porchCli } from './commands/porch/index.js';
 import { importCommand } from './commands/import.js';
@@ -165,26 +166,14 @@ program
   });
 
 // Consult command
-program
-  .command('consult')
-  .description('AI consultation with external models')
-  .argument('[subcommand]', 'Optional: stats')
-  .option('-m, --model <model>', 'Model to use (gemini, codex, claude, hermes, or aliases: pro, gpt, opus)')
-  .option('--prompt <text>', 'Inline prompt (general mode)')
-  .option('--prompt-file <path>', 'Prompt file path (general mode)')
-  .option('--protocol <name>', 'Protocol name: spir, aspir, air, bugfix, pir, maintain')
-  .option('-t, --type <type>', 'Review type: spec, plan, impl, pr, phase, integration')
-  .option('--issue <number>', 'Issue number (required from architect context)')
-  .option('--branch <ref>', 'Read spec/plan artifacts from this git ref instead of the local workspace (e.g. `origin/builder/777-foo` or `builder/777-foo`). Defaults to the PR\'s head branch when --issue resolves to a PR. Note: this only changes the artifact source — for --type impl, the diff scope is always the PR\'s head→base, not the --branch ref.')
-  .option('--base <ref>', 'For --type integration: anchor the diff on this base branch (e.g. `ci`), computed locally as `git diff origin/<base>...origin/<head>` (three-dot). Use in repos with a long-lived integration branch ahead of the default branch so the review sees only the PR\'s actual change, not the whole integration-over-trunk delta. Defaults to config `consult.integrationBranch`; unset → the PR\'s host base (`gh pr diff`).')
-  .option('--output <path>', 'Write consultation output to file (used by porch)')
-  .option('--plan-phase <phase>', 'Scope review to a specific plan phase (used by porch)')
-  .option('--context <path>', 'Context file with previous iteration feedback (used by porch)')
-  .option('--project-id <id>', 'Project ID for metrics (used by porch)')
-  .option('--days <n>', 'Stats: limit to last N days (default: 30)')
-  .option('--project <id>', 'Stats: filter by project ID')
-  .option('--last <n>', 'Stats: show last N individual invocations')
-  .option('--json', 'Stats: output as JSON')
+// Flags and their mapping onto ConsultOptions live in commands/consult/cli-options.ts so a unit
+// test can assert the two agree — see that file for why.
+registerConsultOptions(
+  program
+    .command('consult')
+    .description('AI consultation with external models')
+    .argument('[subcommand]', 'Optional: stats')
+)
   .allowUnknownOption(true)
   .action(async (subcommand, options) => {
     try {
@@ -208,20 +197,7 @@ program
         process.exit(1);
       }
 
-      await consult({
-        model: options.model,
-        prompt: options.prompt,
-        promptFile: options.promptFile,
-        protocol: options.protocol,
-        type: options.type,
-        issue: options.issue,
-        branch: options.branch,
-        base: options.base,
-        output: options.output,
-        planPhase: options.planPhase,
-        context: options.context,
-        projectId: options.projectId,
-      });
+      await consult(buildConsultOptions(options));
       // Bugfix #341: Force exit after consult completes. SDK internals
       // (Claude Agent SDK, Codex SDK, Gemini CLI) leave dangling handles
       // (timers, sockets, subprocesses) that keep the Node.js event loop

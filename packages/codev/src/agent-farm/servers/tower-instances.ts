@@ -20,7 +20,7 @@ import { getGlobalDb } from '../db/index.js';
 import type { TerminalManager } from '../../terminal/pty-manager.js';
 import type { SessionManager } from '../../terminal/session-manager.js';
 import { defaultSessionOptions } from '../../terminal/index.js';
-import type { TerminalType } from '@cluesmith/codev-core/tower-client';
+import type { TerminalType } from '@cluesmith/codev-sdk/tower-client';
 import type { WorkspaceTerminals, TerminalEntry, InstanceStatus } from './tower-types.js';
 import {
   normalizeWorkspacePath,
@@ -41,6 +41,7 @@ import {
   validateArchitectName,
   DEFAULT_ARCHITECT_NAME,
 } from '../utils/architect-name.js';
+import { RetiredHarnessError } from '../utils/harness.js';
 import { setArchitect, setArchitectByName, getArchitects, getArchitectByName } from '../state.js';
 
 // ============================================================================
@@ -791,7 +792,10 @@ export async function launchInstance(workspacePath: string): Promise<{ success: 
         if (entry.architects.has(a.name)) continue;
         if (
           !hasArchitectTerminalSession(a.name, resolvedPath, workspacePath) &&
-          !siblingRegistrationIsLive(workspacePath, a.sessionId ?? null)
+          // Pass the reconcile logger so a retired-harness prune (Issue #1338) logs
+          // its real reason instead of being misattributed to the generic
+          // "no resumable session" line below.
+          !siblingRegistrationIsLive(workspacePath, a.sessionId ?? null, { log: _deps.log })
         ) {
           try {
             setArchitectByName(resolvedPath, a.name, null);
@@ -1067,14 +1071,30 @@ export async function addArchitect(
       log: _deps.log,
     }));
   }
-  const { args: cmdArgs, env: harnessEnv, sessionId: conversationSessionId, resumed, fallback } = resolveArchitectLaunch({
-    workspacePath,
-    name,
-    baseArgs: cmdParts.slice(1),
-    storedSessionId,
-    hasLiveHolder: () => foreignHolder,
-    log: _deps.log,
-  });
+  // Issue #1338: a retired architect harness (e.g. gemini) makes
+  // resolveArchitectLaunch throw at the launch boundary. This entry point (the
+  // `add-architect` CLI / HTTP route) returns a result object rather than
+  // throwing, so convert the retirement into a clean `{ success: false }` — the
+  // caller in tower-routes.ts awaits this without its own try/catch, so an
+  // uncaught throw would become an opaque 500 instead of the retirement message.
+  // Scope the catch to the retirement only (mirrors launchInstance's fail path,
+  // narrowed): every other error propagates unchanged. No worktree/porch/db
+  // state is created before this point, so bailing here leaves nothing behind.
+  let launch;
+  try {
+    launch = resolveArchitectLaunch({
+      workspacePath,
+      name,
+      baseArgs: cmdParts.slice(1),
+      storedSessionId,
+      hasLiveHolder: () => foreignHolder,
+      log: _deps.log,
+    });
+  } catch (err) {
+    if (err instanceof RetiredHarnessError) return { success: false, error: err.message };
+    throw err;
+  }
+  const { args: cmdArgs, env: harnessEnv, sessionId: conversationSessionId, resumed, fallback } = launch;
   if (resumed && conversationSessionId) {
     _deps.log('INFO', `Resuming architect '${name}' session ${conversationSessionId.slice(0, 8)}… in ${workspacePath}`);
   }

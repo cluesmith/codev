@@ -2,7 +2,9 @@
  * Integration tests for the agent harness system.
  *
  * Tests that all call sites (buildWorktreeLaunchScript, buildArchitectArgs)
- * produce correct output for each harness type: claude, codex, gemini, custom.
+ * produce correct output for each harness type: claude, codex, custom. The
+ * built-in gemini harness is retired (Issue #1338) — its scenarios now assert
+ * the retirement instead of role injection.
  *
  * @see codev/specs/591-af-workspace-failure-with-code.md (Test Scenarios 1–8)
  */
@@ -11,10 +13,10 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   CLAUDE_HARNESS,
   CODEX_HARNESS,
-  GEMINI_HARNESS,
   resolveHarness,
   buildCustomHarnessProvider,
   shellEscapeSingleQuote,
+  throwRetired,
   type CustomHarnessConfig,
 } from '../utils/harness.js';
 
@@ -109,20 +111,16 @@ describe('harness integration', () => {
   });
 
   // ===========================================================================
-  // Spec Test Scenario 3: Gemini harness
+  // Spec Test Scenario 3: Gemini harness retirement (Issue #1338)
   // ===========================================================================
 
-  describe('gemini harness', () => {
-    it('buildRoleInjection returns GEMINI_SYSTEM_MD env var', () => {
-      const { args, env } = GEMINI_HARNESS.buildRoleInjection(ROLE_CONTENT, ROLE_FILE);
-      expect(args).toEqual([]);
-      expect(env).toEqual({ GEMINI_SYSTEM_MD: ROLE_FILE });
+  describe('gemini harness retirement', () => {
+    it('explicit gemini resolution throws the retirement', () => {
+      expect(() => resolveHarness('gemini')).toThrow(/retired/i);
     });
 
-    it('buildScriptRoleInjection returns env with empty fragment', () => {
-      const { fragment, env } = GEMINI_HARNESS.buildScriptRoleInjection(ROLE_CONTENT, ROLE_FILE);
-      expect(fragment).toBe('');
-      expect(env).toEqual({ GEMINI_SYSTEM_MD: ROLE_FILE });
+    it('auto-detected gemini command throws the retirement (no silent claude fallback)', () => {
+      expect(() => resolveHarness(undefined, undefined, 'gemini --yolo')).toThrow(/retired/i);
     });
   });
 
@@ -135,15 +133,11 @@ describe('harness integration', () => {
       expect(() => resolveHarness('nonexistent')).toThrow('Unknown harness "nonexistent"');
     });
 
-    it('error message lists available harnesses', () => {
-      try {
-        resolveHarness('bad');
-      } catch (e: unknown) {
-        const msg = (e as Error).message;
-        expect(msg).toContain('claude');
-        expect(msg).toContain('codex');
-        expect(msg).toContain('gemini');
-      }
+    it('error message lists available harnesses (without the retired gemini)', () => {
+      expect(() => resolveHarness('bad')).toThrow(/claude/);
+      expect(() => resolveHarness('bad')).toThrow(/codex/);
+      expect(() => resolveHarness('bad')).toThrow(/opencode/);
+      expect(() => resolveHarness('bad')).not.toThrow(/gemini/);
     });
   });
 
@@ -239,13 +233,14 @@ describe('harness integration', () => {
       expect(script).not.toContain('--append-system-prompt');
     });
 
-    it('gemini harness: script contains GEMINI_SYSTEM_MD export', async () => {
-      mockGetBuilderHarness.mockReturnValue(GEMINI_HARNESS);
+    it('retired gemini builder: buildWorktreeLaunchScript surfaces the retirement (no broken script)', async () => {
+      // The real getBuilderHarness throws the retirement for a gemini config;
+      // assert the call site propagates it rather than emitting a launch script.
+      mockGetBuilderHarness.mockImplementationOnce(() => throwRetired('gemini'));
       const { buildWorktreeLaunchScript } = await import('../commands/spawn-worktree.js');
       const role = { content: 'You are a builder', source: 'test' };
-      const script = buildWorktreeLaunchScript('/tmp/worktree', 'gemini', role, '/tmp/workspace');
-      expect(script).toContain("export GEMINI_SYSTEM_MD='");
-      expect(script).not.toContain('--append-system-prompt');
+      expect(() => buildWorktreeLaunchScript('/tmp/worktree', 'gemini', role, '/tmp/workspace'))
+        .toThrow(/retired/i);
     });
   });
 

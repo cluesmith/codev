@@ -205,6 +205,116 @@ export function hasLocalOverride(relativePath: string, workspaceRoot?: string): 
 /**
  * List all files in the skeleton directory matching a pattern
  */
+/**
+ * All directories that may contain protocols, in resolution order.
+ *
+ * NOTE: this includes the framework cache. `porch/protocol.ts`'s alias scan historically checked
+ * only three tiers (omitting the cache) — that is a pre-existing inconsistency with
+ * resolveCodevFile's four tiers, and is deliberately NOT reproduced here.
+ */
+function protocolDirs(workspaceRoot?: string): string[] {
+  const root = workspaceRoot || findWorkspaceRoot();
+  const dirs = [
+    path.join(root, '.codev', 'protocols'),
+    path.join(root, 'codev', 'protocols'),
+  ];
+  const cacheDir = _getFrameworkCacheDir(root);
+  if (cacheDir) dirs.push(path.join(cacheDir, 'protocols'));
+  dirs.push(path.join(getSkeletonDir(), 'protocols'));
+  return dirs;
+}
+
+function readProtocolJson(filePath: string): Record<string, unknown> | null {
+  try {
+    return JSON.parse(fs.readFileSync(filePath, 'utf-8')) as Record<string, unknown>;
+  } catch {
+    return null; // unreadable or invalid JSON — not this function's error to raise
+  }
+}
+
+/**
+ * Every protocol name visible at ANY tier, plus any aliases those protocols declare.
+ *
+ * Union, not precedence: a name present at any tier is a name porch can run, so configuring it is
+ * legitimate. Aliases are included because porch resolves by them (`spir`/`spider`,
+ * `maintain`/`maint`, `pir`/`plan-implement-review`), so rejecting an alias would reject config the
+ * CLI itself accepts.
+ */
+export function listProtocolNames(workspaceRoot?: string): Set<string> {
+  const names = new Set<string>();
+  for (const dir of protocolDirs(workspaceRoot)) {
+    if (!fs.existsSync(dir)) continue;
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true }).filter(d => d.isDirectory());
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      const jsonPath = path.join(dir, entry.name, 'protocol.json');
+      if (!fs.existsSync(jsonPath)) continue;
+      names.add(entry.name);
+      const parsed = readProtocolJson(jsonPath);
+      const alias = parsed?.alias;
+      if (typeof alias === 'string' && alias.length > 0) names.add(alias);
+    }
+  }
+  return names;
+}
+
+/**
+ * Map a protocol name or alias to its canonical (directory) name.
+ *
+ * Returns the input unchanged when it is already canonical or cannot be resolved — callers use this
+ * for identity comparison, so an unresolvable name simply compares equal only to itself.
+ */
+export function canonicalProtocolName(workspaceRoot: string | undefined, nameOrAlias: string): string {
+  for (const dir of protocolDirs(workspaceRoot)) {
+    if (!fs.existsSync(dir)) continue;
+    // A directory of this name is already canonical.
+    if (fs.existsSync(path.join(dir, nameOrAlias, 'protocol.json'))) return nameOrAlias;
+  }
+  for (const dir of protocolDirs(workspaceRoot)) {
+    if (!fs.existsSync(dir)) continue;
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true }).filter(d => d.isDirectory());
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      const jsonPath = path.join(dir, entry.name, 'protocol.json');
+      if (!fs.existsSync(jsonPath)) continue;
+      const parsed = readProtocolJson(jsonPath);
+      if (parsed?.alias === nameOrAlias) return entry.name;
+    }
+  }
+  return nameOrAlias;
+}
+
+/**
+ * Every review type (`phases[].verify.type`) declared by the protocols available here.
+ *
+ * Unlike listProtocolNames, this reads the RESOLVED protocol.json per name (tier precedence via
+ * resolveCodevFile) rather than unioning across tiers: only the file that will actually execute
+ * defines which review types can occur, so a shadowed skeleton copy's types must not leak in.
+ */
+export function listReviewTypes(workspaceRoot?: string): Set<string> {
+  const types = new Set<string>();
+  for (const name of listProtocolNames(workspaceRoot)) {
+    const resolved = resolveCodevFile(`protocols/${name}/protocol.json`, workspaceRoot);
+    if (!resolved) continue; // alias entries have no directory of their own
+    const parsed = readProtocolJson(resolved);
+    const phases = parsed?.phases;
+    if (!Array.isArray(phases)) continue;
+    for (const phase of phases) {
+      const verifyType = (phase as { verify?: { type?: unknown } })?.verify?.type;
+      if (typeof verifyType === 'string' && verifyType.length > 0) types.add(verifyType);
+    }
+  }
+  return types;
+}
+
 export function listSkeletonFiles(subdir?: string): string[] {
   const skeletonDir = getSkeletonDir();
   const targetDir = subdir ? path.join(skeletonDir, subdir) : skeletonDir;

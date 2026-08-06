@@ -1,0 +1,82 @@
+{
+  "name": "@cluesmith/codev-sdk",
+  "version": "3.2.4",
+  "description": "Client SDK for Tower: the single implementation of how anything talks to Tower. Environment-agnostic (browser, Node, React Native); auth and transport arrive as injected adapters.",
+  "type": "module",
+  "exports": {
+    "./tower-client": {
+      "types": "./dist/tower-client.d.ts",
+      "default": "./dist/tower-client.js"
+    },
+    "./sse": {
+      "types": "./dist/sse.d.ts",
+      "default": "./dist/sse.js"
+    },
+    "./workspace": {
+      "types": "./dist/workspace.d.ts",
+      "default": "./dist/workspace.js"
+    },
+    "./constants": {
+      "types": "./dist/constants.d.ts",
+      "default": "./dist/constants.js"
+    },
+    "./escape-buffer": {
+      "types": "./dist/escape-buffer.d.ts",
+      "default": "./dist/escape-buffer.js"
+    },
+    "./reconnect-policy": {
+      "types": "./dist/reconnect-policy.d.ts",
+      "default": "./dist/reconnect-policy.js"
+    },
+    "./agent-names": {
+      "types": "./dist/agent-names.d.ts",
+      "default": "./dist/agent-names.js"
+    },
+    "./architect-name": {
+      "types": "./dist/architect-name.d.ts",
+      "default": "./dist/architect-name.js"
+    },
+    "./builder-helpers": {
+      "types": "./dist/builder-helpers.d.ts",
+      "default": "./dist/builder-helpers.js"
+    },
+    "./area-grouping": {
+      "types": "./dist/area-grouping.d.ts",
+      "default": "./dist/area-grouping.js"
+    },
+    "./phase-grouping": {
+      "types": "./dist/phase-grouping.d.ts",
+      "default": "./dist/phase-grouping.js"
+    },
+    "./review-markers": {
+      "types": "./dist/review-markers.d.ts",
+      "default": "./dist/review-markers.js"
+    },
+    "./controller": {
+      "types": "./dist/controller.d.ts",
+      "default": "./dist/controller.js"
+    },
+    "./node": {
+      "types": "./dist/node/local-key.d.ts",
+      "default": "./dist/node/local-key.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "check-types": "tsc --noEmit",
+    "test": "vitest run",
+    "prepublishOnly": "pnpm build"
+  },
+  "dependencies": {
+    "@cluesmith/codev-types": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "22.x",
+    "typescript": "catalog:",
+    "vitest": "^4.0.15"
+  },
+  "license": "Apache-2.0"
+}

@@ -19,8 +19,8 @@
  * mock. The toast/recovery UX it feeds lives in `terminal-manager.ts`.
  */
 
-import { backoffDelayMs } from '@cluesmith/codev-core/reconnect-policy';
-import { resolveAgentName } from '@cluesmith/codev-core/agent-names';
+import { backoffDelayMs } from '@cluesmith/codev-sdk/reconnect-policy';
+import { resolveAgentName } from '@cluesmith/codev-sdk/agent-names';
 
 /**
  * Retry budget for the resolve. The first attempt is the original lookup;
@@ -31,7 +31,7 @@ export const TERMINAL_RESOLVE_ATTEMPTS = 4;
 
 /**
  * Interactive-tuned backoff parameters fed to the shared `backoffDelayMs`
- * curve (`@cluesmith/codev-core/reconnect-policy`). The module's defaults
+ * curve (`@cluesmith/codev-sdk/reconnect-policy`). The module's defaults
  * (base 1000ms, cap 30_000ms) are sized for persistent reconnect loops and
  * would make a sidebar click feel laggy; these produce ~150ms, 300ms, 600ms
  * between attempts — snappy enough for a click while still spanning the

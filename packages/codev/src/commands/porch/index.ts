@@ -47,7 +47,7 @@ import {
   allChecksPassed,
   type CheckEnv,
 } from './checks.js';
-import { loadCheckOverrides } from './config.js';
+import { loadCheckOverrides, resolveConsultationModels } from './config.js';
 import { notifyTerminal, gateApprovedMessage } from './notify.js';
 import { loadConfig } from '../../lib/config.js';
 import { version } from '../../version.js';
@@ -429,27 +429,19 @@ export async function done(workspaceRoot: string, projectId: string, resolver?: 
   // Enforce verification for build_verify phases (config-aware)
   const verifyConfig = getVerifyConfig(protocol, state.phase);
   if (verifyConfig) {
-    // Resolve effective models from config (overrides protocol defaults)
-    let effectiveModels = verifyConfig.models;
-    let consultMode: 'normal' | 'none' | 'parent' = 'normal';
-
-    try {
-      const config = loadConfig(workspaceRoot);
-      const configModels = config.porch?.consultation?.models;
-      if (configModels !== undefined) {
-        if (configModels === 'none') {
-          consultMode = 'none';
-        } else if (configModels === 'parent') {
-          consultMode = 'parent';
-        } else if (Array.isArray(configModels)) {
-          effectiveModels = configModels;
-        } else if (typeof configModels === 'string') {
-          effectiveModels = [configModels];
-        }
-      }
-    } catch {
-      // Config load failed — use protocol defaults
-    }
+    // Resolve effective models through the SAME resolver `porch next` uses, so the lanes demanded
+    // here are exactly the lanes that were emitted. The former local copy silently disagreed with
+    // `next` on single-string values and on invalid lane names.
+    //
+    // The `catch` that used to wrap this is deliberately gone. Swallowing a config error and
+    // continuing on protocol defaults meant a typo in `porch.consultation` changed which lanes
+    // porch required without saying so — `next` would refuse to run while `done` quietly demanded
+    // a different set. Config errors now surface here as they already did in `next`. This is a
+    // real behavior change: a workspace whose config is malformed today limps along on protocol
+    // defaults and will now fail loudly.
+    const { models: effectiveModels, mode: consultMode } = resolveConsultationModels(
+      workspaceRoot, verifyConfig.models, state.protocol, verifyConfig.type
+    );
 
     // "none" mode: skip verification
     if (consultMode === 'none') {
@@ -507,14 +499,22 @@ export async function done(workspaceRoot: string, projectId: string, resolver?: 
     return;
   }
 
-  // For phased protocols: plan phase advancement requires 3-way review.
+  // For phased protocols: plan phase advancement requires multi-lane review.
   // The isBuildVerify block above already marked build_complete=true.
-  // Redirect to porch next for verification (3-way review + unanimous verdict).
+  // Redirect to porch next for verification (lane review + unanimous verdict).
   if (isPhased(protocol, state.phase) && state.plan_phases.length > 0) {
     const currentPlanPhase = getCurrentPlanPhase(state.plan_phases);
     if (currentPlanPhase && !allPlanPhasesComplete(state.plan_phases)) {
+      // Say how many lanes will actually run. "3-way" was hardcoded, which stopped being true the
+      // moment config could select lanes — a workspace running a 2-lane PIR was told to expect a
+      // 3-way review and had no way to tell whether the third had failed or was never asked for.
+      const laneCount = verifyConfig
+        ? resolveConsultationModels(workspaceRoot, verifyConfig.models, state.protocol, verifyConfig.type).models.length
+        : 0;
       console.log('');
-      console.log(chalk.green('BUILD COMPLETE. Ready for 3-way review.'));
+      console.log(chalk.green(
+        laneCount > 0 ? `BUILD COMPLETE. Ready for ${laneCount}-way review.` : 'BUILD COMPLETE. Ready for review.'
+      ));
       console.log(`\n  Run: porch next ${state.id} (to trigger verification)`);
       return;
     }

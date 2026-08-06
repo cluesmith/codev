@@ -7,12 +7,18 @@
  *
  * Run with: npm run test:e2e
  * Prerequisites: npm run build (creates skeleton/ and dist/)
+ *
+ * The porch benchmark drives a real agent that shells out to `consult`. Its
+ * gemini lane runs against the harness's fake agy unless you opt in:
+ *   CODEV_ALLOW_REAL_AGY=1 pnpm --filter @cluesmith/codev test:e2e
  */
 
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
+    // Sandboxes the real agy binary and the user-global metrics DB (#1323).
+    setupFiles: ['./vitest-setup.ts'],
     include: [
       'src/commands/porch/__tests__/e2e/**/*.test.ts',
       'src/**/*.e2e.test.ts',  // All server-spawning / integration tests

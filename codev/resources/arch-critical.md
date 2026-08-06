@@ -13,7 +13,7 @@ and keeps the map in sync with arch.md's top-level sections. See codev/resources
 - Porch is a pure planner: it emits task JSON, Claude Code executes. Never hand-edit status.yaml.
 - State lives in a single user-global ~/.agent-farm/global.db (Issue #1118 retired the per-workspace state.db; architect/builders keyed by workspace_path); one Tower on port 4100. Never modify state by hand.
 - Worktrees in .builders/ are Agent-Farm-managed — never delete manually (use afx cleanup); run afx from the main workspace root only.
-- Forge concept commands abstract the VCS provider — add a dedicated concept; don't bolt env flags onto a shared one.
+- Server/client isolation (#1189): codev-core (server) and codev-sdk (client) never import each other; both import only codev-types. The sdk is environment-agnostic (no node:*/vscode/direct fetch outside its /node adapter; zero runtime deps) — boundary tests on both sides enforce this in CI.
 - Two human gates (spec-approval, plan-approval) plus the pr gate; only humans transition conceived→specified and committed→integrated.
 - Never `git add -A` / `.` / `--all` — stage files explicitly.
 

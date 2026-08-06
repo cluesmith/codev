@@ -203,13 +203,21 @@ async function sendToAll(
   workspace: string | undefined,
   from: string,
   options: SendOptions,
-): Promise<{ sent: string[]; failed: string[] }> {
+): Promise<{ sent: string[]; scheduled: string[]; deferred: string[]; failed: string[] }> {
   // Bugfix #826: loadState is workspace-scoped (for the architect read).
   // Builders are global per state.db; use the detected workspace root as
   // scope. `process.cwd()` is a safe fallback when detection fails — the
   // architect read returns [] and `--all` only uses `state.builders`.
   const state = loadState(detectWorkspaceRoot() ?? process.cwd());
-  const results = { sent: [] as string[], failed: [] as string[] };
+  // Spec 1307: `scheduled` is tracked separately from `sent`. Reporting a
+  // delayed fan-out as "Sent" would claim delivery that has not happened — the
+  // same misreport the single-target path below deliberately avoids.
+  const results = {
+    sent: [] as string[],
+    scheduled: [] as string[],
+    deferred: [] as string[],
+    failed: [] as string[],
+  };
 
   if (state.builders.length === 0) {
     logger.warn('No active builders found.');
@@ -225,11 +233,21 @@ async function sendToAll(
         raw: options.raw,
         noEnter: options.noEnter,
         interrupt: options.interrupt,
+        // Spec 1307: each target's delivery is scheduled independently.
+        deliverAfter: options.delay,
       });
       if (!result.ok) {
         throw new Error(result.error || 'Unknown error');
       }
-      results.sent.push(builder.id);
+      // Three distinct outcomes, kept distinct. Classifying a buffered or
+      // scheduled message as "sent" claims a delivery that has not happened.
+      if (result.scheduled) {
+        results.scheduled.push(builder.id);
+      } else if (result.deferred) {
+        results.deferred.push(builder.id);
+      } else {
+        results.sent.push(builder.id);
+      }
     } catch (error) {
       logger.error(`Failed to send to ${builder.id}: ${error instanceof Error ? error.message : String(error)}`);
       results.failed.push(builder.id);
@@ -310,6 +328,17 @@ export async function send(options: SendOptions): Promise<void> {
     if (results.sent.length > 0) {
       logger.success(`Sent to ${results.sent.length} builder(s): ${results.sent.join(', ')}`);
     }
+    if (results.scheduled.length > 0) {
+      logger.success(
+        `Scheduled for ${results.scheduled.length} builder(s) (+${options.delay}s): ${results.scheduled.join(', ')}`,
+      );
+      logger.info('Pending delayed sends are dropped if Tower restarts.');
+    }
+    if (results.deferred.length > 0) {
+      logger.success(
+        `Queued for ${results.deferred.length} builder(s) being typed in: ${results.deferred.join(', ')}`,
+      );
+    }
     if (results.failed.length > 0) {
       logger.error(`Failed for ${results.failed.length} builder(s): ${results.failed.join(', ')}`);
     }
@@ -323,13 +352,26 @@ export async function send(options: SendOptions): Promise<void> {
         raw: options.raw,
         noEnter: options.noEnter,
         interrupt: options.interrupt,
+        deliverAfter: options.delay,
       });
 
       if (!result.ok) {
         throw new Error(result.error || 'Unknown error');
       }
 
-      logger.success(`Message sent to ${result.resolvedTo ?? target}`);
+      // Report what actually happened. A delayed message has NOT been sent, and
+      // saying so would hide the one detail that matters when it never arrives.
+      if (result.scheduled) {
+        logger.success(`Message scheduled for ${result.resolvedTo ?? target} (+${options.delay}s)`);
+        logger.info('Pending delayed sends are dropped if Tower restarts.');
+      } else if (result.deferred) {
+        // Buffered because someone is typing in the target terminal (Spec 403).
+        // Worth saying: the message is accepted but not on screen yet, which
+        // otherwise looks like a lost send.
+        logger.success(`Message queued for ${result.resolvedTo ?? target} (target is being typed in)`);
+      } else {
+        logger.success(`Message sent to ${result.resolvedTo ?? target}`);
+      }
     } catch (error) {
       fatal(error instanceof Error ? error.message : String(error));
     }

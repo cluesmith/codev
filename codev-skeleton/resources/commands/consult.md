@@ -15,6 +15,28 @@ consult stats [options]
 -m, --model <model>    Model to use (required for all modes except stats)
 ```
 
+## Model Selection Options
+
+```
+--model-id <id>        Override the provider model id for THIS invocation
+```
+
+`-m/--model` picks the **lane** (`claude`, `codex`, `gemini`, `hermes`); `--model-id` picks the
+**model that lane runs**. The two are independent — see [Configuration](#configuration) for setting
+an id persistently instead.
+
+```bash
+consult -m codex --model-id gpt-5.6-sol --prompt "Review this design"
+```
+
+- **Precedence**: `--model-id` > `consult.models.<lane>` > the lane's shipped default.
+- **Supported lanes**: `claude`, `codex`, `gemini`. Using it with `hermes` is an **error**, not a
+  silent no-op — `hermes chat -q` has no model selector, so accepting the flag there would mean
+  ignoring it.
+- **Validation is syntax-only.** Whether the id exists is the provider's call; a rejection fails
+  loudly with no fallback to the default. See
+  [the fail-fast contract](#the-fail-fast-contract-and-where-it-stops).
+
 ## Models
 
 | Model | Alias | Backend | Shipped default model id | Notes |
@@ -35,6 +57,172 @@ model. If a model has no rates recorded in Codev, the consultation still runs an
 are still recorded, but `cost_usd` is stored as `null` rather than billed at some other model's
 rates. Only OpenAI's standard pricing tier is modelled — costs for consultations large enough to
 enter the long-context tier are under-reported.
+
+Supply rates for a model Codev doesn't know with [`consult.pricing.codex`](#consultpricingcodex).
+
+## Configuration
+
+Everything below lives in `.codev/config.json` and flows through the standard five-layer config
+stack, lowest priority to highest:
+
+1. built-in defaults
+2. `<cache>/config.json` — remote framework base config
+3. `~/.codev/config.json` — global, per-user, across all projects
+4. `.codev/config.json` — project, checked in
+5. `.codev/config.local.json` — project, per-engineer, gitignored
+
+So any key can be set globally and narrowed per project, and an individual engineer can override
+either without touching a checked-in file.
+
+**Two independent axes**, easy to confuse:
+
+| Axis | Key | Answers |
+|------|-----|---------|
+| *Which model* a lane runs | `consult.models` | "run `claude-opus-5` on the claude lane" |
+| *Which lanes* run at all | `porch.consultation.*` | "review PIR with two lanes, not three" |
+
+### `consult.models`
+
+Per-lane model id. Absent → the shipped default in the [Models](#models) table. Outranked for a
+single invocation by [`--model-id`](#model-selection-options).
+
+```json
+{ "consult": { "models": { "claude": "claude-opus-5", "codex": "gpt-5.6-sol" } } }
+```
+
+Valid lanes: `claude`, `codex`, `gemini`. **`hermes` is rejected** — it is invoked as
+`hermes chat -q` and exposes no model selector, so configuring one would silently do nothing.
+(`hermes` remains valid in `porch.consultation` lane lists; the two key spaces differ on purpose.)
+
+The `gemini` lane passes the id to `agy --model`, so the id space is agy's, not Google's API's.
+
+### `consult.reasoningEffort`
+
+```json
+{ "consult": { "reasoningEffort": { "codex": "high" } } }
+```
+
+Only `codex` exposes this. Values: `minimal`, `low`, `medium`, `high`, `xhigh` (default `medium`).
+Unlike model ids, this **is** a closed set Codev validates locally — see the asymmetry below.
+
+### `consult.pricing.codex`
+
+Per-1M-token rates for the codex lane. Set this when Codev has no rates for the model you run
+(otherwise `cost_usd` is `null`), or to correct rates that have gone stale.
+
+**It outranks the shipped rate table for every model, not only unknown ones** — once set, it is
+used for whatever the codex lane runs, so it is worth revisiting if you later change the model.
+
+```json
+{ "consult": { "pricing": { "codex": { "inputPer1M": 5.00, "cachedInputPer1M": 0.50, "outputPer1M": 30.00 } } } }
+```
+
+> **Take the numbers from the provider, not from here.** Those are the rates Codev ships for
+> `gpt-5.6-sol` at the time of writing, shown so the shape is concrete — they are not right for
+> whatever model you are configuring, and published rates change. Copying a plausible-looking wrong
+> rate produces a confidently wrong cost, which is the exact failure this key exists to prevent;
+> a `null` cost is the better outcome of the two.
+
+- **`codex` is the only accepted lane.** Claude reports its own cost directly and the gemini/agy
+  lane reports no usage data at all, so a pricing override for either would be inert. Any other
+  lane key is an error.
+- **All three rates are required together**, and each must be a finite, non-negative number. A
+  partial object is an error, not a half-priced estimate: defaulting any one rate to a stale
+  built-in would reintroduce exactly the wrong-cost problem this override exists to fix.
+
+### `porch.consultation` — which lanes run
+
+Lane lists accept a single name (`"codex"`), an array (`["codex", "claude"]`), or a whole-value
+special mode: `"none"` (skip consultation) or `"parent"` (emit a gate for the architect instead).
+An **empty array is rejected** — use `"none"`, so there is exactly one way to say it.
+
+`models` is the workspace-wide default, `modelsByType` narrows by review type, and `byProtocol`
+scopes either of those to one protocol:
+
+```json
+{
+  "porch": {
+    "consultation": {
+      "models": ["gemini", "codex", "claude"],
+      "modelsByType": { "pr": ["codex", "claude"] },
+      "byProtocol": {
+        "pir": {
+          "models": ["gemini", "codex"],
+          "modelsByType": { "impl": ["codex"] }
+        }
+      }
+    }
+  }
+}
+```
+
+Review-type keys are the protocol's own `verify.type` values (`spec`, `plan`, `impl`, `pr`, …);
+protocol keys are protocol names, and aliases are canonicalized so `byProtocol.spider` matches a
+project running as `spir`. Unknown keys in either space are **errors, not warnings** — a typo that
+merely warned would silently leave you on the defaults you were trying to override.
+
+#### Precedence
+
+Highest first. The first level that is present wins outright; levels do not merge.
+
+1. `porch.consultation.byProtocol[<protocol>].modelsByType[<type>]`
+2. `porch.consultation.byProtocol[<protocol>].models`
+3. `porch.consultation.modelsByType[<type>]`
+4. `porch.consultation.models`
+5. the protocol's own `verify.models` (i.e. no config at all)
+
+Both `porch next` and `porch done` resolve through this one ladder, so the lanes porch asks you to
+run are exactly the lanes it will require review files for.
+
+#### Worked example: keeping PIR cheap while widening the default
+
+PIR is deliberately a 2-lane (CMAP-2) protocol. A workspace-wide 3-lane default silently inflates
+it, because config outranks protocol. Scope PIR back down explicitly:
+
+```json
+{
+  "porch": {
+    "consultation": {
+      "models": ["gemini", "codex", "claude"],
+      "byProtocol": { "pir": { "models": ["gemini", "codex"] } }
+    }
+  }
+}
+```
+
+`["gemini", "codex"]` is PIR's own shipped pair, so this restores exactly what the protocol declares
+rather than substituting a different two. SPIR and ASPIR reviews run three lanes; PIR runs two.
+Without the `byProtocol` entry, PIR would run three and cost 50% more per review with no change to
+the protocol file.
+
+### The fail-fast contract, and where it stops
+
+Config errors are raised when config is **loaded** — before any consultation starts — and name the
+offending key and the valid alternatives. Nothing falls back to a default on error.
+
+**The asymmetry worth knowing about:** these two are validated very differently.
+
+| | Validated by | When you find out |
+|---|---|---|
+| `reasoningEffort` | **Codev**, against a closed enum | Config load, before anything runs |
+| Model ids | **The provider** | When the lane runs |
+
+Codev checks a model id's *syntax* only (ASCII alphanumerics plus `. _ : / @ + -`, 1–200 characters,
+no leading punctuation) — never its existence. **There is no allowlist of model ids anywhere in
+Codev, by design**: a new model must work the day the provider ships it, without a Codev release.
+
+So a typo'd model id is not caught at config time. It reaches the backend, which rejects it; that
+lane exits non-zero, the provider's error text is surfaced, the config key that supplied the id is
+named, and **no review file is written** — so porch cannot advance on a lane that never ran. What
+you do *not* get is a silent substitution of the default model.
+
+One deliberate exception: a `gemini` lane **with no model id resolved** still skips non-blockingly
+when `agy` is missing or unauthenticated (consultation is best-effort there). Once an id *is*
+resolved — from either `consult.models.gemini` **or** `--model-id` — a rejected model becomes a hard
+failure for that lane, because you asked for a specific model and did not get it. What still skips
+rather than fails, even with an id, are causes that are not the model's fault: `agy` absent,
+unauthenticated, timed out, killed by a signal, or exiting **successfully** having produced no
+output at all.
 
 ## Modes
 
@@ -90,10 +278,11 @@ consult -m codex --type integration --issue 42 --base ci
 - `--base <ref>` — **`--type integration` only.** Anchor the diff on this base branch (e.g. `ci`), computed locally as `git diff origin/<base>...origin/<head>` (three-dot, merge-base anchored). Use in repos with a long-lived integration branch ahead of the default branch so the review sees only the PR's actual change, not the whole integration-over-trunk delta. Unresolvable refs fail loudly with a `git fetch` hint (no silent fallback to the local checkout). Defaults to config `consult.integrationBranch`; with neither set, the integration review uses the PR's host-recorded base (`gh pr diff`), unchanged.
 
 **Config (`.codev/config.json`):**
-```jsonc
+`integrationBranch` is the repo-wide default base for `--type integration`, overridden by `--base`.
+
+```json
 {
   "consult": {
-    // Repo-wide default base for `--type integration` (overridden by --base).
     "integrationBranch": "ci"
   }
 }
@@ -207,6 +396,33 @@ through to a normal spawn.
 | `CODEV_AGY_AUTH_CACHE_WAIT_MS` | `6000` | How long a consult waits for another process's in-flight probe before proceeding anyway. |
 | `CODEV_AGY_AUTH_CACHE_DIR` | `~/.cache/codev` | Cache location (mainly for tests). |
 | `CODEV_AGY_AUTH_CACHE_DISABLE` | unset | `1` restores the always-spawn behaviour. |
+
+#### Test isolation
+
+The cache above protects *production* runs. It did not protect test runs: the
+cache disables itself under `VITEST` unless a cache directory is named, and any
+test that reached the gemini lane without pinning `CODEV_AGY_BIN` resolved the
+real binary — so a suite run could still open a login window per spawn (#1323).
+Consult now treats a test runner as a hard boundary. Under `VITEST` (or
+`CODEV_TEST_ISOLATION`) it refuses to resolve an unpinned `agy` and refuses to open the
+user-global metrics database, failing loudly instead of reaching either. Codev's
+own suites pin a fake `agy`, a sandbox auth cache, and a sandbox metrics DB for
+every test; spawned `codev` / `consult` children inherit the pins through the
+environment.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `CODEV_AGY_BIN` | auto-resolved | Pin the agy binary. The harness sets this to a fake for every test. |
+| `CODEV_ALLOW_REAL_AGY` | unset | `1` opts a test run into the REAL agy binary — the guarded integration smoke and real-AI e2e runs. Expect a browser window if agy's login has lapsed. |
+| `CODEV_METRICS_DB` | `~/.codev/metrics.db` | Redirect the consult metrics database. Required under a test runner; the harness points it at a temp dir so suite runs stop skewing `consult stats`. |
+| `CODEV_TEST_ISOLATION` | unset | `1` applies the same guards to a harness that is not vitest. |
+
+**Adopters:** `VITEST` is exported by *any* vitest run, including yours. If your
+project's own suite deliberately shells out to `consult -m gemini`, that call now
+throws until you set `CODEV_ALLOW_REAL_AGY=1` (and `CODEV_METRICS_DB` if you want
+the metrics recorded somewhere). This is intentional — a suite reaching the real
+agy is what #1323 was about — but it is a behaviour change, not a silent one: the
+error names the variable to set.
 
 ### Claude auth: subscription vs. metered API
 

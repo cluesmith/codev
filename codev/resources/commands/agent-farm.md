@@ -505,6 +505,42 @@ afx send [builder] [message] [options]
 - `--interrupt` - Send Ctrl+C first
 - `--raw` - Skip structured message formatting
 - `--no-enter` - Do not send Enter after message
+- `--delay <seconds>` - Deliver after N seconds instead of immediately (Spec 1307)
+
+**Delayed delivery (`--delay`):**
+
+Tower holds the message and delivers it after the stated delay, so the sending process is
+free to exit in the meantime. That is the point: a session can schedule a message to
+*itself* for after something that destroys it — which is what `/arch-save` uses to send
+`/arch-init` after a `/clear`.
+
+- **Authorised at request time, delivered later.** Target resolution and the
+  builder-spoofing check run when the command is issued, exactly as for an immediate send.
+  A delayed send cannot defer a check past the conditions that would fail it.
+- **Bounds:** a whole number of seconds, 1–3600. Rejected at the CLI *and* server
+  boundaries, because a bad value silently changes *when* (or whether) the message arrives
+  rather than failing loudly.
+- **Not persisted.** A pending message is a Tower-side timer. A Tower restart drops it, by
+  design — a delayed message's timing was chosen against a world the restart has already
+  invalidated, so delivering it late could be worse than not delivering it. Re-send by hand
+  if it matters.
+- **Ordering:** a delayed message never overtakes one already queued for that session
+  (including one held by the typing-aware send buffer), and concurrent deliveries to one
+  session do not interleave. Request order across *differing* delays is **not** preserved —
+  `--delay 30` followed by `--delay 5` delivers the 5-second one first, because that is
+  what `--delay` means.
+- **Reporting:** the CLI says "scheduled", not "sent". A message Tower is merely holding
+  has not been delivered, and saying otherwise costs someone a debugging session.
+- **Not combinable with the API's `escape` option** — an ESC bypasses buffering precisely
+  so that it interrupts the *current* turn, which a delay contradicts. Refused rather than
+  silently dropping one of the two. (`afx send` has no `--escape` flag; use `afx interrupt`.)
+- `--interrupt` **is** combinable: the Ctrl+C is deferred *with* the message rather than
+  firing immediately.
+
+```bash
+# Deliver in 15 seconds; this shell can exit immediately
+afx send architect:main --delay 15 --raw '/arch-init main'
+```
 
 **Description:**
 
@@ -863,6 +899,42 @@ Displays local tower status plus cloud registration details: tower name, ID, con
 
 **Environment Variables:**
 - `CODEVOS_URL` - Override the codevos.ai server URL (default: `https://codevos.ai`). Useful for local development or staging environments.
+
+---
+
+### afx cron
+
+Manage scheduled tasks defined as YAML files in `.af-cron/` at the workspace root. The Tower scheduler loads these every tick, runs due commands, and delivers messages through the normal send pipeline.
+
+```bash
+afx cron list                   # List all cron tasks
+afx cron status <name>          # Check task status
+afx cron run <name>             # Run immediately
+afx cron enable <name>          # Enable
+afx cron disable <name>         # Disable
+```
+
+There is NO `afx cron add` — create YAML files in `.af-cron/` directly.
+
+**Task YAML format:**
+
+```yaml
+name: Service Health Check      # required, unique per workspace
+schedule: "*/15 * * * *"        # required, cron expression (or @hourly/@daily/@startup)
+command: ./health-check.sh      # required, run via shell
+message: "Health alert: ${output}"  # required, ${output} = trimmed command output
+condition: "exitCode != 0"      # optional JS expression, see below
+target: architect               # optional, default architect
+timeout: 30                     # optional, seconds, default 30
+enabled: true                   # optional, default true
+```
+
+**Condition environment:** `condition` is a JavaScript expression evaluated with two variables in scope:
+
+- `output` (string) — the command's trimmed output
+- `exitCode` (number) — `0` on success, the command's exit code on non-zero exit, `124` on timeout, `-1` on spawn failure
+
+With a `condition`, the message is delivered exactly when the expression evaluates truthy — including on failed runs, so `condition: "exitCode != 0"` alerts when the command fails. Without a `condition`, the message is delivered only when the command exits 0.
 
 ---
 

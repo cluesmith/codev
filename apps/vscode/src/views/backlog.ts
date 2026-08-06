@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import type { OverviewBacklogItem } from '@cluesmith/codev-types';
-import { UNCATEGORIZED_AREA } from '@cluesmith/codev-core/constants';
-import { groupByArea } from '@cluesmith/codev-core/area-grouping';
+import { UNCATEGORIZED_AREA } from '@cluesmith/codev-sdk/constants';
+import { groupByArea } from '@cluesmith/codev-sdk/area-grouping';
 import type { OverviewCache } from './overview-data.js';
 import { BacklogGroupTreeItem, BacklogTreeItem } from './backlog-tree-item.js';
 import { AreaGroupExpansionStore } from './area-group-expansion.js';

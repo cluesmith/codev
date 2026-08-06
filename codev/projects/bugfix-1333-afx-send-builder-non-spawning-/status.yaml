@@ -1,0 +1,16 @@
+id: bugfix-1333
+title: afx-send-builder-non-spawning-
+protocol: bugfix
+phase: pr
+plan_phases: []
+current_plan_phase: null
+gates:
+  pr:
+    status: pending
+    requested_at: '2026-08-02T04:35:30.554Z'
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-08-02T04:02:14.892Z'
+updated_at: '2026-08-02T04:35:30.554Z'
+pr_ready_for_human: true

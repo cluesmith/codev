@@ -6,11 +6,13 @@
  * workspace path decoding, and 404 fallback.
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import http from 'node:http';
 import { EventEmitter } from 'node:events';
-import { handleRequest } from '../servers/tower-routes.js';
+import { handleRequest, startSendBuffer, stopSendBuffer } from '../servers/tower-routes.js';
 import type { RouteContext } from '../servers/tower-routes.js';
+import { shutdownDelayedSends, pendingDelayedSendCount } from '../servers/delayed-send.js';
+import { submitToSession, resetSubmissionChains } from '../servers/session-submit.js';
 
 // ============================================================================
 // Mocks
@@ -1555,11 +1557,24 @@ describe('tower-routes', () => {
       const { res } = makeRes();
 
       await handleRequest(req, res, ctx);
-      // Message is written first, then \r is sent separately after a 50ms delay
-      // so the PTY processes the multi-line paste before receiving Enter (Bugfix #492).
-      const writeCalls = mockWrite.mock.calls;
-      expect(writeCalls.length).toBe(1); // Initial write (message only)
-      expect(writeCalls[0][0]).not.toMatch(/\r$/); // No \r in initial write
+      // Message is written first, then \r is sent SEPARATELY after a delay, so
+      // the PTY processes the paste before receiving Enter (Bugfix #492/#481).
+      // That separation is the property this test exists to protect.
+      const writeCalls = mockWrite.mock.calls.map(c => c[0] as string);
+      expect(writeCalls[0]).toContain('hello');
+      expect(writeCalls[0]).not.toMatch(/\r$/); // Enter is never appended
+
+      // UPDATED (Spec 1273 verify): this previously asserted `length === 1` —
+      // i.e. that the route returned BEFORE the Enter was written. That was the
+      // bug, not the contract: an awaited send resolving before its own
+      // submission is how `afx reset` got `/clear` welded onto the front of the
+      // next message and never cleared anything. `/api/send` now awaits the
+      // submission, so by the time the request resolves the Enter HAS landed.
+      //
+      // Asserted as properties rather than an exact count, because the
+      // formatted message may be paced line-by-line (Bugfix #584).
+      expect(writeCalls.length).toBeGreaterThan(1);
+      expect(writeCalls.at(-1)).toBe('\r');
     });
 
     it('delivers message without Enter when noEnter is set (Bugfix #481)', async () => {
@@ -1612,6 +1627,579 @@ describe('tower-routes', () => {
       expect(parsed.ok).toBe(true);
       expect(parsed.deferred).toBe(false);
       // Message SHOULD be written — user is idle (Bugfix #492)
+      expect(mockWrite).toHaveBeenCalled();
+    });
+  });
+
+  // =========================================================================
+  // POST /api/send — delayed delivery (Spec 1307)
+  // =========================================================================
+
+  // These use their own terminal id. The SendBuffer in tower-routes.ts is
+  // module-level state shared across this file, and earlier tests deliberately
+  // leave messages queued for `term-001` — which a delayed send would then
+  // correctly queue behind, masking what these tests are checking.
+  describe('POST /api/send with deliverAfter', () => {
+    beforeEach(() => {
+      shutdownDelayedSends();
+    });
+
+    afterEach(() => {
+      shutdownDelayedSends();
+      // Drains anything these tests left queued, so the module-level SendBuffer
+      // does not leak state into later describes.
+      stopSendBuffer();
+      vi.useRealTimers();
+    });
+
+    function idleSession(write: ReturnType<typeof vi.fn>) {
+      return { write, pid: 1234, writable: true, isUserIdle: () => true, composing: false };
+    }
+
+    it('responds scheduled:true and writes nothing yet', async () => {
+      vi.useFakeTimers();
+      mockParseJsonBody.mockResolvedValue({
+        to: 'architect:main', message: '/arch-init main', workspace: '/tmp/ws',
+        options: { raw: true, deliverAfter: 15 },
+      });
+      mockResolveTarget.mockReturnValue({
+        terminalId: 'term-delay-083', workspacePath: '/tmp/ws', agent: 'architect',
+      });
+      const mockWrite = vi.fn();
+      mockGetTerminalManager.mockReturnValue({
+        getSession: () => idleSession(mockWrite), listSessions: () => [],
+      });
+      const { res, statusCode, body } = makeRes();
+
+      await handleRequest(makeReq('POST', '/api/send'), res, makeCtx());
+
+      expect(statusCode()).toBe(200);
+      const parsed = JSON.parse(body());
+      expect(parsed.scheduled).toBe(true);
+      expect(parsed.deliverAfter).toBe(15);
+      expect(mockWrite).not.toHaveBeenCalled();
+    });
+
+    it('delivers once the delay elapses', async () => {
+      vi.useFakeTimers();
+      mockParseJsonBody.mockResolvedValue({
+        to: 'architect:main', message: 'later', workspace: '/tmp/ws',
+        options: { raw: true, deliverAfter: 15 },
+      });
+      mockResolveTarget.mockReturnValue({
+        terminalId: 'term-delay-084', workspacePath: '/tmp/ws', agent: 'architect',
+      });
+      const mockWrite = vi.fn();
+      mockGetTerminalManager.mockReturnValue({
+        getSession: () => idleSession(mockWrite), listSessions: () => [],
+      });
+      const { res } = makeRes();
+
+      await handleRequest(makeReq('POST', '/api/send'), res, makeCtx());
+      expect(mockWrite).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(mockWrite).toHaveBeenCalled();
+    });
+
+    it('re-fetches the session at delivery and drops gracefully when it is gone', async () => {
+      // The reason delivery must not close over a PtySession: between scheduling
+      // and delivery the session can die, and writes to a stale reference go
+      // nowhere silently.
+      vi.useFakeTimers();
+      mockParseJsonBody.mockResolvedValue({
+        to: 'architect:main', message: 'later', workspace: '/tmp/ws',
+        options: { raw: true, deliverAfter: 5 },
+      });
+      mockResolveTarget.mockReturnValue({
+        terminalId: 'term-delay-085', workspacePath: '/tmp/ws', agent: 'architect',
+      });
+      const mockWrite = vi.fn();
+      let alive = true;
+      mockGetTerminalManager.mockReturnValue({
+        getSession: () => (alive ? idleSession(mockWrite) : undefined),
+        listSessions: () => [],
+      });
+      const { res, statusCode } = makeRes();
+
+      await handleRequest(makeReq('POST', '/api/send'), res, makeCtx());
+      expect(statusCode()).toBe(200);
+
+      alive = false;
+      await expect(vi.advanceTimersByTimeAsync(5_000)).resolves.not.toThrow();
+      expect(mockWrite).not.toHaveBeenCalled();
+    });
+
+    it('does not write to a session that became unwritable during the wait', async () => {
+      vi.useFakeTimers();
+      mockParseJsonBody.mockResolvedValue({
+        to: 'architect:main', message: 'later', workspace: '/tmp/ws',
+        options: { raw: true, deliverAfter: 5 },
+      });
+      mockResolveTarget.mockReturnValue({
+        terminalId: 'term-delay-086', workspacePath: '/tmp/ws', agent: 'architect',
+      });
+      const mockWrite = vi.fn();
+      let writable = true;
+      mockGetTerminalManager.mockReturnValue({
+        getSession: () => ({ ...idleSession(mockWrite), writable }),
+        listSessions: () => [],
+      });
+      const { res } = makeRes();
+
+      await handleRequest(makeReq('POST', '/api/send'), res, makeCtx());
+      writable = false;
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      expect(mockWrite).not.toHaveBeenCalled();
+    });
+
+    it('rejects an invalid delay before scheduling anything', async () => {
+      mockParseJsonBody.mockResolvedValue({
+        to: 'architect:main', message: 'x', workspace: '/tmp/ws',
+        options: { deliverAfter: 0 },
+      });
+      mockResolveTarget.mockReturnValue({
+        terminalId: 'term-delay-087', workspacePath: '/tmp/ws', agent: 'architect',
+      });
+      const { res, statusCode, body } = makeRes();
+
+      await handleRequest(makeReq('POST', '/api/send'), res, makeCtx());
+
+      expect(statusCode()).toBe(400);
+      expect(JSON.parse(body()).error).toBe('INVALID_PARAMS');
+      expect(pendingDelayedSendCount()).toBe(0);
+    });
+
+    it('rejects NaN delays', async () => {
+      mockParseJsonBody.mockResolvedValue({
+        to: 'architect:main', message: 'x', workspace: '/tmp/ws',
+        options: { deliverAfter: NaN },
+      });
+      mockResolveTarget.mockReturnValue({
+        terminalId: 'term-delay-088', workspacePath: '/tmp/ws', agent: 'architect',
+      });
+      const { res, statusCode } = makeRes();
+
+      await handleRequest(makeReq('POST', '/api/send'), res, makeCtx());
+
+      expect(statusCode()).toBe(400);
+      expect(pendingDelayedSendCount()).toBe(0);
+    });
+
+    it('refuses escape combined with a delay rather than silently ignoring one', async () => {
+      mockParseJsonBody.mockResolvedValue({
+        to: 'architect:main', message: 'x', workspace: '/tmp/ws',
+        options: { escape: true, deliverAfter: 5 },
+      });
+      mockResolveTarget.mockReturnValue({
+        terminalId: 'term-delay-089', workspacePath: '/tmp/ws', agent: 'architect',
+      });
+      const { res, statusCode, body } = makeRes();
+
+      await handleRequest(makeReq('POST', '/api/send'), res, makeCtx());
+
+      expect(statusCode()).toBe(400);
+      expect(JSON.parse(body()).message).toMatch(/escape cannot be combined with a delay/);
+      expect(pendingDelayedSendCount()).toBe(0);
+    });
+
+    it('AUTHORISES at request time: a refused target never schedules', async () => {
+      // The security-relevant property. A delayed send must not be able to defer
+      // an authorization check past the conditions that would fail it — so a
+      // resolveTarget refusal (e.g. the builder-spoofing check on
+      // `architect:<name>`) must stop the request before anything is scheduled.
+      mockParseJsonBody.mockResolvedValue({
+        to: 'architect:other', message: 'x', workspace: '/tmp/ws', from: 'aspir-1307',
+        options: { deliverAfter: 15 },
+      });
+      // Mirrors what the real resolver returns for this refusal
+      // (tower-messages.ts:229) — 'NOT_FOUND', not a 'FORBIDDEN' code that does
+      // not exist. `isResolveError` only checks for `code`, so the assertion
+      // held either way, but a mock that does not match production is a
+      // half-truth waiting to mislead the next reader.
+      mockResolveTarget.mockReturnValue({
+        code: 'NOT_FOUND',
+        message: 'builder aspir-1307 may only address its own spawning architect',
+      });
+      const { res, statusCode } = makeRes();
+
+      await handleRequest(makeReq('POST', '/api/send'), res, makeCtx());
+
+      expect(statusCode()).not.toBe(200);
+      expect(pendingDelayedSendCount()).toBe(0);
+    });
+
+    it('defers the interrupt WITH the message rather than firing it now', async () => {
+      // Otherwise the Ctrl+C lands immediately — interrupting the sender's own
+      // turn — and the message arrives alone N seconds later.
+      vi.useFakeTimers();
+      mockParseJsonBody.mockResolvedValue({
+        to: 'architect:main', message: 'later', workspace: '/tmp/ws',
+        options: { raw: true, interrupt: true, deliverAfter: 5 },
+      });
+      mockResolveTarget.mockReturnValue({
+        terminalId: 'term-delay-091', workspacePath: '/tmp/ws', agent: 'architect',
+      });
+      const mockWrite = vi.fn();
+      mockGetTerminalManager.mockReturnValue({
+        getSession: () => idleSession(mockWrite), listSessions: () => [],
+      });
+      const { res } = makeRes();
+
+      await handleRequest(makeReq('POST', '/api/send'), res, makeCtx());
+      expect(mockWrite).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(mockWrite.mock.calls[0][0]).toBe('\x03');
+    });
+
+    it('ORDERING: a delayed message never overtakes an earlier buffered one', async () => {
+      // The regression guard for the one hazard in Spec 1307 that a manual
+      // re-send cannot repair. Exercised against the REAL route and the REAL
+      // module-level SendBuffer — an equivalent test that re-implements the
+      // shouldDefer predicate locally would keep passing if the shipped
+      // predicate regressed, which is exactly what review caught.
+      vi.useFakeTimers();
+      const mockWrite = vi.fn();
+      let typing = true;
+      mockGetTerminalManager.mockReturnValue({
+        getSession: () => ({
+          write: mockWrite, pid: 1234, writable: true,
+          isUserIdle: () => !typing, composing: false,
+        }),
+        listSessions: () => [],
+      });
+      mockResolveTarget.mockReturnValue({
+        terminalId: 'term-fifo-001', workspacePath: '/tmp/ws', agent: 'architect',
+      });
+
+      // 1. /clear is sent while the user is typing → buffered by Spec 403.
+      mockParseJsonBody.mockResolvedValue({
+        to: 'architect:main', message: '/clear', workspace: '/tmp/ws', options: { raw: true },
+      });
+      const first = makeRes();
+      await handleRequest(makeReq('POST', '/api/send'), first.res, makeCtx());
+      expect(JSON.parse(first.body()).deferred).toBe(true);
+      expect(mockWrite).not.toHaveBeenCalled();
+
+      // 2. /arch-init is scheduled for +15s.
+      mockParseJsonBody.mockResolvedValue({
+        to: 'architect:main', message: '/arch-init main', workspace: '/tmp/ws',
+        options: { raw: true, deliverAfter: 15 },
+      });
+      const second = makeRes();
+      await handleRequest(makeReq('POST', '/api/send'), second.res, makeCtx());
+      expect(JSON.parse(second.body()).scheduled).toBe(true);
+
+      // 3. The user stops typing BEFORE the delayed message comes due. The
+      //    buffer's flush timer is not running yet, so /clear is still queued.
+      //    This isolates the `hasPending` term specifically: the session is
+      //    idle, so only that term can prevent a direct write.
+      typing = false;
+      await vi.advanceTimersByTimeAsync(15_000);
+
+      // Nothing has bypassed the queue.
+      const writesBeforeFlush = mockWrite.mock.calls.map(c => String(c[0])).join('');
+      expect(writesBeforeFlush).not.toContain('/arch-init');
+
+      // 4. Draining the buffer delivers them in the order they were sent.
+      startSendBuffer(() => {});
+      await vi.advanceTimersByTimeAsync(600);
+      const order = mockWrite.mock.calls.map(c => String(c[0])).join('|');
+      expect(order.indexOf('/clear')).toBeGreaterThanOrEqual(0);
+      expect(order.indexOf('/arch-init')).toBeGreaterThan(order.indexOf('/clear'));
+    });
+
+    it('ORDERING: a delayed --interrupt also queues, carrying its Ctrl+C', async () => {
+      // An immediate --interrupt deliberately bypasses buffering. A DELAYED one
+      // must not, or it reintroduces the same inversion through a side door.
+      vi.useFakeTimers();
+      const mockWrite = vi.fn();
+      let typing = true;
+      mockGetTerminalManager.mockReturnValue({
+        getSession: () => ({
+          write: mockWrite, pid: 1234, writable: true,
+          isUserIdle: () => !typing, composing: false,
+        }),
+        listSessions: () => [],
+      });
+      mockResolveTarget.mockReturnValue({
+        terminalId: 'term-fifo-002', workspacePath: '/tmp/ws', agent: 'architect',
+      });
+
+      mockParseJsonBody.mockResolvedValue({
+        to: 'architect:main', message: 'first', workspace: '/tmp/ws', options: { raw: true },
+      });
+      await handleRequest(makeReq('POST', '/api/send'), makeRes().res, makeCtx());
+
+      mockParseJsonBody.mockResolvedValue({
+        to: 'architect:main', message: 'urgent', workspace: '/tmp/ws',
+        options: { raw: true, interrupt: true, deliverAfter: 5 },
+      });
+      await handleRequest(makeReq('POST', '/api/send'), makeRes().res, makeCtx());
+
+      typing = false;
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      // The Ctrl+C has NOT jumped the queue.
+      expect(mockWrite.mock.calls.map(c => c[0])).not.toContain('\x03');
+
+      startSendBuffer(() => {});
+      await vi.advanceTimersByTimeAsync(1_000);
+      const writes = mockWrite.mock.calls.map(c => c[0]);
+      const ctrlC = writes.indexOf('\x03');
+      const firstIdx = writes.findIndex(w => String(w).includes('first'));
+      const urgentIdx = writes.findIndex(w => String(w).includes('urgent'));
+      // Order: first → Ctrl+C → urgent. The interrupt lands directly ahead of
+      // its own payload, not ahead of the whole queue.
+      expect(firstIdx).toBeGreaterThanOrEqual(0);
+      expect(ctrlC).toBeGreaterThan(firstIdx);
+      expect(urgentIdx).toBeGreaterThan(ctrlC);
+    });
+
+    it('ORDERING: two simultaneous delayed sends do not interleave their writes', async () => {
+      // Against the REAL route and the REAL paced writer. The unit-level chain
+      // test used an artificially async callback, so it proved the chain waits
+      // for the CALLBACK — not for the writes the callback schedules.
+      // writeMessageToSession returns after SCHEDULING its pacing and trailing
+      // Enter, so without waiting out that window two due messages produce
+      // "firstsecond\r\r" rather than two messages.
+      vi.useFakeTimers();
+      const mockWrite = vi.fn();
+      mockGetTerminalManager.mockReturnValue({
+        getSession: () => idleSession(mockWrite), listSessions: () => [],
+      });
+      mockResolveTarget.mockReturnValue({
+        terminalId: 'term-serial-001', workspacePath: '/tmp/ws', agent: 'architect',
+      });
+
+      for (const text of ['first', 'second']) {
+        mockParseJsonBody.mockResolvedValue({
+          to: 'architect:main', message: text, workspace: '/tmp/ws',
+          options: { raw: true, deliverAfter: 5 },
+        });
+        await handleRequest(makeReq('POST', '/api/send'), makeRes().res, makeCtx());
+      }
+
+      await vi.advanceTimersByTimeAsync(5_000);
+      await vi.advanceTimersByTimeAsync(2_000);
+
+      const writes = mockWrite.mock.calls.map(c => String(c[0]));
+      const firstIdx = writes.findIndex(w => w.includes('first'));
+      const secondIdx = writes.findIndex(w => w.includes('second'));
+
+      expect(firstIdx).toBeGreaterThanOrEqual(0);
+      expect(secondIdx).toBeGreaterThan(firstIdx);
+
+      // The decisive assertion: everything belonging to the FIRST message —
+      // including its trailing Enter — lands before the second begins. An
+      // Enter appearing after 'second' would mean the writes interleaved.
+      const enterAfterFirst = writes.findIndex((w, i) => i > firstIdx && w === '\r');
+      expect(enterAfterFirst).toBeGreaterThan(firstIdx);
+      expect(enterAfterFirst).toBeLessThan(secondIdx);
+    });
+
+    it('ORDERING: a delayed send due MID-FLUSH does not write into the flush', async () => {
+      // The window `hasPending` used to miss. flush() drops a session's queue as
+      // soon as it has SCHEDULED its paced writes, so between that moment and
+      // the trailing Enter landing, the queue looks empty. A delayed /arch-init
+      // due in that window used to write into the middle of the /clear being
+      // delivered — yielding "/clear/arch-init main" on one line, so the clear
+      // never executes at all.
+      vi.useFakeTimers();
+      const mockWrite = vi.fn();
+      let typing = true;
+      mockGetTerminalManager.mockReturnValue({
+        getSession: () => ({
+          write: mockWrite, pid: 1234, writable: true,
+          isUserIdle: () => !typing, composing: false,
+        }),
+        listSessions: () => [],
+      });
+      mockResolveTarget.mockReturnValue({
+        terminalId: 'term-midflush-001', workspacePath: '/tmp/ws', agent: 'architect',
+      });
+
+      // The /clear must be long enough that its paced writes span a real
+      // window: writeMessageToSession spaces lines 10ms apart and adds the
+      // Enter 80ms after the last one, so 150 lines ≈ 1.57s of writing. A
+      // short message completes in ~0.1s and the delayed send lands cleanly
+      // after it — which is why an earlier version of this test passed with
+      // the guard removed. Mutation testing caught that.
+      const clearBody = Array.from({ length: 150 }, (_, i) => `CLEAR-${i}`).join('\n');
+      mockParseJsonBody.mockResolvedValue({
+        to: 'architect:main', message: clearBody,
+        workspace: '/tmp/ws', options: { raw: true },
+      });
+      await handleRequest(makeReq('POST', '/api/send'), makeRes().res, makeCtx());
+
+      // Due at ~1s: after the flush starts (~0.5s), well before it finishes.
+      mockParseJsonBody.mockResolvedValue({
+        to: 'architect:main', message: 'ARCHINIT', workspace: '/tmp/ws',
+        options: { raw: true, deliverAfter: 1 },
+      });
+      await handleRequest(makeReq('POST', '/api/send'), makeRes().res, makeCtx());
+
+      // User goes idle; the buffer flush starts writing the /clear.
+      typing = false;
+      startSendBuffer(() => {});
+      await vi.advanceTimersByTimeAsync(600);   // flush fires, schedules writes
+      await vi.advanceTimersByTimeAsync(1_000); // /arch-init comes due MID-write
+      await vi.advanceTimersByTimeAsync(5_000); // everything settles
+
+      const writes = mockWrite.mock.calls.map(c => String(c[0]));
+      const joined = writes.join('');
+      const archIdx = joined.indexOf('ARCHINIT');
+      const lastClearIdx = joined.lastIndexOf('CLEAR-149');
+
+      expect(archIdx).toBeGreaterThanOrEqual(0);
+      expect(lastClearIdx).toBeGreaterThanOrEqual(0);
+      // Every part of the clear lands before the re-orientation begins.
+      expect(archIdx).toBeGreaterThan(lastClearIdx);
+    });
+
+    it('ORDERING: a delayed --interrupt due MID-FLUSH does not split into the flush', async () => {
+      // Review regression: deleting busyUntil made hasPending queue-only, and a
+      // delayed --interrupt wrote its Ctrl+C DIRECTLY (outside the lock) before
+      // its payload. Due mid-flush, that Ctrl+C landed inside the flush's
+      // stream, separated from its own payload. The fix folds the Ctrl+C into
+      // the payload's submitToSession reservation, so the whole interrupt+
+      // message queues behind the flush as a unit.
+      vi.useFakeTimers();
+      const mockWrite = vi.fn();
+      let typing = true;
+      mockGetTerminalManager.mockReturnValue({
+        getSession: () => ({
+          write: mockWrite, pid: 1234, writable: true,
+          isUserIdle: () => !typing, composing: false,
+        }),
+        listSessions: () => [],
+      });
+      mockResolveTarget.mockReturnValue({
+        terminalId: 'term-midflush-int', workspacePath: '/tmp/ws', agent: 'architect',
+      });
+
+      const clearBody = Array.from({ length: 150 }, (_, i) => `CLEAR-${i}`).join('\n');
+      mockParseJsonBody.mockResolvedValue({
+        to: 'architect:main', message: clearBody, workspace: '/tmp/ws', options: { raw: true },
+      });
+      await handleRequest(makeReq('POST', '/api/send'), makeRes().res, makeCtx());
+
+      // A delayed INTERRUPT due mid-flush.
+      mockParseJsonBody.mockResolvedValue({
+        to: 'architect:main', message: 'URGENT', workspace: '/tmp/ws',
+        options: { raw: true, interrupt: true, deliverAfter: 1 },
+      });
+      await handleRequest(makeReq('POST', '/api/send'), makeRes().res, makeCtx());
+
+      typing = false;
+      startSendBuffer(() => {});
+      await vi.advanceTimersByTimeAsync(600);
+      await vi.advanceTimersByTimeAsync(1_000);
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      const writes = mockWrite.mock.calls.map(c => String(c[0]));
+      const ctrlCIdx = writes.indexOf('\x03');
+      const lastClear = writes.map((w, i) => w.includes('CLEAR-149') ? i : -1).filter(i => i >= 0).pop() ?? -1;
+      const urgentIdx = writes.findIndex(w => w.includes('URGENT'));
+
+      // The Ctrl+C did not jump into the flush: it lands after the whole clear,
+      // and directly ahead of its own payload.
+      expect(lastClear).toBeGreaterThanOrEqual(0);
+      expect(ctrlCIdx).toBeGreaterThan(lastClear);
+      expect(urgentIdx).toBeGreaterThan(ctrlCIdx);
+    });
+
+    it('CANCELLATION: a delayed send whose lock wait outlasts shutdown does not write', async () => {
+      // The route-site `stillLive` guard, exercised where it lives. The
+      // delayed-send unit test only checks the predicate's value; this drives
+      // the real deliverOrBuffer and asserts the WRITE is skipped.
+      //
+      // Window: the delayed timer fires (generation check passes), delivery
+      // enters deliverOrBuffer and calls submitToSession, which QUEUES behind an
+      // occupier already holding this session's lock. Shutdown then bumps the
+      // generation. When the lock frees, the guard inside the reservation sees
+      // stillLive() === false and returns without writing.
+      vi.useFakeTimers();
+      resetSubmissionChains();
+      const mockWrite = vi.fn();
+      mockGetTerminalManager.mockReturnValue({
+        getSession: () => ({
+          write: mockWrite, pid: 1234, writable: true,
+          isUserIdle: () => true, composing: false,
+        }),
+        listSessions: () => [],
+      });
+      mockResolveTarget.mockReturnValue({
+        terminalId: 'term-cancel-lock', workspacePath: '/tmp/ws', agent: 'architect',
+      });
+
+      // Occupy the session's lock for 10s so any later submission queues behind it.
+      void submitToSession('term-cancel-lock', () => 10_000);
+
+      // A delayed send due at 1s — it will queue behind the occupier.
+      mockParseJsonBody.mockResolvedValue({
+        to: 'architect:main', message: 'CANARYMSG', workspace: '/tmp/ws',
+        options: { raw: true, deliverAfter: 1 },
+      });
+      await handleRequest(makeReq('POST', '/api/send'), makeRes().res, makeCtx());
+
+      await vi.advanceTimersByTimeAsync(1_000); // delayed timer fires, queues on the lock
+      shutdownDelayedSends();                    // shutdown while it waits
+      await vi.advanceTimersByTimeAsync(15_000); // occupier frees; queued delivery runs its guard
+
+      // The guard skipped the write: CANARYMSG never reached the session.
+      const wrote = mockWrite.mock.calls.map(c => String(c[0])).join('');
+      expect(wrote).not.toContain('CANARYMSG');
+    });
+
+    it('logs a write that throws instead of swallowing it (Codex/Claude PR review)', async () => {
+      // A torn-down session can make the write throw. The submission lock's
+      // callers only .catch to keep Tower alive; without logging here the drop
+      // is silent, which is exactly the delivery-outcome the log must record.
+      vi.useFakeTimers();
+      const ctxLog = vi.fn();
+      const throwingWrite = vi.fn(() => { throw new Error('session gone'); });
+      mockGetTerminalManager.mockReturnValue({
+        getSession: () => ({
+          write: throwingWrite, pid: 1234, writable: true,
+          isUserIdle: () => true, composing: false,
+        }),
+        listSessions: () => [],
+      });
+      mockResolveTarget.mockReturnValue({
+        terminalId: 'term-throw', workspacePath: '/tmp/ws', agent: 'architect',
+      });
+      mockParseJsonBody.mockResolvedValue({
+        to: 'architect:main', message: 'x', workspace: '/tmp/ws', options: { raw: true },
+      });
+      await handleRequest(makeReq('POST', '/api/send'), makeRes().res, makeCtx({ log: ctxLog }));
+      await vi.advanceTimersByTimeAsync(200);
+
+      const errorLogged = ctxLog.mock.calls.some(
+        c => c[0] === 'ERROR' && String(c[1]).includes('write threw'),
+      );
+      expect(errorLogged).toBe(true);
+    });
+
+    it('leaves undelayed sends on the immediate path', async () => {
+      mockParseJsonBody.mockResolvedValue({
+        to: 'architect:main', message: 'now', workspace: '/tmp/ws', options: { raw: true },
+      });
+      mockResolveTarget.mockReturnValue({
+        terminalId: 'term-delay-096', workspacePath: '/tmp/ws', agent: 'architect',
+      });
+      const mockWrite = vi.fn();
+      mockGetTerminalManager.mockReturnValue({
+        getSession: () => idleSession(mockWrite), listSessions: () => [],
+      });
+      const { res, body } = makeRes();
+
+      await handleRequest(makeReq('POST', '/api/send'), res, makeCtx());
+
+      const parsed = JSON.parse(body());
+      expect(parsed.scheduled).toBe(false);
       expect(mockWrite).toHaveBeenCalled();
     });
   });

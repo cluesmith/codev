@@ -12,7 +12,7 @@ import { MOBILE_BREAKPOINT } from '../lib/constants.js';
 import { uploadPasteImage } from '../lib/api.js';
 import { ScrollController } from '../lib/scrollController.js';
 import { EscapeBuffer } from '../lib/escapeBuffer.js';
-import { BackoffController, classifyUpgradeError } from '@cluesmith/codev-core/reconnect-policy';
+import { BackoffController, classifyUpgradeError } from '@cluesmith/codev-sdk/reconnect-policy';
 
 /**
  * Floating controls overlay for terminal windows — refresh (re-fit + resize)

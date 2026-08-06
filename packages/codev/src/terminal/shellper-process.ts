@@ -37,7 +37,7 @@ import {
   type SignalMessage,
   type SpawnMessage,
 } from './shellper-protocol.js';
-import { ShellperReplayBuffer } from './shellper-replay-buffer.js';
+import { ShellperReplayBuffer, REPLAY_BUFFER_MAX_BYTES } from './shellper-replay-buffer.js';
 import { DEFAULT_COLS, DEFAULT_ROWS } from './index.js';
 
 // --- IShellperPty: abstraction over node-pty for testing ---
@@ -99,9 +99,10 @@ export class ShellperProcess extends EventEmitter {
     private readonly socketPath: string,
     replayBufferLines: number = 10_000,
     private readonly log: (msg: string) => void = () => {},
+    replayBufferBytes: number = REPLAY_BUFFER_MAX_BYTES,
   ) {
     super();
-    this.replayBuffer = new ShellperReplayBuffer(replayBufferLines);
+    this.replayBuffer = new ShellperReplayBuffer(replayBufferLines, replayBufferBytes);
   }
 
   /**
@@ -388,11 +389,20 @@ export class ShellperProcess extends EventEmitter {
     // that fit; a tail-trimmed replay can render imperfectly for alt-screen
     // TUIs (#1047), but the client's post-connect resize nudge repaints,
     // and a truncated replay beats a dead connection.
-    let replayData = this.replayBuffer.getReplayData();
-    if (replayData.length > REPLAY_PAYLOAD_MAX) {
-      this.log(`Replay ${replayData.length} bytes exceeds cap; sending last ${REPLAY_PAYLOAD_MAX}`);
-      replayData = replayData.subarray(replayData.length - REPLAY_PAYLOAD_MAX);
-    }
+    //
+    // #1205: the cap is passed *into* the buffer rather than applied to its
+    // result. This path runs on every connect, so capping afterwards meant
+    // allocating a copy of the entire session history first — the multi-GB
+    // open-time spike.
+    //
+    // There is deliberately no post-hoc `length > REPLAY_PAYLOAD_MAX` guard
+    // here. Passing the cap in makes one unreachable: getReplayData never
+    // returns more than its argument. An earlier revision kept such a guard as
+    // "defense in depth" and claimed a test covered it; neither was true, and
+    // an unreachable branch that looks load-bearing is worse than none. The
+    // invariant is enforced by getReplayData's contract and pinned by the
+    // oversized-retention test, which fails if this argument is ever dropped.
+    const replayData = this.replayBuffer.getReplayData(REPLAY_PAYLOAD_MAX);
     // #1198: send REPLAY even when empty, so a client awaiting the frame
     // resolves immediately instead of burning its timeout. Creation-time
     // attach awaits the frame to avoid racing early child output into a

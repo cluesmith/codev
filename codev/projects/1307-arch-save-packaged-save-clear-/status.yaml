@@ -1,0 +1,123 @@
+id: '1307'
+title: arch-save-packaged-save-clear-
+protocol: aspir
+phase: review
+plan_phases:
+  - id: phase_1
+    title: afx send --delay (Tower-side deferred delivery)
+    status: complete
+  - id: phase_2
+    title: /arch-save skill in four trees + state-block template
+    status: complete
+  - id: phase_3
+    title: Live end-to-end run and documentation
+    status: complete
+current_plan_phase: null
+gates:
+  pr:
+    status: approved
+    requested_at: '2026-08-02T05:46:32.100Z'
+    approved_at: '2026-08-05T04:26:46.051Z'
+  verify-approval:
+    status: pending
+iteration: 1
+build_complete: true
+history:
+  - iteration: 1
+    plan_phase: phase_1
+    build_output: ''
+    reviews:
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/aspir-1307/codev/projects/1307-arch-save-packaged-save-clear-/1307-phase_1-iter1-codex.txt
+      - model: claude
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/aspir-1307/codev/projects/1307-arch-save-packaged-save-clear-/1307-phase_1-iter1-claude.txt
+  - iteration: 2
+    plan_phase: phase_1
+    build_output: ''
+    reviews:
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/aspir-1307/codev/projects/1307-arch-save-packaged-save-clear-/1307-phase_1-iter2-codex.txt
+      - model: claude
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/aspir-1307/codev/projects/1307-arch-save-packaged-save-clear-/1307-phase_1-iter2-claude.txt
+  - iteration: 3
+    plan_phase: phase_1
+    build_output: ''
+    reviews:
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/aspir-1307/codev/projects/1307-arch-save-packaged-save-clear-/1307-phase_1-iter3-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/aspir-1307/codev/projects/1307-arch-save-packaged-save-clear-/1307-phase_1-iter3-claude.txt
+  - iteration: 1
+    plan_phase: phase_2
+    build_output: ''
+    reviews:
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/aspir-1307/codev/projects/1307-arch-save-packaged-save-clear-/1307-phase_2-iter1-codex.txt
+      - model: claude
+        verdict: COMMENT
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/aspir-1307/codev/projects/1307-arch-save-packaged-save-clear-/1307-phase_2-iter1-claude.txt
+  - iteration: 1
+    plan_phase: phase_3
+    build_output: ''
+    reviews:
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/aspir-1307/codev/projects/1307-arch-save-packaged-save-clear-/1307-phase_3-iter1-codex.txt
+      - model: claude
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/aspir-1307/codev/projects/1307-arch-save-packaged-save-clear-/1307-phase_3-iter1-claude.txt
+  - iteration: 2
+    plan_phase: phase_3
+    build_output: ''
+    reviews:
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/aspir-1307/codev/projects/1307-arch-save-packaged-save-clear-/1307-phase_3-iter2-codex.txt
+      - model: claude
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/aspir-1307/codev/projects/1307-arch-save-packaged-save-clear-/1307-phase_3-iter2-claude.txt
+  - iteration: 3
+    plan_phase: phase_3
+    build_output: ''
+    reviews:
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/aspir-1307/codev/projects/1307-arch-save-packaged-save-clear-/1307-phase_3-iter3-codex.txt
+      - model: claude
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/aspir-1307/codev/projects/1307-arch-save-packaged-save-clear-/1307-phase_3-iter3-claude.txt
+started_at: '2026-07-31T21:42:49.601Z'
+updated_at: '2026-08-05T04:26:46.052Z'
+force_advanced:
+  phase: phase_3
+  iteration: 3
+  max_iterations: 3
+  rebuttal_file: 1307-phase_3-iter3-rebuttals.md
+  at: '2026-08-02T05:03:27.880Z'
+pr_history:
+  - phase: review
+    pr_number: 1335
+    branch: builder/aspir-1307
+    created_at: '2026-08-02T05:22:40.839Z'
+pr_ready_for_human: false

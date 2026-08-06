@@ -9,7 +9,7 @@
 
 import * as vscode from 'vscode';
 import * as path from 'node:path';
-import { resolveAgentName } from '@cluesmith/codev-core/agent-names';
+import { resolveAgentName } from '@cluesmith/codev-sdk/agent-names';
 import type { ConnectionManager } from '../connection-manager.js';
 import type { TerminalManager } from '../terminal-manager.js';
 import { startDevForTarget } from './dev-shared.js';
