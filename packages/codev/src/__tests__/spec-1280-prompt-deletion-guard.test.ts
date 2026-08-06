@@ -24,6 +24,9 @@
  * anti-vacuity string is the literal `Baked Decisions` (specify.md carries the clause as a bullet,
  * not a `## Baked Decisions` heading like the builder-prompts). Full trace:
  * codev/resources/1280-retirements.md (R2).
+ *
+ * R3 (approved 2026-08-06) does the same for air/implement.md — the last PHASE_2 file — after
+ * Phase 6's P1 rewrite retired its pure-addition guard. Full trace: 1280-retirements.md (R3).
  */
 import { describe, it, expect } from 'vitest';
 import * as fs from 'node:fs';
@@ -136,4 +139,41 @@ describe('Spec 1280 — SPIR/ASPIR specify.md do not silently lose content (repl
       });
     });
   }
+});
+
+// R3 (Spec 1280, approved 2026-08-06): air/implement.md — the last PHASE_2 file — re-anchored on a
+// post-1280 baseline after Phase 6's P1 rewrite retired its pre-746 pure-addition guard.
+const airImplementBaseline = path.join(baselineDir, 'air-implement.md.baseline');
+const airImplementCurrent = path.join(repoRoot, 'codev/protocols/air/prompts/implement.md');
+
+describe('Spec 1280 — air/implement.md does not silently lose content (replaces R3)', () => {
+  it('has a post-1280 baseline committed', () => {
+    expect(
+      fs.existsSync(airImplementBaseline),
+      'missing baseline for air/implement.md; the guard cannot protect what it has no reference for',
+    ).toBe(true);
+  });
+
+  it('anti-vacuity: the baseline carries Spec 746 content', () => {
+    const baseline = fs.readFileSync(airImplementBaseline, 'utf-8');
+    expect(baseline).toContain('Baked Decisions');
+    expect(baseline.toLowerCase()).toContain('do not autonomously');
+  });
+
+  it('no baseline line has been deleted', () => {
+    expectNoDeletion(
+      'air/implement.md',
+      fs.readFileSync(airImplementBaseline, 'utf-8'),
+      fs.readFileSync(airImplementCurrent, 'utf-8'),
+    );
+  });
+
+  it('the skeleton twin still matches', () => {
+    const ours = fs.readFileSync(airImplementCurrent, 'utf-8');
+    const skeleton = fs.readFileSync(
+      path.join(repoRoot, 'codev-skeleton/protocols/air/prompts/implement.md'),
+      'utf-8',
+    );
+    expect(skeleton).toBe(ours);
+  });
 });
