@@ -221,3 +221,47 @@ describe('Spec 1280 — spir consult-types do not silently lose content (replace
     });
   }
 });
+
+// R6 (Spec 1280, class-pre-approved, applied 2026-08-06): the last four PHASE_3 consult-types —
+// aspir spec/plan-review + air impl/pr-review — re-anchored on post-1280 baselines after Phase 8's
+// P1/P2 rewrite retired their pre-746 pure-addition guard. Full trace: 1280-retirements.md (R6).
+const GUARDED_R6_CONSULT: Array<{ proto: string; name: string }> = [
+  { proto: 'aspir', name: 'spec-review' },
+  { proto: 'aspir', name: 'plan-review' },
+  { proto: 'air', name: 'impl-review' },
+  { proto: 'air', name: 'pr-review' },
+];
+
+describe('Spec 1280 — aspir/air consult-types do not silently lose content (replaces R6)', () => {
+  for (const { proto, name } of GUARDED_R6_CONSULT) {
+    const baseline = path.join(baselineDir, `${proto}-${name}.md.baseline`);
+    const current = path.join(repoRoot, 'codev/protocols', proto, 'consult-types', `${name}.md`);
+    describe(`${proto} ${name}.md`, () => {
+      it('has a post-1280 baseline committed', () => {
+        expect(
+          fs.existsSync(baseline),
+          `missing baseline for ${proto} ${name}.md; the guard cannot protect what it has no reference for`,
+        ).toBe(true);
+      });
+
+      it('anti-vacuity: the baseline carries Spec 746 content', () => {
+        const b = fs.readFileSync(baseline, 'utf-8');
+        expect(b).toContain('Baked Decisions');
+        expect(b.toLowerCase()).toContain('do not autonomously');
+      });
+
+      it('no baseline line has been deleted', () => {
+        expectNoDeletion(`${proto} ${name}.md`, fs.readFileSync(baseline, 'utf-8'), fs.readFileSync(current, 'utf-8'));
+      });
+
+      it('the skeleton twin still matches', () => {
+        const ours = fs.readFileSync(current, 'utf-8');
+        const skeleton = fs.readFileSync(
+          path.join(repoRoot, 'codev-skeleton/protocols', proto, 'consult-types', `${name}.md`),
+          'utf-8',
+        );
+        expect(skeleton).toBe(ours);
+      });
+    });
+  }
+});
