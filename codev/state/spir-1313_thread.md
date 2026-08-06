@@ -1769,3 +1769,85 @@ PLAN (Approach B — enqueue-to-mailbox-when-due; preserves 1307 semantics, no s
      structurally impossible in the mailbox); keep the delayed-send.ts unit tests.
   6. config.ts (+96, Spec 1286 consult-lane) — union with my mailbox config knobs. pnpm-lock — regen. package.json — take main's version.
 Starting the rebase now. Not self-approving/merging; PR stays draft.
+
+### 2026-08-06 — Rebase COMPLETE (150/150 onto origin/main); dropped-merge artifacts found & fixed; --delay re-homed
+Rebase landed all 150 commits onto current origin/main. 0 behind / 150 ahead, no markers. Conflicts resolved:
+- **commit 40 (ff3b66eb, mailbox-first)**: 7 conflicts. `git rm` send-buffer.ts + its test (my deletion stands — all 1307
+  additions to it are subsumed by the mailbox). tower-client.ts (sdk; #1189 moved it core→sdk) → UNION response fields
+  (scheduled/deferred [1307] + delivered/held/reason/mailboxId [1313]). tower-server.ts → my drainer + PRESERVE main's
+  shutdownDelayedSends. send.ts → fan-out result `{delivered,held,scheduled,failed}` (dropped dead `deferred` bucket).
+  tower-routes.ts + tower-routes.test.ts → `checkout --theirs` (my version) — verified ALL of main's tower-routes changes
+  are send-path (Spec 1307), nothing non-send lost.
+- **commit 60**: tower-server import union (setMailboxBroadcaster + shutdownDelayedSends).
+- **commit 82**: arch-critical.md (UNION: main's #1189 server/client-isolation fact + my mailbox-first fact) +
+  lessons-learned.md (UNION #1205 + 1313 lessons).
+- **commit 99 (CMAP r1)** + **144 (silent-loss)**: interrupt submitToSession block / session-submit doc-comment (took my
+  mailbox-accurate version — it documents the submission-lock SUBSUMPTION the architect asked me to verify).
+
+**ROOT-CAUSE of the trickiest artifacts — a FLATTENED MERGE.** My original branch had a merge commit `6a50091a` ("merge
+origin/main into builder/spir-1313", ^2 = 3f622fe6 = my rebase base) that pulled origin/main's **Spec 1273** submitToSession
+import + escape-wrap into tower-routes.ts. `git rebase` FLATTENS merges → that content was dropped, so commit 99 (which USES
+submitToSession) had a missing import + the escape path reverted to bare. Since 6a50091a's ^2 IS my rebase base, everything the
+merge pulled is already in the base — the ONLY real artifacts are where my wholesale `checkout --theirs` discarded base content:
+**tower-routes.ts** (fixed: restored to backup HEAD's version = escape wrapped + import w/ comment; diff vs backup now only the
+--delay graft) and tower-routes.test.ts (took my version; re-covering delay at route level). Verified via `git diff backup HEAD
+-- tower-routes.ts` = exactly the 2 artifacts, nothing else. Base test files (spec-1273/1307 tests, delayed-send.ts) all present.
+
+**--delay RE-HOMED (Approach B).** In handleSend: parse+validate `deliverAfter` + refuse escape+delay; delay branch schedules a
+due-time callback that ENQUEUES to the mailbox + `getMailboxDrainer().scheduleDrain()` (gated delivery). Delayed `--interrupt`
+keeps the gate-bypass (re-fetch session; Ctrl+C+write under submitToSession; degrade to held if session gone). Response
+`scheduled:true`. `delayed-send.ts` (timer registry) survives verbatim (decoupled from SendBuffer). spec-1307-send-delay.test.ts:
+removed SendBuffer import + FakeSession/bufferedMessage + the 2 SendBuffer-coupled ORDERING describe blocks (obsolete — mailbox
+oldest-first designs the inversion out); KEPT validateDelaySeconds/scheduleDelayedSend/shutdownDelayedSends/per-terminal-chain
+(all test the surviving delayed-send.ts). CLAUDE.md/AGENTS.md byte-identical to origin/main (Send-outcomes section gone) → T16
+green on-branch after rebase.
+
+**Behavior nuance to report:** a delayed send that comes due then can't deliver (busy) is now a DURABLE held row (survives
+restart) — strictly stronger than 1307's always-drop-on-restart; not-yet-due sends still drop on restart (1307 contract intact).
+NEXT: build (running) → full unit suite + delivery e2e → add a route-level --delay test → commit (reconciliation + test) →
+force-with-lease push → report. Staying at pr gate.
+
+### 2026-08-06 — RESUMED: architect 1307 correction; --delay contract verified + tested; 2 failures fixed; suite GREEN
+Architect RETRACTED the earlier "spec 1307 is mislabeled / don't read it" guidance: spec 1307 IS /arch-save but was DESCOPED by
+the owner to exactly ONE mechanism — `afx send --delay`. So `--delay` is a genuine 1307 deliverable, the commit tags are correct,
+and `codev/specs/1307-arch-save-packaged-save-clear-.md` on origin/main is the AUTHORITATIVE contract. Read it; verified my
+mailbox re-homing preserves all 5 load-bearing points:
+- **(1) ORDERING (load-bearing)** — a delayed send must never overtake a message already QUEUED for the session (the /clear-no-delay
+  then /arch-init-delay case; /clear must land first). HOLDS by construction: the delayed row is enqueued ONLY at fire-time (timer
+  callback → `enqueueMailbox`), so its `created_at` is strictly later than any already-held row; the drain (`findHeldForAgent`)
+  returns oldest-first (`created_at ASC`) and delivers held[0], one per clean gate pass, serialized per-agent (KeyedSerializer) with
+  an atomic claim. So /clear (older) always drains before /arch-init (younger). 1307 got this from SendBuffer FIFO; we get it from
+  the mailbox oldest-first drain.
+- **(2) COMPOSITION** — `--delay` composes with --raw/--file/--no-enter/--all/--interrupt + every addressing form; undelayed path
+  unchanged (delay branch gated on `deliverAfter !== undefined`). Handled in the handleSend graft (formattedMessage honors raw,
+  noEnter threaded, interrupt sub-branch keeps the gate-bypass, resolveTarget owns addressing/spoofing).
+- **(3) NOT request-order across differing delays** — `--delay 30` then `--delay 5` delivers 5s first. Not FIFO. Covered by the
+  "delivers by DUE time" test.
+- **(4) Invalid delays rejected at the CLI boundary** — validateDelaySeconds (also re-validated at the public /api/send route).
+- **(5) DURABILITY** — pre-due delayed sends live ONLY in the in-memory timer registry (dropped on Tower restart, per 1307); the
+  durable mailbox row is created by the fire-time callback, never before. A due-then-held send becomes a durable held row (strictly
+  stronger than 1307's always-drop; not-yet-due still drops).
+
+**Fixed the 2 known reconciliation failures:**
+1. `hot-tier.test.ts` (Spec 987 cap): arch-critical.md UNION was 11 facts (cap 10). Demoted the "Governance docs are two-tier
+   (Spec 987)" META-fact to cold — its full treatment already lives in arch.md §Spec 987 (2058-2066), and the hot file's own header
+   already states the cap/displacement discipline, so zero info lost. Kept both new behavior-changers hot (#1189 server/client +
+   1313 mailbox-first). Now 10 facts / 32 lines. Used the update-arch-docs skill (diff-mode). CLAUDE.md/AGENTS.md untouched (1280).
+2. `send.test.ts` "buffered send as queued": the SendBuffer `deferred`/"queued" bucket is dead; send.ts reports `held` via
+   logger.info now. Rewrote the test to the mailbox `held` model (asserts held-not-delivered).
+
+**Added the ordering regression guard** (the mailbox-model replacement for the removed SendBuffer ordering test): new nested test
+in `send-delivery.test.ts` — "delayed sends never overtake already-queued mail (Spec 1307 ordering)". Drives the REAL chain:
+real `scheduleDelayedSend` timer (fake clock) → fire-time `mailbox.enqueue` → real `deliverAgentMail` drain → asserts /clear
+drains first, /arch-init second, and that /arch-init's row doesn't exist until the timer fires (created_at strictly later). Left a
+pointer to it in spec-1307-send-delay.test.ts's FIFO section.
+
+**Reconciliation-artifact cleanup:** delayed-send.ts (the survivor file) carried present-tense refs to DELETED code — `SendBuffer`
+and `deliverOrBuffer` (main's function that never existed in my tree). Rewrote those doc-comments to the mailbox path; also fixed
+the 4 `deliverOrBuffer` refs in spec-1307-send-delay.test.ts and its stale pointer to a non-existent tower-routes interleave test
+(now points to the real `deliverAgentMailSerialized` serialization test). `grep deliverOrBuffer` = NONE. Every other file already
+framed SendBuffer as "retired" correctly.
+
+**Green:** full build exit 0; full unit suite **4535 passed / 0 failed / 48 skipped** (was 4532/2/48 pre-fix). Delivery e2e
+(send-integration.e2e.test.ts) running. NEXT: commit the reconciliation as logical commits → force-with-lease push PR #1330 →
+report to architect. STAYING at pr gate — no self-approve, no merge, no status.yaml edits.
