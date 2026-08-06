@@ -17,7 +17,7 @@
  *       marker — never a scan to the screen bottom), AND
  *   (c) zero normal-intensity (non-dim), non-whitespace, non-chrome cells in that
  *       region — with one measured exemption: claude's suggested-command *ghost* cursor
- *       cell (an inverse, non-dim char at the cursor followed by a dim/empty run), which
+ *       cell (an inverse, non-dim char at the cursor followed by a non-empty dim run), which
  *       is composer chrome, not typed text (see `isGhostCursorCell`).
  * The placeholder-vs-user-text distinction is an SGR attribute — both TUIs
  * render rotating placeholder/hint text DIM while typed text is normal-intensity
@@ -209,9 +209,12 @@ function findRegionEnd(lines: string[], markerRow: number, endPatterns: RegExp[]
  *   - an inverse *selection* over real multi-char text fails the dim-tail test (its
  *     following cells are non-dim) and, even if it passed, only this one cell is skipped
  *     while every other selected cell keeps the verdict `busy`.
- * Sole residual (accepted, documented in the review's Technical Debt): a 1-char draft with
- * the cursor relocated onto its only char inside the exact delivery window — identical to
- * the plain cursor-skip option's residual; a multi-char draft always holds.
+ * A lone inverse cursor cell with NO dim tail (a 1-char draft with the cursor sitting on its
+ * only char, empty composer otherwise) is NOT exempted — it stays `busy` — because the
+ * exemption requires positive ghost evidence (≥1 dim suggestion-body cell). That closes the
+ * false-clean an empty-tail exemption would have opened, honoring the no-new-corruption-vector
+ * / fail-toward-hold invariant (Codex CMAP, 2026-08-06). Real ghosts always carry a multi-char
+ * dim command body (the captured fixture's tail is 23 dim cells), so nothing real is lost.
  */
 function isGhostCursorCell(
   line: BufferLine,
@@ -225,15 +228,20 @@ function isGhostCursorCell(
 ): boolean {
   if (row !== cursorRow || col !== cursorCol) return false;
   if (!cell.isInverse()) return false; // typed text is never inverse-rendered; only the software cursor is
-  // The ghost tail: every following non-whitespace, non-chrome cell on this row must be
-  // dim (the SGR-2 suggestion body). Any non-dim text to the right ⇒ real content, not a ghost.
+  // Require POSITIVE ghost evidence: at least one dim, non-whitespace, non-chrome cell must
+  // follow on this row (the SGR-2 suggestion body), and EVERY following such cell must be dim.
+  // An empty / whitespace-only tail is NOT a ghost — it is a 1-char draft with the cursor on
+  // its only char, which must stay `busy` (fail-toward-hold; a lone inverse cell is not proof
+  // of a ghost). Any non-dim text to the right ⇒ real content, also not a ghost.
+  let sawDimTail = false;
   for (let c = col + 1; c < cols; c++) {
     line.getCell(c, probe);
     const ch = probe.getChars();
     if (!ch || WHITESPACE.test(ch) || IGNORE_CHARS.has(ch)) continue;
     if (!probe.isDim()) return false;
+    sawDimTail = true;
   }
-  return true;
+  return sawDimTail;
 }
 
 /**

@@ -303,6 +303,19 @@ describe('render-gate — claude suggested-command ghost (Spec 1313 render-gate 
     expect(v.detail).toBe('user-text');
   });
 
+  it('an inverse non-dim cursor char with an EMPTY tail → busy (a lone inverse cell is not a ghost)', async () => {
+    // Codex CMAP (2026-08-06): the exemption must require POSITIVE ghost evidence — at least one
+    // dim suggestion-body cell after the cursor. A 1-char draft with the cursor parked on its
+    // only char renders as a lone inverse cell with an empty tail; without the positive-evidence
+    // rule it would false-clean (the documented "residual" was actually a spec violation —
+    // no-new-corruption-vector / fail-toward-hold). An empty tail now stays busy. Genuine ghosts
+    // always carry a multi-char dim command body (the real fixture's tail is 23 dim cells).
+    const snap = withCursor(1, 3, `❯ ${INV}x${INV_OFF}`, '──────────');
+    const v = await classifyScreen(snap, CLAUDE_PROFILE);
+    expect(v.clean).toBe(false);
+    expect(v.detail).toBe('user-text');
+  });
+
   it('a real draft with the inverse block cursor on trailing whitespace → busy (claude never inverse-renders typed text)', async () => {
     // Models claude's ACTUAL real-draft rendering (measured live, task-vdfd draft "dfsd"): typed
     // characters are non-inverse and the inverse block cursor rests on the empty cell past them.
