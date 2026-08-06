@@ -1239,3 +1239,23 @@ Three group-pure commits + manifest. Suite green at 0a79f413: 4184 passed / 48 s
 re-run (before/after, deleted-vs-relocated, M0c/M1/M2); T9 live spawn probe; T10 rollback rehearsal for
 every group G1-G7; governance docs routed by tier (incl. the "trust the authoritative source not the
 convenient signal" lesson). Then PR + review.
+
+### Phase 10 COMPLETE — PR #1362 open, at the human pr gate (2026-08-06)
+
+Verification-only phase. HEAD 910f00b2, suite green (4184 pass / 48 skip).
+- **Measurement report** (1280-measurement-report.md): always-on builder 34231→18233 (−47%),
+  architect −66%, total authored 153205→106032 (−31%). M0c relocation proven (skills grew +4516w).
+- **M5** verified: no capability present in the frozen Phase-0 inventory is absent post-rewrite.
+- **Governance**: routed "trust the authoritative source not the convenient signal" to cold
+  lessons-learned.md (hot already has the principle); arch-critical.md unchanged (no module-boundary
+  change).
+- **T10 group purity** verified structurally (rewrite commits .md-only; retirements register+test;
+  guards baseline+test). **T9 (spawn probe) + full T10 (rollback rehearsal) DEFERRED to integration**
+  — both require the main workspace root / destructive git, which a builder worktree cannot do
+  safely. Flagged in the review + PR.
+- **Review** written (codev/reviews/1280-...md) with ## Architecture Updates + ## Lessons Learned
+  Updates for the porch checks. **PR #1362** created, Closes #1280.
+
+All ten implement phases done, suite green. Project is at the **pr gate (human approval)** — the one
+step a builder cannot self-serve. Notified architect. Nothing further to do autonomously until the
+human reviews/merges.
