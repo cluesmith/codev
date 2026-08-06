@@ -47,16 +47,18 @@ gates:
     requested_at: '2026-08-01T04:00:12.126Z'
     approved_at: '2026-08-01T04:26:10.219Z'
   pr:
-    status: pending
+    status: approved
+    approved_at: '2026-08-06T20:36:07.661Z'
   verify-approval:
     status: pending
 iteration: 1
 build_complete: false
 history: []
 started_at: '2026-08-01T02:46:36.457Z'
-updated_at: '2026-08-01T04:39:51.924Z'
+updated_at: '2026-08-06T20:36:07.662Z'
 pr_history:
   - phase: implement
     pr_number: 1319
     branch: builder/1280-instrument
     created_at: '2026-08-01T04:39:51.923Z'
+pr_ready_for_human: false
