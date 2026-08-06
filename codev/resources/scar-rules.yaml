@@ -1,0 +1,83 @@
+# Scar-rule registry (Spec 1280, rebuilt in Phase 9 from the Spec 1252 registry).
+#
+# A scar rule is a prohibition written after a specific incident where an agent
+# destroyed work or bypassed a human decision. The eight rules below are kept
+# VERBATIM (Spec 1280 Baked Decision 2 — the one deliberate exception to P7:
+# judgment replaces defensive padding, but scar rules guard irreversible acts
+# where the cost of being wrong once is unbounded).
+#
+# `must_appear_on` was RE-DERIVED against the post-1280 surface: the P1/P4
+# rewrites removed the git-add prohibition from most prompts (roles/builder.md
+# now owns it), and the dead codev-skeleton/porch/prompts/ tree was deleted, so
+# the pre-rewrite lists are stale. Each list below is exactly where its canonical
+# appears today. All eight survive on the primary always-on surface (CLAUDE.md +
+# AGENTS.md) — the carriage guarantee that matters.
+#
+# ENFORCEMENT (spec-1280-scar-rules.test.ts / T4):
+#   - the count is pinned at 8 and the ids are pinned;
+#   - each rule's `canonical` must appear byte-identically in every file listed
+#     under `must_appear_on` (rewording any copy fails the build);
+#   - changing a canonical requires editing this registry AND every listed
+#     surface in the same commit — a loud, reviewable act.
+
+scar_rules:
+  - id: git-add-explicit
+    canonical: "Never `git add -A` / `--all` / `.` — stage each file explicitly by path."
+    must_appear_on:
+      - AGENTS.md
+      - CLAUDE.md
+      - codev-skeleton/protocols/maintain/protocol.md
+      - codev-skeleton/roles/builder.md
+      - codev/protocols/maintain/protocol.md
+      - codev/roles/builder.md
+
+  - id: never-destroy-worktrees
+    canonical: "Never destroy builder worktrees (`git worktree remove`, `git branch -D` on builder branches, `afx cleanup` + respawn). Use `afx spawn <id> --resume`; if it fails, ask the human — what is expendable is never your call."
+    must_appear_on:
+      - AGENTS.md
+      - CLAUDE.md
+
+  - id: no-destructive-git
+    canonical: "Never run `git reset --hard`, `git checkout -- .`, `git clean -fd`, or `git stash` without explicit human permission — they destroy uncommitted work."
+    must_appear_on:
+      - AGENTS.md
+      - CLAUDE.md
+
+  - id: human-gates
+    canonical: "Never treat a porch gate as approved without an explicit human decision — a gate message is a notification to the human, not authorization."
+    must_appear_on:
+      - AGENTS.md
+      - CLAUDE.md
+      - codev-skeleton/roles/builder.md
+      - codev/roles/builder.md
+
+  - id: no-hand-edit-status
+    canonical: "Never hand-edit `status.yaml` — only porch commands modify project state."
+    must_appear_on:
+      - AGENTS.md
+      - CLAUDE.md
+      - codev-skeleton/protocols/spir/builder-prompt.md
+      - codev-skeleton/roles/builder.md
+      - codev/protocols/spir/builder-prompt.md
+      - codev/roles/builder.md
+
+  - id: afx-from-root
+    canonical: "Run `afx` commands only from the main workspace root, never from inside a builder worktree — spawning from a worktree nests builders and breaks the workspace."
+    must_appear_on:
+      - AGENTS.md
+      - CLAUDE.md
+      - codev-skeleton/roles/architect.md
+      - codev/roles/architect.md
+
+  - id: shellper-verified-orphan
+    canonical: "Never kill a shellper process without verifying it is an orphan (match each PID to its workspace via Tower) — an 'extra' shellper may be a live architect session."
+    must_appear_on:
+      - AGENTS.md
+      - CLAUDE.md
+
+  - id: tower-restart-permission
+    canonical: "Never restart or stop Tower without explicit human permission — it kills every running builder session."
+    must_appear_on:
+      - AGENTS.md
+      - CLAUDE.md
+
