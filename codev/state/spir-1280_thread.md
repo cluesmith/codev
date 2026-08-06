@@ -1200,3 +1200,26 @@ consult-types ×5. Two commits, one per group. Guards: bugfix-742-consult-templa
 spir/consult-types/{pr,impl}-review.md (breaks here — handle); the spir consult-types are PHASE_3
 baked-decisions files → rewriting them triggers the now class-approved retirements (R4+), each still
 needing its own register writeup + manifest row + replacement guard.
+
+### Phase 7 COMPLETE + R4 + R5; pointer → Phase 8 (2026-08-06)
+
+10 decisions (5 templates G4, 5 spir consult-types G5), 4 commits + R5 removal.
+- **G4 templates** (4a2aafe5): notes/findings/maintenance-run/audit-report P2; lessons-learned kept.
+  Preserved maintenance-run delivery headings; audit-report + lessons-learned codev-local.
+- **G5 consult-types** (2479f1f5): 5 spir consult-types P1/P2. Kept VERDICT capability exactly
+  (+ pr-review PR_SUMMARY), SPIR-specific Spec-Adherence/Scoping (#742 divergence), Baked Decisions
+  sections. **P6 fix: spec-review's stale 20-heading list** (broken by Phase 6's spec.md rewrite)
+  → reference the delivered template.
+- **R4** (retirement f96419c2 + replacement 86140f46): spir spec/plan-review pure-addition retired
+  under the class pre-approval; other 4 PHASE_3 files still in force; mutation-verified.
+- **R5** (cead8633): **removed the repo-wide manifest-completeness scan (T16)** per Waleed's ruling —
+  it taxed concurrent PRs (caught Mohid's #1330; Spec 1307 earlier). Kept the manifests, M11
+  inspection contract, and manifest FORMAT checks (four-fields, batch-cap). Full writeup R5.
+
+Full suite at cead8633: **4141 passed / 48 skipped, EXIT 0.** Pointer advanced phase_7 complete,
+phase_8 in_progress.
+
+**Phase 8 next** (G5, consult-types: aspir, bugfix, air): aspir spec/plan/impl/pr(+phase?)-review,
+bugfix impl/pr-review, air impl/pr-review. aspir spec/plan-review + air impl/pr-review are PHASE_3
+baked-decisions files → class-approved retirements (R6…). bugfix impl/pr-review guarded by #742 (must
+differ from SPIR — I just rewrote SPIR's, so re-verify divergence). Preserve VERDICT everywhere.

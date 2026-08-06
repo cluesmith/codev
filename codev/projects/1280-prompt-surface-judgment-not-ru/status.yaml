@@ -26,17 +26,17 @@ plan_phases:
     status: complete
   - id: phase_7_templates_consult_spir
     title: Remaining templates + spir consult-types (G4, G5)
-    status: in_progress
+    status: complete
   - id: phase_8_consult_types_a
     title: 'Consult-types: aspir, bugfix, air (G5)'
-    status: pending
+    status: in_progress
   - id: phase_9_consult_registry_deadtree
     title: Consult-types pir/maintain + scar registry + dead-tree deletion (G5, G7, G4)
     status: pending
   - id: phase_10_integration
     title: Capability verification, measurement report, rollback rehearsal, governance docs
     status: pending
-current_plan_phase: phase_7_templates_consult_spir
+current_plan_phase: phase_8_consult_types_a
 gates:
   spec-approval:
     status: approved
