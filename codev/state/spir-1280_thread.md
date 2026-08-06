@@ -1173,3 +1173,30 @@ in Phase 5; a fresh file (bugfix/pr) had its own guard I didn't re-scan for.
 
 **Clean state now: 1 RED = R3** (air/implement pure-addition, by design), 4131 passed / 48 skipped,
 EXIT 1. Reporting to architect; holding for the R3 (or class-preapproval) decision.
+
+### R3 executed + CLASS PRE-APPROVED; Phase 6 COMPLETE, pointer → Phase 7 (2026-08-06)
+
+Waleed approved R3 and **pre-approved the retirement class** for the PHASE_3 files (phases 7–9), on
+3 binding invariants (now conditions, not conventions): (1) behaviour grep green with canonical
+wording, (2) replacement guard in the mirrored separate commit, (3) full register writeup + phase
+manifest row for each. Architect verifies at M11; violating any invariant voids the class approval
+for that item. Recorded as a "Class pre-approval" box in 1280-retirements.md.
+
+R3 executed as R1/R2's split:
+- **412a11d4 — retirement.** Approval + class box in 1280-retirements.md; air/implement.md added to
+  RETIRED_UNDER_R3. All PHASE_2 pure-addition guards now retired → the loop got a documenting test so
+  it doesn't error as an empty suite and re-activates if a future PHASE_2 file is added. PHASE_3
+  pure-addition assertions verified STILL RUNNING (verbose reporter).
+- **4b7a9496 — replacement.** air-implement.md.baseline + deletion-guard block; mutation-verified
+  both ways.
+
+Full packages/codev suite at 4b7a9496: **4136 passed / 48 skipped, EXIT 0.** Phase 6 complete.
+Architect M11 inspection underway ("flag nothing-blocking unless you hear otherwise") + "continue" →
+advanced pointer phase_6 complete, phase_7 in_progress.
+
+**Phase 7 next** (G4 templates + G5 consult-types, ~10 decisions + bugfix-742 test):
+experiment/maintain/spike templates + 2 codev-local maintain templates (no skeleton twin) + spir
+consult-types ×5. Two commits, one per group. Guards: bugfix-742-consult-templates pins prose in
+spir/consult-types/{pr,impl}-review.md (breaks here — handle); the spir consult-types are PHASE_3
+baked-decisions files → rewriting them triggers the now class-approved retirements (R4+), each still
+needing its own register writeup + manifest row + replacement guard.

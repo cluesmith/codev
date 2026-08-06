@@ -23,10 +23,10 @@ plan_phases:
     status: complete
   - id: phase_6_prompts_light_spir_templates
     title: 'Phase prompts: bugfix, air, maintain + spir templates (G4)'
-    status: in_progress
+    status: complete
   - id: phase_7_templates_consult_spir
     title: Remaining templates + spir consult-types (G4, G5)
-    status: pending
+    status: in_progress
   - id: phase_8_consult_types_a
     title: 'Consult-types: aspir, bugfix, air (G5)'
     status: pending
@@ -36,7 +36,7 @@ plan_phases:
   - id: phase_10_integration
     title: Capability verification, measurement report, rollback rehearsal, governance docs
     status: pending
-current_plan_phase: phase_6_prompts_light_spir_templates
+current_plan_phase: phase_7_templates_consult_spir
 gates:
   spec-approval:
     status: approved
