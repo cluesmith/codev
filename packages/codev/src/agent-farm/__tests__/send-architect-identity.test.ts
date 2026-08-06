@@ -31,8 +31,7 @@ import {
   type DeliverySession,
   type DeliveredBroadcast,
 } from '../servers/mailbox-delivery.js';
-import { classifyScreen } from '../servers/render-gate.js';
-import { resolveProfileForSession } from '../servers/mailbox-wiring.js';
+import { resolveProfileForSession, classifyAgentScreen } from '../servers/mailbox-wiring.js';
 import { TerminalManager } from '../../terminal/pty-manager.js';
 import type { IShellperClient } from '../../terminal/shellper-client.js';
 
@@ -95,7 +94,9 @@ function realSeamPorts(
     // the `.builder-start.sh` fallback), NOT the pure `resolveProfile` the #1265
     // repro used against a command-populated double.
     resolveProfile: (s) => resolveProfileForSession(s),
-    classify: (snap, prof) => classifyScreen(snap, prof),
+    // The REAL production classify seam (Spec 1313 round 2): read the session's persistent
+    // mirror (seeded here via attachShellper's replay) and classify its viewport.
+    classify: (s, prof) => classifyAgentScreen(s, prof),
     writeMessage: (s, msg, noEnter) => {
       writes.push({ msg, noEnter });
       s.write(msg); // drive the real session's write path (fake shellper records it)

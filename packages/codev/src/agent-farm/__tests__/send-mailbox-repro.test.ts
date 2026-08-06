@@ -17,7 +17,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import Database from 'better-sqlite3';
 import { GLOBAL_SCHEMA } from '../db/schema.js';
 import * as mailbox from '../db/mailbox.js';
-import { RingBuffer } from '../../terminal/ring-buffer.js';
+import { SessionScreen } from '../../terminal/session-screen.js';
 import {
   deliverAgentMail,
   MailboxDrainer,
@@ -25,7 +25,7 @@ import {
   type DeliverySession,
   type DeliveredBroadcast,
 } from '../servers/mailbox-delivery.js';
-import { classifyScreen } from '../servers/render-gate.js';
+import { classifyBuffer } from '../servers/render-gate.js';
 import { resolveProfile } from '../servers/gate-profiles.js';
 
 const COLS = 110;
@@ -44,12 +44,26 @@ function screen(...lines: string[]): string {
   return lines.map((l) => l + '\r\n').join('');
 }
 
-/** A live session whose rendered composer can be flipped between draft and clean. */
-function flipSession(command = 'claude'): DeliverySession & { setScreen(raw: string): void; writes: string[] } {
-  const ring = new RingBuffer(1000);
+/**
+ * A live session whose rendered composer can be flipped between draft and clean, driving the
+ * REAL persistent-screen gate path (Spec 1313 round 2). `setScreen` models a full repaint by
+ * swapping in a fresh {@link SessionScreen} fed the new frame — exactly what the gate now
+ * classifies (its bounded viewport), and it bumps the monotone `bytesWritten` token so the
+ * delivery path's TOCTOU/memo see the change. `screen` is what `realGatePorts.classify` reads.
+ */
+type FlipSession = DeliverySession & { setScreen(raw: string): void; writes: string[]; readonly screen: SessionScreen };
+
+function flipSession(command = 'claude'): FlipSession {
   const writes: string[] = [];
+  let bytes = 0;
+  let screen = new SessionScreen(COLS, ROWS);
   return {
-    ringBuffer: ring,
+    get bytesWritten() {
+      return bytes;
+    },
+    get screen() {
+      return screen;
+    },
     info: { cols: COLS, rows: ROWS },
     command,
     launchArgs: [],
@@ -61,22 +75,30 @@ function flipSession(command = 'claude'): DeliverySession & { setScreen(raw: str
     },
     writes,
     setScreen(raw: string) {
-      ring.clear();
-      ring.pushData(raw);
+      screen.dispose(); // a full repaint: a fresh bounded mirror showing only the new frame
+      screen = new SessionScreen(COLS, ROWS);
+      screen.feed(raw);
+      bytes += raw.length; // monotone token advances on the new output
     },
   };
 }
 
-/** Delivery ports bound to the REAL gate + real profile resolution. */
+/** Delivery ports bound to the REAL gate (persistent-screen classify) + real profile resolution. */
 function realGatePorts(
-  session: DeliverySession | null,
+  session: FlipSession | null,
   writes: Array<{ msg: string; noEnter: boolean }>,
   broadcasts: DeliveredBroadcast[],
 ): DeliveryPorts {
   return {
     getSessionForAgent: () => session,
     resolveProfile: (s) => resolveProfile({ command: s.command, args: s.launchArgs }),
-    classify: (snap, prof) => classifyScreen(snap, prof),
+    // The REAL gate path (Spec 1313 round 2): read the session's persistent mirror and classify
+    // its viewport — identical to mailbox-wiring's live `classifyAgentScreen`.
+    classify: async (_s, prof) => {
+      if (!session) return { clean: false, reason: 'busy', detail: 'no-composer-marker' };
+      const { term, cols, rows } = await session.screen.read();
+      return classifyBuffer(term, cols, rows, prof);
+    },
     writeMessage: (_s, msg, noEnter) => {
       writes.push({ msg, noEnter });
       return true; // the write landed (Spec 1313: writeMessage reports delivery success)

@@ -14,6 +14,7 @@ import { handleRequest } from '../servers/tower-routes.js';
 import type { RouteContext } from '../servers/tower-routes.js';
 import { GLOBAL_SCHEMA } from '../db/schema.js';
 import * as mailbox from '../db/mailbox.js';
+import { SessionScreen } from '../../terminal/session-screen.js';
 
 // ============================================================================
 // Mocks
@@ -203,8 +204,17 @@ function makeRes(): { res: http.ServerResponse; body: () => string; statusCode: 
  * A mock PtySession the Spec 1313 render-gate can classify. `ring` is the rendered
  * composer content: `'❯ '` is a clean claude prompt (gate → deliver); `'❯ draft'`
  * is an occupied line (gate → hold busy). `command: 'claude'` resolves the profile.
+ *
+ * Round 2: the gate reads the session's persistent `gateScreen` mirror, not the ring, so the
+ * mock feeds the rendered frame into a real {@link SessionScreen} (fed exactly the PTY bytes:
+ * the composer line + the bounding rule the TUI draws below the input — the render-gate
+ * requires that proven lower bound, else a bare marker is an indeterminate partial and is held).
+ * `bytesWritten` is the monotone change token the delivery path samples.
  */
 function gateSession(mockWrite: (data: string) => void, ring: string, writable = true) {
+  const raw = `${ring}\r\n${'─'.repeat(20)}\r\n`;
+  const gateScreen = new SessionScreen(80, 24);
+  gateScreen.feed(raw);
   return {
     // Model a live PTY: every write lands. The delivery path now threads the write's
     // boolean (Spec 1313 silent-loss fix), so a double whose write returned undefined
@@ -219,16 +229,8 @@ function gateSession(mockWrite: (data: string) => void, ring: string, writable =
     launchArgs: [] as string[],
     cwd: '/tmp/ws',
     info: { cols: 80, rows: 24 },
-    // A real composer is bounded BELOW the input by the rule line the TUI draws (the
-    // composer box border). The render-gate requires that proven lower bound — a bare
-    // marker with nothing beneath it is indeterminate (a partial/mid-repaint frame)
-    // and is held (Spec 1313 D1 hardening + the spec's "born dirty" convergence). So
-    // represent the realistic clean-composer shape: the caller's content line plus the
-    // bounding rule. Each line carries a trailing CR exactly as real ring lines do (the
-    // PTY emits \r\n; RingBuffer splits on \n and keeps the \r), so getAll().join('\n')
-    // renders each from column 0 — without it the LF-only join would render the rule
-    // indented and it would miss the region-end pattern. `ring` = the composer line.
-    ringBuffer: { getAll: () => [`${ring}\r`, `${'─'.repeat(20)}\r`] },
+    bytesWritten: raw.length,
+    gateScreen,
   };
 }
 

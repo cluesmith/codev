@@ -32,7 +32,7 @@ import {
   markEscalated,
 } from '../db/mailbox.js';
 import type { DbMailbox, MailboxReason } from '../db/types.js';
-import type { GateProfile, RingSnapshot, GateVerdict } from './render-gate.js';
+import type { GateProfile, GateVerdict } from './render-gate.js';
 import { KeyedSerializer } from './write-queue.js';
 
 /**
@@ -42,23 +42,19 @@ import { KeyedSerializer } from './write-queue.js';
  * imports the terminal layer.
  */
 export interface DeliverySession {
-  readonly ringBuffer: {
-    getAll(): string[];
-    /**
-     * Cheap, monotone change signals for the gate (Spec 1313 render-gate hardening).
-     * `currentSeq` bumps on each completed (newline-terminated) line; `partialBytes`
-     * is the length of the unbounded partial (the current no-newline alt-screen frame)
-     * and resets to 0 when a newline flushes it — which also bumps `currentSeq`. So the
-     * pair advances on ANY new output and never repeats for different content. The
-     * delivery path samples it around the async whole-ring classify to re-validate that
-     * the screen hasn't moved (a keystroke landing mid-render) before writing onto it,
-     * and the drainer memoizes the gate verdict on this same signal so a STATIC ring is
-     * classified once, not re-rendered every backstop tick (see {@link ringToken} and
-     * {@link MailboxDrainer}). `RingBuffer` exposes both getters.
-     */
-    readonly currentSeq: number;
-    readonly partialBytes: number;
-  };
+  /**
+   * The session's MONOTONE cumulative output-byte counter (Spec 1313 render-gate round 2) —
+   * the gate's change token. It advances on ANY new output and NEVER decreases, so two samples
+   * that match prove the classified screen is byte-for-byte unchanged. This replaces the old
+   * `currentSeq:partialBytes` pair, which was non-monotone once #1205 capped the ring's partial:
+   * a `trimPartial` makes `partialBytes` FALL, so two distinct screens could produce the same
+   * token and alias a stale memoized verdict. The delivery path samples it around the async
+   * classify to re-validate the screen hasn't moved (a keystroke landing mid-classify) before
+   * writing onto it, and the drainer memoizes the gate verdict on it so a STATIC screen is
+   * classified once, not re-checked every backstop tick (see {@link ringToken} and
+   * {@link MailboxDrainer}). `PtySession` exposes it (sourced from `RingBuffer.bytesWritten`).
+   */
+  readonly bytesWritten: number;
   readonly info: { cols: number; rows: number };
   readonly command: string;
   readonly launchArgs: string[];
@@ -91,8 +87,14 @@ export interface DeliveryPorts {
   getSessionForAgent(workspacePath: string, toAgent: string): DeliverySession | null;
   /** The classifier profile for a session (incl. wrapped-launch resolution), or null (→ held `no-profile`). */
   resolveProfile(session: DeliverySession): GateProfile | null;
-  /** The render-gate: classify a rendered ring snapshot against a profile. */
-  classify(snapshot: RingSnapshot, profile: GateProfile): Promise<GateVerdict>;
+  /**
+   * The render-gate: classify the session's CURRENT screen against a profile (Spec 1313
+   * render-gate round 2). The live binding reads the session's persistent {@link SessionScreen}
+   * mirror and runs the classifier on its bounded viewport — no whole-ring re-render, so the
+   * capped ring can no longer hand the gate a torn frame. A session with no mirror yet (no
+   * output) classifies not-clean (`no-composer-marker`), exactly as an empty replay always did.
+   */
+  classify(session: DeliverySession, profile: GateProfile): Promise<GateVerdict>;
   /**
    * Write a formatted message (text + Enter, unless `noEnter`) to the session and
    * report whether every byte reached the terminal. Resolves `true` when the paced
@@ -176,14 +178,6 @@ export interface DeliveryOutcome {
    * for non-gate holds (`no-live-pty`/`no-profile`) and deliveries.
    */
   detail?: GateVerdict['detail'];
-  /**
-   * True when this pass actually RENDERED a ring larger than {@link BIG_RING_UNITS} (i.e. a
-   * memo miss on a large ring — CMAP round 1). The drainer uses it to back off re-classifying
-   * a big ring that stays not-clean: a busy big ring repaints every tick, so its token changes
-   * every tick and the memo always misses exactly when the render is most expensive. Absent on
-   * a memo hit (no render), on deliveries, and on small rings.
-   */
-  bigRing?: boolean;
 }
 
 /**
@@ -215,48 +209,37 @@ export function agentKey(workspacePath: string, toAgent: string): string {
   return `${workspacePath}\0${toAgent}`;
 }
 
-/** The WHOLE-ring reconnect-replay snapshot the gate classifies (rendered in full at any size — see render-gate.ts). */
-function snapshotOf(session: DeliverySession): RingSnapshot {
-  return {
-    replay: session.ringBuffer.getAll().join('\n'),
-    cols: session.info.cols,
-    rows: session.info.rows,
-  };
-}
-
 /**
- * A cheap, monotone token of the ring's rendered state plus the classify inputs
- * (dimensions + resolved app). It advances on ANY new output (see
- * {@link DeliverySession.ringBuffer}), so two samples that match mean the classified
- * screen is unchanged. Two consumers rely on that:
- *   1. gate→write TOCTOU re-validation — sampled before the async whole-ring classify
- *      and re-checked after, so a keystroke landing during the ~tens-of-ms render holds
- *      instead of writing onto the new draft;
- *   2. the drainer's verdict memo ({@link CachedVerdict}) — a cached verdict is reused
- *      only while this token is unchanged, so a static ring is classified once instead
- *      of re-rendered every 1.5 s backstop tick.
- * Both trust the same property: an unchanged token means a byte-for-byte unchanged
- * classified screen.
+ * A cheap, MONOTONE token of the session's rendered state plus the classify inputs
+ * (dimensions + resolved app). `bytesWritten` advances on ANY new output and never falls
+ * (Spec 1313 render-gate round 2 — the fix for the non-monotone `currentSeq:partialBytes`
+ * pair, which aliased once #1205's partial trim made `partialBytes` decrease), and the
+ * geometry catches a resize that reflows the screen without new output. So two samples that
+ * match mean the classified screen is byte-for-byte unchanged. Two consumers rely on that:
+ *   1. gate→write TOCTOU re-validation — sampled before the async classify and re-checked
+ *      after, so a keystroke landing during the classify holds instead of writing onto the
+ *      new draft;
+ *   2. the drainer's verdict memo ({@link CachedVerdict}) — a cached verdict is reused only
+ *      while this token is unchanged, so a static screen is classified once instead of
+ *      re-checked every 1.5 s backstop tick.
  */
 function ringToken(session: DeliverySession, profile: GateProfile): string {
-  const { currentSeq, partialBytes } = session.ringBuffer;
-  return `${currentSeq}:${partialBytes}:${session.info.cols}x${session.info.rows}:${profile.app}`;
+  return `${session.bytesWritten}:${session.info.cols}x${session.info.rows}:${profile.app}`;
 }
 
 /**
  * A gate verdict cached against BOTH the live session instance and the {@link ringToken}
  * that produced it (Spec 1313 render-gate verdict memo). Reuse requires the SAME session
  * object AND an unchanged token, so a cached verdict can never be served for a screen that
- * has moved. The `session` guard closes the RESPAWN route: the token (`currentSeq:partialBytes:…`)
- * is only unique WITHIN one monotonic ring, so a replacement `PtySession` for the same `agentKey`
- * (its `currentSeq` restarts at 0) can transiently reproduce an old token — but it is a DIFFERENT
- * object, so `cached.session === session` misses. (The other aliasing route — `RingBuffer.clear()`
- * on the SAME object during `PtySession` teardown, which leaves `currentSeq` untouched while
- * wiping content — is NOT closed by this guard, which the same object trivially satisfies; it is
- * closed upstream by the `!session.writable` filter in the resolver, so a cleaned-up session never
- * reaches the memo, plus the `partialBytes` change when a non-empty partial is wiped.) CMAP round
- * 1/2: Gemini/Codex/Claude. Holding the session pins it for at most one tick (the drainer prunes
- * to the held-agent set each tick).
+ * has moved. The `session` guard closes the RESPAWN route: a replacement `PtySession` for the
+ * same `agentKey` starts a fresh `bytesWritten` at 0 and could transiently reproduce a low
+ * token value — but it is a DIFFERENT object, so `cached.session === session` misses. (The old
+ * `RingBuffer.clear()`-during-teardown aliasing route — which left `currentSeq` untouched while
+ * wiping content — is now closed by the token itself: `bytesWritten` is monotone and `clear()`
+ * does NOT reset it, so a cleared ring's token can only advance, never collide with a prior
+ * value; the `!session.writable` filter still keeps a torn-down session out of the memo anyway.)
+ * CMAP round 1/2: Gemini/Codex/Claude. Holding the session pins it for at most one tick (the
+ * drainer prunes to the held-agent set each tick).
  * Keyed/bounded by {@link MailboxDrainer}; see {@link deliverAgentMail}.
  */
 interface CachedVerdict {
@@ -318,59 +301,46 @@ export async function deliverAgentMail(
   // re-validate afterward that the screen didn't move under us (below).
   const tokenBefore = ringToken(session, profile);
 
-  // Verdict memo (Spec 1313 render-gate follow-up). The 1.5 s backstop re-renders every held
-  // agent's WHOLE ring each tick; for a STATIC ring that whole-render is pure waste. Reuse the
+  // Verdict memo (Spec 1313 render-gate follow-up). The 1.5 s backstop re-checks every held
+  // agent's screen each tick; for a STATIC screen that classify is pure waste. Reuse the
   // cached verdict while BOTH the live session instance AND the token are unchanged — the token
   // advances on ANY new output, so a match means the screen is byte-for-byte what we already
-  // rendered, and the session guard closes the PTY-respawn aliasing route (a replacement session
-  // is a DIFFERENT object); the same-object `RingBuffer.clear()` route is closed upstream by the
-  // `!session.writable` filter, not by this guard (see {@link CachedVerdict}). A memo hit does NO
-  // await, so the post-classify
-  // re-validation below (`ringToken(...) !== tokenBefore`) passes trivially: no keystroke can
-  // land in a render window that never opened. The memo is owned + bounded by the drainer's
-  // backstop {@link MailboxDrainer.tick} (pruned to the held-agent set each tick); every OTHER
-  // caller — the request/cron paths and the fast scheduleDrain trigger — passes none and
-  // classifies fresh, so an event-driven re-check is never served a cached verdict.
+  // classified, and the session guard closes the PTY-respawn aliasing route (a replacement
+  // session is a DIFFERENT object); the monotone token closes the old `RingBuffer.clear()` route
+  // (see {@link CachedVerdict}). A memo hit does NO await, so the post-classify re-validation
+  // below (`ringToken(...) !== tokenBefore`) passes trivially: no keystroke can land in a
+  // classify window that never opened. The memo is owned + bounded by the drainer's backstop
+  // {@link MailboxDrainer.tick} (pruned to the held-agent set each tick); every OTHER caller —
+  // the request/cron paths and the fast scheduleDrain trigger — passes none and classifies
+  // fresh, so an event-driven re-check is never served a cached verdict.
   const cacheKey = agentKey(workspacePath, toAgent);
   const cached = memo?.get(cacheKey);
   let verdict: GateVerdict;
-  // Stays undefined on a memo HIT or a small ring, so it never appears in the outcome for
-  // those cases (DeliveryOutcome.bigRing) — it rides the outcome only when a large ring was
-  // actually RENDERED (a memo miss), which is the only case the backstop backoff acts on.
-  let bigRing: boolean | undefined;
   if (cached && cached.session === session && cached.token === tokenBefore) {
     verdict = cached.verdict;
   } else {
-    const snapshot = snapshotOf(session);
-    // Flag an expensive render (a memo MISS on a large ring) so the drainer can back off
-    // re-classifying a big ring that stays busy tick after tick (CMAP round 1 — Claude).
-    bigRing = snapshot.replay.length > BIG_RING_UNITS || undefined;
-    verdict = await ports.classify(snapshot, profile);
+    verdict = await ports.classify(session, profile);
     memo?.set(cacheKey, { session, token: tokenBefore, verdict });
   }
 
   if (!verdict.clean) {
     // Carry the gate detail so a sustained classifier-stuck streak (a drifted profile
-    // or a pathological ring) escalates to liveness telemetry instead of holding silently.
+    // or an unrenderable frame) escalates to liveness telemetry instead of holding silently.
     const reason = verdict.reason ?? 'busy';
     for (const row of held) {
       if (row.reason !== reason) setHeldReason(db, row.id, reason, ports.now());
     }
-    return { delivered: [], reason, detail: verdict.detail, bigRing };
+    return { delivered: [], reason, detail: verdict.detail };
   }
 
-  // Re-validate the SCREEN before writing (Spec 1313 render-gate diff review). The
-  // classify above may have awaited (a whole-ring render is tens–130ms, and xterm
-  // yields between parse slices); if the ring advanced since we sampled `tokenBefore`,
-  // a draft may have started under us and the clean verdict is now stale. Writing then
-  // would fuse the message into that draft — the exact false-clean the gate prevents.
-  // Hold instead; it delivers on the next clean tick. (On a memo hit no await occurred,
-  // so the token is unchanged and this passes trivially.)
-  // Carry `bigRing` into this hold too (CMAP round 2 — Claude/Codex): a large ring can render
-  // CLEAN and then move mid-render (this is the fast-repaint case), so the backoff must see it
-  // as an expensive not-clean pass just like the `!verdict.clean` path above — otherwise a
-  // constantly-repainting big ring would re-render every tick and never back off.
-  if (ringToken(session, profile) !== tokenBefore) return { ...hold('busy'), bigRing };
+  // Re-validate the SCREEN before writing (Spec 1313 render-gate diff review). The classify
+  // above may have awaited (the mirror flushes its parser, and xterm yields between parse
+  // slices); if the screen advanced since we sampled `tokenBefore`, a draft may have started
+  // under us and the clean verdict is now stale. Writing then would fuse the message into that
+  // draft — the exact false-clean the gate prevents. Hold instead; it delivers on the next
+  // clean tick. (On a memo hit no await occurred, so the token is unchanged and this passes
+  // trivially.)
+  if (ringToken(session, profile) !== tokenBefore) return hold('busy');
 
   // Clean, verified-empty prompt → deliver the oldest held message. Await the
   // write's paced completion so a serialized follow-up delivery never begins
@@ -491,17 +461,6 @@ const DEFAULT_ESCALATION_MS = 60_000;
 // so its mail will never deliver. The threshold filters transient boot/relaunch screens,
 // which resolve well before it.
 const LIVENESS_STREAK_THRESHOLD = 10;
-// Spec 1313 (CMAP round 1 — Claude): a rendered ring larger than this (UTF-16 units) is
-// "big" for backstop-backoff purposes. Above it, a whole-ring render is tens–hundreds of ms;
-// a BUSY big ring repaints every tick, so its token changes every tick and the verdict memo
-// always misses — a full render every 1.5 s pass. Set above realistic normal rings (largest
-// observed ≈ 3 M units) so ordinary sessions are never throttled.
-const BIG_RING_UNITS = 4 * 1024 * 1024; // 4 M UTF-16 units (~67 ms render, spike g2)
-// Cap on the exponential backstop backoff (in ticks) for a big ring that stays not-clean.
-// At the 1.5 s default that is ≤ ~12 s of extra backstop latency for a stuck big-busy ring —
-// and only the BACKSTOP is throttled; the fast submit/quiescence trigger still fires the
-// instant the line clears, so real delivery latency is unaffected.
-const MAX_CLASSIFY_BACKOFF_TICKS = 8;
 
 /**
  * The poll backstop that replaces `SendBuffer`'s flush timer. On each tick it walks
@@ -526,21 +485,12 @@ export class MailboxDrainer {
   // (one gate check, not one per trigger); the slot is released when the pass begins.
   private readonly scheduledDrains = new Map<string, Promise<void>>();
   // Spec 1313 render-gate verdict memo: a cached gate verdict per agent, keyed on the session
-  // instance + ring change-token, so a static held ring skips its whole-ring re-render every
-  // tick. Owned here so it stays bounded — {@link tick} prunes it to the current held-agent set.
+  // instance + monotone change-token, so a STATIC held screen skips its re-classify every tick.
+  // Owned here so it stays bounded — {@link tick} prunes it to the current held-agent set. (The
+  // CMAP-round-1 big-ring backstop backoff that used to sit alongside this is retired in round 2:
+  // with the persistent bounded mirror, a classify is O(viewport) regardless of history, so there
+  // is no expensive whole-ring render left to throttle — every tick just re-classifies cheaply.)
   private readonly verdictMemo = new Map<string, CachedVerdict>();
-  // Spec 1313 (CMAP round 1): per-agent exponential backoff for a BIG ring that stays not-clean.
-  // The memo only helps a STATIC ring; a busy big ring changes every tick and re-renders fully.
-  // `span` is the current backoff length (doubling, capped at MAX_CLASSIFY_BACKOFF_TICKS);
-  // `skip` counts down the ticks still to skip. `reason`/`detail` carry the last not-clean
-  // classification so the liveness streak keeps advancing during cooldown (CMAP round 2 — the
-  // backoff throttles re-classify, not the classifier-stuck escalation). NEVER a hold —
-  // scheduleDrain still delivers on the real submit/quiescence event; this only throttles the
-  // wasteful backstop polling.
-  private readonly classifyBackoff = new Map<
-    string,
-    { span: number; skip: number; reason: MailboxReason | null; detail?: GateVerdict['detail'] }
-  >();
   // Lifecycle generation (CMAP round 2 — Codex/Claude): the drainer instance is REUSED across
   // stop()/start() (mailbox-wiring `ensureDrainer`), and the tests do start/stop/start. Bumped on
   // stop() so an in-flight tick/scheduleDrain that resumes after a restart bails before mutating
@@ -574,17 +524,16 @@ export class MailboxDrainer {
     // ports/db and runs to completion; it only stops a new trigger from coalescing onto it. Two
     // guards make that resumption safe (CMAP round 3): (1) the `generation` bump below — checked by
     // both `tick` and `scheduleDrain` right after each await — stops an in-flight pass from re-seeding
-    // THIS generation's freshly-cleared streak/backoff/scheduled-drain slot. (The verdict memo can
-    // still be seeded from INSIDE a resumed `deliverAgentMail`, before that check, but that is benign:
-    // the memo is bound to its session instance + ring token and re-pruned to the held-agent set at
-    // the top of every tick, so a cross-generation entry is self-correcting, not a leak.) And (2) both
-    // passes now run their work under a try/catch, so a throw on the old (closed) DB is logged, not an
+    // THIS generation's freshly-cleared streak/scheduled-drain slot. (The verdict memo can still be
+    // seeded from INSIDE a resumed `deliverAgentMail`, before that check, but that is benign: the memo
+    // is bound to its session instance + change token and re-pruned to the held-agent set at the top of
+    // every tick, so a cross-generation entry is self-correcting, not a leak.) And (2) both passes now
+    // run their work under a try/catch, so a throw on the old (closed) DB is logged, not an
     // unhandledRejection that would exit(1). (Pre-round-3, `tick` had no catch, so a closed-DB throw
     // there was NOT harmless.)
     this.verdictMemo.clear();
     this.notCleanStreak.clear();
     this.scheduledDrains.clear();
-    this.classifyBackoff.clear();
     this.generation++;
   }
 
@@ -617,15 +566,11 @@ export class MailboxDrainer {
           toAgent: row.to_agent,
         });
       }
-      // Prune the verdict memo AND the backoff map to the current held-agent set before the
-      // pass: an agent whose mail all delivered/dismissed is no longer walked here, so its
-      // cached verdict / backoff would otherwise leak for the life of the process. Bounds both
-      // to |held agents|.
+      // Prune the verdict memo to the current held-agent set before the pass: an agent whose
+      // mail all delivered/dismissed is no longer walked here, so its cached verdict would
+      // otherwise leak for the life of the process. Bounds the memo to |held agents|.
       for (const key of this.verdictMemo.keys()) {
         if (!agents.has(key)) this.verdictMemo.delete(key);
-      }
-      for (const key of this.classifyBackoff.keys()) {
-        if (!agents.has(key)) this.classifyBackoff.delete(key);
       }
       for (const [key, { workspacePath, toAgent }] of agents) {
         if (this.generation !== gen) return; // stop() ran mid-tick → bail before more work
@@ -636,40 +581,14 @@ export class MailboxDrainer {
         // same way; this mirrors it so the round-2 stop() comment's "throws harmlessly" is true
         // for the backstop tick too, not just the scheduled drain.
         try {
-          // Backstop backoff (CMAP round 1): while an agent is cooling down after a big not-clean
-          // render, skip re-classifying it this tick — the whole-ring render is the cost and the
-          // ring is busy anyway. This is NOT a hold: scheduleDrain fires the instant the line
-          // clears (submit/quiescence) and classifies fresh, so delivery is not delayed by it.
-          const cooldown = this.classifyBackoff.get(key);
-          if (cooldown && cooldown.skip > 0) {
-            // Force a real classify on the ONE tick where the streak would cross the liveness
-            // threshold on a classifier-stuck reason (CMAP round 3 — Codex/Claude): otherwise a big
-            // ring that went `no-region-end` and then CLEARED mid-cooldown (with no fast trigger
-            // observed) would keep advancing the streak on the STALE detail and fire a spurious
-            // `onLiveness` at the crossing. Escalation fires exactly once (recordStreak: next ===
-            // THRESHOLD), so this spends a single render at the crossing — every other cooldown tick
-            // still just re-feeds the cached classification. If the ring actually cleared, the fresh
-            // pass delivers (streak resets) or reclassifies; if still stuck, escalation is confirmed.
-            const wouldCrossOnStale =
-              isClassifierStuck(cooldown.reason, cooldown.detail) &&
-              (this.notCleanStreak.get(key) ?? 0) + 1 === LIVENESS_STREAK_THRESHOLD;
-            if (!wouldCrossOnStale) {
-              cooldown.skip--;
-              // Keep the liveness streak advancing during cooldown (CMAP round 2 — Claude/Codex):
-              // the backoff throttles re-CLASSIFY, but the mail is still not delivering, and a
-              // classifier-stuck streak (no-region-end/no-composer-marker) must still cross its
-              // threshold on schedule — the backoff throttles exactly the pathological population
-              // that escalation guards. Re-feed the last classification so the streak counts this
-              // skipped tick too.
-              this.recordStreak(key, { delivered: [], reason: cooldown.reason, detail: cooldown.detail });
-              continue;
-            }
-          }
+          // Every tick re-classifies cheaply now (Spec 1313 round 2): the persistent mirror makes a
+          // classify O(viewport), independent of history, so there is no expensive whole-ring render
+          // to throttle — the CMAP-round-1 big-ring cooldown is retired. The verdict memo still skips
+          // the re-classify for a STATIC screen (unchanged token); a moving screen just re-checks.
           const outcome = await deliverAgentMailSerialized(ports, db, workspacePath, toAgent, this.verdictMemo);
           if (this.generation !== gen) return; // stop() landed during the await → do NOT mutate the
-                                               // NEW generation's freshly-cleared streak/backoff maps
+                                               // NEW generation's freshly-cleared streak map
           this.recordStreak(key, outcome);
-          this.updateBackoff(key, outcome);
         } catch (err) {
           ports.log(`[mailbox] backstop delivery failed for ${toAgent}: ${String(err)}`);
         }
@@ -756,32 +675,6 @@ export class MailboxDrainer {
   }
 
   /**
-   * Grow or reset the per-agent backstop backoff from a delivery outcome (CMAP round 1). A
-   * pass that DELIVERED or found the mailbox empty resets it (normal cadence resumes). A pass
-   * that held on a freshly-RENDERED big ring (`bigRing` — a memo MISS on a large ring) doubles
-   * the cooldown up to {@link MAX_CLASSIFY_BACKOFF_TICKS}, so the backstop stops re-rendering a
-   * busy giant ring every tick. Anything else — a small ring, or a big ring served from the
-   * memo without a render — resets: only an actual expensive render triggers backoff.
-   */
-  private updateBackoff(key: string, outcome: DeliveryOutcome): void {
-    const delivered = outcome.delivered.length > 0 || outcome.reason === null;
-    if (!delivered && outcome.bigRing) {
-      const prev = this.classifyBackoff.get(key)?.span ?? 0;
-      const span = Math.min(prev > 0 ? prev * 2 : 1, MAX_CLASSIFY_BACKOFF_TICKS);
-      // Carry the classification so the skipped-tick recordStreak (in tick) can keep the
-      // liveness streak advancing on schedule (CMAP round 2).
-      this.classifyBackoff.set(key, { span, skip: span, reason: outcome.reason, detail: outcome.detail });
-    } else {
-      this.classifyBackoff.delete(key);
-    }
-  }
-
-  /** Agent keys currently backing off (render-gate backstop backoff). Observability/test only. */
-  get backoffAgents(): ReadonlyArray<string> {
-    return [...this.classifyBackoff.keys()];
-  }
-
-  /**
    * Fast, event-driven delivery trigger (Spec 1313, Phase 5). A submit (Enter) or
    * output-quiescence signal for a session schedules a single coalesced delivery pass
    * for that agent, so a held message delivers within a microtask of the line
@@ -822,12 +715,8 @@ export class MailboxDrainer {
         // event-driven re-check. tick owns and prunes the memo alone.
         const outcome = await deliverAgentMailSerialized(ports, db, workspacePath, toAgent);
         if (this.generation !== gen) return; // stop() landed during the await → do NOT mutate the
-                                             // NEW generation's freshly-cleared streak/backoff maps
+                                             // NEW generation's freshly-cleared streak map
         this.recordStreak(key, outcome);
-        // A fast-trigger delivery means the line cleared — clear any backstop backoff so the
-        // periodic tick resumes normal cadence (CMAP round 1). A trigger that still HOLDS
-        // (busy) leaves the backoff intact; the backstop keeps throttling the giant busy ring.
-        if (outcome.delivered.length > 0 || outcome.reason === null) this.classifyBackoff.delete(key);
       } catch (err) {
         ports.log(`[mailbox] scheduled drain failed for ${toAgent}: ${String(err)}`);
       }

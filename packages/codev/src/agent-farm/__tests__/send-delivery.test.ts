@@ -25,17 +25,24 @@ import {
   type EscalationInfo,
   type LivenessInfo,
 } from '../servers/mailbox-delivery.js';
-import type { GateProfile, GateVerdict, RingSnapshot } from '../servers/render-gate.js';
+import type { GateProfile, GateVerdict } from '../servers/render-gate.js';
 
 const PROFILE: GateProfile = { app: 'claude', markerPattern: /^❯/, regionEndPatterns: [] };
 const CLEAN: GateVerdict = { clean: true, detail: 'empty' };
 const BUSY: GateVerdict = { clean: false, reason: 'busy', detail: 'user-text' };
 
-/** A minimal DeliverySession fake (records writes). */
+/**
+ * A minimal DeliverySession fake (records writes). Spec 1313 render-gate round 2: the gate no
+ * longer reads a ring snapshot — it classifies the session's screen and the delivery path keys
+ * its TOCTOU/memo on the monotone `bytesWritten` token — so the fake exposes `bytesWritten`
+ * (default 0) instead of the retired `ringBuffer.{getAll,currentSeq,partialBytes}`. Tests that
+ * need a MOVING token build the session inline with a `get bytesWritten()` (a spread would freeze
+ * a getter to its value); a static number covers everything else.
+ */
 function fakeSession(overrides: Partial<DeliverySession> = {}): DeliverySession & { writes: string[] } {
   const writes: string[] = [];
   return {
-    ringBuffer: { getAll: () => ['❯ '] },
+    bytesWritten: 0,
     info: { cols: 110, rows: 32 },
     command: 'claude',
     launchArgs: [],
@@ -64,7 +71,7 @@ interface Harness {
   setSession(agent: string, session: DeliverySession | null): void;
   setProfile(p: GateProfile | null): void;
   setVerdict(v: GateVerdict): void;
-  setClassify(fn: ((snap: RingSnapshot, p: GateProfile) => Promise<GateVerdict>) | null): void;
+  setClassify(fn: ((session: DeliverySession, p: GateProfile) => Promise<GateVerdict>) | null): void;
   now: number;
   /**
    * Result the fake `writeMessage` port returns (Spec 1313 silent-loss test). Default true
@@ -78,7 +85,7 @@ function harness(): Harness {
   const sessions = new Map<string, DeliverySession | null>();
   let profile: GateProfile | null = PROFILE;
   let verdict: GateVerdict = CLEAN;
-  let classifyOverride: ((snap: RingSnapshot, p: GateProfile) => Promise<GateVerdict>) | null = null;
+  let classifyOverride: ((session: DeliverySession, p: GateProfile) => Promise<GateVerdict>) | null = null;
   const broadcasts: DeliveredBroadcast[] = [];
   const writes: Array<{ formattedMessage: string; noEnter: boolean }> = [];
   const logs: string[] = [];
@@ -104,8 +111,8 @@ function harness(): Harness {
     ports: {
       getSessionForAgent: (_ws, agent) => sessions.get(agent) ?? null,
       resolveProfile: () => profile,
-      classify: (snap: RingSnapshot, p: GateProfile): Promise<GateVerdict> =>
-        classifyOverride ? classifyOverride(snap, p) : Promise.resolve(verdict),
+      classify: (session: DeliverySession, p: GateProfile): Promise<GateVerdict> =>
+        classifyOverride ? classifyOverride(session, p) : Promise.resolve(verdict),
       writeMessage: (_s, formattedMessage, noEnter) => {
         writes.push({ formattedMessage, noEnter });
         return h.writeResult;
@@ -294,22 +301,16 @@ describe('deliverAgentMail (Spec 1313, Phase 4)', () => {
     expect(h.writes).toHaveLength(1); // not re-delivered
   });
 
-  it('re-validates the SCREEN after the classify: a keystroke landing during the render → holds, never writes (Spec 1313 render-gate hardening)', async () => {
-    // The whole-ring classify is async (~tens of ms); if the user starts typing during
-    // it, the clean verdict is for a screen that no longer exists. The delivery path
-    // samples the ring change-token before the classify and re-checks it after — a
-    // change means "screen moved under us" → hold, never write the message onto the
-    // now-present draft (the false-clean the gate exists to prevent).
-    let seq = 0;
+  it('re-validates the SCREEN after the classify: a keystroke landing during the classify → holds, never writes (Spec 1313 render-gate hardening)', async () => {
+    // The classify awaits (the mirror flushes its parser); if the user starts typing during
+    // it, the clean verdict is for a screen that no longer exists. The delivery path samples
+    // the monotone bytesWritten token before the classify and re-checks it after — a change
+    // means "screen moved under us" → hold, never write the message onto the now-present draft
+    // (the false-clean the gate exists to prevent).
+    let bytes = 0;
     const session: DeliverySession = {
-      ringBuffer: {
-        getAll: () => ['❯ '],
-        get currentSeq() {
-          return seq;
-        },
-        get partialBytes() {
-          return 0;
-        },
+      get bytesWritten() {
+        return bytes;
       },
       info: { cols: 110, rows: 32 },
       command: 'claude',
@@ -320,10 +321,10 @@ describe('deliverAgentMail (Spec 1313, Phase 4)', () => {
     };
     const h = harness();
     h.setSession('spir-1', session);
-    // Model the keystroke: the ring token advances *during* the classify, which still
+    // Model the keystroke: new output advances the token *during* the classify, which still
     // returns CLEAN for the (now stale) screen it was handed.
     h.setClassify(async () => {
-      seq++;
+      bytes++;
       return CLEAN;
     });
     const row = enqueue();
@@ -450,15 +451,13 @@ describe('MailboxDrainer (Spec 1313, Phase 4)', () => {
     const sessionA = fakeSession();
     const sessionB = fakeSession();
     h.ports.getSessionForAgent = (_ws, agent) => (agent === 'A' ? sessionA : agent === 'B' ? sessionB : null);
-    // Per-agent verdict via classify override:
-    h.ports.classify = (_snap, _p) => Promise.resolve(CLEAN); // default clean; B overridden below
 
     const rowA = mailbox.enqueue(db, { workspacePath: '/ws', toAgent: 'A', body: 'a', formattedMessage: 'A' }, 1000);
     mailbox.enqueue(db, { workspacePath: '/ws', toAgent: 'B', body: 'b', formattedMessage: 'B' }, 1000);
 
-    // Make B busy by keying classify on the session identity.
-    h.ports.classify = (_snap, _p) => Promise.resolve(_snap.replay === 'busyB' ? BUSY : CLEAN);
-    (sessionB.ringBuffer as { getAll: () => string[] }).getAll = () => ['busyB'];
+    // Make B busy by keying classify on the session identity (the gate now classifies a
+    // session's screen, not a ring snapshot).
+    h.ports.classify = (session, _p) => Promise.resolve(session === sessionB ? BUSY : CLEAN);
 
     const drainer = new MailboxDrainer({ intervalMs: 999999 });
     drainer.start(h.ports, db);
@@ -517,28 +516,35 @@ describe('MailboxDrainer verdict memo (Spec 1313 render-gate follow-up)', () => 
   const held = (toAgent: string, body = 'hi', now = 1000) =>
     mailbox.enqueue(db, { workspacePath: '/ws', toAgent, body, formattedMessage: body }, now);
 
-  it('classifies a STATIC ring once: a second backstop tick reuses the cached verdict (no re-render)', async () => {
+  it('classifies a STATIC screen once: a second backstop tick reuses the cached verdict (no re-classify)', async () => {
     const h = harness();
-    // Stable ring token across ticks (currentSeq/partialBytes constant) + a busy verdict,
-    // so the message stays held and both ticks attempt delivery for the same agent.
-    h.setSession('spir-1', fakeSession({ ringBuffer: { getAll: () => ['❯ '], currentSeq: 7, partialBytes: 0 } }));
+    // Stable token across ticks (bytesWritten constant) + a busy verdict, so the message
+    // stays held and both ticks attempt delivery for the same agent.
+    h.setSession('spir-1', fakeSession({ bytesWritten: 7 }));
     let classifyCalls = 0;
     h.ports.classify = async () => { classifyCalls++; return BUSY; };
     held('spir-1');
     const drainer = new MailboxDrainer({ intervalMs: 999999 });
     drainer.start(h.ports, db);
     await drainer.tick(); // classify #1 — memo miss
-    await drainer.tick(); // static token → memo hit, NOT re-rendered
+    await drainer.tick(); // static token → memo hit, NOT re-classified
     drainer.stop();
     expect(classifyCalls).toBe(1);
   });
 
-  it('re-classifies after the ring CHANGES — the memo is keyed on the ring token', async () => {
+  it('re-classifies after the screen CHANGES — the memo is keyed on the monotone token', async () => {
     const h = harness();
-    let seq = 7;
-    h.setSession('spir-1', fakeSession({
-      ringBuffer: { getAll: () => ['❯ '], get currentSeq() { return seq; }, partialBytes: 0 },
-    }));
+    let bytes = 7;
+    // A moving token needs a live getter (a fakeSession spread would freeze bytesWritten to its value).
+    h.setSession('spir-1', {
+      get bytesWritten() { return bytes; },
+      info: { cols: 110, rows: 32 },
+      command: 'claude',
+      launchArgs: [],
+      cwd: '/ws',
+      writable: true,
+      write: () => true,
+    });
     let classifyCalls = 0;
     h.ports.classify = async () => { classifyCalls++; return BUSY; };
     held('spir-1');
@@ -546,8 +552,8 @@ describe('MailboxDrainer verdict memo (Spec 1313 render-gate follow-up)', () => 
     drainer.start(h.ports, db);
     await drainer.tick(); // classify #1 (miss)
     await drainer.tick(); // memo hit (token unchanged)
-    seq = 8;              // new output → token advances
-    await drainer.tick(); // classify #2 (token changed → re-render)
+    bytes = 20;           // new output → token advances (monotone; only ever grows)
+    await drainer.tick(); // classify #2 (token changed → re-classify)
     drainer.stop();
     expect(classifyCalls).toBe(2);
   });
@@ -559,7 +565,7 @@ describe('MailboxDrainer verdict memo (Spec 1313 render-gate follow-up)', () => 
     // it re-classifies fresh before delivering m2. PTY INPUT doesn't advance the ring, so the token
     // alone would wrongly look unchanged; the invalidation prevents delivering onto an un-echoed
     // line. Both still deliver, in order — but via TWO classifies, not a stale reuse.
-    h.setSession('spir-1', fakeSession({ ringBuffer: { getAll: () => ['❯ '], currentSeq: 3, partialBytes: 0 } }));
+    h.setSession('spir-1', fakeSession({ bytesWritten: 3 }));
     let classifyCalls = 0;
     h.ports.classify = async () => { classifyCalls++; return CLEAN; };
     held('spir-1', 'm1', 1000);
@@ -581,7 +587,7 @@ describe('MailboxDrainer verdict memo (Spec 1313 render-gate follow-up)', () => 
     // returns; if the delete sat below that guard (round-2 placement) the stale CLEAN would survive,
     // and tick 2 would memo-hit and write m2 onto the not-yet-echoed line. Static ring, so the ONLY
     // thing that can force a re-classify on tick 2 is the invalidation.
-    h.setSession('spir-1', fakeSession({ ringBuffer: { getAll: () => ['❯ '], currentSeq: 3, partialBytes: 0 } }));
+    h.setSession('spir-1', fakeSession({ bytesWritten: 3 }));
     let classifyCalls = 0;
     h.ports.classify = async () => { classifyCalls++; return CLEAN; };
     const m1 = held('spir-1', 'm1', 1000);
@@ -608,7 +614,7 @@ describe('MailboxDrainer verdict memo (Spec 1313 render-gate follow-up)', () => 
     // follow-up could memo-hit it. Here writeMessage records partial output then rejects → the row
     // stays held (deliverAgentMail throws, caught by the per-agent tick guard) → the NEXT tick must
     // re-classify fresh, not memo-hit. Static ring, so a re-classify can only come from invalidation.
-    h.setSession('spir-1', fakeSession({ ringBuffer: { getAll: () => ['❯ '], currentSeq: 3, partialBytes: 0 } }));
+    h.setSession('spir-1', fakeSession({ bytesWritten: 3 }));
     let classifyCalls = 0;
     h.ports.classify = async () => { classifyCalls++; return CLEAN; };
     let writeAttempts = 0;
@@ -630,7 +636,7 @@ describe('MailboxDrainer verdict memo (Spec 1313 render-gate follow-up)', () => 
 
   it('bounds the memo: an agent whose mail clears is pruned from the memo on the next tick', async () => {
     const h = harness();
-    h.setSession('spir-1', fakeSession({ ringBuffer: { getAll: () => ['❯ '], currentSeq: 1, partialBytes: 0 } }));
+    h.setSession('spir-1', fakeSession({ bytesWritten: 1 }));
     h.setVerdict(BUSY); // held → a memo entry is created
     const row = held('spir-1');
     const drainer = new MailboxDrainer({ intervalMs: 999999 });
@@ -645,7 +651,7 @@ describe('MailboxDrainer verdict memo (Spec 1313 render-gate follow-up)', () => 
 
   it('does NOT reuse a cached verdict across a session swap with an identical token (respawn safety)', async () => {
     const h = harness();
-    h.setSession('spir-1', fakeSession({ ringBuffer: { getAll: () => ['❯ '], currentSeq: 5, partialBytes: 0 } }));
+    h.setSession('spir-1', fakeSession({ bytesWritten: 5 }));
     let classifyCalls = 0;
     h.ports.classify = async () => { classifyCalls++; return BUSY; };
     held('spir-1');
@@ -653,100 +659,17 @@ describe('MailboxDrainer verdict memo (Spec 1313 render-gate follow-up)', () => 
     drainer.start(h.ports, db);
     await drainer.tick(); // classify #1 — caches {sessionA, token}
     // Swap in a DIFFERENT session object carrying the SAME token — models a respawned PTY whose
-    // fresh ring (currentSeq restarts at 0) transiently reproduces the cached currentSeq/partial.
+    // fresh bytesWritten (restarts at 0) transiently reproduces the cached token value.
     // Token-only matching would serve the stale verdict; the session guard forces a re-classify.
-    h.setSession('spir-1', fakeSession({ ringBuffer: { getAll: () => ['❯ '], currentSeq: 5, partialBytes: 0 } }));
+    h.setSession('spir-1', fakeSession({ bytesWritten: 5 }));
     await drainer.tick();
     drainer.stop();
     expect(classifyCalls).toBe(2);
   });
 
-  it('backs off re-classifying a BIG busy ring in the backstop; scheduleDrain still delivers on clear', async () => {
-    const h = harness();
-    let seq = 1;
-    const bigReplay = 'x'.repeat(4 * 1024 * 1024 + 16); // > BIG_RING_UNITS (4 M units)
-    h.setSession('spir-1', fakeSession({
-      ringBuffer: { getAll: () => [bigReplay], get currentSeq() { return seq; }, partialBytes: 0 },
-    }));
-    let classifyCalls = 0;
-    h.ports.classify = async () => { classifyCalls++; return BUSY; };
-    held('spir-1');
-    const drainer = new MailboxDrainer({ intervalMs: 999999 });
-    drainer.start(h.ports, db);
-    // Each tick the busy ring changes (token advances → the memo always misses). Without backoff
-    // that is one whole-render per tick; with backoff the backstop skips ticks after a big
-    // not-clean render (span 1, 2, 4…). 4 ticks ⇒ fewer than 4 classifies.
-    for (let i = 0; i < 4; i++) { seq++; await drainer.tick(); }
-    expect(classifyCalls).toBeLessThan(4);
-    expect(drainer.backoffAgents).toContain(agentKey('/ws', 'spir-1'));
-
-    // The line clears and a submit/quiescence trigger fires. scheduleDrain classifies FRESH
-    // (ignores the backoff) and delivers, resetting the backoff so the backstop resumes.
-    h.ports.classify = async () => { classifyCalls++; return CLEAN; };
-    seq++;
-    await drainer.scheduleDrain('/ws', 'spir-1');
-    drainer.stop();
-    expect(drainer.backoffAgents).toHaveLength(0);
-  });
-
-  it('backoff does NOT delay the classifier-stuck liveness escalation — the streak advances during cooldown', async () => {
-    const h = harness();
-    let seq = 1;
-    const bigReplay = 'x'.repeat(4 * 1024 * 1024 + 16); // big → backoff throttles re-classify
-    h.setSession('spir-1', fakeSession({
-      ringBuffer: { getAll: () => [bigReplay], get currentSeq() { return seq; }, partialBytes: 0 },
-    }));
-    // A big ring the gate can't bound → `no-region-end` (classifier-stuck): the SAME population
-    // the backoff throttles is the one the liveness net guards. The streak must still cross its
-    // threshold (10) on schedule even though most re-classifies are skipped — via the cached
-    // classification re-fed on each skipped tick (CMAP round 2 — Claude/Codex).
-    h.ports.classify = async () => ({ clean: false, reason: 'busy', detail: 'no-region-end' });
-    held('spir-1');
-    const drainer = new MailboxDrainer({ intervalMs: 999999 });
-    drainer.start(h.ports, db);
-    for (let i = 0; i < 12; i++) { seq++; await drainer.tick(); } // > threshold, even with skips
-    drainer.stop();
-    expect(h.livenessCalls.length).toBeGreaterThan(0);
-    expect(h.livenessCalls[0]).toMatchObject({ toAgent: 'spir-1', streak: 10 });
-  });
-
-  it('forces a fresh classify at the liveness-threshold crossing — a ring that CLEARED mid-cooldown does not false-escalate (CMAP round 3 — Codex/Claude)', async () => {
-    const h = harness();
-    let seq = 1;
-    const bigReplay = 'x'.repeat(4 * 1024 * 1024 + 16); // big → backoff throttles re-classify
-    h.setSession('spir-1', fakeSession({
-      ringBuffer: { getAll: () => [bigReplay], get currentSeq() { return seq; }, partialBytes: 0 },
-    }));
-    // Backoff schedule (threshold 10): classify on ticks 1,3,6; every tick (classified OR skipped)
-    // advances the streak, so it is 9 after tick 9 with a cooldown skip still pending. Tick 10 is the
-    // crossing. PRE-fix it would SKIP and re-feed the STALE `no-region-end`, firing a spurious
-    // onLiveness even though the ring has since cleared. The fix forces a real classify at exactly
-    // that crossing tick, so the escalation reflects the CURRENT screen (here: cleared → delivers).
-    let stuck = true;
-    let classifyCalls = 0;
-    h.ports.classify = async () => {
-      classifyCalls++;
-      return stuck ? { clean: false, reason: 'busy', detail: 'no-region-end' } : CLEAN;
-    };
-    held('spir-1');
-    const drainer = new MailboxDrainer({ intervalMs: 999999 });
-    drainer.start(h.ports, db);
-    for (let i = 0; i < 9; i++) { seq++; await drainer.tick(); } // streak → 9, still stuck, backoff active
-    expect(h.livenessCalls).toHaveLength(0);
-    expect(drainer.streaks.get(agentKey('/ws', 'spir-1'))).toBe(9);
-    stuck = false;               // the ring clears — but NO fast trigger is observed (backstop only)
-    const callsBefore = classifyCalls;
-    seq++; await drainer.tick(); // tick 10 = the crossing → MUST force a fresh classify, not skip
-    drainer.stop();
-    expect(classifyCalls).toBe(callsBefore + 1);    // a real classify happened at the crossing (pre-fix: skipped, +0)
-    expect(h.livenessCalls).toHaveLength(0);         // fresh CLEAN → NO false classifier-stuck escalation
-    expect(h.writes.map((w) => w.formattedMessage)).toEqual(['hi']); // the cleared line actually delivered
-  });
-
   it('generation guard (tick): an in-flight pass that resumes after stop() does not seed the new generation (CMAP round 3 — all three)', async () => {
     const h = harness();
-    const bigReplay = 'x'.repeat(4 * 1024 * 1024 + 16); // big → a resumed pass WOULD seed a backoff entry
-    h.setSession('spir-1', fakeSession({ ringBuffer: { getAll: () => [bigReplay], currentSeq: 1, partialBytes: 0 } }));
+    h.setSession('spir-1', fakeSession({ bytesWritten: 1 }));
     let release!: () => void;
     const gate = new Promise<void>((r) => { release = r; });
     h.ports.classify = async () => { await gate; return { clean: false, reason: 'busy', detail: 'no-region-end' }; };
@@ -754,17 +677,15 @@ describe('MailboxDrainer verdict memo (Spec 1313 render-gate follow-up)', () => 
     const drainer = new MailboxDrainer({ intervalMs: 999999 });
     drainer.start(h.ports, db);
     const inFlight = drainer.tick(); // parks at the classify await
-    drainer.stop();                  // bumps the generation + clears the streak/backoff maps
+    drainer.stop();                  // bumps the generation + clears the streak map
     release();                       // classify resolves → the tick resumes PAST the await
-    await inFlight;                  // the post-await generation check must bail before recordStreak/updateBackoff
-    expect(drainer.streaks.size).toBe(0);          // pre-fix: the resumed recordStreak seeds a stale streak (size 1)
-    expect(drainer.backoffAgents).toHaveLength(0); // pre-fix: the resumed updateBackoff seeds a stale backoff entry
+    await inFlight;                  // the post-await generation check must bail before recordStreak
+    expect(drainer.streaks.size).toBe(0); // pre-fix: the resumed recordStreak seeds a stale streak (size 1)
   });
 
   it('generation guard (scheduleDrain): a queued drain that resumes after stop() does not seed the new generation (CMAP round 3 — Codex)', async () => {
     const h = harness();
-    const bigReplay = 'x'.repeat(4 * 1024 * 1024 + 16);
-    h.setSession('spir-1', fakeSession({ ringBuffer: { getAll: () => [bigReplay], currentSeq: 1, partialBytes: 0 } }));
+    h.setSession('spir-1', fakeSession({ bytesWritten: 1 }));
     let release!: () => void;
     const gate = new Promise<void>((r) => { release = r; });
     h.ports.classify = async () => { await gate; return { clean: false, reason: 'busy', detail: 'no-region-end' }; };

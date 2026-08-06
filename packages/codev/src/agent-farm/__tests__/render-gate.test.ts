@@ -18,7 +18,8 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import { RingBuffer } from '../../terminal/ring-buffer.js';
-import { classifyScreen } from '../servers/render-gate.js';
+import { SessionScreen } from '../../terminal/session-screen.js';
+import { classifyScreen, classifyBuffer } from '../servers/render-gate.js';
 import type { RingSnapshot, GateProfile } from '../servers/render-gate.js';
 import { CLAUDE_PROFILE, CODEX_PROFILE, AGY_PROFILE, resolveProfile } from '../servers/gate-profiles.js';
 
@@ -256,6 +257,53 @@ describe('render-gate — real >1MB captures render WHOLE (Spec 1313 D2 root fix
     const whole = load('claude-smallring-idle.replay.bin.gz');
     expect((await classifyScreen({ replay: whole, cols: 139, rows: 63 }, CLAUDE_PROFILE)).clean).toBe(true);
   });
+});
+
+describe('render-gate — PRODUCTION data path: capped ring TEARS, persistent mirror does NOT (Spec 1313 round 2)', () => {
+  // The merge-blocker this round fixes. The whole-capture tests above feed classifyScreen the raw
+  // capture DIRECTLY, which masks #1205: in production the gate saw the capture only AFTER it went
+  // through a RingBuffer whose 2 MiB partial cap TORE the newline-free alt-screen frame. This suite
+  // drives the real production data path — the same chunked dual-feed PtySession.onPtyData does
+  // (ring + mirror together) — and asserts the split: the capped ring reconstruction classifies
+  // BUSY (the resurrected outage), while the persistent bounded mirror classifies CLEAN (the fix).
+  // Architect field repro of the tear: bgtask 2,794,991→1,680,872 chars via the ring; bigring
+  // 2,991,283→1,877,164. Both empty-composer idle screens, so the TRUTH is CLEAN.
+  const loadGz = (name: string) => gunzipSync(readFileSync(`${FIXTURE_DIR}/${name}`)).toString('utf8');
+  const CHUNK = 64 * 1024; // PTY output arrives in chunks; 64 KiB matches the architect's repro feed
+
+  for (const { file, cols, rows } of [
+    { file: 'claude-bgtask-empty.replay.bin.gz', cols: 139, rows: 65 },
+    { file: 'claude-bigring-empty.replay.bin.gz', cols: 139, rows: 65 },
+  ]) {
+    it(`${file}: real default RingBuffer → BUSY (torn), persistent mirror → CLEAN (proves the round-2 fix)`, async () => {
+      const capture = loadGz(file);
+      expect(capture.length).toBeGreaterThan(2 * 1024 * 1024); // crosses the #1205 partial cap
+
+      // Feed the capture through BOTH objects exactly as PtySession.onPtyData does: chunked, with
+      // the ring and the mirror fed the SAME bytes in lockstep. This is the real production path,
+      // not the direct classifyScreen feed the whole-capture tests use.
+      const ring = new RingBuffer(1000); // DEFAULT 2 MiB partial cap — the production config
+      const screen = new SessionScreen(cols, rows);
+      for (let i = 0; i < capture.length; i += CHUNK) {
+        const chunk = capture.slice(i, i + CHUNK);
+        ring.pushData(chunk);
+        screen.feed(chunk);
+      }
+
+      // The capped ring genuinely tears (partial trimmed below the whole frame) → the OLD whole-ring
+      // gate goes BUSY. This is the regression guard: it fails if #1205's cap is ever reverted OR if
+      // the fixture stops crossing the cap.
+      expect(ring.getAll().join('\n').length).toBeLessThan(capture.length); // front dropped by the trim
+      const ringVerdict = await classifyScreen({ replay: ring.getAll().join('\n'), cols, rows }, CLAUDE_PROFILE);
+      expect(ringVerdict.clean).toBe(false);
+
+      // The persistent mirror folded the same bytes into a BOUNDED screen whose viewport is the real
+      // current screen → CLEAN. This is the fix: the delivery outage is gone for the busiest agents.
+      const { term } = await screen.read();
+      expect(classifyBuffer(term, cols, rows, CLAUDE_PROFILE)).toMatchObject({ clean: true, detail: 'empty' });
+      screen.dispose();
+    });
+  }
 });
 
 describe('render-gate — claude suggested-command ghost (Spec 1313 render-gate hardening)', () => {

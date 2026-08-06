@@ -266,4 +266,56 @@ describe('RingBuffer', () => {
       expect(buf.partialBytes).toBeLessThanOrEqual(2 * 1024 * 1024);
     });
   });
+
+  describe('bytesWritten — monotone gate token (Spec 1313 render-gate round 2)', () => {
+    /**
+     * The render-gate change token was `(currentSeq, partialBytes)`, but #1205's partial cap
+     * makes `partialBytes` DECREASE on a trim — so two distinct screens could share a token and
+     * alias a stale memoized verdict. `bytesWritten` is the monotone replacement: cumulative
+     * chars ever fed, never falling, so an unchanged value soundly proves "no new output".
+     */
+    it('starts at 0 and advances by the exact chars fed (newline or not)', () => {
+      const buf = new RingBuffer(10);
+      expect(buf.bytesWritten).toBe(0);
+      buf.pushData('abc');
+      expect(buf.bytesWritten).toBe(3);
+      buf.pushData('de\nfg\n'); // completed lines still count every char
+      expect(buf.bytesWritten).toBe(3 + 6);
+      buf.pushData('');
+      expect(buf.bytesWritten).toBe(9); // empty push is a no-op for the counter too
+    });
+
+    it('is MONOTONE across a partial trim — never falls when partialBytes is halved (the #1205 alias fix)', () => {
+      // A newline-free stream past the ceiling: `partialBytes` gets trimmed (falls) many times over
+      // 300 appends, but `bytesWritten` must keep climbing by exactly what was fed — the token's point.
+      const ceiling = 1000;
+      const buf = new RingBuffer(1000, ceiling);
+      let fed = 0;
+      let prevBytes = 0;
+      let sawPartialDrop = false;
+      for (let i = 0; i < 300; i++) {
+        const partialBefore = buf.partialBytes;
+        buf.pushData('z'.repeat(50));
+        fed += 50;
+        // partialBytes oscillates (grows, then halves on a trim); bytesWritten only ever grows.
+        if (buf.partialBytes < partialBefore) sawPartialDrop = true; // a trim fired on this append
+        expect(buf.bytesWritten).toBe(fed);
+        expect(buf.bytesWritten).toBeGreaterThanOrEqual(prevBytes);
+        prevBytes = buf.bytesWritten;
+      }
+      expect(sawPartialDrop).toBe(true); // partialBytes DID fall on a trim (the alias source)...
+      expect(buf.bytesWritten).toBe(fed); // ...while bytesWritten stayed monotone (== total ever fed)
+    });
+
+    it('survives clear() (not reset) — like seq, so a cleared ring cannot alias a prior token', () => {
+      const buf = new RingBuffer(10);
+      buf.pushData('hello');
+      const before = buf.bytesWritten;
+      expect(before).toBe(5);
+      buf.clear();
+      expect(buf.bytesWritten).toBe(before); // NOT reset to 0
+      buf.pushData('x');
+      expect(buf.bytesWritten).toBe(before + 1); // and keeps climbing from there
+    });
+  });
 });

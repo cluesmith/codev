@@ -8,6 +8,7 @@ import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import type { IPty } from 'node-pty';
 import { RingBuffer } from './ring-buffer.js';
+import { SessionScreen } from './session-screen.js';
 import type { IShellperClient } from './shellper-client.js';
 import { isDeliberateExit } from './shellper-protocol.js';
 
@@ -98,6 +99,12 @@ export class PtySession extends EventEmitter {
   label: string;
   readonly createdAt: string;
   readonly ringBuffer: RingBuffer;
+  // Spec 1313 (render-gate round 2): the persistent bounded gate mirror, fed the same
+  // output bytes as the ring buffer from this session's birth. The render gate reads its
+  // current viewport to decide "is the composer a clean empty prompt?" — replacing the old
+  // whole-ring re-render that #1205's partial cap could hand a torn frame. Lazily created on
+  // the first output byte (see feedGateScreen); null until then and after teardown.
+  private _gateScreen: SessionScreen | null = null;
 
   private pty: IPty | null = null;
   private shellperClient: IShellperClient | null = null;
@@ -212,9 +219,15 @@ export class PtySession extends EventEmitter {
       this.logFd = fs.openSync(this.logPath, 'a');
     }
 
-    // Populate ring buffer with replay data from shellper
+    // Populate ring buffer with replay data from shellper, and seed the gate mirror with
+    // the SAME bytes (Spec 1313 render-gate round 2) so it reflects the session's history
+    // from the moment Tower (re)attaches — a mirror seeded only from live output after this
+    // point would be born torn. Fed through the shared feedGateScreen so it and
+    // `ringBuffer.bytesWritten` (the gate's change token) advance together.
     if (replayData.length > 0) {
-      this.ringBuffer.pushData(replayData.toString('utf-8'));
+      const replay = replayData.toString('utf-8');
+      this.ringBuffer.pushData(replay);
+      this.feedGateScreen(replay);
     }
 
     // Forward shellper data to ring buffer + WebSocket clients
@@ -377,6 +390,11 @@ export class PtySession extends EventEmitter {
       try { fs.closeSync(this.logFd); } catch { /* ignore */ }
       this.logFd = null;
     }
+    // Release the gate mirror's headless Terminal (Spec 1313). Unlike the ring buffer (kept
+    // for shellper replay), the mirror serves only the gate and this is a real teardown, so
+    // free it; a later re-attach lazily builds a fresh one from the replay seed.
+    this._gateScreen?.dispose();
+    this._gateScreen = null;
     // Note: ring buffer is NOT cleared — shellper handles replay
     // Note: shellper client is NOT disconnected — SessionManager owns that lifecycle
   }
@@ -389,8 +407,11 @@ export class PtySession extends EventEmitter {
     // shortly after a streaming agent settles, rather than at the next backstop tick.
     this.armQuiescence();
 
-    // Store in ring buffer
+    // Store in ring buffer + fold into the gate mirror (Spec 1313 render-gate round 2).
+    // Both are fed the SAME bytes here (the single live-output chokepoint), keeping the
+    // mirror's screen and `ringBuffer.bytesWritten` (the gate's change token) in lockstep.
     this.ringBuffer.pushData(data);
+    this.feedGateScreen(data);
 
     // Write to disk log
     if (this.diskLogEnabled && this.logFd !== null) {
@@ -415,6 +436,24 @@ export class PtySession extends EventEmitter {
     }
 
     this.emit('data', data);
+  }
+
+  /**
+   * Fold one output chunk into the persistent gate mirror (Spec 1313 render-gate round 2),
+   * creating it lazily on the first byte. Called at EVERY point the ring buffer is fed —
+   * `onPtyData` (live output) and the `attachShellper` replay seed — with the SAME bytes, so
+   * the mirror's rendered screen and `ringBuffer.bytesWritten` (the gate's monotone change
+   * token) can never drift apart. Creating it on the first byte (not at construction) means a
+   * session that never emits output costs nothing, while any session that does is mirrored from its
+   * very first LIVE byte. NOTE: the `attachShellper` seed is the reconnect/adopt REPLAY, which
+   * `tower-terminals.ts` caps to the last 1 MiB (`capRingSeed`); a long-lived alt-screen frame whose
+   * coherent start predates that tail is seeded born-torn → the gate HOLDS (fail-safe) until the next
+   * repaint/viewer nudge heals it. Pre-existing, not a round-2 regression (the pre-round-2 whole-ring
+   * gate classified that same capped seed); tracked as a fast-follow, #1361.
+   */
+  private feedGateScreen(data: string): void {
+    if (!this._gateScreen) this._gateScreen = new SessionScreen(this.cols, this.rows);
+    this._gateScreen.feed(data);
   }
 
   /**
@@ -495,6 +534,9 @@ export class PtySession extends EventEmitter {
   resize(cols: number, rows: number): boolean {
     this.cols = cols;
     this.rows = rows;
+    // Keep the gate mirror at the live geometry (Spec 1313) so the classified screen wraps
+    // identically to what the user sees; no-op before the mirror's first output / after teardown.
+    this._gateScreen?.resize(cols, rows);
     if (this._shellperBacked) {
       if (this.shellperClient && this.status === 'running') {
         return this.shellperClient.resize(cols, rows);
@@ -621,6 +663,27 @@ export class PtySession extends EventEmitter {
     return this.ringBuffer.partialBytes;
   }
 
+  /**
+   * The persistent gate mirror (Spec 1313 render-gate round 2), or null before this session's
+   * first output byte (and after teardown). The mailbox delivery gate reads its CURRENT
+   * viewport to classify the composer, instead of re-rendering the (capped, tear-prone) ring.
+   * A null mirror means the session has produced no output yet → not a verified-empty prompt →
+   * the gate holds, exactly as an empty replay always did.
+   */
+  get gateScreen(): SessionScreen | null {
+    return this._gateScreen;
+  }
+
+  /**
+   * Cumulative output bytes ever fed to this session (Spec 1313 render-gate round 2) — the
+   * gate's MONOTONE change token. Sourced from the ring buffer's `bytesWritten`, which the
+   * mirror is fed in lockstep with, so an unchanged value proves the mirror's screen has not
+   * moved. Monotone (never falls on a partial trim), unlike the retired `partialBytes` token.
+   */
+  get bytesWritten(): number {
+    return this.ringBuffer.bytesWritten;
+  }
+
   /** Record that a user sent input to this session. */
   recordUserInput(): void {
     this._lastInputAt = Date.now();
@@ -692,6 +755,9 @@ export class PtySession extends EventEmitter {
     this.clients.clear();
     // Release ring buffer memory
     this.ringBuffer.clear();
+    // Release the gate mirror's headless Terminal (Spec 1313).
+    this._gateScreen?.dispose();
+    this._gateScreen = null;
     // Close disk log handle
     if (this.logFd !== null) {
       try { fs.closeSync(this.logFd); } catch { /* ignore */ }

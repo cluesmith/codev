@@ -20,7 +20,7 @@ import type {
   DeliverySession,
   DeliveredBroadcast,
 } from '../servers/mailbox-delivery.js';
-import type { GateProfile, GateVerdict, RingSnapshot } from '../servers/render-gate.js';
+import type { GateProfile, GateVerdict } from '../servers/render-gate.js';
 
 const PROFILE: GateProfile = { app: 'claude', markerPattern: /^❯/, regionEndPatterns: [] };
 const CLEAN: GateVerdict = { clean: true, detail: 'empty' };
@@ -32,7 +32,7 @@ const AGENT = 'main';
 /** A minimal DeliverySession fake (records writes). */
 function fakeSession(): DeliverySession {
   return {
-    ringBuffer: { getAll: () => ['❯ '] },
+    bytesWritten: 0,
     info: { cols: 110, rows: 32 },
     command: 'claude',
     launchArgs: [],
@@ -80,7 +80,7 @@ function harness(): Harness {
     ports: {
       getSessionForAgent: () => session,
       resolveProfile: () => profile,
-      classify: (_snap: RingSnapshot, _p: GateProfile): Promise<GateVerdict> => Promise.resolve(verdict),
+      classify: (_session: DeliverySession, _p: GateProfile): Promise<GateVerdict> => Promise.resolve(verdict),
       writeMessage: (_s, formattedMessage, noEnter) => {
         writes.push({ formattedMessage, noEnter });
         return true; // the write landed (Spec 1313: writeMessage reports delivery success)

@@ -4,15 +4,38 @@
  *
  * A message body is only ever written to a prompt this gate proves empty, so
  * corruption is eliminated by construction: a message can never fuse with a
- * draft because it is never delivered while one exists. The gate replays the
- * session's output ring — the exact reconnect-replay data path
- * (`ringBuffer.getAll().join('\n')`, tower-websocket.ts) — through a transient
- * headless terminal and inspects the rendered composer region. This is a direct
+ * draft because it is never delivered while one exists. The classifier is a direct
  * port of the G-lite classifier validated against the real claude/codex TUIs in
  * spike 1265 (`codev/spikes/1265-poc/exp-g2-glite-prod-path.mjs`).
  *
+ * WHAT it reads (Spec 1313 render-gate round 2 — capped-ring reconciliation): the gate
+ * classifies a rendered terminal SCREEN via the sync core {@link classifyBuffer}. In
+ * PRODUCTION that screen is the session's persistent bounded mirror (`SessionScreen`,
+ * terminal layer): one long-lived `@xterm/headless` Terminal fed the session's output
+ * incrementally — from birth on the live path — whose current viewport IS the live screen. The gate originally
+ * REBUILT the screen every check by replaying the whole output ring
+ * (`ringBuffer.getAll().join('\n')`) through a throwaway Terminal — but #1205 capped the ring's
+ * newline-free `partial` at 2 MiB (`trimPartial` halves to ~1 MiB), and a claude/codex
+ * alt-screen frame (`\x1b[?1049h`) is exactly one giant newline-free partial. So once a busy
+ * long-lived agent's frame crossed the cap, the gate was handed a TORN front — dropping the
+ * composer marker (→ false `no-composer-marker`) or the composer's lower rule (→ the region
+ * spills into status chrome → false `user-text`) — and held its mail PERMANENTLY. That is the
+ * over-ceiling delivery outage the whole-ring render was meant to eliminate, resurrected one
+ * layer down for exactly the busiest agents. A bounded terminal mirror needs only the live byte
+ * stream, not the whole ring, so the cap is irrelevant, the live-ring tear is gone, each classify is
+ * O(viewport) rather than O(ring size), and the whole-render era's unbounded-`partial` OOM risk
+ * (#1047: one classify allocating a multi-hundred-MB string) is closed. The whole-ring
+ * {@link classifyScreen} entry survives for the fixture suite and any transient one-shot
+ * classify; it shares the SAME classifier core, so the two paths can never diverge.
+ *
+ * Caveat — adopt/reconnect seed: after a Tower restart the mirror is seeded from a bounded replay
+ * tail (`capRingSeed`, 1 MiB), not the live-from-birth stream, so a long-lived alt-screen frame can
+ * be born torn on adopt. That classifies not-clean → the gate HOLDS (fail-safe, never a misdelivery)
+ * and self-heals on the next repaint/viewer nudge. Pre-existing (the pre-round-2 whole-ring gate saw
+ * the same capped seed), not a round-2 regression; tracked as #1361.
+ *
  * Classifier (fail-toward-not-clean): CLEAN requires
- *   (a) a recognized composer marker on the reconstructed screen, AND
+ *   (a) a recognized composer marker on the screen, AND
  *   (b) a positively-bounded composer region (a rule/status line BELOW the
  *       marker — never a scan to the screen bottom), AND
  *   (c) zero normal-intensity (non-dim), non-whitespace, non-chrome cells in that
@@ -23,44 +46,13 @@
  * render rotating placeholder/hint text DIM while typed text is normal-intensity
  * (measured, spike g2) — so no placeholder allowlist is needed. Anything
  * unrecognized (no marker, no region boundary, a menu, a picker, a draft, a
- * wrapper/boot screen) → NOT clean → the message stays held. There is no force path.
+ * wrapper/boot screen, or a mirror that has not yet repainted a coherent frame) → NOT clean →
+ * the message stays held. There is no force path.
  *
- * Replay fidelity (Spec 1313 render-gate hardening): the gate renders the WHOLE
- * coherent ring at any size, not a fixed tail slice. A claude/codex TUI on the
- * alternate screen (`\x1b[?1049h`) encodes its state in the cumulative byte stream
- * from the alt-screen-enter onward (why `ring-buffer.ts` keeps the `partial` whole),
- * so a mid-stream tail slice corrupts the reconstruction — dropping the composer
- * marker (→ false `no-composer-marker`) or the composer's lower rule (→ the region
- * spills into status chrome → false `user-text`). Both were real field bugs traced to
- * the old 1 MB `capReplay` slice (architect cap-sweep: every whole render classifies
- * CLEAN; the verdict flipped purely with slice size). There is no "most-recent
- * full-repaint boundary" to slice at for an alt-screen app, so the whole ring is the
- * only faithful input — every time, regardless of size.
- *
- * No size cap on delivery (Spec 1313 over-ceiling removal): the gate never holds a
- * ring for being large. A long-lived session accretes its whole alt-screen frame into
- * the unbounded `partial` (#1047), so a busy terminal grows past any fixed size in
- * normal use — an earlier `over-ceiling` hold therefore meant a permanent delivery
- * outage for exactly the busiest agents (a live ~14 M-unit empty-composer architect
- * terminal was stuck, its mail undeliverable until relaunch). Whole-ring render is
- * correct at any size, so the fix is simply to render it. Two mechanisms in
- * `mailbox-delivery.ts` bound the recurring cost: the verdict memo skips re-rendering a
- * STATIC large ring, and a cost-aware backstop backoff throttles re-classifying a BUSY big
- * ring that repaints every tick — the case the memo can NOT help, because a busy ring's token
- * changes every tick and the memo always misses exactly when the render is most expensive.
- * Residual risk (accepted, deferred to #1047): because `partial` is unbounded, a pathological
- * runaway (a huge no-newline dump) can make ONE whole-ring render allocate and parse a
- * multi-hundred-MB string — a real risk of exhausting the Tower heap (an OOM CRASH, not merely
- * a stall: @xterm/headless chunks its parse and yields, so the event loop is not monolithically
- * blocked, but the allocation is unbounded). Neither the memo nor the backoff bounds that first
- * giant render; a hold cap is NOT the answer (it just reintroduces the outage under a bigger
- * number). The robust fix — classify off-thread with a memory bound, or retire the unbounded
- * `partial` for a persistent headless screen — is #1047, out of scope here. An unclassifiable
- * huge ring still HOLDS and escalates via the classifier-stuck liveness surface
- * (`no-region-end`/`no-composer-marker`), so it is never a silent loss.
- *
- * Cost (spike g2, @xterm/headless 6.0.0): 2 ms @ 13 KB, 67 ms @ 4 MB — cheap enough
- * to gate every delivery for realistic rings.
+ * Cost (spike g2, @xterm/headless 6.0.0): classifying a rendered viewport is sub-millisecond
+ * (bounded rows × cols, independent of history); the mirror pays a normal terminal-emulator
+ * parse per output chunk — the cost any emulator pays for the byte stream — amortised across
+ * the session instead of spent in a per-check whole-history burst.
  */
 
 // `@xterm/headless` resolves to its CommonJS entry (no `exports` map, no
@@ -84,10 +76,13 @@ type BufferCell = ReturnType<HeadlessTerminal['buffer']['active']['getNullCell']
 type BufferLine = NonNullable<ReturnType<HeadlessTerminal['buffer']['active']['getLine']>>;
 
 /**
- * The ring snapshot the gate classifies — the production reconnect-replay shape.
- * `replay` is the WHOLE `ringBuffer.getAll().join('\n')`, rendered in full at any size
- * (no cap — see the module header); `cols`/`rows` size the headless terminal to match
- * the live session so wrapping reconstructs identically.
+ * A one-shot replay-string snapshot for the TRANSIENT {@link classifyScreen} path.
+ * `replay` is a rendered byte stream (e.g. a `ringBuffer.getAll().join('\n')` or a test
+ * fixture); `cols`/`rows` size the throwaway headless terminal to match the captured
+ * session so wrapping reconstructs identically. Production no longer builds this from the
+ * (capped) ring — it reads the session's persistent {@link SessionScreen} mirror instead
+ * (see the module header); this shape survives for the fixture suite and any transient
+ * one-shot classify.
  */
 export interface RingSnapshot {
   replay: string;
@@ -245,77 +240,99 @@ function isGhostCursorCell(
 }
 
 /**
- * Classify a rendered ring snapshot against a profile.
+ * The classifier CORE (Spec 1313 render-gate round 2): classify an already-rendered
+ * headless buffer against a profile. Synchronous — it only READS the live buffer, it never
+ * parses — so it is shared, unchanged, by BOTH gate paths: the production persistent-mirror
+ * gate (`SessionScreen.read()` → this) and the transient {@link classifyScreen} (write a
+ * replay into a throwaway term → this). One classifier core means the two paths can never
+ * disagree about what "empty" means.
  *
- * Returns `{ clean: true, detail: 'empty' }` only when a composer marker is
- * present and the composer region carries zero normal-intensity user cells;
- * otherwise `{ clean: false, reason: 'busy', … }`. Async because the headless
- * terminal parses its input on a write callback.
+ * Precondition: the caller has already parsed all input into `term` (the mirror flushes in
+ * `read()`; `classifyScreen` awaits its `write`). Having no `await`, a single call is atomic
+ * against concurrent feeds — nothing can mutate the buffer mid-scan.
+ *
+ * Returns `{ clean: true, detail: 'empty' }` only when a composer marker is present and the
+ * composer region carries zero normal-intensity user cells; otherwise
+ * `{ clean: false, reason: 'busy', … }`.
+ */
+export function classifyBuffer(
+  term: HeadlessTerminal,
+  cols: number,
+  rows: number,
+  profile: GateProfile
+): GateVerdict {
+  const buf = term.buffer.active;
+  const lines = screenLines(term, rows);
+
+  const markerRow = findMarkerRow(lines, profile.markerPattern);
+  if (markerRow === -1) {
+    // No composer marker: a wrapper/boot screen, a full-screen picker with no marker, a
+    // mirror that has not yet repainted a coherent frame, or an unrenderable snapshot.
+    // Never clean — the safe direction.
+    return { clean: false, reason: 'busy', detail: 'no-composer-marker' };
+  }
+
+  const endRow = findRegionEnd(lines, markerRow, profile.regionEndPatterns);
+  if (endRow === -1) {
+    // A marker with no rule/status line beneath it: a partial/mid-repaint frame. The
+    // composer has no proven lower bound, so hold rather than scan into the status chrome
+    // below it (which would either miscount chrome as user text or, if it renders
+    // empty/dim, return a false CLEAN).
+    return { clean: false, reason: 'busy', detail: 'no-region-end' };
+  }
+  const top = buf.viewportY;
+  const cell = buf.getNullCell();
+  const probe = buf.getNullCell(); // scratch cell for the ghost-tail look-ahead (never clobbers `cell`)
+  // Cursor position is viewport-relative (matching `row`, which indexes from `viewportY`).
+  const cursorRow = buf.cursorY;
+  const cursorCol = buf.cursorX;
+  let userCells = 0;
+
+  for (let row = markerRow; row < endRow; row++) {
+    const line = buf.getLine(top + row);
+    if (!line) continue;
+    for (let col = 0; col < cols; col++) {
+      line.getCell(col, cell);
+      const ch = cell.getChars();
+      if (!ch || WHITESPACE.test(ch) || IGNORE_CHARS.has(ch)) continue;
+      if (row === markerRow && col === 0) continue; // the marker glyph itself
+      if (cell.isDim()) continue; // placeholder / hint chrome renders dim (claude/codex)
+      if (
+        profile.placeholderFgPalette !== undefined &&
+        cell.isFgPalette() &&
+        cell.getFgColor() === profile.placeholderFgPalette
+      ) {
+        continue; // per-app placeholder color: agy renders its idle hint in palette-8 (gray)
+      }
+      if (isGhostCursorCell(line, row, col, cols, cursorRow, cursorCol, cell, probe)) {
+        continue; // claude's suggested-command ghost cursor cell (see isGhostCursorCell)
+      }
+      userCells++;
+    }
+  }
+
+  return userCells === 0
+    ? { clean: true, detail: 'empty' }
+    : { clean: false, reason: 'busy', detail: 'user-text' };
+}
+
+/**
+ * Classify a one-shot replay snapshot by rendering it into a THROWAWAY headless terminal
+ * (Spec 1313). The transient path — the fixture suite and any caller holding a replay string
+ * rather than a live mirror. Production instead classifies the session's persistent
+ * {@link SessionScreen} directly via {@link classifyBuffer} (see the module header). Async
+ * because the headless terminal parses its input on a write callback; the shared
+ * {@link classifyBuffer} then does the actual classification.
  */
 export async function classifyScreen(snapshot: RingSnapshot, profile: GateProfile): Promise<GateVerdict> {
   const { cols, rows } = snapshot;
-  const replay = snapshot.replay;
-
-  // Render the WHOLE ring at any size — never a slice, never a size-based hold. An
-  // alt-screen frame only reconstructs from its full cumulative stream, so a tail
-  // slice would false-clean and a size cap would strand the busiest agents' mail
-  // (see the module header): there is no size at which holding beats rendering.
+  // A throwaway terminal for this single classify. scrollback 2000 is ample for a
+  // whole-replay render; the gate reads only the viewport, so the value never changes the
+  // verdict (the persistent mirror uses a much smaller one for the same reason).
   const term = new Terminal({ cols, rows, allowProposedApi: true, scrollback: 2000 });
   try {
-    await new Promise<void>((resolve) => term.write(replay, resolve));
-
-    const buf = term.buffer.active;
-    const lines = screenLines(term, rows);
-
-    const markerRow = findMarkerRow(lines, profile.markerPattern);
-    if (markerRow === -1) {
-      // No composer marker: a wrapper/boot screen, a full-screen picker with no
-      // marker, or an unrenderable snapshot. Never clean — the safe direction.
-      return { clean: false, reason: 'busy', detail: 'no-composer-marker' };
-    }
-
-    const endRow = findRegionEnd(lines, markerRow, profile.regionEndPatterns);
-    if (endRow === -1) {
-      // A marker with no rule/status line beneath it: a partial/mid-repaint frame or
-      // a torn replay. The composer has no proven lower bound, so hold rather than
-      // scan into the status chrome below it (which would either miscount chrome as
-      // user text or, if it renders empty/dim, return a false CLEAN).
-      return { clean: false, reason: 'busy', detail: 'no-region-end' };
-    }
-    const top = buf.viewportY;
-    const cell = buf.getNullCell();
-    const probe = buf.getNullCell(); // scratch cell for the ghost-tail look-ahead (never clobbers `cell`)
-    // Cursor position is viewport-relative (matching `row`, which indexes from `viewportY`).
-    const cursorRow = buf.cursorY;
-    const cursorCol = buf.cursorX;
-    let userCells = 0;
-
-    for (let row = markerRow; row < endRow; row++) {
-      const line = buf.getLine(top + row);
-      if (!line) continue;
-      for (let col = 0; col < cols; col++) {
-        line.getCell(col, cell);
-        const ch = cell.getChars();
-        if (!ch || WHITESPACE.test(ch) || IGNORE_CHARS.has(ch)) continue;
-        if (row === markerRow && col === 0) continue; // the marker glyph itself
-        if (cell.isDim()) continue; // placeholder / hint chrome renders dim (claude/codex)
-        if (
-          profile.placeholderFgPalette !== undefined &&
-          cell.isFgPalette() &&
-          cell.getFgColor() === profile.placeholderFgPalette
-        ) {
-          continue; // per-app placeholder color: agy renders its idle hint in palette-8 (gray)
-        }
-        if (isGhostCursorCell(line, row, col, cols, cursorRow, cursorCol, cell, probe)) {
-          continue; // claude's suggested-command ghost cursor cell (see isGhostCursorCell)
-        }
-        userCells++;
-      }
-    }
-
-    return userCells === 0
-      ? { clean: true, detail: 'empty' }
-      : { clean: false, reason: 'busy', detail: 'user-text' };
+    await new Promise<void>((resolve) => term.write(snapshot.replay, resolve));
+    return classifyBuffer(term, cols, rows, profile);
   } finally {
     term.dispose();
   }

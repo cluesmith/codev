@@ -19,7 +19,7 @@ import { terminalDeliverySignals, type PtySession } from '../../terminal/pty-ses
 import { getWorkspaceTerminals, getTerminalManager } from './tower-terminals.js';
 import { broadcastMessage } from './tower-messages.js';
 import { writeMessagePaced } from './message-write.js';
-import { classifyScreen, type GateProfile } from './render-gate.js';
+import { classifyBuffer, type GateProfile, type GateVerdict } from './render-gate.js';
 import { resolveProfile } from './gate-profiles.js';
 import { harnessFromLaunchScript, type ContextFsPort } from '../commands/reset/context.js';
 import { getGlobalDb } from '../db/index.js';
@@ -163,6 +163,28 @@ export function resolveProfileForSession(session: DeliverySession): GateProfile 
   return resolveProfile({ command: harness });
 }
 
+/**
+ * Classify a session's CURRENT screen for the gate (Spec 1313 render-gate round 2). Reads the
+ * session's persistent {@link SessionScreen} mirror — a bounded headless Terminal fed the
+ * session's output from birth — and runs the shared classifier on its viewport. This replaces
+ * the old whole-ring re-render (`classifyScreen(ringBuffer.getAll()…)`), which #1205's 2 MiB
+ * partial cap could hand a TORN frame → a permanent false-`busy` hold for the busiest agents.
+ *
+ * The delivery path only ever calls this with a live session resolved by
+ * {@link resolveLiveSessionForAgent} — always a `PtySession`, which carries the mirror — so the
+ * cast is sound. A session that has produced NO output yet has no mirror (`gateScreen` is null);
+ * that is not a verified-empty prompt, so it classifies not-clean (`no-composer-marker`), exactly
+ * as an empty replay always did. `SessionScreen.read()` flushes the parser, so the buffer the
+ * shared {@link classifyBuffer} reads reflects every byte counted by the change token the
+ * delivery path sampled — the property its gate→write TOCTOU relies on.
+ */
+export async function classifyAgentScreen(session: DeliverySession, profile: GateProfile): Promise<GateVerdict> {
+  const screen = (session as PtySession).gateScreen;
+  if (!screen) return { clean: false, reason: 'busy', detail: 'no-composer-marker' };
+  const { term, cols, rows } = await screen.read();
+  return classifyBuffer(term, cols, rows, profile);
+}
+
 /** Convert a delivered-message frame to the WebSocket bus shape and broadcast it. */
 function broadcastDelivered(frame: DeliveredBroadcast): void {
   broadcastMessage({
@@ -185,7 +207,7 @@ export function makeDeliveryPorts(log: LogFn): DeliveryPorts {
   return {
     getSessionForAgent: (ws, agent) => resolveLiveSessionForAgent(ws, agent),
     resolveProfile: (session) => resolveProfileForSession(session),
-    classify: (snapshot, profile) => classifyScreen(snapshot, profile),
+    classify: (session, profile) => classifyAgentScreen(session, profile),
     writeMessage: (session, msg, noEnter) => writeMessagePaced(session, msg, noEnter),
     broadcast: (frame) => broadcastDelivered(frame),
     onHeldStateChange: () => broadcastHeldStateChange(),

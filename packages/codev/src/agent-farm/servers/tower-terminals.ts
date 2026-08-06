@@ -35,9 +35,11 @@ import { TerminalManager, DEFAULT_DISK_LOG_MAX_BYTES } from '../../terminal/inde
  * the client's post-connect resize nudge repaints full-screen apps, and the
  * shellper retains the full history.
  */
-const RING_SEED_MAX_BYTES = 1024 * 1024; // 1MB
+// Exported for the Spec 1313 adopt-path regression test (#1361): a >1 MiB replay
+// capped here to the last 1 MiB can seed the gate mirror born-torn → fail-safe HOLD.
+export const RING_SEED_MAX_BYTES = 1024 * 1024; // 1MB
 
-function capRingSeed(replayData: Buffer, sessionId: string): Buffer {
+export function capRingSeed(replayData: Buffer, sessionId: string): Buffer {
   if (replayData.length <= RING_SEED_MAX_BYTES) return replayData;
   _deps?.log('INFO', `Session ${sessionId} replay is ${replayData.length} bytes; seeding the most recent ${RING_SEED_MAX_BYTES}`);
   return replayData.subarray(replayData.length - RING_SEED_MAX_BYTES);
