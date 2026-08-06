@@ -9,3 +9,10 @@ Issue #1037: codelens-driven review comments in the unified diff editor (per-bui
 - Key design find: PTY injection is raw bytes (`sendText` → `handleInput` → WebSocket), so a multi-line batched message would submit on every `\n` in the Claude REPL. Locked design: bracketed-paste wrapping (`\x1b[200~…\x1b[201~`, `\n`→`\r`); flagged as the top risk, spike first in implement, first item in the dev-approval script.
 - Gitignore decision: managed block in `$GIT_COMMON_DIR/info/exclude` written by the extension at first queue write; family glob `.builder-*` also silences the scaffolding-file class; committed-.gitignore alternative weighed and documented in the plan.
 - Plan written to `codev/plans/1037-vscode-codelens-driven-review-.md`; sitting at plan-approval gate.
+
+## 2026-08-06 Implement phase
+
+- Plan approved; implemented in 5 commits: pure queue module (schema/packaging/bracketed-paste/exclude-block), ReviewQueueStore (fs + watcher + info/exclude managed block), mode-aware codelenses (`codev.diffCodelensMode` setting + title-bar toggle + always-on context menu), builder-review comment controller (mount/reconcile/edit/delete via Comments API), Submit Review (batched bracketed-paste flush + status-bar counter + palette commands).
+- Deviations from plan, to raise at dev-approval: (1) changelog files NOT edited — apps/vscode/CHANGELOG.md and docs/releases/UNRELEASED.md are maintained on the docs/vscode-changelog branch per the template's per-PR workflow; suggested entry text handed to architect instead. (2) `lineRange` made nullable in the schema (null = whole-file comment) so the file-level lens produces `### path` instead of a misleading line ref. (3) #789's context-menu forward action: `when` relaxed from `editorHasSelection` to always-on-builder-files with a cursor-line fallback, to satisfy the issue's "context menu always exposes both" AC; the Cmd/Ctrl+K B keybinding keeps its original selection guard.
+- All 694 vscode unit tests pass (37 new across 6 test files); check-types + eslint + esbuild clean.
+- Bracketed-paste injection is the one thing unit tests cannot prove — first item in the dev-approval script.
