@@ -192,8 +192,9 @@ Phase 5 actually rewrote.
 
 ## R3 — `expectPureAdditionDiff` on `air/implement.md` (the third and last PHASE_2 file)
 
-**Status: PROPOSED, Phase 6, 2026-08-04. Awaiting a human decision. Nothing applied; the suite is
-deliberately left RED on this one assertion until the decision is recorded.**
+**Status: APPROVED by Waleed (human decision, relayed by the architect), 2026-08-06. Applied. The
+same decision PRE-APPROVED THE CLASS for the remaining PHASE_3 retirements (phases 7–9) — see the
+"Class pre-approval" box below.**
 
 The third instance of the pattern R1 foresaw and scoped out. R1 retired the PHASE_1 builder-prompts
 and left PHASE_2 in force; R2 retired two of PHASE_2's three files (spir/aspir specify.md); R3 is the
@@ -254,5 +255,30 @@ call — I am not assuming it; R3 is written up in full either way.
 
 ### Architect / human decision
 
-- [ ] **PENDING.** Rejection is legitimate — it means Phase 6 cannot rewrite `air/implement.md` to
-  P1 and that decision is rescoped to leave it pure-addition.
+- [x] **APPROVED — Waleed, 2026-08-06** (human call, relayed by the architect). Grounds mirror R1/R2:
+  the retirement R1 foresaw and scoped out, behaviour surviving in the grep / mirror-parity / pollution
+  assertions that still pass, anti-vacuity preserved. Applied in two commits (retirement, then
+  replacement guard), mirroring R1/R2's split.
+
+---
+
+## Class pre-approval — foreseen PHASE_3 retirements (phases 7–9)
+
+**Granted by Waleed 2026-08-06, alongside R3.** R1→R2→R3 retired every `PHASE_2` baked-decisions
+pure-addition guard. The `PHASE_3` reviewer / consult-type files carry the identical guard and will
+trip it identically when phases 7–9 rewrite them. Rather than a per-file blocking gate, this class is
+**pre-approved** — subject to three invariants that are now **conditions, not conventions**:
+
+1. **Behaviour survives with canonical wording.** The Baked Decisions grep for that file
+   (`Baked Decisions`, `do not autonomously`, contradiction handling, `afx send`, plus the
+   consult-type `COMMENT`/`REQUEST_CHANGES` distinction) stays green after the rewrite.
+2. **Replacement guard ships in the mirrored separate commit.** A post-1280 baseline + inverted
+   anti-vacuity added to `spec-1280-prompt-deletion-guard.test.ts`, in its own commit, exactly as
+   R1/R2/R3 did.
+3. **Full audit trail.** Each class-approved retirement still gets its own numbered writeup in this
+   register **and** appears in its phase manifest. The audit trail stays complete; only the per-item
+   blocking wait is removed.
+
+**Enforcement**: the architect still verifies each at M11. **A violation of any invariant voids the
+class approval for that item** — it reverts to needing an explicit per-item decision. This box is the
+authority the phases 7–9 retirements cite; each still records its own numbered entry here.

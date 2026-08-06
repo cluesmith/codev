@@ -303,10 +303,33 @@ describe('Spec 746 Phase 2: drafting-prompt baked-decisions clause', () => {
     'codev/protocols/spir/prompts/specify.md',
     'codev/protocols/aspir/prompts/specify.md',
   ]);
+  // RETIRED under Spec 1280 (retirement R3, approved by Waleed 2026-08-06) — the third and last
+  // PHASE_2 file. Phase 6 rewrites air/implement.md to P1, deleting the pre-746 "Process"
+  // walkthrough, so its pure-addition invariant is false by design (the change-freeze failure R1
+  // named). Behaviour survives — the Baked Decisions grep above passes on the canonical wording —
+  // and deletion protection is re-anchored on a post-1280 baseline in
+  // spec-1280-prompt-deletion-guard.test.ts. After R2+R3 every PHASE_2 baseline file is retired;
+  // the loop stays so a future PHASE_2 file would still be guarded. Full trace:
+  // codev/resources/1280-retirements.md (R3).
+  const RETIRED_UNDER_R3 = new Set([
+    'codev/protocols/air/prompts/implement.md',
+  ]);
+  const activePhase2 = PHASE_2_FILES.filter(
+    (f) =>
+      f.baselineName !== null &&
+      !RETIRED_UNDER_R2.has(f.relPath) &&
+      !RETIRED_UNDER_R3.has(f.relPath),
+  );
   describe('pure-addition diff: baseline lines preserved in order', () => {
-    for (const file of PHASE_2_FILES) {
-      if (file.baselineName === null) continue;
-      if (RETIRED_UNDER_R2.has(file.relPath)) continue; // R2 — see comment above
+    // R2 + R3 retired every PHASE_2 baseline file's pure-addition guard. The loop stays so a
+    // future PHASE_2 file (with a fresh pre-746 baseline) is still covered; when none is active,
+    // this documents the fully-retired state rather than leaving an empty (error-raising) suite.
+    if (activePhase2.length === 0) {
+      it('all PHASE_2 pure-addition guards retired (R2, R3) — re-activates if a new PHASE_2 file is added', () => {
+        expect(activePhase2).toHaveLength(0);
+      });
+    }
+    for (const file of activePhase2) {
       it(`${file.label}: post-edit file is a pure-addition diff of its baseline`, () => {
         const baseline = readBaseline(file.baselineName!);
         const current = readRepoFile(file.relPath);
