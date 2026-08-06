@@ -1893,3 +1893,16 @@ e2e **7/7**. Docs: review doc (new Consultation Feedback round + Technical Debt 
 metrics) and `arch.md` §7 (one-sentence ghost-exemption pointer). CLAUDE/AGENTS untouched (Spec 1280 owns them); no hot-tier
 change (mailbox-first invariant unchanged). NEXT: commit as logical commits → force-with-lease push PR #1330 → notify
 architect. STAYING at pr gate — no self-approve, no merge, no status.yaml edits.
+
+### 2026-08-06 — CMAP round on the ghost fix → Codex RC (blocking) → tightened
+Architect's 3-way re-consult: Gemini APPROVE/HIGH, Claude APPROVE/HIGH, **Codex REQUEST_CHANGES/HIGH** (architect-verified
++ agreed). Blocking item: my `isGhostCursorCell` granted the exemption on a dim-**or-EMPTY** tail, so the "1-char-draft-with-
+cursor-on-its-only-char" case (an inverse cell, empty tail) was a **false-CLEAN** — a real no-new-corruption-vector /
+fail-toward-hold violation, NOT the acceptable residual I'd documented. (I was wrong to frame it as acceptable; the architect
++ Codex were right.) **Fix:** require POSITIVE ghost evidence — `sawDimTail` must be true (≥1 dim non-ws/non-chrome tail cell);
+empty/whitespace-only tail now returns false → stays busy. Real ghost unaffected (its dim command body is 23 cells).
+**Verified:** empty-tail→busy, whitespace-only-tail→busy, dim-tail ghost→clean, all 17 fixtures unchanged, real ghost fixture
+still CLEAN. Added the empty-tail regression test. render-gate **40/40**; full unit suite **4541 pass / 48 skip / 0 fail**.
+Updated code header+doc comments, arch.md §7 ("non-empty dim tail"), review doc (Technical Debt reframed CLOSED-not-accepted +
+CMAP-round bullet + metrics). Architect confirmed prior build was already local-installed + E2E-proven (a21b6c64 delivered 1.6s
+post-restart). NEXT: commit + push → re-park at pr gate. No self-approve/merge/status.yaml edits.
