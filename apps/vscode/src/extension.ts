@@ -34,6 +34,10 @@ import { addReviewComment } from './commands/review.js';
 import { activateGateToasts } from './notifications/gate-toast.js';
 import { activateReviewDecorations } from './review-decorations.js';
 import { activateReviewComments } from './comments/plan-review.js';
+import { activateBuilderReviewComments } from './comments/builder-review.js';
+import { ReviewQueueStore } from './review-queue/store.js';
+import { submitReview, discardReviewComments } from './review-queue/submit.js';
+import { activateSubmitReviewStatusBar } from './review-queue/status-bar.js';
 import { MarkdownPreviewProvider } from './markdown-preview/preview-provider.js';
 import { BuilderSpawnHandler } from './builder-spawn-handler.js';
 import { BuilderTerminalLinkProvider, ReconnectTerminalLinkProvider } from './terminal-link-provider.js';
@@ -246,6 +250,14 @@ export async function activate(context: vscode.ExtensionContext) {
 	// Terminal Manager
 	terminalManager = new TerminalManager(connectionManager, outputChannel, context.extensionUri, overviewCache);
 	context.subscriptions.push({ dispose: () => terminalManager?.dispose() });
+
+	// Per-builder pending review-comment queues (#1037). The watcher root is
+	// this window's workspace folder — in the main checkout that covers every
+	// `.builders/<id>/` queue file for cross-window sync.
+	const reviewQueueStore = new ReviewQueueStore(
+		vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
+	);
+	context.subscriptions.push(reviewQueueStore);
 
 	// Drive the `codev.terminalFocused` context key so the Cmd/Ctrl+V image
 	// paste binding (#736) only applies when a Codev terminal is focused —
@@ -1150,25 +1162,46 @@ export async function activate(context: vscode.ExtensionContext) {
 		// selected range when symbol/file lenses aren't granular enough. Unlike
 		// the CodeLens, a context-menu action works inside the multi-file View
 		// Diff editor too. Scoped via the `codev.activeEditorIsBuilderFile`
-		// context key + the built-in `editorHasSelection` in its `when` clause.
+		// context key. With no selection it forwards the cursor line (#1037: the
+		// context menu shows this action unconditionally so the forward flow is
+		// always one right-click away in comment mode; the Cmd/Ctrl+K B
+		// keybinding keeps its original `editorHasSelection` guard).
 		reg('codev.forwardSelectionToBuilder', async () => {
 			const editor = vscode.window.activeTextEditor;
 			if (!editor) { return; }
 			const entry = getDiffInjectEntry(editor.document.uri.fsPath);
 			if (!entry) { return; }
 			const sel = editor.selection;
-			if (sel.isEmpty) { return; }
-			const start = sel.start.line + 1;
-			// A selection ending at column 0 of a line doesn't include that line.
-			const end = sel.end.character === 0 && sel.end.line > sel.start.line
-				? sel.end.line
-				: sel.end.line + 1;
+			let start = sel.start.line + 1;
+			let end = sel.end.line + 1;
+			if (sel.isEmpty) {
+				start = sel.active.line + 1;
+				end = start;
+			} else if (sel.end.character === 0 && sel.end.line > sel.start.line) {
+				// A selection ending at column 0 of a line doesn't include that line.
+				end = sel.end.line;
+			}
 			const text = buildBuilderRangeRef(entry.relPath, start, end);
 			const resolvedId = await terminalManager?.openBuilderByRoleOrId(entry.builderId, true);
 			if (resolvedId && !terminalManager?.injectBuilderText(resolvedId, text)) {
 				vscode.window.showWarningMessage('Codev: Builder terminal not available');
 			}
 		}),
+		// Submit Review + Discard (#1037): flush / drop the per-builder pending
+		// comment queue. Builder resolution: active diff's owner → sole pending
+		// builder → QuickPick.
+		reg('codev.submitReview', () =>
+			submitReview({ store: reviewQueueStore, terminalManager: terminalManager!, overviewCache })),
+		reg('codev.discardReviewComments', () =>
+			discardReviewComments({ store: reviewQueueStore, terminalManager: terminalManager!, overviewCache })),
+		// Diff codelens mode toggle (#1037): a single title-bar button per mode
+		// (VS Code toolbar buttons have no pressed state — same pattern as the
+		// Agents group-by cycle above); each command shows the mode clicking
+		// switches TO and persists the choice per workspace.
+		reg('codev.diffCodelensUseForward', () =>
+			vscode.workspace.getConfiguration('codev').update('diffCodelensMode', 'forward', vscode.ConfigurationTarget.Workspace)),
+		reg('codev.diffCodelensUseComment', () =>
+			vscode.workspace.getConfiguration('codev').update('diffCodelensMode', 'comment', vscode.ConfigurationTarget.Workspace)),
 		// Forward the whole active diff file as a reference (the Forward File action).
 		reg('codev.forwardCurrentFileToBuilder', async () => {
 			const editor = vscode.window.activeTextEditor;
@@ -1339,6 +1372,12 @@ export async function activate(context: vscode.ExtensionContext) {
 	// OverviewData.currentUser, falling back to "architect"), matching the
 	// format produced by `codev.addReviewComment` and review.json snippet.
 	activateReviewComments(context, overviewCache);
+
+	// Builder review comments (#1037): inline threads on builder-diff files
+	// feeding the per-builder pending queue, plus the status-bar Submit Review
+	// counter. The batched submit itself is `codev.submitReview` above.
+	activateBuilderReviewComments(context, reviewQueueStore, overviewCache);
+	activateSubmitReviewStatusBar(context, reviewQueueStore);
 
 	// Codev Markdown Preview (#859): a read-only custom editor that renders a
 	// spec/plan/review in the shared artifact-canvas and adds review comments

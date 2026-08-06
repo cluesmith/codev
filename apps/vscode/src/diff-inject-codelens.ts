@@ -165,12 +165,6 @@ const provider = new DiffInjectCodeLensProvider();
  *  context key in sync with the active editor. Called once at activation,
  *  alongside `activateDiffView`. */
 export function activateDiffInjectCodeLens(context: vscode.ExtensionContext): void {
-  const syncContextKey = (editor: vscode.TextEditor | undefined): void => {
-    const isBuilderFile = !!editor && provider.get(editor.document.uri.fsPath) !== undefined;
-    void vscode.commands.executeCommand('setContext', BUILDER_FILE_CONTEXT_KEY, isBuilderFile);
-  };
-  syncContextKey(vscode.window.activeTextEditor);
-
   // Mirror the diffCodelensMode setting into a context key so the
   // `editor/title` toggle buttons swap on it (#1037), and refresh the lenses
   // when the setting changes so their titles/commands flip live.
@@ -178,6 +172,12 @@ export function activateDiffInjectCodeLens(context: vscode.ExtensionContext): vo
     void vscode.commands.executeCommand('setContext', DIFF_CODELENS_MODE_KEY, getDiffCodelensMode());
   };
   syncModeKey();
+
+  const syncContextKey = (editor: vscode.TextEditor | undefined): void => {
+    const isBuilderFile = !!editor && provider.get(editor.document.uri.fsPath) !== undefined;
+    void vscode.commands.executeCommand('setContext', BUILDER_FILE_CONTEXT_KEY, isBuilderFile);
+  };
+  syncContextKey(vscode.window.activeTextEditor);
 
   context.subscriptions.push(
     vscode.languages.registerCodeLensProvider({ scheme: 'file' }, provider),
