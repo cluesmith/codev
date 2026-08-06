@@ -1259,3 +1259,14 @@ Verification-only phase. HEAD 910f00b2, suite green (4184 pass / 48 skip).
 All ten implement phases done, suite green. Project is at the **pr gate (human approval)** — the one
 step a builder cannot self-serve. Notified architect. Nothing further to do autonomously until the
 human reviews/merges.
+
+### Integration review addressed — four fixes, PR #1362 (2026-08-06)
+
+Architect posted integration review (2-way CMAP codex RC / claude COMMENT), ruled T9/T10 deferral
+acceptable. Four pre-merge fixes applied (commit f81d4720), suite green (4184 pass / 48 skip):
+1. spir/aspir review.md merge-ownership → "merge after human pr-gate approval" (was "architect integrates").
+2. builder.md gate clause → defers to protocol prompts on who types porch approve (PIR = human).
+3. research protocol.md → prose defers to embedded state machine (models=[codex]); states reduced reality.
+4. CLAUDE.md/AGENTS.md → dropped team+forge skill names (#1318 drift). CLAUDE==AGENTS preserved.
+Recorded in the review's Consultation Feedback. Non-blocking follow-ups noted by architect
+(release/protocol.md staleness, maintain/templates two-tree divergence). Back to Waleed for the merge word.
