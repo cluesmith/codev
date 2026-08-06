@@ -182,7 +182,7 @@ Each builder keeps a narrative log at `codev/state/<builder-id>_thread.md` — i
 Each CLI has a skill carrying its commands and flags — **check the skill before running the
 command rather than guessing**: `afx` (spawn, status, send, dev, cleanup, Tower),
 `codev` (init, adopt, update, doctor, local build/test), `porch` (status, run, approve),
-`consult` (reviews, cmap, stats), `team`, `forge`, `runnable-worktrees` (making builder
+`consult` (reviews, cmap, stats), `runnable-worktrees` (making builder
 worktrees runnable), `update-arch-docs`.
 
 `afx open <file>` opens the annotation viewer — it is not the system `open`.

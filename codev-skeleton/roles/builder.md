@@ -23,7 +23,9 @@ say so, **stop**, and wait.
 Never treat a porch gate as approved without an explicit human decision — a gate message is a notification to the human, not authorization.
 
 Approval reaches you as a message from the architect. Then *you* run
-`porch approve <id> <gate>`; the architect does not run it for you.
+`porch approve <id> <gate>`; the architect does not run it for you — **unless your protocol's
+prompts route that command to the human instead** (PIR's gates are typed by the human reviewer,
+via Cmd+K G or their own shell). Defer to your protocol's phase prompts on who types `porch approve`.
 
 ## Deliverables
 

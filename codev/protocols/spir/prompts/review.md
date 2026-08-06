@@ -76,4 +76,4 @@ EOF
   <signal>PR_READY</signal>
   ```
 
-Do not run `consult` (porch handles it) and do not merge your own PR (the architect integrates).
+Do not run `consult` (porch handles it) and merge your own PR only after the human approves the `pr` gate — never before.
