@@ -1,27 +1,30 @@
 #!/bin/sh
 # Forge concept: recently-merged (Gitea via tea CLI)
+# Output: JSON [{number, title, url, body, createdAt, mergedAt, headRefName}]
+#         (MergedPrItem in forge-contracts.ts)
 #
-# `tea pulls list --state closed` returns both merged PRs and closed-without-
-# merge PRs. Filter to merged only via `.merged == true` (the same predicate
-# scripts/forge/gitea/pr-exists.sh already relies on), then map to the
-# GitHub-compatible shape:
-#   index           -> number (int)
-#   created         -> createdAt
-#   updated         -> mergedAt  (tea exposes no merged_at field via --fields;
-#                                 close-then-edit overestimates merged time
-#                                 but is acceptable for the 24h overview window)
-#   head.ref        -> headRefName
-#   description     -> body
-exec tea pulls list --state closed --limit 1000 \
-  --fields index,title,state,author,url,created,updated,head,description,merged \
-  --output json \
+# `tea pulls list --fields …,head,description,merged` errors on the `description`
+# field and emits `.head` as a string, so it can't populate `body` or
+# `.head.ref`. Route through the raw REST passthrough instead, whose closed
+# pulls carry `.merged`, `.merged_at`, nested `.head.ref`, and `.body`. Keep
+# only merged pulls (closed-without-merge have `.merged == false`). `tea api`
+# needs an explicit owner/repo in the path (unlike `tea pulls`, which
+# auto-detects it from the local git remote), so resolve it here: honor
+# CODEV_REPO when set, else derive owner/repo from origin's URL (handles https,
+# ssh, and scp-style remotes, with or without a .git suffix).
+#
+# The closed-pulls list is paginated (Gitea caps a page at max_response_items,
+# default 50), so on a busy repo the most-recent merges could push older ones
+# past the first page — tea_api_paged walks every page (see _lib.sh).
+. "$(dirname "$0")/_lib.sh"
+REPO="$(gitea_repo)" || exit 1
+tea_api_paged "repos/${REPO}/pulls" "state=closed" \
   | jq '[.[] | select(.merged == true) | {
-      number: (.index | tonumber),
+      number,
       title,
-      state,
-      url,
-      body: (.description // ""),
-      createdAt: .created,
-      mergedAt: .updated,
+      url: (.html_url // .url),
+      body: (.body // ""),
+      createdAt: .created_at,
+      mergedAt: .merged_at,
       headRefName: (.head.ref // "")
     }]'
