@@ -1994,3 +1994,14 @@ confirms 3 non-optional hygiene items. All folded in:
 Incremental diff kept proportionate (doc+test+one-liner); the substantive round-2 code was already 3-way CMAP'd. NEXT: build+full
 unit+send-integration e2e green → commit (logical commits) → force-with-lease push PR #1330 → re-park at pr gate. Architect runs
 final integration verification on the incremental diff + hands the human the gate. NO self-approve/merge/status.yaml.
+
+### 2026-08-06 — PUSHED + re-parked at the pr gate (round-2 + Option-A complete)
+All green on the final state: build exit 0; full unit **4551 pass / 48 skip / 0 fail** (+2 = the new adopt-path regression);
+`send-integration.e2e` **7/7**. Committed as 2 logical commits on 68d74c5b and fast-forward-pushed to origin/builder/spir-1313:
+- **8bedc5e0** fix: persistent bounded gate mirror (round 2) + Option-A hygiene (adopt HOLD test, dispose one-liner, capRingSeed
+  export, code-comment caveats) — 16 files, +828/−477.
+- **5f144736** docs: arch §7 round-2 rewrite + review round-2 section + adopt caveat (#1361) — 3 files.
+Staged every file explicitly (no `git add -A`). CMAP artifacts + `codev/projects/1313-…` working files left untracked, per the
+ghost-round precedent. porch confirms PHASE review / WAITING FOR HUMAN APPROVAL / Gate: pr (status.yaml untouched). Sent the
+architect the re-park notification with the commit list + incremental-diff summary. HOLDING at the pr gate for the architect's
+final integration verification + the human gate. No self-approve/merge.
