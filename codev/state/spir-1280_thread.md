@@ -1270,3 +1270,12 @@ acceptable. Four pre-merge fixes applied (commit f81d4720), suite green (4184 pa
 4. CLAUDE.md/AGENTS.md → dropped team+forge skill names (#1318 drift). CLAUDE==AGENTS preserved.
 Recorded in the review's Consultation Feedback. Non-blocking follow-ups noted by architect
 (release/protocol.md staleness, maintain/templates two-tree divergence). Back to Waleed for the merge word.
+
+### pr gate APPROVED by Waleed; merge HELD on CI (Actions outage) (2026-08-06)
+
+Ran `porch approve 1280 pr --a-human-explicitly-approved-this` — gate approved (porch reran
+build+tests green). NOT merged: `gh pr checks 1362` reports "no checks reported" and
+mergeStateStatus=UNKNOWN. Confirmed CI is EXPECTED (recent merged PRs #1358/#1355/#1353 all ran
+CLI Integration Tests + CLI Tests macos/ubuntu, all pass) — so absence = the GitHub Actions outage
+the architect flagged, not a no-CI repo. Applying 1286 discipline: no checks reporting ≠ green;
+never force past a non-green gate. Holding merge until all expected checks REPORT and pass.
