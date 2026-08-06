@@ -32,11 +32,11 @@ plan_phases:
     status: complete
   - id: phase_9_consult_registry_deadtree
     title: Consult-types pir/maintain + scar registry + dead-tree deletion (G5, G7, G4)
-    status: in_progress
+    status: complete
   - id: phase_10_integration
     title: Capability verification, measurement report, rollback rehearsal, governance docs
-    status: pending
-current_plan_phase: phase_9_consult_registry_deadtree
+    status: in_progress
+current_plan_phase: phase_10_integration
 gates:
   spec-approval:
     status: approved

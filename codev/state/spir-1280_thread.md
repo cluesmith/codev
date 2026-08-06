@@ -1223,3 +1223,19 @@ phase_8 in_progress.
 bugfix impl/pr-review, air impl/pr-review. aspir spec/plan-review + air impl/pr-review are PHASE_3
 baked-decisions files → class-approved retirements (R6…). bugfix impl/pr-review guarded by #742 (must
 differ from SPIR — I just rewrote SPIR's, so re-verify divergence). Preserve VERDICT everywhere.
+
+### Phase 9 COMPLETE; pointer → Phase 10 (2026-08-06)
+
+Three group-pure commits + manifest. Suite green at 0a79f413: 4184 passed / 48 skipped.
+- **G5 (batch A)** 144feec1: pir + maintain consult-types. maintain mirror new spir; pir kept
+  PIR-specific (dev-approval, single-pass). Not baked-decisions → no retirement.
+- **G7** f652abf7: rebuilt scar-rules.yaml (8 canonicals byte-identical, must_appear_on re-derived
+  against post-1280 surface — many shrank as P4 removed git-add from prompts; all 8 on CLAUDE+AGENTS)
+  + T4 (spec-1280-scar-rules.test.ts), mutation-verified reword+delete.
+- **G4** b63bbcb3: deleted the dead codev-skeleton/porch/prompts/ (10 files, M6-verified no runtime
+  consumer) + updated review-prompt-routing.test.ts (Spec 987).
+
+**Phase 10 (final, verification-only)**: M5 capability inventory vs Phase-0 frozen baseline; measurement
+re-run (before/after, deleted-vs-relocated, M0c/M1/M2); T9 live spawn probe; T10 rollback rehearsal for
+every group G1-G7; governance docs routed by tier (incl. the "trust the authoritative source not the
+convenient signal" lesson). Then PR + review.
