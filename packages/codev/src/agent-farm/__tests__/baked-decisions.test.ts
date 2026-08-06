@@ -543,10 +543,35 @@ describe('Spec 746 Phase 3: reviewer-prompt baked-decisions clause', () => {
     'codev/protocols/spir/consult-types/spec-review.md',
     'codev/protocols/spir/consult-types/plan-review.md',
   ]);
+  // RETIRED under Spec 1280 (retirement R6, class-pre-approved, applied 2026-08-06) — the last four
+  // PHASE_3 files. Phase 8 rewrites aspir spec/plan-review (mirroring the spir rewrite) and air
+  // impl/pr-review to P1/P2, deleting the pre-746 rubric prose, so their pure-addition invariant is
+  // false by design. Behaviour survives (the Phase 3 grep above passes on the canonical Baked
+  // Decisions wording); deletion protection is re-anchored on post-1280 baselines in
+  // spec-1280-prompt-deletion-guard.test.ts. After R4+R6 every PHASE_3 file is retired. Full trace:
+  // codev/resources/1280-retirements.md (R6, and the "Class pre-approval" box).
+  const RETIRED_UNDER_R6 = new Set([
+    'codev/protocols/aspir/consult-types/spec-review.md',
+    'codev/protocols/aspir/consult-types/plan-review.md',
+    'codev/protocols/air/consult-types/impl-review.md',
+    'codev/protocols/air/consult-types/pr-review.md',
+  ]);
+  const activePhase3 = PHASE_3_FILES.filter(
+    (f) =>
+      f.baselineName !== null &&
+      !RETIRED_UNDER_R4.has(f.relPath) &&
+      !RETIRED_UNDER_R6.has(f.relPath),
+  );
   describe('pure-addition diff: baseline lines preserved in order', () => {
-    for (const file of PHASE_3_FILES) {
-      if (file.baselineName === null) continue;
-      if (RETIRED_UNDER_R4.has(file.relPath)) continue; // R4 — see comment above
+    // R4 + R6 retired every PHASE_3 baseline file's pure-addition guard. The loop stays so a future
+    // PHASE_3 file (with a fresh pre-746 baseline) is still covered; when none is active, this
+    // documents the fully-retired state rather than leaving an empty (error-raising) suite.
+    if (activePhase3.length === 0) {
+      it('all PHASE_3 pure-addition guards retired (R4, R6) — re-activates if a new PHASE_3 file is added', () => {
+        expect(activePhase3).toHaveLength(0);
+      });
+    }
+    for (const file of activePhase3) {
       it(`${file.label}: post-edit file is a pure-addition diff of its baseline`, () => {
         const baseline = readBaseline(file.baselineName!);
         const current = readRepoFile(file.relPath);

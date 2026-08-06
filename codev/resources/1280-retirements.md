@@ -361,3 +361,46 @@ is the signal that the mechanism, not just its predicate, was wrong.)
   1280's manifests without diffing the repo or taxing any other PR.
 
 Only the CI tripwire is gone.
+
+---
+
+## R6 — `expectPureAdditionDiff` on the last four PHASE_3 files (aspir spec/plan-review, air impl/pr-review)
+
+**Status: CLASS PRE-APPROVED (see the "Class pre-approval" box), Phase 8, 2026-08-06. Applied.** The
+final four `PHASE_3` baked-decisions files. **After R6, every PHASE_2 and PHASE_3 pure-addition guard
+in Spec 746 is retired** (PHASE_1 under R1, PHASE_2 under R2+R3, PHASE_3 under R4+R6).
+
+| | |
+|---|---|
+| **Assertion** | `baked-decisions.test.ts` → Phase 3 *"pure-addition diff: baseline lines preserved in order"* |
+| **Files (4)** | `codev/protocols/aspir/consult-types/{spec-review,plan-review}.md`, `codev/protocols/air/consult-types/{impl-review,pr-review}.md` |
+| **Originating spec** | **Spec 746 — Baked Architectural Decisions** |
+| **Baselines** | `fixtures/baselines/{aspir-spec-review,aspir-plan-review,air-impl-review,air-pr-review}.md.baseline` (**pre-746**) |
+
+### Class-invariant compliance
+
+1. **Behaviour grep green.** All four keep a `## Baked Decisions` section with `do not autonomously`,
+   the `COMMENT`/`REQUEST_CHANGES` distinction, and contradiction→`clarify` handling — Phase 3 grep +
+   mirror-parity pass unmodified.
+2. **Replacement guard in a mirrored commit.** Post-1280 baselines for all four + inverted anti-vacuity
+   in `spec-1280-prompt-deletion-guard.test.ts`.
+3. **Audit trail.** This entry + the phase-8 manifest row.
+
+### Why it cannot survive Spec 1280
+
+Phase 8's P1/P2 rewrite deletes the pre-746 rubric prose (aspir mirrors the spir rewrite; air is
+rewritten in place), so "no pre-746 line was ever removed" is false by design. Re-baselining is
+rejected for R1–R4's reason (the new baseline would contain `Baked Decisions`, which the pollution
+check forbids).
+
+### Behaviour-re-asserted mapping
+
+| Retired assertion | Survives? | Still asserted by |
+|---|---|---|
+| `codev ASPIR spec-review: … pure-addition diff` | (a) yes / (b) no, by design | Phase 3 grep + mirror-parity for aspir spec-review — passing |
+| `codev ASPIR plan-review: … pure-addition diff` | same | aspir plan-review grep + mirror-parity |
+| `codev AIR impl-review: … pure-addition diff` | same | air impl-review grep + mirror-parity |
+| `codev AIR pr-review: … pure-addition diff` | same | air pr-review grep + mirror-parity |
+
+**Loop kept, not deleted**: with all six PHASE_3 files retired, the pure-addition `describe` keeps a
+documenting test so it re-activates for any future PHASE_3 file and does not error as an empty suite.
