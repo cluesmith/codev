@@ -1851,3 +1851,45 @@ framed SendBuffer as "retired" correctly.
 **Green:** full build exit 0; full unit suite **4535 passed / 0 failed / 48 skipped** (was 4532/2/48 pre-fix). Delivery e2e
 (send-integration.e2e.test.ts) running. NEXT: commit the reconciliation as logical commits → force-with-lease push PR #1330 →
 report to architect. STAYING at pr gate — no self-approve, no merge, no status.yaml edits.
+
+### 2026-08-06 — PR-ITER (architect live-test): render-gate ghost-cursor false-`busy` fixed
+Architect live-tested the installed build and found `afx send`s to an **idle** agent stranding `held(busy)` while the
+composer was empty (held row a21b6c64 → main). Root cause (architect byte-level verified, handed off in
+`codev/spir-1313-captures/findings-ghost-cursor-false-busy.md` + a captured ring): **claude 2.1.220 paints a
+suggested-command ghost** into the idle composer when its own last reply mentioned a runnable command. The ghost's first
+char doubles as the software block cursor — **SGR-7 inverse at NORMAL intensity** while the rest is SGR-2 dim
+(`❯ ␛[7ma␛[27m␛[2mfx cleanup…␛[22m`). The dim rule skipped the ghost body but **counted the lone inverse cursor cell**
+→ `user-text`/`busy` FOREVER on an idle terminal. Fail-safe → fail-FORWARD for an idle recipient (the exact agent
+`afx send` exists to wake).
+
+**Diagnosis first (before choosing a fix).** Loaded the fixture through the worktree gate: cursor parked at (58,2) on
+`"a"` inv=1 dim=0 — the SOLE counted cell; tail `fx cleanup -p task-VdfD` all dim. Pre-fix verdict via installed dist:
+`{clean:false,reason:busy,detail:user-text}`. Then rendered the **real-draft** fixture (`claude-draft.busy`) to settle
+A-vs-C: claude renders the inverse block cursor on the **trailing whitespace** past a real draft (skipped as whitespace)
+and **never inverse-renders typed chars** (all 21 draft cells inv=0). So the inverse attribute on a *non-whitespace*
+cursor cell with a dim tail is a precise ghost discriminator → chose **Option C (ghost-signature, inverse-gated)** over A
+(unconditional cursor-skip): C has ~nil false-clean surface on real drafts, A doesn't.
+
+**Fix** (`render-gate.ts`): `isGhostCursorCell` exempts exactly the cell at the headless cursor position that is
+**inverse + non-dim + has a dim/empty tail on its row**. NOT a blanket inverse skip (the finding's explicit warning): an
+inverse selection over a real draft fails the dim-tail test and keeps every other cell counted. Types derived from the
+`Terminal` surface (`@xterm/headless` doesn't export `IBufferCell`/`IBufferLine` by name). Generic across profiles by
+design.
+
+**Cross-app checked LIVE per the finding's instruction** (architect pointed me at two live terminals, read-only capture
+via `/api/terminals/:id/output`):
+- **task-shxz (codex)** ghost "Write tests for @filename": codex renders its WHOLE ghost **dim** incl the cursor cell →
+  already CLEAN via the dim rule, never hit by this bug. My exemption requires inverse → correct no-op for codex.
+- **task-vdfd (claude)** real draft "dfsd": typed chars inv=0 → counted → BUSY, cursor past end. Confirms real drafts hold.
+  (Did NOT commit a live builder capture as a fixture — used a synthetic codex-signature test instead to avoid embedding
+  a sibling's conversation in git.)
+
+**Regression coverage**: `claude-ghost-suggestion-empty.replay.bin.gz` (139×63, gzipped 8.2KB) wired as a fixture → CLEAN
+post-fix (busy/user-text(1) pre-fix, recorded). +4 synthetic branch tests (ghost→clean; inverse-cursor-over-real-text→busy;
+real-draft-inverse-trailing→busy; codex-signature→clean). All 17 existing fixtures classify UNCHANGED.
+
+**Green**: build exit 0; render-gate 39/39; full unit suite **4540 pass / 48 skip / 0 fail** (+5 new); send-integration
+e2e **7/7**. Docs: review doc (new Consultation Feedback round + Technical Debt residual + Architecture Updates note +
+metrics) and `arch.md` §7 (one-sentence ghost-exemption pointer). CLAUDE/AGENTS untouched (Spec 1280 owns them); no hot-tier
+change (mailbox-first invariant unchanged). NEXT: commit as logical commits → force-with-lease push PR #1330 → notify
+architect. STAYING at pr gate — no self-approve, no merge, no status.yaml edits.
