@@ -282,3 +282,42 @@ trip it identically when phases 7–9 rewrite them. Rather than a per-file block
 **Enforcement**: the architect still verifies each at M11. **A violation of any invariant voids the
 class approval for that item** — it reverts to needing an explicit per-item decision. This box is the
 authority the phases 7–9 retirements cite; each still records its own numbered entry here.
+
+---
+
+## R4 — `expectPureAdditionDiff` on spir `spec-review.md` + `plan-review.md` (first PHASE_3 files)
+
+**Status: CLASS PRE-APPROVED (see box above), Phase 7, 2026-08-06. Applied.** The first two
+`PHASE_3` files. The other four (aspir spec/plan-review, air impl/pr-review) stay in force until
+Phases 8–9 rewrite them.
+
+| | |
+|---|---|
+| **Assertion** | `baked-decisions.test.ts` → Phase 3 *"pure-addition diff: baseline lines preserved in order"* |
+| **Files (2 of 6)** | `codev/protocols/spir/consult-types/{spec-review,plan-review}.md` |
+| **Originating spec** | **Spec 746 — Baked Architectural Decisions** |
+| **Baselines** | `fixtures/baselines/spir-{spec,plan}-review.md.baseline` (**pre-746**) |
+
+### Class-invariant compliance (the three conditions)
+
+1. **Behaviour grep green.** Both files keep a `## Baked Decisions` section with `do not autonomously`,
+   the `COMMENT` vs `REQUEST_CHANGES` distinction, and contradiction→`clarify` handling — the Phase 3
+   grep + mirror-parity assertions pass unmodified.
+2. **Replacement guard in a mirrored commit.** Post-1280 baselines for both files + inverted
+   anti-vacuity added to `spec-1280-prompt-deletion-guard.test.ts`, in its own commit.
+3. **Audit trail.** This entry + the phase-7 manifest row.
+
+### Why it cannot survive Spec 1280 (same shape as R1–R3)
+
+Phase 7's P1/P2 rewrite deletes the pre-746 rubric prose, so "no pre-746 line was ever removed" is
+false by design. Re-baselining is rejected for the same reason: the new baseline would contain
+`Baked Decisions`, which 746's pollution check forbids.
+
+### Behaviour-re-asserted mapping
+
+| Retired assertion | Behaviour | Survives? | Still asserted by |
+|---|---|---|---|
+| `codev SPIR spec-review: post-edit file is a pure-addition diff of its baseline` | (a) 746 clause present; (b) no pre-746 line deleted | (a) **yes** / (b) **no, by design** | (a) Phase 3 grep (`Baked Decisions`, `do not autonomously`, `COMMENT`+`REQUEST_CHANGES`, `contradict`+`clarify`) + mirror-parity — passing |
+| `codev SPIR plan-review: post-edit file is a pure-addition diff of its baseline` | same | same | same |
+
+**Still in force**: aspir spec/plan-review + air impl/pr-review PHASE_3 pure-addition guards.

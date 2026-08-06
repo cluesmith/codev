@@ -531,9 +531,22 @@ describe('Spec 746 Phase 3: reviewer-prompt baked-decisions clause', () => {
     }
   });
 
+  // RETIRED under Spec 1280 (retirement R4, class-pre-approved, applied 2026-08-06) — the first two
+  // PHASE_3 files. Phase 7 rewrites spir spec-review.md + plan-review.md to P1/P2, deleting the
+  // pre-746 rubric prose, so their pure-addition invariant is false by design (the change-freeze
+  // failure R1 named). Behaviour survives — the Phase 3 grep above passes on the canonical Baked
+  // Decisions wording — and deletion protection is re-anchored on post-1280 baselines in
+  // spec-1280-prompt-deletion-guard.test.ts. The other four PHASE_3 files (aspir spec/plan-review,
+  // air impl/pr-review) stay in force until Phases 8–9 rewrite them. Full trace:
+  // codev/resources/1280-retirements.md (R4, and the "Class pre-approval" box).
+  const RETIRED_UNDER_R4 = new Set([
+    'codev/protocols/spir/consult-types/spec-review.md',
+    'codev/protocols/spir/consult-types/plan-review.md',
+  ]);
   describe('pure-addition diff: baseline lines preserved in order', () => {
     for (const file of PHASE_3_FILES) {
       if (file.baselineName === null) continue;
+      if (RETIRED_UNDER_R4.has(file.relPath)) continue; // R4 — see comment above
       it(`${file.label}: post-edit file is a pure-addition diff of its baseline`, () => {
         const baseline = readBaseline(file.baselineName!);
         const current = readRepoFile(file.relPath);
