@@ -50,8 +50,7 @@ import { handleCommandRoute, COMMAND_ROUTE } from './command-relay.js';
 import { formatArchitectMessage, formatBuilderMessage } from '../utils/message-format.js';
 import type { PtySession } from '../../terminal/pty-session.js';
 import { writeMessageToSession, writeEscapeToSession } from './message-write.js';
-import { submitToSession } from './session-submit.js';
-import { makeDeliveryPorts } from './mailbox-wiring.js';
+import { makeDeliveryPorts, getMailboxDrainer } from './mailbox-wiring.js';
 import { deliverAgentMailSerialized, type DeliveryPorts } from './mailbox-delivery.js';
 import { deliverCronMail, CRON_SENDER, type CronDeliveryResult } from './cron-delivery.js';
 import {
@@ -63,6 +62,16 @@ import {
   type EnqueueInput,
 } from '../db/mailbox.js';
 import type { MailboxReason } from '../db/types.js';
+// Spec 1273 per-terminal submission lock — preserved across the Spec 1313 merge for
+// the two explicit human-bypass paths (escape + interrupt), which do NOT route
+// through the mailbox's per-agent serializer and so need their own anti-fusion lock.
+import { submitToSession } from './session-submit.js';
+// Spec 1307 `--delay` — Tower-side deferred delivery, re-homed onto the Spec 1313
+// mailbox (the merge that carried this feature was flattened by a later rebase, so it
+// is grafted here explicitly): the due-time callback enqueues to the mailbox and
+// triggers a gated drain (see handleSend), so a delayed message delivers onto a
+// render-verified empty prompt like any normal send — never force-injected.
+import { scheduleDelayedSend, validateDelaySeconds } from './delayed-send.js';
 import {
   getKnownWorkspacePaths,
   getInstances,
@@ -1602,6 +1611,31 @@ async function handleSend(
   const interrupt = options.interrupt === true;
   const escape = options.escape === true;
 
+  // Spec 1307 `--delay` (re-homed onto the mailbox): optional deferred delivery.
+  // Validated here as well as at the CLI boundary — /api/send is a public route, so an
+  // unvalidated value would become a setTimeout that fires instantly (NaN) or never
+  // (Infinity). `escape` cannot be combined with a delay: an ESC interrupts the CURRENT
+  // turn by design, so deferring it is contradictory — refuse rather than silently drop
+  // one of the two (a quietly-dropped delay would look like it worked).
+  let deliverAfter: number | undefined;
+  if (options.deliverAfter !== undefined && options.deliverAfter !== null) {
+    const delayError = validateDelaySeconds(options.deliverAfter);
+    if (delayError) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'INVALID_PARAMS', message: delayError }));
+      return;
+    }
+    if (escape) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        error: 'INVALID_PARAMS',
+        message: 'escape cannot be combined with a delay: an ESC keystroke bypasses buffering by design so that it interrupts the CURRENT turn. Send the ESC now, or send a delayed message without escape.',
+      }));
+      return;
+    }
+    deliverAfter = options.deliverAfter as number;
+  }
+
   const db = getGlobalDb();
   const senderWorkspace = fromWorkspace ?? workspace ?? 'unknown';
 
@@ -1720,7 +1754,9 @@ async function handleSend(
   // messages process; the trailing Enter (default) is what lets them through
   // (matching the verified recovery `afx send <b> --raw "$(printf '\x1b')"`).
   if (escape) {
-    writeEscapeToSession(session, noEnter);
+    // Awaited: the response must not claim delivery before the ESC and its
+    // Enter have actually been written (Spec 1273 verify).
+    await submitToSession(result.terminalId, () => writeEscapeToSession(session, noEnter));
     broadcastMessage({
       type: 'message',
       from: { project: path.basename(senderWorkspace), agent: from ?? 'unknown' },
@@ -1735,6 +1771,78 @@ async function handleSend(
   }
 
   const formattedMessage = formatMessageForTarget(isArchitectTarget, from, message, raw);
+
+  // Spec 1307 `--delay`, re-homed onto the Spec 1313 mailbox. Resolution, the
+  // builder-spoofing check (inside resolveTarget), writability, and formatting have all
+  // happened above at REQUEST time — the security-relevant half: a delayed send must not
+  // defer an authorization check past the conditions that would fail it. Only DELIVERY is
+  // deferred. At due time the message enters the durable mailbox and is delivered through
+  // the SAME gated path a normal send uses — onto a render-verified empty prompt, never
+  // force-injected. Delayed sends are in-memory until due (dropped on a Tower restart, per
+  // delayed-send.ts); once due, the row is persisted and survives a restart.
+  if (deliverAfter !== undefined) {
+    const enqueueDue = () => enqueueMailbox(db, {
+      workspacePath: result.workspacePath,
+      toAgent,
+      body: message,
+      formattedMessage,
+      fromAgent: from ?? null,
+      fromWorkspace: senderWorkspace,
+      noEnter,
+      terminalId: result.terminalId,
+    });
+    // `isStillLive` is re-checked at due time under delayed-send.ts's generation guard:
+    // a shutdown during the wait cancels the delivery before it enqueues anything.
+    scheduleDelayedSend(deliverAfter, result.terminalId, (isStillLive) => {
+      if (!isStillLive()) return;
+      if (interrupt) {
+        // A delayed `--interrupt` keeps the immediate path's gate-bypass. Re-fetch the
+        // session (it may have died/respawned during the wait); if live, write the Ctrl+C
+        // + message under the per-terminal submission lock and mark the row delivered. If
+        // the session is gone, leave the row held — the drainer delivers it through the
+        // gate once a session returns, so the message is never lost (only the interrupt
+        // semantics gracefully degrade).
+        const live = getTerminalManager().getSession(result.terminalId);
+        const row = enqueueDue();
+        if (live && live.writable) {
+          markMailboxDelivered(db, row.id);
+          void submitToSession(result.terminalId, () => {
+            live.write('\x03'); // Ctrl+C, inside the reservation
+            return writeMessageToSession(live, formattedMessage, noEnter, 100);
+          })
+            .then(() => {
+              broadcastMessage({
+                type: 'message',
+                from: { project: path.basename(senderWorkspace), agent: from ?? 'unknown' },
+                to: { project: path.basename(result.workspacePath), agent: toAgent },
+                content: message,
+                metadata: { raw, source: 'api' },
+                timestamp: new Date().toISOString(),
+              });
+              ctx.log('INFO', `Delayed interrupt delivered: ${from ?? 'unknown'} → ${toAgent} (terminal ${result.terminalId.slice(0, 8)}...)`);
+            })
+            .catch((err) => ctx.log('ERROR', `Delayed interrupt write failed for ${toAgent}: ${(err as Error).message}`));
+        } else {
+          void getMailboxDrainer().scheduleDrain(result.workspacePath, toAgent);
+        }
+      } else {
+        // Normal delayed send: enqueue + trigger a gated delivery pass. Delivers onto a
+        // clean prompt now, or holds for the backstop — exactly like an immediate send.
+        enqueueDue();
+        void getMailboxDrainer().scheduleDrain(result.workspacePath, toAgent);
+      }
+    });
+    ctx.log('INFO', `Message scheduled (+${deliverAfter}s): ${from ?? 'unknown'} → ${toAgent} (terminal ${result.terminalId.slice(0, 8)}...)`);
+    sendJson(res, 200, {
+      ok: true,
+      terminalId: result.terminalId,
+      resolvedTo: toAgent,
+      deferred: false,
+      scheduled: true,
+      deliverAfter,
+    });
+    return;
+  }
 
   // Spec 1313: `interrupt` is the explicit human bypass. Ctrl+C, then deliver
   // WITHOUT the render-gate (the operator is looking at this terminal). A row is

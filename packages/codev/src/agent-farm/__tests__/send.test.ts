@@ -317,15 +317,20 @@ describe('send command', () => {
       expect(messages.some(m => /^Message sent to/.test(m))).toBe(false);
     });
 
-    it('reports a buffered send as queued, not sent', async () => {
+    it('reports a held send as held, never as delivered', async () => {
+      // Spec 1313: the SendBuffer `deferred`/"queued" bucket is gone. A message that
+      // cannot land now is `held` in the durable mailbox and reported via logger.info
+      // (not success) — it is explicitly NOT a delivery.
       mockSendMessage.mockResolvedValue({
-        ok: true, resolvedTo: 'builder-spir-109', deferred: true,
+        ok: true, resolvedTo: 'builder-spir-109', held: true, reason: 'busy-line',
       });
 
       await send({ builder: 'builder-spir-109', message: 'hi' });
 
-      const messages = vi.mocked(logger.success).mock.calls.map(c => String(c[0]));
-      expect(messages.some(m => /queued/i.test(m))).toBe(true);
+      const infoMessages = vi.mocked(logger.info).mock.calls.map(c => String(c[0]));
+      const successMessages = vi.mocked(logger.success).mock.calls.map(c => String(c[0]));
+      expect(infoMessages.some(m => /held/i.test(m))).toBe(true);
+      expect(successMessages.some(m => /^Message delivered to/.test(m))).toBe(false);
     });
   });
 

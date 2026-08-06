@@ -9,10 +9,11 @@
  * injected so we test the orchestration, not xterm.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import { GLOBAL_SCHEMA } from '../db/schema.js';
 import * as mailbox from '../db/mailbox.js';
+import { scheduleDelayedSend, shutdownDelayedSends } from '../servers/delayed-send.js';
 import {
   deliverAgentMail,
   deliverAgentMailSerialized,
@@ -332,6 +333,67 @@ describe('deliverAgentMail (Spec 1313, Phase 4)', () => {
     expect(out.reason).toBe('busy'); // held: the screen moved under the gate
     expect(h.writes).toHaveLength(0); // never wrote onto the draft that appeared
     expect(mailbox.getById(db, row.id)?.status).toBe('held');
+  });
+
+  // ==========================================================================
+  // Spec 1307 `--delay` ordering, re-homed onto the mailbox.
+  //
+  // 1307's load-bearing guarantee: "a delayed message never overtakes a message
+  // already QUEUED for that session" — the /arch-save case where /clear is sent
+  // with no delay and /arch-init with one, and the clear MUST land first or it
+  // wipes the freshly-recovered context. 1307 got this from SendBuffer's per-session
+  // FIFO; this project deleted SendBuffer, so the guarantee now rests on two facts
+  // proven together here: (a) a delayed send is enqueued only WHEN its timer fires,
+  // so its row is necessarily younger than anything already held; and (b) the drain
+  // delivers the oldest held row first (created_at ASC). This is the mailbox-model
+  // replacement for the SendBuffer ordering test the rebase removed.
+  // ==========================================================================
+  describe('delayed sends never overtake already-queued mail (Spec 1307 ordering)', () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+      vi.setSystemTime(1000); // fake wall clock → drives mailbox created_at
+      shutdownDelayedSends(); // no timers leak in from a prior test
+    });
+    afterEach(() => {
+      shutdownDelayedSends();
+      vi.useRealTimers();
+    });
+
+    it('the /clear-then-delayed-/arch-init case: the clear drains first', async () => {
+      const h = harness();
+      h.setSession('spir-1', fakeSession()); // clean composer → gate delivers
+
+      // (1) /clear is sent with no delay at T=1000 and sits held (someone was typing
+      //     when it arrived, so it did not deliver immediately).
+      const clear = enqueue({ body: '/clear', formattedMessage: '/clear' }, Date.now());
+
+      // (2) /arch-init is scheduled +15s. A pre-due delayed send lives ONLY in the
+      //     in-memory timer registry — its mailbox row must NOT exist yet (this is the
+      //     dropped-on-restart durability contract: nothing durable until it fires).
+      scheduleDelayedSend(15, 'term-1', () => {
+        enqueue({ body: '/arch-init', formattedMessage: '/arch-init' }, Date.now());
+      });
+      expect(mailbox.findHeldForAgent(db, '/ws/a', 'spir-1').map((r) => r.body)).toEqual([
+        '/clear',
+      ]);
+
+      // (3) Timer fires at T=16000 → /arch-init is enqueued NOW, strictly younger.
+      await vi.advanceTimersByTimeAsync(15_000);
+      const held = mailbox.findHeldForAgent(db, '/ws/a', 'spir-1');
+      expect(held.map((r) => r.body)).toEqual(['/clear', '/arch-init']); // oldest-first
+      expect(held[1].created_at).toBeGreaterThan(held[0].created_at); // enqueued at fire time
+
+      // (4) Drain against a clean gate: the OLDEST row (the clear) delivers first, and
+      //     only one lands per clean pass — so /arch-init cannot overtake it.
+      const first = await deliverAgentMail(h.ports, db, '/ws/a', 'spir-1');
+      expect(first.delivered).toEqual([clear.id]);
+      expect(mailbox.getById(db, clear.id)?.status).toBe('delivered');
+
+      // (5) The next pass delivers /arch-init — after the clear, never before it.
+      const second = await deliverAgentMail(h.ports, db, '/ws/a', 'spir-1');
+      expect(second.delivered).toHaveLength(1);
+      expect(mailbox.getById(db, second.delivered[0])?.body).toBe('/arch-init');
+    });
   });
 });
 

@@ -2,9 +2,11 @@
  * Delayed message delivery for `afx send --delay` (Spec 1307).
  *
  * Holds a due-time timer per scheduled message and nothing else. The *decision*
- * of how to deliver — write now, or hand to the typing-aware send buffer — is
- * deliberately NOT made here: it is re-made at delivery time by the same code
- * the immediate path uses. See `deliverOrBuffer` in tower-routes.ts.
+ * of how to deliver — deliver now onto a clean prompt, or persist and hold — is
+ * deliberately NOT made here: it is re-made at delivery time by the same gated
+ * path an immediate send uses. When the timer fires, the callback enqueues the
+ * message into the durable mailbox and triggers the render-gated drain (the
+ * `deliverAfter` branch of handleSend in tower-routes.ts).
  *
  * ## Why the registry exists at all
  *
@@ -14,18 +16,16 @@
  *
  * ## Shutdown DROPS, it does not flush
  *
- * This is the one place this module deliberately disagrees with `SendBuffer`,
- * whose `stop()` performs a final flush. That is right for the buffer: those
- * messages were accepted for *immediate* delivery and merely held back because
- * someone was typing, so delivering them late is better than losing them.
- *
- * A delayed message is the opposite. Its whole content is "deliver this at a
- * moment that has not arrived yet", and the moment is chosen relative to a
- * world (a session mid-clear, a turn about to end) that a Tower restart has
- * already invalidated. Flushing on shutdown would fire `/arch-init` into a
- * session that never got cleared, or into one that has moved on to other work.
- * Dropping is recoverable — a human re-sends one message — and Spec 1307's
- * design explicitly accepts that trade.
+ * A message already in the mailbox is durable: it is a persisted row and simply
+ * survives a restart, delivering when the target's prompt is next clean. A pre-due
+ * delayed send is the opposite — nothing is persisted yet, and its whole content is
+ * "deliver this at a moment that has not arrived yet", a moment chosen relative to a
+ * world (a session mid-clear, a turn about to end) that a Tower restart has already
+ * invalidated. Flushing it on shutdown would fire `/arch-init` into a session that
+ * never got cleared, or into one that has moved on to other work. Dropping is
+ * recoverable — a human re-sends one message — and Spec 1307's design explicitly
+ * accepts that trade. This is why the pre-due timer stays OUT of the durable mailbox
+ * until it actually fires (the mailbox row is created by the fire-time callback).
  */
 
 /** A scheduled delivery, retained so shutdown can cancel it. */
@@ -42,9 +42,9 @@ const pending = new Set<PendingDelayedSend>();
 /*
  * NOTE: this module no longer serialises deliveries. It used to hold a
  * per-terminal promise chain; Spec 1273's `submitToSession` now owns that, and
- * every due message re-enters `deliverOrBuffer`, which submits under the lock.
- * One mechanism, not two — per the architect's ruling that this project adopts
- * the primitive rather than keeping a rival.
+ * every due message re-enters the mailbox delivery path, which submits under the
+ * lock. One mechanism, not two — per the architect's ruling that this project
+ * adopts the primitive rather than keeping a rival.
  */
 
 /**
@@ -143,10 +143,10 @@ export function scheduleDelayedSend(
         // lock is held — closing the shutdown-during-lock-wait window.
         await deliver(() => generation === scheduledGeneration);
       } catch {
-        // deliverOrBuffer logs a write failure at its own site with terminal
-        // context; this catch is a last-resort guard so an unexpected throw
-        // cannot become an unhandled rejection that takes Tower down over one
-        // undeliverable message.
+        // The mailbox delivery path logs a write failure at its own site with
+        // terminal context; this catch is a last-resort guard so an unexpected
+        // throw cannot become an unhandled rejection that takes Tower down over
+        // one undeliverable message.
       }
     })();
   }, delaySeconds * 1000);
