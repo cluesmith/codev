@@ -2,37 +2,19 @@
 
 ## Context
 
-You are performing the 3-way review of a PIR protocol PR. The builder has implemented an approved plan, the human has approved the `dev-approval` gate (meaning a human has run the code locally and tested it), and the PR has been opened. This is a single advisory pass (`max_iterations: 1`) — your verdict is surfaced to the human at the `pr` gate, who is the sole remaining reviewer; it is not auto-re-reviewed.
+You are performing the 3-way review of a PIR PR. The builder implemented an approved plan, the human approved the `dev-approval` gate (having run and tested the code locally), and the PR is open. This is a single advisory pass (`max_iterations: 1`) — your verdict is surfaced to the human at the `pr` gate, who is the sole remaining reviewer; it is not auto-re-reviewed.
 
 ## Focus Areas
 
-1. **Completeness**
-   - Is the PR body the review file content + `Fixes #<N>`?
-   - Are all commits properly formatted (`[PIR #<N>] ...`)?
-   - Does the diff match what the review file describes?
-
-2. **Test Status**
-   - Do all tests pass on the branch?
-   - Is test coverage adequate for the change?
-   - Are there skipped or flaky tests documented?
-
-3. **Code Quality**
-   - Any debug code left in?
-   - Any TODO comments that should be resolved?
-   - Any `// REVIEW:` markers that weren't addressed?
-
-4. **Branch Hygiene**
-   - Is the branch up to date with the default branch? (If not, suggest a rebase. The default branch is whatever `git symbolic-ref --short refs/remotes/origin/HEAD` reports — typically `main`, but may be `dev`, `ci`, etc.)
-   - Are commits atomic and well-described?
-   - Is the change diff a reasonable size for the issue scope?
-
-5. **Issue Linkage**
-   - Does the PR body contain `Fixes #<N>` (or `Refs #<N>` for partial fixes)?
-   - Without this, GitHub won't auto-close the issue on merge
+- **Completeness** — the PR body is the review-file content plus `Fixes #<N>`; commits are formatted `[PIR #<N>] ...`; the diff matches what the review file describes.
+- **Test Status** — all tests pass on the branch, coverage is adequate, and skipped/flaky tests are documented.
+- **Code Quality** — no debug code, no stray `TODO` or unaddressed `// REVIEW:` markers.
+- **Branch Hygiene** — the branch is up to date with the default branch (whatever `git symbolic-ref --short refs/remotes/origin/HEAD` reports — typically `main`, sometimes `dev`/`ci`); commits are atomic; the diff size is reasonable for the issue.
+- **Issue Linkage** — the PR body carries `Fixes #<N>` (or `Refs #<N>` for a partial fix), without which GitHub won't auto-close the issue on merge.
 
 ## Verdict Format
 
-After your review, provide your verdict in exactly this format:
+Provide your verdict in exactly this format — `consult` parses it:
 
 ```
 ---
@@ -46,21 +28,10 @@ KEY_ISSUES:
 ...
 ```
 
-**Verdict meanings:**
-- `APPROVE`: Ready to merge
-- `REQUEST_CHANGES`: Issues to fix before merging
-- `COMMENT`: Minor items, can merge but note feedback
+- `APPROVE`: ready to merge.
+- `REQUEST_CHANGES`: issues to fix before merging.
+- `COMMENT`: minor items; can merge but note the feedback.
 
 ## Scope
 
-- **DO** flag missing `Fixes #<N>` lines
-- **DO** flag obvious problems the human reviewer at the gate might have missed
-- **DO NOT** redesign the approach — that was settled at `plan-approval` and validated at `dev-approval`
-- **DO NOT** demand changes the human reviewer already accepted at the `dev-approval` gate (the human ran the code and approved it; you didn't)
-- **DO NOT** flag the syntax of `git diff` examples that appear in review-file prose (e.g., `git diff ci..HEAD` inside a "Files Changed" caption or "How to Test Locally" section). Quoted diff syntax is documentation, not a command. Apply two-dot/three-dot scrutiny only to diffs you compute yourself.
-
-## Notes
-
-- The human at the `dev-approval` gate is the primary reviewer for behavior; you are the secondary reviewer for hygiene and edge cases
-- Focus on "what would an integration reviewer catch that the gate reviewer missed"
-- If referencing line numbers, use `file:line` format
+Flag a missing `Fixes #<N>` and obvious problems the gate reviewer might have missed. Do **not** redesign the approach (settled at `plan-approval`, validated at `dev-approval`), demand changes the human already accepted at `dev-approval` (they ran the code; you didn't), or flag the syntax of `git diff` examples in review-file prose — quoted diff syntax is documentation, not a command; apply two-dot/three-dot scrutiny only to diffs you compute yourself. You are the secondary reviewer for hygiene and edge cases: "what would an integration reviewer catch that the gate reviewer missed".
