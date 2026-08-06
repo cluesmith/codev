@@ -5,7 +5,7 @@
  *
  * Issue #929: resume is now gated on the builder harness, not the Claude
  * session store directly. Only the Claude harness implements buildResume;
- * codex/gemini return undefined even when a stale Claude jsonl exists (the
+ * codex/opencode return undefined even when a stale Claude jsonl exists (the
  * regression guard against `codex --resume <claude-uuid>` crash-loops).
  */
 
@@ -16,7 +16,7 @@ import { join } from 'node:path';
 
 import { discoverResumeSession } from '../commands/spawn.js';
 import { encodeClaudeProjectDir } from '../utils/claude-session-discovery.js';
-import { CLAUDE_HARNESS, CODEX_HARNESS, GEMINI_HARNESS } from '../utils/harness.js';
+import { CLAUDE_HARNESS, CODEX_HARNESS, OPENCODE_HARNESS } from '../utils/harness.js';
 
 // discoverResumeSession reads from $HOME via os.homedir() through
 // findLatestSessionId. Override the env var for the duration of the test so
@@ -103,11 +103,11 @@ describe('discoverResumeSession', () => {
     });
   });
 
-  it('returns undefined for gemini even when a stale Claude jsonl exists (regression guard)', () => {
-    const worktree = '/Users/x/repo/.builders/pir-gemini';
+  it('returns undefined for opencode even when a stale Claude jsonl exists (regression guard)', () => {
+    const worktree = '/Users/x/repo/.builders/pir-opencode';
     writeSession(projectsRoot, worktree, 'stale-claude-uuid', 1_700_000_000_000);
     pinHome(fakeHome, () => {
-      expect(discoverResumeSession(worktree, true, GEMINI_HARNESS)).toBeUndefined();
+      expect(discoverResumeSession(worktree, true, OPENCODE_HARNESS)).toBeUndefined();
     });
   });
 
