@@ -1906,3 +1906,91 @@ still CLEAN. Added the empty-tail regression test. render-gate **40/40**; full u
 Updated code header+doc comments, arch.md §7 ("non-empty dim tail"), review doc (Technical Debt reframed CLOSED-not-accepted +
 CMAP-round bullet + metrics). Architect confirmed prior build was already local-installed + E2E-proven (a21b6c64 delivered 1.6s
 post-restart). NEXT: commit + push → re-park at pr gate. No self-approve/merge/status.yaml edits.
+
+### 2026-08-06 — RESUMED: round-2 CMAP merge-blocker — capped-ring tear → persistent bounded headless screen
+Architect CONFIRMED-by-repro a NEW merge-blocker (ghost blocker stays CLOSED, 40/40 independent). The branch carries #1205's
+RingBuffer partial cap (2 MiB ceiling, `trimPartial` halves to ~1 MiB). The gate replays `ringBuffer.getAll().join('\n')` through
+a FRESH headless term each classify — but the alt-screen frame is a newline-free giant PARTIAL, so once it crosses 2 MiB the ring
+hands the gate a TORN front → `no-region-end`/`no-composer-marker` → permanent `busy` hold. Repro: bgtask direct 2,794,991→CLEAN
+but via a real RingBuffer 1,680,872→busy; bigring 2,991,283→busy. The over-ceiling outage resurrected for the busiest agents.
+(The big-capture tests masked it — they feed classifyScreen the raw string DIRECTLY, bypassing RingBuffer.pushData/the cap;
+`snapshotFromRaw` DOES go through a ring but the small fixtures never cross 2 MiB. And the 4/9MB synthetic tests use a
+newline-TERMINATED filler → lands in the buffer array, not the capped partial → never torn.)
+
+**DESIGN (architect-preferred: persistent bounded headless screen per session, fed incrementally).** The gate stops re-rendering
+the whole ring; instead each session mirrors its output into ONE long-lived `@xterm/headless` Terminal from birth, and the gate
+reads that screen's current viewport (bounded rows×cols — the cap is irrelevant, the tear is gone, #1047 OOM residual closed, and
+per-classify render cost → O(viewport)).
+- `ring-buffer.ts`: add monotone `bytesWritten` (cumulative appended, never decreases on trim/clear) → the fixed token source.
+- `session-screen.ts` (NEW, terminal layer): wraps a headless Terminal, `feed`/`resize`/`dispose` + async `read()` (flush pending
+  parse, hand back the live buffer). scrollback small — the gate reads only the viewport (verify big captures classify CLEAN).
+- `render-gate.ts`: extract sync `classifyBuffer(term,cols,rows,profile)`; keep `classifyScreen(snapshot)` (fixtures/transient);
+  rewrite the header (drop "whole ring at any size / unbounded partial / OOM residual accepted").
+- `pty-session.ts`: own SessionScreen (lazy on first output), feed at onPtyData + the attachShellper replay push, resize, dispose;
+  expose `gateScreen` + `bytesWritten`.
+- `mailbox-delivery.ts`: DeliverySession→`bytesWritten` (drop ring nesting); `classify(session,profile)`; `ringToken` monotone;
+  REMOVE the bigRing/classifyBackoff machinery (vestigial once the render cost is gone); KEEP verdict memo + TOCTOU on the fixed token.
+- `mailbox-wiring.ts`: classify reads the session's gateScreen → classifyBuffer (null screen → busy/no-composer-marker).
+Requirements: (1) persistent screen ✓ (2) production-path regression test — real captures through a real PtySession/SessionScreen
+in chunks → CLEAN while the ring path → BUSY (3) monotone token ✓ (4) stale docs (render-gate header + arch.md §7). Process: implement
+→ build+suite green → 3-way CMAP on the diff → address → commit/push PR #1330 → re-park at pr gate. NO self-approve/merge/status.yaml.
+
+### 2026-08-06 — PAUSED for context cycle (round-2 impl complete + unit-green)
+Architect --interrupt: pause for a context cycle (I'm the live repro of my own blocker — my ring crossed the #1205 ceiling so the
+installed pre-fix gate holds my inbound mail; fixture saved: spir-1313-captures/claude-trimmed-ring-live.replay.bin). Round-2
+persistent-bounded-headless-screen fix is IMPLEMENTED across all 6 production files + tests; **full unit suite 4549 pass / 48 skip
+/ 0 fail**; arch.md §7 updated. Uncommitted on builder/spir-1313 @ 68d74c5b. Full high-level state + TODO in state-snapshot.md.
+TODO on resume: rebuild re-confirm → delivery e2e → 3-way CMAP → review-doc round-2 section → commit/push PR #1330 → re-park at pr
+gate. No self-approve/merge/status.yaml. Paused; state saved.
+
+### 2026-08-06 — RESUMED (unpause): round-2 verified green + 3-way CMAP → Codex blocker, ESCALATED
+Confirmed uncommitted round-2 fix via git status (matches snapshot). Re-ran the gauntlet on the final state:
+production build exit 0; **full unit suite 4549 pass / 48 skip / 0 fail**; `send-integration.e2e` **7/7**.
+arch.md §7 requirement-4 verified done (whole-ring/over-ceiling/backoff/OOM paragraph replaced by the persistent-mirror
+round-2 rationale). Generated a focused round-2 diff artifact (`…round2.diff`) + reviewer-note in the context doc.
+3-way CMAP (general-mode `--prompt-file`, since `--type pr` fetches the PUSHED diff = stale round-1, and auto-detect
+can't disambiguate `codev/projects/` from a `spir-1313` worktree name):
+- **Gemini APPROVE/HIGH** — validated all 4 reqs + TOCTOU + lockstep + scrollback + bigRing removal; every reviewer Q answered +.
+- **Claude APPROVE/HIGH** — no blockers; sharp non-blocking obs: (a) TOCTOU comment overstates ("exactly tokenBefore's
+  bytes" → really "≥ tokenBefore; excess trips the re-check"); (b) `dispose()` doesn't settle `pending` → a disposed-mid-read
+  could wedge the drainer's `ticking` (not live on pinned xterm, one-line hardening); (c) "from birth" not literally true after
+  re-attach (bounded replay tail can render torn) — **fails toward hold, identical to pre-round-2 ring, self-corrects on repaint**;
+  wants a doc caveat.
+- **Codex REQUEST_CHANGES/HIGH (1 blocker)** — SAME phenomenon as Claude (c) but judged blocking: `tower-terminals.ts:775`
+  (reconcile/adopt) & `:1034` (reconnect) call `capRingSeed()` (1 MiB tail) before `attachShellper`, so an adopted long-lived
+  alt-screen session's mirror can start torn (missing alt-screen-enter/marker); an idle unattended agent has no repaint nudge →
+  permanent false-BUSY (the outage, via a different door). Regression tests feed captures straight into SessionScreen, not the
+  capped-seed adoption path. Docs' "from birth"/"tear is gone" inaccurate until fixed.
+
+**Code-verified adjudication.** `attachShellper:229` (`ringBuffer.pushData(replay)`) is PRE-EXISTING; `:230`
+(`feedGateScreen(replay)`) is the round-2 add using the SAME capped `replay` → the mirror seed exactly reproduces what the
+pre-round-2 ring already rendered. So the adoption-path torn seed is **pre-existing, NOT a round-2 regression** (Claude's read),
+fail-safe (holds, never misdelivers), and self-corrects on any output; round-2 fixes the CONFIRMED live-ring blocker and doesn't
+worsen this. No repaint nudge exists on the adopt path (comment 766-768: "adopted terminals rendered blank until new output").
+Notably the architect's own req-1 hinted at exactly this ("the gate has no post-connect repaint nudge today").
+
+**DECISION: ESCALATE, do not self-resolve.** HIGH REQUEST_CHANGES + a real HIGH/HIGH reviewer split on blocking-vs-not + a
+clean-fix design choice the architect pre-flagged + deferring a blocker past the pr gate = architect's call. Sent afx to architect
+with the split, the pre-existing verification, and 3 options (A accept-pre-existing + doc caveat + follow-up issue [my rec];
+B seed the mirror from the UNCAPPED replay ≤8 MiB while the ring stays capped — token-safe constant offset, no PTY write, big
+coherence gain but not total; C Tower-initiated repaint nudge on adopt — total but blast radius, writes every adopted PTY).
+NOT committed/pushed — holding at pr gate for direction. No self-approve/merge/status.yaml. CMAP outputs saved under
+`codev/projects/1313-…/1313-render-gate-round2-cmap-{gemini,codex,claude}.md` (untracked, per ghost-round precedent).
+
+### 2026-08-06 — Architect chose OPTION A (ship now, defer residual as #1361). Hygiene items folded in.
+Architect verified my adjudication in-code and chose A: round-2 ships, adopt-path torn-seed residual deferred as **#1361**
+(their proposal: seed the mirror from the uncapped ≤8 MiB replay while the ring stays 1 MiB-capped). PR #1330 checklist comment
+confirms 3 non-optional hygiene items. All folded in:
+1. **Docs** — qualified the "from birth"/"tear is gone" overclaims in `session-screen.ts` (header + read() TOCTOU comment),
+   `render-gate.ts` (header), `pty-session.ts` (feedGateScreen comment, the exact spot arch pointed at :441-449), `arch.md §7`,
+   and the review doc. Accurate now: LIVE path mirrored from first byte + live-ring tear gone; ADOPT/reconnect seed is
+   `capRingSeed`-capped (1 MiB) → long-lived alt-screen frame can be born torn → fail-safe HOLD, self-heals on repaint/viewer;
+   ref #1361. Also fixed Claude obs-a: read() reflects ≥ tokenBefore's bytes (never <), not "exactly".
+2. **Test** — `pty-session-attach.test.ts` new describe: real `capRingSeed(>1MiB)` → `attachShellper` → `classifyAgentScreen`
+   asserts fail-safe **HOLD (busy)** for BOTH real captures (bigring, bgtask). Exported `capRingSeed`+`RING_SEED_MAX_BYTES` from
+   tower-terminals for the real function. EMPIRICALLY PROBED FIRST (deleted the probe): 1MiB tail → bigring busy/no-composer-marker,
+   bgtask busy/no-region-end (justover-cap stays clean — correct, only ~60KB trimmed). File runs 8/8 green incl. the 6 pre-existing.
+3. **Harden** — `SessionScreen.dispose()` settles `pending=Promise.resolve()`; `read()` early-returns when disposed (Claude one-liner).
+Incremental diff kept proportionate (doc+test+one-liner); the substantive round-2 code was already 3-way CMAP'd. NEXT: build+full
+unit+send-integration e2e green → commit (logical commits) → force-with-lease push PR #1330 → re-park at pr gate. Architect runs
+final integration verification on the incremental diff + hands the human the gate. NO self-approve/merge/status.yaml.
