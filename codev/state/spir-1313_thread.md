@@ -1720,12 +1720,25 @@ collide. This is the chosen resolution to the T16-vs-1313 escalation (supersedes
   PR *revert* main's newer text = a new collision).
 - **Executed** `git checkout origin/main -- CLAUDE.md AGENTS.md`. Verified end-state: `git diff origin/main --` EMPTY for both;
   `diff CLAUDE.md AGENTS.md` EMPTY (byte-identical); "Send outcomes" grep = 0 in both; both staged.
-- **T16 now passes by construction:** the only prompt-bearing files 1313 changes are CLAUDE.md/AGENTS.md (no protocols/roles
-  `.md`); with both reverted, T16's `origin/main...HEAD` changed-set is empty → early return. Confirmed by running the test
-  post-commit (below).
+- **T16 timing — VERIFIED, corrected my first guess.** I initially expected T16 to pass by construction (the only prompt-bearing
+  files 1313 touches are CLAUDE/AGENTS; no protocols/roles `.md`). WRONG on the un-rebased branch: T16 uses a THREE-DOT
+  `origin/main...HEAD` diff = merge-base(`3f622fe6`) vs HEAD, NOT origin/main's tip. Branch is 285 BEHIND and main advanced these
+  two files (a build-doc paragraph) since that merge-base, so HEAD's now-tip version (blob 916f75de) still differs from the
+  merge-base version (7fa8c9b6) → T16 STILL lists CLAUDE/AGENTS → **T16 red on this branch** (ran it: 1 of 4 sub-tests fails; note
+  the first run's "exit 0" was `tail`'s code masking vitest through the pipe). Goes GREEN after a rebase/merge onto current
+  origin/main (the maintainer-side rebase already needed to clear the CONFLICTING PR) — 1313 makes no NET change to these files.
+  Reverting to the merge-base version instead would force green now but REVERT main's build-doc text (regression), so
+  match-origin/main-tip (architect's call) is the correct final-state fix. Told the architect + PR comment carry this nuance.
 - **No info lost:** the delivered-vs-held / `afx inbox` docs live in the KEPT `agent-farm.md` (canonical `afx` ref, lines
   517-603) + its skeleton twin + the `arch-critical.md` hot bullet. Only a duplicate was removed from CLAUDE/AGENTS.
 - **Review doc updated** (SC11, Deviations, round-3 bullet, + new Architect Change Round entry, Technical Debt→RESOLVED,
   Follow-up→DONE). Markdown-only change; no source touched.
 - Strict mode: this is an architect-directed doc revert + commit + push (authorized) — NOT self-approving the pr gate, NOT
   merging, NOT editing status.yaml, NOT running porch check/done. Staying parked at the pr gate for the architect's re-review.
+- **DONE:** committed **632f3dfc** (revert + review/thread), pushed → PR #1330 updated (5dda0b31..632f3dfc). Replied to architect
+  via `afx send` (delivered) with the full T16-rebase nuance; posted PR comment #issuecomment-5199650782 recording the resolution
+  and pinging @waleedkadous (no change needed to their T16 guard). Follow-up commit corrects the review doc's/thread's premature
+  "T16 passes" wording to the verified rebased-state qualification (my afx reply + PR comment were already accurate; the committed
+  docs now match). Holding at the pr gate, addressable. Resume on: architect integration re-review, a rebase request, or gate
+  approval. If the architect wants T16 green on-branch before the consult, the branch needs the maintainer-side rebase onto
+  current origin/main — offered to do it on their say-so.
