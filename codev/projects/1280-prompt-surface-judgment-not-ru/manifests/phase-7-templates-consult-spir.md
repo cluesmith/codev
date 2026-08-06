@@ -14,8 +14,8 @@
 | `{codev,codev-skeleton}/protocols/experiment/templates/notes.md` | 312 | 167 | P2 | Example-laden placeholders (a literal `python experiment.py …`, fabricated metrics) → a clean heading interface. Kept the include wiring from `experiment/protocol.md`. |
 | `{codev,codev-skeleton}/protocols/spike/templates/findings.md` | 265 | 169 | P2 | Light P2 — kept the **Verdict** line and the effort-sizing interface; trimmed placeholder verbosity. |
 | `{codev,codev-skeleton}/protocols/maintain/templates/maintenance-run.md` | 184 | 175 | P2 | Already a lean heading interface; kept the three delivery-checked headings verbatim and only dropped the one filler example row from the Documentation Changes Log. |
-| `codev/protocols/maintain/templates/audit-report.md` (codev-local, no skeleton twin) | 625 | 294 | P2 | Collapsed ~10 repetitive empty per-category tables into **one findings schema** + a category list; kept pre-audit checks, the summary reconciliation table, recommendation tiers, rollback notes, and approval. |
-| `codev/protocols/maintain/templates/lessons-learned.md` (codev-local, no skeleton twin) | 78 | 78 | none | **Inspected, conformant, kept unchanged** — already a minimal category heading interface. |
+| `codev/protocols/maintain/templates/audit-report.md` | 625 | 294 | P2 | Codev-local (no skeleton twin). Collapsed ~10 repetitive empty per-category tables into **one findings schema** + a category list; kept pre-audit checks, the summary reconciliation table, recommendation tiers, rollback notes, and approval. |
+| `codev/protocols/maintain/templates/lessons-learned.md` | 78 | 78 | none | Codev-local (no skeleton twin). **Inspected, conformant, kept unchanged** — already a minimal category heading interface. |
 
 ## Batch 2 — spir consult-types (G5, 5 decisions)
 

@@ -11,7 +11,6 @@
  * because the guard must predate the thing it guards.
  */
 import { describe, it, expect } from 'vitest';
-import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
@@ -20,9 +19,6 @@ const manifestDir = path.join(
   repoRoot,
   'codev/projects/1280-prompt-surface-judgment-not-ru/manifests',
 );
-
-/** Files a manifest is responsible for listing: prompt-bearing surfaces only. */
-const PROMPT_BEARING = /^(CLAUDE\.md|AGENTS\.md|codev(-skeleton)?\/(protocols|roles)\/.*\.md)$/;
 
 interface Manifest {
   file: string;
@@ -110,58 +106,13 @@ describe('T16 — manifest completeness (M11)', () => {
     }
   });
 
-  it('every prompt-bearing file THIS PROJECT changed appears in some manifest', () => {
-    // SCOPED TO THIS PROJECT'S OWN CHANGES — and that scoping is a bug fix, not a convenience.
-    //
-    // The first version's predicate was repo-global: "any prompt-bearing path in
-    // origin/main...HEAD must appear in a 1280 manifest". Since this test lives in the SHARED
-    // suite, it fired on other projects — Spec 1307 was blocked by it and would have had to
-    // file paperwork in 1280's project directory to go green. A guard that taxes work it does
-    // not govern is a broken guard, however well it protects its own project.
-    //
-    // Provenance, not paths, is the right predicate: only files touched by THIS project's
-    // commits are this project's to document. Attribution is by commit-subject tag, which is
-    // the same marker the protocol already requires of every commit here.
-    const gitOut = (args: string[]): string => {
-      try {
-        return execFileSync('git', args, { cwd: repoRoot, encoding: 'utf-8' });
-      } catch {
-        return '';
-      }
-    };
-
-    // Commits on this branch, not on main, that belong to Spec 1280.
-    const ownCommits = gitOut(['log', '--format=%H %s', 'origin/main..HEAD'])
-      .split('\n')
-      .filter((l) => /\[Spec 1280\]/.test(l))
-      .map((l) => l.split(' ')[0])
-      .filter(Boolean);
-
-    const onThisProjectsBranch =
-      ownCommits.length > 0 || /1280/.test(gitOut(['rev-parse', '--abbrev-ref', 'HEAD']));
-
-    // Any other project's branch: this test has nothing to say. Skip, taxing nobody.
-    if (!onThisProjectsBranch) return;
-
-    const changed = new Set<string>();
-    for (const sha of ownCommits) {
-      for (const f of gitOut(['show', '--name-only', '--format=', sha]).split('\n')) {
-        if (PROMPT_BEARING.test(f.trim())) changed.add(f.trim());
-      }
-    }
-    // Uncommitted work counts too: running before committing must not pass vacuously (the
-    // failure that cost an inspection cycle in Phase 3).
-    for (const l of gitOut(['status', '--porcelain']).split('\n')) {
-      const f = l.slice(3).trim();
-      if (f && PROMPT_BEARING.test(f)) changed.add(f);
-    }
-    if (changed.size === 0) return;
-
-    const listed = new Set(manifests().flatMap((m) => m.rows.map((r) => r.path)));
-    const missing = [...changed].filter((f) => !listed.has(f));
-    expect(
-      missing,
-      `changed by Spec 1280 but absent from every manifest — the architect cannot inspect what is not listed:\n${missing.join('\n')}`,
-    ).toEqual([]);
-  });
+  // RETIRED under Spec 1280 (retirement R5, Waleed's ruling 2026-08-06): the repo-wide
+  // manifest-COMPLETENESS scan ("every prompt-bearing file THIS PROJECT changed appears in some
+  // manifest"). Even scoped by [Spec 1280] commit provenance, it lived in the SHARED suite and ran
+  // a repo diff + `git status` on every PR — its uncommitted-file check caught Mohid's #1330
+  // (which had to strip its CLAUDE.md/AGENTS.md edits to pass CI). The cross-project CI tax isn't
+  // worth the mechanical enforcement. What SURVIVES: the per-phase manifests themselves and the
+  // M11 human inspection contract are unchanged — the architect still inspects against a complete
+  // manifest — and the FORMAT checks above (four required fields, batch cap) still validate this
+  // project's own manifests. Only the CI tripwire is gone. Full trace: codev/resources/1280-retirements.md (R5).
 });

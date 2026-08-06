@@ -321,3 +321,43 @@ false by design. Re-baselining is rejected for the same reason: the new baseline
 | `codev SPIR plan-review: post-edit file is a pure-addition diff of its baseline` | same | same | same |
 
 **Still in force**: aspir spec/plan-review + air impl/pr-review PHASE_3 pure-addition guards.
+
+---
+
+## R5 — the repo-wide manifest-COMPLETENESS scan (T16)
+
+**Status: APPROVED by Waleed (human ruling, relayed by the architect), 2026-08-06. Applied — its own
+commit.** Distinct in kind from R1–R4: this retires **one of Spec 1280's own guards**, not a Spec 746
+assertion.
+
+| | |
+|---|---|
+| **Assertion** | `spec-1280-phase-manifest.test.ts` → *"every prompt-bearing file THIS PROJECT changed appears in some manifest"* |
+| **Originating spec** | **Spec 1280** (this project, M11) |
+
+### What it protected
+
+That no prompt-bearing file 1280 changed could be rewritten without appearing in a per-phase manifest,
+so the architect's M11 inspection could never miss a changed file. It scanned `origin/main..HEAD` +
+`git status` for prompt-bearing paths and diffed them against the manifest rows.
+
+### Why it is retired
+
+It lived in the **shared** test suite, so it ran on every PR in the repo, not just 1280's. Even after
+being scoped by `[Spec 1280]` commit provenance, its uncommitted-file check still evaluated on other
+branches and **caught Mohid's #1330**, which had to strip its `CLAUDE.md`/`AGENTS.md` edits to pass CI.
+A guard that taxes concurrent work it does not govern costs more than the mechanical enforcement is
+worth. (This is the *second* cross-project misfire of this same guard — Spec 1307 was the first — which
+is the signal that the mechanism, not just its predicate, was wrong.)
+
+### What survives
+
+- **The manifests themselves** — every phase still ships a complete `phase-N-*.md` with all four fields.
+- **The M11 inspection contract** — the architect still inspects the old-vs-new diff of every changed
+  file against its manifest row. The completeness guarantee is now the builder's diligence + human
+  inspection, exactly as before the CI check existed.
+- **The manifest FORMAT checks** — the four-required-fields and ≤12-per-batch tests remain in
+  `spec-1280-phase-manifest.test.ts`. They read only this project's manifest directory, so they validate
+  1280's manifests without diffing the repo or taxing any other PR.
+
+Only the CI tripwire is gone.
