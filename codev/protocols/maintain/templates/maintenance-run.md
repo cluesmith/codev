@@ -33,7 +33,7 @@ Recorded by Step 3a (Audit documentation) as the cuts are applied — one line p
 ### Documentation Changes Log
 | Document | Section | Action | Reason |
 |----------|---------|--------|--------|
-| arch.md | "Dashboard Server" | DELETED | OBSOLETE — replaced by Tower |
+| | | | |
 
 ## Deferred
 
