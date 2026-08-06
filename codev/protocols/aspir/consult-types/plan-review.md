@@ -1,44 +1,28 @@
 # Plan Review Prompt
 
 ## Context
-You are reviewing an implementation plan during the Plan phase. The spec has been approved - now you must evaluate whether the plan adequately describes HOW to implement it.
+
+You are reviewing an implementation plan during the Plan phase. The spec is already approved; judge whether the plan adequately describes HOW to implement it.
 
 ## Baked Decisions
 
-If the issue body or the approved spec's Constraints section includes content under a "Baked Decisions" heading, the architect has marked those choices as fixed (this extends the existing "don't re-litigate spec decisions" rule with explicit baked-decision language). Do not autonomously challenge them: do not propose alternative languages, frameworks, deployment shapes, or dependencies that contradict a baked decision. You may `COMMENT` with concerns; reserve `REQUEST_CHANGES` for the case where the plan **fails to honor** a stated baked decision — that is a real defect.
+If the issue body or the approved spec's Constraints section includes content under a "Baked Decisions" heading, the architect has marked those choices as fixed. Do not autonomously challenge them: do not propose alternative languages, frameworks, deployment shapes, or dependencies that contradict a baked decision. You may `COMMENT` with concerns; reserve `REQUEST_CHANGES` for the case where the plan **fails to honor** a stated baked decision — that is a real defect.
 
-If the baked decisions themselves contain contradictions, do not pick one — `REQUEST_CHANGES` and ask the architect to clarify before proceeding.
+If the baked decisions themselves contradict each other, do not pick one — `REQUEST_CHANGES` and ask the architect to clarify before proceeding.
 
 ## Focus Areas
 
-1. **Spec Coverage**
-   - Does the plan address all requirements in the spec?
-   - Are there spec requirements not covered by any phase?
-   - Are there phases that go beyond the spec scope?
+- **Spec coverage** — every spec requirement is addressed by some phase; nothing goes beyond the spec's scope.
+- **Phase breakdown** — phases are appropriately sized, logically sequenced (dependencies respected), and each can be completed and committed independently.
+- **Technical approach** — the approach is sound, the right files/modules are targeted, and no obviously better approach is being missed.
+- **Testability** — each phase has clear test criteria and the spec's edge cases are addressable.
+- **Risk** — blockers and cross-system dependencies are identified; the plan is realistic given the constraints.
 
-2. **Phase Breakdown**
-   - Are phases appropriately sized (not too large or too small)?
-   - Is the sequence logical (dependencies respected)?
-   - Can each phase be completed and committed independently?
-
-3. **Technical Approach**
-   - Is the implementation approach sound?
-   - Are the right files/modules being modified?
-   - Are there obvious better approaches being missed?
-
-4. **Testability**
-   - Does each phase have clear test criteria?
-   - Will the Defend step (writing tests) be feasible?
-   - Are edge cases from the spec addressable?
-
-5. **Risk Assessment**
-   - Are there potential blockers not addressed?
-   - Are dependencies on other systems identified?
-   - Is the plan realistic given constraints?
+The spec is already approved — do not re-litigate spec decisions. Judge the plan as a guide a builder can follow successfully; verify referenced file paths look accurate.
 
 ## Verdict Format
 
-After your review, provide your verdict in exactly this format:
+Provide your verdict in exactly this format — `consult` parses it:
 
 ```
 ---
@@ -52,14 +36,6 @@ KEY_ISSUES:
 ...
 ```
 
-**Verdict meanings:**
-- `APPROVE`: Plan is ready for human review
-- `REQUEST_CHANGES`: Significant issues with approach or coverage
-- `COMMENT`: Minor suggestions, plan is workable but could improve
-
-## Notes
-
-- The spec has already been approved - don't re-litigate spec decisions
-- Focus on the quality of the plan as a guide for builders
-- Consider: Would a builder be able to follow this plan successfully?
-- If referencing existing code, verify file paths seem accurate
+- `APPROVE`: plan is ready for human review.
+- `REQUEST_CHANGES`: significant issues with approach or coverage.
+- `COMMENT`: minor suggestions; the plan is workable but could improve.

@@ -1,42 +1,28 @@
 # Implementation Review Prompt
 
 ## Context
-You are reviewing implementation work during the Implement phase. A builder has completed a plan phase and needs feedback before proceeding. Your job is to verify the implementation matches the spec and plan.
 
-## CRITICAL: Verify Before Flagging
+You are reviewing implementation work during the Implement phase. A builder has completed a plan phase and needs feedback before proceeding. Verify the implementation matches the spec and plan.
 
-Before requesting changes for missing configuration, incorrect patterns, or framework issues:
-1. **Check `package.json`** for actual dependency versions — framework conventions change between major versions
-2. **Read the actual config files** (or confirm their deliberate absence) before flagging missing configs
-3. **Do not assume** your training data reflects the version in use — verify against project files
-4. If "Previous Iteration Context" is provided, read it carefully before re-raising concerns that were already disputed
+## Verify before flagging
+
+Before requesting changes for missing configuration, wrong patterns, or framework issues, confirm the claim against the project rather than your training data:
+
+- Check `package.json` for the actual dependency versions — framework conventions change between major versions.
+- Read the actual config files (or confirm their deliberate absence) before flagging a missing config.
+- If "Previous Iteration Context" is provided, read it before re-raising concerns already disputed.
 
 ## Focus Areas
 
-1. **Spec Adherence**
-   - Does the implementation fulfill the spec requirements for this phase?
-   - Are acceptance criteria met?
-
-2. **Code Quality**
-   - Is the code readable and maintainable?
-   - Are there obvious bugs or issues?
-   - Are error cases handled appropriately?
-
-3. **Test Coverage**
-   - Are the tests adequate for this phase?
-   - Do tests cover the main paths AND edge cases?
-
-4. **Plan Alignment**
-   - Does the implementation follow the plan?
-   - Are there plan items skipped or partially completed?
-
-5. **UX Verification** (if spec has UX requirements)
-   - Does the actual user experience match what the spec describes?
-   - If spec says "async" or "non-blocking", is it actually async?
+- **Spec Adherence** — the implementation fulfills the spec requirements for this phase; acceptance criteria are met.
+- **Code Quality** — readable and maintainable; no obvious bugs; error cases handled.
+- **Test Coverage** — tests are adequate for this phase and cover main paths and edge cases.
+- **Plan Alignment** — the implementation follows the plan; no plan items silently skipped.
+- **UX Verification** (if the spec has UX requirements) — the actual behavior matches what the spec describes (e.g. "async"/"non-blocking" really is).
 
 ## Verdict Format
 
-After your review, provide your verdict in exactly this format:
+Provide your verdict in exactly this format — `consult` parses it:
 
 ```
 ---
@@ -50,23 +36,10 @@ KEY_ISSUES:
 ...
 ```
 
-**Verdict meanings:**
-- `APPROVE`: Phase is complete, builder can proceed
-- `REQUEST_CHANGES`: Issues that must be fixed before proceeding
-- `COMMENT`: Minor suggestions, can proceed but note feedback
+- `APPROVE`: phase is complete, builder can proceed.
+- `REQUEST_CHANGES`: issues that must be fixed before proceeding.
+- `COMMENT`: minor suggestions; can proceed but note the feedback.
 
 ## Scoping (Multi-Phase Plans)
 
-When the implementation plan has multiple phases (e.g., scaffolding, landing, media_rtl):
-- **ONLY review work belonging to the current plan phase**
-- The query will specify which phase you are reviewing
-- Do NOT request changes for functionality scheduled in later phases
-- Do NOT flag missing features that are out of scope for this phase
-- If unsure whether something belongs to this phase, check the plan file
-
-## Notes
-
-- This is a phase-level review, not the final PR review
-- Focus on "does this phase work" not "is the whole feature done"
-- If referencing line numbers, use `file:line` format
-- The builder needs actionable feedback to continue
+Review **only the current plan phase** — the query names which one. Do not request changes for functionality scheduled in later phases, and do not flag missing features that are out of scope for this phase. If unsure whether something belongs to this phase, check the plan file. This is a phase-level review ("does this phase work"), not the final PR review.
