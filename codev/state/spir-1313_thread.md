@@ -1742,3 +1742,30 @@ collide. This is the chosen resolution to the T16-vs-1313 escalation (supersedes
   docs now match). Holding at the pr gate, addressable. Resume on: architect integration re-review, a rebase request, or gate
   approval. If the architect wants T16 green on-branch before the consult, the branch needs the maintainer-side rebase onto
   current origin/main — offered to do it on their say-so.
+
+### 2026-08-06 — ARCHITECT TASK: rebase builder/spir-1313 onto origin/main (285 behind / 150 ahead), resolve conflicts, stay at pr gate
+Architect authorized a full rebase (git rebase origin/main + force-with-lease) to clear the CONFLICTING PR #1330. Constraints:
+preserve BOTH my 1313 work AND main's advances (do NOT drop main); CLAUDE.md/AGENTS.md stay byte-identical to origin/main (1280
+owns them); T16 + prompt-surface guards green after; STAY at pr gate (no self-approve, no merge). Backup tag
+`backup/spir-1313-prerebase-f3600c94`; rerere enabled.
+RECONNAISSANCE (before touching anything):
+- Merge-base 3f622fe6; all 150 ahead-commits are mine (clean separation, no foreign commits). Overlap = 26 files both sides touched.
+  Only 16 of my 150 commits touch hot source files (12 on tower-routes.ts); 120 are docs-only.
+- **Main's advances on this subsystem = Spec 1307** (`afx send --delay` Tower-side deferred delivery + adopt #1320 submission lock +
+  interrupt-carry + FIFO). It's a COMPETING rewrite of the SAME send path my 1313 rewrote — semantic merge, not mechanical.
+- Most of 1307 lives in `send-buffer.ts` (which I DELETED) and is SUBSUMED by the mailbox: FIFO (mailbox delivers oldest held[0]),
+  #1198 !writable hold (mailbox has it), no shutdown force-flush (rows persisted). The one non-subsumed FEATURE is **`--delay`**.
+- KEY: `delayed-send.ts` (main-only new file, the `--delay` timer registry) is DECOUPLED from SendBuffer — it only holds due-time
+  timers; the delivery decision is re-made by the CALLER's callback (`deliverOrBuffer` in main's tower-routes). So preserving
+  `--delay` = re-homing the CALLBACK, not porting buffer internals. `delayed-send.ts` survives the rebase as-is.
+PLAN (Approach B — enqueue-to-mailbox-when-due; preserves 1307 semantics, no schema change):
+  1. Rebase; resolve conflicts keeping MY mailbox structure + main's non-send advances.
+  2. Follow-up commit re-homes `--delay`: import scheduleDelayedSend/validateDelaySeconds into MY handleSend; delay branch schedules
+     a due-time callback that enqueues to the MAILBOX + scheduleDrain (→ flows through the render-gate). Delayed sends stay in-memory,
+     dropped-on-restart (1307's contract + its shutdown-drop test intact).
+  3. tower-server.ts: keep MY drainer start/stop + PRESERVE main's shutdownDelayedSends() shutdown line.
+  4. send.ts: UNION — keep main's `--delay` flag/deliverAfter/"Scheduled" msg + my delivered/held response.
+  5. spec-1307-send-delay.test.ts: drop the SendBuffer import + SendBuffer-coupled FIFO test (mechanism gone; overtaking is
+     structurally impossible in the mailbox); keep the delayed-send.ts unit tests.
+  6. config.ts (+96, Spec 1286 consult-lane) — union with my mailbox config knobs. pnpm-lock — regen. package.json — take main's version.
+Starting the rebase now. Not self-approving/merging; PR stays draft.
