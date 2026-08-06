@@ -177,3 +177,47 @@ describe('Spec 1280 — air/implement.md does not silently lose content (replace
     expect(skeleton).toBe(ours);
   });
 });
+
+// R4 (Spec 1280, class-pre-approved, applied 2026-08-06): spir spec-review.md + plan-review.md —
+// the first two PHASE_3 consult-types — re-anchored on post-1280 baselines after Phase 7's P1/P2
+// rewrite retired their pre-746 pure-addition guard. Full trace: 1280-retirements.md (R4).
+const GUARDED_SPIR_CONSULT = ['spec-review', 'plan-review'] as const;
+const consultBaselinePath = (n: string) => path.join(baselineDir, `spir-${n}.md.baseline`);
+const consultCurrentPath = (n: string) =>
+  path.join(repoRoot, 'codev/protocols/spir/consult-types', `${n}.md`);
+
+describe('Spec 1280 — spir consult-types do not silently lose content (replaces R4)', () => {
+  for (const n of GUARDED_SPIR_CONSULT) {
+    describe(`${n}.md`, () => {
+      it('has a post-1280 baseline committed', () => {
+        expect(
+          fs.existsSync(consultBaselinePath(n)),
+          `missing baseline for spir ${n}.md; the guard cannot protect what it has no reference for`,
+        ).toBe(true);
+      });
+
+      it('anti-vacuity: the baseline carries Spec 746 content', () => {
+        const baseline = fs.readFileSync(consultBaselinePath(n), 'utf-8');
+        expect(baseline).toContain('Baked Decisions');
+        expect(baseline.toLowerCase()).toContain('do not autonomously');
+      });
+
+      it('no baseline line has been deleted', () => {
+        expectNoDeletion(
+          `spir ${n}.md`,
+          fs.readFileSync(consultBaselinePath(n), 'utf-8'),
+          fs.readFileSync(consultCurrentPath(n), 'utf-8'),
+        );
+      });
+
+      it('the skeleton twin still matches', () => {
+        const ours = fs.readFileSync(consultCurrentPath(n), 'utf-8');
+        const skeleton = fs.readFileSync(
+          path.join(repoRoot, 'codev-skeleton/protocols/spir/consult-types', `${n}.md`),
+          'utf-8',
+        );
+        expect(skeleton).toBe(ours);
+      });
+    });
+  }
+});
