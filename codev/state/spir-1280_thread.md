@@ -1279,3 +1279,13 @@ mergeStateStatus=UNKNOWN. Confirmed CI is EXPECTED (recent merged PRs #1358/#135
 CLI Integration Tests + CLI Tests macos/ubuntu, all pass) — so absence = the GitHub Actions outage
 the architect flagged, not a no-CI repo. Applying 1286 discipline: no checks reporting ≠ green;
 never force past a non-green gate. Holding merge until all expected checks REPORT and pass.
+
+### Merge conflict with main resolved (2026-08-06)
+
+During the pr-gate CI-outage wait, main advanced 264 files (many merged PRs); PR went DIRTY.
+Conflict scoped to CLAUDE.md + AGENTS.md only — main's edits were build-details in the verbose
+sections 1280 deleted (P3/P4 relocation to the codev skill), so resolved by taking the 1280 rewrite
+for both. Verified: CLAUDE==AGENTS byte-identical, all 8 scar canonicals present, fix-4 team/forge
+drop survived. Merge commit 9593d551. main added packages/{sdk,core,types} → needed `pnpm install
+--force` (18m) to link them; then build OK. Full suite green post-merge: 4549 passed / 48 skipped
+(main added tests). Pushing; CI will re-trigger on the updated branch.
