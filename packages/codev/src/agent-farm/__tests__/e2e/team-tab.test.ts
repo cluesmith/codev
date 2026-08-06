@@ -201,14 +201,20 @@ test.describe('Team tab: review-blocking rendering (spec 694)', () => {
     await teamTab.click();
     await page.locator('.team-review-blocking').first().waitFor({ state: 'visible', timeout: 5_000 });
 
-    // Amr's card: second-person "You're waiting for Waleed".
-    const amrCard = page.locator('.team-member-card', { hasText: 'Amr' });
+    // Amr's card: second-person "You're waiting for Waleed". Match by member
+    // name (not hasText) because Waleed's card also contains the string "Amr"
+    // ("Amr is waiting for you to review #688"), which would break a hasText match.
+    const amrCard = page.locator('.team-member-card', {
+      has: page.locator('.team-member-name', { hasText: /^Amr$/ }),
+    });
     await expect(amrCard).toContainText("You're waiting for");
     await expect(amrCard).toContainText('Waleed');
     await expect(amrCard).toContainText('#688');
 
     // Waleed's card: "Amr is waiting for you".
-    const waleedCard = page.locator('.team-member-card', { hasText: 'Waleed' });
+    const waleedCard = page.locator('.team-member-card', {
+      has: page.locator('.team-member-name', { hasText: /^Waleed$/ }),
+    });
     await expect(waleedCard).toContainText('is waiting for you to review');
     await expect(waleedCard).toContainText('#688');
 
