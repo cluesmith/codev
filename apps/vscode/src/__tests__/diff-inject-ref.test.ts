@@ -57,9 +57,9 @@ describe('buildSymbolLensDescriptors', () => {
     ];
     expect(buildSymbolLensDescriptors('a/b.ts', symbols)).toEqual([
       { line: 0, title: 'Forward to Builder', refText: 'a/b.ts ' },
-      { line: 4, title: 'Forward to Builder (lines 5-10)', refText: 'a/b.ts:L5-L10 ' },
-      { line: 12, title: 'Forward to Builder (lines 13-19)', refText: 'a/b.ts:L13-L19 ' },
-      { line: 20, title: 'Forward to Builder (lines 21-25)', refText: 'a/b.ts:L21-L25 ' },
+      { line: 4, title: 'Forward to Builder (lines 5-10)', refText: 'a/b.ts:L5-L10 ', range: { start: 5, end: 10 } },
+      { line: 12, title: 'Forward to Builder (lines 13-19)', refText: 'a/b.ts:L13-L19 ', range: { start: 13, end: 19 } },
+      { line: 20, title: 'Forward to Builder (lines 21-25)', refText: 'a/b.ts:L21-L25 ', range: { start: 21, end: 25 } },
     ]);
   });
 
@@ -71,9 +71,9 @@ describe('buildSymbolLensDescriptors', () => {
     ]);
     expect(buildSymbolLensDescriptors('a/b.ts', [cls])).toEqual([
       { line: 0, title: 'Forward to Builder', refText: 'a/b.ts ' },
-      { line: 3, title: 'Forward to Builder (lines 4-41)', refText: 'a/b.ts:L4-L41 ' },   // class
-      { line: 5, title: 'Forward to Builder (lines 6-9)', refText: 'a/b.ts:L6-L9 ' },    // constructor
-      { line: 10, title: 'Forward to Builder (lines 11-21)', refText: 'a/b.ts:L11-L21 ' }, // method
+      { line: 3, title: 'Forward to Builder (lines 4-41)', refText: 'a/b.ts:L4-L41 ', range: { start: 4, end: 41 } },   // class
+      { line: 5, title: 'Forward to Builder (lines 6-9)', refText: 'a/b.ts:L6-L9 ', range: { start: 6, end: 9 } },    // constructor
+      { line: 10, title: 'Forward to Builder (lines 11-21)', refText: 'a/b.ts:L11-L21 ', range: { start: 11, end: 21 } }, // method
     ]);
   });
 
@@ -84,7 +84,7 @@ describe('buildSymbolLensDescriptors', () => {
     ];
     expect(buildSymbolLensDescriptors('a/b.ts', symbols)).toEqual([
       { line: 0, title: 'Forward to Builder', refText: 'a/b.ts ' },
-      { line: 4, title: 'Forward to Builder (lines 5-13)', refText: 'a/b.ts:L5-L13 ' },
+      { line: 4, title: 'Forward to Builder (lines 5-13)', refText: 'a/b.ts:L5-L13 ', range: { start: 5, end: 13 } },
     ]);
   });
 
@@ -104,7 +104,7 @@ describe('buildSymbolLensDescriptors', () => {
     ]);
     expect(buildSymbolLensDescriptors('a/b.ts', [cls])).toEqual([
       { line: 0, title: 'Forward to Builder', refText: 'a/b.ts ' },
-      { line: 2, title: 'Forward to Builder (lines 3-51)', refText: 'a/b.ts:L3-L51 ' },
+      { line: 2, title: 'Forward to Builder (lines 3-51)', refText: 'a/b.ts:L3-L51 ', range: { start: 3, end: 51 } },
     ]);
   });
 });
@@ -158,9 +158,9 @@ describe('buildAllLensDescriptors (symbol + change lenses)', () => {
     const ranges = [{ start: 10, end: 12 }, { start: 18, end: 18 }];
     expect(buildAllLensDescriptors('a/b.ts', symbols, ranges)).toEqual([
       { line: 0, title: 'Forward to Builder', refText: 'a/b.ts ' },
-      { line: 4, title: 'Forward to Builder (lines 5-31)', refText: 'a/b.ts:L5-L31 ' },
-      { line: 9, title: 'Forward to Builder (lines 10-12)', refText: 'a/b.ts:L10-L12 ' },
-      { line: 17, title: 'Forward to Builder (line 18)', refText: 'a/b.ts:L18 ' },
+      { line: 4, title: 'Forward to Builder (lines 5-31)', refText: 'a/b.ts:L5-L31 ', range: { start: 5, end: 31 } },
+      { line: 9, title: 'Forward to Builder (lines 10-12)', refText: 'a/b.ts:L10-L12 ', range: { start: 10, end: 12 } },
+      { line: 17, title: 'Forward to Builder (line 18)', refText: 'a/b.ts:L18 ', range: { start: 18, end: 18 } },
     ]);
   });
 
@@ -169,7 +169,7 @@ describe('buildAllLensDescriptors (symbol + change lenses)', () => {
     const ranges = [{ start: 10, end: 12 }]; // anchor line 9 → collides → skipped
     expect(buildAllLensDescriptors('a/b.ts', symbols, ranges)).toEqual([
       { line: 0, title: 'Forward to Builder', refText: 'a/b.ts ' },
-      { line: 9, title: 'Forward to Builder (lines 10-31)', refText: 'a/b.ts:L10-L31 ' },
+      { line: 9, title: 'Forward to Builder (lines 10-31)', refText: 'a/b.ts:L10-L31 ', range: { start: 10, end: 31 } },
     ]);
   });
 

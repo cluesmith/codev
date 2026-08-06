@@ -33,9 +33,27 @@ import { buildAllLensDescriptors, type ChangedRange, type SymbolNode } from './d
  *  `contributes.commands`, so it never appears in the Command Palette. */
 export const FORWARD_TO_BUILDER_COMMAND = 'codev.forwardToBuilder';
 
+/** Command id the comment-mode lenses invoke (#1037). Like the forward
+ *  command, registered in `extension.ts` and kept out of the Command Palette. */
+export const COMMENT_FOR_BUILDER_COMMAND = 'codev.commentForBuilder';
+
 /** Context key (true when the active editor is a tracked builder-diff file) that
  *  scopes the `editor/context` "Forward Selection to Builder" item. */
 export const BUILDER_FILE_CONTEXT_KEY = 'codev.activeEditorIsBuilderFile';
+
+/** Setting + context key carrying the diff codelens mode (#1037). The setting
+ *  persists per workspace; the same-named context key mirrors it so the
+ *  `editor/title` toggle buttons swap via `when` clauses. */
+export const DIFF_CODELENS_MODE_KEY = 'codev.diffCodelensMode';
+
+export type DiffCodelensMode = 'comment' | 'forward';
+
+/** Read the current mode from configuration (default: comment). */
+export function getDiffCodelensMode(): DiffCodelensMode {
+  const value = vscode.workspace.getConfiguration('codev').get<string>('diffCodelensMode');
+  if (value === 'forward') { return 'forward'; }
+  return 'comment';
+}
 
 /** One changed file in the active diff session, keyed by its right-side fs path. */
 export interface DiffInjectSessionEntry {
@@ -81,6 +99,16 @@ class DiffInjectCodeLensProvider implements vscode.CodeLensProvider {
     return this.registry.get(fsPath);
   }
 
+  /** All entries in the active diff session (the thread reconciler iterates these). */
+  entries(): DiffInjectSessionEntry[] {
+    return [...this.registry.values()];
+  }
+
+  /** Re-emit lenses without changing the registry (mode/config changes). */
+  refresh(): void {
+    this._onDidChangeCodeLenses.fire();
+  }
+
   async provideCodeLenses(
     document: vscode.TextDocument,
     token: vscode.CancellationToken,
@@ -102,9 +130,22 @@ class DiffInjectCodeLensProvider implements vscode.CodeLensProvider {
 
     const nodes = symbols.map(toSymbolNode);
     const lastLine = Math.max(document.lineCount - 1, 0);
-    return buildAllLensDescriptors(entry.relPath, nodes, entry.hunks).map(d => {
+    // Exactly one lens per anchor, matching the current mode (#1037): comment
+    // mode (default) mounts an inline thread; forward mode keeps #789's
+    // fire-and-forget injection. Same anchors either way.
+    const mode = getDiffCodelensMode();
+    let label = 'Comment for Builder';
+    if (mode === 'forward') { label = 'Forward to Builder'; }
+    return buildAllLensDescriptors(entry.relPath, nodes, entry.hunks, label).map(d => {
       const line = Math.min(Math.max(d.line, 0), lastLine);
       const range = new vscode.Range(line, 0, line, 0);
+      if (mode === 'comment') {
+        return new vscode.CodeLens(range, {
+          title: d.title,
+          command: COMMENT_FOR_BUILDER_COMMAND,
+          arguments: [entry.builderId, document.uri.fsPath, entry.relPath, d.range ?? null],
+        });
+      }
       return new vscode.CodeLens(range, {
         title: d.title,
         command: FORWARD_TO_BUILDER_COMMAND,
@@ -130,6 +171,14 @@ export function activateDiffInjectCodeLens(context: vscode.ExtensionContext): vo
   };
   syncContextKey(vscode.window.activeTextEditor);
 
+  // Mirror the diffCodelensMode setting into a context key so the
+  // `editor/title` toggle buttons swap on it (#1037), and refresh the lenses
+  // when the setting changes so their titles/commands flip live.
+  const syncModeKey = (): void => {
+    void vscode.commands.executeCommand('setContext', DIFF_CODELENS_MODE_KEY, getDiffCodelensMode());
+  };
+  syncModeKey();
+
   context.subscriptions.push(
     vscode.languages.registerCodeLensProvider({ scheme: 'file' }, provider),
     vscode.window.onDidChangeActiveTextEditor(syncContextKey),
@@ -140,6 +189,12 @@ export function activateDiffInjectCodeLens(context: vscode.ExtensionContext): vo
     // setSession/upsert), or the selection menu + Cmd/Ctrl+K B would stay
     // disabled on the just-opened diff until focus changes (#789).
     provider.onDidChangeCodeLenses(() => syncContextKey(vscode.window.activeTextEditor)),
+    vscode.workspace.onDidChangeConfiguration(e => {
+      if (e.affectsConfiguration(DIFF_CODELENS_MODE_KEY)) {
+        syncModeKey();
+        provider.refresh();
+      }
+    }),
     provider,
   );
 }
@@ -160,6 +215,12 @@ export function upsertDiffInjectEntry(entry: DiffInjectSessionEntry): void {
  *  command uses this to resolve the owning builder + repo-relative path). */
 export function getDiffInjectEntry(fsPath: string): DiffInjectSessionEntry | undefined {
   return provider.get(fsPath);
+}
+
+/** All entries in the active diff session — the builder-review thread
+ *  reconciler (#1037) uses this to know which files can host visible threads. */
+export function getDiffInjectEntries(): DiffInjectSessionEntry[] {
+  return provider.entries();
 }
 
 /**

@@ -376,6 +376,52 @@
       {
         "command": "codev.cancelEditReviewComment",
         "title": "Codev: Cancel Edit"
+      },
+      {
+        "command": "codev.diffCodelensUseForward",
+        "title": "Codev: Switch Diff Codelens to Forward Mode",
+        "icon": "$(terminal)"
+      },
+      {
+        "command": "codev.diffCodelensUseComment",
+        "title": "Codev: Switch Diff Codelens to Comment Mode",
+        "icon": "$(comment)"
+      },
+      {
+        "command": "codev.commentSelectionForBuilder",
+        "title": "Codev: Comment for Builder"
+      },
+      {
+        "command": "codev.submitReview",
+        "title": "Codev: Submit Review"
+      },
+      {
+        "command": "codev.discardReviewComments",
+        "title": "Codev: Discard Review Comments"
+      },
+      {
+        "command": "codev.submitBuilderComment",
+        "title": "Codev: Queue Comment for Builder",
+        "enablement": "!commentIsEmpty"
+      },
+      {
+        "command": "codev.deleteBuilderComment",
+        "title": "Codev: Delete Pending Comment",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "codev.startEditBuilderComment",
+        "title": "Codev: Edit Pending Comment",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "codev.saveEditBuilderComment",
+        "title": "Codev: Save Pending Comment",
+        "enablement": "!commentIsEmpty"
+      },
+      {
+        "command": "codev.cancelEditBuilderComment",
+        "title": "Codev: Cancel Pending Comment Edit"
       }
     ],
     "menus": {
@@ -383,6 +429,16 @@
         {
           "command": "codev.openMarkdownPreview",
           "when": "resourceLangId == markdown && resourcePath =~ /\\/codev\\/(plans|specs|reviews)\\//",
+          "group": "navigation"
+        },
+        {
+          "command": "codev.diffCodelensUseForward",
+          "when": "codev.activeEditorIsBuilderFile && codev.diffCodelensMode == 'comment'",
+          "group": "navigation"
+        },
+        {
+          "command": "codev.diffCodelensUseComment",
+          "when": "codev.activeEditorIsBuilderFile && codev.diffCodelensMode == 'forward'",
           "group": "navigation"
         }
       ],
@@ -405,6 +461,38 @@
         },
         {
           "command": "codev.forwardSelectionToBuilder",
+          "when": "false"
+        },
+        {
+          "command": "codev.commentSelectionForBuilder",
+          "when": "false"
+        },
+        {
+          "command": "codev.diffCodelensUseForward",
+          "when": "false"
+        },
+        {
+          "command": "codev.diffCodelensUseComment",
+          "when": "false"
+        },
+        {
+          "command": "codev.submitBuilderComment",
+          "when": "false"
+        },
+        {
+          "command": "codev.deleteBuilderComment",
+          "when": "false"
+        },
+        {
+          "command": "codev.startEditBuilderComment",
+          "when": "false"
+        },
+        {
+          "command": "codev.saveEditBuilderComment",
+          "when": "false"
+        },
+        {
+          "command": "codev.cancelEditBuilderComment",
           "when": "false"
         },
         {
@@ -506,9 +594,14 @@
       ],
       "editor/context": [
         {
-          "command": "codev.forwardSelectionToBuilder",
-          "when": "codev.activeEditorIsBuilderFile && editorHasSelection",
+          "command": "codev.commentSelectionForBuilder",
+          "when": "codev.activeEditorIsBuilderFile",
           "group": "codev@1"
+        },
+        {
+          "command": "codev.forwardSelectionToBuilder",
+          "when": "codev.activeEditorIsBuilderFile",
+          "group": "codev@2"
         }
       ],
       "view/item/context": [
@@ -740,6 +833,11 @@
           "command": "codev.submitReviewComment",
           "group": "inline",
           "when": "commentController == codev-review && commentThreadIsEmpty"
+        },
+        {
+          "command": "codev.submitBuilderComment",
+          "group": "inline",
+          "when": "commentController == codev-builder-review && commentThreadIsEmpty"
         }
       ],
       "comments/commentThread/title": [
@@ -747,6 +845,11 @@
           "command": "codev.deleteReviewComment",
           "group": "inline@1",
           "when": "commentController == codev-review && commentThread == inline-review"
+        },
+        {
+          "command": "codev.deleteBuilderComment",
+          "group": "inline@1",
+          "when": "commentController == codev-builder-review && commentThread == pending-builder-comment"
         }
       ],
       "comments/comment/title": [
@@ -754,6 +857,11 @@
           "command": "codev.startEditReviewComment",
           "group": "group@1",
           "when": "commentController == codev-review && comment == inline-review"
+        },
+        {
+          "command": "codev.startEditBuilderComment",
+          "group": "group@1",
+          "when": "commentController == codev-builder-review && comment == pending-builder-comment"
         }
       ],
       "comments/comment/context": [
@@ -766,6 +874,16 @@
           "command": "codev.cancelEditReviewComment",
           "group": "inline@1",
           "when": "commentController == codev-review"
+        },
+        {
+          "command": "codev.saveEditBuilderComment",
+          "group": "inline@2",
+          "when": "commentController == codev-builder-review"
+        },
+        {
+          "command": "codev.cancelEditBuilderComment",
+          "group": "inline@1",
+          "when": "commentController == codev-builder-review"
         }
       ]
     },
@@ -914,6 +1032,16 @@
           "enum": ["editor", "panel"],
           "default": "editor",
           "description": "Where to open Codev terminals (editor area or bottom panel)"
+        },
+        "codev.diffCodelensMode": {
+          "type": "string",
+          "enum": ["comment", "forward"],
+          "enumDescriptions": [
+            "Codelenses compose a review comment in an inline thread; comments queue per builder and reach the PTY only via Submit Review.",
+            "Codelenses type the file/line reference straight into the builder terminal (the original fire-and-forget flow)."
+          ],
+          "default": "comment",
+          "description": "Which single action the codelenses in a builder diff offer. The right-click context menu always offers both actions regardless of mode. Toggle via the diff editor's title-bar button; the choice persists per workspace."
         },
         "codev.maxTerminals": {
           "type": "number",
