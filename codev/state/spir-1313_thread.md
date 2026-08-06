@@ -1703,3 +1703,29 @@ NOT vestigial. Must not delete/scope another active project's guard.
   (becc6e1a) is untouched.
 - Committed **f00322b5** (restore + review doc), pushed. PR #1330 still DRAFT. Strict: NOT self-approving/merging, NOT
   running porch. Ending turn addressable; resume on 1280-owner guidance or architect steer.
+
+### 2026-08-05 — RESOLUTION: architect change round — revert 1313's CLAUDE.md/AGENTS.md edits (resolves the 1280 collision)
+Resumed at the **pr gate** (porch: review phase, pr gate; HEAD 5dda0b31). Note: an untracked `state-snapshot.md` described a
+"verify phase / commit 4a5c21bf" state that does NOT match porch or git log — treated as stale, trusted porch+git.
+**Architect instruction (2026-08-06T02:06Z):** revert ONLY the two prompt surfaces `CLAUDE.md` + `AGENTS.md` (the identical
++9-line "Send outcomes: delivered vs held (Spec 1313)" section) to match `origin/main`, byte-identical to each other; KEEP all
+other doc changes (arch.md, arch-critical.md, lessons-learned.md, codev/resources/commands/*.md + skeleton twins). Commit, push
+PR #1330, reply. Do NOT merge. **Rationale:** Spec 1280 Phase 1 owns + is actively rewriting those two files — 1313 must not
+collide. This is the chosen resolution to the T16-vs-1313 escalation (supersedes "1280 scopes T16 / 1313 waits").
+- **Verified first, then acted** (lessons-critical: verify claims against source). Two-dot `git diff origin/main` showed 3 hunks
+  on each file, but blobs `916f75de..23df7e65` are shared across both files (origin/main byte-identical; branch byte-identical).
+  Three-dot `origin/main...HEAD` proved 1313's *only* edit to each file is the 9-line section — hunks 1&2 are origin/main being
+  ~83 ahead on build-doc text 1313 never touched. So `git checkout origin/main -- CLAUDE.md AGENTS.md` is correct: it removes my
+  section AND syncs to main → zero diff vs origin/main (surgically keeping the branch's stale build text would instead make the
+  PR *revert* main's newer text = a new collision).
+- **Executed** `git checkout origin/main -- CLAUDE.md AGENTS.md`. Verified end-state: `git diff origin/main --` EMPTY for both;
+  `diff CLAUDE.md AGENTS.md` EMPTY (byte-identical); "Send outcomes" grep = 0 in both; both staged.
+- **T16 now passes by construction:** the only prompt-bearing files 1313 changes are CLAUDE.md/AGENTS.md (no protocols/roles
+  `.md`); with both reverted, T16's `origin/main...HEAD` changed-set is empty → early return. Confirmed by running the test
+  post-commit (below).
+- **No info lost:** the delivered-vs-held / `afx inbox` docs live in the KEPT `agent-farm.md` (canonical `afx` ref, lines
+  517-603) + its skeleton twin + the `arch-critical.md` hot bullet. Only a duplicate was removed from CLAUDE/AGENTS.
+- **Review doc updated** (SC11, Deviations, round-3 bullet, + new Architect Change Round entry, Technical Debt→RESOLVED,
+  Follow-up→DONE). Markdown-only change; no source touched.
+- Strict mode: this is an architect-directed doc revert + commit + push (authorized) — NOT self-approving the pr gate, NOT
+  merging, NOT editing status.yaml, NOT running porch check/done. Staying parked at the pr gate for the architect's re-review.
