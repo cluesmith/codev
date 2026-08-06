@@ -47,12 +47,32 @@ reporting-only.** No word target was chased. A file conformant at more words pas
 
 This project ran under **architect M11 inspection + a human-gated retirement model**, not porch's
 per-phase 3-way consultation. The architect inspected each phase's manifest and independently
-re-ran the guard suite; Waleed made every retirement decision. No `CONSULT_ERROR` / verdict files
-were produced. The equivalent adversarial pressure came from the test suite: ~4,180 assertions,
-including per-file guards (bugfix-685 close-keywords, bugfix-742 protocol divergence, #335 CMAP
-ordering, template-delivery, review-prompt-routing, baked-decisions, and the T4 scar registry),
-each of which caught real regressions during the rewrite (documented in the phase manifests and the
-thread).
+re-ran the guard suite; Waleed made every retirement decision. The equivalent adversarial pressure
+came from the test suite: ~4,180 assertions, including per-file guards (bugfix-685 close-keywords,
+bugfix-742 protocol divergence, #335 CMAP ordering, template-delivery, review-prompt-routing,
+baked-decisions, and the T4 scar registry), each of which caught real regressions during the
+rewrite (documented in the phase manifests and the thread).
+
+### Integration review (PR #1362, 2-way CMAP — codex REQUEST_CHANGES / claude COMMENT)
+
+The architect ran a 2-way CMAP at the PR and verified each finding against the worktree. Four
+pre-merge findings, all **Addressed** (commit `f81d4720`):
+
+- **Addressed** — merge-ownership contradiction: `spir/aspir review.md` said "do not merge your own
+  PR (the architect integrates)", contradicting `roles/architect.md`. Reconciled to "merge your own
+  PR only after the human approves the `pr` gate".
+- **Addressed** — gate-ownership scoping: `builder.md`'s "you run `porch approve`" now defers to the
+  protocol's prompts on who types it (PIR routes it to the human reviewer).
+- **Addressed** — RESEARCH json/md disagreement: `protocol.json` runs `models: ["codex"]` for
+  investigation while the prose promised three; the prose now defers to the embedded state machine as
+  authoritative and states the current reduced reality (agy/hermes lanes degraded).
+- **Addressed** — `CLAUDE.md`/`AGENTS.md` named `team` + `forge` skills that don't ship (#1318 drift);
+  dropped, so the new prose stops making an active false claim to adopters.
+
+The T9/T10 deferrals were **ruled acceptable** as documented (they run at integration / local-install,
+alongside 1307's verify probes). The codex "replacement-guard recreates a freeze" critique was
+accepted-by-design: the freeze now ships *with* its documented retirement path. Non-blocking
+follow-ups filed: `release/protocol.md` staleness and a maintain/templates two-tree divergence.
 
 ## Retirements (M10)
 
