@@ -60,8 +60,11 @@ vi.mock('../utils/logger.js', () => ({
 
 import { status } from '../commands/status.js';
 
+// Strip the FULL SGR sequence incl. the ESC (\x1b) — omitting it leaves a stray ESC
+// under FORCE_COLOR/TTY (expected '2' vs received '\x1b2\x1b'), making the test
+// color-dependent (non-hermetic). Matches spec-1057-status-owner's correct helper.
 // eslint-disable-next-line no-control-regex
-const stripAnsi = (s: string) => s.replace(/\[[0-9;]*m/g, '');
+const stripAnsi = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, '');
 
 function builder(id: string, owner: string | undefined, extra: Record<string, any> = {}) {
   return {

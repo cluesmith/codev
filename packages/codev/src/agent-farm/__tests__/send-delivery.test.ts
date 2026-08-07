@@ -130,7 +130,7 @@ function harness(): Harness {
       },
       onEscalation: (info) => h.escalations.push(info),
       onLiveness: (info) => h.livenessCalls.push(info),
-      escalateHeldToOwner: (info) => h.ownerNotices.push(info),
+      escalateHeldToOwner: (info) => { h.ownerNotices.push(info); return true; },
       clearHeldOwnerNotice: (ws, agent) => h.ownerClears.push({ workspacePath: ws, toAgent: agent }),
       log: (m) => logs.push(m),
       now: () => h.now,
@@ -1111,6 +1111,35 @@ describe('MailboxDrainer owner starvation notice (Spec 1313 round 3, change 3)',
     await drainer.tick();
     expect(h.ownerNotices).toHaveLength(0);
     expect(drainer.notifiedOwnerAgents).toEqual([]);
+    drainer.stop();
+  });
+
+  it('does NOT arm the once-per-episode guard when the notice no-ops (no architect yet), then fires once one resolves', async () => {
+    const h = harness();
+    // No live session → the row holds (no-live-pty) and stays stuck past the threshold.
+    enqueue({ reason: 'busy' }, 1000);
+    const drainer = new MailboxDrainer({ intervalMs: 999999, escalationMs: 5000, ownerNoticeMs: 10000 });
+    drainer.start(h.ports, db);
+
+    // No architect resolvable yet → escalateHeldToOwner no-ops (returns false). The guard must
+    // stay UNSET so a later tick retries — else the alarm is suppressed for the whole episode
+    // even after an architect appears (the optional-1 bug this asserts against).
+    h.ports.escalateHeldToOwner = () => false;
+    h.now = 12000; // past ownerNoticeMs (10s)
+    await drainer.tick();
+    expect(drainer.notifiedOwnerAgents).toEqual([]); // not armed — retries next tick
+
+    // An architect registers → the notice now enqueues (returns true) → fired once, now armed.
+    let fired = 0;
+    h.ports.escalateHeldToOwner = () => { fired++; return true; };
+    h.now = 13000;
+    await drainer.tick();
+    expect(fired).toBe(1);
+    expect(drainer.notifiedOwnerAgents).toHaveLength(1);
+
+    // Still stuck AND already armed → no repeat notify.
+    await drainer.tick();
+    expect(fired).toBe(1);
     drainer.stop();
   });
 });

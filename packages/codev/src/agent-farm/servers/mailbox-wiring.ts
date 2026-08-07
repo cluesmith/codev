@@ -252,18 +252,23 @@ function formatOwnerNoticeBody(info: HeldOwnerNoticeInfo): string {
  * `main`, else the first-registered architect — via the shared registry resolver. Then enqueues
  * ONE coalesced (supersede-keyed), GATE-delivered mailbox row: visibility only, never a force
  * path. No-op when no architect can be resolved (nowhere to send).
+ *
+ * RETURNS `true` iff a notice row was enqueued; `false` on every no-op path (recipient is
+ * itself an architect / no architect resolvable / would notify the agent about itself). The
+ * drainer arms its once-per-episode guard only on `true`, so a no-op retries next tick rather
+ * than silently suppressing the alarm for the episode.
  */
-function escalateHeldToOwner(info: HeldOwnerNoticeInfo, log: LogFn): void {
+function escalateHeldToOwner(info: HeldOwnerNoticeInfo, log: LogFn): boolean {
   // An architect-addressed row gets no notice (it would starve in the same mailbox).
-  if (getArchitectByName(info.workspacePath, info.toAgent)) return;
+  if (getArchitectByName(info.workspacePath, info.toAgent)) return false;
   // Resolve the owner architect the same way `afx send architect` does (bare `architect` form
   // with the starving builder as sender → spawning affinity, else main, else first).
   const owner = resolveAgentInRegistry('architect', info.workspacePath, info.toAgent);
   if (isResolveError(owner)) {
     log('INFO', `[mailbox] starvation notice for ${info.toAgent} skipped: no architect to notify (${owner.message})`);
-    return;
+    return false;
   }
-  if (owner.agent === info.toAgent) return; // defensive: never notify an agent about itself
+  if (owner.agent === info.toAgent) return false; // defensive: never notify an agent about itself
   const body = formatOwnerNoticeBody(info);
   supersedeMailbox(getGlobalDb(), info.workspacePath, noticeSupersedeKey(info.toAgent), {
     workspacePath: info.workspacePath,
@@ -281,6 +286,7 @@ function escalateHeldToOwner(info: HeldOwnerNoticeInfo, log: LogFn): void {
     `[mailbox] STARVATION notice → ${owner.agent} about ${info.toAgent} @ ${path.basename(info.workspacePath)} ` +
       `(${info.heldCount} held ~${Math.round(info.ageMs / 1000)}s, reason ${info.reason ?? 'held'})`,
   );
+  return true;
 }
 
 /**

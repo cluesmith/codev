@@ -149,8 +149,14 @@ export interface DeliveryPorts {
    * `afx status` covers that), and enqueues ONE coalesced (supersede-keyed), gate-delivered
    * mailbox row — never a force path. OPTIONAL: unit fakes that don't exercise the notice omit
    * it, so the drainer calls it via `?.`.
+   *
+   * RETURNS `true` iff a notice was actually enqueued; `false` on a no-op (recipient is itself
+   * an architect, or no architect is registered yet). The drainer only records the agent as
+   * notified on `true` — a no-op must NOT arm the once-per-episode guard, or the alarm would be
+   * suppressed for the whole episode even after an architect later registers (it retries each
+   * tick until one enqueues).
    */
-  escalateHeldToOwner?(info: HeldOwnerNoticeInfo): void;
+  escalateHeldToOwner?(info: HeldOwnerNoticeInfo): boolean;
   /**
    * Clear (dismiss) any pending owner notice for an agent whose eligible held set has drained
    * (Spec 1313 round 3) — the starvation is over, so the alarm is moot. A no-op on an
@@ -724,9 +730,11 @@ export class MailboxDrainer {
    *
    * The two spec guards hold by construction: {@link findStarvingAgents} excludes PRE-DUE
    * delayed rows (a scheduled send is not stuck) and NOTICE rows themselves (a notice can never
-   * trigger a notice). The once-per-episode guard is {@link notifiedAgents}; `escalateHeldToOwner`
-   * additionally coalesces via a supersede key, so even a post-restart re-notify stays a single
-   * pending row.
+   * trigger a notice). The once-per-episode guard is {@link notifiedAgents}, armed ONLY after a
+   * notice is actually enqueued (an `escalateHeldToOwner` that no-ops — no architect yet, or the
+   * recipient is itself an architect — leaves the guard unset and retries next tick);
+   * `escalateHeldToOwner` additionally coalesces via a supersede key, so even a post-restart
+   * re-notify stays a single pending row.
    */
   private noticeOverdue(ports: DeliveryPorts, db: Database.Database): void {
     // No notice wiring (a unit fake without these ports) → nothing to do.
@@ -738,14 +746,19 @@ export class MailboxDrainer {
       const key = agentKey(agent.workspacePath, agent.toAgent);
       withEligibleHeld.add(key);
       if (agent.stuckSince <= cutoff && !this.notifiedAgents.has(key)) {
-        this.notifiedAgents.add(key);
-        ports.escalateHeldToOwner?.({
+        // Arm the once-per-episode guard ONLY when a notice was actually enqueued. The binding
+        // no-ops (returns false) when the recipient is itself an architect or no architect is
+        // registered yet; marking the agent notified on that no-op would suppress the alarm for
+        // the rest of the episode even after an architect appears. A falsy/absent return leaves
+        // the key unset so the next tick retries.
+        const enqueued = ports.escalateHeldToOwner?.({
           workspacePath: agent.workspacePath,
           toAgent: agent.toAgent,
           reason: agent.reason,
           ageMs: now - agent.stuckSince,
           heldCount: agent.count,
         });
+        if (enqueued) this.notifiedAgents.add(key);
       }
     }
     // A previously-notified agent with no eligible non-notice held row left has drained
