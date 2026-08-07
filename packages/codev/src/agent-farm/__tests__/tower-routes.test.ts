@@ -6,7 +6,7 @@
  * workspace path decoding, and 404 fallback.
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import http from 'node:http';
 import { EventEmitter } from 'node:events';
 import Database from 'better-sqlite3';
@@ -15,6 +15,13 @@ import type { RouteContext } from '../servers/tower-routes.js';
 import { GLOBAL_SCHEMA } from '../db/schema.js';
 import * as mailbox from '../db/mailbox.js';
 import { SessionScreen } from '../../terminal/session-screen.js';
+// Spec 1313 round 3: the real delayed-send timer registry + per-session submission lock
+// (NOT mocked) so the delayed-`--interrupt` reshape is exercised through the same singletons
+// handleSend uses. shutdownDelayedSends() models a Tower restart (bumps the liveness
+// generation); submitToSession lets a test pre-occupy a session's lock to drive the
+// shutdown-during-lock-wait window deterministically.
+import { shutdownDelayedSends } from '../servers/delayed-send.js';
+import { submitToSession, resetSubmissionChains } from '../servers/session-submit.js';
 
 // ============================================================================
 // Mocks
@@ -1704,6 +1711,133 @@ describe('tower-routes', () => {
       expect(parsed.deferred).toBe(false);
       // Message SHOULD be written — user is idle (Bugfix #492)
       expect(mockWrite).toHaveBeenCalled();
+    });
+  });
+
+  // ==========================================================================
+  // POST /api/send — durable `--delay` (Spec 1313 round 3, changes 1 & 2)
+  //
+  // Change 1: a delayed send is RESOLVED, authorized, and PERSISTED at request time
+  // with `not_before`, then deferred through the gate — uniform across live / offline
+  // (registry-only) / unwritable targets, and durable across a Tower restart. Change 2:
+  // a delayed `--interrupt` writes NO body here and marks nothing delivered; it keeps only
+  // an in-memory timer for the ^C, guarded by `isStillLive` before AND inside the lock.
+  // ==========================================================================
+  describe('POST /api/send — durable --delay (Spec 1313 round 3)', () => {
+    it('persists a scheduled row for a --delay to an offline (registry-only) agent and writes nothing now', async () => {
+      mockParseJsonBody.mockResolvedValue({
+        to: 'spir-9', message: 'later', workspace: '/tmp/ws', options: { deliverAfter: 30 },
+      });
+      // No live terminal, but the registry knows the builder → a delayed send schedules against it.
+      mockResolveTarget.mockReturnValue({ code: 'NOT_FOUND', message: 'no live terminal' });
+      mockResolveAgentInRegistry.mockReturnValue({ workspacePath: '/tmp/ws', agent: 'spir-9', kind: 'builder' });
+      const mockWrite = vi.fn();
+      mockGetTerminalManager.mockReturnValue({ getSession: () => gateSession(mockWrite, '❯ '), listSessions: () => [] });
+      const req = makeReq('POST', '/api/send');
+      const { res, statusCode, body } = makeRes();
+
+      const before = Date.now();
+      await handleRequest(req, res, makeCtx());
+      expect(statusCode()).toBe(200);
+      const parsed = JSON.parse(body());
+      expect(parsed.scheduled).toBe(true);
+      expect(parsed.resolvedTo).toBe('spir-9');
+      expect(typeof parsed.mailboxId).toBe('string');
+      expect(parsed.notBefore).toBeGreaterThanOrEqual(before + 30_000);
+      expect(mockWrite).not.toHaveBeenCalled(); // deferred — nothing on the wire at request time
+
+      // The row is really persisted with its due time, and is NOT eligible until due.
+      const row = mailbox.getById(sendDbHolder.db, parsed.mailboxId);
+      expect(row?.status).toBe('held');
+      expect(row?.not_before).toBe(parsed.notBefore);
+      expect(row?.terminal_id).toBeNull(); // registry-only target → no live terminal id
+      expect(mailbox.findHeldForAgent(sendDbHolder.db, '/tmp/ws', 'spir-9', parsed.notBefore - 1)).toHaveLength(0);
+      expect(mailbox.findHeldForAgent(sendDbHolder.db, '/tmp/ws', 'spir-9', parsed.notBefore)).toHaveLength(1);
+    });
+
+    it('schedules a --delay to a live target at request time without writing (durable, deferred to the gate)', async () => {
+      mockParseJsonBody.mockResolvedValue({
+        to: 'architect', message: 'later', workspace: '/tmp/ws', options: { deliverAfter: 10 },
+      });
+      mockResolveTarget.mockReturnValue({ terminalId: 'term-live', workspacePath: '/tmp/ws', agent: 'architect' });
+      const mockWrite = vi.fn();
+      mockGetTerminalManager.mockReturnValue({ getSession: () => gateSession(mockWrite, '❯ '), listSessions: () => [] });
+      const req = makeReq('POST', '/api/send');
+      const { res, statusCode, body } = makeRes();
+
+      await handleRequest(req, res, makeCtx());
+      expect(statusCode()).toBe(200);
+      const parsed = JSON.parse(body());
+      expect(parsed.scheduled).toBe(true);
+      expect(typeof parsed.mailboxId).toBe('string');
+      expect(mockWrite).not.toHaveBeenCalled(); // delivery is deferred to the gated drainer at due time
+      expect(mailbox.getById(sendDbHolder.db, parsed.mailboxId)?.not_before).toBe(parsed.notBefore);
+    });
+
+    describe('delayed --interrupt: the ^C timer is guarded by isStillLive (change 2)', () => {
+      afterEach(() => {
+        shutdownDelayedSends();
+        resetSubmissionChains();
+        vi.useRealTimers();
+      });
+
+      it('Tower shutdown BEFORE the due time fires no ^C and marks nothing delivered (outer guard)', async () => {
+        vi.useFakeTimers();
+        mockParseJsonBody.mockResolvedValue({
+          to: 'architect', message: 'urgent', workspace: '/tmp/ws', options: { interrupt: true, deliverAfter: 5 },
+        });
+        mockResolveTarget.mockReturnValue({ terminalId: 'term-i', workspacePath: '/tmp/ws', agent: 'architect' });
+        const mockWrite = vi.fn();
+        mockGetTerminalManager.mockReturnValue({ getSession: () => gateSession(mockWrite, '❯ '), listSessions: () => [] });
+        const req = makeReq('POST', '/api/send');
+        const { res, statusCode, body } = makeRes();
+
+        await handleRequest(req, res, makeCtx());
+        expect(statusCode()).toBe(200);
+        const parsed = JSON.parse(body());
+        expect(parsed.scheduled).toBe(true);
+        expect(mockWrite).not.toHaveBeenCalled(); // nothing written at request time (change 2)
+
+        shutdownDelayedSends();                 // Tower restarts while the ^C timer is pending
+        await vi.advanceTimersByTimeAsync(5000); // the due time arrives on the (now dead) timer
+
+        expect(mockWrite).not.toHaveBeenCalled(); // no ^C — the guard bailed; only the nudge is lost
+        expect(mailbox.getById(sendDbHolder.db, parsed.mailboxId)?.status).toBe('held'); // never falsely delivered
+      });
+
+      it('Tower shutdown WHILE the submission lock is held fires no ^C (inner re-check)', async () => {
+        vi.useFakeTimers();
+        // Pre-occupy term-i's submission lock with a manually-released promise, so the ^C
+        // submission chains BEHIND it — reproducing the shutdown-during-lock-wait window.
+        let releaseLock!: () => void;
+        const lockHeld = new Promise<void>((r) => { releaseLock = r; });
+        submitToSession('term-i', () => 1, { sleep: () => lockHeld });
+
+        mockParseJsonBody.mockResolvedValue({
+          to: 'architect', message: 'urgent', workspace: '/tmp/ws', options: { interrupt: true, deliverAfter: 5 },
+        });
+        mockResolveTarget.mockReturnValue({ terminalId: 'term-i', workspacePath: '/tmp/ws', agent: 'architect' });
+        const mockWrite = vi.fn();
+        mockGetTerminalManager.mockReturnValue({ getSession: () => gateSession(mockWrite, '❯ '), listSessions: () => [] });
+        const req = makeReq('POST', '/api/send');
+        const { res, body } = makeRes();
+
+        await handleRequest(req, res, makeCtx());
+        const parsed = JSON.parse(body());
+
+        // Due time: the ^C timer fires while still live → its outer check passes and it QUEUES
+        // the ^C submission behind the held lock (which has not released yet).
+        await vi.advanceTimersByTimeAsync(5000);
+        expect(mockWrite).not.toHaveBeenCalled(); // still waiting for the lock
+
+        // Now Tower shuts down (generation bump) DURING the lock-wait, then the lock drains.
+        shutdownDelayedSends();
+        releaseLock();
+        for (let i = 0; i < 20; i++) await Promise.resolve(); // flush the queued submission
+
+        expect(mockWrite).not.toHaveBeenCalled(); // the inside-the-lock isStillLive() re-check bailed
+        expect(mailbox.getById(sendDbHolder.db, parsed.mailboxId)?.status).toBe('held'); // not falsely delivered
+      });
     });
   });
 

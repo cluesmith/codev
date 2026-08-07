@@ -202,9 +202,14 @@ describe('Spec 1313 — mailbox table migration (v15)', () => {
   });
 
   it('a fresh install (GLOBAL_SCHEMA) converges on the identical mailbox shape as the migration', () => {
-    // Migrated shape (pre-v15 → v15).
+    // Migrated shape = the FULL mailbox migration chain a pre-v15 database really walks:
+    // v15 CREATEs the table, then v17 (Spec 1313 round 3) ADDs `not_before`. The live
+    // GLOBAL_SCHEMA already carries `not_before` in its base CREATE, so the chain must apply
+    // v17 too or this convergence assertion (correctly) fails — which is exactly what caught
+    // the round-3 base-schema/migration drift.
     buildPreV15Db();
     runV15Migration();
+    db.exec(`ALTER TABLE mailbox ADD COLUMN not_before INTEGER`); // v17 add-column (see the v17 block below)
     const migratedCols = mailboxColumns();
     const migratedIdx = mailboxIndexes();
 
@@ -337,6 +342,130 @@ describe('Spec 1313 — command column migration (v16)', () => {
       const freshCols = (fresh.prepare("SELECT name FROM pragma_table_info('terminal_sessions')").all() as Array<{ name: string }>)
         .map((c) => c.name).sort();
       expect(freshCols).toContain('command');
+      expect(freshCols).toEqual(migratedCols);
+    } finally {
+      fresh.close();
+    }
+  });
+});
+
+describe('Spec 1313 round 3 — mailbox not_before column migration (v17)', () => {
+  const testDir = resolve(process.cwd(), '.test-spec-1313-v17-migration');
+  let db: Database.Database;
+
+  beforeEach(() => {
+    if (existsSync(testDir)) rmSync(testDir, { recursive: true });
+    mkdirSync(testDir, { recursive: true });
+    db = new Database(resolve(testDir, 'global.db'));
+    db.pragma('journal_mode = WAL');
+  });
+  afterEach(() => {
+    db.close();
+    if (existsSync(testDir)) rmSync(testDir, { recursive: true });
+  });
+
+  /** The pre-v17 mailbox shape (v15 schema: no `not_before`). */
+  const PRE_V17_MAILBOX_DDL = `
+    CREATE TABLE IF NOT EXISTS mailbox (
+      id TEXT PRIMARY KEY,
+      workspace_path TEXT NOT NULL,
+      to_agent TEXT NOT NULL,
+      terminal_id TEXT,
+      from_agent TEXT,
+      from_workspace TEXT,
+      body TEXT NOT NULL,
+      formatted_message TEXT NOT NULL,
+      no_enter INTEGER NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'held'
+        CHECK(status IN ('held', 'delivered', 'superseded', 'dismissed')),
+      reason TEXT CHECK(reason IN ('busy', 'no-profile', 'no-live-pty')),
+      supersede_key TEXT,
+      escalated INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      resolved_at INTEGER
+    );
+  `;
+
+  function buildPreV17Db(): void {
+    db.exec(`CREATE TABLE _migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL DEFAULT (datetime('now')));`);
+    for (let v = 1; v <= 16; v++) db.prepare('INSERT INTO _migrations (version) VALUES (?)').run(v);
+    db.exec(PRE_V17_MAILBOX_DDL);
+  }
+
+  /**
+   * Faithful replica of the v17 block in db/index.ts: PRAGMA-gated (only ALTER when the
+   * column is genuinely absent, so a real failure surfaces instead of being marked migrated),
+   * then the version marker. Mirrors v16's pattern — a blanket try/catch would let a real
+   * ALTER failure be recorded as "migrated" and every subsequent mailbox insert would fail.
+   */
+  function runV17Migration(): void {
+    const v17 = db.prepare('SELECT version FROM _migrations WHERE version = 17').get();
+    if (!v17) {
+      const hasNotBefore = (db.prepare(`PRAGMA table_info(mailbox)`).all() as Array<{ name: string }>)
+        .some((c) => c.name === 'not_before');
+      if (!hasNotBefore) db.exec(`ALTER TABLE mailbox ADD COLUMN not_before INTEGER`);
+      db.prepare('INSERT INTO _migrations (version) VALUES (17)').run();
+    }
+  }
+
+  const mailboxCols = () =>
+    (db.prepare("SELECT name FROM pragma_table_info('mailbox')").all() as Array<{ name: string }>)
+      .map((c) => c.name).sort();
+
+  it('adds the not_before column to a pre-v17 mailbox and records v17', () => {
+    buildPreV17Db();
+    expect(mailboxCols()).not.toContain('not_before');
+
+    runV17Migration();
+
+    expect(mailboxCols()).toContain('not_before');
+    expect(db.prepare('SELECT version FROM _migrations WHERE version = 17').get()).toBeTruthy();
+    // The healed column round-trips a due time (what a `--delay` row persists) and defaults null.
+    db.prepare(
+      `INSERT INTO mailbox (id, workspace_path, to_agent, body, formatted_message, not_before, created_at, updated_at)
+       VALUES ('d', '/ws', 'spir-1313', 'b', 'f', 5000, 1000, 1000)`
+    ).run();
+    expect((db.prepare("SELECT not_before FROM mailbox WHERE id='d'").get() as { not_before: number }).not_before).toBe(5000);
+    db.prepare(
+      `INSERT INTO mailbox (id, workspace_path, to_agent, body, formatted_message, created_at, updated_at)
+       VALUES ('n', '/ws', 'spir-1313', 'b', 'f', 1000, 1000)`
+    ).run();
+    expect((db.prepare("SELECT not_before FROM mailbox WHERE id='n'").get() as { not_before: number | null }).not_before).toBeNull();
+  });
+
+  it('is idempotent: re-running does not throw, double-add, or duplicate the marker', () => {
+    buildPreV17Db();
+    runV17Migration();
+    expect(() => runV17Migration()).not.toThrow();
+    const markers = db.prepare('SELECT COUNT(*) AS n FROM _migrations WHERE version = 17').get() as { n: number };
+    expect(markers.n).toBe(1);
+    expect(mailboxCols().filter((c) => c === 'not_before')).toHaveLength(1);
+  });
+
+  it('the PRAGMA gate skips the ALTER when not_before already exists (fresh-install shape)', () => {
+    // Fresh install: GLOBAL_SCHEMA already created `not_before`, but the v17 marker was not
+    // yet stamped. The gate must NOT attempt a duplicate ALTER (which SQLite would reject).
+    db.exec(`CREATE TABLE _migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL DEFAULT (datetime('now')));`);
+    for (let v = 1; v <= 16; v++) db.prepare('INSERT INTO _migrations (version) VALUES (?)').run(v);
+    db.exec(PRE_V17_MAILBOX_DDL.replace('escalated INTEGER NOT NULL DEFAULT 0,', 'escalated INTEGER NOT NULL DEFAULT 0,\n      not_before INTEGER,'));
+    expect(mailboxCols()).toContain('not_before');
+
+    expect(() => runV17Migration()).not.toThrow();
+    expect(db.prepare('SELECT version FROM _migrations WHERE version = 17').get()).toBeTruthy();
+  });
+
+  it('a fresh install (GLOBAL_SCHEMA) has not_before, matching the migrated shape', () => {
+    buildPreV17Db();
+    runV17Migration();
+    const migratedCols = mailboxCols();
+
+    const fresh = new Database(resolve(testDir, 'fresh.db'));
+    try {
+      fresh.exec(GLOBAL_SCHEMA);
+      const freshCols = (fresh.prepare("SELECT name FROM pragma_table_info('mailbox')").all() as Array<{ name: string }>)
+        .map((c) => c.name).sort();
+      expect(freshCols).toContain('not_before');
       expect(freshCols).toEqual(migratedCols);
     } finally {
       fresh.close();

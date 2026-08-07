@@ -24,6 +24,7 @@ import {
   type DeliveredBroadcast,
   type EscalationInfo,
   type LivenessInfo,
+  type HeldOwnerNoticeInfo,
 } from '../servers/mailbox-delivery.js';
 import type { GateProfile, GateVerdict } from '../servers/render-gate.js';
 
@@ -68,6 +69,10 @@ interface Harness {
   escalations: EscalationInfo[];
   /** onLiveness payloads (the no-profile-streak diagnostic — metadata only). */
   livenessCalls: LivenessInfo[];
+  /** escalateHeldToOwner payloads (Spec 1313 round 3 — starvation notices to an owner architect). */
+  ownerNotices: HeldOwnerNoticeInfo[];
+  /** clearHeldOwnerNotice calls (Spec 1313 round 3 — a starving agent's notice cleared on drain). */
+  ownerClears: Array<{ workspacePath: string; toAgent: string }>;
   setSession(agent: string, session: DeliverySession | null): void;
   setProfile(p: GateProfile | null): void;
   setVerdict(v: GateVerdict): void;
@@ -96,6 +101,8 @@ function harness(): Harness {
     heldChanges: 0,
     escalations: [],
     livenessCalls: [],
+    ownerNotices: [],
+    ownerClears: [],
     now: 1000,
     writeResult: true,
     setSession: (agent, s) => sessions.set(agent, s),
@@ -123,6 +130,8 @@ function harness(): Harness {
       },
       onEscalation: (info) => h.escalations.push(info),
       onLiveness: (info) => h.livenessCalls.push(info),
+      escalateHeldToOwner: (info) => h.ownerNotices.push(info),
+      clearHeldOwnerNotice: (ws, agent) => h.ownerClears.push({ workspacePath: ws, toAgent: agent }),
       log: (m) => logs.push(m),
       now: () => h.now,
     },
@@ -914,6 +923,194 @@ describe('MailboxDrainer escalation + liveness telemetry (Spec 1313, Phase 7)', 
     drainer.start(h.ports, db);
     for (let i = 0; i < 15; i++) await drainer.tick();
     expect(h.livenessCalls).toHaveLength(0);
+    drainer.stop();
+  });
+});
+
+describe('MailboxDrainer durable --delay (Spec 1313 round 3, change 1)', () => {
+  let db: Database.Database;
+  beforeEach(() => {
+    db = new Database(':memory:');
+    db.exec(GLOBAL_SCHEMA);
+  });
+  afterEach(() => db.close());
+
+  const enqueue = (overrides: Partial<mailbox.EnqueueInput> = {}, now = 1000) =>
+    mailbox.enqueue(
+      db,
+      { workspacePath: '/ws/a', toAgent: 'spir-1', body: 'hi', formattedMessage: 'M', ...overrides },
+      now
+    );
+
+  it('a pre-due delayed row survives a drainer stop/start and delivers ONLY after its due time (durable + never early)', async () => {
+    const h = harness();
+    h.setSession('spir-1', fakeSession()); // clean → would deliver the instant it is eligible
+    enqueue({ formattedMessage: 'L', notBefore: 20000 }, 1000); // scheduled for t=20000
+
+    const drainer = new MailboxDrainer({ intervalMs: 999999 });
+    drainer.start(h.ports, db);
+    h.now = 5000; // before due
+    await drainer.tick();
+    expect(h.writes).toHaveLength(0); // not delivered early
+
+    // Tower "restart": stop drops all in-memory drainer state; the row is DURABLE (persisted).
+    drainer.stop();
+    const drainer2 = new MailboxDrainer({ intervalMs: 999999 });
+    drainer2.start(h.ports, db);
+    h.now = 15000; // still before due, now on a fresh drainer
+    await drainer2.tick();
+    expect(h.writes).toHaveLength(0); // the due time survived the restart — still not early
+
+    h.now = 21000; // past due
+    await drainer2.tick();
+    expect(h.writes.map((w) => w.formattedMessage)).toEqual(['L']); // delivered, not before due
+    drainer2.stop();
+  });
+
+  it('a pre-due delayed row does not block a later NORMAL message from delivering (eligibility ordering)', async () => {
+    const h = harness();
+    h.setSession('spir-1', fakeSession());
+    // Delayed row enqueued FIRST (older created_at) but due far in the future; a normal row after it.
+    enqueue({ formattedMessage: 'D', notBefore: 50000 }, 1000);
+    const normal = enqueue({ formattedMessage: 'N' }, 2000);
+
+    const drainer = new MailboxDrainer({ intervalMs: 999999 });
+    drainer.start(h.ports, db);
+    h.now = 3000; // the delayed row is not yet due
+    await drainer.tick(); // the normal row is the oldest ELIGIBLE → delivers; the pre-due row waits
+    expect(h.writes.map((w) => w.formattedMessage)).toEqual(['N']);
+    expect(mailbox.getById(db, normal.id)?.status).toBe('delivered');
+    drainer.stop();
+  });
+
+  it('a PRE-DUE delayed row never escalates; it escalates only after its DUE time, aged from due (not enqueue)', async () => {
+    const h = harness();
+    h.setSession('spir-1', fakeSession());
+    h.setVerdict(BUSY); // stuck (held) once eligible, so it can reach escalation
+    const row = enqueue({ formattedMessage: 'D', notBefore: 100000 }, 1000);
+    const drainer = new MailboxDrainer({ intervalMs: 999999, escalationMs: 5000 });
+    drainer.start(h.ports, db);
+
+    h.now = 50000; // 49s past enqueue but NOT yet due
+    await drainer.tick();
+    expect(mailbox.getById(db, row.id)?.escalated).toBe(0); // scheduled, not stuck → no escalation
+    expect(h.escalations).toHaveLength(0);
+
+    h.now = 100000 + 6000; // past the due time by more than escalationMs
+    await drainer.tick();
+    expect(mailbox.getById(db, row.id)?.escalated).toBe(1);
+    expect(h.escalations[0]).toMatchObject({ toAgent: 'spir-1', mailboxId: row.id, ageMs: 6000 }); // aged from DUE, not enqueue
+    drainer.stop();
+  });
+});
+
+describe('MailboxDrainer owner starvation notice (Spec 1313 round 3, change 3)', () => {
+  let db: Database.Database;
+  beforeEach(() => {
+    db = new Database(':memory:');
+    db.exec(GLOBAL_SCHEMA);
+  });
+  afterEach(() => db.close());
+
+  const enqueue = (overrides: Partial<mailbox.EnqueueInput> = {}, now = 1000) =>
+    mailbox.enqueue(
+      db,
+      { workspacePath: '/ws/a', toAgent: 'spir-1', body: 'hi', formattedMessage: 'M', ...overrides },
+      now
+    );
+
+  it('raises an owner notice ONCE, only after the owner-notice threshold (not merely the escalation age)', async () => {
+    const h = harness();
+    h.setSession('spir-1', fakeSession());
+    h.setVerdict(BUSY); // a stuck composer — held, never delivers
+    enqueue({ reason: 'busy' }, 1000);
+    const drainer = new MailboxDrainer({ intervalMs: 999999, escalationMs: 5000, ownerNoticeMs: 10000 });
+    drainer.start(h.ports, db);
+
+    h.now = 1000 + 6000; // past escalationMs (5s) but before ownerNoticeMs (10s)
+    await drainer.tick();
+    expect(h.ownerNotices).toHaveLength(0); // basic escalation may fire, but not the owner notice yet
+
+    h.now = 1000 + 11000; // past the owner-notice threshold
+    await drainer.tick();
+    expect(h.ownerNotices).toHaveLength(1);
+    expect(h.ownerNotices[0]).toMatchObject({ workspacePath: '/ws/a', toAgent: 'spir-1', reason: 'busy', heldCount: 1 });
+    expect(drainer.notifiedOwnerAgents).toEqual([agentKey('/ws/a', 'spir-1')]);
+    // Redaction: the notice payload carries no message body.
+    expect(Object.keys(h.ownerNotices[0])).not.toContain('body');
+
+    await drainer.tick(); // still stuck → NOT re-notified (once per episode)
+    expect(h.ownerNotices).toHaveLength(1);
+    drainer.stop();
+  });
+
+  it('clears the pending owner notice once the agent drains', async () => {
+    const h = harness();
+    // A moving token: clearing the composer produces new output, so bytesWritten advances and the
+    // verdict memo re-classifies (a static token would serve the cached BUSY and never deliver).
+    let bytes = 1;
+    h.setSession('spir-1', {
+      get bytesWritten() { return bytes; },
+      info: { cols: 110, rows: 32 },
+      command: 'claude',
+      launchArgs: [],
+      cwd: '/ws/a',
+      writable: true,
+      write: () => true,
+    });
+    h.setVerdict(BUSY);
+    enqueue({ reason: 'busy' }, 1000);
+    const drainer = new MailboxDrainer({ intervalMs: 999999, escalationMs: 5000, ownerNoticeMs: 10000 });
+    drainer.start(h.ports, db);
+    h.now = 12000;
+    await drainer.tick(); // notice fires
+    expect(drainer.notifiedOwnerAgents).toHaveLength(1);
+
+    // The composer clears → new output advances the token → the gate re-classifies clean → the
+    // row delivers → the agent is no longer starving → the moot notice is cleared.
+    bytes = 50;
+    h.setVerdict(CLEAN);
+    await drainer.tick();
+    expect(h.ownerClears).toEqual([{ workspacePath: '/ws/a', toAgent: 'spir-1' }]);
+    expect(drainer.notifiedOwnerAgents).toEqual([]);
+    drainer.stop();
+  });
+
+  it('never raises a notice ABOUT a notice — a held notice row does not itself trigger one', async () => {
+    const h = harness();
+    // No live sessions → both rows hold (no-live-pty), so both stay held past the threshold.
+    // A pending owner notice (held, keyed with the notice prefix, addressed to the architect 'main').
+    mailbox.supersede(
+      db,
+      '/ws/a',
+      `${mailbox.NOTICE_SUPERSEDE_PREFIX}spir-1`,
+      { workspacePath: '/ws/a', toAgent: 'main', body: 'starving!', formattedMessage: 'starving!' },
+      1000
+    );
+    // A genuinely stuck builder.
+    enqueue({ toAgent: 'spir-1', reason: 'busy' }, 1000);
+
+    const drainer = new MailboxDrainer({ intervalMs: 999999, escalationMs: 5000, ownerNoticeMs: 10000 });
+    drainer.start(h.ports, db);
+    h.now = 12000;
+    await drainer.tick();
+
+    // Only the builder's owner is notified; the notice recipient ('main') is never reported starving.
+    expect(h.ownerNotices.map((n) => n.toAgent)).toEqual(['spir-1']);
+    drainer.stop();
+  });
+
+  it('a pre-due-only agent never trips the owner notice (scheduled, not stuck)', async () => {
+    const h = harness();
+    h.setSession('spir-1', fakeSession());
+    h.setVerdict(BUSY);
+    enqueue({ formattedMessage: 'D', notBefore: 100000 }, 1000); // scheduled far out
+    const drainer = new MailboxDrainer({ intervalMs: 999999, escalationMs: 5000, ownerNoticeMs: 10000 });
+    drainer.start(h.ports, db);
+    h.now = 50000; // well past ownerNoticeMs in wall-clock, but the row is not yet due
+    await drainer.tick();
+    expect(h.ownerNotices).toHaveLength(0);
+    expect(drainer.notifiedOwnerAgents).toEqual([]);
     drainer.stop();
   });
 });

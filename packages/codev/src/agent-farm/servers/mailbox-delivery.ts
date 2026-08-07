@@ -3,11 +3,18 @@
  *
  * The single gate-checked delivery path: **persist → serialize → gate → deliver |
  * hold**. Both the send request (`handleSend`, after it enqueues) and the periodic
- * backstop drainer route through {@link deliverAgentMail}, so there is exactly one
- * place a message body is ever written to a PTY — and it only ever writes to a
- * prompt the render-gate has proven empty. This is what eliminates corruption by
- * construction: a message can never fuse with a draft, because it is never
+ * backstop drainer route every GATED delivery through {@link deliverAgentMail}, so for
+ * gate-checked delivery a message body reaches a PTY in exactly one place — and only
+ * onto a prompt the render-gate has proven empty. This is what eliminates corruption by
+ * construction for that path: a message can never fuse with a draft, because it is never
  * delivered while one exists; and there is no force path.
+ *
+ * TWO deliberate exceptions write a body OUTSIDE this path, both explicit human
+ * gate-bypasses documented at their `tower-routes.ts` call sites: immediate `--interrupt`
+ * (Ctrl+C then the message) and `--escape` (a bare ESC). They are the operator's "I am at
+ * this terminal now" actions and take the separate per-terminal submission lock
+ * (`session-submit.ts`), not the per-agent serializer here — every autonomous/scheduled/
+ * held send, by contrast, delivers through this gate.
  *
  * This module replaces the in-memory `SendBuffer` (retired in this phase): held
  * messages now live in the durable `mailbox` table, so nothing is lost to a Tower
@@ -30,6 +37,7 @@ import {
   pruneTerminal,
   findEscalatable,
   markEscalated,
+  findStarvingAgents,
 } from '../db/mailbox.js';
 import type { DbMailbox, MailboxReason } from '../db/types.js';
 import type { GateProfile, GateVerdict } from './render-gate.js';
@@ -132,8 +140,43 @@ export interface DeliveryPorts {
    * no-op in unit fakes.
    */
   onLiveness(info: LivenessInfo): void;
+  /**
+   * Raise a starvation notice to a starving NON-architect agent's OWNER (Spec 1313 round 3,
+   * change 3). Fired once per episode when the agent's oldest eligible held row has been stuck
+   * past the owner-notice threshold. The live binding resolves the recipient architect
+   * (spawning → workspace `main` → first-registered, mirroring `afx send architect`), skips
+   * agents that are themselves architects (a notice would land in the same starved mailbox —
+   * `afx status` covers that), and enqueues ONE coalesced (supersede-keyed), gate-delivered
+   * mailbox row — never a force path. OPTIONAL: unit fakes that don't exercise the notice omit
+   * it, so the drainer calls it via `?.`.
+   */
+  escalateHeldToOwner?(info: HeldOwnerNoticeInfo): void;
+  /**
+   * Clear (dismiss) any pending owner notice for an agent whose eligible held set has drained
+   * (Spec 1313 round 3) — the starvation is over, so the alarm is moot. A no-op on an
+   * already-delivered notice. OPTIONAL, like {@link escalateHeldToOwner}.
+   */
+  clearHeldOwnerNotice?(workspacePath: string, toAgent: string): void;
   log(message: string): void;
   now(): number;
+}
+
+/**
+ * Metadata for a starving agent whose owner should be alarmed (Spec 1313 round 3, change 3).
+ * Carries NO message body (metadata only, per the redaction rule) — the live binding formats a
+ * human notice naming the agent, its held count, how long it has been stuck, and the remedy.
+ */
+export interface HeldOwnerNoticeInfo {
+  /** The starving agent's workspace (the notice is enqueued within it). */
+  workspacePath: string;
+  /** The starving NON-architect agent (a builder id). */
+  toAgent: string;
+  /** Its current why-held reason (busy/no-profile/no-live-pty), if the gate set one. */
+  reason: MailboxReason | null;
+  /** How long the oldest eligible held row has been stuck, in ms. */
+  ageMs: number;
+  /** How many eligible held rows are backed up for the agent. */
+  heldCount: number;
 }
 
 /**
@@ -281,7 +324,12 @@ export async function deliverAgentMail(
   toAgent: string,
   memo?: Map<string, CachedVerdict>
 ): Promise<DeliveryOutcome> {
-  const held = findHeldForAgent(db, workspacePath, toAgent);
+  // Spec 1313 round 3: ELIGIBLE held rows only — a pre-due delayed send (`not_before > now`)
+  // is excluded, so it neither delivers early nor blocks a later normal message. An agent
+  // whose only mail is pre-due looks "empty" here (reason null → not stuck), and the row
+  // becomes eligible on the first pass at/after its due time (backstop granularity is fine —
+  // the delay is a lower bound).
+  const held = findHeldForAgent(db, workspacePath, toAgent, ports.now());
   if (held.length === 0) return { delivered: [], reason: null };
 
   const hold = (reason: MailboxReason): DeliveryOutcome => {
@@ -461,6 +509,12 @@ const DEFAULT_ESCALATION_MS = 60_000;
 // so its mail will never deliver. The threshold filters transient boot/relaunch screens,
 // which resolve well before it.
 const LIVENESS_STREAK_THRESHOLD = 10;
+// Spec 1313 round 3 (change 3): the owner-notice threshold is a small MULTIPLE of the
+// escalation age — a row must be deliverable-but-stuck for this much longer than the basic
+// `escalated` flag before its owner architect is alarmed, so a briefly-busy line does not
+// spam owners. Derived from escalationMs (default 60s → 180s), so it scales with the
+// configured `mailbox.escalationSeconds` without a separate config knob.
+const DEFAULT_OWNER_NOTICE_MULTIPLE = 3;
 
 /**
  * The poll backstop that replaces `SendBuffer`'s flush timer. On each tick it walks
@@ -479,7 +533,14 @@ export class MailboxDrainer {
   private readonly intervalMs: number;
   private readonly retentionDays: number;
   private readonly escalationMs: number;
+  private readonly ownerNoticeMs: number;
   private readonly notCleanStreak = new Map<string, number>();
+  // Spec 1313 round 3 (change 3): agents for which an owner starvation notice has already been
+  // raised this Tower lifetime — so the notice fires ONCE per episode, not once per tick. An
+  // entry is cleared when the agent's eligible held set drains (its starvation is over), which
+  // also fires `clearHeldOwnerNotice`. In-memory (like the streak map); after a restart a still-
+  // starving agent re-notifies once, and `supersede` keeps that to a single pending row.
+  private readonly notifiedAgents = new Set<string>();
   // Spec 1313 Phase 5: agents with a fast-trigger drain already queued. A burst of
   // submit/quiescence signals for one agent coalesces onto the same pending promise
   // (one gate check, not one per trigger); the slot is released when the pass begins.
@@ -497,10 +558,11 @@ export class MailboxDrainer {
   // this generation's state.
   private generation = 0;
 
-  constructor(opts: { intervalMs?: number; pruneRetentionDays?: number; escalationMs?: number } = {}) {
+  constructor(opts: { intervalMs?: number; pruneRetentionDays?: number; escalationMs?: number; ownerNoticeMs?: number } = {}) {
     this.intervalMs = opts.intervalMs ?? DEFAULT_BACKSTOP_INTERVAL_MS;
     this.retentionDays = opts.pruneRetentionDays ?? DEFAULT_PRUNE_RETENTION_DAYS;
     this.escalationMs = opts.escalationMs ?? DEFAULT_ESCALATION_MS;
+    this.ownerNoticeMs = opts.ownerNoticeMs ?? this.escalationMs * DEFAULT_OWNER_NOTICE_MULTIPLE;
   }
 
   start(ports: DeliveryPorts, db: Database.Database): void {
@@ -534,6 +596,7 @@ export class MailboxDrainer {
     this.verdictMemo.clear();
     this.notCleanStreak.clear();
     this.scheduledDrains.clear();
+    this.notifiedAgents.clear();
     this.generation++;
   }
 
@@ -595,6 +658,7 @@ export class MailboxDrainer {
       }
       if (this.generation !== gen) return; // stop() ran during the loop → skip escalation/prune
       this.escalateOverdue(ports, db);
+      this.noticeOverdue(ports, db);
       pruneTerminal(db, this.retentionDays, ports.now());
     } catch (err) {
       // Backstop for escalateOverdue/pruneTerminal (DB ops) or anything the per-agent guard missed:
@@ -621,7 +685,10 @@ export class MailboxDrainer {
     for (const row of findEscalatable(db, this.escalationMs, now)) {
       if (!markEscalated(db, row.id, now)) continue;
       escalatedAny = true;
-      const ageMs = now - row.created_at;
+      // Age from the escalation START (max(created_at, not_before)) so a delayed row's clock
+      // runs from its DUE time, not its enqueue time (Spec 1313 round 3). For a normal row
+      // not_before is null → this is created_at, unchanged from before.
+      const ageMs = now - Math.max(row.created_at, row.not_before ?? row.created_at);
       ports.onEscalation({
         workspacePath: row.workspace_path,
         toAgent: row.to_agent,
@@ -639,6 +706,56 @@ export class MailboxDrainer {
     // `mailbox-escalation` above) so a client that refetches /api/overview on
     // `overview-changed` picks up the new attention state and never shows a stale flag.
     if (escalatedAny) ports.onHeldStateChange();
+  }
+
+  /** Agents with a pending owner starvation notice this lifetime (test/observability). */
+  get notifiedOwnerAgents(): ReadonlyArray<string> {
+    return [...this.notifiedAgents];
+  }
+
+  /**
+   * Owner starvation-notice pass (Spec 1313 round 3, change 3). When an agent's OLDEST eligible
+   * held row has been deliverable-but-stuck past the owner-notice threshold, alarm the agent's
+   * OWNER exactly once per episode via {@link DeliveryPorts.escalateHeldToOwner} — the live
+   * binding resolves the recipient architect (spawning → workspace `main` → first-registered),
+   * skips agents that are themselves architects, and enqueues ONE coalesced, gate-delivered
+   * notice. When a previously-notified agent's eligible held set drains, the pending notice is
+   * cleared via {@link DeliveryPorts.clearHeldOwnerNotice}. VISIBILITY ONLY — never delivers.
+   *
+   * The two spec guards hold by construction: {@link findStarvingAgents} excludes PRE-DUE
+   * delayed rows (a scheduled send is not stuck) and NOTICE rows themselves (a notice can never
+   * trigger a notice). The once-per-episode guard is {@link notifiedAgents}; `escalateHeldToOwner`
+   * additionally coalesces via a supersede key, so even a post-restart re-notify stays a single
+   * pending row.
+   */
+  private noticeOverdue(ports: DeliveryPorts, db: Database.Database): void {
+    // No notice wiring (a unit fake without these ports) → nothing to do.
+    if (!ports.escalateHeldToOwner && !ports.clearHeldOwnerNotice) return;
+    const now = ports.now();
+    const cutoff = now - this.ownerNoticeMs;
+    const withEligibleHeld = new Set<string>();
+    for (const agent of findStarvingAgents(db, now)) {
+      const key = agentKey(agent.workspacePath, agent.toAgent);
+      withEligibleHeld.add(key);
+      if (agent.stuckSince <= cutoff && !this.notifiedAgents.has(key)) {
+        this.notifiedAgents.add(key);
+        ports.escalateHeldToOwner?.({
+          workspacePath: agent.workspacePath,
+          toAgent: agent.toAgent,
+          reason: agent.reason,
+          ageMs: now - agent.stuckSince,
+          heldCount: agent.count,
+        });
+      }
+    }
+    // A previously-notified agent with no eligible non-notice held row left has drained
+    // (delivered/dismissed, or only pre-due scheduled rows remain) → clear the moot notice.
+    for (const key of [...this.notifiedAgents]) {
+      if (withEligibleHeld.has(key)) continue;
+      this.notifiedAgents.delete(key);
+      const [ws, agent] = key.split('\0');
+      ports.clearHeldOwnerNotice?.(ws, agent);
+    }
   }
 
   /**

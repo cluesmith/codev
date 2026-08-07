@@ -142,7 +142,7 @@ function ensureGlobalDatabase(): Database.Database {
   configurePragmas(db);
 
   // Current migration version — bump when adding new migrations
-  const GLOBAL_CURRENT_VERSION = 16;
+  const GLOBAL_CURRENT_VERSION = 17;
 
   // Detect fresh vs existing database by checking if content tables exist.
   // On existing databases, GLOBAL_SCHEMA must NOT run because it references column names
@@ -595,6 +595,26 @@ function ensureGlobalDatabase(): Database.Database {
     }
     db.prepare('INSERT INTO _migrations (version) VALUES (16)').run();
     console.log('[info] Added command column to terminal_sessions (Spec 1313 restart-safe render-gate identity)');
+  }
+
+  // Migration v17: Add not_before column to mailbox (Spec 1313 round 3 — durable `--delay`).
+  // `afx send --delay` now persists its row at REQUEST time with not_before = now + delay*1000
+  // and defers delivery through the render gate, so a delayed send survives a Tower restart
+  // (the conscious reversal of Spec 1307's drop-on-restart semantics). A row is deliverable
+  // only when `not_before IS NULL OR not_before <= now`; null means deliver-ASAP (every
+  // pre-round-3 row). PRAGMA-gated ADD COLUMN mirroring v16 — a blanket try/catch would let a
+  // real ALTER failure be recorded as "migrated" and every subsequent mailbox insert (which
+  // now names not_before) would then fail against a table missing it. Do NOT edit v15 in place:
+  // dev machines on this branch already applied it, so the column must arrive as its own step.
+  const v17 = db.prepare('SELECT version FROM _migrations WHERE version = 17').get();
+  if (!v17) {
+    const hasNotBefore = (db.prepare(`PRAGMA table_info(mailbox)`).all() as Array<{ name: string }>)
+      .some((c) => c.name === 'not_before');
+    if (!hasNotBefore) {
+      db.exec(`ALTER TABLE mailbox ADD COLUMN not_before INTEGER`);
+    }
+    db.prepare('INSERT INTO _migrations (version) VALUES (17)').run();
+    console.log('[info] Added not_before column to mailbox (Spec 1313 durable --delay)');
   }
 
   return db;

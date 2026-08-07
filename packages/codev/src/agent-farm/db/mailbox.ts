@@ -46,17 +46,24 @@ export interface EnqueueInput {
   reason?: MailboxReason | null;
   /** Cron-only coalescing key; null for direct sends. */
   supersedeKey?: string | null;
+  /**
+   * Delayed-send due time in epoch-ms (Spec 1313 round 3 — `--delay`). null means
+   * deliver-ASAP (every non-delayed send). A row is deliverable only once
+   * `not_before IS NULL OR not_before <= now`; a delayed send persists this at REQUEST
+   * time so the delay is durable across a Tower restart.
+   */
+  notBefore?: number | null;
 }
 
 const INSERT_SQL = `
   INSERT INTO mailbox (
     id, workspace_path, to_agent, terminal_id, from_agent, from_workspace,
     body, formatted_message, no_enter, status, reason, supersede_key,
-    escalated, created_at, updated_at, resolved_at
+    escalated, not_before, created_at, updated_at, resolved_at
   ) VALUES (
     @id, @workspace_path, @to_agent, @terminal_id, @from_agent, @from_workspace,
     @body, @formatted_message, @no_enter, @status, @reason, @supersede_key,
-    @escalated, @created_at, @updated_at, @resolved_at
+    @escalated, @not_before, @created_at, @updated_at, @resolved_at
   )
 `;
 
@@ -75,6 +82,7 @@ function buildRow(input: EnqueueInput, now: number): DbMailbox {
     reason: input.reason ?? null,
     supersede_key: input.supersedeKey ?? null,
     escalated: 0,
+    not_before: input.notBefore ?? null,
     created_at: now,
     updated_at: now,
     resolved_at: null,
@@ -116,27 +124,49 @@ export function listHeld(db: Database.Database, workspacePath?: string): DbMailb
 }
 
 /**
- * Held rows addressed to a specific agent, in enqueue order (`created_at ASC`).
+ * ELIGIBLE held rows addressed to a specific agent, in enqueue order (`created_at ASC`).
  * This is the per-agent drain order a delivery pass walks.
+ *
+ * Spec 1313 round 3 (`--delay`): a row is deliverable only when
+ * `not_before IS NULL OR not_before <= now` — a pre-due delayed send is EXCLUDED here, so it
+ * neither delivers early nor blocks a later normal message (the drainer picks `held[0]`, the
+ * oldest ELIGIBLE row). It becomes eligible on the first pass at/after its due time. `now`
+ * defaults to `Date.now()` and is injectable for deterministic tests.
  */
 export function findHeldForAgent(
   db: Database.Database,
   workspacePath: string,
-  toAgent: string
+  toAgent: string,
+  now: number = Date.now()
 ): DbMailbox[] {
   return db
     .prepare(
-      "SELECT * FROM mailbox WHERE workspace_path = ? AND to_agent = ? AND status = 'held' ORDER BY created_at ASC, id ASC"
+      "SELECT * FROM mailbox WHERE workspace_path = ? AND to_agent = ? AND status = 'held' AND (not_before IS NULL OR not_before <= ?) ORDER BY created_at ASC, id ASC"
     )
-    .all(workspacePath, toAgent) as DbMailbox[];
+    .all(workspacePath, toAgent, now) as DbMailbox[];
 }
 
 /**
- * Held rows whose age (`now − created_at`) has crossed `maxAgeMs` and that have NOT yet
- * been escalated. Tower-global (every workspace) — the drainer's escalation pass walks
- * these once per tick to flip `escalated` and emit the visibility broadcast. Bounded by
- * the (small) held set, so a full scan is fine. `created_at ASC` escalates the oldest
- * first. A row is born held at `created_at`, so that timestamp is exactly "held since".
+ * SQL for a held row's escalation-age START — the moment it became *deliverable-but-stuck*.
+ * For a normal row that is `created_at` (born held then). For a delayed row (`not_before`
+ * set) it is the DUE time, so a still-scheduled row's clock has not started (Spec 1313 round
+ * 3: "measure escalation age from max(created_at, not_before)"). `not_before` is always ≥
+ * `created_at` when set (due = created + delay), so MAX == COALESCE(not_before, created_at);
+ * MAX is kept so a hand-written earlier not_before can never move the start before enqueue.
+ */
+const ESCALATION_START_SQL = 'MAX(created_at, COALESCE(not_before, created_at))';
+
+/**
+ * Held rows whose escalation age ({@link ESCALATION_START_SQL} → now) has crossed `maxAgeMs`
+ * and that have NOT yet been escalated. Tower-global (every workspace) — the drainer's
+ * escalation pass walks these once per tick to flip `escalated` and emit the visibility
+ * broadcast. Bounded by the (small) held set, so a full scan is fine. Oldest effective-start
+ * escalates first.
+ *
+ * Spec 1313 round 3: a PRE-DUE delayed row never escalates — its effective start is its
+ * future `not_before`, which cannot be `< cutoff` (cutoff = now − maxAgeMs ≤ now), so the
+ * age filter excludes it by construction. A delayed row escalates only after it has been
+ * deliverable-but-stuck (past its due time) for the window.
  */
 export function findEscalatable(
   db: Database.Database,
@@ -146,7 +176,7 @@ export function findEscalatable(
   const cutoff = now - maxAgeMs;
   return db
     .prepare(
-      "SELECT * FROM mailbox WHERE status = 'held' AND escalated = 0 AND created_at < ? ORDER BY created_at ASC, id ASC"
+      `SELECT * FROM mailbox WHERE status = 'held' AND escalated = 0 AND ${ESCALATION_START_SQL} < ? ORDER BY ${ESCALATION_START_SQL} ASC, id ASC`
     )
     .all(cutoff) as DbMailbox[];
 }
@@ -172,13 +202,26 @@ export interface WorkspaceHeldSummary {
  * safe to fold into the overview payload that the dashboard/VSCode indicator renders
  * (spec: the indicator is count-only; bodies live only in `afx inbox`). Aggregated in
  * SQL so cost is bounded by the (small) held set, not the row bodies.
+ *
+ * ELIGIBLE rows only (Spec 1313 round 3): a PRE-DUE delayed send (`not_before` in the
+ * future) is "scheduled, not stuck" and must NOT inflate the attention count/indicator —
+ * this is the same `not_before IS NULL OR not_before <= now` eligibility every other
+ * count/alarm surface uses (`findHeldForAgent`, `findEscalatable`, `findStarvingAgents`),
+ * so `afx status` / the dashboard badge report deliverable-but-stuck mail, not scheduled
+ * sends. (Pre-due rows are still visible in `afx inbox`, which lists ALL held rows and
+ * labels these "scheduled" — only the count/alarm surfaces exclude them.) The `escalated`
+ * flag was already pre-due-safe (a pre-due row never escalates); this aligns the raw count.
  */
-export function heldSummaryForWorkspace(db: Database.Database, workspacePath: string): WorkspaceHeldSummary {
+export function heldSummaryForWorkspace(
+  db: Database.Database,
+  workspacePath: string,
+  now: number = Date.now()
+): WorkspaceHeldSummary {
   const rows = db
     .prepare(
-      "SELECT to_agent AS toAgent, COUNT(*) AS count, MAX(escalated) AS esc FROM mailbox WHERE workspace_path = ? AND status = 'held' GROUP BY to_agent"
+      "SELECT to_agent AS toAgent, COUNT(*) AS count, MAX(escalated) AS esc FROM mailbox WHERE workspace_path = ? AND status = 'held' AND (not_before IS NULL OR not_before <= ?) GROUP BY to_agent"
     )
-    .all(workspacePath) as Array<{ toAgent: string; count: number; esc: number }>;
+    .all(workspacePath, now) as Array<{ toAgent: string; count: number; esc: number }>;
   let total = 0;
   let escalated = false;
   const byAgent: HeldAgentCount[] = rows.map((r) => {
@@ -236,6 +279,97 @@ export function markEscalated(db: Database.Database, id: string, now: number = D
     .prepare("UPDATE mailbox SET escalated = 1, updated_at = ? WHERE id = ? AND status = 'held' AND escalated = 0")
     .run(now, id);
   return info.changes > 0;
+}
+
+/**
+ * Supersede-key prefix for architect starvation notices (Spec 1313 round 3, change 3). A
+ * notice row carries `${NOTICE_SUPERSEDE_PREFIX}<starving-agent>` so (a) one pending notice
+ * per starving agent coalesces via {@link supersede}, and (b) notice rows are recognizable by
+ * prefix and EXCLUDED from {@link findStarvingAgents} — a notice can never itself trigger a
+ * notice ("no notice about a notice"). Cron uses bare task names as keys, which never collide
+ * with this prefix.
+ */
+export const NOTICE_SUPERSEDE_PREFIX = 'mailbox-notice:';
+
+/** Per-agent aggregate over an agent's ELIGIBLE, non-notice held rows (Spec 1313 round 3). */
+export interface StarvingAgent {
+  workspacePath: string;
+  toAgent: string;
+  /**
+   * Escalation-start ({@link ESCALATION_START_SQL}) of the OLDEST eligible held row — the
+   * moment this agent's oldest deliverable mail became stuck. Its age is `now - stuckSince`.
+   */
+  stuckSince: number;
+  /** How many eligible non-notice rows are held for this agent. */
+  count: number;
+  /** Representative why-held reason (held rows for one agent share the gate's verdict). */
+  reason: MailboxReason | null;
+}
+
+/**
+ * Per-agent view of currently-STARVING mail (Spec 1313 round 3, change 3): agents with at
+ * least one ELIGIBLE (`not_before IS NULL OR not_before <= now`) held row that is NOT itself a
+ * notice ({@link NOTICE_SUPERSEDE_PREFIX}). Tower-global (every workspace), aggregated in SQL
+ * so cost is bounded by the (small) held set. The drainer's notice pass compares each agent's
+ * `stuckSince` against the owner-notice threshold to decide whether to alarm, and uses the
+ * membership of the returned set to decide when a prior notice can be cleared (agent no longer
+ * has any eligible non-notice held row → drained). PRE-DUE delayed rows are excluded (not
+ * stuck), so a scheduled send never trips the alarm nor keeps one alive.
+ */
+export function findStarvingAgents(db: Database.Database, now: number = Date.now()): StarvingAgent[] {
+  return db
+    .prepare(
+      `SELECT workspace_path AS workspacePath, to_agent AS toAgent,
+              MIN(${ESCALATION_START_SQL}) AS stuckSince,
+              COUNT(*) AS count,
+              MAX(reason) AS reason
+         FROM mailbox
+        WHERE status = 'held'
+          AND (not_before IS NULL OR not_before <= ?)
+          AND (supersede_key IS NULL OR supersede_key NOT LIKE ?)
+        GROUP BY workspace_path, to_agent`
+    )
+    .all(now, `${NOTICE_SUPERSEDE_PREFIX}%`) as StarvingAgent[];
+}
+
+/**
+ * Dismiss every still-`held` row matching `(workspacePath, supersedeKey)` (Spec 1313 round 3).
+ * Used to clear a pending architect notice once its starving agent recovers (the notice is
+ * moot). Audit-preserving (soft transition), and a no-op on an already-delivered notice.
+ * Returns the number of rows dismissed.
+ */
+export function dismissHeldWithKey(
+  db: Database.Database,
+  workspacePath: string,
+  supersedeKey: string,
+  now: number = Date.now()
+): number {
+  const info = db
+    .prepare(
+      "UPDATE mailbox SET status = 'dismissed', updated_at = ?, resolved_at = ? WHERE workspace_path = ? AND supersede_key = ? AND status = 'held'"
+    )
+    .run(now, now, workspacePath, supersedeKey);
+  return info.changes;
+}
+
+/**
+ * Dismiss every still-`held` row addressed to an agent (Spec 1313 round 3, take-now B). Called
+ * when an agent is cleaned up (`afx cleanup`) so its orphaned held rows stop pinning
+ * `heldCount`/escalated forever — the terminal-row prune only removes delivered/superseded/
+ * dismissed rows, never held ones. Audit-preserving. Returns the number of rows dismissed.
+ */
+export function dismissHeldForAgent(
+  db: Database.Database,
+  workspacePath: string,
+  toAgent: string,
+  now: number = Date.now()
+): number {
+  const info = db
+    .prepare(
+      "UPDATE mailbox SET status = 'dismissed', updated_at = ?, resolved_at = ? WHERE workspace_path = ? AND to_agent = ? AND status = 'held'"
+    )
+    .run(now, now, workspacePath, toAgent);
+  return info.changes;
 }
 
 /**

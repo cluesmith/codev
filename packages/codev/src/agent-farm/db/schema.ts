@@ -269,6 +269,7 @@ CREATE TABLE IF NOT EXISTS mailbox (
   reason TEXT CHECK(reason IN ('busy', 'no-profile', 'no-live-pty')),  -- why-held; null once delivered
   supersede_key TEXT,                     -- cron-only; null for direct sends
   escalated INTEGER NOT NULL DEFAULT 0,   -- set once escalation age crossed (visibility only)
+  not_before INTEGER,                     -- epoch ms; delayed-send due time (Spec 1313 round 3, --delay). null = deliver ASAP; a row is deliverable only when not_before IS NULL OR not_before <= now
   created_at INTEGER NOT NULL,            -- epoch ms (enqueue order per agent)
   updated_at INTEGER NOT NULL,
   resolved_at INTEGER                     -- delivered/superseded/dismissed timestamp

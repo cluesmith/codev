@@ -344,7 +344,7 @@ export async function send(options: SendOptions): Promise<void> {
       logger.success(
         `Scheduled for ${results.scheduled.length} builder(s) (+${options.delay}s): ${results.scheduled.join(', ')}`,
       );
-      logger.info('Pending delayed sends are dropped if Tower restarts.');
+      logger.info('Each is persisted and durable across a Tower restart; delivers onto a clear prompt when due. Inspect/cancel: afx inbox.');
     }
     if (results.failed.length > 0) {
       logger.error(`Failed for ${results.failed.length} builder(s): ${results.failed.join(', ')}`);
@@ -372,8 +372,11 @@ export async function send(options: SendOptions): Promise<void> {
       // (empty and render-verified) — neither is a failure, and neither has been
       // delivered yet.
       if (result.scheduled) {
-        logger.success(`Message scheduled for ${result.resolvedTo ?? target} (+${options.delay}s)`);
-        logger.info('Pending delayed sends are dropped if Tower restarts.');
+        logger.success(
+          `Message scheduled for ${result.resolvedTo ?? target} (+${options.delay}s)` +
+            `${result.mailboxId ? ` — mailbox id ${result.mailboxId}` : ''}`,
+        );
+        logger.info('Persisted and durable across a Tower restart; delivers onto a clear prompt when due. Inspect/cancel: afx inbox.');
       } else if (result.held) {
         logger.info(
           `Message held for ${result.resolvedTo ?? target} (${result.reason ?? 'pending'})` +

@@ -26,6 +26,12 @@ interface InboxRow {
   reason: string | null; // 'busy' | 'no-profile' | 'no-live-pty'
   escalated: boolean;
   createdAt: number; // epoch ms
+  /**
+   * Spec 1313 round 3: due time of a pre-due delayed (`--delay`) row; null = deliver-ASAP.
+   * A row whose notBefore is still in the future is SCHEDULED (not stuck) — it is listed and
+   * cancellable here, and rendered with its countdown.
+   */
+  notBefore: number | null;
 }
 
 interface InboxListOptions {
@@ -59,6 +65,7 @@ interface InboxMessage {
   escalated: boolean;
   body: string;
   createdAt: number; // epoch ms
+  notBefore: number | null; // epoch ms; due time of a pre-due delayed row (Spec 1313 round 3)
   resolvedAt: number | null; // epoch ms; set once the row leaves `held`
 }
 
@@ -66,15 +73,20 @@ interface InboxShowOptions {
   port?: number;
 }
 
-/** Compact human age ("5s", "3m", "2h", "1d") from an epoch-ms timestamp. */
-function formatAge(createdAt: number, now: number): string {
-  const secs = Math.max(0, Math.floor((now - createdAt) / 1000));
+/** Compact human duration ("5s", "3m", "2h", "1d") from a millisecond delta. */
+function formatDuration(ms: number): string {
+  const secs = Math.max(0, Math.floor(ms / 1000));
   if (secs < 60) return `${secs}s`;
   const mins = Math.floor(secs / 60);
   if (mins < 60) return `${mins}m`;
   const hours = Math.floor(mins / 60);
   if (hours < 24) return `${hours}h`;
   return `${Math.floor(hours / 24)}d`;
+}
+
+/** Compact human age ("5s", "3m", "2h", "1d") from an epoch-ms timestamp. */
+function formatAge(createdAt: number, now: number): string {
+  return formatDuration(now - createdAt);
 }
 
 /**
@@ -117,9 +129,14 @@ export async function inboxList(options: InboxListOptions = {}): Promise<void> {
   for (const row of rows) {
     const wsName = row.workspacePath.split('/').pop() || row.workspacePath;
     const fromTo = `${row.fromAgent ?? '?'} → ${row.toAgent}`;
-    const reason = `${row.reason ?? 'held'}${row.escalated ? '!' : ''}`;
+    // Spec 1313 round 3: a pre-due delayed (`--delay`) row is SCHEDULED, not stuck — render
+    // its due countdown ("→15s") in the AGE column and "scheduled" as the reason, so a delayed
+    // send that is simply waiting for its due time is not mistaken for a starving held message.
+    const preDue = row.notBefore != null && row.notBefore > now;
+    const ageCell = preDue ? `→${formatDuration(row.notBefore! - now)}` : formatAge(row.createdAt, now);
+    const reason = preDue ? 'scheduled' : `${row.reason ?? 'held'}${row.escalated ? '!' : ''}`;
     logger.row(
-      [row.id, formatAge(row.createdAt, now), reason.slice(0, 13), fromTo.slice(0, 22), wsName.slice(0, 14)],
+      [row.id, ageCell, reason.slice(0, 13), fromTo.slice(0, 22), wsName.slice(0, 14)],
       widths,
     );
   }
@@ -154,6 +171,13 @@ export async function inboxShow(id: string, options: InboxShowOptions = {}): Pro
   logger.kv('From → To', `${from} → ${row.toAgent}`);
   logger.kv('Workspace', row.workspacePath);
   logger.kv('Created', new Date(row.createdAt).toISOString());
+  // Spec 1313 round 3: a still-scheduled delayed (`--delay`) row shows its due time and
+  // countdown; a delayed row already past its due time is deliverable and needs no annotation.
+  if (row.notBefore != null && row.status === 'held') {
+    const now = Date.now();
+    const label = row.notBefore > now ? `${new Date(row.notBefore).toISOString()} (in ${formatDuration(row.notBefore - now)})` : `${new Date(row.notBefore).toISOString()} (due)`;
+    logger.kv('Scheduled', label);
+  }
   if (row.resolvedAt) {
     logger.kv('Resolved', new Date(row.resolvedAt).toISOString());
   }

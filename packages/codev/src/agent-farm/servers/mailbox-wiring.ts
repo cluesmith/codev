@@ -17,12 +17,15 @@ import { homedir } from 'node:os';
 import { loadConfig } from '../../lib/config.js';
 import { terminalDeliverySignals, type PtySession } from '../../terminal/pty-session.js';
 import { getWorkspaceTerminals, getTerminalManager } from './tower-terminals.js';
-import { broadcastMessage } from './tower-messages.js';
+import { broadcastMessage, resolveAgentInRegistry, isResolveError } from './tower-messages.js';
 import { writeMessagePaced } from './message-write.js';
 import { classifyBuffer, type GateProfile, type GateVerdict } from './render-gate.js';
 import { resolveProfile } from './gate-profiles.js';
 import { harnessFromLaunchScript, type ContextFsPort } from '../commands/reset/context.js';
 import { getGlobalDb } from '../db/index.js';
+import { getArchitectByName } from '../state.js';
+import { formatBuilderMessage } from '../utils/message-format.js';
+import { supersede as supersedeMailbox, dismissHeldWithKey, NOTICE_SUPERSEDE_PREFIX } from '../db/mailbox.js';
 import path from 'node:path';
 import {
   MailboxDrainer,
@@ -31,6 +34,7 @@ import {
   type DeliveredBroadcast,
   type EscalationInfo,
   type LivenessInfo,
+  type HeldOwnerNoticeInfo,
 } from './mailbox-delivery.js';
 import type { MailboxEscalationPayload } from '@cluesmith/codev-types';
 
@@ -213,9 +217,79 @@ export function makeDeliveryPorts(log: LogFn): DeliveryPorts {
     onHeldStateChange: () => broadcastHeldStateChange(),
     onEscalation: (info) => broadcastEscalation(info),
     onLiveness: (info) => surfaceLiveness(info, log),
+    escalateHeldToOwner: (info) => escalateHeldToOwner(info, log),
+    clearHeldOwnerNotice: (ws, agent) => clearHeldOwnerNotice(ws, agent),
     log: (m) => log('INFO', m),
     now: () => Date.now(),
   };
+}
+
+/** Pseudo-sender identity for owner starvation notices (Spec 1313 round 3, change 3). */
+const NOTICE_SENDER = 'af-mailbox';
+
+/** Supersede key for the single pending owner notice ABOUT a starving `toAgent`. */
+function noticeSupersedeKey(toAgent: string): string {
+  return `${NOTICE_SUPERSEDE_PREFIX}${toAgent}`;
+}
+
+/** Human-readable notice body (metadata only — never the starved messages' contents). */
+function formatOwnerNoticeBody(info: HeldOwnerNoticeInfo): string {
+  const mins = Math.max(1, Math.round(info.ageMs / 60_000));
+  const plural = info.heldCount === 1 ? 'message' : 'messages';
+  return (
+    `Mailbox delivery is STUCK for builder '${info.toAgent}' @ ${path.basename(info.workspacePath)}. ` +
+    `${info.heldCount} ${plural} held ~${mins}m (reason: ${info.reason ?? 'held'}) — its composer never classifies as a ready prompt, ` +
+    `so nothing is being delivered (cron nudges included). ` +
+    `Remedy: run 'afx inbox' to inspect; 'afx interrupt ${info.toAgent}' clears a stuck composer.`
+  );
+}
+
+/**
+ * Raise a starvation notice to a starving agent's OWNER architect (Spec 1313 round 3, change
+ * 3). Skips agents that are themselves architects — the alarm would land in the same starved
+ * mailbox, and `afx status` covers that case. Resolves the recipient EXACTLY as `afx send
+ * architect` does — the starving builder's spawning architect (affinity), else the workspace's
+ * `main`, else the first-registered architect — via the shared registry resolver. Then enqueues
+ * ONE coalesced (supersede-keyed), GATE-delivered mailbox row: visibility only, never a force
+ * path. No-op when no architect can be resolved (nowhere to send).
+ */
+function escalateHeldToOwner(info: HeldOwnerNoticeInfo, log: LogFn): void {
+  // An architect-addressed row gets no notice (it would starve in the same mailbox).
+  if (getArchitectByName(info.workspacePath, info.toAgent)) return;
+  // Resolve the owner architect the same way `afx send architect` does (bare `architect` form
+  // with the starving builder as sender → spawning affinity, else main, else first).
+  const owner = resolveAgentInRegistry('architect', info.workspacePath, info.toAgent);
+  if (isResolveError(owner)) {
+    log('INFO', `[mailbox] starvation notice for ${info.toAgent} skipped: no architect to notify (${owner.message})`);
+    return;
+  }
+  if (owner.agent === info.toAgent) return; // defensive: never notify an agent about itself
+  const body = formatOwnerNoticeBody(info);
+  supersedeMailbox(getGlobalDb(), info.workspacePath, noticeSupersedeKey(info.toAgent), {
+    workspacePath: info.workspacePath,
+    toAgent: owner.agent,
+    body,
+    formattedMessage: formatBuilderMessage(NOTICE_SENDER, body),
+    fromAgent: NOTICE_SENDER,
+    fromWorkspace: info.workspacePath,
+  });
+  broadcastHeldStateChange();
+  // Deliver the notice promptly through the SAME gate (it holds if the architect is busy).
+  void ensureDrainer().scheduleDrain(owner.workspacePath, owner.agent);
+  log(
+    'WARN',
+    `[mailbox] STARVATION notice → ${owner.agent} about ${info.toAgent} @ ${path.basename(info.workspacePath)} ` +
+      `(${info.heldCount} held ~${Math.round(info.ageMs / 1000)}s, reason ${info.reason ?? 'held'})`,
+  );
+}
+
+/**
+ * Clear (dismiss) any still-held owner notice about `toAgent` once its starvation is over
+ * (Spec 1313 round 3). A no-op on an already-delivered notice — the architect already saw it.
+ */
+function clearHeldOwnerNotice(workspacePath: string, toAgent: string): void {
+  const dismissed = dismissHeldWithKey(getGlobalDb(), workspacePath, noticeSupersedeKey(toAgent));
+  if (dismissed > 0) broadcastHeldStateChange();
 }
 
 /**

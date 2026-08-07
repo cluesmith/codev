@@ -115,6 +115,7 @@ export interface DbMailbox {
   reason: MailboxReason | null;
   supersede_key: string | null;
   escalated: number;       // 0 | 1 — set once escalation age crossed (visibility only)
+  not_before: number | null; // epoch ms; delayed-send due time (Spec 1313 round 3). null = deliver-ASAP; row is deliverable only when not_before IS NULL OR not_before <= now
   created_at: number;      // epoch ms; per-agent enqueue order
   updated_at: number;      // epoch ms
   resolved_at: number | null;  // delivered/superseded/dismissed timestamp; null while held

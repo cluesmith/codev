@@ -725,7 +725,9 @@ export class TowerClient {
        * Tower-side rather than a sleeping client because the caller may be the
        * session being written to: `/arch-save` sends its own `/clear` and then a
        * delayed `/arch-init`, and the process issuing them does not survive the
-       * clear. Not persisted; a Tower restart drops pending sends.
+       * clear. Spec 1313 round 3: the row is PERSISTED at request time with a
+       * `not_before` due time, so the delay is durable across a Tower restart and
+       * the pending send is listable/cancellable via `afx inbox`.
        */
       deliverAfter?: number;
     },
@@ -748,6 +750,12 @@ export class TowerClient {
     held?: boolean;
     reason?: string;
     mailboxId?: string;
+    /**
+     * Spec 1313 round 3: due time (epoch ms) of a scheduled (`deliverAfter`) send. Present
+     * only when `scheduled` — the row is persisted at request time and delivers not before
+     * this instant. Omitted by older Tower binaries.
+     */
+    notBefore?: number;
   }> {
     const result = await this.request<{
       ok: boolean;
@@ -758,6 +766,7 @@ export class TowerClient {
       held?: boolean;
       reason?: string | null;
       mailboxId?: string;
+      notBefore?: number;
     }>(
       '/api/send',
       {
@@ -792,6 +801,7 @@ export class TowerClient {
       held: result.data!.held,
       reason: result.data!.reason ?? undefined,
       mailboxId: result.data!.mailboxId,
+      notBefore: result.data!.notBefore,
     };
   }
 

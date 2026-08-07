@@ -344,4 +344,139 @@ describe('Mailbox repository (Spec 1313)', () => {
     mailbox.enqueue(db, input({ workspacePath: '/ws/other', toAgent: 'x' }), 1000);
     expect(mailbox.heldSummaryForWorkspace(db, '/ws/a')).toEqual({ total: 0, escalated: false, byAgent: [] });
   });
+
+  it('heldSummaryForWorkspace excludes a PRE-DUE delayed row (scheduled, not stuck), counting it once due', () => {
+    // Spec 1313 round 3: a scheduled (pre-due `not_before`) send must not inflate the
+    // attention count/indicator — consistent with findHeldForAgent/findEscalatable/findStarvingAgents.
+    mailbox.enqueue(db, input({ toAgent: 'spir-1', body: 'now' }), 1000); // eligible (null not_before)
+    mailbox.enqueue(db, input({ toAgent: 'spir-1', body: 'later', notBefore: 100000 }), 1000); // pre-due
+
+    // now=2000 (< due 100000): only the eligible row counts.
+    const before = mailbox.heldSummaryForWorkspace(db, '/ws/a', 2000);
+    expect(before.total).toBe(1);
+    expect(before.byAgent).toEqual([{ toAgent: 'spir-1', count: 1, escalated: false }]);
+
+    // At/after its due time the scheduled row becomes eligible and is counted.
+    expect(mailbox.heldSummaryForWorkspace(db, '/ws/a', 100000).total).toBe(2);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Spec 1313 round 3 — durable `--delay`: not_before eligibility + escalation start
+  // ---------------------------------------------------------------------------
+
+  it('enqueue persists notBefore (a scheduled delayed send); null for a normal send', () => {
+    const delayed = mailbox.enqueue(db, input({ notBefore: 5000 }), 1000);
+    expect(delayed.not_before).toBe(5000);
+    expect(mailbox.getById(db, delayed.id)?.not_before).toBe(5000);
+
+    const normal = mailbox.enqueue(db, input(), 1000);
+    expect(normal.not_before).toBeNull();
+  });
+
+  it('findHeldForAgent excludes a PRE-DUE delayed row, then includes it once now ≥ its due time', () => {
+    mailbox.enqueue(db, input({ toAgent: 'x', body: 'normal' }), 1000);
+    mailbox.enqueue(db, input({ toAgent: 'x', body: 'delayed', notBefore: 5000 }), 1000);
+
+    // At now=2000 the delayed row is not yet due → only the normal row is eligible.
+    expect(mailbox.findHeldForAgent(db, '/ws/a', 'x', 2000).map((r) => r.body)).toEqual(['normal']);
+    // Exactly at the due time it becomes eligible (not_before <= now).
+    expect(mailbox.findHeldForAgent(db, '/ws/a', 'x', 5000).map((r) => r.body).sort()).toEqual(['delayed', 'normal']);
+    // Past due, still eligible.
+    expect(mailbox.findHeldForAgent(db, '/ws/a', 'x', 9000).map((r) => r.body).sort()).toEqual(['delayed', 'normal']);
+  });
+
+  it('findHeldForAgent keeps oldest-first among ELIGIBLE rows — a pre-due row does not jump the queue', () => {
+    // A delayed row enqueued FIRST (created_at 1000) but due later must not deliver before a
+    // normal row enqueued later (created_at 2000) — eligibility is not_before, order is created_at.
+    mailbox.enqueue(db, input({ toAgent: 'x', body: 'delayed-first', notBefore: 8000 }), 1000);
+    mailbox.enqueue(db, input({ toAgent: 'x', body: 'normal-second' }), 2000);
+
+    // Before the delayed row is due: only the normal row is eligible.
+    expect(mailbox.findHeldForAgent(db, '/ws/a', 'x', 3000).map((r) => r.body)).toEqual(['normal-second']);
+    // After it comes due: both eligible, oldest created_at first (the delayed row, created at 1000).
+    expect(mailbox.findHeldForAgent(db, '/ws/a', 'x', 8000).map((r) => r.body)).toEqual(['delayed-first', 'normal-second']);
+  });
+
+  it('findEscalatable never escalates a PRE-DUE delayed row; a due row escalates from its due time, not enqueue time', () => {
+    // A delayed row: created_at 1000, due (not_before) 100000. maxAge 5000.
+    const delayed = mailbox.enqueue(db, input({ body: 'delayed', notBefore: 100000 }), 1000);
+    // At now=50000 the row is 49s old by created_at but NOT yet due → its escalation clock has
+    // not started (effective start = max(created_at, not_before) = 100000, which is in the future).
+    expect(mailbox.findEscalatable(db, 5000, 50000)).toEqual([]);
+    // At now = due + 6000 (past due by more than maxAge) it becomes escalatable.
+    expect(mailbox.findEscalatable(db, 5000, 106000).map((r) => r.id)).toEqual([delayed.id]);
+    // Just after due but within maxAge → not yet (deliverable-but-stuck for < the window).
+    mailbox.markEscalated(db, delayed.id, 106000); // clear it so the next assertion starts fresh
+    const delayed2 = mailbox.enqueue(db, input({ body: 'delayed2', notBefore: 100000 }), 1000);
+    expect(mailbox.findEscalatable(db, 5000, 102000).map((r) => r.id)).not.toContain(delayed2.id);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Spec 1313 round 3 — findStarvingAgents (the starvation-alarm data source)
+  // ---------------------------------------------------------------------------
+
+  it('findStarvingAgents aggregates ELIGIBLE non-notice held rows per agent (stuckSince = oldest effective start)', () => {
+    mailbox.enqueue(db, input({ toAgent: 'a', body: '1', reason: 'busy' }), 1000);
+    mailbox.enqueue(db, input({ toAgent: 'a', body: '2', reason: 'busy' }), 3000);
+    mailbox.enqueue(db, input({ toAgent: 'b', body: '3', reason: 'no-profile' }), 2000);
+
+    const starving = mailbox.findStarvingAgents(db, 10000);
+    const byAgent = new Map(starving.map((s) => [s.toAgent, s]));
+    expect(byAgent.get('a')).toMatchObject({ workspacePath: '/ws/a', count: 2, stuckSince: 1000, reason: 'busy' });
+    expect(byAgent.get('b')).toMatchObject({ count: 1, stuckSince: 2000, reason: 'no-profile' });
+  });
+
+  it('findStarvingAgents excludes PRE-DUE delayed rows (scheduled, not stuck)', () => {
+    mailbox.enqueue(db, input({ toAgent: 'a', body: 'stuck', reason: 'busy' }), 1000);
+    mailbox.enqueue(db, input({ toAgent: 'sched-only', body: 'later', notBefore: 100000 }), 1000);
+
+    const starving = mailbox.findStarvingAgents(db, 5000);
+    expect(starving.map((s) => s.toAgent)).toEqual(['a']); // sched-only has no eligible row yet
+    // Once the delayed row is due, its agent joins the starving set.
+    expect(mailbox.findStarvingAgents(db, 100000).map((s) => s.toAgent).sort()).toEqual(['a', 'sched-only']);
+  });
+
+  it('findStarvingAgents excludes NOTICE rows — a notice can never itself trigger a notice', () => {
+    // A pending owner notice is a held row keyed with the notice prefix, addressed to an architect.
+    mailbox.supersede(db, '/ws/a', `${mailbox.NOTICE_SUPERSEDE_PREFIX}spir-1`, input({ toAgent: 'main', body: 'starving!' }), 1000);
+    // A genuinely starving builder row.
+    mailbox.enqueue(db, input({ toAgent: 'spir-1', body: 'held', reason: 'busy' }), 1000);
+
+    const starving = mailbox.findStarvingAgents(db, 10000);
+    expect(starving.map((s) => s.toAgent)).toEqual(['spir-1']); // 'main' (the notice recipient) is NOT reported
+  });
+
+  // ---------------------------------------------------------------------------
+  // Spec 1313 round 3 — dismissHeldForAgent (take-now B) / dismissHeldWithKey (notice clear)
+  // ---------------------------------------------------------------------------
+
+  it('dismissHeldForAgent dismisses every held row for an agent (audit-preserving), scoped to workspace+agent', () => {
+    const a1 = mailbox.enqueue(db, input({ toAgent: 'gone', body: '1', reason: 'busy' }), 1000);
+    const a2 = mailbox.enqueue(db, input({ toAgent: 'gone', body: '2' }), 1100);
+    const other = mailbox.enqueue(db, input({ toAgent: 'stays', body: 'keep' }), 1200);
+    const elsewhere = mailbox.enqueue(db, input({ workspacePath: '/ws/other', toAgent: 'gone', body: 'other-ws' }), 1300);
+
+    const dismissed = mailbox.dismissHeldForAgent(db, '/ws/a', 'gone', 2000);
+    expect(dismissed).toBe(2);
+    expect(mailbox.getById(db, a1.id)?.status).toBe('dismissed');
+    expect(mailbox.getById(db, a1.id)?.reason).toBe('busy'); // audit trail preserved
+    expect(mailbox.getById(db, a1.id)?.resolved_at).toBe(2000);
+    expect(mailbox.getById(db, a2.id)?.status).toBe('dismissed');
+    expect(mailbox.getById(db, other.id)?.status).toBe('held'); // other agent untouched
+    expect(mailbox.getById(db, elsewhere.id)?.status).toBe('held'); // other workspace untouched
+  });
+
+  it('dismissHeldForAgent is a no-op when the agent has no held rows', () => {
+    mailbox.markDelivered(db, mailbox.enqueue(db, input({ toAgent: 'gone' }), 1000).id, 1500);
+    expect(mailbox.dismissHeldForAgent(db, '/ws/a', 'gone', 2000)).toBe(0);
+  });
+
+  it('dismissHeldWithKey clears a pending notice (held row with the supersede key); no-op once delivered', () => {
+    const key = `${mailbox.NOTICE_SUPERSEDE_PREFIX}spir-1`;
+    const notice = mailbox.supersede(db, '/ws/a', key, input({ toAgent: 'main', body: 'notice' }), 1000);
+    expect(mailbox.dismissHeldWithKey(db, '/ws/a', key, 2000)).toBe(1);
+    expect(mailbox.getById(db, notice.id)?.status).toBe('dismissed');
+    // A second clear (already dismissed) or a clear after delivery is a no-op.
+    expect(mailbox.dismissHeldWithKey(db, '/ws/a', key, 3000)).toBe(0);
+  });
 });
