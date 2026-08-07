@@ -1289,3 +1289,19 @@ for both. Verified: CLAUDE==AGENTS byte-identical, all 8 scar canonicals present
 drop survived. Merge commit 9593d551. main added packages/{sdk,core,types} → needed `pnpm install
 --force` (18m) to link them; then build OK. Full suite green post-merge: 4549 passed / 48 skipped
 (main added tests). Pushing; CI will re-trigger on the updated branch.
+
+### Outage lifted → CI triggered + GREEN; merge now blocked on a required GitHub review (2026-08-06)
+
+The Actions outage lasted ~3.5h. It never triggered CI on my outage-time push, so passive waiting
+was futile (waiting on a producer that didn't exist). Once Actions recovered (other PRs getting
+CI again), I close/reopened PR #1362 to fire the missed `pull_request` workflows — an INITIAL run
+for commits that never got CI, not a re-run to launder a false green.
+
+**CI GREEN — all 6 checks reporting + passing** (per 1286 discipline): CLI Integration Tests, CLI
+Tests macos + ubuntu, Package Install Verification, Tower Integration Tests, Unit Tests.
+
+**But merge is still BLOCKED**: `reviewDecision=REVIEW_REQUIRED`, reviews=[]. Branch protection
+requires a formal approving GitHub review; the architect's integration review was a comment/afx
+message, not a `gh pr review --approve`. I can't self-approve (GitHub blocks author self-approval)
+and won't `--admin` past a required gate. Needs the architect (or a reviewer) to submit an approving
+GitHub review, then I merge with `gh pr merge 1362 --merge`.
