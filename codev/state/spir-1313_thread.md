@@ -2059,3 +2059,23 @@ tests written; state-snapshot.md enumerated a small remaining tail. Verified eac
   cmap/context working files + state-snapshot.md left UNTRACKED per the ghost-round precedent.
 DONE: committed as 2 logical commits + force-with-lease pushed PR #1330 + notified architect. pr gate stays HELD.
 NO merge / self-approve / status.yaml / porch done — awaiting architect + maintainer re-review.
+
+### 2026-08-07 — Architect re-review round: 1 required fix + optional-1 fixed, optional-2 noted
+Architect re-verified all changes in-code (faithful/correct), accepted the pre-due held-count filter. Addressed:
+- **REQUIRED (fixed): non-hermetic stripAnsi.** `spec-1313-status-held.test.ts` matched `/\[[0-9;]*m/` (CSI body, no ESC) →
+  under FORCE_COLOR=1 it left a stray `\x1b` (expected '2' vs '\x1b2\x1b'); 3 tests were RED in the architect's color-forcing
+  env (my 4586 was a color-off run). Fixed to `/\x1b\[[0-9;]*m/g`. Verified BOTH `FORCE_COLOR=1` AND `NO_COLOR=1` green.
+- **OPTIONAL-1 (fixed): owner-notice once-per-attempt → once-per-successful-enqueue.** `escalateHeldToOwner` now returns
+  boolean; `noticeOverdue` arms `notifiedAgents` only on a true (enqueued) return, so a no-op (recipient is an architect / no
+  architect yet) retries next tick instead of permanently suppressing the alarm. New drainer test (no-arch→not-armed→arch-
+  appears→fires-once→stays-armed). Touched mailbox-delivery.ts (port type + noticeOverdue), mailbox-wiring.ts (return true/false).
+- **OPTIONAL-2 (noted as fast-follow, per architect option): wiring/invocation coverage.** Owner-resolution (architect-skip +
+  fallback) + cleanupBuilder dismiss invocation verified by inspection + reused (tested) resolveAgentInRegistry; a direct test
+  needs registry seeding / git-worktree mocking over already-tested primitives — disproportionate now. Tracked in Follow-up Items.
+- **CWD-DRIFT GOTCHA (recorded):** the first FORCE_COLOR run accidentally executed from the WORKTREE ROOT (an earlier
+  `cd <root>` had drifted cwd) → ran the whole monorepo (389 files, 277 fail = per-package-setup artifact, e.g. consult
+  CODEV_METRICS_DB), NOT the codev suite. Re-ran with explicit `cd packages/codev` → 233 files, correct scope. Lesson: always
+  cd-in-command for vitest; background tasks inherit the drifted cwd.
+ALL GREEN (FORCE_COLOR=1): build exit 0 / 0 TS err; full codev suite **4587 pass / 48 skip / 0 fail**; send-integration.e2e **7/7**.
+DONE: committed (code+tests / docs) + pushed PR #1330 + notified architect. pr gate stays HELD. NO merge / self-approve /
+status.yaml / porch done — awaiting architect + maintainer re-review.
