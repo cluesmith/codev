@@ -35,9 +35,11 @@ import { TerminalManager, DEFAULT_DISK_LOG_MAX_BYTES } from '../../terminal/inde
  * the client's post-connect resize nudge repaints full-screen apps, and the
  * shellper retains the full history.
  */
-const RING_SEED_MAX_BYTES = 1024 * 1024; // 1MB
+// Exported for the Spec 1313 adopt-path regression test (#1361): a >1 MiB replay
+// capped here to the last 1 MiB can seed the gate mirror born-torn → fail-safe HOLD.
+export const RING_SEED_MAX_BYTES = 1024 * 1024; // 1MB
 
-function capRingSeed(replayData: Buffer, sessionId: string): Buffer {
+export function capRingSeed(replayData: Buffer, sessionId: string): Buffer {
   if (replayData.length <= RING_SEED_MAX_BYTES) return replayData;
   _deps?.log('INFO', `Session ${sessionId} replay is ${replayData.length} bytes; seeding the most recent ${RING_SEED_MAX_BYTES}`);
   return replayData.subarray(replayData.length - RING_SEED_MAX_BYTES);
@@ -287,6 +289,7 @@ export function saveTerminalSession(
   shellperStartTime: number | null = null,
   label: string | null = null,
   cwd: string | null = null,
+  command: string | null = null,
 ): void {
   try {
     const normalizedPath = normalizeWorkspacePath(workspacePath);
@@ -300,9 +303,9 @@ export function saveTerminalSession(
 
     const db = getGlobalDb();
     db.prepare(`
-      INSERT OR REPLACE INTO terminal_sessions (id, workspace_path, type, role_id, pid, shellper_socket, shellper_pid, shellper_start_time, label, cwd)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(terminalId, normalizedPath, type, roleId, pid, shellperSocket, shellperPid, shellperStartTime, label, cwd);
+      INSERT OR REPLACE INTO terminal_sessions (id, workspace_path, type, role_id, pid, shellper_socket, shellper_pid, shellper_start_time, label, cwd, command)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(terminalId, normalizedPath, type, roleId, pid, shellperSocket, shellperPid, shellperStartTime, label, cwd, command);
     _deps?.log('INFO', `Saved terminal session to SQLite: ${terminalId} (${type}) for ${path.basename(normalizedPath)}`);
   } catch (err) {
     _deps?.log('WARN', `Failed to save terminal session: ${(err as Error).message}`);
@@ -651,13 +654,22 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
     // Build restart options for architect sessions (synchronous, no I/O)
     let restartOptions: ReconnectRestartOptions | undefined;
     if (dbSession.type === 'architect') {
-      let architectCmd = 'claude';
-      try {
-        const config = loadConfig(workspacePath);
-        const shellArchitect = config.shell?.architect;
-        if (typeof shellArchitect === 'string') architectCmd = shellArchitect;
-        else if (Array.isArray(shellArchitect)) architectCmd = shellArchitect.join(' ');
-      } catch { /* use default */ }
+      // Spec 1313: resolve with the SAME precedence as fresh launch
+      // (TOWER_ARCHITECT_CMD env override > config > 'claude'). restartOptions.command
+      // is now also the legacy-row identity heal, so omitting the env tier would heal
+      // a `TOWER_ARCHITECT_CMD=agy` architect (with no matching config) to the wrong
+      // profile — and agy would then never deliver. It also keeps auto-restart itself
+      // consistent with how the session was originally launched.
+      let architectCmd = process.env.TOWER_ARCHITECT_CMD || '';
+      if (!architectCmd) {
+        architectCmd = 'claude';
+        try {
+          const config = loadConfig(workspacePath);
+          const shellArchitect = config.shell?.architect;
+          if (typeof shellArchitect === 'string') architectCmd = shellArchitect;
+          else if (Array.isArray(shellArchitect)) architectCmd = shellArchitect.join(' ');
+        } catch { /* use default */ }
+      }
       const cmdParts = architectCmd.split(/\s+/);
       const cleanEnv = { ...process.env } as Record<string, string>;
       delete cleanEnv['CLAUDECODE'];
@@ -750,7 +762,18 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
     // across the restart — clients holding `/ws/terminal/<id>` reconnect to the
     // same valid url instead of a dead one. Use stored cwd (worktree path for
     // builders) instead of workspace_path (Bugfix #506).
-    const session = manager.createSessionRaw({ label, cwd: sessionCwd, id: dbSession.id });
+    // Spec 1313: restore the launch command so the render-gate can resolve this
+    // reconnected session's profile. Architects have no `.builder-start.sh`
+    // backstop, so without this a reconciled architect reverts to no-profile
+    // after a Tower restart and `afx send architect` never delivers. The
+    // `?? restartOptions?.command` heals pre-existing rows (persisted before this
+    // column existed → `command` NULL): restartOptions.command is cmdParts[0] from
+    // the CURRENT config, so an upgraded architect resolves on the first restart
+    // rather than staying broken until it is manually relaunched.
+    const session = manager.createSessionRaw({
+      label, cwd: sessionCwd, id: dbSession.id,
+      command: dbSession.command ?? restartOptions?.command ?? undefined,
+    });
     const ptySession = manager.getSession(session.id);
     if (ptySession) {
       const shellperSessId = extractShellperSessionId(dbSession.shellper_socket) ?? dbSession.id;
@@ -786,7 +809,8 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
     // session under the same terminal id with its refreshed shellper info.
     db.prepare('DELETE FROM terminal_sessions WHERE id = ?').run(dbSession.id);
     saveTerminalSession(session.id, workspacePath, dbSession.type, dbSession.role_id, dbSession.shellper_pid,
-      dbSession.shellper_socket, dbSession.shellper_pid, dbSession.shellper_start_time, dbSession.label, sessionCwd);
+      dbSession.shellper_socket, dbSession.shellper_pid, dbSession.shellper_start_time, dbSession.label, sessionCwd,
+      dbSession.command ?? restartOptions?.command ?? null);
     _deps.registerKnownWorkspace(workspacePath);
 
     // Clean up on exit (only fires for permanent death when restartOnExit is set)
@@ -898,13 +922,19 @@ export async function getTerminalsForWorkspace(
         // Restore auto-restart for architect sessions (same as startup reconciliation)
         let restartOptions: ReconnectRestartOptions | undefined;
         if (dbSession.type === 'architect') {
-          let architectCmd = 'claude';
-          try {
-            const config = loadConfig(dbSession.workspace_path);
-            const shellArchitect = config.shell?.architect;
-            if (typeof shellArchitect === 'string') architectCmd = shellArchitect;
-            else if (Array.isArray(shellArchitect)) architectCmd = shellArchitect.join(' ');
-          } catch { /* use default */ }
+          // Spec 1313: same precedence as fresh launch (env override > config >
+          // 'claude') — restartOptions.command doubles as the legacy-row identity
+          // heal, so the env tier must be honored here too (see reconcile path).
+          let architectCmd = process.env.TOWER_ARCHITECT_CMD || '';
+          if (!architectCmd) {
+            architectCmd = 'claude';
+            try {
+              const config = loadConfig(dbSession.workspace_path);
+              const shellArchitect = config.shell?.architect;
+              if (typeof shellArchitect === 'string') architectCmd = shellArchitect;
+              else if (Array.isArray(shellArchitect)) architectCmd = shellArchitect.join(' ');
+            } catch { /* use default */ }
+          }
           const cmdParts = architectCmd.split(/\s+/);
           const cleanEnv = { ...process.env } as Record<string, string>;
           delete cleanEnv['CLAUDECODE'];
@@ -945,7 +975,10 @@ export async function getTerminalsForWorkspace(
           // identity across the reconnect — clients holding `/ws/terminal/<id>`
           // stay valid. Use stored cwd (worktree path for builders) instead of
           // workspace_path (Bugfix #506).
-          const newSession = manager.createSessionRaw({ label, cwd: dbSession.cwd ?? dbSession.workspace_path, id: dbSession.id });
+          const newSession = manager.createSessionRaw({
+            label, cwd: dbSession.cwd ?? dbSession.workspace_path, id: dbSession.id,
+            command: dbSession.command ?? restartOptions?.command ?? undefined, // Spec 1313: restore/heal identity (see reconcile path)
+          });
           const ptySession = manager.getSession(newSession.id);
           if (ptySession) {
             const shellperSessId = extractShellperSessionId(dbSession.shellper_socket) ?? dbSession.id;
@@ -988,7 +1021,8 @@ export async function getTerminalsForWorkspace(
           // Refresh the SQLite row under the same (preserved) id.
           deleteTerminalSession(dbSession.id);
           saveTerminalSession(newSession.id, dbSession.workspace_path, dbSession.type, dbSession.role_id, dbSession.shellper_pid,
-            dbSession.shellper_socket, dbSession.shellper_pid, dbSession.shellper_start_time, dbSession.label, dbSession.cwd);
+            dbSession.shellper_socket, dbSession.shellper_pid, dbSession.shellper_start_time, dbSession.label, dbSession.cwd,
+            dbSession.command ?? restartOptions?.command ?? null);
           dbSession.id = newSession.id;
           session = manager.getSession(newSession.id);
           _deps.log('INFO', `On-the-fly reconnect succeeded for ${newSession.id} (id preserved)`);

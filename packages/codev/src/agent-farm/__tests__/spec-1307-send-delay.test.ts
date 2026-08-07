@@ -1,22 +1,22 @@
 /**
- * `afx send --delay` — Tower-side deferred delivery (Spec 1307, phase 1).
+ * `afx send --delay` — Tower-side deferred delivery (Spec 1307), re-homed onto the
+ * Spec 1313 mailbox.
  *
- * The tests that matter here are the ORDERING ones. `--delay` is otherwise a
- * thin scheduling parameter, but it introduces a second delivery path alongside
- * the existing typing-aware `SendBuffer`, and the seam between them is where
- * this feature can silently destroy work:
+ * These tests exercise the `delayed-send.ts` timer registry that survives the
+ * re-homing unchanged: delay validation, at-most-once due-time scheduling, and the
+ * shutdown-DROP (never flush) semantics. The `--delay` due-time callback in
+ * `handleSend` now enqueues to the mailbox and triggers a gated drain, so a delayed
+ * message delivers onto a render-verified empty prompt like any normal send.
  *
- *   T+0    /clear sent → user typing → BUFFERED (up to 60s)
- *   T+15   /arch-init due → written directly → LANDS FIRST
- *   T+40   buffer flushes → /clear lands → wipes the recovered context
- *
- * That inversion is not recoverable by re-sending (the re-send re-runs the
- * race), so it is the one hazard in Spec 1307's design that had to be designed
- * out rather than accepted. `hasPending` is what closes it.
+ * The original SendBuffer-coupled ORDERING suites (the `/clear` → delayed
+ * `/arch-init` inversion that `hasPending` used to guard) were removed with the
+ * SendBuffer: the mailbox delivers `held[0]` oldest-first through the gate, so a
+ * delayed message enqueued at due time cannot overtake an earlier held one by
+ * construction — the inversion is designed out, not guarded. Route-level `--delay`
+ * behavior is covered against the live handler in tower-routes.test.ts.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { SendBuffer, type BufferedMessage } from '../servers/send-buffer.js';
 import {
   scheduleDelayedSend,
   shutdownDelayedSends,
@@ -24,57 +24,6 @@ import {
   validateDelaySeconds,
   MAX_DELAY_SECONDS,
 } from '../servers/delayed-send.js';
-
-// ============================================================================
-// Fakes
-// ============================================================================
-
-/** Minimal stand-in for PtySession: only what the delivery path touches. */
-class FakeSession {
-  writes: string[] = [];
-  writable = true;
-  private lastInputAt: number;
-
-  constructor(opts?: { lastInputAt?: number }) {
-    this.lastInputAt = opts?.lastInputAt ?? 0;
-  }
-
-  write(data: string): void {
-    this.writes.push(data);
-  }
-
-  isUserIdle(thresholdMs: number): boolean {
-    return Date.now() - this.lastInputAt >= thresholdMs;
-  }
-
-  /** Simulate the user typing right now. */
-  type(): void {
-    this.lastInputAt = Date.now();
-  }
-
-  /** Simulate the user having stopped typing long enough to count as idle. */
-  goIdle(): void {
-    this.lastInputAt = 0;
-  }
-}
-
-function bufferedMessage(sessionId: string, text: string): BufferedMessage {
-  return {
-    sessionId,
-    formattedMessage: text,
-    noEnter: false,
-    timestamp: Date.now(),
-    broadcastPayload: {
-      type: 'message',
-      from: { project: 'p', agent: 'architect' },
-      to: { project: 'p', agent: 'architect' },
-      content: text,
-      metadata: {},
-      timestamp: new Date().toISOString(),
-    },
-    logMessage: `sent ${text}`,
-  };
-}
 
 // ============================================================================
 // Delay validation
@@ -265,23 +214,23 @@ describe('shutdownDelayedSends', () => {
   });
 
   it('cancels a delivery whose lock wait outlasts a shutdown (isStillLive)', async () => {
-    // Codex's finding: the timer-time generation check passes, delivery is
-    // handed to deliverOrBuffer, and THERE it can block on submitToSession
-    // behind an in-flight write to the same session. If shutdown fires during
-    // that block, the write must still be cancelled — the timer check already
-    // passed, so only the write-time `isStillLive()` re-check catches it.
+    // Codex's finding: the timer-time generation check passes, delivery reaches
+    // the mailbox write site, and THERE it can block on submitToSession behind an
+    // in-flight write to the same session. If shutdown fires during that block,
+    // the write must still be cancelled — the timer check already passed, so only
+    // the write-time `isStillLive()` re-check catches it.
     let liveWhenWritten: boolean | undefined;
     scheduleDelayedSend(5, 'term-1', (isStillLive) => {
-      // Simulate reaching the write site (as deliverOrBuffer does inside the
-      // lock) only after shutdown has run.
+      // Simulate reaching the write site (as the mailbox delivery path does
+      // inside the lock) only after shutdown has run.
       shutdownDelayedSends();
       liveWhenWritten = isStillLive();
     });
 
     await vi.advanceTimersByTimeAsync(5_000);
 
-    // The predicate the write site consults reports "not live", so
-    // deliverOrBuffer's `if (!stillLive()) return 0` skips the write.
+    // The predicate the write site consults reports "not live", so the callback's
+    // `if (!isStillLive()) return` skips the write.
     expect(liveWhenWritten).toBe(false);
   });
 
@@ -315,15 +264,14 @@ describe('per-terminal delivery chain', () => {
   it('does NOT serialise on its own — that is the submission lock\'s job now', () => {
     // This module used to hold a per-terminal promise chain. Spec 1273's
     // `submitToSession` now owns serialisation, and every due message re-enters
-    // `deliverOrBuffer`, which submits under the lock. One mechanism, not two.
+    // the mailbox delivery path, which submits under the lock. One mechanism, not two.
     //
     // So scheduling alone is deliberately concurrent here. The property that
-    // two same-terminal deliveries do not interleave is REAL but lives at the
-    // route level, where the real writes happen — see tower-routes.test.ts
-    // "ORDERING: two simultaneous delayed sends do not interleave their
-    // writes", which runs against the actual handler and is mutation-verified.
-    // Asserting it here again would re-create the replica-test mistake this
-    // project hit four times.
+    // two same-terminal deliveries do not interleave is REAL but lives in the
+    // per-agent delivery serializer, where the real writes happen — see
+    // send-delivery.test.ts "deliverAgentMailSerialized — concurrent-send
+    // serialization", which drives the KeyedSerializer directly. Asserting it here
+    // again would re-create the replica-test mistake this project hit four times.
     const started: string[] = [];
     scheduleDelayedSend(5, 'term-1', () => { started.push('a'); });
     scheduleDelayedSend(5, 'term-1', () => { started.push('b'); });
@@ -358,6 +306,9 @@ describe('per-terminal delivery chain', () => {
     // 5s one first, because that is what the caller asked for. The ordering
     // guarantee this feature makes is narrower — a delayed message never
     // overtakes one already QUEUED for the session — not "request order wins".
+    // That narrow, load-bearing guarantee (the /clear-then-delayed-/arch-init case)
+    // is verified end-to-end against the mailbox drain in send-delivery.test.ts
+    // "delayed sends never overtake already-queued mail (Spec 1307 ordering)".
     const order: string[] = [];
     scheduleDelayedSend(30, 'term-1', () => { order.push('long'); });
     scheduleDelayedSend(5, 'term-1', () => { order.push('short'); });
@@ -376,170 +327,5 @@ describe('per-terminal delivery chain', () => {
     await vi.advanceTimersByTimeAsync(100);
 
     expect(order).toEqual(['second']);
-  });
-});
-
-describe('SendBuffer.hasPending (per-session FIFO for delayed sends)', () => {
-  let buffer: SendBuffer;
-
-  beforeEach(() => {
-    buffer = new SendBuffer();
-  });
-
-  it('reports nothing pending for an untouched session', () => {
-    expect(buffer.hasPending('term-1')).toBe(false);
-  });
-
-  it('reports pending once a message is queued', () => {
-    buffer.enqueue(bufferedMessage('term-1', '/clear'));
-    expect(buffer.hasPending('term-1')).toBe(true);
-  });
-
-  it('scopes pending state per session', () => {
-    buffer.enqueue(bufferedMessage('term-1', '/clear'));
-    expect(buffer.hasPending('term-2')).toBe(false);
-  });
-
-  it('reports nothing pending after the queue is flushed', () => {
-    const session = new FakeSession({ lastInputAt: 0 });
-    buffer.enqueue(bufferedMessage('term-1', '/clear'));
-    buffer.start(
-      () => session as never,
-      (s, msg) => {
-        (s as unknown as FakeSession).write(msg.formattedMessage);
-        return 0;
-      },
-      () => {},
-    );
-
-    buffer.flush();
-
-    expect(buffer.hasPending('term-1')).toBe(false);
-    buffer.stop();
-  });
-});
-
-describe('delivery ordering under buffering (the inversion this design prevents)', () => {
-  let buffer: SendBuffer;
-  let session: FakeSession;
-
-  /**
-   * The delivery decision as `deliverOrBuffer` makes it: buffer when the user
-   * is typing, or — for DELAYED deliveries only — when this session already has
-   * something queued. Otherwise write straight through.
-   *
-   * Reproduced here rather than imported because the real function is bound to
-   * the route's module-level terminal manager and logger.
-   *
-   * IMPORTANT — this is a SIMPLIFICATION, not a copy. It omits the shipped
-   * predicate's interrupt handling entirely. These tests document the FIFO rule
-   * readably; they are NOT the regression guard for it. That guard lives in
-   * `tower-routes.test.ts` ("ORDERING: ..."), runs against the real route and
-   * the real SendBuffer, and is mutation-verified. Review caught this file
-   * standing in for that one.
-   *
-   * `enforceFifo` is scoped to delayed sends on purpose: Spec 1307 requires
-   * undelayed sends to behave exactly as before, and applying the FIFO term to
-   * every send changes immediate-path behaviour (it did — three existing
-   * tower-routes tests caught it).
-   */
-  function deliver(text: string, enforceFifo = false): 'buffered' | 'written' {
-    const shouldDefer = !session.isUserIdle(3000)
-      || (enforceFifo && buffer.hasPending('term-1'));
-    if (shouldDefer) {
-      buffer.enqueue(bufferedMessage('term-1', text));
-      return 'buffered';
-    }
-    session.write(text);
-    return 'written';
-  }
-
-  /** A delayed delivery coming due. */
-  function deliverDelayed(text: string): 'buffered' | 'written' {
-    return deliver(text, true);
-  }
-
-  beforeEach(() => {
-    buffer = new SendBuffer();
-    session = new FakeSession({ lastInputAt: 0 });
-    buffer.start(
-      () => session as never,
-      (s, msg) => {
-        (s as unknown as FakeSession).write(msg.formattedMessage);
-        return 0;
-      },
-      () => {},
-    );
-  });
-
-  afterEach(() => {
-    buffer.stop();
-  });
-
-  it('writes straight through when the session is idle and nothing is queued', () => {
-    expect(deliver('hello')).toBe('written');
-    expect(session.writes).toEqual(['hello']);
-  });
-
-  it('buffers when the user is typing', () => {
-    session.type();
-    expect(deliver('/clear')).toBe('buffered');
-    expect(session.writes).toEqual([]);
-  });
-
-  it('does NOT let a DELAYED message overtake an earlier buffered one', () => {
-    // The regression this whole mechanism exists for — the /arch-save sequence.
-    session.type();
-    expect(deliver('/clear')).toBe('buffered');
-
-    // The user stops typing; 15s later the delayed /arch-init comes due. Without
-    // the FIFO term it would find the session idle and write directly — landing
-    // BEFORE the /clear still sitting in the buffer, after which the clear wipes
-    // the context that just recovered.
-    session.goIdle();
-    expect(deliverDelayed('/arch-init main')).toBe('buffered');
-
-    // Nothing written yet; both are queued in order.
-    expect(session.writes).toEqual([]);
-
-    buffer.flush();
-    expect(session.writes).toEqual(['/clear', '/arch-init main']);
-  });
-
-  it('leaves the IMMEDIATE path unchanged: an idle session is written directly even with a queue', () => {
-    // The other half of the contract. Spec 1307 requires undelayed sends to
-    // behave exactly as before; applying the FIFO term to every send changed
-    // immediate-path behaviour and broke three existing tower-routes tests.
-    session.type();
-    expect(deliver('queued-earlier')).toBe('buffered');
-
-    session.goIdle();
-    expect(deliver('immediate')).toBe('written');
-  });
-
-  it('preserves order across three delayed messages with mixed idle states', () => {
-    session.type();
-    deliverDelayed('first');
-    session.goIdle();
-    deliverDelayed('second');
-    deliverDelayed('third');
-
-    buffer.flush();
-    expect(session.writes).toEqual(['first', 'second', 'third']);
-  });
-
-  it('resumes direct writes once the queue has drained', () => {
-    session.type();
-    deliverDelayed('queued');
-
-    // The buffer only releases once the user is idle — flushing while they are
-    // still typing correctly holds the message, which is the behaviour the
-    // inversion test above depends on.
-    session.goIdle();
-    buffer.flush();
-    expect(session.writes).toEqual(['queued']);
-
-    expect(deliverDelayed('direct')).toBe('written');
-    expect(session.writes).toEqual(['queued', 'direct']);
   });
 });

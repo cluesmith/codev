@@ -6,14 +6,12 @@
 
 import { exec } from 'node:child_process';
 import { readdirSync, readFileSync, existsSync } from 'node:fs';
-import { join, basename } from 'node:path';
+import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import * as yaml from 'js-yaml';
 import { parseCronExpression, isDue } from './tower-cron-parser.js';
 import type { CronSchedule } from './tower-cron-parser.js';
-import { formatBuilderMessage } from '../utils/message-format.js';
-import { broadcastMessage } from './tower-messages.js';
-import { writeMessageToSession } from './message-write.js';
+import { CRON_SENDER, type CronDeliveryResult } from './cron-delivery.js';
 import { getGlobalDb } from '../db/index.js';
 
 // ============================================================================
@@ -36,8 +34,14 @@ export interface CronTask {
 export interface CronDeps {
   log: (level: 'INFO' | 'ERROR' | 'WARN', message: string) => void;
   getKnownWorkspacePaths: () => string[];
-  resolveTarget: (target: string, fallbackWorkspace?: string) => unknown;
-  getTerminalManager: () => { getSession: (id: string) => { write: (data: string) => void } | undefined };
+  /**
+   * Route a cron notification through the Spec 1313 mailbox + gate (Phase 6): persist
+   * it with the task's supersede key, then attempt the single gated delivery shared
+   * with `handleSend`. Returns the run's real outcome so the log is honest instead of
+   * unconditional "delivered". Injected so the scheduler stays unit-testable without a
+   * live Tower; the production implementation is `deliverCronMessage` (tower-routes).
+   */
+  deliver: (task: CronTask, message: string) => Promise<CronDeliveryResult>;
 }
 
 // ============================================================================
@@ -263,7 +267,7 @@ export async function executeTask(task: CronTask): Promise<{ result: string; out
 
   if (shouldNotify) {
     const renderedMessage = task.message.replace(/\$\{output\}/g, output.trim());
-    deliverMessage(task, renderedMessage);
+    await deliverMessage(task, renderedMessage);
   } else if (result === 'failure') {
     deps.log('WARN', `Cron command failed for '${task.name}': ${output.trim().slice(0, 200)}`);
   }
@@ -315,44 +319,39 @@ export function evaluateCondition(condition: string, output: string, exitCode = 
 // Message delivery (shared send pipeline)
 // ============================================================================
 
-function deliverMessage(task: CronTask, message: string): void {
+/**
+ * Hand a cron notification to the mailbox + gate (Spec 1313, Phase 6) and log its real
+ * outcome. The blind `writeMessageToSession` is gone: `deps.deliver` persists the
+ * message with the task's supersede key and attempts the single gated delivery, so a
+ * busy/menu screen holds it for the backstop rather than fusing it with a draft. The
+ * delivered-message broadcast now fires inside that shared path (as `source:'mailbox'`),
+ * not here — cron no longer double-broadcasts.
+ */
+async function deliverMessage(task: CronTask, message: string): Promise<void> {
   if (!deps) return;
 
-  const result = deps.resolveTarget(task.target, task.workspacePath) as
-    | { terminalId: string; workspacePath: string; agent: string }
-    | { code: string; message: string };
+  const result = await deps.deliver(task, message);
 
-  if ('code' in result) {
-    deps.log('WARN', `Cannot deliver cron message for '${task.name}': target '${task.target}' not found`);
-    return;
+  switch (result.outcome) {
+    case 'delivered':
+      deps.log('INFO', `Cron message delivered: ${CRON_SENDER} → ${task.target} (task '${task.name}')`);
+      break;
+    case 'superseded':
+      deps.log(
+        'INFO',
+        `Cron message held (${result.reason ?? 'busy'}), superseding the prior held run: ${CRON_SENDER} → ${task.target} (task '${task.name}')`,
+      );
+      break;
+    case 'held':
+      deps.log(
+        'INFO',
+        `Cron message held (${result.reason ?? 'busy'}): ${CRON_SENDER} → ${task.target} (task '${task.name}')`,
+      );
+      break;
+    case 'unresolved':
+      // deliverCronMessage already logged a WARN naming the unresolved target.
+      break;
   }
-
-  const session = deps.getTerminalManager().getSession(result.terminalId);
-  if (!session) {
-    deps.log('WARN', `Cannot deliver cron message for '${task.name}': terminal session gone`);
-    return;
-  }
-
-  const formatted = formatBuilderMessage('af-cron', message);
-  // Bugfix #584: pace multi-line output to avoid paste detection.
-  writeMessageToSession(session, formatted, false);
-
-  broadcastMessage({
-    type: 'message',
-    from: {
-      project: basename(task.workspacePath),
-      agent: 'af-cron',
-    },
-    to: {
-      project: basename(result.workspacePath),
-      agent: result.agent,
-    },
-    content: message,
-    metadata: { source: 'cron' },
-    timestamp: new Date().toISOString(),
-  });
-
-  deps.log('INFO', `Cron message delivered: af-cron → ${result.agent}`);
 }
 
 // ============================================================================

@@ -153,19 +153,83 @@ async function registerTerminal(
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
+      // Spec 1313: an inert shell renders no agent composer, so the render-gate
+      // (correctly) HOLDS a normal send to it. These routing tests therefore use
+      // the explicit `interrupt` delivery path (gate-bypass, broadcasts as before);
+      // the shell traps SIGINT and re-loops so it survives the Ctrl+C and stays
+      // registered across sends. Gated deliver/hold is covered by
+      // send-mailbox-repro.test.ts and tower-routes.test.ts.
       command: '/bin/sh',
-      args: ['-c', 'sleep 3600'],
+      args: ['-c', 'trap "" INT; while true; do sleep 3600; done'],
       cwd: workspacePath,
       cols: 80,
       rows: 24,
       workspacePath,
       type,
       roleId,
+      // Register via the shellper (persistent) backend — the same path Tower
+      // uses for real builders/architects. The non-persistent fallback spawns
+      // node-pty directly via `await import('node-pty')`, which resolves the
+      // module's live named bindings to `undefined` inside Tower's deep ESM
+      // graph when run from the built `dist/` (a pre-existing Node ESM↔CJS
+      // interop quirk in `terminal/pty-session.ts`, unrelated to Spec 1313 —
+      // `terminal/shellper-main.ts` already works around it with createRequire).
+      // Shellper spawns in its own process, so it is immune. A shellper-backed
+      // session reports `command: ''` (see pty-manager.createSessionRaw), which
+      // still resolves to `no-profile` for the held-behavior assertion below.
+      persistent: true,
     }),
   });
   expect(res.status).toBe(201);
   const data = await res.json();
   return data.id;
+}
+
+// ---- Spec 1313: composer-rendering helpers for the #1265 full-cycle e2e ----
+
+const ESC = '\x1b';
+const COMPOSER_RULE = '─'.repeat(22);
+const CLEAR_SCREEN = `${ESC}[2J${ESC}[H`;
+/** An OCCUPIED claude composer: a half-typed draft at normal intensity → gate: busy. */
+const DRAFT_COMPOSER = `${CLEAR_SCREEN}❯ ${ESC}[0mdeploy the hotfix to prod\r\n${COMPOSER_RULE}\r\n`;
+/** A CLEAN claude composer: marker + a dim placeholder only → gate: clean. */
+const CLEAN_COMPOSER = `${CLEAR_SCREEN}❯ ${ESC}[2mTry "fix the flaky test"${ESC}[0m\r\n${COMPOSER_RULE}\r\n`;
+
+/**
+ * Register a shellper-backed "echo" terminal: `stty raw -echo; cat` re-emits
+ * whatever we write to its PTY input verbatim into its output ring buffer, so the
+ * test can render the exact composer bytes the real render-gate classifies (the
+ * same screens send-mailbox-repro.test.ts proves against the gate in-process).
+ * Persistent backend (see registerTerminal) → immune to the node-pty ESM quirk.
+ */
+async function registerEchoTerminal(port: number, workspacePath: string, roleId: string): Promise<string> {
+  const res = await fetch(`http://localhost:${port}/api/terminals`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      command: 'sh',
+      args: ['-c', 'stty raw -echo 2>/dev/null; exec cat'],
+      cwd: workspacePath,
+      cols: 110,
+      rows: 32,
+      workspacePath,
+      type: 'builder',
+      roleId,
+      persistent: true,
+    }),
+  });
+  expect(res.status).toBe(201);
+  return (await res.json()).id;
+}
+
+/** Write raw bytes to a terminal's PTY input (POST /api/terminals/:id/write). */
+async function writeToTerminal(port: number, terminalId: string, data: string): Promise<void> {
+  const res = await fetch(`http://localhost:${port}/api/terminals/${terminalId}/write`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ data }),
+  });
+  expect(res.ok).toBe(true);
 }
 
 /**
@@ -290,6 +354,7 @@ describe('send integration (POST /api/send → /ws/messages)', () => {
         from: 'architect',
         workspace: workspaceA,
         fromWorkspace: workspaceA,
+        options: { interrupt: true }, // Spec 1313: explicit-delivery path (see registerTerminal)
       }),
     });
     expect(sendRes.ok).toBe(true);
@@ -321,6 +386,7 @@ describe('send integration (POST /api/send → /ws/messages)', () => {
         from: 'architect',
         workspace: workspaceA,
         fromWorkspace: workspaceA,
+        options: { interrupt: true }, // Spec 1313: explicit-delivery path (see registerTerminal)
       }),
     });
     expect(sendRes.ok).toBe(true);
@@ -349,6 +415,7 @@ describe('send integration (POST /api/send → /ws/messages)', () => {
         from: 'architect',
         workspace: workspaceA,
         fromWorkspace: workspaceA,
+        options: { interrupt: true }, // Spec 1313: explicit-delivery path (see registerTerminal)
       }),
     });
 
@@ -387,6 +454,7 @@ describe('send integration (POST /api/send → /ws/messages)', () => {
         from: 'architect',
         workspace: workspaceA,
         fromWorkspace: workspaceA,
+        options: { interrupt: true }, // Spec 1313: explicit-delivery path (see registerTerminal)
       }),
     });
     expect(sendRes.ok).toBe(true);
@@ -428,6 +496,7 @@ describe('send integration (POST /api/send → /ws/messages)', () => {
         from: 'builder-spir-42',
         workspace: workspaceA,
         fromWorkspace: workspaceA,
+        options: { interrupt: true }, // Spec 1313: explicit-delivery path (see registerTerminal)
       }),
     });
 
@@ -439,4 +508,103 @@ describe('send integration (POST /api/send → /ws/messages)', () => {
 
     busProjB.close();
   });
+
+  // ---- Spec 1313: mailbox-first hold behavior (HTTP contract) ----
+
+  it('holds a NORMAL (gated) send to an inert terminal instead of writing to it (Spec 1313)', async () => {
+    // No `interrupt` here: the render-gate sees a shell with no agent composer and
+    // holds the message rather than corrupting the line. The send is persisted and
+    // the response reports the real first outcome — held, with a why-held reason.
+    const sendRes = await fetch(`http://localhost:${TEST_TOWER_PORT}/api/send`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        to: 'builder-spir-109',
+        message: 'this should be held, not written',
+        from: 'architect',
+        workspace: workspaceA,
+        fromWorkspace: workspaceA,
+      }),
+    });
+    expect(sendRes.ok).toBe(true);
+    const data = await sendRes.json();
+    expect(data.ok).toBe(true);
+    expect(data.held).toBe(true);
+    expect(data.resolvedTo).toBe('builder-spir-109');
+    expect(typeof data.mailboxId).toBe('string');
+    // An inert shell resolves to no measured agent profile → held `no-profile`.
+    expect(data.reason).toBe('no-profile');
+  });
+
+  // ---- Spec 1313: the #1265 corruption repro, end-to-end over HTTP ----
+
+  it('#1265 full cycle: a draft holds the send (busy), then it delivers cleanly once the composer clears', async () => {
+    // A dedicated workspace whose `.builder-start.sh` names `claude`, so the
+    // render-gate resolves the claude profile for this terminal (a shellper session
+    // reports command='', so the profile is recovered from the launch script exactly
+    // as it is for a real wrapped builder). Torn down in `finally`.
+    const ws = createTestWorkspace('send-int-repro');
+    writeFileSync(resolve(ws, '.builder-start.sh'), '#!/bin/bash\nexec claude\n');
+    try {
+      await activateAndWait(TEST_TOWER_PORT, ws);
+      const termId = await registerEchoTerminal(TEST_TOWER_PORT, ws, 'builder-spir-777');
+
+      // 1. Render an OCCUPIED composer (a half-typed draft at normal intensity).
+      await writeToTerminal(TEST_TOWER_PORT, termId, DRAFT_COMPOSER);
+      await new Promise((r) => setTimeout(r, 300)); // let it render into the ring buffer
+
+      // Subscribe BEFORE sending so we catch the eventual redelivery broadcast.
+      const bus = connectMessageBus(TEST_TOWER_PORT);
+      await waitForOpen(bus.ws);
+
+      // 2. A NORMAL (gated) send lands on the busy line → HELD (busy). The draft is
+      //    never written to, and a held send broadcasts nothing (only delivery does).
+      const sendRes = await fetch(`http://localhost:${TEST_TOWER_PORT}/api/send`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          to: 'builder-spir-777',
+          message: 'ship it',
+          from: 'architect',
+          workspace: ws,
+          fromWorkspace: ws,
+        }),
+      });
+      expect(sendRes.ok).toBe(true);
+      const sendData = await sendRes.json();
+      expect(sendData.held).toBe(true);
+      expect(sendData.reason).toBe('busy');
+      expect(typeof sendData.mailboxId).toBe('string');
+
+      // 3. The user submits: the composer renders clean (dim placeholder only).
+      await writeToTerminal(TEST_TOWER_PORT, termId, CLEAN_COMPOSER);
+
+      // 4. The backstop redelivers on the first clean render-gate → delivery
+      //    broadcast. Held sends never broadcast, so the mailbox-sourced message
+      //    frame is unambiguously the redelivery of exactly this held message.
+      let delivered: { content?: string } | null = null;
+      const deadline = Date.now() + 12_000;
+      while (!delivered && Date.now() < deadline) {
+        try {
+          const frame = await bus.nextMessage();
+          if (frame.type === 'message' && frame.to?.agent === 'builder-spir-777' && frame.metadata?.source === 'mailbox') {
+            delivered = frame;
+          }
+        } catch {
+          /* nextMessage's internal 5s timeout — loop again until our own deadline */
+        }
+      }
+      expect(delivered).not.toBeNull();
+      expect(delivered!.content).toBe('ship it');
+
+      bus.close();
+    } finally {
+      const encWs = encodeWorkspacePath(ws);
+      await fetch(`http://localhost:${TEST_TOWER_PORT}/api/workspaces/${encWs}/deactivate`, {
+        method: 'POST',
+        signal: AbortSignal.timeout(10_000),
+      }).catch(() => {});
+      cleanupWorkspace(ws);
+    }
+  }, 60_000);
 });

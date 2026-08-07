@@ -11,7 +11,7 @@ import path from 'node:path';
 import type { WebSocket } from 'ws';
 import { parseAddress, stripLeadingZeros } from '../utils/agent-names.js';
 import { getWorkspaceTerminals } from './tower-terminals.js';
-import { lookupBuilderSpawningArchitect } from '../state.js';
+import { lookupBuilderSpawningArchitect, getBuilders, getArchitects, getArchitectByName } from '../state.js';
 import { DEFAULT_ARCHITECT_NAME } from '../utils/architect-name.js';
 
 // ============================================================================
@@ -424,6 +424,140 @@ function resolveAgentInWorkspace(
 }
 
 /**
+ * A target resolved from the durable agent registry (global.db) rather than the
+ * live terminal map — a KNOWN agent that currently has no live PTY. There is no
+ * `terminalId` by construction (that is the whole point). Spec 1313 uses this to
+ * hold mail (`no-live-pty`) for an agent that exists but is offline (e.g. a
+ * builder registered in global.db while Tower is mid-restart) instead of 404ing.
+ */
+export interface RegistryResolveResult {
+  workspacePath: string;
+  agent: string;
+  /** Whether the resolved agent is an architect vs a builder — drives formatting. */
+  kind: 'builder' | 'architect';
+}
+
+/**
+ * Registry fallback for {@link resolveTarget}'s `NOT_FOUND` case (Spec 1313,
+ * Phase 4). When no live terminal matches, resolve the address against the
+ * persistent global.db registry so a send to a known-but-offline agent is HELD,
+ * not dropped. Deliberately narrower than the live resolver:
+ *
+ * - Bare `<builder>` (with a workspace context) — exact then tail match against
+ *   `getBuilders(ws)`; ambiguous tail is still AMBIGUOUS (never guess).
+ * - `architect` / `architect:<name>` — resolved to a SPECIFIC architect name via
+ *   the persisted architect rows, preserving the Spec 755 spoofing constraint
+ *   (a builder sender may only address its own spawning architect).
+ * - `project:<agent>` cross-workspace — the target workspace is resolved by
+ *   basename (the same mapping the live resolver uses) and the agent held against
+ *   ITS registry, so the mailbox-first hold applies across every address form.
+ *   Boundary: workspace resolution reads the live workspace map, so the target
+ *   workspace must be active (its agent's PTY may be dead); a fully-inactive
+ *   workspace still NOT_FOUNDs, exactly as the live resolver does.
+ *
+ * A cleaned-up builder (`afx cleanup`) is deleted from global.db too, so it
+ * correctly resolves to NOT_FOUND here — mail is only held for agents that still
+ * exist in the registry.
+ */
+export function resolveAgentInRegistry(
+  target: string,
+  fallbackWorkspace?: string,
+  sender?: string,
+): RegistryResolveResult | ResolveError {
+  const { project, agent } = parseAddress(target);
+
+  if (!agent || !agent.trim()) {
+    return { code: 'NO_CONTEXT', message: 'Malformed address: agent name is empty.' };
+  }
+
+  // architect:<name> — per-architect address within the workspace (Spec 755).
+  if (project && project.toLowerCase() === 'architect') {
+    if (!fallbackWorkspace) {
+      return { code: 'NO_CONTEXT', message: 'Cannot resolve architect:<name> address without workspace context.' };
+    }
+    return resolveRegistryArchitectByName(agent, fallbackWorkspace, sender);
+  }
+
+  // Determine the workspace to resolve the agent within. An explicit `project:`
+  // maps to that workspace by basename (the same mapping the live resolver uses),
+  // so a cross-workspace send to a known agent whose PTY is down is held against
+  // ITS registry rather than dropped; otherwise the agent resolves within the
+  // sender's workspace.
+  let ws: string;
+  if (project) {
+    const wsResult = findWorkspaceByBasename(project);
+    if (isResolveError(wsResult)) return wsResult;
+    ws = wsResult.workspacePath;
+  } else {
+    if (!fallbackWorkspace) {
+      return { code: 'NO_CONTEXT', message: 'Cannot resolve agent without project context.' };
+    }
+    ws = fallbackWorkspace;
+  }
+
+  // Bare architect / arch.
+  if (agent === 'architect' || agent === 'arch') {
+    return resolveRegistryArchitect(ws, sender);
+  }
+
+  // Bare builder — exact (case-insensitive), then tail match with leading-zero strip.
+  const builders = getBuilders(ws);
+  const lower = agent.toLowerCase();
+  for (const b of builders) {
+    if (b.id.toLowerCase() === lower) return { workspacePath: ws, agent: b.id, kind: 'builder' };
+  }
+  const stripped = stripLeadingZeros(agent).toLowerCase();
+  const tail = builders.filter((b) => b.id.toLowerCase().endsWith(`-${stripped}`));
+  if (tail.length === 1) return { workspacePath: ws, agent: tail[0].id, kind: 'builder' };
+  if (tail.length > 1) {
+    return {
+      code: 'AMBIGUOUS',
+      message: `Agent '${agent}' is ambiguous — matches ${tail.length} registered builders: ${tail.map((b) => b.id).join(', ')}. Use the full name.`,
+    };
+  }
+
+  return { code: 'NOT_FOUND', message: `Agent '${agent}' is not a live terminal and is not registered in workspace '${path.basename(ws)}'.` };
+}
+
+/** Registry analogue of the bare-`architect` affinity resolution (offline hold). */
+function resolveRegistryArchitect(
+  workspacePath: string,
+  sender?: string,
+): RegistryResolveResult | ResolveError {
+  const architects = getArchitects(workspacePath);
+  if (architects.length === 0) {
+    return { code: 'NOT_FOUND', message: `No architect registered in workspace '${path.basename(workspacePath)}'.` };
+  }
+  // Builder sender → its spawning architect if still registered, else 'main'.
+  const spawning = sender ? lookupBuilderSpawningArchitect(sender, workspacePath) : undefined;
+  if (spawning) {
+    if (getArchitectByName(workspacePath, spawning)) return { workspacePath, agent: spawning, kind: 'architect' };
+  }
+  if (getArchitectByName(workspacePath, DEFAULT_ARCHITECT_NAME)) {
+    return { workspacePath, agent: DEFAULT_ARCHITECT_NAME, kind: 'architect' };
+  }
+  return { workspacePath, agent: architects[0].name, kind: 'architect' };
+}
+
+/** Registry analogue of `architect:<name>`, preserving the Spec 755 spoofing check. */
+function resolveRegistryArchitectByName(
+  name: string,
+  workspacePath: string,
+  sender?: string,
+): RegistryResolveResult | ResolveError {
+  if (sender) {
+    const spawning = lookupBuilderSpawningArchitect(sender, workspacePath);
+    if (spawning !== undefined && spawning !== name) {
+      return { code: 'NOT_FOUND', message: addressSpoofingErrorMessage(sender) };
+    }
+  }
+  if (!getArchitectByName(workspacePath, name)) {
+    return { code: 'NOT_FOUND', message: `Architect '${name}' is not registered in workspace '${path.basename(workspacePath)}'.` };
+  }
+  return { workspacePath, agent: name, kind: 'architect' };
+}
+
+/**
  * Broadcast a structured message frame to all WebSocket subscribers.
  * Filters by project if the subscriber has a projectFilter set.
  */
@@ -450,6 +584,6 @@ export function broadcastMessage(message: MessageFrame): void {
 /**
  * Helper to check if a resolve result is an error.
  */
-export function isResolveError(result: ResolveResult | ResolveError): result is ResolveError {
+export function isResolveError<T extends object>(result: T | ResolveError): result is ResolveError {
   return 'code' in result;
 }

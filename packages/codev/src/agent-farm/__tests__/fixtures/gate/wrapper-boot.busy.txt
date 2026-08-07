@@ -1,0 +1,9 @@
+[2J[H=====================================
+  builder spir-1313 — launch loop
+=====================================
+
+Agent process exited (status 0).
+
+Press Enter to relaunch, or Ctrl-C to stop.
+
+builder@codev:~/.builders/spir-1313$ 

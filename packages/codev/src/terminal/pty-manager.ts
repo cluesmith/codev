@@ -127,7 +127,7 @@ export class TerminalManager {
    * first (Issue #1047 Fix E) so a replaced session can't keep firing listeners
    * on the surviving shellper client.
    */
-  createSessionRaw(opts: { label: string; cwd: string; id?: string }): PtySessionInfo {
+  createSessionRaw(opts: { label: string; cwd: string; id?: string; command?: string; args?: string[] }): PtySessionInfo {
     if (this.sessions.size >= this.config.maxSessions) {
       throw new ManagerError('MAX_SESSIONS', `Maximum ${this.config.maxSessions} sessions reached`);
     }
@@ -143,8 +143,17 @@ export class TerminalManager {
     const { cols, rows } = defaultSessionOptions();
     const sessionConfig: PtySessionConfig = {
       id,
-      command: '', // Not used for shellper-backed sessions
-      args: [],
+      // Spec 1313: the launch command is the render-gate identity seam — it maps
+      // the session to its classifier profile (claude/codex) so `afx send` can
+      // deliver. Threaded from the creation/reconnect sites for shellper-backed
+      // agent sessions; '' for sessions without a known agent (plain shells).
+      // `args` is CREATION-ONLY: it is NOT persisted on the session row and is NOT
+      // read by `resolveProfile` today. A reconnected session gets `[]`. Do not make
+      // args a resolution input (e.g. to support `env codex` / `npx claude`) without
+      // adding matching persistence, or fresh and post-restart sessions will classify
+      // differently.
+      command: opts.command ?? '',
+      args: opts.args ?? [],
       cols,
       rows,
       cwd: opts.cwd,
@@ -307,15 +316,16 @@ export class TerminalManager {
       try {
         const frame = decodeFrame(Buffer.from(rawData));
         if (frame.type === 'data') {
-          session.recordUserInput();
-          session.write(frame.data.toString('utf-8'));
+          // Route through the shared input chokepoint so this path tracks composing/
+          // submit like the Tower WS handler does (Spec 1313 Phase 5 — previously this
+          // path skipped composing, so Enter here never fired the submit trigger).
+          session.handleUserInput(frame.data.toString('utf-8'));
         } else if (frame.type === 'control') {
           this.handleControlMessage(session, ws, frame.message);
         }
       } catch {
         // If decode fails, treat as raw data (for simpler clients)
-        session.recordUserInput();
-        session.write(rawData.toString('utf-8'));
+        session.handleUserInput(rawData.toString('utf-8'));
       }
     });
 
