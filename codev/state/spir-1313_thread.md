@@ -2005,3 +2005,57 @@ Staged every file explicitly (no `git add -A`). CMAP artifacts + `codev/projects
 ghost-round precedent. porch confirms PHASE review / WAITING FOR HUMAN APPROVAL / Gate: pr (status.yaml untouched). Sent the
 architect the re-park notification with the commit list + incremental-diff summary. HOLDING at the pr gate for the architect's
 final integration verification + the human gate. No self-approve/merge.
+
+### 2026-08-07 — Maintainer-review round (PR #1330, waleedkadous) — architect work order
+Architect handed a directive: `codev/projects/1313-.../1313-maintainer-review-directive.md`. Maintainer requested
+**3 changes + 4 take-now follow-ups** before merge; architect verified all claims vs head e8070fb6 → all real.
+Human adjudicated the one open design Q (change 1): **durable `not_before` design**. Do NOT merge; pr gate stays
+held pending architect+maintainer re-review. Do NOT post the directive as a PR comment. Message architect when pushed.
+
+Scope this round:
+1. **`--delay` durable via `not_before`** — persist row at REQUEST time with `not_before=now+delay*1000` on ALL paths
+   (live/registry/dead/unwritable). Drain eligibility `held AND (not_before IS NULL OR <= now)`, deliver oldest ELIGIBLE.
+   Escalation age from `max(created_at, not_before)`; pre-due never escalates. Retire in-memory registry for the BODY
+   (conscious reversal of Spec 1307 drop-on-restart — approved). Migration **v17** (PRAGMA-gated ADD COLUMN, mirror v16;
+   do NOT edit v15). Response adds `mailboxId`+`notBefore`; remove both "dropped if Tower restarts" msgs. Docs both trees.
+2. **Delayed-interrupt seam** — stop writing the body on the interrupt path; keep an in-memory timer ONLY to fire ^C at
+   due time (re-check isStillLive + re-fetch session + writable inside the lock; NO markMailboxDelivered). Body delivers
+   via the gated drainer after the ^C ends the turn. Immediate `--interrupt` unchanged. Route-level shutdown-during-lock test.
+3. **Reachable starvation alarm** — (a) `afx status` surfaces per-builder heldCount + escalated + workspace total + remedy
+   hint (reuse overview payload); (b) architect-mailbox escalation notice: held row → non-architect agent past a threshold
+   (multiple of escalationMs) enqueues ONE coalesced (supersede-keyed) gate-delivered notice to spawnedByArchitect; no
+   notice-about-notice; cleared on drain.
+Take-now: B `afx cleanup` dismisses removed agent's held rows; C docs (agent-farm.md:528 stale "typing-aware send buffer",
+Ordering + Not-persisted bullets both trees); D hot-tier swap (restore Spec 987 meta-rule, displace `git add -A` line);
+mailbox-delivery.ts header over-claim reword. File-as-issue: serializer convergence (NOT this PR).
+Invariants (re-verified at re-review): delay never early / never silent-drop; no body write after shutdown decision; no
+double delivery; alarms visibility-only; CLAUDE.md/AGENTS.md byte-identical + both doc trees together.
+
+### 2026-08-06 — RESUMED (maintainer round): finishing the remaining tail from state-snapshot.md
+Picked up mid-round. Previous session had the CODE (changes 1/2/3a/3b, take-now B, over-claim i) implemented + all directive
+tests written; state-snapshot.md enumerated a small remaining tail. Verified each claim against source before acting, then:
+- **Migration meta-test** (`send-architect-identity.test.ts`) bumped 16→17 + asserts `Migration v17`; migration+meta tests green (20/20).
+- **Take-now C (skeleton tree)** — mirrored the codev-tree `--delay` rewrite into `codev-skeleton/.../agent-farm.md`
+  (Not-persisted→durable, Ordering re-trued to eligibility). Re-grepped BOTH trees: no `typing-aware`, no `Not persisted`.
+- **Take-now D (hot swap)** — restored the Spec 987 tier-routing meta-rule to `arch-critical.md`, displaced the `git add -A`
+  line (survives in cold arch.md:104 + CLAUDE/AGENTS Git banner). Net 10 facts; hot-tier tests green (14/14).
+- **Over-claim ii** — arch.md §mailbox item 5 (per-PTY→per-AGENT `agentKey`; disjoint interrupt/escape lock named; oldest-
+  ELIGIBLE drain qualifier). Rewrote stale `delayed-send.ts` header (body persisted at REQUEST time, not fire time; shutdown
+  drops only the ^C nudge; listable/cancellable via inbox). Verified over-claim i (mailbox-delivery.ts header) already done.
+- **Review artifact** — added the Maintainer-Round (2026-08-07) section documenting the 1307 drop-on-restart reversal + the
+  delayed-interrupt reshape as explicit decisions w/ rationale; arch-updates HOT+COLD routing note; #1365 cross-refs.
+- **Filed #1365** (area/tower) — serializer convergence (mailbox write edge → submitToSession), out of scope for this PR.
+- Spawned a background faithfulness/invariant review of the full diff (general-purpose agent) as a second pass before commit.
+- **Pre-commit review verdict:** all 5 invariants held, all changes faithful, suite+typecheck green — found **2 LOW issues, both fixed**:
+  (1) `heldSummaryForWorkspace` counted PRE-DUE rows as stuck "held" (no `not_before` filter) → added the eligibility filter so
+  `afx status`/dashboard badge count deliverable-but-stuck mail only, consistent with every other round-3 surface (+ regression
+  test). Deliberate shared-surface blast radius (dashboard badge) — flagged to architect. (2) delayed-`--interrupt` re-checked
+  session/writable OUTSIDE the lock → moved re-fetch + writable check INSIDE `submitToSession` (directive's literal shape); both
+  existing negative tests still green.
+- **ALL GREEN on the final state:** production build exit 0; full unit suite **4586 pass / 48 skip / 0 fail**;
+  `send-integration.e2e` **7/7**. CLAUDE.md/AGENTS.md byte-identical to origin/main + each other; both doc trees updated together.
+- Filed **#1365** (area/tower) for serializer convergence (out of scope). Review artifact updated (1307 reversal + interrupt
+  reshape as explicit decisions; pre-commit fixes; final counts). Staged explicitly (no `git add -A`); directive file committed;
+  cmap/context working files + state-snapshot.md left UNTRACKED per the ghost-round precedent.
+DONE: committed as 2 logical commits + force-with-lease pushed PR #1330 + notified architect. pr gate stays HELD.
+NO merge / self-approve / status.yaml / porch done — awaiting architect + maintainer re-review.

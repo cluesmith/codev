@@ -520,17 +520,22 @@ free to exit in the meantime. That is the point: a session can schedule a messag
 - **Bounds:** a whole number of seconds, 1–3600. Rejected at the CLI *and* server
   boundaries, because a bad value silently changes *when* (or whether) the message arrives
   rather than failing loudly.
-- **Not persisted.** A pending message is a Tower-side timer. A Tower restart drops it, by
-  design — a delayed message's timing was chosen against a world the restart has already
-  invalidated, so delivering it late could be worse than not delivering it. Re-send by hand
-  if it matters.
-- **Ordering:** a delayed message never overtakes one already queued for that session
-  (including one held by the typing-aware send buffer), and concurrent deliveries to one
-  session do not interleave. Request order across *differing* delays is **not** preserved —
-  `--delay 30` followed by `--delay 5` delivers the 5-second one first, because that is
-  what `--delay` means.
-- **Reporting:** the CLI says "scheduled", not "sent". A message Tower is merely holding
-  has not been delivered, and saying otherwise costs someone a debugging session.
+- **Persisted and durable (Spec 1313).** The message is written to Tower's durable mailbox at
+  request time with a due time (`not_before`), so a pending delayed send now **survives a Tower
+  restart** — the render gate still guarantees it only ever lands on a clean, verified-empty
+  prompt when it comes due. This reverses Spec 1307's original drop-on-restart behaviour (the
+  gate now provides the protection that behaviour wanted). A pre-due delayed send is listable —
+  and cancellable — via `afx inbox` (its row shows a due-time countdown).
+- **Ordering:** a delayed message never overtakes one already queued for that session — its
+  durable row is created at request time, so it sorts after anything already waiting, and the
+  mailbox delivers the oldest *eligible* row first. A pre-due delayed message does **not** block
+  a later message that is already due (delivery is by eligibility, then oldest-first), and
+  concurrent deliveries to one agent do not interleave. Request order across *differing* delays
+  is **not** preserved — `--delay 30` followed by `--delay 5` delivers the 5-second one first,
+  because that is what `--delay` means.
+- **Reporting:** the CLI says "scheduled", not "sent", and returns the mailbox id of the
+  persisted row. A message Tower is holding for later has not been delivered yet, and saying
+  otherwise costs someone a debugging session.
 - **Not combinable with the API's `escape` option** — an ESC bypasses buffering precisely
   so that it interrupts the *current* turn, which a delay contradicts. Refused rather than
   silently dropping one of the two. (`afx send` has no `--escape` flag; use `afx interrupt`.)

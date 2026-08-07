@@ -7,6 +7,7 @@ and keeps the map in sync with arch.md's top-level sections. See codev/resources
 
 ## Critical facts (consult before deciding)
 - Framework files resolve at RUNTIME via the four-tier chain (.codev/ → codev/ → cache → skeleton); they are NOT copied into projects. Don't wire features to "scaffold copies it."
+- Governance docs are two-tier (Spec 987): HOT arch-critical.md/lessons-critical.md are capped + always-injected; COLD arch.md/lessons-learned.md are reference. Route new facts/lessons by tier; never grow a hot file past its cap (demote to cold).
 - Two trees: codev/ = our instance, codev-skeleton/ = the template shipped to adopters. Mirror every framework change in BOTH.
 - CLAUDE.md and AGENTS.md MUST stay byte-identical (same content, two tool ecosystems).
 - Porch is a pure planner: it emits task JSON, Claude Code executes. Never hand-edit status.yaml.
@@ -15,7 +16,6 @@ and keeps the map in sync with arch.md's top-level sections. See codev/resources
 - Server/client isolation (#1189): codev-core (server) and codev-sdk (client) never import each other; both import only codev-types. The sdk is environment-agnostic (no node:*/vscode/direct fetch outside its /node adapter; zero runtime deps) — boundary tests on both sides enforce this in CI.
 - `afx send` is mailbox-first (Spec 1313): persist to global.db first, then deliver only onto a render-gate-verified empty prompt. Any new message writer routes through the mailbox+gate — never write a PTY directly, never force-inject. Response: `delivered` | `held`+reason.
 - Two human gates (spec-approval, plan-approval) plus the pr gate; only humans transition conceived→specified and committed→integrated.
-- Never `git add -A` / `.` / `--all` — stage files explicitly.
 
 ## Map of arch.md (consult when…)
 - Invariants & Constraints — touching state, ports, worktrees, or anything "MUST remain true."

@@ -356,14 +356,20 @@ free to exit in the meantime. That is the point: a session can schedule a messag
 - **Bounds:** a whole number of seconds, 1–3600, rejected at both the CLI and server
   boundaries — a bad value silently changes *when* (or whether) a message arrives rather
   than failing loudly.
-- **Not persisted.** A pending message is a Tower-side timer; a Tower restart drops it by
-  design, since a delayed message's timing was chosen against a world the restart has
-  already invalidated. Re-send by hand if it matters.
-- **Ordering:** a delayed message never overtakes one already queued for that session, and
-  concurrent deliveries to one session do not interleave. Request order across *differing*
-  delays is **not** preserved — `--delay 30` then `--delay 5` delivers the 5-second one
-  first, because that is what `--delay` means.
-- **Reporting:** the CLI says "scheduled", not "sent".
+- **Persisted and durable (Spec 1313).** The message is written to Tower's durable mailbox at
+  request time with a due time (`not_before`), so a pending delayed send **survives a Tower
+  restart** — the render gate still guarantees it only lands on a clean, verified-empty prompt
+  when it comes due (this reverses Spec 1307's original drop-on-restart behaviour; the gate now
+  provides the protection that behaviour wanted). A pre-due delayed send is listable — and
+  cancellable — via `afx inbox`.
+- **Ordering:** a delayed message never overtakes one already queued for that session — its
+  durable row is created at request time, and the mailbox delivers the oldest *eligible* row
+  first, so a pre-due message does not block a later message that is already due, and concurrent
+  deliveries to one agent do not interleave. Request order across *differing* delays is **not**
+  preserved — `--delay 30` then `--delay 5` delivers the 5-second one first, because that is what
+  `--delay` means.
+- **Reporting:** the CLI says "scheduled", not "sent", and returns the mailbox id of the
+  persisted row.
 - `--interrupt` is combinable (the Ctrl+C defers *with* the message); the API's `escape`
   option is not (an ESC bypasses buffering precisely so it interrupts the *current* turn).
 
