@@ -1305,3 +1305,21 @@ requires a formal approving GitHub review; the architect's integration review wa
 message, not a `gh pr review --approve`. I can't self-approve (GitHub blocks author self-approval)
 and won't `--admin` past a required gate. Needs the architect (or a reviewer) to submit an approving
 GitHub review, then I merge with `gh pr merge 1362 --merge`.
+
+### FINAL: branch done + green; merge is a policy wall for Waleed (2026-08-06)
+
+Architect clarified the required-review block is STRUCTURALLY UNSATISFIABLE: the gh seat is
+authenticated as waleedkadous — the same account that authored my commits — and GitHub refuses
+self-approval. Every builder PR here is self-authored, so branch protection's required-review rule
+can't be met without a second account or an owner --admin merge (the same wall #1345 sits at). The
+policy call (admin-merge vs adjusting branch protection) is with Waleed.
+
+Instruction: hold as-is, no further action from me; was right not to reach for --admin.
+
+**Final builder-side state — everything done and green:**
+- All 10 SPIR phases complete; six retirements (R1–R6) executed with approval + mutation-verified
+  replacement guards; scar registry rebuilt + T4; dead tree removed.
+- Four integration-review fixes applied (merge-ownership, gate-scoping, RESEARCH json/md, team/forge drop).
+- Conflict with main resolved (CLAUDE/AGENTS), post-merge suite green: 4549 passed / 48 skipped.
+- pr gate approved (porch). CI fully green: all 6 required checks passing.
+- Merge blocked ONLY by the self-approval branch-protection policy — Waleed's decision. Standing by.
