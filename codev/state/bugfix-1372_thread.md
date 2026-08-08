@@ -197,6 +197,54 @@ across `codev/` and `codev-skeleton/`.
 - *Uncommitted round-2 work not in the PR.* Correct at the time it looked — it was
   mid-flight. Committed now.
 
+### CMAP round 3
+
+| Lane | Verdict |
+|---|---|
+| gemini | APPROVE — no issues |
+| claude | APPROVE — three minor |
+| codex | **REQUEST_CHANGES** — one real defect |
+
+**codex and claude independently found the same thing, and it is the worst one yet.**
+Round 1 I wrapped `new WebSocket()` in a try/catch and wrote a comment saying it covered a
+"malformed URL". It did not: `buildTunnelWsUrl()` (which calls `new URL()`) sat *outside*
+the try, after `setState('connecting')`. So a malformed `serverUrl` threw out of
+`doConnect()` and left the client wedged in `connecting` with no watchdog — **the exact bug
+this PR exists to fix, reintroduced by the fix for it**, behind a comment claiming the
+opposite. Moved inside the guard; mutation-verified test.
+
+claude's two minor points, both taken:
+- ERROR-log suppression coupled two files by a bare string literal → exported
+  `AUTH_RETRY_FAILED_MARKER`. Added the first tower-side tests for the alarm-once contract
+  and the reason-in-log-line behaviour.
+- `sanitizeRemoteDetail` widened to strip U+2028/U+2029 and bidi overrides.
+
+Also removed a raw NUL byte an earlier heredoc had written into the test source; verified
+no raw control bytes remain.
+
+### Running tally — worth reading before the next bugfix
+
+Four real defects found across three rounds. **Three of the four were introduced by this
+fix, not by the original code.** A 115-LOC change to reconnection logic had a far larger
+blast radius than "minimal fix" implies:
+
+| Round | Defect | Whose |
+|---|---|---|
+| 1 | late `auth_ok` resurrects a torn-down socket | mine (watchdog made it reachable) |
+| 2 | three unsanitized relay-text paths into the log | mine (round-1 fix, half-applied) |
+| 2 | auth alarm every 15 min forever | mine (half-open breaker) |
+| 3 | `new URL()` outside the try → same wedge class | mine (round-1 hardening) |
+
+Two patterns, both mine:
+1. **Fixing the instance, not the class.** Rounds 1→2 on sanitization, rounds 1→3 on
+   synchronous-throw guarding. Each time I patched exactly what was pointed at.
+   `lessons-critical.md` already says "grep the whole repo before claiming all fixed" —
+   it applies *within a file*, not just across `codev/` and `codev-skeleton/`.
+2. **Comments asserting coverage the code lacks.** The round-3 defect hid behind my own
+   comment. A comment is a claim; it needs the same verification as an assertion.
+
+The consultation loop caught all four. Solo review would have shipped every one.
+
 ### Deliberately not done
 
 Issue ask #4 (rebuild the client object after K instant failures). `doConnect()` already

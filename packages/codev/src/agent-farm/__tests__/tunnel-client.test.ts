@@ -1014,6 +1014,12 @@ describe('#1372 self-healing', () => {
     expect(timedOut).toBeDefined();
     expect(timedOut!.state).toBe('disconnected');
 
+    // ...and it actually retries. A watchdog that only tore down would trade a
+    // wedged `connecting` for a wedged `disconnected`. consecutiveFailures is 1
+    // here, so the next attempt is due within calculateBackoff(1).
+    await vi.advanceTimersByTimeAsync(calculateBackoff(1, () => 0.999) + 100);
+    expect(client.getState()).toBe('connecting');
+
     for (const s of sockets) s.destroy();
   }, 20000);
 
