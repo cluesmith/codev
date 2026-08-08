@@ -78,7 +78,7 @@ If you encounter **pre-existing flaky tests** (intermittent failures unrelated t
 
 ## Resumption After Crash
 
-If your Claude session crashes mid-flow, Tower's `while true` loop will relaunch you with the same prompt. On startup:
+If your Claude session crashes mid-flow, Tower's launch loop **resumes your conversation** (`--resume` against the session id pinned at spawn) and sends you a short re-orientation nudge — your context is intact; re-check state and continue. Only when the session is unresumable (repeated fast failures) does the loop fall back to relaunching fresh with the same spawn prompt. On a fresh relaunch:
 
 1. Run `porch next {{project_id}}` to learn what phase you're in
 2. If `gate_pending`: read the latest plan file (plan-approval) or `DEFAULT_BRANCH=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||'); git diff "$(git merge-base "${DEFAULT_BRANCH:-main}" HEAD)"` (dev-approval) plus any new GitHub issue comments; check `afx send` queue. Decide whether to revise or just announce you're back.
