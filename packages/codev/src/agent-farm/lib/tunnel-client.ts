@@ -37,7 +37,11 @@ export interface TowerMetadata {
   terminals: Array<{ id: string; workspacePath: string }>;
 }
 
-type StateChangeCallback = (state: TunnelState, previousState: TunnelState) => void;
+type StateChangeCallback = (
+  state: TunnelState,
+  previousState: TunnelState,
+  reason?: string
+) => void;
 
 /** Headers that must be stripped when proxying between HTTP/2 and HTTP/1.1 */
 const HOP_BY_HOP_HEADERS = new Set([
@@ -59,6 +63,29 @@ export const PING_INTERVAL_MS = 30_000;
 
 /** Pong timeout — if no pong received within 10 seconds, declare connection dead */
 export const PONG_TIMEOUT_MS = 10_000;
+
+/**
+ * Connect watchdog (#1372) — maximum time the client may sit in `connecting`.
+ *
+ * Neither the WebSocket handshake nor the auth-response wait has a deadline of
+ * its own: `ws` only enforces one when `handshakeTimeout` is passed, and Node
+ * applies no socket timeout by default. After an uplink flap a half-open path
+ * (stale NAT/conntrack entry) accepts the TCP connection and then goes silent,
+ * so no `error` or `close` event ever fires. The heartbeat can't help — it is
+ * armed only after `connected`. Without this watchdog the client parks in
+ * `connecting` forever and only a brand-new TunnelClient recovers it.
+ */
+export const CONNECT_TIMEOUT_MS = 20_000;
+
+/**
+ * Auth circuit-breaker half-open interval (#1372).
+ *
+ * `invalid_api_key` used to be terminal, which turns any misclassified auth
+ * error during a network blip into a permanent cloud outage. Retrying at a long
+ * interval costs one cheap round-trip every 15 minutes; a genuinely revoked key
+ * just fails again and re-parks.
+ */
+export const AUTH_RETRY_INTERVAL_MS = 15 * 60_000;
 
 /**
  * Calculate reconnection backoff with exponential increase and jitter.
@@ -137,6 +164,7 @@ export class TunnelClient {
   private h2Server: http2.Http2Server | null = null;
   private h2Session: http2.ServerHttp2Session | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private connectTimeout: ReturnType<typeof setTimeout> | null = null;
   private consecutiveFailures = 0;
   private rateLimitCount = 0;
   private destroyed = false;
@@ -162,10 +190,12 @@ export class TunnelClient {
     this.stateListeners.push(callback);
   }
 
-  private setState(newState: TunnelState): void {
+  private setState(newState: TunnelState, reason?: string): void {
     if (this.state === newState) return;
     const prev = this.state;
     this.state = newState;
+    // Leaving `connecting` — the attempt resolved, so disarm its watchdog (#1372)
+    if (newState !== 'connecting') this.clearConnectTimeout();
     if (newState === 'connected') {
       this.connectedAt = Date.now();
       this.consecutiveFailures = 0;
@@ -179,7 +209,7 @@ export class TunnelClient {
     }
     for (const listener of this.stateListeners) {
       try {
-        listener(newState, prev);
+        listener(newState, prev, reason);
       } catch {
         // Ignore listener errors
       }
@@ -204,7 +234,7 @@ export class TunnelClient {
     this.clearReconnectTimer();
     this.stopHeartbeat();
     this.cleanup();
-    this.setState('disconnected');
+    this.setState('disconnected', 'disconnect() called');
   }
 
   /**
@@ -216,7 +246,8 @@ export class TunnelClient {
       this.destroyed = false;
       this.consecutiveFailures = 0;
       this.rateLimitCount = 0;
-      this.setState('disconnected');
+      this.clearReconnectTimer();
+      this.setState('disconnected', 'circuit breaker reset');
     }
   }
 
@@ -280,8 +311,16 @@ export class TunnelClient {
     }
   }
 
+  /**
+   * Schedule the next connect attempt.
+   *
+   * Callers increment `consecutiveFailures` *before* calling this (#1372) — the
+   * backoff curve is indexed by the number of failures so far, so incrementing
+   * afterwards computed every delay one attempt behind.
+   */
   private scheduleReconnect(): void {
     if (this.destroyed || this.state === 'auth_failed') return;
+    this.clearReconnectTimer();
     const delay = calculateBackoff(this.consecutiveFailures);
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
@@ -291,8 +330,16 @@ export class TunnelClient {
     }, delay);
   }
 
+  private clearConnectTimeout(): void {
+    if (this.connectTimeout) {
+      clearTimeout(this.connectTimeout);
+      this.connectTimeout = null;
+    }
+  }
+
   private cleanup(): void {
     this.stopHeartbeat();
+    this.clearConnectTimeout();
 
     if (this.h2Session && !this.h2Session.destroyed) {
       this.h2Session.destroy();
@@ -335,8 +382,8 @@ export class TunnelClient {
         if (!this.pongReceived && ws === this.ws) {
           console.warn('Tunnel heartbeat: pong timeout, reconnecting');
           this.cleanup();
-          this.setState('disconnected');
           this.consecutiveFailures++;
+          this.setState('disconnected', `heartbeat pong timeout after ${PONG_TIMEOUT_MS}ms`);
           this.scheduleReconnect();
         }
       }, PONG_TIMEOUT_MS);
@@ -367,12 +414,27 @@ export class TunnelClient {
   }
 
   private doConnect(): void {
-    this.setState('connecting');
+    this.setState('connecting', 'connect attempt started');
 
     const wsUrl = buildTunnelWsUrl(this.options.serverUrl);
 
     const ws = new WebSocket(wsUrl);
     this.ws = ws;
+
+    // Watchdog (#1372): tear down and reschedule any attempt that neither
+    // completes the handshake nor answers auth within CONNECT_TIMEOUT_MS.
+    // Covers both silent-hang phases — no `error`/`close` event is emitted on
+    // a half-open path, so this is the only thing that unsticks `connecting`.
+    this.clearConnectTimeout();
+    this.connectTimeout = setTimeout(() => {
+      this.connectTimeout = null;
+      if (ws !== this.ws || this.state !== 'connecting') return;
+      console.warn(`Tunnel: connect attempt timed out after ${CONNECT_TIMEOUT_MS}ms, retrying`);
+      this.cleanup();
+      this.consecutiveFailures++;
+      this.setState('disconnected', `connect timeout after ${CONNECT_TIMEOUT_MS}ms`);
+      this.scheduleReconnect();
+    }, CONNECT_TIMEOUT_MS);
 
     ws.on('open', () => {
       this.onWsOpen(ws);
@@ -384,13 +446,14 @@ export class TunnelClient {
       this.handleConnectionError(err);
     });
 
-    ws.on('close', () => {
+    ws.on('close', (code: number, reasonBuf: Buffer) => {
       // Ignore events from stale WebSockets (e.g. after disconnect + reconnect)
       if (ws !== this.ws) return;
       if (this.state === 'connected' || this.state === 'connecting') {
+        const detail = reasonBuf?.length ? `: ${reasonBuf.toString()}` : '';
         this.cleanup();
-        this.setState('disconnected');
         this.consecutiveFailures++;
+        this.setState('disconnected', `websocket closed (code ${code}${detail})`);
         this.scheduleReconnect();
       }
     });
@@ -425,23 +488,27 @@ export class TunnelClient {
 
   private handleAuthError(reason: string): void {
     this.cleanup();
+    this.consecutiveFailures++;
 
     if (reason === 'invalid_api_key') {
-      this.setState('auth_failed');
+      this.setState('auth_failed', 'auth rejected: invalid_api_key');
       console.error(
         "Cloud connection failed: API key is invalid or revoked. Run 'afx tower connect --reauth' to update credentials."
       );
-      // Circuit breaker: don't retry
+      // Circuit breaker: park, but half-open on a long interval (#1372) so a
+      // misclassified auth error during a network blip isn't a permanent outage.
+      this.scheduleAuthRetry();
       return;
     }
 
     // Transient errors: rate_limited, internal_error, etc.
-    this.setState('disconnected');
+    this.setState('disconnected', `auth rejected: ${reason}`);
 
     if (reason === 'rate_limited') {
       this.rateLimitCount++;
       // First rate limit: 60s. Subsequent: 5 minutes (per spec).
       const delay = this.rateLimitCount <= 1 ? 60_000 : 300_000;
+      this.clearReconnectTimer();
       this.reconnectTimer = setTimeout(() => {
         this.reconnectTimer = null;
         if (!this.destroyed) this.doConnect();
@@ -449,15 +516,30 @@ export class TunnelClient {
     } else {
       this.scheduleReconnect();
     }
-    this.consecutiveFailures++;
   }
 
-  private handleConnectionError(_err: Error): void {
+  /**
+   * Half-open the auth circuit breaker (#1372): after AUTH_RETRY_INTERVAL_MS,
+   * leave `auth_failed` and try once more. A genuinely revoked key fails again
+   * and re-parks here, so the cost is one round-trip per interval.
+   */
+  private scheduleAuthRetry(): void {
+    if (this.destroyed) return;
+    this.clearReconnectTimer();
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      if (this.destroyed || this.state !== 'auth_failed') return;
+      this.setState('disconnected', 'auth circuit breaker half-open, retrying');
+      this.doConnect();
+    }, AUTH_RETRY_INTERVAL_MS);
+  }
+
+  private handleConnectionError(err: Error): void {
     this.cleanup();
     if (this.state === 'auth_failed') return; // Don't override circuit breaker
-    this.setState('disconnected');
-    this.scheduleReconnect();
     this.consecutiveFailures++;
+    this.setState('disconnected', `connection error: ${err.message}`);
+    this.scheduleReconnect();
   }
 
   private startH2Server(ws: WebSocket): void {

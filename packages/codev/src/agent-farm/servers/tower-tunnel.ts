@@ -138,8 +138,10 @@ async function connectTunnel(config: CloudConfig): Promise<TunnelClient> {
     localPort: _deps.port,
   });
 
-  client.onStateChange((state: TunnelState, prev: TunnelState) => {
-    _deps!.log('INFO', `Tunnel: ${prev} → ${state}`);
+  client.onStateChange((state: TunnelState, prev: TunnelState, reason?: string) => {
+    // #1372: always log *why* — a bare `prev → state` line made the uplink-flap
+    // wedge undiagnosable from the tower log.
+    _deps!.log('INFO', `Tunnel: ${prev} → ${state}${reason ? ` (${reason})` : ''}`);
     if (state === 'connected') {
       startMetadataRefresh();
     } else if (prev === 'connected') {

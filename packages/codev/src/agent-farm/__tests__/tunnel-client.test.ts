@@ -17,6 +17,8 @@ import {
   TunnelClient,
   PING_INTERVAL_MS,
   PONG_TIMEOUT_MS,
+  CONNECT_TIMEOUT_MS,
+  AUTH_RETRY_INTERVAL_MS,
 } from '../lib/tunnel-client.js';
 import { MockTunnelServer } from './helpers/mock-tunnel-server.js';
 
@@ -947,5 +949,182 @@ describe('tunnel-client integration', () => {
         await stopServer(headerServer);
       }
     });
+  });
+});
+
+// === Regression: #1372 — wedges after sustained uplink flap ===
+
+describe('#1372 self-healing', () => {
+  let blackhole: net.Server | null = null;
+  let client: TunnelClient | null = null;
+
+  afterEach(async () => {
+    client?.disconnect();
+    client = null;
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    if (blackhole) {
+      const srv = blackhole;
+      blackhole = null;
+      await new Promise<void>((r) => srv.close(() => r()));
+    }
+  });
+
+  /**
+   * The wedge itself. A server that accepts the TCP connection and never answers
+   * the HTTP upgrade is what an uplink flap leaves behind (stale NAT/conntrack
+   * entry): no `error`, no `close`, and the heartbeat isn't armed until
+   * `connected`. Without the watchdog the client sits in `connecting` forever and
+   * only a brand-new TunnelClient recovers it.
+   */
+  it('connect watchdog tears down and reschedules a hung `connecting` attempt', async () => {
+    const sockets: net.Socket[] = [];
+    blackhole = net.createServer((sock) => {
+      sockets.push(sock);
+      sock.on('error', () => {});
+    });
+    await new Promise<void>((r) => blackhole!.listen(0, '127.0.0.1', () => r()));
+    const port = (blackhole.address() as net.AddressInfo).port;
+
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+
+    client = new TunnelClient({
+      serverUrl: `http://127.0.0.1:${port}`,
+      apiKey: 'ctk_test',
+      towerId: 't',
+      localPort: 4100,
+    });
+
+    const transitions: Array<{ state: string; reason?: string }> = [];
+    client.onStateChange((state, _prev, reason) => transitions.push({ state, reason }));
+
+    client.connect();
+
+    // Let the TCP connection establish; the upgrade never completes.
+    await vi.advanceTimersByTimeAsync(500);
+    expect(client.getState()).toBe('connecting');
+
+    // Watchdog fires — this is the assertion that fails without the fix.
+    await vi.advanceTimersByTimeAsync(CONNECT_TIMEOUT_MS);
+
+    expect(client.getState()).toBe('disconnected');
+    const timedOut = transitions.find((t) => t.reason?.includes('connect timeout'));
+    expect(timedOut).toBeDefined();
+    expect(timedOut!.state).toBe('disconnected');
+
+    for (const s of sockets) s.destroy();
+  }, 20000);
+
+  /** A watchdog that tore down a healthy connection would be worse than the bug. */
+  it('disarms the connect watchdog once the tunnel reaches `connected`', async () => {
+    const server = new MockTunnelServer({});
+    const port = await server.start();
+    const echo = http.createServer((_req, res) => res.end());
+    const echoPort = await startServer(echo);
+
+    try {
+      client = new TunnelClient({
+        serverUrl: `http://127.0.0.1:${port}`,
+        apiKey: 'ctk_test',
+        towerId: '',
+        localPort: echoPort,
+      });
+
+      client.connect();
+      await waitFor(() => client!.getState() === 'connected');
+
+      expect((client as unknown as { connectTimeout: unknown }).connectTimeout).toBeNull();
+    } finally {
+      client?.disconnect();
+      client = null;
+      await server.stop();
+      await stopServer(echo);
+    }
+  }, 20000);
+
+  /**
+   * `auth_failed` used to be terminal, so a single misclassified auth error
+   * during a blip became a permanent cloud outage. Driven through the private
+   * handler (as the heartbeat tests do) so the clock is fully deterministic.
+   */
+  it('auth circuit breaker half-opens and retries after AUTH_RETRY_INTERVAL_MS', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.useFakeTimers();
+
+    const c = createClient();
+    const reasons: Array<string | undefined> = [];
+    c.onStateChange((_state, _prev, reason) => reasons.push(reason));
+
+    const priv = c as unknown as {
+      handleAuthError: (reason: string) => void;
+      doConnect: () => void;
+    };
+    const doConnect = vi.spyOn(priv, 'doConnect').mockImplementation(() => {});
+
+    priv.handleAuthError('invalid_api_key');
+    expect(c.getState()).toBe('auth_failed');
+
+    // Still parked right up to the interval — this is a long retry, not a flap.
+    vi.advanceTimersByTime(AUTH_RETRY_INTERVAL_MS - 1);
+    expect(c.getState()).toBe('auth_failed');
+    expect(doConnect).not.toHaveBeenCalled();
+
+    // Half-open. Fails without the fix: the old breaker never rearmed.
+    vi.advanceTimersByTime(1);
+    expect(c.getState()).toBe('disconnected');
+    expect(doConnect).toHaveBeenCalledTimes(1);
+    expect(reasons.some((r) => r?.includes('half-open'))).toBe(true);
+
+    // A genuinely revoked key re-parks and rearms, so the cycle is sustainable.
+    priv.handleAuthError('invalid_api_key');
+    expect(c.getState()).toBe('auth_failed');
+    vi.advanceTimersByTime(AUTH_RETRY_INTERVAL_MS);
+    expect(doConnect).toHaveBeenCalledTimes(2);
+
+    c.disconnect();
+  });
+
+  it('state transitions carry a failure reason', async () => {
+    // Nothing is listening on this port — ECONNREFUSED.
+    const probe = net.createServer();
+    await new Promise<void>((r) => probe.listen(0, '127.0.0.1', () => r()));
+    const deadPort = (probe.address() as net.AddressInfo).port;
+    await new Promise<void>((r) => probe.close(() => r()));
+
+    client = new TunnelClient({
+      serverUrl: `http://127.0.0.1:${deadPort}`,
+      apiKey: 'ctk_test',
+      towerId: 't',
+      localPort: 4100,
+    });
+
+    const reasons: Array<string | undefined> = [];
+    client.onStateChange((_state, _prev, reason) => reasons.push(reason));
+
+    client.connect();
+    await waitFor(() => reasons.some((r) => r?.startsWith('connection error')));
+
+    expect(reasons.some((r) => r?.includes('ECONNREFUSED'))).toBe(true);
+  }, 15000);
+
+  /**
+   * The failure counter must be incremented *before* the delay is computed —
+   * indexing the backoff curve one attempt behind retried faster than intended
+   * for the whole life of the flap.
+   */
+  it('increments consecutiveFailures before computing the backoff delay', () => {
+    const c = createClient();
+    const seenAtScheduleTime: number[] = [];
+    (c as unknown as { scheduleReconnect: () => void }).scheduleReconnect = () => {
+      seenAtScheduleTime.push((c as unknown as { consecutiveFailures: number }).consecutiveFailures);
+    };
+
+    (c as unknown as { handleConnectionError: (e: Error) => void })
+      .handleConnectionError(new Error('boom'));
+    (c as unknown as { handleConnectionError: (e: Error) => void })
+      .handleConnectionError(new Error('boom again'));
+
+    expect(seenAtScheduleTime).toEqual([1, 2]);
   });
 });
