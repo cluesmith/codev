@@ -31,3 +31,9 @@ Gate discussion (recorded for the review): blast radius (every Claude builder sp
 - PR #1356 opened with review as body; recorded via porch done --pr.
 - CMAP (2-way, single pass): claude=APPROVE/HIGH, codex=APPROVE/HIGH, none blocking. Claude's substantive minor (no direct worktree-mode loop assertion) fixed in 06e8a9e3; nudge-in-worktree-mode wording, `.builder-*` gitignore idea, and degrade-message wording acknowledged in review (gitignore noted as #1112-adjacent follow-up).
 - Sitting at the pr gate.
+
+## 2026-08-08 — pr gate approved; CI drift fix before merge
+
+- `pr` gate approved by human; porch task is now "merge PR #1356".
+- First merge attempt blocked: required CI checks still running; then Unit Tests FAILED on the PR merge-ref — main had retired the gemini harness (#1338), deleting `GEMINI_HARNESS`, which my harness-gating test imported by name.
+- Fix: merged origin/main into the branch (clean merge), rewrote the gating test to iterate `BUILTIN_HARNESSES` so roster changes can't strand it. Local: package build green, 77/77 tests green in the two affected files. Pushed a327238a; waiting on CI, then merging.
