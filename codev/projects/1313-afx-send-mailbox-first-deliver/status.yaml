@@ -1,0 +1,60 @@
+id: '1313'
+title: afx-send-mailbox-first-deliver
+protocol: spir
+phase: verify
+plan_phases:
+  - id: phase_1
+    title: Mailbox persistence layer
+    status: complete
+  - id: phase_2
+    title: Rendered-empty gate + claude/codex profiles
+    status: complete
+  - id: phase_3
+    title: agy classifier profile (blocking measurement)
+    status: complete
+  - id: phase_4
+    title: Delivery orchestration + write serialization
+    status: complete
+  - id: phase_5
+    title: Fast delivery triggers (submit + quiescence)
+    status: complete
+  - id: phase_6
+    title: Cron rerouting through mailbox + gate
+    status: complete
+  - id: phase_7
+    title: afx inbox CLI + broadcasts + escalation
+    status: complete
+  - id: phase_8
+    title: Dashboard + VSCode held-count indicators
+    status: complete
+  - id: phase_9
+    title: Documentation + skeleton mirror
+    status: complete
+current_plan_phase: null
+gates:
+  spec-approval:
+    status: approved
+    requested_at: '2026-08-01T01:48:15.088Z'
+    approved_at: '2026-08-01T01:52:33.410Z'
+  plan-approval:
+    status: approved
+    requested_at: '2026-08-01T02:17:35.649Z'
+    approved_at: '2026-08-01T02:20:04.744Z'
+  pr:
+    status: approved
+    requested_at: '2026-08-03T07:16:01.923Z'
+    approved_at: '2026-08-06T23:06:51.541Z'
+  verify-approval:
+    status: pending
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-08-01T01:40:05.008Z'
+updated_at: '2026-08-07T02:26:39.836Z'
+force_advanced:
+  phase: phase_7
+  iteration: 3
+  max_iterations: 3
+  rebuttal_file: 1313-phase_7-iter3-rebuttals.md
+  at: '2026-08-03T05:36:15.515Z'
+pr_ready_for_human: false

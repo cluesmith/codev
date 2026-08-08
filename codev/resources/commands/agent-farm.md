@@ -520,17 +520,22 @@ free to exit in the meantime. That is the point: a session can schedule a messag
 - **Bounds:** a whole number of seconds, 1–3600. Rejected at the CLI *and* server
   boundaries, because a bad value silently changes *when* (or whether) the message arrives
   rather than failing loudly.
-- **Not persisted.** A pending message is a Tower-side timer. A Tower restart drops it, by
-  design — a delayed message's timing was chosen against a world the restart has already
-  invalidated, so delivering it late could be worse than not delivering it. Re-send by hand
-  if it matters.
-- **Ordering:** a delayed message never overtakes one already queued for that session
-  (including one held by the typing-aware send buffer), and concurrent deliveries to one
-  session do not interleave. Request order across *differing* delays is **not** preserved —
-  `--delay 30` followed by `--delay 5` delivers the 5-second one first, because that is
-  what `--delay` means.
-- **Reporting:** the CLI says "scheduled", not "sent". A message Tower is merely holding
-  has not been delivered, and saying otherwise costs someone a debugging session.
+- **Persisted and durable (Spec 1313).** The message is written to Tower's durable mailbox at
+  request time with a due time (`not_before`), so a pending delayed send now **survives a Tower
+  restart** — the render gate still guarantees it only ever lands on a clean, verified-empty
+  prompt when it comes due. This reverses Spec 1307's original drop-on-restart behaviour (the
+  gate now provides the protection that behaviour wanted). A pre-due delayed send is listable —
+  and cancellable — via `afx inbox` (its row shows a due-time countdown).
+- **Ordering:** a delayed message never overtakes one already queued for that session — its
+  durable row is created at request time, so it sorts after anything already waiting, and the
+  mailbox delivers the oldest *eligible* row first. A pre-due delayed message does **not** block
+  a later message that is already due (delivery is by eligibility, then oldest-first), and
+  concurrent deliveries to one agent do not interleave. Request order across *differing* delays
+  is **not** preserved — `--delay 30` followed by `--delay 5` delivers the 5-second one first,
+  because that is what `--delay` means.
+- **Reporting:** the CLI says "scheduled", not "sent", and returns the mailbox id of the
+  persisted row. A message Tower is holding for later has not been delivered yet, and saying
+  otherwise costs someone a debugging session.
 - **Not combinable with the API's `escape` option** — an ESC bypasses buffering precisely
   so that it interrupts the *current* turn, which a delay contradicts. Refused rather than
   silently dropping one of the two. (`afx send` has no `--escape` flag; use `afx interrupt`.)
@@ -549,6 +554,18 @@ Sends text to a builder's terminal. Useful for:
 - Interrupting long-running processes
 - Sending instructions or context
 - Communicating across workspaces (e.g., notifying another project's architect)
+
+**Outcome (Spec 1313 — mailbox-first delivery):**
+
+`afx send` reports the real first outcome instead of an unconditional "delivered":
+
+- **delivered** — the message was written to the recipient's prompt after a clean render-gate pass (an empty, render-verified prompt).
+- **held** — the prompt was not clear, so the message is persisted in Tower's durable mailbox and **delivers automatically** the moment the recipient's prompt is clean (after a submit, on output quiescence, or a poll backstop). The response carries a **why-held reason** and a mailbox id:
+  - `busy` — a draft, menu, dialog, or wrapper screen occupies the prompt;
+  - `no-profile` — the target app has no render-gate classifier profile (only `claude`, `codex`, and `agy` are modeled);
+  - `no-live-pty` — the recipient agent has no live terminal right now (it delivers when the agent respawns — rows address agents, not PTYs).
+
+A held message is **never force-injected** onto a busy line: a message body is only ever written to a verified-empty prompt, so it cannot fuse with a half-typed draft, and held rows survive Tower restart/shutdown (no shutdown force-flush). See held mail with `afx inbox`, read one (including its body) with `afx inbox show <id>`, and clear one with `afx inbox dismiss <id>`. `--interrupt` is the explicit, deliberate bypass: it interrupts the agent and writes without holding (unchanged semantics).
 
 **Examples:**
 
@@ -583,6 +600,60 @@ afx send 0042 --file src/api.ts "Review this implementation"
 
 - `afx status` lists all architects alongside builders, with names, terminal IDs, and PIDs where available.
 - Each active builder maintains a free-text narrative log at `codev/state/<builder-id>_thread.md` (relative to its worktree, so `.builders/<id>/codev/state/<id>_thread.md` from the main workspace root). **In-flight discovery**: `ls .builders/*/codev/state/*.md` and `cat .builders/<id>/codev/state/<id>_thread.md`. **Post-merge discovery**: after a builder's PR merges, its thread lands in `codev/state/` on `main`, alongside `codev/reviews/` — list with `ls codev/state/` and read with `cat codev/state/<builder-id>_thread.md` from the main checkout.
+
+---
+
+### afx inbox
+
+List, inspect, and dismiss **held** (undelivered) messages — the human-facing visibility surface for Spec 1313's mailbox. `afx send` persists a message it can't deliver immediately as a held row that delivers automatically once the recipient's prompt is clear; `afx inbox` lets a human see what is still waiting, read a specific message body, and clear rows — without reading Tower logs.
+
+```bash
+afx inbox [options]
+afx inbox show <id> [options]
+afx inbox dismiss <id> [options]
+```
+
+**`afx inbox`** — list every currently-held message in the workspace. Metadata only — message bodies are never shown in the list (or in logs); use `afx inbox show <id>` to read one:
+
+| Column | Meaning |
+|---|---|
+| `ID` | Mailbox row id (pass to `show` / `dismiss`) |
+| `AGE` | How long the message has been held (`5s`, `3m`, `2h`, `1d`) |
+| `REASON` | Why-held: `busy`, `no-profile`, or `no-live-pty`; a trailing `!` marks a row past the escalation age |
+| `FROM → TO` | Sender → recipient agent |
+| `WORKSPACE` | Owning workspace |
+
+**Options:**
+- `-w, --workspace <path>` - Workspace to list (default: current workspace — `afx inbox` is workspace-scoped, not Tower-wide)
+- `-p, --port <port>` - Tower port (default: 4100)
+
+**`afx inbox show <id>`** — display a single message by id, **including its body**. This is the one CLI surface that surfaces a body: the redaction rule keeps bodies out of logs, diagnostics, and telemetry — not out of this local operator view, which travels over the same local Tower connection the message already uses. `show` works on a row of **any** status (held / delivered / superseded / dismissed), so a resolved row stays inspectable by id for audit until it is pruned. Prints the metadata (status, why-held reason, from → to, workspace, timestamps) followed by the raw body.
+
+**Options:**
+- `-p, --port <port>` - Tower port (default: 4100)
+
+**`afx inbox dismiss <id>`** — mark a held message dismissed. A soft, auditable transition (the row is marked `dismissed`, not deleted) that **never delivers** the message. Any workspace operator may dismiss any held row (same local-human trust level as `afx send`).
+
+**Options:**
+- `-p, --port <port>` - Tower port (default: 4100)
+
+**Examples:**
+
+```bash
+# List held messages in the current workspace
+afx inbox
+
+# List held messages for a different workspace
+afx inbox --workspace /path/to/other/workspace
+
+# Show one message including its body (works for any status, held or resolved)
+afx inbox show 5f3c9a2b-1e4d-4c7a-9f21-8b6d0e2a1c33
+
+# Dismiss a held message by id (never delivers it)
+afx inbox dismiss 5f3c9a2b-1e4d-4c7a-9f21-8b6d0e2a1c33
+```
+
+Dismissal is CLI-only; the dashboard and VSCode held-count indicators surface the count but are read-only (Spec 1313 decision 8).
 
 ---
 
@@ -1038,6 +1109,24 @@ into each builder during spawn and `afx setup`. The builder receives a managed
 regular-file snapshot rather than a write-through symlink, so builder edits
 cannot change the main workspace's personal config. Running `afx setup` again
 refreshes the snapshot from the main workspace.
+
+### Mailbox retention and escalation
+
+`afx send`'s mailbox (Spec 1313) has two Tower-global knobs under a `mailbox` key:
+
+```json
+{
+  "mailbox": {
+    "retentionDays": 30,
+    "escalationSeconds": 60
+  }
+}
+```
+
+- `mailbox.retentionDays` (default `30`) — how long a **terminal** mailbox row (delivered, superseded, or dismissed) is retained before Tower prunes it. **Held** rows are never pruned — they persist until they deliver, are superseded, or are dismissed via `afx inbox`.
+- `mailbox.escalationSeconds` (default `60`) — how long a row may stay **held** before it crosses the escalation age. At that point the drainer marks the row `escalated`, emits the escalation broadcast, and moves the dashboard / VSCode held-count indicator into its attention state. This is **visibility only** — crossing the escalation age never triggers delivery (there is no force path; a held message still delivers only onto a verified-empty prompt).
+
+Both are Tower-global (they apply to the whole Tower, not per-project) and optional — omit them to use the defaults above.
 
 ### Language-Agnostic Porch Checks
 

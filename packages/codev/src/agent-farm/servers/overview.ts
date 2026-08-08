@@ -33,6 +33,7 @@ import type {
 } from '@cluesmith/codev-types';
 import Database from 'better-sqlite3';
 import { getGlobalDbPath } from '../db/index.js';
+import { heldSummaryForWorkspace } from '../db/mailbox.js';
 import { normalizeWorkspacePath } from './tower-utils.js';
 
 // =============================================================================
@@ -815,26 +816,43 @@ export class OverviewCache {
     // Spec 823: dropped the `WHERE issue_number IS NOT NULL` filter so soft-mode
     // builders (issue_number=null) also enrich their spawnedByArchitect. Each
     // field is applied conditionally on per-row non-nullness.
+    // Spec 1313 Phase 7: workspace held-mail summary, folded into the overview so the
+    // dashboard/VSCode indicator renders count + attention state straight off
+    // /api/overview. Defaults (0 / false) survive a missing or unreadable DB.
+    let heldCount = 0;
+    let mailboxEscalated = false;
     try {
       const dbPath = getGlobalDbPath();
       if (fs.existsSync(dbPath)) {
+        const normWs = normalizeWorkspacePath(workspaceRoot);
         const db = new Database(dbPath, { readonly: true });
         try {
           const rows = db.prepare(
             'SELECT worktree, issue_number, spawned_by_architect FROM builders WHERE workspace_path = ?',
-          ).all(normalizeWorkspacePath(workspaceRoot)) as Array<{ worktree: string; issue_number: string | null; spawned_by_architect: string | null }>;
+          ).all(normWs) as Array<{ worktree: string; issue_number: string | null; spawned_by_architect: string | null }>;
           for (const row of rows) {
             const builder = builders.find(b => b.worktreePath === row.worktree);
             if (!builder) continue;
             if (row.issue_number != null) builder.issueId = String(row.issue_number);
             if (row.spawned_by_architect != null) builder.spawnedByArchitect = row.spawned_by_architect;
           }
+          // Counts + escalation flag only — never bodies (redaction rule). Per-agent
+          // held counts attach to the matching builder by roleId (the same
+          // case-normalized key handleOverview uses to map the terminal registry).
+          const held = heldSummaryForWorkspace(db, normWs);
+          heldCount = held.total;
+          mailboxEscalated = held.escalated;
+          for (const agentCount of held.byAgent) {
+            const builder = builders.find(b => b.roleId === agentCount.toAgent.toLowerCase());
+            if (builder) builder.heldCount = agentCount.count;
+          }
         } finally {
           db.close();
         }
       }
     } catch {
-      // DB not available — keep regex-parsed issueId and null spawnedByArchitect
+      // DB not available — keep regex-parsed issueId, null spawnedByArchitect, and
+      // the held-count defaults (0 / false).
     }
 
     const activeBuilderIssues = new Set(
@@ -963,7 +981,7 @@ export class OverviewCache {
     // has no view of the live terminal sessions. `handleOverview` (tower-routes.ts)
     // injects the real architect list via `liveArchitects` before serialization,
     // mirroring how it enriches `lastDataAt`.
-    const result: OverviewData = { builders, pendingPRs, backlog, recentlyClosed, architects: [] };
+    const result: OverviewData = { builders, pendingPRs, backlog, recentlyClosed, architects: [], heldCount, mailboxEscalated };
     if (currentUser) {
       result.currentUser = currentUser;
     }

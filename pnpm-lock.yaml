@@ -205,6 +205,9 @@ importers:
       '@openai/codex-sdk':
         specifier: ^0.146.0
         version: 0.146.0
+      '@xterm/headless':
+        specifier: ^6.0.0
+        version: 6.0.0
       better-sqlite3:
         specifier: ^12.10.0
         version: 12.10.0
@@ -1658,6 +1661,9 @@ packages:
     resolution: {integrity: sha512-xCnfMBTI+/HKPdRnSOHaJDRqEpq2Ugy8LEj9GiY4J3zJObo3joylIFaMvzBwbYRg8zLtkO0KQaStCeSfoaI2/w==}
     peerDependencies:
       '@xterm/xterm': ^5.0.0
+
+  '@xterm/headless@6.0.0':
+    resolution: {integrity: sha512-5Yj1QINYCyzrZtf8OFIHi47iQtI+0qYFPHmouEfG8dHNxbZ9Tb9YGSuLcsEwj9Z+OL75GJqPyJbyoFer80a2Hw==}
 
   '@xterm/xterm@5.5.0':
     resolution: {integrity: sha512-hqJHYaQb5OptNunnyAnkHyM8aCjZ1MEIDTQu1iIbbTD/xops91NB5yq1ZK/dC2JDbVWtF23zUtl9JE2NqwT87A==}
@@ -4921,7 +4927,7 @@ snapshots:
       obug: 2.1.1
       std-env: 4.0.0
       tinyrainbow: 3.1.0
-      vitest: 4.1.4(@types/node@22.19.17)(@vitest/coverage-v8@4.1.4)(jsdom@28.1.0)(vite@6.4.2(@types/node@22.19.17)(tsx@4.21.0))
+      vitest: 4.1.4(@types/node@22.19.17)(@vitest/coverage-v8@4.1.4)(jsdom@26.1.0)(vite@6.4.2(@types/node@22.19.17)(tsx@4.21.0))
 
   '@vitest/expect@4.1.4':
     dependencies:
@@ -5001,6 +5007,8 @@ snapshots:
   '@xterm/addon-webgl@0.18.0(@xterm/xterm@5.5.0)':
     dependencies:
       '@xterm/xterm': 5.5.0
+
+  '@xterm/headless@6.0.0': {}
 
   '@xterm/xterm@5.5.0': {}
 

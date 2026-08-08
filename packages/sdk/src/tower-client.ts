@@ -725,7 +725,9 @@ export class TowerClient {
        * Tower-side rather than a sleeping client because the caller may be the
        * session being written to: `/arch-save` sends its own `/clear` and then a
        * delayed `/arch-init`, and the process issuing them does not survive the
-       * clear. Not persisted; a Tower restart drops pending sends.
+       * clear. Spec 1313 round 3: the row is PERSISTED at request time with a
+       * `not_before` due time, so the delay is durable across a Tower restart and
+       * the pending send is listable/cancellable via `afx inbox`.
        */
       deliverAfter?: number;
     },
@@ -737,9 +739,34 @@ export class TowerClient {
     /** Tower buffered this because the user was typing (Spec 403). */
     deferred?: boolean;
     error?: string;
+    /**
+     * Spec 1313 mailbox-first delivery. `delivered` = written to the PTY now;
+     * `held` = persisted to the durable mailbox and awaiting a clean prompt
+     * (`reason` says why: `busy` | `no-profile` | `no-live-pty`), with `mailboxId`
+     * the row id. Older Tower binaries omit all four — a bare `{ ok, resolvedTo }`
+     * response then reads as delivered (`held` undefined), preserving behavior.
+     */
+    delivered?: boolean;
+    held?: boolean;
+    reason?: string;
+    mailboxId?: string;
+    /**
+     * Spec 1313 round 3: due time (epoch ms) of a scheduled (`deliverAfter`) send. Present
+     * only when `scheduled` — the row is persisted at request time and delivers not before
+     * this instant. Omitted by older Tower binaries.
+     */
+    notBefore?: number;
   }> {
     const result = await this.request<{
-      ok: boolean; resolvedTo: string; scheduled?: boolean; deferred?: boolean;
+      ok: boolean;
+      resolvedTo: string;
+      scheduled?: boolean;
+      deferred?: boolean;
+      delivered?: boolean;
+      held?: boolean;
+      reason?: string | null;
+      mailboxId?: string;
+      notBefore?: number;
     }>(
       '/api/send',
       {
@@ -770,6 +797,11 @@ export class TowerClient {
       resolvedTo: result.data!.resolvedTo,
       scheduled: result.data!.scheduled === true,
       deferred: result.data!.deferred === true,
+      delivered: result.data!.delivered,
+      held: result.data!.held,
+      reason: result.data!.reason ?? undefined,
+      mailboxId: result.data!.mailboxId,
+      notBefore: result.data!.notBefore,
     };
   }
 

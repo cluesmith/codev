@@ -1,0 +1,9 @@
+[2J[H[1mSelect model[0m
+[2mSwitch the model for this session. Enter to confirm · Esc to cancel[22m
+
+❯ 1. Default (recommended) — Opus 4.8
+  2. Opus 4.8
+  3. Sonnet 4.5
+  4. Haiku 4.5
+
+[2m  ↑/↓ to navigate[22m

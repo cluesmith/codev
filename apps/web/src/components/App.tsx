@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback, type ReactNode } from 'react'
 import { useBuilderStatus } from '../hooks/useBuilderStatus.js';
 import { useTabs, type Tab } from '../hooks/useTabs.js';
 import { useMediaQuery } from '../hooks/useMediaQuery.js';
+import { useOverview } from '../hooks/useOverview.js';
 import { MOBILE_BREAKPOINT } from '../lib/constants.js';
 import { getTerminalWsPath, createFileTab, removeArchitect as removeArchitectApi } from '../lib/api.js';
 import { readActiveArchitect, writeActiveArchitect } from '../lib/architectPersistence.js';
@@ -10,6 +11,7 @@ import { TabBar } from './TabBar.js';
 import { ArchitectTabStrip } from './ArchitectTabStrip.js';
 import { Terminal } from './Terminal.js';
 import { WorkView } from './WorkView.js';
+import { HeldCountBadge } from './HeldCountBadge.js';
 import { MobileLayout } from './MobileLayout.js';
 import { FileViewer } from './FileViewer.js';
 import { AnalyticsView } from './AnalyticsView.js';
@@ -31,6 +33,10 @@ export function buildOverviewTitle(hostname?: string, workspaceName?: string): s
 
 export function App() {
   const { state, refresh } = useBuilderStatus();
+  // Spec 1313 Phase 8: workspace held-mail count for the header indicator. useOverview
+  // is a self-contained SSE hook (shared EventSource) that refetches on overview-changed,
+  // so heldCount / mailboxEscalated stay live without extra wiring.
+  const { data: overview } = useOverview();
   const { tabs, activeTab, activeTabId, selectTab } = useTabs(state);
   const isMobile = useMediaQuery(`(max-width: ${MOBILE_BREAKPOINT}px)`);
   const [collapsedPane, setCollapsedPane] = useState<'left' | 'right' | null>(null);
@@ -351,6 +357,7 @@ export function App() {
           {overviewTitle}
         </h1>
         <div className="header-controls">
+          <HeldCountBadge count={overview?.heldCount ?? 0} escalated={overview?.mailboxEscalated ?? false} />
           {state?.version && <span className="header-version">v{state.version}</span>}
         </div>
       </header>

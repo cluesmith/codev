@@ -120,5 +120,6 @@ export interface DbTerminalSession {
   shellper_start_time: number | null;
   label: string | null;
   cwd: string | null;
+  command: string | null;
   created_at: string;
 }
