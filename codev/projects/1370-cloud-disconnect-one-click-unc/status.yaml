@@ -1,0 +1,14 @@
+id: '1370'
+title: cloud-disconnect-one-click-unc
+protocol: air
+phase: implement
+plan_phases: []
+current_plan_phase: null
+gates:
+  pr:
+    status: pending
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-08-08T22:19:17.153Z'
+updated_at: '2026-08-08T22:19:17.154Z'
