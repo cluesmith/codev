@@ -88,6 +88,13 @@ export const CONNECT_TIMEOUT_MS = 20_000;
 export const AUTH_RETRY_INTERVAL_MS = 15 * 60_000;
 
 /**
+ * Marks an `auth_failed` transition as a *repeat* park after a half-open retry
+ * (#1372). `tower-tunnel.ts` keys its "log the alarm once" rule off this, so it
+ * is a shared contract, not a free-form string — do not inline the literal.
+ */
+export const AUTH_RETRY_FAILED_MARKER = 'half-open retry failed';
+
+/**
  * Calculate reconnection backoff with exponential increase and jitter.
  * Exported for unit testing.
  *
@@ -153,7 +160,9 @@ export function filterHopByHopHeaders(
  */
 export function sanitizeRemoteDetail(text: string): string {
   // eslint-disable-next-line no-control-regex
-  const stripped = text.replace(/[\u0000-\u001f\u007f]/g, ' ').trim();
+  const stripped = text
+    .replace(/[\u0000-\u001f\u007f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g, ' ')
+    .trim();
   return stripped.length > 120 ? `${stripped.slice(0, 120)}…` : stripped;
 }
 
@@ -441,14 +450,13 @@ export class TunnelClient {
   private doConnect(): void {
     this.setState('connecting', 'connect attempt started');
 
-    const wsUrl = buildTunnelWsUrl(this.options.serverUrl);
-
-    // A synchronous throw here (malformed URL, exhausted fds) would otherwise
-    // leave the client in `connecting` with no watchdog armed — the very wedge
-    // this fix exists to prevent.
+    // A synchronous throw anywhere in here — `new URL()` on a malformed
+    // serverUrl, or the WebSocket constructor — would otherwise leave the
+    // client in `connecting` with no watchdog armed, the very wedge this fix
+    // exists to prevent. URL construction must stay inside the guard.
     let ws: WebSocket;
     try {
-      ws = new WebSocket(wsUrl);
+      ws = new WebSocket(buildTunnelWsUrl(this.options.serverUrl));
     } catch (err) {
       this.consecutiveFailures++;
       this.setState('disconnected', `websocket construction failed: ${(err as Error).message}`);
@@ -546,7 +554,9 @@ export class TunnelClient {
       const repeat = this.authFailureLogged;
       this.setState(
         'auth_failed',
-        repeat ? 'auth rejected: invalid_api_key (half-open retry failed)' : 'auth rejected: invalid_api_key'
+        repeat
+          ? `auth rejected: invalid_api_key (${AUTH_RETRY_FAILED_MARKER})`
+          : 'auth rejected: invalid_api_key'
       );
       if (!repeat) {
         this.authFailureLogged = true;

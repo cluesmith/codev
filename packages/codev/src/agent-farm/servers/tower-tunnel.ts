@@ -10,7 +10,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
 import os from 'node:os';
-import { TunnelClient, type TunnelState, type TowerMetadata } from '../lib/tunnel-client.js';
+import {
+  TunnelClient,
+  AUTH_RETRY_FAILED_MARKER,
+  type TunnelState,
+  type TowerMetadata,
+} from '../lib/tunnel-client.js';
 import {
   readCloudConfig,
   writeCloudConfig,
@@ -149,7 +154,7 @@ async function connectTunnel(config: CloudConfig): Promise<TunnelClient> {
     }
     // Only the first park raises the alarm — the breaker half-opens every 15
     // minutes (#1372), and a revoked key would otherwise log ERROR forever.
-    if (state === 'auth_failed' && !reason?.includes('half-open retry failed')) {
+    if (state === 'auth_failed' && !reason?.includes(AUTH_RETRY_FAILED_MARKER)) {
       _deps!.log('ERROR', 'Cloud connection failed: API key is invalid or revoked. Run \'afx tower connect --reauth\' to update credentials.');
     }
   });

@@ -1131,7 +1131,11 @@ describe('#1372 self-healing', () => {
     expect(sanitizeRemoteDetail('going away\nTunnel: connected → forged')).toBe(
       'going away Tunnel: connected → forged',
     );
-    expect(sanitizeRemoteDetail('a\r\nb\tc d')).toBe('a  b c d');
+    expect(sanitizeRemoteDetail('a\r\nb\tc\u0000d')).toBe('a  b c d');
+    // U+2028/U+2029 act as line terminators in many log and JSON consumers,
+    // and bidi overrides can visually reorder a log line (Trojan-Source style).
+    expect(sanitizeRemoteDetail('a\u2028b\u2029c')).toBe('a b c');
+    expect(sanitizeRemoteDetail('a\u202eb\u2066c')).toBe('a b c');
     expect(sanitizeRemoteDetail('a'.repeat(200))).toHaveLength(121); // 120 + ellipsis
     expect(sanitizeRemoteDetail('  tidy  ')).toBe('tidy');
   });
@@ -1238,6 +1242,38 @@ describe('#1372 self-healing', () => {
     // Counter was reset, so this is a first-attempt backoff — well under the
     // 15-minute half-open interval it replaced.
     vi.advanceTimersByTime(calculateBackoff(0, () => 0.999) + 1);
+    expect(doConnect).toHaveBeenCalled();
+
+    c.disconnect();
+  });
+
+  /**
+   * A malformed serverUrl throws inside `new URL()` — after the state is
+   * already `connecting`. Unguarded that recreates the exact wedge this PR
+   * closes, with no watchdog armed. (Raised by codex in CMAP round 3.)
+   */
+  it('does not wedge in `connecting` when the server URL is malformed', () => {
+    vi.useFakeTimers();
+
+    const c = new TunnelClient({
+      serverUrl: 'not a url',
+      apiKey: 'ctk_test',
+      towerId: 't',
+      localPort: 4100,
+    });
+    const reasons: Array<string | undefined> = [];
+    c.onStateChange((_s, _p, reason) => reasons.push(reason));
+
+    expect(() => c.connect()).not.toThrow();
+    expect(c.getState()).toBe('disconnected');
+    expect(reasons.some((r) => r?.includes('websocket construction failed'))).toBe(true);
+
+    // And it keeps retrying rather than parking silently.
+    const doConnect = vi.spyOn(
+      c as unknown as { doConnect: () => void },
+      'doConnect',
+    ).mockImplementation(() => {});
+    vi.advanceTimersByTime(calculateBackoff(1, () => 0.999) + 1);
     expect(doConnect).toHaveBeenCalled();
 
     c.disconnect();
