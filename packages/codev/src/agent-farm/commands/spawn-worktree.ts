@@ -835,6 +835,11 @@ function launchLoopTail(onCleanExit?: string): string {
  * The two commands differ only on the resume path. Every other variant passes
  * the same string twice and gets the historical single-command loop back,
  * byte for byte.
+ *
+ * Issue #1233: this loop now serves only harnesses WITHOUT script-form session
+ * support (codex/gemini/opencode/custom) — their generated script is unchanged,
+ * byte for byte. Claude builders get `buildSessionLaunchLoop` instead, which
+ * resumes the conversation on crash restarts rather than replaying the prompt.
  */
 export function buildLaunchLoop(initial: string, fresh: string): string {
   if (initial === fresh) {
@@ -857,6 +862,158 @@ codev_launch=codev_launch_initial
 while true; do
   "$codev_launch"
 ${launchLoopTail('codev_launch=codev_launch_fresh')}
+done
+`;
+}
+
+/**
+ * The prompt a crash-resume invocation carries (Issue #1233). Without it,
+ * `--resume` restores the conversation but leaves the agent idle at the input
+ * prompt — for an unattended builder that converts amnesia into a stall. The
+ * nudge is a new user message in the restored conversation, so the builder
+ * re-orients itself and continues autonomously. Deliberately free of
+ * single quotes: it is embedded single-quoted in the generated script.
+ */
+export const CRASH_RESUME_NUDGE =
+  'You were automatically restarted after a crash. Your prior conversation context has been restored. '
+  + 'Re-orient yourself (in strict mode run porch next for your project; check queued afx messages) '
+  + 'and continue your work from where you left off.';
+
+/** The shell expression the session-aware loop's commands use to reference the current session id. */
+export const SESSION_ID_EXPR = '"$codev_session_id"';
+
+/**
+ * Script-form session support for a harness, or undefined when the harness
+ * cannot pin/resume a conversation from a generated bash script. Both fragment
+ * forms are required — the session-aware loop needs to pin AND resume.
+ */
+export function scriptSessionForms(harness: HarnessProvider): {
+  newSessionScriptFragment(idExpr: string): string;
+  resumeScriptFragment(idExpr: string): string;
+} | undefined {
+  const session = harness.session;
+  if (!session?.newSessionScriptFragment || !session?.resumeScriptFragment) return undefined;
+  return {
+    newSessionScriptFragment: session.newSessionScriptFragment.bind(session),
+    resumeScriptFragment: session.resumeScriptFragment.bind(session),
+  };
+}
+
+/**
+ * Build the session-aware launch loop (Issue #1233) — the builder-side
+ * expression of the architect resume pattern (#832/#1264): the wrapper pins a
+ * conversation id at entry and *resumes* it after an unnatural exit, instead of
+ * replaying the spawn prompt into a fresh session (the amnesia path this issue
+ * removes). A jetsam SIGKILL now costs 2 seconds, not the builder's memory.
+ *
+ * State machine, expressed in generated bash because builder liveness is
+ * deliberately decoupled from Tower (persistent PTYs survive Tower restarts,
+ * so no Node process is guaranteed to be around when the crash fires):
+ *
+ * - Entry: `initial` if given (the recover path's discovered-id resume), else
+ *   the pinned fresh invocation (`--session-id` + role + prompt).
+ * - Unnatural exit → resume `$codev_session_id` with a short nudge prompt, so
+ *   the restored builder re-orients and continues rather than idling.
+ * - Clean exit → Enter-gated relaunch stays FRESH per #1267/#1264 ("a clean
+ *   exit ends that conversation"), but pinned to a newly minted id so the new
+ *   conversation is crash-protected too. Sticky and one-way, like #1267.
+ * - Unresumable-session degrade (#1145/#1149 lesson): `--resume` against a
+ *   gone/corrupt/held session dies fast; three consecutive fast failures
+ *   (< CODEV_LAUNCH_FAST_FAIL_SECS, default 15) fall back to a prompt-replay
+ *   fresh launch under a new id — today's behavior, crash-protected forward.
+ *   A slow failure resets the counter.
+ * - Id minting at runtime uses uuidgen (lowercased) or /proc fallback; when
+ *   neither exists the relaunch degrades to the UNPINNED fresh invocation —
+ *   exactly the historical command — and crash restarts stay unpinned rather
+ *   than resuming a stale id.
+ *
+ * `.builder-session-id` always holds the current id (removed while unpinned).
+ * The bash script is the sole writer: after a re-mint it is the only party
+ * that knows the current id, so Node- or DB-side copies would go stale
+ * (consumption by recover/--resume is Issue #1112's scope).
+ */
+export function buildSessionLaunchLoop(opts: {
+  /** Initial value of $codev_session_id: spawn-minted, or the discovered id on the recover path. */
+  sessionId: string;
+  /** Entry command override (recover path). Defaults to the pinned fresh invocation. */
+  initial?: string;
+  /** Fresh conversation pinned to $codev_session_id: role + pin + prompt. */
+  pinnedFresh: string;
+  /** The historical unpinned fresh invocation — degrade target when no uuid can be minted. */
+  unpinnedFresh: string;
+  /** Resume $codev_session_id with the crash-resume nudge. */
+  resume: string;
+}): string {
+  const entry = opts.initial ?? opts.pinnedFresh;
+  return `codev_session_id='${shellEscapeSingleQuote(opts.sessionId)}'
+codev_fast_fail_secs="\${CODEV_LAUNCH_FAST_FAIL_SECS:-15}"
+codev_mint_session_id() {
+  if command -v uuidgen >/dev/null 2>&1; then
+    uuidgen | tr '[:upper:]' '[:lower:]'
+  elif [ -r /proc/sys/kernel/random/uuid ]; then
+    cat /proc/sys/kernel/random/uuid
+  fi
+}
+codev_persist_session_id() {
+  printf '%s\\n' "$codev_session_id" > '.builder-session-id'
+}
+codev_launch_entry() {
+  ${entry}
+}
+codev_launch_pinned() {
+  ${opts.pinnedFresh}
+}
+codev_launch_unpinned() {
+  ${opts.unpinnedFresh}
+}
+codev_launch_resume() {
+  ${opts.resume}
+}
+codev_relaunch_fresh() {
+  codev_new_session_id="$(codev_mint_session_id)"
+  if [ -n "$codev_new_session_id" ]; then
+    codev_session_id="$codev_new_session_id"
+    codev_persist_session_id
+    codev_launch=codev_launch_pinned
+  else
+    codev_session_id=''
+    rm -f '.builder-session-id'
+    codev_launch=codev_launch_unpinned
+  fi
+}
+codev_launch=codev_launch_entry
+codev_fast_fails=0
+codev_persist_session_id
+while true; do
+  codev_started=$SECONDS
+  "$codev_launch"
+  status=$?
+  codev_elapsed=$(( SECONDS - codev_started ))
+  if [ "$status" -eq 0 ]; then
+    clear
+    echo "Agent exited at your request. Press Enter to relaunch fresh, or close this terminal."
+    read -r || exit 0
+    codev_relaunch_fresh
+    codev_fast_fails=0
+    continue
+  fi
+  if [ "$codev_elapsed" -lt "$codev_fast_fail_secs" ]; then
+    codev_fast_fails=$(( codev_fast_fails + 1 ))
+  else
+    codev_fast_fails=0
+  fi
+  echo ""
+  if [ "$codev_fast_fails" -ge 3 ]; then
+    echo "Agent failing immediately (code $status). Starting a fresh conversation with the original prompt in 2 seconds... (Ctrl+C to quit)"
+    codev_relaunch_fresh
+    codev_fast_fails=0
+  elif [ "$codev_launch" = codev_launch_unpinned ]; then
+    echo "Agent exited (code $status). Restarting in 2 seconds... (Ctrl+C to quit)"
+  else
+    echo "Agent exited (code $status). Resuming the conversation in 2 seconds... (Ctrl+C to quit)"
+    codev_launch=codev_launch_resume
+  fi
+  sleep 2
 done
 `;
 }
@@ -911,7 +1068,7 @@ export async function startBuilderSession(
 
   const harness = getBuilderHarness(config.workspaceRoot);
   let envBlock = '';
-  let freshCommand: string;
+  let roleFragment = '';
 
   if (roleContent) {
     // Write role to a file for harness-based injection
@@ -922,6 +1079,7 @@ export async function startBuilderSession(
     logger.info(`Loaded role (${roleSource})`);
 
     const { fragment, env } = harness.buildScriptRoleInjection(roleWithPort, roleFile);
+    roleFragment = fragment;
     const envExports = Object.entries(env)
       .map(([k, v]) => `export ${k}='${shellEscapeSingleQuote(v)}'`)
       .join('\n');
@@ -930,27 +1088,48 @@ export async function startBuilderSession(
     // Write any harness-specific worktree files (e.g., opencode.json for OpenCode,
     // the write-guard hook for Claude — Issue #1018)
     installHarnessWorktreeFiles(harness, roleWithPort, roleFile, worktreePath);
-
-    freshCommand = `${baseCmd} ${fragment} "$(cat '${promptFile}')"`;
   } else {
     // Install harness worktree files even without a role, so the write-guard
     // (Issue #1018) is deterministic across all Claude spawn modes.
     installHarnessWorktreeFiles(harness, '', '', worktreePath);
-
-    freshCommand = `${baseCmd} "$(cat '${promptFile}')"`;
   }
 
-  let initialCommand = freshCommand;
+  // With a role, the fragment is appended even when empty (gemini injects via
+  // env only, fragment '') — preserving the historical command text exactly,
+  // double space included, so session-less scripts stay byte-identical.
+  const withRole = roleContent ? `${baseCmd} ${roleFragment}` : baseCmd;
+  const promptArg = `"$(cat '${promptFile}')"`;
+  const freshCommand = `${withRole} ${promptArg}`;
+
   if (resume) {
-    // Resume path: enter on the prior conversation via the harness-provided,
-    // shell-escaped resume fragment.
     logger.info(`Resuming session ${resume.sessionId.slice(0, 8)}…`);
-    initialCommand = `${baseCmd} ${resume.scriptFragment}`;
+  }
+
+  const sessionForms = scriptSessionForms(harness);
+  let loop: string;
+  if (sessionForms) {
+    // Issue #1233: session-aware loop — crash restarts resume the conversation
+    // instead of replaying the spawn prompt into a fresh (amnesiac) session.
+    // Fresh spawns mint a new id here (never reuse a persisted one — #1224);
+    // the recover path enters on the harness-discovered id.
+    const sessionId = resume ? resume.sessionId : randomUUID();
+    loop = buildSessionLaunchLoop({
+      sessionId,
+      initial: resume ? `${baseCmd} ${resume.scriptFragment}` : undefined,
+      pinnedFresh: `${withRole} ${sessionForms.newSessionScriptFragment(SESSION_ID_EXPR)} ${promptArg}`,
+      unpinnedFresh: freshCommand,
+      resume: `${baseCmd} ${sessionForms.resumeScriptFragment(SESSION_ID_EXPR)} '${shellEscapeSingleQuote(CRASH_RESUME_NUDGE)}'`,
+    });
+  } else {
+    // Session-less harness (codex/gemini/opencode/custom): historical loop,
+    // byte for byte. Resume entry via the pre-escaped harness fragment.
+    const initialCommand = resume ? `${baseCmd} ${resume.scriptFragment}` : freshCommand;
+    loop = buildLaunchLoop(initialCommand, freshCommand);
   }
 
   const scriptContent = `#!/bin/bash
 cd "${worktreePath}"
-${envBlock}${buildLaunchLoop(initialCommand, freshCommand)}`;
+${envBlock}${loop}`;
 
   writeFileSync(scriptPath, scriptContent);
   chmodSync(scriptPath, '755');
@@ -998,35 +1177,48 @@ export function buildWorktreeLaunchScript(
   role: { content: string; source: string } | null,
   workspaceRoot?: string,
 ): string {
+  const harness = getBuilderHarness(workspaceRoot);
+  let envBlock = '';
+  let command = baseCmd;
+
   if (role) {
     const roleFile = resolve(worktreePath, '.builder-role.md');
     const roleWithPort = role.content.replace(/\{PORT\}/g, String(DEFAULT_TOWER_PORT));
     writeFileSync(roleFile, roleWithPort);
     logger.info(`Loaded role (${role.source})`);
 
-    // Resolve harness provider for role injection
-    const harness = getBuilderHarness(workspaceRoot);
     const { fragment, env } = harness.buildScriptRoleInjection(roleWithPort, roleFile);
     const envExports = Object.entries(env)
       .map(([k, v]) => `export ${k}='${shellEscapeSingleQuote(v)}'`)
       .join('\n');
-    const envBlock = envExports ? `${envExports}\n` : '';
+    envBlock = envExports ? `${envExports}\n` : '';
 
     // Write any harness-specific worktree files (e.g., opencode.json for OpenCode,
     // the write-guard hook for Claude — Issue #1018)
     installHarnessWorktreeFiles(harness, roleWithPort, roleFile, worktreePath);
 
-    // Worktree mode never resumes, so entry and clean-exit relaunch are the
-    // same invocation — `buildLaunchLoop` collapses to the single-command loop.
-    const command = `${baseCmd} ${fragment}`;
-    return `#!/bin/bash
-cd "${worktreePath}"
-${envBlock}${buildLaunchLoop(command, command)}`;
+    command = `${baseCmd} ${fragment}`;
+  } else {
+    // Install harness worktree files even without a role, so the write-guard
+    // (Issue #1018) is deterministic across all Claude spawn modes.
+    installHarnessWorktreeFiles(harness, '', '', worktreePath);
   }
-  // Install harness worktree files even without a role, so the write-guard
-  // (Issue #1018) is deterministic across all Claude spawn modes.
-  installHarnessWorktreeFiles(getBuilderHarness(workspaceRoot), '', '', worktreePath);
+
+  // Worktree mode never enters on a resume, but the loop itself is
+  // session-aware when the harness supports it (Issue #1233): crash restarts
+  // resume the pinned conversation here too. There is no prompt file in this
+  // mode, so the fresh and degraded invocations are the bare command.
+  const sessionForms = scriptSessionForms(harness);
+  const loop = sessionForms
+    ? buildSessionLaunchLoop({
+      sessionId: randomUUID(),
+      pinnedFresh: `${command} ${sessionForms.newSessionScriptFragment(SESSION_ID_EXPR)}`,
+      unpinnedFresh: command,
+      resume: `${baseCmd} ${sessionForms.resumeScriptFragment(SESSION_ID_EXPR)} '${shellEscapeSingleQuote(CRASH_RESUME_NUDGE)}'`,
+    })
+    : buildLaunchLoop(command, command);
+
   return `#!/bin/bash
 cd "${worktreePath}"
-${buildLaunchLoop(baseCmd, baseCmd)}`;
+${envBlock}${loop}`;
 }

@@ -47,7 +47,10 @@ Revise, recommit, ask whether more remains. **The gate stays pending until the h
 
 ## Resumption After Crash
 
-If your session crashes, Tower's `while true` loop relaunches you with the same prompt:
+If your session crashes, Tower's launch loop **resumes your conversation** (`--resume` against the
+session id pinned at spawn) and sends a short re-orientation nudge — your context is intact, so
+re-check state and continue. Only an unresumable session (repeated fast failures) falls back to a
+fresh relaunch with the same spawn prompt. On a fresh relaunch:
 
 1. `porch next {{project_id}}` to learn what phase you are in
 2. If `gate_pending`: read the latest plan file (plan-approval), or the diff (dev-approval) via

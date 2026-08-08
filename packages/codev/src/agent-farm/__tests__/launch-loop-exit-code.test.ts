@@ -88,7 +88,9 @@ describe('builder launch loop exit handling (Bugfix #1241)', () => {
     });
 
     expect(runCount()).toBeGreaterThan(1);
-    expect(result.stdout).toContain('Restarting in 2 seconds');
+    // PIR #1233: the default (claude) harness crash branch resumes the pinned
+    // conversation rather than replaying fresh — same auto-restart, new wording.
+    expect(result.stdout).toContain('Resuming the conversation in 2 seconds');
     expect(result.stdout).toContain('code 7');
     expect(result.stdout).not.toContain('Agent exited at your request');
   }, 15_000);

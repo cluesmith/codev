@@ -67,8 +67,11 @@ list) silently inflates PIR's cost. Leave it unset, or scope it per-protocol.
 ## Builder session
 
 A long-running interactive session in a Tower-managed PTY, launched as `claude "<prompt>"`
-inside a `while true` restart loop. Typed input reaches the live session immediately; the loop
-is crash recovery, not the gate-wait mechanism. There is no "session ended at gate" state.
+inside a restart loop and pinned to a session id minted at spawn. Typed input reaches the live
+session immediately; the loop is crash recovery, not the gate-wait mechanism. There is no
+"session ended at gate" state. On a crash the loop **resumes the pinned conversation** (context
+intact, plus a re-orientation nudge) rather than replaying the spawn prompt; only an unresumable
+session degrades to a fresh prompt-replay relaunch. A deliberate quit relaunches fresh.
 
 ## Configuration
 

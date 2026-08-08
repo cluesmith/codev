@@ -87,6 +87,22 @@ export interface HarnessProvider {
     /** Args to RESUME an existing session by id (caller skips role injection). */
     resumeArgs(sessionId: string): string[];
     /**
+     * Optional: script-fragment forms of newSessionArgs/resumeArgs for bash
+     * script generation (the builder launch loop — Issue #1233), mirroring the
+     * dual-form convention of buildRoleInjection/buildScriptRoleInjection and
+     * buildResume's args/scriptFragment pair.
+     *
+     * `idExpr` is a shell expression the caller has already quoted (e.g.
+     * `"$codev_session_id"`), NOT a literal id: the generated loop re-mints ids
+     * at runtime (clean-exit relaunch, unresumable-session degrade), so the
+     * fragment must reference the script's variable rather than bake a value.
+     *
+     * BOTH must be present for the session-aware loop; a harness providing
+     * neither keeps the historical prompt-replay restart loop.
+     */
+    newSessionScriptFragment?(idExpr: string): string;
+    resumeScriptFragment?(idExpr: string): string;
+    /**
      * Optional: verify that `sessionId` still has a resumable session on disk
      * for `cwd` before the caller resumes it (Issue #1145). Returns false when
      * the session file is gone (a stored id can outlive its jsonl); callers
@@ -162,6 +178,10 @@ export const CLAUDE_HARNESS: HarnessProvider = {
   session: {
     newSessionArgs: (sessionId) => ['--session-id', sessionId],
     resumeArgs: (sessionId) => ['--resume', sessionId],
+    // Issue #1233: script-fragment forms for the builder crash-resume loop.
+    // `idExpr` arrives pre-quoted (a shell variable reference, not a literal).
+    newSessionScriptFragment: (idExpr) => `--session-id ${idExpr}`,
+    resumeScriptFragment: (idExpr) => `--resume ${idExpr}`,
     // Issue #1145: a stored id is only resumed when its jsonl still exists
     // under this cwd's project dir (stale ids degrade to a fresh spawn).
     verifyOwnership: (sessionId, cwd, opts) => verifySessionOwnership(cwd, sessionId, opts),

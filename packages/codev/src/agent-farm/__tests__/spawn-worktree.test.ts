@@ -355,7 +355,7 @@ describe('spawn-worktree', () => {
     }
 
     /** The body of a generated `codev_launch_<name>() { … }` launcher. */
-    function launcherBody(script: string, name: 'initial' | 'fresh'): string | undefined {
+    function launcherBody(script: string, name: 'entry' | 'pinned' | 'unpinned' | 'resume'): string | undefined {
       return script.match(new RegExp(`codev_launch_${name}\\(\\) \\{\\n(.*)\\n\\}`))?.[1].trim();
     }
 
@@ -374,7 +374,7 @@ describe('spawn-worktree', () => {
       // fresh command, so this asserts on the *entry* launcher specifically:
       // the resumed conversation carries its own system prompt, so role
       // injection and the initial prompt stay off this path.
-      expect(launcherBody(script!, 'initial')).toBe("claude --resume 'abc-1234-uuid'");
+      expect(launcherBody(script!, 'entry')).toBe("claude --resume 'abc-1234-uuid'");
       expect(script).not.toContain('--resume,');
       expect(script).toContain('while true');
       // Resume never rewrites the prompt file: `afx reset` reads the spawn-time
@@ -398,13 +398,18 @@ describe('spawn-worktree', () => {
         'PROMPT', 'ROLE', 'codev', resume,
       );
 
-      const fresh = launcherBody(findScript()!, 'fresh');
-      expect(fresh).toBeDefined();
-      expect(fresh).not.toContain('--resume');
-      expect(fresh).toContain('--append-system-prompt');
-      expect(fresh).toContain('.builder-prompt.txt');
-      // …and the loop actually switches to it on the clean-exit branch.
-      expect(findScript()).toContain('codev_launch=codev_launch_fresh');
+      // PIR #1233: the fresh relaunch is now the PINNED launcher — a new
+      // conversation under a newly minted id. The #1267 invariant is intact:
+      // no --resume on this path, role and prompt re-injected.
+      const pinned = launcherBody(findScript()!, 'pinned');
+      expect(pinned).toBeDefined();
+      expect(pinned).not.toContain('--resume');
+      expect(pinned).toContain('--append-system-prompt');
+      expect(pinned).toContain('.builder-prompt.txt');
+      expect(pinned).toContain('--session-id "$codev_session_id"');
+      // …and the clean-exit branch re-mints and switches to it.
+      expect(findScript()).toContain('codev_relaunch_fresh');
+      expect(findScript()).toContain('codev_launch=codev_launch_pinned');
     });
 
     it('resume → the role file the fresh relaunch injects is (re)written', async () => {
@@ -422,17 +427,24 @@ describe('spawn-worktree', () => {
       expect(roleCall![1]).toBe(`ROLE ${DEFAULT_TOWER_PORT}`);
     });
 
-    it('no resume → single-command loop, unchanged (no launcher indirection)', async () => {
+    // PIR #1233: a fresh Claude spawn now gets the session-aware loop — it
+    // ENTERS on a pinned fresh invocation (never a resume), and the crash
+    // branch resumes that pinned conversation instead of replaying the prompt.
+    it('no resume → enters on a pinned fresh invocation, not a resume', async () => {
       await startBuilderSession(
         { workspaceRoot: '/tmp/ws' } as any,
         'pir-1d', '/tmp/worktree', 'claude',
         'PROMPT', 'ROLE', 'codev',
       );
 
-      expect(findScript()).not.toContain('codev_launch');
+      const entry = launcherBody(findScript()!, 'entry');
+      expect(entry).toBeDefined();
+      expect(entry).toContain('--session-id "$codev_session_id"');
+      expect(entry).toContain('.builder-prompt.txt');
+      expect(entry).not.toContain('--resume');
     });
 
-    it('no resume + role → fresh role-injected script, no --resume', async () => {
+    it('no resume + role → entry is role-injected and never a resume; --resume exists only in the crash-resume launcher', async () => {
       await startBuilderSession(
         { workspaceRoot: '/tmp/ws' } as any,
         'pir-2', '/tmp/worktree', 'claude',
@@ -441,8 +453,10 @@ describe('spawn-worktree', () => {
 
       const script = findScript();
       expect(script).toBeDefined();
-      expect(script).not.toContain('--resume');
-      expect(script).toContain('--append-system-prompt');
+      const entry = launcherBody(script!, 'entry');
+      expect(entry).toContain('--append-system-prompt');
+      expect(entry).not.toContain('--resume');
+      expect(launcherBody(script!, 'resume')).toContain('--resume "$codev_session_id"');
     });
 
     // Bugfix #1241: every generated variant must gate the relaunch on exit
