@@ -57,3 +57,34 @@ codev doctor
 - `codev init` creates a new directory — use `codev adopt` for existing projects
 - Always run `codev adopt` and `codev update` from the project root
 - `codev update` only updates framework files — it never touches specs/plans/reviews
+
+## Local build and install (this repository)
+
+Test changes locally before publishing. Run from the repository root:
+
+```bash
+pnpm build                  # builds core first, then codev (including dashboard)
+pnpm -w run local-install   # packs both packages, installs globally, restarts Tower
+```
+
+`local-install` (`scripts/local-install.sh`) packs `@cluesmith/codev-core` and
+`@cluesmith/codev`, installs both in a single `npm install -g` (separate installs fail —
+`codev-core` is not on the public registry), restores the executable bit on
+`scripts/forge/**/*.sh` that `pnpm pack` strips, and restarts Tower last. Install runs while
+Tower is up; only the final restart causes downtime. **Do not stop Tower first**, and do not use
+`npm link` / `pnpm link` — it breaks global installs.
+
+`pnpm build` also runs `copy-skeleton`, which copies `codev-skeleton/` into
+`packages/codev/skeleton`. **Tests read that copy**, so after editing anything under
+`codev-skeleton/` you must rebuild before the suite reflects your change.
+
+### Where to run things
+
+- `pnpm install` — repository root (installs all workspace packages)
+- `pnpm build` / `pnpm test` — `packages/codev/`, or `pnpm --filter @cluesmith/codev build`
+- Unit tests `packages/codev/tests/unit/` · E2E `packages/codev/tests/e2e/`
+- Never run npm commands from the repository root unless told to
+
+### Measuring code size
+
+`tokei -e "tests/lib" -e "node_modules" -e ".git" -e ".builders" -e "dist" .`

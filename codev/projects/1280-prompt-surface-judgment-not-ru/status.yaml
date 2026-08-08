@@ -5,38 +5,38 @@ phase: implement
 plan_phases:
   - id: phase_0_instrument
     title: Corrected instrument + frozen capability inventory (PR-1, ships early)
-    status: in_progress
+    status: complete
   - id: phase_1_shared_skills
     title: CLAUDE.md/AGENTS.md + four-tree skill relocation (G2)
-    status: pending
+    status: complete
   - id: phase_2_roles
     title: Three role files (G6, G3, G5)
-    status: pending
+    status: complete
   - id: phase_3_protocol_md
     title: protocol.md x10 with the P6 include mechanism (G3)
-    status: pending
+    status: complete
   - id: phase_4_builder_prompts
     title: builder-prompt.md x9 + M10 test-retirement burden (G3)
-    status: pending
+    status: complete
   - id: phase_5_prompts_heavy
     title: 'Phase prompts: spir, aspir, pir (G4)'
-    status: pending
+    status: complete
   - id: phase_6_prompts_light_spir_templates
     title: 'Phase prompts: bugfix, air, maintain + spir templates (G4)'
-    status: pending
+    status: complete
   - id: phase_7_templates_consult_spir
     title: Remaining templates + spir consult-types (G4, G5)
-    status: pending
+    status: complete
   - id: phase_8_consult_types_a
     title: 'Consult-types: aspir, bugfix, air (G5)'
-    status: pending
+    status: complete
   - id: phase_9_consult_registry_deadtree
     title: Consult-types pir/maintain + scar registry + dead-tree deletion (G5, G7, G4)
-    status: pending
+    status: complete
   - id: phase_10_integration
     title: Capability verification, measurement report, rollback rehearsal, governance docs
-    status: pending
-current_plan_phase: phase_0_instrument
+    status: in_progress
+current_plan_phase: phase_10_integration
 gates:
   spec-approval:
     status: approved
@@ -47,16 +47,18 @@ gates:
     requested_at: '2026-08-01T04:00:12.126Z'
     approved_at: '2026-08-01T04:26:10.219Z'
   pr:
-    status: pending
+    status: approved
+    approved_at: '2026-08-06T20:36:07.661Z'
   verify-approval:
     status: pending
 iteration: 1
 build_complete: false
 history: []
 started_at: '2026-08-01T02:46:36.457Z'
-updated_at: '2026-08-01T04:39:51.924Z'
+updated_at: '2026-08-06T20:36:07.662Z'
 pr_history:
   - phase: implement
     pr_number: 1319
     branch: builder/1280-instrument
     created_at: '2026-08-01T04:39:51.923Z'
+pr_ready_for_human: false

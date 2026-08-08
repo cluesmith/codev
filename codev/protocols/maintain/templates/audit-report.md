@@ -1,192 +1,46 @@
 # Cleanup Audit Report
 
-## Metadata
-- **Date**: YYYY-MM-DD
-- **Project**:
-- **Auditor**:
-- **Categories**: dead-code, dependencies, docs, tests, temp, metadata
-- **Tools Used**:
-
-## Summary
-
-| Category | Items Found | Approved for Removal |
-|----------|-------------|---------------------|
-| Dead Code | 0 | 0 |
-| Dependencies | 0 | 0 |
-| Documentation | 0 | 0 |
-| Tests | 0 | 0 |
-| Temp Files | 0 | 0 |
-| Metadata | 0 | 0 |
-| **Total** | **0** | **0** |
+**Date**: YYYY-MM-DD · **Project**: · **Auditor**:
 
 ## Pre-Audit Checks
 
 - [ ] Git working directory is clean
-- [ ] All tests are currently passing
+- [ ] All tests currently passing
 - [ ] No pending merges or PRs in flight
 
----
+## Summary
 
-## Dead Code
+One row per category; totals reconcile against the findings below.
 
-### Unused Exports
+| Category | Items Found | Approved for Removal |
+|----------|------------:|---------------------:|
+| Dead code (unused exports, unreachable code, unused files) | 0 | 0 |
+| Dependencies (npm, Python) | 0 | 0 |
+| Documentation (stale, broken links) | 0 | 0 |
+| Tests (orphaned files, low-ROI, orphaned fixtures) | 0 | 0 |
+| Temp files | 0 | 0 |
+| Metadata (projectlist, AGENTS/CLAUDE, arch) | 0 | 0 |
+| **Total** | **0** | **0** |
 
-**Tool**: `npx ts-prune` / `ruff check --select F401` / other
+## Findings
 
-| Approve | File | Line | Export | Tool Output | Owner Decision |
-|---------|------|------|--------|-------------|----------------|
-| | | | | | |
+One table per category that has findings, using this schema (add/drop columns as the category needs — dependencies use Package/Version, temp files use Path/Size). Name the tool that surfaced each item so the owner can verify it.
 
-### Unreachable Code
-
-**Tool**: static analysis / manual review
-
-| Approve | File | Line | Description | Tool Output | Owner Decision |
-|---------|------|------|-------------|-------------|----------------|
-| | | | | | |
-
-### Unused Files
-
-**Tool**: `grep -r "import.*from"` analysis / IDE unused file detection
-
-| Approve | File | Tool Output | Owner Decision |
-|---------|------|-------------|----------------|
-| | | | |
-
----
-
-## Unused Dependencies
-
-### npm packages
-
-**Tool**: `npx depcheck`
-
-| Approve | Package | Version | Tool Output | Owner Decision |
-|---------|---------|---------|-------------|----------------|
+| Approve | Location (`file:line` / package / path) | Item | Tool + output | Owner decision |
+|:-------:|------------------------------------------|------|---------------|----------------|
 | | | | | |
 
-### Python packages
-
-**Tool**: `pip-autoremove --list` / `deptry`
-
-| Approve | Package | Tool Output | Owner Decision |
-|---------|---------|-------------|----------------|
-| | | | |
-
----
-
-## Stale Documentation
-
-**Tool**: manual review / link checker
-
-| Approve | File | Issue | Suggestion | Owner Decision |
-|---------|------|-------|------------|----------------|
-| | | | | |
-
----
-
-## Test Infrastructure
-
-### Test Status
-- All tests passing: [ ] Yes / [ ] No
-- If no, which tests are failing?
-
-### Orphaned Test Files
-
-**Tool**: cross-reference with deleted features
-
-| Approve | File | Reason | Owner Decision |
-|---------|------|--------|----------------|
-| | | | |
-
-### Low-ROI Tests
-
-**Tool**: test coverage analysis / flaky test detection
-
-| Approve | File | Reason | Owner Decision |
-|---------|------|--------|----------------|
-| | | | |
-
-### Orphaned Fixtures
-
-**Tool**: grep for fixture usage
-
-| Approve | File | Reason | Owner Decision |
-|---------|------|--------|----------------|
-| | | | |
-
----
-
-## Temporary Files
-
-**Tool**: `find` / `du -sh`
-
-| Approve | Path | Type | Size | Owner Decision |
-|---------|------|------|------|----------------|
-| | | | | |
-
----
-
-## Metadata Updates Required
-
-### projectlist.md
-
-| Approve | Entry | Current Status | Suggested Action | Owner Decision |
-|---------|-------|----------------|------------------|----------------|
-| | | | | |
-
-### AGENTS.md / CLAUDE.md
-
-| Approve | Section | Issue | Suggestion | Owner Decision |
-|---------|---------|-------|------------|----------------|
-| | | | | |
-
-### arch.md
-
-| Approve | Section | Issue | Suggestion | Owner Decision |
-|---------|---------|-------|------------|----------------|
-| | | | | |
-
----
+Typical tools: `npx ts-prune` / `ruff check --select F401` (unused exports), `npx depcheck` / `deptry` (dependencies), link checker (docs), coverage + flaky detection (tests), `find` / `du -sh` (temp files).
 
 ## Recommendations
 
-### High Priority (Should Remove)
-1.
-
-### Medium Priority (Likely Safe)
-1.
-
-### Low Priority / Needs Investigation
-1.
-
-### Do Not Remove
-1.
-
----
+Grouped by confidence: **Should remove** · **Likely safe** · **Needs investigation** · **Do not remove** (with reason).
 
 ## Rollback Notes
 
-If VALIDATE fails, document restoration steps here:
-
-| Item | Restoration Command | Notes |
-|------|---------------------|-------|
-| Tracked files | `git revert HEAD` or `git checkout HEAD~1 -- path/to/file` | |
-| Untracked files | `./codev/cleanup/.trash/YYYY-MM-DD-HHMM/restore.sh` | |
-
----
+Restoration path if VALIDATE fails — tracked files via `git revert` / `git checkout HEAD~1 -- <path>`; untracked via the dated `codev/cleanup/.trash/…/restore.sh`.
 
 ## Approval
 
-- [ ] Human has reviewed all items
-- [ ] Checkboxes marked for approved items
-- [ ] Ready to proceed to PRUNE phase
-
-**Reviewed by**: _________________ **Date**: _________________
-
----
-
-## Notes
-
-<!-- Add any notes about this audit, false positives encountered, or improvements to audit logic -->
-
+- [ ] Human reviewed all items and marked the approved ones.
+- [ ] Ready to proceed to the PRUNE phase.
