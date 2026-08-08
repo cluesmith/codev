@@ -1,44 +1,24 @@
 # PR Ready Review Prompt
 
 ## Context
-You are performing a final self-check during the Review phase. The builder has completed all implementation phases and is about to create a PR. This is the last check before the work goes to the architect for integration review.
+
+You are performing the final self-check during the Review phase — the builder has completed all implementation phases and is about to open the PR. This is the last check before the work goes to the architect for integration review.
 
 ## Focus Areas
 
-1. **Completeness**
-   - Are all spec requirements implemented?
-   - Are all plan phases complete?
-   - Is the review document written (`codev/reviews/XXXX-name.md`)?
-   - Are all commits properly formatted (`[Spec XXXX][Phase]`)?
-
-2. **Test Status**
-   - Do all tests pass?
-   - Is test coverage adequate for the changes?
-   - Are there any skipped or flaky tests?
-
-3. **Code Cleanliness**
-   - Is there any debug code left in?
-   - Are there any TODO comments that should be resolved?
-   - Are there any `// REVIEW:` comments that weren't addressed?
-   - Is the code properly formatted?
-
-4. **Documentation**
-   - Are inline comments clear where needed?
-   - Is the review document comprehensive?
-   - Are any new APIs documented?
-
-5. **PR Readiness**
-   - Is the branch up to date with its base (the integration branch the PR targets)?
-   - Are commits atomic and well-described?
-   - Is the change diff reasonable in size?
+- **Completeness** — all spec requirements implemented, all plan phases complete, the review document written (`codev/reviews/XXXX-name.md`), and commits in the `[Spec XXXX][Phase]` format.
+- **Test Status** — all tests pass, coverage is adequate for the changes, and any skipped/flaky tests are accounted for.
+- **Code Cleanliness** — no debug code, no stray `TODO` / `// REVIEW:` left unaddressed, code properly formatted.
+- **Documentation** — inline comments clear where needed, the review document comprehensive, new APIs documented.
+- **PR Readiness** — the branch is up to date with its base (the integration branch the PR targets), commits are atomic and well-described, and the diff size is reasonable.
 
 ## Scope
 
-- **DO NOT** flag the syntax of `git diff` examples that appear in review-file prose (e.g., `git diff ci..HEAD` inside a "Files Changed" caption or "How to Test Locally" section). Quoted diff syntax is documentation, not a command. Apply two-dot/three-dot scrutiny only to diffs you compute yourself.
+Do not flag the syntax of `git diff` examples that appear in review-file prose (e.g. `git diff ci..HEAD` inside a "Files Changed" caption or "How to Test Locally" section) — quoted diff syntax is documentation, not a command. Apply two-dot/three-dot scrutiny only to diffs you compute yourself.
 
 ## Verdict Format
 
-After your review, provide your verdict in exactly this format:
+Provide your verdict in exactly this format — `consult` parses it:
 
 ```
 ---
@@ -63,14 +43,8 @@ PR_SUMMARY: |
   - [How to test]
 ```
 
-**Verdict meanings:**
-- `APPROVE`: Ready to create PR
-- `REQUEST_CHANGES`: Issues to fix before PR creation
-- `COMMENT`: Minor items, can create PR but note feedback
+- `APPROVE`: ready to create the PR.
+- `REQUEST_CHANGES`: issues to fix before PR creation.
+- `COMMENT`: minor items; can create the PR but note the feedback.
 
-## Notes
-
-- This is the builder's final self-review before hand-off
-- The PR_SUMMARY in your output can be used as the PR description
-- Focus on "is this ready for someone else to review" not "is this perfect"
-- Any issues found here are cheaper to fix than during integration review
+The `PR_SUMMARY` block can be used directly as the PR description.

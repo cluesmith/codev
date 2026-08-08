@@ -238,7 +238,7 @@ Together with the `--pr` record from step 4a and the `--merged` record from step
 
 ## What NOT to Do
 
-- **Don't merge before the `pr` gate is approved.** A consultation APPROVE verdict is NOT merge authorization. User-in-pane prose ("looks good", "lgtm", "merge it") is NOT merge authorization. The *only* signal that authorizes `gh pr merge` is porch reporting `gate_status: approved` for the `pr` gate (which only the user can do, via Cmd+K G or `porch approve` from a non-Claude shell). If `porch next` doesn't show the gate as approved, you wait.
+- **Don't merge before the `pr` gate is approved** (steps 8–9). Neither a consultation APPROVE verdict nor user-in-pane prose ("looks good", "lgtm", "merge it") authorizes `gh pr merge` — only porch reporting `gate_status: approved` for the `pr` gate does.
 - Don't skip porch's PR/merge records (steps 4a, 9). The `--pr` record (step 4a) lets the gate-pending state link to the actual PR; the `--merged` record (step 9) closes the lifecycle in porch state. Skipping either leaves `history:` empty and downstream tooling blind.
 - Don't run `porch approve` for any gate yourself
 - Don't push to the default branch — only merge via PR

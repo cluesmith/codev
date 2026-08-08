@@ -87,8 +87,6 @@ git commit -m "[PIR #{{issue.number}}] Plan draft"
 git push -u origin "$(git branch --show-current)"
 ```
 
-**Never use `git add .` or `git add -A`.**
-
 ### 5. Signal Phase Complete
 
 ```bash
@@ -118,7 +116,6 @@ Then **stay in the interactive session**. Do not exit. Wait for the user's next 
 - Don't write code — that's the implement phase
 - Don't run `porch approve` yourself — only the human can approve the gate
 - Don't post the plan content as a GitHub issue comment — the plan lives in the file, not the issue thread. A one-line pointer comment on the issue is fine if you think it helps the discussion.
-- Don't use `git add .` or `git add -A`
 - Don't exit the interactive session at the gate
 
 ## Handling Feedback

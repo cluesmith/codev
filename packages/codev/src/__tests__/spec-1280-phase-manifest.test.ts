@@ -11,7 +11,6 @@
  * because the guard must predate the thing it guards.
  */
 import { describe, it, expect } from 'vitest';
-import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
@@ -21,13 +20,25 @@ const manifestDir = path.join(
   'codev/projects/1280-prompt-surface-judgment-not-ru/manifests',
 );
 
-/** Files a manifest is responsible for listing: prompt-bearing surfaces only. */
-const PROMPT_BEARING = /^(CLAUDE\.md|AGENTS\.md|codev(-skeleton)?\/(protocols|roles)\/.*\.md)$/;
-
 interface Manifest {
   file: string;
   phase: string;
   rows: { path: string; oldWords: string; newWords: string; principles: string }[];
+}
+
+/**
+ * Expand `{a,b}/rest` into `a/rest`, `b/rest`.
+ *
+ * DELIBERATE FORMAT DECISION (Spec 1280, Phase 3): the plan's inspection model is per
+ * DECISION, not per file — twins are byte-identical and T7 verifies the sync mechanically, so
+ * the architect reads ~66 decisions rather than 131 diffs. One manifest row therefore names
+ * both tree paths, and the ≤12 batch cap counts decisions. The parser has to understand that
+ * notation or the skeleton twins read as uninspectable — which is exactly what it reported.
+ */
+function expandBraces(p: string): string[] {
+  const m = p.match(/^\{([^}]+)\}(.*)$/);
+  if (!m) return [p];
+  return m[1].split(',').map((alt) => alt.trim() + m[2]);
 }
 
 function parseManifest(file: string): Manifest {
@@ -37,12 +48,13 @@ function parseManifest(file: string): Manifest {
     // | path | old | new | principles | rationale |
     const m = line.match(/^\|\s*`?([^`|]+?)`?\s*\|\s*(\d+)\s*\|\s*(\d+)\s*\|\s*([^|]*)\|/);
     if (m && !/^-+$/.test(m[1].trim())) {
-      rows.push({
-        path: m[1].trim(),
+      for (const expanded of expandBraces(m[1].trim())) rows.push({
+        path: expanded,
         oldWords: m[2],
         newWords: m[3],
         principles: m[4].trim(),
       });
+
     }
   }
   return { file, phase: path.basename(file, '.md'), rows };
@@ -94,26 +106,13 @@ describe('T16 — manifest completeness (M11)', () => {
     }
   });
 
-  it('every prompt-bearing file changed on this branch appears in some manifest', () => {
-    let changed: string[];
-    try {
-      changed = execFileSync('git', ['diff', '--name-only', 'origin/main...HEAD'], {
-        cwd: repoRoot,
-        encoding: 'utf-8',
-      })
-        .split('\n')
-        .map((s) => s.trim())
-        .filter((s) => PROMPT_BEARING.test(s));
-    } catch {
-      return; // no origin/main to diff against (fresh clone / CI shallow) — skip
-    }
-    if (changed.length === 0) return;
-
-    const listed = new Set(manifests().flatMap((m) => m.rows.map((r) => r.path)));
-    const missing = changed.filter((f) => !listed.has(f));
-    expect(
-      missing,
-      `changed but absent from every manifest — the architect cannot inspect what is not listed:\n${missing.join('\n')}`,
-    ).toEqual([]);
-  });
+  // RETIRED under Spec 1280 (retirement R5, Waleed's ruling 2026-08-06): the repo-wide
+  // manifest-COMPLETENESS scan ("every prompt-bearing file THIS PROJECT changed appears in some
+  // manifest"). Even scoped by [Spec 1280] commit provenance, it lived in the SHARED suite and ran
+  // a repo diff + `git status` on every PR — its uncommitted-file check caught Mohid's #1330
+  // (which had to strip its CLAUDE.md/AGENTS.md edits to pass CI). The cross-project CI tax isn't
+  // worth the mechanical enforcement. What SURVIVES: the per-phase manifests themselves and the
+  // M11 human inspection contract are unchanged — the architect still inspects against a complete
+  // manifest — and the FORMAT checks above (four required fields, batch cap) still validate this
+  // project's own manifests. Only the CI tripwire is gone. Full trace: codev/resources/1280-retirements.md (R5).
 });
