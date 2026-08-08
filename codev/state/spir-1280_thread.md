@@ -1347,3 +1347,17 @@ carry their canonical byte-identically; CLAUDE==AGENTS; no conflict markers repo
 
 Merge commit c884a4e6. Build OK. Full suite green: **4563 passed / 48 skipped, EXIT 0**.
 NOT merge approval — Waleed reviews after conflict-free.
+
+### Merge attempted on Waleed's approval — blocked on the self-approval wall (2026-08-08)
+
+Waleed APPROVED #1362 for merge. Verified before attempting: pr gate already approved
+(status.yaml, 2026-08-06); CI all 6 checks SUCCESS on the exact pushed HEAD b7ce9528; local suite
+4563/48 green; mergeable=MERGEABLE.
+
+Ran `gh pr merge 1362 --merge` (regular merge, not squash) → rejected:
+"the base branch policy prohibits the merge". State: mergeable=MERGEABLE but
+mergeStateStatus=BLOCKED, reviewDecision=REVIEW_REQUIRED, reviews=0 — the same structural wall:
+the gh seat authors the commits and GitHub refuses self-approval.
+
+Per the architect's standing instruction I did NOT use --admin; reported back so architect main can
+admin-merge on Waleed's word. Nothing else outstanding on my side.
