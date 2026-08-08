@@ -1323,3 +1323,27 @@ Instruction: hold as-is, no further action from me; was right not to reach for -
 - Conflict with main resolved (CLAUDE/AGENTS), post-merge suite green: 4549 passed / 48 skipped.
 - pr gate approved (porch). CI fully green: all 6 required checks passing.
 - Merge blocked ONLY by the self-approval branch-protection policy — Waleed's decision. Standing by.
+
+### Merged main again (PIR-1233 + #1345); conflict-free and green (2026-08-08)
+
+Resumed after today's Tower restart (shellper died; afx spawn --resume — the very mechanism this
+merge documents). Waleed via architect: merge main, resolve carefully, re-run suite, push.
+
+35 commits from main; **4 conflicts = 2 logical files x both trees**: pir/builder-prompt.md and
+pir/protocol.md. Unlike the last merge (main only touched prose 1280 deleted), **main added REAL
+new content** from #1286: the corrected resume-first semantics (Tower's loop `--resume`s the pinned
+conversation rather than replaying the spawn prompt). My Phase-3/4 rewrites had condensed those
+same passages and still said "`while true` restart loop" — now factually stale.
+
+**Resolved semantically, not by side-picking**: kept my condensed structure, adopted main's
+corrected facts in both files —
+- builder-prompt.md "Resumption After Crash": resume-first, fresh relaunch only when unresumable.
+- protocol.md "## Builder session": same correction (my rewrite had MOVED this narration here, which
+  is why the conflict looked like a bare heading-vs-paragraph clash).
+
+Invariants verified during resolution (both flagged by the architect): **two-tree mirror** —
+codev/ == codev-skeleton/ for both files; **scar canonical byte-identity (T4)** — 28/28 surfaces
+carry their canonical byte-identically; CLAUDE==AGENTS; no conflict markers repo-wide.
+
+Merge commit c884a4e6. Build OK. Full suite green: **4563 passed / 48 skipped, EXIT 0**.
+NOT merge approval — Waleed reviews after conflict-free.
