@@ -145,12 +145,15 @@ export function filterHopByHopHeaders(
 }
 
 /**
- * Make a remote-supplied WebSocket close reason safe to log: strip control
- * characters (no forged log lines) and cap the length. Exported for testing.
+ * Make any relay-supplied text safe to log: strip control characters (a
+ * newline would otherwise forge a tower log entry) and cap the length (an
+ * oversized payload would otherwise inflate the log). Every externally derived
+ * string that reaches a state-change reason must pass through here.
+ * Exported for testing.
  */
-export function sanitizeCloseReason(reason: string): string {
+export function sanitizeRemoteDetail(text: string): string {
   // eslint-disable-next-line no-control-regex
-  const stripped = reason.replace(/[\u0000-\u001f\u007f]/g, ' ').trim();
+  const stripped = text.replace(/[\u0000-\u001f\u007f]/g, ' ').trim();
   return stripped.length > 120 ? `${stripped.slice(0, 120)}…` : stripped;
 }
 
@@ -182,6 +185,8 @@ export class TunnelClient {
   private pongTimeout: ReturnType<typeof setTimeout> | null = null;
   private pongReceived = false;
   private heartbeatWs: WebSocket | null = null;
+  /** Suppresses repeat auth-failure alarms while the breaker half-opens (#1372) */
+  private authFailureLogged = false;
 
   constructor(options: TunnelClientOptions) {
     this.options = options;
@@ -210,6 +215,7 @@ export class TunnelClient {
       this.connectedAt = Date.now();
       this.consecutiveFailures = 0;
       this.rateLimitCount = 0;
+      this.authFailureLogged = false;
       // Push cached metadata on connect
       if (this._pendingMetadata) {
         this.pushMetadataViaHttp(this._pendingMetadata);
@@ -256,8 +262,13 @@ export class TunnelClient {
       this.destroyed = false;
       this.consecutiveFailures = 0;
       this.rateLimitCount = 0;
+      this.authFailureLogged = false;
+      // Cancelling the pending half-open retry without scheduling a fresh
+      // attempt would leave a standalone caller worse off than before, so
+      // reconnect here rather than relying on the caller to build a new client.
       this.clearReconnectTimer();
       this.setState('disconnected', 'circuit breaker reset');
+      this.scheduleReconnect();
     }
   }
 
@@ -324,9 +335,13 @@ export class TunnelClient {
   /**
    * Schedule the next connect attempt.
    *
-   * Callers increment `consecutiveFailures` *before* calling this (#1372) — the
-   * backoff curve is indexed by the number of failures so far, so incrementing
-   * afterwards computed every delay one attempt behind.
+   * Callers increment `consecutiveFailures` *before* calling this (#1372).
+   * Previously the pong-timeout and close paths incremented first while the
+   * error and auth paths incremented after, so the same failure drew a
+   * different delay depending on which event happened to surface it — and for
+   * a WebSocket an `error` is always followed by a `close`, making that
+   * arbitrary. Unified on increment-first (what the majority of paths already
+   * did); the error path's first retry moves ~1.5s → ~2.5s.
    */
   private scheduleReconnect(): void {
     if (this.destroyed || this.state === 'auth_failed') return;
@@ -471,7 +486,7 @@ export class TunnelClient {
       // Ignore events from stale WebSockets (e.g. after disconnect + reconnect)
       if (ws !== this.ws) return;
       if (this.state === 'connected' || this.state === 'connecting') {
-        const detail = reasonBuf?.length ? `: ${sanitizeCloseReason(reasonBuf.toString())}` : '';
+        const detail = reasonBuf?.length ? `: ${sanitizeRemoteDetail(reasonBuf.toString())}` : '';
         this.cleanup();
         this.consecutiveFailures++;
         this.setState('disconnected', `websocket closed (code ${code}${detail})`);
@@ -506,10 +521,14 @@ export class TunnelClient {
         } else if (msg.type === 'auth_error') {
           this.handleAuthError(msg.reason || 'unknown');
         } else {
-          this.handleConnectionError(new Error(`Unexpected auth response type: ${msg.type}`));
+          this.handleConnectionError(
+            new Error(`unexpected auth response type: ${sanitizeRemoteDetail(String(msg.type))}`)
+          );
         }
       } catch (err) {
-        this.handleConnectionError(new Error(`Invalid auth response: ${data.toString()}`));
+        this.handleConnectionError(
+          new Error(`invalid auth response: ${sanitizeRemoteDetail(data.toString())}`)
+        );
       }
     };
 
@@ -521,10 +540,20 @@ export class TunnelClient {
     this.consecutiveFailures++;
 
     if (reason === 'invalid_api_key') {
-      this.setState('auth_failed', 'auth rejected: invalid_api_key');
-      console.error(
-        "Cloud connection failed: API key is invalid or revoked. Run 'afx tower connect --reauth' to update credentials."
+      // A revoked key re-parks here every AUTH_RETRY_INTERVAL_MS. Raise the
+      // alarm once; tag later re-parks so the tower logs them quietly instead
+      // of crying wolf every 15 minutes.
+      const repeat = this.authFailureLogged;
+      this.setState(
+        'auth_failed',
+        repeat ? 'auth rejected: invalid_api_key (half-open retry failed)' : 'auth rejected: invalid_api_key'
       );
+      if (!repeat) {
+        this.authFailureLogged = true;
+        console.error(
+          "Cloud connection failed: API key is invalid or revoked. Run 'afx tower connect --reauth' to update credentials."
+        );
+      }
       // Circuit breaker: park, but half-open on a long interval (#1372) so a
       // misclassified auth error during a network blip isn't a permanent outage.
       this.scheduleAuthRetry();
@@ -532,7 +561,7 @@ export class TunnelClient {
     }
 
     // Transient errors: rate_limited, internal_error, etc.
-    this.setState('disconnected', `auth rejected: ${reason}`);
+    this.setState('disconnected', `auth rejected: ${sanitizeRemoteDetail(reason)}`);
 
     if (reason === 'rate_limited') {
       this.rateLimitCount++;
@@ -568,7 +597,9 @@ export class TunnelClient {
     this.cleanup();
     if (this.state === 'auth_failed') return; // Don't override circuit breaker
     this.consecutiveFailures++;
-    this.setState('disconnected', `connection error: ${err.message}`);
+    // Choke point: some errors originate from the relay (e.g. `ws`'s
+    // "Unexpected server response: <status>"), so sanitize here too.
+    this.setState('disconnected', `connection error: ${sanitizeRemoteDetail(err.message)}`);
     this.scheduleReconnect();
   }
 

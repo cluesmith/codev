@@ -147,7 +147,9 @@ async function connectTunnel(config: CloudConfig): Promise<TunnelClient> {
     } else if (prev === 'connected') {
       stopMetadataRefresh();
     }
-    if (state === 'auth_failed') {
+    // Only the first park raises the alarm — the breaker half-opens every 15
+    // minutes (#1372), and a revoked key would otherwise log ERROR forever.
+    if (state === 'auth_failed' && !reason?.includes('half-open retry failed')) {
       _deps!.log('ERROR', 'Cloud connection failed: API key is invalid or revoked. Run \'afx tower connect --reauth\' to update credentials.');
     }
   });

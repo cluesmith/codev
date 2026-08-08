@@ -19,7 +19,7 @@ import {
   PONG_TIMEOUT_MS,
   CONNECT_TIMEOUT_MS,
   AUTH_RETRY_INTERVAL_MS,
-  sanitizeCloseReason,
+  sanitizeRemoteDetail,
 } from '../lib/tunnel-client.js';
 import { MockTunnelServer } from './helpers/mock-tunnel-server.js';
 
@@ -1126,13 +1126,121 @@ describe('#1372 self-healing', () => {
     c.disconnect();
   });
 
-  it('sanitizes a remote-supplied close reason before logging it', () => {
-    // A relay could otherwise forge log lines through the close frame.
-    expect(sanitizeCloseReason('going away\nTunnel: connected → forged')).toBe(
+  it('sanitizes remote-supplied text before it reaches a log line', () => {
+    // A relay could otherwise forge log lines or inflate the log.
+    expect(sanitizeRemoteDetail('going away\nTunnel: connected → forged')).toBe(
       'going away Tunnel: connected → forged',
     );
-    expect(sanitizeCloseReason('a'.repeat(200))).toHaveLength(121); // 120 + ellipsis
-    expect(sanitizeCloseReason('  tidy  ')).toBe('tidy');
+    expect(sanitizeRemoteDetail('a\r\nb\tc d')).toBe('a  b c d');
+    expect(sanitizeRemoteDetail('a'.repeat(200))).toHaveLength(121); // 120 + ellipsis
+    expect(sanitizeRemoteDetail('  tidy  ')).toBe('tidy');
+  });
+
+  /**
+   * Every relay-controlled string that reaches a transition reason must be
+   * sanitized, not just the close frame. (Raised by codex in CMAP round 2.)
+   */
+  it.each([
+    ['auth_error reason', { type: 'auth_error', reason: 'nope\ninjected' }],
+    ['unexpected type', { type: 'weird\ninjected' }],
+  ])('sanitizes the %s carried into the transition reason', (_label, payload) => {
+    vi.useFakeTimers();
+    const c = createClient();
+    const ws = createMockWs();
+    (ws as unknown as { send: () => void }).send = vi.fn();
+    (c as unknown as { ws: WebSocket | null }).ws = ws;
+    (c as unknown as { state: string }).state = 'connecting';
+
+    const reasons: Array<string | undefined> = [];
+    c.onStateChange((_s, _p, reason) => reasons.push(reason));
+
+    (c as unknown as { onWsOpen: (w: WebSocket) => void }).onWsOpen(ws);
+    ws.emit('message', Buffer.from(JSON.stringify(payload)));
+
+    expect(reasons.length).toBeGreaterThan(0);
+    for (const r of reasons) expect(r ?? '').not.toMatch(/[\u0000-\u001f\u007f]/);
+
+    c.disconnect();
+  });
+
+  it('bounds an oversized malformed auth response instead of echoing it', () => {
+    vi.useFakeTimers();
+    const c = createClient();
+    const ws = createMockWs();
+    (ws as unknown as { send: () => void }).send = vi.fn();
+    (c as unknown as { ws: WebSocket | null }).ws = ws;
+    (c as unknown as { state: string }).state = 'connecting';
+
+    const reasons: Array<string | undefined> = [];
+    c.onStateChange((_s, _p, reason) => reasons.push(reason));
+
+    (c as unknown as { onWsOpen: (w: WebSocket) => void }).onWsOpen(ws);
+    // Not JSON, and far too large to echo into the tower log.
+    ws.emit('message', Buffer.from('<html>' + 'x'.repeat(100_000) + '</html>'));
+
+    const reason = reasons.find((r) => r?.includes('invalid auth response'));
+    expect(reason).toBeDefined();
+    expect(reason!.length).toBeLessThan(200);
+
+    c.disconnect();
+  });
+
+  /**
+   * A revoked key re-parks every 15 minutes forever. Raising the same alarm
+   * each time would be crying wolf. (Raised by claude in CMAP round 2.)
+   */
+  it('raises the auth alarm once, not on every half-open re-park', () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.useFakeTimers();
+
+    const c = createClient();
+    const reasons: Array<string | undefined> = [];
+    c.onStateChange((_s, _p, reason) => reasons.push(reason));
+
+    const priv = c as unknown as { handleAuthError: (r: string) => void; doConnect: () => void };
+    vi.spyOn(priv, 'doConnect').mockImplementation(() => {});
+
+    // Three full park → half-open → re-park cycles, as a revoked key produces.
+    priv.handleAuthError('invalid_api_key');
+    for (let i = 0; i < 2; i++) {
+      vi.advanceTimersByTime(AUTH_RETRY_INTERVAL_MS);
+      expect(c.getState()).toBe('disconnected');
+      priv.handleAuthError('invalid_api_key');
+    }
+
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    // Later re-parks are tagged so the tower log can stay quiet too.
+    expect(reasons.filter((r) => r?.includes('half-open retry failed'))).toHaveLength(2);
+
+    c.disconnect();
+    errorSpy.mockRestore();
+  });
+
+  /**
+   * Cancelling the pending half-open retry without scheduling a fresh attempt
+   * would leave a standalone caller worse off than before the fix.
+   * (Raised by claude in CMAP round 2.)
+   */
+  it('resetCircuitBreaker schedules a reconnect rather than just cancelling', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.useFakeTimers();
+
+    const c = createClient();
+    const priv = c as unknown as { handleAuthError: (r: string) => void; doConnect: () => void };
+    const doConnect = vi.spyOn(priv, 'doConnect').mockImplementation(() => {});
+
+    priv.handleAuthError('invalid_api_key');
+    expect(c.getState()).toBe('auth_failed');
+
+    c.resetCircuitBreaker();
+    expect(c.getState()).toBe('disconnected');
+
+    // Counter was reset, so this is a first-attempt backoff — well under the
+    // 15-minute half-open interval it replaced.
+    vi.advanceTimersByTime(calculateBackoff(0, () => 0.999) + 1);
+    expect(doConnect).toHaveBeenCalled();
+
+    c.disconnect();
   });
 
   it('state transitions carry a failure reason', async () => {

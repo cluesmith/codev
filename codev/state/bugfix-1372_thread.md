@@ -155,6 +155,48 @@ hypothesis — "a proxy error page misclassified as an auth error" — cannot ha
 code path. The half-open breaker is **defensive hardening, not the corrective fix**; the
 watchdog is what resolves the reported wedge. PR body corrected to say so.
 
+### CMAP round 2
+
+| Lane | Verdict |
+|---|---|
+| gemini | APPROVE — no issues |
+| claude | APPROVE — four points, three real |
+| codex | **REQUEST_CHANGES** — one real defect |
+
+**codex, again, and it's the same mistake twice.** Round 1 I sanitized the close
+frame; codex pointed out I'd missed every sibling path carrying relay-controlled text
+into the same log: `auth rejected: ${reason}`, `Unexpected auth response type: ${msg.type}`,
+and worst, `Invalid auth response: ${data.toString()}` — echoing the **entire raw payload**
+unbounded into the tower log. Generalized `sanitizeCloseReason` → `sanitizeRemoteDetail`
+and applied it at all four sites plus `handleConnectionError` as a choke point.
+
+Lesson, and it is the one already in `lessons-critical.md`: *after any change, grep for
+siblings before claiming it's fixed.* I fixed the instance I was handed, twice, instead of
+sweeping the class. Worth remembering that this applies within a single file, not just
+across `codev/` and `codev-skeleton/`.
+
+**claude's points — three real, one wrong:**
+
+- *Auth alarm every 15 min.* Real, and a regression I introduced: a revoked key now
+  re-parks forever, and both `console.error` and the tower ERROR line fired each time.
+  Now raised once; later re-parks are tagged `(half-open retry failed)` so the tower logs
+  them quietly. Test added.
+- *`resetCircuitBreaker()` cancels the pending retry without reconnecting.* Real — my
+  `clearReconnectTimer()` made a standalone call worse than before the fix. Now schedules
+  a reconnect. Test added.
+- *Backoff framing.* **Claude's facts were wrong, its point was right.** It claimed "the
+  old ordering matched the documented formula and its existing test." There was no single
+  old ordering — pong/close incremented before, error/auth after, a 2-vs-2 inconsistency
+  where the same failure drew a different delay depending on which event surfaced first
+  (and for a WebSocket an `error` is *always* followed by a `close`, so it was arbitrary).
+  No existing test pins client scheduling either; the suite stayed green through the change.
+  But I *did* frame "unify an inconsistency" as "fix an off-by-one," and I unified on the
+  slower branch — the error path's first retry moves ~1.5s → ~2.5s. Docstring, PR body and
+  the section above now say that plainly. Immaterial next to a 20s watchdog, and trivially
+  revertible if the architect prefers the faster branch.
+- *Uncommitted round-2 work not in the PR.* Correct at the time it looked — it was
+  mid-flight. Committed now.
+
 ### Deliberately not done
 
 Issue ask #4 (rebuild the client object after K instant failures). `doConnect()` already
