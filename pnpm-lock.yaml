@@ -294,10 +294,11 @@ importers:
         version: 4.1.4(@types/node@22.19.17)(@vitest/coverage-v8@4.1.4)(jsdom@28.1.0)(vite@6.4.2(@types/node@22.19.17)(tsx@4.21.0))
 
   packages/sdk:
-    devDependencies:
+    dependencies:
       '@cluesmith/codev-types':
         specifier: workspace:*
         version: link:../types
+    devDependencies:
       '@types/node':
         specifier: 22.x
         version: 22.19.17

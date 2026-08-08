@@ -341,7 +341,7 @@ describe('spawn-worktree', () => {
   // baked `<cmd> --resume "<id>"` into .builder-start.sh. The fix threads a
   // harness-provided, pre-escaped `scriptFragment` through instead of
   // re-deriving the flag (which risked a comma-joined / word-split argv), and
-  // codex/gemini builders never reach this branch (resume === undefined → fresh
+  // codex/opencode builders never reach this branch (resume === undefined → fresh
   // role-injected script, no --resume).
   // =========================================================================
 

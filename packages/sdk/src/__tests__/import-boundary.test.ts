@@ -8,8 +8,12 @@ import { fileURLToPath } from 'node:url';
  * Node, and React Native (Metro). Shipped source therefore has zero Node
  * builtins, zero vscode imports, zero direct fetch calls (transport is an
  * injected adapter), zero DOM-global usage, and zero runtime dependencies.
- * `@cluesmith/codev-types` is type-only (erased at build). `@cluesmith/codev-core`
- * is forbidden outright: core and sdk never import each other.
+ * `@cluesmith/codev-types` is type-only (erased at build): it may appear in
+ * `dependencies` so published `.d.ts` files resolve for npm consumers (issue
+ * #1357), but no runtime code from it may ever load — every import and
+ * re-export of it must use the `import type` / `export type` form. Nothing
+ * else belongs in `dependencies`. `@cluesmith/codev-core` is forbidden
+ * outright: core and sdk never import each other.
  *
  * The single exception is `src/node/`, the explicitly Node-only adapter subpath
  * (`@cluesmith/codev-sdk/node`). It may use Node builtins; nothing outside it
@@ -56,6 +60,10 @@ const UNIVERSAL: Array<{ label: string; pattern: RegExp }> = [
   { label: 'fetch()', pattern: /\bfetch\s*\(/ },
   { label: '@cluesmith/codev-core', pattern: /['"]@cluesmith\/codev-core/ },
   { label: 'runtime import of @cluesmith/codev-types (must be `import type`)', pattern: /^import\s+(?!type\b)[^;]*['"]@cluesmith\/codev-types/m },
+  // `export { type X } from` is NOT equivalent: it emits a runtime re-export
+  // statement. Only the whole-statement `export type { ... } from` form is
+  // fully erased.
+  { label: 'runtime re-export of @cluesmith/codev-types (must be `export type`)', pattern: /^export\s+(?!type\b)[^;]*['"]@cluesmith\/codev-types/m },
 ];
 
 /** Additional rules for the environment-agnostic graph (everything outside src/node/). */
@@ -90,10 +98,32 @@ describe('import boundary', () => {
     expect(violations).toEqual([]);
   });
 
-  it('declares zero runtime dependencies', () => {
+  /**
+   * Intent: zero RUNTIME dependencies. `@cluesmith/codev-types` is the one
+   * allowed entry — it is a regular dependency only so published `.d.ts`
+   * files typecheck for npm consumers (issue #1357); the source rules above
+   * guarantee it is erased at build and never loaded at runtime.
+   */
+  it('declares no dependencies beyond the type-only contract package', () => {
     const pkg = JSON.parse(readFileSync(join(srcRoot, '..', 'package.json'), 'utf8')) as {
       dependencies?: Record<string, string>;
     };
-    expect(Object.keys(pkg.dependencies ?? {})).toEqual([]);
+    expect(Object.keys(pkg.dependencies ?? {})).toEqual(['@cluesmith/codev-types']);
+  });
+
+  /**
+   * Issue #1357: the controller subpath ships the overview wire types its
+   * consumers read (`getOverview` returns `OverviewData`), so integrations
+   * need no direct `@cluesmith/codev-types` dependency. Pin both presence
+   * and the erased `export type` form.
+   */
+  it('controller subpath re-exports the overview wire types type-only', () => {
+    const text = readFileSync(join(srcRoot, 'controller.ts'), 'utf8');
+    const match = text.match(/^export type \{([^}]*)\} from ['"]@cluesmith\/codev-types['"]/m);
+    expect(match, 'controller.ts must `export type { ... } from "@cluesmith/codev-types"`').not.toBeNull();
+    const names = match![1].split(',').map((name) => name.trim()).filter(Boolean);
+    for (const name of ['OverviewData', 'OverviewBuilder', 'OverviewPR', 'OverviewBacklogItem']) {
+      expect(names).toContain(name);
+    }
   });
 });

@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 import chalk from 'chalk';
 import { query as claudeQuery } from '@anthropic-ai/claude-agent-sdk';
 import { executeForgeCommandSync, loadForgeConfig, validateForgeConfig, resolveAllConcepts, type ConceptResolution } from '../lib/forge.js';
-import { detectHarnessFromCommand } from '../agent-farm/utils/harness.js';
+import { detectHarnessFromCommand, getRetirement } from '../agent-farm/utils/harness.js';
 import { auditPrGates, formatPrGateWarning } from '../lib/pr-gate-audit.js';
 import { auditStateFileIgnore } from '../lib/gitignore.js';
 import { auditFrameworkRefs, formatFrameworkRefFinding, hasFrameworkOverrides } from '../lib/framework-ref-audit.js';
@@ -794,15 +794,35 @@ export async function doctor(): Promise<number> {
     if (root) {
       const config = loadConfig(root) as Record<string, unknown>;
       const shell = config?.shell as Record<string, unknown> | undefined;
-      // Check explicit architectHarness or auto-detect from architect command
-      const architectHarness = shell?.architectHarness as string | undefined;
-      const architectCmd = Array.isArray(shell?.architect)
-        ? (shell.architect as string[]).join(' ')
-        : (shell?.architect as string ?? '');
-      const resolvedHarness = architectHarness ||
-        (architectCmd ? detectHarnessFromCommand(architectCmd) : undefined);
-      const isOpencode = resolvedHarness === 'opencode';
-      if (isOpencode) {
+      // Diagnose the harness a PERSISTED shell config selects for a role, WITHOUT
+      // CLI/env overrides (doctor reports on the persisted config, not a one-off
+      // `--architect-cmd`/`TOWER_*_CMD` run). Mirrors resolveHarness's precedence
+      // but never throws (doctor reports; it does not launch), and is shared by
+      // both role branches so they can't drift:
+      //   • explicit shell.<role>Harness — a same-named CUSTOM harness is the
+      //     sanctioned escape hatch and wins over retirement (built-in → custom →
+      //     retired), so an explicit `gemini` backed by a `harness.gemini`
+      //     definition is NOT flagged (following doctor's own advice clears it);
+      //   • auto-detected shell.<role> command — retirement applies regardless of
+      //     custom harnesses, because auto-detection resolves the built-in
+      //     namespace only (Issue #1338), so a bare `gemini …` command is flagged.
+      const customHarnesses = config?.harness as Record<string, unknown> | undefined;
+      const resolveShell = (role: 'architect' | 'builder'): { name: string | undefined; retirement: string | undefined } => {
+        const explicit = shell?.[`${role}Harness`] as string | undefined;
+        if (explicit) {
+          const hasCustom = !!customHarnesses && Object.prototype.hasOwnProperty.call(customHarnesses, explicit);
+          return { name: explicit, retirement: hasCustom ? undefined : getRetirement(explicit) };
+        }
+        const raw = shell?.[role];
+        const cmd = Array.isArray(raw) ? (raw as string[]).join(' ') : (raw as string ?? '');
+        const detected = cmd ? detectHarnessFromCommand(cmd) : undefined;
+        return { name: detected, retirement: detected ? getRetirement(detected) : undefined };
+      };
+      const architect = resolveShell('architect');
+      const builder = resolveShell('builder');
+
+      // --- Architect shell ---
+      if (architect.name === 'opencode') {
         console.log('');
         console.log(chalk.yellow('  ⚠') + ' OpenCode is configured as architect shell — this is unsupported.');
         console.log(chalk.yellow('    ') + 'OpenCode uses file-based role injection that requires an ephemeral worktree.');
@@ -813,25 +833,53 @@ export async function doctor(): Promise<number> {
           issue: 'OpenCode configured as architect shell (unsupported)',
           recommendation: 'Set shell.architect to "claude --dangerously-skip-permissions" in .codev/config.json',
         });
-      } else if (resolvedHarness === 'gemini') {
-        // Issue #929: gemini is builder-only; the Gemini CLI is retiring (#778),
-        // so it is no longer supported as an architect.
+      } else if (architect.retirement) {
+        // Issue #1338: the built-in gemini harness is retired for BOTH roles
+        // (Google ended consumer Gemini CLI access 2026-06-18). This branch
+        // previously claimed gemini was "supported for builders, not architects";
+        // that premise is now wrong — it is retired for builders too.
         console.log('');
-        console.log(chalk.yellow('  ⚠') + ' Gemini is configured as architect shell — this is unsupported.');
-        console.log(chalk.yellow('    ') + 'The Gemini CLI is retiring (#778); gemini is supported for builders, not architects.');
+        console.log(chalk.yellow('  ⚠') + ` ${architect.name} is configured as the architect shell — this harness is retired.`);
+        console.log(chalk.yellow('    ') + architect.retirement);
         console.log(chalk.yellow('    ') + 'Use codex or claude for the architect (e.g., "codex" or "claude --dangerously-skip-permissions").');
         warnings++;
         warningDetails.push({
           name: 'Shell config',
-          issue: 'Gemini configured as architect shell (builder-only, not architect)',
-          recommendation: 'Set shell.architect to "codex" or "claude --dangerously-skip-permissions" in .codev/config.json',
+          issue: `${architect.name} configured as architect shell (harness retired)`,
+          // Cover both selectors: an explicit shell.architectHarness beats the
+          // shell.architect command, so switching only the command wouldn't help.
+          // The custom-harness name is the configured (retired) harness, not a
+          // hard-coded "gemini", so the advice stays correct if another harness is
+          // ever retired (RETIRED_HARNESSES is extensible).
+          recommendation: `Set shell.architect / shell.architectHarness to "codex" or "claude --dangerously-skip-permissions" in .codev/config.json, or define a custom "${architect.name}" harness and select it explicitly via shell.architectHarness (a bare shell.architect command stays retired)`,
         });
-      } else if (resolvedHarness === 'codex') {
+      } else if (architect.name === 'codex') {
         // Issue #929: codex is a supported architect (config-driven).
         console.log('');
         console.log(chalk.green('  ✓') + ' codex is configured as architect shell — supported.');
         console.log(chalk.gray('    ') + 'Conversation resume is Claude-main-only; codex architects relaunch fresh with role injection.');
         console.log(chalk.gray('    ') + 'Select the architect harness via .codev/config.json (shell.architect / shell.architectHarness).');
+      }
+
+      // --- Builder shell (#1338) ---
+      // A retired builder harness fails closed at spawn (Phase 2); doctor flags
+      // the persisted config proactively so users learn before a spawn is rejected.
+      if (builder.retirement) {
+        console.log('');
+        console.log(chalk.yellow('  ⚠') + ` ${builder.name} is configured as the builder shell — this harness is retired.`);
+        console.log(chalk.yellow('    ') + builder.retirement);
+        console.log(chalk.yellow('    ') + 'Use claude, codex, or opencode for builders (set shell.builder / shell.builderHarness in .codev/config.json).');
+        warnings++;
+        warningDetails.push({
+          name: 'Shell config',
+          issue: `${builder.name} configured as builder shell (harness retired)`,
+          // Cover both selectors: an explicit shell.builderHarness beats the
+          // shell.builder command, so switching only the command wouldn't help.
+          // The custom-harness name is the configured (retired) harness, not a
+          // hard-coded "gemini", so the advice stays correct if another harness is
+          // ever retired (RETIRED_HARNESSES is extensible).
+          recommendation: `Set shell.builder / shell.builderHarness to a supported harness (claude, codex, or opencode) in .codev/config.json, or define a custom "${builder.name}" harness and select it explicitly via shell.builderHarness (a bare shell.builder command stays retired)`,
+        });
       }
     }
   } catch {

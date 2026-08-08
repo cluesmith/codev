@@ -90,6 +90,11 @@ vi.mock('chalk', () => {
       red: createChainableColor(),
       blue: identity,
       dim: identity,
+      // #1338: the codex-architect "supported" branch calls chalk.gray (doctor.ts).
+      // Without this, chalk.gray throws into the shell-section catch {}, aborting
+      // before the builder branch runs — which made the supported-config test below
+      // pass vacuously (it never reached the path it guards).
+      gray: createChainableColor(),
     },
   };
 });
@@ -654,6 +659,160 @@ describe('doctor command', () => {
         line.includes('Project structure OK')
       );
       expect(hasOk).toBe(true);
+    });
+  });
+
+  // Issue #1338 — codev doctor flags a retired harness (gemini) on BOTH the
+  // architect and builder shells, and no longer claims gemini is "supported for
+  // builders". The structured issue/recommendation (rendered in the warning
+  // summary) is the assertion target — stabler than the inline console text.
+  describe('shell-harness retirement flagging (#1338)', () => {
+    const testBaseDir = path.join(tmpdir(), `codev-doctor-1338-${Date.now()}`);
+    let originalCwd: string;
+
+    beforeEach(() => {
+      originalCwd = process.cwd();
+      // `codev/` marks the workspace root for doctor's findWorkspaceRoot;
+      // `.codev/config.json` is what loadConfig reads for the shell config.
+      fs.mkdirSync(path.join(testBaseDir, 'codev'), { recursive: true });
+      fs.mkdirSync(path.join(testBaseDir, '.codev'), { recursive: true });
+    });
+
+    afterEach(() => {
+      process.chdir(originalCwd);
+      if (fs.existsSync(testBaseDir)) {
+        fs.rmSync(testBaseDir, { recursive: true });
+      }
+    });
+
+    // Every dependency present so doctor() runs through to the shell-config
+    // section without bailing early on a missing tool.
+    async function runDoctorWith(config: object): Promise<string[]> {
+      fs.writeFileSync(path.join(testBaseDir, '.codev', 'config.json'), JSON.stringify(config));
+      process.chdir(testBaseDir);
+      vi.mocked(execSync).mockImplementation((cmd: string) => {
+        if (cmd.includes('gh auth status')) return Buffer.from('Logged in');
+        return Buffer.from('/usr/bin/command');
+      });
+      vi.mocked(spawnSync).mockImplementation((cmd: string) => {
+        const responses: Record<string, string> = {
+          node: 'v20.0.0', tmux: 'tmux 3.4', git: 'git version 2.40.0',
+          claude: '1.0.0', codex: '0.60.0',
+        };
+        return {
+          status: 0,
+          stdout: responses[cmd] || 'working',
+          stderr: '',
+          signal: null,
+          output: [null, responses[cmd] || 'working', ''],
+          pid: 0,
+        };
+      });
+      vi.resetModules();
+      const logOutput: string[] = [];
+      vi.spyOn(console, 'log').mockImplementation((...args) => {
+        logOutput.push(args.join(' '));
+      });
+      const { doctor } = await import('../commands/doctor.js');
+      await doctor();
+      return logOutput;
+    }
+
+    it('flags a gemini BUILDER config as retired via the structured issue/recommendation', async () => {
+      const out = await runDoctorWith({ shell: { builder: 'gemini --yolo' } });
+      expect(out.some((l) => l.includes('gemini configured as builder shell (harness retired)'))).toBe(true);
+      // Recommendation names BOTH selectors — an explicit shell.builderHarness beats
+      // the shell.builder command, so switching only one wouldn't clear it (#1338).
+      expect(out.some((l) => l.includes('Set shell.builder / shell.builderHarness to a supported harness'))).toBe(true);
+      // The custom-harness escape hatch names the EXPLICIT selector (#1338): a bare
+      // shell.builder "gemini" stays retired, so the rec points at shell.builderHarness.
+      // ("via" is unique to the recommendation; the retirement message uses "with".)
+      expect(out.some((l) => l.includes('select it explicitly via shell.builderHarness'))).toBe(true);
+      // Locks the RENDERED custom-harness clause for the configured retired harness.
+      // (This assertion can't by itself prove the `${role.name}` interpolation — with a
+      // single RETIRED_HARNESSES entry it reads identically to a hard-coded literal; the
+      // interpolation is verified by inspection and shares the pattern of the
+      // already-asserted console/issue lines above. #1338.)
+      expect(out.some((l) => l.includes('define a custom "gemini" harness'))).toBe(true);
+      // The single-source-of-truth retirement explanation is surfaced (2026-06-18 cause).
+      expect(out.some((l) => l.includes('2026-06-18'))).toBe(true);
+    });
+
+    it('flags a gemini ARCHITECT config as retired and never claims builder support', async () => {
+      const out = await runDoctorWith({ shell: { architect: 'gemini --yolo' } });
+      expect(out.some((l) => l.includes('gemini configured as architect shell (harness retired)'))).toBe(true);
+      expect(out.some((l) => l.includes('Set shell.architect / shell.architectHarness to "codex"'))).toBe(true);
+      // The custom-harness escape hatch names the EXPLICIT architect selector (#1338).
+      expect(out.some((l) => l.includes('select it explicitly via shell.architectHarness'))).toBe(true);
+      // Locks the RENDERED custom-harness clause for the configured retired harness
+      // (not a proof of the `${role.name}` interpolation — see the builder test's note). #1338.
+      expect(out.some((l) => l.includes('define a custom "gemini" harness'))).toBe(true);
+      // The inverted pre-retirement message must be gone.
+      expect(out.some((l) => l.includes('supported for builders'))).toBe(false);
+      expect(out.some((l) => l.includes('builder-only'))).toBe(false);
+    });
+
+    it('detects gemini via explicit builderHarness, not only the command form', async () => {
+      const out = await runDoctorWith({ shell: { builder: 'some-wrapper', builderHarness: 'gemini' } });
+      expect(out.some((l) => l.includes('gemini configured as builder shell (harness retired)'))).toBe(true);
+    });
+
+    it('does NOT flag a supported-harness config (claude builder + codex architect)', async () => {
+      const out = await runDoctorWith({ shell: { builder: 'claude', architect: 'codex' } });
+      // Non-vacuity guard (#1338). The codex-architect branch prints the "supported"
+      // line, THEN two chalk.gray lines, THEN control falls through to the builder
+      // branch. Without the chalk.gray mock, gray throws into the section's catch {}
+      // right after "supported" — skipping the builder branch entirely and making the
+      // "not flagged" checks below vacuous. The "supported" line alone can't detect
+      // that (it prints before the throw), so assert a line printed AFTER the gray
+      // calls: its presence proves the section ran to completion and the builder
+      // branch was actually reached.
+      expect(out.some((l) => l.includes('codex is configured as architect shell') && l.includes('supported'))).toBe(true);
+      expect(out.some((l) => l.includes('Select the architect harness via .codev/config.json'))).toBe(true);
+      expect(out.some((l) => l.includes('harness retired'))).toBe(false);
+      expect(out.some((l) => l.includes('supported for builders'))).toBe(false);
+    });
+
+    // The sanctioned escape hatch (#1338): an EXPLICIT shell.builderHarness "gemini"
+    // backed by a matching custom `harness.gemini` definition resolves and spawns
+    // fine (resolveHarness precedence: built-in → custom → retired), so doctor must
+    // NOT flag it — otherwise following the retirement advice ("configure a custom
+    // harness") would leave the warning stuck on. Mirrors the resolver's escape-hatch
+    // case in harness.test.ts.
+    it('does NOT flag an explicit custom gemini BUILDER harness (escape hatch)', async () => {
+      const out = await runDoctorWith({
+        shell: { builderHarness: 'gemini' },
+        harness: { gemini: { roleArgs: [], roleScriptFragment: '' } },
+      });
+      expect(out.some((l) => l.includes('builder shell (harness retired)'))).toBe(false);
+      expect(out.some((l) => l.includes('2026-06-18'))).toBe(false);
+    });
+
+    it('does NOT flag an explicit custom gemini ARCHITECT harness (escape hatch)', async () => {
+      const out = await runDoctorWith({
+        shell: { architectHarness: 'gemini' },
+        harness: { gemini: { roleArgs: [], roleScriptFragment: '' } },
+      });
+      expect(out.some((l) => l.includes('architect shell (harness retired)'))).toBe(false);
+      expect(out.some((l) => l.includes('2026-06-18'))).toBe(false);
+    });
+
+    // The distinction that keeps the escape hatch safe: auto-detection resolves the
+    // BUILT-IN namespace only, so a bare `gemini …` command is retired even when a
+    // same-named custom harness exists (matches resolveHarness in harness.ts). Doctor
+    // must keep flagging it — otherwise it would green-light a config that fails
+    // closed at spawn.
+    it('STILL flags an auto-detected gemini command even when a custom gemini harness exists', async () => {
+      const out = await runDoctorWith({
+        shell: { builder: 'gemini --yolo' },
+        harness: { gemini: { roleArgs: [], roleScriptFragment: '' } },
+      });
+      expect(out.some((l) => l.includes('gemini configured as builder shell (harness retired)'))).toBe(true);
+    });
+
+    it('flags an array-form gemini builder command (parity with the resolver)', async () => {
+      const out = await runDoctorWith({ shell: { builder: ['gemini', '--yolo'] } });
+      expect(out.some((l) => l.includes('gemini configured as builder shell (harness retired)'))).toBe(true);
     });
   });
 

@@ -60,9 +60,17 @@ export interface CrashLoopFallback {
  * Returning null (or omitting the option entirely) means "relaunch with the
  * args as they stand" — correct for sessions that have no recovery concept,
  * such as plain shells.
+ *
+ * Returning `{ stop: true }` means "do NOT relaunch — end the session instead."
+ * next() can only influence the args/env; the launch `command` is retained by
+ * SessionManager. So when the harness has become invalid since launch (Issue
+ * #1338: a retired harness, whose retained command may itself be the retired
+ * binary), rerunning would be fail-open. `stop` lets the factory fail closed:
+ * SessionManager tears the session down with a visible reason rather than
+ * respawning the retired command.
  */
 export interface FreshLaunch {
-  next: () => { args: string[]; env?: Record<string, string> } | null;
+  next: () => { args: string[]; env?: Record<string, string> } | { stop: true } | null;
 }
 
 export interface CreateSessionOptions {
@@ -1173,6 +1181,22 @@ export class SessionManager extends EventEmitter {
           return;
         }
         const fresh = session.options.freshLaunch?.next() ?? null;
+        if (fresh && 'stop' in fresh) {
+          // Issue #1338: the harness resolved to a RETIRED one after this session
+          // launched (a custom `gemini` harness later removed, or a config edit
+          // before this clean exit). next() cannot change the launch `command`,
+          // only the args/env — and the retained command may itself be the retired
+          // binary, so rerunning it would be fail-open. Fail closed: do not respawn.
+          // End the session and surface the reason in the pane (session-gave-up →
+          // PtySession.notice), the same visible-teardown UX as the fast-exit valve.
+          const reason =
+            `Not relaunching '${session.options.command}' after a clean exit: its harness has been ` +
+            `retired. Reconfigure the architect to a supported harness and respawn.`;
+          this.log(`Session ${sessionId} not rerun (harness retired): ${reason}`);
+          this.emit('session-gave-up', sessionId, reason);
+          this.removeDeadSession(sessionId);
+          return;
+        }
         if (fresh) {
           session.options.args = fresh.args;
           if (fresh.env) session.options.env = fresh.env;
