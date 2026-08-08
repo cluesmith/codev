@@ -1,7 +1,7 @@
 id: bugfix-1372
 title: tunnel-client-wedges-after-sus
 protocol: bugfix
-phase: fix
+phase: pr
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -11,4 +11,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-08-08T22:18:55.516Z'
-updated_at: '2026-08-08T22:23:36.701Z'
+updated_at: '2026-08-08T22:30:58.822Z'
