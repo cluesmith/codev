@@ -25,7 +25,7 @@ import {
   CRASH_RESUME_NUDGE,
   SESSION_ID_EXPR,
 } from '../commands/spawn-worktree.js';
-import { CLAUDE_HARNESS, CODEX_HARNESS, GEMINI_HARNESS, OPENCODE_HARNESS } from '../utils/harness.js';
+import { CLAUDE_HARNESS, BUILTIN_HARNESSES } from '../utils/harness.js';
 import { harnessFromLaunchScript } from '../commands/reset/context.js';
 
 const SPAWN_ID = 'aaaaaaaa-1111-2222-3333-444444444444';
@@ -193,10 +193,16 @@ describe('PIR #1233 — crash restarts resume the conversation', () => {
 
 describe('PIR #1233 — harness gating', () => {
   it('only the Claude harness offers script-form session support', () => {
+    // Iterate the live roster rather than naming harnesses, so a retired or
+    // added built-in (e.g. gemini's retirement, #1338) can't strand this test.
+    for (const [name, harness] of Object.entries(BUILTIN_HARNESSES)) {
+      if (name === 'claude') {
+        expect(scriptSessionForms(harness)).toBeDefined();
+      } else {
+        expect(scriptSessionForms(harness)).toBeUndefined();
+      }
+    }
     expect(scriptSessionForms(CLAUDE_HARNESS)).toBeDefined();
-    expect(scriptSessionForms(CODEX_HARNESS)).toBeUndefined();
-    expect(scriptSessionForms(GEMINI_HARNESS)).toBeUndefined();
-    expect(scriptSessionForms(OPENCODE_HARNESS)).toBeUndefined();
   });
 
   it('claude renders pin/resume fragments around the caller-supplied id expression', () => {
