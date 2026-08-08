@@ -245,6 +245,34 @@ Two patterns, both mine:
 
 The consultation loop caught all four. Solo review would have shipped every one.
 
+### CMAP round 4 — converged
+
+| Lane | Verdict |
+|---|---|
+| gemini | APPROVE — no issues |
+| codex | COMMENT — no defects |
+| claude | COMMENT — no blocking |
+
+**First round with no defect in the code.** Both commenting lanes raised polish:
+
+- *codex:* PR body carried stale counts ("seven new tests"; pre-round-3 suite total) — real
+  figure is 15. And the blackhole test was named "tears down **and reschedules**" while only
+  asserting the teardown; a watchdog that only tore down would trade a wedged `connecting`
+  for a wedged `disconnected`. Added the reschedule assertion. Fixed in `35cbf328`.
+- *claude:* two points were races with in-flight work (now committed). The third was real:
+  `cleanup()` called `ws.close()` *before* nulling `this.ws`, so the watchdog's reason
+  survived only because `ws` happens to defer abortHandshake's error via `process.nextTick`.
+  Inverted to detach-then-close, removing the dependency on a third party's internals
+  rather than commenting on it (`573dae73`).
+
+Left undone, flagged for the architect: the tower UI cloud chip briefly flickers
+`auth failed → connecting… → auth failed` every 15 min. Inherent to half-opening, and only
+with a genuinely revoked key.
+
+**Final state:** 4579 tests passing, build green, 16 mutation-verified regression tests
+(14 client-side, 2 tower-side — the first coverage `tower-tunnel.ts` had for either
+behaviour). Four CMAP rounds, twelve lane-runs.
+
 ### Deliberately not done
 
 Issue ask #4 (rebuild the client object after K instant failures). `doConnect()` already
