@@ -145,6 +145,16 @@ export function filterHopByHopHeaders(
 }
 
 /**
+ * Make a remote-supplied WebSocket close reason safe to log: strip control
+ * characters (no forged log lines) and cap the length. Exported for testing.
+ */
+export function sanitizeCloseReason(reason: string): string {
+  // eslint-disable-next-line no-control-regex
+  const stripped = reason.replace(/[\u0000-\u001f\u007f]/g, ' ').trim();
+  return stripped.length > 120 ? `${stripped.slice(0, 120)}…` : stripped;
+}
+
+/**
  * Build the WebSocket tunnel URL from the server URL.
  * https:// → wss://, http:// → ws://
  */
@@ -418,7 +428,18 @@ export class TunnelClient {
 
     const wsUrl = buildTunnelWsUrl(this.options.serverUrl);
 
-    const ws = new WebSocket(wsUrl);
+    // A synchronous throw here (malformed URL, exhausted fds) would otherwise
+    // leave the client in `connecting` with no watchdog armed — the very wedge
+    // this fix exists to prevent.
+    let ws: WebSocket;
+    try {
+      ws = new WebSocket(wsUrl);
+    } catch (err) {
+      this.consecutiveFailures++;
+      this.setState('disconnected', `websocket construction failed: ${(err as Error).message}`);
+      this.scheduleReconnect();
+      return;
+    }
     this.ws = ws;
 
     // Watchdog (#1372): tear down and reschedule any attempt that neither
@@ -450,7 +471,7 @@ export class TunnelClient {
       // Ignore events from stale WebSockets (e.g. after disconnect + reconnect)
       if (ws !== this.ws) return;
       if (this.state === 'connected' || this.state === 'connecting') {
-        const detail = reasonBuf?.length ? `: ${reasonBuf.toString()}` : '';
+        const detail = reasonBuf?.length ? `: ${sanitizeCloseReason(reasonBuf.toString())}` : '';
         this.cleanup();
         this.consecutiveFailures++;
         this.setState('disconnected', `websocket closed (code ${code}${detail})`);
@@ -460,12 +481,21 @@ export class TunnelClient {
   }
 
   private onWsOpen(ws: WebSocket): void {
+    // Ignore a stale socket (e.g. one the connect watchdog already tore down)
+    if (ws !== this.ws) return;
+
     // Send JSON auth message (TICK-001 protocol)
     ws.send(JSON.stringify({ type: 'auth', apiKey: this.options.apiKey }));
 
     // Wait for auth response
     const onMessage = (data: WebSocket.RawData) => {
       ws.removeListener('message', onMessage);
+
+      // The watchdog tears attempts down mid-flight, so an `auth_ok` queued
+      // before cleanup can still arrive here. Without this guard it would
+      // resurrect a dead socket: startH2Server() would clobber the h2 handles
+      // and flip the state back to `connected` while a reconnect is pending.
+      if (ws !== this.ws) return;
 
       try {
         const msg = JSON.parse(data.toString());
@@ -543,6 +573,10 @@ export class TunnelClient {
   }
 
   private startH2Server(ws: WebSocket): void {
+    // Belt and braces alongside the onWsOpen guard — never build h2 state on a
+    // socket the client has already moved on from.
+    if (ws !== this.ws) return;
+
     // Convert WebSocket to a Node.js duplex stream
     const wsStream = createWebSocketStream(ws);
     this.wsStream = wsStream;
@@ -555,8 +589,13 @@ export class TunnelClient {
     this.h2Server = h2Server;
 
     h2Server.on('session', (session: http2.ServerHttp2Session) => {
+      // The session lands a tick later; the attempt may have been torn down since.
+      if (ws !== this.ws) {
+        session.destroy();
+        return;
+      }
       this.h2Session = session;
-      this.setState('connected');
+      this.setState('connected', 'h2 session established');
       this.startHeartbeat(ws);
     });
 

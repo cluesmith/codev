@@ -19,6 +19,7 @@ import {
   PONG_TIMEOUT_MS,
   CONNECT_TIMEOUT_MS,
   AUTH_RETRY_INTERVAL_MS,
+  sanitizeCloseReason,
 } from '../lib/tunnel-client.js';
 import { MockTunnelServer } from './helpers/mock-tunnel-server.js';
 
@@ -1083,6 +1084,55 @@ describe('#1372 self-healing', () => {
     expect(doConnect).toHaveBeenCalledTimes(2);
 
     c.disconnect();
+  });
+
+  /**
+   * The watchdog tears attempts down mid-flight, so an `auth_ok` queued before
+   * cleanup can still arrive. Unguarded it would resurrect the dead socket —
+   * clobbering the h2 handles and flipping state back to `connected` while a
+   * reconnect is already pending. (Raised by codex in CMAP review of #1373.)
+   */
+  it('ignores a late auth response from a timed-out attempt', () => {
+    vi.useFakeTimers();
+    const c = createClient();
+
+    // Stand in for the socket the watchdog is about to discard.
+    const staleWs = createMockWs();
+    (staleWs as unknown as { send: () => void }).send = vi.fn();
+    (c as unknown as { ws: WebSocket | null }).ws = staleWs;
+    (c as unknown as { state: string }).state = 'connecting';
+
+    const priv = c as unknown as {
+      onWsOpen: (ws: WebSocket) => void;
+      startH2Server: (ws: WebSocket) => void;
+      ws: WebSocket | null;
+    };
+    const startH2Server = vi.spyOn(priv, 'startH2Server');
+
+    priv.onWsOpen(staleWs);
+
+    // Watchdog fires: cleanup() drops the socket and the client moves on.
+    priv.ws = null;
+    (c as unknown as { state: string }).state = 'disconnected';
+
+    // The in-flight auth_ok lands after the teardown.
+    staleWs.emit('message', Buffer.from(JSON.stringify({ type: 'auth_ok', towerId: 'zombie' })));
+
+    expect(startH2Server).not.toHaveBeenCalled();
+    expect(c.getState()).toBe('disconnected');
+    expect((c as unknown as { h2Session: unknown }).h2Session).toBeNull();
+    expect((c as unknown as { wsStream: unknown }).wsStream).toBeNull();
+
+    c.disconnect();
+  });
+
+  it('sanitizes a remote-supplied close reason before logging it', () => {
+    // A relay could otherwise forge log lines through the close frame.
+    expect(sanitizeCloseReason('going away\nTunnel: connected → forged')).toBe(
+      'going away Tunnel: connected → forged',
+    );
+    expect(sanitizeCloseReason('a'.repeat(200))).toHaveLength(121); // 120 + ellipsis
+    expect(sanitizeCloseReason('  tidy  ')).toBe('tidy');
   });
 
   it('state transitions carry a failure reason', async () => {

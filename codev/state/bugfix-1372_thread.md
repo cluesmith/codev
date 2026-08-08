@@ -120,6 +120,41 @@ upgrade) under `vi.useFakeTimers({ shouldAdvanceTime: true })`. The auth half-op
 driven through the private handler with plain fake timers — mixing a 15-minute fake clock
 with real socket I/O was flaky, and the heartbeat tests already established that idiom.
 
+### CMAP round 1 (PR #1373)
+
+| Lane | Verdict |
+|---|---|
+| gemini | APPROVE — no issues |
+| claude | APPROVE — three minor, non-blocking |
+| codex | **REQUEST_CHANGES** — one real defect |
+
+**codex was right, and it's a defect my own watchdog introduced.** `onWsOpen`'s `onMessage`
+had no `ws === this.ws` guard, unlike the `error`/`close` handlers. Before this PR nothing
+tore an attempt down mid-flight, so the hole was latent; the watchdog makes it reachable —
+an `auth_ok` queued before `cleanup()` could call `startH2Server()`, clobber the h2 handles
+and flip state back to `connected` on a dead socket while a reconnect was already pending.
+Exactly the "wedged internal state" the issue speculated about, and I'd have shipped it.
+
+Fixed with stale guards in `onWsOpen`, `onMessage`, `startH2Server`, and the h2 `session`
+callback (which destroys the late session). Regression test added; mutation-verified — with
+the guard removed the test fails.
+
+From claude, applied:
+- `new WebSocket()` wrapped in try/catch. A synchronous throw would have left `connecting`
+  unbounded with no watchdog armed — the same wedge class this PR exists to close.
+- `sanitizeCloseReason()` strips control characters and caps length. The close-frame reason
+  is remote-supplied and was being logged verbatim (log-forging vector).
+
+### Correction to my own framing (claude's third point, verified)
+
+I implied the auth breaker addresses the observed incident. It does not. `auth_failed` is
+reachable **only** from an explicit `{type:'auth_error', reason:'invalid_api_key'}` JSON
+frame. A Cloudflare 5xx/HTML body fails `JSON.parse` and routes to `handleConnectionError`
+(transient, retries); a failed upgrade never opens the socket at all. So the issue's
+hypothesis — "a proxy error page misclassified as an auth error" — cannot happen on this
+code path. The half-open breaker is **defensive hardening, not the corrective fix**; the
+watchdog is what resolves the reported wedge. PR body corrected to say so.
+
 ### Deliberately not done
 
 Issue ask #4 (rebuild the client object after K instant failures). `doConnect()` already
