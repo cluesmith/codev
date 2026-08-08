@@ -55,6 +55,18 @@ const HOP_BY_HOP_HEADERS = new Set([
 const BLOCKED_PATH_PREFIX = '/api/tunnel/';
 
 /**
+ * Matches an `api/tunnel/` segment anywhere in a normalized path, not just at
+ * the root (#1370).
+ *
+ * A root-anchored prefix check misses the workspace-scoped form the dashboard
+ * actually uses — `/workspace/<base64url>/api/tunnel/disconnect` — which
+ * `handleWorkspaceRoutes` strips and dispatches to the very same
+ * `handleTunnelEndpoint`. That path sailed through this blocklist and
+ * deregistered the tower.
+ */
+const BLOCKED_PATH_SEGMENT = /(^|\/)api\/tunnel\//;
+
+/**
  * Header stamped on every request this client proxies in from the cloud (#1370).
  *
  * Requests reaching Tower through the tunnel arrive over localhost, so the
@@ -114,10 +126,10 @@ export function isBlockedPath(path: string): boolean {
     const decoded = decodeURIComponent(path);
     // Collapse duplicate slashes and resolve . / .. segments
     const normalized = new URL(decoded, 'http://localhost').pathname;
-    return normalized.startsWith(BLOCKED_PATH_PREFIX);
+    return BLOCKED_PATH_SEGMENT.test(normalized);
   } catch {
     // If decoding fails, check the raw path as a fallback (fail closed)
-    return path.startsWith(BLOCKED_PATH_PREFIX);
+    return path.startsWith(BLOCKED_PATH_PREFIX) || BLOCKED_PATH_SEGMENT.test(path);
   }
 }
 

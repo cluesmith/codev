@@ -61,3 +61,60 @@ them into the main checkout.)
 - `packages/codev` build + full suite via `porch check 1370`
 - `apps/web` vitest (CloudStatus)
 - `apps/vscode` `tsc --noEmit`
+
+## Incident #3 (22:29:15Z) — root cause found
+
+Architect reported a third full deregistration **with the laptop lid closed**,
+which exonerates every click-gated caller and kills the misclick theory.
+Reprioritized per instruction: attribution logging first, defense-in-depth as
+the actual fix, plus a new cloud-edge authentication audit.
+
+### The bypass
+
+`tower-routes.ts:2063` — `handleWorkspaceRoutes` strips the workspace prefix and
+dispatches to the *same* `handleTunnelEndpoint`:
+
+```ts
+if (subPath.startsWith('api/tunnel/')) {
+  const tunnelSub = subPath.slice('api/tunnel/'.length);
+  await handleTunnelEndpoint(req, res, tunnelSub);
+}
+```
+
+`isBlockedPath` only tested `normalized.startsWith('/api/tunnel/')` — root-anchored.
+So the workspace-scoped form sails through:
+
+| Path | Tunnel blocklist |
+|---|---|
+| `/api/tunnel/disconnect` | BLOCKED |
+| `/workspace/<base64url>/api/tunnel/disconnect` | **ALLOWED THROUGH TUNNEL** |
+
+A request arriving over the h2-over-websocket tunnel on that path reaches
+`handleTunnelEndpoint`, deregisters the tower server-side and deletes the local
+credentials. No local user required — consistent with a lid-closed incident.
+
+Fixed by matching an `api/tunnel/` segment at any depth. The Tower-side rejection
+added earlier is the more robust layer: it keys off the stamped
+`x-codev-tunnel-proxy` header and is enforced inside `handleTunnelEndpoint`,
+where both dispatch paths converge, so it holds even if a third route appears.
+
+### Authentication audit (new scope item) — NOT properly gated
+
+- `isRequestAllowed()` (`server-utils.ts:80`) unconditionally returns `true`. Its
+  own comment: "security is handled by the server binding to localhost only."
+- The tunnel invalidates that premise — `TunnelClient` proxies cloud-originated
+  requests *into* `localhost:4100`, so localhost binding no longer implies a
+  local actor.
+- No `401` exists anywhere in the Tower server. The `codev-web-key` / `authFetch`
+  machinery in `tower.html` sends headers Tower never checks.
+
+So all authentication for tunnel-borne requests lives at the codevos.ai edge,
+outside this repo. If the public `/t/<tower>/` URL is reachable unauthenticated,
+an internet actor reaches every Tower API endpoint — not only the tunnel ones.
+That check has to happen cloud-side; I could not verify it from here.
+
+### Open question
+
+Nothing in this repo auto-calls disconnect, so what at the edge issued the POST
+during the reconnect storm is still unknown. Recommended the cloud-side access
+log for `/workspace/*/api/tunnel/disconnect` around 22:29:15Z.

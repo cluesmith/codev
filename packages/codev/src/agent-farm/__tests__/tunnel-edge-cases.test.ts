@@ -188,6 +188,38 @@ describe('tunnel edge cases (Phase 7)', () => {
     });
   });
 
+  describe('workspace-scoped tunnel path (#1370)', () => {
+    // The regression that let a tunnel-borne request deregister the tower:
+    // /workspace/<enc>/api/tunnel/disconnect is stripped by
+    // handleWorkspaceRoutes and dispatched to handleTunnelEndpoint, but the
+    // blocklist only looked at the root-anchored prefix.
+    it('returns 403 for /workspace/<enc>/api/tunnel/disconnect through tunnel', async () => {
+      await setup();
+      client.connect();
+      await waitFor(() => client.getState() === 'connected');
+
+      const enc = Buffer.from('/Users/me/proj').toString('base64url');
+      const response = await mockServer.sendRequest({
+        method: 'POST',
+        path: `/workspace/${enc}/api/tunnel/disconnect`,
+      });
+
+      expect(response.status).toBe(403);
+      expect(JSON.parse(response.body).error).toContain('local-only');
+    });
+
+    it('still proxies other workspace-scoped API paths', async () => {
+      await setup();
+      client.connect();
+      await waitFor(() => client.getState() === 'connected');
+
+      const enc = Buffer.from('/Users/me/proj').toString('base64url');
+      const response = await mockServer.sendRequest({ path: `/workspace/${enc}/api/state` });
+
+      expect(response.status).toBe(200);
+    });
+  });
+
   describe('tunnel proxy marker header (#1370)', () => {
     it('stamps x-codev-tunnel-proxy on proxied requests', async () => {
       await setup();
