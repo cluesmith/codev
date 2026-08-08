@@ -564,3 +564,68 @@ install). `porch status` reports `pr` gate pending since 05:46Z.
 Nothing further for me to do autonomously: the gate is a human decision and I do not call
 `porch approve`. Architect notified. Stopping until approval arrives, then I merge and
 enter verify.
+
+## 2026-08-05 — PR #1335 MERGED. Entering verify.
+
+Waleed approved the `pr` gate; architect relayed. `porch approve 1307 pr
+--a-human-explicitly-approved-this` passed all four criteria (incl. a fresh 41s e2e).
+That approval commit re-triggered CI — all six checks green again — and #1335 merged as
+`63ea19e9` at 04:29Z with a real merge commit (never squash).
+
+Worktree is now `origin/main` + this branch (`78fbf301`), so verification runs against the
+integrated tree, not my branch in isolation.
+
+**Verify items still outstanding, both gated on a local install:**
+1. Live sibling-architect `/arch-save` probe — the one thing unit tests structurally cannot
+   prove. The P2 defect from plan CMAP (bare `architect` resolving to main/first-registered,
+   so a sibling's save would clear MAIN's terminal) is fixed by addressing
+   `architect:<name>` explicitly; only a real two-architect run demonstrates the fix holds
+   end-to-end. This is exactly the lessons-critical "it compiled ≠ it works" case.
+2. 15s delay calibration — the budget is measured from send, while the clear only lands
+   after the turn ends, so the number has to be checked against real send→session-ready
+   timing, not send→clear-sent.
+
+Both need `pnpm -w run local-install` for Tower to be running the merged code. That restarts
+Tower, which is the architect's call and not mine to make unilaterally — asked for it rather
+than running it. Holding `porch done 1307` until the two probes actually run; signalling
+verify-ready on an uninstalled build would be the "asserting something adjacent to the
+truth" failure this thread already recorded once.
+
+**Hold confirmed (04:31Z).** Architect: the local-install / Tower restart is queued with
+Waleed and won't run without his explicit go-ahead; they'll message when the new build is
+live. So the verify wait is tracked, not dropped — no polling from me. Idle until then.
+
+## 2026-08-08 — VERIFY APPROVED. PROTOCOL COMPLETE.
+
+Shellper died in today's Tower restart and was revived via `afx workspace recover`;
+re-oriented from this file. Worktree was intact at `0bad65d6`, nothing lost.
+
+Porch was still parked in `review` — the merge had been recorded but the phase never
+advanced, because `porch done 1307` was deliberately withheld pending the live probes.
+Ran it now: all four criteria green (incl. a 47s e2e), advanced to `verify`, then
+`porch approve 1307 verify-approval --a-human-explicitly-approved-this`. **Protocol
+complete.**
+
+**Waleed's live e2e — the part unit tests structurally could not prove:**
+- Sibling-architect routed send delivered in **9s**
+- `--delay 20` held Tower-side, delivered at **+24s**
+- Full `/arch-save` cycle on `probe-1307`, with fresh-session proof; probe torn down clean
+
+This closes the P2 defect from plan CMAP for real: a sibling architect's save cleared its
+OWN terminal, not main's. That was the finding one word away from destroying the context of
+someone who never invoked anything, and the only proof that mattered was two real
+architects in a real workspace.
+
+**Calibration read on the shipped 15s default** — the numbers support it rather than
+contradict it. Delayed delivery runs ~4s over nominal (20 → 24), and ordinary routed
+delivery is ~9s, so a 15s delay lands around 19s: past the clear, with margin, provided the
+turn ends promptly. The skill doc already frames 15s honestly ("a value chosen because it
+works in practice, not a guarantee"), so nothing there is now false. Flagged to the
+architect that the measured numbers could be folded into that paragraph as evidence — but
+did NOT open a follow-up PR for it. The protocol is complete and the docs are already on
+main; a doc-strengthening PR is the architect's call, not a builder's parting edit.
+
+**Closing lesson, on top of the one already recorded at plan CMAP:** the two defects that
+survived to the end were both at the seam between new delivery and existing delivery, and
+the last one could only die to a live two-party run. A single-session test can never catch
+a bug whose whole nature is "it does the right thing to the WRONG session."
