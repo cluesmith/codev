@@ -1,7 +1,7 @@
 id: '1307'
 title: arch-save-packaged-save-clear-
 protocol: aspir
-phase: verify
+phase: verified
 plan_phases:
   - id: phase_1
     title: afx send --delay (Tower-side deferred delivery)
@@ -109,7 +109,7 @@ history:
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/aspir-1307/codev/projects/1307-arch-save-packaged-save-clear-/1307-phase_3-iter3-claude.txt
 started_at: '2026-07-31T21:42:49.601Z'
-updated_at: '2026-08-08T18:23:31.287Z'
+updated_at: '2026-08-08T18:23:32.664Z'
 force_advanced:
   phase: phase_3
   iteration: 3
