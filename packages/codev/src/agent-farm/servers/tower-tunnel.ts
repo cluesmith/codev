@@ -10,7 +10,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
 import os from 'node:os';
-import { TunnelClient, type TunnelState, type TowerMetadata } from '../lib/tunnel-client.js';
+import {
+  TunnelClient,
+  TUNNEL_PROXY_HEADER,
+  type TunnelState,
+  type TowerMetadata,
+} from '../lib/tunnel-client.js';
 import {
   readCloudConfig,
   writeCloudConfig,
@@ -279,6 +284,68 @@ export function shutdownTunnel(): void {
 
 
 
+/** Trim a header value to something safe and bounded for a log line. */
+function logSafe(value: string | string[] | undefined, max = 160): string {
+  if (value === undefined) return '';
+  const flat = Array.isArray(value) ? value.join(',') : value;
+  // Collapse control characters — a hostile header must not forge log lines.
+  // eslint-disable-next-line no-control-regex
+  return flat.replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, max);
+}
+
+/** Where a tunnel management request came from — see describeSource(). */
+interface RequestSource {
+  /** True when the request was proxied in from codevos.ai rather than issued locally. */
+  viaTunnel: boolean;
+  /** Pre-formatted `key=value` attribution suffix for the log line. */
+  text: string;
+}
+
+/**
+ * Describe the origin of a tunnel management request (#1370).
+ *
+ * `POST /api/tunnel/disconnect` deregisters the tower server-side and deletes
+ * the local credentials, so an unattributed one is impossible to investigate
+ * after the fact. Every call now logs its remote address, user-agent and
+ * origin, plus whether it arrived through the tunnel proxy.
+ */
+function describeSource(req: http.IncomingMessage): RequestSource {
+  const viaTunnel = req.headers[TUNNEL_PROXY_HEADER] !== undefined;
+  const remote = req.socket?.remoteAddress ?? 'unknown';
+  const ua = logSafe(req.headers['user-agent']) || 'none';
+  const origin = logSafe(req.headers.origin ?? req.headers.referer);
+  return {
+    viaTunnel,
+    text:
+      `remote=${logSafe(remote, 64)} via=${viaTunnel ? 'tunnel' : 'local'} ua="${ua}"` +
+      (origin ? ` origin=${origin}` : ''),
+  };
+}
+
+/**
+ * Reject a management request that arrived through the tunnel.
+ *
+ * TunnelClient already blocks `/api/tunnel/*` on the proxy side; this is the
+ * second, independent layer — a cloud-side actor must never be able to
+ * deregister the tower through the tower's own tunnel.
+ */
+function rejectIfProxied(
+  res: http.ServerResponse,
+  source: RequestSource,
+  action: string,
+): boolean {
+  if (!source.viaTunnel) return false;
+  _deps?.log('WARN', `Tunnel ${action} REJECTED — arrived via tunnel proxy (${source.text})`);
+  res.writeHead(403, { 'Content-Type': 'application/json' });
+  res.end(
+    JSON.stringify({
+      success: false,
+      error: 'Forbidden: tunnel management endpoints are local-only',
+    }),
+  );
+  return true;
+}
+
 function htmlPage(title: string, body: string): string {
   return `<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>${title}</title>
@@ -352,6 +419,10 @@ export async function handleTunnelEndpoint(
 
   // POST connect — OAuth initiation or smart reconnect
   if (req.method === 'POST' && tunnelSub === 'connect') {
+    const source = describeSource(req);
+    if (rejectIfProxied(res, source, 'connect')) return;
+    _deps?.log('INFO', `Tunnel connect requested (${source.text})`);
+
     if (!_deps) {
       res.writeHead(503, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ success: false, error: 'Tower is still starting up. Try again shortly.' }));
@@ -441,6 +512,11 @@ export async function handleTunnelEndpoint(
 
   // POST disconnect — deregister server-side + delete local config
   if (req.method === 'POST' && tunnelSub === 'disconnect') {
+    const source = describeSource(req);
+    if (rejectIfProxied(res, source, 'disconnect')) return;
+    // Deregisters server-side and deletes local credentials — always attributable.
+    _deps?.log('INFO', `Tunnel disconnect requested (${source.text})`);
+
     let warning: string | undefined;
 
     // Read config FIRST (need credentials for server-side deregister)

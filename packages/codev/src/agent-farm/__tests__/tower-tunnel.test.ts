@@ -74,6 +74,7 @@ vi.mock('../lib/cloud-config.js', () => ({
 }));
 
 vi.mock('../lib/tunnel-client.js', () => ({
+  TUNNEL_PROXY_HEADER: 'x-codev-tunnel-proxy',
   TunnelClient: class MockTunnelClient {
     connect = mockConnect;
     disconnect = mockDisconnect;
@@ -126,8 +127,17 @@ function makeDeps(overrides: Partial<TunnelDeps> = {}): TunnelDeps {
   };
 }
 
-/** Create a mock IncomingMessage with optional body and URL */
-function makeReq(method: string, opts?: { body?: string; url?: string; host?: string }): http.IncomingMessage {
+/** Create a mock IncomingMessage with optional body, URL, headers and peer address */
+function makeReq(
+  method: string,
+  opts?: {
+    body?: string;
+    url?: string;
+    host?: string;
+    headers?: Record<string, string>;
+    remoteAddress?: string;
+  },
+): http.IncomingMessage {
   const readable = new Readable();
   if (opts?.body) {
     readable.push(opts.body);
@@ -137,9 +147,17 @@ function makeReq(method: string, opts?: { body?: string; url?: string; host?: st
   const req = Object.assign(readable, {
     method,
     url: opts?.url || '/',
-    headers: { host: opts?.host || 'localhost:4100' },
+    headers: { host: opts?.host || 'localhost:4100', ...(opts?.headers ?? {}) },
+    socket: { remoteAddress: opts?.remoteAddress ?? '127.0.0.1' },
   });
   return req as unknown as http.IncomingMessage;
+}
+
+/** Join every message passed to a mocked deps.log into one searchable string. */
+function loggedText(deps: TunnelDeps): string {
+  return (deps.log as ReturnType<typeof vi.fn>).mock.calls
+    .map((call: unknown[]) => String(call[1]))
+    .join('\n');
 }
 
 function makeRes(): { res: http.ServerResponse; body: () => string; statusCode: () => number } {
@@ -603,6 +621,127 @@ describe('tower-tunnel', () => {
         const parsed = JSON.parse(body());
         expect(parsed.success).toBe(false);
         expect(parsed.error).toContain('Failed to delete local config');
+      });
+    });
+
+    // =====================================================================
+    // #1370: source attribution + proxied-request rejection
+    // =====================================================================
+
+    describe('source attribution (#1370)', () => {
+      let fetchSpy: ReturnType<typeof vi.spyOn>;
+
+      beforeEach(() => {
+        fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+          new Response(null, { status: 200 }),
+        );
+      });
+
+      afterEach(() => {
+        fetchSpy.mockRestore();
+      });
+
+      it('logs remote address, user-agent and origin for a disconnect', async () => {
+        mockReadCloudConfig.mockReturnValue(FAKE_CONFIG);
+        const deps = makeDeps();
+        await initTunnel(deps, { getInstances: async () => [] });
+
+        const { res } = makeRes();
+        await handleTunnelEndpoint(
+          makeReq('POST', {
+            remoteAddress: '192.168.1.50',
+            headers: { 'user-agent': 'Mozilla/5.0 Chrome', origin: 'http://localhost:4100' },
+          }),
+          res,
+          'disconnect',
+        );
+
+        const log = loggedText(deps);
+        expect(log).toContain('Tunnel disconnect requested');
+        expect(log).toContain('remote=192.168.1.50');
+        expect(log).toContain('via=local');
+        expect(log).toContain('ua="Mozilla/5.0 Chrome"');
+        expect(log).toContain('origin=http://localhost:4100');
+      });
+
+      it('logs attribution for a connect', async () => {
+        mockReadCloudConfig.mockReturnValue(FAKE_CONFIG);
+        const deps = makeDeps();
+        await initTunnel(deps, { getInstances: async () => [] });
+
+        const { res } = makeRes();
+        await handleTunnelEndpoint(
+          makeReq('POST', { headers: { 'user-agent': 'codev-vscode/1.0' } }),
+          res,
+          'connect',
+        );
+
+        const log = loggedText(deps);
+        expect(log).toContain('Tunnel connect requested');
+        expect(log).toContain('ua="codev-vscode/1.0"');
+      });
+
+      it('records ua="none" when no user-agent is sent', async () => {
+        const deps = makeDeps();
+        await initTunnel(deps, { getInstances: async () => [] });
+
+        const { res } = makeRes();
+        await handleTunnelEndpoint(makeReq('POST'), res, 'disconnect');
+
+        expect(loggedText(deps)).toContain('ua="none"');
+      });
+
+      it('strips control characters from a hostile user-agent', async () => {
+        const deps = makeDeps();
+        await initTunnel(deps, { getInstances: async () => [] });
+
+        const { res } = makeRes();
+        await handleTunnelEndpoint(
+          makeReq('POST', { headers: { 'user-agent': 'evil\nINFO forged log line' } }),
+          res,
+          'disconnect',
+        );
+
+        const log = loggedText(deps);
+        expect(log).toContain('evil INFO forged log line');
+        expect(log).not.toContain('evil\nINFO');
+      });
+
+      it('rejects a tunnel-proxied disconnect with 403 and does not deregister', async () => {
+        mockReadCloudConfig.mockReturnValue(FAKE_CONFIG);
+        const deps = makeDeps();
+        await initTunnel(deps, { getInstances: async () => [] });
+        mockDeleteCloudConfig.mockClear();
+
+        const { res, body, statusCode } = makeRes();
+        await handleTunnelEndpoint(
+          makeReq('POST', { headers: { 'x-codev-tunnel-proxy': '1' } }),
+          res,
+          'disconnect',
+        );
+
+        expect(statusCode()).toBe(403);
+        expect(JSON.parse(body()).error).toContain('local-only');
+        // The destructive work must not have happened.
+        expect(mockDeleteCloudConfig).not.toHaveBeenCalled();
+        expect(fetchSpy).not.toHaveBeenCalled();
+        expect(loggedText(deps)).toContain('REJECTED');
+      });
+
+      it('rejects a tunnel-proxied connect with 403', async () => {
+        mockReadCloudConfig.mockReturnValue(FAKE_CONFIG);
+        const deps = makeDeps();
+        await initTunnel(deps, { getInstances: async () => [] });
+
+        const { res, body, statusCode } = makeRes();
+        await handleTunnelEndpoint(
+          makeReq('POST', { headers: { 'x-codev-tunnel-proxy': '1' } }),
+          res,
+          'connect',
+        );
+
+        expect(statusCode()).toBe(403);
+        expect(JSON.parse(body()).success).toBe(false);
       });
     });
 

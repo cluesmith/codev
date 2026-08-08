@@ -1669,9 +1669,39 @@
     // Store the latest cloud status for use by cloudConnect
     let lastCloudStatus = null;
 
+    /**
+     * #1370: while the tunnel state is flapping, the header control swaps
+     * between Connect and Disconnect under the cursor — a click aimed at
+     * Connect (or the adjacent Open link) can land on the destructive
+     * Disconnect. Hold Disconnect disabled for a moment after any state change
+     * so the click target has to be deliberate.
+     */
+    const CLOUD_SETTLE_MS = 2000;
+    let cloudPrevState = null;
+    let cloudSettleUntil = 0;
+    let cloudSettleTimer = null;
+
+    function cloudSettling() {
+      return Date.now() < cloudSettleUntil;
+    }
+
+    function noteCloudStateChange(state) {
+      if (cloudPrevState === null) { cloudPrevState = state; return; }
+      if (cloudPrevState === state) return;
+      cloudPrevState = state;
+      cloudSettleUntil = Date.now() + CLOUD_SETTLE_MS;
+      // Re-render once the window closes — polling alone may not be timely.
+      if (cloudSettleTimer) clearTimeout(cloudSettleTimer);
+      cloudSettleTimer = setTimeout(() => {
+        cloudSettleTimer = null;
+        renderCloudStatus(lastCloudStatus);
+      }, CLOUD_SETTLE_MS + 50);
+    }
+
     function renderCloudStatus(status) {
       const el = document.getElementById('cloud-status');
       lastCloudStatus = status;
+      noteCloudStateChange(status && status.state ? status.state : null);
 
       // When accessed through codevos.ai, cloud status is irrelevant
       if (window.location.hostname.endsWith('codevos.ai')) {
@@ -1718,7 +1748,7 @@
           <span class="cloud-status">
             <span class="cloud-dot cloud-dot--green"></span>
             ${name}${uptimeStr}
-            <button class="cloud-btn" onclick="cloudDisconnect()" ${cloudLoading ? 'disabled' : ''}>Disconnect</button>
+            <button class="cloud-btn" onclick="cloudDisconnect()" ${cloudLoading || cloudSettling() ? 'disabled' : ''} title="${cloudSettling() ? 'Connection just changed state — wait a moment' : 'Deregister this tower from Codev Cloud'}">Disconnect</button>
           </span>`;
         return;
       }
@@ -1738,7 +1768,14 @@
     }
 
     async function cloudDisconnect() {
-      if (!confirm('This will disconnect from Codev Cloud. Continue?')) return;
+      if (cloudSettling()) return;
+      // #1370: name the real consequences — this is not a reversible toggle.
+      const name = (lastCloudStatus && lastCloudStatus.towerName) || 'this tower';
+      if (!confirm(
+        'Disconnect "' + name + '" from Codev Cloud?\n\n'
+        + 'This deregisters the tower server-side and deletes its local cloud '
+        + 'credentials. Reconnecting requires signing in again.'
+      )) return;
       cloudLoading = true;
       try {
         const res = await authFetch('./api/tunnel/disconnect', { method: 'POST' });

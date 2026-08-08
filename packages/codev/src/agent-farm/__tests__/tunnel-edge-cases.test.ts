@@ -33,7 +33,7 @@ function createEchoServer(): http.Server {
     req.on('data', (chunk) => chunks.push(chunk));
     req.on('end', () => {
       res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ method: req.method, path: req.url }));
+      res.end(JSON.stringify({ method: req.method, path: req.url, headers: req.headers }));
     });
   });
 }
@@ -185,6 +185,35 @@ describe('tunnel edge cases (Phase 7)', () => {
         });
         expect(response.status).toBe(403);
       }
+    });
+  });
+
+  describe('tunnel proxy marker header (#1370)', () => {
+    it('stamps x-codev-tunnel-proxy on proxied requests', async () => {
+      await setup();
+      client.connect();
+      await waitFor(() => client.getState() === 'connected');
+
+      const response = await mockServer.sendRequest({ path: '/api/status' });
+
+      expect(response.status).toBe(200);
+      const body = JSON.parse(response.body);
+      expect(body.headers['x-codev-tunnel-proxy']).toBe('1');
+    });
+
+    it('overwrites a marker forged by the cloud side', async () => {
+      await setup();
+      client.connect();
+      await waitFor(() => client.getState() === 'connected');
+
+      // A cloud-side actor must not be able to suppress or fake the marker.
+      const response = await mockServer.sendRequest({
+        path: '/api/status',
+        headers: { 'x-codev-tunnel-proxy': 'forged-value' },
+      });
+
+      const body = JSON.parse(response.body);
+      expect(body.headers['x-codev-tunnel-proxy']).toBe('1');
     });
   });
 
