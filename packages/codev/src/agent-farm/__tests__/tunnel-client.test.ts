@@ -1285,6 +1285,33 @@ describe('#1372 self-healing', () => {
     c.disconnect();
   });
 
+  /**
+   * `close()` on a CONNECTING socket aborts the handshake and emits `error`.
+   * `ws` defers that via process.nextTick today, but if it ever emitted
+   * synchronously the handler would still see `ws === this.ws` and overwrite
+   * the watchdog's "connect timeout" reason. cleanup() must detach first so
+   * the ordering can't depend on a third party's internals.
+   * (Raised by claude in CMAP round 4.)
+   */
+  it('detaches the socket before closing it, so late events cannot race', () => {
+    const c = createClient();
+    const ws = createMockWs();
+
+    let wsSeenDuringClose: unknown = 'never called';
+    (ws as unknown as { close: () => void }).close = vi.fn(() => {
+      wsSeenDuringClose = (c as unknown as { ws: WebSocket | null }).ws;
+    });
+    (ws as unknown as { readyState: number }).readyState = WebSocket.CONNECTING;
+    (c as unknown as { ws: WebSocket | null }).ws = ws;
+
+    (c as unknown as { cleanup: () => void }).cleanup();
+
+    expect(ws.close).toHaveBeenCalled();
+    // Already detached at the moment close() runs — a synchronous error emitted
+    // from inside close() would hit the `ws !== this.ws` stale guard.
+    expect(wsSeenDuringClose).toBeNull();
+  });
+
   it('state transitions carry a failure reason', async () => {
     // Nothing is listening on this port — ECONNREFUSED.
     const probe = net.createServer();

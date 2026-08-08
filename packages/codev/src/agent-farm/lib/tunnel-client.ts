@@ -390,10 +390,18 @@ export class TunnelClient {
     }
     this.wsStream = null;
 
-    if (this.ws && this.ws.readyState !== WebSocket.CLOSED) {
-      this.ws.close();
-    }
+    // Detach *before* closing. `close()` on a CONNECTING socket aborts the
+    // handshake and emits `error`; `ws` currently defers that via
+    // process.nextTick, but if it ever emitted synchronously the handler would
+    // still see `ws === this.ws`, run handleConnectionError, and overwrite the
+    // caller's reason — the watchdog's "connect timeout" would be swallowed by
+    // the same-state check in setState. Nulling first makes every late event
+    // from this socket hit the stale guard regardless of when it fires.
+    const ws = this.ws;
     this.ws = null;
+    if (ws && ws.readyState !== WebSocket.CLOSED) {
+      ws.close();
+    }
   }
 
   private startHeartbeat(ws: WebSocket): void {
