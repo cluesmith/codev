@@ -56,3 +56,71 @@
 - CMAP (gemini, codex, claude) on the change set: unanimous APPROVE, zero findings, clean in one iteration.
 - Full suite: 3802 passed / 48 skipped.
 - Live kimi 0.29.1 verification (tmux PTY, real bare launch script from dist): /quit → exit 0 → keypress gate held (no respawn), Enter relaunched; SIGKILL → code 137 → auto-restart after 2s. Both branches behave per the #1244 contract.
+
+## 2026-08-08/09 — Re-integration after parking: merge main + design pivot
+
+The PR sat parked on two upstream blockers; both landed, the branch went stale (901 commits behind), and `kimi` itself drifted 0.27.0 → 0.34.0. This session re-integrates.
+
+**Merged `origin/main`** (10 conflicts). Took main's rewritten `spawn-worktree.ts` / `tower-routes.ts` / `tower-cron.ts` / `tower-client.ts` / `discover-resume-session.test.ts` wholesale — our versions were the retired `SendBuffer` / direct-PTY-write paths that Spec 1313 replaced, plus a launch-loop shape #1233/#1317 superseded. Hand-merged `doctor.ts` and three docs.
+
+**Design pivot** (architect-directed, PR comment 5229238112), validated live 7/7 against real kimi 0.34.0 before any code was committed to it:
+- **Role via `--agent-file`** (0.31.0+), composed around `${base_prompt}` so it EXTENDS kimi's own system prompt instead of replacing it. Verified injecting in both `-p` and the interactive TUI — the half never measured in the original spike.
+- **Task via the Spec 1313 mailbox**, delivered by the render gate onto a verified-empty composer. Never a direct PTY write.
+- **Deleted** `seed-kick.ts`, the sentinel, the `-p` seed bootstrap, `.builder-seed.txt`, the ack-and-wait BEGIN discipline, and (later) the dead `SeedKickRequest` SDK surface.
+
+**The finding that shaped the launch loop.** `kimi -c` does NOT fail with nothing to continue — it prints `No sessions to continue…` and starts a fresh session that never saw `--agent-file`, i.e. a silently ROLELESS builder (#929 hazard class). So every path to `-c` is gated on an inlined `node -e` store probe that fails CLOSED to a role-carrying fresh launch. Pinned by tests that EXECUTE the probe against fixture stores and cross-check it against `findLatestKimiSessionId`, so the hand-written bash snippet cannot drift from the TypeScript it mirrors.
+
+**Pacing re-homed.** Spec 1313 replaced the routes `message-pacing.ts` hooked into, leaving pacing wired to nothing — every `afx send` to a Kimi builder would have been typed and never submitted. Now resolved in `mailbox-wiring.ts` (`resolveHarnessForSession` → `getBuiltinHarness(...).messagePacing`) and threaded through `writeMessagePaced`. Deleted `message-pacing.ts` AND the `.builder-kimi` marker: the harness name now comes out of the generated `.builder-start.sh`, which is generated FROM the resolved harness and so cannot be forgotten — the marker's coverage obligation is exactly what the maintainer's earlier finding was about. `--interrupt` paces too; `--escape` deliberately does not (writes no text; unmeasured on kimi).
+
+**Guardrail 1 (render-gate).** The one shared-code edit: the classifier's marker exemption follows the profile's matched span instead of column 0, because kimi's marker sits at column 3 inside a rounded box. Carries dedicated before/after pins — exact span per shipped profile (claude/codex 1 = literally the old rule, agy 2 whose extra cell is whitespace already skipped), a tightest-possible-draft test per profile proving no over-skip, and a direct demonstration that a span-2 kimi profile classifies the real idle capture `user-text` while the shipped span-4 one classifies it clean. Three REAL 0.34.0 captures added as fixtures (committed raw — they carry only throwaway `/tmp` paths, unlike the agy captures). **Flag this for CMAP.**
+
+**Guardrail 2 (trust).** No sanctioned bypass exists (audited 0.34.0: no `--help` flag; full strings sweep for `KIMI_*` env vars and trust config keys found nothing). Kept fail-soft, and added `inspectKimiTrustLayout` — it validates our undocumented `sha256(root)[:12]` derivation against kimi's OWN records, so a scheme change surfaces as a named `codev doctor` warning instead of silently stranding every new builder on the dialog. Doctor now reports the richer per-surface drift reasons; `kimiStoreLayoutLooksDrifted` deleted as production-dead.
+
+**Version floor raised 0.27.0 → 0.33.0.** `--agent-file` is the hard break (0.31.0), but every measurement here was taken on the agent-core-v2 engine 0.33.0 made default. Claiming 0.31–0.32 support would be unverified. Flagged in the PR as the maintainer's call.
+
+**Corrected an obsolete claim**: kimi DOES have a hook seam (blocking `PreToolUse`, `[[hooks]]` in config.toml, 18 events as of 0.32.0), so "#1018 write-guard parity impossible" was wrong. Docs now say parity is achievable follow-up work; the PR asks the maintainer whether it lands here or separately.
+
+Store drift also fixed (three renames, not one: `workDir`→`cwd`, ISO→epoch-ms timestamps, `lastPrompt` gone) with v1 back-compat retained.
+
+## 2026-08-09 — post-pivot CMAP round: two blocking defects, both fixed
+
+Collected the work left in flight at the context reset (nothing restarted — the demo and both
+consultations were still alive and were allowed to finish).
+
+**CMAP: gemini APPROVE, codex REQUEST_CHANGES, claude REQUEST_CHANGES.** Both REQUEST_CHANGES
+found the same two defects from opposite directions, and neither is reachable from a happy-path
+run — an empty composer and a clean store both behave correctly, which is exactly why three
+passing live demos missed them. Full dispositions in
+`codev/projects/1201-*/1201-cmap-postpivot-dispositions.md`.
+
+1. **False CLEAN on a multi-row kimi composer (blocking).** kimi's marker `│ >` can match a
+   *continuation* row, and `findMarkerRow` takes the last match, so a draft whose final line
+   begins with `>` left the real text above the scanned region → clean verdict on a composer
+   holding unsent input. Claude reproduced it but had no live kimi to confirm the geometry; I
+   measured it — real 0.34.0 renders exactly that shape. Fixed with an optional, *exclusive*
+   `regionStartPatterns` upper bound (kimi: the box top). Exclusive was not cosmetic: my first
+   attempt included the box-top row, whose `╮` is not an ignorable glyph, and it held every idle
+   composer forever — the fixture suite caught it immediately. Claude's second proposed input (a
+   marker row inside a second box below the composer) is NOT reachable: measured, kimi's `/` menu
+   renders as unclosed `│` rows with no `╰`, so it yields `no-region-end` → held. Four new
+   fixtures from live capture: multiline-bare, multiline, menu, picker.
+2. **Store probe diverged from the TypeScript (blocking).** codex found the dangerous direction
+   (an `archived` session authorized `-c`, which kimi then refuses to continue → fresh, roleless
+   session — the #929 class). Claude found the safe-but-harmful direction (one stray `.DS_Store`
+   threw ENOTDIR into the single outer try and disabled resume machine-wide, silently). The
+   cross-check test had been comparing two implementations of the same omissions. Both now share
+   one resumability predicate and per-level error handling, with every case asserted against both.
+3. Plus: shell-metacharacter interpolation in the generated script (all three reviewers, from
+   different angles), unbounded task re-queueing in a crash loop, drift probes that report healthy
+   forever after a migration, and two stale seed-era strings.
+
+**The demo's role oracle was wrong, not the product.** Its two failures (steps 2 and 4b) were a
+role that told the model to prefix every reply with a token — that measures K3's formatting
+compliance, not role delivery. The live `--agent-file` probe passed 7/7 against a
+production-identical agent file, including role survival across `kimi -c`. Rewrote the demo to
+ask for a codeword instead (the same oracle the probe uses), with a comment saying why so nobody
+restores the weaker one.
+
+**Verification:** `pnpm build` clean; full suite **4900 passed / 48 skipped / 0 failed**; live
+demo **7/7** against real kimi 0.34.0, including the crash-resume claim that was withheld until
+it passed.
