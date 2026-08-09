@@ -518,7 +518,8 @@ describe('spawn-worktree', () => {
       const script = findWrite('.builder-start.sh');
       expect(script).toBeDefined();
       expect(script).toContain(`--agent-file '/tmp/worktree/${KIMI_AGENT_FILE}'`);
-      expect(script).toContain("afx send 'pir-k1'");
+      expect(script).toContain("codev_builder_id='pir-k1'");
+      expect(script).toContain('afx send "$codev_builder_id" "$(cat "$codev_task_file")"');
       // The retired seed-session bootstrap leaves no trace.
       expect(script).not.toContain('stream-json');
       expect(script).not.toContain('__CODEV_KIMI_SEED_DONE__');

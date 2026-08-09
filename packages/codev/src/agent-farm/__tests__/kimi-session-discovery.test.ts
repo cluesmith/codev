@@ -13,7 +13,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, symlinkSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 
@@ -86,6 +86,26 @@ describe('kimi session discovery', () => {
       writeSession('session_aaa', { workDir: '/some/worktree', updatedAt: '2026-07-18T10:00:00Z' });
       writeSession('session_bbb', { workDir: '/other/dir', updatedAt: '2026-07-18T12:00:00Z' });
       expect(findLatestKimiSessionId('/some/worktree', opts())).toBe('session_aaa');
+    });
+
+    // Existing on disk is not the question — "would `kimi -c` continue it?" is.
+    // Kimi's cwd listing drops archived sessions and ids it does not recognize, and
+    // `-c` with nothing to continue does not fail: it starts a fresh session that
+    // never saw --agent-file, i.e. a silently roleless builder (#929 class).
+    it('skips an ARCHIVED session — kimi would not continue it', () => {
+      writeSession('session_archived', { cwd: '/wt', updatedAt: 5, archived: true });
+      expect(findLatestKimiSessionId('/wt', opts())).toBeNull();
+    });
+
+    it('prefers a live session over a NEWER archived one', () => {
+      writeSession('session_archived', { cwd: '/wt', updatedAt: 99, archived: true });
+      writeSession('session_live', { cwd: '/wt', updatedAt: 1 });
+      expect(findLatestKimiSessionId('/wt', opts())).toBe('session_live');
+    });
+
+    it('skips a directory kimi would not recognize as a session id', () => {
+      writeSession('scratch-dir', { cwd: '/wt', updatedAt: 5 });
+      expect(findLatestKimiSessionId('/wt', opts())).toBeNull();
     });
 
     it('picks the newest by updatedAt among matches (across wd dirs)', () => {
@@ -162,6 +182,7 @@ describe('kimi session discovery', () => {
         cwd: '/wt',
         updatedAt: 1_760_000_000_000,
         version: 2,
+        archived: false,
       });
     });
 
@@ -173,6 +194,7 @@ describe('kimi session discovery', () => {
         cwd: '/wt',
         updatedAt: Date.parse('2026-07-18T10:00:00Z'),
         version: null,
+        archived: false,
       });
     });
 
@@ -182,6 +204,7 @@ describe('kimi session discovery', () => {
         cwd: '/wt',
         updatedAt: null,
         version: null,
+        archived: false,
       });
     });
 
@@ -205,6 +228,32 @@ describe('kimi session discovery', () => {
     it('ok when at least one session carries the load-bearing shape', () => {
       writeSession('session_ok', { cwd: '/wt' });
       writeSession('session_bad', '###');
+      expect(inspectKimiStoreLayout(opts())).toEqual({ status: 'ok', sampled: 1 });
+    });
+
+    // The blind spot in "any session matches" (CMAP 2026-08-09, codex #5): after a
+    // store migration the pre-migration sessions keep matching forever, so the probe
+    // would report healthy through exactly the rename it was built to catch.
+    /** Recency is the session directory's mtime; pin it so the ordering is explicit. */
+    const touchDir = (dir: string, epochSeconds: number) => utimesSync(dir, epochSeconds, epochSeconds);
+
+    it('reports drift when the NEWEST session stopped matching but older ones still do', () => {
+      touchDir(writeSession('session_old', { cwd: '/wt' }), 1_000);
+      touchDir(writeSession('session_new', { someRenamedField: '/wt' }), 9_000);
+      const layout = inspectKimiStoreLayout(opts());
+      expect(layout.status).toBe('drifted');
+      expect(layout.status === 'drifted' && layout.reason).toMatch(/most recently written session/);
+    });
+
+    it('stays ok when the non-matching session is the OLDER one (a leftover, not a migration)', () => {
+      touchDir(writeSession('session_old', { someRenamedField: '/wt' }), 1_000);
+      touchDir(writeSession('session_new', { cwd: '/wt' }), 9_000);
+      expect(inspectKimiStoreLayout(opts())).toEqual({ status: 'ok', sampled: 1 });
+    });
+
+    it('stays ok on a tie, so the verdict never depends on directory iteration order', () => {
+      touchDir(writeSession('session_a', { cwd: '/wt' }), 5_000);
+      touchDir(writeSession('session_b', { someRenamedField: '/wt' }), 5_000);
       expect(inspectKimiStoreLayout(opts())).toEqual({ status: 'ok', sampled: 1 });
     });
 

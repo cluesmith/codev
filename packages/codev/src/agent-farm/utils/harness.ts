@@ -413,24 +413,45 @@ function kimiTuiCmd(baseCmd: string): string {
  *
  * Fails CLOSED: any error (no store, unreadable dir, malformed JSON) exits
  * non-zero and the loop relaunches fresh WITH the role, which is always safe.
- * `readStateJson`'s `cwd ?? workDir` tolerance is mirrored here; the generated
- * snippet is pinned against a fixture store by a unit test so it cannot drift
- * from {@link findLatestKimiSessionId} unnoticed.
+ *
+ * It mirrors {@link findLatestKimiSessionId} field for field — `cwd ?? workDir`,
+ * `sameDir`'s realpath tolerance, and `isResumable`'s archived / `session_`
+ * filters — because the two answer the same question in two languages and a
+ * divergence is a silent bug in EITHER direction: a probe that says yes where
+ * discovery says no sends `-c` down its roleless nothing-to-continue path, and a
+ * probe that says no where discovery says yes restarts a crashed builder with no
+ * context and re-queues its task. The generated snippet is pinned against fixture
+ * stores by a unit test that EXECUTES it and cross-checks both answers, so the
+ * mirroring cannot rot.
  */
 const KIMI_HAS_SESSION_PROBE =
-  'const {readdirSync,readFileSync}=require("fs"),{join}=require("path");' +
+  'const {readdirSync,readFileSync,realpathSync}=require("fs"),{join}=require("path");' +
   'const r=join(process.env.KIMI_CODE_HOME||join(require("os").homedir(),".kimi-code"),"sessions");' +
-  'const c=process.argv[1];try{for(const a of readdirSync(r)){for(const b of readdirSync(join(r,a))){' +
-  'try{const s=JSON.parse(readFileSync(join(r,a,b,"state.json"),"utf8"));' +
-  'if((s.cwd??s.workDir)===c)process.exit(0)}catch{}}}}catch{}process.exit(1)';
+  // Mirrors sameDir(): compare canonicalized paths, falling back to the literal
+  // when realpath fails, so a symlinked worktree or a trailing slash still matches.
+  'const n=p=>{p=String(p).replace(/\\/+$/,"")||"/";try{return realpathSync(p)}catch{return p}};' +
+  'const a0=process.argv[1],c=n(a0);' +
+  'let ws=[];try{ws=readdirSync(r,{withFileTypes:true}).filter(e=>e.isDirectory())}catch{}' +
+  'for(const w of ws){let ss=[];' +
+  // Each level gets its OWN try. A stray non-directory under sessions/ (a
+  // .DS_Store) made readdirSync throw ENOTDIR into the single outer try, which
+  // aborted the WHOLE scan — one junk file silently disabled resume for every
+  // worktree on the machine.
+  'try{ss=readdirSync(join(r,w.name),{withFileTypes:true})' +
+  '.filter(e=>e.isDirectory()&&e.name.startsWith("session_"))}catch{continue}' +
+  'for(const s of ss){try{const j=JSON.parse(readFileSync(join(r,w.name,s.name,"state.json"),"utf8"));' +
+  'if(j.archived===true)continue;const d=j.cwd??j.workDir;' +
+  'if(typeof d==="string"&&(d===a0||n(d)===c))process.exit(0)}catch{}}}' +
+  'process.exit(1)';
 
 export const KIMI_HARNESS: HarnessProvider = {
   buildRoleInjection: () => {
     throw new Error(
       'Kimi is only supported as a builder shell, not as an architect shell ' +
-      '(stage 2 — see issue #1201). Kimi has no documented system-prompt flag; ' +
-      'builder role injection uses a seed-session bootstrap owned by the builder ' +
-      'launch script. Configure a different shell for the architect ' +
+      '(stage 2 — see issue #1201). Kimi takes no inline system-prompt argument: ' +
+      'its role mechanism is "--agent-file <path>", which needs a file written ' +
+      'into the agent\'s directory first — a seam only the builder launch path ' +
+      'has. Configure a different shell for the architect ' +
       '(e.g., "claude --dangerously-skip-permissions" or "codex").',
     );
   },
@@ -494,7 +515,7 @@ export const KIMI_HARNESS: HarnessProvider = {
     // harness probe matches on.
     if (!ctx.taskFile) {
       return `#!/bin/bash
-cd "${ctx.worktreePath}"
+cd '${shellEscapeSingleQuote(ctx.worktreePath)}'
 while true; do
   ${fresh}
 ${launchLoopTail()}
@@ -513,15 +534,34 @@ done
     // Never a direct PTY write (Spec 1313 forbids it for message writers), so a
     // busy line, a boot screen, or 0.33.0's folder-trust dialog simply holds the
     // message instead of corrupting or losing it.
-    const queueTask = `codev_queue_task() {
+    // Every interpolated value enters the script exactly once, inside a
+    // single-quoted assignment escaped by shellEscapeSingleQuote — never inside
+    // executable double-quoted text. The recovery hints then print the values
+    // through `printf '%s\n'` with the shell VARIABLE expanded, because bash does
+    // not re-scan an expansion for command substitution: a builder id or task
+    // path containing a backtick or `$(…)` is printed literally instead of being
+    // executed when the hint is shown (CMAP 2026-08-09, codex #3 / claude F3).
+    const queueTask = `codev_builder_id='${shellEscapeSingleQuote(ctx.builderId ?? '')}'
+codev_task_file='${shellEscapeSingleQuote(ctx.taskFile)}'
+# Set once the task is on the mailbox, so a crash-restart loop cannot enqueue the
+# same mission every two seconds while kimi is failing to start (the mailbox
+# PERSISTS a held row — it does not need re-queueing to survive). Reset only on
+# the human-gated clean-exit relaunch below, which is a deliberate new
+# conversation and does want its task again.
+codev_task_queued=0
+codev_queue_task() {
+  [ "$codev_task_queued" = 1 ] && return 0
   if ! command -v afx >/dev/null 2>&1; then
-    echo "WARNING: afx is not on PATH — the builder's task was not queued." >&2
-    echo "         Queue it with: afx send ${ctx.builderId ?? '<builder-id>'} \\"\\$(cat '${ctx.taskFile}')\\"" >&2
+    printf '%s\\n' "WARNING: afx is not on PATH — the builder's task was not queued." >&2
+    printf '%s\\n' "         Queue it with: afx send $codev_builder_id \\"\\$(cat $codev_task_file)\\"" >&2
     return 0
   fi
-  afx send '${shellEscapeSingleQuote(ctx.builderId ?? '')}' "$(cat '${shellEscapeSingleQuote(ctx.taskFile)}')" >/dev/null 2>&1 && return 0
-  echo "WARNING: could not queue the builder's task (is Tower running?)." >&2
-  echo "         Retry with: afx send ${ctx.builderId ?? '<builder-id>'} \\"\\$(cat '${ctx.taskFile}')\\"" >&2
+  if afx send "$codev_builder_id" "$(cat "$codev_task_file")" >/dev/null 2>&1; then
+    codev_task_queued=1
+    return 0
+  fi
+  printf '%s\\n' "WARNING: could not queue the builder's task (is Tower running?)." >&2
+  printf '%s\\n' "         Retry with: afx send $codev_builder_id \\"\\$(cat $codev_task_file)\\"" >&2
 }`;
 
     // Crash restart resumes the conversation (#1233's builder-side contract) via
@@ -531,7 +571,7 @@ done
     // ROLELESS builder (verified, 0.34.0). The guard fails closed, so the
     // fallback is always the role-carrying fresh launch.
     return `#!/bin/bash
-cd "${ctx.worktreePath}"
+cd '${shellEscapeSingleQuote(ctx.worktreePath)}'
 codev_fast_fail_secs="\${CODEV_LAUNCH_FAST_FAIL_SECS:-15}"
 
 ${queueTask}
@@ -569,6 +609,7 @@ while true; do
     echo "Agent exited at your request. Press Enter to relaunch fresh, or close this terminal."
     read -r || exit 0
     codev_launch=codev_launch_fresh
+    codev_task_queued=0
     codev_fast_fails=0
     continue
   fi

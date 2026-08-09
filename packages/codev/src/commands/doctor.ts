@@ -516,7 +516,13 @@ function verifyKimi(): CheckResult {
   const notes: string[] = [];
   try {
     const result = spawnSync('kimi', ['doctor'], { encoding: 'utf-8', timeout: 10000, stdio: 'pipe' });
-    if (result.status !== 0) {
+    // `status` is null when the process never ran to completion (spawn failure,
+    // or the 10s timeout killing it by signal). That is "we learned nothing",
+    // not "config is broken" — reporting it as config issues would put a false
+    // failure in front of a user whose install is fine but whose machine is slow.
+    if (result.error || result.status === null) {
+      // nothing learned — stay silent rather than accuse a healthy install
+    } else if (result.status !== 0) {
       notes.push('"kimi doctor" reports config issues (config check, not auth)');
     }
   } catch {
@@ -966,9 +972,10 @@ export async function doctor(): Promise<number> {
           recommendation: `Set shell.architect / shell.architectHarness to "codex" or "claude --dangerously-skip-permissions" in .codev/config.json, or define a custom "${architect.name}" harness and select it explicitly via shell.architectHarness (a bare shell.architect command stays retired)`,
         });
       } else if (architect.name === 'kimi') {
-        // Issue #1201: kimi is builder-only. It has no documented
-        // system-prompt flag; builder role injection uses a seed-session
-        // bootstrap owned by the builder launch script. Architect support is
+        // Issue #1201: kimi is builder-only. Its role mechanism is
+        // `--agent-file <path>`, which needs a file written into the agent's
+        // directory first — a seam only the builder launch path has, so there is
+        // nothing to inject into a bare architect command. Architect support is
         // stage 2.
         console.log('');
         console.log(chalk.yellow('  ⚠') + ' Kimi is configured as architect shell — this is unsupported.');

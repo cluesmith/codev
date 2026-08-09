@@ -29,7 +29,7 @@
 // dir/cwd index). The directory scan below is the ground truth the index
 // mirrors; reading only the tree keeps us on one undocumented surface, not two.
 
-import { existsSync, readdirSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, writeFileSync, mkdirSync, statSync } from 'node:fs';
 import { realpathSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
@@ -42,6 +42,13 @@ export interface KimiSessionState {
   updatedAt: number | null;
   /** Store schema version when present (v2 sessions carry `version: 2`). */
   version: number | null;
+  /**
+   * v2's `archived` flag. Load-bearing for resume: kimi excludes archived
+   * sessions from the cwd listing `-c` continues from, so treating one as
+   * resumable makes `kimi -c` silently start a FRESH, roleless session — the
+   * #929 hazard the crash path exists to avoid (CMAP 2026-08-09, codex #1).
+   */
+  archived: boolean;
 }
 
 export interface KimiDiscoveryOpts {
@@ -56,6 +63,15 @@ export interface KimiDiscoveryOpts {
  */
 export function getKimiHome(opts?: KimiDiscoveryOpts): string {
   return opts?.kimiHome ?? process.env.KIMI_CODE_HOME ?? join(homedir(), '.kimi-code');
+}
+
+/** Modification time in epoch ms, or -Infinity when it can't be read (ranks oldest). */
+function mtimeOrNegInf(p: string): number {
+  try {
+    return statSync(p).mtimeMs;
+  } catch {
+    return -Infinity;
+  }
 }
 
 /** Canonicalize a path for comparison; fall back to the input when realpath fails. */
@@ -107,6 +123,7 @@ function readStateJson(sessionDir: string): KimiSessionState | null {
       cwd: dir,
       updatedAt: parseTimestamp(parsed.updatedAt),
       version: typeof parsed.version === 'number' ? parsed.version : null,
+      archived: parsed.archived === true,
     };
   } catch {
     return null;
@@ -151,10 +168,29 @@ function* iterateSessionDirs(kimiHome: string): Generator<{ sessionId: string; s
 }
 
 /**
+ * Would `kimi -c` actually continue this session?
+ *
+ * Existing on disk is NOT enough. Kimi lists a cwd's sessions before continuing
+ * one, and that listing drops archived sessions and ids it does not recognize —
+ * so a session we call resumable but kimi skips sends `-c` down its
+ * nothing-to-continue path, which does not fail: it starts a FRESH session that
+ * never saw `--agent-file`, i.e. a silently roleless builder (#929 class).
+ *
+ * Both filters therefore err toward "not resumable", whose fallback is the
+ * role-carrying fresh launch — always safe. Deliberately NOT folded into
+ * {@link iterateSessionDirs}: {@link inspectKimiStoreLayout} must keep seeing
+ * unrecognized ids, because reporting that drift is its entire job.
+ */
+function isResumable(sessionId: string, state: KimiSessionState): boolean {
+  return sessionId.startsWith('session_') && !state.archived;
+}
+
+/**
  * Return the session id of the most recent Kimi session whose recorded working
- * directory is exactly `absolutePath` (realpath-tolerant), or null when none
- * exists. "Most recent" = max `updatedAt`; sessions with an unparseable
- * timestamp rank oldest.
+ * directory is exactly `absolutePath` (realpath-tolerant) and that kimi would
+ * actually continue (see {@link isResumable}), or null when none exists.
+ * "Most recent" = max `updatedAt`; sessions with an unparseable timestamp rank
+ * oldest.
  */
 export function findLatestKimiSessionId(
   absolutePath: string,
@@ -167,6 +203,7 @@ export function findLatestKimiSessionId(
   for (const { sessionId, sessionDir } of iterateSessionDirs(home)) {
     const state = readStateJson(sessionDir);
     if (!state || !sameDir(state.cwd, absolutePath)) continue;
+    if (!isResumable(sessionId, state)) continue;
     // Unparseable timestamps rank below every real epoch (>= 0) but above the
     // initial -Infinity sentinel, so a lone malformed match is still returned.
     const rank = state.updatedAt ?? -1;
@@ -191,7 +228,11 @@ export function verifyKimiSessionOwnership(
   opts?: KimiDiscoveryOpts,
 ): boolean {
   const state = readKimiSessionState(sessionId, opts);
-  return state !== null && sameDir(state.cwd, cwd);
+  // Same resumability filter discovery applies: an archived (or unrecognizably
+  // named) session exists on disk but is not one `kimi -c` will continue, and
+  // claiming ownership of it would hand the caller a resume that silently
+  // becomes a roleless fresh session.
+  return state !== null && sameDir(state.cwd, cwd) && isResumable(sessionId, state);
 }
 
 /**
@@ -240,18 +281,55 @@ export function inspectKimiStoreLayout(opts?: KimiDiscoveryOpts): KimiStoreLayou
   let sawSessionDir = false;
   let sampled = 0;
   let badId: string | null = null;
+  // "Some session still matches" is too weak a health signal for a store that
+  // migrates: after a rename the OLD sessions keep matching forever and hide every
+  // new one, so the probe would report ok through exactly the migration it exists
+  // to catch (CMAP 2026-08-09, codex #5). So track the newest conforming session
+  // against the newest non-conforming one and report drift only when the bad one is
+  // STRICTLY newer — a tie (same timestamp, or no timestamps at all) reports ok,
+  // because a doctor warning that depends on directory-iteration order would be
+  // worse than the blind spot it closes.
+  let newestGood = -Infinity;
+  let newestBad = -Infinity;
+  let newestBadReason: string | null = null;
   for (const { sessionId, sessionDir } of iterateSessionDirs(home)) {
     sawSessionDir = true;
-    if (readStateJson(sessionDir) === null) continue;
+    const state = readStateJson(sessionDir);
     // The id `-S` accepts is the directory basename; 0.33.0+ prefixes it.
-    if (!sessionId.startsWith('session_')) {
-      badId ??= sessionId;
+    const goodId = sessionId.startsWith('session_');
+    // Directory mtime, for EVERY session — not `updatedAt`. A session whose
+    // state.json no longer parses has no `updatedAt` to offer, and mixing the two
+    // would compare a kimi timestamp against a filesystem one, which is how the
+    // drifted session always wins. One signal, same units, available for all.
+    const recency = mtimeOrNegInf(sessionDir);
+    if (state !== null && goodId) {
+      sampled++;
+      if (recency > newestGood) newestGood = recency;
       continue;
     }
-    sampled++;
+    if (state === null) {
+      if (recency > newestBad) {
+        newestBad = recency;
+        newestBadReason = `state.json for "${sessionId}" no longer parses into a working-directory field`;
+      }
+      continue;
+    }
+    badId ??= sessionId;
+    if (recency > newestBad) {
+      newestBad = recency;
+      newestBadReason = `session id "${sessionId}" is no longer "session_<uuid>"`;
+    }
   }
   if (!sawSessionDir) return { status: 'empty' };
-  if (sampled > 0) return { status: 'ok', sampled };
+  if (sampled > 0) {
+    if (newestBad > newestGood && newestBadReason) {
+      return {
+        status: 'drifted',
+        reason: `the most recently written session no longer matches the shape this integration reads — ${newestBadReason}; older sessions still match, which is what a store migration looks like`,
+      };
+    }
+    return { status: 'ok', sampled };
+  }
   if (badId) {
     return {
       status: 'drifted',
@@ -300,6 +378,14 @@ export function inspectKimiTrustLayout(opts?: KimiDiscoveryOpts): KimiStoreLayou
   let sawRecord = false;
   let matched = 0;
   let mismatchExample: string | null = null;
+  // Same recency rule as the store probe, and the same conservative tie-break:
+  // after a scheme change kimi's OLD records keep agreeing forever, so "any record
+  // matches" would report healthy through the exact migration this probe exists to
+  // catch. Drift is reported only when the newest DISAGREEING record is strictly
+  // newer than every agreeing one.
+  let newestAgreeing = -Infinity;
+  let newestMismatchTime = -Infinity;
+  let newestMismatch: string | null = null;
   try {
     for (const name of readdirSync(dir)) {
       let root: unknown;
@@ -310,14 +396,30 @@ export function inspectKimiTrustLayout(opts?: KimiDiscoveryOpts): KimiStoreLayou
       }
       if (typeof root !== 'string' || root.length === 0) continue;
       sawRecord = true;
-      if (basename(kimiTrustRecordPath(root, opts)) === name) matched++;
-      else mismatchExample ??= name;
+      const agrees = basename(kimiTrustRecordPath(root, opts)) === name;
+      const mtime = mtimeOrNegInf(join(dir, name));
+      if (agrees) {
+        matched++;
+        if (mtime > newestAgreeing) newestAgreeing = mtime;
+      } else {
+        mismatchExample ??= name;
+        if (mtime > newestMismatchTime) {
+          newestMismatchTime = mtime;
+          newestMismatch = name;
+        }
+      }
     }
   } catch {
     return { status: 'empty' };
   }
 
   if (!sawRecord) return { status: 'empty' };
+  if (newestMismatch && newestMismatchTime > newestAgreeing) {
+    return {
+      status: 'drifted',
+      reason: `the most recently written workspace-trust record ("${newestMismatch}") does not match the derived "wd_<name>_<sha256(root)[:12]>" scheme, though older records still do — that is what a naming-scheme change looks like, and it means pre-recording trust for new builder worktrees has already stopped working`,
+    };
+  }
   if (matched > 0) return { status: 'ok', sampled: matched };
   return {
     status: 'drifted',
