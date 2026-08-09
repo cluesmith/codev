@@ -30,6 +30,7 @@ export class RingBuffer {
   private count: number = 0;
   private seq: number = 0; // monotonically increasing sequence number
   private partial: string = ''; // incomplete line from previous pushData call
+  private bytes: number = 0; // cumulative chars ever appended via pushData (monotone; see bytesWritten)
 
   constructor(
     private readonly capacity: number = 1000,
@@ -73,6 +74,13 @@ export class RingBuffer {
    * Returns last sequence number.
    */
   pushData(data: string): number {
+    // Monotone total of every char ever fed in (Spec 1313 render-gate round 2). Advances
+    // here — before any split/trim — so it counts ALL output regardless of newlines, and
+    // NEVER decreases (unlike `partialBytes`, which drops when `trimPartial` cuts the front).
+    // It is the render-gate's change token: the mailbox delivery path samples it around the
+    // async classify to detect a mid-render keystroke, and the verdict memo keys on it. A
+    // decreasing signal would let two different screens share a token and alias a stale verdict.
+    this.bytes += data.length;
     let start = 0;
     let nl = data.indexOf('\n');
     while (nl !== -1) {
@@ -164,6 +172,22 @@ export class RingBuffer {
   /** Bytes held in the incomplete-line partial (observability, #1047). */
   get partialBytes(): number {
     return this.partial.length;
+  }
+
+  /**
+   * Cumulative chars ever appended via `pushData` (Spec 1313 render-gate round 2).
+   *
+   * Monotonically non-decreasing: it counts every byte of output for the life of the
+   * session and is NEVER reset by `trimPartial` (which drops `partialBytes`) nor by
+   * `clear()` (which keeps `seq` for the same monotonicity reason). That is exactly the
+   * property the render-gate's change token needs — `(currentSeq, partialBytes)` was
+   * non-monotone once #1205 capped the partial (a trim makes `partialBytes` fall, so two
+   * distinct screens could produce the same token and alias a stale memoized verdict).
+   * `bytesWritten` advances on ANY output and can never collide, so an unchanged value is
+   * a sound proof that the classified screen has not moved.
+   */
+  get bytesWritten(): number {
+    return this.bytes;
   }
 
   /** Clear the buffer and release memory. */

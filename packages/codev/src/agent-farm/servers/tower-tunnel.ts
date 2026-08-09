@@ -13,6 +13,7 @@ import os from 'node:os';
 import {
   TunnelClient,
   TUNNEL_PROXY_HEADER,
+  AUTH_RETRY_FAILED_MARKER,
   type TunnelState,
   type TowerMetadata,
 } from '../lib/tunnel-client.js';
@@ -143,14 +144,18 @@ async function connectTunnel(config: CloudConfig): Promise<TunnelClient> {
     localPort: _deps.port,
   });
 
-  client.onStateChange((state: TunnelState, prev: TunnelState) => {
-    _deps!.log('INFO', `Tunnel: ${prev} → ${state}`);
+  client.onStateChange((state: TunnelState, prev: TunnelState, reason?: string) => {
+    // #1372: always log *why* — a bare `prev → state` line made the uplink-flap
+    // wedge undiagnosable from the tower log.
+    _deps!.log('INFO', `Tunnel: ${prev} → ${state}${reason ? ` (${reason})` : ''}`);
     if (state === 'connected') {
       startMetadataRefresh();
     } else if (prev === 'connected') {
       stopMetadataRefresh();
     }
-    if (state === 'auth_failed') {
+    // Only the first park raises the alarm — the breaker half-opens every 15
+    // minutes (#1372), and a revoked key would otherwise log ERROR forever.
+    if (state === 'auth_failed' && !reason?.includes(AUTH_RETRY_FAILED_MARKER)) {
       _deps!.log('ERROR', 'Cloud connection failed: API key is invalid or revoked. Run \'afx tower connect --reauth\' to update credentials.');
     }
   });

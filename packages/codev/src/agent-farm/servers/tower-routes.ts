@@ -45,15 +45,33 @@ import { getWorktreeConfig, getActivityHooks } from '../utils/config.js';
 import { ensureCodevConfigWatcher } from './codev-config-watcher.js';
 import { hasTeam, loadTeamMembers, loadMessages, type TeamMember, type TeamMessage } from '../../lib/team.js';
 import { fetchTeamGitHubData, type TeamMemberGitHubData } from '../../lib/team-github.js';
-import { resolveTarget, broadcastMessage, isResolveError } from './tower-messages.js';
+import { resolveTarget, resolveAgentInRegistry, broadcastMessage, isResolveError, type ResolveResult } from './tower-messages.js';
 import { handleCommandRoute, COMMAND_ROUTE } from './command-relay.js';
 import { formatArchitectMessage, formatBuilderMessage } from '../utils/message-format.js';
-import { SendBuffer } from './send-buffer.js';
-import type { BufferedMessage } from './send-buffer.js';
 import type { PtySession } from '../../terminal/pty-session.js';
 import { writeMessageToSession, writeEscapeToSession } from './message-write.js';
-import { scheduleDelayedSend, validateDelaySeconds } from './delayed-send.js';
+import { makeDeliveryPorts, getMailboxDrainer } from './mailbox-wiring.js';
+import { deliverAgentMailSerialized, type DeliveryPorts } from './mailbox-delivery.js';
+import { deliverCronMail, CRON_SENDER, type CronDeliveryResult } from './cron-delivery.js';
+import {
+  enqueue as enqueueMailbox,
+  getById as getMailboxById,
+  markDelivered as markMailboxDelivered,
+  listHeld as listHeldMailbox,
+  dismiss as dismissMailbox,
+  type EnqueueInput,
+} from '../db/mailbox.js';
+import type { MailboxReason } from '../db/types.js';
+// Spec 1273 per-terminal submission lock — preserved across the Spec 1313 merge for
+// the two explicit human-bypass paths (escape + interrupt), which do NOT route
+// through the mailbox's per-agent serializer and so need their own anti-fusion lock.
 import { submitToSession } from './session-submit.js';
+// Spec 1307 `--delay` — Tower-side deferred delivery, re-homed onto the Spec 1313
+// mailbox (the merge that carried this feature was flattened by a later rebase, so it
+// is grafted here explicitly): the due-time callback enqueues to the mailbox and
+// triggers a gated drain (see handleSend), so a delayed message delivers onto a
+// render-verified empty prompt like any normal send — never force-injected.
+import { scheduleDelayedSend, validateDelaySeconds } from './delayed-send.js';
 import {
   getKnownWorkspacePaths,
   getInstances,
@@ -114,55 +132,11 @@ const __dirname = path.dirname(__filename);
 // Singleton cache for overview endpoint (Spec 0126 Phase 4)
 const overviewCache = new OverviewCache();
 
-// Singleton send buffer for typing-aware message delivery (Spec 403)
-const sendBuffer = new SendBuffer();
-
-/** Deliver a buffered message to a session (write + broadcast + log).
- *  Returns the ms timestamp when all writes complete (for serialization). */
-function deliverBufferedMessage(session: PtySession, msg: BufferedMessage, delayOffset = 0): number {
-  let offset = delayOffset;
-  // Spec 1307: a queued delayed `--interrupt` carries its Ctrl+C, written just
-  // ahead of its own payload rather than ahead of the whole queue. The 100ms
-  // gap mirrors the immediate path's pause between the interrupt and the text.
-  if (msg.interruptFirst) {
-    if (offset === 0) {
-      session.write('\x03');
-    } else {
-      const at = offset;
-      setTimeout(() => session.write('\x03'), at);
-    }
-    offset += 100;
-  }
-  const endTime = writeMessageToSession(session, msg.formattedMessage, msg.noEnter, offset);
-  broadcastMessage(msg.broadcastPayload as Parameters<typeof broadcastMessage>[0]);
-  return endTime;
-}
-
-/** Start the send buffer flush timer (called from tower-server during init). */
-export function startSendBuffer(log: (level: 'INFO' | 'ERROR' | 'WARN', message: string) => void): void {
-  sendBuffer.start(
-    (id) => getTerminalManager().getSession(id),
-    deliverBufferedMessage,
-    log,
-    // Spec 1307: drain each session's batch under Spec 1273's submission lock,
-    // so a direct or delayed send cannot write into a flush that has scheduled
-    // its paced writes but not finished them. Returns the promise so the
-    // shutdown flush can be awaited; the catch keeps a throwing batch from
-    // becoming an unhandled rejection (the periodic flush ignores the return).
-    (sessionId, write) =>
-      submitToSession(sessionId, write).catch((err) => {
-        // deliverBufferedMessage's own writes do not throw synchronously, but a
-        // torn-down session could; log rather than swallow silently, and never
-        // crash Tower over one batch.
-        log('ERROR', `Buffered flush submission failed for ${sessionId.slice(0, 8)}...: ${err instanceof Error ? err.message : String(err)}`);
-      }),
-  );
-}
-
-/** Stop the send buffer and deliver remaining messages (called from tower-server during shutdown). */
-export async function stopSendBuffer(): Promise<void> {
-  await sendBuffer.stop();
-}
+// Spec 1313: the in-memory SendBuffer (Spec 403) is retired. Every send is now
+// persisted to the durable `mailbox` table before the response and delivered only
+// through the render-gate; the backstop drainer lifecycle lives in
+// `mailbox-wiring.ts` (startMailboxDrainer / stopMailboxDrainer), wired from
+// tower-server. There is no shutdown force-flush — held rows survive in SQLite.
 
 // ============================================================================
 // Route context — dependencies provided by the orchestrator
@@ -218,6 +192,7 @@ const ROUTES: Record<string, RouteEntry> = {
   'POST /api/launch':     (req, res) => handleLaunchInstance(req, res),
   'POST /api/stop':       (req, res) => handleStopInstance(req, res),
   'POST /api/send':       (req, res, _url, ctx) => handleSend(req, res, ctx),
+  'GET /api/inbox':       (_req, res, url) => handleInboxList(res, url),
   'GET /api/cron/tasks':  (_req, res, url) => handleCronList(res, url),
   'GET /':                (_req, res, _url, ctx) => handleDashboard(res, ctx),
   'GET /index.html':      (_req, res, _url, ctx) => handleDashboard(res, ctx),
@@ -331,6 +306,20 @@ export async function handleRequest(
     const cronTaskMatch = url.pathname.match(/^\/api\/cron\/tasks\/([^/]+)\/(status|run|enable|disable)$/);
     if (cronTaskMatch) {
       return await handleCronTaskAction(req, res, url, cronTaskMatch);
+    }
+
+    // Inbox dismiss: POST /api/inbox/:id/dismiss (Spec 1313, Phase 7)
+    const inboxDismissMatch = url.pathname.match(/^\/api\/inbox\/([^/]+)\/dismiss$/);
+    if (inboxDismissMatch) {
+      return handleInboxDismiss(req, res, ctx, inboxDismissMatch);
+    }
+
+    // Inbox show: GET /api/inbox/:id — a single row INCLUDING its body (Spec 1313 §178).
+    // Checked AFTER the dismiss match, so /:id/dismiss never falls through here (its
+    // trailing segment can't match this single-segment pattern anyway).
+    const inboxShowMatch = url.pathname.match(/^\/api\/inbox\/([^/]+)$/);
+    if (inboxShowMatch) {
+      return handleInboxShow(req, res, inboxShowMatch);
     }
 
     // Workspace routes: /workspace/:base64urlPath/* (Spec 0090 Phase 4)
@@ -801,6 +790,11 @@ async function handleTerminalCreate(
         const session = manager.createSessionRaw({
           label: label || `terminal-${sessionId.slice(0, 8)}`,
           cwd,
+          // Spec 1313: thread the launch command so the render-gate can resolve
+          // this session's profile (builders keep the `.builder-start.sh` backstop
+          // too; this makes identity direct and restart-safe via the persisted row).
+          command,
+          args,
         });
         const ptySession = manager.getSession(session.id);
         if (ptySession) {
@@ -819,7 +813,7 @@ async function handleTerminalCreate(
             entry.shells.set(roleId, session.id);
           }
           saveTerminalSession(session.id, workspacePath, termType, roleId, shellperInfo.pid,
-            shellperInfo.socketPath, shellperInfo.pid, shellperInfo.startTime, label ?? null, cwd ?? null);
+            shellperInfo.socketPath, shellperInfo.pid, shellperInfo.startTime, label ?? null, cwd ?? null, command ?? null);
           ctx.log('INFO', `Registered shellper terminal ${session.id} as ${termType} "${roleId}" for workspace ${workspacePath}`);
         }
       } catch (shellperErr) {
@@ -841,7 +835,7 @@ async function handleTerminalCreate(
         } else {
           entry.shells.set(roleId, info.id);
         }
-        saveTerminalSession(info.id, workspacePath, termType, roleId, info.pid, null, null, null, null, cwd ?? null);
+        saveTerminalSession(info.id, workspacePath, termType, roleId, info.pid, null, null, null, null, cwd ?? null, command ?? null);
         ctx.log('WARN', `Terminal ${info.id} for ${workspacePath} is non-persistent (shellper unavailable)`);
       }
     }
@@ -1105,7 +1099,7 @@ async function handleOverview(res: http.ServerResponse, url: URL, workspaceOverr
     // every collection field is required ('never undefined' for `architects`,
     // Issue 1104), so emit them all empty rather than a partial payload.
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ builders: [], pendingPRs: [], backlog: [], recentlyClosed: [], architects: [] }));
+    res.end(JSON.stringify({ builders: [], pendingPRs: [], backlog: [], recentlyClosed: [], architects: [], heldCount: 0, mailboxEscalated: false }));
     return;
   }
 
@@ -1449,6 +1443,292 @@ async function handleNotify(
 // POST /api/send — send a message to a resolved agent terminal
 // ============================================================================
 
+/** Minimal JSON responder for the send route. */
+function sendJson(res: http.ServerResponse, status: number, payload: Record<string, unknown>): void {
+  res.writeHead(status, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify(payload));
+}
+
+/**
+ * The specific architect NAME whose live terminal is `terminalId`, or null when
+ * `terminalId` is a builder/shell terminal. Reverse-maps via the routing registry
+ * (Spec 1313): storing the canonical architect name on a mailbox row is what lets
+ * held mail redeliver to the right terminal after a respawn, and it also tells an
+ * architect target from a builder target for message formatting.
+ */
+function architectNameForTerminal(workspacePath: string, terminalId: string): string | null {
+  const entry = getWorkspaceTerminals().get(workspacePath);
+  if (!entry) return null;
+  for (const [name, tid] of entry.architects) {
+    if (tid === terminalId) return name;
+  }
+  return null;
+}
+
+/**
+ * The canonical mailbox identity of a live-resolved target: architect targets are
+ * stored under their SPECIFIC architect name (reverse-mapped from the terminal),
+ * everything else under its resolved agent id.
+ */
+function liveTargetIdentity(result: ResolveResult): { toAgent: string; isArchitectTarget: boolean } {
+  const archName = architectNameForTerminal(result.workspacePath, result.terminalId);
+  return { toAgent: archName ?? result.agent, isArchitectTarget: archName !== null };
+}
+
+/** Format a message per sender/target — preserves the pre-1313 formatting rules. */
+function formatMessageForTarget(
+  isArchitectTarget: boolean,
+  from: string | undefined,
+  message: string,
+  raw: boolean,
+): string {
+  if (isArchitectTarget && from) return formatBuilderMessage(from, message, undefined, raw); // builder → architect
+  if (!isArchitectTarget) return formatArchitectMessage(message, undefined, raw); // any → builder
+  return raw ? message : formatArchitectMessage(message, undefined, false); // unknown → architect
+}
+
+/**
+ * Route a cron notification through the Spec 1313 mailbox + gate — the Tower-wired
+ * front half of {@link deliverCronMail} (Phase 6). Resolves the task's target to a
+ * canonical recipient agent: a live terminal via {@link resolveTarget} plus the
+ * architect reverse-map ({@link liveTargetIdentity}, because a bare `architect`
+ * target resolves to the generic id, which the mailbox can't address), or — when the
+ * agent is known but has no live PTY — via {@link resolveAgentInRegistry}, so the
+ * message HOLDS as `no-live-pty` instead of vanishing (spec decision 9). Then it
+ * hands off to the registry-free core. Cron is a non-builder sender, so no
+ * sender-affinity or spoofing check applies. Wired into the cron scheduler as its
+ * `deliver` port (see `initCron`), keeping the scheduler ignorant of mailbox
+ * internals and giving cron exactly one gated path shared with `handleSend`.
+ */
+export async function deliverCronMessage(
+  task: Pick<CronTask, 'name' | 'target' | 'workspacePath'>,
+  message: string,
+  log: (level: 'INFO' | 'ERROR' | 'WARN', msg: string) => void,
+): Promise<CronDeliveryResult> {
+  const db = getGlobalDb();
+  const ports = makeDeliveryPorts(log);
+  // Preserve the pre-1313 cron framing: a message FROM the `af-cron` pseudo-builder,
+  // regardless of whether the target is an architect or a builder.
+  const base = {
+    body: message,
+    formattedMessage: formatBuilderMessage(CRON_SENDER, message),
+    supersedeKey: task.name,
+  };
+
+  const live = resolveTarget(task.target, task.workspacePath);
+  if (!isResolveError(live)) {
+    const { toAgent } = liveTargetIdentity(live);
+    return deliverCronMail(ports, db, {
+      ...base,
+      workspacePath: live.workspacePath,
+      toAgent,
+      terminalId: live.terminalId,
+    });
+  }
+
+  // Live resolution failed. A NOT_FOUND target may still be a known agent with no
+  // live PTY (Tower restarting, builder between respawns) — hold its mail so a
+  // respawn drains it, instead of the old blind drop-with-WARN (decision 9).
+  if (live.code === 'NOT_FOUND') {
+    const reg = resolveAgentInRegistry(task.target, task.workspacePath);
+    if (!isResolveError(reg)) {
+      return deliverCronMail(ports, db, {
+        ...base,
+        workspacePath: reg.workspacePath,
+        toAgent: reg.agent,
+        terminalId: null,
+      });
+    }
+  }
+
+  log('WARN', `Cron '${task.name}': target '${task.target}' not found — message not delivered`);
+  return { outcome: 'unresolved', reason: null, mailboxId: null };
+}
+
+/**
+ * Persist a `held` mailbox row and write the Spec 1313 `held` send response. Used
+ * for both dead-session cases (no live PTY, held `no-live-pty`). The row exists
+ * before the response returns, so the backstop drainer will redeliver it once the
+ * agent has a clean prompt — nothing is dropped.
+ */
+function holdAndRespond(
+  res: http.ServerResponse,
+  ctx: RouteContext,
+  input: EnqueueInput,
+  reason: MailboxReason,
+): void {
+  const row = enqueueMailbox(getGlobalDb(), { ...input, reason });
+  ctx.log(
+    'INFO',
+    `Message held (${reason}) → ${input.toAgent} @ ${path.basename(input.workspacePath)} (mailbox ${row.id.slice(0, 8)}...)`,
+  );
+  // A new held row appeared → refresh the held-count indicator (Spec 1313, Phase 7).
+  ctx.broadcastNotification({ type: 'overview-changed', title: 'Held mail changed', body: `held ${reason}` });
+  sendJson(res, 200, {
+    ok: true,
+    terminalId: input.terminalId ?? null,
+    resolvedTo: input.toAgent,
+    deferred: true, // back-compat: a held message is "deferred" to old binaries
+    delivered: false,
+    held: true,
+    reason,
+    mailboxId: row.id,
+  });
+}
+
+/** Inputs for a delayed (`--delay`) send, captured from the parsed request. */
+interface DelayedSendParams {
+  to: string;
+  workspace: string | undefined;
+  from: string | undefined;
+  message: string;
+  raw: boolean;
+  noEnter: boolean;
+  interrupt: boolean;
+  deliverAfter: number;
+  senderWorkspace: string;
+}
+
+/**
+ * Handle a delayed (`--delay`) send (Spec 1307, re-homed onto the Spec 1313 mailbox; round 3
+ * durable rework). The row is RESOLVED, authorized (the builder-spoofing check inside
+ * `resolveTarget`), formatted, and PERSISTED here at REQUEST time with `not_before = now +
+ * delay*1000` — the security property the immediate path documents (a delayed send must not
+ * defer an authorization check past the conditions that would fail it) is preserved, and only
+ * DELIVERY is deferred. Persisting at request time is what makes `--delay` DURABLE across a
+ * Tower restart (the conscious, architect+maintainer-approved reversal of Spec 1307's
+ * drop-on-restart semantics): the render gate still guarantees a post-restart delivery only
+ * ever lands on a verified-empty prompt, and a pre-due row is visible/cancellable in
+ * `afx inbox`.
+ *
+ * Resolution is live-first then registry (a known agent with no live PTY) so a
+ * dead/unwritable/registry-only target schedules UNIFORMLY — a delayed send does not require a
+ * live session now. reason is left null: the row is SCHEDULED, not held-for-a-reason; the
+ * drainer re-evaluates liveness at due time.
+ *
+ * The body is NEVER written from here. A normal delayed send is delivered by the gated
+ * backstop drainer once `not_before` passes (≤ one 1.5 s tick after due — the delay is a lower
+ * bound). A delayed `--interrupt` (change 2 reshape) additionally keeps a small in-memory timer
+ * that fires ONLY the Ctrl+C at due time (guarded by `isStillLive` + a re-fetched writable
+ * session, inside the submission lock); the ^C ends the turn and the body then delivers through
+ * the SAME gate every send uses — nothing is marked delivered here, so a #1198 dropped write or
+ * a shutdown during the wait can never falsely report delivery or double-deliver. A restart
+ * during the wait loses only the ^C nudge, never the message.
+ */
+function handleDelayedSend(
+  res: http.ServerResponse,
+  ctx: RouteContext,
+  db: ReturnType<typeof getGlobalDb>,
+  params: DelayedSendParams,
+): void {
+  const { to, workspace, from, message, raw, noEnter, interrupt, deliverAfter, senderWorkspace } = params;
+  const now = Date.now();
+  const notBefore = now + deliverAfter * 1000;
+
+  // Resolve to a canonical AGENT — live first, then registry (known agent, no live PTY yet).
+  let workspacePath: string;
+  let toAgent: string;
+  let isArchitectTarget: boolean;
+  let terminalId: string | null;
+
+  const live = resolveTarget(to, workspace, from);
+  if (!isResolveError(live)) {
+    const identity = liveTargetIdentity(live);
+    workspacePath = live.workspacePath;
+    toAgent = identity.toAgent;
+    isArchitectTarget = identity.isArchitectTarget;
+    terminalId = live.terminalId;
+  } else if (live.code === 'NOT_FOUND') {
+    const reg = resolveAgentInRegistry(to, workspace, from);
+    if (isResolveError(reg)) {
+      const statusCode = reg.code === 'AMBIGUOUS' ? 409 : reg.code === 'NO_CONTEXT' ? 400 : 404;
+      const errorCode = reg.code === 'NO_CONTEXT' ? 'INVALID_PARAMS' : reg.code;
+      sendJson(res, statusCode, { error: errorCode, message: reg.message });
+      return;
+    }
+    workspacePath = reg.workspacePath;
+    toAgent = reg.agent;
+    isArchitectTarget = reg.kind === 'architect';
+    terminalId = null;
+  } else {
+    const statusCode = live.code === 'AMBIGUOUS' ? 409 : live.code === 'NO_CONTEXT' ? 400 : 404;
+    const errorCode = live.code === 'NO_CONTEXT' ? 'INVALID_PARAMS' : live.code;
+    sendJson(res, statusCode, { error: errorCode, message: live.message });
+    return;
+  }
+
+  const formattedMessage = formatMessageForTarget(isArchitectTarget, from, message, raw);
+
+  // Persist NOW, at request time, with the due time. reason=null → SCHEDULED, not stuck.
+  const row = enqueueMailbox(db, {
+    workspacePath,
+    toAgent,
+    body: message,
+    formattedMessage,
+    fromAgent: from ?? null,
+    fromWorkspace: senderWorkspace,
+    noEnter,
+    terminalId,
+    notBefore,
+  });
+  // A new held (scheduled) row appeared → refresh the held-count indicator (Phase 7).
+  ctx.broadcastNotification({ type: 'overview-changed', title: 'Held mail changed', body: 'scheduled' });
+
+  if (interrupt) {
+    // Change 2 reshape: an in-memory timer that fires ONLY the Ctrl+C at due time. It writes
+    // no message body and marks nothing delivered — the body delivers through the gated
+    // drainer after the ^C ends the turn. Everything the ^C depends on — `isStillLive`
+    // (delayed-send.ts's generation guard), the session's existence, and its writability — is
+    // re-checked INSIDE the submission lock, right before the write, so a shutdown OR a session
+    // teardown/respawn during the lock-wait writes nothing (invariant 2; the directive's
+    // preferred shape). Diagnostics arg falls back to toAgent when the target has no terminal
+    // id yet.
+    scheduleDelayedSend(deliverAfter, terminalId ?? toAgent, (isStillLive) => {
+      if (!isStillLive()) return; // shutdown before/at due → drop the ^C nudge (body survives)
+      if (terminalId) {
+        let fired = false;
+        void submitToSession(terminalId, () => {
+          // Re-check EVERYTHING inside the lock: the queued submission can acquire the lock only
+          // AFTER a shutdown or a session teardown/respawn that landed while it waited behind an
+          // in-flight write. Re-fetch the session and re-check live + writable here; bail with no
+          // ^C otherwise (the body still delivers via the gate).
+          if (!isStillLive()) return 0;
+          const live = getTerminalManager().getSession(terminalId);
+          if (!live || !live.writable) return 0;
+          live.write('\x03'); // Ctrl+C only — end the turn; body follows via the gate
+          fired = true;
+          return 0; // no body, no Enter on this path
+        })
+          .then(() =>
+            ctx.log('INFO', fired
+              ? `Delayed interrupt ^C fired → ${toAgent} (terminal ${terminalId.slice(0, 8)}...); body delivers via the gate`
+              : `Delayed interrupt for ${toAgent}: session not live/writable at write time — body delivers via the gate on the next clean pass`),
+          )
+          .catch((err) => ctx.log('ERROR', `Delayed interrupt ^C failed for ${toAgent}: ${(err as Error).message}`));
+      } else {
+        ctx.log('INFO', `Delayed interrupt for ${toAgent}: no live terminal at due time — body delivers via the gate on the next clean pass`);
+      }
+      // Nudge the gated drainer so the now-due body delivers promptly (gated — a spurious
+      // nudge onto a busy/mid-turn screen simply re-holds; the backstop is the ultimate net).
+      void getMailboxDrainer().scheduleDrain(workspacePath, toAgent);
+    });
+  }
+  // A normal delayed send keeps NO timer: the persisted `not_before` row is delivered by the
+  // gated backstop drainer once due — durable across restart by construction.
+
+  ctx.log('INFO', `Message scheduled (+${deliverAfter}s): ${from ?? 'unknown'} → ${toAgent} (mailbox ${row.id.slice(0, 8)}...)`);
+  sendJson(res, 200, {
+    ok: true,
+    terminalId,
+    resolvedTo: toAgent,
+    deferred: false,
+    scheduled: true,
+    deliverAfter,
+    mailboxId: row.id,
+    notBefore,
+  });
+}
+
 async function handleSend(
   req: http.IncomingMessage,
   res: http.ServerResponse,
@@ -1484,10 +1764,12 @@ async function handleSend(
   const interrupt = options.interrupt === true;
   const escape = options.escape === true;
 
-  // Spec 1307: optional delayed delivery. Validated here as well as at the CLI
-  // boundary — this is a public HTTP route, so the CLI is not the only caller,
-  // and an unvalidated value becomes a setTimeout that either fires instantly
-  // (NaN) or never (Infinity).
+  // Spec 1307 `--delay` (re-homed onto the mailbox): optional deferred delivery.
+  // Validated here as well as at the CLI boundary — /api/send is a public route, so an
+  // unvalidated value would become a setTimeout that fires instantly (NaN) or never
+  // (Infinity). `escape` cannot be combined with a delay: an ESC interrupts the CURRENT
+  // turn by design, so deferring it is contradictory — refuse rather than silently drop
+  // one of the two (a quietly-dropped delay would look like it worked).
   let deliverAfter: number | undefined;
   if (options.deliverAfter !== undefined && options.deliverAfter !== null) {
     const delayError = validateDelaySeconds(options.deliverAfter);
@@ -1496,69 +1778,146 @@ async function handleSend(
       res.end(JSON.stringify({ error: 'INVALID_PARAMS', message: delayError }));
       return;
     }
+    if (escape) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        error: 'INVALID_PARAMS',
+        message: 'escape cannot be combined with a delay: an ESC keystroke bypasses buffering by design so that it interrupts the CURRENT turn. Send the ESC now, or send a delayed message without escape.',
+      }));
+      return;
+    }
     deliverAfter = options.deliverAfter as number;
   }
 
-  // `escape` short-circuits before formatting and before the send buffer, by
-  // design (an interrupt that can be deferred is not an interrupt). Combining it
-  // with a delay is therefore contradictory rather than merely unsupported, and
-  // is refused instead of silently ignoring one of the two — a delay that is
-  // quietly dropped would look like it worked.
-  if (escape && deliverAfter !== undefined) {
-    res.writeHead(400, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({
-      error: 'INVALID_PARAMS',
-      message: 'escape cannot be combined with a delay: an ESC keystroke bypasses buffering by design so that it interrupts the CURRENT turn. Send the ESC now, or send a delayed message without escape.',
-    }));
+  const db = getGlobalDb();
+  const senderWorkspace = fromWorkspace ?? workspace ?? 'unknown';
+
+  // Spec 1313 round 3: a delayed send (`--delay`) is RESOLVED, authorized, formatted, and
+  // PERSISTED here at REQUEST time, then deferred — it does NOT require a live session now,
+  // so it is handled BEFORE the immediate live/dead/unwritable/escape/interrupt branches
+  // below (those would 404/503 a delayed send to a target that has no live PTY yet). Only
+  // DELIVERY is deferred, through the same render gate every send uses; the row's `not_before`
+  // makes the delay durable across a Tower restart.
+  if (deliverAfter !== undefined) {
+    handleDelayedSend(res, ctx, db, {
+      to, workspace, from, message, raw, noEnter, interrupt, deliverAfter, senderWorkspace,
+    });
     return;
   }
 
-  // Resolve the target address to a terminal ID.
+  // Resolve the target address against LIVE terminals.
   // Spec 755: pass `from` so architect resolution is sender-affinity-aware
   // when the sender is a builder. Non-builder senders see unchanged behavior.
   const result = resolveTarget(to, workspace, from);
 
+  // --- Resolution failed against live terminals ---
   if (isResolveError(result)) {
-    const statusCode = result.code === 'AMBIGUOUS' ? 409
-      : result.code === 'NO_CONTEXT' ? 400
-      : 404;
+    // Spec 1313 dead-session seam: a NOT_FOUND target may still be a KNOWN agent
+    // with no live PTY (e.g. registered in global.db while Tower restarts). Hold
+    // its mail instead of 404ing. escape/interrupt act on a live session only, so
+    // an unresolved target keeps the original error for them.
+    if (result.code === 'NOT_FOUND' && !escape && !interrupt) {
+      const reg = resolveAgentInRegistry(to, workspace, from);
+      if (!isResolveError(reg)) {
+        holdAndRespond(
+          res,
+          ctx,
+          {
+            workspacePath: reg.workspacePath,
+            toAgent: reg.agent,
+            body: message,
+            formattedMessage: formatMessageForTarget(reg.kind === 'architect', from, message, raw),
+            fromAgent: from ?? null,
+            fromWorkspace: senderWorkspace,
+            noEnter,
+            terminalId: null,
+          },
+          'no-live-pty',
+        );
+        return;
+      }
+      if (reg.code === 'AMBIGUOUS') {
+        sendJson(res, 409, { error: 'AMBIGUOUS', message: reg.message });
+        return;
+      }
+      // else: fall through to the original live-resolution error below.
+    }
+    const statusCode = result.code === 'AMBIGUOUS' ? 409 : result.code === 'NO_CONTEXT' ? 400 : 404;
     // Map NO_CONTEXT to INVALID_PARAMS per plan's error contract
     const errorCode = result.code === 'NO_CONTEXT' ? 'INVALID_PARAMS' : result.code;
-    res.writeHead(statusCode, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: errorCode, message: result.message }));
+    sendJson(res, statusCode, { error: errorCode, message: result.message });
     return;
   }
 
-  // Get the terminal session
+  // --- Live target resolved; locate its session ---
   const manager = getTerminalManager();
   const session = manager.getSession(result.terminalId);
+  const { toAgent, isArchitectTarget } = liveTargetIdentity(result);
+
+  // Dead session: the routing entry resolved but the PTY is gone (exited > 30s).
+  // Hold a normal message; escape/interrupt need a live session → original 404.
   if (!session) {
-    res.writeHead(404, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({
-      error: 'NOT_FOUND',
-      message: `Terminal session ${result.terminalId} not found (agent '${result.agent}' resolved but terminal is gone).`,
-    }));
+    if (escape || interrupt) {
+      sendJson(res, 404, {
+        error: 'NOT_FOUND',
+        message: `Terminal session ${result.terminalId} not found (agent '${result.agent}' resolved but terminal is gone).`,
+      });
+      return;
+    }
+    holdAndRespond(
+      res,
+      ctx,
+      {
+        workspacePath: result.workspacePath,
+        toAgent,
+        body: message,
+        formattedMessage: formatMessageForTarget(isArchitectTarget, from, message, raw),
+        fromAgent: from ?? null,
+        fromWorkspace: senderWorkspace,
+        noEnter,
+        terminalId: result.terminalId,
+      },
+      'no-live-pty',
+    );
     return;
   }
 
   // #1198: a session whose shellper connection died still reports status
-  // 'running', but every write to it is dropped. Fail the send loudly
-  // instead of logging "Message sent" for a message that went nowhere.
+  // 'running', but every write is dropped. Hold a normal message (it delivers
+  // when the connection recovers); keep the loud 503 for escape/interrupt, which
+  // are operator actions that require the live PTY here and now.
   if (!session.writable) {
-    ctx.log('ERROR', `Message DROPPED: ${from ?? 'unknown'} → ${result.agent} (terminal ${result.terminalId.slice(0, 8)}...): terminal not writable (shellper connection down)`);
-    res.writeHead(503, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({
-      error: 'TERMINAL_NOT_WRITABLE',
-      message: `Terminal for '${result.agent}' is not accepting input (its process connection is down). Retry shortly; if this persists, check Tower logs.`,
-    }));
+    if (escape || interrupt) {
+      ctx.log('ERROR', `Interrupt/ESC not deliverable: ${from ?? 'unknown'} → ${result.agent} (terminal not writable, shellper connection down)`);
+      sendJson(res, 503, {
+        error: 'TERMINAL_NOT_WRITABLE',
+        message: `Terminal for '${result.agent}' is not accepting input (its process connection is down). Retry shortly; if this persists, check Tower logs.`,
+      });
+      return;
+    }
+    holdAndRespond(
+      res,
+      ctx,
+      {
+        workspacePath: result.workspacePath,
+        toAgent,
+        body: message,
+        formattedMessage: formatMessageForTarget(isArchitectTarget, from, message, raw),
+        fromAgent: from ?? null,
+        fromWorkspace: senderWorkspace,
+        noEnter,
+        terminalId: result.terminalId,
+      },
+      'no-live-pty',
+    );
     return;
   }
 
-  // Spec 1273: `escape` delivers a bare ESC keystroke and returns. It is handled
-  // before formatting and before the send buffer on purpose — an interrupt that
-  // can be deferred because someone recently typed in this terminal is not an
-  // interrupt. ESC ends the running turn so already-queued messages process; the
-  // trailing Enter is what lets them through, which is why it is the default
+  // --- Live, writable session ---
+
+  // Spec 1273: `escape` delivers a bare ESC keystroke and returns. Explicit human
+  // bypass — no gate, no mailbox row. ESC ends the running turn so already-queued
+  // messages process; the trailing Enter (default) is what lets them through
   // (matching the verified recovery `afx send <b> --raw "$(printf '\x1b')"`).
   if (escape) {
     // Awaited: the response must not claim delivery before the ESC and its
@@ -1566,294 +1925,259 @@ async function handleSend(
     await submitToSession(result.terminalId, () => writeEscapeToSession(session, noEnter));
     broadcastMessage({
       type: 'message',
-      from: { project: path.basename(fromWorkspace ?? workspace ?? 'unknown'), agent: from ?? 'unknown' },
-      to: { project: path.basename(result.workspacePath), agent: result.agent },
+      from: { project: path.basename(senderWorkspace), agent: from ?? 'unknown' },
+      to: { project: path.basename(result.workspacePath), agent: toAgent },
       content: '<ESC>',
       metadata: { raw: true, source: 'api', escape: true },
       timestamp: new Date().toISOString(),
     });
-    ctx.log('INFO', `Interrupt (ESC) sent: ${from ?? 'unknown'} → ${result.agent} (terminal ${result.terminalId.slice(0, 8)}...)`);
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({
-      ok: true,
-      terminalId: result.terminalId,
-      resolvedTo: result.agent,
-      deferred: false,
-    }));
+    ctx.log('INFO', `Interrupt (ESC) sent: ${from ?? 'unknown'} → ${toAgent} (terminal ${result.terminalId.slice(0, 8)}...)`);
+    sendJson(res, 200, { ok: true, terminalId: result.terminalId, resolvedTo: toAgent, deferred: false });
     return;
   }
 
-  // Format the message based on sender/target
-  const isArchitectTarget = result.agent === 'architect';
-  let formattedMessage: string;
-  if (isArchitectTarget && from) {
-    // Builder → Architect
-    formattedMessage = formatBuilderMessage(from, message, undefined, raw);
-  } else if (!isArchitectTarget) {
-    // Architect → Builder (or any → builder)
-    formattedMessage = formatArchitectMessage(message, undefined, raw);
-  } else {
-    // Unknown sender to architect — use raw
-    formattedMessage = raw ? message : formatArchitectMessage(message, undefined, false);
-  }
+  const formattedMessage = formatMessageForTarget(isArchitectTarget, from, message, raw);
 
-  // Build broadcast payload (used for both immediate and deferred delivery)
-  const senderWorkspace = fromWorkspace ?? workspace ?? 'unknown';
-  const broadcastPayload = {
-    type: 'message' as const,
-    from: {
-      project: path.basename(senderWorkspace),
-      agent: from ?? 'unknown',
-    },
-    to: {
-      project: path.basename(result.workspacePath),
-      agent: result.agent,
-    },
-    content: message,
-    metadata: { raw, source: 'api' },
-    timestamp: new Date().toISOString(),
-  };
-  const logMessage = `Message sent: ${from ?? 'unknown'} → ${result.agent} (terminal ${result.terminalId.slice(0, 8)}...)`;
+  // NB: `--delay` (deliverAfter) is handled earlier by handleDelayedSend, before this
+  // immediate-path block — a delayed send is resolved + persisted at request time and does
+  // not fall through here.
 
-  // Spec 1307: `--delay` schedules DELIVERY only. Everything above this point —
-  // target resolution, the builder-spoofing check inside resolveTarget,
-  // writability, formatting — has already happened at REQUEST time, which is the
-  // security-relevant half of the design: a delayed send must not be able to
-  // defer an authorization check past the conditions that would fail it.
-  if (deliverAfter !== undefined) {
-    const deliveryContext: DeliveryContext = {
-      terminalId: result.terminalId,
-      agent: result.agent,
-      from,
+  // Spec 1313: `interrupt` is the explicit human bypass. Ctrl+C, then deliver
+  // WITHOUT the render-gate (the operator is looking at this terminal). A row is
+  // still persisted and marked delivered for audit parity — every send is a row.
+  if (interrupt) {
+    const row = enqueueMailbox(db, {
+      workspacePath: result.workspacePath,
+      toAgent,
+      body: message,
       formattedMessage,
+      fromAgent: from ?? null,
+      fromWorkspace: senderWorkspace,
       noEnter,
-      interrupt,
-      broadcastPayload,
-      logMessage,
-      ctx,
-      // Delayed deliveries queue behind anything already buffered.
-      enforceFifo: true,
-    };
-    // A due message re-enters deliverOrBuffer, which submits under Spec 1273's
-    // per-session lock — so serialisation against other writes to this session
-    // is the lock's job, and this scheduler only owns WHEN delivery starts.
-    // `stillLive` is re-checked inside the lock so a shutdown during the wait
-    // for it cancels the write (delayed-send.ts passes the generation check).
-    scheduleDelayedSend(deliverAfter, result.terminalId, (stillLive) =>
-      deliverOrBuffer({ ...deliveryContext, stillLive }));
-    ctx.log('INFO', `Message scheduled (+${deliverAfter}s): ${from ?? 'unknown'} → ${result.agent} (terminal ${result.terminalId.slice(0, 8)}...)`);
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({
+      terminalId: result.terminalId,
+    });
+    // Claim the row as delivered SYNCHRONOUSLY, before any await (CMAP round 2 — Codex): the
+    // interrupt writes the message itself (a gate bypass), so the row must never be visible to
+    // the mailbox drainer as `held`, or a concurrent backstop/scheduleDrain pass could gate-deliver
+    // the SAME row and put the bytes on the wire twice. enqueue→markDelivered are both synchronous
+    // (no await between), so there is no window for the drainer to pick it up before we own it.
+    // Tradeoff (CMAP round 3 — Codex/Claude): claiming BEFORE the write below means that if
+    // submitToSession throws/crashes, the row reads `delivered` for audit though no bytes reached
+    // the PTY — the message is lost, not retried. This is the deliberate choice: the write is not
+    // transactional, so a partial write may already have put bytes on the wire, and re-holding (the
+    // alternative) would let the backstop gate-deliver a SECOND copy. Losing a crashed interrupt is
+    // preferred over double-delivering it; `--interrupt` is the explicit human gate-bypass anyway.
+    markMailboxDelivered(db, row.id);
+    // Deliver the interrupt as ONE atomic critical section under the Spec 1273 per-terminal
+    // submission lock (CMAP round 1 — Gemini/Codex/Claude): the Ctrl+C, its 100 ms settle, and
+    // the message write all occur inside a single lock acquisition. Previously the \x03 + the
+    // settle sat OUTSIDE the lock, so a concurrent submission to the same terminal could land
+    // its Ctrl+C inside another submission's text→Enter window (killing that composer) or run
+    // during the 100 ms gap. `writeMessageToSession(..., 100)` schedules the text 100 ms after
+    // the ^C (the settle) and returns the completion offset, so the lock is held until the
+    // whole interrupt is on the wire; uncontended, it runs at once.
+    //   Scope of the guarantee: this serializes interrupt against interrupt/escape — the only
+    //   /api/send writers that take this per-terminal lock. It does NOT serialize against a
+    //   concurrent mailbox/backstop delivery (which writes through the per-AGENT serializer, a
+    //   disjoint lock); interrupt is the explicit gate-bypassing human action, and closing that
+    //   cross-path race would require the mailbox write edge to take this lock too (a separate,
+    //   larger change — flagged, not done here).
+    await submitToSession(result.terminalId, () => {
+      session.write('\x03'); // Ctrl+C
+      return writeMessageToSession(session, formattedMessage, noEnter, 100);
+    });
+    broadcastMessage({
+      type: 'message',
+      from: { project: path.basename(senderWorkspace), agent: from ?? 'unknown' },
+      to: { project: path.basename(result.workspacePath), agent: toAgent },
+      content: message,
+      metadata: { raw, source: 'api' },
+      timestamp: new Date().toISOString(),
+    });
+    ctx.log('INFO', `Message delivered (interrupt): ${from ?? 'unknown'} → ${toAgent} (terminal ${result.terminalId.slice(0, 8)}...)`);
+    sendJson(res, 200, {
       ok: true,
       terminalId: result.terminalId,
-      resolvedTo: result.agent,
+      resolvedTo: toAgent,
       deferred: false,
-      scheduled: true,
-      deliverAfter,
-    }));
+      delivered: true,
+      held: false,
+      mailboxId: row.id,
+      reason: null,
+    });
     return;
   }
 
-  const deferred = await deliverOrBuffer({
-    terminalId: result.terminalId,
-    agent: result.agent,
-    from,
+  // Spec 1313 normal path: PERSIST first (survives a crash), then attempt gated
+  // delivery through the single serialized path. The response reports the row's
+  // real first outcome — a clean, render-verified empty prompt delivers now;
+  // anything else (busy/menu/wrapper/no-profile) stays held for the backstop.
+  const row = enqueueMailbox(db, {
+    workspacePath: result.workspacePath,
+    toAgent,
+    body: message,
     formattedMessage,
+    fromAgent: from ?? null,
+    fromWorkspace: senderWorkspace,
     noEnter,
-    interrupt,
-    broadcastPayload,
-    logMessage,
-    ctx,
-    // Immediate sends keep their existing behaviour exactly (Spec 1307).
-    enforceFifo: false,
+    terminalId: result.terminalId,
   });
-
-  res.writeHead(200, { 'Content-Type': 'application/json' });
-  res.end(JSON.stringify({
+  // Deliver to the session THIS request already resolved rather than re-resolving
+  // by agent: the base resolver would repeat the routing-map lookup (redundant) and
+  // could target a different terminal if the map changed mid-request. The backstop
+  // drainer, which only has the agent, still uses the base resolver.
+  const basePorts = makeDeliveryPorts(ctx.log);
+  const ports: DeliveryPorts = {
+    ...basePorts,
+    getSessionForAgent: (ws, agent) =>
+      ws === result.workspacePath && agent === toAgent ? session : basePorts.getSessionForAgent(ws, agent),
+  };
+  try {
+    await deliverAgentMailSerialized(ports, db, result.workspacePath, toAgent);
+  } catch (err) {
+    // A gate/write error leaves the row HELD (markDelivered only runs on a
+    // completed write); the backstop drainer will retry. Report held, not a 500.
+    ctx.log('ERROR', `Delivery attempt errored for ${toAgent} (row ${row.id.slice(0, 8)}... stays held): ${(err as Error).message}`);
+  }
+  const stored = getMailboxById(db, row.id);
+  if (stored?.status === 'delivered') {
+    ctx.log('INFO', `Message delivered: ${from ?? 'unknown'} → ${toAgent} (terminal ${result.terminalId.slice(0, 8)}...)`);
+    sendJson(res, 200, {
+      ok: true,
+      terminalId: result.terminalId,
+      resolvedTo: toAgent,
+      deferred: false,
+      delivered: true,
+      held: false,
+      mailboxId: row.id,
+      reason: null,
+    });
+    return;
+  }
+  const reason: MailboxReason = stored?.reason ?? 'busy';
+  ctx.log('INFO', `Message held (${reason}): ${from ?? 'unknown'} → ${toAgent} (mailbox ${row.id.slice(0, 8)}...)`);
+  // The message stayed held → a new held row is in the set; refresh the indicator
+  // count (Spec 1313, Phase 7). The delivered branch above needs no fire — the
+  // delivery path's onHeldStateChange already broadcast when the row left the set.
+  ctx.broadcastNotification({ type: 'overview-changed', title: 'Held mail changed', body: `held ${reason}` });
+  sendJson(res, 200, {
     ok: true,
     terminalId: result.terminalId,
-    resolvedTo: result.agent,
-    deferred,
-    scheduled: false,
-  }));
-}
-
-/** Everything `deliverOrBuffer` needs, captured at request time. */
-interface DeliveryContext {
-  terminalId: string;
-  agent: string;
-  from?: string;
-  formattedMessage: string;
-  noEnter: boolean;
-  interrupt: boolean;
-  broadcastPayload: Parameters<typeof broadcastMessage>[0];
-  logMessage: string;
-  ctx: RouteContext;
-  /**
-   * Whether to queue behind messages already buffered for this session even
-   * when it looks idle. True only for DELAYED deliveries.
-   *
-   * Scoped deliberately rather than applied to every send. An immediate send
-   * races the 500ms buffer flush at worst, which is existing behaviour and not
-   * this spec's to change — Spec 1307 requires undelayed sends to be unchanged.
-   * A delayed send is different in kind: it can come due arbitrarily long after
-   * a message that is still queued, so "the session is idle right now" says
-   * nothing about whether it would overtake something.
-   */
-  enforceFifo: boolean;
-  /**
-   * Re-checked at the moment of the write, INSIDE the submission reservation —
-   * for DELAYED deliveries only (Spec 1307).
-   *
-   * A delayed delivery can sit behind an in-flight write to this session while
-   * it waits for the submission lock, and a shutdown can land in that wait. The
-   * generation check in `delayed-send.ts` fires before the delivery enters the
-   * lock, so without this second check a message that acquired the lock AFTER
-   * shutdown would still write — contradicting "shutdown starts nothing new".
-   * Undefined on the immediate path, which has no shutdown-cancellation notion.
-   */
-  stillLive?: () => boolean;
+    resolvedTo: toAgent,
+    deferred: true,
+    delivered: false,
+    held: true,
+    reason,
+    mailboxId: row.id,
+  });
 }
 
 /**
- * Deliver a formatted message: write it now, or hand it to the typing-aware
- * send buffer (Spec 403).
- *
- * Extracted from `handleSend` so the immediate and delayed paths make this
- * decision through the SAME code (Spec 1307). A delayed message that wrote
- * straight to the PTY would be deciding "is the user typing?" against a world
- * observed 15 seconds ago, and — worse — could overtake an earlier message
- * still sitting in the buffer.
- *
- * The session is re-fetched by id rather than captured: between scheduling and
- * delivery the session can die, be replaced, or lose its shellper connection,
- * and a retained `PtySession` reference would happily absorb writes that go
- * nowhere.
- *
- * @returns whether the message was buffered rather than written now.
- *
- * The write itself goes through Spec 1273's `submitToSession`, so it is
- * submitted — Enter included — before the session's next write begins. Callers
- * therefore need no settling wait of their own; "delivered" means delivered.
+ * GET /api/inbox — list held (undelivered) mailbox rows for a workspace. Backs the
+ * workspace-scoped `afx inbox` (Spec 1313 decision 8): `?workspace=<path>` selects the
+ * workspace (the CLI passes the current one by default); the path is normalized to the
+ * same realpath form the enqueue path stores, so a raw workspace root still matches its
+ * held rows. Omitting `?workspace=` lists every workspace — an API-level convenience the
+ * CLI never triggers, kept for direct callers. Metadata-only projection (Spec 1313
+ * redaction rule): id, addresses, why-held reason, escalation flag, and enqueue time —
+ * the message BODY is deliberately never surfaced here (it travels only over the live
+ * terminal stream on delivery). `escalated` is normalized from SQLite's 0/1 to a bool.
  */
-async function deliverOrBuffer(
-  delivery: DeliveryContext,
-): Promise<boolean> {
-  const {
-    terminalId, agent, from, formattedMessage, noEnter, interrupt,
-    broadcastPayload, logMessage, ctx, enforceFifo, stillLive,
-  } = delivery;
+function handleInboxList(res: http.ServerResponse, url: URL): void {
+  const rawWorkspace = url.searchParams.get('workspace');
+  // Normalize to the stored realpath key (mailbox workspace_path is normalized at
+  // enqueue — tower-routes handleSend / holdAndRespond — matching overview.ts). Without
+  // this a symlinked workspace root would miss its own held rows.
+  const workspace = rawWorkspace ? normalizeWorkspacePath(rawWorkspace) : undefined;
+  const rows = listHeldMailbox(getGlobalDb(), workspace);
+  const projected = rows.map((r) => ({
+    id: r.id,
+    workspacePath: r.workspace_path,
+    toAgent: r.to_agent,
+    fromAgent: r.from_agent,
+    reason: r.reason,
+    escalated: r.escalated === 1,
+    createdAt: r.created_at,
+    // Spec 1313 round 3: due time of a pre-due delayed (`--delay`) row; null = deliver-ASAP.
+    // The CLI renders "in Ns" for a row whose notBefore is still in the future.
+    notBefore: r.not_before,
+  }));
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify(projected));
+}
 
-  // Re-resolve. For the immediate path this is the same session that was just
-  // validated; for the delayed path it is the whole point.
-  const session = getTerminalManager().getSession(terminalId);
-  if (!session) {
-    ctx.log('WARN', `Message DROPPED: ${from ?? 'unknown'} → ${agent} (terminal ${terminalId.slice(0, 8)}...): session gone before delivery`);
-    return false;
+/**
+ * POST /api/inbox/:id/dismiss — mark a held row `dismissed` (operator-cleared via
+ * `afx inbox dismiss`). Soft transition: the row is marked, not deleted, and NEVER
+ * delivered. The dispatch matches this path for ANY method, so the method is guarded
+ * here: a non-POST request (e.g. GET) must not mutate state → 405. 404 when the id names
+ * no currently-held row (already terminal or unknown), so the CLI reports a clean error.
+ * On success, fires `overview-changed` so the held-count indicator drops immediately.
+ * Authorized at the workspace-human trust level — any local operator may dismiss any held
+ * row (Spec 1313 decision 8); no ownership check.
+ */
+function handleInboxDismiss(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  ctx: RouteContext,
+  match: RegExpMatchArray,
+): void {
+  // Dismissal mutates state — only POST may reach it. The path match in the dispatch is
+  // method-agnostic, so without this guard a GET (or any method) to this URL would dismiss
+  // mail. Matches the method-guard convention used by the cron action routes.
+  if (req.method !== 'POST') {
+    sendJson(res, 405, { error: 'Method not allowed' });
+    return;
   }
-  if (!session.writable) {
-    ctx.log('ERROR', `Message DROPPED: ${from ?? 'unknown'} → ${agent} (terminal ${terminalId.slice(0, 8)}...): terminal not writable (shellper connection down)`);
-    return false;
+  const id = decodeURIComponent(match[1]);
+  if (!dismissMailbox(getGlobalDb(), id)) {
+    sendJson(res, 404, { error: 'NOT_FOUND', message: `No held message with id '${id}'` });
+    return;
   }
+  ctx.broadcastNotification({ type: 'overview-changed', title: 'Held mail changed', body: 'dismissed' });
+  ctx.log('INFO', `Inbox: dismissed held message ${id.slice(0, 8)}...`);
+  sendJson(res, 200, { ok: true });
+}
 
-  // Spec 1307: a DELAYED interrupt must still respect per-session order. An
-  // immediate `--interrupt` deliberately bypasses buffering ("an interrupt that
-  // can be deferred is not an interrupt"), but that reasoning does not carry to
-  // one that was already deferred by N seconds — writing it directly would let
-  // it overtake messages queued ahead of it. When there IS a queue ahead, the
-  // Ctrl+C rides along with the message (`interruptFirst`); otherwise it is
-  // written INSIDE the payload's submission reservation below, never before it.
-  const queueAhead = enforceFifo && sendBuffer.hasPending(terminalId);
-
-  // Check if user is idle — deliver immediately or buffer (Spec 403, Bugfix #450)
-  // Defer only when user has typed recently (within idle threshold).
-  // Bugfix #492: removed session.composing check — composing gets stuck true
-  // after non-Enter keystrokes (Ctrl+C, arrows, Tab), causing 60s delays.
-  //
-  // Spec 1307 adds the `enforceFifo` term, for DELAYED deliveries only: an idle
-  // session must not be written to directly while earlier messages are still
-  // queued for it, or the delayed message overtakes them. For `/arch-save` that
-  // inversion means `/arch-init` landing before its `/clear`, after which the
-  // clear wipes the context that just recovered — a failure no re-send repairs.
-  //
-  // WHAT THIS GUARANTEES, and what it does not:
-  //   `enforceFifo` (this predicate) decides ORDER: a delayed message never
-  //     bypasses one already queued for the session. ATOMICITY — that each
-  //     delivery, Enter included, completes before the next write to that
-  //     session begins — is Spec 1273's `submitToSession`, which every write
-  //     from here goes through, immediate and delayed alike. Order and
-  //     atomicity are separate layers; this term is the first, the lock is the
-  //     second. Together they close the mid-flush interleave (route test
-  //     "ORDERING: ... MID-FLUSH", mutation-verified against the flush's
-  //     submitToSession reservation) and the two-simultaneous-delayed case.
-  //   NOT GUARANTEED — request-order across differing delays: `--delay 5` after
-  //     `--delay 30` lands first, because that is what `--delay` means.
-  const shouldDefer = queueAhead
-    || (!interrupt && !session.isUserIdle(sendBuffer.idleThresholdMs));
-
-  if (shouldDefer) {
-    sendBuffer.enqueue({
-      sessionId: terminalId,
-      formattedMessage,
-      noEnter,
-      timestamp: Date.now(),
-      broadcastPayload,
-      logMessage,
-      // A deferred interrupt carries its Ctrl+C on the message, written just
-      // ahead of its own payload at flush time rather than ahead of the whole
-      // queue. Nothing is pre-written, so there is no double-Ctrl+C to guard.
-      interruptFirst: interrupt ? true : undefined,
-    });
-    ctx.log('INFO', `Message deferred (user typing): ${from ?? 'unknown'} → ${agent} (terminal ${terminalId.slice(0, 8)}...)`);
-    return true;
+/**
+ * GET /api/inbox/:id — return a single mailbox row INCLUDING its body. Backs
+ * `afx inbox show <id>` (Spec 1313 §178: `afx inbox` is a UI surface that legitimately
+ * displays message bodies over the local Tower connection — the redaction rule applies to
+ * logs/diagnostics/telemetry only, never this view). Mirrors dismiss's addressing model:
+ * by unique id at the workspace-human trust level, no per-recipient/workspace ownership
+ * check (decision 8). GET-only (the path match in the dispatch is method-agnostic, so a
+ * non-GET is rejected here); 404 when the id names no row. The body is returned to the
+ * caller but never logged.
+ */
+function handleInboxShow(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  match: RegExpMatchArray,
+): void {
+  if (req.method !== 'GET') {
+    sendJson(res, 405, { error: 'Method not allowed' });
+    return;
   }
-
-  // Direct delivery, through Spec 1273's submission lock. Everything this
-  // message writes — an optional Ctrl+C, the payload, its Enter — happens in
-  // ONE reservation, so nothing else can write to this session mid-delivery and
-  // the interrupt cannot be separated from the payload it belongs to.
-  //
-  // AWAITED: `writeMessageToSession` schedules its Enter 50-80ms out and returns
-  // immediately, so responding on that return meant an awaited send resolved
-  // BEFORE its message was submitted — two sends in quick succession landed in
-  // one composer and were submitted as one. That is how `afx reset` sent
-  // `/clear### [ARCHITECT INSTRUCTION...` and cleared nothing. Both of Spec
-  // 1307's paths route through here, so both inherit the guarantee.
-  let wrote = false;
-  await submitToSession(terminalId, () => {
-    // Cancellation is re-checked HERE, holding the lock, not before the wait for
-    // it: a delayed delivery can acquire the lock only after a shutdown that
-    // fired while it queued. `stillLive` is undefined on the immediate path.
-    if (stillLive && !stillLive()) {
-      // Cancelled by a shutdown that landed while this delayed delivery waited
-      // for the lock. Logged like every other drop path — a silent return here
-      // was the one drop this feature did not record (Claude, PR review).
-      ctx.log('INFO', `Delayed send cancelled at shutdown: ${from ?? 'unknown'} → ${agent} (terminal ${terminalId.slice(0, 8)}...)`);
-      return 0;
-    }
-    try {
-      let offset = 0;
-      if (interrupt) {
-        session.write('\x03'); // Ctrl+C, inside the reservation
-        offset = 100; // same pause the buffered interruptFirst path uses
-      }
-      const endTime = writeMessageToSession(session, formattedMessage, noEnter, offset);
-      wrote = true;
-      return endTime;
-    } catch (err) {
-      // A write can throw if the session is torn down between the writability
-      // check and here. Log it — the caller's catch (delayed-send, or the flush
-      // submit) only swallows to keep Tower alive, and a silently-dropped
-      // scheduled message is exactly the failure the delivery log must record.
-      ctx.log('ERROR', `Message DROPPED: ${from ?? 'unknown'} → ${agent} (terminal ${terminalId.slice(0, 8)}...): write threw: ${err instanceof Error ? err.message : String(err)}`);
-      return 0;
-    }
+  const id = decodeURIComponent(match[1]);
+  const row = getMailboxById(getGlobalDb(), id);
+  if (!row) {
+    sendJson(res, 404, { error: 'NOT_FOUND', message: `No message with id '${id}'` });
+    return;
+  }
+  sendJson(res, 200, {
+    id: row.id,
+    workspacePath: row.workspace_path,
+    toAgent: row.to_agent,
+    fromAgent: row.from_agent,
+    fromWorkspace: row.from_workspace,
+    status: row.status,
+    reason: row.reason,
+    escalated: row.escalated === 1,
+    body: row.body,
+    createdAt: row.created_at,
+    notBefore: row.not_before,
+    resolvedAt: row.resolved_at,
   });
-  if (wrote) {
-    broadcastMessage(broadcastPayload);
-    ctx.log('INFO', logMessage);
-  }
-  return false;
 }
 
 async function handleBrowse(res: http.ServerResponse, url: URL): Promise<void> {
@@ -2511,6 +2835,13 @@ async function handleWorkspaceShellCreate(
         const session = manager.createSessionRaw({
           label: `Shell ${shellId.replace('shell-', '')}`,
           cwd: workspacePath,
+          // Spec 1313: thread/persist for reconstruction symmetry with the other
+          // createSessionRaw sites. A workspace-root shell resolves to no-profile
+          // (its command is a shell, not an agent, and the cwd has no launch script),
+          // so `afx send` correctly holds. (A shell whose cwd happened to be a builder
+          // worktree would resolve that worktree's harness via the launch-script fallback.)
+          command: shellCmd,
+          args: shellArgs,
         });
         const ptySession = manager.getSession(session.id);
         if (ptySession) {
@@ -2520,7 +2851,7 @@ async function handleWorkspaceShellCreate(
         const entry = getWorkspaceTerminalsEntry(workspacePath);
         entry.shells.set(shellId, session.id);
         saveTerminalSession(session.id, workspacePath, 'shell', shellId, shellperInfo.pid,
-          shellperInfo.socketPath, shellperInfo.pid, shellperInfo.startTime, session.label, workspacePath);
+          shellperInfo.socketPath, shellperInfo.pid, shellperInfo.startTime, session.label, workspacePath, shellCmd);
 
         shellCreated = true;
         res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -2551,7 +2882,7 @@ async function handleWorkspaceShellCreate(
 
       const entry = getWorkspaceTerminalsEntry(workspacePath);
       entry.shells.set(shellId, session.id);
-      saveTerminalSession(session.id, workspacePath, 'shell', shellId, session.pid, null, null, null, session.label, workspacePath);
+      saveTerminalSession(session.id, workspacePath, 'shell', shellId, session.pid, null, null, null, session.label, workspacePath, shellCmd);
       ctx.log('WARN', `Shell ${shellId} for ${workspacePath} is non-persistent (shellper unavailable)`);
 
       res.writeHead(200, { 'Content-Type': 'application/json' });

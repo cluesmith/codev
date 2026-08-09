@@ -11,6 +11,7 @@ import { getTowerClient } from '../lib/tower-client.js';
 import { getTypeColor } from '../utils/display.js';
 import { currentArchitectName } from '../utils/architect-name.js';
 import type { Builder } from '../types.js';
+import type { OverviewData } from '@cluesmith/codev-types';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { loadConfig } from '../../lib/config.js';
@@ -71,11 +72,56 @@ function isBuilderRunning(builder: Builder): boolean {
 }
 
 /**
+ * Build a `builderId → heldCount` map from the overview payload (Spec 1313 round 3).
+ * Keyed by the overview builder's `roleId` (lowercased), which equals the state.db builder
+ * `id` whenever any mail attached (the mailbox addresses agents by that canonical id), so
+ * `renderBuilders` can look it up by `builder.id`. Reuses the overview's per-builder count —
+ * no re-derivation. Only non-zero counts are stored; a miss renders as 0.
+ */
+function heldMapFromOverview(overview: OverviewData | null): Map<string, number> {
+  const map = new Map<string, number>();
+  if (!overview) return map;
+  for (const b of overview.builders) {
+    if (b.roleId && typeof b.heldCount === 'number' && b.heldCount > 0) {
+      map.set(b.roleId.toLowerCase(), b.heldCount);
+    }
+  }
+  return map;
+}
+
+/**
+ * Workspace-level held-mail summary + remedy hint (Spec 1313 round 3). Held mail that has
+ * crossed the escalation age signals an autonomous builder is STARVING — a stray character on
+ * its composer classifies busy and holds ALL its mail (cron nudges included). `afx status` is
+ * the reachable surface that names it and the fix; escalation was previously SSE/log-only.
+ * Reuses the overview payload (`heldCount` / `mailboxEscalated`) — no re-derivation.
+ */
+function renderMailboxSummary(heldCount: number, escalated: boolean): void {
+  if (heldCount === 0) {
+    logger.kv('Held mail', chalk.gray('none'));
+    return;
+  }
+  logger.kv('Held mail', escalated ? chalk.yellow(`${heldCount} (escalated)`) : String(heldCount));
+  if (escalated) {
+    logger.info('  Mail has been held past its escalation age — a stuck composer may be starving delivery.');
+    logger.info(`  Inspect: ${chalk.cyan('afx inbox')}   ·   clear a stuck composer: ${chalk.cyan('afx interrupt <id>')}`);
+  }
+}
+
+/**
  * Render the owner-aware Builders table (Spec 1057). Sourced from `state.db`
  * (the canonical home of `spawnedByArchitect`), so it works identically whether
  * or not Tower is running. The Owner column is second; ID stays first.
+ *
+ * Spec 1313 round 3: when `heldByRoleId` is provided (Tower up, overview fetched), a trailing
+ * `Held` column shows each builder's held-mail count so a starving builder is visible at a
+ * glance; omitted entirely when Tower is down (no overview to reuse).
  */
-function renderBuilders(builders: Builder[], ownerFilter: string | undefined): void {
+function renderBuilders(
+  builders: Builder[],
+  ownerFilter: string | undefined,
+  heldByRoleId?: Map<string, number>,
+): void {
   const visible = sortByOwner(filterByOwner(builders, ownerFilter));
 
   if (visible.length === 0) {
@@ -88,9 +134,13 @@ function renderBuilders(builders: Builder[], ownerFilter: string | undefined): v
   }
 
   logger.info('Builders:');
-  const widths = [20, 14, 8, 12, 10];
-  logger.row(['ID', 'Owner', 'Type', 'Status', 'Phase'], widths);
-  logger.row(['──', '─────', '────', '──────', '─────'], widths);
+  const showHeld = heldByRoleId !== undefined;
+  const widths = showHeld ? [20, 14, 8, 12, 10, 6] : [20, 14, 8, 12, 10];
+  const header = ['ID', 'Owner', 'Type', 'Status', 'Phase'];
+  const rule = ['──', '─────', '────', '──────', '─────'];
+  if (showHeld) { header.push('Held'); rule.push('────'); }
+  logger.row(header, widths);
+  logger.row(rule, widths);
 
   for (const builder of visible) {
     const running = isBuilderRunning(builder);
@@ -99,13 +149,18 @@ function renderBuilders(builders: Builder[], ownerFilter: string | undefined): v
     const owner = builder.spawnedByArchitect;
     const ownerCell = owner ? chalk.cyan(owner) : chalk.gray(UNKNOWN_OWNER);
 
-    logger.row([
+    const cells = [
       builder.id,
       ownerCell,
       typeColor(builder.type || 'spec'),
       statusColor(builder.status),
       builder.phase.substring(0, 8),
-    ], widths);
+    ];
+    if (showHeld) {
+      const n = heldByRoleId!.get(builder.id.toLowerCase()) ?? 0;
+      cells.push(n > 0 ? chalk.yellow(String(n)) : chalk.gray('0'));
+    }
+    logger.row(cells, widths);
   }
 }
 
@@ -126,14 +181,19 @@ function emitStatusJson(params: {
   // Issue #1227: null (not omitted) when Tower is down or the running Tower
   // predates these fields — same nullable-not-optional contract as `workspace.name`.
   fleet: { rssKb: number | null; unregisteredShellperCount: number | null };
+  // Spec 1313 round 3: workspace held-mail summary + per-builder counts (reused from the
+  // overview payload). Defaults (0 / false / empty map) when Tower is down.
+  mailbox: { heldCount: number; escalated: boolean };
+  heldByRoleId: Map<string, number>;
 }): void {
-  const { towerRunning, workspace, architects, builders, ownerFilter, fleet } = params;
+  const { towerRunning, workspace, architects, builders, ownerFilter, fleet, mailbox, heldByRoleId } = params;
   const visible = sortByOwner(filterByOwner(builders, ownerFilter));
 
   const payload = {
     tower: { running: towerRunning },
     workspace,
     fleet,
+    mailbox,
     ownerFilter: ownerFilter ?? null,
     architects: architects.map((a) => ({ name: a.name ?? 'main' })),
     builders: visible.map((b) => ({
@@ -148,6 +208,7 @@ function emitStatusJson(params: {
       branch: b.branch,
       issueNumber: b.issueNumber ?? null,
       protocolName: b.protocolName ?? null,
+      heldCount: heldByRoleId.get(b.id.toLowerCase()) ?? 0,
     })),
   };
 
@@ -172,6 +233,17 @@ export async function status(options: StatusOptions = {}): Promise<void> {
   const state = loadState(workspacePath);
   const builders = state?.builders ?? [];
   const architects = state?.architects ?? [];
+
+  // Spec 1313 round 3: held-mail awareness. The overview payload already carries the
+  // workspace held total, the escalation attention bit, and per-builder held counts
+  // (overview.ts) — reuse it rather than re-deriving from global.db. Only available when
+  // Tower is up; a null overview degrades to "no held info" (0 / false / empty map).
+  const overview = towerRunning ? await client.getOverview(workspacePath) : null;
+  const heldByRoleId = heldMapFromOverview(overview);
+  const mailboxSummary = {
+    heldCount: overview?.heldCount ?? 0,
+    escalated: overview?.mailboxEscalated ?? false,
+  };
 
   // Machine-readable mode (Spec 1057): gather workspace metadata when Tower is
   // up, then emit JSON and return before any human-facing output.
@@ -203,6 +275,8 @@ export async function status(options: StatusOptions = {}): Promise<void> {
       builders,
       ownerFilter,
       fleet,
+      mailbox: mailboxSummary,
+      heldByRoleId,
     });
     return;
   }
@@ -284,8 +358,14 @@ export async function status(options: StatusOptions = {}): Promise<void> {
 
       // Spec 1057: owner-aware Builders section, sourced from state.db so each
       // row carries its spawning architect (the Tower terminal list does not).
+      // Spec 1313 round 3: annotate each row with its held-mail count ONLY when the
+      // workspace actually has held mail — a trailing column of zeroes on every
+      // `afx status` is noise; it appears precisely when there is starvation to see.
+      // The workspace summary + remedy hint always print (they say "none" at zero).
       logger.blank();
-      renderBuilders(builders, ownerFilter);
+      renderBuilders(builders, ownerFilter, mailboxSummary.heldCount > 0 ? heldByRoleId : undefined);
+      logger.blank();
+      renderMailboxSummary(mailboxSummary.heldCount, mailboxSummary.escalated);
 
       return;
     }

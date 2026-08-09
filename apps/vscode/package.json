@@ -960,6 +960,11 @@
           "default": true,
           "description": "Show a VSCode notification toast when a builder reaches a human-approval gate (plan-approval, code-review, etc.)"
         },
+        "codev.mailboxEscalationToasts.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show a VSCode notification toast when a held afx-send message crosses the escalation age (default 60s). The persistent held-count status-bar indicator is unaffected by this toggle. Read or dismiss held messages with the `afx inbox` CLI."
+        },
         "codev.overviewRefreshSeconds": {
           "type": "number",
           "default": 60,

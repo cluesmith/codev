@@ -9,6 +9,7 @@ export {
   type SSEEventType,
   type SSENotification,
   type BuilderSpawnedPayload,
+  type MailboxEscalationPayload,
 } from './sse.js';
 
 export {

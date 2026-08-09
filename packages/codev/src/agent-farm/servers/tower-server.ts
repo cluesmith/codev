@@ -32,7 +32,6 @@ import {
   shutdownTunnel,
 } from './tower-tunnel.js';
 import { initCron, shutdownCron } from './tower-cron.js';
-import { resolveTarget } from './tower-messages.js';
 import {
   initInstances,
   shutdownInstances,
@@ -56,7 +55,8 @@ import {
 import {
   setupUpgradeHandler,
 } from './tower-websocket.js';
-import { handleRequest, startSendBuffer, stopSendBuffer } from './tower-routes.js';
+import { handleRequest, deliverCronMessage } from './tower-routes.js';
+import { startMailboxDrainer, stopMailboxDrainer, setMailboxBroadcaster } from './mailbox-wiring.js';
 import { shutdownDelayedSends } from './delayed-send.js';
 import type { RouteContext } from './tower-routes.js';
 import { setCodevConfigNotifier, stopAllCodevConfigWatchers } from './codev-config-watcher.js';
@@ -182,25 +182,21 @@ async function gracefulShutdown(signal: string): Promise<void> {
   if (sessionLogSweepInterval) clearInterval(sessionLogSweepInterval);
   clearInterval(sseHeartbeatInterval);
 
-  // 4b. Drop pending delayed sends FIRST (Spec 1307). Ordering is load-bearing:
-  // this runs before the awaited buffer flush below, not after. If it ran after,
-  // a delayed timer could fire DURING that await, pass the generation guard
-  // (not yet bumped), and write or enqueue after shutdown had begun. Dropping
-  // first bumps the generation up front, so any timer that fires during the
-  // flush is cancelled at its write site. A delayed message that had ALREADY
-  // re-entered the buffer before now is a buffered message and is still flushed
-  // by 4c — this cancels only sends still waiting on their timer.
+  // 4b. Drop pending delayed sends FIRST (Spec 1307 `--delay`). Cancels every timer
+  // still waiting to fire and bumps the delayed-send generation, so a timer that
+  // fires mid-shutdown is a no-op at its delivery site rather than enqueuing a
+  // mailbox row after teardown has begun. Delayed sends are in-memory by design
+  // (dropped on restart) — the re-homed due-time callback enqueues to the mailbox
+  // only WHEN due, so a not-yet-due send has nothing persisted to recover; re-send
+  // if still wanted.
   const droppedDelayed = shutdownDelayedSends();
   if (droppedDelayed > 0) {
     log('INFO', `Dropped ${droppedDelayed} pending delayed send(s) — re-send them if still wanted`);
   }
 
-  // 4c. Flush and stop the send buffer (Spec 403) — deliver deferred messages.
-  // Awaited (Spec 1307): the flush drains under the submission lock, so a batch
-  // can be queued behind an in-flight write. Awaiting here — before the terminal
-  // teardown below — is what keeps a buffered message accepted for delivery from
-  // being lost when the process exits.
-  await stopSendBuffer();
+  // 4c. Stop the mailbox backstop drainer (Spec 1313) — no force-flush; held
+  // rows persist in SQLite and redeliver on a clean gate after restart.
+  stopMailboxDrainer();
 
   // 5. Stop cron scheduler (Spec 399)
   shutdownCron();
@@ -379,6 +375,13 @@ const routeCtx: RouteContext = {
 // events. The actual watcher is installed lazily by any config-resolving
 // route handler (/api/worktree-config, /api/activity-hooks) on first request.
 setCodevConfigNotifier(broadcastNotification);
+
+// Spec 1313 Phase 7: wire the same SSE broadcaster into the mailbox delivery path so
+// its held-set events reach clients — `overview-changed` on a held-state change (keeps
+// the held-count indicator live) and `mailbox-escalation` when a row crosses the
+// escalation age (moves the indicator into its attention state). The pure delivery
+// module and the boot-time drainer have no RouteContext, so they fan out through here.
+setMailboxBroadcaster(broadcastNotification);
 
 // ============================================================================
 // Readiness gate (Issue #1261)
@@ -601,8 +604,10 @@ async function bootSequence(): Promise<void> {
   }, TERMINAL_MONITOR_INTERVAL_MS);
   terminalPartialMonitorInterval.unref();
 
-  // Spec 403: Start send buffer for typing-aware message delivery
-  startSendBuffer(log);
+  // Spec 1313: start the mailbox backstop drainer (prunes terminal rows, then
+  // periodically redelivers held mail on a clean render-gate). Replaces the
+  // retired Spec 403 SendBuffer.
+  startMailboxDrainer(log);
 
   // Issue #1118: one-time state.db → global.db consolidation. Runs once ever
   // (strict `_consolidation` marker), BEFORE initInstances() reads architect /
@@ -667,12 +672,13 @@ async function bootSequence(): Promise<void> {
     getTerminalsForWorkspace,
   });
 
-  // Spec 399: Initialize cron scheduler after instances are ready
+  // Spec 399: Initialize cron scheduler after instances are ready.
+  // Spec 1313 (Phase 6): cron delivers through the mailbox + gate via `deliverCronMessage`
+  // (the same single gated path as `handleSend`) instead of a blind PTY write.
   initCron({
     log,
     getKnownWorkspacePaths,
-    resolveTarget,
-    getTerminalManager: () => getTerminalManager(),
+    deliver: (task, message) => deliverCronMessage(task, message, log),
   });
 
   // Issue #1261: dependency wiring is complete — open the gate. Everything

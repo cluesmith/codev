@@ -14,6 +14,8 @@ import { loadState, removeBuilder } from '../state.js';
 import { TowerClient } from '../lib/tower-client.js';
 import { getGlobalDb, closeGlobalDb } from '../db/index.js';
 import { deleteFileTabsByPathPrefix } from '../utils/file-tabs.js';
+import { dismissHeldForAgent } from '../db/mailbox.js';
+import { normalizeWorkspacePath } from '../utils/workspace-path.js';
 import { executeForgeCommand } from '../../lib/forge.js';
 
 /**
@@ -375,6 +377,19 @@ async function cleanupBuilder(builder: Builder, force?: boolean, issueNumber?: n
       logger.info(`Branch preserved: ${builder.branch}`);
       logger.info('To delete: git branch -d "' + builder.branch + '"');
     }
+  }
+
+  // Spec 1313 round 3 (take-now B): dismiss this agent's still-HELD mailbox rows. The
+  // terminal-row prune only removes delivered/superseded/dismissed rows, never held ones, so a
+  // removed agent's orphaned held mail would otherwise pin `heldCount`/escalated (and the
+  // starvation alarm) forever. Soft transition (audit-preserving); keyed by the same normalized
+  // workspace path the mailbox stores under, and by the canonical agent id (`builder.id`).
+  // Non-fatal: a mailbox hiccup must not block worktree/state cleanup.
+  try {
+    const dismissed = dismissHeldForAgent(getGlobalDb(), normalizeWorkspacePath(config.workspaceRoot), builder.id);
+    if (dismissed > 0) logger.info(`Dismissed ${dismissed} held mailbox message(s) for ${builder.id}`);
+  } catch {
+    // Non-fatal — the prune/backstop will not resurrect a removed agent's rows regardless.
   }
 
   // Remove from state. Issue #1118: scope by workspace (the builder was loaded

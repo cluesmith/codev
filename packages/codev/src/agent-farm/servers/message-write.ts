@@ -7,7 +7,14 @@
 
 /** Minimal writable session interface — avoids coupling to PtySession. */
 export interface WritableSession {
-  write(data: string): void;
+  /**
+   * Write input to the underlying PTY. Returns `false` when the write was dropped
+   * (#1198: a shellper-backed session whose socket has died still reports status
+   * 'running', yet its writes silently no-op). {@link writeMessagePaced} threads this
+   * boolean so a mailbox delivery whose bytes never reached the terminal is held, not
+   * marked delivered (Spec 1313 integration review — the silent-loss finding).
+   */
+  write(data: string): boolean;
 }
 
 // Messages longer than this threshold are written line-by-line with delays
@@ -101,4 +108,39 @@ export function writeMessageToSession(
     return enterTime;
   }
   return lastLineTime;
+}
+
+/**
+ * Paced write of a message (text + trailing Enter unless `noEnter`) that reports
+ * whether every byte reached the PTY. Resolves `true` when the whole submit landed,
+ * `false` when ANY scheduled write was dropped (#1198: a shellper socket that died
+ * mid-pace). This is the delivery layer's authoritative success signal — a mailbox
+ * delivery holds a row whose bytes never made it instead of marking it delivered
+ * (Spec 1313 integration review — the silent-loss finding).
+ *
+ * `writeMessageToSession` fires the text, any subsequent lines, and the trailing
+ * Enter across `setTimeout` gaps (10–130ms+), and a t=0 `writable` precheck cannot
+ * see a socket that dies *during* that sequence. So wrap the session and record
+ * whether any of those writes returned false. The returned promise resolves at the
+ * final scheduled offset (`doneMs`); `writeMessageToSession` registers the Enter's
+ * `setTimeout` at that same offset *before* this resolve is scheduled, so the Enter
+ * executes first and its result is observed by resolution time.
+ *
+ * Awaiting the promise is also what makes the per-agent write serializer's
+ * completion-chaining real — the next delivery cannot begin until this submit
+ * (Enter included) is entirely on the wire.
+ */
+export function writeMessagePaced(
+  session: WritableSession, message: string, noEnter: boolean,
+): Promise<boolean> {
+  let delivered = true;
+  const tracked: WritableSession = {
+    write: (data: string): boolean => {
+      const ok = session.write(data);
+      if (!ok) delivered = false;
+      return ok;
+    },
+  };
+  const doneMs = writeMessageToSession(tracked, message, noEnter);
+  return new Promise((resolve) => setTimeout(() => resolve(delivered), doneMs));
 }

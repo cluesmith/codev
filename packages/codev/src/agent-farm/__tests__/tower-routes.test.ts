@@ -9,9 +9,18 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import http from 'node:http';
 import { EventEmitter } from 'node:events';
-import { handleRequest, startSendBuffer, stopSendBuffer } from '../servers/tower-routes.js';
+import Database from 'better-sqlite3';
+import { handleRequest } from '../servers/tower-routes.js';
 import type { RouteContext } from '../servers/tower-routes.js';
-import { shutdownDelayedSends, pendingDelayedSendCount } from '../servers/delayed-send.js';
+import { GLOBAL_SCHEMA } from '../db/schema.js';
+import * as mailbox from '../db/mailbox.js';
+import { SessionScreen } from '../../terminal/session-screen.js';
+// Spec 1313 round 3: the real delayed-send timer registry + per-session submission lock
+// (NOT mocked) so the delayed-`--interrupt` reshape is exercised through the same singletons
+// handleSend uses. shutdownDelayedSends() models a Tower restart (bumps the liveness
+// generation); submitToSession lets a test pre-occupy a session's lock to drive the
+// shutdown-during-lock-wait window deterministically.
+import { shutdownDelayedSends } from '../servers/delayed-send.js';
 import { submitToSession, resetSubmissionChains } from '../servers/session-submit.js';
 
 // ============================================================================
@@ -22,13 +31,14 @@ const { mockGetInstances, mockGetTerminalManager, mockGetSession,
   mockListSessions, mockGetWorkspaceTerminalsEntry, mockGetTerminalsForWorkspace,
   mockGetRehydratedTerminalsEntry,
   mockIsSessionPersistent, mockGetNextShellId,
-  mockResolveTarget, mockBroadcastMessage, mockIsResolveError,
+  mockResolveTarget, mockResolveAgentInRegistry, mockBroadcastMessage, mockIsResolveError,
   mockParseJsonBody,
   mockOverviewGetOverview, mockOverviewInvalidate,
   mockReadCloudConfig,
   mockComputeAnalytics,
   mockGetKnownWorkspacePaths,
-  mockIsStartupReconcileSettled } = vi.hoisted(() => ({
+  mockIsStartupReconcileSettled,
+  sendDbHolder } = vi.hoisted(() => ({
   mockGetInstances: vi.fn(),
   mockGetTerminalManager: vi.fn(),
   mockGetSession: vi.fn(),
@@ -44,6 +54,7 @@ const { mockGetInstances, mockGetTerminalManager, mockGetSession,
   mockIsSessionPersistent: vi.fn(),
   mockGetNextShellId: vi.fn(),
   mockResolveTarget: vi.fn(),
+  mockResolveAgentInRegistry: vi.fn(),
   mockBroadcastMessage: vi.fn(),
   mockIsResolveError: vi.fn((r: any) => 'code' in r),
   mockParseJsonBody: vi.fn(async () => ({})),
@@ -53,6 +64,9 @@ const { mockGetInstances, mockGetTerminalManager, mockGetSession,
   mockComputeAnalytics: vi.fn(),
   mockGetKnownWorkspacePaths: vi.fn(() => []),
   mockIsStartupReconcileSettled: vi.fn(() => true),
+  // Holder for the in-memory global.db used by the Spec 1313 send path (mailbox
+  // persist + gate delivery). Re-created per test in beforeEach.
+  sendDbHolder: { db: null as unknown as import('better-sqlite3').Database },
 }));
 
 vi.mock('../lib/cloud-config.js', () => ({
@@ -99,8 +113,17 @@ vi.mock('../servers/tower-tunnel.js', () => ({
 
 vi.mock('../servers/tower-messages.js', () => ({
   resolveTarget: (...args: unknown[]) => mockResolveTarget(...args),
+  resolveAgentInRegistry: (...args: unknown[]) => mockResolveAgentInRegistry(...args),
   broadcastMessage: (...args: unknown[]) => mockBroadcastMessage(...args),
   isResolveError: (r: any) => mockIsResolveError(r),
+}));
+
+// Spec 1313: handleSend persists every send to global.db and delivers through the
+// gate. Back it with a fresh in-memory DB per test so the mailbox ops are real
+// (no over-mocking of the system under test); only the DB handle is injected.
+vi.mock('../db/index.js', async (importActual) => ({
+  ...(await importActual<typeof import('../db/index.js')>()),
+  getGlobalDb: () => sendDbHolder.db,
 }));
 
 vi.mock('../servers/tower-utils.js', () => ({
@@ -184,12 +207,52 @@ function makeRes(): { res: http.ServerResponse; body: () => string; statusCode: 
 }
 
 // ============================================================================
+/**
+ * A mock PtySession the Spec 1313 render-gate can classify. `ring` is the rendered
+ * composer content: `'❯ '` is a clean claude prompt (gate → deliver); `'❯ draft'`
+ * is an occupied line (gate → hold busy). `command: 'claude'` resolves the profile.
+ *
+ * Round 2: the gate reads the session's persistent `gateScreen` mirror, not the ring, so the
+ * mock feeds the rendered frame into a real {@link SessionScreen} (fed exactly the PTY bytes:
+ * the composer line + the bounding rule the TUI draws below the input — the render-gate
+ * requires that proven lower bound, else a bare marker is an indeterminate partial and is held).
+ * `bytesWritten` is the monotone change token the delivery path samples.
+ */
+function gateSession(mockWrite: (data: string) => void, ring: string, writable = true) {
+  const raw = `${ring}\r\n${'─'.repeat(20)}\r\n`;
+  const gateScreen = new SessionScreen(80, 24);
+  gateScreen.feed(raw);
+  return {
+    // Model a live PTY: every write lands. The delivery path now threads the write's
+    // boolean (Spec 1313 silent-loss fix), so a double whose write returned undefined
+    // would read as a DROPPED write and be held. Wrap mockWrite so call-assertions still
+    // see it while the write reports success.
+    write: (data: string): boolean => { mockWrite(data); return true; },
+    pid: 1234,
+    writable,
+    isUserIdle: () => true,
+    composing: false,
+    command: 'claude',
+    launchArgs: [] as string[],
+    cwd: '/tmp/ws',
+    info: { cols: 80, rows: 24 },
+    bytesWritten: raw.length,
+    gateScreen,
+  };
+}
+
 // Tests
 // ============================================================================
 
 describe('tower-routes', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Fresh in-memory global.db for the Spec 1313 send path (real mailbox ops).
+    sendDbHolder.db = new Database(':memory:');
+    sendDbHolder.db.exec(GLOBAL_SCHEMA);
+    // Default: the registry fallback finds nothing (so a NOT_FOUND target 404s as
+    // before, unless a test opts a known offline agent in).
+    mockResolveAgentInRegistry.mockReturnValue({ code: 'NOT_FOUND', message: 'not registered' });
     mockGetInstances.mockResolvedValue([]);
     mockGetTerminalManager.mockReturnValue({
       listSessions: mockListSessions.mockReturnValue([]),
@@ -1337,7 +1400,7 @@ describe('tower-routes', () => {
       expect(mockResolveTarget).toHaveBeenCalledWith('architect', '/tmp/ws', undefined);
     });
 
-    it('returns 200 with ok:true on successful send', async () => {
+    it('returns 200 delivered:true on a successful send to a clean prompt (Spec 1313)', async () => {
       mockParseJsonBody.mockResolvedValue({ to: 'architect', message: 'hello', workspace: '/tmp/ws' });
       mockResolveTarget.mockReturnValue({
         terminalId: 'term-001',
@@ -1346,7 +1409,7 @@ describe('tower-routes', () => {
       });
       const mockWrite = vi.fn();
       mockGetTerminalManager.mockReturnValue({
-        getSession: () => ({ write: mockWrite, pid: 1234, writable: true, isUserIdle: () => true, composing: false }),
+        getSession: () => gateSession(mockWrite, '❯ '), // clean, render-verified empty
         listSessions: () => [],
       });
       const req = makeReq('POST', '/api/send');
@@ -1359,11 +1422,16 @@ describe('tower-routes', () => {
       expect(parsed.ok).toBe(true);
       expect(parsed.resolvedTo).toBe('architect');
       expect(parsed.terminalId).toBe('term-001');
+      expect(parsed.delivered).toBe(true);
+      expect(parsed.held).toBe(false);
       expect(parsed.deferred).toBe(false);
+      expect(typeof parsed.mailboxId).toBe('string');
       expect(mockWrite).toHaveBeenCalled();
     });
 
-    it('returns 503 TERMINAL_NOT_WRITABLE instead of a false success when the shellper connection is down (#1198)', async () => {
+    it('holds (no-live-pty) instead of dropping when the shellper connection is down (#1198, Spec 1313)', async () => {
+      // Pre-1313 this returned 503 and dropped the message. Now the send is
+      // persisted and held; the backstop redelivers when the connection recovers.
       mockParseJsonBody.mockResolvedValue({ to: 'architect', message: 'hello', workspace: '/tmp/ws' });
       mockResolveTarget.mockReturnValue({
         terminalId: 'term-zombie',
@@ -1372,17 +1440,39 @@ describe('tower-routes', () => {
       });
       const mockWrite = vi.fn();
       mockGetTerminalManager.mockReturnValue({
-        getSession: () => ({ write: mockWrite, pid: 1234, writable: false, isUserIdle: () => true, composing: false }),
+        getSession: () => gateSession(mockWrite, '❯ ', /* writable */ false),
         listSessions: () => [],
       });
       const req = makeReq('POST', '/api/send');
       const { res, statusCode, body } = makeRes();
 
       await handleRequest(req, res, makeCtx());
-      expect(statusCode()).toBe(503);
+      expect(statusCode()).toBe(200);
       const parsed = JSON.parse(body());
-      expect(parsed.error).toBe('TERMINAL_NOT_WRITABLE');
-      expect(mockWrite).not.toHaveBeenCalled();
+      expect(parsed.ok).toBe(true);
+      expect(parsed.held).toBe(true);
+      expect(parsed.reason).toBe('no-live-pty');
+      expect(typeof parsed.mailboxId).toBe('string');
+      expect(mockWrite).not.toHaveBeenCalled(); // never written to a dead line
+    });
+
+    it('holds (no-live-pty) a normal send to a known offline agent instead of 404ing (Spec 1313 dead-session seam)', async () => {
+      mockParseJsonBody.mockResolvedValue({ to: 'spir-9', message: 'hello', workspace: '/tmp/ws' });
+      mockResolveTarget.mockReturnValue({ code: 'NOT_FOUND', message: 'no live terminal' });
+      // The registry knows this builder even though it has no live PTY.
+      mockResolveAgentInRegistry.mockReturnValue({ workspacePath: '/tmp/ws', agent: 'spir-9', kind: 'builder' });
+      const req = makeReq('POST', '/api/send');
+      const { res, statusCode, body } = makeRes();
+
+      await handleRequest(req, res, makeCtx());
+      expect(statusCode()).toBe(200);
+      const parsed = JSON.parse(body());
+      expect(parsed.held).toBe(true);
+      expect(parsed.reason).toBe('no-live-pty');
+      expect(parsed.resolvedTo).toBe('spir-9');
+      expect(typeof parsed.mailboxId).toBe('string');
+      // And it is really persisted (drain-order query finds it).
+      expect(mailbox.findHeldForAgent(sendDbHolder.db, '/tmp/ws', 'spir-9')).toHaveLength(1);
     });
 
     // Spec 1273: `escape` delivers a bare ESC keystroke straight to the PTY.
@@ -1474,7 +1564,7 @@ describe('tower-routes', () => {
       });
       const mockWrite = vi.fn();
       mockGetTerminalManager.mockReturnValue({
-        getSession: () => ({ write: mockWrite, pid: 1234, writable: true, isUserIdle: () => true, composing: false }),
+        getSession: () => gateSession(mockWrite, '❯ '), // clean prompt → delivers
         listSessions: () => [],
       });
       const req = makeReq('POST', '/api/send');
@@ -1483,12 +1573,14 @@ describe('tower-routes', () => {
       await handleRequest(req, res, makeCtx());
 
       expect(statusCode()).toBe(200);
-      // Formatted, not a bare ESC.
+      // Formatted message, not a bare ESC.
       expect(mockWrite).toHaveBeenCalled();
       expect(mockWrite.mock.calls[0][0]).not.toBe('\x1b');
     });
 
-    it('returns deferred:true when user is actively typing (Spec 403)', async () => {
+    it('holds (busy) when the composer is occupied, writing nothing (Spec 1313)', async () => {
+      // Pre-1313 this deferred on a 3s idle timer; now it holds on the render-gate
+      // verdict — a draft in the composer means the line is occupied.
       mockParseJsonBody.mockResolvedValue({ to: 'architect', message: 'hello', workspace: '/tmp/ws' });
       mockResolveTarget.mockReturnValue({
         terminalId: 'term-001',
@@ -1497,7 +1589,7 @@ describe('tower-routes', () => {
       });
       const mockWrite = vi.fn();
       mockGetTerminalManager.mockReturnValue({
-        getSession: () => ({ write: mockWrite, pid: 1234, writable: true, isUserIdle: () => false, composing: false }),
+        getSession: () => gateSession(mockWrite, '❯ half-typed draft'), // occupied → busy
         listSessions: () => [],
       });
       const req = makeReq('POST', '/api/send');
@@ -1508,8 +1600,10 @@ describe('tower-routes', () => {
       expect(statusCode()).toBe(200);
       const parsed = JSON.parse(body());
       expect(parsed.ok).toBe(true);
-      expect(parsed.deferred).toBe(true);
-      // Message should NOT be written to session when deferred
+      expect(parsed.held).toBe(true);
+      expect(parsed.reason).toBe('busy');
+      expect(parsed.deferred).toBe(true); // back-compat: held ⇒ deferred
+      // The draft is never touched — nothing is written to an occupied line.
       expect(mockWrite).not.toHaveBeenCalled();
     });
 
@@ -1540,7 +1634,7 @@ describe('tower-routes', () => {
       expect(mockWrite).toHaveBeenCalled();
     });
 
-    it('delivers message + Enter as a single atomic write (Bugfix #481)', async () => {
+    it('writes the message as one un-split write, Enter separate (Bugfix #481, via the gate)', async () => {
       mockParseJsonBody.mockResolvedValue({ to: 'architect', message: 'hello', workspace: '/tmp/ws' });
       mockResolveTarget.mockReturnValue({
         terminalId: 'term-001',
@@ -1549,7 +1643,7 @@ describe('tower-routes', () => {
       });
       const mockWrite = vi.fn();
       mockGetTerminalManager.mockReturnValue({
-        getSession: () => ({ write: mockWrite, pid: 1234, writable: true, isUserIdle: () => true, composing: false }),
+        getSession: () => gateSession(mockWrite, '❯ '),
         listSessions: () => [],
       });
       const req = makeReq('POST', '/api/send');
@@ -1557,27 +1651,16 @@ describe('tower-routes', () => {
       const { res } = makeRes();
 
       await handleRequest(req, res, ctx);
-      // Message is written first, then \r is sent SEPARATELY after a delay, so
-      // the PTY processes the paste before receiving Enter (Bugfix #492/#481).
-      // That separation is the property this test exists to protect.
-      const writeCalls = mockWrite.mock.calls.map(c => c[0] as string);
-      expect(writeCalls[0]).toContain('hello');
-      expect(writeCalls[0]).not.toMatch(/\r$/); // Enter is never appended
-
-      // UPDATED (Spec 1273 verify): this previously asserted `length === 1` —
-      // i.e. that the route returned BEFORE the Enter was written. That was the
-      // bug, not the contract: an awaited send resolving before its own
-      // submission is how `afx reset` got `/clear` welded onto the front of the
-      // next message and never cleared anything. `/api/send` now awaits the
-      // submission, so by the time the request resolves the Enter HAS landed.
-      //
-      // Asserted as properties rather than an exact count, because the
-      // formatted message may be paced line-by-line (Bugfix #584).
-      expect(writeCalls.length).toBeGreaterThan(1);
-      expect(writeCalls.at(-1)).toBe('\r');
+      // The delivery awaits the paced write's completion, so both the message and
+      // its trailing Enter have landed: the message is ONE un-split write, and the
+      // Enter is a separate `\r` (Bugfix #481: never fused, never split mid-message).
+      const writeCalls = mockWrite.mock.calls;
+      expect(writeCalls[0][0]).toContain('hello');
+      expect(writeCalls[0][0]).not.toContain('\r');
+      expect(writeCalls[writeCalls.length - 1][0]).toBe('\r');
     });
 
-    it('delivers message without Enter when noEnter is set (Bugfix #481)', async () => {
+    it('writes the message without Enter when noEnter is set (Bugfix #481)', async () => {
       mockParseJsonBody.mockResolvedValue({
         to: 'architect', message: 'hello', workspace: '/tmp/ws',
         options: { noEnter: true },
@@ -1589,7 +1672,7 @@ describe('tower-routes', () => {
       });
       const mockWrite = vi.fn();
       mockGetTerminalManager.mockReturnValue({
-        getSession: () => ({ write: mockWrite, pid: 1234, writable: true, isUserIdle: () => true, composing: false }),
+        getSession: () => gateSession(mockWrite, '❯ '),
         listSessions: () => [],
       });
       const req = makeReq('POST', '/api/send');
@@ -1598,12 +1681,13 @@ describe('tower-routes', () => {
 
       await handleRequest(req, res, ctx);
       const writeCalls = mockWrite.mock.calls;
-      expect(writeCalls.length).toBe(1);
-      // Should NOT end with \r when noEnter is set
+      expect(writeCalls.length).toBe(1); // message only — no trailing Enter write
       expect(writeCalls[0][0]).not.toMatch(/\r$/);
     });
 
-    it('delivers immediately when user is idle even if composing (Bugfix #492)', async () => {
+    it('delivers when the composer renders a clean empty prompt (Spec 1313 gate)', async () => {
+      // The pre-1313 idle/composing heuristics are gone; the render-gate is the
+      // sole authority. A clean, verified-empty composer delivers immediately.
       mockParseJsonBody.mockResolvedValue({ to: 'architect', message: 'hello', workspace: '/tmp/ws' });
       mockResolveTarget.mockReturnValue({
         terminalId: 'term-001',
@@ -1611,10 +1695,8 @@ describe('tower-routes', () => {
         agent: 'architect',
       });
       const mockWrite = vi.fn();
-      // Bugfix #492: composing gets stuck true after non-Enter keystrokes.
-      // Idle threshold alone is sufficient — deliver immediately.
       mockGetTerminalManager.mockReturnValue({
-        getSession: () => ({ write: mockWrite, pid: 1234, writable: true, isUserIdle: () => true, composing: true }),
+        getSession: () => gateSession(mockWrite, '❯ '),
         listSessions: () => [],
       });
       const req = makeReq('POST', '/api/send');
@@ -1625,582 +1707,137 @@ describe('tower-routes', () => {
       expect(statusCode()).toBe(200);
       const parsed = JSON.parse(body());
       expect(parsed.ok).toBe(true);
+      expect(parsed.delivered).toBe(true);
       expect(parsed.deferred).toBe(false);
       // Message SHOULD be written — user is idle (Bugfix #492)
       expect(mockWrite).toHaveBeenCalled();
     });
   });
 
-  // =========================================================================
-  // POST /api/send — delayed delivery (Spec 1307)
-  // =========================================================================
-
-  // These use their own terminal id. The SendBuffer in tower-routes.ts is
-  // module-level state shared across this file, and earlier tests deliberately
-  // leave messages queued for `term-001` — which a delayed send would then
-  // correctly queue behind, masking what these tests are checking.
-  describe('POST /api/send with deliverAfter', () => {
-    beforeEach(() => {
-      shutdownDelayedSends();
-    });
-
-    afterEach(() => {
-      shutdownDelayedSends();
-      // Drains anything these tests left queued, so the module-level SendBuffer
-      // does not leak state into later describes.
-      stopSendBuffer();
-      vi.useRealTimers();
-    });
-
-    function idleSession(write: ReturnType<typeof vi.fn>) {
-      return { write, pid: 1234, writable: true, isUserIdle: () => true, composing: false };
-    }
-
-    it('responds scheduled:true and writes nothing yet', async () => {
-      vi.useFakeTimers();
+  // ==========================================================================
+  // POST /api/send — durable `--delay` (Spec 1313 round 3, changes 1 & 2)
+  //
+  // Change 1: a delayed send is RESOLVED, authorized, and PERSISTED at request time
+  // with `not_before`, then deferred through the gate — uniform across live / offline
+  // (registry-only) / unwritable targets, and durable across a Tower restart. Change 2:
+  // a delayed `--interrupt` writes NO body here and marks nothing delivered; it keeps only
+  // an in-memory timer for the ^C, guarded by `isStillLive` before AND inside the lock.
+  // ==========================================================================
+  describe('POST /api/send — durable --delay (Spec 1313 round 3)', () => {
+    it('persists a scheduled row for a --delay to an offline (registry-only) agent and writes nothing now', async () => {
       mockParseJsonBody.mockResolvedValue({
-        to: 'architect:main', message: '/arch-init main', workspace: '/tmp/ws',
-        options: { raw: true, deliverAfter: 15 },
+        to: 'spir-9', message: 'later', workspace: '/tmp/ws', options: { deliverAfter: 30 },
       });
-      mockResolveTarget.mockReturnValue({
-        terminalId: 'term-delay-083', workspacePath: '/tmp/ws', agent: 'architect',
-      });
+      // No live terminal, but the registry knows the builder → a delayed send schedules against it.
+      mockResolveTarget.mockReturnValue({ code: 'NOT_FOUND', message: 'no live terminal' });
+      mockResolveAgentInRegistry.mockReturnValue({ workspacePath: '/tmp/ws', agent: 'spir-9', kind: 'builder' });
       const mockWrite = vi.fn();
-      mockGetTerminalManager.mockReturnValue({
-        getSession: () => idleSession(mockWrite), listSessions: () => [],
-      });
+      mockGetTerminalManager.mockReturnValue({ getSession: () => gateSession(mockWrite, '❯ '), listSessions: () => [] });
+      const req = makeReq('POST', '/api/send');
       const { res, statusCode, body } = makeRes();
 
-      await handleRequest(makeReq('POST', '/api/send'), res, makeCtx());
-
+      const before = Date.now();
+      await handleRequest(req, res, makeCtx());
       expect(statusCode()).toBe(200);
       const parsed = JSON.parse(body());
       expect(parsed.scheduled).toBe(true);
-      expect(parsed.deliverAfter).toBe(15);
-      expect(mockWrite).not.toHaveBeenCalled();
+      expect(parsed.resolvedTo).toBe('spir-9');
+      expect(typeof parsed.mailboxId).toBe('string');
+      expect(parsed.notBefore).toBeGreaterThanOrEqual(before + 30_000);
+      expect(mockWrite).not.toHaveBeenCalled(); // deferred — nothing on the wire at request time
+
+      // The row is really persisted with its due time, and is NOT eligible until due.
+      const row = mailbox.getById(sendDbHolder.db, parsed.mailboxId);
+      expect(row?.status).toBe('held');
+      expect(row?.not_before).toBe(parsed.notBefore);
+      expect(row?.terminal_id).toBeNull(); // registry-only target → no live terminal id
+      expect(mailbox.findHeldForAgent(sendDbHolder.db, '/tmp/ws', 'spir-9', parsed.notBefore - 1)).toHaveLength(0);
+      expect(mailbox.findHeldForAgent(sendDbHolder.db, '/tmp/ws', 'spir-9', parsed.notBefore)).toHaveLength(1);
     });
 
-    it('delivers once the delay elapses', async () => {
-      vi.useFakeTimers();
+    it('schedules a --delay to a live target at request time without writing (durable, deferred to the gate)', async () => {
       mockParseJsonBody.mockResolvedValue({
-        to: 'architect:main', message: 'later', workspace: '/tmp/ws',
-        options: { raw: true, deliverAfter: 15 },
+        to: 'architect', message: 'later', workspace: '/tmp/ws', options: { deliverAfter: 10 },
       });
-      mockResolveTarget.mockReturnValue({
-        terminalId: 'term-delay-084', workspacePath: '/tmp/ws', agent: 'architect',
-      });
+      mockResolveTarget.mockReturnValue({ terminalId: 'term-live', workspacePath: '/tmp/ws', agent: 'architect' });
       const mockWrite = vi.fn();
-      mockGetTerminalManager.mockReturnValue({
-        getSession: () => idleSession(mockWrite), listSessions: () => [],
-      });
-      const { res } = makeRes();
+      mockGetTerminalManager.mockReturnValue({ getSession: () => gateSession(mockWrite, '❯ '), listSessions: () => [] });
+      const req = makeReq('POST', '/api/send');
+      const { res, statusCode, body } = makeRes();
 
-      await handleRequest(makeReq('POST', '/api/send'), res, makeCtx());
-      expect(mockWrite).not.toHaveBeenCalled();
-
-      await vi.advanceTimersByTimeAsync(15_000);
-      expect(mockWrite).toHaveBeenCalled();
-    });
-
-    it('re-fetches the session at delivery and drops gracefully when it is gone', async () => {
-      // The reason delivery must not close over a PtySession: between scheduling
-      // and delivery the session can die, and writes to a stale reference go
-      // nowhere silently.
-      vi.useFakeTimers();
-      mockParseJsonBody.mockResolvedValue({
-        to: 'architect:main', message: 'later', workspace: '/tmp/ws',
-        options: { raw: true, deliverAfter: 5 },
-      });
-      mockResolveTarget.mockReturnValue({
-        terminalId: 'term-delay-085', workspacePath: '/tmp/ws', agent: 'architect',
-      });
-      const mockWrite = vi.fn();
-      let alive = true;
-      mockGetTerminalManager.mockReturnValue({
-        getSession: () => (alive ? idleSession(mockWrite) : undefined),
-        listSessions: () => [],
-      });
-      const { res, statusCode } = makeRes();
-
-      await handleRequest(makeReq('POST', '/api/send'), res, makeCtx());
+      await handleRequest(req, res, makeCtx());
       expect(statusCode()).toBe(200);
-
-      alive = false;
-      await expect(vi.advanceTimersByTimeAsync(5_000)).resolves.not.toThrow();
-      expect(mockWrite).not.toHaveBeenCalled();
-    });
-
-    it('does not write to a session that became unwritable during the wait', async () => {
-      vi.useFakeTimers();
-      mockParseJsonBody.mockResolvedValue({
-        to: 'architect:main', message: 'later', workspace: '/tmp/ws',
-        options: { raw: true, deliverAfter: 5 },
-      });
-      mockResolveTarget.mockReturnValue({
-        terminalId: 'term-delay-086', workspacePath: '/tmp/ws', agent: 'architect',
-      });
-      const mockWrite = vi.fn();
-      let writable = true;
-      mockGetTerminalManager.mockReturnValue({
-        getSession: () => ({ ...idleSession(mockWrite), writable }),
-        listSessions: () => [],
-      });
-      const { res } = makeRes();
-
-      await handleRequest(makeReq('POST', '/api/send'), res, makeCtx());
-      writable = false;
-      await vi.advanceTimersByTimeAsync(5_000);
-
-      expect(mockWrite).not.toHaveBeenCalled();
-    });
-
-    it('rejects an invalid delay before scheduling anything', async () => {
-      mockParseJsonBody.mockResolvedValue({
-        to: 'architect:main', message: 'x', workspace: '/tmp/ws',
-        options: { deliverAfter: 0 },
-      });
-      mockResolveTarget.mockReturnValue({
-        terminalId: 'term-delay-087', workspacePath: '/tmp/ws', agent: 'architect',
-      });
-      const { res, statusCode, body } = makeRes();
-
-      await handleRequest(makeReq('POST', '/api/send'), res, makeCtx());
-
-      expect(statusCode()).toBe(400);
-      expect(JSON.parse(body()).error).toBe('INVALID_PARAMS');
-      expect(pendingDelayedSendCount()).toBe(0);
-    });
-
-    it('rejects NaN delays', async () => {
-      mockParseJsonBody.mockResolvedValue({
-        to: 'architect:main', message: 'x', workspace: '/tmp/ws',
-        options: { deliverAfter: NaN },
-      });
-      mockResolveTarget.mockReturnValue({
-        terminalId: 'term-delay-088', workspacePath: '/tmp/ws', agent: 'architect',
-      });
-      const { res, statusCode } = makeRes();
-
-      await handleRequest(makeReq('POST', '/api/send'), res, makeCtx());
-
-      expect(statusCode()).toBe(400);
-      expect(pendingDelayedSendCount()).toBe(0);
-    });
-
-    it('refuses escape combined with a delay rather than silently ignoring one', async () => {
-      mockParseJsonBody.mockResolvedValue({
-        to: 'architect:main', message: 'x', workspace: '/tmp/ws',
-        options: { escape: true, deliverAfter: 5 },
-      });
-      mockResolveTarget.mockReturnValue({
-        terminalId: 'term-delay-089', workspacePath: '/tmp/ws', agent: 'architect',
-      });
-      const { res, statusCode, body } = makeRes();
-
-      await handleRequest(makeReq('POST', '/api/send'), res, makeCtx());
-
-      expect(statusCode()).toBe(400);
-      expect(JSON.parse(body()).message).toMatch(/escape cannot be combined with a delay/);
-      expect(pendingDelayedSendCount()).toBe(0);
-    });
-
-    it('AUTHORISES at request time: a refused target never schedules', async () => {
-      // The security-relevant property. A delayed send must not be able to defer
-      // an authorization check past the conditions that would fail it — so a
-      // resolveTarget refusal (e.g. the builder-spoofing check on
-      // `architect:<name>`) must stop the request before anything is scheduled.
-      mockParseJsonBody.mockResolvedValue({
-        to: 'architect:other', message: 'x', workspace: '/tmp/ws', from: 'aspir-1307',
-        options: { deliverAfter: 15 },
-      });
-      // Mirrors what the real resolver returns for this refusal
-      // (tower-messages.ts:229) — 'NOT_FOUND', not a 'FORBIDDEN' code that does
-      // not exist. `isResolveError` only checks for `code`, so the assertion
-      // held either way, but a mock that does not match production is a
-      // half-truth waiting to mislead the next reader.
-      mockResolveTarget.mockReturnValue({
-        code: 'NOT_FOUND',
-        message: 'builder aspir-1307 may only address its own spawning architect',
-      });
-      const { res, statusCode } = makeRes();
-
-      await handleRequest(makeReq('POST', '/api/send'), res, makeCtx());
-
-      expect(statusCode()).not.toBe(200);
-      expect(pendingDelayedSendCount()).toBe(0);
-    });
-
-    it('defers the interrupt WITH the message rather than firing it now', async () => {
-      // Otherwise the Ctrl+C lands immediately — interrupting the sender's own
-      // turn — and the message arrives alone N seconds later.
-      vi.useFakeTimers();
-      mockParseJsonBody.mockResolvedValue({
-        to: 'architect:main', message: 'later', workspace: '/tmp/ws',
-        options: { raw: true, interrupt: true, deliverAfter: 5 },
-      });
-      mockResolveTarget.mockReturnValue({
-        terminalId: 'term-delay-091', workspacePath: '/tmp/ws', agent: 'architect',
-      });
-      const mockWrite = vi.fn();
-      mockGetTerminalManager.mockReturnValue({
-        getSession: () => idleSession(mockWrite), listSessions: () => [],
-      });
-      const { res } = makeRes();
-
-      await handleRequest(makeReq('POST', '/api/send'), res, makeCtx());
-      expect(mockWrite).not.toHaveBeenCalled();
-
-      await vi.advanceTimersByTimeAsync(5_000);
-      expect(mockWrite.mock.calls[0][0]).toBe('\x03');
-    });
-
-    it('ORDERING: a delayed message never overtakes an earlier buffered one', async () => {
-      // The regression guard for the one hazard in Spec 1307 that a manual
-      // re-send cannot repair. Exercised against the REAL route and the REAL
-      // module-level SendBuffer — an equivalent test that re-implements the
-      // shouldDefer predicate locally would keep passing if the shipped
-      // predicate regressed, which is exactly what review caught.
-      vi.useFakeTimers();
-      const mockWrite = vi.fn();
-      let typing = true;
-      mockGetTerminalManager.mockReturnValue({
-        getSession: () => ({
-          write: mockWrite, pid: 1234, writable: true,
-          isUserIdle: () => !typing, composing: false,
-        }),
-        listSessions: () => [],
-      });
-      mockResolveTarget.mockReturnValue({
-        terminalId: 'term-fifo-001', workspacePath: '/tmp/ws', agent: 'architect',
-      });
-
-      // 1. /clear is sent while the user is typing → buffered by Spec 403.
-      mockParseJsonBody.mockResolvedValue({
-        to: 'architect:main', message: '/clear', workspace: '/tmp/ws', options: { raw: true },
-      });
-      const first = makeRes();
-      await handleRequest(makeReq('POST', '/api/send'), first.res, makeCtx());
-      expect(JSON.parse(first.body()).deferred).toBe(true);
-      expect(mockWrite).not.toHaveBeenCalled();
-
-      // 2. /arch-init is scheduled for +15s.
-      mockParseJsonBody.mockResolvedValue({
-        to: 'architect:main', message: '/arch-init main', workspace: '/tmp/ws',
-        options: { raw: true, deliverAfter: 15 },
-      });
-      const second = makeRes();
-      await handleRequest(makeReq('POST', '/api/send'), second.res, makeCtx());
-      expect(JSON.parse(second.body()).scheduled).toBe(true);
-
-      // 3. The user stops typing BEFORE the delayed message comes due. The
-      //    buffer's flush timer is not running yet, so /clear is still queued.
-      //    This isolates the `hasPending` term specifically: the session is
-      //    idle, so only that term can prevent a direct write.
-      typing = false;
-      await vi.advanceTimersByTimeAsync(15_000);
-
-      // Nothing has bypassed the queue.
-      const writesBeforeFlush = mockWrite.mock.calls.map(c => String(c[0])).join('');
-      expect(writesBeforeFlush).not.toContain('/arch-init');
-
-      // 4. Draining the buffer delivers them in the order they were sent.
-      startSendBuffer(() => {});
-      await vi.advanceTimersByTimeAsync(600);
-      const order = mockWrite.mock.calls.map(c => String(c[0])).join('|');
-      expect(order.indexOf('/clear')).toBeGreaterThanOrEqual(0);
-      expect(order.indexOf('/arch-init')).toBeGreaterThan(order.indexOf('/clear'));
-    });
-
-    it('ORDERING: a delayed --interrupt also queues, carrying its Ctrl+C', async () => {
-      // An immediate --interrupt deliberately bypasses buffering. A DELAYED one
-      // must not, or it reintroduces the same inversion through a side door.
-      vi.useFakeTimers();
-      const mockWrite = vi.fn();
-      let typing = true;
-      mockGetTerminalManager.mockReturnValue({
-        getSession: () => ({
-          write: mockWrite, pid: 1234, writable: true,
-          isUserIdle: () => !typing, composing: false,
-        }),
-        listSessions: () => [],
-      });
-      mockResolveTarget.mockReturnValue({
-        terminalId: 'term-fifo-002', workspacePath: '/tmp/ws', agent: 'architect',
-      });
-
-      mockParseJsonBody.mockResolvedValue({
-        to: 'architect:main', message: 'first', workspace: '/tmp/ws', options: { raw: true },
-      });
-      await handleRequest(makeReq('POST', '/api/send'), makeRes().res, makeCtx());
-
-      mockParseJsonBody.mockResolvedValue({
-        to: 'architect:main', message: 'urgent', workspace: '/tmp/ws',
-        options: { raw: true, interrupt: true, deliverAfter: 5 },
-      });
-      await handleRequest(makeReq('POST', '/api/send'), makeRes().res, makeCtx());
-
-      typing = false;
-      await vi.advanceTimersByTimeAsync(5_000);
-
-      // The Ctrl+C has NOT jumped the queue.
-      expect(mockWrite.mock.calls.map(c => c[0])).not.toContain('\x03');
-
-      startSendBuffer(() => {});
-      await vi.advanceTimersByTimeAsync(1_000);
-      const writes = mockWrite.mock.calls.map(c => c[0]);
-      const ctrlC = writes.indexOf('\x03');
-      const firstIdx = writes.findIndex(w => String(w).includes('first'));
-      const urgentIdx = writes.findIndex(w => String(w).includes('urgent'));
-      // Order: first → Ctrl+C → urgent. The interrupt lands directly ahead of
-      // its own payload, not ahead of the whole queue.
-      expect(firstIdx).toBeGreaterThanOrEqual(0);
-      expect(ctrlC).toBeGreaterThan(firstIdx);
-      expect(urgentIdx).toBeGreaterThan(ctrlC);
-    });
-
-    it('ORDERING: two simultaneous delayed sends do not interleave their writes', async () => {
-      // Against the REAL route and the REAL paced writer. The unit-level chain
-      // test used an artificially async callback, so it proved the chain waits
-      // for the CALLBACK — not for the writes the callback schedules.
-      // writeMessageToSession returns after SCHEDULING its pacing and trailing
-      // Enter, so without waiting out that window two due messages produce
-      // "firstsecond\r\r" rather than two messages.
-      vi.useFakeTimers();
-      const mockWrite = vi.fn();
-      mockGetTerminalManager.mockReturnValue({
-        getSession: () => idleSession(mockWrite), listSessions: () => [],
-      });
-      mockResolveTarget.mockReturnValue({
-        terminalId: 'term-serial-001', workspacePath: '/tmp/ws', agent: 'architect',
-      });
-
-      for (const text of ['first', 'second']) {
-        mockParseJsonBody.mockResolvedValue({
-          to: 'architect:main', message: text, workspace: '/tmp/ws',
-          options: { raw: true, deliverAfter: 5 },
-        });
-        await handleRequest(makeReq('POST', '/api/send'), makeRes().res, makeCtx());
-      }
-
-      await vi.advanceTimersByTimeAsync(5_000);
-      await vi.advanceTimersByTimeAsync(2_000);
-
-      const writes = mockWrite.mock.calls.map(c => String(c[0]));
-      const firstIdx = writes.findIndex(w => w.includes('first'));
-      const secondIdx = writes.findIndex(w => w.includes('second'));
-
-      expect(firstIdx).toBeGreaterThanOrEqual(0);
-      expect(secondIdx).toBeGreaterThan(firstIdx);
-
-      // The decisive assertion: everything belonging to the FIRST message —
-      // including its trailing Enter — lands before the second begins. An
-      // Enter appearing after 'second' would mean the writes interleaved.
-      const enterAfterFirst = writes.findIndex((w, i) => i > firstIdx && w === '\r');
-      expect(enterAfterFirst).toBeGreaterThan(firstIdx);
-      expect(enterAfterFirst).toBeLessThan(secondIdx);
-    });
-
-    it('ORDERING: a delayed send due MID-FLUSH does not write into the flush', async () => {
-      // The window `hasPending` used to miss. flush() drops a session's queue as
-      // soon as it has SCHEDULED its paced writes, so between that moment and
-      // the trailing Enter landing, the queue looks empty. A delayed /arch-init
-      // due in that window used to write into the middle of the /clear being
-      // delivered — yielding "/clear/arch-init main" on one line, so the clear
-      // never executes at all.
-      vi.useFakeTimers();
-      const mockWrite = vi.fn();
-      let typing = true;
-      mockGetTerminalManager.mockReturnValue({
-        getSession: () => ({
-          write: mockWrite, pid: 1234, writable: true,
-          isUserIdle: () => !typing, composing: false,
-        }),
-        listSessions: () => [],
-      });
-      mockResolveTarget.mockReturnValue({
-        terminalId: 'term-midflush-001', workspacePath: '/tmp/ws', agent: 'architect',
-      });
-
-      // The /clear must be long enough that its paced writes span a real
-      // window: writeMessageToSession spaces lines 10ms apart and adds the
-      // Enter 80ms after the last one, so 150 lines ≈ 1.57s of writing. A
-      // short message completes in ~0.1s and the delayed send lands cleanly
-      // after it — which is why an earlier version of this test passed with
-      // the guard removed. Mutation testing caught that.
-      const clearBody = Array.from({ length: 150 }, (_, i) => `CLEAR-${i}`).join('\n');
-      mockParseJsonBody.mockResolvedValue({
-        to: 'architect:main', message: clearBody,
-        workspace: '/tmp/ws', options: { raw: true },
-      });
-      await handleRequest(makeReq('POST', '/api/send'), makeRes().res, makeCtx());
-
-      // Due at ~1s: after the flush starts (~0.5s), well before it finishes.
-      mockParseJsonBody.mockResolvedValue({
-        to: 'architect:main', message: 'ARCHINIT', workspace: '/tmp/ws',
-        options: { raw: true, deliverAfter: 1 },
-      });
-      await handleRequest(makeReq('POST', '/api/send'), makeRes().res, makeCtx());
-
-      // User goes idle; the buffer flush starts writing the /clear.
-      typing = false;
-      startSendBuffer(() => {});
-      await vi.advanceTimersByTimeAsync(600);   // flush fires, schedules writes
-      await vi.advanceTimersByTimeAsync(1_000); // /arch-init comes due MID-write
-      await vi.advanceTimersByTimeAsync(5_000); // everything settles
-
-      const writes = mockWrite.mock.calls.map(c => String(c[0]));
-      const joined = writes.join('');
-      const archIdx = joined.indexOf('ARCHINIT');
-      const lastClearIdx = joined.lastIndexOf('CLEAR-149');
-
-      expect(archIdx).toBeGreaterThanOrEqual(0);
-      expect(lastClearIdx).toBeGreaterThanOrEqual(0);
-      // Every part of the clear lands before the re-orientation begins.
-      expect(archIdx).toBeGreaterThan(lastClearIdx);
-    });
-
-    it('ORDERING: a delayed --interrupt due MID-FLUSH does not split into the flush', async () => {
-      // Review regression: deleting busyUntil made hasPending queue-only, and a
-      // delayed --interrupt wrote its Ctrl+C DIRECTLY (outside the lock) before
-      // its payload. Due mid-flush, that Ctrl+C landed inside the flush's
-      // stream, separated from its own payload. The fix folds the Ctrl+C into
-      // the payload's submitToSession reservation, so the whole interrupt+
-      // message queues behind the flush as a unit.
-      vi.useFakeTimers();
-      const mockWrite = vi.fn();
-      let typing = true;
-      mockGetTerminalManager.mockReturnValue({
-        getSession: () => ({
-          write: mockWrite, pid: 1234, writable: true,
-          isUserIdle: () => !typing, composing: false,
-        }),
-        listSessions: () => [],
-      });
-      mockResolveTarget.mockReturnValue({
-        terminalId: 'term-midflush-int', workspacePath: '/tmp/ws', agent: 'architect',
-      });
-
-      const clearBody = Array.from({ length: 150 }, (_, i) => `CLEAR-${i}`).join('\n');
-      mockParseJsonBody.mockResolvedValue({
-        to: 'architect:main', message: clearBody, workspace: '/tmp/ws', options: { raw: true },
-      });
-      await handleRequest(makeReq('POST', '/api/send'), makeRes().res, makeCtx());
-
-      // A delayed INTERRUPT due mid-flush.
-      mockParseJsonBody.mockResolvedValue({
-        to: 'architect:main', message: 'URGENT', workspace: '/tmp/ws',
-        options: { raw: true, interrupt: true, deliverAfter: 1 },
-      });
-      await handleRequest(makeReq('POST', '/api/send'), makeRes().res, makeCtx());
-
-      typing = false;
-      startSendBuffer(() => {});
-      await vi.advanceTimersByTimeAsync(600);
-      await vi.advanceTimersByTimeAsync(1_000);
-      await vi.advanceTimersByTimeAsync(5_000);
-
-      const writes = mockWrite.mock.calls.map(c => String(c[0]));
-      const ctrlCIdx = writes.indexOf('\x03');
-      const lastClear = writes.map((w, i) => w.includes('CLEAR-149') ? i : -1).filter(i => i >= 0).pop() ?? -1;
-      const urgentIdx = writes.findIndex(w => w.includes('URGENT'));
-
-      // The Ctrl+C did not jump into the flush: it lands after the whole clear,
-      // and directly ahead of its own payload.
-      expect(lastClear).toBeGreaterThanOrEqual(0);
-      expect(ctrlCIdx).toBeGreaterThan(lastClear);
-      expect(urgentIdx).toBeGreaterThan(ctrlCIdx);
-    });
-
-    it('CANCELLATION: a delayed send whose lock wait outlasts shutdown does not write', async () => {
-      // The route-site `stillLive` guard, exercised where it lives. The
-      // delayed-send unit test only checks the predicate's value; this drives
-      // the real deliverOrBuffer and asserts the WRITE is skipped.
-      //
-      // Window: the delayed timer fires (generation check passes), delivery
-      // enters deliverOrBuffer and calls submitToSession, which QUEUES behind an
-      // occupier already holding this session's lock. Shutdown then bumps the
-      // generation. When the lock frees, the guard inside the reservation sees
-      // stillLive() === false and returns without writing.
-      vi.useFakeTimers();
-      resetSubmissionChains();
-      const mockWrite = vi.fn();
-      mockGetTerminalManager.mockReturnValue({
-        getSession: () => ({
-          write: mockWrite, pid: 1234, writable: true,
-          isUserIdle: () => true, composing: false,
-        }),
-        listSessions: () => [],
-      });
-      mockResolveTarget.mockReturnValue({
-        terminalId: 'term-cancel-lock', workspacePath: '/tmp/ws', agent: 'architect',
-      });
-
-      // Occupy the session's lock for 10s so any later submission queues behind it.
-      void submitToSession('term-cancel-lock', () => 10_000);
-
-      // A delayed send due at 1s — it will queue behind the occupier.
-      mockParseJsonBody.mockResolvedValue({
-        to: 'architect:main', message: 'CANARYMSG', workspace: '/tmp/ws',
-        options: { raw: true, deliverAfter: 1 },
-      });
-      await handleRequest(makeReq('POST', '/api/send'), makeRes().res, makeCtx());
-
-      await vi.advanceTimersByTimeAsync(1_000); // delayed timer fires, queues on the lock
-      shutdownDelayedSends();                    // shutdown while it waits
-      await vi.advanceTimersByTimeAsync(15_000); // occupier frees; queued delivery runs its guard
-
-      // The guard skipped the write: CANARYMSG never reached the session.
-      const wrote = mockWrite.mock.calls.map(c => String(c[0])).join('');
-      expect(wrote).not.toContain('CANARYMSG');
-    });
-
-    it('logs a write that throws instead of swallowing it (Codex/Claude PR review)', async () => {
-      // A torn-down session can make the write throw. The submission lock's
-      // callers only .catch to keep Tower alive; without logging here the drop
-      // is silent, which is exactly the delivery-outcome the log must record.
-      vi.useFakeTimers();
-      const ctxLog = vi.fn();
-      const throwingWrite = vi.fn(() => { throw new Error('session gone'); });
-      mockGetTerminalManager.mockReturnValue({
-        getSession: () => ({
-          write: throwingWrite, pid: 1234, writable: true,
-          isUserIdle: () => true, composing: false,
-        }),
-        listSessions: () => [],
-      });
-      mockResolveTarget.mockReturnValue({
-        terminalId: 'term-throw', workspacePath: '/tmp/ws', agent: 'architect',
-      });
-      mockParseJsonBody.mockResolvedValue({
-        to: 'architect:main', message: 'x', workspace: '/tmp/ws', options: { raw: true },
-      });
-      await handleRequest(makeReq('POST', '/api/send'), makeRes().res, makeCtx({ log: ctxLog }));
-      await vi.advanceTimersByTimeAsync(200);
-
-      const errorLogged = ctxLog.mock.calls.some(
-        c => c[0] === 'ERROR' && String(c[1]).includes('write threw'),
-      );
-      expect(errorLogged).toBe(true);
-    });
-
-    it('leaves undelayed sends on the immediate path', async () => {
-      mockParseJsonBody.mockResolvedValue({
-        to: 'architect:main', message: 'now', workspace: '/tmp/ws', options: { raw: true },
-      });
-      mockResolveTarget.mockReturnValue({
-        terminalId: 'term-delay-096', workspacePath: '/tmp/ws', agent: 'architect',
-      });
-      const mockWrite = vi.fn();
-      mockGetTerminalManager.mockReturnValue({
-        getSession: () => idleSession(mockWrite), listSessions: () => [],
-      });
-      const { res, body } = makeRes();
-
-      await handleRequest(makeReq('POST', '/api/send'), res, makeCtx());
-
       const parsed = JSON.parse(body());
-      expect(parsed.scheduled).toBe(false);
-      expect(mockWrite).toHaveBeenCalled();
+      expect(parsed.scheduled).toBe(true);
+      expect(typeof parsed.mailboxId).toBe('string');
+      expect(mockWrite).not.toHaveBeenCalled(); // delivery is deferred to the gated drainer at due time
+      expect(mailbox.getById(sendDbHolder.db, parsed.mailboxId)?.not_before).toBe(parsed.notBefore);
+    });
+
+    describe('delayed --interrupt: the ^C timer is guarded by isStillLive (change 2)', () => {
+      afterEach(() => {
+        shutdownDelayedSends();
+        resetSubmissionChains();
+        vi.useRealTimers();
+      });
+
+      it('Tower shutdown BEFORE the due time fires no ^C and marks nothing delivered (outer guard)', async () => {
+        vi.useFakeTimers();
+        mockParseJsonBody.mockResolvedValue({
+          to: 'architect', message: 'urgent', workspace: '/tmp/ws', options: { interrupt: true, deliverAfter: 5 },
+        });
+        mockResolveTarget.mockReturnValue({ terminalId: 'term-i', workspacePath: '/tmp/ws', agent: 'architect' });
+        const mockWrite = vi.fn();
+        mockGetTerminalManager.mockReturnValue({ getSession: () => gateSession(mockWrite, '❯ '), listSessions: () => [] });
+        const req = makeReq('POST', '/api/send');
+        const { res, statusCode, body } = makeRes();
+
+        await handleRequest(req, res, makeCtx());
+        expect(statusCode()).toBe(200);
+        const parsed = JSON.parse(body());
+        expect(parsed.scheduled).toBe(true);
+        expect(mockWrite).not.toHaveBeenCalled(); // nothing written at request time (change 2)
+
+        shutdownDelayedSends();                 // Tower restarts while the ^C timer is pending
+        await vi.advanceTimersByTimeAsync(5000); // the due time arrives on the (now dead) timer
+
+        expect(mockWrite).not.toHaveBeenCalled(); // no ^C — the guard bailed; only the nudge is lost
+        expect(mailbox.getById(sendDbHolder.db, parsed.mailboxId)?.status).toBe('held'); // never falsely delivered
+      });
+
+      it('Tower shutdown WHILE the submission lock is held fires no ^C (inner re-check)', async () => {
+        vi.useFakeTimers();
+        // Pre-occupy term-i's submission lock with a manually-released promise, so the ^C
+        // submission chains BEHIND it — reproducing the shutdown-during-lock-wait window.
+        let releaseLock!: () => void;
+        const lockHeld = new Promise<void>((r) => { releaseLock = r; });
+        submitToSession('term-i', () => 1, { sleep: () => lockHeld });
+
+        mockParseJsonBody.mockResolvedValue({
+          to: 'architect', message: 'urgent', workspace: '/tmp/ws', options: { interrupt: true, deliverAfter: 5 },
+        });
+        mockResolveTarget.mockReturnValue({ terminalId: 'term-i', workspacePath: '/tmp/ws', agent: 'architect' });
+        const mockWrite = vi.fn();
+        mockGetTerminalManager.mockReturnValue({ getSession: () => gateSession(mockWrite, '❯ '), listSessions: () => [] });
+        const req = makeReq('POST', '/api/send');
+        const { res, body } = makeRes();
+
+        await handleRequest(req, res, makeCtx());
+        const parsed = JSON.parse(body());
+
+        // Due time: the ^C timer fires while still live → its outer check passes and it QUEUES
+        // the ^C submission behind the held lock (which has not released yet).
+        await vi.advanceTimersByTimeAsync(5000);
+        expect(mockWrite).not.toHaveBeenCalled(); // still waiting for the lock
+
+        // Now Tower shuts down (generation bump) DURING the lock-wait, then the lock drains.
+        shutdownDelayedSends();
+        releaseLock();
+        for (let i = 0; i < 20; i++) await Promise.resolve(); // flush the queued submission
+
+        expect(mockWrite).not.toHaveBeenCalled(); // the inside-the-lock isStillLive() re-check bailed
+        expect(mailbox.getById(sendDbHolder.db, parsed.mailboxId)?.status).toBe('held'); // not falsely delivered
+      });
     });
   });
 

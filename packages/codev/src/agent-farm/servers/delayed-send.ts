@@ -1,31 +1,36 @@
 /**
- * Delayed message delivery for `afx send --delay` (Spec 1307).
+ * Due-time timer for the delayed `afx send --delay --interrupt` path (Spec 1307,
+ * reshaped by Spec 1313 round 3).
  *
- * Holds a due-time timer per scheduled message and nothing else. The *decision*
- * of how to deliver — write now, or hand to the typing-aware send buffer — is
- * deliberately NOT made here: it is re-made at delivery time by the same code
- * the immediate path uses. See `deliverOrBuffer` in tower-routes.ts.
+ * ## What this module does NOW (and no longer does)
+ *
+ * The message *body* of every `--delay` send is persisted to the durable mailbox
+ * at REQUEST time, with a `not_before` due time, by `handleDelayedSend` in
+ * tower-routes.ts — NOT here, and NOT at fire time. The gated backstop drainer
+ * delivers that row once `not_before` passes, so a plain `--delay` keeps no timer
+ * at all and survives a Tower restart by construction.
+ *
+ * This module holds a due-time timer used by ONE caller: the delayed-`--interrupt`
+ * path. When it fires it writes only the Ctrl+C that ends the current turn — no
+ * message body, and it marks nothing `delivered`. The body then lands through the
+ * same render gate every send uses, after the ^C ends the turn.
  *
  * ## Why the registry exists at all
  *
  * A bare `setTimeout` would work until Tower shuts down, at which point the
- * process would either hang on a pending timer or exit with a message
- * half-scheduled and no record of it. The registry makes shutdown explicit.
+ * process would either hang on a pending timer or exit with a ^C half-scheduled
+ * and no record of it. The registry makes shutdown explicit.
  *
- * ## Shutdown DROPS, it does not flush
+ * ## Shutdown drops the ^C nudge, never the message
  *
- * This is the one place this module deliberately disagrees with `SendBuffer`,
- * whose `stop()` performs a final flush. That is right for the buffer: those
- * messages were accepted for *immediate* delivery and merely held back because
- * someone was typing, so delivering them late is better than losing them.
- *
- * A delayed message is the opposite. Its whole content is "deliver this at a
- * moment that has not arrived yet", and the moment is chosen relative to a
- * world (a session mid-clear, a turn about to end) that a Tower restart has
- * already invalidated. Flushing on shutdown would fire `/arch-init` into a
- * session that never got cleared, or into one that has moved on to other work.
- * Dropping is recoverable — a human re-sends one message — and Spec 1307's
- * design explicitly accepts that trade.
+ * A pre-due `--delay` message is a persisted mailbox row: it survives a restart
+ * and delivers when the target's prompt is next clean. Only the in-memory ^C
+ * nudge is dropped on shutdown — recoverable (a human re-interrupts if it matters),
+ * and matching the documented "only the interrupt semantics gracefully degrade"
+ * boundary. This is the CONSCIOUS reversal of Spec 1307's original body-drop-on-
+ * restart trade (see review 1313): the render gate now supplies the protection that
+ * trade wanted — a post-restart delivery still only lands on a render-verified empty
+ * prompt, and a stale pending row is visible and cancellable in `afx inbox`.
  */
 
 /** A scheduled delivery, retained so shutdown can cancel it. */
@@ -42,9 +47,9 @@ const pending = new Set<PendingDelayedSend>();
 /*
  * NOTE: this module no longer serialises deliveries. It used to hold a
  * per-terminal promise chain; Spec 1273's `submitToSession` now owns that, and
- * every due message re-enters `deliverOrBuffer`, which submits under the lock.
- * One mechanism, not two — per the architect's ruling that this project adopts
- * the primitive rather than keeping a rival.
+ * every due message re-enters the mailbox delivery path, which submits under the
+ * lock. One mechanism, not two — per the architect's ruling that this project
+ * adopts the primitive rather than keeping a rival.
  */
 
 /**
@@ -70,9 +75,10 @@ let generation = 0;
  * Upper bound on `--delay`, in seconds.
  *
  * One hour. Not a meaningful workflow limit — it exists so a typo (`--delay
- * 1500` when 15 was meant) cannot park a message for 25 minutes with no way to
- * see or cancel it. Listing and cancelling pending sends are deliberately out
- * of scope for Spec 1307, which is exactly why the ceiling matters.
+ * 1500` when 15 was meant) cannot park a message far in the future unnoticed.
+ * Under Spec 1313 round 3 a parked send IS listable and cancellable via
+ * `afx inbox` / `afx inbox dismiss` (it is a durable mailbox row), but the
+ * ceiling stays as a cheap guard against the typo case.
  */
 export const MAX_DELAY_SECONDS = 3600;
 
@@ -143,10 +149,10 @@ export function scheduleDelayedSend(
         // lock is held — closing the shutdown-during-lock-wait window.
         await deliver(() => generation === scheduledGeneration);
       } catch {
-        // deliverOrBuffer logs a write failure at its own site with terminal
-        // context; this catch is a last-resort guard so an unexpected throw
-        // cannot become an unhandled rejection that takes Tower down over one
-        // undeliverable message.
+        // The mailbox delivery path logs a write failure at its own site with
+        // terminal context; this catch is a last-resort guard so an unexpected
+        // throw cannot become an unhandled rejection that takes Tower down over
+        // one undeliverable message.
       }
     })();
   }, delaySeconds * 1000);

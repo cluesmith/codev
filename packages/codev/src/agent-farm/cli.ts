@@ -767,6 +767,57 @@ export async function runAgentFarm(args: string[]): Promise<void> {
       }
     });
 
+  // Inbox commands (Spec 1313) — list/dismiss held (undelivered) mailbox messages
+  const inboxCmd = program
+    .command('inbox')
+    .description('List held (undelivered) messages; dismiss by id')
+    .option('-w, --workspace <path>', 'Workspace to list held messages for (default: current workspace)')
+    .option('-p, --port <port>', 'Tower port (default: 4100)')
+    .action(async (options) => {
+      const { inboxList } = await import('./commands/inbox.js');
+      try {
+        await inboxList({
+          workspace: options.workspace,
+          port: options.port ? parseInt(options.port, 10) : undefined,
+        });
+      } catch (error) {
+        logger.error(error instanceof Error ? error.message : String(error));
+        process.exit(1);
+      }
+    });
+
+  inboxCmd
+    .command('show <id>')
+    .description('Show a single message by id, including its body (metadata + body)')
+    .option('-p, --port <port>', 'Tower port (default: 4100)')
+    .action(async (id, options) => {
+      const { inboxShow } = await import('./commands/inbox.js');
+      try {
+        await inboxShow(id, {
+          port: options.port ? parseInt(options.port, 10) : undefined,
+        });
+      } catch (error) {
+        logger.error(error instanceof Error ? error.message : String(error));
+        process.exit(1);
+      }
+    });
+
+  inboxCmd
+    .command('dismiss <id>')
+    .description('Dismiss a held message by id — marks it dismissed, never delivers it')
+    .option('-p, --port <port>', 'Tower port (default: 4100)')
+    .action(async (id, options) => {
+      const { inboxDismiss } = await import('./commands/inbox.js');
+      try {
+        await inboxDismiss(id, {
+          port: options.port ? parseInt(options.port, 10) : undefined,
+        });
+      } catch (error) {
+        logger.error(error instanceof Error ? error.message : String(error));
+        process.exit(1);
+      }
+    });
+
   // Team commands (Spec 587) — deprecated in favor of standalone `team` CLI (Spec 599)
   const teamCmd = program
     .command('team')

@@ -35,6 +35,9 @@ vi.mock('../lib/tower-client.js', () => ({
     isRunning: (...a: any[]) => mockIsRunning(...a),
     getHealth: (...a: any[]) => mockGetHealth(...a),
     getWorkspaceStatus: (...a: any[]) => mockGetWorkspaceStatus(...a),
+    // Spec 1313 round 3: status now reads the overview for held-mail awareness. These suites
+    // don't exercise held mail, so a null overview degrades to "no held info" (unchanged output).
+    getOverview: async () => null,
   }),
 }));
 
