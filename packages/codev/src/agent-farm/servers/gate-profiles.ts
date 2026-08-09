@@ -122,6 +122,32 @@ const KIMI_REGION_END = [/^\s*╰[─━╌┄]{3,}/];
  * fixture): that screen classified `clean`, and a queued message would have been
  * typed on top of the draft. Anchoring the region to the box top fixes it for any
  * number of draft rows.
+ *
+ * This bounds the SCAN. The residual case it cannot close is armed separately by
+ * `growsWithDraft` on the profile below — a draft whose every
+ * row is whitespace or whitespace+`>` (enter a newline, then `>`) has zero countable
+ * cells no matter how correctly the region is bounded, because the second row
+ * matches {@link KIMI_MARKER} and its `>` is span-exempted as chrome. Shape, not
+ * cells, is the only evidence left — so a region grown past one interior row is held.
+ *
+ * That rule is sound only because box growth is EXCLUSIVE to multi-line drafts, which
+ * was measured on real kimi 0.34.0 rather than assumed
+ * (`codev/spikes/pir-1201-kimi-box-growth.mjs`): idle, a single-line draft, the `/`
+ * menu, the `@` picker, and the post-reply steady state all hold at exactly one
+ * interior row; only the newline drafts grow to two. The steady-state result is the
+ * load-bearing one — growth on a composer that has already carried a turn would hold
+ * every later message forever, a liveness bug rather than a fail-safe one. (A long
+ * soft-wrapped single line grows the box too, but it carries text and was already
+ * busy, so its verdict is unchanged.)
+ *
+ * The WORKING states were measured separately, because a rule that reads shape could
+ * otherwise turn "deliver while the agent is busy" into "hold until it goes idle"
+ * without anyone noticing (`pir-1201-kimi-working-states.mjs`, CMAP 2026-08-09
+ * claude Q2): mid-generation at 5s and 13s, the shift+tab mode chrome, and a draft
+ * typed while the agent is still working ALL hold at one interior row. So the rule
+ * changes nothing for a working builder. (`!` bash mode replaces the `>` glyph, so it
+ * classifies `no-composer-marker` and holds — pre-existing, fail-safe, and correct:
+ * there is unsent input on that row.)
  */
 const KIMI_REGION_START = [/^\s*╭[─━╌┄]{3,}/];
 
@@ -151,6 +177,10 @@ export const KIMI_PROFILE: GateProfile = {
   markerPattern: KIMI_MARKER,
   regionStartPatterns: KIMI_REGION_START,
   regionEndPatterns: KIMI_REGION_END,
+  // Measured, not assumed: kimi's box grows a row only when the draft gains a line.
+  // See KIMI_REGION_START above for the state-by-state table and why the post-reply
+  // steady state is the load-bearing row. kimi is the only profile that sets this.
+  growsWithDraft: true,
 };
 
 /** Registry keyed by the harness name `detectHarnessFromCommand` returns. */

@@ -123,8 +123,35 @@ export interface GateProfile {
    * Left unset — claude, codex, agy — the region starts at the marker row exactly
    * as before, and since no row below a LAST match can match, those profiles
    * cannot reach any of the new behavior.
+   *
+   * Bounds the SCAN only. It does not arm the multi-row-draft rule — see
+   * {@link growsWithDraft}, which is deliberately a separate opt-in.
    */
   regionStartPatterns?: RegExp[];
+  /**
+   * Declares a MEASURED property of this app's composer: its box grows a row only
+   * when the draft gains a line, so a region taller than one interior row proves
+   * unsent input. Arms the multi-row-draft rule in {@link classifyBuffer}, which is
+   * the only thing that catches a draft with zero countable cells (kimi: a newline
+   * then `>`, whose every cell is whitespace, box chrome, or an exempted marker).
+   *
+   * Set this ONLY from a live measurement covering the app's idle screen, its menus
+   * and pickers, and — the one that matters most — its steady state after a reply.
+   * The rule holds mail on shape alone, so an app that grows its box for any reason
+   * other than a draft line would hold every message forever: a liveness failure,
+   * not the fail-safe direction. For kimi 0.34.0 that measurement is
+   * `codev/spikes/pir-1201-kimi-box-growth.mjs`.
+   *
+   * Kept separate from {@link regionStartPatterns} because the two are unrelated
+   * properties that merely coincide for kimi, and the hazard is concrete rather than
+   * theoretical: the shipped `codex-idle.clean.txt` capture — a real, genuinely EMPTY
+   * codex composer — already spans two interior rows. Were arming folded into
+   * `regionStartPatterns`, the day anyone declared one for codex (a header bound, a
+   * boxed redesign) codex mail would stop delivering, silently. Requires
+   * `regionStartPatterns` to be set as well, since without a box top the row count
+   * measures distance to the status line rather than the composer's height.
+   */
+  growsWithDraft?: true;
   /**
    * Optional per-app placeholder signal: a 16-color palette index whose cells are
    * treated as placeholder/hint chrome (ignored), NOT user text. This is the
@@ -149,9 +176,17 @@ export interface GateVerdict {
    * line beneath it to bound the composer (a partial/mid-repaint frame) — held
    * rather than scanning into status chrome; `no-region-start` = the mirror of that
    * for a profile whose composer is a box (kimi), when the box TOP is not on screen;
+   * `multi-row-draft` = a boxed composer grown past one interior row, i.e. a
+   * multi-line draft, held on SHAPE because its cells can all be exempt chrome;
    * `user-text` = a draft or menu occupies the composer; `empty` = clean.
    */
-  detail: 'no-composer-marker' | 'no-region-end' | 'no-region-start' | 'user-text' | 'empty';
+  detail:
+    | 'no-composer-marker'
+    | 'no-region-end'
+    | 'no-region-start'
+    | 'multi-row-draft'
+    | 'user-text'
+    | 'empty';
 }
 
 /**
@@ -238,11 +273,25 @@ export function markerSpanEnd(line: string, pattern: RegExp): number {
  * the false-CLEAN this bound exists to prevent, so the caller must hold instead.
  */
 function findRegionStart(lines: string[], markerRow: number, startPatterns?: RegExp[]): number {
-  if (!startPatterns || startPatterns.length === 0) return markerRow;
+  if (!hasRegionStart(startPatterns)) return markerRow;
   for (let i = markerRow - 1; i >= 0; i--) {
     if (startPatterns.some((p) => p.test(lines[i]))) return i + 1;
   }
   return -1;
+}
+
+/**
+ * Does this profile declare a proven UPPER bound for its composer region?
+ *
+ * Shared by {@link findRegionStart} and the multi-row-draft rule in
+ * {@link classifyBuffer} on purpose: both must agree on what "bounded" means. If
+ * they disagreed, a profile with an empty pattern array would fall back to
+ * `startRow = markerRow` while still being treated as bounded — and the row-count
+ * rule would then fire on claude/codex, whose composer legitimately sits more than
+ * one row above its rule line.
+ */
+function hasRegionStart(patterns?: RegExp[]): patterns is RegExp[] {
+  return patterns !== undefined && patterns.length > 0;
 }
 
 /**
@@ -412,9 +461,47 @@ export function classifyBuffer(
     }
   }
 
-  return userCells === 0
-    ? { clean: true, detail: 'empty' }
-    : { clean: false, reason: 'busy', detail: 'user-text' };
+  if (userCells > 0) return { clean: false, reason: 'busy', detail: 'user-text' };
+
+  // Zero countable cells is NOT yet proof of an empty composer. One draft shape has no
+  // countable cells at all: type a newline and then `>` and kimi renders
+  //
+  //     │ >        <- row 1, empty
+  //     │   >      <- row 2, matches the marker, so its `>` is span-exempted as chrome
+  //
+  // every cell being whitespace, box chrome, or an exempted marker. Bounding the region
+  // correctly does not help — the draft is real but literally uncountable — so the last
+  // evidence available is the composer's SHAPE. For a boxed composer the box grows a row
+  // only when the draft gains a line, so a region spanning more than one interior row is
+  // positive evidence of unsent input. Generalizes to any draft whose rows are all
+  // whitespace or whitespace+`>`.
+  //
+  // Sound only because box growth is EXCLUSIVE to multi-line drafts, which was measured
+  // on real kimi 0.34.0 rather than assumed (`codev/spikes/pir-1201-kimi-box-growth.mjs`):
+  // idle, a single-line draft, the `/` menu, the `@` picker and the post-reply steady
+  // state all hold at one interior row; only the newline drafts grow to two. The steady
+  // state is the load-bearing measurement — growth on a composer that has already carried
+  // a turn would hold every later message forever, a liveness bug rather than a fail-safe
+  // one.
+  //
+  // Placed AFTER the scan, not before it, so the cell count keeps its ground-truth role:
+  // a text-bearing multi-row draft still reports `user-text`, and this detail is reserved
+  // for the case the count is blind to.
+  //
+  // Two conditions, both required and each carrying its own half of the meaning:
+  // `growsWithDraft` is the app's MEASURED promise that box height tracks draft lines,
+  // and `hasRegionStart` is what makes `endRow - startRow` mean "interior rows" at all.
+  // Neither alone is sufficient, and the second is not academic — the shipped
+  // `codex-idle.clean.txt` capture is a genuinely EMPTY composer spanning two interior
+  // rows, so an unbounded profile reaching this line would hold real mail forever.
+  if (
+    profile.growsWithDraft &&
+    hasRegionStart(profile.regionStartPatterns) &&
+    endRow - startRow > 1
+  ) {
+    return { clean: false, reason: 'busy', detail: 'multi-row-draft' };
+  }
+  return { clean: true, detail: 'empty' };
 }
 
 /**

@@ -80,6 +80,10 @@ describe('render-gate — real captured fixtures (Spec 1313)', () => {
       // marker search is most likely to settle on the wrong row.
       'kimi-multiline.busy',
       'kimi-multiline-bare.busy',
+      // The all-exempt draft: every row is whitespace or whitespace+`>`, so no
+      // amount of correct region bounding produces a countable cell. Held on the
+      // region's SHAPE instead (see the multi-row-draft rule).
+      'kimi-newline-bare.busy',
       'kimi-menu.busy',
       'kimi-picker.busy',
       'wrapper-boot.busy',
@@ -198,6 +202,87 @@ describe('render-gate — marker-span exemption is a no-op for claude/codex/agy 
     const { regionStartPatterns: _dropped, ...unbounded } = KIMI_PROFILE;
     expect(await classifyScreen(snapshotFromRaw(raw), unbounded as GateProfile))
       .toMatchObject({ clean: true, detail: 'empty' });
+  });
+
+  it('holds an all-exempt multi-row kimi draft, which no cell count can catch', async () => {
+    // Architect review 2026-08-09, finding 1. Enter a newline then `>` and kimi renders
+    // `│ > ` / `│   >`: row 1 is empty, row 2 matches the marker so its `>` is
+    // span-exempted as chrome. userCells is 0 with the region bounded exactly right —
+    // the cell count is simply blind here, and a queued message would be typed on top
+    // of the unsent draft. Real 0.34.0 capture, not a constructed screen.
+    const raw = readFileSync(`${FIXTURE_DIR}/kimi-newline-bare.busy.txt`, 'utf8');
+    expect(await classifyScreen(snapshotFromRaw(raw), KIMI_PROFILE))
+      .toMatchObject({ clean: false, detail: 'multi-row-draft' });
+
+    // …and the before/after half: the SAME bytes under a profile identical except that
+    // it declares no upper bound reproduce the false CLEAN. This pins that the rule is
+    // what protects this screen — if it ever stops classifying clean, the fixture has
+    // drifted and this test has stopped testing the fix.
+    const { regionStartPatterns: _dropped, ...unbounded } = KIMI_PROFILE;
+    expect(await classifyScreen(snapshotFromRaw(raw), unbounded as GateProfile))
+      .toMatchObject({ clean: true, detail: 'empty' });
+  });
+
+  it('leaves the multi-row rule inert for the profiles that do not opt in', async () => {
+    // This is NOT a hypothetical shape. codex's real, captured, genuinely-EMPTY composer
+    // spans TWO interior rows under its shipped profile (measured across every fixture:
+    // codex-idle marker=18 start=18 end=20), so the rule's geometric predicate is
+    // already true on a screen that must stay clean. The opt-in gates are the only
+    // thing standing between that capture and codex mail being held forever — which is
+    // exactly why arming lives in its own field rather than riding regionStartPatterns.
+    const codexIdle = readFileSync(`${FIXTURE_DIR}/codex-idle.clean.txt`, 'utf8');
+    expect(await classifyScreen(snapshotFromRaw(codexIdle), CODEX_PROFILE))
+      .toMatchObject({ clean: true, detail: 'empty' });
+
+    // The differential, on the SAME BYTES: opt the profile in and that identical empty
+    // screen flips to busy. Without this half, deleting the rule outright would leave
+    // the inertness assertion above still passing.
+    const armed: GateProfile = {
+      ...CODEX_PROFILE,
+      regionStartPatterns: [/^\s*$/], // any blank line above the marker bounds the region
+      growsWithDraft: true,
+    };
+    expect(await classifyScreen(snapshotFromRaw(codexIdle), armed))
+      .toMatchObject({ clean: false, detail: 'multi-row-draft' });
+  });
+
+  it('needs BOTH opt-ins: a region start alone never arms the rule', async () => {
+    // The decoupling itself (CMAP 2026-08-09, codex #1 / claude Q5). A profile that
+    // bounds its scan but makes no claim about box growth must classify exactly as it
+    // did before this rule existed — otherwise declaring a region start for an
+    // unrelated reason (a header line, a boxed redesign) is a silent delivery outage.
+    const codexIdle = readFileSync(`${FIXTURE_DIR}/codex-idle.clean.txt`, 'utf8');
+    const boundedOnly: GateProfile = { ...CODEX_PROFILE, regionStartPatterns: [/^\s*$/] };
+    expect(await classifyScreen(snapshotFromRaw(codexIdle), boundedOnly))
+      .toMatchObject({ clean: true, detail: 'empty' });
+
+    // …and the converse: growsWithDraft without a region start is inert too, because
+    // `endRow - startRow` would then measure the distance to the status line rather
+    // than the composer's height — a number the rule has no business reading.
+    const growsOnly: GateProfile = { ...CODEX_PROFILE, growsWithDraft: true };
+    expect(await classifyScreen(snapshotFromRaw(codexIdle), growsOnly))
+      .toMatchObject({ clean: true, detail: 'empty' });
+  });
+
+  it('treats an EMPTY regionStartPatterns array as unbounded in both places that read it', async () => {
+    // The drift the shared hasRegionStart predicate exists to prevent. findRegionStart
+    // falls back to `startRow = markerRow` for an empty array; if the rule instead read
+    // it as "bounded" (a plain truthiness check on the array would), the two would
+    // disagree and the rule would fire on a region it never bounded.
+    const codexIdle = readFileSync(`${FIXTURE_DIR}/codex-idle.clean.txt`, 'utf8');
+    const armed: GateProfile = { ...CODEX_PROFILE, regionStartPatterns: [], growsWithDraft: true };
+    expect(await classifyScreen(snapshotFromRaw(codexIdle), armed))
+      .toMatchObject({ clean: true, detail: 'empty' });
+  });
+
+  it('kimi is the only shipped profile that opts into the rule, and it declares both fields', async () => {
+    for (const p of [CLAUDE_PROFILE, CODEX_PROFILE, AGY_PROFILE]) {
+      expect(p.growsWithDraft).toBeUndefined();
+    }
+    expect(KIMI_PROFILE.growsWithDraft).toBe(true);
+    // growsWithDraft is meaningless without a box top to measure height from, so the
+    // two must be declared together. Pinned as an invariant rather than a convention.
+    expect(KIMI_PROFILE.regionStartPatterns?.length).toBeGreaterThan(0);
   });
 
   it('holds a boxed composer whose box top is off-screen instead of scanning a partial region', async () => {
