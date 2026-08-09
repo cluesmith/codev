@@ -63,6 +63,32 @@ For the full walkthrough, see **[Getting Started](https://codevos.ai/getting-sta
 
 See [CLI Reference](codev/resources/commands/overview.md) for details.
 
+## Upgrading
+
+Upgrading is **two steps, not one** — the npm package and your projects' framework files update separately:
+
+```bash
+# 1. Update the CLI (once per machine)
+npm install -g @cluesmith/codev@latest    # or @next for the release-candidate channel
+
+# 2. Update framework files (once per project/workspace)
+cd my-project
+codev update
+```
+
+`npm install -g` updates the binaries (`codev`, `afx`, `porch`, `consult`) and the built-in
+protocol skeleton. `codev update` then refreshes the files checked into each project —
+`CLAUDE.md`/`AGENTS.md`, protocol and resource files, skills — merging your local
+customizations. Skipping step 2 leaves your projects running old prompts against a new CLI,
+which is the most common source of "my agents stopped following the protocol" reports.
+
+**VS Code extension**: "Codev for VS Code" updates through the Marketplace like any
+extension (auto-update by default, or Extensions panel → Codev → Update). Keep it current
+with the CLI — Tower and the extension are versioned together.
+
+If Tower is running during an upgrade, restart it afterwards so it picks up the new code:
+`afx tower stop && afx tower start`.
+
 ## How It Works
 
 1. **Write a spec** — Describe what you want. The architect helps refine it.
