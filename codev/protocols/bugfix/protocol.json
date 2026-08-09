@@ -50,13 +50,11 @@
         },
         "build": {
           "command": "npm run build",
-          "cwd": "packages/codev",
           "on_fail": "retry",
           "max_retries": 2
         },
         "tests": {
           "command": "npm test",
-          "cwd": "packages/codev",
           "on_fail": "retry",
           "max_retries": 2
         }

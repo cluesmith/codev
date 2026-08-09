@@ -9,7 +9,7 @@
 import http from 'node:http';
 import type net from 'node:net';
 import { WebSocketServer, WebSocket } from 'ws';
-import { WS_CLOSE_SESSION_UNKNOWN } from '@cluesmith/codev-core/reconnect-policy';
+import { WS_CLOSE_SESSION_UNKNOWN } from '../lib/reconnect-backoff.js';
 import { encodeData, encodeControl, decodeFrame } from '../../terminal/ws-protocol.js';
 import type { PtySession } from '../../terminal/pty-session.js';
 import { getTerminalManager, isStartupReconcileSettled, whenStartupReconcileSettled } from './tower-terminals.js';
@@ -89,16 +89,10 @@ export function handleTerminalWebSocket(ws: WebSocket, session: PtySession, req:
       const frame = decodeFrame(Buffer.from(rawData));
 
       if (frame.type === 'data') {
-        // Record user input for typing awareness (Spec 403)
-        session.recordUserInput();
-        const data = frame.data.toString('utf-8');
-        // Track composing state: Enter/Return means submission (Bugfix #450)
-        if (data.includes('\r') || data.includes('\n')) {
-          session.stopComposing();
-        } else {
-          session.startComposing();
-        }
-        session.write(data);
+        // Spec 403 typing-awareness + Bugfix #450 composing/submit detection are
+        // consolidated in PtySession.handleUserInput so every live input path stays
+        // consistent (Spec 1313 Phase 5 — its 'submit' fast trigger fires from there).
+        session.handleUserInput(frame.data.toString('utf-8'));
       } else if (frame.type === 'control') {
         // Handle control messages
         const msg = frame.message;
@@ -117,14 +111,7 @@ export function handleTerminalWebSocket(ws: WebSocket, session: PtySession, req:
     } catch {
       // If decode fails, try treating as raw UTF-8 input (for simpler clients)
       try {
-        session.recordUserInput();
-        const rawStr = rawData.toString('utf-8');
-        if (rawStr.includes('\r') || rawStr.includes('\n')) {
-          session.stopComposing();
-        } else {
-          session.startComposing();
-        }
-        session.write(rawStr);
+        session.handleUserInput(rawData.toString('utf-8'));
       } catch {
         // Ignore malformed input
       }

@@ -11,8 +11,8 @@ import { fileURLToPath } from 'node:url';
 import chalk from 'chalk';
 import { query as claudeQuery } from '@anthropic-ai/claude-agent-sdk';
 import { executeForgeCommandSync, loadForgeConfig, validateForgeConfig, resolveAllConcepts, type ConceptResolution } from '../lib/forge.js';
-import { detectHarnessFromCommand } from '../agent-farm/utils/harness.js';
-import { getKimiHome, kimiStoreLayoutLooksDrifted } from '../agent-farm/utils/kimi-session-discovery.js';
+import { detectHarnessFromCommand, getRetirement } from '../agent-farm/utils/harness.js';
+import { getKimiHome, inspectKimiStoreLayout, inspectKimiTrustLayout } from '../agent-farm/utils/kimi-session-discovery.js';
 import { join } from 'node:path';
 import { auditPrGates, formatPrGateWarning } from '../lib/pr-gate-audit.js';
 import { auditStateFileIgnore } from '../lib/gitignore.js';
@@ -265,9 +265,17 @@ const AI_DEPENDENCIES: Dependency[] = [
       linux: 'npm install -g opencode-ai',
     },
   },
-  // Kimi Code CLI (Issue #1201 — builder-only harness). The 0.27.0 floor pins
-  // the version the integration's UNDOCUMENTED surfaces (session store layout,
-  // stream-json session.resume_hint) were observed against.
+  // Kimi Code CLI (Issue #1201 — builder-only harness).
+  //
+  // The 0.33.0 floor is evidence-based, not conservative-by-default. The hard
+  // functional break is `--agent-file` (added 0.31.0): below it the builder role
+  // does not inject at all and the builder runs silently roleless. 0.31.0–0.32.x
+  // would nominally work, but every live measurement this integration rests on —
+  // the session-store shape, the folder-trust dialog and its record scheme, and
+  // the render-gate composer profile — was taken on the agent-core-v2 engine that
+  // 0.33.0 made the default. Claiming support for versions we never measured is
+  // exactly the kind of unverified claim that turns into a field bug, so the floor
+  // sits at the oldest version the evidence actually covers.
   {
     name: 'Kimi',
     command: 'kimi',
@@ -276,7 +284,7 @@ const AI_DEPENDENCIES: Dependency[] = [
       const match = output.match(/(\d+\.\d+\.\d+)/);
       return match ? match[1] : null;
     },
-    minVersion: '0.27.0',
+    minVersion: '0.33.0',
     required: false,
     installHint: {
       macos: 'see https://www.kimi.com/code (Kimi Code CLI)',
@@ -474,16 +482,22 @@ function verifyAiModel(modelName: string): CheckResult {
  * (`kimi doctor` validates config only; `kimi login` is a device-code flow,
  * not a check), and we never make a billed `-p` call from doctor — so the
  * auth story is a TRUTHFUL HEURISTIC: report whether credential artifacts
- * exist under the Kimi home (undocumented layout, observed on 0.27.0) and
+ * exist under the Kimi home (undocumented layout, observed on 0.34.0) and
  * point at `kimi login` otherwise.
  *
- * Also runs two cheap supplementary probes:
+ * Also runs three cheap supplementary probes:
  *  - `kimi doctor` (documented: exit 0 = config valid/skipped, 1 = invalid) —
  *    reported as a config check, explicitly not an auth check.
- *  - Session-store layout smoke probe: the builder integration reads the
- *    UNDOCUMENTED store (resume + BEGIN-delivery verification); if a store
- *    exists but no session parses, the layout likely drifted with a Kimi
- *    update — warn loudly rather than fail silently at spawn time.
+ *  - Session-store layout: the builder integration reads the UNDOCUMENTED store
+ *    to decide whether a crash restart may take `kimi -c`. Drift there degrades
+ *    resume to fresh spawns.
+ *  - Workspace-trust record naming: the builder spawn pre-writes a trust record
+ *    (also undocumented) so an unattended builder is not stranded on 0.33.0+'s
+ *    "Trust this folder?" dialog. Drift there strands every new builder.
+ *
+ * Both layout probes exist because these surfaces are undocumented and Kimi ships
+ * weekly — the store's working-directory field has ALREADY been renamed once. They
+ * turn a silent degradation into a named warning at `codev doctor` time.
  */
 function verifyKimi(): CheckResult {
   const kimiHome = getKimiHome();
@@ -509,9 +523,14 @@ function verifyKimi(): CheckResult {
     // kimi doctor unavailable/timed out — skip the supplementary config check
   }
 
-  if (kimiStoreLayoutLooksDrifted()) {
-    notes.push('session store layout not recognized — a Kimi update may have changed the (undocumented) layout; builder resume and BEGIN-delivery verification may fail');
-  }
+  // Two undocumented surfaces this integration rides, each with its own probe that
+  // reports WHICH assumption broke rather than "something changed". Both tolerate a
+  // fresh install (nothing recorded yet) as not-drift.
+  const store = inspectKimiStoreLayout();
+  if (store.status === 'drifted') notes.push(`session store: ${store.reason}`);
+
+  const trust = inspectKimiTrustLayout();
+  if (trust.status === 'drifted') notes.push(`workspace trust: ${trust.reason}`);
 
   if (notes.length > 0) {
     return { status: 'warn', version: 'auth artifacts present (heuristic)', note: notes.join('; ') };
@@ -542,7 +561,13 @@ function checkAgy(): CheckResult {
  * Streams output and detects the OAuth URL on the *early* stream so an
  * unauthenticated agy reports "needs login" promptly (it would otherwise print
  * the URL and wait ~30s) — rather than stalling `codev doctor` for the full
- * auth wait. Always resolves (never throws).
+ * auth wait.
+ *
+ * Resolves rather than rejecting for every agy outcome. The one exception is the
+ * test-isolation guard inside `resolveAgyBin` (#1323), which throws
+ * *synchronously* — before the promise exists — when a suite reaches this path
+ * with no pinned `CODEV_AGY_BIN`. That is intentional loudness, but it means a
+ * caller cannot catch it via `.catch()` on the returned promise.
  *
  * Shares the consult lane's auth cache (#1077): a fresh verdict is reported
  * without probing, so `codev doctor` on an unauthenticated agy does not open yet
@@ -881,15 +906,35 @@ export async function doctor(): Promise<number> {
     if (root) {
       const config = loadConfig(root) as Record<string, unknown>;
       const shell = config?.shell as Record<string, unknown> | undefined;
-      // Check explicit architectHarness or auto-detect from architect command
-      const architectHarness = shell?.architectHarness as string | undefined;
-      const architectCmd = Array.isArray(shell?.architect)
-        ? (shell.architect as string[]).join(' ')
-        : (shell?.architect as string ?? '');
-      const resolvedHarness = architectHarness ||
-        (architectCmd ? detectHarnessFromCommand(architectCmd) : undefined);
-      const isOpencode = resolvedHarness === 'opencode';
-      if (isOpencode) {
+      // Diagnose the harness a PERSISTED shell config selects for a role, WITHOUT
+      // CLI/env overrides (doctor reports on the persisted config, not a one-off
+      // `--architect-cmd`/`TOWER_*_CMD` run). Mirrors resolveHarness's precedence
+      // but never throws (doctor reports; it does not launch), and is shared by
+      // both role branches so they can't drift:
+      //   • explicit shell.<role>Harness — a same-named CUSTOM harness is the
+      //     sanctioned escape hatch and wins over retirement (built-in → custom →
+      //     retired), so an explicit `gemini` backed by a `harness.gemini`
+      //     definition is NOT flagged (following doctor's own advice clears it);
+      //   • auto-detected shell.<role> command — retirement applies regardless of
+      //     custom harnesses, because auto-detection resolves the built-in
+      //     namespace only (Issue #1338), so a bare `gemini …` command is flagged.
+      const customHarnesses = config?.harness as Record<string, unknown> | undefined;
+      const resolveShell = (role: 'architect' | 'builder'): { name: string | undefined; retirement: string | undefined } => {
+        const explicit = shell?.[`${role}Harness`] as string | undefined;
+        if (explicit) {
+          const hasCustom = !!customHarnesses && Object.prototype.hasOwnProperty.call(customHarnesses, explicit);
+          return { name: explicit, retirement: hasCustom ? undefined : getRetirement(explicit) };
+        }
+        const raw = shell?.[role];
+        const cmd = Array.isArray(raw) ? (raw as string[]).join(' ') : (raw as string ?? '');
+        const detected = cmd ? detectHarnessFromCommand(cmd) : undefined;
+        return { name: detected, retirement: detected ? getRetirement(detected) : undefined };
+      };
+      const architect = resolveShell('architect');
+      const builder = resolveShell('builder');
+
+      // --- Architect shell ---
+      if (architect.name === 'opencode') {
         console.log('');
         console.log(chalk.yellow('  ⚠') + ' OpenCode is configured as architect shell — this is unsupported.');
         console.log(chalk.yellow('    ') + 'OpenCode uses file-based role injection that requires an ephemeral worktree.');
@@ -900,20 +945,27 @@ export async function doctor(): Promise<number> {
           issue: 'OpenCode configured as architect shell (unsupported)',
           recommendation: 'Set shell.architect to "claude --dangerously-skip-permissions" in .codev/config.json',
         });
-      } else if (resolvedHarness === 'gemini') {
-        // Issue #929: gemini is builder-only; the Gemini CLI is retiring (#778),
-        // so it is no longer supported as an architect.
+      } else if (architect.retirement) {
+        // Issue #1338: the built-in gemini harness is retired for BOTH roles
+        // (Google ended consumer Gemini CLI access 2026-06-18). This branch
+        // previously claimed gemini was "supported for builders, not architects";
+        // that premise is now wrong — it is retired for builders too.
         console.log('');
-        console.log(chalk.yellow('  ⚠') + ' Gemini is configured as architect shell — this is unsupported.');
-        console.log(chalk.yellow('    ') + 'The Gemini CLI is retiring (#778); gemini is supported for builders, not architects.');
+        console.log(chalk.yellow('  ⚠') + ` ${architect.name} is configured as the architect shell — this harness is retired.`);
+        console.log(chalk.yellow('    ') + architect.retirement);
         console.log(chalk.yellow('    ') + 'Use codex or claude for the architect (e.g., "codex" or "claude --dangerously-skip-permissions").');
         warnings++;
         warningDetails.push({
           name: 'Shell config',
-          issue: 'Gemini configured as architect shell (builder-only, not architect)',
-          recommendation: 'Set shell.architect to "codex" or "claude --dangerously-skip-permissions" in .codev/config.json',
+          issue: `${architect.name} configured as architect shell (harness retired)`,
+          // Cover both selectors: an explicit shell.architectHarness beats the
+          // shell.architect command, so switching only the command wouldn't help.
+          // The custom-harness name is the configured (retired) harness, not a
+          // hard-coded "gemini", so the advice stays correct if another harness is
+          // ever retired (RETIRED_HARNESSES is extensible).
+          recommendation: `Set shell.architect / shell.architectHarness to "codex" or "claude --dangerously-skip-permissions" in .codev/config.json, or define a custom "${architect.name}" harness and select it explicitly via shell.architectHarness (a bare shell.architect command stays retired)`,
         });
-      } else if (resolvedHarness === 'kimi') {
+      } else if (architect.name === 'kimi') {
         // Issue #1201: kimi is builder-only. It has no documented
         // system-prompt flag; builder role injection uses a seed-session
         // bootstrap owned by the builder launch script. Architect support is
@@ -928,12 +980,33 @@ export async function doctor(): Promise<number> {
           issue: 'Kimi configured as architect shell (builder-only, not architect)',
           recommendation: 'Set shell.architect to "codex" or "claude --dangerously-skip-permissions" in .codev/config.json',
         });
-      } else if (resolvedHarness === 'codex') {
+      } else if (architect.name === 'codex') {
         // Issue #929: codex is a supported architect (config-driven).
         console.log('');
         console.log(chalk.green('  ✓') + ' codex is configured as architect shell — supported.');
         console.log(chalk.gray('    ') + 'Conversation resume is Claude-main-only; codex architects relaunch fresh with role injection.');
         console.log(chalk.gray('    ') + 'Select the architect harness via .codev/config.json (shell.architect / shell.architectHarness).');
+      }
+
+      // --- Builder shell (#1338) ---
+      // A retired builder harness fails closed at spawn (Phase 2); doctor flags
+      // the persisted config proactively so users learn before a spawn is rejected.
+      if (builder.retirement) {
+        console.log('');
+        console.log(chalk.yellow('  ⚠') + ` ${builder.name} is configured as the builder shell — this harness is retired.`);
+        console.log(chalk.yellow('    ') + builder.retirement);
+        console.log(chalk.yellow('    ') + 'Use claude, codex, or opencode for builders (set shell.builder / shell.builderHarness in .codev/config.json).');
+        warnings++;
+        warningDetails.push({
+          name: 'Shell config',
+          issue: `${builder.name} configured as builder shell (harness retired)`,
+          // Cover both selectors: an explicit shell.builderHarness beats the
+          // shell.builder command, so switching only the command wouldn't help.
+          // The custom-harness name is the configured (retired) harness, not a
+          // hard-coded "gemini", so the advice stays correct if another harness is
+          // ever retired (RETIRED_HARNESSES is extensible).
+          recommendation: `Set shell.builder / shell.builderHarness to a supported harness (claude, codex, or opencode) in .codev/config.json, or define a custom "${builder.name}" harness and select it explicitly via shell.builderHarness (a bare shell.builder command stays retired)`,
+        });
       }
     }
   } catch {

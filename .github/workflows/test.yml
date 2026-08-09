@@ -25,6 +25,10 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
+      - name: Build sdk package
+        working-directory: packages/sdk
+        run: pnpm build
+
       - name: Build core package
         working-directory: packages/core
         run: pnpm build
@@ -36,6 +40,10 @@ jobs:
       - name: Build artifact-canvas package (+ build-smoke)
         working-directory: packages/artifact-canvas
         run: pnpm build && pnpm build:smoke
+
+      - name: Run sdk unit tests
+        working-directory: packages/sdk
+        run: pnpm test
 
       - name: Run core unit tests
         working-directory: packages/core
@@ -101,6 +109,10 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
+      - name: Build sdk package
+        working-directory: packages/sdk
+        run: pnpm build
+
       - name: Build core package
         working-directory: packages/core
         run: pnpm build
@@ -131,6 +143,10 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install
+
+      - name: Build sdk package
+        working-directory: packages/sdk
+        run: pnpm build
 
       - name: Build core package
         working-directory: packages/core
@@ -163,6 +179,10 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
+      - name: Build sdk package
+        working-directory: packages/sdk
+        run: pnpm build
+
       - name: Build core package
         working-directory: packages/core
         run: pnpm build
@@ -175,11 +195,15 @@ jobs:
         working-directory: packages/core
         run: pnpm pack
 
+      - name: Pack sdk tarball
+        working-directory: packages/sdk
+        run: pnpm pack
+
       - name: Pack tarball
         working-directory: packages/codev
         run: pnpm pack
 
       - name: Verify install from tarball
         working-directory: packages/codev
-        run: node scripts/verify-install.mjs cluesmith-codev-*.tgz ../core/cluesmith-codev-core-*.tgz
+        run: node scripts/verify-install.mjs cluesmith-codev-*.tgz ../core/cluesmith-codev-core-*.tgz ../sdk/cluesmith-codev-sdk-*.tgz
 

@@ -1,0 +1,123 @@
+id: '1338'
+title: retire-gemini-cli-as-a-builder
+protocol: spir
+phase: review
+plan_phases:
+  - id: phase_1
+    title: Retire gemini in the shared resolver (core + resolver/config tests)
+    status: complete
+  - id: phase_2
+    title: Fail closed at spawn/launch boundaries (no orphaned state, no Tower crash)
+    status: complete
+  - id: phase_3
+    title: 'codev doctor: retirement guidance + builder-side flagging'
+    status: complete
+  - id: phase_4
+    title: 'User-facing docs: README + CHANGELOG'
+    status: complete
+current_plan_phase: null
+gates:
+  spec-approval:
+    status: approved
+    requested_at: '2026-08-03T19:34:19.277Z'
+    approved_at: '2026-08-03T19:35:31.931Z'
+  plan-approval:
+    status: approved
+    requested_at: '2026-08-03T19:49:19.697Z'
+    approved_at: '2026-08-03T19:52:33.839Z'
+  pr:
+    status: pending
+    requested_at: '2026-08-04T02:52:39.784Z'
+  verify-approval:
+    status: pending
+iteration: 1
+build_complete: true
+history:
+  - iteration: 1
+    plan_phase: phase_2
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: APPROVE
+        file: >-
+          /home/user/code/codev_root/codev/.builders/spir-1338/codev/projects/1338-retire-gemini-cli-as-a-builder/1338-phase_2-iter1-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /home/user/code/codev_root/codev/.builders/spir-1338/codev/projects/1338-retire-gemini-cli-as-a-builder/1338-phase_2-iter1-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /home/user/code/codev_root/codev/.builders/spir-1338/codev/projects/1338-retire-gemini-cli-as-a-builder/1338-phase_2-iter1-claude.txt
+  - iteration: 2
+    plan_phase: phase_2
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: APPROVE
+        file: >-
+          /home/user/code/codev_root/codev/.builders/spir-1338/codev/projects/1338-retire-gemini-cli-as-a-builder/1338-phase_2-iter2-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /home/user/code/codev_root/codev/.builders/spir-1338/codev/projects/1338-retire-gemini-cli-as-a-builder/1338-phase_2-iter2-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /home/user/code/codev_root/codev/.builders/spir-1338/codev/projects/1338-retire-gemini-cli-as-a-builder/1338-phase_2-iter2-claude.txt
+  - iteration: 1
+    plan_phase: phase_3
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: APPROVE
+        file: >-
+          /home/user/code/codev_root/codev/.builders/spir-1338/codev/projects/1338-retire-gemini-cli-as-a-builder/1338-phase_3-iter1-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /home/user/code/codev_root/codev/.builders/spir-1338/codev/projects/1338-retire-gemini-cli-as-a-builder/1338-phase_3-iter1-codex.txt
+      - model: claude
+        verdict: REQUEST_CHANGES
+        file: >-
+          /home/user/code/codev_root/codev/.builders/spir-1338/codev/projects/1338-retire-gemini-cli-as-a-builder/1338-phase_3-iter1-claude.txt
+  - iteration: 1
+    plan_phase: phase_4
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: APPROVE
+        file: >-
+          /home/user/code/codev_root/codev/.builders/spir-1338/codev/projects/1338-retire-gemini-cli-as-a-builder/1338-phase_4-iter1-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /home/user/code/codev_root/codev/.builders/spir-1338/codev/projects/1338-retire-gemini-cli-as-a-builder/1338-phase_4-iter1-codex.txt
+      - model: claude
+        verdict: REQUEST_CHANGES
+        file: >-
+          /home/user/code/codev_root/codev/.builders/spir-1338/codev/projects/1338-retire-gemini-cli-as-a-builder/1338-phase_4-iter1-claude.txt
+  - iteration: 2
+    plan_phase: phase_4
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: APPROVE
+        file: >-
+          /home/user/code/codev_root/codev/.builders/spir-1338/codev/projects/1338-retire-gemini-cli-as-a-builder/1338-phase_4-iter2-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /home/user/code/codev_root/codev/.builders/spir-1338/codev/projects/1338-retire-gemini-cli-as-a-builder/1338-phase_4-iter2-codex.txt
+      - model: claude
+        verdict: REQUEST_CHANGES
+        file: >-
+          /home/user/code/codev_root/codev/.builders/spir-1338/codev/projects/1338-retire-gemini-cli-as-a-builder/1338-phase_4-iter2-claude.txt
+started_at: '2026-08-03T19:12:09.462Z'
+updated_at: '2026-08-04T02:52:39.784Z'
+pr_history:
+  - phase: review
+    pr_number: 1342
+    branch: builder/spir-1338
+    created_at: '2026-08-04T01:14:21.523Z'
+pr_ready_for_human: true

@@ -8,8 +8,10 @@ import {
   ensureDirectories,
   getArchitectHarness,
   getBuilderHarness,
+  assertBuilderHarnessNotRetired,
   setCliOverrides,
 } from '../utils/config.js';
+import { logger } from '../utils/logger.js';
 import { existsSync } from 'node:fs';
 import { rm, mkdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -17,9 +19,24 @@ import { resolve } from 'node:path';
 // Mock loadConfig to avoid depending on the real workspace's config files.
 // The agent-farm config.ts imports from lib/config.ts which would detect
 // af-config.json in the real workspace and error.
+//
+// The shell block is a mutable, hoisted object so the retirement tests (#1338)
+// can drive builder/architect to a gemini command (string OR array form) or an
+// explicit gemini *Harness. Every retirement test resets it in afterEach, so
+// the default (claude everywhere) is what all other tests observe.
+const configMock = vi.hoisted(() => ({
+  shell: { architect: 'claude', builder: 'claude', shell: 'bash' } as {
+    architect: string | string[];
+    builder: string | string[];
+    shell: string;
+    architectHarness?: string;
+    builderHarness?: string;
+  },
+}));
+
 vi.mock('../../lib/config.js', () => ({
   loadConfig: () => ({
-    shell: { architect: 'claude', builder: 'claude', shell: 'bash' },
+    shell: configMock.shell,
     porch: { consultation: { models: ['gemini', 'codex', 'claude'] } },
     framework: { source: 'local' },
   }),
@@ -135,8 +152,8 @@ describe('getArchitectHarness / getBuilderHarness override-awareness (#929)', ()
     expect(getArchitectHarness().buildResume).toBeUndefined();
   });
 
-  it('--builder-cmd gemini → gemini builder harness (no claude resume)', () => {
-    setCliOverrides({ builder: 'gemini' });
+  it('--builder-cmd codex → codex builder harness (no claude resume)', () => {
+    setCliOverrides({ builder: 'codex' });
     expect(getBuilderHarness().buildResume).toBeUndefined();
   });
 
@@ -150,5 +167,111 @@ describe('getArchitectHarness / getBuilderHarness override-awareness (#929)', ()
     const harness = getBuilderHarness();
     expect(harness.buildBuilderLaunchScript).toBeDefined();
     expect(() => harness.buildRoleInjection('role', '/tmp/role.md')).toThrow(/builder shell/);
+  });
+});
+
+// Issue #1338 — the built-in gemini harness is retired. Every config path that
+// resolves to gemini (an explicit *Harness, a --*-cmd override, or an
+// auto-detected gemini command in string OR array form) must fail closed with
+// the retirement, never silently resolve the Claude harness (#929-class
+// mismatch) or undefined.
+describe('gemini harness retirement (#1338)', () => {
+  const savedArchitectCmd = process.env.TOWER_ARCHITECT_CMD;
+
+  afterEach(() => {
+    setCliOverrides({});
+    configMock.shell.architect = 'claude';
+    configMock.shell.builder = 'claude';
+    delete configMock.shell.architectHarness;
+    delete configMock.shell.builderHarness;
+    if (savedArchitectCmd === undefined) {
+      delete process.env.TOWER_ARCHITECT_CMD;
+    } else {
+      process.env.TOWER_ARCHITECT_CMD = savedArchitectCmd;
+    }
+  });
+
+  it('--builder-cmd gemini fails closed with the retirement', () => {
+    setCliOverrides({ builder: 'gemini' });
+    expect(() => getBuilderHarness()).toThrow(/retired/i);
+  });
+
+  it('--architect-cmd gemini fails closed with the retirement', () => {
+    delete process.env.TOWER_ARCHITECT_CMD;
+    setCliOverrides({ architect: 'gemini' });
+    expect(() => getArchitectHarness()).toThrow(/retired/i);
+  });
+
+  it('explicit builderHarness "gemini" fails closed with the retirement', () => {
+    configMock.shell.builderHarness = 'gemini';
+    expect(() => getBuilderHarness()).toThrow(/retired/i);
+  });
+
+  it('array-form builder ["gemini", "--yolo"] fails closed with the retirement', () => {
+    configMock.shell.builder = ['gemini', '--yolo'];
+    expect(() => getBuilderHarness()).toThrow(/retired/i);
+  });
+
+  it('the retirement message names the cause and a supported alternative', () => {
+    setCliOverrides({ builder: 'gemini' });
+    expect(() => getBuilderHarness()).toThrow(/2026-06-18/);
+    expect(() => getBuilderHarness()).toThrow(/claude/);
+  });
+});
+
+// Issue #1338 — the spawn preflight. `assertBuilderHarnessNotRetired` is called
+// in the spawn() dispatcher BEFORE any worktree/porch/db state is created, so a
+// retired builder harness aborts with no orphaned state. It must abort on the
+// retirement for every config form (explicit *Harness, --builder-cmd override,
+// auto-detected command in string OR array form), stay a no-op for supported
+// harnesses, and — crucially — defer (NOT abort) on any non-retirement error so
+// an unknown harness still surfaces at its normal resolution call site.
+describe('assertBuilderHarnessNotRetired spawn preflight (#1338)', () => {
+  afterEach(() => {
+    setCliOverrides({});
+    configMock.shell.architect = 'claude';
+    configMock.shell.builder = 'claude';
+    delete configMock.shell.architectHarness;
+    delete configMock.shell.builderHarness;
+  });
+
+  it('aborts on --builder-cmd gemini with the retirement', () => {
+    setCliOverrides({ builder: 'gemini' });
+    expect(() => assertBuilderHarnessNotRetired()).toThrow(/retired/i);
+  });
+
+  it('aborts on explicit builderHarness "gemini" with the retirement', () => {
+    configMock.shell.builderHarness = 'gemini';
+    expect(() => assertBuilderHarnessNotRetired()).toThrow(/retired/i);
+  });
+
+  it('aborts on array-form builder ["gemini", "--yolo"] with the retirement', () => {
+    configMock.shell.builder = ['gemini', '--yolo'];
+    expect(() => assertBuilderHarnessNotRetired()).toThrow(/retired/i);
+  });
+
+  it('is a no-op for a supported builder harness (claude default)', () => {
+    expect(() => assertBuilderHarnessNotRetired()).not.toThrow();
+  });
+
+  it('is a no-op for a supported builder harness (codex)', () => {
+    setCliOverrides({ builder: 'codex' });
+    expect(() => assertBuilderHarnessNotRetired()).not.toThrow();
+  });
+
+  it('defers (does NOT abort) on an unknown builder harness — surfaces later', () => {
+    // An unknown name throws a generic "Unknown harness" (not the retirement).
+    // The preflight only aborts spawns for retired harnesses; every other
+    // resolution error is left to surface at the real getBuilderHarness call.
+    // The deferred error is routed through `logger.debug` (NOT `console.debug`),
+    // so it stays out of Tower's stdout log stream unless DEBUG is set (#1338
+    // review): Tower imports this module and a bare console.debug always prints.
+    configMock.shell.builderHarness = 'no-such-harness';
+    const debugSpy = vi.spyOn(logger, 'debug').mockImplementation(() => {});
+    expect(() => assertBuilderHarnessNotRetired()).not.toThrow();
+    expect(debugSpy).toHaveBeenCalledWith(
+      expect.stringMatching(/non-retirement, deferred/),
+    );
+    debugSpy.mockRestore();
   });
 });

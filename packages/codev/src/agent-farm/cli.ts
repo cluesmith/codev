@@ -452,9 +452,31 @@ export async function runAgentFarm(args: string[]): Promise<void> {
     .option('--interrupt', 'Send Ctrl+C first')
     .option('--raw', 'Skip structured message formatting')
     .option('--no-enter', 'Do not send Enter after message')
+    .option('--delay <seconds>', 'Deliver after N seconds (Tower-side; dropped if Tower restarts)')
     .action(async (builder, message, options) => {
       const { send } = await import('./commands/send.js');
       try {
+        // Spec 1307: validated here AND server-side. A bad value does not
+        // degrade the send — it silently changes when (or whether) the message
+        // arrives. NaN in particular yields a timer that fires immediately,
+        // turning a delayed send into an immediate one with no error.
+        let delay: number | undefined;
+        if (options.delay !== undefined) {
+          // Bound imported rather than repeated: a second hardcoded ceiling
+          // drifts from the server's, and the two disagreeing means the CLI
+          // accepts a value Tower then rejects.
+          const { validateDelaySeconds } = await import('./servers/delayed-send.js');
+          const parsed = Number(options.delay);
+          const delayError = validateDelaySeconds(parsed);
+          if (delayError) {
+            // Echo what the USER typed, not the parse result. `--delay abc`
+            // becoming "got 'NaN'" tells them about an intermediate value they
+            // never entered and cannot search for.
+            logger.error(`--delay '${options.delay}': ${delayError.replace(/, got .*$/, '')}`);
+            process.exit(1);
+          }
+          delay = parsed;
+        }
         await send({
           builder,
           message,
@@ -463,6 +485,74 @@ export async function runAgentFarm(args: string[]): Promise<void> {
           interrupt: options.interrupt,
           raw: options.raw,
           noEnter: !options.enter,
+          delay,
+        });
+      } catch (error) {
+        logger.error(error instanceof Error ? error.message : String(error));
+        process.exit(1);
+      }
+    });
+
+  // Interrupt command (Spec 1273) — ESC into a builder's PTY
+  program
+    .command('interrupt [builder]')
+    .description('Interrupt a builder mid-turn (sends ESC to end the running turn)')
+    .option('--no-enter', 'Send ESC alone, without the trailing Enter')
+    .action(async (builder, options) => {
+      const { interrupt } = await import('./commands/interrupt.js');
+      try {
+        await interrupt({ builder, noEnter: !options.enter });
+      } catch (error) {
+        logger.error(error instanceof Error ? error.message : String(error));
+        process.exit(1);
+      }
+    });
+
+  // Reset command (Spec 1273) — save-state → /clear → re-orient
+  program
+    .command('reset [builder]')
+    .description('Reset a builder\'s context: save working state, clear, then re-orient')
+    .option('--note <text>', 'Extra context to append to the re-orientation')
+    .option('--file <path>', 'Append file content to the re-orientation (48KB max)')
+    .option('--dry-run', 'Print what would be sent; write nothing to the builder')
+    .option('--interrupt-first', 'Send ESC before the save request (for a builder wedged mid-turn)')
+    .option('--mode <mode>', 'Override the builder mode (strict|soft) if it cannot be detected')
+    .option('--timeout <seconds>', 'How long to wait for the save-state receipt')
+    .option('--min-bytes <n>', 'Minimum state-file size to accept as substantive')
+    .option('--quiet-window <ms>', 'Terminal silence that counts as turn-ended')
+    .action(async (builder, options) => {
+      const { reset } = await import('./commands/reset.js');
+      try {
+        if (options.mode && options.mode !== 'strict' && options.mode !== 'soft') {
+          logger.error(`--mode must be 'strict' or 'soft', got '${options.mode}'`);
+          process.exit(1);
+        }
+        // Every one of these tunes a SAFETY GATE, so a bad value does not
+        // degrade the run — it disables a protection while still reporting
+        // success. `--quiet-window -1` makes the quiescence check pass
+        // instantly (R4 gone), `--min-bytes -1` accepts any state file however
+        // empty (R2's substance floor gone), and a non-numeric `--timeout`
+        // yields NaN, whose comparisons are all false, so the receipt wait
+        // never expires and the command hangs. Reject at the boundary.
+        const positiveInt = (raw: string | undefined, flag: string): number | undefined => {
+          if (raw === undefined) return undefined;
+          const parsed = Number(raw);
+          if (!Number.isInteger(parsed) || parsed <= 0) {
+            logger.error(`${flag} must be a positive integer, got '${raw}'`);
+            process.exit(1);
+          }
+          return parsed;
+        };
+        await reset({
+          builder,
+          note: options.note,
+          file: options.file,
+          dryRun: options.dryRun,
+          interruptFirst: options.interruptFirst,
+          mode: options.mode,
+          timeout: positiveInt(options.timeout, '--timeout'),
+          minBytes: positiveInt(options.minBytes, '--min-bytes'),
+          quietWindow: positiveInt(options.quietWindow, '--quiet-window'),
         });
       } catch (error) {
         logger.error(error instanceof Error ? error.message : String(error));
@@ -669,6 +759,57 @@ export async function runAgentFarm(args: string[]): Promise<void> {
       try {
         await cronDisable(name, {
           workspace: options.workspace,
+          port: options.port ? parseInt(options.port, 10) : undefined,
+        });
+      } catch (error) {
+        logger.error(error instanceof Error ? error.message : String(error));
+        process.exit(1);
+      }
+    });
+
+  // Inbox commands (Spec 1313) — list/dismiss held (undelivered) mailbox messages
+  const inboxCmd = program
+    .command('inbox')
+    .description('List held (undelivered) messages; dismiss by id')
+    .option('-w, --workspace <path>', 'Workspace to list held messages for (default: current workspace)')
+    .option('-p, --port <port>', 'Tower port (default: 4100)')
+    .action(async (options) => {
+      const { inboxList } = await import('./commands/inbox.js');
+      try {
+        await inboxList({
+          workspace: options.workspace,
+          port: options.port ? parseInt(options.port, 10) : undefined,
+        });
+      } catch (error) {
+        logger.error(error instanceof Error ? error.message : String(error));
+        process.exit(1);
+      }
+    });
+
+  inboxCmd
+    .command('show <id>')
+    .description('Show a single message by id, including its body (metadata + body)')
+    .option('-p, --port <port>', 'Tower port (default: 4100)')
+    .action(async (id, options) => {
+      const { inboxShow } = await import('./commands/inbox.js');
+      try {
+        await inboxShow(id, {
+          port: options.port ? parseInt(options.port, 10) : undefined,
+        });
+      } catch (error) {
+        logger.error(error instanceof Error ? error.message : String(error));
+        process.exit(1);
+      }
+    });
+
+  inboxCmd
+    .command('dismiss <id>')
+    .description('Dismiss a held message by id — marks it dismissed, never delivers it')
+    .option('-p, --port <port>', 'Tower port (default: 4100)')
+    .action(async (id, options) => {
+      const { inboxDismiss } = await import('./commands/inbox.js');
+      try {
+        await inboxDismiss(id, {
           port: options.port ? parseInt(options.port, 10) : undefined,
         });
       } catch (error) {

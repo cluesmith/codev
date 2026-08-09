@@ -16,170 +16,69 @@ map to open the full arch.md / lessons-learned.md when relevant.
 
 <!-- END CODEV HOT CONTEXT -->
 
-> **Always-on governance docs (Spec 987 — hot/cold tiers).** The block above is **auto-generated** from the HOT tier (`codev/resources/arch-critical.md` and `lessons-critical.md`) and refreshed by `codev init` / `codev update` — edit those source files, not the block. Each hot file is tiny, hard-capped, and injected into *every* porch phase prompt as well as here, so the most decision-relevant facts are always in context. Their full COLD counterparts (`codev/resources/arch.md` and `lessons-learned.md`) are the on-demand reference archives; the "consult when…" maps in the hot files point into them. New facts/lessons are **routed** by tier at review time and policed (cap + map accuracy) during MAINTAIN.
+> The block above is **auto-generated** from the hot tier by `codev init` / `codev update` —
+> edit those source files, not the block. Their COLD counterparts (`codev/resources/arch.md`,
+> `lessons-learned.md`) are on-demand archives; the "consult when…" maps point into them.
+> New facts are **routed** by tier at review time and policed during MAINTAIN.
 
-> **Note**: This file is specific to Claude Code. An identical [AGENTS.md](AGENTS.md) file is also maintained following the [AGENTS.md standard](https://agents.md/) for cross-tool compatibility with Cursor, GitHub Copilot, and other AI coding assistants. Both files contain the same content and should be kept synchronized.
+> **[AGENTS.md](AGENTS.md) is a byte-identical twin of this file** for tools that read the
+> [AGENTS.md standard](https://agents.md/). Any edit here must be applied there.
 
-## Project Context
+## This repository is Codev, built with Codev
 
-**THIS IS THE CODEV SOURCE REPOSITORY - WE ARE SELF-HOSTED**
+Two trees, and the distinction governs almost every change:
 
-This project IS Codev itself, and we use our own methodology for development. All new features and improvements to Codev should follow the SPIR protocol defined in `codev/protocols/spir/protocol.md`.
+| Tree | What it is | When you edit it |
+|---|---|---|
+| `codev/` | **Our** instance — our specs, plans, reviews, resources | Implementing a feature *for* Codev |
+| `codev-skeleton/` | The **template shipped to adopters** — protocols, roles, templates, agents | Changing what other projects receive |
 
-### Important: Understanding This Repository's Structure
+A framework change usually belongs in **both**. `codev-skeleton/` carries no specs or
+plans — those are created by the projects that install it.
 
-This repository has a dual nature that's important to understand:
+### How framework files resolve
 
-1. **`codev/`** - This is OUR instance of Codev
-   - This is where WE (the Codev project) keep our specs, plans, reviews, and resources
-   - When working on Codev features, you work in this directory
-   - Example: `codev/specs/1-test-infrastructure.md` is a feature spec for Codev itself
+Protocols, prompts, roles and templates resolve at **runtime** through four tiers, highest
+first: `.codev/<path>` → `codev/<path>` → runtime cache → **installed package skeleton**.
 
-2. **`codev-skeleton/`** - This is the template for OTHER projects
-   - This is what gets copied to other projects when they install Codev
-   - Contains the protocol definitions, templates, and agents
-   - Does NOT contain specs/plans/reviews (those are created by users)
-   - Think of it as "what Codev provides" vs "how Codev uses itself"
+The absence of `codev/protocols/<name>/` is normal, not a missing reference — it means the
+protocol resolves from the installed package. Only protocols you customize need a local copy.
+When `codev update` merges a template that references a protocol you don't have locally, keep
+the reference.
 
-**When to modify each**:
-- **Modify `codev/`**: When implementing features for Codev (specs, plans, reviews, our architecture docs)
-- **Modify `codev-skeleton/`**: When updating protocols, templates, or agents that other projects will use
+**Deliver framework content; don't instruct an agent to fetch it by path.** A builder-facing
+prompt or role doc must not say "read `codev/protocols/…`" — that bypasses the resolver and
+fails in fresh installs. `protocol.md` is inlined into the spawn prompt; phase prompts and
+their templates arrive via porch. Naming a `codev/...` path in prose for orientation is fine;
+the rule is about *fetching*. (`codev/resources/arch.md` and `lessons-learned.md` are
+user-evolved files, not framework files — referencing those by path is correct.)
 
-### Release Process
+Verify an unfamiliar protocol against the CLI rather than assuming: `afx spawn --protocol
+<name> --help` succeeds if it is registered, including via the skeleton fallback.
 
-To release a new version, tell the AI: `Let's release v1.6.0`. The AI follows the **RELEASE protocol** (`codev/protocols/release/protocol.md`). Release candidate workflow and local testing procedures are documented there. For local testing shortcuts, see `codev/resources/testing-guide.md`.
+## Irreversible acts — the rules that exist because something was destroyed
 
-### Local Build Testing
+These are not style preferences. Each one is here because an agent destroyed work or bypassed
+a human decision.
 
-To test changes locally before publishing to npm:
+- Never `git add -A` / `--all` / `.` — stage each file explicitly by path.
+- Never destroy builder worktrees (`git worktree remove`, `git branch -D` on builder branches, `afx cleanup` + respawn). Use `afx spawn <id> --resume`; if it fails, ask the human — what is expendable is never your call.
+- Never run `git reset --hard`, `git checkout -- .`, `git clean -fd`, or `git stash` without explicit human permission — they destroy uncommitted work.
+- Never treat a porch gate as approved without an explicit human decision — a gate message is a notification to the human, not authorization.
+- Never hand-edit `status.yaml` — only porch commands modify project state.
+- Run `afx` commands only from the main workspace root, never from inside a builder worktree — spawning from a worktree nests builders and breaks the workspace.
+- Never kill a shellper process without verifying it is an orphan (match each PID to its workspace via Tower) — an 'extra' shellper may be a live architect session.
+- Never restart or stop Tower without explicit human permission — it kills every running builder session.
 
-```bash
-# From the repository root:
+## Gates
 
-# 1. Build (Tower stays up during this)
-pnpm build
+Two human approval gates plus the PR gate. Only a human transitions
+`conceived → specified` and `committed → integrated`. Stop and wait at each; do not infer
+approval from silence.
 
-# 2. Pack, install globally, and restart Tower (one command)
-pnpm -w run local-install
-```
+**Approved specs and plans need frontmatter and must be committed to `main` before spawning.**
+Porch runs the full protocol from `specify`, but treats an artifact carrying this as done:
 
-- `pnpm build` builds core first, then codev (including dashboard)
-- `pnpm -w run local-install` runs `scripts/local-install.sh`, which:
-  - Packs both `@cluesmith/codev-core` and `@cluesmith/codev` tarballs into their package directories
-  - Globally installs both in one `npm install -g` (separate installs fail because `@cluesmith/codev-core` isn't on the public npm registry)
-  - Restores the executable bit on `scripts/forge/**/*.sh` (pnpm pack strips it, causing "GitHub CLI unavailable" errors otherwise)
-  - Restarts Tower so it picks up the new code
-- Install runs while Tower is up — only the final restart causes downtime
-- Do NOT stop Tower yourself before running the script — the script handles restart at the end
-- Do NOT use `npm link` or `pnpm link` — it breaks global installs
-
-### Testing
-
-When making changes to UI code (tower, dashboard, terminal), you MUST test using Playwright before claiming the fix works. See `codev/resources/testing-guide.md` for Playwright patterns and Tower regression prevention.
-
-## Quick Start
-
-> **New to Codev?** See the [Cheatsheet](codev/resources/cheatsheet.md) for philosophies, concepts, and tool reference.
-
-You are working in the Codev project itself, with multiple development protocols available:
-
-**Available Protocols**:
-- **SPIR**: Multi-phase development with consultation - `codev/protocols/spir/protocol.md`
-- **ASPIR**: Autonomous SPIR (no human gates on spec/plan) - `codev/protocols/aspir/protocol.md`
-- **AIR**: Autonomous Implement & Review for small features - `codev/protocols/air/protocol.md`
-- **BUGFIX**: Bug fixes from GitHub issues - `codev/protocols/bugfix/protocol.md`
-- **PIR**: Plan / Implement / Review — issue-driven with two pre-PR human gates (plan-approval, dev-approval) plus a post-PR `pr` gate. Lighter than SPIR; stronger than BUGFIX/AIR. Useful when a change needs design review before coding OR pre-PR testing of running code (e.g., mobile / UI / cross-platform). See `codev/protocols/pir/protocol.md`.
-- **EXPERIMENT**: Disciplined experimentation - `codev/protocols/experiment/protocol.md`
-- **MAINTAIN**: Codebase maintenance (code hygiene + documentation sync) - `codev/protocols/maintain/protocol.md`
-- **RESEARCH**: Multi-agent research with 3-way investigation, synthesis, and critique - `codev/protocols/research/protocol.md`
-
-### File Resolution (How Codev Finds Protocols and Templates)
-
-Codev resolves protocol files, prompts, agent definitions, and roles through a four-tier lookup (highest priority first):
-
-1. `.codev/<path>` — user override (project-local customization)
-2. `codev/<path>` — project-local copy (customized and checked in)
-3. Runtime cache
-4. **Installed package skeleton** — ships with `@cluesmith/codev` (the default for every standard protocol)
-
-**The absence of `codev/protocols/<name>/` on disk is not a missing reference** — it's the normal case for any protocol you haven't customized. The protocol resolves from the installed package's skeleton at runtime. Only protocols you want to customize need to live in your repo's `codev/protocols/`.
-
-**Implication for `codev update` and CLAUDE.md / AGENTS.md merges:** when an updated template references a protocol (e.g., PIR), do NOT drop the reference because `codev/protocols/<name>/` is absent locally. The protocol resolves via the package skeleton, and dropping the reference removes the protocol from the user's available-protocol list while it's still callable from the CLI.
-
-### Framework files in prompts: deliver them, don't make the builder read them by path
-
-Framework files (protocol/role docs, the shipped `codev/resources/` reference docs) default to the package skeleton (see File Resolution above) and aren't guaranteed on disk in a fresh project. So when authoring any builder-facing prompt, role doc, or instruction, don't tell the builder to read a framework file by literal `codev/...` path — that bypasses the resolver and fails in fresh installs. Deliver the content instead (`protocol.md` is inlined into the spawn prompt; per-phase prompts and their templates arrive via porch). Mentioning a `codev/...` path in prose for orientation is fine — the rule is about *fetching*, not *referencing*. (`codev/resources/arch.md` and `codev/resources/lessons-learned.md` are user-evolved files, not framework files, so referencing those by path is correct.)
-
-### Protocol Verification (When You Don't Recognize a Protocol Name)
-
-If the user mentions a protocol name you don't immediately recognize, verify against the CLI before responding:
-
-```bash
-afx spawn --protocol <name> --help
-```
-
-This succeeds if the protocol is registered (including via the skeleton fallback in tier 4 of the resolution chain) and errors helpfully otherwise. The CLI is the source of truth — defer to it when in doubt.
-
-Key locations:
-- Protocol details: `codev/protocols/` (Choose appropriate protocol)
-- **Project tracking**: GitHub Issues (source of truth for all projects)
-- Specifications go in: `codev/specs/`
-- Plans go in: `codev/plans/`
-- Reviews go in: `codev/reviews/`
-
-### Project Tracking
-
-**GitHub Issues are the source of truth for project tracking.**
-
-- Issues with the `spec` label have approved specifications
-- Issues with the `plan` label have approved plans
-- Active builders are tracked via `codev/projects/<id>/status.yaml` (managed by porch)
-- The workspace overview Work view shows builders, PRs, and backlog derived from GitHub + filesystem state
-
-**When to use which:**
-- **Starting work**: Check GitHub Issues for priorities and backlog
-- **During implementation**: Use `porch status <id>` for detailed phase status
-- **After completion**: Close the GitHub Issue when PR is merged
-
-### Area Labels — the organizing axis for issues
-
-`area/*` is the **primary axis** for organizing GitHub Issues in this repo. When users ask to group, edit, audit, or bulk-move issues, treat `area/*` as the grouping dimension first — not `type:*` (we don't use them), not milestones, not assignees.
-
-**Labels**:
-
-| Label | Scope |
-|---|---|
-| `area/docs` | Documentation — this repo, CLAUDE/AGENTS, role files, `codev/resources/` |
-| `area/vscode` | VSCode extension — sidebar views, panel-area views, commands, keybindings |
-| `area/dashboard` | Tower web dashboard — the `@cluesmith/codev-web` React/Vite package, served by Tower and opened in a browser (distinct from any VSCode UI) |
-| `area/consult` | `consult` CLI and consultation tooling |
-| `area/tower` | Tower server + `afx` / agent-farm CLI. **No separate `area/agent-farm`** — afx work goes here. |
-| `area/cross-cutting` | Multi-area work — used **alone**, never alongside another `area/*` |
-| `area/porch` | Porch state machine / protocol orchestration |
-| `area/protocols` | Protocol definitions (`codev/protocols/`, `codev-skeleton/protocols/`) — distinct from `area/porch` (orchestration) |
-| `area/config` | `.codev/config.json` and workspace setup |
-| `area/terminal` | Terminal-specific — PTY, VSCode terminal pane |
-| `area/scaffold` | Install path — `codev init` / `adopt` / `update` / `doctor`, `codev-skeleton/`, the four-tier resolver |
-| `area/release` | Release tooling — version bumps, release protocol artifacts, release scripts |
-| `area/web` | Marketing site / web content — the `marketing/` directory |
-| `area/core` | Shared core library / forge abstraction (`packages/core`, `packages/codev/src/lib`, `packages/types`) |
-
-**Policy:**
-
-- **Exactly one** `area/*` per issue. Multi-area work uses `area/cross-cutting` *alone* — never two `area/*` labels.
-- **No `type:*` labels.** Codev classifies issues by area only.
-- `area/` uses **slash**. Other label families (if ever introduced) would keep colons.
-
-**🚨 CRITICAL: Two human approval gates exist:**
-- **conceived → specified**: AI creates spec, but ONLY the human can approve it
-- **committed → integrated**: AI can merge PRs, but ONLY the human can validate production
-
-AI agents must stop at `conceived` after writing a spec, and stop at `committed` after merging.
-
-**🚨 CRITICAL: Approved specs/plans need YAML frontmatter and must be committed to `main`.**
-When the architect creates and approves a spec or plan before spawning a builder, it must have YAML frontmatter marking it as approved and validated, and be committed to `main`. Porch always runs the full protocol from `specify` — but when it finds an existing artifact with this metadata, it skips that phase as a no-op. If no spec/plan exists, porch drives the builder to create one.
-
-Frontmatter format:
 ```yaml
 ---
 approved: 2026-01-29
@@ -187,552 +86,118 @@ validated: [gemini, codex, claude]
 ---
 ```
 
-## Agent Responsiveness
+## Protocols
 
-**Responsiveness is paramount.** The user should never wait for you. Use `run_in_background: true` for any operation that takes more than ~5 seconds.
+Pick by the nature of the work, not its size. Full definitions in `codev/protocols/<name>/`
+(or the package skeleton).
 
-| Task Type | Expected Duration | Action |
-|-----------|------------------|--------|
-| Running tests | 10-300s | `run_in_background: true` |
-| Consultations (consult) | 60-250s | `run_in_background: true` |
-| E2E test suites | 60-600s | `run_in_background: true` |
-| pnpm install/build | 5-60s | `run_in_background: true` |
-| Quick file reads/edits | <5s | Run normally |
+| Protocol | Use when |
+|---|---|
+| **BUGFIX** | A bug in a GitHub issue; isolated fix; no spec/plan needed |
+| **AIR** | Small feature fully described in an issue; no architectural decisions |
+| **PIR** | The approach needs review before coding, **or** the change must be tested running (mobile, UI, hardware, OAuth) before a PR exists |
+| **SPIR** | New feature from scratch, new protocol, architecture change |
+| **ASPIR** | SPIR without the spec/plan human gates — trusted, low-risk work |
+| **EXPERIMENT** | Proof of concept, model/library evaluation, research spike |
+| **MAINTAIN** | Dead code, dependency cleanup, doc sync (arch/lessons, CLAUDE↔AGENTS) |
+| **RESEARCH** | Competitive/technology analysis; output to `codev/research/` |
 
-**Critical**: Using `&` at the end of the command does NOT work - you MUST set the `run_in_background` parameter.
+Skip protocol ceremony for README typos, template one-liners, and dependency bumps.
 
-## Protocol Selection Guide
+**Issues are the source of truth for tracking.** `spec` and `plan` labels mark approved
+artifacts; `porch status <id>` gives live phase detail; close the issue when the PR merges.
 
-### Use BUGFIX for (GitHub issue fixes):
-- Bug reported as a **GitHub Issue**
-- Fix is isolated (< 300 LOC net diff)
-- No spec/plan artifacts needed
-- Single builder can fix independently
+### Artifacts
 
-**BUGFIX uses GitHub Issues as source of truth.** See `codev/protocols/bugfix/protocol.md`.
+Three documents per feature, same filename in three directories — spec defines **what**, plan
+defines **how**, review captures **what was learned**:
 
-### Use AIR for (small features from GitHub issues):
-- Small features (< 300 LOC) fully described in a **GitHub Issue**
-- No architectural decisions needed
-- No spec/plan artifacts — review goes in the PR body
-- Would be overkill for full SPIR/ASPIR ceremony
-
-**AIR uses GitHub Issues as source of truth.** Two phases: Implement → Review. See `codev/protocols/air/protocol.md`.
-
-### Use PIR for (engineer-judged — based on the nature of the work, not its size):
-
-Pick PIR when ONE or BOTH of the following apply to a GitHub-issue-driven change:
-
-**1. The approach needs review before coding starts**:
-- Root cause is ambiguous; multiple valid fixes exist
-- Area is unfamiliar or high-blast-radius (shared utilities, auth, migrations, public APIs)
-- Design-sensitive (affects conventions, patterns, architecture)
-- Cheaper to redirect at plan time than at PR time
-
-**2. The implementation needs to be TESTED before a PR is created** (PR diff alone is insufficient):
-- Mobile app changes (needs device testing on Android, iOS, possibly web)
-- UI / UX changes (visual inspection, interaction flow, accessibility)
-- Hardware-adjacent behavior (sensors, camera, permissions, notifications)
-- Integration with external services that don't mock cleanly (OAuth, payments, analytics)
-- User-journey changes that need a full-flow exercise
-- Performance-sensitive changes that need profiling on the running app
-
-**PIR uses GitHub Issues as source of truth.** Three phases: Plan (gated by `plan-approval`) → Implement (gated by `dev-approval`) → Review (PR + CMAP-2 at PR, then gated by `pr` for merge synchronization — matching SPIR's pr-gate pattern but with no post-merge verify phase). Plan and review artifacts live in `codev/plans/` and `codev/reviews/` on the builder branch, ship to main with the merge. Review file is shaped identically to SPIR's (Summary + Architecture Updates + Lessons Learned + supporting sections) so `codev/reviews/` stays semantically consistent across protocols. Lighter than SPIR (no spec phase — the issue body is the implicit spec; consult footprint matches BUGFIX/AIR's "one consult at PR" pattern). Stronger than BUGFIX/AIR (two human gates pre-PR — the human reviews the running worktree at the `dev-approval` gate, not the PR diff post-creation). CMAP at the PR is a **single advisory pass** (`max_iterations: 1`) — no iterate-until-APPROVE loop; a `REQUEST_CHANGES` is escalated to the human at the `pr` gate, not auto-re-reviewed. The CMAP-2 footprint is a design invariant: porch's model precedence is *config > protocol*, so a project-wide `porch.consultation.models` (e.g. a SPIR-tuned 3-model list) silently inflates PIR — leave it unset or scope it per-protocol to preserve the BUGFIX/AIR-parity cost. See `codev/protocols/pir/protocol.md`.
-
-### Use SPIR for (new features):
-- Creating a **new feature from scratch** (no existing spec to amend)
-- New protocols or protocol variants
-- Major changes to existing protocols
-- Complex features requiring multiple phases
-- Architecture changes
-
-### Use ASPIR for (autonomous SPIR):
-- Same as SPIR but **without human approval gates** on spec and plan
-- Trusted, low-risk work where spec/plan review can be deferred to PR
-- Builder runs autonomously through Specify → Plan → Implement → Review (→ Verify)
-- Human approval still required at the PR gate before merge
-
-**ASPIR is identical to SPIR** except `spec-approval` and `plan-approval` gates are removed. Both include an optional verify phase after review. See `codev/protocols/aspir/protocol.md`.
-
-### Use EXPERIMENT for:
-- Testing new approaches or techniques
-- Evaluating models or libraries
-- Proof-of-concept work
-- Research spikes
-
-### Use MAINTAIN for:
-- Removing dead code and unused dependencies
-- Quarterly codebase maintenance
-- Before releases (clean slate for shipping)
-- Syncing documentation (arch.md/arch-critical.md, lessons-learned.md/lessons-critical.md, CLAUDE.md/AGENTS.md)
-
-### Use RESEARCH for:
-- Competitive analysis and technology evaluation
-- Market research and "state of X" questions
-- Architectural decision support when unfamiliar with the domain
-- Triangulating across 3 AI models to get a high-confidence answer
-- Output goes to `codev/research/<topic>.md`
-
-### Skip formal protocols for:
-- README typos or minor documentation fixes
-- Small bug fixes in templates
-- Dependency updates
-
-## Core Workflow
-
-1. **When asked to build NEW FEATURES FOR CODEV**: Start with the Specification phase
-2. **Create exactly THREE documents per feature**: spec, plan, and review (all with same filename)
-3. **Follow the SPIR phases**: Specify → Plan → Implement → Review (→ Verify)
-4. **Use multi-agent consultation by default** unless user says "without consultation"
-
-## Directory Structure
 ```
-project-root/
-├── codev/
-│   ├── protocols/           # Development protocols
-│   │   ├── spir/          # Multi-phase development with consultation
-│   │   ├── experiment/     # Disciplined experimentation
-│   │   └── maintain/       # Codebase maintenance (code + docs)
-│   ├── maintain/            # MAINTAIN protocol runtime artifacts
-│   │   └── .trash/         # Soft-deleted files (gitignored, 30-day retention)
-│   ├── projects/           # Active project state (managed by porch)
-│   ├── specs/              # Feature specifications (WHAT to build)
-│   ├── plans/              # Implementation plans (HOW to build)
-│   ├── reviews/            # Reviews and lessons learned from each feature
-│   └── resources/          # Reference materials
-│       ├── arch.md         # Architecture (COLD reference; maintained during MAINTAIN)
-│       ├── arch-critical.md # Architecture HOT tier — capped, always-injected (Spec 987)
-│       ├── testing-guide.md # Local testing, Playwright, regression prevention
-│       ├── lessons-learned.md   # Engineering wisdom (COLD reference; maintained during MAINTAIN)
-│       └── lessons-critical.md  # Engineering wisdom HOT tier — capped, always-injected (Spec 987)
-├── .claude/
-│   ├── agents/             # AI agent definitions (custom project agents)
-│   └── skills/             # Claude-native Codev skills
-├── .codex/
-│   └── skills/             # Codex-native Codev skills
-├── AGENTS.md              # Universal AI agent instructions (AGENTS.md standard)
-├── CLAUDE.md              # This file (Claude Code-specific, identical to AGENTS.md)
-└── [project code]
+codev/specs/42-feature-name.md
+codev/plans/42-feature-name.md
+codev/reviews/42-feature-name.md
 ```
 
-## Directory Map
-- pnpm install → always run from the repository root (installs all workspace packages)
-- pnpm build / pnpm test → run from `packages/codev/` or use `pnpm --filter @cluesmith/codev build`
-- E2E tests → `packages/codev/tests/e2e/`
-- Unit tests → `packages/codev/tests/unit/`
-- Never run npm commands from the repository root unless explicitly told to.
+Sequential numbering, no leading zeros. Keep specs and plans separate; they answer different
+questions.
 
-## File Naming Convention
+## Issue labels
 
-Use sequential numbering with descriptive names (no leading zeros):
-- Specification: `codev/specs/42-feature-name.md`
-- Plan: `codev/plans/42-feature-name.md`
-- Review: `codev/reviews/42-feature-name.md`
+`area/*` is the **primary organizing axis** — group, audit and bulk-move issues by area first.
 
-**CRITICAL: Keep Specs and Plans Separate**
-- Specs define WHAT to build (requirements, acceptance criteria)
-- Plans define HOW to build (phases, files to modify, implementation details)
-- Each document serves a distinct purpose and must remain separate
+**Exactly one `area/*` per issue.** Multi-area work uses `area/cross-cutting` *alone*. There
+are no `type:*` labels.
 
-## Multi-Agent Consultation
+`area/`: docs · vscode · dashboard · consult · tower (includes afx; there is no
+`area/agent-farm`) · porch · protocols (definitions, distinct from porch orchestration) ·
+config · terminal · scaffold · release · web · core · cross-cutting
 
-**DEFAULT BEHAVIOR**: Consultation is ENABLED by default with:
-- **Gemini** via the **Antigravity CLI (`agy`)** for deep analysis (the retired Gemini CLI's
-  replacement; OAuth/subscription, agy's default model — no pinned model id). Skips non-blockingly
-  if `agy` is missing/unauthenticated. An unauthenticated `agy` is spawned **at most once per TTL
-  window** rather than once per consult: the verdict is cached across processes in
-  `~/.cache/codev/agy-auth.json`, because each spawn opens an OAuth browser tab before Codev can
-  detect the missing login (#1077). Sign in with `agy` in any terminal and the lane recovers on its
-  own; see `codev/resources/commands/consult.md` for the TTL/opt-out env vars.
-- **GPT-5.4 Codex** (gpt-5.4-codex) for coding and architecture perspective
+## Multi-agent consultation
 
-To disable: User must explicitly say "without multi-agent consultation"
+**Enabled by default.** Three reviewers: **Gemini** via the Antigravity CLI (`agy`, skips
+non-blockingly if unauthenticated), **GPT-5.6 Sol** (`gpt-5.6-sol` — the `-sol` suffix is
+load-bearing) via the Codex SDK, and **Claude Opus 5** via the Agent SDK. Disable only when
+the user says "without consultation".
 
-**CRITICAL CONSULTATION CHECKPOINTS (DO NOT SKIP):**
-- After writing implementation code → STOP → Consult GPT-5 and Gemini (via agy)
-- After writing tests → STOP → Consult GPT-5 and Gemini (via agy)
-- ONLY THEN present results to user for evaluation
+Consult after writing implementation code and after writing tests, before presenting results.
+**"cmap"** means run all three in parallel *in the background* and return control immediately.
 
-### cmap (Consult Multiple Agents in Parallel)
+## Git
 
-**cmap** is shorthand for "consult multiple agents in parallel in the background."
+Commit messages:
 
-When the user says **"cmap the PR"** or **"cmap spec 42"**, this means:
-1. Run a 3-way parallel review (Gemini, Codex, Claude)
-2. Run all three in the **background** (`run_in_background: true`)
-3. Return control to the user **immediately**
-4. Retrieve results later with `TaskOutput` when needed
-
-**Always run consultations in parallel** using separate Bash tool calls in the same message, not sequentially.
-
-## CLI Command Reference
-
-**IMPORTANT: Never guess CLI commands.** Use the `/afx` skill to check the quick reference before running agent farm commands. Common mistakes to avoid:
-- There is NO `codev tower` command — use `afx tower start` / `afx tower stop`
-- There is NO `restart` subcommand — stop then start
-- When unsure about syntax, check the docs below first
-
-Codev provides five CLI tools. For complete reference documentation, see:
-
-- **[Overview](codev/resources/commands/overview.md)** - Quick start and summary of all tools
-- **[codev](codev/resources/commands/codev.md)** - Project management (init, adopt, doctor, update, tower)
-- **[afx](codev/resources/commands/agent-farm.md)** - Agent Farm orchestration (start, spawn, status, cleanup, send, etc.)
-- **[porch](codev/resources/commands/overview.md#porch---protocol-orchestrator)** - Protocol orchestrator (status, run, approve, pending)
-- **[consult](codev/resources/commands/consult.md)** - AI consultation (general, protocol, stats)
-- **[team](codev/resources/commands/team.md)** - Team coordination (list, message, update, add)
-
-## Runnable Worktrees
-
-When configured, each builder worktree (`.builders/<id>/`) becomes runnable — reviewers can run whatever your dev command starts against the builder's branch — a dev server, `cargo run`, `expo start`, a test watcher, a build script, whatever iterates on your project — without `cd`'ing, manually installing, or finding the right command. Opt-in via `.codev/config.json`; unconfigured repos see zero behavior change.
-
-### Config: the `worktree` block
-
-```jsonc
-{
-  "worktree": {
-    "symlinks":   ["..."],        // glob patterns of files to symlink from root into each new worktree
-    "postSpawn":  ["..."],        // shell commands run inside each new worktree after createWorktree
-    "devCommand": "..."           // consumed by `afx dev <builder-id|main>`
-  }
-}
-```
-
-- `symlinks`: globs resolve from the workspace root; matches symlink into the worktree at the same relative path. Root `.env` and `.codev/config.json` are *always* symlinked regardless. **Symlinks, not copies** — edits to main's env files reflect instantly in any running dev session. A directory match is silently skipped (so a glob can't mask the worktree's own source) **unless** the entry ends with a trailing slash: `".local-user-data/"` is treated as a literal path and symlinks the directory whole (shared with the parent, not branch-isolated; a dangling link is fine if the source doesn't exist yet).
-- `postSpawn`: each command runs sequentially with `cwd` = worktree path. Non-zero exit aborts the spawn loud (half-built worktree stays for inspection).
-- `devCommand`: the foreground command that starts your dev process (a server, a watcher, `cargo run`, `expo start`, a build script — whatever iterates on your project). Required for `afx dev` to work.
-
-**Codev does not auto-detect your stack.** Pick the recipe below that matches your toolchain.
-
-### CLI
-
-```bash
-afx dev <builder-id>     # start dev in <builder-id>'s worktree
-afx dev main             # start dev in the MAIN workspace (Codev-managed)
-afx dev --stop           # stop the currently running dev PTY (builder or main)
-```
-
-Only one dev PTY runs at a time (by design — see "URLs are load-bearing" below), across **{main + all builders}**. `main` is a reserved target: it runs `worktree.devCommand` in the main checkout as a Codev-managed, swappable PTY, symmetric with builders. Starting any target while another is up prompts for swap (`afx dev <builder>` while `main` runs, or vice-versa); same-target requests print the existing terminal URL and exit. Like builder dev, main dev is a **non-persistent** PTY — a Tower restart (`pnpm -w run local-install`, crash) kills it; re-run to restart.
-
-**Launch main dev via `afx dev main`, not a bare `pnpm dev`.** A manually-run `pnpm dev` at the repo root is invisible to Codev (the deliberate "never kill what it didn't spawn" policy) — start a builder dev while it holds the ports and the builder dev silently fails to bind, or worse serves main's code under the worktree URL. `afx dev main` makes it a managed PTY that swap-detection can cleanly stop first. This only helps if you use it *consistently*; a hand-started `pnpm dev` stays unmanaged.
-
-### VSCode
-
-The same actions are available via right-click on any builder row in the Codev sidebar (Builders or Needs Attention view):
-
-- **Codev: Open Builder Terminal** — opens that builder's AI terminal in a VSCode tab (same as left-clicking the row).
-- **Codev: Open Worktree Folder** — opens `.builders/<id>/` in the OS file manager (Finder on macOS, Explorer on Windows, xdg-open on Linux).
-- **Codev: Run Worktree Setup** — applies the configured `worktree.symlinks` and runs the `worktree.postSpawn` commands against the existing worktree (mirrors what spawn does, minus the git steps). Idempotent: existing symlinks are skipped, missing ones added. Useful when the lockfile changed (reinstall deps), `symlinks` or `postSpawn` was extended after the builder spawned, a symlink was accidentally deleted, or the original setup aborted mid-run. Opens a fresh VSCode terminal so install output streams live. Available via CLI too: `afx setup <builder-id>`.
-- **Codev: View Diff** — opens a single unified diff editor for `main...HEAD` of that builder's worktree, with a file-list pane on the left (matches VSCode's built-in Source Control "Working Tree" view). Status icons indicate added / modified / deleted. Empty diff → friendly toast.
-- **Codev: Run Dev** — reads `worktree.devCommand` from `.codev/config.json`, asks Tower to spawn a dev PTY in the builder's worktree, and opens it as a VSCode terminal tab named `Codev: <name> (dev)`. If another builder's dev is already running, you get a modal asking whether to swap.
-- **Codev: Stop Dev** — kills the running dev PTY and closes its tab.
-
-The Codev sidebar's **Workspace** view also carries a dev control for *whatever folder this VSCode window is rooted at* (it is not "main"-specific):
-
-- **Start Dev** — runs `worktree.devCommand` for the current workspace. Target is resolved from the open folder: the main checkout → `main`; a `.builders/<id>/` worktree opened as its own window (e.g. via *Open Worktree as Workspace*) → that builder. Same single-slot swap model as builder dev (prompts if another dev is running). The row tooltip names the resolved target.
-- **Stop Dev** — stops this workspace's dev; the row appears only while it is running. Scoped to the resolved target — it does not touch other devs.
-
-The three commands are also available from the command palette (Cmd+Shift+P). No default keybindings; bind via `keybindings.json` if you use them often.
-
-### URLs are load-bearing
-
-The dev PTY uses **the same ports and URLs as main** intentionally. OAuth callbacks, CORS allowlists, cookie scoping, CSP `connect-src`, webhook URLs are all keyed off origin — running the worktree on a different port would break them. Consequence: stop main's `pnpm dev` before `afx dev`. If you don't, the spawned dev fails at bind time with its own `EADDRINUSE`. Prefer `afx dev main` (or the Workspace view's *Start Dev* row) over a hand-run `pnpm dev` so Codev owns the PTY and swap-detection can stop it for you automatically.
-
-### Cleanup semantics
-
-`afx dev --stop` and the swap path kill the entire PTY process group (SIGTERM, escalating to SIGKILL after 5s via `PtySession.kill`). That signals every grandchild of a monorepo dev orchestrator (`pnpm dev`, `turbo dev`, `pnpm -r --parallel run dev`, etc.) simultaneously. The OS reclaims ports as a consequence — Codev never touches ports directly.
-
-**Orphan recovery** — if Tower itself hard-crashes mid-dev and a process is left holding a port outside Codev's records:
-
-```bash
-lsof -ti :<port> | xargs kill                       # one port
-lsof -ti :3000,:3001,:4000 | xargs kill             # several at once
-```
-
-### Runnable Worktree Recipes
-
-Ready-to-paste blocks per stack. Adjust ports / paths to your project.
-
-**pnpm monorepo (Next.js + Turbo style):**
-```json
-{
-  "worktree": {
-    "symlinks": [".env.local", ".env.development.local", "packages/*/.env", "packages/*/.env.local", "turbo.json"],
-    "postSpawn": ["pnpm install --frozen-lockfile"],
-    "devCommand": "pnpm dev"
-  }
-}
-```
-
-**npm (single package):**
-```json
-{
-  "worktree": {
-    "symlinks": [".env.local", ".env.development"],
-    "postSpawn": ["npm ci"],
-    "devCommand": "npm run dev"
-  }
-}
-```
-
-**yarn:**
-```json
-{
-  "worktree": {
-    "symlinks": [".env.local"],
-    "postSpawn": ["yarn install --frozen-lockfile"],
-    "devCommand": "yarn dev"
-  }
-}
-```
-
-**bun:**
-```json
-{
-  "worktree": {
-    "symlinks": [".env.local"],
-    "postSpawn": ["bun install --frozen-lockfile"],
-    "devCommand": "bun dev"
-  }
-}
-```
-
-**cargo (Rust):**
-```json
-{
-  "worktree": {
-    "symlinks": [".env"],
-    "postSpawn": [],
-    "devCommand": "cargo run"
-  }
-}
-```
-
-**poetry / uv (Python):**
-```json
-{
-  "worktree": {
-    "symlinks": [".env", ".env.local"],
-    "postSpawn": ["uv sync"],
-    "devCommand": "uv run python -m myapp"
-  }
-}
-```
-
-**go mod:**
-```json
-{
-  "worktree": {
-    "symlinks": [".env"],
-    "postSpawn": ["go mod download"],
-    "devCommand": "go run ./cmd/server"
-  }
-}
-```
-
-## Architect-Builder Pattern
-
-The Architect-Builder pattern enables parallel AI-assisted development:
-- **Architect** (human + primary AI): Creates specs and plans, reviews work
-- **Builders** (autonomous AI agents): Implement specs in isolated git worktrees
-
-For detailed commands, configuration, and architecture, see:
-- `codev/resources/commands/agent-farm.md` - Full CLI reference
-- `codev/resources/arch.md` - Terminal architecture, state management
-- `codev/resources/workflow-reference.md` - Stage-by-stage workflow
-
-### 🚨 NEVER DESTROY BUILDER WORKTREES 🚨
-
-**When a worktree already exists for a project:**
-1. Use `afx spawn XXXX --resume`
-2. If `--resume` fails → **ASK THE USER**
-3. Only destroy if the user explicitly says to
-
-**NEVER run without EXPLICIT user request:**
-- `git worktree remove` (with or without --force)
-- `git branch -D` on builder branches
-- `afx cleanup` followed by fresh spawn
-
-**You are NOT qualified to judge what's expendable.** It is NEVER your call to delete a worktree.
-
-### 🚨 ALWAYS Operate From the Main Workspace Root 🚨
-
-**ALL `afx` commands (`afx spawn`, `afx send`, `afx status`, `afx workspace`, `afx cleanup`) MUST be run from the repository root on the `main` branch.**
-
-- **NEVER** run `afx spawn` from inside a builder worktree — builders will get nested inside that worktree, breaking everything
-- **NEVER** run `afx workspace start` from a worktree — there is no separate workspace per worktree
-- **NEVER** `cd` into a worktree to run afx commands
-- The **only exception** is `porch` commands that need worktree context (e.g. `porch approve` from a builder's worktree)
-
-**What happened**: On 2026-02-21, `afx spawn` was run from inside a builder's worktree. All new builders were nested inside that worktree, `afx send` couldn't find them, and `afx status` showed "not active in tower". Multiple builders had to be killed and respawned.
-
-### Pre-Spawn Rule
-
-**Commit all local changes before `afx spawn`.** Builders work in git worktrees branched from HEAD — uncommitted specs, plans, and codev updates are invisible to the builder. The spawn command enforces this (override with `--force`).
-
-### Key Commands
-
-```bash
-afx workspace start                   # Start the workspace
-afx spawn 42 --protocol spir          # Spawn builder for SPIR project
-afx spawn 42 --protocol spir --soft   # Spawn builder (soft mode)
-afx spawn 42 --protocol bugfix        # Spawn builder for a bugfix
-afx status                            # Check all builders
-afx cleanup --project 0042            # Clean up (architect-driven, not automatic)
-afx open file.ts            # Open file in annotation viewer (NOT system open)
-```
-
-**IMPORTANT:** When the user says `afx open`, always run the `afx open` command — do NOT substitute the system `open` command.
-
-### Configuration
-
-Agent Farm is configured via `.codev/config.json` at the project root. Created during `codev init` or `codev adopt`. Override via CLI: `--architect-cmd`, `--builder-cmd`, `--shell-cmd`.
-
-## Inter-agent messaging
-
-Agents within a workspace communicate through `afx send`. Four addressing forms are supported:
-
-### Addressing forms
-
-| Form | Meaning | Allowed from |
-|---|---|---|
-| `afx send <builder-id> "msg"` | Send to a specific builder (e.g. `afx send 0823 "..."`). | Any sender. |
-| `afx send architect "msg"` | From a builder: routes to the spawning architect via affinity (per #774). From an architect (or any non-builder sender): routes to the architect named `main` if present, else the first registered architect. | Any sender. |
-| `afx send architect:<name> "msg"` | Explicit per-architect addressing. **Architects (including `main`)**: open address grammar — any architect can address any other architect. This is the sibling-architect messaging form. **Builders**: allowed ONLY when `<name>` matches the builder's own `spawnedByArchitect`. Mismatches are rejected by the spoofing check at `tower-messages.ts:213-218`. From a builder, this is an explicit form of the affinity routing, NOT an override. | Any sender (with the spoofing constraint above for builders). |
-| `afx send <workspace>:architect "msg"` | Cross-workspace addressing (e.g. `afx send marketmaker:architect "..."`). | Any sender. |
-
-### Sibling-architect messaging
-
-When a workspace hosts more than one architect (added via `afx workspace add-architect --name <name>`), sibling architects message each other via the `architect:<name>` form. Example:
-
-```bash
-# From main's terminal to a sibling architect named ob-refine
-afx send architect:ob-refine "PR-iter-2 feedback ready"
-```
-
-This works because sender = architect bypasses the spoofing check.
-
-### Builder spoofing-check (verified at `tower-messages.ts:213-218`)
-
-Builder `spir-823` running `afx send architect:ob-refine "..."` is rejected unless its `spawnedByArchitect == 'ob-refine'`. A builder cannot use `architect:<name>` to address an architect other than its spawning architect — that's an attempted spoof.
-
-### Discovering active agents
-
-- `afx status` lists all architects (post-#786) alongside builders, with names, terminal IDs, and PIDs where available.
-- Each active builder maintains a free-text narrative log at `codev/state/<builder-id>_thread.md` (relative to its worktree, so `.builders/<id>/codev/state/<id>_thread.md` from the main workspace root). **In-flight discovery**: `ls .builders/*/codev/state/*.md` and `cat .builders/<id>/codev/state/<id>_thread.md`. **Post-merge discovery**: after a builder's PR merges, its thread lands in `codev/state/` on `main`, alongside `codev/reviews/` — list with `ls codev/state/` and read with `cat codev/state/<builder-id>_thread.md` from the main checkout.
-
-## Porch - Protocol Orchestrator
-
-Porch drives SPIR, ASPIR, AIR, and BUGFIX protocols via a state machine with phase transitions, gates, and multi-agent consultations.
-
-### Key Commands
-
-```bash
-porch init spir 0073 "feature-name" --worktree .builders/0073
-porch status 0073
-porch run 0073
-porch approve 0073 spec-approval    # Human only
-porch pending                        # List pending gates
-```
-
-### Project State
-
-State is stored in `codev/projects/<id>-<name>/status.yaml`, managed automatically by porch. See `codev/resources/protocol-format.md` for protocol definition format.
-
-## Git Workflow
-
-### 🚨 ABSOLUTE PROHIBITION: NEVER USE `git add -A` or `git add .` 🚨
-
-**THIS IS A CRITICAL SECURITY REQUIREMENT - NO EXCEPTIONS**
-
-```bash
-git add -A        # ABSOLUTELY FORBIDDEN
-git add .         # ABSOLUTELY FORBIDDEN
-git add --all     # ABSOLUTELY FORBIDDEN
-```
-
-**MANDATORY APPROACH - ALWAYS ADD FILES EXPLICITLY**:
-```bash
-git add codev/specs/42-feature.md
-git add src/components/TodoList.tsx
-```
-
-**BEFORE EVERY COMMIT**: Run `git status`, add each file explicitly by name.
-
-### Commit Messages
 ```
 [Spec 42] Initial specification draft
 [Spec 42][Phase: user-auth] feat: Add password hashing
 [Bugfix #42] Fix: URL-encode username before API call
 ```
 
-### Branch Naming
-```
-spir/42-feature-name/phase-name
-builder/bugfix-42-description
-```
+Branches: `spir/42-feature-name/phase-name`, `builder/bugfix-42-description`.
 
-### Pull Request Merging
+**Merge PRs with `gh pr merge <n> --merge` — never squash.** Individual commits document the
+development process; squashing destroys it.
 
-**DO NOT SQUASH MERGE** - Always use regular merge commits:
-```bash
-gh pr merge <number> --merge    # CORRECT
-```
+## Working with builders
 
-Individual commits document the development process. Squashing loses this valuable history.
+Architects create specs and plans and review work; builders implement in isolated worktrees
+under `.builders/<id>/`. Commit everything before `afx spawn` — builders branch from HEAD, so
+uncommitted work is invisible to them.
 
-## Code Metrics
+Agents message each other with `afx send`:
 
-Use **tokei** for measuring codebase size: `tokei -e "tests/lib" -e "node_modules" -e ".git" -e ".builders" -e "dist" .`
+| Form | Meaning |
+|---|---|
+| `afx send <builder-id> "…"` | A specific builder |
+| `afx send architect "…"` | From a builder: its spawning architect. From anyone else: the architect named `main`, else the first registered |
+| `afx send architect:<name> "…"` | A named architect. Architects may address any architect; a **builder may only use this for its own spawning architect** — mismatches are rejected as spoofing |
+| `afx send <workspace>:architect "…"` | Cross-workspace |
 
-## Before Starting ANY Task
+`afx send` requires the workspace active in Tower (`afx workspace start`).
 
-### ALWAYS Check for Existing Work First
+Each builder keeps a narrative log at `codev/state/<builder-id>_thread.md` — in-flight at
+`.builders/<id>/codev/state/`, and on `main` after the PR merges.
 
-**BEFORE writing ANY code, run these checks:**
+## Tooling
 
-```bash
-# Check if there's already a PR for this
-gh pr list --search "XXXX"
+Each CLI has a skill carrying its commands and flags — **check the skill before running the
+command rather than guessing**: `afx` (spawn, status, send, dev, cleanup, Tower),
+`codev` (init, adopt, update, doctor, local build/test), `porch` (status, run, approve),
+`consult` (reviews, cmap, stats), `runnable-worktrees` (making builder
+worktrees runnable), `update-arch-docs`.
 
-# Check GitHub Issues for status
-gh issue list --search "XXXX"
+`afx open <file>` opens the annotation viewer — it is not the system `open`.
 
-# Check if implementation already exists
-git log --oneline --all | grep -i "feature-name"
-```
+**Run anything slower than ~5s in the background** (`run_in_background: true`, not a trailing
+`&`): tests, consultations, installs, e2e suites.
 
-**If existing work exists**: READ it first, TEST if it works, IDENTIFY specific bugs, FIX minimally.
+Configuration lives in `.codev/config.json`.
 
-### When Stuck: STOP After 15 Minutes
+## Testing
 
-**If you've been debugging the same issue for 15+ minutes:**
-1. **STOP coding immediately**
-2. **Consult external models** (GPT-5, Gemini) with specific questions
-3. **Ask the user** if you're on the right path
-4. **Consider simpler approaches** - you're probably overcomplicating it
+UI changes (tower, dashboard, terminal) must be verified in a browser via Playwright before
+being called done — see `codev/resources/testing-guide.md`.
 
-**Warning signs you're in a rathole:**
-- Making incremental fixes that don't work
-- User telling you you're overcomplicating it (LISTEN TO THEM)
-- Trying multiple approaches without understanding why none work
-- Not understanding the underlying technology
+## Releasing
 
-### Understand Before Coding
-
-**Before implementing, you MUST understand:**
-1. **The protocol/API** - Read docs, don't guess
-2. **The module system** - ESM vs CommonJS vs UMD vs globals
-3. **What already exists** - Check the codebase and git history
-4. **The spec's assumptions** - Verify they're actually true
-
-## Important Notes
-
-1. **ALWAYS check `codev/protocols/spir/protocol.md`** for detailed phase instructions
-2. **Use provided templates** from `codev/protocols/spir/templates/`
-3. **Document all deviations** from the plan with reasoning
-4. **Create atomic commits** for each phase completion
-5. **Maintain >90% test coverage** where possible
-
----
-
-*Remember: Context drives code. When in doubt, write more documentation rather than less.*
+Say "Let's release v1.6.0"; the RELEASE protocol (`codev/protocols/release/protocol.md`)
+carries the procedure.

@@ -28,12 +28,12 @@ import { globSync } from 'glob';
 import type { Config, ProtocolDefinition } from '../types.js';
 import { logger, fatal } from '../utils/logger.js';
 import { getBuilderHarness, getWorktreeConfig } from '../utils/config.js';
-import { shellEscapeSingleQuote, LAUNCH_LOOP_TAIL, type HarnessProvider } from '../utils/harness.js';
+import { shellEscapeSingleQuote, launchLoopTail, type HarnessProvider } from '../utils/harness.js';
 import { defaultSessionOptions } from '../../terminal/index.js';
 import { run, runStreaming, commandExists } from '../utils/shell.js';
 import { fetchIssueOrThrow, type ForgeIssue } from '../../lib/github.js';
 import { executeForgeCommand, type ForgeConfig } from '../../lib/forge.js';
-import { getTowerClient, DEFAULT_TOWER_PORT, type SeedKickRequest } from '../lib/tower-client.js';
+import { getTowerClient, DEFAULT_TOWER_PORT } from '../lib/tower-client.js';
 
 // =============================================================================
 // Dependency Checks
@@ -696,7 +696,6 @@ export async function createPtySession(
     roleId: string;
     label?: string;
   },
-  seedKick?: SeedKickRequest,
 ): Promise<{ terminalId: string }> {
   const { cols, rows } = defaultSessionOptions();
   const client = getTowerClient();
@@ -707,7 +706,6 @@ export async function createPtySession(
     type: registration?.type,
     roleId: registration?.roleId,
     label: registration?.label,
-    seedKick,
   });
 
   if (!terminal) {
@@ -781,84 +779,224 @@ function installHarnessWorktreeFiles(
 }
 
 /**
- * Build the launch script via the harness's provider-owned shape (Issue
- * #1201 — currently only Kimi implements `buildBuilderLaunchScript`).
+ * Build the `while true; do … done` launch loop for a builder script.
  *
- * Fresh paths write the same reference files as the generic shapes
- * (.builder-prompt.txt, .builder-role.md) plus `.builder-seed.txt` — the
- * seed-turn payload composed by the harness (role and/or task briefing in an
- * ack-and-wait wrapper), since seed-style CLIs cannot take either via argv.
- * When there is an initial task prompt, the returned `seedKick` asks Tower to
- * deliver the harness's kick message (e.g. 'BEGIN') once the launch script's
- * seed sentinel appears — writes into the PTY during the seed window are
- * silently lost, so the kick must be readiness-gated Tower-side.
+ * `initial` is what the loop runs on entry, and what a crash restart reruns —
+ * on the resume path that is `<cmd> --resume <id>`, because recovering the
+ * conversation is exactly right after an unnatural death.
+ *
+ * `fresh` is what the Enter-gated relaunch runs after a *clean* exit. Issue
+ * #1267: a clean exit means the user deliberately ended that conversation, so
+ * relaunching it is the one thing the relaunch must not do — the same rule
+ * #1264 established for architect terminals. `fresh` is the plain
+ * role-injected, prompt-carrying invocation a non-resume spawn would have used,
+ * so "fresh" needs no definition of its own.
+ *
+ * The switch is one-way and sticky: once a clean exit has moved the loop to
+ * `fresh`, a later crash restarts the *fresh* invocation, never the superseded
+ * session the user walked away from.
+ *
+ * The two commands differ only on the resume path. Every other variant passes
+ * the same string twice and gets the historical single-command loop back,
+ * byte for byte.
+ *
+ * Issue #1233: this loop now serves only harnesses WITHOUT script-form session
+ * support (codex/gemini/opencode/custom) — their generated script is unchanged,
+ * byte for byte. Claude builders get `buildSessionLaunchLoop` instead, which
+ * resumes the conversation on crash restarts rather than replaying the prompt.
  */
-function buildProviderOwnedScript(
-  harness: HarnessProvider,
-  worktreePath: string,
-  baseCmd: string,
-  prompt: string | null,
-  roleContent: string | null,
-  roleSource: string | null,
-  resume?: { sessionId: string },
-): { scriptContent: string; seedKick?: SeedKickRequest } {
-  const build = harness.buildBuilderLaunchScript!;
-
-  if (resume) {
-    // Prior conversation already contains role + task context.
-    logger.info(`Resuming session ${resume.sessionId.slice(0, 8)}…`);
-    return {
-      scriptContent: build({
-        worktreePath, baseCmd, seedFile: null,
-        resume: { sessionId: resume.sessionId },
-      }),
-    };
+export function buildLaunchLoop(initial: string, fresh: string): string {
+  if (initial === fresh) {
+    return `while true; do
+  ${initial}
+${launchLoopTail()}
+done
+`;
   }
+  // Functions, not a re-expanded string: the commands carry their own quoting
+  // (`--append-system-prompt "$(cat '…')"`), which would not survive being
+  // stuffed through a variable and word-split at call time.
+  return `codev_launch_initial() {
+  ${initial}
+}
+codev_launch_fresh() {
+  ${fresh}
+}
+codev_launch=codev_launch_initial
+while true; do
+  "$codev_launch"
+${launchLoopTail('codev_launch=codev_launch_fresh')}
+done
+`;
+}
 
-  if (prompt) {
-    writeFileSync(resolve(worktreePath, '.builder-prompt.txt'), prompt);
-  }
+/**
+ * The prompt a crash-resume invocation carries (Issue #1233). Without it,
+ * `--resume` restores the conversation but leaves the agent idle at the input
+ * prompt — for an unattended builder that converts amnesia into a stall. The
+ * nudge is a new user message in the restored conversation, so the builder
+ * re-orients itself and continues autonomously. Deliberately free of
+ * single quotes: it is embedded single-quoted in the generated script.
+ */
+export const CRASH_RESUME_NUDGE =
+  'You were automatically restarted after a crash. Your prior conversation context has been restored. '
+  + 'Re-orient yourself (in strict mode run porch next for your project; check queued afx messages) '
+  + 'and continue your work from where you left off.';
 
-  let roleWithPort: string | null = null;
-  let roleFile = '';
-  if (roleContent) {
-    roleWithPort = roleContent.replace(/\{PORT\}/g, String(DEFAULT_TOWER_PORT));
-    roleFile = resolve(worktreePath, '.builder-role.md');
-    writeFileSync(roleFile, roleWithPort);
-    logger.info(`Loaded role (${roleSource})`);
-  }
+/** The shell expression the session-aware loop's commands use to reference the current session id. */
+export const SESSION_ID_EXPR = '"$codev_session_id"';
 
-  installHarnessWorktreeFiles(harness, roleWithPort ?? '', roleFile, worktreePath);
+/**
+ * Script-form session support for a harness, or undefined when the harness
+ * cannot pin/resume a conversation from a generated bash script. Both fragment
+ * forms are required — the session-aware loop needs to pin AND resume.
+ */
+export function scriptSessionForms(harness: HarnessProvider): {
+  newSessionScriptFragment(idExpr: string): string;
+  resumeScriptFragment(idExpr: string): string;
+} | undefined {
+  const session = harness.session;
+  if (!session?.newSessionScriptFragment || !session?.resumeScriptFragment) return undefined;
+  return {
+    newSessionScriptFragment: session.newSessionScriptFragment.bind(session),
+    resumeScriptFragment: session.resumeScriptFragment.bind(session),
+  };
+}
 
-  let seedFile: string | null = null;
-  let seedKick: SeedKickRequest | undefined;
-  if (harness.seedDelivery && (roleWithPort || prompt)) {
-    seedFile = resolve(worktreePath, '.builder-seed.txt');
-    writeFileSync(seedFile, harness.seedDelivery.buildSeedPrompt(roleWithPort, prompt || null));
-    if (prompt) {
-      seedKick = {
-        sentinel: harness.seedDelivery.sentinelPrefix,
-        message: harness.seedDelivery.kickMessage,
-        graceMs: harness.seedDelivery.graceMs,
-        enterDelayMs: harness.messagePacing?.enterDelayMs,
-        verify: { kind: 'kimi-session-store', worktreePath },
-      };
-    }
-  }
-
-  return { scriptContent: build({ worktreePath, baseCmd, seedFile }), seedKick };
+/**
+ * Build the session-aware launch loop (Issue #1233) — the builder-side
+ * expression of the architect resume pattern (#832/#1264): the wrapper pins a
+ * conversation id at entry and *resumes* it after an unnatural exit, instead of
+ * replaying the spawn prompt into a fresh session (the amnesia path this issue
+ * removes). A jetsam SIGKILL now costs 2 seconds, not the builder's memory.
+ *
+ * State machine, expressed in generated bash because builder liveness is
+ * deliberately decoupled from Tower (persistent PTYs survive Tower restarts,
+ * so no Node process is guaranteed to be around when the crash fires):
+ *
+ * - Entry: `initial` if given (the recover path's discovered-id resume), else
+ *   the pinned fresh invocation (`--session-id` + role + prompt).
+ * - Unnatural exit → resume `$codev_session_id` with a short nudge prompt, so
+ *   the restored builder re-orients and continues rather than idling.
+ * - Clean exit → Enter-gated relaunch stays FRESH per #1267/#1264 ("a clean
+ *   exit ends that conversation"), but pinned to a newly minted id so the new
+ *   conversation is crash-protected too. Sticky and one-way, like #1267.
+ * - Unresumable-session degrade (#1145/#1149 lesson): `--resume` against a
+ *   gone/corrupt/held session dies fast; three consecutive fast failures
+ *   (< CODEV_LAUNCH_FAST_FAIL_SECS, default 15) fall back to a prompt-replay
+ *   fresh launch under a new id — today's behavior, crash-protected forward.
+ *   A slow failure resets the counter.
+ * - Id minting at runtime uses uuidgen (lowercased) or /proc fallback; when
+ *   neither exists the relaunch degrades to the UNPINNED fresh invocation —
+ *   exactly the historical command — and crash restarts stay unpinned rather
+ *   than resuming a stale id.
+ *
+ * `.builder-session-id` always holds the current id (removed while unpinned).
+ * The bash script is the sole writer: after a re-mint it is the only party
+ * that knows the current id, so Node- or DB-side copies would go stale
+ * (consumption by recover/--resume is Issue #1112's scope).
+ */
+export function buildSessionLaunchLoop(opts: {
+  /** Initial value of $codev_session_id: spawn-minted, or the discovered id on the recover path. */
+  sessionId: string;
+  /** Entry command override (recover path). Defaults to the pinned fresh invocation. */
+  initial?: string;
+  /** Fresh conversation pinned to $codev_session_id: role + pin + prompt. */
+  pinnedFresh: string;
+  /** The historical unpinned fresh invocation — degrade target when no uuid can be minted. */
+  unpinnedFresh: string;
+  /** Resume $codev_session_id with the crash-resume nudge. */
+  resume: string;
+}): string {
+  const entry = opts.initial ?? opts.pinnedFresh;
+  return `codev_session_id='${shellEscapeSingleQuote(opts.sessionId)}'
+codev_fast_fail_secs="\${CODEV_LAUNCH_FAST_FAIL_SECS:-15}"
+codev_mint_session_id() {
+  if command -v uuidgen >/dev/null 2>&1; then
+    uuidgen | tr '[:upper:]' '[:lower:]'
+  elif [ -r /proc/sys/kernel/random/uuid ]; then
+    cat /proc/sys/kernel/random/uuid
+  fi
+}
+codev_persist_session_id() {
+  printf '%s\\n' "$codev_session_id" > '.builder-session-id'
+}
+codev_launch_entry() {
+  ${entry}
+}
+codev_launch_pinned() {
+  ${opts.pinnedFresh}
+}
+codev_launch_unpinned() {
+  ${opts.unpinnedFresh}
+}
+codev_launch_resume() {
+  ${opts.resume}
+}
+codev_relaunch_fresh() {
+  codev_new_session_id="$(codev_mint_session_id)"
+  if [ -n "$codev_new_session_id" ]; then
+    codev_session_id="$codev_new_session_id"
+    codev_persist_session_id
+    codev_launch=codev_launch_pinned
+  else
+    codev_session_id=''
+    rm -f '.builder-session-id'
+    codev_launch=codev_launch_unpinned
+  fi
+}
+codev_launch=codev_launch_entry
+codev_fast_fails=0
+codev_persist_session_id
+while true; do
+  codev_started=$SECONDS
+  "$codev_launch"
+  status=$?
+  codev_elapsed=$(( SECONDS - codev_started ))
+  if [ "$status" -eq 0 ]; then
+    clear
+    echo "Agent exited at your request. Press Enter to relaunch fresh, or close this terminal."
+    read -r || exit 0
+    codev_relaunch_fresh
+    codev_fast_fails=0
+    continue
+  fi
+  if [ "$codev_elapsed" -lt "$codev_fast_fail_secs" ]; then
+    codev_fast_fails=$(( codev_fast_fails + 1 ))
+  else
+    codev_fast_fails=0
+  fi
+  echo ""
+  if [ "$codev_fast_fails" -ge 3 ]; then
+    echo "Agent failing immediately (code $status). Starting a fresh conversation with the original prompt in 2 seconds... (Ctrl+C to quit)"
+    codev_relaunch_fresh
+    codev_fast_fails=0
+  elif [ "$codev_launch" = codev_launch_unpinned ]; then
+    echo "Agent exited (code $status). Restarting in 2 seconds... (Ctrl+C to quit)"
+  else
+    echo "Agent exited (code $status). Resuming the conversation in 2 seconds... (Ctrl+C to quit)"
+    codev_launch=codev_launch_resume
+  fi
+  sleep 2
+done
+`;
 }
 
 /**
  * Start a terminal session for a builder.
  *
- * When `resume` is provided, the launch script invokes the harness's resume
+ * When `resume` is provided, the launch script *enters* on the harness's resume
  * form (e.g. `claude --resume <uuid>`) via the pre-escaped `scriptFragment`
- * instead of a fresh prompt+role invocation. The saved conversation contains
- * the system prompt / role context already, so role injection and the initial
- * prompt are intentionally skipped on that path. Only the Claude and Kimi
- * harnesses produce a resume object (Issues #929, #1201); codex/gemini pass
- * `undefined` here and take the fresh role-injection path.
+ * rather than a prompt+role invocation: the saved conversation already contains
+ * the system prompt and role context. Only the Claude harness produces a resume
+ * object (Issue #929); codex/gemini pass `undefined` here and enter fresh.
+ *
+ * Issue #1267: the script still *carries* the fresh invocation, because a clean
+ * exit relaunches with it (see `buildLaunchLoop`). That is why role injection
+ * and the harness worktree files are prepared on the resume path too — the
+ * relaunch is a genuine fresh launch and needs everything one needs.
+ * `.builder-prompt.txt` is the deliberate exception: it is read, never
+ * rewritten, on resume (see below).
  */
 export async function startBuilderSession(
   config: Config,
@@ -873,35 +1011,30 @@ export async function startBuilderSession(
   logger.info('Creating terminal session...');
 
   const scriptPath = resolve(worktreePath, '.builder-start.sh');
-  let scriptContent: string;
-  let seedKick: SeedKickRequest | undefined;
+  const promptFile = resolve(worktreePath, '.builder-prompt.txt');
 
-  const sessionHarness = getBuilderHarness(config.workspaceRoot);
-  if (sessionHarness.buildBuilderLaunchScript) {
-    // Provider-owned launch shape (Issue #1201 — Kimi): the harness generates
-    // the entire script (seed bootstrap / pinned-id loop); no role flags, no
-    // positional prompt.
-    ({ scriptContent, seedKick } = buildProviderOwnedScript(
-      sessionHarness, worktreePath, baseCmd, prompt, roleContent, roleSource, resume,
-    ));
-  } else if (resume) {
-    // Resume path: load the prior conversation via the harness-provided,
-    // shell-escaped resume fragment. No prompt file, no role injection — both
-    // are already part of the saved conversation.
-    logger.info(`Resuming session ${resume.sessionId.slice(0, 8)}…`);
-    scriptContent = `#!/bin/bash
-cd "${worktreePath}"
-while true; do
-  ${baseCmd} ${resume.scriptFragment}
-${LAUNCH_LOOP_TAIL}
-done
-`;
-  } else if (roleContent) {
-    // Fresh spawn with role injection.
-    // Write initial prompt to a file for reference.
-    const promptFile = resolve(worktreePath, '.builder-prompt.txt');
-    writeFileSync(promptFile, prompt);
+  // Write the initial prompt to a file the launch command reads back.
+  //
+  // Issue #1267: a resume must NOT rewrite it. `afx reset` reads the literal
+  // `## Mode: STRICT|SOFT` heading out of this file as spawn-time ground truth
+  // (reset/context.ts: modeFromBuilderPrompt) precisely *because* `--resume`
+  // never regenerates it — `resolveMode` cannot recover a spawn-time `--soft`
+  // from protocol defaults, so regenerating here would silently flip a soft
+  // builder to strict. The fresh relaunch reads what the original spawn wrote,
+  // which is also the more correct prompt: it is that builder's real mission.
+  //
+  // That the file exists on the resume path is an invariant of this function,
+  // not an assumption about the worktree: every non-resume branch writes it, and
+  // a resume is by definition a second launch into a worktree a prior one set
+  // up. Worktree-mode spawns, which have no prompt file, are generated by
+  // `buildWorktreeLaunchScript` and never reach here.
+  if (!resume) writeFileSync(promptFile, prompt);
 
+  const harness = getBuilderHarness(config.workspaceRoot);
+  let envBlock = '';
+  let roleFragment = '';
+
+  if (roleContent) {
     // Write role to a file for harness-based injection
     const roleFile = resolve(worktreePath, '.builder-role.md');
     // Inject the actual dashboard port into the role prompt
@@ -909,42 +1042,81 @@ done
     writeFileSync(roleFile, roleWithPort);
     logger.info(`Loaded role (${roleSource})`);
 
-    // Resolve harness provider for role injection
-    const harness = sessionHarness;
     const { fragment, env } = harness.buildScriptRoleInjection(roleWithPort, roleFile);
+    roleFragment = fragment;
     const envExports = Object.entries(env)
       .map(([k, v]) => `export ${k}='${shellEscapeSingleQuote(v)}'`)
       .join('\n');
-    const envBlock = envExports ? `${envExports}\n` : '';
+    envBlock = envExports ? `${envExports}\n` : '';
 
     // Write any harness-specific worktree files (e.g., opencode.json for OpenCode,
     // the write-guard hook for Claude — Issue #1018)
     installHarnessWorktreeFiles(harness, roleWithPort, roleFile, worktreePath);
-
-    scriptContent = `#!/bin/bash
-cd "${worktreePath}"
-${envBlock}while true; do
-  ${baseCmd} ${fragment} "$(cat '${promptFile}')"
-${LAUNCH_LOOP_TAIL}
-done
-`;
   } else {
-    // Fresh spawn without role injection.
-    const promptFile = resolve(worktreePath, '.builder-prompt.txt');
-    writeFileSync(promptFile, prompt);
-
     // Install harness worktree files even without a role, so the write-guard
     // (Issue #1018) is deterministic across all Claude spawn modes.
-    installHarnessWorktreeFiles(sessionHarness, '', '', worktreePath);
-
-    scriptContent = `#!/bin/bash
-cd "${worktreePath}"
-while true; do
-  ${baseCmd} "$(cat '${promptFile}')"
-${LAUNCH_LOOP_TAIL}
-done
-`;
+    installHarnessWorktreeFiles(harness, '', '', worktreePath);
   }
+
+  // With a role, the fragment is appended even when empty (gemini injects via
+  // env only, fragment '') — preserving the historical command text exactly,
+  // double space included, so session-less scripts stay byte-identical.
+  const withRole = roleContent ? `${baseCmd} ${roleFragment}` : baseCmd;
+  const promptArg = `"$(cat '${promptFile}')"`;
+  const freshCommand = `${withRole} ${promptArg}`;
+
+  if (resume) {
+    logger.info(`Resuming session ${resume.sessionId.slice(0, 8)}…`);
+  }
+
+  // Provider-owned launch shape (Issue #1201 — Kimi). Taken before the generic
+  // loops because the reasons for it are exactly what those loops assume away:
+  // a CLI with no positional prompt (the task is queued on the mailbox instead)
+  // and no launch-time session id to pin (the crash path resumes by cwd). Role
+  // injection, the prompt file, and the harness worktree files are all prepared
+  // above on this path too — the provider gets the same inputs, and its script
+  // decides the shape.
+  if (harness.buildBuilderLaunchScript) {
+    harness.prepareWorkspace?.(worktreePath);
+    const scriptContent = harness.buildBuilderLaunchScript({
+      worktreePath, baseCmd, roleFragment, taskFile: promptFile, builderId,
+    });
+    writeFileSync(scriptPath, scriptContent);
+    chmodSync(scriptPath, '755');
+    logger.info('Creating PTY terminal session...');
+    const { terminalId } = await createPtySession(
+      config, '/bin/bash', [scriptPath], worktreePath,
+      { workspacePath: config.workspaceRoot, type: 'builder', roleId: builderId },
+    );
+    logger.info(`Terminal session created: ${terminalId}`);
+    return { terminalId };
+  }
+
+  const sessionForms = scriptSessionForms(harness);
+  let loop: string;
+  if (sessionForms) {
+    // Issue #1233: session-aware loop — crash restarts resume the conversation
+    // instead of replaying the spawn prompt into a fresh (amnesiac) session.
+    // Fresh spawns mint a new id here (never reuse a persisted one — #1224);
+    // the recover path enters on the harness-discovered id.
+    const sessionId = resume ? resume.sessionId : randomUUID();
+    loop = buildSessionLaunchLoop({
+      sessionId,
+      initial: resume ? `${baseCmd} ${resume.scriptFragment}` : undefined,
+      pinnedFresh: `${withRole} ${sessionForms.newSessionScriptFragment(SESSION_ID_EXPR)} ${promptArg}`,
+      unpinnedFresh: freshCommand,
+      resume: `${baseCmd} ${sessionForms.resumeScriptFragment(SESSION_ID_EXPR)} '${shellEscapeSingleQuote(CRASH_RESUME_NUDGE)}'`,
+    });
+  } else {
+    // Session-less harness (codex/gemini/opencode/custom): historical loop,
+    // byte for byte. Resume entry via the pre-escaped harness fragment.
+    const initialCommand = resume ? `${baseCmd} ${resume.scriptFragment}` : freshCommand;
+    loop = buildLaunchLoop(initialCommand, freshCommand);
+  }
+
+  const scriptContent = `#!/bin/bash
+cd "${worktreePath}"
+${envBlock}${loop}`;
 
   writeFileSync(scriptPath, scriptContent);
   chmodSync(scriptPath, '755');
@@ -957,7 +1129,6 @@ done
     [scriptPath],
     worktreePath,
     { workspacePath: config.workspaceRoot, type: 'builder', roleId: builderId },
-    seedKick,
   );
   logger.info(`Terminal session created: ${terminalId}`);
   return { terminalId };
@@ -993,50 +1164,61 @@ export function buildWorktreeLaunchScript(
   role: { content: string; source: string } | null,
   workspaceRoot?: string,
 ): string {
-  const worktreeHarness = getBuilderHarness(workspaceRoot);
-  if (worktreeHarness.buildBuilderLaunchScript) {
-    // Provider-owned launch shape (Issue #1201 — Kimi). Interactive worktree
-    // mode has no initial prompt, so no seed kick is armed: the seed wrapper
-    // tells the agent to await instructions typed in the session.
-    const { scriptContent } = buildProviderOwnedScript(
-      worktreeHarness, worktreePath, baseCmd, null, role?.content ?? null, role?.source ?? null,
-    );
-    return scriptContent;
-  }
+  const harness = getBuilderHarness(workspaceRoot);
+  let envBlock = '';
+  let command = baseCmd;
+
   if (role) {
     const roleFile = resolve(worktreePath, '.builder-role.md');
     const roleWithPort = role.content.replace(/\{PORT\}/g, String(DEFAULT_TOWER_PORT));
     writeFileSync(roleFile, roleWithPort);
     logger.info(`Loaded role (${role.source})`);
 
-    // Resolve harness provider for role injection
-    const harness = worktreeHarness;
     const { fragment, env } = harness.buildScriptRoleInjection(roleWithPort, roleFile);
     const envExports = Object.entries(env)
       .map(([k, v]) => `export ${k}='${shellEscapeSingleQuote(v)}'`)
       .join('\n');
-    const envBlock = envExports ? `${envExports}\n` : '';
+    envBlock = envExports ? `${envExports}\n` : '';
 
     // Write any harness-specific worktree files (e.g., opencode.json for OpenCode,
     // the write-guard hook for Claude — Issue #1018)
     installHarnessWorktreeFiles(harness, roleWithPort, roleFile, worktreePath);
 
-    return `#!/bin/bash
-cd "${worktreePath}"
-${envBlock}while true; do
-  ${baseCmd} ${fragment}
-${LAUNCH_LOOP_TAIL}
-done
-`;
+    command = `${baseCmd} ${fragment}`;
+  } else {
+    // Install harness worktree files even without a role, so the write-guard
+    // (Issue #1018) is deterministic across all Claude spawn modes.
+    installHarnessWorktreeFiles(harness, '', '', worktreePath);
   }
-  // Install harness worktree files even without a role, so the write-guard
-  // (Issue #1018) is deterministic across all Claude spawn modes.
-  installHarnessWorktreeFiles(worktreeHarness, '', '', worktreePath);
+
+  // Provider-owned launch shape (Issue #1201 — Kimi). Worktree mode has no
+  // initial task, so the provider gets `taskFile: null` and generates its plain
+  // loop: nothing is queued on the mailbox, and the operator drives the session
+  // by typing into it.
+  if (harness.buildBuilderLaunchScript) {
+    harness.prepareWorkspace?.(worktreePath);
+    return harness.buildBuilderLaunchScript({
+      worktreePath, baseCmd,
+      roleFragment: role ? command.slice(baseCmd.length + 1) : '',
+      taskFile: null,
+    });
+  }
+
+  // Worktree mode never enters on a resume, but the loop itself is
+  // session-aware when the harness supports it (Issue #1233): crash restarts
+  // resume the pinned conversation here too. There is no prompt file in this
+  // mode, so the fresh and degraded invocations are the bare command.
+  const sessionForms = scriptSessionForms(harness);
+  const loop = sessionForms
+    ? buildSessionLaunchLoop({
+      sessionId: randomUUID(),
+      pinnedFresh: `${command} ${sessionForms.newSessionScriptFragment(SESSION_ID_EXPR)}`,
+      unpinnedFresh: command,
+      resume: `${baseCmd} ${sessionForms.resumeScriptFragment(SESSION_ID_EXPR)} '${shellEscapeSingleQuote(CRASH_RESUME_NUDGE)}'`,
+    })
+    : buildLaunchLoop(command, command);
+
   return `#!/bin/bash
 cd "${worktreePath}"
-while true; do
-  ${baseCmd}
-${LAUNCH_LOOP_TAIL}
-done
-`;
+${envBlock}${loop}`;
 }

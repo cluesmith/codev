@@ -63,6 +63,19 @@ vi.mock('chalk', () => ({
   },
 }));
 
+/**
+ * The sandbox pins installed by the vitest harness (`vitest-setup.ts`), captured
+ * before any test overrides them. Tests restore *these* rather than deleting, so
+ * the fake-agy pin survives for the rest of the file (#1323).
+ */
+const harnessAgyBin = process.env.CODEV_AGY_BIN;
+const harnessAgyAuthCacheDir = process.env.CODEV_AGY_AUTH_CACHE_DIR;
+
+function restoreEnv(key: string, prior: string | undefined): void {
+  if (prior === undefined) delete process.env[key];
+  else process.env[key] = prior;
+}
+
 describe('consult command', () => {
   const testBaseDir = path.join(tmpdir(), `codev-consult-test-${Date.now()}`);
   let originalCwd: string;
@@ -536,7 +549,7 @@ describe('consult command', () => {
       expect(mockQueryFn).toHaveBeenCalledTimes(1);
       const callArgs = mockQueryFn.mock.calls[0][0];
       expect(callArgs.options.allowedTools).toEqual(['Read', 'Glob', 'Grep']);
-      expect(callArgs.options.model).toBe('claude-opus-4-6');
+      expect(callArgs.options.model).toBe('claude-opus-5');
       expect(callArgs.options.maxTurns).toBe(200);
       expect(callArgs.options.maxBudgetUsd).toBe(25);
       expect(callArgs.options.permissionMode).toBe('bypassPermissions');
@@ -745,8 +758,11 @@ describe('consult command', () => {
     });
 
     afterEach(() => {
-      delete process.env.CODEV_AGY_BIN;
-      delete process.env.CODEV_AGY_AUTH_CACHE_DIR;
+      // Restore, never delete: a bare delete drops the vitest harness's
+      // fake-agy pin for every later test in the file, which is how tests came
+      // to resolve — and spawn — the developer's real agy binary (#1323).
+      restoreEnv('CODEV_AGY_BIN', harnessAgyBin);
+      restoreEnv('CODEV_AGY_AUTH_CACHE_DIR', harnessAgyAuthCacheDir);
     });
 
     async function loadAgy() {
@@ -914,7 +930,7 @@ describe('consult command', () => {
   });
 
   describe('agy binary resolution (resolveAgyBin / isRealAgyCli)', () => {
-    afterEach(() => { delete process.env.CODEV_AGY_BIN; });
+    afterEach(() => { restoreEnv('CODEV_AGY_BIN', harnessAgyBin); });
 
     it('isRealAgyCli accepts a real standalone binary', async () => {
       const { isRealAgyCli } = await import('../commands/consult/index.js');

@@ -64,7 +64,7 @@ vi.mock('../commands/dev-shared.js', () => ({
 vi.mock('../load-worktree-config.js', () => ({
   loadWorktreeConfig: async () => null,
 }));
-vi.mock('@cluesmith/codev-core/workspace', () => ({
+vi.mock('@cluesmith/codev-sdk/workspace', () => ({
   encodeWorkspacePath: (p: string) => Buffer.from(p).toString('base64url'),
 }));
 

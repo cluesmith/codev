@@ -2,7 +2,8 @@ import * as vscode from 'vscode';
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { TowerClient } from '@cluesmith/codev-core/tower-client';
+import { TowerClient } from '@cluesmith/codev-sdk/tower-client';
+import { readLocalKey } from '@cluesmith/codev-sdk/node';
 import { getTowerAddress } from './workspace-detector.js';
 
 /**
@@ -118,7 +119,7 @@ export async function restartTower(
   // success — a "successful" restart that left the user on the old version is
   // exactly the silent divergence this feature exists to surface.
   const { host, port } = getTowerAddress();
-  const client = new TowerClient({ host, port });
+  const client = new TowerClient({ host, port, getAuthKey: readLocalKey });
   const deadline = Date.now() + SHUTDOWN_TIMEOUT_MS;
   while (await client.isRunning()) {
     if (Date.now() >= deadline) {

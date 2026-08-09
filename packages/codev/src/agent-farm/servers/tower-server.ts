@@ -32,7 +32,6 @@ import {
   shutdownTunnel,
 } from './tower-tunnel.js';
 import { initCron, shutdownCron } from './tower-cron.js';
-import { resolveTarget } from './tower-messages.js';
 import {
   initInstances,
   shutdownInstances,
@@ -56,7 +55,9 @@ import {
 import {
   setupUpgradeHandler,
 } from './tower-websocket.js';
-import { handleRequest, startSendBuffer, stopSendBuffer } from './tower-routes.js';
+import { handleRequest, deliverCronMessage } from './tower-routes.js';
+import { startMailboxDrainer, stopMailboxDrainer, setMailboxBroadcaster } from './mailbox-wiring.js';
+import { shutdownDelayedSends } from './delayed-send.js';
 import type { RouteContext } from './tower-routes.js';
 import { setCodevConfigNotifier, stopAllCodevConfigWatchers } from './codev-config-watcher.js';
 import { getGlobalDb } from '../db/index.js';
@@ -181,8 +182,21 @@ async function gracefulShutdown(signal: string): Promise<void> {
   if (sessionLogSweepInterval) clearInterval(sessionLogSweepInterval);
   clearInterval(sseHeartbeatInterval);
 
-  // 4b. Flush and stop send buffer (Spec 403) — delivers any deferred messages
-  stopSendBuffer();
+  // 4b. Drop pending delayed sends FIRST (Spec 1307 `--delay`). Cancels every timer
+  // still waiting to fire and bumps the delayed-send generation, so a timer that
+  // fires mid-shutdown is a no-op at its delivery site rather than enqueuing a
+  // mailbox row after teardown has begun. Delayed sends are in-memory by design
+  // (dropped on restart) — the re-homed due-time callback enqueues to the mailbox
+  // only WHEN due, so a not-yet-due send has nothing persisted to recover; re-send
+  // if still wanted.
+  const droppedDelayed = shutdownDelayedSends();
+  if (droppedDelayed > 0) {
+    log('INFO', `Dropped ${droppedDelayed} pending delayed send(s) — re-send them if still wanted`);
+  }
+
+  // 4c. Stop the mailbox backstop drainer (Spec 1313) — no force-flush; held
+  // rows persist in SQLite and redeliver on a clean gate after restart.
+  stopMailboxDrainer();
 
   // 5. Stop cron scheduler (Spec 399)
   shutdownCron();
@@ -362,17 +376,83 @@ const routeCtx: RouteContext = {
 // route handler (/api/worktree-config, /api/activity-hooks) on first request.
 setCodevConfigNotifier(broadcastNotification);
 
+// Spec 1313 Phase 7: wire the same SSE broadcaster into the mailbox delivery path so
+// its held-set events reach clients — `overview-changed` on a held-state change (keeps
+// the held-count indicator live) and `mailbox-escalation` when a row crosses the
+// escalation age (moves the indicator into its attention state). The pure delivery
+// module and the boot-time drainer have no RouteContext, so they fan out through here.
+setMailboxBroadcaster(broadcastNotification);
+
+// ============================================================================
+// Readiness gate (Issue #1261)
+// ============================================================================
+//
+// The port must bind first — it is the single-Tower mutex (a second
+// `afx tower start` detects EADDRINUSE) and the thing every readiness check
+// probes. But binding used to mean "serving", and the boot sequence that wires
+// up the request handlers' dependencies ran *after* the bind. Requests landing
+// in that window were answered with whatever a half-wired Tower could produce:
+// `DELETE /api/terminals/:id` returned 404 for a terminal that plainly existed,
+// because `killTerminalWithShellper()` bails when `_deps` is null.
+//
+// So: bind immediately, but hold requests until `bootSequence()` finishes.
+// Readiness becomes deterministic instead of a function of how long the boot's
+// disk work happens to take on this machine.
+
+// Boot is bounded by the maintenance work that stays *inside* it; anything
+// slower than this is a hang, and a held request should not hang with it.
+const BOOT_READY_TIMEOUT_MS = 20_000;
+
+const bootStartedAtMs = Date.now();
+let bootComplete = false;
+const bootWaiters: Array<() => void> = [];
+
+/** Open the gate: release every held request and admit all future ones. */
+function markBootComplete(): void {
+  if (bootComplete) return;
+  bootComplete = true;
+  log('INFO', `Tower ready — serving API requests (${Date.now() - bootStartedAtMs}ms after process start)`);
+  for (const release of bootWaiters.splice(0)) release();
+}
+
+/** Resolves true once boot completes, or false if it takes longer than `timeoutMs`. */
+function whenBootComplete(timeoutMs: number): Promise<boolean> {
+  if (bootComplete) return Promise.resolve(true);
+  return new Promise<boolean>((resolve) => {
+    const timer = setTimeout(() => {
+      const index = bootWaiters.indexOf(release);
+      if (index !== -1) bootWaiters.splice(index, 1);
+      resolve(false);
+    }, timeoutMs);
+    const release = (): void => {
+      clearTimeout(timer);
+      resolve(true);
+    };
+    bootWaiters.push(release);
+  });
+}
+
 // ============================================================================
 // Create server — delegates all HTTP handling to tower-routes.ts
 // ============================================================================
 
 const server = http.createServer(async (req, res) => {
+  if (!bootComplete) {
+    if (!(await whenBootComplete(BOOT_READY_TIMEOUT_MS))) {
+      log('ERROR', `Boot did not complete within ${BOOT_READY_TIMEOUT_MS}ms; rejecting ${req.method} ${req.url} with 503`);
+      res.writeHead(503, { 'Content-Type': 'application/json', 'Retry-After': '1' });
+      res.end(JSON.stringify({ error: 'STARTING_UP', message: 'Tower is starting up. Try again shortly.' }));
+      return;
+    }
+    // The client may have given up while it was held.
+    if (res.destroyed || res.writableEnded) return;
+  }
   await handleRequest(req, res, routeCtx);
 });
 
 // SECURITY: Bind to configured host (default 127.0.0.1 for localhost-only).
 // Bridge mode enables non-localhost binding when BRIDGE_MODE=1 is set.
-server.listen(port, bindHost, async () => {
+server.listen(port, bindHost, () => {
   if (bridgeMode) {
     log('WARN', `Bridge mode is ENABLED — Tower is listening on ${bindHost} network interfaces.`);
   }
@@ -380,6 +460,22 @@ server.listen(port, bindHost, async () => {
   const displayHost = bindHost === '0.0.0.0' ? 'localhost' : bindHost;
   log('INFO', `Tower server listening at http://${displayHost}:${port}`);
 
+  bootSequence().catch((err) => {
+    // Preserve the previous fail-fast behaviour: before Issue #1261 this body
+    // was the listen callback, so a throw surfaced as an unhandled rejection
+    // and the process-level handler exited. Keep exiting rather than serving
+    // from a half-wired Tower.
+    log('ERROR', `Tower boot sequence failed: ${(err as Error).message}\n${(err as Error).stack}`);
+    process.exit(1);
+  });
+});
+
+/**
+ * Everything that must be wired up before Tower can answer API requests
+ * correctly. Runs once, immediately after the port binds; requests are held by
+ * the readiness gate above until it calls markBootComplete().
+ */
+async function bootSequence(): Promise<void> {
   // Initialize shellper session manager for persistent terminals
   const socketDir = process.env.SHELLPER_SOCKET_DIR || path.join(homedir(), '.codev', 'run');
   const shellperScript = path.join(__dirname, '..', '..', 'terminal', 'shellper-main.js');
@@ -395,6 +491,20 @@ server.listen(port, bindHost, async () => {
   // failed reconnect was completely invisible in the Tower log.
   shellperManager.on('session-error', (sessionId: string, err: Error) => {
     log('ERROR', `Shellper session ${sessionId}: ${err.message}`);
+  });
+
+  // #1264: SessionManager stopped respawning a session for a reason the user
+  // needs to see. Put it in the terminal itself, not just the Tower log — the
+  // person affected is watching a pane that just went quiet, and has no reason
+  // to go reading server logs to find out why.
+  shellperManager.on('session-gave-up', (sessionId: string, reason: string) => {
+    log('ERROR', `Shellper session ${sessionId} gave up: ${reason}`);
+    const ptySession = getTerminalManager().findByShellperSessionId(sessionId);
+    if (!ptySession) {
+      log('WARN', `Shellper session ${sessionId} gave up but no matching terminal session found to notify`);
+      return;
+    }
+    ptySession.notice(reason);
   });
 
   // #1198: SessionManager re-established a session's connection in place
@@ -494,8 +604,10 @@ server.listen(port, bindHost, async () => {
   }, TERMINAL_MONITOR_INTERVAL_MS);
   terminalPartialMonitorInterval.unref();
 
-  // Spec 403: Start send buffer for typing-aware message delivery
-  startSendBuffer(log);
+  // Spec 1313: start the mailbox backstop drainer (prunes terminal rows, then
+  // periodically redelivers held mail on a clean render-gate). Replaces the
+  // retired Spec 403 SendBuffer.
+  startMailboxDrainer(log);
 
   // Issue #1118: one-time state.db → global.db consolidation. Runs once ever
   // (strict `_consolidation` marker), BEFORE initInstances() reads architect /
@@ -530,9 +642,56 @@ server.listen(port, bindHost, async () => {
     log('INFO', `Killed ${orphansKilled} orphaned shellper process(es)`);
   }
 
+  // Issue #1261 test hook: widen the pre-wiring window to a known duration so
+  // the startup race is deterministic instead of a function of this machine's
+  // process table and session-log volume. Never set outside tests.
+  const bootDelayMs = parseInt(process.env.AF_TEST_BOOT_DELAY_MS || '0', 10);
+  if (bootDelayMs > 0) {
+    log('WARN', `AF_TEST_BOOT_DELAY_MS=${bootDelayMs} — delaying dependency wiring (test hook)`);
+    await new Promise((r) => setTimeout(r, bootDelayMs));
+  }
+
+  // Spec 0105 Phase 3: Initialize instance lifecycle module.
+  // Placed after reconciliation so getInstances() cannot race with it.
+  //
+  // Issue #1261: this used to be the *last* step of the boot sequence, after
+  // the husk sweep and the session-log retention scan — both of which scale
+  // with disk state. Every route that touches `_deps` was therefore broken for
+  // as long as those scans took. It only needs to follow reconciliation, so it
+  // now runs here and the two maintenance sweeps run after readiness instead.
+  initInstances({
+    log,
+    workspaceTerminals: getWorkspaceTerminals(),
+    getTerminalManager,
+    shellperManager,
+    getWorkspaceTerminalsEntry,
+    saveTerminalSession,
+    deleteTerminalSession,
+    deleteWorkspaceTerminalSessions,
+    deleteFileTabsForWorkspace,
+    getTerminalsForWorkspace,
+  });
+
+  // Spec 399: Initialize cron scheduler after instances are ready.
+  // Spec 1313 (Phase 6): cron delivers through the mailbox + gate via `deliverCronMessage`
+  // (the same single gated path as `handleSend`) instead of a blind PTY write.
+  initCron({
+    log,
+    getKnownWorkspacePaths,
+    deliver: (task, message) => deliverCronMessage(task, message, log),
+  });
+
+  // Issue #1261: dependency wiring is complete — open the gate. Everything
+  // below is maintenance or background service startup: it must not gate the
+  // API, and none of it is a prerequisite for a correct response.
+  markBootComplete();
+
   // Issue #1227: run the stricter husk sweep once at startup too, same
   // ordering requirement as killOrphanedShellpers (must run after
   // reconciliation so a reconnected session's shellper is registered).
+  // Safe to run post-readiness: the sweep's predicate requires an aged
+  // shellper (1h grace by default), so a session created by an incoming
+  // request while the sweep runs can never match it.
   await runHuskSweep();
 
   // Issue #1238: PTY session log retention. Session logs are per-session files
@@ -569,36 +728,15 @@ server.listen(port, bindHost, async () => {
     sessionLogSweepInterval.unref();
   }
 
-  // Spec 0105 Phase 3: Initialize instance lifecycle module.
-  // Placed after reconciliation so getInstances() returns [] during startup
-  // (since _deps is null), preventing race conditions with reconciliation.
-  initInstances({
-    log,
-    workspaceTerminals: getWorkspaceTerminals(),
-    getTerminalManager,
-    shellperManager,
-    getWorkspaceTerminalsEntry,
-    saveTerminalSession,
-    deleteTerminalSession,
-    deleteWorkspaceTerminalSessions,
-    deleteFileTabsForWorkspace,
-    getTerminalsForWorkspace,
-  });
-
-  // Spec 399: Initialize cron scheduler after instances are ready
-  initCron({
-    log,
-    getKnownWorkspacePaths,
-    resolveTarget,
-    getTerminalManager: () => getTerminalManager(),
-  });
-
-  // Spec 0097 Phase 4 / Spec 0105 Phase 2: Initialize cloud tunnel
+  // Spec 0097 Phase 4 / Spec 0105 Phase 2: Initialize cloud tunnel.
+  // Deliberately after markBootComplete(): connectTunnel() talks to a remote
+  // service, so gating local API readiness on it would make an unreachable
+  // cloud endpoint look like a broken Tower.
   await initTunnel(
     { port, log, workspaceTerminals: getWorkspaceTerminals(), terminalManager: getTerminalManager() },
     { getInstances },
   );
-});
+}
 
 // Initialize terminal WebSocket server (Phase 2 - Spec 0090)
 terminalWss = new WebSocketServer({ noServer: true });

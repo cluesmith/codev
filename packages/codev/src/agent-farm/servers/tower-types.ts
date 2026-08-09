@@ -6,7 +6,7 @@
 import type http from 'node:http';
 import type { WebSocketServer } from 'ws';
 import type Database from 'better-sqlite3';
-import type { TerminalType } from '@cluesmith/codev-core/tower-client';
+import type { TerminalType } from '@cluesmith/codev-sdk/tower-client';
 import type { TerminalManager } from '../../terminal/pty-manager.js';
 import type { SessionManager } from '../../terminal/session-manager.js';
 import type { TunnelClient } from '../lib/tunnel-client.js';
@@ -120,5 +120,6 @@ export interface DbTerminalSession {
   shellper_start_time: number | null;
   label: string | null;
   cwd: string | null;
+  command: string | null;
   created_at: string;
 }

@@ -1,8 +1,8 @@
 import * as vscode from 'vscode';
 import WebSocket from 'ws';
 import { FRAME_CONTROL, FRAME_DATA, type ControlMessage } from '@cluesmith/codev-types';
-import { EscapeBuffer } from '@cluesmith/codev-core/escape-buffer';
-import { BackoffController, classifyUpgradeError } from '@cluesmith/codev-core/reconnect-policy';
+import { EscapeBuffer } from '@cluesmith/codev-sdk/escape-buffer';
+import { BackoffController, classifyUpgradeError } from '@cluesmith/codev-sdk/reconnect-policy';
 
 const CHUNK_SIZE = 16384; // 16KB — chunk onDidWrite to avoid CPU spikes
 const MAX_QUEUE = 1048576; // 1MB — drop live output if the unrendered queue exceeds this

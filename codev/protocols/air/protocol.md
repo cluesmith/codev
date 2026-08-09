@@ -1,92 +1,60 @@
 # AIR Protocol
 
-> **AIR** = **A**utonomous **I**mplement & **R**eview
->
-> A lightweight protocol for small features that are fully specified by their GitHub issue.
-> Two phases: Implement → Review. No spec/plan artifacts.
+**A**utonomous **I**mplement → **R**eview. The lightest protocol that still produces a reviewed
+PR: no spec, no plan, no artifact files. The GitHub issue *is* the specification, and the review
+lives in the PR body.
 
-## What is AIR?
+Use AIR when a small feature (roughly <300 LOC) is fully described by its issue and needs no
+architectural decision, no new abstraction, and no significant refactor. If the issue leaves the
+approach genuinely open, the cost of a spec is lower than the cost of building the wrong thing —
+use SPIR or ASPIR. For a defect rather than a feature, use BUGFIX.
 
-AIR is a minimal protocol for implementing small features (< 300 LOC) where the GitHub issue provides all the requirements. It skips the Specify and Plan phases entirely — the builder implements directly from the issue and creates a PR with the review embedded in the PR body.
+## The state machine
 
-### How AIR Compares
-
-| Aspect | BUGFIX | AIR | ASPIR/SPIR |
-|--------|--------|-----|------------|
-| **Use case** | Bug fixes | Small features | New features |
-| **Input** | GitHub Issue | GitHub Issue | GitHub Issue → Spec |
-| **Phases** | Investigate → Fix → PR | Implement → PR | Specify → Plan → Implement → Review |
-| **Artifacts** | None | None | Spec, plan, review files |
-| **Review location** | PR body | PR body | `codev/reviews/` file |
-| **Consultation** | PR phase only | Optional (builder decides) | Every phase (3-way) |
-| **Human gates** | None (PR gate) | None (PR gate) | Spec + Plan + PR gates (SPIR) |
-| **LOC limit** | < 300 | < 300 | No limit |
-
-### When to Use AIR
-
-- Small features (< 300 LOC)
-- Requirements are clear from the GitHub issue
-- No architectural decisions needed
-- No new abstractions or significant refactoring required
-- Would be overkill for full SPIR/ASPIR ceremony
-
-### When NOT to Use AIR
-
-- Bug fixes → use **BUGFIX**
-- Features needing spec discussion → use **SPIR** or **ASPIR**
-- Amendments to existing specs → use **TICK**
-- Architectural changes → use **SPIR**
-- Complex features with multiple phases → use **SPIR** or **ASPIR**
-
-## Baked Decisions (Optional)
-
-When filing an issue for AIR, you can pin architectural decisions you don't want the builder or CMAP reviewers to re-litigate. Include a `## Baked Decisions` section (any heading level is fine) anywhere in the issue body. Useful categories: language, framework, deployment shape, key dependencies, decisions deferred to a later spec. The builder will treat each listed item as fixed during implementation; CMAP reviewers will not propose alternatives unless the implementation itself fails to honor a stated decision. Leave the section out for issues where you want the builder to explore freely — absence is the no-op default. You can amend or rescind a baked decision at any time by updating the issue and respawning, or by sending the builder a direct instruction via `afx send`.
-
-## Protocol Phases
-
-### I - Implement
-
-The builder reads the GitHub issue and implements the feature:
-
-1. Read and understand the issue requirements
-2. Implement the feature (< 300 LOC)
-3. Write tests
-4. Verify build and tests pass
-5. Commit with descriptive message
-
-If the feature grows beyond 300 LOC or requires architectural decisions, the builder signals `TOO_COMPLEX` to escalate to ASPIR.
-
-### R - Review (PR)
-
-The builder creates a PR with the review embedded in the PR body:
-
-1. Create PR linking to the issue
-2. Include a review section in the PR body (summary, key decisions, test plan)
-3. Optionally run CMAP consultation if the builder judges the complexity warrants it
-4. Notify the architect
-
-The **PR gate** is preserved — a human reviews all code before merge.
-
-## Usage
-
-```bash
-# Spawn a builder using AIR
-afx spawn 42 --protocol air
-
-# The builder implements autonomously and stops at the PR gate
+```json
+{{> protocols/air/protocol.json}}
 ```
 
-## File Structure
+## Artifacts
 
-```
-codev-skeleton/protocols/air/
-├── protocol.json          # Protocol definition
-├── protocol.md            # This file
-├── builder-prompt.md      # Builder instructions (Handlebars template)
-├── prompts/
-│   ├── implement.md       # Implement phase prompt
-│   └── pr.md              # PR phase prompt
-└── consult-types/
-    ├── impl-review.md     # Implementation consultation guide
-    └── pr-review.md       # PR consultation guide
-```
+**None on disk.** The issue carries the requirements; the review goes in the PR body. That is
+the whole economy of AIR — a `codev/reviews/` file for a 200-line change costs more to maintain
+than it ever repays.
+
+## Consultation
+
+At the builder's discretion, unlike SPIR's mandatory 3-way at every phase. Reach for it when the
+change touches shared code or you are unsure the approach is right; skip it when the issue is
+unambiguous and the diff is small.
+
+## Gate
+
+The `pr` gate is human. There are no pre-implementation gates — which is precisely why AIR is
+only appropriate when the issue has already settled the questions a spec would ask.
+
+## Baked Decisions
+
+An issue may carry a `## Baked Decisions` section pinning architectural choices the architect
+does not want re-litigated — typically **language**, **framework**, deployment shape, key
+**dependencies**, or decisions deferred to a later spec.
+
+Every item in it is fixed. Copy the section verbatim into the spec's Constraints and do not
+re-open it in the spec, plan, or review; CMAP reviewers will not propose alternatives unless the
+spec fails to honour one. If two items contradict each other, do not choose — surface the
+contradiction and wait.
+
+**Absence is the no-op default**: an issue with no such section is an invitation to explore
+freely, not an omission to be filled in.
+
+The architect can **amend or rescind** a baked decision at any time by updating the issue and
+respawning, or by sending the builder a direct instruction via `afx send`.
+
+## Escalation
+
+If implementation reveals that the change is not small, or that it needs a decision the issue
+does not make, **stop and say so** rather than growing an AIR project into an unplanned SPIR.
+Escalating early is cheap; discovering it at PR review is not.
+
+## Branch naming
+
+`builder/air-<issue>-<short-description>`

@@ -1,0 +1,17 @@
+id: bugfix-1279
+title: spir-spec-template-is-dead-cod
+protocol: bugfix
+phase: verified
+plan_phases: []
+current_plan_phase: null
+gates:
+  pr:
+    status: approved
+    requested_at: '2026-07-28T18:08:01.883Z'
+    approved_at: '2026-07-29T02:22:18.544Z'
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-07-28T17:44:57.015Z'
+updated_at: '2026-07-29T11:27:18.708Z'
+pr_ready_for_human: false

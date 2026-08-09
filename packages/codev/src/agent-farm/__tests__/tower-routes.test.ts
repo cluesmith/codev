@@ -6,11 +6,22 @@
  * workspace path decoding, and 404 fallback.
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import http from 'node:http';
 import { EventEmitter } from 'node:events';
+import Database from 'better-sqlite3';
 import { handleRequest } from '../servers/tower-routes.js';
 import type { RouteContext } from '../servers/tower-routes.js';
+import { GLOBAL_SCHEMA } from '../db/schema.js';
+import * as mailbox from '../db/mailbox.js';
+import { SessionScreen } from '../../terminal/session-screen.js';
+// Spec 1313 round 3: the real delayed-send timer registry + per-session submission lock
+// (NOT mocked) so the delayed-`--interrupt` reshape is exercised through the same singletons
+// handleSend uses. shutdownDelayedSends() models a Tower restart (bumps the liveness
+// generation); submitToSession lets a test pre-occupy a session's lock to drive the
+// shutdown-during-lock-wait window deterministically.
+import { shutdownDelayedSends } from '../servers/delayed-send.js';
+import { submitToSession, resetSubmissionChains } from '../servers/session-submit.js';
 
 // ============================================================================
 // Mocks
@@ -20,13 +31,14 @@ const { mockGetInstances, mockGetTerminalManager, mockGetSession,
   mockListSessions, mockGetWorkspaceTerminalsEntry, mockGetTerminalsForWorkspace,
   mockGetRehydratedTerminalsEntry,
   mockIsSessionPersistent, mockGetNextShellId,
-  mockResolveTarget, mockBroadcastMessage, mockIsResolveError,
+  mockResolveTarget, mockResolveAgentInRegistry, mockBroadcastMessage, mockIsResolveError,
   mockParseJsonBody,
   mockOverviewGetOverview, mockOverviewInvalidate,
   mockReadCloudConfig,
   mockComputeAnalytics,
   mockGetKnownWorkspacePaths,
-  mockIsStartupReconcileSettled } = vi.hoisted(() => ({
+  mockIsStartupReconcileSettled,
+  sendDbHolder } = vi.hoisted(() => ({
   mockGetInstances: vi.fn(),
   mockGetTerminalManager: vi.fn(),
   mockGetSession: vi.fn(),
@@ -42,6 +54,7 @@ const { mockGetInstances, mockGetTerminalManager, mockGetSession,
   mockIsSessionPersistent: vi.fn(),
   mockGetNextShellId: vi.fn(),
   mockResolveTarget: vi.fn(),
+  mockResolveAgentInRegistry: vi.fn(),
   mockBroadcastMessage: vi.fn(),
   mockIsResolveError: vi.fn((r: any) => 'code' in r),
   mockParseJsonBody: vi.fn(async () => ({})),
@@ -51,6 +64,9 @@ const { mockGetInstances, mockGetTerminalManager, mockGetSession,
   mockComputeAnalytics: vi.fn(),
   mockGetKnownWorkspacePaths: vi.fn(() => []),
   mockIsStartupReconcileSettled: vi.fn(() => true),
+  // Holder for the in-memory global.db used by the Spec 1313 send path (mailbox
+  // persist + gate delivery). Re-created per test in beforeEach.
+  sendDbHolder: { db: null as unknown as import('better-sqlite3').Database },
 }));
 
 vi.mock('../lib/cloud-config.js', () => ({
@@ -63,6 +79,9 @@ vi.mock('../servers/tower-instances.js', () => ({
   getDirectorySuggestions: vi.fn(async () => []),
   launchInstance: vi.fn(async () => ({ success: true })),
   killTerminalWithShellper: vi.fn(async () => true),
+  // Issue #1261: routes that need the instances module ask this first, so a
+  // wired-up Tower is the default for every route test here.
+  instancesReady: vi.fn(() => true),
   stopInstance: vi.fn(async () => ({ ok: true })),
   addArchitect: vi.fn(async () => ({ success: true, name: 'sibling', terminalId: 'term-arch-sibling' })),
   removeArchitect: vi.fn(async () => ({ success: true })),
@@ -83,7 +102,6 @@ vi.mock('../servers/tower-terminals.js', () => ({
   getTerminalsForWorkspace: mockGetTerminalsForWorkspace,
   getRehydratedTerminalsEntry: mockGetRehydratedTerminalsEntry,
   isStartupReconcileSettled: mockIsStartupReconcileSettled,
-  // Issue #1201: message-pacing resolution reads the persisted row (best-effort)
   getTerminalSessionById: vi.fn(() => null),
 }));
 
@@ -96,8 +114,17 @@ vi.mock('../servers/tower-tunnel.js', () => ({
 
 vi.mock('../servers/tower-messages.js', () => ({
   resolveTarget: (...args: unknown[]) => mockResolveTarget(...args),
+  resolveAgentInRegistry: (...args: unknown[]) => mockResolveAgentInRegistry(...args),
   broadcastMessage: (...args: unknown[]) => mockBroadcastMessage(...args),
   isResolveError: (r: any) => mockIsResolveError(r),
+}));
+
+// Spec 1313: handleSend persists every send to global.db and delivers through the
+// gate. Back it with a fresh in-memory DB per test so the mailbox ops are real
+// (no over-mocking of the system under test); only the DB handle is injected.
+vi.mock('../db/index.js', async (importActual) => ({
+  ...(await importActual<typeof import('../db/index.js')>()),
+  getGlobalDb: () => sendDbHolder.db,
 }));
 
 vi.mock('../servers/tower-utils.js', () => ({
@@ -181,12 +208,52 @@ function makeRes(): { res: http.ServerResponse; body: () => string; statusCode: 
 }
 
 // ============================================================================
+/**
+ * A mock PtySession the Spec 1313 render-gate can classify. `ring` is the rendered
+ * composer content: `'❯ '` is a clean claude prompt (gate → deliver); `'❯ draft'`
+ * is an occupied line (gate → hold busy). `command: 'claude'` resolves the profile.
+ *
+ * Round 2: the gate reads the session's persistent `gateScreen` mirror, not the ring, so the
+ * mock feeds the rendered frame into a real {@link SessionScreen} (fed exactly the PTY bytes:
+ * the composer line + the bounding rule the TUI draws below the input — the render-gate
+ * requires that proven lower bound, else a bare marker is an indeterminate partial and is held).
+ * `bytesWritten` is the monotone change token the delivery path samples.
+ */
+function gateSession(mockWrite: (data: string) => void, ring: string, writable = true) {
+  const raw = `${ring}\r\n${'─'.repeat(20)}\r\n`;
+  const gateScreen = new SessionScreen(80, 24);
+  gateScreen.feed(raw);
+  return {
+    // Model a live PTY: every write lands. The delivery path now threads the write's
+    // boolean (Spec 1313 silent-loss fix), so a double whose write returned undefined
+    // would read as a DROPPED write and be held. Wrap mockWrite so call-assertions still
+    // see it while the write reports success.
+    write: (data: string): boolean => { mockWrite(data); return true; },
+    pid: 1234,
+    writable,
+    isUserIdle: () => true,
+    composing: false,
+    command: 'claude',
+    launchArgs: [] as string[],
+    cwd: '/tmp/ws',
+    info: { cols: 80, rows: 24 },
+    bytesWritten: raw.length,
+    gateScreen,
+  };
+}
+
 // Tests
 // ============================================================================
 
 describe('tower-routes', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Fresh in-memory global.db for the Spec 1313 send path (real mailbox ops).
+    sendDbHolder.db = new Database(':memory:');
+    sendDbHolder.db.exec(GLOBAL_SCHEMA);
+    // Default: the registry fallback finds nothing (so a NOT_FOUND target 404s as
+    // before, unless a test opts a known offline agent in).
+    mockResolveAgentInRegistry.mockReturnValue({ code: 'NOT_FOUND', message: 'not registered' });
     mockGetInstances.mockResolvedValue([]);
     mockGetTerminalManager.mockReturnValue({
       listSessions: mockListSessions.mockReturnValue([]),
@@ -947,6 +1014,51 @@ describe('tower-routes', () => {
   });
 
   // =========================================================================
+  // GET /api/terminals/:id — the wire contract for quiescence (Spec 1273)
+  // =========================================================================
+
+  describe('GET /api/terminals/:id (Spec 1273 — lastDataAt on the wire)', () => {
+    // Testing `session.info` alone would not pin this: the whole point of the
+    // phase is that the field reaches a *client*, so afx reset can measure
+    // output quiescence instead of assuming a builder's turn has ended before
+    // typing /clear into its terminal. This asserts the serialised response.
+    it('serialises lastDataAt as an epoch-ms number', async () => {
+      const lastDataAt = 1_753_660_000_000;
+      mockGetTerminalManager.mockReturnValue({
+        getSession: () => ({
+          info: {
+            id: 'term-42', pid: 4242, cols: 80, rows: 24, label: 'builder',
+            status: 'running', createdAt: '2026-07-28T00:00:00.000Z', lastDataAt,
+          },
+        }),
+        listSessions: () => [],
+      });
+
+      const req = makeReq('GET', '/api/terminals/term-42');
+      const { res, statusCode, body } = makeRes();
+      await handleRequest(req, res, makeCtx());
+
+      expect(statusCode()).toBe(200);
+      const parsed = JSON.parse(body());
+      expect(typeof parsed.lastDataAt).toBe('number');
+      expect(parsed.lastDataAt).toBe(lastDataAt);
+    });
+
+    it('returns 404 for an unknown terminal rather than a body without lastDataAt', async () => {
+      mockGetTerminalManager.mockReturnValue({
+        getSession: () => undefined,
+        listSessions: () => [],
+      });
+
+      const req = makeReq('GET', '/api/terminals/term-gone');
+      const { res, statusCode, body } = makeRes();
+      await handleRequest(req, res, makeCtx());
+
+      expect(statusCode()).toBe(404);
+      expect(JSON.parse(body()).error).toBe('NOT_FOUND');
+    });
+  });
+
   // DELETE /api/terminals/:id (Bugfix #290)
   // =========================================================================
 
@@ -979,6 +1091,24 @@ describe('tower-routes', () => {
       const { deleteTerminalSession, removeTerminalFromRegistry } = await import('../servers/tower-terminals.js');
       expect(deleteTerminalSession).not.toHaveBeenCalled();
       expect(removeTerminalFromRegistry).not.toHaveBeenCalled();
+    });
+
+    // Issue #1261: "Tower isn't wired up yet" is not "no such terminal".
+    // Answering 404 sent callers off hunting for a terminal that was there all
+    // along; 503 + Retry-After tells them to try again instead.
+    it('returns 503 rather than 404 when the instances module is not wired yet', async () => {
+      const { instancesReady, killTerminalWithShellper } = await import('../servers/tower-instances.js');
+      (instancesReady as any).mockReturnValueOnce(false);
+
+      const req = makeReq('DELETE', `/api/terminals/${terminalId}`);
+      const { res, statusCode, body, headers } = makeRes();
+      await handleRequest(req, res, makeCtx());
+
+      expect(statusCode()).toBe(503);
+      expect(headers()['Retry-After']).toBe('1');
+      expect(JSON.parse(body()).error).toBe('STARTING_UP');
+      // And it must not have tried to kill anything on the way out.
+      expect(killTerminalWithShellper).not.toHaveBeenCalled();
     });
   });
 
@@ -1271,7 +1401,7 @@ describe('tower-routes', () => {
       expect(mockResolveTarget).toHaveBeenCalledWith('architect', '/tmp/ws', undefined);
     });
 
-    it('returns 200 with ok:true on successful send', async () => {
+    it('returns 200 delivered:true on a successful send to a clean prompt (Spec 1313)', async () => {
       mockParseJsonBody.mockResolvedValue({ to: 'architect', message: 'hello', workspace: '/tmp/ws' });
       mockResolveTarget.mockReturnValue({
         terminalId: 'term-001',
@@ -1280,7 +1410,7 @@ describe('tower-routes', () => {
       });
       const mockWrite = vi.fn();
       mockGetTerminalManager.mockReturnValue({
-        getSession: () => ({ write: mockWrite, pid: 1234, writable: true, isUserIdle: () => true, composing: false }),
+        getSession: () => gateSession(mockWrite, '❯ '), // clean, render-verified empty
         listSessions: () => [],
       });
       const req = makeReq('POST', '/api/send');
@@ -1293,16 +1423,123 @@ describe('tower-routes', () => {
       expect(parsed.ok).toBe(true);
       expect(parsed.resolvedTo).toBe('architect');
       expect(parsed.terminalId).toBe('term-001');
+      expect(parsed.delivered).toBe(true);
+      expect(parsed.held).toBe(false);
       expect(parsed.deferred).toBe(false);
+      expect(typeof parsed.mailboxId).toBe('string');
       expect(mockWrite).toHaveBeenCalled();
     });
 
-    it('returns 503 TERMINAL_NOT_WRITABLE instead of a false success when the shellper connection is down (#1198)', async () => {
+    it('holds (no-live-pty) instead of dropping when the shellper connection is down (#1198, Spec 1313)', async () => {
+      // Pre-1313 this returned 503 and dropped the message. Now the send is
+      // persisted and held; the backstop redelivers when the connection recovers.
       mockParseJsonBody.mockResolvedValue({ to: 'architect', message: 'hello', workspace: '/tmp/ws' });
       mockResolveTarget.mockReturnValue({
         terminalId: 'term-zombie',
         workspacePath: '/tmp/ws',
         agent: 'architect',
+      });
+      const mockWrite = vi.fn();
+      mockGetTerminalManager.mockReturnValue({
+        getSession: () => gateSession(mockWrite, '❯ ', /* writable */ false),
+        listSessions: () => [],
+      });
+      const req = makeReq('POST', '/api/send');
+      const { res, statusCode, body } = makeRes();
+
+      await handleRequest(req, res, makeCtx());
+      expect(statusCode()).toBe(200);
+      const parsed = JSON.parse(body());
+      expect(parsed.ok).toBe(true);
+      expect(parsed.held).toBe(true);
+      expect(parsed.reason).toBe('no-live-pty');
+      expect(typeof parsed.mailboxId).toBe('string');
+      expect(mockWrite).not.toHaveBeenCalled(); // never written to a dead line
+    });
+
+    it('holds (no-live-pty) a normal send to a known offline agent instead of 404ing (Spec 1313 dead-session seam)', async () => {
+      mockParseJsonBody.mockResolvedValue({ to: 'spir-9', message: 'hello', workspace: '/tmp/ws' });
+      mockResolveTarget.mockReturnValue({ code: 'NOT_FOUND', message: 'no live terminal' });
+      // The registry knows this builder even though it has no live PTY.
+      mockResolveAgentInRegistry.mockReturnValue({ workspacePath: '/tmp/ws', agent: 'spir-9', kind: 'builder' });
+      const req = makeReq('POST', '/api/send');
+      const { res, statusCode, body } = makeRes();
+
+      await handleRequest(req, res, makeCtx());
+      expect(statusCode()).toBe(200);
+      const parsed = JSON.parse(body());
+      expect(parsed.held).toBe(true);
+      expect(parsed.reason).toBe('no-live-pty');
+      expect(parsed.resolvedTo).toBe('spir-9');
+      expect(typeof parsed.mailboxId).toBe('string');
+      // And it is really persisted (drain-order query finds it).
+      expect(mailbox.findHeldForAgent(sendDbHolder.db, '/tmp/ws', 'spir-9')).toHaveLength(1);
+    });
+
+    // Spec 1273: `escape` delivers a bare ESC keystroke straight to the PTY.
+    // The buffer-bypass assertion is the load-bearing one — an interrupt that can
+    // be deferred because someone recently typed in that terminal is not an
+    // interrupt, and a wedged builder is precisely the case where you cannot wait.
+    it('writes a bare ESC and never defers it, even when the user is actively typing (Spec 1273)', async () => {
+      mockParseJsonBody.mockResolvedValue({
+        to: '1273', message: '\x1b', workspace: '/tmp/ws', options: { escape: true },
+      });
+      mockResolveTarget.mockReturnValue({
+        terminalId: 'term-wedged',
+        workspacePath: '/tmp/ws',
+        agent: 'builder-aspir-1273',
+      });
+      const mockWrite = vi.fn();
+      mockGetTerminalManager.mockReturnValue({
+        // isUserIdle() === false is what forces deferral on the normal send path.
+        getSession: () => ({ write: mockWrite, pid: 1234, writable: true, isUserIdle: () => false, composing: false }),
+        listSessions: () => [],
+      });
+      const req = makeReq('POST', '/api/send');
+      const { res, statusCode, body } = makeRes();
+
+      await handleRequest(req, res, makeCtx());
+
+      expect(statusCode()).toBe(200);
+      const parsed = JSON.parse(body());
+      expect(parsed.ok).toBe(true);
+      expect(parsed.deferred).toBe(false);
+      // ESC written immediately and unformatted — no header/wrapper text.
+      expect(mockWrite).toHaveBeenCalledWith('\x1b');
+      expect(mockWrite.mock.calls[0][0]).toBe('\x1b');
+    });
+
+    it('accepts a lone ESC message body without tripping the non-empty guard (Spec 1273)', async () => {
+      // The ESC recovery depends on `\x1b` surviving handleSend's trim(); a 400
+      // here would mean the only mid-turn recovery had been silently broken.
+      mockParseJsonBody.mockResolvedValue({
+        to: '1273', message: '\x1b', workspace: '/tmp/ws', options: { escape: true },
+      });
+      mockResolveTarget.mockReturnValue({
+        terminalId: 'term-wedged',
+        workspacePath: '/tmp/ws',
+        agent: 'builder-aspir-1273',
+      });
+      mockGetTerminalManager.mockReturnValue({
+        getSession: () => ({ write: vi.fn(), pid: 1234, writable: true, isUserIdle: () => true, composing: false }),
+        listSessions: () => [],
+      });
+      const req = makeReq('POST', '/api/send');
+      const { res, statusCode } = makeRes();
+
+      await handleRequest(req, res, makeCtx());
+
+      expect(statusCode()).toBe(200);
+    });
+
+    it('fails loudly on a non-writable terminal instead of reporting a delivered ESC (Spec 1273)', async () => {
+      mockParseJsonBody.mockResolvedValue({
+        to: '1273', message: '\x1b', workspace: '/tmp/ws', options: { escape: true },
+      });
+      mockResolveTarget.mockReturnValue({
+        terminalId: 'term-zombie',
+        workspacePath: '/tmp/ws',
+        agent: 'builder-aspir-1273',
       });
       const mockWrite = vi.fn();
       mockGetTerminalManager.mockReturnValue({
@@ -1313,13 +1550,13 @@ describe('tower-routes', () => {
       const { res, statusCode, body } = makeRes();
 
       await handleRequest(req, res, makeCtx());
+
       expect(statusCode()).toBe(503);
-      const parsed = JSON.parse(body());
-      expect(parsed.error).toBe('TERMINAL_NOT_WRITABLE');
+      expect(JSON.parse(body()).error).toBe('TERMINAL_NOT_WRITABLE');
       expect(mockWrite).not.toHaveBeenCalled();
     });
 
-    it('returns deferred:true when user is actively typing (Spec 403)', async () => {
+    it('leaves normal sends unaffected when escape is absent (Spec 1273 regression guard)', async () => {
       mockParseJsonBody.mockResolvedValue({ to: 'architect', message: 'hello', workspace: '/tmp/ws' });
       mockResolveTarget.mockReturnValue({
         terminalId: 'term-001',
@@ -1328,7 +1565,32 @@ describe('tower-routes', () => {
       });
       const mockWrite = vi.fn();
       mockGetTerminalManager.mockReturnValue({
-        getSession: () => ({ write: mockWrite, pid: 1234, writable: true, isUserIdle: () => false, composing: false }),
+        getSession: () => gateSession(mockWrite, '❯ '), // clean prompt → delivers
+        listSessions: () => [],
+      });
+      const req = makeReq('POST', '/api/send');
+      const { res, statusCode } = makeRes();
+
+      await handleRequest(req, res, makeCtx());
+
+      expect(statusCode()).toBe(200);
+      // Formatted message, not a bare ESC.
+      expect(mockWrite).toHaveBeenCalled();
+      expect(mockWrite.mock.calls[0][0]).not.toBe('\x1b');
+    });
+
+    it('holds (busy) when the composer is occupied, writing nothing (Spec 1313)', async () => {
+      // Pre-1313 this deferred on a 3s idle timer; now it holds on the render-gate
+      // verdict — a draft in the composer means the line is occupied.
+      mockParseJsonBody.mockResolvedValue({ to: 'architect', message: 'hello', workspace: '/tmp/ws' });
+      mockResolveTarget.mockReturnValue({
+        terminalId: 'term-001',
+        workspacePath: '/tmp/ws',
+        agent: 'architect',
+      });
+      const mockWrite = vi.fn();
+      mockGetTerminalManager.mockReturnValue({
+        getSession: () => gateSession(mockWrite, '❯ half-typed draft'), // occupied → busy
         listSessions: () => [],
       });
       const req = makeReq('POST', '/api/send');
@@ -1339,8 +1601,10 @@ describe('tower-routes', () => {
       expect(statusCode()).toBe(200);
       const parsed = JSON.parse(body());
       expect(parsed.ok).toBe(true);
-      expect(parsed.deferred).toBe(true);
-      // Message should NOT be written to session when deferred
+      expect(parsed.held).toBe(true);
+      expect(parsed.reason).toBe('busy');
+      expect(parsed.deferred).toBe(true); // back-compat: held ⇒ deferred
+      // The draft is never touched — nothing is written to an occupied line.
       expect(mockWrite).not.toHaveBeenCalled();
     });
 
@@ -1371,7 +1635,7 @@ describe('tower-routes', () => {
       expect(mockWrite).toHaveBeenCalled();
     });
 
-    it('delivers message + Enter as a single atomic write (Bugfix #481)', async () => {
+    it('writes the message as one un-split write, Enter separate (Bugfix #481, via the gate)', async () => {
       mockParseJsonBody.mockResolvedValue({ to: 'architect', message: 'hello', workspace: '/tmp/ws' });
       mockResolveTarget.mockReturnValue({
         terminalId: 'term-001',
@@ -1380,7 +1644,7 @@ describe('tower-routes', () => {
       });
       const mockWrite = vi.fn();
       mockGetTerminalManager.mockReturnValue({
-        getSession: () => ({ write: mockWrite, pid: 1234, writable: true, isUserIdle: () => true, composing: false }),
+        getSession: () => gateSession(mockWrite, '❯ '),
         listSessions: () => [],
       });
       const req = makeReq('POST', '/api/send');
@@ -1388,14 +1652,16 @@ describe('tower-routes', () => {
       const { res } = makeRes();
 
       await handleRequest(req, res, ctx);
-      // Message is written first, then \r is sent separately after a 50ms delay
-      // so the PTY processes the multi-line paste before receiving Enter (Bugfix #492).
+      // The delivery awaits the paced write's completion, so both the message and
+      // its trailing Enter have landed: the message is ONE un-split write, and the
+      // Enter is a separate `\r` (Bugfix #481: never fused, never split mid-message).
       const writeCalls = mockWrite.mock.calls;
-      expect(writeCalls.length).toBe(1); // Initial write (message only)
-      expect(writeCalls[0][0]).not.toMatch(/\r$/); // No \r in initial write
+      expect(writeCalls[0][0]).toContain('hello');
+      expect(writeCalls[0][0]).not.toContain('\r');
+      expect(writeCalls[writeCalls.length - 1][0]).toBe('\r');
     });
 
-    it('delivers message without Enter when noEnter is set (Bugfix #481)', async () => {
+    it('writes the message without Enter when noEnter is set (Bugfix #481)', async () => {
       mockParseJsonBody.mockResolvedValue({
         to: 'architect', message: 'hello', workspace: '/tmp/ws',
         options: { noEnter: true },
@@ -1407,7 +1673,7 @@ describe('tower-routes', () => {
       });
       const mockWrite = vi.fn();
       mockGetTerminalManager.mockReturnValue({
-        getSession: () => ({ write: mockWrite, pid: 1234, writable: true, isUserIdle: () => true, composing: false }),
+        getSession: () => gateSession(mockWrite, '❯ '),
         listSessions: () => [],
       });
       const req = makeReq('POST', '/api/send');
@@ -1416,12 +1682,13 @@ describe('tower-routes', () => {
 
       await handleRequest(req, res, ctx);
       const writeCalls = mockWrite.mock.calls;
-      expect(writeCalls.length).toBe(1);
-      // Should NOT end with \r when noEnter is set
+      expect(writeCalls.length).toBe(1); // message only — no trailing Enter write
       expect(writeCalls[0][0]).not.toMatch(/\r$/);
     });
 
-    it('delivers immediately when user is idle even if composing (Bugfix #492)', async () => {
+    it('delivers when the composer renders a clean empty prompt (Spec 1313 gate)', async () => {
+      // The pre-1313 idle/composing heuristics are gone; the render-gate is the
+      // sole authority. A clean, verified-empty composer delivers immediately.
       mockParseJsonBody.mockResolvedValue({ to: 'architect', message: 'hello', workspace: '/tmp/ws' });
       mockResolveTarget.mockReturnValue({
         terminalId: 'term-001',
@@ -1429,10 +1696,8 @@ describe('tower-routes', () => {
         agent: 'architect',
       });
       const mockWrite = vi.fn();
-      // Bugfix #492: composing gets stuck true after non-Enter keystrokes.
-      // Idle threshold alone is sufficient — deliver immediately.
       mockGetTerminalManager.mockReturnValue({
-        getSession: () => ({ write: mockWrite, pid: 1234, writable: true, isUserIdle: () => true, composing: true }),
+        getSession: () => gateSession(mockWrite, '❯ '),
         listSessions: () => [],
       });
       const req = makeReq('POST', '/api/send');
@@ -1443,9 +1708,137 @@ describe('tower-routes', () => {
       expect(statusCode()).toBe(200);
       const parsed = JSON.parse(body());
       expect(parsed.ok).toBe(true);
+      expect(parsed.delivered).toBe(true);
       expect(parsed.deferred).toBe(false);
       // Message SHOULD be written — user is idle (Bugfix #492)
       expect(mockWrite).toHaveBeenCalled();
+    });
+  });
+
+  // ==========================================================================
+  // POST /api/send — durable `--delay` (Spec 1313 round 3, changes 1 & 2)
+  //
+  // Change 1: a delayed send is RESOLVED, authorized, and PERSISTED at request time
+  // with `not_before`, then deferred through the gate — uniform across live / offline
+  // (registry-only) / unwritable targets, and durable across a Tower restart. Change 2:
+  // a delayed `--interrupt` writes NO body here and marks nothing delivered; it keeps only
+  // an in-memory timer for the ^C, guarded by `isStillLive` before AND inside the lock.
+  // ==========================================================================
+  describe('POST /api/send — durable --delay (Spec 1313 round 3)', () => {
+    it('persists a scheduled row for a --delay to an offline (registry-only) agent and writes nothing now', async () => {
+      mockParseJsonBody.mockResolvedValue({
+        to: 'spir-9', message: 'later', workspace: '/tmp/ws', options: { deliverAfter: 30 },
+      });
+      // No live terminal, but the registry knows the builder → a delayed send schedules against it.
+      mockResolveTarget.mockReturnValue({ code: 'NOT_FOUND', message: 'no live terminal' });
+      mockResolveAgentInRegistry.mockReturnValue({ workspacePath: '/tmp/ws', agent: 'spir-9', kind: 'builder' });
+      const mockWrite = vi.fn();
+      mockGetTerminalManager.mockReturnValue({ getSession: () => gateSession(mockWrite, '❯ '), listSessions: () => [] });
+      const req = makeReq('POST', '/api/send');
+      const { res, statusCode, body } = makeRes();
+
+      const before = Date.now();
+      await handleRequest(req, res, makeCtx());
+      expect(statusCode()).toBe(200);
+      const parsed = JSON.parse(body());
+      expect(parsed.scheduled).toBe(true);
+      expect(parsed.resolvedTo).toBe('spir-9');
+      expect(typeof parsed.mailboxId).toBe('string');
+      expect(parsed.notBefore).toBeGreaterThanOrEqual(before + 30_000);
+      expect(mockWrite).not.toHaveBeenCalled(); // deferred — nothing on the wire at request time
+
+      // The row is really persisted with its due time, and is NOT eligible until due.
+      const row = mailbox.getById(sendDbHolder.db, parsed.mailboxId);
+      expect(row?.status).toBe('held');
+      expect(row?.not_before).toBe(parsed.notBefore);
+      expect(row?.terminal_id).toBeNull(); // registry-only target → no live terminal id
+      expect(mailbox.findHeldForAgent(sendDbHolder.db, '/tmp/ws', 'spir-9', parsed.notBefore - 1)).toHaveLength(0);
+      expect(mailbox.findHeldForAgent(sendDbHolder.db, '/tmp/ws', 'spir-9', parsed.notBefore)).toHaveLength(1);
+    });
+
+    it('schedules a --delay to a live target at request time without writing (durable, deferred to the gate)', async () => {
+      mockParseJsonBody.mockResolvedValue({
+        to: 'architect', message: 'later', workspace: '/tmp/ws', options: { deliverAfter: 10 },
+      });
+      mockResolveTarget.mockReturnValue({ terminalId: 'term-live', workspacePath: '/tmp/ws', agent: 'architect' });
+      const mockWrite = vi.fn();
+      mockGetTerminalManager.mockReturnValue({ getSession: () => gateSession(mockWrite, '❯ '), listSessions: () => [] });
+      const req = makeReq('POST', '/api/send');
+      const { res, statusCode, body } = makeRes();
+
+      await handleRequest(req, res, makeCtx());
+      expect(statusCode()).toBe(200);
+      const parsed = JSON.parse(body());
+      expect(parsed.scheduled).toBe(true);
+      expect(typeof parsed.mailboxId).toBe('string');
+      expect(mockWrite).not.toHaveBeenCalled(); // delivery is deferred to the gated drainer at due time
+      expect(mailbox.getById(sendDbHolder.db, parsed.mailboxId)?.not_before).toBe(parsed.notBefore);
+    });
+
+    describe('delayed --interrupt: the ^C timer is guarded by isStillLive (change 2)', () => {
+      afterEach(() => {
+        shutdownDelayedSends();
+        resetSubmissionChains();
+        vi.useRealTimers();
+      });
+
+      it('Tower shutdown BEFORE the due time fires no ^C and marks nothing delivered (outer guard)', async () => {
+        vi.useFakeTimers();
+        mockParseJsonBody.mockResolvedValue({
+          to: 'architect', message: 'urgent', workspace: '/tmp/ws', options: { interrupt: true, deliverAfter: 5 },
+        });
+        mockResolveTarget.mockReturnValue({ terminalId: 'term-i', workspacePath: '/tmp/ws', agent: 'architect' });
+        const mockWrite = vi.fn();
+        mockGetTerminalManager.mockReturnValue({ getSession: () => gateSession(mockWrite, '❯ '), listSessions: () => [] });
+        const req = makeReq('POST', '/api/send');
+        const { res, statusCode, body } = makeRes();
+
+        await handleRequest(req, res, makeCtx());
+        expect(statusCode()).toBe(200);
+        const parsed = JSON.parse(body());
+        expect(parsed.scheduled).toBe(true);
+        expect(mockWrite).not.toHaveBeenCalled(); // nothing written at request time (change 2)
+
+        shutdownDelayedSends();                 // Tower restarts while the ^C timer is pending
+        await vi.advanceTimersByTimeAsync(5000); // the due time arrives on the (now dead) timer
+
+        expect(mockWrite).not.toHaveBeenCalled(); // no ^C — the guard bailed; only the nudge is lost
+        expect(mailbox.getById(sendDbHolder.db, parsed.mailboxId)?.status).toBe('held'); // never falsely delivered
+      });
+
+      it('Tower shutdown WHILE the submission lock is held fires no ^C (inner re-check)', async () => {
+        vi.useFakeTimers();
+        // Pre-occupy term-i's submission lock with a manually-released promise, so the ^C
+        // submission chains BEHIND it — reproducing the shutdown-during-lock-wait window.
+        let releaseLock!: () => void;
+        const lockHeld = new Promise<void>((r) => { releaseLock = r; });
+        submitToSession('term-i', () => 1, { sleep: () => lockHeld });
+
+        mockParseJsonBody.mockResolvedValue({
+          to: 'architect', message: 'urgent', workspace: '/tmp/ws', options: { interrupt: true, deliverAfter: 5 },
+        });
+        mockResolveTarget.mockReturnValue({ terminalId: 'term-i', workspacePath: '/tmp/ws', agent: 'architect' });
+        const mockWrite = vi.fn();
+        mockGetTerminalManager.mockReturnValue({ getSession: () => gateSession(mockWrite, '❯ '), listSessions: () => [] });
+        const req = makeReq('POST', '/api/send');
+        const { res, body } = makeRes();
+
+        await handleRequest(req, res, makeCtx());
+        const parsed = JSON.parse(body());
+
+        // Due time: the ^C timer fires while still live → its outer check passes and it QUEUES
+        // the ^C submission behind the held lock (which has not released yet).
+        await vi.advanceTimersByTimeAsync(5000);
+        expect(mockWrite).not.toHaveBeenCalled(); // still waiting for the lock
+
+        // Now Tower shuts down (generation bump) DURING the lock-wait, then the lock drains.
+        shutdownDelayedSends();
+        releaseLock();
+        for (let i = 0; i < 20; i++) await Promise.resolve(); // flush the queued submission
+
+        expect(mockWrite).not.toHaveBeenCalled(); // the inside-the-lock isStillLive() re-check bailed
+        expect(mailbox.getById(sendDbHolder.db, parsed.mailboxId)?.status).toBe('held'); // not falsely delivered
+      });
     });
   });
 

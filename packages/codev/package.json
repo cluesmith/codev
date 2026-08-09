@@ -1,6 +1,6 @@
 {
   "name": "@cluesmith/codev",
-  "version": "3.2.4",
+  "version": "3.3.0",
   "description": "Codev CLI - AI-assisted software development framework",
   "type": "module",
   "bin": {
@@ -22,8 +22,8 @@
   ],
   "scripts": {
     "clean": "rm -rf dist",
-    "build": "pnpm clean && tsc && pnpm build:dashboard && pnpm copy-skeleton",
-    "build:dashboard": "cd ../../apps/web && pnpm build && rm -rf ../../packages/codev/dashboard-dist && cp -r dist ../../packages/codev/dashboard-dist",
+    "build": "pnpm --filter \"@cluesmith/codev^...\" build && pnpm clean && tsc && pnpm copy-dashboard && pnpm copy-skeleton",
+    "copy-dashboard": "rm -rf dashboard-dist && cp -r ../../apps/web/dist dashboard-dist",
     "dev:dashboard": "cd ../../apps/web && pnpm dev",
     "copy-skeleton": "rm -rf skeleton && cp -r ../../codev-skeleton skeleton",
     "dev": "tsx src/cli.ts",
@@ -38,9 +38,11 @@
   },
   "dependencies": {
     "@cluesmith/codev-core": "workspace:*",
+    "@cluesmith/codev-sdk": "workspace:*",
     "@anthropic-ai/claude-agent-sdk": "^0.2.41",
     "@google/genai": "^1.0.0",
-    "@openai/codex-sdk": "^0.142.5",
+    "@openai/codex-sdk": "^0.146.0",
+    "@xterm/headless": "^6.0.0",
     "better-sqlite3": "^12.10.0",
     "chalk": "^5.3.0",
     "commander": "^12.1.0",

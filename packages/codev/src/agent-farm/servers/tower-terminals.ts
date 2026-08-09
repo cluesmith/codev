@@ -9,7 +9,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { AGENT_FARM_DIR, encodeWorkspacePath } from '../lib/tower-client.js';
-import type { TerminalType } from '@cluesmith/codev-core/tower-client';
+import type { TerminalType } from '@cluesmith/codev-sdk/tower-client';
 import { loadConfig } from '../../lib/config.js';
 import { getGlobalDb } from '../db/index.js';
 import {
@@ -35,9 +35,11 @@ import { TerminalManager, DEFAULT_DISK_LOG_MAX_BYTES } from '../../terminal/inde
  * the client's post-connect resize nudge repaints full-screen apps, and the
  * shellper retains the full history.
  */
-const RING_SEED_MAX_BYTES = 1024 * 1024; // 1MB
+// Exported for the Spec 1313 adopt-path regression test (#1361): a >1 MiB replay
+// capped here to the last 1 MiB can seed the gate mirror born-torn → fail-safe HOLD.
+export const RING_SEED_MAX_BYTES = 1024 * 1024; // 1MB
 
-function capRingSeed(replayData: Buffer, sessionId: string): Buffer {
+export function capRingSeed(replayData: Buffer, sessionId: string): Buffer {
   if (replayData.length <= RING_SEED_MAX_BYTES) return replayData;
   _deps?.log('INFO', `Session ${sessionId} replay is ${replayData.length} bytes; seeding the most recent ${RING_SEED_MAX_BYTES}`);
   return replayData.subarray(replayData.length - RING_SEED_MAX_BYTES);
@@ -51,7 +53,7 @@ function extractShellperSessionId(socketPath: string | null): string | null {
 import type { SessionManager, ReconnectRestartOptions } from '../../terminal/session-manager.js';
 import type { PtySession } from '../../terminal/pty-session.js';
 import type { WorkspaceTerminals, TerminalEntry, DbTerminalSession } from './tower-types.js';
-import { normalizeWorkspacePath, resolveArchitectRestart, buildArchitectCrashLoopFallback } from './tower-utils.js';
+import { normalizeWorkspacePath, buildArchitectReconnectRestartOptions } from './tower-utils.js';
 import { setArchitectByName } from '../state.js';
 import { isIntentionallyStopping } from './tower-instances.js';
 
@@ -287,6 +289,7 @@ export function saveTerminalSession(
   shellperStartTime: number | null = null,
   label: string | null = null,
   cwd: string | null = null,
+  command: string | null = null,
 ): void {
   try {
     const normalizedPath = normalizeWorkspacePath(workspacePath);
@@ -300,9 +303,9 @@ export function saveTerminalSession(
 
     const db = getGlobalDb();
     db.prepare(`
-      INSERT OR REPLACE INTO terminal_sessions (id, workspace_path, type, role_id, pid, shellper_socket, shellper_pid, shellper_start_time, label, cwd)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(terminalId, normalizedPath, type, roleId, pid, shellperSocket, shellperPid, shellperStartTime, label, cwd);
+      INSERT OR REPLACE INTO terminal_sessions (id, workspace_path, type, role_id, pid, shellper_socket, shellper_pid, shellper_start_time, label, cwd, command)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(terminalId, normalizedPath, type, roleId, pid, shellperSocket, shellperPid, shellperStartTime, label, cwd, command);
     _deps?.log('INFO', `Saved terminal session to SQLite: ${terminalId} (${type}) for ${path.basename(normalizedPath)}`);
   } catch (err) {
     _deps?.log('WARN', `Failed to save terminal session: ${(err as Error).message}`);
@@ -651,13 +654,22 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
     // Build restart options for architect sessions (synchronous, no I/O)
     let restartOptions: ReconnectRestartOptions | undefined;
     if (dbSession.type === 'architect') {
-      let architectCmd = 'claude';
-      try {
-        const config = loadConfig(workspacePath);
-        const shellArchitect = config.shell?.architect;
-        if (typeof shellArchitect === 'string') architectCmd = shellArchitect;
-        else if (Array.isArray(shellArchitect)) architectCmd = shellArchitect.join(' ');
-      } catch { /* use default */ }
+      // Spec 1313: resolve with the SAME precedence as fresh launch
+      // (TOWER_ARCHITECT_CMD env override > config > 'claude'). restartOptions.command
+      // is now also the legacy-row identity heal, so omitting the env tier would heal
+      // a `TOWER_ARCHITECT_CMD=agy` architect (with no matching config) to the wrong
+      // profile — and agy would then never deliver. It also keeps auto-restart itself
+      // consistent with how the session was originally launched.
+      let architectCmd = process.env.TOWER_ARCHITECT_CMD || '';
+      if (!architectCmd) {
+        architectCmd = 'claude';
+        try {
+          const config = loadConfig(workspacePath);
+          const shellArchitect = config.shell?.architect;
+          if (typeof shellArchitect === 'string') architectCmd = shellArchitect;
+          else if (Array.isArray(shellArchitect)) architectCmd = shellArchitect.join(' ');
+        } catch { /* use default */ }
+      }
       const cmdParts = architectCmd.split(/\s+/);
       const cleanEnv = { ...process.env } as Record<string, string>;
       delete cleanEnv['CLAUDECODE'];
@@ -669,55 +681,21 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
       // populated them; this is belt-and-suspenders).
       const architectName = dbSession.role_id || 'main';
       cleanEnv['CODEV_ARCHITECT_NAME'] = architectName;
-      try {
-        // Issue #832: bake `--resume <storedId>` into the auto-restart args so a
-        // claude crash inside a live shellper revives the SAME conversation (the
-        // silent-context-loss path). The id was stored at the original spawn; a
-        // legacy architect with none falls through to a fresh session, then self-
-        // heals (the next spawn/revival stores an id). The minted id on the fresh
-        // branch is not persisted here (the bake precedes the actual restart) —
-        // fine, since post-#832 architects always carry a stored id and resume.
-        const { args: architectArgs, env: harnessEnv, resumed, storedSessionId, fallback } =
-          resolveArchitectRestart(workspacePath, architectName, cmdParts.slice(1));
-        if (resumed && storedSessionId) {
-          _deps.log('INFO', `Resuming architect '${architectName}' session ${storedSessionId.slice(0, 8)}… on restart in ${workspacePath}`);
-        }
-        restartOptions = {
-          command: cmdParts[0],
-          args: architectArgs,
-          cwd: workspacePath,
-          env: { ...cleanEnv, ...harnessEnv },
-          restartDelay: 2000,
-          maxRestarts: 50,
-        };
-        // Issue #1149: if the resumed session fast-fails at runtime (jsonl
-        // vanished after the bake, or corrupt), degrade to a fresh launch
-        // instead of burning all 50 restarts on identical args.
-        if (resumed && storedSessionId && fallback) {
-          restartOptions.crashLoopFallback = buildArchitectCrashLoopFallback({
-            workspacePath,
-            architectName,
-            storedSessionId,
-            fallback,
-            baseEnv: cleanEnv,
-            log: _deps.log,
-          });
-        }
-      } catch (err) {
-        _deps.log('WARN', `Harness resolution failed for workspace ${workspacePath}: ${err instanceof Error ? err.message : err}`);
-        // Fall back to plain command without harness role-prompt args so the
-        // session can still reconnect. `cleanEnv` still carries
-        // CODEV_ARCHITECT_NAME (set above for Spec 786 Phase 2), so identity
-        // is preserved even on harness failure.
-        restartOptions = {
-          command: cmdParts[0],
-          args: cmdParts.slice(1),
-          cwd: workspacePath,
-          env: cleanEnv,
-          restartDelay: 2000,
-          maxRestarts: 50,
-        };
-      }
+      // Issue #832/#1149/#1264: bake `--resume <storedId>` + a #1264 clean-exit
+      // fresh-launch factory + a #1149 crash-loop fallback into the auto-restart
+      // args, so a claude crash inside a live shellper revives the SAME
+      // conversation. Issue #1338: a retired harness returns `undefined` here
+      // (fail closed — no auto-restart into the retired binary), never a fallback
+      // that relaunches it. `includeFreshLaunch: true` — this is the startup
+      // reconcile path that also wires the #1264 clean-exit rerun.
+      restartOptions = buildArchitectReconnectRestartOptions({
+        workspacePath,
+        architectName,
+        cmdParts,
+        cleanEnv,
+        includeFreshLaunch: true,
+        log: _deps.log,
+      });
     }
 
     probeTasks.push({ dbSession, restartOptions });
@@ -769,7 +747,7 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
   }
 
   // Process probe results sequentially (shared state mutations)
-  for (const { dbSession, client, replayData } of probeResults) {
+  for (const { dbSession, client, replayData, restartOptions } of probeResults) {
     if (!client) {
       _deps.log('INFO', `Shellper session ${dbSession.id} is stale (PID/socket dead) — will clean up`);
       continue; // Will be cleaned up in Phase 2
@@ -784,7 +762,18 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
     // across the restart — clients holding `/ws/terminal/<id>` reconnect to the
     // same valid url instead of a dead one. Use stored cwd (worktree path for
     // builders) instead of workspace_path (Bugfix #506).
-    const session = manager.createSessionRaw({ label, cwd: sessionCwd, id: dbSession.id });
+    // Spec 1313: restore the launch command so the render-gate can resolve this
+    // reconnected session's profile. Architects have no `.builder-start.sh`
+    // backstop, so without this a reconciled architect reverts to no-profile
+    // after a Tower restart and `afx send architect` never delivers. The
+    // `?? restartOptions?.command` heals pre-existing rows (persisted before this
+    // column existed → `command` NULL): restartOptions.command is cmdParts[0] from
+    // the CURRENT config, so an upgraded architect resolves on the first restart
+    // rather than staying broken until it is manually relaunched.
+    const session = manager.createSessionRaw({
+      label, cwd: sessionCwd, id: dbSession.id,
+      command: dbSession.command ?? restartOptions?.command ?? undefined,
+    });
     const ptySession = manager.getSession(session.id);
     if (ptySession) {
       const shellperSessId = extractShellperSessionId(dbSession.shellper_socket) ?? dbSession.id;
@@ -792,8 +781,14 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
       // which the `if (!client)` guard already excluded — fall back to
       // empty defensively rather than asserting.
       ptySession.attachShellper(client, replayData ?? Buffer.alloc(0), dbSession.shellper_pid!, shellperSessId);
-      // Architect sessions have auto-restart — keep WebSocket clients connected on exit
-      if (dbSession.type === 'architect') {
+      // Architect sessions with a live auto-restart config keep WebSocket clients
+      // connected on exit. Gate on `restartOptions`: a retired-harness architect
+      // (#1338) resolves to `undefined` here, so `reconnectSession` was told NOT to
+      // configure an auto-restart (SessionManager mirrors this exactly with
+      // `restartOnExit: hasRestart`). Setting the PTY flag true anyway would make
+      // PtySession hold WebSocket clients in a "restarting…" wait for a process that
+      // can never come back — the flag must track whether a restart is real.
+      if (dbSession.type === 'architect' && restartOptions) {
         ptySession.restartOnExit = true;
       }
     }
@@ -814,7 +809,8 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
     // session under the same terminal id with its refreshed shellper info.
     db.prepare('DELETE FROM terminal_sessions WHERE id = ?').run(dbSession.id);
     saveTerminalSession(session.id, workspacePath, dbSession.type, dbSession.role_id, dbSession.shellper_pid,
-      dbSession.shellper_socket, dbSession.shellper_pid, dbSession.shellper_start_time, dbSession.label, sessionCwd);
+      dbSession.shellper_socket, dbSession.shellper_pid, dbSession.shellper_start_time, dbSession.label, sessionCwd,
+      dbSession.command ?? restartOptions?.command ?? null);
     _deps.registerKnownWorkspace(workspacePath);
 
     // Clean up on exit (only fires for permanent death when restartOnExit is set)
@@ -926,13 +922,19 @@ export async function getTerminalsForWorkspace(
         // Restore auto-restart for architect sessions (same as startup reconciliation)
         let restartOptions: ReconnectRestartOptions | undefined;
         if (dbSession.type === 'architect') {
-          let architectCmd = 'claude';
-          try {
-            const config = loadConfig(dbSession.workspace_path);
-            const shellArchitect = config.shell?.architect;
-            if (typeof shellArchitect === 'string') architectCmd = shellArchitect;
-            else if (Array.isArray(shellArchitect)) architectCmd = shellArchitect.join(' ');
-          } catch { /* use default */ }
+          // Spec 1313: same precedence as fresh launch (env override > config >
+          // 'claude') — restartOptions.command doubles as the legacy-row identity
+          // heal, so the env tier must be honored here too (see reconcile path).
+          let architectCmd = process.env.TOWER_ARCHITECT_CMD || '';
+          if (!architectCmd) {
+            architectCmd = 'claude';
+            try {
+              const config = loadConfig(dbSession.workspace_path);
+              const shellArchitect = config.shell?.architect;
+              if (typeof shellArchitect === 'string') architectCmd = shellArchitect;
+              else if (Array.isArray(shellArchitect)) architectCmd = shellArchitect.join(' ');
+            } catch { /* use default */ }
+          }
           const cmdParts = architectCmd.split(/\s+/);
           const cleanEnv = { ...process.env } as Record<string, string>;
           delete cleanEnv['CLAUDECODE'];
@@ -940,45 +942,20 @@ export async function getTerminalsForWorkspace(
           // restart (see matching block in reconcileTerminalSessionsInner above).
           const architectName = dbSession.role_id || 'main';
           cleanEnv['CODEV_ARCHITECT_NAME'] = architectName;
-          try {
-            // Issue #832: revive the same conversation on auto-restart via the
-            // stored session id (see matching block above).
-            const { args: architectArgs, env: harnessEnv, resumed, storedSessionId, fallback } =
-              resolveArchitectRestart(dbSession.workspace_path, architectName, cmdParts.slice(1));
-            if (resumed && storedSessionId) {
-              _deps.log('INFO', `Resuming architect '${architectName}' session ${storedSessionId.slice(0, 8)}… on reconnect in ${dbSession.workspace_path}`);
-            }
-            restartOptions = {
-              command: cmdParts[0],
-              args: architectArgs,
-              cwd: dbSession.workspace_path,
-              env: { ...cleanEnv, ...harnessEnv },
-              restartDelay: 2000,
-              maxRestarts: 50,
-            };
-            // Issue #1149: degrade a fast-failing resume to a fresh launch
-            // (see matching block in reconcileTerminalSessionsInner above).
-            if (resumed && storedSessionId && fallback) {
-              restartOptions.crashLoopFallback = buildArchitectCrashLoopFallback({
-                workspacePath: dbSession.workspace_path,
-                architectName,
-                storedSessionId,
-                fallback,
-                baseEnv: cleanEnv,
-                log: _deps.log,
-              });
-            }
-          } catch (err) {
-            _deps.log('WARN', `Harness resolution failed for workspace ${dbSession.workspace_path}: ${err instanceof Error ? err.message : err}`);
-            restartOptions = {
-              command: cmdParts[0],
-              args: cmdParts.slice(1),
-              cwd: dbSession.workspace_path,
-              env: cleanEnv,
-              restartDelay: 2000,
-              maxRestarts: 50,
-            };
-          }
+          // Issue #832/#1149: revive the same conversation on auto-restart via the
+          // stored session id, with the #1149 crash-loop fallback (see matching
+          // block in reconcileTerminalSessionsInner above). Issue #1338: a retired
+          // harness returns `undefined` (fail closed — no auto-restart into the
+          // retired binary). `includeFreshLaunch: false` — the on-the-fly reconnect
+          // path does not wire the #1264 clean-exit rerun (unchanged from before).
+          restartOptions = buildArchitectReconnectRestartOptions({
+            workspacePath: dbSession.workspace_path,
+            architectName,
+            cmdParts,
+            cleanEnv,
+            includeFreshLaunch: false,
+            log: _deps.log,
+          });
         }
 
         _deps.log('INFO', `On-the-fly shellper reconnect for ${dbSession.id}`);
@@ -998,13 +975,20 @@ export async function getTerminalsForWorkspace(
           // identity across the reconnect — clients holding `/ws/terminal/<id>`
           // stay valid. Use stored cwd (worktree path for builders) instead of
           // workspace_path (Bugfix #506).
-          const newSession = manager.createSessionRaw({ label, cwd: dbSession.cwd ?? dbSession.workspace_path, id: dbSession.id });
+          const newSession = manager.createSessionRaw({
+            label, cwd: dbSession.cwd ?? dbSession.workspace_path, id: dbSession.id,
+            command: dbSession.command ?? restartOptions?.command ?? undefined, // Spec 1313: restore/heal identity (see reconcile path)
+          });
           const ptySession = manager.getSession(newSession.id);
           if (ptySession) {
             const shellperSessId = extractShellperSessionId(dbSession.shellper_socket) ?? dbSession.id;
             ptySession.attachShellper(client, replayData, dbSession.shellper_pid!, shellperSessId);
-            // Architect sessions have auto-restart — keep WebSocket clients connected on exit
-            if (dbSession.type === 'architect') {
+            // Gate on `restartOptions` (same rationale as the reconcile path above):
+            // a retired-harness architect (#1338) resolves to `undefined`, so holding
+            // clients for an auto-restart that was never configured would strand the
+            // pane in a "restarting…" wait. `restartOptions` is in scope from the
+            // architect block above.
+            if (dbSession.type === 'architect' && restartOptions) {
               ptySession.restartOnExit = true;
             }
 
@@ -1037,7 +1021,8 @@ export async function getTerminalsForWorkspace(
           // Refresh the SQLite row under the same (preserved) id.
           deleteTerminalSession(dbSession.id);
           saveTerminalSession(newSession.id, dbSession.workspace_path, dbSession.type, dbSession.role_id, dbSession.shellper_pid,
-            dbSession.shellper_socket, dbSession.shellper_pid, dbSession.shellper_start_time, dbSession.label, dbSession.cwd);
+            dbSession.shellper_socket, dbSession.shellper_pid, dbSession.shellper_start_time, dbSession.label, dbSession.cwd,
+            dbSession.command ?? restartOptions?.command ?? null);
           dbSession.id = newSession.id;
           session = manager.getSession(newSession.id);
           _deps.log('INFO', `On-the-fly reconnect succeeded for ${newSession.id} (id preserved)`);

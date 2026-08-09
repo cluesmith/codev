@@ -1,98 +1,52 @@
 # ASPIR Protocol
 
-> **ASPIR** = **A**utonomous **S**pecify → **P**lan → **I**mplement → **R**eview
->
-> Identical to SPIR but without human approval gates on spec and plan phases.
-> Each phase has one build-verify cycle with 3-way consultation.
+Autonomous SPIR: the same phases, artifacts, consultations and checks, with the **spec and plan
+human gates absent**. The builder runs Specify → Plan → Implement without stopping, and a human
+still reviews everything at the `pr` gate before merge.
 
-## What is ASPIR?
+Use ASPIR for trusted, low-risk work where reviewing the approach up front would cost more than
+it saves, and deferring that review to the PR is acceptable. When getting the shape wrong would
+be expensive to unwind, use SPIR and take the gates.
 
-ASPIR is an autonomous variant of the SPIR protocol. It follows the exact same phases (Specify → Plan → Implement → Review) with the same 3-way consultations, checks, and PR flow — but removes the `spec-approval` and `plan-approval` human gates.
+## The state machine
 
-This means the builder proceeds automatically from Specify → Plan → Implement without waiting for human approval at each gate. The `pr` gate in the Review phase is preserved — a human still reviews all code before merge.
+Phases, gates and checks — note that `specify` and `plan` carry **no gate at all**; they are not
+auto-approved, they are ungated:
 
-### Differences from SPIR
-
-| Aspect | SPIR | ASPIR |
-|--------|------|-------|
-| Spec gate (`spec-approval`) | Human must approve | Auto-approved |
-| Plan gate (`plan-approval`) | Human must approve | Auto-approved |
-| PR gate (`pr`) | Human must approve | Human must approve |
-| Phases | Specify → Plan → Implement → Review | Same |
-| 3-way consultations | Yes, every phase | Same |
-| Checks (build, tests, PR) | Yes | Same |
-| Prompts / templates | Full set | Same (copied from SPIR) |
-
-### When to Use ASPIR
-
-Use ASPIR instead of SPIR when:
-
-- The work is **trusted and low-risk** — internal tooling, protocol additions, well-understood features
-- The architect has **pre-written and approved** the spec before spawning
-- The scope is **self-contained** with low blast radius
-- You want **full SPIR discipline** (consultations, phased implementation, review) without waiting at gates
-
-### When NOT to Use ASPIR
-
-Use SPIR instead when:
-
-- The feature involves **novel architecture** or unclear requirements
-- The spec needs **iterative human feedback** during drafting
-- The work is **high-risk** — security-sensitive, user-facing, or broadly impactful
-- You want to **review and adjust** the plan before implementation starts
-
-## Baked Decisions (Optional)
-
-When filing an issue for ASPIR, you can pin architectural decisions you don't want the builder or CMAP reviewers to re-litigate. Include a `## Baked Decisions` section (any heading level is fine) anywhere in the issue body. Useful categories: language, framework, deployment shape, key dependencies, decisions deferred to a later spec. The builder will copy the section verbatim into the spec's Constraints and treat each item as fixed; CMAP reviewers will not propose alternatives unless the spec itself fails to honor a stated decision. Leave the section out for issues where you want the builder to explore freely — absence is the no-op default. You can amend or rescind a baked decision at any time by updating the issue and respawning, or by sending the builder a direct instruction via `afx send`.
-
-## Protocol Phases
-
-ASPIR follows the same four phases as SPIR. For full phase documentation, see the [SPIR protocol](../spir/protocol.md).
-
-### S - Specify
-Write specification with 3-way review (Gemini, Codex, Claude). **No human gate** — proceeds directly to Plan after verification.
-
-### P - Plan
-Write implementation plan with 3-way review. **No human gate** — proceeds directly to Implement after verification and checks pass.
-
-### I - Implement
-Execute each plan phase with build-verify cycle. Same as SPIR — no gate between phases (SPIR also has no gate here).
-
-### R - Review
-Final review, PR preparation, and 3-way review. **PR gate preserved** — builder stops and waits for human approval before merge.
-
-## Usage
-
-```bash
-# Spawn a builder using ASPIR
-afx spawn 42 --protocol aspir
-
-# The builder runs autonomously through Specify → Plan → Implement
-# and stops only at the PR gate in the Review phase
+```json
+{{> protocols/aspir/protocol.json}}
 ```
 
-## File Structure
+## Everything else is SPIR
 
-```
-codev/protocols/aspir/
-├── protocol.json          # Protocol definition (SPIR minus gates)
-├── protocol.md            # This file
-├── builder-prompt.md      # Builder instructions (same as SPIR)
-├── prompts/
-│   ├── specify.md         # Specify phase prompt (same as SPIR)
-│   ├── plan.md            # Plan phase prompt (same as SPIR)
-│   ├── implement.md       # Implement phase prompt (same as SPIR)
-│   └── review.md          # Review phase prompt (same as SPIR)
-├── consult-types/
-│   ├── spec-review.md     # Spec consultation guide (same as SPIR)
-│   ├── plan-review.md     # Plan consultation guide (same as SPIR)
-│   ├── impl-review.md     # Impl consultation guide (same as SPIR)
-│   ├── phase-review.md    # Phase consultation guide (same as SPIR)
-│   └── pr-review.md       # PR consultation guide (same as SPIR)
-└── templates/
-    ├── spec.md            # Spec template (same as SPIR)
-    ├── plan.md            # Plan template (same as SPIR)
-    └── review.md          # Review template (same as SPIR)
-```
+Artifacts (`codev/specs/`, `codev/plans/`, `codev/reviews/`, same base filename), the
+build-verify cycle per plan phase, mandatory 3-way consultation at each verify step, the
+machine-readable `phases` block in the plan, commit and branch conventions, and Baked Decisions
+handling are all identical to SPIR. ASPIR includes SPIR's templates rather than copying them, so
+there is one set to keep correct.
 
-All files except `protocol.json` and `protocol.md` are identical to their SPIR counterparts.
+See `protocols/spir/protocol.md` for that shared substance.
+
+## Baked Decisions
+
+An issue may carry a `## Baked Decisions` section pinning architectural choices the architect
+does not want re-litigated — typically **language**, **framework**, deployment shape, key
+**dependencies**, or decisions deferred to a later spec.
+
+Every item in it is fixed. Copy the section verbatim into the spec's Constraints and do not
+re-open it in the spec, plan, or review; CMAP reviewers will not propose alternatives unless the
+spec fails to honour one. If two items contradict each other, do not choose — surface the
+contradiction and wait.
+
+**Absence is the no-op default**: an issue with no such section is an invitation to explore
+freely, not an omission to be filled in.
+
+The architect can **amend or rescind** a baked decision at any time by updating the issue and
+respawning, or by sending the builder a direct instruction via `afx send`.
+
+## The one thing to be careful about
+
+Without the spec and plan gates, nothing external catches a misread of the issue until the PR.
+If the spec you write surprises you — if it turns out larger, or more architectural, than the
+issue implied — that is the signal ASPIR was the wrong choice. Say so early rather than
+carrying the misfit through to review.

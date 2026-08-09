@@ -33,7 +33,7 @@ function createEchoServer(): http.Server {
     req.on('data', (chunk) => chunks.push(chunk));
     req.on('end', () => {
       res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ method: req.method, path: req.url }));
+      res.end(JSON.stringify({ method: req.method, path: req.url, headers: req.headers }));
     });
   });
 }
@@ -185,6 +185,67 @@ describe('tunnel edge cases (Phase 7)', () => {
         });
         expect(response.status).toBe(403);
       }
+    });
+  });
+
+  describe('workspace-scoped tunnel path (#1370)', () => {
+    // The regression that let a tunnel-borne request deregister the tower:
+    // /workspace/<enc>/api/tunnel/disconnect is stripped by
+    // handleWorkspaceRoutes and dispatched to handleTunnelEndpoint, but the
+    // blocklist only looked at the root-anchored prefix.
+    it('returns 403 for /workspace/<enc>/api/tunnel/disconnect through tunnel', async () => {
+      await setup();
+      client.connect();
+      await waitFor(() => client.getState() === 'connected');
+
+      const enc = Buffer.from('/Users/me/proj').toString('base64url');
+      const response = await mockServer.sendRequest({
+        method: 'POST',
+        path: `/workspace/${enc}/api/tunnel/disconnect`,
+      });
+
+      expect(response.status).toBe(403);
+      expect(JSON.parse(response.body).error).toContain('local-only');
+    });
+
+    it('still proxies other workspace-scoped API paths', async () => {
+      await setup();
+      client.connect();
+      await waitFor(() => client.getState() === 'connected');
+
+      const enc = Buffer.from('/Users/me/proj').toString('base64url');
+      const response = await mockServer.sendRequest({ path: `/workspace/${enc}/api/state` });
+
+      expect(response.status).toBe(200);
+    });
+  });
+
+  describe('tunnel proxy marker header (#1370)', () => {
+    it('stamps x-codev-tunnel-proxy on proxied requests', async () => {
+      await setup();
+      client.connect();
+      await waitFor(() => client.getState() === 'connected');
+
+      const response = await mockServer.sendRequest({ path: '/api/status' });
+
+      expect(response.status).toBe(200);
+      const body = JSON.parse(response.body);
+      expect(body.headers['x-codev-tunnel-proxy']).toBe('1');
+    });
+
+    it('overwrites a marker forged by the cloud side', async () => {
+      await setup();
+      client.connect();
+      await waitFor(() => client.getState() === 'connected');
+
+      // A cloud-side actor must not be able to suppress or fake the marker.
+      const response = await mockServer.sendRequest({
+        path: '/api/status',
+        headers: { 'x-codev-tunnel-proxy': 'forged-value' },
+      });
+
+      const body = JSON.parse(response.body);
+      expect(body.headers['x-codev-tunnel-proxy']).toBe('1');
     });
   });
 

@@ -20,7 +20,7 @@ import { getGlobalDb } from '../db/index.js';
 import type { TerminalManager } from '../../terminal/pty-manager.js';
 import type { SessionManager } from '../../terminal/session-manager.js';
 import { defaultSessionOptions } from '../../terminal/index.js';
-import type { TerminalType } from '@cluesmith/codev-core/tower-client';
+import type { TerminalType } from '@cluesmith/codev-sdk/tower-client';
 import type { WorkspaceTerminals, TerminalEntry, InstanceStatus } from './tower-types.js';
 import {
   normalizeWorkspacePath,
@@ -29,6 +29,7 @@ import {
   resolveArchitectLaunch,
   siblingRegistrationIsLive,
   buildArchitectCrashLoopFallback,
+  buildArchitectFreshLaunch,
 } from './tower-utils.js';
 import {
   reconcileArchitectSessionHolder,
@@ -40,6 +41,7 @@ import {
   validateArchitectName,
   DEFAULT_ARCHITECT_NAME,
 } from '../utils/architect-name.js';
+import { RetiredHarnessError } from '../utils/harness.js';
 import { setArchitect, setArchitectByName, getArchitects, getArchitectByName } from '../state.js';
 
 // ============================================================================
@@ -59,7 +61,7 @@ export interface InstanceDeps {
     id: string, workspacePath: string, type: TerminalType,
     roleId: string | null, pid: number | null,
     shellperSocket?: string | null, shellperPid?: number | null, shellperStartTime?: number | null,
-    label?: string | null, cwd?: string | null,
+    label?: string | null, cwd?: string | null, command?: string | null,
   ) => void;
   /** Delete a terminal session row from SQLite */
   deleteTerminalSession: (id: string) => void;
@@ -166,6 +168,21 @@ export function initInstances(deps: InstanceDeps): void {
 /** Tear down the instances module. */
 export function shutdownInstances(): void {
   _deps = null;
+}
+
+/**
+ * Whether the module has been wired up.
+ *
+ * Issue #1261: routes that call into this module need to tell "not wired yet"
+ * apart from "no such thing", because those deserve different answers — 503
+ * "try again" versus 404 "it isn't here". `killTerminalWithShellper()` returns
+ * a bare boolean and cannot express the difference, so the DELETE route lands
+ * on 404 for a terminal that exists. Tower's readiness gate now holds requests
+ * until boot completes, so this should never be false at request time; it is
+ * kept as a second line of defence.
+ */
+export function instancesReady(): boolean {
+  return _deps !== null;
 }
 
 // ============================================================================
@@ -594,6 +611,16 @@ export async function launchInstance(workspacePath: string): Promise<{ success: 
               cwd: workspacePath,
               env: cleanEnv,
               crashLoopFallback,
+              // Issue #1264: a clean exit reruns the harness fresh (no --resume)
+              // instead of ending the session. Built from the ORIGINAL baseArgs,
+              // never from cmdArgs — those may already carry a `--resume`.
+              freshLaunch: buildArchitectFreshLaunch({
+                workspacePath: resolvedPath,
+                architectName: DEFAULT_ARCHITECT_NAME,
+                baseArgs: cmdParts.slice(1),
+                baseEnv: cleanEnv,
+                log: _deps.log,
+              }),
               ...defaultSessionOptions({ restartOnExit: true, restartDelay: 2000, maxRestarts: 50 }),
             });
 
@@ -602,10 +629,15 @@ export async function launchInstance(workspacePath: string): Promise<{ success: 
             const shellperInfo = _deps.shellperManager.getSessionInfo(sessionId)!;
             const replayData = await client.waitForReplay(); // #1198: fresh shellpers always send REPLAY (possibly empty)
 
-            // Create a PtySession backed by the shellper client
+            // Create a PtySession backed by the shellper client. Spec 1313:
+            // thread the harness command/args so the render-gate resolves this
+            // architect's profile directly (architects have no `.builder-start.sh`
+            // backstop; without this, `afx send architect` always holds no-profile).
             const session = manager.createSessionRaw({
               label: 'Architect',
               cwd: workspacePath,
+              command: cmd,
+              args: cmdArgs,
             });
             const ptySession = manager.getSession(session.id);
             if (ptySession) {
@@ -618,7 +650,7 @@ export async function launchInstance(workspacePath: string): Promise<{ success: 
             // Spec 755: default architect is named 'main'; role_id stores the name.
             entry.architects.set('main', session.id);
             _deps.saveTerminalSession(session.id, resolvedPath, 'architect', 'main', shellperInfo.pid,
-              shellperInfo.socketPath, shellperInfo.pid, shellperInfo.startTime, null, workspacePath);
+              shellperInfo.socketPath, shellperInfo.pid, shellperInfo.startTime, null, workspacePath, cmd);
 
             // Spec 755: persist to local state.db (architect table) so afx
             // status / stop see the architect via loadState's scalar shim.
@@ -682,7 +714,7 @@ export async function launchInstance(workspacePath: string): Promise<{ success: 
 
           // Spec 755: default architect is named 'main'; role_id stores the name.
           entry.architects.set('main', session.id);
-          _deps.saveTerminalSession(session.id, resolvedPath, 'architect', 'main', session.pid, null, null, null, null, workspacePath);
+          _deps.saveTerminalSession(session.id, resolvedPath, 'architect', 'main', session.pid, null, null, null, null, workspacePath, cmd);
 
           // Spec 755: persist to local state.db so afx status / stop see it.
           // Bugfix #826: scoped by workspace_path.
@@ -765,7 +797,10 @@ export async function launchInstance(workspacePath: string): Promise<{ success: 
         if (entry.architects.has(a.name)) continue;
         if (
           !hasArchitectTerminalSession(a.name, resolvedPath, workspacePath) &&
-          !siblingRegistrationIsLive(workspacePath, a.sessionId ?? null)
+          // Pass the reconcile logger so a retired-harness prune (Issue #1338) logs
+          // its real reason instead of being misattributed to the generic
+          // "no resumable session" line below.
+          !siblingRegistrationIsLive(workspacePath, a.sessionId ?? null, { log: _deps.log })
         ) {
           try {
             setArchitectByName(resolvedPath, a.name, null);
@@ -1041,14 +1076,30 @@ export async function addArchitect(
       log: _deps.log,
     }));
   }
-  const { args: cmdArgs, env: harnessEnv, sessionId: conversationSessionId, resumed, fallback } = resolveArchitectLaunch({
-    workspacePath,
-    name,
-    baseArgs: cmdParts.slice(1),
-    storedSessionId,
-    hasLiveHolder: () => foreignHolder,
-    log: _deps.log,
-  });
+  // Issue #1338: a retired architect harness (e.g. gemini) makes
+  // resolveArchitectLaunch throw at the launch boundary. This entry point (the
+  // `add-architect` CLI / HTTP route) returns a result object rather than
+  // throwing, so convert the retirement into a clean `{ success: false }` — the
+  // caller in tower-routes.ts awaits this without its own try/catch, so an
+  // uncaught throw would become an opaque 500 instead of the retirement message.
+  // Scope the catch to the retirement only (mirrors launchInstance's fail path,
+  // narrowed): every other error propagates unchanged. No worktree/porch/db
+  // state is created before this point, so bailing here leaves nothing behind.
+  let launch;
+  try {
+    launch = resolveArchitectLaunch({
+      workspacePath,
+      name,
+      baseArgs: cmdParts.slice(1),
+      storedSessionId,
+      hasLiveHolder: () => foreignHolder,
+      log: _deps.log,
+    });
+  } catch (err) {
+    if (err instanceof RetiredHarnessError) return { success: false, error: err.message };
+    throw err;
+  }
+  const { args: cmdArgs, env: harnessEnv, sessionId: conversationSessionId, resumed, fallback } = launch;
   if (resumed && conversationSessionId) {
     _deps.log('INFO', `Resuming architect '${name}' session ${conversationSessionId.slice(0, 8)}… in ${workspacePath}`);
   }
@@ -1089,6 +1140,15 @@ export async function addArchitect(
         cwd: workspacePath,
         env: cleanEnv,
         crashLoopFallback,
+        // Issue #1264: see the `main` launch path — same rule for siblings,
+        // built from baseArgs so a `--resume` can never leak into the rerun.
+        freshLaunch: buildArchitectFreshLaunch({
+          workspacePath: resolvedPath,
+          architectName: name,
+          baseArgs: cmdParts.slice(1),
+          baseEnv: cleanEnv,
+          log: _deps.log,
+        }),
         ...defaultSessionOptions({ restartOnExit: true, restartDelay: 2000, maxRestarts: 50 }),
       });
 
@@ -1097,7 +1157,9 @@ export async function addArchitect(
       const shellperInfo = _deps.shellperManager.getSessionInfo(shellperSessionId)!;
       const replayData = await client.waitForReplay(); // #1198: fresh shellpers always send REPLAY (possibly empty)
 
-      const session = manager.createSessionRaw({ label: `Architect (${name})`, cwd: workspacePath });
+      // Spec 1313: thread the harness command/args so the render-gate resolves
+      // this sibling architect's profile directly (no `.builder-start.sh` backstop).
+      const session = manager.createSessionRaw({ label: `Architect (${name})`, cwd: workspacePath, command: cmd, args: cmdArgs });
       const ptySession = manager.getSession(session.id);
       if (ptySession) {
         ptySession.attachShellper(client, replayData, shellperInfo.pid, shellperSessionId);
@@ -1107,7 +1169,7 @@ export async function addArchitect(
       entry.architects.set(name, session.id);
       _deps.saveTerminalSession(
         session.id, resolvedPath, 'architect', name, shellperInfo.pid,
-        shellperInfo.socketPath, shellperInfo.pid, shellperInfo.startTime, null, workspacePath,
+        shellperInfo.socketPath, shellperInfo.pid, shellperInfo.startTime, null, workspacePath, cmd,
       );
 
       // Spec 755: persist to local state.db so the architect appears in
@@ -1165,7 +1227,7 @@ export async function addArchitect(
       });
 
       entry.architects.set(name, session.id);
-      _deps.saveTerminalSession(session.id, resolvedPath, 'architect', name, session.pid, null, null, null, null, workspacePath);
+      _deps.saveTerminalSession(session.id, resolvedPath, 'architect', name, session.pid, null, null, null, null, workspacePath, cmd);
 
       try {
         // Bugfix #826: scoped by workspace_path.

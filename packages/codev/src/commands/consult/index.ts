@@ -16,12 +16,21 @@ import { query as claudeQuery } from '@anthropic-ai/claude-agent-sdk';
 import { Codex } from '@openai/codex-sdk';
 import { readCodevFile, findWorkspaceRoot } from '../../lib/skeleton.js';
 import { resolveDefaultBranch } from '../../lib/default-branch.js';
-import { loadConfig } from '../../lib/config.js';
+import { loadConfig, findConfigSource } from '../../lib/config.js';
+import {
+  resolveLaneModel,
+  resolveReasoningEffort,
+  validateModelId,
+  assertLaneAcceptsModelOverride,
+  type ConfigurableLane,
+} from '../../lib/consult-lanes.js';
+import type { ModelReasoningEffort } from '@openai/codex-sdk';
 import { getResolver, GitRefResolver, type ArtifactResolver } from '../porch/artifacts.js';
 import { MetricsDB } from './metrics.js';
 import { extractUsage, extractReviewText, type SDKResultLike, type UsageData } from './usage-extractor.js';
 import { executeForgeCommandSync } from '../../lib/forge.js';
 import { preflightAgyAuth, recordAgyAuthState, type AgyAuthState } from './agy-auth-cache.js';
+import { assertAgyLaneAllowedUnderTest } from '../../lib/test-env.js';
 
 // Content reference — resolved artifact content with a display label
 interface ContentRef {
@@ -80,6 +89,9 @@ export interface ConsultOptions {
   // this base (origin/<base>...origin/<head>) instead of `gh pr diff` (the
   // PR's host-recorded base). Falls back to config `consult.integrationBranch`.
   base?: string;
+  // Per-invocation model override (spec 1286). Outranks `consult.models.<lane>`; applies to
+  // whichever lane `-m` selected, so there are deliberately no per-lane variants of this flag.
+  modelId?: string;
   // Porch flags
   output?: string;
   planPhase?: string;
@@ -100,6 +112,13 @@ interface MetricsContext {
 
 // Helper to record a metrics entry, opening and closing the DB
 function recordMetrics(ctx: MetricsContext, extra: {
+  /**
+   * The provider model id that actually ran; null when no model was chosen (spec 1286).
+   *
+   * Required, not optional, so the compiler names every call site that produces a metrics row —
+   * an optional field would let a lane silently record NULL and look like a data bug later.
+   */
+  modelId: string | null;
   durationSeconds: number;
   inputTokens: number | null;
   cachedInputTokens: number | null;
@@ -114,6 +133,7 @@ function recordMetrics(ctx: MetricsContext, extra: {
       db.record({
         timestamp: ctx.timestamp,
         model: ctx.model,
+        modelId: extra.modelId,
         reviewType: ctx.reviewType,
         subcommand: ctx.subcommand,
         protocol: ctx.protocol,
@@ -382,8 +402,178 @@ function commandExists(cmd: string): boolean {
   }
 }
 
-// Codex pricing for cost computation (matches values from old SUBPROCESS_MODEL_PRICING)
-const CODEX_PRICING = { inputPer1M: 2.00, cachedInputPer1M: 1.00, outputPer1M: 8.00 };
+/**
+ * Shipped default model id for the codex consult lane (#1288).
+ *
+ * The `-sol` suffix is LOAD-BEARING. Both plain `gpt-5.6` and `gpt-5.6-codex`
+ * were live-probed on 2026-07-29 and rejected by Codex with a ChatGPT account
+ * ("The '<id>' model is not supported when using Codex with a ChatGPT
+ * account."). Do not "simplify" this id — `default-models.test.ts` guards it.
+ */
+export const DEFAULT_CODEX_MODEL = 'gpt-5.6-sol';
+
+/** Shipped default reasoning effort for the codex consult lane. */
+export const DEFAULT_CODEX_REASONING_EFFORT = 'medium' as const;
+
+/** Shipped default model id for the claude consult lane (#1288). */
+export const DEFAULT_CLAUDE_MODEL = 'claude-opus-5';
+
+interface CodexModelPricing {
+  inputPer1M: number;
+  cachedInputPer1M: number;
+  outputPer1M: number;
+}
+
+/**
+ * Per-1M-token codex rates, keyed by model id. Verified against
+ * https://developers.openai.com/api/docs/pricing on 2026-07-30.
+ *
+ * Only OpenAI's *standard* tier is modelled; the separate long-context tier
+ * (charged above the standard context threshold) is not, so cost is
+ * under-reported for unusually large consultations.
+ *
+ * A model id absent from this table yields `costUsd: null` rather than a cost
+ * computed from some other model's rates — a confidently wrong number is worse
+ * than none.
+ */
+const CODEX_PRICING: Record<string, CodexModelPricing> = {
+  'gpt-5.6-sol': { inputPer1M: 5.00, cachedInputPer1M: 0.50, outputPer1M: 30.00 },
+};
+
+/**
+ * Compute codex consultation cost in USD, or null when the model's published
+ * rates are unknown.
+ */
+export function computeCodexCost(
+  model: string,
+  inputTokens: number,
+  cachedInputTokens: number,
+  outputTokens: number,
+  workspaceRoot?: string,
+): number | null {
+  // `consult.pricing.codex` (spec 1286) outranks the shipped table, so a workspace running a model
+  // Codev has no rates for can still get real costs instead of nulls. Optional param: main's
+  // 4-arg callers and tests are unaffected.
+  const configured = workspaceRoot ? loadConfig(workspaceRoot).consult?.pricing?.codex : undefined;
+  const pricing = configured ?? CODEX_PRICING[model];
+  if (!pricing) return null;
+  const uncached = inputTokens - cachedInputTokens;
+  return (uncached / 1_000_000) * pricing.inputPer1M
+       + (cachedInputTokens / 1_000_000) * pricing.cachedInputPer1M
+       + (outputTokens / 1_000_000) * pricing.outputPer1M;
+}
+
+
+/** A lane's resolved model id plus enough provenance to name the source in an error. */
+export interface LaneModelChoice {
+  id: string;
+  /** The config key that supplied the id, or null for the flag / shipped default. */
+  key: string | null;
+  /** The config file that supplied it, or null when it wasn't config. */
+  source: string | null;
+  /** Set when `--model-id` supplied the id. */
+  fromFlag: boolean;
+}
+
+/**
+ * Resolve which model id an SDK lane runs, and record where it came from.
+ *
+ * Precedence: `--model-id` > `consult.models.<lane>` > the shipped default constant.
+ *
+ * The provenance is not decoration: with five config layers, telling a user their
+ * `consult.models.codex` is wrong doesn't tell them which of five files to edit.
+ */
+export function resolveLaneModelChoice(
+  workspaceRoot: string,
+  lane: ConfigurableLane,
+  defaultId: string,
+  modelIdOverride?: string,
+): LaneModelChoice {
+  if (modelIdOverride !== undefined) {
+    validateModelId(modelIdOverride, '--model-id');
+    return { id: modelIdOverride, key: '--model-id', source: null, fromFlag: true };
+  }
+
+  const { id, key } = resolveLaneModel(loadConfig(workspaceRoot).consult, lane);
+  if (id === undefined || key === undefined) {
+    return { id: defaultId, key: null, source: null, fromFlag: false };
+  }
+  return { id, key, source: findConfigSource(workspaceRoot, ['consult', 'models', lane]), fromFlag: false };
+}
+
+/**
+ * Remove a stale review file before failing a consultation.
+ *
+ * "No review file" has to mean none *exists*, not merely that this run declined to write one.
+ * Porch keys off the file's presence, and consult writes to a deterministic per-iteration path — so
+ * a review left by an earlier run of the same iteration would be accepted as though the failed run
+ * had succeeded, and the phase would advance on a stale verdict. Found by codex reviewing the agy
+ * lane; applied to all three lanes because the exposure is identical wherever a runner throws after
+ * a previous run wrote output.
+ */
+function discardStaleOutput(outputPath?: string): void {
+  if (!outputPath) return;
+  try {
+    if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
+  } catch (err) {
+    // Best-effort — failing to unlink must not mask the underlying error. But it must not be
+    // silent either: this is precisely the state where porch could accept a stale review, so it
+    // has to be visible rather than undetectable.
+    console.error(
+      `\n[warning] could not remove stale review at ${outputPath}: ` +
+      `${err instanceof Error ? err.message : String(err)}\n` +
+      `Delete it manually — porch may otherwise accept it as this iteration's review.`
+    );
+  }
+}
+
+/**
+ * Resolve a model for a lane that has **no built-in default** — agy picks its own model when
+ * `--model` is absent, so there is nothing to fall back to.
+ *
+ * `null` means "omit the flag entirely", which is what preserves zero-config parity: an
+ * unconfigured gemini lane must produce byte-identical argv to before this spec.
+ */
+export function resolveOptionalLaneModelChoice(
+  workspaceRoot: string,
+  lane: ConfigurableLane,
+  modelIdOverride?: string,
+): LaneModelChoice | null {
+  if (modelIdOverride !== undefined) {
+    validateModelId(modelIdOverride, '--model-id');
+    return { id: modelIdOverride, key: '--model-id', source: null, fromFlag: true };
+  }
+
+  const { id, key } = resolveLaneModel(loadConfig(workspaceRoot).consult, lane);
+  if (id === undefined || key === undefined) return null;
+  return { id, key, source: findConfigSource(workspaceRoot, ['consult', 'models', lane]), fromFlag: false };
+}
+
+/**
+ * Attach model provenance to a provider rejection.
+ *
+ * Deliberately does NOT substitute a working id or otherwise recover — a bad model id must fail
+ * loudly. The provider's own text is preserved verbatim and merely annotated, because paraphrasing
+ * a provider error is how you lose the one detail that identifies the real problem.
+ */
+function annotateModelError(err: unknown, lane: string, choice: LaneModelChoice): unknown {
+  // A shipped default can't be misconfigured by the user — nothing useful to add.
+  if (choice.key === null) return err;
+
+  const providerText = err instanceof Error ? err.message : String(err);
+  const where = choice.fromFlag
+    ? 'passed via --model-id'
+    : `from \`${choice.key}\`${choice.source ? ` in ${choice.source}` : ''}`;
+
+  const annotated = new Error(
+    `${providerText}\n\n` +
+    `The ${lane} lane requested model "${choice.id}" (${where}).\n` +
+    `If the provider rejected that id, correct it at the source above. ` +
+    `Codev does not fall back to a default model.`
+  );
+  if (err instanceof Error && err.stack) annotated.stack = err.stack;
+  return annotated;
+}
 
 /**
  * Run Codex consultation via @openai/codex-sdk.
@@ -395,7 +585,15 @@ export async function runCodexConsultation(
   workspaceRoot: string,
   outputPath?: string,
   metricsCtx?: MetricsContext,
+  modelChoice?: LaneModelChoice,
+  reasoningEffort?: ModelReasoningEffort,
 ): Promise<void> {
+  // Absent an explicit choice (direct callers), resolve from config so behavior is identical
+  // whether the caller threads it through or not.
+  const choice = modelChoice ?? resolveLaneModelChoice(workspaceRoot, 'codex', DEFAULT_CODEX_MODEL);
+  const effort = reasoningEffort
+    ?? resolveReasoningEffort(loadConfig(workspaceRoot).consult)
+    ?? DEFAULT_CODEX_REASONING_EFFORT;
   const chunks: string[] = [];
   const startTime = Date.now();
   let usageData: UsageData | null = null;
@@ -414,9 +612,9 @@ export async function runCodexConsultation(
     });
 
     const thread = codex.startThread({
-      model: 'gpt-5.4',
+      model: choice.id,
       sandboxMode: 'read-only',
-      modelReasoningEffort: 'medium',
+      modelReasoningEffort: effort,
       workingDirectory: workspaceRoot,
     });
 
@@ -436,10 +634,7 @@ export async function runCodexConsultation(
         // output_tokens already includes reasoning_output_tokens (OpenAI Responses-API
         // convention) — do NOT add the latter to cost or reasoning is double-billed.
         const output = event.usage.output_tokens;
-        const uncached = input - cached;
-        const cost = (uncached / 1_000_000) * CODEX_PRICING.inputPer1M
-                   + (cached / 1_000_000) * CODEX_PRICING.cachedInputPer1M
-                   + (output / 1_000_000) * CODEX_PRICING.outputPer1M;
+        const cost = computeCodexCost(choice.id, input, cached, output, workspaceRoot);
         usageData = { inputTokens: input, cachedInputTokens: cached, outputTokens: output, costUsd: cost };
       }
       if (event.type === 'turn.failed') {
@@ -466,7 +661,8 @@ export async function runCodexConsultation(
       errorMessage = (err instanceof Error ? err.message : String(err)).substring(0, 500);
       exitCode = 1;
     }
-    throw err;
+    discardStaleOutput(outputPath);
+    throw annotateModelError(err, 'codex', choice);
   } finally {
     // Clean up temp file
     if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile);
@@ -475,6 +671,7 @@ export async function runCodexConsultation(
     if (metricsCtx) {
       const duration = (Date.now() - startTime) / 1000;
       recordMetrics(metricsCtx, {
+        modelId: choice.id,
         durationSeconds: duration,
         inputTokens: usageData?.inputTokens ?? null,
         cachedInputTokens: usageData?.cachedInputTokens ?? null,
@@ -526,13 +723,17 @@ export function buildClaudeConsultEnv(
  * Uses the SDK's query() function instead of CLI subprocess.
  * This avoids the CLAUDECODE nesting guard and enables tool use during reviews.
  */
-async function runClaudeConsultation(
+export async function runClaudeConsultation(
   queryText: string,
   role: string,
   workspaceRoot: string,
   outputPath?: string,
   metricsCtx?: MetricsContext,
+  modelChoice?: LaneModelChoice,
 ): Promise<void> {
+  // Absent an explicit choice (direct callers), resolve from config so behavior is identical
+  // whether the caller threads it through or not.
+  const choice = modelChoice ?? resolveLaneModelChoice(workspaceRoot, 'claude', DEFAULT_CLAUDE_MODEL);
   const chunks: string[] = [];
   const startTime = Date.now();
   let sdkResult: SDKResultLike | undefined;
@@ -555,7 +756,7 @@ async function runClaudeConsultation(
         allowedTools: ['Read', 'Glob', 'Grep'],
         permissionMode: 'bypassPermissions',
         allowDangerouslySkipPermissions: true,
-        model: 'claude-opus-4-6',
+        model: choice.id,
         maxTurns: CLAUDE_MAX_TURNS,
         maxBudgetUsd: 25,
         cwd: workspaceRoot,
@@ -595,7 +796,8 @@ async function runClaudeConsultation(
       errorMessage = (err instanceof Error ? err.message : String(err)).substring(0, 500);
       exitCode = 1;
     }
-    throw err;
+    discardStaleOutput(outputPath);
+    throw annotateModelError(err, 'claude', choice);
   } finally {
     if (savedClaudeCode !== undefined) {
       process.env.CLAUDECODE = savedClaudeCode;
@@ -606,6 +808,7 @@ async function runClaudeConsultation(
       const duration = (Date.now() - startTime) / 1000;
       const usage = sdkResult ? extractUsage('claude', '', sdkResult) : null;
       recordMetrics(metricsCtx, {
+        modelId: choice.id,
         durationSeconds: duration,
         inputTokens: usage?.inputTokens ?? null,
         cachedInputTokens: usage?.cachedInputTokens ?? null,
@@ -636,6 +839,10 @@ const AGY_PRINT_TIMEOUT = '5m';                 // passed to `agy --print-timeou
 const AGY_TIMEOUT_MS = 6 * 60 * 1000;           // Codev-owned hard cap (> agy's own timeout)
 // OAuth banner appears before any review text; only scan the early stream.
 const AGY_MARKER_SCAN_LIMIT = 8192;
+// Bounded tail of agy's own output retained for a configured-lane hard failure. agy's rejection
+// text is the only thing that explains WHY a model id was refused, but it lands in an error
+// message, so it is capped rather than accumulated.
+const AGY_FAILURE_TAIL_MAX_CHARS = 2000;
 /**
  * How long a prober waits, marker-free, before publishing `auth` to the shared
  * cache (#1077). The OAuth banner is the very first thing an unauthenticated agy
@@ -694,6 +901,13 @@ export function resolveAgyBin(): string | null {
   // fall back to a different binary the user didn't ask for.
   const override = process.env.CODEV_AGY_BIN;
   if (override) return isRealAgyCli(override) ? override : null;
+
+  // Past this point we go looking for the developer's real install, so this is
+  // the true chokepoint for the test-isolation guard (#1323) — not the spawn
+  // sites. Resolution is not passive: the PATH branch below runs
+  // `agyRespondsToVersion`, which *executes* the candidate binary. Guarding only
+  // the spawn would still let a suite run the real agy.
+  assertAgyLaneAllowedUnderTest();
 
   // Canonical install path — trusted location; realpath-reject the IDE only.
   const preferred = path.join(homedir(), '.local', 'bin', 'agy');
@@ -757,9 +971,14 @@ function recordAgyMetrics(
   startTime: number,
   exitCode: number,
   errorMessage: string | null,
+  // No default: every caller states the id or states null. A default would quietly reintroduce
+  // the silent-NULL path that making modelId required on MetricsRecord exists to prevent.
+  modelId: string | null,
 ): void {
   if (!metricsCtx) return;
   recordMetrics(metricsCtx, {
+    // Null on a skip with no model configured — "no model was chosen", not "we forgot".
+    modelId,
     durationSeconds: (Date.now() - startTime) / 1000,
     // agy --print emits plain text, no token usage → cost rows degrade gracefully (null).
     inputTokens: null,
@@ -783,16 +1002,28 @@ async function runAgyConsultation(
   workspaceRoot: string,
   outputPath?: string,
   metricsCtx?: MetricsContext,
+  modelChoice?: LaneModelChoice | null,
 ): Promise<void> {
   const startTime = Date.now();
 
+  // `undefined` means "resolve it yourself" (direct callers); an explicit `null` means "no model
+  // configured", which must stay distinguishable from "not yet resolved".
+  const choice = modelChoice === undefined
+    ? resolveOptionalLaneModelChoice(workspaceRoot, 'gemini')
+    : modelChoice;
+
+  // The test-isolation guard (#1323) lives inside resolveAgyBin, at the point
+  // where an unpinned lookup would reach the real install. It throws rather than
+  // falling through to the non-blocking skip below — deliberately: a misconfigured
+  // test must fail loudly instead of passing on a machine that happens not to have
+  // agy installed while spawning the real CLI on one that does.
   const bin = resolveAgyBin();
   if (!bin) {
     const reason = 'agy CLI not found (install: https://antigravity.google/cli/install.sh)';
     const content = agySkipContent(reason);
     process.stdout.write(content);
     writeConsultOutput(outputPath, content);
-    recordAgyMetrics(metricsCtx, startTime, 0, reason);
+    recordAgyMetrics(metricsCtx, startTime, 0, reason, choice?.id ?? null);
     console.error(`\n[gemini (agy) skipped: ${reason}]`);
     return;
   }
@@ -807,7 +1038,7 @@ async function runAgyConsultation(
     const content = agySkipContent(reason);
     process.stdout.write(content);
     writeConsultOutput(outputPath, content);
-    recordAgyMetrics(metricsCtx, startTime, 0, reason);
+    recordAgyMetrics(metricsCtx, startTime, 0, reason, choice?.id ?? null);
     console.error(`\n[gemini (agy) skipped without spawning: ${reason}]`);
     return;
   }
@@ -845,6 +1076,10 @@ async function runAgyConsultation(
 
   const args = ['--sandbox', '--print-timeout', AGY_PRINT_TIMEOUT];
   for (const d of addDirs) args.push('--add-dir', d);
+  // Omitted entirely when unconfigured, so an unconfigured lane's argv is byte-identical to
+  // pre-1286 and agy keeps choosing its own model. Must precede --print: agy parses --print as a
+  // string-valued option, so its value has to be the immediately following argument.
+  if (choice) args.push('--model', choice.id);
   // agy 1.0.10 defines --print as a string-valued option, so its prompt must
   // immediately follow the flag rather than another option such as --sandbox.
   args.push('--print', promptArg);
@@ -855,7 +1090,7 @@ async function runAgyConsultation(
     }
   };
 
-  return new Promise<void>((resolve) => {
+  return new Promise<void>((resolve, reject) => {
     const proc = spawn(bin, args, {
       cwd: workspaceRoot,
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -864,6 +1099,11 @@ async function runAgyConsultation(
     const outChunks: Buffer[] = [];
     let scanBuf = '';
     let settled = false;
+    // stderr is watched for auth markers but otherwise discarded today, so a hard failure would
+    // have nothing but an exit code to report. Retain a bounded tail of BOTH streams: agy's own
+    // text is the only thing that explains *why* a model was rejected, and this lands in an error
+    // message, so it must not be unbounded.
+    let outputTail = '';
 
     // When we hold the probe lock, other consult processes are polling the cache
     // for our verdict — publish it as soon as it is knowable, and always release
@@ -890,7 +1130,7 @@ async function runAgyConsultation(
       const content = agySkipContent(reason);
       process.stdout.write(content);
       writeConsultOutput(outputPath, content);
-      recordAgyMetrics(metricsCtx, startTime, exitCode, reason);
+      recordAgyMetrics(metricsCtx, startTime, exitCode, reason, choice?.id ?? null);
       console.error(`\n[gemini (agy) skipped: ${reason}]`);
       resolve();
     };
@@ -902,6 +1142,7 @@ async function runAgyConsultation(
 
     const watch = (buf: Buffer, isStdout: boolean) => {
       if (isStdout) outChunks.push(buf);
+      outputTail = (outputTail + buf.toString('utf-8')).slice(-AGY_FAILURE_TAIL_MAX_CHARS);
       if (scanBuf.length < AGY_MARKER_SCAN_LIMIT) {
         scanBuf += buf.toString('utf-8');
         if (AGY_OAUTH_MARKERS.some((m) => scanBuf.includes(m))) {
@@ -935,7 +1176,51 @@ async function runAgyConsultation(
       clearTimeout(timer);
       cleanup();
       const raw = Buffer.concat(outChunks).toString('utf-8').trim();
-      if (code !== 0 || raw.length === 0 || raw.includes(AGY_NONRESPONSE_MARKER)) {
+
+      // THE PHASE 3 INVARIANT: a skip may only be reached for an ENVIRONMENT cause.
+      //
+      // Configuring `consult.models.gemini` is opting out of "quietly proceed without this lane" —
+      // a non-zero exit then means the model was probably rejected, and swallowing that as a
+      // COMMENT skip would let a typo'd model id silently reduce every review to two lanes.
+      //
+      // Deliberately narrow: ONLY a non-zero exit hard-fails. Auth, timeout, non-response and
+      // empty output stay skips even when configured, because those are environment causes and the
+      // degraded-agy lane (#1032/#1033) must keep its non-blocking property. Widening this to
+      // "any failure" would wedge phases for workspaces whose agy is merely unauthenticated.
+      // Environment causes are classified FIRST. agy can emit its non-response marker *and* exit
+      // non-zero, and checking the exit code before the marker would misfile that timeout as a
+      // configuration failure — breaking the "timeout stays a skip in both cases" half of the
+      // invariant for exactly the degraded lane it exists to protect. (Found by codex at review.)
+      // ONLY the non-response marker, deliberately — NOT empty stdout. A rejected model id writes
+      // its error to stderr and exits non-zero with empty stdout, so treating "no stdout" as an
+      // environment cause would make the hard failure unreachable for the exact case it exists to
+      // catch. (My own stale-review test caught that overcorrection.) Empty stdout still means
+      // "no review" on the zero-exit path below.
+      // Checked against BOTH streams: agy may print its timeout notice to stderr, and matching
+      // stdout alone would hard-fail a configured lane on a plain timeout — the same invariant hole
+      // twice over. `outputTail` is capped, but a timeout notice is by nature near the end of the
+      // stream, so the tail is where it lands. (Found by claude at review.)
+      const timedOutProducing =
+        raw.includes(AGY_NONRESPONSE_MARKER) || outputTail.includes(AGY_NONRESPONSE_MARKER);
+
+      // `code === null` means agy was killed by a signal (OOM, external kill) — an environment
+      // cause, not a rejected model, so it must not hard-fail either. `code !== 0` alone is true
+      // for null and would misfile it. (Found by claude at review.)
+      if (code !== null && code !== 0 && choice && !timedOutProducing) {
+        publishAuth();
+        recordAgyMetrics(metricsCtx, startTime, code, `agy exited with code ${code}`, choice?.id ?? null);
+        console.error(`\n[gemini (agy) FAILED: configured model "${choice.id}" — see error]`);
+        // "No review file" must mean none EXISTS, not merely that this run wrote none.
+        discardStaleOutput(outputPath);
+        const providerError = new Error(
+          `agy exited with code ${code}.` +
+          (outputTail.trim() ? `\n\nagy output (last ${AGY_FAILURE_TAIL_MAX_CHARS} chars):\n${outputTail.trim()}` : '')
+        );
+        reject(annotateModelError(providerError, 'gemini', choice));
+        return;
+      }
+
+      if (code !== 0 || raw.length === 0 || timedOutProducing) {
         // A broken run tells us nothing about auth — release without a verdict
         // and let the next call re-probe.
         publishAuth();
@@ -947,7 +1232,7 @@ async function runAgyConsultation(
         const content = agySkipContent(reason);
         process.stdout.write(content);
         writeConsultOutput(outputPath, content);
-        recordAgyMetrics(metricsCtx, startTime, code ?? 1, reason);
+        recordAgyMetrics(metricsCtx, startTime, code ?? 1, reason, choice?.id ?? null);
         console.error(`\n[gemini (agy) skipped: ${reason}]`);
         resolve();
         return;
@@ -957,11 +1242,24 @@ async function runAgyConsultation(
       // Plain-text stdout IS the review.
       process.stdout.write(raw);
       writeConsultOutput(outputPath, raw);
-      recordAgyMetrics(metricsCtx, startTime, 0, null);
+      recordAgyMetrics(metricsCtx, startTime, 0, null, choice?.id ?? null);
       console.error(`\n[gemini (agy) completed in ${((Date.now() - startTime) / 1000).toFixed(1)}s]`);
       resolve();
     });
   });
+}
+
+/**
+ * Record the model a lane actually ran, so a transcript answers "what did this use?".
+ *
+ * Logged from the dispatch branch that owns the resolved `choice`, NOT re-derived for display: a
+ * second resolution path is exactly how `--model-id` came to be documented, parsed, and inert.
+ * Naming the source too means a surprising id points at the file to edit.
+ */
+function logResolvedModel(lane: string, id: string, key: string | null, effort?: string): void {
+  const from = key ? ` (from ${key})` : '';
+  const at = effort ? ` at ${effort} reasoning effort` : '';
+  console.error(`[${lane.toUpperCase()}] model: ${id}${at}${from}`);
 }
 
 /**
@@ -975,11 +1273,21 @@ async function runConsultation(
   outputPath?: string,
   metricsCtx?: MetricsContext,
   generalMode?: boolean,
+  modelIdOverride?: string,
 ): Promise<void> {
+  // Fail before dispatch if the selected lane cannot honour the override. Checked here rather than
+  // per-branch so a lane that never reads it can't silently ignore it (codex caught exactly that for
+  // hermes). Syntax is validated per-lane in resolveLaneModelChoice.
+  if (modelIdOverride !== undefined) {
+    assertLaneAcceptsModelOverride(model);
+  }
+
   // SDK-based models
   if (model === 'claude') {
     const startTime = Date.now();
-    await runClaudeConsultation(query, role, workspaceRoot, outputPath, metricsCtx);
+    const choice = resolveLaneModelChoice(workspaceRoot, 'claude', DEFAULT_CLAUDE_MODEL, modelIdOverride);
+    logResolvedModel(model, choice.id, choice.key);
+    await runClaudeConsultation(query, role, workspaceRoot, outputPath, metricsCtx, choice);
     const duration = (Date.now() - startTime) / 1000;
     logQuery(workspaceRoot, model, query, duration);
     console.error(`\n[${model} completed in ${duration.toFixed(1)}s]`);
@@ -988,7 +1296,10 @@ async function runConsultation(
 
   if (model === 'codex') {
     const startTime = Date.now();
-    await runCodexConsultation(query, role, workspaceRoot, outputPath, metricsCtx);
+    const choice = resolveLaneModelChoice(workspaceRoot, 'codex', DEFAULT_CODEX_MODEL, modelIdOverride);
+    const effort = resolveReasoningEffort(loadConfig(workspaceRoot).consult) ?? DEFAULT_CODEX_REASONING_EFFORT;
+    logResolvedModel(model, choice.id, choice.key, effort);
+    await runCodexConsultation(query, role, workspaceRoot, outputPath, metricsCtx, choice, effort);
     const duration = (Date.now() - startTime) / 1000;
     logQuery(workspaceRoot, model, query, duration);
     console.error(`\n[${model} completed in ${duration.toFixed(1)}s]`);
@@ -999,7 +1310,10 @@ async function runConsultation(
   // and non-blocking skip (see runAgyConsultation).
   if (model === 'gemini') {
     const startTime = Date.now();
-    await runAgyConsultation(query, role, workspaceRoot, outputPath, metricsCtx);
+    const choice = resolveOptionalLaneModelChoice(workspaceRoot, 'gemini', modelIdOverride);
+    // No configured id means agy chooses; say so rather than printing a value we did not set.
+    logResolvedModel(model, choice?.id ?? "agy's own default", choice?.key ?? null);
+    await runAgyConsultation(query, role, workspaceRoot, outputPath, metricsCtx, choice);
     logQuery(workspaceRoot, model, query, (Date.now() - startTime) / 1000);
     return;
   }
@@ -1090,6 +1404,8 @@ async function runConsultation(
       if (metricsCtx) {
         const usage = extractUsage(model, rawOutput);
         recordMetrics(metricsCtx, {
+          // Subprocess lanes (hermes) expose no model selector — see MODEL_CONFIGURABLE_LANES.
+          modelId: null,
           durationSeconds: duration,
           inputTokens: usage?.inputTokens ?? null,
           cachedInputTokens: usage?.cachedInputTokens ?? null,
@@ -1118,6 +1434,7 @@ async function runConsultation(
       if (metricsCtx) {
         const duration = (Date.now() - startTime) / 1000;
         recordMetrics(metricsCtx, {
+          modelId: null,
           durationSeconds: duration,
           inputTokens: null,
           cachedInputTokens: null,
@@ -2092,7 +2409,7 @@ export async function consult(options: ConsultOptions): Promise<void> {
   }
 
   const isGeneralMode = !hasType;
-  await runConsultation(model, query, workspaceRoot, role, outputPath, metricsCtx, isGeneralMode);
+  await runConsultation(model, query, workspaceRoot, role, outputPath, metricsCtx, isGeneralMode, options.modelId);
 }
 
 // Exported for testing

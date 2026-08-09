@@ -18,10 +18,13 @@ import {
   normalizeWorkspacePath,
   isTempDirectory,
   serveStaticFile,
+  buildArchitectArgs,
   resolveArchitectLaunch,
   resolveArchitectRestart,
   siblingRegistrationIsLive,
   buildArchitectCrashLoopFallback,
+  buildArchitectFreshLaunch,
+  buildArchitectReconnectRestartOptions,
   sessionHasLiveHolder,
 } from '../servers/tower-utils.js';
 
@@ -490,6 +493,14 @@ describe('siblingRegistrationIsLive (Issue #1150)', () => {
     );
   }
 
+  function forceGeminiHarness(): void {
+    fs.mkdirSync(path.join(workspace, '.codev'), { recursive: true });
+    fs.writeFileSync(
+      path.join(workspace, '.codev', 'config.json'),
+      JSON.stringify({ shell: { architect: 'gemini' } }),
+    );
+  }
+
   it('live when the stored session jsonl exists on disk', () => {
     writeSessionFixture(fakeHome, workspace, 'sib-1');
     expect(siblingRegistrationIsLive(workspace, 'sib-1', { homeDir: fakeHome })).toBe(true);
@@ -514,6 +525,243 @@ describe('siblingRegistrationIsLive (Issue #1150)', () => {
   it('dead when the jsonl lives under a different cwd (not this workspace\'s session)', () => {
     writeSessionFixture(fakeHome, '/somewhere/else/entirely', 'foreign-1');
     expect(siblingRegistrationIsLive(workspace, 'foreign-1', { homeDir: fakeHome })).toBe(false);
+  });
+
+  // Issue #1338: a retired gemini architect makes getArchitectHarness throw. This
+  // predicate must NOT propagate that throw (it would abort the whole
+  // sibling-reconcile pass for every architect in the workspace). It returns `true`
+  // — not because a retired registration can launch (it cannot; addArchitect fails
+  // closed on the same retirement), but so the reconcile loop routes to addArchitect
+  // and leaves the user's config row intact instead of DELETEing it. Same launch
+  // safety, non-destructive to a registration the user can still repair.
+  it('live (returns true, no throw) for a retired gemini architect config so its row survives', () => {
+    forceGeminiHarness();
+    expect(() => siblingRegistrationIsLive(workspace, 'sib-1', { homeDir: fakeHome })).not.toThrow();
+    expect(siblingRegistrationIsLive(workspace, 'sib-1', { homeDir: fakeHome })).toBe(true);
+    // Also true with no stored id (the reconcile loop's other liveness input): the
+    // decision is harness retirement, independent of any session evidence.
+    expect(siblingRegistrationIsLive(workspace, null, { homeDir: fakeHome })).toBe(true);
+  });
+
+  // Issue #1338: returning true keeps the row, but the reason must stay diagnosable.
+  // The catch emits an INFO explaining the row is KEPT (addArchitect fails closed)
+  // rather than pruned, so a retired sibling that re-fails on every reconcile is
+  // traceable to its harness instead of a misattributed "no resumable session".
+  it('logs the retirement reason (INFO) for a retired gemini architect (row kept, not pruned)', () => {
+    forceGeminiHarness();
+    const logged: Array<{ level: string; message: string }> = [];
+    const log = (level: 'INFO' | 'WARN' | 'ERROR', message: string) => logged.push({ level, message });
+    expect(siblingRegistrationIsLive(workspace, 'sib-1', { homeDir: fakeHome, log })).toBe(true);
+    expect(logged).toHaveLength(1);
+    expect(logged[0].level).toBe('INFO');
+    expect(logged[0].message).toMatch(/retired harness/i);
+    // The message describes keeping the row, not pruning it (the behavior change).
+    expect(logged[0].message).toMatch(/keeping the row/i);
+  });
+
+  it('does NOT log for a live (supported) sibling registration', () => {
+    // Session-less codex is always live → the retirement catch is never reached,
+    // so no diagnostic line is emitted (non-vacuity: the log is retirement-specific,
+    // not emitted on every call).
+    forceCodexHarness();
+    const logged: string[] = [];
+    const log = (_level: 'INFO' | 'WARN' | 'ERROR', message: string) => logged.push(message);
+    expect(siblingRegistrationIsLive(workspace, null, { homeDir: fakeHome, log })).toBe(true);
+    expect(logged).toEqual([]);
+  });
+});
+
+// Issue #1338 tests write a workspace `.codev/config.json` and assert the harness
+// resolves from it. But `getArchitectHarness` → `getResolvedCommands` gives
+// `TOWER_ARCHITECT_CMD` precedence over workspace config, and `loadUserConfig` can
+// pick up a global `~/.codev/config.json` (HOME) — either set locally would mask
+// the fixture with a loud, misleading failure (phase_2 iter2 review nit). Isolate
+// both for every retirement describe below.
+function isolateHarnessEnv(): { restore: () => void } {
+  const home = fs.mkdtempSync(path.join(tmpdir(), 'ret-home-'));
+  const saved: Record<string, string | undefined> = {
+    HOME: process.env.HOME,
+    TOWER_ARCHITECT_CMD: process.env.TOWER_ARCHITECT_CMD,
+    TOWER_BUILDER_CMD: process.env.TOWER_BUILDER_CMD,
+  };
+  process.env.HOME = home;
+  delete process.env.TOWER_ARCHITECT_CMD;
+  delete process.env.TOWER_BUILDER_CMD;
+  return {
+    restore: () => {
+      fs.rmSync(home, { recursive: true, force: true });
+      for (const [k, v] of Object.entries(saved)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    },
+  };
+}
+
+// Issue #1338 — buildArchitectArgs is the shared launch-injection boundary every
+// architect launch funnels through. A retired architect harness (gemini) must
+// fail closed here with the retirement message (a retired architect must not
+// launch); a supported harness resolves unchanged.
+describe('buildArchitectArgs retirement (#1338)', () => {
+  let workspace: string;
+  let envGuard: { restore: () => void };
+
+  beforeEach(() => {
+    envGuard = isolateHarnessEnv();
+    workspace = fs.mkdtempSync(path.join(tmpdir(), 'baa-ws-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(workspace, { recursive: true, force: true });
+    envGuard.restore();
+  });
+
+  function writeArchitectConfig(architect: string): void {
+    fs.mkdirSync(path.join(workspace, '.codev'), { recursive: true });
+    fs.writeFileSync(
+      path.join(workspace, '.codev', 'config.json'),
+      JSON.stringify({ shell: { architect } }),
+    );
+  }
+
+  it('throws the retirement for a gemini architect config', () => {
+    writeArchitectConfig('gemini');
+    expect(() => buildArchitectArgs([], workspace)).toThrow(/retired/i);
+  });
+
+  it('does not throw for a codex architect config (regression)', () => {
+    writeArchitectConfig('codex');
+    // Codex resolves normally (no retirement); baseArgs stay at the front, with
+    // any role injection (from the bundled skeleton architect role) appended.
+    expect(() => buildArchitectArgs(['--base'], workspace)).not.toThrow();
+    expect(buildArchitectArgs(['--base'], workspace).args[0]).toBe('--base');
+  });
+
+  it('does not throw for the default (claude) architect (regression)', () => {
+    expect(() => buildArchitectArgs([], workspace)).not.toThrow();
+  });
+});
+
+// Issue #1338 — the clean-exit relaunch path. SessionManager invokes
+// freshLaunch.next() WITHOUT a try/catch, so if the architect's harness was
+// retired after launch (a config edit before a clean exit), next() must not throw
+// and must not re-inject/relaunch the retired harness.
+describe('buildArchitectFreshLaunch retirement (#1338)', () => {
+  let workspace: string;
+  let envGuard: { restore: () => void };
+
+  beforeEach(() => {
+    envGuard = isolateHarnessEnv();
+    workspace = fs.mkdtempSync(path.join(tmpdir(), 'bafl-ws-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(workspace, { recursive: true, force: true });
+    envGuard.restore();
+  });
+
+  function writeArchitectConfig(architect: string): void {
+    fs.mkdirSync(path.join(workspace, '.codev'), { recursive: true });
+    fs.writeFileSync(
+      path.join(workspace, '.codev', 'config.json'),
+      JSON.stringify({ shell: { architect } }),
+    );
+  }
+
+  it('next() for a retired gemini architect signals stop (fail closed) and does not throw', () => {
+    writeArchitectConfig('gemini');
+    const fl = buildArchitectFreshLaunch({
+      workspacePath: workspace, architectName: 'main', baseArgs: ['--base'], baseEnv: { FOO: 'bar' }, log: vi.fn(),
+    });
+    // next() can only change args/env, not the retained launch command — which
+    // may itself be the retired binary. So returning baseArgs would still let
+    // SessionManager respawn it (fail-open). Fail closed by signalling stop; the
+    // clean-exit handler then ends the session instead of relaunching. No throw
+    // (SessionManager calls next() without a try/catch).
+    expect(() => fl.next()).not.toThrow();
+    expect(fl.next()).toEqual({ stop: true });
+  });
+
+  it('next() for a supported (codex) architect resolves normally (regression)', () => {
+    writeArchitectConfig('codex');
+    const fl = buildArchitectFreshLaunch({
+      workspacePath: workspace, architectName: 'main', baseArgs: ['--base'], baseEnv: {}, log: vi.fn(),
+    });
+    expect(() => fl.next()).not.toThrow();
+    expect(fl.next().args[0]).toBe('--base');
+  });
+});
+
+// Issue #1338 — the shellper reconnect / startup-reconcile path. A retired harness
+// must NOT produce restart options that relaunch the retired command (the previous
+// fail-OPEN bug); it fails closed by returning undefined (reconnect only, never an
+// auto-restart into the retired binary). Non-retirement harness errors still
+// degrade to the plain configured command so a transient failure can reconnect.
+describe('buildArchitectReconnectRestartOptions retirement (#1338)', () => {
+  let workspace: string;
+  let envGuard: { restore: () => void };
+
+  beforeEach(() => {
+    envGuard = isolateHarnessEnv();
+    workspace = fs.mkdtempSync(path.join(tmpdir(), 'barro-ws-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(workspace, { recursive: true, force: true });
+    envGuard.restore();
+  });
+
+  function writeConfig(cfg: object): void {
+    fs.mkdirSync(path.join(workspace, '.codev'), { recursive: true });
+    fs.writeFileSync(path.join(workspace, '.codev', 'config.json'), JSON.stringify(cfg));
+  }
+
+  it('returns undefined (fail closed) for a retired gemini architect', () => {
+    writeConfig({ shell: { architect: 'gemini' } });
+    const opts = buildArchitectReconnectRestartOptions({
+      workspacePath: workspace, architectName: 'main', cmdParts: ['gemini', '--yolo'], cleanEnv: {}, includeFreshLaunch: true, log: vi.fn(),
+    });
+    expect(opts).toBeUndefined();
+  });
+
+  it('returns undefined for a retired gemini architect regardless of includeFreshLaunch', () => {
+    writeConfig({ shell: { architect: 'gemini' } });
+    expect(buildArchitectReconnectRestartOptions({
+      workspacePath: workspace, architectName: 'main', cmdParts: ['gemini'], cleanEnv: {}, includeFreshLaunch: false, log: vi.fn(),
+    })).toBeUndefined();
+  });
+
+  it('returns restart options for a supported (codex) architect (regression)', () => {
+    writeConfig({ shell: { architect: 'codex' } });
+    const opts = buildArchitectReconnectRestartOptions({
+      workspacePath: workspace, architectName: 'main', cmdParts: ['codex', '--flag'], cleanEnv: { CODEV_ARCHITECT_NAME: 'main' }, includeFreshLaunch: false, log: vi.fn(),
+    });
+    expect(opts).toBeDefined();
+    expect(opts!.command).toBe('codex');
+    expect(opts!.env.CODEV_ARCHITECT_NAME).toBe('main');
+    expect(opts!.freshLaunch).toBeUndefined();
+  });
+
+  it('wires freshLaunch only when includeFreshLaunch is true', () => {
+    writeConfig({ shell: { architect: 'codex' } });
+    const base = { workspacePath: workspace, architectName: 'main', cmdParts: ['codex'], cleanEnv: {}, log: vi.fn() };
+    expect(buildArchitectReconnectRestartOptions({ ...base, includeFreshLaunch: true })!.freshLaunch).toBeDefined();
+    expect(buildArchitectReconnectRestartOptions({ ...base, includeFreshLaunch: false })!.freshLaunch).toBeUndefined();
+  });
+
+  it('falls back to the plain command for a non-retirement harness error', () => {
+    // An unknown harness name throws a generic error (not the retirement), so the
+    // helper degrades to the plain configured command so the session can reconnect
+    // (identity preserved via cleanEnv). This must NOT change for retired harnesses.
+    writeConfig({ shell: { architectHarness: 'no-such-harness', architect: 'weirdcmd' } });
+    const opts = buildArchitectReconnectRestartOptions({
+      workspacePath: workspace, architectName: 'main', cmdParts: ['weirdcmd', '--x'], cleanEnv: { CODEV_ARCHITECT_NAME: 'main' }, includeFreshLaunch: true, log: vi.fn(),
+    });
+    expect(opts).toBeDefined();
+    expect(opts!.command).toBe('weirdcmd');
+    expect(opts!.args).toEqual(['--x']);
+    expect(opts!.env.CODEV_ARCHITECT_NAME).toBe('main');
+    expect(opts!.freshLaunch).toBeUndefined();
   });
 });
 

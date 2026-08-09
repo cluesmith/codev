@@ -36,6 +36,7 @@ packages/codev/dist/
 packages/codev/skeleton/
 packages/types/dist/
 packages/core/dist/
+packages/sdk/dist/
 packages/artifact-canvas/dist/
 apps/vscode/dist/
 apps/vscode/out/

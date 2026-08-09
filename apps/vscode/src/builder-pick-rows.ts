@@ -18,7 +18,7 @@
  * following the `prune-builder-terminals.ts` precedent.
  */
 
-import { resolveAgentName } from '@cluesmith/codev-core/agent-names';
+import { resolveAgentName } from '@cluesmith/codev-sdk/agent-names';
 
 /** Minimal shape of an `OverviewBuilder` row needs for display. */
 export interface OverviewBuilderRow {

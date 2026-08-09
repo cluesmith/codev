@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { encodeWorkspacePath } from '@cluesmith/codev-core/workspace';
+import { encodeWorkspacePath } from '@cluesmith/codev-sdk/workspace';
 import type { ConnectionManager } from '../connection-manager.js';
 import type { TerminalManager } from '../terminal-manager.js';
 import { getTowerAddress } from '../workspace-detector.js';

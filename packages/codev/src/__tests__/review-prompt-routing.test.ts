@@ -18,14 +18,18 @@ const ROUTING_FILES = [
   'protocols/aspir/prompts/review.md',
   'protocols/pir/prompts/review.md',
   'protocols/spir/templates/review.md',
-  'protocols/aspir/templates/review.md',
+  // aspir/templates/ was deleted in #1279 — ASPIR includes SPIR's templates, so
+  // there is one copy to keep routed rather than two that can drift apart.
 ];
 
 const files: string[] = [];
 for (const tree of ['codev', 'codev-skeleton']) {
   for (const f of ROUTING_FILES) files.push(`${tree}/${f}`);
 }
-files.push('codev-skeleton/porch/prompts/review.md'); // generic porch review prompt (skeleton-only)
+// Spec 1280 Phase 9 (M6, G4): the dead `codev-skeleton/porch/prompts/` tree was deleted — it was
+// the Ralph-SPIR-era prompt set with no runtime consumer (the live resolver loads
+// protocols/<p>/prompts/). Its review.md was previously routing-checked here (Spec 987); with the
+// tree gone there is nothing to route. The live review prompts/templates above are unaffected.
 
 function read(rel: string): string {
   return fs.readFileSync(path.join(repoRoot, rel), 'utf-8');

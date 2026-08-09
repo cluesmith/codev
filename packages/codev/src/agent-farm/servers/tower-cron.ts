@@ -6,15 +6,12 @@
 
 import { exec } from 'node:child_process';
 import { readdirSync, readFileSync, existsSync } from 'node:fs';
-import { join, basename } from 'node:path';
+import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import * as yaml from 'js-yaml';
 import { parseCronExpression, isDue } from './tower-cron-parser.js';
 import type { CronSchedule } from './tower-cron-parser.js';
-import { formatBuilderMessage } from '../utils/message-format.js';
-import { broadcastMessage } from './tower-messages.js';
-import { writeMessageToSession } from './message-write.js';
-import { resolvePacingForSession } from './message-pacing.js';
+import { CRON_SENDER, type CronDeliveryResult } from './cron-delivery.js';
 import { getGlobalDb } from '../db/index.js';
 
 // ============================================================================
@@ -37,10 +34,14 @@ export interface CronTask {
 export interface CronDeps {
   log: (level: 'INFO' | 'ERROR' | 'WARN', message: string) => void;
   getKnownWorkspacePaths: () => string[];
-  resolveTarget: (target: string, fallbackWorkspace?: string) => unknown;
-  // id/cwd feed per-harness pacing resolution (Issue #1201); the real
-  // PtySession provides both.
-  getTerminalManager: () => { getSession: (id: string) => { id: string; cwd?: string; write: (data: string) => void } | undefined };
+  /**
+   * Route a cron notification through the Spec 1313 mailbox + gate (Phase 6): persist
+   * it with the task's supersede key, then attempt the single gated delivery shared
+   * with `handleSend`. Returns the run's real outcome so the log is honest instead of
+   * unconditional "delivered". Injected so the scheduler stays unit-testable without a
+   * live Tower; the production implementation is `deliverCronMessage` (tower-routes).
+   */
+  deliver: (task: CronTask, message: string) => Promise<CronDeliveryResult>;
 }
 
 // ============================================================================
@@ -224,17 +225,21 @@ export async function executeTask(task: CronTask): Promise<{ result: string; out
   deps.log('INFO', `Executing cron task: ${task.name}`);
 
   let output: string;
+  let exitCode: number;
   let result: string;
 
   try {
-    output = await runCommand(task.command, {
+    ({ output, exitCode } = await runCommand(task.command, {
       cwd: task.cwd ?? task.workspacePath,
       timeout: task.timeout * 1000,
-    });
-    result = 'success';
+    }));
+    result = exitCode === 0 ? 'success' : 'failure';
   } catch (err: unknown) {
-    const execErr = err as { stdout?: string; stderr?: string; message?: string };
-    output = execErr.stdout ?? execErr.stderr ?? execErr.message ?? String(err);
+    // Infrastructure error: spawn failure or timeout/kill. 124 mirrors the
+    // coreutils `timeout` convention; -1 means the process never ran cleanly.
+    const execErr = err as { stdout?: string; stderr?: string; message?: string; killed?: boolean };
+    output = execErr.stdout || execErr.stderr || execErr.message || String(err);
+    exitCode = execErr.killed ? 124 : -1;
     result = 'failure';
   }
 
@@ -245,23 +250,25 @@ export async function executeTask(task: CronTask): Promise<{ result: string; out
   // Update SQLite state
   updateTaskState(taskId, task.workspacePath, task.name, nowSeconds, result, truncatedOutput);
 
-  // Evaluate condition
-  let shouldNotify = true;
+  // Decide delivery. With a condition, the condition alone decides (a non-zero
+  // exit is data the condition can inspect via exitCode, not noise). Without
+  // one, deliver only on clean exit so flaky commands don't alert-spam.
+  let shouldNotify: boolean;
   if (task.condition) {
     try {
-      shouldNotify = evaluateCondition(task.condition, output.trim());
+      shouldNotify = evaluateCondition(task.condition, output.trim(), exitCode);
     } catch (err) {
       deps.log('WARN', `Condition evaluation failed for '${task.name}': ${err}`);
       shouldNotify = false;
     }
+  } else {
+    shouldNotify = result === 'success';
   }
 
-  if (shouldNotify && result === 'success') {
+  if (shouldNotify) {
     const renderedMessage = task.message.replace(/\$\{output\}/g, output.trim());
-    deliverMessage(task, renderedMessage);
+    await deliverMessage(task, renderedMessage);
   } else if (result === 'failure') {
-    // Command itself errored (non-zero exit, timeout, etc.) — log but don't alert.
-    // Command errors are infrastructure noise, not actionable CI failures.
     deps.log('WARN', `Cron command failed for '${task.name}': ${output.trim().slice(0, 200)}`);
   }
 
@@ -269,7 +276,10 @@ export async function executeTask(task: CronTask): Promise<{ result: string; out
   return { result, output: truncatedOutput };
 }
 
-function runCommand(command: string, options: { cwd: string; timeout: number }): Promise<string> {
+function runCommand(
+  command: string,
+  options: { cwd: string; timeout: number },
+): Promise<{ output: string; exitCode: number }> {
   return new Promise((resolve, reject) => {
     exec(command, {
       cwd: options.cwd,
@@ -277,14 +287,20 @@ function runCommand(command: string, options: { cwd: string; timeout: number }):
       maxBuffer: 1024 * 1024, // 1MB
       env: process.env,
     }, (error, stdout, stderr) => {
-      if (error) {
-        // Attach stdout/stderr for the caller
-        (error as unknown as Record<string, string>).stdout = stdout;
-        (error as unknown as Record<string, string>).stderr = stderr;
-        reject(error);
-      } else {
-        resolve(stdout);
+      if (!error) {
+        resolve({ output: stdout, exitCode: 0 });
+        return;
       }
+      // A numeric code with no kill signal means the process ran and exited
+      // non-zero — that's data for conditions, not an infrastructure error.
+      if (typeof error.code === 'number' && !error.killed && !error.signal) {
+        resolve({ output: stdout || stderr, exitCode: error.code });
+        return;
+      }
+      // Spawn failure or timeout/kill — attach stdout/stderr for the caller
+      (error as unknown as Record<string, string>).stdout = stdout;
+      (error as unknown as Record<string, string>).stderr = stderr;
+      reject(error);
     });
   });
 }
@@ -293,55 +309,49 @@ function runCommand(command: string, options: { cwd: string; timeout: number }):
 // Condition evaluation
 // ============================================================================
 
-export function evaluateCondition(condition: string, output: string): boolean {
+export function evaluateCondition(condition: string, output: string, exitCode = 0): boolean {
   // eslint-disable-next-line no-new-func
-  const fn = new Function('output', 'return ' + condition);
-  return !!fn(output);
+  const fn = new Function('output', 'exitCode', 'return ' + condition);
+  return !!fn(output, exitCode);
 }
 
 // ============================================================================
 // Message delivery (shared send pipeline)
 // ============================================================================
 
-function deliverMessage(task: CronTask, message: string): void {
+/**
+ * Hand a cron notification to the mailbox + gate (Spec 1313, Phase 6) and log its real
+ * outcome. The blind `writeMessageToSession` is gone: `deps.deliver` persists the
+ * message with the task's supersede key and attempts the single gated delivery, so a
+ * busy/menu screen holds it for the backstop rather than fusing it with a draft. The
+ * delivered-message broadcast now fires inside that shared path (as `source:'mailbox'`),
+ * not here — cron no longer double-broadcasts.
+ */
+async function deliverMessage(task: CronTask, message: string): Promise<void> {
   if (!deps) return;
 
-  const result = deps.resolveTarget(task.target, task.workspacePath) as
-    | { terminalId: string; workspacePath: string; agent: string }
-    | { code: string; message: string };
+  const result = await deps.deliver(task, message);
 
-  if ('code' in result) {
-    deps.log('WARN', `Cannot deliver cron message for '${task.name}': target '${task.target}' not found`);
-    return;
+  switch (result.outcome) {
+    case 'delivered':
+      deps.log('INFO', `Cron message delivered: ${CRON_SENDER} → ${task.target} (task '${task.name}')`);
+      break;
+    case 'superseded':
+      deps.log(
+        'INFO',
+        `Cron message held (${result.reason ?? 'busy'}), superseding the prior held run: ${CRON_SENDER} → ${task.target} (task '${task.name}')`,
+      );
+      break;
+    case 'held':
+      deps.log(
+        'INFO',
+        `Cron message held (${result.reason ?? 'busy'}): ${CRON_SENDER} → ${task.target} (task '${task.name}')`,
+      );
+      break;
+    case 'unresolved':
+      // deliverCronMessage already logged a WARN naming the unresolved target.
+      break;
   }
-
-  const session = deps.getTerminalManager().getSession(result.terminalId);
-  if (!session) {
-    deps.log('WARN', `Cannot deliver cron message for '${task.name}': terminal session gone`);
-    return;
-  }
-
-  const formatted = formatBuilderMessage('af-cron', message);
-  // Bugfix #584: pace multi-line output to avoid paste detection.
-  // Issue #1201: per-harness Enter pacing (Kimi needs a longer delayed Enter).
-  writeMessageToSession(session, formatted, false, 0, resolvePacingForSession(session));
-
-  broadcastMessage({
-    type: 'message',
-    from: {
-      project: basename(task.workspacePath),
-      agent: 'af-cron',
-    },
-    to: {
-      project: basename(result.workspacePath),
-      agent: result.agent,
-    },
-    content: message,
-    metadata: { source: 'cron' },
-    timestamp: new Date().toISOString(),
-  });
-
-  deps.log('INFO', `Cron message delivered: af-cron → ${result.agent}`);
 }
 
 // ============================================================================

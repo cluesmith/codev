@@ -106,6 +106,10 @@ describe('adopt command', () => {
       expect(
         fs.existsSync(path.join(projectDir, '.codex', 'skills', 'afx', 'SKILL.md'))
       ).toBe(true);
+      // Spec 1307
+      expect(
+        fs.existsSync(path.join(projectDir, '.codex', 'skills', 'arch-save', 'SKILL.md'))
+      ).toBe(true);
     });
 
     it('should throw error if codev directory already exists', async () => {

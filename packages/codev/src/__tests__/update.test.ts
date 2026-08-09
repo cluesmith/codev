@@ -120,6 +120,12 @@ describe('update command', () => {
       ).toBe(true);
       expect(result.newFiles).toContain('.codex/skills/afx/');
       expect(result.newFiles).not.toContain('.codex/skills/arch-init/');
+      // Spec 1307: existing projects get /arch-save via `codev update`, which is
+      // the path every current adopter takes — init only covers new ones.
+      expect(result.newFiles).toContain('.codex/skills/arch-save/');
+      expect(
+        fs.existsSync(path.join(projectDir, '.codex', 'skills', 'arch-save', 'SKILL.md'))
+      ).toBe(true);
     });
 
     it('should return UpdateResult from update()', async () => {

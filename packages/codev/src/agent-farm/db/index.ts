@@ -142,7 +142,7 @@ function ensureGlobalDatabase(): Database.Database {
   configurePragmas(db);
 
   // Current migration version — bump when adding new migrations
-  const GLOBAL_CURRENT_VERSION = 14;
+  const GLOBAL_CURRENT_VERSION = 17;
 
   // Detect fresh vs existing database by checking if content tables exist.
   // On existing databases, GLOBAL_SCHEMA must NOT run because it references column names
@@ -535,6 +535,88 @@ function ensureGlobalDatabase(): Database.Database {
     console.log('[info] Absorbed state.db tables into global.db (Issue #1118)');
   }
 
+  // Migration v15: Add mailbox table (Spec 1313 — mailbox-first delivery).
+  // Additive new table: every `afx send` is persisted here before the send
+  // response returns, so nothing is lost to a Tower crash/restart/shutdown.
+  // Rows address AGENTS (to_agent), not PTYs, so a respawned terminal drains its
+  // predecessor's mail. No rows to migrate — the retired SendBuffer was in-memory.
+  // Idempotent via CREATE TABLE / CREATE INDEX IF NOT EXISTS (fresh installs
+  // already created it from GLOBAL_SCHEMA and reach the marker as a no-op).
+  const v15 = db.prepare('SELECT version FROM _migrations WHERE version = 15').get();
+  if (!v15) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS mailbox (
+        id TEXT PRIMARY KEY,
+        workspace_path TEXT NOT NULL,
+        to_agent TEXT NOT NULL,
+        terminal_id TEXT,
+        from_agent TEXT,
+        from_workspace TEXT,
+        body TEXT NOT NULL,
+        formatted_message TEXT NOT NULL,
+        no_enter INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'held'
+          CHECK(status IN ('held', 'delivered', 'superseded', 'dismissed')),
+        reason TEXT CHECK(reason IN ('busy', 'no-profile', 'no-live-pty')),
+        supersede_key TEXT,
+        escalated INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        resolved_at INTEGER
+      );
+      CREATE INDEX IF NOT EXISTS idx_mailbox_workspace_status ON mailbox(workspace_path, status);
+      CREATE INDEX IF NOT EXISTS idx_mailbox_agent_drain ON mailbox(workspace_path, to_agent, status);
+      CREATE INDEX IF NOT EXISTS idx_mailbox_supersede ON mailbox(supersede_key);
+    `);
+    db.prepare('INSERT INTO _migrations (version) VALUES (15)').run();
+    console.log('[info] Created mailbox table (Spec 1313)');
+  }
+
+  // Migration v16: Add command column to terminal_sessions (Spec 1313).
+  // The render-gate resolves an agent's classifier profile from its launch
+  // command (PtySession.command). Shellper-backed sessions were created with
+  // command: '' and the profile fell back to reading `.builder-start.sh` —
+  // which only builder worktrees have. Architects run in the workspace root
+  // (no launch script), so they never resolved and every `afx send architect`
+  // held `no-profile`. Persisting the command lets the reconcile/reconnect
+  // paths restore identity after a Tower restart, so architects resolve
+  // directly and survive restart (builders keep the launch-script backstop).
+  // Mirrors the label (v11) / cwd (v12) column adds.
+  const v16 = db.prepare('SELECT version FROM _migrations WHERE version = 16').get();
+  if (!v16) {
+    // Only skip the ALTER when the column genuinely exists already (fresh install
+    // ran GLOBAL_SCHEMA). A blanket try/catch would let a REAL alter failure be
+    // recorded as "migrated" — and since saveTerminalSession's INSERT now names
+    // `command`, every future write would then fail against a table missing it.
+    const hasCommand = (db.prepare(`PRAGMA table_info(terminal_sessions)`).all() as Array<{ name: string }>)
+      .some((c) => c.name === 'command');
+    if (!hasCommand) {
+      db.exec(`ALTER TABLE terminal_sessions ADD COLUMN command TEXT`);
+    }
+    db.prepare('INSERT INTO _migrations (version) VALUES (16)').run();
+    console.log('[info] Added command column to terminal_sessions (Spec 1313 restart-safe render-gate identity)');
+  }
+
+  // Migration v17: Add not_before column to mailbox (Spec 1313 round 3 — durable `--delay`).
+  // `afx send --delay` now persists its row at REQUEST time with not_before = now + delay*1000
+  // and defers delivery through the render gate, so a delayed send survives a Tower restart
+  // (the conscious reversal of Spec 1307's drop-on-restart semantics). A row is deliverable
+  // only when `not_before IS NULL OR not_before <= now`; null means deliver-ASAP (every
+  // pre-round-3 row). PRAGMA-gated ADD COLUMN mirroring v16 — a blanket try/catch would let a
+  // real ALTER failure be recorded as "migrated" and every subsequent mailbox insert (which
+  // now names not_before) would then fail against a table missing it. Do NOT edit v15 in place:
+  // dev machines on this branch already applied it, so the column must arrive as its own step.
+  const v17 = db.prepare('SELECT version FROM _migrations WHERE version = 17').get();
+  if (!v17) {
+    const hasNotBefore = (db.prepare(`PRAGMA table_info(mailbox)`).all() as Array<{ name: string }>)
+      .some((c) => c.name === 'not_before');
+    if (!hasNotBefore) {
+      db.exec(`ALTER TABLE mailbox ADD COLUMN not_before INTEGER`);
+    }
+    db.prepare('INSERT INTO _migrations (version) VALUES (17)').run();
+    console.log('[info] Added not_before column to mailbox (Spec 1313 durable --delay)');
+  }
+
   return db;
 }
 
@@ -546,4 +628,7 @@ export type {
   DbBuilder,
   DbUtil,
   DbAnnotation,
+  DbMailbox,
+  MailboxStatus,
+  MailboxReason,
 } from './types.js';

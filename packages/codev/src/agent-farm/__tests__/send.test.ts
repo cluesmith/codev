@@ -68,7 +68,7 @@ vi.mock('node:fs', async () => {
 
 import { tmpdir } from 'node:os';
 import { send, detectWorkspaceRoot } from '../commands/send.js';
-import { fatal } from '../utils/logger.js';
+import { fatal, logger } from '../utils/logger.js';
 
 // ============================================================================
 // Helpers
@@ -265,6 +265,72 @@ describe('send command', () => {
       await send({ all: true, builder: 'Hello' });
 
       expect(mockSendMessage).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  // =========================================================================
+  // --delay (Spec 1307)
+  // =========================================================================
+
+  describe('--delay', () => {
+    it('passes deliverAfter through to the client', async () => {
+      // The CLI->client hop for --delay. Without this assertion, dropping
+      // `deliverAfter: options.delay` from send.ts leaves every other test
+      // green while --delay silently degrades to an immediate send.
+      await send({ builder: 'builder-spir-109', message: 'later', delay: 15 });
+
+      expect(mockSendMessage).toHaveBeenCalledWith(
+        'builder-spir-109',
+        'later',
+        expect.objectContaining({ deliverAfter: 15 }),
+      );
+    });
+
+    it('omits deliverAfter when no delay is given', async () => {
+      await send({ builder: 'builder-spir-109', message: 'now' });
+
+      expect(mockSendMessage).toHaveBeenCalledWith(
+        'builder-spir-109',
+        'now',
+        expect.objectContaining({ deliverAfter: undefined }),
+      );
+    });
+
+    it('passes deliverAfter for every target under --all', async () => {
+      await send({ all: true, builder: 'broadcast later', delay: 20 });
+
+      for (const call of mockSendMessage.mock.calls) {
+        expect(call[2]).toEqual(expect.objectContaining({ deliverAfter: 20 }));
+      }
+      expect(mockSendMessage.mock.calls.length).toBeGreaterThan(0);
+    });
+
+    it('reports a scheduled send as scheduled, not sent', async () => {
+      mockSendMessage.mockResolvedValue({
+        ok: true, resolvedTo: 'builder-spir-109', scheduled: true,
+      });
+
+      await send({ builder: 'builder-spir-109', message: 'later', delay: 15 });
+
+      const messages = vi.mocked(logger.success).mock.calls.map(c => String(c[0]));
+      expect(messages.some(m => /scheduled/i.test(m))).toBe(true);
+      expect(messages.some(m => /^Message sent to/.test(m))).toBe(false);
+    });
+
+    it('reports a held send as held, never as delivered', async () => {
+      // Spec 1313: the SendBuffer `deferred`/"queued" bucket is gone. A message that
+      // cannot land now is `held` in the durable mailbox and reported via logger.info
+      // (not success) — it is explicitly NOT a delivery.
+      mockSendMessage.mockResolvedValue({
+        ok: true, resolvedTo: 'builder-spir-109', held: true, reason: 'busy-line',
+      });
+
+      await send({ builder: 'builder-spir-109', message: 'hi' });
+
+      const infoMessages = vi.mocked(logger.info).mock.calls.map(c => String(c[0]));
+      const successMessages = vi.mocked(logger.success).mock.calls.map(c => String(c[0]));
+      expect(infoMessages.some(m => /held/i.test(m))).toBe(true);
+      expect(successMessages.some(m => /^Message delivered to/.test(m))).toBe(false);
     });
   });
 

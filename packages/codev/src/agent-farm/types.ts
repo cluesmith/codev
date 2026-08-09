@@ -164,6 +164,47 @@ export interface SendOptions {
   interrupt?: boolean;  // Send Ctrl+C first to ensure prompt is ready
   raw?: boolean;        // Skip structured formatting
   noEnter?: boolean;    // Don't send Enter after message
+  /**
+   * Spec 1307: hold in Tower and deliver after this many seconds. Resolution
+   * and authorization still happen at request time; only delivery is deferred.
+   * Not persisted — a Tower restart drops pending sends.
+   *
+   * Named `delay` here to match the user-facing `--delay` flag; it becomes
+   * `deliverAfter` at the client and wire layers, where the question is *when
+   * to deliver* rather than *how long the caller asked to wait*. The two names
+   * are deliberate, not drift.
+   */
+  delay?: number;
+}
+
+/**
+ * Options for `afx interrupt` (Spec 1273).
+ *
+ * Sends a bare ESC keystroke into a builder's PTY — the only recovery that
+ * reaches a builder mid-turn, ending the turn so queued messages process.
+ */
+export interface InterruptOptions {
+  builder?: string;     // Builder ID / short id (required)
+  noEnter?: boolean;    // Write ESC alone, without the trailing Enter
+}
+
+/**
+ * Options for `afx reset` — save-state → /clear → re-orient (Spec 1273).
+ *
+ * The timing knobs exist because the safe failure of every gate is "abort
+ * without clearing". A builder that legitimately needs longer than a default
+ * should be given longer, not have the gate weakened.
+ */
+export interface ResetOptions {
+  builder?: string;      // Builder ID / short id (required)
+  note?: string;         // Inline addendum appended to the re-orientation
+  file?: string;         // Addendum read from the CALLER's filesystem (48KB cap)
+  dryRun?: boolean;      // Print the payloads; write nothing to the builder
+  interruptFirst?: boolean;  // ESC before the save request, for a wedged builder
+  mode?: 'strict' | 'soft';  // Override when the builder prompt file is gone
+  timeout?: number;      // Seconds to wait for the save-state receipt
+  minBytes?: number;     // Minimum state-file size to count as substantive
+  quietWindow?: number;  // ms of terminal silence that counts as turn-ended
 }
 
 /**

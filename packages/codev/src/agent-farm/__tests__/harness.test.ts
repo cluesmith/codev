@@ -1,21 +1,34 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   CLAUDE_HARNESS,
   CODEX_HARNESS,
-  GEMINI_HARNESS,
   OPENCODE_HARNESS,
   KIMI_HARNESS,
-  KIMI_SEED_SENTINEL,
-  KIMI_SESSION_FILE,
+  KIMI_AGENT_FILE,
+  buildKimiAgentFile,
   buildCustomHarnessProvider,
   validateCustomHarnessConfig,
   resolveHarness,
   detectHarnessFromCommand,
+  isRetiredHarness,
+  getRetirement,
+  getBuiltinHarness,
   type CustomHarnessConfig,
 } from '../utils/harness.js';
+
+// Capture whether resolveHarness returned a provider or threw — lets a test
+// assert a retired path returns NEITHER a provider NOR undefined (it throws).
+function resolveResult(fn: () => unknown): { returned?: unknown; threw?: Error } {
+  try {
+    return { returned: fn() };
+  } catch (e) {
+    return { threw: e as Error };
+  }
+}
 
 describe('harness', () => {
   const ROLE_CONTENT = '# Role\n\nYou are an architect.';
@@ -67,22 +80,7 @@ describe('harness', () => {
     // so architects on Codex spawn fresh and nothing is persisted.
     it('has no session capability', () => {
       expect(CODEX_HARNESS.session).toBeUndefined();
-      expect(GEMINI_HARNESS.session).toBeUndefined();
       expect(OPENCODE_HARNESS.session).toBeUndefined();
-    });
-  });
-
-  describe('GEMINI_HARNESS', () => {
-    it('buildRoleInjection returns GEMINI_SYSTEM_MD env var', () => {
-      const result = GEMINI_HARNESS.buildRoleInjection(ROLE_CONTENT, ROLE_FILE);
-      expect(result.args).toEqual([]);
-      expect(result.env).toEqual({ GEMINI_SYSTEM_MD: ROLE_FILE });
-    });
-
-    it('buildScriptRoleInjection returns env with empty fragment', () => {
-      const result = GEMINI_HARNESS.buildScriptRoleInjection(ROLE_CONTENT, ROLE_FILE);
-      expect(result.fragment).toBe('');
-      expect(result.env).toEqual({ GEMINI_SYSTEM_MD: ROLE_FILE });
     });
   });
 
@@ -121,10 +119,6 @@ describe('harness', () => {
 
     it('CODEX_HARNESS does not have getWorktreeFiles', () => {
       expect(CODEX_HARNESS.getWorktreeFiles).toBeUndefined();
-    });
-
-    it('GEMINI_HARNESS does not have getWorktreeFiles', () => {
-      expect(GEMINI_HARNESS.getWorktreeFiles).toBeUndefined();
     });
   });
 
@@ -277,9 +271,14 @@ describe('harness', () => {
       expect(provider).toBe(CODEX_HARNESS);
     });
 
-    it('resolves built-in gemini', () => {
-      const provider = resolveHarness('gemini');
-      expect(provider).toBe(GEMINI_HARNESS);
+    it('explicit gemini fails closed with the retirement (never claude, never undefined)', () => {
+      // Fail closed: a retired name resolves to NEITHER CLAUDE_HARNESS (the #929
+      // silent-mismatch class) NOR undefined. Throwing is that guarantee.
+      const r = resolveResult(() => resolveHarness('gemini'));
+      expect(r.returned).toBeUndefined();
+      expect(r.returned).not.toBe(CLAUDE_HARNESS);
+      expect(r.threw?.message).toMatch(/retired/i);
+      expect(r.threw?.message).toContain('2026-06-18');
     });
 
     it('resolves built-in opencode', () => {
@@ -313,14 +312,70 @@ describe('harness', () => {
       expect(() => resolveHarness('bad', customHarnesses)).toThrow('my-agent');
     });
 
+    it('unrelated unknown name throws the generic error, not the retirement', () => {
+      expect(() => resolveHarness('frobnicate')).toThrow('Unknown harness "frobnicate"');
+      expect(() => resolveHarness('frobnicate')).not.toThrow(/retired/i);
+    });
+
+    it('the available-harnesses listing no longer includes gemini', () => {
+      expect(() => resolveHarness('frobnicate')).toThrow(/claude/);
+      expect(() => resolveHarness('frobnicate')).toThrow(/codex/);
+      expect(() => resolveHarness('frobnicate')).toThrow(/opencode/);
+      expect(() => resolveHarness('frobnicate')).not.toThrow(/gemini/);
+    });
+
+    it('explicit custom gemini resolves to the custom provider (retained-access escape hatch)', () => {
+      // Mirrors the documented escape hatch (README) and the retired built-in GEMINI_HARNESS:
+      // the Gemini CLI reads its system prompt from the GEMINI_SYSTEM_MD env var (empty args /
+      // fragment), not a --system flag. Keeping the asserted shape identical to the documented one
+      // prevents the docs from drifting back to a launch line the CLI would reject.
+      const customHarnesses: Record<string, CustomHarnessConfig> = {
+        gemini: {
+          roleArgs: [],
+          roleEnv: { GEMINI_SYSTEM_MD: '${ROLE_FILE}' },
+          roleScriptFragment: '',
+          roleScriptEnv: { GEMINI_SYSTEM_MD: '${ROLE_FILE}' },
+        },
+      };
+      const provider = resolveHarness('gemini', customHarnesses);
+      const spawn = provider.buildRoleInjection(ROLE_CONTENT, ROLE_FILE);
+      expect(spawn.args).toEqual([]);
+      expect(spawn.env).toEqual({ GEMINI_SYSTEM_MD: ROLE_FILE });
+      const script = provider.buildScriptRoleInjection(ROLE_CONTENT, ROLE_FILE);
+      expect(script.fragment).toBe('');
+      expect(script.env).toEqual({ GEMINI_SYSTEM_MD: ROLE_FILE });
+    });
+
+    it('auto-detected gemini is retired even when a custom gemini exists', () => {
+      // Auto-detection never consults custom harnesses, so a `gemini …` command
+      // is retired regardless of a same-named custom definition.
+      const customHarnesses: Record<string, CustomHarnessConfig> = {
+        gemini: { roleArgs: [], roleScriptFragment: '' },
+      };
+      expect(() => resolveHarness(undefined, customHarnesses, 'gemini --yolo')).toThrow(/retired/i);
+    });
+
+    it('built-in harnesses are never shadowed by same-named custom harnesses', () => {
+      const customHarnesses: Record<string, CustomHarnessConfig> = {
+        claude: { roleArgs: ['x'], roleScriptFragment: 'x' },
+        codex: { roleArgs: ['x'], roleScriptFragment: 'x' },
+        opencode: { roleArgs: ['x'], roleScriptFragment: 'x' },
+      };
+      expect(resolveHarness('claude', customHarnesses)).toBe(CLAUDE_HARNESS);
+      expect(resolveHarness('codex', customHarnesses)).toBe(CODEX_HARNESS);
+      expect(resolveHarness('opencode', customHarnesses)).toBe(OPENCODE_HARNESS);
+    });
+
     it('auto-detects codex from command string', () => {
       const provider = resolveHarness(undefined, undefined, 'codex');
       expect(provider).toBe(CODEX_HARNESS);
     });
 
-    it('auto-detects gemini from full path', () => {
-      const provider = resolveHarness(undefined, undefined, '/opt/homebrew/bin/gemini');
-      expect(provider).toBe(GEMINI_HARNESS);
+    it('auto-detected gemini command fails closed with the retirement (never claude, never undefined)', () => {
+      const r = resolveResult(() => resolveHarness(undefined, undefined, '/opt/homebrew/bin/gemini'));
+      expect(r.returned).toBeUndefined();
+      expect(r.returned).not.toBe(CLAUDE_HARNESS);
+      expect(r.threw?.message).toMatch(/retired/i);
     });
 
     it('auto-detects claude from command with flags', () => {
@@ -334,13 +389,52 @@ describe('harness', () => {
     });
 
     it('explicit harnessName takes priority over auto-detection', () => {
-      const provider = resolveHarness('gemini', undefined, 'codex');
-      expect(provider).toBe(GEMINI_HARNESS);
+      const provider = resolveHarness('codex', undefined, 'claude');
+      expect(provider).toBe(CODEX_HARNESS);
     });
 
     it('falls back to claude for unknown command', () => {
       const provider = resolveHarness(undefined, undefined, 'my-custom-agent');
       expect(provider).toBe(CLAUDE_HARNESS);
+    });
+
+    it('inherited Object keys are not providers — throws Unknown harness, never a bogus provider (#1338)', () => {
+      // `harnessName` is user-controlled (config `shell.builderHarness` / a builder
+      // launch script). A bare `BUILTIN_HARNESSES[name]` for an inherited Object
+      // member returns a truthy value (`Object` for 'constructor', a function for
+      // 'toString'/'hasOwnProperty', `Object.prototype` for '__proto__'), which the
+      // pre-#1338 `if (builtin) return builtin` handed back as a bogus provider that
+      // TypeErrors at the first buildRoleInjection. The own-property guard makes
+      // these fail closed with the generic "Unknown harness" error instead.
+      for (const protoKey of ['constructor', 'toString', 'hasOwnProperty', 'valueOf', '__proto__']) {
+        const r = resolveResult(() => resolveHarness(protoKey));
+        expect(r.returned, `${protoKey} must not resolve to a provider`).toBeUndefined();
+        expect(r.threw?.message, `${protoKey} must throw Unknown harness`).toMatch(/Unknown harness/);
+      }
+    });
+  });
+
+  // ===========================================================================
+  // getBuiltinHarness (own-property accessor — #1338)
+  // ===========================================================================
+
+  describe('getBuiltinHarness', () => {
+    it('returns the provider for each built-in name', () => {
+      expect(getBuiltinHarness('claude')).toBe(CLAUDE_HARNESS);
+      expect(getBuiltinHarness('codex')).toBe(CODEX_HARNESS);
+      expect(getBuiltinHarness('opencode')).toBe(OPENCODE_HARNESS);
+    });
+
+    it('returns undefined for an unknown name', () => {
+      expect(getBuiltinHarness('nonexistent')).toBeUndefined();
+    });
+
+    it('returns undefined for inherited Object keys (the footgun the guard closes)', () => {
+      // Mirrors isRetiredHarness's own-property check: these must never resolve to
+      // Object.prototype members even though `BUILTIN_HARNESSES[key]` would be truthy.
+      for (const protoKey of ['constructor', 'toString', 'hasOwnProperty', 'valueOf', '__proto__']) {
+        expect(getBuiltinHarness(protoKey)).toBeUndefined();
+      }
     });
   });
 
@@ -426,11 +520,36 @@ describe('harness', () => {
       expect(() => KIMI_HARNESS.buildRoleInjection(ROLE_CONTENT, ROLE_FILE)).toThrow(/architect/);
     });
 
-    it('buildScriptRoleInjection is inert (role cannot ride argv)', () => {
-      expect(KIMI_HARNESS.buildScriptRoleInjection(ROLE_CONTENT, ROLE_FILE)).toEqual({
-        fragment: '',
-        env: {},
-      });
+    // The pivot (PR #1203 re-integration): the role rides `--agent-file`, a real
+    // kimi 0.31.0+ flag, pointed at a file written next to `.builder-role.md`.
+    // It replaced a seed-session bootstrap that delivered the role as a user turn.
+    it('buildScriptRoleInjection points --agent-file at the worktree agent file', () => {
+      const { fragment, env } = KIMI_HARNESS.buildScriptRoleInjection(ROLE_CONTENT, ROLE_FILE);
+      expect(fragment).toBe(`--agent-file '/tmp/workspace/${KIMI_AGENT_FILE}'`);
+      expect(env).toEqual({});
+    });
+
+    it('the agent file extends kimi\'s own system prompt rather than replacing it', () => {
+      const body = buildKimiAgentFile('ROLE BODY');
+      // ${base_prompt} is the load-bearing token: it interpolates kimi's default
+      // system prompt, so the role is additive (the --append-system-prompt analogue).
+      // Without it the builder silently loses kimi's tool-use and safety preamble.
+      expect(body).toContain('${base_prompt}');
+      expect(body).toContain('ROLE BODY');
+      expect(body.indexOf('${base_prompt}')).toBeLessThan(body.indexOf('ROLE BODY'));
+      // Frontmatter is required by kimi's agent-definition format.
+      expect(body.startsWith('---\n')).toBe(true);
+      expect(body).toMatch(/^name:\s*\S+/m);
+    });
+
+    it('getWorktreeFiles writes the agent file only when there is a role', () => {
+      const withRole = KIMI_HARNESS.getWorktreeFiles!(ROLE_CONTENT);
+      expect(withRole).toEqual([
+        { relativePath: KIMI_AGENT_FILE, content: buildKimiAgentFile(ROLE_CONTENT) },
+      ]);
+      // No marker file any more: pacing reads the harness out of the generated
+      // .builder-start.sh, so nothing has to remember to write a breadcrumb.
+      expect(KIMI_HARNESS.getWorktreeFiles!(null)).toEqual([]);
     });
 
     // The architect stored-UUID contract needs newSessionArgs (mint-and-pin),
@@ -444,108 +563,226 @@ describe('harness', () => {
       expect(KIMI_HARNESS.messagePacing?.enterDelayMs).toBeGreaterThanOrEqual(1000);
     });
 
-    describe('seedDelivery.buildSeedPrompt', () => {
-      const build = KIMI_HARNESS.seedDelivery!.buildSeedPrompt;
-
-      it('role + task → ack-and-wait with BEGIN discipline, both payloads present', () => {
-        const prompt = build('ROLE BODY', 'TASK BODY');
-        expect(prompt).toContain('Do NOT start working');
-        expect(prompt).toContain('BEGIN');
-        expect(prompt).toContain('=== YOUR ROLE ===');
-        expect(prompt).toContain('ROLE BODY');
-        expect(prompt).toContain('=== TASK BRIEFING');
-        expect(prompt).toContain('TASK BODY');
-      });
-
-      it('role only (interactive worktree mode) → waits for the user, no BEGIN protocol', () => {
-        const prompt = build('ROLE BODY', null);
-        expect(prompt).toContain('ROLE BODY');
-        expect(prompt).not.toContain('BEGIN');
-        expect(prompt).toContain('wait for instructions from the user');
-      });
-
-      it('task only (no-role spawn) → BEGIN discipline without a role section', () => {
-        const prompt = build(null, 'TASK BODY');
-        expect(prompt).toContain('TASK BODY');
-        expect(prompt).toContain('BEGIN');
-        expect(prompt).not.toContain('=== YOUR ROLE ===');
-      });
-    });
-
     describe('buildBuilderLaunchScript', () => {
-      const ctxBase = { worktreePath: '/tmp/wt', baseCmd: 'kimi' };
+      const ROLE_FRAGMENT = `--agent-file '/tmp/wt/${KIMI_AGENT_FILE}'`;
+      const ctxBase = { worktreePath: '/tmp/wt', baseCmd: 'kimi', roleFragment: ROLE_FRAGMENT };
+      const taskCtx = { ...ctxBase, taskFile: '/tmp/wt/.builder-prompt.txt', builderId: 'pir-1201' };
+      const bareCtx = { ...ctxBase, roleFragment: '', taskFile: null };
 
-      it('fresh: seed guard + sentinel + pinned -S loop with --yolo; no role flags, no positional prompt', () => {
-        const script = KIMI_HARNESS.buildBuilderLaunchScript!({
-          ...ctxBase, seedFile: '/tmp/wt/.builder-seed.txt',
-        });
-        expect(script).toContain('if [ ! -s .builder-kimi-session ]');
-        expect(script).toContain('--output-format stream-json');
-        expect(script).toContain(`${KIMI_SEED_SENTINEL} $SID`);
-        expect(script).toContain('kimi --yolo -S "$SID"');
-        expect(script).toContain('while true');
-        // Seed failure exits BEFORE the loop — surfaced, never restart-looped.
-        // toContain guards the ordering check against a vacuous pass: without
-        // it, removing `exit 1` makes indexOf return -1, and -1 < anything.
-        expect(script).toContain('exit 1');
-        expect(script.indexOf('exit 1')).toBeLessThan(script.indexOf('while true'));
-        // The #929/#1062 regression class: no claude-shaped flags, no
-        // positional prompt appended to the CLI.
-        expect(script).not.toContain('--append-system-prompt');
-        expect(script).not.toContain('--resume');
-        expect(script).not.toContain('.builder-prompt.txt');
+      it('task-carrying: role via --agent-file, task via the mailbox — never a positional prompt', () => {
+        const script = KIMI_HARNESS.buildBuilderLaunchScript!(taskCtx);
+        expect(script).toContain(ROLE_FRAGMENT);
+        expect(script).toContain('--yolo');
+        // kimi takes no positional prompt, so the task rides the Spec 1313 mailbox
+        // and the render gate delivers it onto a verified-empty composer.
+        expect(script).toContain("afx send 'pir-1201'");
+        expect(script).toContain('/tmp/wt/.builder-prompt.txt');
+        // The #929/#1062 regression class: never claude-shaped flags, and never a
+        // prompt appended as an argument (kimi exits 1 on both). Scoped to the lines
+        // that actually INVOKE kimi — the script's prose mentions `afx spawn --resume`,
+        // and a whole-script substring guard would trip on that instead of on a real
+        // mis-injection.
+        const kimiInvocations = script.split('\n').filter((l) => /^\s*kimi(\s|$)/.test(l));
+        expect(kimiInvocations.length).toBeGreaterThan(0);
+        for (const line of kimiInvocations) {
+          expect(line).not.toContain('--append-system-prompt');
+          expect(line).not.toContain('--resume');
+          expect(line).not.toContain('$(cat');
+        }
       });
 
-      it('resume: no seed; persists the pinned id and loops -S on it', () => {
-        const script = KIMI_HARNESS.buildBuilderLaunchScript!({
-          ...ctxBase, seedFile: null, resume: { sessionId: 'session_abc-123' },
-        });
-        expect(script).toContain("printf '%s' 'session_abc-123' > .builder-kimi-session");
-        expect(script).toContain('kimi --yolo -S "$SID"');
-        expect(script).not.toContain('stream-json');
-        expect(script).not.toContain('--append-system-prompt');
+      it('task-carrying: queues the task on a FRESH launch only, never on a resume', () => {
+        const script = KIMI_HARNESS.buildBuilderLaunchScript!(taskCtx);
+        const fresh = script.indexOf('codev_launch_fresh() {');
+        const resume = script.indexOf('codev_launch_resume() {');
+        const queueCall = script.indexOf('codev_queue_task\n', fresh);
+        expect(fresh).toBeGreaterThan(-1);
+        expect(resume).toBeGreaterThan(-1);
+        // The only invocation of the queue helper sits inside the fresh branch, so a
+        // resumed conversation is never re-fed a task it has already been working on.
+        expect(queueCall).toBeGreaterThan(fresh);
+        expect(queueCall).toBeLessThan(resume);
       });
 
-      it('bare (nothing to seed): plain TUI loop that still persists the pacing marker', () => {
-        const script = KIMI_HARNESS.buildBuilderLaunchScript!({ ...ctxBase, seedFile: null });
+      // THE guard this design exists for (verified live on 0.34.0): `kimi -c` with
+      // nothing to continue does NOT fail — it prints "No sessions to continue…" and
+      // starts a fresh session that never saw --agent-file, i.e. a ROLELESS builder.
+      // Every path to `-c` must therefore be gated on a proven-existing session, and
+      // the gate must fail CLOSED to the role-carrying launch.
+      it('never reaches -c without proving a session exists (the roleless-fallback guard)', () => {
+        const script = KIMI_HARNESS.buildBuilderLaunchScript!(taskCtx);
+        expect(script).toContain('codev_has_session');
+        // Entry selects resume only under the probe...
+        expect(script).toMatch(/if codev_has_session; then\n\s*codev_launch=codev_launch_resume\n\s*else\n\s*codev_launch=codev_launch_fresh/);
+        // ...and so does the crash path; its else-branch is fresh, not resume.
+        expect(script).toMatch(/elif codev_has_session; then[\s\S]*?codev_launch=codev_launch_resume\n\s*else\n[\s\S]*?codev_launch=codev_launch_fresh/);
+        // `-c` appears ONLY inside codev_launch_resume, which only the probe selects.
+        const resumeBody = script.slice(
+          script.indexOf('codev_launch_resume() {'),
+          script.indexOf('}', script.indexOf('codev_launch_resume() {')),
+        );
+        expect(resumeBody).toContain('-c');
+        expect(script.match(/(^|\s)-c(\s|$)/gm)!.length).toBe(1);
+        // The probe itself must fail closed: its last act on any error is exit 1
+        // (→ "no session" → fresh), never exit 0.
+        expect(script).toContain('process.exit(1)');
+      });
+
+      it('bare shape (no role, no task): the plain loop every session-less harness gets', () => {
+        const script = KIMI_HARNESS.buildBuilderLaunchScript!(bareCtx);
         expect(script).toContain('kimi --yolo');
-        expect(script).not.toContain('-S');
-        expect(script).not.toContain('stream-json');
-        // PR #1203 review regression: EVERY Kimi launch shape must persist
-        // .builder-kimi-session — the pacing probe keys off its existence, so
-        // a bare override spawn without it resolves the config harness's
-        // Enter timing and sends get swallowed by paste detection. The touch
-        // must also PRECEDE the loop, so the marker exists for the whole TUI
-        // lifetime (a touch after/inside the loop could race the first send).
-        expect(script).toContain(`touch ${KIMI_SESSION_FILE}`);
         expect(script).toContain('while true');
-        expect(script.indexOf(`touch ${KIMI_SESSION_FILE}`))
-          .toBeLessThan(script.indexOf('while true'));
+        // Nothing to pin and nothing to queue, so none of the state machine appears.
+        expect(script).not.toContain('codev_has_session');
+        expect(script).not.toContain('afx send');
+        expect(script).not.toContain('-c');
       });
 
-      // Bugfix #1241 / PR #1244: Kimi's provider-owned loops must share the
-      // exit-code-gated tail — a deliberate exit 0 gates the relaunch on a
-      // keypress instead of blind auto-respawn; crashes keep the auto-restart.
+      // Pacing depends on this: `resolvePacingForSession` recovers the harness by
+      // reading .builder-start.sh and matching the command in COMMAND POSITION. If a
+      // refactor ever moved `kimi` off the start of its own line (or behind a `while`
+      // on the same line), pacing would silently fall back to the 80ms default and
+      // every `afx send` to this builder would be typed but never submitted.
       it.each([
-        ['fresh', { ...ctxBase, seedFile: '/tmp/wt/.builder-seed.txt' }],
-        ['resume', { ...ctxBase, seedFile: null, resume: { sessionId: 'session_abc' } }],
-        ['bare', { ...ctxBase, seedFile: null }],
+        ['task-carrying', taskCtx],
+        ['bare', bareCtx],
+      ] as const)('%s shape puts kimi in command position on its own line', (_name, ctx) => {
+        const script = KIMI_HARNESS.buildBuilderLaunchScript!(ctx);
+        expect(script.split('\n').some((l) => /^\s*kimi(\s|$)/.test(l))).toBe(true);
+      });
+
+      // Bugfix #1241 / PR #1244: Kimi's provider-owned loops share the exit-code-gated
+      // tail — a deliberate exit 0 gates the relaunch on a keypress instead of blindly
+      // respawning; crashes keep the auto-restart.
+      it.each([
+        ['task-carrying', taskCtx],
+        ['bare', bareCtx],
       ] as const)('%s shape does not auto-restart on exit 0', (_name, ctx) => {
         const script = KIMI_HARNESS.buildBuilderLaunchScript!(ctx);
         expect(script).toContain('status=$?');
         expect(script).toContain('if [ "$status" -eq 0 ]; then');
         expect(script).toContain('Press Enter to relaunch');
         expect(script).toContain('read -r || exit 0');
-        // The crash path is untouched.
-        expect(script).toContain('Restarting in 2 seconds');
+      });
+
+      // #1267/#1317: a clean exit relaunches FRESH (new conversation), matching
+      // claude's prompt-on-fresh semantics — which for kimi means re-queuing the task.
+      it('task-carrying: a clean exit relaunches fresh, not resumed', () => {
+        const script = KIMI_HARNESS.buildBuilderLaunchScript!(taskCtx);
+        const cleanExit = script.indexOf('if [ "$status" -eq 0 ]; then');
+        const afterClean = script.slice(cleanExit, script.indexOf('fi', cleanExit));
+        expect(afterClean).toContain('codev_launch=codev_launch_fresh');
+        expect(afterClean).not.toContain('codev_launch_resume');
+      });
+
+      it('warns loudly but non-fatally when the task cannot be queued', () => {
+        const script = KIMI_HARNESS.buildBuilderLaunchScript!(taskCtx);
+        // A missing afx / down Tower must not stop the builder from starting — it
+        // surfaces a recovery command instead. `return 0` keeps the launch going.
+        expect(script).toContain('WARNING');
+        expect(script).toContain('is Tower running?');
+        expect(script).toContain('return 0');
       });
 
       it('does not duplicate --yolo when the user already passed it', () => {
         const script = KIMI_HARNESS.buildBuilderLaunchScript!({
-          worktreePath: '/tmp/wt', baseCmd: 'kimi --yolo', seedFile: null,
+          ...bareCtx, baseCmd: 'kimi --yolo',
         });
         expect(script.match(/--yolo/g)!.length).toBeGreaterThan(0);
         expect(script).not.toContain('--yolo --yolo');
+      });
+    });
+
+    /**
+     * The crash-resume guard, executed for real rather than pattern-matched.
+     *
+     * `kimi -c` does NOT fail with nothing to continue — it starts a fresh session
+     * that never saw `--agent-file`, i.e. a silently ROLELESS builder (#929 hazard
+     * class, verified live on 0.34.0). The launch loop therefore only takes `-c`
+     * when this inlined `node -e` probe says a session exists for this cwd.
+     *
+     * The probe is a hand-written store scan living inside a bash heredoc, where a
+     * type checker cannot reach it and the store's shape has already drifted once
+     * (`workDir` → `cwd` in 0.33.0). So it is extracted from the generated script and
+     * RUN against fixture stores, and its verdict is checked against the TypeScript
+     * discovery it mirrors — if the two ever disagree, this fails instead of a
+     * builder silently losing its role in the field.
+     */
+    describe('the inlined crash-resume session probe (KIMI_HAS_SESSION_PROBE)', () => {
+      let fakeHome: string;
+      let worktree: string;
+
+      beforeEach(() => {
+        fakeHome = mkdtempSync(join(tmpdir(), 'kimi-probe-'));
+        worktree = join(fakeHome, 'worktree');
+        mkdirSync(worktree, { recursive: true });
+      });
+
+      afterEach(() => rmSync(fakeHome, { recursive: true, force: true }));
+
+      /** The exact `node -e '<probe>'` snippet the generated script would run. */
+      function extractProbe(): string {
+        const script = KIMI_HARNESS.buildBuilderLaunchScript!({
+          worktreePath: worktree, baseCmd: 'kimi', roleFragment: '--agent-file x',
+          taskFile: '/tmp/wt/.builder-prompt.txt', builderId: 'pir-1201',
+        });
+        const m = script.match(/node -e '([^']*)'/);
+        expect(m, 'the launch script must still inline a node probe').not.toBeNull();
+        return m![1];
+      }
+
+      /** Run the probe exactly as the script does; true ⇔ exit 0 ⇔ "a session exists". */
+      function runProbe(cwd: string): boolean {
+        const res = spawnSync(process.execPath, ['-e', extractProbe(), cwd], {
+          env: { ...process.env, KIMI_CODE_HOME: join(fakeHome, '.kimi-code') },
+        });
+        return res.status === 0;
+      }
+
+      function writeStoreSession(sessionId: string, state: Record<string, unknown>): void {
+        const dir = join(fakeHome, '.kimi-code', 'sessions', 'wd_x_000000000000', sessionId);
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(join(dir, 'state.json'), JSON.stringify(state), 'utf-8');
+      }
+
+      // THE regression the whole guard exists for.
+      it('an EMPTY store reports no session, so the loop launches fresh WITH the role', () => {
+        expect(runProbe(worktree)).toBe(false);
+        // And the TypeScript discovery agrees — one answer, two implementations.
+        expect(KIMI_HARNESS.buildResume!(worktree, { homeDir: fakeHome })).toBeNull();
+      });
+
+      it('a session recorded for this cwd reports true (v2 `cwd` shape)', () => {
+        writeStoreSession('session_here', { id: 'session_here', version: 2, cwd: worktree, updatedAt: 1 });
+        expect(runProbe(worktree)).toBe(true);
+        expect(KIMI_HARNESS.buildResume!(worktree, { homeDir: fakeHome })?.sessionId).toBe('session_here');
+      });
+
+      it('tolerates the v1 `workDir` shape exactly as readStateJson does', () => {
+        writeStoreSession('session_v1', { workDir: worktree, updatedAt: '2026-07-18T10:00:00Z' });
+        expect(runProbe(worktree)).toBe(true);
+        expect(KIMI_HARNESS.buildResume!(worktree, { homeDir: fakeHome })?.sessionId).toBe('session_v1');
+      });
+
+      it('a session for ANOTHER directory reports no session (never inherits a stranger\'s conversation)', () => {
+        writeStoreSession('session_elsewhere', { cwd: '/some/other/dir', updatedAt: 1 });
+        expect(runProbe(worktree)).toBe(false);
+        expect(KIMI_HARNESS.buildResume!(worktree, { homeDir: fakeHome })).toBeNull();
+      });
+
+      it('fails CLOSED on a malformed store — a corrupt state.json must not authorize -c', () => {
+        writeStoreSession('session_junk', {});
+        writeFileSync(
+          join(fakeHome, '.kimi-code', 'sessions', 'wd_x_000000000000', 'session_junk', 'state.json'),
+          '{ not json',
+          'utf-8',
+        );
+        expect(runProbe(worktree)).toBe(false);
+      });
+
+      it('fails CLOSED when the store does not exist at all', () => {
+        rmSync(join(fakeHome, '.kimi-code'), { recursive: true, force: true });
+        expect(runProbe(worktree)).toBe(false);
       });
     });
 
@@ -563,41 +800,50 @@ describe('harness', () => {
         rmSync(fakeHome, { recursive: true, force: true });
       });
 
-      function writeStoreSession(sessionId: string, workDir: string, updatedAt: string): void {
+      // v2 store shape (kimi 0.33.0+): `cwd` (was `workDir`) and epoch-ms timestamps
+      // (were ISO strings). Discovery tolerates both; these fixtures use the current one.
+      function writeStoreSession(sessionId: string, cwd: string, updatedAt: number): void {
         const dir = join(fakeHome, '.kimi-code', 'sessions', 'wd_x_000000000000', sessionId);
         mkdirSync(dir, { recursive: true });
-        writeFileSync(join(dir, 'state.json'), JSON.stringify({ workDir, updatedAt }), 'utf-8');
+        writeFileSync(
+          join(dir, 'state.json'),
+          JSON.stringify({ id: sessionId, version: 2, cwd, updatedAt }),
+          'utf-8',
+        );
       }
 
-      it('null when neither a session file nor a store match exists → fresh-with-role fallback', () => {
+      it('null when no store session exists for this worktree → fresh-with-role launch', () => {
         expect(KIMI_HARNESS.buildResume!(worktree, { homeDir: fakeHome })).toBeNull();
       });
 
-      it('prefers the ownership-verified .builder-kimi-session file', () => {
-        writeStoreSession('session_from-file', worktree, '2026-07-18T09:00:00Z');
-        writeStoreSession('session_newer-in-store', worktree, '2026-07-18T11:00:00Z');
-        writeFileSync(join(worktree, '.builder-kimi-session'), 'session_from-file\n', 'utf-8');
+      // The pivot shrank discovery to a single question — does a conversation exist for
+      // exactly this worktree? — and the ANSWER, not the id, is what the script uses:
+      // the relaunch runs the DOCUMENTED cwd-scoped `-c`, so no undocumented session id
+      // is ever baked into generated bash. The id still rides the return value because
+      // callers log it and spawn.ts reads null as "nothing to resume".
+      it('resumes with the documented cwd-scoped -c, never an undocumented -S <id>', () => {
+        writeStoreSession('session_abc-123', worktree, 1_760_000_000_000);
         const resume = KIMI_HARNESS.buildResume!(worktree, { homeDir: fakeHome });
         expect(resume).toEqual({
-          sessionId: 'session_from-file',
-          args: ['-S', 'session_from-file'],
-          scriptFragment: "-S 'session_from-file'",
+          sessionId: 'session_abc-123',
+          args: ['-c'],
+          scriptFragment: '-c',
         });
       });
 
-      it('a stale session file (dead id) falls through to the store scan instead of resuming a dead -S', () => {
-        writeStoreSession('session_alive', worktree, '2026-07-18T10:00:00Z');
-        writeFileSync(join(worktree, '.builder-kimi-session'), 'session_deleted-by-gc', 'utf-8');
-        const resume = KIMI_HARNESS.buildResume!(worktree, { homeDir: fakeHome });
-        expect(resume?.sessionId).toBe('session_alive');
-      });
-
       it('store scan picks the newest session recorded for exactly this worktree', () => {
-        writeStoreSession('session_older', worktree, '2026-07-18T09:00:00Z');
-        writeStoreSession('session_newest', worktree, '2026-07-18T11:00:00Z');
-        writeStoreSession('session_other-dir', '/elsewhere', '2026-07-18T12:00:00Z');
+        writeStoreSession('session_older', worktree, 1_750_000_000_000);
+        writeStoreSession('session_newest', worktree, 1_760_000_000_000);
+        writeStoreSession('session_other-dir', '/elsewhere', 1_770_000_000_000);
         const resume = KIMI_HARNESS.buildResume!(worktree, { homeDir: fakeHome });
         expect(resume?.sessionId).toBe('session_newest');
+      });
+
+      // #1145: a session recorded for a DIFFERENT cwd must never be resumed here, or a
+      // builder inherits an unrelated conversation.
+      it('ignores sessions recorded for another directory', () => {
+        writeStoreSession('session_elsewhere', '/some/other/worktree', 1_760_000_000_000);
+        expect(KIMI_HARNESS.buildResume!(worktree, { homeDir: fakeHome })).toBeNull();
       });
 
       // #929-class regression, harness angle: a stale CLAUDE jsonl for this
@@ -609,6 +855,41 @@ describe('harness', () => {
         writeFileSync(join(claudeDir, 'stale-claude-uuid.jsonl'), '{}', 'utf-8');
         expect(KIMI_HARNESS.buildResume!(worktree, { homeDir: fakeHome })).toBeNull();
       });
+    });
+  });
+
+  // ===========================================================================
+  // Retired harnesses (Issue #1338)
+  // ===========================================================================
+
+  describe('retired harnesses', () => {
+    it('isRetiredHarness is true for gemini, false for supported and unknown names', () => {
+      expect(isRetiredHarness('gemini')).toBe(true);
+      expect(isRetiredHarness('claude')).toBe(false);
+      expect(isRetiredHarness('codex')).toBe(false);
+      expect(isRetiredHarness('opencode')).toBe(false);
+      expect(isRetiredHarness('frobnicate')).toBe(false);
+    });
+
+    it('isRetiredHarness is not fooled by inherited Object.prototype keys', () => {
+      expect(isRetiredHarness('constructor')).toBe(false);
+      expect(isRetiredHarness('toString')).toBe(false);
+      expect(isRetiredHarness('hasOwnProperty')).toBe(false);
+    });
+
+    it('getRetirement returns the gemini explanation and undefined otherwise', () => {
+      const msg = getRetirement('gemini');
+      expect(msg).toMatch(/retired/i);
+      expect(msg).toContain('2026-06-18');
+      expect(msg).toContain('claude');
+      // The escape-hatch guidance names the EXPLICIT selector (#1338), matching the
+      // README + doctor: a bare auto-detected `gemini` stays retired, so a custom
+      // `gemini` def must be selected via shell.builderHarness / shell.architectHarness.
+      expect(msg).toContain('shell.builderHarness');
+      expect(msg).toContain('shell.architectHarness');
+      expect(getRetirement('claude')).toBeUndefined();
+      expect(getRetirement('frobnicate')).toBeUndefined();
+      expect(getRetirement('constructor')).toBeUndefined();
     });
   });
 });

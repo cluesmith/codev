@@ -24,7 +24,7 @@ import {
   markerAppendLine,
   isEligibleReviewPath,
   rewriteReviewMarkerBody,
-} from '@cluesmith/codev-core/review-markers';
+} from '@cluesmith/codev-sdk/review-markers';
 import type { OverviewCache } from '../views/overview-data.js';
 
 /**
@@ -58,7 +58,7 @@ function commentBodyText(body: string | vscode.MarkdownString): string {
  *
  * Tolerant of whitespace; mirrors the regex shape used elsewhere
  * (review-decorations.ts, snippets/review.json). The on-disk marker FORMAT and
- * the eligible-path rule now live in `@cluesmith/codev-core/review-markers` so
+ * the eligible-path rule now live in `@cluesmith/codev-sdk/review-markers` so
  * this editor path and the canvas host (#859) share one definition; this
  * thread-display pattern stays local because it anchors threads at the marker's
  * own position (the canvas instead anchors to the line above — same bytes,

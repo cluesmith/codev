@@ -64,7 +64,7 @@ describe('Spec 786 Phase 6 — extension.ts architect commands', () => {
 
   it('codev.addArchitect is registered and validates with the shared rule', () => {
     // Issue 1104: the command is now CONVERSATIONAL — it still validates the
-    // name via the codev-core validator (parity with the CLI) but no longer
+    // name via the codev-sdk validator (parity with the CLI) but no longer
     // creates the architect directly.
     expect(EXT_SRC).toMatch(/(?:registerCommand|regCli)\(['"]codev\.addArchitect['"]/);
     const addBlock = EXT_SRC.split("regCli('codev.addArchitect'")[1] ?? '';
@@ -99,7 +99,7 @@ describe('Spec 786 Phase 6 — extension.ts architect commands', () => {
 
   it('codev.addArchitect imports its helpers from the pure module (single source)', () => {
     expect(EXT_SRC).toMatch(
-      /import \{ validateArchitectName \} from ['"]@cluesmith\/codev-core\/architect-name['"]/
+      /import \{ validateArchitectName \} from ['"]@cluesmith\/codev-sdk\/architect-name['"]/
     );
     expect(EXT_SRC).toMatch(
       /import \{ resolveMainArchitect, addArchitectRequestMessage, ADD_ARCHITECT_RECIPIENT \} from ['"]\.\/commands\/add-architect\.js['"]/

@@ -11,7 +11,7 @@
  *
  * Architecture (host side of the package's adapter contract):
  * - The host posts the **raw** document text and parses markers via `parseReviewMarkers`
- *   (from `@cluesmith/codev-core/review-markers`); the canvas renderer strips full-line
+ *   (from `@cluesmith/codev-sdk/review-markers`); the canvas renderer strips full-line
  *   REVIEW/comment lines itself before block parsing (the #1036/#1042 fix), so the host no
  *   longer pre-hides them. The shared core codec means this surface and the editor
  *   Comments-API path write/parse identical bytes.
@@ -34,7 +34,7 @@ import {
   parseReviewMarkers,
   matchesExpectedMarker,
   rewriteReviewMarkerBody,
-} from '@cluesmith/codev-core/review-markers';
+} from '@cluesmith/codev-sdk/review-markers';
 import { renderMarkdownPreviewHtml } from './preview-template.js';
 import type { HostToWebviewMessage, WebviewToHostMessage } from './messages.js';
 import type { OverviewCache } from '../views/overview-data.js';

@@ -1,9 +1,14 @@
 /**
  * Agent harness abstraction.
  *
- * Encapsulates how different agent CLI tools (Claude, Codex, Gemini, etc.)
+ * Encapsulates how different agent CLI tools (Claude, Codex, etc.)
  * handle role/system prompt injection. Built-in providers cover Claude, Codex,
- * and Gemini. Custom providers can be defined in .codev/config.json.
+ * and OpenCode. Custom providers can be defined in .codev/config.json.
+ *
+ * The built-in Gemini CLI harness was retired in Issue #1338 (Google ended
+ * consumer-tier Gemini CLI availability on 2026-06-18); selecting it now fails
+ * closed with a retirement message instead of resolving a provider. See
+ * RETIRED_HARNESSES below.
  *
  * Two integration patterns exist:
  * - Node spawn() call sites: use buildRoleInjection() → returns args + env
@@ -12,12 +17,11 @@
  * @see codev/specs/591-af-workspace-failure-with-code.md
  */
 
-import { join } from 'node:path';
-import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { findLatestSessionId, verifySessionOwnership } from './claude-session-discovery.js';
 import {
   findLatestKimiSessionId,
-  verifyKimiSessionOwnership,
+  ensureKimiWorkspaceTrust,
   type KimiDiscoveryOpts,
 } from './kimi-session-discovery.js';
 import { buildWorktreeGuardFiles } from './worktree-write-guard.js';
@@ -37,13 +41,23 @@ export interface BuilderLaunchScriptContext {
   /** The resolved builder command string (may include user flags). */
   baseCmd: string;
   /**
-   * Absolute path to the seed-prompt file (.builder-seed.txt) written by the
-   * caller from `seedDelivery.buildSeedPrompt(...)`. Null on paths with
-   * nothing to seed (no role, no prompt) and on resume.
+   * The harness's own role fragment (`buildScriptRoleInjection().fragment`), or
+   * '' when the spawn carries no role. Passed in rather than recomputed so the
+   * provider-owned script and the generic shapes inject the role identically.
    */
-  seedFile: string | null;
-  /** Present on the resume path: relaunch pinned to this prior session. */
-  resume?: { sessionId: string };
+  roleFragment: string;
+  /**
+   * Absolute path to `.builder-prompt.txt`, or null when the spawn has no
+   * initial task (`afx spawn --worktree`). A provider whose CLI takes no
+   * positional prompt delivers this some other way — Kimi queues it on the
+   * mailbox — which is why it arrives as a path, not a baked-in string.
+   */
+  taskFile: string | null;
+  /**
+   * The builder id, for a provider that must address this builder at runtime
+   * (Kimi queues its task with `afx send <builderId>`). Absent in worktree mode.
+   */
+  builderId?: string;
 }
 
 export interface HarnessProvider {
@@ -67,6 +81,17 @@ export interface HarnessProvider {
   };
 
   /**
+   * Whether this harness can clear its conversation context in-session, without
+   * restarting the process (Spec 1273 — `afx reset`).
+   *
+   * Optional, and absence means "no": a harness that has not declared support
+   * must not be reset, and defaulting to unsupported is the safe direction. Only
+   * Claude declares it today (`/clear`), which is why `afx reset` refuses other
+   * harnesses loudly rather than improvising a substitute mechanism.
+   */
+  supportsContextReset?: boolean;
+
+  /**
    * Optional: files to write in the worktree before launching the agent.
    * Used by harnesses that rely on file-based configuration (e.g., OpenCode
    * uses opencode.json's instructions field for role injection; Claude uses it
@@ -79,6 +104,19 @@ export interface HarnessProvider {
     relativePath: string;
     content: string;
   }>;
+
+  /**
+   * Optional: one-time side effects a harness needs OUTSIDE the worktree before
+   * its first launch there (Issue #1201). Distinct from `getWorktreeFiles`,
+   * which can only write files inside the worktree.
+   *
+   * Kimi is the only implementer: 0.33.0 added a startup "Trust this folder?"
+   * dialog, and a builder worktree is always a new folder, so an unattended
+   * builder would sit on that dialog forever. It pre-records trust in kimi's
+   * own store. Implementations MUST be idempotent and fail-soft — a failure has
+   * to degrade to the CLI's normal behavior, never abort a spawn.
+   */
+  prepareWorkspace?(worktreePath: string): void;
 
   /**
    * Optional: conversation-session support, for agents whose CLI can pin and
@@ -97,6 +135,22 @@ export interface HarnessProvider {
     newSessionArgs(sessionId: string): string[];
     /** Args to RESUME an existing session by id (caller skips role injection). */
     resumeArgs(sessionId: string): string[];
+    /**
+     * Optional: script-fragment forms of newSessionArgs/resumeArgs for bash
+     * script generation (the builder launch loop — Issue #1233), mirroring the
+     * dual-form convention of buildRoleInjection/buildScriptRoleInjection and
+     * buildResume's args/scriptFragment pair.
+     *
+     * `idExpr` is a shell expression the caller has already quoted (e.g.
+     * `"$codev_session_id"`), NOT a literal id: the generated loop re-mints ids
+     * at runtime (clean-exit relaunch, unresumable-session degrade), so the
+     * fragment must reference the script's variable rather than bake a value.
+     *
+     * BOTH must be present for the session-aware loop; a harness providing
+     * neither keeps the historical prompt-replay restart loop.
+     */
+    newSessionScriptFragment?(idExpr: string): string;
+    resumeScriptFragment?(idExpr: string): string;
     /**
      * Optional: verify that `sessionId` still has a resumable session on disk
      * for `cwd` before the caller resumes it (Issue #1145). Returns false when
@@ -130,34 +184,23 @@ export interface HarnessProvider {
   } | null;
 
   /**
-   * Optional: provider-owned builder launch script (Issue #1201). When
-   * present, spawn-worktree.ts uses this INSTEAD of the generic
-   * `${baseCmd} ${roleFragment} "<prompt>"` script shapes — for CLIs with no
-   * role flag and no positional prompt (Kimi), where the whole launch shape
-   * (seed-session bootstrap + pinned-id TUI loop) belongs to the provider.
+   * Optional: provider-owned builder launch script (Issue #1201). When present,
+   * spawn-worktree.ts uses this INSTEAD of the generic
+   * `${baseCmd} ${roleFragment} "<prompt>"` shapes.
+   *
+   * Kimi is the only implementer, for two reasons the generic shapes cannot
+   * express: its CLI takes **no positional prompt** (so the task must reach it
+   * through the mailbox, queued by the script whenever a fresh conversation
+   * starts), and it mints conversation ids **server-side on the first message**
+   * (so there is no id to pin at launch and the crash path resumes with the
+   * cwd-scoped `-c` instead of `session.resumeScriptFragment`).
+   *
+   * A provider-owned script is still expected to honor the shared contract:
+   * clean exit → keypress-gated FRESH relaunch (#1267/#1317), crash → resume,
+   * repeated fast failures → degrade to fresh. Use {@link launchLoopTail} where
+   * the generic tail fits.
    */
   buildBuilderLaunchScript?(ctx: BuilderLaunchScriptContext): string;
-
-  /**
-   * Optional: seed-session delivery metadata (Issue #1201), consumed by
-   * spawn-worktree.ts (seed-prompt file) and Tower's seed-kick module
-   * (readiness barrier). Only meaningful alongside buildBuilderLaunchScript.
-   *
-   * The generated script prints `<sentinelPrefix> <session-id>` on its own
-   * line after the seed completes and before the interactive TUI starts.
-   * Tower gates any first-message delivery on that sentinel: bytes written to
-   * the PTY during the seed window have no defined consumer (observed: they
-   * are silently lost), so an ungated write would drop the task kick.
-   */
-  seedDelivery?: {
-    sentinelPrefix: string;
-    /** Single-line kick delivered after the sentinel + grace (e.g. 'BEGIN'). */
-    kickMessage: string;
-    /** Post-sentinel grace before writing the kick (composer warm-up). */
-    graceMs: number;
-    /** Compose the seed-turn prompt from role and/or initial task prompt. */
-    buildSeedPrompt(roleContent: string | null, taskPrompt: string | null): string;
-  };
 
   /**
    * Optional: PTY message pacing for this harness's CLI (Issue #1201).
@@ -194,27 +237,41 @@ export interface CustomHarnessConfig {
  * `read` failing means EOF on stdin, i.e. the terminal is gone; exit rather
  * than spin the loop on an input that will never arrive.
  *
- * Lives here (not in spawn-worktree.ts) so provider-owned launch scripts —
- * currently Kimi's `buildBuilderLaunchScript` — share the exact same tail as
- * the generic shapes without a circular import (spawn-worktree.ts already
- * imports from this module).
+ * `onCleanExit` (Issue #1267) is an extra statement run just after the keypress,
+ * before the loop repeats — how the resume variant switches itself over to the
+ * fresh invocation. It sits *after* the `read`, so a terminal that went away
+ * (EOF → `exit 0`) never mutates state on its way out.
+ *
+ * Lives here (not in spawn-worktree.ts, where it was introduced) so
+ * provider-owned launch scripts — currently Kimi's `buildBuilderLaunchScript`
+ * — share the exact same tail as the generic shapes without a circular import
+ * (spawn-worktree.ts already imports from this module). Issue #1201's first
+ * pass duplicated the tail into the Kimi loops and drifted from it the moment
+ * #1244 changed the contract; one definition is what stops that recurring.
  */
-export const LAUNCH_LOOP_TAIL = `  status=$?
+export function launchLoopTail(onCleanExit?: string): string {
+  const switchToFresh = onCleanExit ? `\n    ${onCleanExit}` : '';
+  return `  status=$?
   if [ "$status" -eq 0 ]; then
     clear
-    echo "Agent exited at your request. Press Enter to relaunch, or close this terminal."
-    read -r || exit 0
+    echo "Agent exited at your request. Press Enter to relaunch fresh, or close this terminal."
+    read -r || exit 0${switchToFresh}
     continue
   fi
   echo ""
   echo "Agent exited (code $status). Restarting in 2 seconds... (Ctrl+C to quit)"
   sleep 2`;
+}
 
 // =============================================================================
 // Built-in providers
 // =============================================================================
 
 export const CLAUDE_HARNESS: HarnessProvider = {
+  // Spec 1273: `/clear` empties the conversation while leaving the process — and
+  // therefore the --append-system-prompt role below — intact. That is what makes
+  // an in-session reset possible here and nowhere else today.
+  supportsContextReset: true,
   buildRoleInjection: (content, _filePath) => ({
     args: ['--append-system-prompt', content],
     env: {},
@@ -241,6 +298,10 @@ export const CLAUDE_HARNESS: HarnessProvider = {
   session: {
     newSessionArgs: (sessionId) => ['--session-id', sessionId],
     resumeArgs: (sessionId) => ['--resume', sessionId],
+    // Issue #1233: script-fragment forms for the builder crash-resume loop.
+    // `idExpr` arrives pre-quoted (a shell variable reference, not a literal).
+    newSessionScriptFragment: (idExpr) => `--session-id ${idExpr}`,
+    resumeScriptFragment: (idExpr) => `--resume ${idExpr}`,
     // Issue #1145: a stored id is only resumed when its jsonl still exists
     // under this cwd's project dir (stale ids degrade to a fresh spawn).
     verifyOwnership: (sessionId, cwd, opts) => verifySessionOwnership(cwd, sessionId, opts),
@@ -255,17 +316,6 @@ export const CODEX_HARNESS: HarnessProvider = {
   buildScriptRoleInjection: (_content, filePath) => ({
     fragment: `-c model_instructions_file='${shellEscapeSingleQuote(filePath)}'`,
     env: {},
-  }),
-};
-
-export const GEMINI_HARNESS: HarnessProvider = {
-  buildRoleInjection: (_content, filePath) => ({
-    args: [],
-    env: { GEMINI_SYSTEM_MD: filePath },
-  }),
-  buildScriptRoleInjection: (_content, filePath) => ({
-    fragment: '',
-    env: { GEMINI_SYSTEM_MD: filePath },
   }),
 };
 
@@ -290,27 +340,21 @@ export const OPENCODE_HARNESS: HarnessProvider = {
 // =============================================================================
 
 /**
- * Sentinel printed by the generated Kimi launch script between seed completion
- * and TUI start. Tower's seed-kick module gates first-message delivery on it.
+ * The agent-definition file the Kimi builder launches with (`--agent-file`).
+ * Written into the worktree by {@link KIMI_HARNESS.getWorktreeFiles}; distinct
+ * from `.builder-role.md` (the raw role every harness writes) because kimi
+ * needs frontmatter and a template body around it.
  */
-export const KIMI_SEED_SENTINEL = '__CODEV_KIMI_SEED_DONE__';
-
-/**
- * File in the worktree persisting the seeded Kimi session id. Doubles as the
- * Kimi-shape marker for Tower's pacing probe (message-pacing.ts), so EVERY
- * launch shape persists it: seed and resume write the captured id; the bare
- * no-role/no-prompt shape touches it empty (there is no id to pin).
- */
-export const KIMI_SESSION_FILE = '.builder-kimi-session';
+export const KIMI_AGENT_FILE = '.builder-role-agent.md';
 
 /**
  * Delayed-Enter timing for Kimi PTYs. Kimi's paste-detection window is longer
  * than Claude's: an Enter arriving too soon after the message body is treated
  * as part of a paste and NOT submitted. Bisected live against kimi 0.27.0
  * (PIR #1201): 80ms and 100ms fail; 120ms, 250ms, 500ms, 1000ms submit —
- * threshold ≈ 100–120ms. Pinned at 1000ms for ~9x margin (the POC-validated
- * value; the only cost is submission latency, which is irrelevant for
- * agent-to-agent messages). Applied via messagePacing below.
+ * threshold ≈ 100–120ms. Pinned at 1000ms for ~9x margin; re-verified
+ * submitting on 0.34.0 (agent-core-v2). The only cost is submission latency,
+ * which is irrelevant for agent-to-agent messages. Applied via messagePacing.
  */
 export const KIMI_ENTER_DELAY_MS = 1000;
 
@@ -320,29 +364,27 @@ function kimiOpts(opts?: { homeDir?: string }): KimiDiscoveryOpts | undefined {
 }
 
 /**
- * Compose the seed-turn prompt: role and/or task briefing wrapped in an
- * ack-and-wait discipline. The role rides a USER turn, not a system prompt
- * (Kimi documents no system-prompt flag) — the same tradeoff that deferred
- * agy as an architect (#1063). Validated end-to-end in spike task-Iptx.
+ * Compose the `--agent-file` body: kimi's agent-definition format is YAML
+ * frontmatter plus a system-prompt template.
+ *
+ * `${base_prompt}` is the load-bearing token — it interpolates kimi's own
+ * default system prompt, so the role EXTENDS the agent's instructions instead
+ * of replacing them (the `claude --append-system-prompt` analogue). Without it
+ * the builder would lose kimi's tool-use and safety preamble wholesale.
+ * Verified on 0.34.0 in both `-p` and interactive TUI mode
+ * (`codev/spikes/pir-1201-kimi-agentfile-probe.mjs`).
  */
-function buildKimiSeedPrompt(roleContent: string | null, taskPrompt: string | null): string {
-  const waitInstruction = taskPrompt
-    ? '- Reply with exactly "ROLE-OK", then wait. You will receive a message "BEGIN" in a later turn — only then start working on the task briefing, following your role.'
-    : '- Reply with exactly "ROLE-OK", then wait for instructions from the user in the interactive session.';
-  const parts: string[] = [
-    'You are being initialized as an autonomous agent inside a project worktree.',
-    'This initialization turn delivers your ROLE and TASK BRIEFING. Strict discipline for THIS turn:',
-    '- Do NOT start working yet. Do NOT use any tools. Do NOT read or write files.',
-    '- Internalize everything below; it governs the rest of this session.',
-    waitInstruction,
-  ];
-  if (roleContent) {
-    parts.push('', '=== YOUR ROLE ===', roleContent);
-  }
-  if (taskPrompt) {
-    parts.push('', '=== TASK BRIEFING (do not act until BEGIN) ===', taskPrompt);
-  }
-  return parts.join('\n');
+export function buildKimiAgentFile(roleContent: string): string {
+  return `---
+name: codev-builder
+description: Codev builder role, injected at spawn by Agent Farm.
+---
+\${base_prompt}
+
+# Your Role
+
+${roleContent}
+`;
 }
 
 /**
@@ -356,18 +398,31 @@ function kimiTuiCmd(baseCmd: string): string {
 }
 
 /**
- * Extract the seeded session id from `kimi -p … --output-format stream-json`
- * stdout: the machine-readable `session.resume_hint` meta line (UNDOCUMENTED,
- * observed on kimi 0.27.0 — see kimi-session-discovery.ts header). Reads stdin
- * to EOF before printing so the pipe never closes early (an early exit would
- * EPIPE the seed process mid-turn). Exits 1 when no hint line is found — the
- * session file ends up empty and the script's empty-id bailout fires.
+ * Runtime guard for the crash-resume path, emitted into the launch script.
+ *
+ * `kimi -c` does NOT fail when there is nothing to continue — it prints
+ * "No sessions to continue under <cwd>; starting a fresh session." and starts a
+ * fresh one anyway (verified, 0.34.0). That fresh session never saw
+ * `--agent-file` (illegal alongside `-c`), so it would run **roleless** — the
+ * #929 hazard class, silently. So the loop only takes the `-c` path once a
+ * session provably exists for this cwd.
+ *
+ * 0.33.0's TUI mints no session at startup (verified) — the FIRST MESSAGE mints
+ * it — so "has the task landed yet?" and "is there anything to resume?" are the
+ * same question, and this probe answers it directly from the store.
+ *
+ * Fails CLOSED: any error (no store, unreadable dir, malformed JSON) exits
+ * non-zero and the loop relaunches fresh WITH the role, which is always safe.
+ * `readStateJson`'s `cwd ?? workDir` tolerance is mirrored here; the generated
+ * snippet is pinned against a fixture store by a unit test so it cannot drift
+ * from {@link findLatestKimiSessionId} unnoticed.
  */
-const KIMI_SEED_EXTRACTOR =
-  'let b="";process.stdin.on("data",d=>b+=d);process.stdin.on("end",()=>{' +
-  'for(const l of b.split("\\n")){try{const o=JSON.parse(l);' +
-  'if(o&&o.type==="session.resume_hint"&&typeof o.session_id==="string"){process.stdout.write(o.session_id);return}}catch{}}' +
-  'process.exit(1)})';
+const KIMI_HAS_SESSION_PROBE =
+  'const {readdirSync,readFileSync}=require("fs"),{join}=require("path");' +
+  'const r=join(process.env.KIMI_CODE_HOME||join(require("os").homedir(),".kimi-code"),"sessions");' +
+  'const c=process.argv[1];try{for(const a of readdirSync(r)){for(const b of readdirSync(join(r,a))){' +
+  'try{const s=JSON.parse(readFileSync(join(r,a,b,"state.json"),"utf8"));' +
+  'if((s.cwd??s.workDir)===c)process.exit(0)}catch{}}}}catch{}process.exit(1)';
 
 export const KIMI_HARNESS: HarnessProvider = {
   buildRoleInjection: () => {
@@ -379,124 +434,268 @@ export const KIMI_HARNESS: HarnessProvider = {
       '(e.g., "claude --dangerously-skip-permissions" or "codex").',
     );
   },
-  // Role cannot ride argv (no role flag, no positional prompt — both exit 1,
-  // observed). The real shape is provider-owned via buildBuilderLaunchScript.
-  buildScriptRoleInjection: () => ({ fragment: '', env: {} }),
+  // Role rides `--agent-file` (kimi 0.31.0+), pointed at the agent-definition
+  // file getWorktreeFiles writes next to the raw role. `filePath` is
+  // `<worktree>/.builder-role.md`, so its directory is the worktree.
+  buildScriptRoleInjection: (_content, filePath) => ({
+    fragment: `--agent-file '${shellEscapeSingleQuote(join(dirname(filePath), KIMI_AGENT_FILE))}'`,
+    env: {},
+  }),
 
-  // Builder resume (afx spawn --resume): prefer the id persisted by the launch
-  // script, ownership-verified so a stale id (store GC, manual deletion) falls
-  // through instead of baking a fast-failing `-S <dead-id>` into the restart
-  // loop; else newest store session recorded for exactly this worktree; else
-  // null → callers take the fresh-with-role seed path (never a roleless fresh
-  // session — the reason explicit-ID is preferred over cwd-scoped --continue).
+  // One file: the `--agent-file` definition (role + ${base_prompt}), written next
+  // to the raw `.builder-role.md` every harness gets. A roleless spawn writes
+  // nothing — there is no Kimi-launch MARKER any more. The first pass had one
+  // (`.builder-kimi`) for Tower's pacing probe, and it obliged every launch shape
+  // to remember to write it — an obligation the bare shape missed, which cost a
+  // maintainer review cycle. Pacing now reads the harness out of the generated
+  // `.builder-start.sh` instead (see resolvePacingForSession in mailbox-wiring.ts):
+  // same override-proof answer, derived from an artifact that cannot be forgotten
+  // because the launcher itself is the artifact.
+  getWorktreeFiles: (roleContent) => (
+    roleContent
+      ? [{ relativePath: KIMI_AGENT_FILE, content: buildKimiAgentFile(roleContent) }]
+      : []
+  ),
+
+  // Builder resume (afx spawn --resume). Discovery answers one question — does
+  // a conversation exist for exactly this worktree? — and the ANSWER, not the
+  // id, is what the script uses: the relaunch runs the documented cwd-scoped
+  // `kimi -c`, so no undocumented id is baked into the generated bash. The id
+  // still rides the return value because callers log it and `spawn.ts` treats a
+  // null as "nothing to resume" (→ a fresh, role-carrying launch).
+  //
+  // #1145 semantics hold: the store records each session's exact cwd, and a
+  // builder worktree belongs to one builder, so a match cannot be some other
+  // conversation the user happened to hold in the same directory.
   buildResume: (absolutePath, opts) => {
-    const kOpts = kimiOpts(opts);
-    let sessionId: string | null = null;
-    try {
-      const persisted = readFileSync(join(absolutePath, KIMI_SESSION_FILE), 'utf-8').trim();
-      if (persisted && verifyKimiSessionOwnership(persisted, absolutePath, kOpts)) {
-        sessionId = persisted;
-      }
-    } catch {
-      // No persisted session file — fall through to the store scan
-    }
-    if (!sessionId) {
-      sessionId = findLatestKimiSessionId(absolutePath, kOpts);
-    }
+    const sessionId = findLatestKimiSessionId(absolutePath, kimiOpts(opts));
     if (!sessionId) return null;
     return {
       sessionId,
-      args: ['-S', sessionId],
-      scriptFragment: `-S '${shellEscapeSingleQuote(sessionId)}'`,
+      args: ['-c'],
+      scriptFragment: '-c',
     };
   },
 
+  // 0.33.0's folder-trust dialog would block an unattended builder before its
+  // composer ever renders; pre-record trust for the worktree Codev just made.
+  // Idempotent and fail-soft — see ensureKimiWorkspaceTrust.
+  prepareWorkspace: (worktreePath) => { ensureKimiWorkspaceTrust(worktreePath); },
+
   buildBuilderLaunchScript: (ctx) => {
     const tuiCmd = kimiTuiCmd(ctx.baseCmd);
-    // Shared loop tail (#1241/#1244): deliberate exit 0 → keypress-gated
-    // relaunch; nonzero/signal exits keep the historical auto-restart.
-    const loop = `while true; do
-  ${tuiCmd} -S "$SID"
-${LAUNCH_LOOP_TAIL}
+    const fresh = ctx.roleFragment ? `${tuiCmd} ${ctx.roleFragment}` : tuiCmd;
+
+    // Bare shape (no role, no task — `afx spawn --worktree`, or a spawn with
+    // neither): the plain loop every session-less harness gets, byte for byte.
+    // Nothing to pin, nothing to queue; a clean exit relaunches fresh because a
+    // roleless kimi launch IS fresh. Pacing still resolves for this shape: `kimi`
+    // sits in command position on its own line, which is what the launch-script
+    // harness probe matches on.
+    if (!ctx.taskFile) {
+      return `#!/bin/bash
+cd "${ctx.worktreePath}"
+while true; do
+  ${fresh}
+${launchLoopTail()}
 done
 `;
-
-    if (ctx.resume) {
-      // Resume path: pinned prior session, no seed. Re-persist the id so the
-      // session file regains precedence for the next resume (it may be absent
-      // when the id came from a store scan) and so the file keeps serving as
-      // the Kimi marker for message pacing.
-      const escapedId = shellEscapeSingleQuote(ctx.resume.sessionId);
-      return `#!/bin/bash
-cd "${ctx.worktreePath}"
-printf '%s' '${escapedId}' > ${KIMI_SESSION_FILE}
-SID='${escapedId}'
-echo "${KIMI_SEED_SENTINEL} $SID"
-${loop}`;
     }
 
-    if (ctx.seedFile) {
-      // Fresh path: seed-session bootstrap (spike task-Iptx, POC 6). The seed
-      // turn carries the role/task briefing; its captured session id pins the
-      // TUI loop, so context survives inner restarts. The `-s` guard makes the
-      // seed idempotent across script relaunches; a failed seed (auth,
-      // network, no resume_hint) leaves the file empty and exits BEFORE the
-      // loop — surfaced once, never restart-looped.
-      return `#!/bin/bash
-cd "${ctx.worktreePath}"
-if [ ! -s ${KIMI_SESSION_FILE} ]; then
-  echo "Seeding Kimi session (role/task briefing via kimi -p)..."
-  ${ctx.baseCmd} -p "$(cat '${shellEscapeSingleQuote(ctx.seedFile)}')" --output-format stream-json \\
-    | node -e '${KIMI_SEED_EXTRACTOR}' > ${KIMI_SESSION_FILE}
-  echo ""
-fi
-SID="$(cat ${KIMI_SESSION_FILE} 2>/dev/null)"
-if [ -z "$SID" ]; then
-  echo "ERROR: Kimi seed failed — no session id captured." >&2
-  echo "Check authentication (kimi login) and network, then relaunch this terminal." >&2
-  rm -f ${KIMI_SESSION_FILE}
-  exit 1
-fi
-echo "${KIMI_SEED_SENTINEL} $SID"
-${loop}`;
-    }
+    // Task-carrying shape. kimi takes no positional prompt, so the task cannot
+    // ride argv the way claude's does — it is queued on the Spec 1313 mailbox
+    // and delivered by the render gate onto a verified-empty composer. That is
+    // also why the queue call lives INSIDE the fresh launch: a fresh
+    // conversation needs the task re-delivered, and only the script knows when
+    // the loop starts one. It mirrors claude's prompt-on-fresh semantics
+    // exactly, including on a script re-run.
+    //
+    // Never a direct PTY write (Spec 1313 forbids it for message writers), so a
+    // busy line, a boot screen, or 0.33.0's folder-trust dialog simply holds the
+    // message instead of corrupting or losing it.
+    const queueTask = `codev_queue_task() {
+  if ! command -v afx >/dev/null 2>&1; then
+    echo "WARNING: afx is not on PATH — the builder's task was not queued." >&2
+    echo "         Queue it with: afx send ${ctx.builderId ?? '<builder-id>'} \\"\\$(cat '${ctx.taskFile}')\\"" >&2
+    return 0
+  fi
+  afx send '${shellEscapeSingleQuote(ctx.builderId ?? '')}' "$(cat '${shellEscapeSingleQuote(ctx.taskFile)}')" >/dev/null 2>&1 && return 0
+  echo "WARNING: could not queue the builder's task (is Tower running?)." >&2
+  echo "         Retry with: afx send ${ctx.builderId ?? '<builder-id>'} \\"\\$(cat '${ctx.taskFile}')\\"" >&2
+}`;
 
-    // Nothing to seed (no role, no prompt): plain TUI loop. No session
-    // pinning — restarts start fresh, matching the bare-mode behavior of
-    // other harnesses. The marker file is still persisted (empty — no id to
-    // pin) so Tower's pacing probe recognizes the worktree as Kimi-shaped;
-    // without it an override-spawned bare builder (`--builder-cmd kimi` in a
-    // claude-configured workspace) resolves the config harness's Enter timing
-    // and `afx send` payloads are swallowed by paste detection. `touch`
-    // preserves a previously seeded id, and an empty file keeps both the seed
-    // guard (`! -s`) and buildResume's empty-id fallthrough intact.
+    // Crash restart resumes the conversation (#1233's builder-side contract) via
+    // the DOCUMENTED, cwd-scoped `-c` — no undocumented session id in the script.
+    // Guarded by codev_has_session because `-c` with nothing to continue does not
+    // fail: it starts a fresh session that never saw --agent-file, i.e. a
+    // ROLELESS builder (verified, 0.34.0). The guard fails closed, so the
+    // fallback is always the role-carrying fresh launch.
     return `#!/bin/bash
 cd "${ctx.worktreePath}"
-touch ${KIMI_SESSION_FILE}
+codev_fast_fail_secs="\${CODEV_LAUNCH_FAST_FAIL_SECS:-15}"
+
+${queueTask}
+
+codev_has_session() {
+  node -e '${KIMI_HAS_SESSION_PROBE}' "$PWD" 2>/dev/null
+}
+
+codev_launch_fresh() {
+  codev_queue_task
+  ${fresh}
+}
+
+codev_launch_resume() {
+  ${tuiCmd} -c
+}
+
+# Entry is self-configuring, which is what makes 'afx spawn --resume' and a
+# Tower-side terminal re-create do the right thing without a second script
+# shape: a worktree that already holds a conversation is resumed (and the task
+# NOT re-queued); a virgin one starts fresh.
+if codev_has_session; then
+  codev_launch=codev_launch_resume
+else
+  codev_launch=codev_launch_fresh
+fi
+codev_fast_fails=0
 while true; do
-  ${tuiCmd}
-${LAUNCH_LOOP_TAIL}
+  codev_started=$SECONDS
+  "$codev_launch"
+  status=$?
+  codev_elapsed=$(( SECONDS - codev_started ))
+  if [ "$status" -eq 0 ]; then
+    clear
+    echo "Agent exited at your request. Press Enter to relaunch fresh, or close this terminal."
+    read -r || exit 0
+    codev_launch=codev_launch_fresh
+    codev_fast_fails=0
+    continue
+  fi
+  if [ "$codev_elapsed" -lt "$codev_fast_fail_secs" ]; then
+    codev_fast_fails=$(( codev_fast_fails + 1 ))
+  else
+    codev_fast_fails=0
+  fi
+  echo ""
+  if [ "$codev_fast_fails" -ge 3 ]; then
+    echo "Agent failing immediately (code $status). Starting a fresh conversation with the original task in 2 seconds... (Ctrl+C to quit)"
+    codev_launch=codev_launch_fresh
+    codev_fast_fails=0
+  elif codev_has_session; then
+    echo "Agent exited (code $status). Resuming the conversation in 2 seconds... (Ctrl+C to quit)"
+    codev_launch=codev_launch_resume
+  else
+    echo "Agent exited (code $status) before starting a conversation. Relaunching fresh in 2 seconds... (Ctrl+C to quit)"
+    codev_launch=codev_launch_fresh
+  fi
+  sleep 2
 done
 `;
-  },
-
-  seedDelivery: {
-    sentinelPrefix: KIMI_SEED_SENTINEL,
-    kickMessage: 'BEGIN',
-    graceMs: 2500,
-    buildSeedPrompt: buildKimiSeedPrompt,
   },
 
   messagePacing: { enterDelayMs: KIMI_ENTER_DELAY_MS },
 };
 
-const BUILTIN_HARNESSES: Record<string, HarnessProvider> = {
+/**
+ * Exported for Spec 1273: `afx reset` identifies a running builder's harness from
+ * its launch script and must check `supportsContextReset` before typing into the
+ * terminal. It needs the name→provider map, not just the workspace default.
+ */
+export const BUILTIN_HARNESSES: Record<string, HarnessProvider> = {
   claude: CLAUDE_HARNESS,
   codex: CODEX_HARNESS,
-  gemini: GEMINI_HARNESS,
   opencode: OPENCODE_HARNESS,
   kimi: KIMI_HARNESS,
 };
+
+/**
+ * The built-in provider for `name`, or `undefined` when `name` is not a built-in
+ * harness. Uses an own-property check — the same guard `isRetiredHarness` gives
+ * `RETIRED_HARNESSES` — so inherited Object members (`constructor`, `toString`,
+ * `hasOwnProperty`, `valueOf`, …) on a *user-controlled* name are never misread as
+ * a provider. A bare `BUILTIN_HARNESSES[name]` for `name = 'constructor'` returns
+ * `Object`'s constructor (a truthy function), which a `if (builtin) return builtin`
+ * check would then hand back as a bogus "provider" that TypeErrors at the first
+ * `buildRoleInjection` call. The name reaches here straight from config
+ * (`shell.builderHarness` / a builder launch script), so the key is untrusted.
+ */
+export function getBuiltinHarness(name: string): HarnessProvider | undefined {
+  return Object.prototype.hasOwnProperty.call(BUILTIN_HARNESSES, name)
+    ? BUILTIN_HARNESSES[name]
+    : undefined;
+}
+
+// =============================================================================
+// Retired harnesses
+// =============================================================================
+
+/**
+ * Built-in harness names Codev no longer supports, each mapped to the
+ * explanation shown when a user still selects it.
+ *
+ * A retired name is intercepted on *every* `resolveHarness` exit — the explicit
+ * path and the command auto-detect path — so it fails loudly and closed rather
+ * than silently falling back to Claude (the Issue #929 mis-injection class) or
+ * returning `undefined` (a `BUILTIN_HARNESSES[name]` miss → downstream
+ * TypeError). See `resolveHarness` and Issue #1338.
+ *
+ * Escape hatch: a user who retains access to a retired CLI (e.g. an
+ * enterprise/API-key Gemini subscription) can still wire it as a *custom*
+ * harness in .codev/config.json — the retirement targets the built-in name,
+ * not a user's own definition.
+ */
+export const RETIRED_HARNESSES: Record<string, string> = {
+  gemini:
+    'The built-in Gemini CLI harness is retired. Google ended Gemini CLI ' +
+    'availability for consumer accounts (free, Pro, and Ultra tiers) on ' +
+    '2026-06-18, so it no longer works for most users. Use a supported harness ' +
+    'instead: claude, codex, or opencode. If you still have Gemini CLI access ' +
+    '(a Standard/Enterprise subscription or API-key auth), define a custom ' +
+    'harness named "gemini" in .codev/config.json under the "harness" section ' +
+    'and select it explicitly with shell.builderHarness / shell.architectHarness ' +
+    '— a bare auto-detected "gemini" command stays retired. See issue #1338.',
+};
+
+/**
+ * Whether `name` is a retired built-in harness. Uses an own-property check so
+ * inherited Object keys (`constructor`, `toString`, …) are never misread as
+ * retired.
+ */
+export function isRetiredHarness(name: string): boolean {
+  return Object.prototype.hasOwnProperty.call(RETIRED_HARNESSES, name);
+}
+
+/**
+ * The retirement explanation for `name`, or `undefined` when `name` is not a
+ * retired harness.
+ */
+export function getRetirement(name: string): string | undefined {
+  return isRetiredHarness(name) ? RETIRED_HARNESSES[name] : undefined;
+}
+
+/**
+ * Error thrown when a retired harness name is selected. A distinct type lets a
+ * caller scope a `catch` to the retirement — return a safe default, or abort a
+ * spawn before it creates state — and rethrow every other error unchanged. Used
+ * by the spawn pre-flight and the Tower-side `siblingRegistrationIsLive`
+ * predicate (Issue #1338). `harnessName` is the retired name that triggered it.
+ */
+export class RetiredHarnessError extends Error {
+  constructor(public readonly harnessName: string, message: string) {
+    super(message);
+    this.name = 'RetiredHarnessError';
+  }
+}
+
+/**
+ * Throw the consistent retirement error for retired harness `name`. Returns
+ * `never` so callers can use it as a resolver exit on any branch and keep one
+ * identical message regardless of which path selected the retired name.
+ */
+export function throwRetired(name: string): never {
+  throw new RetiredHarnessError(name, getRetirement(name) ?? `The "${name}" harness is retired.`);
+}
 
 // =============================================================================
 // Template expansion
@@ -635,11 +834,15 @@ export function detectHarnessFromCommand(command: string): string | undefined {
  * Resolve a harness name to a HarnessProvider.
  *
  * Resolution order:
- * 1. Explicit harnessName → built-in or custom provider
- * 2. Auto-detect from command string basename (if command provided)
- * 3. Default to claude (backward compatible)
+ * 1. Explicit harnessName → built-in provider, else custom provider
+ * 2. Retired name → throw the retirement error (fail closed). A same-named
+ *    custom harness still wins for an *explicit* name (the escape hatch), but an
+ *    auto-detected retired command is always retired — auto-detection never
+ *    consults custom harnesses (Issue #1338).
+ * 3. Auto-detect from command string basename (if command provided)
+ * 4. Default to claude (backward compatible)
  *
- * Throws if harnessName is set but doesn't match any known provider.
+ * Throws if harnessName is retired, or is set but doesn't match any provider.
  */
 export function resolveHarness(
   harnessName: string | undefined,
@@ -648,12 +851,19 @@ export function resolveHarness(
 ): HarnessProvider {
   // Explicit harness name takes priority
   if (harnessName) {
-    const builtin = BUILTIN_HARNESSES[harnessName];
+    // Own-property lookup: `harnessName` is user-controlled, so a bare index could
+    // return an inherited Object member (`constructor`, …) as a bogus provider.
+    const builtin = getBuiltinHarness(harnessName);
     if (builtin) return builtin;
 
     if (customHarnesses && harnessName in customHarnesses) {
       return buildCustomHarnessProvider(customHarnesses[harnessName]);
     }
+
+    // A retired name with no custom override fails closed with a clear message.
+    // Checked after the custom lookup so an explicit custom `gemini` (the
+    // escape hatch for retained enterprise/API-key access) still resolves.
+    if (isRetiredHarness(harnessName)) throwRetired(harnessName);
 
     const knownNames = Object.keys(BUILTIN_HARNESSES);
     const customNames = customHarnesses ? Object.keys(customHarnesses) : [];
@@ -670,6 +880,12 @@ export function resolveHarness(
   if (command) {
     const detected = detectHarnessFromCommand(command);
     if (detected) {
+      // Intercept a retired detected name BEFORE the BUILTIN_HARNESSES lookup:
+      // it must never return undefined (removed registry entry) nor fall through
+      // to the Claude default below (the #929 silent-mismatch class). Auto-detect
+      // resolves the built-in namespace only, so a detected `gemini` is retired
+      // even when a custom `gemini` exists.
+      if (isRetiredHarness(detected)) throwRetired(detected);
       return BUILTIN_HARNESSES[detected];
     }
   }

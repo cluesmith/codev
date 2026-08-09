@@ -350,7 +350,7 @@ describe('PtySession + ShellperClient integration', () => {
       vi.useRealTimers();
     });
 
-    it('ends cleanly on a deliberate quit even when restartOnExit is true (Bugfix #1241)', () => {
+    it('keeps the session alive on a clean exit and awaits the fresh rerun (Bugfix #1264)', () => {
       vi.useFakeTimers();
       session.attachShellper(mockClient, Buffer.alloc(0), 9999);
       session.restartOnExit = true;
@@ -360,16 +360,38 @@ describe('PtySession + ShellperClient integration', () => {
 
       mockClient.simulateExit(0);
 
-      // No respawn is coming, so exit fires immediately rather than after the
-      // 10s wait-for-restart window, and the notice says what really happened.
-      expect(exitSpy).toHaveBeenCalledWith(0, null);
+      // A rerun IS coming, so 'exit' must be suppressed — otherwise Tower
+      // clears the architect row and the terminal dies, which was #1264.
+      expect(exitSpy).not.toHaveBeenCalled();
       const ringContent = session.ringBuffer.getAll().join('');
-      expect(ringContent).toContain('Agent exited at your request');
-      expect(ringContent).not.toContain('Process exited');
+      // The notice must not promise the old conversation back.
+      expect(ringContent).toContain('starting a fresh session');
+      expect(ringContent).not.toContain('at your request');
 
-      // Nothing left armed that could re-fire exit later.
+      // The rerun lands: fresh output cancels the teardown and the session runs on.
+      vi.advanceTimersByTime(2000);
+      mockClient.simulateData('fresh agent\r\n');
+      expect(session.status).toBe('running');
       vi.advanceTimersByTime(20_000);
-      expect(exitSpy).toHaveBeenCalledTimes(1);
+      expect(exitSpy).not.toHaveBeenCalled();
+      vi.useRealTimers();
+    });
+
+    it('still tears down a clean exit if no rerun arrives (Bugfix #1264)', () => {
+      // The bounded wait is the backstop: if SessionManager gave up (e.g. the
+      // fast-clean-exit valve tripped), the session must not hang forever.
+      vi.useFakeTimers();
+      session.attachShellper(mockClient, Buffer.alloc(0), 9999);
+      session.restartOnExit = true;
+
+      const exitSpy = vi.fn();
+      session.on('exit', exitSpy);
+
+      mockClient.simulateExit(0);
+      expect(exitSpy).not.toHaveBeenCalled();
+
+      vi.advanceTimersByTime(10_000);
+      expect(exitSpy).toHaveBeenCalledWith(0, null);
       vi.useRealTimers();
     });
 

@@ -505,6 +505,47 @@ afx send [builder] [message] [options]
 - `--interrupt` - Send Ctrl+C first
 - `--raw` - Skip structured message formatting
 - `--no-enter` - Do not send Enter after message
+- `--delay <seconds>` - Deliver after N seconds instead of immediately (Spec 1307)
+
+**Delayed delivery (`--delay`):**
+
+Tower holds the message and delivers it after the stated delay, so the sending process is
+free to exit in the meantime. That is the point: a session can schedule a message to
+*itself* for after something that destroys it — which is what `/arch-save` uses to send
+`/arch-init` after a `/clear`.
+
+- **Authorised at request time, delivered later.** Target resolution and the
+  builder-spoofing check run when the command is issued, exactly as for an immediate send.
+  A delayed send cannot defer a check past the conditions that would fail it.
+- **Bounds:** a whole number of seconds, 1–3600. Rejected at the CLI *and* server
+  boundaries, because a bad value silently changes *when* (or whether) the message arrives
+  rather than failing loudly.
+- **Persisted and durable (Spec 1313).** The message is written to Tower's durable mailbox at
+  request time with a due time (`not_before`), so a pending delayed send now **survives a Tower
+  restart** — the render gate still guarantees it only ever lands on a clean, verified-empty
+  prompt when it comes due. This reverses Spec 1307's original drop-on-restart behaviour (the
+  gate now provides the protection that behaviour wanted). A pre-due delayed send is listable —
+  and cancellable — via `afx inbox` (its row shows a due-time countdown).
+- **Ordering:** a delayed message never overtakes one already queued for that session — its
+  durable row is created at request time, so it sorts after anything already waiting, and the
+  mailbox delivers the oldest *eligible* row first. A pre-due delayed message does **not** block
+  a later message that is already due (delivery is by eligibility, then oldest-first), and
+  concurrent deliveries to one agent do not interleave. Request order across *differing* delays
+  is **not** preserved — `--delay 30` followed by `--delay 5` delivers the 5-second one first,
+  because that is what `--delay` means.
+- **Reporting:** the CLI says "scheduled", not "sent", and returns the mailbox id of the
+  persisted row. A message Tower is holding for later has not been delivered yet, and saying
+  otherwise costs someone a debugging session.
+- **Not combinable with the API's `escape` option** — an ESC bypasses buffering precisely
+  so that it interrupts the *current* turn, which a delay contradicts. Refused rather than
+  silently dropping one of the two. (`afx send` has no `--escape` flag; use `afx interrupt`.)
+- `--interrupt` **is** combinable: the Ctrl+C is deferred *with* the message rather than
+  firing immediately.
+
+```bash
+# Deliver in 15 seconds; this shell can exit immediately
+afx send architect:main --delay 15 --raw '/arch-init main'
+```
 
 **Description:**
 
@@ -513,6 +554,18 @@ Sends text to a builder's terminal. Useful for:
 - Interrupting long-running processes
 - Sending instructions or context
 - Communicating across workspaces (e.g., notifying another project's architect)
+
+**Outcome (Spec 1313 — mailbox-first delivery):**
+
+`afx send` reports the real first outcome instead of an unconditional "delivered":
+
+- **delivered** — the message was written to the recipient's prompt after a clean render-gate pass (an empty, render-verified prompt).
+- **held** — the prompt was not clear, so the message is persisted in Tower's durable mailbox and **delivers automatically** the moment the recipient's prompt is clean (after a submit, on output quiescence, or a poll backstop). The response carries a **why-held reason** and a mailbox id:
+  - `busy` — a draft, menu, dialog, or wrapper screen occupies the prompt;
+  - `no-profile` — the target app has no render-gate classifier profile (only `claude`, `codex`, and `agy` are modeled);
+  - `no-live-pty` — the recipient agent has no live terminal right now (it delivers when the agent respawns — rows address agents, not PTYs).
+
+A held message is **never force-injected** onto a busy line: a message body is only ever written to a verified-empty prompt, so it cannot fuse with a half-typed draft, and held rows survive Tower restart/shutdown (no shutdown force-flush). See held mail with `afx inbox`, read one (including its body) with `afx inbox show <id>`, and clear one with `afx inbox dismiss <id>`. `--interrupt` is the explicit, deliberate bypass: it interrupts the agent and writes without holding (unchanged semantics).
 
 **Examples:**
 
@@ -547,6 +600,167 @@ afx send 0042 --file src/api.ts "Review this implementation"
 
 - `afx status` lists all architects alongside builders, with names, terminal IDs, and PIDs where available.
 - Each active builder maintains a free-text narrative log at `codev/state/<builder-id>_thread.md` (relative to its worktree, so `.builders/<id>/codev/state/<id>_thread.md` from the main workspace root). **In-flight discovery**: `ls .builders/*/codev/state/*.md` and `cat .builders/<id>/codev/state/<id>_thread.md`. **Post-merge discovery**: after a builder's PR merges, its thread lands in `codev/state/` on `main`, alongside `codev/reviews/` — list with `ls codev/state/` and read with `cat codev/state/<builder-id>_thread.md` from the main checkout.
+
+---
+
+### afx inbox
+
+List, inspect, and dismiss **held** (undelivered) messages — the human-facing visibility surface for Spec 1313's mailbox. `afx send` persists a message it can't deliver immediately as a held row that delivers automatically once the recipient's prompt is clear; `afx inbox` lets a human see what is still waiting, read a specific message body, and clear rows — without reading Tower logs.
+
+```bash
+afx inbox [options]
+afx inbox show <id> [options]
+afx inbox dismiss <id> [options]
+```
+
+**`afx inbox`** — list every currently-held message in the workspace. Metadata only — message bodies are never shown in the list (or in logs); use `afx inbox show <id>` to read one:
+
+| Column | Meaning |
+|---|---|
+| `ID` | Mailbox row id (pass to `show` / `dismiss`) |
+| `AGE` | How long the message has been held (`5s`, `3m`, `2h`, `1d`) |
+| `REASON` | Why-held: `busy`, `no-profile`, or `no-live-pty`; a trailing `!` marks a row past the escalation age |
+| `FROM → TO` | Sender → recipient agent |
+| `WORKSPACE` | Owning workspace |
+
+**Options:**
+- `-w, --workspace <path>` - Workspace to list (default: current workspace — `afx inbox` is workspace-scoped, not Tower-wide)
+- `-p, --port <port>` - Tower port (default: 4100)
+
+**`afx inbox show <id>`** — display a single message by id, **including its body**. This is the one CLI surface that surfaces a body: the redaction rule keeps bodies out of logs, diagnostics, and telemetry — not out of this local operator view, which travels over the same local Tower connection the message already uses. `show` works on a row of **any** status (held / delivered / superseded / dismissed), so a resolved row stays inspectable by id for audit until it is pruned. Prints the metadata (status, why-held reason, from → to, workspace, timestamps) followed by the raw body.
+
+**Options:**
+- `-p, --port <port>` - Tower port (default: 4100)
+
+**`afx inbox dismiss <id>`** — mark a held message dismissed. A soft, auditable transition (the row is marked `dismissed`, not deleted) that **never delivers** the message. Any workspace operator may dismiss any held row (same local-human trust level as `afx send`).
+
+**Options:**
+- `-p, --port <port>` - Tower port (default: 4100)
+
+**Examples:**
+
+```bash
+# List held messages in the current workspace
+afx inbox
+
+# List held messages for a different workspace
+afx inbox --workspace /path/to/other/workspace
+
+# Show one message including its body (works for any status, held or resolved)
+afx inbox show 5f3c9a2b-1e4d-4c7a-9f21-8b6d0e2a1c33
+
+# Dismiss a held message by id (never delivers it)
+afx inbox dismiss 5f3c9a2b-1e4d-4c7a-9f21-8b6d0e2a1c33
+```
+
+Dismissal is CLI-only; the dashboard and VSCode held-count indicators surface the count but are read-only (Spec 1313 decision 8).
+
+---
+
+### afx interrupt
+
+Interrupt a builder mid-turn by sending an ESC keystroke to its PTY.
+
+```bash
+afx interrupt <builder> [options]
+```
+
+**Arguments:**
+- `builder` - Target builder. Same addressing as `afx send`.
+
+**Options:**
+- `--no-enter` - Send ESC alone, without the trailing Enter
+
+**Description:**
+
+This is the only recovery that reaches a builder **mid-turn**. When a builder chains foreground waits
+inside a single turn, every `afx send` — including your order to stop — queues unread until that turn
+ends. ESC interrupts the running tool and ends the turn, after which the queued messages process. The
+trailing Enter (default) is what lets them through.
+
+Distinct from `afx send --interrupt`, which sends Ctrl+C.
+
+**Examples:**
+
+```bash
+# Builder is wedged on a foreground wait and not reading messages
+afx interrupt 0042
+
+# Then the queued instruction lands
+afx send 0042 "That producer died — stop waiting and report."
+```
+
+---
+
+### afx reset
+
+Reset a builder's context: have it save its working state, clear the conversation, then re-orient it.
+
+```bash
+afx reset <builder> [options]
+```
+
+**Arguments:**
+- `builder` - Target builder. Same addressing as `afx send`.
+
+**Options:**
+- `--note <text>` - Extra context appended to the re-orientation
+- `--file <path>` - Append file content to the re-orientation (48KB max, read from *your* filesystem)
+- `--dry-run` - Print the save request and both re-orientation payloads; write nothing to the builder
+- `--interrupt-first` - Send ESC before the save request, for a builder already wedged mid-turn
+- `--mode <strict|soft>` - Override the builder mode if it cannot be detected
+- `--timeout <seconds>` - How long to wait for the save-state receipt (default 300)
+- `--min-bytes <n>` - Minimum state-file size to accept as substantive (default 1000)
+- `--quiet-window <ms>` - Terminal silence that counts as turn-ended (default 1500)
+
+**Description:**
+
+Long-running builders exhaust their context window. `afx spawn --resume` reattaches the *same*
+conversation, so a deep session resumes deep — it does not give the builder a fresh window. `afx reset`
+does, without losing what the builder knows.
+
+The sequence:
+
+1. Assemble the re-orientation and write it to `.builder-reorient.md` in the worktree.
+2. Ask the builder to write its complete working state to `.builder-state.md`, stamped with a one-time
+   nonce.
+3. Wait for that file and **verify** it: correct nonce (not a stale file from an earlier reset),
+   substantive size, and stable across two observations (not still being written).
+4. Wait for the terminal to fall silent, so the clear is not typed mid-turn. If it does not settle, send
+   **one** ESC and wait again.
+5. Send `/clear`.
+6. Deliver the re-orientation: role, protocol, mode, project, worktree, branch, the porch re-entry
+   instruction, and a pointer to the state file.
+
+**Every gate fails safe.** If the state file never arrives, carries the wrong nonce, is a stub, is still
+growing, or the builder will not go quiet — the command **aborts without clearing** and exits non-zero,
+naming the gate that failed. A builder whose context was not cleared has lost nothing.
+
+Both worktree artifacts use the `.builder-` prefix, so `afx cleanup` still classifies the worktree as
+clean, and both are untracked so `porch done`'s staged-file sweep cannot pick them up.
+
+Requires a harness with in-session context reset (Claude Code). Other harnesses abort loudly rather than
+substituting a different mechanism — use the boundary-recycle pattern instead (let the builder finish,
+then `afx spawn <id> --resume`).
+
+**Examples:**
+
+```bash
+# See exactly what would be sent, without touching the builder
+afx reset 0042 --dry-run
+
+# Standard reset
+afx reset 0042
+
+# Add context that post-dates the builder's saved state
+afx reset 0042 --note "PR #90 merged while you were mid-phase. Rebase before continuing."
+
+# The builder is wedged mid-turn and not reading messages
+afx reset 0042 --interrupt-first
+
+# A builder that legitimately needs longer to write its state
+afx reset 0042 --timeout 600
+```
 
 ---
 
@@ -759,6 +973,42 @@ Displays local tower status plus cloud registration details: tower name, ID, con
 
 ---
 
+### afx cron
+
+Manage scheduled tasks defined as YAML files in `.af-cron/` at the workspace root. The Tower scheduler loads these every tick, runs due commands, and delivers messages through the normal send pipeline.
+
+```bash
+afx cron list                   # List all cron tasks
+afx cron status <name>          # Check task status
+afx cron run <name>             # Run immediately
+afx cron enable <name>          # Enable
+afx cron disable <name>         # Disable
+```
+
+There is NO `afx cron add` — create YAML files in `.af-cron/` directly.
+
+**Task YAML format:**
+
+```yaml
+name: Service Health Check      # required, unique per workspace
+schedule: "*/15 * * * *"        # required, cron expression (or @hourly/@daily/@startup)
+command: ./health-check.sh      # required, run via shell
+message: "Health alert: ${output}"  # required, ${output} = trimmed command output
+condition: "exitCode != 0"      # optional JS expression, see below
+target: architect               # optional, default architect
+timeout: 30                     # optional, seconds, default 30
+enabled: true                   # optional, default true
+```
+
+**Condition environment:** `condition` is a JavaScript expression evaluated with two variables in scope:
+
+- `output` (string) — the command's trimmed output
+- `exitCode` (number) — `0` on success, the command's exit code on non-zero exit, `124` on timeout, `-1` on spawn failure
+
+With a `condition`, the message is delivered exactly when the expression evaluates truthy — including on failed runs, so `condition: "exitCode != 0"` alerts when the command fails. Without a `condition`, the message is delivered only when the command exits 0.
+
+---
+
 ### afx db
 
 Database debugging and maintenance commands.
@@ -863,9 +1113,9 @@ refreshes the snapshot from the main workspace.
 ### Builder harnesses
 
 The builder CLI's role/prompt mechanics are handled by a harness, auto-detected
-from the command basename (`claude`, `codex`, `gemini`, `opencode`, `kimi`) or
-pinned explicitly via `shell.builderHarness`. Example — Kimi Code CLI as the
-builder (builder-only; requires kimi >= 0.27.0, Issue #1201):
+from the command basename (`claude`, `codex`, `opencode`, `kimi`) or pinned
+explicitly via `shell.builderHarness`. Example — Kimi Code CLI as the builder
+(builder-only; requires kimi >= 0.33.0, Issue #1201):
 
 ```json
 {
@@ -875,11 +1125,43 @@ builder (builder-only; requires kimi >= 0.27.0, Issue #1201):
 }
 ```
 
-Kimi builders use a seed-session bootstrap (role + task delivered via a
-one-shot `kimi -p` call whose session the interactive TUI then resumes), so
-context survives builder restarts. Note: Kimi has no hook seam, so Kimi
-builders do NOT get the worktree write-guard Claude builders have (#1018).
+Kimi takes no positional prompt, so a Kimi builder gets its role and its task
+through two different channels: the role via `--agent-file` (an agent-definition
+file written into the worktree, composed around kimi's `${base_prompt}` token so
+it extends rather than replaces kimi's own system prompt), and the task via the
+`afx send` mailbox, delivered onto a verified-empty composer by the render gate.
+A crashed builder resumes with `kimi -c`, but only once a store probe confirms a
+conversation exists for that worktree — `kimi -c` with nothing to continue
+silently starts a fresh, roleless session, so the probe fails closed to a
+role-carrying fresh launch instead.
+
+Two notes specific to Kimi builders. Spawning pre-records workspace trust for the
+new worktree, because kimi 0.33.0+ opens on a "Trust this folder?" dialog that an
+unattended builder cannot answer (trust gates only whether project-level MCP
+servers load; it does not gate tool execution). And Kimi builders do NOT yet get
+the worktree write-guard Claude builders have (#1018) — kimi does have a
+blocking `PreToolUse` hook seam, so parity is achievable follow-up work rather
+than a permanent limitation.
+
 Architect use of kimi and opencode is unsupported (claude or codex there).
+
+### Mailbox retention and escalation
+
+`afx send`'s mailbox (Spec 1313) has two Tower-global knobs under a `mailbox` key:
+
+```json
+{
+  "mailbox": {
+    "retentionDays": 30,
+    "escalationSeconds": 60
+  }
+}
+```
+
+- `mailbox.retentionDays` (default `30`) — how long a **terminal** mailbox row (delivered, superseded, or dismissed) is retained before Tower prunes it. **Held** rows are never pruned — they persist until they deliver, are superseded, or are dismissed via `afx inbox`.
+- `mailbox.escalationSeconds` (default `60`) — how long a row may stay **held** before it crosses the escalation age. At that point the drainer marks the row `escalated`, emits the escalation broadcast, and moves the dashboard / VSCode held-count indicator into its attention state. This is **visibility only** — crossing the escalation age never triggers delivery (there is no force path; a held message still delivers only onto a verified-empty prompt).
+
+Both are Tower-global (they apply to the whole Tower, not per-project) and optional — omit them to use the defaults above.
 
 ### Language-Agnostic Porch Checks
 

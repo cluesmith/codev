@@ -2,32 +2,20 @@
 
 You are executing the **PR** phase of the AIR protocol.
 
-## Your Goal
+## Goal
 
-Create a pull request with the review embedded in the PR body, optionally run CMAP, and notify the architect.
+Open the PR with the review embedded in its body, optionally run CMAP, and notify the architect.
 
 ## Context
 
 - **Issue**: #{{issue.number}} — {{issue.title}}
 - **Current State**: {{current_state}}
 
-## Process
+## Create the PR
 
-### 1. Create the Pull Request
+**The PR body IS the review for AIR** — do not create a file in `codev/reviews/`. Include a summary, the key decisions, and a test plan in the body itself.
 
-Create a PR that links to the issue. The PR body IS the review — include a summary, key decisions, and test plan.
-
-**PR body requirements**: The PR body MUST include `Closes #<N>` (where `<N>` is
-the driving issue number) so GitHub auto-closes the issue on merge. If the PR
-closes multiple issues (e.g. duplicates consolidated), include one `Closes #<N>`
-per issue. Without this, GitHub will not auto-close the issue.
-
-**Exception**: if this PR only partially addresses the issue, use `Refs #<N>`
-or `Part of #<N>` instead of `Closes` — the issue stays open until a
-follow-up PR closes it.
-
-**Note**: substitute the real issue number for `<N>` — do not leave the
-placeholder or any `{{...}}` template tag in the committed PR body.
+The body must carry `Closes #<N>` for the driving issue — one per issue if several — so GitHub auto-closes it on merge. **Exception:** a partial fix uses `Refs #<N>` or `Part of #<N>` instead. Substitute the real number for `<N>`; leave no `{{...}}` tag or `<N>` placeholder in the committed body.
 
 ```bash
 gh pr create --title "[Air #<N>] feat: <brief description>" --body "$(cat <<'EOF'
@@ -35,15 +23,15 @@ gh pr create --title "[Air #<N>] feat: <brief description>" --body "$(cat <<'EOF
 
 <1-2 sentence description of the feature>
 
-Closes #<N>  <!-- Substitute <N> with the real issue number -->
+Closes #<N>  <!-- Substitute <N>; use "Refs #<N>" for a partial fix -->
 
 ## What Changed
 
-<Brief explanation of the implementation approach>
+<the implementation approach>
 
 ## Key Decisions
 
-<Any notable decisions made during implementation, or "None — straightforward implementation">
+<notable decisions, or "None — straightforward implementation">
 
 ## Test Plan
 
@@ -53,16 +41,14 @@ Closes #<N>  <!-- Substitute <N> with the real issue number -->
 
 ## Review Notes
 
-<Anything the reviewer should pay special attention to, or "Standard implementation — no special concerns">
+<anything the reviewer should focus on, or "Standard implementation — no special concerns">
 EOF
 )"
 ```
 
-**IMPORTANT**: Do NOT create a review file in `codev/reviews/`. The PR body IS the review for AIR.
+## Optional CMAP review
 
-### 2. Optional CMAP Review
-
-If the implementation is non-trivial, run 3-way consultation:
+CMAP is your judgement call for AIR. Skip it for simple changes (config, small UI); run it for features touching core logic or several modules:
 
 ```bash
 consult -m gemini --protocol air --type pr &
@@ -70,41 +56,23 @@ consult -m codex --protocol air --type pr &
 consult -m claude --protocol air --type pr &
 ```
 
-All three should run in the background (`run_in_background: true`).
+If you run it, wait for all three, record each verdict, fix real issues, and push.
 
-**This is optional** — use your judgement. For simple features (config changes, small UI additions), you may skip consultation. For features touching core logic or multiple modules, run it.
-
-### 3. Address Feedback (if CMAP was run)
-
-If you ran CMAP:
-- Wait for all consultations to complete
-- Record each model's verdict
-- Fix any issues identified
-- Push updates to the PR branch
-
-### 4. Notify Architect
-
-Send notification with PR link:
+## Notify the architect
 
 ```bash
 afx send architect "PR #<number> ready for review (implements issue #{{issue.number}})"
 ```
 
-If CMAP was run, include verdicts:
-```bash
-afx send architect "PR #<number> ready for review (implements issue #{{issue.number}}). CMAP: gemini=<verdict>, codex=<verdict>, claude=<verdict>"
-```
+If you ran CMAP, include the verdicts: `CMAP: gemini=<verdict>, codex=<verdict>, claude=<verdict>`.
 
 ## Signals
 
-When PR is created and ready for review:
-
-```
-<signal>PHASE_COMPLETE</signal>
-```
-
-If you're blocked:
-
-```
-<signal>BLOCKED:reason goes here</signal>
-```
+- PR created and ready for review:
+  ```
+  <signal>PHASE_COMPLETE</signal>
+  ```
+- Blocked:
+  ```
+  <signal>BLOCKED:reason goes here</signal>
+  ```

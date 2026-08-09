@@ -70,6 +70,19 @@ describe('init command', () => {
         expect(
           fs.existsSync(path.join(projectDir, '.codex', 'skills', 'arch-init', 'SKILL.md'))
         ).toBe(true);
+        // Spec 1307. NOTE: this file is excluded from the default run
+        // (vitest.config.ts — "Flaky: codev doctor timeout in worktree
+        // context"), so this assertion does NOT currently guard anything. The
+        // real arch-save scaffolding coverage lives in scaffold.test.ts
+        // (copySkills against the actual skeleton), update.test.ts and
+        // adopt.test.ts, all of which do run. Kept so it is correct if the
+        // exclusion is ever lifted — not counted as coverage.
+        expect(
+          fs.existsSync(path.join(projectDir, '.claude', 'skills', 'arch-save', 'SKILL.md'))
+        ).toBe(true);
+        expect(
+          fs.existsSync(path.join(projectDir, '.codex', 'skills', 'arch-save', 'SKILL.md'))
+        ).toBe(true);
 
         // Verify user data directories (minimal structure)
         expect(fs.existsSync(path.join(projectDir, 'codev', 'specs'))).toBe(true);

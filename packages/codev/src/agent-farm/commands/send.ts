@@ -197,19 +197,30 @@ async function readStdin(): Promise<string> {
 /**
  * Send a message to all builders via Tower API.
  */
+interface SendToAllResults {
+  delivered: string[];
+  held: Array<{ id: string; reason?: string; mailboxId?: string }>;
+  /** Spec 1307 `--delay`: accepted for later delivery, not sent now. */
+  scheduled: string[];
+  failed: string[];
+}
+
 async function sendToAll(
   client: TowerClient,
   message: string,
   workspace: string | undefined,
   from: string,
   options: SendOptions,
-): Promise<{ sent: string[]; failed: string[] }> {
+): Promise<SendToAllResults> {
   // Bugfix #826: loadState is workspace-scoped (for the architect read).
   // Builders are global per state.db; use the detected workspace root as
   // scope. `process.cwd()` is a safe fallback when detection fails — the
   // architect read returns [] and `--all` only uses `state.builders`.
   const state = loadState(detectWorkspaceRoot() ?? process.cwd());
-  const results = { sent: [] as string[], failed: [] as string[] };
+  // Spec 1307 `--delay` + Spec 1313 mailbox: scheduled (delayed) and held
+  // (persisted, awaiting a clean prompt) are tracked separately from delivered.
+  // Reporting either as "Delivered" would claim a delivery that hasn't happened.
+  const results: SendToAllResults = { delivered: [], held: [], scheduled: [], failed: [] };
 
   if (state.builders.length === 0) {
     logger.warn('No active builders found.');
@@ -225,11 +236,23 @@ async function sendToAll(
         raw: options.raw,
         noEnter: options.noEnter,
         interrupt: options.interrupt,
+        // Spec 1307: each target's delivery is scheduled independently.
+        deliverAfter: options.delay,
       });
       if (!result.ok) {
         throw new Error(result.error || 'Unknown error');
       }
-      results.sent.push(builder.id);
+      // Distinct outcomes, kept distinct (Spec 1307 `--delay` + Spec 1313 mailbox):
+      // a scheduled (delayed) or held (persisted, awaiting a clean prompt) message
+      // has NOT been delivered now — classifying either as "delivered" would claim a
+      // delivery that has not happened.
+      if (result.scheduled) {
+        results.scheduled.push(builder.id);
+      } else if (result.held) {
+        results.held.push({ id: builder.id, reason: result.reason, mailboxId: result.mailboxId });
+      } else {
+        results.delivered.push(builder.id);
+      }
     } catch (error) {
       logger.error(`Failed to send to ${builder.id}: ${error instanceof Error ? error.message : String(error)}`);
       results.failed.push(builder.id);
@@ -307,8 +330,21 @@ export async function send(options: SendOptions): Promise<void> {
     // Broadcast to all builders
     const results = await sendToAll(client, message, workspace, from, options);
 
-    if (results.sent.length > 0) {
-      logger.success(`Sent to ${results.sent.length} builder(s): ${results.sent.join(', ')}`);
+    if (results.delivered.length > 0) {
+      logger.success(`Delivered to ${results.delivered.length} builder(s): ${results.delivered.join(', ')}`);
+    }
+    if (results.held.length > 0) {
+      const detail = results.held.map((h) => `${h.id} (${h.reason ?? 'pending'})`).join(', ');
+      logger.info(
+        `Held for ${results.held.length} builder(s): ${detail}. ` +
+          `Each delivers automatically when its prompt is clear.`,
+      );
+    }
+    if (results.scheduled.length > 0) {
+      logger.success(
+        `Scheduled for ${results.scheduled.length} builder(s) (+${options.delay}s): ${results.scheduled.join(', ')}`,
+      );
+      logger.info('Each is persisted and durable across a Tower restart; delivers onto a clear prompt when due. Inspect/cancel: afx inbox.');
     }
     if (results.failed.length > 0) {
       logger.error(`Failed for ${results.failed.length} builder(s): ${results.failed.join(', ')}`);
@@ -323,13 +359,33 @@ export async function send(options: SendOptions): Promise<void> {
         raw: options.raw,
         noEnter: options.noEnter,
         interrupt: options.interrupt,
+        deliverAfter: options.delay,
       });
 
       if (!result.ok) {
         throw new Error(result.error || 'Unknown error');
       }
 
-      logger.success(`Message sent to ${result.resolvedTo ?? target}`);
+      // Report the real first outcome (Spec 1307 `--delay` + Spec 1313 mailbox). A
+      // scheduled message is deferred to a future time; a held message is persisted
+      // in the mailbox and delivers automatically once the target's prompt is clear
+      // (empty and render-verified) — neither is a failure, and neither has been
+      // delivered yet.
+      if (result.scheduled) {
+        logger.success(
+          `Message scheduled for ${result.resolvedTo ?? target} (+${options.delay}s)` +
+            `${result.mailboxId ? ` — mailbox id ${result.mailboxId}` : ''}`,
+        );
+        logger.info('Persisted and durable across a Tower restart; delivers onto a clear prompt when due. Inspect/cancel: afx inbox.');
+      } else if (result.held) {
+        logger.info(
+          `Message held for ${result.resolvedTo ?? target} (${result.reason ?? 'pending'})` +
+            `${result.mailboxId ? ` — mailbox id ${result.mailboxId}` : ''}. ` +
+            `It delivers automatically when the prompt is clear.`,
+        );
+      } else {
+        logger.success(`Message delivered to ${result.resolvedTo ?? target}`);
+      }
     } catch (error) {
       fatal(error instanceof Error ? error.message : String(error));
     }

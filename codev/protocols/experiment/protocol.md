@@ -1,208 +1,37 @@
 # EXPERIMENT Protocol
 
-## Overview
+A disciplined experiment: state the hypothesis before running it, record what actually happened,
+and keep the result whichever way it goes.
 
-Disciplined experimentation: Each experiment gets its own directory with `notes.md` tracking goals, code, and results.
+Use it for evaluating models or libraries, proof-of-concept work, and technique comparisons —
+questions that should be settled by evidence rather than by argument.
 
-**Core Principle**: Document what you're trying, what you did, and what you learned.
+## The state machine
 
-## When to Use
-
-**Use for**: Testing approaches, evaluating models, prototyping, proof-of-concept work, research spikes
-
-**Skip for**: Production code (use SPIR), simple one-off scripts, well-understood implementations (use TICK)
+```json
+{{> protocols/experiment/protocol.json}}
+```
 
 ## Structure
 
-```
-experiments/
-├── 1_descriptive_name/
-│   ├── notes.md           # Goal, code, results
-│   ├── experiment.py      # Your experiment code
-│   └── data/
-│       ├── input/         # Input data
-│       └── output/        # Results, plots, etc.
-└── 2_another_experiment/
-    ├── notes.md
-    └── ...
-```
+Each experiment gets a numbered directory under `codev/experiments/` with a `notes.md` recording
+the hypothesis, method, results and conclusion.
 
-## Workflow
+## Notes structure
 
-### 1. Create Experiment Directory
-
-```bash
-# Create numbered directory
-mkdir -p experiments/1_experiment_name
-cd experiments/1_experiment_name
-
-# Initialize notes.md from template
-touch notes.md   # then fill it from the embedded template at the end of this protocol
-```
-
-Or ask your AI assistant: "Create a new experiment for [goal]"
-
-### 2. Document the Goal
-
-Before writing code, clearly state what you're trying to learn in `notes.md`:
-
-```markdown
-## Goal
-
-What specific question are you trying to answer?
-What hypothesis are you testing?
-```
-
-### 3. Write Experiment Code
-
-- Keep it simple - experiments don't need production polish
-- Reuse existing project modules where possible
-- Any structure is fine - focus on learning, not architecture
-
-**Dependencies**: If your experiment requires libraries not in the main project:
-1. Do NOT add them to the main project's `requirements.txt` or `pyproject.toml`
-2. Create a `requirements.txt` inside your experiment folder
-3. Document installation in `notes.md`
-
-### 4. Run and Observe
-
-Execute your experiment and capture results:
-- Save output files to `data/output/`
-- Take screenshots of visualizations
-- Log key metrics
-
-### 5. Document Results
-
-Update `notes.md` with:
-- What happened (actual results)
-- What you learned (insights)
-- What's next (follow-up actions)
-
-### 6. Commit
-
-```bash
-git add experiments/1_experiment_name/
-git commit -m "[Experiment 1] Brief description of findings"
-```
-
-## Best Practices
-
-### Keep It Simple
-- Experiments don't need production polish
-- Skip comprehensive error handling
-- Focus on answering the question
-
-### Document Honestly
-- Include failures - they're valuable learnings
-- Note dead ends and why they didn't work
-- Be specific about what surprised you
-
-### Track Time Investment
-- Wall clock time: Total elapsed time
-- Developer time: Active working time (excluding waiting)
-- Helps estimate future similar work
-
-### Use Project Modules
-- Don't duplicate existing code
-- Import from your `src/` directory
-- Experiments validate approaches, not reimplement them
-
-### Commit Progress
-- Use `[Experiment ####]` commit prefix
-- Commit intermediate results
-- Include output files when reasonable
-
-## Integration with Other Protocols
-
-### Experiment → SPIR
-When an experiment validates an approach for production use:
-
-1. Create a specification referencing the experiment
-2. Link to experiment results as evidence
-3. Use experiment code as reference implementation
-
-Example spec reference:
-```markdown
-## Background
-
-Experiment 5 validated that [approach] achieves [results].
-See: experiments/5_validation_test/notes.md
-```
-
-### Experiment → TICK
-For small, validated changes discovered during experimentation:
-- Use TICK for quick implementation
-- Reference experiment as justification
-
-## Numbering Convention
-
-Use four-digit sequential numbering (consistent with project list):
-- `1_`, `2_`, `3_`...
-- Shared sequence across all experiments
-- Descriptive name after the number (snake_case)
-
-Examples:
-- `1_api_response_caching`
-- `2_model_comparison`
-- `3_performance_baseline`
-
-## Git Workflow
-
-### Commits
-```
-[Experiment 1] Initial setup and goal
-[Experiment 1] Add baseline measurements
-[Experiment 1] Complete - caching improves latency 40%
-```
-
-### When to Commit
-- After setting up the experiment
-- After significant findings
-- When completing the experiment
-
-**Data Management**:
-- Include `data/output/` ONLY if files are small (summary metrics, small plots)
-- Do NOT commit large datasets, binary model checkpoints, or heavy artifacts
-- Add appropriate entries to `.gitignore` for large files
-- Consider storing large outputs externally and linking in notes
-
-## Example Experiment
-
-```
-experiments/1_caching_strategy/
-├── notes.md
-├── benchmark.py
-├── cache_test.py
-└── data/
-    ├── input/
-    │   └── sample_requests.json
-    └── output/
-        ├── results.csv
-        └── latency_chart.png
-```
-
-**notes.md excerpt:**
-```markdown
-# Experiment 1: Caching Strategy Evaluation
-
-**Status**: Complete
-
-**Date**: 2024-01-15
-
-## Goal
-Determine if Redis caching improves API response times for repeated queries.
-
-## Results
-- 40% latency reduction for cached queries
-- Cache hit rate: 73% after warm-up
-- Memory usage: 50MB for 10k cached responses
-
-## Next Steps
-Create SPIR spec for production caching implementation.
-```
-
-## Template: notes.md
-
-Create `notes.md` with the following content:
+`notes.md` uses this structure:
 
 {{> protocols/experiment/templates/notes.md}}
+
+## The discipline that makes it worth doing
+
+**Write the hypothesis and the success criteria before running anything.** An experiment scored
+after the fact always succeeds — you discover the criterion the result happens to meet.
+
+**Record negative results.** "We tried X and it did not work, here is why" is the output that
+saves the next person a week. An experiment directory containing only successes is a directory
+that has been curated rather than run.
+
+**Keep the experiment separate from production code.** Experimental code answers a question; it
+has not earned the standards production code is held to, and promoting it silently is how a
+proof of concept becomes a maintenance burden nobody chose.

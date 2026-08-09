@@ -11,7 +11,8 @@ import type { Config, UserConfig, ResolvedCommands } from '../types.js';
 import { getSkeletonDir } from '../../lib/skeleton.js';
 import { loadConfig } from '../../lib/config.js';
 import type { CodevConfig } from '../../lib/config.js';
-import { resolveHarness, type HarnessProvider, type CustomHarnessConfig } from './harness.js';
+import { resolveHarness, RetiredHarnessError, type HarnessProvider, type CustomHarnessConfig } from './harness.js';
+import { logger } from './logger.js';
 import type { ResolvedWorktreeConfig, WorktreeDevUrl, ResolvedActivityHooks, ActivityHook, ActivityEvent } from '@cluesmith/codev-types';
 
 // Re-export so existing internal callers that import the resolved types
@@ -286,6 +287,38 @@ export function getBuilderHarness(workspaceRoot?: string): HarnessProvider {
     userConfig?.harness as Record<string, CustomHarnessConfig> | undefined,
     builderCmd,
   );
+}
+
+/**
+ * Spawn pre-flight (Issue #1338): throw if the configured builder harness resolves
+ * to a retired built-in (e.g. gemini). Call this BEFORE any worktree / porch / db
+ * state is created so a retired selection fails closed with no orphaned state,
+ * rather than only surfacing at the later `getBuilderHarness` call site.
+ *
+ * The retirement decision — including the custom-harness escape hatch — is
+ * delegated to `getBuilderHarness`, the single source of truth. Only the
+ * retirement aborts here; any other resolution error (e.g. an unknown harness
+ * name) is left to surface at its existing call site, so this changes behavior
+ * for retired harnesses only.
+ */
+export function assertBuilderHarnessNotRetired(workspaceRoot?: string): void {
+  try {
+    getBuilderHarness(workspaceRoot);
+  } catch (err) {
+    if (err instanceof RetiredHarnessError) throw err;
+    // A non-retirement resolution error (e.g. an unknown harness name) is left to
+    // re-surface at the real `getBuilderHarness` call site for worktree modes.
+    // Shell mode never resolves a harness downstream (`spawnShell` runs
+    // `commands.builder` as a raw command), so this preflight is the only place
+    // such an error is seen — log it rather than swallowing it silently, so a
+    // misconfigured `builderHarness` stays diagnosable (Issue #1338 review). Route
+    // through `logger.debug` (DEBUG-gated), not `console.debug`: Tower imports this
+    // module, and a bare console.debug always writes to stdout and pollutes Tower's
+    // log stream. `logger.debug` stays silent unless DEBUG is set.
+    logger.debug(
+      `[spawn preflight] builder harness resolution error (non-retirement, deferred): ${(err as Error).message}`,
+    );
+  }
 }
 
 // ResolvedWorktreeConfig + WorktreeDevUrl now live in

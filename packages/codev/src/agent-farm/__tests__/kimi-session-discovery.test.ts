@@ -1,24 +1,31 @@
 /**
  * Tests for Kimi session discovery via on-disk store introspection.
  *
- * Issue #1201 — Kimi Code CLI as a builder. The store layout is UNDOCUMENTED
- * (observed on kimi 0.27.0):
+ * Issue #1201 — Kimi Code CLI as a builder. Two UNDOCUMENTED surfaces, both
+ * observed on kimi 0.34.0:
  *   <kimi-home>/sessions/wd_<hash>/session_<uuid>/state.json
- * with state.json carrying { workDir, updatedAt, lastPrompt }. Every function
- * is fail-soft: malformed fixtures must yield null/false, never a throw.
+ *     v2 (0.33.0+): { id, version: 2, cwd, createdAt, updatedAt, … }
+ *     v1 (≤ 0.32):  { workDir, updatedAt (ISO), lastPrompt?, … }
+ *   <kimi-home>/workspace-trust/wd_<basename>_<sha256(root)[:12]> → { root, trustedAt }
+ *
+ * Every function is fail-soft: malformed fixtures must yield null/empty, never a
+ * throw, because all of this is read on the spawn path.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 
 import {
   getKimiHome,
   findLatestKimiSessionId,
   verifyKimiSessionOwnership,
   readKimiSessionState,
-  kimiStoreLayoutLooksDrifted,
+  inspectKimiStoreLayout,
+  inspectKimiTrustLayout,
+  kimiTrustRecordPath,
+  ensureKimiWorkspaceTrust,
 } from '../utils/kimi-session-discovery.js';
 
 describe('kimi session discovery', () => {
@@ -141,25 +148,40 @@ describe('kimi session discovery', () => {
   });
 
   describe('readKimiSessionState', () => {
-    it('returns workDir/updatedAt/lastPrompt for a valid session', () => {
+    // Store v2 (kimi 0.33.0+, agent-core-v2): the working-directory field was renamed
+    // `workDir` → `cwd`, timestamps became epoch-ms NUMBERS instead of ISO strings, and
+    // `lastPrompt` was dropped entirely. Discovery normalizes all three.
+    it('returns cwd/updatedAt/version for a v2 session (epoch-ms timestamps)', () => {
       writeSession('session_full', {
-        workDir: '/wt',
-        updatedAt: '2026-07-18T10:00:00Z',
-        lastPrompt: 'BEGIN',
+        id: 'session_full',
+        version: 2,
+        cwd: '/wt',
+        updatedAt: 1_760_000_000_000,
       });
       expect(readKimiSessionState('session_full', opts())).toEqual({
-        workDir: '/wt',
-        updatedAt: '2026-07-18T10:00:00Z',
-        lastPrompt: 'BEGIN',
+        cwd: '/wt',
+        updatedAt: 1_760_000_000_000,
+        version: 2,
+      });
+    });
+
+    // Back-compat: a v1 store (kimi < 0.33.0) still reads, so an installed-but-not-yet
+    // upgraded kimi keeps resuming instead of silently starting fresh, roleless sessions.
+    it('accepts the v1 shape: workDir and an ISO timestamp, normalized to epoch ms', () => {
+      writeSession('session_v1', { workDir: '/wt', updatedAt: '2026-07-18T10:00:00Z' });
+      expect(readKimiSessionState('session_v1', opts())).toEqual({
+        cwd: '/wt',
+        updatedAt: Date.parse('2026-07-18T10:00:00Z'),
+        version: null,
       });
     });
 
     it('nulls optional fields that are absent', () => {
-      writeSession('session_sparse', { workDir: '/wt' });
+      writeSession('session_sparse', { cwd: '/wt' });
       expect(readKimiSessionState('session_sparse', opts())).toEqual({
-        workDir: '/wt',
+        cwd: '/wt',
         updatedAt: null,
-        lastPrompt: null,
+        version: null,
       });
     });
 
@@ -170,21 +192,89 @@ describe('kimi session discovery', () => {
     });
   });
 
-  describe('kimiStoreLayoutLooksDrifted (doctor smoke probe)', () => {
-    it('false when the store does not exist (fresh install is not drift)', () => {
-      expect(kimiStoreLayoutLooksDrifted(opts())).toBe(false);
+  // Kimi ships weekly and has already renamed the store's working-directory field
+  // once (`workDir` → `cwd`, 0.33.0), which silently nulled every parse. The probe
+  // therefore asserts the load-bearing facts EXPLICITLY and names the first one that
+  // broke, so `codev doctor` can say which assumption failed instead of "something
+  // changed" — or, worse, degrade silently at spawn time.
+  describe('inspectKimiStoreLayout (doctor smoke probe)', () => {
+    it('empty when the store does not exist (fresh install is not drift)', () => {
+      expect(inspectKimiStoreLayout(opts())).toEqual({ status: 'empty' });
     });
 
-    it('false when at least one session parses', () => {
-      writeSession('session_ok', { workDir: '/wt' });
+    it('ok when at least one session carries the load-bearing shape', () => {
+      writeSession('session_ok', { cwd: '/wt' });
       writeSession('session_bad', '###');
-      expect(kimiStoreLayoutLooksDrifted(opts())).toBe(false);
+      expect(inspectKimiStoreLayout(opts())).toEqual({ status: 'ok', sampled: 1 });
     });
 
-    it('true when session dirs exist but none parse (layout drift)', () => {
+    it('names the working-directory field when no session carries one', () => {
       writeSession('session_bad1', '###');
       writeSession('session_bad2', { noWorkDirKey: true });
-      expect(kimiStoreLayoutLooksDrifted(opts())).toBe(true);
+      const layout = inspectKimiStoreLayout(opts());
+      expect(layout.status).toBe('drifted');
+      expect(layout.status === 'drifted' && layout.reason).toMatch(/working-directory field/);
+    });
+
+    // `kimi -S <id>` takes the directory basename; if that stops being
+    // `session_<uuid>`, discovery returns ids the CLI would reject.
+    it('names the id scheme when session dirs lose the session_ prefix', () => {
+      writeSession('bare-uuid-1234', { cwd: '/wt' });
+      const layout = inspectKimiStoreLayout(opts());
+      expect(layout.status).toBe('drifted');
+      expect(layout.status === 'drifted' && layout.reason).toMatch(/session_<uuid>/);
+    });
+  });
+
+  /**
+   * The trust-record probe validates OUR undocumented derivation against kimi's own
+   * records. If the scheme ever changes, the pre-write lands where kimi does not look:
+   * the write still "succeeds", the dialog reappears, and every unattended builder
+   * stalls on it. Silent by construction — hence the probe.
+   */
+  describe('inspectKimiTrustLayout (undocumented trust-scheme probe)', () => {
+    function writeTrustRecord(fileName: string, root: string): void {
+      const dir = join(kimiHome, 'workspace-trust');
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, fileName), JSON.stringify({ root, trustedAt: 1 }), 'utf-8');
+    }
+
+    it('empty when nothing has been trusted yet (or kimi predates the dialog)', () => {
+      expect(inspectKimiTrustLayout(opts())).toEqual({ status: 'empty' });
+    });
+
+    it('ok when a record kimi wrote matches the name we would derive for its root', () => {
+      const root = '/tmp/some-worktree';
+      writeTrustRecord(basename(kimiTrustRecordPath(root, opts())), root);
+      expect(inspectKimiTrustLayout(opts())).toEqual({ status: 'ok', sampled: 1 });
+    });
+
+    it('drifted when records exist but none match the derived scheme', () => {
+      writeTrustRecord('wd_some-worktree_DIFFERENTHASH', '/tmp/some-worktree');
+      const layout = inspectKimiTrustLayout(opts());
+      expect(layout.status).toBe('drifted');
+      expect(layout.status === 'drifted' && layout.reason).toMatch(/sha256\(root\)/);
+    });
+
+    it('ignores unreadable records rather than calling them drift', () => {
+      const dir = join(kimiHome, 'workspace-trust');
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, 'not-json'), 'nope', 'utf-8');
+      expect(inspectKimiTrustLayout(opts())).toEqual({ status: 'empty' });
+    });
+
+    // The end-to-end property the pre-write depends on: what we WRITE is what the
+    // probe recognizes. If the derivation and the writer ever diverge, this fails.
+    it('agrees with what ensureKimiWorkspaceTrust actually writes', () => {
+      const root = mkdtempSync(join(tmpdir(), 'kimi-trust-root-'));
+      try {
+        expect(ensureKimiWorkspaceTrust(root, opts())).toBe(true);
+        expect(inspectKimiTrustLayout(opts())).toEqual({ status: 'ok', sampled: 1 });
+        // Idempotent: a second call leaves the existing record alone.
+        expect(ensureKimiWorkspaceTrust(root, opts())).toBe(false);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
     });
   });
 });

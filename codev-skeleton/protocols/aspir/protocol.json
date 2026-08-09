@@ -23,6 +23,16 @@
         "models": ["gemini", "codex", "claude"],
         "parallel": true
       },
+      "checks": {
+        "spec_exists": {
+          "command": "test -f codev/specs/${PROJECT_TITLE}.md",
+          "description": "Spec file must exist before the spec-approval gate"
+        },
+        "spec_has_required_sections": {
+          "command": "grep -qF '## Problem Statement' codev/specs/${PROJECT_TITLE}.md && grep -qF '## Current State' codev/specs/${PROJECT_TITLE}.md && grep -qF '## Desired State' codev/specs/${PROJECT_TITLE}.md && grep -qF '## Success Criteria' codev/specs/${PROJECT_TITLE}.md",
+          "description": "Spec must follow the canonical template delivered by the specify prompt (protocols/spir/templates/spec.md). Required headings: ## Problem Statement, ## Current State, ## Desired State, ## Success Criteria"
+        }
+      },
       "max_iterations": 3,
       "on_complete": {
         "commit": true,

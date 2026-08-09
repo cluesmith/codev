@@ -3,8 +3,13 @@ import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { gunzipSync } from 'node:zlib';
+import { fileURLToPath } from 'node:url';
 import { PtySession, type PtySessionConfig } from '../pty-session.js';
 import type { IShellperClient } from '../shellper-client.js';
+import { capRingSeed, RING_SEED_MAX_BYTES } from '../../agent-farm/servers/tower-terminals.js';
+import { classifyAgentScreen } from '../../agent-farm/servers/mailbox-wiring.js';
+import { CLAUDE_PROFILE } from '../../agent-farm/servers/gate-profiles.js';
 
 /**
  * Fix E (#1047): attachShellper must be idempotent — re-attaching a session to
@@ -151,4 +156,48 @@ describe('PtySession.writable (#1198)', () => {
     expect(session.writable).toBe(false);
     expect(session.write('nowhere')).toBe(false);
   });
+});
+
+describe('PtySession.attachShellper adopt-path gate seed (Spec 1313 round 2, fail-safe HOLD — #1361)', () => {
+  // Counterpart to the render-gate production-path CLEAN test: there the mirror is fed the WHOLE live
+  // stream, so the live-ring tear is gone. Here we pin the ADOPT/reconnect path — tower-terminals
+  // reconcile (:775) and reconnect (:1034) cap the shellper replay to the last 1 MiB via the real
+  // `capRingSeed` BEFORE `attachShellper` seeds the gate mirror with it. A long-lived alt-screen frame
+  // whose coherent start predates that 1 MiB tail is seeded born-torn, so the gate HOLDS (busy) —
+  // fail-safe: mail is delayed, never fused onto a non-empty screen — until the agent's next repaint
+  // or a viewer's post-connect nudge heals the mirror. This is PRE-EXISTING (before round 2 the
+  // whole-ring gate classified this same capped seed), not a round-2 regression; the residual liveness
+  // gap is deferred as #1361. Pin the HOLD so no future change can silently turn a torn adopt seed into
+  // a false-CLEAN misdelivery.
+  const FIXTURE_DIR = fileURLToPath(new URL('../../agent-farm/__tests__/fixtures/gate', import.meta.url));
+  const loadGz = (name: string): string => gunzipSync(fs.readFileSync(`${FIXTURE_DIR}/${name}`)).toString('utf8');
+
+  function makeSessionAt(cols: number, rows: number): PtySession {
+    return new PtySession({
+      id: 'adopt-1', command: '', args: [], cols, rows, cwd: '/tmp', env: {},
+      label: 'test', logDir: '/tmp', diskLogEnabled: false,
+    });
+  }
+
+  // Both captures are IDLE empty-composer screens (TRUE verdict CLEAN) each > 1 MiB, so capRingSeed
+  // drops their coherent front → the seeded mirror is torn. (Empirically the 1 MiB tail classifies
+  // busy/no-composer-marker for bigring and busy/no-region-end for bgtask.)
+  for (const file of ['claude-bigring-empty.replay.bin.gz', 'claude-bgtask-empty.replay.bin.gz']) {
+    it(`${file}: real capRingSeed(>1MiB) → attachShellper seeds a torn mirror → gate HOLDS busy`, async () => {
+      const full = Buffer.from(loadGz(file), 'utf8');
+      expect(full.length).toBeGreaterThan(RING_SEED_MAX_BYTES); // crosses the 1 MiB adopt-seed cap
+
+      const seed = capRingSeed(full, 'adopt-1'); // the REAL cap → last 1 MiB, coherent front dropped
+      expect(seed.length).toBe(RING_SEED_MAX_BYTES);
+
+      const session = makeSessionAt(139, 65); // the captures' geometry
+      session.attachShellper(makeFakeClient(), seed, 1234); // seeds ring + gate mirror with the capped tail
+
+      // The seeded mirror has no coherent composer frame → fail-safe HOLD, never a CLEAN delivery.
+      const verdict = await classifyAgentScreen(session, CLAUDE_PROFILE);
+      expect(verdict).toMatchObject({ clean: false, reason: 'busy' });
+
+      session.detachShellper(); // disposes the gate mirror (cleanupShellper)
+    });
+  }
 });

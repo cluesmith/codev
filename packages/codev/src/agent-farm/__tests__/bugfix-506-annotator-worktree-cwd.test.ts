@@ -77,8 +77,9 @@ describe('Bugfix #506: saveTerminalSession stores cwd', () => {
     const fnEnd = src.indexOf('\n}', fnStart);
     const fnBody = src.slice(fnStart, fnEnd);
     expect(fnBody).toContain('cwd');
-    // The VALUES placeholder count should include cwd (10 params)
-    expect(fnBody).toMatch(/VALUES\s*\(\?\s*(?:,\s*\?){9}\)/);
+    // The VALUES placeholder count should include cwd and command
+    // (11 params: +command is the Spec 1313 render-gate identity column).
+    expect(fnBody).toMatch(/VALUES\s*\(\?\s*(?:,\s*\?){10}\)/);
   });
 });
 

@@ -17,7 +17,7 @@
 import { resolve, basename } from 'node:path';
 import { existsSync, writeFileSync, readdirSync } from 'node:fs';
 import type { SpawnOptions, BuilderType, Config } from '../types.js';
-import { getConfig, ensureDirectories, getResolvedCommands, getBuilderHarness } from '../utils/index.js';
+import { getConfig, ensureDirectories, getResolvedCommands, getBuilderHarness, assertBuilderHarnessNotRetired } from '../utils/index.js';
 import type { HarnessProvider } from '../utils/harness.js';
 import { logger, fatal } from '../utils/logger.js';
 import { run } from '../utils/shell.js';
@@ -919,6 +919,19 @@ export async function spawn(options: SpawnOptions): Promise<void> {
   }
 
   const mode = getSpawnMode(options);
+
+  // Fail closed on a retired builder harness (Issue #1338) BEFORE dispatching to
+  // any handler, for EVERY mode. Worktree modes create worktree/porch/db state,
+  // and `createWorktree` itself resolves the builder harness (spawn-worktree.ts),
+  // so a guard placed below dispatch would orphan a half-built worktree. `shell`
+  // mode has no worktree, but `spawnShell` still runs `commands.builder` via
+  // `startShellSession` and persists a shell row — so a retired `gemini`
+  // shell.builder would otherwise launch the retired CLI AND leave a shell row.
+  // The retirement decision (including the custom-harness escape hatch) is
+  // delegated to `getBuilderHarness`; only the retirement aborts here — an
+  // unknown-harness name still surfaces at its existing resolution call site, so
+  // behavior is unchanged for every supported harness and every mode.
+  assertBuilderHarnessNotRetired(config.workspaceRoot);
 
   const handlers: Record<BuilderType, () => Promise<void>> = {
     spec: () => spawnSpec(options, config),

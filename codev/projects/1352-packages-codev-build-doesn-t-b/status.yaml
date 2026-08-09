@@ -1,0 +1,17 @@
+id: '1352'
+title: packages-codev-build-doesn-t-b
+protocol: air
+phase: pr
+plan_phases: []
+current_plan_phase: null
+gates:
+  pr:
+    status: approved
+    requested_at: '2026-08-05T08:02:36.865Z'
+    approved_at: '2026-08-05T08:10:31.557Z'
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-08-05T07:51:58.758Z'
+updated_at: '2026-08-05T08:10:31.558Z'
+pr_ready_for_human: false

@@ -21,7 +21,9 @@ function Harness({ markers, lines }: { markers: ReviewMarker[]; lines: number[] 
       'div',
       { ref, className: 'codev-artifact-canvas-body' },
       lines.map((l) =>
-        React.createElement('p', { key: l, 'data-line': String(l) }, `block ${l}`),
+        // tabIndex mirrors the real renderer, which stamps tabindex="0" on every mapped block —
+        // required for the focus-handoff assertion (jsdom ignores focus() on non-focusables).
+        React.createElement('p', { key: l, 'data-line': String(l), tabIndex: 0 }, `block ${l}`),
       ),
     ),
     React.createElement(MarkerMinimap, { markers, bodyRef: ref }),
@@ -64,6 +66,16 @@ describe('MarkerMinimap (#863)', () => {
     render(<Harness markers={[marker(2, 'bob', 'fix')]} lines={[0, 1, 2]} />);
     fireEvent.click(screen.getByRole('button', { name: /jump to comment by bob/i }));
     expect(scrollSpy).toHaveBeenCalledWith({ behavior: 'smooth', block: 'center' });
+    Element.prototype.scrollIntoView = original;
+  });
+
+  it('activating a dot moves focus to the target block, not just the viewport (#1237)', () => {
+    const original = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = vi.fn();
+    render(<Harness markers={[marker(2, 'bob', 'fix')]} lines={[0, 1, 2]} />);
+    fireEvent.click(screen.getByRole('button', { name: /jump to comment by bob/i }));
+    // A keyboard user's next Tab / jump key must resume from the block the dot targeted.
+    expect(document.activeElement).toBe(document.querySelector('[data-line="2"]'));
     Element.prototype.scrollIntoView = original;
   });
 });

@@ -1,0 +1,13 @@
+[2J[H[1m[38;5;3mAccessing workspace:[0m
+
+[1m/project[0m
+
+Do you trust the contents of this project?
+
+[38;2;66;133;244mAntigravity CLI[39m requires permission to read, edit, and execute files here.
+
+[38;5;12m>[39m [38;5;12mYes, I trust this folder[39m
+  [38;5;8mNo, exit[39m
+
+  [1m[38;5;12m↑/↓[0m [38;5;8mNavigate ·[39m [1m[38;5;12menter[0m [38;5;8mConfirm[39m
+                                                                         [38;5;2maccept-edits[39m [2m· Gemini 3.1 Pro · high[0m
