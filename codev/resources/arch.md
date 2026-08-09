@@ -1952,6 +1952,16 @@ consult -m claude spec 42
 
 > **Historical note** (Spec 0008, Spec 0098): Originally allocated deterministic 100-port blocks per repository. After the Tower Single Daemon architecture (Spec 0090), per-workspace port blocks became unnecessary and were removed in Spec 0098. The global registry now tracks workspace metadata and terminal sessions instead.
 
+### 8. No Internal Authentication in Tower (By Design)
+**Decision**: Tower performs no internal request authentication (`isRequestAllowed()` returns true unconditionally); the authentication boundary is external — localhost binding for local actors, the codevos.ai edge for tunnel-borne traffic (owner ruling, issue #1375).
+
+**Rationale**:
+- **Localhost binding** covers the local case: filesystem/OS user boundary is the auth mechanism, consistent with the terminal-endpoint stance above
+- **The cloud edge owns remote auth** - tunnel-borne requests are gated at codevos.ai before they reach the tunnel; duplicating auth inside Tower adds a second credential system to keep in sync
+- **Management endpoints are still origin-restricted** - `/api/tunnel/*` rejects tunnel-borne requests outright (PR #1374), so a compromised or misconfigured edge cannot deregister the tower; `via=tunnel/local` attribution logs every proxied request
+
+**Consequence**: do not file or "fix" the missing 401s as a vulnerability; harden at the edge or via origin-restriction of specific endpoints instead.
+
 ## Integration Points
 
 ### External Services
