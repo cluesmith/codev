@@ -5,38 +5,38 @@ phase: implement
 plan_phases:
   - id: phase_0_instrument
     title: Corrected instrument + frozen capability inventory (PR-1, ships early)
-    status: complete
+    status: in_progress
   - id: phase_1_shared_skills
     title: CLAUDE.md/AGENTS.md + four-tree skill relocation (G2)
-    status: complete
+    status: pending
   - id: phase_2_roles
     title: Three role files (G6, G3, G5)
-    status: complete
+    status: pending
   - id: phase_3_protocol_md
     title: protocol.md x10 with the P6 include mechanism (G3)
-    status: complete
+    status: pending
   - id: phase_4_builder_prompts
     title: builder-prompt.md x9 + M10 test-retirement burden (G3)
-    status: complete
+    status: pending
   - id: phase_5_prompts_heavy
     title: 'Phase prompts: spir, aspir, pir (G4)'
-    status: complete
+    status: pending
   - id: phase_6_prompts_light_spir_templates
     title: 'Phase prompts: bugfix, air, maintain + spir templates (G4)'
-    status: complete
+    status: pending
   - id: phase_7_templates_consult_spir
     title: Remaining templates + spir consult-types (G4, G5)
-    status: complete
+    status: pending
   - id: phase_8_consult_types_a
     title: 'Consult-types: aspir, bugfix, air (G5)'
-    status: complete
+    status: pending
   - id: phase_9_consult_registry_deadtree
     title: Consult-types pir/maintain + scar registry + dead-tree deletion (G5, G7, G4)
-    status: complete
+    status: pending
   - id: phase_10_integration
     title: Capability verification, measurement report, rollback rehearsal, governance docs
-    status: in_progress
-current_plan_phase: phase_10_integration
+    status: pending
+current_plan_phase: phase_0_instrument
 gates:
   spec-approval:
     status: approved
@@ -53,10 +53,10 @@ gates:
     status: approved
     approved_at: '2026-08-09T01:18:31.453Z'
 iteration: 1
-build_complete: true
+build_complete: false
 history: []
 started_at: '2026-08-01T02:46:36.457Z'
-updated_at: '2026-08-09T01:18:31.454Z'
+updated_at: '2026-08-09T01:18:33.934Z'
 pr_history:
   - phase: implement
     pr_number: 1319
