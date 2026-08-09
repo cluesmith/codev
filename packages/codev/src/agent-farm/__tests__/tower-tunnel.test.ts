@@ -74,6 +74,7 @@ vi.mock('../lib/cloud-config.js', () => ({
 }));
 
 vi.mock('../lib/tunnel-client.js', () => ({
+  AUTH_RETRY_FAILED_MARKER: 'half-open retry failed',
   TunnelClient: class MockTunnelClient {
     connect = mockConnect;
     disconnect = mockDisconnect;
@@ -645,6 +646,45 @@ describe('tower-tunnel', () => {
 
       expect(mockConnect).toHaveBeenCalled();
       expect(mockSendMetadata).toHaveBeenCalled();
+    });
+
+    /**
+     * The breaker half-opens every 15 minutes (#1372), so a genuinely revoked
+     * key re-parks forever. Only the first park may raise the alarm.
+     */
+    it('logs the auth-failure alarm once, not on every half-open re-park', async () => {
+      mockReadCloudConfig.mockReturnValue(FAKE_CONFIG);
+      const deps = makeDeps();
+      await initTunnel(deps, { getInstances: async () => [] });
+
+      const onState = mockOnStateChange.mock.calls[0][0] as (
+        s: string, p: string, reason?: string,
+      ) => void;
+
+      onState('auth_failed', 'connecting', 'auth rejected: invalid_api_key');
+      onState('disconnected', 'auth_failed', 'auth circuit breaker half-open, retrying');
+      onState('auth_failed', 'connecting', 'auth rejected: invalid_api_key (half-open retry failed)');
+
+      const alarms = (deps.log as ReturnType<typeof vi.fn>).mock.calls.filter(
+        ([level, msg]) => level === 'ERROR' && String(msg).includes('invalid or revoked'),
+      );
+      expect(alarms).toHaveLength(1);
+    });
+
+    it('includes the transition reason in the tunnel state log line', async () => {
+      mockReadCloudConfig.mockReturnValue(FAKE_CONFIG);
+      const deps = makeDeps();
+      await initTunnel(deps, { getInstances: async () => [] });
+
+      const onState = mockOnStateChange.mock.calls[0][0] as (
+        s: string, p: string, reason?: string,
+      ) => void;
+      onState('disconnected', 'connecting', 'connect timeout after 20000ms');
+
+      expect(deps.log).toHaveBeenCalledWith(
+        'INFO',
+        'Tunnel: connecting → disconnected (connect timeout after 20000ms)',
+      );
     });
 
     it('handles cloud config read failure gracefully', async () => {

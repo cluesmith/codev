@@ -17,6 +17,9 @@ import {
   TunnelClient,
   PING_INTERVAL_MS,
   PONG_TIMEOUT_MS,
+  CONNECT_TIMEOUT_MS,
+  AUTH_RETRY_INTERVAL_MS,
+  sanitizeRemoteDetail,
 } from '../lib/tunnel-client.js';
 import { MockTunnelServer } from './helpers/mock-tunnel-server.js';
 
@@ -947,5 +950,408 @@ describe('tunnel-client integration', () => {
         await stopServer(headerServer);
       }
     });
+  });
+});
+
+// === Regression: #1372 — wedges after sustained uplink flap ===
+
+describe('#1372 self-healing', () => {
+  let blackhole: net.Server | null = null;
+  let client: TunnelClient | null = null;
+
+  afterEach(async () => {
+    client?.disconnect();
+    client = null;
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    if (blackhole) {
+      const srv = blackhole;
+      blackhole = null;
+      await new Promise<void>((r) => srv.close(() => r()));
+    }
+  });
+
+  /**
+   * The wedge itself. A server that accepts the TCP connection and never answers
+   * the HTTP upgrade is what an uplink flap leaves behind (stale NAT/conntrack
+   * entry): no `error`, no `close`, and the heartbeat isn't armed until
+   * `connected`. Without the watchdog the client sits in `connecting` forever and
+   * only a brand-new TunnelClient recovers it.
+   */
+  it('connect watchdog tears down and reschedules a hung `connecting` attempt', async () => {
+    const sockets: net.Socket[] = [];
+    blackhole = net.createServer((sock) => {
+      sockets.push(sock);
+      sock.on('error', () => {});
+    });
+    await new Promise<void>((r) => blackhole!.listen(0, '127.0.0.1', () => r()));
+    const port = (blackhole.address() as net.AddressInfo).port;
+
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+
+    client = new TunnelClient({
+      serverUrl: `http://127.0.0.1:${port}`,
+      apiKey: 'ctk_test',
+      towerId: 't',
+      localPort: 4100,
+    });
+
+    const transitions: Array<{ state: string; reason?: string }> = [];
+    client.onStateChange((state, _prev, reason) => transitions.push({ state, reason }));
+
+    client.connect();
+
+    // Let the TCP connection establish; the upgrade never completes.
+    await vi.advanceTimersByTimeAsync(500);
+    expect(client.getState()).toBe('connecting');
+
+    // Watchdog fires — this is the assertion that fails without the fix.
+    await vi.advanceTimersByTimeAsync(CONNECT_TIMEOUT_MS);
+
+    expect(client.getState()).toBe('disconnected');
+    const timedOut = transitions.find((t) => t.reason?.includes('connect timeout'));
+    expect(timedOut).toBeDefined();
+    expect(timedOut!.state).toBe('disconnected');
+
+    // ...and it actually retries. A watchdog that only tore down would trade a
+    // wedged `connecting` for a wedged `disconnected`. consecutiveFailures is 1
+    // here, so the next attempt is due within calculateBackoff(1).
+    await vi.advanceTimersByTimeAsync(calculateBackoff(1, () => 0.999) + 100);
+    expect(client.getState()).toBe('connecting');
+
+    for (const s of sockets) s.destroy();
+  }, 20000);
+
+  /** A watchdog that tore down a healthy connection would be worse than the bug. */
+  it('disarms the connect watchdog once the tunnel reaches `connected`', async () => {
+    const server = new MockTunnelServer({});
+    const port = await server.start();
+    const echo = http.createServer((_req, res) => res.end());
+    const echoPort = await startServer(echo);
+
+    try {
+      client = new TunnelClient({
+        serverUrl: `http://127.0.0.1:${port}`,
+        apiKey: 'ctk_test',
+        towerId: '',
+        localPort: echoPort,
+      });
+
+      client.connect();
+      await waitFor(() => client!.getState() === 'connected');
+
+      expect((client as unknown as { connectTimeout: unknown }).connectTimeout).toBeNull();
+    } finally {
+      client?.disconnect();
+      client = null;
+      await server.stop();
+      await stopServer(echo);
+    }
+  }, 20000);
+
+  /**
+   * `auth_failed` used to be terminal, so a single misclassified auth error
+   * during a blip became a permanent cloud outage. Driven through the private
+   * handler (as the heartbeat tests do) so the clock is fully deterministic.
+   */
+  it('auth circuit breaker half-opens and retries after AUTH_RETRY_INTERVAL_MS', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.useFakeTimers();
+
+    const c = createClient();
+    const reasons: Array<string | undefined> = [];
+    c.onStateChange((_state, _prev, reason) => reasons.push(reason));
+
+    const priv = c as unknown as {
+      handleAuthError: (reason: string) => void;
+      doConnect: () => void;
+    };
+    const doConnect = vi.spyOn(priv, 'doConnect').mockImplementation(() => {});
+
+    priv.handleAuthError('invalid_api_key');
+    expect(c.getState()).toBe('auth_failed');
+
+    // Still parked right up to the interval — this is a long retry, not a flap.
+    vi.advanceTimersByTime(AUTH_RETRY_INTERVAL_MS - 1);
+    expect(c.getState()).toBe('auth_failed');
+    expect(doConnect).not.toHaveBeenCalled();
+
+    // Half-open. Fails without the fix: the old breaker never rearmed.
+    vi.advanceTimersByTime(1);
+    expect(c.getState()).toBe('disconnected');
+    expect(doConnect).toHaveBeenCalledTimes(1);
+    expect(reasons.some((r) => r?.includes('half-open'))).toBe(true);
+
+    // A genuinely revoked key re-parks and rearms, so the cycle is sustainable.
+    priv.handleAuthError('invalid_api_key');
+    expect(c.getState()).toBe('auth_failed');
+    vi.advanceTimersByTime(AUTH_RETRY_INTERVAL_MS);
+    expect(doConnect).toHaveBeenCalledTimes(2);
+
+    c.disconnect();
+  });
+
+  /**
+   * The watchdog tears attempts down mid-flight, so an `auth_ok` queued before
+   * cleanup can still arrive. Unguarded it would resurrect the dead socket —
+   * clobbering the h2 handles and flipping state back to `connected` while a
+   * reconnect is already pending. (Raised by codex in CMAP review of #1373.)
+   */
+  it('ignores a late auth response from a timed-out attempt', () => {
+    vi.useFakeTimers();
+    const c = createClient();
+
+    // Stand in for the socket the watchdog is about to discard.
+    const staleWs = createMockWs();
+    (staleWs as unknown as { send: () => void }).send = vi.fn();
+    (c as unknown as { ws: WebSocket | null }).ws = staleWs;
+    (c as unknown as { state: string }).state = 'connecting';
+
+    const priv = c as unknown as {
+      onWsOpen: (ws: WebSocket) => void;
+      startH2Server: (ws: WebSocket) => void;
+      ws: WebSocket | null;
+    };
+    const startH2Server = vi.spyOn(priv, 'startH2Server');
+
+    priv.onWsOpen(staleWs);
+
+    // Watchdog fires: cleanup() drops the socket and the client moves on.
+    priv.ws = null;
+    (c as unknown as { state: string }).state = 'disconnected';
+
+    // The in-flight auth_ok lands after the teardown.
+    staleWs.emit('message', Buffer.from(JSON.stringify({ type: 'auth_ok', towerId: 'zombie' })));
+
+    expect(startH2Server).not.toHaveBeenCalled();
+    expect(c.getState()).toBe('disconnected');
+    expect((c as unknown as { h2Session: unknown }).h2Session).toBeNull();
+    expect((c as unknown as { wsStream: unknown }).wsStream).toBeNull();
+
+    c.disconnect();
+  });
+
+  it('sanitizes remote-supplied text before it reaches a log line', () => {
+    // A relay could otherwise forge log lines or inflate the log.
+    expect(sanitizeRemoteDetail('going away\nTunnel: connected → forged')).toBe(
+      'going away Tunnel: connected → forged',
+    );
+    expect(sanitizeRemoteDetail('a\r\nb\tc\u0000d')).toBe('a  b c d');
+    // U+2028/U+2029 act as line terminators in many log and JSON consumers,
+    // and bidi overrides can visually reorder a log line (Trojan-Source style).
+    expect(sanitizeRemoteDetail('a\u2028b\u2029c')).toBe('a b c');
+    expect(sanitizeRemoteDetail('a\u202eb\u2066c')).toBe('a b c');
+    expect(sanitizeRemoteDetail('a'.repeat(200))).toHaveLength(121); // 120 + ellipsis
+    expect(sanitizeRemoteDetail('  tidy  ')).toBe('tidy');
+  });
+
+  /**
+   * Every relay-controlled string that reaches a transition reason must be
+   * sanitized, not just the close frame. (Raised by codex in CMAP round 2.)
+   */
+  it.each([
+    ['auth_error reason', { type: 'auth_error', reason: 'nope\ninjected' }],
+    ['unexpected type', { type: 'weird\ninjected' }],
+  ])('sanitizes the %s carried into the transition reason', (_label, payload) => {
+    vi.useFakeTimers();
+    const c = createClient();
+    const ws = createMockWs();
+    (ws as unknown as { send: () => void }).send = vi.fn();
+    (c as unknown as { ws: WebSocket | null }).ws = ws;
+    (c as unknown as { state: string }).state = 'connecting';
+
+    const reasons: Array<string | undefined> = [];
+    c.onStateChange((_s, _p, reason) => reasons.push(reason));
+
+    (c as unknown as { onWsOpen: (w: WebSocket) => void }).onWsOpen(ws);
+    ws.emit('message', Buffer.from(JSON.stringify(payload)));
+
+    expect(reasons.length).toBeGreaterThan(0);
+    for (const r of reasons) expect(r ?? '').not.toMatch(/[\u0000-\u001f\u007f]/);
+
+    c.disconnect();
+  });
+
+  it('bounds an oversized malformed auth response instead of echoing it', () => {
+    vi.useFakeTimers();
+    const c = createClient();
+    const ws = createMockWs();
+    (ws as unknown as { send: () => void }).send = vi.fn();
+    (c as unknown as { ws: WebSocket | null }).ws = ws;
+    (c as unknown as { state: string }).state = 'connecting';
+
+    const reasons: Array<string | undefined> = [];
+    c.onStateChange((_s, _p, reason) => reasons.push(reason));
+
+    (c as unknown as { onWsOpen: (w: WebSocket) => void }).onWsOpen(ws);
+    // Not JSON, and far too large to echo into the tower log.
+    ws.emit('message', Buffer.from('<html>' + 'x'.repeat(100_000) + '</html>'));
+
+    const reason = reasons.find((r) => r?.includes('invalid auth response'));
+    expect(reason).toBeDefined();
+    expect(reason!.length).toBeLessThan(200);
+
+    c.disconnect();
+  });
+
+  /**
+   * A revoked key re-parks every 15 minutes forever. Raising the same alarm
+   * each time would be crying wolf. (Raised by claude in CMAP round 2.)
+   */
+  it('raises the auth alarm once, not on every half-open re-park', () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.useFakeTimers();
+
+    const c = createClient();
+    const reasons: Array<string | undefined> = [];
+    c.onStateChange((_s, _p, reason) => reasons.push(reason));
+
+    const priv = c as unknown as { handleAuthError: (r: string) => void; doConnect: () => void };
+    vi.spyOn(priv, 'doConnect').mockImplementation(() => {});
+
+    // Three full park → half-open → re-park cycles, as a revoked key produces.
+    priv.handleAuthError('invalid_api_key');
+    for (let i = 0; i < 2; i++) {
+      vi.advanceTimersByTime(AUTH_RETRY_INTERVAL_MS);
+      expect(c.getState()).toBe('disconnected');
+      priv.handleAuthError('invalid_api_key');
+    }
+
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    // Later re-parks are tagged so the tower log can stay quiet too.
+    expect(reasons.filter((r) => r?.includes('half-open retry failed'))).toHaveLength(2);
+
+    c.disconnect();
+    errorSpy.mockRestore();
+  });
+
+  /**
+   * Cancelling the pending half-open retry without scheduling a fresh attempt
+   * would leave a standalone caller worse off than before the fix.
+   * (Raised by claude in CMAP round 2.)
+   */
+  it('resetCircuitBreaker schedules a reconnect rather than just cancelling', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.useFakeTimers();
+
+    const c = createClient();
+    const priv = c as unknown as { handleAuthError: (r: string) => void; doConnect: () => void };
+    const doConnect = vi.spyOn(priv, 'doConnect').mockImplementation(() => {});
+
+    priv.handleAuthError('invalid_api_key');
+    expect(c.getState()).toBe('auth_failed');
+
+    c.resetCircuitBreaker();
+    expect(c.getState()).toBe('disconnected');
+
+    // Counter was reset, so this is a first-attempt backoff — well under the
+    // 15-minute half-open interval it replaced.
+    vi.advanceTimersByTime(calculateBackoff(0, () => 0.999) + 1);
+    expect(doConnect).toHaveBeenCalled();
+
+    c.disconnect();
+  });
+
+  /**
+   * A malformed serverUrl throws inside `new URL()` — after the state is
+   * already `connecting`. Unguarded that recreates the exact wedge this PR
+   * closes, with no watchdog armed. (Raised by codex in CMAP round 3.)
+   */
+  it('does not wedge in `connecting` when the server URL is malformed', () => {
+    vi.useFakeTimers();
+
+    const c = new TunnelClient({
+      serverUrl: 'not a url',
+      apiKey: 'ctk_test',
+      towerId: 't',
+      localPort: 4100,
+    });
+    const reasons: Array<string | undefined> = [];
+    c.onStateChange((_s, _p, reason) => reasons.push(reason));
+
+    expect(() => c.connect()).not.toThrow();
+    expect(c.getState()).toBe('disconnected');
+    expect(reasons.some((r) => r?.includes('websocket construction failed'))).toBe(true);
+
+    // And it keeps retrying rather than parking silently.
+    const doConnect = vi.spyOn(
+      c as unknown as { doConnect: () => void },
+      'doConnect',
+    ).mockImplementation(() => {});
+    vi.advanceTimersByTime(calculateBackoff(1, () => 0.999) + 1);
+    expect(doConnect).toHaveBeenCalled();
+
+    c.disconnect();
+  });
+
+  /**
+   * `close()` on a CONNECTING socket aborts the handshake and emits `error`.
+   * `ws` defers that via process.nextTick today, but if it ever emitted
+   * synchronously the handler would still see `ws === this.ws` and overwrite
+   * the watchdog's "connect timeout" reason. cleanup() must detach first so
+   * the ordering can't depend on a third party's internals.
+   * (Raised by claude in CMAP round 4.)
+   */
+  it('detaches the socket before closing it, so late events cannot race', () => {
+    const c = createClient();
+    const ws = createMockWs();
+
+    let wsSeenDuringClose: unknown = 'never called';
+    (ws as unknown as { close: () => void }).close = vi.fn(() => {
+      wsSeenDuringClose = (c as unknown as { ws: WebSocket | null }).ws;
+    });
+    (ws as unknown as { readyState: number }).readyState = WebSocket.CONNECTING;
+    (c as unknown as { ws: WebSocket | null }).ws = ws;
+
+    (c as unknown as { cleanup: () => void }).cleanup();
+
+    expect(ws.close).toHaveBeenCalled();
+    // Already detached at the moment close() runs — a synchronous error emitted
+    // from inside close() would hit the `ws !== this.ws` stale guard.
+    expect(wsSeenDuringClose).toBeNull();
+  });
+
+  it('state transitions carry a failure reason', async () => {
+    // Nothing is listening on this port — ECONNREFUSED.
+    const probe = net.createServer();
+    await new Promise<void>((r) => probe.listen(0, '127.0.0.1', () => r()));
+    const deadPort = (probe.address() as net.AddressInfo).port;
+    await new Promise<void>((r) => probe.close(() => r()));
+
+    client = new TunnelClient({
+      serverUrl: `http://127.0.0.1:${deadPort}`,
+      apiKey: 'ctk_test',
+      towerId: 't',
+      localPort: 4100,
+    });
+
+    const reasons: Array<string | undefined> = [];
+    client.onStateChange((_state, _prev, reason) => reasons.push(reason));
+
+    client.connect();
+    await waitFor(() => reasons.some((r) => r?.startsWith('connection error')));
+
+    expect(reasons.some((r) => r?.includes('ECONNREFUSED'))).toBe(true);
+  }, 15000);
+
+  /**
+   * The failure counter must be incremented *before* the delay is computed —
+   * indexing the backoff curve one attempt behind retried faster than intended
+   * for the whole life of the flap.
+   */
+  it('increments consecutiveFailures before computing the backoff delay', () => {
+    const c = createClient();
+    const seenAtScheduleTime: number[] = [];
+    (c as unknown as { scheduleReconnect: () => void }).scheduleReconnect = () => {
+      seenAtScheduleTime.push((c as unknown as { consecutiveFailures: number }).consecutiveFailures);
+    };
+
+    (c as unknown as { handleConnectionError: (e: Error) => void })
+      .handleConnectionError(new Error('boom'));
+    (c as unknown as { handleConnectionError: (e: Error) => void })
+      .handleConnectionError(new Error('boom again'));
+
+    expect(seenAtScheduleTime).toEqual([1, 2]);
   });
 });
