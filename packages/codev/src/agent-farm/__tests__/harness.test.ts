@@ -623,11 +623,11 @@ describe('harness', () => {
       // the gate must fail CLOSED to the role-carrying launch.
       it('never reaches -c without proving a session exists (the roleless-fallback guard)', () => {
         const script = KIMI_HARNESS.buildBuilderLaunchScript!(taskCtx);
-        expect(script).toContain('codev_has_session');
+        expect(script).toContain('codev_should_resume');
         // Entry selects resume only under the probe...
-        expect(script).toMatch(/if codev_has_session; then\n\s*codev_launch=codev_launch_resume\n\s*else\n\s*codev_launch=codev_launch_fresh/);
+        expect(script).toMatch(/if codev_should_resume; then\n\s*codev_launch=codev_launch_resume\n\s*else\n\s*codev_launch=codev_launch_fresh/);
         // ...and so does the crash path; its else-branch is fresh, not resume.
-        expect(script).toMatch(/elif codev_has_session; then[\s\S]*?codev_launch=codev_launch_resume\n\s*else\n[\s\S]*?codev_launch=codev_launch_fresh/);
+        expect(script).toMatch(/elif codev_should_resume; then[\s\S]*?codev_launch=codev_launch_resume\n\s*else\n[\s\S]*?codev_launch=codev_launch_fresh/);
         // `-c` appears ONLY inside codev_launch_resume, which only the probe selects.
         const resumeBody = script.slice(
           script.indexOf('codev_launch_resume() {'),
@@ -645,7 +645,8 @@ describe('harness', () => {
         expect(script).toContain('kimi --yolo');
         expect(script).toContain('while true');
         // Nothing to pin and nothing to queue, so none of the state machine appears.
-        expect(script).not.toContain('codev_has_session');
+        expect(script).not.toContain('codev_should_resume');
+        expect(script).not.toContain('codev_superseded_id');
         expect(script).not.toContain('afx send');
         expect(script).not.toContain('-c');
       });
@@ -682,9 +683,20 @@ describe('harness', () => {
       it('task-carrying: a clean exit relaunches fresh, not resumed', () => {
         const script = KIMI_HARNESS.buildBuilderLaunchScript!(taskCtx);
         const cleanExit = script.indexOf('if [ "$status" -eq 0 ]; then');
-        const afterClean = script.slice(cleanExit, script.indexOf('fi', cleanExit));
+        // Bound the branch on ITS OWN closing `fi` — the one at the loop body's two-
+        // space indent. Matching the next two letters "fi" stops inside prose
+        // ("fine", "confirm"); matching any indented `fi` stops at the nested
+        // baseline-capture conditional. Either way the slice silently shrinks and the
+        // assertions below stop inspecting the branch they name.
+        const close = script.slice(cleanExit).search(/\n {2}fi\n/);
+        const afterClean = script.slice(cleanExit, cleanExit + close);
         expect(afterClean).toContain('codev_launch=codev_launch_fresh');
         expect(afterClean).not.toContain('codev_launch_resume');
+        // Finding 4: relaunching fresh is not enough on its own — `-c` is cwd-scoped,
+        // so the branch must also RETIRE the ended conversation by id, or a crash in
+        // the pre-mint window resumes it right back. The behavioral half of this pin
+        // is the sticky-fresh block below, which runs the decision at the shell.
+        expect(afterClean).toContain('codev_superseded_id="$codev_prev_id"');
       });
 
       it('warns loudly but non-fatally when the task cannot be queued', () => {
@@ -719,8 +731,12 @@ describe('harness', () => {
      * RUN against fixture stores, and its verdict is checked against the TypeScript
      * discovery it mirrors — if the two ever disagree, this fails instead of a
      * builder silently losing its role in the field.
+     *
+     * Since Finding 4 the probe answers WHICH session, not merely whether one exists,
+     * so every case here also asserts the printed id against discovery's (see
+     * `runProbe`) — identity is what the sticky-fresh contract turns on.
      */
-    describe('the inlined crash-resume session probe (KIMI_HAS_SESSION_PROBE)', () => {
+    describe('the inlined crash-resume session probe (KIMI_NEWEST_SESSION_PROBE)', () => {
       let fakeHome: string;
       let worktree: string;
 
@@ -743,12 +759,93 @@ describe('harness', () => {
         return m![1];
       }
 
-      /** Run the probe exactly as the script does; true ⇔ exit 0 ⇔ "a session exists". */
+      /**
+       * Run the probe exactly as the script does; true ⇔ it named a session.
+       *
+       * Also cross-checks, on every call, that the PRINTED id is exactly what
+       * `findLatestKimiSessionId` would return. Asserting inside the helper rather
+       * than per-test is deliberate: the identity claim then rides every case in
+       * this block — archived, junk, symlink, trailing slash — instead of only the
+       * cases someone remembered to extend. Since Finding 4 the loop resumes on
+       * WHICH session is newest, so a probe that agrees about existence but
+       * disagrees about identity would silently defeat the sticky-fresh contract.
+       */
       function runProbe(cwd: string): boolean {
         const res = spawnSync(process.execPath, ['-e', extractProbe(), cwd], {
           env: { ...process.env, KIMI_CODE_HOME: join(fakeHome, '.kimi-code') },
+          encoding: 'utf-8',
         });
-        return res.status === 0;
+        const printed = (res.stdout ?? '').trim();
+        const discovered = KIMI_HARNESS.buildResume!(cwd, { homeDir: fakeHome })?.sessionId ?? null;
+        expect(printed || null, 'probe must name the same session discovery does').toBe(discovered);
+        // Exit status and output must agree, since the script reads emptiness.
+        expect(res.status === 0).toBe(printed !== '');
+        return printed !== '';
+      }
+
+      /** The id the generated script would treat as "the conversation to continue". */
+      function probeId(cwd: string): string {
+        const res = spawnSync(process.execPath, ['-e', extractProbe(), cwd], {
+          env: { ...process.env, KIMI_CODE_HOME: join(fakeHome, '.kimi-code') },
+          encoding: 'utf-8',
+        });
+        return (res.stdout ?? '').trim();
+      }
+
+      /**
+       * Run the generated resume DECISION at the shell, with a real store underneath.
+       * `superseded` is what a clean exit would have recorded. Returns the branch the
+       * loop takes: RESUME (`kimi -c`) or FRESH (role-carrying new conversation).
+       */
+      function decideBranch(superseded: string | null): string {
+        const script = KIMI_HARNESS.buildBuilderLaunchScript!({
+          worktreePath: worktree, baseCmd: 'kimi', roleFragment: '--agent-file x',
+          taskFile: join(worktree, '.builder-prompt.txt'), builderId: 'pir-1201',
+        });
+        // The three generated pieces the decision is made of, run verbatim.
+        const fns = script.slice(
+          script.indexOf('codev_newest_session()'),
+          script.indexOf('codev_launch_fresh()'),
+        );
+        const res = spawnSync('bash', ['-c',
+          `${fns}\n` +
+          (superseded === null ? '' : `codev_superseded_id='${superseded}'\n`) +
+          'if codev_should_resume; then echo RESUME; else echo FRESH; fi\n',
+        ], {
+          cwd: worktree,
+          env: { ...process.env, KIMI_CODE_HOME: join(fakeHome, '.kimi-code') },
+          encoding: 'utf-8',
+        });
+        expect(res.status, res.stderr).toBe(0);
+        return res.stdout.trim();
+      }
+
+      /**
+       * The PRE-fix predicate — "does any session exist for this cwd?" — run against
+       * the same generated probe and the same store. Exists so the regression tests
+       * can show the defect rather than assert its absence: if this ever returns the
+       * same branch as `decideBranch` on the sticky-fresh fixture, the new guard has
+       * stopped doing anything and those tests have gone vacuous.
+       */
+      function decideBranchLegacy(): string {
+        const script = KIMI_HARNESS.buildBuilderLaunchScript!({
+          worktreePath: worktree, baseCmd: 'kimi', roleFragment: '--agent-file x',
+          taskFile: join(worktree, '.builder-prompt.txt'), builderId: 'pir-1201',
+        });
+        const fns = script.slice(
+          script.indexOf('codev_newest_session()'),
+          script.indexOf('codev_launch_fresh()'),
+        );
+        const res = spawnSync('bash', ['-c',
+          `${fns}\n` +
+          'if [ -n "$(codev_newest_session)" ]; then echo RESUME; else echo FRESH; fi\n',
+        ], {
+          cwd: worktree,
+          env: { ...process.env, KIMI_CODE_HOME: join(fakeHome, '.kimi-code') },
+          encoding: 'utf-8',
+        });
+        expect(res.status, res.stderr).toBe(0);
+        return res.stdout.trim();
       }
 
       function writeStoreSession(sessionId: string, state: Record<string, unknown>): void {
@@ -815,7 +912,7 @@ describe('harness', () => {
         const calls = join(fakeHome, 'afx-calls.log');
         // `afx send <builder-id> <message>` → $3 is the task body.
         writeFileSync(join(bin, 'afx'), `#!/bin/bash\necho "$3" >> '${calls}'\n`, { mode: 0o755 });
-        const harnessFns = script.slice(script.indexOf('codev_builder_id='), script.indexOf('codev_has_session()'));
+        const harnessFns = script.slice(script.indexOf('codev_builder_id='), script.indexOf('codev_newest_session()'));
         const res = spawnSync('bash', ['-c',
           `${harnessFns}\n` +
           // three crash-restart iterations, then a clean-exit relaunch
@@ -827,6 +924,176 @@ describe('harness', () => {
         expect(readFileSync(calls, 'utf-8').trim().split('\n')).toEqual(['THE TASK', 'THE TASK']);
       });
 
+      /**
+       * Finding 4 (architect review, 2026-08-09) — #1267's sticky-fresh contract,
+       * enforced at the shell against a real store.
+       *
+       * "Clean exit → fresh rerun, no recovery" is a contract main states twice: in
+       * `buildLaunchLoop`'s docstring ("once a clean exit has moved the loop to fresh,
+       * a later crash restarts the *fresh* invocation, never the superseded session")
+       * and in `buildSessionLaunchLoop`, which enforces it BY IDENTITY — clean exit
+       * mints a new id, and the superseded one is never named again.
+       *
+       * kimi cannot mint an id on demand, and `-c` is cwd-scoped, so identity has to
+       * come from the store. The window that matters: 0.33.0+ mints NO session until
+       * the first message lands, so between a clean-exit relaunch and the first
+       * delivery, the newest session for the cwd is still the one the human ended.
+       * An existence-only guard resumes it — and the re-queued task lands in the
+       * conversation they walked away from.
+       */
+      describe('a clean exit is sticky: a crash before the new conversation mints stays fresh', () => {
+        it('resumes nothing when the only session is the one the human just ended', () => {
+          writeStoreSession('session_A', {
+            id: 'session_A', version: 2, cwd: worktree, updatedAt: 100,
+          });
+          // Clean exit records the newest id as superseded…
+          const superseded = probeId(worktree);
+          expect(superseded).toBe('session_A');
+          // …and the crash lands in the pre-mint window, so the store is unchanged.
+          expect(decideBranch(superseded)).toBe('FRESH');
+
+          // The defect itself, demonstrated on the same bytes: the existence-only
+          // guard this replaced resumes here — `kimi -c` into the conversation the
+          // human ended, carrying the re-queued task with it.
+          expect(decideBranchLegacy()).toBe('RESUME');
+        });
+
+        it('resumes again once the fresh conversation has minted a newer session', () => {
+          writeStoreSession('session_A', {
+            id: 'session_A', version: 2, cwd: worktree, updatedAt: 100,
+          });
+          writeStoreSession('session_B', {
+            id: 'session_B', version: 2, cwd: worktree, updatedAt: 200,
+          });
+          // Same superseded id, but the first message has now minted B.
+          expect(decideBranch('session_A')).toBe('RESUME');
+        });
+
+        it('supersedes each conversation in turn across iterated clean exits', () => {
+          writeStoreSession('session_A', {
+            id: 'session_A', version: 2, cwd: worktree, updatedAt: 100,
+          });
+          writeStoreSession('session_B', {
+            id: 'session_B', version: 2, cwd: worktree, updatedAt: 200,
+          });
+          // Second quit supersedes B. The loop must NOT fall back to resuming A —
+          // that conversation was abandoned too, and it is not what `-c` targets.
+          expect(probeId(worktree)).toBe('session_B');
+          expect(decideBranch('session_B')).toBe('FRESH');
+        });
+
+        it('keeps entry semantics unchanged: nothing superseded yet', () => {
+          // Virgin worktree → fresh (and the role rides that launch).
+          expect(decideBranch(null)).toBe('FRESH');
+          // A worktree that already holds a conversation → resumed, task not re-queued.
+          writeStoreSession('session_A', {
+            id: 'session_A', version: 2, cwd: worktree, updatedAt: 100,
+          });
+          expect(decideBranch(null)).toBe('RESUME');
+        });
+
+        it('routes a genuinely UNREADABLE store to FRESH even though a session exists', () => {
+          // Not the same as an absent store (pinned separately above). Here a session
+          // for this cwd DOES exist and would authorize `-c`, but the scan cannot run:
+          // replacing `sessions/` with a regular file makes readdirSync throw ENOTDIR
+          // deterministically, and unlike `chmod 000` it still fails when run as root.
+          writeStoreSession('session_A', {
+            id: 'session_A', version: 2, cwd: worktree, updatedAt: 100,
+          });
+          const sessions = join(fakeHome, '.kimi-code', 'sessions');
+          rmSync(sessions, { recursive: true, force: true });
+          writeFileSync(sessions, 'not a directory', 'utf-8');
+          expect(decideBranch('session_A')).toBe('FRESH');
+          expect(decideBranch(null)).toBe('FRESH');
+        });
+
+        it('ignores stdout the probe did not produce (status is what authorizes -c)', () => {
+          // CMAP 2026-08-09, claude F1 — a failure mode this delta INTRODUCED. Once
+          // the decision reads stdout, anything else writing there is read as "a
+          // session exists": a `node` shim on PATH, or NODE_OPTIONS preloading an
+          // instrumentation module that prints a banner. Against an EMPTY store that
+          // sends the loop to `kimi -c` with nothing to continue — which does not
+          // fail, it starts a session that never saw --agent-file. Silently roleless,
+          // the #929 class. The probe still exits 1; the guard must honor it.
+          const preload = join(fakeHome, 'noisy.cjs');
+          writeFileSync(preload, 'console.log("hello-from-require");', 'utf-8');
+          const script = KIMI_HARNESS.buildBuilderLaunchScript!({
+            worktreePath: worktree, baseCmd: 'kimi', roleFragment: '--agent-file x',
+            taskFile: join(worktree, '.builder-prompt.txt'), builderId: 'pir-1201',
+          });
+          const fns = script.slice(
+            script.indexOf('codev_newest_session()'),
+            script.indexOf('codev_launch_fresh()'),
+          );
+          const res = spawnSync('bash', ['-c',
+            `${fns}\nif codev_should_resume; then echo RESUME; else echo FRESH; fi\n`,
+          ], {
+            cwd: worktree,
+            env: {
+              ...process.env,
+              KIMI_CODE_HOME: join(fakeHome, '.kimi-code'),
+              NODE_OPTIONS: `--require ${preload}`,
+            },
+            encoding: 'utf-8',
+          });
+          expect(res.stdout.trim()).toBe('FRESH');
+        });
+      });
+
+      /**
+       * F4 (CMAP 2026-08-09, claude): the pieces were pinned, the COMPOSITION was not.
+       *
+       * `decideBranch` injects `codev_superseded_id` from the test, so nothing proved
+       * the generated clean-exit branch actually assigns it. A refactor that wrapped
+       * the assignment in a subshell — `( codev_superseded_id=$(...) )`, an ordinary
+       * bash footgun — or moved it below the relaunch would pass every other test here
+       * while the sticky-fresh contract was dead. The composition is where the bug
+       * was, so it is where the pin belongs: drive the REAL loop body with stubbed
+       * launches and read back which branch each iteration took.
+       */
+      it('drives the real loop: clean exit then a pre-mint crash launches fresh TWICE', () => {
+        writeStoreSession('session_A', {
+          id: 'session_A', version: 2, cwd: worktree, updatedAt: 100,
+        });
+        const script = KIMI_HARNESS.buildBuilderLaunchScript!({
+          worktreePath: worktree, baseCmd: 'kimi', roleFragment: '--agent-file x',
+          taskFile: join(worktree, '.builder-prompt.txt'), builderId: 'pir-1201',
+        });
+        const log = join(fakeHome, 'branches.log');
+        // Everything from the probe definition down, with the real `while` loop —
+        // only the two launches and the sleep are stubbed. `exit 0` on the third
+        // iteration ends the loop so the test terminates.
+        const body = script.slice(script.indexOf('codev_newest_session()'));
+        const harness =
+          `${body.replace(/^codev_launch_fresh\(\) \{[\s\S]*?^\}$/m,
+            `codev_launch_fresh() { echo fresh >> '${log}'; return $codev_next_status; }`)
+            .replace(/^codev_launch_resume\(\) \{[\s\S]*?^\}$/m,
+              `codev_launch_resume() { echo resume >> '${log}'; return $codev_next_status; }`)}`;
+        const driver =
+          'codev_next_status=0\n' + // iteration 1: kimi exits cleanly
+          'sleep() { :; }\n' +
+          'codev_queue_task() { :; }\n';
+        const res = spawnSync('bash', ['-c',
+          `${driver}\n${harness.replace('while true; do',
+            'codev_iter=0\nwhile true; do\n  codev_iter=$(( codev_iter + 1 ))\n' +
+            '  [ "$codev_iter" -eq 2 ] && codev_next_status=1\n' +
+            '  [ "$codev_iter" -ge 4 ] && exit 0\n')}`,
+        ], {
+          cwd: worktree,
+          // The Enter that gates the clean-exit relaunch.
+          input: '\n',
+          env: { ...process.env, KIMI_CODE_HOME: join(fakeHome, '.kimi-code') },
+          encoding: 'utf-8',
+          timeout: 20000,
+        });
+        expect(res.status, res.stderr).toBe(0);
+        const branches = readFileSync(log, 'utf-8').trim().split('\n');
+        // 1: entry resumes (a session exists and nothing is superseded yet).
+        // 2: clean exit → fresh, and the branch retires session_A.
+        // 3: the crash lands pre-mint, so the ONLY session is the retired one → fresh.
+        expect(branches).toEqual(['resume', 'fresh', 'fresh']);
+      });
+
       it('does not execute a builder id containing shell metacharacters', () => {
         // claude F3 / codex #3: the recovery hints used to interpolate the id into a
         // double-quoted echo, where bash re-scans it — so `$(…)` in an id ran when the
@@ -836,7 +1103,7 @@ describe('harness', () => {
           worktreePath: worktree, baseCmd: 'kimi', roleFragment: '--agent-file x',
           taskFile: join(worktree, '.builder-prompt.txt'), builderId: evil,
         });
-        const harnessFns = script.slice(script.indexOf('codev_builder_id='), script.indexOf('codev_has_session()'));
+        const harnessFns = script.slice(script.indexOf('codev_builder_id='), script.indexOf('codev_newest_session()'));
         // No `afx` on PATH → both recovery hints print, which is the vulnerable path.
         const res = spawnSync('bash', ['-c', `${harnessFns}\ncodev_queue_task\n`],
           { env: { ...process.env, PATH: '/usr/bin:/bin' }, encoding: 'utf-8' });
@@ -893,6 +1160,35 @@ describe('harness', () => {
           );
           expect(runProbe(worktree)).toBe(true);
           expect(KIMI_HARNESS.buildResume!(worktree, { homeDir: fakeHome })?.sessionId).toBe('session_here');
+        });
+
+        it('reads workDir when cwd is present but NOT a string', () => {
+          // CMAP 2026-08-09, claude F3a. The probe used `j.cwd ?? j.workDir`, which
+          // short-circuits on any non-null cwd — including a number — while
+          // readStateJson tests `typeof === 'string'` per field and falls through to
+          // workDir. A store that ever wrote a non-string cwd would have made the two
+          // disagree about which session is newest, which is the one thing this pair
+          // must never do now that the resume decision reads identity.
+          writeStoreSession('session_mixed', {
+            id: 'session_mixed', version: 2, cwd: 12345, workDir: worktree, updatedAt: 5,
+          });
+          expect(runProbe(worktree)).toBe(true);
+          expect(KIMI_HARNESS.buildResume!(worktree, { homeDir: fakeHome })?.sessionId)
+            .toBe('session_mixed');
+        });
+
+        it('a trailing slash on a NONEXISTENT cwd does not manufacture a match', () => {
+          // CMAP 2026-08-09, claude F3b — the unsafe direction, and the reason the
+          // probe no longer pre-strips trailing slashes. realpathSync normalizes one
+          // away for a directory that exists (the case below), so stripping first
+          // bought nothing and cost fidelity: for a path that does NOT exist, the
+          // probe canonicalized `/ghost/` to `/ghost` while sameDir left it alone, so
+          // the probe would name a session discovery rejects — `kimi -c` into a
+          // conversation nobody verified, i.e. the roleless path.
+          const ghost = join(fakeHome, 'ghost');
+          writeStoreSession('session_ghost', { id: 'session_ghost', cwd: `${ghost}/`, updatedAt: 1 });
+          expect(runProbe(ghost)).toBe(false);
+          expect(KIMI_HARNESS.buildResume!(ghost, { homeDir: fakeHome })).toBeNull();
         });
 
         it('a cwd recorded with a trailing slash still matches', () => {

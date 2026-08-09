@@ -411,27 +411,55 @@ function kimiTuiCmd(baseCmd: string): string {
  * it — so "has the task landed yet?" and "is there anything to resume?" are the
  * same question, and this probe answers it directly from the store.
  *
- * Fails CLOSED: any error (no store, unreadable dir, malformed JSON) exits
- * non-zero and the loop relaunches fresh WITH the role, which is always safe.
+ * It prints the NEWEST resumable session id rather than a bare yes/no, because
+ * the loop needs identity, not existence, to honor #1267's sticky-fresh contract:
+ * after a clean exit the superseded id is recorded, and `-c` is only taken when
+ * the newest id has since CHANGED (see the launch script). Existence alone cannot
+ * distinguish "the fresh conversation has started" from "the conversation the user
+ * deliberately ended is still the only one here". The boolean uses derive from
+ * "printed something", so there is one probe and one mirror, not two snippets.
  *
- * It mirrors {@link findLatestKimiSessionId} field for field — `cwd ?? workDir`,
- * `sameDir`'s realpath tolerance, and `isResumable`'s archived / `session_`
- * filters — because the two answer the same question in two languages and a
- * divergence is a silent bug in EITHER direction: a probe that says yes where
- * discovery says no sends `-c` down its roleless nothing-to-continue path, and a
- * probe that says no where discovery says yes restarts a crashed builder with no
- * context and re-queues its task. The generated snippet is pinned against fixture
- * stores by a unit test that EXECUTES it and cross-checks both answers, so the
- * mirroring cannot rot.
+ * Printing the newest id is only meaningful because `kimi -c` continues the NEWEST
+ * session for the cwd — measured on 0.34.0 with two live sessions in one directory,
+ * confirmed by both a content oracle and a store-identity oracle, no prompt and no
+ * new session minted (`codev/spikes/pir-1201-kimi-continue-newest-probe.mjs`).
+ *
+ * Fails CLOSED: any error (no store, unreadable dir, malformed JSON) prints
+ * nothing, and an empty answer routes the loop to a fresh launch WITH the role,
+ * which is always safe.
+ *
+ * It mirrors {@link findLatestKimiSessionId} field for field — `readStateJson`'s
+ * PER-FIELD `typeof` check on `cwd` then `workDir` (not `cwd ?? workDir`, which
+ * short-circuits on a non-string `cwd` where discovery falls through),
+ * `sameDir`'s realpath tolerance, `isResumable`'s archived / `session_` filters,
+ * and now `parseTimestamp`'s ranking — because the two answer the same question in
+ * two languages and a divergence is a silent bug in EITHER direction: a probe that
+ * names a session discovery would not sends `-c` down its roleless
+ * nothing-to-continue path, and a probe that says no where discovery says yes
+ * restarts a crashed builder with no context. Naming the WRONG session is the new
+ * third direction, and it is the one this finding is about. The generated snippet
+ * is pinned against fixture stores by a unit test that EXECUTES it and asserts the
+ * printed id equals discovery's, so the mirroring cannot rot.
  */
-const KIMI_HAS_SESSION_PROBE =
+const KIMI_NEWEST_SESSION_PROBE =
   'const {readdirSync,readFileSync,realpathSync}=require("fs"),{join}=require("path");' +
   'const r=join(process.env.KIMI_CODE_HOME||join(require("os").homedir(),".kimi-code"),"sessions");' +
-  // Mirrors sameDir(): compare canonicalized paths, falling back to the literal
-  // when realpath fails, so a symlinked worktree or a trailing slash still matches.
-  'const n=p=>{p=String(p).replace(/\\/+$/,"")||"/";try{return realpathSync(p)}catch{return p}};' +
+  // Mirrors realpathOrSelf(): canonicalize, falling back to the literal when
+  // realpath fails, so a symlinked worktree still matches. Deliberately does NOT
+  // pre-strip a trailing slash — realpathSync already normalizes one away for any
+  // directory that exists, and stripping first was the probe's only divergence
+  // from sameDir(): for a path that does NOT exist, `/ghost/` would canonicalize
+  // to `/ghost` here and stay `/ghost/` there, letting the probe name a session
+  // discovery would reject (the unsafe direction).
+  'const n=p=>{try{return realpathSync(p)}catch{return p}};' +
   'const a0=process.argv[1],c=n(a0);' +
+  // Mirrors parseTimestamp(): finite number as-is, string via Date.parse, anything
+  // else unparseable. Ranking must match findLatestKimiSessionId or the script and
+  // the TypeScript would disagree about WHICH session `-c` is about to continue.
+  'const ts=v=>typeof v==="number"?(Number.isFinite(v)?v:null):' +
+  'typeof v==="string"?(Number.isNaN(Date.parse(v))?null:Date.parse(v)):null;' +
   'let ws=[];try{ws=readdirSync(r,{withFileTypes:true}).filter(e=>e.isDirectory())}catch{}' +
+  'let bi=null,bt=-Infinity;' +
   'for(const w of ws){let ss=[];' +
   // Each level gets its OWN try. A stray non-directory under sessions/ (a
   // .DS_Store) made readdirSync throw ENOTDIR into the single outer try, which
@@ -440,9 +468,17 @@ const KIMI_HAS_SESSION_PROBE =
   'try{ss=readdirSync(join(r,w.name),{withFileTypes:true})' +
   '.filter(e=>e.isDirectory()&&e.name.startsWith("session_"))}catch{continue}' +
   'for(const s of ss){try{const j=JSON.parse(readFileSync(join(r,w.name,s.name,"state.json"),"utf8"));' +
-  'if(j.archived===true)continue;const d=j.cwd??j.workDir;' +
-  'if(typeof d==="string"&&(d===a0||n(d)===c))process.exit(0)}catch{}}}' +
-  'process.exit(1)';
+  // Per-FIELD typeof, exactly as readStateJson does. `j.cwd??j.workDir` diverged:
+  // a non-string `cwd` alongside a valid `workDir` short-circuits the fallback
+  // here while discovery still reads workDir, so the two disagreed on the winner.
+  'if(j.archived===true)continue;' +
+  'const d=typeof j.cwd==="string"?j.cwd:j.workDir;' +
+  'if(typeof d!=="string"||(d!==a0&&n(d)!==c))continue;' +
+  // `?? -1` mirrors discovery: an unparseable timestamp ranks below every real
+  // epoch but above the -Infinity sentinel, so a lone malformed match still wins.
+  'const k=ts(j.updatedAt)??-1;if(k>bt){bt=k;bi=s.name}}catch{}}}' +
+  'if(bi===null)process.exit(1);' +
+  'console.log(bi)';
 
 export const KIMI_HARNESS: HarnessProvider = {
   buildRoleInjection: () => {
@@ -579,18 +615,80 @@ codev_queue_task() {
 
     // Crash restart resumes the conversation (#1233's builder-side contract) via
     // the DOCUMENTED, cwd-scoped `-c` — no undocumented session id in the script.
-    // Guarded by codev_has_session because `-c` with nothing to continue does not
-    // fail: it starts a fresh session that never saw --agent-file, i.e. a
-    // ROLELESS builder (verified, 0.34.0). The guard fails closed, so the
-    // fallback is always the role-carrying fresh launch.
+    // Guarded because `-c` with nothing to continue does not fail: it starts a
+    // fresh session that never saw --agent-file, i.e. a ROLELESS builder
+    // (verified, 0.34.0). The guard fails closed, so the fallback is always the
+    // role-carrying fresh launch.
+    //
+    // The guard compares session IDENTITY, not mere existence, to honor #1267's
+    // sticky-fresh contract ("clean exit → fresh rerun, no recovery"). Because
+    // `-c` is cwd-scoped rather than id-pinned, existence alone leaves a real gap:
+    // a clean exit relaunches fresh, 0.33.0+ mints no session until the first
+    // message lands, and a crash inside that pre-mint window would find the
+    // just-abandoned conversation still the newest one for the cwd and continue
+    // IT — resurrecting exactly what the user walked away from, and delivering the
+    // re-queued task into it. claude's loop closes this by minting a new id and
+    // never naming the superseded one; kimi cannot mint on demand, so the loop
+    // records the superseded id at clean exit and refuses `-c` until the newest id
+    // differs. A crash AFTER the new conversation mints resumes normally.
+    //
+    // Two edges this deliberately does NOT cover, both traced and both accepted:
+    //
+    //  - The superseded id lives in the loop's memory, so it does not survive the
+    //    terminal being closed and re-created. That is the intended boundary, not
+    //    an oversight: `afx spawn --resume` means "resume this builder", and entry
+    //    semantics are unchanged — a worktree holding a conversation is resumed.
+    //    (claude's equivalent survives only because its id is persisted for the
+    //    `--resume` pin; kimi writes no session id to disk by design.)
+    //  - If the store GC'd the just-superseded session while an OLDER abandoned one
+    //    for the same cwd survived, the newest id would differ from the superseded
+    //    one and `-c` would continue that older conversation. It requires a GC that
+    //    drops the NEWEST session while keeping older ones — the opposite of any
+    //    plausible retention policy — so it is recorded rather than engineered
+    //    against; closing it would mean accumulating every superseded id.
+    //
+    // And one accepted COST, in the other direction: when the clean-exit probe
+    // fails outright, `codev_resume_blocked` refuses `-c` for the rest of this
+    // loop's life rather than risk resurrecting the ended conversation. A later
+    // crash then restarts fresh instead of continuing, losing conversation
+    // continuity (never the role, and never the task — the mailbox still holds it).
+    // It self-heals at the next clean exit, which re-establishes a baseline.
     return `#!/bin/bash
 cd '${shellEscapeSingleQuote(ctx.worktreePath)}'
 codev_fast_fail_secs="\${CODEV_LAUNCH_FAST_FAIL_SECS:-15}"
 
 ${queueTask}
 
-codev_has_session() {
-  node -e '${KIMI_HAS_SESSION_PROBE}' "$PWD" 2>/dev/null
+# Prints the newest resumable session id for this cwd, or nothing. Empty output
+# (no store, unreadable store, malformed json, no match) means "do not resume" —
+# the fail-closed direction, whose fallback is the role-carrying fresh launch.
+codev_newest_session() {
+  node -e '${KIMI_NEWEST_SESSION_PROBE}' "$PWD" 2>/dev/null
+}
+
+# The id of the conversation the human deliberately ended, recorded at clean exit.
+# Empty until then, which is why the same predicate serves script entry: with
+# nothing superseded, "newest differs from superseded" reduces to "one exists".
+codev_superseded_id=''
+# Set when a clean exit could not read the store: we then have no baseline, so a
+# later session cannot be told apart from the one just ended. Refuse to resume
+# until the next clean exit re-establishes one. Fresh always carries the role, so
+# the cost is losing crash-resume continuity, never losing the role.
+codev_resume_blocked=0
+
+codev_should_resume() {
+  [ "$codev_resume_blocked" = 1 ] && return 1
+  # BOTH signals. The status is what makes this fail closed: stdout alone would
+  # accept anything written to it by something other than the probe (a node
+  # wrapper on PATH, NODE_OPTIONS=--require preloading an instrumentation module
+  # that prints), and a non-empty answer against an empty store sends the loop to
+  # "kimi -c" with nothing to continue — which does not fail, it starts a session
+  # that never saw --agent-file, i.e. the silently roleless builder this whole
+  # guard exists to prevent. Declared first, assigned second: a combined
+  # "local x=$(cmd)" would mask the substitution's status behind local's own.
+  local codev_newest
+  codev_newest=$(codev_newest_session) || return 1
+  [ -n "$codev_newest" ] && [ "$codev_newest" != "$codev_superseded_id" ]
 }
 
 codev_launch_fresh() {
@@ -606,7 +704,7 @@ codev_launch_resume() {
 # Tower-side terminal re-create do the right thing without a second script
 # shape: a worktree that already holds a conversation is resumed (and the task
 # NOT re-queued); a virgin one starts fresh.
-if codev_has_session; then
+if codev_should_resume; then
   codev_launch=codev_launch_resume
 else
   codev_launch=codev_launch_fresh
@@ -621,6 +719,23 @@ while true; do
     clear
     echo "Agent exited at your request. Press Enter to relaunch fresh, or close this terminal."
     read -r || exit 0
+    # Retire the conversation the human just ended: until a NEW session mints,
+    # the crash branch must not treat this id as something to continue. Recorded
+    # after the Enter gate, while it is still the newest for this cwd — and after
+    # kimi has flushed state.json, rather than during its teardown. Re-recorded on
+    # every clean exit, so iterated quits supersede each conversation in turn.
+    #
+    # A FAILED probe here is not the same as an empty store: it means we could not
+    # read the baseline at all, and recording '' would leave the just-ended session
+    # comparing "different" on the next crash — resurrecting exactly what this
+    # branch exists to retire. So distinguish the two by status and block resume
+    # outright when the baseline is unknown.
+    if codev_prev_id=$(codev_newest_session); then
+      codev_superseded_id="$codev_prev_id"
+      codev_resume_blocked=0
+    else
+      codev_resume_blocked=1
+    fi
     codev_launch=codev_launch_fresh
     codev_task_queued=0
     codev_fast_fails=0
@@ -649,10 +764,12 @@ while true; do
     fi
     codev_launch=codev_launch_fresh
     codev_fast_fails=0
-  elif codev_has_session; then
+  elif codev_should_resume; then
     echo "Agent exited (code $status). Resuming the conversation in 2 seconds... (Ctrl+C to quit)"
     codev_launch=codev_launch_resume
   else
+    # Either nothing to continue, or the only thing to continue is the conversation
+    # the human ended — the pre-mint window after a clean exit. Fresh, both times.
     echo "Agent exited (code $status) before starting a conversation. Relaunching fresh in 2 seconds... (Ctrl+C to quit)"
     codev_launch=codev_launch_fresh
   fi

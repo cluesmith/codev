@@ -562,7 +562,7 @@ describe('spawn-worktree', () => {
 
       const script = findWrite('.builder-start.sh');
       expect(script).toBeDefined();
-      expect(script).toContain('codev_has_session');
+      expect(script).toContain('codev_should_resume');
       // The discovered id is NEVER baked into the script — the relaunch is the
       // documented cwd-scoped `-c`, so no undocumented id reaches generated bash.
       expect(script).not.toContain('session_prev-1');
@@ -581,7 +581,7 @@ describe('spawn-worktree', () => {
         'PROMPT', 'ROLE', 'codev',
       );
       const script = findWrite('.builder-start.sh');
-      expect(script).not.toContain('codev_has_session');
+      expect(script).not.toContain('codev_should_resume');
       expect(script).not.toContain('--agent-file');
       expect(createTerminalMock.mock.calls.at(-1)![0].seedKick).toBeUndefined();
     });
