@@ -108,6 +108,31 @@ describe('tunnel-client unit tests', () => {
       expect(isBlockedPath('/')).toBe(false);
     });
 
+    // #1370: the dashboard reaches tunnel endpoints through the workspace-scoped
+    // path, which handleWorkspaceRoutes strips and dispatches to the same
+    // handleTunnelEndpoint. A root-anchored prefix check missed it entirely.
+    it('blocks the workspace-scoped form /workspace/<enc>/api/tunnel/disconnect', () => {
+      const enc = Buffer.from('/Users/me/proj').toString('base64url');
+      expect(isBlockedPath(`/workspace/${enc}/api/tunnel/disconnect`)).toBe(true);
+      expect(isBlockedPath(`/workspace/${enc}/api/tunnel/connect`)).toBe(true);
+      expect(isBlockedPath(`/workspace/${enc}/api/tunnel/status`)).toBe(true);
+    });
+
+    it('blocks a nested api/tunnel segment at any depth', () => {
+      expect(isBlockedPath('/a/b/c/api/tunnel/disconnect')).toBe(true);
+    });
+
+    it('blocks the workspace-scoped form with a query string', () => {
+      const enc = Buffer.from('/Users/me/proj').toString('base64url');
+      expect(isBlockedPath(`/workspace/${enc}/api/tunnel/disconnect?x=1`)).toBe(true);
+    });
+
+    it('does not over-block paths that merely mention tunnel', () => {
+      expect(isBlockedPath('/api/tunnels/list')).toBe(false);
+      expect(isBlockedPath('/api/state?q=api/tunnel/disconnect')).toBe(false);
+      expect(isBlockedPath('/workspace/abc/api/status')).toBe(false);
+    });
+
     it('allows /api/tunnel without trailing slash', () => {
       // Only paths starting with /api/tunnel/ are blocked
       expect(isBlockedPath('/api/tunnel')).toBe(false);

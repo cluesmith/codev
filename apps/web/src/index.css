@@ -226,8 +226,10 @@ body {
   background: var(--bg-hover);
 }
 
-/* Spec 786 Phase 4: confirmation modal for `remove-architect`. */
-.remove-architect-modal-backdrop {
+/* Confirmation modal — `remove-architect` (Spec 786 Phase 4) and the
+   cloud Disconnect dialog (#1370) share these rules. */
+.remove-architect-modal-backdrop,
+.confirm-dialog-backdrop {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.5);
@@ -237,7 +239,8 @@ body {
   z-index: 1000;
 }
 
-.remove-architect-modal {
+.remove-architect-modal,
+.confirm-dialog {
   background: var(--bg-primary, #1e1e1e);
   color: var(--text-primary, #e0e0e0);
   border-radius: 6px;
@@ -247,17 +250,20 @@ body {
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
 }
 
-.remove-architect-modal h2 {
+.remove-architect-modal h2,
+.confirm-dialog h2 {
   margin: 0 0 12px 0;
   font-size: 18px;
 }
 
-.remove-architect-modal p {
+.remove-architect-modal p,
+.confirm-dialog p {
   margin: 0 0 16px 0;
   line-height: 1.5;
 }
 
-.remove-architect-modal code {
+.remove-architect-modal code,
+.confirm-dialog code {
   background: var(--bg-secondary, #2a2a2a);
   padding: 2px 6px;
   border-radius: 3px;
@@ -268,14 +274,16 @@ body {
   color: var(--text-error, #ff6b6b);
 }
 
-.remove-architect-modal-actions {
+.remove-architect-modal-actions,
+.confirm-dialog-actions {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
   margin-top: 16px;
 }
 
-.remove-architect-modal-actions button {
+.remove-architect-modal-actions button,
+.confirm-dialog-actions button {
   padding: 6px 14px;
   border: 1px solid var(--border-color, #444);
   background: var(--bg-secondary, #2a2a2a);
@@ -284,17 +292,20 @@ body {
   cursor: pointer;
 }
 
-.remove-architect-modal-actions button:hover:not(:disabled) {
+.remove-architect-modal-actions button:hover:not(:disabled),
+.confirm-dialog-actions button:hover:not(:disabled) {
   background: var(--bg-hover, #333);
 }
 
-.remove-architect-modal-actions button.primary {
+.remove-architect-modal-actions button.primary,
+.confirm-dialog-actions button.primary {
   background: var(--accent-color, #f44747);
   color: white;
   border-color: var(--accent-color, #f44747);
 }
 
-.remove-architect-modal-actions button:disabled {
+.remove-architect-modal-actions button:disabled,
+.confirm-dialog-actions button:disabled {
   opacity: 0.6;
   cursor: not-allowed;
 }

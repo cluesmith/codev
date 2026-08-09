@@ -17,6 +17,22 @@ export async function disconnectTunnel(connectionManager: ConnectionManager): Pr
     vscode.window.showErrorMessage('Codev: Not connected to Tower');
     return;
   }
+
+  // #1370: this deregisters the tower server-side and deletes the local cloud
+  // credentials — reconnecting needs a fresh OAuth. A fuzzy palette match plus
+  // Enter must not be enough to trigger it.
+  const choice = await vscode.window.showWarningMessage(
+    'Disconnect this tower from Codev Cloud?',
+    {
+      modal: true,
+      detail:
+        'This deregisters the tower server-side and deletes its local cloud credentials. '
+        + 'Reconnecting requires signing in again.',
+    },
+    'Disconnect',
+  );
+  if (choice !== 'Disconnect') return;
+
   await client.signalTunnel('disconnect');
-  vscode.window.showInformationMessage('Codev: Tunnel disconnected');
+  vscode.window.showInformationMessage('Codev: Tower deregistered from Codev Cloud');
 }

@@ -58,6 +58,39 @@ const HOP_BY_HOP_HEADERS = new Set([
 /** Paths that are local-only management endpoints — block from tunnel */
 const BLOCKED_PATH_PREFIX = '/api/tunnel/';
 
+/**
+ * Matches an `api/tunnel/` segment anywhere in a normalized path, not just at
+ * the root (#1370).
+ *
+ * A root-anchored prefix check misses the workspace-scoped form the dashboard
+ * actually uses — `/workspace/<base64url>/api/tunnel/disconnect` — which
+ * `handleWorkspaceRoutes` strips and dispatches to the very same
+ * `handleTunnelEndpoint`. That path sailed through this blocklist and
+ * deregistered the tower.
+ */
+const BLOCKED_PATH_SEGMENT = /(^|\/)api\/tunnel\//;
+
+/**
+ * Header stamped on every request this client proxies in from the cloud (#1370).
+ *
+ * Requests reaching Tower through the tunnel arrive over localhost, so the
+ * socket address alone cannot tell them apart from a genuinely local caller.
+ * This marker makes the distinction explicit — Tower uses it both for source
+ * attribution in the log and to refuse cloud-originated management calls.
+ *
+ * Any inbound copy is stripped before stamping, so a cloud-side actor cannot
+ * forge or suppress it.
+ */
+export const TUNNEL_PROXY_HEADER = 'x-codev-tunnel-proxy';
+
+/** Strip any caller-supplied proxy marker, then stamp our own. */
+function stampProxyMarker(headers: Record<string, string | string[]>): void {
+  for (const key of Object.keys(headers)) {
+    if (key.toLowerCase() === TUNNEL_PROXY_HEADER) delete headers[key];
+  }
+  headers[TUNNEL_PROXY_HEADER] = '1';
+}
+
 /** Heartbeat ping interval — send a WebSocket ping every 30 seconds */
 export const PING_INTERVAL_MS = 30_000;
 
@@ -127,10 +160,10 @@ export function isBlockedPath(path: string): boolean {
     const decoded = decodeURIComponent(path);
     // Collapse duplicate slashes and resolve . / .. segments
     const normalized = new URL(decoded, 'http://localhost').pathname;
-    return normalized.startsWith(BLOCKED_PATH_PREFIX);
+    return BLOCKED_PATH_SEGMENT.test(normalized);
   } catch {
     // If decoding fails, check the raw path as a fallback (fail closed)
-    return path.startsWith(BLOCKED_PATH_PREFIX);
+    return path.startsWith(BLOCKED_PATH_PREFIX) || BLOCKED_PATH_SEGMENT.test(path);
   }
 }
 
@@ -720,6 +753,7 @@ export class TunnelClient {
         forwardHeaders[key] = value as string | string[];
       }
     }
+    stampProxyMarker(forwardHeaders);
 
     // Make HTTP/1.1 WebSocket upgrade request to localhost
     const wsReq = http.request({
@@ -783,6 +817,7 @@ export class TunnelClient {
         reqHeaders[key] = value as string | string[];
       }
     }
+    stampProxyMarker(reqHeaders);
 
     const proxyReq = http.request(
       {
