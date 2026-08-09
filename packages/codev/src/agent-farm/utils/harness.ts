@@ -548,6 +548,19 @@ codev_task_file='${shellEscapeSingleQuote(ctx.taskFile)}'
 # PERSISTS a held row — it does not need re-queueing to survive). Reset only on
 # the human-gated clean-exit relaunch below, which is a deliberate new
 # conversation and does want its task again.
+#
+# ACCEPTED TRADEOFF in the other direction (architect review, 2026-08-09). The
+# clean-exit reset assumes the first row was DELIVERED — the common case, but not
+# a guarantee. Seeing a composer is necessary, not sufficient: the gate also has to
+# have polled it EMPTY at least once. So the row can still be held if they quit at
+# a screen that never rendered a composer (the 0.33.0 folder-trust dialog is the
+# realistic case), or if they typed into the composer and quit within a couple of
+# backstop ticks. The reset then queues a second identical row and both eventually
+# deliver — one mission, stated twice. Left as-is deliberately:
+# de-duplicating means either a delivery receipt the script cannot see or a
+# mailbox-side identity check, and the failure is a duplicated instruction to an
+# agent that has not started yet — recoverable by reading, unlike the crash-loop
+# direction above, which floods a mailbox no one is draining.
 codev_task_queued=0
 codev_queue_task() {
   [ "$codev_task_queued" = 1 ] && return 0
@@ -620,7 +633,20 @@ while true; do
   fi
   echo ""
   if [ "$codev_fast_fails" -ge 3 ]; then
-    echo "Agent failing immediately (code $status). Starting a fresh conversation with the original task in 2 seconds... (Ctrl+C to quit)"
+    # Deliberately does NOT say "with the original task": this branch does not reset
+    # codev_task_queued, so if the task DID reach the mailbox, codev_queue_task
+    # early-returns and nothing is re-queued. That is the correct behavior (an
+    # undelivered row PERSISTS on the mailbox; re-queueing would duplicate it) — but
+    # the operator has to be told which case they are in, and there are two, because
+    # the flag is only set on a SUCCESSFUL afx send. If queueing never succeeded (afx
+    # off PATH, Tower down) the flag is still 0 and the fresh launch below really does
+    # retry it, so an unconditional "still queued" would be a lie.
+    echo "Agent failing immediately (code $status). Starting a fresh conversation in 2 seconds... (Ctrl+C to quit)"
+    if [ "$codev_task_queued" = 1 ]; then
+      echo "  The task is on the mailbox and is not re-queued; if it already reached the dead session, re-send it with 'afx send'."
+    else
+      echo "  The task was never queued (see the warning above) — the fresh conversation will retry it."
+    fi
     codev_launch=codev_launch_fresh
     codev_fast_fails=0
   elif codev_has_session; then
