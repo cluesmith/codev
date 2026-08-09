@@ -1,6 +1,6 @@
 {
   "name": "@cluesmith/codev-core",
-  "version": "3.2.4",
+  "version": "3.3.0",
   "description": "Server-side runtime for Codev — local-key issuance and homedir-derived paths. Client-side Tower access lives in @cluesmith/codev-sdk; the two packages never import each other.",
   "type": "module",
   "exports": {
