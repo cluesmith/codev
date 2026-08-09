@@ -124,3 +124,117 @@ restores the weaker one.
 **Verification:** `pnpm build` clean; full suite **4900 passed / 48 skipped / 0 failed**; live
 demo **7/7** against real kimi 0.34.0, including the crash-resume claim that was withheld until
 it passed.
+
+---
+
+## 2026-08-09 — architect integration review, three findings
+
+The architect reviewed the PR at head `4a7e2afe` and returned three non-blocking findings. None
+of them touch the three decisions parked for the upstream maintainer (trust pre-write, 0.33.0
+floor, write-guard parity as follow-up) — a later architect message fenced those explicitly, and
+this round left all three exactly as the branch already implements them.
+
+**Finding 1 was measure-first, and the measurement is the interesting part.** The claim: a
+residual false-CLEAN survives the `regionStartPatterns` fix. Enter a newline and then `>` and
+kimi renders `│ > ` / `│   >` — row one empty, row two matching `KIMI_MARKER` so its `>` is
+span-exempted as chrome. Every cell is whitespace, box chrome, or an exempted marker, so
+`userCells` is 0 and the composer reads CLEAN *while holding unsent user input*. Bounding the
+region correctly does not help: the draft is real but literally uncountable. That is the
+corruption direction, so it mattered.
+
+The proposed fix reads the composer's **shape** instead — a boxed region spanning more than one
+interior row is a multi-line draft by construction. Sound only if box growth is exclusive to
+multi-line drafts, which is a claim about kimi, not about our code. So I measured it before
+writing it (`codev/spikes/pir-1201-kimi-box-growth.mjs`, real kimi 0.34.0):
+
+| state | interior rows |
+|---|---|
+| idle | 1 |
+| single-line draft | 1 |
+| `/` menu | 1 |
+| `@` picker | 1 |
+| **post-reply steady state** | **1** |
+| newline + bare `>` | 2 |
+| newline only | 2 |
+| long soft-wrapped single line | 2 |
+
+**Premise holds.** The steady-state row is the load-bearing one: growth on a composer that has
+already carried a turn would hold every later message forever — a liveness bug, which is worse
+than the fail-safe direction. The soft-wrap case grows the box too, but it carries text and was
+already busy, so its verdict is unchanged.
+
+**One design correction I made against the suggestion.** Implemented as suggested — short-circuit
+before the cell scan — the rule changed an *existing* fixture's verdict detail
+(`kimi-multiline-bare` went from `user-text` to `multi-row-draft`), because that draft is also
+multi-row. That would have masked the cell scan's ground-truth role and quietly retired what the
+older guardrail test was actually testing. Moved the rule to **after** the scan: `userCells > 0`
+still wins and still reports `user-text`, and `multi-row-draft` is reserved for exactly the case
+the count is blind to. Every pre-existing fixture verdict is unchanged.
+
+The arming gate is a shared `hasRegionStart` predicate used by **both** `findRegionStart` and the
+rule, so an empty-pattern array cannot be read as "bounded" by one and "unbounded" by the other —
+that divergence would fire the rule on claude/codex, whose composer legitimately sits several rows
+above its rule line. Pinned with an armed/unarmed differential on identical bytes, so deleting the
+rule outright fails the inertness test rather than silently passing it.
+
+**Findings 2 and 3 were wording/comment only.** The fast-fail echo claimed to restart "with the
+original task", but that branch leaves `codev_task_queued` set, so nothing is re-queued — correct
+behavior (an undelivered row persists on the mailbox), wrong message. Reworded, and the operator
+is now told which of the two cases they are in. Finding 3 records the accepted tradeoff in the
+other direction: the clean-exit branch *does* reset the flag, so if the first row was never
+delivered (quit at the trust dialog before a composer ever rendered) the mailbox ends up holding
+the same mission twice. Documented rather than fixed, deliberately.
+
+**Verification:** `pnpm build` clean; full suite **4904 passed / 48 skipped / 0 failed** (+4 =
+three new tests and one new fixture); targeted suites (render-gate, harness, harness-integration,
+spawn-worktree, mailbox-pacing, kimi-session-discovery) 327 passed.
+
+### The CMAP on that delta found something better than what I built
+
+gemini APPROVE, codex REQUEST_CHANGES, claude APPROVE-with-changes. Every finding from both
+non-approving reviews was accepted; nothing was rejected. Full dispositions:
+`codev/projects/1201-support-kimi-code-cli-as-a-bui/1201-cmap-architect-review-dispositions.md`.
+
+**The one that mattered.** Both codex and claude independently attacked the same thing: I armed
+the geometry rule off `regionStartPatterns`, overloading a field that means "this composer has an
+upper boundary" with an unrelated claim, "this composer's height tracks draft lines". They
+coincide for kimi. claude then produced evidence that this is not stylistic, and I verified it
+myself with a geometry probe over every shipped fixture rather than taking it on trust:
+
+**`codex-idle.clean.txt` — a real, captured, genuinely EMPTY codex composer — already spans two
+interior rows** (`marker=18 start=18 end=20`). The rule's geometric predicate is *already true*
+on a screen that must stay clean. Only the arming gate stood between that capture and codex mail
+being held forever, and the day anyone declared a region start for codex — a header bound, a
+boxed redesign — delivery would have died silently. That is the failure mode I was trying to
+prevent for kimi, sitting one field declaration away for a different app.
+
+Decoupled into an explicit `growsWithDraft?: true`, set only on `KIMI_PROFILE`. The rule now
+requires both: the measured promise *and* the bound that makes the arithmetic mean "interior
+rows". codex wanted `maxCleanInteriorRows?: number` instead; I chose the boolean because it
+encodes the measured premise rather than a tunable number, and a wrong threshold under it gets
+caught by the app's own idle fixture. The three inertness tests now run on codex's **real**
+capture under four profile variants, so the hazard is demonstrated on identical bytes rather than
+described on a screen I invented.
+
+**Claude also found a gap in my measurement, so I measured it.** The spike had not enumerated the
+composer *while the agent is generating* — if the box grew there, "deliver while busy" would have
+silently become "hold until idle". It does not: mid-generation at 5s and 13s, shift+tab mode
+chrome, and a draft typed during generation are all one interior row
+(`pir-1201-kimi-working-states.mjs`). Claude asked for a line documenting what wasn't measured; a
+measurement is a better answer than a caveat.
+
+**Two accuracy bugs in my own prose, both real.** The reworded fast-fail hint asserted
+unconditionally that a task was still queued — false when `afx send` never succeeded, since the
+flag is only set on success, and in that case the fresh launch genuinely does retry. Now branches
+on the flag. And "delivered whenever the operator saw a composer" was too strong: seeing a
+composer is necessary, not sufficient, since the gate also has to have polled it empty. A
+message-accuracy fix on top of a message-accuracy fix, which is a fair thing to have been caught on.
+
+**One silent-omission class fixed:** `isClassifierStuck` enumerated details as a closed `||`
+chain, so widening the union never forced a decision. Now a `Record<GateVerdict['detail'],
+boolean>` — the next new detail is a compile error rather than a silent `false`.
+
+**Verification:** build + `tsc --noEmit` clean; full suite **4906 passed / 48 skipped / 0 failed**
+(+6 on the 4900 this round started from). No live demo re-run needed: the rule can only change
+verdicts for a composer past one interior row, and delivery targets the idle composer — measured
+at one row in every state, including mid-generation.
