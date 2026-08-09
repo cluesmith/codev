@@ -238,3 +238,74 @@ boolean>` — the next new detail is a compile error rather than a silent `false
 (+6 on the 4900 this round started from). No live demo re-run needed: the rule can only change
 verdicts for a composer past one interior row, and delivery targets the idle composer — measured
 at one row in every state, including mid-generation.
+
+---
+
+## 2026-08-09 — finding 4: a clean exit that did not stick
+
+The architect re-verified the maintainer's exit contract against main's landed code and found a
+real gap. #1267's contract is "clean exit → fresh rerun, no recovery", and claude's loop enforces
+it **by identity**: a clean exit mints a new session id and the superseded one is never named
+again. kimi cannot mint on demand and `kimi -c` is cwd-scoped, so identity was never pinned:
+
+1. human cleanly exits conversation A
+2. Enter gate → fresh relaunch; kimi 0.33+ mints **no session** until the first message lands
+3. kimi crashes in that pre-mint window
+4. the old guard asked only "does *any* session exist for this cwd?", found A, and ran `kimi -c`
+   → continuing the conversation the human deliberately ended, with the re-queued task delivered
+   into it
+
+**Measured before building.** The whole design assumes `-c` continues the NEWEST session when a
+cwd holds several — the existing probe only covered the zero-session case. Two live sessions in
+one directory on 0.34.0, two independent oracles: content (codewords ALPHA/BRAVO → answered
+BRAVO) and store identity (only the newest session's dir was touched; nothing new minted; exit 0,
+no prompt). Premise holds, so the documented-residual fallback did not apply.
+
+The fix makes the probe answer **which** session rather than **whether** one exists; the
+clean-exit branch records that id; the crash branch resumes only once the newest id differs.
+
+### CMAP: gemini APPROVE, codex REQUEST_CHANGES, claude REQUEST_CHANGES — and they were right
+
+**The blocking one is a defect I introduced, not one I inherited.** Moving the decision from
+`$?` onto stdout meant anything *else* writing to stdout counted as "a session exists". Claude
+measured it: empty store plus `NODE_OPTIONS=--require <module that prints>` → probe prints a
+banner, exits 1, script reads RESUME → `kimi -c` with nothing to continue → a session that never
+saw `--agent-file`. A silently roleless builder — the exact #929 class this guard exists to
+prevent, reintroduced by the guard's own upgrade. The pre-delta code could not produce it. Fixed
+by consuming both signals (`codev_newest=$(...) || return 1`, declaration split from assignment
+so `local` cannot mask the status).
+
+**The architect's sketch had one too, and both reviewers caught it.** It said record the id,
+"empty on any error — fail-closed", and I repeated that in a comment. It isn't: a *transient*
+probe failure records `''`, and the next crash then sees the ended session as "different from
+empty" and resumes it. Now failure and empty-store are distinguished by status, and a failed
+baseline blocks resume until the next clean exit re-establishes one. Costs crash-resume
+continuity in that rare case; never the role, never the task.
+
+Two probe/discovery divergences also fell out, both pre-existing and both found by reading the
+two implementations against each other rather than by testing: `j.cwd ?? j.workDir` short-circuits
+on a non-string `cwd` where `readStateJson` falls through per-field; and the probe stripped a
+trailing slash before `realpathSync` while `sameDir` does not — the unsafe direction, since a
+nonexistent `/ghost/` would match in the probe and not in discovery. Removed the strip rather
+than documenting it: `realpathSync` already normalizes a trailing slash for any directory that
+exists, so it bought nothing and cost fidelity. Exact mirror beats documented exception.
+
+**Claude's sharpest test point:** the pieces were pinned, the composition never was. `decideBranch`
+injected the superseded id from the test, so the only evidence the generated clean-exit branch
+assigns it was a string match — and a refactor wrapping that assignment in a subshell would pass
+everything while the contract was dead. There is now a test that drives the **real `while` loop**
+with stubbed launches and asserts the branch sequence `resume, fresh, fresh`.
+
+Non-vacuity is demonstrated, not claimed: `decideBranchLegacy()` runs the pre-fix existence-only
+predicate against the same store and the same generated probe, and the regression test asserts it
+returns RESUME exactly where the shipped guard returns FRESH.
+
+**Residuals, written down rather than engineered against:** a store GC that dropped the newest
+session while keeping an older abandoned one would let `-c` reach the older one (requires
+newest-first eviction); and the superseded id is in-memory, so closing and re-creating the
+terminal returns to plain entry semantics — which claude pointed out is contract *parity* with
+claude's loop, whose minted id is equally per-process, not a kimi shortfall.
+
+**Verification:** build + `tsc --noEmit` clean; generated script passes `bash -n`; full suite
+**4915 passed / 48 skipped / 0 failed**. Dispositions in
+`codev/projects/1201-support-kimi-code-cli-as-a-bui/1201-cmap-finding4-dispositions.md`.
