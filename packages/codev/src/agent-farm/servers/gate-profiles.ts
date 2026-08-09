@@ -111,6 +111,21 @@ const KIMI_MARKER = /^\s*│\s*>/;
 const KIMI_REGION_END = [/^\s*╰[─━╌┄]{3,}/];
 
 /**
+ * The rounded box TOP that opens kimi's composer (`` ╭─────╮ ``) — the region's
+ * upper bound, and the reason a multi-row kimi draft is scanned in full.
+ *
+ * kimi's composer grows downward: a two-line draft renders `│ > <line one>` then
+ * `│   <line two>`. When line two begins with `>` (a pasted quote, a markdown
+ * blockquote) it matches {@link KIMI_MARKER} too, and since the classifier takes
+ * the LAST match, the region would start there and line one — real, unsent user
+ * text — would sit above it, uncounted. Measured on 0.34.0 (`kimi-multiline-bare`
+ * fixture): that screen classified `clean`, and a queued message would have been
+ * typed on top of the draft. Anchoring the region to the box top fixes it for any
+ * number of draft rows.
+ */
+const KIMI_REGION_START = [/^\s*╭[─━╌┄]{3,}/];
+
+/**
  * kimi composer profile (Issue #1201 — net-new measurement on 0.34.0, the same
  * shape of live capture the agy Phase-3 profile rests on).
  *
@@ -134,6 +149,7 @@ const KIMI_REGION_END = [/^\s*╰[─━╌┄]{3,}/];
 export const KIMI_PROFILE: GateProfile = {
   app: 'kimi',
   markerPattern: KIMI_MARKER,
+  regionStartPatterns: KIMI_REGION_START,
   regionEndPatterns: KIMI_REGION_END,
 };
 

@@ -108,6 +108,24 @@ export interface GateProfile {
    */
   regionEndPatterns: RegExp[];
   /**
+   * Optional UPPER bound for the composer region, for apps whose composer spans
+   * more than the marker row (Issue #1201 — kimi draws a multi-row rounded box).
+   *
+   * Without one, scanning starts AT the marker row, and since {@link findMarkerRow}
+   * takes the LAST matching row, any lower row that looks like a marker moves the
+   * region down past real draft text — which is then never counted, so a composer
+   * holding a draft classifies CLEAN. Measured on kimi 0.34.0: a two-line draft
+   * whose second line is a bare `>` renders `│ > <text>` / `│   >`, and the second
+   * row matches kimi's marker.
+   *
+   * Set it and the region instead starts at the nearest matching line ABOVE the
+   * marker row (kimi: the box top `╭───`), so the whole composer is scanned.
+   * Left unset — claude, codex, agy — the region starts at the marker row exactly
+   * as before, and since no row below a LAST match can match, those profiles
+   * cannot reach any of the new behavior.
+   */
+  regionStartPatterns?: RegExp[];
+  /**
    * Optional per-app placeholder signal: a 16-color palette index whose cells are
    * treated as placeholder/hint chrome (ignored), NOT user text. This is the
    * color-attribute analogue of the universal dim-placeholder skip. claude/codex
@@ -129,10 +147,11 @@ export interface GateVerdict {
    * reason). `no-composer-marker` = wrapper/boot/picker/unknown screen (or a torn
    * replay that dropped the marker); `no-region-end` = a marker with no rule/status
    * line beneath it to bound the composer (a partial/mid-repaint frame) — held
-   * rather than scanning into status chrome; `user-text` = a draft or menu occupies
-   * the composer; `empty` = clean.
+   * rather than scanning into status chrome; `no-region-start` = the mirror of that
+   * for a profile whose composer is a box (kimi), when the box TOP is not on screen;
+   * `user-text` = a draft or menu occupies the composer; `empty` = clean.
    */
-  detail: 'no-composer-marker' | 'no-region-end' | 'user-text' | 'empty';
+  detail: 'no-composer-marker' | 'no-region-end' | 'no-region-start' | 'user-text' | 'empty';
 }
 
 /**
@@ -197,6 +216,33 @@ export function markerSpanEnd(line: string, pattern: RegExp): number {
   const stateless = new RegExp(pattern.source, pattern.flags.replace(/[gy]/g, ''));
   const m = stateless.exec(line);
   return m ? m.index + m[0].length : 1;
+}
+
+/**
+ * First row of the composer region: the row just below the nearest
+ * `regionStartPatterns` match above `markerRow`, or -1 when the profile declares
+ * one and none is on screen.
+ *
+ * A profile with no `regionStartPatterns` returns `markerRow` — the original
+ * behavior, byte for byte.
+ *
+ * The bound is EXCLUSIVE, mirroring `endRow`: the matched line is the composer's
+ * boundary, not part of it. That matters concretely — kimi's box top renders
+ * `╭────╮`, and its right corner `╮` is not in {@link IGNORE_CHARS}, so including
+ * that row would count the corner as user text and hold every idle kimi composer
+ * forever. Excluding it keeps the region to the rows that can actually hold a draft.
+ *
+ * -1 is deliberate and mirrors {@link findRegionEnd}: for an app whose composer is
+ * a box, a marker with no box top above it is a partial/mid-repaint frame, so the
+ * region has no proven UPPER bound. Scanning from the marker row anyway is exactly
+ * the false-CLEAN this bound exists to prevent, so the caller must hold instead.
+ */
+function findRegionStart(lines: string[], markerRow: number, startPatterns?: RegExp[]): number {
+  if (!startPatterns || startPatterns.length === 0) return markerRow;
+  for (let i = markerRow - 1; i >= 0; i--) {
+    if (startPatterns.some((p) => p.test(lines[i]))) return i + 1;
+  }
+  return -1;
 }
 
 /**
@@ -313,8 +359,20 @@ export function classifyBuffer(
     // empty/dim, return a false CLEAN).
     return { clean: false, reason: 'busy', detail: 'no-region-end' };
   }
+  const startRow = findRegionStart(lines, markerRow, profile.regionStartPatterns);
+  if (startRow === -1) {
+    // A boxed composer whose box top is not on screen: the region has no proven
+    // upper bound, so scanning would count only the tail of a draft that may
+    // continue above. Hold — the same fail-toward-hold call as `no-region-end`.
+    return { clean: false, reason: 'busy', detail: 'no-region-start' };
+  }
   const top = buf.viewportY;
-  const markerEnd = markerSpanEnd(lines[markerRow], profile.markerPattern);
+  // Re-compiled without g/y for the same reason markerSpanEnd does it: a stateful
+  // profile regex must not let one row's match position affect the next row's test.
+  const markerTest = new RegExp(
+    profile.markerPattern.source,
+    profile.markerPattern.flags.replace(/[gy]/g, ''),
+  );
   const cell = buf.getNullCell();
   const probe = buf.getNullCell(); // scratch cell for the ghost-tail look-ahead (never clobbers `cell`)
   // Cursor position is viewport-relative (matching `row`, which indexes from `viewportY`).
@@ -322,14 +380,23 @@ export function classifyBuffer(
   const cursorCol = buf.cursorX;
   let userCells = 0;
 
-  for (let row = markerRow; row < endRow; row++) {
+  for (let row = startRow; row < endRow; row++) {
     const line = buf.getLine(top + row);
     if (!line) continue;
+    // The marker is chrome on EVERY row that renders it, not just the row the
+    // search settled on: a multi-row composer repeats its box edge, and with a
+    // region that starts above `markerRow` those upper rows are now scanned.
+    // Rows that do not match contribute 0, so profiles without a region start —
+    // where the only marker-matching row in the region IS `markerRow` — keep the
+    // exact previous exemption.
+    const markerEnd = markerTest.test(lines[row])
+      ? markerSpanEnd(lines[row], profile.markerPattern)
+      : 0;
     for (let col = 0; col < cols; col++) {
       line.getCell(col, cell);
       const ch = cell.getChars();
       if (!ch || WHITESPACE.test(ch) || IGNORE_CHARS.has(ch)) continue;
-      if (row === markerRow && col < markerEnd) continue; // the marker glyph itself (see markerSpanEnd)
+      if (col < markerEnd) continue; // the marker glyph itself (see markerSpanEnd)
       if (cell.isDim()) continue; // placeholder / hint chrome renders dim (claude/codex)
       if (
         profile.placeholderFgPalette !== undefined &&

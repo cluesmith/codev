@@ -58,7 +58,7 @@ function profileForFixture(name: string): GateProfile {
 describe('render-gate — real captured fixtures (Spec 1313)', () => {
   const fixtures = readdirSync(FIXTURE_DIR).filter((f) => f.endsWith('.txt')).sort();
 
-  it('the required states are all captured (claude+codex idle/draft/menu/picker, agy+kimi idle/draft/trust, wrapper/boot)', () => {
+  it('the required states are all captured (claude+codex+kimi idle/draft/menu/picker, agy+kimi trust, kimi multiline, wrapper/boot)', () => {
     for (const required of [
       'claude-idle.clean',
       'claude-draft.busy',
@@ -74,6 +74,14 @@ describe('render-gate — real captured fixtures (Spec 1313)', () => {
       'kimi-idle.clean',
       'kimi-draft.busy',
       'kimi-trust.busy',
+      // The multi-row composer states. `kimi-multiline-bare` is the false-CLEAN
+      // this profile's regionStartPatterns exists to close — captured, not
+      // constructed — and menu/picker are the screen class where a LAST-match
+      // marker search is most likely to settle on the wrong row.
+      'kimi-multiline.busy',
+      'kimi-multiline-bare.busy',
+      'kimi-menu.busy',
+      'kimi-picker.busy',
       'wrapper-boot.busy',
     ]) {
       expect(fixtures.some((f) => f.startsWith(required))).toBe(true);
@@ -170,6 +178,52 @@ describe('render-gate — marker-span exemption is a no-op for claude/codex/agy 
     // With the shipped profile's full span, the same bytes are clean.
     expect(await classifyScreen(snapshotFromRaw(raw), KIMI_PROFILE))
       .toMatchObject({ clean: true, detail: 'empty' });
+  });
+
+  it('scans the WHOLE kimi composer box, so a draft above a bare-`>` row is still counted', async () => {
+    // The false-CLEAN found by the 3-way review (2026-08-09, claude F1), pinned against
+    // the real 0.34.0 capture rather than a constructed screen. kimi renders a two-line
+    // draft as `│ > implement the whole feature` / `│   >`; the second row matches the
+    // marker, findMarkerRow takes the LAST match, so scanning from the marker row left
+    // the real draft ABOVE the region and the composer read empty — a queued message
+    // would then have been typed on top of unsent user text.
+    const raw = readFileSync(`${FIXTURE_DIR}/kimi-multiline-bare.busy.txt`, 'utf8');
+    expect(await classifyScreen(snapshotFromRaw(raw), KIMI_PROFILE))
+      .toMatchObject({ clean: false, detail: 'user-text' });
+
+    // …and the fix is specifically the region start: the SAME bytes under a profile
+    // identical except that it declares no upper bound reproduce the old false CLEAN.
+    // If this ever stops classifying clean, the regionStartPatterns above is no longer
+    // what is protecting the composer, and this test has stopped testing the fix.
+    const { regionStartPatterns: _dropped, ...unbounded } = KIMI_PROFILE;
+    expect(await classifyScreen(snapshotFromRaw(raw), unbounded as GateProfile))
+      .toMatchObject({ clean: true, detail: 'empty' });
+  });
+
+  it('holds a boxed composer whose box top is off-screen instead of scanning a partial region', async () => {
+    // A marker row with no `╭` above it is a torn/mid-repaint frame for a boxed app.
+    // The region has no proven upper bound, so the safe answer is hold — the same call
+    // findRegionEnd already makes downward.
+    const snap = snapshotFromRaw(screen(' │   >', ' ╰────────────'));
+    expect(await classifyScreen(snap, KIMI_PROFILE))
+      .toMatchObject({ clean: false, detail: 'no-region-start' });
+  });
+
+  it('leaves claude/codex/agy on the marker row exactly as before (no region start declared)', async () => {
+    // The new upper bound is opt-in. These profiles declare none, so findRegionStart
+    // returns markerRow and the scan is byte-identical to the pre-change behavior —
+    // including that a row ABOVE the composer is never counted as draft text.
+    for (const p of [CLAUDE_PROFILE, CODEX_PROFILE, AGY_PROFILE]) {
+      expect(p.regionStartPatterns).toBeUndefined();
+    }
+    // Behavioural half, on the two profiles whose marker survives screenLines'
+    // trimEnd on an empty composer (agy's `^> ` cannot — a bare `> ` row trims to
+    // `>` and stops matching, which is why its idle capture carries hint text).
+    // Text on the line ABOVE the composer is chat history, not a draft: still clean.
+    for (const [p, marker] of [[CLAUDE_PROFILE, '❯'], [CODEX_PROFILE, '›']] as const) {
+      const snap = snapshotFromRaw(screen('some earlier assistant output', marker, '──────────────────────'));
+      expect(await classifyScreen(snap, p)).toMatchObject({ clean: true, detail: 'empty' });
+    }
   });
 
   it('ignores g/y regex state so a stateful profile pattern cannot alias a previous call', () => {

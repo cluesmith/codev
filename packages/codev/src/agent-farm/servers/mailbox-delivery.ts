@@ -232,8 +232,9 @@ export interface DeliveryOutcome {
 /**
  * A gate outcome the render gate CANNOT bound to a decision — an unrecognized app
  * (`no-profile`) or a recognized app whose composer region can't be found
- * (`no-region-end`/`no-composer-marker` = a drifted TUI layout or an unrenderable #1047
- * ring). A sustained streak of these means the mail will NEVER deliver on its own, so it
+ * (`no-region-end`/`no-region-start`/`no-composer-marker` = a drifted TUI layout or an
+ * unrenderable #1047 ring). A sustained streak of these means the mail will NEVER deliver
+ * on its own, so it
  * is the class {@link MailboxDrainer.recordStreak} escalates to liveness telemetry; a
  * `busy`/`user-text` streak is deliberately excluded (a human legitimately at the line).
  * Shared by `recordStreak` and the cooldown branch of {@link MailboxDrainer.tick} so a
@@ -243,7 +244,10 @@ function isClassifierStuck(
   reason: MailboxReason | null,
   detail: GateVerdict['detail'] | undefined
 ): boolean {
-  return reason === 'no-profile' || detail === 'no-region-end' || detail === 'no-composer-marker';
+  return reason === 'no-profile'
+    || detail === 'no-region-end'
+    || detail === 'no-region-start'
+    || detail === 'no-composer-marker';
 }
 
 /**
