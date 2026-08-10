@@ -1,0 +1,14 @@
+id: '1388'
+title: vendor-sdpi-components-js-into
+protocol: air
+phase: implement
+plan_phases: []
+current_plan_phase: null
+gates:
+  pr:
+    status: pending
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-08-10T09:31:17.059Z'
+updated_at: '2026-08-10T09:31:17.060Z'
