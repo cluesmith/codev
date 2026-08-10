@@ -41,6 +41,7 @@ describe('default-theme.css token vocabulary', () => {
         "--codev-canvas-font-family",
         "--codev-canvas-font-size",
         "--codev-canvas-foreground",
+        "--codev-canvas-gutter",
         "--codev-canvas-h1-size",
         "--codev-canvas-h2-size",
         "--codev-canvas-h3-size",
@@ -92,9 +93,26 @@ describe('default-theme.css token vocabulary', () => {
     expect(css).toMatch(
       /:is\(\.codev-artifact-canvas-body,\s*\.codev-artifact-canvas-rendered\)\s+code\b/,
     );
-    // The overlay gutter stays composed-surface-only (MarkdownView has no overlay): the bare
-    // `.codev-artifact-canvas-body` padding rule must NOT pull in the standalone root.
-    expect(css).toMatch(/^\.codev-artifact-canvas-body\s*\{[^}]*padding-left/m);
+    // The gutter is block-local (#1343): the body itself carries NO left padding — each
+    // top-level row does, composed surface only (the standalone root gets no row rules).
+    expect(css).not.toMatch(/^\.codev-artifact-canvas-body\s*\{[^}]*padding-left/m);
+    expect(css).toMatch(
+      /\.codev-artifact-canvas-body\s*>\s*\[data-line\]\s*\{[^}]*padding-left:\s*var\(--codev-canvas-gutter\)/,
+    );
+    expect(css).not.toMatch(/\.codev-artifact-canvas-rendered[^{]*>\s*\[data-line\]/);
+  });
+
+  it('reserves block-local leading space on rows (#1343)', () => {
+    expect(tokens.get('--codev-canvas-gutter')).toBe('1.9rem');
+    // Rows are the positioning context for the in-row "+" and the marker bar.
+    expect(css).toMatch(/\.codev-artifact-canvas-body\s*>\s*\[data-line\]\s*\{[^}]*position:\s*relative/);
+    // Chrome rows absorb the gutter into their own padding (text x-position preserved).
+    expect(css).toMatch(/pre\[data-line\]\s*\{[^}]*calc\(var\(--codev-canvas-gutter\)\s*\+\s*16px\)/);
+    expect(css).toMatch(/blockquote\[data-line\]\s*\{[^}]*calc\(var\(--codev-canvas-gutter\)\s*\+\s*1em\)/);
+    expect(css).toMatch(/:is\(ul,\s*ol\)\[data-line\]\s*\{[^}]*calc\(var\(--codev-canvas-gutter\)\s*\+\s*2em\)/);
+    // The pre row must not scroll (it hosts the "+"); the inner code element scrolls instead.
+    expect(css).not.toMatch(/\)\s+pre\s*\{[^}]*overflow/);
+    expect(css).toMatch(/pre\s+code\s*\{[^}]*overflow-x:\s*auto/);
   });
 
   it('shows the arrow cursor (not the I-beam) over the composed content body (#1232)', () => {
@@ -104,11 +122,17 @@ describe('default-theme.css token vocabulary', () => {
     expect(css).not.toMatch(/\.codev-artifact-canvas-rendered[^{]*\{[^}]*cursor:\s*default/);
   });
 
-  it('sizes the "+" affordance against the prose, with a 24px hit-target floor (#1236)', () => {
-    // The overlay lives outside the font-sized prose containers; without an explicit font-size
-    // token the button renders at the host default (13px in VS Code webviews) beside 16px prose.
-    expect(css).toMatch(/\.codev-canvas-overlay\s*\{[^}]*font-size:\s*var\(--codev-canvas-font-size\)/);
+  it('sizes the "+" affordance against the prose, with a 24px hit-target floor (#1236/#1343)', () => {
+    // The in-row wrapper pins the canvas typography so the "+" renders identically whatever row
+    // hosts it (a pre's monospace/85% must not leak in); the button inherits it explicitly —
+    // buttons don't inherit fonts by default.
+    expect(css).toMatch(
+      /\.codev-canvas-row-affordance\s*\{[^}]*font-size:\s*var\(--codev-canvas-font-size\)/,
+    );
+    expect(css).toMatch(/\.codev-canvas-add-comment\s*\{[^}]*font:\s*inherit/);
     expect(css).toMatch(/\.codev-canvas-add-comment\s*\{[^}]*min-width:\s*24px/);
     expect(css).toMatch(/\.codev-canvas-add-comment\s*\{[^}]*min-height:\s*24px/);
+    // The canvas-anchored overlay is gone (#1343); nothing may quietly reintroduce it.
+    expect(css).not.toMatch(/\.codev-canvas-overlay\b/);
   });
 });
