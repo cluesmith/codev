@@ -548,6 +548,45 @@
   max-height: calc(var(--_codev-column-cap) - 60px);
 }
 
+/* Focusable container (spec 1380, Constraint 7): the body is a tab stop in horizontal mode —
+   show focus inside its own edge (offset -2) so the ring isn't clipped by the overflow box. */
+.codev-canvas-mode-horizontal .codev-artifact-canvas-body:focus-visible {
+  outline: 2px solid var(--codev-canvas-accent);
+  outline-offset: -2px;
+}
+
+/* Progress readout (spec 1380 D8): a small fixed chip, bottom-left (the keys legend owns
+   bottom-right), token-styled like the rest of the canvas chrome. */
+.codev-canvas-reading-progress {
+  position: fixed;
+  left: 16px;
+  bottom: 16px;
+  z-index: 6;
+  padding: 3px 10px;
+  border: 1px solid var(--codev-canvas-border);
+  border-radius: 12px;
+  background: var(--codev-canvas-background);
+  color: var(--codev-canvas-muted);
+  font-family: var(--codev-canvas-font-family);
+  font-size: 12px;
+  line-height: 1.6;
+  user-select: none;
+  pointer-events: none;
+}
+
+/* Visually hidden, screen-reader-available (the aria-live announcement channel). */
+.codev-canvas-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
 /* Reading-mode toggle (spec 1380 D4): fixed top-right, matching the canvas's other fixed
    chrome (minimap rail, keys legend); right offset clears the 14px minimap column. Token-styled
    like the "+" button; 24px hit floor (WCAG 2.5.8, the #1236 convention). */

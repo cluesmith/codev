@@ -239,23 +239,31 @@ describe('legend and minimap (phase-3 deliverables)', () => {
     }
   });
 
-  it('minimap dot click scrolls axis-aware', async () => {
-    const { body } = await mountCanvas({ initialReadingMode: 'horizontal' });
-    await waitFor(() =>
-      expect(body.querySelector('.codev-canvas-has-marker')).not.toBeNull(),
-    );
-    const marked = body.querySelector('.codev-canvas-has-marker') as HTMLElement;
+  it('minimap dot click scrolls axis-aware (overlay-level: the canvas suppresses it in horizontal)', async () => {
+    // Phase 5 suppresses the minimap in horizontal mode (D3), so the axis-aware prop is
+    // exercised by rendering the overlay directly — it stays correct for re-enablement.
+    const { MarkerMinimap } = await import('../../overlays/MarkerMinimap.js');
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const block = document.createElement('p');
+    block.setAttribute('data-line', '2');
+    host.appendChild(block);
     const calls: ScrollIntoViewOptions[] = [];
-    marked.scrollIntoView = ((opts?: ScrollIntoViewOptions) => {
+    block.scrollIntoView = ((opts?: ScrollIntoViewOptions) => {
       calls.push(opts as ScrollIntoViewOptions);
     }) as HTMLElement['scrollIntoView'];
-    const dot = await waitFor(() => {
-      const d = document.querySelector('.codev-canvas-minimap-dot');
-      expect(d).not.toBeNull();
-      return d as HTMLButtonElement;
-    });
+    const bodyRef = { current: host as HTMLDivElement };
+    render(
+      <MarkerMinimap
+        markers={[{ author: 'amr', line: 2, text: 'x', raw: '<!-- REVIEW(@amr): x -->' }]}
+        bodyRef={bodyRef}
+        readingMode="horizontal"
+      />,
+    );
+    const dot = document.querySelector('.codev-canvas-minimap-dot') as HTMLButtonElement;
     act(() => { dot.click(); });
     expect(calls[0]).toEqual(blockScrollOptions('horizontal'));
+    host.remove();
   });
 
   it('paging with unmeasurable geometry leaves the key to the browser', async () => {

@@ -7,6 +7,7 @@ import { CommentComposer } from '../overlays/CommentComposer.js';
 import { MarkerMinimap } from '../overlays/MarkerMinimap.js';
 import { KeyboardHelp } from '../overlays/KeyboardHelp.js';
 import { ReadingModeToggle } from '../overlays/ReadingModeToggle.js';
+import { ReadingProgress } from '../overlays/ReadingProgress.js';
 import {
   blockScrollOptions,
   flowHeight,
@@ -549,14 +550,11 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
     onReadingModeChange?.(next);
   };
 
-  // Restore the recorded anchor after the switch has re-laid-out (D7): exact line first,
-  // nearest preceding block if the line vanished (the #1237 focus-restoration fallback,
-  // applied to scroll position). Instant, not smooth — the whole layout just changed, and
+  // Bring a recorded anchor line back to the reading start (D7 + the resize criterion): exact
+  // line first, nearest preceding block if the line vanished (the #1237 focus-restoration
+  // fallback, applied to scroll position). Instant, not smooth — the layout just changed, and
   // animating would imply a continuity that doesn't exist.
-  React.useLayoutEffect(() => {
-    const line = pendingAnchorLineRef.current;
-    if (line === null) return;
-    pendingAnchorLineRef.current = null;
+  const restoreAnchorLine = (line: number, mode: ReadingMode): void => {
     const root = bodyRef.current;
     if (!root) return;
     let target = root.querySelector<HTMLElement>(`[data-line="${line}"]`);
@@ -572,11 +570,45 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
     }
     if (target) {
       let options: ScrollIntoViewOptions = { block: 'start', inline: 'nearest' };
-      if (readingMode === 'horizontal') {
+      if (mode === 'horizontal') {
         options = { inline: 'start', block: 'nearest' };
       }
       target.scrollIntoView(options);
     }
+  };
+
+  // Restore the recorded anchor after a mode switch has re-laid-out (D7).
+  React.useLayoutEffect(() => {
+    const line = pendingAnchorLineRef.current;
+    if (line === null) return;
+    pendingAnchorLineRef.current = null;
+    restoreAnchorLine(line, readingMode);
+  }, [readingMode]);
+
+  // Track the block at the viewport start while the reviewer scrolls horizontally
+  // (rAF-throttled), so a container resize can put them back on it (spec resize criterion,
+  // phase 5). Vertical mode attaches nothing.
+  const lastViewportLineRef = React.useRef<number | null>(null);
+  React.useEffect(() => {
+    const body = bodyRef.current;
+    if (!body || readingMode !== 'horizontal') {
+      lastViewportLineRef.current = null;
+      return;
+    }
+    let raf = 0;
+    const onScroll = (): void => {
+      if (raf !== 0) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        const line = viewportStartLine('horizontal');
+        if (line !== null) lastViewportLineRef.current = line;
+      });
+    };
+    body.addEventListener('scroll', onScroll, { passive: true });
+    return () => {
+      body.removeEventListener('scroll', onScroll);
+      if (raf !== 0) cancelAnimationFrame(raf);
+    };
   }, [readingMode]);
 
   // Column-height variable (spec 1380, D1 groundwork): in horizontal mode, publish the body's
@@ -597,7 +629,14 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
     };
     publish();
     if (typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver(publish);
+    const ro = new ResizeObserver(() => {
+      publish();
+      // Re-anchor after a resize/zoom reflow (spec resize criterion): the scroll-tracked
+      // viewport-start block stays in view instead of the reflow teleporting the reader.
+      // Null on the observer's initial fire (nothing tracked yet) — no spurious scroll.
+      const line = lastViewportLineRef.current;
+      if (line !== null) restoreAnchorLine(line, 'horizontal');
+    });
     ro.observe(body);
     return () => ro.disconnect();
   }, [readingMode]);
@@ -641,8 +680,32 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
     }
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     const root = bodyRef.current;
+    if (!root) return;
+
+    // Column paging (spec 1380, phase 3 + the phase-5 container decision): CONTAINER-level —
+    // it works with focus on the body itself (focusable in horizontal, Constraint 7) or on any
+    // block, closing the phase-3 gap where paging was unreachable right after clicking the
+    // toggle. The composer is exempt: its textarea keeps native PageUp/PageDown. Steps land on
+    // column starts: quantize to the measured step grid, then move one column.
+    if (readingMode === 'horizontal' && (e.key === 'PageDown' || e.key === 'PageUp')) {
+      const t = e.target as HTMLElement | null;
+      if (t?.closest?.('.codev-canvas-comment-composer')) return;
+      const { step } = measureColumnGeometry(root);
+      // Unmeasurable geometry: leave the key to the browser rather than swallowing it.
+      if (step <= 0) return;
+      e.preventDefault();
+      let dir = 1;
+      if (e.key === 'PageUp') dir = -1;
+      const max = Math.max(root.scrollWidth - root.clientWidth, 0);
+      let target = (Math.round(root.scrollLeft / step) + dir) * step;
+      if (target < 0) target = 0;
+      if (target > max) target = max;
+      root.scrollLeft = target;
+      return;
+    }
+
     const current = (e.target as HTMLElement | null)?.closest?.('[data-line]') as HTMLElement | null;
-    if (!root || !current) return;
+    if (!current) return;
 
     if (e.key === '?') {
       e.preventDefault();
@@ -655,26 +718,6 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
         e.preventDefault();
         setHelpOpen(false);
       }
-      return;
-    }
-
-    // Column paging (spec 1380, plan phase 3; horizontal only). Reached only when the event
-    // originated on a `[data-line]` block (the `current` guard above), so keystrokes in the
-    // composer are never intercepted. Steps land on column starts: quantize to the measured
-    // step grid, then move one column.
-    if (readingMode === 'horizontal' && (e.key === 'PageDown' || e.key === 'PageUp')) {
-      const { step } = measureColumnGeometry(root);
-      // Unmeasurable geometry: leave the key to the browser rather than swallowing it
-      // (iter-1 Claude — preventDefault only when we actually page).
-      if (step <= 0) return;
-      e.preventDefault();
-      let dir = 1;
-      if (e.key === 'PageUp') dir = -1;
-      const max = Math.max(root.scrollWidth - root.clientWidth, 0);
-      let target = (Math.round(root.scrollLeft / step) + dir) * step;
-      if (target < 0) target = 0;
-      if (target > max) target = max;
-      root.scrollLeft = target;
       return;
     }
 
@@ -877,9 +920,17 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
       <ReadingModeToggle mode={readingMode} onToggle={toggleReadingMode} />
       {/* No `dangerouslySetInnerHTML`: the body's content is set imperatively in the effect above so
           React never re-commits it (which would wipe the injected cards). Rendered with no children. */}
+      {/* Horizontal-mode container semantics (Constraint 7): the body is itself focusable —
+          the landmark a screen reader announces via the roledescription, and the target that
+          makes column paging reachable without first focusing a block. Vertical mode carries
+          none of these attributes (undefined → absent). */}
       <div
         ref={bodyRef}
         className="codev-artifact-canvas-body"
+        tabIndex={readingMode === 'horizontal' ? 0 : undefined}
+        role={readingMode === 'horizontal' ? 'region' : undefined}
+        aria-label={readingMode === 'horizontal' ? 'Document content' : undefined}
+        aria-roledescription={readingMode === 'horizontal' ? 'multi-column reading view' : undefined}
         onMouseOver={activateFromPointer}
         onMouseMove={activateFromPointer}
         onFocus={(e) => activateFromFocus(e.target)}
@@ -917,7 +968,13 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
           )
         : null}
       {helpOpen ? <KeyboardHelp readingMode={readingMode} /> : null}
-      <MarkerMinimap markers={markers} bodyRef={bodyRef} readingMode={readingMode} />
+      {/* Progress readout replaces the vertical scrollbar's positional feedback (D8);
+          minimap is suppressed in horizontal (D3 — its offsetTop fractions collapse to
+          within-column positions there; `n`/`p` + the readout cover its jobs in v1). */}
+      {readingMode === 'horizontal' ? <ReadingProgress bodyRef={bodyRef} contentKey={html} /> : null}
+      {readingMode === 'vertical' ? (
+        <MarkerMinimap markers={markers} bodyRef={bodyRef} readingMode={readingMode} />
+      ) : null}
     </div>
   );
 }
