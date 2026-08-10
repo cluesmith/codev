@@ -22,12 +22,17 @@ export interface ColumnGeometry {
 
 export function measureColumnGeometry(body: HTMLElement): ColumnGeometry {
   const gap = Number.parseFloat(getComputedStyle(body).columnGap) || 0;
+  // MAX first-rect width over a sample of children, not the first child's: a narrow
+  // shrink-to-fit block (tables are `width: max-content`) would under-measure the column and
+  // skew both paging and the progress total (phase-5 consult). Prose/paragraph children span
+  // the full column box, so the max over a small sample is the column width.
   let columnWidth = 0;
-  for (let child = body.firstElementChild; child; child = child.nextElementSibling) {
+  let sampled = 0;
+  for (let child = body.firstElementChild; child && sampled < 10; child = child.nextElementSibling) {
     const rect = child.getClientRects()[0];
     if (rect && rect.width > 0) {
-      columnWidth = rect.width;
-      break;
+      sampled++;
+      if (rect.width > columnWidth) columnWidth = rect.width;
     }
   }
   let step = columnWidth + gap;

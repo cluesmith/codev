@@ -58,7 +58,12 @@ export function ReadingProgress({ bodyRef, contentKey }: ReadingProgressProps): 
       // scrollWidth counts n columns + (n-1) gaps; adding one gap makes it n whole steps.
       const total = Math.max(1, Math.round((body.scrollWidth + gap) / step));
       const current = Math.min(total, Math.round(body.scrollLeft / step) + 1);
-      setProgress({ current, total });
+      // Bail on unchanged values: `compute` runs per scroll tick, and a fresh object every
+      // tick would re-render the chip continuously for nothing (phase-5 consult).
+      setProgress((prev) => {
+        if (prev && prev.current === current && prev.total === total) return prev;
+        return { current, total };
+      });
     };
     compute();
     // Child effects run BEFORE the canvas's imperative innerHTML effect, so on a content
@@ -66,6 +71,10 @@ export function ReadingProgress({ bodyRef, contentKey }: ReadingProgressProps): 
     // more after layout settles.
     const raf = requestAnimationFrame(compute);
     body.addEventListener('scroll', compute, { passive: true });
+    // Async media (an image finishing its load) grows scrollWidth with no scroll, no
+    // border-box resize, and no content change — catch it via the capture phase, since
+    // `load` doesn't bubble.
+    body.addEventListener('load', compute, true);
     let ro: ResizeObserver | null = null;
     if (typeof ResizeObserver !== 'undefined') {
       ro = new ResizeObserver(compute);
@@ -74,6 +83,7 @@ export function ReadingProgress({ bodyRef, contentKey }: ReadingProgressProps): 
     return () => {
       cancelAnimationFrame(raf);
       body.removeEventListener('scroll', compute);
+      body.removeEventListener('load', compute, true);
       ro?.disconnect();
     };
   }, [bodyRef, contentKey]);

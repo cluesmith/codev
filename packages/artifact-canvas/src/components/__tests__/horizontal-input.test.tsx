@@ -154,6 +154,24 @@ describe('column paging (PageUp/PageDown)', () => {
     expect(body.scrollLeft).toBe(0);
   });
 
+  it('paging yields to a focused inner vertical scroller (same rule as the wheel remap)', async () => {
+    const { body } = await mountHorizontalWithGeometry();
+    const block = body.querySelector('[data-line]') as HTMLElement;
+    block.style.overflowY = 'auto';
+    Object.defineProperty(block, 'scrollHeight', { value: 500, configurable: true });
+    Object.defineProperty(block, 'clientHeight', { value: 100, configurable: true });
+    block.scrollTop = 0;
+    block.focus();
+    // Scroller can consume a downward page → the key stays native (no canvas paging).
+    const notPrevented = fireEvent.keyDown(block, { key: 'PageDown' });
+    expect(notPrevented).toBe(true);
+    expect(body.scrollLeft).toBe(0);
+    // Exhausted downward → the canvas pages.
+    block.scrollTop = 400;
+    fireEvent.keyDown(block, { key: 'PageDown' });
+    expect(body.scrollLeft).toBe(448);
+  });
+
   it('paging keys are inert in vertical mode', async () => {
     const { body } = await mountCanvas();
     const block = body.querySelector('[data-line]') as HTMLElement;

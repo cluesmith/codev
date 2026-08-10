@@ -58,6 +58,42 @@ describe('ReadingProgress (spec 1380 D8)', () => {
     body.remove();
   });
 
+  it('recomputes when contentKey changes even without scroll/resize (staleness fix, iter-1 Codex)', async () => {
+    const body = makeBody({ scrollWidth: 5328, clientWidth: 1600, columnWidth: 400, gap: 48 });
+    const { rerender } = render(<ReadingProgress bodyRef={{ current: body }} contentKey={1} />);
+    await waitFor(() =>
+      expect(
+        document.querySelector('.codev-canvas-reading-progress [aria-hidden]')?.textContent,
+      ).toBe('Column 1 of 12'),
+    );
+    // Cards injected / composer opened: scrollWidth grows with no scroll and no border-box
+    // resize — only the key identifies the change.
+    Object.defineProperty(body, 'scrollWidth', { value: 5328 + 448, configurable: true });
+    rerender(<ReadingProgress bodyRef={{ current: body }} contentKey={2} />);
+    await waitFor(() =>
+      expect(
+        document.querySelector('.codev-canvas-reading-progress [aria-hidden]')?.textContent,
+      ).toBe('Column 1 of 13'),
+    );
+    body.remove();
+  });
+
+  it('geometry uses the MAX child width, so a narrow leading table cannot skew it', async () => {
+    const body = makeBody({ scrollWidth: 5328, clientWidth: 1600, columnWidth: 400, gap: 48 });
+    // Prepend a narrow shrink-to-fit block (a small table) BEFORE the full-width child.
+    const narrow = document.createElement('table');
+    narrow.getClientRects = (() =>
+      [{ width: 120, left: 0, top: 0, right: 120, bottom: 50, height: 50 }] as unknown as DOMRectList) as HTMLElement['getClientRects'];
+    body.insertBefore(narrow, body.firstElementChild);
+    render(<ReadingProgress bodyRef={{ current: body }} />);
+    await waitFor(() =>
+      expect(
+        document.querySelector('.codev-canvas-reading-progress [aria-hidden]')?.textContent,
+      ).toBe('Column 1 of 12'), // 448-step grid, not a 168-step one
+    );
+    body.remove();
+  });
+
   it('hidden when the document fits the viewport', async () => {
     const body = makeBody({ scrollWidth: 1200, clientWidth: 1600, columnWidth: 400, gap: 48 });
     render(<ReadingProgress bodyRef={{ current: body }} />);

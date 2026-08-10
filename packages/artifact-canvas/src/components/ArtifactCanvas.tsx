@@ -690,6 +690,11 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
     if (readingMode === 'horizontal' && (e.key === 'PageDown' || e.key === 'PageUp')) {
       const t = e.target as HTMLElement | null;
       if (t?.closest?.('.codev-canvas-comment-composer')) return;
+      // Yield to a focused inner vertical scroller (a capped code block or card body) that
+      // can still consume the page in that direction — same rule as the wheel remap.
+      let pageDelta = 1;
+      if (e.key === 'PageUp') pageDelta = -1;
+      if (innerScrollerCanConsume(t, pageDelta, root)) return;
       const { step } = measureColumnGeometry(root);
       // Unmeasurable geometry: leave the key to the browser rather than swallowing it.
       if (step <= 0) return;
@@ -906,6 +911,13 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
     affordanceWrapRef.current?.remove();
   };
 
+  // Progress recomputation key (iter-1 Codex): scrollWidth moves not only on content changes
+  // but when marker CARDS are (re)injected or the composer opens/closes — neither changes
+  // `html` nor the body's border box (fixed height), so neither the ResizeObserver nor a
+  // plain html key would catch them. A memo over all three layout-affecting inputs gives the
+  // readout one stable identity per layout-relevant state.
+  const progressKey = React.useMemo(() => ({}), [html, markers, composingLine]);
+
   let rootClassName = 'codev-artifact-canvas';
   if (readingMode === 'horizontal') {
     rootClassName += ' codev-canvas-mode-horizontal';
@@ -971,7 +983,7 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
       {/* Progress readout replaces the vertical scrollbar's positional feedback (D8);
           minimap is suppressed in horizontal (D3 — its offsetTop fractions collapse to
           within-column positions there; `n`/`p` + the readout cover its jobs in v1). */}
-      {readingMode === 'horizontal' ? <ReadingProgress bodyRef={bodyRef} contentKey={html} /> : null}
+      {readingMode === 'horizontal' ? <ReadingProgress bodyRef={bodyRef} contentKey={progressKey} /> : null}
       {readingMode === 'vertical' ? (
         <MarkerMinimap markers={markers} bodyRef={bodyRef} readingMode={readingMode} />
       ) : null}
