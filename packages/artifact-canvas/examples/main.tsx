@@ -30,7 +30,24 @@ if (fixtureMode) {
 }
 const host = createStubHost(doc);
 
+// Per-user persistence in the dev host (spec 1380 D4): localStorage, mirroring what the VS
+// Code host does with globalState. An explicit ?mode= always wins (the Playwright fixtures
+// drive modes via the URL and must not depend on prior runs' storage).
+const STORAGE_KEY = 'codev-canvas-reading-mode';
+function initialReadingMode(): string | undefined {
+  const fromUrl = params.get('mode');
+  if (fromUrl !== null) return fromUrl;
+  try {
+    return window.localStorage.getItem(STORAGE_KEY) ?? undefined;
+  } catch {
+    return undefined; // storage unavailable → vertical default, toggle still works
+  }
+}
+
 function Example(): React.ReactElement {
+  // Track the mode so the page can swap its own layout: the classic centered dev column for
+  // vertical, full viewport for horizontal (a 760px well would leave room for ~1 column).
+  const [mode, setMode] = React.useState<string>(initialReadingMode() ?? 'vertical');
   const onAddComment = (line: number, text: string) => {
     // Host glue (spec D6): the canvas's inline composer (#1107) collects the body and passes it
     // here; the host just writes it back. (Pre-#1107 this used window.prompt for the input.)
@@ -42,7 +59,15 @@ function Example(): React.ReactElement {
     markerAdapter: host.markerAdapter,
     themeAdapter: host.themeAdapter,
     onAddComment,
-    initialReadingMode: params.get('mode') ?? undefined,
+    initialReadingMode: mode,
+    onReadingModeChange: (next: string) => {
+      setMode(next);
+      try {
+        window.localStorage.setItem(STORAGE_KEY, next);
+      } catch {
+        // Persistence failure is non-fatal by spec: session-only mode.
+      }
+    },
   });
 
   if (fixtureMode) {
@@ -56,14 +81,27 @@ function Example(): React.ReactElement {
     return React.createElement('div', { style }, canvas);
   }
 
+  // One stable tree for both modes (the canvas must not remount on toggle — a remount would
+  // discard the D7 position preservation this page exists to demonstrate): the wrapper swaps
+  // styles and the header hides, but the canvas keeps its position.
+  let wrapperStyle: React.CSSProperties = { maxWidth: 760, margin: '2rem auto', padding: '0 1rem' };
+  let headerStyle: React.CSSProperties = {};
+  if (mode === 'horizontal') {
+    wrapperStyle = { height: '100%' };
+    headerStyle = { display: 'none' };
+  }
   return React.createElement(
     'div',
-    { style: { maxWidth: 760, margin: '2rem auto', padding: '0 1rem' } },
-    React.createElement('h2', null, 'artifact-canvas dev example'),
+    { style: wrapperStyle },
     React.createElement(
-      'p',
-      { style: { color: '#6e7781' } },
-      'Hover a block for the + affordance (or focus it and press Enter). Comments round-trip through text.',
+      'div',
+      { style: headerStyle },
+      React.createElement('h2', null, 'artifact-canvas dev example'),
+      React.createElement(
+        'p',
+        { style: { color: '#6e7781' } },
+        'Hover a block for the + affordance (or focus it and press Enter). Comments round-trip through text.',
+      ),
     ),
     canvas,
   );

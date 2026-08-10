@@ -42,6 +42,12 @@ const vscodeApi = acquireVsCodeApi();
 // bound to, so the value is never interpreted, only required by the prop.
 const URI = 'codev:markdown-preview';
 
+const rootElement = document.getElementById('root') as HTMLElement;
+// Persisted reading mode (spec 1380 D4): bootstrapped via the initial HTML because this
+// script mounts the canvas before the first host message. The canvas coerces anything
+// unrecognized to vertical, so a missing/garbage attribute is safe.
+const initialReadingMode = rootElement.dataset.readingMode;
+
 let content = '';
 let markers: ReviewMarker[] = [];
 let refreshKey = 0;
@@ -65,7 +71,7 @@ const themeAdapter: ThemeAdapter = {
   onChange: () => ({ dispose: () => {} }),
 };
 
-const root = createRoot(document.getElementById('root') as HTMLElement);
+const root = createRoot(rootElement);
 
 function render(): void {
   root.render(
@@ -91,6 +97,11 @@ function render(): void {
         }),
       onDeleteComment: (markerLine: number, expectedAuthor: string, expectedBodyPrefix: string) =>
         vscodeApi.postMessage({ type: 'deleteComment', markerLine, expectedAuthor, expectedBodyPrefix }),
+      // Reading mode (spec 1380 D4): seed from the bootstrap attribute; forward toggle intents
+      // for the host to persist per-user.
+      initialReadingMode,
+      onReadingModeChange: (mode: string) =>
+        vscodeApi.postMessage({ type: 'readingModeChange', mode }),
       refreshKey,
     }),
   );

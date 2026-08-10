@@ -1396,7 +1396,7 @@ export async function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(
 		vscode.window.registerCustomEditorProvider(
 			MarkdownPreviewProvider.viewType,
-			new MarkdownPreviewProvider(context.extensionUri, overviewCache),
+			new MarkdownPreviewProvider(context.extensionUri, overviewCache, context.globalState),
 			{
 				webviewOptions: { retainContextWhenHidden: true },
 				supportsMultipleEditorsPerDocument: false,

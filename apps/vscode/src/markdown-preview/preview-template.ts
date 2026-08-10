@@ -21,6 +21,13 @@ export interface MarkdownPreviewHtmlOptions {
    */
   fontSizePx?: number;
   lineHeight?: number;
+  /**
+   * Persisted reading mode (spec 1380 D4), embedded in the bootstrap HTML because the canvas
+   * mounts before the first host message. MUST be pre-validated by the provider
+   * (`sanitizeReadingMode`) — only known mode names reach the template; anything else is
+   * omitted and the canvas defaults to vertical.
+   */
+  initialReadingMode?: string;
 }
 
 /** Build the full webview document with a fresh nonce bound into the CSP and the script tag. */
@@ -43,6 +50,11 @@ export function renderMarkdownPreviewHtml(opts: MarkdownPreviewHtmlOptions): str
   <link href="${opts.styleUri}" rel="stylesheet" />
   <style>
     html, body { background: var(--vscode-editor-background); margin: 0; padding: 0 14px; }
+    /* Height context (spec 1380, Constraint 3): horizontal mode needs a bounded column height.
+       Vertical mode is untouched by these — body overflow stays default, so the page scrolls
+       exactly as before; only the mode class (package CSS) consumes the 100% chain. */
+    html, body { height: 100%; box-sizing: border-box; }
+    #root { height: 100%; }
     /* Bind the canvas color tokens to the active VS Code theme (package Model A). */
     .codev-artifact-canvas {
       --codev-canvas-foreground: var(--vscode-foreground);
@@ -80,10 +92,19 @@ ${userTokens}
   <title>Codev Markdown Preview</title>
 </head>
 <body>
-  <div id="root"></div>
+  <div id="root"${readingModeAttr(opts.initialReadingMode)}></div>
   <script nonce="${nonce}" src="${opts.scriptUri}"></script>
 </body>
 </html>`;
+}
+
+/** The bootstrap `data-reading-mode` attribute. Values are provider-validated mode names, so
+ * the interpolation is closed-vocabulary by construction; anything else contributes nothing. */
+function readingModeAttr(mode: string | undefined): string {
+  if (mode === 'horizontal' || mode === 'vertical') {
+    return ` data-reading-mode="${mode}"`;
+  }
+  return '';
 }
 
 /**

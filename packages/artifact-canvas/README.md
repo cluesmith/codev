@@ -50,6 +50,27 @@ the host performs the input and calls its own `MarkerAdapter.add` (spec D6).
 | `onAddComment` | `(line: number) => void` | Comment intent; `line` is **0-based** (spec D5). |
 | `onError?` | `(err: unknown) => void` | Optional sink for genuine adapter failures. The component never throws out of an event handler. |
 | `refreshKey?` | `number \| string` | For hosts **without** a watcher: pass a new value whenever the underlying data changes to force a re-read + re-list. Hosts with a watcher omit it. |
+| `initialReadingMode?` | `string` | Seed for the reading mode (spec 1380). Typed `string` because it round-trips through host persistence and arrives untrusted; anything other than `'horizontal'` is coerced to `'vertical'`. |
+| `onReadingModeChange?` | `(mode: ReadingMode) => void` | Toggle intent: the host persists it per-user (VS Code `globalState`, browser `localStorage`, …) or ignores it — the canvas works without persistence, defaulting to vertical each mount. |
+
+### Reading modes (spec 1380)
+
+Vertical single-column flow is the default and is behaviorally unchanged for hosts that never
+touch the mode props. The canvas-rendered toggle (top-right) switches to a **horizontal
+multi-column reading mode**: content flows top-to-bottom in fixed-height columns of readable
+measure, continuing rightward newspaper-style inside a horizontally scrolling container.
+Highlights: protected block types (code, tables, images, comment cards, the open composer)
+never split across a column boundary; over-tall code/tables/cards get an inner vertical
+scroll; the vertical wheel is remapped to horizontal travel (yielding to inner scrollers,
+never touching trackpad horizontal gestures or pinch); PageUp/PageDown step whole columns; a
+"Column *k* of *n*" readout replaces the scrollbar's positional feedback; the marker minimap
+is suppressed in this mode.
+
+**Host requirements**: give the canvas a bounded height (a `height: 100%` chain from the
+viewport to the canvas container — see the two reference hosts). In an embed with no height
+context the canvas self-bounds to the visual viewport height. Persistence is host-owned via
+the two props above. The `afx open` browser annotator inherits this mode when it adopts the
+canvas (#1386).
 
 ## The three adapters
 
@@ -123,6 +144,15 @@ Import the default stylesheet and override any subset of the `--codev-canvas-*` 
 | `--codev-canvas-accent` | `#0969da` |
 | `--codev-canvas-border` | `#d0d7de` |
 | `--codev-canvas-muted` | `#656d76` |
+
+**Column tokens** (spec 1380, horizontal mode): `--codev-canvas-column-width` (`400px`, a
+preferred minimum — rendered columns stretch to share leftover width) and
+`--codev-canvas-column-gap` (`48px`). Overriding them is the supported way to retune the mode;
+there is no settings UI. The canvas also publishes `--codev-canvas-column-height` (the
+JS-observed column height, in px, on the canvas root) for derived rules; it is an output, not
+a knob. Note `--codev-canvas-prose-max-width` is **inert in horizontal mode** — it caps the
+very element that becomes the multi-column container, so the column-width token governs
+measure there instead.
 | `--codev-canvas-code-background` | `#f6f8fa` |
 | `--codev-canvas-code-foreground` | `#1f2328` |
 | `--codev-canvas-link` | `#0969da` |

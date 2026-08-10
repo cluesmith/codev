@@ -49,11 +49,15 @@ test('PageDown/PageUp step one measured column, landing on the step grid', async
     const gap = Number.parseFloat(getComputedStyle(el).columnGap) || 0;
     return width + gap;
   });
-  await expect.poll(async () => (await scrollState(body)).left).toBe(step);
+  // scrollLeft rounds to device pixels while the measured step can be fractional (columns
+  // stretch to share leftover width) — assert within a pixel of the grid, not exact equality.
+  const near = (target: number) => async () =>
+    Math.abs((await scrollState(body)).left - target) <= 1;
+  await expect.poll(near(step)).toBe(true);
   await page.keyboard.press('PageDown');
-  await expect.poll(async () => (await scrollState(body)).left).toBe(2 * step);
+  await expect.poll(near(2 * step)).toBe(true);
   await page.keyboard.press('PageUp');
-  await expect.poll(async () => (await scrollState(body)).left).toBe(step);
+  await expect.poll(near(step)).toBe(true);
 });
 
 test('n (next marked block) scrolls the marked block into the viewport horizontally', async ({ page }) => {
