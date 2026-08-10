@@ -20,3 +20,12 @@
   floor is pinned in tests). 54/54 tests pass.
 - Remaining human step at the pr gate: Amr verifies on a physical device (Stream Deck app
   >= 6.9) and re-uploads to Maker Console.
+
+## 2026-08-10 — submission completed
+
+- Amr confirmed the Maker Console accepted the resubmitted package. Acceptance criteria met.
+- Marketplace collateral added under apps/streamdeck/marketplace/: icon (288x288 from the real
+  plugin icon), thumbnail (1920x960), four gallery cards (1920x960, composed from the real
+  action icons), and release-notes.md (1,102 chars). Manifest description now links
+  https://codevos.ai/.
+- PR #1395 waiting at the pr gate for approval and merge.
