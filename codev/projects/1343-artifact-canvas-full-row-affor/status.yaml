@@ -1,7 +1,7 @@
 id: '1343'
 title: artifact-canvas-full-row-affor
 protocol: pir
-phase: implement
+phase: review
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -19,4 +19,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-08-10T03:19:08.704Z'
-updated_at: '2026-08-10T04:38:09.136Z'
+updated_at: '2026-08-10T04:38:18.916Z'
