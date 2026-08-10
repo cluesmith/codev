@@ -86,3 +86,25 @@ Plan approved. Porch-driven phase loop, one commit per phase + a consult-fix com
 
 Suites: 137 jsdom + 25 browser green; repo-wide green. Next: phase 5 (progress indicator,
 minimap suppression, a11y — incl. the deferred container-paging decision), phase 6 (hosts).
+
+## Implement phases 5–6 (same day)
+
+- **Phase 5 (progress + a11y)**: "Column k of n" readout (live chip + debounced aria-live),
+  minimap suppressed in horizontal, body became a focusable labeled region — which closed
+  phase-3's deferred container-paging decision — resize re-anchoring via a scroll-tracked
+  viewport-start line. Consult iter-1: Codex REQUEST_CHANGES (staleness when cards/composer
+  move layout without an html change) + Claude polish; fixed with a memoized layout key, and
+  chasing a parallel-run flake exposed a 4th silent scrollWidth mover (async image load) —
+  capture-phase load listener. Iter-2: both APPROVE.
+- **Phase 6 (host wiring)**: VS Code webview — persisted mode bootstrapped via
+  data-reading-mode in the initial HTML (canvas mounts before the first message),
+  WebviewToHostMessage gains readingModeChange, Memento plumbed through the provider,
+  sanitizeReadingMode gates both untrusted directions; vite dev host — localStorage +
+  mode-aware layout in one stable tree (no remount, D7 demo preserved); height contexts in
+  both hosts; README modes/tokens sections. Consult iter-1: both REQUEST_CHANGES — README
+  paragraph had landed mid-table (fixed), persistence round-trip now driven end-to-end
+  through resolveCustomTextEditor with a fake panel+Memento (10 host tests), dev-host mode
+  state defended as Constraint-3 layout glue (comment records the reasoning).
+
+All six phases done pending phase-6 iter-2. Next: PR → dev-approval demos (both hosts, incl.
+vertical-mode fence pass for the #1396 change) → merge → verify.

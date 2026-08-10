@@ -144,6 +144,10 @@ Import the default stylesheet and override any subset of the `--codev-canvas-*` 
 | `--codev-canvas-accent` | `#0969da` |
 | `--codev-canvas-border` | `#d0d7de` |
 | `--codev-canvas-muted` | `#656d76` |
+| `--codev-canvas-code-background` | `#f6f8fa` |
+| `--codev-canvas-code-foreground` | `#1f2328` |
+| `--codev-canvas-link` | `#0969da` |
+| `--codev-canvas-comment-marker` | `#bf8700` |
 
 **Column tokens** (spec 1380, horizontal mode): `--codev-canvas-column-width` (`400px`, a
 preferred minimum — rendered columns stretch to share leftover width) and
@@ -153,10 +157,6 @@ JS-observed column height, in px, on the canvas root) for derived rules; it is a
 a knob. Note `--codev-canvas-prose-max-width` is **inert in horizontal mode** — it caps the
 very element that becomes the multi-column container, so the column-width token governs
 measure there instead.
-| `--codev-canvas-code-background` | `#f6f8fa` |
-| `--codev-canvas-code-foreground` | `#1f2328` |
-| `--codev-canvas-link` | `#0969da` |
-| `--codev-canvas-comment-marker` | `#bf8700` |
 
 **Typography tokens** (#1053). Defaults mirror [github-markdown-css](https://github.com/sindresorhus/github-markdown-css)
 v5.8.1 so prose reads cleanly instead of inheriting the host's code-tuned font. Theme-invariant

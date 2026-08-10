@@ -16,11 +16,78 @@ import { renderMarkdownPreviewHtml } from '../markdown-preview/preview-template.
 // sanitize copy would drift, so mock vscode minimally to import the real function.
 import { vi } from 'vitest';
 vi.mock('vscode', () => ({
-  workspace: {}, window: {}, Position: class {}, Range: class {}, WorkspaceEdit: class {},
+  workspace: {
+    onDidChangeTextDocument: vi.fn(() => ({ dispose: vi.fn() })),
+    onDidChangeConfiguration: vi.fn(() => ({ dispose: vi.fn() })),
+    getConfiguration: vi.fn(() => ({ get: vi.fn((_k: string, d: unknown) => d) })),
+    applyEdit: vi.fn(async () => true),
+  },
+  window: { showInformationMessage: vi.fn(async () => undefined) },
+  Uri: { joinPath: vi.fn((...parts: unknown[]) => ({ toString: () => parts.join('/') })) },
+  Position: class {}, Range: class {}, WorkspaceEdit: class {},
 }));
-const { sanitizeReadingMode, READING_MODE_STATE_KEY } = await import(
+const { sanitizeReadingMode, READING_MODE_STATE_KEY, MarkdownPreviewProvider } = await import(
   '../markdown-preview/preview-provider.js'
 );
+
+/** Fake Memento + webview panel, enough to drive `resolveCustomTextEditor` end to end. */
+function makeHostFixture(stored?: unknown) {
+  const memento = {
+    get: vi.fn(() => stored),
+    update: vi.fn(async () => undefined),
+  };
+  let messageHandler: ((msg: unknown) => void) | undefined;
+  const panel = {
+    webview: {
+      options: undefined as unknown,
+      html: '',
+      cspSource: 'vscode-resource:',
+      asWebviewUri: (u: { toString(): string }) => u,
+      onDidReceiveMessage: vi.fn((h: (msg: unknown) => void) => { messageHandler = h; }),
+      postMessage: vi.fn(),
+    },
+    onDidDispose: vi.fn(),
+  };
+  const document = {
+    uri: { toString: () => 'file:///codev/specs/1.md' },
+    getText: () => '# Doc',
+  };
+  const provider = new MarkdownPreviewProvider(
+    { toString: () => 'ext:' } as never,
+    { getData: () => undefined } as never,
+    memento as never,
+  );
+  provider.resolveCustomTextEditor(document as never, panel as never, undefined as never);
+  return { memento, panel, sendMessage: (msg: unknown) => messageHandler?.(msg) };
+}
+
+describe('persistence round-trip through the provider (iter-1 consult)', () => {
+  it('readingModeChange persists a valid mode to globalState under the stable key', () => {
+    const { memento, sendMessage } = makeHostFixture();
+    sendMessage({ type: 'readingModeChange', mode: 'horizontal' });
+    expect(memento.update).toHaveBeenCalledWith(READING_MODE_STATE_KEY, 'horizontal');
+    sendMessage({ type: 'readingModeChange', mode: 'vertical' });
+    expect(memento.update).toHaveBeenLastCalledWith(READING_MODE_STATE_KEY, 'vertical');
+  });
+
+  it('a garbage mode from the webview is dropped, never stored', () => {
+    const { memento, sendMessage } = makeHostFixture();
+    for (const junk of ['sideways', 42, null, undefined]) {
+      sendMessage({ type: 'readingModeChange', mode: junk });
+    }
+    expect(memento.update).not.toHaveBeenCalled();
+  });
+
+  it('the initial HTML seeds from the persisted globalState value', () => {
+    const { panel } = makeHostFixture('horizontal');
+    expect(panel.webview.html).toContain('data-reading-mode="horizontal"');
+  });
+
+  it('a corrupt persisted value seeds nothing (canvas defaults to vertical)', () => {
+    const { panel } = makeHostFixture('diagonal');
+    expect(panel.webview.html).not.toContain('data-reading-mode');
+  });
+});
 
 describe('sanitizeReadingMode (untrusted-value gate)', () => {
   it('passes the two known modes through', () => {

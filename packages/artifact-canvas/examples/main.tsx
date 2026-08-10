@@ -47,6 +47,12 @@ function initialReadingMode(): string | undefined {
 function Example(): React.ReactElement {
   // Track the mode so the page can swap its own layout: the classic centered dev column for
   // vertical, full viewport for horizontal (a 760px well would leave room for ~1 column).
+  // This is host LAYOUT glue, not mode logic (spec Constraint 3 assigns hosts exactly two
+  // jobs: a height context and persistence — the height context here is mode-dependent
+  // because this page's vertical chrome is a centered well). All mode semantics — the
+  // vocabulary, coercion, toggling, column mechanics — live in the package; the mode value is
+  // opaque to this page beyond one equality check for its own chrome. The production host
+  // (VS Code webview) is mode-invariant full-viewport and carries no such state.
   const [mode, setMode] = React.useState<string>(initialReadingMode() ?? 'vertical');
   const onAddComment = (line: number, text: string) => {
     // Host glue (spec D6): the canvas's inline composer (#1107) collects the body and passes it
