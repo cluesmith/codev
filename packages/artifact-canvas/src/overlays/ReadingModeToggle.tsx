@@ -8,30 +8,27 @@ export interface ReadingModeToggleProps {
   onToggle(): void;
 }
 
-const SVG_NS = 'http://www.w3.org/2000/svg';
-
 /**
  * Columns glyph drawn from static path data (no user input; same rationale as the marker-card
  * icons: the package is host-agnostic, so no icon font can be assumed). Two vertical bars —
  * the multi-column page. `currentColor` lets the button's CSS drive the tint.
  */
 function ColumnsIcon(): React.ReactElement {
-  return React.createElement(
-    'svg',
-    {
-      xmlns: SVG_NS,
-      viewBox: '0 0 16 16',
-      width: 14,
-      height: 14,
-      'aria-hidden': true,
-      fill: 'none',
-      stroke: 'currentColor',
-      strokeWidth: 1.3,
-      strokeLinecap: 'round' as const,
-      strokeLinejoin: 'round' as const,
-    },
-    React.createElement('path', { d: 'M2.5 2.5h4.6v11H2.5z' }),
-    React.createElement('path', { d: 'M8.9 2.5h4.6v11H8.9z' }),
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      width={14}
+      height={14}
+      aria-hidden
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.3}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M2.5 2.5h4.6v11H2.5z" />
+      <path d="M8.9 2.5h4.6v11H8.9z" />
+    </svg>
   );
 }
 
@@ -43,13 +40,17 @@ function ColumnsIcon(): React.ReactElement {
  */
 export function ReadingModeToggle({ mode, onToggle }: ReadingModeToggleProps): React.ReactElement {
   const horizontal = mode === 'horizontal';
+  let title = 'Switch to horizontal (multi-column) reading';
+  if (horizontal) {
+    title = 'Switch to vertical reading';
+  }
   return (
     <button
       type="button"
       className="codev-canvas-reading-mode-toggle"
       aria-pressed={horizontal}
       aria-label="Horizontal reading mode"
-      title={horizontal ? 'Switch to vertical reading' : 'Switch to horizontal (multi-column) reading'}
+      title={title}
       onClick={onToggle}
     >
       <ColumnsIcon />

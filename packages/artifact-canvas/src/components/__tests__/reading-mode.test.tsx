@@ -140,4 +140,13 @@ describe('reading mode (spec 1380, phase 1)', () => {
     expect(btn.getAttribute('type')).toBe('button');
     expect(btn.getAttribute('aria-label')).toBeTruthy();
   });
+
+  it('toggle precedes the body in document order (first tab stop, not behind every block)', async () => {
+    const { body } = mountCanvas();
+    const btn = toggleButton();
+    // Every mapped block is tabindex="0", so a toggle rendered after the body would be
+    // hundreds of Tab presses away in a long spec — and in horizontal mode it is the way
+    // back (iter-1 Claude). Fixed positioning makes document order purely a tab-order choice.
+    expect(btn.compareDocumentPosition(body) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
 });

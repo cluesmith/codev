@@ -75,6 +75,28 @@ describe('default-theme.css token vocabulary', () => {
     expect(tokens.get('--codev-canvas-code-font-size')).toBe('0.85em');
   });
 
+  it('scopes every horizontal-mode rule away from the standalone MarkdownView (spec 1380)', () => {
+    // "Vertical untouched / MarkdownView untouched by every new rule" is a spec deliverable;
+    // guard it structurally (the #1053/#1343 regex-precedent style): the multicol layer must be
+    // scoped under the mode class on the composed body, and the column mechanism must never
+    // name the standalone `.codev-artifact-canvas-rendered` root.
+    expect(css).toMatch(
+      /\.codev-canvas-mode-horizontal \.codev-artifact-canvas-body\s*\{[^}]*column-width/,
+    );
+    // Comments mention both names freely — the guard is about RULES, so strip comments first.
+    const cssNoComments = css.replace(/\/\*[\s\S]*?\*\//g, '');
+    const renderedRules =
+      cssNoComments.match(/[^{}]*\.codev-artifact-canvas-rendered[^{]*\{[^}]*\}/g) ?? [];
+    expect(renderedRules.length).toBeGreaterThan(0);
+    for (const rule of renderedRules) {
+      // Ban the column PROPERTIES, not the token declarations: `--codev-canvas-column-width:`
+      // in the shared token block is vocabulary, and declaring it applies no layout. A real
+      // `column-width:` / `column-fill:` use is never preceded by `-`.
+      expect(rule).not.toMatch(/[^-]column-(width|fill)\s*:/);
+      expect(rule).not.toMatch(/codev-canvas-mode-horizontal/);
+    }
+  });
+
   it('gives inline code its own foreground token (dark-mode contrast, #1053)', () => {
     expect(tokens.has('--codev-canvas-code-foreground')).toBe(true);
     expect(tokens.get('--codev-canvas-code-foreground')).not.toBe('');

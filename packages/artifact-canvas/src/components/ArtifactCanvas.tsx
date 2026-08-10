@@ -550,11 +550,13 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
         }
       }
     }
-    target?.scrollIntoView(
-      readingMode === 'horizontal'
-        ? { inline: 'start', block: 'nearest' }
-        : { block: 'start', inline: 'nearest' },
-    );
+    if (target) {
+      let options: ScrollIntoViewOptions = { block: 'start', inline: 'nearest' };
+      if (readingMode === 'horizontal') {
+        options = { inline: 'start', block: 'nearest' };
+      }
+      target.scrollIntoView(options);
+    }
   }, [readingMode]);
 
   // Column-height variable (spec 1380, D1 groundwork): in horizontal mode, publish the body's
@@ -783,13 +785,18 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
     affordanceWrapRef.current?.remove();
   };
 
-  const rootClassName =
-    readingMode === 'horizontal'
-      ? 'codev-artifact-canvas codev-canvas-mode-horizontal'
-      : 'codev-artifact-canvas';
+  let rootClassName = 'codev-artifact-canvas';
+  if (readingMode === 'horizontal') {
+    rootClassName += ' codev-canvas-mode-horizontal';
+  }
 
   return (
     <div ref={rootRef} className={rootClassName} onMouseLeave={dismissAffordance}>
+      {/* Reading-mode toggle (spec 1380 D4): canvas-owned chrome so every host gets the control.
+          Rendered in both modes — it is the way back. Placed BEFORE the body so it is the FIRST
+          tab stop, not the last one behind every tabindex="0" block (iter-1 Claude); it is
+          position: fixed, so document order has no visual effect. */}
+      <ReadingModeToggle mode={readingMode} onToggle={toggleReadingMode} />
       {/* No `dangerouslySetInnerHTML`: the body's content is set imperatively in the effect above so
           React never re-commits it (which would wipe the injected cards). Rendered with no children. */}
       <div
@@ -832,9 +839,6 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
           )
         : null}
       {helpOpen ? <KeyboardHelp /> : null}
-      {/* Reading-mode toggle (spec 1380 D4): canvas-owned chrome so every host gets the control.
-          Rendered in both modes — it is the way back. */}
-      <ReadingModeToggle mode={readingMode} onToggle={toggleReadingMode} />
       <MarkerMinimap markers={markers} bodyRef={bodyRef} />
     </div>
   );
