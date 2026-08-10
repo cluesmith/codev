@@ -24,8 +24,8 @@ importers:
         version: 2.1.0
     devDependencies:
       '@elgato/cli':
-        specifier: ^1.7.4
-        version: 1.7.4(@types/node@22.19.17)
+        specifier: ^1.8.0
+        version: 1.8.0(@types/node@22.19.17)
       '@types/node':
         specifier: 22.x
         version: 22.19.17
@@ -538,8 +538,8 @@ packages:
     resolution: {integrity: sha512-QxULHAm7cNu72w97JUNCBFODFaXpbDg+dP8b/oWFAZ2MTRppA3U00Y2L1HqaS4J6yBqxwa/Y3nMBaxVKbB/NsA==}
     engines: {node: '>=20.19.0'}
 
-  '@elgato/cli@1.7.4':
-    resolution: {integrity: sha512-6gD0f9p6VKNYv/INZGk4RzjBbiGSCUCiDOXxh52KyjVbnsJXNlFSKFBk8mtZIoJQHRl+5/QkZkKxXUmABxf86Q==}
+  '@elgato/cli@1.8.0':
+    resolution: {integrity: sha512-4nha53v+gQc1Fha3rip3HH2Psb8zLZQbbbuld9J52uW0/hK3a4Qo4pkc2gaOEKMFcNubG74SwfU4NlVah6x4Sw==}
     engines: {node: '>=20.1.0'}
     hasBin: true
 
@@ -4375,7 +4375,7 @@ snapshots:
 
   '@csstools/css-tokenizer@4.0.0': {}
 
-  '@elgato/cli@1.7.4(@types/node@22.19.17)':
+  '@elgato/cli@1.8.0(@types/node@22.19.17)':
     dependencies:
       '@elgato/schemas': 0.4.15
       '@humanwhocodes/momoa': 3.3.10
@@ -5380,7 +5380,7 @@ snapshots:
       obug: 2.1.1
       std-env: 4.0.0
       tinyrainbow: 3.1.0
-      vitest: 4.1.4(@types/node@22.19.17)(@vitest/coverage-v8@4.1.4)(jsdom@26.1.0)(vite@6.4.2(@types/node@22.19.17)(tsx@4.21.0))
+      vitest: 4.1.4(@types/node@22.19.17)(@vitest/coverage-v8@4.1.4)(jsdom@28.1.0)(vite@6.4.2(@types/node@22.19.17)(tsx@4.21.0))
 
   '@vitest/expect@4.1.4':
     dependencies:
