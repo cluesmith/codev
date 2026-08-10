@@ -100,3 +100,25 @@ else
   SCRIPT_DIR="$(dirname "$0")"
   "$SCRIPT_DIR/bump-vscode.sh" "$VERSION"
 fi
+
+# Stream Deck plugin: package.json rides the lockstep, and the Elgato manifest
+# carries a four-part {version}.{build} that must move with it (pinned by
+# apps/streamdeck/src/__tests__/version-sync.test.ts). The Elgato Marketplace,
+# like VS Code's, takes plain numeric versions only — skip on pre-releases.
+if [ "$IS_PRERELEASE" = "1" ]; then
+  echo "Skipping apps/streamdeck ($VERSION is a pre-release; Elgato manifest Version is numeric-only)"
+else
+  bump_file "apps/streamdeck/package.json"
+  MANIFEST="apps/streamdeck/com.cluesmith.codev.sdPlugin/manifest.json" VERSION="$VERSION" node -e '
+    const fs = require("fs");
+    const p = process.env.MANIFEST;
+    const content = fs.readFileSync(p, "utf8");
+    const pattern = /^(  "Version"\s*:\s*")[^"]*(")/m;
+    if (!pattern.test(content)) {
+      console.error("Failed to find manifest Version field in " + p);
+      process.exit(1);
+    }
+    fs.writeFileSync(p, content.replace(pattern, `$1${process.env.VERSION}.0$2`));
+    console.log("Bumped streamdeck manifest → " + process.env.VERSION + ".0");
+  '
+fi

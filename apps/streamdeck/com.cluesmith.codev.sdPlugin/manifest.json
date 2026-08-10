@@ -102,7 +102,7 @@
     {
       "Name": "Diff File Navigator",
       "UUID": "com.cluesmith.codev.diff-file-nav",
-      "Tooltip": "Step across files in a builder diff review; press to jump to the first file.",
+      "Tooltip": "Step across files in a builder diff review; press to forward the current file to the builder; tap the touch strip to jump to the first file.",
       "Icon": "icons/list/diff-file-nav",
       "Controllers": ["Encoder"],
       "Encoder": {
@@ -114,7 +114,7 @@
     {
       "Name": "Diff Hunk Navigator",
       "UUID": "com.cluesmith.codev.diff-hunk-nav",
-      "Tooltip": "Step across changes within a diff; press to jump to the first change.",
+      "Tooltip": "Step across changes within a diff; press to forward the current change to the builder; tap the touch strip to jump to the first change.",
       "Icon": "icons/list/diff-hunk-nav",
       "Controllers": ["Encoder"],
       "Encoder": {
@@ -126,7 +126,7 @@
     {
       "Name": "Scroll & Forward Selection",
       "UUID": "com.cluesmith.codev.scroll-nav",
-      "Tooltip": "Rotate to scroll the active editor; tap the touch strip to forward the current selection to the builder.",
+      "Tooltip": "Rotate to scroll the active editor; press the dial to forward the current selection to the builder.",
       "Icon": "icons/list/scroll",
       "Controllers": ["Encoder"],
       "Encoder": {

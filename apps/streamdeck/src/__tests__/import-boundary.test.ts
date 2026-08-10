@@ -37,11 +37,23 @@ function collectSourceFiles(dir: string): string[] {
   return out;
 }
 
-/** Every static import/export-from specifier in a module's source text. */
+/**
+ * Every module specifier in a source text: static `import … from` /
+ * `export … from`, bare side-effect imports (`import 'pkg'`), and dynamic
+ * `import('pkg')`. Side-effect and dynamic forms matter — a plain
+ * from-clause regex would let `import '@cluesmith/codev-core'` bypass the
+ * boundary entirely.
+ */
 function importSpecifiers(text: string): string[] {
   const out: string[] = [];
-  const pattern = /(?:^|\n)\s*(?:import|export)\s[^;]*?from\s+['"]([^'"]+)['"]/g;
-  for (const match of text.matchAll(pattern)) out.push(match[1]);
+  const patterns = [
+    /(?:^|\n)\s*(?:import|export)\s[^;]*?from\s+['"]([^'"]+)['"]/g,
+    /(?:^|\n)\s*import\s+['"]([^'"]+)['"]/g,
+    /\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g,
+  ];
+  for (const pattern of patterns) {
+    for (const match of text.matchAll(pattern)) out.push(match[1]);
+  }
   return out;
 }
 
@@ -53,6 +65,23 @@ const ALLOWED = [
 ];
 
 const files = collectSourceFiles(srcRoot);
+
+describe('importSpecifiers extraction', () => {
+  it('captures static, re-export, side-effect, and dynamic import forms', () => {
+    const fixture = [
+      "import { TowerClient } from '@cluesmith/codev-sdk/controller';",
+      "export { helper } from './helper.js';",
+      "import '@cluesmith/codev-core';",
+      "const lazy = await import('@cluesmith/codev-types');",
+    ].join('\n');
+    expect(importSpecifiers(fixture)).toEqual([
+      '@cluesmith/codev-sdk/controller',
+      './helper.js',
+      '@cluesmith/codev-core',
+      '@cluesmith/codev-types',
+    ]);
+  });
+});
 
 describe('import boundary', () => {
   it('finds the shipped source files', () => {

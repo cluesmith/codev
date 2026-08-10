@@ -82,9 +82,13 @@ builder (+ its phase and position); PR / Spawn show the item + `i/N`.
 - **Spawn from Backlog** — rotate the backlog; **push** spawns a builder for the
   selected issue (VSCode prompts for the protocol).
 - **Diff File Navigator** — rotate = next / previous file in a diff review;
-  **push** = first file.
-- **Diff Hunk Navigator** — rotate = next / previous change; **push** = first
+  **push** = forward the current file to the builder; **tap the touch strip** =
+  jump to the first file.
+- **Diff Hunk Navigator** — rotate = next / previous change; **push** = forward
+  the current change to the builder; **tap the touch strip** = jump to the first
   change.
+- **Scroll** — rotate = scroll the focused editor's viewport (caret stays put);
+  **push** = forward the current selection to the builder.
 
 Verbs are stamped with the active workspace, so a single Tower serving several
 workspaces routes each command to the right one.
@@ -181,8 +185,9 @@ the activity-hooks support merged.
 
 ## Status / roadmap
 
-V0.1 — functional, build/type/unit-verified. Not yet validated end-to-end on
-physical hardware. The dial touch strips render title + a live value via
+Functional — build/type/unit-verified and validated end-to-end on physical
+hardware (Stream Deck +, live Tower; versioned in lockstep with the codev
+workspace since 3.3.0). The dial touch strips render title + a live value via
 `setFeedback`; a richer SVG/icon render layer (badges, colour by state) is still
 out of scope. Also deliberately out of scope (see the pre-migration `PLAN.md`):
 editor scrolling (use native Stream Deck keystrokes — PageUp/PageDown) and silent

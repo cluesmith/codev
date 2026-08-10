@@ -75,9 +75,20 @@ which package failed) — no duplicate entry added.
 
 - **The one behavioral change**: `plugin.ts` constructs `TowerClient({ getAuthKey: readLocalKey })`; the old client read the key implicitly. Verified live (badge online ⇒ auth header worked).
 - **Icon pipeline**: key faces keep color (spec-allowed); list/category icons are new white-monochrome derivations; plugin icon is a 256/512 white-on-black tile rendered from the updated `plugin.svg`. Watermark removal repainted bottom-left regions to each tile's background — glyphs verified intact via montage inspection.
-- **Version lockstep**: `version-sync.test.ts` pins manifest `Version` (`3.3.0.0`) to package.json (`3.3.0`). Release tooling doesn't bump the manifest — the next release will fail this test until the manifest is bumped. **Follow-up worth filing**: teach the RELEASE protocol to bump `apps/streamdeck/com.cluesmith.codev.sdPlugin/manifest.json`.
+- **Version lockstep**: `scripts/bump-all.sh` now bumps `apps/streamdeck/package.json` and the Elgato manifest's four-part `Version` (`<version>.0`) alongside the other workspace packages, skipping pre-releases (Elgato's manifest is numeric-only, mirroring the vscode constraint). `version-sync.test.ts` remains the guard against the pair drifting through manual edits. (The consultation caught that this review originally claimed the test would fail loudly at release — in fact `bump-all.sh` covered neither file, so drift would have been silent; fixed by extending the script.)
 - **Canary caveat**: `sdk-canary.yml` is dispatch-only; its cron must be enabled after the sdk's first npm publish. It assumes default `link-workspace-packages: false` (guard comment in the file).
 - **Follow-up findings from live testing** (out of scope here, for the architect): workspace display-name collision (two workspaces named `codev` are indistinguishable on the touch strip); Tower registers overly broad workspaces (`~`, `~/repos/cluesmith`) that can hijack follow-focus.
+
+## Consultation Findings & Dispositions (single advisory pass)
+
+PIR runs the 3-way consultation once — these findings were **not** independently re-reviewed, so
+the human at the `pr` gate is the remaining check on each disposition. Gemini lane skipped
+(agy unauthenticated, non-blocking). Full texts in `codev/projects/1347-*/1347-review-iter1-*.txt`.
+
+- **Codex — REQUEST_CHANGES (2 findings, both confirmed and fixed):**
+  1. *Boundary scanner missed side-effect imports* (`import '@cluesmith/codev-core'`) and dynamic `import()`. Real gap — the regex required a `from` clause. Fixed: extractor now covers static/re-export/side-effect/dynamic forms, with a fixture regression test pinning all four.
+  2. *Tooltips and README contradicted the implementation* for the diff dials (press forwards, touch jumps to first — docs said press = first) and ScrollNav (press forwards selection — docs said touch). Confirmed against `actions.ts`; the verbatim-imported docs lagged a behavior swap made in the old repo. Fixed in `manifest.json` tooltips and README, plus a previously missing Scroll dial bullet.
+- **Claude — non-blocking, 3 minors, all fixed:** the `bump-all.sh` gap above (its analysis corrected this review's original claim); stale README status prose ("V0.1… not yet validated on hardware"); the same boundary-scanner gap Codex flagged.
 
 ## How to Test Locally
 
