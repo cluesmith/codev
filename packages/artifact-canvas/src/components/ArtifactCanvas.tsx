@@ -1,11 +1,18 @@
 import * as React from 'react';
 import { createPortal } from 'react-dom';
-import type { ArtifactCanvasProps, ReviewMarker } from '../types.js';
+import type { ArtifactCanvasProps, ReadingMode, ReviewMarker } from '../types.js';
 import { renderMarkdown } from '../renderer/renderer.js';
 import { CommentAffordance } from '../overlays/CommentAffordance.js';
 import { CommentComposer } from '../overlays/CommentComposer.js';
 import { MarkerMinimap } from '../overlays/MarkerMinimap.js';
 import { KeyboardHelp } from '../overlays/KeyboardHelp.js';
+import { ReadingModeToggle } from '../overlays/ReadingModeToggle.js';
+
+/** Coerce an untrusted (host-persisted) mode value to the closed vocabulary (spec 1380 D4). */
+function coerceReadingMode(value: string | undefined): ReadingMode {
+  if (value === 'horizontal') return 'horizontal';
+  return 'vertical';
+}
 
 /**
  * ArtifactCanvas — the composed review surface (Phase 3).
@@ -137,9 +144,27 @@ function makeCardAction(
 }
 
 export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
-  const { uri, fileAdapter, markerAdapter, onAddComment, onEditComment, onDeleteComment, onError, refreshKey } = props;
+  const {
+    uri,
+    fileAdapter,
+    markerAdapter,
+    onAddComment,
+    onEditComment,
+    onDeleteComment,
+    onError,
+    refreshKey,
+    initialReadingMode,
+    onReadingModeChange,
+  } = props;
   const canEdit = onEditComment !== undefined;
   const canDelete = onDeleteComment !== undefined;
+
+  // Reading mode (spec 1380 D4): uncontrolled after mount, seeded from the host's persisted
+  // value coerced to the closed vocabulary. Mode is React state on the root, so it survives
+  // content rebuilds (the innerHTML effect touches only the body's children).
+  const [readingMode, setReadingMode] = React.useState<ReadingMode>(() =>
+    coerceReadingMode(initialReadingMode),
+  );
 
   const [content, setContent] = React.useState<string>('');
   const [markers, setMarkers] = React.useState<ReviewMarker[]>([]);
@@ -473,6 +498,88 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
     // Focusing fires the body's onFocus → activateFromFocus, so the "+" follows the jump for free.
   };
 
+  // ---- Reading-mode switch (spec 1380 D4/D7) ----
+  const rootRef = React.useRef<HTMLDivElement>(null);
+  // data-line of the block at the viewport start, recorded just before a mode switch; the
+  // layout effect below restores it once the new mode has laid out (D7 coarse preservation).
+  const pendingAnchorLineRef = React.useRef<number | null>(null);
+
+  // First block (tree order) not entirely before the viewport start — the block the reviewer
+  // is reading. Vertical: the viewport start is the window top (the page/host scrolls the
+  // canvas). Horizontal: the body's left edge (the body is the horizontal scroll container).
+  const viewportStartLine = (mode: ReadingMode): number | null => {
+    const root = bodyRef.current;
+    if (!root) return null;
+    const rootRect = root.getBoundingClientRect();
+    for (const el of collectBlocks(root)) {
+      const r = el.getBoundingClientRect();
+      const visible = mode === 'horizontal' ? r.right > rootRect.left : r.bottom > 0;
+      if (visible) {
+        const n = Number(el.getAttribute('data-line'));
+        return Number.isNaN(n) ? null : n;
+      }
+    }
+    return null;
+  };
+
+  const toggleReadingMode = (): void => {
+    const next: ReadingMode = readingMode === 'horizontal' ? 'vertical' : 'horizontal';
+    pendingAnchorLineRef.current = viewportStartLine(readingMode);
+    setReadingMode(next);
+    onReadingModeChange?.(next);
+  };
+
+  // Restore the recorded anchor after the switch has re-laid-out (D7): exact line first,
+  // nearest preceding block if the line vanished (the #1237 focus-restoration fallback,
+  // applied to scroll position). Instant, not smooth — the whole layout just changed, and
+  // animating would imply a continuity that doesn't exist.
+  React.useLayoutEffect(() => {
+    const line = pendingAnchorLineRef.current;
+    if (line === null) return;
+    pendingAnchorLineRef.current = null;
+    const root = bodyRef.current;
+    if (!root) return;
+    let target = root.querySelector<HTMLElement>(`[data-line="${line}"]`);
+    if (target === null) {
+      let bestLine = -1;
+      for (const el of Array.from(root.querySelectorAll<HTMLElement>('[data-line]'))) {
+        const l = Number(el.getAttribute('data-line'));
+        if (!Number.isNaN(l) && l < line && l > bestLine) {
+          bestLine = l;
+          target = el;
+        }
+      }
+    }
+    target?.scrollIntoView(
+      readingMode === 'horizontal'
+        ? { inline: 'start', block: 'nearest' }
+        : { block: 'start', inline: 'nearest' },
+    );
+  }, [readingMode]);
+
+  // Column-height variable (spec 1380, D1 groundwork): in horizontal mode, publish the body's
+  // resolved height as `--codev-canvas-column-height` so cap rules can derive from it. The CSS
+  // layer self-bounds the body (100% of the host bound, capped to the viewport), so this is
+  // measurement, not sizing — no circularity. Hosts without ResizeObserver (jsdom) keep the
+  // one-shot measurement.
+  React.useEffect(() => {
+    const root = rootRef.current;
+    const body = bodyRef.current;
+    if (!root || !body) return;
+    if (readingMode !== 'horizontal') {
+      root.style.removeProperty('--codev-canvas-column-height');
+      return;
+    }
+    const publish = (): void => {
+      root.style.setProperty('--codev-canvas-column-height', `${body.clientHeight}px`);
+    };
+    publish();
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(publish);
+    ro.observe(body);
+    return () => ro.disconnect();
+  }, [readingMode]);
+
   // Keyboard handling on the body (#1107 activation + #1237 jump navigation). Every branch below
   // requires the event to originate on a `[data-line]` block, so keystrokes inside the composer
   // textarea, the card action buttons, or the minimap are never intercepted — typing "n" in a
@@ -676,8 +783,13 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
     affordanceWrapRef.current?.remove();
   };
 
+  const rootClassName =
+    readingMode === 'horizontal'
+      ? 'codev-artifact-canvas codev-canvas-mode-horizontal'
+      : 'codev-artifact-canvas';
+
   return (
-    <div className="codev-artifact-canvas" onMouseLeave={dismissAffordance}>
+    <div ref={rootRef} className={rootClassName} onMouseLeave={dismissAffordance}>
       {/* No `dangerouslySetInnerHTML`: the body's content is set imperatively in the effect above so
           React never re-commits it (which would wipe the injected cards). Rendered with no children. */}
       <div
@@ -720,6 +832,9 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
           )
         : null}
       {helpOpen ? <KeyboardHelp /> : null}
+      {/* Reading-mode toggle (spec 1380 D4): canvas-owned chrome so every host gets the control.
+          Rendered in both modes — it is the way back. */}
+      <ReadingModeToggle mode={readingMode} onToggle={toggleReadingMode} />
       <MarkerMinimap markers={markers} bodyRef={bodyRef} />
     </div>
   );

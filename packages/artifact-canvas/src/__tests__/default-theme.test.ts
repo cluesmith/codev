@@ -37,6 +37,8 @@ describe('default-theme.css token vocabulary', () => {
         "--codev-canvas-code-font-family",
         "--codev-canvas-code-font-size",
         "--codev-canvas-code-foreground",
+        "--codev-canvas-column-gap",
+        "--codev-canvas-column-width",
         "--codev-canvas-comment-marker",
         "--codev-canvas-font-family",
         "--codev-canvas-font-size",

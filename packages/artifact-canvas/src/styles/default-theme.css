@@ -60,6 +60,13 @@
      (not canvas-level) so the strip is part of the row's own hover box and travels with the row
      through #1380's column fragmentation. */
   --codev-canvas-gutter: 1.9rem;
+  /* Horizontal reading mode (spec 1380 D6): the preferred column measure and gap. Applied only
+     under `.codev-canvas-mode-horizontal` (composed surface); overriding them is the supported
+     way to retune the mode — no settings UI. NOTE `column-width` is a preferred MINIMUM: real
+     columns stretch to share leftover viewport width, so code measuring columns must read
+     layout, never this token. */
+  --codev-canvas-column-width: 400px;
+  --codev-canvas-column-gap: 48px;
   /* Per-level heading sizes. github-markdown-css's scale is non-geometric, so a single ratio
      can't reproduce it — explicit per-level tokens mirror the baseline exactly (#1053). */
   --codev-canvas-h1-size: 2em;
@@ -454,6 +461,70 @@
 .codev-canvas-comment-composer-actions button:focus-visible {
   outline: 2px solid var(--codev-canvas-accent);
   outline-offset: 1px;
+}
+
+/*
+ * Horizontal reading mode (spec 1380, Approach 1). The mode class sits on the CANVAS ROOT and
+ * every rule below scopes `.codev-canvas-mode-horizontal .codev-artifact-canvas-body` — the
+ * body is the multicol element, and none of these rules reuse the shared `:is(body, rendered)`
+ * groups, so the standalone MarkdownView is untouched by construction. With the class absent
+ * (vertical, the default), none of this applies.
+ *
+ * Height model: the body fills the host-provided bound (`height: 100%`) and self-bounds to the
+ * visual viewport (`max-height: 100vh`) when the host provides none — an unbounded embed gets
+ * viewport-height columns, never one infinite column (spec success criterion). Overflow columns
+ * beyond the width scroll horizontally on the body itself (spike finding 1).
+ */
+.codev-canvas-mode-horizontal {
+  height: 100%;
+}
+.codev-canvas-mode-horizontal .codev-artifact-canvas-body {
+  height: 100%;
+  max-height: 100vh;
+  box-sizing: border-box;
+  column-width: var(--codev-canvas-column-width);
+  column-gap: var(--codev-canvas-column-gap);
+  column-fill: auto;
+  overflow-x: auto;
+  overflow-y: hidden;
+  /* The prose-measure cap is INERT in horizontal mode (spec D6): it targets this same element,
+     and capping the multicol container would collapse the mode to ~one column. Measure here is
+     governed solely by the column-width token. */
+  max-width: none;
+}
+
+/* Reading-mode toggle (spec 1380 D4): fixed top-right, matching the canvas's other fixed
+   chrome (minimap rail, keys legend); right offset clears the 14px minimap column. Token-styled
+   like the "+" button; 24px hit floor (WCAG 2.5.8, the #1236 convention). */
+.codev-canvas-reading-mode-toggle {
+  position: fixed;
+  top: 12px;
+  right: 20px;
+  z-index: 6;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  min-height: 24px;
+  padding: 3px;
+  font: inherit;
+  border: 1px solid var(--codev-canvas-border);
+  border-radius: 4px;
+  background: var(--codev-canvas-background);
+  color: var(--codev-canvas-muted);
+  cursor: pointer;
+  user-select: none;
+}
+.codev-canvas-reading-mode-toggle:hover,
+.codev-canvas-reading-mode-toggle:focus-visible {
+  background: var(--codev-canvas-code-background);
+  color: var(--codev-canvas-foreground);
+  outline: 2px solid var(--codev-canvas-accent);
+}
+/* Pressed = horizontal mode active: accent tint so the state reads at a glance. */
+.codev-canvas-reading-mode-toggle[aria-pressed='true'] {
+  color: var(--codev-canvas-accent);
+  border-color: var(--codev-canvas-accent);
 }
 
 /* Right-edge marker minimap (#863): a fixed, narrow column of dots — one per REVIEW marker,
