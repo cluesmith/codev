@@ -38,3 +38,11 @@ block anchor on mode switch; D8 column-count progress readout). Spike code staye
 scratchpad (throwaway, not committed per research-docs convention).
 
 Next: porch checks → porch done → 3-way consultation → spec-approval gate.
+
+**Iter-1 consultation.** Codex REQUEST_CHANGES (5 findings), Claude COMMENT (6 findings,
+code-verified — caught that neither v1 host provides a bounded height today, and that
+`--codev-canvas-prose-max-width` sits on the future multicol element). All 11 accepted:
+card-body caps, MarkdownView exclusion, wheel yield-to-inner-scrollers, resize/zoom
+recompute, persistence validation, in-scope host height wiring, prose-cap inert in
+horizontal, PageUp/PageDown column paging, selection scenario, spike→Playwright fixture.
+Spec revised + rebuttals committed. **spec-approval gate requested; waiting on human.**
