@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="360" height="1400" viewBox="0 0 360 1400">
+  <!-- Deliberately over-tall diagram for the horizontal-mode image-cap regression test. -->
+  <rect width="360" height="1400" fill="#0969da"/>
+  <rect x="20" y="20" width="320" height="1360" fill="none" stroke="#ffffff" stroke-width="4"/>
+  <text x="180" y="700" fill="#ffffff" font-size="28" text-anchor="middle">tall diagram</text>
+</svg>

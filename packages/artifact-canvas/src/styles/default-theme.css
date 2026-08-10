@@ -491,6 +491,58 @@
      and capping the multicol container would collapse the mode to ~one column. Measure here is
      governed solely by the column-width token. */
   max-width: none;
+  /* Usable height for the tall-block caps below: the JS-observed column height minus one rhythm
+     unit each side. Underscore prefix = private (not part of the `--codev-canvas-*` public
+     vocabulary; the token snapshot test intentionally does not see it). */
+  --_codev-column-cap: calc(
+    var(--codev-canvas-column-height, 100vh) - 2 * var(--codev-canvas-paragraph-spacing)
+  );
+}
+
+/*
+ * Fragmentation protection (spec 1380 Constraint 4 + D1). Protected block types never split
+ * across a column boundary; and because Chromium does NOT honor `break-inside: avoid` for a
+ * block taller than the column (it fragments it anyway AND lets a fragment overflow the column
+ * bottom — spike finding 3, unreachable under `overflow-y: hidden`), every protected type also
+ * gets a height cap with inner vertical scroll so the too-tall fallback is never entered.
+ * Marker-card STACKS may break between cards (a long thread reads on like prose); each card is
+ * individually protected. Images are monolithic by engine guarantee (replaced elements never
+ * fragment); the cap scales a tall diagram to fit its column.
+ */
+.codev-canvas-mode-horizontal .codev-artifact-canvas-body > pre,
+.codev-canvas-mode-horizontal .codev-artifact-canvas-body > table[data-line],
+.codev-canvas-mode-horizontal .codev-artifact-canvas-body .codev-canvas-marker-card,
+.codev-canvas-mode-horizontal .codev-artifact-canvas-body .codev-canvas-comment-composer-host {
+  break-inside: avoid;
+}
+/* NOTE the bare `> pre` (not `pre[data-line]`): markdown-it's fence renderer emits token
+   attrs on the INNER `code`, so a fence row is `<pre><code data-line …>` — `pre[data-line]`
+   matches nothing the renderer produces (fixture-caught). Tables are `_open` tokens, so the
+   attrs land on `<table>` itself. */
+/* Tall code: the inner `code` is already the scroll container (#1343); cap it just under the
+   column, allowing for the pre's own 16px paddings + 1px borders + trailing rhythm. */
+.codev-canvas-mode-horizontal .codev-artifact-canvas-body > pre > code {
+  max-height: calc(var(--_codev-column-cap) - 34px);
+  overflow-y: auto;
+}
+/* Tall table: the table row is already `display: block; overflow: auto` — the cap makes that
+   existing scroll container bound its height too. */
+.codev-canvas-mode-horizontal .codev-artifact-canvas-body > table[data-line] {
+  max-height: var(--_codev-column-cap);
+}
+/* Tall single comment card: cap the body text, keep author/actions visible. */
+.codev-canvas-mode-horizontal .codev-artifact-canvas-body .codev-canvas-marker-card-body {
+  max-height: calc(var(--_codev-column-cap) - 24px);
+  overflow-y: auto;
+}
+/* Tall image: scale to fit the column (width is already capped by `max-width: 100%`). */
+.codev-canvas-mode-horizontal .codev-artifact-canvas-body img {
+  max-height: var(--_codev-column-cap);
+}
+/* Open composer: protected whole (above); clamp the textarea so user resizing can never push
+   the composer past a column (spec D1). */
+.codev-canvas-mode-horizontal .codev-artifact-canvas-body .codev-canvas-comment-composer-input {
+  max-height: calc(var(--_codev-column-cap) - 60px);
 }
 
 /* Reading-mode toggle (spec 1380 D4): fixed top-right, matching the canvas's other fixed

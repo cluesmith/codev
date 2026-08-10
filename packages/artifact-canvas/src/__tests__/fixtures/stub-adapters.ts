@@ -45,11 +45,20 @@ const REVIEW_RE = /<!--\s*REVIEW\(@([^)]+)\):\s*(.*?)\s*-->/;
 /** Parse positional REVIEW comments out of the text into ReviewMarkers (text → markers). */
 function parseMarkers(text: string): ReviewMarker[] {
   const out: ReviewMarker[] = [];
-  text.split('\n').forEach((ln, i) => {
+  const lines = text.split('\n');
+  lines.forEach((ln, i) => {
     const m = ln.match(REVIEW_RE);
     // #857: a REVIEW comment sits on the line BELOW the block it annotates, so its logical
-    // (0-based) line is i-1. A comment on line 0 annotates nothing and is skipped.
-    if (m && i > 0) out.push({ author: m[1], line: i - 1, text: m[2], raw: ln.trim() });
+    // (0-based) line is i-1 — walking back past any preceding comment lines, so a run of
+    // consecutive comments STACKS on the same block (comment lines are stripped from the
+    // render and have no `data-line` of their own). A comment with no content above is skipped.
+    if (m && i > 0) {
+      let line = i - 1;
+      while (line > 0 && REVIEW_RE.test(lines[line])) line--;
+      if (!REVIEW_RE.test(lines[line])) {
+        out.push({ author: m[1], line, text: m[2], raw: ln.trim() });
+      }
+    }
   });
   return out;
 }

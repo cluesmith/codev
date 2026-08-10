@@ -90,6 +90,35 @@ jobs:
         working-directory: apps/vscode
         run: pnpm test:unit
 
+  canvas-browser:
+    name: Artifact-Canvas Browser Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Install Playwright Chromium
+        working-directory: packages/artifact-canvas
+        run: pnpm exec playwright install --with-deps chromium
+
+      # Real-browser fragmentation regression suite (spec 1380): jsdom cannot express CSS
+      # multi-column fragmentation, so the spike-derived invariants run against Chromium here.
+      - name: Run artifact-canvas browser tests
+        working-directory: packages/artifact-canvas
+        run: pnpm test:browser
+
   integration:
     name: Tower Integration Tests
     runs-on: ubuntu-latest

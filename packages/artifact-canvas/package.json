@@ -25,6 +25,7 @@
   "scripts": {
     "build": "tsdown --config-loader native",
     "test": "vitest run",
+    "test:browser": "playwright test",
     "build:smoke": "node scripts/smoke.mjs",
     "check-types": "tsc --noEmit",
     "dev:example": "vite examples"
@@ -38,6 +39,7 @@
     "markdown-it": "^14.1.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.58.0",
     "@testing-library/jest-dom": "^6.6.0",
     "@testing-library/react": "^16.0.0",
     "@types/dompurify": "^3.0.5",
