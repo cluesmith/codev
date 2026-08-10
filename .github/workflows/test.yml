@@ -90,6 +90,20 @@ jobs:
         working-directory: apps/vscode
         run: pnpm test:unit
 
+      # Streamdeck check-types resolves the sdk's dist .d.ts — the "Build sdk
+      # package" step above must stay ahead of these.
+      - name: Type-check streamdeck plugin
+        working-directory: apps/streamdeck
+        run: pnpm check-types
+
+      - name: Run streamdeck unit tests
+        working-directory: apps/streamdeck
+        run: pnpm test
+
+      - name: Build + validate streamdeck plugin
+        working-directory: apps/streamdeck
+        run: pnpm build && pnpm validate
+
   canvas-browser:
     name: Artifact-Canvas Browser Tests
     runs-on: ubuntu-latest
