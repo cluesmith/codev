@@ -218,6 +218,57 @@ describe('axis-aware navigation', () => {
   });
 });
 
+describe('legend and minimap (phase-3 deliverables)', () => {
+  it('keys legend lists the paging row only in horizontal mode', async () => {
+    for (const mode of ['vertical', 'horizontal'] as const) {
+      cleanup();
+      const { body } = await mountCanvas({ initialReadingMode: mode });
+      const block = body.querySelector('[data-line]') as HTMLElement;
+      block.focus();
+      fireEvent.keyDown(block, { key: '?' });
+      const help = await waitFor(() => {
+        const h = document.querySelector('.codev-canvas-keyboard-help');
+        expect(h).not.toBeNull();
+        return h as HTMLElement;
+      });
+      if (mode === 'horizontal') {
+        expect(help.textContent).toContain('PgUp / PgDn');
+      } else {
+        expect(help.textContent).not.toContain('PgUp / PgDn');
+      }
+    }
+  });
+
+  it('minimap dot click scrolls axis-aware', async () => {
+    const { body } = await mountCanvas({ initialReadingMode: 'horizontal' });
+    await waitFor(() =>
+      expect(body.querySelector('.codev-canvas-has-marker')).not.toBeNull(),
+    );
+    const marked = body.querySelector('.codev-canvas-has-marker') as HTMLElement;
+    const calls: ScrollIntoViewOptions[] = [];
+    marked.scrollIntoView = ((opts?: ScrollIntoViewOptions) => {
+      calls.push(opts as ScrollIntoViewOptions);
+    }) as HTMLElement['scrollIntoView'];
+    const dot = await waitFor(() => {
+      const d = document.querySelector('.codev-canvas-minimap-dot');
+      expect(d).not.toBeNull();
+      return d as HTMLButtonElement;
+    });
+    act(() => { dot.click(); });
+    expect(calls[0]).toEqual(blockScrollOptions('horizontal'));
+  });
+
+  it('paging with unmeasurable geometry leaves the key to the browser', async () => {
+    const { body } = await mountCanvas({ initialReadingMode: 'horizontal' });
+    // jsdom: no rects and clientWidth 0 → step 0 → no preventDefault, no movement.
+    const block = body.querySelector('[data-line]') as HTMLElement;
+    block.focus();
+    const notPrevented = fireEvent.keyDown(block, { key: 'PageDown' });
+    expect(notPrevented).toBe(true);
+    expect(body.scrollLeft).toBe(0);
+  });
+});
+
 describe('column-geometry helpers (pure)', () => {
   it('wheelDeltaPx normalizes line and page delta modes', () => {
     const px = { deltaY: 3, deltaMode: 0 } as WheelEvent;

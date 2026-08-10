@@ -660,17 +660,18 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
     // composer are never intercepted. Steps land on column starts: quantize to the measured
     // step grid, then move one column.
     if (readingMode === 'horizontal' && (e.key === 'PageDown' || e.key === 'PageUp')) {
-      e.preventDefault();
       const { step } = measureColumnGeometry(root);
-      if (step > 0) {
-        let dir = 1;
-        if (e.key === 'PageUp') dir = -1;
-        const max = root.scrollWidth - root.clientWidth;
-        let target = (Math.round(root.scrollLeft / step) + dir) * step;
-        if (target < 0) target = 0;
-        if (target > max) target = max;
-        root.scrollLeft = target;
-      }
+      // Unmeasurable geometry: leave the key to the browser rather than swallowing it
+      // (iter-1 Claude — preventDefault only when we actually page).
+      if (step <= 0) return;
+      e.preventDefault();
+      let dir = 1;
+      if (e.key === 'PageUp') dir = -1;
+      const max = Math.max(root.scrollWidth - root.clientWidth, 0);
+      let target = (Math.round(root.scrollLeft / step) + dir) * step;
+      if (target < 0) target = 0;
+      if (target > max) target = max;
+      root.scrollLeft = target;
       return;
     }
 

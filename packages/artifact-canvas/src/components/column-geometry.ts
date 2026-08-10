@@ -72,7 +72,9 @@ export function innerScrollerCanConsume(
   return false;
 }
 
-/** Normalize a wheel delta to px (deltaMode: 0 px, 1 lines, 2 pages). */
+/** Normalize a wheel delta to px (deltaMode: 0 px, 1 lines, 2 pages). The 16px/line factor is
+ * a fixed convention: both v1 hosts are Chromium, which only ever emits pixel deltas (mode 0),
+ * so the line branch exists for engine robustness, not calibration (iter-1 consult). */
 export function wheelDeltaPx(e: WheelEvent, pageHeight: number): number {
   if (e.deltaMode === 1) return e.deltaY * 16;
   if (e.deltaMode === 2) return e.deltaY * pageHeight;
