@@ -93,8 +93,13 @@ export function activateBuilderReviewComments(
 
   /** Mounted threads keyed by queued-comment id. */
   const mounted = new Map<string, vscode.CommentThread>();
-  /** Codelens-supplied ranges for in-progress input threads (null = whole file). */
-  const pendingRanges = new Map<vscode.CommentThread, LineRange | null>();
+  /**
+   * Set when the file-level lens opened the input: the next submit on this
+   * file anchored at line 1 records `lineRange: null` (whole-file comment)
+   * instead of a misleading L1 ref. Short-lived — cleared on every new input
+   * open and every submit, with a time cap for abandoned inputs.
+   */
+  let pendingWholeFile: { fsPath: string; at: number } | null = null;
   /** Builders whose queue file has been loaded from disk this session. */
   const loaded = new Set<string>();
 
@@ -186,17 +191,35 @@ export function activateBuilderReviewComments(
     }
   }
 
-  /** Open an empty input thread at the given anchor (codelens / context menu). */
-  function mountInputThread(fsPath: string, range: LineRange | null): void {
-    const line = anchorLine(fsPath, range);
-    const thread = controller.createCommentThread(
-      vscode.Uri.file(fsPath),
-      new vscode.Range(line, 0, line, 0),
-      [],
-    );
-    thread.collapsibleState = vscode.CommentThreadCollapsibleState.Expanded;
-    thread.canReply = true;
-    pendingRanges.set(thread, range);
+  /**
+   * Open the comment input at the given anchor via VS Code's own
+   * `workbench.action.addComment` ("Add Comment on Current Selection") — the
+   * same path the gutter "+" takes. A programmatically created thread renders
+   * expanded but does NOT focus its input (the stable API has no
+   * `CommentThread.reveal`), forcing a second click into the textbox; the
+   * built-in command both creates the thread (our range provider covers the
+   * file) and focuses the input. The thread's range comes from the selection,
+   * so the lens range is selected first; the eventual submit reads it back
+   * from `thread.range`.
+   */
+  async function openCommentInput(fsPath: string, range: LineRange | null): Promise<void> {
+    let editor = vscode.window.activeTextEditor;
+    if (!editor || editor.document.uri.fsPath !== fsPath) {
+      editor = vscode.window.visibleTextEditors.find(e => e.document.uri.fsPath === fsPath);
+    }
+    if (!editor) { return; }
+    const lastLine = Math.max(editor.document.lineCount - 1, 0);
+    let startLine = 0;
+    let endLine = 0;
+    if (range) {
+      startLine = Math.min(Math.max(range.start - 1, 0), lastLine);
+      endLine = Math.min(Math.max(range.end - 1, startLine), lastLine);
+    }
+    editor.selection = new vscode.Selection(startLine, 0, endLine, 0);
+    editor.revealRange(new vscode.Range(startLine, 0, endLine, 0));
+    pendingWholeFile = null;
+    if (!range) { pendingWholeFile = { fsPath, at: Date.now() }; }
+    await vscode.commands.executeCommand('workbench.action.addComment');
   }
 
   const reg = (id: string, fn: (...args: never[]) => unknown): void => {
@@ -206,33 +229,24 @@ export function activateBuilderReviewComments(
 
   // Comment-mode codelens entry point. Args match the lens descriptors built
   // in diff-inject-codelens.ts.
-  reg(COMMENT_FOR_BUILDER_COMMAND, (
+  reg(COMMENT_FOR_BUILDER_COMMAND, async (
     _builderId: string,
     fsPath: string,
     _relPath: string,
     range: LineRange | null,
   ) => {
-    mountInputThread(fsPath, range);
+    await openCommentInput(fsPath, range);
   });
 
-  // Context-menu entry: selection if present, else the cursor line. Available
-  // in both modes (the menu always shows both actions).
-  reg('codev.commentSelectionForBuilder', () => {
+  // Context-menu entry: the user's own selection (or cursor line) is already
+  // what `workbench.action.addComment` consumes, so no selection surgery is
+  // needed here. Available in both modes (the menu always shows both actions).
+  reg('codev.commentSelectionForBuilder', async () => {
     const editor = vscode.window.activeTextEditor;
     if (!editor) { return; }
-    const entry = getDiffInjectEntry(editor.document.uri.fsPath);
-    if (!entry) { return; }
-    const sel = editor.selection;
-    let start = sel.start.line + 1;
-    let end = sel.end.line + 1;
-    if (sel.isEmpty) {
-      start = editor.selection.active.line + 1;
-      end = start;
-    } else if (sel.end.character === 0 && sel.end.line > sel.start.line) {
-      // A selection ending at column 0 of a line doesn't include that line.
-      end = sel.end.line;
-    }
-    mountInputThread(entry.fsPath, { start, end });
+    if (!getDiffInjectEntry(editor.document.uri.fsPath)) { return; }
+    pendingWholeFile = null;
+    await vscode.commands.executeCommand('workbench.action.addComment');
   });
 
   // Submit button on an input thread → queue the comment. The input thread is
@@ -245,9 +259,18 @@ export function activateBuilderReviewComments(
       return;
     }
     let lineRange: LineRange | null = threadLineRange(thread);
-    if (pendingRanges.has(thread)) {
-      lineRange = pendingRanges.get(thread)!;
+    // File-level lens flow: the input was opened at line 1 purely as a mount
+    // point; record the comment as whole-file. The 30s cap keeps a marker from
+    // an abandoned input from reclassifying a genuine line-1 comment later.
+    if (
+      pendingWholeFile &&
+      pendingWholeFile.fsPath === thread.uri.fsPath &&
+      Date.now() - pendingWholeFile.at < 30_000 &&
+      lineRange.start === 1 && lineRange.end === 1
+    ) {
+      lineRange = null;
     }
+    pendingWholeFile = null;
     const comment: PendingComment = {
       id: randomUUID(),
       createdAt: new Date().toISOString(),
@@ -255,7 +278,6 @@ export function activateBuilderReviewComments(
       lineRange,
       body: reply.text,
     };
-    pendingRanges.delete(thread);
     thread.dispose();
     await store.add(entry.builderId, comment);
   });
