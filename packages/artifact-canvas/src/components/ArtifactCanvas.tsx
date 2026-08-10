@@ -9,6 +9,9 @@ import { KeyboardHelp } from '../overlays/KeyboardHelp.js';
 import { ReadingModeToggle } from '../overlays/ReadingModeToggle.js';
 import {
   blockScrollOptions,
+  flowHeight,
+  flowOffsetAt,
+  fragmentAtPoint,
   innerScrollerCanConsume,
   measureColumnGeometry,
   wheelDeltaPx,
@@ -765,33 +768,51 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
     return 0;
   };
 
-  // Attach the wrapper inside `el`'s row and set its row-relative `top`. The mouse path passes the
-  // pointer's clientY and gets the line under the pointer — quantized to `el`'s line-height so the
-  // "+" snaps line-to-line (GitHub-style) instead of sliding, and clamped to the row's box. The
-  // keyboard path passes null and gets the block's first-line center (`offsetTop` is row-relative
-  // because only top-level rows are positioned). `translateY(-50%)` in the CSS centers the button
-  // on the computed line either way.
-  const placeAffordance = (el: HTMLElement, clientY: number | null): void => {
+  // Attach the wrapper inside `el`'s row and set its row-relative `top` — in FLOW coordinates
+  // (spec-1380 D2): the fragment math sums preceding fragment heights, and the browser resolves
+  // an abspos flow `top` into the correct column fragment (spike finding 6). The mouse path
+  // anchors to the fragment under the pointer — hovering a prose block's continuation in column
+  // N lights the "+" in column N, never back at the block's start (the addendum requirement) —
+  // quantized to `el`'s line-height so the "+" snaps line-to-line (GitHub-style). The keyboard
+  // path anchors to the block's first fragment, where reading of the block starts. Both paths
+  // clamp on flow height (fragment-height sum), never the union bounding box, which spans
+  // columns under fragmentation. In vertical mode every rect list has length 1 and the math
+  // degenerates to the classic #1343 single-rect placement. jsdom (no layout: empty rect lists)
+  // falls back to `offsetTop`, preserving the pre-1380 unit-test surface.
+  const placeAffordance = (el: HTMLElement, clientY: number | null, clientX: number | null = null): void => {
     const host = rowHostOf(el);
     const wrap = affordanceWrap();
     if (wrap.parentElement !== host) host.appendChild(wrap);
     const lineHeight = lineHeightOf(el);
+    const elRects = Array.from(el.getClientRects());
+    const hostRects = Array.from(host.getClientRects());
     let top: number;
-    if (clientY === null) {
+    if (elRects.length === 0 || hostRects.length === 0) {
+      // No layout (jsdom / display:none): the keyboard math from offset geometry.
       let base = 0;
       if (el !== host) base = el.offsetTop;
-      top = base + lineHeight / 2;
+      let within = lineHeight / 2;
+      if (clientY !== null && lineHeight > 0) {
+        within = Math.floor(Math.max(clientY, 0) / lineHeight) * lineHeight + lineHeight / 2;
+      }
+      top = base + within;
+    } else if (clientY === null) {
+      // Keyboard path: first line of the block's FIRST fragment, in host flow coordinates.
+      const first = elRects[0];
+      top = flowOffsetAt(hostRects, first.left + 1, first.top) + lineHeight / 2;
     } else {
-      const hostRect = host.getBoundingClientRect();
-      const elRect = el.getBoundingClientRect();
-      let within = clientY - elRect.top;
+      let x = elRects[0].left + 1;
+      if (clientX !== null) x = clientX;
+      const frag = elRects[fragmentAtPoint(elRects, x, clientY)];
+      let within = clientY - frag.top;
       if (lineHeight > 0) {
         within = Math.floor(within / lineHeight) * lineHeight + lineHeight / 2;
       }
-      top = elRect.top - hostRect.top + within;
-      if (top < 0) top = 0;
-      if (top > hostRect.height) top = hostRect.height;
+      top = flowOffsetAt(hostRects, frag.left + 1, frag.top) + within;
     }
+    const max = flowHeight(hostRects);
+    if (top < 0) top = 0;
+    if (max > 0 && top > max) top = max;
     wrap.style.top = `${top}px`;
   };
 
@@ -831,7 +852,7 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
     const b = resolveBlock(target);
     if (!b) return;
     setActiveLine(b.line);
-    placeAffordance(b.el, e.clientY);
+    placeAffordance(b.el, e.clientY, e.clientX);
   };
 
   // Canvas mouseleave: dismiss immediately. Structurally safe without a grace window — the "+"

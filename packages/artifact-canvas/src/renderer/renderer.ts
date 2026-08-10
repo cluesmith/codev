@@ -85,6 +85,33 @@ md.core.ruler.push('codev_data_line', (state) => {
   return true;
 });
 
+// Fence rows carry data-line on the PRE, like every other row (#1396). markdown-it's default
+// fence renderer emits token attrs on the inner `code` — unlike `code_block`, which emits them
+// on the `pre` — so fences were the one block type whose top-level element had no `data-line`,
+// silently missing every `> [data-line]` row rule (position context, gutter padding) and
+// anchoring marker-card stacks INSIDE the pre. This rule moves the row identity (`data-line`)
+// to the pre while LEAVING `tabindex` on the code: the code is the fence's scroll container
+// (#1343 overflow-x; spec-1380 D1 adds a vertical cap), and a scroller must stay
+// keyboard-focusable. Net DOM: `<pre data-line tabindex><code tabindex>`.
+const defaultFence = md.renderer.rules.fence?.bind(md.renderer.rules);
+md.renderer.rules.fence = (tokens, idx, options, env, self) => {
+  const token = tokens[idx];
+  const dataLine = token.attrGet('data-line');
+  if (token.attrs) {
+    token.attrs = token.attrs.filter(([name]) => name !== 'data-line');
+  }
+  let html: string;
+  if (defaultFence) {
+    html = defaultFence(tokens, idx, options, env, self);
+  } else {
+    html = self.renderToken(tokens, idx, options);
+  }
+  if (dataLine !== null) {
+    html = html.replace('<pre', `<pre data-line="${dataLine}" tabindex="0"`);
+  }
+  return html;
+};
+
 /** Render markdown to sanitized HTML carrying original-source `data-line` attributes on blocks. */
 export function renderMarkdown(source: string): string {
   const { text, lineMap } = stripCommentLines(source);
