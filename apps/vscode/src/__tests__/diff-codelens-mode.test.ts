@@ -1,9 +1,10 @@
 /**
  * Mode-aware diff codelenses (#1037): exactly one lens per anchor, whose
  * title + command follow `codev.diffCodelensMode` — `Comment for Builder` /
- * `codev.commentForBuilder` in comment mode (the default), `Forward to
- * Builder` / `codev.forwardToBuilder` in forward mode. A configuration change
- * must re-emit lenses (and re-sync the mode context key) so the flip is live.
+ * `codev.commentForBuilder` in comment mode, `Forward to Builder` /
+ * `codev.forwardToBuilder` in forward mode (the default, preserving #789).
+ * A configuration change must re-emit lenses (and re-sync the mode context
+ * key) so the flip is live.
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';

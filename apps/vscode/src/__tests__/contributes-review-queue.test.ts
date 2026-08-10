@@ -1,7 +1,8 @@
 /**
  * Manifest invariants for the review-comment queue surface (#1037):
  *
- * - `codev.diffCodelensMode` is declared with default `"comment"`.
+ * - `codev.diffCodelensMode` is declared with default `"forward"` (existing
+ *   #789 users see no change; comment mode is the per-workspace opt-in).
  * - The editor context menu offers BOTH the comment and the forward action on
  *   builder-diff files with no mode condition — the non-default flow must
  *   always be one right-click away, whatever the codelens shows.

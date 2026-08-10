@@ -48,6 +48,7 @@ The builder diff gains a structured review-comment surface layered on #789's fir
 3. **`lineRange` is nullable in the schema** (null = whole-file comment) so the packaged section header reads `### path` instead of a fabricated line ref.
 4. **#789's context-menu forward action** now shows without a selection (cursor-line fallback) to satisfy the "context menu always exposes both actions" criterion; the `Cmd/Ctrl+K B` keybinding keeps its original selection guard.
 5. **Changelog files not edited on this branch** — `apps/vscode/CHANGELOG.md` and `docs/releases/UNRELEASED.md` are maintained on the `docs/vscode-changelog` branch per that workflow; suggested entry handed to the architect: "Builder diff review comments: compose queued review comments in inline threads (opt-in comment mode via the diff title-bar toggle), batch-submit to the builder's prompt via Submit Review."
+6. **`terminal-manager.ts` unchanged** — the plan listed an `injectBuilderTextMultiline` method; instead `submit.ts` wraps the message with `wrapBracketedPaste` at the call site and reuses the existing `injectBuilderText`, leaving the #789 injection path byte-identical. (Flagged by the PR consultation as an undocumented deviation; documented here.)
 
 ## Architecture Updates
 
@@ -64,6 +65,7 @@ Routed COLD: three `[From 1037]` entries in `codev/resources/lessons-learned.md`
 - **`info/exclude` managed block** (`store.ts ensureExclude`): writes to `$GIT_COMMON_DIR/info/exclude` resolved via `git rev-parse`; the `.builder-*` family glob also silences spawn scaffolding files. Failures are deliberately swallowed (cosmetic concern, never blocks a comment write).
 - **`comments/builder-review.ts`**: the commenting-ranges refresh trick (provider re-assignment) and the reconciler's mount/dispose lifecycle are the least obvious parts; the pure planner (`reconcile.ts`) carries the tests.
 - **#789 surface untouched**: `codev.forwardToBuilder` and the keybinding are unchanged; the only #789-adjacent edits are the context-menu `when` relaxation + cursor fallback (deviation 4) and lens titles/commands swapping by mode.
+- **Known minor gap (consultation finding, follow-up)**: after a window reload, the palette `Codev: Submit Review` doesn't see on-disk queues until a builder diff has been opened (the store's cache populates from the diff-inject registry and its own writes; nothing globs `.builders/*/.codev/pending-comments.json` at activation). No data loss — the diff-centric flow always works, and opening the diff is the natural path to reviewing before submitting. A one-time activation glob-and-load would close it; deliberately left as a follow-up rather than expanding this PR.
 
 ## How to Test Locally
 
