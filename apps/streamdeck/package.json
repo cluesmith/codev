@@ -10,6 +10,7 @@
     "check-types": "tsc --noEmit",
     "validate": "streamdeck validate com.cluesmith.codev.sdPlugin",
     "pack": "streamdeck pack com.cluesmith.codev.sdPlugin --output dist --force",
+    "package": "node esbuild.js && rm -f com.cluesmith.codev.sdPlugin/bin/plugin.js.map && rm -rf com.cluesmith.codev.sdPlugin/logs && find com.cluesmith.codev.sdPlugin -name .DS_Store -delete && streamdeck validate com.cluesmith.codev.sdPlugin && streamdeck pack com.cluesmith.codev.sdPlugin --output dist --force",
     "test": "vitest run"
   },
   "dependencies": {
