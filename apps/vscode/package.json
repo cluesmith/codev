@@ -1040,7 +1040,7 @@
             "Codelenses compose a review comment in an inline thread; comments queue per builder and reach the PTY only via Submit Review.",
             "Codelenses type the file/line reference straight into the builder terminal (the original fire-and-forget flow)."
           ],
-          "default": "comment",
+          "default": "forward",
           "description": "Which single action the codelenses in a builder diff offer. The right-click context menu always offers both actions regardless of mode. Toggle via the diff editor's title-bar button; the choice persists per workspace."
         },
         "codev.maxTerminals": {

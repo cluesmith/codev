@@ -30,11 +30,11 @@ function entry(section: string, command: string): MenuEntry | undefined {
 }
 
 describe('codev.diffCodelensMode setting', () => {
-  it('is declared with enum comment|forward and default comment', () => {
+  it('is declared with enum comment|forward and default forward (preserves #789 for existing users)', () => {
     const prop = PKG.contributes.configuration.properties['codev.diffCodelensMode'];
     expect(prop).toBeDefined();
     expect(prop.enum).toEqual(['comment', 'forward']);
-    expect(prop.default).toBe('comment');
+    expect(prop.default).toBe('forward');
   });
 });
 

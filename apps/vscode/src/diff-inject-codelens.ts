@@ -48,11 +48,12 @@ export const DIFF_CODELENS_MODE_KEY = 'codev.diffCodelensMode';
 
 export type DiffCodelensMode = 'comment' | 'forward';
 
-/** Read the current mode from configuration (default: comment). */
+/** Read the current mode from configuration (default: forward — #789's
+ *  original behavior is preserved for users who never touch the setting). */
 export function getDiffCodelensMode(): DiffCodelensMode {
   const value = vscode.workspace.getConfiguration('codev').get<string>('diffCodelensMode');
-  if (value === 'forward') { return 'forward'; }
-  return 'comment';
+  if (value === 'comment') { return 'comment'; }
+  return 'forward';
 }
 
 /** One changed file in the active diff session, keyed by its right-side fs path. */
@@ -131,7 +132,7 @@ class DiffInjectCodeLensProvider implements vscode.CodeLensProvider {
     const nodes = symbols.map(toSymbolNode);
     const lastLine = Math.max(document.lineCount - 1, 0);
     // Exactly one lens per anchor, matching the current mode (#1037): comment
-    // mode (default) mounts an inline thread; forward mode keeps #789's
+    // mode mounts an inline thread; forward mode (default) keeps #789's
     // fire-and-forget injection. Same anchors either way.
     const mode = getDiffCodelensMode();
     let label = 'Comment for Builder';

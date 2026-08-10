@@ -16,3 +16,12 @@ Issue #1037: codelens-driven review comments in the unified diff editor (per-bui
 - Deviations from plan, to raise at dev-approval: (1) changelog files NOT edited — apps/vscode/CHANGELOG.md and docs/releases/UNRELEASED.md are maintained on the docs/vscode-changelog branch per the template's per-PR workflow; suggested entry text handed to architect instead. (2) `lineRange` made nullable in the schema (null = whole-file comment) so the file-level lens produces `### path` instead of a misleading line ref. (3) #789's context-menu forward action: `when` relaxed from `editorHasSelection` to always-on-builder-files with a cursor-line fallback, to satisfy the issue's "context menu always exposes both" AC; the Cmd/Ctrl+K B keybinding keeps its original selection guard.
 - All 694 vscode unit tests pass (37 new across 6 test files); check-types + eslint + esbuild clean.
 - Bracketed-paste injection is the one thing unit tests cannot prove — first item in the dev-approval script.
+
+## 2026-08-10 Dev-approval gate iteration (live testing feedback)
+
+- Comment input required a second click to focus: replaced programmatic thread creation for input with the built-in `workbench.action.addComment` (args-based: `{range}` / `{fileComment: true}`), which creates + focuses natively. Whole-file marker hack deleted; provider now returns `enableFileComments: true`.
+- "Cursor must be within a commenting range" on fresh diffs: VS Code caches commenting ranges per document and never re-queries when the registry registers a file post-open; re-assigning `commentingRangeProvider` on registry change (and mode change) forces the recompute via the ext-host setter.
+- Re-mounted queued threads anchored at start line only (widget cut through the range) → mount on the full recorded range.
+- Range highlight skipped the last line (range ended at column 0) → extend to last-line content end in both input and mount paths.
+- Third report (widget "mid-hunk") verified NOT a bug via stored JSON: gutter/selection comment 133-150 rendered faithfully; hunk lens is the whole-hunk entry point.
+- **Human decision at gate: default mode flipped to `forward`** — preserves #789 behavior for existing users; comment mode is opt-in via the title-bar toggle. Overrides the issue's "comment default"; decided by the human reviewer 2026-08-10. Changelog note about a behavior flip is now unnecessary.

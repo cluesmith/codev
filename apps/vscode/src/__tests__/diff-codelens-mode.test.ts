@@ -103,7 +103,7 @@ beforeEach(() => {
 });
 
 describe('diff codelens mode (#1037)', () => {
-  it('comment mode (default) emits Comment for Builder lenses with the comment command', async () => {
+  it('comment mode emits Comment for Builder lenses with the comment command', async () => {
     const all = await lenses();
     expect(all.length).toBeGreaterThan(0);
     for (const lens of all) {
@@ -125,6 +125,15 @@ describe('diff codelens mode (#1037)', () => {
       expect(lens.command.title).toMatch(/^Forward to Builder/);
     }
     expect(all[0]!.command.arguments).toEqual(['pir-9', 'pkg/src/a.ts ']);
+  });
+
+  it('an unset or unrecognized setting value falls back to forward (the default)', async () => {
+    h.state.mode = undefined as never;
+    let all = await lenses();
+    expect(all[0]!.command.command).toBe('codev.forwardToBuilder');
+    h.state.mode = 'garbage';
+    all = await lenses();
+    expect(all[0]!.command.command).toBe('codev.forwardToBuilder');
   });
 
   it('exactly one lens per anchor line in either mode', async () => {
