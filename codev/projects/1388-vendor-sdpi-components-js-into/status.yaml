@@ -1,7 +1,7 @@
 id: '1388'
 title: vendor-sdpi-components-js-into
 protocol: air
-phase: pr
+phase: verified
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -13,5 +13,5 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-08-10T09:31:17.059Z'
-updated_at: '2026-08-10T10:14:45.941Z'
+updated_at: '2026-08-10T10:15:14.064Z'
 pr_ready_for_human: false
