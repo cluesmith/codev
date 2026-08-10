@@ -509,25 +509,27 @@
  * individually protected. Images are monolithic by engine guarantee (replaced elements never
  * fragment); the cap scales a tall diagram to fit its column.
  */
-.codev-canvas-mode-horizontal .codev-artifact-canvas-body > pre,
-.codev-canvas-mode-horizontal .codev-artifact-canvas-body > table[data-line],
+.codev-canvas-mode-horizontal .codev-artifact-canvas-body pre,
+.codev-canvas-mode-horizontal .codev-artifact-canvas-body table,
+.codev-canvas-mode-horizontal .codev-artifact-canvas-body img,
 .codev-canvas-mode-horizontal .codev-artifact-canvas-body .codev-canvas-marker-card,
 .codev-canvas-mode-horizontal .codev-artifact-canvas-body .codev-canvas-comment-composer-host {
   break-inside: avoid;
 }
-/* NOTE the bare `> pre` (not `pre[data-line]`): markdown-it's fence renderer emits token
-   attrs on the INNER `code`, so a fence row is `<pre><code data-line …>` — `pre[data-line]`
-   matches nothing the renderer produces (fixture-caught). Tables are `_open` tokens, so the
-   attrs land on `<table>` itself. */
+/* DESCENDANT selectors, deliberately (iter-1 Claude): a fence or table nested in a list item
+   or blockquote — dozens of real codev specs have them — needs the same protection as a
+   top-level row; a child combinator left them fragmenting AND overflowing (spike finding 3).
+   Bare `pre` (not `pre[data-line]`): markdown-it's fence renderer emits token attrs on the
+   INNER `code`, so `pre[data-line]` matches nothing the renderer produces (#1396). */
 /* Tall code: the inner `code` is already the scroll container (#1343); cap it just under the
    column, allowing for the pre's own 16px paddings + 1px borders + trailing rhythm. */
-.codev-canvas-mode-horizontal .codev-artifact-canvas-body > pre > code {
+.codev-canvas-mode-horizontal .codev-artifact-canvas-body pre > code {
   max-height: calc(var(--_codev-column-cap) - 34px);
   overflow-y: auto;
 }
-/* Tall table: the table row is already `display: block; overflow: auto` — the cap makes that
+/* Tall table: the table is already `display: block; overflow: auto` — the cap makes that
    existing scroll container bound its height too. */
-.codev-canvas-mode-horizontal .codev-artifact-canvas-body > table[data-line] {
+.codev-canvas-mode-horizontal .codev-artifact-canvas-body table {
   max-height: var(--_codev-column-cap);
 }
 /* Tall single comment card: cap the body text, keep author/actions visible. */

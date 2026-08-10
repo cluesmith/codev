@@ -32,6 +32,31 @@ const tableRows = (tag: string, rows: number): string => {
   return out.join('\n');
 };
 
+/**
+ * Filler sections that push the document past the spec's "long spec" scale (success criterion
+ * 1 names ≥1000 source lines) with a realistic mix: prose, lists, a fence, a table per section.
+ */
+const fillerSections = (n: number): string => {
+  const out: string[] = [];
+  for (let s = 0; s < n; s++) {
+    out.push(`## Filler section ${s}
+
+${prose(`Filler prose ${s}.`, 6)}
+
+- filler item ${s}.1
+- filler item ${s}.2 with wrapping text so the item spans more than one line in a column
+- filler item ${s}.3
+
+\`\`\`js
+${fenceLines(`filler-fence-${s}`, 6)}
+\`\`\`
+
+${tableRows(`FillerTable${s}`, 4)}
+`);
+  }
+  return out.join('\n');
+};
+
 export const COLUMNS_FIXTURE = `# Columns fixture
 
 ${prose('LONGPROSE', 40)}
@@ -76,9 +101,37 @@ ${prose('Block with one over-long comment below.', 1)}
 - list item two with enough text that it wraps within the column measure comfortably
 - list item three
 
+## Nested structures
+
+A fence nested inside a list item (the shape #1396 caught — dozens of real specs indent
+fences under list items) and a table inside a blockquote:
+
+- list item hosting a nested tall fence:
+
+  \`\`\`js
+${fenceLines('nested-fence', 120)
+  .split('\n')
+  .map((l) => `  ${l}`)
+  .join('\n')}
+  \`\`\`
+
+- a nested list level:
+  - inner item one
+  - inner item two with enough text that it wraps within the column measure
+
+> Blockquote hosting a table:
+>
+> | NestedTable | Probability | Impact |
+> | --- | --- | --- |
+> | Quoted risk row 0 | Medium | High |
+> | Quoted risk row 1 | Medium | High |
+> | Quoted risk row 2 | Medium | High |
+
 ${prose('Tail prose A.', 8)}
 
 ${prose('Tail prose B.', 8)}
 
 ${prose('Tail prose C.', 8)}
+
+${fillerSections(28)}
 `;

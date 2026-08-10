@@ -159,6 +159,118 @@ test('without a host height context the canvas self-bounds to the viewport', asy
   expect(metrics.scrollWidth).toBeGreaterThan(metrics.clientWidth); // still columns, not one tall column
 });
 
+test('NESTED tall fence (inside a list item) is protected and inner-scrolls (#1396 shape)', async ({ page }) => {
+  const body = await openFixture(page);
+  const nested = body.locator('li pre', { hasText: 'nested-fence' });
+  await expect(nested).toHaveCount(1);
+  expect(await fragmentCount(nested)).toBe(1);
+
+  const columnHeight = await body.evaluate((el) => el.clientHeight);
+  const box = await nested.boundingBox();
+  expect(box!.height).toBeLessThanOrEqual(columnHeight);
+
+  const scrolls = await nested.locator('code').evaluate((el) => {
+    if (el.scrollHeight <= el.clientHeight) return false;
+    el.scrollTop = 100;
+    return el.scrollTop > 0;
+  });
+  expect(scrolls).toBe(true);
+});
+
+test('NESTED table (inside a blockquote) is protected', async ({ page }) => {
+  const body = await openFixture(page);
+  const nested = body.locator('blockquote table', { hasText: 'NestedTable' });
+  await expect(nested).toHaveCount(1);
+  expect(await fragmentCount(nested)).toBe(1);
+});
+
+test('every data-line block is fully within the column viewport vertically (reachability)', async ({ page }) => {
+  const body = await openFixture(page);
+  const result = await body.evaluate((el) => {
+    const bodyRect = el.getBoundingClientRect();
+    const blocks = Array.from(el.querySelectorAll('[data-line]'));
+    let checked = 0;
+    const offenders: string[] = [];
+    // Content INSIDE an inner scroll container (a capped table's rows, capped code's lines) is
+    // reached via that container's own scrollbar — its rects legitimately extend past the
+    // column box and are not clipped content.
+    const insideInnerScroller = (node: Element): boolean => {
+      for (let a = node.parentElement; a && a !== el; a = a.parentElement) {
+        const oy = getComputedStyle(a).overflowY;
+        if (oy === 'auto' || oy === 'scroll') return true;
+      }
+      return false;
+    };
+    for (const block of blocks) {
+      if (insideInnerScroller(block)) continue;
+      for (const r of Array.from(block.getClientRects())) {
+        if (r.height === 0) continue;
+        checked++;
+        // Vertical containment is scroll-independent (only x scrolls); any fragment poking
+        // past the body's vertical box is unreachable under overflow-y: hidden.
+        if (r.top < bodyRect.top - 1 || r.bottom > bodyRect.bottom + 1) {
+          offenders.push(`${block.tagName}@line=${block.getAttribute('data-line')}`);
+        }
+      }
+    }
+    return { blockCount: blocks.length, checked, offenders: offenders.slice(0, 10) };
+  });
+  // The fixture is a ≥1000-line mixed document — make sure we actually swept it.
+  expect(result.blockCount).toBeGreaterThan(200);
+  expect(result.checked).toBeGreaterThan(200);
+  expect(result.offenders).toEqual([]);
+});
+
+test('a user-resized composer cannot exceed the column (textarea clamp, D1)', async ({ page }) => {
+  const body = await openFixture(page);
+  const target = body.locator('p', { hasText: 'Intro paragraph.' });
+  await target.hover();
+  await page.locator('.codev-canvas-add-comment').click();
+
+  const input = page.locator('.codev-canvas-comment-composer-input');
+  await expect(input).toBeVisible();
+  await input.evaluate((el) => {
+    el.style.height = '3000px'; // simulate the user dragging the resize handle far past the column
+  });
+  const columnHeight = await body.evaluate((el) => el.clientHeight);
+  const host = body.locator('.codev-canvas-comment-composer-host');
+  expect(await fragmentCount(host)).toBe(1);
+  const box = await host.boundingBox();
+  expect(box!.height).toBeLessThanOrEqual(columnHeight);
+});
+
+test('card STACK may break between cards; individual cards must not (D1 policy)', async ({ page }) => {
+  const body = await openFixture(page);
+  const stack = body.locator('.codev-canvas-marker-cards').first();
+  // The policy pair: the stack is fragmentation-neutral (auto), each card is protected.
+  expect(await stack.evaluate((el) => getComputedStyle(el).breakInside)).toBe('auto');
+  const cards = stack.locator('.codev-canvas-marker-card');
+  const n = await cards.count();
+  for (let i = 0; i < n; i++) {
+    expect(await cards.nth(i).evaluate((el) => getComputedStyle(el).breakInside)).toBe('avoid');
+  }
+});
+
+test('dark-theme token override keeps the layout invariants (light/dark smoke)', async ({ page }) => {
+  const body = await openFixture(page);
+  await page.addStyleTag({
+    content: `.codev-artifact-canvas {
+      --codev-canvas-foreground: #e6edf3; --codev-canvas-background: #0d1117;
+      --codev-canvas-border: #30363d; --codev-canvas-muted: #8d96a0;
+      --codev-canvas-code-background: #161b22; --codev-canvas-code-foreground: #e6edf3;
+    }`,
+  });
+  const metrics = await body.evaluate((el) => ({
+    scrollWidth: el.scrollWidth,
+    clientWidth: el.clientWidth,
+    scrollHeight: el.scrollHeight,
+    clientHeight: el.clientHeight,
+  }));
+  expect(metrics.scrollWidth).toBeGreaterThan(metrics.clientWidth);
+  expect(metrics.scrollHeight).toBeLessThanOrEqual(metrics.clientHeight);
+  await expect(page.locator('.codev-canvas-reading-mode-toggle')).toBeVisible();
+});
+
 test('vertical mode lays out single-column (no mode class, no columns)', async ({ page }) => {
   await page.goto('/?fixture=columns');
   const body = page.locator('.codev-artifact-canvas-body');
