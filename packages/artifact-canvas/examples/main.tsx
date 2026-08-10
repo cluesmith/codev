@@ -16,7 +16,7 @@
 import * as React from 'react';
 import { createRoot } from 'react-dom/client';
 import { ArtifactCanvas } from '../src/components/ArtifactCanvas.js';
-import { createStubHost } from '../src/__tests__/fixtures/stub-adapters.js';
+import { createStubHost, stubEditMarker, stubDeleteMarker } from '../src/__tests__/fixtures/stub-adapters.js';
 import { SAMPLE_ARTIFACT } from '../src/__tests__/fixtures/sample-artifact.js';
 import { COLUMNS_FIXTURE } from '../src/__tests__/fixtures/columns-fixture.js';
 import '../src/styles/default-theme.css';
@@ -65,6 +65,13 @@ function Example(): React.ReactElement {
     markerAdapter: host.markerAdapter,
     themeAdapter: host.themeAdapter,
     onAddComment,
+    // Full review pass (#1055 + spec 1380 phase 6): the dev host wires edit/delete through the
+    // same verified-write contract the VS Code host uses, so cards render their action buttons
+    // and the whole add → edit → delete flow is demonstrable here.
+    onEditComment: (markerLine: number, expectedAuthor: string, expectedBodyPrefix: string, newBody: string) =>
+      stubEditMarker(host.store, markerLine, expectedAuthor, expectedBodyPrefix, newBody),
+    onDeleteComment: (markerLine: number, expectedAuthor: string, expectedBodyPrefix: string) =>
+      stubDeleteMarker(host.store, markerLine, expectedAuthor, expectedBodyPrefix),
     initialReadingMode: mode,
     onReadingModeChange: (next: string) => {
       setMode(next);

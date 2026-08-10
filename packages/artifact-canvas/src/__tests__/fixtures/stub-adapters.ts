@@ -56,7 +56,10 @@ function parseMarkers(text: string): ReviewMarker[] {
       let line = i - 1;
       while (line > 0 && REVIEW_RE.test(lines[line])) line--;
       if (!REVIEW_RE.test(lines[line])) {
-        out.push({ author: m[1], line, text: m[2], raw: ln.trim() });
+        // `markerLine` = the marker's own physical line (#1055): with it populated, hosts that
+        // supply edit/delete callbacks get addressable cards — the dev page needs the full
+        // review pass (add → edit → delete), same as the VS Code host.
+        out.push({ author: m[1], line, text: m[2], raw: ln.trim(), markerLine: i });
       }
     }
   });
@@ -97,6 +100,41 @@ export function stubThemeAdapter(): ThemeAdapter {
     resolve: (token: string) => (token === '--codev-canvas-foreground' ? '#1f2328' : ''),
     onChange: (_handler: () => void): Disposable => ({ dispose: () => {} }),
   };
+}
+
+/**
+ * Host-side edit intent (#1055 contract, stub form): verify the marker at `markerLine` still
+ * matches (author + body prefix — the optimistic-concurrency check real hosts perform), then
+ * rewrite its body in the text and notify watchers. A mismatch is a silent no-op (the real
+ * VS Code host refreshes + notifies; the stub just refuses to write the wrong marker).
+ */
+export function stubEditMarker(
+  store: StubStore,
+  markerLine: number,
+  expectedAuthor: string,
+  expectedBodyPrefix: string,
+  newBody: string,
+): void {
+  const lines = store.getText().split('\n');
+  const m = (lines[markerLine] ?? '').match(REVIEW_RE);
+  if (!m || m[1] !== expectedAuthor || !m[2].startsWith(expectedBodyPrefix)) return;
+  const indent = lines[markerLine].match(/^\s*/)?.[0] ?? '';
+  lines[markerLine] = `${indent}<!-- REVIEW(@${expectedAuthor}): ${newBody} -->`;
+  store.setText(lines.join('\n'));
+}
+
+/** Host-side delete intent (#1055 contract, stub form): same verification, then remove the line. */
+export function stubDeleteMarker(
+  store: StubStore,
+  markerLine: number,
+  expectedAuthor: string,
+  expectedBodyPrefix: string,
+): void {
+  const lines = store.getText().split('\n');
+  const m = (lines[markerLine] ?? '').match(REVIEW_RE);
+  if (!m || m[1] !== expectedAuthor || !m[2].startsWith(expectedBodyPrefix)) return;
+  lines.splice(markerLine, 1);
+  store.setText(lines.join('\n'));
 }
 
 /** Convenience: one shared store wired to all three stub adapters (used by the e2e test + page). */
