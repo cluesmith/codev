@@ -29,6 +29,7 @@ import {
   ArtifactCanvas,
   type FileAdapter,
   type MarkerAdapter,
+  type ReadingMode,
   type ThemeAdapter,
   type ReviewMarker,
 } from '@cluesmith/codev-artifact-canvas';
@@ -100,7 +101,7 @@ function render(): void {
       // Reading mode (spec 1380 D4): seed from the bootstrap attribute; forward toggle intents
       // for the host to persist per-user.
       initialReadingMode,
-      onReadingModeChange: (mode: string) =>
+      onReadingModeChange: (mode: ReadingMode) =>
         vscodeApi.postMessage({ type: 'readingModeChange', mode }),
       refreshKey,
     }),

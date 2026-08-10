@@ -1,3 +1,8 @@
+---
+approved: 2026-08-10
+validated: [claude, codex]
+---
+
 # Specification: Horizontal Multi-Column Reading Mode for the Artifact Canvas
 
 <!--

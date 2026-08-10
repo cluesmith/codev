@@ -655,7 +655,12 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
       if (Math.abs(e.deltaX) >= Math.abs(e.deltaY)) return;
       if (innerScrollerCanConsume(e.target, e.deltaY, body)) return;
       e.preventDefault();
-      body.scrollLeft += wheelDeltaPx(e, body.clientHeight);
+      // Page-mode deltas (deltaMode 2) are translated to horizontal travel, so a "page" is
+      // one column step, not the viewport height (PR consult; dead path on Chromium, which
+      // only emits pixel deltas — kept correct for engine robustness).
+      let pageSize = measureColumnGeometry(body).step;
+      if (pageSize <= 0) pageSize = body.clientWidth;
+      body.scrollLeft += wheelDeltaPx(e, pageSize);
     };
     body.addEventListener('wheel', onWheel, { passive: false });
     return () => body.removeEventListener('wheel', onWheel);

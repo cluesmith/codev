@@ -112,7 +112,10 @@ test('nested block inside a FRAGMENTED host row anchors in the hovered column (p
     }
     return null;
   });
-  test.skip(probe === null, 'fixture produced no cross-fragment list this viewport');
+  // Hard assertion, not a conditional skip (PR consult): if the fixture stops producing a
+  // cross-fragment list at the pinned 1600×900 viewport, this test must FAIL loudly — a
+  // silent skip would retire the plan's verification item without anyone noticing.
+  expect(probe, 'fixture must contain a list fragmenting across columns at 1600×900').not.toBeNull();
   await page.mouse.move(probe!.x, probe!.y);
   await expect(page.locator('.codev-canvas-add-comment')).toBeVisible();
   const w = await wrapperRect(page);

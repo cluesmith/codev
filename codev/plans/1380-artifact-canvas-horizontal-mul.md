@@ -1,3 +1,8 @@
+---
+approved: 2026-08-10
+validated: [claude, codex]
+---
+
 # Plan: Horizontal Multi-Column Reading Mode for the Artifact Canvas
 
 **Specification**: [codev/specs/1380-artifact-canvas-horizontal-mul.md](../specs/1380-artifact-canvas-horizontal-mul.md)
