@@ -184,6 +184,8 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 
 ## Process
 
+- [From #1347] For device-facing surfaces, PIR's dev-approval gate earns its cost precisely where automated checks are blind: the live-hardware pass caught Marketplace icon-spec violations (list icons must be white monochrome — `streamdeck validate` doesn't check this), a branding watermark colliding with the runtime-rendered key titles, and a stale extension host silently breaking follow-focus. Budget gate time for the real device, not just the diff.
+
 - [From 0054] Keep specs technology-agnostic when implementation should match existing codebase patterns
 - [From 0059] Verify what data is actually available in state before designing features that depend on it
 - [From 0057] Always handle both new and existing branches when creating worktrees
@@ -459,6 +461,7 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 
 ## Debugging and Root Cause Analysis
 
+- [From #1347] Verify image transforms numerically, never visually: white-on-transparent output renders invisibly on light preview grounds, and ImageMagick 7's `-channel RGB -fill white -colorize 100` silently produced red glyphs with corrupted alpha while *looking* plausible in a montage. Recolor glyphs by alpha-composition (PIL: white layer + `putalpha`) and assert channel means (`magick -format "%[fx:mean.r]"`) before committing assets.
 - [From #1150] When users report a **newly recurring** symptom, correlate the report window against what shipped just before it, before accepting a low-probability failure theory. The issue's root-cause analysis blamed a swallowed SQLite error and WAL loss (both real defects, both rare); a reviewer's "is a failed SQLite update actually probable?" challenge prompted enumerating every writer of the table, which surfaced the #1118 consolidation (shipped one week before the reports) deterministically re-inserting stale snapshot rows. The rare-event defects were still worth fixing, but ranking them as *the* cause would have shipped a fix while misdescribing the bug. Enumerate all writers of the corrupted state, not just the suspicious-looking one.
 - [From #1055] A VS Code command whose button is **visible but does nothing** after an extension change is often a **stale Extension Development Host**, not a code regression — package.json contribution + compiled-JS changes don't fully take effect until a `Developer: Reload Window`. Before hunting a dispatch bug, confirm the symptom survives a clean reload. Here an "editor delete no longer works" report against a byte-for-byte-unchanged delete command evaporated on reload; a speculative menu-placement fix was started, then reverted once it proved environmental. Diff-the-actual-code first, and let the tester rule out a stale host before you change working behavior.
 - [From 0107] Commander.js `.alias()` does NOT hide aliases from `--help` output -- they show as `command|alias`. Use `towerCmd.addCommand(cmd, { hidden: true })` to add hidden backward-compatible commands.
