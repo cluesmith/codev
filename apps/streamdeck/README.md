@@ -152,6 +152,17 @@ pnpm --filter @cluesmith/codev-sdk build              # once, if the sdk dist is
 pnpm --filter @cluesmith/codev-streamdeck run package # → apps/streamdeck/dist/com.cluesmith.codev.streamDeckPlugin
 ```
 
+## Vendored dependencies
+
+The property inspectors load
+[sdpi-components](https://sdpi-components.dev) from a local copy at
+`com.cluesmith.codev.sdPlugin/ui/lib/sdpi-components.js` (currently **v4.0.1**),
+per Elgato's guidance to bundle the library in distributed plugins. This keeps
+action configuration working offline and avoids executing remotely mutable code
+in the PI. To bump it, download the release build from
+`https://sdpi-components.dev/releases/v4/sdpi-components.js`, replace the file,
+and update the version noted here (the version is in the file's license header).
+
 ## Follow-focus (optional)
 
 So the deck follows whichever VSCode window / builder you're looking at, add an
