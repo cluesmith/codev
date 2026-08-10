@@ -1,7 +1,7 @@
 id: '1383'
 title: docs-add-area-streamdeck-to-th
 protocol: air
-phase: pr
+phase: verified
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -13,7 +13,7 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-08-10T03:04:59.272Z'
-updated_at: '2026-08-10T03:14:37.470Z'
+updated_at: '2026-08-10T03:14:43.324Z'
 pr_history:
   - phase: pr
     pr_number: 1384
