@@ -1,7 +1,7 @@
 id: '1380'
 title: artifact-canvas-horizontal-mul
 protocol: spir
-phase: specify
+phase: plan
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -16,7 +16,7 @@ gates:
   verify-approval:
     status: pending
 iteration: 1
-build_complete: true
+build_complete: false
 history: []
 started_at: '2026-08-10T07:39:19.659Z'
-updated_at: '2026-08-10T08:37:19.980Z'
+updated_at: '2026-08-10T08:37:32.014Z'
