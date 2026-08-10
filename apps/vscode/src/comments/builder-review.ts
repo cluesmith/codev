@@ -125,22 +125,28 @@ export function activateBuilderReviewComments(
     return true;
   }
 
-  /** Anchor line for a queued comment, clamped to the open document if any. */
-  function anchorLine(fsPath: string, range: LineRange | null): number {
-    let line = 0;
-    if (range) { line = Math.max(range.start - 1, 0); }
+  /**
+   * A queued comment's full anchor range (0-based, clamped to the open
+   * document if any). The thread must span the WHOLE recorded range, not just
+   * its first line — the widget renders after the range's last line, so a
+   * start-line-only thread would visually cut through the commented lines.
+   */
+  function anchorRange(fsPath: string, range: LineRange): vscode.Range {
+    let start = Math.max(range.start - 1, 0);
+    let end = Math.max(range.end - 1, start);
     const doc = vscode.workspace.textDocuments.find(d => d.uri.fsPath === fsPath);
-    if (doc) { line = Math.min(line, Math.max(doc.lineCount - 1, 0)); }
-    return line;
+    if (doc) {
+      const lastLine = Math.max(doc.lineCount - 1, 0);
+      start = Math.min(start, lastLine);
+      end = Math.min(end, lastLine);
+    }
+    return new vscode.Range(start, 0, end, 0);
   }
 
   function mountQueuedComment(fsPath: string, builderId: string, comment: PendingComment): void {
-    const line = anchorLine(fsPath, comment.lineRange);
-    const thread = controller.createCommentThread(
-      vscode.Uri.file(fsPath),
-      new vscode.Range(line, 0, line, 0),
-      [],
-    );
+    let range = new vscode.Range(0, 0, 0, 0);
+    if (comment.lineRange) { range = anchorRange(fsPath, comment.lineRange); }
+    const thread = controller.createCommentThread(vscode.Uri.file(fsPath), range, []);
     if (!comment.lineRange) {
       // Whole-file comment: render as a range-less file comment (the factory
       // signature requires a Range, but the property accepts undefined).
