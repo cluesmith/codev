@@ -629,11 +629,15 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
     wrap.style.top = `${top}px`;
   };
 
-  // True when an event originated inside the "+" wrapper. Every activation path must no-op for
-  // these: the wrapper sits inside the HOST row, so re-resolving through `closest('[data-line]')`
-  // would retarget a nested block's line (an `li`) to its host's line (the `ul`) — changing the
-  // label, the composer target, and the anchor out from under the reviewer interacting with the
-  // button (iter-1 Codex).
+  // True when an event originated inside the "+" wrapper. Every activation path no-ops for
+  // these: the wrapper sits inside the HOST row's DOM, so re-resolving through
+  // `closest('[data-line]')` would retarget a nested block's line (an `li`) to its host's line
+  // (the `ul`) — wrong label, wrong composer target (iter-1 Codex). NOTE the primary isolation
+  // is actually the portal itself: React propagates the button's events through the REACT tree
+  // (the portal's parent is the canvas div), so the body div's handlers never see them. These
+  // guards are deliberate defense-in-depth — they keep nested-line targeting correct even if the
+  // affordance is ever re-hosted non-portally (e.g. rendered imperatively like the marker cards),
+  // where DOM-tree bubbling WOULD reach the body handlers (iter-1 Claude).
   const fromAffordance = (target: EventTarget | null): boolean =>
     Boolean((target as HTMLElement | null)?.closest?.('.codev-canvas-row-affordance'));
 

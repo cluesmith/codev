@@ -252,6 +252,15 @@
 .codev-artifact-canvas-body > :is(ul, ol)[data-line] {
   padding-left: calc(var(--codev-canvas-gutter) + 2em);
 }
+/* Everything ELSE at the top level aligns via margin instead (#1343, iter-1 consultation):
+   unmapped renderer output (`hr`, raw HTML blocks — markdown-it stamps `data-line` only on
+   `_open`/fence tokens) and the injected marker-card stacks / composer hosts. Margin, not
+   padding: these aren't hover rows and host no "+". Child combinator is load-bearing — a
+   NESTED stack/host (an li's marker cards) sits inside a row that already carries the gutter,
+   and an unscoped margin would double-indent it. */
+.codev-artifact-canvas-body > :not([data-line]) {
+  margin-left: var(--codev-canvas-gutter);
+}
 
 /* The "+" add-comment button. Min 24×24px hit target (#1236, WCAG 2.5.8 floor). `font: inherit`
    picks up the wrapper's pinned canvas typography (buttons don't inherit fonts by default), and
@@ -347,13 +356,6 @@
   align-items: baseline;
   gap: 2px;
 }
-/* Gutter alignment for TOP-LEVEL stacks only (#1343, iter-1 Codex): a stack for a nested block
-   (an li's marker) is injected INSIDE its row (after the li), which already carries the gutter
-   in its own padding — an unscoped margin would double-indent it. Same scoping for the composer
-   host below. */
-.codev-artifact-canvas-body > .codev-canvas-marker-cards {
-  margin-left: var(--codev-canvas-gutter);
-}
 .codev-canvas-marker-card-icon { margin-right: 4px; }
 .codev-canvas-marker-card-author { font-weight: 600; color: var(--codev-canvas-muted); margin-right: 4px; }
 .codev-canvas-marker-card-body { flex: 1 1 auto; }
@@ -401,11 +403,6 @@
    so the open composer reads as the in-progress sibling of the comments it will become. The host is
    a layout-only wrapper; all chrome lives on `.codev-canvas-comment-composer`. */
 .codev-canvas-comment-composer-host { display: block; }
-/* Top-level hosts carry the gutter; nested hosts (composer below an li) sit inside a row that
-   already has it — see the marker-cards scoping note above. */
-.codev-artifact-canvas-body > .codev-canvas-comment-composer-host {
-  margin-left: var(--codev-canvas-gutter);
-}
 .codev-canvas-comment-composer {
   margin: 4px 0 10px;
   padding-left: 8px;

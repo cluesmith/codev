@@ -87,6 +87,25 @@ Codex returned REQUEST_CHANGES with three findings; all three were confirmed rea
    double-indented them. Fixed: gutter margins scoped with a child combinator to top-level
    stacks/hosts only, pinned by CSS-contract assertions in `default-theme.test.ts`.
 
+Claude returned **COMMENT** (plan adherence verified complete; advisory notes). Dispositions:
+
+1. **`hr` / raw-HTML blocks lost the leading indent** (the renderer only stamps `data-line` on
+   `_open`/fence tokens, so they got neither the old body padding nor the new row padding).
+   Fixed: `.codev-artifact-canvas-body > :not([data-line])` carries the gutter as `margin-left`
+   — one rule that also subsumes the Codex fix #3 scoping for card stacks and composer hosts.
+2. **The affordance-origin guards are currently unreachable via React** — portal events
+   propagate through the React tree (the portal's parent is the canvas div), so the body
+   handlers never see button events; the portal placement is the primary isolation. Accepted as
+   accurate: comments in `fromAffordance` and the regression test now say so explicitly, and the
+   guards stay as deliberate defense-in-depth (they become load-bearing if the affordance is
+   ever rendered non-portally, where DOM bubbling *would* reach the body handlers).
+3. **Hoist `placeAffordance` above the effect that calls it** — declined (style preference; the
+   file's existing pattern already defines handlers after the effects that close over them, and
+   the call executes post-render).
+4. **Narrow tables** (`width: max-content`) don't span the full row, so hover to their right
+   lands on sticky whitespace rather than the table's row. Documented as a v1 wrinkle alongside
+   the table-scroll limitation below; the fix (a full-width wrapper) is the same follow-up.
+
 - **`ArtifactCanvas.tsx` — `activateFromPointer`'s three guard clauses** (affordance-origin
   events, primary-button drag, no-block targets). The first is subtle: without it, hovering the
   "+" hosted in a `ul`'s gutter re-resolves to the `ul` and retargets a nested `li`'s line to

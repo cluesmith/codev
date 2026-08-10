@@ -159,9 +159,11 @@ describe('full-row "+" affordance (#1343)', () => {
   });
 
   it('focus and keydown on the affordance never retarget it either (iter-1 Codex)', async () => {
-    // Same trap as the pointer path, via keyboard: the button lives inside the HOST row (the ul),
-    // so an unguarded focus/keydown re-resolves an li's line 8 to the ul's line 7 — and Enter
-    // would open the composer on the wrong line.
+    // The button lives inside the HOST row (the ul), so re-resolving its events through
+    // closest('[data-line]') would retarget an li's line 8 to the ul's line 7. Today the portal
+    // already isolates these events from the body handlers (React propagates portal events
+    // through the React tree, not the DOM tree — iter-1 Claude); this test pins the BEHAVIOR so
+    // a future non-portal rendering of the affordance can't silently regress it.
     const { onAddComment } = await mount();
     const li = document.querySelector<HTMLElement>('li[data-line="7"]') as HTMLElement;
     fireEvent.mouseOver(li);

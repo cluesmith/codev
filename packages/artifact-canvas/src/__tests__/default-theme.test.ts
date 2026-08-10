@@ -113,14 +113,12 @@ describe('default-theme.css token vocabulary', () => {
     // The pre row must not scroll (it hosts the "+"); the inner code element scrolls instead.
     expect(css).not.toMatch(/\)\s+pre\s*\{[^}]*overflow/);
     expect(css).toMatch(/pre\s+code\s*\{[^}]*overflow-x:\s*auto/);
-    // Injected siblings carry the gutter ONLY at the top level (iter-1 Codex): a nested stack /
-    // composer host sits inside a row that already has the gutter — an unscoped margin
-    // double-indents it. The child combinator is the load-bearing part of these selectors.
+    // Non-row body children (hr / raw HTML blocks, which the renderer never stamps, plus the
+    // injected card stacks and composer hosts) align via a margin rule scoped with the child
+    // combinator (iter-1 consultation): nested stacks/hosts sit inside a row that already
+    // carries the gutter — an unscoped margin would double-indent them.
     expect(css).toMatch(
-      /\.codev-artifact-canvas-body\s*>\s*\.codev-canvas-marker-cards\s*\{[^}]*margin-left:\s*var\(--codev-canvas-gutter\)/,
-    );
-    expect(css).toMatch(
-      /\.codev-artifact-canvas-body\s*>\s*\.codev-canvas-comment-composer-host\s*\{[^}]*margin-left:\s*var\(--codev-canvas-gutter\)/,
+      /\.codev-artifact-canvas-body\s*>\s*:not\(\[data-line\]\)\s*\{[^}]*margin-left:\s*var\(--codev-canvas-gutter\)/,
     );
     expect(css).not.toMatch(/^\.codev-canvas-marker-cards\s*\{[^}]*margin-left:\s*var/m);
   });
