@@ -328,9 +328,7 @@
    block consumes no extra vertical space. */
 .codev-canvas-marker-cards {
   list-style: none;
-  /* Left margin: the stack is a direct body child (injected after its row), so it aligns to the
-     text by carrying the row gutter itself (#1343). */
-  margin: 4px 0 10px var(--codev-canvas-gutter);
+  margin: 4px 0 10px;
   padding-left: 8px;
   border-left: 2px solid var(--codev-canvas-comment-marker);
   display: flex;
@@ -348,6 +346,13 @@
   display: flex;
   align-items: baseline;
   gap: 2px;
+}
+/* Gutter alignment for TOP-LEVEL stacks only (#1343, iter-1 Codex): a stack for a nested block
+   (an li's marker) is injected INSIDE its row (after the li), which already carries the gutter
+   in its own padding — an unscoped margin would double-indent it. Same scoping for the composer
+   host below. */
+.codev-artifact-canvas-body > .codev-canvas-marker-cards {
+  margin-left: var(--codev-canvas-gutter);
 }
 .codev-canvas-marker-card-icon { margin-right: 4px; }
 .codev-canvas-marker-card-author { font-weight: 600; color: var(--codev-canvas-muted); margin-right: 4px; }
@@ -395,9 +400,10 @@
    into `.codev-canvas-comment-composer-host`), mirroring the marker-card stack's left rule + spacing
    so the open composer reads as the in-progress sibling of the comments it will become. The host is
    a layout-only wrapper; all chrome lives on `.codev-canvas-comment-composer`. */
-.codev-canvas-comment-composer-host {
-  display: block;
-  /* Same alignment story as the marker cards: a direct body child carrying the row gutter. */
+.codev-canvas-comment-composer-host { display: block; }
+/* Top-level hosts carry the gutter; nested hosts (composer below an li) sit inside a row that
+   already has it — see the marker-cards scoping note above. */
+.codev-artifact-canvas-body > .codev-canvas-comment-composer-host {
   margin-left: var(--codev-canvas-gutter);
 }
 .codev-canvas-comment-composer {

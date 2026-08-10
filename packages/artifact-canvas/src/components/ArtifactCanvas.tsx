@@ -478,6 +478,10 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
   // textarea, the card action buttons, or the minimap are never intercepted — typing "n" in a
   // comment types "n".
   const onBodyKeyDown = (e: React.KeyboardEvent<HTMLDivElement>): void => {
+    // Keys pressed ON the "+" button belong to the button: its native Enter/Space activation
+    // fires onClick → openComposer with the button's own (possibly nested) line. Intercepting
+    // here would re-resolve through the host row and open the composer on the wrong line.
+    if (fromAffordance(e.target)) return;
     if (e.key === 'Enter' || e.key === ' ') {
       const l = lineFromEvent(e.target);
       if (l !== null) {
@@ -625,8 +629,18 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
     wrap.style.top = `${top}px`;
   };
 
+  // True when an event originated inside the "+" wrapper. Every activation path must no-op for
+  // these: the wrapper sits inside the HOST row, so re-resolving through `closest('[data-line]')`
+  // would retarget a nested block's line (an `li`) to its host's line (the `ul`) — changing the
+  // label, the composer target, and the anchor out from under the reviewer interacting with the
+  // button (iter-1 Codex).
+  const fromAffordance = (target: EventTarget | null): boolean =>
+    Boolean((target as HTMLElement | null)?.closest?.('.codev-canvas-row-affordance'));
+
   // Keyboard path (#1237 parity): focusing a block lights the "+" in its row, instantly.
+  // Tab-focusing the button itself must not re-anchor (see fromAffordance).
   const activateFromFocus = (target: EventTarget | null): void => {
+    if (fromAffordance(target)) return;
     const b = resolveBlock(target);
     if (!b) return;
     setActiveLine(b.line);
@@ -642,7 +656,7 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
   // targets, so a lingering affordance can never be attributed to the wrong row).
   const activateFromPointer = (e: React.MouseEvent): void => {
     const target = e.target as HTMLElement | null;
-    if (target?.closest?.('.codev-canvas-row-affordance')) return;
+    if (fromAffordance(target)) return;
     if ((e.buttons & 1) !== 0) return;
     const b = resolveBlock(target);
     if (!b) return;

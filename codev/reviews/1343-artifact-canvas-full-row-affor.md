@@ -68,6 +68,25 @@ Nothing routed HOT (both are situation-specific recipes, not behavior-changing g
 
 ## Things to Look At During PR Review
 
+### Consultation findings (iter-1, single-pass — verify these dispositions at the pr gate)
+
+Codex returned REQUEST_CHANGES with three findings; all three were confirmed real and fixed
+(PIR runs one consultation pass, so these fixes were **not** independently re-reviewed):
+
+1. **Affordance-origin focus/keydown retargeted nested lines.** Tab-focusing the "+" (or Enter
+   on it) re-resolved through the host row, retargeting an `li`'s line to the `ul`'s line and
+   opening the composer on the wrong line. Fixed: a shared `fromAffordance` guard now no-ops all
+   three activation paths (pointer, focus, body keydown) for events originating inside the
+   wrapper; the button's native Enter/Space activation → onClick carries the correct line.
+   Regression test: "focus and keydown on the affordance never retarget it either".
+2. **Governance-doc corruption.** The `[From #1237]` focus-restoration lesson in
+   `lessons-learned.md` lost its header in an earlier edit, gluing its tail onto the new portal
+   lesson. Restored as its own bullet.
+3. **Nested marker-card/composer over-indent.** Stacks for nested blocks (an `li`'s marker) are
+   injected *inside* their row, which already carries the gutter — the unscoped `margin-left`
+   double-indented them. Fixed: gutter margins scoped with a child combinator to top-level
+   stacks/hosts only, pinned by CSS-contract assertions in `default-theme.test.ts`.
+
 - **`ArtifactCanvas.tsx` — `activateFromPointer`'s three guard clauses** (affordance-origin
   events, primary-button drag, no-block targets). The first is subtle: without it, hovering the
   "+" hosted in a `ul`'s gutter re-resolves to the `ul` and retargets a nested `li`'s line to

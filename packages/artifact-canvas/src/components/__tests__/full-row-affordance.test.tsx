@@ -157,4 +157,34 @@ describe('full-row "+" affordance (#1343)', () => {
     expect(plusButton(8)).not.toBeNull();
     expect(plusButton(7)).toBeNull();
   });
+
+  it('focus and keydown on the affordance never retarget it either (iter-1 Codex)', async () => {
+    // Same trap as the pointer path, via keyboard: the button lives inside the HOST row (the ul),
+    // so an unguarded focus/keydown re-resolves an li's line 8 to the ul's line 7 — and Enter
+    // would open the composer on the wrong line.
+    const { onAddComment } = await mount();
+    const li = document.querySelector<HTMLElement>('li[data-line="7"]') as HTMLElement;
+    fireEvent.mouseOver(li);
+    const btn = plusButton(8) as HTMLElement;
+    act(() => {
+      btn.focus(); // Tab reaches the button — must not re-anchor to the host row's line
+    });
+    expect(plusButton(8)).not.toBeNull();
+    expect(plusButton(7)).toBeNull();
+    // Enter on the button belongs to the button (native activation → onClick). The body handler
+    // must not intercept it and open the composer for the ul's line.
+    fireEvent.keyDown(btn, { key: 'Enter' });
+    expect(document.querySelector('.codev-canvas-comment-composer')).toBeNull();
+    // Clicking (what native activation fires) opens the composer for the li's own line.
+    fireEvent.click(btn);
+    const textarea = await waitFor(() => {
+      const el = document.querySelector<HTMLTextAreaElement>('.codev-canvas-comment-composer-input');
+      if (!el) throw new Error('composer not open yet');
+      return el;
+    });
+    expect(textarea.getAttribute('aria-label')).toBe('Add comment on line 8');
+    fireEvent.change(textarea, { target: { value: 'scoped to the item' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Comment' }));
+    expect(onAddComment).toHaveBeenCalledWith(7, 'scoped to the item'); // the li's 0-based line
+  });
 });
