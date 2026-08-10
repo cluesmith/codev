@@ -1,7 +1,7 @@
 id: '1037'
 title: vscode-codelens-driven-review-
 protocol: pir
-phase: review
+phase: verified
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -21,7 +21,7 @@ iteration: 1
 build_complete: true
 history: []
 started_at: '2026-08-05T23:21:45.893Z'
-updated_at: '2026-08-10T02:58:09.016Z'
+updated_at: '2026-08-10T02:59:21.759Z'
 pr_history:
   - phase: review
     pr_number: 1382
