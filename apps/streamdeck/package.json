@@ -1,0 +1,27 @@
+{
+  "name": "@cluesmith/codev-streamdeck",
+  "version": "3.3.0",
+  "private": true,
+  "description": "Codev Stream Deck plugin — a controller that drives Codev via Tower's command relay + overview API.",
+  "type": "module",
+  "scripts": {
+    "build": "node esbuild.js",
+    "watch": "node esbuild.js --watch",
+    "check-types": "tsc --noEmit",
+    "validate": "streamdeck validate com.cluesmith.codev.sdPlugin",
+    "pack": "streamdeck pack com.cluesmith.codev.sdPlugin --output dist --force",
+    "package": "node esbuild.js && rm -f com.cluesmith.codev.sdPlugin/bin/plugin.js.map && rm -rf com.cluesmith.codev.sdPlugin/logs && find com.cluesmith.codev.sdPlugin -name .DS_Store -delete && streamdeck validate com.cluesmith.codev.sdPlugin && streamdeck pack com.cluesmith.codev.sdPlugin --output dist --force",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@cluesmith/codev-sdk": "workspace:*",
+    "@elgato/streamdeck": "^2.1.0"
+  },
+  "devDependencies": {
+    "@elgato/cli": "^1.7.4",
+    "@types/node": "22.x",
+    "esbuild": "^0.27.1",
+    "typescript": "catalog:",
+    "vitest": "^4.0.15"
+  }
+}

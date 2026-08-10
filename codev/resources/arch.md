@@ -1120,6 +1120,7 @@ live in `packages/`; end-user client surfaces live in `apps/`:
 | `packages/artifact-canvas` | `@cluesmith/codev-artifact-canvas` | Reusable React surface for rendering/reviewing Codev markdown artifacts |
 | `apps/web` | `@cluesmith/codev-web` | React dashboard SPA (built into codev package) |
 | `apps/vscode` | `codev-vscode` (Marketplace: `cluesmith.codev-vscode`) | VS Code extension |
+| `apps/streamdeck` | `@cluesmith/codev-streamdeck` (private; Elgato plugin UUID `com.cluesmith.codev`) | Stream Deck plugin — outside-in controller: overview reads + SSE + command-relay verbs via the sdk's `controller`/`node` subpaths. Imported from codev-integrations under #1347; packs on demand into a `.sdPlugin` Marketplace bundle (not yet Marketplace-distributed — initial Maker Console submission is a tracked follow-up), versioned in workspace lockstep (manifest `Version` = package version + build segment, pinned by a version-sync test) |
 
 **Dependency graph:**
 ```
@@ -1131,6 +1132,9 @@ codev-core (server: key issuance,   codev-sdk (client: TowerClient, SSE,
 codev (CLI + Tower)                vscode (extension)     dashboard (React SPA)
   imports core + sdk                 imports sdk            imports sdk
   imports types (dev)                imports types (dev)    imports types (dev)
+
+streamdeck (Elgato plugin)
+  imports sdk only (controller + node subpaths; own import-boundary test)
 ```
 
 **Isolation invariant (issue #1189):** `codev-core` and `codev-sdk` never import
@@ -1145,6 +1149,8 @@ server must not import the client sdk.
 **Build order:** `pnpm build` from root builds artifact-canvas (consumed by the VS Code extension; zero workspace deps, so no ordering hazard) and then `@cluesmith/codev`, whose own build script first builds its graph-derived workspace-dependency closure via `pnpm --filter "@cluesmith/codev^..." build` (types, sdk, core, apps/web in topological order, then the dashboard copy — Issue #1352, replacing the drift-prone hand-list). The closure guarantees `types/dist` exists, which the VS Code extension's esbuild bundle needs: it resolves the package's runtime `exports.default` (`./dist/index.js`), and a missing `types/dist` breaks the extension build even though tsc and vite resolve it from source via `exports.types` (`./src/index.ts`).
 
 **Publishing:** `codev-core` and `codev-sdk` must be published to npm before `codev` (runtime dependencies).
+
+**Published-SDK canary:** with every sdk consumer now on `workspace:*`, nothing in normal CI exercises the *published* npm artifact. `.github/workflows/sdk-canary.yml` rebuilds `apps/streamdeck` against `@cluesmith/codev-sdk@latest` from the registry (types, tests, bundle, validate) — manual-only until the sdk's first npm publish; enable its weekly cron after that release (#1347, mitigation from #1189).
 
 **Per-package build tools:** most packages compile with plain `tsc`; `apps/web` uses Vite; `apps/vscode` uses esbuild; `packages/artifact-canvas` produces its dual-format (CJS + ESM) library via **tsdown** (Rolldown-powered, the maintained successor to tsup — migrated in Issue #1187). tsdown emits per-format filenames (`index.mjs`/`index.d.mts` for ESM, `index.cjs`/`index.d.cts` for CJS), so the package's `exports` map uses nested `import`/`require` conditions each pointing at their matching declaration file.
 

@@ -1,0 +1,57 @@
+# Published-SDK canary (issue #1347, mitigation from #1189): builds
+# apps/streamdeck against the LATEST PUBLISHED @cluesmith/codev-sdk instead of
+# workspace:*, keeping one external-fidelity check alive for third-party
+# integrators now that every in-repo consumer uses workspace HEAD.
+#
+# The `pnpm add @cluesmith/codev-sdk@latest` step rewrites the plugin's
+# dependency from `workspace:*` to a registry semver range; with pnpm's default
+# `link-workspace-packages: false` that resolves from npm, NOT the local
+# workspace — so type-check/test/build exercise the published dist + types
+# exactly where an external consumer would feel a break. (If a repo-level
+# .npmrc ever enables link-workspace-packages, this job silently loses its
+# meaning — don't.)
+#
+# Manual-only until @cluesmith/codev-sdk's first npm publish (next release).
+# After that release, enable the weekly schedule below.
+name: Published-SDK Canary
+
+on:
+  workflow_dispatch:
+  # Enable after the sdk's first npm publish:
+  # schedule:
+  #   - cron: '0 6 * * 1'  # Mondays 06:00 UTC
+
+jobs:
+  canary:
+    name: Build streamdeck against published sdk
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Swap sdk dependency to latest published version
+        run: pnpm --filter @cluesmith/codev-streamdeck add @cluesmith/codev-sdk@latest
+
+      - name: Type-check against published sdk
+        working-directory: apps/streamdeck
+        run: pnpm check-types
+
+      - name: Run unit tests against published sdk
+        working-directory: apps/streamdeck
+        run: pnpm test
+
+      - name: Build + validate against published sdk
+        working-directory: apps/streamdeck
+        run: pnpm build && pnpm validate
