@@ -7,6 +7,12 @@ import { CommentComposer } from '../overlays/CommentComposer.js';
 import { MarkerMinimap } from '../overlays/MarkerMinimap.js';
 import { KeyboardHelp } from '../overlays/KeyboardHelp.js';
 import { ReadingModeToggle } from '../overlays/ReadingModeToggle.js';
+import {
+  blockScrollOptions,
+  innerScrollerCanConsume,
+  measureColumnGeometry,
+  wheelDeltaPx,
+} from './column-geometry.js';
 
 /** Coerce an untrusted (host-persisted) mode value to the closed vocabulary (spec 1380 D4). */
 function coerceReadingMode(value: string | undefined): ReadingMode {
@@ -39,6 +45,7 @@ function buildMarkerCards(
   markers: ReviewMarker[],
   canEdit: boolean,
   canDelete: boolean,
+  focusableBodies: boolean,
 ): HTMLUListElement {
   const stack = document.createElement('ul');
   stack.className = 'codev-canvas-marker-cards';
@@ -60,6 +67,12 @@ function buildMarkerCards(
     const body = document.createElement('span');
     body.className = 'codev-canvas-marker-card-body';
     body.textContent = m.text;
+    // Horizontal mode caps the card body with an inner scroller (spec D1); a scroller must be
+    // keyboard-reachable to be keyboard-scrollable (phase-2 iter-2 consult). Vertical mode adds
+    // no tabindex — its tab order stays exactly as it was.
+    if (focusableBodies) {
+      body.setAttribute('tabindex', '0');
+    }
 
     card.append(icon, author, body);
 
@@ -327,7 +340,8 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
       if (ms && ms.length > 0 && !decoratedLines.has(line)) {
         decoratedLines.add(line);
         el.classList.add('codev-canvas-has-marker');
-        el.after(buildMarkerCards(line, ms, canEdit, canDelete)); // inline-below, in flow (#863)
+        // inline-below, in flow (#863); card bodies become focusable scrollers in horizontal
+        el.after(buildMarkerCards(line, ms, canEdit, canDelete, readingMode === 'horizontal'));
       } else {
         // Inner siblings that share the line (and genuinely unmarked blocks) get no card and no
         // decoration; any stale class from a prior markers-only re-render is cleared here too.
@@ -373,7 +387,9 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
       }
       if (target) target.focus({ preventScroll: true });
     }
-  }, [html, markers, canEdit, canDelete]);
+    // `readingMode` in the deps: toggling re-injects the card stacks so card-body focusability
+    // tracks the mode (the injected DOM is not React-managed, so a re-run is the update path).
+  }, [html, markers, canEdit, canDelete, readingMode]);
 
   // Manage the in-flow composer placeholder (#1107). When `composingLine` is set, inject a
   // placeholder `<div>` directly below that block — AFTER its marker-card stack if present, so the
@@ -494,7 +510,8 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
 
   const focusBlock = (el: HTMLElement): void => {
     el.focus({ preventScroll: true });
-    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    // Axis-aware (spec req. 3): horizontal centers on the inline axis — the axis that scrolls.
+    el.scrollIntoView(blockScrollOptions(readingMode));
     // Focusing fires the body's onFocus → activateFromFocus, so the "+" follows the jump for free.
   };
 
@@ -582,6 +599,26 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
     return () => ro.disconnect();
   }, [readingMode]);
 
+  // Wheel remap (spec Constraint 5): active ONLY in horizontal mode, attached as a NATIVE
+  // non-passive listener — React's delegated wheel path is passive-by-default, so its
+  // preventDefault cannot be relied on (plan phase 3). Pass-through rules, in order: modified
+  // wheels (pinch-zoom), horizontal-dominant deltas (native trackpad gesture), and events an
+  // inner vertical scroller (capped code/table/card/composer) can still consume. Everything
+  // else becomes horizontal canvas travel. Vertical mode attaches nothing.
+  React.useEffect(() => {
+    const body = bodyRef.current;
+    if (!body || readingMode !== 'horizontal') return;
+    const onWheel = (e: WheelEvent): void => {
+      if (e.ctrlKey || e.metaKey) return;
+      if (Math.abs(e.deltaX) >= Math.abs(e.deltaY)) return;
+      if (innerScrollerCanConsume(e.target, e.deltaY, body)) return;
+      e.preventDefault();
+      body.scrollLeft += wheelDeltaPx(e, body.clientHeight);
+    };
+    body.addEventListener('wheel', onWheel, { passive: false });
+    return () => body.removeEventListener('wheel', onWheel);
+  }, [readingMode]);
+
   // Keyboard handling on the body (#1107 activation + #1237 jump navigation). Every branch below
   // requires the event to originate on a `[data-line]` block, so keystrokes inside the composer
   // textarea, the card action buttons, or the minimap are never intercepted — typing "n" in a
@@ -614,6 +651,25 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
       if (helpOpen) {
         e.preventDefault();
         setHelpOpen(false);
+      }
+      return;
+    }
+
+    // Column paging (spec 1380, plan phase 3; horizontal only). Reached only when the event
+    // originated on a `[data-line]` block (the `current` guard above), so keystrokes in the
+    // composer are never intercepted. Steps land on column starts: quantize to the measured
+    // step grid, then move one column.
+    if (readingMode === 'horizontal' && (e.key === 'PageDown' || e.key === 'PageUp')) {
+      e.preventDefault();
+      const { step } = measureColumnGeometry(root);
+      if (step > 0) {
+        let dir = 1;
+        if (e.key === 'PageUp') dir = -1;
+        const max = root.scrollWidth - root.clientWidth;
+        let target = (Math.round(root.scrollLeft / step) + dir) * step;
+        if (target < 0) target = 0;
+        if (target > max) target = max;
+        root.scrollLeft = target;
       }
       return;
     }
@@ -838,8 +894,8 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
             composerHost,
           )
         : null}
-      {helpOpen ? <KeyboardHelp /> : null}
-      <MarkerMinimap markers={markers} bodyRef={bodyRef} />
+      {helpOpen ? <KeyboardHelp readingMode={readingMode} /> : null}
+      <MarkerMinimap markers={markers} bodyRef={bodyRef} readingMode={readingMode} />
     </div>
   );
 }
