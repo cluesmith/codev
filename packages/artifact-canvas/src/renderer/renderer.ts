@@ -106,8 +106,12 @@ md.renderer.rules.fence = (tokens, idx, options, env, self) => {
   } else {
     html = self.renderToken(tokens, idx, options);
   }
-  if (dataLine !== null) {
-    html = html.replace('<pre', `<pre data-line="${dataLine}" tabindex="0"`);
+  if (dataLine !== null && html.startsWith('<pre')) {
+    // The startsWith guard is load-bearing coupling: markdown-it's default fence output always
+    // opens with `<pre`, but a host-configured `options.highlight` returning its own wrapper
+    // would not — in that case we must not stamp a random first tag, and the fence simply has
+    // no row identity (the pre-#1396 status quo) rather than a corrupted one.
+    html = `<pre data-line="${dataLine}" tabindex="0"${html.slice('<pre'.length)}`;
   }
   return html;
 };

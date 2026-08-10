@@ -85,6 +85,44 @@ test('fence row hosts the "+" inside the pre with row-local placement (#1396)', 
   expect(w.bottom).toBeLessThanOrEqual(preRect.bottom + 20);
 });
 
+test('nested block inside a FRAGMENTED host row anchors in the hovered column (plan verification item)', async ({ page }) => {
+  const body = await openFixture(page);
+  // The filler lists are multi-item ULs; find one whose UL fragments across columns so an li
+  // sits in a continuation fragment of its own host row.
+  const probe = await body.evaluate((el) => {
+    const uls = Array.from(el.querySelectorAll(':scope > ul[data-line]'));
+    for (const ul of uls) {
+      const ulRects = Array.from(ul.getClientRects());
+      if (ulRects.length < 2) continue;
+      for (const li of Array.from(ul.querySelectorAll('li'))) {
+        const r = li.getClientRects()[0];
+        // An li that starts in the host's SECOND fragment (right of the first fragment's band).
+        if (r && r.left > ulRects[0].right) {
+          li.scrollIntoView({ inline: 'center', block: 'nearest' });
+          const rr = li.getClientRects()[0];
+          return {
+            x: (rr.left + rr.right) / 2,
+            y: rr.top + 8,
+            liLeft: rr.left,
+            liRight: rr.right,
+            hostFirstFragRight: ul.getClientRects()[0].right,
+          };
+        }
+      }
+    }
+    return null;
+  });
+  test.skip(probe === null, 'fixture produced no cross-fragment list this viewport');
+  await page.mouse.move(probe!.x, probe!.y);
+  await expect(page.locator('.codev-canvas-add-comment')).toBeVisible();
+  const w = await wrapperRect(page);
+  // The "+" renders in the li's own column band — the host's continuation fragment — not back
+  // in the host row's first column.
+  expect(w.right).toBeLessThanOrEqual(probe!.liLeft + 5);
+  expect(w.top).toBeGreaterThanOrEqual(probe!.y - 40);
+  expect(w.bottom).toBeLessThanOrEqual(probe!.y + 40);
+});
+
 test('watch-reload in horizontal mode: mode, cards, focus, and affordance all recover (scenario 9)', async ({ page }) => {
   const body = await openFixture(page);
   const target = body.locator('p', { hasText: 'Intro paragraph.' });

@@ -59,3 +59,30 @@ non-passive wheel listener, @playwright/test as artifact-canvas devDep + a PR-tr
 step (fixture had no CI home), Memento plumbed through MarkdownPreviewProvider's
 constructor, homes for spec scenarios 9 + 5c. Plan + rebuttals committed.
 **plan-approval gate requested; waiting on human.**
+
+## Implement phases 1–4 (same day)
+
+Plan approved. Porch-driven phase loop, one commit per phase + a consult-fix commit each:
+
+- **Phase 1 (reading-mode core)**: mode prop/coercion, toggle chrome, horizontal CSS layer,
+  D7 anchoring, column-height observation. Consult: Codex APPROVE, Claude COMMENT — toggle
+  moved before the body (first tab stop), CSS scoping guard test added.
+- **Phase 2 (fragmentation protection + fixture)**: break-inside + caps, 1109-line fixture,
+  Playwright suite + CI job. Fixture immediately caught that markdown-it stamps fence attrs
+  on the inner code (→ architect filed #1396). Consult iter-1: both REQUEST_CHANGES —
+  nested pre/table were unprotected (child combinators), fixed with descendant selectors +
+  nested fixtures/tests; iter-2: both APPROVE.
+- **Phase 3 (input semantics)**: non-passive wheel remap with inner-scroller yield, measured
+  column paging, axis-aware jumps, focusable card scrollers. Consult: Codex APPROVE, Claude
+  COMMENT — guard-order/clamp polish + legend/minimap tests added. Container-level paging
+  reachability deliberately deferred to phase 5 (focusable container lands there).
+- **Phase 4 (fragment-aware "+")**: #1396 fixed at the ROOT — custom fence renderer stamps
+  data-line on the pre (code keeps tabindex as scroller); placeAffordance rewritten in flow
+  coordinates over pure, unit-tested fragment math; offsetTop eliminated outside the
+  no-layout fallback. Browser tests: addendum both directions, first-fragment keyboard,
+  pre-row regression, scenario-9 watch-reload, nested×fragmented-host lock. Consult: both
+  APPROVE. NOTE for PR body: the #1396 fix intentionally changes vertical fences (row model
+  + two tab stops: pre row + code scroller) — defensible, demo at dev-approval.
+
+Suites: 137 jsdom + 25 browser green; repo-wide green. Next: phase 5 (progress indicator,
+minimap suppression, a11y — incl. the deferred container-paging decision), phase 6 (hosts).
