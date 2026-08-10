@@ -46,3 +46,16 @@ card-body caps, MarkdownView exclusion, wheel yield-to-inner-scrollers, resize/z
 recompute, persistence validation, in-scope host height wiring, prose-cap inert in
 horizontal, PageUp/PageDown column paging, selection scenario, spike→Playwright fixture.
 Spec revised + rebuttals committed. **spec-approval gate requested; waiting on human.**
+
+## Plan phase (same day)
+
+Spec approved at gate. Plan drafted: 6 phases, inside-out (mode core → fragmentation
+protection + Playwright fixture → input semantics → fragment-aware affordance → progress/
+a11y → host wiring). Iter-1 consultation: Codex REQUEST_CHANGES (7) + Claude COMMENT (7,
+code-verified). All 14 accepted — the big ones: measured column geometry (the width token is
+a preferred minimum, real columns stretch), VS Code bootstrap must embed the persisted mode
+in the initial webview HTML (canvas mounts before the first host message), native
+non-passive wheel listener, @playwright/test as artifact-canvas devDep + a PR-triggered CI
+step (fixture had no CI home), Memento plumbed through MarkdownPreviewProvider's
+constructor, homes for spec scenarios 9 + 5c. Plan + rebuttals committed.
+**plan-approval gate requested; waiting on human.**
