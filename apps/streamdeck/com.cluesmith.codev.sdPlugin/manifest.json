@@ -8,9 +8,9 @@
   "Description": "Drive Codev's AI agent workflows from your Stream Deck. Approve gates, watch your builder fleet, step through diff reviews with dials, spawn builders from the backlog, and control your dev server — without leaving your editor. Companion plugin for Codev (github.com/cluesmith/codev): requires Codev and its Tower server running locally.",
   "Icon": "icons/plugin",
   "URL": "https://github.com/cluesmith/codev",
-  "SDKVersion": 2,
+  "SDKVersion": 3,
   "Software": {
-    "MinimumVersion": "6.5"
+    "MinimumVersion": "6.9"
   },
   "OS": [
     {

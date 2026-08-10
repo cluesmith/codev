@@ -18,7 +18,7 @@
     "@elgato/streamdeck": "^2.1.0"
   },
   "devDependencies": {
-    "@elgato/cli": "^1.7.4",
+    "@elgato/cli": "^1.8.0",
     "@types/node": "22.x",
     "esbuild": "^0.27.1",
     "typescript": "catalog:",

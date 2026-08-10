@@ -16,11 +16,33 @@ describe('manifest / package version lockstep', () => {
   const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf-8')) as { version: string };
   const manifest = JSON.parse(
     readFileSync(join(root, 'com.cluesmith.codev.sdPlugin', 'manifest.json'), 'utf-8'),
-  ) as { Version: string };
+  ) as { Version: string; SDKVersion: number; Software: { MinimumVersion: string } };
 
   it('manifest Version is package.json version plus a build segment', () => {
     expect(manifest.Version).toMatch(
       new RegExp(`^${pkg.version.replace(/\./g, '\\.')}\\.\\d+$`),
     );
+  });
+});
+
+/**
+ * The Elgato Marketplace rejects submissions below SDKVersion 3 / Stream
+ * Deck 6.9 (issue #1394). Local `streamdeck validate` can lag behind the
+ * marketplace's requirements, so pin them here to fail loudly if the
+ * manifest is ever regenerated or downgraded.
+ */
+describe('marketplace submission requirements', () => {
+  const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+  const manifest = JSON.parse(
+    readFileSync(join(root, 'com.cluesmith.codev.sdPlugin', 'manifest.json'), 'utf-8'),
+  ) as { SDKVersion: number; Software: { MinimumVersion: string } };
+
+  it('declares SDKVersion 3 or later', () => {
+    expect(manifest.SDKVersion).toBeGreaterThanOrEqual(3);
+  });
+
+  it('requires Stream Deck 6.9 or later', () => {
+    const [major, minor] = manifest.Software.MinimumVersion.split('.').map(Number);
+    expect(major * 100 + minor).toBeGreaterThanOrEqual(6 * 100 + 9);
   });
 });
