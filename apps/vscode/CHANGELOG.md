@@ -4,6 +4,7 @@
 
 ### What's new
 
+- **Review comments for builder diffs: compose, queue, submit as a batch.** In a builder's unified diff, a `> Comment for builder` codelens (or the right-click menu, available in every mode) opens an inline comment thread at the line or hunk. Comments collect in a per-builder queue that survives window reloads, and `Submit Review` packages them into a single message typed into the builder's prompt — you read it and press Enter to send. The existing one-click `> Send to builder PTY` flow is unchanged and always available from the context menu; an editor toggle picks which codelens shows (comment is the new default).
 - **Annotation viewer: keyboard-first review.** A spec or plan can now be reviewed without the mouse: Tab between blocks, Enter/Space to open the comment box, Cmd/Ctrl+Enter to submit, Esc to cancel. Jump keys move between commented blocks (`n`/`p`) and headings (`[`/`]`), Home/End jump to the document ends, minimap dots are keyboard-reachable, and `?` shows a keys legend.
 
 ### Fixes

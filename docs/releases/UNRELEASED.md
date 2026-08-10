@@ -33,6 +33,10 @@
     6. Re-cp the template back to UNRELEASED.md to start the next cycle
 -->
 
+## Review comments on builder diffs (#1037, PR #1382)
+
+A structured review mode for builder diffs: compose comments in inline threads via codelens or context menu, collect them in a per-builder queue (persists across reloads), and submit the whole review as one batched message typed into the builder's prompt for a final read-and-Enter. The frictionless one-click PTY injection stays for quick reactions; an editor toggle chooses the default surface.
+
 ## Polish
 
 <!-- Small vscode items as bullets:
