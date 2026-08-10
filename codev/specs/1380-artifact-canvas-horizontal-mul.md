@@ -112,11 +112,23 @@ A toolbar-toggleable horizontal reading mode:
 - Every review interaction works identically: row hover/focus lights the "+" in the column
   fragment under the pointer; the composer opens in flow below its block; cards render below
   their block; edit/delete work; the full #1237 keyboard flow works with axis-aware scrolling.
+  Container-level paging is defined too (iter-1 Claude): in horizontal mode PageDown/PageUp
+  step the view one column forward/back; the existing block bindings are untouched (Space and
+  Enter on a focused block keep their composer meaning, `n`/`p`/`[`/`]`/Home/End keep theirs),
+  and no key is intercepted while the composer has focus.
 - Code blocks (and other over-tall protected blocks) stay fully readable via inner vertical
   scroll; prose fragments naturally across columns.
 - A progress indicator replaces the vertical scrollbar's positional feedback.
 - Toggling back restores vertical mode exactly; the mode preference persists per user across
   sessions; switching modes lands the reader within the same section.
+
+Scope boundaries within the package (iter-1 review): horizontal mode is a feature of the
+**composed surface** (`ArtifactCanvas`) only. The standalone `MarkdownView` render surface is
+unchanged — no toggle, no mode class, no new CSS applies to it. The wheel remap **yields to
+inner vertical scrollers**: a wheel event whose target sits inside an element that can still
+consume the delta on its own vertical axis (a tall code block's inner scroll, a table, the
+composer textarea, a capped marker card) scrolls that element natively and is not remapped —
+only wheel input the content cannot consume becomes horizontal canvas scroll.
 
 ## Success Criteria
 
@@ -136,7 +148,14 @@ A toolbar-toggleable horizontal reading mode:
       horizontal delta and pinch-zoom (ctrl/meta-modified wheel) pass through untouched;
       vertical mode's wheel behavior is untouched.
 - [ ] The mode preference survives a host restart (per-user scope); a user who never toggles
-      sees zero behavioral change in vertical mode.
+      sees zero behavioral change in vertical mode. An unrecognized or corrupt persisted value
+      is coerced to vertical, and a persistence failure degrades to the vertical default with
+      the toggle still functional.
+- [ ] Resizing the container (window resize, host pane resize, zoom) recomputes column
+      geometry, tall-block caps, and the progress readout, and keeps the pre-resize
+      viewport-start block in view.
+- [ ] In an embed that provides no height context, horizontal mode self-bounds to the visual
+      viewport height rather than degenerating into one infinite column.
 - [ ] Mode switch lands the reader within the same section: the block (or nearest heading at
       or above it) that was at the viewport start before the switch is visible after it.
 - [ ] Progress indication is visible while scrolling horizontally (position within the
@@ -153,9 +172,13 @@ Architect non-negotiables (issue #1380 + 2026-08-10 guidance), restated as fixed
 2. **No new runtime dependencies.** The mechanism is native CSS multi-column
    (`column-width` + `column-fill: auto`) plus a wheel remap, axis-aware `scrollIntoView`,
    and a progress indicator — all hand-rolled.
-3. **Host scope per ruling A**: implemented once in the canvas package; proven in the vite
-   dev host and the VS Code webview. `afx open` parity arrives via #1386 (canvas adoption),
-   not this feature.
+3. **Host scope per ruling A**: the mechanism is implemented once, in the canvas package;
+   proven in the vite dev host and the VS Code webview. `afx open` parity arrives via #1386
+   (canvas adoption), not this feature. Precision added after iter-1 review: neither v1 host
+   currently gives the canvas a bounded height (both scroll the document), and horizontal
+   mode inverts scroll ownership — so **minimal host wiring is in scope for both v1 hosts**:
+   a height context (CSS making the canvas fill the host viewport) plus the per-user
+   persistence glue of D4. No mode logic lives in any host.
 4. **Protected block types never fragment**: `pre`, `table`, images, marker cards, and an
    open composer get `break-inside: avoid`; prose may fragment naturally.
 5. **Wheel remap only in horizontal mode, only for vertical wheel deltas**; native horizontal
@@ -186,9 +209,11 @@ Existing-system constraints:
 - **Both verification hosts are Chromium** (Electron webview; vite dev host verified in
   Chromium). The CSS used is standard and supported in Gecko/WebKit, but only Chromium
   behavior is verified in v1; other engines are best-effort.
-- The host gives the canvas a bounded viewport height in horizontal mode (a full-viewport
-  webview / dev page). Column mode is meaningless in an unbounded-height embed; the mode
-  requires a height context, and the host integration provides it.
+- Column height in horizontal mode comes from the canvas root's resolved height, which the
+  v1 hosts provide via the in-scope height wiring (Constraint 3); the canvas observes its own
+  container size (resize/zoom recomputation). In an embed that provides no height context,
+  the canvas self-bounds to the visual viewport height (success criterion above) — column
+  mode never produces an unbounded column.
 - jsdom (the unit-test environment) does not implement CSS fragmentation; fragmentation-
   dependent behavior is verified in a real browser at dev-approval (per the minimap
   precedent), while unit tests assert structure and state logic.
@@ -253,7 +278,10 @@ column height; content beyond the cap is reached by the block's own inner vertic
 (code, tables) or scaled to fit (images, which already `max-width: 100%`). Marker-card
 *stacks* may break **between** cards (each card individually protected) — a long comment
 thread reads on like prose, and no individual card ever splits, which is the requirement's
-intent. The open composer is protected whole; its textarea gets a max-height in horizontal
+intent. A single card whose body would exceed the column height gets the same treatment as
+code — a max-height cap with inner vertical scroll on the card body (iter-1 Codex) — so the
+protected-block fallback of finding 3 is never entered for *any* protected type. The open
+composer is protected whole; its textarea gets a max-height in horizontal
 mode so user resizing cannot push it past a column. Prose (`p`, headings, list items,
 blockquotes) fragments naturally. "Cap-with-expand" is rejected: it adds interaction state
 for no reader benefit over an inner scrollbar.
@@ -284,7 +312,10 @@ the canvas takes an initial mode and emits mode-change events; each host stores 
 per-user (VS Code: extension global state; vite dev host: browser local storage). Scope is
 **per-user** (architect lean adopted): reading-mode preference is about the human's display
 and habits, not the workspace's content. A host that persists nothing simply gets vertical
-default each session — read-only hosts remain zero-config.
+default each session — read-only hosts remain zero-config. The initial-mode value crosses an
+untyped host seam (`postMessage` in the webview), so the canvas validates it: anything other
+than a recognized mode name is coerced to vertical, and a host persistence failure degrades
+to the vertical default with the toggle still functional (iter-1 Codex + Claude).
 
 **D5 — Scroll-snap: none in v1 (free scrolling).**
 Architect lean adopted. Snap fights precise positioning while composing (an open composer
@@ -296,7 +327,11 @@ real reading-comfort feedback.
 The width becomes part of the `--codev-canvas-*` token vocabulary (with the column gap),
 which the theming model already lets hosts and users override — configurability for free,
 with no settings surface, consistent with how every other canvas dimension is themed. No
-per-document or per-toggle width UI in v1.
+per-document or per-toggle width UI in v1. One interaction with the existing vocabulary
+(iter-1 Claude): `--codev-canvas-prose-max-width` currently caps the body element itself —
+the very element that becomes the multicol container — so a host that sets it (e.g. `72ch`)
+would collapse horizontal mode to roughly one column. The prose cap is therefore **inert in
+horizontal mode**; readable measure there is governed solely by the column-width token.
 
 **D7 — Mode-switch position mapping: viewport-start block anchor.**
 On toggle, record the first `[data-line]` block at least partially visible at the viewport
@@ -343,6 +378,16 @@ Functional, horizontal mode (real browser; unit-level where jsdom permits):
    no individual card split.
 5. Wheel: vertical deltas scroll horizontally; dominant-horizontal deltas pass through
    natively; ctrl/meta-wheel (pinch) untouched; in vertical mode no remap handler is active.
+   Wheel over an inner vertical scroller (tall code, table, composer textarea, capped card)
+   scrolls that element while it can consume the delta, and falls through to horizontal
+   canvas scroll only when it cannot.
+5b. Resize/zoom: shrinking and growing the window (and browser zoom) recomputes column
+   geometry, caps, and the progress readout; the pre-resize viewport-start block stays in
+   view; keyboard paging steps still land on column starts.
+5c. Selection: a text selection dragged across a column boundary selects the intervening
+   content in document order and copies in document order (engine-owned behavior — verified
+   in the real-browser pass; if an engine defect surfaces it is documented as a known
+   limitation, not worked around).
 6. Mode switch position: scroll to a mid-document section, toggle → the same section is
    visible; toggle back → same section again.
 7. Preference: toggle horizontal, restart the host (webview reload / page reload) → horizontal
@@ -362,6 +407,13 @@ Non-functional:
 12. Theming: light and dark, toggle + progress chrome legible, only `--codev-canvas-*` tokens
     used (existing token-compliance test pattern extended).
 13. Host demos at dev-approval: vite dev host and VS Code webview, per the testing guide.
+14. Regression fixture (iter-1 Claude): the spike's fragmentation invariants — protected
+    blocks report one client rect, over-tall protected blocks fit their column via inner
+    scroll, fragmented prose reports per-fragment rects — are committed as a real-browser
+    (Playwright-driven) test over a fixture document, so the load-bearing spike findings
+    become regression checks rather than one-time observations.
+15. Persistence robustness: a corrupt/unknown persisted mode value renders vertical with a
+    working toggle; a host whose storage write fails still toggles for the session.
 
 ## Risks and Mitigation
 
@@ -371,7 +423,7 @@ Non-functional:
 | Residual vertical-flow geometry assumptions (`offsetTop`, union `getBoundingClientRect`) misplace chrome in columns | Medium | Medium | Spec mandates an audit of all layout-reading code paths (affordance placement, minimap, focus restoration); minimap suppressed (D3); clamping defined on flow height (D2) |
 | jsdom cannot exercise fragmentation, so unit tests under-cover the core mechanism | High | Medium | Split verification: unit tests for state/structure; real-browser verification (Playwright + both host demos) at dev-approval — the established minimap precedent |
 | Wheel remap fights native horizontal gestures or pinch-zoom | Medium | Medium | Remap only vertical-dominant, unmodified wheel events; explicit pass-through scenarios in tests (scenario 5) |
-| Host embeds the canvas without a bounded height, making column mode degenerate | Medium | Low | Assumption recorded; host integration for the two v1 hosts provides the height context; mode toggle is a no-op benefit-wise elsewhere but never corrupts layout |
+| Host embeds the canvas without a bounded height, making column mode degenerate | Medium | Low | Height wiring for both v1 hosts is explicitly in scope (Constraint 3); any other embed self-bounds to the visual viewport height (success criterion), so no configuration yields an unbounded column |
 | Single-lane conflicts: architect lands canvas changes mid-flight | Medium | Low | Rebase over `main` at phase boundaries; #1343 already merged (the big geometric dependency) |
 | `column-fill`/`break-inside` behavior differs in future engine updates | Low | Medium | Success criteria are behavior-based (rect counts, reachability), so regressions surface in the real-browser checks rather than silently |
 
