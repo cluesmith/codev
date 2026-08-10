@@ -38,6 +38,10 @@ const CONTROLLER_ID = 'codev-builder-review';
 /** contextValue on threads/comments — matched by the `comments/*` menu `when` clauses. */
 const PENDING_CONTEXT = 'pending-builder-comment';
 
+/** Fallback end column when the document isn't open to measure the last
+ *  line's length — far past any real line; the editor clamps to content. */
+const LAST_COLUMN = 1 << 20;
+
 /** A mounted queued comment. Carries its queue identity for edit/delete. */
 class BuilderReviewComment implements vscode.Comment {
   public parent?: vscode.CommentThread;
@@ -130,17 +134,22 @@ export function activateBuilderReviewComments(
    * document if any). The thread must span the WHOLE recorded range, not just
    * its first line — the widget renders after the range's last line, so a
    * start-line-only thread would visually cut through the commented lines.
+   * The range ends at the last line's content end, NOT column 0 of that line:
+   * a column-0 end covers zero characters of the last line, so the comment
+   * range highlight would skip it (paint 129 but not 130 of a 129-130 span).
    */
   function anchorRange(fsPath: string, range: LineRange): vscode.Range {
     let start = Math.max(range.start - 1, 0);
     let end = Math.max(range.end - 1, start);
+    let endColumn = LAST_COLUMN;
     const doc = vscode.workspace.textDocuments.find(d => d.uri.fsPath === fsPath);
     if (doc) {
       const lastLine = Math.max(doc.lineCount - 1, 0);
       start = Math.min(start, lastLine);
       end = Math.min(end, lastLine);
+      endColumn = doc.lineAt(end).text.length;
     }
-    return new vscode.Range(start, 0, end, 0);
+    return new vscode.Range(start, 0, end, endColumn);
   }
 
   function mountQueuedComment(fsPath: string, builderId: string, comment: PendingComment): void {
@@ -229,12 +238,18 @@ export function activateBuilderReviewComments(
     const editor = vscode.window.activeTextEditor;
     if (!editor || editor.document.uri.fsPath !== fsPath) { return; }
     if (range) {
+      // endColumn spans the last line's content (clamped by the editor);
+      // ending at column 1 would exclude the last line from the range
+      // highlight entirely.
+      let endColumn = LAST_COLUMN;
+      const endLine = Math.min(Math.max(range.end - 1, 0), editor.document.lineCount - 1);
+      if (endLine >= 0) { endColumn = editor.document.lineAt(endLine).text.length + 1; }
       await vscode.commands.executeCommand('workbench.action.addComment', {
         range: {
           startLineNumber: range.start,
           startColumn: 1,
           endLineNumber: range.end,
-          endColumn: 1,
+          endColumn,
         },
       });
       return;
