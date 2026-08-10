@@ -1,7 +1,7 @@
 id: '1380'
 title: artifact-canvas-horizontal-mul
 protocol: spir
-phase: implement
+phase: review
 plan_phases:
   - id: phase_1
     title: 'Reading-mode core: prop, toggle, column CSS, mode-switch anchoring'
@@ -20,8 +20,8 @@ plan_phases:
     status: complete
   - id: phase_6
     title: 'Host wiring: VS Code webview + vite dev host, docs, demos'
-    status: in_progress
-current_plan_phase: phase_6
+    status: complete
+current_plan_phase: null
 gates:
   spec-approval:
     status: approved
@@ -35,8 +35,8 @@ gates:
     status: pending
   verify-approval:
     status: pending
-iteration: 3
-build_complete: true
+iteration: 1
+build_complete: false
 history:
   - iteration: 1
     plan_phase: phase_2
@@ -87,4 +87,4 @@ history:
         file: >-
           /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1380/codev/projects/1380-artifact-canvas-horizontal-mul/1380-phase_6-iter2-codex.txt
 started_at: '2026-08-10T07:39:19.659Z'
-updated_at: '2026-08-10T10:43:08.919Z'
+updated_at: '2026-08-10T10:46:39.068Z'
