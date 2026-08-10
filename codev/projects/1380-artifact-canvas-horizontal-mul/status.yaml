@@ -11,17 +11,17 @@ plan_phases:
     status: complete
   - id: phase_3
     title: Wheel remap, keyboard paging, axis-aware navigation
-    status: in_progress
+    status: complete
   - id: phase_4
     title: Fragment-aware '+' affordance placement
-    status: pending
+    status: in_progress
   - id: phase_5
     title: Progress indicator, minimap suppression, accessibility chrome
     status: pending
   - id: phase_6
     title: 'Host wiring: VS Code webview + vite dev host, docs, demos'
     status: pending
-current_plan_phase: phase_3
+current_plan_phase: phase_4
 gates:
   spec-approval:
     status: approved
@@ -36,7 +36,7 @@ gates:
   verify-approval:
     status: pending
 iteration: 1
-build_complete: true
+build_complete: false
 history:
   - iteration: 1
     plan_phase: phase_2
@@ -51,4 +51,4 @@ history:
         file: >-
           /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1380/codev/projects/1380-artifact-canvas-horizontal-mul/1380-phase_2-iter1-codex.txt
 started_at: '2026-08-10T07:39:19.659Z'
-updated_at: '2026-08-10T09:33:55.135Z'
+updated_at: '2026-08-10T09:39:47.020Z'
