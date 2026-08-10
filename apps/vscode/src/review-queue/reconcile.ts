@@ -11,7 +11,7 @@
  * session are disposed.
  */
 
-import type { PendingComment } from './queue.js';
+import type { LineRange, PendingComment } from './queue.js';
 
 /** The subset of a diff-inject session entry the planner needs. */
 export interface RegisteredFile {
@@ -60,6 +60,27 @@ export function planThreadReconcile(
     if (!desired.has(id)) { toDispose.push(id); }
   }
   return { toCreate, toDispose };
+}
+
+/**
+ * Clamp a queued comment's 1-based inclusive anchor range to 0-based line
+ * indices within a document of `lineCount` lines (undefined = document not
+ * open, no upper clamp). Queued anchors go stale as the builder keeps
+ * committing — a range past the current end of file must still mount, on the
+ * last line, rather than throw or vanish.
+ */
+export function clampAnchorLines(
+  range: LineRange,
+  lineCount: number | undefined,
+): { startLine: number; endLine: number } {
+  let startLine = Math.max(range.start - 1, 0);
+  let endLine = Math.max(range.end - 1, startLine);
+  if (lineCount !== undefined) {
+    const lastLine = Math.max(lineCount - 1, 0);
+    startLine = Math.min(startLine, lastLine);
+    endLine = Math.min(endLine, lastLine);
+  }
+  return { startLine, endLine };
 }
 
 /**

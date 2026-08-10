@@ -21,14 +21,12 @@ import * as vscode from 'vscode';
 import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import {
-  getDiffCodelensMode,
   getDiffInjectEntry,
   getDiffInjectEntries,
   onDidChangeDiffInjectRegistry,
   COMMENT_FOR_BUILDER_COMMAND,
-  DIFF_CODELENS_MODE_KEY,
 } from '../diff-inject-codelens.js';
-import { planThreadReconcile, deriveWorktreePath, type RegisteredFile } from '../review-queue/reconcile.js';
+import { planThreadReconcile, deriveWorktreePath, clampAnchorLines, type RegisteredFile } from '../review-queue/reconcile.js';
 import type { ReviewQueueStore } from '../review-queue/store.js';
 import type { LineRange, PendingComment } from '../review-queue/queue.js';
 import type { OverviewCache } from '../views/overview-data.js';
@@ -85,13 +83,16 @@ export function activateBuilderReviewComments(
   };
   context.subscriptions.push(controller);
 
-  // Gutter "+" on registered builder-diff files, comment mode only — in
-  // forward mode the comment surface recedes so the two modes stay distinct.
-  // `enableFileComments` lets `workbench.action.addComment` create a
-  // range-less file comment (the file-level lens flow).
+  // Gutter "+" on registered builder-diff files, in BOTH codelens modes. The
+  // ranges must not depend on the mode: `workbench.action.addComment` (which
+  // backs the codelens, gutter, AND the always-visible context-menu action)
+  // validates against these ranges, so a comment-mode-only provider breaks
+  // `Codev: Comment for Builder` from the context menu whenever the editor is
+  // in forward mode — the default. The codelens stays the mode-distinct
+  // surface. `enableFileComments` lets the command create a range-less file
+  // comment (the file-level lens flow).
   const rangeProvider: vscode.CommentingRangeProvider = {
     provideCommentingRanges(document) {
-      if (getDiffCodelensMode() !== 'comment') { return []; }
       if (!getDiffInjectEntry(document.uri.fsPath)) { return []; }
       const lastLine = Math.max(0, document.lineCount - 1);
       return { enableFileComments: true, ranges: [new vscode.Range(0, 0, lastLine, 0)] };
@@ -139,17 +140,11 @@ export function activateBuilderReviewComments(
    * range highlight would skip it (paint 129 but not 130 of a 129-130 span).
    */
   function anchorRange(fsPath: string, range: LineRange): vscode.Range {
-    let start = Math.max(range.start - 1, 0);
-    let end = Math.max(range.end - 1, start);
-    let endColumn = LAST_COLUMN;
     const doc = vscode.workspace.textDocuments.find(d => d.uri.fsPath === fsPath);
-    if (doc) {
-      const lastLine = Math.max(doc.lineCount - 1, 0);
-      start = Math.min(start, lastLine);
-      end = Math.min(end, lastLine);
-      endColumn = doc.lineAt(end).text.length;
-    }
-    return new vscode.Range(start, 0, end, endColumn);
+    const { startLine, endLine } = clampAnchorLines(range, doc?.lineCount);
+    let endColumn = LAST_COLUMN;
+    if (doc) { endColumn = doc.lineAt(endLine).text.length; }
+    return new vscode.Range(startLine, 0, endLine, endColumn);
   }
 
   function mountQueuedComment(fsPath: string, builderId: string, comment: PendingComment): void {
@@ -351,11 +346,6 @@ export function activateBuilderReviewComments(
       reconcile();
     }),
     store.onDidChangeQueue(() => { reconcile(); }),
-    // Mode flips change what provideCommentingRanges returns; force the
-    // recompute so the gutter "+" appears/recedes with the toggle.
-    vscode.workspace.onDidChangeConfiguration(e => {
-      if (e.affectsConfiguration(DIFF_CODELENS_MODE_KEY)) { refreshCommentingRanges(); }
-    }),
     new vscode.Disposable(() => {
       for (const thread of mounted.values()) { thread.dispose(); }
       mounted.clear();

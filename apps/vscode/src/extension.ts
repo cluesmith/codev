@@ -258,6 +258,9 @@ export async function activate(context: vscode.ExtensionContext) {
 		vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
 	);
 	context.subscriptions.push(reviewQueueStore);
+	// Load persisted queues so the palette Submit Review and the status-bar
+	// counter see them right after a reload, before any diff is opened.
+	reviewQueueStore.preloadFromDisk();
 
 	// Drive the `codev.terminalFocused` context key so the Cmd/Ctrl+V image
 	// paste binding (#736) only applies when a Codev terminal is focused —

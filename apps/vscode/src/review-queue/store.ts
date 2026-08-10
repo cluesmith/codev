@@ -57,7 +57,7 @@ export class ReviewQueueStore implements vscode.Disposable {
   private readonly debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly disposables: vscode.Disposable[] = [];
 
-  constructor(workspaceRoot: string | undefined) {
+  constructor(private readonly workspaceRoot: string | undefined) {
     if (workspaceRoot) {
       const watcher = vscode.workspace.createFileSystemWatcher(
         new vscode.RelativePattern(workspaceRoot, `.builders/*/${QUEUE_FILE_RELPATH}`),
@@ -70,6 +70,34 @@ export class ReviewQueueStore implements vscode.Disposable {
         watcher.onDidDelete(onEvent),
       );
     }
+  }
+
+  /**
+   * One-time scan of `.builders/<id>/.codev/pending-comments.json` under the
+   * workspace root: register each worktree (dir basename = builder id, the
+   * same fallback the watcher path uses) and load its queue into the cache.
+   * Called fire-and-forget at activation so the palette Submit Review and the
+   * status-bar counter see persisted queues after a window reload, before any
+   * diff has been opened. Best-effort: a missing `.builders/` dir or an
+   * unreadable file reads as empty, never throws.
+   */
+  async preloadFromDisk(): Promise<void> {
+    if (!this.workspaceRoot) { return; }
+    let names: string[] = [];
+    try {
+      names = await fs.readdir(path.join(this.workspaceRoot, '.builders'));
+    } catch {
+      return; // No worktrees — nothing to preload.
+    }
+    await Promise.all(names.map(async name => {
+      const queueFile = path.join(this.workspaceRoot!, '.builders', name, QUEUE_FILE_RELPATH);
+      try {
+        await fs.access(queueFile);
+      } catch {
+        return; // This builder never queued anything.
+      }
+      await this.load(this.builderIdForQueuePath(queueFile));
+    }));
   }
 
   /** Remember a builder's worktree root (idempotent; callers pass authoritative paths). */

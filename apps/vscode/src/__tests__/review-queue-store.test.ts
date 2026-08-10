@@ -13,6 +13,11 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { execFileSync } from 'node:child_process';
 
+const w = vi.hoisted(() => ({
+  // Captured FileSystemWatcher handlers so tests can simulate OS events.
+  handlers: [] as Array<(uri: { fsPath: string }) => void>,
+}));
+
 vi.mock('vscode', () => {
   class EventEmitter<T> {
     private handlers: Array<(e: T) => void> = [];
@@ -28,14 +33,18 @@ vi.mock('vscode', () => {
   class RelativePattern {
     constructor(public base: string, public pattern: string) {}
   }
+  const capture = (fn: (uri: { fsPath: string }) => void): { dispose(): void } => {
+    w.handlers.push(fn);
+    return { dispose() {} };
+  };
   return {
     EventEmitter,
     RelativePattern,
     workspace: {
       createFileSystemWatcher: vi.fn(() => ({
-        onDidCreate: vi.fn(() => ({ dispose() {} })),
-        onDidChange: vi.fn(() => ({ dispose() {} })),
-        onDidDelete: vi.fn(() => ({ dispose() {} })),
+        onDidCreate: capture,
+        onDidChange: capture,
+        onDidDelete: capture,
         dispose: vi.fn(),
       })),
     },
@@ -67,6 +76,7 @@ async function makeWorktree(name: string): Promise<string> {
 
 beforeEach(async () => {
   tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'review-queue-'));
+  w.handlers.length = 0;
 });
 
 afterEach(async () => {
@@ -180,6 +190,66 @@ describe('ReviewQueueStore', () => {
 
     const exclude = await fs.readFile(path.join(wt, '.git', 'info', 'exclude'), 'utf8');
     expect(exclude.split('\n').filter(l => l.includes('managed block'))).toHaveLength(1);
+  });
+
+  it('preloadFromDisk surfaces persisted queues before any diff is opened (reload gap)', async () => {
+    // Two builders under `.builders/` wrote queues in a previous session.
+    for (const id of ['pir-a', 'pir-b']) {
+      const dir = path.join(tmpRoot, '.builders', id, '.codev');
+      await fs.mkdir(dir, { recursive: true });
+      await fs.writeFile(
+        path.join(tmpRoot, '.builders', id, QUEUE_FILE_RELPATH),
+        JSON.stringify({ version: 1, builderId: id, comments: [makeComment(`${id}-c1`)] }),
+        'utf8',
+      );
+    }
+    // One worktree without a queue file must not register.
+    await fs.mkdir(path.join(tmpRoot, '.builders', 'pir-empty'), { recursive: true });
+
+    const store = new ReviewQueueStore(tmpRoot);
+    await store.preloadFromDisk();
+    expect(store.buildersWithPending().sort()).toEqual(['pir-a', 'pir-b']);
+    expect(store.getComments('pir-a')[0]!.id).toBe('pir-a-c1');
+    store.dispose();
+  });
+
+  it('preloadFromDisk is a no-op without a .builders directory', async () => {
+    const store = new ReviewQueueStore(tmpRoot);
+    await store.preloadFromDisk();
+    expect(store.buildersWithPending()).toEqual([]);
+    store.dispose();
+  });
+
+  it('suppresses watcher echoes of its own writes but honors external changes', async () => {
+    // Real timers: the 200ms debounce chains into real fs I/O, so the test
+    // waits past the window instead of faking the clock.
+    const pastDebounce = (): Promise<void> => new Promise(r => setTimeout(r, 300));
+    const wt = await makeWorktree('pir-1');
+    const store = new ReviewQueueStore(tmpRoot);
+    store.registerWorktree('pir-1', wt);
+    const events: string[] = [];
+    store.onDidChangeQueue(id => events.push(id));
+
+    await store.add('pir-1', makeComment('c1'));
+    expect(events).toEqual(['pir-1']);
+
+    // The OS watcher reports our own write back — must not re-fire.
+    const queuePath = path.join(wt, QUEUE_FILE_RELPATH);
+    for (const fire of w.handlers) { fire({ fsPath: queuePath }); }
+    await pastDebounce();
+    expect(events).toEqual(['pir-1']);
+
+    // A genuinely external write (another window) must fire.
+    await fs.writeFile(
+      queuePath,
+      JSON.stringify({ version: 1, builderId: 'pir-1', comments: [makeComment('c1'), makeComment('c2')] }),
+      'utf8',
+    );
+    for (const fire of w.handlers) { fire({ fsPath: queuePath }); }
+    await pastDebounce();
+    expect(events).toEqual(['pir-1', 'pir-1']);
+    expect(store.getComments('pir-1').map(c => c.id)).toEqual(['c1', 'c2']);
+    store.dispose();
   });
 
   it('fires onDidChangeQueue on mutations with the builder id', async () => {

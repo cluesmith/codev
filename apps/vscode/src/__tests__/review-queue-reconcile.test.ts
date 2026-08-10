@@ -10,6 +10,7 @@ import { describe, it, expect } from 'vitest';
 import {
   planThreadReconcile,
   deriveWorktreePath,
+  clampAnchorLines,
   type RegisteredFile,
 } from '../review-queue/reconcile.js';
 import type { PendingComment } from '../review-queue/queue.js';
@@ -65,6 +66,29 @@ describe('planThreadReconcile', () => {
     const queues = new Map([['A', [comment('a1', 'src/x.ts')]]]);
     const plan = planThreadReconcile([FILE_A], queues, new Set());
     expect(plan.toCreate[0]).toMatchObject({ fsPath: '/wt/a/src/x.ts', builderId: 'A' });
+  });
+});
+
+describe('clampAnchorLines (stale anchors from a moving worktree)', () => {
+  it('maps a 1-based in-bounds range to 0-based lines', () => {
+    expect(clampAnchorLines({ start: 42, end: 58 }, 100)).toEqual({ startLine: 41, endLine: 57 });
+  });
+
+  it('clamps a range whose end drifted past the end of file', () => {
+    expect(clampAnchorLines({ start: 42, end: 58 }, 50)).toEqual({ startLine: 41, endLine: 49 });
+  });
+
+  it('clamps a fully out-of-bounds range onto the last line', () => {
+    expect(clampAnchorLines({ start: 90, end: 95 }, 10)).toEqual({ startLine: 9, endLine: 9 });
+  });
+
+  it('applies no upper clamp when the document is not open', () => {
+    expect(clampAnchorLines({ start: 42, end: 58 }, undefined)).toEqual({ startLine: 41, endLine: 57 });
+  });
+
+  it('never inverts: end is floored to start, start is floored to 0', () => {
+    expect(clampAnchorLines({ start: 10, end: 3 }, 100)).toEqual({ startLine: 9, endLine: 9 });
+    expect(clampAnchorLines({ start: 0, end: 0 }, 100)).toEqual({ startLine: 0, endLine: 0 });
   });
 });
 
