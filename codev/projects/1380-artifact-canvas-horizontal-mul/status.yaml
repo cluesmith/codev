@@ -5,10 +5,10 @@ phase: implement
 plan_phases:
   - id: phase_1
     title: 'Reading-mode core: prop, toggle, column CSS, mode-switch anchoring'
-    status: in_progress
+    status: complete
   - id: phase_2
     title: Fragmentation protection + real-browser regression fixture
-    status: pending
+    status: in_progress
   - id: phase_3
     title: Wheel remap, keyboard paging, axis-aware navigation
     status: pending
@@ -21,7 +21,7 @@ plan_phases:
   - id: phase_6
     title: 'Host wiring: VS Code webview + vite dev host, docs, demos'
     status: pending
-current_plan_phase: phase_1
+current_plan_phase: phase_2
 gates:
   spec-approval:
     status: approved
@@ -36,7 +36,7 @@ gates:
   verify-approval:
     status: pending
 iteration: 1
-build_complete: true
+build_complete: false
 history: []
 started_at: '2026-08-10T07:39:19.659Z'
-updated_at: '2026-08-10T08:56:34.283Z'
+updated_at: '2026-08-10T09:02:57.904Z'
