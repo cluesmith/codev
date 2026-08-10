@@ -26,6 +26,7 @@ import {
   getDiffInjectEntries,
   onDidChangeDiffInjectRegistry,
   COMMENT_FOR_BUILDER_COMMAND,
+  DIFF_CODELENS_MODE_KEY,
 } from '../diff-inject-codelens.js';
 import { planThreadReconcile, deriveWorktreePath, type RegisteredFile } from '../review-queue/reconcile.js';
 import type { ReviewQueueStore } from '../review-queue/store.js';
@@ -82,24 +83,32 @@ export function activateBuilderReviewComments(
 
   // Gutter "+" on registered builder-diff files, comment mode only — in
   // forward mode the comment surface recedes so the two modes stay distinct.
-  controller.commentingRangeProvider = {
+  // `enableFileComments` lets `workbench.action.addComment` create a
+  // range-less file comment (the file-level lens flow).
+  const rangeProvider: vscode.CommentingRangeProvider = {
     provideCommentingRanges(document) {
       if (getDiffCodelensMode() !== 'comment') { return []; }
       if (!getDiffInjectEntry(document.uri.fsPath)) { return []; }
       const lastLine = Math.max(0, document.lineCount - 1);
-      return [new vscode.Range(0, 0, lastLine, 0)];
+      return { enableFileComments: true, ranges: [new vscode.Range(0, 0, lastLine, 0)] };
     },
+  };
+  controller.commentingRangeProvider = rangeProvider;
+
+  // VS Code caches each document's commenting ranges and only re-queries on
+  // its own triggers — none of which fire when the diff-inject registry
+  // registers a file AFTER its editor opened (openBuilderFileDiff opens the
+  // diff first; same ordering as the #789 context-key fix). Re-assigning the
+  // provider goes through the extension-host setter, which calls
+  // `$updateCommentingRanges` and makes the editor recompute — without this,
+  // the gutter "+" is missing and `workbench.action.addComment` rejects with
+  // "cursor must be within a commenting range" on a freshly opened diff.
+  const refreshCommentingRanges = (): void => {
+    controller.commentingRangeProvider = rangeProvider;
   };
 
   /** Mounted threads keyed by queued-comment id. */
   const mounted = new Map<string, vscode.CommentThread>();
-  /**
-   * Set when the file-level lens opened the input: the next submit on this
-   * file anchored at line 1 records `lineRange: null` (whole-file comment)
-   * instead of a misleading L1 ref. Short-lived — cleared on every new input
-   * open and every submit, with a time cap for abandoned inputs.
-   */
-  let pendingWholeFile: { fsPath: string; at: number } | null = null;
   /** Builders whose queue file has been loaded from disk this session. */
   const loaded = new Set<string>();
 
@@ -132,6 +141,11 @@ export function activateBuilderReviewComments(
       new vscode.Range(line, 0, line, 0),
       [],
     );
+    if (!comment.lineRange) {
+      // Whole-file comment: render as a range-less file comment (the factory
+      // signature requires a Range, but the property accepts undefined).
+      thread.range = undefined;
+    }
     const rendered = new BuilderReviewComment(
       new vscode.MarkdownString(comment.body),
       author(),
@@ -193,33 +207,33 @@ export function activateBuilderReviewComments(
 
   /**
    * Open the comment input at the given anchor via VS Code's own
-   * `workbench.action.addComment` ("Add Comment on Current Selection") — the
-   * same path the gutter "+" takes. A programmatically created thread renders
-   * expanded but does NOT focus its input (the stable API has no
-   * `CommentThread.reveal`), forcing a second click into the textbox; the
-   * built-in command both creates the thread (our range provider covers the
-   * file) and focuses the input. The thread's range comes from the selection,
-   * so the lens range is selected first; the eventual submit reads it back
-   * from `thread.range`.
+   * `workbench.action.addComment` — the same path the gutter "+" takes. A
+   * programmatically created thread renders expanded but does NOT focus its
+   * input (the stable API has no `CommentThread.reveal`), forcing a second
+   * click into the textbox; the built-in command both creates the thread (our
+   * range provider covers the file) and focuses the input.
+   *
+   * The command takes an explicit args object — `range` (1-based editor-core
+   * coordinates) or `fileComment` — so the anchor is passed directly instead
+   * of mutating the editor selection (which flashed a highlight). A
+   * `fileComment` thread materializes with `thread.range === undefined`,
+   * which the submit handler records as a whole-file comment.
    */
   async function openCommentInput(fsPath: string, range: LineRange | null): Promise<void> {
-    let editor = vscode.window.activeTextEditor;
-    if (!editor || editor.document.uri.fsPath !== fsPath) {
-      editor = vscode.window.visibleTextEditors.find(e => e.document.uri.fsPath === fsPath);
-    }
-    if (!editor) { return; }
-    const lastLine = Math.max(editor.document.lineCount - 1, 0);
-    let startLine = 0;
-    let endLine = 0;
+    const editor = vscode.window.activeTextEditor;
+    if (!editor || editor.document.uri.fsPath !== fsPath) { return; }
     if (range) {
-      startLine = Math.min(Math.max(range.start - 1, 0), lastLine);
-      endLine = Math.min(Math.max(range.end - 1, startLine), lastLine);
+      await vscode.commands.executeCommand('workbench.action.addComment', {
+        range: {
+          startLineNumber: range.start,
+          startColumn: 1,
+          endLineNumber: range.end,
+          endColumn: 1,
+        },
+      });
+      return;
     }
-    editor.selection = new vscode.Selection(startLine, 0, endLine, 0);
-    editor.revealRange(new vscode.Range(startLine, 0, endLine, 0));
-    pendingWholeFile = null;
-    if (!range) { pendingWholeFile = { fsPath, at: Date.now() }; }
-    await vscode.commands.executeCommand('workbench.action.addComment');
+    await vscode.commands.executeCommand('workbench.action.addComment', { fileComment: true });
   }
 
   const reg = (id: string, fn: (...args: never[]) => unknown): void => {
@@ -245,7 +259,6 @@ export function activateBuilderReviewComments(
     const editor = vscode.window.activeTextEditor;
     if (!editor) { return; }
     if (!getDiffInjectEntry(editor.document.uri.fsPath)) { return; }
-    pendingWholeFile = null;
     await vscode.commands.executeCommand('workbench.action.addComment');
   });
 
@@ -258,19 +271,9 @@ export function activateBuilderReviewComments(
       vscode.window.showWarningMessage('Codev: This file is not part of an active builder diff');
       return;
     }
-    let lineRange: LineRange | null = threadLineRange(thread);
-    // File-level lens flow: the input was opened at line 1 purely as a mount
-    // point; record the comment as whole-file. The 30s cap keeps a marker from
-    // an abandoned input from reclassifying a genuine line-1 comment later.
-    if (
-      pendingWholeFile &&
-      pendingWholeFile.fsPath === thread.uri.fsPath &&
-      Date.now() - pendingWholeFile.at < 30_000 &&
-      lineRange.start === 1 && lineRange.end === 1
-    ) {
-      lineRange = null;
-    }
-    pendingWholeFile = null;
+    // A range-less thread is a file comment (the file-level lens flow).
+    let lineRange: LineRange | null = null;
+    if (thread.range) { lineRange = threadLineRange(thread); }
     const comment: PendingComment = {
       id: randomUUID(),
       createdAt: new Date().toISOString(),
@@ -322,8 +325,16 @@ export function activateBuilderReviewComments(
   });
 
   context.subscriptions.push(
-    onDidChangeDiffInjectRegistry(() => { reconcile(); }),
+    onDidChangeDiffInjectRegistry(() => {
+      refreshCommentingRanges();
+      reconcile();
+    }),
     store.onDidChangeQueue(() => { reconcile(); }),
+    // Mode flips change what provideCommentingRanges returns; force the
+    // recompute so the gutter "+" appears/recedes with the toggle.
+    vscode.workspace.onDidChangeConfiguration(e => {
+      if (e.affectsConfiguration(DIFF_CODELENS_MODE_KEY)) { refreshCommentingRanges(); }
+    }),
     new vscode.Disposable(() => {
       for (const thread of mounted.values()) { thread.dispose(); }
       mounted.clear();
