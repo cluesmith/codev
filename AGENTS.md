@@ -130,7 +130,8 @@ are no `type:*` labels.
 
 `area/`: docs · vscode · dashboard · consult · tower (includes afx; there is no
 `area/agent-farm`) · porch · protocols (definitions, distinct from porch orchestration) ·
-config · terminal · scaffold · release · web · core · cross-cutting
+config · terminal · scaffold · release · web · streamdeck (Stream Deck plugin,
+apps/streamdeck; Elgato channel: profiles, Maker Console, packaging) · core · cross-cutting
 
 ## Multi-agent consultation
 
