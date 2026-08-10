@@ -48,6 +48,10 @@ vi.mock('vscode', () => ({
     get activeTextEditor() { return h.state.activeEditor; },
     onDidChangeActiveTextEditor: () => ({ dispose() {} }),
   },
+  workspace: {
+    getConfiguration: () => ({ get: () => 'comment' }),
+    onDidChangeConfiguration: () => ({ dispose() {} }),
+  },
 }));
 
 const {

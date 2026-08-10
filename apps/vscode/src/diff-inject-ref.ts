@@ -21,6 +21,12 @@ export interface LensDescriptor {
   title: string;
   /** Text typed into the builder terminal — always ends with a space, no Enter. */
   refText: string;
+  /**
+   * 1-based inclusive line range the lens denotes; absent on the file-level
+   * lens (whole file). Comment mode (#1037) anchors its queued comment to this
+   * range; forward mode only needs `refText`.
+   */
+  range?: ChangedRange;
 }
 
 /**
@@ -180,10 +186,18 @@ function rangeLabel(start: number, end: number): string {
  *
  * A symbol lens that would anchor on line 0 is skipped — the file-level lens
  * already occupies that line.
+ *
+ * `label` is the verb rendered in each title — `Forward to Builder` (#789,
+ * default) or `Comment for Builder` (#1037). The anchors are identical in both
+ * modes; only the title and the command the provider attaches differ.
  */
-export function buildSymbolLensDescriptors(relPath: string, symbols: SymbolNode[]): LensDescriptor[] {
+export function buildSymbolLensDescriptors(
+  relPath: string,
+  symbols: SymbolNode[],
+  label = 'Forward to Builder',
+): LensDescriptor[] {
   const lenses: LensDescriptor[] = [
-    { line: 0, title: 'Forward to Builder', refText: buildBuilderFileRef(relPath) },
+    { line: 0, title: label, refText: buildBuilderFileRef(relPath) },
   ];
 
   const addLens = (s: SymbolNode): void => {
@@ -193,8 +207,9 @@ export function buildSymbolLensDescriptors(relPath: string, symbols: SymbolNode[
     const end = s.endLine + 1;
     lenses.push({
       line,
-      title: `Forward to Builder ${rangeLabel(start, end)}`,
+      title: `${label} ${rangeLabel(start, end)}`,
       refText: buildBuilderRangeRef(relPath, start, end),
+      range: { start, end },
     });
   };
 
@@ -230,8 +245,9 @@ export function buildAllLensDescriptors(
   relPath: string,
   symbols: SymbolNode[],
   ranges: ChangedRange[],
+  label = 'Forward to Builder',
 ): LensDescriptor[] {
-  const lenses = buildSymbolLensDescriptors(relPath, symbols);
+  const lenses = buildSymbolLensDescriptors(relPath, symbols, label);
   const usedLines = new Set(lenses.map(l => l.line));
   for (const r of ranges) {
     const line = Math.max(r.start - 1, 0);
@@ -239,8 +255,9 @@ export function buildAllLensDescriptors(
     usedLines.add(line);
     lenses.push({
       line,
-      title: `Forward to Builder ${rangeLabel(r.start, r.end)}`,
+      title: `${label} ${rangeLabel(r.start, r.end)}`,
       refText: buildBuilderRangeRef(relPath, r.start, r.end),
+      range: { start: r.start, end: r.end },
     });
   }
   return lenses;

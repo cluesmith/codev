@@ -1,0 +1,27 @@
+# Builder thread: pir-1037
+
+Issue #1037: codelens-driven review comments in the unified diff editor (per-builder queue, batched submit to PTY). Protocol: PIR (strict).
+
+## 2026-08-06 Plan phase
+
+- Investigated #789's actual surface: lenses are file/symbol/changed-run anchored (`diff-inject-ref.ts`), not literal hunk headers; multi-file `vscode.changes` editor suppresses codelens (context menu is the affordance there). Comments API already used in `comments/plan-review.ts` (#1055 edit pattern) against the pinned engine, so no new API surface needed.
+- Architect instruction (mid-turn, 2026-08-05): scope is #1037 ONLY, no #1049 panel views; deliverable standalone via palette command + status bar. Weigh gitignore mechanism explicitly. Preserve #789 semantics exactly. Submit stays human-in-the-loop (no auto-Enter). Verify comments API vs engines ^1.105. Plan for a running-flow demo at dev-approval.
+- Key design find: PTY injection is raw bytes (`sendText` → `handleInput` → WebSocket), so a multi-line batched message would submit on every `\n` in the Claude REPL. Locked design: bracketed-paste wrapping (`\x1b[200~…\x1b[201~`, `\n`→`\r`); flagged as the top risk, spike first in implement, first item in the dev-approval script.
+- Gitignore decision: managed block in `$GIT_COMMON_DIR/info/exclude` written by the extension at first queue write; family glob `.builder-*` also silences the scaffolding-file class; committed-.gitignore alternative weighed and documented in the plan.
+- Plan written to `codev/plans/1037-vscode-codelens-driven-review-.md`; sitting at plan-approval gate.
+
+## 2026-08-06 Implement phase
+
+- Plan approved; implemented in 5 commits: pure queue module (schema/packaging/bracketed-paste/exclude-block), ReviewQueueStore (fs + watcher + info/exclude managed block), mode-aware codelenses (`codev.diffCodelensMode` setting + title-bar toggle + always-on context menu), builder-review comment controller (mount/reconcile/edit/delete via Comments API), Submit Review (batched bracketed-paste flush + status-bar counter + palette commands).
+- Deviations from plan, to raise at dev-approval: (1) changelog files NOT edited — apps/vscode/CHANGELOG.md and docs/releases/UNRELEASED.md are maintained on the docs/vscode-changelog branch per the template's per-PR workflow; suggested entry text handed to architect instead. (2) `lineRange` made nullable in the schema (null = whole-file comment) so the file-level lens produces `### path` instead of a misleading line ref. (3) #789's context-menu forward action: `when` relaxed from `editorHasSelection` to always-on-builder-files with a cursor-line fallback, to satisfy the issue's "context menu always exposes both" AC; the Cmd/Ctrl+K B keybinding keeps its original selection guard.
+- All 694 vscode unit tests pass (37 new across 6 test files); check-types + eslint + esbuild clean.
+- Bracketed-paste injection is the one thing unit tests cannot prove — first item in the dev-approval script.
+
+## 2026-08-10 Dev-approval gate iteration (live testing feedback)
+
+- Comment input required a second click to focus: replaced programmatic thread creation for input with the built-in `workbench.action.addComment` (args-based: `{range}` / `{fileComment: true}`), which creates + focuses natively. Whole-file marker hack deleted; provider now returns `enableFileComments: true`.
+- "Cursor must be within a commenting range" on fresh diffs: VS Code caches commenting ranges per document and never re-queries when the registry registers a file post-open; re-assigning `commentingRangeProvider` on registry change (and mode change) forces the recompute via the ext-host setter.
+- Re-mounted queued threads anchored at start line only (widget cut through the range) → mount on the full recorded range.
+- Range highlight skipped the last line (range ended at column 0) → extend to last-line content end in both input and mount paths.
+- Third report (widget "mid-hunk") verified NOT a bug via stored JSON: gutter/selection comment 133-150 rendered faithfully; hunk lens is the whole-hunk entry point.
+- **Human decision at gate: default mode flipped to `forward`** — preserves #789 behavior for existing users; comment mode is opt-in via the title-bar toggle. Overrides the issue's "comment default"; decided by the human reviewer 2026-08-10. Changelog note about a behavior flip is now unnecessary.
