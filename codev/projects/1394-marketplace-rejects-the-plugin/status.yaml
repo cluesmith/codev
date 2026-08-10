@@ -1,7 +1,7 @@
 id: '1394'
 title: marketplace-rejects-the-plugin
 protocol: air
-phase: implement
+phase: pr
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -11,4 +11,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-08-10T09:01:32.601Z'
-updated_at: '2026-08-10T09:01:32.602Z'
+updated_at: '2026-08-10T09:07:18.738Z'
