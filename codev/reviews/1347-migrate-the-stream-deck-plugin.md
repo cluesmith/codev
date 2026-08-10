@@ -90,6 +90,17 @@ the human at the `pr` gate is the remaining check on each disposition. Gemini la
   2. *Tooltips and README contradicted the implementation* for the diff dials (press forwards, touch jumps to first — docs said press = first) and ScrollNav (press forwards selection — docs said touch). Confirmed against `actions.ts`; the verbatim-imported docs lagged a behavior swap made in the old repo. Fixed in `manifest.json` tooltips and README, plus a previously missing Scroll dial bullet.
 - **Claude — non-blocking, 3 minors, all fixed:** the `bump-all.sh` gap above (its analysis corrected this review's original claim); stale README status prose ("V0.1… not yet validated on hardware"); the same boundary-scanner gap Codex flagged.
 
+**Architect's pr-gate CMAP round** (gemini APPROVE; codex REQUEST_CHANGES ×3, architect-verified
+dispositions): remote `sdpi-components.js` reference in `ui/*.html` — confirmed pre-existing from
+the verbatim import, filed by the architect as a pre-Marketplace follow-up (out of PR scope);
+boundary scanner missing CommonJS `require()` — fixed in-PR (pattern + fixture case; no violation
+existed in src); README still listing "editor scrolling" as out of scope despite the implemented
+Scroll dial — fixed in-PR.
+
+**Marketplace-prep additions at the gate (owner-directed):** plain-language manifest
+`Description`; `Nodejs.Debug` removed for production; bundled `Codev.streamDeckProfile`
+(Stream Deck +, DeviceType 7) declared via the manifest `Profiles` field.
+
 ## How to Test Locally
 
 - **View diff**: VSCode sidebar → right-click builder pir-1347 → Review Diff.

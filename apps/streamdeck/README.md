@@ -143,11 +143,13 @@ com.cluesmith.codev` to reload. Logs: `com.cluesmith.codev.sdPlugin/logs/` and
 `~/Library/Logs/ElgatoStreamDeck/` (macOS). Uninstall: `streamdeck unlink
 com.cluesmith.codev`.
 
-Validate / pack a distributable:
+Build a clean Marketplace distributable on demand (bundles, strips dev artifacts —
+sourcemap, logs, `.DS_Store` — validates, and packs in one shot; note the `run`,
+without it pnpm's own tarball `pack` command shadows the script):
 
 ```bash
-pnpm --filter @cluesmith/codev-streamdeck validate
-pnpm --filter @cluesmith/codev-streamdeck pack    # → apps/streamdeck/dist/*.streamDeckPlugin
+pnpm --filter @cluesmith/codev-sdk build              # once, if the sdk dist is stale
+pnpm --filter @cluesmith/codev-streamdeck run package # → apps/streamdeck/dist/com.cluesmith.codev.streamDeckPlugin
 ```
 
 ## Follow-focus (optional)
@@ -190,9 +192,9 @@ hardware (Stream Deck +, live Tower; versioned in lockstep with the codev
 workspace since 3.3.0). The dial touch strips render title + a live value via
 `setFeedback`; a richer SVG/icon render layer (badges, colour by state) is still
 out of scope. Also deliberately out of scope (see the pre-migration `PLAN.md`):
-editor scrolling (use native Stream Deck keystrokes — PageUp/PageDown) and silent
-one-touch gate approval. The `/api/command` route inherits Tower's current auth
-posture; a Tower-auth follow-up is tracked separately.
+silent one-touch gate approval. (Editor scrolling, originally out of scope there,
+was since implemented as the Scroll dial.) The `/api/command` route inherits
+Tower's current auth posture; a Tower-auth follow-up is tracked separately.
 
 ## History
 

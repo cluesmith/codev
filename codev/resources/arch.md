@@ -1120,7 +1120,7 @@ live in `packages/`; end-user client surfaces live in `apps/`:
 | `packages/artifact-canvas` | `@cluesmith/codev-artifact-canvas` | Reusable React surface for rendering/reviewing Codev markdown artifacts |
 | `apps/web` | `@cluesmith/codev-web` | React dashboard SPA (built into codev package) |
 | `apps/vscode` | `codev-vscode` (Marketplace: `cluesmith.codev-vscode`) | VS Code extension |
-| `apps/streamdeck` | `@cluesmith/codev-streamdeck` (private; Elgato plugin UUID `com.cluesmith.codev`) | Stream Deck plugin — outside-in controller: overview reads + SSE + command-relay verbs via the sdk's `controller`/`node` subpaths. Imported from codev-integrations under #1347; ships as a Marketplace `.sdPlugin` bundle, versioned in workspace lockstep (manifest `Version` = package version + build segment, pinned by a version-sync test) |
+| `apps/streamdeck` | `@cluesmith/codev-streamdeck` (private; Elgato plugin UUID `com.cluesmith.codev`) | Stream Deck plugin — outside-in controller: overview reads + SSE + command-relay verbs via the sdk's `controller`/`node` subpaths. Imported from codev-integrations under #1347; packs on demand into a `.sdPlugin` Marketplace bundle (not yet Marketplace-distributed — initial Maker Console submission is a tracked follow-up), versioned in workspace lockstep (manifest `Version` = package version + build segment, pinned by a version-sync test) |
 
 **Dependency graph:**
 ```

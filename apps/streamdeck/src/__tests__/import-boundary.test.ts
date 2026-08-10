@@ -50,6 +50,7 @@ function importSpecifiers(text: string): string[] {
     /(?:^|\n)\s*(?:import|export)\s[^;]*?from\s+['"]([^'"]+)['"]/g,
     /(?:^|\n)\s*import\s+['"]([^'"]+)['"]/g,
     /\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g,
+    /\brequire\s*\(\s*['"]([^'"]+)['"]\s*\)/g,
   ];
   for (const pattern of patterns) {
     for (const match of text.matchAll(pattern)) out.push(match[1]);
@@ -73,12 +74,14 @@ describe('importSpecifiers extraction', () => {
       "export { helper } from './helper.js';",
       "import '@cluesmith/codev-core';",
       "const lazy = await import('@cluesmith/codev-types');",
+      "const legacy = require('@cluesmith/codev-client');",
     ].join('\n');
     expect(importSpecifiers(fixture)).toEqual([
       '@cluesmith/codev-sdk/controller',
       './helper.js',
       '@cluesmith/codev-core',
       '@cluesmith/codev-types',
+      '@cluesmith/codev-client',
     ]);
   });
 });
