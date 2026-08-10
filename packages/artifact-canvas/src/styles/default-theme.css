@@ -56,6 +56,10 @@
   /* Optional readable-measure cap. Off by default (`none`) so it can't break a host layout; a
      host or user opts into e.g. 72ch. */
   --codev-canvas-prose-max-width: none;
+  /* Leading space each top-level row reserves for the in-row "+" affordance (#1343). Block-local
+     (not canvas-level) so the strip is part of the row's own hover box and travels with the row
+     through #1380's column fragmentation. */
+  --codev-canvas-gutter: 1.9rem;
   /* Per-level heading sizes. github-markdown-css's scale is non-geometric, so a single ratio
      can't reproduce it — explicit per-level tokens mirror the baseline exactly (#1053). */
   --codev-canvas-h1-size: 2em;
@@ -77,18 +81,18 @@
   line-height: var(--codev-canvas-line-height);
 }
 
-/* Positioning context for the comment overlay (composed surface only — MarkdownView has none). */
+/* Positioning context for canvas-level chrome (composed surface only — MarkdownView has none).
+   The "+" affordance does NOT anchor here (#1343: it is row-scoped, see below). */
 .codev-artifact-canvas {
   position: relative;
 }
 
-/* Left gutter so the anchored "+" affordance sits beside a block, not over its text. Composed
-   surface only — the gutter exists for the overlay, which MarkdownView doesn't render.
-   `cursor: default` (#1232): the content is read-only and comments are button-driven (hover →
+/* `cursor: default` (#1232): the content is read-only and comments are button-driven (hover →
    "+"), so the arrow — not the I-beam — is the honest signal, uniformly including code blocks.
-   Links keep the pointing hand via the UA's `a[href]` rule; selection/copy still work. */
+   Links keep the pointing hand via the UA's `a[href]` rule; selection/copy still work.
+   (The old canvas-level left gutter is gone — leading space is block-local now, see the row
+   rules below.) */
 .codev-artifact-canvas-body {
-  padding-left: 1.9rem;
   cursor: default;
 }
 
@@ -96,7 +100,8 @@
  * Prose typography (#1053). Targets BOTH prose containers via `:is(...)` — the composed
  * `.codev-artifact-canvas-body` and the standalone `.codev-artifact-canvas-rendered`
  * (MarkdownView) — so the exported standalone surface gets the same prose styling. The comment
- * cards, overlay `+`, and minimap chrome live OUTSIDE these containers, so they're untouched.
+ * cards and minimap chrome live OUTSIDE these containers, so they're untouched; the in-row "+"
+ * lives INSIDE a row (#1343) but pins its own typography via `.codev-canvas-row-affordance`.
  * Sizes are `em`-relative to the body font-size (a single px anchor), matching how
  * github-markdown-css avoids compounding nested `em` chains.
  */
@@ -162,7 +167,10 @@
   padding: 0.2em 0.4em;
   border-radius: 6px;
 }
-/* Fenced code block: padded, rounded, horizontally scrollable, with a hairline for definition. */
+/* Fenced code block: padded, rounded, horizontally scrollable, with a hairline for definition.
+   The scroll container is the inner `code`, not the `pre` itself (#1343): the pre is a row that
+   hosts the in-row "+" affordance, and a scrolling row would carry the "+" (and clip the row's
+   leading strip) with the code. */
 :is(.codev-artifact-canvas-body, .codev-artifact-canvas-rendered) pre {
   font-family: var(--codev-canvas-code-font-family);
   font-size: var(--codev-canvas-code-font-size);
@@ -170,11 +178,12 @@
   border: 1px solid var(--codev-canvas-border);
   border-radius: 6px;
   padding: 16px;
-  overflow: auto;
 }
 /* Code INSIDE a fence is plain text, not a chip: reset the inline chrome — including the 85%
    size, which would otherwise compound to ~72% on top of pre's own 85%. */
 :is(.codev-artifact-canvas-body, .codev-artifact-canvas-rendered) pre code {
+  display: block;
+  overflow-x: auto;
   background: transparent;
   color: inherit;
   padding: 0;
@@ -219,19 +228,56 @@
   max-width: 100%;
 }
 
-/* Phase 3 — comment overlay + minimal marker rendering. Min 24×24px hit target (#1236, WCAG
-   2.5.8 floor): the small button compounded the hover-geometry bug — a tiny target demands the
-   precise travel that maximized exposure to the re-anchor/overshoot dismissal. */
+/*
+ * Full-row model (#1343, GitHub-diff pattern; composed surface only). Every top-level block is a
+ * row that carries its own leading space — the old canvas-level gutter, made block-local so the
+ * strip is part of the row's own hover box (no dead zone where the "+" lives) and travels with
+ * the row through #1380's column fragmentation. Rows are positioned so the in-row "+" and the
+ * marker bar anchor against the row, never the canvas. Nested blocks (an `li`, a `p` inside a
+ * blockquote) sit inside their row and must not double-indent, hence the child combinator.
+ */
+.codev-artifact-canvas-body > [data-line] {
+  position: relative;
+  padding-left: var(--codev-canvas-gutter);
+}
+/* Rows with their own left chrome absorb the gutter into their existing padding so the text
+   keeps its x-position; their backgrounds and rules now start at the canvas edge (full-bleed
+   rows, deliberately GitHub-like — the "+" renders on top of the row's own chrome). */
+.codev-artifact-canvas-body > pre[data-line] {
+  padding-left: calc(var(--codev-canvas-gutter) + 16px);
+}
+.codev-artifact-canvas-body > blockquote[data-line] {
+  padding-left: calc(var(--codev-canvas-gutter) + 1em);
+}
+.codev-artifact-canvas-body > :is(ul, ol)[data-line] {
+  padding-left: calc(var(--codev-canvas-gutter) + 2em);
+}
+/* Everything ELSE at the top level aligns via margin instead (#1343, iter-1 consultation):
+   unmapped renderer output (`hr`, raw HTML blocks — markdown-it stamps `data-line` only on
+   `_open`/fence tokens) and the injected marker-card stacks / composer hosts. Margin, not
+   padding: these aren't hover rows and host no "+". Child combinator is load-bearing — a
+   NESTED stack/host (an li's marker cards) sits inside a row that already carries the gutter,
+   and an unscoped margin would double-indent it. */
+.codev-artifact-canvas-body > :not([data-line]) {
+  margin-left: var(--codev-canvas-gutter);
+}
+
+/* The "+" add-comment button. Min 24×24px hit target (#1236, WCAG 2.5.8 floor). `font: inherit`
+   picks up the wrapper's pinned canvas typography (buttons don't inherit fonts by default), and
+   MUST precede line-height (the shorthand resets it). `user-select: none` keeps a drag-selection
+   across the row from smearing a '+' into the copied text. */
 .codev-canvas-add-comment {
+  font: inherit;
+  line-height: 1;
   border: 1px solid var(--codev-canvas-border);
   background: var(--codev-canvas-background);
   color: var(--codev-canvas-comment-marker);
   cursor: pointer;
   border-radius: 4px;
-  line-height: 1;
   padding: 0 6px;
   min-width: 24px;
   min-height: 24px;
+  user-select: none;
 }
 .codev-canvas-add-comment:hover,
 .codev-canvas-add-comment:focus-visible {
@@ -239,12 +285,27 @@
   outline: 2px solid var(--codev-canvas-accent);
 }
 
-/* v1 minimal indicator for a line carrying a review marker (#863 adds polished inline markers).
-   The bar is an inset box-shadow on the left edge; padding-left keeps the text off the bar so
-   the gold rule doesn't crowd the prose it annotates. */
+/* Marked-line indicator. Nested marked blocks (inside a row) keep the classic treatment: an
+   inset bar on the box edge plus a 10px text inset. */
 .codev-canvas-has-marker {
   box-shadow: inset 3px 0 0 0 var(--codev-canvas-comment-marker);
   padding-left: 10px;
+}
+/* Top-level marked rows (#1343): the row's box edge is the canvas edge now, so an inset shadow
+   would strand the bar in the gutter far from the prose it annotates. Draw a positioned strip
+   just left of the text instead — 3px bar + 10px gap, mirroring the classic geometry. The row's
+   gutter padding (higher specificity) already replaces the 10px inset. */
+.codev-artifact-canvas-body > .codev-canvas-has-marker {
+  box-shadow: none;
+}
+.codev-artifact-canvas-body > .codev-canvas-has-marker::before {
+  content: '';
+  position: absolute;
+  left: calc(var(--codev-canvas-gutter) - 13px);
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--codev-canvas-comment-marker);
 }
 
 .codev-artifact-canvas-body [data-line]:focus-visible {
@@ -253,21 +314,21 @@
 }
 :is(.codev-artifact-canvas-body, .codev-artifact-canvas-rendered) a { color: var(--codev-canvas-link); }
 
-/* Overlay: the "+" add-comment affordance only. Anchored to the active block: positioned
-   absolutely in the canvas, with `top` set inline to the first line's vertical center; the
-   `translateY(-50%)` lands the `+` centered on that line (in the left gutter) rather than floating
-   above the block's top edge (#863). */
-.codev-canvas-overlay {
-  display: flex;
-  gap: 8px;
-  align-items: center;
+/* In-row "+" wrapper (#1343): appended into the active row's own DOM and positioned against it,
+   never against the canvas. `top` is set inline — the pointer's line (mouse) or the focused
+   block's first line (keyboard); `translateY(-50%)` centers the button on that line at the row's
+   leading edge, inside the block-local gutter. The wrapper pins the canvas typography so the "+"
+   renders identically whatever row hosts it — a pre's monospace/85% must not leak in (the #1236
+   16px fix, carried into the new placement). */
+.codev-canvas-row-affordance {
   position: absolute;
-  left: 0;
+  left: 2px;
   z-index: 5;
   transform: translateY(-50%);
-  /* The overlay lives OUTSIDE the font-sized prose containers, so without this the "+" renders
-     at the host default (13px in VS Code webviews) beside 16px prose (#1236). */
+  user-select: none;
+  font-family: var(--codev-canvas-font-family);
   font-size: var(--codev-canvas-font-size);
+  line-height: var(--codev-canvas-line-height);
 }
 
 /* Inline-below comment cards (#863): rendered in flow beneath the annotated block, so they push

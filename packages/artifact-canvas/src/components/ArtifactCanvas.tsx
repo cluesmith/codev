@@ -81,14 +81,6 @@ function buildMarkerCards(
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
 /**
- * Grace window (#1236) for the hover overlay: how long a pending dismiss (pointer left the canvas)
- * or re-anchor (pointer crossed another block) waits before applying, giving the pointer time to
- * reach the "+" — entering the overlay cancels the pending transition. One tunable knob: raise it
- * if the button still vanishes en route, lower it if block-to-block hover feels laggy.
- */
-const OVERLAY_GRACE_MS = 200;
-
-/**
  * A 16-grid stroke icon built from static path data (no user input, so no injection surface). We
  * draw our own SVGs rather than reuse a font glyph or the host's icon set: the package is
  * host-agnostic (it can't assume VS Code's codicon font is present in the webview), and emoji
@@ -152,8 +144,6 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
   const [content, setContent] = React.useState<string>('');
   const [markers, setMarkers] = React.useState<ReviewMarker[]>([]);
   const [activeLine, setActiveLine] = React.useState<number | null>(null);
-  // Vertical offset (px, relative to the canvas) of the active block, so the overlay anchors to it.
-  const [overlayTop, setOverlayTop] = React.useState(0);
   // The line currently being commented on (the inline composer is open for it), and the in-flow
   // placeholder node the composer portals into — injected directly below that block (#1107).
   const [composingLine, setComposingLine] = React.useState<number | null>(null);
@@ -167,13 +157,10 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
   // Latest markers, readable synchronously from the delegated click handler without re-binding it.
   const markersRef = React.useRef<ReviewMarker[]>(markers);
   markersRef.current = markers;
-  // Hover grace (#1236): ONE pending timer covers both transitions that used to fire instantly and
-  // yank the "+" out from under a pointer traveling toward it: the canvas-mouseleave dismiss and
-  // the block-crossing re-anchor. Only one can be pending at a time; any fresh hover, focus, or
-  // overlay-enter cancels it.
-  const graceTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-  // True while the pointer is inside the overlay: nothing re-anchors or dismisses under the cursor.
-  const overlayPinnedRef = React.useRef(false);
+  // Latest active line, readable synchronously from the decoration effect (which must not depend
+  // on `activeLine` — re-running it per hover would churn the injected card stacks).
+  const activeLineRef = React.useRef<number | null>(activeLine);
+  activeLineRef.current = activeLine;
   // Block line to focus after the next body rebuild (#1237): submit/delete trigger a host write,
   // the watch reload rebuilds the body, and the previously-focused element is destroyed. The
   // decoration effect consumes this to put the reviewer back on the block they were working on.
@@ -322,14 +309,25 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
         el.classList.remove('codev-canvas-has-marker');
       }
     });
-    // Reconcile the overlay anchor against the *reloaded* DOM (iter-5 Codex): if a watch/refreshKey
-    // reload removed or shortened the previously active block, clear `activeLine` so the overlay
-    // can't render `+` for — or emit `onAddComment` for — a line the new content no longer has.
-    // VALIDATE rather than blindly reset: a still-present active line survives, so this never races
-    // a fresh hover (which changes only `activeLine`, not `html`, so this effect doesn't run then).
+    // Reconcile the affordance anchor against the *reloaded* DOM (iter-5 Codex): if a watch/
+    // refreshKey reload removed or shortened the previously active block, clear `activeLine` so
+    // the "+" can't render for — or emit `onAddComment` for — a line the new content no longer
+    // has. VALIDATE rather than blindly reset: a still-present active line survives, so this never
+    // races a fresh hover (which changes only `activeLine`, not `html`, so this effect doesn't run
+    // then).
     setActiveLine((cur) =>
       cur !== null && !root.querySelector(`[data-line="${cur}"]`) ? null : cur,
     );
+    // Re-host the in-row "+" after a body rebuild (#1343): the innerHTML reset detached the
+    // wrapper node (the ref keeps it alive and the portal keeps rendering into it), so re-append
+    // it into the still-active line's row. A line the reload removed skips this (the lookup fails,
+    // and the validation above has already queued the clear); a markers-only update leaves the
+    // wrapper connected, so this is a no-op then.
+    const wrap = affordanceWrapRef.current;
+    if (wrap && !wrap.isConnected && activeLineRef.current !== null) {
+      const el = root.querySelector<HTMLElement>(`[data-line="${activeLineRef.current}"]`);
+      if (el) placeAffordance(el, null);
+    }
     // Focus restoration (#1237): submit/delete recorded the block being worked on before emitting
     // the intent; the host's write led back here via the watch reload, which rebuilt the body and
     // dropped focus to the document root. Exact line first; if the write shifted lines, the nearest
@@ -393,9 +391,6 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
   // line; submitting emits `onAddComment(line, text)` (the host writes the marker); cancel/Esc just
   // closes it and restores focus to the block so keyboard users aren't stranded.
   const openComposer = (line: number): void => {
-    // Opening the composer unmounts the overlay without a mouseleave, so drop any pointer pin.
-    overlayPinnedRef.current = false;
-    clearGraceTimer();
     setEditingMarker(null);
     setComposingLine(line);
   };
@@ -483,6 +478,10 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
   // textarea, the card action buttons, or the minimap are never intercepted — typing "n" in a
   // comment types "n".
   const onBodyKeyDown = (e: React.KeyboardEvent<HTMLDivElement>): void => {
+    // Keys pressed ON the "+" button belong to the button: its native Enter/Space activation
+    // fires onClick → openComposer with the button's own (possibly nested) line. Intercepting
+    // here would re-resolve through the host row and open the composer on the wrong line.
+    if (fromAffordance(e.target)) return;
     if (e.key === 'Enter' || e.key === ' ') {
       const l = lineFromEvent(e.target);
       if (l !== null) {
@@ -558,103 +557,148 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
     return { el, line: n };
   };
 
-  const clearGraceTimer = (): void => {
-    if (graceTimerRef.current !== null) {
-      clearTimeout(graceTimerRef.current);
-      graceTimerRef.current = null;
-    }
-  };
-  React.useEffect(() => clearGraceTimer, []);
+  // ---- In-row "+" affordance (#1343, GitHub-diff pattern) ----
+  // The whole row is the hover target and the "+" renders inside the hovered row's own DOM,
+  // positioned only against that row — never against the canvas. Trigger and target coincide, so
+  // there is no pointer journey to protect: the #1236 grace/pin machinery is gone, instant
+  // re-anchor and immediate dismiss are correct, and #1380's column mode places the row (and its
+  // affordance) for free.
 
-  // Anchor the overlay to a block: record the block's vertical offset so the `+` affordance renders
-  // beside it. We anchor to the *first line's vertical center* (offsetTop + half the line height)
-  // rather than the block's top edge, and the overlay CSS applies `translateY(-50%)` so the `+`
-  // lands centered on the first line, not floating above it (#863 bundled polish from the issue
-  // comment). (`offsetTop` is relative to `.codev-artifact-canvas`, the positioned ancestor.)
-  const anchorOverlay = (el: HTMLElement, line: number): void => {
-    setActiveLine(line);
+  // Single wrapper node for the "+", created once and MOVED between row hosts (appendChild
+  // relocates it). The portal below targets this stable node, so React's ownership of the button
+  // survives both moves and body rebuilds (the ref outlives an innerHTML wipe; the decoration
+  // effect re-appends the node).
+  const affordanceWrapRef = React.useRef<HTMLElement | null>(null);
+  const affordanceWrap = (): HTMLElement => {
+    if (affordanceWrapRef.current === null) {
+      const wrap = document.createElement('div');
+      wrap.className = 'codev-canvas-row-affordance';
+      affordanceWrapRef.current = wrap;
+    }
+    return affordanceWrapRef.current;
+  };
+
+  // The top-level row that hosts the affordance for a block: its ancestor that is a direct child
+  // of the body. Nested blocks (an `li`, a `p` inside a blockquote) are hosted by their outermost
+  // row, which carries the block-local gutter the "+" renders in; `activeLine` still targets the
+  // inner block, so the label and the composer stay precise.
+  const rowHostOf = (el: HTMLElement): HTMLElement => {
+    let host = el;
+    while (host.parentElement && host.parentElement !== bodyRef.current) {
+      host = host.parentElement;
+    }
+    return host;
+  };
+
+  const lineHeightOf = (el: HTMLElement): number => {
     const cs = getComputedStyle(el);
-    let lineHeight = parseFloat(cs.lineHeight);
-    if (!Number.isFinite(lineHeight)) {
-      const fontSize = parseFloat(cs.fontSize);
-      lineHeight = Number.isFinite(fontSize) ? fontSize * 1.2 : 0;
-    }
-    setOverlayTop(el.offsetTop + lineHeight / 2);
+    const lineHeight = parseFloat(cs.lineHeight);
+    if (Number.isFinite(lineHeight)) return lineHeight;
+    const fontSize = parseFloat(cs.fontSize);
+    if (Number.isFinite(fontSize)) return fontSize * 1.2;
+    return 0;
   };
 
-  // Keyboard path: a focus move re-anchors INSTANTLY. The grace below exists to absorb pointer
-  // travel geometry; lagging a deliberate focus change 200ms would just feel broken.
+  // Attach the wrapper inside `el`'s row and set its row-relative `top`. The mouse path passes the
+  // pointer's clientY and gets the line under the pointer — quantized to `el`'s line-height so the
+  // "+" snaps line-to-line (GitHub-style) instead of sliding, and clamped to the row's box. The
+  // keyboard path passes null and gets the block's first-line center (`offsetTop` is row-relative
+  // because only top-level rows are positioned). `translateY(-50%)` in the CSS centers the button
+  // on the computed line either way.
+  const placeAffordance = (el: HTMLElement, clientY: number | null): void => {
+    const host = rowHostOf(el);
+    const wrap = affordanceWrap();
+    if (wrap.parentElement !== host) host.appendChild(wrap);
+    const lineHeight = lineHeightOf(el);
+    let top: number;
+    if (clientY === null) {
+      let base = 0;
+      if (el !== host) base = el.offsetTop;
+      top = base + lineHeight / 2;
+    } else {
+      const hostRect = host.getBoundingClientRect();
+      const elRect = el.getBoundingClientRect();
+      let within = clientY - elRect.top;
+      if (lineHeight > 0) {
+        within = Math.floor(within / lineHeight) * lineHeight + lineHeight / 2;
+      }
+      top = elRect.top - hostRect.top + within;
+      if (top < 0) top = 0;
+      if (top > hostRect.height) top = hostRect.height;
+    }
+    wrap.style.top = `${top}px`;
+  };
+
+  // True when an event originated inside the "+" wrapper. Every activation path no-ops for
+  // these: the wrapper sits inside the HOST row's DOM, so re-resolving through
+  // `closest('[data-line]')` would retarget a nested block's line (an `li`) to its host's line
+  // (the `ul`) — wrong label, wrong composer target (iter-1 Codex). NOTE the primary isolation
+  // is actually the portal itself: React propagates the button's events through the REACT tree
+  // (the portal's parent is the canvas div), so the body div's handlers never see them. These
+  // guards are deliberate defense-in-depth — they keep nested-line targeting correct even if the
+  // affordance is ever re-hosted non-portally (e.g. rendered imperatively like the marker cards),
+  // where DOM-tree bubbling WOULD reach the body handlers (iter-1 Claude).
+  const fromAffordance = (target: EventTarget | null): boolean =>
+    Boolean((target as HTMLElement | null)?.closest?.('.codev-canvas-row-affordance'));
+
+  // Keyboard path (#1237 parity): focusing a block lights the "+" in its row, instantly.
+  // Tab-focusing the button itself must not re-anchor (see fromAffordance).
   const activateFromFocus = (target: EventTarget | null): void => {
+    if (fromAffordance(target)) return;
     const b = resolveBlock(target);
     if (!b) return;
-    clearGraceTimer();
-    anchorOverlay(b.el, b.line);
+    setActiveLine(b.line);
+    placeAffordance(b.el, null);
   };
 
-  // Mouse path (#1236). First hover (no overlay up) anchors instantly, but once an overlay is
-  // showing for another line, crossing a block only re-anchors after the grace elapses, so a
-  // diagonal path toward the "+" can cross neighbors without the button jumping away. While the
-  // pointer is inside the overlay itself, everything is pinned. A stale pin (the overlay was
-  // unmounted under the pointer, so its mouseleave never fired) is ignored when no overlay is up.
-  const activateFromHover = (target: EventTarget | null): void => {
+  // Mouse path: hover and move share one handler (a repeat with an unchanged line is a state-set
+  // React bails out of, plus one style write). Three deliberate no-ops: events originating inside
+  // the affordance itself (re-resolving would retarget a nested block's line to its host row and
+  // jitter the "+" under the pointer), moves during a primary-button drag (the "+" must never
+  // jump around mid text-selection), and targets outside any block (margins and other dead strips
+  // keep the current row lit — sticky — rather than flickering; the "+" sits inside the row it
+  // targets, so a lingering affordance can never be attributed to the wrong row).
+  const activateFromPointer = (e: React.MouseEvent): void => {
+    const target = e.target as HTMLElement | null;
+    if (fromAffordance(target)) return;
+    if ((e.buttons & 1) !== 0) return;
     const b = resolveBlock(target);
     if (!b) return;
-    if (overlayPinnedRef.current && activeLine !== null) return;
-    overlayPinnedRef.current = false;
-    clearGraceTimer();
-    if (activeLine === null || activeLine === b.line) {
-      anchorOverlay(b.el, b.line);
-      return;
-    }
-    graceTimerRef.current = setTimeout(() => {
-      graceTimerRef.current = null;
-      if (!overlayPinnedRef.current && b.el.isConnected) anchorOverlay(b.el, b.line);
-    }, OVERLAY_GRACE_MS);
+    setActiveLine(b.line);
+    placeAffordance(b.el, e.clientY);
   };
 
-  // Canvas mouseleave: dismiss after the grace, not instantly, so a pixel of overshoot past the
-  // canvas edge (the overlay hugs left: 0) no longer unmounts the button under the cursor (#1236).
-  const scheduleDismiss = (): void => {
-    clearGraceTimer();
-    graceTimerRef.current = setTimeout(() => {
-      graceTimerRef.current = null;
-      if (!overlayPinnedRef.current) setActiveLine(null);
-    }, OVERLAY_GRACE_MS);
+  // Canvas mouseleave: dismiss immediately. Structurally safe without a grace window — the "+"
+  // sits on the pointer's own path at the row's leading edge, so it cannot be approached without
+  // being crossed, and re-entry re-lights it instantly in the same place.
+  const dismissAffordance = (): void => {
+    setActiveLine(null);
+    affordanceWrapRef.current?.remove();
   };
 
   return (
-    <div className="codev-artifact-canvas" onMouseLeave={scheduleDismiss}>
+    <div className="codev-artifact-canvas" onMouseLeave={dismissAffordance}>
       {/* No `dangerouslySetInnerHTML`: the body's content is set imperatively in the effect above so
           React never re-commits it (which would wipe the injected cards). Rendered with no children. */}
       <div
         ref={bodyRef}
         className="codev-artifact-canvas-body"
-        onMouseOver={(e) => activateFromHover(e.target)}
+        onMouseOver={activateFromPointer}
+        onMouseMove={activateFromPointer}
         onFocus={(e) => activateFromFocus(e.target)}
         onClick={onBodyClick}
         onKeyDown={onBodyKeyDown}
       />
-      {/* The overlay carries ONLY the "+" add-comment affordance. Existing markers render as
-          always-visible inline cards below their block (injected above), not in this hover overlay —
-          that's the layout fix that stopped the cards overlapping the block content (#863). The "+"
+      {/* The "+" add-comment affordance (#1343): portalled into the wrapper that lives INSIDE the
+          active row's own DOM, so the affordance is wherever its row is. Existing markers render as
+          always-visible inline cards below their block (injected above), never here (#863). The "+"
           is suppressed for the line whose composer is open (the composer is shown there instead). */}
-      {activeLine !== null && activeLine !== composingLine ? (
-        <div
-          className="codev-canvas-overlay"
-          style={{ top: overlayTop }}
-          // Pin while the pointer is on the overlay (#1236): cancel any pending dismiss/re-anchor
-          // so the "+" can't move or vanish under a cursor that has reached it.
-          onMouseEnter={() => {
-            overlayPinnedRef.current = true;
-            clearGraceTimer();
-          }}
-          onMouseLeave={() => {
-            overlayPinnedRef.current = false;
-          }}
-        >
-          <CommentAffordance line={activeLine} onActivate={openComposer} />
-        </div>
-      ) : null}
+      {activeLine !== null && activeLine !== composingLine && affordanceWrapRef.current
+        ? createPortal(
+            <CommentAffordance line={activeLine} onActivate={openComposer} />,
+            affordanceWrapRef.current,
+          )
+        : null}
       {/* Inline composer (#1107): portalled into the in-flow placeholder injected directly below the
           block, so the reviewer types where the comment will live. Keeping it React-owned (rather than
           hand-built DOM in the imperatively-managed body) gives clean state / focus / Esc handling. */}
