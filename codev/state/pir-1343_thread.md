@@ -21,3 +21,22 @@
     zone (text x preserved); "+" drift inside horizontally-scrolled wide tables accepted as v1
     limitation; `pre` fixed via inner `pre > code` scroll.
 - Gate: plan-approval pending.
+
+## 2026-08-10 — implement phase
+
+- Plan approved as written (no revisions requested). Implemented in two commits:
+  - `995dad5d4` component + CSS: portal wrapper moved between row hosts (stable node, survives
+    innerHTML rebuilds via the decoration-effect re-host), pointer-line quantized placement,
+    `--codev-canvas-gutter` block-local leading space, chrome-row padding sums, pre inner-scroll
+    (`pre > code` scrolls so the row and its "+" don't), has-marker bar as `::before` on
+    top-level rows, grace/pin machinery deleted.
+  - `5c297f635` tests: hover-affordance grace suite replaced by full-row-affordance suite (9
+    tests, zero fake timers by design); default-theme contract updated (gutter token snapshot,
+    row rules, no `.codev-canvas-overlay`).
+- Implementation notes for reviewers:
+  - `activateFromPointer` ignores events from inside the affordance (re-resolving would retarget
+    a nested block's line to its host row) and during primary-button drags (selection).
+  - `activeLine` stays the innermost block's line (labels/composer); hosting is outermost-row.
+  - Known v1 limitation (in plan): a horizontally-scrolled wide table carries its "+" with the
+    scroll; pre is immune via the inner-scroll refactor.
+- All 97 package tests pass; tsc + tsdown build clean. Gate: dev-approval pending.
