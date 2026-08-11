@@ -347,14 +347,15 @@
 }
 
 /* Inline-below comment cards (#863): rendered in flow beneath the annotated block, so they push
-   following content down instead of overlapping it. The left rule ties the stack visually to the
-   gutter where the "+" lives. No stack is injected for a block with zero markers, so a comment-free
-   block consumes no extra vertical space. */
+   following content down instead of overlapping it. No stack is injected for a block with zero
+   markers, so a comment-free block consumes no extra vertical space. The stack itself carries NO
+   amber rail (spec-1380 dev-approval feedback: rail + per-card border doubled the left edge) —
+   each card's own border is the annotation marker; the padding keeps card edges aligned with the
+   composer's rule below them. */
 .codev-canvas-marker-cards {
   list-style: none;
   margin: 4px 0 10px;
-  padding-left: 8px;
-  border-left: 2px solid var(--codev-canvas-comment-marker);
+  padding-left: 10px;
   display: flex;
   flex-direction: column;
   gap: 4px;
