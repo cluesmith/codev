@@ -147,8 +147,16 @@ export function registerCanvasView(options: CanvasViewRegistrationOptions): vsco
   // registration at open time is a no-op while there is no client yet.
   const stateSub = connectionManager.onStateChange((state) => {
     if (state !== 'connected') { return; }
-    // The id from before the restart is meaningless to the new Tower; drop it and register anew.
+    const stale = viewId;
     viewId = null;
+    if (stale) {
+      const client = connectionManager.getClient();
+      // Release the old id before taking a new one. A reconnect is not necessarily a restart: if
+      // this is the same Tower, the old registration is still live and would sit there as a
+      // duplicate competing for MRU until its lease lapsed. Best-effort — against a genuinely
+      // restarted Tower the id is unknown and this 404s harmlessly.
+      if (client) { void client.unregisterCanvasView(stale); }
+    }
     void ensureRegistered();
   });
 
@@ -162,12 +170,18 @@ export function registerCanvasView(options: CanvasViewRegistrationOptions): vsco
     if (!event || typeof event.viewId !== 'string' || event.viewId !== viewId) { return; }
     if (!isCanvasCommand(event.command)) { return; }
 
-    const message: HostToWebviewMessage = { type: 'command', command: event.command };
-    // Only a sane repeat count travels on; Tower already rejects the rest, and a bogus value
-    // here would just be extra work for the canvas to ignore.
-    if (typeof event.count === 'number' && Number.isInteger(event.count) && event.count > 0) {
-      message.count = event.count;
+    // A malformed `count` invalidates the whole event rather than being quietly dropped. Tower
+    // rejects bad counts before relaying, so one arriving here means the frame cannot be trusted
+    // — and running the command with a different repeat than the sender intended is a silent
+    // change to what the reviewer asked for, which is worse than doing nothing.
+    if (event.count !== undefined) {
+      if (typeof event.count !== 'number' || !Number.isInteger(event.count) || event.count < 1) {
+        return;
+      }
     }
+
+    const message: HostToWebviewMessage = { type: 'command', command: event.command };
+    if (event.count !== undefined) { message.count = event.count; }
     // Deliberately no `panel.reveal()`: a remote command drives the canvas, it does not steal the
     // reviewer's window, matching the existing command relay's "never pulls focus" posture.
     void panel.webview.postMessage(message);

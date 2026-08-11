@@ -87,3 +87,30 @@ gate, which is the right place for a human-only verification to land.
 - 16/16 host-glue tests (4 new), 793/793 vscode unit suite.
 - `check-types` clean for the extension (both configs) and repo-wide; `eslint` clean.
 - Repo build green; 4847 repo tests pass.
+
+---
+
+# Iteration 2 addendum
+
+Verdicts: gemini APPROVE · claude APPROVE · codex REQUEST_CHANGES.
+
+**1. Malformed `count` forwarded as a single command instead of rejecting the event.** Accepted,
+and codex is right on the principle. I had chosen to drop the bad field and run the command,
+which is graceful degradation in the wrong place: Tower rejects bad counts before relaying, so
+one arriving here means the frame cannot be trusted, and running a traversal with a different
+repeat than the sender intended silently changes what the reviewer asked for. The event is now
+rejected whole. Test updated to assert nothing is forwarded for a negative, fractional, or
+non-numeric count.
+
+**2. Reconnect discarded the `viewId` without unregistering it.** Accepted, and a good catch: a
+reconnect is not necessarily a restart. Against the *same* Tower the old registration is still
+live, so dropping the id and registering afresh left a duplicate view in the registry competing
+for MRU until its lease lapsed. The old id is now released first, best-effort — against a
+genuinely restarted Tower that call 404s harmlessly. Test added.
+
+**3. The live VS Code end-to-end loop remains unperformed.** Unchanged and unchangeable from
+here; see item 7 above. Claude's iteration-2 review describes it as "properly escalated to the PR
+gate", which is the intent: it is documented as blocking for sign-off in the review file with a
+four-step script, and called out in the PR body.
+
+Verification: 17/17 host-glue tests, 794/794 vscode unit suite, typecheck and lint clean.

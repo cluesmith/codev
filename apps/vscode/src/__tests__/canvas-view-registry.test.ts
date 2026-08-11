@@ -180,6 +180,21 @@ describe('canvas view registration', () => {
     expect(conn.client.registerCanvasView).toHaveBeenCalledTimes(2);
   });
 
+  it('releases the old registration when reconnecting to the same Tower', async () => {
+    const conn = fakeConnection();
+    const panel = fakePanel();
+
+    registerCanvasView({ connectionManager: conn.connectionManager, panel: panel as never, file: '/ws/spec.md' });
+    await flush();
+
+    conn.setState('connected');
+    await flush();
+
+    // A reconnect is not necessarily a restart: against the same Tower the old id is still live,
+    // and leaving it would put a duplicate view in the registry competing for MRU.
+    expect(conn.client.unregisterCanvasView).toHaveBeenCalledWith('canvas-1');
+  });
+
   it('ignores connection states other than connected', async () => {
     const conn = fakeConnection();
     const panel = fakePanel();
@@ -290,7 +305,7 @@ describe('addressed delivery', () => {
     expect(panel.posted).toEqual([]);
   });
 
-  it('drops a nonsensical count rather than passing it on', async () => {
+  it('rejects the whole event when count is malformed', async () => {
     const conn = fakeConnection();
     const panel = fakePanel();
 
@@ -298,11 +313,12 @@ describe('addressed delivery', () => {
     await flush();
     conn.emit('canvas-command', { viewId: 'canvas-1', command: 'block-next', count: -4 });
     conn.emit('canvas-command', { viewId: 'canvas-1', command: 'block-next', count: 1.5 });
+    conn.emit('canvas-command', { viewId: 'canvas-1', command: 'block-next', count: 'three' });
 
-    expect(panel.posted).toEqual([
-      { type: 'command', command: 'block-next' },
-      { type: 'command', command: 'block-next' },
-    ]);
+    // Running the command with a different repeat than the sender intended would silently change
+    // what the reviewer asked for; Tower rejects bad counts, so one arriving here means the frame
+    // is untrustworthy.
+    expect(panel.posted).toEqual([]);
   });
 
   it('delivers nothing before registration completes', async () => {
