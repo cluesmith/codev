@@ -406,6 +406,15 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
     const root = bodyRef.current;
     if (!root) { return; }
 
+    // Keep-with-block grouping (spec 1380, dev-approval feedback): mark the annotated block
+    // while its composer is open. In horizontal mode the CSS pairs this class's
+    // `break-after: avoid` with the host's `break-before: avoid`, so when the composer doesn't
+    // fit below the block at a column bottom, the engine moves block + cards + composer to the
+    // next column TOGETHER instead of stranding the dialog a column away (spike-verified).
+    root.querySelectorAll('.codev-canvas-composing').forEach((el) => {
+      el.classList.remove('codev-canvas-composing');
+    });
+
     if (composingLine === null) {
       if (composerHost) { composerHost.remove(); setComposerHost(null); }
       return;
@@ -417,6 +426,7 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
       setComposingLine(null);
       return;
     }
+    block.classList.add('codev-canvas-composing');
     // Anchor below the block's marker-card stack when it has one, else directly below the block.
     let anchor: Element = block;
     const sib = block.nextElementSibling;
@@ -641,15 +651,43 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
     return () => ro.disconnect();
   }, [readingMode]);
 
+  // Cancels any in-flight wheel glide (set by the wheel effect below). Paging calls it so a
+  // PageDown never fights a glide animation for the scroll position.
+  const cancelWheelGlideRef = React.useRef<(() => void) | null>(null);
+
   // Wheel remap (spec Constraint 5): active ONLY in horizontal mode, attached as a NATIVE
   // non-passive listener — React's delegated wheel path is passive-by-default, so its
   // preventDefault cannot be relied on (plan phase 3). Pass-through rules, in order: modified
   // wheels (pinch-zoom), horizontal-dominant deltas (native trackpad gesture), and events an
   // inner vertical scroller (capped code/table/card/composer) can still consume. Everything
-  // else becomes horizontal canvas travel. Vertical mode attaches nothing.
+  // else becomes horizontal canvas travel — GLIDED, not teleported (dev-approval feedback):
+  // native vertical wheeling is animated by the browser, and intercepting it bypasses that
+  // animation, so a notched mouse wheel (120px/event) felt jagged. Deltas accumulate into a
+  // target and a rAF loop eases toward it (30%/frame, snapping under 1px), which restores the
+  // native feel for notched wheels while trackpads (many small deltas) behave as before.
   React.useEffect(() => {
     const body = bodyRef.current;
     if (!body || readingMode !== 'horizontal') return;
+    let target: number | null = null;
+    let raf = 0;
+    const glide = (): void => {
+      raf = 0;
+      if (target === null) return;
+      const remaining = target - body.scrollLeft;
+      if (Math.abs(remaining) < 1) {
+        body.scrollLeft = target;
+        target = null;
+        return;
+      }
+      body.scrollLeft += remaining * 0.3;
+      raf = requestAnimationFrame(glide);
+    };
+    const cancel = (): void => {
+      if (raf !== 0) cancelAnimationFrame(raf);
+      raf = 0;
+      target = null;
+    };
+    cancelWheelGlideRef.current = cancel;
     const onWheel = (e: WheelEvent): void => {
       if (e.ctrlKey || e.metaKey) return;
       if (Math.abs(e.deltaX) >= Math.abs(e.deltaY)) return;
@@ -660,10 +698,26 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
       // only emits pixel deltas — kept correct for engine robustness).
       let pageSize = measureColumnGeometry(body).step;
       if (pageSize <= 0) pageSize = body.clientWidth;
-      body.scrollLeft += wheelDeltaPx(e, pageSize);
+      const max = Math.max(body.scrollWidth - body.clientWidth, 0);
+      let next = target ?? body.scrollLeft;
+      next += wheelDeltaPx(e, pageSize);
+      if (next < 0) next = 0;
+      if (next > max) next = max;
+      target = next;
+      if (typeof requestAnimationFrame === 'undefined') {
+        // No frame scheduler (jsdom): apply instantly — behavior-identical, minus the glide.
+        body.scrollLeft = target;
+        target = null;
+        return;
+      }
+      if (raf === 0) raf = requestAnimationFrame(glide);
     };
     body.addEventListener('wheel', onWheel, { passive: false });
-    return () => body.removeEventListener('wheel', onWheel);
+    return () => {
+      body.removeEventListener('wheel', onWheel);
+      cancel();
+      cancelWheelGlideRef.current = null;
+    };
   }, [readingMode]);
 
   // Keyboard handling on the body (#1107 activation + #1237 jump navigation). Every branch below
@@ -704,6 +758,8 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
       // Unmeasurable geometry: leave the key to the browser rather than swallowing it.
       if (step <= 0) return;
       e.preventDefault();
+      // A page step is absolute; never let an in-flight wheel glide drag the position away.
+      cancelWheelGlideRef.current?.();
       let dir = 1;
       if (e.key === 'PageUp') dir = -1;
       const max = Math.max(root.scrollWidth - root.clientWidth, 0);

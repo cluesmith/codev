@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { render, waitFor, cleanup, act, fireEvent } from '@testing-library/react';
 import * as React from 'react';
 import { ArtifactCanvas } from '../ArtifactCanvas.js';
@@ -42,7 +42,35 @@ function wheel(el: HTMLElement, init: WheelEventInit): WheelEvent {
   return e;
 }
 
+/** jsdom has no layout, so scrollWidth/clientWidth are 0 and the glide's clamp would pin every
+ * target to 0 — fabricate a scrollable extent so travel assertions are meaningful. */
+function fakeScrollExtent(body: HTMLElement): void {
+  Object.defineProperty(body, 'scrollWidth', { value: 5333, configurable: true });
+  Object.defineProperty(body, 'clientWidth', { value: 1600, configurable: true });
+}
+
 describe('horizontal wheel remap (spec Constraint 5)', () => {
+  // jsdom defines requestAnimationFrame but never fires its callbacks, so the wheel glide
+  // (dev-approval feedback: eased scrolling instead of per-notch teleports) would never
+  // converge here. A synchronous stub runs the easing loop to completion inside the wheel
+  // handler, making the post-glide position assertable deterministically; the real frame
+  // pacing is exercised by the Playwright suite.
+  let realRaf: typeof requestAnimationFrame;
+  let realCaf: typeof cancelAnimationFrame;
+  beforeEach(() => {
+    realRaf = window.requestAnimationFrame;
+    realCaf = window.cancelAnimationFrame;
+    window.requestAnimationFrame = ((cb: FrameRequestCallback) => {
+      cb(0);
+      return 0;
+    }) as typeof requestAnimationFrame;
+    window.cancelAnimationFrame = (() => {}) as typeof cancelAnimationFrame;
+  });
+  afterEach(() => {
+    window.requestAnimationFrame = realRaf;
+    window.cancelAnimationFrame = realCaf;
+  });
+
   it('vertical mode attaches no handler: wheel events are never consumed', async () => {
     const { body } = await mountCanvas();
     const e = wheel(body, { deltaY: 120 });
@@ -50,11 +78,23 @@ describe('horizontal wheel remap (spec Constraint 5)', () => {
     expect(body.scrollLeft).toBe(0);
   });
 
-  it('vertical-dominant unmodified wheel becomes horizontal scroll (prevented + scrollLeft)', async () => {
+  it('vertical-dominant unmodified wheel becomes horizontal scroll (prevented + glides to target)', async () => {
     const { body } = await mountCanvas({ initialReadingMode: 'horizontal' });
+    fakeScrollExtent(body);
     const e = wheel(body, { deltaY: 120, deltaX: 10 });
     expect(e.defaultPrevented).toBe(true);
-    expect(body.scrollLeft).toBe(120);
+    // The glide eases toward the accumulated target over rAF frames (dev-approval feedback:
+    // instant per-notch teleports felt jagged); assert convergence, not the first frame.
+    await waitFor(() => expect(body.scrollLeft).toBe(120));
+  });
+
+  it('successive wheel notches accumulate into one glide target (no lost deltas)', async () => {
+    const { body } = await mountCanvas({ initialReadingMode: 'horizontal' });
+    fakeScrollExtent(body);
+    wheel(body, { deltaY: 120 });
+    wheel(body, { deltaY: 120 });
+    wheel(body, { deltaY: 120 });
+    await waitFor(() => expect(body.scrollLeft).toBe(360));
   });
 
   it('horizontal-dominant deltas pass through (native trackpad gesture)', async () => {
@@ -73,6 +113,7 @@ describe('horizontal wheel remap (spec Constraint 5)', () => {
 
   it('yields to an inner vertical scroller that can still consume the delta', async () => {
     const { body } = await mountCanvas({ initialReadingMode: 'horizontal' });
+    fakeScrollExtent(body);
     const p = body.querySelector('p') as HTMLElement;
     p.style.overflowY = 'auto';
     Object.defineProperty(p, 'scrollHeight', { value: 500, configurable: true });

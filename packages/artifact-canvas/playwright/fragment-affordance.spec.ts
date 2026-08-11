@@ -126,6 +126,55 @@ test('nested block inside a FRAGMENTED host row anchors in the hovered column (p
   expect(w.bottom).toBeLessThanOrEqual(probe!.y + 40);
 });
 
+test('the open composer shares a column with its block, even at a column bottom (dev-approval)', async ({ page }) => {
+  const body = await openFixture(page);
+  // Find a short prose block sitting in the BOTTOM third of its column: the case where the
+  // composer cannot fit below it, which used to strand the dialog in the next column alone.
+  const line = await body.evaluate((el) => {
+    const bodyRect = el.getBoundingClientRect();
+    for (const p of Array.from(el.querySelectorAll(':scope > p[data-line]'))) {
+      const rects = p.getClientRects();
+      if (rects.length !== 1) continue; // unfragmented prose only — a clean single-column block
+      const r = rects[0];
+      if (r.bottom > bodyRect.top + bodyRect.height * 0.66 && r.height < bodyRect.height / 4) {
+        p.scrollIntoView({ inline: 'center', block: 'nearest' });
+        return p.getAttribute('data-line');
+      }
+    }
+    return null;
+  });
+  expect(line, 'fixture must contain a short paragraph low in a column').not.toBeNull();
+
+  const block = body.locator(`[data-line="${line}"]`);
+  await block.hover();
+  await page.locator('.codev-canvas-add-comment').click();
+  const host = body.locator('.codev-canvas-comment-composer-host');
+  await expect(host).toBeVisible();
+
+  // The invariant: the dialog sits DIRECTLY BELOW the block's last fragment — same column
+  // band, adjacent vertically. (The keep-with hints let the engine satisfy this by breaking
+  // inside the prose when needed, so the paragraph's tail travels WITH the dialog; comparing
+  // against the union bounding box would mislabel that correct layout as stranding.)
+  const geom = await page.evaluate((l) => {
+    const rects = Array.from(document.querySelector(`[data-line="${l}"]`)!.getClientRects());
+    const last = rects[rects.length - 1];
+    const h = document.querySelector('.codev-canvas-comment-composer-host')!.getBoundingClientRect();
+    return {
+      lastLeft: Math.round(last.left),
+      lastBottom: Math.round(last.bottom),
+      hostLeft: Math.round(h.left),
+      hostTop: Math.round(h.top),
+    };
+  }, line);
+  // Same column band as the block's last fragment, and below it (the card stack may sit
+  // between them — it travels with the group, so no upper bound on the gap is asserted).
+  // Tolerance: the block's rect spans the full row (its gutter is PADDING) while the host is
+  // gutter-inset via MARGIN, so a same-column pair differs by ~the 1.9rem gutter (~30px) —
+  // far below a column step (~450px), which is what actual stranding would measure.
+  expect(Math.abs(geom.hostLeft - geom.lastLeft)).toBeLessThanOrEqual(48);
+  expect(geom.hostTop).toBeGreaterThanOrEqual(geom.lastBottom - 2);
+});
+
 test('watch-reload in horizontal mode: mode, cards, focus, and affordance all recover (scenario 9)', async ({ page }) => {
   const body = await openFixture(page);
   const target = body.locator('p', { hasText: 'Intro paragraph.' });

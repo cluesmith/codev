@@ -543,9 +543,33 @@
   max-height: var(--_codev-column-cap);
 }
 /* Open composer: protected whole (above); clamp the textarea so user resizing can never push
-   the composer past a column (spec D1). */
+   the composer past a column (spec D1). Half the column, not nearly all of it: the composer is
+   kept WITH its block (below), and a near-column-height composer would make the
+   block+cards+composer group unfittable in ANY column, forcing the engine to renege on the
+   protection and split the dialog. Half a column is ~20 text lines on a typical display —
+   generous for a review comment — and leaves room for the group to travel intact. */
 .codev-canvas-mode-horizontal .codev-artifact-canvas-body .codev-canvas-comment-composer-input {
-  max-height: calc(var(--_codev-column-cap) - 60px);
+  max-height: calc(var(--_codev-column-cap) * 0.5);
+}
+/* Keep the open composer WITH its block (dev-approval feedback): when the dialog doesn't fit
+   below the block at a column bottom, these hints make Chromium move block + cards + composer
+   to the next column together (spike-verified) instead of stranding the dialog a column away
+   from the text it annotates. `.codev-canvas-composing` is stamped on the annotated block only
+   while its composer is open; the chained `break-after: avoid` covers the card stack sitting
+   between them. Horizontal-only — vertical has no columns to strand across. */
+.codev-canvas-mode-horizontal .codev-artifact-canvas-body .codev-canvas-composing,
+.codev-canvas-mode-horizontal .codev-artifact-canvas-body .codev-canvas-composing + .codev-canvas-marker-cards {
+  break-after: avoid;
+}
+/* While composing, the block's card stack must be ATOMIC, not merely break-averse: its normal
+   between-cards break points are legal escapes the engine will take, keeping the block but
+   pushing trailing cards + dialog to the next column — the exact stranding being fixed. Scoped
+   to the composing block's stack only; ordinary stacks keep fragmenting between cards (D1). */
+.codev-canvas-mode-horizontal .codev-artifact-canvas-body .codev-canvas-composing + .codev-canvas-marker-cards {
+  break-inside: avoid;
+}
+.codev-canvas-mode-horizontal .codev-artifact-canvas-body .codev-canvas-comment-composer-host {
+  break-before: avoid;
 }
 
 /* Focusable container (spec 1380, Constraint 7): the body is a tab stop in horizontal mode —
