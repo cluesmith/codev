@@ -124,3 +124,29 @@ source field would be a third encoding of one fact.
 Lesson worth keeping: my proposal was locally well-reasoned but violated a package-wide
 invariant I had not checked. The stakeholder review caught it, exactly as the #1189 arrangement
 is meant to.
+
+## 2026-08-11 — plan-approval granted; implementing phase_1 (wire contracts)
+
+Human approved plan-approval; porch advanced to `implement`, plan phase_1.
+
+Written: packages/types/src/canvas-command.ts (14-command closed union, type-level
+TraversalCommand/NonTraversalCommand, wire vs client error unions, request/result/registry/SSE
+event shapes, three route/event constants), exported from index.ts; type-test guard at
+packages/types/type-tests/ with its own tsconfig + `check-types:tests` script.
+
+Guard design note: `Extract`/`Exclude` alone CANNOT catch drift — a newly added command silently
+falls into the NonTraversal complement and `count` quietly stops applying to it. So the guard
+carries an exhaustive `satisfies Record<CanvasCommand, ...>` classification map that must be
+updated by hand, plus bidirectional Equal<> assertions that the map and the exported types
+agree, and partition complete/disjoint checks. **Verified by hand** that adding an unclassified
+command fails the guard with 3 errors, then reverted the probe.
+
+Also dropped a `@ts-expect-error` approach for the "Tower cannot answer 'unreachable'" check:
+the error surfaces on the object property line, not the declaration line, so the directive was
+reported unused while the real error escaped. Replaced with pure type-level Extract<> assertions
+(more robust, no line-position coupling).
+
+Build hiccup, NOT mine: `npm run build` failed on a missing `@xterm/addon-serialize` in
+packages/codev/src/terminal/session-screen.ts. Traced it to PIR #1354, which my rebase pulled in
+from main; the dep is declared in packages/codev/package.json but the worktree's node_modules
+predated it. My branch touches zero terminal files. Running pnpm install.
