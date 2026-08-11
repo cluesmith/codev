@@ -37,6 +37,10 @@
 
 A structured review mode for builder diffs: compose comments in inline threads via codelens or context menu, collect them in a per-builder queue (persists across reloads), and submit the whole review as one batched message typed into the builder's prompt for a final read-and-Enter. The frictionless one-click PTY injection stays for quick reactions; an editor toggle chooses the default surface.
 
+## Horizontal reading mode for spec and plan review (#1380, PR #1398)
+
+The annotation viewer can now lay documents out in side-by-side columns — newspaper flow — turning a wide monitor into three or four pages of a spec at once. Wheel and keyboard navigation are column-aware, commenting and keyboard review work identically in both modes, and protected content (code, tables, comment cards, the composer) never splits across a column edge. Vertical stays the default; the preference is per-user. Ships with a real-browser regression suite (a new CI job) that caught and fixed a latent rendering gap (#1396) before launch.
+
 ## Polish
 
 <!-- Small vscode items as bullets:
