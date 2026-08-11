@@ -8,10 +8,10 @@ plan_phases:
     status: complete
   - id: phase_2
     title: Canvas action registry extraction
-    status: in_progress
+    status: complete
   - id: phase_3
     title: Canvas remote command seam
-    status: pending
+    status: in_progress
   - id: phase_4
     title: Tower canvas view registry and command route
     status: pending
@@ -21,7 +21,7 @@ plan_phases:
   - id: phase_6
     title: VS Code host wiring and end-to-end review loop
     status: pending
-current_plan_phase: phase_2
+current_plan_phase: phase_3
 gates:
   spec-approval:
     status: approved
@@ -36,7 +36,7 @@ gates:
   verify-approval:
     status: pending
 iteration: 1
-build_complete: true
+build_complete: false
 history:
   - iteration: 1
     plan_phase: phase_1
@@ -55,4 +55,4 @@ history:
         file: >-
           /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1401/codev/projects/1401-artifact-canvas-remote-command/1401-phase_1-iter1-claude.txt
 started_at: '2026-08-11T10:57:41.092Z'
-updated_at: '2026-08-11T20:15:08.102Z'
+updated_at: '2026-08-11T20:18:56.042Z'
