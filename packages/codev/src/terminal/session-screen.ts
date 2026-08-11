@@ -41,20 +41,29 @@
 // and its named exports are not statically analyzable, so a native-node ESM
 // `import { Terminal }` throws "Named export 'Terminal' not found" under the compiled
 // dist (see the identical note in render-gate.ts). Default-import the module object.
+// `@xterm/addon-serialize` ships the same way (same repo and release train).
 import xtermHeadless from '@xterm/headless';
 import type { Terminal as HeadlessTerminal } from '@xterm/headless';
+import xtermSerialize from '@xterm/addon-serialize';
 
 const { Terminal } = xtermHeadless;
+const { SerializeAddon } = xtermSerialize;
 
 /**
- * Scrollback retained by the mirror. The gate reads ONLY the current viewport
- * (`viewportY … viewportY + rows`), never scrollback, so this can be modest — it exists
- * only so a transient scroll doesn't momentarily drop viewport lines during reflow. Kept
- * small to bound per-session memory (one Terminal per live session): at ~200 lines it is a
- * few hundred KB even at a wide geometry. The viewport a classify sees is identical for any
- * scrollback ≥ rows, so this never changes a verdict (asserted by the production-path tests).
+ * Scrollback retained by the mirror, now serving two consumers (PIR #1354):
+ *
+ * - The render gate reads ONLY the current viewport (`viewportY … viewportY + rows`),
+ *   never scrollback, and its verdict is identical for any scrollback ≥ rows (asserted
+ *   by the production-path tests) — so for the gate this value is a free variable.
+ * - {@link SessionScreen.serialize} is the viewer-attach replay payload, and its
+ *   scrollback IS the history a reconnecting viewer gets back. 1000 matches the ring
+ *   buffer's default line capacity (`ringBufferLines`), so snapshot replay does not
+ *   regress history depth versus the raw-ring replay it replaces.
+ *
+ * Memory: measured ~509 KB per fully-scrolled 200x50 terminal at 1000 lines (~215 KB
+ * at the previous 200) — the bounded per-session budget the plan commits to.
  */
-const GATE_SCROLLBACK = 200;
+const SCREEN_SCROLLBACK = 1000;
 
 /** The live-buffer read handle the gate classifies (see {@link SessionScreen.read}). */
 export interface ScreenView {
@@ -65,6 +74,7 @@ export interface ScreenView {
 
 export class SessionScreen {
   private readonly term: HeadlessTerminal;
+  private readonly serializer: InstanceType<typeof SerializeAddon>;
   private _cols: number;
   private _rows: number;
   // Promise of the most recently issued write's parse completion. `@xterm/headless`
@@ -76,7 +86,9 @@ export class SessionScreen {
   constructor(cols: number, rows: number) {
     this._cols = cols;
     this._rows = rows;
-    this.term = new Terminal({ cols, rows, allowProposedApi: true, scrollback: GATE_SCROLLBACK });
+    this.term = new Terminal({ cols, rows, allowProposedApi: true, scrollback: SCREEN_SCROLLBACK });
+    this.serializer = new SerializeAddon();
+    this.term.loadAddon(this.serializer);
   }
 
   /**
@@ -124,6 +136,37 @@ export class SessionScreen {
     if (this.disposed) return { term: this.term, cols: this._cols, rows: this._rows };
     await this.pending;
     return { term: this.term, cols: this._cols, rows: this._rows };
+  }
+
+  /**
+   * Serialize the current screen state (both buffers, colors/attrs, cursor, alt-screen
+   * mode, plus up to {@link SCREEN_SCROLLBACK} lines of history) back into a terminal
+   * byte stream a client can replay — the O(screen) viewer-attach payload (PIR #1354).
+   *
+   * SYNCHRONOUS by design: it reads whatever is parsed into the grid right now.
+   * Callers wanting a coherent frame must flush first ({@link read}) and must call this
+   * with no intervening `await` afterward — the same no-interleave discipline the render
+   * gate's classifier relies on. `PtySession.replaySnapshot` owns that protocol.
+   *
+   * Throws whatever the addon throws; the caller maps failures to the raw-replay
+   * fallback. After {@link dispose} the term is freed — return '' rather than touching it
+   * (callers treat an empty snapshot for a non-empty session as a fallback signal).
+   */
+  serialize(): string {
+    if (this.disposed) return '';
+    return this.serializer.serialize({ scrollback: SCREEN_SCROLLBACK });
+  }
+
+  /**
+   * Which buffer the emulated app is currently in. 'alternate' identifies the
+   * full-screen-TUI case whose delta resume is unservable from the line-based ring
+   * (`RingBuffer.getSince` returns [] for a caught-up client), so the attach path
+   * routes it to {@link serialize} instead. Read without flushing: worst case the
+   * routing decision lags the last few unparsed bytes, and both routes remain correct
+   * (the raw path keeps its client-nudge recovery).
+   */
+  get bufferType(): 'normal' | 'alternate' {
+    return this.term.buffer.active.type;
   }
 
   /** Current mirror geometry (matches the live session). */
