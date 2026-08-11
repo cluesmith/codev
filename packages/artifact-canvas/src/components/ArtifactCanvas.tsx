@@ -207,6 +207,15 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
   // the watch reload rebuilds the body, and the previously-focused element is destroyed. The
   // decoration effect consumes this to put the reviewer back on the block they were working on.
   const pendingFocusLineRef = React.useRef<number | null>(null);
+  // Whether that pending restoration should be QUIET (no focus ring): true when the action that
+  // closed the composer was pointer-driven. Browsers mark textareas always-focus-visible, so a
+  // script focus() inheriting from the composer draws a keyboard-style ring even for mouse-only
+  // reviewers (dev-approval feedback); the quiet class suppresses it until the next keystroke.
+  const pendingFocusQuietRef = React.useRef(false);
+
+  const quietFocusRestore = (): void => {
+    rootRef.current?.classList.add('codev-canvas-quiet-focus');
+  };
 
   const report = React.useCallback(
     (err: unknown) => {
@@ -389,7 +398,11 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
           }
         }
       }
-      if (target) target.focus({ preventScroll: true });
+      if (target) {
+        if (pendingFocusQuietRef.current) quietFocusRestore();
+        pendingFocusQuietRef.current = false;
+        target.focus({ preventScroll: true });
+      }
     }
     // `readingMode` in the deps: toggling re-injects the card stacks so card-body focusability
     // tracks the mode (the injected DOM is not React-managed, so a re-run is the update path).
@@ -449,8 +462,9 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
     setEditingMarker(null);
     setComposingLine(line);
   };
-  const submitComposer = (text: string): void => {
+  const submitComposer = (text: string, viaKeyboard: boolean): void => {
     if (composingLine === null) { return; }
+    pendingFocusQuietRef.current = !viaKeyboard;
     // Edit vs add (#1055): when a marker is being edited, route to `onEditComment` with the marker's
     // identity (physical line) + the expected author/body for the host's optimistic-concurrency
     // check; otherwise emit the add intent. The host verifies then writes either way.
@@ -466,13 +480,15 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
     setEditingMarker(null);
     setComposingLine(null);
   };
-  const cancelComposer = (): void => {
+  const cancelComposer = (viaKeyboard: boolean): void => {
     const line = composingLine;
     setEditingMarker(null);
     setComposingLine(null);
     if (line !== null) {
       // The block element persists across this state change (the body is not rebuilt), so focus it
-      // synchronously to return the reviewer to where they were.
+      // synchronously to return the reviewer to where they were. Pointer-driven cancels restore
+      // quietly — no ring for a mouse-only flow (dev-approval feedback).
+      if (!viaKeyboard) quietFocusRestore();
       bodyRef.current?.querySelector<HTMLElement>(`[data-line="${line}"]`)?.focus();
     }
   };
@@ -492,6 +508,8 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
     if (action === 'delete') {
       // Focus was on the delete button, which the post-write reload destroys with the card; land
       // the reviewer back on the annotated block, the stable anchor jump keys resume from (#1237).
+      // `e.detail === 0` = keyboard-activated click; pointer deletes restore quietly.
+      pendingFocusQuietRef.current = e.detail !== 0;
       pendingFocusLineRef.current = marker.line;
       onDeleteComment?.(marker.markerLine as number, marker.author, marker.text);
     } else if (action === 'edit') {
@@ -725,6 +743,9 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
   // textarea, the card action buttons, or the minimap are never intercepted — typing "n" in a
   // comment types "n".
   const onBodyKeyDown = (e: React.KeyboardEvent<HTMLDivElement>): void => {
+    // Any keystroke re-arms the focus ring: quiet restoration is for pointer flows only, and
+    // the first keyboard interaction means the reviewer wants to see where focus is.
+    rootRef.current?.classList.remove('codev-canvas-quiet-focus');
     // Keys pressed ON the "+" button belong to the button: its native Enter/Space activation
     // fires onClick → openComposer with the button's own (possibly nested) line. Intercepting
     // here would re-resolve through the host row and open the composer on the wrong line.

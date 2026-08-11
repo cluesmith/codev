@@ -45,3 +45,40 @@ test('full review pass: add → edit → delete, in horizontal mode', async ({ p
   // The whole pass happened without leaving horizontal mode.
   await expect(page.locator('.codev-artifact-canvas')).toHaveClass(/codev-canvas-mode-horizontal/);
 });
+
+test('mouse-only comment flow draws no focus ring; keyboard re-arms it (dev-approval)', async ({ page }) => {
+  await page.goto('/?fixture=columns&mode=horizontal');
+  const body = page.locator('.codev-artifact-canvas-body');
+  await expect(body.locator('h1')).toHaveText('Columns fixture');
+  await expect(body.locator('.codev-canvas-marker-card')).toHaveCount(6);
+
+  // Pointer-only: hover, +, type, click Comment.
+  const target = body.locator('p', { hasText: 'Between blocks.' });
+  await target.hover();
+  await page.locator('.codev-canvas-add-comment').click();
+  await page.locator('.codev-canvas-comment-composer-input').fill('ring check');
+  await page.locator('.codev-canvas-comment-composer-submit').click();
+  await expect(body.locator('.codev-canvas-marker-card', { hasText: 'ring check' })).toBeVisible();
+
+  // Focus was restored to the block (keyboard continuity)…
+  const ringState = () =>
+    page.evaluate(() => {
+      const el = document.activeElement as HTMLElement | null;
+      if (!el || el.getAttribute('data-line') === null) return { focusedBlock: false, outline: '' };
+      return { focusedBlock: true, outline: getComputedStyle(el).outlineStyle };
+    });
+  const afterMouse = await ringState();
+  expect(afterMouse.focusedBlock).toBe(true);
+  // …but with NO visible ring for the mouse-only flow.
+  expect(afterMouse.outline).toBe('none');
+
+  // First keystroke re-arms the ring: jump to the next commented block, ring visible there.
+  await page.keyboard.press('n');
+  await expect.poll(async () => (await ringState()).outline).toBe('solid');
+
+  // Cleanup: delete the comment so this test leaves the fixture as it found it.
+  const card = body.locator('.codev-canvas-marker-card', { hasText: 'ring check' });
+  await card.hover();
+  await card.locator('.codev-canvas-marker-card-delete').click();
+  await expect(body.locator('.codev-canvas-marker-card')).toHaveCount(6);
+});

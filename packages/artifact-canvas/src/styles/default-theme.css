@@ -319,6 +319,14 @@
   outline: 2px solid var(--codev-canvas-accent);
   outline-offset: 2px;
 }
+/* Quiet focus restoration (spec 1380 dev-approval feedback, both modes): after a POINTER-driven
+   composer close / card delete, focus returns to the block for keyboard continuity, but the ring
+   is suppressed — browsers mark textareas always-focus-visible, so the programmatic restoration
+   would otherwise inherit a keyboard-style ring into a mouse-only flow. The class is cleared on
+   the next keystroke (see onBodyKeyDown), so keyboard reviewers always see their position. */
+.codev-canvas-quiet-focus .codev-artifact-canvas-body [data-line]:focus-visible {
+  outline: none;
+}
 :is(.codev-artifact-canvas-body, .codev-artifact-canvas-rendered) a { color: var(--codev-canvas-link); }
 
 /* In-row "+" wrapper (#1343): appended into the active row's own DOM and positioned against it,

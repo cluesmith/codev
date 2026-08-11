@@ -336,6 +336,75 @@ describe('legend and minimap (phase-3 deliverables)', () => {
   });
 });
 
+describe('quiet focus restoration (pointer flows leave no ring)', () => {
+  const root = () => document.querySelector('.codev-artifact-canvas') as HTMLElement;
+
+  it('mouse cancel restores block focus quietly; the next keystroke re-arms the ring', async () => {
+    const { body } = await mountCanvas({ initialReadingMode: 'horizontal' });
+    const block = body.querySelector('[data-line]') as HTMLElement;
+    fireEvent.keyDown(block, { key: 'Enter' }); // open composer (opening modality is irrelevant)
+    const cancel = await waitFor(() => {
+      const c = document.querySelector('.codev-canvas-comment-composer-cancel');
+      expect(c).not.toBeNull();
+      return c as HTMLButtonElement;
+    });
+    fireEvent.click(cancel, { detail: 1 }); // a real pointer click has detail >= 1
+    expect(root().classList.contains('codev-canvas-quiet-focus')).toBe(true);
+    expect(document.activeElement).toBe(block); // focus continuity is kept — only the ring is quiet
+
+    fireEvent.keyDown(block, { key: 'n' });
+    expect(root().classList.contains('codev-canvas-quiet-focus')).toBe(false);
+  });
+
+  it('keyboard cancel (Esc) keeps the ring armed', async () => {
+    const { body } = await mountCanvas({ initialReadingMode: 'horizontal' });
+    const block = body.querySelector('[data-line]') as HTMLElement;
+    fireEvent.keyDown(block, { key: 'Enter' });
+    const input = await waitFor(() => {
+      const t = document.querySelector('.codev-canvas-comment-composer-input');
+      expect(t).not.toBeNull();
+      return t as HTMLTextAreaElement;
+    });
+    fireEvent.keyDown(input, { key: 'Escape' });
+    expect(root().classList.contains('codev-canvas-quiet-focus')).toBe(false);
+    expect(document.activeElement).toBe(block);
+  });
+
+  it('mouse submit marks the post-reload restoration quiet', async () => {
+    // A WRITING host: the submit must round-trip through the store so the watch reload +
+    // focus restoration actually run (a no-op onAddComment would never rebuild the body).
+    const store = createStore(DOC);
+    const markerAdapter = stubMarkerAdapter(store);
+    render(
+      <ArtifactCanvas
+        uri="artifact://doc.md"
+        fileAdapter={stubFileAdapter(store)}
+        markerAdapter={markerAdapter}
+        themeAdapter={stubThemeAdapter()}
+        onAddComment={(line, text) => { void markerAdapter.add('artifact://doc.md', line, text, 'you'); }}
+        initialReadingMode="horizontal"
+      />,
+    );
+    const body = document.querySelector('.codev-artifact-canvas-body') as HTMLElement;
+    await waitFor(() => expect(body.querySelector('h1')).not.toBeNull());
+    const block = body.querySelector('[data-line]') as HTMLElement;
+    fireEvent.keyDown(block, { key: 'Enter' });
+    const input = await waitFor(() => {
+      const t = document.querySelector('.codev-canvas-comment-composer-input');
+      expect(t).not.toBeNull();
+      return t as HTMLTextAreaElement;
+    });
+    fireEvent.change(input, { target: { value: 'quiet-focus check' } });
+    const submit = document.querySelector('.codev-canvas-comment-composer-submit') as HTMLButtonElement;
+    fireEvent.click(submit, { detail: 1 });
+    // The write round-trips through the stub store → reload → decoration effect restores focus.
+    await waitFor(() => {
+      expect(root().classList.contains('codev-canvas-quiet-focus')).toBe(true);
+      expect((document.activeElement as HTMLElement)?.getAttribute('data-line')).not.toBeNull();
+    });
+  });
+});
+
 describe('column-geometry helpers (pure)', () => {
   it('wheelDeltaPx normalizes line and page delta modes', () => {
     const px = { deltaY: 3, deltaMode: 0 } as WheelEvent;
