@@ -30,4 +30,31 @@ Next: commit draft, message main architect (they route the sdk-surface section t
 2. `block-next/prev` can't be native-Tab parity (Tab visits affordances/cards/toolbar/links). Redefined as flow-order `[data-line]` stepping, explicitly not Tab parity.
 Also folded: Tower-minted viewId semantics, Tower-side path canonicalization, Tower-stamped `lastActiveAt`, security posture paragraph (inherits Tower trust boundary; composer-submit is the first relay-triggerable file write; selector keys never dereferenced as paths), closed HTTP error contract.
 
+### Architect question during the gate: "are we tapping the same pipeline as other deck commands?"
+
+Traced it in code. There IS one existing pipeline: deck → `sendCommand(verb,args,ws)` → `POST /api/command` → SSE broadcast → `apps/vscode/src/command-relay.ts` (workspace filter + focus gate + `VERB_COMMANDS` allowlist) → `vscode.commands.executeCommand`. Notably `open-spec` → `codev.viewSpecFile` → `vscode.openWith(uri, MarkdownPreviewProvider.viewType)`, so **the deck already opens the artifact canvas through that pipeline today**; #1400 navigates inside a canvas the deck itself opened.
+
+We share the transport, controller posture, sdk subpath and receiving provider; we diverge on route/targeting/response because the broadcast relay returns `{ok:true}` unconditionally and cannot express Requirement 4. No collision with the existing `add-comment` verb: it operates on `vscode.window.activeTextEditor`, which is undefined when the canvas custom editor holds focus (it is the raw-source sibling, not a duplicate).
+
 Streamdeck sdk-surface review: APPROVE (issue #1401 comment) with deltas, folded in: optional `count` (default 1) on the eight traversal/paging commands only; failure codes as a closed exported union in codev-types (`CanvasCommandErrorCode`); generic-relay exposure CLOSED as NO (open question removed, decision recorded); sdk presence query recorded as a named non-goal with an additive follow-up path. MRU + lastActiveAt-on-delivery + toggle-not-set explicitly endorsed.
+
+## 2026-08-11 — spec-approval granted; plan drafted
+
+Human approved spec-approval; porch advanced to `plan`. Plan written with 5 phases:
+types contracts → canvas seam → Tower registry+route → sdk calls → VS Code host wiring.
+Phases 2/3/4 each depend only on Phase 1, so they are independently verifiable.
+
+Two spec-deferred decisions settled in the plan:
+1. **Vocabulary ownership.** artifact-canvas has NO codev-types dep today (only dompurify +
+   markdown-it). The union is a real wire contract and Tower/sdk cannot depend on a React
+   package, so codev-types owns it and the canvas takes a type-only dependency (sdk precedent).
+   The canvas import-boundary guard forbids vscode/node:*/fs/fetch only, so this is allowed;
+   Phase 2 extends the guard to pin the import as type-only.
+2. **Registration transport.** Per-view HTTP register/heartbeat/unregister with a lease, NOT
+   SSE-connection-lifetime binding. Deciding case: one VS Code window holds a single SSE
+   connection but can host several canvas panels, so connection-scoped registration cannot
+   distinguish panels or drop one on close.
+
+Also decided: sdk gains host-facing registration methods on TowerClient but does NOT re-export
+them through controller.ts — controllers drive views, hosts register them, so the approved
+controller surface stays exactly as reviewed.
