@@ -527,3 +527,17 @@ a real VS Code window + Tower + open panel. Claiming it was done is exactly the 
 "tests pass is not it works" lesson exists to prevent. Documented as outstanding and
 blocking-for-sign-off in the review file with a 4-step script, and called out in the PR body. The
 pr gate is a human gate — the right place for a human-only verification.
+
+### phase_6 loop cannot converge — escalated (2026-08-12)
+
+iter2 and iter3 both landed gemini APPROVE + claude APPROVE + codex REQUEST_CHANGES, with codex's
+only remaining objection being the live VS Code end-to-end pass. That is not a code defect and no
+code change closes it: it needs a real VS Code window + Tower + open panel driven by a person. A
+headless builder cannot produce that, and the only way to flip the verdict would be to claim a
+verification I did not perform. So the loop is non-convergent — each round costs 3 consultations
+and ends 2-1 identically.
+
+All actionable findings from iter1/iter2 ARE fixed (reconnect, re-registration race,
+deactivate-unregister, closed-union validation, malformed-count event rejection, release-id-on-
+reconnect, lint). Asked the architect to let me stop iterating and open the PR, where the human
+runs the 4-step script at the pr gate. Holding rather than burning another consultation round.
