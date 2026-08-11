@@ -738,7 +738,9 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
         // sequential loop below (worst case for a mostly-idle, pre-upgrade
         // fleet of shellpers was ~10s serialized; see waitForReplay() for
         // how the per-session cost itself is also bounded for legacy peers).
-        const replayData = capRingSeed(await client.waitForReplay(), task.dbSession.id);
+        // Kept UNCAPPED here; the attach below caps the ring seed and feeds the
+        // mirror the full replay (PIR #1354).
+        const replayData = await client.waitForReplay();
         return { dbSession: task.dbSession, client, replayData, restartOptions: task.restartOptions };
       }),
     );
@@ -789,7 +791,18 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
       // replayData is only null when client is null (probe batch above),
       // which the `if (!client)` guard already excluded — fall back to
       // empty defensively rather than asserting.
-      ptySession.attachShellper(client, replayData ?? Buffer.alloc(0), dbSession.shellper_pid!, shellperSessId);
+      const fullReplay = replayData ?? Buffer.alloc(0);
+      // Ring seed capped (client fallback payload, 1 MiB); mirror seeded with the
+      // full replay so the snapshot serves the real screen (PIR #1354).
+      ptySession.attachShellper(client, capRingSeed(fullReplay, dbSession.id), dbSession.shellper_pid!, shellperSessId, fullReplay);
+      // Drain this session's seed parse before adopting the next (PIR #1354): the
+      // parse runs in the emulator's own small time slices (never blocking serving),
+      // and sequencing bounds the transient seed backlog to ONE session's replay
+      // instead of the whole fleet's. Skipped for seeds the ring cap wouldn't have
+      // trimmed — for those the mirror work is unchanged from before this feature.
+      if (fullReplay.length > RING_SEED_MAX_BYTES) {
+        await ptySession.gateScreen?.read();
+      }
       // Architect sessions with a live auto-restart config keep WebSocket clients
       // connected on exit. Gate on `restartOptions`: a retired-harness architect
       // (#1338) resolves to `undefined` here, so `reconnectSession` was told NOT to
@@ -977,8 +990,10 @@ export async function getTerminalsForWorkspace(
         );
         if (client) {
           // #1198: wait for the REPLAY frame instead of racing it (see the
-          // matching change in the startup adoption pass above).
-          const replayData = capRingSeed(await client.waitForReplay(), dbSession.id);
+          // matching change in the startup adoption pass above). Uncapped —
+          // the ring seed is capped at the attach below, while the mirror
+          // gets the full replay (PIR #1354).
+          const replayData = await client.waitForReplay();
           const label = dbSession.label || (dbSession.type === 'architect' ? 'Architect' : (dbSession.role_id || dbSession.id));
           // Reuse the persisted terminal id (#991) so the session keeps its
           // identity across the reconnect — clients holding `/ws/terminal/<id>`
@@ -991,7 +1006,9 @@ export async function getTerminalsForWorkspace(
           const ptySession = manager.getSession(newSession.id);
           if (ptySession) {
             const shellperSessId = extractShellperSessionId(dbSession.shellper_socket) ?? dbSession.id;
-            ptySession.attachShellper(client, replayData, dbSession.shellper_pid!, shellperSessId);
+            // Capped ring seed, full mirror seed (PIR #1354) — single-session path,
+            // so no cross-session parse sequencing is needed here.
+            ptySession.attachShellper(client, capRingSeed(replayData, dbSession.id), dbSession.shellper_pid!, shellperSessId, replayData);
             // Gate on `restartOptions` (same rationale as the reconcile path above):
             // a retired-harness architect (#1338) resolves to `undefined`, so holding
             // clients for an auto-restart that was never configured would strand the

@@ -203,8 +203,17 @@ export class PtySession extends EventEmitter {
    * Attach a shellper client as the I/O backend instead of node-pty.
    * Data flows: shellper → ring buffer → WebSocket clients.
    * User input flows: WebSocket → write() → shellper.
+   *
+   * `mirrorSeed` (PIR #1354): the UNCAPPED replay for the screen mirror, when the
+   * caller capped `replayData` for the ring (`capRingSeed`). The two seeds diverge
+   * deliberately — ring contents are shipped raw to clients only on the fallback
+   * path, so the 1 MiB client-payload cap stays; the mirror folds its seed into a
+   * fixed-size grid, so feeding it the full (wire-capped, ≤8 MB) history costs
+   * bounded parse time and shrinks the #1361 born-torn window from 1 MiB to the
+   * shellper's whole retention. Omitted → the mirror gets `replayData`, i.e. the
+   * pre-#1354 behavior (fresh spawns, whose replay is never capped).
    */
-  attachShellper(client: IShellperClient, replayData: Buffer, shellperPid: number, shellperSessionId?: string): void {
+  attachShellper(client: IShellperClient, replayData: Buffer, shellperPid: number, shellperSessionId?: string, mirrorSeed?: Buffer): void {
     // Idempotent re-attach (Issue #1047 Fix E): if a previous client is still
     // attached, drop our listeners on it before subscribing to the new one so
     // a re-attach can't double the per-byte data fan-out (each leaked 'data'
@@ -239,15 +248,19 @@ export class PtySession extends EventEmitter {
       this.logFd = fs.openSync(this.logPath, 'a');
     }
 
-    // Populate ring buffer with replay data from shellper, and seed the gate mirror with
-    // the SAME bytes (Spec 1313 render-gate round 2) so it reflects the session's history
-    // from the moment Tower (re)attaches — a mirror seeded only from live output after this
-    // point would be born torn. Fed through the shared feedGateScreen so it and
-    // `ringBuffer.bytesWritten` (the gate's change token) advance together.
+    // Populate the ring buffer and seed the screen mirror so both reflect the session's
+    // history from the moment Tower (re)attaches — a mirror seeded only from live output
+    // after this point would be born torn (Spec 1313 render-gate round 2). The mirror may
+    // receive a LONGER seed than the ring (see `mirrorSeed` above); that superset is safe
+    // for the `bytesWritten` token protocol, which only ever compares the token against
+    // itself across a flush — every LIVE byte after this point still feeds both in
+    // lockstep via onPtyData.
     if (replayData.length > 0) {
-      const replay = replayData.toString('utf-8');
-      this.ringBuffer.pushData(replay);
-      this.feedGateScreen(replay);
+      this.ringBuffer.pushData(replayData.toString('utf-8'));
+    }
+    const screenSeed = mirrorSeed ?? replayData;
+    if (screenSeed.length > 0) {
+      this.feedGateScreen(screenSeed.toString('utf-8'));
     }
 
     // Forward shellper data to ring buffer + WebSocket clients
@@ -460,16 +473,16 @@ export class PtySession extends EventEmitter {
 
   /**
    * Fold one output chunk into the persistent gate mirror (Spec 1313 render-gate round 2),
-   * creating it lazily on the first byte. Called at EVERY point the ring buffer is fed —
-   * `onPtyData` (live output) and the `attachShellper` replay seed — with the SAME bytes, so
+   * creating it lazily on the first byte. Called at EVERY point the mirror is fed —
+   * `onPtyData` (live output, in lockstep with the ring) and the `attachShellper` seed — so
    * the mirror's rendered screen and `ringBuffer.bytesWritten` (the gate's monotone change
-   * token) can never drift apart. Creating it on the first byte (not at construction) means a
-   * session that never emits output costs nothing, while any session that does is mirrored from its
-   * very first LIVE byte. NOTE: the `attachShellper` seed is the reconnect/adopt REPLAY, which
-   * `tower-terminals.ts` caps to the last 1 MiB (`capRingSeed`); a long-lived alt-screen frame whose
-   * coherent start predates that tail is seeded born-torn → the gate HOLDS (fail-safe) until the next
-   * repaint/viewer nudge heals it. Pre-existing, not a round-2 regression (the pre-round-2 whole-ring
-   * gate classified that same capped seed); tracked as a fast-follow, #1361.
+   * token) can never drift apart on the live path. Creating it on the first byte (not at
+   * construction) means a session that never emits output costs nothing, while any session
+   * that does is mirrored from its very first LIVE byte. On adopt/reconnect the seed is the
+   * FULL shellper replay (≤8 MB wire cap), not the ring's 1 MiB `capRingSeed` tail
+   * (PIR #1354) — so a long-lived alt-screen frame is only born torn when its coherent
+   * start predates the shellper's whole retention (#1361's residual case); the gate then
+   * HOLDS (fail-safe) until the next repaint heals it.
    */
   private feedGateScreen(data: string): void {
     if (!this._gateScreen) this._gateScreen = new SessionScreen(this.cols, this.rows);
