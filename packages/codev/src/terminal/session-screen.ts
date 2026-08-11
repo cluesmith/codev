@@ -43,7 +43,7 @@
 // dist (see the identical note in render-gate.ts). Default-import the module object.
 // `@xterm/addon-serialize` ships the same way (same repo and release train).
 import xtermHeadless from '@xterm/headless';
-import type { Terminal as HeadlessTerminal } from '@xterm/headless';
+import type { Terminal as HeadlessTerminal, ITerminalAddon } from '@xterm/headless';
 import xtermSerialize from '@xterm/addon-serialize';
 
 const { Terminal } = xtermHeadless;
@@ -88,7 +88,10 @@ export class SessionScreen {
     this._rows = rows;
     this.term = new Terminal({ cols, rows, allowProposedApi: true, scrollback: SCREEN_SCROLLBACK });
     this.serializer = new SerializeAddon();
-    this.term.loadAddon(this.serializer);
+    // The addon's typings bind to the full `@xterm/xterm` Terminal; its runtime touches
+    // only the buffer/parser surface the headless build shares (proven by the round-trip
+    // suite), so the declared-type gap is bridged explicitly here.
+    this.term.loadAddon(this.serializer as unknown as ITerminalAddon);
   }
 
   /**
