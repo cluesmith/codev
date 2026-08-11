@@ -561,3 +561,24 @@ iterating on architect instruction rather than reaching 3/3. Flagged to the arch
 hand-edit status.yaml to "fix" it.
 
 Next: wait for the pr gate. After merge → `porch done 1401 --merged 1413`, then the verify phase.
+
+## 2026-08-12 — PR-level consultation: 2 APPROVE, codex REQUEST_CHANGES (SECURITY finding)
+
+codex raised a real one at PR level and I verified it independently. Tower's existing
+request-trust boundary is weaker than my spec claimed; the specifics and the fix are tracked
+privately as a security advisory and are deliberately not restated here (public repo — owner's
+disclosure decision, relayed via the architect 2026-08-12).
+
+My spec had described a safeguard in terms that overstated what is in place; corrected in place,
+because documenting protection that is not there is worse than documenting none.
+
+Did NOT apply a partial measure to this one route. The property is pre-existing and Tower-wide,
+not introduced by this channel; addressing it properly is an architectural change with a client
+migration. Securing only the newest route would move the label rather than the risk. Escalated;
+the architect verified independently and routed it to the owner. Likely my next lane after this
+gate.
+
+Also fixed: rebased onto main (70 commits replayed clean, 0 behind, force-pushed with lease, full
+suite re-run green); added approved/validated frontmatter to spec + plan; and fixed the stale
+webview/main.ts header comment — **that comment is where my own repeated "webview isn't
+typechecked" error came from**. Caught in phase_6, root found here.
