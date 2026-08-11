@@ -150,3 +150,16 @@ Build hiccup, NOT mine: `npm run build` failed on a missing `@xterm/addon-serial
 packages/codev/src/terminal/session-screen.ts. Traced it to PIR #1354, which my rebase pulled in
 from main; the dep is declared in packages/codev/package.json but the worktree's node_modules
 predated it. My branch touches zero terminal files. Running pnpm install.
+
+### phase_1 consultation: gemini APPROVE, codex APPROVE, claude REQUEST_CHANGES
+
+Claude caught that **the exhaustiveness guard never runs in CI** — verified myself: test.yml
+builds packages/types but nothing in any of the 5 workflows invokes check-types:tests, and
+there is no recursive `pnpm -r check-types`. Since codev-types has no test runner, that guard
+is phase_1's ENTIRE verification story, and living outside src/ (so it isn't published) is
+exactly what keeps `pnpm build` from reaching it. Unwired it would have protected nothing while
+looking like protection, and no later phase touches this package's CI. Added a
+`check-types:tests` step to test.yml right after the types build, with a comment explaining why.
+
+Worth remembering: everything was green locally and two of three reviewers approved. "Tests
+pass" hid "the test can never fail."
