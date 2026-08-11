@@ -180,3 +180,36 @@ re-run `porch next`. porch resumed correctly at implement iteration 2 with no st
 
 Generalisable: a wait is a claim that a producer exists — check the CHILD process, not just the
 parent. An hour of "still running" was one wedged subprocess the whole time.
+
+## 2026-08-12 — phase_1 approved (3/3); phase_2 extraction done
+
+phase_1 got unanimous APPROVE on iteration 2 (claude re-ran the CI step and confirmed the guard
+fails a build when a command is unclassified). porch advanced to phase_2.
+
+phase_2 (pure extraction) in ArtifactCanvas.tsx: 9 actions now live in one `canvasActions`
+registry keyed by command name (comment-next/prev, heading-next/prev, doc-start/end,
+column-forward/back, composer-open), with onBodyKeyDown reduced to key mapping + event guards.
+Every event-shaped concern stayed in the handler (affordance/modifier guards, composer
+exemption, innerScrollerCanConsume, preventDefault) because a remote command has no event.
+
+Two ordering subtleties preserved deliberately:
+- Enter/Space is handled BEFORE the modifier guard, so Ctrl+Enter on a block still opens the
+  composer. Kept as-is rather than "fixed" — phase 2 is a refactor.
+- Column paging must not preventDefault when geometry is unmeasurable, so `pageColumn` returns
+  a boolean and the handler only prevents default when the action actually ran.
+
+`lineFromEvent` was orphaned by the extraction (composer-open now does closest → Number → NaN
+inline, identical logic) and was removed rather than left as dead code.
+
+Verification: 150/150 vitest pass with NO test file edited (the phase's oracle), check-types
+clean, 33/33 Playwright pass.
+
+### HARNESS BUG worth an issue (not mine to fix in this phase)
+
+`packages/artifact-canvas/playwright.config.ts` pins port 5199 with
+`reuseExistingServer: !process.env.CI`. A sibling worktree (.builders/spir-1380) had its canvas
+vite up on 5199 for ~1.5 days, so my first `test:browser` run silently executed against THAT
+worktree's code and failed 33/33. The dangerous case is not this one: if the sibling's code
+happens to be compatible, the run PASSES against the wrong worktree and nobody notices.
+Worked around locally with a temporary isolated config on a free port (deleted, not committed);
+did NOT touch the sibling builder's server. Reported to the architect.

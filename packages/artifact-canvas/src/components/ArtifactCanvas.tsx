@@ -518,13 +518,6 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
     }
   };
 
-  const lineFromEvent = (target: EventTarget | null): number | null => {
-    const el = (target as HTMLElement | null)?.closest?.('[data-line]') as HTMLElement | null;
-    if (!el) return null;
-    const n = Number(el.getAttribute('data-line'));
-    return Number.isNaN(n) ? null : n;
-  };
-
   // Navigable blocks in tree order, deduped to the FIRST element per line: the renderer stamps the
   // same `data-line` on nested blocks (a `ul` and its `li`), and the first match is the outermost —
   // the same outermost-wins rule the marker decoration uses, so `n`/`p` land where the class is.
@@ -738,6 +731,137 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
     };
   }, [readingMode]);
 
+  // ---- Semantic action registry (spec 1401, phase 2) ----
+  // One named implementation per action, dispatched by command name. The keyboard handler below
+  // and (from phase 3) the remote command channel both go through this map, so the two paths
+  // cannot drift apart. Everything event-shaped stays in the handler — which key means what, the
+  // affordance/modifier guards, the composer exemption, and `preventDefault` — because a remote
+  // command has no event; these functions carry only the action itself.
+
+  const isMarkedBlock = (el: HTMLElement): boolean => el.classList.contains('codev-canvas-has-marker');
+  const isHeadingBlock = (el: HTMLElement): boolean => /^H[1-6]$/.test(el.tagName);
+
+  const originBlock = (target: EventTarget | null): HTMLElement | null =>
+    ((target as HTMLElement | null)?.closest?.('[data-line]') as HTMLElement | null) ?? null;
+
+  const focusEdgeBlock = (root: HTMLElement, edge: 'start' | 'end'): void => {
+    const blocks = collectBlocks(root);
+    let target: HTMLElement | undefined;
+    if (edge === 'start') {
+      target = blocks[0];
+    } else {
+      target = blocks[blocks.length - 1];
+    }
+    if (target) focusBlock(target);
+  };
+
+  // Focus the next/previous block matching `match`, walking outward from `fromLine`.
+  const focusMatchingBlock = (
+    root: HTMLElement,
+    fromLine: string | null,
+    match: (el: HTMLElement) => boolean,
+    step: 1 | -1,
+  ): void => {
+    const blocks = collectBlocks(root);
+    // Match by line value, not element identity: the focused element may be an inner nested block
+    // that the dedupe dropped in favor of its outermost sibling for the same line.
+    const start = blocks.findIndex((b) => b.getAttribute('data-line') === fromLine);
+    if (start === -1) return;
+    for (let i = start + step; i >= 0 && i < blocks.length; i += step) {
+      if (match(blocks[i])) {
+        focusBlock(blocks[i]);
+        return;
+      }
+    }
+    // No match in that direction: deliberate no-op, no wrap-around — predictable at the edges.
+  };
+
+  // Step the horizontal viewport one column. Steps land on column starts: quantize to the
+  // measured step grid, then move one column.
+  const pageColumn = (root: HTMLElement, dir: 1 | -1): boolean => {
+    const { step } = measureColumnGeometry(root);
+    if (step <= 0) return false;
+    // A page step is absolute; never let an in-flight wheel glide drag the position away.
+    cancelWheelGlideRef.current?.();
+    const max = Math.max(root.scrollWidth - root.clientWidth, 0);
+    let target = (Math.round(root.scrollLeft / step) + dir) * step;
+    if (target < 0) target = 0;
+    if (target > max) target = max;
+    root.scrollLeft = target;
+    return true;
+  };
+
+  type CanvasActionName =
+    | 'comment-next'
+    | 'comment-prev'
+    | 'heading-next'
+    | 'heading-prev'
+    | 'doc-start'
+    | 'doc-end'
+    | 'column-forward'
+    | 'column-back'
+    | 'composer-open';
+
+  interface CanvasActionContext {
+    /** The canvas body: scroll container and query root. */
+    root: HTMLElement | null;
+    /** The `[data-line]` block the action starts from, when the caller has one. */
+    origin: HTMLElement | null;
+  }
+
+  /**
+   * Each action returns false only when it could not run at all and the caller should leave the
+   * key to the browser. A deliberate no-op (no match in that direction, an empty document) still
+   * returns true: the action ran and decided to do nothing, which is not the same as declining.
+   */
+  const canvasActions: Record<CanvasActionName, (ctx: CanvasActionContext) => boolean> = {
+    'comment-next': ({ root, origin }) => {
+      if (!root) return false;
+      focusMatchingBlock(root, origin?.getAttribute('data-line') ?? null, isMarkedBlock, 1);
+      return true;
+    },
+    'comment-prev': ({ root, origin }) => {
+      if (!root) return false;
+      focusMatchingBlock(root, origin?.getAttribute('data-line') ?? null, isMarkedBlock, -1);
+      return true;
+    },
+    'heading-next': ({ root, origin }) => {
+      if (!root) return false;
+      focusMatchingBlock(root, origin?.getAttribute('data-line') ?? null, isHeadingBlock, 1);
+      return true;
+    },
+    'heading-prev': ({ root, origin }) => {
+      if (!root) return false;
+      focusMatchingBlock(root, origin?.getAttribute('data-line') ?? null, isHeadingBlock, -1);
+      return true;
+    },
+    'doc-start': ({ root }) => {
+      if (!root) return false;
+      focusEdgeBlock(root, 'start');
+      return true;
+    },
+    'doc-end': ({ root }) => {
+      if (!root) return false;
+      focusEdgeBlock(root, 'end');
+      return true;
+    },
+    'column-forward': ({ root }) => {
+      if (!root) return false;
+      return pageColumn(root, 1);
+    },
+    'column-back': ({ root }) => {
+      if (!root) return false;
+      return pageColumn(root, -1);
+    },
+    'composer-open': ({ origin }) => {
+      if (!origin) return false;
+      const line = Number(origin.getAttribute('data-line'));
+      if (Number.isNaN(line)) return false;
+      openComposer(line); // open the inline composer for this block (#1107)
+      return true;
+    },
+  };
+
   // Keyboard handling on the body (#1107 activation + #1237 jump navigation). Every branch below
   // requires the event to originate on a `[data-line]` block, so keystrokes inside the composer
   // textarea, the card action buttons, or the minimap are never intercepted — typing "n" in a
@@ -751,10 +875,8 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
     // here would re-resolve through the host row and open the composer on the wrong line.
     if (fromAffordance(e.target)) return;
     if (e.key === 'Enter' || e.key === ' ') {
-      const l = lineFromEvent(e.target);
-      if (l !== null) {
+      if (canvasActions['composer-open']({ root: bodyRef.current, origin: originBlock(e.target) })) {
         e.preventDefault();
-        openComposer(l); // open the inline composer for this block (#1107)
       }
       return;
     }
@@ -775,19 +897,11 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
       let pageDelta = 1;
       if (e.key === 'PageUp') pageDelta = -1;
       if (innerScrollerCanConsume(t, pageDelta, root)) return;
-      const { step } = measureColumnGeometry(root);
+      let pageAction: CanvasActionName = 'column-forward';
+      if (e.key === 'PageUp') pageAction = 'column-back';
       // Unmeasurable geometry: leave the key to the browser rather than swallowing it.
-      if (step <= 0) return;
+      if (!canvasActions[pageAction]({ root, origin: null })) return;
       e.preventDefault();
-      // A page step is absolute; never let an in-flight wheel glide drag the position away.
-      cancelWheelGlideRef.current?.();
-      let dir = 1;
-      if (e.key === 'PageUp') dir = -1;
-      const max = Math.max(root.scrollWidth - root.clientWidth, 0);
-      let target = (Math.round(root.scrollLeft / step) + dir) * step;
-      if (target < 0) target = 0;
-      if (target > max) target = max;
-      root.scrollLeft = target;
       return;
     }
 
@@ -810,42 +924,22 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
 
     if (e.key === 'Home' || e.key === 'End') {
       e.preventDefault();
-      const blocks = collectBlocks(root);
-      let target: HTMLElement | undefined;
-      if (e.key === 'Home') {
-        target = blocks[0];
-      } else {
-        target = blocks[blocks.length - 1];
-      }
-      if (target) focusBlock(target);
+      let edgeAction: CanvasActionName = 'doc-start';
+      if (e.key === 'End') edgeAction = 'doc-end';
+      canvasActions[edgeAction]({ root, origin: current });
       return;
     }
 
-    const isMarked = (el: HTMLElement): boolean => el.classList.contains('codev-canvas-has-marker');
-    const isHeading = (el: HTMLElement): boolean => /^H[1-6]$/.test(el.tagName);
-    let match: (el: HTMLElement) => boolean;
-    let step: number;
+    let jumpAction: CanvasActionName | null = null;
     switch (e.key) {
-      case 'n': match = isMarked; step = 1; break;
-      case 'p': match = isMarked; step = -1; break;
-      case ']': match = isHeading; step = 1; break;
-      case '[': match = isHeading; step = -1; break;
+      case 'n': jumpAction = 'comment-next'; break;
+      case 'p': jumpAction = 'comment-prev'; break;
+      case ']': jumpAction = 'heading-next'; break;
+      case '[': jumpAction = 'heading-prev'; break;
       default: return;
     }
     e.preventDefault();
-    const blocks = collectBlocks(root);
-    const curLine = current.getAttribute('data-line');
-    // Match by line value, not element identity: the focused element may be an inner nested block
-    // that the dedupe dropped in favor of its outermost sibling for the same line.
-    const start = blocks.findIndex((b) => b.getAttribute('data-line') === curLine);
-    if (start === -1) return;
-    for (let i = start + step; i >= 0 && i < blocks.length; i += step) {
-      if (match(blocks[i])) {
-        focusBlock(blocks[i]);
-        return;
-      }
-    }
-    // No match in that direction: deliberate no-op, no wrap-around — predictable at the edges.
+    canvasActions[jumpAction]({ root, origin: current });
   };
 
   const resolveBlock = (target: EventTarget | null): { el: HTMLElement; line: number } | null => {
