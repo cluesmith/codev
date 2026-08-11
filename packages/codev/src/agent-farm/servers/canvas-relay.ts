@@ -25,7 +25,9 @@ import { randomUUID } from 'node:crypto';
 import type {
   CanvasCommand,
   CanvasCommandEvent,
+  CanvasCommandResult,
   CanvasView,
+  CanvasViewRegistrationResult,
   TraversalCommand,
 } from '@cluesmith/codev-types';
 import { parseJsonBody } from '../utils/server-utils.js';
@@ -235,12 +237,14 @@ async function handleRegisterView(
   res: http.ServerResponse,
 ): Promise<void> {
   const d = requireDeps();
-  let body: { workspace?: unknown; file?: unknown };
+  let parsed: unknown;
   try {
-    body = (await parseJsonBody(req)) as { workspace?: unknown; file?: unknown };
+    parsed = await parseJsonBody(req);
   } catch {
     return sendJson(res, 400, { ok: false, error: 'Invalid JSON' });
   }
+  const body = asObject(parsed);
+  if (!body) return sendJson(res, 400, { ok: false, error: 'Invalid JSON' });
   if (!isNonEmptyString(body.workspace)) {
     return sendJson(res, 400, { ok: false, error: 'Missing workspace' });
   }
@@ -263,7 +267,8 @@ async function handleRegisterView(
     lastSeenAt: nowMs,
     sequence,
   });
-  return sendJson(res, 200, { ok: true, viewId, file });
+  const result: CanvasViewRegistrationResult = { ok: true, viewId, file };
+  return sendJson(res, 200, result);
 }
 
 /**
@@ -279,12 +284,18 @@ async function handleHeartbeat(
   viewId: string,
 ): Promise<void> {
   const d = requireDeps();
-  let body: { focused?: unknown } = {};
+  let parsed: unknown;
   try {
-    body = (await parseJsonBody(req)) as { focused?: unknown };
+    parsed = await parseJsonBody(req);
   } catch {
-    body = {}; // a bodyless heartbeat is valid: it just means "still here, not necessarily focused"
+    // A bodyless heartbeat is valid and already parses as `{}` ("still here, not necessarily
+    // focused"), so reaching here means the body was genuinely malformed. Renewing the lease on
+    // a payload we could not read would be extending liveness on the strength of a broken
+    // request.
+    return sendJson(res, 400, { ok: false, error: 'Invalid JSON' });
   }
+  const body = asObject(parsed);
+  if (!body) return sendJson(res, 400, { ok: false, error: 'Invalid JSON' });
 
   const nowMs = d.now();
   sweep(nowMs);
@@ -317,15 +328,17 @@ async function handleCanvasCommand(
   res: http.ServerResponse,
 ): Promise<void> {
   const d = requireDeps();
-  let raw: Record<string, unknown>;
+  let parsed: unknown;
   try {
-    raw = (await parseJsonBody(req)) as Record<string, unknown>;
+    parsed = await parseJsonBody(req);
   } catch {
-    return sendJson(res, 400, { ok: false, code: 'invalid-request', error: 'Invalid JSON' });
+    return sendJson(res, 400, invalidRequest('Invalid JSON'));
   }
+  const raw = asObject(parsed);
+  if (!raw) return sendJson(res, 400, invalidRequest('Invalid JSON'));
 
   const invalid = validateCommandRequest(raw);
-  if (invalid) return sendJson(res, 400, { ok: false, code: 'invalid-request', error: invalid });
+  if (invalid) return sendJson(res, 400, invalidRequest(invalid));
 
   const workspace = raw.workspace as string;
   const file = raw.file as string | undefined;
@@ -335,11 +348,12 @@ async function handleCanvasCommand(
   const nowMs = d.now();
   const target = resolveTarget(workspace, file, nowMs);
   if (!target) {
-    return sendJson(res, 404, {
+    const noCanvas: CanvasCommandResult = {
       ok: false,
       code: 'no-canvas',
       error: 'No canvas view is open for that workspace/file',
-    });
+    };
+    return sendJson(res, 404, noCanvas);
   }
 
   const event: CanvasCommandEvent = { viewId: target.viewId, command };
@@ -348,10 +362,19 @@ async function handleCanvasCommand(
 
   // Driving a view is activity: it keeps that view the MRU target for the follow-up commands a
   // controller is about to send, even though it never took focus in its host.
+  //
+  // It is deliberately NOT liveness. Delivery is fire-and-forget over SSE and proves nothing
+  // about the host still being alive, so refreshing the lease here would mean a ghost view kept
+  // renewing itself for as long as a controller kept driving it — exactly when the reviewer most
+  // needs to be told there is no canvas. Only a heartbeat, which only a live host can send,
+  // extends the lease.
   target.lastActiveAt = nowMs;
-  target.lastSeenAt = nowMs;
 
-  return sendJson(res, 200, { ok: true, target: { viewId: target.viewId, file: target.file } });
+  const ok: CanvasCommandResult = {
+    ok: true,
+    target: { viewId: target.viewId, file: target.file },
+  };
+  return sendJson(res, 200, ok);
 }
 
 /** Returns an error message when the payload is not a valid command request, else null. */
@@ -374,8 +397,23 @@ function validateCommandRequest(raw: Record<string, unknown>): string | null {
   return null;
 }
 
+/** Every command-route failure carries a wire `code`; this keeps that impossible to forget. */
+function invalidRequest(error: string): CanvasCommandResult {
+  return { ok: false, code: 'invalid-request', error };
+}
+
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0;
+}
+
+/**
+ * `parseJsonBody` is typed as returning an object but will happily resolve a literal `null`, a
+ * bare array, or a number, since those are all valid JSON. Reading a field off `null` throws,
+ * which would escape as a 500 with no wire `code` — the one thing the error contract forbids.
+ */
+function asObject(value: unknown): Record<string, unknown> | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
 }
 
 /** Access the wired deps, throwing a clear error if init was skipped. */

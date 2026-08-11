@@ -385,3 +385,25 @@ via `pnpm --filter @cluesmith/codev test:e2e` (vitest.e2e.config.ts), which buil
 
 Verification: 23/23 unit, 5/5 e2e against a real Tower, repo-wide check-types clean, repo build
 green, 4843 repo tests pass.
+
+### phase_4 iter1: gemini APPROVE, codex + claude REQUEST_CHANGES — lease bug was serious
+
+**The bad one:** command delivery refreshed `lastSeenAt` (the LEASE), not just `lastActiveAt`
+(MRU). Under steady controller traffic a ghost view renewed itself forever, so the guarantee this
+whole phase exists to provide — dead host ages out, caller hears `no-canvas` — silently inverted
+into "always reports success at a canvas nobody can see". Delivery is fire-and-forget SSE and
+proves nothing about the host; only heartbeats prove liveness. Fixed, commented at the assignment
+so a later edit doesn't "helpfully" restore it, regression test drives 4 lease-thirds with no
+heartbeat and asserts expiry.
+
+**The other:** a literal `null` body is valid JSON, so parseJsonBody resolved it and the first
+field read threw → HTTP 500 with no wire `code`, which the error contract forbids. Added an
+asObject() guard to all three handlers. Same root cause made a malformed heartbeat renew the
+lease (my catch fell back to `{}`); a truly bodyless request already parses as `{}`, so that
+catch was only ever reachable for broken input. Now 400.
+
+Also typed the response literals against CanvasCommandResult / CanvasViewRegistrationResult so
+wire drift fails the build — and doing that immediately exposed that the registration type was
+missing the `ok` field Tower actually sends. The contract was wrong, not the handler.
+
+Verification: 27/27 unit, 5/5 e2e, repo check-types clean, build green.

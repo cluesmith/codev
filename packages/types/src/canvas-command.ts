@@ -157,6 +157,7 @@ export interface CanvasViewRegistration {
 
 /** Tower -> host: the minted identity a host uses for heartbeat, unregister, and filtering. */
 export interface CanvasViewRegistrationResult {
+  ok: true;
   viewId: string;
   /** The canonicalized `file`, so the host sees the identity Tower matched it under. */
   file: string;

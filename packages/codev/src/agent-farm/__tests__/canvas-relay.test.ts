@@ -304,4 +304,50 @@ describe('command validation', () => {
   it('rejects an unknown canvas route', async () => {
     expect((await call('GET', '/api/canvas/nonsense')).status).toBe(404);
   });
+
+  // A literal `null` is valid JSON, so it parses without throwing and then explodes on the first
+  // field read. That would surface as a 500 with no wire `code`, which the error contract forbids.
+  it('answers invalid-request for a null or non-object body', async () => {
+    for (const payload of [null, 42, 'text', ['a']]) {
+      const out = await sendCommand(payload);
+      expect(out.status).toBe(400);
+      expect(out.body.code).toBe('invalid-request');
+    }
+  });
+});
+
+describe('lease integrity', () => {
+  it('does NOT let command traffic keep a dead host\'s view alive', async () => {
+    await register('/tmp/doc.md');
+
+    // Drive the view steadily, without any heartbeat: this is exactly the shape of a controller
+    // still sending to a host that has died. Delivery is fire-and-forget over SSE and proves
+    // nothing about the host, so it must not extend the lease.
+    for (let i = 0; i < 4; i += 1) {
+      now += CANVAS_VIEW_LEASE_MS / 3;
+      await sendCommand({ workspace: WS, command: 'block-next' });
+    }
+
+    const out = await sendCommand({ workspace: WS, command: 'block-next' });
+    expect(out.status).toBe(404);
+    expect(out.body.code).toBe('no-canvas');
+    expect(listCanvasViewsForTest()).toHaveLength(0);
+  });
+
+  it('does not renew the lease on a malformed heartbeat', async () => {
+    const viewId = await register('/tmp/doc.md');
+
+    now += CANVAS_VIEW_LEASE_MS - 1_000;
+    const bad = await call('POST', `/api/canvas/views/${viewId}/heartbeat`, null);
+    expect(bad.status).toBe(400);
+
+    // The bad heartbeat bought no time, so the view ages out on the original lease.
+    now += 2_000;
+    expect((await sendCommand({ workspace: WS, command: 'block-next' })).body.code).toBe('no-canvas');
+  });
+
+  it('rejects a non-object registration body instead of throwing', async () => {
+    const out = await call('POST', '/api/canvas/views', null);
+    expect(out.status).toBe(400);
+  });
 });
