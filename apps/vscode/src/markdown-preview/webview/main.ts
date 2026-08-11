@@ -16,9 +16,12 @@
  *    The host writes the marker; the resulting document change comes back as
  *    another `update`. (Pre-#1107 the host collected the text via `showInputBox`.)
  *
- * This file is bundled by esbuild as a browser IIFE (`dist/webview/markdown-preview.js`)
- * and is intentionally excluded from the extension's `tsc` typecheck (it targets
- * the DOM, not Node) — same treatment as the backlog-search webview script (#920).
+ * This file is bundled by esbuild as a browser IIFE (`dist/webview/markdown-preview.js`).
+ * It is excluded from the extension host's `tsconfig.json` because it targets the DOM rather
+ * than Node — but it IS type-checked, by `tsconfig.webview.json`, and the package's
+ * `check-types` script runs both (`tsc --noEmit && tsc --noEmit -p tsconfig.webview.json`).
+ * (This comment previously said only "excluded from the typecheck", which read as untyped and
+ * misled a reader into treating this file as unchecked.)
  * No JSX: `ArtifactCanvas` is created via `React.createElement`, so no JSX build
  * config is needed in the extension package.
  */

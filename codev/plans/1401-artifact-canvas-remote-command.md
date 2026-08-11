@@ -1,3 +1,8 @@
+---
+approved: 2026-08-11
+validated: [gemini, codex, claude]
+---
+
 # Plan: Artifact-Canvas Remote Command Channel (Tower relay + sdk route)
 
 **Specification**: [codev/specs/1401-artifact-canvas-remote-command.md](../specs/1401-artifact-canvas-remote-command.md)

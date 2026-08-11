@@ -1,3 +1,8 @@
+---
+approved: 2026-08-11
+validated: [gemini, codex, claude]
+---
+
 # Specification: Artifact-Canvas Remote Command Channel (Tower relay + sdk route)
 
 <!--
@@ -223,9 +228,17 @@ body is `{ok:false, code, error}` with `code` from the wire union; extending it 
 type change, not a string convention. The sdk-visible union is one member wider, for the
 client-synthesized `unreachable` case described in §3.
 
-**Security posture.** The route inherits Tower's existing trust boundary (localhost bind
-behind the host/origin gate; the same exposure considerations as every route under
-`BRIDGE_MODE`) — it adds no new authentication surface. `workspace` and `file` are registry
+**Security posture.** The route inherits Tower's existing trust boundary and adds no
+authentication of its own.
+
+> **Correction (2026-08-12, PR review).** An earlier draft described that boundary as a
+> "host/origin gate". That description overstated the protection actually in place. Tower's
+> existing request-trust boundary is weaker than this spec originally claimed; the specifics and
+> the fix are tracked privately as a security advisory. The property is pre-existing and
+> Tower-wide, not introduced by this channel, and it is handled there rather than patched onto a
+> single route. No safeguard is asserted here that does not exist. What this channel adds is one
+> more capability behind the existing boundary: a `composer-submit` writes a review comment
+> through the host's existing marker path. `workspace` and `file` are registry
 lookup keys only: this route never dereferences them as filesystem paths. The command
 payload is validated against the closed `CanvasCommand` union before relay. Note the
 inherited-boundary consequence explicitly: `composer-submit` is the first relay-triggerable
