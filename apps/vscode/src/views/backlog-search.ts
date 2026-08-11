@@ -65,21 +65,22 @@ export function toQuickPickItems(
   });
 }
 
-/** Target kind of a dynamic type-ahead row in the Search Backlog Quick Pick. */
-export type DynamicPickKind = 'issue' | 'pr';
+/** Target of a dynamic type-ahead row in the Search Backlog Quick Pick. */
+export type DynamicPickTarget = 'issue' | 'pr';
 
 /**
  * A dynamic `View Issue #N` / `View PR #N` row (issue #1179), prepended to the
  * Quick Pick when the typed value matches the numeric grammar. `alwaysShow`
  * exempts the row from VS Code's fuzzy filter: the label is synthesized from
  * the input, so filtering it against that same input is meaningless and (for
- * forms like `view pr 1350`) would hide it.
+ * forms like `view pr 1350`) would hide it. The discriminator is named
+ * `target` because `QuickPickItem` reserves `kind` for its separator enum.
  */
 export interface DynamicQuickPickItem {
   label: string;
   description: string;
   alwaysShow: true;
-  kind: DynamicPickKind;
+  target: DynamicPickTarget;
   id: string;
 }
 
@@ -99,24 +100,24 @@ const TYPED_ID = /^(?:view\s+)?(issue|pr)\s+#?(\d+)$/i;
  */
 export function parseSearchDynamicQuery(
   value: string,
-): Array<{ kind: DynamicPickKind; id: string }> {
+): Array<{ target: DynamicPickTarget; id: string }> {
   const trimmed = value.trim();
   const bare = BARE_ID.exec(trimmed);
   if (bare) {
-    return [{ kind: 'issue', id: bare[1] }, { kind: 'pr', id: bare[1] }];
+    return [{ target: 'issue', id: bare[1] }, { target: 'pr', id: bare[1] }];
   }
   const typed = TYPED_ID.exec(trimmed);
   if (typed) {
-    return [{ kind: typed[1].toLowerCase() as DynamicPickKind, id: typed[2] }];
+    return [{ target: typed[1].toLowerCase() as DynamicPickTarget, id: typed[2] }];
   }
   return [];
 }
 
 /** Project the parsed dynamic grammar into ready-to-insert Quick Pick rows. */
 export function toDynamicQuickPickItems(value: string): DynamicQuickPickItem[] {
-  return parseSearchDynamicQuery(value).map(({ kind, id }) => {
+  return parseSearchDynamicQuery(value).map(({ target, id }) => {
     let noun: string;
-    if (kind === 'issue') {
+    if (target === 'issue') {
       noun = 'Issue';
     } else {
       noun = 'PR';
@@ -125,7 +126,7 @@ export function toDynamicQuickPickItems(value: string): DynamicQuickPickItem[] {
       label: `View ${noun} #${id}`,
       description: 'Open in browser',
       alwaysShow: true,
-      kind,
+      target,
       id,
     };
   });

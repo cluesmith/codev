@@ -104,15 +104,15 @@ describe('toQuickPickItems', () => {
 describe('parseSearchDynamicQuery (type-ahead grammar, #1179)', () => {
   it('offers both targets for a bare number, issue first', () => {
     expect(parseSearchDynamicQuery('1350')).toEqual([
-      { kind: 'issue', id: '1350' },
-      { kind: 'pr', id: '1350' },
+      { target: 'issue', id: '1350' },
+      { target: 'pr', id: '1350' },
     ]);
   });
 
   it('tolerates a leading # on the bare form', () => {
     expect(parseSearchDynamicQuery('#1350')).toEqual([
-      { kind: 'issue', id: '1350' },
-      { kind: 'pr', id: '1350' },
+      { target: 'issue', id: '1350' },
+      { target: 'pr', id: '1350' },
     ]);
   });
 
@@ -121,18 +121,18 @@ describe('parseSearchDynamicQuery (type-ahead grammar, #1179)', () => {
   });
 
   it('narrows to issue for "issue N" and "view issue N"', () => {
-    expect(parseSearchDynamicQuery('issue 1350')).toEqual([{ kind: 'issue', id: '1350' }]);
-    expect(parseSearchDynamicQuery('view issue 1350')).toEqual([{ kind: 'issue', id: '1350' }]);
+    expect(parseSearchDynamicQuery('issue 1350')).toEqual([{ target: 'issue', id: '1350' }]);
+    expect(parseSearchDynamicQuery('view issue 1350')).toEqual([{ target: 'issue', id: '1350' }]);
   });
 
   it('narrows to pr for "pr N" and "view pr N"', () => {
-    expect(parseSearchDynamicQuery('pr 1350')).toEqual([{ kind: 'pr', id: '1350' }]);
-    expect(parseSearchDynamicQuery('view pr 1350')).toEqual([{ kind: 'pr', id: '1350' }]);
+    expect(parseSearchDynamicQuery('pr 1350')).toEqual([{ target: 'pr', id: '1350' }]);
+    expect(parseSearchDynamicQuery('view pr 1350')).toEqual([{ target: 'pr', id: '1350' }]);
   });
 
   it('is case-insensitive and tolerates # on the typed form', () => {
-    expect(parseSearchDynamicQuery('ISSUE #1350')).toEqual([{ kind: 'issue', id: '1350' }]);
-    expect(parseSearchDynamicQuery('View PR #1350')).toEqual([{ kind: 'pr', id: '1350' }]);
+    expect(parseSearchDynamicQuery('ISSUE #1350')).toEqual([{ target: 'issue', id: '1350' }]);
+    expect(parseSearchDynamicQuery('View PR #1350')).toEqual([{ target: 'pr', id: '1350' }]);
   });
 
   it('yields nothing for plain text searches', () => {
@@ -168,6 +168,6 @@ describe('toDynamicQuickPickItems', () => {
     const rows = toDynamicQuickPickItems('view pr 1350');
     expect(rows).toHaveLength(1);
     expect(rows[0].label).toBe('View PR #1350');
-    expect(rows[0].kind).toBe('pr');
+    expect(rows[0].target).toBe('pr');
   });
 });

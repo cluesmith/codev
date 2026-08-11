@@ -67,8 +67,8 @@ export async function searchBacklog(
     const picked = picker.selectedItems[0];
     picker.hide();
     if (!picked) { return; }
-    if ('kind' in picked) {
-      if (picked.kind === 'issue') {
+    if ('target' in picked) {
+      if (picked.target === 'issue') {
         openIssueInBrowser(connectionManager, picked.id);
       } else {
         openPRInBrowser(connectionManager, picked.id);
