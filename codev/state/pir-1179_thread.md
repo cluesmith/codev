@@ -20,3 +20,26 @@ Investigated issue #1179 (one-step "view issue N / view pr N" QuickPick type-ahe
 
 Plan written to `codev/plans/1179-vscode-one-step-view-issue-n-v.md`; three commits:
 plumbing → openPRById command → QuickPick type-ahead. Sitting at plan-approval gate.
+
+## 2026-08-11 — Implement phase
+
+Plan approved as written (reviewer asked one clarifying question about typing id+title
+together; no plan change needed). Implemented in the three planned commits:
+
+1. `5545122` PR-fetch plumbing: `pr-view` scripts emit `url` (github --json field;
+   gitlab/gitea jq mappings mirroring issue-view), `PrViewResult.url`, `fetchPR`,
+   Tower `GET /api/pr` (mirror of handleIssueView), `PRView` wire type,
+   `TowerClient.getPR` + sdk tests.
+2. `0689c82` `codev.openPRById` + Cmd+K P: extracted `openIssueInBrowser` from
+   `openIssueById` (behavior unchanged, tests pass unmodified), new
+   `open-pr-by-id.ts` with `openPRInBrowser`, manifest command + keybinding.
+3. `5608aa1` QuickPick type-ahead: `parseSearchDynamicQuery` grammar +
+   `toDynamicQuickPickItems` (alwaysShow rows) in vscode-free `backlog-search.ts`;
+   `search-backlog.ts` moved to `createQuickPick` with dynamic rows and accept
+   routing (dynamic → browser helpers, static → in-editor preview unchanged).
+
+Notes for reviewers: fresh-worktree builds need `pnpm -C packages/types build`,
+`packages/core build`, `packages/sdk build`, `packages/artifact-canvas build` before
+type-checking codev/vscode (dist-based workspace resolution; not caused by this change).
+Verified the real forge path: `CODEV_PR_NUMBER=1398 sh .../github/pr-view.sh` returns
+title/url/state. vscode vitest 777/777 green.
