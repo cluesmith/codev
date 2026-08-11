@@ -226,3 +226,16 @@ SANCTIONED for my remaining phases: keep verifying browser tests with a temporar
 config on a free port, uncommitted. **TODO for the review file's testing section: note the
 workaround and cite #1407** so the pr-gate reviewer knows why the committed config was not used
 locally. (Phases 3 and 6 both touch canvas behavior, so this will recur.)
+
+### phase_2 consultation: codex APPROVE, claude APPROVE, gemini lane skipped (agy no output)
+
+No blocking issues. Three advisories carried forward to phase_3:
+1. **`canvasActions` is rebuilt every render.** The CommandAdapter subscription must dispatch
+   through a REF, not a closure captured at subscribe time, or a remote command would run the
+   first render's actions with stale `readingMode`/`composingLine`. This is the main correctness
+   trap in phase_3 and is now on the checklist.
+2. **Replace the local `CanvasActionName` with `Extract<CanvasCommand, ...>` from codev-types**
+   and hoist to module scope. Names match exactly today, so this is drift prevention. Phase_3
+   adds the codev-types dependency anyway, so it lands naturally there.
+3. `pageColumn`'s `step <= 0 -> false` branch is untested (pre-existing gap); phase_3 adds
+   adapter-level tests and can cover it cheaply.
