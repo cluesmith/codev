@@ -32,8 +32,9 @@ gates:
     requested_at: '2026-08-10T08:46:10.702Z'
     approved_at: '2026-08-10T08:48:53.586Z'
   pr:
-    status: pending
+    status: approved
     requested_at: '2026-08-10T10:59:11.556Z'
+    approved_at: '2026-08-11T04:20:05.476Z'
   verify-approval:
     status: pending
 iteration: 1
@@ -88,10 +89,10 @@ history:
         file: >-
           /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1380/codev/projects/1380-artifact-canvas-horizontal-mul/1380-phase_6-iter2-codex.txt
 started_at: '2026-08-10T07:39:19.659Z'
-updated_at: '2026-08-10T10:59:11.556Z'
+updated_at: '2026-08-11T04:20:05.477Z'
 pr_history:
   - phase: review
     pr_number: 1398
     branch: builder/spir-1380
     created_at: '2026-08-10T10:50:47.941Z'
-pr_ready_for_human: true
+pr_ready_for_human: false
