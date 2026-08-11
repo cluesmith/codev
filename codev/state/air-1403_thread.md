@@ -41,5 +41,28 @@ check-types clean, esbuild build OK, `vitest run` 66/66 pass.
 (check-types needs `@cluesmith/codev-types` + `@cluesmith/codev-sdk` built first
 in a fresh worktree — those emit `dist/` the streamdeck tsconfig resolves.)
 
+## CMAP (PR phase, issue #1403)
+- gemini: APPROVE (high) — no issues.
+- codex: SKIPPED — API had no credits remaining (non-blocking).
+- claude: COMMENT (high) — two real edge-case gaps + one suggestion.
+
+## Post-review fixes (round 2)
+Claude's review + the architect's PR review both flagged the same clamp defect;
+fixed both raised gaps:
+1. **Clamp reset (Issue 1)**: the deactivation clamp did `{ ...cursor, workspace: 0 }`
+   and carried the OLD builder/file indices into the new workspace →
+   `selectedBuilder()` could point at an unrelated builder (slot/dev keys act on the
+   wrong one). Now resets `builder: 0, file: 0` too, matching `rotate()` /
+   `syncToWorkspace()`. + test asserting builder/file reset on deactivation.
+2. **Zero-active guard (Issue 2)**: strict filter makes "0 active workspaces"
+   routine (Tower up, nothing started). `refreshOverview()` now returns early on an
+   empty list instead of calling `getOverview(undefined)`, which made Tower serve an
+   arbitrary dormant workspace's overview onto a dial with nothing to act on. + test.
+- Skipped Issue 3 (path re-anchoring): the issue explicitly sanctioned "reset to 0
+  is fine", so kept the simple clamp.
+
+check-types/build/vitest green again (68/68).
+
 ## Status
-Implementation + tests done and green. Next: commit, open PR with review in body.
+Round-2 fixes committed + pushed to PR #1405. At the `pr` gate — awaiting human
+gate approval from the architect.

@@ -80,9 +80,11 @@ export class CodevStore {
     // A workspace can deactivate while it is the current selection; after the
     // refresh drops it the cursor may point past the end of the (shorter) list.
     // Snap back to a valid index so `selectedWorkspacePath()` and the zoom cursor
-    // stay coherent.
+    // stay coherent. Reset the deeper indices too (as `rotate()` and
+    // `syncToWorkspace()` do on a workspace change) — the new workspace has its
+    // own builders, so a stale `builder`/`file` would point into the wrong list.
     if (this.cursor.workspace >= this.workspaces.length) {
-      this.cursor = { ...this.cursor, workspace: 0 };
+      this.cursor = { ...this.cursor, workspace: 0, builder: 0, file: 0 };
     }
     await this.refreshOverview();
   }
@@ -104,6 +106,17 @@ export class CodevStore {
    * different workspace), then notify. A request token guards against a slower
    * earlier fetch landing after a newer one (rapid workspace switching). */
   async refreshOverview(): Promise<void> {
+    // With the active-only filter, "no workspaces" is now a routine state (Tower
+    // up, nothing started) rather than a degenerate one. Skip the fetch: passing
+    // an undefined path makes Tower fall back to an arbitrary registered (likely
+    // dormant) workspace's overview, which would render its builders on a dial
+    // that has no active workspace to act on.
+    if (this.workspaces.length === 0) {
+      this.overview = null;
+      this.loadingOverview = false;
+      this.emit();
+      return;
+    }
     const req = ++this.overviewReq;
     const data = await this.client.getOverview(this.selectedWorkspacePath());
     if (req !== this.overviewReq) return; // superseded by a newer fetch

@@ -276,6 +276,34 @@ describe('CodevStore active-workspace filtering', () => {
     expect(ctx.store.selectedWorkspacePath()).toBe('/work/a'); // valid, not past the end
   });
 
+  it('resets the deeper cursor indices when the clamp fires (new workspace has its own builders)', async () => {
+    const ctx = makeStore();
+    ctx.listWorkspaces.mockResolvedValueOnce([
+      workspace('/work/a', 'a', true),
+      workspace('/work/b', 'b', true),
+    ] as never);
+    await ctx.store.refresh();
+    ctx.store.rotateCursor(1); // → workspace 1
+    ctx.store.cursor.builder = 3; // pretend we were deep in /work/b's builders
+    ctx.store.cursor.file = 2;
+
+    ctx.listWorkspaces.mockResolvedValueOnce([workspace('/work/a', 'a', true)] as never);
+    await ctx.store.refresh(); // /work/b deactivates → clamp back to /work/a
+    expect(ctx.store.cursor.workspace).toBe(0);
+    expect(ctx.store.cursor.builder).toBe(0); // not left pointing into /work/b's builder list
+    expect(ctx.store.cursor.file).toBe(0);
+  });
+
+  it('does not fetch an overview when no workspace is active (avoids Tower dormant fallback)', async () => {
+    const ctx = makeStore();
+    ctx.listWorkspaces.mockResolvedValue([workspace('/work/dormant', 'dormant', false)] as never);
+    await ctx.store.refresh();
+    expect(ctx.store.workspaces).toEqual([]);
+    expect(ctx.store.overview).toBeNull();
+    expect(ctx.store.loadingOverview).toBe(false);
+    expect(ctx.getOverview).not.toHaveBeenCalled(); // never asked Tower for an undefined-path overview
+  });
+
   it('syncToWorkspace treats a dormant registration like an unknown path (no-op)', async () => {
     const ctx = makeStore();
     ctx.store.workspaces = [workspace('/work/a', 'a', true)];
