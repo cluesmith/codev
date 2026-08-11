@@ -70,3 +70,16 @@ Plan approved by the human; implemented in five commits matching the plan's phas
 
 In-browser verification (dashboard + VS Code) deferred to the dev-approval gate per the
 plan's test plan; the human reviews the running worktree there.
+
+## 2026-08-11: Review phase / pr gate
+
+PR #1402 opened with the retrospective as body. 3-way consultation (single pass):
+gemini=APPROVE, codex=REQUEST_CHANGES, claude=REQUEST_CHANGES. Claude's blocking find
+was real and embarrassing in a useful way: the ITerminalAddon tsc fix was never
+committed — vitest transpiles without typechecking and porch's build check ran against
+the working tree, so nothing caught that the PUSHED head failed tsc. Fixed. Codex's
+flush-race on buffer-type routing was also real (unparsed alt-enter misroutes a resume);
+fixed with a regression test. attempts=k log field and a standalone WARN sink added.
+Rebutted Codex's standalone-framing claim (that framing never existed on that path).
+Rebuttals in codev/projects/1354-*/1354-review-iter1-rebuttals.md; dispositions also in
+the review file for the pr-gate reviewer. Waiting at the pr gate for the human merge.
