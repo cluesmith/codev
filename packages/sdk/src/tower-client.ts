@@ -13,7 +13,7 @@
  * the read-only reader for standalone Node controllers).
  */
 
-import type { DashboardState, OverviewData, IssueView, PRView, IssueSearchResponse, ResolvedWorktreeConfig, ResolvedActivityHooks, TowerVersionInfo, CommandRequest } from '@cluesmith/codev-types';
+import type { DashboardState, OverviewData, IssueView, PRView, IssueSearchResponse, ResolvedWorktreeConfig, ResolvedActivityHooks, TowerVersionInfo, CommandRequest, CanvasCommand, CanvasCommandRequest, CanvasCommandResult, CanvasCommandClientResult } from '@cluesmith/codev-types';
 import { DEFAULT_TOWER_PORT } from './constants.js';
 import { parseSseText, type SseEnvelope } from './sse.js';
 
@@ -33,6 +33,18 @@ const REQUEST_TIMEOUT_MS = 10000;
  * Recorded in issue #1189; the boundary test enforces the type-only rule.
  */
 export const COMMAND_ROUTE = '/api/command';
+
+/**
+ * The canvas command channel (spec 1401). Mirrored from `@cluesmith/codev-types` for the same
+ * reason as `COMMAND_ROUTE` above.
+ *
+ * Separate from the command relay on purpose: that one broadcasts a verb and answers `ok`
+ * regardless, while this one resolves a single target view and reports which — or that none is
+ * open, which is the whole point of the channel.
+ */
+export const CANVAS_COMMAND_ROUTE = '/api/canvas/command';
+/** Host-side view lifecycle: register, heartbeat, unregister. */
+export const CANVAS_VIEWS_ROUTE = '/api/canvas/views';
 
 // ── Types ──────────────────────────────────────────────────────
 
@@ -868,6 +880,138 @@ export class TowerClient {
       method: 'POST',
       body: JSON.stringify(body),
     });
+  }
+
+  /**
+   * Like `request`, but keeps the parsed body on a non-2xx response.
+   *
+   * `request` runs failures through `extractTowerError`, which reduces the body to a message and
+   * discards everything else. The canvas channel answers with a machine-readable `code`, and a
+   * controller has to act on it (render "no canvas open" versus "Tower is down"), so that code
+   * must survive the trip. Never throws: a transport failure comes back as `status: 0`, matching
+   * the never-reject invariant the rest of this client holds.
+   */
+  private async requestPreservingBody(
+    path: string,
+    options: RequestInit = {},
+  ): Promise<{ status: number; body: unknown; error?: string }> {
+    try {
+      const authKey = this.getAuthKey();
+      const headers: Record<string, string> = {
+        ...(options.headers as Record<string, string>),
+        'Content-Type': 'application/json',
+      };
+      if (authKey) {
+        headers['codev-web-key'] = authKey;
+      }
+      const response = await this.fetchFn(`${this.baseUrl}${path}`, {
+        ...options,
+        headers,
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      });
+      const text = await response.text();
+      let body: unknown = null;
+      try {
+        body = text ? JSON.parse(text) : null;
+      } catch {
+        body = null; // an unparseable body is reported by the caller as an unusable answer
+      }
+      return { status: response.status, body };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (message.includes('ECONNREFUSED')) return { status: 0, body: null, error: 'Tower not running' };
+      if (message.includes('timeout')) return { status: 0, body: null, error: 'Request timeout' };
+      return { status: 0, body: null, error: message };
+    }
+  }
+
+  /**
+   * POST /api/canvas/command: drive one open artifact-canvas view (spec 1401).
+   *
+   * `target.workspace` is required and scopes the lookup; `target.file` narrows to one document,
+   * and omitting it targets the workspace's most recently active view. `options.count` repeats a
+   * traversal command and is rejected by Tower on any other.
+   *
+   * Never rejects. A resolved promise always carries Tower's verdict, except for `unreachable`,
+   * which this client synthesizes when there was no answer at all — that distinction is the
+   * reason the call exists in this shape, since "no canvas is open" and "Tower is down" must not
+   * look alike to a controller.
+   */
+  async sendCanvasCommand(
+    command: CanvasCommand,
+    target: { workspace: string; file?: string },
+    options?: { count?: number },
+  ): Promise<CanvasCommandClientResult> {
+    const payload: CanvasCommandRequest = { workspace: target.workspace, command };
+    if (target.file !== undefined) payload.file = target.file;
+    if (options?.count !== undefined) payload.count = options.count;
+
+    const outcome = await this.requestPreservingBody(CANVAS_COMMAND_ROUTE, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+
+    if (outcome.status === 0) {
+      return { ok: false, code: 'unreachable', error: outcome.error ?? 'Tower unreachable' };
+    }
+    const body = outcome.body as CanvasCommandResult | null;
+    if (body && typeof body === 'object' && 'ok' in body) return body;
+    // A 2xx with a shape we cannot read is not a verdict, so it is reported as such rather than
+    // being flattened into a success or an arbitrary failure code.
+    return {
+      ok: false,
+      code: 'unreachable',
+      error: `Unreadable response from Tower (HTTP ${outcome.status})`,
+    };
+  }
+
+  /**
+   * POST /api/canvas/views: a HOST registers one live canvas view and receives its Tower-minted
+   * id. Host-side lifecycle, deliberately absent from the controller subpath — controllers drive
+   * views, hosts own them.
+   */
+  async registerCanvasView(
+    workspace: string,
+    file: string,
+  ): Promise<{ ok: boolean; viewId?: string; file?: string; error?: string }> {
+    const result = await this.request<{ ok: boolean; viewId: string; file: string }>(
+      CANVAS_VIEWS_ROUTE,
+      { method: 'POST', body: JSON.stringify({ workspace, file }) },
+    );
+    if (!result.ok || !result.data) return { ok: false, error: result.error ?? 'Registration failed' };
+    return { ok: true, viewId: result.data.viewId, file: result.data.file };
+  }
+
+  /**
+   * POST /api/canvas/views/:viewId/heartbeat: keep a view's lease alive, and with
+   * `focused: true` mark it the most recently active target.
+   *
+   * `unknownView` distinguishes "Tower has forgotten this id" (a restart, an expired lease) from
+   * a transport problem, because the host's response to the two differs: re-register, versus try
+   * again later.
+   */
+  async heartbeatCanvasView(
+    viewId: string,
+    focused?: boolean,
+  ): Promise<{ ok: boolean; unknownView: boolean; error?: string }> {
+    const body: { focused?: boolean } = {};
+    if (focused !== undefined) body.focused = focused;
+    const result = await this.request<{ ok: boolean }>(
+      `${CANVAS_VIEWS_ROUTE}/${encodeURIComponent(viewId)}/heartbeat`,
+      { method: 'POST', body: JSON.stringify(body) },
+    );
+    if (result.ok) return { ok: true, unknownView: false };
+    return { ok: false, unknownView: result.status === 404, error: result.error };
+  }
+
+  /** DELETE /api/canvas/views/:viewId: the host's view is gone. */
+  async unregisterCanvasView(viewId: string): Promise<{ ok: boolean; error?: string }> {
+    const result = await this.request<{ ok: boolean }>(
+      `${CANVAS_VIEWS_ROUTE}/${encodeURIComponent(viewId)}`,
+      { method: 'DELETE' },
+    );
+    if (result.ok) return { ok: true };
+    return { ok: false, error: result.error };
   }
 
   /**

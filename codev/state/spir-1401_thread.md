@@ -407,3 +407,25 @@ wire drift fails the build — and doing that immediately exposed that the regis
 missing the `ok` field Tower actually sends. The contract was wrong, not the handler.
 
 Verification: 27/27 unit, 5/5 e2e, repo check-types clean, build green.
+
+## 2026-08-12 — phase_5 (sdk canvas command + view registration) implemented
+
+`sendCanvasCommand(command, target, options?)` plus host-facing `registerCanvasView` /
+`heartbeatCanvasView` / `unregisterCanvasView` on TowerClient. Controller subpath re-exports the
+command call, its result types and CANVAS_COMMAND_ROUTE — but NOT the registration methods, per
+the split agreed with the streamdeck stakeholder (controllers drive views, hosts own them).
+
+Implementation note that mattered: the shared `request()` runs non-2xx bodies through
+`extractTowerError`, which reduces them to a message and DISCARDS the machine-readable `code` —
+exactly what a controller needs. Added a private `requestPreservingBody` alongside it rather than
+changing `request()` (which every existing caller depends on). It uses the injected `this.fetchFn`,
+so the sdk boundary rule (`/\bfetch\s*\(/`) is untouched, and it never throws: transport failure
+comes back as status 0, preserving the client's never-reject invariant.
+
+`unreachable` is synthesized only when Tower gave no usable answer (transport failure, or a body
+we cannot read). Every other resolution carries Tower's own verdict. `heartbeatCanvasView`
+returns `unknownView` separately from a generic failure because the host's response differs:
+re-register vs retry later — phase_6 depends on that distinction.
+
+Verification: 89/89 sdk (13 new), 63/63 streamdeck (boundary suite unchanged and passing),
+repo check-types clean, build green, 4847 repo tests.
