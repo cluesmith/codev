@@ -38,6 +38,17 @@ together; no plan change needed). Implemented in the three planned commits:
    `search-backlog.ts` moved to `createQuickPick` with dynamic rows and accept
    routing (dynamic → browser helpers, static → in-editor preview unchanged).
 
+## 2026-08-11 — Review phase / pr gate
+
+Dev-approval feedback caught a real tsc error my piped `pnpm compile | tail` had masked
+(lesson #1150 struck again): `DynamicQuickPickItem.kind` collided with VS Code's reserved
+`QuickPickItem.kind`; renamed to `target` (2a747cb5). PR #1399 opened; retrospective +
+COLD lesson (QuickPickItem reserves `kind`; alwaysShow for injected rows) committed.
+Consultation: gemini APPROVE, codex APPROVE, claude REQUEST_CHANGES — confirmed finding:
+Cmd+K P shadows the built-in Copy Path of Active File (issue's "free slot" premise only
+covered our own map). Key kept as issue-specified; collision escalated to the human at
+the pr gate via review "Things to Look At" + rebuttal file. Sitting at pr gate.
+
 Notes for reviewers: fresh-worktree builds need `pnpm -C packages/types build`,
 `packages/core build`, `packages/sdk build`, `packages/artifact-canvas build` before
 type-checking codev/vscode (dist-based workspace resolution; not caused by this change).
