@@ -39,12 +39,29 @@ import { renderMarkdownPreviewHtml } from './preview-template.js';
 import type { HostToWebviewMessage, WebviewToHostMessage } from './messages.js';
 import type { OverviewCache } from '../views/overview-data.js';
 
+/** globalState key for the per-user reading-mode preference (spec 1380 D4 — per-USER scope:
+ * reading mode is about the human's display and habits, not the workspace's content). */
+export const READING_MODE_STATE_KEY = 'codev.markdownPreview.readingMode';
+
+/**
+ * Validate an untrusted persisted/message value against the closed mode vocabulary (spec 1380
+ * D4): only known mode names pass; anything else — corrupt storage, a hostile webview message —
+ * yields `undefined`, and the canvas's own coercion lands on vertical. Exported for unit tests.
+ */
+export function sanitizeReadingMode(value: unknown): 'vertical' | 'horizontal' | undefined {
+  if (value === 'vertical' || value === 'horizontal') { return value; }
+  return undefined;
+}
+
 export class MarkdownPreviewProvider implements vscode.CustomTextEditorProvider {
   public static readonly viewType = 'codev.markdownPreview';
 
   constructor(
     private readonly extensionUri: vscode.Uri,
     private readonly overviewCache: OverviewCache,
+    // Per-user persistence surface for the reading-mode preference (spec 1380 D4). A `Memento`
+    // rather than the whole ExtensionContext: the provider needs exactly this seam.
+    private readonly globalState: vscode.Memento,
   ) {}
 
   public resolveCustomTextEditor(
@@ -114,6 +131,18 @@ export class MarkdownPreviewProvider implements vscode.CustomTextEditorProvider 
         deleteReviewMarker(document, m.markerLine, m.expectedAuthor, m.expectedBodyPrefix, pushUpdate);
         return;
       }
+      if (m.type === 'readingModeChange') {
+        // Persist per-user (spec 1380 D4). Sanitized: a garbage value from the webview is
+        // dropped rather than stored, so the next mount can never bootstrap from junk. A failed
+        // update degrades to session-only mode (the toggle itself keeps working in the canvas).
+        const mode = sanitizeReadingMode(m.mode);
+        if (mode !== undefined) {
+          this.globalState.update(READING_MODE_STATE_KEY, mode).then(undefined, () => {
+            // Persistence failure is non-fatal by spec: vertical default next session.
+          });
+        }
+        return;
+      }
     });
   }
 
@@ -156,6 +185,9 @@ export class MarkdownPreviewProvider implements vscode.CustomTextEditorProvider 
       styleUri: asUri('markdown-preview.css'),
       fontSizePx: cfg.get<number>('fontSize', 0),
       lineHeight: cfg.get<number>('lineHeight', 0),
+      // Bootstrap the persisted mode in the initial HTML (spec 1380 D4): the canvas mounts
+      // before the first host message, so a message cannot initialize it.
+      initialReadingMode: sanitizeReadingMode(this.globalState.get(READING_MODE_STATE_KEY)),
     });
   }
 }

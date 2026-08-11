@@ -27,4 +27,9 @@ export type WebviewToHostMessage =
   // at `markerLine` no longer matches (the file changed between click and write), the host refuses
   // the write and refreshes rather than mutating a different marker.
   | { type: 'editComment'; markerLine: number; expectedAuthor: string; expectedBodyPrefix: string; newBody: string }
-  | { type: 'deleteComment'; markerLine: number; expectedAuthor: string; expectedBodyPrefix: string };
+  | { type: 'deleteComment'; markerLine: number; expectedAuthor: string; expectedBodyPrefix: string }
+  // Reading-mode change (spec 1380 D4): the canvas's toggle intent, persisted per-user by the
+  // host (globalState). The INITIAL mode travels the other way inside the bootstrap HTML (a
+  // `data-reading-mode` attribute) — the canvas mounts before the first host message, so a
+  // message could not initialize it. `HostToWebviewMessage` is deliberately untouched.
+  | { type: 'readingModeChange'; mode: string };

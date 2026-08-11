@@ -33,14 +33,14 @@ describe('CommentComposer (#1107)', () => {
     const { onSubmit, input } = setup();
     fireEvent.change(input, { target: { value: '  please clarify  ' } });
     fireEvent.keyDown(input, { key: 'Enter', metaKey: true });
-    expect(onSubmit).toHaveBeenCalledWith('please clarify');
+    expect(onSubmit).toHaveBeenCalledWith('please clarify', true); // ⌘Enter = keyboard modality
   });
 
   it('Ctrl+Enter submits (non-mac)', () => {
     const { onSubmit, input } = setup();
     fireEvent.change(input, { target: { value: 'looks good' } });
     fireEvent.keyDown(input, { key: 'Enter', ctrlKey: true });
-    expect(onSubmit).toHaveBeenCalledWith('looks good');
+    expect(onSubmit).toHaveBeenCalledWith('looks good', true); // Ctrl+Enter = keyboard modality
   });
 
   it('plain Enter does NOT submit (newline in the textarea)', () => {
@@ -72,7 +72,7 @@ describe('CommentComposer (#1107)', () => {
     fireEvent.change(input, { target: { value: 'ship it' } });
     expect(submit.disabled).toBe(false);
     fireEvent.click(submit);
-    expect(onSubmit).toHaveBeenCalledWith('ship it');
+    expect(onSubmit).toHaveBeenCalledWith('ship it', expect.any(Boolean)); // modality of the click
   });
 
   it('Cancel button cancels', () => {

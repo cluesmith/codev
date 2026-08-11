@@ -60,6 +60,13 @@
      (not canvas-level) so the strip is part of the row's own hover box and travels with the row
      through #1380's column fragmentation. */
   --codev-canvas-gutter: 1.9rem;
+  /* Horizontal reading mode (spec 1380 D6): the preferred column measure and gap. Applied only
+     under `.codev-canvas-mode-horizontal` (composed surface); overriding them is the supported
+     way to retune the mode — no settings UI. NOTE `column-width` is a preferred MINIMUM: real
+     columns stretch to share leftover viewport width, so code measuring columns must read
+     layout, never this token. */
+  --codev-canvas-column-width: 400px;
+  --codev-canvas-column-gap: 48px;
   /* Per-level heading sizes. github-markdown-css's scale is non-geometric, so a single ratio
      can't reproduce it — explicit per-level tokens mirror the baseline exactly (#1053). */
   --codev-canvas-h1-size: 2em;
@@ -312,6 +319,14 @@
   outline: 2px solid var(--codev-canvas-accent);
   outline-offset: 2px;
 }
+/* Quiet focus restoration (spec 1380 dev-approval feedback, both modes): after a POINTER-driven
+   composer close / card delete, focus returns to the block for keyboard continuity, but the ring
+   is suppressed — browsers mark textareas always-focus-visible, so the programmatic restoration
+   would otherwise inherit a keyboard-style ring into a mouse-only flow. The class is cleared on
+   the next keystroke (see onBodyKeyDown), so keyboard reviewers always see their position. */
+.codev-canvas-quiet-focus .codev-artifact-canvas-body [data-line]:focus-visible {
+  outline: none;
+}
 :is(.codev-artifact-canvas-body, .codev-artifact-canvas-rendered) a { color: var(--codev-canvas-link); }
 
 /* In-row "+" wrapper (#1343): appended into the active row's own DOM and positioned against it,
@@ -332,14 +347,15 @@
 }
 
 /* Inline-below comment cards (#863): rendered in flow beneath the annotated block, so they push
-   following content down instead of overlapping it. The left rule ties the stack visually to the
-   gutter where the "+" lives. No stack is injected for a block with zero markers, so a comment-free
-   block consumes no extra vertical space. */
+   following content down instead of overlapping it. No stack is injected for a block with zero
+   markers, so a comment-free block consumes no extra vertical space. The stack itself carries NO
+   amber rail (spec-1380 dev-approval feedback: rail + per-card border doubled the left edge) —
+   each card's own border is the annotation marker; the padding keeps card edges aligned with the
+   composer's rule below them. */
 .codev-canvas-marker-cards {
   list-style: none;
   margin: 4px 0 10px;
-  padding-left: 8px;
-  border-left: 2px solid var(--codev-canvas-comment-marker);
+  padding-left: 10px;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -454,6 +470,188 @@
 .codev-canvas-comment-composer-actions button:focus-visible {
   outline: 2px solid var(--codev-canvas-accent);
   outline-offset: 1px;
+}
+
+/*
+ * Horizontal reading mode (spec 1380, Approach 1). The mode class sits on the CANVAS ROOT and
+ * every rule below scopes `.codev-canvas-mode-horizontal .codev-artifact-canvas-body` — the
+ * body is the multicol element, and none of these rules reuse the shared `:is(body, rendered)`
+ * groups, so the standalone MarkdownView is untouched by construction. With the class absent
+ * (vertical, the default), none of this applies.
+ *
+ * Height model: the body fills the host-provided bound (`height: 100%`) and self-bounds to the
+ * visual viewport (`max-height: 100vh`) when the host provides none — an unbounded embed gets
+ * viewport-height columns, never one infinite column (spec success criterion). Overflow columns
+ * beyond the width scroll horizontally on the body itself (spike finding 1).
+ */
+.codev-canvas-mode-horizontal {
+  height: 100%;
+}
+.codev-canvas-mode-horizontal .codev-artifact-canvas-body {
+  height: 100%;
+  max-height: 100vh;
+  box-sizing: border-box;
+  column-width: var(--codev-canvas-column-width);
+  column-gap: var(--codev-canvas-column-gap);
+  column-fill: auto;
+  overflow-x: auto;
+  overflow-y: hidden;
+  /* The prose-measure cap is INERT in horizontal mode (spec D6): it targets this same element,
+     and capping the multicol container would collapse the mode to ~one column. Measure here is
+     governed solely by the column-width token. */
+  max-width: none;
+  /* Usable height for the tall-block caps below: the JS-observed column height minus one rhythm
+     unit each side. Underscore prefix = private (not part of the `--codev-canvas-*` public
+     vocabulary; the token snapshot test intentionally does not see it). */
+  --_codev-column-cap: calc(
+    var(--codev-canvas-column-height, 100vh) - 2 * var(--codev-canvas-paragraph-spacing)
+  );
+}
+
+/*
+ * Fragmentation protection (spec 1380 Constraint 4 + D1). Protected block types never split
+ * across a column boundary; and because Chromium does NOT honor `break-inside: avoid` for a
+ * block taller than the column (it fragments it anyway AND lets a fragment overflow the column
+ * bottom — spike finding 3, unreachable under `overflow-y: hidden`), every protected type also
+ * gets a height cap with inner vertical scroll so the too-tall fallback is never entered.
+ * Marker-card STACKS may break between cards (a long thread reads on like prose); each card is
+ * individually protected. Images are monolithic by engine guarantee (replaced elements never
+ * fragment); the cap scales a tall diagram to fit its column.
+ */
+.codev-canvas-mode-horizontal .codev-artifact-canvas-body pre,
+.codev-canvas-mode-horizontal .codev-artifact-canvas-body table,
+.codev-canvas-mode-horizontal .codev-artifact-canvas-body img,
+.codev-canvas-mode-horizontal .codev-artifact-canvas-body .codev-canvas-marker-card,
+.codev-canvas-mode-horizontal .codev-artifact-canvas-body .codev-canvas-comment-composer-host {
+  break-inside: avoid;
+}
+/* DESCENDANT selectors, deliberately (iter-1 Claude): a fence or table nested in a list item
+   or blockquote — dozens of real codev specs have them — needs the same protection as a
+   top-level row; a child combinator left them fragmenting AND overflowing (spike finding 3).
+   Bare `pre` (not `pre[data-line]`): TOP-LEVEL fences do carry `data-line` on the pre since
+   the #1396 renderer fix, but a NESTED fence's protection must not depend on row identity —
+   the bare element selector covers both. */
+/* Tall code: the inner `code` is already the scroll container (#1343); cap it just under the
+   column, allowing for the pre's own 16px paddings + 1px borders + trailing rhythm. */
+.codev-canvas-mode-horizontal .codev-artifact-canvas-body pre > code {
+  max-height: calc(var(--_codev-column-cap) - 34px);
+  overflow-y: auto;
+}
+/* Tall table: the table is already `display: block; overflow: auto` — the cap makes that
+   existing scroll container bound its height too. */
+.codev-canvas-mode-horizontal .codev-artifact-canvas-body table {
+  max-height: var(--_codev-column-cap);
+}
+/* Tall single comment card: cap the body text, keep author/actions visible. */
+.codev-canvas-mode-horizontal .codev-artifact-canvas-body .codev-canvas-marker-card-body {
+  max-height: calc(var(--_codev-column-cap) - 24px);
+  overflow-y: auto;
+}
+/* Tall image: scale to fit the column (width is already capped by `max-width: 100%`). */
+.codev-canvas-mode-horizontal .codev-artifact-canvas-body img {
+  max-height: var(--_codev-column-cap);
+}
+/* Open composer: protected whole (above); clamp the textarea so user resizing can never push
+   the composer past a column (spec D1). Half the column, not nearly all of it: the composer is
+   kept WITH its block (below), and a near-column-height composer would make the
+   block+cards+composer group unfittable in ANY column, forcing the engine to renege on the
+   protection and split the dialog. Half a column is ~20 text lines on a typical display —
+   generous for a review comment — and leaves room for the group to travel intact. */
+.codev-canvas-mode-horizontal .codev-artifact-canvas-body .codev-canvas-comment-composer-input {
+  max-height: calc(var(--_codev-column-cap) * 0.5);
+}
+/* Keep the open composer WITH its block (dev-approval feedback): when the dialog doesn't fit
+   below the block at a column bottom, these hints make Chromium move block + cards + composer
+   to the next column together (spike-verified) instead of stranding the dialog a column away
+   from the text it annotates. `.codev-canvas-composing` is stamped on the annotated block only
+   while its composer is open; the chained `break-after: avoid` covers the card stack sitting
+   between them. Horizontal-only — vertical has no columns to strand across. */
+.codev-canvas-mode-horizontal .codev-artifact-canvas-body .codev-canvas-composing,
+.codev-canvas-mode-horizontal .codev-artifact-canvas-body .codev-canvas-composing + .codev-canvas-marker-cards {
+  break-after: avoid;
+}
+/* While composing, the block's card stack must be ATOMIC, not merely break-averse: its normal
+   between-cards break points are legal escapes the engine will take, keeping the block but
+   pushing trailing cards + dialog to the next column — the exact stranding being fixed. Scoped
+   to the composing block's stack only; ordinary stacks keep fragmenting between cards (D1). */
+.codev-canvas-mode-horizontal .codev-artifact-canvas-body .codev-canvas-composing + .codev-canvas-marker-cards {
+  break-inside: avoid;
+}
+.codev-canvas-mode-horizontal .codev-artifact-canvas-body .codev-canvas-comment-composer-host {
+  break-before: avoid;
+}
+
+/* Focusable container (spec 1380, Constraint 7): the body is a tab stop in horizontal mode —
+   show focus inside its own edge (offset -2) so the ring isn't clipped by the overflow box. */
+.codev-canvas-mode-horizontal .codev-artifact-canvas-body:focus-visible {
+  outline: 2px solid var(--codev-canvas-accent);
+  outline-offset: -2px;
+}
+
+/* Progress readout (spec 1380 D8): a small fixed chip, bottom-left (the keys legend owns
+   bottom-right), token-styled like the rest of the canvas chrome. */
+.codev-canvas-reading-progress {
+  position: fixed;
+  left: 16px;
+  bottom: 16px;
+  z-index: 6;
+  padding: 3px 10px;
+  border: 1px solid var(--codev-canvas-border);
+  border-radius: 12px;
+  background: var(--codev-canvas-background);
+  color: var(--codev-canvas-muted);
+  font-family: var(--codev-canvas-font-family);
+  font-size: 12px;
+  line-height: 1.6;
+  user-select: none;
+  pointer-events: none;
+}
+
+/* Visually hidden, screen-reader-available (the aria-live announcement channel). */
+.codev-canvas-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Reading-mode toggle (spec 1380 D4): fixed top-right, matching the canvas's other fixed
+   chrome (minimap rail, keys legend); right offset clears the 14px minimap column. Token-styled
+   like the "+" button; 24px hit floor (WCAG 2.5.8, the #1236 convention). */
+.codev-canvas-reading-mode-toggle {
+  position: fixed;
+  top: 12px;
+  right: 20px;
+  z-index: 6;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  min-height: 24px;
+  padding: 3px;
+  font: inherit;
+  border: 1px solid var(--codev-canvas-border);
+  border-radius: 4px;
+  background: var(--codev-canvas-background);
+  color: var(--codev-canvas-muted);
+  cursor: pointer;
+  user-select: none;
+}
+.codev-canvas-reading-mode-toggle:hover,
+.codev-canvas-reading-mode-toggle:focus-visible {
+  background: var(--codev-canvas-code-background);
+  color: var(--codev-canvas-foreground);
+  outline: 2px solid var(--codev-canvas-accent);
+}
+/* Pressed = horizontal mode active: accent tint so the state reads at a glance. */
+.codev-canvas-reading-mode-toggle[aria-pressed='true'] {
+  color: var(--codev-canvas-accent);
+  border-color: var(--codev-canvas-accent);
 }
 
 /* Right-edge marker minimap (#863): a fixed, narrow column of dots — one per REVIEW marker,

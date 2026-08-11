@@ -28,6 +28,14 @@ export interface Disposable {
 }
 
 /**
+ * Canvas reading mode (spec 1380). `vertical` is the classic single-column flow and the
+ * default; `horizontal` is the opt-in multi-column newspaper flow. The type is the closed
+ * vocabulary — values arriving from a host (persisted preferences cross untyped seams) are
+ * validated at the component boundary and coerced to `vertical` when unrecognized (D4).
+ */
+export type ReadingMode = 'vertical' | 'horizontal';
+
+/**
  * In-memory model of a review marker. The package is serialization-agnostic (spec D3): the
  * host's `MarkerAdapter` owns the on-disk byte form; `raw` preserves the original marker text
  * for lossless round-tripping.
@@ -94,4 +102,18 @@ export interface ArtifactCanvasProps {
    * underlying data changes. Hosts with a watcher can omit it — behavior is unchanged.
    */
   refreshKey?: number | string;
+  /**
+   * Initial reading mode (spec 1380 D4). Typed `string`, not `ReadingMode`, because the value
+   * typically round-trips through host persistence (localStorage, webview bootstrap HTML) and
+   * arrives untrusted; anything other than a recognized `ReadingMode` is coerced to
+   * `'vertical'`. Omitting it means vertical. The canvas owns the mode state after mount
+   * (uncontrolled); hosts persist changes via `onReadingModeChange`.
+   */
+  initialReadingMode?: string;
+  /**
+   * Mode-change intent (spec 1380 D4): emitted with the new mode when the reviewer uses the
+   * reading-mode toggle. The host persists it per-user (or ignores it — the canvas works
+   * without persistence, defaulting to vertical each mount).
+   */
+  onReadingModeChange?(mode: ReadingMode): void;
 }

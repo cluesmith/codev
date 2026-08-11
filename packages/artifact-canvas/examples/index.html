@@ -6,6 +6,12 @@
     <title>artifact-canvas — dev example</title>
   </head>
   <body>
+    <!-- Height context (spec 1380, Constraint 3): horizontal mode needs a bounded column
+         height; the 100% chain feeds the canvas's mode class and nothing else. -->
+    <style>
+      html, body, #root { height: 100%; }
+      body { margin: 0; }
+    </style>
     <main id="root"></main>
     <script type="module" src="./main.tsx"></script>
   </body>
