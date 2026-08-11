@@ -132,7 +132,13 @@ test('the open composer shares a column with its block, even at a column bottom 
   // composer cannot fit below it, which used to strand the dialog in the next column alone.
   const line = await body.evaluate((el) => {
     const bodyRect = el.getBoundingClientRect();
-    for (const p of Array.from(el.querySelectorAll(':scope > p[data-line]'))) {
+    // Card-FREE paragraphs only (`:not(.codev-canvas-has-marker)`): a card stack joins the
+    // keep-together group, and under CI's fonts a tall block+stack+dialog group can exceed a
+    // whole column — where the engine legitimately breaks somewhere and the invariant under
+    // test (small group travels intact) doesn't apply. The block+dialog pair always fits.
+    for (const p of Array.from(
+      el.querySelectorAll(':scope > p[data-line]:not(.codev-canvas-has-marker)'),
+    )) {
       const rects = p.getClientRects();
       if (rects.length !== 1) continue; // unfragmented prose only — a clean single-column block
       const r = rects[0];

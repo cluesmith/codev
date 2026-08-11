@@ -352,6 +352,11 @@ describe('quiet focus restoration (pointer flows leave no ring)', () => {
     expect(root().classList.contains('codev-canvas-quiet-focus')).toBe(true);
     expect(document.activeElement).toBe(block); // focus continuity is kept — only the ring is quiet
 
+    // jsdom implements neither scrollIntoView nor layout; the 'n' jump calls it on the next
+    // marked block, so stub it everywhere before pressing (same shim as the axis-aware tests).
+    body.querySelectorAll<HTMLElement>('[data-line]').forEach((el) => {
+      el.scrollIntoView = (() => {}) as HTMLElement['scrollIntoView'];
+    });
     fireEvent.keyDown(block, { key: 'n' });
     expect(root().classList.contains('codev-canvas-quiet-focus')).toBe(false);
   });
