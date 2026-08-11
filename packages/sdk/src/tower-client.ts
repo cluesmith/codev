@@ -13,7 +13,7 @@
  * the read-only reader for standalone Node controllers).
  */
 
-import type { DashboardState, OverviewData, IssueView, PRView, IssueSearchResponse, ResolvedWorktreeConfig, ResolvedActivityHooks, TowerVersionInfo, CommandRequest, CanvasCommand, CanvasCommandRequest, CanvasCommandResult, CanvasCommandClientResult } from '@cluesmith/codev-types';
+import type { DashboardState, OverviewData, IssueView, PRView, IssueSearchResponse, ResolvedWorktreeConfig, ResolvedActivityHooks, TowerVersionInfo, CommandRequest, CanvasCommand, CanvasCommandRequest, CanvasCommandResult, CanvasCommandClientResult, CanvasCommandErrorCode } from '@cluesmith/codev-types';
 import { DEFAULT_TOWER_PORT } from './constants.js';
 import { parseSseText, type SseEnvelope } from './sse.js';
 
@@ -45,6 +45,52 @@ export const COMMAND_ROUTE = '/api/command';
 export const CANVAS_COMMAND_ROUTE = '/api/canvas/command';
 /** Host-side view lifecycle: register, heartbeat, unregister. */
 export const CANVAS_VIEWS_ROUTE = '/api/canvas/views';
+
+/**
+ * The failure codes Tower itself can answer with. Mirrored from `CanvasCommandErrorCode` (the
+ * sdk keeps codev-types type-only), and pinned to it by the assertion below so a code added to
+ * the contract cannot silently go unrecognized here — an unrecognized code is treated as an
+ * unreadable answer, which would turn a real Tower verdict into a spurious `unreachable`.
+ */
+const CANVAS_WIRE_ERROR_CODES = ['no-canvas', 'invalid-request'] as const;
+
+/** Fails to instantiate unless the mirror above covers the contract exactly. */
+type AssertTrue<T extends true> = T;
+type _WireCodesMatchContract = AssertTrue<
+  [Exclude<CanvasCommandErrorCode, (typeof CANVAS_WIRE_ERROR_CODES)[number]>] extends [never]
+    ? true
+    : false
+>;
+
+/**
+ * Validate a canvas command response against the wire contract.
+ *
+ * Checking only for an `ok` field would let `{ok:true}` with no target, or a failure carrying an
+ * unknown code, pass through as a typed result — the caller would then read `target.viewId` off
+ * undefined, or switch on a code that is not in its union. A response we cannot fully verify is
+ * not a verdict, so it is reported as unreadable instead.
+ */
+function parseCanvasCommandResult(body: unknown): CanvasCommandResult | null {
+  if (!body || typeof body !== 'object') return null;
+  const raw = body as Record<string, unknown>;
+
+  if (raw.ok === true) {
+    const target = raw.target as Record<string, unknown> | undefined;
+    if (!target || typeof target !== 'object') return null;
+    if (typeof target.viewId !== 'string' || typeof target.file !== 'string') return null;
+    return { ok: true, target: { viewId: target.viewId, file: target.file } };
+  }
+
+  if (raw.ok === false) {
+    if (typeof raw.code !== 'string') return null;
+    if (!(CANVAS_WIRE_ERROR_CODES as readonly string[]).includes(raw.code)) return null;
+    let error = 'Canvas command failed';
+    if (typeof raw.error === 'string') error = raw.error;
+    return { ok: false, code: raw.code as CanvasCommandErrorCode, error };
+  }
+
+  return null;
+}
 
 // ── Types ──────────────────────────────────────────────────────
 
@@ -954,9 +1000,9 @@ export class TowerClient {
     if (outcome.status === 0) {
       return { ok: false, code: 'unreachable', error: outcome.error ?? 'Tower unreachable' };
     }
-    const body = outcome.body as CanvasCommandResult | null;
-    if (body && typeof body === 'object' && 'ok' in body) return body;
-    // A 2xx with a shape we cannot read is not a verdict, so it is reported as such rather than
+    const verdict = parseCanvasCommandResult(outcome.body);
+    if (verdict) return verdict;
+    // A response we cannot fully verify is not a verdict, so it is reported as such rather than
     // being flattened into a success or an arbitrary failure code.
     return {
       ok: false,

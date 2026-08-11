@@ -429,3 +429,23 @@ re-register vs retry later — phase_6 depends on that distinction.
 
 Verification: 89/89 sdk (13 new), 63/63 streamdeck (boundary suite unchanged and passing),
 repo check-types clean, build green, 4847 repo tests.
+
+### phase_5 iter1: gemini + claude APPROVE, codex REQUEST_CHANGES (one accepted, one disputed)
+
+**Accepted:** sendCanvasCommand validated only `'ok' in body`, so `{ok:true}` with no target came
+back as a typed success (caller then reads target.viewId off undefined) and `{ok:false,
+code:'bogus'}` came back carrying a code outside the caller's union. Replaced with a full shape
+check; anything unverifiable is reported `unreachable` — a response we cannot verify is not a
+verdict. The runtime code list is pinned to CanvasCommandErrorCode with an AssertTrue guard, which
+immediately paid off: the type name was missing from the import and the guard surfaced it as
+`false` rather than passing silently.
+
+**Partially disputed:** codex says controller.ts re-exporting TowerClient leaves the registration
+methods reachable, violating the host-only requirement. True as an observation, but that subpath
+exports the CLASS and always has — it carries 39 public methods including addArchitect,
+killTerminal, sweepHusks, activateWorkspace, none of them controller concerns. My 3 are no more
+reachable than the 36 that predate them. The plan's requirement (don't re-export them) IS met.
+The only real remedy is a restricted client surface on a published subpath the streamdeck
+architect owns and approved — a breaking redesign, unrelated to canvas commands, and exactly the
+kind of scope expansion to raise rather than take. Flagged to the architect; if they want a hard
+boundary it deserves its own issue covering all 39 methods.

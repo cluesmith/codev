@@ -85,10 +85,29 @@ describe('sendCanvasCommand', () => {
     expect(result).toMatchObject({ ok: false, code: 'unreachable' });
   });
 
-  it('reports an unreadable body as unreachable rather than inventing a verdict', async () => {
-    const { client } = clientWith({ status: 200, body: { unexpected: true } });
+  // A response is only a verdict if the whole shape checks out. Accepting anything with an `ok`
+  // field would hand the caller `target.viewId` off undefined, or a code outside its union.
+  it.each([
+    ['no ok field', { unexpected: true }],
+    ['success with no target', { ok: true }],
+    ['success with a malformed target', { ok: true, target: { viewId: 7 } }],
+    ['success with a partial target', { ok: true, target: { viewId: 'v' } }],
+    ['failure with an unknown code', { ok: false, code: 'unknown', error: 'x' }],
+    ['failure with no code', { ok: false, error: 'x' }],
+    ['failure with a non-string code', { ok: false, code: 12 }],
+    ['a non-object body', 'plain text'],
+    ['null', null],
+  ])('reports %s as unreachable rather than inventing a verdict', async (_label, body) => {
+    const { client } = clientWith({ status: 200, body });
     const result = await client.sendCanvasCommand('block-next', TARGET);
     expect(result).toMatchObject({ ok: false, code: 'unreachable' });
+  });
+
+  it('supplies a message when Tower omits one on a valid failure code', async () => {
+    const { client } = clientWith({ status: 404, body: { ok: false, code: 'no-canvas' } });
+    const result = await client.sendCanvasCommand('block-next', TARGET);
+    expect(result).toMatchObject({ ok: false, code: 'no-canvas' });
+    expect((result as { error: string }).error).toBeTruthy();
   });
 
   it('never rejects, whatever the transport does', async () => {
