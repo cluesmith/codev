@@ -1,7 +1,7 @@
 id: '1380'
 title: artifact-canvas-horizontal-mul
 protocol: spir
-phase: review
+phase: verify
 plan_phases:
   - id: phase_1
     title: 'Reading-mode core: prop, toggle, column CSS, mode-switch anchoring'
@@ -38,58 +38,10 @@ gates:
   verify-approval:
     status: pending
 iteration: 1
-build_complete: true
-history:
-  - iteration: 1
-    plan_phase: phase_2
-    build_output: ''
-    reviews:
-      - model: claude
-        verdict: REQUEST_CHANGES
-        file: >-
-          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1380/codev/projects/1380-artifact-canvas-horizontal-mul/1380-phase_2-iter1-claude.txt
-      - model: codex
-        verdict: REQUEST_CHANGES
-        file: >-
-          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1380/codev/projects/1380-artifact-canvas-horizontal-mul/1380-phase_2-iter1-codex.txt
-  - iteration: 1
-    plan_phase: phase_5
-    build_output: ''
-    reviews:
-      - model: claude
-        verdict: APPROVE
-        file: >-
-          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1380/codev/projects/1380-artifact-canvas-horizontal-mul/1380-phase_5-iter1-claude.txt
-      - model: codex
-        verdict: REQUEST_CHANGES
-        file: >-
-          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1380/codev/projects/1380-artifact-canvas-horizontal-mul/1380-phase_5-iter1-codex.txt
-  - iteration: 1
-    plan_phase: phase_6
-    build_output: ''
-    reviews:
-      - model: claude
-        verdict: REQUEST_CHANGES
-        file: >-
-          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1380/codev/projects/1380-artifact-canvas-horizontal-mul/1380-phase_6-iter1-claude.txt
-      - model: codex
-        verdict: REQUEST_CHANGES
-        file: >-
-          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1380/codev/projects/1380-artifact-canvas-horizontal-mul/1380-phase_6-iter1-codex.txt
-  - iteration: 2
-    plan_phase: phase_6
-    build_output: ''
-    reviews:
-      - model: claude
-        verdict: APPROVE
-        file: >-
-          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1380/codev/projects/1380-artifact-canvas-horizontal-mul/1380-phase_6-iter2-claude.txt
-      - model: codex
-        verdict: REQUEST_CHANGES
-        file: >-
-          /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1380/codev/projects/1380-artifact-canvas-horizontal-mul/1380-phase_6-iter2-codex.txt
+build_complete: false
+history: []
 started_at: '2026-08-10T07:39:19.659Z'
-updated_at: '2026-08-11T04:22:06.652Z'
+updated_at: '2026-08-11T04:22:08.617Z'
 pr_history:
   - phase: review
     pr_number: 1398
