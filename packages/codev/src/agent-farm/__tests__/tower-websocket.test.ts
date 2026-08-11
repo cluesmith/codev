@@ -29,6 +29,8 @@ vi.mock('../servers/tower-terminals.js', () => ({
   // fast-path (matches the normal post-startup case these tests exercise).
   isStartupReconcileSettled: () => true,
   whenStartupReconcileSettled: () => Promise.resolve(),
+  // PIR #1354: replay-snapshot fallback logging sink.
+  logTerminal: vi.fn(),
 }));
 
 vi.mock('../servers/tower-utils.js', () => ({
@@ -49,8 +51,10 @@ function makeWs(): any {
 
 function makeSession(seq = 0): any {
   return {
+    id: 'sess-t',
     attach: vi.fn(() => []),
     attachResume: vi.fn(() => []),
+    addClient: vi.fn(),
     detach: vi.fn(),
     write: vi.fn(),
     resize: vi.fn(),
@@ -62,6 +66,12 @@ function makeSession(seq = 0): any {
     // covered by the PtySession unit tests.
     handleUserInput: vi.fn(),
     ringBuffer: { currentSeq: seq },
+    // PIR #1354: the attach path consults the mirror. Defaulting to a mirror-less
+    // session routes fresh attaches through the raw-ring fallback, preserving the
+    // legacy replay expectations these tests pin; the snapshot path has its own tests.
+    screenBufferType: null,
+    bytesWritten: 0,
+    replaySnapshot: vi.fn(async () => ({ ok: false, reason: 'no-mirror' })),
   };
 }
 
@@ -111,34 +121,34 @@ describe('tower-websocket', () => {
   // =========================================================================
 
   describe('handleTerminalWebSocket', () => {
-    it('attaches client to session on connect', () => {
+    it('attaches client to session on connect', async () => {
       const ws = makeWs();
       const session = makeSession();
       const req = makeReq();
 
-      handleTerminalWebSocket(ws, session, req);
+      await handleTerminalWebSocket(ws, session, req);
 
       expect(session.attach).toHaveBeenCalledTimes(1);
     });
 
-    it('uses attachResume when x-session-resume header is set', () => {
+    it('uses attachResume when x-session-resume header is set', async () => {
       const ws = makeWs();
       const session = makeSession();
       const req = makeReq({ 'x-session-resume': '42' });
 
-      handleTerminalWebSocket(ws, session, req);
+      await handleTerminalWebSocket(ws, session, req);
 
       expect(session.attachResume).toHaveBeenCalledWith(expect.anything(), 42);
       expect(session.attach).not.toHaveBeenCalled();
     });
 
-    it('brackets replay with pause/resume and sends a seq frame on connect (#1047)', () => {
+    it('brackets replay with pause/resume and sends a seq frame on connect (#1047)', async () => {
       const ws = makeWs();
       const session = makeSession(5);
       session.attach.mockReturnValue(['line1', 'line2']);
       const req = makeReq();
 
-      handleTerminalWebSocket(ws, session, req);
+      await handleTerminalWebSocket(ws, session, req);
 
       // pause control + replay data + resume control + seq control = 4 frames.
       // The pause/resume bracket lets the client exclude the (potentially large)
@@ -152,24 +162,45 @@ describe('tower-websocket', () => {
       expect(controlTypes).toEqual(['pause', 'resume', 'seq']);
     });
 
-    it('sends only seq frame when no replay lines', () => {
+    it('serves the O(screen) snapshot on fresh attach, bracketed like a replay (PIR #1354)', async () => {
+      const ws = makeWs();
+      const session = makeSession(7);
+      session.replaySnapshot.mockResolvedValue({ ok: true, data: 'SNAPSHOT-BYTES', token: 0 });
+      const req = makeReq();
+
+      await handleTerminalWebSocket(ws, session, req);
+
+      // Snapshot path: client registered via addClient, never via the raw attach.
+      expect(session.addClient).toHaveBeenCalledTimes(1);
+      expect(session.attach).not.toHaveBeenCalled();
+
+      // pause + snapshot data + resume + seq — same wire framing as the raw replay,
+      // so clients need no changes.
+      expect(ws.send).toHaveBeenCalledTimes(4);
+      const dataFrame = ws.send.mock.calls
+        .map((call: unknown[]) => call[0] as Buffer)
+        .find((buf: Buffer) => buf[0] === 0x01);
+      expect(dataFrame!.subarray(1).toString('utf-8')).toBe('SNAPSHOT-BYTES');
+    });
+
+    it('sends only seq frame when no replay lines', async () => {
       const ws = makeWs();
       const session = makeSession();
       session.attach.mockReturnValue([]);
       const req = makeReq();
 
-      handleTerminalWebSocket(ws, session, req);
+      await handleTerminalWebSocket(ws, session, req);
 
       // Seq frame is always sent after attach
       expect(ws.send).toHaveBeenCalledTimes(1);
     });
 
-    it('writes data frames to session', () => {
+    it('writes data frames to session', async () => {
       const ws = makeWs();
       const session = makeSession();
       const req = makeReq();
 
-      handleTerminalWebSocket(ws, session, req);
+      await handleTerminalWebSocket(ws, session, req);
 
       // Emit a data frame (0x01 prefix)
       ws.emit('message', encodeDataFrame('hello'));
@@ -179,12 +210,12 @@ describe('tower-websocket', () => {
       expect(session.handleUserInput).toHaveBeenCalledWith('hello');
     });
 
-    it('does not treat control frames as user input', () => {
+    it('does not treat control frames as user input', async () => {
       const ws = makeWs();
       const session = makeSession();
       const req = makeReq();
 
-      handleTerminalWebSocket(ws, session, req);
+      await handleTerminalWebSocket(ws, session, req);
 
       ws.emit('message', encodeControlFrame({
         type: 'resize',
@@ -194,12 +225,12 @@ describe('tower-websocket', () => {
       expect(session.handleUserInput).not.toHaveBeenCalled();
     });
 
-    it('handles resize control frames', () => {
+    it('handles resize control frames', async () => {
       const ws = makeWs();
       const session = makeSession();
       const req = makeReq();
 
-      handleTerminalWebSocket(ws, session, req);
+      await handleTerminalWebSocket(ws, session, req);
 
       ws.emit('message', encodeControlFrame({
         type: 'resize',
@@ -209,12 +240,12 @@ describe('tower-websocket', () => {
       expect(session.resize).toHaveBeenCalledWith(120, 40);
     });
 
-    it('handles ping control frames with pong', () => {
+    it('handles ping control frames with pong', async () => {
       const ws = makeWs();
       const session = makeSession();
       const req = makeReq();
 
-      handleTerminalWebSocket(ws, session, req);
+      await handleTerminalWebSocket(ws, session, req);
       ws.send.mockClear(); // Clear seq frame from attach
 
       ws.emit('message', encodeControlFrame({
@@ -226,12 +257,12 @@ describe('tower-websocket', () => {
       expect(ws.send).toHaveBeenCalledTimes(1);
     });
 
-    it('falls back to raw UTF-8 on decode error', () => {
+    it('falls back to raw UTF-8 on decode error', async () => {
       const ws = makeWs();
       const session = makeSession();
       const req = makeReq();
 
-      handleTerminalWebSocket(ws, session, req);
+      await handleTerminalWebSocket(ws, session, req);
 
       // Send raw text without protocol prefix — will fail decode, fallback to UTF-8
       ws.emit('message', Buffer.from('raw text'));
@@ -239,60 +270,60 @@ describe('tower-websocket', () => {
       expect(session.handleUserInput).toHaveBeenCalledWith('raw text');
     });
 
-    it('detaches client on close', () => {
+    it('detaches client on close', async () => {
       const ws = makeWs();
       const session = makeSession();
       const req = makeReq();
 
-      handleTerminalWebSocket(ws, session, req);
+      await handleTerminalWebSocket(ws, session, req);
 
       ws.emit('close');
 
       expect(session.detach).toHaveBeenCalledTimes(1);
     });
 
-    it('detaches client on error', () => {
+    it('detaches client on error', async () => {
       const ws = makeWs();
       const session = makeSession();
       const req = makeReq();
 
-      handleTerminalWebSocket(ws, session, req);
+      await handleTerminalWebSocket(ws, session, req);
 
       ws.emit('error');
 
       expect(session.detach).toHaveBeenCalledTimes(1);
     });
 
-    it('does not send when ws is not OPEN', () => {
+    it('does not send when ws is not OPEN', async () => {
       const ws = makeWs();
       ws.readyState = 3; // CLOSED
       const session = makeSession();
       session.attach.mockReturnValue(['replay-line']);
       const req = makeReq();
 
-      handleTerminalWebSocket(ws, session, req);
+      await handleTerminalWebSocket(ws, session, req);
 
       // Should not try to send replay when connection is closed
       expect(ws.send).not.toHaveBeenCalled();
     });
 
-    it('uses attachResume when ?resume= query param is set (Bugfix #442)', () => {
+    it('uses attachResume when ?resume= query param is set (Bugfix #442)', async () => {
       const ws = makeWs();
       const session = makeSession();
       const req = makeReq({}, '/ws/terminal/t1?resume=99');
 
-      handleTerminalWebSocket(ws, session, req);
+      await handleTerminalWebSocket(ws, session, req);
 
       expect(session.attachResume).toHaveBeenCalledWith(expect.anything(), 99);
       expect(session.attach).not.toHaveBeenCalled();
     });
 
-    it('sends seq control frame with current ring buffer seq (Bugfix #442)', () => {
+    it('sends seq control frame with current ring buffer seq (Bugfix #442)', async () => {
       const ws = makeWs();
       const session = makeSession(42);
       const req = makeReq();
 
-      handleTerminalWebSocket(ws, session, req);
+      await handleTerminalWebSocket(ws, session, req);
 
       // Find the seq control frame
       const seqFrame = ws.send.mock.calls.find((call: unknown[]) => {
@@ -306,12 +337,12 @@ describe('tower-websocket', () => {
       expect(msg.payload.seq).toBe(42);
     });
 
-    it('sends periodic seq heartbeat (Bugfix #442)', () => {
+    it('sends periodic seq heartbeat (Bugfix #442)', async () => {
       const ws = makeWs();
       const session = makeSession(10);
       const req = makeReq();
 
-      handleTerminalWebSocket(ws, session, req);
+      await handleTerminalWebSocket(ws, session, req);
       ws.send.mockClear();
 
       // Advance by 10s to trigger one heartbeat
@@ -329,12 +360,12 @@ describe('tower-websocket', () => {
       expect(msg.payload.seq).toBe(20);
     });
 
-    it('clears heartbeat interval on close (Bugfix #442)', () => {
+    it('clears heartbeat interval on close (Bugfix #442)', async () => {
       const ws = makeWs();
       const session = makeSession();
       const req = makeReq();
 
-      handleTerminalWebSocket(ws, session, req);
+      await handleTerminalWebSocket(ws, session, req);
       ws.send.mockClear();
 
       ws.emit('close');
@@ -344,12 +375,12 @@ describe('tower-websocket', () => {
       expect(ws.send).not.toHaveBeenCalled();
     });
 
-    it('drops data frames when WebSocket bufferedAmount exceeds high water mark (Bugfix #313)', () => {
+    it('drops data frames when WebSocket bufferedAmount exceeds high water mark (Bugfix #313)', async () => {
       const ws = makeWs();
       const session = makeSession();
       const req = makeReq();
 
-      handleTerminalWebSocket(ws, session, req);
+      await handleTerminalWebSocket(ws, session, req);
 
       // Get the client adapter that was passed to session.attach
       const client = session.attach.mock.calls[0][0];
@@ -398,7 +429,7 @@ describe('tower-websocket', () => {
       };
     }
 
-    it('routes /ws/terminal/:id to session', () => {
+    it('routes /ws/terminal/:id to session', async () => {
       const server = makeServer();
       const wss = makeWss();
       const session = makeSession();
@@ -413,7 +444,7 @@ describe('tower-websocket', () => {
       expect(wss.handleUpgrade).toHaveBeenCalled();
     });
 
-    it('returns 404 for /ws/terminal/:id with unknown session (Node client, no Origin)', () => {
+    it('returns 404 for /ws/terminal/:id with unknown session (Node client, no Origin)', async () => {
       const server = makeServer();
       const wss = makeWss();
       mockGetSession.mockReturnValue(null);
@@ -430,7 +461,7 @@ describe('tower-websocket', () => {
       expect(socket.destroy).toHaveBeenCalled();
     });
 
-    it('closes with 4404 for /ws/terminal/:id with unknown session (browser, Origin present)', () => {
+    it('closes with 4404 for /ws/terminal/:id with unknown session (browser, Origin present)', async () => {
       const server = makeServer();
       let closedWith: [number, string] | null = null;
       const wss: any = {
@@ -459,7 +490,7 @@ describe('tower-websocket', () => {
       expect(socket.destroy).not.toHaveBeenCalled();
     });
 
-    it('routes workspace-scoped /workspace/:path/ws/terminal/:id', () => {
+    it('routes workspace-scoped /workspace/:path/ws/terminal/:id', async () => {
       const server = makeServer();
       const wss = makeWss();
       const session = makeSession();
@@ -479,7 +510,7 @@ describe('tower-websocket', () => {
       expect(wss.handleUpgrade).toHaveBeenCalled();
     });
 
-    it('returns 404 for non-workspace, non-terminal WS paths', () => {
+    it('returns 404 for non-workspace, non-terminal WS paths', async () => {
       const server = makeServer();
       const wss = makeWss();
 
@@ -492,7 +523,7 @@ describe('tower-websocket', () => {
       expect(socket.destroy).toHaveBeenCalled();
     });
 
-    it('returns 400 for missing encoded path', () => {
+    it('returns 400 for missing encoded path', async () => {
       const server = makeServer();
       const wss = makeWss();
 
@@ -505,7 +536,7 @@ describe('tower-websocket', () => {
       expect(socket.destroy).toHaveBeenCalled();
     });
 
-    it('returns 400 for invalid base64url path', () => {
+    it('returns 400 for invalid base64url path', async () => {
       const server = makeServer();
       const wss = makeWss();
 
@@ -523,7 +554,7 @@ describe('tower-websocket', () => {
       expect(socket.destroy).toHaveBeenCalled();
     });
 
-    it('returns 404 for workspace path without terminal route', () => {
+    it('returns 404 for workspace path without terminal route', async () => {
       const server = makeServer();
       const wss = makeWss();
 
@@ -540,7 +571,7 @@ describe('tower-websocket', () => {
       expect(socket.destroy).toHaveBeenCalled();
     });
 
-    it('returns 404 for workspace-scoped route with unknown session (Node client, no Origin)', () => {
+    it('returns 404 for workspace-scoped route with unknown session (Node client, no Origin)', async () => {
       const server = makeServer();
       const wss = makeWss();
       mockGetSession.mockReturnValue(null);
@@ -558,7 +589,7 @@ describe('tower-websocket', () => {
       expect(socket.destroy).toHaveBeenCalled();
     });
 
-    it('closes with 4404 for workspace-scoped route with unknown session (browser, Origin present)', () => {
+    it('closes with 4404 for workspace-scoped route with unknown session (browser, Origin present)', async () => {
       const server = makeServer();
       let closedWith: [number, string] | null = null;
       const wss: any = {
