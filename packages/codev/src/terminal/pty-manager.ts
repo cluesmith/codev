@@ -10,6 +10,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { PtySession } from './pty-session.js';
 import type { PtySessionConfig, PtySessionInfo } from './pty-session.js';
 import { decodeFrame, encodeControl, encodeData } from './ws-protocol.js';
+import { attachWithReplay } from './attach-replay.js';
 import { defaultSessionOptions, DEFAULT_DISK_LOG_MAX_BYTES } from './index.js';
 
 export interface TerminalManagerConfig {
@@ -277,12 +278,16 @@ export class TerminalManager {
       }
 
       this.wss!.handleUpgrade(req, socket, head, (ws) => {
-        this.handleTerminalConnection(ws, session, req);
+        this.handleTerminalConnection(ws, session, req).catch(() => {
+          ws.close();
+        });
       });
     });
   }
 
-  private handleTerminalConnection(ws: WebSocket, session: PtySession, req: http.IncomingMessage): void {
+  // Async since PIR #1354 (snapshot replay awaits the mirror's parser flush);
+  // handlers are registered before the await so input works during the flush.
+  private async handleTerminalConnection(ws: WebSocket, session: PtySession, req: http.IncomingMessage): Promise<void> {
     const url = new URL(req.url ?? '/', `http://${req.headers.host}`);
     const resumeSeq = req.headers['x-session-resume'];
 
@@ -294,22 +299,6 @@ export class TerminalManager {
         }
       },
     };
-
-    // Attach and replay buffer
-    let replayLines: string[];
-    if (resumeSeq && typeof resumeSeq === 'string') {
-      replayLines = session.attachResume(client, parseInt(resumeSeq, 10));
-    } else {
-      replayLines = session.attach(client);
-    }
-
-    // Send replay data
-    if (replayLines.length > 0) {
-      const replayData = replayLines.join('\n');
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(encodeData(replayData));
-      }
-    }
 
     // Handle incoming messages from client
     ws.on('message', (rawData: Buffer) => {
@@ -336,6 +325,30 @@ export class TerminalManager {
     ws.on('error', () => {
       session.detach(client);
     });
+
+    // Attach and compute the replay payload: O(screen) snapshot or raw ring
+    // lines (delta resume / fallback) — same routing as the Tower WS handler.
+    let sinceSeq: number | null = null;
+    if (resumeSeq && typeof resumeSeq === 'string') {
+      sinceSeq = parseInt(resumeSeq, 10);
+    }
+    const replay = await attachWithReplay(session, client, sinceSeq);
+
+    if (ws.readyState !== WebSocket.OPEN) {
+      // Closed while the snapshot flushed — undo the attach registration.
+      session.detach(client);
+      return;
+    }
+
+    let replayData = '';
+    if (replay.kind === 'snapshot') {
+      replayData = replay.data;
+    } else if (replay.lines.length > 0) {
+      replayData = replay.lines.join('\n');
+    }
+    if (replayData.length > 0) {
+      ws.send(encodeData(replayData));
+    }
   }
 
   private handleControlMessage(

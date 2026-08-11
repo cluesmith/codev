@@ -102,6 +102,15 @@ export function isReconciling(): boolean {
   return _reconciling;
 }
 
+/**
+ * Log through the terminal module's injected logger; a no-op before init.
+ * Exists so sibling modules without their own `TerminalDeps` (the WS attach
+ * handler's replay-snapshot fallback line, PIR #1354) share Tower's log sink.
+ */
+export function logTerminal(level: 'INFO' | 'ERROR' | 'WARN', msg: string): void {
+  _deps?.log(level, msg);
+}
+
 // ============================================================================
 // Startup-readiness barrier (#997)
 // ============================================================================
