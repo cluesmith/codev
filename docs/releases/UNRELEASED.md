@@ -47,6 +47,7 @@ The annotation viewer can now lay documents out in side-by-side columns — news
        - **<Headline>** (#<issue>, PR #<pr>). <One short paragraph of context.>
      Move out to its own ## section if the entry grows past ~3 sentences. -->
 
+- **One-step open issue or PR by number** (#1179, PR #1399). Typing a number (`1350`, `pr 1350`, `view issue 1350`) into the backlog search Quick Pick surfaces direct `View Issue #N` / `View PR #N` rows that open the target in the browser in a single gesture, and a new `Codev: Open PR by ID` command (`Cmd+K Shift+P` / `Ctrl+K Shift+P`) completes the keyboard family alongside `Cmd+K I` for issues. Works across GitHub, GitLab, and Gitea.
 - **Annotation viewer: in-row add-comment button** (#1343, PR #1385). The "+" now renders inside the hovered row itself (the pattern code-review tools use), eliminating the disappearing-button class the previous release only damped. Full-bleed visual refresh on code blocks and quotes; text positions unchanged.
 - **Annotation viewer: keyboard-first review** (#1237, PR #1344). Review a spec or plan entirely from the keyboard: Tab between blocks, Enter to comment, Cmd/Ctrl+Enter to submit, Esc to cancel, jump keys for commented blocks and headings, keyboard-reachable minimap, and a `?` keys legend.
 - **Annotation viewer: steadier, larger add-comment button** (#1236, PR #1344). The "+" no longer disappears or jumps away while the mouse travels toward it, and it's sized to the document font with a comfortable click target.
