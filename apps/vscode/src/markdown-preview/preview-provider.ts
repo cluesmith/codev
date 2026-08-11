@@ -37,6 +37,8 @@ import {
 } from '@cluesmith/codev-sdk/review-markers';
 import { renderMarkdownPreviewHtml } from './preview-template.js';
 import type { HostToWebviewMessage, WebviewToHostMessage } from './messages.js';
+import type { ConnectionManager } from '../connection-manager.js';
+import { registerCanvasView } from './canvas-view-registry.js';
 import type { OverviewCache } from '../views/overview-data.js';
 
 /** globalState key for the per-user reading-mode preference (spec 1380 D4 — per-USER scope:
@@ -62,6 +64,12 @@ export class MarkdownPreviewProvider implements vscode.CustomTextEditorProvider 
     // Per-user persistence surface for the reading-mode preference (spec 1380 D4). A `Memento`
     // rather than the whole ExtensionContext: the provider needs exactly this seam.
     private readonly globalState: vscode.Memento,
+    /**
+     * Tower connection, used to register this panel as a live canvas view and receive the
+     * commands addressed to it (spec 1401). Optional so the preview still works standalone —
+     * without it the canvas is simply not remotely drivable, exactly as before.
+     */
+    private readonly connectionManager?: ConnectionManager,
   ) {}
 
   public resolveCustomTextEditor(
@@ -101,6 +109,18 @@ export class MarkdownPreviewProvider implements vscode.CustomTextEditorProvider 
       if (e.document.uri.toString() === document.uri.toString()) { pushUpdate(); }
     });
     panel.onDidDispose(() => changeSub.dispose());
+
+    // Register this panel as a live canvas view so Tower can address commands to it (spec 1401).
+    // Torn down with the panel, so a closed preview stops being a target immediately rather than
+    // lingering until its lease expires.
+    if (this.connectionManager) {
+      const canvasView = registerCanvasView({
+        connectionManager: this.connectionManager,
+        panel,
+        file: document.uri.fsPath,
+      });
+      panel.onDidDispose(() => canvasView.dispose());
+    }
 
     panel.webview.onDidReceiveMessage((msg: unknown) => {
       if (!msg || typeof msg !== 'object') { return; }

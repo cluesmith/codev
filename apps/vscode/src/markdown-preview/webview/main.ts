@@ -27,6 +27,8 @@ import * as React from 'react';
 import { createRoot } from 'react-dom/client';
 import {
   ArtifactCanvas,
+  type CanvasCommandInvocation,
+  type CommandAdapter,
   type FileAdapter,
   type MarkerAdapter,
   type ReadingMode,
@@ -74,6 +76,33 @@ const themeAdapter: ThemeAdapter = {
 
 const root = createRoot(rootElement);
 
+/**
+ * Remote command seam (spec 1401). The host owns the transport — it holds the Tower connection
+ * and has already decided this panel is the addressee — so the adapter here is just the last
+ * hop: hold the canvas's subscriber and hand it whatever arrives.
+ *
+ * Commands can arrive before the canvas has subscribed (the host pushes as soon as Tower
+ * resolves), in which case there is no subscriber to hand it to and the command is dropped
+ * rather than queued: a stale navigation replayed later would move the reviewer somewhere they
+ * no longer expect.
+ */
+let onCanvasCommand: ((invocation: CanvasCommandInvocation) => void) | null = null;
+
+function deliverCommand(invocation: CanvasCommandInvocation): void {
+  onCanvasCommand?.(invocation);
+}
+
+const commandAdapter: CommandAdapter = {
+  subscribe(handler) {
+    onCanvasCommand = handler;
+    return {
+      dispose: () => {
+        onCanvasCommand = null;
+      },
+    };
+  },
+};
+
 function render(): void {
   root.render(
     React.createElement(ArtifactCanvas, {
@@ -81,6 +110,7 @@ function render(): void {
       fileAdapter,
       markerAdapter,
       themeAdapter,
+      commandAdapter,
       onAddComment: (line: number, text: string) =>
         vscodeApi.postMessage({ type: 'addComment', line, text }),
       onEditComment: (
@@ -110,6 +140,14 @@ function render(): void {
 
 window.addEventListener('message', (event: MessageEvent) => {
   const msg = event.data as HostToWebviewMessage | null;
+  if (msg?.type === 'command') {
+    // Already addressed to this panel by the host, which matched Tower's resolved `viewId`, so
+    // there is nothing left to filter here — just run it (spec 1401).
+    if (typeof msg.command === 'string') {
+      deliverCommand({ command: msg.command, count: msg.count });
+    }
+    return;
+  }
   if (msg?.type !== 'update') { return; }
   content = msg.content ?? '';
   markers = msg.markers ?? [];

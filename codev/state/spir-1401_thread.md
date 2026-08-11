@@ -457,3 +457,38 @@ an already-full class surface; my doc note is endorsed as the interim posture. S
 tracked as **#1411** (restricted controller client / capability surface) in their name, sequenced
 after this merge. TODO: record #1411 + this verdict in the review file's dispositions, and note
 it in the PR body.
+
+## 2026-08-12 — phase_6 (VS Code host wiring) implemented
+
+New apps/vscode/src/markdown-preview/canvas-view-registry.ts: registers each canvas PANEL as a
+live view, heartbeats the lease (30s, matching Tower's constant), reports activity on
+onDidChangeViewState so the panel being read wins MRU, filters the broadcast SSE by its own
+viewId, and forwards to that panel's webview. Wired through preview-provider (connectionManager
+is an OPTIONAL constructor arg, so the preview still works standalone) and extension.ts.
+HostToWebviewMessage became a union with a `command` member; webview/main.ts implements
+CommandAdapter as the last hop.
+
+Lifecycle details that needed care:
+- **Panel closed mid-registration**: the in-flight response is unregistered immediately, or the
+  view would linger as a target nothing will ever heartbeat. Has a test.
+- **Re-registration** on `unknownView` (Tower restart / lapsed lease) and retry when Tower was
+  unreachable at open time — otherwise an open panel is permanently undrivable.
+- **Serialized registration** so a heartbeat racing a reconnect cannot register twice.
+- **No panel.reveal()** on delivery: a remote command drives the canvas, it must not steal the
+  reviewer's window (matches the existing relay's never-pulls-focus posture).
+- Commands arriving before the canvas subscribes are DROPPED, not queued: a stale navigation
+  replayed later would move the reviewer somewhere they no longer expect.
+
+### OUTSTANDING: the manual end-to-end pass (plan phase_6 acceptance criterion)
+
+I cannot perform it autonomously — it needs a real VS Code window with the extension loaded, a
+running Tower, and an open canvas panel. Everything either side of that seam IS verified (Tower
+route by e2e against a real Tower; canvas seam by unit + playwright + the human's own dev-page
+session; sdk and host glue by unit tests with fakes). What no automated test here covers is the
+real extension registering with the real Tower and a real command reaching the real webview —
+and note webview/main.ts is outside the extension's tsconfig, so it has NO typecheck either.
+That makes the manual pass load-bearing evidence, not a formality. Flagged in the review file and
+the PR body for the pr-gate reviewer.
+
+Verification: 12/12 new host-glue tests, 789/789 vscode suite, repo check-types clean, build
+green, 4847 repo tests.
