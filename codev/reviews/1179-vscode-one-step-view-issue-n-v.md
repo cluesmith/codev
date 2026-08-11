@@ -79,6 +79,24 @@ section documents the concept mechanism generically and already lists `pr-view` 
 
 ## Things to Look At During PR Review
 
+- **⚠️ Consultation finding (Claude, REQUEST_CHANGES — confirmed, needs a human decision):
+  `Ctrl+K P` / `Cmd+K P` shadows a VS Code built-in.** The issue said "verified P slot is
+  free," but that verification (plan's included) only covered the extension's own
+  keybindings map. VS Code registers `workbench.action.files.copyPathOfActiveFile` on
+  exactly this chord (weight 200, no `when` clause — confirmed in Cursor's bundled
+  `workbench.desktop.main.js`: `registerCommandAndKeybindingRule({weight:200, when:void 0,
+  primary:chord(ctrl+k, KeyP), mac:chord(cmd+k, KeyP)})`), and extension-contributed
+  keybindings outrank workbench ones, so installing Codev takes "Copy Path of Active File"
+  away on both platforms. The binding ships as the issue specified; options at the gate:
+  **keep** (accept shadowing — common among extensions, and the command remains reachable
+  via palette/context menu), **scope** with a `when` clause, or **rebind**. Since the key
+  choice was baked into the issue on a false premise, I did not change it unilaterally —
+  decide here. (PIR consultation is single-pass; this disposition was not re-reviewed.)
+- Consultation minor (Claude, non-blocking): in `search-backlog.ts` the async browser-open
+  helpers are invoked bare inside the sync `onDidAccept` callback, so an `openExternal`
+  rejection would be an unhandled rejection. Left as-is per house style (bare
+  fire-and-forget calls); both helpers handle their real failure modes (not connected /
+  not found) internally with toasts.
 - `search-backlog.ts` accept-routing: dynamic rows are discriminated by `'target' in picked`
   — static `BacklogQuickPickItem` rows never carry `target`, so the check is sound, but
   it's the one structural assumption tying the two item shapes together.
