@@ -108,3 +108,19 @@ minimap suppression, a11y — incl. the deferred container-paging decision), pha
 
 All six phases done pending phase-6 iter-2. Next: PR → dev-approval demos (both hosts, incl.
 vertical-mode fence pass for the #1396 change) → merge → verify.
+
+## Dev-approval, merge, verify (2026-08-11)
+
+Human hands-on testing produced four fixes (all with regression tests): composer
+keep-with-block across column breaks (break-avoid grouping, atomic stack while composing,
+half-column textarea cap), wheel glide for notched wheels, quiet focus restoration for
+pointer flows (pre-existing modality leak, both modes), single amber edge on comment cards.
+Two CI-only test hardenings followed (scrollIntoView stub; card-free candidate for the
+same-column lock) — local grep-piping had masked a vitest exit code, lesson noted. Webview
+staleness gotcha surfaced during testing: the extension bundles the canvas from dist, so
+package build + esbuild + window reload are required to see canvas changes there.
+
+PR #1398 merged 2026-08-11T04:21Z (pr gate approved_at 04:20:05, verified in status.yaml;
+admin fallback per architect authorization; merge commit). #1380 + #1396 auto-closed. Main
+pulled back into the worktree; post-merge suites green (150 jsdom / 33 browser / 4786
+repo-wide). verify-approval gate requested.
