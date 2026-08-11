@@ -20,8 +20,9 @@
         <option value="8">Slot 8</option>
       </sdpi-select>
     </sdpi-item>
-    <sdpi-item label="Verb">
-      <sdpi-select setting="verb" default="view-diff">
+    <sdpi-item label="On press">
+      <sdpi-select setting="verb" default="automatic">
+        <option value="automatic">Automatic (open current phase's artifact)</option>
         <option value="view-diff">View Diff</option>
         <option value="open-terminal">Open Terminal</option>
         <option value="open-spec">Open Spec</option>
@@ -31,8 +32,10 @@
       </sdpi-select>
     </sdpi-item>
     <sdpi-item label="">
-      <small>Pins this key to the Nth builder (slot 1 = first builder) and runs
-      the chosen verb for it on press.</small>
+      <small>Pins this key to the Nth builder (slot 1 = first builder) and shows
+      its issue + phase. Press selects that builder. On Automatic, the press opens
+      the artifact for its current phase (spec / plan / diff), re-openable every
+      press; pick a fixed verb to always run that instead.</small>
     </sdpi-item>
   </body>
 </html>
