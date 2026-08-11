@@ -5,6 +5,19 @@ SPEC vs PLAN BOUNDARY:
 This spec defines WHAT and WHY. The plan defines HOW and WHEN.
 -->
 
+> **Revision note (2026-08-11, post-approval, authorized by the architect and the streamdeck
+> stakeholder).** Two corrections, neither changing a requirement:
+>
+> 1. The multi-view example was corrected from "split editor" to an accurate one, since
+>    `supportsMultipleEditorsPerDocument: false` means VS Code cannot open two canvas panels
+>    for one document. The MRU requirement is unchanged; only the illustrative example and the
+>    verification venue moved.
+> 2. The sdk-visible error union gained a third member, `unreachable`, and the call is
+>    explicitly non-throwing. The **wire** union Tower answers with is still exactly
+>    `'no-canvas' | 'invalid-request'`; `unreachable` is client-synthesized. This resolves a
+>    builder proposal (reject on transport failure) that the streamdeck stakeholder rejected,
+>    because `TowerClient` holds a never-reject invariant that this call must not break.
+
 ## Problem Statement
 
 The artifact canvas has a complete keyboard-first review vocabulary (#1237 / PR #1344,
@@ -202,12 +215,13 @@ after resolution is best-effort (SSE has no ack); the explicit-answer guarantee 
 target resolution.
 
 **Error contract.** Failure codes are a **closed, exported union type in `codev-types`**
-(streamdeck design-review decision — not an open string):
-`'no-canvas' | 'invalid-request'`. `no-canvas` answers HTTP 404 (selector resolved to zero
-live views); `invalid-request` answers HTTP 400 (unknown command, malformed selector, or
-`count` on a non-traversal command). Every failure body is
-`{ok:false, code, error}` with `code` from the union; extending the union is an additive
-type change, not a string convention.
+(streamdeck design-review decision — not an open string). The **wire** union, i.e. the answers
+Tower itself gives, has exactly two members: `'no-canvas' | 'invalid-request'`. `no-canvas`
+answers HTTP 404 (selector resolved to zero live views); `invalid-request` answers HTTP 400
+(unknown command, malformed selector, or `count` on a non-traversal command). Every failure
+body is `{ok:false, code, error}` with `code` from the wire union; extending it is an additive
+type change, not a string convention. The sdk-visible union is one member wider, for the
+client-synthesized `unreachable` case described in §3.
 
 **Security posture.** The route inherits Tower's existing trust boundary (localhost bind
 behind the host/origin gate; the same exposure considerations as every route under
@@ -241,16 +255,29 @@ sendCanvasCommand(
   command: CanvasCommand,
   target: { workspace: string; file?: string },
   options?: { count?: number }   // traversal/paging commands only; default 1
-): Promise<CanvasCommandResult>
-// CanvasCommandResult: { ok: true, target: { viewId: string, file: string } }
-//                    | { ok: false, code: CanvasCommandErrorCode, error: string }
-// CanvasCommandErrorCode = 'no-canvas' | 'invalid-request'   (closed union, codev-types)
+): Promise<CanvasCommandClientResult>          // never rejects
+// CanvasCommandClientResult: { ok: true, target: { viewId: string, file: string } }
+//                          | { ok: false, code: CanvasCommandClientErrorCode, error: string }
+// CanvasCommandErrorCode       = 'no-canvas' | 'invalid-request'       (wire; Tower's answers)
+// CanvasCommandClientErrorCode = CanvasCommandErrorCode | 'unreachable' (sdk-visible)
 ```
 
 - Wire types (`CanvasCommand`, `CanvasCommandErrorCode`, request/result shapes, route
   constant) live in `codev-types`; the sdk imports them type-only and re-declares the route
   string literal, matching the existing `COMMAND_ROUTE` pattern. Result types are
   re-exported as `export type` from the controller subpath.
+- **The call never rejects**, matching the never-reject invariant the whole `TowerClient`
+  holds (its shared `request()` catches every transport error and returns `ok:false` with
+  `status: 0`). `sendCanvasCommand` is not an exception to that invariant.
+- **`unreachable` is client-synthesized and never sent by Tower.** It is how a caller
+  distinguishes "Tower answered: no canvas is open" from "Tower could not be reached", which
+  is precisely the confusion a controller must not make. The wire union stays two members so
+  Tower cannot even type such a response; the sdk-visible union carries the third.
+- No structural `source` discriminator is added (builder's call, streamdeck indifferent). The
+  type-level split already does that work: Tower cannot express `unreachable`, the union is
+  closed so TS consumers get exhaustiveness checking when it grows, and the transport layer
+  already signals the case with `status: 0`. A `source` field would be a third encoding of
+  one fact.
 - The machine-readable `code` must survive to the caller: the sdk call's observable
   contract is the typed result above, not a flattened error string (the deck renders
   "no canvas open" from `code`, never by parsing prose). How that composes with the shared
@@ -281,8 +308,10 @@ sendCanvasCommand(
       `codev-types` — machine-readable, never only prose.
 - [ ] With no matching canvas view open, the Tower route and the sdk call return an explicit
       machine-readable `no-canvas` error — observably not a success and not a silent no-op.
-- [ ] With two views open on the same file (e.g. split editor), a command is applied to
-      exactly one — the most recently active — and the response names it.
+- [ ] With two views open on the same file (two hosts on one file, e.g. a VS Code panel and
+      the Tower-served page once #1386 lands; verified at the Tower registry, which accepts
+      two registrations for one file directly), a command is applied to exactly one — the
+      most recently active — and the response names it.
 - [ ] With views open on two different files in one workspace, a file-qualified command
       reaches the view for that file; a file-less command reaches the most recently active.
 - [ ] `composer-open` → (human types) → `composer-submit` driven remotely posts exactly one
@@ -407,10 +436,12 @@ Functional:
    command) returns `invalid-request`; `count: 0` and negative values are rejected.
 5. No canvas open (workspace has none / file not shown / last view closed): route and sdk
    call return `no-canvas` (HTTP 404, closed-union code); nothing is delivered.
-6. Two views, same file: command lands only on the most recently active; response names it
-   via its Tower-minted `viewId`; activating the other view flips subsequent delivery. Two
-   registrations of the same file under different path spellings resolve to one registry
-   identity (Tower canonicalization).
+6. Two views, same file (exercised at the Tower registry, which accepts two registrations for
+   one file regardless of host): command lands only on the most recently active; response
+   names it via its Tower-minted `viewId`; activating the other view flips subsequent
+   delivery. Two registrations of the same file under different path spellings match the same
+   selector (Tower canonicalization) while remaining two distinct views with distinct
+   `viewId`s.
 7. Two views, different files: file-qualified selector routes correctly both ways; file-less
    selector follows MRU; a delivered command advances the target's `lastActiveAt`.
 8. Stale registration (host killed without unregister): after lease expiry, commands return

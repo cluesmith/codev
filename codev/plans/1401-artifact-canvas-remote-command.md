@@ -101,10 +101,16 @@ packages in lockstep.
       (`Extract<CanvasCommand, 'block-next' | ...>`) covering the eight traversal/paging
       commands, plus its complement. Types-only for the reason given in the summary; each
       consumer declares its own `satisfies`-bound `const` list.
-- [ ] `CanvasCommandErrorCode`: closed union `'no-canvas' | 'invalid-request'`.
-- [ ] `CanvasCommandRequest { workspace, file?, command, count? }` and
-      `CanvasCommandResult` (success carries `target: { viewId, file }`; failure carries
-      `code` and `error`).
+- [ ] `CanvasCommandErrorCode`: the closed **wire** union `'no-canvas' | 'invalid-request'`,
+      i.e. exactly the answers Tower gives.
+- [ ] `CanvasCommandClientErrorCode`: `CanvasCommandErrorCode | 'unreachable'`, the sdk-visible
+      union, with `unreachable` documented at its declaration as client-synthesized and never
+      sent by Tower. Two separate types rather than one, so Tower cannot type a response it
+      must never send.
+- [ ] `CanvasCommandRequest { workspace, file?, command, count? }`, `CanvasCommandResult`
+      (the wire result: success carries `target: { viewId, file }`, failure carries a wire
+      `code` and `error`), and `CanvasCommandClientResult` (the sdk-visible result, identical
+      but widened to the client error union).
 - [ ] View-registry wire shapes: registration request/result (`viewId` minted by Tower),
       heartbeat body (`{ focused?: boolean }`), and the registered-view shape.
 - [ ] `CanvasCommandEvent`: the addressed SSE event payload as an explicit wire shape
@@ -339,17 +345,18 @@ beyond what the streamdeck architect reviewed.
 #### Deliverables
 
 - [ ] `sendCanvasCommand(command, target, options?)` returning the typed
-      `CanvasCommandResult`, with the machine-readable `code` preserved on failure. The shared
-      `request()` helper normalizes non-2xx responses and discards body-level codes today, so
-      this call reads the parsed error body rather than inheriting that flattening.
-- [ ] **Transport failures reject the returned promise** rather than resolving to a failure
-      code. The spec fixes `CanvasCommandErrorCode` as a closed union of Tower's *answers*
-      (`no-canvas`, `invalid-request`), and "Tower is unreachable" is not an answer. A
-      resolved promise therefore always carries a Tower verdict, which is precisely the
-      distinction a controller needs so it never renders "no canvas open" when Tower is simply
-      down. This is a deliberate, documented departure from the non-throwing house style of
-      `sendCommand`; it is called out here rather than buried, and it does not widen the
-      approved union.
+      `CanvasCommandClientResult`, with the machine-readable `code` preserved on failure. The
+      shared `request()` helper returns only a flattened `error` string on non-2xx
+      (`tower-client.ts:276-280` runs the body through `extractTowerError`), so this call
+      parses the response body itself to recover the wire `code`.
+- [ ] **The call never rejects** (streamdeck stakeholder verdict, 2026-08-11; an earlier
+      builder proposal to reject on transport failure was rejected). `TowerClient.request()`
+      catches every transport error and returns `{ok:false, status:0}`
+      (`tower-client.ts:288-296`), a never-reject invariant the whole client holds, and this
+      call is not its sole exception.
+- [ ] Transport failures map to the client-synthesized `code: 'unreachable'`, keyed off the
+      existing `status: 0` signal from `request()`. Tower never sends this code, and the wire
+      union cannot express it.
 - [ ] Host-facing `registerCanvasView`, `heartbeatCanvasView`, `unregisterCanvasView` on
       `TowerClient`, deliberately **not** re-exported through `controller.ts`: controllers
       drive views, hosts register them, so the controller surface stays exactly as approved.
@@ -363,8 +370,11 @@ beyond what the streamdeck architect reviewed.
 
 - [ ] Success, `no-canvas` and `invalid-request` responses each produce the correct typed
       result, with `code` reaching the caller rather than only a prose string.
-- [ ] Transport failure and malformed-response cases reject, and are therefore distinguishable
-      from a resolved `no-canvas`.
+- [ ] Transport failure and malformed-response cases resolve (never reject) with
+      `code: 'unreachable'`, so a caller distinguishes them from a Tower-answered `no-canvas`
+      without parsing prose.
+- [ ] No call path in the new methods can reject: asserted by a test that drives a throwing
+      `fetchFn`.
 - [ ] `packages/sdk/src/__tests__/import-boundary.test.ts` passes unchanged: no `node:*`, no
       direct `fetch`, no runtime import from `codev-types`, zero new runtime dependencies.
 - [ ] `apps/streamdeck/src/__tests__/import-boundary.test.ts` passes unchanged.
@@ -374,8 +384,9 @@ beyond what the streamdeck architect reviewed.
 
 Unit tests with an injected `fetchFn` (the established pattern in `tower-client.test.ts`): one
 case per response shape including a malformed body, one asserting the request payload carries
-`count` only when supplied, and transport-failure cases asserting rejection. Registration calls
-get the same treatment. The two boundary suites are the architectural regression tests.
+`count` only when supplied, and transport-failure cases asserting a resolved `unreachable`
+rather than a rejection. Registration calls get the same treatment. The two boundary suites are
+the architectural regression tests.
 
 ### Phase 6: VS Code host wiring and end-to-end review loop
 
@@ -459,7 +470,7 @@ for that file, not a confirmatory formality, and its transcript belongs in
 | Adding `@cluesmith/codev-types` to the canvas package leaks a runtime import | Low | Medium: breaks the package's host-agnostic posture | Type-only import enforced by an extended import-boundary test, mirroring the sdk rule; fallback is a canvas-local union plus a drift test, at the cost of two definitions |
 | Registry staleness leaves a ghost view after a hard host kill | Medium | Medium: commands resolve and silently do nothing | Lease expiry bounds the window; unregister on panel dispose and on deactivate covers graceful paths; Phase 4 tests expiry explicitly |
 | Tower restart strands open panels holding dead `viewId`s | Medium | Medium: canvas silently stops responding | Explicit re-registration on reconnect and on unknown-view heartbeat, with a Phase 6 test |
-| The sdk `request()` normalization swallows the error code | Medium | Medium: the deck cannot distinguish no-canvas from a generic failure | A Phase 5 deliverable with its own cases, plus rejection-on-transport-failure so the two are structurally distinct |
+| The sdk `request()` normalization swallows the error code | Medium | Medium: the deck cannot distinguish no-canvas from a generic failure | Phase 5 parses the response body for the wire `code` and synthesizes `unreachable` from `status: 0`, with a test per case and a throwing-`fetchFn` test pinning the never-reject invariant |
 | Webview code is outside the extension typecheck | High (pre-existing) | Medium: a broken adapter compiles | Called out in the Phase 6 test plan; the manual pass is treated as load-bearing evidence rather than a formality |
 | Two act-paths on the deck (`sendCommand` to open a canvas, `sendCanvasCommand` to drive it) confuse future contributors | Medium | Low | Documented at both call sites and in the arch integration-points note; the generic-relay question is recorded as closed in the spec |
 

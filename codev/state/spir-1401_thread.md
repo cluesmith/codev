@@ -93,3 +93,34 @@ restart; canonicalization merges FILE identity, not view identity (two views kee
 viewIds); typed CanvasCommandEvent SSE payload; sdk transport failures reject rather than
 widening the spec-fixed closed error union; webview/ is outside the extension typecheck so the
 manual pass is load-bearing evidence, not a formality.
+
+## 2026-08-11 — Rebased on main; two post-approval corrections folded in
+
+Rebased builder/spir-1401 onto origin/main (27 commits behind → 0). Clean, no conflicts; porch
+state intact at `plan`. NOTE: the branch was already pushed, so the remote is now diverged and
+needs a force-push to match. Not done — waiting on the human, since it rewrites published
+history.
+
+Architect-authorized spec corrections (post spec-approval, substance unchanged; both recorded
+in a revision note at the top of the spec):
+1. **split-editor example was factually wrong.** extension.ts:1404 sets
+   supportsMultipleEditorsPerDocument:false, so VS Code cannot open two canvas panels on one
+   document. Example replaced (two hosts on one file, post-#1386); MRU requirement kept
+   verbatim; verification venue moved to the Tower registry, which accepts two registrations
+   for one file directly. Flag deliberately NOT flipped.
+2. **Transport-failure delta: streamdeck stakeholder REJECTED my proposal.** I verified their
+   claim myself at tower-client.ts:288-296: request() catches every transport error and returns
+   {ok:false, status:0}, so the client holds a never-reject invariant and sendCanvasCommand must
+   not be its sole exception. Binding resolution folded in: call stays NON-THROWING; the
+   sdk-visible union gains `unreachable` as a CLIENT-SYNTHESIZED code (wire union stays two
+   members — two separate types, so Tower cannot type a response it must never send);
+   transport failures key off the existing status:0 signal.
+
+Structural `source` field was my call: **declined**. The type-level split already carries the
+distinction (Tower cannot express `unreachable`), the closed union gives TS consumers
+exhaustiveness checking when it grows, and status:0 already signals the case one layer down. A
+source field would be a third encoding of one fact.
+
+Lesson worth keeping: my proposal was locally well-reasoned but violated a package-wide
+invariant I had not checked. The stakeholder review caught it, exactly as the #1189 arrangement
+is meant to.
