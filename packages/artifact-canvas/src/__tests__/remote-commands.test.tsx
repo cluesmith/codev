@@ -9,7 +9,7 @@
  * here is the remote path, so these tests assert through the adapter rather than through keys.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, cleanup, fireEvent, act } from '@testing-library/react';
+import { render, screen, waitFor, cleanup, fireEvent } from '@testing-library/react';
 import * as React from 'react';
 import { ArtifactCanvas } from '../components/ArtifactCanvas.js';
 import type { CanvasCommandInvocation, CommandAdapter } from '../adapters/CommandAdapter.js';
@@ -148,6 +148,32 @@ describe('remote command channel', () => {
     channel.send('doc-start');
     channel.send('heading-next');
     expect(focusedLine()).toBe(lineOf('Summary'));
+  });
+
+  it('jumps backwards to the previous commented block and heading', async () => {
+    const { channel } = mount();
+    await rendered();
+
+    channel.send('doc-end');
+    channel.send('comment-prev');
+    expect(focusedLine()).toBe(lineOf('Summary'));
+
+    channel.send('doc-end');
+    channel.send('heading-prev');
+    // The last heading before the end of the fixture is "## Requirements".
+    expect(focusedLine()).toBe(lineOf('Requirements'));
+  });
+
+  it('does not wrap when a backwards jump has nowhere to go', async () => {
+    const { channel } = mount();
+    await rendered();
+
+    channel.send('doc-start');
+    const first = focusedLine();
+    channel.send('comment-prev');
+    expect(focusedLine()).toBe(first);
+    channel.send('heading-prev');
+    expect(focusedLine()).toBe(first);
   });
 
   it('moves to the document start and end', async () => {
@@ -300,13 +326,36 @@ describe('remote command channel', () => {
   // command is safe to send in vertical mode.
   it('leaves column paging a safe no-op in vertical mode', async () => {
     const { channel } = mount();
-    await rendered();
+    const block = await rendered();
+    const body = block.closest('.codev-artifact-canvas-body') as HTMLElement;
 
     channel.send('doc-start');
     const before = focusedLine();
+    // A vertical layout can still scroll horizontally (a wide table, a long code line), so give
+    // the body a non-zero scroll position and assert paging does not move it. Without the
+    // mode check in the action this passes only because jsdom reports zero geometry.
+    body.scrollLeft = 40;
     channel.send('column-forward');
     channel.send('column-back');
+    expect(body.scrollLeft).toBe(40);
     expect(focusedLine()).toBe(before);
+  });
+
+  it('stops a counted command once it stops making progress', async () => {
+    const { channel } = mount();
+    await rendered();
+
+    // A huge count must not walk a million steps over a handful of blocks. The loop breaks as
+    // soon as a step changes nothing, so this returns promptly and lands on the last block.
+    channel.send('doc-start');
+    const started = Date.now();
+    channel.send('block-next', 1_000_000);
+    const elapsed = Date.now() - started;
+    const landed = focusedLine();
+
+    channel.send('doc-end');
+    expect(focusedLine()).toBe(landed);
+    expect(elapsed).toBeLessThan(1000);
   });
 
   it('reports a thrown error through onError instead of escaping the host callback', async () => {
@@ -349,6 +398,21 @@ describe('remote command channel', () => {
     expect(onReadingModeChange).toHaveBeenLastCalledWith('vertical');
     channel.send('reading-mode-toggle');
     expect(onReadingModeChange).toHaveBeenLastCalledWith('horizontal');
+  });
+
+  // The spec's non-goal: remote block traversal must not be implemented by hijacking Tab, which
+  // also visits the "+" affordance, card actions, the toolbar and links.
+  it('does not intercept Tab', async () => {
+    const { channel } = mount();
+    const block = await rendered();
+
+    channel.send('doc-start');
+    const before = focusedLine();
+    const handled = fireEvent.keyDown(block, { key: 'Tab' });
+    // fireEvent returns false only when preventDefault was called; the canvas must leave Tab to
+    // the browser, and focus must not have moved as a side effect.
+    expect(handled).toBe(true);
+    expect(focusedLine()).toBe(before);
   });
 
   it('leaves behavior unchanged when no command adapter is supplied', async () => {

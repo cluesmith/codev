@@ -1,0 +1,104 @@
+import { test, expect, type Page, type Locator } from '@playwright/test';
+
+/**
+ * Remote command channel in real Chromium (spec 1401, plan phase 3).
+ *
+ * The unit suite drives the same `CommandAdapter`, but jsdom reports no layout, so column paging
+ * and scroll-into-view can only be asserted for real here. The dev page exposes the adapter as
+ * `window.__canvasCommand`, which is exactly the shape a host implements.
+ */
+
+async function openFixture(page: Page, mode: 'horizontal' | 'vertical'): Promise<Locator> {
+  await page.goto(`/?fixture=columns&mode=${mode}`);
+  const body = page.locator('.codev-artifact-canvas-body');
+  await expect(body.locator('h1')).toHaveText('Columns fixture');
+  await page.waitForFunction(() => typeof window.__canvasCommand === 'function');
+  return body;
+}
+
+const send = (page: Page, command: string, count?: number) =>
+  page.evaluate(
+    ([c, n]) => window.__canvasCommand?.(c as never, n as number | undefined),
+    [command, count] as const,
+  );
+
+const scrollLeft = (body: Locator) => body.evaluate((el) => el.scrollLeft);
+
+/** One column step: the first fragment's width plus the column gap. */
+const measureStep = (body: Locator) =>
+  body.evaluate((el) => {
+    const first = el.firstElementChild as Element;
+    const width = first.getClientRects()[0].width;
+    const gap = Number.parseFloat(getComputedStyle(el).columnGap) || 0;
+    return width + gap;
+  });
+
+test('remote column paging steps one measured column, forward and back', async ({ page }) => {
+  const body = await openFixture(page, 'horizontal');
+  const step = await measureStep(body);
+  // scrollLeft rounds to device pixels while the measured step can be fractional, so assert
+  // within a pixel of the grid rather than exact equality (same tolerance as the key-driven suite).
+  const near = (target: number) => async () => Math.abs((await scrollLeft(body)) - target) <= 1;
+
+  await send(page, 'column-forward');
+  await expect.poll(near(step)).toBe(true);
+  await send(page, 'column-forward');
+  await expect.poll(near(2 * step)).toBe(true);
+  await send(page, 'column-back');
+  await expect.poll(near(step)).toBe(true);
+});
+
+test('count pages several columns in one command', async ({ page }) => {
+  const body = await openFixture(page, 'horizontal');
+  const step = await measureStep(body);
+
+  await send(page, 'column-forward', 3);
+  await expect.poll(async () => Math.abs((await scrollLeft(body)) - 3 * step) <= 1).toBe(true);
+});
+
+test('a huge count stops at the end instead of spinning', async ({ page }) => {
+  const body = await openFixture(page, 'horizontal');
+
+  const started = Date.now();
+  await send(page, 'column-forward', 1_000_000);
+  const elapsed = Date.now() - started;
+
+  const max = await body.evaluate((el) => el.scrollWidth - el.clientWidth);
+  await expect.poll(async () => Math.abs((await scrollLeft(body)) - max) <= 2).toBe(true);
+  expect(elapsed).toBeLessThan(5000);
+});
+
+test('column paging is inert in vertical mode', async ({ page }) => {
+  const body = await openFixture(page, 'vertical');
+
+  // The body only becomes a horizontal scroll container under `.codev-canvas-mode-horizontal`
+  // (`overflow-x: auto` is mode-scoped), so vertical mode has nothing to scroll and this pins
+  // that. The mode check in the action is the guard for a host whose stylesheet makes the body
+  // scrollable anyway; it cannot be provoked from here.
+  const scrollable = await body.evaluate((el) => el.scrollWidth > el.clientWidth);
+  expect(scrollable).toBe(false);
+
+  await send(page, 'column-forward');
+  await send(page, 'column-back');
+  expect(await scrollLeft(body)).toBe(0);
+});
+
+test('remote navigation scrolls the target block into view', async ({ page }) => {
+  const body = await openFixture(page, 'horizontal');
+
+  // Mirrors the keyboard suite's `n` case, and deliberately uses a marked block rather than the
+  // document end: the fixture's last block is a table row whose scrollable ancestor is the table
+  // itself, so `doc-end` leaves the body's scroll alone — identically for the key and the
+  // command, which is the parity that matters.
+  await send(page, 'comment-next');
+  const marked = body.locator('.codev-canvas-has-marker').first();
+  await expect
+    .poll(() =>
+      marked.evaluate((el) => {
+        const r = el.getBoundingClientRect();
+        return r.left >= 0 && r.right <= window.innerWidth;
+      }),
+    )
+    .toBe(true);
+  await expect(marked).toBeFocused();
+});

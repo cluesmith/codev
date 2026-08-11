@@ -44,8 +44,16 @@ const TRAVERSAL_COMMANDS = [
   'column-back',
 ] as const satisfies readonly TraversalCommand[];
 
-type _EveryTraversalCommandIsListed =
-  Exclude<TraversalCommand, (typeof TRAVERSAL_COMMANDS)[number]> extends never ? true : never;
+/**
+ * `T extends true` is what makes the assertion below bite. A bare conditional type alias imposes
+ * no constraint, so a missing member would just resolve to `never` and compile happily — the
+ * guard has to be a type that FAILS to instantiate, not one that merely evaluates to something.
+ */
+type Assert<T extends true> = T;
+
+type _EveryTraversalCommandIsListed = Assert<
+  Exclude<TraversalCommand, (typeof TRAVERSAL_COMMANDS)[number]> extends never ? true : false
+>;
 
 function isTraversalCommand(command: CanvasCommand): command is TraversalCommand {
   return (TRAVERSAL_COMMANDS as readonly CanvasCommand[]).includes(command);
@@ -825,8 +833,10 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
       if (el) return el;
     }
 
-    // Then the topmost visible block, for a view nobody has touched yet.
-    const start = viewportStartLine(readingMode);
+    // Then the topmost visible block, for a view nobody has touched yet. Reads the mode through
+    // the ref for the same reason `toggleReadingMode` does: a navigation command batched behind a
+    // toggle must measure against the mode that toggle already chose.
+    const start = viewportStartLine(readingModeRef.current);
     if (start !== null) {
       const el = root.querySelector<HTMLElement>(`[data-line="${start}"]`);
       if (el) return el;
@@ -836,6 +846,15 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
     // yields nothing useful when the canvas is display:none, detached, or not laid out yet; a
     // remote command must still do something visible rather than silently no-op (spec 1401).
     return collectBlocks(root)[0] ?? null;
+  };
+
+  // Where the view currently sits, for detecting that a repeated command has stopped making
+  // progress. Traversal moves the origin block; column paging moves the scroll offset instead and
+  // leaves focus alone, so both have to be in the signature or a counted page would stop after
+  // one step.
+  const positionSignature = (root: HTMLElement): string => {
+    const line = currentBlock(root)?.getAttribute('data-line') ?? '';
+    return `${line}:${root.scrollLeft}`;
   };
 
   // Step one block in flow order. Deliberately NOT native Tab parity: Tab also visits the "+"
@@ -949,12 +968,17 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
       focusEdgeBlock(root, 'end');
       return true;
     },
+    // Paging is meaningful only in horizontal mode, and the mode check belongs HERE rather than
+    // only in the key handler: a vertical layout can still scroll horizontally (a wide table, a
+    // long code line), so a remote page would scroll the body sideways instead of no-opping.
     'column-forward': ({ root }) => {
       if (!root) return false;
+      if (readingModeRef.current !== 'horizontal') return false;
       return pageColumn(root, 1);
     },
     'column-back': ({ root }) => {
       if (!root) return false;
+      if (readingModeRef.current !== 'horizontal') return false;
       return pageColumn(root, -1);
     },
     'composer-open': ({ origin }) => {
@@ -992,8 +1016,20 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
       if (!root) return;
       const action = canvasActions[command];
       if (!action) return;
+      // A remote command is a deliberate interaction, so re-arm the focus ring exactly as the
+      // first line of the key handler does. Without this, navigation issued after a
+      // pointer-driven cancel or delete would move focus invisibly.
+      rootRef.current?.classList.remove('codev-canvas-quiet-focus');
       const times = repeatCount(command, count);
+      let previous: string | null = null;
       for (let i = 0; i < times; i += 1) {
+        // Stop as soon as a step changes nothing: that is the edge, and it also bounds the work
+        // to what actually exists. `count` is only validated as a positive integer on the wire,
+        // so without this a controller sending a huge value would pin the UI thread walking a
+        // document that ran out of blocks long before.
+        const position = positionSignature(root);
+        if (previous !== null && position === previous) break;
+        previous = position;
         action({ root, origin: currentBlock(root) });
       }
     } catch (err) {

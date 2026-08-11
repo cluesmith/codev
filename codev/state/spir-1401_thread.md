@@ -250,7 +250,12 @@ the commandAdapter prop, the focus-derived cursor, and count handling.
 
 Advisories from phase_2 all actioned: dispatch reads through a ref (canvasActions is rebuilt per
 render); CanvasActionName replaced by CanvasCommand from codev-types, TRAVERSAL_COMMANDS hoisted
-to module scope with `satisfies` + an Exclude<> assertion so drift breaks in BOTH directions.
+to module scope with `satisfies` + an assertion for the missing-member direction.
+
+**CORRECTION (phase_3 iter1 review):** that assertion as first written was INERT — a bare
+conditional type alias constrains nothing, so an omitted command resolved to `never` and compiled.
+Same defect class phase_1 was sent back for. Now wrapped in `Assert<T extends true>` and verified
+by deleting a command from the list and watching check-types fail with TS2344.
 
 Composer seam: CommentComposer is now forwardRef with a `submit()` handle. Only submit, because
 submission needs the composer's own draft text; cancel needs nothing so it goes through the
@@ -277,3 +282,28 @@ keeps its visible ring.
 
 Verification: 169/169 vitest (19 new), check-types clean, 33/33 playwright on the COMMITTED
 config (5199 free again after the orphan was cleared), repo build + 4820 tests green.
+
+### phase_3 consultation iter1: gemini APPROVE, codex + claude REQUEST_CHANGES
+
+All points fixed. Two where the honest answer changed the TEST rather than the code:
+
+1. **Vertical-mode column paging (codex).** Added the mode check (correct, defensive), but the
+   described failure — a vertical layout scrolling sideways — does not reproduce: `overflow-x:
+   auto` is scoped to `.codev-canvas-mode-horizontal` (default-theme.css:490-497), so in vertical
+   mode the body is not a horizontal scroll container and `scrollLeft = 40` reads back 0. Test now
+   asserts what is verifiable and records why the stronger scenario is unreachable, instead of
+   passing vacuously.
+2. **Remote doc-end doesn't scroll into view.** My own new test caught this and I nearly "fixed"
+   the canvas. Probed the keyboard equivalent first: `End` behaves IDENTICALLY (line 1106,
+   scrollLeft 0), because the fixture's last block is a table row whose scrollable ancestor is the
+   table, not the body. Pre-existing, and reproducing it exactly IS the parity the spec asks for.
+   Changing it would have breached the no-in-page-behavior-change non-goal. Test rewritten to
+   mirror the keyboard suite's `n` case.
+
+Also: made the dev examples page a real host implementing CommandAdapter over
+`window.__canvasCommand`, so Playwright can drive the seam. That is the only way to assert column
+paging at all (jsdom has no layout), and it closes codex's real-browser coverage gap.
+
+Lesson worth carrying: when a new test fails, check whether the KEYBOARD path does the same thing
+before touching the component. Twice now the diff between "my path is broken" and "this is how it
+has always worked" was one probe away.
