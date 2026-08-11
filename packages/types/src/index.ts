@@ -33,6 +33,7 @@ export {
   type OverviewRecentlyClosed,
   type OverviewData,
   type IssueView,
+  type PRView,
   type IssueSearchItem,
   type IssueSearchResponse,
   type WorktreeDevUrl,

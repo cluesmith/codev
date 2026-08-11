@@ -190,6 +190,10 @@
         "title": "Codev: Open Issue by ID..."
       },
       {
+        "command": "codev.openPRById",
+        "title": "Codev: Open PR by ID..."
+      },
+      {
         "command": "codev.refreshTeam",
         "title": "Codev: Refresh Team",
         "icon": "$(refresh)"
@@ -919,6 +923,11 @@
         "command": "codev.openIssueById",
         "key": "ctrl+k i",
         "mac": "cmd+k i"
+      },
+      {
+        "command": "codev.openPRById",
+        "key": "ctrl+k shift+p",
+        "mac": "cmd+k shift+p"
       },
       {
         "command": "codev.diffNextFile",

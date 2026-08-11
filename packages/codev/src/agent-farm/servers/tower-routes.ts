@@ -86,6 +86,7 @@ import {
 import { OverviewCache } from './overview.js';
 import {
   fetchIssue,
+  fetchPR,
   searchIssues,
   fetchPRList,
   fetchCurrentUser,
@@ -180,6 +181,7 @@ const ROUTES: Record<string, RouteEntry> = {
   'GET /api/version':     (_req, res, _url, ctx) => handleVersion(res, ctx),
   'GET /api/overview':    (_req, res, url, ctx) => handleOverview(res, url, undefined, ctx),
   'GET /api/issue':       (_req, res, url) => handleIssueView(res, url),
+  'GET /api/pr':          (_req, res, url) => handlePRView(res, url),
   'GET /api/issue-search': (_req, res, url) => handleIssueSearch(res, url),
   'GET /api/worktree-config': (_req, res, url) => handleWorktreeConfigView(res, url),
   'GET /api/activity-hooks': (_req, res, url) => handleActivityHooksView(res, url),
@@ -1172,6 +1174,34 @@ async function handleIssueView(res: http.ServerResponse, url: URL): Promise<void
 
   res.writeHead(200, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify(issue));
+}
+
+async function handlePRView(res: http.ServerResponse, url: URL): Promise<void> {
+  // Mirror of handleIssueView for PRs: same workspace resolution, same
+  // ?number= param, routed through the `pr-view` forge concept. Powers the
+  // VSCode `codev.openPRById` / QuickPick "View PR #N" browser-open flow.
+  let workspaceRoot = url.searchParams.get('workspace');
+  if (!workspaceRoot) {
+    const knownPaths = getKnownWorkspacePaths();
+    workspaceRoot = knownPaths.find(p => !p.includes('/.builders/')) || null;
+  }
+
+  const number = url.searchParams.get('number');
+  if (!workspaceRoot || !number) {
+    res.writeHead(400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Missing workspace or number' }));
+    return;
+  }
+
+  const pr = await fetchPR(number, { cwd: workspaceRoot });
+  if (!pr) {
+    res.writeHead(404, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: `PR #${number} not found or forge unavailable` }));
+    return;
+  }
+
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify(pr));
 }
 
 /**

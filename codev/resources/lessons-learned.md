@@ -328,6 +328,12 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 
 ## UI/UX
 
+- [From #1179] `vscode.QuickPickItem` reserves the `kind` property for its separator enum
+  (`QuickPickItemKind`), so a custom item type using `kind` as its own discriminator fails
+  the `createQuickPick<T extends QuickPickItem>` constraint. Pick a different name
+  (`target`, `action`) for domain discriminators on QuickPick item types. Relatedly:
+  dynamic rows injected via `onDidChangeValue` need `alwaysShow: true`, or VS Code's fuzzy
+  filter hides a row whose label was synthesized from the very input being filtered on.
 - [From #1380] Chromium does NOT honor `break-inside: avoid` for a block taller than the
   fragmentainer — it fragments it anyway AND lets a fragment overflow (unreachable under
   `overflow-y: hidden`). Protected-block designs need height caps (inner scroll) so that
