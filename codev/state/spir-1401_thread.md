@@ -239,3 +239,41 @@ No blocking issues. Three advisories carried forward to phase_3:
    adds the codev-types dependency anyway, so it lands naturally there.
 3. `pageColumn`'s `step <= 0 -> false` branch is untested (pre-existing gap); phase_3 adds
    adapter-level tests and can cover it cheaply.
+
+## 2026-08-12 — phase_3 (canvas remote command seam) implemented
+
+Registry widened from a local union to `Record<CanvasCommand, ...>` from codev-types, so TS now
+enforces that all 14 commands have an implementation. Added the five that had no handler:
+block-next/prev (flow-order [data-line] stepping, NOT Tab parity, Tab untouched),
+composer-submit/cancel, reading-mode-toggle. Plus CommandAdapter (4th adapter, interface-only),
+the commandAdapter prop, the focus-derived cursor, and count handling.
+
+Advisories from phase_2 all actioned: dispatch reads through a ref (canvasActions is rebuilt per
+render); CanvasActionName replaced by CanvasCommand from codev-types, TRAVERSAL_COMMANDS hoisted
+to module scope with `satisfies` + an Exclude<> assertion so drift breaks in BOTH directions.
+
+Composer seam: CommentComposer is now forwardRef with a `submit()` handle. Only submit, because
+submission needs the composer's own draft text; cancel needs nothing so it goes through the
+parent's existing cancelComposer. Remote submit reports viaKeyboard:true so focus restoration
+keeps its visible ring.
+
+### Three test failures that were real code gaps, not test problems
+
+1. **Clean-view navigation no-oped.** currentBlock fell back to viewportStartLine, which measures
+   with getBoundingClientRect — useless in jsdom, and equally useless in a real browser when the
+   canvas is display:none/detached/not yet laid out. Added a final fallback to the first block.
+   My own success criterion ("every navigation command has an observable effect from a clean
+   state") would have been false.
+2. **count stopped after one step.** currentBlock relied on the focus event refreshing the cursor
+   ref between iterations. Now it reads live DOM focus FIRST (precedence: live focus → cursor ref
+   → topmost visible → first block), so each step sees where the previous one landed. Uncovered
+   because jsdom lacks scrollIntoView: focusBlock threw, my try/catch swallowed it, and the loop
+   truncated. Mocked scrollIntoView per the repo's existing pattern (marker-minimap.test.tsx).
+3. **Double toggle landed back where it started.** Two commands delivered in ONE synchronous
+   batch: the second read readingMode from a render closure that had not updated. Nothing in the
+   CommandAdapter contract forbids a host delivering synchronously, so toggleReadingMode now
+   reads/writes a readingModeRef mirror instead of assuming a re-render between calls. The
+   pointer path cannot hit this; the remote path can.
+
+Verification: 169/169 vitest (19 new), check-types clean, 33/33 playwright on the COMMITTED
+config (5199 free again after the orphan was cleared), repo build + 4820 tests green.

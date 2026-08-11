@@ -40,6 +40,26 @@ describe('import boundary', () => {
     expect(files.length).toBeGreaterThan(0);
   });
 
+  /**
+   * `@cluesmith/codev-types` carries the canvas command vocabulary (spec 1401), and it must reach
+   * this package as TYPES ONLY. A runtime import would give the package its first non-rendering
+   * runtime dependency and break the host-agnostic posture the boundary above protects — and it
+   * would not even resolve in every consumer, since codev-types is a compile-time-only dependency
+   * elsewhere in the monorepo. Every import of it must be the fully-erased `import type` form.
+   */
+  it('imports @cluesmith/codev-types as types only', () => {
+    const violations: string[] = [];
+    for (const file of files) {
+      const text = readFileSync(file, 'utf8');
+      for (const line of text.split('\n')) {
+        if (!line.includes('@cluesmith/codev-types')) continue;
+        if (!/^\s*import\s/.test(line)) continue;
+        if (!/^\s*import\s+type\s/.test(line)) violations.push(`${file}: ${line.trim()}`);
+      }
+    }
+    expect(violations).toEqual([]);
+  });
+
   it('shipped source contains no vscode / node:* / fs / fetch usage', () => {
     const violations: string[] = [];
     for (const file of files) {

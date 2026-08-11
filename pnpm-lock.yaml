@@ -163,6 +163,9 @@ importers:
 
   packages/artifact-canvas:
     dependencies:
+      '@cluesmith/codev-types':
+        specifier: workspace:*
+        version: link:../types
       dompurify:
         specifier: ^3.2.0
         version: 3.4.8

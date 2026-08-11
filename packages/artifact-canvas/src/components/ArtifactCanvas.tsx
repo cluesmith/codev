@@ -1,9 +1,11 @@
 import * as React from 'react';
 import { createPortal } from 'react-dom';
+import type { CanvasCommand, TraversalCommand } from '@cluesmith/codev-types';
+import type { CanvasCommandInvocation } from '../adapters/CommandAdapter.js';
 import type { ArtifactCanvasProps, ReadingMode, ReviewMarker } from '../types.js';
 import { renderMarkdown } from '../renderer/renderer.js';
 import { CommentAffordance } from '../overlays/CommentAffordance.js';
-import { CommentComposer } from '../overlays/CommentComposer.js';
+import { CommentComposer, type CommentComposerHandle } from '../overlays/CommentComposer.js';
 import { MarkerMinimap } from '../overlays/MarkerMinimap.js';
 import { KeyboardHelp } from '../overlays/KeyboardHelp.js';
 import { ReadingModeToggle } from '../overlays/ReadingModeToggle.js';
@@ -22,6 +24,43 @@ import {
 function coerceReadingMode(value: string | undefined): ReadingMode {
   if (value === 'horizontal') return 'horizontal';
   return 'vertical';
+}
+
+/**
+ * The commands `count` repeats. Declared locally and bound to `TraversalCommand` with
+ * `satisfies` rather than imported as a runtime value: `@cluesmith/codev-types` reaches this
+ * package as types only, so the classification travels as a type and each consumer owns its own
+ * list. `satisfies` catches a member that is not traversal; the assertion below catches a
+ * traversal command missing from the list, so drift in either direction is a compile error.
+ */
+const TRAVERSAL_COMMANDS = [
+  'block-next',
+  'block-prev',
+  'comment-next',
+  'comment-prev',
+  'heading-next',
+  'heading-prev',
+  'column-forward',
+  'column-back',
+] as const satisfies readonly TraversalCommand[];
+
+type _EveryTraversalCommandIsListed =
+  Exclude<TraversalCommand, (typeof TRAVERSAL_COMMANDS)[number]> extends never ? true : never;
+
+function isTraversalCommand(command: CanvasCommand): command is TraversalCommand {
+  return (TRAVERSAL_COMMANDS as readonly CanvasCommand[]).includes(command);
+}
+
+/**
+ * How many times to apply a command. `count` repeats traversal commands only, and only for
+ * positive integers; anything else falls back to a single application. The canvas IGNORES an
+ * invalid count rather than rejecting it — validation is the sender's job (Tower answers
+ * `invalid-request`), and a command that arrived here already passed it.
+ */
+function repeatCount(command: CanvasCommand, count: number | undefined): number {
+  if (!isTraversalCommand(command)) return 1;
+  if (typeof count !== 'number' || !Number.isInteger(count) || count < 1) return 1;
+  return count;
 }
 
 /**
@@ -172,6 +211,7 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
     refreshKey,
     initialReadingMode,
     onReadingModeChange,
+    commandAdapter,
   } = props;
   const canEdit = onEditComment !== undefined;
   const canDelete = onDeleteComment !== undefined;
@@ -564,9 +604,20 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
     return null;
   };
 
+  // Mirrors `readingMode` for callers that run before React has re-rendered. A host may deliver
+  // two remote commands inside one synchronous batch (nothing in the CommandAdapter contract
+  // forbids it), and reading the mode from the render closure would make the second one compute
+  // from a value that is already outdated — toggling twice would land back where it started
+  // while reporting the same mode twice. The pointer path cannot hit this; the remote path can.
+  const readingModeRef = React.useRef(readingMode);
+  readingModeRef.current = readingMode;
+
   const toggleReadingMode = (): void => {
-    const next: ReadingMode = readingMode === 'horizontal' ? 'vertical' : 'horizontal';
-    pendingAnchorLineRef.current = viewportStartLine(readingMode);
+    const current = readingModeRef.current;
+    let next: ReadingMode = 'horizontal';
+    if (current === 'horizontal') next = 'vertical';
+    pendingAnchorLineRef.current = viewportStartLine(current);
+    readingModeRef.current = next; // visible to a second toggle in the same batch
     setReadingMode(next);
     onReadingModeChange?.(next);
   };
@@ -744,6 +795,60 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
   const originBlock = (target: EventTarget | null): HTMLElement | null =>
     ((target as HTMLElement | null)?.closest?.('[data-line]') as HTMLElement | null) ?? null;
 
+  // The block a relative command starts from. Distinct from `activeLine`, which is HOVER-driven
+  // and cleared on mouseleave because it positions the "+" affordance: this one is FOCUS-derived
+  // and persistent, because it answers "where is the reviewer" for navigation. Recorded in
+  // `activateFromFocus`, the single point every focus path funnels through — keyboard, pointer,
+  // minimap, and the programmatic `focusBlock`.
+  const cursorLineRef = React.useRef<number | null>(null);
+
+  // Handle on the open composer, so a remote `composer-submit` can commit the draft the reviewer
+  // typed. Null whenever no composer is mounted, which is what makes that command a no-op then.
+  const composerHandleRef = React.useRef<CommentComposerHandle | null>(null);
+
+  // Resolve the origin for a remote command: the cursor when it still points at a live block,
+  // otherwise the topmost visible block. The fallback is what makes navigation well-defined on a
+  // freshly opened view that nobody has touched yet (spec 1401).
+  const currentBlock = (root: HTMLElement): HTMLElement | null => {
+    // Live DOM focus first. It is the truth when it exists, and reading it directly (rather than
+    // waiting for the focus event to refresh the cursor ref) is what lets a counted traversal
+    // step N times in one go: each step sees where the previous one actually landed.
+    const focused = (document.activeElement as HTMLElement | null)?.closest?.('[data-line]') as
+      | HTMLElement
+      | null;
+    if (focused && root.contains(focused)) return focused;
+
+    // Then the last block that held focus, which survives focus leaving the canvas entirely.
+    const cursor = cursorLineRef.current;
+    if (cursor !== null) {
+      const el = root.querySelector<HTMLElement>(`[data-line="${cursor}"]`);
+      if (el) return el;
+    }
+
+    // Then the topmost visible block, for a view nobody has touched yet.
+    const start = viewportStartLine(readingMode);
+    if (start !== null) {
+      const el = root.querySelector<HTMLElement>(`[data-line="${start}"]`);
+      if (el) return el;
+    }
+
+    // Finally the first block. `viewportStartLine` measures with `getBoundingClientRect`, which
+    // yields nothing useful when the canvas is display:none, detached, or not laid out yet; a
+    // remote command must still do something visible rather than silently no-op (spec 1401).
+    return collectBlocks(root)[0] ?? null;
+  };
+
+  // Step one block in flow order. Deliberately NOT native Tab parity: Tab also visits the "+"
+  // affordance, card actions, the toolbar and links, so a remote "next block" that mimicked it
+  // would land off-prose. Tab itself is untouched (spec 1401 non-goal).
+  const focusAdjacentBlock = (root: HTMLElement, fromLine: string | null, step: 1 | -1): void => {
+    const blocks = collectBlocks(root);
+    const start = blocks.findIndex((b) => b.getAttribute('data-line') === fromLine);
+    if (start === -1) return;
+    const next = blocks[start + step];
+    if (next) focusBlock(next); // no wrap-around, same as the jump keys
+  };
+
   const focusEdgeBlock = (root: HTMLElement, edge: 'start' | 'end'): void => {
     const blocks = collectBlocks(root);
     let target: HTMLElement | undefined;
@@ -791,17 +896,6 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
     return true;
   };
 
-  type CanvasActionName =
-    | 'comment-next'
-    | 'comment-prev'
-    | 'heading-next'
-    | 'heading-prev'
-    | 'doc-start'
-    | 'doc-end'
-    | 'column-forward'
-    | 'column-back'
-    | 'composer-open';
-
   interface CanvasActionContext {
     /** The canvas body: scroll container and query root. */
     root: HTMLElement | null;
@@ -814,7 +908,17 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
    * key to the browser. A deliberate no-op (no match in that direction, an empty document) still
    * returns true: the action ran and decided to do nothing, which is not the same as declining.
    */
-  const canvasActions: Record<CanvasActionName, (ctx: CanvasActionContext) => boolean> = {
+  const canvasActions: Record<CanvasCommand, (ctx: CanvasActionContext) => boolean> = {
+    'block-next': ({ root, origin }) => {
+      if (!root) return false;
+      focusAdjacentBlock(root, origin?.getAttribute('data-line') ?? null, 1);
+      return true;
+    },
+    'block-prev': ({ root, origin }) => {
+      if (!root) return false;
+      focusAdjacentBlock(root, origin?.getAttribute('data-line') ?? null, -1);
+      return true;
+    },
     'comment-next': ({ root, origin }) => {
       if (!root) return false;
       focusMatchingBlock(root, origin?.getAttribute('data-line') ?? null, isMarkedBlock, 1);
@@ -860,7 +964,57 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
       openComposer(line); // open the inline composer for this block (#1107)
       return true;
     },
+    // Composer submit/cancel are VIEW-scoped, not focus-scoped: they act on this canvas's open
+    // composer wherever DOM focus happens to sit, because a remote driver never moved focus into
+    // the textarea. With no composer open they are a defined no-op, exactly as the keys are.
+    'composer-submit': () => {
+      composerHandleRef.current?.submit();
+      return true;
+    },
+    'composer-cancel': () => {
+      if (composingLine === null) return true;
+      cancelComposer(true);
+      return true;
+    },
+    'reading-mode-toggle': () => {
+      toggleReadingMode();
+      return true;
+    },
   };
+
+  // Run a remote command against the current origin. Traversal commands re-resolve the origin on
+  // every step, so `count: 3` walks three blocks rather than re-running from the same start.
+  const runCanvasCommand = ({ command, count }: CanvasCommandInvocation): void => {
+    // Never throw out of a host callback (spec D2): an unknown command from a misbehaving host,
+    // or a DOM query that fails mid-rebuild, is reported through the existing sink, not fatal.
+    try {
+      const root = bodyRef.current;
+      if (!root) return;
+      const action = canvasActions[command];
+      if (!action) return;
+      const times = repeatCount(command, count);
+      for (let i = 0; i < times; i += 1) {
+        action({ root, origin: currentBlock(root) });
+      }
+    } catch (err) {
+      report(err);
+    }
+  };
+
+  // `canvasActions` is rebuilt every render and its closures capture that render's state, so the
+  // subscription below must NOT close over it directly: subscribing once on mount would pin the
+  // first render's actions and run them against a stale `readingMode` and composer state forever.
+  // The ref is refreshed on every render and the subscription reads through it.
+  const runCanvasCommandRef = React.useRef(runCanvasCommand);
+  runCanvasCommandRef.current = runCanvasCommand;
+
+  React.useEffect(() => {
+    if (!commandAdapter) return;
+    const subscription = commandAdapter.subscribe((invocation) => {
+      runCanvasCommandRef.current(invocation);
+    });
+    return () => subscription.dispose();
+  }, [commandAdapter]);
 
   // Keyboard handling on the body (#1107 activation + #1237 jump navigation). Every branch below
   // requires the event to originate on a `[data-line]` block, so keystrokes inside the composer
@@ -897,7 +1051,7 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
       let pageDelta = 1;
       if (e.key === 'PageUp') pageDelta = -1;
       if (innerScrollerCanConsume(t, pageDelta, root)) return;
-      let pageAction: CanvasActionName = 'column-forward';
+      let pageAction: CanvasCommand = 'column-forward';
       if (e.key === 'PageUp') pageAction = 'column-back';
       // Unmeasurable geometry: leave the key to the browser rather than swallowing it.
       if (!canvasActions[pageAction]({ root, origin: null })) return;
@@ -924,13 +1078,13 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
 
     if (e.key === 'Home' || e.key === 'End') {
       e.preventDefault();
-      let edgeAction: CanvasActionName = 'doc-start';
+      let edgeAction: CanvasCommand = 'doc-start';
       if (e.key === 'End') edgeAction = 'doc-end';
       canvasActions[edgeAction]({ root, origin: current });
       return;
     }
 
-    let jumpAction: CanvasActionName | null = null;
+    let jumpAction: CanvasCommand | null = null;
     switch (e.key) {
       case 'n': jumpAction = 'comment-next'; break;
       case 'p': jumpAction = 'comment-prev'; break;
@@ -1058,6 +1212,9 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
     if (fromAffordance(target)) return;
     const b = resolveBlock(target);
     if (!b) return;
+    // Every focus path funnels through here, so this is where the navigation cursor is recorded
+    // (spec 1401): keyboard jumps, pointer clicks, minimap handoff, and remote commands alike.
+    cursorLineRef.current = b.line;
     setActiveLine(b.line);
     placeAffordance(b.el, null);
   };
@@ -1147,6 +1304,7 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
               // save would write it to the wrong marker (#1055 codex finding). `useState(initialText)`
               // only reads its arg on mount, so a fresh mount is what refreshes the seed.
               key={`composer-${editingMarker?.markerLine ?? 'add'}-${composingLine}`}
+              ref={composerHandleRef}
               line={composingLine}
               onSubmit={submitComposer}
               onCancel={cancelComposer}

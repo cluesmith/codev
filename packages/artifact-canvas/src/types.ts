@@ -17,6 +17,7 @@
 import type { FileAdapter } from './adapters/FileAdapter.js';
 import type { MarkerAdapter } from './adapters/MarkerAdapter.js';
 import type { ThemeAdapter } from './adapters/ThemeAdapter.js';
+import type { CommandAdapter } from './adapters/CommandAdapter.js';
 
 /**
  * Disposable handle returned by subscriptions; mirrors VSCode's `Disposable` shape.
@@ -116,4 +117,10 @@ export interface ArtifactCanvasProps {
    * without persistence, defaulting to vertical each mount).
    */
   onReadingModeChange?(mode: ReadingMode): void;
+  /**
+   * Optional remote-command seam (spec 1401). When supplied, the canvas subscribes to it and runs
+   * inbound commands through the same per-action implementations the keyboard uses, so the two
+   * paths cannot drift. Omitting it leaves behavior exactly as it is without one.
+   */
+  commandAdapter?: CommandAdapter;
 }
