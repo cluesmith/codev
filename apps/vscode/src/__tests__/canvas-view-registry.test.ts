@@ -45,6 +45,7 @@ function fakePanel() {
 /** A connection double: a scripted Tower client plus a controllable SSE feed. */
 function fakeConnection(overrides: Record<string, unknown> = {}) {
   let sseHandler: ((e: { data: string }) => void) | null = null;
+  let stateHandler: ((state: string) => void) | null = null;
   const client = {
     registerCanvasView: vi.fn(async () => ({ ok: true, viewId: 'canvas-1', file: '/ws/spec.md' })),
     heartbeatCanvasView: vi.fn(async () => ({ ok: true, unknownView: false })),
@@ -60,10 +61,17 @@ function fakeConnection(overrides: Record<string, unknown> = {}) {
         sseHandler = handler;
         return { dispose: vi.fn() };
       },
+      onStateChange(handler: (state: string) => void) {
+        stateHandler = handler;
+        return { dispose: vi.fn() };
+      },
     } as never,
     /** Push an SSE frame in Tower's envelope shape. */
     emit(type: string, body: unknown) {
       sseHandler?.({ data: JSON.stringify({ type, title: type, body: JSON.stringify(body) }) });
+    },
+    setState(state: string) {
+      stateHandler?.(state);
     },
   };
 }
@@ -156,6 +164,60 @@ describe('canvas view registration', () => {
     expect(conn.client.registerCanvasView).toHaveBeenCalledTimes(2);
   });
 
+  it('re-registers as soon as the connection returns, not on the next heartbeat', async () => {
+    const conn = fakeConnection();
+    const panel = fakePanel();
+
+    registerCanvasView({ connectionManager: conn.connectionManager, panel: panel as never, file: '/ws/spec.md' });
+    await flush();
+    expect(conn.client.registerCanvasView).toHaveBeenCalledTimes(1);
+
+    // A Tower restart: the old id means nothing to the new process, and waiting out the
+    // heartbeat would leave the panel undrivable for up to 30 seconds.
+    conn.setState('connected');
+    await flush();
+
+    expect(conn.client.registerCanvasView).toHaveBeenCalledTimes(2);
+  });
+
+  it('ignores connection states other than connected', async () => {
+    const conn = fakeConnection();
+    const panel = fakePanel();
+
+    registerCanvasView({ connectionManager: conn.connectionManager, panel: panel as never, file: '/ws/spec.md' });
+    await flush();
+    conn.setState('disconnected');
+    conn.setState('connecting');
+    await flush();
+
+    expect(conn.client.registerCanvasView).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not orphan a fresh view when two heartbeats both come back unknown', async () => {
+    let registrations = 0;
+    const conn = fakeConnection({
+      registerCanvasView: vi.fn(async () => {
+        registrations += 1;
+        return { ok: true, viewId: `canvas-${registrations}`, file: '/ws/spec.md' };
+      }),
+      heartbeatCanvasView: vi.fn(async () => ({ ok: false, unknownView: true })),
+    });
+    const panel = fakePanel();
+
+    registerCanvasView({ connectionManager: conn.connectionManager, panel: panel as never, file: '/ws/spec.md' });
+    await flush();
+
+    // Two beats in flight against the same stale id, both answered unknown-view. Without the
+    // captured-id guard the second would clear the id the first had just replaced, leaving a
+    // freshly registered view orphaned in Tower until its lease expired.
+    panel.activate(true);
+    panel.activate(true);
+    await flush();
+    await flush();
+
+    expect(registrations).toBeLessThanOrEqual(2);
+  });
+
   it('retries registration later when Tower was unreachable at open time', async () => {
     const conn = fakeConnection({
       registerCanvasView: vi.fn(async () => ({ ok: false, error: 'Tower not running' })),
@@ -221,8 +283,26 @@ describe('addressed delivery', () => {
     conn.emit('canvas-command', { viewId: 'canvas-1' }); // no command
     conn.emit('canvas-command', { command: 'comment-next' }); // no viewId
     conn.emit('canvas-command', { viewId: 'canvas-1', command: 42 });
+    // Not in the closed vocabulary: Tower would have rejected it, but the host does not forward
+    // an unchecked string into code that has no validation of its own.
+    conn.emit('canvas-command', { viewId: 'canvas-1', command: 'rm-rf' });
 
     expect(panel.posted).toEqual([]);
+  });
+
+  it('drops a nonsensical count rather than passing it on', async () => {
+    const conn = fakeConnection();
+    const panel = fakePanel();
+
+    registerCanvasView({ connectionManager: conn.connectionManager, panel: panel as never, file: '/ws/spec.md' });
+    await flush();
+    conn.emit('canvas-command', { viewId: 'canvas-1', command: 'block-next', count: -4 });
+    conn.emit('canvas-command', { viewId: 'canvas-1', command: 'block-next', count: 1.5 });
+
+    expect(panel.posted).toEqual([
+      { type: 'command', command: 'block-next' },
+      { type: 'command', command: 'block-next' },
+    ]);
   });
 
   it('delivers nothing before registration completes', async () => {

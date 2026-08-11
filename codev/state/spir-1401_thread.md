@@ -501,3 +501,29 @@ selected builder's artifact, with MRU as the recorded fallback. No code or spec 
 here. If a pr-gate reviewer flags the `file?` selector as speculative or unused, the disposition
 is: required by #1400 as revised 2026-08-11. How the deck discovers the artifact path is a #1400
 question in the streamdeck lane, not mine. TODO: record in the review file dispositions + PR body.
+
+### phase_6 iter1: gemini APPROVE, claude COMMENT, codex REQUEST_CHANGES — all fixed but the human pass
+
+Fixed: reconnect handling via onStateChange (a Tower restart previously left panels undrivable
+for up to the full 30s heartbeat, and a slow first connect did too); a re-registration RACE where
+two concurrent unknownView beats orphaned a freshly registered view for a whole lease (guarded by
+capturing beatViewId); unregister-on-deactivate (provider is now Disposable and in
+context.subscriptions — deactivate does not dispose panels individually); runtime validation of
+the SSE command against the closed union plus a count sanity check; and 11 curly lint warnings.
+
+**A reviewer corrected ME, and it matters.** I had claimed in the plan, a phase_3 rebuttal, and
+the review draft that webview/main.ts has NO check-types coverage, reasoning from
+apps/vscode/tsconfig.json excluding that directory. Wrong: tsconfig.webview.json covers exactly
+that directory and `check-types` runs BOTH configs. I stopped one file too early and then repeated
+the claim three times. Verified myself, corrected the review file explicitly. The manual pass is
+still needed — types don't prove runtime behavior across three processes — but I had been
+overstating why.
+
+Also recorded: `pnpm --filter codev-vscode test` is vscode-test (Electron, fails here for
+unrelated reasons); unit tests are `test:unit` → vitest, which is what CI runs and what I ran.
+
+**NOT fixed, deliberately:** the manual end-to-end VS Code pass. A headless builder cannot produce
+a real VS Code window + Tower + open panel. Claiming it was done is exactly the failure the
+"tests pass is not it works" lesson exists to prevent. Documented as outstanding and
+blocking-for-sign-off in the review file with a 4-step script, and called out in the PR body. The
+pr gate is a human gate — the right place for a human-only verification.

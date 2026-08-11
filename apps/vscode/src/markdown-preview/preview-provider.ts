@@ -55,8 +55,23 @@ export function sanitizeReadingMode(value: unknown): 'vertical' | 'horizontal' |
   return undefined;
 }
 
-export class MarkdownPreviewProvider implements vscode.CustomTextEditorProvider {
+export class MarkdownPreviewProvider implements vscode.CustomTextEditorProvider, vscode.Disposable {
   public static readonly viewType = 'codev.markdownPreview';
+
+  /**
+   * Live canvas-view registrations, one per open panel (spec 1401).
+   *
+   * Panels normally clean up their own registration on dispose. This set exists for the case
+   * they cannot: on extension deactivate the panels are not individually disposed, so without it
+   * every open view would sit in Tower's registry absorbing commands until its lease lapsed.
+   */
+  private readonly canvasViews = new Set<vscode.Disposable>();
+
+  /** Release every live registration. Called when the extension shuts down. */
+  public dispose(): void {
+    for (const view of this.canvasViews) { view.dispose(); }
+    this.canvasViews.clear();
+  }
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -119,7 +134,11 @@ export class MarkdownPreviewProvider implements vscode.CustomTextEditorProvider 
         panel,
         file: document.uri.fsPath,
       });
-      panel.onDidDispose(() => canvasView.dispose());
+      this.canvasViews.add(canvasView);
+      panel.onDidDispose(() => {
+        this.canvasViews.delete(canvasView);
+        canvasView.dispose();
+      });
     }
 
     panel.webview.onDidReceiveMessage((msg: unknown) => {

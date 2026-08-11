@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import type { CanvasCommandEvent } from '@cluesmith/codev-types';
+import type { CanvasCommand, CanvasCommandEvent } from '@cluesmith/codev-types';
 import type { ConnectionManager } from '../connection-manager.js';
 import { parseSseEnvelope, parseSseBody } from '../sse-envelope.js';
 import type { HostToWebviewMessage } from './messages.js';
@@ -23,6 +23,40 @@ const HEARTBEAT_MS = 30_000;
 /** The SSE event type Tower addresses a canvas command with. */
 const CANVAS_COMMAND_EVENT = 'canvas-command';
 
+/**
+ * The closed command vocabulary, as runtime data.
+ *
+ * Tower validates before relaying, so this is defence in depth rather than the primary check —
+ * but an SSE frame is untrusted input crossing a process boundary, and forwarding an unchecked
+ * string into the webview would push the problem into code with no validation of its own. The
+ * assertion below fails to compile if the contract grows a command this list forgets.
+ */
+const CANVAS_COMMANDS = [
+  'block-next',
+  'block-prev',
+  'comment-next',
+  'comment-prev',
+  'heading-next',
+  'heading-prev',
+  'column-forward',
+  'column-back',
+  'doc-start',
+  'doc-end',
+  'composer-open',
+  'composer-submit',
+  'composer-cancel',
+  'reading-mode-toggle',
+] as const satisfies readonly CanvasCommand[];
+
+type AssertTrue<T extends true> = T;
+type _EveryCommandIsListed = AssertTrue<
+  [Exclude<CanvasCommand, (typeof CANVAS_COMMANDS)[number]>] extends [never] ? true : false
+>;
+
+function isCanvasCommand(value: unknown): value is CanvasCommand {
+  return typeof value === 'string' && (CANVAS_COMMANDS as readonly string[]).includes(value);
+}
+
 export interface CanvasViewRegistrationOptions {
   connectionManager: ConnectionManager;
   panel: vscode.WebviewPanel;
@@ -45,15 +79,15 @@ export function registerCanvasView(options: CanvasViewRegistrationOptions): vsco
   let registering: Promise<void> | null = null;
 
   const register = async (): Promise<void> => {
-    if (disposed || viewId) return;
+    if (disposed || viewId) { return; }
     const client = connectionManager.getClient();
     const workspace = connectionManager.getWorkspacePath();
-    if (!client || !workspace) return; // not connected yet; the heartbeat retries
+    if (!client || !workspace) { return; } // not connected yet; the heartbeat retries
     const result = await client.registerCanvasView(workspace, file);
     if (disposed) {
       // The panel closed while the request was in flight. Registering now would leak a view that
       // nothing will ever heartbeat, so hand the id straight back.
-      if (result.ok && result.viewId) void client.unregisterCanvasView(result.viewId);
+      if (result.ok && result.viewId) { void client.unregisterCanvasView(result.viewId); }
       return;
     }
     if (result.ok && result.viewId) {
@@ -64,7 +98,7 @@ export function registerCanvasView(options: CanvasViewRegistrationOptions): vsco
 
   /** Serialize registration attempts so a heartbeat racing a reconnect cannot register twice. */
   const ensureRegistered = async (): Promise<void> => {
-    if (registering) return registering;
+    if (registering) { return registering; }
     registering = register().finally(() => {
       registering = null;
     });
@@ -72,19 +106,24 @@ export function registerCanvasView(options: CanvasViewRegistrationOptions): vsco
   };
 
   const beat = async (focused: boolean): Promise<void> => {
-    if (disposed) return;
+    if (disposed) { return; }
     if (!viewId) {
       await ensureRegistered();
       return;
     }
     const client = connectionManager.getClient();
-    if (!client) return;
-    const result = await client.heartbeatCanvasView(viewId, focused);
-    if (result.unknownView) {
+    if (!client) { return; }
+    // Capture the id this beat is about. Two heartbeats can be in flight at once (the timer and
+    // an activation), and both can come back `unknownView`. Without this comparison the second
+    // one would clear a viewId the first had already replaced, orphaning a freshly registered
+    // view until its lease expired.
+    const beatViewId = viewId;
+    const result = await client.heartbeatCanvasView(beatViewId, focused);
+    if (result.unknownView && viewId === beatViewId) {
       // Tower has forgotten this id — it restarted, or the lease lapsed while the machine slept.
       // Re-register rather than heartbeating into the void, which is what would otherwise leave
       // an open panel permanently undrivable.
-      log(`canvas view ${viewId} unknown to Tower; re-registering`);
+      log(`canvas view ${beatViewId} unknown to Tower; re-registering`);
       viewId = null;
       await ensureRegistered();
     }
@@ -99,21 +138,36 @@ export function registerCanvasView(options: CanvasViewRegistrationOptions): vsco
   // The panel the reviewer is looking at should win Tower's most-recently-active rule, so report
   // activity when it becomes visible rather than only on a timer.
   const viewStateSub = panel.onDidChangeViewState((e) => {
-    if (e.webviewPanel.active) void beat(true);
+    if (e.webviewPanel.active) { void beat(true); }
+  });
+
+  // Re-register as soon as the connection comes back, rather than waiting for the next
+  // heartbeat. Without this, a Tower restart leaves every open panel undrivable for up to the
+  // full heartbeat interval — and the first connection after a slow start would too, since
+  // registration at open time is a no-op while there is no client yet.
+  const stateSub = connectionManager.onStateChange((state) => {
+    if (state !== 'connected') { return; }
+    // The id from before the restart is meaningless to the new Tower; drop it and register anew.
+    viewId = null;
+    void ensureRegistered();
   });
 
   const sseSub = connectionManager.onSSEEvent(({ data }) => {
     const envelope = parseSseEnvelope(data);
-    if (!envelope || envelope.type !== CANVAS_COMMAND_EVENT) return;
+    if (!envelope || envelope.type !== CANVAS_COMMAND_EVENT) { return; }
     const event = parseSseBody<CanvasCommandEvent>(envelope.body);
     // Tower broadcasts to every subscriber, so each panel keeps only what is addressed to it.
     // This comparison is the whole addressing mechanism; without it every open canvas would run
     // every command.
-    if (!event || typeof event.viewId !== 'string' || event.viewId !== viewId) return;
-    if (typeof event.command !== 'string') return;
+    if (!event || typeof event.viewId !== 'string' || event.viewId !== viewId) { return; }
+    if (!isCanvasCommand(event.command)) { return; }
 
     const message: HostToWebviewMessage = { type: 'command', command: event.command };
-    if (typeof event.count === 'number') message.count = event.count;
+    // Only a sane repeat count travels on; Tower already rejects the rest, and a bogus value
+    // here would just be extra work for the canvas to ignore.
+    if (typeof event.count === 'number' && Number.isInteger(event.count) && event.count > 0) {
+      message.count = event.count;
+    }
     // Deliberately no `panel.reveal()`: a remote command drives the canvas, it does not steal the
     // reviewer's window, matching the existing command relay's "never pulls focus" posture.
     void panel.webview.postMessage(message);
@@ -123,6 +177,7 @@ export function registerCanvasView(options: CanvasViewRegistrationOptions): vsco
     disposed = true;
     clearInterval(timer);
     viewStateSub.dispose();
+    stateSub.dispose();
     sseSub.dispose();
     const client = connectionManager.getClient();
     if (viewId && client) {
