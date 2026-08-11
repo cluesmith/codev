@@ -22,3 +22,12 @@ Ground-truth findings that shaped the spec:
 - Target rule decided at spec time: zero matches → explicit `no-canvas` error; multiple → deliver to exactly one, most-recently-active (never broadcast — composer-submit would double-post).
 
 Next: commit draft, message main architect (they route the sdk-surface section to the streamdeck architect BEFORE the spec-approval gate), then `porch done 1401` for the 3-way consultation.
+
+## 2026-08-11 — Consultation + streamdeck review folded in
+
+3-way verdicts: gemini APPROVE, codex REQUEST_CHANGES, claude REQUEST_CHANGES (high-quality, code-verified). Claude's two blocking findings were real and both landed on the parity rule:
+1. Remote commands have no `e.target`, and the in-page handlers gate on DOM focus — literal parity would make 8/14 commands no-ops in the primary scenario. Fixed by redefining the rule as *effect parity with a defined remote origin*: a "current block" cursor (last-focused block → topmost visible block fallback), remote navigation moves within-document focus via the same path, composer submit/cancel are view-scoped not focus-scoped.
+2. `block-next/prev` can't be native-Tab parity (Tab visits affordances/cards/toolbar/links). Redefined as flow-order `[data-line]` stepping, explicitly not Tab parity.
+Also folded: Tower-minted viewId semantics, Tower-side path canonicalization, Tower-stamped `lastActiveAt`, security posture paragraph (inherits Tower trust boundary; composer-submit is the first relay-triggerable file write; selector keys never dereferenced as paths), closed HTTP error contract.
+
+Streamdeck sdk-surface review: APPROVE (issue #1401 comment) with deltas, folded in: optional `count` (default 1) on the eight traversal/paging commands only; failure codes as a closed exported union in codev-types (`CanvasCommandErrorCode`); generic-relay exposure CLOSED as NO (open question removed, decision recorded); sdk presence query recorded as a named non-goal with an additive follow-up path. MRU + lastActiveAt-on-delivery + toggle-not-set explicitly endorsed.

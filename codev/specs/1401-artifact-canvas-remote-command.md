@@ -83,31 +83,62 @@ established D-series pattern:
 /** Delivers remote review-navigation commands into the canvas. */
 export interface CommandAdapter {
   /** Subscribe to inbound commands. Returns a Disposable synchronously. */
-  subscribe(onCommand: (command: CanvasCommand) => void): Disposable;
+  subscribe(
+    onCommand: (invocation: { command: CanvasCommand; count?: number }) => void
+  ): Disposable;
 }
 ```
+
+(`count`, default 1, applies to traversal/paging commands only — defined with the Tower
+route in §2.)
 
 `CanvasCommand` is a closed union naming the existing keyboard vocabulary — **exactly** the
 vocabulary, no parallel one. Canonical command set (14):
 
-| Command | Keyboard equivalent | Semantics |
+| Command | In-page equivalent | Semantics |
 |---|---|---|
-| `block-next` / `block-prev` | Tab / Shift+Tab | Focus next/previous block in flow order |
-| `comment-next` / `comment-prev` | `n` / `p` | Focus next/previous commented block |
-| `heading-next` / `heading-prev` | `]` / `[` | Focus next/previous heading |
-| `doc-start` / `doc-end` | Home / End | Focus first/last block |
+| `block-next` / `block-prev` | Tab / Shift+Tab (blocks only — see below) | Move the current block to the next/previous `[data-line]` block in flow order |
+| `comment-next` / `comment-prev` | `n` / `p` | Move to next/previous commented block |
+| `heading-next` / `heading-prev` | `]` / `[` | Move to next/previous heading |
+| `doc-start` / `doc-end` | Home / End | Move to first/last block |
 | `column-forward` / `column-back` | PageDown / PageUp | Page one column (horizontal mode) |
-| `composer-open` | Enter / Space | Open composer on the focused block |
-| `composer-submit` | ⌘/Ctrl+Enter | Submit the open composer |
-| `composer-cancel` | Escape | Cancel the open composer |
-| `reading-mode-toggle` | (toolbar button) | Toggle vertical/horizontal reading mode |
+| `composer-open` | Enter / Space | Open composer on the current block |
+| `composer-submit` | ⌘/Ctrl+Enter | Submit the view's open composer |
+| `composer-cancel` | Escape | Cancel the view's open composer |
+| `reading-mode-toggle` | Reading-mode toolbar button | Toggle vertical/horizontal reading mode |
 
-Semantics rule: **a command behaves exactly as its keyboard equivalent behaves today**, same
-guards, same edge behavior (no wrap-around at edges, column paging only meaningful in
-horizontal mode, composer-open requires a focused block, submit/cancel require an open
-composer). Where the equivalent would do nothing, the command does nothing — that is defined
+**Semantics rule — effect parity with a defined remote origin.** A remote command produces
+the same *effect on canvas state* as its in-page equivalent, through the same per-action
+implementation (predicates, step logic, edge behavior — e.g. no wrap-around at edges, column
+paging meaningful only in horizontal mode). Literal event parity is impossible — the in-page
+handlers derive their origin from the DOM event (`e.target` → enclosing `[data-line]`
+block), and a remote command has no event — so the spec defines the remote origin
+explicitly:
+
+- **Current block (the remote origin).** Relative navigation commands and `composer-open`
+  operate on the canvas's *current block*: the most recently focused block (whether focused
+  by keyboard, pointer, minimap, or a prior remote command). If no block has been focused
+  yet, the fallback is the topmost visible block in the viewport; in an unscrolled document
+  that is the first block. This makes every navigation command well-defined on a
+  freshly-opened, never-touched view — the feature's primary scenario.
+- **Remote navigation moves focus.** A navigation command focuses its target block within
+  the canvas document via the same focus path the keyboard uses (visible focus ring, scroll
+  into view), so a subsequent `composer-open` + keyboard typing continues the flow exactly
+  as the in-page loop does. Whether the *hosting surface* (VS Code panel, browser tab)
+  acquires input focus is the host's policy, outside the package; hosts must not let a
+  delivered command steal focus across unrelated surfaces.
+- **Composer commands are view-scoped, not focus-scoped.** `composer-submit` /
+  `composer-cancel` act on the target view's open composer regardless of where DOM focus
+  sits; with no composer open they are defined no-ops.
+- **Two commands have no key to be parity with**, and are defined against their in-page
+  equivalents directly: `block-next`/`block-prev` step `[data-line]` blocks in flow order —
+  deliberately *not* full native-Tab parity, since Tab also visits affordance buttons,
+  comment-card actions, toolbar controls, and links; and `reading-mode-toggle` mirrors the
+  toolbar button.
+
+Where the in-page equivalent would do nothing, the command does nothing — that is defined
 per-command applicability, not targeting ambiguity (Requirement 4 governs *targeting*, which
-is never silent; see §3). Text entry is out of scope: comment bodies are typed on the
+is never silent; see §2). Text entry is out of scope: comment bodies are typed on the
 keyboard.
 
 Excluded from the set, deliberately: the `?` help legend (in-page discoverability chrome, not
@@ -128,8 +159,28 @@ dead host's views age out; exact transport is a plan decision).
 A new command endpoint accepts one command for a given target selector:
 
 ```
-POST → { workspace, file?, command }   (selector: workspace required, file optional)
+POST → { workspace, file?, command, count? }   (selector: workspace required, file optional)
 ```
+
+`count` (optional, default 1, positive integer) applies to the eight traversal/paging
+commands only (`block-*`, `comment-*`, `heading-*`, `column-*`) and means "apply the step N
+times" with the same edge semantics as N single steps (stops at the edge, no wrap). It is
+rejected on the absolute and stateful commands (`doc-*`, `composer-*`,
+`reading-mode-toggle`) as an invalid request. This is a streamdeck-architect design-review
+addition: dials and repeated key presses batch naturally into one command.
+
+Registry semantics, decided here because they are observable behavior:
+
+- **`viewId` is Tower-minted** at registration: an opaque identifier, stable for the life of
+  that registration, returned in command results for observability (it is what
+  distinguishes two views of the same file). It is not a command selector today; admitting
+  it as one is an additive follow-up if a need arises.
+- **File paths are canonicalized by Tower** on both registration and command (resolved to
+  absolute, same normalization the file-tab dedupe already uses), so path-spelling variance
+  cannot split the registry or defeat MRU dedupe.
+- **Activity time is Tower-stamped.** `lastActiveAt` is the Tower receipt time of the
+  host's activity report (and of command delivery — a driven view stays MRU); host clocks
+  are never trusted, so MRU stays deterministic across multiple host processes.
 
 **Target rule (decided here, per Requirement 4 — never a silent ambiguous no-op):**
 
@@ -150,6 +201,26 @@ filter pattern, made unambiguous by carrying the resolved `viewId` in the event)
 after resolution is best-effort (SSE has no ack); the explicit-answer guarantee covers
 target resolution.
 
+**Error contract.** Failure codes are a **closed, exported union type in `codev-types`**
+(streamdeck design-review decision — not an open string):
+`'no-canvas' | 'invalid-request'`. `no-canvas` answers HTTP 404 (selector resolved to zero
+live views); `invalid-request` answers HTTP 400 (unknown command, malformed selector, or
+`count` on a non-traversal command). Every failure body is
+`{ok:false, code, error}` with `code` from the union; extending the union is an additive
+type change, not a string convention.
+
+**Security posture.** The route inherits Tower's existing trust boundary (localhost bind
+behind the host/origin gate; the same exposure considerations as every route under
+`BRIDGE_MODE`) — it adds no new authentication surface. `workspace` and `file` are registry
+lookup keys only: this route never dereferences them as filesystem paths. The command
+payload is validated against the closed `CanvasCommand` union before relay. Note the
+inherited-boundary consequence explicitly: `composer-submit` is the first relay-triggerable
+action that can cause a file write (through the target host's existing marker write path,
+with the host's own validation) — the write path itself is unchanged and host-side, but the
+trigger is remote. View registration and activity reports carry the same Tower auth as any
+other route; `viewId` being Tower-minted means a registrant cannot claim another view's
+identity.
+
 Hosts (VS Code extension now; the #1386 Tower-served page when it lands) are responsible for
 registering their canvas views, reporting activity, and forwarding delivered commands into
 the page's `CommandAdapter`. The bridge is host-agnostic by construction: any surface that
@@ -158,36 +229,56 @@ can register a view and receive SSE gets remote drive for free.
 ### 3. sdk route (streamdeck-architect review section)
 
 > This section is the design-time review surface for the streamdeck architect
-> (controller-subpath owner, #1189 arrangement).
+> (controller-subpath owner, #1189 arrangement). **Reviewed and APPROVED**
+> (issue #1401 comment, 2026-08-11) with the deltas already folded in below: the `count`
+> parameter, the closed failure-code union, generic-relay exposure closed as NO, and the
+> presence-query non-goal.
 
 A new `TowerClient` method, re-exported through `@cluesmith/codev-sdk/controller`:
 
 ```ts
 sendCanvasCommand(
   command: CanvasCommand,
-  target: { workspace: string; file?: string }
+  target: { workspace: string; file?: string },
+  options?: { count?: number }   // traversal/paging commands only; default 1
 ): Promise<CanvasCommandResult>
-// CanvasCommandResult: { ok: true, target: { viewId, file } }
-//                    | { ok: false, code: 'no-canvas' | …, error: string }
+// CanvasCommandResult: { ok: true, target: { viewId: string, file: string } }
+//                    | { ok: false, code: CanvasCommandErrorCode, error: string }
+// CanvasCommandErrorCode = 'no-canvas' | 'invalid-request'   (closed union, codev-types)
 ```
 
-- Wire types (`CanvasCommand`, request/result shapes, route constant) live in
-  `codev-types`; the sdk imports them type-only and re-declares the route string literal,
-  matching the existing `COMMAND_ROUTE` pattern. Result types are re-exported as
-  `export type` from the controller subpath.
+- Wire types (`CanvasCommand`, `CanvasCommandErrorCode`, request/result shapes, route
+  constant) live in `codev-types`; the sdk imports them type-only and re-declares the route
+  string literal, matching the existing `COMMAND_ROUTE` pattern. Result types are
+  re-exported as `export type` from the controller subpath.
+- The machine-readable `code` must survive to the caller: the sdk call's observable
+  contract is the typed result above, not a flattened error string (the deck renders
+  "no canvas open" from `code`, never by parsing prose). How that composes with the shared
+  `request()` normalization is plan detail; the contract is fixed here.
 - Distinct from `sendCommand` deliberately: the generic verb relay is fire-and-forget
-  broadcast; this call is targeted and reports resolution (`no-canvas` reaches the caller —
-  the deck can flash "no canvas open" on the key). Whether the canvas command set should
-  *additionally* be reachable as `canvas-*` verbs through the generic relay for controller
-  uniformity is explicitly deferred to this design review — the recommendation is no
-  (one path, one semantics).
+  broadcast; this call is targeted and reports resolution. **Decision (design review,
+  closed): the canvas command set is exposed on the targeted route only** — it is *not*
+  additionally exposed as `canvas-*` verbs on the generic relay. One path, one semantics.
+- **Named non-goal: an sdk-visible presence query** (list/inspect open canvas views). Not
+  in scope; if a controller later needs it (e.g. deck key-state display), it is an additive
+  read-only route + sdk call over the same registry, with no change to the command
+  contract.
 
 ## Success Criteria
 
 - [ ] Every one of the 14 canonical commands, delivered remotely to an open canvas view,
-      produces exactly the effect of its keyboard equivalent (verified per command).
+      produces the effect defined in the command table — for the 12 with an in-page key,
+      the same effect the key produces from the current block; for `block-next`/`block-prev`
+      and `reading-mode-toggle`, their defined in-page equivalents (verified per command).
+- [ ] The remote origin is well-defined with no prior interaction: on a freshly opened,
+      never-focused view, relative navigation starts from the topmost visible block and
+      every navigation command has an observable effect from a clean state.
 - [ ] No parallel vocabulary exists: keyboard handlers and remote commands execute the same
       per-action implementation in the package.
+- [ ] `count` multiplies the eight traversal/paging commands (N steps, edge-clamped, no
+      wrap) and is rejected as `invalid-request` on the other six.
+- [ ] Failure codes reach sdk callers as the closed `CanvasCommandErrorCode` union from
+      `codev-types` — machine-readable, never only prose.
 - [ ] With no matching canvas view open, the Tower route and the sdk call return an explicit
       machine-readable `no-canvas` error — observably not a success and not a silent no-op.
 - [ ] With two views open on the same file (e.g. split editor), a command is applied to
@@ -280,49 +371,62 @@ acks come back up.
 
 ## Open Questions
 
-- **Important (shapes design, owned by the streamdeck design review)**: should the canvas
-  command set also be exposed as `canvas-*` verbs on the generic relay for controller
-  uniformity, or stay exclusively on the targeted route? Recommendation: targeted route
-  only (one path, one semantics). Blocks implementation of the sdk surface, not the rest.
 - **Important**: registration transport for hosts — dedicated register/unregister/heartbeat
   HTTP calls vs binding registrations to the host's SSE connection lifetime. Plan-phase
   decision; the spec fixes only the observable behavior (live views, activity, expiry).
-- **Nice-to-know**: should `reading-mode-toggle` be `reading-mode-set` with an explicit
-  target mode for idempotent remote control? The keyboard vocabulary says toggle; deck keys
-  often prefer explicit states. Default: mirror the vocabulary (toggle), revisit in #1400
-  if the deck needs state display anyway (it can read the result/state elsewhere).
-- **Nice-to-know**: whether `lastActiveAt` should also advance on delivered commands (so a
-  driven-but-unfocused view stays MRU). Default: yes — remote driving is activity.
+
+Resolved during the streamdeck design review (2026-08-11), recorded here so they are not
+reopened:
+
+- Generic-relay exposure: **closed as NO** — targeted route only, never `canvas-*` verbs on
+  `/api/command`.
+- `reading-mode-toggle` stays a toggle (not `reading-mode-set`) — mirrors the vocabulary;
+  endorsed as specced.
+- `lastActiveAt` advances on command delivery (a driven view stays MRU) — endorsed, now
+  part of the registry semantics.
+- Traversal `count` parameter added; presence query named a non-goal with an additive
+  follow-up path.
 
 ## Test Scenarios
 
 Functional:
 
-1. Each of the 14 commands delivered to a single open view produces the keyboard-equivalent
-   effect (focus moves, composer opens/submits/cancels, column pages, mode toggles).
+1. Each of the 14 commands delivered to a single open view produces its table-defined
+   effect (focus moves with visible ring + scroll-into-view, composer
+   opens/submits/cancels, column pages, mode toggles).
 2. Command semantics parity edge cases: `comment-next` at the last commented block does not
-   wrap (matches `n`); `column-forward` in vertical mode is a defined no-op; `composer-submit`
-   with no composer open is a defined no-op; `composer-open` with no focused block is a
-   defined no-op.
-3. No canvas open (workspace has none / file not shown / last view closed): route and sdk
-   call return `no-canvas`; nothing is delivered.
-4. Two views, same file: command lands only on the most recently active; response names it;
-   activating the other view flips subsequent delivery.
-5. Two views, different files: file-qualified selector routes correctly both ways; file-less
-   selector follows MRU.
-6. Stale registration (host killed without unregister): after lease expiry, commands return
+   wrap (matches `n`); `column-forward` in vertical mode is a defined no-op;
+   `composer-submit` / `composer-cancel` with no composer open are defined no-ops, and act
+   on the view's composer regardless of where DOM focus sits.
+3. Remote origin: on a freshly opened view with no interaction, `comment-next` starts its
+   scan from the topmost visible block; after scrolling, from the new topmost visible
+   block; after any focus (keyboard, pointer, minimap, or remote), from the current block.
+   `composer-open` on a clean view opens on the topmost visible block.
+4. `count`: `heading-next` with `count: 3` lands where three single steps land, clamping at
+   the last heading without wrapping; `count` on `composer-open` (or any non-traversal
+   command) returns `invalid-request`; `count: 0` and negative values are rejected.
+5. No canvas open (workspace has none / file not shown / last view closed): route and sdk
+   call return `no-canvas` (HTTP 404, closed-union code); nothing is delivered.
+6. Two views, same file: command lands only on the most recently active; response names it
+   via its Tower-minted `viewId`; activating the other view flips subsequent delivery. Two
+   registrations of the same file under different path spellings resolve to one registry
+   identity (Tower canonicalization).
+7. Two views, different files: file-qualified selector routes correctly both ways; file-less
+   selector follows MRU; a delivered command advances the target's `lastActiveAt`.
+8. Stale registration (host killed without unregister): after lease expiry, commands return
    `no-canvas` rather than resolving to the dead view.
-7. Full remote review loop on the VS Code host: navigate to a block, `composer-open`, type
+9. Full remote review loop on the VS Code host: navigate to a block, `composer-open`, type
    on the keyboard, `composer-submit` — exactly one marker written via the existing
    MarkerAdapter path; focus restoration behaves as the keyboard flow does.
-8. sdk: `sendCanvasCommand` success and `no-canvas` results are typed and reachable from
-   `@cluesmith/codev-sdk/controller`.
+10. sdk: `sendCanvasCommand` success and failure results are typed and reachable from
+    `@cluesmith/codev-sdk/controller`, with `code` from the exported
+    `CanvasCommandErrorCode` union.
 
 Non-functional:
 
-9. Boundary tests: sdk import rules and streamdeck subpath rules pass unchanged.
-10. Existing canvas keyboard tests pass unmodified (no in-page behavior change).
-11. SSE fan-out: non-target hosts receiving the addressed event ignore it cheaply (no
+11. Boundary tests: sdk import rules and streamdeck subpath rules pass unchanged.
+12. Existing canvas keyboard tests pass unmodified (no in-page behavior change).
+13. SSE fan-out: non-target hosts receiving the addressed event ignore it cheaply (no
     canvas work triggered).
 
 ## Risks and Mitigation
