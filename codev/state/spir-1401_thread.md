@@ -307,3 +307,23 @@ paging at all (jsdom has no layout), and it closes codex's real-browser coverage
 Lesson worth carrying: when a new test fails, check whether the KEYBOARD path does the same thing
 before touching the component. Twice now the diff between "my path is broken" and "this is how it
 has always worked" was one probe away.
+
+### Manual verification by the human (2026-08-12) — canvas half CONFIRMED WORKING
+
+Ran the dev examples page (`pnpm --filter @cluesmith/codev-artifact-canvas dev:example`, :5173)
+and drove the seam from the browser console via `window.__canvasCommand`. Human confirmed working.
+
+Worth recording because it briefly looked broken and was not:
+- the command returns `undefined` (void), which reads like a failure but is just the return value;
+- on the default sample page the ONLY visible effect of navigation is the focus ring moving;
+- the sample doc has exactly ONE marked block, so a second `comment-next` is a correct no-op
+  (no wrap at the edges, same as the `n` key).
+Trace captured: doc-start/comment-next -> line 2 Summary, heading-next -> line 6 Requirements,
+block-next -> line 8, doc-end -> line 12.
+
+For anyone testing later: `reading-mode-toggle` and `composer-open` give unmistakable visual
+feedback; `?fixture=columns&mode=horizontal` is the page for column paging. Dev server stopped
+after the session (deliberately, so it cannot become the kind of orphan behind #1407).
+
+This is the first real-user-path confirmation for the canvas half. The Tower/sdk/VS Code path
+still needs phases 4-6, and phase_6 carries the full human review loop as an acceptance criterion.
