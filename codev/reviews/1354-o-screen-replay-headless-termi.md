@@ -63,6 +63,17 @@ Routed **COLD** (`codev/resources/lessons-learned.md`, Architecture section), in
 
 ## Things to Look At During PR Review
 
+### 3-way consultation findings and dispositions (iter 1: gemini=APPROVE, codex=REQUEST_CHANGES, claude=REQUEST_CHANGES)
+
+PIR's consultation is single-pass — none of these dispositions were independently re-reviewed by a model; please verify them here.
+
+- **[Claude, BLOCKING — fixed]** The `ITerminalAddon` type bridge in `session-screen.ts` existed only in the working tree; the pushed PR head failed `tsc` (masked because vitest transpiles without typechecking and porch's build check ran against the working tree). Committed in `[PIR #1354] Commit the ITerminalAddon type bridge`; `tsc` now passes on a clean checkout of the branch head.
+- **[Codex — fixed + regression test]** `attachWithReplay` read `screenBufferType` without flushing the mirror's parser, so a resume arriving right after an alt-screen enter (bytes fed, not yet parsed) misrouted to the delta path and re-created the nudge dependence. Now flushes before routing; regression test feeds an unflushed alt-enter and asserts the resume gets the snapshot.
+- **[Codex — fixed]** Fallback log now carries the plan's `attempts=<k>` field for the `flush-timeout` reason (the only reason for which an attempt count is meaningful); test asserts the exact line.
+- **[Claude, minor — fixed]** The standalone `TerminalManager` attach path passed no log sink, silently dropping the AC-4 desync signal. It now forwards WARN lines to the console (INFO stays suppressed there — routine per-attach chatter).
+- **[Codex — rebutted]** "Standalone `pty-manager.ts` omits pause/resume framing and the seq frame." That framing has never existed on the standalone path (pre-#1354 it sent a bare data frame and no seq heartbeat); the plan's contract was "send the snapshot exactly as replay is sent today, keep each site's existing framing." Adding brackets/seq to the standalone wire protocol is out of scope for this PR.
+- **[Claude, minor — accepted, note]** The plan listed `tower-routes.ts` attach sites for signature consistency; they were deliberately left untouched — `mirrorSeed` is optional and fresh-spawn replays are never capped, so passing it there would be a no-op. Recording the deviation here per the finding.
+
 - **The no-await critical section** (`attach-replay.ts`, `pty-session.ts` `replaySnapshot` doc): the guarantee that every output byte lands in exactly one of snapshot or live stream rests on "no await between token re-check, serialize, and addClient" plus PTY data arriving only via macrotasks. The byte-partition test pins it, but the invariant is easy to break with a future refactor that inserts an await.
 - **Async WS handlers**: `handleTerminalWebSocket` and the standalone `handleTerminalConnection` now register message/close handlers *before* the snapshot await and undo the attach if the socket closed during the flush. Call sites got `.catch` guards.
 - **Log-level deviation from the plan**: the plan specified WARN for all fallback reasons; `no-mirror` (a session that has never produced output — every fresh terminal) logs INFO instead to avoid chronic log spam. All genuine desync reasons (`flush-timeout`, `serialize-error`, `empty-snapshot`) are WARN as planned.

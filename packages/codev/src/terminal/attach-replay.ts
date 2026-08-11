@@ -16,6 +16,7 @@
  */
 
 import type { PtySession } from './pty-session.js';
+import { REPLAY_FLUSH_ATTEMPTS } from './pty-session.js';
 
 export type ReplayClient = { send: (data: Buffer | string) => void };
 
@@ -40,8 +41,17 @@ export async function attachWithReplay(
   sinceSeq: number | null,
   log?: ReplayLog,
 ): Promise<AttachReplay> {
-  if (sinceSeq !== null && session.screenBufferType !== 'alternate') {
-    return { kind: 'lines', lines: session.attachResume(client, sinceSeq) };
+  if (sinceSeq !== null) {
+    // Flush the mirror's parser before routing on buffer type: right after an
+    // alt-screen enter the bytes are fed but not yet parsed, and the unflushed
+    // type still reads 'normal' — which would misroute this resume onto the
+    // delta path and re-create the nudge dependence (Codex consultation
+    // finding, iter 1). After the await the check-and-attach is synchronous,
+    // so the routing cannot go stale before the client is registered.
+    await session.gateScreen?.read();
+    if (session.screenBufferType !== 'alternate') {
+      return { kind: 'lines', lines: session.attachResume(client, sinceSeq) };
+    }
   }
 
   const snap = await session.replaySnapshot();
@@ -58,6 +68,9 @@ export async function attachWithReplay(
     reason = snap.reason;
     if (snap.reason === 'serialize-error') {
       detail = ` err=${String((snap.error as Error)?.message ?? snap.error)}`;
+    }
+    if (snap.reason === 'flush-timeout') {
+      detail = ` attempts=${REPLAY_FLUSH_ATTEMPTS}`;
     }
   } else {
     // Token drifted between resolution and this continuation — theoretically

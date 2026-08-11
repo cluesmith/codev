@@ -332,7 +332,12 @@ export class TerminalManager {
     if (resumeSeq && typeof resumeSeq === 'string') {
       sinceSeq = parseInt(resumeSeq, 10);
     }
-    const replay = await attachWithReplay(session, client, sinceSeq);
+    // Forward only WARN lines to the console: those are the AC-4 desync
+    // detection signal (replay-snapshot-fallback), which must not be silently
+    // dropped on the standalone path; INFO here is routine per-attach chatter.
+    const replay = await attachWithReplay(session, client, sinceSeq, (level, msg) => {
+      if (level === 'WARN') console.warn(`[terminal] ${msg}`);
+    });
 
     if (ws.readyState !== WebSocket.OPEN) {
       // Closed while the snapshot flushed — undo the attach registration.

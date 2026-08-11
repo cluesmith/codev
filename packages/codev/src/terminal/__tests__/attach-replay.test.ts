@@ -61,6 +61,34 @@ describe('attachWithReplay (PIR #1354)', () => {
     expect(session.clientCount).toBe(1);
   });
 
+  it('resume routed correctly even when the alt-screen enter is fed but not yet parsed (Codex iter-1 regression)', async () => {
+    const { session, feed } = makeSession();
+    // Feed the alt-screen enter and DO NOT flush: the unparsed mirror still
+    // reads 'normal'. Routing must flush before deciding, or this resume takes
+    // the delta path and re-creates the nudge dependence.
+    feed('\x1b[?1049h\x1b[2J\x1b[1;1HJUST ENTERED TUI');
+    const replay = await attachWithReplay(session, nullClient, session.ringBuffer.currentSeq, undefined);
+    expect(replay.kind).toBe('snapshot');
+    if (replay.kind !== 'snapshot') return;
+    expect(replay.data).toContain('JUST ENTERED TUI');
+  });
+
+  it('flush-timeout fallback logs the bounded attempt count', async () => {
+    const { session, feed } = makeSession();
+    feed('content\r\n');
+    const screen = session.gateScreen!;
+    const realRead = screen.read.bind(screen);
+    vi.spyOn(screen, 'read').mockImplementation(async () => {
+      feed('drift');
+      return realRead();
+    });
+    const logs: string[] = [];
+    const replay = await attachWithReplay(session, nullClient, null, (level, msg) => logs.push(`${level} ${msg}`));
+    expect(replay.kind).toBe('lines');
+    expect(logs).toHaveLength(1);
+    expect(logs[0]).toMatch(/^WARN replay-snapshot-fallback session=route-1 reason=flush-timeout bytesWritten=\d+ attempts=3$/);
+  });
+
   it('alternate-buffer resume serves the snapshot (the nudge-dependent case)', async () => {
     const { session, feed } = makeSession();
     feed('shell\r\n\x1b[?1049h\x1b[2J\x1b[1;1HTUI SCREEN');
