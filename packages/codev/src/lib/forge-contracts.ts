@@ -123,6 +123,15 @@ export interface PrViewResult {
   title: string;
   body: string;
   state: string;
+  /**
+   * The PR's **browser/web** URL (NOT an API endpoint), when the concept
+   * supplies it. Each forge script maps its own web-URL field here: GitHub
+   * `url`, GitLab `web_url`, Gitea `html_url` (Gitea's `url` is the API
+   * endpoint — do not use it). Optional to keep the contract forge-neutral
+   * (a forge script that doesn't emit it degrades gracefully) — same shape
+   * as `IssueViewResult.url`.
+   */
+  url?: string;
   author: { login: string };
   baseRefName: string;
   headRefName: string;

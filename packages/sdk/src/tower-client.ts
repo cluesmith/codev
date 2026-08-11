@@ -13,7 +13,7 @@
  * the read-only reader for standalone Node controllers).
  */
 
-import type { DashboardState, OverviewData, IssueView, IssueSearchResponse, ResolvedWorktreeConfig, ResolvedActivityHooks, TowerVersionInfo, CommandRequest } from '@cluesmith/codev-types';
+import type { DashboardState, OverviewData, IssueView, PRView, IssueSearchResponse, ResolvedWorktreeConfig, ResolvedActivityHooks, TowerVersionInfo, CommandRequest } from '@cluesmith/codev-types';
 import { DEFAULT_TOWER_PORT } from './constants.js';
 import { parseSseText, type SseEnvelope } from './sse.js';
 
@@ -474,6 +474,19 @@ export class TowerClient {
     const params = new URLSearchParams({ number: issueNumber });
     if (workspacePath) { params.set('workspace', workspacePath); }
     const result = await this.request<IssueView>(`/api/issue?${params.toString()}`);
+    return result.ok ? result.data! : null;
+  }
+
+  /**
+   * Fetch a single PR's title/state/url via Tower's forge-backed
+   * GET /api/pr — the PR counterpart of getIssue. Returns null if the PR
+   * can't be resolved (forge unavailable, bad number) so callers can
+   * degrade.
+   */
+  async getPR(prNumber: string, workspacePath?: string): Promise<PRView | null> {
+    const params = new URLSearchParams({ number: prNumber });
+    if (workspacePath) { params.set('workspace', workspacePath); }
+    const result = await this.request<PRView>(`/api/pr?${params.toString()}`);
     return result.ok ? result.data! : null;
   }
 

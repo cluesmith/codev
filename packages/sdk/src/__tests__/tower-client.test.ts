@@ -74,6 +74,19 @@ describe('TowerClient REST', () => {
     expect(await new TowerClient(opts(impl)).listWorkspaces()).toEqual(ws);
   });
 
+  it('getPR hits /api/pr with number + workspace and unwraps the payload', async () => {
+    const pr = { title: 't', body: '', state: 'MERGED', url: 'https://forge/pull/7' };
+    const { impl, calls } = jsonFetch(200, pr);
+    const got = await new TowerClient(opts(impl)).getPR('7', '/work/a b');
+    expect(calls[0].url).toBe('http://localhost:4100/api/pr?number=7&workspace=%2Fwork%2Fa+b');
+    expect(got).toEqual(pr);
+  });
+
+  it('getPR returns null on a non-2xx response (PR not found)', async () => {
+    const { impl } = jsonFetch(404, { error: 'PR #7 not found or forge unavailable' });
+    expect(await new TowerClient(opts(impl)).getPR('7')).toBeNull();
+  });
+
   it('normalizes a connection refusal to "Tower not running" (not a throw)', async () => {
     const impl = vi.fn(async () => { throw new Error('ECONNREFUSED'); }) as unknown as typeof fetch;
     const res = await new TowerClient(opts(impl)).sendCommand('view-diff');

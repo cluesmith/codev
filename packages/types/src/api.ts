@@ -408,6 +408,33 @@ export interface IssueView {
   }>;
 }
 
+// --- PR view (GET /api/pr) ---
+
+/**
+ * A single PR as returned by the `pr-view` forge concept and surfaced
+ * verbatim by Tower's GET /api/pr. Mirrors the server-side PrViewResult
+ * (packages/codev/src/lib/forge-contracts.ts).
+ */
+export interface PRView {
+  title: string;
+  body: string;
+  state: string;
+  /**
+   * The PR's **browser/web** URL (NOT an API endpoint), when the forge
+   * concept supplies it. Each forge maps its own web-URL field into this:
+   * GitHub `url`, GitLab `web_url`, Gitea `html_url` (Gitea's `url` is the
+   * API endpoint — do not use it). Optional so the contract stays
+   * forge-neutral; consumers that open the PR in a browser degrade
+   * gracefully when it's absent (e.g. a forge script that doesn't emit it).
+   */
+  url?: string;
+  author: { login: string };
+  baseRefName: string;
+  headRefName: string;
+  additions: number;
+  deletions: number;
+}
+
 // --- Issue search (GET /api/issue-search) ---
 
 /**

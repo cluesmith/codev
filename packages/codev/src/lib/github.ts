@@ -12,7 +12,7 @@
 import { UNCATEGORIZED_AREA } from '@cluesmith/codev-sdk/constants';
 import { executeForgeCommand, type ForgeConfig } from './forge.js';
 import { getRepoInfo } from './team-github.js';
-import type { IssueViewResult, PrListItem, IssueListItem } from './forge-contracts.js';
+import type { IssueViewResult, PrListItem, PrViewResult, IssueListItem } from './forge-contracts.js';
 
 // =============================================================================
 // Types — re-export forge-contracts types under generic names
@@ -22,6 +22,8 @@ import type { IssueViewResult, PrListItem, IssueListItem } from './forge-contrac
 export type ForgeIssue = IssueViewResult;
 /** A single PR/MR item as returned by the `pr-list` concept command. */
 export type ForgePR = PrListItem;
+/** A single PR/MR as returned by the `pr-view` concept command. */
+export type ForgePRView = PrViewResult;
 /** A single issue item as returned by the `issue-list` concept command. */
 export type ForgeIssueListItem = IssueListItem;
 
@@ -83,6 +85,27 @@ export async function fetchIssueOrThrow(
 export const fetchGitHubIssue = fetchIssue;
 /** @deprecated Use fetchIssueOrThrow instead. */
 export const fetchGitHubIssueOrThrow = fetchIssueOrThrow;
+
+/**
+ * Fetch a single PR by number.
+ * Routes through the `pr-view` concept command.
+ * Returns null if the concept command fails (bad number, forge unavailable).
+ *
+ * @param prId - PR identifier (number or string)
+ * @param options - Optional forge config and cwd
+ */
+export async function fetchPR(
+  prId: string | number,
+  options?: { cwd?: string; forgeConfig?: ForgeConfig | null },
+): Promise<ForgePRView | null> {
+  const result = await executeForgeCommand('pr-view', {
+    CODEV_PR_NUMBER: String(prId),
+  }, {
+    cwd: options?.cwd,
+    forgeConfig: options?.forgeConfig,
+  });
+  return result as ForgePRView | null;
+}
 
 /**
  * Fetch open PRs for the current repo.
