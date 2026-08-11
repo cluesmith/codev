@@ -65,6 +65,72 @@ export function toQuickPickItems(
   });
 }
 
+/** Target kind of a dynamic type-ahead row in the Search Backlog Quick Pick. */
+export type DynamicPickKind = 'issue' | 'pr';
+
+/**
+ * A dynamic `View Issue #N` / `View PR #N` row (issue #1179), prepended to the
+ * Quick Pick when the typed value matches the numeric grammar. `alwaysShow`
+ * exempts the row from VS Code's fuzzy filter: the label is synthesized from
+ * the input, so filtering it against that same input is meaningless and (for
+ * forms like `view pr 1350`) would hide it.
+ */
+export interface DynamicQuickPickItem {
+  label: string;
+  description: string;
+  alwaysShow: true;
+  kind: DynamicPickKind;
+  id: string;
+}
+
+const BARE_ID = /^#?(\d+)$/;
+const TYPED_ID = /^(?:view\s+)?(issue|pr)\s+#?(\d+)$/i;
+
+/**
+ * Parse the Quick Pick's typed value against the dynamic type-ahead grammar:
+ *
+ * - `1350` / `#1350` (bare id) is ambiguous, so both targets are offered,
+ *   issue first.
+ * - `issue 1350` / `view issue 1350` names the target explicitly; likewise
+ *   `pr 1350` / `view pr 1350`. Case-insensitive, leading `#` on the number
+ *   tolerated (the `parseIssueId` convention).
+ * - Anything else (non-numeric, trailing text, bare keyword) yields no
+ *   dynamic rows: the input is an ordinary text search over the static rows.
+ */
+export function parseSearchDynamicQuery(
+  value: string,
+): Array<{ kind: DynamicPickKind; id: string }> {
+  const trimmed = value.trim();
+  const bare = BARE_ID.exec(trimmed);
+  if (bare) {
+    return [{ kind: 'issue', id: bare[1] }, { kind: 'pr', id: bare[1] }];
+  }
+  const typed = TYPED_ID.exec(trimmed);
+  if (typed) {
+    return [{ kind: typed[1].toLowerCase() as DynamicPickKind, id: typed[2] }];
+  }
+  return [];
+}
+
+/** Project the parsed dynamic grammar into ready-to-insert Quick Pick rows. */
+export function toDynamicQuickPickItems(value: string): DynamicQuickPickItem[] {
+  return parseSearchDynamicQuery(value).map(({ kind, id }) => {
+    let noun: string;
+    if (kind === 'issue') {
+      noun = 'Issue';
+    } else {
+      noun = 'PR';
+    }
+    return {
+      label: `View ${noun} #${id}`,
+      description: 'Open in browser',
+      alwaysShow: true,
+      kind,
+      id,
+    };
+  });
+}
+
 /**
  * Relative age of an ISO timestamp, e.g. `3d ago`. Same granularity ladder as
  * `commands/view-artifact.ts`'s helper. Returns an empty string for an

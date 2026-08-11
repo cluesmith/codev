@@ -1098,7 +1098,7 @@ export async function activate(context: vscode.ExtensionContext) {
 			viewBacklogIssue(connectionManager!, extractIssueId(arg))),
 		reg('codev.openBacklogSearch', () =>
 			BacklogSearchPanel.createOrShow(connectionManager!, overviewCache, context.extensionUri)),
-		reg('codev.searchBacklog', () => searchBacklog(overviewCache)),
+		reg('codev.searchBacklog', () => searchBacklog(connectionManager!, overviewCache)),
 		reg('codev.openIssueById', () => openIssueById(connectionManager!)),
 		reg('codev.openPRById', () => openPRById(connectionManager!)),
 		reg('codev.openMarkdownPreview', async () => {
