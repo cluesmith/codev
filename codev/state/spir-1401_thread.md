@@ -213,3 +213,16 @@ worktree's code and failed 33/33. The dangerous case is not this one: if the sib
 happens to be compatible, the run PASSES against the wrong worktree and nobody notices.
 Worked around locally with a temporary isolated config on a free port (deleted, not committed);
 did NOT touch the sibling builder's server. Reported to the architect.
+
+### Architect response on the harness bug (2026-08-11)
+
+Verified and actioned. The 5199 holder is a TRUE ORPHAN: vite pid 70738 whose cwd is the
+*removed* spir-1380 worktree, serving deleted code from stale file handles for ~1.5 days. The
+architect's kill was permission-blocked, so 5199 stays occupied until the human clears it.
+Issue **#1407** (area/vscode) filed for the structural fix (per-worktree port, or
+reuseExistingServer:false + dynamic port).
+
+SANCTIONED for my remaining phases: keep verifying browser tests with a temporary isolated
+config on a free port, uncommitted. **TODO for the review file's testing section: note the
+workaround and cite #1407** so the pr-gate reviewer knows why the committed config was not used
+locally. (Phases 3 and 6 both touch canvas behavior, so this will recur.)
