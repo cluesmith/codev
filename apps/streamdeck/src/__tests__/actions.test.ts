@@ -232,6 +232,90 @@ describe('CodevStore.syncToWorkspace (focus following)', () => {
   });
 });
 
+describe('CodevStore active-workspace filtering', () => {
+  const mixed = () => [
+    workspace('/work/a', 'a', true),
+    workspace('/work/dormant', 'dormant', false),
+    workspace('/work/b', 'b', true),
+  ];
+
+  it('refresh() stores only active workspaces, so the zoom dial cycles active ones alone', async () => {
+    const ctx = makeStore();
+    ctx.listWorkspaces.mockResolvedValue(mixed() as never);
+    await ctx.store.refresh();
+    expect(ctx.store.workspaces.map((w) => w.path)).toEqual(['/work/a', '/work/b']);
+
+    // The cursor cycles only the two active entries (clamped, never the dormant one).
+    expect(ctx.store.selectedWorkspacePath()).toBe('/work/a');
+    ctx.store.rotateCursor(1);
+    expect(ctx.store.selectedWorkspacePath()).toBe('/work/b');
+    ctx.store.rotateCursor(1); // clamped at the end of the 2-entry active list
+    expect(ctx.store.selectedWorkspacePath()).toBe('/work/b');
+    ctx.store.rotateCursor(-1);
+    expect(ctx.store.selectedWorkspacePath()).toBe('/work/a'); // back to the first active, dormant skipped
+  });
+
+  it('clamps the cursor to a valid index when the selected workspace deactivates', async () => {
+    const ctx = makeStore();
+    // Start on the second of two active workspaces.
+    ctx.listWorkspaces.mockResolvedValueOnce([
+      workspace('/work/a', 'a', true),
+      workspace('/work/b', 'b', true),
+    ] as never);
+    await ctx.store.refresh();
+    ctx.store.rotateCursor(1);
+    expect(ctx.store.cursor.workspace).toBe(1);
+
+    // /work/b goes dormant; the next refresh drops it and the cursor snaps back.
+    ctx.listWorkspaces.mockResolvedValueOnce([
+      workspace('/work/a', 'a', true),
+    ] as never);
+    await ctx.store.refresh();
+    expect(ctx.store.workspaces.map((w) => w.path)).toEqual(['/work/a']);
+    expect(ctx.store.cursor.workspace).toBe(0);
+    expect(ctx.store.selectedWorkspacePath()).toBe('/work/a'); // valid, not past the end
+  });
+
+  it('resets the deeper cursor indices when the clamp fires (new workspace has its own builders)', async () => {
+    const ctx = makeStore();
+    ctx.listWorkspaces.mockResolvedValueOnce([
+      workspace('/work/a', 'a', true),
+      workspace('/work/b', 'b', true),
+    ] as never);
+    await ctx.store.refresh();
+    ctx.store.rotateCursor(1); // → workspace 1
+    ctx.store.cursor.builder = 3; // pretend we were deep in /work/b's builders
+    ctx.store.cursor.file = 2;
+
+    ctx.listWorkspaces.mockResolvedValueOnce([workspace('/work/a', 'a', true)] as never);
+    await ctx.store.refresh(); // /work/b deactivates → clamp back to /work/a
+    expect(ctx.store.cursor.workspace).toBe(0);
+    expect(ctx.store.cursor.builder).toBe(0); // not left pointing into /work/b's builder list
+    expect(ctx.store.cursor.file).toBe(0);
+  });
+
+  it('does not fetch an overview when no workspace is active (avoids Tower dormant fallback)', async () => {
+    const ctx = makeStore();
+    ctx.listWorkspaces.mockResolvedValue([workspace('/work/dormant', 'dormant', false)] as never);
+    await ctx.store.refresh();
+    expect(ctx.store.workspaces).toEqual([]);
+    expect(ctx.store.overview).toBeNull();
+    expect(ctx.store.loadingOverview).toBe(false);
+    expect(ctx.getOverview).not.toHaveBeenCalled(); // never asked Tower for an undefined-path overview
+  });
+
+  it('syncToWorkspace treats a dormant registration like an unknown path (no-op)', async () => {
+    const ctx = makeStore();
+    ctx.store.workspaces = [workspace('/work/a', 'a', true)];
+    // Tower still lists the dormant one, but the fetch filters it out, so the
+    // focus-follow finds no match and leaves the cursor put.
+    ctx.listWorkspaces.mockResolvedValue(mixed() as never);
+    await ctx.store.syncToWorkspace('/work/dormant');
+    expect(ctx.store.cursor.workspace).toBe(0); // unchanged
+    expect(ctx.getOverview).not.toHaveBeenCalled();
+  });
+});
+
 describe('zoomInVerb (phase-aware zoom-in)', () => {
   const b = (over: Record<string, unknown>) => ({ id: 'x', blockedGate: null, protocolPhase: '', ...over }) as never;
   it('opens the spec when blocked on spec-approval or in the specify phase', () => {

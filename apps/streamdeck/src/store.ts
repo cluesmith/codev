@@ -76,14 +76,47 @@ export class CodevStore {
 
   /** Re-fetch workspaces + the selected workspace's overview, then notify. */
   async refresh(): Promise<void> {
-    this.workspaces = await this.client.listWorkspaces();
+    this.workspaces = await this.fetchActiveWorkspaces();
+    // A workspace can deactivate while it is the current selection; after the
+    // refresh drops it the cursor may point past the end of the (shorter) list.
+    // Snap back to a valid index so `selectedWorkspacePath()` and the zoom cursor
+    // stay coherent. Reset the deeper indices too (as `rotate()` and
+    // `syncToWorkspace()` do on a workspace change) — the new workspace has its
+    // own builders, so a stale `builder`/`file` would point into the wrong list.
+    if (this.cursor.workspace >= this.workspaces.length) {
+      this.cursor = { ...this.cursor, workspace: 0, builder: 0, file: 0 };
+    }
     await this.refreshOverview();
+  }
+
+  /**
+   * Fetch the workspace list, keeping only entries Tower reports as active
+   * (`active === true`). Dormant registrations are dead stops on the zoom dial:
+   * they carry no actionable overview and every command requires the workspace
+   * active in Tower, so they are filtered out at fetch time. Filtering here (not
+   * per-render) keeps the stored array — which the zoom cursor and
+   * `selectedWorkspacePath()` index into — coherent.
+   */
+  private async fetchActiveWorkspaces(): Promise<TowerWorkspace[]> {
+    const all = await this.client.listWorkspaces();
+    return all.filter((w) => w.active);
   }
 
   /** Re-fetch just the selected workspace's overview (e.g. after zooming to a
    * different workspace), then notify. A request token guards against a slower
    * earlier fetch landing after a newer one (rapid workspace switching). */
   async refreshOverview(): Promise<void> {
+    // With the active-only filter, "no workspaces" is now a routine state (Tower
+    // up, nothing started) rather than a degenerate one. Skip the fetch: passing
+    // an undefined path makes Tower fall back to an arbitrary registered (likely
+    // dormant) workspace's overview, which would render its builders on a dial
+    // that has no active workspace to act on.
+    if (this.workspaces.length === 0) {
+      this.overview = null;
+      this.loadingOverview = false;
+      this.emit();
+      return;
+    }
     const req = ++this.overviewReq;
     const data = await this.client.getOverview(this.selectedWorkspacePath());
     if (req !== this.overviewReq) return; // superseded by a newer fetch
@@ -167,14 +200,17 @@ export class CodevStore {
   /**
    * Follow the focused editor provider: point the cursor at `path` and load that
    * workspace's overview, so the plugin targets the workspace the user is looking
-   * at. No-op if `path` isn't a registered workspace (e.g. a builder worktree
-   * window, which isn't in the workspaces list).
+   * at. No-op if `path` isn't an *active* registered workspace (e.g. a builder
+   * worktree window, or a dormant registration — neither is in the filtered list).
    */
   async syncToWorkspace(path: string): Promise<void> {
     let index = this.workspaces.findIndex((w) => w.path === path);
     if (index < 0) {
       // The list may be stale (a workspace was registered since the last fetch).
-      this.workspaces = await this.client.listWorkspaces();
+      // A dormant registration is filtered out here, so a path that is registered
+      // but not active stays unfound and this falls through to the no-op below —
+      // the same behavior as an unknown path.
+      this.workspaces = await this.fetchActiveWorkspaces();
       index = this.workspaces.findIndex((w) => w.path === path);
     }
     if (index < 0 || index === this.cursor.workspace) return;
