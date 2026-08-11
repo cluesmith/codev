@@ -12,7 +12,8 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { WS_CLOSE_SESSION_UNKNOWN } from '../lib/reconnect-backoff.js';
 import { encodeData, encodeControl, decodeFrame } from '../../terminal/ws-protocol.js';
 import type { PtySession } from '../../terminal/pty-session.js';
-import { getTerminalManager, isStartupReconcileSettled, whenStartupReconcileSettled } from './tower-terminals.js';
+import { attachWithReplay } from '../../terminal/attach-replay.js';
+import { getTerminalManager, isStartupReconcileSettled, whenStartupReconcileSettled, logTerminal } from './tower-terminals.js';
 import { normalizeWorkspacePath } from './tower-utils.js';
 import { decodeWorkspacePath } from '../lib/tower-client.js';
 import { addSubscriber, removeSubscriber } from './tower-messages.js';
@@ -33,8 +34,13 @@ const WS_HIGH_WATER_MARK = 1 * 1024 * 1024; // 1 MB
  * Uses hybrid binary protocol (Spec 0085):
  * - 0x00 prefix: Control frame (JSON)
  * - 0x01 prefix: Data frame (raw PTY bytes)
+ *
+ * Async since PIR #1354: the replay payload is the session mirror's serialized
+ * O(screen) snapshot, whose parser flush awaits. Input/close handlers are
+ * registered BEFORE that await so the client can type during the flush and a
+ * close can never race the registration.
  */
-export function handleTerminalWebSocket(ws: WebSocket, session: PtySession, req: http.IncomingMessage): void {
+export async function handleTerminalWebSocket(ws: WebSocket, session: PtySession, req: http.IncomingMessage): Promise<void> {
   // Support resume via header (server-to-server) or query param (browser WebSocket)
   const reqUrl = new URL(req.url || '/', `http://localhost`);
   const resumeSeq = req.headers['x-session-resume'] || reqUrl.searchParams.get('resume');
@@ -50,38 +56,8 @@ export function handleTerminalWebSocket(ws: WebSocket, session: PtySession, req:
     },
   };
 
-  // Attach client to session and get replay data
-  let replayLines: string[];
-  if (resumeSeq && typeof resumeSeq === 'string') {
-    replayLines = session.attachResume(client, parseInt(resumeSeq, 10));
-  } else {
-    replayLines = session.attach(client);
-  }
-
-  // Send replay data as binary data frame, bracketed by pause/resume control
-  // frames (#1047). The bracket tells the client "this is the one-shot buffer
-  // snapshot" so it paces the write and excludes it from its live-backpressure
-  // budget. Without it, a client counts a large replay as live overload and
-  // (historically) looped forever reconnecting for the same oversized replay.
-  if (replayLines.length > 0) {
-    const replayData = replayLines.join('\n');
-    if (ws.readyState === WebSocket.OPEN) {
-      ws.send(encodeControl({ type: 'pause', payload: {} }));
-      ws.send(encodeData(replayData));
-      ws.send(encodeControl({ type: 'resume', payload: {} }));
-    }
-  }
-
-  // Send current sequence number so client can resume from this point (Bugfix #442)
-  const sendSeq = () => {
-    if (ws.readyState === WebSocket.OPEN) {
-      ws.send(encodeControl({ type: 'seq', payload: { seq: session.ringBuffer.currentSeq } }));
-    }
-  };
-  sendSeq();
-
-  // Periodic seq heartbeat so client always has a recent sequence number
-  const seqInterval = setInterval(sendSeq, 10_000);
+  // Created only after the replay lands; the close handler must tolerate null.
+  let seqInterval: ReturnType<typeof setInterval> | null = null;
 
   // Handle incoming messages from client (binary protocol)
   ws.on('message', (rawData: Buffer) => {
@@ -119,14 +95,57 @@ export function handleTerminalWebSocket(ws: WebSocket, session: PtySession, req:
   });
 
   ws.on('close', () => {
-    clearInterval(seqInterval);
+    if (seqInterval) clearInterval(seqInterval);
     session.detach(client);
   });
 
   ws.on('error', () => {
-    clearInterval(seqInterval);
+    if (seqInterval) clearInterval(seqInterval);
     session.detach(client);
   });
+
+  // Attach and compute the replay payload: the O(screen) snapshot, or raw ring
+  // lines on the normal-buffer delta-resume path and on snapshot fallback
+  // (PIR #1354; routing and fallback logging live in attachWithReplay).
+  let sinceSeq: number | null = null;
+  if (resumeSeq && typeof resumeSeq === 'string') {
+    sinceSeq = parseInt(resumeSeq, 10);
+  }
+  const replay = await attachWithReplay(session, client, sinceSeq, logTerminal);
+
+  if (ws.readyState !== WebSocket.OPEN) {
+    // Closed while the snapshot flushed — undo the attach registration.
+    session.detach(client);
+    return;
+  }
+
+  // Send replay as a binary data frame, bracketed by pause/resume control
+  // frames (#1047). The bracket tells the client "this is the one-shot buffer
+  // snapshot" so it paces the write and excludes it from its live-backpressure
+  // budget. Without it, a client counts a large replay as live overload and
+  // (historically) looped forever reconnecting for the same oversized replay.
+  let replayData = '';
+  if (replay.kind === 'snapshot') {
+    replayData = replay.data;
+  } else if (replay.lines.length > 0) {
+    replayData = replay.lines.join('\n');
+  }
+  if (replayData.length > 0) {
+    ws.send(encodeControl({ type: 'pause', payload: {} }));
+    ws.send(encodeData(replayData));
+    ws.send(encodeControl({ type: 'resume', payload: {} }));
+  }
+
+  // Send current sequence number so client can resume from this point (Bugfix #442)
+  const sendSeq = () => {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(encodeControl({ type: 'seq', payload: { seq: session.ringBuffer.currentSeq } }));
+    }
+  };
+  sendSeq();
+
+  // Periodic seq heartbeat so client always has a recent sequence number
+  seqInterval = setInterval(sendSeq, 10_000);
 }
 
 // ============================================================================
@@ -199,7 +218,10 @@ export function setupUpgradeHandler(
       }
 
       wss.handleUpgrade(req, socket, head, (ws) => {
-        handleTerminalWebSocket(ws, session, req);
+        handleTerminalWebSocket(ws, session, req).catch((err) => {
+          logTerminal('ERROR', `terminal WS handler failed for ${terminalId}: ${String(err)}`);
+          ws.close();
+        });
       });
       return;
     }
@@ -273,7 +295,10 @@ export function setupUpgradeHandler(
       }
 
       wss.handleUpgrade(req, socket, head, (ws) => {
-        handleTerminalWebSocket(ws, session, req);
+        handleTerminalWebSocket(ws, session, req).catch((err) => {
+          logTerminal('ERROR', `terminal WS handler failed for ${terminalId}: ${String(err)}`);
+          ws.close();
+        });
       });
       return;
     }

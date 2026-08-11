@@ -94,6 +94,26 @@ export interface PtySessionInfo {
  */
 export const SHELLPER_CLOSE_GRACE_MS = 15_000;
 
+/**
+ * Bound on {@link PtySession.replaySnapshot}'s flush-until-quiescent loop. Each retry
+ * means output arrived during the previous parser flush; three consecutive busy flushes
+ * (each typically <100ms even for MB-scale backlogs) indicate a pathologically streaming
+ * session, for which the raw-tail fallback (whose correctness the client nudge already
+ * recovers) is the right answer rather than an unbounded wait (PIR #1354).
+ */
+export const REPLAY_FLUSH_ATTEMPTS = 3;
+
+/**
+ * Outcome of {@link PtySession.replaySnapshot} (PIR #1354). On `ok`, `data` is the
+ * serialized O(screen) replay payload and `token` is the `bytesWritten` value the
+ * snapshot is provably current to — the caller re-checks it (and attaches the client)
+ * with NO intervening await, so no output byte can fall between snapshot and live
+ * stream. On failure, `reason` feeds the attach path's fallback log line.
+ */
+export type ReplaySnapshotResult =
+  | { ok: true; data: string; token: number }
+  | { ok: false; reason: 'no-mirror' | 'flush-timeout' | 'serialize-error' | 'empty-snapshot'; error?: unknown };
+
 export class PtySession extends EventEmitter {
   readonly id: string;
   label: string;
@@ -183,8 +203,17 @@ export class PtySession extends EventEmitter {
    * Attach a shellper client as the I/O backend instead of node-pty.
    * Data flows: shellper → ring buffer → WebSocket clients.
    * User input flows: WebSocket → write() → shellper.
+   *
+   * `mirrorSeed` (PIR #1354): the UNCAPPED replay for the screen mirror, when the
+   * caller capped `replayData` for the ring (`capRingSeed`). The two seeds diverge
+   * deliberately — ring contents are shipped raw to clients only on the fallback
+   * path, so the 1 MiB client-payload cap stays; the mirror folds its seed into a
+   * fixed-size grid, so feeding it the full (wire-capped, ≤8 MB) history costs
+   * bounded parse time and shrinks the #1361 born-torn window from 1 MiB to the
+   * shellper's whole retention. Omitted → the mirror gets `replayData`, i.e. the
+   * pre-#1354 behavior (fresh spawns, whose replay is never capped).
    */
-  attachShellper(client: IShellperClient, replayData: Buffer, shellperPid: number, shellperSessionId?: string): void {
+  attachShellper(client: IShellperClient, replayData: Buffer, shellperPid: number, shellperSessionId?: string, mirrorSeed?: Buffer): void {
     // Idempotent re-attach (Issue #1047 Fix E): if a previous client is still
     // attached, drop our listeners on it before subscribing to the new one so
     // a re-attach can't double the per-byte data fan-out (each leaked 'data'
@@ -219,15 +248,19 @@ export class PtySession extends EventEmitter {
       this.logFd = fs.openSync(this.logPath, 'a');
     }
 
-    // Populate ring buffer with replay data from shellper, and seed the gate mirror with
-    // the SAME bytes (Spec 1313 render-gate round 2) so it reflects the session's history
-    // from the moment Tower (re)attaches — a mirror seeded only from live output after this
-    // point would be born torn. Fed through the shared feedGateScreen so it and
-    // `ringBuffer.bytesWritten` (the gate's change token) advance together.
+    // Populate the ring buffer and seed the screen mirror so both reflect the session's
+    // history from the moment Tower (re)attaches — a mirror seeded only from live output
+    // after this point would be born torn (Spec 1313 render-gate round 2). The mirror may
+    // receive a LONGER seed than the ring (see `mirrorSeed` above); that superset is safe
+    // for the `bytesWritten` token protocol, which only ever compares the token against
+    // itself across a flush — every LIVE byte after this point still feeds both in
+    // lockstep via onPtyData.
     if (replayData.length > 0) {
-      const replay = replayData.toString('utf-8');
-      this.ringBuffer.pushData(replay);
-      this.feedGateScreen(replay);
+      this.ringBuffer.pushData(replayData.toString('utf-8'));
+    }
+    const screenSeed = mirrorSeed ?? replayData;
+    if (screenSeed.length > 0) {
+      this.feedGateScreen(screenSeed.toString('utf-8'));
     }
 
     // Forward shellper data to ring buffer + WebSocket clients
@@ -440,16 +473,16 @@ export class PtySession extends EventEmitter {
 
   /**
    * Fold one output chunk into the persistent gate mirror (Spec 1313 render-gate round 2),
-   * creating it lazily on the first byte. Called at EVERY point the ring buffer is fed —
-   * `onPtyData` (live output) and the `attachShellper` replay seed — with the SAME bytes, so
+   * creating it lazily on the first byte. Called at EVERY point the mirror is fed —
+   * `onPtyData` (live output, in lockstep with the ring) and the `attachShellper` seed — so
    * the mirror's rendered screen and `ringBuffer.bytesWritten` (the gate's monotone change
-   * token) can never drift apart. Creating it on the first byte (not at construction) means a
-   * session that never emits output costs nothing, while any session that does is mirrored from its
-   * very first LIVE byte. NOTE: the `attachShellper` seed is the reconnect/adopt REPLAY, which
-   * `tower-terminals.ts` caps to the last 1 MiB (`capRingSeed`); a long-lived alt-screen frame whose
-   * coherent start predates that tail is seeded born-torn → the gate HOLDS (fail-safe) until the next
-   * repaint/viewer nudge heals it. Pre-existing, not a round-2 regression (the pre-round-2 whole-ring
-   * gate classified that same capped seed); tracked as a fast-follow, #1361.
+   * token) can never drift apart on the live path. Creating it on the first byte (not at
+   * construction) means a session that never emits output costs nothing, while any session
+   * that does is mirrored from its very first LIVE byte. On adopt/reconnect the seed is the
+   * FULL shellper replay (≤8 MB wire cap), not the ring's 1 MiB `capRingSeed` tail
+   * (PIR #1354) — so a long-lived alt-screen frame is only born torn when its coherent
+   * start predates the shellper's whole retention (#1361's residual case); the gate then
+   * HOLDS (fail-safe) until the next repaint heals it.
    */
   private feedGateScreen(data: string): void {
     if (!this._gateScreen) this._gateScreen = new SessionScreen(this.cols, this.rows);
@@ -573,24 +606,91 @@ export class PtySession extends EventEmitter {
     this.cleanup();
   }
 
-  /** Attach a WebSocket client. Returns ring buffer contents for replay. */
-  attach(client: { send: (data: Buffer | string) => void }): string[] {
+  /**
+   * Register a live client for output broadcast without producing any replay.
+   * The replay-payload decision (snapshot vs raw lines) belongs to the attach
+   * path (PIR #1354); this is the shared registration step every variant uses.
+   */
+  addClient(client: { send: (data: Buffer | string) => void }): void {
     this.clients.add(client);
     if (this.disconnectTimer) {
       clearTimeout(this.disconnectTimer);
       this.disconnectTimer = null;
     }
+  }
+
+  /** Attach a WebSocket client. Returns ring buffer contents for replay. */
+  attach(client: { send: (data: Buffer | string) => void }): string[] {
+    this.addClient(client);
     return this.ringBuffer.getAll();
   }
 
   /** Attach with resume from a specific sequence number. */
   attachResume(client: { send: (data: Buffer | string) => void }, sinceSeq: number): string[] {
-    this.clients.add(client);
-    if (this.disconnectTimer) {
-      clearTimeout(this.disconnectTimer);
-      this.disconnectTimer = null;
-    }
+    this.addClient(client);
     return this.ringBuffer.getSince(sinceSeq);
+  }
+
+  /**
+   * Which buffer the session's emulated screen is in: 'alternate' means a
+   * full-screen TUI, the case whose reconnect is unservable from the line ring
+   * (a caught-up client's delta resume returns [] — `ring-buffer.ts` getSince)
+   * and so must be served the snapshot. Null before the first output byte and
+   * after teardown.
+   */
+  get screenBufferType(): 'normal' | 'alternate' | null {
+    if (!this._gateScreen) return null;
+    return this._gateScreen.bufferType;
+  }
+
+  /**
+   * Produce the O(screen) viewer-attach replay payload from the session's mirror
+   * (PIR #1354): the serialized current screen plus bounded scrollback, replacing
+   * the raw ring-tail replay whose truncation the client-side resize nudge papered
+   * over. Does NOT attach the client — the caller must, and the split is what makes
+   * the byte partition airtight:
+   *
+   * The flush loop samples `ringBuffer.bytesWritten` (the same monotone token the
+   * render gate uses), flushes the mirror's parser, and re-checks; an unchanged token
+   * proves every byte ever fed is parsed into the grid. Serialization then happens
+   * synchronously, and the caller's continuation (token re-check + `addClient` +
+   * replay send) runs in a microtask — PTY output only arrives via I/O macrotasks, so
+   * nothing can interleave before the client is attached. Every output byte is
+   * therefore either in the snapshot or broadcast live to the attached client:
+   * no gap, no duplication.
+   *
+   * Failure never degrades availability: callers fall back to the raw-ring replay
+   * (today's behavior, nudge-recovered), logging the `reason`.
+   */
+  async replaySnapshot(): Promise<ReplaySnapshotResult> {
+    const screen = this._gateScreen;
+    if (!screen) {
+      // Lazily created on the first output byte, so no mirror simply means a
+      // session that has never produced output (or was torn down) — benign.
+      return { ok: false, reason: 'no-mirror' };
+    }
+    for (let attempt = 0; attempt < REPLAY_FLUSH_ATTEMPTS; attempt++) {
+      const token = this.ringBuffer.bytesWritten;
+      await screen.read();
+      if (this._gateScreen !== screen) {
+        // Torn down mid-flush; the freed term has no coherent frame.
+        return { ok: false, reason: 'no-mirror' };
+      }
+      if (this.ringBuffer.bytesWritten !== token) continue;
+      let data: string;
+      try {
+        data = screen.serialize();
+      } catch (error) {
+        return { ok: false, reason: 'serialize-error', error };
+      }
+      if (!data) {
+        // A live mirror exists only for sessions that produced output, so an
+        // empty serialization is the desync canary, not an idle session.
+        return { ok: false, reason: 'empty-snapshot' };
+      }
+      return { ok: true, data, token };
+    }
+    return { ok: false, reason: 'flush-timeout' };
   }
 
   /** Detach a WebSocket client. Starts disconnect timer if no clients remain (non-shellper only). */
