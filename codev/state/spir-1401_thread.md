@@ -163,3 +163,20 @@ looking like protection, and no later phase touches this package's CI. Added a
 
 Worth remembering: everything was green locally and two of three reviewers approved. "Tests
 pass" hid "the test can never fail."
+
+### Porch wedge incident (worth knowing if it recurs)
+
+`porch next 1401` hung for ~65 minutes with zero output. Root cause was NOT porch and NOT the
+review: it had spawned `git push -u origin HEAD` which wedged. Diagnosis path: `pgrep -P <porch
+pid>` showed the child was a git push; `git ls-remote` returned instantly (so network + auth
+were fine); no hooks, no .lock files; the remote ref had not moved in an hour, so nothing was
+mid-transfer. The wedged process was Xcode's git (/Applications/Xcode.app/.../git), most likely
+stuck on a credential-helper prompt with no TTY to answer it. My own shell git is /usr/bin/git
+and pushed the same commits instantly.
+
+Recovery: SIGTERM the git child (porch stayed alive but idle with no children, so it was not
+going to recover), SIGTERM porch, verify status.yaml intact, push manually with /usr/bin/git,
+re-run `porch next`. porch resumed correctly at implement iteration 2 with no state loss.
+
+Generalisable: a wait is a claim that a producer exists — check the CHILD process, not just the
+parent. An hour of "still running" was one wedged subprocess the whole time.
