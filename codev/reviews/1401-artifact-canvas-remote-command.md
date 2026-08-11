@@ -107,7 +107,7 @@ architect authorization rather than worked around:
 | Tower relay e2e | 5 pass against a real booted Tower |
 | sdk | 98 pass, including 9 malformed-response cases |
 | streamdeck boundary | 63 pass, unchanged |
-| VS Code extension | 789 pass, including 12 new host-glue tests |
+| VS Code extension | 794 pass, including 17 new host-glue tests |
 | Repo | 4847 pass, build green, repo-wide `check-types` clean |
 
 **Human verification of the canvas half** (2026-08-12): the dev examples page was driven from the
