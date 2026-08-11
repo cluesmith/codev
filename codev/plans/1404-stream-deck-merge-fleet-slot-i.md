@@ -11,6 +11,8 @@ They are the same `SlotKey` base class differing only in `defaultVerb` and `rend
 
 The phase→verb resolution already exists for the Zoom Navigator's touch-strip zoom-in — `zoomInVerb` (`actions.ts:208-217`), covered by tests at `src/__tests__/actions.test.ts:319-334`. Per the owner's implementation note on the issue, Automatic mode must **reuse/extract that resolver** rather than writing a second mapping. The only difference: `zoomInVerb` falls back to `view-diff` for unknown/no-status builders (a dial always has an editor to open), while Automatic must fall back to `open-terminal` (requirement 3: "no artifact yet / unknown state → open-terminal"). So the shared core returns the recognised verb or `undefined`, and each caller supplies its own fallback.
 
+**Selection on press (design decision, 2026-08-12).** The store already carries a shared zoom cursor (`store.cursor`, `selectedBuilder()`) that the diff dials, `ScrollNav`, `DevServerAction`, and `ZoomNav` all act on. Today the slot-pinned keys ignore it, so pressing a builder key opens that builder's artifact but leaves the dials pointing elsewhere. The merged key becomes the fleet **selector**: its press points the cursor at the builder (`store.syncToBuilder(b.id)`, `store.ts:236-242`) **and** opens the artifact, so one press focuses the builder for the dials and any selection-scoped keys. This is the sole change in this project taken from a broader SD+ two-zone workflow design; that wider design (a Row 2 action palette, dial queue/send semantics, feedback-mode wiring) is captured in a **separate spec** and is out of scope here.
+
 State strings are read from the overview wire values on `OverviewBuilder` (`packages/types/src/api.ts:141-183`): `protocolPhase` (`specify`/`plan`/`implement`/`review`/`verify`, `''` when no live status) and `blockedGate` (canonical gate name: `spec-approval`/`plan-approval`/`dev-approval`/`pr`, `null` when not blocked). No new hardcoded phase guesses.
 
 The bundled SD+ profile (`com.cluesmith.codev.sdPlugin/Codev.streamDeckProfile`, a zip) references `fleet-slot` on 3 keys and `builder-action` on 1, so it is revved in this same PR.
@@ -52,13 +54,14 @@ This preserves `zoomInVerb`'s current behaviour exactly (every existing case sti
 
 - Add an `'automatic'` sentinel. When `settings.verb` is unset or `'automatic'`, resolve via `phaseArtifactVerb(b) ?? 'open-terminal'`; any other value is an explicit verb used verbatim (requirement 2: explicit choices never overridden).
 - Move the resolution into `SlotKey.onKeyDown` via an overridable hook so `BuilderAction` supplies the Automatic behaviour and the base default stays simple. Concretely, replace the `const verb = settings.verb ?? this.defaultVerb` line with `const verb = this.resolveVerb(settings, b)`, where the base returns `settings.verb ?? this.defaultVerb` and `BuilderAction` overrides it to honour the `automatic` sentinel.
+- **Press also selects.** In `SlotKey.onKeyDown`, once the slot builder `b` is resolved (before or after firing the verb), call `this.store.syncToBuilder(b.id)` so the press moves the shared cursor to that builder. `syncToBuilder` is an existing no-op-safe method (already used to follow VSCode focus), so this reuses it rather than adding cursor plumbing. The empty-slot path (no builder) still just alerts and selects nothing.
 - `BuilderAction.renderTo` adopts Fleet Slot's two-line render: `#issue` (or `b.id`) on line 1, `b.blocked ?? b.protocolPhase` on line 2; `Slot N` when the slot is empty. (Rendering stays title-based, matching the existing `v1` note at `actions.ts:20`; true colour-by-state tiles would need SVG feedback and are out of scope for this merge — flagged under Risks.)
 - Delete the `FleetSlot` class and its default `view-diff` on `BuilderAction` becomes `automatic`.
 
 ### 3. Remove Fleet Slot registration & manifest entry
 
 - `src/plugin.ts`: drop the `FleetSlot` import (line 9) and `new FleetSlot(store)` (line 41).
-- `manifest.json`: remove the entire `fleet-slot` action object (lines ~100-115). Update the `builder-action` Tooltip to describe the shipped behaviour truthfully (requirement 6), e.g. *"Live tile for the Nth builder (set the slot in the PI). Press opens the artifact for its current phase (spec / plan / diff), or a fixed verb you choose."*
+- `manifest.json`: remove the entire `fleet-slot` action object (lines ~100-115). Update the `builder-action` Tooltip to describe the shipped behaviour truthfully (requirement 6), e.g. *"Live tile for the Nth builder (set the slot in the PI). Press selects the builder and opens the artifact for its current phase (spec / plan / diff), or a fixed verb you choose."*
 
 ### 4. Property Inspector (`ui/builder-action.html`)
 
@@ -90,10 +93,11 @@ Also update each key's cached `"Name": "Fleet Slot"` → `"Builder Action"`. Pro
   - empty/unknown phase and unrecognised gate → `undefined` (helper) and → `open-terminal` (Builder Action Automatic press).
   - Builder Action with an explicit `verb` (e.g. `open-review`) fires it verbatim, unaffected by phase (requirement 7: explicit-verb keys unaffected).
   - Builder Action render shows `#issue` + phase/blocked on two lines.
+  - Pressing a Builder Action selects its slot builder: `store.cursor.builder` (and `selectedBuilder()`) point at that builder after the press; an empty slot selects nothing.
 
 ## Files to Change
 
-- `apps/streamdeck/src/actions.ts` — extract `phaseArtifactVerb`; rewrite `zoomInVerb` as a wrapper; `BuilderAction` gains Automatic resolution + two-line render; delete `FleetSlot`.
+- `apps/streamdeck/src/actions.ts` — extract `phaseArtifactVerb`; rewrite `zoomInVerb` as a wrapper; `BuilderAction` gains Automatic resolution + two-line render; `SlotKey.onKeyDown` calls `store.syncToBuilder(b.id)` so the press selects; delete `FleetSlot`. (No `store.ts` change — `syncToBuilder` already exists.)
 - `apps/streamdeck/src/plugin.ts:9,41` — drop `FleetSlot` import + registration.
 - `apps/streamdeck/com.cluesmith.codev.sdPlugin/manifest.json` — remove `fleet-slot` action; fix `builder-action` tooltip.
 - `apps/streamdeck/com.cluesmith.codev.sdPlugin/ui/builder-action.html` — Automatic option (default, first); relabel "On press"; update helper.
@@ -117,6 +121,7 @@ Also update each key's cached `"Name": "Fleet Slot"` → `"Builder Action"`. Pro
 **Unit** (`pnpm --filter @cluesmith/codev-streamdeck test`, run from the worktree):
 - `phaseArtifactVerb`: phase mapping, blocked-gate mapping, unknown/empty → `undefined`.
 - Builder Action Automatic press: fires the resolved verb; unknown → `open-terminal`; re-press fires again (stateless).
+- Builder Action press selects the slot builder (cursor follows); empty slot alerts and selects nothing.
 - Explicit-verb Builder Action fires verbatim regardless of phase.
 - Existing `zoomInVerb` suite still green.
 - Builder Action render: two-line `#issue` + phase/blocked; `Slot N` when empty.
@@ -127,4 +132,5 @@ Also update each key's cached `"Name": "Fleet Slot"` → `"Builder Action"`. Pro
 - Import the revved `Codev.streamDeckProfile` onto a Stream Deck + — the 3 former Fleet Slot keys appear as Builder Action, On press = Automatic.
 - With a live workspace, watch a builder move through phases and press its key at each: specify → spec opens; plan → plan opens; implement/review → diff opens; blocked at a gate → the gate's artifact; no builder in the slot → alert. Press twice at one phase → re-opens (stateless).
 - Set a key to an explicit verb in the PI → that verb fires, ignoring phase.
+- Press a builder key, then rotate a diff dial (Files/Changes) → the dials now act on the builder you pressed (selection followed the press).
 - Confirm the Approve Gate key still owns approval; the Builder Action key never approves.
