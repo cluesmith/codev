@@ -26,3 +26,11 @@ resume (delta for normal buffer, snapshot for alternate); full-replay mirror see
 signal; all #1353 caps untouched as defense in depth.
 
 At the plan-approval gate.
+
+Architect review verdict: RECOMMEND APPROVE (independently verified SessionScreen internals,
+addon metadata, getSince alt-screen behavior, #1361). One implementation-time note, not a plan
+revision: phase 4's full-replay mirror seeding costs ~100 ms per adoption and Tower restart
+re-adopts every session at once (30 sessions could add ~3 s). At implement time, measure the
+aggregate on a realistic fleet and ensure adoption feeding cannot block Tower's startup/serving
+path (async or lazy-on-first-attach both acceptable); document the choice in the review
+artifact. Waiting for the human gate decision before implementing.
