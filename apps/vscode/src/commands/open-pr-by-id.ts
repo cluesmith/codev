@@ -2,8 +2,11 @@
  * Codev: Open PR by ID — open a specific pull request by typing its id,
  * mirroring `open-issue-by-id.ts` (issue #1179).
  *
- * Bound to `Cmd+K P` / `Ctrl+K P`, completing the keyboard family alongside
- * `Cmd+K I` (issue). Fetches via the SDK's forge-agnostic `getPR` (Tower's
+ * Bound to `Cmd+K Shift+P` / `Ctrl+K Shift+P`, completing the keyboard family
+ * alongside `Cmd+K I` (issue). The unshifted `Cmd+K P` chord is a VS Code
+ * built-in (Copy Path of Active File), so the shifted variant keeps the
+ * P-for-PR mnemonic without shadowing it (issue #1179 pr-gate decision).
+ * Fetches via the SDK's forge-agnostic `getPR` (Tower's
  * GET /api/pr → the `pr-view` forge concept) and opens the PR's canonical
  * forge page in the external browser.
  *

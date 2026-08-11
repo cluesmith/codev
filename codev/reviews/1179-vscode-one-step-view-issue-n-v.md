@@ -1,4 +1,4 @@
-# PIR Review: One-step "view issue N" / "view pr N" QuickPick type-ahead + Cmd+K P Open-PR-by-ID
+# PIR Review: One-step "view issue N" / "view pr N" QuickPick type-ahead + Cmd+K Shift+P Open-PR-by-ID
 
 Fixes #1179
 
@@ -8,14 +8,14 @@ Two additive VS Code navigation improvements sharing one code path. The backlog 
 QuickPick now recognizes numeric input (`1350`, `#1350`, `issue 1350`, `view pr 1350`) and
 prepends dynamic `View Issue #N` / `View PR #N` rows that fetch live and open in the
 browser, reaching issues outside the loaded backlog (closed, claimed) and PRs in one
-gesture. A new `codev.openPRById` command on `Cmd+K P` mirrors `codev.openIssueById`,
+gesture. A new `codev.openPRById` command on `Cmd+K Shift+P` mirrors `codev.openIssueById`,
 backed by a new forge-agnostic PR-fetch slice: the `pr-view` concept now emits the PR's
 browser `url` on all three forges, surfaced through Tower's new `GET /api/pr`, a `PRView`
 wire type, and `TowerClient.getPR`.
 
 ## Files Changed
 
-- `apps/vscode/package.json` (+9 / -0) — command declaration + `ctrl+k p` / `cmd+k p`
+- `apps/vscode/package.json` (+9 / -0) — command declaration + `ctrl+k shift+p` / `cmd+k shift+p`
 - `apps/vscode/src/__tests__/backlog-search.test.ts` (+78 / -1) — grammar table
 - `apps/vscode/src/__tests__/open-pr-by-id.test.ts` (+95 / -0) — new
 - `apps/vscode/src/__tests__/search-backlog-quickpick.test.ts` (+148 / -0) — new
@@ -79,19 +79,18 @@ section documents the concept mechanism generically and already lists `pr-view` 
 
 ## Things to Look At During PR Review
 
-- **⚠️ Consultation finding (Claude, REQUEST_CHANGES — confirmed, needs a human decision):
-  `Ctrl+K P` / `Cmd+K P` shadows a VS Code built-in.** The issue said "verified P slot is
-  free," but that verification (plan's included) only covered the extension's own
-  keybindings map. VS Code registers `workbench.action.files.copyPathOfActiveFile` on
-  exactly this chord (weight 200, no `when` clause — confirmed in Cursor's bundled
-  `workbench.desktop.main.js`: `registerCommandAndKeybindingRule({weight:200, when:void 0,
-  primary:chord(ctrl+k, KeyP), mac:chord(cmd+k, KeyP)})`), and extension-contributed
-  keybindings outrank workbench ones, so installing Codev takes "Copy Path of Active File"
-  away on both platforms. The binding ships as the issue specified; options at the gate:
-  **keep** (accept shadowing — common among extensions, and the command remains reachable
-  via palette/context menu), **scope** with a `when` clause, or **rebind**. Since the key
-  choice was baked into the issue on a false premise, I did not change it unilaterally —
-  decide here. (PIR consultation is single-pass; this disposition was not re-reviewed.)
+- **Consultation finding (Claude, REQUEST_CHANGES — confirmed, RESOLVED by rebind):** the
+  originally planned `Ctrl+K P` / `Cmd+K P` shadowed a VS Code built-in. The issue said
+  "verified P slot is free," but that verification (plan's included) only covered the
+  extension's own keybindings map; VS Code registers
+  `workbench.action.files.copyPathOfActiveFile` on exactly that chord (weight 200, no
+  `when` clause — confirmed in the bundled `workbench.desktop.main.js`), and
+  extension-contributed keybindings outrank workbench ones. **Resolution (human decision
+  at the pr gate): rebound to `Ctrl+K Shift+P` / `Cmd+K Shift+P`** — verified free across
+  the core workbench chord table (no shift-modified KeyP chord exists), built-in
+  extensions, and our own map, and it keeps the P-for-PR mnemonic the issue intended.
+  (PIR consultation is single-pass; the rebind itself was verified by the human reviewer,
+  not re-reviewed by the models.)
 - Consultation minor (Claude, non-blocking): in `search-backlog.ts` the async browser-open
   helpers are invoked bare inside the sync `onDidAccept` callback, so an `openExternal`
   rejection would be an unhandled rejection. Left as-is per house style (bare
@@ -119,7 +118,8 @@ section documents the concept mechanism generically and already lists `pr-view` 
     Enter on the first opens the issue in the browser
   - Q1b: type `view pr 1350` → `View PR #1350` on top; Enter opens the PR in the browser
   - Q1c: type `tower` → normal filtering, no dynamic rows
-  - Q2a: `Cmd+K P` → InputBox; `1398` + Enter opens PR #1398 in the browser
+  - Q2a: `Cmd+K Shift+P` → InputBox; `1398` + Enter opens PR #1398 in the browser
+  - Regression: `Cmd+K P` (unshifted) still runs the built-in Copy Path of Active File
   - Q2b: non-numeric input → validation message
   - Q2c: `999999` → warning toast, no crash
   - Regression: `Cmd+K I` unchanged; backlog row Enter still opens the in-editor preview

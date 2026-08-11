@@ -926,8 +926,8 @@
       },
       {
         "command": "codev.openPRById",
-        "key": "ctrl+k p",
-        "mac": "cmd+k p"
+        "key": "ctrl+k shift+p",
+        "mac": "cmd+k shift+p"
       },
       {
         "command": "codev.diffNextFile",

@@ -49,6 +49,15 @@ Cmd+K P shadows the built-in Copy Path of Active File (issue's "free slot" premi
 covered our own map). Key kept as issue-specified; collision escalated to the human at
 the pr gate via review "Things to Look At" + rebuttal file. Sitting at pr gate.
 
+## 2026-08-11 — pr gate: keybinding rebound
+
+Architect decision on the shadowing finding: rebind. `codev.openPRById` moved from
+`ctrl+k p` / `cmd+k p` to `ctrl+k shift+p` / `cmd+k shift+p` — verified free in the core
+workbench chord table (no shift+KeyP chord; I cross-checked via chord-code enumeration of
+the bundled workbench, architect verified independently incl. built-in extensions),
+keeps the P-for-PR mnemonic. Review file + PR body updated to record the resolution.
+Earlier "verified free" notes above stand as the historical record of the bad premise.
+
 Notes for reviewers: fresh-worktree builds need `pnpm -C packages/types build`,
 `packages/core build`, `packages/sdk build`, `packages/artifact-canvas build` before
 type-checking codev/vscode (dist-based workspace resolution; not caused by this change).
