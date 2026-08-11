@@ -541,3 +541,23 @@ All actionable findings from iter1/iter2 ARE fixed (reconnect, re-registration r
 deactivate-unregister, closed-union validation, malformed-count event rejection, release-id-on-
 reconnect, lint). Asked the architect to let me stop iterating and open the PR, where the human
 runs the 4-step script at the pr gate. Holding rather than burning another consultation round.
+
+## 2026-08-12 — PR #1413 OPENED; holding at the pr gate
+
+https://github.com/cluesmith/codev/pull/1413 — 63 commits, 46 files, +6025/-69, MERGEABLE.
+
+Architect gave the word to stop iterating phase_6 and open the PR, citing precedent (pir-1179's
+keybinding collision, 1313's phase-7 force-advance): a REQUEST_CHANGES that no code change can
+close belongs with the human at the gate, and refusing to claim an unperformed verification is
+the right call.
+
+PR body carries the three required elements: the 4-step live script front and center as the
+gate's blocking human check with the 2-1 verdict and rebuttal linked; the verified-vs-unverified
+table isolating the single untested join; and the instruction to run the extension from THIS
+worktree's build rather than an installed copy.
+
+Note for whoever picks this up: **porch still shows phase_6 in_progress**, because I stopped
+iterating on architect instruction rather than reaching 3/3. Flagged to the architect. Do not
+hand-edit status.yaml to "fix" it.
+
+Next: wait for the pr gate. After merge → `porch done 1401 --merged 1413`, then the verify phase.
