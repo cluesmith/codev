@@ -17,11 +17,11 @@ plan_phases:
     status: complete
   - id: phase_5
     title: sdk canvas command and view registration calls
-    status: in_progress
+    status: complete
   - id: phase_6
     title: VS Code host wiring and end-to-end review loop
-    status: pending
-current_plan_phase: phase_5
+    status: in_progress
+current_plan_phase: phase_6
 gates:
   spec-approval:
     status: approved
@@ -35,8 +35,8 @@ gates:
     status: pending
   verify-approval:
     status: pending
-iteration: 2
-build_complete: true
+iteration: 1
+build_complete: false
 history:
   - iteration: 1
     plan_phase: phase_1
@@ -119,4 +119,4 @@ history:
         file: >-
           /Users/amrmohamed/repos/cluesmith/codev/.builders/spir-1401/codev/projects/1401-artifact-canvas-remote-command/1401-phase_5-iter1-claude.txt
 started_at: '2026-08-11T10:57:41.092Z'
-updated_at: '2026-08-11T23:11:09.326Z'
+updated_at: '2026-08-11T23:13:25.293Z'
