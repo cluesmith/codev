@@ -492,3 +492,12 @@ the PR body for the pr-gate reviewer.
 
 Verification: 12/12 new host-glue tests, 789/789 vscode suite, repo check-types clean, build
 green, 4847 repo tests.
+
+### #1400 revised (2026-08-11) — the `file?` selector has a named consumer
+
+Streamdeck stakeholder, via the architect: #1400 was revised (owner-directed) to FILE-QUALIFIED
+targeting. The deck will call sendCanvasCommand with BOTH workspace and file, targeting the
+selected builder's artifact, with MRU as the recorded fallback. No code or spec change requested
+here. If a pr-gate reviewer flags the `file?` selector as speculative or unused, the disposition
+is: required by #1400 as revised 2026-08-11. How the deck discovers the artifact path is a #1400
+question in the streamdeck lane, not mine. TODO: record in the review file dispositions + PR body.
