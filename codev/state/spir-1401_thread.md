@@ -58,3 +58,38 @@ Two spec-deferred decisions settled in the plan:
 Also decided: sdk gains host-facing registration methods on TowerClient but does NOT re-export
 them through controller.ts — controllers drive views, hosts register them, so the approved
 controller surface stays exactly as reviewed.
+
+## 2026-08-11 — Plan consultation: two blockers, plan restructured 5 → 6 phases
+
+gemini APPROVE; codex + claude REQUEST_CHANGES, both code-verified and both right. I
+re-verified all six load-bearing claims against the worktree before acting; all held.
+
+Blockers:
+1. **Runtime traversal classification was unimportable by BOTH intended consumers.**
+   packages/codev has codev-types as a compile-time-only dep and runs unbundled from dist/, so
+   a runtime value import does not resolve (command-relay.ts:24-29 documents this and
+   re-declares COMMAND_ROUTE for the same reason); and the canvas import is type-only by my own
+   Phase 2 rule. Fixed: classification is now type-level (`TraversalCommand`), each consumer
+   declares a `satisfies`-bound const list. Tower also re-declares route/event literals.
+2. **Phase 2 "pure extraction" hid ~6 commands of new work.** Only 6 of 14 commands have a
+   handler to extract; block-next/prev (native Tab), reading-mode-toggle (ReadingModeToggle.tsx)
+   and composer-submit/cancel (CommentComposer.tsx's own onKeyDown) are new. Split the PHASE
+   rather than just the deliverable, because the template requires one atomic commit per phase.
+   Now: Phase 2 = pure extraction (oracle: unmodified existing suite), Phase 3 = new actions +
+   composer seam + cursor + CommandAdapter.
+
+Notable: **`supportsMultipleEditorsPerDocument: false` (extension.ts:1404)** means VS Code
+cannot open two canvas panels for one document, so the approved spec's "(e.g. split editor)"
+example is factually wrong. MRU rule is unaffected and still needed (two files in one
+workspace; two hosts once #1386 lands; registry-level defence) — only the verification venue
+moves, to Tower-layer tests. Did NOT flip the flag (user-visible editor behavior, out of scope).
+Raised with the architect since it corrects an approved artifact.
+
+Other fixes: type-test moved out of src/ (would have been published: include src/**/*, files
+[src,dist]); cursor documented as deliberately separate from hover-driven activeLine; count
+ignored by canvas / rejected by Tower (was unfalsifiable "ignored or rejected"); extension.ts
+added to Phase 6 (provider is constructed without ConnectionManager); re-registration on Tower
+restart; canonicalization merges FILE identity, not view identity (two views keep distinct
+viewIds); typed CanvasCommandEvent SSE payload; sdk transport failures reject rather than
+widening the spec-fixed closed error union; webview/ is outside the extension typecheck so the
+manual pass is load-bearing evidence, not a formality.
