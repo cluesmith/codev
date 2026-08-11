@@ -257,6 +257,20 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 
 ## Testing
 
+- [From #1401] **A guard is not a guard until you have watched it fail.** Two variants bit in one
+  project. (a) A compile-time exhaustiveness check written as a bare conditional type alias
+  (`type _X = Cond extends never ? true : never`) constrains nothing — an omitted member resolves
+  to `never` and compiles happily. It must be a type that *fails to instantiate*:
+  `type Assert<T extends true> = T` wrapping a `… ? true : false`. I shipped the inert form,
+  had it caught, then reintroduced it two phases later under a comment claiming enforcement.
+  (b) The same project's type-test file lived outside `src/` so it would not be published, which
+  also meant `pnpm build` never compiled it and **no CI job invoked it** — it protected nothing
+  while looking like protection. Before trusting any guard, break the thing it guards and watch
+  the build go red; then check something in CI actually runs it.
+- [From #1401] Green signals can hide a red one. `check-types` was failing on a newly added
+  Playwright spec while the unit and browser suites both passed, because Playwright transpiles
+  per file with no project-wide type check. Run `check-types` after the last **file** is added,
+  not after the last logic change.
 - [From #1380] jsdom cannot express CSS layout (fragmentation, multicol, client rects) — for
   layout-dependent features, commit a real-browser (Playwright) fixture **alongside the first
   layout CSS**, and have it assert invariants (fragment-rect counts, reachability), not the

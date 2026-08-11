@@ -1,150 +1,184 @@
 # Review: Artifact-Canvas Remote Command Channel (Tower relay + sdk route)
 
-**Spec**: [codev/specs/1401-artifact-canvas-remote-command.md](../specs/1401-artifact-canvas-remote-command.md)
-**Plan**: [codev/plans/1401-artifact-canvas-remote-command.md](../plans/1401-artifact-canvas-remote-command.md)
-**Issue**: #1401 · **Branch**: `builder/spir-1401`
+**Spec**: [codev/specs/1401-artifact-canvas-remote-command.md](../specs/1401-artifact-canvas-remote-command.md) ·
+**Plan**: [codev/plans/1401-artifact-canvas-remote-command.md](../plans/1401-artifact-canvas-remote-command.md) ·
+**Issue**: #1401 · **PR**: #1413 · **Branch**: `builder/spir-1401`
 
-## What shipped
+## Summary
 
-A generic bridge that lets anything outside the canvas drive an open artifact-canvas view, built
-so the Stream Deck (#1400) is the first consumer rather than the only possible one.
+A generic remote-command channel for the artifact canvas, delivered in six phases: Tower keeps a
+registry of live canvas views, resolves exactly one target for a command, and answers explicitly
+when none is open. The Stream Deck (#1400) is the first consumer rather than the only possible
+one. 46 files, roughly +6000 lines; every layer green, with one human-only verification
+outstanding at the PR gate.
 
-| Layer | What it does |
-|---|---|
-| `codev-types` | The closed 14-command vocabulary, wire and client error unions, request/result/registry/event shapes, route and event names |
-| `artifact-canvas` | One named implementation per action, a `CommandAdapter` seam, and a focus-derived cursor giving remote commands a defined origin |
-| Tower | A registry of live canvas views plus a targeted `/api/canvas/*` route that resolves exactly one view and answers explicitly |
-| sdk | `sendCanvasCommand` on the controller subpath, and host-side register/heartbeat/unregister |
-| VS Code | Each canvas panel registers as a view, heartbeats, reports activity, and runs the commands addressed to it |
+## Spec Compliance
 
-53 commits, 46 files, roughly +5400 lines.
+- [x] AC1: All 14 commands produce their table-defined effect (Phase 3, verified by unit + Playwright)
+- [x] AC2: The remote origin is well-defined with no prior interaction — clean-state and scrolled-state both covered (Phase 3)
+- [x] AC3: No parallel vocabulary; keyboard and remote run the same per-action implementations (Phases 2-3)
+- [x] AC4: `count` multiplies the eight traversal commands and is rejected on the other six (Phases 3-4)
+- [x] AC5: Failure codes reach sdk callers as the closed union, never only prose (Phase 5)
+- [x] AC6: No matching view answers an explicit machine-readable `no-canvas` (Phase 4)
+- [x] AC7: Several matching views deliver to exactly one, most recently active, named in the response (Phase 4)
+- [x] AC8: File-qualified and file-less selectors route correctly (Phase 4)
+- [x] AC9: `composer-open` → typed body → `composer-submit` posts exactly one comment — **automated at the unit level (Phase 3); the live VS Code instance is the outstanding check below**
+- [x] AC10: The sdk call is available from `@cluesmith/codev-sdk/controller`; both boundary suites pass unchanged (Phase 5)
+- [x] AC11: In-page keyboard behavior unchanged — the pre-existing suite passes unmodified (Phase 2)
+- [x] AC12: Closing the last preview makes the next command return `no-canvas` (Phase 6, unit-verified; live pass outstanding)
 
-## Requirements traceability
+## Deviations from Plan
 
-| Issue requirement | Where it landed |
-|---|---|
-| 1. Canvas command channel over existing plumbing | `CommandAdapter` + delivery over Tower's existing SSE stream; no new transport |
-| 1a. Vocabulary mirrors the keyboard exactly | `Record<CanvasCommand, …>` registry; keyboard and remote run the same functions |
-| 1b. Composer open/submit/cancel in, text entry out | All three commands present; bodies are still typed on the keyboard |
-| 2. Tower surface accepting one command and relaying it | `POST /api/canvas/command`, addressed SSE delivery |
-| 3. sdk route, reviewed by the streamdeck architect | `sendCanvasCommand`, reviewed at design time and again at phase 5 |
-| 4. Target rule decided at spec time | Zero → `no-canvas` (404); many → single most-recently-active; never a silent no-op |
+- **Phase 2/3 split.** The plan's original phase 2 mixed a pure extraction with newly authored
+  actions. Since only 6 of 14 commands had a handler to extract, and the template requires one
+  atomic commit per phase, the phase was split so the extraction's "no behavior change" claim
+  could be proven by an unmodified test suite. Agreed during plan review, before implementation.
+- **Registration transport.** The plan left this open; per-view HTTP register/heartbeat/unregister
+  was chosen over binding registrations to the SSE connection, because one VS Code window holds a
+  single SSE connection but can host several canvas panels.
+- **Two spec/plan factual corrections**, both authorized rather than worked around: the spec's
+  "split editor" multi-view example was impossible under
+  `supportsMultipleEditorsPerDocument: false` (MRU requirement unchanged, verification venue moved
+  to the Tower registry), and the plan's claim that the webview has no `check-types` coverage was
+  wrong — `tsconfig.webview.json` covers it and the package script runs both configs.
 
-## What the reviews changed
+## Consultation Feedback
 
-Every phase went through a three-way consultation. Six findings were substantive enough to
-change the design rather than the wording, and they are the honest story of this project.
+Every phase ran a three-way consultation; several ran two or three rounds. Full per-round detail
+lives in `codev/projects/1401-*/1401-*-rebuttals.md`. Summarised by disposition:
 
-**A guard that could not fail (phase 1, then again in phase 3).** The exhaustiveness guard for
-the command vocabulary was written as a bare conditional type alias, which constrains nothing: an
-omitted member resolved to `never` and compiled. It was caught in phase 1, and I reintroduced the
-identical mistake in phase 3 while a comment claimed enforcement. Both are now
-`Assert<T extends true>` and both were verified by deliberately breaking them. A guard is not a
-guard until you have watched it fail.
+### Specify Phase (Round 1)
+- **Gemini**: No concerns → **N/A**
+- **Codex**: sdk error contract left open-ended (`…` in the union); parity not always literal; path/clock normalization unspecified; security posture absent → **Addressed** (closed error union, effect-parity rewrite, Tower-side canonicalization and timestamps, security paragraph)
+- **Claude**: (blocking) remote commands have no `e.target`, so literal parity would no-op 8 of 14 commands; `block-next/prev` cannot be Tab parity → **Addressed** (origin chain defined; block stepping defined against `[data-line]`, not Tab)
 
-**A test that never ran (phase 1).** The type-test guard lived outside `src/` so it would not be
-published, which also meant `pnpm build` never compiled it and no CI job invoked it. It protected
-nothing while looking like protection. Now wired into `test.yml`.
+### Plan Phase (Round 1)
+- **Gemini**: No concerns → **N/A**
+- **Codex**: runtime-vs-type-only classification; missing composer file; `supportsMultipleEditorsPerDocument: false`; reconnect undefined; canonicalization wording → **Addressed** (type-level classification; files added; scenario re-venued; re-registration specified)
+- **Claude**: (blocking) the shared runtime traversal list is unimportable by both consumers; "pure extraction" hid ~6 commands of new work; a type-test under `src/` would ship → **Addressed** (type-level with per-consumer `satisfies`; phase split; guard moved out of `src/`)
 
-**Literal keyboard parity would have been a no-op (spec phase).** The in-page handlers derive
-their origin from the DOM event, and a remote command has no event, so eight of fourteen commands
-would have done nothing in the feature's primary scenario. The spec was rewritten to *effect*
-parity with a defined origin: live focus, then the last focused block, then the topmost visible
-block, then the first block.
+### Phase 1 — Wire contracts (Rounds 1-2)
+- **Gemini / Codex**: APPROVE, no concerns → **N/A**
+- **Claude**: the exhaustiveness guard is never invoked by CI → **Addressed** (step added to `test.yml`; re-verified by the reviewer in round 2)
 
-**The lease renewed itself under traffic (phase 4).** Command delivery refreshed the liveness
-stamp as well as the recency stamp, so a dead host's view stayed alive exactly as long as a
-controller kept driving it. The guarantee the phase exists to provide silently inverted into
-"always reports success at a canvas nobody can see". Delivery now advances recency only.
+### Phase 2 — Action registry extraction (Round 1)
+- **Gemini**: lane skipped (`agy` produced no output) → **N/A** (`CONSULT_ERROR`-equivalent, non-blocking by design)
+- **Codex / Claude**: APPROVE. Three advisories for phase 3 (per-render registry needs ref dispatch; use `Extract<CanvasCommand,…>`; `pageColumn` edge untested) → **Addressed** in phase 3
 
-**A response shape accepted on faith (phase 5).** `sendCanvasCommand` checked only for an `ok`
-field, so a success without a target, or a failure with a code outside the union, passed through
-as a typed verdict. Now validated completely; anything unverifiable is reported as `unreachable`.
+### Phase 3 — Canvas remote seam (Rounds 1-3)
+- **Gemini**: APPROVE → **N/A**
+- **Codex**: column paging missing a mode check; counted traversal unbounded; coverage gaps → **Addressed** (mode check, progress-based break, browser suite driving the dev page). The stated vertical-mode scenario did not reproduce (`overflow-x` is mode-scoped) → **Rebutted** in part, with the guard kept as defence and the test rewritten to assert what is verifiable
+- **Claude**: (blocking) the drift guard is inert; unbounded `count` loop; quiet-focus not re-armed; `check-types` failing on the new spec → **Addressed** (all four; guard re-verified by deliberately breaking it)
 
-**`check-types` was red while everything I watched was green (phase 3).** I ran the typecheck
-before adding a Playwright spec, then re-ran only the unit and browser suites, which pass without
-project-wide type checking. The rule I now follow: run `check-types` after the last *file* is
-added, not after the last logic change.
+### Phase 4 — Tower registry and route (Rounds 1-2)
+- **Gemini**: APPROVE → **N/A**
+- **Codex / Claude**: (blocking) command delivery refreshed the liveness lease; a literal `null` body escaped as a 500 with no wire code; a malformed heartbeat renewed the lease; response literals untyped → **Addressed** (all four; the typing change exposed that the registration contract omitted `ok`)
 
-## Ground-truth corrections
+### Phase 5 — sdk calls (Rounds 1-2)
+- **Gemini / Claude**: APPROVE → **N/A**
+- **Codex**: (blocking) `sendCanvasCommand` accepted any object with `ok` → **Addressed** (full shape validation). Registration methods reachable via the exported class → **Rebutted**: the subpath exports `TowerClient` with 39 public methods; the three added here are no more reachable than the 36 that predate them. Streamdeck stakeholder accepted as-is; structural fix is #1411
 
-Two things the issue and spec assumed turned out to be false, and both were corrected with
-architect authorization rather than worked around:
+### Phase 6 — VS Code host wiring (Rounds 1-3)
+- **Gemini**: APPROVE → **N/A**
+- **Claude**: COMMENT then APPROVE. Re-registration race; deactivate-unregister missing; no reconnect handling; unvalidated command; lint warnings → **Addressed** (all five). Also corrected my own false premise about webview typechecking → **Addressed** (propagated to this document)
+- **Codex**: reconnect, runtime validation, malformed `count`, reconnect leaking the old id → **Addressed**. The live end-to-end pass → **Rebutted as unclosable by a builder**: it needs a real VS Code window, Tower, and an open panel driven by a person. Escalated to the PR gate with architect authorization (precedent: pir-1179, 1313 phase 7)
 
-- **`afx open` does not serve the canvas.** It serves the legacy `open.html` annotator; the canvas
-  migration is #1386. The bridge was therefore designed host-agnostic, and #1386's page becomes a
-  second registrant with no protocol change.
-- **VS Code cannot open two canvas panels for one document** (`supportsMultipleEditorsPerDocument:
-  false`), so the spec's "split editor" example was impossible. The MRU rule is unaffected and
-  still needed; only the verification venue moved to the Tower registry. The flag was deliberately
-  not flipped, since that would change user-visible editor behavior far outside this issue.
+## Lessons Learned
 
-## Dispositions for the PR gate
+### What Went Well
 
-- **Controller subpath exposure.** Codex asked that the new host-side registration methods be
-  unreachable through `@cluesmith/codev-sdk/controller`. They are not re-exported, but the subpath
-  exports the `TowerClient` class, which carries 39 public methods including `addArchitect`,
-  `killTerminal` and `sweepHusks`. The three added here are no more reachable than the
-  thirty-six that predate them, so this is a pre-existing property, not a regression.
-  **Streamdeck stakeholder verdict: accept as-is for #1401.** The structural fix is tracked as
-  **#1411** (restricted controller client), sequenced after this merge.
-- **The `file?` selector is not speculative.** #1400 was revised on 2026-08-11 to file-qualified
-  targeting: the deck will send both `workspace` and `file`, with MRU as the recorded fallback.
-  How the deck discovers the artifact path is a #1400 question.
-- **Playwright port collision (#1407).** The canvas browser config pins port 5199 and reuses any
-  existing server, so an orphaned vite process from a since-removed worktree silently served
-  deleted code to my first run. The orphan was cleared during this project and the suite now runs
-  against the committed config. The structural fix (per-worktree port) is #1407.
+The three-way consultation earned its cost. Six findings changed the design rather than the
+wording, and two of them — the self-renewing lease and the inert type guard — were defects that
+would have shipped looking correct.
 
-## Testing
+Splitting the canvas work into a pure extraction followed by new authorship made the
+"no behavior change" claim checkable by an untouched test suite, which is a much stronger
+guarantee than a careful diff read.
 
-| Suite | Result |
-|---|---|
-| `codev-types` compile-time guards | Pass, and verified to fail on an unclassified command |
-| artifact-canvas unit | 173 pass |
-| artifact-canvas Playwright | 39 pass, including 5 new remote-command specs |
-| Tower relay unit | 27 pass, lease expiry driven by an injected clock |
-| Tower relay e2e | 5 pass against a real booted Tower |
-| sdk | 98 pass, including 9 malformed-response cases |
-| streamdeck boundary | 63 pass, unchanged |
-| VS Code extension | 794 pass, including 17 new host-glue tests |
-| Repo | 4847 pass, build green, repo-wide `check-types` clean |
+Deciding the target rule at spec time, as the issue demanded, meant the multi-view and no-canvas
+cases were never open questions during implementation.
 
-**Human verification of the canvas half** (2026-08-12): the dev examples page was driven from the
-browser console through `window.__canvasCommand` and confirmed working by the user. Three things
-made it briefly look broken and are worth knowing: the call returns `undefined` because it is
-void, the only visible effect of navigation is the focus ring moving, and the sample document has
-exactly one commented block so a second `comment-next` is a correct no-op.
+### Challenges Encountered
 
-### Outstanding: the end-to-end VS Code pass
+**A non-convergent review loop.** Phase 6 ended 2-1 three rounds running, with the sole remaining
+objection being a check no code change can close. Escalating was correct, but it cost two extra
+consultation rounds to establish that the loop could not converge on its own.
 
-**This has not been performed, and it is the one criterion automation cannot cover here.** It
-needs a real VS Code window with the extension loaded, a running Tower, and an open canvas panel.
-Everything on either side of that seam is verified, but no automated test exercises the real
-extension registering with the real Tower and a real command reaching the real webview.
+**An hour lost to a wedged subprocess.** `porch next` appeared hung; it had spawned a `git push`
+that was itself stuck. Checking the parent said "still running" indefinitely; checking the *child*
+found it in one step.
 
-*Correction to the plan.* The plan's phase 6 test plan claims the webview has no `check-types`
-coverage, on the grounds that `apps/vscode/tsconfig.json` excludes
-`src/markdown-preview/webview`. That is wrong, and the phase 6 review caught it: a second config,
-`tsconfig.webview.json`, covers exactly that directory, and the package's `check-types` script
-runs both (`tsc --noEmit && tsc --noEmit -p tsconfig.webview.json`). The webview adapter *is*
-typechecked. The manual pass is still required, but for the ordinary reason — types do not prove
-runtime behavior across three processes — not because the code is unchecked.
+**Cross-worktree contamination.** The canvas Playwright suite reuses any server on port 5199, and
+an orphaned vite process from a since-removed worktree served deleted code to my first run. It
+failed loudly, which was lucky — the dangerous case is a compatible sibling making the suite pass
+against the wrong code.
 
-Suggested pass for the reviewer:
+### What Would Be Done Differently
 
-1. Open a spec in the Codev Markdown Preview with Tower running.
-2. `curl -X POST localhost:4100/api/canvas/command -H 'Content-Type: application/json' -d '{"workspace":"<abs path>","command":"comment-next"}'` and watch focus move.
-3. Close the panel, repeat, and confirm the response is `404 no-canvas` rather than a silent success.
-4. Drive `composer-open`, type a body on the keyboard, then `composer-submit`, and confirm exactly one comment is written.
+Prove a guard fails before trusting it, the first time. I wrote an inert exhaustiveness check,
+had it caught, and then wrote the identical inert form again two phases later underneath a comment
+asserting it worked.
+
+Run `check-types` after adding the last file rather than after the last logic change. A Playwright
+spec added post-typecheck left the criterion red while every suite I was watching stayed green.
+
+Check the keyboard equivalent before "fixing" a remote-path bug. Twice a failing new test looked
+like my regression and turned out to be long-standing behavior that the remote path was faithfully
+reproducing.
+
+### Methodology Improvements
+
+**Porch should recognise an unclosable finding.** When a reviewer's only remaining objection is a
+human-only verification, further rounds cannot change the verdict, and the loop currently relies
+on a human noticing and authorising a stop. A protocol-level "escalate to gate" disposition would
+make that path explicit instead of ad hoc.
+
+**Consultation prompts could ask for the reviewer's own verification method.** The most valuable
+findings this project came from reviewers who ran the code (probing the guard with `tsc`, running
+the CI step) rather than reading it. Asking for that explicitly would raise the floor.
+
+## Architecture Updates
+
+- Routed: **cold** — `codev/resources/arch.md`, Integration Points — "Two remote-command paths
+  into an editor surface (Spec 1401)": a comparison table of the broadcast verb relay versus the
+  targeted canvas channel, the rule for choosing between them, and the canvas channel's
+  registry/lease/liveness specifics.
+- **Not promoted to hot**, deliberately. `arch-critical.md` is at its 10-fact cap, and this is
+  subsystem detail a builder needs *when touching remote control*, not before every decision. The
+  hot map's existing "Integration Points — crossing a subsystem or process boundary" line already
+  routes a reader to it, so no displacement was warranted. Flagged for the architect in case they
+  judge the two-paths trap worth a hot slot at MAINTAIN.
+
+## Lessons Learned Updates
+
+- Routed: **cold** — `codev/resources/lessons-learned.md`, Testing — "A guard is not a guard until
+  you have watched it fail", covering both the inert conditional-type-alias form and the
+  guard-that-CI-never-runs variant, with the concrete fix.
+- Routed: **cold** — same section — green signals hiding a red one: run `check-types` after the
+  last file is added, not the last logic change.
+- **Hot candidate flagged, not taken unilaterally.** The guard lesson is cross-cutting and
+  behaviour-changing, which is hot-tier shape, but `lessons-critical.md` is at its 10-lesson cap
+  and promoting it requires demoting an existing entry. That displacement is the architect's call
+  at MAINTAIN, not a builder's mid-PR.
 
 ## Flaky Tests
 
-None encountered.
+No flaky tests encountered. One environmental failure is worth recording but is not flakiness:
+`pnpm --filter codev-vscode test` maps to `vscode-test` (the Electron harness), which fails in
+this worktree with `spawn Electron ENOENT`. It is pre-existing and unrelated; the unit tests run
+under `test:unit` → `vitest`, which is what CI invokes.
 
-## Follow-ups
+## Follow-up Items
 
-- **#1411** — restricted controller client / capability surface (streamdeck architect, after this merge).
+- **Outstanding at this PR gate — the live VS Code pass.** Needs a real VS Code window with the
+  extension loaded (built from this worktree), a running Tower, and an open canvas panel. Steps:
+  (1) drive `comment-next` by `curl` and watch focus move; (2) close the panel and confirm `404
+  no-canvas` rather than a silent success; (3) `block-next` with `count: 3`; (4) `composer-open`,
+  type a body, `composer-submit`, confirm **exactly one** comment written. Everything either side
+  of that seam is verified — Tower's route by 5 e2e tests against a real booted Tower, the canvas
+  by 173 unit and 39 Playwright tests plus a human dev-page session, the sdk by 98 tests, and the
+  host glue by 17 — so this closes the single untested join.
+- **#1411** — restricted controller client / capability surface (streamdeck architect, after merge).
 - **#1407** — per-worktree Playwright port for the canvas browser suite.
 - **#1400** — the deck actions themselves, unblocked by this bridge.
 - **#1386** — `afx open` onto the canvas; that page becomes a second registrant with no protocol change.
