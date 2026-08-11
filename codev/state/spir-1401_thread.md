@@ -351,3 +351,37 @@ asserts the topmost visible block differs from the document's first block before
 cannot pass vacuously.
 
 Verification: check-types clean (package + repo-wide), 173/173 unit, 39/39 playwright.
+
+## 2026-08-12 — phase_4 (Tower canvas view registry + command route) implemented
+
+New `packages/codev/src/agent-farm/servers/canvas-relay.ts`, self-routing on `/api/canvas/*`,
+wired into tower-routes next to the generic command relay. Routes: POST /api/canvas/views
+(register, Tower mints `canvas-<uuid>`), POST /api/canvas/views/:id/heartbeat ({focused?}),
+DELETE /api/canvas/views/:id, POST /api/canvas/command.
+
+Decisions worth recording:
+- **lastSeenAt vs lastActiveAt are separate.** Any heartbeat refreshes the lease (lastSeenAt);
+  only `focused:true` or a delivered command advances MRU (lastActiveAt). Otherwise a background
+  view's keepalive would steal targeting from the view the reviewer is actually looking at. Has
+  its own test.
+- **Tie-break is a registration SEQUENCE, not a timestamp.** Two views registered in the same
+  millisecond would otherwise resolve arbitrarily, and a target rule that depends on timer
+  resolution is not a rule.
+- **Lease sweep is lazy** (on every access) rather than a timer: no background work, and tests
+  advance an injected clock instead of sleeping 90s.
+- **Heartbeat for an unknown view answers 404**, deliberately not a silent re-create, so phase_6
+  can re-register after a Tower restart instead of heartbeating into the void forever.
+- Applied the phase_3 guard lesson: both the CANVAS_COMMANDS and TRAVERSAL_COMMANDS runtime lists
+  carry `Assert<... extends never ? true : false>` checks, so a command added to codev-types that
+  Tower forgets to validate is a compile error.
+
+Two unit tests initially failed asserting `/tmp/doc.md` while Tower returned `/private/tmp/doc.md`
+— macOS symlink resolution, i.e. canonicalization working exactly as designed. Fixed the
+assertions to compare against the canonical path Tower reports rather than the spelling sent,
+since hardcoding the pre-canonical form would assert the ABSENCE of the feature.
+
+Note for future phases: `**/*.e2e.test.ts` is excluded from the default vitest config; e2e runs
+via `pnpm --filter @cluesmith/codev test:e2e` (vitest.e2e.config.ts), which builds first.
+
+Verification: 23/23 unit, 5/5 e2e against a real Tower, repo-wide check-types clean, repo build
+green, 4843 repo tests pass.
