@@ -1,7 +1,7 @@
 id: '1179'
 title: vscode-one-step-view-issue-n-v
 protocol: pir
-phase: plan
+phase: implement
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -17,4 +17,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-08-11T05:28:14.613Z'
-updated_at: '2026-08-11T05:39:15.707Z'
+updated_at: '2026-08-11T05:39:23.983Z'
