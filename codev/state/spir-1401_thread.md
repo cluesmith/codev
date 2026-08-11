@@ -327,3 +327,27 @@ after the session (deliberately, so it cannot become the kind of orphan behind #
 
 This is the first real-user-path confirmation for the canvas half. The Tower/sdk/VS Code path
 still needs phases 4-6, and phase_6 carries the full human review loop as an acceptance criterion.
+
+### phase_3 iter2: gemini APPROVE, codex + claude REQUEST_CHANGES — check-types was FAILING
+
+Both caught that `pnpm --filter @cluesmith/codev-artifact-canvas check-types` failed with TS2339
+on `playwright/remote-commands.spec.ts`: the `window.__canvasCommand` augmentation lives in
+examples/main.tsx, and this package's tsconfig includes src + playwright but NOT examples.
+
+**Process failure worth remembering.** I ran check-types while wiring the seam, then added the
+playwright spec afterwards and re-ran only the unit + browser suites, both of which passed
+(Playwright transpiles per file, with no project-wide type check). So the phase's own acceptance
+criterion was red while every signal I was watching was green. Rule for the remaining phases:
+run check-types AFTER the last file is added, not after the last logic change.
+
+Fixed with playwright/window-command.d.ts mirroring the augmentation for the compilation unit
+that type-checks the specs; `send()` is now typed `CanvasCommand` so a typo'd command name is a
+compile error rather than a silent runtime no-op.
+
+Also added the scrolled clean-state origin test codex asked for. It belongs in Playwright, not
+jsdom: "nothing focused and nothing scrolled -> start at the top" is checkable without layout,
+but "scrolled but never focused -> start from what the reviewer is LOOKING at" is not. The test
+asserts the topmost visible block differs from the document's first block before driving, so it
+cannot pass vacuously.
+
+Verification: check-types clean (package + repo-wide), 173/173 unit, 39/39 playwright.

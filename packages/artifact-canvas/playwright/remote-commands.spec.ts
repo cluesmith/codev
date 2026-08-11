@@ -1,4 +1,5 @@
 import { test, expect, type Page, type Locator } from '@playwright/test';
+import type { CanvasCommand } from '@cluesmith/codev-types';
 
 /**
  * Remote command channel in real Chromium (spec 1401, plan phase 3).
@@ -16,10 +17,18 @@ async function openFixture(page: Page, mode: 'horizontal' | 'vertical'): Promise
   return body;
 }
 
-const send = (page: Page, command: string, count?: number) =>
+const send = (page: Page, command: CanvasCommand, count?: number) =>
   page.evaluate(
-    ([c, n]) => window.__canvasCommand?.(c as never, n as number | undefined),
+    ([c, n]) => window.__canvasCommand?.(c as CanvasCommand, n as number | undefined),
     [command, count] as const,
+  );
+
+const focusedLine = (page: Page) =>
+  page.evaluate(
+    () =>
+      (document.activeElement as HTMLElement | null)
+        ?.closest?.('[data-line]')
+        ?.getAttribute('data-line') ?? null,
   );
 
 const scrollLeft = (body: Locator) => body.evaluate((el) => el.scrollLeft);
@@ -81,6 +90,38 @@ test('column paging is inert in vertical mode', async ({ page }) => {
   await send(page, 'column-forward');
   await send(page, 'column-back');
   expect(await scrollLeft(body)).toBe(0);
+});
+
+// The clean-state origin rule has two halves. jsdom covers the unscrolled one (nothing focused,
+// start from the top); only a real layout can prove the other, that a SCROLLED but never-focused
+// view starts from the block the reviewer is actually looking at rather than the document start.
+test('a scrolled, never-focused view starts from the topmost visible block', async ({ page }) => {
+  const body = await openFixture(page, 'horizontal');
+
+  // Scroll well into the document without touching focus, the way a reviewer who has only
+  // scrolled (or a host that restored a position) would leave it.
+  await body.evaluate((el) => {
+    el.scrollLeft = Math.floor((el.scrollWidth - el.clientWidth) / 2);
+  });
+
+  const firstInDocument = await body.evaluate(
+    (el) => el.querySelector('[data-line]')?.getAttribute('data-line') ?? null,
+  );
+  const topmostVisible = await body.evaluate((el) => {
+    const host = el.getBoundingClientRect();
+    for (const b of Array.from(el.querySelectorAll('[data-line]'))) {
+      if (b.getBoundingClientRect().right > host.left) return b.getAttribute('data-line');
+    }
+    return null;
+  });
+  expect(topmostVisible).not.toBe(firstInDocument); // the scroll actually moved past the start
+
+  await send(page, 'block-next');
+  const landed = await focusedLine(page);
+
+  // It stepped on from what was visible, not from the top of the document.
+  expect(landed).not.toBe(firstInDocument);
+  expect(Number(landed)).toBeGreaterThan(Number(topmostVisible));
 });
 
 test('remote navigation scrolls the target block into view', async ({ page }) => {
