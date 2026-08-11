@@ -449,3 +449,11 @@ The only real remedy is a restricted client surface on a published subpath the s
 architect owns and approved — a breaking redesign, unrelated to canvas commands, and exactly the
 kind of scope expansion to raise rather than take. Flagged to the architect; if they want a hard
 boundary it deserves its own issue covering all 39 methods.
+
+### Streamdeck verdict on the phase_5 controller-surface item (2026-08-11): ACCEPT AS-IS
+
+They verified controller.ts:15 themselves and agree the three registration methods add nothing to
+an already-full class surface; my doc note is endorsed as the interim posture. Structural fix
+tracked as **#1411** (restricted controller client / capability surface) in their name, sequenced
+after this merge. TODO: record #1411 + this verdict in the review file's dispositions, and note
+it in the PR body.
