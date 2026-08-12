@@ -55,3 +55,26 @@ reuse helper re-fetching). Fix:
 - Tradeoff: PR can now be browser-opened by two paths (explicit vs fallthrough); still no new fetch code
   (openExternal opens a url already fetched via the sanctioned getIssue). Flagged to reviewer.
 Green: check-types + lint clean, 807 unit tests.
+
+### dev-approval feedback #2 — setting wording (2026-08-12)
+
+Reviewer flagged "bare #N" jargon in the `issueTarget` setting description (odd to end users). Reworded to
+"issue references (#N)" / "Pull-request references (`PR #N`)"; dropped "bare" entirely. Committed ee6dea3f1.
+
+## Review phase (2026-08-12)
+
+dev-approval approved. Wrote `codev/reviews/1412-vscode-terminallinkprovider-ma.md`; added one COLD lesson
+to lessons-learned.md (gh issue view resolves PR numbers → url-path discriminator). No arch changes
+(self-contained provider + resolution module, reuses existing forge paths). PR #1418 opened, recorded with
+porch. `porch done 1412` running the single 3-way consultation pass (bg). Awaiting verdicts → pr gate.
+
+### 3-way consultation (2026-08-12): ALL APPROVE
+
+gemini=APPROVE, codex=APPROVE, claude=APPROVE (all HIGH). No blocking issues. Claude flagged 3 minor
+non-blocking nits; fixed 2 stale-text ones (plan "rejected" note now amended to reflect adopted
+openExternal approach; test header comment corrected) in 3b511bb4d. Left the 3rd (no try/catch on
+getIssue) — matches existing openIssueInBrowser behavior, out of scope.
+
+**pr gate now pending.** Notified architect (all-clear). Waiting for porch "Gate pr approved" wake-up —
+NOT merging on pane prose. On approval: verify gate_status via `porch next`, check if human already
+merged #1418, then `gh pr merge 1418 --merge` (never squash) + `porch done 1412 --merged 1418`.
