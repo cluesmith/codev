@@ -100,6 +100,19 @@ describe('verb keypads', () => {
     expect(ctx.sent[0]).toEqual({ verb: 'open-terminal', args: ['pir-2'], ws: '/work/alpha' });
   });
 
+  it('BuilderAction Automatic opens the FIRST file diff (dial-ready), not the aggregate, for a diff-phase builder (#1414)', async () => {
+    // pir-2 is in `implement` → the phase artifact is the diff; Automatic remaps it to
+    // `open-diff-first` so the SD+ dials step from file 1, never `view-diff` (aggregate).
+    await new BuilderAction(ctx.store).onKeyDown(keyEvent({ slot: '2' }) as never);
+    expect(ctx.sent[0]).toEqual({ verb: 'open-diff-first', args: ['pir-2'], ws: '/work/alpha' });
+  });
+
+  it('BuilderAction explicit "View Diff" still fires view-diff (aggregate) verbatim (#1414)', async () => {
+    // The PI View Diff option is unchanged: only Automatic remaps to open-diff-first.
+    await new BuilderAction(ctx.store).onKeyDown(keyEvent({ slot: '2', verb: 'view-diff' }) as never);
+    expect(ctx.sent[0]).toEqual({ verb: 'view-diff', args: ['pir-2'], ws: '/work/alpha' });
+  });
+
   it('BuilderAction press selects the slot builder (cursor follows)', async () => {
     await new BuilderAction(ctx.store).onKeyDown(keyEvent({ slot: '2' }) as never);
     expect(ctx.store.selectedBuilder()?.id).toBe('pir-2');

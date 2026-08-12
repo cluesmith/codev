@@ -66,6 +66,16 @@ describe('wireCommandProvider', () => {
     expect(vscode.commands.executeCommand).toHaveBeenCalledWith('codev.openBuilderById', 'spir-809');
   });
 
+  it('maps open-diff-first to the builder-scoped first-file-diff command with the builder id (#1414)', async () => {
+    const { mgr, fire } = makeConnMgr();
+    wireCommandProvider(mgr as never);
+
+    fire('command', { verb: 'open-diff-first', args: ['pir-1414'] });
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(vscode.commands.executeCommand).toHaveBeenCalledWith('codev.openBuilderDiffFirstFile', 'pir-1414');
+  });
+
   it('ignores a verb that is not in the provider map (the allowlist)', async () => {
     const { mgr, fire } = makeConnMgr();
     wireCommandProvider(mgr as never);

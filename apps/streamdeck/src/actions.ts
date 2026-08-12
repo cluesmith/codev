@@ -155,7 +155,11 @@ export class BuilderAction extends SlotKey {
     const verb = settings.verb;
     if (verb && verb !== 'automatic') return verb;
     // Automatic: the current phase's artifact, else a terminal when there's none.
-    return phaseArtifactVerb(b) ?? 'open-terminal';
+    // When that artifact is the diff, open the builder's FIRST file in per-file mode
+    // (`open-diff-first`, #1414) — dial-ready — instead of the aggregate editor. The
+    // explicit "View Diff" PI verb above still relays `view-diff` (aggregate) verbatim.
+    const auto = phaseArtifactVerb(b) ?? 'open-terminal';
+    return auto === 'view-diff' ? 'open-diff-first' : auto;
   }
   protected renderTo(action: KeyAction, settings: SlotSettings): void {
     const b = slotBuilder(this.store, settings);

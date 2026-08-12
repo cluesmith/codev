@@ -1,0 +1,30 @@
+id: '1414'
+title: stream-deck-sd-automatic-diff-
+protocol: pir
+phase: verified
+plan_phases: []
+current_plan_phase: null
+gates:
+  plan-approval:
+    status: approved
+    requested_at: '2026-08-12T11:27:57.107Z'
+    approved_at: '2026-08-12T11:31:09.892Z'
+  dev-approval:
+    status: approved
+    requested_at: '2026-08-12T11:37:05.334Z'
+    approved_at: '2026-08-12T11:49:57.249Z'
+  pr:
+    status: approved
+    requested_at: '2026-08-12T11:54:47.121Z'
+    approved_at: '2026-08-12T11:58:23.815Z'
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-08-12T11:24:18.970Z'
+updated_at: '2026-08-12T11:58:25.674Z'
+pr_history:
+  - phase: review
+    pr_number: 1429
+    branch: builder/pir-1414
+    created_at: '2026-08-12T11:52:04.569Z'
+pr_ready_for_human: false

@@ -25,6 +25,7 @@ const VERB_COMMANDS: Record<string, string> = {
   // Builder-scoped verbs (arg: builder id).
   'open-terminal': 'codev.openBuilderById',
   'view-diff': 'codev.viewDiff',
+  'open-diff-first': 'codev.openBuilderDiffFirstFile',
   'open-spec': 'codev.viewSpecFile',
   'open-plan': 'codev.viewPlanFile',
   'open-review': 'codev.viewReviewFile',
