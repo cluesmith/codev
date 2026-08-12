@@ -26,5 +26,11 @@ Plan-approval granted. Applied the one-line sort in `overview.ts` (after the
 comment tying it to #1191. Added test `sorts recently closed items by closedAt descending
 (#1191)` in `overview.test.ts` feeding items out of order and asserting `['2','3','1']`.
 
-Build ✓. overview suite ✓ (165 tests). Running full package suite before committing.
-Awaiting dev-approval gate next.
+Build ✓. overview suite ✓ (165 tests). Full package suite ✓ (4851 passed, 48 pre-existing
+skips). Committed da7a44f86. dev-approval gate reached.
+
+## Review phase (2026-08-12)
+
+dev-approval granted. Wrote retrospective `codev/reviews/1191-recently-closed-sidebar-sectio.md`.
+No arch/lessons updates (mechanical localized fix). Opening PR next, then porch runs the
+single 3-way consultation pass and fires the pr gate.
