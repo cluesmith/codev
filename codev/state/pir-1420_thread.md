@@ -62,3 +62,15 @@ the four satisfies-guards already enforce the invariant — nothing rises to hot
 explain why, per protocol.
 Next: commit review, push, open PR, `porch done --pr`, then `porch done` (porch runs 3-way consult
 once), notify architect, wait at pr gate.
+
+PR #1424 opened (branch builder/pir-1420). Porch ran the single 3-way consult pass.
+Verdicts: gemini APPROVE, claude APPROVE, codex REQUEST_CHANGES.
+
+Codex (REAL, accepted): `Fixes #1420` would auto-close the issue on merge, but this PR is only the
+bridge lane (reqs 1,2,5) — reqs 3-4 (deck remap, touchstrip) remain for streamdeck's follow-on. Fixed:
+review + PR body now `Refs #1420` (commit 1c14cb651). Escalated to human at pr gate: they decide
+whether #1420 should close with this merge (if follow-on rides its own issue/#1410) or stay open.
+Rebuttal written (1420-review-iter1-rebuttals.md, committed 2939886d8). Claude's non-blocking notes
+addressed in rebuttal, no code change.
+
+Now at PR GATE — waiting for human to merge on GitHub. Do NOT self-merge or self-approve.
