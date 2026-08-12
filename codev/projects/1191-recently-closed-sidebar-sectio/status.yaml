@@ -1,0 +1,18 @@
+id: '1191'
+title: recently-closed-sidebar-sectio
+protocol: pir
+phase: plan
+plan_phases: []
+current_plan_phase: null
+gates:
+  plan-approval:
+    status: pending
+  dev-approval:
+    status: pending
+  pr:
+    status: pending
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-08-12T11:03:50.931Z'
+updated_at: '2026-08-12T11:03:50.932Z'
