@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { CodevStore } from '../store.js';
-import type { TowerClient, TowerWorkspace } from '@cluesmith/codev-sdk/controller';
+import type { ControllerClient, TowerWorkspace } from '@cluesmith/codev-sdk/controller';
 import {
   CodevAction,
   BuilderAction,
@@ -43,7 +43,7 @@ function makeStore() {
     }),
     getOverview,
     listWorkspaces,
-  } as unknown as TowerClient;
+  } as unknown as ControllerClient;
   const store = new CodevStore({ client, openUrl: (u) => { opened.push(u); } });
   store.workspaces = [workspace('/work/alpha', 'alpha', true)];
   store.overview = {

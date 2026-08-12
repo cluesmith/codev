@@ -1,5 +1,5 @@
 import streamDeck from '@elgato/streamdeck';
-import { TowerClient } from '@cluesmith/codev-sdk/controller';
+import { createControllerClient } from '@cluesmith/codev-sdk/controller';
 import { readLocalKey } from '@cluesmith/codev-sdk/node';
 import { CodevStore } from './store.js';
 import {
@@ -25,11 +25,11 @@ import {
  * + first fetch after, so a failed initial connection just renders empty/offline
  * rather than blocking the handshake.
  */
-// The sdk's TowerClient defaults to no auth (unlike the dissolved codev-client,
-// which read the local key implicitly); the plugin is a local Node process
-// entitled to the key, so it injects the sdk/node reader explicitly.
+// The sdk's controller client defaults to no auth (unlike the dissolved
+// codev-client, which read the local key implicitly); the plugin is a local
+// Node process entitled to the key, so it injects the sdk/node reader explicitly.
 const store = new CodevStore({
-  client: new TowerClient({ getAuthKey: readLocalKey }),
+  client: createControllerClient({ getAuthKey: readLocalKey }),
   openUrl: (url) => streamDeck.system.openUrl(url),
 });
 
