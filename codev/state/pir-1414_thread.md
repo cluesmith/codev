@@ -28,3 +28,33 @@ The zoom-in touch-strip path likely shares the aggregate-open behavior — defer
 possible follow-up pending the hardware finding; will route to architect, not self-expand.
 
 Plan written to `codev/plans/1414-stream-deck-sd-automatic-diff-.md`. Awaiting plan-approval.
+
+## Plan revised (main's addendum, no re-gate)
+
+Pinned the empty-diff / no-worktree / falsy-id cases on the seeded path as a defined,
+user-visible status-bar flash with explicit tests (not silent no-op / throw). Commit 0993d3a85.
+
+## Plan-approval APPROVED (2026-08-12)
+
+Streamdeck architect approved, no revisions. Amr typed the gate. Advanced to implement.
+
+## Implement phase (2026-08-12)
+
+Implemented exactly to plan:
+- `apps/vscode/src/commands/diff-nav.ts`: `resolveDiffContext` gained an optional `seed`
+  (replaces only step-1 editor resolution); new `navigateBuilderDiffToFirst(builderId, deps)`
+  — falsy id / no-worktree / empty-list all flash; happy path opens file 0 + seeds anchor.
+- `apps/vscode/src/extension.ts`: registered `codev.openBuilderDiffFirstFile` (extractBuilderId arg).
+- `apps/vscode/src/command-relay.ts`: added `'open-diff-first' → codev.openBuilderDiffFirstFile`.
+- `apps/streamdeck/src/actions.ts`: `BuilderAction.resolveVerb` remaps ONLY the Automatic
+  `view-diff` result to `open-diff-first`; explicit View Diff PI verb still verbatim.
+- Tests: diff-nav.test.ts (+4: happy/empty-flash/no-worktree-flash/falsy-id), command-relay.test.ts
+  (+1 verb map), actions.test.ts (+2 Automatic→open-diff-first, explicit view-diff verbatim).
+
+Verification (fresh worktree needed codev-types + codev-sdk built first):
+- vscode check-types ✓; vscode test:unit ✓ 812/68 files.
+- streamdeck check-types ✓; streamdeck test ✓ 86/5 files.
+
+No types/server change (verb is a free wire string; server relay is a passthrough).
+The verify-first hardware question + zoom-in follow-up decision happen at the dev-approval gate.
+Awaiting dev-approval (hardware SD+ session).
