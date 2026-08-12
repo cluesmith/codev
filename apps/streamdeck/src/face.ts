@@ -168,12 +168,24 @@ export function builderFaceSvg(face: BuilderFace | { kind: 'empty'; slot: string
 }
 
 function svg(inner: string): string {
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 72 72">${inner}</svg>`;
+  // Explicit width/height (not just viewBox): Stream Deck's rasterizer needs an intrinsic size or
+  // it drops the image entirely and falls back to the manifest PNG.
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="72" height="72" viewBox="0 0 72 72">${inner}</svg>`;
 }
 
-/** Shared text attributes: centered, system sans, at the given baseline / size / weight. */
+/**
+ * Encode a face SVG for `setImage`. Stream Deck (6.x) renders an SVG reliably only as a base64
+ * data URI with the mime type declared — a raw `<svg>` string is silently dropped (the whole key
+ * reverts to its manifest image). This is the SDK's documented "base64 encoded string with the
+ * mime type declared" form.
+ */
+export function svgToDataUri(svg: string): string {
+  return `data:image/svg+xml;base64,${Buffer.from(svg, 'utf8').toString('base64')}`;
+}
+
+/** Shared text attributes: centered, generic sans (the rasterizer resolves it), given baseline/size/weight. */
 function textAttrs(x: number, y: number, size: number, weight: number): string {
-  return `x="${x}" y="${y}" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="${size}" font-weight="${weight}"`;
+  return `x="${x}" y="${y}" text-anchor="middle" font-family="sans-serif" font-size="${size}" font-weight="${weight}"`;
 }
 
 /** Escape the five XML entities so a builder id / label can't break the SVG string. */

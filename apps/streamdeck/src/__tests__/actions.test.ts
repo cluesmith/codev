@@ -132,6 +132,14 @@ describe('slot keys', () => {
   // per-instance fix (without it, all keys collided on shared state).
   const slotKey = (id: string) => ({ id, isKey: () => true, setImage: vi.fn(), setTitle: vi.fn() });
 
+  // renderTo hands setImage a base64 data URI (Stream Deck drops raw SVG strings); decode to
+  // assert on the underlying face.
+  const decodeFace = (action: { setImage: { mock: { calls: unknown[][] } } }): string => {
+    const arg = String(action.setImage.mock.calls.at(-1)?.[0] ?? '');
+    expect(arg.startsWith('data:image/svg+xml;base64,')).toBe(true);
+    return Buffer.from(arg.slice('data:image/svg+xml;base64,'.length), 'base64').toString('utf8');
+  };
+
   it('renders each slot key against its own slot (different slots → different builders)', () => {
     const ctx = makeStore(); // pir-1 (#101), pir-2 (#102)
     const ba = new BuilderAction(ctx.store);
@@ -140,8 +148,8 @@ describe('slot keys', () => {
     ba.onWillAppear({ action: a, payload: { settings: { slot: '1' } } } as never);
     ba.onWillAppear({ action: b, payload: { settings: { slot: '2' } } } as never);
     // The face is now a composite SVG handed to setImage (not a title).
-    expect(a.setImage).toHaveBeenLastCalledWith(expect.stringContaining('#101'));
-    expect(b.setImage).toHaveBeenLastCalledWith(expect.stringContaining('#102'));
+    expect(decodeFace(a)).toContain('#101');
+    expect(decodeFace(b)).toContain('#102');
   });
 
   it('renders the builder’s state as a colour-coded, mapped face (mirrors the sidebar)', () => {
@@ -152,11 +160,11 @@ describe('slot keys', () => {
     ba.onWillAppear({ action: a, payload: { settings: { slot: '1' } } } as never);
     ba.onWillAppear({ action: b, payload: { settings: { slot: '2' } } } as never);
     // Blocked at plan-approval → mapped label "Plan" in warning yellow (not the wire "plan review").
-    const aSvg = a.setImage.mock.calls.at(-1)?.[0] as string;
+    const aSvg = decodeFace(a);
     expect(aSvg).toContain('>Plan<');
     expect(aSvg).toContain('#cca700');
     // Active → phase label "Implement" in green.
-    const bSvg = b.setImage.mock.calls.at(-1)?.[0] as string;
+    const bSvg = decodeFace(b);
     expect(bSvg).toContain('>Implement<');
     expect(bSvg).toContain('#73c991');
   });
@@ -166,7 +174,7 @@ describe('slot keys', () => {
     const ba = new BuilderAction(ctx.store);
     const a = slotKey('A');
     ba.onWillAppear({ action: a, payload: { settings: { slot: '5' } } } as never);
-    expect(a.setImage).toHaveBeenLastCalledWith(expect.stringContaining('Slot 5'));
+    expect(decodeFace(a)).toContain('Slot 5');
   });
 
   it('re-renders every slot key on a store change (fixes stale-on-workspace-switch)', () => {

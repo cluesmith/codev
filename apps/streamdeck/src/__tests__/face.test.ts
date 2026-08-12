@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { OverviewBuilder } from '@cluesmith/codev-sdk/controller';
-import { builderState, stateLabel, faceForBuilder, builderFaceSvg } from '../face.js';
+import { builderState, stateLabel, faceForBuilder, builderFaceSvg, svgToDataUri } from '../face.js';
 
 /** Minimal builder fixture — only the fields the face reads matter; the rest are filler. */
 function builder(over: Partial<OverviewBuilder>): OverviewBuilder {
@@ -89,5 +89,20 @@ describe('builderFaceSvg', () => {
   it('escapes XML so an id with special characters cannot break the SVG', () => {
     const svg = builderFaceSvg(faceForBuilder(builder({ id: 'a<b&c', issueId: null })));
     expect(svg).toContain('a&lt;b&amp;c');
+  });
+  it('carries an intrinsic width/height so Stream Deck does not drop the image', () => {
+    const svg = builderFaceSvg({ kind: 'empty', slot: '1' });
+    expect(svg).toContain('width="72"');
+    expect(svg).toContain('height="72"');
+  });
+});
+
+describe('svgToDataUri', () => {
+  it('wraps an SVG as a base64 svg+xml data URI that decodes back to the source', () => {
+    const svg = builderFaceSvg(faceForBuilder(builder({ issueId: '1414', protocolPhase: 'implement' })));
+    const uri = svgToDataUri(svg);
+    expect(uri.startsWith('data:image/svg+xml;base64,')).toBe(true);
+    const decoded = Buffer.from(uri.slice('data:image/svg+xml;base64,'.length), 'base64').toString('utf8');
+    expect(decoded).toBe(svg);
   });
 });
