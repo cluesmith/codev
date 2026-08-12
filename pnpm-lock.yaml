@@ -230,6 +230,9 @@ importers:
       '@cluesmith/codev-sdk':
         specifier: workspace:*
         version: link:../sdk
+      '@cluesmith/codev-types':
+        specifier: workspace:*
+        version: link:../types
       '@google/genai':
         specifier: ^1.0.0
         version: 1.50.0(@modelcontextprotocol/sdk@1.29.0(zod@4.3.6))
@@ -270,9 +273,6 @@ importers:
         specifier: ^8.18.0
         version: 8.20.0
     devDependencies:
-      '@cluesmith/codev-types':
-        specifier: workspace:*
-        version: link:../types
       '@cluesmith/codev-web':
         specifier: workspace:*
         version: link:../../apps/web
