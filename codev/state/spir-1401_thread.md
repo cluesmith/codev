@@ -582,3 +582,32 @@ Also fixed: rebased onto main (70 commits replayed clean, 0 behind, force-pushed
 suite re-run green); added approved/validated frontmatter to spec + plan; and fixed the stale
 webview/main.ts header comment — **that comment is where my own repeated "webview isn't
 typechecked" error came from**. Caught in phase_6, root found here.
+
+## 2026-08-12 — history rewrite: mechanics removed from the branch, BUT not from GitHub
+
+Redacting at the tip was not enough — correctly called out. The earlier fix only changed HEAD and
+one commit message, so the text still sat in the trees of two commits reachable on the pushed
+branch. Verified with `git log -S` (the pickaxe), which is authoritative; my earlier per-commit
+audit loops gave FALSE NEGATIVES because a git command inside `while read` consumed the loop's
+stdin. Do not trust an audit loop of that shape.
+
+Rewrite done: filter-branch --tree-filter over the three affected commits, substituting the
+redacted file versions wherever the markers appeared, with --prune-empty dropping the
+now-empty redaction commit (which also removed a commit whose subject advertised that something
+had been redacted). 72 -> 71 commits. HEAD tree byte-identical to the redacted state; full suite
+re-run green; force-pushed with lease. New HEAD e17915a75.
+
+**RESIDUAL EXPOSURE — the branch is clean, the repo is not.** Verified by API: the orphaned
+commits (including the two carrying the text) are STILL SERVED by GitHub at their SHAs after the
+force-push. Git force-push does not delete objects on the remote; GitHub retains unreachable
+objects and serves them by SHA until it garbage-collects, and refs/pull/1413/* pins objects too.
+Practically: anyone who knows or can read an old SHA can still fetch the content. Only GitHub
+Support can purge it.
+
+Mitigation confirmed: no committed artifact and no commit message in the branch references any
+orphaned SHA, so there is no pointer published from our side. The PR's web timeline may still
+show force-push events with before/after SHAs (the timeline API did not return them, but the UI
+commonly does) — that is the most likely discovery path and is the owner's call.
+
+Correct posture: for a public repo, treat this as disclosed from first push and let the FIX
+timeline drive, not the concealment.
