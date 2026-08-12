@@ -66,3 +66,11 @@ label seen when configuring) though the live dial face already re-titles Heading
 Renamed to "Review: Files / Headings" and "Review: Changes / Blocks" with dual-mode tooltips. UUIDs
 (`diff-file-nav`/`diff-hunk-nav`) and controller/layout structure untouched — stable identity, no
 layout change, so no code/test impact. `streamdeck validate` ✓.
+
+## Review phase (2026-08-12) — dev-approval APPROVED
+
+Retrospective at `codev/reviews/1400-stream-deck-phase-aware-review.md`. Also swept
+`apps/streamdeck/README.md` Actions list for the rename (grep-both-trees lesson). No arch/lessons
+tier change — existing hot lessons already governed (single-source resolver reuse; rename sweep);
+arch.md's streamdeck entry stays accurate (sendCanvasCommand is on the controller subpath it names).
+PR #1419 opened (Fixes #1400), recorded with porch. Running the single 3-way consult via porch done.
