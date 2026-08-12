@@ -13,9 +13,11 @@ import {
   ZoomNav,
   zoomInVerb,
   phaseArtifactVerb,
+  reviewMode,
 } from '../actions.js';
 
 type Sent = { verb: string; args: unknown[]; ws?: string };
+type CanvasSent = { command: string; target: { workspace: string; file?: string }; count?: number };
 
 /** A full TowerWorkspace fixture (the sdk type carries proxyUrl + terminals on top of the old WorkspaceSummary). */
 function workspace(path: string, name: string, active: boolean): TowerWorkspace {
@@ -24,13 +26,20 @@ function workspace(path: string, name: string, active: boolean): TowerWorkspace 
 
 function makeStore() {
   const sent: Sent[] = [];
+  const canvasSent: CanvasSent[] = [];
   const opened: string[] = [];
   const getOverview = vi.fn(async (_ws?: string) => null);
   const listWorkspaces = vi.fn(async () => []);
+  // A canvas verdict the test can override to exercise the per-code feedback lines.
+  const canvasResult = { value: { ok: true, target: { viewId: 'v1', file: '/f.md' } } as unknown };
   const client = {
     sendCommand: vi.fn((verb: string, args: unknown[] = [], ws?: string) => {
       sent.push({ verb, args, ws });
       return Promise.resolve({ ok: true, status: 200, data: { ok: true } });
+    }),
+    sendCanvasCommand: vi.fn((command: string, target: { workspace: string; file?: string }, options?: { count?: number }) => {
+      canvasSent.push({ command, target, count: options?.count });
+      return Promise.resolve(canvasResult.value);
     }),
     getOverview,
     listWorkspaces,
@@ -46,7 +55,7 @@ function makeStore() {
     backlog: [{ id: '55', title: 'Add X' }],
     recentlyClosed: [],
   } as never;
-  return { store, sent, opened, getOverview, listWorkspaces };
+  return { store, sent, canvasSent, canvasResult, opened, getOverview, listWorkspaces };
 }
 
 const keyEvent = (settings: Record<string, unknown> = {}) => ({
@@ -165,8 +174,9 @@ describe('ApproveGate', () => {
 });
 
 describe('encoders', () => {
-  it('DiffFileNav: rotate navigates, press forwards the file, touch jumps to first', async () => {
+  it('DiffFileNav in diff mode: rotate navigates, press forwards the file, touch jumps to first', async () => {
     const ctx = makeStore();
+    ctx.store.syncToBuilder('pir-2'); // implement phase → diff mode
     const nav = new DiffFileNav(ctx.store);
     await nav.onDialRotate(dial(1) as never);   // next
     await nav.onDialRotate(dial(-2) as never);  // prev
@@ -174,13 +184,99 @@ describe('encoders', () => {
     await nav.onTouchTap();                       // first
     expect(ctx.sent.map((s) => s.verb)).toEqual(['diff-next-file', 'diff-prev-file', 'forward-file', 'diff-first-file']);
     expect(ctx.sent.every((s) => s.ws === '/work/alpha')).toBe(true);
+    expect(ctx.canvasSent).toHaveLength(0); // diff mode never touches the canvas channel
   });
 
-  it('Diff dials forward their axis on a dial press', async () => {
+  it('Diff dials forward their axis on a dial press (diff mode)', async () => {
     const ctx = makeStore();
+    ctx.store.syncToBuilder('pir-2'); // implement phase → diff mode
     await new DiffFileNav(ctx.store).onDialDown();
     await new DiffHunkNav(ctx.store).onDialDown();
     expect(ctx.sent.map((s) => s.verb)).toEqual(['forward-file', 'forward-hunk']);
+  });
+
+  it('canvas mode: coarse dial rotates headings (count = |ticks|), press opens composer, tap resets to doc start', async () => {
+    const ctx = makeStore(); // default selection pir-1 is blocked at plan-approval → canvas mode
+    const nav = new DiffFileNav(ctx.store);
+    await nav.onDialRotate(dial(3) as never);   // heading-next, count 3
+    await nav.onDialRotate(dial(-1) as never);  // heading-prev, count 1
+    await nav.onDialDown();                      // composer-open
+    await nav.onTouchTap();                       // doc-start
+    expect(ctx.canvasSent).toEqual([
+      { command: 'heading-next', target: { workspace: '/work/alpha' }, count: 3 },
+      { command: 'heading-prev', target: { workspace: '/work/alpha' }, count: 1 },
+      { command: 'composer-open', target: { workspace: '/work/alpha' }, count: undefined },
+      { command: 'doc-start', target: { workspace: '/work/alpha' }, count: undefined },
+    ]);
+    expect(ctx.sent).toHaveLength(0); // canvas mode never touches the generic verb relay
+  });
+
+  it('canvas mode: fine dial rotates blocks, tap walks forward through comments', async () => {
+    const ctx = makeStore(); // pir-1 → canvas mode
+    const nav = new DiffHunkNav(ctx.store);
+    await nav.onDialRotate(dial(2) as never);   // block-next, count 2
+    await nav.onDialDown();                      // composer-open
+    await nav.onTouchTap();                       // comment-next
+    expect(ctx.canvasSent).toEqual([
+      { command: 'block-next', target: { workspace: '/work/alpha' }, count: 2 },
+      { command: 'composer-open', target: { workspace: '/work/alpha' }, count: undefined },
+      { command: 'comment-next', target: { workspace: '/work/alpha' }, count: undefined },
+    ]);
+  });
+
+  it('canvas targeting omits file (MRU): the target carries only the workspace', async () => {
+    const ctx = makeStore();
+    await new DiffFileNav(ctx.store).onDialRotate(dial(1) as never);
+    expect(ctx.canvasSent[0].target).toEqual({ workspace: '/work/alpha' });
+    expect('file' in ctx.canvasSent[0].target).toBe(false);
+  });
+
+  it('a failed canvas command renders its per-code reason on the touchstrip', async () => {
+    const ctx = makeStore();
+    ctx.canvasResult.value = { ok: false, code: 'no-canvas', error: 'no canvas open' };
+    const action = dial(1).action;
+    const nav = new DiffFileNav(ctx.store);
+    nav.onWillAppear({ action, payload: {} } as never);
+    await nav.onDialRotate({ action, payload: { ticks: 1, settings: {} } } as never);
+    const last = action.setFeedback.mock.calls.at(-1)?.[0];
+    expect(last).toMatchObject({ title: 'Headings', value: 'Open artifact' });
+
+    ctx.canvasResult.value = { ok: false, code: 'unreachable', error: 'Tower down' };
+    await nav.onDialDown();
+    expect(action.setFeedback.mock.calls.at(-1)?.[0]).toMatchObject({ value: 'Tower offline' });
+  });
+
+  it('a canvas gesture with no active workspace is a no-op', async () => {
+    const ctx = makeStore();
+    ctx.store.workspaces = []; // selectedWorkspacePath() → undefined
+    await new DiffFileNav(ctx.store).onDialRotate(dial(1) as never);
+    expect(ctx.canvasSent).toHaveLength(0);
+  });
+
+  it('none mode (unknown-phase builder): rotate/press/tap send nothing on either channel', async () => {
+    const ctx = makeStore();
+    // A builder with no live status → phaseArtifactVerb undefined → reviewMode 'none'.
+    ctx.store.overview = {
+      builders: [{ id: 'pir-x', roleId: null, issueId: null, issueTitle: null, blocked: null, blockedGate: null, protocolPhase: '', progress: 0, worktreePath: '/w' }],
+      pendingPRs: [], backlog: [], recentlyClosed: [],
+    } as never;
+    const nav = new DiffFileNav(ctx.store);
+    await nav.onDialRotate(dial(1) as never);
+    await nav.onDialDown();
+    await nav.onTouchTap();
+    expect(ctx.sent).toHaveLength(0);        // no diff verbs
+    expect(ctx.canvasSent).toHaveLength(0);  // no canvas commands
+  });
+
+  it('none mode (no builder): the dials are inert', async () => {
+    const ctx = makeStore();
+    ctx.store.overview = { builders: [], pendingPRs: [], backlog: [], recentlyClosed: [] } as never;
+    const nav = new DiffHunkNav(ctx.store);
+    await nav.onDialRotate(dial(1) as never);
+    await nav.onDialDown();
+    await nav.onTouchTap();
+    expect(ctx.sent).toHaveLength(0);
+    expect(ctx.canvasSent).toHaveLength(0);
   });
 
   it('ScrollNav scrolls the editor on rotate and forwards the selection on press', async () => {
@@ -378,6 +474,27 @@ describe('phaseArtifactVerb (shared resolver — recognised verb or undefined)',
   });
 });
 
+describe('reviewMode (dial mode from the shared resolver)', () => {
+  const b = (over: Record<string, unknown>) => ({ id: 'x', blockedGate: null, protocolPhase: '', ...over }) as never;
+  it('spec/plan phases and their gates → canvas', () => {
+    expect(reviewMode(b({ blockedGate: 'spec-approval' }))).toBe('canvas');
+    expect(reviewMode(b({ protocolPhase: 'specify' }))).toBe('canvas');
+    expect(reviewMode(b({ blockedGate: 'plan-approval' }))).toBe('canvas');
+    expect(reviewMode(b({ protocolPhase: 'plan' }))).toBe('canvas');
+  });
+  it('implement/review/verify and the dev-approval/pr gates → diff', () => {
+    expect(reviewMode(b({ protocolPhase: 'implement' }))).toBe('diff');
+    expect(reviewMode(b({ protocolPhase: 'review' }))).toBe('diff');
+    expect(reviewMode(b({ blockedGate: 'dev-approval' }))).toBe('diff');
+    expect(reviewMode(b({ blockedGate: 'pr' }))).toBe('diff');
+  });
+  it('an unknown phase, no live status, or no builder → none', () => {
+    expect(reviewMode(b({}))).toBe('none');
+    expect(reviewMode(b({ protocolPhase: 'mystery' }))).toBe('none');
+    expect(reviewMode(undefined)).toBe('none');
+  });
+});
+
 describe('CodevStore.syncToBuilder (builder follow)', () => {
   it('matches OverviewBuilder.id (diff/sidebar signal) and descends to builders', () => {
     const ctx = makeStore(); // cursor.builder 0 → pir-1; level defaults to workspaces
@@ -488,14 +605,35 @@ describe('ZoomNav zoom gesture', () => {
     expect(fb.bar).toBe(45);                       // builder progress
   });
 
-  it('Diff dials show the function (line 1) + issue details (line 2) + progress', () => {
-    const ctx = makeStore(); // selected builder (cursor 0) → pir-1 (#101, "Add the relay", 45%)
+  it('legibility: canvas-phase builder titles the dials Headings/Blocks', () => {
+    const ctx = makeStore(); // selected builder (cursor 0) → pir-1, blocked at plan-approval → canvas
     const fileAction = { isDial: () => true, setFeedback: vi.fn() };
     const hunkAction = { isDial: () => true, setFeedback: vi.fn() };
     new DiffFileNav(ctx.store).onWillAppear({ action: fileAction, payload: {} } as never);
     new DiffHunkNav(ctx.store).onWillAppear({ action: hunkAction, payload: {} } as never);
-    expect(fileAction.setFeedback).toHaveBeenCalledWith({ title: 'Files', value: '#101 Add the relay', bar: 45 });
-    expect(hunkAction.setFeedback).toHaveBeenCalledWith({ title: 'Changes', value: '#101 Add the relay', bar: 45 });
+    expect(fileAction.setFeedback).toHaveBeenCalledWith({ title: 'Headings', value: '#101 Add the relay', bar: 45 });
+    expect(hunkAction.setFeedback).toHaveBeenCalledWith({ title: 'Blocks', value: '#101 Add the relay', bar: 45 });
+  });
+
+  it('legibility: diff-phase builder titles the dials Files/Changes', () => {
+    const ctx = makeStore();
+    ctx.store.syncToBuilder('pir-2'); // implement phase → diff mode (#102, "Wire the dial", 70%)
+    const fileAction = { isDial: () => true, setFeedback: vi.fn() };
+    const hunkAction = { isDial: () => true, setFeedback: vi.fn() };
+    new DiffFileNav(ctx.store).onWillAppear({ action: fileAction, payload: {} } as never);
+    new DiffHunkNav(ctx.store).onWillAppear({ action: hunkAction, payload: {} } as never);
+    expect(fileAction.setFeedback).toHaveBeenCalledWith({ title: 'Files', value: '#102 Wire the dial', bar: 70 });
+    expect(hunkAction.setFeedback).toHaveBeenCalledWith({ title: 'Changes', value: '#102 Wire the dial', bar: 70 });
+  });
+
+  it('legibility: the dial re-titles when the selection moves between modes', () => {
+    const ctx = makeStore();
+    const action = { isDial: () => true, setFeedback: vi.fn() };
+    const nav = new DiffFileNav(ctx.store);
+    nav.onWillAppear({ action, payload: {} } as never); // pir-1 → canvas
+    expect(action.setFeedback.mock.calls.at(-1)?.[0]).toMatchObject({ title: 'Headings' });
+    ctx.store.syncToBuilder('pir-2'); // → diff; onChange re-renders
+    expect(action.setFeedback.mock.calls.at(-1)?.[0]).toMatchObject({ title: 'Files' });
   });
 
   it('clears the previous workspace overview immediately on switch (no stale flash)', () => {

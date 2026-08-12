@@ -83,12 +83,19 @@ builder (+ its phase and position); PR / Spawn show the item + `i/N`.
   your browser.
 - **Spawn from Backlog** — rotate the backlog; **push** spawns a builder for the
   selected issue (VSCode prompts for the protocol).
-- **Diff File Navigator** — rotate = next / previous file in a diff review;
-  **push** = forward the current file to the builder; **tap the touch strip** =
-  jump to the first file.
-- **Diff Hunk Navigator** — rotate = next / previous change; **push** = forward
-  the current change to the builder; **tap the touch strip** = jump to the first
-  change.
+- **Review: Files / Headings** — phase-aware coarse review dial. The selected
+  builder's phase picks the mode. *Diff phase* (implement / review, or blocked at
+  dev-approval / pr): rotate = next / previous file, **push** = forward the current
+  file to the builder, **tap** = jump to the first file. *Spec/plan phase* (specify /
+  plan, or blocked at spec-approval / plan-approval): rotate = next / previous heading
+  in the artifact canvas, **push** = open the composer at the focused block, **tap** =
+  jump to the document top. The touch strip always names the live mode
+  (`Files` / `Headings`).
+- **Review: Changes / Blocks** — phase-aware fine review dial, same mode split.
+  *Diff phase*: rotate = next / previous change, **push** = forward the current change,
+  **tap** = jump to the first change. *Spec/plan phase*: rotate = next / previous
+  block, **push** = open the composer, **tap** = walk forward to the next commented
+  block. The touch strip names the live mode (`Changes` / `Blocks`).
 - **Scroll** — rotate = scroll the focused editor's viewport (caret stays put);
   **push** = forward the current selection to the builder.
 

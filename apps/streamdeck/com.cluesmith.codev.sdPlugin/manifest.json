@@ -162,9 +162,9 @@
       ]
     },
     {
-      "Name": "Diff File Navigator",
+      "Name": "Review: Files / Headings",
       "UUID": "com.cluesmith.codev.diff-file-nav",
-      "Tooltip": "Step across files in a builder diff review; press to forward the current file to the builder; tap the touch strip to jump to the first file.",
+      "Tooltip": "Review the selected builder's work; its phase picks the mode. Diff phase: step across files (press forwards the file to the builder, tap jumps to the first file). Spec/plan phase: step across headings in the artifact canvas (press opens the composer, tap jumps to the top).",
       "Icon": "icons/list/diff-file-nav",
       "Controllers": [
         "Encoder"
@@ -172,9 +172,9 @@
       "Encoder": {
         "layout": "layouts/dial.json",
         "TriggerDescription": {
-          "Rotate": "Next / previous file",
-          "Push": "Forward file to builder",
-          "Touch": "First file"
+          "Rotate": "Next / previous file (diff) or heading (spec/plan)",
+          "Push": "Forward file to builder (diff) or open composer (spec/plan)",
+          "Touch": "First file (diff) or document top (spec/plan)"
         }
       },
       "States": [
@@ -184,9 +184,9 @@
       ]
     },
     {
-      "Name": "Diff Hunk Navigator",
+      "Name": "Review: Changes / Blocks",
       "UUID": "com.cluesmith.codev.diff-hunk-nav",
-      "Tooltip": "Step across changes within a diff; press to forward the current change to the builder; tap the touch strip to jump to the first change.",
+      "Tooltip": "Review the selected builder's work; its phase picks the mode. Diff phase: step across changes within a file (press forwards the change to the builder, tap jumps to the first change). Spec/plan phase: step across blocks in the artifact canvas (press opens the composer, tap walks to the next commented block).",
       "Icon": "icons/list/diff-hunk-nav",
       "Controllers": [
         "Encoder"
@@ -194,9 +194,9 @@
       "Encoder": {
         "layout": "layouts/dial.json",
         "TriggerDescription": {
-          "Rotate": "Next / previous change",
-          "Push": "Forward hunk to builder",
-          "Touch": "First change"
+          "Rotate": "Next / previous change (diff) or block (spec/plan)",
+          "Push": "Forward change to builder (diff) or open composer (spec/plan)",
+          "Touch": "First change (diff) or next commented block (spec/plan)"
         }
       },
       "States": [
