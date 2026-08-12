@@ -28,8 +28,24 @@ function apiUrl(endpoint: string): string {
   return base + clean;
 }
 
+/**
+ * Resolve the shared local key (advisory GHSA-xvjp-7748-v88v). Prefer the value
+ * Tower injects same-origin at serve time (`window.__CODEV_WEB_KEY__`) so a
+ * direct navigation to a workspace URL works without first visiting the Tower
+ * shell; fall back to a previously stored value. The injected value is persisted
+ * so later same-origin requests keep working.
+ */
+export function getWebKey(): string | null {
+  const injected = (window as unknown as { __CODEV_WEB_KEY__?: string }).__CODEV_WEB_KEY__;
+  if (injected) {
+    try { localStorage.setItem('codev-web-key', injected); } catch { /* storage may be unavailable */ }
+    return injected;
+  }
+  return localStorage.getItem('codev-web-key');
+}
+
 function getAuthHeaders(): Record<string, string> {
-  const token = localStorage.getItem('codev-web-key');
+  const token = getWebKey();
   if (token) {
     // Request authentication (advisory GHSA-xvjp-7748-v88v): Tower reads the
     // shared local key from the codev-web-key header.

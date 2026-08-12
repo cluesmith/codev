@@ -9,11 +9,11 @@ import { FilePathLinkProvider, FilePathDecorationManager } from '../lib/filePath
 import { VirtualKeyboard, type ModifierState } from './VirtualKeyboard.js';
 import { useMediaQuery } from '../hooks/useMediaQuery.js';
 import { MOBILE_BREAKPOINT } from '../lib/constants.js';
-import { uploadPasteImage } from '../lib/api.js';
+import { uploadPasteImage, getWebKey } from '../lib/api.js';
 import { ScrollController } from '../lib/scrollController.js';
 import { EscapeBuffer } from '../lib/escapeBuffer.js';
 import { BackoffController, classifyUpgradeError } from '@cluesmith/codev-sdk/reconnect-policy';
-import { WS_MARKER_PROTOCOL, WS_KEY_PROTOCOL_PREFIX } from '@cluesmith/codev-types';
+import { terminalWsProtocols } from '@cluesmith/codev-types';
 
 /**
  * Floating controls overlay for terminal windows — refresh (re-fit + resize)
@@ -449,10 +449,7 @@ export function Terminal({ wsPath, onFileOpen, persistent, toolbarExtra, onPerma
       // Request authentication (advisory GHSA-xvjp-7748-v88v): browsers cannot
       // set headers on a WebSocket, so the shared key travels as a subprotocol
       // (validated at the upgrade), alongside the marker protocol Tower echoes.
-      const key = localStorage.getItem('codev-web-key');
-      const protocols = key
-        ? [WS_MARKER_PROTOCOL, `${WS_KEY_PROTOCOL_PREFIX}${key}`]
-        : undefined;
+      const protocols = terminalWsProtocols(getWebKey());
       const ws = protocols ? new WebSocket(wsUrl, protocols) : new WebSocket(wsUrl);
       ws.binaryType = 'arraybuffer';
       wsRef.current = ws;

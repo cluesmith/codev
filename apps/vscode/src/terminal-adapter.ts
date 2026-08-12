@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import WebSocket from 'ws';
-import { FRAME_CONTROL, FRAME_DATA, WS_MARKER_PROTOCOL, WS_KEY_PROTOCOL_PREFIX, type ControlMessage } from '@cluesmith/codev-types';
+import { FRAME_CONTROL, FRAME_DATA, terminalWsProtocols, type ControlMessage } from '@cluesmith/codev-types';
 import { EscapeBuffer } from '@cluesmith/codev-sdk/escape-buffer';
 import { BackoffController, classifyUpgradeError } from '@cluesmith/codev-sdk/reconnect-policy';
 
@@ -180,13 +180,9 @@ export class CodevPseudoterminal implements vscode.Pseudoterminal {
 
     const url = this.connectUrl();
     this.log('INFO', `Connecting to ${url}`);
-    // Request authentication (advisory GHSA-xvjp-7748-v88v): send the shared key
-    // as a Sec-WebSocket-Protocol subprotocol so it is validated at the upgrade,
-    // alongside the non-secret marker protocol the server echoes back.
-    const protocols = this.authKey
-      ? [WS_MARKER_PROTOCOL, `${WS_KEY_PROTOCOL_PREFIX}${this.authKey}`]
-      : undefined;
-    const socket = new WebSocket(url, protocols);
+    // Request authentication (advisory GHSA-xvjp-7748-v88v): the shared key
+    // travels as a Sec-WebSocket-Protocol subprotocol, validated at the upgrade.
+    const socket = new WebSocket(url, terminalWsProtocols(this.authKey));
     this.ws = socket;
     this.ws.binaryType = 'arraybuffer';
 

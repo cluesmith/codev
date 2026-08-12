@@ -569,6 +569,46 @@
   <script src="vendor/prism-markup.min.js"></script>
 
   <script>
+    // Request authentication (advisory GHSA-xvjp-7748-v88v): Tower injects the
+    // shared local key into this page same-origin; every data/media fetch sends
+    // it via the codev-web-key header. Media is fetched as an authenticated blob
+    // (img/video/pdf src cannot carry a header) and displayed via an object URL,
+    // revoked when replaced or on unload to avoid blob leaks.
+    function getWebKey() {
+      if (window.__CODEV_WEB_KEY__) {
+        try { localStorage.setItem('codev-web-key', window.__CODEV_WEB_KEY__); } catch (e) {}
+        return window.__CODEV_WEB_KEY__;
+      }
+      return localStorage.getItem('codev-web-key');
+    }
+    function authHeaders(extra) {
+      const key = getWebKey();
+      const headers = extra ? Object.assign({}, extra) : {};
+      if (key) headers['codev-web-key'] = key;
+      return headers;
+    }
+    function setMediaSrc(el, objectUrl) {
+      if (el.__objUrl) URL.revokeObjectURL(el.__objUrl);
+      el.__objUrl = objectUrl;
+      el.src = objectUrl;
+    }
+    async function loadMedia(el, path) {
+      try {
+        const res = await fetch(path, { headers: authHeaders() });
+        if (!res.ok) throw new Error('status ' + res.status);
+        const blob = await res.blob();
+        setMediaSrc(el, URL.createObjectURL(blob));
+      } catch (e) {
+        if (typeof el.onerror === 'function') el.onerror();
+      }
+    }
+    window.addEventListener('beforeunload', function() {
+      ['image-display', 'video-display', 'pdf-display'].forEach(function(id) {
+        const el = document.getElementById(id);
+        if (el && el.__objUrl) URL.revokeObjectURL(el.__objUrl);
+      });
+    });
+
     // State
     let fileLines = [];
     let currentLine = null;
@@ -673,8 +713,8 @@
         img.style.display = 'none';
       };
 
-      // Add cache-busting query param to allow reload
-      img.src = 'api/image?t=' + Date.now();
+      // Fetch as an authenticated blob (img.src cannot carry the key header).
+      loadMedia(img, 'api/image?t=' + Date.now());
     }
 
     // Initialize video viewer
@@ -707,8 +747,8 @@
         video.style.display = 'none';
       };
 
-      // Add cache-busting query param to allow reload
-      video.src = 'api/video?t=' + Date.now();
+      // Fetch as an authenticated blob (video.src cannot carry the key header).
+      loadMedia(video, 'api/video?t=' + Date.now());
     }
 
     // Initialize PDF viewer
@@ -726,9 +766,10 @@
       const pdfViewer = document.getElementById('pdf-viewer');
       pdfViewer.style.display = 'block';
 
-      // Load PDF via raw endpoint
+      // Load PDF via raw endpoint as an authenticated blob (embed.src cannot
+      // carry the key header).
       const embed = document.getElementById('pdf-display');
-      embed.src = 'api/pdf?t=' + Date.now();
+      loadMedia(embed, 'api/pdf?t=' + Date.now());
     }
 
     // Update image info display (in both header and controls)
@@ -1339,7 +1380,7 @@
       try {
         const response = await fetch('save', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: authHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({
             file: filePath,
             content: fileLines.join('\n')
@@ -1457,7 +1498,7 @@
       try {
         const response = await fetch('save', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: authHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({ file: filePath, content })
         });
 
@@ -1778,7 +1819,7 @@
       if (hasUnsavedChanges || editMode) return;
 
       try {
-        const res = await fetch('api/mtime');
+        const res = await fetch('api/mtime', { headers: authHeaders() });
         if (res.ok) {
           const data = await res.json();
           if (lastMtime === null) {
@@ -1797,21 +1838,21 @@
       // For images and videos, just reload the source
       if (isImageFile) {
         const img = document.getElementById('image-display');
-        img.src = 'api/image?t=' + Date.now();
+        loadMedia(img, 'api/image?t=' + Date.now());
         showNotification('Image reloaded');
         return;
       }
 
       if (isVideoFile) {
         const video = document.getElementById('video-display');
-        video.src = 'api/video?t=' + Date.now();
+        loadMedia(video, 'api/video?t=' + Date.now());
         showNotification('Video reloaded');
         return;
       }
 
       // For text files, fetch new content
       try {
-        const res = await fetch('file');
+        const res = await fetch('file', { headers: authHeaders() });
         if (res.ok) {
           const content = await res.text();
           currentContent = content;
