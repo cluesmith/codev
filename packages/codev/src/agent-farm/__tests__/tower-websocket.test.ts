@@ -11,7 +11,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import http from 'node:http';
 import { EventEmitter } from 'node:events';
 import { handleTerminalWebSocket, setupUpgradeHandler } from '../servers/tower-websocket.js';
-import { WS_CLOSE_SESSION_UNKNOWN } from '../lib/reconnect-backoff.js';
+import { WS_CLOSE_SESSION_UNKNOWN, WS_CLOSE_UNAUTHORIZED } from '../lib/reconnect-backoff.js';
+import { isWebSocketAllowed } from '../utils/server-utils.js';
 
 // ============================================================================
 // Mocks
@@ -35,6 +36,14 @@ vi.mock('../servers/tower-terminals.js', () => ({
 
 vi.mock('../servers/tower-utils.js', () => ({
   normalizeWorkspacePath: (p: string) => p,
+}));
+
+// Keep the real auth helpers but stub isWebSocketAllowed so the routing tests
+// need not thread a valid key; a dedicated describe flips it to exercise the
+// reject path (advisory GHSA-xvjp-7748-v88v).
+vi.mock('../utils/server-utils.js', async (importActual) => ({
+  ...(await importActual<typeof import('../utils/server-utils.js')>()),
+  isWebSocketAllowed: vi.fn(() => true),
 }));
 
 // ============================================================================
@@ -614,6 +623,52 @@ describe('tower-websocket', () => {
       expect(closedWith).toEqual([WS_CLOSE_SESSION_UNKNOWN, 'session-unknown']);
       expect(socket.write).not.toHaveBeenCalled();
       expect(socket.destroy).not.toHaveBeenCalled();
+    });
+
+    // =======================================================================
+    // Request authentication (advisory GHSA-xvjp-7748-v88v)
+    // =======================================================================
+
+    it('rejects an unauthenticated upgrade before any session lookup (Node client, no Origin → 401)', async () => {
+      (isWebSocketAllowed as any).mockReturnValueOnce(false);
+      const server = makeServer();
+      const wss = makeWss();
+
+      setupUpgradeHandler(server, wss, 4100);
+
+      const socket = makeSocket();
+      server.emit('upgrade', { url: '/ws/terminal/term-1', headers: {} }, socket, Buffer.alloc(0));
+
+      expect(socket.write).toHaveBeenCalledWith('HTTP/1.1 401 Unauthorized\r\n\r\n');
+      expect(socket.destroy).toHaveBeenCalled();
+      // Auth is gated before routing, so the session is never resolved.
+      expect(mockGetSession).not.toHaveBeenCalled();
+    });
+
+    it('rejects an unauthenticated upgrade with a close code (browser, Origin present → 4401)', async () => {
+      (isWebSocketAllowed as any).mockReturnValueOnce(false);
+      const server = makeServer();
+      let closedWith: [number, string] | null = null;
+      const wss: any = {
+        handleUpgrade: vi.fn((_req: unknown, _socket: unknown, _head: unknown, cb: (ws: any) => void) => {
+          const ws: any = new EventEmitter();
+          ws.close = vi.fn((code: number, reason: string) => { closedWith = [code, reason]; });
+          cb(ws);
+        }),
+      };
+
+      setupUpgradeHandler(server, wss, 4100);
+
+      const socket = makeSocket();
+      server.emit('upgrade', {
+        url: '/ws/terminal/term-1',
+        headers: { origin: 'http://localhost:5173' },
+      }, socket, Buffer.alloc(0));
+
+      expect(closedWith).toEqual([WS_CLOSE_UNAUTHORIZED, 'unauthorized']);
+      expect(socket.write).not.toHaveBeenCalled();
+      expect(socket.destroy).not.toHaveBeenCalled();
+      expect(mockGetSession).not.toHaveBeenCalled();
     });
   });
 });
