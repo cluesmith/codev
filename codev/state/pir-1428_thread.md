@@ -115,3 +115,19 @@ Fix (both standard Stream Deck requirements, applied together to save a hardware
   Also switched font-family system-ui → sans-serif (generic the rasterizer resolves).
 check-types clean, 103/103 tests pass (added svgToDataUri round-trip + width/height tests), build ok.
 Lesson for review: Stream Deck setImage(SVG) needs a base64 svg+xml data URI + intrinsic w/h.
+
+## Extended fix to the Gates key (2026-08-13, owner-directed)
+
+Owner (Amr) confirmed on hardware the Gates key (ApproveGate) suffers the same text-over-icon
+overlap. Investigated: it's the ONLY other keypad with dynamic text-over-icon (setTitle 'Gates\nN'
+over the PNG); the other keypads (action, dev-server) are icon-only, and the dials use setFeedback
+(structured, reads fine). So this is a contained same-bug extension, NOT the broad #1381
+buttons-posture redesign.
+Refactored face.ts to share the frame (BG/DIVIDER + iconZone/primaryLine/secondaryLine/centeredLine
+helpers; builder-face output unchanged) and added gatesFaceSvg(pendingCount): bell glyph +
+count + "Gates" in warning-yellow when gates pending, dim "Gates" when none. ApproveGate.renderTo →
+setImage(svgToDataUri(gatesFaceSvg(n))) + setTitle(''). bell = the sidebar's "needs attention" glyph
+(builder-row.ts), so it's consistent.
+check-types clean, 106/106 tests pass, build ok.
+Flagging to architect: this widens the #1428 PR beyond the Builder Action key; the broader
+"redesign every button's posture" remains #1381 (parked) — only the Gates same-bug fix folded in.
