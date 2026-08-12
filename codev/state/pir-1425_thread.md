@@ -69,3 +69,9 @@ inside the existing CanvasSpec pattern); no lessons-doc edit (the two sideload g
 build from worktree root, sdk dist first — are streamdeck-local and already documented, kept
 in the review). Opening PR next, recording with porch, then `porch done` triggers the single
 3-way consult pass → pr gate.
+
+PR #1426 opened (Fixes #1425), recorded via porch. 3-way consult (iter1): gemini APPROVE,
+claude APPROVE, codex COMMENT. Codex's one COMMENT = stale ReviewNav class doc comment
+("press opens the composer") no longer true after the remap; fixed the comment in 3d7765ec7
+(no behavior change), noted in review "Things to Look At". No REQUEST_CHANGES. At the pr gate
+awaiting human merge.
