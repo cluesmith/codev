@@ -1,6 +1,6 @@
 # PIR Review: `composer-open-or-submit` — context-aware canvas command
 
-Fixes #1420
+Refs #1420
 
 ## Summary
 
@@ -68,6 +68,14 @@ that undercount from a latent production 400 into a compile error caught before 
 
 ## Things to Look At During PR Review
 
+- **`Refs #1420`, not `Fixes` — deliberate (raised by Codex at the PR consultation, REQUEST_CHANGES).**
+  Issue #1420 enumerates requirements 1–5; this PR is the bridge-extension lane and lands 1, 2, and 5,
+  but requirements 3 (deck dial remap) and 4 (touchstrip legibility) remain for streamdeck's follow-on
+  lane. Auto-closing #1420 on merge would drop that remaining work on the floor, so the PR body
+  references the issue rather than closing it. **Human decision at the `pr` gate:** if the follow-on
+  work is (or will be) tracked under its own issue / #1410 and #1420 should close with this merge,
+  switch back to `Fixes #1420` or close the issue manually. This finding gets no automated
+  re-review (PIR consultation is single-pass), so it is surfaced here and to the architect.
 - **The open-vs-submit branch reads `composingLine` live.** `canvasActions` is rebuilt every render
   and `runCanvasCommandRef.current` is refreshed every render (`ArtifactCanvas.tsx:996-1001`), so the
   action body sees the current `composingLine`. `composer-cancel` already relies on this exact
