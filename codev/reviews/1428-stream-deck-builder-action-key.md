@@ -4,30 +4,25 @@
 > notes the architect asked to record before the plan-approval gate. The full review (what was
 > built, what was learned at the hardware gate, CMAP outcomes) is written in the review phase.
 
-## Follow-up candidates (recorded for humans to weigh — not implemented here)
+## Decision: twinned presentation vocabulary is intentional replication (not shared code)
 
-### Twinned presentation vocabulary: `face.ts` ↔ `builder-row.ts` wants a shared home
-
-This project deliberately **duplicates** the builder presentation vocabulary across two apps:
+The deck reproduces the VS Code sidebar's visual language — state colours + gate icons —
+**independently**. It does not import from the vscode app and is not meant to.
 
 - `apps/streamdeck/src/face.ts` — `STATE_COLOR` (state → hex), `GATE_ICONS` (gate → glyph),
-  `GATE_LABELS` / `PHASE_LABELS`.
-- `apps/vscode/src/views/builder-row.ts` — `BUILDER_STATE_GLYPH` (state → codicon + ThemeColor),
-  `gateIconFor` (gate → codicon), and the sidebar's label vocabulary.
+  `GATE_LABELS` / `PHASE_LABELS`. Self-contained: inlined hexes (a static SVG can't bind VS Code
+  `ThemeColor` tokens) and its own transcribed codicon paths.
+- `apps/vscode/src/views/builder-row.ts` — the sidebar's `BUILDER_STATE_GLYPH` / `gateIconFor`.
 
-The duplication is **forced by the current architecture**: the two apps can't import each other,
-so the streamdeck twin carries inlined hexes (a static SVG can't bind VS Code `ThemeColor`
-tokens) and its own transcribed codicon paths, kept in sync only by comments.
+**Owner ruling (Amr, 2026-08-12):** no cross-app import and no shared vocabulary module — the
+goal is to *replicate the behaviour*, not to share the source. The small maps are deliberately
+duplicated and kept aligned by sync-note comments (the same pattern already used between
+`overview.ts` and `builder-row.ts` for `GATE_LABELS`). This is a fine, intended pattern here, not
+single-source-of-truth debt.
 
-This sits in direct tension with our **single-source-of-truth** lesson (consolidate duplicates
-rather than syncing them). It is flagged as a **candidate** for a shared home — e.g. a
-neutral, environment-agnostic vocabulary module (gate/phase ids → semantic label + icon *name* +
-semantic colour *role*), consumed by both apps, with each app binding the semantic roles to its
-own render primitives (ThemeColor tokens in vscode, inlined hexes + codicon paths on the deck).
-
-**Not in scope for #1428** (it would touch shared packages and the vscode app; #1428 is
-plugin-local by requirement). Co-flagged by `main`. Recorded here for the humans to decide
-whether/when to spin it out. Do not implement as part of this PR.
+Context: a shared-home module was raised as a candidate by `main`/the architect for the humans to
+weigh; the owner weighed it and **declined** — recorded here so the decision isn't re-litigated.
+No action.
 
 ## Lessons (seed)
 

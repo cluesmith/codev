@@ -72,3 +72,12 @@ Two additions recorded in the REVIEW artifact (seeded now, not the plan):
 2. verify-approval press-path gap filed as #1431 (BUGFIX, after this merge) — referenced in
    review lessons.
 Plan-approval gate now to Amr.
+
+## Owner ruling on the shared-vocabulary candidate (2026-08-12)
+
+Amr: no cross-app import, no shared module — the deck REPLICATES the sidebar's visual language
+independently. The small twinned maps in face.ts are intentional duplication, kept aligned by
+sync-note comments (same pattern as overview.ts ↔ builder-row.ts GATE_LABELS). Not SSOT debt.
+Reframed the review's follow-up section from "candidate for a shared home" to "decision:
+intentional replication, shared-home declined by owner." Plan unchanged (already framed the
+twinning as the established sync-note pattern, no shared-module proposal).
