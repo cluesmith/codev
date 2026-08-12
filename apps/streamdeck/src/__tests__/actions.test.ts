@@ -253,6 +253,32 @@ describe('encoders', () => {
     expect(ctx.canvasSent).toHaveLength(0);
   });
 
+  it('none mode (unknown-phase builder): rotate/press/tap send nothing on either channel', async () => {
+    const ctx = makeStore();
+    // A builder with no live status → phaseArtifactVerb undefined → reviewMode 'none'.
+    ctx.store.overview = {
+      builders: [{ id: 'pir-x', roleId: null, issueId: null, issueTitle: null, blocked: null, blockedGate: null, protocolPhase: '', progress: 0, worktreePath: '/w' }],
+      pendingPRs: [], backlog: [], recentlyClosed: [],
+    } as never;
+    const nav = new DiffFileNav(ctx.store);
+    await nav.onDialRotate(dial(1) as never);
+    await nav.onDialDown();
+    await nav.onTouchTap();
+    expect(ctx.sent).toHaveLength(0);        // no diff verbs
+    expect(ctx.canvasSent).toHaveLength(0);  // no canvas commands
+  });
+
+  it('none mode (no builder): the dials are inert', async () => {
+    const ctx = makeStore();
+    ctx.store.overview = { builders: [], pendingPRs: [], backlog: [], recentlyClosed: [] } as never;
+    const nav = new DiffHunkNav(ctx.store);
+    await nav.onDialRotate(dial(1) as never);
+    await nav.onDialDown();
+    await nav.onTouchTap();
+    expect(ctx.sent).toHaveLength(0);
+    expect(ctx.canvasSent).toHaveLength(0);
+  });
+
   it('ScrollNav scrolls the editor on rotate and forwards the selection on press', async () => {
     const ctx = makeStore();
     const nav = new ScrollNav(ctx.store);

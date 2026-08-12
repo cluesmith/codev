@@ -584,31 +584,43 @@ abstract class ReviewNav extends SingletonAction {
   }
 
   override async onDialRotate(ev: DialRotateEvent): Promise<void> {
+    const mode = this.mode();
     const forward = dir(ev) >= 0;
-    if (this.mode() === 'canvas') {
+    if (mode === 'canvas') {
       // One call per rotate event: count = |ticks|, never a burst of single-tick sends.
       const command = forward ? this.canvas.next : this.canvas.prev;
       await this.runCanvas(command, Math.abs(ev.payload.ticks) || 1);
       return;
     }
-    const verb = forward ? this.diff.next : this.diff.prev;
-    await this.store.client.sendCommand(verb, [], this.store.selectedWorkspacePath());
+    if (mode === 'diff') {
+      const verb = forward ? this.diff.next : this.diff.prev;
+      await this.store.client.sendCommand(verb, [], this.store.selectedWorkspacePath());
+    }
+    // none (no builder / unknown phase): no-op — the dial has no artifact to act on.
   }
 
   override async onDialDown(): Promise<void> {
-    if (this.mode() === 'canvas') {
+    const mode = this.mode();
+    if (mode === 'canvas') {
       await this.runCanvas('composer-open');
       return;
     }
-    await this.store.client.sendCommand(this.diff.forward, [], this.store.selectedWorkspacePath());
+    if (mode === 'diff') {
+      await this.store.client.sendCommand(this.diff.forward, [], this.store.selectedWorkspacePath());
+    }
+    // none: no-op.
   }
 
   override async onTouchTap(): Promise<void> {
-    if (this.mode() === 'canvas') {
+    const mode = this.mode();
+    if (mode === 'canvas') {
       await this.runCanvas(this.canvas.jump);
       return;
     }
-    await this.store.client.sendCommand(this.diff.first, [], this.store.selectedWorkspacePath());
+    if (mode === 'diff') {
+      await this.store.client.sendCommand(this.diff.first, [], this.store.selectedWorkspacePath());
+    }
+    // none: no-op.
   }
 
   /** Send one canvas command to the workspace's MRU view and render its verdict. `count`

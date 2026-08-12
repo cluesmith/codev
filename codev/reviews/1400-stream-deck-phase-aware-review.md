@@ -28,7 +28,7 @@ walk) over #1401's `sendCanvasCommand`. No bridge, sdk, Tower, or vscode change 
 
 - `npm run build`: ✓ pass (esbuild bundle)
 - `npx tsc --noEmit`: ✓ pass
-- `npm test`: ✓ pass (82 tests, 11 new)
+- `npm test`: ✓ pass (84 tests, 13 new — includes 2 pinning the `none`-mode no-op fix below)
 - `npx streamdeck validate`: ✓ pass
 - Manual verification (human, dev-approval gate): sideloaded from the worktree; confirmed the phase
   switch, the live touchstrip re-title, and that diff-phase behavior is unchanged.
@@ -51,6 +51,14 @@ sweep). The MRU-vs-file-qualified targeting call is spec-narrow and already capt
 and issue thread, so it does not warrant a cold-tier entry.
 
 ## Things to Look At During PR Review
+
+- **3-way consultation — `none`-mode fix (Codex REQUEST_CHANGES, Claude flagged same, HIGH confidence).**
+  Both reviewers caught that the first implementation let `none` mode (no builder / unknown phase)
+  fall through to the diff verbs, whereas plan §2 specifies a no-op. This was a genuine unstated
+  deviation from the approved plan. **Fixed** in `onDialRotate` / `onDialDown` / `onTouchTap`: each now
+  branches explicitly on `mode === 'diff'`, so `none` sends nothing on either channel. Pinned by two
+  regression tests (unknown-phase builder, and no builder) asserting `sent` and `canvasSent` are both
+  empty — they fail against the pre-fix fall-through. Gemini returned APPROVE with no issues.
 
 - **`reviewMode()` reuse** (`actions.ts`): it is intentionally a thin derivation of `phaseArtifactVerb`
   (`open-spec`/`open-plan` → canvas, `view-diff` → diff, else `none`) so the wire source stays single
