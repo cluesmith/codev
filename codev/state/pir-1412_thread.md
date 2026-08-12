@@ -22,3 +22,23 @@ Registered in extension.ts beside the two existing providers. `vscode/` app only
 (this is our extension, not framework template content).
 
 **Status:** plan committed, awaiting `plan-approval` gate. dev-approval will be a live terminal check.
+
+## Implement phase (2026-08-12)
+
+plan-approval approved. Rebased on main first (was 95 behind). Implemented:
+- `commands/open-terminal-ref.ts` — resolution: PR#N→openPRInBrowser; bare #N→getIssue discriminator
+  (url `/pull/`→PR fallthrough, else editor via `executeCommand('codev.viewBacklogIssue')` or browser
+  via openIssueInBrowser per `codev.terminalLinks.issueTarget`).
+- `terminal-link-provider.ts` — added `IssueRefTerminalLinkProvider` (regex `/(?<pr>\bPR\s+)?#(?<num>\d+)/gi`,
+  built per call).
+- `extension.ts` — registered beside the two existing providers.
+- `package.json` — `codev.terminalLinks.issueTarget` setting (editor|browser, default editor).
+- `__tests__/terminal-ref-link-provider.test.ts` — 12 tests (detection + resolution routing).
+
+**Gotcha caught by tests:** first version imported `viewBacklogIssue` directly from view-issue.js, whose
+module-level `new vscode.EventEmitter()` singleton broke `reconnect-link-provider.test.ts` (loads the
+provider with a bare vscode mock). Switched to `executeCommand('codev.viewBacklogIssue', N)` — the same
+indirection open-issue-by-id.ts already uses, no load-time coupling. Full suite green after.
+
+Verified from worktree: `pnpm compile` (check-types + lint) clean (1 pre-existing tunnel.ts lint warning,
+not mine); `pnpm test:unit` 806 passed (68 files). Awaiting `dev-approval` — live terminal demo.
