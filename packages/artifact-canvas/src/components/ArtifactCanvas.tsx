@@ -71,6 +71,13 @@ function repeatCount(command: CanvasCommand, count: number | undefined): number 
   return count;
 }
 
+// Block predicates for the jump commands. Module scope: they close over nothing, so there is no
+// reason to rebuild them per render.
+const isMarkedBlock = (el: HTMLElement): boolean => el.classList.contains('codev-canvas-has-marker');
+const isHeadingBlock = (el: HTMLElement): boolean => /^H[1-6]$/.test(el.tagName);
+/** "Any block" turns the generic scan into plain adjacent-block stepping. */
+const anyBlock = (): boolean => true;
+
 /**
  * ArtifactCanvas — the composed review surface (Phase 3).
  *
@@ -797,9 +804,6 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
   // affordance/modifier guards, the composer exemption, and `preventDefault` — because a remote
   // command has no event; these functions carry only the action itself.
 
-  const isMarkedBlock = (el: HTMLElement): boolean => el.classList.contains('codev-canvas-has-marker');
-  const isHeadingBlock = (el: HTMLElement): boolean => /^H[1-6]$/.test(el.tagName);
-
   const originBlock = (target: EventTarget | null): HTMLElement | null =>
     ((target as HTMLElement | null)?.closest?.('[data-line]') as HTMLElement | null) ?? null;
 
@@ -848,26 +852,6 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
     return collectBlocks(root)[0] ?? null;
   };
 
-  // Where the view currently sits, for detecting that a repeated command has stopped making
-  // progress. Traversal moves the origin block; column paging moves the scroll offset instead and
-  // leaves focus alone, so both have to be in the signature or a counted page would stop after
-  // one step.
-  const positionSignature = (root: HTMLElement): string => {
-    const line = currentBlock(root)?.getAttribute('data-line') ?? '';
-    return `${line}:${root.scrollLeft}`;
-  };
-
-  // Step one block in flow order. Deliberately NOT native Tab parity: Tab also visits the "+"
-  // affordance, card actions, the toolbar and links, so a remote "next block" that mimicked it
-  // would land off-prose. Tab itself is untouched (spec 1401 non-goal).
-  const focusAdjacentBlock = (root: HTMLElement, fromLine: string | null, step: 1 | -1): void => {
-    const blocks = collectBlocks(root);
-    const start = blocks.findIndex((b) => b.getAttribute('data-line') === fromLine);
-    if (start === -1) return;
-    const next = blocks[start + step];
-    if (next) focusBlock(next); // no wrap-around, same as the jump keys
-  };
-
   const focusEdgeBlock = (root: HTMLElement, edge: 'start' | 'end'): void => {
     const blocks = collectBlocks(root);
     let target: HTMLElement | undefined;
@@ -879,7 +863,10 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
     if (target) focusBlock(target);
   };
 
-  // Focus the next/previous block matching `match`, walking outward from `fromLine`.
+  // Focus the next/previous block matching `match`, walking outward from `fromLine`. With
+  // `anyBlock` this is plain adjacent stepping, which is why `block-next/prev` need no separate
+  // implementation. Deliberately NOT native Tab parity: Tab also visits the "+" affordance, card
+  // actions, the toolbar and links, so a "next block" that mimicked it would land off-prose.
   const focusMatchingBlock = (
     root: HTMLElement,
     fromLine: string | null,
@@ -916,95 +903,60 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
   };
 
   interface CanvasActionContext {
-    /** The canvas body: scroll container and query root. */
-    root: HTMLElement | null;
+    /** The canvas body: scroll container and query root. Callers guarantee it. */
+    root: HTMLElement;
     /** The `[data-line]` block the action starts from, when the caller has one. */
     origin: HTMLElement | null;
+    /** `origin`'s line, resolved once by the caller rather than by each action. */
+    originLine: string | null;
   }
 
   /**
-   * Each action returns false only when it could not run at all and the caller should leave the
-   * key to the browser. A deliberate no-op (no match in that direction, an empty document) still
-   * returns true: the action ran and decided to do nothing, which is not the same as declining.
+   * One implementation per command, shared by the keyboard handler and the remote channel so the
+   * two paths cannot drift. Actions return nothing: "did anything happen" is not a question any
+   * caller asks. The one place it is asked — whether a `PageUp` should fall through to the
+   * browser when column geometry is unmeasurable — reads `pageColumn`'s own boolean directly.
    */
-  const canvasActions: Record<CanvasCommand, (ctx: CanvasActionContext) => boolean> = {
-    'block-next': ({ root, origin }) => {
-      if (!root) return false;
-      focusAdjacentBlock(root, origin?.getAttribute('data-line') ?? null, 1);
-      return true;
-    },
-    'block-prev': ({ root, origin }) => {
-      if (!root) return false;
-      focusAdjacentBlock(root, origin?.getAttribute('data-line') ?? null, -1);
-      return true;
-    },
-    'comment-next': ({ root, origin }) => {
-      if (!root) return false;
-      focusMatchingBlock(root, origin?.getAttribute('data-line') ?? null, isMarkedBlock, 1);
-      return true;
-    },
-    'comment-prev': ({ root, origin }) => {
-      if (!root) return false;
-      focusMatchingBlock(root, origin?.getAttribute('data-line') ?? null, isMarkedBlock, -1);
-      return true;
-    },
-    'heading-next': ({ root, origin }) => {
-      if (!root) return false;
-      focusMatchingBlock(root, origin?.getAttribute('data-line') ?? null, isHeadingBlock, 1);
-      return true;
-    },
-    'heading-prev': ({ root, origin }) => {
-      if (!root) return false;
-      focusMatchingBlock(root, origin?.getAttribute('data-line') ?? null, isHeadingBlock, -1);
-      return true;
-    },
-    'doc-start': ({ root }) => {
-      if (!root) return false;
-      focusEdgeBlock(root, 'start');
-      return true;
-    },
-    'doc-end': ({ root }) => {
-      if (!root) return false;
-      focusEdgeBlock(root, 'end');
-      return true;
-    },
+  const canvasActions: Record<CanvasCommand, (ctx: CanvasActionContext) => void> = {
+    'block-next': ({ root, originLine }) => focusMatchingBlock(root, originLine, anyBlock, 1),
+    'block-prev': ({ root, originLine }) => focusMatchingBlock(root, originLine, anyBlock, -1),
+    'comment-next': ({ root, originLine }) => focusMatchingBlock(root, originLine, isMarkedBlock, 1),
+    'comment-prev': ({ root, originLine }) => focusMatchingBlock(root, originLine, isMarkedBlock, -1),
+    'heading-next': ({ root, originLine }) => focusMatchingBlock(root, originLine, isHeadingBlock, 1),
+    'heading-prev': ({ root, originLine }) => focusMatchingBlock(root, originLine, isHeadingBlock, -1),
+    'doc-start': ({ root }) => focusEdgeBlock(root, 'start'),
+    'doc-end': ({ root }) => focusEdgeBlock(root, 'end'),
     // Paging is meaningful only in horizontal mode, and the mode check belongs HERE rather than
     // only in the key handler: a vertical layout can still scroll horizontally (a wide table, a
     // long code line), so a remote page would scroll the body sideways instead of no-opping.
     'column-forward': ({ root }) => {
-      if (!root) return false;
-      if (readingModeRef.current !== 'horizontal') return false;
-      return pageColumn(root, 1);
+      if (readingModeRef.current === 'horizontal') pageColumn(root, 1);
     },
     'column-back': ({ root }) => {
-      if (!root) return false;
-      if (readingModeRef.current !== 'horizontal') return false;
-      return pageColumn(root, -1);
+      if (readingModeRef.current === 'horizontal') pageColumn(root, -1);
     },
-    'composer-open': ({ origin }) => {
-      if (!origin) return false;
-      const line = Number(origin.getAttribute('data-line'));
-      if (Number.isNaN(line)) return false;
+    'composer-open': ({ originLine }) => {
+      if (originLine === null) return;
+      const line = Number(originLine);
+      if (Number.isNaN(line)) return;
       openComposer(line); // open the inline composer for this block (#1107)
-      return true;
     },
     // Composer submit/cancel are VIEW-scoped, not focus-scoped: they act on this canvas's open
     // composer wherever DOM focus happens to sit, because a remote driver never moved focus into
     // the textarea. With no composer open they are a defined no-op, exactly as the keys are.
-    'composer-submit': () => {
-      composerHandleRef.current?.submit();
-      return true;
-    },
+    'composer-submit': () => composerHandleRef.current?.submit(),
     'composer-cancel': () => {
-      if (composingLine === null) return true;
-      cancelComposer(true);
-      return true;
+      if (composingLine !== null) cancelComposer(true);
     },
-    'reading-mode-toggle': () => {
-      toggleReadingMode();
-      return true;
-    },
+    'reading-mode-toggle': () => toggleReadingMode(),
   };
+
+  /** Build a context from an origin element, resolving its line once. */
+  const actionContext = (root: HTMLElement, origin: HTMLElement | null): CanvasActionContext => ({
+    root,
+    origin,
+    originLine: origin?.getAttribute('data-line') ?? null,
+  });
 
   // Run a remote command against the current origin. Traversal commands re-resolve the origin on
   // every step, so `count: 3` walks three blocks rather than re-running from the same start.
@@ -1023,14 +975,18 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
       const times = repeatCount(command, count);
       let previous: string | null = null;
       for (let i = 0; i < times; i += 1) {
+        // Resolve the origin ONCE per step and derive the progress signature from it. Traversal
+        // moves the origin block; column paging moves the scroll offset and leaves focus alone,
+        // so both belong in the signature or a counted page would stop after one step.
+        const ctx = actionContext(root, currentBlock(root));
+        const position = `${ctx.originLine ?? ''}:${root.scrollLeft}`;
         // Stop as soon as a step changes nothing: that is the edge, and it also bounds the work
         // to what actually exists. `count` is only validated as a positive integer on the wire,
         // so without this a controller sending a huge value would pin the UI thread walking a
         // document that ran out of blocks long before.
-        const position = positionSignature(root);
         if (previous !== null && position === previous) break;
         previous = position;
-        action({ root, origin: currentBlock(root) });
+        action(ctx);
       }
     } catch (err) {
       report(err);
@@ -1065,8 +1021,11 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
     // here would re-resolve through the host row and open the composer on the wrong line.
     if (fromAffordance(e.target)) return;
     if (e.key === 'Enter' || e.key === ' ') {
-      if (canvasActions['composer-open']({ root: bodyRef.current, origin: originBlock(e.target) })) {
+      const body = bodyRef.current;
+      const origin = originBlock(e.target);
+      if (body && origin) {
         e.preventDefault();
+        canvasActions['composer-open'](actionContext(body, origin));
       }
       return;
     }
@@ -1087,10 +1046,12 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
       let pageDelta = 1;
       if (e.key === 'PageUp') pageDelta = -1;
       if (innerScrollerCanConsume(t, pageDelta, root)) return;
-      let pageAction: CanvasCommand = 'column-forward';
-      if (e.key === 'PageUp') pageAction = 'column-back';
+      // Straight to `pageColumn`, the same implementation the `column-*` actions call: its
+      // boolean is the fall-through signal, and this branch has already checked horizontal mode.
       // Unmeasurable geometry: leave the key to the browser rather than swallowing it.
-      if (!canvasActions[pageAction]({ root, origin: null })) return;
+      let dir: 1 | -1 = 1;
+      if (e.key === 'PageUp') dir = -1;
+      if (!pageColumn(root, dir)) return;
       e.preventDefault();
       return;
     }
@@ -1116,7 +1077,7 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
       e.preventDefault();
       let edgeAction: CanvasCommand = 'doc-start';
       if (e.key === 'End') edgeAction = 'doc-end';
-      canvasActions[edgeAction]({ root, origin: current });
+      canvasActions[edgeAction](actionContext(root, current));
       return;
     }
 
@@ -1129,7 +1090,7 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
       default: return;
     }
     e.preventDefault();
-    canvasActions[jumpAction]({ root, origin: current });
+    canvasActions[jumpAction](actionContext(root, current));
   };
 
   const resolveBlock = (target: EventTarget | null): { el: HTMLElement; line: number } | null => {
