@@ -1,0 +1,14 @@
+id: '1411'
+title: sdk-restricted-controller-clie
+protocol: air
+phase: implement
+plan_phases: []
+current_plan_phase: null
+gates:
+  pr:
+    status: pending
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-08-12T12:03:53.037Z'
+updated_at: '2026-08-12T12:03:53.038Z'
