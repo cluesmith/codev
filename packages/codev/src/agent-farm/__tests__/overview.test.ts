@@ -2169,6 +2169,23 @@ describe('overview', () => {
       expect(item200.prUrl).toBeUndefined();
     });
 
+    it('sorts recently closed items by closedAt descending (#1191)', async () => {
+      // Forge search APIs return relevance order, not closure order. Feed the
+      // items deliberately out of order and assert they come back most-recent-first.
+      const now = Date.now();
+      const hour = 60 * 60 * 1000;
+      mockFetchRecentlyClosed.mockResolvedValue([
+        { number: 1, title: 'Closed yesterday', url: 'https://github.com/org/repo/issues/1', labels: [], createdAt: '2026-01-01T00:00:00Z', closedAt: new Date(now - 20 * hour).toISOString() },
+        { number: 2, title: 'Closed this morning', url: 'https://github.com/org/repo/issues/2', labels: [], createdAt: '2026-01-01T00:00:00Z', closedAt: new Date(now - 1 * hour).toISOString() },
+        { number: 3, title: 'Closed midday', url: 'https://github.com/org/repo/issues/3', labels: [], createdAt: '2026-01-01T00:00:00Z', closedAt: new Date(now - 8 * hour).toISOString() },
+      ]);
+
+      const cache = new OverviewCache();
+      const data = await cache.getOverview(tmpDir);
+
+      expect(data.recentlyClosed.map(i => i.id)).toEqual(['2', '3', '1']);
+    });
+
     it('enriches recently closed items with spec/plan/review paths (Bugfix #465)', async () => {
       createSpecFile(tmpDir, 42, 'my-feature');
       createPlanFile(tmpDir, 42, 'my-feature');
