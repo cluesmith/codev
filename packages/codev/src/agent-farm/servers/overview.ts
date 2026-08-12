@@ -975,6 +975,15 @@ export class OverviewCache {
         if (reviewFile) item.reviewPath = `codev/reviews/${reviewFile}`;
         return item;
       });
+
+      // Forge search APIs return relevance ("best match") order, not closure
+      // order, so sort most-recently-closed first here: one fix for every
+      // forge, since `closedAt` is present on every item (issue #1191). Parse to
+      // epoch millis rather than compare strings: provider scripts aren't
+      // guaranteed to emit a normalized ISO form, matching the 24h-window filter.
+      recentlyClosed.sort(
+        (a, b) => new Date(b.closedAt).getTime() - new Date(a.closedAt).getTime(),
+      );
     }
 
     // `architects` defaults to `[]` here — the filesystem/git-derived overview
