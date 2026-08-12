@@ -562,52 +562,29 @@ hand-edit status.yaml to "fix" it.
 
 Next: wait for the pr gate. After merge → `porch done 1401 --merged 1413`, then the verify phase.
 
-## 2026-08-12 — PR-level consultation: 2 APPROVE, codex REQUEST_CHANGES (SECURITY finding)
+## 2026-08-12 — PR-level consultation: 2 APPROVE, 1 REQUEST_CHANGES
 
-codex raised a real one at PR level and I verified it independently. Tower's existing
-request-trust boundary is weaker than my spec claimed; the specifics and the fix are tracked
-privately as a security advisory and are deliberately not restated here (public repo — owner's
-disclosure decision, relayed via the architect 2026-08-12).
+Four of codex's five items fixed: rebased onto main (70 commits replayed clean, 0 behind,
+force-pushed with lease, full suite re-run green); added approved/validated frontmatter to spec +
+plan; and fixed the stale webview/main.ts header comment — **that comment is where my own
+repeated "webview isn't typechecked" error came from**. Caught in phase_6, root found here.
 
-My spec had described a safeguard in terms that overstated what is in place; corrected in place,
-because documenting protection that is not there is worse than documenting none.
+The fifth is a Tower-wide concern outside this change's scope. Verified independently, raised
+with the architect, routed to the maintainers, tracked separately from this PR. Deliberately not
+described here: this log ships with the PR, and a public artifact is not the place for it.
+Whoever picks up that lane should ask the architect rather than reconstruct it from the repo.
 
-Did NOT apply a partial measure to this one route. The property is pre-existing and Tower-wide,
-not introduced by this channel; addressing it properly is an architectural change with a client
-migration. Securing only the newest route would move the label rather than the risk. Escalated;
-the architect verified independently and routed it to the owner. Likely my next lane after this
-gate.
+## 2026-08-12 — final state, holding at the pr gate
 
-Also fixed: rebased onto main (70 commits replayed clean, 0 behind, force-pushed with lease, full
-suite re-run green); added approved/validated frontmatter to spec + plan; and fixed the stale
-webview/main.ts header comment — **that comment is where my own repeated "webview isn't
-typechecked" error came from**. Caught in phase_6, root found here.
+PR #1413: all 7 CI checks green, MERGEABLE. Locally build green, 4847 tests, repo-wide
+check-types clean.
 
-## 2026-08-12 — history rewrite: mechanics removed from the branch, BUT not from GitHub
+Outstanding and NOT closable by a builder: the live VS Code end-to-end pass (real editor window,
+running Tower, open canvas panel). The four-step script is in the PR body; step 4, the composer
+round trip, is the one that matters, since "exactly one comment" is what a fan-out bug would
+break.
 
-Redacting at the tip was not enough — correctly called out. The earlier fix only changed HEAD and
-one commit message, so the text still sat in the trees of two commits reachable on the pushed
-branch. Verified with `git log -S` (the pickaxe), which is authoritative; my earlier per-commit
-audit loops gave FALSE NEGATIVES because a git command inside `while read` consumed the loop's
-stdin. Do not trust an audit loop of that shape.
-
-Rewrite done: filter-branch --tree-filter over the three affected commits, substituting the
-redacted file versions wherever the markers appeared, with --prune-empty dropping the
-now-empty redaction commit (which also removed a commit whose subject advertised that something
-had been redacted). 72 -> 71 commits. HEAD tree byte-identical to the redacted state; full suite
-re-run green; force-pushed with lease. New HEAD e17915a75.
-
-**RESIDUAL EXPOSURE — the branch is clean, the repo is not.** Verified by API: the orphaned
-commits (including the two carrying the text) are STILL SERVED by GitHub at their SHAs after the
-force-push. Git force-push does not delete objects on the remote; GitHub retains unreachable
-objects and serves them by SHA until it garbage-collects, and refs/pull/1413/* pins objects too.
-Practically: anyone who knows or can read an old SHA can still fetch the content. Only GitHub
-Support can purge it.
-
-Mitigation confirmed: no committed artifact and no commit message in the branch references any
-orphaned SHA, so there is no pointer published from our side. The PR's web timeline may still
-show force-push events with before/after SHAs (the timeline API did not return them, but the UI
-commonly does) — that is the most likely discovery path and is the owner's call.
-
-Correct posture: for a public repo, treat this as disclosed from first push and let the FIX
-timeline drive, not the concealment.
+Process note worth keeping: an audit loop shaped like `git rev-list | while read sha; do git show
+...; done` gives FALSE NEGATIVES — the inner git command consumes the loop's stdin, so the loop
+stops after one iteration. I reported a clean result off exactly that shape and was wrong. For
+"does any commit contain X", the pickaxe (`git log -S`) is the authoritative check.

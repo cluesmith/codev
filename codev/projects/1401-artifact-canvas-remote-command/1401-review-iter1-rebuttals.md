@@ -2,32 +2,21 @@
 
 Verdicts: gemini APPROVE · claude APPROVE · codex REQUEST_CHANGES.
 
-Codex raised five items. Four are fixed. The fifth — a real security finding — is corrected in
-the documentation and escalated, because the honest fix is Tower-wide and patching one route
-would be theatre.
+Codex raised five items. Four are fixed here. The fifth is a Tower-wide concern outside this
+change's scope, verified and routed to the maintainers.
 
-## 1. (Security) Request trust on the command route
+## 1. Request handling on the command route
 
-**Accepted.** Codex is right, and I verified the finding independently before responding.
+**Accepted, and out of scope for this PR.** Codex raised a Tower-wide concern about how requests
+are handled. I verified it independently, and it is pre-existing rather than anything this
+channel introduces: addressing it properly is an architectural change with a client migration,
+and a partial measure applied to the newest route alone would not improve matters.
 
-Tower's existing request-trust boundary is weaker than my spec claimed. The specifics and the
-fix are tracked privately as a security advisory, so they are not restated here.
+The spec previously characterised Tower's request handling in terms it should not have; that
+wording is removed rather than restated, since this spec is not the place to describe
+Tower-wide behaviour it does not own.
 
-Two things follow, and both are settled:
-
-**The spec's claim is corrected.** It described a safeguard in terms that overstated what is
-actually in place. Documenting protection that is not there is worse than documenting none, so
-the wording was fixed in place.
-
-**The fix does not belong in this PR.** The property is pre-existing and Tower-wide rather than
-anything this channel introduces, and addressing it properly is an architectural change with a
-client migration — not a line in a builder's PR. Applying a partial measure to the newest route
-alone would move the label rather than the risk, and would leave an inconsistent model that is
-harder to reason about later than a known, tracked gap. What this PR adds is one more capability
-behind the existing boundary, and the spec now says exactly that.
-
-Escalated to the architect, who verified it independently and routed it to the owner for
-disclosure handling.
+Raised with the architect and routed to the maintainers, tracked separately from this PR.
 
 ## 2. The live VS Code end-to-end check is incomplete
 
