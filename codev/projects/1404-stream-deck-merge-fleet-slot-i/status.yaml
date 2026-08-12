@@ -1,7 +1,7 @@
 id: '1404'
 title: stream-deck-merge-fleet-slot-i
 protocol: pir
-phase: implement
+phase: review
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -19,4 +19,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-08-11T20:02:11.571Z'
-updated_at: '2026-08-12T01:05:03.791Z'
+updated_at: '2026-08-12T01:05:16.324Z'
