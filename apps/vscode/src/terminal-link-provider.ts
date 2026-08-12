@@ -106,7 +106,7 @@ export class IssueRefTerminalLinkProvider implements vscode.TerminalLinkProvider
     return links;
   }
 
-  handleTerminalLink(link: IssueRefLink): Promise<void> {
+  handleTerminalLink(link: IssueRefLink): Thenable<void> {
     return openTerminalRef(this.connectionManager, { number: link.number, isPR: link.isPR });
   }
 }

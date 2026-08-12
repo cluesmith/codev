@@ -42,3 +42,16 @@ indirection open-issue-by-id.ts already uses, no load-time coupling. Full suite 
 
 Verified from worktree: `pnpm compile` (check-types + lint) clean (1 pre-existing tunnel.ts lint warning,
 not mine); `pnpm test:unit` 806 passed (68 files). Awaiting `dev-approval` — live terminal demo.
+
+### dev-approval feedback #1 — perceived slowness (2026-08-12)
+
+Reviewer: working but ~2s with no feedback → feels like nothing happens. Root cause: (a) VSCode gives
+no click feedback on terminal links; (b) bare #N did TWO gh round-trips (discriminator getIssue + the
+reuse helper re-fetching). Fix:
+- Wrapped resolution in `withProgress` (status-bar "Opening #N…") for instant feedback.
+- Bare #N now fetches once: the discriminator getIssue's `url` is opened directly via `openExternal`
+  for the PR-fallthrough and browser-issue paths (no helper re-fetch). Editor preview still fetches once
+  to render (that fetch IS the content). Explicit PR #N unchanged (openPRInBrowser, no discriminator).
+- Tradeoff: PR can now be browser-opened by two paths (explicit vs fallthrough); still no new fetch code
+  (openExternal opens a url already fetched via the sanctioned getIssue). Flagged to reviewer.
+Green: check-types + lint clean, 807 unit tests.

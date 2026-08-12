@@ -15,18 +15,22 @@ const showErrorMessage = vi.fn();
 const showWarningMessage = vi.fn();
 const getConfiguration = vi.fn();
 const executeCommand = vi.fn();
+const openExternal = vi.fn();
+// withProgress just runs the task; the status-bar spinner is UI-only.
+const withProgress = vi.fn((_opts: unknown, task: () => unknown) => task());
 
 vi.mock('vscode', () => ({
-  window: { showErrorMessage, showWarningMessage },
+  window: { showErrorMessage, showWarningMessage, withProgress },
   workspace: { getConfiguration },
   commands: { executeCommand },
+  env: { openExternal },
+  Uri: { parse: (s: string) => ({ __parsed: s }) },
+  ProgressLocation: { Window: 10 },
 }));
 
 const openPRInBrowser = vi.fn();
-const openIssueInBrowser = vi.fn();
 
 vi.mock('../commands/open-pr-by-id.js', () => ({ openPRInBrowser }));
-vi.mock('../commands/open-issue-by-id.js', () => ({ openIssueInBrowser }));
 
 // terminal-link-provider.ts pulls in terminal-adapter.js (via RECONNECT_LINK_TEXT)
 // and terminal-manager types; stub the adapter so the module loads in isolation.
@@ -118,24 +122,32 @@ describe('PIR #1412 — openTerminalRef resolution', () => {
     getIssue.mockResolvedValue({ url: 'https://github.com/o/r/issues/915' });
     await openTerminalRef(connected as never, { number: '915', isPR: false });
     expect(executeCommand).toHaveBeenCalledWith('codev.viewBacklogIssue', '915');
-    expect(openIssueInBrowser).not.toHaveBeenCalled();
+    expect(openExternal).not.toHaveBeenCalled();
     expect(openPRInBrowser).not.toHaveBeenCalled();
   });
 
-  it('opens a genuine issue in the browser when issueTarget = browser', async () => {
+  it('opens a genuine issue in the browser via the already-resolved url when issueTarget = browser', async () => {
     withSetting('browser');
     getIssue.mockResolvedValue({ url: 'https://github.com/o/r/issues/915' });
     await openTerminalRef(connected as never, { number: '915', isPR: false });
-    expect(openIssueInBrowser).toHaveBeenCalledWith(connected, '915');
+    expect(openExternal).toHaveBeenCalledWith({ __parsed: 'https://github.com/o/r/issues/915' });
     expect(executeCommand).not.toHaveBeenCalled();
   });
 
-  it('falls through to the PR browser-open when a bare #N resolves to a PR url', async () => {
+  it('opens a browser-target issue in the editor preview when the forge supplies no url', async () => {
+    withSetting('browser');
+    getIssue.mockResolvedValue({ url: undefined });
+    await openTerminalRef(connected as never, { number: '915', isPR: false });
+    expect(executeCommand).toHaveBeenCalledWith('codev.viewBacklogIssue', '915');
+    expect(openExternal).not.toHaveBeenCalled();
+  });
+
+  it('falls through to the PR page via the resolved /pull/ url when a bare #N is actually a PR', async () => {
     getIssue.mockResolvedValue({ url: 'https://github.com/o/r/pull/1405' });
     await openTerminalRef(connected as never, { number: '1405', isPR: false });
-    expect(openPRInBrowser).toHaveBeenCalledWith(connected, '1405');
+    expect(openExternal).toHaveBeenCalledWith({ __parsed: 'https://github.com/o/r/pull/1405' });
     expect(executeCommand).not.toHaveBeenCalled();
-    expect(openIssueInBrowser).not.toHaveBeenCalled();
+    expect(openPRInBrowser).not.toHaveBeenCalled();
   });
 
   it('warns and opens nothing when the number is unresolvable', async () => {
@@ -143,7 +155,7 @@ describe('PIR #1412 — openTerminalRef resolution', () => {
     await openTerminalRef(connected as never, { number: '999999', isPR: false });
     expect(showWarningMessage).toHaveBeenCalledWith(expect.stringContaining('#999999'));
     expect(executeCommand).not.toHaveBeenCalled();
-    expect(openIssueInBrowser).not.toHaveBeenCalled();
+    expect(openExternal).not.toHaveBeenCalled();
     expect(openPRInBrowser).not.toHaveBeenCalled();
   });
 
