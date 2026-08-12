@@ -1109,7 +1109,7 @@ async function handleOverview(res: http.ServerResponse, url: URL, workspaceOverr
     // every collection field is required ('never undefined' for `architects`,
     // Issue 1104), so emit them all empty rather than a partial payload.
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ builders: [], pendingPRs: [], backlog: [], recentlyClosed: [], architects: [], heldCount: 0, mailboxEscalated: false }));
+    res.end(JSON.stringify({ builders: [], pendingPRs: [], backlog: [], recentlyClosed: [], architects: [], heldCount: 0, mailboxEscalated: false, queuedFeedback: {}, feedbackMode: 'forward' }));
     return;
   }
 

@@ -315,6 +315,26 @@ export interface OverviewData {
    * escalation never triggers delivery.
    */
   mailboxEscalated: boolean;
+  /**
+   * Issue 1410: per-builder count of pending review-comments (the queued
+   * feedback in each builder's `.codev/pending-comments.json`), keyed by
+   * `OverviewBuilder.id`. A **map, never a scalar total** — the Stream Deck
+   * badge reads its selected builder's count, and #1049's future Attention
+   * rollup consumes the same field. A builder absent from the map has none
+   * (read as 0); `{}` when nothing is queued anywhere — never `undefined`, so
+   * consumers don't branch.
+   */
+  queuedFeedback: Record<string, number>;
+  /**
+   * Issue 1410: the workspace's current review-feedback delivery mode, projected
+   * from the VSCode `codev.diffCodelensMode` setting (`forward` → `'forward'`,
+   * `comment` → `'queue'`). `'forward'` = a review chunk is sent to the builder
+   * immediately; `'queue'` = it accumulates in the pending-comments queue until
+   * flushed. Lets the deck name the live semantic on the dial touchscreen
+   * (`Files · send` vs `Files · queue`) instead of inferring it. Defaults to
+   * `'forward'` (the setting's own default) when unreadable.
+   */
+  feedbackMode: 'forward' | 'queue';
   /** Auto-detected GitHub login of the current user (via the user-identity forge concept). */
   currentUser?: string;
   errors?: { prs?: string; issues?: string };
