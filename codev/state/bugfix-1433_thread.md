@@ -37,3 +37,24 @@ restructure face.ts (pir-1410 rebases over this).
   produce); the row breaks lifecycle ordering (cosmetic); the test `it(...)` title is slightly
   overstated. All cosmetic; architect scoped this to exactly one line + one test.
 - Handed off at the `pr` gate; awaiting architect approval before merge.
+
+## Flaky Tests (CI on PR #1434, 2026-08-13)
+
+CI "Unit Tests" job failed twice with **two different pre-existing flakes**, neither related
+to the one-line `face.ts` label change (which is in `apps/streamdeck`; both flakes are in
+`packages/codev` / external CLI):
+
+1. Run 1 — `streamdeck validate` step: `TypeError: fetch failed` /
+   `SocketError: other side closed` (`UND_ERR_SOCKET`) reaching a remote host over TLS. The
+   Elgato CLI fetches validation rules over the network; a transient socket close aborted it.
+   The `build` step itself passed.
+2. Run 2 — `packages/codev/src/commands/consult/__tests__/agy-auth-cache.test.ts` >
+   "re-probes after the unauth TTL lapses" (line 325): `expected null to be 'unauth'`. The
+   test sets `CODEV_AGY_AUTH_CACHE_TTL_UNAUTH_MS=50` then does `await runLane(1)` (spawns a
+   process) before asserting the cached `unauth` verdict is still present. Under CI load
+   `runLane` exceeds 50ms, so the cache entry expires first → `null`. Classic TTL-vs-latency
+   race. 4838 passed, 1 failed.
+
+My change's own suite is green: streamdeck 108/108, `pnpm build` + `check-types` clean.
+Decision on the flaky consult test (skip/annotate vs. separate fix) left to the architect —
+outside this BUGFIX's one-line + one-test scope.
