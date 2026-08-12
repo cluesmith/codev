@@ -74,3 +74,11 @@ Retrospective at `codev/reviews/1400-stream-deck-phase-aware-review.md`. Also sw
 tier change — existing hot lessons already governed (single-source resolver reuse; rename sweep);
 arch.md's streamdeck entry stays accurate (sendCanvasCommand is on the controller subpath it names).
 PR #1419 opened (Fixes #1400), recorded with porch. Running the single 3-way consult via porch done.
+
+**Consult iter1 verdicts:** Gemini APPROVE, Claude APPROVE, **Codex REQUEST_CHANGES** (HIGH).
+One substantive finding (Codex + Claude both caught it): `none` mode fell through to diff verbs,
+but plan §2 says no-op. **Accepted + fixed** (commit a7a7e81d4): explicit `mode === 'diff'` branch,
+`none` → no-op, +2 regression tests (unknown-phase builder, no-builder) → 84 tests. Rebuttal at
+`codev/projects/1400-*/1400-review-iter1-rebuttals.md`; disposition also in review "Things to Look At".
+PIR is single-pass so this fix is NOT re-reviewed by models — human pr-gate is the backstop.
+pr gate now pending. Notifying architect leading with the REQUEST_CHANGES + disposition.
