@@ -115,14 +115,25 @@ interface DiffContext {
  * within it (steps 1-3 shared by every navigation gesture). Flashes and returns
  * undefined when there's nothing to navigate.
  */
-async function resolveDiffContext(deps: NavDeps): Promise<DiffContext | undefined> {
-  // 1. Resolve the current builder + file from the active editor, falling back
-  //    to the last navigated position.
-  const activeFsPath = vscode.window.activeTextEditor?.document.uri.fsPath;
-  const entry = activeFsPath ? getDiffInjectEntry(activeFsPath) : undefined;
-  const current = entry
-    ? { builderId: entry.builderId, relPath: entry.relPath }
-    : lastPosition;
+async function resolveDiffContext(
+  deps: NavDeps,
+  seed?: { builderId: string; relPath?: string },
+): Promise<DiffContext | undefined> {
+  // 1. Resolve the current builder + file. An explicit `seed` (a builder-id-scoped
+  //    open, e.g. the SD+ Automatic diff press via `navigateBuilderDiffToFirst`)
+  //    replaces ONLY this editor resolution; otherwise read the active editor's
+  //    diff-inject entry, falling back to the last navigated position. Steps 2-3
+  //    (worktree + file-list resolution, and their flashes) run either way.
+  let current: { builderId: string; relPath?: string } | undefined;
+  if (seed) {
+    current = seed;
+  } else {
+    const activeFsPath = vscode.window.activeTextEditor?.document.uri.fsPath;
+    const entry = activeFsPath ? getDiffInjectEntry(activeFsPath) : undefined;
+    current = entry
+      ? { builderId: entry.builderId, relPath: entry.relPath }
+      : lastPosition;
+  }
   if (!current) {
     flash('open a builder file diff first');
     return undefined;
@@ -187,6 +198,31 @@ export async function navigateDiff(direction: 1 | -1, deps: NavDeps): Promise<vo
  */
 export async function navigateDiffToFirst(deps: NavDeps): Promise<void> {
   const ctx = await resolveDiffContext(deps);
+  if (!ctx) { return; }
+  await openDiffAt(deps, ctx, 0);
+}
+
+/**
+ * Open the FIRST changed file of an EXPLICITLY NAMED builder in per-file diff mode
+ * and seed dial navigation there — the SD+ Automatic diff press, relayed as the
+ * `open-diff-first` verb (#1414). Unlike `navigateDiffToFirst`, this doesn't depend
+ * on a builder file diff already being open: the builder id comes from the caller,
+ * so it resolves cold (where the aggregate `view-diff` open left the dials unseeded).
+ *
+ * Every failure mode ends in a status-bar flash — a defined, user-visible outcome,
+ * never a silent no-op or a throw: a missing id here, and a builder with no worktree
+ * / no changed files inside `resolveDiffContext`. `openDiffAt` records the nav
+ * position, so the Files/Changes dials step forward from file 1.
+ */
+export async function navigateBuilderDiffToFirst(
+  builderId: string | undefined,
+  deps: NavDeps,
+): Promise<void> {
+  if (!builderId) {
+    flash('no builder to open a diff for');
+    return;
+  }
+  const ctx = await resolveDiffContext(deps, { builderId });
   if (!ctx) { return; }
   await openDiffAt(deps, ctx, 0);
 }
