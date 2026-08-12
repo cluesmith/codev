@@ -26,4 +26,6 @@ Cautions: do NOT touch .builders/pir-1428 (live deck symlink) or sibling worktre
 - Approve: `apps/vscode/src/commands/approve.ts` (`approve-gate [builderId]` → confirmation modal; selected-scoped is just a different id arg).
 
 ## Status
-- 2026-08-13: Plan phase, first run. Investigated codebase. Writing plan.
+- 2026-08-13: Plan phase, first run. Investigated codebase. Wrote plan (commit 4c0f07dda), plan-approval gate pending.
+- 2026-08-13: Amr resolved req-6 — RETIRE the generic ApproveGate singleton; Row 2 [Approve] = single selected-scoped affordance, jump-to-next + gate-count badge fold into Row 2 [Next/attention].
+- 2026-08-13: Amr asked how >4 builders are navigated + how deck syncs a workspace. Found a real gap: #1404's Row 1 keys are FIXED absolute slots (slotBuilder → builders()[slot-1]), so only builders 1-4 show. Added Row 1 windowing to plan: 4-wide window derived from cursor (page = floor(cursor.builder/4)), Select dial (ZoomNav rotate) scrolls it, selected-slot highlight. Workspace sync is already built (bidirectional): VSCode deep-link → store.syncToWorkspace/Builder; deck Select-dial zoom-in → focus-workspace verb → vscode.openFolder brings window to front. Plan revised (commit 8332eac6c), still at plan-approval gate.
