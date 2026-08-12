@@ -2373,23 +2373,63 @@ function handleDashboard(res: http.ServerResponse, ctx: RouteContext): void {
 
   try {
     const template = fs.readFileSync(ctx.templatePath, 'utf-8');
-    // Same-origin key injection (advisory GHSA-xvjp-7748-v88v Layer 4): write the
-    // shared local key into the page Tower serves so it can authenticate its own
-    // API calls, without embedding a readable secret in the shipped template.
-    // This is safe because only same-origin/allowlisted JS can read this response
-    // body — CORS blocks a cross-origin page from reading `GET /` — so the key is
-    // never exposed to arbitrary web content. The key is hex, so JSON.stringify
-    // yields a safe `<script>`-embeddable literal.
-    const key = getExpectedKey();
-    const injection = key
-      ? `<script>window.__CODEV_WEB_KEY__ = ${JSON.stringify(key)};</script>`
-      : '';
-    const html = template.replace('<!-- CODEV_WEB_KEY_INJECTION -->', injection);
-    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-    res.end(html);
+    sendKeyInjectedHtml(res, template);
   } catch (err) {
     res.writeHead(500, { 'Content-Type': 'text/plain' });
     res.end('Error loading template: ' + (err as Error).message);
+  }
+}
+
+/**
+ * Same-origin key injection (advisory GHSA-xvjp-7748-v88v Layer 4). Writes the
+ * shared local key into an HTML shell Tower serves (tower.html or the React SPA
+ * index.html) so the page can authenticate its own API/WebSocket calls, without
+ * embedding a readable secret in the shipped template. The key is hex, so
+ * JSON.stringify yields a safe `<script>`-embeddable literal.
+ *
+ * tower.html carries an explicit placeholder; the built SPA index.html does not,
+ * so the script is inserted before `</head>` there — ahead of the deferred SPA
+ * module, so `window.__CODEV_WEB_KEY__` is set before the app's first request.
+ */
+function injectWebKey(html: string): string {
+  const key = getExpectedKey();
+  const injection = key
+    ? `<script>window.__CODEV_WEB_KEY__ = ${JSON.stringify(key)};</script>`
+    : '';
+  if (html.includes('<!-- CODEV_WEB_KEY_INJECTION -->')) {
+    return html.replace('<!-- CODEV_WEB_KEY_INJECTION -->', injection);
+  }
+  if (injection && html.includes('</head>')) {
+    return html.replace('</head>', `${injection}</head>`);
+  }
+  return html;
+}
+
+/**
+ * Send a key-injected HTML shell. Strips the CORS `Access-Control-Allow-Origin`
+ * header set by the front door: this response body carries the key, and the
+ * shell is only ever loaded by a same-origin navigation, so it must never be
+ * readable by a cross-origin `fetch` (advisory GHSA-xvjp-7748-v88v). Same-origin
+ * reads are unaffected; the key check still guards the actual API routes.
+ */
+function sendKeyInjectedHtml(res: http.ServerResponse, template: string): void {
+  res.removeHeader('Access-Control-Allow-Origin');
+  res.removeHeader('Vary');
+  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+  res.end(injectWebKey(template));
+}
+
+/**
+ * Serve the React dashboard's index.html with the key injected (SPA shell + SPA
+ * client-side-routing fallback). Returns false if the file cannot be read.
+ */
+function serveDashboardIndex(dashboardPath: string, res: http.ServerResponse): boolean {
+  try {
+    const html = fs.readFileSync(path.join(dashboardPath, 'index.html'), 'utf-8');
+    sendKeyInjectedHtml(res, html);
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -2465,23 +2505,24 @@ async function handleWorkspaceRoutes(
   // 3. React dashboard is available
   // 4. Workspace doesn't need to be running for static files
   if (!isApiCall && !isWsPath && ctx.hasReactDashboard) {
-    // Determine which static file to serve
-    let staticPath: string;
-    if (!subPath || subPath === '' || subPath === 'index.html') {
-      staticPath = path.join(ctx.reactDashboardPath, 'index.html');
+    // The SPA shell (index.html) is served with the shared key injected same-origin
+    // (advisory GHSA-xvjp-7748-v88v) so a direct navigation to a workspace URL can
+    // authenticate without first visiting the Tower root. Other static assets
+    // (JS/CSS/images) carry no secret and stream as-is.
+    const isIndex = !subPath || subPath === '' || subPath === 'index.html';
+    if (isIndex) {
+      if (serveDashboardIndex(ctx.reactDashboardPath, res)) {
+        return;
+      }
     } else {
-      // Check if it's a static asset
-      staticPath = path.join(ctx.reactDashboardPath, subPath);
+      const staticPath = path.join(ctx.reactDashboardPath, subPath);
+      if (serveStaticFile(staticPath, res)) {
+        return;
+      }
     }
 
-    // Try to serve the static file
-    if (serveStaticFile(staticPath, res)) {
-      return;
-    }
-
-    // SPA fallback: serve index.html for client-side routing
-    const indexPath = path.join(ctx.reactDashboardPath, 'index.html');
-    if (serveStaticFile(indexPath, res)) {
+    // SPA fallback: serve the (key-injected) index.html for client-side routing.
+    if (serveDashboardIndex(ctx.reactDashboardPath, res)) {
       return;
     }
   }
@@ -3570,7 +3611,7 @@ function handleWorkspaceAnnotate(
         } else if (isPdf) {
           initScript = `initPdf(${fileSize});`;
         } else {
-          initScript = `fetch('file').then(r=>r.text()).then(init);`;
+          initScript = `fetch('file',{headers:authHeaders()}).then(r=>r.text()).then(init);`;
         }
         html = html.replace('// FILE_CONTENT will be injected by the server', initScript);
       }
@@ -3582,8 +3623,10 @@ function handleWorkspaceAnnotate(
         html = html.replace('</body>', `${scrollScript}</body>`);
       }
 
-      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-      res.end(html);
+      // Same-origin key injection so the annotator's fetches can authenticate
+      // (advisory GHSA-xvjp-7748-v88v). The shell is public (iframe navigation);
+      // its data/media sub-routes stay keyed.
+      sendKeyInjectedHtml(res, html);
     } catch (err) {
       res.writeHead(500, { 'Content-Type': 'text/plain' });
       res.end(`Failed to serve annotator: ${(err as Error).message}`);

@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, chmodSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { AGENT_FARM_DIR } from './constants.js';
@@ -33,5 +33,14 @@ export function ensureLocalKey(): string {
     return key;
   }
 
+  // Repair permissions on an existing key file: `mode` on writeFileSync only
+  // applies at creation, so a key written before this hardening (or by another
+  // tool) may be world-readable. Tighten it to 0600 on read (best effort;
+  // chmod is a no-op on platforms that don't support POSIX modes).
+  try {
+    chmodSync(LOCAL_KEY_PATH, 0o600);
+  } catch {
+    /* best effort — platform may not support chmod */
+  }
   return readFileSync(LOCAL_KEY_PATH, 'utf-8').trim();
 }

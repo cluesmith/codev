@@ -150,6 +150,18 @@ export function isPublicRoute(method: string, pathname: string): boolean {
   const workspaceMatch = pathname.match(/^\/workspace\/[^/]+\/(.*)$/);
   if (workspaceMatch) {
     const subPath = workspaceMatch[1];
+
+    // Annotator: its HTML shell and vendor libraries are loaded by iframe
+    // navigation and <script>/<link> tags that cannot carry the key header, so
+    // they are public (no secret; the shell gets the key injected same-origin).
+    // Every data/media sub-route (file, save, api/mtime, api/image, ...) stays
+    // keyed — the shell fetches them with the key.
+    const annotate = subPath.match(/^api\/annotate\/[^/]+(?:\/(.*))?$/);
+    if (annotate) {
+      const annotateSub = annotate[1] || '';
+      return annotateSub === '' || annotateSub.startsWith('vendor/');
+    }
+
     if (subPath.startsWith('api/') || subPath === 'api') return false;
     if (subPath.startsWith('ws/') || subPath === 'ws') return false;
     if (subPath === 'file') return false;
@@ -181,6 +193,50 @@ export function isAllowedOrigin(origin: string): boolean {
   return false;
 }
 
+/** Extract the hostname (no port) from a `Host` header value. */
+function hostnameOf(hostHeader: string): string {
+  const h = hostHeader.trim();
+  if (h.startsWith('[')) {
+    // IPv6 literal: [::1] or [::1]:port
+    const end = h.indexOf(']');
+    return end >= 0 ? h.slice(1, end) : h;
+  }
+  const colon = h.lastIndexOf(':');
+  if (colon >= 0 && /^\d+$/.test(h.slice(colon + 1))) {
+    return h.slice(0, colon);
+  }
+  return h;
+}
+
+/**
+ * Host allowlist (advisory GHSA-xvjp-7748-v88v). Restores the DNS-rebinding
+ * guard the original request check had: a browser induced (via DNS rebinding) to
+ * treat Tower's address as an attacker origin would still send the attacker's
+ * hostname in the `Host` header, so Tower rejects it before serving the
+ * key-bearing shell. Allowed: loopback hostnames, the configured BRIDGE bind
+ * host, and the hostnames of any `CODEV_TOWER_ALLOWED_ORIGINS` (the same var the
+ * CORS allowlist uses, so a tunnel/proxy deployment configures both at once).
+ */
+export function isAllowedHost(hostHeader: string | undefined): boolean {
+  if (!hostHeader) return false;
+  const hostname = hostnameOf(hostHeader).toLowerCase();
+
+  if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') return true;
+
+  const bridgeHost = process.env.BRIDGE_TOWER_HOST;
+  if (bridgeHost && hostname === bridgeHost.trim().toLowerCase()) return true;
+
+  const configured = process.env.CODEV_TOWER_ALLOWED_ORIGINS;
+  if (configured) {
+    for (const origin of configured.split(',')) {
+      try {
+        if (new URL(origin.trim()).hostname.toLowerCase() === hostname) return true;
+      } catch { /* ignore malformed entry */ }
+    }
+  }
+  return false;
+}
+
 /** Read the key a client presented on an HTTP request, or null if absent. */
 function presentedHttpKey(req: http.IncomingMessage): string | null {
   const raw = req.headers[WEB_KEY_HEADER];
@@ -200,6 +256,10 @@ function presentedHttpKey(req: http.IncomingMessage): string | null {
  * @returns true if the request is authorized
  */
 export function isRequestAllowed(req: http.IncomingMessage): boolean {
+  // Host guard runs first (even for public routes) — the key is injected into the
+  // public dashboard shell, so a rebound Host must not reach it.
+  if (!isAllowedHost(req.headers.host)) return false;
+
   const method = req.method || 'GET';
   let pathname = '/';
   try {
@@ -248,6 +308,8 @@ function presentedWsKey(req: http.IncomingMessage): string | null {
  * @returns true if the upgrade is authorized
  */
 export function isWebSocketAllowed(req: http.IncomingMessage): boolean {
+  if (!isAllowedHost(req.headers.host)) return false;
+
   const expected = getExpectedKey();
   if (!expected) return false;
 
