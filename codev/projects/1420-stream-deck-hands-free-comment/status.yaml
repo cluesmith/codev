@@ -1,7 +1,7 @@
 id: '1420'
 title: stream-deck-hands-free-comment
 protocol: pir
-phase: implement
+phase: review
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -19,4 +19,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-08-12T08:46:00.888Z'
-updated_at: '2026-08-12T09:50:03.471Z'
+updated_at: '2026-08-12T09:50:13.066Z'
