@@ -230,6 +230,7 @@ export function setupUpgradeHandler(
     // the handshake, before any session lookup or PTY attach, for every WS route.
     // Independent of the Origin header so a missing Origin cannot bypass auth.
     if (!isWebSocketAllowed(req)) {
+      logTerminal('WARN', `WS upgrade 401 ${reqUrl.pathname} — disallowed Host or missing/invalid key`);
       rejectUnauthorized(req, socket, head, wss);
       return;
     }

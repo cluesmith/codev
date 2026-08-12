@@ -146,10 +146,12 @@ export function isPublicRoute(method: string, pathname: string): boolean {
   if (pathname === '/api/version') return true;
   if (pathname === '/' || pathname === '/index.html') return true;
 
-  // React SPA served under /workspace/<encoded>/... — static assets only.
-  const workspaceMatch = pathname.match(/^\/workspace\/[^/]+\/(.*)$/);
+  // React SPA served under /workspace/<encoded>/... — static assets only. The
+  // trailing subpath is optional: bare /workspace/<enc> serves the SPA shell,
+  // same as /workspace/<enc>/ (handleWorkspaceRoutes treats them identically).
+  const workspaceMatch = pathname.match(/^\/workspace\/[^/]+(?:\/(.*))?$/);
   if (workspaceMatch) {
-    const subPath = workspaceMatch[1];
+    const subPath = workspaceMatch[1] || '';
 
     // Annotator: its HTML shell and vendor libraries are loaded by iframe
     // navigation and <script>/<link> tags that cannot carry the key header, so
@@ -197,9 +199,14 @@ export function isAllowedOrigin(origin: string): boolean {
 function hostnameOf(hostHeader: string): string {
   const h = hostHeader.trim();
   if (h.startsWith('[')) {
-    // IPv6 literal: [::1] or [::1]:port
+    // IPv6 literal: [::1] or [::1]:port. The remainder after ] must be empty or
+    // a :port — otherwise the value is malformed and returned whole (matching
+    // nothing on the allowlist) rather than trusting its leading literal.
     const end = h.indexOf(']');
-    return end >= 0 ? h.slice(1, end) : h;
+    if (end < 0) return h;
+    const rest = h.slice(end + 1);
+    if (rest === '' || /^:\d+$/.test(rest)) return h.slice(1, end);
+    return h;
   }
   const colon = h.lastIndexOf(':');
   if (colon >= 0 && /^\d+$/.test(h.slice(colon + 1))) {
@@ -209,22 +216,25 @@ function hostnameOf(hostHeader: string): string {
 }
 
 /**
- * Host allowlist (advisory GHSA-xvjp-7748-v88v). Restores the DNS-rebinding
- * guard the original request check had: a browser induced (via DNS rebinding) to
- * treat Tower's address as an attacker origin would still send the attacker's
- * hostname in the `Host` header, so Tower rejects it before serving the
- * key-bearing shell. Allowed: loopback hostnames, the configured BRIDGE bind
- * host, and the hostnames of any `CODEV_TOWER_ALLOWED_ORIGINS` (the same var the
- * CORS allowlist uses, so a tunnel/proxy deployment configures both at once).
+ * Host allowlist (advisory GHSA-xvjp-7748-v88v). A DNS-rebinding guard for the
+ * default localhost bind: the key is injected into the (public) dashboard shell,
+ * so a browser rebound to Tower's address would carry the attacker's hostname in
+ * `Host` and be rejected before the shell is served. Allowed: loopback
+ * hostnames and the hostnames of any `CODEV_TOWER_ALLOWED_ORIGINS` (the same var
+ * the CORS allowlist uses, so a tunnel/proxy deployment configures both).
+ *
+ * In BRIDGE_MODE the operator has deliberately exposed Tower on the network at a
+ * LAN IP / tunnel host Tower cannot enumerate, so the Host allowlist is relaxed;
+ * the shared key (mandatory under bridge mode) and TLS remain the controls. This
+ * relaxation never touches the key check — keyed routes still require the key.
  */
 export function isAllowedHost(hostHeader: string | undefined): boolean {
+  if (process.env.BRIDGE_MODE === '1') return true;
+
   if (!hostHeader) return false;
   const hostname = hostnameOf(hostHeader).toLowerCase();
 
   if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') return true;
-
-  const bridgeHost = process.env.BRIDGE_TOWER_HOST;
-  if (bridgeHost && hostname === bridgeHost.trim().toLowerCase()) return true;
 
   const configured = process.env.CODEV_TOWER_ALLOWED_ORIGINS;
   if (configured) {

@@ -32,7 +32,7 @@ import { getBuilders, setArchitectByName } from '../state.js';
 import { DEFAULT_COLS, defaultSessionOptions } from '../../terminal/index.js';
 import type { SSEClient, WorkspaceTerminals } from './tower-types.js';
 import type { TerminalManager } from '../../terminal/pty-manager.js';
-import { parseJsonBody, isRequestAllowed, isAllowedOrigin, getExpectedKey } from '../utils/server-utils.js';
+import { parseJsonBody, isRequestAllowed, isAllowedOrigin, isAllowedHost, getExpectedKey } from '../utils/server-utils.js';
 import { WEB_KEY_HEADER } from '@cluesmith/codev-types';
 import {
   isRateLimited,
@@ -254,6 +254,12 @@ export async function handleRequest(
   // is the single HTTP choke point every route passes through. CORS above is
   // defense-in-depth only — a no-preflight "simple" request still lands here.
   if (!isRequestAllowed(req)) {
+    // Log the reason so a broken legitimate client (disallowed Host vs missing
+    // key) is diagnosable — a bare 401 is indistinguishable from either side.
+    const reason = isAllowedHost(req.headers.host)
+      ? 'missing or invalid key'
+      : `disallowed Host "${req.headers.host ?? ''}"`;
+    ctx.log('WARN', `401 ${req.method ?? 'GET'} ${req.url ?? '/'} — ${reason}`);
     res.writeHead(401, { 'Content-Type': 'text/plain' });
     res.end('Unauthorized');
     return;
@@ -2393,7 +2399,11 @@ function handleDashboard(res: http.ServerResponse, ctx: RouteContext): void {
  */
 function injectWebKey(html: string): string {
   const key = getExpectedKey();
-  const injection = key
+  // Only embed a well-formed hex key. `ensureLocalKey` always produces 64 hex
+  // chars; validating before embedding means a hand-edited or third-party-written
+  // key file containing e.g. `</script>` can never become stored XSS in a shell.
+  // A malformed key yields no injection (clients then fail closed with 401).
+  const injection = key && /^[0-9a-f]{64}$/.test(key)
     ? `<script>window.__CODEV_WEB_KEY__ = ${JSON.stringify(key)};</script>`
     : '';
   if (html.includes('<!-- CODEV_WEB_KEY_INJECTION -->')) {
