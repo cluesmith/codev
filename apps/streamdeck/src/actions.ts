@@ -9,7 +9,11 @@ import {
   type WillDisappearEvent,
   type DidReceiveSettingsEvent,
 } from '@elgato/streamdeck';
-import type { OverviewBuilder } from '@cluesmith/codev-sdk/controller';
+import type {
+  OverviewBuilder,
+  CanvasCommand,
+  CanvasCommandClientErrorCode,
+} from '@cluesmith/codev-sdk/controller';
 import type { CodevStore } from './store.js';
 
 /**
@@ -237,6 +241,24 @@ export function phaseArtifactVerb(b: OverviewBuilder): string | undefined {
  */
 export function zoomInVerb(b: OverviewBuilder): string {
   return phaseArtifactVerb(b) ?? 'view-diff';
+}
+
+/** Which artifact form the selected builder's phase implies for the review dials. */
+export type ReviewMode = 'diff' | 'canvas' | 'none';
+
+/**
+ * The review mode for a builder: a builder still writing its spec/plan reviews as a
+ * canvas (`open-spec` / `open-plan`), one with a diff reviews as a diff (`view-diff`),
+ * and an unknown/no-status builder has neither. Derived from the shared phase/gate
+ * resolver so the wire source stays single (`blockedGate` beats `protocolPhase`; never
+ * guessed) — this is the same resolver family #1404's press keys off.
+ */
+export function reviewMode(b: OverviewBuilder | undefined): ReviewMode {
+  if (!b) return 'none';
+  const verb = phaseArtifactVerb(b);
+  if (verb === 'open-spec' || verb === 'open-plan') return 'canvas';
+  if (verb === 'view-diff') return 'diff';
+  return 'none';
 }
 
 /**
@@ -467,19 +489,65 @@ export class SpawnNav extends SingletonAction {
   }
 }
 
+/** Diff-mode gesture spec: canonical verbs fired over the generic command relay. */
+interface DiffSpec {
+  /** Line-1 label in diff mode (Files / Changes). */
+  label: string;
+  next: string;
+  prev: string;
+  /** Tap: jump to the first file / hunk. */
+  first: string;
+  /** Press: forward this axis (file / hunk) to the builder. */
+  forward: string;
+}
+
 /**
- * A dial for a diff-review axis (files or hunks): rotate navigates, the dial press
- * forwards that axis to the builder, and a touch-strip tap jumps to the first.
- * VSCode owns the actual file/hunk position, so the screen shows what the dial does
- * (line 1) and which builder is under review (line 2 + progress bar) — not a counter.
+ * Canvas-mode gesture spec: canvas commands driven over `sendCanvasCommand` (#1401).
+ * Press is always `composer-open` (feedback at the focused block), so it is shared
+ * across dials rather than a field here.
  */
-abstract class DiffNav extends SingletonAction {
-  protected abstract readonly verbs: { next: string; prev: string; first: string };
-  /** Line-1 label: what this dial does (Files / Changes). */
-  protected abstract readonly label: string;
-  /** Verb fired by a dial press: forward this axis (file / hunk) to the builder. */
-  protected abstract readonly forwardVerb: string;
+interface CanvasSpec {
+  /** Line-1 label in canvas mode (Headings / Blocks). */
+  label: string;
+  next: CanvasCommand;
+  prev: CanvasCommand;
+  /** Tap. */
+  jump: CanvasCommand;
+}
+
+/** Touchstrip line for a failed canvas command, per client error code (plan §4). */
+function canvasErrorLine(code: CanvasCommandClientErrorCode): string {
+  if (code === 'no-canvas') return 'Open artifact';
+  if (code === 'unreachable') return 'Tower offline';
+  return 'Error'; // invalid-request: defensive — we only ever send valid commands
+}
+
+/**
+ * A phase-aware review dial. The selected builder's phase picks the MODE:
+ *
+ *   - diff mode (implement / review, or blocked at dev-approval / pr): rotate walks
+ *     the diff axis (files / hunks), press forwards that axis to the builder, tap
+ *     jumps to the first — over the generic command relay.
+ *   - canvas mode (specify / plan, or blocked at spec-approval / plan-approval): rotate
+ *     steps the artifact-canvas (headings / blocks), press opens the composer at the
+ *     focused block, tap resets (doc start) or walks comments — over `sendCanvasCommand`.
+ *
+ * The dials drive the workspace's most-recently-active canvas (MRU targeting): the
+ * phase picks the mode, the dials drive what you are looking at, and #1404's press
+ * converges the MRU onto the selected builder's own artifact.
+ *
+ * Legibility is a hard requirement: the touchstrip always names the live semantic
+ * (Files/Changes vs Headings/Blocks), recomputed on every overview tick, so a gesture
+ * is never a surprise. A failed canvas command renders its reason on the strip until
+ * the next tick. VSCode owns the actual position, so the screen shows what the dial
+ * does (line 1) and which builder is under review (line 2 + progress bar) — not a counter.
+ */
+abstract class ReviewNav extends SingletonAction {
+  protected abstract readonly diff: DiffSpec;
+  protected abstract readonly canvas: CanvasSpec;
   private current?: DialAction;
+  /** Transient canvas-error line; shown until the next overview tick clears it. */
+  private status?: string;
 
   constructor(protected readonly store: CodevStore) {
     super();
@@ -494,42 +562,107 @@ abstract class DiffNav extends SingletonAction {
   override onWillDisappear(): void {
     this.current = undefined;
   }
+
+  private mode(): ReviewMode {
+    return reviewMode(this.store.selectedBuilder());
+  }
+
+  /** onChange re-render: a fresh overview clears the transient canvas-error line. */
   private render(): void {
+    this.status = undefined;
     if (this.current) this.renderTo(this.current);
   }
-  /** Line 1 = what the dial does; line 2 = builder under review (id + title); bar = its progress. */
+
+  /** Line 1 = the live semantic (mode-dependent); line 2 = builder under review
+   *  (id + title); bar = its progress. A pending canvas error takes line 2 for one cycle. */
   private renderTo(action: DialAction): void {
+    const label = this.mode() === 'canvas' ? this.canvas.label : this.diff.label;
     const b = this.store.selectedBuilder();
     const id = b ? (b.issueId ? `#${b.issueId}` : b.id) : '';
     const details = b ? (b.issueTitle ? `${id} ${b.issueTitle}` : id) : 'No builder';
-    void action.setFeedback({ title: this.label, value: details, bar: Math.round(b?.progress ?? 0) });
+    void action.setFeedback({ title: label, value: this.status ?? details, bar: Math.round(b?.progress ?? 0) });
   }
+
   override async onDialRotate(ev: DialRotateEvent): Promise<void> {
-    const verb = dir(ev) >= 0 ? this.verbs.next : this.verbs.prev;
+    const forward = dir(ev) >= 0;
+    if (this.mode() === 'canvas') {
+      // One call per rotate event: count = |ticks|, never a burst of single-tick sends.
+      const command = forward ? this.canvas.next : this.canvas.prev;
+      await this.runCanvas(command, Math.abs(ev.payload.ticks) || 1);
+      return;
+    }
+    const verb = forward ? this.diff.next : this.diff.prev;
     await this.store.client.sendCommand(verb, [], this.store.selectedWorkspacePath());
   }
+
   override async onDialDown(): Promise<void> {
-    // Press forwards this axis to the builder (was the touch strip).
-    await this.store.client.sendCommand(this.forwardVerb, [], this.store.selectedWorkspacePath());
+    if (this.mode() === 'canvas') {
+      await this.runCanvas('composer-open');
+      return;
+    }
+    await this.store.client.sendCommand(this.diff.forward, [], this.store.selectedWorkspacePath());
   }
+
   override async onTouchTap(): Promise<void> {
-    // Touch jumps to the first file/change (was the dial press).
-    await this.store.client.sendCommand(this.verbs.first, [], this.store.selectedWorkspacePath());
+    if (this.mode() === 'canvas') {
+      await this.runCanvas(this.canvas.jump);
+      return;
+    }
+    await this.store.client.sendCommand(this.diff.first, [], this.store.selectedWorkspacePath());
+  }
+
+  /** Send one canvas command to the workspace's MRU view and render its verdict. `count`
+   *  is passed only for rotate (a traversal command); press / tap omit it. */
+  private async runCanvas(command: CanvasCommand, count?: number): Promise<void> {
+    const workspace = this.store.selectedWorkspacePath();
+    if (!workspace) return; // no active workspace to target
+    const res = await this.store.client.sendCanvasCommand(
+      command,
+      { workspace },
+      count !== undefined ? { count } : undefined,
+    );
+    this.status = res.ok ? undefined : canvasErrorLine(res.code);
+    if (this.current) this.renderTo(this.current);
   }
 }
 
-export class DiffFileNav extends DiffNav {
+export class DiffFileNav extends ReviewNav {
   override readonly manifestId = 'com.cluesmith.codev.diff-file-nav';
-  protected readonly label = 'Files';
-  protected readonly forwardVerb = 'forward-file';
-  protected readonly verbs = { next: 'diff-next-file', prev: 'diff-prev-file', first: 'diff-first-file' };
+  protected readonly diff: DiffSpec = {
+    label: 'Files',
+    next: 'diff-next-file',
+    prev: 'diff-prev-file',
+    first: 'diff-first-file',
+    forward: 'forward-file',
+  };
+  // Coarse dial in canvas mode: step headings; tap resets to the document start
+  // (role-consistent with diff-mode jump-to-first-file).
+  protected readonly canvas: CanvasSpec = {
+    label: 'Headings',
+    next: 'heading-next',
+    prev: 'heading-prev',
+    jump: 'doc-start',
+  };
 }
 
-export class DiffHunkNav extends DiffNav {
+export class DiffHunkNav extends ReviewNav {
   override readonly manifestId = 'com.cluesmith.codev.diff-hunk-nav';
-  protected readonly label = 'Changes';
-  protected readonly forwardVerb = 'forward-hunk';
-  protected readonly verbs = { next: 'diff-next-hunk', prev: 'diff-prev-hunk', first: 'diff-first-hunk' };
+  protected readonly diff: DiffSpec = {
+    label: 'Changes',
+    next: 'diff-next-hunk',
+    prev: 'diff-prev-hunk',
+    first: 'diff-first-hunk',
+    forward: 'forward-hunk',
+  };
+  // Fine dial in canvas mode: step blocks; tap walks forward through commented blocks
+  // (the "next place needing attention" capability). Keyboard parity means no wrap, so
+  // it stops at the last comment.
+  protected readonly canvas: CanvasSpec = {
+    label: 'Blocks',
+    next: 'block-next',
+    prev: 'block-prev',
+    jump: 'comment-next',
+  };
 }
 
 /** Lines scrolled per dial tick (viewport only — the caret stays put). */
