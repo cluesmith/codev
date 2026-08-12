@@ -25,3 +25,15 @@ restructure face.ts (pir-1410 rebases over this).
 - Full suite: 108/108 pass. `check-types` clean, `build` clean.
 - Note: a fresh worktree needs `pnpm build` in `packages/sdk` first, else `tsc`/esbuild can't
   resolve `@cluesmith/codev-sdk/controller` (pre-existing worktree ordering, unrelated to fix).
+
+## PR (2026-08-13)
+
+- PR #1434 opened (`Fixes #1433`).
+- CMAP 3-way review: **gemini=APPROVE, codex=APPROVE, claude=APPROVE** (all HIGH).
+- Note: consult auto-detect couldn't disambiguate the project; had to pass
+  `--project-id bugfix-1433` explicitly.
+- Claude's non-blocking notes (surfaced to architect, no code change per scope directive):
+  a 5-word comment could explain why `pr` needs an explicit row (acronym the fallback can't
+  produce); the row breaks lifecycle ordering (cosmetic); the test `it(...)` title is slightly
+  overstated. All cosmetic; architect scoped this to exactly one line + one test.
+- Handed off at the `pr` gate; awaiting architect approval before merge.
