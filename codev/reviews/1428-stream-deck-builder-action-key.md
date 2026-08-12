@@ -26,6 +26,18 @@ settled decision so it isn't re-litigated or re-proposed as a consolidation foll
 
 ## Lessons (seed)
 
+- **Stream Deck `setImage`: the SDK's "SVG string" claim does not survive contact with the device.**
+  `@elgato/streamdeck@2.1.0`'s `key.d.ts` documents that `setImage` accepts *"an SVG string"*, and
+  the SDK forwards it verbatim (`key.js:51-59`). On real hardware (Stream Deck 6.9) a raw `<svg>`
+  string is **silently dropped** — the key reverts to its manifest PNG with no error. Two things are
+  required and neither is in the type doc: (1) encode as a base64 **`data:image/svg+xml`** data URI
+  (the SDK's separately-documented "base64 encoded string with the mime type declared" form), and
+  (2) give the root `<svg>` an **intrinsic `width`/`height`**, not just a `viewBox`, or the
+  rasterizer drops the sizeless image. Diagnosis was fast because `setTitle('')` had visibly taken
+  effect (text gone) while the face stayed on the PNG — isolating the failure to the image layer,
+  not a pinned custom image. This is exactly the class of defect the PIR hardware gate exists to
+  catch: build + typecheck + unit tests were all green, but "it renders" was only true on the
+  device. Reusable for anyone touching `setImage` (`svgToDataUri` + `width`/`height` in `face.ts`).
 - **Twinned per-app presentation maps with sync-notes are an accepted pattern, not SSOT debt
   (owner-ruled).** When two apps must present the same vocabulary but can't/shouldn't cross-import
   (e.g. a static SVG can't bind VS Code `ThemeColor` tokens), duplicating the small maps with a
