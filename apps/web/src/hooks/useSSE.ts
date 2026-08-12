@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { WEB_KEY_HEADER } from '@cluesmith/codev-types';
+import { TOWER_KEY_HEADER } from '@cluesmith/codev-types';
 import { getSSEEventsUrl, getWebKey } from '../lib/api.js';
 
 type Listener = () => void;
@@ -7,7 +7,7 @@ type Listener = () => void;
 // Singleton SSE connection shared across all hooks in this tab.
 //
 // WHY fetch+ReadableStream instead of EventSource: the browser `EventSource`
-// cannot set request headers, so it cannot carry the `codev-web-key` header the
+// cannot set request headers, so it cannot carry the `codev-tower-key` header the
 // Tower API now requires (advisory GHSA-xvjp-7748-v88v). A `fetch` streamed
 // through a `ReadableStream` sends the header and parses the same `data: {...}`
 // SSE wire format.
@@ -42,7 +42,7 @@ function connect(): void {
 async function streamEvents(ctrl: AbortController): Promise<void> {
   const headers: Record<string, string> = {};
   const key = getWebKey();
-  if (key) headers[WEB_KEY_HEADER] = key;
+  if (key) headers[TOWER_KEY_HEADER] = key;
 
   try {
     const response = await fetch(getSSEEventsUrl(), { headers, signal: ctrl.signal });

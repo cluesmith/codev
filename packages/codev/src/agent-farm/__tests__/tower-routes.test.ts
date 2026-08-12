@@ -312,12 +312,12 @@ describe('tower-routes', () => {
       expect(headers()['Access-Control-Allow-Origin']).toBeUndefined();
     });
 
-    it('allows the codev-web-key header in CORS', async () => {
+    it('allows the codev-tower-key header in CORS', async () => {
       const req = makeReq('GET', '/health', { origin: 'http://localhost:3000' });
       const { res, headers } = makeRes();
       await handleRequest(req, res, makeCtx());
 
-      expect(headers()['Access-Control-Allow-Headers']).toContain('codev-web-key');
+      expect(headers()['Access-Control-Allow-Headers']).toContain('codev-tower-key');
     });
 
     it('handles OPTIONS preflight', async () => {

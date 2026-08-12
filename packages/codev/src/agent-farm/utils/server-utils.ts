@@ -7,7 +7,7 @@
 import type * as http from 'node:http';
 import { timingSafeEqual } from 'node:crypto';
 import { ensureLocalKey } from '@cluesmith/codev-core/auth';
-import { WEB_KEY_HEADER, WS_KEY_PROTOCOL_PREFIX } from '@cluesmith/codev-types';
+import { TOWER_KEY_HEADER, LEGACY_WEB_KEY_HEADER, WS_KEY_PROTOCOL_PREFIX } from '@cluesmith/codev-types';
 
 /**
  * HTML-escape a string to prevent XSS
@@ -80,7 +80,7 @@ export function parseJsonBody(req: http.IncomingMessage, maxSize = 1024 * 1024):
 //
 // Tower's local HTTP + WebSocket API reaches privileged local operations, so
 // every request that is not on the narrow public-route allowlist must present
-// the shared local key (`~/.agent-farm/local-key`) in the `codev-web-key`
+// the shared local key (`~/.agent-farm/local-key`) in the `codev-tower-key`
 // header. Enforcement is server-side only (server/client isolation, #1189):
 // clients merely transport the key.
 
@@ -260,19 +260,28 @@ export function isAllowedHost(hostHeader: string | undefined): boolean {
   return false;
 }
 
-/** Read the key a client presented on an HTTP request, or null if absent. */
-function presentedHttpKey(req: http.IncomingMessage): string | null {
-  const raw = req.headers[WEB_KEY_HEADER];
+/** Read one header value as a non-empty string, or null. */
+function headerValue(raw: string | string[] | undefined): string | null {
   if (typeof raw === 'string' && raw.length > 0) return raw;
   if (Array.isArray(raw) && raw.length > 0 && raw[0]) return raw[0];
   return null;
 }
 
 /**
+ * Read the key a client presented on an HTTP request, or null if absent. Prefers
+ * the current `codev-tower-key` header and falls back to the legacy
+ * `codev-web-key` (dual-accept for one release) so an already-installed client
+ * bundling an older sdk still authenticates while it updates.
+ */
+function presentedHttpKey(req: http.IncomingMessage): string | null {
+  return headerValue(req.headers[TOWER_KEY_HEADER]) ?? headerValue(req.headers[LEGACY_WEB_KEY_HEADER]);
+}
+
+/**
  * Security: decide whether an HTTP request may proceed.
  *
  * Public-allowlisted routes pass keyless; every other route must present a
- * `codev-web-key` header that constant-time-matches the expected local key.
+ * `codev-tower-key` header that constant-time-matches the expected local key.
  * Fails closed when the expected key is unavailable.
  *
  * @param req - HTTP incoming message

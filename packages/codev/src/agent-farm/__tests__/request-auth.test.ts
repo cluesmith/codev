@@ -163,7 +163,7 @@ describe('isAllowedHost', () => {
       expect(isAllowedHost('attacker.com:4100')).toBe(false);
       // The key check is separate and still mandatory for keyed routes.
       expect(isRequestAllowed(req('POST', '/api/terminals', { host: '192.168.1.5:4100' }))).toBe(false);
-      expect(isRequestAllowed(req('POST', '/api/terminals', { host: '192.168.1.5:4100', 'codev-web-key': TEST_KEY }))).toBe(true);
+      expect(isRequestAllowed(req('POST', '/api/terminals', { host: '192.168.1.5:4100', 'codev-tower-key': TEST_KEY }))).toBe(true);
     } finally {
       delete process.env.BRIDGE_MODE;
     }
@@ -180,7 +180,7 @@ describe('isRequestAllowed Host guard', () => {
   });
 
   it('rejects a keyed request with a valid key but a bad Host', () => {
-    expect(isRequestAllowed(req('POST', '/api/terminals', { host: 'evil.com', 'codev-web-key': TEST_KEY }))).toBe(false);
+    expect(isRequestAllowed(req('POST', '/api/terminals', { host: 'evil.com', 'codev-tower-key': TEST_KEY }))).toBe(false);
   });
 });
 
@@ -211,10 +211,15 @@ describe('isRequestAllowed', () => {
   });
 
   it('rejects a privileged route with a wrong key', () => {
-    expect(isRequestAllowed(req('POST', '/api/terminals', { 'codev-web-key': 'b'.repeat(64) }))).toBe(false);
+    expect(isRequestAllowed(req('POST', '/api/terminals', { 'codev-tower-key': 'b'.repeat(64) }))).toBe(false);
   });
 
   it('allows a privileged route with the correct key', () => {
+    expect(isRequestAllowed(req('POST', '/api/terminals', { 'codev-tower-key': TEST_KEY }))).toBe(true);
+  });
+
+  it('accepts the legacy codev-web-key header too (dual-accept for one release)', () => {
+    // An already-installed client bundling an older sdk still sends codev-web-key.
     expect(isRequestAllowed(req('POST', '/api/terminals', { 'codev-web-key': TEST_KEY }))).toBe(true);
   });
 
@@ -223,7 +228,7 @@ describe('isRequestAllowed', () => {
       throw new Error('unwritable');
     });
     resetExpectedKeyCache();
-    expect(isRequestAllowed(req('POST', '/api/terminals', { 'codev-web-key': TEST_KEY }))).toBe(false);
+    expect(isRequestAllowed(req('POST', '/api/terminals', { 'codev-tower-key': TEST_KEY }))).toBe(false);
   });
 });
 

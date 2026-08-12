@@ -8,7 +8,7 @@
   <meta name="theme-color" content="#252525">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🗼</text></svg>">
   <title>Agent Farm Tower</title>
-  <!-- CODEV_WEB_KEY_INJECTION -->
+  <!-- CODEV_TOWER_KEY_INJECTION -->
   <style>
     * {
       box-sizing: border-box;
@@ -991,21 +991,21 @@
     let recentInstances = [];
 
     // Auth helper: resolve the shared local key. Prefer the value Tower injects
-    // same-origin at serve time (window.__CODEV_WEB_KEY__); fall back to any
+    // same-origin at serve time (window.__CODEV_TOWER_KEY__); fall back to any
     // previously stored value. The injected value is persisted so later loads
     // and manual navigations keep working.
     function getWebKey() {
-      if (window.__CODEV_WEB_KEY__) {
-        try { localStorage.setItem('codev-web-key', window.__CODEV_WEB_KEY__); } catch (e) {}
-        return window.__CODEV_WEB_KEY__;
+      if (window.__CODEV_TOWER_KEY__) {
+        try { localStorage.setItem('codev-tower-key', window.__CODEV_TOWER_KEY__); } catch (e) {}
+        return window.__CODEV_TOWER_KEY__;
       }
-      return localStorage.getItem('codev-web-key');
+      return localStorage.getItem('codev-tower-key');
     }
 
     // Auth helper: get headers with the auth key if available
     function getAuthHeaders() {
       const key = getWebKey();
-      return key ? { 'codev-web-key': key } : {};
+      return key ? { 'codev-tower-key': key } : {};
     }
 
     // Auth helper: make authenticated fetch request
@@ -1019,7 +1019,7 @@
       // no key to begin with, the shell has none to inject, so reloading would
       // loop forever (advisory GHSA-xvjp-7748-v88v) — surface the error instead.
       if (response.status === 401) {
-        localStorage.removeItem('codev-web-key');
+        localStorage.removeItem('codev-tower-key');
         if (hadKey) {
           location.reload();
         }
@@ -1030,7 +1030,7 @@
 
     // Logout function
     function logout() {
-      localStorage.removeItem('codev-web-key');
+      localStorage.removeItem('codev-tower-key');
       window.location.href = './';
     }
 

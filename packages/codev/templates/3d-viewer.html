@@ -221,7 +221,7 @@
   <!-- Three.js ES Modules — vendored locally (three@0.160.0), served same-origin
        from the annotator's vendor/ route. NO remote code runs in this page: it is
        key-injected (advisory GHSA-xvjp-7748-v88v), so loading executable modules
-       from a CDN would expose window.__CODEV_WEB_KEY__ to that CDN. -->
+       from a CDN would expose window.__CODEV_TOWER_KEY__ to that CDN. -->
   <script type="importmap">
   {
     "imports": {
@@ -242,19 +242,19 @@
 
     // Request authentication (advisory GHSA-xvjp-7748-v88v): Tower injects the
     // shared local key into this page same-origin; model/mtime requests send it
-    // via the codev-web-key header. Three.js loaders carry it through
+    // via the codev-tower-key header. Three.js loaders carry it through
     // loader.setRequestHeader(authHeaders()).
     function getWebKey() {
-      if (window.__CODEV_WEB_KEY__) {
-        try { localStorage.setItem('codev-web-key', window.__CODEV_WEB_KEY__); } catch (e) {}
-        return window.__CODEV_WEB_KEY__;
+      if (window.__CODEV_TOWER_KEY__) {
+        try { localStorage.setItem('codev-tower-key', window.__CODEV_TOWER_KEY__); } catch (e) {}
+        return window.__CODEV_TOWER_KEY__;
       }
-      return localStorage.getItem('codev-web-key');
+      return localStorage.getItem('codev-tower-key');
     }
     function authHeaders(extra) {
       const key = getWebKey();
       const headers = extra ? Object.assign({}, extra) : {};
-      if (key) headers['codev-web-key'] = key;
+      if (key) headers['codev-tower-key'] = key;
       return headers;
     }
 

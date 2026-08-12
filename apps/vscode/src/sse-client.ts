@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { WEB_KEY_HEADER } from '@cluesmith/codev-types';
+import { TOWER_KEY_HEADER } from '@cluesmith/codev-types';
 
 export type SSEListener = (eventType: string, data: string) => void;
 
@@ -64,10 +64,10 @@ export class SSEClient {
   private async startSSE(url: string): Promise<void> {
     try {
       // Request authentication (advisory GHSA-xvjp-7748-v88v): /api/events is a
-      // key-required route; SSE via fetch can carry the codev-web-key header.
+      // key-required route; SSE via fetch can carry the codev-tower-key header.
       const headers: Record<string, string> = { 'Accept': 'text/event-stream' };
       const key = this.getAuthKey();
-      if (key) { headers[WEB_KEY_HEADER] = key; }
+      if (key) { headers[TOWER_KEY_HEADER] = key; }
       const response = await fetch(url, { headers });
 
       if (!response.ok || !response.body) {

@@ -33,7 +33,7 @@ import { DEFAULT_COLS, defaultSessionOptions } from '../../terminal/index.js';
 import type { SSEClient, WorkspaceTerminals } from './tower-types.js';
 import type { TerminalManager } from '../../terminal/pty-manager.js';
 import { parseJsonBody, isRequestAllowed, isAllowedOrigin, isAllowedHost, getExpectedKey, escapeHtml } from '../utils/server-utils.js';
-import { WEB_KEY_HEADER } from '@cluesmith/codev-types';
+import { TOWER_KEY_HEADER, LEGACY_WEB_KEY_HEADER } from '@cluesmith/codev-types';
 import {
   isRateLimited,
   normalizeWorkspacePath,
@@ -237,7 +237,7 @@ export async function handleRequest(
     res.setHeader('Vary', 'Origin');
   }
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', `Content-Type, ${WEB_KEY_HEADER}`);
+  res.setHeader('Access-Control-Allow-Headers', `Content-Type, ${TOWER_KEY_HEADER}, ${LEGACY_WEB_KEY_HEADER}`);
   res.setHeader('Cache-Control', 'no-store');
 
   // A CORS preflight carries no credentials and performs no action, so it is
@@ -2395,7 +2395,7 @@ function handleDashboard(res: http.ServerResponse, ctx: RouteContext): void {
  *
  * tower.html carries an explicit placeholder; the built SPA index.html does not,
  * so the script is inserted before `</head>` there — ahead of the deferred SPA
- * module, so `window.__CODEV_WEB_KEY__` is set before the app's first request.
+ * module, so `window.__CODEV_TOWER_KEY__` is set before the app's first request.
  */
 function injectWebKey(html: string): string {
   const key = getExpectedKey();
@@ -2404,10 +2404,10 @@ function injectWebKey(html: string): string {
   // key file containing e.g. `</script>` can never become stored XSS in a shell.
   // A malformed key yields no injection (clients then fail closed with 401).
   const injection = key && /^[0-9a-f]{64}$/.test(key)
-    ? `<script>window.__CODEV_WEB_KEY__ = ${JSON.stringify(key)};</script>`
+    ? `<script>window.__CODEV_TOWER_KEY__ = ${JSON.stringify(key)};</script>`
     : '';
-  if (html.includes('<!-- CODEV_WEB_KEY_INJECTION -->')) {
-    return html.replace('<!-- CODEV_WEB_KEY_INJECTION -->', injection);
+  if (html.includes('<!-- CODEV_TOWER_KEY_INJECTION -->')) {
+    return html.replace('<!-- CODEV_TOWER_KEY_INJECTION -->', injection);
   }
   if (injection && html.includes('</head>')) {
     return html.replace('</head>', `${injection}</head>`);

@@ -6,7 +6,7 @@
  * re-fetch data instead of waiting for the next poll interval.
  *
  * useSSE streams via fetch + ReadableStream (not EventSource) so it can send the
- * codev-web-key header (advisory GHSA-xvjp-7748-v88v). This test mocks fetch to
+ * codev-tower-key header (advisory GHSA-xvjp-7748-v88v). This test mocks fetch to
  * return a controllable stream and drives SSE frames into it.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';

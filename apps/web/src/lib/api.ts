@@ -1,4 +1,4 @@
-import { WEB_KEY_HEADER } from '@cluesmith/codev-types';
+import { TOWER_KEY_HEADER } from '@cluesmith/codev-types';
 import { getApiBase } from './constants.js';
 
 // Shared types from @cluesmith/codev-types
@@ -30,26 +30,26 @@ function apiUrl(endpoint: string): string {
 
 /**
  * Resolve the shared local key (advisory GHSA-xvjp-7748-v88v). Prefer the value
- * Tower injects same-origin at serve time (`window.__CODEV_WEB_KEY__`) so a
+ * Tower injects same-origin at serve time (`window.__CODEV_TOWER_KEY__`) so a
  * direct navigation to a workspace URL works without first visiting the Tower
  * shell; fall back to a previously stored value. The injected value is persisted
  * so later same-origin requests keep working.
  */
 export function getWebKey(): string | null {
-  const injected = (window as unknown as { __CODEV_WEB_KEY__?: string }).__CODEV_WEB_KEY__;
+  const injected = (window as unknown as { __CODEV_TOWER_KEY__?: string }).__CODEV_TOWER_KEY__;
   if (injected) {
-    try { localStorage.setItem('codev-web-key', injected); } catch { /* storage may be unavailable */ }
+    try { localStorage.setItem('codev-tower-key', injected); } catch { /* storage may be unavailable */ }
     return injected;
   }
-  return localStorage.getItem('codev-web-key');
+  return localStorage.getItem('codev-tower-key');
 }
 
 function getAuthHeaders(): Record<string, string> {
   const token = getWebKey();
   if (token) {
     // Request authentication (advisory GHSA-xvjp-7748-v88v): Tower reads the
-    // shared local key from the codev-web-key header.
-    return { [WEB_KEY_HEADER]: token };
+    // shared local key from the codev-tower-key header.
+    return { [TOWER_KEY_HEADER]: token };
   }
   return {};
 }

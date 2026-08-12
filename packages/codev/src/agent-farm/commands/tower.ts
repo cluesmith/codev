@@ -11,7 +11,7 @@ import { getConfig } from '../utils/config.js';
 import { execSync } from 'node:child_process';
 import { DEFAULT_TOWER_PORT, AGENT_FARM_DIR } from '../lib/tower-client.js';
 import { ensureLocalKey } from '@cluesmith/codev-core/auth';
-import { WEB_KEY_HEADER } from '@cluesmith/codev-types';
+import { TOWER_KEY_HEADER } from '@cluesmith/codev-types';
 import { isPortAvailable } from '../utils/shell.js';
 import Database from 'better-sqlite3';
 import { getGlobalDbPath } from '../db/index.js';
@@ -116,7 +116,7 @@ async function isServerResponding(port: number): Promise<boolean> {
     // other client — otherwise it 401s forever and startup never detects "ready".
     const headers: Record<string, string> = {};
     try {
-      headers[WEB_KEY_HEADER] = ensureLocalKey();
+      headers[TOWER_KEY_HEADER] = ensureLocalKey();
     } catch {
       // Key unavailable — fall through unauthenticated (probe will just fail).
     }

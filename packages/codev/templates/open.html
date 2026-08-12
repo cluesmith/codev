@@ -571,20 +571,20 @@
   <script>
     // Request authentication (advisory GHSA-xvjp-7748-v88v): Tower injects the
     // shared local key into this page same-origin; every data/media fetch sends
-    // it via the codev-web-key header. Media is fetched as an authenticated blob
+    // it via the codev-tower-key header. Media is fetched as an authenticated blob
     // (img/video/pdf src cannot carry a header) and displayed via an object URL,
     // revoked when replaced or on unload to avoid blob leaks.
     function getWebKey() {
-      if (window.__CODEV_WEB_KEY__) {
-        try { localStorage.setItem('codev-web-key', window.__CODEV_WEB_KEY__); } catch (e) {}
-        return window.__CODEV_WEB_KEY__;
+      if (window.__CODEV_TOWER_KEY__) {
+        try { localStorage.setItem('codev-tower-key', window.__CODEV_TOWER_KEY__); } catch (e) {}
+        return window.__CODEV_TOWER_KEY__;
       }
-      return localStorage.getItem('codev-web-key');
+      return localStorage.getItem('codev-tower-key');
     }
     function authHeaders(extra) {
       const key = getWebKey();
       const headers = extra ? Object.assign({}, extra) : {};
-      if (key) headers['codev-web-key'] = key;
+      if (key) headers['codev-tower-key'] = key;
       return headers;
     }
     function setMediaSrc(el, objectUrl) {
