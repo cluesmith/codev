@@ -50,13 +50,17 @@ const GATE_LABELS: Record<string, string> = {
   'dev-approval':  'Dev Approval',
   'pr':            'PR Review',
 };
-// Coarse protocol phase (canonical protocolPhase ids).
+// Coarse protocol phase (canonical protocolPhase ids). `verify` is the IN-PROGRESS
+// phase (→ 'Verify'); `verified` is porch's TERMINAL id (next.ts:204), with legacy
+// `complete` migrating to it (state.ts:135-140) — both display as 'Verified'.
 const PHASE_LABELS: Record<string, string> = {
   specify:   'Specify',
   plan:      'Plan',
   implement: 'Implement',
   review:    'Review',
-  verify:    'Verified',
+  verify:    'Verify',
+  verified:  'Verified',
+  complete:  'Verified',
 };
 
 /** Deliberate display label for a builder's current state; '' → the caller's fallback. */
@@ -85,7 +89,9 @@ export function stateLabel(b: Pick<OverviewBuilder, 'blockedGate' | 'protocolPha
 | `plan` | protocolPhase | Plan |
 | `implement` | protocolPhase | Implement |
 | `review` | protocolPhase | Review |
-| `verify` | protocolPhase | Verified |
+| `verify` | protocolPhase | Verify (in-progress) |
+| `verified` | protocolPhase | Verified (terminal — `next.ts:204`) |
+| `complete` | protocolPhase | Verified (legacy → `verified`, `state.ts:135-140`) |
 | `''` / unknown | either | title-cased raw, else empty |
 
 Longest single token is "Approval"/"Implement" (8–9 chars). Two-word gate labels are rendered
@@ -179,6 +185,13 @@ against the exact stacking that caused symptom 1).
   Mitigation if seen at the hardware gate: set the SVG in `onWillAppear` (already the path —
   `renderTo` is called there) so the window is a single frame; only escalate to a manifest swap
   if the flash is actually visible.
+- **Risk: a profile-pinned custom image silently defeats `setImage`.** The SDK doc is explicit:
+  *"The image can only be set by the plugin when the user has not specified a custom image."*
+  If the bundled/imported profile pins a custom image on a Builder Action key, our SVG face is
+  ignored with no error and the old PNG-under-title face persists. Mitigation: verify the
+  profile (including the #1404-revved one) does **not** pin custom images on these keys; if the
+  face fails to render at the hardware gate, this is the **first** suspect (before any SVG/logic
+  debugging). Added to the hardware checklist below.
 - **Risk: label doesn't fit the band on the physical deck.** The whole point of §1(b) is that
   the SVG sizes the band to the label (and wraps two-word gates), so truncation is impossible by
   construction. The hardware gate is the real check; font sizes are cheap to tune in the SVG
@@ -198,8 +211,9 @@ against the exact stacking that caused symptom 1).
 
 ## Test Plan
 
-- **Unit (`face.test.ts`)**: `stateLabel` returns the exact label for each of the 9 mapped ids,
-  gate-beats-phase when both present, the title-cased fallback for an unknown id, and `''` for
+- **Unit (`face.test.ts`)**: `stateLabel` returns the exact label for each of the 11 mapped ids
+  (incl. `verify`→'Verify' distinct from `verified`/`complete`→'Verified'), gate-beats-phase
+  when both present, the title-cased fallback for an unknown id, and `''` for
   no state; `builderFaceSvg` output contains the number + label, splits a two-word gate label
   across two lines, and produces a distinct `Slot N` empty variant with no number.
 - **Unit (`actions.test.ts`)**: `BuilderAction.renderTo` calls `setImage` with an SVG string
@@ -214,3 +228,7 @@ against the exact stacking that caused symptom 1).
   phase label, and icon are each legible at a glance and that legibility matches the Gates key.
   Verify press/rotate still fire the same verbs as before (regression check on the untouched
   path).
+- **Manual — pre-flight (do this first at the hardware gate):** confirm the active/imported
+  profile (incl. the #1404-revved one) does **not** pin a custom image on the Builder Action
+  keys — a pinned custom image makes `setImage` a silent no-op. If the SVG face doesn't render,
+  check this before debugging the SVG or the render path.

@@ -26,3 +26,17 @@ in the plan. Routed to architect before plan-approval gate.
 worktrees; air-1411 touches streamdeck imports only — will re-resolve at merge if churn.
 
 Plan written to `codev/plans/1428-stream-deck-builder-action-key.md`. Awaiting plan-approval.
+
+## Plan revision 1 (2026-08-12) — architect review
+
+Approved with two revisions, both applied:
+1. Label map: porch's TERMINAL phase id is `verified` (next.ts:204; `complete` migrates to it,
+   state.ts:135-140) — the exact state the owner's photo showed. Added `verified`→'Verified' and
+   `complete`→'Verified'; changed `verify`→'Verify' (in-progress, not done). Map is now 11 rows.
+   Verified the porch source myself before editing.
+2. Added risk + hardware pre-flight: a profile-pinned custom image makes `setImage` a silent
+   no-op (SDK: "image can only be set … when the user has not specified a custom image"). Check
+   the #1404-revved profile first if the face doesn't render.
+
+Rest approved as written (face.ts pure module, SVG non-overlap, canonical-id keying, setTitle('')).
+Recommitted; gate goes to Amr.
