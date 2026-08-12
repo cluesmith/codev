@@ -12,6 +12,7 @@
 
 ### Fixes
 
+- **Recently Closed is sorted by recency.** The sidebar's Recently Closed section now lists items most-recently-closed first. It previously showed whatever order the forge's search API returned (relevance ranking), so an issue closed this morning could render below one closed yesterday. Correct for every forge.
 - **Annotation viewer: the add-comment "+" lives in the row itself.** Hovering anywhere in a block — including the right edge and the margins — shows the "+" right there in the row, instead of a button floating in the left gutter that could vanish while you traveled to it. Code blocks and quotes now extend to the canvas edge (text position unchanged); wide code scrolls inside its block so the button stays put. Keyboard focus lights the same affordance.
 - **Annotation viewer: the add-comment "+" button no longer vanishes en route.** Moving the mouse toward the button could dismiss or relocate it; it now stays put while you travel to it. It is also larger — sized to the document font with a comfortable click target.
 - **Annotation viewer: arrow cursor over document content.** The content area no longer shows the text-editing I-beam; the document is read-only and comments are added via the "+" button. Links still show the pointing hand, and text selection/copy work unchanged.
