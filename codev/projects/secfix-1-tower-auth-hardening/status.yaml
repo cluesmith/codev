@@ -1,7 +1,7 @@
 id: secfix-1
 title: tower-auth-hardening
 protocol: pir
-phase: implement
+phase: review
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -19,4 +19,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-08-12T04:32:39.515Z'
-updated_at: '2026-08-12T08:51:55.685Z'
+updated_at: '2026-08-12T08:53:17.339Z'
