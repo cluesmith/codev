@@ -1,6 +1,9 @@
 export {
   FRAME_CONTROL,
   FRAME_DATA,
+  WEB_KEY_HEADER,
+  WS_MARKER_PROTOCOL,
+  WS_KEY_PROTOCOL_PREFIX,
   type ControlMessage,
   type DecodedFrame,
 } from './websocket.js';
