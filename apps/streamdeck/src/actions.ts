@@ -503,8 +503,9 @@ interface DiffSpec {
 
 /**
  * Canvas-mode gesture spec: canvas commands driven over `sendCanvasCommand` (#1401).
- * Press is always `composer-open` (feedback at the focused block), so it is shared
- * across dials rather than a field here.
+ * Press differs per dial (#1425): the fine dial submits (`composer-open-or-submit`), the
+ * coarse dial cancels (`composer-cancel`), so each dial carries its own press verb and a
+ * short touchstrip hint naming it.
  */
 interface CanvasSpec {
   /** Line-1 label in canvas mode (Headings / Blocks). */
@@ -513,6 +514,11 @@ interface CanvasSpec {
   prev: CanvasCommand;
   /** Tap. */
   jump: CanvasCommand;
+  /** Press: the composer command sent on dial down. */
+  press: CanvasCommand;
+  /** Short line-1 hint naming the press (e.g. Open/Submit, Cancel) so a reviewer can tell
+   *  the two dials' presses apart at a glance. */
+  pressLabel: string;
 }
 
 /** Touchstrip line for a failed canvas command, per client error code (plan §4). */
@@ -576,7 +582,10 @@ abstract class ReviewNav extends SingletonAction {
   /** Line 1 = the live semantic (mode-dependent); line 2 = builder under review
    *  (id + title); bar = its progress. A pending canvas error takes line 2 for one cycle. */
   private renderTo(action: DialAction): void {
-    const label = this.mode() === 'canvas' ? this.canvas.label : this.diff.label;
+    // Canvas line 1 pairs the rotate axis with the press meaning (`Blocks · Open/Submit`,
+    // `Headings · Cancel`); diff mode shows only its axis label.
+    const label =
+      this.mode() === 'canvas' ? `${this.canvas.label} · ${this.canvas.pressLabel}` : this.diff.label;
     const b = this.store.selectedBuilder();
     const id = b ? (b.issueId ? `#${b.issueId}` : b.id) : '';
     const details = b ? (b.issueTitle ? `${id} ${b.issueTitle}` : id) : 'No builder';
@@ -602,7 +611,7 @@ abstract class ReviewNav extends SingletonAction {
   override async onDialDown(): Promise<void> {
     const mode = this.mode();
     if (mode === 'canvas') {
-      await this.runCanvas('composer-open');
+      await this.runCanvas(this.canvas.press);
       return;
     }
     if (mode === 'diff') {
@@ -648,12 +657,14 @@ export class DiffFileNav extends ReviewNav {
     forward: 'forward-file',
   };
   // Coarse dial in canvas mode: step headings; tap resets to the document start
-  // (role-consistent with diff-mode jump-to-first-file).
+  // (role-consistent with diff-mode jump-to-first-file); press cancels an open composer.
   protected readonly canvas: CanvasSpec = {
     label: 'Headings',
     next: 'heading-next',
     prev: 'heading-prev',
     jump: 'doc-start',
+    press: 'composer-cancel',
+    pressLabel: 'Cancel',
   };
 }
 
@@ -668,12 +679,15 @@ export class DiffHunkNav extends ReviewNav {
   };
   // Fine dial in canvas mode: step blocks; tap walks forward through commented blocks
   // (the "next place needing attention" capability). Keyboard parity means no wrap, so
-  // it stops at the last comment.
+  // it stops at the last comment. Press is context-aware: opens the composer at the
+  // focused block, or submits an already-open draft (#1420).
   protected readonly canvas: CanvasSpec = {
     label: 'Blocks',
     next: 'block-next',
     prev: 'block-prev',
     jump: 'comment-next',
+    press: 'composer-open-or-submit',
+    pressLabel: 'Open/Submit',
   };
 }
 

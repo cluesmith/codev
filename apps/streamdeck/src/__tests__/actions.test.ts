@@ -195,31 +195,31 @@ describe('encoders', () => {
     expect(ctx.sent.map((s) => s.verb)).toEqual(['forward-file', 'forward-hunk']);
   });
 
-  it('canvas mode: coarse dial rotates headings (count = |ticks|), press opens composer, tap resets to doc start', async () => {
+  it('canvas mode: coarse dial rotates headings (count = |ticks|), press cancels composer, tap resets to doc start', async () => {
     const ctx = makeStore(); // default selection pir-1 is blocked at plan-approval → canvas mode
     const nav = new DiffFileNav(ctx.store);
     await nav.onDialRotate(dial(3) as never);   // heading-next, count 3
     await nav.onDialRotate(dial(-1) as never);  // heading-prev, count 1
-    await nav.onDialDown();                      // composer-open
+    await nav.onDialDown();                      // composer-cancel (#1425)
     await nav.onTouchTap();                       // doc-start
     expect(ctx.canvasSent).toEqual([
       { command: 'heading-next', target: { workspace: '/work/alpha' }, count: 3 },
       { command: 'heading-prev', target: { workspace: '/work/alpha' }, count: 1 },
-      { command: 'composer-open', target: { workspace: '/work/alpha' }, count: undefined },
+      { command: 'composer-cancel', target: { workspace: '/work/alpha' }, count: undefined },
       { command: 'doc-start', target: { workspace: '/work/alpha' }, count: undefined },
     ]);
     expect(ctx.sent).toHaveLength(0); // canvas mode never touches the generic verb relay
   });
 
-  it('canvas mode: fine dial rotates blocks, tap walks forward through comments', async () => {
+  it('canvas mode: fine dial rotates blocks, press submits/opens composer, tap walks forward through comments', async () => {
     const ctx = makeStore(); // pir-1 → canvas mode
     const nav = new DiffHunkNav(ctx.store);
     await nav.onDialRotate(dial(2) as never);   // block-next, count 2
-    await nav.onDialDown();                      // composer-open
+    await nav.onDialDown();                      // composer-open-or-submit (#1425)
     await nav.onTouchTap();                       // comment-next
     expect(ctx.canvasSent).toEqual([
       { command: 'block-next', target: { workspace: '/work/alpha' }, count: 2 },
-      { command: 'composer-open', target: { workspace: '/work/alpha' }, count: undefined },
+      { command: 'composer-open-or-submit', target: { workspace: '/work/alpha' }, count: undefined },
       { command: 'comment-next', target: { workspace: '/work/alpha' }, count: undefined },
     ]);
   });
@@ -239,7 +239,7 @@ describe('encoders', () => {
     nav.onWillAppear({ action, payload: {} } as never);
     await nav.onDialRotate({ action, payload: { ticks: 1, settings: {} } } as never);
     const last = action.setFeedback.mock.calls.at(-1)?.[0];
-    expect(last).toMatchObject({ title: 'Headings', value: 'Open artifact' });
+    expect(last).toMatchObject({ title: 'Headings · Cancel', value: 'Open artifact' });
 
     ctx.canvasResult.value = { ok: false, code: 'unreachable', error: 'Tower down' };
     await nav.onDialDown();
@@ -605,14 +605,15 @@ describe('ZoomNav zoom gesture', () => {
     expect(fb.bar).toBe(45);                       // builder progress
   });
 
-  it('legibility: canvas-phase builder titles the dials Headings/Blocks', () => {
+  it('legibility: canvas-phase dials pair the rotate axis with the press meaning (#1425)', () => {
     const ctx = makeStore(); // selected builder (cursor 0) → pir-1, blocked at plan-approval → canvas
     const fileAction = { isDial: () => true, setFeedback: vi.fn() };
     const hunkAction = { isDial: () => true, setFeedback: vi.fn() };
     new DiffFileNav(ctx.store).onWillAppear({ action: fileAction, payload: {} } as never);
     new DiffHunkNav(ctx.store).onWillAppear({ action: hunkAction, payload: {} } as never);
-    expect(fileAction.setFeedback).toHaveBeenCalledWith({ title: 'Headings', value: '#101 Add the relay', bar: 45 });
-    expect(hunkAction.setFeedback).toHaveBeenCalledWith({ title: 'Blocks', value: '#101 Add the relay', bar: 45 });
+    // Coarse dial cancels; fine dial opens/submits. Line 2 stays the builder under review.
+    expect(fileAction.setFeedback).toHaveBeenCalledWith({ title: 'Headings · Cancel', value: '#101 Add the relay', bar: 45 });
+    expect(hunkAction.setFeedback).toHaveBeenCalledWith({ title: 'Blocks · Open/Submit', value: '#101 Add the relay', bar: 45 });
   });
 
   it('legibility: diff-phase builder titles the dials Files/Changes', () => {
@@ -631,7 +632,7 @@ describe('ZoomNav zoom gesture', () => {
     const action = { isDial: () => true, setFeedback: vi.fn() };
     const nav = new DiffFileNav(ctx.store);
     nav.onWillAppear({ action, payload: {} } as never); // pir-1 → canvas
-    expect(action.setFeedback.mock.calls.at(-1)?.[0]).toMatchObject({ title: 'Headings' });
+    expect(action.setFeedback.mock.calls.at(-1)?.[0]).toMatchObject({ title: 'Headings · Cancel' });
     ctx.store.syncToBuilder('pir-2'); // → diff; onChange re-renders
     expect(action.setFeedback.mock.calls.at(-1)?.[0]).toMatchObject({ title: 'Files' });
   });
