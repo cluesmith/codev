@@ -5,8 +5,10 @@
  * spans, flags, multiple refs per line) and `openTerminalRef` (resolution —
  * issue-first with the url-based PR discriminator, and the `issueTarget`
  * setting). Both import `vscode` at module load, so we stub it (the established
- * pattern from open-issue-by-id.test.ts), and stub the three reuse helper
- * modules so we can assert delegation without real fetches.
+ * pattern from open-issue-by-id.test.ts). We also stub `open-pr-by-id.js` — the
+ * one reuse helper still called directly (for `PR #N` and the PR fallthrough);
+ * the browser-issue and editor paths are asserted via the stubbed
+ * `vscode.env.openExternal` / `vscode.commands.executeCommand`.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';

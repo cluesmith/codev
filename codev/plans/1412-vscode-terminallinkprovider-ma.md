@@ -175,6 +175,12 @@ in-editor PR preview surface.
 
 ## Risks & Alternatives Considered
 
+> **Amendment (dev-approval, 2026-08-12):** the "double fetch, accepted" call below was **reversed**
+> after the human tested it — a bare `#N` felt unresponsive (~2s, no feedback). The shipped code takes
+> the second alternative ("rejected" here): it opens `issue.url` directly via `openExternal` for the
+> PR-fallthrough and browser-issue paths (single round-trip), and adds a `withProgress` spinner. See the
+> review file's "Things to Look At". The text below is preserved as the original plan-time reasoning.
+
 - **Double fetch on a bare `#N` click** (discriminator `getIssue`, then the helper re-fetches):
   accepted. It is one extra round-trip on a single deliberate click; funneling every open through the
   one sanctioned helper (single owner per destination) is worth more than saving it.
@@ -182,6 +188,7 @@ in-editor PR preview surface.
     to skip the re-fetch — expands their signatures for a non-user-visible micro-opt; against "lean."
   - *Alternative (rejected):* `openExternal(issue.url)` directly for the discriminated-PR case (saves the
     `getPR`) — creates a second browser-open path; consistency with the explicit `PR #N` branch wins.
+    **(Adopted after all — see amendment above.)**
 - **Over-claiming spans** (e.g. `#2` in "step #2"): accepted. Cmd+click is opt-in; a stray click yields
   a warning toast at worst. Hex colors and spaced `# 1` headings already don't match.
 - **Non-GitHub forge with no `url`**: discriminator can't tell issue from PR; degrades to the issue
