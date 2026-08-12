@@ -1,8 +1,11 @@
 # PIR Plan: Stream Deck SD+ two-zone builder workflow (selectors + action palette, dial-driven feedback queue)
 
-## Owner decision needed EARLY (requirement 6 — single approve affordance)
+## Owner decision (requirement 6 — single approve affordance) — RESOLVED
 
-**This is the one decision I need from Amr before implementation, surfaced up top per architect instruction.**
+**Decided by Amr (2026-08-13): retire the generic `ApproveGate` singleton.** Row 2 [Approve gate]
+becomes the single, selected-scoped approve affordance; the singleton's jump-to-next + gate-count
+badge fold into Row 2 [Next / attention]. The recommendation below is the confirmed path (the
+"flip" alternative is retained only as a record).
 
 Today the deck has one approve affordance: the standalone `ApproveGate` singleton
 (`actions.ts:187`). It targets the **top pending gate** (`store.topGateBuilderId()` = first
@@ -43,8 +46,10 @@ phase artifact. Covering a builder end-to-end needs more than select+open — ap
 dev, send queued review feedback — and the queued code-review feedback (#1037/#1382) has no
 hardware trigger. The issue asks for a stable **two-zone** SD+ layout (no modal reflow):
 
-- **Row 1** = the 4 existing fleet-selector keys (a 4-wide window; the Select dial = `ZoomNav`
-  rotate reaches builders past the first four). No change to Row 1 behaviour.
+- **Row 1** = the fleet-selector keys, upgraded from #1404's fixed absolute slots into a
+  **4-wide window that follows the selection**, so a fleet larger than 4 is fully reachable
+  (see "Row 1 windowing" below). The Select dial = `ZoomNav` rotate scrolls the window across
+  the whole fleet.
 - **Row 2** = a fixed action palette always acting on the **selected** builder:
   **[Approve gate] [Run Dev] [Send Fb (N)] [Next / attention]**.
 
@@ -143,6 +148,30 @@ the deck stops using them — leaning yes, to avoid a dead immediate-only path.)
 
 ### D. Deck: Row 2 palette + dial repoint + mode label (`apps/streamdeck`) — streamdeck lane
 
+**Row 1 windowing (requirement 1 — reach a fleet larger than 4).** Today `slotBuilder`
+(`actions.ts:82`) resolves a key's PI `slot` to a **fixed absolute index** (`builders()[slot-1]`),
+so Row 1 only ever shows builders 1-4. #1410 turns Row 1 into a **4-wide window that follows the
+selection**:
+
+- The visible page is **derived from the shared cursor** (no new stored offset, so nothing can
+  desync): `page = Math.floor(store.cursor.builder / 4)`; slot *i* (0-3) renders
+  `builders()[page*4 + i]`. Add a `store.windowedBuilder(slotIndex)` reader; `slotBuilder`
+  (or its Row 1 caller) switches to it. The per-key `slot` setting now means **position within
+  the window** (1-4), not an absolute index — shape-compatible with existing profiles.
+- The **Select dial** (`ZoomNav` rotate → `store.rotateCursor`) already walks `cursor.builder`
+  across the whole fleet; because the page derives from the cursor, rotating past index 3 flips
+  Row 1 to builders 5-8, then 9-N (trailing slots render the existing `{kind:'empty'}` face).
+  No new gesture.
+- **Selected-slot highlight**: the slot whose builder is `selectedBuilder()` gets an accent
+  (border / brighter ground) via a `selected` flag on the face, so the live builder is
+  unmistakable among the four. `face.ts` gains that accent branch.
+- This is a **page**, not a per-tick slide: the four keys stay put between 4-boundaries (only the
+  highlight moves), preserving muscle memory; a page flips only when the selection crosses a
+  boundary. A page flip changes *which builder* each selector shows, never a key's *purpose* — so
+  it is not the modal key-reflow requirement 1 rejects. (*Owner alternative:* a sliding window
+  that pins the selection to a fixed edge slot and repaints every tick — worse muscle memory;
+  offered if preferred.)
+
 `apps/streamdeck/src/actions.ts`:
 - **Dial press → feedback-\*** (requirement 2): in `DiffSpec.forward`, change
   `forward-file` → `feedback-file` (`DiffFileNav`) and `forward-hunk` → `feedback-hunk`
@@ -168,10 +197,12 @@ the deck stops using them — leaning yes, to avoid a dead immediate-only path.)
   verb). Inert when no gate pends.
 
 `apps/streamdeck/src/store.ts`: add `feedbackMode()` and `queuedFeedback(builderId)` readers off
-`this.overview` (defaulting to `'forward'` / `0`).
+`this.overview` (defaulting to `'forward'` / `0`), and `windowedBuilder(slotIndex)` (the
+cursor-derived 4-wide window reader for Row 1).
 
 `apps/streamdeck/src/face.ts`: add `sendFbFaceSvg(n)` (and, if Next/attention needs a distinct
-glyph, a small addition) reusing the existing composite frame — accepted twin pattern.
+glyph, a small addition) reusing the existing composite frame — accepted twin pattern; plus a
+`selected`-slot accent branch on the builder face for the Row 1 highlight.
 
 `apps/streamdeck/com.cluesmith.codev.sdPlugin/manifest.json`: add the `send-queue` action
 (and `next-attention` action) UUIDs, Keypad controllers, icons; remove the retired singleton if
@@ -185,9 +216,10 @@ the 8 keys — Row 1 = 4× `builder-action` (slots 1-4), Row 2 = `approve-gate`,
 
 ### E. Tests, README, docs
 
-- Unit: deck `store` readers (`feedbackMode`/`queuedFeedback`); `SendQueueAction` inert-at-0 vs
-  send; `NextAttentionAction` jump target; `ReviewNav` touchstrip mode-label; dial press relays
-  `feedback-*` (extend `actions.test.ts`).
+- Unit: deck `store` readers (`feedbackMode`/`queuedFeedback`/`windowedBuilder`); Row 1 window
+  paging + selected-slot highlight (page derivation, trailing-empty slots, boundary flip);
+  `SendQueueAction` inert-at-0 vs send; `NextAttentionAction` jump target; `ReviewNav` touchstrip
+  mode-label; dial press relays `feedback-*` (extend `actions.test.ts`).
 - Unit: VSCode mode-router commands (forward → delegates; comment → `store.add` with the right
   `PendingComment`); relay allowlist includes the new verbs and excludes an options 2nd arg
   where relevant.
@@ -205,10 +237,10 @@ the 8 keys — Row 1 = 4× `builder-action` (slots 1-4), Row 2 = `approve-gate`,
 - `apps/vscode/src/command-relay.ts:24-61` — allowlist `feedback-*` + `send-queue`. *(→ main)*
 - `apps/vscode/src/extension.ts:~1217-1240` — 3 mode-router commands. *(→ main)*
 - `apps/vscode/src/__tests__/…` — relay + mode-router tests. *(→ main)*
-- `apps/streamdeck/src/actions.ts` — dial press verbs, touchstrip label, Approve repurpose,
-  `SendQueueAction`, `NextAttentionAction`.
-- `apps/streamdeck/src/store.ts` — `feedbackMode()`, `queuedFeedback()`.
-- `apps/streamdeck/src/face.ts` — `sendFbFaceSvg` (+ any Next glyph).
+- `apps/streamdeck/src/actions.ts` — Row 1 windowing (`windowedBuilder` + selected highlight),
+  dial press verbs, touchstrip label, Approve repurpose, `SendQueueAction`, `NextAttentionAction`.
+- `apps/streamdeck/src/store.ts` — `feedbackMode()`, `queuedFeedback()`, `windowedBuilder()`.
+- `apps/streamdeck/src/face.ts` — `sendFbFaceSvg` (+ any Next glyph), selected-slot accent.
 - `apps/streamdeck/src/plugin.ts` — register new actions.
 - `apps/streamdeck/com.cluesmith.codev.sdPlugin/manifest.json` — new action(s), retire singleton.
 - `apps/streamdeck/com.cluesmith.codev.sdPlugin/Codev.streamDeckProfile` — 8-key layout (zip).
@@ -247,10 +279,13 @@ PIR):
 
 - **Unit / CI:** `pnpm -C apps/streamdeck test`, `pnpm -C apps/vscode test`,
   `pnpm -C packages/codev test`, plus a full build. All green before the gate.
-- **Manual (hardware), two-zone layout:** Row 1 shows 4 builders; pressing a Row 1 key selects
-  that builder (dials + Row 2 re-target it) and opens its phase artifact. The Select dial
-  (ZoomNav rotate) walks to builders past the first four; Row 1 keys keep their slots (no
-  reflow).
+- **Manual (hardware), two-zone layout + >4 fleet:** with ≥6 (ideally 10) live builders, Row 1
+  shows a 4-wide window; the selected builder's slot is highlighted. Rotating the Select dial
+  (ZoomNav) past the 4th builder flips Row 1 to builders 5-8, then 9-N (trailing slots empty) —
+  the four keys stay put between page boundaries (no per-tick reshuffle), and each still means
+  "selector". Pressing any visible slot selects that builder (dials + Row 2 re-target it) and
+  opens its phase artifact. Builders past the window are still fully actionable: dial-select →
+  touchstrip tap opens the artifact, Row 2 acts on them.
 - **Manual — Row 2 palette on the selected builder:** [Run Dev] starts its worktree dev;
   [Approve gate] pops the confirmation modal for the *selected* builder (approve → `porch
   approve` runs); [Next / attention] jumps the selection to the pending-gate builder and shows
