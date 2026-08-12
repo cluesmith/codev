@@ -81,3 +81,21 @@ sync-note comments (same pattern as overview.ts ↔ builder-row.ts GATE_LABELS).
 Reframed the review's follow-up section from "candidate for a shared home" to "decision:
 intentional replication, shared-home declined by owner." Plan unchanged (already framed the
 twinning as the established sync-note pattern, no shared-module proposal).
+
+## Implement phase complete (2026-08-12)
+
+Built per approved plan:
+- NEW apps/streamdeck/src/face.ts (pure, SDK-free): builderState, STATE_COLOR (inlined hexes
+  mirroring vscode tokens), GATE_ICONS + in-plugin codicon-style GLYPHS, GATE_LABELS/PHASE_LABELS
+  + stateLabel, faceForBuilder, builderFaceSvg (72×72, icon zone + reserved text band, XML-escaped).
+- actions.ts BuilderAction.renderTo: setTitle overlay → builderFaceSvg(faceForBuilder(b)) +
+  setImage + setTitle(''). Only this method changed; press/rotate untouched.
+- Tests: NEW face.test.ts (builderState, stateLabel all ids, faceForBuilder icon selection + bell
+  fallback, builderFaceSvg content + XML escape); actions.test.ts updated to assert setImage SVG
+  (label + state colour) + empty-slot face.
+
+Green from the worktree: check-types clean, 101/101 tests pass, esbuild build ok. (Had to build
+codev-types + codev-sdk workspace deps first — dist wasn't present in the worktree.)
+
+Codicon-style glyphs are drawn in-plugin (codicon font not vendored — keeps zero-dep bundle);
+legibility is the hardware-gate check. dev-approval is a hardware session → next.
