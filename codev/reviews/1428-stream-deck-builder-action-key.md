@@ -43,7 +43,7 @@ vs merge-base `84407b8`:
 
 - `pnpm --filter @cluesmith/codev-streamdeck check-types`: ✓ pass
 - `pnpm --filter @cluesmith/codev-streamdeck build` (esbuild): ✓ pass
-- `pnpm --filter @cluesmith/codev-streamdeck test`: ✓ pass (106 tests, ~25 new)
+- `pnpm --filter @cluesmith/codev-streamdeck test`: ✓ pass (108 tests, ~27 new)
 - **Manual (hardware, dev-approval gate, Amr):** photo-level check on the physical deck across
   states — Builder Action keys (active phase, blocked gates, empty slot) and the Gates key
   (pending badge count vs no-gates). The **first** hardware pass exposed that raw SVG didn't render
@@ -82,6 +82,24 @@ sync-note comments. **Owner ruling (Amr):** this is the intended design — no c
 shared vocabulary module — recorded so it isn't re-litigated. The lane owner ruled the Gates-key
 extension **rides in this PR** (same root cause, shares the `face.ts` frame; the bug class ends
 there — `action`/`dev-server` are icon-only and the dials use `setFeedback`).
+
+## 3-Way Consultation Dispositions (review phase, single pass)
+
+- **Codex — REQUEST_CHANGES (HIGH), fixed.** `stateLabel` let a *mapped phase* win over an
+  *unmapped gate*, so a builder blocked at a future/unknown gate would show its phase label while
+  the face was already yellow + bell (blocked) — masking the pending gate. Real defect in the
+  documented "gate beats phase" fallback. **Fix:** any non-empty `blockedGate` now wins (mapped
+  label, else its first token title-cased, e.g. `security-approval` → `Security`); phase only when
+  there is no gate. **Regression test:** `face.test.ts` "an unmapped gate STILL wins over a known
+  phase". PIR is single-pass — this fix was **not** independently re-reviewed; please sanity-check
+  it at the `pr` gate.
+- **Gemini — APPROVE.** No issues.
+- **Claude — APPROVE**, with four non-blocking notes, all addressed: stale module-doc comment in
+  `actions.ts` (updated); long builder-id / unmapped-label could overflow the 72px face (added
+  `textLength`/`lengthAdjust` shrink-to-fit via `fit()`, with a test); the plan still said "only
+  `BuilderAction.renderTo` changes" (added a post-approval scope addendum to the plan); a ternary
+  in `renderTo` against the project's no-ternary preference (converted to if/else, and the
+  `faceForBuilder` ternaries too).
 
 ## Things to Look At During PR Review
 

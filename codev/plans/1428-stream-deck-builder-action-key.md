@@ -307,3 +307,13 @@ caused symptom 1).
 - **Manual — pre-flight (first at the hardware gate):** confirm the active/imported profile
   (incl. #1404-revved) does **not** pin a custom image on the Builder Action keys — a pinned
   custom image makes `setImage` a silent no-op. Check this before debugging the SVG or render path.
+
+## Scope addendum (post-approval, 2026-08-13)
+
+This plan (approved as written) scopes the **Builder Action** key. After approval, the owner
+confirmed on hardware that the **Gates** key (`ApproveGate`) has the identical text-over-icon
+overlap, and the lane owner ruled the fix rides in this PR. So `ApproveGate.renderTo` also switched
+to the composite `setImage(svgToDataUri(...))` treatment via a new `gatesFaceSvg`, sharing the same
+`face.ts` frame. Investigation confirmed the bug class ends there: `action`/`dev-server` keys are
+icon-only, and the encoders use `setFeedback` layouts. Broader per-button posture work remains the
+parked #1381. See the review for the full record.
