@@ -268,3 +268,24 @@ LESSON (build+test did NOT catch this — monorepo symlinks resolve everything;
 only the packaged artifact crashes). Saved to memory. Verified all runtime
 @cluesmith value-imports in packages/codev are now in dependencies (core, sdk,
 types). Commit f0f4afe2a.
+
+## dev-approval — startup readiness probe fix + header rename (2026-08-12)
+
+Two more issues surfaced by running the real build (build+test can't catch either):
+1. BOOT: `afx tower start`'s readiness probe polls GET /api/status (commands/
+   tower.ts) to detect "ready", but this change keyed /api/status -> probe 401'd
+   -> launcher never saw ready -> 30s timeout killed a healthy Tower. Fix:
+   authenticate the probe (send the key). /api/status keeps its boot-gated
+   readiness semantics. Commit 0ff32b63d.
+
+Header rename (user request): standardized codev-web-key -> codev-tower-key
+(matches the already-'tower'-named WS subprotocol). Renamed the header, the
+localStorage key, and the injected window global (__CODEV_TOWER_KEY__). Server
+DUAL-ACCEPTS the legacy codev-web-key for one release so a lagging separately-
+installed VS Code / Stream Deck (bundled old sdk) keeps working; added a
+dual-accept test. Verified pre-change (main): server never read the header
+(client-only aspiration), only the sdk-based clients sent it -> the rename is
+server-safe, residual concern is lagging VS Code/Stream Deck (covered by
+dual-accept). Wire name in codev-types (TOWER_KEY_HEADER + LEGACY_WEB_KEY_HEADER);
+disk key file + WS subprotocol unchanged. Follow-up: drop the fallback next release.
+Commit 11978b516. All suites green (codev 4884, sdk 98, web 335, vscode 794).
