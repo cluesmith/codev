@@ -1,7 +1,7 @@
 id: '1428'
 title: stream-deck-builder-action-key
 protocol: pir
-phase: review
+phase: verified
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -21,7 +21,7 @@ iteration: 1
 build_complete: true
 history: []
 started_at: '2026-08-12T12:05:28.964Z'
-updated_at: '2026-08-12T21:34:22.024Z'
+updated_at: '2026-08-12T21:34:30.663Z'
 pr_history:
   - phase: review
     pr_number: 1432
