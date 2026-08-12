@@ -39,3 +39,24 @@ approved as written; `Blocks · Submit` truncation fallback pre-approved):
 
 Both applied. Amr runs swap/restore at the gate session. Re-committed; still at
 plan-approval.
+
+## IMPLEMENT phase (2026-08-12)
+
+Plan approved. Implemented in `apps/streamdeck/src/actions.ts` (commit fe813cbe3):
+- `CanvasSpec` gained `press: CanvasCommand` + `pressLabel: string` (doc comment rewritten;
+  the "press is always composer-open, shared" rationale is gone).
+- `onDialDown` canvas branch sends `this.canvas.press`.
+- `renderTo` canvas-mode line 1 = `${label} · ${pressLabel}`; diff mode unchanged.
+- Fine (`DiffHunkNav`): `composer-open-or-submit` / `Open/Submit`. Coarse (`DiffFileNav`):
+  `composer-cancel` / `Cancel`.
+
+Tests: updated the two canvas-press assertions + both legibility/title tests to the new
+`Headings · Cancel` / `Blocks · Open/Submit` titles (three pre-existing tests asserted the
+bare titles). Did NOT add a redundant new title test — folded it into the existing
+canvas-legibility test. `check-types` clean, 84/84 tests pass, plugin builds
+(`bin/plugin.js` is gitignored, rebuilt at sideload). Note: had to build the sdk dist first
+(`pnpm --filter @cluesmith/codev-sdk build`) or the streamdeck check-types can't resolve
+`@cluesmith/codev-sdk/*`.
+
+At dev-approval — hardware session. Amr runs the sideload swap (worktree build) → verify →
+restore to main-checkout build.
