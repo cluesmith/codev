@@ -207,6 +207,19 @@ describe('ApproveGate', () => {
     expect(ctx.sent).toHaveLength(0);
     expect(ev.action.showAlert).toHaveBeenCalled();
   });
+
+  it('renders a composite Gates face (count + label under a bell), not a title over the icon', () => {
+    const ctx = makeStore(); // pir-1 blocked → 1 pending gate
+    const key = { id: 'G', isKey: () => true, setImage: vi.fn(), setTitle: vi.fn() };
+    new ApproveGate(ctx.store).onWillAppear({ action: key, payload: {} } as never);
+    const arg = String(key.setImage.mock.calls.at(-1)?.[0] ?? '');
+    expect(arg.startsWith('data:image/svg+xml;base64,')).toBe(true);
+    const face = Buffer.from(arg.slice('data:image/svg+xml;base64,'.length), 'base64').toString('utf8');
+    expect(face).toContain('Gates');
+    expect(face).toContain('>1<'); // the pending count
+    expect(face).toContain('#cca700'); // pending → warning yellow
+    expect(key.setTitle).toHaveBeenCalledWith(''); // title layer suppressed
+  });
 });
 
 describe('encoders', () => {

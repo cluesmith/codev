@@ -15,7 +15,7 @@ import type {
   CanvasCommandClientErrorCode,
 } from '@cluesmith/codev-sdk/controller';
 import type { CodevStore } from './store.js';
-import { builderFaceSvg, faceForBuilder, svgToDataUri } from './face.js';
+import { builderFaceSvg, faceForBuilder, gatesFaceSvg, svgToDataUri } from './face.js';
 
 /**
  * The Stream Deck actions — thin adapters over CodevStore. Each maps a physical
@@ -209,7 +209,10 @@ export class ApproveGate extends SingletonAction {
   }
   private renderTo(action: KeyAction): void {
     const n = this.store.pendingGates().length;
-    void action.setTitle(n > 0 ? `Gates\n${n}` : 'Gates');
+    // Composite SVG face (same fix as BuilderAction): count + label in a reserved band under the
+    // bell icon, instead of a title stacked over the manifest PNG.
+    void action.setImage(svgToDataUri(gatesFaceSvg(n)));
+    void action.setTitle('');
   }
 }
 

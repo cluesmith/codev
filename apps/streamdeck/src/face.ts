@@ -154,17 +154,50 @@ export function faceForBuilder(b: OverviewBuilder): BuilderFace {
  * for the collision symptom.
  */
 export function builderFaceSvg(face: BuilderFace | { kind: 'empty'; slot: string }): string {
-  const bg = '<rect width="72" height="72" rx="12" fill="#1b1b1e"/>';
-  const divider = '<line x1="14" y1="35" x2="58" y2="35" stroke="#333338" stroke-width="1"/>';
   if (face.kind === 'empty') {
-    const icon = `<g transform="translate(24,7)">${GLYPHS.bolt('#63636b')}</g>`;
-    const slot = `<text ${textAttrs(36, 55, 14, 600)} fill="#8a8a92">Slot ${escapeXml(face.slot)}</text>`;
-    return svg(`${bg}${icon}${divider}${slot}`);
+    return svg(`${BG}${iconZone('bolt', '#63636b')}${DIVIDER}${centeredLine(`Slot ${face.slot}`)}`);
   }
-  const icon = `<g transform="translate(24,7)">${GLYPHS[face.icon](STATE_COLOR[face.state])}</g>`;
-  const number = `<text ${textAttrs(36, 50, 16, 700)} fill="#f4f4f6">${escapeXml(face.number)}</text>`;
-  const label = `<text ${textAttrs(36, 63, 12, 500)} fill="#a9a9b2">${escapeXml(face.label)}</text>`;
-  return svg(`${bg}${icon}${divider}${number}${label}`);
+  return svg(
+    `${BG}${iconZone(face.icon, STATE_COLOR[face.state])}${DIVIDER}` +
+      `${primaryLine(face.number)}${secondaryLine(face.label)}`,
+  );
+}
+
+/**
+ * The Gates (approve-gate) key face — same composite frame as the builder face, fixing the same
+ * text-over-icon overlap. A `bell` (the sidebar's "needs attention" glyph, `builder-row.ts`) tinted
+ * warning-yellow with the pending count when gates await approval; a dim neutral bell with just the
+ * `Gates` label when none are pending.
+ */
+export function gatesFaceSvg(pendingCount: number): string {
+  if (pendingCount <= 0) {
+    return svg(`${BG}${iconZone('bell', '#63636b')}${DIVIDER}${centeredLine('Gates')}`);
+  }
+  return svg(
+    `${BG}${iconZone('bell', STATE_COLOR.blocked)}${DIVIDER}` +
+      `${primaryLine(String(pendingCount))}${secondaryLine('Gates')}`,
+  );
+}
+
+/** Shared face frame: the rounded key ground and the hairline that splits icon zone from text band. */
+const BG = '<rect width="72" height="72" rx="12" fill="#1b1b1e"/>';
+const DIVIDER = '<line x1="14" y1="35" x2="58" y2="35" stroke="#333338" stroke-width="1"/>';
+
+/** Place a glyph, tinted, in the icon zone (upper ~30px). */
+function iconZone(glyph: GlyphKey, color: string): string {
+  return `<g transform="translate(24,7)">${GLYPHS[glyph](color)}</g>`;
+}
+/** Primary datum: bold, high-contrast (issue number / pending count). */
+function primaryLine(text: string): string {
+  return `<text ${textAttrs(36, 50, 16, 700)} fill="#f4f4f6">${escapeXml(text)}</text>`;
+}
+/** Secondary label: muted, below the primary line. */
+function secondaryLine(text: string): string {
+  return `<text ${textAttrs(36, 63, 12, 500)} fill="#a9a9b2">${escapeXml(text)}</text>`;
+}
+/** A single muted line centered in the band, when there is no primary datum (empty slot / no gates). */
+function centeredLine(text: string): string {
+  return `<text ${textAttrs(36, 55, 14, 600)} fill="#8a8a92">${escapeXml(text)}</text>`;
 }
 
 function svg(inner: string): string {
