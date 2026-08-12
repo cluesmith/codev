@@ -23,8 +23,11 @@ export interface CanvasCommandInvocation {
  * back through `onCommand`.
  *
  * Commands drive the SAME per-action implementations as the keyboard, so the remote and in-page
- * paths cannot diverge. What a command cannot do is type: comment bodies are entered on the
- * keyboard, so `composer-open` and `composer-submit` are in the vocabulary but text entry is not.
+ * paths cannot diverge. One member has no keyboard twin: `composer-open-or-submit` (#1420) is
+ * resolved canvas-side against composer state (open when none is open, else submit) so a stateless
+ * controller can drive open-then-submit from one gesture. What a command cannot do is type: comment
+ * bodies are entered on the keyboard, so `composer-open` and `composer-submit` are in the vocabulary
+ * but text entry is not.
  *
  * Optional by design: a host that omits `commandAdapter` gets exactly today's behavior.
  */

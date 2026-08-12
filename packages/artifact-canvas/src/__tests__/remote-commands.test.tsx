@@ -362,21 +362,34 @@ describe('remote command channel', () => {
 
   // The draft-safety ruling: a press on an open-but-empty composer must neither submit nor discard
   // the draft. Submit is CommentComposer's own no-op on empty, and the open branch is never taken
-  // while the composer is open, so the composer stays mounted.
-  it('leaves an empty open composer mounted and writes nothing (composer-open-or-submit)', async () => {
+  // while the composer is open, so the composer stays mounted AND anchored to its original line.
+  // Moving the cursor with `block-next` between presses is what makes this assert "never
+  // re-anchors": if the branch resolved wrongly it would re-open at the NEW focused line, changing
+  // the composer's line-scoped aria-label. Asserting the label is unchanged catches that directly.
+  it('leaves an empty open composer mounted and anchored, writing nothing (composer-open-or-submit)', async () => {
     const { channel, onAddComment } = mount();
     await rendered();
 
     channel.send('doc-start');
+    const originalLine = focusedLine();
     channel.send('composer-open-or-submit');
+    const label = `Add comment on line ${Number(originalLine) + 1}`;
     await waitFor(() => {
-      expect(document.querySelector('.codev-canvas-comment-composer')).not.toBeNull();
+      const el = document.querySelector('.codev-canvas-comment-composer-input');
+      if (!el) throw new Error('composer did not open');
+      expect(el.getAttribute('aria-label')).toBe(label);
     });
 
-    // Composer open, draft empty: the press is a no-op that keeps the composer (and its draft) alive.
+    // Move the cursor off the composer's line, then press again with the draft still empty.
+    channel.send('block-next');
+    expect(focusedLine()).not.toBe(originalLine);
     channel.send('composer-open-or-submit');
+
+    // No write, composer still mounted, and still anchored to the ORIGINAL line — no re-anchor.
     expect(onAddComment).not.toHaveBeenCalled();
-    expect(document.querySelector('.codev-canvas-comment-composer')).not.toBeNull();
+    const composer = document.querySelector('.codev-canvas-comment-composer-input');
+    expect(composer).not.toBeNull();
+    expect(composer?.getAttribute('aria-label')).toBe(label);
   });
 
   // Column paging is meaningful only in horizontal mode; jsdom cannot measure column geometry,

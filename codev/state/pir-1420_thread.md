@@ -30,3 +30,27 @@ Plan has a dedicated "Command semantics" section to route to the streamdeck arch
 before the plan gate (per the process ruling in the issue comments).
 
 Next: notify architect + streamdeck architect; wait at plan-approval gate.
+
+## Implement phase (iter 1) — done, verifying
+plan-approval approved by human. Implemented all five code locations + tests (commit 3c719dac6):
+- types union + doc, type-test CLASSIFICATION map, Tower relay allowlist, host allowlist, canvas
+  action map (`composer-open-or-submit`).
+- Tests: canvas open/submit/empty-no-op via remote channel; relay round-trip + count-rejection.
+
+Green: codev 4850 passed / 48 skipped; artifact-canvas 176; types build + type-tests; vscode
+check-types. All exit 0.
+
+CMAP (impl, pir): codex APPROVE, claude APPROVE, gemini REQUEST_CHANGES. Gemini's only blocker is
+"missing review artifact" — a FALSE POSITIVE: PIR implement.md forbids writing the review file this
+phase (it's the review phase's job). Claude flagged the same and confirmed it's not a defect.
+
+Applied two non-blocking CMAP nits from claude:
+- Strengthened the empty-draft test to assert NO re-anchor (block-next between presses, assert the
+  composer aria-label still names the original line — the prior test would pass even under wrong
+  branch resolution).
+- Updated stale CommandAdapter.ts prose to mention the context-aware member (plan flagged optional).
+
+Also confirmed (claude): the edit composer shares composingLine, so a press mid-edit routes to
+submit-the-edit, never a draft-discarding re-anchor. Worth exercising at the dev gate.
+
+Next: re-run canvas tests after nits, commit, `porch done`, wait at dev-approval gate.
