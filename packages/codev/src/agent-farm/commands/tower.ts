@@ -10,6 +10,8 @@ import { spawn } from 'node:child_process';
 import { getConfig } from '../utils/config.js';
 import { execSync } from 'node:child_process';
 import { DEFAULT_TOWER_PORT, AGENT_FARM_DIR } from '../lib/tower-client.js';
+import { ensureLocalKey } from '@cluesmith/codev-core/auth';
+import { WEB_KEY_HEADER } from '@cluesmith/codev-types';
 import { isPortAvailable } from '../utils/shell.js';
 import Database from 'better-sqlite3';
 import { getGlobalDbPath } from '../db/index.js';
@@ -109,6 +111,15 @@ async function isPortInUse(port: number): Promise<boolean> {
  */
 async function isServerResponding(port: number): Promise<boolean> {
   return new Promise((resolve) => {
+    // /api/status is a keyed route (advisory GHSA-xvjp-7748-v88v). This readiness
+    // probe is a trusted local caller, so it sends the shared local key like any
+    // other client — otherwise it 401s forever and startup never detects "ready".
+    const headers: Record<string, string> = {};
+    try {
+      headers[WEB_KEY_HEADER] = ensureLocalKey();
+    } catch {
+      // Key unavailable — fall through unauthenticated (probe will just fail).
+    }
     const req = http.request(
       {
         hostname: '127.0.0.1',
@@ -116,6 +127,7 @@ async function isServerResponding(port: number): Promise<boolean> {
         path: '/api/status',
         method: 'GET',
         timeout: 2000,
+        headers,
       },
       (res) => {
         resolve(res.statusCode === 200);
