@@ -27,8 +27,8 @@ Both panel tabs are tree views; **no `WebviewViewProvider` is registered anywher
 The extension already computes, elsewhere, every piece of state the contextual modes want:
 
 - **Artifact-file context:** spec/plan/review files are matched by the path shape `/\/codev\/(plans|specs|reviews)\//` (used both by the `codev.markdownPreview` custom-editor selector and by menu `when` clauses).
-- **Builder diff editor:** the unified multi-file diff opens under the custom scheme `codev-diff:`; the `codev.activeEditorIsBuilderFile` context key already tracks whether the active editor belongs to a builder diff session.
-- **Builder terminal:** `TerminalManager` owns builder PTY terminals; `resolveBuilderTerminal` maps a terminal to its builder id.
+- **Builder diff editor:** the unified multi-file diff renders each file as a two-side diff whose *base/left* side is backed by the read-only custom scheme `codev-diff:`, while the *right* side is the live `file:` worktree document (which is the side the context key keys off). The `codev.activeEditorIsBuilderFile` context key tracks whether the active editor's file is registered in a builder diff-inject session — note this is true for *any* registered builder file, including one opened as a normal editor tab, not only inside the diff surface. The diff-inject registry is populated *after* the diff editor activates and exposes a change event (`onDidChangeDiffInjectRegistry`).
+- **Builder terminal:** `TerminalManager` owns builder PTY terminals; `getActiveBuilderId()` maps the currently active managed terminal to its builder id (the inverse helper `resolveBuilderTerminal` maps a builder id to its terminal).
 - **Attention data:** the Agents view (`codev.agents`, `BuildersProvider`) already sorts builders into blocked / idle-waiting / active buckets. Its data comes from `OverviewCache` (`GET /api/overview` from Tower, refreshed on SSE), typed as `OverviewBuilder` / `OverviewData` (fields: `blocked`, `blockedGate`, `blockedSince`, `gates`, `phase`, `prReady`, `idleMs`, `heldCount`, `mailboxEscalated`). There is no view literally named "Needs Attention" — the Agents view is the closest existing surface.
 - **Per-builder pending comments (#1037):** `ReviewQueueStore` watches `.builders/*/.codev/pending-comments.json`, exposing `buildersWithPending()`, `getComments(id)`, `count(id)`, and `onDidChangeQueue(builderId)`.
 - **Review markers (#859/#945):** the SDK codec (`@cluesmith/codev-sdk` review-markers) parses/serializes markers whose actual on-disk form is `<!-- REVIEW(@<author>): <text> -->` (positional), consumed by the markdown preview and plan-review flows.
@@ -57,14 +57,17 @@ Users will see: the panel automatically pairs with what they are looking at; pow
 ## Success Criteria
 
 - [ ] One contextual `Codev` tab exists in the bottom panel; the existing scaffold placeholder is repurposed into it. The `Codev Dev` tab is untouched.
-- [ ] A `ModeResolver` exists as a **pure, synchronous function** taking `(activeContext, workspaceState, pinnedMode)` and returning a `ModeDescriptor` (`{ kind: 'document-review' | 'code-review' | 'builder-inspector' | 'attention', context }`). No filesystem walks, no async, no network. Its inputs are cheap-to-compute (URI-prefix / scheme / context-value checks).
-- [ ] The panel header renders four mode pills (Document Review, Code Review, Builder Inspector, Attention). The active mode is visually distinct. Modes inapplicable to the current context are visibly greyed rather than hidden.
-- [ ] Clicking an applicable mode pill overrides the contextual default for the session. A pin control toggles persistent pinning, stored per workspace under the key `codev.contextualPanel.pinnedMode`; when pinned, the panel stops switching with the editor.
-- [ ] When no context matches and no pin is set, the panel falls back to Attention mode.
-- [ ] The mode switches in response to the active-surface changing within a perceptible budget (~50 ms from the editor/terminal-change event to the header reflecting the new mode); resolution itself is O(1).
+- [ ] A `ModeResolver` exists as a **pure, synchronous, VSCode-free function** taking a plain `SurfaceContext` value plus a `ModeOverride | null`, and returning a `ModeDescriptor` (`{ kind: 'document-review' | 'code-review' | 'builder-inspector' | 'attention', context }`) together with the applicability of all four modes. No VSCode host types in the signature (no `Memento`/editor objects), no filesystem walks, no async, no network. A host-side adapter derives `SurfaceContext` from cheap signals (active tab input viewType/scheme/resource path, `codev.activeEditorIsBuilderFile`, `getActiveBuilderId()`) and reads the persisted override before calling the resolver.
+- [ ] **Predicate precedence is explicit and total.** When more than one context predicate matches (e.g. a builder's `codev/specs/*.md` open inside a diff session satisfies both the artifact-path and builder-diff predicates), the resolver applies a single documented priority order to pick exactly one mode. The order is a plan-gate decision; whatever it is, it is encoded once, tested, and never ambiguous.
+- [ ] **Context is derived from the active tab, not `activeTextEditor` alone**, so the resolver works for the extension's non-text surfaces: the `codev.markdownPreview` custom editor (where `activeTextEditor` is `undefined`) still resolves to Document Review, and the multi-file diff tab still resolves to Code Review. The trigger set includes tab-group changes, terminal-focus changes, and diff-inject registry changes — not only `onDidChangeActiveTextEditor`.
+- [ ] The panel header renders four mode pills (Document Review, Code Review, Builder Inspector, Attention). The active mode is visually distinct. Modes inapplicable to the current context are visibly greyed rather than hidden (any mode remains user-selectable/pinnable).
+- [ ] **Override model is unified and its lifetime is defined.** Selecting a mode pill sets a session override; a pin control persists that override per workspace under the key `codev.contextualPanel.pinnedMode`. An override (session or pinned) holds across active-surface changes until the user changes it or clears it; a documented "return to contextual" affordance clears it. A pinned override survives reload; a session-only override does not.
+- [ ] When no context matches and no override is set, the panel falls back to Attention mode.
+- [ ] The mode switches in response to the active-surface changing within a perceptible budget (~50 ms from the trigger event to the header reflecting the new mode); resolution itself is O(1).
 - [ ] The panel exposes a render target per mode but does **not** implement mode content — it ships placeholder bodies per mode plus the orchestration that switches between them.
-- [ ] Unit tests cover the resolver's branches: each active-surface type → its mode, pin-overrides-context, attention fallback when nothing matches, and modes reported greyed/inapplicable for the current context.
-- [ ] Dev-approval walkthrough passes: open a spec → Document Review active; switch to a builder diff editor → Code Review active; focus a builder terminal → Builder Inspector active; pin Attention, switch editors → panel stays on Attention.
+- [ ] The webview surface is hardened: nonce-based CSP, constrained `localResourceRoots`, an allowlisted/validated host↔webview message contract, and escaping of any header text derived from file paths or builder ids.
+- [ ] Unit tests cover the resolver's branches: each active-surface type → its mode, predicate-overlap precedence, override-overrides-context, attention fallback when nothing matches, modes reported greyed/inapplicable for the current context, and graceful degradation on malformed/absent inputs. Additional automated tests cover provider event wiring, the webview message contract, override reset, and pin persistence round-trip.
+- [ ] Dev-approval walkthrough passes: open a spec (including via the Codev markdown preview) → Document Review active; switch to a builder diff editor → Code Review active; focus a builder terminal → Builder Inspector active; pin Attention, switch editors → panel stays on Attention.
 
 ## Constraints
 
@@ -76,9 +79,12 @@ Technical and integration constraints that bound the solution. The following ref
 - **Panel-only change (baked):** no sidebar restructuring, no editor/terminal-surface modes, single mode at a time (no split-mode) for v1. Each VSCode window reflects its own active surface (already correct — active editor is per-window).
 - **Performance budget (baked):** resolution runs on every active-surface change and must be O(1) — URI-prefix matching, scheme checks, `contextValue`/context-key checks, no filesystem walks. Data fetches are deferred into render.
 - **Header with mode-pill buttons implies a webview surface.** The current panel tabs are tree views and no `WebviewViewProvider` exists yet; a mode-switcher header is not expressible as a tree. This is new infrastructure for the extension (see Solution Approaches).
-- **Reuse existing state sources, do not duplicate them:** artifact-path matching, the `codev-diff:` scheme / `codev.activeEditorIsBuilderFile` key, `resolveBuilderTerminal`, `OverviewCache`, `ReviewQueueStore`, and the SDK review-marker codec are the authoritative inputs. The resolver reads already-computed signals; it does not re-derive them.
-- **Terminal focus is a distinct VSCode event.** A builder terminal becoming active fires `onDidChangeActiveTerminal`, not `onDidChangeActiveTextEditor`. Builder Inspector mode therefore cannot be driven by the text-editor event alone; the resolver's trigger set must include the terminal event. (Correction to the issue's "runs on onDidChangeActiveTextEditor" phrasing.)
-- **Persistence uses `workspaceState` (per-workspace Memento),** matching the existing `AreaGroupExpansionStore` precedent, under key `codev.contextualPanel.pinnedMode`. Note this is per-workspace-folder, shared across windows opening the same folder (see Open Questions on pin scope).
+- **Reuse existing state sources, do not duplicate them:** artifact-path matching, the `codev-diff:` scheme / `codev.activeEditorIsBuilderFile` key / `onDidChangeDiffInjectRegistry`, `getActiveBuilderId()`, `OverviewCache`, `ReviewQueueStore`, and the SDK review-marker codec are the authoritative inputs. The resolver reads already-computed signals; it does not re-derive them.
+- **The resolver contract is VSCode-free and total.** Its input is a plain `SurfaceContext` value (illustratively: `{ surface: 'artifact' | 'builder-diff' | 'builder-terminal' | 'other' | 'none', resourcePath?, viewType?, builderId? }`) produced by a thin host-side adapter, plus an optional `ModeOverride` (`{ mode, persistent }`). It returns the chosen `ModeDescriptor` and the applicability of each mode. It must never throw on malformed input — unknown/empty context degrades to Attention. This keeps it unit-testable under Vitest with no VSCode host and no `Memento` in the signature.
+- **Context is tab-based, and the trigger set is explicit.** The adapter reads the active tab input (`window.tabGroups.activeTabGroup.activeTab.input` → viewType/scheme + resource URI) rather than `activeTextEditor` alone, so custom editors (`codev.markdownPreview`) and the multi-file diff tab resolve correctly. Re-resolution is triggered by tab-group changes, terminal-focus changes (`onDidChangeActiveTerminal`), and diff-inject registry changes (`onDidChangeDiffInjectRegistry`, since the registry populates after the diff activates). (Correction to the issue's "runs on onDidChangeActiveTextEditor" phrasing.)
+- **Active-surface semantics must resolve editor-vs-terminal focus.** A terminal gaining focus does not clear `activeTextEditor`; the adapter must decide the currently-active surface (most-recently-focused editor tab vs terminal) and define how returning focus to an editor exits Builder Inspector. This is captured as an Important open question, not left implicit.
+- **Persistence uses `workspaceState` (per-workspace Memento),** matching the existing `AreaGroupExpansionStore` precedent, under key `codev.contextualPanel.pinnedMode`. This is per-workspace-folder: windows on distinct folders naturally keep distinct pins; only the rare case of two windows on the *identical* folder shares it (see Open Questions on pin scope, reconciled with issue #1049's per-window out-of-scope bullet).
+- **Webview hardening is required (baked by the substrate choice).** The panel webview must use a nonce-based CSP, constrained `localResourceRoots`, an allowlisted and validated host↔webview message contract (discriminated union, ignore unknown types), and HTML-escaping of any header text derived from file paths or builder ids.
 - **Testing harness:** pure-logic units use Vitest (`src/__tests__/**/*.test.ts`, node env); manifest structure is asserted with text-reading invariant tests; provider tests mock `vscode` via `vi.mock`. The pure resolver must be Vitest-testable with no VSCode host.
 - **Review-marker on-disk format** is `<!-- REVIEW(@<author>): <text> -->` (per the SDK codec), not the `<!-- REVIEW: author "body" -->` form in the issue text. Document Review's future content must read the real codec.
 
@@ -96,7 +102,7 @@ The architecture (resolver + renderer, pure resolver, four modes) is baked. The 
 
 ### Approach 1: Webview-view panel (recommended)
 
-Back the contextual tab with a `WebviewViewProvider` registered against the `codevPanel` container. The webview renders the header (context label + four mode pills + pin control) and a mode body region. The host runs the resolver on active-surface-change events and posts the resulting `ModeDescriptor` to the webview; the webview renders the header state and a per-mode placeholder body. Message passing follows the existing `BacklogSearchPanel` (themed `--vscode-*` HTML) or `MarkdownPreviewProvider` (React) precedents.
+Back the contextual tab with a `WebviewViewProvider` registered against the `codevPanel` container. The webview renders the header (context label + four mode pills + pin control) and a mode body region. The host derives a tab-based `SurfaceContext`, runs the pure resolver on active-surface-change events (tab-group, terminal-focus, diff-inject registry), and posts the resulting `ModeDescriptor` to the webview; the webview renders the header state and a per-mode placeholder body. Message passing follows the existing `BacklogSearchPanel` (themed `--vscode-*` HTML) or `MarkdownPreviewProvider` (React) precedents, and inherits their nonce/CSP/`localResourceRoots` hardening.
 
 - **Pros:** the mode-pill header, greyed/active pill styling, hover explanations, and a flexible mode body are all naturally expressible; gives participating issues a real render surface (React or HTML) to build their mode content into; matches where the extension's richer surfaces already live.
 - **Cons:** first view-embedded webview in the extension — a small amount of new infrastructure (webview lifecycle in a panel view, CSP, bundle wiring); more surface area than a tree.
@@ -116,13 +122,15 @@ Keep a `TreeDataProvider` (evolving the placeholder) and express the "header" as
 
 **Critical (blocks progress):**
 
-- None. The baked architecture, mode mapping, and out-of-scope boundary remove the blocking ambiguities; the substrate choice above has a clear recommendation.
+- None. The baked architecture, mode mapping, and out-of-scope boundary remove the blocking ambiguities; the substrate choice has a clear recommendation, and the precedence gap surfaced by review is now a required (though as-yet-unordered) criterion rather than a hidden ambiguity.
 
 **Important (shapes design — resolve at plan gate):**
 
-- **Pin scope: per-window vs per-workspace.** Plan-gate lean #1 favors per-window (each window has its own panel state), but `workspaceState` persists per workspace-folder and is *shared* across windows opening the same folder. True per-window requires in-memory/session state (not persisted) or window-keyed storage. Which wins: per-window feel (session-scoped, not persisted) or persisted-per-workspace as the issue's key name implies? (Recommend: persist the pin per workspace under `codev.contextualPanel.pinnedMode`; accept that same-folder multi-window shares it, which is rare.)
-- **Terminal trigger event.** Confirm Builder Inspector mode is driven by `onDidChangeActiveTerminal` (plus text-editor changes for the other modes), since the text-editor event does not fire on terminal focus. Does focusing a builder terminal switch the mode while a text editor remains the "active editor"? (Recommend: yes — treat the active terminal as part of the resolver's `activeContext`.)
-- **Sticky input during mode switch.** Plan-gate lean #5: if the user is mid-typing in one mode and focuses an editor that would switch modes, does the panel switch immediately (losing input) or hold until the input settles? (Recommend: hold until commit — typed input is sticky.) The skeleton's placeholder bodies have no input, so this is a contract to define now and honor when participating modes add inputs.
+- **Predicate precedence order.** The resolver must pick exactly one mode when predicates overlap (a builder's `codev/specs/*.md` in a diff session satisfies both artifact-path and builder-diff). What is the order? (Recommend: builder-terminal → builder-diff → artifact-path → attention. Rationale: the diff surface signals code-review intent even when the file is an artifact; a spec opened as a plain/preview tab is not a builder-diff surface, so it still lands in Document Review.) The order is a decision to lock, not to leave to implementation.
+- **Active-surface (editor vs terminal) semantics.** Focusing a builder terminal fires `onDidChangeActiveTerminal` but does not clear `activeTextEditor`. How is the "active surface" chosen, and how does returning focus to an editor exit Builder Inspector? (Recommend: track the most-recently-focused surface; an editor-tab focus supersedes the terminal, a terminal focus supersedes the tab; Builder Inspector holds only while the terminal is the most-recent surface.)
+- **Override lifetime and clearing.** A session override (pill click) and a pin (persisted override) both hold across surface changes. What clears a session override — an explicit "return to contextual" control, re-clicking the active pill, or closing the panel? Can builder-dependent modes (Code Review / Builder Inspector) be pinned when no builder is in context (they render an empty "no builder" state)? (Recommend: explicit clear control + re-click clears; any mode is pinnable, builder-dependent modes show an empty state when context is absent.)
+- **Pin scope, reconciled with the issue's out-of-scope.** Issue #1049 states both "persisted as `codev.contextualPanel.pinnedMode` per workspace" and, in Out of Scope, "each VSCode window keeps its own pin state." These are reconcilable: `workspaceState` is per-workspace-folder, so windows on distinct folders already keep distinct pins; the only shared case is two windows on the identical folder. Decision to confirm at the gate: accept per-workspace-folder persistence (shared in the rare identical-folder case) or use in-memory per-window state (true per-window, but the pin does not survive reload). (Recommend: per-workspace-folder persistence — honors both statements for the common case.)
+- **Sticky input during mode switch.** Plan-gate lean #5: if the user is mid-typing in one mode and focuses an editor that would switch modes, does the panel switch immediately (losing input) or hold until the input settles? (Recommend: hold until commit — typed input is sticky. A standard host↔webview signal such as `postMessage({ type: 'userEditingStateChanged', isEditing })` lets the orchestrator defer re-resolution; skeleton placeholders never set `isEditing`, but defining the contract now makes downstream mode integration seamless.)
 
 **Nice-to-know (optimization):**
 
@@ -134,25 +142,35 @@ Keep a `TreeDataProvider` (evolving the placeholder) and express the "header" as
 
 **Resolver (pure-function unit tests — happy paths and branches):**
 
-- Active editor is a `codev/specs/…md` file → `document-review`; same for `plans/` and `reviews/`.
-- Active editor is a `codev-diff:` builder diff / `codev.activeEditorIsBuilderFile` is true → `code-review`, context carries the builder id.
-- Active surface is a builder terminal → `builder-inspector`, context carries the builder id.
-- No matching context (arbitrary non-artifact file, no builder terminal) → `attention` (fallback).
-- A pin is set → resolver returns the pinned mode regardless of context (pin overrides).
+- Artifact surface: `SurfaceContext` for a `codev/specs/…md` file → `document-review`; same for `plans/` and `reviews/`.
+- Artifact via custom editor: surface `viewType = codev.markdownPreview` on a spec resource → `document-review` (proves the tab-based, not `activeTextEditor`, model).
+- Builder-diff surface (diff tab / `activeEditorIsBuilderFile`) → `code-review`, context carries the builder id.
+- Builder-terminal surface → `builder-inspector`, context carries the builder id.
+- **Predicate overlap:** a builder `codev/specs/*.md` inside a diff session → the single mode chosen by the documented precedence order (and a test asserting the order is applied, not either-or).
+- No matching context → `attention` (fallback).
+- An override is set (session or pinned) → resolver returns the overridden mode regardless of context; a builder-dependent overridden mode with no builder in context reports an empty-context descriptor rather than throwing.
 - For a given context, the resolver reports which of the four modes are applicable vs inapplicable (drives greyed pills).
 
 **Edge cases:**
 
-- Non-builder markdown file *outside* `codev/{specs,plans,reviews}/` → not Document Review (must be Attention or whatever else matches), guarding against over-broad path matching.
-- Active editor is `undefined` (all editors closed) with a builder terminal focused → `builder-inspector`; with nothing focused → `attention`.
-- Pinned mode value that is stale/invalid (persisted mode no longer valid) → resolver degrades gracefully to contextual/attention rather than throwing.
+- Non-builder markdown file *outside* `codev/{specs,plans,reviews}/` → not Document Review (guards against over-broad path matching).
+- Multi-file diff tab active where the registry has not yet populated on first open → re-resolution on `onDidChangeDiffInjectRegistry` yields `code-review` (no stale-key miss).
+- Surface is `none`/unknown (all tabs closed) with a builder terminal focused → `builder-inspector`; with nothing focused → `attention`.
+- Malformed/stale override value (persisted mode no longer valid) → resolver degrades to contextual/attention rather than throwing.
 - Multi-window: each window's resolver reflects its own active surface independently.
 
-**Non-functional / integration:**
+**Provider / integration (mocked-`vscode` and manifest tests):**
 
-- Switching the active editor updates the header within ~50 ms (no perceptible lag); resolution is O(1) with no filesystem/network calls on the switch path.
+- Provider event wiring: tab-group / terminal-focus / diff-inject-registry changes each trigger exactly one re-resolution and a header update.
+- Webview message contract: unknown/malformed inbound messages are ignored; known messages (mode-select, pin-toggle, clear-override) drive the expected host action.
+- Override reset: selecting a pill sets the session override; the clear control returns to contextual resolution.
+- Persistence round-trip: pinning writes `codev.contextualPanel.pinnedMode`; reopening the workspace restores the pin; unpinning clears it and resumes contextual switching.
 - Manifest invariant: the panel container contributes the contextual `Codev` view and still contributes `codev.dev`; the placeholder is repurposed/hidden appropriately.
-- Persistence round-trip: pinning a mode writes `codev.contextualPanel.pinnedMode`; reopening the workspace restores the pin; unpinning clears it and resumes contextual switching.
+
+**Non-functional / security:**
+
+- Switching the active surface updates the header within ~50 ms (no perceptible lag); resolution is O(1) with no filesystem/network calls on the switch path.
+- Webview CSP: only nonce-tagged scripts execute; resources outside `localResourceRoots` are blocked; a header context label containing HTML metacharacters (crafted path/builder id) renders escaped, not as markup.
 
 **Error conditions:**
 
@@ -164,6 +182,9 @@ Keep a `TreeDataProvider` (evolving the placeholder) and express the "header" as
 | Risk | Probability | Impact | Mitigation |
 |------|-------------|--------|------------|
 | First view-embedded webview adds unforeseen lifecycle/CSP/bundle work | Medium | Medium | Model directly on existing `BacklogSearchPanel` / `MarkdownPreviewProvider` webviews; keep the skeleton's bodies as placeholders so webview scope is header + switching only. |
+| Overlapping predicates make the "deterministic resolver" non-deterministic (the load-bearing risk for a resolver spec) | High if unaddressed | High | Lock an explicit precedence order at the plan gate; encode it once; unit-test the overlap case directly. |
+| Editor-centric context model silently fails on the extension's own custom-editor / multi-diff surfaces (opening a spec via Codev preview falls to Attention) | High if unaddressed | High | Derive context from the active tab input, not `activeTextEditor`; include the diff-inject-registry and tab-group events in the trigger set; test custom-editor and multi-diff surfaces. |
+| Webview XSS / resource escape via path- or builder-id-derived header text | Low | High | Nonce+CSP, `localResourceRoots`, validated message allowlist, HTML-escape all header text; assert escaping in tests. |
 | Terminal-vs-editor event mismatch causes Builder Inspector to never trigger | Medium | High | Make the resolver's trigger set explicit (editor + terminal events); cover terminal-active → builder-inspector in unit tests; verify in dev-approval walkthrough. |
 | Pin-scope decision (per-window vs per-workspace) chosen wrong, surprising multi-window users | Low | Low | Resolve at plan gate; default to persisted-per-workspace (rare multi-window-same-folder case); document behavior. |
 | Umbrella/participating boundary blurs — skeleton starts implementing mode content | Medium | Medium | Ship only placeholder bodies + render targets; success criteria explicitly forbid mode-content rendering here; participating issues reference this umbrella. |
