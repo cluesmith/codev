@@ -130,7 +130,15 @@ describe('slot keys', () => {
 
   // One SingletonAction instance serves every key of its type — these guard the
   // per-instance fix (without it, all keys collided on shared state).
-  const slotKey = (id: string) => ({ id, isKey: () => true, setTitle: vi.fn() });
+  const slotKey = (id: string) => ({ id, isKey: () => true, setImage: vi.fn(), setTitle: vi.fn() });
+
+  // renderTo hands setImage a base64 data URI (Stream Deck drops raw SVG strings); decode to
+  // assert on the underlying face.
+  const decodeFace = (action: { setImage: { mock: { calls: unknown[][] } } }): string => {
+    const arg = String(action.setImage.mock.calls.at(-1)?.[0] ?? '');
+    expect(arg.startsWith('data:image/svg+xml;base64,')).toBe(true);
+    return Buffer.from(arg.slice('data:image/svg+xml;base64,'.length), 'base64').toString('utf8');
+  };
 
   it('renders each slot key against its own slot (different slots → different builders)', () => {
     const ctx = makeStore(); // pir-1 (#101), pir-2 (#102)
@@ -139,19 +147,34 @@ describe('slot keys', () => {
     const b = slotKey('B');
     ba.onWillAppear({ action: a, payload: { settings: { slot: '1' } } } as never);
     ba.onWillAppear({ action: b, payload: { settings: { slot: '2' } } } as never);
-    expect(a.setTitle).toHaveBeenLastCalledWith(expect.stringContaining('#101'));
-    expect(b.setTitle).toHaveBeenLastCalledWith(expect.stringContaining('#102'));
+    // The face is now a composite SVG handed to setImage (not a title).
+    expect(decodeFace(a)).toContain('#101');
+    expect(decodeFace(b)).toContain('#102');
   });
 
-  it('renders the builder’s phase/blocked on a second line (live tile, merged from Fleet Slot)', () => {
-    const ctx = makeStore(); // pir-1 blocked "plan review", pir-2 phase "implement"
+  it('renders the builder’s state as a colour-coded, mapped face (mirrors the sidebar)', () => {
+    const ctx = makeStore(); // pir-1 blocked plan-approval, pir-2 phase "implement"
     const ba = new BuilderAction(ctx.store);
     const a = slotKey('A');
     const b = slotKey('B');
     ba.onWillAppear({ action: a, payload: { settings: { slot: '1' } } } as never);
     ba.onWillAppear({ action: b, payload: { settings: { slot: '2' } } } as never);
-    expect(a.setTitle).toHaveBeenLastCalledWith(expect.stringContaining('plan review')); // blocked label wins
-    expect(b.setTitle).toHaveBeenLastCalledWith(expect.stringContaining('implement')); // else the phase
+    // Blocked at plan-approval → mapped label "Plan" in warning yellow (not the wire "plan review").
+    const aSvg = decodeFace(a);
+    expect(aSvg).toContain('>Plan<');
+    expect(aSvg).toContain('#cca700');
+    // Active → phase label "Implement" in green.
+    const bSvg = decodeFace(b);
+    expect(bSvg).toContain('>Implement<');
+    expect(bSvg).toContain('#73c991');
+  });
+
+  it('renders the empty-slot face when no builder occupies the slot', () => {
+    const ctx = makeStore(); // only 2 builders → slot 5 is empty
+    const ba = new BuilderAction(ctx.store);
+    const a = slotKey('A');
+    ba.onWillAppear({ action: a, payload: { settings: { slot: '5' } } } as never);
+    expect(decodeFace(a)).toContain('Slot 5');
   });
 
   it('re-renders every slot key on a store change (fixes stale-on-workspace-switch)', () => {
@@ -161,11 +184,11 @@ describe('slot keys', () => {
     const b = slotKey('B');
     ba.onWillAppear({ action: a, payload: { settings: { slot: '1' } } } as never);
     ba.onWillAppear({ action: b, payload: { settings: { slot: '2' } } } as never);
-    a.setTitle.mockClear();
-    b.setTitle.mockClear();
+    a.setImage.mockClear();
+    b.setImage.mockClear();
     ctx.store.setLevel('builders'); // any store change → onChange → render all keys
-    expect(a.setTitle).toHaveBeenCalled();
-    expect(b.setTitle).toHaveBeenCalled();
+    expect(a.setImage).toHaveBeenCalled();
+    expect(b.setImage).toHaveBeenCalled();
   });
 });
 
@@ -183,6 +206,19 @@ describe('ApproveGate', () => {
     await new ApproveGate(ctx.store).onKeyDown(ev as never);
     expect(ctx.sent).toHaveLength(0);
     expect(ev.action.showAlert).toHaveBeenCalled();
+  });
+
+  it('renders a composite Gates face (count + label under a bell), not a title over the icon', () => {
+    const ctx = makeStore(); // pir-1 blocked → 1 pending gate
+    const key = { id: 'G', isKey: () => true, setImage: vi.fn(), setTitle: vi.fn() };
+    new ApproveGate(ctx.store).onWillAppear({ action: key, payload: {} } as never);
+    const arg = String(key.setImage.mock.calls.at(-1)?.[0] ?? '');
+    expect(arg.startsWith('data:image/svg+xml;base64,')).toBe(true);
+    const face = Buffer.from(arg.slice('data:image/svg+xml;base64,'.length), 'base64').toString('utf8');
+    expect(face).toContain('Gates');
+    expect(face).toContain('>1<'); // the pending count
+    expect(face).toContain('#cca700'); // pending → warning yellow
+    expect(key.setTitle).toHaveBeenCalledWith(''); // title layer suppressed
   });
 });
 

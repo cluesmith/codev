@@ -15,13 +15,15 @@ import type {
   CanvasCommandClientErrorCode,
 } from '@cluesmith/codev-sdk/controller';
 import type { CodevStore } from './store.js';
+import { builderFaceSvg, faceForBuilder, gatesFaceSvg, svgToDataUri } from './face.js';
 
 /**
  * The Stream Deck actions — thin adapters over CodevStore. Each maps a physical
  * input to a canonical verb (POSTed via the command relay) or a cursor move /
  * URL open. UUIDs are set via the `manifestId` field (no decorators — keeps the
- * esbuild→node bundle free of decorator transpilation). Rendering is title-based
- * for v1 (richer SVG/feedback is a later polish).
+ * esbuild→node bundle free of decorator transpilation). Most keys render title-based;
+ * the Builder Action and Gates keys compose a full SVG face via `setImage` (see `face.ts`),
+ * and the encoders render `setFeedback` touchscreen layouts.
  */
 
 /** Optional per-instance verb override from the Property Inspector. */
@@ -163,9 +165,17 @@ export class BuilderAction extends SlotKey {
   }
   protected renderTo(action: KeyAction, settings: SlotSettings): void {
     const b = slotBuilder(this.store, settings);
-    void action.setTitle(
-      b ? `${b.issueId ? `#${b.issueId}` : b.id}\n${b.blocked ?? b.protocolPhase}` : `Slot ${settings.slot ?? '1'}`,
-    );
+    // Compose the WHOLE face as one SVG (icon zone + reserved text band) instead of stacking a
+    // title over the manifest bolt PNG — see face.ts for the layout and the sidebar-mirrored
+    // colour/icon vocabulary. setTitle('') suppresses the SDK title layer so nothing overlays it.
+    let svg: string;
+    if (b) {
+      svg = builderFaceSvg(faceForBuilder(b));
+    } else {
+      svg = builderFaceSvg({ kind: 'empty', slot: settings.slot ?? '1' });
+    }
+    void action.setImage(svgToDataUri(svg));
+    void action.setTitle('');
   }
 }
 
@@ -205,7 +215,10 @@ export class ApproveGate extends SingletonAction {
   }
   private renderTo(action: KeyAction): void {
     const n = this.store.pendingGates().length;
-    void action.setTitle(n > 0 ? `Gates\n${n}` : 'Gates');
+    // Composite SVG face (same fix as BuilderAction): count + label in a reserved band under the
+    // bell icon, instead of a title stacked over the manifest PNG.
+    void action.setImage(svgToDataUri(gatesFaceSvg(n)));
+    void action.setTitle('');
   }
 }
 

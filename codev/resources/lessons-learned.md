@@ -66,6 +66,15 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 
 ## Architecture
 
+- [From #1428] Twinned per-app *presentation* maps kept aligned by sync-note comments are an
+  accepted pattern (owner-ruled), not a violation of the "consolidate duplicates rather than
+  syncing" lesson. When two apps must present the same vocabulary but can't/shouldn't cross-import
+  — e.g. the Stream Deck plugin replicating the VS Code sidebar's state colours + gate icons, where
+  a static SVG can't bind `ThemeColor` tokens and the plugin bundle must stay dependency-free —
+  duplicating the small maps with a comment naming the counterpart (`face.ts` ↔ `builder-row.ts`)
+  is the intended design. Don't reflexively propose a shared module for presentation-only
+  vocabulary; the consolidation lesson targets *stateful/behavioral* duplication, not independent
+  look-replication across a boundary the architecture deliberately keeps un-crossed.
 - Before adding a new stateful component, check whether one already running models the same data — extending it can collapse the feature to one operation. The reconnect-replay emulator "to be built" turned out to be the render gate's per-session headless screen mirror, already fed every output byte; the whole feature reduced to a serialize step on the attach path, at near-zero marginal memory.
 - A library addon typed against a sibling package can still be runtime-compatible with yours; prove compatibility with behavior tests (round-trip the real workload), then bridge the declared-type gap with one explicit documented cast rather than forking or vendoring.
 - [From #1205] A cap that trims back to exactly its ceiling re-trims on the very next append, so every subsequent call copies the whole structure — O(n) per call where the code was deliberately O(chunk). Trim to a *fraction* of the ceiling (half works) so the copy amortises over the next growth window. The failure is invisible to correctness tests: the cap holds, the data is right, and only throughput degrades, which is exactly the property the original optimisation existed to protect.
@@ -346,6 +355,14 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 
 ## UI/UX
 
+- [From #1428] Stream Deck's `setImage` accepts an SVG per the SDK d.ts, but a *raw* `<svg>`
+  string is silently dropped on-device (Stream Deck 6.9) — the key reverts to its manifest PNG
+  with no error. Two undocumented requirements: encode as a base64 `data:image/svg+xml` data URI,
+  **and** give the root `<svg>` an intrinsic `width`/`height` (not just `viewBox`) or the
+  rasterizer drops the sizeless image. The SDK forwards the string verbatim (`key.js`), so the
+  type doc's "SVG string" claim is not a device guarantee. Build + typecheck + unit tests were all
+  green — only the hardware gate exposed it (a textbook case for PIR's device gate). Fix pattern:
+  `svgToDataUri` + intrinsic size in `apps/streamdeck/src/face.ts`.
 - [From #1179] `vscode.QuickPickItem` reserves the `kind` property for its separator enum
   (`QuickPickItemKind`), so a custom item type using `kind` as its own discriminator fails
   the `createQuickPick<T extends QuickPickItem>` constraint. Pick a different name
