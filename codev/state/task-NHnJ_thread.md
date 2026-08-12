@@ -170,3 +170,77 @@ forbids runtime codev-types use; type-only, zero runtime deps). sdk unchanged
 Verify (iteration 2): codev build exit 0; sdk 98 pass (incl import-boundary);
 apps/web + apps/vscode(main) tsc exit 0; full codev suite 4881 pass / 48 skip / 0 fail.
 
+## IMPLEMENT phase — iteration 3: cmap-2 findings + full-surface sweep (2026-08-12)
+
+cmap-2 (gemini APPROVE; codex+claude) found real breakage the 1st pass missed.
+Architect ruled all in scope + directed a full fetch/SSE/WS sweep + Option A for
+3D. Fixed:
+- VS Code SSE client (sse-client.ts) used raw fetch for /api/events with NO key
+  -> extension lost ALL live updates. Threaded the key (getKeySync). A 7th surface
+  the "five clients" enumeration missed.
+- Tunnel WS broke: tunnel-client.ts set Host:<tunnel-domain> on the WS upgrade ->
+  my Host guard 401'd remote terminals. Now sets Host:localhost (matches HTTP path).
+- BRIDGE/LAN: Host guard 401'd a documented mobile-LAN flow. Now RELAXED under
+  BRIDGE_MODE (deliberate network exposure; key stays mandatory + separate); strict
+  loopback allowlist kept for the localhost bind. + rejected-request logging
+  (Host vs key) for diagnosability.
+- 3D viewer (Option A): VENDORED three@0.160.0 + STL/3MF/Trackball loaders + fflate
+  locally into templates/vendor/ (one-time fetch, committed; no build-time CDN
+  fetch). Rewrote 3MFLoader's relative fflate import to a bare specifier + repointed
+  the importmap to local files. No remote code runs in the key-injected page now.
+- Cheap: bare /workspace/<enc> (no slash) public; malformed IPv6 bracket rejected;
+  hex-validate key before injecting (stored-XSS guard); tower.html 401 reload-loop
+  guard; pagehide object-URL cleanup.
+- FULL SWEEP (architect directive): audited every fetch/EventSource/WebSocket/loader
+  across apps/web (19 fetches all keyed via getAuthHeaders; WS via terminalWsProtocols;
+  SSE keyed), apps/vscode (sse-client + terminal-adapter + TowerClient - all keyed;
+  no node http/axios), and all 3 templates (all fetch/media/model keyed; shell+vendor
+  public). getFileRawUrl in apps/web is dead code (no callers) - noted, left.
+
+Deferred/noted (architect pre-approved or low): video/PDF full-buffer memory (UX
+follow-up); SSE no-backoff + ignores server retry directive (minor); S3 allowlist-
+shape refactor; e2e WS suite update; getFileRawUrl dead code; threat-model note
+(key = web-origin auth, not a local-process boundary) for the review file.
+
+Verify (iteration 3): codev build exit 0; full codev suite 4883 pass / 48 skip / 0
+fail; sdk 98; vscode 794; apps/web 335; apps/web + vscode(main) tsc exit 0.
+Ran cmap-3 (final pass) on the iteration-3 deltas.
+
+## IMPLEMENT phase — iteration 4: cmap-3 findings + bounded XSS sweep (2026-08-12)
+
+cmap-3: gemini APPROVE; claude items 2-6 correct; codex 2 High. Fixed:
+- Bridge Host relax NARROWED (architect-approved): now allows only IP-literal
+  Hosts (+loopback+configured) in BRIDGE_MODE, NOT arbitrary DNS names. A LAN
+  phone hits an IP (works); DNS-rebinding needs a hostname (blocked even in
+  bridge). Key stays mandatory+separate. (isIpLiteral/isConfiguredHost helpers.)
+- XSS = KEY THEFT sweep (architect: bounded, but fix ALL sinks in key-bearing
+  pages reachable by attacker-influenceable input; incomplete = key-theft path).
+  Enumerated every sink:
+  * Server-side {{}} + query params in open.html/3d-viewer.html: HTML-escape
+    filename/filepath/lang/format (escapeHtml); escape the JSON-in-<script>
+    filepath against </script> (<); integer-validate ?line. ALL fixed.
+  * Client-side raw-HTML sinks in key-bearing pages (tower.html 12x innerHTML,
+    open.html markdown/HTML-preview/code-grid/annotations): VERIFIED already safe
+    - tower.html uses escapeHtml on every field; markdown via DOMPurify.sanitize;
+    HTML preview via iframe sandbox="allow-scripts" (no allow-same-origin -> opaque
+    origin, can't read parent key); code grid via Prism.highlight (escapes);
+    annotations via escapeHtml; line-numbers numeric.
+  * React SPA (apps/web): no innerHTML/dangerouslySetInnerHTML - React auto-escapes.
+  Sweep complete: no key-theft XSS path remains in any key-bearing page.
+- pagehide bfcache guard (skip revoke when persisted).
+Deferred (architect-agreed fast-follow): SSE-401 key-rotation recovery (rotation
+deferred anyway); 401 WARN log spam on exposed Tower.
+
+Verify (iteration 4): codev build exit 0; full codev suite 4883 pass / 48 skip /
+0 fail; request-auth 31 pass.
+
+## Reaching dev-approval gate (2026-08-12)
+
+All 5 core layers implemented + hardened across 4 iterations (3 cmap rounds).
+Final state green: codev build 0; full suite 4883/0-fail; sdk 98; vscode 794;
+apps/web 335; apps/web+vscode(main) tsc 0. Signalling porch done -> dev-approval.
+Human live-verify needed for: dashboard load + WS terminal attach (direct
+/workspace entry), VS Code terminals/gate/comments + SSE, tower.html, annotator
+(text/image/video/pdf via authenticated blobs + vendored 3D viewer), LAN/bridge
+access, tunnel terminals, and a no/wrong-key 401 path.
+
