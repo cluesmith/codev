@@ -1,7 +1,7 @@
 id: '1400'
 title: stream-deck-phase-aware-review
 protocol: pir
-phase: implement
+phase: review
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -19,4 +19,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-08-12T01:43:13.126Z'
-updated_at: '2026-08-12T05:16:55.900Z'
+updated_at: '2026-08-12T05:17:03.349Z'
