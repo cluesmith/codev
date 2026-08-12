@@ -61,3 +61,14 @@ Flagged to architect: (1) scope expansion for cohort awareness (air-1411 also on
 (2) verify-approval press-path gap in phaseArtifactVerb (left untouched, out of scope).
 Mockup: https://claude.ai/code/artifact/450b5b24-66d2-42e3-8db2-992cc09eda18
 Recommitted; gate still plan-approval pending → Amr.
+
+## Plan APPROVED by architect (2026-08-12)
+
+Architect ratified: ship blocked/active in v1, defer waiting (strict-superset follow-up).
+Two additions recorded in the REVIEW artifact (seeded now, not the plan):
+1. Twinned-vocabulary maps (face.ts ↔ builder-row.ts) → candidate for a shared home
+   (single-source-of-truth vs apps-can't-cross-import). Co-flagged by main. Humans to weigh; NOT
+   implemented in #1428.
+2. verify-approval press-path gap filed as #1431 (BUGFIX, after this merge) — referenced in
+   review lessons.
+Plan-approval gate now to Amr.
