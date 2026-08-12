@@ -128,16 +128,11 @@ this (Test Plan).
   Without it, only deck-driven selection (Row 1 press / Select dial) moves the cursor — VSCode
   focus changes won't. **Setup prerequisite** for the hardware dev-approval session; documented in
   the deck README. Not a code change.
-- **(E2) Canvas focus does NOT back-sync (asymmetry with diff)** — OWNER DECISION.
+- **(E2) Canvas focus back-sync — RESOLVED: Amr chose (b), a symmetric back-sync.**
   `announceActiveBuilderFromEditor` gates on `getDiffInjectEntry` (`extension.ts:682-683`), and a
-  spec/plan canvas is not a diff-inject file, so no `builder-active` fires. In canvas mode,
-  coherence rests only on the Row 1 press (which syncs directly); opening a different builder's
-  canvas via VSCode won't move the deck cursor.
-  - **(a) Accept + document (recommended):** the Row 1 press is the convergence gesture for canvas
-    review; matches current shipped behavior; keeps #1410 scoped to the deck + relay + wire.
-  - **(b) Add a symmetric `canvas-active` event** so focusing a canvas back-syncs too — small
-    VSCode addition, but reaches into the canvas work (#1401/#1425) and widens scope.
-  - *Awaiting Amr; plan assumes (a) unless told otherwise.*
+  spec/plan canvas is not a diff-inject file, so today no back-sync fires when a canvas is
+  focused. #1410 adds the symmetric path so focusing a builder's canvas moves the deck cursor to
+  it, exactly as focusing its diff does — see §F below.
 
 ## Proposed Change
 
@@ -271,6 +266,32 @@ the 8 keys — Row 1 = 4× `builder-action` (slots 1-4), Row 2 = `approve-gate`,
 
 `apps/streamdeck/src/plugin.ts`: register the new action(s).
 
+### F. Canvas focus back-sync (`apps/vscode`) — routes to `main` (E2 = (b))
+
+Give a focused **canvas** the same back-sync a focused diff already has, so opening/focusing a
+builder's spec/plan/review canvas moves the deck cursor to that builder — the symmetric
+counterpart of `announceActiveBuilderFromEditor`.
+
+- **Detection:** the canvas panel already emits `panel.onDidChangeViewState` and heartbeats
+  `active` to Tower (`markdown-preview/canvas-view-registry.ts:141-143`). The
+  `MarkdownPreviewProvider` (`markdown-preview/preview-provider.ts`) owns the panel + the document
+  `file` and is already constructed with `overviewCache` — so it is the natural place to fire the
+  back-sync on panel-active.
+- **Builder resolution:** `viewPlanFile`/`viewSpecFile`/`viewReviewFile` open the artifact
+  **inside the builder's worktree** (`commands/view-artifact.ts:83,128` →
+  `<worktreePath>/codev/<subdir>/<id>-<slug>.md`). So the owning builder is the one whose
+  `worktreePath` is a **path prefix** of the canvas `file` — matched against
+  `overviewCache.getData().builders` (robust; no filename parsing). A canvas outside any builder
+  worktree (a main-repo artifact) resolves to none → no fire (correct: it isn't a builder's).
+- **Emit:** reuse the existing **`builder-active`** event (not a new `canvas-active`):
+  `fireActivity(workspace, 'builder-active', { builder: b.id })`. This rides the *same*
+  personal-config hook the diff path already needs (E1) — **no new hook to configure** — reaches
+  the deck via the same deep link → `syncToBuilder`, and is deduped by `fireActivity`'s
+  `lastFiredKey`. No loop: `syncToBuilder` only moves the deck cursor, it sends nothing back to
+  VSCode. *(If Amr later wants canvas focus routed to a distinct destination, splitting out a
+  `canvas-active` event is a one-line follow-up — but reusing `builder-active` is the
+  lower-config, fully-symmetric choice, so this plan does that.)*
+
 ### E. Tests, README, docs
 
 - Unit: deck `store` readers (`feedbackMode`/`queuedFeedback`/`windowedBuilder`); Row 1 window
@@ -285,6 +306,8 @@ the 8 keys — Row 1 = 4× `builder-action` (slots 1-4), Row 2 = `approve-gate`,
 - Unit: the shared-selection invariant — Row 1/Row 2/dial-mode all read the same
   `selectedBuilder()`; Send Fb badge source == flush target; a diff-focus `builder-active`
   (VSCode side) fires with the focused diff's builder id (`announceActiveBuilderFromEditor`).
+- Unit (§F): canvas focus resolves the owning builder by `worktreePath`-prefix and fires
+  `builder-active` with its id; a canvas outside any worktree fires nothing.
 - `apps/streamdeck/README.md`: document the two-zone layout, the `feedback-*`/`send-queue`
   verbs, the mode-follows-setting behaviour (replace the `forward-file`/`forward-hunk` mention at
   README:120), the shared-selection coherence model (Row 1 press = select+open; diff focus
@@ -298,7 +321,9 @@ the 8 keys — Row 1 = 4× `builder-action` (slots 1-4), Row 2 = `approve-gate`,
 - `packages/codev/src/agent-farm/__tests__/…` — overview wire tests. *(→ main)*
 - `apps/vscode/src/command-relay.ts:24-61` — allowlist `feedback-*` + `send-queue`. *(→ main)*
 - `apps/vscode/src/extension.ts:~1217-1240` — 3 mode-router commands. *(→ main)*
-- `apps/vscode/src/__tests__/…` — relay + mode-router tests. *(→ main)*
+- `apps/vscode/src/markdown-preview/preview-provider.ts` — canvas focus back-sync: fire
+  `builder-active` for the owning builder (§F). *(→ main)*
+- `apps/vscode/src/__tests__/…` — relay + mode-router + canvas-back-sync tests. *(→ main)*
 - `apps/streamdeck/src/actions.ts` — Row 1 windowing (`windowedBuilder` + selected highlight),
   dial press verbs, touchstrip label, Approve repurpose, `SendQueueAction`, `NextAttentionAction`.
 - `apps/streamdeck/src/store.ts` — `feedbackMode()`, `queuedFeedback()`, `windowedBuilder()`.
@@ -371,3 +396,7 @@ present before testing the coherence steps below:
   Enqueue a chunk with a diff dial, then flush with Send Fb — it targets the same builder you
   were viewing. Verify the Select-dial-rotate-without-open transient self-heals on the next Row 1
   press / tap-to-open.
+- **Manual — canvas back-sync (§F, E2=(b)):** with a spec/plan-phase builder, open builder A's
+  plan canvas, then focus builder B's plan canvas *in VSCode* → the deck selection snaps to B
+  (mode stays canvas; Row 1 highlight + Row 2 move to B) — proving the symmetric canvas
+  `builder-active` fires and rides the same hook as the diff path.
