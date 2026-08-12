@@ -54,3 +54,11 @@ Also confirmed (claude): the edit composer shares composingLine, so a press mid-
 submit-the-edit, never a draft-discarding re-anchor. Worth exercising at the dev gate.
 
 Next: re-run canvas tests after nits, commit, `porch done`, wait at dev-approval gate.
+
+## Review phase (iter 1) — writing retrospective, opening PR
+dev-approval approved by human. Wrote codev/reviews/1420-stream-deck-hands-free-comment.md.
+No arch/lessons governance-file changes (one member added to an already-guarded closed vocabulary;
+the four satisfies-guards already enforce the invariant — nothing rises to hot-tier). Sections
+explain why, per protocol.
+Next: commit review, push, open PR, `porch done --pr`, then `porch done` (porch runs 3-way consult
+once), notify architect, wait at pr gate.
