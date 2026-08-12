@@ -41,6 +41,7 @@ describe('stateLabel', () => {
     expect(stateLabel(builder({ protocolPhase: 'verify' }))).toBe('Verify');
     expect(stateLabel(builder({ protocolPhase: 'verified' }))).toBe('Verified');
     expect(stateLabel(builder({ protocolPhase: 'complete' }))).toBe('Verified');
+    expect(stateLabel(builder({ protocolPhase: 'pr' }))).toBe('PR');
   });
   it('title-cases an unmapped id and returns empty for no state', () => {
     expect(stateLabel(builder({ protocolPhase: 'rebase' }))).toBe('Rebase');
