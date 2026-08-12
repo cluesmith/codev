@@ -36,3 +36,26 @@ Issue #1400. Deck half of phase-aware review; bridge (#1401 `sendCanvasCommand`)
 
 Architect (streamdeck) confirmed these pointers via afx during plan phase. Plan drafted, awaiting
 plan-approval gate.
+
+## Implement phase (2026-08-12) — plan-approval APPROVED
+
+Implemented in `apps/streamdeck/src/actions.ts` (+ tests). No sdk/Tower/vscode/manifest change.
+
+- `reviewMode(b)` derives `'diff' | 'canvas' | 'none'` from `phaseArtifactVerb` (single wire source).
+- `DiffNav` → `ReviewNav`: carries a `DiffSpec` (unchanged verbs) + `CanvasSpec`; dispatches on
+  `reviewMode(selectedBuilder)` in rotate/press/tap and in `renderTo` (legibility). Coarse dial
+  `Files`↔`Headings`, fine `Changes`↔`Blocks`.
+- Canvas rotate = one `sendCanvasCommand` with `count=|ticks|`; press = `composer-open`; tap =
+  `doc-start` (coarse) / `comment-next` (fine). MRU targeting (`{workspace}`, no `file`).
+- Per-code touchstrip feedback: `no-canvas`→"Open artifact", `unreachable`→"Tower offline",
+  else "Error"; transient `status` line cleared on the next overview tick.
+- **Import note:** typed canvas spec fields as `CanvasCommand` (re-exported from
+  `@cluesmith/codev-sdk/controller`); `TraversalCommand` is NOT re-exported there and the
+  import-boundary test forbids importing `@cluesmith/codev-types` directly — so no sdk change,
+  honoring the plan. `count` isn't type-restricted to traversal by the sdk signature anyway.
+- **Test-fixture gotcha:** default selection (cursor 0 = pir-1) is now a canvas-phase builder;
+  existing diff-mode tests re-pointed at `pir-2` (implement) via `syncToBuilder`.
+
+Verified in worktree: `tsc --noEmit` ✓, `npm run build` ✓, `npm test` ✓ (82 tests, ~10 new).
+Needed `pnpm --filter @cluesmith/codev-sdk build` first (sdk dist absent in fresh worktree).
+Commit 9aa1a29d9. Awaiting dev-approval gate (hardware verification).
