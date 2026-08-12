@@ -1,0 +1,26 @@
+# Builder thread — pir-1425
+
+**Issue #1425**: Stream Deck — map review dials to composer-open-or-submit /
+composer-cancel (deck half of #1420). Protocol: PIR (hardware verification before PR).
+Refs #1420, PR #1424 (bridge lane, merged).
+
+## PLAN phase (2026-08-12)
+
+Investigated `apps/streamdeck/src/actions.ts`. The two canvas-mode review dials share one
+press handler (`ReviewNav.onDialDown`) that hardcodes `composer-open` — the #1400 decision
+this issue supersedes. `CanvasSpec` has no press field on purpose (press was identical).
+
+Plan: add `press: CanvasCommand` + `pressLabel: string` to `CanvasSpec`; fine dial
+(`DiffHunkNav`, Blocks) → `composer-open-or-submit`, coarse dial (`DiffFileNav`, Headings)
+→ `composer-cancel`. Touchstrip line 1 becomes `${label} · ${pressLabel}` in canvas mode
+(`Blocks · Open/Submit`, `Headings · Cancel`); line 2 keeps builder identity. Both commands
+already exist in `CanvasCommand`, the canvas-relay allowlist, and `ArtifactCanvas` action
+map — deck-only remap, no bridge/canvas/types/host change (requirement 4).
+
+Verified the Elgato Plugins symlink currently points at the **pir-1400** worktree, so the
+plan covers the sideload swap to pir-1425 for dev-approval and restoring the link after.
+
+Per architect instruction (2026-08-12T10:22Z), routing dial-semantics + hardware-verification
+sections to the architect BEFORE the plan-approval gate.
+
+Plan written to `codev/plans/1425-stream-deck-map-review-dials-t.md`. Awaiting plan-approval.
