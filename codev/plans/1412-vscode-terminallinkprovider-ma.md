@@ -132,7 +132,7 @@ Regex notes: the optional greedy `(?<pr>\bPR\s+)?` prefers the `PR #N` form when
 (matchAll advances past the consumed span). `\b` before `PR` avoids `SUPR #12`. `#\d+` never matches
 `#fff` (hex color) or `# 1` (heading, space before digit). Case-insensitive so `Pr`/`pr` also match.
 
-### Registration — `apps/vscode/src/extension.ts` (~line 1440, beside the existing two)
+### Registration — `apps/vscode/src/extension.ts` (~line 1450, beside the existing two providers registered at 1440/1447)
 
 ```ts
 context.subscriptions.push(
@@ -165,7 +165,7 @@ context.subscriptions.push(
   + delegation to the three reuse helpers + setting read.
 - `apps/vscode/src/terminal-link-provider.ts` — add `IssueRefTerminalLinkProvider` (+ `IssueRefLink`),
   import `openTerminalRef` and `ConnectionManager` type.
-- `apps/vscode/src/extension.ts:~1440` — register the provider (one `push`, beside the existing two).
+- `apps/vscode/src/extension.ts:~1450` — register the provider (one `push`, beside the existing two).
 - `apps/vscode/package.json` — add `codev.terminalLinks.issueTarget` under
   `contributes.configuration.properties`.
 - `apps/vscode/src/__tests__/terminal-ref-link-provider.test.ts` — **new**. Detection + resolution tests.
