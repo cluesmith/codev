@@ -1,7 +1,7 @@
 id: '1425'
 title: stream-deck-map-review-dials-t
 protocol: pir
-phase: implement
+phase: review
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -19,4 +19,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-08-12T10:21:33.851Z'
-updated_at: '2026-08-12T11:06:38.137Z'
+updated_at: '2026-08-12T11:06:43.299Z'
