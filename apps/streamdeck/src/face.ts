@@ -1,0 +1,187 @@
+import type { OverviewBuilder } from '@cluesmith/codev-sdk/controller';
+
+/**
+ * Builder Action key face — the plugin composes the WHOLE key as one SVG (handed to
+ * `KeyAction.setImage`), instead of stacking a `setTitle` over the manifest's bolt PNG. The two
+ * stacked layers were the root cause of #1428 (text on the icon's diagonal, `#1414` reading as
+ * `#1,414` where the bolt edge bleeds between digits, and mid-word truncation).
+ *
+ * The face mirrors the VS Code Builders sidebar's two-axis vocabulary
+ * (`apps/vscode/src/views/builder-row.ts`): COLOUR encodes state severity, ICON encodes which
+ * gate a blocked builder waits on. The maps below are the streamdeck TWIN of that file — the two
+ * apps can't (and, by owner ruling, shouldn't) import each other, so the deck REPLICATES the
+ * sidebar's look independently and the maps are kept aligned by the sync-notes on each. This is an
+ * accepted, intentional pattern here, not single-source-of-truth debt.
+ *
+ * Pure and SDK-free so it unit-tests without the Stream Deck runtime (mirrors `nav/cursor.ts`).
+ */
+
+/** State severity, in the sidebar's precedence: blocked beats waiting beats active. */
+export type BuilderState = 'blocked' | 'waiting' | 'active';
+
+/**
+ * Classify a builder's state. Mirrors `builder-row.ts`'s blocked > idle > active precedence.
+ *
+ * v1 ships `blocked` / `active` only. `waiting` (blue) is the deferred strict-superset follow-up:
+ * it needs an idle threshold derived from `lastDataAt` (the sidebar's `isIdleWaiting`); until this
+ * returns `'waiting'`, the blue token in `STATE_COLOR` is defined-but-unused. Adding it later
+ * changes only this function.
+ */
+export function builderState(b: Pick<OverviewBuilder, 'blocked' | 'blockedGate'>): BuilderState {
+  if (b.blocked || b.blockedGate) return 'blocked';
+  return 'active';
+}
+
+/**
+ * State → colour. Inlined hexes that mirror VS Code's default-theme tokens (the deck LCD face is a
+ * static SVG with no `ThemeColor` binding). Keep in sync with `BUILDER_STATE_GLYPH` in
+ * `apps/vscode/src/views/builder-row.ts`.
+ */
+const STATE_COLOR: Record<BuilderState, string> = {
+  blocked: '#cca700', // notificationsWarningIcon.foreground
+  waiting: '#3794ff', // notificationsInfoIcon.foreground
+  active: '#73c991', //  testing.iconPassed (dark)
+};
+
+/** The glyphs the face can draw: a gate shape when blocked, the bolt otherwise. */
+export type GlyphKey = 'bolt' | 'book' | 'checklist' | 'code' | 'pull-request' | 'verified' | 'bell';
+
+/**
+ * Gate id → glyph. The streamdeck twin of `gateIconFor` in `apps/vscode/src/views/builder-row.ts`
+ * — keep in sync. A blocked builder whose gate isn't mapped falls back to `bell` (see
+ * `faceForBuilder`), matching the sidebar. `verify-approval` renders here even though the press
+ * resolver doesn't handle it yet (that gap is BUGFIX #1431).
+ */
+const GATE_ICONS: Record<string, GlyphKey> = {
+  'spec-approval': 'book',
+  'plan-approval': 'checklist',
+  'dev-approval': 'code',
+  pr: 'pull-request',
+  'verify-approval': 'verified',
+};
+
+/**
+ * Glyph → inner SVG markup, drawn in a 24×24 box and stroked/filled in the caller's colour. The
+ * shapes are modelled on the matching VS Code codicons (book / checklist / code / git-pull-request
+ * / verified / bell); the codicon font isn't vendored, so these are drawn in-plugin — which also
+ * keeps the bundle dependency-free. The bolt is filled (the plugin's identity mark); the rest are
+ * line glyphs like the codicons.
+ */
+const GLYPHS: Record<GlyphKey, (color: string) => string> = {
+  bolt: (c) => `<path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" fill="${c}"/>`,
+  book: (c) => stroked(c, '<path d="M5 4h13v16H5z"/><path d="M11 4v16"/>'),
+  checklist: (c) => stroked(c, '<path d="M3 6l2 2 3-3"/><path d="M11 7h10"/><path d="M3 15l2 2 3-3"/><path d="M11 16h10"/>'),
+  code: (c) => stroked(c, '<path d="M8 7l-5 5 5 5"/><path d="M16 7l5 5-5 5"/>'),
+  'pull-request': (c) =>
+    stroked(c, '<circle cx="7" cy="6" r="2.3"/><circle cx="7" cy="18" r="2.3"/><circle cx="17" cy="18" r="2.3"/><path d="M7 8.3v7.4"/><path d="M17 15.7V12a3 3 0 0 0-3-3h-3.5"/>'),
+  verified: (c) => stroked(c, '<path d="M12 3l7 3v5c0 4.5-3 7.6-7 9.2C8 18.6 5 15.5 5 11V6z"/><path d="M8.6 12l2.3 2.3 4.6-4.6"/>'),
+  bell: (c) => stroked(c, '<path d="M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6z"/><path d="M10.5 20a1.6 1.6 0 0 0 3 0"/>'),
+};
+
+/** Wrap line-glyph paths in a shared stroke group (round caps/joins, like the codicons). */
+function stroked(color: string, paths: string): string {
+  return `<g fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${paths}</g>`;
+}
+
+/**
+ * Gate id → short display label (blocked builders). The streamdeck twin of the sidebar's gate
+ * vocabulary. Short by design: colour + icon carry the blocked-vs-working distinction, so the
+ * label need not — `Plan` (gate) and `Plan` (phase) stay unmistakable via yellow-checklist vs
+ * green-bolt. Keyed on the canonical `blockedGate` id, never the free-form `blocked` label.
+ */
+const GATE_LABELS: Record<string, string> = {
+  'spec-approval': 'Spec',
+  'plan-approval': 'Plan',
+  'dev-approval': 'Dev',
+  pr: 'PR',
+  'verify-approval': 'Verify',
+};
+
+/**
+ * Protocol phase id → display label (active builders). `verify` is the IN-PROGRESS phase; `verified`
+ * is porch's TERMINAL id (`next.ts:204`), with legacy `complete` migrating to it
+ * (`state.ts:135-140`) — both display `Verified`.
+ */
+const PHASE_LABELS: Record<string, string> = {
+  specify: 'Specify',
+  plan: 'Plan',
+  implement: 'Implement',
+  review: 'Review',
+  verify: 'Verify',
+  verified: 'Verified',
+  complete: 'Verified',
+};
+
+/**
+ * Deliberate short label for a builder's state. Gate beats phase (matching `phaseArtifactVerb`);
+ * an unmapped id is title-cased so nothing renders lowercase or clips mid-word; no state → `''`.
+ */
+export function stateLabel(b: Pick<OverviewBuilder, 'blockedGate' | 'protocolPhase'>): string {
+  const gate = b.blockedGate ?? '';
+  if (GATE_LABELS[gate]) return GATE_LABELS[gate];
+  const phase = b.protocolPhase ?? '';
+  if (PHASE_LABELS[phase]) return PHASE_LABELS[phase];
+  const raw = gate || phase;
+  return raw ? raw.charAt(0).toUpperCase() + raw.slice(1) : '';
+}
+
+/** A fully-resolved builder face: what to draw and how to colour it. */
+export interface BuilderFace {
+  kind: 'builder';
+  number: string;
+  label: string;
+  state: BuilderState;
+  icon: GlyphKey;
+}
+
+/** Resolve a builder into its face descriptor — all id→presentation mapping in one testable place. */
+export function faceForBuilder(b: OverviewBuilder): BuilderFace {
+  const state = builderState(b);
+  const icon: GlyphKey = state === 'blocked' ? (GATE_ICONS[b.blockedGate ?? ''] ?? 'bell') : 'bolt';
+  return {
+    kind: 'builder',
+    number: b.issueId ? `#${b.issueId}` : b.id,
+    label: stateLabel(b),
+    state,
+    icon,
+  };
+}
+
+/**
+ * Render a key face as a self-contained SVG string for `setImage`. 72×72 viewBox (the deck
+ * upscales; vector stays crisp): an icon zone up top, a hairline divider, then a reserved text
+ * band (number + short label). Icon zone and text band never overlap by construction — the fix
+ * for the collision symptom.
+ */
+export function builderFaceSvg(face: BuilderFace | { kind: 'empty'; slot: string }): string {
+  const bg = '<rect width="72" height="72" rx="12" fill="#1b1b1e"/>';
+  const divider = '<line x1="14" y1="35" x2="58" y2="35" stroke="#333338" stroke-width="1"/>';
+  if (face.kind === 'empty') {
+    const icon = `<g transform="translate(24,7)">${GLYPHS.bolt('#63636b')}</g>`;
+    const slot = `<text ${textAttrs(36, 55, 14, 600)} fill="#8a8a92">Slot ${escapeXml(face.slot)}</text>`;
+    return svg(`${bg}${icon}${divider}${slot}`);
+  }
+  const icon = `<g transform="translate(24,7)">${GLYPHS[face.icon](STATE_COLOR[face.state])}</g>`;
+  const number = `<text ${textAttrs(36, 50, 16, 700)} fill="#f4f4f6">${escapeXml(face.number)}</text>`;
+  const label = `<text ${textAttrs(36, 63, 12, 500)} fill="#a9a9b2">${escapeXml(face.label)}</text>`;
+  return svg(`${bg}${icon}${divider}${number}${label}`);
+}
+
+function svg(inner: string): string {
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 72 72">${inner}</svg>`;
+}
+
+/** Shared text attributes: centered, system sans, at the given baseline / size / weight. */
+function textAttrs(x: number, y: number, size: number, weight: number): string {
+  return `x="${x}" y="${y}" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="${size}" font-weight="${weight}"`;
+}
+
+/** Escape the five XML entities so a builder id / label can't break the SVG string. */
+function escapeXml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}

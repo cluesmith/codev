@@ -15,6 +15,7 @@ import type {
   CanvasCommandClientErrorCode,
 } from '@cluesmith/codev-sdk/controller';
 import type { CodevStore } from './store.js';
+import { builderFaceSvg, faceForBuilder } from './face.js';
 
 /**
  * The Stream Deck actions — thin adapters over CodevStore. Each maps a physical
@@ -163,9 +164,12 @@ export class BuilderAction extends SlotKey {
   }
   protected renderTo(action: KeyAction, settings: SlotSettings): void {
     const b = slotBuilder(this.store, settings);
-    void action.setTitle(
-      b ? `${b.issueId ? `#${b.issueId}` : b.id}\n${b.blocked ?? b.protocolPhase}` : `Slot ${settings.slot ?? '1'}`,
-    );
+    // Compose the WHOLE face as one SVG (icon zone + reserved text band) instead of stacking a
+    // title over the manifest bolt PNG — see face.ts for the layout and the sidebar-mirrored
+    // colour/icon vocabulary. setTitle('') suppresses the SDK title layer so nothing overlays it.
+    const svg = b ? builderFaceSvg(faceForBuilder(b)) : builderFaceSvg({ kind: 'empty', slot: settings.slot ?? '1' });
+    void action.setImage(svg);
+    void action.setTitle('');
   }
 }
 
