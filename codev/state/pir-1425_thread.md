@@ -24,3 +24,18 @@ Per architect instruction (2026-08-12T10:22Z), routing dial-semantics + hardware
 sections to the architect BEFORE the plan-approval gate.
 
 Plan written to `codev/plans/1425-stream-deck-map-review-dials-t.md`. Awaiting plan-approval.
+
+### Plan review revisions (2026-08-12T10:26Z, architect)
+
+Approved with two hardware-section fixes (semantics/press-field/pressLabel/tests all
+approved as written; `Blocks · Submit` truncation fallback pre-approved):
+
+1. BUG: swap-build commands must run from the **pir-1425 worktree root**, not main —
+   `pnpm --filter` from main builds main's apps/streamdeck, sideloading stale/missing
+   `bin/plugin.js`. Rewrote with `cd` to worktree root + absolute link path.
+2. RULING: restore target is a **fresh build from the MAIN checkout** (behaviorally
+   identical to pir-1400's merged code), which becomes the deck's permanent stable link
+   and frees pir-1400 for the #1176 orphan sweep. No longer restoring to pir-1400.
+
+Both applied. Amr runs swap/restore at the gate session. Re-committed; still at
+plan-approval.

@@ -130,14 +130,20 @@ Scope is `apps/streamdeck` only (requirement 4).
 **Hardware (dev-approval gate — a physical Stream Deck+ session):**
 
 Sideload swap (current Elgato Plugins symlink points at the **pir-1400** worktree —
-verified `…/Plugins/com.cluesmith.codev.sdPlugin -> …/.builders/pir-1400/…`):
+verified `…/Plugins/com.cluesmith.codev.sdPlugin -> …/.builders/pir-1400/…`). Amr runs
+these at the gate session:
 
 ```bash
-# from the monorepo root (main checkout)
+# Build THIS lane's bundle — MUST run from the pir-1425 WORKTREE root. `pnpm --filter`
+# resolves against the nearest workspace, so from the main checkout it would build MAIN's
+# apps/streamdeck and you would sideload a stale/missing bin/plugin.js and test the wrong code.
+cd /Users/amrmohamed/repos/cluesmith/codev/.builders/pir-1425
 pnpm --filter @cluesmith/codev-sdk build
-pnpm --filter @cluesmith/codev-streamdeck build   # builds pir-1425/.../bin/plugin.js
+pnpm --filter @cluesmith/codev-streamdeck build   # -> .builders/pir-1425/apps/streamdeck/com.cluesmith.codev.sdPlugin/bin/plugin.js
+
+# Link that bundle (absolute path; streamdeck link/unlink/restart are cwd-independent).
 streamdeck unlink com.cluesmith.codev
-streamdeck link .builders/pir-1425/apps/streamdeck/com.cluesmith.codev.sdPlugin
+streamdeck link /Users/amrmohamed/repos/cluesmith/codev/.builders/pir-1425/apps/streamdeck/com.cluesmith.codev.sdPlugin
 streamdeck restart com.cluesmith.codev
 streamdeck list                                   # confirm it points at pir-1425
 ```
@@ -154,15 +160,20 @@ Verify the flow from the issue:
 7. Touchstrip on the coarse dial reads `Headings · Cancel`; confirm neither line-1 string
    truncates unacceptably.
 
-Restore the sideload after the gate (return the deck to the prior build):
+Restore the sideload after the gate. Per the architect's ruling, the permanent stable
+target is a **fresh build of `apps/streamdeck` from the MAIN checkout** (behaviorally
+identical to pir-1400's merged code) — not the pir-1400 worktree. This main-checkout link
+becomes the deck's lasting target and frees the pir-1400 worktree for the pending orphan
+sweep (#1176):
 
 ```bash
-# from the monorepo root
-streamdeck unlink com.cluesmith.codev
-streamdeck link .builders/pir-1400/apps/streamdeck/com.cluesmith.codev.sdPlugin
-streamdeck restart com.cluesmith.codev
-streamdeck list                                   # confirm restored to pir-1400
-```
+# Build apps/streamdeck from the MAIN checkout (run from the main checkout root).
+cd /Users/amrmohamed/repos/cluesmith/codev
+pnpm --filter @cluesmith/codev-sdk build
+pnpm --filter @cluesmith/codev-streamdeck build   # -> apps/streamdeck/com.cluesmith.codev.sdPlugin/bin/plugin.js
 
-(If pir-1400's worktree is gone by then, relink whatever build the architect designates —
-the restore target is "the deck's prior state," confirmed with the architect at the gate.)
+streamdeck unlink com.cluesmith.codev
+streamdeck link /Users/amrmohamed/repos/cluesmith/codev/apps/streamdeck/com.cluesmith.codev.sdPlugin
+streamdeck restart com.cluesmith.codev
+streamdeck list                                   # confirm it points at the MAIN checkout — the deck's permanent stable target
+```
