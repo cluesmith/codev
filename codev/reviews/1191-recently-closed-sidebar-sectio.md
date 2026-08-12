@@ -12,8 +12,8 @@ once since `closedAt` is present on every item.
 
 ## Files Changed
 
-- `packages/codev/src/agent-farm/servers/overview.ts` (+9 / -0) — sort `recentlyClosed` by `closedAt` descending after assembly
-- `packages/codev/src/agent-farm/__tests__/overview.test.ts` (+17 / -0) — regression test asserting descending order from an out-of-order fixture
+- `packages/codev/src/agent-farm/servers/overview.ts` (+9 / -0): sort `recentlyClosed` by `closedAt` descending after assembly
+- `packages/codev/src/agent-farm/__tests__/overview.test.ts` (+17 / -0): regression test asserting descending order from an out-of-order fixture
 
 ## Commits
 
@@ -24,18 +24,18 @@ once since `closedAt` is present on every item.
 
 - `pnpm --filter @cluesmith/codev build`: ✓ pass
 - `pnpm --filter @cluesmith/codev test`: ✓ pass (4851 passed, 48 pre-existing skips; 1 new test)
-- Manual verification: reviewer approved at the `dev-approval` gate.
+- Manual verification: the running worktree was reviewed and the `dev-approval` gate was granted.
 
 ## Architecture Updates
 
-No arch changes — this is a localized ordering fix at an existing assembly point. It does not
+No arch changes: this is a localized ordering fix at an existing assembly point. It does not
 change module boundaries, the forge abstraction, or any invariant. The fact that ordering
 belongs in the shared assembly layer (not per-forge scripts) is already implied by the
 existing single-assembly design.
 
 ## Lessons Learned Updates
 
-No lessons captured — the change was a mechanical, well-scoped fix. The one reusable insight
+No lessons captured: the change was a mechanical, well-scoped fix. The one reusable insight
 (sort shared, forge-normalized fields in the assembly layer rather than patching each
 provider script) is a narrow recipe, not a cross-cutting rule worth a hot/cold entry.
 

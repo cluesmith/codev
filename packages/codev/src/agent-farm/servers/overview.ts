@@ -977,7 +977,7 @@ export class OverviewCache {
       });
 
       // Forge search APIs return relevance ("best match") order, not closure
-      // order, so sort most-recently-closed first here — one fix for every
+      // order, so sort most-recently-closed first here: one fix for every
       // forge, since `closedAt` is present on every item (issue #1191). Parse to
       // epoch millis rather than compare strings: provider scripts aren't
       // guaranteed to emit a normalized ISO form, matching the 24h-window filter.
