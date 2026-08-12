@@ -1,7 +1,7 @@
 id: '1191'
 title: recently-closed-sidebar-sectio
 protocol: pir
-phase: review
+phase: verified
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -21,7 +21,7 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-08-12T11:03:50.931Z'
-updated_at: '2026-08-12T11:19:54.134Z'
+updated_at: '2026-08-12T11:20:20.093Z'
 pr_history:
   - phase: review
     pr_number: 1427
