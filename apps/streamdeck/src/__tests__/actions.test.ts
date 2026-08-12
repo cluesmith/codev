@@ -4,7 +4,6 @@ import type { TowerClient, TowerWorkspace } from '@cluesmith/codev-sdk/controlle
 import {
   CodevAction,
   BuilderAction,
-  FleetSlot,
   ApproveGate,
   PrNav,
   SpawnNav,
@@ -13,6 +12,7 @@ import {
   ScrollNav,
   ZoomNav,
   zoomInVerb,
+  phaseArtifactVerb,
 } from '../actions.js';
 
 type Sent = { verb: string; args: unknown[]; ws?: string };
@@ -74,28 +74,34 @@ describe('verb keypads', () => {
     expect(ctx.sent[0].verb).toBe('new-shell');
   });
 
-  it('BuilderAction defaults to slot 1 + view-diff', async () => {
+  it('BuilderAction defaults to Automatic — opens slot 1 builder’s current-phase artifact', async () => {
+    // pir-1 is blocked at plan-approval → Automatic resolves to open-plan.
     await new BuilderAction(ctx.store).onKeyDown(keyEvent() as never);
-    expect(ctx.sent[0]).toEqual({ verb: 'view-diff', args: ['pir-1'], ws: '/work/alpha' });
+    expect(ctx.sent[0]).toEqual({ verb: 'open-plan', args: ['pir-1'], ws: '/work/alpha' });
   });
 
-  it('BuilderAction targets the chosen slot and verb', async () => {
+  it('BuilderAction Automatic falls back to open-terminal for an unknown-state builder', async () => {
+    ctx.store.overview = { builders: [{ id: 'pir-x', roleId: null, issueId: null, issueTitle: null, blocked: null, blockedGate: null, protocolPhase: '', progress: 0, worktreePath: '/w' }], pendingPRs: [], backlog: [], recentlyClosed: [] } as never;
+    await new BuilderAction(ctx.store).onKeyDown(keyEvent() as never);
+    expect(ctx.sent[0]).toEqual({ verb: 'open-terminal', args: ['pir-x'], ws: '/work/alpha' });
+  });
+
+  it('BuilderAction with an explicit verb fires it verbatim, ignoring phase', async () => {
     await new BuilderAction(ctx.store).onKeyDown(keyEvent({ slot: '2', verb: 'open-terminal' }) as never);
     expect(ctx.sent[0]).toEqual({ verb: 'open-terminal', args: ['pir-2'], ws: '/work/alpha' });
+  });
+
+  it('BuilderAction press selects the slot builder (cursor follows)', async () => {
+    await new BuilderAction(ctx.store).onKeyDown(keyEvent({ slot: '2' }) as never);
+    expect(ctx.store.selectedBuilder()?.id).toBe('pir-2');
   });
 });
 
 describe('slot keys', () => {
-  it('FleetSlot opens the slot builder’s terminal by default', async () => {
-    const ctx = makeStore();
-    await new FleetSlot(ctx.store).onKeyDown(keyEvent({ slot: '2' }) as never);
-    expect(ctx.sent[0]).toEqual({ verb: 'open-terminal', args: ['pir-2'], ws: '/work/alpha' });
-  });
-
   it('a slot past the end of the builder list alerts and sends nothing', async () => {
     const ctx = makeStore(); // only 2 builders
     const ev = keyEvent({ slot: '8' });
-    await new FleetSlot(ctx.store).onKeyDown(ev as never);
+    await new BuilderAction(ctx.store).onKeyDown(ev as never);
     expect(ctx.sent).toHaveLength(0);
     expect(ev.action.showAlert).toHaveBeenCalled();
   });
@@ -106,22 +112,33 @@ describe('slot keys', () => {
 
   it('renders each slot key against its own slot (different slots → different builders)', () => {
     const ctx = makeStore(); // pir-1 (#101), pir-2 (#102)
-    const fs = new FleetSlot(ctx.store);
+    const ba = new BuilderAction(ctx.store);
     const a = slotKey('A');
     const b = slotKey('B');
-    fs.onWillAppear({ action: a, payload: { settings: { slot: '1' } } } as never);
-    fs.onWillAppear({ action: b, payload: { settings: { slot: '2' } } } as never);
+    ba.onWillAppear({ action: a, payload: { settings: { slot: '1' } } } as never);
+    ba.onWillAppear({ action: b, payload: { settings: { slot: '2' } } } as never);
     expect(a.setTitle).toHaveBeenLastCalledWith(expect.stringContaining('#101'));
     expect(b.setTitle).toHaveBeenLastCalledWith(expect.stringContaining('#102'));
   });
 
-  it('re-renders every slot key on a store change (fixes stale-on-workspace-switch)', () => {
-    const ctx = makeStore();
-    const fs = new FleetSlot(ctx.store);
+  it('renders the builder’s phase/blocked on a second line (live tile, merged from Fleet Slot)', () => {
+    const ctx = makeStore(); // pir-1 blocked "plan review", pir-2 phase "implement"
+    const ba = new BuilderAction(ctx.store);
     const a = slotKey('A');
     const b = slotKey('B');
-    fs.onWillAppear({ action: a, payload: { settings: { slot: '1' } } } as never);
-    fs.onWillAppear({ action: b, payload: { settings: { slot: '2' } } } as never);
+    ba.onWillAppear({ action: a, payload: { settings: { slot: '1' } } } as never);
+    ba.onWillAppear({ action: b, payload: { settings: { slot: '2' } } } as never);
+    expect(a.setTitle).toHaveBeenLastCalledWith(expect.stringContaining('plan review')); // blocked label wins
+    expect(b.setTitle).toHaveBeenLastCalledWith(expect.stringContaining('implement')); // else the phase
+  });
+
+  it('re-renders every slot key on a store change (fixes stale-on-workspace-switch)', () => {
+    const ctx = makeStore();
+    const ba = new BuilderAction(ctx.store);
+    const a = slotKey('A');
+    const b = slotKey('B');
+    ba.onWillAppear({ action: a, payload: { settings: { slot: '1' } } } as never);
+    ba.onWillAppear({ action: b, payload: { settings: { slot: '2' } } } as never);
     a.setTitle.mockClear();
     b.setTitle.mockClear();
     ctx.store.setLevel('builders'); // any store change → onChange → render all keys
@@ -331,6 +348,33 @@ describe('zoomInVerb (phase-aware zoom-in)', () => {
     expect(zoomInVerb(b({ protocolPhase: 'review' }))).toBe('view-diff');
     expect(zoomInVerb(b({ blockedGate: 'dev-approval' }))).toBe('view-diff'); // gate past plan → diff
     expect(zoomInVerb(b({}))).toBe('view-diff'); // no status → diff
+  });
+});
+
+describe('phaseArtifactVerb (shared resolver — recognised verb or undefined)', () => {
+  const b = (over: Record<string, unknown>) => ({ id: 'x', blockedGate: null, protocolPhase: '', ...over }) as never;
+  it('maps the specify/plan phases and their gates to the document', () => {
+    expect(phaseArtifactVerb(b({ blockedGate: 'spec-approval' }))).toBe('open-spec');
+    expect(phaseArtifactVerb(b({ protocolPhase: 'specify' }))).toBe('open-spec');
+    expect(phaseArtifactVerb(b({ blockedGate: 'plan-approval' }))).toBe('open-plan');
+    expect(phaseArtifactVerb(b({ protocolPhase: 'plan' }))).toBe('open-plan');
+  });
+  it('maps implement/review/verify and the dev-approval/pr gates to the diff', () => {
+    expect(phaseArtifactVerb(b({ protocolPhase: 'implement' }))).toBe('view-diff');
+    expect(phaseArtifactVerb(b({ protocolPhase: 'review' }))).toBe('view-diff');
+    expect(phaseArtifactVerb(b({ protocolPhase: 'verify' }))).toBe('view-diff');
+    expect(phaseArtifactVerb(b({ blockedGate: 'dev-approval' }))).toBe('view-diff');
+    expect(phaseArtifactVerb(b({ blockedGate: 'pr' }))).toBe('view-diff');
+  });
+  it('gate beats phase (the stronger signal)', () => {
+    expect(phaseArtifactVerb(b({ blockedGate: 'plan-approval', protocolPhase: 'implement' }))).toBe('open-plan');
+  });
+  it('returns undefined for an unknown gate or no live status — the caller picks the fallback', () => {
+    expect(phaseArtifactVerb(b({}))).toBeUndefined();
+    expect(phaseArtifactVerb(b({ blockedGate: 'some-future-gate' }))).toBeUndefined();
+    expect(phaseArtifactVerb(b({ protocolPhase: 'mystery' }))).toBeUndefined();
+    // The two callers diverge exactly here: dial → view-diff, Builder Action → open-terminal.
+    expect(zoomInVerb(b({}))).toBe('view-diff');
   });
 });
 

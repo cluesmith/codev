@@ -20,7 +20,7 @@ but degrades by model:
 
 | Action group | Works on |
 |---|---|
-| Keys — Approve Gate, Codev / Builder / Dev-Server Action, Fleet Slot | **Any** keyed model (Mini, MK.2, XL, +, Neo) |
+| Keys — Approve Gate, Codev / Builder / Dev-Server Action | **Any** keyed model (Mini, MK.2, XL, +, Neo) |
 | Dials — Zoom / PR / Spawn navigators, Diff File / Hunk dials | **Stream Deck + / Studio** (require encoders) |
 
 ## Recommended layout (Stream Deck +)
@@ -34,8 +34,8 @@ but degrades by model:
 │  │ Gate ⓷ │  │ Action │  │ Server │  │ Action │           │
 │  └────────┘  └────────┘  └────────┘  └────────┘           │
 │  ┌────────┐  ┌────────┐  ┌────────┐  ┌────────┐           │
-│  │ Fleet  │  │ Fleet  │  │ Fleet  │  │ Fleet  │   keys 5–8 │
-│  │ Slot   │  │ Slot   │  │ Slot   │  │ Slot   │  (pin 4)   │
+│  │ Builder│  │ Builder│  │ Builder│  │ Builder│   keys 5–8 │
+│  │ Action │  │ Action │  │ Action │  │ Action │  (pin 4)   │
 │  └────────┘  └────────┘  └────────┘  └────────┘           │
 │  ┌──────────────────────────────────────────────┐         │
 │  │  touch strip: each dial's title + live detail  │         │
@@ -60,11 +60,13 @@ the four above (e.g. replace PR Nav when you are triaging the backlog).
 - **Codev Action** — fires a workspace verb. Choose it in the Property Inspector
   (Open Architect/Builder Terminal, View Diff, Send Message, Spawn Builder,
   Refresh Overview). Defaults to Refresh Overview.
-- **Builder Action** — pins to a builder **slot** (the Nth builder) and fires a
-  verb for it. Slot + verb are set in the PI; defaults to View Diff.
+- **Builder Action** — a live tile pinned to a builder **slot** (the Nth builder):
+  it shows that builder's issue + phase, and on press selects the builder (the
+  Zoom dials follow) and fires a verb. The default verb is **Automatic** — it opens
+  the artifact for the builder's current phase (spec / plan / diff), re-openable on
+  every press; pick a fixed verb in the PI to always run that instead. Pin one per
+  key for a live fleet board.
 - **Dev Server** — runs the dev server for the builder the Zoom Navigator is on.
-- **Fleet Slot** — pin one builder per key (set its slot + verb in the PI);
-  the key shows that builder's status and fires its verb on press.
 
 Each dial's touch strip shows a **title + a live value**, refreshed over SSE:
 the Zoom Navigator shows the workspace (+ builder/gate counts) or the selected
@@ -99,10 +101,10 @@ The plugin gives physical shortcuts into Codev's review flow; the reading,
 commenting, and approving still happen in VSCode (the plugin is a controller, it
 renders no artifact content on the device):
 
-- **Open the artifact** — set a **Builder Action** (or **Fleet Slot**) verb to
-  **Open Spec / Open Plan / Open Review**; pressing it opens that builder's
-  artifact in VSCode. Pair it with the **Zoom Navigator** to land on the builder
-  first.
+- **Open the artifact** — a **Builder Action** on **Automatic** opens the current
+  phase's artifact (spec / plan / diff) on press; or set a fixed **Open Spec /
+  Open Plan / Open Review** verb to always open that one. Pressing it also selects
+  the builder, so the **Zoom Navigator** and diff dials land on it.
 - **Approve the gate** — **Approve Gate** badges pending gates (including
   `plan-approval`) and, on press, surfaces that gate's approval modal in VSCode —
   which carries a *View Plan* / *Run Dev* inspect button — for you to review and

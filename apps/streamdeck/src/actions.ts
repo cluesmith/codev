@@ -83,7 +83,8 @@ function slotBuilder(store: CodevStore, settings: SlotSettings): OverviewBuilder
  * A keypad pinned to a builder slot (the Nth builder) that fires a verb for that
  * builder. The Property Inspector picks the slot and the verb; the press is
  * resilient to builder ids changing because it indexes by position, not id.
- * FleetSlot and BuilderAction differ only in their default verb + title.
+ * Subclasses override the default verb, the render, and (optionally) the verb
+ * resolution (BuilderAction resolves its `automatic` default to a phase artifact).
  */
 abstract class SlotKey extends SingletonAction<SlotSettings> {
   protected abstract readonly defaultVerb: string;
@@ -119,9 +120,16 @@ abstract class SlotKey extends SingletonAction<SlotSettings> {
       await ev.action.showAlert();
       return;
     }
-    const verb = settings.verb ?? this.defaultVerb;
+    // Pressing a builder key focuses it: the shared cursor follows, so the diff
+    // dials and other selection-scoped keys now act on the builder you pressed.
+    this.store.syncToBuilder(b.id);
+    const verb = this.resolveVerb(settings, b);
     const res = await this.store.client.sendCommand(verb, [b.id], this.store.selectedWorkspacePath());
     await ack(ev.action, res.ok);
+  }
+  /** The verb a press fires. Base: the per-key setting, else the default. */
+  protected resolveVerb(settings: SlotSettings, _b: OverviewBuilder): string {
+    return settings.verb ?? this.defaultVerb;
   }
   private renderAll(): void {
     for (const { action, settings } of this.keys.values()) this.renderTo(action, settings);
@@ -129,20 +137,22 @@ abstract class SlotKey extends SingletonAction<SlotSettings> {
   protected abstract renderTo(action: KeyAction, settings: SlotSettings): void;
 }
 
-/** Builder Action: pick a builder slot + a verb; press fires it (default: view diff). */
+/**
+ * Builder Action: a live board key for the slot's builder. It renders that
+ * builder's issue + phase/blocked, and on press selects the builder (the cursor
+ * follows) and fires a verb. The default verb is `automatic`: it opens the
+ * artifact that matters for the builder's current phase (spec / plan / diff), and
+ * re-opens it on every press. An explicit verb chosen in the PI is fired verbatim.
+ */
 export class BuilderAction extends SlotKey {
   override readonly manifestId = 'com.cluesmith.codev.builder-action';
-  protected readonly defaultVerb = 'view-diff';
-  protected renderTo(action: KeyAction, settings: SlotSettings): void {
-    const b = slotBuilder(this.store, settings);
-    void action.setTitle(b ? (b.issueId ? `#${b.issueId}` : b.id) : `Slot ${settings.slot ?? '1'}`);
+  protected readonly defaultVerb = 'automatic';
+  protected override resolveVerb(settings: SlotSettings, b: OverviewBuilder): string {
+    const verb = settings.verb;
+    if (verb && verb !== 'automatic') return verb;
+    // Automatic: the current phase's artifact, else a terminal when there's none.
+    return phaseArtifactVerb(b) ?? 'open-terminal';
   }
-}
-
-/** Fleet Slot: a live board key — shows the slot's builder + state; press opens its terminal. */
-export class FleetSlot extends SlotKey {
-  override readonly manifestId = 'com.cluesmith.codev.fleet-slot';
-  protected readonly defaultVerb = 'open-terminal';
   protected renderTo(action: KeyAction, settings: SlotSettings): void {
     const b = slotBuilder(this.store, settings);
     void action.setTitle(
@@ -199,21 +209,34 @@ function dir(ev: DialRotateEvent): number {
 }
 
 /**
- * Pick the artifact to open when zooming into a builder, by its phase: a builder
- * still writing its spec/plan has no meaningful diff, so open the document instead.
- * The gate it's blocked on is the strongest signal (mirrors Codev's gate side-actions:
- * plan-approval → View Plan); otherwise fall back to the protocol phase. Everything
- * past plan (implement / review / verify / unknown) opens the diff, as before.
+ * The artifact verb for a builder's current protocol state, or `undefined` when
+ * the state is unknown / has no artifact yet. The gate a builder is blocked on is
+ * the strongest signal (mirrors Codev's gate side-actions: plan-approval → View
+ * Plan); otherwise the protocol phase decides. A builder still writing its
+ * spec/plan has no meaningful diff, so its document opens instead. State strings
+ * are read from the overview wire values (`blockedGate` / `protocolPhase`), never
+ * guessed. Callers choose the fallback: the dial zoom-in opens the diff, the
+ * Builder Action key opens a terminal.
  */
-export function zoomInVerb(b: OverviewBuilder): string {
+export function phaseArtifactVerb(b: OverviewBuilder): string | undefined {
   const gate = b.blockedGate ?? '';
   if (gate === 'spec-approval') return 'open-spec';
   if (gate === 'plan-approval') return 'open-plan';
-  if (gate) return 'view-diff'; // dev-approval / pr / other → review the implementation
+  if (gate === 'dev-approval' || gate === 'pr') return 'view-diff';
   const phase = b.protocolPhase ?? '';
   if (phase === 'specify') return 'open-spec';
   if (phase === 'plan') return 'open-plan';
-  return 'view-diff';
+  if (phase === 'implement' || phase === 'review' || phase === 'verify') return 'view-diff';
+  return undefined; // unknown gate / no live status → the caller's fallback
+}
+
+/**
+ * Pick the artifact to open when zooming into a builder. Reuses the shared
+ * phase→artifact resolver; an unknown/no-status builder falls back to the diff
+ * (a dial always has an editor to hand off to).
+ */
+export function zoomInVerb(b: OverviewBuilder): string {
+  return phaseArtifactVerb(b) ?? 'view-diff';
 }
 
 /**

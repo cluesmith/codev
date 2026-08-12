@@ -84,7 +84,7 @@
     {
       "Name": "Builder Action",
       "UUID": "com.cluesmith.codev.builder-action",
-      "Tooltip": "A phase-aware verb for the selected builder; assign a slot in the property inspector.",
+      "Tooltip": "Live tile for the Nth builder (set the slot in the property inspector). Shows its issue + phase; press selects the builder and opens the artifact for its current phase (spec / plan / diff), or a fixed verb you choose.",
       "Icon": "icons/list/builder-action",
       "Controllers": [
         "Keypad"
@@ -93,22 +93,6 @@
       "States": [
         {
           "Image": "icons/builder-action",
-          "TitleAlignment": "bottom"
-        }
-      ]
-    },
-    {
-      "Name": "Fleet Slot",
-      "UUID": "com.cluesmith.codev.fleet-slot",
-      "Tooltip": "A live fleet board: one builder per key, coloured by state. Assign a slot in the property inspector.",
-      "Icon": "icons/list/fleet-slot",
-      "Controllers": [
-        "Keypad"
-      ],
-      "PropertyInspectorPath": "ui/fleet-slot.html",
-      "States": [
-        {
-          "Image": "icons/fleet-slot",
           "TitleAlignment": "bottom"
         }
       ]

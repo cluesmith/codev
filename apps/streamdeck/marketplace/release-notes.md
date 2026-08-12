@@ -5,8 +5,7 @@ Drive Codev's AI agent workflows from your desk. This plugin pairs with Codev (h
 **Keys**
 
 - **Approve Gate**: a live badge counts pending approval gates; press to surface the next review in VS Code.
-- **Fleet Slot**: a live fleet board, one builder per key, coloured by state.
-- **Builder Action**: a phase-aware verb for the selected builder.
+- **Builder Action**: a live tile, one builder per key, showing its issue and phase; press selects the builder and opens the artifact for its current phase (spec / plan / diff), or a fixed verb you choose.
 - **Codev Action**: run Codev commands (open terminals, view diff, send, spawn, refresh).
 - **Dev Server**: start and stop the workspace dev server.
 
