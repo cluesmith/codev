@@ -152,13 +152,16 @@ describe('isAllowedHost', () => {
     expect(isAllowedHost('other.example.com')).toBe(false);
   });
 
-  it('relaxes the Host allowlist in BRIDGE_MODE (deliberate network exposure)', () => {
+  it('allows IP-literal (not DNS-name) Hosts in BRIDGE_MODE, keeping the rebinding guard', () => {
     process.env.BRIDGE_MODE = '1';
     try {
-      // Any Host is allowed on a bridge bind (LAN IP / tunnel host Tower cannot
-      // enumerate); the key check — separate — still guards keyed routes.
+      // A LAN client reaches Tower by IP — allowed on a bridge bind.
       expect(isAllowedHost('192.168.1.5:4100')).toBe(true);
-      expect(isAllowedHost('phone.local')).toBe(true);
+      expect(isAllowedHost('[fe80::1]:4100')).toBe(true);
+      // DNS rebinding needs a host NAME — still rejected even in bridge mode.
+      expect(isAllowedHost('phone.local')).toBe(false);
+      expect(isAllowedHost('attacker.com:4100')).toBe(false);
+      // The key check is separate and still mandatory for keyed routes.
       expect(isRequestAllowed(req('POST', '/api/terminals', { host: '192.168.1.5:4100' }))).toBe(false);
       expect(isRequestAllowed(req('POST', '/api/terminals', { host: '192.168.1.5:4100', 'codev-web-key': TEST_KEY }))).toBe(true);
     } finally {

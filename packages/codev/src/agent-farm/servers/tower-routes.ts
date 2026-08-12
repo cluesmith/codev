@@ -32,7 +32,7 @@ import { getBuilders, setArchitectByName } from '../state.js';
 import { DEFAULT_COLS, defaultSessionOptions } from '../../terminal/index.js';
 import type { SSEClient, WorkspaceTerminals } from './tower-types.js';
 import type { TerminalManager } from '../../terminal/pty-manager.js';
-import { parseJsonBody, isRequestAllowed, isAllowedOrigin, isAllowedHost, getExpectedKey } from '../utils/server-utils.js';
+import { parseJsonBody, isRequestAllowed, isAllowedOrigin, isAllowedHost, getExpectedKey, escapeHtml } from '../utils/server-utils.js';
 import { WEB_KEY_HEADER } from '@cluesmith/codev-types';
 import {
   isRateLimited,
@@ -3596,15 +3596,23 @@ function handleWorkspaceAnnotate(
       const fileName = path.basename(filePath);
       const fileSize = fs.statSync(filePath).size;
 
+      // The shell carries the injected key (advisory GHSA-xvjp-7748-v88v), so a
+      // maliciously-named file must not become XSS (which would read the key).
+      // HTML-escape values that land in markup/attributes (safe in the JS string
+      // contexts too — it blocks `<`, `"`, `'`), and for the JSON-in-<script>
+      // value escape `<` so a filename containing `</script>` can't break out.
+      const safeFileName = escapeHtml(fileName);
+      const safeFilePath = escapeHtml(filePath);
+      const filePathJson = JSON.stringify(filePath).replace(/</g, '\\u003c');
       if (is3D) {
-        html = html.replace(/\{\{FILE\}\}/g, fileName);
-        html = html.replace(/\{\{FILE_PATH_JSON\}\}/g, JSON.stringify(filePath));
-        html = html.replace(/\{\{FORMAT\}\}/g, ext);
+        html = html.replace(/\{\{FILE\}\}/g, safeFileName);
+        html = html.replace(/\{\{FILE_PATH_JSON\}\}/g, filePathJson);
+        html = html.replace(/\{\{FORMAT\}\}/g, escapeHtml(ext));
       } else {
-        html = html.replace(/\{\{FILE\}\}/g, fileName);
-        html = html.replace(/\{\{FILE_PATH\}\}/g, filePath);
+        html = html.replace(/\{\{FILE\}\}/g, safeFileName);
+        html = html.replace(/\{\{FILE_PATH\}\}/g, safeFilePath);
         html = html.replace(/\{\{BUILDER_ID\}\}/g, '');
-        html = html.replace(/\{\{LANG\}\}/g, getLanguageForExt(ext));
+        html = html.replace(/\{\{LANG\}\}/g, escapeHtml(getLanguageForExt(ext)));
         html = html.replace(/\{\{IS_MARKDOWN\}\}/g, String(isMarkdown));
         html = html.replace(/\{\{IS_IMAGE\}\}/g, String(isImage));
         html = html.replace(/\{\{IS_VIDEO\}\}/g, String(isVideo));
@@ -3626,9 +3634,11 @@ function handleWorkspaceAnnotate(
         html = html.replace('// FILE_CONTENT will be injected by the server', initScript);
       }
 
-      // Handle ?line= query param for scroll-to-line
+      // Handle ?line= query param for scroll-to-line. Validate as a bare integer
+      // before interpolating into the script — untrusted query input must never
+      // reach the key-bearing shell's markup unescaped.
       const lineParam = url.searchParams.get('line');
-      if (lineParam) {
+      if (lineParam && /^\d+$/.test(lineParam)) {
         const scrollScript = `<script>window.addEventListener('load',()=>{setTimeout(()=>{const el=document.querySelector('[data-line="${lineParam}"]');if(el){el.scrollIntoView({block:'center'});el.classList.add('highlighted-line');}},200);})</script>`;
         html = html.replace('</body>', `${scrollScript}</body>`);
       }

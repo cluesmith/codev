@@ -609,7 +609,9 @@
       });
     }
     // pagehide fires on mobile / bfcache navigations where beforeunload does not.
-    window.addEventListener('pagehide', revokeAllMediaUrls);
+    // Skip revocation when the page is going into the bfcache (persisted): the
+    // object URLs must survive so restored media still renders on pageshow.
+    window.addEventListener('pagehide', function(e) { if (!e.persisted) revokeAllMediaUrls(); });
     window.addEventListener('beforeunload', revokeAllMediaUrls);
 
     // State

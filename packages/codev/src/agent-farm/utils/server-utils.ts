@@ -215,35 +215,48 @@ function hostnameOf(hostHeader: string): string {
   return h;
 }
 
+/** True if `hostname` is an IPv4 or IPv6 literal (brackets already stripped). */
+function isIpLiteral(hostname: string): boolean {
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(hostname)) return true; // IPv4
+  return hostname.includes(':'); // IPv6 (a DNS name never contains ':')
+}
+
+/** True if `hostname` matches a `CODEV_TOWER_ALLOWED_ORIGINS` entry's host. */
+function isConfiguredHost(hostname: string): boolean {
+  const configured = process.env.CODEV_TOWER_ALLOWED_ORIGINS;
+  if (!configured) return false;
+  for (const origin of configured.split(',')) {
+    try {
+      if (new URL(origin.trim()).hostname.toLowerCase() === hostname) return true;
+    } catch { /* ignore malformed entry */ }
+  }
+  return false;
+}
+
 /**
  * Host allowlist (advisory GHSA-xvjp-7748-v88v). A DNS-rebinding guard for the
- * default localhost bind: the key is injected into the (public) dashboard shell,
- * so a browser rebound to Tower's address would carry the attacker's hostname in
- * `Host` and be rejected before the shell is served. Allowed: loopback
- * hostnames and the hostnames of any `CODEV_TOWER_ALLOWED_ORIGINS` (the same var
- * the CORS allowlist uses, so a tunnel/proxy deployment configures both).
+ * key-bearing dashboard shell: the key is injected into the (public) shell, so a
+ * browser rebound to Tower's address would carry the attacker's hostname in
+ * `Host` and be rejected before the shell is served. Allowed: loopback hostnames
+ * and the hostnames of any `CODEV_TOWER_ALLOWED_ORIGINS` (the same var the CORS
+ * allowlist uses, so a tunnel/proxy deployment configures both).
  *
- * In BRIDGE_MODE the operator has deliberately exposed Tower on the network at a
- * LAN IP / tunnel host Tower cannot enumerate, so the Host allowlist is relaxed;
- * the shared key (mandatory under bridge mode) and TLS remain the controls. This
- * relaxation never touches the key check — keyed routes still require the key.
+ * In BRIDGE_MODE the operator has deliberately exposed Tower on the network, so
+ * the allowlist ALSO accepts IP-literal Hosts — a LAN client reaches Tower by IP
+ * (`http://192.168.1.5:4100/`), while DNS rebinding requires a host *name*, which
+ * stays rejected even in bridge mode. Hostname-based LAN access uses the
+ * `CODEV_TOWER_ALLOWED_ORIGINS` escape hatch. The key (mandatory under bridge
+ * mode) remains the primary control and is checked separately for keyed routes;
+ * this relaxation never weakens it.
  */
 export function isAllowedHost(hostHeader: string | undefined): boolean {
-  if (process.env.BRIDGE_MODE === '1') return true;
-
   if (!hostHeader) return false;
   const hostname = hostnameOf(hostHeader).toLowerCase();
 
   if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') return true;
+  if (isConfiguredHost(hostname)) return true;
+  if (process.env.BRIDGE_MODE === '1' && isIpLiteral(hostname)) return true;
 
-  const configured = process.env.CODEV_TOWER_ALLOWED_ORIGINS;
-  if (configured) {
-    for (const origin of configured.split(',')) {
-      try {
-        if (new URL(origin.trim()).hostname.toLowerCase() === hostname) return true;
-      } catch { /* ignore malformed entry */ }
-    }
-  }
   return false;
 }
 
