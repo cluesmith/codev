@@ -32,5 +32,9 @@ skips). Committed da7a44f86. dev-approval gate reached.
 ## Review phase (2026-08-12)
 
 dev-approval granted. Wrote retrospective `codev/reviews/1191-recently-closed-sidebar-sectio.md`.
-No arch/lessons updates (mechanical localized fix). Opening PR next, then porch runs the
-single 3-way consultation pass and fires the pr gate.
+No arch/lessons updates (mechanical localized fix). Opened PR #1427, recorded with porch.
+
+3-way consultation (single pass): gemini APPROVE, codex APPROVE, claude APPROVE (all HIGH).
+Claude flagged two non-blocking nits: em dashes (standing project preference) and a
+pre-emptive "reviewer approved" line. Fixed both in e31765f15 (did NOT re-run porch done, so
+no re-consult). pr gate now pending — awaiting human merge.
