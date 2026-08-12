@@ -11,7 +11,7 @@ import { approveGate } from './commands/approve.js';
 import { cleanupBuilder } from './commands/cleanup.js';
 import { openWorktreeWindow } from './commands/open-worktree-window.js';
 import { viewDiff, activateDiffView, openBuilderFileDiff } from './commands/view-diff.js';
-import { navigateDiff, navigateDiffToFirst, diffFirstHunk, recordDiffNavPosition } from './commands/diff-nav.js';
+import { navigateDiff, navigateDiffToFirst, navigateBuilderDiffToFirst, diffFirstHunk, recordDiffNavPosition } from './commands/diff-nav.js';
 import { activateDiffInjectCodeLens, getDiffInjectEntry, onDidChangeDiffInjectRegistry } from './diff-inject-codelens.js';
 import { isStandaloneTextTab } from './diff-tab-input.js';
 import { buildBuilderRangeRef, buildBuilderFileRef } from './diff-inject-ref.js';
@@ -1263,6 +1263,11 @@ export async function activate(context: vscode.ExtensionContext) {
 		// first file in the list / the first hunk of the active diff.
 		reg('codev.diffFirstFile', () =>
 			navigateDiffToFirst({ context, overviewCache, diffCache: builderDiffCache })),
+		// Builder-id-scoped "open first file diff" (#1414): the SD+ Automatic diff
+		// press relays `open-diff-first` here with the target builder id, so it lands
+		// on file 1 in per-file mode (dials seeded) instead of the aggregate editor.
+		reg('codev.openBuilderDiffFirstFile', (arg: vscode.TreeItem | string | undefined) =>
+			navigateBuilderDiffToFirst(extractBuilderId(arg), { context, overviewCache, diffCache: builderDiffCache })),
 		reg('codev.diffFirstHunk', () => diffFirstHunk()),
 		regCli('codev.runWorktreeDev', (arg: vscode.TreeItem | string | undefined) =>
 			runWorktreeDev(connectionManager!, terminalManager!, extractBuilderId(arg))),
