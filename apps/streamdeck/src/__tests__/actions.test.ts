@@ -5,6 +5,8 @@ import {
   CodevAction,
   BuilderAction,
   ApproveGate,
+  SendQueueAction,
+  NextAttentionAction,
   PrNav,
   SpawnNav,
   DiffFileNav,
@@ -192,56 +194,174 @@ describe('slot keys', () => {
   });
 });
 
-describe('ApproveGate', () => {
-  it('fires approve-gate for the top blocked builder', async () => {
-    const ctx = makeStore();
+describe('ApproveGate (Row 2 — selected-scoped, #1410)', () => {
+  it('fires approve-gate for the SELECTED builder (not the top pending gate)', async () => {
+    const ctx = makeStore(); // selection defaults to pir-1 (blocked at plan-approval)
     await new ApproveGate(ctx.store).onKeyDown(keyEvent() as never);
     expect(ctx.sent[0]).toEqual({ verb: 'approve-gate', args: ['pir-1'], ws: '/work/alpha' });
   });
 
-  it('alerts and sends nothing when no gate is pending', async () => {
+  it('acts on whoever is selected: after selecting pir-2 it would target pir-2', async () => {
     const ctx = makeStore();
-    ctx.store.overview!.builders = ctx.store.overview!.builders.map((b) => ({ ...b, blocked: null }));
+    // Block pir-2 too, then select it — the key must follow the selection, not pir-1.
+    ctx.store.overview!.builders[1] = { ...ctx.store.overview!.builders[1], blockedGate: 'dev-approval' } as never;
+    ctx.store.syncToBuilder('pir-2');
+    await new ApproveGate(ctx.store).onKeyDown(keyEvent() as never);
+    expect(ctx.sent[0]).toEqual({ verb: 'approve-gate', args: ['pir-2'], ws: '/work/alpha' });
+  });
+
+  it('alerts and sends nothing when the selected builder is not blocked at a gate', async () => {
+    const ctx = makeStore();
+    ctx.store.syncToBuilder('pir-2'); // pir-2 is not blocked (blockedGate: null)
     const ev = keyEvent();
     await new ApproveGate(ctx.store).onKeyDown(ev as never);
     expect(ctx.sent).toHaveLength(0);
     expect(ev.action.showAlert).toHaveBeenCalled();
   });
 
-  it('renders a composite Gates face (count + label under a bell), not a title over the icon', () => {
-    const ctx = makeStore(); // pir-1 blocked → 1 pending gate
+  it('renders the selected builder’s pending gate on the Approve face', () => {
+    const ctx = makeStore(); // pir-1 selected, blocked at plan-approval
     const key = { id: 'G', isKey: () => true, setImage: vi.fn(), setTitle: vi.fn() };
     new ApproveGate(ctx.store).onWillAppear({ action: key, payload: {} } as never);
     const arg = String(key.setImage.mock.calls.at(-1)?.[0] ?? '');
     expect(arg.startsWith('data:image/svg+xml;base64,')).toBe(true);
     const face = Buffer.from(arg.slice('data:image/svg+xml;base64,'.length), 'base64').toString('utf8');
-    expect(face).toContain('Gates');
-    expect(face).toContain('>1<'); // the pending count
-    expect(face).toContain('#cca700'); // pending → warning yellow
+    expect(face).toContain('Plan');    // the selected builder's gate label
+    expect(face).toContain('Approve'); // the action band
+    expect(face).toContain('#cca700'); // blocked → warning yellow
     expect(key.setTitle).toHaveBeenCalledWith(''); // title layer suppressed
   });
 });
 
+describe('SendQueueAction (Row 2 — flush, #1410)', () => {
+  it('badges the selected builder’s queued count and flushes on press', async () => {
+    const ctx = makeStore();
+    ctx.store.overview = { ...ctx.store.overview!, queuedFeedback: { 'pir-1': 3 } } as never;
+    const key = { id: 'S', isKey: () => true, setImage: vi.fn(), setTitle: vi.fn(), showOk: vi.fn(), showAlert: vi.fn() };
+    const action = new SendQueueAction(ctx.store);
+    action.onWillAppear({ action: key, payload: {} } as never);
+    const face = Buffer.from(String(key.setImage.mock.calls.at(-1)?.[0]).split(',')[1], 'base64').toString('utf8');
+    expect(face).toContain('Send Fb');
+    expect(face).toContain('>3<'); // badge
+    await action.onKeyDown({ action: key, payload: { settings: {} } } as never);
+    expect(ctx.sent[0]).toEqual({ verb: 'send-queue', args: ['pir-1'], ws: '/work/alpha' });
+  });
+
+  it('is inert (alerts, sends nothing) when the selected builder has no queued feedback', async () => {
+    const ctx = makeStore(); // no queuedFeedback on the fixture → 0
+    const key = { id: 'S', isKey: () => true, setImage: vi.fn(), setTitle: vi.fn(), showOk: vi.fn(), showAlert: vi.fn() };
+    await new SendQueueAction(ctx.store).onKeyDown({ action: key, payload: { settings: {} } } as never);
+    expect(ctx.sent).toHaveLength(0);
+    expect(key.showAlert).toHaveBeenCalled();
+  });
+});
+
+describe('NextAttentionAction (Row 2 — jump to attention, #1410)', () => {
+  it('jumps the selection to the highest-priority pending-gate builder', async () => {
+    const ctx = makeStore();
+    ctx.store.syncToBuilder('pir-2'); // move selection away from the blocked pir-1
+    const key = { id: 'N', isKey: () => true, setImage: vi.fn(), setTitle: vi.fn(), showOk: vi.fn(), showAlert: vi.fn() };
+    await new NextAttentionAction(ctx.store).onKeyDown({ action: key, payload: { settings: {} } } as never);
+    expect(ctx.store.selectedBuilder()?.id).toBe('pir-1'); // the pending gate
+    expect(ctx.sent).toHaveLength(0); // a selection move, no verb relayed
+    expect(key.showOk).toHaveBeenCalled();
+  });
+
+  it('badges the fleet pending-gate count and is inert when none pend', async () => {
+    const ctx = makeStore();
+    ctx.store.overview!.builders = ctx.store.overview!.builders.map((b) => ({ ...b, blocked: null, blockedGate: null }));
+    const key = { id: 'N', isKey: () => true, setImage: vi.fn(), setTitle: vi.fn(), showOk: vi.fn(), showAlert: vi.fn() };
+    const action = new NextAttentionAction(ctx.store);
+    action.onWillAppear({ action: key, payload: {} } as never);
+    const face = Buffer.from(String(key.setImage.mock.calls.at(-1)?.[0]).split(',')[1], 'base64').toString('utf8');
+    expect(face).toContain('Attn');
+    await action.onKeyDown({ action: key, payload: { settings: {} } } as never);
+    expect(key.showAlert).toHaveBeenCalled();
+  });
+});
+
+describe('Row 1 windowing (#1410)', () => {
+  /** A store with `n` builders (ids builder-0..builder-(n-1)), selection at `cursor`. */
+  function windowedStore(n: number, cursor: number) {
+    const ctx = makeStore();
+    ctx.store.overview = {
+      builders: Array.from({ length: n }, (_, i) => ({
+        id: `b${i}`, roleId: `builder-b${i}`, issueId: String(100 + i), issueTitle: `Task ${i}`,
+        blocked: null, blockedGate: null, protocolPhase: 'implement', progress: 0, worktreePath: `/w/b${i}`,
+      })),
+      pendingPRs: [], backlog: [], recentlyClosed: [],
+    } as never;
+    ctx.store.cursor = { ...ctx.store.cursor, builder: cursor, level: 'builders' };
+    return ctx.store;
+  }
+
+  it('slot i shows builder i on page 0 (first four)', () => {
+    const store = windowedStore(10, 0);
+    expect([0, 1, 2, 3].map((i) => store.windowedBuilder(i)?.id)).toEqual(['b0', 'b1', 'b2', 'b3']);
+  });
+
+  it('scrolls a page when the selection moves past the fourth builder', () => {
+    const store = windowedStore(10, 4); // selection on b4 → page 1
+    expect([0, 1, 2, 3].map((i) => store.windowedBuilder(i)?.id)).toEqual(['b4', 'b5', 'b6', 'b7']);
+  });
+
+  it('trailing slots are empty on a partial last page', () => {
+    const store = windowedStore(10, 9); // selection on b9 → page 2 (b8, b9, -, -)
+    expect([0, 1, 2, 3].map((i) => store.windowedBuilder(i)?.id)).toEqual(['b8', 'b9', undefined, undefined]);
+  });
+
+  it('BuilderAction renders the windowed builder and accents the selected slot', () => {
+    const store = windowedStore(10, 5); // page 1: slots show b4..b7; b5 is selected (slot 1)
+    const render = (slot: string) => {
+      const key = { id: `k${slot}`, isKey: () => true, setImage: vi.fn(), setTitle: vi.fn() };
+      new BuilderAction(store).onWillAppear({ action: key, payload: { settings: { slot } } } as never);
+      return Buffer.from(String(key.setImage.mock.calls.at(-1)?.[0]).split(',')[1], 'base64').toString('utf8');
+    };
+    expect(render('1')).toContain('#104'); // slot 1 → b4 (issueId 104)
+    expect(render('2')).toContain('#105'); // slot 2 → b5 (selected)
+    expect(render('2')).toContain('stroke-width="3"'); // selected accent ring
+    expect(render('1')).not.toContain('stroke-width="3"'); // unselected slot has no ring
+  });
+});
+
+describe('store readers (#1410)', () => {
+  it('feedbackMode defaults to forward, reads queue from the overview', () => {
+    const ctx = makeStore();
+    expect(ctx.store.feedbackMode()).toBe('forward');
+    ctx.store.overview = { ...ctx.store.overview!, feedbackMode: 'queue' } as never;
+    expect(ctx.store.feedbackMode()).toBe('queue');
+  });
+
+  it('queuedFeedback reads the per-builder map, 0 when absent', () => {
+    const ctx = makeStore();
+    expect(ctx.store.queuedFeedback('pir-1')).toBe(0);
+    ctx.store.overview = { ...ctx.store.overview!, queuedFeedback: { 'pir-1': 5 } } as never;
+    expect(ctx.store.queuedFeedback('pir-1')).toBe(5);
+    expect(ctx.store.queuedFeedback('pir-2')).toBe(0);
+    expect(ctx.store.queuedFeedback(undefined)).toBe(0);
+  });
+});
+
 describe('encoders', () => {
-  it('DiffFileNav in diff mode: rotate navigates, press forwards the file, touch jumps to first', async () => {
+  it('DiffFileNav in diff mode: rotate navigates, press submits feedback, touch jumps to first', async () => {
     const ctx = makeStore();
     ctx.store.syncToBuilder('pir-2'); // implement phase → diff mode
     const nav = new DiffFileNav(ctx.store);
     await nav.onDialRotate(dial(1) as never);   // next
     await nav.onDialRotate(dial(-2) as never);  // prev
-    await nav.onDialDown();                      // forward
+    await nav.onDialDown();                      // submit feedback (mode-neutral)
     await nav.onTouchTap();                       // first
-    expect(ctx.sent.map((s) => s.verb)).toEqual(['diff-next-file', 'diff-prev-file', 'forward-file', 'diff-first-file']);
+    expect(ctx.sent.map((s) => s.verb)).toEqual(['diff-next-file', 'diff-prev-file', 'feedback-file', 'diff-first-file']);
     expect(ctx.sent.every((s) => s.ws === '/work/alpha')).toBe(true);
     expect(ctx.canvasSent).toHaveLength(0); // diff mode never touches the canvas channel
   });
 
-  it('Diff dials forward their axis on a dial press (diff mode)', async () => {
+  it('Diff dials submit their axis as feedback on a dial press (diff mode, #1410)', async () => {
     const ctx = makeStore();
     ctx.store.syncToBuilder('pir-2'); // implement phase → diff mode
     await new DiffFileNav(ctx.store).onDialDown();
     await new DiffHunkNav(ctx.store).onDialDown();
-    expect(ctx.sent.map((s) => s.verb)).toEqual(['forward-file', 'forward-hunk']);
+    expect(ctx.sent.map((s) => s.verb)).toEqual(['feedback-file', 'feedback-hunk']);
   });
 
   it('canvas mode: coarse dial rotates headings (count = |ticks|), press cancels composer, tap resets to doc start', async () => {
@@ -328,7 +448,7 @@ describe('encoders', () => {
     expect(ctx.canvasSent).toHaveLength(0);
   });
 
-  it('ScrollNav scrolls the editor on rotate and forwards the selection on press', async () => {
+  it('ScrollNav scrolls the editor on rotate and submits the selection as feedback on press', async () => {
     const ctx = makeStore();
     const nav = new ScrollNav(ctx.store);
     await nav.onDialRotate(dial(1) as never);  // down
@@ -336,7 +456,7 @@ describe('encoders', () => {
     await nav.onDialDown();
     expect(ctx.sent[0]).toEqual({ verb: 'scroll', args: [{ to: 'down', by: 'line', value: 3, revealCursor: false }], ws: '/work/alpha' });
     expect((ctx.sent[1].args[0] as { to: string }).to).toBe('up');
-    expect(ctx.sent[2]).toEqual({ verb: 'forward-selection', args: [], ws: '/work/alpha' });
+    expect(ctx.sent[2]).toEqual({ verb: 'feedback-selection', args: [], ws: '/work/alpha' });
   });
 
   it('PrNav opens the selected PR url on press', async () => {
@@ -665,15 +785,24 @@ describe('ZoomNav zoom gesture', () => {
     expect(hunkAction.setFeedback).toHaveBeenCalledWith({ title: 'Blocks · Open/Submit', value: '#101 Add the relay', bar: 45 });
   });
 
-  it('legibility: diff-phase builder titles the dials Files/Changes', () => {
-    const ctx = makeStore();
+  it('legibility: diff-phase builder titles the dials with axis + delivery mode (Files · send)', () => {
+    const ctx = makeStore(); // no feedbackMode on the fixture → defaults to forward → "send"
     ctx.store.syncToBuilder('pir-2'); // implement phase → diff mode (#102, "Wire the dial", 70%)
     const fileAction = { isDial: () => true, setFeedback: vi.fn() };
     const hunkAction = { isDial: () => true, setFeedback: vi.fn() };
     new DiffFileNav(ctx.store).onWillAppear({ action: fileAction, payload: {} } as never);
     new DiffHunkNav(ctx.store).onWillAppear({ action: hunkAction, payload: {} } as never);
-    expect(fileAction.setFeedback).toHaveBeenCalledWith({ title: 'Files', value: '#102 Wire the dial', bar: 70 });
-    expect(hunkAction.setFeedback).toHaveBeenCalledWith({ title: 'Changes', value: '#102 Wire the dial', bar: 70 });
+    expect(fileAction.setFeedback).toHaveBeenCalledWith({ title: 'Files · send', value: '#102 Wire the dial', bar: 70 });
+    expect(hunkAction.setFeedback).toHaveBeenCalledWith({ title: 'Changes · send', value: '#102 Wire the dial', bar: 70 });
+  });
+
+  it('legibility: the diff touchstrip names the queue mode when the workspace queues (Files · queue)', () => {
+    const ctx = makeStore();
+    ctx.store.overview = { ...ctx.store.overview!, feedbackMode: 'queue' } as never;
+    ctx.store.syncToBuilder('pir-2'); // diff mode
+    const action = { isDial: () => true, setFeedback: vi.fn() };
+    new DiffFileNav(ctx.store).onWillAppear({ action, payload: {} } as never);
+    expect(action.setFeedback.mock.calls.at(-1)?.[0]).toMatchObject({ title: 'Files · queue' });
   });
 
   it('legibility: the dial re-titles when the selection moves between modes', () => {
@@ -683,7 +812,7 @@ describe('ZoomNav zoom gesture', () => {
     nav.onWillAppear({ action, payload: {} } as never); // pir-1 → canvas
     expect(action.setFeedback.mock.calls.at(-1)?.[0]).toMatchObject({ title: 'Headings · Cancel' });
     ctx.store.syncToBuilder('pir-2'); // → diff; onChange re-renders
-    expect(action.setFeedback.mock.calls.at(-1)?.[0]).toMatchObject({ title: 'Files' });
+    expect(action.setFeedback.mock.calls.at(-1)?.[0]).toMatchObject({ title: 'Files · send' });
   });
 
   it('clears the previous workspace overview immediately on switch (no stale flash)', () => {

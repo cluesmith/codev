@@ -36,7 +36,37 @@
     {
       "Name": "Approve Gate",
       "UUID": "com.cluesmith.codev.approve-gate",
-      "Tooltip": "Badge of pending gates; press to surface the next gate's review for confirmation in VSCode.",
+      "Tooltip": "Acts on the selected builder: shows its pending gate; press to surface that gate's review for confirmation in VSCode.",
+      "Icon": "icons/list/approve-gate",
+      "Controllers": [
+        "Keypad"
+      ],
+      "States": [
+        {
+          "Image": "icons/approve-gate",
+          "TitleAlignment": "bottom"
+        }
+      ]
+    },
+    {
+      "Name": "Send Feedback",
+      "UUID": "com.cluesmith.codev.send-queue",
+      "Tooltip": "Flush the selected builder's queued review feedback. Badge shows the queued count; inert when nothing is queued (or the workspace forwards immediately).",
+      "Icon": "icons/list/action",
+      "Controllers": [
+        "Keypad"
+      ],
+      "States": [
+        {
+          "Image": "icons/action",
+          "TitleAlignment": "bottom"
+        }
+      ]
+    },
+    {
+      "Name": "Next / Attention",
+      "UUID": "com.cluesmith.codev.next-attention",
+      "Tooltip": "Badge of pending gates across the fleet; press to jump the selection to the builder needing attention, then approve on the Approve key.",
       "Icon": "icons/list/approve-gate",
       "Controllers": [
         "Keypad"

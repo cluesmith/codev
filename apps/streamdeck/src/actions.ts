@@ -15,7 +15,7 @@ import type {
   CanvasCommandClientErrorCode,
 } from '@cluesmith/codev-sdk/controller';
 import type { CodevStore } from './store.js';
-import { builderFaceSvg, faceForBuilder, gatesFaceSvg, svgToDataUri } from './face.js';
+import { approveFaceSvg, builderFaceSvg, faceForBuilder, gatesFaceSvg, sendFbFaceSvg, svgToDataUri } from './face.js';
 
 /**
  * The Stream Deck actions — thin adapters over CodevStore. Each maps a physical
@@ -78,11 +78,17 @@ export class DevServerAction extends VerbKey {
 /** PI settings shared by the slot-based keys: a 1-based builder slot + a verb. */
 type SlotSettings = { slot?: string; verb?: string };
 
-/** Resolve the builder a slot points at: slot N → the Nth builder (overview order). */
+/**
+ * Resolve the builder a slot points at. Slot N is a POSITION in Row 1's 4-wide
+ * window onto the fleet (#1410), not an absolute index: the window is the page
+ * containing the selection, so the Select dial scrolls builders 5-8, 9-N into the
+ * same four keys. A slot past the end of the fleet resolves to `undefined` (an
+ * empty slot on the last page).
+ */
 function slotBuilder(store: CodevStore, settings: SlotSettings): OverviewBuilder | undefined {
   const slot = Number.parseInt(settings.slot ?? '1', 10);
-  const index = (Number.isFinite(slot) && slot > 0 ? slot : 1) - 1;
-  return store.builders()[index];
+  const slotIndex = (Number.isFinite(slot) && slot > 0 ? slot : 1) - 1;
+  return store.windowedBuilder(slotIndex);
 }
 
 /**
@@ -170,7 +176,10 @@ export class BuilderAction extends SlotKey {
     // colour/icon vocabulary. setTitle('') suppresses the SDK title layer so nothing overlays it.
     let svg: string;
     if (b) {
-      svg = builderFaceSvg(faceForBuilder(b));
+      // Accent the slot holding the shared selection so the live builder among
+      // the four is unmistakable (#1410).
+      const selected = b.id === this.store.selectedBuilder()?.id;
+      svg = builderFaceSvg(faceForBuilder(b, selected));
     } else {
       svg = builderFaceSvg({ kind: 'empty', slot: settings.slot ?? '1' });
     }
@@ -180,12 +189,102 @@ export class BuilderAction extends SlotKey {
 }
 
 /**
- * Approve-gate key: a read-only badge of the pending-gate count, and on press a
- * jump-to-review — it fires `approve-gate` for the top pending gate, which the
- * provider surfaces as a confirmation modal (it does NOT silently approve).
+ * Row-2 Approve key (#1410): the SINGLE approve affordance on the deck. It acts on
+ * the SELECTED builder — press relays `approve-gate [selectedId]`, which the
+ * provider surfaces as a confirmation modal (it does NOT silently approve). The
+ * face shows the selected builder's pending gate (e.g. `Plan · Approve`) when it is
+ * blocked, and is inert otherwise. The former standalone top-gate singleton is
+ * retired: the fleet-wide pending-gate count + jump-to-next now live on
+ * `NextAttentionAction`, so there are never two approve keys with different targets.
  */
 export class ApproveGate extends SingletonAction {
   override readonly manifestId = 'com.cluesmith.codev.approve-gate';
+  private readonly keys = new Map<string, KeyAction>();
+
+  constructor(private readonly store: CodevStore) {
+    super();
+    this.store.onChange(() => this.renderAll());
+  }
+
+  override onWillAppear(ev: WillAppearEvent): void {
+    if (!ev.action.isKey()) return;
+    this.keys.set(ev.action.id, ev.action);
+    this.renderTo(ev.action);
+  }
+  override onWillDisappear(ev: WillDisappearEvent): void {
+    this.keys.delete(ev.action.id);
+  }
+  override async onKeyDown(ev: KeyDownEvent): Promise<void> {
+    const b = this.store.selectedBuilder();
+    // Only a builder blocked at a gate is approvable; otherwise the key is inert
+    // (no pointless relay that the provider would just reject).
+    if (!b || !b.blockedGate) {
+      await ev.action.showAlert();
+      return;
+    }
+    const res = await this.store.client.sendCommand('approve-gate', [b.id], this.store.selectedWorkspacePath());
+    await ack(ev.action, res.ok);
+  }
+  private renderAll(): void {
+    for (const action of this.keys.values()) this.renderTo(action);
+  }
+  private renderTo(action: KeyAction): void {
+    void action.setImage(svgToDataUri(approveFaceSvg(this.store.selectedBuilder())));
+    void action.setTitle('');
+  }
+}
+
+/**
+ * Row-2 Send Fb key (#1410): flushes the SELECTED builder's queued review
+ * feedback. The badge `N` mirrors the per-builder queued count from the overview
+ * (`store.queuedFeedback`). Press relays `send-queue [selectedId]` (VSCode's
+ * batched Submit Review) when `N > 0`; inert at 0 — in immediate mode nothing ever
+ * queues so `N` stays 0 and the key never sends (no deck-side mode inference).
+ */
+export class SendQueueAction extends SingletonAction {
+  override readonly manifestId = 'com.cluesmith.codev.send-queue';
+  private readonly keys = new Map<string, KeyAction>();
+
+  constructor(private readonly store: CodevStore) {
+    super();
+    this.store.onChange(() => this.renderAll());
+  }
+
+  override onWillAppear(ev: WillAppearEvent): void {
+    if (!ev.action.isKey()) return;
+    this.keys.set(ev.action.id, ev.action);
+    this.renderTo(ev.action);
+  }
+  override onWillDisappear(ev: WillDisappearEvent): void {
+    this.keys.delete(ev.action.id);
+  }
+  override async onKeyDown(ev: KeyDownEvent): Promise<void> {
+    const b = this.store.selectedBuilder();
+    if (!b || this.store.queuedFeedback(b.id) <= 0) {
+      await ev.action.showAlert();
+      return;
+    }
+    const res = await this.store.client.sendCommand('send-queue', [b.id], this.store.selectedWorkspacePath());
+    await ack(ev.action, res.ok);
+  }
+  private renderAll(): void {
+    for (const action of this.keys.values()) this.renderTo(action);
+  }
+  private renderTo(action: KeyAction): void {
+    void action.setImage(svgToDataUri(sendFbFaceSvg(this.store.queuedFeedback(this.store.selectedBuilder()?.id))));
+    void action.setTitle('');
+  }
+}
+
+/**
+ * Row-2 Next / attention key (#1410): the retired approve singleton's fleet role.
+ * The badge shows the pending-gate count; press jumps the shared selection to the
+ * highest-priority pending-gate builder (`store.topGateBuilderId`), so the reviewer
+ * lands on the builder needing attention and then presses Approve. Inert when no
+ * gate is pending.
+ */
+export class NextAttentionAction extends SingletonAction {
+  override readonly manifestId = 'com.cluesmith.codev.next-attention';
   private readonly keys = new Map<string, KeyAction>();
 
   constructor(private readonly store: CodevStore) {
@@ -207,17 +306,16 @@ export class ApproveGate extends SingletonAction {
       await ev.action.showAlert();
       return;
     }
-    const res = await this.store.client.sendCommand('approve-gate', [id], this.store.selectedWorkspacePath());
-    await ack(ev.action, res.ok);
+    // Selection move only (no open): the reviewer then presses Approve, which
+    // surfaces the confirmation modal for whoever is now selected.
+    this.store.syncToBuilder(id);
+    await ev.action.showOk();
   }
   private renderAll(): void {
     for (const action of this.keys.values()) this.renderTo(action);
   }
   private renderTo(action: KeyAction): void {
-    const n = this.store.pendingGates().length;
-    // Composite SVG face (same fix as BuilderAction): count + label in a reserved band under the
-    // bell icon, instead of a title stacked over the manifest PNG.
-    void action.setImage(svgToDataUri(gatesFaceSvg(n)));
+    void action.setImage(svgToDataUri(gatesFaceSvg(this.store.pendingGates().length, 'Attn')));
     void action.setTitle('');
   }
 }
@@ -601,9 +699,12 @@ abstract class ReviewNav extends SingletonAction {
    *  (id + title); bar = its progress. A pending canvas error takes line 2 for one cycle. */
   private renderTo(action: DialAction): void {
     // Canvas line 1 pairs the rotate axis with the press meaning (`Blocks · Open/Submit`,
-    // `Headings · Cancel`); diff mode shows only its axis label.
+    // `Headings · Cancel`); diff mode pairs its axis with the feedback delivery mode
+    // (`Files · queue` vs `Files · send`, #1410) so a press is never a surprise.
     const label =
-      this.mode() === 'canvas' ? `${this.canvas.label} · ${this.canvas.pressLabel}` : this.diff.label;
+      this.mode() === 'canvas'
+        ? `${this.canvas.label} · ${this.canvas.pressLabel}`
+        : `${this.diff.label} · ${this.store.feedbackMode() === 'queue' ? 'queue' : 'send'}`;
     const b = this.store.selectedBuilder();
     const id = b ? (b.issueId ? `#${b.issueId}` : b.id) : '';
     const details = b ? (b.issueTitle ? `${id} ${b.issueTitle}` : id) : 'No builder';
@@ -672,7 +773,9 @@ export class DiffFileNav extends ReviewNav {
     next: 'diff-next-file',
     prev: 'diff-prev-file',
     first: 'diff-first-file',
-    forward: 'forward-file',
+    // Dials collect, key commits (#1410): press submits the file as feedback via a
+    // mode-neutral verb; VSCode routes it forward-now or enqueue per the setting.
+    forward: 'feedback-file',
   };
   // Coarse dial in canvas mode: step headings; tap resets to the document start
   // (role-consistent with diff-mode jump-to-first-file); press cancels an open composer.
@@ -693,7 +796,8 @@ export class DiffHunkNav extends ReviewNav {
     next: 'diff-next-hunk',
     prev: 'diff-prev-hunk',
     first: 'diff-first-hunk',
-    forward: 'forward-hunk',
+    // Mode-neutral feedback (#1410): forward-now or enqueue per the workspace setting.
+    forward: 'feedback-hunk',
   };
   // Fine dial in canvas mode: step blocks; tap walks forward through commented blocks
   // (the "next place needing attention" capability). Keyboard parity means no wrap, so
@@ -714,9 +818,9 @@ const SCROLL_LINES_PER_TICK = 3;
 
 /**
  * Scroll dial: rotate scrolls the focused editor's viewport up/down (so you can
- * read a diff without the keyboard); a dial press forwards the current selection to
- * the builder. Scroll is a viewport move (`revealCursor: false`), so select your
- * text first, then scroll/forward.
+ * read a diff without the keyboard); a dial press submits the current selection as
+ * feedback (forwarded now or queued per the workspace setting, #1410). Scroll is a
+ * viewport move (`revealCursor: false`), so select your text first, then scroll/submit.
  */
 export class ScrollNav extends SingletonAction {
   override readonly manifestId = 'com.cluesmith.codev.scroll-nav';
@@ -735,6 +839,8 @@ export class ScrollNav extends SingletonAction {
     );
   }
   override async onDialDown(): Promise<void> {
-    await this.store.client.sendCommand('forward-selection', [], this.store.selectedWorkspacePath());
+    // Mode-neutral feedback (#1410): submit the selection, routed forward-now or
+    // enqueue by VSCode per the workspace setting.
+    await this.store.client.sendCommand('feedback-selection', [], this.store.selectedWorkspacePath());
   }
 }

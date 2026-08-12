@@ -23,6 +23,10 @@ export interface CodevStoreOptions {
   openUrl?: (url: string) => void | Promise<void>;
 }
 
+/** Row-1 selector width on the SD+ (a 2×4 keypad): the fleet window is this many
+ *  builders wide, and the Select dial scrolls it a page at a time (#1410). */
+export const ROW1_WINDOW_SIZE = 4;
+
 export class CodevStore {
   readonly client: ControllerClient;
   readonly openUrl: (url: string) => void | Promise<void>;
@@ -137,6 +141,35 @@ export class CodevStore {
 
   selectedBuilder(): OverviewBuilder | undefined {
     return this.builders()[this.cursor.builder];
+  }
+
+  /**
+   * The builder shown in Row-1 selector slot `slotIndex` (0-based, 0..3). Row 1
+   * is a 4-wide WINDOW onto the fleet, not a fixed view of the first four (#1410):
+   * the window is the page containing the selection, so rotating the Select dial
+   * past the 4th builder scrolls Row 1 to builders 5-8, then 9-N. A slot past the
+   * end of the fleet returns `undefined` (a trailing empty slot on the last page).
+   */
+  windowedBuilder(slotIndex: number): OverviewBuilder | undefined {
+    return this.builders()[this.builderWindowStart() + slotIndex];
+  }
+
+  /** First builder index of the Row-1 window: the page (of `ROW1_WINDOW_SIZE`)
+   *  that contains the current selection. */
+  private builderWindowStart(): number {
+    return Math.floor(this.cursor.builder / ROW1_WINDOW_SIZE) * ROW1_WINDOW_SIZE;
+  }
+
+  /** The workspace's review-feedback delivery mode (#1410); `'forward'` until an
+   *  overview arrives, so the dial touchstrip never mislabels a press. */
+  feedbackMode(): 'forward' | 'queue' {
+    return this.overview?.feedbackMode ?? 'forward';
+  }
+
+  /** Count of queued review-feedback for a builder (#1410); 0 when none / absent. */
+  queuedFeedback(builderId: string | undefined): number {
+    if (!builderId) return 0;
+    return this.overview?.queuedFeedback?.[builderId] ?? 0;
   }
 
   pendingGates(): OverviewBuilder[] {

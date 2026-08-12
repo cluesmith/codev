@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { OverviewBuilder } from '@cluesmith/codev-sdk/controller';
-import { builderState, stateLabel, faceForBuilder, builderFaceSvg, gatesFaceSvg, svgToDataUri } from '../face.js';
+import { builderState, stateLabel, faceForBuilder, builderFaceSvg, gatesFaceSvg, approveFaceSvg, sendFbFaceSvg, svgToDataUri } from '../face.js';
 
 /** Minimal builder fixture — only the fields the face reads matter; the rest are filler. */
 function builder(over: Partial<OverviewBuilder>): OverviewBuilder {
@@ -120,6 +120,47 @@ describe('gatesFaceSvg', () => {
     const svg = gatesFaceSvg(0);
     expect(svg).toContain('Gates');
     expect(svg).not.toContain('#cca700');
+  });
+  it('accepts a custom label (Next / attention key reuse)', () => {
+    expect(gatesFaceSvg(2, 'Attn')).toContain('Attn');
+    expect(gatesFaceSvg(0, 'Attn')).toContain('Attn');
+  });
+});
+
+describe('approveFaceSvg (#1410)', () => {
+  it('shows the selected builder’s gate label over an Approve band, warning-tinted, when blocked', () => {
+    const svg = approveFaceSvg({ blockedGate: 'plan-approval' });
+    expect(svg).toContain('Plan');
+    expect(svg).toContain('Approve');
+    expect(svg).toContain('#cca700');
+  });
+  it('is dim + inert (just "Approve") when the selected builder is not blocked / none selected', () => {
+    expect(approveFaceSvg({ blockedGate: null })).toContain('Approve');
+    expect(approveFaceSvg({ blockedGate: null })).not.toContain('#cca700');
+    expect(approveFaceSvg(undefined)).toContain('Approve');
+  });
+});
+
+describe('sendFbFaceSvg (#1410)', () => {
+  it('shows the queued count + "Send Fb" in active green when there is feedback to send', () => {
+    const svg = sendFbFaceSvg(4);
+    expect(svg).toContain('>4<');
+    expect(svg).toContain('Send Fb');
+    expect(svg).toContain('#73c991'); // active green
+  });
+  it('is dim + inert (just "Send Fb", no count) when nothing is queued', () => {
+    const svg = sendFbFaceSvg(0);
+    expect(svg).toContain('Send Fb');
+    expect(svg).not.toContain('#73c991');
+  });
+});
+
+describe('builder face selection accent (#1410)', () => {
+  it('draws an accent ring only when the slot holds the selection', () => {
+    const selected = builderFaceSvg(faceForBuilder(builder({ issueId: '1' }), true));
+    const plain = builderFaceSvg(faceForBuilder(builder({ issueId: '1' }), false));
+    expect(selected).toContain('stroke-width="3"');
+    expect(plain).not.toContain('stroke-width="3"');
   });
 });
 
