@@ -82,6 +82,63 @@ deck-driven changes for free. (Tower *reads* the queue file to count it for the 
 is a read of the file the store owns, consistent with how `discoverBuilders` already reads
 worktree files, not a parallel write path.)
 
+## Layer integration — the shared-selection coherence model
+
+Row 1/Row 2 bind to the **shared cursor** (`selectedBuilder()`); the review dials bind to the
+**focused editor / MRU canvas**. These are two different anchors, and the design's integrity is
+one invariant: **`selectedBuilder()` == the builder whose artifact is focused.** Where each
+surface's target actually resolves (verified against the code):
+
+| Surface | Acts on | Anchor |
+|---|---|---|
+| Row 1 selector | shared cursor (windowed); press = **select + open** | `syncToBuilder(b.id)` + `open-* [b.id]` (`actions.ts:131-133`) |
+| Row 2 palette | `selectedBuilder().id`, builder-id verbs | `run-dev`/`approve-gate`/`send-queue` + id |
+| Dial **mode** (diff/canvas) | `selectedBuilder().phase` | `reviewMode(selectedBuilder())` (`actions.ts:590`) |
+| Dial **action — diff** | **focused / last-opened diff's builder**, not selection | `resolveDiffContext` via `getDiffInjectEntry` + `lastPosition` (`commands/diff-nav.ts`) |
+| Dial **action — canvas** | workspace **MRU canvas** | `sendCanvasCommand({ workspace })` (`actions.ts:655`) |
+| `feedback-*` **write** | **focused diff's owner** (artifact-anchored — correct) | `getDiffInjectEntry(activeEditor).builderId` (`extension.ts:1217-1240`) |
+| Send Fb flush + badge | `selectedBuilder().id` | new Row 2 action |
+
+**Two mechanisms hold the invariant, so all surfaces converge on one builder:**
+
+1. **Row 1 press is select + open in one gesture** (`actions.ts:131-133`) — it moves the cursor
+   *and* opens that builder's diff/canvas, so the dials' focused artifact becomes that builder's.
+   The press calls `syncToBuilder` directly, so it converges even for canvas (no hook needed).
+   This mirrors requirement 2's "dials collect, key commits": the Select dial scrolls/previews
+   the window; **pressing a Row 1 key is what commits + opens** — you cannot act on a builder you
+   have not opened.
+2. **Focusing a diff back-syncs the cursor.** `onDidChangeActiveTextEditor` →
+   `announceActiveBuilderFromEditor` fires `builder-active` with the focused diff's builder id
+   (`extension.ts:679-685`) → deep link → deck `syncToBuilder` (`plugin.ts:56-64`). So clicking
+   builder 3's diff in VSCode snaps the deck selection to 3; mode, Row 2, and the Row 1 highlight
+   realign to what is viewed.
+
+**Send Fb (N) internal consistency:** the badge (`queuedFeedback[selectedId]`) and the flush
+(`send-queue [selectedId]`) are keyed to the **same** `selectedBuilder()`, so they can never
+badge-one / flush-another. The `feedback-*` write is artifact-anchored (focused diff owner) and
+agrees with Send Fb in steady state because focus == selection; the only divergence is the
+unnatural "rotate Select dial without opening", which the next press/open closes. A test asserts
+this (Test Plan).
+
+**Two edges (E1 fixed by docs, E2 needs an owner call):**
+
+- **(E1) The focus→deck back-sync requires a configured activity hook.** `builder-active` only
+  reaches the deck if the personal-config hook (`on:['builder-active'] → streamdeck://…/active`)
+  exists (`activity-hooks.ts:37-57`, resolved from `~/.codev/config.json` only, for security).
+  Without it, only deck-driven selection (Row 1 press / Select dial) moves the cursor — VSCode
+  focus changes won't. **Setup prerequisite** for the hardware dev-approval session; documented in
+  the deck README. Not a code change.
+- **(E2) Canvas focus does NOT back-sync (asymmetry with diff)** — OWNER DECISION.
+  `announceActiveBuilderFromEditor` gates on `getDiffInjectEntry` (`extension.ts:682-683`), and a
+  spec/plan canvas is not a diff-inject file, so no `builder-active` fires. In canvas mode,
+  coherence rests only on the Row 1 press (which syncs directly); opening a different builder's
+  canvas via VSCode won't move the deck cursor.
+  - **(a) Accept + document (recommended):** the Row 1 press is the convergence gesture for canvas
+    review; matches current shipped behavior; keeps #1410 scoped to the deck + relay + wire.
+  - **(b) Add a symmetric `canvas-active` event** so focusing a canvas back-syncs too — small
+    VSCode addition, but reaches into the canvas work (#1401/#1425) and widens scope.
+  - *Awaiting Amr; plan assumes (a) unless told otherwise.*
+
 ## Proposed Change
 
 ### A. Wire contract (`packages/types`) — routes to `main`
@@ -225,9 +282,14 @@ the 8 keys — Row 1 = 4× `builder-action` (slots 1-4), Row 2 = `approve-gate`,
   where relevant.
 - Unit: Tower overview populates `queuedFeedback` from queue files and `feedbackMode` from
   settings (fixture worktrees, matching the existing overview test style).
+- Unit: the shared-selection invariant — Row 1/Row 2/dial-mode all read the same
+  `selectedBuilder()`; Send Fb badge source == flush target; a diff-focus `builder-active`
+  (VSCode side) fires with the focused diff's builder id (`announceActiveBuilderFromEditor`).
 - `apps/streamdeck/README.md`: document the two-zone layout, the `feedback-*`/`send-queue`
-  verbs, and the mode-follows-setting behaviour (replace the `forward-file`/`forward-hunk`
-  mention at README:120).
+  verbs, the mode-follows-setting behaviour (replace the `forward-file`/`forward-hunk` mention at
+  README:120), the shared-selection coherence model (Row 1 press = select+open; diff focus
+  back-syncs), and **the `builder-active` activity-hook prerequisite (E1)** for the VSCode→deck
+  focus sync.
 
 ## Files to Change
 
@@ -275,7 +337,9 @@ the 8 keys — Row 1 = 4× `builder-action` (slots 1-4), Row 2 = `approve-gate`,
 ## Test Plan
 
 Reviewer verifies at the **dev-approval gate on real SD+ hardware** (this is why the issue is
-PIR):
+PIR). **Prerequisite (E1):** the `builder-active` → `streamdeck://…/active` activity hook must be
+configured in `~/.codev/config.json` for the VSCode→deck focus sync — the session confirms it is
+present before testing the coherence steps below:
 
 - **Unit / CI:** `pnpm -C apps/streamdeck test`, `pnpm -C apps/vscode test`,
   `pnpm -C packages/codev test`, plus a full build. All green before the gate.
@@ -301,3 +365,9 @@ PIR):
   flow), and `N` returns to 0.
 - **Manual — overview wire:** confirm the per-builder counts are correct across ≥2 builders
   simultaneously (each key's `N` is its own builder's count, proving the map — not a scalar).
+- **Manual — layer coherence (the crux):** select builder A on Row 1 → its diff opens, dials +
+  Row 2 act on A. Click builder B's diff *in VSCode* → the deck selection snaps to B (Row 1
+  highlight, Row 2 target, and dial mode all move to B — proving the `builder-active` back-sync).
+  Enqueue a chunk with a diff dial, then flush with Send Fb — it targets the same builder you
+  were viewing. Verify the Select-dial-rotate-without-open transient self-heals on the next Row 1
+  press / tap-to-open.
