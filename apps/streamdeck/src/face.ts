@@ -111,6 +111,7 @@ const PHASE_LABELS: Record<string, string> = {
   verify: 'Verify',
   verified: 'Verified',
   complete: 'Verified',
+  pr: 'PR',
 };
 
 /**
