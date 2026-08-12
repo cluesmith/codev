@@ -18,3 +18,13 @@ Existing test harness in `overview.test.ts` mocks `fetchRecentlyClosed` — will
 an out-of-order fixture asserting descending order.
 
 Plan written and committed. Awaiting plan-approval gate.
+
+## Implement phase (2026-08-12)
+
+Plan-approval granted. Applied the one-line sort in `overview.ts` (after the
+`recentlyClosed.map`, inside `if (closed !== null)`): epoch-millis descending sort with a
+comment tying it to #1191. Added test `sorts recently closed items by closedAt descending
+(#1191)` in `overview.test.ts` feeding items out of order and asserting `['2','3','1']`.
+
+Build ✓. overview suite ✓ (165 tests). Running full package suite before committing.
+Awaiting dev-approval gate next.
