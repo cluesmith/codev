@@ -59,3 +59,10 @@ Implemented in `apps/streamdeck/src/actions.ts` (+ tests). No sdk/Tower/vscode/m
 Verified in worktree: `tsc --noEmit` ✓, `npm run build` ✓, `npm test` ✓ (82 tests, ~10 new).
 Needed `pnpm --filter @cluesmith/codev-sdk build` first (sdk dist absent in fresh worktree).
 Commit 9aa1a29d9. Awaiting dev-approval gate (hardware verification).
+
+**Manifest rename (owner-requested at dev-approval, commit 1abc02025):** the two dial actions'
+user-facing `Name`/`Tooltip`/`TriggerDescription` still said "Diff File/Hunk Navigator" (palette
+label seen when configuring) though the live dial face already re-titles Headings/Blocks at runtime.
+Renamed to "Review: Files / Headings" and "Review: Changes / Blocks" with dual-mode tooltips. UUIDs
+(`diff-file-nav`/`diff-hunk-nav`) and controller/layout structure untouched — stable identity, no
+layout change, so no code/test impact. `streamdeck validate` ✓.
