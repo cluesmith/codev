@@ -4,30 +4,44 @@
  * Verifies that when the SSE connection receives a message (e.g. after Tower
  * restarts and sends a "connected" event), the polling hooks immediately
  * re-fetch data instead of waiting for the next poll interval.
+ *
+ * useSSE streams via fetch + ReadableStream (not EventSource) so it can send the
+ * codev-web-key header (advisory GHSA-xvjp-7748-v88v). This test mocks fetch to
+ * return a controllable stream and drives SSE frames into it.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import type { DashboardState, OverviewData } from '../src/lib/api.js';
 
-// Capture EventSource instances so we can simulate SSE messages
-let eventSourceInstances: Array<{ onmessage: ((ev: MessageEvent) => void) | null; close: () => void }> = [];
-
-class MockEventSource {
-  static readonly CONNECTING = 0;
-  static readonly OPEN = 1;
-  static readonly CLOSED = 2;
-  onmessage: ((ev: MessageEvent) => void) | null = null;
-  onerror: ((ev: Event) => void) | null = null;
-  onopen: ((ev: Event) => void) | null = null;
-  readyState = 1;
-  close = vi.fn(() => { this.readyState = MockEventSource.CLOSED; });
-  constructor(_url: string) {
-    eventSourceInstances.push(this);
-  }
+// Each fetch() call to the SSE endpoint creates a connection we can push frames
+// into and observe aborting (the fetch-stream analogue of an EventSource).
+interface MockSSEConnection {
+  controller: ReadableStreamDefaultController<Uint8Array> | null;
+  aborted: boolean;
+  abort: ReturnType<typeof vi.fn>;
 }
+let connections: MockSSEConnection[] = [];
+const encoder = new TextEncoder();
 
-// Override the EventSource stub from setup.ts with our instrumented mock
-(globalThis as Record<string, unknown>).EventSource = MockEventSource;
+const mockFetch = vi.fn((_url: string, opts?: { signal?: AbortSignal }) => {
+  const conn: MockSSEConnection = { controller: null, aborted: false, abort: vi.fn() };
+  connections.push(conn);
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      conn.controller = controller;
+      const signal = opts?.signal;
+      if (signal) {
+        signal.addEventListener('abort', () => {
+          conn.aborted = true;
+          conn.abort();
+          try { controller.error(new DOMException('aborted', 'AbortError')); } catch { /* already closed */ }
+        });
+      }
+    },
+  });
+  return Promise.resolve({ ok: true, body } as unknown as Response);
+});
+(globalThis as Record<string, unknown>).fetch = mockFetch;
 
 // Mock api module
 const mockFetchState = vi.fn<() => Promise<DashboardState>>();
@@ -39,6 +53,7 @@ vi.mock('../src/lib/api.js', () => ({
   fetchOverview: (...args: unknown[]) => mockFetchOverview(...(args as [])),
   refreshOverview: (...args: unknown[]) => mockRefreshOverview(...(args as [])),
   getSSEEventsUrl: () => 'http://localhost:0/api/events',
+  getWebKey: () => null,
 }));
 
 const MOCK_STATE: DashboardState = {
@@ -56,18 +71,28 @@ const MOCK_OVERVIEW: OverviewData = {
   architects: [],
 };
 
+/** Push an SSE `data:` frame into every open connection's stream. */
 function simulateSSEMessage(data: Record<string, unknown> = { type: 'connected' }): void {
-  for (const es of eventSourceInstances) {
-    if (es.onmessage) {
-      es.onmessage(new MessageEvent('message', { data: JSON.stringify(data) }));
+  const frame = encoder.encode(`data: ${JSON.stringify(data)}\n\n`);
+  for (const conn of connections) {
+    if (conn.controller && !conn.aborted) {
+      conn.controller.enqueue(frame);
     }
+  }
+}
+
+/** Simulate the server closing the stream (→ useSSE schedules a reconnect). */
+function endStream(conn: MockSSEConnection): void {
+  if (conn.controller && !conn.aborted) {
+    try { conn.controller.close(); } catch { /* already closed */ }
   }
 }
 
 describe('SSE reconnect triggers immediate refresh (bugfix #472)', () => {
   beforeEach(() => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    eventSourceInstances = [];
+    connections = [];
+    mockFetch.mockClear();
     mockFetchState.mockReset().mockResolvedValue(MOCK_STATE);
     mockFetchOverview.mockReset().mockResolvedValue(MOCK_OVERVIEW);
     mockRefreshOverview.mockReset().mockResolvedValue(undefined);
@@ -77,7 +102,7 @@ describe('SSE reconnect triggers immediate refresh (bugfix #472)', () => {
 
   afterEach(() => {
     vi.useRealTimers();
-    // Reset module registry so singleton EventSource is cleaned up between tests
+    // Reset module registry so the singleton connection is cleaned up between tests
     vi.resetModules();
   });
 
@@ -131,10 +156,12 @@ describe('SSE reconnect triggers immediate refresh (bugfix #472)', () => {
     const listener = vi.fn();
     const { unmount } = renderHook(() => useSSE(listener));
 
-    // Record baseline — prior tests may have leaked instances via module resets
-    const baseCount = eventSourceInstances.length;
+    await act(async () => { await vi.advanceTimersByTimeAsync(10); });
+
+    // Record baseline — prior tests may have leaked connections via module resets
+    const baseCount = connections.length;
     expect(baseCount).toBeGreaterThanOrEqual(1);
-    const currentES = eventSourceInstances[baseCount - 1];
+    const currentConn = connections[baseCount - 1];
 
     // Hide the tab
     Object.defineProperty(document, 'hidden', { value: true, configurable: true });
@@ -142,17 +169,18 @@ describe('SSE reconnect triggers immediate refresh (bugfix #472)', () => {
       document.dispatchEvent(new Event('visibilitychange'));
     });
 
-    // SSE should be closed
-    expect(currentES.close).toHaveBeenCalled();
+    // SSE should be aborted (the fetch-stream analogue of EventSource.close)
+    expect(currentConn.abort).toHaveBeenCalled();
 
     // Show the tab again
     Object.defineProperty(document, 'hidden', { value: false, configurable: true });
-    act(() => {
+    await act(async () => {
       document.dispatchEvent(new Event('visibilitychange'));
+      await vi.advanceTimersByTimeAsync(10);
     });
 
-    // Should have reconnected (at least one new EventSource instance)
-    expect(eventSourceInstances.length).toBeGreaterThan(baseCount);
+    // Should have reconnected (at least one new connection)
+    expect(connections.length).toBeGreaterThan(baseCount);
 
     // Listener should have been notified on re-visible (to refresh stale data)
     expect(listener).toHaveBeenCalled();
@@ -164,49 +192,45 @@ describe('SSE reconnect triggers immediate refresh (bugfix #472)', () => {
     Object.defineProperty(document, 'hidden', { value: true, configurable: true });
     const { useSSE } = await import('../src/hooks/useSSE.js');
     const listener = vi.fn();
-    const baseCount = eventSourceInstances.length;
+    const baseCount = connections.length;
     const { unmount } = renderHook(() => useSSE(listener));
 
-    // Should NOT have connected (no new instances beyond baseline)
-    expect(eventSourceInstances.length).toBe(baseCount);
+    await act(async () => { await vi.advanceTimersByTimeAsync(10); });
+
+    // Should NOT have connected (no new connections beyond baseline)
+    expect(connections.length).toBe(baseCount);
 
     // Make visible — should connect now
     Object.defineProperty(document, 'hidden', { value: false, configurable: true });
-    act(() => {
+    await act(async () => {
       document.dispatchEvent(new Event('visibilitychange'));
+      await vi.advanceTimersByTimeAsync(10);
     });
 
-    expect(eventSourceInstances.length).toBeGreaterThan(baseCount);
+    expect(connections.length).toBeGreaterThan(baseCount);
     unmount();
   });
 
-  it('schedules reconnect when EventSource enters CLOSED state (Bugfix #1124)', async () => {
+  it('schedules reconnect when the stream ends (Bugfix #1124)', async () => {
     const { useSSE } = await import('../src/hooks/useSSE.js');
     const listener = vi.fn();
     const { unmount } = renderHook(() => useSSE(listener));
 
-    const baseCount = eventSourceInstances.length;
+    await act(async () => { await vi.advanceTimersByTimeAsync(10); });
+
+    const baseCount = connections.length;
     expect(baseCount).toBeGreaterThanOrEqual(1);
-    const currentES = eventSourceInstances[baseCount - 1] as MockEventSource;
+    const currentConn = connections[baseCount - 1];
 
-    // Simulate a 503 rejection: EventSource transitions to CLOSED
-    currentES.readyState = MockEventSource.CLOSED;
-    act(() => {
-      if (currentES.onerror) {
-        currentES.onerror(new Event('error'));
-      }
-    });
-
-    // Should have disconnected the dead EventSource
-    expect(currentES.close).toHaveBeenCalled();
-
-    // Advance past the jittered reconnect window (max 5s)
+    // Simulate the server dropping the stream (non-200 / restart / capacity).
     await act(async () => {
+      endStream(currentConn);
+      // Advance past the jittered reconnect window (max 5s)
       await vi.advanceTimersByTimeAsync(6000);
     });
 
-    // Should have reconnected (new EventSource instance)
-    expect(eventSourceInstances.length).toBeGreaterThan(baseCount);
+    // Should have reconnected (new connection)
+    expect(connections.length).toBeGreaterThan(baseCount);
 
     unmount();
   });

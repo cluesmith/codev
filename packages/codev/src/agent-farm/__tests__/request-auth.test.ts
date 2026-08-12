@@ -52,6 +52,7 @@ describe('isPublicRoute', () => {
 
   it('allows React SPA static assets under /workspace/<enc>/', () => {
     expect(isPublicRoute('GET', '/workspace/ENC/')).toBe(true);
+    expect(isPublicRoute('GET', '/workspace/ENC')).toBe(true); // bare, no trailing slash
     expect(isPublicRoute('GET', '/workspace/ENC/assets/app.js')).toBe(true);
     expect(isPublicRoute('GET', '/workspace/ENC/index.html')).toBe(true);
   });
@@ -149,6 +150,24 @@ describe('isAllowedHost', () => {
     expect(isAllowedHost('tunnel.example.com')).toBe(true);
     expect(isAllowedHost('tunnel.example.com:443')).toBe(true);
     expect(isAllowedHost('other.example.com')).toBe(false);
+  });
+
+  it('relaxes the Host allowlist in BRIDGE_MODE (deliberate network exposure)', () => {
+    process.env.BRIDGE_MODE = '1';
+    try {
+      // Any Host is allowed on a bridge bind (LAN IP / tunnel host Tower cannot
+      // enumerate); the key check — separate — still guards keyed routes.
+      expect(isAllowedHost('192.168.1.5:4100')).toBe(true);
+      expect(isAllowedHost('phone.local')).toBe(true);
+      expect(isRequestAllowed(req('POST', '/api/terminals', { host: '192.168.1.5:4100' }))).toBe(false);
+      expect(isRequestAllowed(req('POST', '/api/terminals', { host: '192.168.1.5:4100', 'codev-web-key': TEST_KEY }))).toBe(true);
+    } finally {
+      delete process.env.BRIDGE_MODE;
+    }
+  });
+
+  it('rejects a malformed bracketed IPv6 Host', () => {
+    expect(isAllowedHost('[::1]evil')).toBe(false);
   });
 });
 

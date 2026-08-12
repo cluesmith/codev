@@ -64,7 +64,12 @@ vi.mock('@cluesmith/codev-sdk/escape-buffer', () => ({
   },
 }));
 
-vi.mock('@cluesmith/codev-types', () => ({ FRAME_CONTROL: 0x00, FRAME_DATA: 0x01 }));
+vi.mock('@cluesmith/codev-types', () => ({
+  FRAME_CONTROL: 0x00,
+  FRAME_DATA: 0x01,
+  terminalWsProtocols: (key: string | null | undefined) =>
+    (key ? ['codev.tower.v1', `codev-key.${key}`] : undefined),
+}));
 
 const FRAME_CONTROL = 0x00;
 const FRAME_DATA = 0x01;
