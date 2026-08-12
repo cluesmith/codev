@@ -296,6 +296,12 @@ async function handleHeartbeat(
   }
   const body = asObject(parsed);
   if (!body) return sendJson(res, 400, { ok: false, error: 'Invalid JSON' });
+  // `focused` is optional but typed: a non-boolean violates `CanvasViewHeartbeat`. Reject before
+  // touching the lease, matching how the command route treats a bad `count` — a payload that does
+  // not meet the contract should not buy liveness just because the rest of it parsed.
+  if (body.focused !== undefined && typeof body.focused !== 'boolean') {
+    return sendJson(res, 400, { ok: false, error: 'focused must be a boolean' });
+  }
 
   const nowMs = d.now();
   sweep(nowMs);

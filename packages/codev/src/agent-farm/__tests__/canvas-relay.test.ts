@@ -350,4 +350,26 @@ describe('lease integrity', () => {
     const out = await call('POST', '/api/canvas/views', null);
     expect(out.status).toBe(400);
   });
+
+  // A well-formed object whose `focused` is not a boolean still violates CanvasViewHeartbeat.
+  // Accepting it would buy liveness for a payload that does not meet the contract, and would be
+  // inconsistent with the command route, which rejects a bad `count` outright.
+  it('rejects a heartbeat whose focused field is not a boolean, and grants it no lease', async () => {
+    const viewId = await register('/tmp/doc.md');
+
+    now += CANVAS_VIEW_LEASE_MS - 1_000;
+    for (const focused of ['yes', 1, null, {}]) {
+      const out = await call('POST', `/api/canvas/views/${viewId}/heartbeat`, { focused });
+      expect(out.status).toBe(400);
+    }
+
+    now += 2_000;
+    expect((await sendCommand({ workspace: WS, command: 'block-next' })).body.code).toBe('no-canvas');
+  });
+
+  it('still accepts a heartbeat that omits focused entirely', async () => {
+    const viewId = await register('/tmp/doc.md');
+    expect((await call('POST', `/api/canvas/views/${viewId}/heartbeat`, {})).status).toBe(200);
+    expect((await call('POST', `/api/canvas/views/${viewId}/heartbeat`, { focused: false })).status).toBe(200);
+  });
 });
