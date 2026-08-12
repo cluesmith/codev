@@ -1,3 +1,4 @@
+import { WEB_KEY_HEADER } from '@cluesmith/codev-types';
 import { getApiBase } from './constants.js';
 
 // Shared types from @cluesmith/codev-types
@@ -30,7 +31,9 @@ function apiUrl(endpoint: string): string {
 function getAuthHeaders(): Record<string, string> {
   const token = localStorage.getItem('codev-web-key');
   if (token) {
-    return { Authorization: `Bearer ${token}` };
+    // Request authentication (advisory GHSA-xvjp-7748-v88v): Tower reads the
+    // shared local key from the codev-web-key header.
+    return { [WEB_KEY_HEADER]: token };
   }
   return {};
 }

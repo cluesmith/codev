@@ -8,6 +8,7 @@
   <meta name="theme-color" content="#252525">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🗼</text></svg>">
   <title>Agent Farm Tower</title>
+  <!-- CODEV_WEB_KEY_INJECTION -->
   <style>
     * {
       box-sizing: border-box;
@@ -989,10 +990,22 @@
     let runningInstances = [];
     let recentInstances = [];
 
-    // Auth helper: get headers with auth token if available
+    // Auth helper: resolve the shared local key. Prefer the value Tower injects
+    // same-origin at serve time (window.__CODEV_WEB_KEY__); fall back to any
+    // previously stored value. The injected value is persisted so later loads
+    // and manual navigations keep working.
+    function getWebKey() {
+      if (window.__CODEV_WEB_KEY__) {
+        try { localStorage.setItem('codev-web-key', window.__CODEV_WEB_KEY__); } catch (e) {}
+        return window.__CODEV_WEB_KEY__;
+      }
+      return localStorage.getItem('codev-web-key');
+    }
+
+    // Auth helper: get headers with the auth key if available
     function getAuthHeaders() {
-      const key = localStorage.getItem('codev-web-key');
-      return key ? { 'Authorization': `Bearer ${key}` } : {};
+      const key = getWebKey();
+      return key ? { 'codev-web-key': key } : {};
     }
 
     // Auth helper: make authenticated fetch request
