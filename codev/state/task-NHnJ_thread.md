@@ -76,3 +76,61 @@ Builder id stays `task-NHnJ` (worktree basename), so this thread file keeps its 
 The stale `codev/projects/builder-task-nhnj-task-NHnJ/` dir is harmless scaffolding
 (left as-is; not hand-editing any status.yaml).
 
+## IMPLEMENT phase — plan approved by human (Amr), building 5 layers (2026-08-12)
+
+plan-approval gate approved by Amr (explicit); recorded via `porch approve`. porch
+advanced to implement. Architect directive: implement all 5 core layers, stop at
+dev-approval for a live cross-client review, run cmap after impl code and after tests,
+keep artifacts mechanics-free.
+
+Implementation design notes (grounded in code read):
+- Expected key: cache `ensureLocalKey()` (@cluesmith/codev-core/auth) lazily server-side;
+  fail closed if it throws. Tower owns generation, so the file always exists post-boot.
+- HTTP enforcement stays inside `isRequestAllowed(req)` (preserves the test-mock seam) —
+  it parses method+pathname, allows a narrow public-route list, else constant-time
+  compares the `codev-web-key` header to the expected key. handleRequest reorders so the
+  CORS/OPTIONS preflight is answered BEFORE the key check (preflight carries no creds),
+  and rejects with 401 (was 403).
+- Public routes (keyless): GET /health, GET /api/version, GET / and /index.html, and the
+  React SPA static assets under /workspace/<enc>/ EXCLUDING api/, ws/, and the privileged
+  `file` reader. Everything else needs the key.
+- WS (Layer 2): key via Sec-WebSocket-Protocol; client offers a non-secret marker protocol
+  + a `codev-key.<KEY>` token; server validates the token at handleUpgrade and echoes only
+  the marker (via ws `handleProtocols`). Fail closed regardless of Origin.
+- CORS (Layer 3): fixed origin allowlist (loopback any port + configured tunnel origin);
+  add codev-web-key to allowed headers; drop Authorization.
+- Clients (Layer 4): vscode terminal-adapter → subprotocol (drop in-band auth frame);
+  apps/web api.ts → codev-web-key header, Terminal.tsx → subprotocol; tower.html →
+  codev-web-key header + consume same-origin-injected key (server injects in handleDashboard).
+- BRIDGE (Layer 5): mandatory enforcement + fail-closed-if-no-key at boot; TLS note.
+
+## IMPLEMENT phase — code + tests done, all green (2026-08-12)
+
+Implemented all five layers across four commits (types wire contracts → server
+enforcement → client transport → tests). Results:
+- `pnpm --filter @cluesmith/codev build`: exit 0 (types/core/sdk/codev compile).
+- apps/web `tsc -b`: exit 0. apps/vscode main tsconfig: exit 0.
+- Full codev vitest suite: 4874 passed, 48 skipped, 0 failed.
+
+Design decisions worth flagging for dev-approval review:
+- Public-route allowlist (isPublicRoute): GET-only; /health, /api/version, /,
+  /index.html, and React SPA static assets under /workspace/<enc>/ EXCLUDING
+  api/, ws/, and the privileged `file` reader. Everything else needs the key.
+- CORS origin allowlist: loopback (any port) + operator env
+  CODEV_TOWER_ALLOWED_ORIGINS (comma-separated) for tunnel/proxy. The tunnel
+  subsystem exposes no clean synchronous origin, so I used a static, auditable
+  env rather than deep-coupling into it; CORS is defense-in-depth (key is the
+  control). Flag for review.
+- tower.html key delivery: same-origin serve-time injection into the page
+  (window.__CODEV_WEB_KEY__); safe because CORS blocks a cross-origin page from
+  reading GET /'s body.
+
+### Out-of-scope pre-existing failure (NOT my diff)
+apps/vscode webview tsconfig (tsconfig.webview.json) reports errors in
+src/markdown-preview/webview/main.ts: "Cannot find module
+'@cluesmith/codev-artifact-canvas'" (that package isn't built in the worktree;
+the root build builds it first) plus two pre-existing implicit-any params. I
+did not touch markdown-preview/; my vscode change (terminal-adapter.ts) is in
+the MAIN tsconfig, which passes clean. Left as-is per the implement prompt's
+out-of-scope guidance.
+
