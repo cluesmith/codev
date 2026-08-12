@@ -117,12 +117,23 @@ const PHASE_LABELS: Record<string, string> = {
  * an unmapped id is title-cased so nothing renders lowercase or clips mid-word; no state → `''`.
  */
 export function stateLabel(b: Pick<OverviewBuilder, 'blockedGate' | 'protocolPhase'>): string {
+  // A blocked builder's gate ALWAYS wins over its phase — even an UNMAPPED gate title-cases to a
+  // short label, so a pending gate is never masked by the phase beneath it. (The face is already
+  // yellow + bell for an unmapped gate; the label must agree, or the key would read as its phase
+  // while looking blocked.) Only a builder with no gate at all falls through to its phase.
   const gate = b.blockedGate ?? '';
-  if (GATE_LABELS[gate]) return GATE_LABELS[gate];
+  if (gate) return GATE_LABELS[gate] ?? titleToken(gate);
   const phase = b.protocolPhase ?? '';
-  if (PHASE_LABELS[phase]) return PHASE_LABELS[phase];
-  const raw = gate || phase;
-  return raw ? raw.charAt(0).toUpperCase() + raw.slice(1) : '';
+  if (phase) return PHASE_LABELS[phase] ?? titleToken(phase);
+  return '';
+}
+
+/** Short, key-friendly fallback for an unmapped id: its first alphanumeric token, title-cased
+ *  (e.g. `security-approval` → `Security`) — never lowercase, never a mid-word clip. */
+function titleToken(raw: string): string {
+  const token = raw.split(/[^a-zA-Z0-9]/, 1)[0] ?? '';
+  if (!token) return '';
+  return token.charAt(0).toUpperCase() + token.slice(1);
 }
 
 /** A fully-resolved builder face: what to draw and how to colour it. */
@@ -137,14 +148,15 @@ export interface BuilderFace {
 /** Resolve a builder into its face descriptor — all id→presentation mapping in one testable place. */
 export function faceForBuilder(b: OverviewBuilder): BuilderFace {
   const state = builderState(b);
-  const icon: GlyphKey = state === 'blocked' ? (GATE_ICONS[b.blockedGate ?? ''] ?? 'bell') : 'bolt';
-  return {
-    kind: 'builder',
-    number: b.issueId ? `#${b.issueId}` : b.id,
-    label: stateLabel(b),
-    state,
-    icon,
-  };
+  let icon: GlyphKey = 'bolt';
+  if (state === 'blocked') {
+    icon = GATE_ICONS[b.blockedGate ?? ''] ?? 'bell';
+  }
+  let number = b.id;
+  if (b.issueId) {
+    number = `#${b.issueId}`;
+  }
+  return { kind: 'builder', number, label: stateLabel(b), state, icon };
 }
 
 /**
@@ -187,13 +199,20 @@ const DIVIDER = '<line x1="14" y1="35" x2="58" y2="35" stroke="#333338" stroke-w
 function iconZone(glyph: GlyphKey, color: string): string {
   return `<g transform="translate(24,7)">${GLYPHS[glyph](color)}</g>`;
 }
+/** Shrink-to-fit for a string that would overflow the 72px face (a long builder-id fallback, an
+ *  unusually long unmapped-id label). Empty for short strings, so the common case keeps its
+ *  natural width instead of being stretched. */
+function fit(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return '';
+  return ' textLength="60" lengthAdjust="spacingAndGlyphs"';
+}
 /** Primary datum: bold, high-contrast (issue number / pending count). */
 function primaryLine(text: string): string {
-  return `<text ${textAttrs(36, 50, 16, 700)} fill="#f4f4f6">${escapeXml(text)}</text>`;
+  return `<text ${textAttrs(36, 50, 16, 700)}${fit(text, 6)} fill="#f4f4f6">${escapeXml(text)}</text>`;
 }
 /** Secondary label: muted, below the primary line. */
 function secondaryLine(text: string): string {
-  return `<text ${textAttrs(36, 63, 12, 500)} fill="#a9a9b2">${escapeXml(text)}</text>`;
+  return `<text ${textAttrs(36, 63, 12, 500)}${fit(text, 9)} fill="#a9a9b2">${escapeXml(text)}</text>`;
 }
 /** A single muted line centered in the band, when there is no primary datum (empty slot / no gates). */
 function centeredLine(text: string): string {

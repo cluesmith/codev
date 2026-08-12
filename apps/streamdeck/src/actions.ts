@@ -21,8 +21,9 @@ import { builderFaceSvg, faceForBuilder, gatesFaceSvg, svgToDataUri } from './fa
  * The Stream Deck actions — thin adapters over CodevStore. Each maps a physical
  * input to a canonical verb (POSTed via the command relay) or a cursor move /
  * URL open. UUIDs are set via the `manifestId` field (no decorators — keeps the
- * esbuild→node bundle free of decorator transpilation). Rendering is title-based
- * for v1 (richer SVG/feedback is a later polish).
+ * esbuild→node bundle free of decorator transpilation). Most keys render title-based;
+ * the Builder Action and Gates keys compose a full SVG face via `setImage` (see `face.ts`),
+ * and the encoders render `setFeedback` touchscreen layouts.
  */
 
 /** Optional per-instance verb override from the Property Inspector. */
@@ -167,7 +168,12 @@ export class BuilderAction extends SlotKey {
     // Compose the WHOLE face as one SVG (icon zone + reserved text band) instead of stacking a
     // title over the manifest bolt PNG — see face.ts for the layout and the sidebar-mirrored
     // colour/icon vocabulary. setTitle('') suppresses the SDK title layer so nothing overlays it.
-    const svg = b ? builderFaceSvg(faceForBuilder(b)) : builderFaceSvg({ kind: 'empty', slot: settings.slot ?? '1' });
+    let svg: string;
+    if (b) {
+      svg = builderFaceSvg(faceForBuilder(b));
+    } else {
+      svg = builderFaceSvg({ kind: 'empty', slot: settings.slot ?? '1' });
+    }
     void action.setImage(svgToDataUri(svg));
     void action.setTitle('');
   }

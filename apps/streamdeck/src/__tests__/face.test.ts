@@ -46,6 +46,12 @@ describe('stateLabel', () => {
     expect(stateLabel(builder({ protocolPhase: 'rebase' }))).toBe('Rebase');
     expect(stateLabel(builder({}))).toBe('');
   });
+  it('an unmapped gate STILL wins over a known phase — a pending gate is never masked', () => {
+    // Regression for the review consultation (Codex): previously a mapped phase (`review`) beat an
+    // unmapped gate, so a builder blocked at a future gate showed its phase while the face was
+    // yellow + bell. Any gate now wins, title-cased to its first token.
+    expect(stateLabel(builder({ blockedGate: 'security-approval', protocolPhase: 'review' }))).toBe('Security');
+  });
 });
 
 describe('faceForBuilder', () => {
@@ -94,6 +100,12 @@ describe('builderFaceSvg', () => {
     const svg = builderFaceSvg({ kind: 'empty', slot: '1' });
     expect(svg).toContain('width="72"');
     expect(svg).toContain('height="72"');
+  });
+  it('shrinks a long primary datum to fit (no clip) but leaves a short number natural', () => {
+    const longId = builderFaceSvg(faceForBuilder(builder({ id: 'builder-pir-1428', issueId: null })));
+    expect(longId).toContain('lengthAdjust="spacingAndGlyphs"');
+    const shortNum = builderFaceSvg(faceForBuilder(builder({ issueId: '1414', protocolPhase: 'implement' })));
+    expect(shortNum).not.toContain('lengthAdjust');
   });
 });
 
