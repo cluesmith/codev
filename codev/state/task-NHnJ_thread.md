@@ -134,3 +134,39 @@ did not touch markdown-preview/; my vscode change (terminal-adapter.ts) is in
 the MAIN tsconfig, which passes clean. Left as-is per the implement prompt's
 out-of-scope guidance.
 
+## IMPLEMENT phase — iteration 2: cmap findings addressed (2026-08-12)
+
+cmap (gemini+codex+claude) on iteration 1: server enforcement core all 3 PASS.
+Converged on client/delivery gaps; architect ruled all in scope. Fixed:
+- F2 (HIGH): key delivery via same-origin serve-time injection into every HTML
+  shell (tower.html, React SPA index.html, annotator open.html/3d-viewer.html) as
+  window.__CODEV_WEB_KEY__, so a direct /workspace/<enc>/ entry authenticates
+  without visiting the root. apps/web reads it via getWebKey().
+- F1 (HIGH): apps/web useSSE rewritten EventSource -> fetch+ReadableStream so it
+  sends the codev-web-key header.
+- S1 (MED-HIGH): Host allowlist (isAllowedHost) restores the DNS-rebinding guard;
+  enforced on HTTP (before the public-route check) and WS. Allows loopback +
+  BRIDGE host + CODEV_TOWER_ALLOWED_ORIGINS hosts.
+- S2 (MED): key-bearing HTML shells strip Access-Control-Allow-Origin
+  (sendKeyInjectedHtml), so a cross-origin localhost page can't read the key.
+- F3 annotator (architect ruled IN, Option A): shells public+injected; vendor
+  public; ALL data/media routes KEYED. open.html media (img/video/pdf) fetched as
+  authenticated blobs -> object URLs (revoked on replace/unload); 3d-viewer model
+  via loader.setRequestHeader(authHeaders()); file/save/mtime send the key. NEEDS
+  LIVE VERIFICATION at dev-approval (browser-only, can't unit-test).
+- chmod (codex Low): ensureLocalKey repairs an existing key file to 0600 on read.
+- S3: no current keyless hole (isPublicRoute carve-out explicit); added a
+  regression test that new api/* subpaths default private. Broader allowlist-shape
+  refactor = fast-follow.
+- e2e WS suites (excluded from default run): WS auth covered by fast unit tests
+  in this PR; heavy e2e update = fast-follow (architect ok'd).
+
+Centralization (architect's sdk question): WS-subprotocol builder
+terminalWsProtocols(key) lives in @cluesmith/codev-types beside the wire
+constants, used by both WS clients. It cannot live in the sdk (import-boundary
+forbids runtime codev-types use; type-only, zero runtime deps). sdk unchanged
+(already sends HTTP key, opens no socket).
+
+Verify (iteration 2): codev build exit 0; sdk 98 pass (incl import-boundary);
+apps/web + apps/vscode(main) tsc exit 0; full codev suite 4881 pass / 48 skip / 0 fail.
+
