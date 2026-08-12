@@ -27,7 +27,9 @@ Issue #1400. Deck half of phase-aware review; bridge (#1401 `sendCanvasCommand`)
 
 ### Spec-time decisions I'm resolving in the plan (issue body is the spec)
 
-- Tap in canvas mode: **doc-start** (analog of diff-first-*; unsurprising). comment-next noted as alt.
+- Tap in canvas mode (architect plan-review revision): **coarse (Headings) → doc-start** (reset),
+  **fine (Blocks) → comment-next** (walk commented blocks = "next place needing attention"). Restores
+  the headline commented-block navigation; keeps comment-next/prev in the map; no doc-start duplication.
 - Reading-mode toggle (req 4) + column paging (req 5): **deferred** — existing dials have no spare
   gesture, press-duration heuristics are avoided in this codebase, #1410 Row 2 is the natural home.
 - Deck submit/cancel (req 6): **no** (default) — composer-open only; typing stays on keyboard.

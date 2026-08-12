@@ -13,7 +13,7 @@ phase implies.
 | Selected builder's state | Coarse dial (today: Files) | Fine dial (today: Changes) | Press | Tap |
 |---|---|---|---|---|
 | implement / review, or blocked at dev-approval / pr | files (unchanged) | hunks (unchanged) | forward file/hunk (unchanged) | jump to first (unchanged) |
-| specify / plan, or blocked at spec-approval / plan-approval | heading step | block step | `composer-open` on the focused block | jump (doc-start — see decision) |
+| specify / plan, or blocked at spec-approval / plan-approval | heading step | block step | `composer-open` on the focused block | coarse → `doc-start` (reset); fine → `comment-next` (walk commented blocks) |
 
 The bridge is done: #1401 shipped `sendCanvasCommand` on the sdk controller subpath and #1404
 shipped `phaseArtifactVerb` (the phase/gate resolver). This project is the **deck half** and needs
@@ -79,9 +79,11 @@ interface CanvasSpec {
 ```
 
 - **Coarse dial (`DiffFileNav`)** — diff: `Files` (`diff-next/prev/first-file`, `forward-file`);
-  canvas: `Headings` (`heading-next`/`heading-prev`, tap → `doc-start`).
+  canvas: `Headings` (`heading-next`/`heading-prev`, tap → `doc-start` — the reset gesture,
+  role-consistent with diff-mode first-file).
 - **Fine dial (`DiffHunkNav`)** — diff: `Changes` (`diff-next/prev/first-hunk`, `forward-hunk`);
-  canvas: `Blocks` (`block-next`/`block-prev`, tap → `doc-start`).
+  canvas: `Blocks` (`block-next`/`block-prev`, tap → `comment-next` — repeatable taps walk forward
+  through commented blocks; keyboard parity means no wrap, so it stops at the last comment).
 
 Handlers dispatch on `reviewMode(this.store.selectedBuilder())`:
 
@@ -143,6 +145,11 @@ wire field is.
 
 ### 6. Deferred (spec-time calls resolved here)
 
+- **Canvas tap mapping (the issue's "first commented block vs doc start" spec decision): split by
+  dial.** Coarse (Headings) tap → `doc-start`, the reset gesture (role-consistent with diff-mode
+  first-file). Fine (Blocks) tap → `comment-next`, so repeatable taps walk forward through commented
+  blocks — the "next place needing attention" capability. This keeps `comment-next`/`comment-prev` in
+  the gesture map (rather than unused) and avoids duplicating `doc-start` on both taps.
 - **Reading-mode toggle (req 4): deferred.** The two dials' rotate/press/tap all carry review
   semantics in both modes — no spare gesture. This codebase deliberately avoids press-duration
   heuristics (see the `ZoomNav` comment on touch-in / press-out being two distinct reliable
@@ -207,7 +214,8 @@ wire field is.
   (`diff-next-file`, `forward-file`, `diff-first-file`, and the hunk equivalents) — unchanged.
 - Canvas-mode: with the selected builder in `plan`, coarse-dial rotate(+3) →
   `sendCanvasCommand('heading-next', {workspace}, {count: 3})`, rotate(-1) → `heading-prev` count 1;
-  press → `composer-open`; tap → `doc-start`. Fine dial → `block-next`/`block-prev`.
+  press → `composer-open`; tap → `doc-start`. Fine dial → rotate `block-next`/`block-prev`;
+  press → `composer-open`; tap → `comment-next` (no count on press/tap).
 - Legibility: `renderTo` titles are `Headings`/`Blocks` for a canvas-phase builder, `Files`/`Changes`
   for a diff-phase builder.
 - Feedback: a stubbed `sendCanvasCommand` returning `{ok:false, code:'no-canvas'}` sets the
@@ -218,8 +226,9 @@ wire field is.
   `Files`/`Changes`, rotate/press/tap drive the diff exactly as today (no regression).
 - Select a builder in `specify`/`plan` (or blocked at spec-approval/plan-approval): dials **re-title
   to `Headings`/`Blocks`**; press the builder key (#1404) to open its artifact; rotate steps
-  headings/blocks in the canvas, press opens the composer at the focused block, tap jumps to doc
-  start.
+  headings/blocks in the canvas, press opens the composer at the focused block, coarse-dial tap
+  jumps to doc start, and **fine-dial tap walks forward through commented blocks** (repeat taps step
+  to each next comment, stopping at the last).
 - With no artifact canvas open, a canvas rotate shows `Open artifact` on the strip (no-canvas).
 - With Tower stopped, a canvas gesture shows `Tower offline` (unreachable), not a false success.
 - Switch the selected builder between a diff-phase and a canvas-phase builder and confirm both dials
