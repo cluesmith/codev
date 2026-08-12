@@ -79,6 +79,7 @@ const CANVAS_COMMANDS = [
   'composer-open',
   'composer-submit',
   'composer-cancel',
+  'composer-open-or-submit',
   'reading-mode-toggle',
 ] as const satisfies readonly CanvasCommand[];
 
