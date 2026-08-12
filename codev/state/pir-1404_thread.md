@@ -37,3 +37,13 @@ Plan-approval gate approved by the human; porch advanced to implement. Implement
 - Tests: new `phaseArtifactVerb` suite + Automatic/explicit/fallback/select tests; `zoomInVerb` suite unchanged. Swapped FleetSlot→BuilderAction in slot-key tests.
 
 Worktree had no linked/built workspace deps (fresh builder worktree): ran `pnpm install`, built codev-types + codev-sdk, then streamdeck. Build ✓, tsc --noEmit ✓, `vitest run` 72/72 ✓. Awaiting dev-approval gate (hardware verification of the profile import + phase-across-states press).
+
+## Dev-approval review with owner (2026-08-12)
+
+Sideload steps confirmed (README "Install & develop"): `streamdeck link` this worktree's sdPlugin (verify via `streamdeck list` → path under .builders/pir-1404), import the revved `Codev.streamDeckProfile` separately.
+
+Two items raised during hardware review:
+1. **Repeated firing (OPEN):** owner reports the Automatic press's verb (e.g. open-plan) re-fires every few seconds. Traced statically end-to-end: deck sends exactly one command per tap (all sendCommand in input handlers; onChange only re-renders), Tower relay broadcasts once per POST (stateless, command-relay.ts:105), broadcastNotification writes once (30s heartbeat only, no command replay; reconnection replay is terminal-only #1047), VSCode relay wired once + focus-gated. Code says "once" at every hop → repeat is a runtime reconnect/multi-window/delivery effect, NOT the deck merge. `streamdeck list` shows a single link (double-instance ruled out). Decisive test pending from owner: quit the Stream Deck app — does it keep firing? (yes → Tower/VSCode delivery loop, separate bug; no → deck runtime, add keyDown counter log). My #1404 change didn't introduce it (open-plan default just made a pre-existing loop visible).
+2. **Diff branch → first file (SPUN OFF → #1412):** owner wants Automatic's diff branch to open the builder's FIRST file (dial-ready per-file), not view-diff's aggregate vscode.changes editor. Can't be deck-only: diff-first-file ignores the builder-id arg (resolves from editor/lastPosition, diff-nav.ts:118), view-diff is the only id-taking opener. Needs a vscode-side builder-id-scoped open-first-file verb. Routed to architect (per their convention), filed as #1414 (area/cross-cutting), verify-first folded into this dev-approval hardware session.
+
+#1404 merge itself stands: implemented, 72/72, pushed. Holding at dev-approval.
