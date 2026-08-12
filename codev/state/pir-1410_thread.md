@@ -25,6 +25,19 @@ Cautions: do NOT touch .builders/pir-1428 (live deck symlink) or sibling worktre
 - Submit/flush: `apps/vscode/src/review-queue/submit.ts` (`submitReview` → PTY batch, removes via store).
 - Approve: `apps/vscode/src/commands/approve.ts` (`approve-gate [builderId]` → confirmation modal; selected-scoped is just a different id arg).
 
+## Implementation (implement phase, plan-approval passed)
+Commits on builder/pir-1410:
+- Overview wire: OverviewData.queuedFeedback (Record<builderId,count>, map not scalar) + feedbackMode ('forward'|'queue'). packages/types/src/api.ts.
+- Tower overview: countQueuedFeedback (reads each builder's .codev/pending-comments.json) + readFeedbackMode (reads <root>/.vscode/settings.json codev.diffCodelensMode, JSONC-tolerant, default 'forward'). packages/codev/.../overview.ts; tower-routes.ts fallback updated.
+- VSCode relay: feedback-file/hunk/selection + send-queue verbs (command-relay.ts). New review-queue/feedback.ts mode-router: forward mode → codev.forwardToBuilder (immediate); comment mode → ReviewQueueStore.add (single source of truth). submitReview now accepts builder-id arg (deck Send Fb passes selectedId; status bar still resolves).
+- Canvas back-sync (§F, E2=b): preview-provider fires builder-active on canvas focus (onDidChangeViewState active), builder resolved by worktreePath-prefix via new pure canvas-owner.ts. Reuses existing builder-active event/hook (no new hook).
+- Deck: store readers (feedbackMode/queuedFeedback/windowedBuilder + ROW1_WINDOW_SIZE=4). face.ts: selected-slot accent ring, approveFaceSvg, sendFbFaceSvg, 'comment' glyph, gatesFaceSvg label param. actions.ts: slotBuilder→windowedBuilder (4-wide page window), selected highlight, dial press forward-*→feedback-*, ScrollNav→feedback-selection, touchstrip 'Files · send/queue', ApproveGate repurposed selected-scoped, new SendQueueAction + NextAttentionAction. plugin.ts registers them. manifest.json: +send-queue +next-attention actions (reused icons; dedicated icons = polish follow-up).
+- README: two-zone layout, mode-neutral feedback, coherence model, builder-active activity-hook prerequisite (E1) with config example.
+- Tests: streamdeck 126 pass (windowing, SendFb, NextAttn, faces, mode label, dial verbs); vscode 822 pass (feedback router, relay verbs, canvas-owner); codev overview (countQueuedFeedback/readFeedbackMode).
+
+## Scope note (intentional deferral)
+- SD+ PROFILE (Codev.streamDeckProfile zip) left BLANK as it has always shipped (Actions:null; #1404 shipped Row 1 the same way). No known-good sdProfile Actions schema in history to safely pre-populate; a malformed binary profile would fail import at the hardware session. Two-zone key layout is documented in README; reviewer places the 8 keys at the dev-approval hardware session. Flag to architect.
+
 ## Status
 - 2026-08-13: Plan phase, first run. Investigated codebase. Wrote plan (commit 4c0f07dda), plan-approval gate pending.
 - 2026-08-13: Amr resolved req-6 — RETIRE the generic ApproveGate singleton; Row 2 [Approve] = single selected-scoped affordance, jump-to-next + gate-count badge fold into Row 2 [Next/attention].
