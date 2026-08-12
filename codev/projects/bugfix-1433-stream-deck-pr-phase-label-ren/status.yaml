@@ -1,7 +1,7 @@
 id: bugfix-1433
 title: stream-deck-pr-phase-label-ren
 protocol: bugfix
-phase: investigate
+phase: fix
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -11,4 +11,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-08-12T21:44:29.187Z'
-updated_at: '2026-08-12T21:44:29.188Z'
+updated_at: '2026-08-12T21:45:14.873Z'
