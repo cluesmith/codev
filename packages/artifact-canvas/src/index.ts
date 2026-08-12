@@ -12,6 +12,7 @@
 export type { FileAdapter } from './adapters/FileAdapter.js';
 export type { MarkerAdapter } from './adapters/MarkerAdapter.js';
 export type { ThemeAdapter } from './adapters/ThemeAdapter.js';
+export type { CommandAdapter, CanvasCommandInvocation } from './adapters/CommandAdapter.js';
 export type { Disposable, ReviewMarker, ArtifactCanvasProps, ReadingMode } from './types.js';
 
 export { ArtifactCanvas } from './components/ArtifactCanvas.js';

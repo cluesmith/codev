@@ -47,6 +47,7 @@ import { hasTeam, loadTeamMembers, loadMessages, type TeamMember, type TeamMessa
 import { fetchTeamGitHubData, type TeamMemberGitHubData } from '../../lib/team-github.js';
 import { resolveTarget, resolveAgentInRegistry, broadcastMessage, isResolveError, type ResolveResult } from './tower-messages.js';
 import { handleCommandRoute, COMMAND_ROUTE } from './command-relay.js';
+import { handleCanvasRoute, CANVAS_ROUTE_PREFIX } from './canvas-relay.js';
 import { formatArchitectMessage, formatBuilderMessage } from '../utils/message-format.js';
 import type { PtySession } from '../../terminal/pty-session.js';
 import { writeMessageToSession, writeEscapeToSession } from './message-write.js';
@@ -278,6 +279,13 @@ export async function handleRequest(
     // to the active editor provider for any controller.
     if (url.pathname === COMMAND_ROUTE) {
       return await handleCommandRoute(req, res, url, ctx);
+    }
+
+    // Canvas command channel: /api/canvas/* — same self-routing shape as the command relay, but
+    // targeted rather than broadcast: it keeps a registry of live canvas views so it can resolve
+    // exactly one and answer when none is open (spec 1401).
+    if (url.pathname.startsWith(CANVAS_ROUTE_PREFIX)) {
+      return await handleCanvasRoute(req, res, url, ctx);
     }
 
     // Workspace API: /api/workspaces/:encodedPath/activate|deactivate|status (Spec 0090 Phase 1)

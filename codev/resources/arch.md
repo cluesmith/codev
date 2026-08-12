@@ -1997,6 +1997,34 @@ All interactions with the repository hosting platform (GitHub by default) are ro
 
 **Environment variables**: Each concept receives `CODEV_*` env vars (e.g., `CODEV_ISSUE_NUMBER`, `CODEV_PR_NUMBER`) that the command uses to parameterize its output.
 
+### Two remote-command paths into an editor surface (Spec 1401)
+
+Tower has **two** ways for an external controller to drive an editor, and picking the wrong one
+is the mistake this note exists to prevent.
+
+| | `/api/command` (Spec 1189) | `/api/canvas/*` (Spec 1401) |
+|---|---|---|
+| Shape | Broadcast a canonical **verb** to every SSE subscriber | Resolve **one** registered canvas view and address it |
+| Answer | `{ok:true}` unconditionally, even with no provider listening | The resolved target, or `no-canvas` (404) / `invalid-request` (400) |
+| State | Stateless relay | In-memory registry of live views, heartbeat lease |
+| Use it when | Any provider may act; nobody needs to hear whether one did | The caller must know a target existed, or several could match |
+
+**Rule:** if a new remote feature needs to report that nothing was there to receive it, or to
+choose among several candidate surfaces, it belongs on the canvas-style path — the broadcast
+relay cannot express either, and bolting a reply onto it would change its contract for every
+existing verb.
+
+**Canvas channel specifics.** `packages/codev/src/agent-farm/servers/canvas-relay.ts` owns the
+route family; hosts register per **view** (a panel, not a document), heartbeat a lease, and
+filter the broadcast SSE by their Tower-minted `viewId`. Liveness and recency are tracked
+separately: any heartbeat extends the lease, but only focus or a delivered command advances the
+most-recently-active stamp used for targeting. Command delivery deliberately does **not** extend
+the lease — delivery is fire-and-forget and proves nothing about the host still being alive.
+
+The command vocabulary lives in `@cluesmith/codev-types` (`canvas-command.ts`) as a closed union;
+Tower, the sdk and the canvas package each keep a local `satisfies`-bound copy of any runtime list
+because codev-types is type-only for all three.
+
 ### Internal Dependencies
 - **Git**: Version control, worktrees for builder isolation
 - **Node.js**: Runtime for agent-farm TypeScript CLI

@@ -12,10 +12,16 @@
  *   ?mode=horizontal          seed `initialReadingMode` (any other value exercises coercion)
  *   ?height=unbounded         omit the bounded-height container (self-bounding assertion)
  * Default (no params) is the classic hands-on page, unchanged.
+ *
+ * Remote commands (spec 1401): the page wires a `CommandAdapter` to `window.__canvasCommand`,
+ * so `__canvasCommand('column-forward')` in the console — or from the Playwright suite — drives
+ * the canvas the way a remote controller does.
  */
 import * as React from 'react';
 import { createRoot } from 'react-dom/client';
 import { ArtifactCanvas } from '../src/components/ArtifactCanvas.js';
+import type { CommandAdapter } from '../src/adapters/CommandAdapter.js';
+import type { CanvasCommand } from '@cluesmith/codev-types';
 import { createStubHost, stubEditMarker, stubDeleteMarker } from '../src/__tests__/fixtures/stub-adapters.js';
 import { SAMPLE_ARTIFACT } from '../src/__tests__/fixtures/sample-artifact.js';
 import { COLUMNS_FIXTURE } from '../src/__tests__/fixtures/columns-fixture.js';
@@ -29,6 +35,29 @@ if (fixtureMode) {
   doc = COLUMNS_FIXTURE;
 }
 const host = createStubHost(doc);
+
+/**
+ * Remote-command channel (spec 1401). This page is a host, so it implements `CommandAdapter` the
+ * way any host does — it owns the transport. Here the "transport" is a function on `window`, so
+ * the Playwright suite can drive the seam exactly as a real remote driver would, which is the
+ * only way to assert column paging: jsdom has no layout to measure.
+ */
+declare global {
+  interface Window {
+    __canvasCommand?: (command: CanvasCommand, count?: number) => void;
+  }
+}
+
+const commandAdapter: CommandAdapter = {
+  subscribe(onCommand) {
+    window.__canvasCommand = (command, count) => onCommand({ command, count });
+    return {
+      dispose: () => {
+        delete window.__canvasCommand;
+      },
+    };
+  },
+};
 
 // Per-user persistence in the dev host (spec 1380 D4): localStorage, mirroring what the VS
 // Code host does with globalState. An explicit ?mode= always wins (the Playwright fixtures
@@ -72,6 +101,7 @@ function Example(): React.ReactElement {
       stubEditMarker(host.store, markerLine, expectedAuthor, expectedBodyPrefix, newBody),
     onDeleteComment: (markerLine: number, expectedAuthor: string, expectedBodyPrefix: string) =>
       stubDeleteMarker(host.store, markerLine, expectedAuthor, expectedBodyPrefix),
+    commandAdapter,
     initialReadingMode: mode,
     onReadingModeChange: (next: string) => {
       setMode(next);

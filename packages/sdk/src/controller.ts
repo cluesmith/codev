@@ -14,6 +14,7 @@
 export {
   TowerClient,
   COMMAND_ROUTE,
+  CANVAS_COMMAND_ROUTE,
   type TowerClientOptions,
   type TowerWorkspace,
 } from './tower-client.js';
@@ -32,4 +33,24 @@ export type {
   OverviewBuilder,
   OverviewPR,
   OverviewBacklogItem,
+} from '@cluesmith/codev-types';
+
+/*
+ * The canvas command vocabulary and its result shapes (spec 1401), so a controller can drive an
+ * open artifact-canvas view and act on the answer without a direct codev-types dependency.
+ *
+ * `CanvasCommandClientErrorCode` is one member wider than the wire union: it adds `unreachable`,
+ * which the client synthesizes when Tower gave no answer at all. A controller must be able to
+ * tell that apart from `no-canvas`, or it will report "no canvas open" while Tower is simply
+ * down.
+ *
+ * View registration is deliberately NOT re-exported here. Controllers drive views; hosts own
+ * them, and those methods stay on the client for hosts to reach.
+ */
+export type {
+  CanvasCommand,
+  CanvasCommandClientResult,
+  CanvasCommandClientErrorCode,
+  CanvasCommandErrorCode,
+  CanvasCommandTarget,
 } from '@cluesmith/codev-types';

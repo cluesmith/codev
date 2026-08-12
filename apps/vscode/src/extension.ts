@@ -1395,10 +1395,20 @@ export async function activate(context: vscode.ExtensionContext) {
 	// from the rendered surface. Opt-in via "Reopen With…" or
 	// `codev.openMarkdownPreview`; `priority: "option"` keeps the default `.md`
 	// editor and built-in preview untouched.
+	// Held in a local so the provider itself joins `subscriptions`: on deactivate it releases the
+	// canvas-view registrations of any still-open panels, which VS Code does not dispose
+	// individually (spec 1401). Without that, those views linger in Tower until their lease lapses.
+	const markdownPreviewProvider = new MarkdownPreviewProvider(
+		context.extensionUri,
+		overviewCache,
+		context.globalState,
+		connectionManager,
+	);
+	context.subscriptions.push(markdownPreviewProvider);
 	context.subscriptions.push(
 		vscode.window.registerCustomEditorProvider(
 			MarkdownPreviewProvider.viewType,
-			new MarkdownPreviewProvider(context.extensionUri, overviewCache, context.globalState),
+			markdownPreviewProvider,
 			{
 				webviewOptions: { retainContextWhenHidden: true },
 				supportsMultipleEditorsPerDocument: false,

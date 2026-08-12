@@ -10,13 +10,25 @@
  * well-formed message; they do not vouch that a given runtime value conforms.
  */
 import type { ReviewMarker } from '@cluesmith/codev-sdk/review-markers';
+import type { CanvasCommand } from '@cluesmith/codev-types';
 
-/** Host → webview: push the current document text + parsed markers for rendering. */
-export interface HostToWebviewMessage {
-  type: 'update';
-  content: string;
-  markers: ReviewMarker[];
-}
+/** Host → webview: push content, or deliver a remote command addressed to this panel. */
+export type HostToWebviewMessage =
+  | {
+      type: 'update';
+      content: string;
+      markers: ReviewMarker[];
+    }
+  /**
+   * A canvas command Tower resolved to THIS panel's view (spec 1401). The host has already
+   * matched the event's `viewId`, so the webview simply runs it; `count` repeats a traversal
+   * command and is absent otherwise.
+   */
+  | {
+      type: 'command';
+      command: CanvasCommand;
+      count?: number;
+    };
 
 /** Webview → host: the canvas's lifecycle + comment-intent messages. */
 export type WebviewToHostMessage =

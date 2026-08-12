@@ -37,6 +37,14 @@ jobs:
         working-directory: packages/types
         run: pnpm build
 
+      # The wire-contract guards under packages/types/type-tests/ live outside src/ so they
+      # are never published, which also means `pnpm build` above does not check them. They are
+      # compile-time-only tests (the package has no test runner), so this step is the only
+      # thing that makes them able to fail a build.
+      - name: Type-check types package contracts
+        working-directory: packages/types
+        run: pnpm check-types:tests
+
       - name: Build artifact-canvas package (+ build-smoke)
         working-directory: packages/artifact-canvas
         run: pnpm build && pnpm build:smoke
