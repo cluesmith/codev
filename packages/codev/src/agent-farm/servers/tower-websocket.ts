@@ -9,7 +9,8 @@
 import http from 'node:http';
 import type net from 'node:net';
 import { WebSocketServer, WebSocket } from 'ws';
-import { WS_CLOSE_SESSION_UNKNOWN } from '../lib/reconnect-backoff.js';
+import { WS_CLOSE_SESSION_UNKNOWN, WS_CLOSE_UNAUTHORIZED } from '../lib/reconnect-backoff.js';
+import { isWebSocketAllowed } from '../utils/server-utils.js';
 import { encodeData, encodeControl, decodeFrame } from '../../terminal/ws-protocol.js';
 import type { PtySession } from '../../terminal/pty-session.js';
 import { attachWithReplay } from '../../terminal/attach-replay.js';
@@ -187,6 +188,31 @@ function rejectUnknownSession(
 }
 
 /**
+ * Reject an upgrade that failed request authentication (advisory
+ * GHSA-xvjp-7748-v88v). Mirrors {@link rejectUnknownSession}'s two client
+ * shapes: a browser (has `Origin`, can't read a failed upgrade's HTTP status)
+ * gets an accepted-then-closed handshake with {@link WS_CLOSE_UNAUTHORIZED};
+ * a Node `ws` client gets the HTTP-stage `401`. This runs BEFORE any session
+ * lookup and is independent of `Origin`, so a missing `Origin` cannot degrade
+ * into an auth bypass.
+ */
+function rejectUnauthorized(
+  req: http.IncomingMessage,
+  socket: net.Socket,
+  head: Buffer,
+  wss: WebSocketServer,
+): void {
+  if (req.headers.origin) {
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      ws.close(WS_CLOSE_UNAUTHORIZED, 'unauthorized');
+    });
+    return;
+  }
+  socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+  socket.destroy();
+}
+
+/**
  * Set up the WebSocket upgrade handler on the HTTP server.
  * Parses upgrade requests and routes them to the appropriate terminal session:
  * - Direct route: /ws/terminal/:id
@@ -199,6 +225,14 @@ export function setupUpgradeHandler(
 ): void {
   server.on('upgrade', async (req: http.IncomingMessage, socket: net.Socket, head: Buffer) => {
     const reqUrl = new URL(req.url || '/', `http://localhost:${port}`);
+
+    // Request authentication (advisory GHSA-xvjp-7748-v88v): validate the key at
+    // the handshake, before any session lookup or PTY attach, for every WS route.
+    // Independent of the Origin header so a missing Origin cannot bypass auth.
+    if (!isWebSocketAllowed(req)) {
+      rejectUnauthorized(req, socket, head, wss);
+      return;
+    }
 
     // Phase 2: Handle /ws/terminal/:id routes directly
     const terminalMatch = reqUrl.pathname.match(/^\/ws\/terminal\/([^/]+)$/);

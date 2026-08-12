@@ -5,6 +5,9 @@
  */
 
 import type * as http from 'node:http';
+import { timingSafeEqual } from 'node:crypto';
+import { ensureLocalKey } from '@cluesmith/codev-core/auth';
+import { WEB_KEY_HEADER, WS_KEY_PROTOCOL_PREFIX } from '@cluesmith/codev-types';
 
 /**
  * HTML-escape a string to prevent XSS
@@ -71,14 +74,187 @@ export function parseJsonBody(req: http.IncomingMessage, maxSize = 1024 * 1024):
   });
 }
 
+// ============================================================================
+// Request authentication (advisory GHSA-xvjp-7748-v88v)
+// ============================================================================
+//
+// Tower's local HTTP + WebSocket API reaches privileged local operations, so
+// every request that is not on the narrow public-route allowlist must present
+// the shared local key (`~/.agent-farm/local-key`) in the `codev-web-key`
+// header. Enforcement is server-side only (server/client isolation, #1189):
+// clients merely transport the key.
+
+// Wire-contract names (header + WS subprotocols) live in `@cluesmith/codev-types`
+// so the server and every client share one source of truth.
+
 /**
- * Security: Validate request origin
- * Currently allows all requests - security is handled by the server binding to localhost only.
- * @param req - HTTP incoming message
- * @returns true (always allowed)
+ * Cached expected key. `undefined` = not yet loaded; `null` = load failed
+ * (fail closed — reject every authenticated request). Tower owns generation,
+ * so under normal operation the key file exists after boot.
  */
-export function isRequestAllowed(_req: http.IncomingMessage): boolean {
-  return true;
+let cachedExpectedKey: string | null | undefined;
+
+/**
+ * The expected local key, cached after first read. Issues the key if missing
+ * (Tower is the owner). Returns null and stays fail-closed if the key cannot be
+ * read or created (e.g. an unwritable `~/.agent-farm`).
+ */
+export function getExpectedKey(): string | null {
+  if (cachedExpectedKey === undefined) {
+    try {
+      cachedExpectedKey = ensureLocalKey() || null;
+    } catch {
+      cachedExpectedKey = null;
+    }
+  }
+  return cachedExpectedKey;
+}
+
+/**
+ * Reset the cached key. Test-only seam; also lets a future rotation path force
+ * a re-read. Not wired to any runtime rotation in this change.
+ */
+export function resetExpectedKeyCache(): void {
+  cachedExpectedKey = undefined;
+}
+
+/**
+ * Constant-time key comparison. `timingSafeEqual` throws on unequal-length
+ * buffers, so length is checked first (a length mismatch is an immediate,
+ * non-secret reject).
+ */
+export function keysMatch(presented: string, expected: string): boolean {
+  const a = Buffer.from(presented, 'utf8');
+  const b = Buffer.from(expected, 'utf8');
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
+}
+
+/**
+ * Routes intentionally reachable without the key. Kept deliberately narrow:
+ * pre-auth liveness/version probes, the Tower launcher shell, and the React
+ * dashboard's static assets (the page loads keyless, then authenticates its
+ * own API/WebSocket calls with the key). Everything else requires the key.
+ *
+ * The privileged workspace `file` reader and every `api/` or `ws/` subpath are
+ * explicitly excluded so a static-asset carve-out never exposes a data route.
+ */
+export function isPublicRoute(method: string, pathname: string): boolean {
+  if (method !== 'GET') return false;
+
+  if (pathname === '/health') return true;
+  if (pathname === '/api/version') return true;
+  if (pathname === '/' || pathname === '/index.html') return true;
+
+  // React SPA served under /workspace/<encoded>/... — static assets only.
+  const workspaceMatch = pathname.match(/^\/workspace\/[^/]+\/(.*)$/);
+  if (workspaceMatch) {
+    const subPath = workspaceMatch[1];
+    if (subPath.startsWith('api/') || subPath === 'api') return false;
+    if (subPath.startsWith('ws/') || subPath === 'ws') return false;
+    if (subPath === 'file') return false;
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * CORS origin allowlist (advisory Layer 3). Replaces the previous
+ * reflect-any-`https://` behavior. Allowed: loopback origins on any port
+ * (`http://localhost[:port]`, `http://127.0.0.1[:port]`) plus any origins an
+ * operator lists in `CODEV_TOWER_ALLOWED_ORIGINS` (comma-separated, exact
+ * match) for a tunnel/proxy deployment. Secure by default: no wildcard, no
+ * scheme-only reflection. CORS is defense-in-depth; the key check is the
+ * actual control.
+ */
+export function isAllowedOrigin(origin: string): boolean {
+  if (/^http:\/\/localhost(:\d+)?$/.test(origin)) return true;
+  if (/^http:\/\/127\.0\.0\.1(:\d+)?$/.test(origin)) return true;
+
+  const configured = process.env.CODEV_TOWER_ALLOWED_ORIGINS;
+  if (configured) {
+    for (const allowed of configured.split(',')) {
+      if (allowed.trim() === origin) return true;
+    }
+  }
+  return false;
+}
+
+/** Read the key a client presented on an HTTP request, or null if absent. */
+function presentedHttpKey(req: http.IncomingMessage): string | null {
+  const raw = req.headers[WEB_KEY_HEADER];
+  if (typeof raw === 'string' && raw.length > 0) return raw;
+  if (Array.isArray(raw) && raw.length > 0 && raw[0]) return raw[0];
+  return null;
+}
+
+/**
+ * Security: decide whether an HTTP request may proceed.
+ *
+ * Public-allowlisted routes pass keyless; every other route must present a
+ * `codev-web-key` header that constant-time-matches the expected local key.
+ * Fails closed when the expected key is unavailable.
+ *
+ * @param req - HTTP incoming message
+ * @returns true if the request is authorized
+ */
+export function isRequestAllowed(req: http.IncomingMessage): boolean {
+  const method = req.method || 'GET';
+  let pathname = '/';
+  try {
+    pathname = new URL(req.url || '/', 'http://localhost').pathname;
+  } catch {
+    return false;
+  }
+
+  if (isPublicRoute(method, pathname)) return true;
+
+  const expected = getExpectedKey();
+  if (!expected) return false;
+
+  const presented = presentedHttpKey(req);
+  if (!presented) return false;
+
+  return keysMatch(presented, expected);
+}
+
+/**
+ * Extract the presented key from a WebSocket upgrade's `Sec-WebSocket-Protocol`
+ * offer (the `codev-key.<KEY>` token), or null if absent/malformed.
+ */
+function presentedWsKey(req: http.IncomingMessage): string | null {
+  const raw = req.headers['sec-websocket-protocol'];
+  if (!raw) return null;
+  const offered = (Array.isArray(raw) ? raw.join(',') : raw)
+    .split(',')
+    .map((p) => p.trim());
+  for (const proto of offered) {
+    if (proto.startsWith(WS_KEY_PROTOCOL_PREFIX)) {
+      const key = proto.slice(WS_KEY_PROTOCOL_PREFIX.length);
+      return key.length > 0 ? key : null;
+    }
+  }
+  return null;
+}
+
+/**
+ * Security: decide whether a WebSocket upgrade may proceed. Validated at the
+ * handshake (before any PTY attach), independent of the `Origin` header so a
+ * missing Origin can never degrade into an auth bypass. Fails closed when the
+ * expected key is unavailable.
+ *
+ * @param req - HTTP upgrade request
+ * @returns true if the upgrade is authorized
+ */
+export function isWebSocketAllowed(req: http.IncomingMessage): boolean {
+  const expected = getExpectedKey();
+  if (!expected) return false;
+
+  const presented = presentedWsKey(req);
+  if (!presented) return false;
+
+  return keysMatch(presented, expected);
 }
 /**
  * Validate a bind host value for server.listen().

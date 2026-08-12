@@ -32,7 +32,8 @@ import { getBuilders, setArchitectByName } from '../state.js';
 import { DEFAULT_COLS, defaultSessionOptions } from '../../terminal/index.js';
 import type { SSEClient, WorkspaceTerminals } from './tower-types.js';
 import type { TerminalManager } from '../../terminal/pty-manager.js';
-import { parseJsonBody, isRequestAllowed } from '../utils/server-utils.js';
+import { parseJsonBody, isRequestAllowed, isAllowedOrigin, getExpectedKey } from '../utils/server-utils.js';
+import { WEB_KEY_HEADER } from '@cluesmith/codev-types';
 import {
   isRateLimited,
   normalizeWorkspacePath,
@@ -229,29 +230,32 @@ export async function handleRequest(
   res: http.ServerResponse,
   ctx: RouteContext,
 ): Promise<void> {
-  // Security: Validate Host and Origin headers
-  if (!isRequestAllowed(req)) {
-    res.writeHead(403, { 'Content-Type': 'text/plain' });
-    res.end('Forbidden');
-    return;
-  }
-
-  // CORS headers — allow localhost and tunnel proxy origins
+  // CORS headers — reflect only allowlisted origins (advisory Layer 3).
   const origin = req.headers.origin;
-  if (origin && (
-    origin.startsWith('http://localhost:') ||
-    origin.startsWith('http://127.0.0.1:') ||
-    origin.startsWith('https://')
-  )) {
+  if (origin && isAllowedOrigin(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
   }
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Allow-Headers', `Content-Type, ${WEB_KEY_HEADER}`);
   res.setHeader('Cache-Control', 'no-store');
 
+  // A CORS preflight carries no credentials and performs no action, so it is
+  // answered before the key check — otherwise browser clients could never
+  // complete the preflight that precedes an authenticated request.
   if (req.method === 'OPTIONS') {
     res.writeHead(200);
     res.end();
+    return;
+  }
+
+  // Request authentication (advisory GHSA-xvjp-7748-v88v): every route outside
+  // the narrow public-route allowlist must present the shared local key. This
+  // is the single HTTP choke point every route passes through. CORS above is
+  // defense-in-depth only — a no-preflight "simple" request still lands here.
+  if (!isRequestAllowed(req)) {
+    res.writeHead(401, { 'Content-Type': 'text/plain' });
+    res.end('Unauthorized');
     return;
   }
 
@@ -2369,8 +2373,20 @@ function handleDashboard(res: http.ServerResponse, ctx: RouteContext): void {
 
   try {
     const template = fs.readFileSync(ctx.templatePath, 'utf-8');
+    // Same-origin key injection (advisory GHSA-xvjp-7748-v88v Layer 4): write the
+    // shared local key into the page Tower serves so it can authenticate its own
+    // API calls, without embedding a readable secret in the shipped template.
+    // This is safe because only same-origin/allowlisted JS can read this response
+    // body — CORS blocks a cross-origin page from reading `GET /` — so the key is
+    // never exposed to arbitrary web content. The key is hex, so JSON.stringify
+    // yields a safe `<script>`-embeddable literal.
+    const key = getExpectedKey();
+    const injection = key
+      ? `<script>window.__CODEV_WEB_KEY__ = ${JSON.stringify(key)};</script>`
+      : '';
+    const html = template.replace('<!-- CODEV_WEB_KEY_INJECTION -->', injection);
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-    res.end(template);
+    res.end(html);
   } catch (err) {
     res.writeHead(500, { 'Content-Type': 'text/plain' });
     res.end('Error loading template: ' + (err as Error).message);
