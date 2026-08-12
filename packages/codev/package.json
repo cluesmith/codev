@@ -22,8 +22,9 @@
   ],
   "scripts": {
     "clean": "rm -rf dist",
-    "build": "pnpm --filter \"@cluesmith/codev^...\" build && pnpm clean && tsc && pnpm copy-dashboard && pnpm copy-skeleton",
+    "build": "pnpm --filter \"@cluesmith/codev^...\" build && pnpm clean && tsc && pnpm copy-dashboard && pnpm copy-skeleton && pnpm copy-three",
     "copy-dashboard": "rm -rf dashboard-dist && cp -r ../../apps/web/dist dashboard-dist",
+    "copy-three": "node ./scripts/copy-three.mjs",
     "dev:dashboard": "cd ../../apps/web && pnpm dev",
     "copy-skeleton": "rm -rf skeleton && cp -r ../../codev-skeleton skeleton",
     "dev": "tsx src/cli.ts",
@@ -37,10 +38,10 @@
     "prepublishOnly": "pnpm build"
   },
   "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.2.41",
     "@cluesmith/codev-core": "workspace:*",
     "@cluesmith/codev-sdk": "workspace:*",
     "@cluesmith/codev-types": "workspace:*",
-    "@anthropic-ai/claude-agent-sdk": "^0.2.41",
     "@google/genai": "^1.0.0",
     "@openai/codex-sdk": "^0.146.0",
     "@xterm/addon-serialize": "^0.14.0",
@@ -58,14 +59,15 @@
   "devDependencies": {
     "@cluesmith/codev-web": "workspace:*",
     "@playwright/test": "^1.58.0",
-    "@xterm/xterm": "^5.5.0",
     "@types/better-sqlite3": "^7.6.13",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.10.1",
     "@types/ws": "^8.18.1",
     "@vitest/coverage-v8": "^4.0.18",
+    "@xterm/xterm": "^5.5.0",
     "jsdom": "^28.1.0",
     "playwright": "^1.58.0",
+    "three": "0.160.0",
     "tsx": "^4.19.2",
     "typescript": "catalog:",
     "vitest": "^4.0.15"

@@ -289,3 +289,31 @@ server-safe, residual concern is lagging VS Code/Stream Deck (covered by
 dual-accept). Wire name in codev-types (TOWER_KEY_HEADER + LEGACY_WEB_KEY_HEADER);
 disk key file + WS subprotocol unchanged. Follow-up: drop the fallback next release.
 Commit 11978b516. All suites green (codev 4884, sdk 98, web 335, vscode 794).
+
+## pr gate — CI fixes + three.js vendoring moved to build-time (2026-08-12)
+
+Two CI jobs were red (both direct consequences of enforcing request auth; neither
+is catchable by in-package build+test because they only exercise the packaged /
+served artifact):
+1. Package Install Verification ran `afx --help` against an install missing
+   @cluesmith/codev-types (server-utils imports its wire constants at module
+   load), so the CLI crashed at boot. Fix: the workflow now builds + packs the
+   types tarball and passes it to verify-install (mirrors the local-install.sh
+   fix). Verified locally by packing all four tarballs and running verify-install:
+   codev/afx/porch/consult all respond.
+2. Tower Integration Tests hit the now-authenticated Tower with keyless fetch /
+   WebSocket calls -> 401. Fix: an e2e-only global fetch wrapper
+   (vitest-e2e-setup.ts) injects the codev-tower-key header for loopback Tower
+   requests, and a towerWsProtocols() helper carries the key on the four terminal/
+   message sockets. Two affected e2e files pass (17/17). All 7 checks green.
+
+three.js vendoring: reduced the PR from +60k to a normal-sized diff. The 3D viewer
+is a key-bearing page (holds the injected Tower key to fetch the keyed api/model
+route), so it must run zero remote code -> three.js is served same-origin from
+vendor/ rather than a CDN. But the ~58k library lines don't need to live in git:
+added `three` as an exact-pinned devDependency and a build step (scripts/
+copy-three.mjs) that regenerates the five vendor files at build time. Output is
+byte-identical to what was committed (proven: git diff empty after regenerate),
+so behaviour is unchanged; the importmap and file names are untouched. The files
+are .gitignored and ship in the npm tarball via the `files` allowlist, exactly
+like skeleton/ and dashboard-dist/ (dry-run confirms all 5 present in the tarball).
