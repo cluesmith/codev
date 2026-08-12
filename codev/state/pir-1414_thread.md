@@ -58,3 +58,21 @@ Verification (fresh worktree needed codev-types + codev-sdk built first):
 No types/server change (verb is a free wire string; server relay is a passthrough).
 The verify-first hardware question + zoom-in follow-up decision happen at the dev-approval gate.
 Awaiting dev-approval (hardware SD+ session).
+
+## dev-approval session (2026-08-12)
+
+Owner reported the aggregate still opened. Screenshot confirmed the aggregate editor
+("Reviewing #1414 (main ↔ HEAD) (10 files)"). Root cause: `streamdeck list` showed the deck
+linked to pir-1425's bundle (old actions.ts, no remap) → deck fired old `view-diff`. NOT a code
+issue — this branch's built bundle contains open-diff-first (verified grep). So a clean hardware
+confirmation of the NEW first-file behavior was NOT captured in-session; the verify-first
+question + zoom-in follow-up remain open. Owner approved dev-approval anyway.
+
+Captured this as a COLD lesson (dual-artifact hardware-testing trap; sibling worktree's live
+streamdeck link serves stale behavior). Advanced to review.
+
+## review phase (2026-08-12)
+
+Wrote codev/reviews/1414-...md (Summary/Files/Commits/Tests/Arch=no HOT/Lessons=1 COLD/Things
+to look at incl. residual hardware check + zoom-in follow-up/How to test). Opening PR, recording
+with porch, then porch done → single 3-way consult → pr gate.
