@@ -60,3 +60,12 @@ canvas-legibility test. `check-types` clean, 84/84 tests pass, plugin builds
 
 At dev-approval — hardware session. Amr runs the sideload swap (worktree build) → verify →
 restore to main-checkout build.
+
+## REVIEW phase (2026-08-12)
+
+dev-approval approved (hardware verified). Wrote
+`codev/reviews/1425-stream-deck-map-review-dials-t.md`: no arch change (client dial remap
+inside the existing CanvasSpec pattern); no lessons-doc edit (the two sideload gotchas —
+build from worktree root, sdk dist first — are streamdeck-local and already documented, kept
+in the review). Opening PR next, recording with porch, then `porch done` triggers the single
+3-way consult pass → pr gate.
