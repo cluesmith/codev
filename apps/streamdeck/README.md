@@ -25,26 +25,37 @@ but degrades by model:
 
 ## Recommended layout (Stream Deck +)
 
+A two-zone board bound by one shared selection: **Row 1 selects, Row 2 acts on
+the selection, the dials review it.**
+
 ```
 ┌──────────────────────────────────────────────────────────┐
 │  STREAM DECK +                                             │
 │                                                            │
 │  ┌────────┐  ┌────────┐  ┌────────┐  ┌────────┐           │
-│  │ Approve│  │ Builder│  │  Dev   │  │ Codev  │   keys 1–4 │
-│  │ Gate ⓷ │  │ Action │  │ Server │  │ Action │           │
+│  │ Builder│  │ Builder│  │ Builder│  │ Builder│  Row 1:    │
+│  │ slot 1 │  │ slot 2 │  │ slot 3 │  │ slot 4 │  selectors │
 │  └────────┘  └────────┘  └────────┘  └────────┘           │
 │  ┌────────┐  ┌────────┐  ┌────────┐  ┌────────┐           │
-│  │ Builder│  │ Builder│  │ Builder│  │ Builder│   keys 5–8 │
-│  │ Action │  │ Action │  │ Action │  │ Action │  (pin 4)   │
+│  │Approve │  │  Dev   │  │Send Fb │  │ Next / │  Row 2:    │
+│  │ Gate   │  │ Server │  │  (N)   │  │ Attn ⓷ │  palette   │
 │  └────────┘  └────────┘  └────────┘  └────────┘           │
 │  ┌──────────────────────────────────────────────┐         │
 │  │  touch strip: each dial's title + live detail  │         │
 │  └──────────────────────────────────────────────┘         │
 │      ◉            ◉            ◉            ◉               │
-│    Zoom         Diff         Diff          PR     4 dials  │
-│    Nav          File         Hunk          Nav             │
+│   Select        Review       Review       Scroll  4 dials  │
+│   (Zoom)        Files        Changes               /PR     │
 └──────────────────────────────────────────────────────────┘
 ```
+
+- **Row 1 — fleet selectors.** Four **Builder Action** keys, one per slot (1–4).
+  They are a **4-wide window** onto the fleet: with more than four builders the
+  **Select dial** (Zoom Navigator rotate) scrolls the window to builders 5–8, 9–N,
+  and the slot holding the current selection is accented. Press selects the builder
+  (Row 2 + the dials follow) and opens its phase artifact.
+- **Row 2 — action palette**, fixed in place, always acting on the **selected**
+  builder: **Approve Gate · Dev Server · Send Feedback (N) · Next / Attention**.
 
 Nothing is fixed — drag whatever you want onto each slot in the Stream Deck app.
 The 5th encoder, **Spawn from Backlog**, can swap onto a dial in place of any of
@@ -54,19 +65,28 @@ the four above (e.g. replace PR Nav when you are triaging the backlog).
 
 ### Keys
 
-- **Approve Gate** — badge shows the count of pending gates. Press surfaces the
-  next gate's **approval modal in the focused VSCode window** for you to confirm
-  (it never silently approves — the human stays in the loop).
+- **Builder Action** (Row 1) — a live tile for a builder **slot**, but as a 4-wide
+  **window** onto the fleet, not a fixed index: slot N shows the Nth builder on the
+  current page, and the **Select dial** scrolls the page so a fleet larger than four
+  is fully reachable. It shows the builder's issue + phase, accents the slot holding
+  the selection, and on press selects the builder (Row 2 + the dials follow) and
+  opens its phase artifact. The default press verb is **Automatic** (the current
+  phase's spec / plan / diff); pick a fixed verb in the PI to always run that.
+- **Approve Gate** (Row 2) — the **single** approve affordance. Acts on the
+  **selected** builder: the face shows its pending gate (e.g. `Plan · Approve`), and
+  press surfaces that gate's **approval modal in the focused VSCode window** for you
+  to confirm (it never silently approves). Inert when the selection isn't blocked.
+- **Dev Server** (Row 2) — runs the dev server for the selected builder's worktree.
+- **Send Feedback (N)** (Row 2) — flushes the **selected** builder's queued review
+  feedback. The badge `N` mirrors that builder's queued count from the overview:
+  in immediate mode `N` stays 0 and the key is inert; in queue mode `N` climbs and
+  a press sends the batch (VSCode's Submit Review).
+- **Next / Attention** (Row 2) — badge of the fleet's pending-gate count; press
+  jumps the selection to the builder needing attention, so you land on it and then
+  press **Approve Gate**.
 - **Codev Action** — fires a workspace verb. Choose it in the Property Inspector
   (Open Architect/Builder Terminal, View Diff, Send Message, Spawn Builder,
   Refresh Overview). Defaults to Refresh Overview.
-- **Builder Action** — a live tile pinned to a builder **slot** (the Nth builder):
-  it shows that builder's issue + phase, and on press selects the builder (the
-  Zoom dials follow) and fires a verb. The default verb is **Automatic** — it opens
-  the artifact for the builder's current phase (spec / plan / diff), re-openable on
-  every press; pick a fixed verb in the PI to always run that instead. Pin one per
-  key for a live fleet board.
-- **Dev Server** — runs the dev server for the builder the Zoom Navigator is on.
 
 Each dial's touch strip shows a **title + a live value**, refreshed over SSE:
 the Zoom Navigator shows the workspace (+ builder/gate counts) or the selected
@@ -85,19 +105,29 @@ builder (+ its phase and position); PR / Spawn show the item + `i/N`.
   selected issue (VSCode prompts for the protocol).
 - **Review: Files / Headings** — phase-aware coarse review dial. The selected
   builder's phase picks the mode. *Diff phase* (implement / review, or blocked at
-  dev-approval / pr): rotate = next / previous file, **push** = forward the current
-  file to the builder, **tap** = jump to the first file. *Spec/plan phase* (specify /
+  dev-approval / pr): rotate = next / previous file, **push** = submit the current
+  file as feedback, **tap** = jump to the first file. *Spec/plan phase* (specify /
   plan, or blocked at spec-approval / plan-approval): rotate = next / previous heading
   in the artifact canvas, **push** = open the composer at the focused block, **tap** =
-  jump to the document top. The touch strip always names the live mode
-  (`Files` / `Headings`).
+  jump to the document top. The touch strip names the live mode and, in diff phase,
+  the delivery mode (`Files · send` vs `Files · queue`).
 - **Review: Changes / Blocks** — phase-aware fine review dial, same mode split.
-  *Diff phase*: rotate = next / previous change, **push** = forward the current change,
-  **tap** = jump to the first change. *Spec/plan phase*: rotate = next / previous
-  block, **push** = open the composer, **tap** = walk forward to the next commented
-  block. The touch strip names the live mode (`Changes` / `Blocks`).
+  *Diff phase*: rotate = next / previous change, **push** = submit the current change
+  as feedback, **tap** = jump to the first change. *Spec/plan phase*: rotate = next /
+  previous block, **push** = open the composer, **tap** = walk forward to the next
+  commented block. The touch strip names the live mode (`Changes · send` /
+  `Changes · queue`, or `Blocks`).
 - **Scroll** — rotate = scroll the focused editor's viewport (caret stays put);
-  **push** = forward the current selection to the builder.
+  **push** = submit the current selection as feedback.
+
+**Dials collect, keys commit.** A diff dial press submits a chunk via a
+**mode-neutral** verb (`feedback-file` / `feedback-hunk` / `feedback-selection`);
+VSCode routes it forward-now or into the queue per the workspace setting
+`codev.diffCodelensMode` (`forward` = immediate, `comment` = queue). The touch strip
+names that mode so a press is never a surprise, and **Send Feedback (N)** flushes a
+queue. Feedback attaches to the builder whose diff is **focused** (the file in front
+of you); Row 2 acts on the **selected** builder — the two are the same builder in
+normal use (see *Reviewing specs & plans*).
 
 Verbs are stamped with the active workspace, so a single Tower serving several
 workspaces routes each command to the right one.
@@ -112,14 +142,31 @@ renders no artifact content on the device):
   phase's artifact (spec / plan / diff) on press; or set a fixed **Open Spec /
   Open Plan / Open Review** verb to always open that one. Pressing it also selects
   the builder, so the **Zoom Navigator** and diff dials land on it.
-- **Approve the gate** — **Approve Gate** badges pending gates (including
-  `plan-approval`) and, on press, surfaces that gate's approval modal in VSCode —
-  which carries a *View Plan* / *Run Dev* inspect button — for you to review and
-  confirm. It never auto-approves.
-- **Forward a hunk/file for changes** — the diff-review verbs (`view-diff`,
-  `forward-file`, `forward-hunk`, `add-comment`) drive the same diff-injection the
-  VSCode sidebar uses, so a key can push a spec/plan/diff reference straight to the
-  builder's terminal.
+- **Approve the gate** — **Approve Gate** acts on the selected builder and, on
+  press, surfaces that gate's approval modal in VSCode — which carries a *View Plan*
+  / *Run Dev* inspect button — for you to review and confirm. It never auto-approves.
+- **Send a hunk/file as feedback** — a diff dial press (or the diff-review verbs
+  `feedback-file` / `feedback-hunk` / `feedback-selection`) submits a spec/plan/diff
+  reference; VSCode forwards it to the builder's terminal now, or queues it, per the
+  `codev.diffCodelensMode` setting. A queue is flushed with **Send Feedback**.
+
+**One shared selection binds the board.** Row 1/Row 2 act on the *selected* builder;
+the review dials act on the *focused* artifact. Two things keep those the same
+builder: a **Row 1 press is select + open in one gesture**, and **focusing a
+builder's diff or canvas in VSCode moves the deck selection to it**. So the
+selector, the palette, and the dials always point at one builder.
+
+> **Prerequisite for the VSCode→deck focus sync:** the back-sync rides a
+> `builder-active` activity hook. Add one to your personal Codev config
+> (`~/.codev/config.json`), pointing at the plugin's deep link:
+>
+> ```json
+> { "activityHooks": [ { "on": ["builder-active"],
+>   "url": "streamdeck://plugins/message/com.cluesmith.codev/active?workspace={workspace}&builder={builder}" } ] }
+> ```
+>
+> Without it the deck still follows deck-driven selection (Row 1 press / Select
+> dial); it just won't follow which window you click into in VSCode.
 
 ## Install & develop (sideload)
 
