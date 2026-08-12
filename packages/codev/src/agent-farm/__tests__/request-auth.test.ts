@@ -21,6 +21,7 @@ import {
   isPublicRoute,
   keysMatch,
   isAllowedOrigin,
+  isAllowedHost,
   isRequestAllowed,
   isWebSocketAllowed,
   getExpectedKey,
@@ -29,7 +30,8 @@ import {
 import { ensureLocalKey } from '@cluesmith/codev-core/auth';
 
 function req(method: string, url: string, headers: Record<string, string> = {}): http.IncomingMessage {
-  return { method, url, headers } as unknown as http.IncomingMessage;
+  // Default to a loopback Host so the Host guard passes unless a test overrides it.
+  return { method, url, headers: { host: 'localhost:4100', ...headers } } as unknown as http.IncomingMessage;
 }
 
 beforeEach(() => {
@@ -67,6 +69,27 @@ describe('isPublicRoute', () => {
     expect(isPublicRoute('POST', '/')).toBe(false);
     expect(isPublicRoute('DELETE', '/workspace/ENC/assets/app.js')).toBe(false);
   });
+
+  it('makes only the annotator shell + vendor public; its data/media routes stay keyed', () => {
+    // Shell (iframe navigation) and vendor libs (<script>/<link>) — public.
+    expect(isPublicRoute('GET', '/workspace/ENC/api/annotate/TAB/')).toBe(true);
+    expect(isPublicRoute('GET', '/workspace/ENC/api/annotate/TAB')).toBe(true);
+    expect(isPublicRoute('GET', '/workspace/ENC/api/annotate/TAB/vendor/prism.min.js')).toBe(true);
+    // Data + media reads and the save write — keyed (fetched/loaded with the key).
+    expect(isPublicRoute('GET', '/workspace/ENC/api/annotate/TAB/file')).toBe(false);
+    expect(isPublicRoute('POST', '/workspace/ENC/api/annotate/TAB/save')).toBe(false);
+    expect(isPublicRoute('GET', '/workspace/ENC/api/annotate/TAB/api/mtime')).toBe(false);
+    expect(isPublicRoute('GET', '/workspace/ENC/api/annotate/TAB/api/image')).toBe(false);
+    expect(isPublicRoute('GET', '/workspace/ENC/api/annotate/TAB/api/model')).toBe(false);
+  });
+
+  it('defaults an unknown future workspace GET subpath to private unless it is a static asset', () => {
+    // Regression guard for the deny-list shape under /workspace/: a genuinely
+    // new *data* route (e.g. api/*) must not become public by accident.
+    expect(isPublicRoute('GET', '/workspace/ENC/api/something-new')).toBe(false);
+    // Plain asset-looking paths remain public (SPA static serving).
+    expect(isPublicRoute('GET', '/workspace/ENC/assets/new.css')).toBe(true);
+  });
 });
 
 describe('keysMatch', () => {
@@ -103,6 +126,39 @@ describe('isAllowedOrigin', () => {
     expect(isAllowedOrigin('https://tunnel.example.com')).toBe(true);
     expect(isAllowedOrigin('https://two.example.com')).toBe(true);
     expect(isAllowedOrigin('https://other.example.com')).toBe(false);
+  });
+});
+
+describe('isAllowedHost', () => {
+  it('allows loopback hosts (with or without port)', () => {
+    expect(isAllowedHost('localhost:4100')).toBe(true);
+    expect(isAllowedHost('localhost')).toBe(true);
+    expect(isAllowedHost('127.0.0.1:4100')).toBe(true);
+    expect(isAllowedHost('[::1]:4100')).toBe(true);
+  });
+
+  it('rejects a rebound / arbitrary host', () => {
+    expect(isAllowedHost('evil.com')).toBe(false);
+    expect(isAllowedHost('evil.com:4100')).toBe(false);
+    expect(isAllowedHost('attacker.localhost.evil.com:4100')).toBe(false);
+    expect(isAllowedHost(undefined)).toBe(false);
+  });
+
+  it('allows operator-configured origin hosts', () => {
+    process.env.CODEV_TOWER_ALLOWED_ORIGINS = 'https://tunnel.example.com';
+    expect(isAllowedHost('tunnel.example.com')).toBe(true);
+    expect(isAllowedHost('tunnel.example.com:443')).toBe(true);
+    expect(isAllowedHost('other.example.com')).toBe(false);
+  });
+});
+
+describe('isRequestAllowed Host guard', () => {
+  it('rejects even a public route when the Host is not allowed (DNS-rebinding guard)', () => {
+    expect(isRequestAllowed(req('GET', '/health', { host: 'evil.com' }))).toBe(false);
+  });
+
+  it('rejects a keyed request with a valid key but a bad Host', () => {
+    expect(isRequestAllowed(req('POST', '/api/terminals', { host: 'evil.com', 'codev-web-key': TEST_KEY }))).toBe(false);
   });
 });
 
