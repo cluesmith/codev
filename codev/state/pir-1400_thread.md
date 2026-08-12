@@ -15,11 +15,12 @@ Issue #1400. Deck half of phase-aware review; bridge (#1401 `sendCanvasCommand`)
 - `sendCanvasCommand(command, {workspace, file?}, {count?})` lives on `TowerClient` (tower-client.ts:986),
   reachable via `store.client`. Never rejects; returns `CanvasCommandClientResult` with a closed
   error union (`no-canvas` | `invalid-request` | `unreachable`). `count` valid only on the 8 traversal verbs.
-- **Targeting decision (the one open design question):** `OverviewBuilder` carries `worktreePath` but
-  NO artifact path. File-qualified targeting would need an additive wire field. Workspace-MRU (omit
-  `file`) converges because #1404's press opens the selected builder's artifact → makes it MRU.
-  Recommending **MRU for v1** (no wire/bridge change, honors req 7), file-qualified deferred behind a
-  future `OverviewBuilder` artifact-path field (one-line deck change when it lands).
+- **Targeting DECIDED (2026-08-12, architect + main):** workspace-MRU for v1 (omit `file`).
+  `OverviewBuilder` carries `worktreePath` only — file-qualified genuinely needs an additive
+  Tower-computed wire field, out of scope. Model: phase picks the dial MODE; dials drive the MRU
+  canvas (what you see); #1404's press converges MRU onto the selected builder's artifact.
+  File-qualified recorded as the additive upgrade path (future `OverviewBuilder.specPath`/`.planPath`
+  through main's sphere, one-line deck change) — NOT a v1 alternative. Folded into plan §5.
 - Canvas view registration (`canvas-view-registry.ts`) keys on host workspace + abs file path; the
   reviewer opens artifacts in their main window, registered under the selected workspace → matches
   the deck's `selectedWorkspacePath()`. Convergence holds.

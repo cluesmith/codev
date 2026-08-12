@@ -121,31 +121,25 @@ cleared on the next success/overview tick:
 Implemented as a per-instance `status?: string` on the dial; `renderTo` renders it as the `value`
 line for one cycle when set. Keeps the "always legible" invariant even on failure.
 
-### 5. Targeting: workspace-MRU for v1 (the open design decision)
+### 5. Targeting: workspace-MRU (decided)
 
-`sendCanvasCommand` supports two targeting modes and the bridge already supports both (req 7). The
-choice is which the deck uses:
+**Decided (2026-08-12, issue comment): the deck uses workspace-MRU targeting — `sendCanvasCommand`
+with `file` omitted.** The decision was co-signed by the streamdeck architect (this lane) and main as
+the codev-types wire-contract stakeholder, after verifying `OverviewBuilder` carries `worktreePath`
+only. Requirement 3's file-qualified preference is superseded; MRU (its recorded fallback) is the v1
+behavior. This section records the settled model, not a tradeoff.
 
-- **Workspace-MRU (omit `file`)** — "drive the most-recently-active canvas in this workspace."
-- **File-qualified (pass `file`)** — pin to the selected builder's artifact path.
+**The model:** the selected builder's phase picks the dial **mode** (diff vs canvas); the dials then
+drive the **MRU canvas — the artifact you are looking at**. These converge in the real workflow:
+#1404's press opens and focuses the selected builder's artifact (`open-spec`/`open-plan`), making it
+the MRU view, so "drive the MRU" *is* "drive the selected builder's artifact." Concretely, every
+canvas gesture targets `{ workspace: selectedWorkspacePath() }` with no `file`.
 
-**Decision: ship workspace-MRU (omit `file`) in v1.** Rationale:
-
-1. **No wire change.** File-qualification needs the deck to *know* the artifact's absolute path.
-   `OverviewBuilder` does not carry it (only `worktreePath`), and the path is non-trivial to derive:
-   `viewSpecFile`/`viewPlanFile` scan `<worktree>/codev/{specs,plans}/` for `<id>-*.md` and may hit a
-   2+ quick-pick. Reproducing that on the deck is fragile; doing it right means an additive
-   `OverviewBuilder` field computed Tower-side — a wire/API change this issue scopes out.
-2. **Convergence is real.** #1404's press (the shared-cursor selector) opens the selected builder's
-   artifact via `open-spec`/`open-plan`, which registers/focuses that canvas → it becomes the MRU
-   view. So "drive the MRU" *is* "drive the selected builder's artifact" for the actual workflow
-   (press builder key → dials drive it). The issue itself notes "in practice they converge."
-3. **Reversible and cheap to upgrade.** If hardware testing shows MRU drifting (reviewer opens an
-   unrelated canvas after selecting), the fix is additive: a future `OverviewBuilder.specPath` /
-   `.planPath` field + passing `file` — a one-line deck change, no redesign.
-
-File-qualified is documented as the deferred upgrade. I'll flag this explicitly for the
-plan-approval reviewer since it is the deliberate open call.
+**Upgrade path (additive, preserved, not a v1 alternative):** file-qualified targeting stays
+available as a future enhancement — an additive `OverviewBuilder.specPath` / `.planPath` field
+(Tower-computed, specced with main when pursued) plus passing `file` on the deck's `sendCanvasCommand`
+call. That is a one-line deck change with no redesign; it is out of this issue's scope because the
+wire field is.
 
 ### 6. Deferred (spec-time calls resolved here)
 
@@ -189,9 +183,10 @@ plan-approval reviewer since it is the deliberate open call.
 ## Risks & Alternatives Considered
 
 - **Risk: MRU drives the wrong canvas** if the reviewer opens an unrelated canvas after selecting a
-  builder. Mitigation: the workflow is press-builder-key-then-dial (press opens the artifact →
-  MRU); the `no-canvas` feedback covers "nothing open"; file-qualified is the documented additive
-  upgrade if hardware testing shows drift.
+  builder. This is accepted and by design: the dials drive the canvas you are looking at. The
+  press-builder-key-then-dial workflow (press opens the artifact → MRU) is the intended path, and
+  the `no-canvas` feedback covers "nothing open." The additive file-qualified upgrade (§5) remains
+  available if a future need arises.
 - **Risk: mode flips mid-gesture** as a phase transitions between a rotate and a press. Low blast
   radius — each gesture reads `reviewMode` freshly and fires one self-contained command; a stale
   read at worst sends one command to the other channel, which the receiver handles (or answers
@@ -199,9 +194,6 @@ plan-approval reviewer since it is the deliberate open call.
 - **Alternative: separate new canvas dial actions** (new manifest UUIDs on reserved keys). Rejected
   — that is the superseded reserved-headroom layout the issue explicitly replaces; it would reopen
   the eight-key conflict on #1410 and add layout the issue says is no longer needed.
-- **Alternative: file-qualified targeting now.** Rejected for v1 — needs an additive wire field
-  (out of scope) or fragile deck-side path derivation; convergence via #1404's press makes MRU
-  sufficient. Kept as the documented upgrade path.
 - **Alternative: burst N single-tick canvas commands per rotate.** Rejected per architect directive
   — one `sendCanvasCommand` with `count = ticks` per rotate event.
 
