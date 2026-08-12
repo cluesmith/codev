@@ -244,3 +244,27 @@ Human live-verify needed for: dashboard load + WS terminal attach (direct
 (text/image/video/pdf via authenticated blobs + vendored 3D viewer), LAN/bridge
 access, tunnel terminals, and a no/wrong-key 401 path.
 
+
+## dev-approval — BOOT REGRESSION found + fixed (2026-08-12)
+
+Human tried the build via local-install: Tower failed to start ("failed to
+respond within 30000ms", zero log lines = crash at module load before the
+logger). Diagnosed from tower.log + reproduced against the built/deployed tree.
+
+ROOT CAUSE (a ship-blocker my change introduced): `@cluesmith/codev-types` was a
+**devDependency** of packages/codev — fine while codev only `import type`'d it
+(erased at build). This lane added the FIRST runtime (value) import of it in the
+server (WEB_KEY_HEADER / WS_* wire constants), so the installed/published build
+tries to load codev-types at boot, but devDeps aren't installed for a consumer
+artifact -> `Cannot find module '@cluesmith/codev-types'` -> boot crash. Would
+have broken the published v3.3.0 release too, not just local-install.
+
+FIX: moved @cluesmith/codev-types from devDependencies to dependencies in
+packages/codev/package.json (+ pnpm-lock.yaml). Proven with `pnpm deploy --prod
+--legacy` (resolves only real deps, like a published install): codev-types/core/
+sdk now present and the deployed server-utils.js loads without the crash.
+
+LESSON (build+test did NOT catch this — monorepo symlinks resolve everything;
+only the packaged artifact crashes). Saved to memory. Verified all runtime
+@cluesmith value-imports in packages/codev are now in dependencies (core, sdk,
+types). Commit f0f4afe2a.
