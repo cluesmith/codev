@@ -76,6 +76,22 @@ describe('wireCommandProvider', () => {
     expect(vscode.commands.executeCommand).toHaveBeenCalledWith('codev.openBuilderDiffFirstFile', 'pir-1414');
   });
 
+  it('maps the mode-neutral feedback verbs + send-queue to their commands (#1410)', async () => {
+    const { mgr, fire } = makeConnMgr();
+    wireCommandProvider(mgr as never);
+
+    fire('command', { verb: 'feedback-file', args: [] });
+    fire('command', { verb: 'feedback-hunk', args: [] });
+    fire('command', { verb: 'feedback-selection', args: [] });
+    fire('command', { verb: 'send-queue', args: ['pir-1'] });
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(vscode.commands.executeCommand).toHaveBeenCalledWith('codev.feedbackCurrentFileToBuilder');
+    expect(vscode.commands.executeCommand).toHaveBeenCalledWith('codev.feedbackCurrentHunkToBuilder');
+    expect(vscode.commands.executeCommand).toHaveBeenCalledWith('codev.feedbackSelectionToBuilder');
+    expect(vscode.commands.executeCommand).toHaveBeenCalledWith('codev.submitReview', 'pir-1');
+  });
+
   it('ignores a verb that is not in the provider map (the allowlist)', async () => {
     const { mgr, fire } = makeConnMgr();
     wireCommandProvider(mgr as never);

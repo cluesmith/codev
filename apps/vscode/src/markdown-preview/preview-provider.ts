@@ -40,6 +40,7 @@ import { renderMarkdownPreviewHtml } from './preview-template.js';
 import type { HostToWebviewMessage, WebviewToHostMessage } from './messages.js';
 import type { ConnectionManager } from '../connection-manager.js';
 import { registerCanvasView } from './canvas-view-registry.js';
+import { builderIdForWorktreeFile } from './canvas-owner.js';
 import { fireActivity } from '../activity-hooks.js';
 import type { OverviewCache } from '../views/overview-data.js';
 
@@ -97,11 +98,7 @@ export class MarkdownPreviewProvider implements vscode.CustomTextEditorProvider,
    * one whose `worktreePath` is a path prefix of the file (#1410).
    */
   private builderIdForCanvasFile(file: string): string | undefined {
-    const builders = this.overviewCache.getData()?.builders ?? [];
-    const match = builders.find(
-      b => !!b.worktreePath && (file === b.worktreePath || file.startsWith(b.worktreePath + path.sep)),
-    );
-    return match?.id;
+    return builderIdForWorktreeFile(this.overviewCache.getData()?.builders ?? [], file, path.sep);
   }
 
   public resolveCustomTextEditor(
