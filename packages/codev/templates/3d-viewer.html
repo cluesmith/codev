@@ -218,12 +218,18 @@
     </div>
   </div>
 
-  <!-- Three.js ES Modules via import map -->
+  <!-- Three.js ES Modules — vendored locally (three@0.160.0), served same-origin
+       from the annotator's vendor/ route. NO remote code runs in this page: it is
+       key-injected (advisory GHSA-xvjp-7748-v88v), so loading executable modules
+       from a CDN would expose window.__CODEV_WEB_KEY__ to that CDN. -->
   <script type="importmap">
   {
     "imports": {
-      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+      "three": "vendor/three.module.js",
+      "three/addons/loaders/STLLoader.js": "vendor/three-STLLoader.js",
+      "three/addons/loaders/3MFLoader.js": "vendor/three-3MFLoader.js",
+      "three/addons/controls/TrackballControls.js": "vendor/three-TrackballControls.js",
+      "fflate": "vendor/three-fflate.module.js"
     }
   }
   </script>

@@ -602,12 +602,15 @@
         if (typeof el.onerror === 'function') el.onerror();
       }
     }
-    window.addEventListener('beforeunload', function() {
+    function revokeAllMediaUrls() {
       ['image-display', 'video-display', 'pdf-display'].forEach(function(id) {
         const el = document.getElementById(id);
         if (el && el.__objUrl) URL.revokeObjectURL(el.__objUrl);
       });
-    });
+    }
+    // pagehide fires on mobile / bfcache navigations where beforeunload does not.
+    window.addEventListener('pagehide', revokeAllMediaUrls);
+    window.addEventListener('beforeunload', revokeAllMediaUrls);
 
     // State
     let fileLines = [];

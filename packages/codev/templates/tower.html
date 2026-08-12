@@ -1010,13 +1010,19 @@
 
     // Auth helper: make authenticated fetch request
     async function authFetch(url, options = {}) {
+      const hadKey = !!getWebKey();
       const headers = { ...getAuthHeaders(), ...(options.headers || {}) };
       const response = await fetch(url, { ...options, headers });
 
-      // If 401, clear key and redirect to login
+      // If 401, clear a now-stale key. Only reload when we actually sent a key:
+      // a reload re-fetches the shell and picks up a freshly injected key. With
+      // no key to begin with, the shell has none to inject, so reloading would
+      // loop forever (advisory GHSA-xvjp-7748-v88v) — surface the error instead.
       if (response.status === 401) {
         localStorage.removeItem('codev-web-key');
-        location.reload();
+        if (hadKey) {
+          location.reload();
+        }
         throw new Error('Unauthorized');
       }
       return response;
