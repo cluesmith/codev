@@ -4,6 +4,7 @@ export {
   WEB_KEY_HEADER,
   WS_MARKER_PROTOCOL,
   WS_KEY_PROTOCOL_PREFIX,
+  terminalWsProtocols,
   type ControlMessage,
   type DecodedFrame,
 } from './websocket.js';

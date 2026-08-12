@@ -24,6 +24,22 @@ export const WEB_KEY_HEADER = 'codev-web-key';
 export const WS_MARKER_PROTOCOL = 'codev.tower.v1';
 export const WS_KEY_PROTOCOL_PREFIX = 'codev-key.';
 
+/**
+ * Build the `Sec-WebSocket-Protocol` list for a Tower terminal WebSocket: the
+ * non-secret marker the server echoes back on the handshake, plus a
+ * `codev-key.<key>` token the server validates at the upgrade and never echoes.
+ * Returns `undefined` when there is no key (the caller offers no subprotocol).
+ *
+ * Lives here — beside the wire constants, in the contract package both server
+ * and every client import — so the subprotocol shape has a single source of
+ * truth shared by the two terminal-WS clients (the VS Code node-`ws` adapter and
+ * the browser dashboard). It cannot live in the sdk: the sdk forbids runtime use
+ * of these constants (codev-types is `import type`-only there, zero runtime deps).
+ */
+export function terminalWsProtocols(authKey: string | null | undefined): string[] | undefined {
+  return authKey ? [WS_MARKER_PROTOCOL, `${WS_KEY_PROTOCOL_PREFIX}${authKey}`] : undefined;
+}
+
 export interface ControlMessage {
   type: 'resize' | 'ping' | 'pong' | 'pause' | 'resume' | 'error' | 'seq';
   payload: Record<string, unknown>;
