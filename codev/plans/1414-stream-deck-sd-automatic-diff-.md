@@ -60,16 +60,20 @@ the architect to file a separate issue rather than expand this one.
    optional explicit seed and add a builder-scoped entry point:
    - Change the signature to
      `resolveDiffContext(deps: NavDeps, seed?: { builderId: string; relPath?: string })`.
-     When `seed` is provided, use it as `current` (bypassing the active-editor /
-     `lastPosition` resolution); otherwise keep today's behavior exactly. `relPath`
-     is optional because "first file" does not need a current position — step 3's
-     worktree resolution + ordered-file load and all the existing flashes ("no
-     worktree on record", "no changed files to navigate") are reused unchanged.
+     When `seed` is provided it replaces **only step 1** (the active-editor /
+     `lastPosition` resolution); **steps 2 and 3 still run** — worktree resolution
+     and the ordered-file load — so their existing user-visible flashes
+     ("no worktree on record for X", "no changed files to navigate") fire on the
+     seeded path exactly as on the editor-context path. Nothing about the seed turns
+     an empty/absent case into a silent no-op or a throw; the defined outcome is the
+     status-bar flash. `relPath` is optional because "first file" does not need a
+     current position.
    - Add `export async function navigateBuilderDiffToFirst(builderId: string | undefined, deps: NavDeps)`:
-     flash and return if `builderId` is falsy; else
-     `resolveDiffContext(deps, { builderId })` and `openDiffAt(deps, ctx, 0)`.
-     `openDiffAt` already calls `recordDiffNavPosition`, so `lastPosition` is seeded
-     to file 1 and the dials step forward from there.
+     if `builderId` is falsy, `flash` a message and return (defined user-visible
+     outcome, never a silent bail); else `resolveDiffContext(deps, { builderId })`
+     and `openDiffAt(deps, ctx, 0)`. `openDiffAt` already calls
+     `recordDiffNavPosition`, so `lastPosition` is seeded to file 1 and the dials
+     step forward from there.
 
 2. **`apps/vscode/src/extension.ts`** — register the command, mirroring the
    `codev.viewDiff` registration (`extension.ts:1156`) for arg handling:
@@ -142,10 +146,19 @@ passthrough — "the verb allowlist + execution live provider-side").
 ## Test Plan
 
 **Unit (automated — run from the worktree):**
-- `diff-nav.test.ts`: with a seeded `{ builderId }` and a mocked overview + diff cache,
-  `navigateBuilderDiffToFirst` opens file index 0 via `openBuilderFileDiff` and records
-  the nav position (`peekDiffNavPosition` → file 1); a falsy builder id flashes and no-ops;
-  an unknown builder / empty file list no-ops without opening.
+- `diff-nav.test.ts` (mocks `vscode.window.setStatusBarMessage` so the flash is
+  observable, plus `openBuilderFileDiff` and the overview + diff cache deps):
+  - **Happy path:** a seeded `{ builderId }` on a builder with changed files opens file
+    index 0 via `openBuilderFileDiff` and records the nav position (`peekDiffNavPosition`
+    → file 1).
+  - **Empty diff (defined outcome, per main's review):** a seeded `open-diff-first` on a
+    builder with **zero changed files** fires the `"no changed files to navigate"` flash
+    (`setStatusBarMessage` called with that text) and does **not** call `openBuilderFileDiff`
+    — asserted as a positive flash, not just "no open".
+  - **No worktree (seeded path):** a seeded id whose builder has no worktree on record fires
+    the `"no worktree on record for <id>"` flash and opens nothing.
+  - **Falsy id:** `navigateBuilderDiffToFirst(undefined, …)` fires a flash and opens nothing
+    (no throw).
 - `command-relay.test.ts`: `open-diff-first` resolves to `codev.openBuilderDiffFirstFile`
   and forwards the builder-id arg; an unknown verb is still ignored.
 - `actions.test.ts`: a diff-phase builder's Automatic press sends `open-diff-first`
