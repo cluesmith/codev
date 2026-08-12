@@ -99,3 +99,19 @@ codev-types + codev-sdk workspace deps first — dist wasn't present in the work
 
 Codicon-style glyphs are drawn in-plugin (codicon font not vendored — keeps zero-dep bundle);
 legibility is the hardware-gate check. dev-approval is a hardware session → next.
+
+## Hardware gate finding #1 (2026-08-13): SVG not rendering → fixed
+
+Symptom on deck: Builder Action keys showed ONLY the static manifest PNG, no composite face.
+Diagnosis (verified against SDK source, not guessed): SDK's setImage forwards the string verbatim
+(key.js:51-59), so Stream Deck itself rejected our raw <svg>. setTitle('') HAD taken effect (text
+gone) → title layer not pinned → the failure was the image format, not a pinned custom image.
+Fix (both standard Stream Deck requirements, applied together to save a hardware round-trip):
+  1. Root <svg> now carries intrinsic width="72" height="72" (not just viewBox) — the rasterizer
+     drops sizeless SVGs.
+  2. setImage now gets a base64 data URI (svgToDataUri: data:image/svg+xml;base64,...) — the SDK's
+     documented "base64 encoded string with mime type declared"; raw <svg> strings are dropped by
+     the 6.x renderer.
+  Also switched font-family system-ui → sans-serif (generic the rasterizer resolves).
+check-types clean, 103/103 tests pass (added svgToDataUri round-trip + width/height tests), build ok.
+Lesson for review: Stream Deck setImage(SVG) needs a base64 svg+xml data URI + intrinsic w/h.
