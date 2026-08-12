@@ -1,5 +1,5 @@
 import type {
-  TowerClient,
+  ControllerClient,
   TowerWorkspace,
   OverviewData,
   OverviewBuilder,
@@ -19,12 +19,12 @@ import { initialCursor, rotate, descend, ascend, type CursorState, type LevelCou
  * testable without the SDK.
  */
 export interface CodevStoreOptions {
-  client: TowerClient;
+  client: ControllerClient;
   openUrl?: (url: string) => void | Promise<void>;
 }
 
 export class CodevStore {
-  readonly client: TowerClient;
+  readonly client: ControllerClient;
   readonly openUrl: (url: string) => void | Promise<void>;
 
   cursor: CursorState = initialCursor();
