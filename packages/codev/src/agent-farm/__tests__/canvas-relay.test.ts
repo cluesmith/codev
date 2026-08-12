@@ -166,6 +166,21 @@ describe('target resolution', () => {
     ]);
   });
 
+  // The context-aware composer command (#1420) must clear Tower's own allowlist and relay like any
+  // other member; without the entry in canvas-relay's CANVAS_COMMANDS it would 400 before the
+  // canvas ever saw it.
+  it('relays the context-aware composer command (#1420)', async () => {
+    const { viewId } = await registerCanonical('/tmp/doc.md');
+
+    const out = await sendCommand({ workspace: WS, command: 'composer-open-or-submit' });
+
+    expect(out.status).toBe(200);
+    expect(out.body.ok).toBe(true);
+    expect(broadcasts).toEqual([
+      { type: 'canvas-command', body: { viewId, command: 'composer-open-or-submit' } },
+    ]);
+  });
+
   it('delivers to exactly ONE view when several match, never fanning out', async () => {
     await register('/tmp/doc.md');
     const second = await register('/tmp/doc.md');
@@ -286,7 +301,7 @@ describe('command validation', () => {
   });
 
   it('rejects count on a non-traversal command', async () => {
-    for (const command of ['doc-start', 'composer-open', 'reading-mode-toggle']) {
+    for (const command of ['doc-start', 'composer-open', 'composer-open-or-submit', 'reading-mode-toggle']) {
       const out = await sendCommand({ workspace: WS, command, count: 2 });
       expect(out.status).toBe(400);
       expect(out.body.code).toBe('invalid-request');

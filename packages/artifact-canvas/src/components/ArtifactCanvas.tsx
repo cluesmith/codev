@@ -948,6 +948,22 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
     'composer-cancel': () => {
       if (composingLine !== null) cancelComposer(true);
     },
+    // Context-aware composer control (#1420): the canvas — the only party that knows whether a
+    // composer is open — decides, so a stateless controller can drive open-then-submit from one
+    // gesture. Closed → open at the focused block; open → submit the current draft. Submit trims
+    // and no-ops on an empty body (CommentComposer.submit), so this never writes an empty comment
+    // and never re-anchors/discards the draft. Reads `composingLine` like `composer-cancel`; the
+    // action map is rebuilt each render, so the read is current.
+    'composer-open-or-submit': ({ originLine }) => {
+      if (composingLine !== null) {
+        composerHandleRef.current?.submit();
+        return;
+      }
+      if (originLine === null) return;
+      const line = Number(originLine);
+      if (Number.isNaN(line)) return;
+      openComposer(line);
+    },
     'reading-mode-toggle': () => toggleReadingMode(),
   };
 

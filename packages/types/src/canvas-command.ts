@@ -25,6 +25,13 @@
  * Tab parity, which also visits affordances, card actions, toolbar controls and links), and
  * `reading-mode-toggle` mirrors the reading-mode toolbar button.
  *
+ * One member is context-aware rather than mirroring a single in-page action: `composer-open-or-submit`
+ * (#1420) resolves canvas-side against the view's composer state — no composer open means open one at
+ * the focused block, an open composer means submit it. It exists so a stateless controller (a control
+ * device that never learns composer state back) can drive open-then-submit from one gesture without
+ * guessing, which — if wrong — would re-anchor the composer and discard an in-progress draft. The
+ * canvas makes the call, so it is always correct; an empty draft stays the composer's own no-op.
+ *
  * Text entry is out of scope: comment bodies are typed on the keyboard.
  */
 export type CanvasCommand =
@@ -45,6 +52,8 @@ export type CanvasCommand =
   | 'composer-open'
   | 'composer-submit'
   | 'composer-cancel'
+  // Composer, context-aware: open when none is open, else submit (#1420).
+  | 'composer-open-or-submit'
   // View state.
   | 'reading-mode-toggle';
 

@@ -1,0 +1,30 @@
+id: '1420'
+title: stream-deck-hands-free-comment
+protocol: pir
+phase: verified
+plan_phases: []
+current_plan_phase: null
+gates:
+  plan-approval:
+    status: approved
+    requested_at: '2026-08-12T08:49:35.815Z'
+    approved_at: '2026-08-12T08:51:11.352Z'
+  dev-approval:
+    status: approved
+    requested_at: '2026-08-12T08:59:54.442Z'
+    approved_at: '2026-08-12T09:50:03.471Z'
+  pr:
+    status: approved
+    requested_at: '2026-08-12T09:55:56.026Z'
+    approved_at: '2026-08-12T10:01:56.479Z'
+iteration: 1
+build_complete: true
+history: []
+started_at: '2026-08-12T08:46:00.888Z'
+updated_at: '2026-08-12T10:02:10.868Z'
+pr_history:
+  - phase: review
+    pr_number: 1424
+    branch: builder/pir-1420
+    created_at: '2026-08-12T09:52:06.220Z'
+pr_ready_for_human: false

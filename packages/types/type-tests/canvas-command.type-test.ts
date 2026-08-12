@@ -48,6 +48,7 @@ const CLASSIFICATION = {
   'composer-open': 'non-traversal',
   'composer-submit': 'non-traversal',
   'composer-cancel': 'non-traversal',
+  'composer-open-or-submit': 'non-traversal',
   'reading-mode-toggle': 'non-traversal',
 } as const satisfies Record<CanvasCommand, 'traversal' | 'non-traversal'>;
 
