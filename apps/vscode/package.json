@@ -1042,6 +1042,16 @@
           "default": "editor",
           "description": "Where to open Codev terminals (editor area or bottom panel)"
         },
+        "codev.terminalLinks.issueTarget": {
+          "type": "string",
+          "enum": ["editor", "browser"],
+          "enumDescriptions": [
+            "Open issue references (#N) in the in-editor issue viewer.",
+            "Open issue references (#N) in your browser."
+          ],
+          "default": "editor",
+          "markdownDescription": "Where Cmd+clicking an issue reference (`#N`) in a terminal opens it. Pull-request references (`PR #N`) always open in the browser (there is no in-editor PR preview)."
+        },
         "codev.diffCodelensMode": {
           "type": "string",
           "enum": ["comment", "forward"],

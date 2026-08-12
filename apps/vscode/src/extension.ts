@@ -43,7 +43,7 @@ import { submitReview, discardReviewComments } from './review-queue/submit.js';
 import { activateSubmitReviewStatusBar } from './review-queue/status-bar.js';
 import { MarkdownPreviewProvider } from './markdown-preview/preview-provider.js';
 import { BuilderSpawnHandler } from './builder-spawn-handler.js';
-import { BuilderTerminalLinkProvider, ReconnectTerminalLinkProvider } from './terminal-link-provider.js';
+import { BuilderTerminalLinkProvider, ReconnectTerminalLinkProvider, IssueRefTerminalLinkProvider } from './terminal-link-provider.js';
 import { computeBuildersToClose, roleIdsFromBuilders } from './prune-builder-terminals.js';
 import { buildBuilderPickRows } from './builder-pick-rows.js';
 import { readBuildersFileViewAsTree } from './builders-config.js';
@@ -1446,6 +1446,13 @@ export async function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(
 		vscode.window.registerTerminalLinkProvider(
 			new ReconnectTerminalLinkProvider(terminalManager),
+		),
+	);
+
+	// Make #N / PR #N references clickable in any terminal output (#1412)
+	context.subscriptions.push(
+		vscode.window.registerTerminalLinkProvider(
+			new IssueRefTerminalLinkProvider(connectionManager),
 		),
 	);
 
