@@ -137,6 +137,42 @@ Security-sensitive spots worth focused attention:
 - **Constant-time compare** — length-guarded before `timingSafeEqual`; fail-closed when the key is
   unavailable.
 
+### 3-Way Consultation Dispositions (single advisory pass)
+
+Verdicts: **Gemini APPROVE**, **Claude COMMENT**, **Codex REQUEST_CHANGES**. PIR runs one advisory
+pass and will not re-review, so each finding is dispositioned here for the `pr`-gate reviewer:
+
+- **Missing BRIDGE_MODE/TLS + `CODEV_TOWER_ALLOWED_ORIGINS` docs** (Codex + Claude) — **Fixed.**
+  Documented in `codev/resources/commands/agent-farm.md` under `afx tower start`: the mandatory
+  bridge-mode auth, the cleartext-key/TLS-termination requirement, and the new
+  `CODEV_TOWER_ALLOWED_ORIGINS` knob (Host + CORS allowlist for hostname clients).
+- **WS marker-echo + vscode-subprotocol test gaps** (Codex) — **Fixed.** Extracted the echo rule to
+  a testable `selectWsSubprotocol` (asserts it echoes the marker and never the key token) and added
+  a vscode test asserting the WS is opened with `[marker, codev-key.<key>]` (and none without a key).
+- **Header renamed `codev-web-key` → `codev-tower-key` + dual-accept, vs the plan's "one header"**
+  (Codex) — **Reasoned deviation, not a defect.** This was an explicit post-plan decision by the
+  human reviewer at the dev-approval gate: the Stream Deck plugin lives out-of-tree and bundles an
+  older sdk, so a hard cutover would break it; the server dual-accepts the legacy header for one
+  release. Disclosed above; Claude concurred the justification is sound.
+- **CORS uses `CODEV_TOWER_ALLOWED_ORIGINS` instead of "the single tunnel origin from Tower config"**
+  (Codex) — **Reasoned substitution, now documented.** The tunnel subsystem exposes no clean
+  synchronous origin; the env var is an **exact-match** allowlist (not a wildcard), empty/secure by
+  default. CORS is defense-in-depth; the key check is the control. (Doc gap fixed above.)
+- **`BRIDGE_MODE` doesn't fail when the key file is absent (it creates it)** (Codex) — **By design,
+  not a hole.** Tower owns key generation, so bridge mode always boots *with* enforced auth (a
+  random key) rather than refusing to start; the fail-closed path triggers when the key genuinely
+  cannot be obtained (unwritable `~/.agent-farm` → `getExpectedKey()` returns null → boot exits).
+  The fail-closed auth behavior on a null key is unit-tested (`getExpectedKey` + `isRequestAllowed`);
+  the boot-time `process.exit` itself runs at module load and isn't unit-tested.
+- **`escapeHtml` renders `&#39;`/`&quot;` literally for quoted paths in `<script>` string contexts**
+  (Codex + Claude) — **Cosmetic, no security impact.** HTML-escaping blocks the `<`/quote breakout
+  in every context; the entity-rendering only affects display for pathological filenames.
+- **Dual-accept removal tracked only as a code comment** (Claude) — flagged for the architect to
+  file a follow-up issue (drop the `codev-web-key` fallback next release); noted here so it isn't
+  lost past the one-release window.
+- **e2e WS suites still open keyless sockets** (Claude, disclosed) — fast-follow; WS auth is covered
+  by the in-PR unit/integration tests.
+
 ## How to Test Locally
 
 For reviewers pulling the branch:

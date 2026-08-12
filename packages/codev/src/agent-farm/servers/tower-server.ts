@@ -63,8 +63,7 @@ import { setCodevConfigNotifier, stopAllCodevConfigWatchers } from './codev-conf
 import { getGlobalDb } from '../db/index.js';
 import { runBootConsolidation } from '../db/consolidate.js';
 import { DEFAULT_TOWER_PORT, AGENT_FARM_DIR } from '../lib/tower-client.js';
-import { validateHost, getExpectedKey } from '../utils/server-utils.js';
-import { WS_MARKER_PROTOCOL } from '@cluesmith/codev-types';
+import { validateHost, getExpectedKey, selectWsSubprotocol } from '../utils/server-utils.js';
 import { version } from '../../version.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -761,8 +760,7 @@ async function bootSequence(): Promise<void> {
 // offers is validated at the upgrade and never echoed.
 terminalWss = new WebSocketServer({
   noServer: true,
-  handleProtocols: (protocols: Set<string>) =>
-    (protocols.has(WS_MARKER_PROTOCOL) ? WS_MARKER_PROTOCOL : false),
+  handleProtocols: (protocols: Set<string>) => selectWsSubprotocol(protocols),
 });
 
 // Spec 0105 Phase 5: WebSocket upgrade handler extracted to tower-websocket.ts

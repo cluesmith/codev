@@ -24,6 +24,7 @@ import {
   isAllowedHost,
   isRequestAllowed,
   isWebSocketAllowed,
+  selectWsSubprotocol,
   getExpectedKey,
   resetExpectedKeyCache,
 } from '../utils/server-utils.js';
@@ -229,6 +230,23 @@ describe('isRequestAllowed', () => {
     });
     resetExpectedKeyCache();
     expect(isRequestAllowed(req('POST', '/api/terminals', { 'codev-tower-key': TEST_KEY }))).toBe(false);
+  });
+});
+
+describe('selectWsSubprotocol (marker echo)', () => {
+  const marker = WS_MARKER_PROTOCOL;
+  const tokenFor = (key: string) => `${WS_KEY_PROTOCOL_PREFIX}${key}`;
+
+  it('echoes the marker when offered, and NEVER the key token', () => {
+    const offered = new Set([marker, tokenFor(TEST_KEY)]);
+    const selected = selectWsSubprotocol(offered);
+    expect(selected).toBe(marker);
+    expect(selected).not.toContain(WS_KEY_PROTOCOL_PREFIX); // the secret is never echoed
+  });
+
+  it('selects nothing when the marker is absent', () => {
+    expect(selectWsSubprotocol(new Set([tokenFor(TEST_KEY)]))).toBe(false);
+    expect(selectWsSubprotocol(new Set())).toBe(false);
   });
 });
 

@@ -41,7 +41,7 @@ vi.mock('ws', () => {
     closed = false;
     sent: unknown[] = [];
     private handlers: Record<string, Array<(...args: unknown[]) => void>> = {};
-    constructor(public url: string) { FakeWebSocket.instances.push(this); }
+    constructor(public url: string, public protocols?: string | string[]) { FakeWebSocket.instances.push(this); }
     on(event: string, cb: (...args: unknown[]) => void): this {
       (this.handlers[event] ||= []).push(cb);
       return this;
@@ -132,10 +132,31 @@ function makeAdapter() {
   return { pty, writes };
 }
 
+/** Build an adapter with an explicit auth key (default makeAdapter uses null). */
+function makeAdapterWithKey(authKey: string | null) {
+  const pty = new (CodevPseudoterminal as unknown as new (
+    url: string, authKey: string | null, ch: unknown,
+  ) => { open(d: unknown): void }) ('ws://localhost:4100/x', authKey, fakeOutputChannel());
+  pty.open(undefined);
+  return WebSocket.instances[WebSocket.instances.length - 1] as unknown as { protocols?: string | string[] };
+}
+
 beforeEach(() => {
   vi.useFakeTimers();
   WebSocket.instances.length = 0;
   hoisted.escapeBufferCount = 0;
+});
+
+describe('WS subprotocol auth (advisory GHSA-xvjp-7748-v88v)', () => {
+  it('offers the marker + codev-key token when an auth key is present', () => {
+    const sock = makeAdapterWithKey('SECRETKEY');
+    expect(sock.protocols).toEqual(['codev.tower.v1', 'codev-key.SECRETKEY']);
+  });
+
+  it('offers no subprotocol when there is no auth key', () => {
+    const sock = makeAdapterWithKey(null);
+    expect(sock.protocols).toBeUndefined();
+  });
 });
 
 describe('PIR #936 — adapter-owned reconnect loop', () => {

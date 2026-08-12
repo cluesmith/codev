@@ -7,7 +7,7 @@
 import type * as http from 'node:http';
 import { timingSafeEqual } from 'node:crypto';
 import { ensureLocalKey } from '@cluesmith/codev-core/auth';
-import { TOWER_KEY_HEADER, LEGACY_WEB_KEY_HEADER, WS_KEY_PROTOCOL_PREFIX } from '@cluesmith/codev-types';
+import { TOWER_KEY_HEADER, LEGACY_WEB_KEY_HEADER, WS_MARKER_PROTOCOL, WS_KEY_PROTOCOL_PREFIX } from '@cluesmith/codev-types';
 
 /**
  * HTML-escape a string to prevent XSS
@@ -328,6 +328,17 @@ function presentedWsKey(req: http.IncomingMessage): string | null {
     }
   }
   return null;
+}
+
+/**
+ * The subprotocol the server echoes back on a terminal WebSocket handshake:
+ * the non-secret marker if the client offered it, else none. NEVER echoes the
+ * `codev-key.<key>` token — echoing it would leak the key into a response
+ * header. Used as the `ws` server's `handleProtocols` (advisory
+ * GHSA-xvjp-7748-v88v). Exported so the echo contract is unit-testable.
+ */
+export function selectWsSubprotocol(offered: Set<string>): string | false {
+  return offered.has(WS_MARKER_PROTOCOL) ? WS_MARKER_PROTOCOL : false;
 }
 
 /**

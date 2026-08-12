@@ -897,6 +897,9 @@ afx tower start [options]
 **Environment Variables:**
 - `BRIDGE_MODE=1` — Enable non-localhost binding (required). Without this flag, Tower only binds to `127.0.0.1`.
 - `BRIDGE_TOWER_HOST` — Bind address when bridge mode is enabled (default: `127.0.0.1`). Only consulted when `BRIDGE_MODE=1`. Set to `0.0.0.0` for all network interfaces. Accepts IP literals only (no hostnames). Note: `BRIDGE_TOWER_HOST` has no effect unless `BRIDGE_MODE=1`.
+- `CODEV_TOWER_ALLOWED_ORIGINS` — Comma-separated list of extra origins (e.g. `https://tunnel.example.com`) that Tower's request-authentication layer accepts for **both** the `Host` guard and CORS. Loopback (`localhost`/`127.0.0.1`/`::1`) is always allowed, and under `BRIDGE_MODE` any IP-literal `Host` is accepted (a LAN client reaches Tower by IP). Set this only when clients reach Tower by a **hostname** (a tunnel/proxy domain, a custom `.local` name); otherwise those requests are rejected with `401` and a `disallowed Host` log line. DNS names not on this list stay rejected even under `BRIDGE_MODE` (the DNS-rebinding guard).
+
+**Authentication & `BRIDGE_MODE` (advisory GHSA-xvjp-7748-v88v):** Tower's local API enforces request authentication with a shared key (`~/.agent-farm/local-key`). Under `BRIDGE_MODE`, enforcement is **mandatory** — Tower refuses to start on a network-reachable bind if the key cannot be created. Because a non-localhost bind serves plain HTTP, **the shared key travels in cleartext on the wire unless TLS terminates at your tunnel/proxy** — always front a bridge-mode Tower with TLS (e.g. the tunnel's HTTPS endpoint), never expose plain `http://<lan-ip>:4100` on an untrusted network.
 
 #### afx tower stop
 
