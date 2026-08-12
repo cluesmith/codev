@@ -36,7 +36,8 @@ are untouched.
 - `npm run build` (porch `build` check): ✓ pass (8.8s)
 - `npm test` (porch `tests` check): ✓ pass (29.7s)
 - Unit: vscode 812 tests / 68 files ✓; streamdeck 86 tests / 5 files ✓; both `check-types` clean. (Fresh worktree required `pnpm --filter @cluesmith/codev-types build` and `… codev-sdk build` before vitest — see lesson [From 936].)
-- Manual (hardware SD+, dev-approval gate): the human approved the gate. **A clean in-session hardware confirmation of the new first-file-diff open was NOT captured**: the physical deck was found still linked to a sibling worktree's bundle (`pir-1425`, via `streamdeck list`), so it kept firing the old `view-diff` and the aggregate opened. That was a link/load issue, not the code — this branch's built bundle contains `open-diff-first` and the verb-level behavior is covered by unit tests on both halves. See **Things to Look At** for the residual hardware check and the zoom-in follow-up.
+- Manual (hardware SD+): at the dev-approval gate the deck was found still linked to a sibling worktree's bundle (`pir-1425`, via `streamdeck list`), so it fired the old `view-diff` and the aggregate opened — a link/load issue, not the code. A subsequent **hardware re-check with both halves on-branch (deck bundle + this branch's extension) PASSED**: the Automatic press opens **file 1 in per-file mode** and the Files/Changes dials step from there. Amr authorized the merge on that confirmation.
+- **Verify-first question — ANSWERED.** With the *old* build (aggregate open), the dials **did** navigate afterward. So this issue is **polish (land on file 1 in per-file mode), not a broken-dial-flow fix**, and the touch-strip zoom-in path needs **no follow-up** — it already seeds the dials via the aggregate open.
 
 ## Architecture Updates
 
@@ -66,15 +67,12 @@ fired the pre-change verb even though this branch's bundle was built. The lesson
   a user-visible status-bar flash (never a silent no-op / throw) for zero-changed-files,
   no-worktree, and missing-id. The seed replaces only resolve step 1; steps 2–3 (and their
   flashes) still run. Each is pinned by a test in `diff-nav.test.ts`.
-- **Residual hardware verification (open).** A clean SD+ confirmation of the first-file open +
-  dial seeding was not captured in-session (deck pointed at pir-1425). Worth a quick hardware
-  re-check with the deck relinked to a branch build of both artifacts.
-- **The "verify-first" question is still open, and the zoom-in follow-up.** #1414 asked whether
-  the old aggregate press left the dials navigable. Because the in-session deck ran the old
-  bundle, this wasn't answered cleanly. Separately, the **Zoom Navigator touch-strip zoom-in**
-  (`zoomInVerb`, `actions.ts:337`) still opens the aggregate by design — out of scope here. If
-  the hardware re-check shows the dials need seeding there too, that's a follow-up issue for the
-  architect (flagged, not self-expanded).
+- **Hardware verification — DONE.** The residual SD+ re-check (both halves relinked to a branch
+  build) passed: Automatic press → first file in per-file mode, dials step from there.
+- **Verify-first — RESOLVED as polish, no follow-up.** With the old build the dials navigated
+  after the aggregate open, so this is a "land on file 1 in per-file mode" polish, not a
+  broken-dial-flow fix. The **Zoom Navigator touch-strip zoom-in** (`zoomInVerb`, `actions.ts:337`)
+  keeps opening the aggregate by design and needs no change — no follow-up issue is warranted.
 
 ## How to Test Locally
 

@@ -76,3 +76,21 @@ streamdeck link serves stale behavior). Advanced to review.
 Wrote codev/reviews/1414-...md (Summary/Files/Commits/Tests/Arch=no HOT/Lessons=1 COLD/Things
 to look at incl. residual hardware check + zoom-in follow-up/How to test). Opening PR, recording
 with porch, then porch done → single 3-way consult → pr gate.
+
+## pr gate (2026-08-12)
+
+PR #1429 open + recorded. 3-way consult all APPROVE (gemini/codex/claude, zero KEY_ISSUES).
+pr gate PENDING. Architect: DO NOT merge on CMAP alone — PR #1429 stays open until a short
+hardware re-check with BOTH halves on-branch (deck bundle AND the branch's vscode extension;
+with the OLD extension the new open-diff-first verb isn't in VERB_COMMANDS → press silently
+no-ops, worse than the aggregate). Architect arranging the re-check with Amr. Holding. Merge
+word comes AFTER hardware confirmation + porch gate_status: approved.
+
+## MERGE AUTHORIZED (2026-08-12)
+
+Hardware re-check PASSED (both halves on-branch): Automatic press → file 1 per-file mode,
+dials step from there. Amr authorized merge (relayed by architect). Verify-first ANSWERED: old
+build's dials DID navigate after aggregate open → polish, NOT broken-flow; NO zoom-in follow-up.
+Recorded in review. Running porch approve (human flag, per architect's explicit instruction) →
+gh pr merge 1429 --merge (report if review-required blocks; main admin-merges on authorized word).
+Do NOT clean worktree post-merge — live deck symlink now points into .builders/pir-1414.
