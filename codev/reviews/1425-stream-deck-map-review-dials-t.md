@@ -65,6 +65,11 @@ documented, so they stay in this review rather than in `lessons-learned.md`:
 
 ## Things to Look At During PR Review
 
+- **Consultation dispositions** (review-phase 3-way, iter 1): gemini APPROVE, claude APPROVE,
+  codex COMMENT. Codex flagged one stale source comment — the `ReviewNav` class doc still said
+  canvas presses "open the composer at the focused block," which no longer holds after the
+  per-dial remap. Fixed the comment to describe fine=open-or-submit / coarse=cancel (no
+  behavior change). No REQUEST_CHANGES from any reviewer.
 - **`renderTo` title composition** (`actions.ts`): canvas mode now emits
   `` `${label} · ${pressLabel}` ``; diff mode still emits the bare `diff.label`. Confirm the
   diff-mode path is untouched (the mode-transition test covers `Headings · Cancel` → `Files`).

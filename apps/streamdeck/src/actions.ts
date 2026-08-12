@@ -535,8 +535,9 @@ function canvasErrorLine(code: CanvasCommandClientErrorCode): string {
  *     the diff axis (files / hunks), press forwards that axis to the builder, tap
  *     jumps to the first — over the generic command relay.
  *   - canvas mode (specify / plan, or blocked at spec-approval / plan-approval): rotate
- *     steps the artifact-canvas (headings / blocks), press opens the composer at the
- *     focused block, tap resets (doc start) or walks comments — over `sendCanvasCommand`.
+ *     steps the artifact-canvas (headings / blocks), press drives the composer per dial
+ *     (fine: open-or-submit; coarse: cancel — #1425), tap resets (doc start) or walks
+ *     comments — over `sendCanvasCommand`.
  *
  * The dials drive the workspace's most-recently-active canvas (MRU targeting): the
  * phase picks the mode, the dials drive what you are looking at, and #1404's press
