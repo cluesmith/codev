@@ -40,3 +40,24 @@ Approved with two revisions, both applied:
 
 Rest approved as written (face.ts pure module, SVG non-overlap, canonical-id keying, setTitle('')).
 Recommitted; gate goes to Amr.
+
+## Plan revision 2 (2026-08-12) — scope expanded (owner-approved)
+
+Owner (Amr) approved widening scope after reviewing a mockup: adopt VS Code's Builders-sidebar
+TWO-AXIS model on the deck face.
+- Colour = state severity (blocked=warning yellow #cca700, waiting=info blue #3794ff [optional
+  fast-follow], active=green #73c991) — mirrors builder-row.ts BUILDER_STATE_GLYPH tokens.
+- Icon = gate (blocked): book/checklist/code/git-pull-request/verified, mirrors gateIconFor;
+  bolt otherwise. Codicon path data inlined (MIT), not a new dep.
+- Labels now SHORT (Spec/Plan/Dev/PR/Verify; phases Specify..Verified) — colour+icon carry the
+  blocked-vs-working distinction, so plan-approval (yellow checklist "Plan") ≠ plan phase (green
+  bolt "Plan") with no qualifier word. This resolves the label-collision worry Amr raised.
+
+Maps twinned in face.ts with sync-notes (apps can't cross-import; same pattern as overview.ts
+GATE_LABELS). Boundaries intact: only BuilderAction.renderTo changes; press/rotate + #1429
+resolveVerb untouched; no wire/types/server change.
+
+Flagged to architect: (1) scope expansion for cohort awareness (air-1411 also on streamdeck);
+(2) verify-approval press-path gap in phaseArtifactVerb (left untouched, out of scope).
+Mockup: https://claude.ai/code/artifact/450b5b24-66d2-42e3-8db2-992cc09eda18
+Recommitted; gate still plan-approval pending → Amr.
