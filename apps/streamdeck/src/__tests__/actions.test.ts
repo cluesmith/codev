@@ -640,6 +640,7 @@ describe('phaseArtifactVerb (shared resolver — recognised verb or undefined)',
     expect(phaseArtifactVerb(b({ protocolPhase: 'verify' }))).toBe('view-diff');
     expect(phaseArtifactVerb(b({ blockedGate: 'dev-approval' }))).toBe('view-diff');
     expect(phaseArtifactVerb(b({ blockedGate: 'pr' }))).toBe('view-diff');
+    expect(phaseArtifactVerb(b({ blockedGate: 'verify-approval' }))).toBe('view-diff'); // #1431: human reviewing finished work
   });
   it('gate beats phase (the stronger signal)', () => {
     expect(phaseArtifactVerb(b({ blockedGate: 'plan-approval', protocolPhase: 'implement' }))).toBe('open-plan');
@@ -666,6 +667,7 @@ describe('reviewMode (dial mode from the shared resolver)', () => {
     expect(reviewMode(b({ protocolPhase: 'review' }))).toBe('diff');
     expect(reviewMode(b({ blockedGate: 'dev-approval' }))).toBe('diff');
     expect(reviewMode(b({ blockedGate: 'pr' }))).toBe('diff');
+    expect(reviewMode(b({ blockedGate: 'verify-approval' }))).toBe('diff'); // #1431: dials navigate the diff while the human reviews finished work
   });
   it('an unknown phase, no live status, or no builder → none', () => {
     expect(reviewMode(b({}))).toBe('none');
