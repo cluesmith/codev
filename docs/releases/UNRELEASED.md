@@ -33,6 +33,10 @@
     6. Re-cp the template back to UNRELEASED.md to start the next cycle
 -->
 
+## Stream Deck+: a two-zone builder cockpit (#1410, PR #1439)
+
+The SD+ layout becomes a stable two-zone cockpit bound by one shared selection. The top row holds four builder keys — a live window onto the fleet that the Select dial scrolls when there are more than four, with the selected builder's key visibly accented. The bottom row is a fixed action palette that always acts on the selected builder: approve its pending gate (through the usual confirmation), run its dev server, send collected review feedback, and open its terminal. Review feedback now follows the workspace's delivery mode instead of guessing: in forward mode a dial press sends the file, hunk, or selection to the builder immediately, exactly as before; in comment mode the same press quietly stages it in the shared review queue — the Send Fb key shows how many chunks are waiting and flushes them as one composed review. The dial touchstrips name the live mode ("Files · queue" vs "Files · send") so a press is never a surprise, and selection stays coherent in both directions: pressing a builder key opens its artifact in VS Code, and focusing a builder's diff or spec/plan canvas in VS Code selects that builder on the deck.
+
 ## Review comments on builder diffs (#1037, PR #1382)
 
 A structured review mode for builder diffs: compose comments in inline threads via codelens or context menu, collect them in a per-builder queue (persists across reloads), and submit the whole review as one batched message typed into the builder's prompt for a final read-and-Enter. The frictionless one-click PTY injection stays for quick reactions; an editor toggle chooses the default surface.
