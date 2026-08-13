@@ -42,6 +42,7 @@ import { ReviewQueueStore } from './review-queue/store.js';
 import { submitReview, discardReviewComments } from './review-queue/submit.js';
 import { feedbackFile, feedbackHunk, feedbackSelection } from './review-queue/feedback.js';
 import { activateSubmitReviewStatusBar } from './review-queue/status-bar.js';
+import { activateOverviewNudge } from './review-queue/overview-nudge.js';
 import { MarkdownPreviewProvider } from './markdown-preview/preview-provider.js';
 import { BuilderSpawnHandler } from './builder-spawn-handler.js';
 import { BuilderTerminalLinkProvider, ReconnectTerminalLinkProvider, IssueRefTerminalLinkProvider } from './terminal-link-provider.js';
@@ -1406,6 +1407,10 @@ export async function activate(context: vscode.ExtensionContext) {
 	// counter. The batched submit itself is `codev.submitReview` above.
 	activateBuilderReviewComments(context, reviewQueueStore, overviewCache);
 	activateSubmitReviewStatusBar(context, reviewQueueStore);
+	// #1410: nudge Tower to rebuild + rebroadcast the overview on a queue mutation
+	// or a feedback-mode change, so the deck's Send Fb badge + dial mode-label
+	// update promptly (Tower has no watcher on the queue files / settings.json).
+	context.subscriptions.push(activateOverviewNudge(reviewQueueStore, connectionManager!));
 
 	// Codev Markdown Preview (#859): a read-only custom editor that renders a
 	// spec/plan/review in the shared artifact-canvas and adds review comments

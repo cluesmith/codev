@@ -17,7 +17,8 @@ Turns the SD+ into a two-zone remote bound by one shared selection: **Row 1** is
 - `apps/vscode/src/extension.ts` (+15 / -1) — register the 3 feedback commands; `submitReview` accepts a builder id
 - `apps/vscode/src/markdown-preview/preview-provider.ts` (+33 / -0) — canvas focus back-sync
 - `apps/vscode/src/markdown-preview/canvas-owner.ts` (+27 / -0, new) — pure canvas→builder resolver
-- `apps/vscode/src/__tests__/feedback.test.ts` (+118, new), `command-relay.test.ts` (+16), `canvas-back-sync.test.ts` (+35, new)
+- `apps/vscode/src/review-queue/overview-nudge.ts` (+40 / -0, new) — nudge Tower to rebuild+rebroadcast the overview on a queue/mode change (consultation fix)
+- `apps/vscode/src/__tests__/feedback.test.ts` (+118, new), `command-relay.test.ts` (+16), `canvas-back-sync.test.ts` (+35, new), `overview-nudge.test.ts` (+3 cases, new)
 - `apps/streamdeck/src/store.ts` (+40 / -4) — `feedbackMode` / `queuedFeedback` / `windowedBuilder` readers
 - `apps/streamdeck/src/face.ts` (+45 / -12) — selected accent, `approveFaceSvg` / `sendFbFaceSvg`, `comment`/`terminal` glyphs
 - `apps/streamdeck/src/actions.ts` (+110 / -30) — Row 1 windowing, dial `feedback-*`, touchstrip mode label, Row 2 palette
@@ -44,7 +45,7 @@ Turns the SD+ into a two-zone remote bound by one shared selection: **Row 1** is
 
 - `pnpm build` (full workspace): ✓ pass
 - `pnpm --filter @cluesmith/codev-streamdeck test`: ✓ 125 pass
-- `pnpm --filter codev-vscode test:unit`: ✓ 822 pass
+- `pnpm --filter codev-vscode test:unit`: ✓ 825 pass
 - `pnpm --filter @cluesmith/codev test` (codev): ✓ 4856 pass / 48 skipped
 - `streamdeck validate`: ✓
 - Manual verification: approved by the human at the **dev-approval** hardware SD+ session — the two-zone layout, dial-collect/Send-Fb flush in both delivery modes, the `Files · send`/`Files · queue` label, Row 2 Approve/Dev/Open-Terminal on the selected builder, and the diff/canvas focus back-sync were exercised on real hardware.
@@ -63,6 +64,19 @@ Turns the SD+ into a two-zone remote bound by one shared selection: **Row 1** is
 
 ## Things to Look At During PR Review
 
+- **[Consultation finding — Codex, fixed] Deterministic overview refresh for the badge + mode label.**
+  Tower projects `queuedFeedback` (from the queue files) and `feedbackMode` (from `.vscode/settings.json`)
+  into the overview but has no watcher on either, and `ReviewQueueStore` writes never notified Tower — so
+  the Send Fb badge / dial mode-label only refreshed on an unrelated SSE event, and the deck's
+  refresh-on-command-echo could race ahead of the queue write. Fixed by
+  `apps/vscode/src/review-queue/overview-nudge.ts` (wired in `extension.ts`): a queue mutation
+  (`onDidChangeQueue`) or a `codev.diffCodelensMode` change calls `TowerClient.refreshOverview()`, which
+  invalidates Tower's cache and broadcasts `overview-changed` *after* the write. Pinned by
+  `overview-nudge.test.ts` (fails without the wiring).
+- **[Consultation finding — Codex, rebutted] The SD+ profile ships blank.** Deliberate: it has always
+  shipped `Actions: null` (#1404 shipped Row 1 the same way), there is no safe `sdProfile` Actions schema
+  to pre-populate, and the two-zone workflow was verified on hardware at `dev-approval` with the human
+  placing the keys. See the rebuttal doc; escalated to the human (who ruled on it at `dev-approval`).
 - **Coherence anchors (the subtle part).** Row 1/Row 2 act on `selectedBuilder()`; the review dials act on the *focused* artifact; `feedback-*` writes attach to the *focused diff's* owner (correct — a comment must attach to the file in view) while Send Fb flushes `selectedBuilder()`. These agree because focusing a diff/canvas fires `builder-active` → `syncToBuilder`. The one transient divergence (rotate the Select dial without opening) self-heals on the next Row 1 press / focus. See the plan's "Layer integration" section.
 - **`feedbackMode` sourcing.** Tower reads `<root>/.vscode/settings.json` (JSONC-tolerant, defaults to `forward`). This is single-folder-workspace only; a multi-root `.code-workspace` or user-level override isn't at that path and reads as the default — an accepted limitation (the deck falls back to `send`, never a wrong-way write, since the mode only labels the dial).
 - **`send-queue` → `codev.submitReview` id forwarding.** The status-bar button still calls it arg-less (resolves target itself); the deck passes `[selectedId]`. Confirm the `typeof builderId === 'string'` guard.
