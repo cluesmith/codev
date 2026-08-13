@@ -28,3 +28,28 @@ sidebar's `gateIconFor` (apps/vscode/src/views/builder-row.ts) already knows
 
 Do NOT touch anything else in face.ts/actions.ts (#1410 just landed a large change;
 keep this diff trivially reviewable).
+
+## Fix phase — done
+
+Made the three scoped edits. Regression test confirmed to fail without the fix
+(returns `undefined`) and pass with it (`view-diff`). Full suite 125/125,
+check-types clean, esbuild build clean (after building the `@cluesmith/codev-sdk`
+workspace dep first — the type/build errors before that were the unbuilt dep, not
+my change). Committed as `Fix #1431: ...`.
+
+## PR phase
+
+PR #1442 opened (Fixes #1431). CMAP consult needs `--project-id bugfix-1431` —
+auto-detect fails because the worktree's `codev/projects/` holds every project.
+Running all three (gemini/codex/claude) in the background.
+
+## CMAP verdicts
+
+- gemini = APPROVE (HIGH) — "clean, minimal fix … with unit test coverage."
+- claude = APPROVE (HIGH) — "correct one-line gate mapping … backed by a genuine
+  regression test; scope and hygiene are clean."
+- codex  = UNAVAILABLE — the codex lane errored on OpenAI billing ("no credits
+  remaining"), not a review verdict. Environment issue, unrelated to this change.
+
+Two independent APPROVEs, no requested changes. Notifying architect and firing the
+pr gate; codex reported honestly as unavailable rather than a fabricated verdict.
