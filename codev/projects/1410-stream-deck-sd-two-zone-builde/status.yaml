@@ -1,7 +1,7 @@
 id: '1410'
 title: stream-deck-sd-two-zone-builde
 protocol: pir
-phase: review
+phase: verified
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -21,7 +21,7 @@ iteration: 1
 build_complete: true
 history: []
 started_at: '2026-08-12T21:43:07.730Z'
-updated_at: '2026-08-13T01:10:37.421Z'
+updated_at: '2026-08-13T01:11:00.401Z'
 pr_history:
   - phase: review
     pr_number: 1439
