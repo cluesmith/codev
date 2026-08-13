@@ -293,6 +293,10 @@ export function resolveCursorRef(
   cursorLine: number,
 ): CursorRef {
   let best: ChangedRange | undefined;
+  // `buildSymbolLensDescriptors` skips a symbol anchored on line 0 (it collides
+  // with the file-level lens), so a declaration starting on file line 1 has no
+  // symbol candidate here and falls through to the hunk/file steps — the same
+  // "keyboard == codelens click" gap the lens itself has.
   for (const lens of buildSymbolLensDescriptors(relPath, symbols)) {
     const range = lens.range;
     if (!range) { continue; } // the file-level lens has no range

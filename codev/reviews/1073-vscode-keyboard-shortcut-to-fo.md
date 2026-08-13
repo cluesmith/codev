@@ -40,7 +40,9 @@ selection first; codelens has no keyboard activator in VS Code).
 - `pnpm test:unit`: ✓ pass (819 tests, 68 files; 7 new)
 - Manual verification: approved by the human at the `dev-approval` gate (cursor
   inside a symbol / in a hunk / on an unchanged line → correct reference injected,
-  no Enter, focus retained on the diff editor).
+  no Enter). The builder terminal is revealed and focused so the reviewer can type
+  feedback — identical to a codelens click and `Cmd/Ctrl+K B` (see the focus note
+  under "Things to Look At").
 
 ## Architecture Updates
 
@@ -62,6 +64,22 @@ it's flagged under "Things to Look At" for the reviewer's awareness.)
 
 ## Things to Look At During PR Review
 
+- **Focus behavior (Codex 3-way REQUEST_CHANGES — needs the human's call).** Codex
+  correctly flagged that the shared inject path focuses the builder terminal
+  (`forwardToBuilder` → `openBuilderByRoleOrId(id, true)` → `terminal.show(false)`,
+  plus `injectBuilderText` → `terminal.show()`), so focus moves off the diff editor
+  — contradicting the plan/review's original "focus stays on the diff editor" wording
+  and acceptance-criterion #5. **Disposition: no code change.** This is the *exact*
+  shared path the existing codelens click and `Cmd/Ctrl+K B` use, and the issue
+  defines this command as "the keyboard equivalent of one existing codelens click"
+  (plan-gate decision #5: inherit the codelens resolver). The codelens injects the
+  ref without Enter *so the reviewer keeps typing feedback* — which requires the
+  terminal to be focused; preserving diff-editor focus would defeat that purpose and
+  diverge this command from every sibling. The human already exercised and approved
+  this exact running behavior at the `dev-approval` gate. The inaccuracy was in the
+  documentation (now corrected above), not the behavior. Acceptance-criterion #5's
+  literal wording is in tension with the codelens-parity goal it sits beside; that
+  is the human's decision at the `pr` gate. Gemini and Claude both returned APPROVE.
 - **Symbol resolution == codelens click.** `resolveCursorRef` derives its symbol
   candidates from `buildSymbolLensDescriptors` (the exact forwardable-symbol set
   the codelens renders) rather than walking the raw symbol tree, so the keyboard
@@ -94,7 +112,9 @@ it's flagged under "Things to Look At" for the reviewer's awareness.)
   - Cursor in a changed region with no covering symbol → injects the hunk range.
   - Cursor on an unchanged line outside any symbol/hunk → injects the bare file
     path and shows the status-bar note.
-  - Focus stays on the diff editor; no picker/modal; no Enter pressed.
+  - No picker/modal interrupts the flow; no Enter pressed. The builder terminal is
+    revealed and focused (same as a codelens click / `Cmd/Ctrl+K B`) so you can type
+    feedback immediately.
   - New-file diff: cursor inside a symbol still forwards its range.
   - Scope: in an unrelated (non-builder) diff/editor, `Cmd/Ctrl+K H` does nothing.
   - Regression: `Cmd/Ctrl+K B` (with a selection) and codelens clicks still work.
