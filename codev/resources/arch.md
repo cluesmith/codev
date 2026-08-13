@@ -2025,6 +2025,28 @@ The command vocabulary lives in `@cluesmith/codev-types` (`canvas-command.ts`) a
 Tower, the sdk and the canvas package each keep a local `satisfies`-bound copy of any runtime list
 because codev-types is type-only for all three.
 
+### Stream Deck ↔ VSCode shared-selection coherence (Spec 1410)
+
+The deck is a remote and VSCode is the screen, bound by **one shared selection**. Two surfaces have
+*different* anchors, and keeping them equal is the invariant future deck/vscode work must preserve:
+
+- **Row 1/Row 2 keys** act on the deck's shared cursor (`selectedBuilder()`); the **review dials**
+  act on VSCode's *focused* editor / MRU canvas. They stay the same builder because (a) a Row 1 press
+  is *select + open* in one gesture, and (b) focusing a builder artifact fires the **`builder-active`
+  activity hook** → deep link → the deck's `syncToBuilder`. Spec 1410 extends that back-sync to a
+  focused **canvas** (`preview-provider.ts`, resolving the owner by worktree-path prefix), not only a
+  diff (`announceActiveBuilderFromEditor`) — so canvas focus moves the deck selection too. The hook is
+  personal-config (`~/.codev/config.json`, `activityHooks`), so the VSCode→deck direction is opt-in.
+- **Review feedback is mode-neutral at the deck, mode-routed in VSCode.** A diff-dial press relays
+  `feedback-file`/`feedback-hunk`/`feedback-selection`; VSCode forwards immediately or enqueues per the
+  `codev.diffCodelensMode` workspace setting, and `send-queue` flushes. **All queue mutations go through
+  `ReviewQueueStore`** (the single source of truth, Spec 1037) — never a parallel path — so every surface
+  reflects deck-driven changes. Tower only *reads* the queue file to project the count.
+- **Overview wire (`OverviewData`)** carries `queuedFeedback: Record<builderId, count>` (a per-builder
+  **map**, never a scalar — the deck badge and #1049's Attention rollup both index it) and
+  `feedbackMode: 'forward' | 'queue'` (per-workspace scalar, read from `.vscode/settings.json`,
+  single-folder-workspace only, defaults to `forward`).
+
 ### Internal Dependencies
 - **Git**: Version control, worktrees for builder isolation
 - **Node.js**: Runtime for agent-farm TypeScript CLI
