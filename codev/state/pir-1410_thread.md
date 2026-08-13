@@ -45,6 +45,12 @@ Commits on builder/pir-1410:
 - DRY cleanup: refactored my 3 inert face branches (approve/sendFb/terminal "icon + centered label") to call their `labelFaceSvg` helper instead of hand-rolling — consistency with the new shared helper. Row 2 now: Approve (approveFaceSvg), Dev (labelFaceSvg play), Send Fb (sendFbFaceSvg), Open Terminal (terminalFaceSvg) — all composite faces, all consistent.
 - Deck 128 tests pass, check-types clean, plugin builds + validates.
 
+## Review phase — 3-way consultation (2026-08-13)
+- PR #1439 opened. Consultation: gemini=APPROVE, claude=APPROVE, codex=REQUEST_CHANGES (2 pts).
+- Codex pt2 (refresh trigger) — VALID, FIXED (bf693620e): verified queuedFeedback/feedbackMode had NO deterministic push (porch pushes status.yaml via overview-changed broadcast, but ReviewQueueStore writes never notify Tower + Tower doesn't watch queue files/.vscode/settings.json; deck refresh-on-command-echo races the write). Fix: apps/vscode/src/review-queue/overview-nudge.ts — onDidChangeQueue OR diffCodelensMode config change → TowerClient.refreshOverview() (POST /api/overview/refresh → invalidate cache + broadcast overview-changed, fires AFTER write). Regression test overview-nudge.test.ts (3 cases). vscode 825 pass.
+- Codex pt1 (blank profile) — REBUTTED: deliberate, already accepted by human at dev-approval (keys placed on hardware, workflow verified); profile always shipped Actions:null (#1404 same); no safe sdProfile Actions schema. Rebuttal in codev/projects/1410-*/1410-review-iter1-rebuttals.md.
+- Notified architect (led with REQUEST_CHANGES + disposition). At pr gate — waiting for human merge. PIR single-pass: no auto re-review; human pr-gate review is the backstop.
+
 ## Scope note (intentional deferral)
 - SD+ PROFILE (Codev.streamDeckProfile zip) left BLANK as it has always shipped (Actions:null; #1404 shipped Row 1 the same way). No known-good sdProfile Actions schema in history to safely pre-populate; a malformed binary profile would fail import at the hardware session. Two-zone key layout is documented in README; reviewer places the 8 keys at the dev-approval hardware session. Flag to architect.
 
