@@ -1,7 +1,7 @@
 id: '1073'
 title: vscode-keyboard-shortcut-to-fo
 protocol: pir
-phase: plan
+phase: implement
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -17,4 +17,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-08-13T00:20:25.415Z'
-updated_at: '2026-08-13T01:32:22.881Z'
+updated_at: '2026-08-13T01:32:28.637Z'
