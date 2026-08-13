@@ -53,3 +53,13 @@ Running all three (gemini/codex/claude) in the background.
 
 Two independent APPROVEs, no requested changes. Notifying architect and firing the
 pr gate; codex reported honestly as unavailable rather than a fabricated verdict.
+
+## Architect review of PR #1442 (compensating for codex being down)
+
+Flagged a real gap: the fix has a second behavioural effect neither the issue nor
+my tests covered — `reviewMode()` derives from `phaseArtifactVerb` (`view-diff` →
+`diff`), so a verify-approval-blocked builder's review dials flip from `none`
+(dead) to `diff` (navigating the diff). Correct and desirable (symmetric with
+dev-approval/pr), but was untested + undocumented. Added a `reviewMode` assertion
+beside the dev-approval/pr cases and documented the dial-mode consequence in the PR
+body. 125/125 pass. Still exactly in scope. Holding at the pr gate.
