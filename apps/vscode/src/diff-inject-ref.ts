@@ -262,3 +262,55 @@ export function buildAllLensDescriptors(
   }
   return lenses;
 }
+
+/**
+ * The reference resolved for a cursor sitting on a given line — the keyboard
+ * equivalent of clicking a "Forward to Builder" lens (#1073). `kind` records
+ * which resolution step fired so the command handler can surface a status-bar
+ * note on the bare-file fallback.
+ */
+export type CursorRef =
+  | { kind: 'symbol' | 'hunk'; refText: string; range: ChangedRange }
+  | { kind: 'file'; refText: string };
+
+/**
+ * Resolve the reference to forward for a cursor on `cursorLine` (1-based,
+ * new-side). Resolution order (locked by #1073):
+ *
+ *   1. **Symbol** — the most specific *forwardable* symbol whose range contains
+ *      the cursor. "Forwardable" is exactly the symbol set the codelens exposes
+ *      (`buildSymbolLensDescriptors`), so the keyboard lands on the same range a
+ *      lens click would; among overlapping candidates the smallest span wins (a
+ *      method inside a class beats the class).
+ *   2. **Hunk** — the changed range containing the cursor (the registry entry's
+ *      new-side 1-based ranges).
+ *   3. **File** — the bare file path, when neither covers the cursor.
+ */
+export function resolveCursorRef(
+  relPath: string,
+  symbols: SymbolNode[],
+  hunks: ChangedRange[],
+  cursorLine: number,
+): CursorRef {
+  let best: ChangedRange | undefined;
+  // `buildSymbolLensDescriptors` skips a symbol anchored on line 0 (it collides
+  // with the file-level lens), so a declaration starting on file line 1 has no
+  // symbol candidate here and falls through to the hunk/file steps — the same
+  // "keyboard == codelens click" gap the lens itself has.
+  for (const lens of buildSymbolLensDescriptors(relPath, symbols)) {
+    const range = lens.range;
+    if (!range) { continue; } // the file-level lens has no range
+    if (cursorLine < range.start || cursorLine > range.end) { continue; }
+    if (!best || range.end - range.start < best.end - best.start) { best = range; }
+  }
+  if (best) {
+    return { kind: 'symbol', refText: buildBuilderRangeRef(relPath, best.start, best.end), range: best };
+  }
+
+  const hunk = hunks.find(h => cursorLine >= h.start && cursorLine <= h.end);
+  if (hunk) {
+    return { kind: 'hunk', refText: buildBuilderRangeRef(relPath, hunk.start, hunk.end), range: hunk };
+  }
+
+  return { kind: 'file', refText: buildBuilderFileRef(relPath) };
+}

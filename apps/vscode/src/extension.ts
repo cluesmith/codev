@@ -12,9 +12,9 @@ import { cleanupBuilder } from './commands/cleanup.js';
 import { openWorktreeWindow } from './commands/open-worktree-window.js';
 import { viewDiff, activateDiffView, openBuilderFileDiff } from './commands/view-diff.js';
 import { navigateDiff, navigateDiffToFirst, navigateBuilderDiffToFirst, diffFirstHunk, recordDiffNavPosition } from './commands/diff-nav.js';
-import { activateDiffInjectCodeLens, getDiffInjectEntry, onDidChangeDiffInjectRegistry } from './diff-inject-codelens.js';
+import { activateDiffInjectCodeLens, getDiffInjectEntry, onDidChangeDiffInjectRegistry, toSymbolNode } from './diff-inject-codelens.js';
 import { isStandaloneTextTab } from './diff-tab-input.js';
-import { buildBuilderRangeRef, buildBuilderFileRef } from './diff-inject-ref.js';
+import { buildBuilderRangeRef, buildBuilderFileRef, resolveCursorRef } from './diff-inject-ref.js';
 import { runWorktreeDev } from './commands/run-worktree-dev.js';
 import { stopWorktreeDev } from './commands/stop-worktree-dev.js';
 import { runWorkspaceDev, stopWorkspaceDev } from './commands/run-workspace-dev.js';
@@ -1250,6 +1250,32 @@ export async function activate(context: vscode.ExtensionContext) {
 			}
 			await vscode.commands.executeCommand(
 				'codev.forwardToBuilder', entry.builderId, buildBuilderRangeRef(entry.relPath, hunk.start, hunk.end));
+		}),
+		// Keyboard equivalent of a codelens click (#1073): forward whatever covers
+		// the cursor — the most specific enclosing symbol first, else the changed
+		// hunk, else the bare file path. Bound to Cmd/Ctrl+K H; `when` scopes it to
+		// builder-diff files with `editorTextFocus` (cursor only, no selection).
+		// All resolution lives in the pure `resolveCursorRef`; this handler only
+		// fetches the live symbols and reuses the shared `forwardToBuilder` inject
+		// path (no Enter, focus stays on the diff editor).
+		reg('codev.forwardCursorContextToBuilder', async () => {
+			const editor = vscode.window.activeTextEditor;
+			if (!editor) { return; }
+			const entry = getDiffInjectEntry(editor.document.uri.fsPath);
+			if (!entry) { return; }
+			const cursorLine = editor.selection.active.line + 1; // 1-based new-side
+			let symbols: vscode.DocumentSymbol[] = [];
+			try {
+				symbols = (await vscode.commands.executeCommand<vscode.DocumentSymbol[]>(
+					'vscode.executeDocumentSymbolProvider', editor.document.uri)) ?? [];
+			} catch {
+				symbols = [];
+			}
+			const resolved = resolveCursorRef(entry.relPath, symbols.map(toSymbolNode), entry.hunks, cursorLine);
+			if (resolved.kind === 'file') {
+				vscode.window.setStatusBarMessage('Codev: forwarded file path (no symbol or hunk at cursor)', 3000);
+			}
+			await vscode.commands.executeCommand('codev.forwardToBuilder', entry.builderId, resolved.refText);
 		}),
 		reg('codev.openBuilderFileDiff', async (arg: unknown) => {
 			if (!(arg instanceof BuilderFileTreeItem)) { return; }

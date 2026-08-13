@@ -11,6 +11,7 @@ import {
   buildSymbolLensDescriptors,
   buildAllLensDescriptors,
   parseHunkRanges,
+  resolveCursorRef,
   type SymbolNode,
 } from '../diff-inject-ref.js';
 
@@ -177,5 +178,74 @@ describe('buildAllLensDescriptors (symbol + change lenses)', () => {
     expect(buildAllLensDescriptors('a/b.ts', [], [{ start: 1, end: 17 }])).toEqual([
       { line: 0, title: 'Forward to Builder', refText: 'a/b.ts ' },
     ]);
+  });
+});
+
+describe('resolveCursorRef (symbol → hunk → file)', () => {
+  it('resolves the cursor to its enclosing top-level symbol', () => {
+    const symbols = [sym(K.Function, 4, 9)]; // L5-L10
+    // Cursor on the body (line 7, 1-based) → the function range.
+    expect(resolveCursorRef('a/b.ts', symbols, [], 7)).toEqual({
+      kind: 'symbol',
+      refText: 'a/b.ts:L5-L10 ',
+      range: { start: 5, end: 10 },
+    });
+  });
+
+  it('resolves the declaration line and the body line to the same symbol', () => {
+    const symbols = [sym(K.Function, 4, 9)]; // L5-L10
+    expect(resolveCursorRef('a/b.ts', symbols, [], 5).refText).toBe('a/b.ts:L5-L10 '); // decl line
+    expect(resolveCursorRef('a/b.ts', symbols, [], 9).refText).toBe('a/b.ts:L5-L10 '); // last line
+  });
+
+  it('picks the most specific symbol: a method inside a class beats the class', () => {
+    const cls = sym(K.Class, 3, 40, [
+      sym(K.Method, 10, 20), // L11-L21
+    ]);
+    // Cursor at line 15 is inside both the class (L4-L41) and the method (L11-L21).
+    expect(resolveCursorRef('a/b.ts', [cls], [], 15)).toEqual({
+      kind: 'symbol',
+      refText: 'a/b.ts:L11-L21 ',
+      range: { start: 11, end: 21 },
+    });
+    // Cursor at line 5 is in the class but outside the method → the class.
+    expect(resolveCursorRef('a/b.ts', [cls], [], 5).refText).toBe('a/b.ts:L4-L41 ');
+  });
+
+  it('falls back to the containing hunk when no symbol covers the cursor', () => {
+    // No forwardable symbol at the cursor; a changed range does cover it.
+    expect(resolveCursorRef('a/b.ts', [], [{ start: 30, end: 42 }], 35)).toEqual({
+      kind: 'hunk',
+      refText: 'a/b.ts:L30-L42 ',
+      range: { start: 30, end: 42 },
+    });
+  });
+
+  it('prefers the symbol over the hunk when both cover the cursor (order)', () => {
+    const symbols = [sym(K.Function, 4, 9)]; // L5-L10
+    // A hunk also spans the cursor line, but symbol resolution wins.
+    expect(resolveCursorRef('a/b.ts', symbols, [{ start: 1, end: 20 }], 7)).toEqual({
+      kind: 'symbol',
+      refText: 'a/b.ts:L5-L10 ',
+      range: { start: 5, end: 10 },
+    });
+  });
+
+  it('falls back to the bare file path when neither a symbol nor a hunk covers the cursor', () => {
+    const symbols = [sym(K.Function, 4, 9)]; // L5-L10
+    // Cursor on an unchanged context line outside every symbol and hunk.
+    expect(resolveCursorRef('a/b.ts', symbols, [{ start: 30, end: 42 }], 25)).toEqual({
+      kind: 'file',
+      refText: 'a/b.ts ',
+    });
+  });
+
+  it('resolves a symbol on a new-file diff (symbols present, no hunks)', () => {
+    const symbols = [sym(K.Function, 4, 9)]; // L5-L10
+    expect(resolveCursorRef('a/b.ts', symbols, [], 6)).toEqual({
+      kind: 'symbol',
+      refText: 'a/b.ts:L5-L10 ',
+      range: { start: 5, end: 10 },
+    });
   });
 });
