@@ -23,6 +23,8 @@ import {
   detectBlockedSince,
   computeIdleMs,
   derivePrReady,
+  countQueuedFeedback,
+  readFeedbackMode,
 } from '../servers/overview.js';
 
 // ============================================================================
@@ -2357,5 +2359,65 @@ describe('overview', () => {
         expect(data.builders[0].spawnedByArchitect).toBeNull();
       });
     });
+  });
+});
+
+// ============================================================================
+// #1410: per-builder queued-feedback count + workspace feedback mode
+// ============================================================================
+
+describe('countQueuedFeedback (#1410)', () => {
+  let dir: string;
+  beforeEach(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qf-')); });
+  afterEach(() => { fs.rmSync(dir, { recursive: true, force: true }); });
+
+  function writeQueue(content: string): void {
+    fs.mkdirSync(path.join(dir, '.codev'), { recursive: true });
+    fs.writeFileSync(path.join(dir, '.codev', 'pending-comments.json'), content);
+  }
+
+  it('counts the comments in a builder’s queue file', () => {
+    writeQueue(JSON.stringify({ version: 1, builderId: 'pir-1', comments: [
+      { id: 'a', createdAt: 't', file: 'f', lineRange: null, body: 'x' },
+      { id: 'b', createdAt: 't', file: 'g', lineRange: null, body: 'y' },
+    ] }));
+    expect(countQueuedFeedback(dir)).toBe(2);
+  });
+
+  it('is 0 for a missing, empty, or corrupt file', () => {
+    expect(countQueuedFeedback(dir)).toBe(0); // no file
+    writeQueue('not json at all');
+    expect(countQueuedFeedback(dir)).toBe(0);
+    writeQueue(JSON.stringify({ version: 1, builderId: 'x', comments: 'nope' }));
+    expect(countQueuedFeedback(dir)).toBe(0); // comments not an array
+  });
+});
+
+describe('readFeedbackMode (#1410)', () => {
+  let dir: string;
+  beforeEach(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fm-')); });
+  afterEach(() => { fs.rmSync(dir, { recursive: true, force: true }); });
+
+  function writeSettings(content: string): void {
+    fs.mkdirSync(path.join(dir, '.vscode'), { recursive: true });
+    fs.writeFileSync(path.join(dir, '.vscode', 'settings.json'), content);
+  }
+
+  it('maps the codev.diffCodelensMode setting to the wire value', () => {
+    writeSettings(JSON.stringify({ 'codev.diffCodelensMode': 'comment' }));
+    expect(readFeedbackMode(dir)).toBe('queue');
+    writeSettings(JSON.stringify({ 'codev.diffCodelensMode': 'forward' }));
+    expect(readFeedbackMode(dir)).toBe('forward');
+  });
+
+  it('defaults to forward when the file / key is absent or unreadable', () => {
+    expect(readFeedbackMode(dir)).toBe('forward'); // no file
+    writeSettings(JSON.stringify({ 'editor.tabSize': 2 }));
+    expect(readFeedbackMode(dir)).toBe('forward'); // key absent
+  });
+
+  it('tolerates JSONC comments / trailing commas around the setting', () => {
+    writeSettings('{\n  // my settings\n  "codev.diffCodelensMode": "comment",\n}');
+    expect(readFeedbackMode(dir)).toBe('queue');
   });
 });

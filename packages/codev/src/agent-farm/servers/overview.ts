@@ -728,6 +728,67 @@ function scanArtifactDir(dirPath: string): Map<string, string> {
 }
 
 /**
+ * Count a builder's pending review-comments by reading its queue file
+ * (`<worktree>/.codev/pending-comments.json`, the single source of truth the
+ * VSCode ReviewQueueStore owns, #1037). This is a READ of that file, never a
+ * write — the same pattern `discoverBuilders` uses to read worktree state.
+ * Tolerant: a missing / unreadable / corrupt file, or a non-array `comments`,
+ * reads as 0. Returns the count only, never bodies (#1410).
+ */
+export function countQueuedFeedback(worktreePath: string): number {
+  try {
+    const raw = fs.readFileSync(path.join(worktreePath, '.codev', 'pending-comments.json'), 'utf8');
+    const data = JSON.parse(raw) as { comments?: unknown };
+    return Array.isArray(data.comments) ? data.comments.length : 0;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * The workspace's review-feedback delivery mode, read from the VSCode
+ * `codev.diffCodelensMode` workspace setting in `<root>/.vscode/settings.json`
+ * (`comment` → `'queue'`; anything else, or unreadable, → `'forward'`, matching
+ * VSCode's own default). Single-folder workspaces only — a multi-root
+ * `.code-workspace` or a user-level override isn't at this path and reads as the
+ * default. Tolerant of the JSONC (comments / trailing commas) VSCode may leave
+ * in the file: strict parse first, then a comment-stripped retry (#1410).
+ */
+export function readFeedbackMode(workspaceRoot: string): 'forward' | 'queue' {
+  let raw: string;
+  try {
+    raw = fs.readFileSync(path.join(workspaceRoot, '.vscode', 'settings.json'), 'utf8');
+  } catch {
+    return 'forward'; // no settings file — the setting is at its default
+  }
+  const value = readSettingValue(raw, 'codev.diffCodelensMode');
+  return value === 'comment' ? 'queue' : 'forward';
+}
+
+/** Parse a settings.json string (strict, then JSONC-tolerant) and return one
+ *  key's value, or `undefined` when the file can't be parsed or lacks the key. */
+function readSettingValue(raw: string, key: string): unknown {
+  for (const candidate of [raw, stripJsonComments(raw)]) {
+    try {
+      const data = JSON.parse(candidate) as Record<string, unknown>;
+      return data[key];
+    } catch {
+      // try the next candidate
+    }
+  }
+  return undefined;
+}
+
+/** Minimal JSONC → JSON: drop block/line comments and trailing commas. Good
+ *  enough for a best-effort settings read (not a general JSONC parser). */
+function stripJsonComments(raw: string): string {
+  return raw
+    .replace(/\/\*[\s\S]*?\*\//g, '')      // block comments
+    .replace(/(^|[^:"])\/\/.*$/gm, '$1')   // line comments (leave `://` in URLs)
+    .replace(/,(\s*[}\]])/g, '$1');        // trailing commas
+}
+
+/**
  * Derive backlog from open GitHub issues cross-referenced with specs and builders.
  */
 export function deriveBacklog(
@@ -986,11 +1047,22 @@ export class OverviewCache {
       );
     }
 
+    // Per-builder queued-feedback counts (#1410): read each builder's pending
+    // review-comment queue file. Only non-zero entries are carried, so the map
+    // stays `{}` when nothing is queued anywhere; a builder absent from it reads
+    // as 0 on every consumer.
+    const queuedFeedback: Record<string, number> = {};
+    for (const b of builders) {
+      const count = countQueuedFeedback(b.worktreePath);
+      if (count > 0) queuedFeedback[b.id] = count;
+    }
+    const feedbackMode = readFeedbackMode(workspaceRoot);
+
     // `architects` defaults to `[]` here — the filesystem/git-derived overview
     // has no view of the live terminal sessions. `handleOverview` (tower-routes.ts)
     // injects the real architect list via `liveArchitects` before serialization,
     // mirroring how it enriches `lastDataAt`.
-    const result: OverviewData = { builders, pendingPRs, backlog, recentlyClosed, architects: [], heldCount, mailboxEscalated };
+    const result: OverviewData = { builders, pendingPRs, backlog, recentlyClosed, architects: [], heldCount, mailboxEscalated, queuedFeedback, feedbackMode };
     if (currentUser) {
       result.currentUser = currentUser;
     }

@@ -31,6 +31,14 @@ const VERB_COMMANDS: Record<string, string> = {
   'open-review': 'codev.viewReviewFile',
   'forward-hunk': 'codev.forwardCurrentHunkToBuilder',
   'forward-file': 'codev.forwardCurrentFileToBuilder',
+  // Mode-neutral review feedback (#1410): the deck dials press these; VSCode
+  // routes each forward-now or enqueue per the `codev.diffCodelensMode` setting.
+  'feedback-file': 'codev.feedbackCurrentFileToBuilder',
+  'feedback-hunk': 'codev.feedbackCurrentHunkToBuilder',
+  'feedback-selection': 'codev.feedbackSelectionToBuilder',
+  // Flush the selected builder's queued review feedback (the Send Fb key); arg:
+  // builder id. Inert deck-side when the badge count is 0.
+  'send-queue': 'codev.submitReview',
   'run-dev': 'codev.runWorktreeDev',
   'spawn-builder': 'codev.spawnBuilder',
   // Context verbs (operate on the focused editor; no arg).

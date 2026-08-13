@@ -44,7 +44,7 @@ const STATE_COLOR: Record<BuilderState, string> = {
 };
 
 /** The glyphs the face can draw: a gate shape when blocked, the bolt otherwise. */
-export type GlyphKey = 'bolt' | 'book' | 'checklist' | 'code' | 'pull-request' | 'verified' | 'bell' | 'play';
+export type GlyphKey = 'bolt' | 'book' | 'checklist' | 'code' | 'pull-request' | 'verified' | 'bell' | 'comment' | 'terminal' | 'play';
 
 /**
  * Gate id → glyph. The streamdeck twin of `gateIconFor` in `apps/vscode/src/views/builder-row.ts`
@@ -76,6 +76,8 @@ const GLYPHS: Record<GlyphKey, (color: string) => string> = {
     stroked(c, '<circle cx="7" cy="6" r="2.3"/><circle cx="7" cy="18" r="2.3"/><circle cx="17" cy="18" r="2.3"/><path d="M7 8.3v7.4"/><path d="M17 15.7V12a3 3 0 0 0-3-3h-3.5"/>'),
   verified: (c) => stroked(c, '<path d="M12 3l7 3v5c0 4.5-3 7.6-7 9.2C8 18.6 5 15.5 5 11V6z"/><path d="M8.6 12l2.3 2.3 4.6-4.6"/>'),
   bell: (c) => stroked(c, '<path d="M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6z"/><path d="M10.5 20a1.6 1.6 0 0 0 3 0"/>'),
+  comment: (c) => stroked(c, '<path d="M4 5h16v11H10l-4 4v-4H4z"/>'),
+  terminal: (c) => stroked(c, '<rect x="3" y="5" width="18" height="14" rx="1.5"/><path d="M7 10l3 2.5-3 2.5"/><path d="M12.5 15h4"/>'),
   play: (c) => `<path d="M8 5v14l11-7z" fill="${c}"/>`, // VS Code's Run/Start-Dev affordance
 };
 
@@ -145,10 +147,14 @@ export interface BuilderFace {
   label: string;
   state: BuilderState;
   icon: GlyphKey;
+  /** True for the Row-1 slot holding the shared selection — draws an accent ring
+   *  so the live builder among the four is unmistakable (#1410). */
+  selected: boolean;
 }
 
-/** Resolve a builder into its face descriptor — all id→presentation mapping in one testable place. */
-export function faceForBuilder(b: OverviewBuilder): BuilderFace {
+/** Resolve a builder into its face descriptor — all id→presentation mapping in one testable place.
+ *  `selected` marks the Row-1 slot that currently holds the shared selection. */
+export function faceForBuilder(b: OverviewBuilder, selected = false): BuilderFace {
   const state = builderState(b);
   let icon: GlyphKey = 'bolt';
   if (state === 'blocked') {
@@ -158,7 +164,7 @@ export function faceForBuilder(b: OverviewBuilder): BuilderFace {
   if (b.issueId) {
     number = `#${b.issueId}`;
   }
-  return { kind: 'builder', number, label: stateLabel(b), state, icon };
+  return { kind: 'builder', number, label: stateLabel(b), state, icon, selected };
 }
 
 /**
@@ -173,23 +179,46 @@ export function builderFaceSvg(face: BuilderFace | { kind: 'empty'; slot: string
   }
   return svg(
     `${BG}${iconZone(face.icon, STATE_COLOR[face.state])}${DIVIDER}` +
-      `${primaryLine(face.number)}${secondaryLine(face.label)}`,
+      `${primaryLine(face.number)}${secondaryLine(face.label)}` +
+      `${face.selected ? SELECTED_RING : ''}`,
+  );
+}
+
+/** Accent ring drawn on top of the selected Row-1 slot's face (#1410). */
+const SELECTED_RING = '<rect x="2" y="2" width="68" height="68" rx="11" fill="none" stroke="#f4f4f6" stroke-width="3"/>';
+
+/**
+ * The Row-2 **[Approve gate]** key face (#1410): it acts on the SELECTED builder,
+ * so it renders that builder's pending gate — the gate label (e.g. `Plan`) over an
+ * `Approve` band, warning-tinted, when the selection is blocked at a gate; a dim,
+ * inert `Approve` when it isn't (or nothing is selected). Never a fleet-wide count —
+ * the pending-gate tally lives on the [Next / attention] key.
+ */
+export function approveFaceSvg(b: Pick<OverviewBuilder, 'blockedGate'> | undefined): string {
+  const gate = b?.blockedGate ?? '';
+  if (!gate) {
+    return labelFaceSvg('verified', 'Approve', '#63636b');
+  }
+  const label = GATE_LABELS[gate] ?? titleToken(gate);
+  return svg(
+    `${BG}${iconZone('verified', STATE_COLOR.blocked)}${DIVIDER}` +
+      `${primaryLine(label)}${secondaryLine('Approve')}`,
   );
 }
 
 /**
- * The Gates (approve-gate) key face — same composite frame as the builder face, fixing the same
- * text-over-icon overlap. A `bell` (the sidebar's "needs attention" glyph, `builder-row.ts`) tinted
- * warning-yellow with the pending count when gates await approval; a dim neutral bell with just the
- * `Gates` label when none are pending.
+ * The Row-2 **[Send Fb]** key face (#1410): a comment glyph with the selected
+ * builder's queued-feedback count. `n > 0` → active-green icon + count + `Send Fb`
+ * (press flushes the queue); `n === 0` → dim glyph + `Send Fb` (inert — nothing
+ * queued, or the workspace forwards immediately).
  */
-export function gatesFaceSvg(pendingCount: number): string {
-  if (pendingCount <= 0) {
-    return svg(`${BG}${iconZone('bell', '#63636b')}${DIVIDER}${centeredLine('Gates')}`);
+export function sendFbFaceSvg(n: number): string {
+  if (n <= 0) {
+    return labelFaceSvg('comment', 'Send Fb', '#63636b');
   }
   return svg(
-    `${BG}${iconZone('bell', STATE_COLOR.blocked)}${DIVIDER}` +
-      `${primaryLine(String(pendingCount))}${secondaryLine('Gates')}`,
+    `${BG}${iconZone('comment', STATE_COLOR.active)}${DIVIDER}` +
+      `${primaryLine(String(n))}${secondaryLine('Send Fb')}`,
   );
 }
 

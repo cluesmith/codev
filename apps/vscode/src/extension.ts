@@ -40,7 +40,9 @@ import { activateReviewComments } from './comments/plan-review.js';
 import { activateBuilderReviewComments } from './comments/builder-review.js';
 import { ReviewQueueStore } from './review-queue/store.js';
 import { submitReview, discardReviewComments } from './review-queue/submit.js';
+import { feedbackFile, feedbackHunk, feedbackSelection } from './review-queue/feedback.js';
 import { activateSubmitReviewStatusBar } from './review-queue/status-bar.js';
+import { activateOverviewNudge } from './review-queue/overview-nudge.js';
 import { MarkdownPreviewProvider } from './markdown-preview/preview-provider.js';
 import { BuilderSpawnHandler } from './builder-spawn-handler.js';
 import { BuilderTerminalLinkProvider, ReconnectTerminalLinkProvider, IssueRefTerminalLinkProvider } from './terminal-link-provider.js';
@@ -1201,10 +1203,21 @@ export async function activate(context: vscode.ExtensionContext) {
 		// Submit Review + Discard (#1037): flush / drop the per-builder pending
 		// comment queue. Builder resolution: active diff's owner → sole pending
 		// builder → QuickPick.
-		reg('codev.submitReview', () =>
-			submitReview({ store: reviewQueueStore, terminalManager: terminalManager!, overviewCache })),
+		// The status-bar button invokes this with no arg (resolves the target
+		// builder itself); the deck's Send Fb key relays `send-queue [builderId]`,
+		// so an explicit id string flushes exactly that builder's queue (#1410).
+		reg('codev.submitReview', (builderId?: unknown) =>
+			submitReview(
+				{ store: reviewQueueStore, terminalManager: terminalManager!, overviewCache },
+				typeof builderId === 'string' ? builderId : undefined,
+			)),
 		reg('codev.discardReviewComments', () =>
 			discardReviewComments({ store: reviewQueueStore, terminalManager: terminalManager!, overviewCache })),
+		// Mode-neutral review feedback (#1410): the deck diff/scroll dials press
+		// these; each forwards immediately or enqueues per `codev.diffCodelensMode`.
+		reg('codev.feedbackCurrentFileToBuilder', () => feedbackFile({ store: reviewQueueStore })),
+		reg('codev.feedbackCurrentHunkToBuilder', () => feedbackHunk({ store: reviewQueueStore })),
+		reg('codev.feedbackSelectionToBuilder', () => feedbackSelection({ store: reviewQueueStore })),
 		// Diff codelens mode toggle (#1037): a single title-bar button per mode
 		// (VS Code toolbar buttons have no pressed state — same pattern as the
 		// Agents group-by cycle above); each command shows the mode clicking
@@ -1394,6 +1407,10 @@ export async function activate(context: vscode.ExtensionContext) {
 	// counter. The batched submit itself is `codev.submitReview` above.
 	activateBuilderReviewComments(context, reviewQueueStore, overviewCache);
 	activateSubmitReviewStatusBar(context, reviewQueueStore);
+	// #1410: nudge Tower to rebuild + rebroadcast the overview on a queue mutation
+	// or a feedback-mode change, so the deck's Send Fb badge + dial mode-label
+	// update promptly (Tower has no watcher on the queue files / settings.json).
+	context.subscriptions.push(activateOverviewNudge(reviewQueueStore, connectionManager!));
 
 	// Codev Markdown Preview (#859): a read-only custom editor that renders a
 	// spec/plan/review in the shared artifact-canvas and adds review comments
