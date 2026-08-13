@@ -40,4 +40,7 @@
   `icons/action` used by catch-all "Codev Action" — re-glyphing Codev Action (to `bolt`) would
   fully resolve the picker ambiguity; the terminal→open-terminal mapping itself is baked scope.
 - Verified: check-types ✓, build ✓, `streamdeck validate` ✓, vitest 162 passed.
-- Next: commit fix, push, update PR body, notify architect, porch done.
+- Committed + pushed (fix commit 1d19f99f2), PR #1443 body updated with CMAP round, architect
+  notified.
+- **PR gate open — WAITING for human approval.** `porch approve 1440 pr` is the human's to run
+  (via the architect). Nothing further from me until approval arrives.
