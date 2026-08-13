@@ -19,4 +19,9 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-08-13T00:20:25.415Z'
-updated_at: '2026-08-13T07:28:25.756Z'
+updated_at: '2026-08-13T07:29:28.504Z'
+pr_history:
+  - phase: review
+    pr_number: 1447
+    branch: builder/pir-1073
+    created_at: '2026-08-13T07:29:28.503Z'
