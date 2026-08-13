@@ -29,6 +29,12 @@ function pngVariants(ref: string): string[] {
   return [join(pluginDir, `${ref}.png`), join(pluginDir, `${ref}@2x.png`)];
 }
 
+/** Read a PNG's pixel dimensions from its IHDR chunk (bytes 16–24, big-endian) — no image lib. */
+function pngSize(absPath: string): { w: number; h: number } {
+  const buf = readFileSync(absPath);
+  return { w: buf.readUInt32BE(16), h: buf.readUInt32BE(20) };
+}
+
 describe('manifest icon assets exist on disk', () => {
   const refs = new Set<string>([manifest.Icon, manifest.CategoryIcon]);
   for (const action of manifest.Actions) {
@@ -79,5 +85,14 @@ describe('#1440 dedicated action icons', () => {
         expect(existsSync(png), `missing ${png}`).toBe(true);
       }
     }
+  });
+
+  // The Stream Deck convention: key Image @1x/@2x = 72/144, list Icon @1x/@2x = 20/40. A wrongly
+  // sized asset renders blurry or gets rejected by Elgato validation — pin the committed sizes.
+  it.each(['send-queue', 'open-terminal'])('%s icons ship at the convention sizes', (name) => {
+    expect(pngSize(join(pluginDir, `icons/${name}.png`))).toEqual({ w: 72, h: 72 });
+    expect(pngSize(join(pluginDir, `icons/${name}@2x.png`))).toEqual({ w: 144, h: 144 });
+    expect(pngSize(join(pluginDir, `icons/list/${name}.png`))).toEqual({ w: 20, h: 20 });
+    expect(pngSize(join(pluginDir, `icons/list/${name}@2x.png`))).toEqual({ w: 40, h: 40 });
   });
 });

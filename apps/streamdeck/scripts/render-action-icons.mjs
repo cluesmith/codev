@@ -5,13 +5,17 @@
 // `labelFaceSvg('comment'|'terminal', …)`. So the action-picker icon and the live hardware key
 // agree by construction; changing a glyph in face.ts and re-running this script keeps them aligned.
 //
-// RASTERIZER: system `rsvg-convert` (librsvg). This is a one-time asset build; per the #1440
-// scope we prefer repo-available tooling over adding an npm dependency just to turn SVG into PNG.
-// Re-run manually when a glyph changes:  node scripts/render-action-icons.mjs
+// FIT: the glyphs don't fill their authored 24×24 box (comment ≈ 18×17, terminal ≈ 20×16), and a
+// transparent list icon needs far less padding than a rounded-key image. So we render the glyph,
+// trim it to its true drawn bounding box, then scale that bbox to the SAME fill fraction the
+// existing icons use (measured: list/* ≈ 95% of frame, key images ≈ 56%). Fitting the bbox — not
+// the nominal box — is what keeps the new icons from reading small next to their siblings.
 //
-// Frame matches the existing icon convention (measured from the live approve-gate / action
-// assets): the full key Image is a rounded rect (rx=12) filled #1C2128 with a white glyph; the
-// list/picker Icon is the same glyph, white, on a transparent ground.
+// TOOLING: system `rsvg-convert` (librsvg) rasterizes the vector; system `magick` (ImageMagick)
+// trims to the glyph bbox, fits, centers, and composites over the rounded-key ground. Both are
+// pre-installed dev tools, not npm dependencies — per the #1440 scope, a one-time asset build
+// prefers repo-available tooling over adding a dependency just to turn SVG into PNG. Re-run after a
+// glyph changes:  node scripts/render-action-icons.mjs   (needs: brew install librsvg imagemagick)
 
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
@@ -31,9 +35,10 @@ export const ICONS = [
 
 const GLYPH_COLOR = '#ffffff';
 const BG = '#1C2128'; // rounded-key ground, matching icons/action.png & siblings
-const CORNER_RADIUS = 12; // measured from the existing 72px key images
-const GLYPH_BOX = 24; // GLYPHS are authored in a 24×24 box (see face.ts)
-const GLYPH_SIZE = 40; // rendered glyph size inside the 72px canvas (centered, padded)
+const CORNER_RADIUS = 12; // measured from the existing 72px key images (scales with size)
+const LIST_FILL = 0.94; // glyph bbox / frame for the transparent list icon (siblings ≈ 0.95)
+const KEY_FILL = 0.56; //  glyph bbox / frame for the key image (siblings ≈ 0.56)
+const RENDER_PX = 512; // high-res glyph raster, downscaled by magick for clean antialiasing
 
 /**
  * Reproduce face.ts's `stroked()` wrapper — line glyphs (comment/terminal) are stored as their
@@ -46,11 +51,13 @@ function stroked(color, paths) {
 /**
  * Pull a glyph's inner SVG out of face.ts's GLYPHS map without importing it (GLYPHS is
  * module-private, and face.ts is off-limits to edit while bugfix-1431 is in flight). Supports the
- * two forms GLYPHS uses: `stroked(c, '<…>')` (line glyphs) and a raw `'<… fill="${c}" …>'` string
- * (filled glyphs). Throws loudly if the shape drifts, so a silent stale-icon build can't happen.
+ * two forms GLYPHS uses: `stroked(c, '<…>')` (line glyphs) and a raw `` `<… ${c} …>` `` template
+ * (filled glyphs), and both bare (`comment:`) and quoted (`'pull-request':`) keys. Throws loudly if
+ * the shape drifts, so a silent stale-icon build can't happen.
  */
 export function extractGlyph(faceSrc, key, color) {
-  const line = faceSrc.match(new RegExp(`\\n\\s*${key}:\\s*\\(c\\)\\s*=>\\s*([^\\n]*?),?\\s*\\n`));
+  const k = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const line = faceSrc.match(new RegExp(`\\n\\s*['"]?${k}['"]?:\\s*\\(c\\)\\s*=>\\s*([^\\n]*?),?\\s*\\n`));
   if (!line) throw new Error(`glyph '${key}' not found in face.ts GLYPHS`);
   const rhs = line[1].trim();
   const strokedArg = rhs.match(/^stroked\(c,\s*'(.*)'\)$/);
@@ -60,50 +67,87 @@ export function extractGlyph(faceSrc, key, color) {
   throw new Error(`glyph '${key}' has an unrecognized form: ${rhs}`);
 }
 
-/** Center the 24×24 glyph, scaled to GLYPH_SIZE, inside the 72×72 canvas. */
-function centeredGlyph(inner) {
-  const scale = GLYPH_SIZE / GLYPH_BOX;
-  const offset = (72 - GLYPH_SIZE) / 2;
-  return `<g transform="translate(${offset},${offset}) scale(${scale})">${inner}</g>`;
+/** The glyph on its own, high-res, transparent — the raster both variants trim and fit from. */
+function glyphSvg(inner) {
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${RENDER_PX}" height="${RENDER_PX}" viewBox="0 0 24 24">${inner}</svg>`;
 }
 
-function keySvg(inner) {
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="72" height="72" viewBox="0 0 72 72"><rect width="72" height="72" rx="${CORNER_RADIUS}" fill="${BG}"/>${centeredGlyph(inner)}</svg>`;
+function tmp(tag) {
+  return join(tmpdir(), `sd-icon-1440-${tag}`);
 }
 
-function listSvg(inner) {
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="72" height="72" viewBox="0 0 72 72">${centeredGlyph(inner)}</svg>`;
-}
-
-function rasterize(svg, outPath, size) {
-  const tmp = join(tmpdir(), `sd-icon-${size}-${Math.abs(hash(outPath))}.svg`);
-  writeFileSync(tmp, svg);
+function ensureTool(bin, install) {
   try {
-    execFileSync('rsvg-convert', ['-w', String(size), '-h', String(size), tmp, '-o', outPath]);
-  } finally {
-    rmSync(tmp, { force: true });
+    execFileSync(bin, ['--version'], { stdio: 'ignore' });
+  } catch {
+    throw new Error(`'${bin}' not found — this one-off asset build needs it (${install}).`);
   }
 }
 
-// Stable per-path suffix for the temp filename (Math.random is unavailable in some sandboxes).
-function hash(s) {
-  let h = 0;
-  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
-  return h;
+/** magick expression that trims the high-res glyph to its drawn bbox and scales it to `target` px. */
+function fittedGlyph(glyphPng, target) {
+  return [glyphPng, '-trim', '+repage', '-resize', `${target}x${target}`];
+}
+
+/** Transparent list icon: glyph fit to LIST_FILL of the frame, centered. */
+function renderList(glyphPng, out, size) {
+  const target = Math.round(LIST_FILL * size);
+  execFileSync('magick', [
+    ...fittedGlyph(glyphPng, target),
+    '-background', 'none', '-gravity', 'center', '-extent', `${size}x${size}`,
+    out,
+  ]);
+}
+
+/** Key image: glyph fit to KEY_FILL of the frame, centered over the rounded #1C2128 ground. */
+function renderKey(glyphPng, out, size) {
+  const target = Math.round(KEY_FILL * size);
+  const radius = Math.round((CORNER_RADIUS * size) / 72);
+  const bg = tmp(`bg-${size}.png`);
+  execFileSync('magick', [
+    '-size', `${size}x${size}`, 'xc:none', '-fill', BG,
+    '-draw', `roundrectangle 0,0,${size - 1},${size - 1},${radius},${radius}`,
+    bg,
+  ]);
+  try {
+    execFileSync('magick', [bg, '(', ...fittedGlyph(glyphPng, target), ')', '-gravity', 'center', '-composite', out]);
+  } finally {
+    rmSync(bg, { force: true });
+  }
+}
+
+/** Guard the fix: a list icon must fill the frame like its siblings, not sit small and padded. */
+function assertListCoverage(out, size, min) {
+  const dims = execFileSync('magick', [out, '-trim', '+repage', '-format', '%wx%h', 'info:'], { encoding: 'utf8' });
+  const [w, h] = dims.trim().split('x').map(Number);
+  const coverage = Math.max(w, h) / size;
+  if (coverage < min) {
+    throw new Error(`${out}: glyph fills ${(coverage * 100).toFixed(0)}% of the frame, below the ${(min * 100).toFixed(0)}% convention floor`);
+  }
 }
 
 function main() {
+  ensureTool('rsvg-convert', 'brew install librsvg');
+  ensureTool('magick', 'brew install imagemagick');
+
   const faceSrc = readFileSync(FACE_TS, 'utf8');
   mkdirSync(join(PLUGIN, 'icons', 'list'), { recursive: true });
 
   for (const { name, glyph } of ICONS) {
-    const inner = extractGlyph(faceSrc, glyph, GLYPH_COLOR);
-    const key = keySvg(inner);
-    const list = listSvg(inner);
-    rasterize(key, join(PLUGIN, 'icons', `${name}.png`), 72);
-    rasterize(key, join(PLUGIN, 'icons', `${name}@2x.png`), 144);
-    rasterize(list, join(PLUGIN, 'icons', 'list', `${name}.png`), 20);
-    rasterize(list, join(PLUGIN, 'icons', 'list', `${name}@2x.png`), 40);
+    const svgFile = tmp(`${glyph}.svg`);
+    const glyphPng = tmp(`${glyph}.png`);
+    writeFileSync(svgFile, glyphSvg(extractGlyph(faceSrc, glyph, GLYPH_COLOR)));
+    execFileSync('rsvg-convert', ['-w', String(RENDER_PX), '-h', String(RENDER_PX), svgFile, '-o', glyphPng]);
+    try {
+      renderKey(glyphPng, join(PLUGIN, 'icons', `${name}.png`), 72);
+      renderKey(glyphPng, join(PLUGIN, 'icons', `${name}@2x.png`), 144);
+      renderList(glyphPng, join(PLUGIN, 'icons', 'list', `${name}.png`), 20);
+      renderList(glyphPng, join(PLUGIN, 'icons', 'list', `${name}@2x.png`), 40);
+      assertListCoverage(join(PLUGIN, 'icons', 'list', `${name}@2x.png`), 40, 0.8);
+    } finally {
+      rmSync(svgFile, { force: true });
+      rmSync(glyphPng, { force: true });
+    }
     console.log(`rendered ${name} (from GLYPHS.${glyph}) → 72/144/20/40`);
   }
 }

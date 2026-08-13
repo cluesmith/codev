@@ -25,10 +25,19 @@
   fill `#1C2128` + white glyph; list icon = transparent + white glyph.
 
 ## Status
-- Implemented. 8 PNGs rendered (send-queue←comment, open-terminal←terminal), manifest repointed,
-  6 dead PNGs removed. Render script committed. Two vitest files added.
-- Verified: check-types ✓, esbuild build ✓ (after building @cluesmith/codev-sdk dist — the
-  pre-existing "cannot find codev-sdk" errors are a fresh-worktree artifact, not from this change),
-  `streamdeck validate` ✓, vitest 160 passed. Glyphs visually confirmed (comment bubble + terminal
-  window); key-image bg/corner pixels byte-match the existing action.png convention.
-- Next: commit, open PR with review in body (no review file — AIR).
+- Implemented + PR #1443 opened (review in body).
+- CMAP (AIR PR): gemini=APPROVE(HIGH), claude=REQUEST_CHANGES(HIGH), codex=unavailable (external
+  OpenAI billing — "no credits remaining", not our code).
+- **Acted on Claude's blocking finding (verified against the PNGs first):** the first-pass list
+  icons filled only ~45% of the frame vs the ~95% convention, because `listSvg` reused the
+  key-frame padding and the glyphs don't fill their 24×24 box. Rewrote the render pipeline to
+  rasterize the glyph, trim to its true bbox, then fit to the convention's fill fraction
+  (list 0.94, key 0.56) via `magick` + `rsvg-convert`; added a self-check that fails the build if a
+  list icon drops below 80% coverage. Re-measured: list @2x now 38×36 / 38×30 (sibling 38×34); key
+  @2x 81×77 / 81×65 (sibling 80×68). Also addressed Claude's minors: friendly ENOENT for both
+  system tools, quoted-key-safe `extractGlyph` regex, and a zero-dep PNG-dimension test guard.
+- Deferred (architect's call, noted in PR): open-terminal's glyph resembles the still-shared
+  `icons/action` used by catch-all "Codev Action" — re-glyphing Codev Action (to `bolt`) would
+  fully resolve the picker ambiguity; the terminal→open-terminal mapping itself is baked scope.
+- Verified: check-types ✓, build ✓, `streamdeck validate` ✓, vitest 162 passed.
+- Next: commit fix, push, update PR body, notify architect, porch done.
