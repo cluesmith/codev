@@ -35,6 +35,10 @@ Commits on builder/pir-1410:
 - README: two-zone layout, mode-neutral feedback, coherence model, builder-active activity-hook prerequisite (E1) with config example.
 - Tests: streamdeck 126 pass (windowing, SendFb, NextAttn, faces, mode label, dial verbs); vscode 822 pass (feedback router, relay verbs, canvas-owner); codev overview (countQueuedFeedback/readFeedbackMode).
 
+## Dev-approval gate revisions
+- 2026-08-13: Root cause of "deck buttons/dials not showing after relink": the plugin bin/plugin.js was never built in this worktree (root `pnpm build` intentionally skips apps/streamdeck + apps/vscode — they're not npm-published; CI builds them in separate jobs, test.yml:41 comments this). Fix: `pnpm --filter @cluesmith/codev-streamdeck build`. Not a bug (by design) but a footgun; flagged to Amr as a possible build:all/docs follow-up (cross-cutting, out of #1410 scope).
+- 2026-08-13: Amr — Row 2 key 4 should be per-builder (Approve/Dev/SendFb all are; Next/Attention was fleet-level, odd one out). Replaced NextAttentionAction with OpenTerminalAction (VerbKey, open-terminal [selectedId], like DevServerAction). Fleet jump-to-next + gate-count DROPPED (covered by Row 1 window gate-faces + Zoom dial N⚠ count). Removed dead gatesFaceSvg + store.topGateBuilderId. manifest: next-attention→open-terminal. Deck 122 tests pass, check-types clean, plugin builds+validates. Plan updated with revision note. req-6 outcome unchanged (single selected-scoped approve). Still at dev-approval gate.
+
 ## Scope note (intentional deferral)
 - SD+ PROFILE (Codev.streamDeckProfile zip) left BLANK as it has always shipped (Actions:null; #1404 shipped Row 1 the same way). No known-good sdProfile Actions schema in history to safely pre-populate; a malformed binary profile would fail import at the hardware session. Two-zone key layout is documented in README; reviewer places the 8 keys at the dev-approval hardware session. Flag to architect.
 
