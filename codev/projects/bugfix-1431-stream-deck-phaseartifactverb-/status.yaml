@@ -1,0 +1,14 @@
+id: bugfix-1431
+title: stream-deck-phaseartifactverb-
+protocol: bugfix
+phase: investigate
+plan_phases: []
+current_plan_phase: null
+gates:
+  pr:
+    status: pending
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-08-13T01:30:28.426Z'
+updated_at: '2026-08-13T01:30:28.427Z'
