@@ -223,23 +223,6 @@ export function sendFbFaceSvg(n: number): string {
 }
 
 /**
- * The Row-2 **[Open Terminal]** key face (#1410): same composite frame as the other
- * keys. With a builder selected it shows that builder's number over a `Terminal`
- * band (a neutral terminal glyph — this is a plain action, not a state); with none
- * selected it's a dim, inert `Terminal`.
- */
-export function terminalFaceSvg(b: Pick<OverviewBuilder, 'id' | 'issueId'> | undefined): string {
-  if (!b) {
-    return labelFaceSvg('terminal', 'Terminal', '#63636b');
-  }
-  const number = b.issueId ? `#${b.issueId}` : b.id;
-  return svg(
-    `${BG}${iconZone('terminal', '#a9a9b2')}${DIVIDER}` +
-      `${primaryLine(number)}${secondaryLine('Terminal')}`,
-  );
-}
-
-/**
  * A simple action-key face: an icon over a single centered label, no primary datum. For keys that
  * aren't builder-state-coded (e.g. the Run Dev key) but should still match the composite pattern
  * — icon in the zone, text in the band, never stacked.

@@ -277,24 +277,16 @@ describe('OpenTerminalAction (Row 2 — per-builder, #1410)', () => {
     expect(ctx.sent[0]).toEqual({ verb: 'open-terminal', args: ['pir-2'], ws: '/work/alpha' });
   });
 
-  it('renders the composite face (terminal glyph + selected number over a Terminal band)', () => {
+  it('renders a plain label face (terminal glyph + "Terminal"), not the builder id', () => {
     const ctx = makeStore();
     ctx.store.syncToBuilder('pir-2'); // issueId 102
-    const key = { id: 'T', isKey: () => true, setImage: vi.fn(), setTitle: vi.fn() };
-    new OpenTerminalAction(ctx.store).onWillAppear({ action: key, payload: {} } as never);
+    const key = { isKey: () => true, setImage: vi.fn(), setTitle: vi.fn() };
+    new OpenTerminalAction(ctx.store).onWillAppear({ action: key, payload: { settings: {} } } as never);
     const face = Buffer.from(String(key.setImage.mock.calls.at(-1)?.[0]).split(',')[1], 'base64').toString('utf8');
     expect(face).toContain('Terminal');
-    expect(face).toContain('#102'); // the selected builder's number
+    expect(face).toContain('rect x="3" y="5"'); // the terminal glyph
+    expect(face).not.toContain('#102'); // the builder id lives on Row 1's accent, not here
     expect(key.setTitle).toHaveBeenCalledWith(''); // title layer suppressed
-  });
-
-  it('is inert (alerts, sends nothing) when no builder is selected', async () => {
-    const ctx = makeStore();
-    ctx.store.overview = { builders: [], pendingPRs: [], backlog: [], recentlyClosed: [] } as never;
-    const key = { id: 'T', isKey: () => true, setImage: vi.fn(), setTitle: vi.fn(), showOk: vi.fn(), showAlert: vi.fn() };
-    await new OpenTerminalAction(ctx.store).onKeyDown({ action: key, payload: { settings: {} } } as never);
-    expect(ctx.sent).toHaveLength(0);
-    expect(key.showAlert).toHaveBeenCalled();
   });
 });
 

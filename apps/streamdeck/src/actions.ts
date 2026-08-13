@@ -15,7 +15,7 @@ import type {
   CanvasCommandClientErrorCode,
 } from '@cluesmith/codev-sdk/controller';
 import type { CodevStore } from './store.js';
-import { approveFaceSvg, builderFaceSvg, faceForBuilder, labelFaceSvg, sendFbFaceSvg, terminalFaceSvg, svgToDataUri } from './face.js';
+import { approveFaceSvg, builderFaceSvg, faceForBuilder, labelFaceSvg, sendFbFaceSvg, svgToDataUri } from './face.js';
 
 /**
  * The Stream Deck actions — thin adapters over CodevStore. Each maps a physical
@@ -289,41 +289,21 @@ export class SendQueueAction extends SingletonAction {
 /**
  * Row-2 Open Terminal key (#1410): opens the SELECTED builder's terminal — the
  * per-builder complement to the Builder Action (which opens the phase artifact).
- * Renders the shared composite face (terminal glyph + selected builder's number
- * over a `Terminal` band); inert when nothing is selected.
+ * Same shape as the Dev Server key: a `VerbKey` firing `open-terminal [selectedId]`
+ * with a static label face (terminal glyph + `Terminal`). Which builder is selected
+ * is shown by Row 1's accent, not repeated here.
  */
-export class OpenTerminalAction extends SingletonAction {
+export class OpenTerminalAction extends VerbKey {
   override readonly manifestId = 'com.cluesmith.codev.open-terminal';
-  private readonly keys = new Map<string, KeyAction>();
-
-  constructor(private readonly store: CodevStore) {
-    super();
-    this.store.onChange(() => this.renderAll());
-  }
-
-  override onWillAppear(ev: WillAppearEvent): void {
-    if (!ev.action.isKey()) return;
-    this.keys.set(ev.action.id, ev.action);
-    this.renderTo(ev.action);
-  }
-  override onWillDisappear(ev: WillDisappearEvent): void {
-    this.keys.delete(ev.action.id);
-  }
-  override async onKeyDown(ev: KeyDownEvent): Promise<void> {
+  protected readonly defaultVerb = 'open-terminal';
+  protected override args(): unknown[] {
     const b = this.store.selectedBuilder();
-    if (!b) {
-      await ev.action.showAlert();
-      return;
-    }
-    const res = await this.store.client.sendCommand('open-terminal', [b.id], this.store.selectedWorkspacePath());
-    await ack(ev.action, res.ok);
+    return b ? [b.id] : [];
   }
-  private renderAll(): void {
-    for (const action of this.keys.values()) this.renderTo(action);
-  }
-  private renderTo(action: KeyAction): void {
-    void action.setImage(svgToDataUri(terminalFaceSvg(this.store.selectedBuilder())));
-    void action.setTitle('');
+  override onWillAppear(ev: WillAppearEvent<VerbSettings>): void {
+    if (!ev.action.isKey()) return;
+    void ev.action.setImage(svgToDataUri(labelFaceSvg('terminal', 'Terminal', '#a9a9b2')));
+    void ev.action.setTitle('');
   }
 }
 

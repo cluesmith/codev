@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { OverviewBuilder } from '@cluesmith/codev-sdk/controller';
-import { builderState, stateLabel, faceForBuilder, builderFaceSvg, approveFaceSvg, sendFbFaceSvg, terminalFaceSvg, labelFaceSvg, svgToDataUri } from '../face.js';
+import { builderState, stateLabel, faceForBuilder, builderFaceSvg, approveFaceSvg, sendFbFaceSvg, labelFaceSvg, svgToDataUri } from '../face.js';
 
 /** Minimal builder fixture — only the fields the face reads matter; the rest are filler. */
 function builder(over: Partial<OverviewBuilder>): OverviewBuilder {
@@ -135,20 +135,6 @@ describe('sendFbFaceSvg (#1410)', () => {
     const svg = sendFbFaceSvg(0);
     expect(svg).toContain('Send Fb');
     expect(svg).not.toContain('#73c991');
-  });
-});
-
-describe('terminalFaceSvg (#1410)', () => {
-  it('renders the composite face: selected number over a Terminal band + terminal glyph', () => {
-    const svg = terminalFaceSvg(builder({ issueId: '102' }));
-    expect(svg).toContain('#102');
-    expect(svg).toContain('Terminal');
-    expect(svg).toContain('rect x="3" y="5"'); // the terminal glyph
-  });
-  it('is dim + inert (just "Terminal", no number) when nothing is selected', () => {
-    const svg = terminalFaceSvg(undefined);
-    expect(svg).toContain('Terminal');
-    expect(svg).not.toContain('#102');
   });
 });
 
