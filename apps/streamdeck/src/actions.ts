@@ -15,7 +15,7 @@ import type {
   CanvasCommandClientErrorCode,
 } from '@cluesmith/codev-sdk/controller';
 import type { CodevStore } from './store.js';
-import { approveFaceSvg, builderFaceSvg, faceForBuilder, sendFbFaceSvg, svgToDataUri } from './face.js';
+import { approveFaceSvg, builderFaceSvg, faceForBuilder, sendFbFaceSvg, terminalFaceSvg, svgToDataUri } from './face.js';
 
 /**
  * The Stream Deck actions — thin adapters over CodevStore. Each maps a physical
@@ -73,19 +73,6 @@ export class DevServerAction extends VerbKey {
   }
 }
 
-/**
- * Row-2 Open Terminal key (#1410): opens the SELECTED builder's terminal — the
- * per-builder complement to the Builder Action (which opens the phase artifact).
- * Same selected-scoped shape as Dev Server. No PI.
- */
-export class OpenTerminalAction extends VerbKey {
-  override readonly manifestId = 'com.cluesmith.codev.open-terminal';
-  protected readonly defaultVerb = 'open-terminal';
-  protected override args(): unknown[] {
-    const b = this.store.selectedBuilder();
-    return b ? [b.id] : [];
-  }
-}
 
 // ── Slot keys (pinned builder board) ────────────────────────────────────────
 
@@ -286,6 +273,47 @@ export class SendQueueAction extends SingletonAction {
   }
   private renderTo(action: KeyAction): void {
     void action.setImage(svgToDataUri(sendFbFaceSvg(this.store.queuedFeedback(this.store.selectedBuilder()?.id))));
+    void action.setTitle('');
+  }
+}
+
+/**
+ * Row-2 Open Terminal key (#1410): opens the SELECTED builder's terminal — the
+ * per-builder complement to the Builder Action (which opens the phase artifact).
+ * Renders the shared composite face (terminal glyph + selected builder's number
+ * over a `Terminal` band); inert when nothing is selected.
+ */
+export class OpenTerminalAction extends SingletonAction {
+  override readonly manifestId = 'com.cluesmith.codev.open-terminal';
+  private readonly keys = new Map<string, KeyAction>();
+
+  constructor(private readonly store: CodevStore) {
+    super();
+    this.store.onChange(() => this.renderAll());
+  }
+
+  override onWillAppear(ev: WillAppearEvent): void {
+    if (!ev.action.isKey()) return;
+    this.keys.set(ev.action.id, ev.action);
+    this.renderTo(ev.action);
+  }
+  override onWillDisappear(ev: WillDisappearEvent): void {
+    this.keys.delete(ev.action.id);
+  }
+  override async onKeyDown(ev: KeyDownEvent): Promise<void> {
+    const b = this.store.selectedBuilder();
+    if (!b) {
+      await ev.action.showAlert();
+      return;
+    }
+    const res = await this.store.client.sendCommand('open-terminal', [b.id], this.store.selectedWorkspacePath());
+    await ack(ev.action, res.ok);
+  }
+  private renderAll(): void {
+    for (const action of this.keys.values()) this.renderTo(action);
+  }
+  private renderTo(action: KeyAction): void {
+    void action.setImage(svgToDataUri(terminalFaceSvg(this.store.selectedBuilder())));
     void action.setTitle('');
   }
 }

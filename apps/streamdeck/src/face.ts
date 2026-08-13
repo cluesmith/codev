@@ -44,7 +44,7 @@ const STATE_COLOR: Record<BuilderState, string> = {
 };
 
 /** The glyphs the face can draw: a gate shape when blocked, the bolt otherwise. */
-export type GlyphKey = 'bolt' | 'book' | 'checklist' | 'code' | 'pull-request' | 'verified' | 'bell' | 'comment';
+export type GlyphKey = 'bolt' | 'book' | 'checklist' | 'code' | 'pull-request' | 'verified' | 'bell' | 'comment' | 'terminal';
 
 /**
  * Gate id → glyph. The streamdeck twin of `gateIconFor` in `apps/vscode/src/views/builder-row.ts`
@@ -77,6 +77,7 @@ const GLYPHS: Record<GlyphKey, (color: string) => string> = {
   verified: (c) => stroked(c, '<path d="M12 3l7 3v5c0 4.5-3 7.6-7 9.2C8 18.6 5 15.5 5 11V6z"/><path d="M8.6 12l2.3 2.3 4.6-4.6"/>'),
   bell: (c) => stroked(c, '<path d="M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6z"/><path d="M10.5 20a1.6 1.6 0 0 0 3 0"/>'),
   comment: (c) => stroked(c, '<path d="M4 5h16v11H10l-4 4v-4H4z"/>'),
+  terminal: (c) => stroked(c, '<rect x="3" y="5" width="18" height="14" rx="1.5"/><path d="M7 10l3 2.5-3 2.5"/><path d="M12.5 15h4"/>'),
 };
 
 /** Wrap line-glyph paths in a shared stroke group (round caps/joins, like the codicons). */
@@ -217,6 +218,23 @@ export function sendFbFaceSvg(n: number): string {
   return svg(
     `${BG}${iconZone('comment', STATE_COLOR.active)}${DIVIDER}` +
       `${primaryLine(String(n))}${secondaryLine('Send Fb')}`,
+  );
+}
+
+/**
+ * The Row-2 **[Open Terminal]** key face (#1410): same composite frame as the other
+ * keys. With a builder selected it shows that builder's number over a `Terminal`
+ * band (a neutral terminal glyph — this is a plain action, not a state); with none
+ * selected it's a dim, inert `Terminal`.
+ */
+export function terminalFaceSvg(b: Pick<OverviewBuilder, 'id' | 'issueId'> | undefined): string {
+  if (!b) {
+    return svg(`${BG}${iconZone('terminal', '#63636b')}${DIVIDER}${centeredLine('Terminal')}`);
+  }
+  const number = b.issueId ? `#${b.issueId}` : b.id;
+  return svg(
+    `${BG}${iconZone('terminal', '#a9a9b2')}${DIVIDER}` +
+      `${primaryLine(number)}${secondaryLine('Terminal')}`,
   );
 }
 
