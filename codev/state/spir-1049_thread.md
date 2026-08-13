@@ -69,3 +69,27 @@ Actual per-mode rendering is out of scope (owned by participating-feature issues
   supersession explicitly (Constraints).
 - Gate still OPEN — spec revised in place (pre-approval). Need to ask architect: fresh consult on
   revised design, or approve as-is? Did NOT advance porch state.
+
+### 2026-08-13 — Issue updated + iter2 cmap (architect-requested)
+- Architect: "update the issue to match the specs" then "run cmap". Done both.
+- Updated issue #1049 body surgically: removed all pinning (proposed pattern, panel header,
+  architecture, ACs, plan-gate decisions, out-of-scope), added summary/detail + derived attachment
+  + tab-based context, fixed marker format + trigger-set facts. Rest preserved.
+- Ran cmap iter2 (manual, architect-requested — outside porch's iteration tracking; porch still at
+  spec-approval gate). Verdicts: Gemini APPROVE, Codex REQUEST_CHANGES, Claude COMMENT (all HIGH).
+  Claude re-verified all codebase claims: "unusually high" accuracy. Design validated.
+- Strongest finding (Codex+Claude, source-verified): my "most-recently-focused surface wins" lean
+  has NO backing VSCode event for the EXIT path — returning focus from a builder terminal to an
+  already-active editor fires none of tab-group/terminal/diff-registry events and activeTerminal
+  stays set → Builder Inspector can't exit. Reframed as plan-gate API-feasibility question
+  (candidate: onDidChangeTextEditorSelection + webview/terminal focus signal; accept some returns
+  fire nothing). Added "never EXITS" risk row (had only "never triggers").
+- Other iter2 fixes adopted: (a) locked precedence order in spec (terminal→diff→artifact→attention);
+  (b) navigability per mode — CodeReview/BuilderInspector/Attention always navigable, DocReview
+  disabled w/o artifact; (c) REMOVED sticky-input from umbrella (contradicted "immediate follow
+  context"; draft preservation → participating mode); (d) dropped stale "amend issue" clause
+  (already done); (e) placeholder retired + named 3 breaking manifest tests; (f) 7 render targets
+  (no {document-review,summary}); (g) split ~50ms feel-check from O(1) automated assertion; (h)
+  defined minimum summary/drill-in UI (builder-id stub) for umbrella scope.
+- Rebuttal: 1049-specify-iter2-rebuttals.md. Gate still OPEN; porch state untouched.
+- Next: report verdicts to architect; ready for spec-approval when they approve.
