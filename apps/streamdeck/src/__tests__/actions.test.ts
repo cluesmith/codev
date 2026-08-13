@@ -75,7 +75,9 @@ describe('verb keypads', () => {
     const ev = keyEvent();
     await new CodevAction(ctx.store).onKeyDown(ev as never);
     expect(ctx.sent).toEqual([{ verb: 'refresh-overview', args: [], ws: '/work/alpha' }]);
-    expect(ev.action.showOk).toHaveBeenCalled();
+    // Success is silent now (no green checkmark); only failures alert.
+    expect(ev.action.showOk).not.toHaveBeenCalled();
+    expect(ev.action.showAlert).not.toHaveBeenCalled();
   });
 
   it('CodevAction honors a settings verb override', async () => {

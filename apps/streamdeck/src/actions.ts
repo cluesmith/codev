@@ -35,7 +35,9 @@ function settingsVerb(ev: KeyDownEvent): string | undefined {
 }
 
 async function ack(action: KeyAction, ok: boolean): Promise<void> {
-  await (ok ? action.showOk() : action.showAlert());
+  // Success is silent — the green "OK" checkmark was redundant press feedback. Failures still
+  // surface a red alert so a rejected command is never silent.
+  if (!ok) await action.showAlert();
 }
 
 // ── Verb keypads ──────────────────────────────────────────────────────────
