@@ -15,7 +15,7 @@ import type {
   CanvasCommandClientErrorCode,
 } from '@cluesmith/codev-sdk/controller';
 import type { CodevStore } from './store.js';
-import { builderFaceSvg, faceForBuilder, gatesFaceSvg, svgToDataUri } from './face.js';
+import { builderFaceSvg, faceForBuilder, gatesFaceSvg, labelFaceSvg, svgToDataUri } from './face.js';
 
 /**
  * The Stream Deck actions — thin adapters over CodevStore. Each maps a physical
@@ -65,13 +65,20 @@ export class CodevAction extends VerbKey {
   protected readonly defaultVerb = 'refresh-overview';
 }
 
-/** Run the dev server for the cursor-selected builder's worktree (no PI). */
+/** Run dev for the cursor-selected builder's worktree (no PI). */
 export class DevServerAction extends VerbKey {
   override readonly manifestId = 'com.cluesmith.codev.dev-server';
   protected readonly defaultVerb = 'run-dev';
   protected override args(): unknown[] {
     const b = this.store.selectedBuilder();
     return b ? [b.id] : [];
+  }
+  // Render the composite face (play icon + "Dev" label) so this key matches the other keys instead
+  // of showing a bare icon. Static — the label doesn't track running state.
+  override onWillAppear(ev: WillAppearEvent<VerbSettings>): void {
+    if (!ev.action.isKey()) return;
+    void ev.action.setImage(svgToDataUri(labelFaceSvg('play', 'Dev', '#73c991')));
+    void ev.action.setTitle('');
   }
 }
 

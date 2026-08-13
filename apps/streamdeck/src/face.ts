@@ -44,7 +44,7 @@ const STATE_COLOR: Record<BuilderState, string> = {
 };
 
 /** The glyphs the face can draw: a gate shape when blocked, the bolt otherwise. */
-export type GlyphKey = 'bolt' | 'book' | 'checklist' | 'code' | 'pull-request' | 'verified' | 'bell';
+export type GlyphKey = 'bolt' | 'book' | 'checklist' | 'code' | 'pull-request' | 'verified' | 'bell' | 'play';
 
 /**
  * Gate id → glyph. The streamdeck twin of `gateIconFor` in `apps/vscode/src/views/builder-row.ts`
@@ -76,6 +76,7 @@ const GLYPHS: Record<GlyphKey, (color: string) => string> = {
     stroked(c, '<circle cx="7" cy="6" r="2.3"/><circle cx="7" cy="18" r="2.3"/><circle cx="17" cy="18" r="2.3"/><path d="M7 8.3v7.4"/><path d="M17 15.7V12a3 3 0 0 0-3-3h-3.5"/>'),
   verified: (c) => stroked(c, '<path d="M12 3l7 3v5c0 4.5-3 7.6-7 9.2C8 18.6 5 15.5 5 11V6z"/><path d="M8.6 12l2.3 2.3 4.6-4.6"/>'),
   bell: (c) => stroked(c, '<path d="M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6z"/><path d="M10.5 20a1.6 1.6 0 0 0 3 0"/>'),
+  play: (c) => `<path d="M8 5v14l11-7z" fill="${c}"/>`, // VS Code's Run/Start-Dev affordance
 };
 
 /** Wrap line-glyph paths in a shared stroke group (round caps/joins, like the codicons). */
@@ -190,6 +191,15 @@ export function gatesFaceSvg(pendingCount: number): string {
     `${BG}${iconZone('bell', STATE_COLOR.blocked)}${DIVIDER}` +
       `${primaryLine(String(pendingCount))}${secondaryLine('Gates')}`,
   );
+}
+
+/**
+ * A simple action-key face: an icon over a single centered label, no primary datum. For keys that
+ * aren't builder-state-coded (e.g. the Run Dev key) but should still match the composite pattern
+ * — icon in the zone, text in the band, never stacked.
+ */
+export function labelFaceSvg(icon: GlyphKey, label: string, color: string): string {
+  return svg(`${BG}${iconZone(icon, color)}${DIVIDER}${centeredLine(label)}`);
 }
 
 /** Shared face frame: the rounded key ground and the hairline that splits icon zone from text band. */

@@ -50,3 +50,28 @@ imports — a pre-existing environment step, not part of the fix.
 Results in this worktree: check-types clean, build clean, tests 108/108.
 `porch check` green (build + tests).
 
+## Scope update — Run Dev key polish (2026-08-13)
+
+Architect folded in a second owner-directed, live-validated change (main's fold
+ruling, issue #1437 comment 5274289164). Superseding patch carries BOTH changes as
+one batch; PR #1438 stays the single PR. Applied the additional pieces verbatim:
+
+- `apps/streamdeck/src/face.ts` — new `play` glyph (`M8 5v14l11-7z`) and a
+  `labelFaceSvg(icon, label, color)` helper: icon zone + centered label, the
+  composite frame for keys that aren't builder-state-coded.
+- `apps/streamdeck/src/actions.ts` — `DevServerAction.onWillAppear` now renders the
+  composite face (green play glyph + "Dev" label) via `labelFaceSvg`, so the Run
+  Dev key matches the others instead of showing a bare icon. Static label (doesn't
+  track running state). Doc comment reworded "dev server" → "dev".
+- `apps/streamdeck/com.cluesmith.codev.sdPlugin/manifest.json` — action Name
+  "Dev Server" → "Run Dev"; Tooltip and plugin Description drop "dev server"
+  vocabulary. UUID (`com.cluesmith.codev.dev-server`) and icon filenames unchanged.
+  "Tower server" wording left intact (a different thing).
+- Tests: `actions.test.ts` gains a DevServerAction composite-face assertion;
+  `face.test.ts` gains a `labelFaceSvg` block.
+
+Both changes were validated live on the held worktree (110/110 + build + validate).
+Reproduced here: check-types clean, build clean, `streamdeck validate` successful,
+tests 110/110.
+
+

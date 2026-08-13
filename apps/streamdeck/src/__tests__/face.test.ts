@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { OverviewBuilder } from '@cluesmith/codev-sdk/controller';
-import { builderState, stateLabel, faceForBuilder, builderFaceSvg, gatesFaceSvg, svgToDataUri } from '../face.js';
+import { builderState, stateLabel, faceForBuilder, builderFaceSvg, gatesFaceSvg, labelFaceSvg, svgToDataUri } from '../face.js';
 
 /** Minimal builder fixture — only the fields the face reads matter; the rest are filler. */
 function builder(over: Partial<OverviewBuilder>): OverviewBuilder {
@@ -121,6 +121,17 @@ describe('gatesFaceSvg', () => {
     const svg = gatesFaceSvg(0);
     expect(svg).toContain('Gates');
     expect(svg).not.toContain('#cca700');
+  });
+});
+
+describe('labelFaceSvg', () => {
+  it('renders an icon over a single centered label (the Run Dev pattern)', () => {
+    const svg = labelFaceSvg('play', 'Dev', '#73c991');
+    expect(svg.startsWith('<svg')).toBe(true);
+    expect(svg).toContain('Dev');
+    expect(svg).toContain('#73c991');
+    expect(svg).toContain('M8 5v14l11-7z'); // the play glyph
+    expect(svg).toContain('width="72"');
   });
 });
 
