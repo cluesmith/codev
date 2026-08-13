@@ -52,13 +52,13 @@
       "Name": "Send Feedback",
       "UUID": "com.cluesmith.codev.send-queue",
       "Tooltip": "Flush the selected builder's queued review feedback. Badge shows the queued count; inert when nothing is queued (or the workspace forwards immediately).",
-      "Icon": "icons/list/action",
+      "Icon": "icons/list/send-queue",
       "Controllers": [
         "Keypad"
       ],
       "States": [
         {
-          "Image": "icons/action",
+          "Image": "icons/send-queue",
           "TitleAlignment": "bottom"
         }
       ]
@@ -67,13 +67,13 @@
       "Name": "Open Terminal",
       "UUID": "com.cluesmith.codev.open-terminal",
       "Tooltip": "Open the selected builder's terminal — the per-builder complement to Builder Action's open-artifact.",
-      "Icon": "icons/list/action",
+      "Icon": "icons/list/open-terminal",
       "Controllers": [
         "Keypad"
       ],
       "States": [
         {
-          "Image": "icons/action",
+          "Image": "icons/open-terminal",
           "TitleAlignment": "bottom"
         }
       ]

@@ -1,0 +1,17 @@
+id: '1440'
+title: stream-deck-polish-follow-ups-
+protocol: air
+phase: pr
+plan_phases: []
+current_plan_phase: null
+gates:
+  pr:
+    status: approved
+    requested_at: '2026-08-13T01:51:46.079Z'
+    approved_at: '2026-08-13T07:25:03.413Z'
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-08-13T01:33:00.163Z'
+updated_at: '2026-08-13T07:25:03.413Z'
+pr_ready_for_human: false
