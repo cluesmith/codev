@@ -84,6 +84,10 @@
         "title": "Codev: Forward Current Hunk to Builder"
       },
       {
+        "command": "codev.forwardCursorContextToBuilder",
+        "title": "Codev: Forward Symbol / Hunk at Cursor to Builder"
+      },
+      {
         "command": "codev.openArchitectTerminal",
         "title": "Codev: Open Architect Terminal"
       },
@@ -918,6 +922,12 @@
         "key": "ctrl+k b",
         "mac": "cmd+k b",
         "when": "codev.activeEditorIsBuilderFile && editorHasSelection"
+      },
+      {
+        "command": "codev.forwardCursorContextToBuilder",
+        "key": "ctrl+k h",
+        "mac": "cmd+k h",
+        "when": "codev.activeEditorIsBuilderFile && editorTextFocus"
       },
       {
         "command": "codev.openIssueById",
