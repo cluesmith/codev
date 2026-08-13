@@ -3,6 +3,7 @@ import { CodevStore } from '../store.js';
 import type { ControllerClient, TowerWorkspace } from '@cluesmith/codev-sdk/controller';
 import {
   CodevAction,
+  DevServerAction,
   BuilderAction,
   ApproveGate,
   SendQueueAction,
@@ -77,7 +78,19 @@ describe('verb keypads', () => {
     const ev = keyEvent();
     await new CodevAction(ctx.store).onKeyDown(ev as never);
     expect(ctx.sent).toEqual([{ verb: 'refresh-overview', args: [], ws: '/work/alpha' }]);
-    expect(ev.action.showOk).toHaveBeenCalled();
+    // Success is silent now (no green checkmark); only failures alert.
+    expect(ev.action.showOk).not.toHaveBeenCalled();
+    expect(ev.action.showAlert).not.toHaveBeenCalled();
+  });
+
+  it('DevServerAction renders a composite face (play icon + "Dev" label), not a bare icon', () => {
+    const key = { isKey: () => true, setImage: vi.fn(), setTitle: vi.fn() };
+    new DevServerAction(ctx.store).onWillAppear({ action: key, payload: { settings: {} } } as never);
+    const arg = String(key.setImage.mock.calls.at(-1)?.[0] ?? '');
+    expect(arg.startsWith('data:image/svg+xml;base64,')).toBe(true);
+    const face = Buffer.from(arg.slice('data:image/svg+xml;base64,'.length), 'base64').toString('utf8');
+    expect(face).toContain('Dev');
+    expect(face).toContain('M8 5v14l11-7z'); // play glyph
   });
 
   it('CodevAction honors a settings verb override', async () => {

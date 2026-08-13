@@ -44,7 +44,7 @@ const STATE_COLOR: Record<BuilderState, string> = {
 };
 
 /** The glyphs the face can draw: a gate shape when blocked, the bolt otherwise. */
-export type GlyphKey = 'bolt' | 'book' | 'checklist' | 'code' | 'pull-request' | 'verified' | 'bell' | 'comment' | 'terminal';
+export type GlyphKey = 'bolt' | 'book' | 'checklist' | 'code' | 'pull-request' | 'verified' | 'bell' | 'comment' | 'terminal' | 'play';
 
 /**
  * Gate id → glyph. The streamdeck twin of `gateIconFor` in `apps/vscode/src/views/builder-row.ts`
@@ -78,6 +78,7 @@ const GLYPHS: Record<GlyphKey, (color: string) => string> = {
   bell: (c) => stroked(c, '<path d="M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6z"/><path d="M10.5 20a1.6 1.6 0 0 0 3 0"/>'),
   comment: (c) => stroked(c, '<path d="M4 5h16v11H10l-4 4v-4H4z"/>'),
   terminal: (c) => stroked(c, '<rect x="3" y="5" width="18" height="14" rx="1.5"/><path d="M7 10l3 2.5-3 2.5"/><path d="M12.5 15h4"/>'),
+  play: (c) => `<path d="M8 5v14l11-7z" fill="${c}"/>`, // VS Code's Run/Start-Dev affordance
 };
 
 /** Wrap line-glyph paths in a shared stroke group (round caps/joins, like the codicons). */
@@ -196,7 +197,7 @@ const SELECTED_RING = '<rect x="2" y="2" width="68" height="68" rx="11" fill="no
 export function approveFaceSvg(b: Pick<OverviewBuilder, 'blockedGate'> | undefined): string {
   const gate = b?.blockedGate ?? '';
   if (!gate) {
-    return svg(`${BG}${iconZone('verified', '#63636b')}${DIVIDER}${centeredLine('Approve')}`);
+    return labelFaceSvg('verified', 'Approve', '#63636b');
   }
   const label = GATE_LABELS[gate] ?? titleToken(gate);
   return svg(
@@ -213,7 +214,7 @@ export function approveFaceSvg(b: Pick<OverviewBuilder, 'blockedGate'> | undefin
  */
 export function sendFbFaceSvg(n: number): string {
   if (n <= 0) {
-    return svg(`${BG}${iconZone('comment', '#63636b')}${DIVIDER}${centeredLine('Send Fb')}`);
+    return labelFaceSvg('comment', 'Send Fb', '#63636b');
   }
   return svg(
     `${BG}${iconZone('comment', STATE_COLOR.active)}${DIVIDER}` +
@@ -229,13 +230,22 @@ export function sendFbFaceSvg(n: number): string {
  */
 export function terminalFaceSvg(b: Pick<OverviewBuilder, 'id' | 'issueId'> | undefined): string {
   if (!b) {
-    return svg(`${BG}${iconZone('terminal', '#63636b')}${DIVIDER}${centeredLine('Terminal')}`);
+    return labelFaceSvg('terminal', 'Terminal', '#63636b');
   }
   const number = b.issueId ? `#${b.issueId}` : b.id;
   return svg(
     `${BG}${iconZone('terminal', '#a9a9b2')}${DIVIDER}` +
       `${primaryLine(number)}${secondaryLine('Terminal')}`,
   );
+}
+
+/**
+ * A simple action-key face: an icon over a single centered label, no primary datum. For keys that
+ * aren't builder-state-coded (e.g. the Run Dev key) but should still match the composite pattern
+ * — icon in the zone, text in the band, never stacked.
+ */
+export function labelFaceSvg(icon: GlyphKey, label: string, color: string): string {
+  return svg(`${BG}${iconZone(icon, color)}${DIVIDER}${centeredLine(label)}`);
 }
 
 /** Shared face frame: the rounded key ground and the hairline that splits icon zone from text band. */

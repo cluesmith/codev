@@ -15,7 +15,7 @@ import type {
   CanvasCommandClientErrorCode,
 } from '@cluesmith/codev-sdk/controller';
 import type { CodevStore } from './store.js';
-import { approveFaceSvg, builderFaceSvg, faceForBuilder, sendFbFaceSvg, terminalFaceSvg, svgToDataUri } from './face.js';
+import { approveFaceSvg, builderFaceSvg, faceForBuilder, labelFaceSvg, sendFbFaceSvg, terminalFaceSvg, svgToDataUri } from './face.js';
 
 /**
  * The Stream Deck actions — thin adapters over CodevStore. Each maps a physical
@@ -35,7 +35,9 @@ function settingsVerb(ev: KeyDownEvent): string | undefined {
 }
 
 async function ack(action: KeyAction, ok: boolean): Promise<void> {
-  await (ok ? action.showOk() : action.showAlert());
+  // Success is silent — the green "OK" checkmark was redundant press feedback. Failures still
+  // surface a red alert so a rejected command is never silent.
+  if (!ok) await action.showAlert();
 }
 
 // ── Verb keypads ──────────────────────────────────────────────────────────
@@ -63,13 +65,20 @@ export class CodevAction extends VerbKey {
   protected readonly defaultVerb = 'refresh-overview';
 }
 
-/** Run the dev server for the cursor-selected builder's worktree (no PI). */
+/** Run dev for the cursor-selected builder's worktree (no PI). */
 export class DevServerAction extends VerbKey {
   override readonly manifestId = 'com.cluesmith.codev.dev-server';
   protected readonly defaultVerb = 'run-dev';
   protected override args(): unknown[] {
     const b = this.store.selectedBuilder();
     return b ? [b.id] : [];
+  }
+  // Render the composite face (play icon + "Dev" label) so this key matches the other keys instead
+  // of showing a bare icon. Static — the label doesn't track running state.
+  override onWillAppear(ev: WillAppearEvent<VerbSettings>): void {
+    if (!ev.action.isKey()) return;
+    void ev.action.setImage(svgToDataUri(labelFaceSvg('play', 'Dev', '#73c991')));
+    void ev.action.setTitle('');
   }
 }
 
