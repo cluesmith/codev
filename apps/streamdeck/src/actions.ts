@@ -328,7 +328,7 @@ export function phaseArtifactVerb(b: OverviewBuilder): string | undefined {
   const gate = b.blockedGate ?? '';
   if (gate === 'spec-approval') return 'open-spec';
   if (gate === 'plan-approval') return 'open-plan';
-  if (gate === 'dev-approval' || gate === 'pr') return 'view-diff';
+  if (gate === 'dev-approval' || gate === 'pr' || gate === 'verify-approval') return 'view-diff';
   const phase = b.protocolPhase ?? '';
   if (phase === 'specify') return 'open-spec';
   if (phase === 'plan') return 'open-plan';

@@ -49,8 +49,7 @@ export type GlyphKey = 'bolt' | 'book' | 'checklist' | 'code' | 'pull-request' |
 /**
  * Gate id → glyph. The streamdeck twin of `gateIconFor` in `apps/vscode/src/views/builder-row.ts`
  * — keep in sync. A blocked builder whose gate isn't mapped falls back to `bell` (see
- * `faceForBuilder`), matching the sidebar. `verify-approval` renders here even though the press
- * resolver doesn't handle it yet (that gap is BUGFIX #1431).
+ * `faceForBuilder`), matching the sidebar.
  */
 const GATE_ICONS: Record<string, GlyphKey> = {
   'spec-approval': 'book',

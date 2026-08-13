@@ -640,6 +640,7 @@ describe('phaseArtifactVerb (shared resolver — recognised verb or undefined)',
     expect(phaseArtifactVerb(b({ protocolPhase: 'verify' }))).toBe('view-diff');
     expect(phaseArtifactVerb(b({ blockedGate: 'dev-approval' }))).toBe('view-diff');
     expect(phaseArtifactVerb(b({ blockedGate: 'pr' }))).toBe('view-diff');
+    expect(phaseArtifactVerb(b({ blockedGate: 'verify-approval' }))).toBe('view-diff'); // #1431: human reviewing finished work
   });
   it('gate beats phase (the stronger signal)', () => {
     expect(phaseArtifactVerb(b({ blockedGate: 'plan-approval', protocolPhase: 'implement' }))).toBe('open-plan');
