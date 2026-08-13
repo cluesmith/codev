@@ -41,3 +41,31 @@ Actual per-mode rendering is out of scope (owned by participating-feature issues
 - Left as plan-gate decisions (not overriding architect): precedence order, active-surface
   semantics, override clearing, pin scope, sticky-input.
 - Next: commit "with multi-agent review", porch next → likely spec-approval gate.
+
+### 2026-08-13 — At spec-approval gate: architect design iteration (NO PINNING)
+- Reached spec-approval gate (porch gate 1049), notified architect. During gate review the
+  architect drove several design refinements via conversation:
+  1. Builder ATTACHMENT is derived, not chosen: terminal→getActiveBuilderId(), diff→registry
+     DiffInjectSessionEntry.builderId. No global "current builder". Verified both in source.
+  2. Builder-scoped modes (Code Review, Builder Inspector) have SUMMARY⇄DETAIL shape: detail =
+     one builder; summary = cross-builder list (drill-in). Losing the surface rolls back to
+     summary, never blanks. Attention = the global summary/fallback.
+  3. **PINNING REMOVED ENTIRELY** (architect decision, reverses issue #1049's baked pin feature).
+     Panel is purely contextual. Mode pills are TRANSIENT NAVIGATION (browse other modes/builders
+     without touching editor), discarded on ANY active-surface change. Nothing persisted — NO
+     codev.contextualPanel.pinnedMode, no workspaceState/globalState/config key.
+- Rewrote spec to no-pin contextual + transient-nav model: Desired State (summary/detail table +
+  attachment + transient nav), Success Criteria (no-persistence, transient nav, level in
+  ModeDescriptor), Constraints (no-pin, transient host-side selection cleared on surface change,
+  no persistence surface), Solution Approaches, Open Questions (dropped pin-scope + override-
+  lifetime + pin-visual; kept precedence, active-surface semantics, reset-granularity, sticky-
+  input), Test Scenarios (transient-clear invariant, summary/detail), Risks (stuck-off-context,
+  auto-switch-yanks-input). Swept for lingering pin/override/persist — all remaining are intentional.
+- Resolver signature now: (SurfaceContext, ManualSelection|null) → ModeDescriptor{mode, level,
+  context}. ManualSelection is transient, never persisted; host clears it on surface change.
+- Interpretation flagged to architect: "any active-surface change resets transient nav" (incl
+  tab-switching between open editors), not only new-file-open. Awaiting confirm.
+- NOTE: issue #1049 body still describes pinning; architect should amend it. Spec records the
+  supersession explicitly (Constraints).
+- Gate still OPEN — spec revised in place (pre-approval). Need to ask architect: fresh consult on
+  revised design, or approve as-is? Did NOT advance porch state.
