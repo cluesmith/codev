@@ -5,7 +5,7 @@
   "Author": "Cluesmith",
   "Category": "Codev",
   "CategoryIcon": "icons/category",
-  "Description": "Drive Codev's AI agent workflows from your Stream Deck. Approve gates, watch your builder fleet, step through diff reviews with dials, spawn builders from the backlog, and control your dev server, all without leaving your editor. Companion plugin for Codev (https://codevos.ai/): requires Codev and its Tower server running locally.",
+  "Description": "Drive Codev's AI agent workflows from your Stream Deck. Approve gates, watch your builder fleet, step through diff reviews with dials, spawn builders from the backlog, and run dev for your worktrees, all without leaving your editor. Companion plugin for Codev (https://codevos.ai/): requires Codev and its Tower server running locally.",
   "Icon": "icons/plugin",
   "URL": "https://github.com/cluesmith/codev",
   "SDKVersion": 3,
@@ -65,9 +65,9 @@
       ]
     },
     {
-      "Name": "Dev Server",
+      "Name": "Run Dev",
       "UUID": "com.cluesmith.codev.dev-server",
-      "Tooltip": "Start / stop the workspace dev server.",
+      "Tooltip": "Start / stop dev for the selected builder's worktree.",
       "Icon": "icons/list/dev-server",
       "Controllers": [
         "Keypad"
