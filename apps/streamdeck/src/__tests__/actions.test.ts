@@ -6,7 +6,7 @@ import {
   BuilderAction,
   ApproveGate,
   SendQueueAction,
-  NextAttentionAction,
+  OpenTerminalAction,
   PrNav,
   SpawnNav,
   DiffFileNav,
@@ -256,27 +256,12 @@ describe('SendQueueAction (Row 2 — flush, #1410)', () => {
   });
 });
 
-describe('NextAttentionAction (Row 2 — jump to attention, #1410)', () => {
-  it('jumps the selection to the highest-priority pending-gate builder', async () => {
+describe('OpenTerminalAction (Row 2 — per-builder, #1410)', () => {
+  it('opens the selected builder’s terminal', async () => {
     const ctx = makeStore();
-    ctx.store.syncToBuilder('pir-2'); // move selection away from the blocked pir-1
-    const key = { id: 'N', isKey: () => true, setImage: vi.fn(), setTitle: vi.fn(), showOk: vi.fn(), showAlert: vi.fn() };
-    await new NextAttentionAction(ctx.store).onKeyDown({ action: key, payload: { settings: {} } } as never);
-    expect(ctx.store.selectedBuilder()?.id).toBe('pir-1'); // the pending gate
-    expect(ctx.sent).toHaveLength(0); // a selection move, no verb relayed
-    expect(key.showOk).toHaveBeenCalled();
-  });
-
-  it('badges the fleet pending-gate count and is inert when none pend', async () => {
-    const ctx = makeStore();
-    ctx.store.overview!.builders = ctx.store.overview!.builders.map((b) => ({ ...b, blocked: null, blockedGate: null }));
-    const key = { id: 'N', isKey: () => true, setImage: vi.fn(), setTitle: vi.fn(), showOk: vi.fn(), showAlert: vi.fn() };
-    const action = new NextAttentionAction(ctx.store);
-    action.onWillAppear({ action: key, payload: {} } as never);
-    const face = Buffer.from(String(key.setImage.mock.calls.at(-1)?.[0]).split(',')[1], 'base64').toString('utf8');
-    expect(face).toContain('Attn');
-    await action.onKeyDown({ action: key, payload: { settings: {} } } as never);
-    expect(key.showAlert).toHaveBeenCalled();
+    ctx.store.syncToBuilder('pir-2');
+    await new OpenTerminalAction(ctx.store).onKeyDown(keyEvent() as never);
+    expect(ctx.sent[0]).toEqual({ verb: 'open-terminal', args: ['pir-2'], ws: '/work/alpha' });
   });
 });
 

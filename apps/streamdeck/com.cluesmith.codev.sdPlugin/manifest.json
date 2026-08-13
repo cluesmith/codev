@@ -64,16 +64,16 @@
       ]
     },
     {
-      "Name": "Next / Attention",
-      "UUID": "com.cluesmith.codev.next-attention",
-      "Tooltip": "Badge of pending gates across the fleet; press to jump the selection to the builder needing attention, then approve on the Approve key.",
-      "Icon": "icons/list/approve-gate",
+      "Name": "Open Terminal",
+      "UUID": "com.cluesmith.codev.open-terminal",
+      "Tooltip": "Open the selected builder's terminal — the per-builder complement to Builder Action's open-artifact.",
+      "Icon": "icons/list/action",
       "Controllers": [
         "Keypad"
       ],
       "States": [
         {
-          "Image": "icons/approve-gate",
+          "Image": "icons/action",
           "TitleAlignment": "bottom"
         }
       ]

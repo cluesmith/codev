@@ -220,22 +220,6 @@ export function sendFbFaceSvg(n: number): string {
   );
 }
 
-/**
- * The Gates (approve-gate) key face — same composite frame as the builder face, fixing the same
- * text-over-icon overlap. A `bell` (the sidebar's "needs attention" glyph, `builder-row.ts`) tinted
- * warning-yellow with the pending count when gates await approval; a dim neutral bell with just the
- * `Gates` label when none are pending.
- */
-export function gatesFaceSvg(pendingCount: number, label = 'Gates'): string {
-  if (pendingCount <= 0) {
-    return svg(`${BG}${iconZone('bell', '#63636b')}${DIVIDER}${centeredLine(label)}`);
-  }
-  return svg(
-    `${BG}${iconZone('bell', STATE_COLOR.blocked)}${DIVIDER}` +
-      `${primaryLine(String(pendingCount))}${secondaryLine(label)}`,
-  );
-}
-
 /** Shared face frame: the rounded key ground and the hairline that splits icon zone from text band. */
 const BG = '<rect width="72" height="72" rx="12" fill="#1b1b1e"/>';
 const DIVIDER = '<line x1="14" y1="35" x2="58" y2="35" stroke="#333338" stroke-width="1"/>';

@@ -15,7 +15,7 @@ import type {
   CanvasCommandClientErrorCode,
 } from '@cluesmith/codev-sdk/controller';
 import type { CodevStore } from './store.js';
-import { approveFaceSvg, builderFaceSvg, faceForBuilder, gatesFaceSvg, sendFbFaceSvg, svgToDataUri } from './face.js';
+import { approveFaceSvg, builderFaceSvg, faceForBuilder, sendFbFaceSvg, svgToDataUri } from './face.js';
 
 /**
  * The Stream Deck actions — thin adapters over CodevStore. Each maps a physical
@@ -67,6 +67,20 @@ export class CodevAction extends VerbKey {
 export class DevServerAction extends VerbKey {
   override readonly manifestId = 'com.cluesmith.codev.dev-server';
   protected readonly defaultVerb = 'run-dev';
+  protected override args(): unknown[] {
+    const b = this.store.selectedBuilder();
+    return b ? [b.id] : [];
+  }
+}
+
+/**
+ * Row-2 Open Terminal key (#1410): opens the SELECTED builder's terminal — the
+ * per-builder complement to the Builder Action (which opens the phase artifact).
+ * Same selected-scoped shape as Dev Server. No PI.
+ */
+export class OpenTerminalAction extends VerbKey {
+  override readonly manifestId = 'com.cluesmith.codev.open-terminal';
+  protected readonly defaultVerb = 'open-terminal';
   protected override args(): unknown[] {
     const b = this.store.selectedBuilder();
     return b ? [b.id] : [];
@@ -272,50 +286,6 @@ export class SendQueueAction extends SingletonAction {
   }
   private renderTo(action: KeyAction): void {
     void action.setImage(svgToDataUri(sendFbFaceSvg(this.store.queuedFeedback(this.store.selectedBuilder()?.id))));
-    void action.setTitle('');
-  }
-}
-
-/**
- * Row-2 Next / attention key (#1410): the retired approve singleton's fleet role.
- * The badge shows the pending-gate count; press jumps the shared selection to the
- * highest-priority pending-gate builder (`store.topGateBuilderId`), so the reviewer
- * lands on the builder needing attention and then presses Approve. Inert when no
- * gate is pending.
- */
-export class NextAttentionAction extends SingletonAction {
-  override readonly manifestId = 'com.cluesmith.codev.next-attention';
-  private readonly keys = new Map<string, KeyAction>();
-
-  constructor(private readonly store: CodevStore) {
-    super();
-    this.store.onChange(() => this.renderAll());
-  }
-
-  override onWillAppear(ev: WillAppearEvent): void {
-    if (!ev.action.isKey()) return;
-    this.keys.set(ev.action.id, ev.action);
-    this.renderTo(ev.action);
-  }
-  override onWillDisappear(ev: WillDisappearEvent): void {
-    this.keys.delete(ev.action.id);
-  }
-  override async onKeyDown(ev: KeyDownEvent): Promise<void> {
-    const id = this.store.topGateBuilderId();
-    if (!id) {
-      await ev.action.showAlert();
-      return;
-    }
-    // Selection move only (no open): the reviewer then presses Approve, which
-    // surfaces the confirmation modal for whoever is now selected.
-    this.store.syncToBuilder(id);
-    await ev.action.showOk();
-  }
-  private renderAll(): void {
-    for (const action of this.keys.values()) this.renderTo(action);
-  }
-  private renderTo(action: KeyAction): void {
-    void action.setImage(svgToDataUri(gatesFaceSvg(this.store.pendingGates().length, 'Attn')));
     void action.setTitle('');
   }
 }

@@ -37,8 +37,8 @@ the selection, the dials review it.**
 │  │ slot 1 │  │ slot 2 │  │ slot 3 │  │ slot 4 │  selectors │
 │  └────────┘  └────────┘  └────────┘  └────────┘           │
 │  ┌────────┐  ┌────────┐  ┌────────┐  ┌────────┐           │
-│  │Approve │  │  Dev   │  │Send Fb │  │ Next / │  Row 2:    │
-│  │ Gate   │  │ Server │  │  (N)   │  │ Attn ⓷ │  palette   │
+│  │Approve │  │  Dev   │  │Send Fb │  │  Open  │  Row 2:    │
+│  │ Gate   │  │ Server │  │  (N)   │  │  Term  │  palette   │
 │  └────────┘  └────────┘  └────────┘  └────────┘           │
 │  ┌──────────────────────────────────────────────┐         │
 │  │  touch strip: each dial's title + live detail  │         │
@@ -55,7 +55,7 @@ the selection, the dials review it.**
   and the slot holding the current selection is accented. Press selects the builder
   (Row 2 + the dials follow) and opens its phase artifact.
 - **Row 2 — action palette**, fixed in place, always acting on the **selected**
-  builder: **Approve Gate · Dev Server · Send Feedback (N) · Next / Attention**.
+  builder: **Approve Gate · Dev Server · Send Feedback (N) · Open Terminal**.
 
 Nothing is fixed — drag whatever you want onto each slot in the Stream Deck app.
 The 5th encoder, **Spawn from Backlog**, can swap onto a dial in place of any of
@@ -81,9 +81,11 @@ the four above (e.g. replace PR Nav when you are triaging the backlog).
   feedback. The badge `N` mirrors that builder's queued count from the overview:
   in immediate mode `N` stays 0 and the key is inert; in queue mode `N` climbs and
   a press sends the batch (VSCode's Submit Review).
-- **Next / Attention** (Row 2) — badge of the fleet's pending-gate count; press
-  jumps the selection to the builder needing attention, so you land on it and then
-  press **Approve Gate**.
+- **Open Terminal** (Row 2) — opens the selected builder's terminal (the
+  per-builder complement to Builder Action, which opens the phase artifact). To
+  reach a blocked builder off the current window, scroll the Select dial — blocked
+  builders show gate-colored faces, and the Zoom dial's touchstrip shows the
+  workspace's pending-gate count.
 - **Codev Action** — fires a workspace verb. Choose it in the Property Inspector
   (Open Architect/Builder Terminal, View Diff, Send Message, Spawn Builder,
   Refresh Overview). Defaults to Refresh Overview.

@@ -172,14 +172,9 @@ export class CodevStore {
     return this.overview?.queuedFeedback?.[builderId] ?? 0;
   }
 
+  /** Blocked builders (a pending gate); the Zoom dial surfaces the count. */
   pendingGates(): OverviewBuilder[] {
     return this.builders().filter((b) => b.blocked);
-  }
-
-  /** The builder whose gate the approve-gate key targets (oldest-first not yet
-   * available in overview — first blocked builder for now; see PLAN open detail). */
-  topGateBuilderId(): string | undefined {
-    return this.pendingGates()[0]?.id;
   }
 
   pendingPRs(): OverviewPR[] {

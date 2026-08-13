@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { OverviewBuilder } from '@cluesmith/codev-sdk/controller';
-import { builderState, stateLabel, faceForBuilder, builderFaceSvg, gatesFaceSvg, approveFaceSvg, sendFbFaceSvg, svgToDataUri } from '../face.js';
+import { builderState, stateLabel, faceForBuilder, builderFaceSvg, approveFaceSvg, sendFbFaceSvg, svgToDataUri } from '../face.js';
 
 /** Minimal builder fixture — only the fields the face reads matter; the rest are filler. */
 function builder(over: Partial<OverviewBuilder>): OverviewBuilder {
@@ -107,24 +107,6 @@ describe('builderFaceSvg', () => {
     expect(longId).toContain('lengthAdjust="spacingAndGlyphs"');
     const shortNum = builderFaceSvg(faceForBuilder(builder({ issueId: '1414', protocolPhase: 'implement' })));
     expect(shortNum).not.toContain('lengthAdjust');
-  });
-});
-
-describe('gatesFaceSvg', () => {
-  it('shows the pending count + "Gates" in warning yellow when gates await approval', () => {
-    const svg = gatesFaceSvg(3);
-    expect(svg).toContain('>3<');
-    expect(svg).toContain('Gates');
-    expect(svg).toContain('#cca700');
-  });
-  it('shows just "Gates" (dim, no count) when none are pending', () => {
-    const svg = gatesFaceSvg(0);
-    expect(svg).toContain('Gates');
-    expect(svg).not.toContain('#cca700');
-  });
-  it('accepts a custom label (Next / attention key reuse)', () => {
-    expect(gatesFaceSvg(2, 'Attn')).toContain('Attn');
-    expect(gatesFaceSvg(0, 'Attn')).toContain('Attn');
   });
 });
 

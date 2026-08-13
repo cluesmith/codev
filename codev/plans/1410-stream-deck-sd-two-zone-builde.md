@@ -3,9 +3,15 @@
 ## Owner decision (requirement 6 — single approve affordance) — RESOLVED
 
 **Decided by Amr (2026-08-13): retire the generic `ApproveGate` singleton.** Row 2 [Approve gate]
-becomes the single, selected-scoped approve affordance; the singleton's jump-to-next + gate-count
-badge fold into Row 2 [Next / attention]. The recommendation below is the confirmed path (the
-"flip" alternative is retained only as a record).
+becomes the single, selected-scoped approve affordance.
+
+> **Revised during implement (Amr, 2026-08-13):** Row 2 is now **uniformly per-builder**. The 4th
+> palette key is **[Open Terminal]** (opens the selected builder's terminal), *not* the
+> fleet-level [Next / attention]. The retired singleton's **jump-to-next + fleet gate-count are
+> dropped** — pending gates stay visible via the Row 1 window (gate-colored faces) and the Zoom
+> dial's touchstrip `N⚠` count, so a dedicated jump key isn't needed. The req-6 outcome is
+> unchanged (one selected-scoped approve affordance; singleton retired); only the 4th key differs.
+> Sections below that still say "[Next / attention]" are superseded by this note.
 
 Today the deck has one approve affordance: the standalone `ApproveGate` singleton
 (`actions.ts:187`). It targets the **top pending gate** (`store.topGateBuilderId()` = first
@@ -51,7 +57,7 @@ hardware trigger. The issue asks for a stable **two-zone** SD+ layout (no modal 
   (see "Row 1 windowing" below). The Select dial = `ZoomNav` rotate scrolls the window across
   the whole fleet.
 - **Row 2** = a fixed action palette always acting on the **selected** builder:
-  **[Approve gate] [Run Dev] [Send Fb (N)] [Next / attention]**.
+  **[Approve gate] [Run Dev] [Send Fb (N)] [Open Terminal]**.
 
 Two behaviour changes ride along:
 
@@ -243,10 +249,11 @@ selection**:
   store.queuedFeedback(selectedId)`; press relays `send-queue [selectedId]`; inert (`showAlert`,
   no send) when `N === 0`. Face built via `face.ts` (a new `sendFbFaceSvg(n)` twin of
   `gatesFaceSvg`).
-- **Row 2 [Next / attention]** (per owner decision; recommended): new `NextAttentionAction` —
-  badge = `store.pendingGates().length` (the count the retiring singleton showed); press moves
-  the selection to `store.topGateBuilderId()` via `store.syncToBuilder(...)` (a cursor move, no
-  verb). Inert when no gate pends.
+- **Row 2 [Open Terminal]** (revised — per the note up top): new `OpenTerminalAction`, a
+  `VerbKey` like `DevServerAction`, relaying `open-terminal [selectedId]` — the per-builder
+  complement to the Builder Action's open-artifact. The fleet jump-to-next + gate-count are
+  dropped (covered by the Row 1 window's gate-colored faces + the Zoom dial's `N⚠` count), so
+  `topGateBuilderId()` and `gatesFaceSvg` are removed as dead.
 
 `apps/streamdeck/src/store.ts`: add `feedbackMode()` and `queuedFeedback(builderId)` readers off
 `this.overview` (defaulting to `'forward'` / `0`), and `windowedBuilder(slotIndex)` (the
@@ -296,7 +303,7 @@ counterpart of `announceActiveBuilderFromEditor`.
 
 - Unit: deck `store` readers (`feedbackMode`/`queuedFeedback`/`windowedBuilder`); Row 1 window
   paging + selected-slot highlight (page derivation, trailing-empty slots, boundary flip);
-  `SendQueueAction` inert-at-0 vs send; `NextAttentionAction` jump target; `ReviewNav` touchstrip
+  `SendQueueAction` inert-at-0 vs send; `OpenTerminalAction` opens the selected builder; `ReviewNav` touchstrip
   mode-label; dial press relays `feedback-*` (extend `actions.test.ts`).
 - Unit: VSCode mode-router commands (forward → delegates; comment → `store.add` with the right
   `PendingComment`); relay allowlist includes the new verbs and excludes an options 2nd arg
@@ -325,7 +332,7 @@ counterpart of `announceActiveBuilderFromEditor`.
   `builder-active` for the owning builder (§F). *(→ main)*
 - `apps/vscode/src/__tests__/…` — relay + mode-router + canvas-back-sync tests. *(→ main)*
 - `apps/streamdeck/src/actions.ts` — Row 1 windowing (`windowedBuilder` + selected highlight),
-  dial press verbs, touchstrip label, Approve repurpose, `SendQueueAction`, `NextAttentionAction`.
+  dial press verbs, touchstrip label, Approve repurpose, `SendQueueAction`, `OpenTerminalAction`.
 - `apps/streamdeck/src/store.ts` — `feedbackMode()`, `queuedFeedback()`, `windowedBuilder()`.
 - `apps/streamdeck/src/face.ts` — `sendFbFaceSvg` (+ any Next glyph), selected-slot accent.
 - `apps/streamdeck/src/plugin.ts` — register new actions.
@@ -377,8 +384,7 @@ present before testing the coherence steps below:
   touchstrip tap opens the artifact, Row 2 acts on them.
 - **Manual — Row 2 palette on the selected builder:** [Run Dev] starts its worktree dev;
   [Approve gate] pops the confirmation modal for the *selected* builder (approve → `porch
-  approve` runs); [Next / attention] jumps the selection to the pending-gate builder and shows
-  the gate count; [Send Fb (N)] is inert at N=0.
+  approve` runs); [Open Terminal] opens the selected builder's terminal; [Send Fb (N)] is inert at N=0.
 - **Manual — dials collect / mode legibility:** with `diffCodelensMode = comment`, the dial
   touchstrip reads `Files · queue` / `Changes · queue`; a diff dial press enqueues (the Send Fb
   badge `N` on the selected builder increments, the VSCode status bar / inline thread updates —
