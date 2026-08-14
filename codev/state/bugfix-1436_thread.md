@@ -51,3 +51,28 @@ fails without retry (single-shot throws), passes with it. Real validation errors
 NOT be retried.
 
 Scope: << 300 LOC. Fits BUGFIX.
+
+## Fix + PR (iter 1)
+
+Implemented `apps/streamdeck/scripts/validate-with-retry.mjs` (retry core exported +
+unit-tested), wired `package.json` `validate` + inline `package` call to it. 170
+streamdeck tests pass (11 new). Verified end-to-end: happy path exit 0, real error
+fails fast (exit 1), transient retries in unit tests, regression test fails without fix.
+Committed 84fd5e785. Porch checks (build, tests) passed. PR #1451 opened (Fixes #1436).
+
+CMAP: first run failed to auto-detect project from worktree ("Multiple projects found");
+re-ran with `--issue 1436 --project-id bugfix-1436` — both resolve PR #1451 correctly.
+Awaiting all three verdicts before notifying architect + `porch done` (pr gate).
+
+## CMAP verdicts + review fixes
+
+- gemini=APPROVE (HIGH), codex=APPROVE (HIGH), claude=COMMENT (HIGH, non-blocking nits).
+- Addressed claude's substantive points:
+  - Dropped the over-broad `'network'` substring from TRANSIENT_SIGNATURES (could false-retry
+    a plugin description mentioning "network"); added specific `ENETUNREACH`/`ENETDOWN`.
+  - Spawn failure now surfaces `error.message` in output instead of exit-1-with-empty-output.
+  - Sharpened the comment on the deliberate EAI_AGAIN (retry) vs ENOTFOUND (fail-fast) asymmetry.
+  - Corrected PR body test count: 8 new tests (170 suite total), not 11.
+- Left as-is (correct by design): ENOTFOUND exclusion — the CLI already reports it as a graceful
+  "must be resolvable" error, so we must not retry a genuinely bad URL.
+- 170 tests still pass after the fixes.

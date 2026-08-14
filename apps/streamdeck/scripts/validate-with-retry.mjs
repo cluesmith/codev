@@ -22,9 +22,14 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const PLUGIN_DIR = 'com.cluesmith.codev.sdPlugin';
 
 // Case-insensitive signatures of a transient network failure worth retrying. These are the
-// error shapes the CLI rethrows from a failed `fetch(URL, { method: 'HEAD' })`. ENOTFOUND is
-// intentionally absent: the CLI reports that as a normal "must be resolvable" validation error,
-// which we must NOT retry or mask.
+// error shapes the CLI rethrows from a failed `fetch(URL, { method: 'HEAD' })`. Each is a specific
+// error code/phrase, not a loose word, so a plugin description that merely mentions "network"
+// can't trigger a false retry.
+//
+// EAI_AGAIN (temporary DNS failure) IS here but ENOTFOUND (permanent "host doesn't exist") is
+// NOT — and that asymmetry is deliberate: the CLI already converts ENOTFOUND into a graceful
+// "must be resolvable" validation error rather than rethrowing it, so a genuinely bad URL fails
+// loudly on attempt 1, while a transient DNS blip retries.
 export const TRANSIENT_SIGNATURES = [
   'UND_ERR_SOCKET',
   'UND_ERR_CONNECT_TIMEOUT',
@@ -33,8 +38,9 @@ export const TRANSIENT_SIGNATURES = [
   'ECONNREFUSED',
   'ETIMEDOUT',
   'EAI_AGAIN',
+  'ENETUNREACH',
+  'ENETDOWN',
   'socket hang up',
-  'network',
 ];
 
 export const DEFAULTS = { attempts: 3, baseBackoffMs: 1000 };
@@ -90,11 +96,18 @@ function runValidateOnce() {
       ['validate', PLUGIN_DIR],
       { cwd: join(HERE, '..'), encoding: 'utf-8', maxBuffer: 10 * 1024 * 1024 },
       (error, stdout, stderr) => {
-        const output = `${stdout ?? ''}${stderr ?? ''}`;
+        let output = `${stdout ?? ''}${stderr ?? ''}`;
+        // A spawn failure (e.g. the CLI isn't on PATH) yields empty stdio; surface the error
+        // message so CI shows *why* rather than an exit 1 with no diagnostic. ENOENT and the like
+        // aren't in TRANSIENT_SIGNATURES, so appending it won't trigger a spurious retry.
+        if (error && output.trim() === '') {
+          output = `${error.message}\n`;
+        }
         resolve({ code: error ? (error.code ?? 1) : 0, output });
       },
     );
-    // Fall back if the binary can't be spawned at all (resolves via the callback's error).
+    // The execFile callback already receives spawn errors; this handler just prevents an
+    // unhandled 'error' event from crashing the process before the callback resolves.
     child.on('error', () => {});
   });
 }
