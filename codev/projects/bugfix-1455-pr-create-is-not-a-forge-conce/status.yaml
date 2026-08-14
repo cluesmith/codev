@@ -1,0 +1,14 @@
+id: bugfix-1455
+title: pr-create-is-not-a-forge-conce
+protocol: bugfix
+phase: investigate
+plan_phases: []
+current_plan_phase: null
+gates:
+  pr:
+    status: pending
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-08-14T04:34:29.595Z'
+updated_at: '2026-08-14T04:34:29.596Z'
