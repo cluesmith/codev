@@ -115,7 +115,7 @@ CODEV_PR_HEAD="$BRANCH" \
 {{pr_create_command}}
 ```
 
-Porch substitutes `{{pr_create_command}}` with your forge's `pr-create` concept command (`gh pr create` by default) and it prints `{"number": <int>, "url": "<url>"}`. The body goes in as an environment variable, not `--body-file` — read the created PR back and confirm the body arrived intact before moving on.
+The command above is your forge's `pr-create` concept, substituted by porch (`gh pr create` by default). It prints `{"number": <int>, "url": "<url>"}`. The body goes in as an environment variable, not `--body-file` — read the created PR back and confirm the body arrived intact before moving on.
 
 **Verify the PR body contains `Fixes #{{issue.number}}`** (it should — the review file has it at the top). If somehow missing, edit and re-apply:
 

@@ -47,7 +47,7 @@ EOF
 )" {{pr_create_command}}
 ```
 
-Porch substitutes `{{pr_create_command}}` with your forge's `pr-create` concept command (`gh pr create` by default). It reads `CODEV_PR_TITLE` / `CODEV_PR_BODY` — optionally `CODEV_PR_BASE`, `CODEV_PR_HEAD`, `CODEV_PR_REPO` — and prints `{"number": <int>, "url": "<url>"}`.
+The command above is your forge's `pr-create` concept, substituted by porch (`gh pr create` by default). It reads `CODEV_PR_TITLE` / `CODEV_PR_BODY` — optionally `CODEV_PR_BASE`, `CODEV_PR_HEAD`, `CODEV_PR_REPO` — and prints `{"number": <int>, "url": "<url>"}`.
 
 ## Optional CMAP review
 

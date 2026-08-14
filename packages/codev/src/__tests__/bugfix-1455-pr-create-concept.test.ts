@@ -231,6 +231,10 @@ describe('#1455 — prompts route PR creation through the concept', () => {
     expect(content).toContain('{{pr_create_command}}');
     expect(content).toContain('CODEV_PR_TITLE=');
     expect(content).toContain('CODEV_PR_BODY=');
+    // Exactly once — the invocation. Porch substitutes every occurrence, so a
+    // second one in the prose renders as "…substitutes /path/to/pr-create.sh
+    // with your forge's command", which is nonsense.
+    expect(content.match(/\{\{pr_create_command\}\}/g)).toHaveLength(1);
   });
 
   it('no protocol file shells out to `gh pr create`', () => {
