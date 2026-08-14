@@ -1,7 +1,7 @@
 id: '1444'
 title: stream-deck-re-glyph-the-catch
 protocol: air
-phase: implement
+phase: pr
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -11,7 +11,7 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-08-14T00:27:27.654Z'
-updated_at: '2026-08-14T00:55:15.071Z'
+updated_at: '2026-08-14T00:56:39.366Z'
 pr_history:
   - phase: implement
     pr_number: 1453
