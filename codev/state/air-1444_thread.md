@@ -24,6 +24,13 @@ So the Codev Action key face shows the manifest `States[0].Image` (`icons/action
 ## Status
 - [x] Verify runtime render path
 - [x] Prototype brand-mark legibility at 20px
-- [ ] Extend render script + regenerate action PNGs
-- [ ] Tests
-- [ ] PR with review in body
+- [x] Extend render script + regenerate action PNGs (brand-mark source in render-action-icons.mjs)
+- [x] Tests (172 pass; check-types + build green after building @cluesmith/codev-sdk first)
+- [x] PR #1453 with review in body
+
+## Notes
+- send-queue/open-terminal PNGs re-encode with different IM metadata but are pixel-identical
+  (AE=0) to #1440's committed versions; reverted them so the diff is action-only.
+- check-types/build initially failed on missing @cluesmith/codev-sdk/controller — pre-existing,
+  fixed by `pnpm --filter @cluesmith/codev-sdk build` (dist wasn't built in the worktree).
+- No CMAP: AIR economy, purely declarative asset regen, visually + test-guarded.
