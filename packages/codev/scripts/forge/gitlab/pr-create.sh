@@ -22,6 +22,13 @@ if [ -z "$CODEV_PR_TITLE" ]; then
   exit 2
 fi
 
+# An empty body is allowed; an *absent* one is not. Without this, forgetting the
+# variable opens a PR with no body at exit 0 — the silent failure #1455 is about.
+if [ -z "${CODEV_PR_BODY+x}" ]; then
+  echo "pr-create: CODEV_PR_BODY is required (set it to \"\" for an empty body)" >&2
+  exit 2
+fi
+
 set -- --title "$CODEV_PR_TITLE" --description "$CODEV_PR_BODY" --yes
 if [ -n "$CODEV_PR_BASE" ]; then set -- "$@" --target-branch "$CODEV_PR_BASE"; fi
 if [ -n "$CODEV_PR_HEAD" ]; then set -- "$@" --source-branch "$CODEV_PR_HEAD"; fi

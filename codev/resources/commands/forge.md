@@ -70,7 +70,7 @@ Set a concept to `null` to disable it. The feature that uses it will gracefully 
 | `issue-list` | — | JSON array | List issues |
 | `issue-comment` | `CODEV_ISSUE_ID`, `CODEV_COMMENT_BODY` | — | Post issue comment |
 | `pr-exists` | `CODEV_BRANCH_NAME` | truthy/falsy | Check if PR exists for branch |
-| `pr-create` | `CODEV_PR_TITLE`, `CODEV_PR_BODY`, `CODEV_PR_BASE`, `CODEV_PR_HEAD`, `CODEV_PR_REPO`, `CODEV_PR_DRAFT` | JSON `{number, url}` | Open a PR (title + body required, rest optional) |
+| `pr-create` | `CODEV_PR_TITLE`, `CODEV_PR_BODY`, `CODEV_PR_BASE`, `CODEV_PR_HEAD`, `CODEV_PR_REPO`, `CODEV_PR_DRAFT` | JSON `{number, url}` | Open a PR (title + body required — set the body to `""` for none; rest optional. Gitea also reads `CODEV_PR_LOGIN`) |
 | `pr-merge` | `CODEV_PR_NUMBER` | — | Merge a PR |
 | `pr-search` | `CODEV_SEARCH_QUERY` | JSON array | Search PRs |
 | `pr-view` | `CODEV_PR_NUMBER`, `CODEV_INCLUDE_COMMENTS` | JSON or text | View PR details |

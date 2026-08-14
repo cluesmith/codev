@@ -157,6 +157,32 @@ describe('#1455 — pr-create scripts honour the contract', () => {
     expect(() => run('github', { CODEV_PR_TITLE: '', CODEV_PR_BODY: 'b' })).toThrow();
   });
 
+  it.each(['github', 'gitea', 'gitlab'])(
+    '%s: refuses an absent body but accepts a deliberately empty one',
+    (provider) => {
+      // `--body ""` succeeds on every forge, so an unset variable would open a
+      // bodyless PR at exit 0 — the silent failure #1455 exists to close.
+      stub('gh', 'echo https://github.com/o/r/pull/1');
+      stub('glab', 'echo https://gitlab.com/o/r/-/merge_requests/1');
+      stub(
+        'tea',
+        [
+          'if [ "$2" = "create" ]; then exit 0; fi',
+          'echo \'[{"index":"1","url":"https://forge.example.com/o/r/pulls/1","head":"b"}]\'',
+        ].join('\n'),
+      );
+
+      // Absent: the script must fail before it ever reaches the forge CLI.
+      expect(() => run(provider, { CODEV_PR_TITLE: 't', CODEV_PR_HEAD: 'b' })).toThrow();
+
+      // Empty-but-set: allowed (jq only needed for the gitea lookup).
+      if (provider !== 'gitea' || hasJq()) {
+        const stdout = run(provider, { CODEV_PR_TITLE: 't', CODEV_PR_BODY: '', CODEV_PR_HEAD: 'b' });
+        expect(JSON.parse(stdout).number).toBe(1);
+      }
+    },
+  );
+
   it.skipIf(!hasJq())(
     'gitea: passes the body as --description and normalizes tea output to {number, url}',
     () => {

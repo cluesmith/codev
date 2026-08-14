@@ -5,6 +5,7 @@
 # Input:  CODEV_PR_TITLE (required)
 #         CODEV_PR_BODY  (required, may be empty)
 #         CODEV_PR_BASE, CODEV_PR_HEAD, CODEV_PR_REPO, CODEV_PR_DRAFT (optional)
+#         CODEV_PR_LOGIN (optional, gitea-only: tea's --login, for multi-login hosts)
 # Output: {"number": <int>, "url": "<web url>"}
 #
 # `tea pulls create` takes the body as --description (not --body) and prints a
@@ -21,6 +22,13 @@ set -e
 
 if [ -z "$CODEV_PR_TITLE" ]; then
   echo "pr-create: CODEV_PR_TITLE is required" >&2
+  exit 2
+fi
+
+# An empty body is allowed; an *absent* one is not. Without this, forgetting the
+# variable opens a PR with no body at exit 0 — the silent failure #1455 is about.
+if [ -z "${CODEV_PR_BODY+x}" ]; then
+  echo "pr-create: CODEV_PR_BODY is required (set it to \"\" for an empty body)" >&2
   exit 2
 fi
 
