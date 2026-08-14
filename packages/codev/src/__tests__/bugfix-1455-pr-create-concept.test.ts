@@ -41,6 +41,34 @@ const TRICKY_BODY = [
   '- [ ] checkbox',
 ].join('\n');
 
+/**
+ * A fake `tea` implementing the slice of `tea api` the gitea script uses.
+ *
+ * Records argv per HTTP method (so a test can assert what was and wasn't
+ * called) plus the POSTed request body, then answers:
+ *   GET  repos/{owner}/{repo}        → {"default_branch":"trunk"}
+ *   POST repos/{owner}/{repo}/pulls  → the created PR object
+ *
+ * The POST response carries both `html_url` (browser page) and `url` (API
+ * endpoint) so the tests pin that the browser page is what reaches the contract.
+ * Everything that isn't `tea api` exits non-zero — `tea pulls create`/`list`
+ * must not be reachable.
+ */
+const TEA_API_STUB = [
+  'if [ "$1" != "api" ]; then echo "unexpected: $*" >&2; exit 9; fi',
+  'method=GET',
+  'for a in "$@"; do case "$prev" in -X) method=$a ;; esac; prev=$a; done',
+  'if [ "$method" = POST ]; then',
+  '  printf "%s\\0" "$@" > post-args',
+  '  cat > post-body',
+  '  echo \'{"number":7,"html_url":"https://forge.example.com/o/r/pulls/7","url":"https://forge.example.com/api/v1/repos/o/r/pulls/7"}\'',
+  'else',
+  '  printf "%s\\0" "$@" > get-args',
+  '  echo \'{"default_branch":"trunk"}\'',
+  'fi',
+  'exit 0',
+].join('\n');
+
 function hasJq(): boolean {
   try {
     execFileSync('sh', ['-c', 'command -v jq'], { stdio: 'ignore' });
@@ -164,47 +192,28 @@ describe('#1455 — pr-create scripts honour the contract', () => {
       // bodyless PR at exit 0 — the silent failure #1455 exists to close.
       stub('gh', 'echo https://github.com/o/r/pull/1');
       stub('glab', 'echo https://gitlab.com/o/r/-/merge_requests/1');
-      stub(
-        'tea',
-        [
-          'if [ "$2" = "create" ]; then exit 0; fi',
-          'echo \'[{"index":"1","url":"https://forge.example.com/o/r/pulls/1","head":"b"}]\'',
-        ].join('\n'),
-      );
+      stub('tea', TEA_API_STUB.replace('"number":7', '"number":1'));
 
       // Absent: the script must fail before it ever reaches the forge CLI.
       expect(() => run(provider, { CODEV_PR_TITLE: 't', CODEV_PR_HEAD: 'b' })).toThrow();
 
-      // Empty-but-set: allowed (jq only needed for the gitea lookup).
+      // Empty-but-set: allowed (jq only needed to build/read the gitea payload).
       if (provider !== 'gitea' || hasJq()) {
-        const stdout = run(provider, { CODEV_PR_TITLE: 't', CODEV_PR_BODY: '', CODEV_PR_HEAD: 'b' });
+        const stdout = run(provider, {
+          CODEV_PR_TITLE: 't',
+          CODEV_PR_BODY: '',
+          CODEV_PR_HEAD: 'b',
+          CODEV_PR_BASE: 'main',
+        });
         expect(JSON.parse(stdout).number).toBe(1);
       }
     },
   );
 
   it.skipIf(!hasJq())(
-    'gitea: passes the body as --description and normalizes tea output to {number, url}',
+    'gitea: creates through `tea api` POST and reads the PR out of the response',
     () => {
-      // `tea pulls create` prints a rendered, line-wrapped, ANSI-decorated view;
-      // the script must ignore it and look the PR up via `tea pulls list`.
-      stub(
-        'tea',
-        [
-          'if [ "$2" = "create" ]; then',
-          '  printf "%s\\0" "$@" > create-args',
-          '  echo "  # #7 rendered nonsense (open)"',
-          '  exit 0',
-          'fi',
-          'if [ "$2" = "list" ]; then',
-          '  printf "%s\\0" "$@" > list-args',
-          '  echo \'[{"index":"7","url":"https://forge.example.com/o/r/pulls/7","head":"my-branch"},',
-          '        {"index":"3","url":"https://forge.example.com/o/r/pulls/3","head":"other"}]\'',
-          '  exit 0',
-          'fi',
-          'exit 1',
-        ].join('\n'),
-      );
+      stub('tea', TEA_API_STUB);
 
       const stdout = run('gitea', {
         CODEV_PR_TITLE: 'Fix #1455',
@@ -213,52 +222,240 @@ describe('#1455 — pr-create scripts honour the contract', () => {
         CODEV_PR_HEAD: 'my-branch',
       });
 
+      // The created PR comes straight out of the create response — and `url` is
+      // the browser page, never the API endpoint the stub also returns.
       expect(JSON.parse(stdout)).toEqual({
         number: 7,
         url: 'https://forge.example.com/o/r/pulls/7',
       });
 
-      const args = recordedArgs('create-args');
-      expect(args.slice(0, 2)).toEqual(['pulls', 'create']);
-      expect(args[args.indexOf('--description') + 1]).toBe(TRICKY_BODY);
-      expect(args).not.toContain('--body');
-      expect(args[args.indexOf('--title') + 1]).toBe('Fix #1455');
-      expect(args[args.indexOf('--head') + 1]).toBe('my-branch');
-      expect(args[args.indexOf('--base') + 1]).toBe('main');
+      const args = recordedArgs('post-args');
+      expect(args[0]).toBe('api');
+      expect(args).toContain('-X');
+      expect(args[args.indexOf('-X') + 1]).toBe('POST');
+      expect(args).toContain('repos/{owner}/{repo}/pulls');
+      // Body travels on stdin, not argv — nothing to quote-mangle.
+      expect(args[args.indexOf('-d') + 1]).toBe('@-');
 
-      // The lookup must page like every other gitea script; on tea's default
-      // page a busy repo pushes the just-created PR off the list and the script
-      // reports failure for a PR that exists.
-      const listArgs = recordedArgs('list-args');
-      expect(listArgs[listArgs.indexOf('--limit') + 1]).toBe('200');
+      // The payload is JSON, and the body survives it byte for byte.
+      const payload = JSON.parse(fs.readFileSync(path.join(tmp, 'post-body'), 'utf-8'));
+      expect(payload).toEqual({
+        title: 'Fix #1455',
+        body: TRICKY_BODY,
+        head: 'my-branch',
+        base: 'main',
+      });
     },
   );
 
-  it.skipIf(!hasJq())('gitea: matches a cross-repo <user>:<branch> head', () => {
-    stub(
-      'tea',
-      [
-        'if [ "$2" = "create" ]; then exit 0; fi',
-        'echo \'[{"index":"9","url":"https://forge.example.com/o/r/pulls/9","head":"feature"}]\'',
-      ].join('\n'),
-    );
+  it.skipIf(!hasJq())('gitea: never looks the created PR up with a truncating list call', () => {
+    // The regression this pins: the lookup used to be `tea pulls list --limit
+    // 200`. Gitea caps list responses at `max_response_items` (default 50 —
+    // confirmed against Forgejo 15.0.2), so `--limit 200` silently truncates and
+    // on a busy repo the just-created PR falls off the page. The script then
+    // reported failure for a PR that exists, inviting a duplicate retry.
+    // Reading the PR out of the create response removes the lookup entirely.
+    stub('tea', TEA_API_STUB);
+
+    run('gitea', {
+      CODEV_PR_TITLE: 't',
+      CODEV_PR_BODY: 'b',
+      CODEV_PR_HEAD: 'my-branch',
+      CODEV_PR_BASE: 'main',
+    });
+
+    const args = recordedArgs('post-args');
+    expect(args).not.toContain('pulls'); // i.e. no `tea pulls list`
+    expect(args).not.toContain('list');
+    expect(args).not.toContain('--limit');
+    expect(fs.existsSync(path.join(tmp, 'get-args')), 'made an unnecessary GET').toBe(false);
+  });
+
+  it.skipIf(!hasJq())('gitea: resolves the default branch when no base is given', () => {
+    // `tea pulls create` defaulted the base client-side; the REST API rejects a
+    // missing one outright (`[Base]: Required`), so the script has to ask.
+    stub('tea', TEA_API_STUB);
+
+    const stdout = run('gitea', {
+      CODEV_PR_TITLE: 't',
+      CODEV_PR_BODY: 'b',
+      CODEV_PR_HEAD: 'my-branch',
+    });
+    expect(JSON.parse(stdout).number).toBe(7);
+
+    expect(recordedArgs('get-args')).toContain('repos/{owner}/{repo}');
+    const payload = JSON.parse(fs.readFileSync(path.join(tmp, 'post-body'), 'utf-8'));
+    expect(payload.base).toBe('trunk');
+  });
+
+  it.skipIf(!hasJq())('gitea: marks a draft with a WIP: title prefix', () => {
+    // Gitea has no draft flag on the create API — it silently ignores
+    // `draft: true` (verified against Forgejo 15.0.2, which echoes back
+    // `draft: false`). A `WIP:` title prefix is the marker, and it is what
+    // `tea pulls create --draft` does too.
+    stub('tea', TEA_API_STUB);
+
+    run('gitea', {
+      CODEV_PR_TITLE: 'Fix #1455',
+      CODEV_PR_BODY: 'b',
+      CODEV_PR_HEAD: 'my-branch',
+      CODEV_PR_BASE: 'main',
+      CODEV_PR_DRAFT: '1',
+    });
+
+    const payload = JSON.parse(fs.readFileSync(path.join(tmp, 'post-body'), 'utf-8'));
+    expect(payload.title).toBe('WIP: Fix #1455');
+    expect(payload).not.toHaveProperty('draft');
+  });
+
+  it.skipIf(!hasJq())('gitea: passes a cross-repo <user>:<branch> head through verbatim', () => {
+    // The API resolves `owner:branch` itself (verified against Forgejo 15.0.2),
+    // so there is no head-matching heuristic left to get wrong.
+    stub('tea', TEA_API_STUB);
 
     const stdout = run('gitea', {
       CODEV_PR_TITLE: 't',
       CODEV_PR_BODY: 'b',
       CODEV_PR_HEAD: 'contributor:feature',
+      CODEV_PR_BASE: 'main',
     });
-    expect(JSON.parse(stdout).number).toBe(9);
+    expect(JSON.parse(stdout).number).toBe(7);
+
+    const payload = JSON.parse(fs.readFileSync(path.join(tmp, 'post-body'), 'utf-8'));
+    expect(payload.head).toBe('contributor:feature');
   });
 
-  it.skipIf(!hasJq())('gitea: fails when the created PR cannot be found', () => {
+  it.skipIf(!hasJq())('gitea: forwards --repo and --login to tea', () => {
+    stub('tea', TEA_API_STUB);
+
+    run('gitea', {
+      CODEV_PR_TITLE: 't',
+      CODEV_PR_BODY: 'b',
+      CODEV_PR_HEAD: 'my-branch',
+      CODEV_PR_BASE: 'main',
+      CODEV_PR_REPO: 'acme/widgets',
+      CODEV_PR_LOGIN: 'work',
+    });
+
+    const args = recordedArgs('post-args');
+    expect(args[args.indexOf('--repo') + 1]).toBe('acme/widgets');
+    expect(args[args.indexOf('--login') + 1]).toBe('work');
+  });
+
+  it.skipIf(!hasJq())('gitea: fails loudly on an API error even though tea exits 0', () => {
+    // `tea api` returns exit 0 for HTTP errors and prints the error body, so
+    // exit status is not a usable signal — the response has to be inspected.
+    // Verified live: a duplicate head answers `{"message":"pull request already
+    // exists…"}` at exit 0.
     stub(
       'tea',
-      ['if [ "$2" = "create" ]; then exit 0; fi', "echo '[]'"].join('\n'),
+      [
+        'if [ "$1" = "api" ]; then',
+        '  for a in "$@"; do case "$prev" in -X) m=$a ;; esac; prev=$a; done',
+        '  if [ "$m" = POST ]; then cat > /dev/null; fi',
+        '  echo \'{"message":"pull request already exists for these targets","url":"https://forge.example.com/api/swagger"}\'',
+        '  exit 0',
+        'fi',
+        'exit 1',
+      ].join('\n'),
     );
-    expect(() =>
-      run('gitea', { CODEV_PR_TITLE: 't', CODEV_PR_BODY: 'b', CODEV_PR_HEAD: 'nope' }),
-    ).toThrow();
+
+    let stderr = '';
+    try {
+      run('gitea', {
+        CODEV_PR_TITLE: 't',
+        CODEV_PR_BODY: 'b',
+        CODEV_PR_HEAD: 'dup',
+        CODEV_PR_BASE: 'main',
+      });
+      expect.unreachable('the script exited 0 for a PR that was never created');
+    } catch (e) {
+      stderr = String((e as { stderr?: Buffer }).stderr ?? '');
+    }
+    expect(stderr).toContain('pull request already exists');
+  });
+
+  it.skipIf(!hasJq())('gitea: rejects a 200-shaped response that is not a PR object', () => {
+    // Every one of these comes back at exit 0. None of them is a created PR, so
+    // none may be reported as one — that is #1455's silent success reappearing
+    // inside the fix for it.
+    const notPrs = [
+      '{"message":"The target couldn\'t be found."}', // API error object
+      '[]', // an array (e.g. a list endpoint answered instead)
+      '{"number":"7","html_url":"https://forge.example.com/o/r/pulls/7"}', // number as a STRING
+      '{"html_url":"https://forge.example.com/o/r/pulls/7"}', // no number at all
+      'null',
+      '',
+    ];
+
+    for (const payload of notPrs) {
+      stub(
+        'tea',
+        ['if [ "$1" = "api" ]; then', `  printf '%s' '${payload}'`, '  exit 0', 'fi', 'exit 1'].join('\n'),
+      );
+      expect(
+        () =>
+          run('gitea', {
+            CODEV_PR_TITLE: 't',
+            CODEV_PR_BODY: 'b',
+            CODEV_PR_HEAD: 'x',
+            CODEV_PR_BASE: 'main',
+          }),
+        `reported success for a non-PR response: ${payload || '(empty)'}`,
+      ).toThrow();
+    }
+  });
+
+  it.skipIf(!hasJq())('gitea: a created PR with no URL warns against retrying', () => {
+    // `number` but no `html_url`/`url` means the PR EXISTS and only the URL is
+    // missing. Exiting 1 is right, but the message must not read as "nothing
+    // happened" — that invites the duplicate retry this whole change is about.
+    stub(
+      'tea',
+      [
+        'if [ "$1" = "api" ]; then',
+        '  echo \'{"number":7,"title":"t"}\'',
+        '  exit 0',
+        'fi',
+        'exit 1',
+      ].join('\n'),
+    );
+
+    let stderr = '';
+    try {
+      run('gitea', {
+        CODEV_PR_TITLE: 't',
+        CODEV_PR_BODY: 'b',
+        CODEV_PR_HEAD: 'x',
+        CODEV_PR_BASE: 'main',
+      });
+      expect.unreachable('emitted a result with no browser URL');
+    } catch (e) {
+      stderr = String((e as { stderr?: Buffer }).stderr ?? '');
+    }
+    expect(stderr).toContain('#7 WAS CREATED');
+    expect(stderr).toContain('do not retry');
+  });
+
+  it.skipIf(!hasJq())('gitea: names the remedy when the repo context does not resolve', () => {
+    // With no Gitea remote and no CODEV_PR_REPO, `{owner}`/`{repo}` stay
+    // unsubstituted and tea requests `repos//pulls`, which answers a bare
+    // `404 page not found` — non-JSON, and still exit 0. Verified live.
+    stub('tea', ['if [ "$1" = "api" ]; then', '  echo "404 page not found"', '  exit 0', 'fi', 'exit 1'].join('\n'));
+
+    let stderr = '';
+    try {
+      run('gitea', {
+        CODEV_PR_TITLE: 't',
+        CODEV_PR_BODY: 'b',
+        CODEV_PR_HEAD: 'x',
+        CODEV_PR_BASE: 'main',
+      });
+      expect.unreachable('the script exited 0 for a PR that was never created');
+    } catch (e) {
+      stderr = String((e as { stderr?: Buffer }).stderr ?? '');
+    }
+    expect(stderr).toContain('CODEV_PR_REPO=owner/repo');
   });
 });
 
