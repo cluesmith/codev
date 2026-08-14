@@ -93,3 +93,25 @@ Actual per-mode rendering is out of scope (owned by participating-feature issues
   defined minimum summary/drill-in UI (builder-id stub) for umbrella scope.
 - Rebuttal: 1049-specify-iter2-rebuttals.md. Gate still OPEN; porch state untouched.
 - Next: report verdicts to architect; ready for spec-approval when they approve.
+
+## Plan-phase notes (do NOT apply to spec — captured for when we reach PLAN)
+
+### Placeholder dead-code cleanup (architect note 2026-08-14, verified against source)
+The repurpose of `codev.placeholder` into the contextual panel must ALSO retire orphaned dead code,
+not just add the new view. Verified:
+- `apps/vscode/src/extension.ts:555` — `setContext codev.panelContainerEmpty false` is unconditional
+  (because `codev.dev` is always present), so `codev.placeholder` (gated by that key) can NEVER render.
+  This flip becomes dead once the placeholder is gone → retire it.
+- `apps/vscode/src/views/panel-placeholder.ts:18,20` — stale body/tooltip text advertising #813/#814/
+  #815 as future panel tabs, shown to a user who by construction can't see the view → remove.
+- `apps/vscode/src/extension.ts:552` comment calls #813/#814/#815 "sibling tabs" — now STALE (see
+  rescope ruling below); clean up as part of the same repurpose.
+- Existing manifest tests already flagged in spec Constraints (contributes-panel / panel-placeholder /
+  contributes-dev) will need updating in lockstep.
+
+### #813/#814/#815 rescope ruling (architect, 2026-08-14)
+#813 (Recently Closed) / #814 (Team) / #815 (Status) are HELD pending this surface and will be
+rescoped as PARTICIPATING FEATURES rendering into the contextual panel's modes (e.g. Attention
+sub-views), NOT sibling panel tabs. => The umbrella/participating boundary is the load-bearing part
+of that design — keep it CRISP in the plan (umbrella ships skeleton + resolver + switching + minimal
+stubs; these three render their content into my mode render-targets in their own PRs).
