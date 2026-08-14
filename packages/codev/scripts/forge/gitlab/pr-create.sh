@@ -1,5 +1,6 @@
 #!/bin/sh
 # Forge concept: pr-create (GitLab via glab CLI — merge requests)
+# forge-executable: glab
 #
 # Input:  CODEV_PR_TITLE (required)
 #         CODEV_PR_BODY  (required, may be empty)

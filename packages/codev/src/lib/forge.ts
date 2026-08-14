@@ -189,6 +189,9 @@ export function resolveAllConcepts(forgeConfig?: ForgeConfig | null): ConceptRes
  *
  * For inline commands: handles `if [ ... ]; then cmd ...` patterns and pipes.
  */
+/** Shell builtins and keywords that are never the executable a concept needs on PATH. */
+const SHELL_BUILTINS = ['if', 'then', 'else', 'fi', 'test', '[', '[[', 'set', 'export', 'readonly', 'local', 'shift', ':'];
+
 function extractExecutable(command: string): string | null {
   const trimmed = command.trim();
 
@@ -196,15 +199,25 @@ function extractExecutable(command: string): string | null {
   if (trimmed.endsWith('.sh') && existsSync(trimmed)) {
     try {
       const content = readFileSync(trimmed, 'utf-8');
+      // An explicit `# forge-executable: <tool>` declaration wins. The heuristic
+      // below reads the first substantive line, which is wrong for any script
+      // that opens with `set -e` or an input guard — it would tell `codev
+      // doctor` to look for `set` or `echo` instead of `gh`/`tea`/`glab`, and a
+      // missing forge CLI would go unreported (#1455).
+      const declared = content.match(/^#\s*forge-executable:\s*(\S+)/m);
+      if (declared) return declared[1];
       // Look for `exec <tool>` or first non-comment, non-shebang, non-blank line
       for (const line of content.split('\n')) {
         const l = line.trim();
         if (!l || l.startsWith('#') || l.startsWith('if') || l.startsWith('else') || l.startsWith('fi') || /^\w+=/.test(l)) continue;
         const execMatch = l.match(/^exec\s+(\S+)/);
         if (execMatch) return execMatch[1];
-        // First substantive command
+        // First substantive command. Shell builtins are skipped, not returned:
+        // a script opening with `set -e` would otherwise report `set` as its
+        // executable, and `codev doctor` would then warn that `set` is missing
+        // instead of checking for the real CLI (#1455).
         const token = l.split(/\s+/)[0];
-        if (token && !['if', 'then', 'else', 'fi', 'test', '[', '[['].includes(token)) {
+        if (token && !SHELL_BUILTINS.includes(token)) {
           return token;
         }
       }
@@ -222,7 +235,7 @@ function extractExecutable(command: string): string | null {
   const first = trimmed.split(/[|;]/).map(s => s.trim())[0];
   // Skip shell builtins
   const token = first.split(/\s+/)[0];
-  if (['if', 'test', '[', '[['].includes(token)) return null;
+  if (SHELL_BUILTINS.includes(token)) return null;
   return token || null;
 }
 

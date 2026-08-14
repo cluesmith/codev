@@ -108,14 +108,15 @@ git push
 PR_TITLE="<concise description of the change>"
 BRANCH="$(git branch --show-current)"
 
-CODEV_PR_TITLE="$PR_TITLE" \
-CODEV_PR_BODY="$(cat codev/reviews/{{artifact_name}}.md)" \
-CODEV_PR_BASE=main \
-CODEV_PR_HEAD="$BRANCH" \
+export CODEV_PR_TITLE="$PR_TITLE"
+export CODEV_PR_BODY="$(cat codev/reviews/{{artifact_name}}.md)"
+export CODEV_PR_BASE=main
+export CODEV_PR_HEAD="$BRANCH"
+
 {{pr_create_command}}
 ```
 
-The command above is your forge's `pr-create` concept, substituted by porch (`gh pr create` by default). It prints `{"number": <int>, "url": "<url>"}`. The body goes in as an environment variable, not `--body-file` — read the created PR back and confirm the body arrived intact before moving on.
+The command above is your forge's `pr-create` concept, substituted by porch (`gh pr create` by default). It prints `{"number": <int>, "url": "<url>"}`. The inputs are **exported** so an inline override that spells `--title "$CODEV_PR_TITLE"` sees them too. The body goes in as an environment variable, not `--body-file` — read the created PR back and confirm the body arrived intact before moving on.
 
 **Verify the PR body contains `Fixes #{{issue.number}}`** (it should — the review file has it at the top). If somehow missing, edit and re-apply:
 

@@ -24,6 +24,7 @@ import * as path from 'node:path';
 import {
   getKnownConcepts,
   getForgeCommand,
+  resolveAllConcepts,
   validateForgeConfig,
 } from '../lib/forge.js';
 
@@ -68,6 +69,18 @@ describe('#1455 — pr-create is a forge concept', () => {
       expect(fs.statSync(command!).mode & 0o111, 'script is not executable').not.toBe(0);
     },
   );
+
+  it.each([
+    ['github', 'gh'],
+    ['gitea', 'tea'],
+    ['gitlab', 'glab'],
+  ])('doctor resolves the %s pr-create executable as %s, not a shell builtin', (provider, tool) => {
+    // extractExecutable reads the script and reports what must be on PATH. The
+    // scripts open with `set -e`, so a builtin-blind reader answers "set" and
+    // `codev doctor` then warns that `set` is missing instead of `tea`/`glab`.
+    const resolution = resolveAllConcepts({ provider }).find((r) => r.concept === 'pr-create');
+    expect(resolution?.executable).toBe(tool);
+  });
 
   it('defaults to the github script and honours a manual override', () => {
     expect(getForgeCommand('pr-create', null)).toBe(
@@ -158,6 +171,7 @@ describe('#1455 — pr-create scripts honour the contract', () => {
           '  exit 0',
           'fi',
           'if [ "$2" = "list" ]; then',
+          '  printf "%s\\0" "$@" > list-args',
           '  echo \'[{"index":"7","url":"https://forge.example.com/o/r/pulls/7","head":"my-branch"},',
           '        {"index":"3","url":"https://forge.example.com/o/r/pulls/3","head":"other"}]\'',
           '  exit 0',
@@ -185,6 +199,12 @@ describe('#1455 — pr-create scripts honour the contract', () => {
       expect(args[args.indexOf('--title') + 1]).toBe('Fix #1455');
       expect(args[args.indexOf('--head') + 1]).toBe('my-branch');
       expect(args[args.indexOf('--base') + 1]).toBe('main');
+
+      // The lookup must page like every other gitea script; on tea's default
+      // page a busy repo pushes the just-created PR off the list and the script
+      // reports failure for a PR that exists.
+      const listArgs = recordedArgs('list-args');
+      expect(listArgs[listArgs.indexOf('--limit') + 1]).toBe('200');
     },
   );
 

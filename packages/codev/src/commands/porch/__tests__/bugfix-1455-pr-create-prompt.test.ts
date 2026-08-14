@@ -8,6 +8,7 @@
  * would simply say `gh pr create` on a Gitea project.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -89,5 +90,41 @@ describe('#1455 — porch substitutes {{pr_create_command}}', () => {
     const prompt = await buildPhasePrompt(tmp, state, protocol);
     expect(prompt).toContain('open the PR manually');
     expect(prompt).not.toContain('{{pr_create_command}}');
+    // And it must fail rather than being a comment the shell happily ignores —
+    // otherwise running the block "succeeds" without opening anything.
+    expect(prompt).toContain('false;');
+    expect(prompt).not.toMatch(/^# pr-create is disabled/m);
+  });
+
+  /**
+   * The shipped prompt block, executed for real.
+   *
+   * Inline commands are a documented override form (`"pr-merge": "glab mr merge
+   * \"$CODEV_PR_NUMBER\" --yes"`). With the inputs written as an assignment
+   * prefix (`CODEV_PR_TITLE=… cmd --title "$CODEV_PR_TITLE"`) the calling shell
+   * expands the argument BEFORE applying the assignment, so an inline override
+   * receives an empty title and body — while a script reading the environment
+   * works fine, which is what makes it easy to miss.
+   */
+  it('an inline override receives the title and body the prompt sets', async () => {
+    const repoRoot = path.resolve(import.meta.dirname, '..', '..', '..', '..', '..', '..');
+    fs.copyFileSync(
+      path.join(repoRoot, 'codev/protocols/bugfix/prompts/pr.md'),
+      path.join(tmp, 'codev', 'protocols', 'bugfix', 'prompts', 'pr.md'),
+    );
+    writeForgeConfig({
+      'pr-create': `sh -c 'printf "%s" "$1" > title.txt; printf "%s" "$2" > body.txt' _ "$CODEV_PR_TITLE" "$CODEV_PR_BODY"`,
+    });
+
+    const prompt = await buildPhasePrompt(tmp, state, protocol);
+    const block = prompt.match(/```bash\n(export CODEV_PR_TITLE[\s\S]*?)```/)?.[1];
+    expect(block, 'PR-creating block not found in the rendered prompt').toBeTruthy();
+
+    execFileSync('sh', ['-c', block!], { cwd: tmp });
+
+    expect(fs.readFileSync(path.join(tmp, 'title.txt'), 'utf-8')).toContain('Fix #');
+    const body = fs.readFileSync(path.join(tmp, 'body.txt'), 'utf-8');
+    expect(body).toContain('## Summary');
+    expect(body).toContain('Fixes #');
   });
 });

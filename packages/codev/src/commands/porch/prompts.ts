@@ -96,7 +96,12 @@ function loadPromptFile(workspaceRoot: string, protocolName: string, promptFile:
  */
 function resolvePrCreateCommand(workspaceRoot: string): string {
   const command = getForgeCommand('pr-create', loadForgeConfig(workspaceRoot));
-  return command ?? '# pr-create is disabled for this forge — open the PR manually';
+  // The disabled form must FAIL, not comment: a `# …` line is valid shell that
+  // exits 0, so an agent running the block would read "PR opened" from silence.
+  return (
+    command ??
+    "{ echo 'pr-create is disabled for this forge — open the PR manually' >&2; false; }"
+  );
 }
 
 /**

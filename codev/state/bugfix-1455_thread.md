@@ -119,3 +119,40 @@ Three scratch PRs, all closed and their branches deleted afterwards:
   `gitea/pr-exists.sh` filters on `.head.ref`.
 - `gh pr edit --body-file` is still hardcoded in `pir/prompts/review.md` — `pr-edit` is not a
   concept and adding one is outside this issue.
+
+## PR phase
+
+PR **#1458** against `cluesmith/codev` (base `main`, head `pseudoseed:builder/bugfix-1455`,
+`isCrossRepository: true` — verified from the server, not assumed). Opened with the new
+`scripts/forge/github/pr-create.sh`; the 7,937-byte body read back over the API is byte-identical
+to what went in.
+
+Porch's `tests` check could not pass on this machine: `spec-1280-measurement-instrument.test.ts`
+shells out to `measure-prompt-surface.sh`, which costs 25–30 s per invocation here (~2.0 s on
+record), and two of its tests call it twice against a 60 s budget. The branch is 0 commits behind
+`upstream/main` and that file and script are byte-identical to main. Architect chose "advance past
+it, don't touch the budgets, disclose it in the PR body". Advanced via a `porch.checks.tests`
+override in `.codev/config.json`, which is a **symlink to the main workspace** — so I copied the
+file into the worktree, added the override, advanced, then restored the symlink. Main's config was
+never modified.
+
+### CMAP: gemini APPROVE · codex REQUEST_CHANGES · claude REQUEST_CHANGES
+
+Three real defects, all fixed in `a9f534ed`+ follow-ups:
+
+1. **codex** — the prompts used an assignment *prefix* (`CODEV_PR_TITLE=… cmd`). A script reading
+   the environment works, but an **inline** override (the documented form, e.g.
+   `"pr-merge": "glab mr merge \"$CODEV_PR_NUMBER\" --yes"`) has its `"$CODEV_PR_TITLE"` argument
+   expanded by the calling shell *before* the assignment applies — so it receives empty strings.
+   Verified with a two-line shell experiment. Prompts now `export`. Pinned by a test that renders
+   the real shipped prompt, extracts the bash block and **executes** it against an inline override.
+2. **claude** — `extractExecutable` reads a script's first substantive line, so `set -e` made
+   `codev doctor` report `pr-create … set not found`; it could no longer tell a Gitea user that
+   `tea` was missing. Added a `# forge-executable: <tool>` declaration honoured ahead of the
+   heuristic, plus a shell-builtin skip list. Verified against the built `dist`: github→gh,
+   gitea→tea, gitlab→glab.
+3. **claude** — `gitea/pr-create.sh`'s lookup had no `--limit`, unlike every sibling script; on a
+   busy repo it would create the PR and then exit 1 claiming it couldn't find it. Now `--limit 200`.
+
+Also took claude's non-blocking note: the disabled-concept fallback rendered as a `#` comment
+(valid shell, exit 0, no PR). It now fails loudly.

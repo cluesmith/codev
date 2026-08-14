@@ -1,5 +1,6 @@
 #!/bin/sh
 # Forge concept: pr-create (GitHub via gh CLI)
+# forge-executable: gh
 #
 # Input:  CODEV_PR_TITLE (required)
 #         CODEV_PR_BODY  (required, may be empty)

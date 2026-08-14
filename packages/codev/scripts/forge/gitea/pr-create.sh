@@ -1,5 +1,6 @@
 #!/bin/sh
 # Forge concept: pr-create (Gitea/Forgejo via tea CLI)
+# forge-executable: tea
 #
 # Input:  CODEV_PR_TITLE (required)
 #         CODEV_PR_BODY  (required, may be empty)
@@ -37,8 +38,11 @@ if [ "$CODEV_PR_DRAFT" = "1" ]; then set -- "$@" --draft; fi
 tea pulls create "$@" >&2
 
 # Look the PR up by head branch. A cross-repo head is "<user>:<branch>" on the
-# way in but lists as the bare branch name, so match either form.
-set -- --state open --fields index,url,head --output json
+# way in but lists as the bare branch name, so match either form. --limit 200
+# matches the other gitea scripts: on tea's default page size a busy repo could
+# push the just-created PR off the list, and this would report a failure for a
+# PR that exists.
+set -- --state open --limit 200 --fields index,url,head --output json
 if [ -n "$CODEV_PR_REPO" ]; then set -- "$@" --repo "$CODEV_PR_REPO"; fi
 if [ -n "$CODEV_PR_LOGIN" ]; then set -- "$@" --login "$CODEV_PR_LOGIN"; fi
 

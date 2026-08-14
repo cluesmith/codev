@@ -185,3 +185,14 @@ curl -s "https://forge.example.com/api/issues/$CODEV_ISSUE_ID" \
   -H "Authorization: Bearer $FORGE_TOKEN" \
   | jq '{title: .title, body: .description, state: .state}'
 ```
+
+`codev doctor` reports the executable each concept needs on `PATH`, inferred from the script's
+first substantive command. A script that opens with `set -e` or an input guard should say so
+explicitly instead:
+
+```bash
+#!/bin/sh
+# forge-executable: tea
+set -e
+...
+```
