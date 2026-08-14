@@ -1,0 +1,14 @@
+id: '1444'
+title: stream-deck-re-glyph-the-catch
+protocol: air
+phase: implement
+plan_phases: []
+current_plan_phase: null
+gates:
+  pr:
+    status: pending
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-08-14T00:27:27.654Z'
+updated_at: '2026-08-14T00:27:27.655Z'
