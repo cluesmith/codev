@@ -132,21 +132,92 @@ constant under zoom — it **sawtooths** as `n` drops. Approx chars/line at 25em
 
 Not constant, not monotonic. What em buys is a **scaling lower bound on the minimum column width**:
 the floor rises with the prose, so the column count drops at the right point and the measure never
-**collapses** to too-narrow under zoom. That is the real benefit, and it is worth stating as exactly
-that rather than as "constant measure."
+**collapses** to too-narrow under zoom.
+
+**The sawtooth is not new, and this is a preference between failure modes, not a fix.** The
+sawtooth is inherent to stretch-to-fill multicol: **px has it too**, and at 16px px and em render
+**identically everywhere**. What em changes is only *where the teeth fall* and *which direction the
+extremes fail*: **px fails toward too-narrow** (columns stay a fixed pixel width, so under zoom the
+prose gets larger inside an unchanged column and the measure shrinks in characters), **em fails
+toward too-wide** (the minimum scales, so the last case before a column drop is an over-wide
+column). Since this issue is motivated by the **too-narrow** complaint (a reviewer zooming in and
+losing measure), em is the **better default** — as a chosen preference between failure modes, not as
+a claim of constant measure.
 
 **Failure mode em introduces that px does not have — named and scripted.** At the 1-column boundary
 the single column stretches to the **full pane with no cap**, because horizontal mode deliberately
 sets `max-width: none` (the prose-measure cap is inert there, `default-theme.css:499-502`). So at a
 wide pane + high zoom (e.g. 1200px at 24px) em yields **one over-wide column at ~100 chars**, where
-px would have kept 2 columns at ~48 chars — at *that* combination px reads better. The honest
-balance: **em prevents the measure collapsing under zoom, at the cost of column count and an
-over-wide single-column case.** It is still right on balance (it wins where it matters — 900px at
-24px is em ~75 vs px ~35 — and the revert-to-px path exists), but the plan states what it does
-rather than only its upside. Both effects are added to the dev-approval script below.
+px would have kept 2 columns at ~48 chars — at *that* combination px reads better. Net balance: em
+prevents the measure collapsing under zoom, at the cost of column count and an over-wide
+single-column case; still right on balance for the too-narrow-motivated issue, and the revert-to-px
+path exists. If the over-wide case reads badly at the gate, the response is the container cap below,
+not abandoning em.
 
 `column-width` remaining a preferred minimum, D6 is preserved exactly: there is still no settings UI
 for the column tokens; overriding them remains the supported retune path.
+
+**First-class design option, recorded but NOT implemented in this lane: a whole-column container
+cap.** Cap the multicol **container** to `n * (column + gap)` (centred), where `n` is the largest
+column count that fits the pane. This is **not** what the CSS comment at `default-theme.css:499-502`
+warns against — that warns against capping to a **prose measure** (e.g. `72ch`), which collapses the
+mode to a single column. Capping to a whole-column **multiple** keeps every column that fits and
+only stops the **last** column stretching into leftover space.
+
+**Constant by construction (closed form, exact — not a sample).** With the em tokens (col = 25em,
+gap = 3em) and the container capped to `n*(col+gap)`, each column is
+`(n·28em − (n−1)·3em) / n = 25em + 3em/n`, so `measure = (25em + 3em/n) / 0.5em = 50 + 6/n`
+characters. **Pane width and font size cancel entirely** — only column count `n` survives,
+contributing at most 6 characters: `n=1 → 56`, `n=2 → 53`, `n=3 → 52`, `n≥8 → ~51`. So the capped
+measure is **constant by construction**, not merely flattened: the 52–56 range is the *entire* range
+that can exist at any pane and any zoom, not an empirical sample. The precise conclusion — the useful
+way the original rationale was wrong: it was **wrong about the mechanism, right about the goal.** Em
+alone does not give constant measure; **em plus a whole-column container cap does, almost exactly.**
+(Full derivation is posted as a comment on issue #1070 so a follow-up lane inherits the arithmetic.)
+
+The table below is the closed form's empirical shadow, kept as a sanity check (approx chars/line;
+same ~0.5em glyph assumption):
+
+| pane | font | no cap | container cap |
+|------|------|--------|---------------|
+| 900px  | 16px | 2 col 53ch | 2 col 53ch |
+| 900px  | 20px | 1 col 90ch | 1 col 56ch |
+| 900px  | 24px | 1 col 75ch | 1 col 56ch |
+| 900px  | 28px | 1 col 64ch | 1 col 56ch |
+| 1200px | 16px | 2 col 72ch | 2 col 53ch |
+| 1200px | 20px | 2 col 57ch | 2 col 53ch |
+| 1200px | 24px | 1 col 100ch | 1 col 56ch |
+| 1200px | 28px | 1 col 86ch | 1 col 56ch |
+| 1600px | 16px | 3 col 63ch | 3 col 52ch |
+| 1600px | 20px | 2 col 77ch | 2 col 53ch |
+| 1600px | 24px | 2 col 64ch | 2 col 53ch |
+| 1600px | 28px | 2 col 54ch | 2 col 53ch |
+
+Uncapped ranges 53–100 chars; capped holds 52–56 across every pane and zoom — matching the closed
+form exactly. Two caveats to record (for measurement, not argument):
+
+- **(a) It needs JS, not static CSS.** `n` depends on pane width **and** font size, and CSS has no
+  floor operation for this. The canvas already observes geometry in JS and publishes
+  `--codev-canvas-column-height`, so a sibling `--codev-canvas-column-container-max` follows the
+  existing pattern rather than introducing a novel one.
+- **(b) It leaves centred dead space, and the dead space is bounded.** The scroll container becomes
+  narrower than the pane, centred, with margin either side. The dead space is `pane mod (col+gap)`,
+  so it is **at most one column-plus-gap**. Worked cases: 1200px/24px → 528px total (264 per side,
+  against a 672px reading window); 1600px/28px → 32px total (16 per side, visually invisible);
+  900px/20px → 340px total (170 per side). The cost is **not uniform**: it is worst exactly at the
+  boundary where the uncapped version is also at its worst (the ~100-char line). Both failure modes
+  cluster at the same place, which makes **1200px/24px the decisive comparison** and the other cases
+  confirmatory. Reading research favours the capped window over a 100-char line, but it visibly
+  changes how horizontal mode fills the pane — its own judgement at the gate, not an assumed win.
+- **(c) Recompute-on-zoom hazard (for the follow-up lane).** The cap depends on font size, which the
+  zoom control changes, so the JS observer must recompute the cap on **font-size change**, not only
+  on resize. This is the bug class that passes every test and fails in the hand: on zoom the column
+  count updates because CSS handles it, but a JS cap wired only to resize does not, and the layout
+  goes wrong in a way that reads like a rounding error rather than a bug. If the cap becomes a lane,
+  that recompute path deserves **its own dev-approval step**, not a general "it works" check.
+
+This is deferred out of the current lane deliberately; it is the designed response if the wide
+1-column case reads badly at dev-approval, evaluated there with the numbers above.
 
 **Explicitly EXCLUDED from scope — a separate, deliberate decision, not a surprise:** making
 **rhythm** (`--codev-canvas-paragraph-spacing`, `--codev-canvas-gutter`) em-relative. Because
@@ -222,10 +293,12 @@ time that none assert the token **strings**.
   to the setting's existing scope via `inspect()` (Workspace if defined there, else Global).
 - **Risk — shared-package ownership.** Workstream B changes a main-owned surface. Delineated above
   and routed to main before plan-approval; A ships independently if B is declined.
-- **Risk — horizontal-mode reads badly under zoom** (the silent tall-block-cap effect). Not
-  fixable by tokens; verified tolerable at dev-approval with real fences/tables at several zoom
-  levels in both modes (evidence required, see Test Plan). If em columns make it worse, revert B to
-  px and keep A.
+- **Risk — horizontal-mode reads badly under zoom.** Two distinct effects: the silent
+  tall-block-cap effect (not fixable by tokens; verified tolerable at dev-approval with real
+  fences/tables at several zoom levels in both modes, evidence required, see Test Plan), and the
+  em over-wide single-column case. If em reads worse on balance, revert B to px and keep A; if only
+  the wide 1-column case reads badly, the designed response is the whole-column container cap
+  (recorded as a first-class option in Workstream B, not implemented in this lane).
 - **Alternative — webview toolbar buttons in the canvas.** Rejected: adds chrome/message protocol
   to the shared surface for a host-side "step a number" action, more surface area than native
   title-bar buttons buy.
@@ -258,17 +331,21 @@ Open a real spec containing **fenced code, a wide table, and an image** in the p
 2. **Expected column COUNT changes as predicted (not stays constant).** Because em keeps the
    minimum measure scaling, the number of columns that fit **drops as you zoom in** — that is
    correct behavior, not a regression. For each pane width tested, write the expected column count
-   at each zoom level *before* looking, then confirm the count changes accordingly. Include at
-   least one **narrow-pane** case (e.g. ~900px at 28px) where high zoom **collapses to a single
-   column** and horizontal mode effectively becomes vertical with sideways scroll — confirm that is
-   what happens and reads acceptably.
-3. **Wide-pane 1-column case, judged explicitly (the failure mode em introduces).** At a wide pane
-   with high zoom (e.g. **1200px at 24px**), horizontal mode yields **one over-wide column (~100
-   chars) with no width cap**. Judge whether that single column reads acceptably. If it does not,
-   the cheap fixes (do **not** implement now, just flag) are (i) capping the zoom range in
-   horizontal mode, or (ii) capping single-column content width; both are far cheaper than
-   abandoning em. **Preferred if needed: (ii) cap single-column content width** — it keeps the full
-   zoom range and only intervenes in the exact over-wide case, rather than taking zoom away.
+   at each zoom level *before* looking (use the no-cap table above), then confirm the count changes
+   accordingly. Two cases to check as **predictions, not hopes**:
+   - **900px at 24px → expect 1 column at ~75 chars** (em winning here; px would give ~36).
+   - **1200px at 24px → expect 1 column at ~100 chars** (em losing here; px would give ~48).
+   Include at least one **narrow-pane** case (e.g. ~900px at 28px) where high zoom **collapses to a
+   single column** and horizontal mode effectively becomes vertical with sideways scroll — confirm
+   that is what happens and reads acceptably.
+3. **Judge uncapped vs the container cap side by side (do NOT implement the cap in this lane).**
+   **1200px at 24px is THE decisive comparison** — it is where the uncapped over-wide line (~100
+   chars) and the capped dead space (~264px per side) are *both* at their worst; the other cases are
+   confirmatory. Judge the uncapped ~100-char column against the container-cap outcome (constant
+   `50 + 6/n` ≈ ~56 chars, centred, with side margin), not in a vacuum. If the uncapped case reads
+   badly, that is **not a failed lane** — it is the measurement doing its job, and the **whole-column
+   container cap is the designed response** (JS-computed sibling token; see the design-option section
+   above). Flag the finding; leave the cap unimplemented.
 4. The `$(zoom-in)` / `$(zoom-out)` buttons are visible on the preview's title bar, and the
    command palette offers all three only when the preview is the active editor.
 5. +/− reflow **live** (no reopen), and the value **persists** across closing and reopening the

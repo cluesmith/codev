@@ -55,6 +55,25 @@ Two Workstream-B correctness fixes:
 
 Dev-approval script additions: (a) reviewer states EXPECTED column COUNT per pane×zoom and confirms
 it CHANGES as predicted (incl. a narrow-pane case collapsing to 1 col); (b) explicit wide-pane
-1-col case (1200px@24px) judged for readability — flagged preferred cheap fix if needed = cap
-single-column content width (keeps full zoom range), not implemented now. Numbers use architect's;
-sanity-check one row vs real render at implement time (0.5em glyph is rule-of-thumb).
+1-col case (1200px@24px) judged for readability. Numbers use architect's; sanity-check one row vs
+real render at implement time (0.5em glyph is rule-of-thumb).
+
+### Plan revision 3 (both architects satisfied, 2026-08-14)
+
+Reframed the em rationale + recorded the container cap as a first-class design option (NOT
+implemented this lane):
+- Sawtooth is inherent to stretch-to-fill multicol; px has it too; identical at 16px. em vs px
+  differ only in where teeth fall + which extreme fails (px→too-narrow, em→too-wide). Issue is
+  too-narrow-motivated, so em is the better DEFAULT — a preference between failure modes, not a fix.
+- Whole-column container cap = cap container to n*(col+gap) centred (NOT prose-measure cap, which
+  :499-502 warns against). Closed form: measure = 50 + 6/n chars → pane & font-size CANCEL, only
+  column count survives (n=1→56, n=2→53, ≥8→~51). CONSTANT BY CONSTRUCTION. Original rationale was
+  wrong about MECHANISM, right about GOAL: em alone ≠ constant; em + container cap = constant almost
+  exactly. Derivation posted as issue #1070 comment (referenced, not reproduced).
+- Cap caveats: (a) needs JS (sibling --codev-canvas-column-container-max, follows column-height
+  pattern); (b) bounded dead space = pane mod (col+gap), worst at 1200px/24px (264px/side) — same
+  boundary where uncapped is worst, so 1200px/24px is THE decisive dev-approval comparison; (c)
+  recompute-on-zoom hazard — cap depends on font-size so observer must recompute on font-size change
+  not only resize (bug class that passes tests, fails in hand); own dev-approval step if it lands.
+- Dev-approval script: uncapped predictions (900@24→~75 em-win/px36; 1200@24→~100 em-lose/px48) vs
+  capped comparison side-by-side; 1200@24 flagged decisive.
