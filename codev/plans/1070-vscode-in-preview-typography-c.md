@@ -109,17 +109,44 @@ dev-approval and can be dropped without affecting Workstream A.
   `--codev-canvas-gutter` at `1.9rem` (line 130). So making **rhythm** scale with font size touches
   an asserted baseline.
 
-**In-scope token change (free, serves zoom directly):** make the horizontal-mode measure track
-font size by making the column tokens em-relative:
+**In-scope token change (free, serves zoom directly):** make the horizontal-mode minimum column
+width scale with font size (a scaling lower bound on the measure, see below) by making the column
+tokens em-relative:
 
 - `--codev-canvas-column-width: 400px` → `25em` (400 / 16 = 25em at baseline; identical at 16px).
 - `--codev-canvas-column-gap: 48px` → `3em` (48 / 16 = 3em at baseline; identical at 16px).
 
-At baseline these are byte-equivalent in rendered px, so nothing changes today; under zoom the
-columns widen with the prose, keeping the **measure constant in characters** (which is what a
-measure is). `column-width` is a preferred minimum, so real columns still stretch to share
-leftover viewport width. D6 is preserved exactly: there is still no settings UI for the column
-tokens; overriding them remains the supported retune path.
+At baseline these are byte-equivalent in rendered px, so nothing changes today.
+
+**What em actually buys (stated precisely, not overclaimed).** `column-width` is a preferred
+**minimum**, and columns stretch to fill the pane, so the *rendered* measure is
+`(pane - (n-1)*gap) / n` where `n` is the column count the engine fits. That does **not** stay
+constant under zoom — it **sawtooths** as `n` drops. Approx chars/line at 25em/3em (avg glyph
+~0.5em; a rule of thumb to sanity-check against a real render at implement time, not a measurement):
+
+| pane | 16px | 20px | 24px | 28px |
+|------|------|------|------|------|
+| 900px  | 53 | 90 | 75 | 64 |
+| 1200px | 72 | 57 | 100 | 86 |
+| 1600px | 63 | 77 | 64 | 54 |
+
+Not constant, not monotonic. What em buys is a **scaling lower bound on the minimum column width**:
+the floor rises with the prose, so the column count drops at the right point and the measure never
+**collapses** to too-narrow under zoom. That is the real benefit, and it is worth stating as exactly
+that rather than as "constant measure."
+
+**Failure mode em introduces that px does not have — named and scripted.** At the 1-column boundary
+the single column stretches to the **full pane with no cap**, because horizontal mode deliberately
+sets `max-width: none` (the prose-measure cap is inert there, `default-theme.css:499-502`). So at a
+wide pane + high zoom (e.g. 1200px at 24px) em yields **one over-wide column at ~100 chars**, where
+px would have kept 2 columns at ~48 chars — at *that* combination px reads better. The honest
+balance: **em prevents the measure collapsing under zoom, at the cost of column count and an
+over-wide single-column case.** It is still right on balance (it wins where it matters — 900px at
+24px is em ~75 vs px ~35 — and the revert-to-px path exists), but the plan states what it does
+rather than only its upside. Both effects are added to the dev-approval script below.
+
+`column-width` remaining a preferred minimum, D6 is preserved exactly: there is still no settings UI
+for the column tokens; overriding them remains the supported retune path.
 
 **Explicitly EXCLUDED from scope — a separate, deliberate decision, not a surprise:** making
 **rhythm** (`--codev-canvas-paragraph-spacing`, `--codev-canvas-gutter`) em-relative. Because
@@ -226,19 +253,33 @@ Open a real spec containing **fenced code, a wide table, and an image** in the p
 1. **The tall-block cap, checked FIRST with visual evidence (the silent failure mode).** In
    **horizontal mode**, at each zoom level, confirm that fences/tables/images/marker cards which
    cross the fixed column cap fall back to **usable inner vertical scroll**, not broken layout or
-   content clipped past the column bottom. Also confirm the measure stays sane as text grows
-   (Workstream B). This is the check tests cannot substitute for; capture it explicitly.
-2. The `$(zoom-in)` / `$(zoom-out)` buttons are visible on the preview's title bar, and the
+   content clipped past the column bottom. This is the check tests cannot substitute for; capture
+   it explicitly.
+2. **Expected column COUNT changes as predicted (not stays constant).** Because em keeps the
+   minimum measure scaling, the number of columns that fit **drops as you zoom in** — that is
+   correct behavior, not a regression. For each pane width tested, write the expected column count
+   at each zoom level *before* looking, then confirm the count changes accordingly. Include at
+   least one **narrow-pane** case (e.g. ~900px at 28px) where high zoom **collapses to a single
+   column** and horizontal mode effectively becomes vertical with sideways scroll — confirm that is
+   what happens and reads acceptably.
+3. **Wide-pane 1-column case, judged explicitly (the failure mode em introduces).** At a wide pane
+   with high zoom (e.g. **1200px at 24px**), horizontal mode yields **one over-wide column (~100
+   chars) with no width cap**. Judge whether that single column reads acceptably. If it does not,
+   the cheap fixes (do **not** implement now, just flag) are (i) capping the zoom range in
+   horizontal mode, or (ii) capping single-column content width; both are far cheaper than
+   abandoning em. **Preferred if needed: (ii) cap single-column content width** — it keeps the full
+   zoom range and only intervenes in the exact over-wide case, rather than taking zoom away.
+4. The `$(zoom-in)` / `$(zoom-out)` buttons are visible on the preview's title bar, and the
    command palette offers all three only when the preview is the active editor.
-3. +/− reflow **live** (no reopen), and the value **persists** across closing and reopening the
+5. +/− reflow **live** (no reopen), and the value **persists** across closing and reopening the
    preview (confirming it was written to the setting, not held in memory).
-4. No keybindings ship in v1, so confirm the negative: `cmd+=`/`cmd+-`/`cmd+0` still perform normal
+6. No keybindings ship in v1, so confirm the negative: `cmd+=`/`cmd+-`/`cmd+0` still perform normal
    workbench zoom everywhere, including with the preview as the active editor.
-5. Reset restores the baseline in both modes.
+7. Reset restores the baseline in both modes.
 
 Capture **screenshots or a short recording** at each zoom level in each mode (fences + a table in
 view), attached to the dev-approval gate — with the horizontal tall-block-cap behavior (check 1)
-shown at every zoom level.
+and the column-count transitions (checks 2–3) shown at every zoom level.
 
 ### Cross-platform
 

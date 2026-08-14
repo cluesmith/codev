@@ -39,5 +39,22 @@ v1** (issue lists them as optional; buttons + palette meet the discoverability g
 binding to shadow). Focus-scoped keybinding is a verified follow-up.
 
 Also reordered dev-approval Test Plan so the horizontal tall-block-cap check is FIRST with visual
-evidence (architect standing instruction). Rhythm exclusion + cap-not-fixed unchanged. Revised
-commit follows.
+evidence (architect standing instruction). Rhythm exclusion + cap-not-fixed unchanged.
+
+### Plan revision 2 (architect + stakeholder review, 2026-08-14)
+
+Two Workstream-B correctness fixes:
+1. Killed the false "constant measure in characters" claim. Rendered measure = (pane-(n-1)gap)/n,
+   which SAWTOOTHS as column count n drops (added architect's chars/line table, 900/1200/1600px ×
+   16-28px). What em actually buys = a SCALING LOWER BOUND on the minimum column width (prevents
+   measure collapsing under zoom), not constant measure.
+2. Named the failure mode em introduces that px lacks: at the 1-column boundary the single column
+   fills the pane with NO cap (horizontal mode sets max-width:none, default-theme.css:499-502), so
+   wide-pane+high-zoom (1200px@24px) → 1 over-wide column ~100 chars where px kept 2 cols ~48. Kept
+   em (right on balance, revert path exists) but stated the honest trade.
+
+Dev-approval script additions: (a) reviewer states EXPECTED column COUNT per pane×zoom and confirms
+it CHANGES as predicted (incl. a narrow-pane case collapsing to 1 col); (b) explicit wide-pane
+1-col case (1200px@24px) judged for readability — flagged preferred cheap fix if needed = cap
+single-column content width (keeps full zoom range), not implemented now. Numbers use architect's;
+sanity-check one row vs real render at implement time (0.5em glyph is rule-of-thumb).
