@@ -77,3 +77,29 @@ implemented this lane):
   not only resize (bug class that passes tests, fails in hand); own dev-approval step if it lands.
 - Dev-approval script: uncapped predictions (900@24→~75 em-win/px36; 1200@24→~100 em-lose/px48) vs
   capped comparison side-by-side; 1200@24 flagged decisive.
+
+## Implement phase (plan approved, 2026-08-14)
+
+Workstream A (apps/vscode):
+- New `src/markdown-preview/font-size-control.ts` — pure: effectiveFontSize (0 sentinel→16),
+  steppedFontSize (±1, clamp 8..40, never returns 0), resolveWriteScope (write to the scope the
+  value already lives in so a workspace override can't shadow the click).
+- `src/extension.ts` — module-level `configTargetFor` + `stepMarkdownPreviewFontSize`; 3 command
+  regs (increase/decrease/reset). Reset writes 0 to BOTH fontSize+lineHeight.
+- `package.json` — 3 commands ($(zoom-in)/$(zoom-out) icons; reset iconless), editor/title buttons
+  (decrease@1, increase@2) + commandPalette, all gated activeCustomEditorId==codev.markdownPreview.
+  NO keybindings (v1). Live reflow reuses existing onDidChangeConfiguration — untouched.
+- Test `src/__tests__/preview-font-size-control.test.ts` (arithmetic + scope resolution).
+
+Workstream B (packages/artifact-canvas): column-width 400px→25em, column-gap 48px→3em (byte-equal
+at 16px baseline). Verified the 3 geometry fixtures mock RESOLVED values (getClientRects width:400,
+columnGap:'48px' proxy) independent of the stylesheet — unaffected, no fixture edits. Added a test
+locking the em tokens.
+
+Verify: artifact-canvas 177 tests pass + build (dist CSS shows 25em/3em); vscode 845 tests pass +
+check-types + esbuild compile all green (needed `pnpm --filter 'codev-vscode^...' build` first to
+build codev-types/codev-sdk dist — worktree hadn't built deps; unrelated to the change). Only lint
+warning is pre-existing in tunnel.ts (untouched).
+
+Next: commit A + B, push, porch done → dev-approval gate. Reviewer must run at multiple zoom levels
+in BOTH modes with fences+tables; cap-check first (silent failure mode); 1200px/24px decisive.
