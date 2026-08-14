@@ -148,7 +148,7 @@ export interface ConceptResolution {
 }
 
 /**
- * Resolve all 15 concepts with their source and executable.
+ * Resolve every known concept with its source and executable.
  * Used by `codev doctor` for full concept reporting.
  */
 export function resolveAllConcepts(forgeConfig?: ForgeConfig | null): ConceptResolution[] {

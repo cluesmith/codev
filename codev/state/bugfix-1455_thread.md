@@ -156,3 +156,22 @@ Three real defects, all fixed in `a9f534ed`+ follow-ups:
 
 Also took claude's non-blocking note: the disabled-concept fallback rendered as a `#` comment
 (valid shell, exit 0, no PR). It now fails loudly.
+
+### CMAP round 2: gemini APPROVE · claude APPROVE · codex REQUEST_CHANGES
+
+4. **codex** — the scripts checked the title but not the body. `--body ""` succeeds on every
+   forge, so omitting `CODEV_PR_BODY` entirely opened a bodyless PR at exit 0 — the exact silent
+   failure the issue's testing notes describe. Now `${CODEV_PR_BODY+x}` separates unset from
+   deliberately empty, failing before the forge CLI is reached, with a per-provider test covering
+   both. Also documented `CODEV_PR_LOGIN` (claude's minor: read by the gitea script, named
+   nowhere).
+
+### CMAP round 3: gemini APPROVE · codex APPROVE · claude APPROVE
+
+Took claude's two remaining minors: `.head` now accepts both the string (tea 0.14.2) and the
+object-with-`.ref` shape sibling scripts assume, so a lookup miss can't report failure for a PR
+that exists and invite a duplicate retry; and the stale "15 concepts" counts in `forge.ts` and
+`arch.md` are corrected to 18 with `pr-create` listed.
+
+Re-verified live afterwards: PR #17 on the Forgejo scratch repo, body/base/head correct on the
+server, closed and branch deleted.

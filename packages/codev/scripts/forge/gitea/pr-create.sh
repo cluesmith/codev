@@ -54,8 +54,11 @@ set -- --state open --limit 200 --fields index,url,head --output json
 if [ -n "$CODEV_PR_REPO" ]; then set -- "$@" --repo "$CODEV_PR_REPO"; fi
 if [ -n "$CODEV_PR_LOGIN" ]; then set -- "$@" --login "$CODEV_PR_LOGIN"; fi
 
+# `.head` is a plain branch string on tea 0.14.2, but sibling scripts were written
+# against an object with `.ref` — accept either rather than risk a lookup miss,
+# which would report failure for a PR that exists and invite a duplicate retry.
 result=$(tea pulls list "$@" | jq -c --arg head "${head#*:}" '
-  [ .[] | select((.head | sub("^[^:]*:"; "")) == $head) ]
+  [ .[] | select(((.head | if type == "object" then .ref else . end) | sub("^[^:]*:"; "")) == $head) ]
   | max_by(.index | tonumber)
   | if . == null then null else {number: (.index | tonumber), url} end')
 
