@@ -64,7 +64,7 @@ export interface ForgeCommandOptions {
 const KNOWN_CONCEPTS = [
   'issue-view', 'pr-list', 'issue-list', 'issue-search', 'issue-comment', 'pr-exists',
   'recently-closed', 'recently-merged', 'user-identity', 'team-activity',
-  'on-it-timestamps', 'pr-merge', 'pr-search', 'pr-view', 'pr-diff',
+  'on-it-timestamps', 'pr-create', 'pr-merge', 'pr-search', 'pr-view', 'pr-diff',
   'auth-status', 'repo-archive',
 ] as const;
 

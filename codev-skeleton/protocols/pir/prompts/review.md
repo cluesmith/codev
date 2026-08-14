@@ -108,12 +108,14 @@ git push
 PR_TITLE="<concise description of the change>"
 BRANCH="$(git branch --show-current)"
 
-gh pr create \
-  --base main \
-  --head "$BRANCH" \
-  --title "$PR_TITLE" \
-  --body-file codev/reviews/{{artifact_name}}.md
+CODEV_PR_TITLE="$PR_TITLE" \
+CODEV_PR_BODY="$(cat codev/reviews/{{artifact_name}}.md)" \
+CODEV_PR_BASE=main \
+CODEV_PR_HEAD="$BRANCH" \
+{{pr_create_command}}
 ```
+
+Porch substitutes `{{pr_create_command}}` with your forge's `pr-create` concept command (`gh pr create` by default) and it prints `{"number": <int>, "url": "<url>"}`. The body goes in as an environment variable, not `--body-file` — read the created PR back and confirm the body arrived intact before moving on.
 
 **Verify the PR body contains `Fixes #{{issue.number}}`** (it should — the review file has it at the top). If somehow missing, edit and re-apply:
 
@@ -154,7 +156,7 @@ For any `REQUEST_CHANGES`:
 
 1. Read the finding in full (`codev/projects/{{project_id}}-*/{{project_id}}-<model>.txt`).
 2. **Assess it honestly:**
-   - **Real defect** (correctness / cancellation / security / data-loss): fix it in code, add a regression test that fails without the fix, commit + push (the PR updates automatically — no new `gh pr create`). Then document the finding, your fix, and the pinning test in the review file's **"Things to Look At During PR Review"** section.
+   - **Real defect** (correctness / cancellation / security / data-loss): fix it in code, add a regression test that fails without the fix, commit + push (the PR updates automatically — no second PR). Then document the finding, your fix, and the pinning test in the review file's **"Things to Look At During PR Review"** section.
    - **False positive / out of scope**: write a brief rebuttal in that same section explaining why no change is warranted.
 3. Do **not** re-run `porch done` expecting another consultation pass — `max_iterations: 1` means it will not re-review. Proceed to step 7.
 
@@ -257,7 +259,7 @@ Together with the `--pr` record from step 4a and the `--merged` record from step
   ```
 - Resolve conflicts (do NOT use destructive shortcuts)
 - Force-push with lease: `git push --force-with-lease`
-- Re-run `gh pr create`
+- Re-run the PR creation command from step 4
 
 **If porch's consultation fails (e.g., model unavailable):**
 - `porch done` will report the failure. Inspect `codev/projects/{{project_id}}-*/{{project_id}}-<model>.txt` for the failure details.

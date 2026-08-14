@@ -46,7 +46,8 @@ If the run was not tied to any issue, the `Closes` line can be omitted.
 ```bash
 git push origin HEAD
 
-gh pr create --title "[Maintain] Codebase maintenance run NNNN" --body "$(cat <<'PREOF'
+CODEV_PR_TITLE="[Maintain] Codebase maintenance run NNNN" \
+CODEV_PR_BODY="$(cat <<'PREOF'
 ## Summary
 
 <2-3 bullet points of what was done>
@@ -66,8 +67,10 @@ Closes #<N>  <!-- Only if this run was triggered by a GitHub issue. Use "Refs #<
 - [x] All tests pass
 - [x] Documentation links resolve
 PREOF
-)"
+)" {{pr_create_command}}
 ```
+
+Porch substitutes `{{pr_create_command}}` with your forge's `pr-create` concept command (`gh pr create` by default). It reads `CODEV_PR_TITLE` / `CODEV_PR_BODY` — optionally `CODEV_PR_BASE`, `CODEV_PR_HEAD`, `CODEV_PR_REPO` — and prints `{"number": <int>, "url": "<url>"}`.
 
 ## Signals
 

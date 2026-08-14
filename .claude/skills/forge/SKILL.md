@@ -16,6 +16,7 @@ Forge concept commands decouple codev from direct `gh` CLI calls. Each GitHub op
 | `user-identity` | — | Get current user's handle (plain text) |
 | `team-activity` | `CODEV_GRAPHQL_QUERY` | Run a batched GraphQL query |
 | `on-it-timestamps` | `CODEV_ISSUE_NUMBERS`, `CODEV_GRAPHQL_QUERY`, `CODEV_REPO_OWNER`, `CODEV_REPO_NAME` | Get "on it" comment timestamps |
+| `pr-create` | `CODEV_PR_TITLE`, `CODEV_PR_BODY`, `CODEV_PR_BASE` (optional), `CODEV_PR_HEAD` (optional), `CODEV_PR_REPO` (optional), `CODEV_PR_DRAFT` (optional) | Open a PR; prints `{"number", "url"}` |
 | `pr-merge` | `CODEV_PR_NUMBER` | Merge a PR |
 | `pr-search` | `CODEV_SEARCH_QUERY` | Search PRs (JSON array) |
 | `pr-view` | `CODEV_PR_NUMBER`, `CODEV_INCLUDE_COMMENTS` (optional) | View PR details (JSON or text) |

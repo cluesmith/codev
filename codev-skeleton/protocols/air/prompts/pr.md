@@ -18,7 +18,8 @@ Open the PR with the review embedded in its body, optionally run CMAP, and notif
 The body must carry `Closes #<N>` for the driving issue — one per issue if several — so GitHub auto-closes it on merge. **Exception:** a partial fix uses `Refs #<N>` or `Part of #<N>` instead. Substitute the real number for `<N>`; leave no `{{...}}` tag or `<N>` placeholder in the committed body.
 
 ```bash
-gh pr create --title "[Air #<N>] feat: <brief description>" --body "$(cat <<'EOF'
+CODEV_PR_TITLE="[Air #<N>] feat: <brief description>" \
+CODEV_PR_BODY="$(cat <<'EOF'
 ## Summary
 
 <1-2 sentence description of the feature>
@@ -43,8 +44,10 @@ Closes #<N>  <!-- Substitute <N>; use "Refs #<N>" for a partial fix -->
 
 <anything the reviewer should focus on, or "Standard implementation — no special concerns">
 EOF
-)"
+)" {{pr_create_command}}
 ```
+
+Porch substitutes `{{pr_create_command}}` with your forge's `pr-create` concept command (`gh pr create` by default). It reads `CODEV_PR_TITLE` / `CODEV_PR_BODY` — optionally `CODEV_PR_BASE`, `CODEV_PR_HEAD`, `CODEV_PR_REPO` — and prints `{"number": <int>, "url": "<url>"}`.
 
 ## Optional CMAP review
 

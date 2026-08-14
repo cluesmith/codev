@@ -307,7 +307,7 @@ describe('executeForgeCommandSync', () => {
 // =============================================================================
 
 describe('getKnownConcepts', () => {
-  it('returns all 17 known concept names', () => {
+  it('returns all 18 known concept names', () => {
     const concepts = getKnownConcepts();
     expect(concepts).toContain('issue-view');
     expect(concepts).toContain('pr-list');
@@ -320,13 +320,14 @@ describe('getKnownConcepts', () => {
     expect(concepts).toContain('user-identity');
     expect(concepts).toContain('team-activity');
     expect(concepts).toContain('on-it-timestamps');
+    expect(concepts).toContain('pr-create');
     expect(concepts).toContain('pr-merge');
     expect(concepts).toContain('pr-search');
     expect(concepts).toContain('pr-view');
     expect(concepts).toContain('pr-diff');
     expect(concepts).toContain('auth-status');
     expect(concepts).toContain('repo-archive');
-    expect(concepts.length).toBe(17);
+    expect(concepts.length).toBe(18);
   });
 });
 
@@ -549,9 +550,9 @@ describe('graceful degradation when command not found', () => {
 // =============================================================================
 
 describe('resolveAllConcepts', () => {
-  it('returns all 17 concepts with default source when no config', () => {
+  it('returns all 18 concepts with default source when no config', () => {
     const resolutions = resolveAllConcepts();
-    expect(resolutions).toHaveLength(17);
+    expect(resolutions).toHaveLength(18);
     expect(resolutions.every(r => r.source === 'default')).toBe(true);
     expect(resolutions.every(r => r.executable !== null)).toBe(true);
   });

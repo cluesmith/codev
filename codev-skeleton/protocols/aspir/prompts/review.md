@@ -44,7 +44,8 @@ The review's `## Architecture Updates` and `## Lessons Learned Updates` sections
 The PR body must carry `Closes #<N>` (feature) or `Fixes #<N>` (bug) for the driving issue — one keyword per issue if several — so GitHub auto-closes on merge. **Exception:** a PR that only partially addresses its issue uses `Refs #<N>` or `Part of #<N>` instead, leaving the issue open for the follow-up.
 
 ```bash
-gh pr create --title "[Spec {{project_id}}] {{title}}" --body "$(cat <<'EOF'
+CODEV_PR_TITLE="[Spec {{project_id}}] {{title}}" \
+CODEV_PR_BODY="$(cat <<'EOF'
 ## Summary
 [what was implemented]
 
@@ -62,8 +63,10 @@ codev/specs/{{artifact_name}}.md
 ## Review
 codev/reviews/{{artifact_name}}.md
 EOF
-)"
+)" {{pr_create_command}}
 ```
+
+Porch substitutes `{{pr_create_command}}` with your forge's `pr-create` concept command (`gh pr create` by default). It reads `CODEV_PR_TITLE` / `CODEV_PR_BODY` — optionally `CODEV_PR_BASE`, `CODEV_PR_HEAD`, `CODEV_PR_REPO` — and prints `{"number": <int>, "url": "<url>"}`.
 
 ## Signals
 
