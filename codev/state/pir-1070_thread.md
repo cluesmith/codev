@@ -27,3 +27,17 @@ dev-approval gate is real: must be seen running at several zoom levels in BOTH r
 fences+tables in view (screenshots/recording), because the degradation is silent.
 
 Plan written to `codev/plans/1070-vscode-in-preview-typography-c.md`. Awaiting plan-approval.
+
+### Plan revision 1 (architect correction, 2026-08-14)
+
+Architect caught a false safety claim: `activeCustomEditorId` tracks the ACTIVE EDITOR, not
+keyboard focus (distinct: VS Code carries a separate `focusedCustomEditorIsEditable` key). My
+"keybinding wins only while focused" was wrong — with the preview active but focus in the
+terminal/sidebar, `cmd+=` would shadow workbench zoom. Chose option (c): **drop keybindings from
+v1** (issue lists them as optional; buttons + palette meet the discoverability goal). The
+`activeCustomEditorId` gate is still correct for buttons/palette (active-editor semantics, no global
+binding to shadow). Focus-scoped keybinding is a verified follow-up.
+
+Also reordered dev-approval Test Plan so the horizontal tall-block-cap check is FIRST with visual
+evidence (architect standing instruction). Rhythm exclusion + cap-not-fixed unchanged. Revised
+commit follows.

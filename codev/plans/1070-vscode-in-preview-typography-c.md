@@ -41,11 +41,12 @@ and lives entirely in `apps/vscode`. **Workstream B is a shared-surface token ch
 `packages/artifact-canvas`** (owned by the main architect) and is delineated here so it can be
 routed to them before the plan-approval gate. A can ship without B.
 
-### Decision: native editor-title buttons + commands + keybindings (not webview chrome)
+### Decision: native editor-title buttons + commands (no keybindings in v1, no webview chrome)
 
 The issue asks me to decide between webview toolbar buttons, command-palette commands, or both.
-I choose **command-palette commands surfaced as native `editor/title` icon buttons, plus
-keybindings** — and deliberately **not** webview HTML chrome. Rationale:
+I choose **command-palette commands surfaced as native `editor/title` icon buttons** — and
+deliberately **not** webview HTML chrome, and **no keybindings in v1** (the issue lists keybindings
+as optional; see the Risks section for why they are deferred). Rationale:
 
 - It satisfies discoverability (the whole point of the issue): the reviewer sees zoom buttons on
   the preview's title bar, exactly where VS Code's own preview and browsers put zoom.
@@ -55,8 +56,9 @@ keybindings** — and deliberately **not** webview HTML chrome. Rationale:
   both are more surface area for a "step a number" action.
 - It reuses the extension's own precedent (`openMarkdownPreview` in `editor/title`) and the
   free live-reflow path.
-- Custom editors expose the `activeCustomEditorId` context key, so buttons/keybindings scope
-  cleanly to `activeCustomEditorId == codev.markdownPreview` (visible/active only on the preview).
+- Custom editors expose the `activeCustomEditorId` context key, so the buttons and palette entries
+  scope cleanly to `activeCustomEditorId == codev.markdownPreview` (offered only when the preview is
+  the active editor). Note this key tracks the **active editor, not keyboard focus** — see Risks.
 
 ### Workstream A — Host affordance (apps/vscode)
 
@@ -153,8 +155,7 @@ time that none assert the token **strings**.
     `when: activeCustomEditorId == codev.markdownPreview`.
   - `contributes.menus.commandPalette`: add all three gated
     `when: activeCustomEditorId == codev.markdownPreview` (only offered when the preview is active).
-  - `contributes.keybindings`: `cmd+=`/`ctrl+=` (increase), `cmd+-`/`ctrl+-` (decrease),
-    `cmd+0`/`ctrl+0` (reset), each `when: activeCustomEditorId == codev.markdownPreview`.
+  - **No `contributes.keybindings` in v1** (deferred — see Risks).
 - `apps/vscode/src/markdown-preview/font-size-control.ts` — **new**. Pure functions:
   `effectiveFontSize(raw)`, `steppedFontSize(raw, direction, {step,min,max})`, and the constants.
   No `vscode` import, so it is trivially unit-testable.
@@ -176,11 +177,20 @@ time that none assert the token **strings**.
 
 ## Risks & Alternatives Considered
 
-- **Risk — keybinding shadowing.** `cmd+=`/`cmd+-`/`cmd+0` are VS Code's workbench zoom bindings.
-  Scoping to `activeCustomEditorId == codev.markdownPreview` means our bindings win **only while the
-  preview is focused**; everywhere else workbench zoom is unaffected. This matches browser/preview
-  norms (zoom keys act on the focused reading surface). Verified these are the workbench-zoom
-  defaults before proposing.
+- **Decision — keybindings deferred out of v1 (why).** `cmd+=`/`cmd+-`/`cmd+0` are VS Code's
+  workbench-zoom bindings (weight 200); an extension binding (weight 300) wins **wherever its
+  when-clause matches**. The tempting gate, `activeCustomEditorId == codev.markdownPreview`, tracks
+  the **active editor, not keyboard focus** (the two are distinct — VS Code itself carries a
+  separate `focusedCustomEditorIsEditable` key alongside `activeCustomEditorId`). So with the
+  preview as the active editor, clicking into the terminal, sidebar, or a search box leaves that key
+  `true`, and `cmd+=` would step the preview font instead of zooming the workbench — silently taking
+  workbench zoom away in states we did not intend. A genuinely focus-scoped clause would need a
+  custom-editor **focus** context key I have not been able to verify resolves as expected. Since the
+  issue lists keybindings as **optional** and the discoverability goal is met by the title-bar
+  buttons + palette, v1 ships **without keybindings**. A focus-scoped binding is a clean follow-up
+  once a correct focus key is verified. (The `activeCustomEditorId` gate is still correct for the
+  **buttons and palette entries**, where "offered when the preview is the active editor" is exactly
+  the intended semantics and there is no global binding to shadow.)
 - **Risk — write-back silently no-ops** under an existing workspace override. Mitigated by writing
   to the setting's existing scope via `inspect()` (Workspace if defined there, else Global).
 - **Risk — shared-package ownership.** Workstream B changes a main-owned surface. Delineated above
@@ -211,21 +221,24 @@ time that none assert the token **strings**.
 
 The failure mode is **silent**, so passing tests are not evidence the surface still reads well.
 Open a real spec containing **fenced code, a wide table, and an image** in the preview, then, in
-**both vertical and horizontal reading modes**, at **~3 zoom levels** (e.g. 14 / 20 / 28px):
+**both vertical and horizontal reading modes**, at **~3 zoom levels** (e.g. 14 / 20 / 28px).
 
-1. The `$(zoom-in)` / `$(zoom-out)` buttons are visible on the preview's title bar, and the
-   command palette offers all three only when the preview is active.
-2. +/− reflow **live** (no reopen), and the value **persists** across closing and reopening the
+1. **The tall-block cap, checked FIRST with visual evidence (the silent failure mode).** In
+   **horizontal mode**, at each zoom level, confirm that fences/tables/images/marker cards which
+   cross the fixed column cap fall back to **usable inner vertical scroll**, not broken layout or
+   content clipped past the column bottom. Also confirm the measure stays sane as text grows
+   (Workstream B). This is the check tests cannot substitute for; capture it explicitly.
+2. The `$(zoom-in)` / `$(zoom-out)` buttons are visible on the preview's title bar, and the
+   command palette offers all three only when the preview is the active editor.
+3. +/− reflow **live** (no reopen), and the value **persists** across closing and reopening the
    preview (confirming it was written to the setting, not held in memory).
-3. Keybindings `cmd+=`/`cmd+-`/`cmd+0` act on the preview when focused and do not disturb workbench
-   zoom elsewhere.
-4. **Horizontal mode specifically:** the measure stays sane as text grows (Workstream B), and
-   fences/tables/images that cross the column cap fall back to **inner vertical scroll** that is
-   usable, not broken layout. This is the silent-degradation check.
+4. No keybindings ship in v1, so confirm the negative: `cmd+=`/`cmd+-`/`cmd+0` still perform normal
+   workbench zoom everywhere, including with the preview as the active editor.
 5. Reset restores the baseline in both modes.
 
 Capture **screenshots or a short recording** at each zoom level in each mode (fences + a table in
-view), attached to the dev-approval gate.
+view), attached to the dev-approval gate — with the horizontal tall-block-cap behavior (check 1)
+shown at every zoom level.
 
 ### Cross-platform
 
