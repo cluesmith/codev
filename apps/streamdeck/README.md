@@ -10,8 +10,71 @@ and runs it. The plugin holds no Tower state and never edits files directly.
 - **Auth**: reads `~/.agent-farm/local-key` and sends it as the `codev-web-key`
   header (never generates it — Tower owns the key).
 
-Architecture and design decisions live in the pre-migration repo's `PLAN.md`
-(see [History](#history)).
+The **[Design](#design)** section explains why the plugin is shaped this way; the
+[History](#history) section records where it came from.
+
+## Design
+
+The rest of this README is the *what*; this section is the *why*. These decisions
+shape everything above.
+
+**A stateless controller, not a second client.** The plugin holds no Tower state
+and edits no files. It is a remote: it reads the overview Tower already computes
+and POSTs verbs Tower already routes. Everything authoritative lives elsewhere.
+Tower owns workspace, builder, and gate state plus the auth key; VSCode owns the
+working tree, the review queue, and the composer. The deck only projects that
+state onto keys and dials and fires intents back. The payoff is that the device
+is disposable: unplug it, restart it, or run two of them, and nothing is lost or
+forked, because there was never a second copy of the truth to reconcile. It also
+means every surface (deck, VSCode sidebar, web dashboard) reflects one state, so a
+change made on any of them shows up on all of them.
+
+**Canonical verbs over a command relay, not direct editor control.** The plugin
+never speaks to VSCode directly. It POSTs a small, fixed vocabulary of canonical
+verbs to Tower's command relay (`/api/command`), and the focused VSCode window
+maps each verb to a `codev.*` command. The decoupling is deliberate: the deck does
+not need to know how many editors are open, which one is focused, or how a command
+is implemented. Tower routes the verb to the focused window, and each verb is
+stamped with the active workspace, so one Tower serving several workspaces sends
+each command to the right place. New editor behavior is a new `codev.*` handler,
+and the deck's verb set barely moves.
+
+**One shared selection, because the board is a single instrument.** Row 1 selects a
+builder, Row 2 acts on it, and the dials review it, with all three pointed at the
+same builder. That coherence is the design, not a coincidence: a Row 1 press is
+select-and-open in one gesture, and focusing a builder's diff or canvas in VSCode
+moves the deck's selection back to it (via the `builder-active` activity hook).
+Without one binding selection the three zones would drift and every press would
+carry a "which builder?" ambiguity. With it, the board reads as one instrument
+aimed at one target.
+
+**Keys commit, dials review, mapped to the hardware.** The interaction model splits
+along the SD+'s two physical controls. A key is a discrete, labelled surface, so
+keys carry commits: select, approve, run, flush. An encoder is a continuous cursor,
+so dials carry review, the one task that is inherently "scan an ordered list and
+pick a target." Reviewing a diff walks files, then hunks, then changes; reviewing a
+spec walks headings, then blocks. That is a rotate-to-cursor, push-to-act motion,
+exactly what a dial is for and what a grid of keys is not. So the dials are
+phase-aware review cursors and the keys are the commit buttons: "dials collect,
+keys commit."
+
+**The canvas owns composer state; the deck stays mode-neutral.** A dial press does
+not decide what happens to the feedback it submits. It relays a mode-neutral verb
+(`feedback-file`, `feedback-hunk`, `feedback-selection`); VSCode forwards it to the
+builder now or queues it, per the `codev.diffCodelensMode` workspace setting, and
+**Send Feedback** flushes a queue. All of that (the queue, the delivery mode, the
+composed text) lives in VSCode, the surface that actually renders the artifact. The
+deck renders no artifact content and holds no composer state, so it cannot fall out
+of sync with what you are reading; the touch strip only names the live mode so a
+press is never a surprise. Keeping composer state where the canvas is, and off the
+device, is what lets the deck stay a stateless remote.
+
+**Gate approval is never silent, by design.** The deck can surface a gate's approval
+modal in VSCode, but it can never approve on the device. Approving a spec, plan, or
+PR is a human decision with consequences, so it always lands in front of you in the
+editor, where the artifact is, rather than behind a one-touch key on a desk
+peripheral. Silent one-touch approval is deliberately out of scope for that reason,
+not for want of a spare key.
 
 ## Hardware
 
@@ -260,17 +323,18 @@ Functional — build/type/unit-verified and validated end-to-end on physical
 hardware (Stream Deck +, live Tower; versioned in lockstep with the codev
 workspace since 3.3.0). The dial touch strips render title + a live value via
 `setFeedback`; a richer SVG/icon render layer (badges, colour by state) is still
-out of scope. Also deliberately out of scope (see the pre-migration `PLAN.md`):
-silent one-touch gate approval. (Editor scrolling, originally out of scope there,
-was since implemented as the Scroll dial.) The `/api/command` route inherits
+out of scope. Silent one-touch gate approval is also deliberately out of scope
+(see [Design](#design) for the reason). (Editor scrolling, once out of scope, was
+since implemented as the Scroll dial.) The `/api/command` route inherits
 Tower's current auth posture; a Tower-auth follow-up is tracked separately.
 
 ## History
 
-This plugin was imported into the monorepo (issue #1347) from
-[`cluesmith/codev-integrations`](https://github.com/cluesmith/codev-integrations)
-at commit `77be3d0` (`packages/streamdeck`), as part of the #1189 SDK
-consolidation: its `@cluesmith/codev-client` dependency was absorbed into
-`@cluesmith/codev-sdk`, and the plugin became the sdk's first
-outside-the-original-trio consumer. Pre-migration history (including the
-original `PLAN.md` design document) lives in that repo.
+This plugin was imported into the monorepo under issue #1347 from the
+pre-migration repository at commit `77be3d0` (`packages/streamdeck`), as part of
+the #1189 SDK consolidation: its `@cluesmith/codev-client` dependency was absorbed
+into `@cluesmith/codev-sdk`, and the plugin became the sdk's first
+outside-the-original-trio consumer. The design rationale that once lived only in
+that repository's planning document now lives in-tree, under [Design](#design)
+(issue #1390); the pre-migration repository, which holds the earlier development
+history, is slated for retirement after the sdk's first npm publish.
