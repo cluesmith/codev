@@ -103,3 +103,33 @@ warning is pre-existing in tunnel.ts (untouched).
 
 Next: commit A + B, push, porch done → dev-approval gate. Reviewer must run at multiple zoom levels
 in BOTH modes with fences+tables; cap-check first (silent failure mode); 1200px/24px decisive.
+
+## Provenance note (2026-08-14)
+
+plan-approval was approved by **Amr directly** (his words, confirmed by him to the vscode architect
+2026-08-14). The architect did not relay it; commit 2d567980b (gate-approved) carries Amr's git
+identity. I did NOT run `porch approve` — I only ran `porch next` after a pane message
+("Gate plan-approval approved — please run porch next to advance"). Record shows a genuine human
+decision; no rule broken.
+
+## dev-approval evidence captured (2026-08-14)
+
+Honest scope: the VS Code extension host cannot be driven headlessly from the builder shell, so the
+affordance itself (title-bar buttons, palette, write-back, live reflow) must be verified by Amr via
+Run Dev. BUT the silent reading-quality failure mode — horizontal-mode column behavior under zoom —
+IS capturable at the package level, so I captured it:
+
+- Playwright + Chromium against packages/artifact-canvas examples/ page (?fixture=columns&mode=
+  horizontal), viewport per pane, `--codev-canvas-font-size` injected per font — the exact token the
+  preview sets, on the shipping default-theme.css. Temp capture spec deleted (not committed).
+- **Cap fallback (check 1, silent mode): PASS.** Tall fence (code overflowY:auto client834/scroll4285)
+  and tall table (overflowY:auto client868/scroll4460) stay bounded with inner vertical scroll at
+  24px+28px, wide+narrow panes. Visually confirmed clean.
+- **Measure matches plan EXACTLY** at 20/24/28px across all 3 panes (900/24→75, 1200/24→100,
+  1600/28→54, etc). Validates the architect's arithmetic against a real render (they asked to
+  sanity-check one row; the whole grid matches).
+- **Column count steps as designed** (1200px: 3→2→1→1 over 14/20/24/28).
+- **Decisive 1200px/24px = 1 over-wide ~100ch column**, exactly as flagged — human judgement call;
+  container cap (~56ch) is the recorded response, not built this lane.
+- Evidence artifact (screenshots + grid + honest caveats): https://claude.ai/code/artifact/ac591845-ea30-4808-ba56-8427b686d4bb
+  Screenshots in scratchpad/zoom/ (session-local, not committed).
