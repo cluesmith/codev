@@ -79,6 +79,22 @@
       ]
     },
     {
+      "Name": "Open Architect",
+      "UUID": "com.cluesmith.codev.open-architect",
+      "Tooltip": "Open an architect's terminal. Builder mode (default): the architect that spawned the selected builder. Main mode: always the workspace's main architect. The face shows the resolved architect's name.",
+      "Icon": "icons/list/open-architect",
+      "Controllers": [
+        "Keypad"
+      ],
+      "PropertyInspectorPath": "ui/open-architect.html",
+      "States": [
+        {
+          "Image": "icons/open-architect",
+          "TitleAlignment": "bottom"
+        }
+      ]
+    },
+    {
       "Name": "Codev Action",
       "UUID": "com.cluesmith.codev.action",
       "Tooltip": "Run a Codev command (open terminals, view diff, send, spawn, refresh).",

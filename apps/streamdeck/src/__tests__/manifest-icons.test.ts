@@ -122,6 +122,31 @@ describe('#1444 re-glyphed Codev Action', () => {
     expect(pngSize(join(pluginDir, 'icons/list/action.png'))).toEqual({ w: 20, h: 20 });
     expect(pngSize(join(pluginDir, 'icons/list/action@2x.png'))).toEqual({ w: 40, h: 40 });
   });
+});
+
+/**
+ * #1463: the Open Architect action ships its own dedicated icon, rendered from the `architect`
+ * glyph in face.ts (same pipeline as #1440). Pin the manifest references and the convention sizes.
+ */
+describe('#1463 Open Architect action icon', () => {
+  function action(uuid: string): ManifestAction {
+    const found = manifest.Actions.find((a) => a.UUID === uuid);
+    if (!found) throw new Error(`action ${uuid} not in manifest`);
+    return found;
+  }
+
+  it('points at its own dedicated icon', () => {
+    const a = action('com.cluesmith.codev.open-architect');
+    expect(a.Icon).toBe('icons/list/open-architect');
+    expect(a.States[0].Image).toBe('icons/open-architect');
+  });
+
+  it('open-architect icons ship at the convention sizes', () => {
+    expect(pngSize(join(pluginDir, 'icons/open-architect.png'))).toEqual({ w: 72, h: 72 });
+    expect(pngSize(join(pluginDir, 'icons/open-architect@2x.png'))).toEqual({ w: 144, h: 144 });
+    expect(pngSize(join(pluginDir, 'icons/list/open-architect.png'))).toEqual({ w: 20, h: 20 });
+    expect(pngSize(join(pluginDir, 'icons/list/open-architect@2x.png'))).toEqual({ w: 40, h: 40 });
+  });
 
   // The collision the issue reports: before the re-glyph, action and open-terminal drew the same
   // terminal picture. The two key faces must no longer be byte-identical.
