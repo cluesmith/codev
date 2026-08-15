@@ -44,6 +44,12 @@ import { feedbackFile, feedbackHunk, feedbackSelection } from './review-queue/fe
 import { activateSubmitReviewStatusBar } from './review-queue/status-bar.js';
 import { activateOverviewNudge } from './review-queue/overview-nudge.js';
 import { MarkdownPreviewProvider } from './markdown-preview/preview-provider.js';
+import {
+  steppedFontSize,
+  resolveWriteScope,
+  type FontSizeDirection,
+  type ConfigScope,
+} from './markdown-preview/font-size-control.js';
 import { BuilderSpawnHandler } from './builder-spawn-handler.js';
 import { BuilderTerminalLinkProvider, ReconnectTerminalLinkProvider, IssueRefTerminalLinkProvider } from './terminal-link-provider.js';
 import { computeBuildersToClose, roleIdsFromBuilders } from './prune-builder-terminals.js';
@@ -146,6 +152,32 @@ function extractIssueTitle(arg: IssueCommandArg): string | undefined {
 		return arg.issueTitle || undefined;
 	}
 	return undefined;
+}
+
+/** Map the pure `ConfigScope` onto the VS Code `ConfigurationTarget` enum (#1070). */
+function configTargetFor(scope: ConfigScope): vscode.ConfigurationTarget {
+	if (scope === 'workspaceFolder') {
+		return vscode.ConfigurationTarget.WorkspaceFolder;
+	}
+	if (scope === 'workspace') {
+		return vscode.ConfigurationTarget.Workspace;
+	}
+	return vscode.ConfigurationTarget.Global;
+}
+
+/**
+ * Step `codev.markdownPreview.fontSize` one click and persist it back (#1070). Writes to the scope
+ * the value already lives in (`resolveWriteScope`) so a workspace override cannot silently swallow
+ * the click. The provider's `onDidChangeConfiguration` re-render reflows the open preview.
+ *
+ * `getConfiguration` is called without a resource, so `inspect()` never surfaces a
+ * workspace-FOLDER value — the effective scopes here are global and workspace. `resolveWriteScope`
+ * still handles the folder case (unit-tested) as defensive cover if a resource is ever threaded in.
+ */
+async function stepMarkdownPreviewFontSize(direction: FontSizeDirection): Promise<void> {
+	const cfg = vscode.workspace.getConfiguration('codev.markdownPreview');
+	const next = steppedFontSize(cfg.get<number>('fontSize', 0), direction);
+	await cfg.update('fontSize', next, configTargetFor(resolveWriteScope(cfg.inspect('fontSize') ?? {})));
 }
 
 export async function activate(context: vscode.ExtensionContext) {
@@ -1114,6 +1146,22 @@ export async function activate(context: vscode.ExtensionContext) {
 			await vscode.commands.executeCommand(
 				'vscode.openWith', uri, MarkdownPreviewProvider.viewType, vscode.ViewColumn.Beside,
 			);
+		}),
+		// In-preview typography zoom (#1070). These step `codev.markdownPreview.fontSize` and write
+		// it back, so the title-bar buttons and the Settings editor stay one source of truth; the
+		// provider's `onDidChangeConfiguration` re-render reflows the open preview live. Surfaced as
+		// `editor/title` buttons gated on `activeCustomEditorId == codev.markdownPreview` (no
+		// keybindings in v1 — that key tracks the active editor, not focus, and would shadow
+		// workbench zoom from the terminal/sidebar; see plan #1070).
+		reg('codev.markdownPreview.increaseFontSize', () => stepMarkdownPreviewFontSize('increase')),
+		reg('codev.markdownPreview.decreaseFontSize', () => stepMarkdownPreviewFontSize('decrease')),
+		reg('codev.markdownPreview.resetFontSize', async () => {
+			// Reset restores the documented `0` sentinel ("use the built-in default") for BOTH
+			// typography knobs, so a user who tuned font size or line-height in Settings gets back to
+			// baseline from the surface. Written to the scope each value currently lives in.
+			const cfg = vscode.workspace.getConfiguration('codev.markdownPreview');
+			await cfg.update('fontSize', 0, configTargetFor(resolveWriteScope(cfg.inspect('fontSize') ?? {})));
+			await cfg.update('lineHeight', 0, configTargetFor(resolveWriteScope(cfg.inspect('lineHeight') ?? {})));
 		}),
 		regCli('codev.referenceIssueInArchitect', async (arg: IssueCommandArg) => {
 			// Inline-button action on a backlog row: open + focus the architect

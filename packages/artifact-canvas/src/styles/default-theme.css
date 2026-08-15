@@ -64,9 +64,14 @@
      under `.codev-canvas-mode-horizontal` (composed surface); overriding them is the supported
      way to retune the mode — no settings UI. NOTE `column-width` is a preferred MINIMUM: real
      columns stretch to share leftover viewport width, so code measuring columns must read
-     layout, never this token. */
-  --codev-canvas-column-width: 400px;
-  --codev-canvas-column-gap: 48px;
+     layout, never this token.
+     em-relative (#1070): 25em/3em == 400px/48px at the 16px baseline (byte-identical today), but
+     the minimum measure now scales with the reviewer's prose font size, so zooming in a preview
+     (codev.markdownPreview.fontSize) widens the columns to keep the measure from collapsing to
+     too-narrow rather than shrinking it in characters. This is a scaling lower bound, NOT a
+     constant measure (columns still stretch to fill); see plan #1070. */
+  --codev-canvas-column-width: 25em;
+  --codev-canvas-column-gap: 3em;
   /* Per-level heading sizes. github-markdown-css's scale is non-geometric, so a single ratio
      can't reproduce it — explicit per-level tokens mirror the baseline exactly (#1053). */
   --codev-canvas-h1-size: 2em;

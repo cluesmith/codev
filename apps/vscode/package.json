@@ -72,6 +72,20 @@
         }
       },
       {
+        "command": "codev.markdownPreview.increaseFontSize",
+        "title": "Codev: Increase Markdown Preview Font Size",
+        "icon": "$(zoom-in)"
+      },
+      {
+        "command": "codev.markdownPreview.decreaseFontSize",
+        "title": "Codev: Decrease Markdown Preview Font Size",
+        "icon": "$(zoom-out)"
+      },
+      {
+        "command": "codev.markdownPreview.resetFontSize",
+        "title": "Codev: Reset Markdown Preview Font Size"
+      },
+      {
         "command": "codev.forwardSelectionToBuilder",
         "title": "Codev: Forward Selection to Builder"
       },
@@ -440,6 +454,21 @@
           "group": "navigation"
         },
         {
+          "command": "codev.markdownPreview.decreaseFontSize",
+          "when": "activeCustomEditorId == codev.markdownPreview",
+          "group": "navigation@1"
+        },
+        {
+          "command": "codev.markdownPreview.increaseFontSize",
+          "when": "activeCustomEditorId == codev.markdownPreview",
+          "group": "navigation@2"
+        },
+        {
+          "command": "codev.markdownPreview.resetFontSize",
+          "when": "activeCustomEditorId == codev.markdownPreview",
+          "group": "1_run"
+        },
+        {
           "command": "codev.diffCodelensUseForward",
           "when": "codev.activeEditorIsBuilderFile && codev.diffCodelensMode == 'comment'",
           "group": "navigation"
@@ -454,6 +483,18 @@
         {
           "command": "codev.openMarkdownPreview",
           "when": "resourceLangId == markdown && resourcePath =~ /\\/codev\\/(plans|specs|reviews)\\//"
+        },
+        {
+          "command": "codev.markdownPreview.increaseFontSize",
+          "when": "activeCustomEditorId == codev.markdownPreview"
+        },
+        {
+          "command": "codev.markdownPreview.decreaseFontSize",
+          "when": "activeCustomEditorId == codev.markdownPreview"
+        },
+        {
+          "command": "codev.markdownPreview.resetFontSize",
+          "when": "activeCustomEditorId == codev.markdownPreview"
         },
         {
           "command": "codev.agentsCycleGroupFromStage",

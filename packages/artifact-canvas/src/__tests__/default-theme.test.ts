@@ -75,6 +75,15 @@ describe('default-theme.css token vocabulary', () => {
     expect(tokens.get('--codev-canvas-code-font-size')).toBe('0.85em');
   });
 
+  it('keeps the horizontal-mode column tokens em-relative so the measure tracks font size (#1070)', () => {
+    // em-relative (not px) is the load-bearing property: under a preview font-size zoom the minimum
+    // column width scales with the prose, keeping the measure from collapsing to too-narrow. 25em/3em
+    // are byte-identical to the old 400px/48px at the 16px baseline. Neither token is value-asserted
+    // elsewhere, so this is the only guard on the unit.
+    expect(tokens.get('--codev-canvas-column-width')).toBe('25em');
+    expect(tokens.get('--codev-canvas-column-gap')).toBe('3em');
+  });
+
   it('scopes every horizontal-mode rule away from the standalone MarkdownView (spec 1380)', () => {
     // "Vertical untouched / MarkdownView untouched by every new rule" is a spec deliverable;
     // guard it structurally (the #1053/#1343 regex-precedent style): the multicol layer must be
