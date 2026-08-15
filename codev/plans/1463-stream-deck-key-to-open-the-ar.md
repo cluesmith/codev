@@ -19,9 +19,13 @@ ruling 1 in the body. The key mirrors Builder Action's **Automatic-or-explicit**
 Property Inspector shape:
 
 - **`Automatic` (default)** — target the selected builder's `spawnedByArchitect`,
-  falling back to `main` when nothing is selected or the builder has no recorded
-  owner (matching `afx send architect`'s "route to `main` if present, else the
-  first registered" convention).
+  falling back to the **first live architect** when nothing is selected or the
+  builder has no recorded owner. This is `afx send architect`'s real convention —
+  "`main` if present, **else the first registered**" — not a hardcoded `'main'`.
+  `OverviewData.architects` is live-only and documented main-first, so the first
+  entry **is** `main` whenever `main` exists and self-corrects to whatever exists
+  when it doesn't. When that list is empty (no live architects), nothing is
+  resolvable and the key is **inert** (ruling 3).
 - **An explicit architect name** (pinned in the PI) — always that architect,
   regardless of selection.
 
@@ -63,30 +67,42 @@ The issue names a `VerbKey` subclass, but `VerbKey` renders its face **once** in
 dynamic composite face: a `SingletonAction` that tracks its `KeyAction`s in a
 per-context `Map`, subscribes to `store.onChange`, and re-renders.
 
-**Decision (flag for the gate):** implement `OpenArchitectAction` on the
+**Decision (ratified at plan-approval):** implement `OpenArchitectAction` on the
 `ApproveGate`/`SendQueueAction` shape (`SingletonAction` + keys-map + `onChange`),
-not the static-face `VerbKey` shape. The issue's "VerbKey subclass" phrasing
-predates the realization — which the issue itself raises via the #1444/#1459
-compositing note — that the face is dynamic. The press still fires the single
-verb `open-architect-terminal`; only the base class differs. If the architect
-prefers literal `VerbKey` inheritance, the alternative is to keep `extends
-VerbKey` and layer the same keys-map + `onChange` lifecycle on top (widening
-`VerbSettings` to carry `architect?`); functionally identical, slightly more
-friction against the base generic. Recommending the `SingletonAction` shape.
+not the static-face `VerbKey` shape. `VerbKey` supports dynamic `args()`
+(`OpenTerminalAction` already reads `selectedBuilder()` for its id) but paints a
+**fixed** face once in `onWillAppear` — and the dynamic face is what forces the
+change. The press still fires the single verb `open-architect-terminal`; only the
+base class differs.
 
 Behaviour:
 
 - **Settings**: `{ architect?: string }`. Empty / absent / `"automatic"` →
   Automatic; any other value → pinned name (trimmed).
-- **Resolution** (`resolve(settings)`, used by both press and render):
-  `pinned ?? selectedBuilder()?.spawnedByArchitect ?? 'main'`. Never `null` —
-  liveness/not-found is VS Code's job (ruling 2).
-- **Press** (`onKeyDown`): `sendCommand('open-architect-terminal',
-  [resolve(settings)], selectedWorkspacePath())`, then `ack` (red alert on
-  failure; silent success, matching the other keys).
+- **Resolution** (`resolve(settings): string | undefined`, used by both press and
+  render): `pinned ?? selectedBuilder()?.spawnedByArchitect ??
+  store.firstLiveArchitect()`. Returns `undefined` only when nothing is pinned,
+  no builder is selected (or it has no owner), **and** there are no live
+  architects — the inert case (ruling 3). A *named-but-not-live* target (pinned or
+  owner) is **not** inert: the name flows to VS Code, which handles the
+  not-found warning (ruling 2).
+- **Press** (`onKeyDown`): if `resolve(settings)` is `undefined`, `showAlert` and
+  do nothing (inert). Otherwise `sendCommand('open-architect-terminal',
+  [resolved], selectedWorkspacePath())`, then `ack` (red alert on failure; silent
+  success, matching the other keys).
 - **Render** (`renderTo`): `setImage(svgToDataUri(architectFaceSvg(resolve(settings))))`
   + `setTitle('')`. Called from `onWillAppear`, `onDidReceiveSettings`, and the
-  `onChange` subscription.
+  `onChange` subscription. `architectFaceSvg(undefined)` draws a **dim, inert**
+  face (a muted `Architect` label, mirroring `approveFaceSvg`/`sendFbFaceSvg`'s
+  dim-when-inert states) so an unresolvable key reads as inert, not broken.
+
+### 1b. Store accessor (`apps/streamdeck/src/store.ts`)
+
+The store has no architects reader today. Add `firstLiveArchitect(): string |
+undefined` (returns `this.overview?.architects?.[0]?.name`) — `OverviewData.architects`
+is already fetched into `store.overview`, live-only and main-first, so this is a
+pure read with no new fetch. Mirrors the existing `builders()` / `queuedFeedback()`
+accessors.
 
 ### 2. The face (`apps/streamdeck/src/face.ts`)
 
@@ -140,8 +156,10 @@ keys themselves — #1404/#1410, so no bundled-profile change.)
 
 - `apps/streamdeck/src/actions.ts` — new `OpenArchitectAction` (SingletonAction +
   keys-map + `onChange`; resolve → press → render).
+- `apps/streamdeck/src/store.ts` — new `firstLiveArchitect()` accessor.
 - `apps/streamdeck/src/face.ts` — new `architect` glyph in `GLYPHS`/`GlyphKey`;
-  new `architectFaceSvg(name)`; fit-aware centered name band.
+  new `architectFaceSvg(name | undefined)` (dim inert face when `undefined`);
+  fit-aware centered name band.
 - `apps/streamdeck/src/plugin.ts` — import + register `OpenArchitectAction`.
 - `apps/streamdeck/com.cluesmith.codev.sdPlugin/manifest.json` — new Action entry.
 - `apps/streamdeck/com.cluesmith.codev.sdPlugin/ui/open-architect.html` — new PI.
@@ -171,9 +189,8 @@ keys themselves — #1404/#1410, so no bundled-profile change.)
   on the visible name. The `face.test.ts` cases pin that `architectFaceSvg`
   renders the resolved name (pinned, owner, and `main`-fallback), so a regression
   that blanks the face fails the build.
-- **Risk: base-class choice.** Using `SingletonAction` rather than literal
-  `VerbKey` inheritance (see the Decision above). Surfaced for the gate; trivially
-  reversible to the `VerbKey`-plus-lifecycle variant.
+- **Base-class choice** — resolved: `SingletonAction`, ratified at plan-approval
+  (see the Decision above).
 - **Alternative — statically configured per-architect keys.** Rejected in the
   issue: breaks the Row-2 invariant (one context-free key among builder-scoped
   neighbours) and needs a slot per architect.
@@ -189,16 +206,23 @@ keys themselves — #1404/#1410, so no bundled-profile change.)
 
 ### Unit (vitest, `apps/streamdeck`)
 
-- `actions.test.ts` (extend the `makeStore` fixture with `spawnedByArchitect`):
+- `actions.test.ts` (extend the `makeStore` fixture with `spawnedByArchitect` on
+  builders and an `architects` list on the overview):
   - Automatic + selected builder with an owner → press relays
-    `open-architect-terminal ['<owner>']`.
-  - Automatic + selected builder with `spawnedByArchitect: null` → relays
-    `['main']`.
-  - Automatic + **no** selected builder → relays `['main']`.
+    `open-architect-terminal ['<owner>']` (even if that owner isn't in the live
+    list — deferred to VS Code).
+  - Automatic + selected builder with `spawnedByArchitect: null`, `architects`
+    main-first → relays `['main']` (first live).
+  - Automatic + no owner, `architects` = `[{name:'web'}, …]` (no main) → relays
+    `['web']` (self-corrects to first live).
+  - Automatic + **no** selected builder → relays the first live architect's name.
+  - Automatic + no owner + `architects: []` → **inert**: `showAlert`, no
+    `sendCommand`.
   - Pinned name in settings → relays `['<pinned>']` regardless of selection.
   - Press failure (`sendCommand` → `{ ok:false }`) → `showAlert`.
 - `face.test.ts`: `architectFaceSvg('streamdeck')` contains `STREAMDECK`;
-  `architectFaceSvg('main')` contains `MAIN`; a long name shrinks (asserts the
+  `architectFaceSvg('main')` contains `MAIN`; `architectFaceSvg(undefined)`
+  renders the dim inert label (no name); a long name shrinks (asserts the
   `textLength`/`lengthAdjust` fit attribute) rather than overflowing; output is
   valid `<svg …>`.
 - `manifest-icons.test.ts`: the new action's `Icon` + `States[].Image` resolve to
@@ -219,11 +243,13 @@ keys themselves — #1404/#1410, so no bundled-profile change.)
 2. Select a builder owned by architect X → press → X's terminal opens/focuses in
    VS Code.
 3. Select a builder with no recorded owner (or clear the selection) → face reads
-   `MAIN` → press opens `main`.
+   the first live architect (e.g. `MAIN`) → press opens it.
 4. Pin the key to an explicit architect in the PI → face shows that name → press
    always opens it, independent of selection.
-5. Point Automatic at a name with no live architect → VS Code shows
+5. Pin (or select an owner) that names a non-live architect → VS Code shows
    `No '<name>' architect found` (deck does not second-guess — ruling 2).
+5b. Workspace with no live architects → face is dim/inert; press does nothing
+   (ruling 3).
 6. Cross-check against #1406: with a builder known to be mis-attributed, confirm
    the face shows the (currently wrong) stored owner — demonstrating the visible
    fallback and why #1406 must be resolved before ship.

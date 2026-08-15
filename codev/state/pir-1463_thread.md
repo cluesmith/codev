@@ -38,3 +38,14 @@ before pressing. Stated in the plan; needs fix/confirm before ship.
 
 Plan written to `codev/plans/1463-stream-deck-key-to-open-the-ar.md`. Awaiting
 plan-approval gate.
+
+## Plan review — approved with one revision (2026-08-15)
+
+Architect ratified the SingletonAction decision and required one change:
+**don't hardcode `'main'`**. `afx send architect` is "main if present, else the
+FIRST REGISTERED". Use `OverviewData.architects[0].name` (live-only, main-first,
+`[]` when none) as the last link, so it self-corrects. Added a store accessor
+`firstLiveArchitect()` (no store architects reader existed). `resolve()` now
+returns `string | undefined`; `undefined` → inert (ruling 3). Named-but-not-live
+targets still defer to VS Code (ruling 2). Revised plan + test cases (first-live,
+non-main first-live, empty→inert) and recommitted. Gate now goes to Amr.
