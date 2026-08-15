@@ -133,3 +133,20 @@ IS capturable at the package level, so I captured it:
   container cap (~56ch) is the recorded response, not built this lane.
 - Evidence artifact (screenshots + grid + honest caveats): https://claude.ai/code/artifact/ac591845-ea30-4808-ba56-8427b686d4bb
   Screenshots in scratchpad/zoom/ (session-local, not committed).
+
+## dev-approval feedback: Reset discoverability (2026-08-15)
+
+Amr liked +/- but asked how to reset — it was command-palette-only (I'd under-wired it vs the plan,
+which said palette + overflow). He chose the overflow `⋯` menu. Added reset (iconless, group 1_run)
+to editor/title so it lands in the `⋯` menu; +/- stay inline. Manifest-only, handler already existed.
+Commit 029bbeee6.
+
+## Review phase (dev-approval approved, 2026-08-15)
+
+Wrote codev/reviews/1070-*.md (summary, files, commits, test results, arch=no-change+why, 2 COLD
+lessons, things-to-look-at, how-to-test). Routed 2 COLD lessons to lessons-learned.md UI/UX:
+(1) activeCustomEditorId = active-editor-not-focus (fine for menu gating, trap for global-key
+keybindings); (2) em multicol ≠ constant measure (failure-mode preference; constant needs JS
+whole-column container cap 50+6/n, recompute on font-size not just resize). No HOT tier (both
+surface-narrow). Next: commit review+lessons, open PR, record, porch done → single 3-way CMAP →
+pr gate.
