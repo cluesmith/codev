@@ -31,3 +31,27 @@ Design decisions taken into the plan:
 
 Plan written to codev/plans/1465-stream-deck-size-the-row-1-bui.md. Routing to architect before
 plan-approval gate per instruction. dev-approval is a hardware session (3-key + 4-key + non-SD+).
+
+## Phase: IMPLEMENT (2026-08-15) — done, at dev-approval gate
+Plan approved (architect confirmed retiring the manual slot field is fine). Implemented:
+- store.ts: removed `ROW1_WINDOW_SIZE` constant; added private `builderWindowSize` (default 1) +
+  `setBuilderWindowSize()`; `builderWindowStart()` pages by it with a `max(1,·)` guard.
+- actions.ts: `SlotKey` now captures `KeyAction.coordinates` per key; derives each key's slot by
+  sorting placed keys on (row, column); reports the count to the store; skips undefined-coord
+  (multi-action) instances. Window size set synchronously on willAppear/willDisappear (so a press
+  resolves against the current layout); a debounced (`WINDOW_SETTLE_MS=50`) full renderAll coalesces
+  the page-load burst. `slotBuilder()` + `settings.slot` retired; empty face labels by position.
+- builder-action.html: dropped the Slot selector; kept the verb selector; rewrote help text.
+- README.md: Row-1 diagram now shows 3 builders + Open Architect (the #1463 layout); prose says the
+  window sizes to the placed keys, keys self-order by position.
+- Tests (actions.test.ts): rewrote the windowing blocks to drive via coordinates + placed-key count.
+  Added: the core INVARIANT (selected builder always on a rendered slot, for every cursor × size 3/4),
+  paging-follows-placed-count, multi-action exclusion, debounced-settle re-render, and
+  cursor-paging-coherent-under-size-change.
+
+Design note (for review): immediate render on willAppear is KEPT (correct in the common cursor≈0
+load; a rare later-selection load shows a ~50ms transient before the settle corrects it). The
+debounce is on the full renderAll (the thrash the architect flagged), not on press resolution.
+
+Verified in worktree: `npm run build` ✓, `npm run check-types` (tsc) ✓, `npm test` ✓ (212 tests),
+`npm run validate` ✓. dev-approval is the hardware session next.
