@@ -33,6 +33,12 @@
     6. Re-cp the template back to UNRELEASED.md to start the next cycle
 -->
 
+## Zoom controls for the annotation viewer (#1070, PR #1461)
+
+Long specs and plans can now be sized for comfortable reading from inside the document itself. Zoom in and zoom out buttons sit on the annotation viewer's title bar, with matching command-palette entries and a reset, and the chosen size is written straight back to the `codev.markdownPreview.fontSize` setting: it survives closing and reopening the document, and the in-document control and the Settings editor stay in step with each other rather than drifting apart. Unlike the workbench zoom this leaves the rest of the IDE where it is, so sizing up a spec for a read-through does not rearrange the editor around it.
+
+Horizontal reading mode gained the half of this that is easy to miss. Its columns previously held a fixed width, so enlarging the prose squeezed the line length narrower with every step, which is the opposite of what zooming in is for. The column measure now scales with the font, keeping lines readable as the text grows. The cost is that fewer columns fit at larger sizes, which is the mechanism working rather than a regression, and on a wide pane at a high zoom the layout can settle into a single broad column. If that reads too wide, a step back down restores the multi-column view.
+
 ## Stream Deck+: a two-zone builder cockpit (#1410, PR #1439)
 
 The SD+ layout becomes a stable two-zone cockpit bound by one shared selection. The top row holds four builder keys — a live window onto the fleet that the Select dial scrolls when there are more than four, with the selected builder's key visibly accented. The bottom row is a fixed action palette that always acts on the selected builder: approve its pending gate (through the usual confirmation), run its dev server, send collected review feedback, and open its terminal. Review feedback now follows the workspace's delivery mode instead of guessing: in forward mode a dial press sends the file, hunk, or selection to the builder immediately, exactly as before; in comment mode the same press quietly stages it in the shared review queue — the Send Fb key shows how many chunks are waiting and flushes them as one composed review. The dial touchstrips name the live mode ("Files · queue" vs "Files · send") so a press is never a surprise, and selection stays coherent in both directions: pressing a builder key opens its artifact in VS Code, and focusing a builder's diff or spec/plan canvas in VS Code selects that builder on the deck.
