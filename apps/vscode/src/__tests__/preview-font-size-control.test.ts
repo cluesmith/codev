@@ -43,6 +43,14 @@ describe('steppedFontSize', () => {
   it('clamps at the minimum', () => {
     expect(steppedFontSize(MIN_FONT_SIZE, 'decrease')).toBe(MIN_FONT_SIZE);
   });
+  it('pulls an out-of-range stored value the way the button implies (clamp before step)', () => {
+    // A settings.json value above MAX (e.g. 48): increase must not shrink, decrease must not grow.
+    expect(steppedFontSize(48, 'increase')).toBe(MAX_FONT_SIZE);
+    expect(steppedFontSize(48, 'decrease')).toBe(MAX_FONT_SIZE - 1);
+    // And a positive value below MIN (e.g. 4): decrease holds at MIN, increase steps up.
+    expect(steppedFontSize(4, 'decrease')).toBe(MIN_FONT_SIZE);
+    expect(steppedFontSize(4, 'increase')).toBe(MIN_FONT_SIZE + 1);
+  });
   it('never returns the 0 sentinel (the control always writes an explicit px value)', () => {
     // Decreasing from the baseline repeatedly lands on MIN, not 0.
     let v = 0;

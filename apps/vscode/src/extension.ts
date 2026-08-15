@@ -169,6 +169,10 @@ function configTargetFor(scope: ConfigScope): vscode.ConfigurationTarget {
  * Step `codev.markdownPreview.fontSize` one click and persist it back (#1070). Writes to the scope
  * the value already lives in (`resolveWriteScope`) so a workspace override cannot silently swallow
  * the click. The provider's `onDidChangeConfiguration` re-render reflows the open preview.
+ *
+ * `getConfiguration` is called without a resource, so `inspect()` never surfaces a
+ * workspace-FOLDER value — the effective scopes here are global and workspace. `resolveWriteScope`
+ * still handles the folder case (unit-tested) as defensive cover if a resource is ever threaded in.
  */
 async function stepMarkdownPreviewFontSize(direction: FontSizeDirection): Promise<void> {
 	const cfg = vscode.workspace.getConfiguration('codev.markdownPreview');

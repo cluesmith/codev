@@ -34,25 +34,32 @@ export function effectiveFontSize(raw: number): number {
   return BASELINE_FONT_SIZE;
 }
 
+/** Clamp a size into the reading bounds. */
+function clampFontSize(value: number): number {
+  if (value < MIN_FONT_SIZE) {
+    return MIN_FONT_SIZE;
+  }
+  if (value > MAX_FONT_SIZE) {
+    return MAX_FONT_SIZE;
+  }
+  return value;
+}
+
 /**
- * The next font-size value for a +/- click, stepped from the effective size and clamped to the
- * reading bounds. Returns a concrete px value (never the `0` sentinel): the control always writes
- * an explicit override. `resetFontSize` is the only path back to the sentinel, handled by the
- * command directly.
+ * The next font-size value for a +/- click. The effective size is clamped into the reading bounds
+ * *before* stepping, so a stored value outside the range (e.g. a settings.json `fontSize: 48`, above
+ * MAX) is pulled in the direction the button implies rather than snapping the wrong way — from 48,
+ * "increase" holds at MAX and "decrease" steps to MAX-1, never growing on decrease or shrinking on
+ * increase. Returns a concrete px value (never the `0` sentinel): the control always writes an
+ * explicit override. `resetFontSize` is the only path back to the sentinel, handled by the command.
  */
 export function steppedFontSize(raw: number, direction: FontSizeDirection): number {
-  const current = effectiveFontSize(raw);
+  const current = clampFontSize(effectiveFontSize(raw));
   let next = current + FONT_SIZE_STEP;
   if (direction === 'decrease') {
     next = current - FONT_SIZE_STEP;
   }
-  if (next < MIN_FONT_SIZE) {
-    return MIN_FONT_SIZE;
-  }
-  if (next > MAX_FONT_SIZE) {
-    return MAX_FONT_SIZE;
-  }
-  return next;
+  return clampFontSize(next);
 }
 
 /** Which config scope a write-back should target, so the button is never silently shadowed. */

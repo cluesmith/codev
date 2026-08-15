@@ -44,6 +44,16 @@ Two COLD lessons added to `codev/resources/lessons-learned.md` (UI/UX), both `[F
 
 Neither rises to the always-injected HOT tier (both are surface-specific recipes, not repo-wide invariants).
 
+## 3-Way Consultation (iter 1) — verdicts and dispositions
+
+Gemini **APPROVE**, Codex **APPROVE**, Claude **COMMENT**. No REQUEST_CHANGES. Claude's three comments, all assessed and addressed before the gate:
+
+1. **README stale after px→em** (`packages/artifact-canvas/README.md:152-154` still said `400px`/`48px`) — **real, fixed**. Updated to `25em`/`3em` with a note that they equal the former px at the 16px baseline.
+2. **`steppedFontSize` clamps only the result** — the reviewer's example numbers were off (with result-clamping, both directions from a stored `48` already returned `40`, not `47`), but the underlying oddity was real: from an out-of-range stored value, "increase" could shrink. **Fixed** by clamping the effective value into range *before* stepping, with a regression test (`48`→increase holds at MAX, decrease steps to MAX−1; `4`→decrease holds at MIN).
+3. **`resolveWriteScope` `workspaceFolder` branch unreachable** — correct: `getConfiguration` is called without a resource, so `inspect()` never surfaces a workspace-folder value. **Kept as defensive** (the pure function is correct and unit-tested; threading a resource URI from a global command isn't warranted for a folder case that doesn't arise here), with a comment at the call site documenting it. No behavior change.
+
+Full verdicts in `codev/projects/1070-vscode-in-preview-typography-c/1070-review-iter1-*.txt`.
+
 ## Things to Look At During PR Review
 
 - **Write-scope resolution** (`resolveWriteScope` + `configTargetFor`): the control writes `fontSize` back to the scope the value already lives in (workspace-folder → workspace → global) so a workspace override can't silently swallow a click. Global is the default for a fresh personal preference. Worth a sanity check that this matches how you'd expect the setting to behave under a `.vscode/settings.json` override.

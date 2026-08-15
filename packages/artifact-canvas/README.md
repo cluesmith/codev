@@ -149,9 +149,11 @@ Import the default stylesheet and override any subset of the `--codev-canvas-*` 
 | `--codev-canvas-link` | `#0969da` |
 | `--codev-canvas-comment-marker` | `#bf8700` |
 
-**Column tokens** (spec 1380, horizontal mode): `--codev-canvas-column-width` (`400px`, a
+**Column tokens** (spec 1380, horizontal mode): `--codev-canvas-column-width` (`25em`, a
 preferred minimum — rendered columns stretch to share leftover width) and
-`--codev-canvas-column-gap` (`48px`). Overriding them is the supported way to retune the mode;
+`--codev-canvas-column-gap` (`3em`). These are `em`-relative (#1070) so the minimum measure
+scales with the prose font size — `25em`/`3em` equal the former `400px`/`48px` at the 16px
+baseline. Overriding them is the supported way to retune the mode;
 there is no settings UI. The canvas also publishes `--codev-canvas-column-height` (the
 JS-observed column height, in px, on the canvas root) for derived rules; it is an output, not
 a knob. Note `--codev-canvas-prose-max-width` is **inert in horizontal mode** — it caps the
