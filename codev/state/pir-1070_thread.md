@@ -150,3 +150,17 @@ keybindings); (2) em multicol ≠ constant measure (failure-mode preference; con
 whole-column container cap 50+6/n, recompute on font-size not just resize). No HOT tier (both
 surface-narrow). Next: commit review+lessons, open PR, record, porch done → single 3-way CMAP →
 pr gate.
+
+## PR + consultation (2026-08-15)
+
+PR #1461 opened (Fixes #1070), recorded with porch. 3-way CMAP iter-1: gemini=APPROVE,
+codex=APPROVE, claude=COMMENT (no REQUEST_CHANGES). Addressed all three of Claude's comments before
+the gate (commit c1a075981):
+1. README:152-154 stale 400px/48px → updated to 25em/3em (real doc miss, fixed).
+2. steppedFontSize clamped only result → clamp EFFECTIVE before stepping + regression test (reviewer's
+   47 example was factually off — result-clamp already returned 40 — but the pull-into-range oddity
+   was real; fixed cleanly).
+3. resolveWriteScope workspaceFolder branch unreachable (no resource passed) → kept as defensive,
+   documented at call site. No behavior change.
+Tests 846 pass (+1), compile clean. pr gate now pending — awaiting human merge. Will NOT merge on
+prose; only porch gate-approved authorizes.
