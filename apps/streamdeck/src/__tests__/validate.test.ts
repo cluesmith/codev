@@ -1,5 +1,4 @@
 import { describe, it, expect, vi } from 'vitest';
-// @ts-expect-error — plain ESM build script, no type declarations.
 import {
   runWithBackoff,
   isTransientError,
