@@ -63,3 +63,24 @@ Three consequences folded in:
 3. Stale-but-present (live registration behind dead PTY) → documented known
    limitation (deck can't detect), README + Risks; not fixed.
 Recommitted. Requesting plan-approval gate.
+
+## Plan reshaped at the gate — two-mode design (2026-08-15, Amr in PTY)
+
+Owner (Amr) reworked the key interactively at the gate. Final design supersedes
+both ruling 1 and the free-text `Automatic`/pin revision (5300180262):
+
+- **Two PI modes**, `target: 'builder' | 'main'`, default `builder`.
+  - Builder mode → opens `selectedBuilder().spawnedByArchitect`; inert when none.
+  - Main mode → fires literal `'main'` (VS Code does main-else-first, ruling 2).
+- **No positional fallback** (dropped first-live + `firstLiveArchitect()` store
+  accessor — no store change now). Neither mode summons an unexpected architect.
+- **Title/subtitle face**: title `Architect` (constant), subtitle = resolved
+  name **first-letter-capitalized** (deck-local `capitalizeFirst`, NOT VS Code's
+  uppercase `displayArchitectName`). Inert → dim, subtitle `None`. Names are
+  lowercase `[a-z][a-z0-9-]*` on the wire.
+- **Codev Action**: keep its `open-architect-terminal` entry as the generic
+  manual-picker escape hatch (owner ruled keep). No `codev-action.html` change.
+- #1406 still a stated prereq; the visible owner name makes a mis-attribution
+  noticeable but can't correct it.
+
+Rewrote the plan to this. Re-requesting plan-approval.
