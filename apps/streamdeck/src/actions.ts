@@ -15,7 +15,7 @@ import type {
   CanvasCommandClientErrorCode,
 } from '@cluesmith/codev-sdk/controller';
 import type { CodevStore } from './store.js';
-import { approveFaceSvg, builderFaceSvg, faceForBuilder, labelFaceSvg, sendFbFaceSvg, svgToDataUri } from './face.js';
+import { approveFaceSvg, architectFaceSvg, builderFaceSvg, faceForBuilder, labelFaceSvg, sendFbFaceSvg, svgToDataUri } from './face.js';
 
 /**
  * The Stream Deck actions — thin adapters over CodevStore. Each maps a physical
@@ -304,6 +304,77 @@ export class OpenTerminalAction extends VerbKey {
     if (!ev.action.isKey()) return;
     void ev.action.setImage(svgToDataUri(labelFaceSvg('terminal', 'Terminal', '#a9a9b2')));
     void ev.action.setTitle('');
+  }
+}
+
+/** PI setting for the Open Architect key: which architect a press targets. */
+type ArchitectTarget = 'builder' | 'main';
+type ArchitectSettings = { target?: ArchitectTarget };
+
+/**
+ * Row-2 Open Architect key (#1463): opens an architect's terminal in VSCode via the
+ * `open-architect-terminal` verb. Two Property-Inspector modes:
+ *  - `builder` (default): the architect that spawned the SELECTED builder
+ *    (`spawnedByArchitect`); inert when nothing is selected or the builder has no
+ *    recorded owner (ruling 3).
+ *  - `main`: always the workspace's `main` architect. VSCode resolves `'main'` as
+ *    main-else-first and owns the not-found warning, so the deck defers liveness to
+ *    it (ruling 2) — the deck never consumes the live-architect view.
+ *
+ * The face is dynamic (title `Architect` over the resolved name, dim `None` when
+ * inert), and the resolved name IS the safeguard against a wrong-architect press —
+ * so, like ApproveGate / SendQueueAction, this is a SingletonAction that tracks its
+ * keys and re-renders on store changes, not a static-face VerbKey.
+ */
+export class OpenArchitectAction extends SingletonAction<ArchitectSettings> {
+  override readonly manifestId = 'com.cluesmith.codev.open-architect';
+  private readonly keys = new Map<string, { action: KeyAction; settings: ArchitectSettings }>();
+
+  constructor(private readonly store: CodevStore) {
+    super();
+    this.store.onChange(() => this.renderAll());
+  }
+
+  /** The architect a press targets, or `undefined` when nothing resolves (inert).
+   *  Builder mode is the default — an absent `target` is not `'main'`, so it falls
+   *  through to the selected builder's owner. */
+  private resolve(settings: ArchitectSettings): string | undefined {
+    if (settings.target === 'main') return 'main';
+    return this.store.selectedBuilder()?.spawnedByArchitect ?? undefined;
+  }
+
+  override onWillAppear(ev: WillAppearEvent<ArchitectSettings>): void {
+    if (!ev.action.isKey()) return;
+    const settings = ev.payload.settings ?? {};
+    this.keys.set(ev.action.id, { action: ev.action, settings });
+    this.renderTo(ev.action, settings);
+  }
+  override onWillDisappear(ev: WillDisappearEvent<ArchitectSettings>): void {
+    this.keys.delete(ev.action.id);
+  }
+  override onDidReceiveSettings(ev: DidReceiveSettingsEvent<ArchitectSettings>): void {
+    const entry = this.keys.get(ev.action.id);
+    if (!entry) return;
+    entry.settings = ev.payload.settings ?? {};
+    this.renderTo(entry.action, entry.settings);
+  }
+  override async onKeyDown(ev: KeyDownEvent<ArchitectSettings>): Promise<void> {
+    const name = this.resolve(ev.payload.settings ?? {});
+    if (!name) {
+      // Inert: nothing selected / no owner and not pinned to main. Visibly
+      // unavailable via the dim face; the press does nothing.
+      await ev.action.showAlert();
+      return;
+    }
+    const res = await this.store.client.sendCommand('open-architect-terminal', [name], this.store.selectedWorkspacePath());
+    await ack(ev.action, res.ok);
+  }
+  private renderAll(): void {
+    for (const { action, settings } of this.keys.values()) this.renderTo(action, settings);
+  }
+  private renderTo(action: KeyAction, settings: ArchitectSettings): void {
+    void action.setImage(svgToDataUri(architectFaceSvg(this.resolve(settings))));
+    void action.setTitle('');
   }
 }
 

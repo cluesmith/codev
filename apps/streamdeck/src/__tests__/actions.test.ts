@@ -8,6 +8,7 @@ import {
   ApproveGate,
   SendQueueAction,
   OpenTerminalAction,
+  OpenArchitectAction,
   PrNav,
   SpawnNav,
   DiffFileNav,
@@ -51,8 +52,8 @@ function makeStore() {
   store.workspaces = [workspace('/work/alpha', 'alpha', true)];
   store.overview = {
     builders: [
-      { id: 'pir-1', roleId: 'builder-pir-1', issueId: '101', issueTitle: 'Add the relay', blocked: 'plan review', blockedGate: 'plan-approval', protocolPhase: 'plan', progress: 45, worktreePath: '/work/alpha/.builders/pir-1' },
-      { id: 'pir-2', roleId: 'builder-pir-2', issueId: '102', issueTitle: 'Wire the dial', blocked: null, blockedGate: null, protocolPhase: 'implement', progress: 70, worktreePath: '/work/alpha/.builders/pir-2' },
+      { id: 'pir-1', roleId: 'builder-pir-1', issueId: '101', issueTitle: 'Add the relay', blocked: 'plan review', blockedGate: 'plan-approval', protocolPhase: 'plan', progress: 45, worktreePath: '/work/alpha/.builders/pir-1', spawnedByArchitect: 'main' },
+      { id: 'pir-2', roleId: 'builder-pir-2', issueId: '102', issueTitle: 'Wire the dial', blocked: null, blockedGate: null, protocolPhase: 'implement', progress: 70, worktreePath: '/work/alpha/.builders/pir-2', spawnedByArchitect: 'streamdeck' },
     ],
     pendingPRs: [{ id: '7', title: 'Fix', url: 'https://gh/pr/7' }],
     backlog: [{ id: '55', title: 'Add X' }],
@@ -834,5 +835,76 @@ describe('ZoomNav zoom gesture', () => {
     ctx.store.rotateCursor(1); // workspace 0 → 1, triggers re-fetch
     expect(ctx.store.overview).toBeNull();      // dropped synchronously, before the fetch
     expect(ctx.store.loadingOverview).toBe(true);
+  });
+});
+
+describe('OpenArchitectAction (Row 2 — open architect, #1463)', () => {
+  it('Builder mode (default): opens the selected builder’s spawning architect', async () => {
+    const ctx = makeStore(); // pir-1 selected, owner 'main'
+    await new OpenArchitectAction(ctx.store).onKeyDown(keyEvent() as never);
+    expect(ctx.sent[0]).toEqual({ verb: 'open-architect-terminal', args: ['main'], ws: '/work/alpha' });
+  });
+
+  it('Builder mode: follows the selection to a sibling-owned builder', async () => {
+    const ctx = makeStore();
+    ctx.store.syncToBuilder('pir-2'); // owner 'streamdeck'
+    await new OpenArchitectAction(ctx.store).onKeyDown(keyEvent() as never);
+    expect(ctx.sent[0]).toEqual({ verb: 'open-architect-terminal', args: ['streamdeck'], ws: '/work/alpha' });
+  });
+
+  it('Builder mode: inert (alerts, sends nothing) when the selected builder has no owner', async () => {
+    const ctx = makeStore();
+    ctx.store.overview!.builders[0].spawnedByArchitect = null;
+    const key = { id: 'A', isKey: () => true, setImage: vi.fn(), setTitle: vi.fn(), showOk: vi.fn(), showAlert: vi.fn() };
+    await new OpenArchitectAction(ctx.store).onKeyDown({ action: key, payload: { settings: {} } } as never);
+    expect(ctx.sent).toHaveLength(0);
+    expect(key.showAlert).toHaveBeenCalled();
+  });
+
+  it('Builder mode: inert when nothing is selected', async () => {
+    const ctx = makeStore();
+    ctx.store.overview = { builders: [], pendingPRs: [], backlog: [], recentlyClosed: [] } as never;
+    const key = { id: 'A', isKey: () => true, setImage: vi.fn(), setTitle: vi.fn(), showOk: vi.fn(), showAlert: vi.fn() };
+    await new OpenArchitectAction(ctx.store).onKeyDown({ action: key, payload: { settings: {} } } as never);
+    expect(ctx.sent).toHaveLength(0);
+    expect(key.showAlert).toHaveBeenCalled();
+  });
+
+  it('Main mode: opens main regardless of selection', async () => {
+    const ctx = makeStore();
+    ctx.store.syncToBuilder('pir-2'); // owner 'streamdeck', but Main mode ignores it
+    await new OpenArchitectAction(ctx.store).onKeyDown(keyEvent({ target: 'main' }) as never);
+    expect(ctx.sent[0]).toEqual({ verb: 'open-architect-terminal', args: ['main'], ws: '/work/alpha' });
+  });
+
+  it('alerts when the relay rejects the command', async () => {
+    const ctx = makeStore();
+    (ctx.store.client.sendCommand as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ ok: false, status: 500, data: { ok: false } });
+    const key = { id: 'A', isKey: () => true, setImage: vi.fn(), setTitle: vi.fn(), showOk: vi.fn(), showAlert: vi.fn() };
+    await new OpenArchitectAction(ctx.store).onKeyDown({ action: key, payload: { settings: {} } } as never);
+    expect(key.showAlert).toHaveBeenCalled();
+  });
+
+  it('renders the resolved architect name on the face (the safeguard), dim None when inert', () => {
+    const ctx = makeStore();
+    const action = new OpenArchitectAction(ctx.store);
+    const key = { id: 'A', isKey: () => true, setImage: vi.fn(), setTitle: vi.fn() };
+    action.onWillAppear({ action: key, payload: { settings: {} } } as never); // pir-1 → 'main'
+    const decode = (): string => Buffer.from(String(key.setImage.mock.calls.at(-1)?.[0]).split(',')[1], 'base64').toString('utf8');
+    expect(decode()).toContain('Architect');
+    expect(decode()).toContain('Main');
+
+    ctx.store.syncToBuilder('pir-2'); // onChange re-renders → 'streamdeck'
+    expect(decode()).toContain('Streamdeck');
+  });
+
+  it('renders the dim "None" inert face when no architect resolves', () => {
+    const ctx = makeStore();
+    ctx.store.overview = { builders: [], pendingPRs: [], backlog: [], recentlyClosed: [] } as never;
+    const key = { id: 'A', isKey: () => true, setImage: vi.fn(), setTitle: vi.fn() };
+    new OpenArchitectAction(ctx.store).onWillAppear({ action: key, payload: { settings: {} } } as never);
+    const face = Buffer.from(String(key.setImage.mock.calls.at(-1)?.[0]).split(',')[1], 'base64').toString('utf8');
+    expect(face).toContain('Architect');
+    expect(face).toContain('None');
   });
 });
