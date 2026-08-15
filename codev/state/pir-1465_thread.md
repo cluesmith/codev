@@ -65,3 +65,9 @@ in placed-keys terms (never "4-wide"), dropped the stale "place Open Architect w
 up" note. Folded into this lane (no separate PR) because a 3-key Row 1 is only correct once the
 window follows the placed keys — the doc and the fix must ship together. readme-design test ✓.
 Committed 3bbf15782. Still at dev-approval gate.
+
+## Row 2 layout revision (owner-directed, 2026-08-15)
+Owner revised recommended Row 2: slot 1 free, slot 2 Approve Gate, slot 3 Open Architect
+Terminal in BUILDER mode (selected builder's owning architect — per-builder complement to
+Row 1's main-mode anchor), slot 4 Open Builder Terminal. Updated ASCII diagram + Row-2 bullet.
+Docs-only, readme-design test ✓. Committed 8c016a973. Still at dev-approval gate.
