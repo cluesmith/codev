@@ -1,9 +1,17 @@
-// Render the dedicated manifest action icons for `send-queue` and `open-terminal` (#1440).
+// Render the dedicated manifest action icons for `send-queue`, `open-terminal` (#1440) and the
+// catch-all `action` (#1444).
 //
 // SINGLE SOURCE: the glyph vectors are NOT re-drawn here — they are parsed out of
 // `src/face.ts`'s GLYPHS map, the same vectors the runtime key face draws via
 // `labelFaceSvg('comment'|'terminal', …)`. So the action-picker icon and the live hardware key
 // agree by construction; changing a glyph in face.ts and re-running this script keeps them aligned.
+//
+// BRAND-SOURCED: the `action` icon is the exception — it renders from the plugin's own brand mark
+// (`icons/plugin.svg`), not a face.ts glyph. `Codev Action` is a configurable catch-all that runs
+// any verb, so #1440's terminal glyph both mislabeled it and collided with the new open-terminal
+// icon; the Codev mark reads as "a generic Codev action" and needs no new artwork (#1444). The mark
+// is already monochrome white on the same viewBox we reuse, so it flows through the identical
+// trim → fit → composite pipeline as the glyphs.
 //
 // FIT: the glyphs don't fill their authored 24×24 box (comment ≈ 18×17, terminal ≈ 20×16), and a
 // transparent list icon needs far less padding than a rounded-key image. So we render the glyph,
@@ -26,12 +34,16 @@ import { tmpdir } from 'node:os';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PLUGIN = join(HERE, '..', 'com.cluesmith.codev.sdPlugin');
 const FACE_TS = join(HERE, '..', 'src', 'face.ts');
+const BRAND_SVG = join(PLUGIN, 'icons', 'plugin.svg');
 
 // name → the GLYPHS key in face.ts it renders from.
 export const ICONS = [
   { name: 'send-queue', glyph: 'comment' },
   { name: 'open-terminal', glyph: 'terminal' },
 ];
+
+// name → rendered from the brand mark in icons/plugin.svg instead of a face.ts glyph (#1444).
+export const BRAND_ICONS = [{ name: 'action' }];
 
 const GLYPH_COLOR = '#ffffff';
 const BG = '#1C2128'; // rounded-key ground, matching icons/action.png & siblings
@@ -70,6 +82,25 @@ export function extractGlyph(faceSrc, key, color) {
 /** The glyph on its own, high-res, transparent — the raster both variants trim and fit from. */
 function glyphSvg(inner) {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${RENDER_PX}" height="${RENDER_PX}" viewBox="0 0 24 24">${inner}</svg>`;
+}
+
+/**
+ * Pull the brand mark out of icons/plugin.svg: its single `<g>` group (the white handshake path)
+ * and the SVG's viewBox. The opaque background `<rect>` is left behind, so the mark renders
+ * transparent — the same raster shape renderKey/renderList expect. Throws loudly if the mark's
+ * shape drifts, so a silent stale-icon build can't happen. Returns the group already white; unlike
+ * the glyphs it carries no `${c}` placeholder, so no recolor step is needed.
+ */
+export function extractBrandMark(svgSrc) {
+  const viewBox = svgSrc.match(/viewBox="([^"]*)"/);
+  const group = svgSrc.match(/<g\b[^>]*>[\s\S]*?<\/g>/);
+  if (!viewBox || !group) throw new Error('brand mark: expected <svg viewBox> with a <g> group in plugin.svg');
+  return { viewBox: viewBox[1], inner: group[0] };
+}
+
+/** The brand mark on its own, high-res, transparent — same role as glyphSvg for the glyphs. */
+function brandSvg({ viewBox, inner }) {
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${RENDER_PX}" height="${RENDER_PX}" viewBox="${viewBox}">${inner}</svg>`;
 }
 
 function tmp(tag) {
@@ -126,6 +157,34 @@ function assertListCoverage(out, size, min) {
   }
 }
 
+/**
+ * The four manifest variants a single high-res transparent source raster produces: the 72/144 key
+ * faces (glyph over the rounded ground) and the 20/40 transparent list icons. Shared by the glyph-
+ * and brand-sourced icons so both fit and center identically.
+ */
+function emit(name, srcPng) {
+  renderKey(srcPng, join(PLUGIN, 'icons', `${name}.png`), 72);
+  renderKey(srcPng, join(PLUGIN, 'icons', `${name}@2x.png`), 144);
+  renderList(srcPng, join(PLUGIN, 'icons', 'list', `${name}.png`), 20);
+  renderList(srcPng, join(PLUGIN, 'icons', 'list', `${name}@2x.png`), 40);
+  assertListCoverage(join(PLUGIN, 'icons', 'list', `${name}@2x.png`), 40, 0.8);
+}
+
+/** Rasterize a source SVG to the shared high-res transparent raster, run `emit`, then clean up. */
+function build(name, svg, tag, label) {
+  const svgFile = tmp(`${tag}.svg`);
+  const srcPng = tmp(`${tag}.png`);
+  writeFileSync(svgFile, svg);
+  execFileSync('rsvg-convert', ['-w', String(RENDER_PX), '-h', String(RENDER_PX), svgFile, '-o', srcPng]);
+  try {
+    emit(name, srcPng);
+  } finally {
+    rmSync(svgFile, { force: true });
+    rmSync(srcPng, { force: true });
+  }
+  console.log(`rendered ${name} (${label}) → 72/144/20/40`);
+}
+
 function main() {
   ensureTool('rsvg-convert', 'brew install librsvg');
   ensureTool('magick', 'brew install imagemagick');
@@ -134,21 +193,12 @@ function main() {
   mkdirSync(join(PLUGIN, 'icons', 'list'), { recursive: true });
 
   for (const { name, glyph } of ICONS) {
-    const svgFile = tmp(`${glyph}.svg`);
-    const glyphPng = tmp(`${glyph}.png`);
-    writeFileSync(svgFile, glyphSvg(extractGlyph(faceSrc, glyph, GLYPH_COLOR)));
-    execFileSync('rsvg-convert', ['-w', String(RENDER_PX), '-h', String(RENDER_PX), svgFile, '-o', glyphPng]);
-    try {
-      renderKey(glyphPng, join(PLUGIN, 'icons', `${name}.png`), 72);
-      renderKey(glyphPng, join(PLUGIN, 'icons', `${name}@2x.png`), 144);
-      renderList(glyphPng, join(PLUGIN, 'icons', 'list', `${name}.png`), 20);
-      renderList(glyphPng, join(PLUGIN, 'icons', 'list', `${name}@2x.png`), 40);
-      assertListCoverage(join(PLUGIN, 'icons', 'list', `${name}@2x.png`), 40, 0.8);
-    } finally {
-      rmSync(svgFile, { force: true });
-      rmSync(glyphPng, { force: true });
-    }
-    console.log(`rendered ${name} (from GLYPHS.${glyph}) → 72/144/20/40`);
+    build(name, glyphSvg(extractGlyph(faceSrc, glyph, GLYPH_COLOR)), glyph, `from GLYPHS.${glyph}`);
+  }
+
+  const brandSrc = readFileSync(BRAND_SVG, 'utf8');
+  for (const { name } of BRAND_ICONS) {
+    build(name, brandSvg(extractBrandMark(brandSrc)), 'brand', 'from icons/plugin.svg brand mark');
   }
 }
 

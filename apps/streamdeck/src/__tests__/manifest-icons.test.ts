@@ -96,3 +96,42 @@ describe('#1440 dedicated action icons', () => {
     expect(pngSize(join(pluginDir, `icons/list/${name}@2x.png`))).toEqual({ w: 40, h: 40 });
   });
 });
+
+/**
+ * #1444: the catch-all `Codev Action` was re-glyphed off the terminal picture (which now belongs to
+ * the dedicated open-terminal action from #1440) onto the Codev brand mark. Its manifest references
+ * are unchanged — only the pixels behind `icons/action` were regenerated — so these guards pin both
+ * the still-shared filenames and the fix itself: the action image must no longer be the terminal.
+ */
+describe('#1444 re-glyphed Codev Action', () => {
+  function action(uuid: string): ManifestAction {
+    const found = manifest.Actions.find((a) => a.UUID === uuid);
+    if (!found) throw new Error(`action ${uuid} not in manifest`);
+    return found;
+  }
+
+  it('keeps the action referencing its own icon filenames', () => {
+    const a = action('com.cluesmith.codev.action');
+    expect(a.Icon).toBe('icons/list/action');
+    expect(a.States[0].Image).toBe('icons/action');
+  });
+
+  it('action icons ship at the convention sizes', () => {
+    expect(pngSize(join(pluginDir, 'icons/action.png'))).toEqual({ w: 72, h: 72 });
+    expect(pngSize(join(pluginDir, 'icons/action@2x.png'))).toEqual({ w: 144, h: 144 });
+    expect(pngSize(join(pluginDir, 'icons/list/action.png'))).toEqual({ w: 20, h: 20 });
+    expect(pngSize(join(pluginDir, 'icons/list/action@2x.png'))).toEqual({ w: 40, h: 40 });
+  });
+
+  // The collision the issue reports: before the re-glyph, action and open-terminal drew the same
+  // terminal picture. The two key faces must no longer be byte-identical.
+  it.each(['icons/action.png', 'icons/action@2x.png', 'icons/list/action.png', 'icons/list/action@2x.png'])(
+    '%s no longer collides with the open-terminal asset',
+    (ref) => {
+      const terminalRef = ref.replace('action', 'open-terminal');
+      const actionBytes = readFileSync(join(pluginDir, ref));
+      const terminalBytes = readFileSync(join(pluginDir, terminalRef));
+      expect(actionBytes.equals(terminalBytes)).toBe(false);
+    },
+  );
+});
