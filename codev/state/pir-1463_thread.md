@@ -85,6 +85,29 @@ both ruling 1 and the free-text `Automatic`/pin revision (5300180262):
 
 Rewrote the plan to this. Re-requesting plan-approval.
 
+## Implement phase complete (2026-08-15)
+
+plan-approval approved by Amr (relayed via porch by architect). Implemented:
+- `face.ts`: `architect` person glyph, `capitalizeFirst`, `architectFaceSvg(name|undefined)`
+  (title `Architect` / subtitle name; dim `None` when inert). primaryLine/secondaryLine
+  got an optional color param for the dim state.
+- `actions.ts`: `OpenArchitectAction` (SingletonAction + keys-map + onChange). Modes
+  `builder` (default → selectedBuilder.spawnedByArchitect, inert when none) / `main`
+  (fires literal 'main'). Registered in `plugin.ts`.
+- Manifest action + `ui/open-architect.html` (target select). Dedicated icon via the
+  render pipeline (added `architect` to ICONS; ran the script).
+- README: key docs, modes, known edges, Row-1 placement caveat (#1465).
+- Tests: face (capitalizeFirst + architectFaceSvg), actions (both modes, inert x2,
+  main, relay-reject, dynamic face), manifest-icons sizes, render extractGlyph.
+
+Gotcha: the render script regenerates ALL ICONS/BRAND_ICONS, so it dirtied the
+pre-existing send-queue/open-terminal/action PNGs (byte churn); restored those 12 to
+committed, kept only the 4 new open-architect PNGs. Glyph line must carry NO trailing
+comment (the extractor regex rejects it).
+
+Verified from worktree: build ✓, check-types (tsc) ✓, vitest 197/197 ✓, streamdeck
+validate ✓. Pushed. dev-approval is a hardware session — requesting the gate.
+
 ## Row-1 windowing question + follow-up #1465 (2026-08-15)
 
 Amr asked about Row-1 slot selection and placing the Main-mode key on a Row-1
