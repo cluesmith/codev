@@ -8,9 +8,9 @@
     "build": "node esbuild.js",
     "watch": "node esbuild.js --watch",
     "check-types": "tsc --noEmit",
-    "validate": "node scripts/validate-with-retry.mjs",
+    "validate": "node scripts/retry-validate.mjs",
     "pack": "streamdeck pack com.cluesmith.codev.sdPlugin --output dist --force",
-    "package": "node esbuild.js && rm -f com.cluesmith.codev.sdPlugin/bin/plugin.js.map && rm -rf com.cluesmith.codev.sdPlugin/logs && find com.cluesmith.codev.sdPlugin -name .DS_Store -delete && node scripts/validate-with-retry.mjs && streamdeck pack com.cluesmith.codev.sdPlugin --output dist --force",
+    "package": "node esbuild.js && rm -f com.cluesmith.codev.sdPlugin/bin/plugin.js.map && rm -rf com.cluesmith.codev.sdPlugin/logs && find com.cluesmith.codev.sdPlugin -name .DS_Store -delete && node scripts/retry-validate.mjs && streamdeck pack com.cluesmith.codev.sdPlugin --output dist --force",
     "test": "vitest run"
   },
   "dependencies": {

@@ -11,7 +11,7 @@
 // first attempt (no masking, no wasted backoff). `--no-update-check` does NOT help here — it only
 // gates the separate schema-update fetch, not this URL-reachability probe.
 //
-// The retry core is exported and unit-tested (see src/__tests__/validate-with-retry.test.ts);
+// The retry core is exported and unit-tested (see src/__tests__/retry-validate.test.ts);
 // `main()` only wires it to the real child process. Mirrors scripts/render-action-icons.mjs.
 
 import { execFile } from 'node:child_process';

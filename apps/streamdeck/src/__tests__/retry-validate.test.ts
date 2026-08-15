@@ -4,7 +4,7 @@ import {
   runWithRetry,
   isTransientError,
   TRANSIENT_SIGNATURES,
-} from '../../scripts/validate-with-retry.mjs';
+} from '../../scripts/retry-validate.mjs';
 
 /**
  * #1436: `streamdeck validate`'s `manifestUrlsExist` rule does a live HEAD request to the
