@@ -464,6 +464,11 @@
           "group": "navigation@2"
         },
         {
+          "command": "codev.markdownPreview.resetFontSize",
+          "when": "activeCustomEditorId == codev.markdownPreview",
+          "group": "1_run"
+        },
+        {
           "command": "codev.diffCodelensUseForward",
           "when": "codev.activeEditorIsBuilderFile && codev.diffCodelensMode == 'comment'",
           "group": "navigation"
