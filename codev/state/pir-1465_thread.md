@@ -55,3 +55,13 @@ debounce is on the full renderAll (the thrash the architect flagged), not on pre
 
 Verified in worktree: `npm run build` ✓, `npm run check-types` (tsc) ✓, `npm test` ✓ (212 tests),
 `npm run validate` ✓. dev-approval is the hardware session next.
+
+## Scope addition at dev-approval (owner-directed, 2026-08-15)
+Owner wants the recommended SD+ layout to lead with the architect anchor. Updated README
+"Recommended layout" section: Row 1 slot 1 = Open Architect Terminal in MAIN mode (fixed,
+selection-independent anchor — that's WHY it can sit in Row 1 without breaking "Row 1 selects"),
+slots 2-4 = three Builder Action selectors. Redrew the ASCII diagram, rewrote the Row-1 bullet
+in placed-keys terms (never "4-wide"), dropped the stale "place Open Architect where a slot frees
+up" note. Folded into this lane (no separate PR) because a 3-key Row 1 is only correct once the
+window follows the placed keys — the doc and the fix must ship together. readme-design test ✓.
+Committed 3bbf15782. Still at dev-approval gate.
