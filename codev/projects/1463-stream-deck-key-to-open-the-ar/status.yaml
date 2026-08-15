@@ -1,7 +1,7 @@
 id: '1463'
 title: stream-deck-key-to-open-the-ar
 protocol: pir
-phase: implement
+phase: review
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -19,4 +19,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-08-15T02:54:37.170Z'
-updated_at: '2026-08-15T08:10:52.278Z'
+updated_at: '2026-08-15T08:11:13.680Z'
