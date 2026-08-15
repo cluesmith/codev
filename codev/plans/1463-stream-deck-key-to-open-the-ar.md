@@ -146,6 +146,15 @@ mode shows `Main` even if VS Code opens the first architect when `main` isn't li
 (mode reflects configured intent), and a live registration behind a dead PTY
 opens a terminal nobody reads (the deck can't detect it).
 
+Placement caveat (Row 1): the Main-mode key is selection-independent, so it may
+live on a Row-1 key without affecting the selection model — but Row 1's window is
+a fixed page of `ROW1_WINDOW_SIZE = 4` (`store.ts:28`), independent of how many
+BuilderAction keys are placed. Putting a key there leaves 3 builder slots against
+that page-of-4, so at 4+ concurrent builders every 4th builder renders on no key
+(fine when the working set is ≤ 3). Recommended for small working sets; otherwise
+keep Main on Row 2 or a larger profile. Self-sizing the window from placed keys is
+tracked separately in **#1465** — out of scope here.
+
 ## Files to Change
 
 - `apps/streamdeck/src/actions.ts` — new `OpenArchitectAction` (SingletonAction +
@@ -181,10 +190,16 @@ opens a terminal nobody reads (the deck can't detect it).
 - **Base-class choice** — resolved: `SingletonAction` (ratified). `VerbKey`
   supports dynamic `args()` but not a dynamic face, and the face is what forces
   the change.
-- **Known limitation (documented, not fixed): Main mode vs. missing `main`.** If
-  `main` isn't live, VS Code opens the first architect while the face still reads
-  `Main` (the key's configured intent). Deferred to VS Code (ruling 2); noted in
-  the README.
+- **Known limitation (documented, not fixed): Main mode vs. missing `main`.** In
+  `target='main'` mode when `main` is absent, VS Code opens `architects[0]`
+  (`extension.ts:921` — the main-else-first special-case, scoped to that one name;
+  any *other* named target fails loudly instead of substituting), while the face
+  still reads `Architect / Main`. The relay is fire-and-forget, so the deck never
+  learns which architect actually opened. Narrow (a workspace with architects but
+  no `main`), and **pre-existing VS Code behaviour** rather than something this key
+  introduces. Not chased: deck-side verification would reintroduce exactly the
+  live-architect-view coupling this design deliberately removed. Documented in the
+  README; deferred to VS Code (ruling 2).
 - **Known limitation: stale-but-present architect.** A live registration behind a
   dead PTY resolves normally and opens a terminal nobody reads; the deck can't
   distinguish it from a real session. Out of scope; noted in the README.

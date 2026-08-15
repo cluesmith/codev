@@ -84,3 +84,19 @@ both ruling 1 and the free-text `Automatic`/pin revision (5300180262):
   noticeable but can't correct it.
 
 Rewrote the plan to this. Re-requesting plan-approval.
+
+## Row-1 windowing question + follow-up #1465 (2026-08-15)
+
+Amr asked about Row-1 slot selection and placing the Main-mode key on a Row-1
+key. Traced it: ZoomNav dial steps the selection ±1 across the fleet;
+`windowedBuilder` shows the page of `ROW1_WINDOW_SIZE=4` containing the
+selection. The 4 is a fixed constant, independent of placed BuilderAction keys —
+so 3 placed keys hide every 4th builder at 4+ fleet (a selectable-but-invisible
+ambiguous state). Verified the Elgato SDK (@2.1.0): NO profile-structure API
+(profiles.d.ts: plugins "cannot access user-defined profiles"), but willAppear
+carries KeyAction.coordinates + streamDeck.devices gives Device.size — so a
+self-sizing window is derivable from the lifecycle. Architect filed that as a
+SEPARATE issue **#1465** (reframed to lead with the correctness bug), credited to
+me. 1463 stays as-is; added a one-line Row-1 placement caveat + #1465 pointer to
+the plan's README-guidance section (documentation, not a fold-in). Architect
+endorsed the reshape and the Main-mode residual wording. Gate still pending (Amr).
