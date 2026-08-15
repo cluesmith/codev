@@ -22,10 +22,23 @@ Property Inspector shape:
   falling back to the **first live architect** when nothing is selected or the
   builder has no recorded owner. This is `afx send architect`'s real convention —
   "`main` if present, **else the first registered**" — not a hardcoded `'main'`.
-  `OverviewData.architects` is live-only and documented main-first, so the first
-  entry **is** `main` whenever `main` exists and self-corrects to whatever exists
-  when it doesn't. When that list is empty (no live architects), nothing is
-  resolvable and the key is **inert** (ruling 3).
+  `OverviewData.architects` is main-first, so the first entry **is** `main`
+  whenever `main` is visible and self-corrects to whatever exists when it isn't.
+  When that list is empty, nothing is resolvable and the key shows an explicit
+  **unavailable** face (ruling 3 — see the "live view" caveat below).
+
+**Caveat: `architects` is "what Tower can currently *see*", not "what exists".**
+`liveArchitects` (`tower-routes.ts:1077-1090`) skips any architect whose terminal
+session is missing (`if (!session) continue`) and re-sorts main-first among the
+*survivors*. This view is transiently wrong in practice (a Tower restart drops
+every registration; a row can vanish mid-operation). Three consequences the plan
+handles: (a) an empty list must render a **legible unavailable state**, not a
+key that looks normal and silently does nothing — otherwise the reviewer presses
+again and again; (b) if `main`'s session is momentarily invisible, the positional
+fallback lands on a *sibling* — the face is the safeguard, because it renders the
+**resolved name**, so a sibling summon is visible before the press; (c) a live
+registration behind a **dead PTY** resolves fine and opens a terminal nobody
+reads — the deck cannot detect this, documented as a known limitation, not fixed.
 - **An explicit architect name** (pinned in the PI) — always that architect,
   regardless of selection.
 
@@ -87,14 +100,15 @@ Behaviour:
   owner) is **not** inert: the name flows to VS Code, which handles the
   not-found warning (ruling 2).
 - **Press** (`onKeyDown`): if `resolve(settings)` is `undefined`, `showAlert` and
-  do nothing (inert). Otherwise `sendCommand('open-architect-terminal',
-  [resolved], selectedWorkspacePath())`, then `ack` (red alert on failure; silent
-  success, matching the other keys).
+  do nothing. Otherwise `sendCommand('open-architect-terminal', [resolved],
+  selectedWorkspacePath())`, then `ack` (red alert on failure; silent success,
+  matching the other keys).
 - **Render** (`renderTo`): `setImage(svgToDataUri(architectFaceSvg(resolve(settings))))`
   + `setTitle('')`. Called from `onWillAppear`, `onDidReceiveSettings`, and the
-  `onChange` subscription. `architectFaceSvg(undefined)` draws a **dim, inert**
-  face (a muted `Architect` label, mirroring `approveFaceSvg`/`sendFbFaceSvg`'s
-  dim-when-inert states) so an unresolvable key reads as inert, not broken.
+  `onChange` subscription. `architectFaceSvg(undefined)` draws an **explicit
+  unavailable** face — a dimmed state whose label reads `No architect` (distinct
+  from a normal-looking key) — so a dead press is legible at a glance. "Inert"
+  here means *visibly unavailable*, never *silently inactive*.
 
 ### 1b. Store accessor (`apps/streamdeck/src/store.ts`)
 
@@ -150,7 +164,10 @@ alongside the other builder-scoped keys; the natural donor slot is **Send
 Feedback while the workspace is in forward mode** (where that key is inert by
 design); unplacing a key leaves the action in the picker; the trade disappears
 with a larger profile (#1381). (The plugin ships `Actions: null`; users place
-keys themselves — #1404/#1410, so no bundled-profile change.)
+keys themselves — #1404/#1410, so no bundled-profile change.) Also note the
+known edge: the key targets the architect list Tower currently sees live, so a
+registration behind a dead PTY can open a terminal nobody reads, and a transient
+Tower outage can briefly empty the list (`No architect`).
 
 ## Files to Change
 
@@ -158,8 +175,8 @@ keys themselves — #1404/#1410, so no bundled-profile change.)
   keys-map + `onChange`; resolve → press → render).
 - `apps/streamdeck/src/store.ts` — new `firstLiveArchitect()` accessor.
 - `apps/streamdeck/src/face.ts` — new `architect` glyph in `GLYPHS`/`GlyphKey`;
-  new `architectFaceSvg(name | undefined)` (dim inert face when `undefined`);
-  fit-aware centered name band.
+  new `architectFaceSvg(name | undefined)` (explicit dim `No architect` face when
+  `undefined`); fit-aware centered name band.
 - `apps/streamdeck/src/plugin.ts` — import + register `OpenArchitectAction`.
 - `apps/streamdeck/com.cluesmith.codev.sdPlugin/manifest.json` — new Action entry.
 - `apps/streamdeck/com.cluesmith.codev.sdPlugin/ui/open-architect.html` — new PI.
@@ -185,10 +202,19 @@ keys themselves — #1404/#1410, so no bundled-profile change.)
   inside our scope: the face renders the resolved target, so the mistake is
   **visible before pressing**. Full correctness needs #1406 fixed or confirmed
   before this ships — out of this lane; called out for the architect.
-- **Risk: face must genuinely show the target.** The whole `main` fallback rests
-  on the visible name. The `face.test.ts` cases pin that `architectFaceSvg`
-  renders the resolved name (pinned, owner, and `main`-fallback), so a regression
-  that blanks the face fails the build.
+- **Risk: face must genuinely show the target.** The whole fallback rests on the
+  visible name. The `face.test.ts` cases pin that `architectFaceSvg` renders the
+  resolved name (pinned, owner, and first-live), so a regression that blanks the
+  face fails the build.
+- **Known limitation (documented, not fixed): stale-but-present architect.** A
+  live Tower registration behind a **dead PTY** resolves normally and opens a
+  terminal nobody reads. `OverviewData.architects` reports it as live, so the deck
+  cannot distinguish it from a real session. Out of scope for a deck-side fix;
+  noted in the README as a known edge.
+- **Risk: transient "Tower can't see main".** If main's session is momentarily
+  invisible, the positional fallback lands on a sibling. The face is the
+  safeguard — it renders the *resolved* name, so a wrong summon is visible before
+  the press. A hardware test case exercises exactly this (see Test Plan).
 - **Base-class choice** — resolved: `SingletonAction`, ratified at plan-approval
   (see the Decision above).
 - **Alternative — statically configured per-architect keys.** Rejected in the
@@ -216,15 +242,15 @@ keys themselves — #1404/#1410, so no bundled-profile change.)
   - Automatic + no owner, `architects` = `[{name:'web'}, …]` (no main) → relays
     `['web']` (self-corrects to first live).
   - Automatic + **no** selected builder → relays the first live architect's name.
-  - Automatic + no owner + `architects: []` → **inert**: `showAlert`, no
-    `sendCommand`.
+  - Automatic + no owner + `architects: []` → **unavailable**: `showAlert`, no
+    `sendCommand`, and the rendered face is the `No architect` state.
   - Pinned name in settings → relays `['<pinned>']` regardless of selection.
   - Press failure (`sendCommand` → `{ ok:false }`) → `showAlert`.
 - `face.test.ts`: `architectFaceSvg('streamdeck')` contains `STREAMDECK`;
   `architectFaceSvg('main')` contains `MAIN`; `architectFaceSvg(undefined)`
-  renders the dim inert label (no name); a long name shrinks (asserts the
-  `textLength`/`lengthAdjust` fit attribute) rather than overflowing; output is
-  valid `<svg …>`.
+  renders the explicit `No architect` unavailable label; a long name shrinks
+  (asserts the `textLength`/`lengthAdjust` fit attribute) rather than overflowing;
+  output is valid `<svg …>`.
 - `manifest-icons.test.ts`: the new action's `Icon` + `States[].Image` resolve to
   @1x/@2x PNGs at convention sizes (72/144 key, 20/40 list).
 - `render-action-icons.test.ts`: `extractGlyph(faceSrc, 'architect', …)` returns a
@@ -248,8 +274,12 @@ keys themselves — #1404/#1410, so no bundled-profile change.)
    always opens it, independent of selection.
 5. Pin (or select an owner) that names a non-live architect → VS Code shows
    `No '<name>' architect found` (deck does not second-guess — ruling 2).
-5b. Workspace with no live architects → face is dim/inert; press does nothing
-   (ruling 3).
+5b. Workspace with no live architects → face reads `No architect` (visibly
+   unavailable); press does nothing (ruling 3).
+6b. **Missing-main safeguard**: with `main`'s session momentarily invisible (only
+   a sibling live) and no builder owner, confirm the face **visibly shows the
+   sibling's name**, not a generic label — proving the resolved-name face is the
+   trustworthy safeguard against a wrong summon.
 6. Cross-check against #1406: with a builder known to be mis-attributed, confirm
    the face shows the (currently wrong) stored owner — demonstrating the visible
    fallback and why #1406 must be resolved before ship.

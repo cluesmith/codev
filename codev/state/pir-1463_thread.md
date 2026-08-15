@@ -49,3 +49,17 @@ FIRST REGISTERED". Use `OverviewData.architects[0].name` (live-only, main-first,
 returns `string | undefined`; `undefined` → inert (ruling 3). Named-but-not-live
 targets still defer to VS Code (ruling 2). Revised plan + test cases (first-live,
 non-main first-live, empty→inert) and recommitted. Gate now goes to Amr.
+
+## Plan review — final fold-in (2026-08-15, registry-side review)
+
+Verified `liveArchitects` (`tower-routes.ts:1077-1090`): skips any architect with
+no live session (`if (!session) continue`), re-sorts main-first among survivors.
+So `OverviewData.architects` = "what Tower can SEE live", transiently wrong.
+Three consequences folded in:
+1. Empty list → **explicit `No architect` unavailable face**, not silent inert
+   (reviewer would otherwise press repeatedly).
+2. Missing-main → positional fallback lands on a sibling; face (resolved name) is
+   the safeguard → added hardware test 6b (face must visibly show the sibling).
+3. Stale-but-present (live registration behind dead PTY) → documented known
+   limitation (deck can't detect), README + Risks; not fixed.
+Recommitted. Requesting plan-approval gate.
