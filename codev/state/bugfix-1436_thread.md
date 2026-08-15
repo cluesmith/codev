@@ -76,3 +76,29 @@ Awaiting all three verdicts before notifying architect + `porch done` (pr gate).
 - Left as-is (correct by design): ENOTFOUND exclusion — the CLI already reports it as a graceful
   "must be resolvable" error, so we must not retry a genuinely bad URL.
 - 170 tests still pass after the fixes.
+
+## Merge saga + outcome
+
+- pr gate approved by Amr; architect integration review APPROVE.
+- CI on head 50953ae0c came back 6/7 green with **Unit Tests RED** — a real defect, not a
+  flake. The failure was the `check-types` (tsc) step, which I never ran locally (I only ran
+  `pnpm test`/vitest, which ignores type errors). Root cause: a multi-line `@ts-expect-error`
+  import suppressed the `import {` line while the real `TS7016` landed on the `from '…'` line
+  below it (unsuppressed), and the unused directive tripped `TS2578`.
+- Fixed the CAUSE not the symptom: added `scripts/validate.d.mts` so the NodeNext import
+  resolves with real types, and removed the suppression entirely. The test now type-checks
+  `runWithBackoff`/`isTransientError` for real instead of importing `any`. Pushed head 6e3c9ecff.
+- **Key process lesson (architect-flagged): the branch was RED on seven consecutive heads
+  (e731e82d2 … 0455c7b43) while `CLI Integration Tests` was green on every one** — which is how
+  three people reported/accepted "CI green" on a branch that had never been fully green. A green
+  sub-check ≠ a green branch. Verify the whole required set against a stationary head.
+- Honored two architect "go quiet" windows (no branch writes; reported status via `afx` only) to
+  avoid a commit→CI-restart loop.
+- All 7/7 green on stationary head 6e3c9ecff. **PR #1451 merged 2026-08-15T03:02:02Z**, merge
+  commit 9fe014a95. Verified origin/main contains 6e3c9ecff and all three files. `porch done
+  --merged 1451` → protocol COMPLETE.
+- Renames were owner-directed (Amr): verbose → `retry-validate.mjs` → drop "retry" entirely →
+  `validate.mjs` (+ export `runWithRetry` → `runWithBackoff`). These landed after the integration
+  review, so the reviewer re-anchored to the final SHA.
+- Review artifact written: `codev/reviews/bugfix-1436-ci-streamdeck-validate-step-fl.md`.
+  Delivering review + this thread finalization via a small follow-up PR (fix PR already merged).
