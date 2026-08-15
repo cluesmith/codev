@@ -1,7 +1,7 @@
 id: '1465'
 title: stream-deck-size-the-row-1-bui
 protocol: pir
-phase: plan
+phase: implement
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -17,4 +17,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-08-15T09:49:32.581Z'
-updated_at: '2026-08-15T09:59:20.587Z'
+updated_at: '2026-08-15T09:59:31.837Z'
