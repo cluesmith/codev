@@ -1,0 +1,22 @@
+id: bugfix-1436
+title: ci-streamdeck-validate-step-fl
+protocol: bugfix
+phase: pr
+plan_phases: []
+current_plan_phase: null
+gates:
+  pr:
+    status: approved
+    requested_at: '2026-08-14T00:40:33.414Z'
+    approved_at: '2026-08-15T02:53:15.320Z'
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-08-14T00:27:39.607Z'
+updated_at: '2026-08-15T02:53:15.321Z'
+pr_ready_for_human: false
+pr_history:
+  - phase: pr
+    pr_number: 1451
+    branch: builder/bugfix-1436
+    created_at: '2026-08-14T00:40:49.690Z'
