@@ -100,8 +100,8 @@ the selection, the dials review it.**
 │  │ (main) │  │  (1st) │  │  (2nd) │  │  (3rd) │  selectors │
 │  └────────┘  └────────┘  └────────┘  └────────┘           │
 │  ┌────────┐  ┌────────┐  ┌────────┐  ┌────────┐           │
-│  │Approve │  │  Dev   │  │Send Fb │  │  Bldr  │  Row 2:    │
-│  │ Gate   │  │ Server │  │  (N)   │  │  Term  │  palette   │
+│  │        │  │Approve │  │OpenArch│  │  Bldr  │  Row 2:    │
+│  │ (free) │  │ Gate   │  │ (bldr) │  │  Term  │  palette   │
 │  └────────┘  └────────┘  └────────┘  └────────┘           │
 │  ┌──────────────────────────────────────────────┐         │
 │  │  touch strip: each dial's title + live detail  │         │
@@ -127,9 +127,12 @@ the selection, the dials review it.**
   keys, a builder is never selectable while shown on no key. Press selects the builder
   (Row 2 + the dials follow) and opens its phase artifact.
 - **Row 2 — action palette**, fixed in place, always acting on the **selected**
-  builder: **Approve Gate · Dev Server · Send Feedback (N) · Open Builder Terminal**.
-  (The **Open Architect Terminal** key has its home in Row 1 slot 1 above; in its other
-  mode it follows the selected builder's owning architect instead of `main`.)
+  builder: slot 1 is **free** (drop any key here — e.g. Dev Server or Send Feedback),
+  then **Approve Gate · Open Architect Terminal (builder mode) · Open Builder
+  Terminal**. The Row-2 architect key is pinned to **builder** mode, so it opens the
+  **selected builder's owning architect** — the per-builder complement to Row 1's
+  `main`-mode anchor. Between the two keys, both `main` and whoever spawned the current
+  builder are one press away.
 
 Nothing is fixed — drag whatever you want onto each slot in the Stream Deck app.
 The 5th encoder, **Spawn from Backlog**, can swap onto a dial in place of any of
