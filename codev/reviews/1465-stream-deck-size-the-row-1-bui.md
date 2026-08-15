@@ -66,6 +66,39 @@ derived from the lifecycle (`willAppear` `KeyAction.coordinates`, excluding unde
 multi-action instances), sorted by `(row, column)`, counted for the width, and debounced
 across the page-load settle. This is a plugin-narrow recipe, so COLD, not the hot tier.
 
+## 3-Way Consultation — Verdicts & Dispositions
+
+Gemini **APPROVE**; Codex **REQUEST_CHANGES**; Claude **REQUEST_CHANGES**. PIR runs the
+consultation once (`max_iterations: 1`), so these were not independently re-reviewed —
+the fixes below and the human `pr`-gate review are the backstop. All three findings were
+real (two overlapped across Codex and Claude), all were doc/coverage issues around the
+otherwise-approved core fix, and all are addressed in commit(s) on this branch:
+
+- **Stale README caveat describing the old fixed-4 window as current** (Codex + Claude,
+  `README.md` Open Architect Terminal bullet). The "Placement caveat" still said Row 1 "is
+  a fixed page of four … hides every fourth builder" and deferred self-sizing to #1465 —
+  a verbatim description of the bug this PR fixes, contradicting the new recommended layout
+  earlier in the same file. This was the fixed-4 text #1463 deliberately shipped for this
+  issue to remove, and I missed it in the first pass. **Fixed**: rewritten to say the window
+  self-sizes to the placed keys, so giving Row 1 slot 1 to the Main-mode architect key leaves
+  a correctly-sized three-wide builder window with no hidden builders.
+- **Manifest tooltip still instructs setting the retired slot field** (Claude,
+  `manifest.json` Builder Action `Tooltip`: "set the slot in the property inspector"). The PI
+  control is gone; user-visible in the Stream Deck app's action list during the hardware test.
+  Not in the original file list, so it was missed. **Fixed**: tooltip now says the slot is the
+  key's physical position (selectors self-order left to right, top row first).
+- **Missing positional-order test** (Codex + Claude). The plan listed a case for keys given
+  `(row, column)` out of placement order; every fixture used row 0 with ascending columns, so
+  the comparator's row term and out-of-arrival-order behavior were never exercised. **Fixed**:
+  added a test that appears four keys across two rows in reverse reading order and asserts each
+  resolves to its reading-order builder (A→b0 … D→b3).
+
+Non-blocking notes accepted as-is (no change): `WINDOW_SETTLE_MS` is a module constant rather
+than injectable (fake timers cover it); `onWillDisappear` doesn't guard `isKey()` (a `Map.delete`
+on an absent id is harmless). Claude independently confirmed the core fix correct — `max(1,·)`
+divide-by-zero guard, multi-action exclusion, and that `setBuilderWindowSize` does not `emit()`
+so the eager size update can't re-enter `renderAll` (the debounce genuinely debounces).
+
 ## Things to Look At During PR Review
 
 - **The correctness invariant.** The load-bearing test is "the selected builder is always

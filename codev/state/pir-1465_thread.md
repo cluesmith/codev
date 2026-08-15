@@ -71,3 +71,15 @@ Owner revised recommended Row 2: slot 1 free, slot 2 Approve Gate, slot 3 Open A
 Terminal in BUILDER mode (selected builder's owning architect — per-builder complement to
 Row 1's main-mode anchor), slot 4 Open Builder Terminal. Updated ASCII diagram + Row-2 bullet.
 Docs-only, readme-design test ✓. Committed 8c016a973. Still at dev-approval gate.
+
+## Review phase + 3-way consultation (2026-08-15)
+PR #1468 opened. Consultation: gemini APPROVE, codex + claude REQUEST_CHANGES. All findings real
+(doc/coverage around an approved core fix), all fixed on-branch:
+- README Open Architect Terminal bullet still had the fixed-4 "hides every fourth builder" caveat
+  deferring to #1465 — the exact #1463-shipped text this issue removes; I missed it first pass. Rewrote.
+- manifest.json Builder Action Tooltip still said "set the slot in the property inspector" (retired
+  field, user-visible in the SD app). Fixed to positional.
+- Added positional-order test: 4 keys across 2 rows in reverse reading order → reading-order slots.
+Non-blocking notes (WINDOW_SETTLE_MS module const, onWillDisappear no isKey guard) accepted, no change.
+213 tests ✓, tsc ✓, build ✓, validate ✓. PIR is single-pass — documented dispositions in review file,
+escalating to human at pr gate. Reviewers must verify the fixes there (no AI re-review).

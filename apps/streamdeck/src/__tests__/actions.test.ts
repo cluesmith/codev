@@ -441,6 +441,37 @@ describe('Row 1 window recompute (#1465)', () => {
     expect(store.windowedBuilder(0)?.id).toBe('b3'); // still 3 wide
   });
 
+  it('slots keys in (row, column) reading order regardless of arrival order or row', () => {
+    vi.useFakeTimers();
+    try {
+      // Keys arrive out of reading order and span two rows: a lower row and a higher column
+      // must each sort later. Reading order is (r0,c0)=A, (r0,c1)=B, (r1,c0)=C, (r1,c1)=D →
+      // slots 0..3 → builders b0..b3. Press each and confirm it targets the reading-order builder.
+      const store = fleet(8, 0);
+      const ba = new BuilderAction(store);
+      const A = bkey('A', 0, 0); // (row 0, col 0) — first
+      const B = bkey('B', 1, 0); // (row 0, col 1) — second
+      const C = bkey('C', 0, 1); // (row 1, col 0) — third: its row wins over its lower column
+      const D = bkey('D', 1, 1); // (row 1, col 1) — last
+      // Deliberately out of reading order:
+      [D, C, B, A].forEach((k) => ba.onWillAppear({ action: k, payload: { settings: {} } } as never));
+      vi.advanceTimersByTime(60);
+      const pressed: string[] = [];
+      const client = store.client as unknown as { sendCommand: ReturnType<typeof vi.fn> };
+      client.sendCommand.mockImplementation((_v: string, args: string[]) => {
+        pressed.push(args[0]);
+        return Promise.resolve({ ok: true, status: 200, data: { ok: true } });
+      });
+      return Promise.all(
+        [A, B, C, D].map((k) => ba.onKeyDown({ action: k, payload: { settings: { verb: 'noop' } } } as never)),
+      ).then(() => {
+        expect(pressed).toEqual(['b0', 'b1', 'b2', 'b3']); // A→b0, B→b1, C→b2, D→b3
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('debounced settle re-renders keys whose page shifted as later keys arrived', () => {
     vi.useFakeTimers();
     try {

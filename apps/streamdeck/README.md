@@ -179,12 +179,11 @@ the four above (e.g. replace PR Nav when you are triaging the backlog).
   in Main mode when `main` isn't live, VSCode opens the first architect while the
   face still reads `Main` (the mode reflects your configured intent); and a live
   architect registration behind a dead terminal opens a session nobody reads (the
-  deck can't detect it). Placement caveat: the Main-mode key is selection-
-  independent, so it can live on a **Row 1** key without affecting selection — but
-  Row 1's window is a fixed page of four (independent of how many Builder Action
-  keys you place), so freeing a Row 1 key leaves three builder slots and hides
-  every fourth builder past a three-builder fleet. Recommended for small working
-  sets; self-sizing the Row 1 window is tracked separately (#1465).
+  deck can't detect it). Placement: the Main-mode key is selection-independent, so
+  it can live on a **Row 1** key without affecting selection — and because Row 1's
+  window sizes itself to the Builder Action keys you actually place (#1465), giving a
+  Row 1 key to this one simply leaves a correctly-sized three-wide builder window,
+  with no hidden builders. That is the recommended layout above (Row 1 slot 1).
 - **Codev Action** — fires a workspace verb. Choose it in the Property Inspector
   (Open Architect/Builder Terminal, View Diff, Send Message, Spawn Builder,
   Refresh Overview). Defaults to Refresh Overview. (The Open Architect Terminal
