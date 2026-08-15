@@ -122,6 +122,18 @@ Added dev-approval hardware check #8: an already-placed Open Terminal key must
 survive the rename (still opens the builder terminal, now reads `Builder`) —
 proves UUID stability on hardware. dev-approval remains Amr's.
 
+## Review phase (2026-08-15)
+
+dev-approval approved by Amr (relayed via porch). Wrote review artifact carrying
+the three decisions the architect flagged: (1) WHY delegate main-else-first to VS
+Code (one policy home; let the deck stop consuming the live-architect view);
+(2) the two accepted residuals (main-absent → first live while face reads Main,
+fire-and-forget relay; stale-PTY); (3) UUID-stability of the rename. #1406 stated
+as a LIVE prerequisite. Cold-doc notes: arch.md (Stream Deck integration bullet)
++ lessons-learned.md (UUID-is-identity + icon-script gotchas). No hot-tier changes
+(reuse lesson already covered by "single source of truth"). Next: open PR, porch
+runs single 3-way consult (codex back, full board), then pr gate → Amr merges.
+
 ## Row-1 windowing question + follow-up #1465 (2026-08-15)
 
 Amr asked about Row-1 slot selection and placing the Main-mode key on a Row-1
