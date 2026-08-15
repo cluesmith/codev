@@ -96,8 +96,8 @@ the selection, the dials review it.**
 │  STREAM DECK +                                             │
 │                                                            │
 │  ┌────────┐  ┌────────┐  ┌────────┐  ┌────────┐           │
-│  │ Builder│  │ Builder│  │ Builder│  │ Builder│  Row 1:    │
-│  │ slot 1 │  │ slot 2 │  │ slot 3 │  │ slot 4 │  selectors │
+│  │ Builder│  │ Builder│  │ Builder│  │  Open  │  Row 1:    │
+│  │  (1st) │  │  (2nd) │  │  (3rd) │  │  Arch  │  selectors │
 │  └────────┘  └────────┘  └────────┘  └────────┘           │
 │  ┌────────┐  ┌────────┐  ┌────────┐  ┌────────┐           │
 │  │Approve │  │  Dev   │  │Send Fb │  │  Bldr  │  Row 2:    │
@@ -112,11 +112,15 @@ the selection, the dials review it.**
 └──────────────────────────────────────────────────────────┘
 ```
 
-- **Row 1 — fleet selectors.** Four **Builder Action** keys, one per slot (1–4).
-  They are a **4-wide window** onto the fleet: with more than four builders the
-  **Select dial** (Zoom Navigator rotate) scrolls the window to builders 5–8, 9–N,
-  and the slot holding the current selection is accented. Press selects the builder
-  (Row 2 + the dials follow) and opens its phase artifact.
+- **Row 1 — fleet selectors.** **Builder Action** keys, each one slot in a **window**
+  onto the fleet. The window is **exactly as wide as the number of Builder Action keys
+  you place** — put three down (leaving the fourth Row-1 key for something else, like
+  Open Architect above) and it is three wide; a Mini or an XL sizes itself the same
+  way. The keys self-order by physical position (left to right, top row first), so
+  there are no slot numbers to set. With more builders than keys the **Select dial**
+  (Zoom Navigator rotate) scrolls the window a page at a time, and the slot holding
+  the current selection is accented. Press selects the builder (Row 2 + the dials
+  follow) and opens its phase artifact.
 - **Row 2 — action palette**, fixed in place, always acting on the **selected**
   builder: **Approve Gate · Dev Server · Send Feedback (N) · Open Builder
   Terminal**. Its sibling **Open Architect Terminal** opens the owning architect
@@ -130,13 +134,16 @@ the four above (e.g. replace PR Nav when you are triaging the backlog).
 
 ### Keys
 
-- **Builder Action** (Row 1) — a live tile for a builder **slot**, but as a 4-wide
-  **window** onto the fleet, not a fixed index: slot N shows the Nth builder on the
-  current page, and the **Select dial** scrolls the page so a fleet larger than four
-  is fully reachable. It shows the builder's issue + phase, accents the slot holding
-  the selection, and on press selects the builder (Row 2 + the dials follow) and
-  opens its phase artifact. The default press verb is **Automatic** (the current
-  phase's spec / plan / diff); pick a fixed verb in the PI to always run that.
+- **Builder Action** (Row 1) — a live tile for a builder **slot**, as a **window**
+  onto the fleet whose width is the number of these keys you placed (not a fixed
+  index): the key's slot is its position among them (reading order, row then column),
+  so the Nth key shows the Nth builder on the current page, and the **Select dial**
+  scrolls the page so a fleet larger than the window is fully reachable. Because the
+  window matches the placed keys, a builder is never selectable while shown on no key.
+  It shows the builder's issue + phase, accents the slot holding the selection, and on
+  press selects the builder (Row 2 + the dials follow) and opens its phase artifact.
+  The default press verb is **Automatic** (the current phase's spec / plan / diff);
+  pick a fixed verb in the PI to always run that.
 - **Approve Gate** (Row 2) — the **single** approve affordance. Acts on the
   **selected** builder: the face shows its pending gate (e.g. `Plan · Approve`), and
   press surfaces that gate's **approval modal in the focused VSCode window** for you
