@@ -355,6 +355,16 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 
 ## UI/UX
 
+- [From #1463] A Stream Deck action's identity is its **UUID**, not its `Name`. Renaming a key's
+  `Name`/`Tooltip`/face label (e.g. `Open Terminal` → `Open Builder Terminal`) leaves every
+  already-placed instance working — the app re-labels it in place — **as long as the manifest UUID
+  is unchanged**. Change the UUID and you orphan those keys (they vanish from the user's profile). So
+  rename freely for clarity; never touch the UUID to do it. The property is invisible in a diff, so
+  the dev-approval hardware check must confirm a pre-placed key survives the rename. Relatedly, the
+  icon render script (`scripts/render-action-icons.mjs`) regenerates **all** icons and parses each
+  glyph line out of `face.ts` — so a new glyph must be a single line with **no trailing comment**, and
+  after running it, restore any pre-existing icon PNGs it re-touched (byte churn) so the diff stays
+  scoped.
 - [From #1428] Stream Deck's `setImage` accepts an SVG per the SDK d.ts, but a *raw* `<svg>`
   string is silently dropped on-device (Stream Deck 6.9) — the key reverts to its manifest PNG
   with no error. Two undocumented requirements: encode as a base64 `data:image/svg+xml` data URI,

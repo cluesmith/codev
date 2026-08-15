@@ -38,6 +38,12 @@ describe('extractGlyph pulls the glyph vector out of face.ts', () => {
     expect(svg).toContain('<rect');
     expect(svg).toContain('<path');
   });
+
+  it('architect glyph carries the person shape (head circle + shoulders path) (#1463)', () => {
+    const svg = extractGlyph(faceSrc, 'architect', '#ffffff');
+    expect(svg).toContain('<circle');
+    expect(svg).toContain('<path');
+  });
 });
 
 /**

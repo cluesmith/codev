@@ -2046,6 +2046,18 @@ The deck is a remote and VSCode is the screen, bound by **one shared selection**
   **map**, never a scalar — the deck badge and #1049's Attention rollup both index it) and
   `feedbackMode: 'forward' | 'queue'` (per-workspace scalar, read from `.vscode/settings.json`,
   single-folder-workspace only, defaults to `forward`).
+- **Open Architect Terminal key (Spec 1463)** — a Row-2 key that opens an architect's terminal via
+  `open-architect-terminal` (relay → `codev.openArchitectTerminal`). Two PI modes: `builder` (default,
+  the selected builder's `spawnedByArchitect`; inert when none) and `main`. **The deck delegates the
+  `main`-else-first resolution policy to VSCode** (which already special-cases the literal `'main'` in
+  `openArchitectTerminal`), so it fires a name and never consumes `OverviewData.architects` (the
+  live-architect view) — one policy, one home. Two accepted residuals follow from the fire-and-forget
+  relay: in `main` mode when `main` is absent VSCode opens the first live architect while the face still
+  reads `Main`; and a live registration behind a dead PTY resolves fine. The face renders the resolved
+  architect name (the safeguard shown before a press). Paired-renamed with the builder key
+  (`Open Builder Terminal` / `Open Architect Terminal`); **the Elgato UUID is the stable identity**, so
+  renaming `Name`/face never orphans an already-placed key. Prerequisite: #1406 (spawn mis-attribution)
+  can make `builder` mode summon the wrong architect until fixed.
 
 ### Internal Dependencies
 - **Git**: Version control, worktrees for builder isolation
