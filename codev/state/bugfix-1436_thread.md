@@ -39,7 +39,7 @@ Schemas themselves are bundled locally via `@elgato/schemas`.
 ### Fix (architect preference: bounded retry with backoff)
 Wrap the `streamdeck validate` invocation in a bounded retry (3 attempts, exp backoff),
 retrying ONLY on transient/network error signatures; fail fast on real validation errors.
-Place a small testable helper `apps/streamdeck/scripts/retry-validate.mjs` (mirrors
+Place a small testable helper `apps/streamdeck/scripts/validate.mjs` (mirrors
 the existing `scripts/render-action-icons.mjs` + matching vitest test pattern) and point
 the `validate` npm script at it. Both CI workflows call `pnpm validate`
 (test.yml:113, sdk-canary.yml:57), so this fixes the flake at both sites. Local `package`
@@ -54,7 +54,7 @@ Scope: << 300 LOC. Fits BUGFIX.
 
 ## Fix + PR (iter 1)
 
-Implemented `apps/streamdeck/scripts/retry-validate.mjs` (retry core exported +
+Implemented `apps/streamdeck/scripts/validate.mjs` (retry core exported +
 unit-tested), wired `package.json` `validate` + inline `package` call to it. 170
 streamdeck tests pass (11 new). Verified end-to-end: happy path exit 0, real error
 fails fast (exit 1), transient retries in unit tests, regression test fails without fix.
