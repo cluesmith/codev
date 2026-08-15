@@ -100,7 +100,7 @@ the selection, the dials review it.**
 │  │ slot 1 │  │ slot 2 │  │ slot 3 │  │ slot 4 │  selectors │
 │  └────────┘  └────────┘  └────────┘  └────────┘           │
 │  ┌────────┐  ┌────────┐  ┌────────┐  ┌────────┐           │
-│  │Approve │  │  Dev   │  │Send Fb │  │  Open  │  Row 2:    │
+│  │Approve │  │  Dev   │  │Send Fb │  │  Bldr  │  Row 2:    │
 │  │ Gate   │  │ Server │  │  (N)   │  │  Term  │  palette   │
 │  └────────┘  └────────┘  └────────┘  └────────┘           │
 │  ┌──────────────────────────────────────────────┐         │
@@ -118,7 +118,9 @@ the selection, the dials review it.**
   and the slot holding the current selection is accented. Press selects the builder
   (Row 2 + the dials follow) and opens its phase artifact.
 - **Row 2 — action palette**, fixed in place, always acting on the **selected**
-  builder: **Approve Gate · Dev Server · Send Feedback (N) · Open Terminal**.
+  builder: **Approve Gate · Dev Server · Send Feedback (N) · Open Builder
+  Terminal**. Its sibling **Open Architect Terminal** opens the owning architect
+  instead — place it where a slot frees up (e.g. Send Feedback in forward mode).
 
 Nothing is fixed — drag whatever you want onto each slot in the Stream Deck app.
 The 5th encoder, **Spawn from Backlog**, can swap onto a dial in place of any of
@@ -144,12 +146,13 @@ the four above (e.g. replace PR Nav when you are triaging the backlog).
   feedback. The badge `N` mirrors that builder's queued count from the overview:
   in immediate mode `N` stays 0 and the key is inert; in queue mode `N` climbs and
   a press sends the batch (VSCode's Submit Review).
-- **Open Terminal** (Row 2) — opens the selected builder's terminal (the
-  per-builder complement to Builder Action, which opens the phase artifact). To
-  reach a blocked builder off the current window, scroll the Select dial — blocked
-  builders show gate-colored faces, and the Zoom dial's touchstrip shows the
-  workspace's pending-gate count.
-- **Open Architect** (Row 2) — opens an architect's terminal in VSCode. Two
+- **Open Builder Terminal** (Row 2) — opens the selected builder's terminal (the
+  per-builder complement to Builder Action, which opens the phase artifact; the
+  face reads **Builder** over a terminal glyph). To reach a blocked builder off the
+  current window, scroll the Select dial — blocked builders show gate-colored
+  faces, and the Zoom dial's touchstrip shows the workspace's pending-gate count.
+- **Open Architect Terminal** (Row 2) — opens an architect's terminal in VSCode.
+  The sibling of Open Builder Terminal. Two
   Property-Inspector modes: **Builder** (default) follows the selected builder and
   opens the architect that spawned it (`spawnedByArchitect`), and is inert
   (dimmed, "None") when nothing is selected or the builder has no recorded owner;
@@ -170,8 +173,8 @@ the four above (e.g. replace PR Nav when you are triaging the backlog).
 - **Codev Action** — fires a workspace verb. Choose it in the Property Inspector
   (Open Architect/Builder Terminal, View Diff, Send Message, Spawn Builder,
   Refresh Overview). Defaults to Refresh Overview. (The Open Architect Terminal
-  entry here is the generic manual picker — the dedicated **Open Architect** key
-  above is the builder-scoped, face-labelled complement.)
+  entry here is the generic manual picker — the dedicated **Open Architect
+  Terminal** key above is the builder-scoped, face-labelled complement.)
 
 Each dial's touch strip shows a **title + a live value**, refreshed over SSE:
 the Zoom Navigator shows the workspace (+ builder/gate counts) or the selected

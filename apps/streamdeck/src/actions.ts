@@ -287,11 +287,12 @@ export class SendQueueAction extends SingletonAction {
 }
 
 /**
- * Row-2 Open Terminal key (#1410): opens the SELECTED builder's terminal — the
- * per-builder complement to the Builder Action (which opens the phase artifact).
- * Same shape as the Dev Server key: a `VerbKey` firing `open-terminal [selectedId]`
- * with a static label face (terminal glyph + `Terminal`). Which builder is selected
- * is shown by Row 1's accent, not repeated here.
+ * Row-2 Open Builder Terminal key (#1410; renamed #1463): opens the SELECTED
+ * builder's terminal — the per-builder complement to the Builder Action (which
+ * opens the phase artifact), and the sibling of Open Architect Terminal. Same shape
+ * as the Dev Server key: a `VerbKey` firing `open-terminal [selectedId]` with a
+ * static label face (terminal glyph + `Builder`). Which builder is selected is shown
+ * by Row 1's accent, not repeated here.
  */
 export class OpenTerminalAction extends VerbKey {
   override readonly manifestId = 'com.cluesmith.codev.open-terminal';
@@ -302,7 +303,7 @@ export class OpenTerminalAction extends VerbKey {
   }
   override onWillAppear(ev: WillAppearEvent<VerbSettings>): void {
     if (!ev.action.isKey()) return;
-    void ev.action.setImage(svgToDataUri(labelFaceSvg('terminal', 'Terminal', '#a9a9b2')));
+    void ev.action.setImage(svgToDataUri(labelFaceSvg('terminal', 'Builder', '#a9a9b2')));
     void ev.action.setTitle('');
   }
 }

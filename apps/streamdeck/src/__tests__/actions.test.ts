@@ -278,13 +278,13 @@ describe('OpenTerminalAction (Row 2 — per-builder, #1410)', () => {
     expect(ctx.sent[0]).toEqual({ verb: 'open-terminal', args: ['pir-2'], ws: '/work/alpha' });
   });
 
-  it('renders a plain label face (terminal glyph + "Terminal"), not the builder id', () => {
+  it('renders a plain label face (terminal glyph + "Builder"), not the builder id', () => {
     const ctx = makeStore();
     ctx.store.syncToBuilder('pir-2'); // issueId 102
     const key = { isKey: () => true, setImage: vi.fn(), setTitle: vi.fn() };
     new OpenTerminalAction(ctx.store).onWillAppear({ action: key, payload: { settings: {} } } as never);
     const face = Buffer.from(String(key.setImage.mock.calls.at(-1)?.[0]).split(',')[1], 'base64').toString('utf8');
-    expect(face).toContain('Terminal');
+    expect(face).toContain('Builder'); // label names the target kind (paired with Open Architect Terminal)
     expect(face).toContain('rect x="3" y="5"'); // the terminal glyph
     expect(face).not.toContain('#102'); // the builder id lives on Row 1's accent, not here
     expect(key.setTitle).toHaveBeenCalledWith(''); // title layer suppressed
