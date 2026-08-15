@@ -59,6 +59,21 @@ action report the live count to the store, which pages by it:
   `windowedBuilder(slotIndex)` keeps its formula. The `max(1, …)` guards division when no
   builder keys are visible.
 
+*What "count" means — placed keys, not device capacity.* The window size is the number of
+`BuilderAction` keys **you actually placed and that are currently on screen**, never the
+device's key count. `BuilderAction` is one `SingletonAction` serving every builder key; each
+placed key fires `willAppear` on it (and `willDisappear` when removed or paged away), so its
+key map holds exactly the live builder keys. Any other action in a neighbouring slot is a
+*different* `SingletonAction` — e.g. #1463's Open Architect key fires on `OpenArchitectAction`,
+not `BuilderAction` — so it never enters the builder count; the manifest UUID does that routing
+for free. Concretely on an SD+ (a 4-wide top row) with **3 Builder Action keys + 1 Open
+Architect key**: the map has 3 entries, the window size is 3, the Select dial pages the fleet
+by 3, and there is no phantom 4th slot — which is exactly the bug (today's constant `4` invents
+a slot-3 with no key, so every 4th builder is selectable but shown nowhere). `Device.size` /
+`Device.type` are deliberately *not* consulted: device size describes the whole keypad, not
+which keys are builder selectors. The count is also **per visible page** — a profile/page switch
+fires `willDisappear`/`willAppear`, so it always reflects what is currently displayed.
+
 **2. Slot order derived by sorting visible keys on `(row, column)`; retire the manual `slot`
 field.** In `BuilderAction`, recompute on `willAppear`/`willDisappear`:
 
