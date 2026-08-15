@@ -23,10 +23,6 @@ export interface CodevStoreOptions {
   openUrl?: (url: string) => void | Promise<void>;
 }
 
-/** Row-1 selector width on the SD+ (a 2×4 keypad): the fleet window is this many
- *  builders wide, and the Select dial scrolls it a page at a time (#1410). */
-export const ROW1_WINDOW_SIZE = 4;
-
 export class CodevStore {
   readonly client: ControllerClient;
   readonly openUrl: (url: string) => void | Promise<void>;
@@ -40,6 +36,14 @@ export class CodevStore {
 
   /** Monotonic token so an out-of-order overview fetch can't overwrite a newer one. */
   private overviewReq = 0;
+
+  /** Row-1 window width = the number of `BuilderAction` selector keys currently
+   *  placed on the deck (#1465, replacing the fixed 4 of #1410). The `BuilderAction`
+   *  singleton counts its visible instances and reports it via `setBuilderWindowSize`;
+   *  the window then pages the fleet by that count, so a builder is never selectable
+   *  while shown on no key. Defaults to 1 until the first key reports — with no keys
+   *  placed nothing renders, so the value is only a division guard. */
+  private builderWindowSize = 1;
 
   private readonly listeners = new Set<() => void>();
   private stopSse?: () => void;
@@ -143,21 +147,31 @@ export class CodevStore {
     return this.builders()[this.cursor.builder];
   }
 
+  /** Report how many `BuilderAction` selector keys are currently placed (#1465). The
+   *  window pages the fleet by this count, so the Row-1 window is exactly as wide as
+   *  the keys on the board and a builder can't be selected while shown on no key.
+   *  Never below 1 (a division guard for the no-keys-placed case). */
+  setBuilderWindowSize(count: number): void {
+    this.builderWindowSize = Math.max(1, count);
+  }
+
   /**
-   * The builder shown in Row-1 selector slot `slotIndex` (0-based, 0..3). Row 1
-   * is a 4-wide WINDOW onto the fleet, not a fixed view of the first four (#1410):
-   * the window is the page containing the selection, so rotating the Select dial
-   * past the 4th builder scrolls Row 1 to builders 5-8, then 9-N. A slot past the
-   * end of the fleet returns `undefined` (a trailing empty slot on the last page).
+   * The builder shown in Row-1 selector slot `slotIndex` (0-based). Row 1 is a
+   * WINDOW onto the fleet whose width is the number of placed builder keys (#1465,
+   * replacing the fixed 4 of #1410): the window is the page containing the selection,
+   * so rotating the Select dial past the last visible builder scrolls Row 1 to the
+   * next page. A slot past the end of the fleet returns `undefined` (a trailing empty
+   * slot on the last page).
    */
   windowedBuilder(slotIndex: number): OverviewBuilder | undefined {
     return this.builders()[this.builderWindowStart() + slotIndex];
   }
 
-  /** First builder index of the Row-1 window: the page (of `ROW1_WINDOW_SIZE`)
-   *  that contains the current selection. */
+  /** First builder index of the Row-1 window: the page (of `builderWindowSize`, the
+   *  placed-key count) that contains the current selection. */
   private builderWindowStart(): number {
-    return Math.floor(this.cursor.builder / ROW1_WINDOW_SIZE) * ROW1_WINDOW_SIZE;
+    const size = Math.max(1, this.builderWindowSize);
+    return Math.floor(this.cursor.builder / size) * size;
   }
 
   /** The workspace's review-feedback delivery mode (#1410); `'forward'` until an

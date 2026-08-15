@@ -71,6 +71,28 @@ const dial = (ticks: number) => ({
   payload: { ticks, settings: {} },
 });
 
+/** A placed Builder Action key at board (row, column) — a defined `coordinates` marks it
+ *  as an on-board key (not a multi-action instance), which #1465's windowing sorts by. */
+const bkey = (id: string, column: number, row = 0) => ({
+  id, isKey: () => true, isDial: () => false, coordinates: { column, row },
+  showAlert: vi.fn(), showOk: vi.fn(), setImage: vi.fn(), setTitle: vi.fn(),
+});
+/** A Builder Action key inside a multi-action: the SDK reports `coordinates: undefined`, so
+ *  #1465 excludes it from the window (no slot). */
+const multiKey = (id: string) => ({
+  id, isKey: () => true, isDial: () => false, coordinates: undefined,
+  showAlert: vi.fn(), showOk: vi.fn(), setImage: vi.fn(), setTitle: vi.fn(),
+});
+/** Place `n` builder keys left-to-right on row 0 (reading order) and return them. */
+function placeKeys(ba: BuilderAction, n: number) {
+  const keys = Array.from({ length: n }, (_, i) => bkey(`k${i}`, i));
+  keys.forEach((k) => ba.onWillAppear({ action: k, payload: { settings: {} } } as never));
+  return keys;
+}
+/** Press a placed key with optional PI settings (verb). */
+const pressKey = (ba: BuilderAction, action: unknown, settings: Record<string, unknown> = {}) =>
+  ba.onKeyDown({ action, payload: { settings } } as never);
+
 describe('verb keypads', () => {
   let ctx: ReturnType<typeof makeStore>;
   beforeEach(() => { ctx = makeStore(); });
@@ -100,54 +122,55 @@ describe('verb keypads', () => {
   });
 
   it('BuilderAction defaults to Automatic — opens slot 1 builder’s current-phase artifact', async () => {
-    // pir-1 is blocked at plan-approval → Automatic resolves to open-plan.
-    await new BuilderAction(ctx.store).onKeyDown(keyEvent() as never);
+    // The first placed key is slot 0 → pir-1, blocked at plan-approval → Automatic = open-plan.
+    const ba = new BuilderAction(ctx.store);
+    const [k0] = placeKeys(ba, 1);
+    await pressKey(ba, k0);
     expect(ctx.sent[0]).toEqual({ verb: 'open-plan', args: ['pir-1'], ws: '/work/alpha' });
   });
 
   it('BuilderAction Automatic falls back to open-terminal for an unknown-state builder', async () => {
     ctx.store.overview = { builders: [{ id: 'pir-x', roleId: null, issueId: null, issueTitle: null, blocked: null, blockedGate: null, protocolPhase: '', progress: 0, worktreePath: '/w' }], pendingPRs: [], backlog: [], recentlyClosed: [] } as never;
-    await new BuilderAction(ctx.store).onKeyDown(keyEvent() as never);
+    const ba = new BuilderAction(ctx.store);
+    const [k0] = placeKeys(ba, 1);
+    await pressKey(ba, k0);
     expect(ctx.sent[0]).toEqual({ verb: 'open-terminal', args: ['pir-x'], ws: '/work/alpha' });
   });
 
   it('BuilderAction with an explicit verb fires it verbatim, ignoring phase', async () => {
-    await new BuilderAction(ctx.store).onKeyDown(keyEvent({ slot: '2', verb: 'open-terminal' }) as never);
+    // Two placed keys → the second (slot 1) is pir-2.
+    const ba = new BuilderAction(ctx.store);
+    const [, k1] = placeKeys(ba, 2);
+    await pressKey(ba, k1, { verb: 'open-terminal' });
     expect(ctx.sent[0]).toEqual({ verb: 'open-terminal', args: ['pir-2'], ws: '/work/alpha' });
   });
 
   it('BuilderAction Automatic opens the FIRST file diff (dial-ready), not the aggregate, for a diff-phase builder (#1414)', async () => {
-    // pir-2 is in `implement` → the phase artifact is the diff; Automatic remaps it to
+    // pir-2 (slot 1) is in `implement` → the phase artifact is the diff; Automatic remaps it to
     // `open-diff-first` so the SD+ dials step from file 1, never `view-diff` (aggregate).
-    await new BuilderAction(ctx.store).onKeyDown(keyEvent({ slot: '2' }) as never);
+    const ba = new BuilderAction(ctx.store);
+    const [, k1] = placeKeys(ba, 2);
+    await pressKey(ba, k1);
     expect(ctx.sent[0]).toEqual({ verb: 'open-diff-first', args: ['pir-2'], ws: '/work/alpha' });
   });
 
   it('BuilderAction explicit "View Diff" still fires view-diff (aggregate) verbatim (#1414)', async () => {
     // The PI View Diff option is unchanged: only Automatic remaps to open-diff-first.
-    await new BuilderAction(ctx.store).onKeyDown(keyEvent({ slot: '2', verb: 'view-diff' }) as never);
+    const ba = new BuilderAction(ctx.store);
+    const [, k1] = placeKeys(ba, 2);
+    await pressKey(ba, k1, { verb: 'view-diff' });
     expect(ctx.sent[0]).toEqual({ verb: 'view-diff', args: ['pir-2'], ws: '/work/alpha' });
   });
 
   it('BuilderAction press selects the slot builder (cursor follows)', async () => {
-    await new BuilderAction(ctx.store).onKeyDown(keyEvent({ slot: '2' }) as never);
+    const ba = new BuilderAction(ctx.store);
+    const [, k1] = placeKeys(ba, 2);
+    await pressKey(ba, k1);
     expect(ctx.store.selectedBuilder()?.id).toBe('pir-2');
   });
 });
 
 describe('slot keys', () => {
-  it('a slot past the end of the builder list alerts and sends nothing', async () => {
-    const ctx = makeStore(); // only 2 builders
-    const ev = keyEvent({ slot: '8' });
-    await new BuilderAction(ctx.store).onKeyDown(ev as never);
-    expect(ctx.sent).toHaveLength(0);
-    expect(ev.action.showAlert).toHaveBeenCalled();
-  });
-
-  // One SingletonAction instance serves every key of its type — these guard the
-  // per-instance fix (without it, all keys collided on shared state).
-  const slotKey = (id: string) => ({ id, isKey: () => true, setImage: vi.fn(), setTitle: vi.fn() });
-
   // renderTo hands setImage a base64 data URI (Stream Deck drops raw SVG strings); decode to
   // assert on the underlying face.
   const decodeFace = (action: { setImage: { mock: { calls: unknown[][] } } }): string => {
@@ -156,14 +179,31 @@ describe('slot keys', () => {
     return Buffer.from(arg.slice('data:image/svg+xml;base64,'.length), 'base64').toString('utf8');
   };
 
+  it('a slot past the end of the fleet alerts and sends nothing', async () => {
+    const ctx = makeStore(); // only 2 builders
+    const ba = new BuilderAction(ctx.store);
+    const [, , k2] = placeKeys(ba, 3); // 3 keys → slot 2 has no builder
+    await pressKey(ba, k2);
+    expect(ctx.sent).toHaveLength(0);
+    expect(k2.showAlert).toHaveBeenCalled();
+  });
+
+  it('a multi-action key (no coordinates) has no slot — alerts and sends nothing', async () => {
+    const ctx = makeStore(); // 2 builders
+    const ba = new BuilderAction(ctx.store);
+    placeKeys(ba, 2); // two placed keys → window is 2 wide
+    const m = multiKey('M');
+    ba.onWillAppear({ action: m, payload: { settings: {} } } as never);
+    await pressKey(ba, m);
+    expect(ctx.sent).toHaveLength(0);
+    expect(m.showAlert).toHaveBeenCalled();
+  });
+
   it('renders each slot key against its own slot (different slots → different builders)', () => {
     const ctx = makeStore(); // pir-1 (#101), pir-2 (#102)
     const ba = new BuilderAction(ctx.store);
-    const a = slotKey('A');
-    const b = slotKey('B');
-    ba.onWillAppear({ action: a, payload: { settings: { slot: '1' } } } as never);
-    ba.onWillAppear({ action: b, payload: { settings: { slot: '2' } } } as never);
-    // The face is now a composite SVG handed to setImage (not a title).
+    const [a, b] = placeKeys(ba, 2); // a at column 0, b at column 1
+    // The face is a composite SVG handed to setImage (not a title).
     expect(decodeFace(a)).toContain('#101');
     expect(decodeFace(b)).toContain('#102');
   });
@@ -171,10 +211,7 @@ describe('slot keys', () => {
   it('renders the builder’s state as a colour-coded, mapped face (mirrors the sidebar)', () => {
     const ctx = makeStore(); // pir-1 blocked plan-approval, pir-2 phase "implement"
     const ba = new BuilderAction(ctx.store);
-    const a = slotKey('A');
-    const b = slotKey('B');
-    ba.onWillAppear({ action: a, payload: { settings: { slot: '1' } } } as never);
-    ba.onWillAppear({ action: b, payload: { settings: { slot: '2' } } } as never);
+    const [a, b] = placeKeys(ba, 2);
     // Blocked at plan-approval → mapped label "Plan" in warning yellow (not the wire "plan review").
     const aSvg = decodeFace(a);
     expect(aSvg).toContain('>Plan<');
@@ -185,21 +222,17 @@ describe('slot keys', () => {
     expect(bSvg).toContain('#73c991');
   });
 
-  it('renders the empty-slot face when no builder occupies the slot', () => {
-    const ctx = makeStore(); // only 2 builders → slot 5 is empty
+  it('renders the empty-slot face (labelled by position) when no builder occupies the slot', () => {
+    const ctx = makeStore(); // only 2 builders → the 3rd key's slot is empty
     const ba = new BuilderAction(ctx.store);
-    const a = slotKey('A');
-    ba.onWillAppear({ action: a, payload: { settings: { slot: '5' } } } as never);
-    expect(decodeFace(a)).toContain('Slot 5');
+    const [, , k2] = placeKeys(ba, 3);
+    expect(decodeFace(k2)).toContain('Slot 3'); // position 2 → 1-based label "Slot 3"
   });
 
   it('re-renders every slot key on a store change (fixes stale-on-workspace-switch)', () => {
     const ctx = makeStore();
     const ba = new BuilderAction(ctx.store);
-    const a = slotKey('A');
-    const b = slotKey('B');
-    ba.onWillAppear({ action: a, payload: { settings: { slot: '1' } } } as never);
-    ba.onWillAppear({ action: b, payload: { settings: { slot: '2' } } } as never);
+    const [a, b] = placeKeys(ba, 2);
     a.setImage.mockClear();
     b.setImage.mockClear();
     ctx.store.setLevel('builders'); // any store change → onChange → render all keys
@@ -291,9 +324,84 @@ describe('OpenTerminalAction (Row 2 — per-builder, #1410)', () => {
   });
 });
 
-describe('Row 1 windowing (#1410)', () => {
-  /** A store with `n` builders (ids builder-0..builder-(n-1)), selection at `cursor`. */
-  function windowedStore(n: number, cursor: number) {
+describe('Row 1 windowing (#1410, dynamic size #1465)', () => {
+  /** A store with `n` builders (ids b0..b(n-1)), selection at `cursor`, window `size` wide
+   *  (the count of placed builder keys the `BuilderAction` singleton would report). */
+  function windowedStore(n: number, cursor: number, size: number) {
+    const ctx = makeStore();
+    ctx.store.overview = {
+      builders: Array.from({ length: n }, (_, i) => ({
+        id: `b${i}`, roleId: `builder-b${i}`, issueId: String(100 + i), issueTitle: `Task ${i}`,
+        blocked: null, blockedGate: null, protocolPhase: 'implement', progress: 0, worktreePath: `/w/b${i}`,
+      })),
+      pendingPRs: [], backlog: [], recentlyClosed: [],
+    } as never;
+    ctx.store.cursor = { ...ctx.store.cursor, builder: cursor, level: 'builders' };
+    ctx.store.setBuilderWindowSize(size);
+    return ctx.store;
+  }
+
+  it('slot i shows builder i on page 0', () => {
+    const store = windowedStore(10, 0, 4);
+    expect([0, 1, 2, 3].map((i) => store.windowedBuilder(i)?.id)).toEqual(['b0', 'b1', 'b2', 'b3']);
+  });
+
+  it('scrolls a page (= the window width) when the selection moves past the window', () => {
+    const store = windowedStore(10, 4, 4); // selection on b4 → page 1
+    expect([0, 1, 2, 3].map((i) => store.windowedBuilder(i)?.id)).toEqual(['b4', 'b5', 'b6', 'b7']);
+  });
+
+  it('trailing slots are empty on a partial last page', () => {
+    const store = windowedStore(10, 9, 4); // selection on b9 → page 2 (b8, b9, -, -)
+    expect([0, 1, 2, 3].map((i) => store.windowedBuilder(i)?.id)).toEqual(['b8', 'b9', undefined, undefined]);
+  });
+
+  it('pages by the placed-key count, not a constant 4 — a 3-wide window puts b3 on slot 0', () => {
+    // The bug: with the old fixed 4, cursor on b3 gives windowStart 0, so b3 lands at slot 3 —
+    // a key that does not exist when only 3 are placed, hiding b3. Sized to 3, b3 is on slot 0.
+    const store = windowedStore(10, 3, 3);
+    expect([0, 1, 2].map((i) => store.windowedBuilder(i)?.id)).toEqual(['b3', 'b4', 'b5']);
+  });
+
+  it('INVARIANT: the selected builder is always on a rendered slot, for every cursor', () => {
+    // The core correctness guarantee. For each window size and each possible selection, the
+    // selected builder must resolve to some slot in [0, size) — never selectable-but-hidden.
+    for (const size of [3, 4]) {
+      for (const n of [3, 4, 5, 8, 11]) {
+        for (let cursor = 0; cursor < n; cursor++) {
+          const store = windowedStore(n, cursor, size);
+          const selectedId = store.selectedBuilder()?.id;
+          const shown = Array.from({ length: size }, (_, i) => store.windowedBuilder(i)?.id);
+          expect(shown).toContain(selectedId);
+        }
+      }
+    }
+  });
+
+  it('BuilderAction renders the windowed builder and accents the selected slot', () => {
+    vi.useFakeTimers();
+    try {
+      // 4 placed keys, selection on b5 (10 builders) → page 1 shows b4..b7; b5 is selected.
+      const store = windowedStore(10, 5, 4);
+      const ba = new BuilderAction(store);
+      const keys = Array.from({ length: 4 }, (_, i) => bkey(`k${i}`, i));
+      keys.forEach((k) => ba.onWillAppear({ action: k, payload: { settings: {} } } as never));
+      vi.advanceTimersByTime(60); // let the window settle so every slot reflects the final page
+      const face = (k: (typeof keys)[number]) =>
+        Buffer.from(String(k.setImage.mock.calls.at(-1)?.[0]).split(',')[1], 'base64').toString('utf8');
+      expect(face(keys[0])).toContain('#104'); // slot 0 → b4 (issueId 104)
+      expect(face(keys[1])).toContain('#105'); // slot 1 → b5 (selected)
+      expect(face(keys[1])).toContain('stroke-width="3"'); // selected accent ring
+      expect(face(keys[0])).not.toContain('stroke-width="3"'); // unselected slot has no ring
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('Row 1 window recompute (#1465)', () => {
+  /** A store with `n` builders, selection at `cursor`. */
+  function fleet(n: number, cursor: number) {
     const ctx = makeStore();
     ctx.store.overview = {
       builders: Array.from({ length: n }, (_, i) => ({
@@ -305,33 +413,100 @@ describe('Row 1 windowing (#1410)', () => {
     ctx.store.cursor = { ...ctx.store.cursor, builder: cursor, level: 'builders' };
     return ctx.store;
   }
+  const face = (k: { setImage: { mock: { calls: unknown[][] } } }) =>
+    Buffer.from(String(k.setImage.mock.calls.at(-1)?.[0]).split(',')[1], 'base64').toString('utf8');
 
-  it('slot i shows builder i on page 0 (first four)', () => {
-    const store = windowedStore(10, 0);
-    expect([0, 1, 2, 3].map((i) => store.windowedBuilder(i)?.id)).toEqual(['b0', 'b1', 'b2', 'b3']);
+  it('window paging follows the placed-key count as keys appear and disappear', () => {
+    // Observe the window WIDTH through paging: windowStart = floor(cursor / size) * size.
+    const store = fleet(8, 3); // selection on b3
+    const ba = new BuilderAction(store);
+    const keys = Array.from({ length: 4 }, (_, i) => bkey(`k${i}`, i));
+    keys.forEach((k) => ba.onWillAppear({ action: k, payload: { settings: {} } } as never));
+    // 4 placed → windowStart floor(3/4)*4 = 0 → slot 0 = b0.
+    expect(store.windowedBuilder(0)?.id).toBe('b0');
+    ba.onWillDisappear({ action: keys[3], payload: { settings: {} } } as never);
+    // 3 placed → windowStart floor(3/3)*3 = 3 → slot 0 = b3.
+    expect(store.windowedBuilder(0)?.id).toBe('b3');
   });
 
-  it('scrolls a page when the selection moves past the fourth builder', () => {
-    const store = windowedStore(10, 4); // selection on b4 → page 1
-    expect([0, 1, 2, 3].map((i) => store.windowedBuilder(i)?.id)).toEqual(['b4', 'b5', 'b6', 'b7']);
+  it('multi-action instances are excluded from the window count', () => {
+    // Selection on b3; three placed keys + a multi-action instance. If the multi-action key
+    // were counted the window would be 4 wide (windowStart 0 → slot 0 = b0); excluded, it is
+    // 3 wide (windowStart 3 → slot 0 = b3).
+    const store = fleet(8, 3);
+    const ba = new BuilderAction(store);
+    const keys = Array.from({ length: 3 }, (_, i) => bkey(`k${i}`, i));
+    keys.forEach((k) => ba.onWillAppear({ action: k, payload: { settings: {} } } as never));
+    ba.onWillAppear({ action: multiKey('M'), payload: { settings: {} } } as never);
+    expect(store.windowedBuilder(0)?.id).toBe('b3'); // still 3 wide
   });
 
-  it('trailing slots are empty on a partial last page', () => {
-    const store = windowedStore(10, 9); // selection on b9 → page 2 (b8, b9, -, -)
-    expect([0, 1, 2, 3].map((i) => store.windowedBuilder(i)?.id)).toEqual(['b8', 'b9', undefined, undefined]);
+  it('slots keys in (row, column) reading order regardless of arrival order or row', () => {
+    vi.useFakeTimers();
+    try {
+      // Keys arrive out of reading order and span two rows: a lower row and a higher column
+      // must each sort later. Reading order is (r0,c0)=A, (r0,c1)=B, (r1,c0)=C, (r1,c1)=D →
+      // slots 0..3 → builders b0..b3. Press each and confirm it targets the reading-order builder.
+      const store = fleet(8, 0);
+      const ba = new BuilderAction(store);
+      const A = bkey('A', 0, 0); // (row 0, col 0) — first
+      const B = bkey('B', 1, 0); // (row 0, col 1) — second
+      const C = bkey('C', 0, 1); // (row 1, col 0) — third: its row wins over its lower column
+      const D = bkey('D', 1, 1); // (row 1, col 1) — last
+      // Deliberately out of reading order:
+      [D, C, B, A].forEach((k) => ba.onWillAppear({ action: k, payload: { settings: {} } } as never));
+      vi.advanceTimersByTime(60);
+      const pressed: string[] = [];
+      const client = store.client as unknown as { sendCommand: ReturnType<typeof vi.fn> };
+      client.sendCommand.mockImplementation((_v: string, args: string[]) => {
+        pressed.push(args[0]);
+        return Promise.resolve({ ok: true, status: 200, data: { ok: true } });
+      });
+      return Promise.all(
+        [A, B, C, D].map((k) => ba.onKeyDown({ action: k, payload: { settings: { verb: 'noop' } } } as never)),
+      ).then(() => {
+        expect(pressed).toEqual(['b0', 'b1', 'b2', 'b3']); // A→b0, B→b1, C→b2, D→b3
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
-  it('BuilderAction renders the windowed builder and accents the selected slot', () => {
-    const store = windowedStore(10, 5); // page 1: slots show b4..b7; b5 is selected (slot 1)
-    const render = (slot: string) => {
-      const key = { id: `k${slot}`, isKey: () => true, setImage: vi.fn(), setTitle: vi.fn() };
-      new BuilderAction(store).onWillAppear({ action: key, payload: { settings: { slot } } } as never);
-      return Buffer.from(String(key.setImage.mock.calls.at(-1)?.[0]).split(',')[1], 'base64').toString('utf8');
-    };
-    expect(render('1')).toContain('#104'); // slot 1 → b4 (issueId 104)
-    expect(render('2')).toContain('#105'); // slot 2 → b5 (selected)
-    expect(render('2')).toContain('stroke-width="3"'); // selected accent ring
-    expect(render('1')).not.toContain('stroke-width="3"'); // unselected slot has no ring
+  it('debounced settle re-renders keys whose page shifted as later keys arrived', () => {
+    vi.useFakeTimers();
+    try {
+      // Selection on b4 (5 builders). Keys arrive one at a time; as the window grows the page
+      // start shifts, so an earlier key's builder changes and must be corrected on settle.
+      const store = fleet(5, 4);
+      const ba = new BuilderAction(store);
+      const keys = Array.from({ length: 3 }, (_, i) => bkey(`k${i}`, i));
+      keys.forEach((k) => ba.onWillAppear({ action: k, payload: { settings: {} } } as never));
+      // Before settle, k0 still shows its stale immediate render (windowStart was 4 when it
+      // appeared alone → b4). After the 3-wide window settles, windowStart is 3 → k0 shows b3.
+      vi.advanceTimersByTime(60);
+      expect(face(keys[0])).toContain('#103'); // b3
+      expect(face(keys[1])).toContain('#104'); // b4 (the selected builder — on a key)
+      // And the selected builder is visible on a slot, never hidden.
+      const shown = keys.map((k) => face(k));
+      expect(shown.some((s) => s.includes('#104'))).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('cursor paging stays coherent when the window size changes under a selection', () => {
+    // Selection on b3 (4 builders). With 3 keys the window is 3 wide → b3 on slot 0 (page 1).
+    const store = fleet(4, 3);
+    const ba = new BuilderAction(store);
+    const keys = Array.from({ length: 3 }, (_, i) => bkey(`k${i}`, i));
+    keys.forEach((k) => ba.onWillAppear({ action: k, payload: { settings: {} } } as never));
+    expect(store.windowedBuilder(0)?.id).toBe('b3'); // selected builder is shown
+    // A 4th key appears → window 4 wide → page 0 → b3 on slot 3. Still shown, no gap, no crash.
+    const k3 = bkey('k3', 3);
+    ba.onWillAppear({ action: k3, payload: { settings: {} } } as never);
+    const slots = [0, 1, 2, 3].map((i) => store.windowedBuilder(i)?.id);
+    expect(slots).toEqual(['b0', 'b1', 'b2', 'b3']);
+    expect(slots).toContain('b3'); // the selection remains on a rendered slot
   });
 });
 

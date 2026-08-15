@@ -365,6 +365,19 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
   glyph line out of `face.ts` — so a new glyph must be a single line with **no trailing comment**, and
   after running it, restore any pre-existing icon PNGs it re-touched (byte churn) so the diff stays
   scoped.
+- [From #1465] A UI "window onto a list" must size itself from the elements actually **placed**, not
+  a hardcoded page constant. The Stream Deck Row-1 selector paged by a fixed `ROW1_WINDOW_SIZE = 4`;
+  place fewer keys than that and a selectable item at index ≡ (size) mod 4 rendered on **no key** while
+  the selection dial still walked onto it — selectable but invisible, driving the rest of the board with
+  no accent anywhere. The fix derives the window width from the visible action instances. Two SDK facts
+  make it work: there is **no profile-structure API** (`@elgato/streamdeck` `profiles.d.ts` says a plugin
+  "cannot access user-defined profiles"), so the layout can only be **derived from the lifecycle** —
+  each visible key fires `willAppear` carrying `KeyAction.coordinates {column,row}` (`undefined` for a
+  multi-action instance, which must be excluded). Sort the placed keys by `(row, column)` for slot order,
+  count them for the window width, and **debounce the recompute** — keys arrive over several `willAppear`
+  events at page load, so an eager recompute thrashes the size and flickers the faces. General rule: when
+  a fixed count and a hand-numbered index can disagree with the true placed set, tie both to the placed
+  set so a selection can never point at nothing.
 - [From #1428] Stream Deck's `setImage` accepts an SVG per the SDK d.ts, but a *raw* `<svg>`
   string is silently dropped on-device (Stream Deck 6.9) — the key reverts to its manifest PNG
   with no error. Two undocumented requirements: encode as a base64 `data:image/svg+xml` data URI,

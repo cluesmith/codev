@@ -130,7 +130,7 @@
     {
       "Name": "Builder Action",
       "UUID": "com.cluesmith.codev.builder-action",
-      "Tooltip": "Live tile for the Nth builder (set the slot in the property inspector). Shows its issue + phase; press selects the builder and opens the artifact for its current phase (spec / plan / diff), or a fixed verb you choose.",
+      "Tooltip": "Live tile for a builder — its slot is where you place the key (the selectors self-order left to right, top row first). Shows its issue + phase; press selects the builder and opens the artifact for its current phase (spec / plan / diff), or a fixed verb you choose.",
       "Icon": "icons/list/builder-action",
       "Controllers": [
         "Keypad"

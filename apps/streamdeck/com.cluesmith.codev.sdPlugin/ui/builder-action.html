@@ -3,23 +3,11 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <!-- sdpi-components binds <sdpi-select setting="slot"> to this key's persisted
+    <!-- sdpi-components binds <sdpi-select setting="verb"> to this key's persisted
          settings over the property-inspector protocol. -->
     <script src="lib/sdpi-components.js"></script>
   </head>
   <body>
-    <sdpi-item label="Slot">
-      <sdpi-select setting="slot" default="1">
-        <option value="1">Slot 1</option>
-        <option value="2">Slot 2</option>
-        <option value="3">Slot 3</option>
-        <option value="4">Slot 4</option>
-        <option value="5">Slot 5</option>
-        <option value="6">Slot 6</option>
-        <option value="7">Slot 7</option>
-        <option value="8">Slot 8</option>
-      </sdpi-select>
-    </sdpi-item>
     <sdpi-item label="On press">
       <sdpi-select setting="verb" default="automatic">
         <option value="automatic">Automatic (open current phase's artifact)</option>
@@ -32,10 +20,13 @@
       </sdpi-select>
     </sdpi-item>
     <sdpi-item label="">
-      <small>Pins this key to the Nth builder (slot 1 = first builder) and shows
-      its issue + phase. Press selects that builder. On Automatic, the press opens
-      the artifact for its current phase (spec / plan / diff), re-openable every
-      press; pick a fixed verb to always run that instead.</small>
+      <small>Each Builder Action key is one slot in a window onto the fleet, sized to
+      how many of these keys you place: the leftmost (top row first) shows the first
+      builder, the next shows the second, and so on, and the Select dial scrolls the
+      window when there are more builders than keys. Just place as many as you like —
+      no slot numbers to set. Press selects that builder; on Automatic it opens the
+      artifact for its current phase (spec / plan / diff), re-openable every press.
+      Pick a fixed verb to always run that instead.</small>
     </sdpi-item>
   </body>
 </html>
