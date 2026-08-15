@@ -1,5 +1,6 @@
 import {
   SingletonAction,
+  type Coordinates,
   type KeyAction,
   type DialAction,
   type KeyDownEvent,
@@ -85,35 +86,35 @@ export class DevServerAction extends VerbKey {
 
 // ── Slot keys (pinned builder board) ────────────────────────────────────────
 
-/** PI settings shared by the slot-based keys: a 1-based builder slot + a verb. */
-type SlotSettings = { slot?: string; verb?: string };
+/** PI settings for the slot-based keys: an optional per-key verb. The former manual
+ *  `slot` field is retired (#1465) — a key's slot is derived from where it physically
+ *  sits, not hand-numbered, so the window can never disagree with the placed keys. */
+type SlotSettings = { verb?: string };
+
+/** How long to let the page-load `willAppear`/`willDisappear` burst settle before
+ *  the full re-render (#1465). Keys arrive over several events at load, and a later
+ *  key can shift an earlier key's page; one coalesced pass avoids thrashing the
+ *  window size and flickering the faces. */
+const WINDOW_SETTLE_MS = 50;
 
 /**
- * Resolve the builder a slot points at. Slot N is a POSITION in Row 1's 4-wide
- * window onto the fleet (#1410), not an absolute index: the window is the page
- * containing the selection, so the Select dial scrolls builders 5-8, 9-N into the
- * same four keys. A slot past the end of the fleet resolves to `undefined` (an
- * empty slot on the last page).
- */
-function slotBuilder(store: CodevStore, settings: SlotSettings): OverviewBuilder | undefined {
-  const slot = Number.parseInt(settings.slot ?? '1', 10);
-  const slotIndex = (Number.isFinite(slot) && slot > 0 ? slot : 1) - 1;
-  return store.windowedBuilder(slotIndex);
-}
-
-/**
- * A keypad pinned to a builder slot (the Nth builder) that fires a verb for that
- * builder. The Property Inspector picks the slot and the verb; the press is
- * resilient to builder ids changing because it indexes by position, not id.
- * Subclasses override the default verb, the render, and (optionally) the verb
- * resolution (BuilderAction resolves its `automatic` default to a phase artifact).
+ * A keypad pinned to a builder SLOT — the Nth builder in Row-1's window onto the
+ * fleet — that fires a verb for that builder. A key's slot is its RANK among the
+ * placed builder keys sorted by physical position (row, then column), derived from
+ * `KeyAction.coordinates`, NOT a hand-numbered setting (#1465): so the window is
+ * exactly as wide as the keys you placed, and a builder is never selectable while
+ * shown on no key. The press indexes by position, so it survives builder ids
+ * changing. Subclasses override the default verb, the render, and (optionally) the
+ * verb resolution (BuilderAction resolves its `automatic` default to a phase artifact).
  */
 abstract class SlotKey extends SingletonAction<SlotSettings> {
   protected abstract readonly defaultVerb: string;
   // One SingletonAction instance serves EVERY key of this type, so per-key state
-  // (its settings + render handle) is tracked per instance, keyed by the action
-  // context id — never in shared fields, which would collide across keys.
-  private readonly keys = new Map<string, { action: KeyAction; settings: SlotSettings }>();
+  // (its action handle, settings, and board coordinates) is tracked per instance,
+  // keyed by the action context id — never in shared fields, which would collide.
+  // `coordinates` is `undefined` for a multi-action instance (excluded from the window).
+  private readonly keys = new Map<string, { action: KeyAction; settings: SlotSettings; coordinates?: Coordinates }>();
+  private settleTimer?: ReturnType<typeof setTimeout>;
 
   constructor(protected readonly store: CodevStore) {
     super();
@@ -123,21 +124,28 @@ abstract class SlotKey extends SingletonAction<SlotSettings> {
   override onWillAppear(ev: WillAppearEvent<SlotSettings>): void {
     if (!ev.action.isKey()) return;
     const settings = ev.payload.settings ?? {};
-    this.keys.set(ev.action.id, { action: ev.action, settings });
-    this.renderTo(ev.action, settings);
+    this.keys.set(ev.action.id, { action: ev.action, settings, coordinates: ev.action.coordinates });
+    // Size the window from the placed keys right away so a press resolves against the
+    // current layout, and render THIS key now; the debounced pass re-renders the rest
+    // once the page-load burst settles (a later key can shift an earlier key's page).
+    this.store.setBuilderWindowSize(this.placedKeys().length);
+    this.renderTo(ev.action);
+    this.scheduleSettle();
   }
   override onWillDisappear(ev: WillDisappearEvent<SlotSettings>): void {
     this.keys.delete(ev.action.id);
+    this.store.setBuilderWindowSize(this.placedKeys().length);
+    this.scheduleSettle();
   }
   override onDidReceiveSettings(ev: DidReceiveSettingsEvent<SlotSettings>): void {
     const entry = this.keys.get(ev.action.id);
     if (!entry) return;
     entry.settings = ev.payload.settings ?? {};
-    this.renderTo(entry.action, entry.settings);
+    // A verb change doesn't move any key, so just re-render this one.
+    this.renderTo(entry.action);
   }
   override async onKeyDown(ev: KeyDownEvent<SlotSettings>): Promise<void> {
-    const settings = ev.payload.settings ?? {};
-    const b = slotBuilder(this.store, settings);
+    const b = this.builderFor(ev.action);
     if (!b) {
       await ev.action.showAlert();
       return;
@@ -145,18 +153,56 @@ abstract class SlotKey extends SingletonAction<SlotSettings> {
     // Pressing a builder key focuses it: the shared cursor follows, so the diff
     // dials and other selection-scoped keys now act on the builder you pressed.
     this.store.syncToBuilder(b.id);
+    const settings = ev.payload.settings ?? {};
     const verb = this.resolveVerb(settings, b);
     const res = await this.store.client.sendCommand(verb, [b.id], this.store.selectedWorkspacePath());
     await ack(ev.action, res.ok);
   }
+
+  /** Placed builder keys — those with defined coordinates (multi-action instances
+   *  report `undefined` and are excluded) — in reading order: row, then column. */
+  private placedKeys(): KeyAction[] {
+    return [...this.keys.values()]
+      .filter(
+        (e): e is { action: KeyAction; settings: SlotSettings; coordinates: Coordinates } =>
+          e.coordinates !== undefined,
+      )
+      .sort((a, b) => a.coordinates.row - b.coordinates.row || a.coordinates.column - b.coordinates.column)
+      .map((e) => e.action);
+  }
+  /** The 0-based slot a key occupies (its rank among the placed keys), or `undefined`
+   *  when it is a multi-action instance with no coordinates. */
+  protected slotIndexOf(action: KeyAction): number | undefined {
+    const slotIndex = this.placedKeys().findIndex((a) => a.id === action.id);
+    return slotIndex < 0 ? undefined : slotIndex;
+  }
+  /** The builder a key shows: its slot indexes the fleet window. `undefined` for a
+   *  multi-action key (no slot) or a slot past the end of the fleet (trailing empty). */
+  protected builderFor(action: KeyAction): OverviewBuilder | undefined {
+    const slotIndex = this.slotIndexOf(action);
+    if (slotIndex === undefined) return undefined;
+    return this.store.windowedBuilder(slotIndex);
+  }
+
+  /** Debounce a full re-render across the willAppear/willDisappear settle (#1465);
+   *  reassert the window size from the settled key set before rendering. */
+  private scheduleSettle(): void {
+    if (this.settleTimer) clearTimeout(this.settleTimer);
+    this.settleTimer = setTimeout(() => {
+      this.settleTimer = undefined;
+      this.store.setBuilderWindowSize(this.placedKeys().length);
+      this.renderAll();
+    }, WINDOW_SETTLE_MS);
+  }
+
   /** The verb a press fires. Base: the per-key setting, else the default. */
   protected resolveVerb(settings: SlotSettings, _b: OverviewBuilder): string {
     return settings.verb ?? this.defaultVerb;
   }
   private renderAll(): void {
-    for (const { action, settings } of this.keys.values()) this.renderTo(action, settings);
+    for (const { action } of this.keys.values()) this.renderTo(action);
   }
-  protected abstract renderTo(action: KeyAction, settings: SlotSettings): void;
+  protected abstract renderTo(action: KeyAction): void;
 }
 
 /**
@@ -179,19 +225,22 @@ export class BuilderAction extends SlotKey {
     const auto = phaseArtifactVerb(b) ?? 'open-terminal';
     return auto === 'view-diff' ? 'open-diff-first' : auto;
   }
-  protected renderTo(action: KeyAction, settings: SlotSettings): void {
-    const b = slotBuilder(this.store, settings);
+  protected renderTo(action: KeyAction): void {
+    const b = this.builderFor(action);
     // Compose the WHOLE face as one SVG (icon zone + reserved text band) instead of stacking a
     // title over the manifest bolt PNG — see face.ts for the layout and the sidebar-mirrored
     // colour/icon vocabulary. setTitle('') suppresses the SDK title layer so nothing overlays it.
     let svg: string;
     if (b) {
-      // Accent the slot holding the shared selection so the live builder among
-      // the four is unmistakable (#1410).
+      // Accent the slot holding the shared selection so the live builder among the
+      // placed keys is unmistakable (#1410).
       const selected = b.id === this.store.selectedBuilder()?.id;
       svg = builderFaceSvg(faceForBuilder(b, selected));
     } else {
-      svg = builderFaceSvg({ kind: 'empty', slot: settings.slot ?? '1' });
+      // A placed but off-fleet slot shows its 1-based position; a multi-action key
+      // (no slot) shows a dash.
+      const slotIndex = this.slotIndexOf(action);
+      svg = builderFaceSvg({ kind: 'empty', slot: slotIndex === undefined ? '—' : String(slotIndex + 1) });
     }
     void action.setImage(svgToDataUri(svg));
     void action.setTitle('');
