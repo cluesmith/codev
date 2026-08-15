@@ -96,8 +96,8 @@ the selection, the dials review it.**
 │  STREAM DECK +                                             │
 │                                                            │
 │  ┌────────┐  ┌────────┐  ┌────────┐  ┌────────┐           │
-│  │ Builder│  │ Builder│  │ Builder│  │  Open  │  Row 1:    │
-│  │  (1st) │  │  (2nd) │  │  (3rd) │  │  Arch  │  selectors │
+│  │OpenArch│  │ Builder│  │ Builder│  │ Builder│  Row 1:    │
+│  │ (main) │  │  (1st) │  │  (2nd) │  │  (3rd) │  selectors │
 │  └────────┘  └────────┘  └────────┘  └────────┘           │
 │  ┌────────┐  ┌────────┐  ┌────────┐  ┌────────┐           │
 │  │Approve │  │  Dev   │  │Send Fb │  │  Bldr  │  Row 2:    │
@@ -112,19 +112,24 @@ the selection, the dials review it.**
 └──────────────────────────────────────────────────────────┘
 ```
 
-- **Row 1 — fleet selectors.** **Builder Action** keys, each one slot in a **window**
-  onto the fleet. The window is **exactly as wide as the number of Builder Action keys
-  you place** — put three down (leaving the fourth Row-1 key for something else, like
-  Open Architect above) and it is three wide; a Mini or an XL sizes itself the same
-  way. The keys self-order by physical position (left to right, top row first), so
-  there are no slot numbers to set. With more builders than keys the **Select dial**
-  (Zoom Navigator rotate) scrolls the window a page at a time, and the slot holding
-  the current selection is accented. Press selects the builder (Row 2 + the dials
-  follow) and opens its phase artifact.
+- **Row 1 — selectors, anchored by the architect.** Slot 1 is **Open Architect
+  Terminal** pinned to **Main** mode: a fixed anchor at the left of the board that
+  opens the workspace's `main` architect. It can sit in Row 1 without breaking the
+  "Row 1 selects" invariant precisely because Main mode is **selection-independent** —
+  it always targets `main`, so it neither reads nor moves the shared selection. Slots
+  2–4 are **Builder Action** selectors — here **three** of them.
+  The selectors are a **window** onto the fleet whose width is **exactly the number of
+  Builder Action keys you place** (three here), not a fixed count: the keys self-order
+  by physical position (left to right, top row first), so there are no slot numbers to
+  set, and a Mini or an XL sizes itself the same way. With more builders than keys the
+  **Select dial** (Zoom Navigator rotate) scrolls the window a page at a time, and the
+  slot holding the current selection is accented. Because the window follows the placed
+  keys, a builder is never selectable while shown on no key. Press selects the builder
+  (Row 2 + the dials follow) and opens its phase artifact.
 - **Row 2 — action palette**, fixed in place, always acting on the **selected**
-  builder: **Approve Gate · Dev Server · Send Feedback (N) · Open Builder
-  Terminal**. Its sibling **Open Architect Terminal** opens the owning architect
-  instead — place it where a slot frees up (e.g. Send Feedback in forward mode).
+  builder: **Approve Gate · Dev Server · Send Feedback (N) · Open Builder Terminal**.
+  (The **Open Architect Terminal** key has its home in Row 1 slot 1 above; in its other
+  mode it follows the selected builder's owning architect instead of `main`.)
 
 Nothing is fixed — drag whatever you want onto each slot in the Stream Deck app.
 The 5th encoder, **Spawn from Backlog**, can swap onto a dial in place of any of
