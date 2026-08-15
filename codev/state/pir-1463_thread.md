@@ -108,6 +108,20 @@ comment (the extractor regex rejects it).
 Verified from worktree: build ✓, check-types (tsc) ✓, vitest 197/197 ✓, streamdeck
 validate ✓. Pushed. dev-approval is a hardware session — requesting the gate.
 
+## Gate-time refinement: symmetric terminal-key rename (2026-08-15)
+
+At Amr's direction, renamed the two terminal keys as a PAIR: existing
+`Open Terminal` → `Open Builder Terminal` (face `Terminal`→`Builder`, terminal
+glyph kept) and the new key → `Open Architect Terminal`. UUIDs UNCHANGED
+(`open-terminal`, `open-architect`) so already-placed keys survive; only Name +
+Tooltip + face label moved. Terminal-vs-person glyphs stay the visual
+differentiator. Updated manifest, actions.ts (+doc), README (incl. ASCII cell),
+OpenTerminal face test. build/tsc/vitest 197/validate ✓. Architect verified +
+approved the scope expansion (feature created the ambiguity, so resolve in-lane).
+Added dev-approval hardware check #8: an already-placed Open Terminal key must
+survive the rename (still opens the builder terminal, now reads `Builder`) —
+proves UUID stability on hardware. dev-approval remains Amr's.
+
 ## Row-1 windowing question + follow-up #1465 (2026-08-15)
 
 Amr asked about Row-1 slot selection and placing the Main-mode key on a Row-1

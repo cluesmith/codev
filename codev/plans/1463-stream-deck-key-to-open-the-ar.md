@@ -263,3 +263,9 @@ tracked separately in **#1465** — out of scope here.
 7. Cross-check #1406: with a known mis-attributed builder selected (Builder mode),
    confirm the subtitle shows the (currently wrong) stored owner — demonstrating
    why #1406 must be resolved before ship.
+8. **Rename / UUID-stability check** (the only user-visible risk of the pair
+   rename): a key placed as "Open Terminal" *before* this change must survive the
+   rename — the already-placed key still opens the selected builder's terminal and
+   now reads `Builder`. The UUID is unchanged (`com.cluesmith.codev.open-terminal`),
+   so only the Name/face moved; this confirms it on hardware, not just in the
+   manifest.
