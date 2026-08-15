@@ -176,3 +176,19 @@ post-consultation fixes against source. Main architect will admin-merge on attes
 Post-merge ritual (verify, cleanup, sync main, changelog, close #1070) is the architect's, NOT mine —
 builders don't close issues. Asked architect whether I or they run `porch done 1070 --merged 1461`.
 Holding.
+
+## Branch freeze + merge landed (2026-08-15)
+
+Architect flagged a real mechanical trap (held in my head at the time, per instruction, recorded now):
+every push to the builder branch bumped the PR head and restarted all 7 CI checks, so my
+thread-update discipline was sustaining the block — narrating the blocked state moved the head and
+deferred the merge. Lesson: when blocked on something measured against your own branch head, going
+quiet IS the action. Froze the branch (no commits/pushes/porch-writes), kept only a read-only
+`gh pr view` poll, went silent.
+
+Architect confirmed I (not they) run `porch done --merged` — porch state belongs to the agent it
+describes; also avoids adding an instance of #1446 (completed status.yaml never recording its own
+merge). Verified the merge INDEPENDENTLY via gh pr view (not inferred): PR #1461 MERGED, commit
+3f7061d4a2e466fb43c380c863d562c52b54e725, 02:40:06Z, by amrmelsayed. Ran `porch done 1070 --merged
+1461` → protocol complete (status: complete, phase: verified, next: None). Post-merge ritual
+(issue close, cleanup, main sync, changelog) is the architect's. Done.
