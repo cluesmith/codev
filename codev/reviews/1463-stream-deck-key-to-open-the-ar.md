@@ -63,6 +63,23 @@ live-architect view) entirely** — dropping the first-live fallback and a store
 reader that would have coupled the deck to a transiently-wrong view. The bullet also
 records the two accepted residuals and the UUID-stability property (below).
 
+### Design note for the next key-author (read this before reaching for `OverviewData.architects`)
+
+Two properties are the point of this key, and the default instinct — read the live
+architect list on the deck — would have thrown both away:
+
+- **Avoiding the live-architect dependency beat handling it carefully.** Because the
+  deck fires a *name* and delegates `main`-else-first to VS Code, the three registry
+  failure modes — an empty architect list, a transiently-missing `main`, and a live
+  row behind a dead PTY — are simply **not this key's problem**, rather than being
+  mitigated by it. There is no live-view code on the deck to get the mitigation
+  wrong. Reaching for `OverviewData.architects` would have re-imported all three.
+- **The wrong-architect safeguard is structural, not conventional.** `resolve()` is
+  shared by the press path (`onKeyDown`) and `renderTo`, so the face and the action
+  **cannot drift apart** — there is exactly one resolution, and the name you see is
+  the name you'll open. It's not "remember to keep the face in sync with the press";
+  it's one function, so there's nothing to keep in sync.
+
 ## Lessons Learned Updates
 
 **HOT (`lessons-critical.md`): none** — the core reuse decision ("delegate the

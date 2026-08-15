@@ -149,3 +149,20 @@ SEPARATE issue **#1465** (reframed to lead with the correctness bug), credited t
 me. 1463 stays as-is; added a one-line Row-1 placement caveat + #1465 pointer to
 the plan's README-guidance section (documentation, not a fold-in). Architect
 endorsed the reshape and the Main-mode residual wording. Gate still pending (Amr).
+
+## Merged + complete (2026-08-15)
+
+PR #1466 opened; 3-way consult all APPROVE (one non-blocking claude note: rename
+was outside the plan's file list — ratified). pr gate approved by Amr. First
+`gh pr merge --merge` hit the review-required branch-protection wall (BLOCKED /
+REVIEW_REQUIRED); went quiet per merge-window hygiene (#1462). Architect merged
+via admin — merge commit 0cc416ff7, seven checks green, mergedAt
+2026-08-15T08:49:14Z. Verified state=MERGED against that SHA; ran
+`porch done 1463 --merged 1466` → protocol COMPLETE (phase verified).
+
+Follow-up (doc-only, PR #TBD): architect asked to add the key reuse lesson to the
+review artifact + arch.md — (1) AVOIDING the live-architect dependency beat
+handling it (fire a name, delegate main-else-first to VSCode → the 3 registry
+failure modes aren't this key's problem); (2) resolve() shared by press + render
+makes the wrong-architect safeguard STRUCTURAL, not conventional. Subject to the
+same review-required wall.
