@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { OverviewBuilder } from '@cluesmith/codev-sdk/controller';
-import { builderState, stateLabel, faceForBuilder, builderFaceSvg, approveFaceSvg, sendFbFaceSvg, labelFaceSvg, svgToDataUri } from '../face.js';
+import { builderState, stateLabel, faceForBuilder, builderFaceSvg, approveFaceSvg, sendFbFaceSvg, labelFaceSvg, architectFaceSvg, capitalizeFirst, svgToDataUri } from '../face.js';
 
 /** Minimal builder fixture — only the fields the face reads matter; the rest are filler. */
 function builder(over: Partial<OverviewBuilder>): OverviewBuilder {
@@ -155,6 +155,45 @@ describe('labelFaceSvg', () => {
     expect(svg).toContain('#73c991');
     expect(svg).toContain('M8 5v14l11-7z'); // the play glyph
     expect(svg).toContain('width="72"');
+  });
+});
+
+describe('capitalizeFirst', () => {
+  it('capitalizes only the first letter of a lowercase wire name', () => {
+    expect(capitalizeFirst('main')).toBe('Main');
+    expect(capitalizeFirst('streamdeck')).toBe('Streamdeck');
+    expect(capitalizeFirst('ob-refine')).toBe('Ob-refine');
+    expect(capitalizeFirst('architect-2')).toBe('Architect-2');
+    expect(capitalizeFirst('')).toBe('');
+  });
+});
+
+describe('architectFaceSvg (#1463)', () => {
+  it('renders the constant "Architect" title over the resolved name, capitalized', () => {
+    const main = architectFaceSvg('main');
+    expect(main).toContain('Architect');
+    expect(main).toContain('Main');
+    expect(main).toContain('#a9a9b2'); // active (not dimmed)
+    expect(main).not.toContain('None');
+
+    const sibling = architectFaceSvg('streamdeck');
+    expect(sibling).toContain('Streamdeck');
+  });
+  it('is dim + inert ("Architect" over "None") when no architect resolves', () => {
+    const inert = architectFaceSvg(undefined);
+    expect(inert).toContain('Architect');
+    expect(inert).toContain('None');
+    expect(inert).toContain('#63636b'); // dimmed
+  });
+  it('shrink-fits a long name so it does not overflow the face', () => {
+    // The constant "Architect" title always shrink-fits, so a long NAME must add a
+    // second lengthAdjust beyond the short-name baseline.
+    const count = (s: string): number => (s.match(/lengthAdjust/g) ?? []).length;
+    expect(count(architectFaceSvg('streamdeck'))).toBeGreaterThan(count(architectFaceSvg('main')));
+  });
+  it('is a valid self-contained SVG', () => {
+    expect(architectFaceSvg('main').startsWith('<svg')).toBe(true);
+    expect(architectFaceSvg('main')).toContain('width="72"');
   });
 });
 
