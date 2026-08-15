@@ -2054,7 +2054,11 @@ The deck is a remote and VSCode is the screen, bound by **one shared selection**
   live-architect view) — one policy, one home. Two accepted residuals follow from the fire-and-forget
   relay: in `main` mode when `main` is absent VSCode opens the first live architect while the face still
   reads `Main`; and a live registration behind a dead PTY resolves fine. The face renders the resolved
-  architect name (the safeguard shown before a press). Paired-renamed with the builder key
+  architect name (the safeguard shown before a press), and because `resolve()` is shared by the
+  press path and the render path, that safeguard is **structural** — face and action can't drift,
+  there is one resolution. The lesson for the next key: **avoiding** the live-architect dependency
+  (fire a name, delegate policy to VSCode) beat handling it — the registry failure modes are simply
+  not this key's problem. Don't reach for `OverviewData.architects`. Paired-renamed with the builder key
   (`Open Builder Terminal` / `Open Architect Terminal`); **the Elgato UUID is the stable identity**, so
   renaming `Name`/face never orphans an already-placed key. Prerequisite: #1406 (spawn mis-attribution)
   can make `builder` mode summon the wrong architect until fixed.
