@@ -12,6 +12,8 @@ import chalk from 'chalk';
 import { query as claudeQuery } from '@anthropic-ai/claude-agent-sdk';
 import { executeForgeCommandSync, loadForgeConfig, validateForgeConfig, resolveAllConcepts, type ConceptResolution } from '../lib/forge.js';
 import { detectHarnessFromCommand, getRetirement } from '../agent-farm/utils/harness.js';
+import { getKimiHome, inspectKimiStoreLayout, inspectKimiTrustLayout } from '../agent-farm/utils/kimi-session-discovery.js';
+import { join } from 'node:path';
 import { auditPrGates, formatPrGateWarning } from '../lib/pr-gate-audit.js';
 import { auditStateFileIgnore } from '../lib/gitignore.js';
 import { auditFrameworkRefs, formatFrameworkRefFinding, hasFrameworkOverrides } from '../lib/framework-ref-audit.js';
@@ -263,6 +265,32 @@ const AI_DEPENDENCIES: Dependency[] = [
       linux: 'npm install -g opencode-ai',
     },
   },
+  // Kimi Code CLI (Issue #1201 — builder-only harness).
+  //
+  // The 0.33.0 floor is evidence-based, not conservative-by-default. The hard
+  // functional break is `--agent-file` (added 0.31.0): below it the builder role
+  // does not inject at all and the builder runs silently roleless. 0.31.0–0.32.x
+  // would nominally work, but every live measurement this integration rests on —
+  // the session-store shape, the folder-trust dialog and its record scheme, and
+  // the render-gate composer profile — was taken on the agent-core-v2 engine that
+  // 0.33.0 made the default. Claiming support for versions we never measured is
+  // exactly the kind of unverified claim that turns into a field bug, so the floor
+  // sits at the oldest version the evidence actually covers.
+  {
+    name: 'Kimi',
+    command: 'kimi',
+    versionArg: '--version',
+    versionExtract: (output: string) => {
+      const match = output.match(/(\d+\.\d+\.\d+)/);
+      return match ? match[1] : null;
+    },
+    minVersion: '0.33.0',
+    required: false,
+    installHint: {
+      macos: 'see https://www.kimi.com/code (Kimi Code CLI)',
+      linux: 'see https://www.kimi.com/code (Kimi Code CLI)',
+    },
+  },
 ];
 
 /**
@@ -447,6 +475,77 @@ function verifyAiModel(modelName: string): CheckResult {
     const errMsg = err instanceof Error ? err.message : 'unknown error';
     return { status: 'fail', version: 'error', note: `${config.authHint} (${errMsg})` };
   }
+}
+
+/**
+ * Verify the Kimi lane (Issue #1201). Kimi documents NO auth status probe
+ * (`kimi doctor` validates config only; `kimi login` is a device-code flow,
+ * not a check), and we never make a billed `-p` call from doctor — so the
+ * auth story is a TRUTHFUL HEURISTIC: report whether credential artifacts
+ * exist under the Kimi home (undocumented layout, observed on 0.34.0) and
+ * point at `kimi login` otherwise.
+ *
+ * Also runs three cheap supplementary probes:
+ *  - `kimi doctor` (documented: exit 0 = config valid/skipped, 1 = invalid) —
+ *    reported as a config check, explicitly not an auth check.
+ *  - Session-store layout: the builder integration reads the UNDOCUMENTED store
+ *    to decide whether a crash restart may take `kimi -c`. Drift there degrades
+ *    resume to fresh spawns.
+ *  - Workspace-trust record naming: the builder spawn pre-writes a trust record
+ *    (also undocumented) so an unattended builder is not stranded on 0.33.0+'s
+ *    "Trust this folder?" dialog. Drift there strands every new builder.
+ *
+ * Both layout probes exist because these surfaces are undocumented and Kimi ships
+ * weekly — the store's working-directory field has ALREADY been renamed once. They
+ * turn a silent degradation into a named warning at `codev doctor` time.
+ */
+function verifyKimi(): CheckResult {
+  const kimiHome = getKimiHome();
+  const hasCredentials =
+    existsSync(join(kimiHome, 'credentials', 'kimi-code.json')) ||
+    existsSync(join(kimiHome, 'oauth', 'kimi-code'));
+
+  if (!hasCredentials) {
+    return {
+      status: 'fail',
+      version: 'no auth artifacts',
+      note: 'Run "kimi login" (heuristic — doctor makes no billed probe; artifacts checked under ' + kimiHome + ')',
+    };
+  }
+
+  const notes: string[] = [];
+  try {
+    const result = spawnSync('kimi', ['doctor'], { encoding: 'utf-8', timeout: 10000, stdio: 'pipe' });
+    // `status` is null when the process never ran to completion (spawn failure,
+    // or the 10s timeout killing it by signal). That is "we learned nothing",
+    // not "config is broken" — reporting it as config issues would put a false
+    // failure in front of a user whose install is fine but whose machine is slow.
+    if (result.error || result.status === null) {
+      // nothing learned — stay silent rather than accuse a healthy install
+    } else if (result.status !== 0) {
+      notes.push('"kimi doctor" reports config issues (config check, not auth)');
+    }
+  } catch {
+    // kimi doctor unavailable/timed out — skip the supplementary config check
+  }
+
+  // Two undocumented surfaces this integration rides, each with its own probe that
+  // reports WHICH assumption broke rather than "something changed". Both tolerate a
+  // fresh install (nothing recorded yet) as not-drift.
+  const store = inspectKimiStoreLayout();
+  if (store.status === 'drifted') notes.push(`session store: ${store.reason}`);
+
+  const trust = inspectKimiTrustLayout();
+  if (trust.status === 'drifted') notes.push(`workspace trust: ${trust.reason}`);
+
+  if (notes.length > 0) {
+    return { status: 'warn', version: 'auth artifacts present (heuristic)', note: notes.join('; ') };
+  }
+  return {
+    status: 'ok',
+    version: 'auth artifacts present (heuristic)',
+    note: 'no documented status probe exists; doctor makes no billed call',
+  };
 }
 
 const AGY_INSTALL_HINT = 'install: curl -fsSL https://antigravity.google/cli/install.sh | bash, then run `agy` once to sign in';
@@ -742,8 +841,10 @@ export async function doctor(): Promise<number> {
     });
   }
 
-  // Verify CLI-based models (agy handled separately below — custom OAuth probe)
-  for (const cliName of installedAiClis.filter(n => n !== 'Claude' && n !== 'Gemini (agy)')) {
+  // Verify CLI-based models (agy and Kimi handled separately — custom probes:
+  // agy has an OAuth-aware streaming probe; Kimi has a no-billed-call
+  // credential-artifact heuristic, Issue #1201)
+  for (const cliName of installedAiClis.filter(n => n !== 'Claude' && n !== 'Gemini (agy)' && n !== 'Kimi')) {
     console.log(chalk.blue(`  ⋯ ${cliName.padEnd(12)} verifying...`));
     process.stdout.write('\x1b[1A\x1b[2K');
 
@@ -758,6 +859,23 @@ export async function doctor(): Promise<number> {
         name: cliName,
         issue: result.version,
         recommendation: result.note,
+      });
+    }
+  }
+
+  // Verify the Kimi lane via its heuristic probe (Issue #1201).
+  if (installedAiClis.includes('Kimi')) {
+    const kimiResult = verifyKimi();
+    printStatus('Kimi', kimiResult);
+    if (kimiResult.status === 'ok' || kimiResult.status === 'warn') {
+      aiCliCount++;
+    }
+    if (kimiResult.status === 'warn' || kimiResult.status === 'fail') {
+      warnings++;
+      warningDetails.push({
+        name: 'Kimi',
+        issue: kimiResult.version,
+        recommendation: kimiResult.note,
       });
     }
   }
@@ -852,6 +970,22 @@ export async function doctor(): Promise<number> {
           // hard-coded "gemini", so the advice stays correct if another harness is
           // ever retired (RETIRED_HARNESSES is extensible).
           recommendation: `Set shell.architect / shell.architectHarness to "codex" or "claude --dangerously-skip-permissions" in .codev/config.json, or define a custom "${architect.name}" harness and select it explicitly via shell.architectHarness (a bare shell.architect command stays retired)`,
+        });
+      } else if (architect.name === 'kimi') {
+        // Issue #1201: kimi is builder-only. Its role mechanism is
+        // `--agent-file <path>`, which needs a file written into the agent's
+        // directory first — a seam only the builder launch path has, so there is
+        // nothing to inject into a bare architect command. Architect support is
+        // stage 2.
+        console.log('');
+        console.log(chalk.yellow('  ⚠') + ' Kimi is configured as architect shell — this is unsupported.');
+        console.log(chalk.yellow('    ') + 'Kimi is supported for builders only (Issue #1201); architect support is a planned follow-up.');
+        console.log(chalk.yellow('    ') + 'Use codex or claude for the architect (e.g., "codex" or "claude --dangerously-skip-permissions").');
+        warnings++;
+        warningDetails.push({
+          name: 'Shell config',
+          issue: 'Kimi configured as architect shell (builder-only, not architect)',
+          recommendation: 'Set shell.architect to "codex" or "claude --dangerously-skip-permissions" in .codev/config.json',
         });
       } else if (architect.name === 'codex') {
         // Issue #929: codex is a supported architect (config-driven).

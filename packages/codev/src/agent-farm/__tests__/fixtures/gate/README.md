@@ -42,6 +42,45 @@ encodes the expected verdict: `<app>-<state>.<clean|busy>.txt`.
   (default-fg text counts), trust → busy (palette-12 option counts — a blind Enter
   never confirms filesystem trust). The raw measurement (with real render + per-cell
   fg attributes) is archived in the Phase 3 review.
+- **kimi-idle.clean.txt, kimi-draft.busy.txt, kimi-trust.busy.txt** — **real captures**
+  from Kimi Code CLI **0.34.0** under a PTY at the same 110×32 the suite classifies at
+  (harness: `codev/spikes/pir-1201-kimi-gate-measure.mjs`, Issue #1201). Committed raw:
+  unlike the agy captures these embed no account identity — only throwaway `/tmp`
+  worktree paths. Measured facts they encode: kimi draws its composer inside a **rounded
+  box**, so the input row is `` │ > `` with the marker at **column 3**, not the row start
+  (hence its own `markerPattern`, and the classifier's marker exemption spanning the
+  matched region rather than column 0); an idle kimi composer carries **no placeholder
+  text at all** — just the marker and an inverse-space block cursor, which the whitespace
+  rule already skips — so kimi needs **neither** a dim rule nor a `placeholderFgPalette`;
+  typed text is **default-fg at normal intensity** → counted → busy; and the 0.33.0+
+  **folder-trust dialog** has no marker at a row start → `no-composer-marker` → busy, so
+  a blind Enter can never confirm filesystem trust (the same guarantee agy's trust dialog
+  gets). The box bottom (`` ╰───╯ ``, indented one column) is kimi's sole region-end
+  pattern — the shared rule pattern requires the rule glyph to start the line and so
+  cannot bound it.
+- **kimi-multiline.busy.txt, kimi-multiline-bare.busy.txt, kimi-newline-bare.busy.txt,
+  kimi-menu.busy.txt, kimi-picker.busy.txt** — **real captures** (0.34.0, same harness)
+  of the multi-row composer states, which is where a LAST-match marker search goes
+  wrong. kimi renders a two-line draft as `` │ > <line one> `` / `` │   <line two> ``, so
+  a continuation row beginning with `>` matches the marker too and the search settles
+  on it, leaving line one *above* the scanned region. `kimi-multiline-bare` is that
+  false-CLEAN with a real draft above the bare `>` — closed by the profile's
+  `regionStartPatterns` (anchor the region to the box top). `kimi-newline-bare` is the
+  residual the region bound alone cannot close (architect review, 2026-08-09): a
+  newline then `>` renders `` │ > `` / `` │   > `` — row one empty, row two's `>`
+  span-exempted as chrome — so the draft is real but has **zero countable cells** no
+  matter how the region is bounded. It is held on the composer's *shape* instead
+  (`multi-row-draft`), which is sound because box growth was **measured** to be
+  exclusive to multi-line drafts on 0.34.0 (harness:
+  `codev/spikes/pir-1201-kimi-box-growth.mjs` — idle, single-line draft, `/` menu, `@`
+  picker and the post-reply steady state all hold at one interior row; and
+  `pir-1201-kimi-working-states.mjs` — mid-generation, mode chrome, and a draft typed
+  while the agent works, likewise one row). The menu and picker captures pin that kimi
+  draws those lists *outside* the box, below its bottom rule, so neither grows the
+  scanned region. The rule is armed by the profile's `growsWithDraft` flag, **not** by
+  `regionStartPatterns`: `codex-idle.clean.txt` is a real, genuinely empty composer that
+  already spans two interior rows, so arming on the scan bound alone would hold codex
+  mail forever the day codex declared one.
 - **wrapper-boot.busy.txt** — **synthetic** builder launch-loop screen (a born-dirty
   state with no composer marker). App-agnostic: no marker → busy under any profile.
 

@@ -51,7 +51,7 @@ import { handleCanvasRoute, CANVAS_ROUTE_PREFIX } from './canvas-relay.js';
 import { formatArchitectMessage, formatBuilderMessage } from '../utils/message-format.js';
 import type { PtySession } from '../../terminal/pty-session.js';
 import { writeMessageToSession, writeEscapeToSession } from './message-write.js';
-import { makeDeliveryPorts, getMailboxDrainer } from './mailbox-wiring.js';
+import { makeDeliveryPorts, getMailboxDrainer, resolvePacingForSession } from './mailbox-wiring.js';
 import { deliverAgentMailSerialized, type DeliveryPorts } from './mailbox-delivery.js';
 import { deliverCronMail, CRON_SENDER, type CronDeliveryResult } from './cron-delivery.js';
 import {
@@ -1957,6 +1957,11 @@ async function handleSend(
   // bypass — no gate, no mailbox row. ESC ends the running turn so already-queued
   // messages process; the trailing Enter (default) is what lets them through
   // (matching the verified recovery `afx send <b> --raw "$(printf '\x1b')"`).
+  //
+  // Deliberately NOT per-harness paced (Issue #1201), unlike the interrupt path below:
+  // this route writes no text, and Kimi's swallowed-Enter behaviour is paste detection
+  // keyed to a preceding text burst. Unmeasured either way on Kimi, so it is left at the
+  // Spec 1273 timing rather than changed on a guess.
   if (escape) {
     // Awaited: the response must not claim delivery before the ESC and its
     // Enter have actually been written (Spec 1273 verify).
@@ -2020,9 +2025,16 @@ async function handleSend(
     //   disjoint lock); interrupt is the explicit gate-bypassing human action, and closing that
     //   cross-path race would require the mailbox write edge to take this lock too (a separate,
     //   larger change — flagged, not done here).
+    //   Pacing (Issue #1201): the interrupt writes body-then-Enter exactly like a gated
+    //   delivery, so it needs the same per-harness Enter timing — without it a Kimi target's
+    //   interrupt text is typed and never submitted (paste detection swallows the Enter),
+    //   which reads as a silently ignored human bypass. Resolution is advisory/total; a
+    //   miss just means the default timing.
     await submitToSession(result.terminalId, () => {
       session.write('\x03'); // Ctrl+C
-      return writeMessageToSession(session, formattedMessage, noEnter, 100);
+      return writeMessageToSession(
+        session, formattedMessage, noEnter, 100, resolvePacingForSession(session),
+      );
     });
     broadcastMessage({
       type: 'message',

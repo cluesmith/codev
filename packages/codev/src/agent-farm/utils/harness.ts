@@ -17,12 +17,48 @@
  * @see codev/specs/591-af-workspace-failure-with-code.md
  */
 
+import { dirname, join } from 'node:path';
 import { findLatestSessionId, verifySessionOwnership } from './claude-session-discovery.js';
+import {
+  findLatestKimiSessionId,
+  ensureKimiWorkspaceTrust,
+  type KimiDiscoveryOpts,
+} from './kimi-session-discovery.js';
 import { buildWorktreeGuardFiles } from './worktree-write-guard.js';
 
 // =============================================================================
 // Types
 // =============================================================================
+
+/**
+ * Context for provider-owned builder launch scripts (Issue #1201).
+ * Only harnesses whose CLI cannot take a role/prompt via argv implement
+ * `buildBuilderLaunchScript` (currently Kimi); flag-shaped harnesses keep the
+ * generic scripts in spawn-worktree.ts.
+ */
+export interface BuilderLaunchScriptContext {
+  worktreePath: string;
+  /** The resolved builder command string (may include user flags). */
+  baseCmd: string;
+  /**
+   * The harness's own role fragment (`buildScriptRoleInjection().fragment`), or
+   * '' when the spawn carries no role. Passed in rather than recomputed so the
+   * provider-owned script and the generic shapes inject the role identically.
+   */
+  roleFragment: string;
+  /**
+   * Absolute path to `.builder-prompt.txt`, or null when the spawn has no
+   * initial task (`afx spawn --worktree`). A provider whose CLI takes no
+   * positional prompt delivers this some other way — Kimi queues it on the
+   * mailbox — which is why it arrives as a path, not a baked-in string.
+   */
+  taskFile: string | null;
+  /**
+   * The builder id, for a provider that must address this builder at runtime
+   * (Kimi queues its task with `afx send <builderId>`). Absent in worktree mode.
+   */
+  builderId?: string;
+}
 
 export interface HarnessProvider {
   /**
@@ -68,6 +104,19 @@ export interface HarnessProvider {
     relativePath: string;
     content: string;
   }>;
+
+  /**
+   * Optional: one-time side effects a harness needs OUTSIDE the worktree before
+   * its first launch there (Issue #1201). Distinct from `getWorktreeFiles`,
+   * which can only write files inside the worktree.
+   *
+   * Kimi is the only implementer: 0.33.0 added a startup "Trust this folder?"
+   * dialog, and a builder worktree is always a new folder, so an unattended
+   * builder would sit on that dialog forever. It pre-records trust in kimi's
+   * own store. Implementations MUST be idempotent and fail-soft — a failure has
+   * to degrade to the CLI's normal behavior, never abort a spawn.
+   */
+  prepareWorkspace?(worktreePath: string): void;
 
   /**
    * Optional: conversation-session support, for agents whose CLI can pin and
@@ -133,6 +182,34 @@ export interface HarnessProvider {
     args: string[];
     scriptFragment: string;
   } | null;
+
+  /**
+   * Optional: provider-owned builder launch script (Issue #1201). When present,
+   * spawn-worktree.ts uses this INSTEAD of the generic
+   * `${baseCmd} ${roleFragment} "<prompt>"` shapes.
+   *
+   * Kimi is the only implementer, for two reasons the generic shapes cannot
+   * express: its CLI takes **no positional prompt** (so the task must reach it
+   * through the mailbox, queued by the script whenever a fresh conversation
+   * starts), and it mints conversation ids **server-side on the first message**
+   * (so there is no id to pin at launch and the crash path resumes with the
+   * cwd-scoped `-c` instead of `session.resumeScriptFragment`).
+   *
+   * A provider-owned script is still expected to honor the shared contract:
+   * clean exit → keypress-gated FRESH relaunch (#1267/#1317), crash → resume,
+   * repeated fast failures → degrade to fresh. Use {@link launchLoopTail} where
+   * the generic tail fits.
+   */
+  buildBuilderLaunchScript?(ctx: BuilderLaunchScriptContext): string;
+
+  /**
+   * Optional: PTY message pacing for this harness's CLI (Issue #1201).
+   * `enterDelayMs` overrides message-write.ts's default delayed-Enter timing —
+   * CLIs with a longer paste-detection window (Kimi) silently swallow an
+   * Enter that arrives too soon after the message body, so `afx send` never
+   * submits without this.
+   */
+  messagePacing?: { enterDelayMs: number };
 }
 
 /** Custom harness definition from .codev/config.json */
@@ -141,6 +218,49 @@ export interface CustomHarnessConfig {
   roleEnv?: Record<string, string>;
   roleScriptFragment: string;
   roleScriptEnv?: Record<string, string>;
+}
+
+/**
+ * The tail shared by every builder launch loop, appended after the agent
+ * invocation inside `while true; do … done`.
+ *
+ * Issue #1241: exit code 0 is the user deliberately quitting (double Ctrl+C,
+ * `/quit`) — auto-respawning overrides that choice and forces them to race a
+ * second Ctrl+C into the sleep window, where a mistimed one lands in the fresh
+ * agent instead. It also feeds the #1224 class, where a respawn within ~2s
+ * collides with the dying predecessor's session lock. So a clean exit clears
+ * the screen and gates the relaunch on a keypress: recovery stays one keystroke
+ * away without anything happening on its own. Nonzero exits and signal deaths
+ * (bash reports those as 128+N) keep the historical auto-restart — that is what
+ * the loop is for.
+ *
+ * `read` failing means EOF on stdin, i.e. the terminal is gone; exit rather
+ * than spin the loop on an input that will never arrive.
+ *
+ * `onCleanExit` (Issue #1267) is an extra statement run just after the keypress,
+ * before the loop repeats — how the resume variant switches itself over to the
+ * fresh invocation. It sits *after* the `read`, so a terminal that went away
+ * (EOF → `exit 0`) never mutates state on its way out.
+ *
+ * Lives here (not in spawn-worktree.ts, where it was introduced) so
+ * provider-owned launch scripts — currently Kimi's `buildBuilderLaunchScript`
+ * — share the exact same tail as the generic shapes without a circular import
+ * (spawn-worktree.ts already imports from this module). Issue #1201's first
+ * pass duplicated the tail into the Kimi loops and drifted from it the moment
+ * #1244 changed the contract; one definition is what stops that recurring.
+ */
+export function launchLoopTail(onCleanExit?: string): string {
+  const switchToFresh = onCleanExit ? `\n    ${onCleanExit}` : '';
+  return `  status=$?
+  if [ "$status" -eq 0 ]; then
+    clear
+    echo "Agent exited at your request. Press Enter to relaunch fresh, or close this terminal."
+    read -r || exit 0${switchToFresh}
+    continue
+  fi
+  echo ""
+  echo "Agent exited (code $status). Restarting in 2 seconds... (Ctrl+C to quit)"
+  sleep 2`;
 }
 
 // =============================================================================
@@ -215,6 +335,452 @@ export const OPENCODE_HARNESS: HarnessProvider = {
   }]),
 };
 
+// =============================================================================
+// Kimi (Issue #1201 — builder-only)
+// =============================================================================
+
+/**
+ * The agent-definition file the Kimi builder launches with (`--agent-file`).
+ * Written into the worktree by {@link KIMI_HARNESS.getWorktreeFiles}; distinct
+ * from `.builder-role.md` (the raw role every harness writes) because kimi
+ * needs frontmatter and a template body around it.
+ */
+export const KIMI_AGENT_FILE = '.builder-role-agent.md';
+
+/**
+ * Delayed-Enter timing for Kimi PTYs. Kimi's paste-detection window is longer
+ * than Claude's: an Enter arriving too soon after the message body is treated
+ * as part of a paste and NOT submitted. Bisected live against kimi 0.27.0
+ * (PIR #1201): 80ms and 100ms fail; 120ms, 250ms, 500ms, 1000ms submit —
+ * threshold ≈ 100–120ms. Pinned at 1000ms for ~9x margin; re-verified
+ * submitting on 0.34.0 (agent-core-v2). The only cost is submission latency,
+ * which is irrelevant for agent-to-agent messages. Applied via messagePacing.
+ */
+export const KIMI_ENTER_DELAY_MS = 1000;
+
+/** Map the shared `homeDir` test-seam option onto the Kimi store location. */
+function kimiOpts(opts?: { homeDir?: string }): KimiDiscoveryOpts | undefined {
+  return opts?.homeDir ? { kimiHome: join(opts.homeDir, '.kimi-code') } : undefined;
+}
+
+/**
+ * Compose the `--agent-file` body: kimi's agent-definition format is YAML
+ * frontmatter plus a system-prompt template.
+ *
+ * `${base_prompt}` is the load-bearing token — it interpolates kimi's own
+ * default system prompt, so the role EXTENDS the agent's instructions instead
+ * of replacing them (the `claude --append-system-prompt` analogue). Without it
+ * the builder would lose kimi's tool-use and safety preamble wholesale.
+ * Verified on 0.34.0 in both `-p` and interactive TUI mode
+ * (`codev/spikes/pir-1201-kimi-agentfile-probe.mjs`).
+ */
+export function buildKimiAgentFile(roleContent: string): string {
+  return `---
+name: codev-builder
+description: Codev builder role, injected at spawn by Agent Farm.
+---
+\${base_prompt}
+
+# Your Role
+
+${roleContent}
+`;
+}
+
+/**
+ * Append --yolo (auto-approve tools; the Kimi analog of
+ * `claude --dangerously-skip-permissions`) unless the user already passed it.
+ * `--auto` is deliberately NOT used: it suppresses agent→user questions, which
+ * the gate/Q&A workflow depends on, and it conflicts with --yolo (documented).
+ */
+function kimiTuiCmd(baseCmd: string): string {
+  return baseCmd.includes('--yolo') ? baseCmd : `${baseCmd} --yolo`;
+}
+
+/**
+ * Runtime guard for the crash-resume path, emitted into the launch script.
+ *
+ * `kimi -c` does NOT fail when there is nothing to continue — it prints
+ * "No sessions to continue under <cwd>; starting a fresh session." and starts a
+ * fresh one anyway (verified, 0.34.0). That fresh session never saw
+ * `--agent-file` (illegal alongside `-c`), so it would run **roleless** — the
+ * #929 hazard class, silently. So the loop only takes the `-c` path once a
+ * session provably exists for this cwd.
+ *
+ * 0.33.0's TUI mints no session at startup (verified) — the FIRST MESSAGE mints
+ * it — so "has the task landed yet?" and "is there anything to resume?" are the
+ * same question, and this probe answers it directly from the store.
+ *
+ * It prints the NEWEST resumable session id rather than a bare yes/no, because
+ * the loop needs identity, not existence, to honor #1267's sticky-fresh contract:
+ * after a clean exit the superseded id is recorded, and `-c` is only taken when
+ * the newest id has since CHANGED (see the launch script). Existence alone cannot
+ * distinguish "the fresh conversation has started" from "the conversation the user
+ * deliberately ended is still the only one here". The boolean uses derive from
+ * "printed something", so there is one probe and one mirror, not two snippets.
+ *
+ * Printing the newest id is only meaningful because `kimi -c` continues the NEWEST
+ * session for the cwd — measured on 0.34.0 with two live sessions in one directory,
+ * confirmed by both a content oracle and a store-identity oracle, no prompt and no
+ * new session minted (`codev/spikes/pir-1201-kimi-continue-newest-probe.mjs`).
+ *
+ * Fails CLOSED: any error (no store, unreadable dir, malformed JSON) prints
+ * nothing, and an empty answer routes the loop to a fresh launch WITH the role,
+ * which is always safe.
+ *
+ * It mirrors {@link findLatestKimiSessionId} field for field — `readStateJson`'s
+ * PER-FIELD `typeof` check on `cwd` then `workDir` (not `cwd ?? workDir`, which
+ * short-circuits on a non-string `cwd` where discovery falls through),
+ * `sameDir`'s realpath tolerance, `isResumable`'s archived / `session_` filters,
+ * and now `parseTimestamp`'s ranking — because the two answer the same question in
+ * two languages and a divergence is a silent bug in EITHER direction: a probe that
+ * names a session discovery would not sends `-c` down its roleless
+ * nothing-to-continue path, and a probe that says no where discovery says yes
+ * restarts a crashed builder with no context. Naming the WRONG session is the new
+ * third direction, and it is the one this finding is about. The generated snippet
+ * is pinned against fixture stores by a unit test that EXECUTES it and asserts the
+ * printed id equals discovery's, so the mirroring cannot rot.
+ */
+const KIMI_NEWEST_SESSION_PROBE =
+  'const {readdirSync,readFileSync,realpathSync}=require("fs"),{join}=require("path");' +
+  'const r=join(process.env.KIMI_CODE_HOME||join(require("os").homedir(),".kimi-code"),"sessions");' +
+  // Mirrors realpathOrSelf(): canonicalize, falling back to the literal when
+  // realpath fails, so a symlinked worktree still matches. Deliberately does NOT
+  // pre-strip a trailing slash — realpathSync already normalizes one away for any
+  // directory that exists, and stripping first was the probe's only divergence
+  // from sameDir(): for a path that does NOT exist, `/ghost/` would canonicalize
+  // to `/ghost` here and stay `/ghost/` there, letting the probe name a session
+  // discovery would reject (the unsafe direction).
+  'const n=p=>{try{return realpathSync(p)}catch{return p}};' +
+  'const a0=process.argv[1],c=n(a0);' +
+  // Mirrors parseTimestamp(): finite number as-is, string via Date.parse, anything
+  // else unparseable. Ranking must match findLatestKimiSessionId or the script and
+  // the TypeScript would disagree about WHICH session `-c` is about to continue.
+  'const ts=v=>typeof v==="number"?(Number.isFinite(v)?v:null):' +
+  'typeof v==="string"?(Number.isNaN(Date.parse(v))?null:Date.parse(v)):null;' +
+  'let ws=[];try{ws=readdirSync(r,{withFileTypes:true}).filter(e=>e.isDirectory())}catch{}' +
+  'let bi=null,bt=-Infinity;' +
+  'for(const w of ws){let ss=[];' +
+  // Each level gets its OWN try. A stray non-directory under sessions/ (a
+  // .DS_Store) made readdirSync throw ENOTDIR into the single outer try, which
+  // aborted the WHOLE scan — one junk file silently disabled resume for every
+  // worktree on the machine.
+  'try{ss=readdirSync(join(r,w.name),{withFileTypes:true})' +
+  '.filter(e=>e.isDirectory()&&e.name.startsWith("session_"))}catch{continue}' +
+  'for(const s of ss){try{const j=JSON.parse(readFileSync(join(r,w.name,s.name,"state.json"),"utf8"));' +
+  // Per-FIELD typeof, exactly as readStateJson does. `j.cwd??j.workDir` diverged:
+  // a non-string `cwd` alongside a valid `workDir` short-circuits the fallback
+  // here while discovery still reads workDir, so the two disagreed on the winner.
+  'if(j.archived===true)continue;' +
+  'const d=typeof j.cwd==="string"?j.cwd:j.workDir;' +
+  'if(typeof d!=="string"||(d!==a0&&n(d)!==c))continue;' +
+  // `?? -1` mirrors discovery: an unparseable timestamp ranks below every real
+  // epoch but above the -Infinity sentinel, so a lone malformed match still wins.
+  'const k=ts(j.updatedAt)??-1;if(k>bt){bt=k;bi=s.name}}catch{}}}' +
+  'if(bi===null)process.exit(1);' +
+  'console.log(bi)';
+
+export const KIMI_HARNESS: HarnessProvider = {
+  buildRoleInjection: () => {
+    throw new Error(
+      'Kimi is only supported as a builder shell, not as an architect shell ' +
+      '(stage 2 — see issue #1201). Kimi takes no inline system-prompt argument: ' +
+      'its role mechanism is "--agent-file <path>", which needs a file written ' +
+      'into the agent\'s directory first — a seam only the builder launch path ' +
+      'has. Configure a different shell for the architect ' +
+      '(e.g., "claude --dangerously-skip-permissions" or "codex").',
+    );
+  },
+  // Role rides `--agent-file` (kimi 0.31.0+), pointed at the agent-definition
+  // file getWorktreeFiles writes next to the raw role. `filePath` is
+  // `<worktree>/.builder-role.md`, so its directory is the worktree.
+  buildScriptRoleInjection: (_content, filePath) => ({
+    fragment: `--agent-file '${shellEscapeSingleQuote(join(dirname(filePath), KIMI_AGENT_FILE))}'`,
+    env: {},
+  }),
+
+  // One file: the `--agent-file` definition (role + ${base_prompt}), written next
+  // to the raw `.builder-role.md` every harness gets. A roleless spawn writes
+  // nothing — there is no Kimi-launch MARKER any more. The first pass had one
+  // (`.builder-kimi`) for Tower's pacing probe, and it obliged every launch shape
+  // to remember to write it — an obligation the bare shape missed, which cost a
+  // maintainer review cycle. Pacing now reads the harness out of the generated
+  // `.builder-start.sh` instead (see resolvePacingForSession in mailbox-wiring.ts):
+  // same override-proof answer, derived from an artifact that cannot be forgotten
+  // because the launcher itself is the artifact.
+  getWorktreeFiles: (roleContent) => (
+    roleContent
+      ? [{ relativePath: KIMI_AGENT_FILE, content: buildKimiAgentFile(roleContent) }]
+      : []
+  ),
+
+  // Builder resume (afx spawn --resume). Discovery answers one question — does
+  // a conversation exist for exactly this worktree? — and the ANSWER, not the
+  // id, is what the script uses: the relaunch runs the documented cwd-scoped
+  // `kimi -c`, so no undocumented id is baked into the generated bash. The id
+  // still rides the return value because callers log it and `spawn.ts` treats a
+  // null as "nothing to resume" (→ a fresh, role-carrying launch).
+  //
+  // #1145 semantics hold: the store records each session's exact cwd, and a
+  // builder worktree belongs to one builder, so a match cannot be some other
+  // conversation the user happened to hold in the same directory.
+  buildResume: (absolutePath, opts) => {
+    const sessionId = findLatestKimiSessionId(absolutePath, kimiOpts(opts));
+    if (!sessionId) return null;
+    return {
+      sessionId,
+      args: ['-c'],
+      scriptFragment: '-c',
+    };
+  },
+
+  // 0.33.0's folder-trust dialog would block an unattended builder before its
+  // composer ever renders; pre-record trust for the worktree Codev just made.
+  // Idempotent and fail-soft — see ensureKimiWorkspaceTrust.
+  prepareWorkspace: (worktreePath) => { ensureKimiWorkspaceTrust(worktreePath); },
+
+  buildBuilderLaunchScript: (ctx) => {
+    const tuiCmd = kimiTuiCmd(ctx.baseCmd);
+    const fresh = ctx.roleFragment ? `${tuiCmd} ${ctx.roleFragment}` : tuiCmd;
+
+    // Bare shape (no role, no task — `afx spawn --worktree`, or a spawn with
+    // neither): the plain loop every session-less harness gets, byte for byte.
+    // Nothing to pin, nothing to queue; a clean exit relaunches fresh because a
+    // roleless kimi launch IS fresh. Pacing still resolves for this shape: `kimi`
+    // sits in command position on its own line, which is what the launch-script
+    // harness probe matches on.
+    if (!ctx.taskFile) {
+      return `#!/bin/bash
+cd '${shellEscapeSingleQuote(ctx.worktreePath)}'
+while true; do
+  ${fresh}
+${launchLoopTail()}
+done
+`;
+    }
+
+    // Task-carrying shape. kimi takes no positional prompt, so the task cannot
+    // ride argv the way claude's does — it is queued on the Spec 1313 mailbox
+    // and delivered by the render gate onto a verified-empty composer. That is
+    // also why the queue call lives INSIDE the fresh launch: a fresh
+    // conversation needs the task re-delivered, and only the script knows when
+    // the loop starts one. It mirrors claude's prompt-on-fresh semantics
+    // exactly, including on a script re-run.
+    //
+    // Never a direct PTY write (Spec 1313 forbids it for message writers), so a
+    // busy line, a boot screen, or 0.33.0's folder-trust dialog simply holds the
+    // message instead of corrupting or losing it.
+    // Every interpolated value enters the script exactly once, inside a
+    // single-quoted assignment escaped by shellEscapeSingleQuote — never inside
+    // executable double-quoted text. The recovery hints then print the values
+    // through `printf '%s\n'` with the shell VARIABLE expanded, because bash does
+    // not re-scan an expansion for command substitution: a builder id or task
+    // path containing a backtick or `$(…)` is printed literally instead of being
+    // executed when the hint is shown (CMAP 2026-08-09, codex #3 / claude F3).
+    const queueTask = `codev_builder_id='${shellEscapeSingleQuote(ctx.builderId ?? '')}'
+codev_task_file='${shellEscapeSingleQuote(ctx.taskFile)}'
+# Set once the task is on the mailbox, so a crash-restart loop cannot enqueue the
+# same mission every two seconds while kimi is failing to start (the mailbox
+# PERSISTS a held row — it does not need re-queueing to survive). Reset only on
+# the human-gated clean-exit relaunch below, which is a deliberate new
+# conversation and does want its task again.
+#
+# ACCEPTED TRADEOFF in the other direction (architect review, 2026-08-09). The
+# clean-exit reset assumes the first row was DELIVERED — the common case, but not
+# a guarantee. Seeing a composer is necessary, not sufficient: the gate also has to
+# have polled it EMPTY at least once. So the row can still be held if they quit at
+# a screen that never rendered a composer (the 0.33.0 folder-trust dialog is the
+# realistic case), or if they typed into the composer and quit within a couple of
+# backstop ticks. The reset then queues a second identical row and both eventually
+# deliver — one mission, stated twice. Left as-is deliberately:
+# de-duplicating means either a delivery receipt the script cannot see or a
+# mailbox-side identity check, and the failure is a duplicated instruction to an
+# agent that has not started yet — recoverable by reading, unlike the crash-loop
+# direction above, which floods a mailbox no one is draining.
+codev_task_queued=0
+codev_queue_task() {
+  [ "$codev_task_queued" = 1 ] && return 0
+  if ! command -v afx >/dev/null 2>&1; then
+    printf '%s\\n' "WARNING: afx is not on PATH — the builder's task was not queued." >&2
+    printf '%s\\n' "         Queue it with: afx send $codev_builder_id \\"\\$(cat $codev_task_file)\\"" >&2
+    return 0
+  fi
+  if afx send "$codev_builder_id" "$(cat "$codev_task_file")" >/dev/null 2>&1; then
+    codev_task_queued=1
+    return 0
+  fi
+  printf '%s\\n' "WARNING: could not queue the builder's task (is Tower running?)." >&2
+  printf '%s\\n' "         Retry with: afx send $codev_builder_id \\"\\$(cat $codev_task_file)\\"" >&2
+}`;
+
+    // Crash restart resumes the conversation (#1233's builder-side contract) via
+    // the DOCUMENTED, cwd-scoped `-c` — no undocumented session id in the script.
+    // Guarded because `-c` with nothing to continue does not fail: it starts a
+    // fresh session that never saw --agent-file, i.e. a ROLELESS builder
+    // (verified, 0.34.0). The guard fails closed, so the fallback is always the
+    // role-carrying fresh launch.
+    //
+    // The guard compares session IDENTITY, not mere existence, to honor #1267's
+    // sticky-fresh contract ("clean exit → fresh rerun, no recovery"). Because
+    // `-c` is cwd-scoped rather than id-pinned, existence alone leaves a real gap:
+    // a clean exit relaunches fresh, 0.33.0+ mints no session until the first
+    // message lands, and a crash inside that pre-mint window would find the
+    // just-abandoned conversation still the newest one for the cwd and continue
+    // IT — resurrecting exactly what the user walked away from, and delivering the
+    // re-queued task into it. claude's loop closes this by minting a new id and
+    // never naming the superseded one; kimi cannot mint on demand, so the loop
+    // records the superseded id at clean exit and refuses `-c` until the newest id
+    // differs. A crash AFTER the new conversation mints resumes normally.
+    //
+    // Two edges this deliberately does NOT cover, both traced and both accepted:
+    //
+    //  - The superseded id lives in the loop's memory, so it does not survive the
+    //    terminal being closed and re-created. That is the intended boundary, not
+    //    an oversight: `afx spawn --resume` means "resume this builder", and entry
+    //    semantics are unchanged — a worktree holding a conversation is resumed.
+    //    (claude's equivalent survives only because its id is persisted for the
+    //    `--resume` pin; kimi writes no session id to disk by design.)
+    //  - If the store GC'd the just-superseded session while an OLDER abandoned one
+    //    for the same cwd survived, the newest id would differ from the superseded
+    //    one and `-c` would continue that older conversation. It requires a GC that
+    //    drops the NEWEST session while keeping older ones — the opposite of any
+    //    plausible retention policy — so it is recorded rather than engineered
+    //    against; closing it would mean accumulating every superseded id.
+    //
+    // And one accepted COST, in the other direction: when the clean-exit probe
+    // fails outright, `codev_resume_blocked` refuses `-c` for the rest of this
+    // loop's life rather than risk resurrecting the ended conversation. A later
+    // crash then restarts fresh instead of continuing, losing conversation
+    // continuity (never the role, and never the task — the mailbox still holds it).
+    // It self-heals at the next clean exit, which re-establishes a baseline.
+    return `#!/bin/bash
+cd '${shellEscapeSingleQuote(ctx.worktreePath)}'
+codev_fast_fail_secs="\${CODEV_LAUNCH_FAST_FAIL_SECS:-15}"
+
+${queueTask}
+
+# Prints the newest resumable session id for this cwd, or nothing. Empty output
+# (no store, unreadable store, malformed json, no match) means "do not resume" —
+# the fail-closed direction, whose fallback is the role-carrying fresh launch.
+codev_newest_session() {
+  node -e '${KIMI_NEWEST_SESSION_PROBE}' "$PWD" 2>/dev/null
+}
+
+# The id of the conversation the human deliberately ended, recorded at clean exit.
+# Empty until then, which is why the same predicate serves script entry: with
+# nothing superseded, "newest differs from superseded" reduces to "one exists".
+codev_superseded_id=''
+# Set when a clean exit could not read the store: we then have no baseline, so a
+# later session cannot be told apart from the one just ended. Refuse to resume
+# until the next clean exit re-establishes one. Fresh always carries the role, so
+# the cost is losing crash-resume continuity, never losing the role.
+codev_resume_blocked=0
+
+codev_should_resume() {
+  [ "$codev_resume_blocked" = 1 ] && return 1
+  # BOTH signals. The status is what makes this fail closed: stdout alone would
+  # accept anything written to it by something other than the probe (a node
+  # wrapper on PATH, NODE_OPTIONS=--require preloading an instrumentation module
+  # that prints), and a non-empty answer against an empty store sends the loop to
+  # "kimi -c" with nothing to continue — which does not fail, it starts a session
+  # that never saw --agent-file, i.e. the silently roleless builder this whole
+  # guard exists to prevent. Declared first, assigned second: a combined
+  # "local x=$(cmd)" would mask the substitution's status behind local's own.
+  local codev_newest
+  codev_newest=$(codev_newest_session) || return 1
+  [ -n "$codev_newest" ] && [ "$codev_newest" != "$codev_superseded_id" ]
+}
+
+codev_launch_fresh() {
+  codev_queue_task
+  ${fresh}
+}
+
+codev_launch_resume() {
+  ${tuiCmd} -c
+}
+
+# Entry is self-configuring, which is what makes 'afx spawn --resume' and a
+# Tower-side terminal re-create do the right thing without a second script
+# shape: a worktree that already holds a conversation is resumed (and the task
+# NOT re-queued); a virgin one starts fresh.
+if codev_should_resume; then
+  codev_launch=codev_launch_resume
+else
+  codev_launch=codev_launch_fresh
+fi
+codev_fast_fails=0
+while true; do
+  codev_started=$SECONDS
+  "$codev_launch"
+  status=$?
+  codev_elapsed=$(( SECONDS - codev_started ))
+  if [ "$status" -eq 0 ]; then
+    clear
+    echo "Agent exited at your request. Press Enter to relaunch fresh, or close this terminal."
+    read -r || exit 0
+    # Retire the conversation the human just ended: until a NEW session mints,
+    # the crash branch must not treat this id as something to continue. Recorded
+    # after the Enter gate, while it is still the newest for this cwd — and after
+    # kimi has flushed state.json, rather than during its teardown. Re-recorded on
+    # every clean exit, so iterated quits supersede each conversation in turn.
+    #
+    # A FAILED probe here is not the same as an empty store: it means we could not
+    # read the baseline at all, and recording '' would leave the just-ended session
+    # comparing "different" on the next crash — resurrecting exactly what this
+    # branch exists to retire. So distinguish the two by status and block resume
+    # outright when the baseline is unknown.
+    if codev_prev_id=$(codev_newest_session); then
+      codev_superseded_id="$codev_prev_id"
+      codev_resume_blocked=0
+    else
+      codev_resume_blocked=1
+    fi
+    codev_launch=codev_launch_fresh
+    codev_task_queued=0
+    codev_fast_fails=0
+    continue
+  fi
+  if [ "$codev_elapsed" -lt "$codev_fast_fail_secs" ]; then
+    codev_fast_fails=$(( codev_fast_fails + 1 ))
+  else
+    codev_fast_fails=0
+  fi
+  echo ""
+  if [ "$codev_fast_fails" -ge 3 ]; then
+    # Deliberately does NOT say "with the original task": this branch does not reset
+    # codev_task_queued, so if the task DID reach the mailbox, codev_queue_task
+    # early-returns and nothing is re-queued. That is the correct behavior (an
+    # undelivered row PERSISTS on the mailbox; re-queueing would duplicate it) — but
+    # the operator has to be told which case they are in, and there are two, because
+    # the flag is only set on a SUCCESSFUL afx send. If queueing never succeeded (afx
+    # off PATH, Tower down) the flag is still 0 and the fresh launch below really does
+    # retry it, so an unconditional "still queued" would be a lie.
+    echo "Agent failing immediately (code $status). Starting a fresh conversation in 2 seconds... (Ctrl+C to quit)"
+    if [ "$codev_task_queued" = 1 ]; then
+      echo "  The task is on the mailbox and is not re-queued; if it already reached the dead session, re-send it with 'afx send'."
+    else
+      echo "  The task was never queued (see the warning above) — the fresh conversation will retry it."
+    fi
+    codev_launch=codev_launch_fresh
+    codev_fast_fails=0
+  elif codev_should_resume; then
+    echo "Agent exited (code $status). Resuming the conversation in 2 seconds... (Ctrl+C to quit)"
+    codev_launch=codev_launch_resume
+  else
+    # Either nothing to continue, or the only thing to continue is the conversation
+    # the human ended — the pre-mint window after a clean exit. Fresh, both times.
+    echo "Agent exited (code $status) before starting a conversation. Relaunching fresh in 2 seconds... (Ctrl+C to quit)"
+    codev_launch=codev_launch_fresh
+  fi
+  sleep 2
+done
+`;
+  },
+
+  messagePacing: { enterDelayMs: KIMI_ENTER_DELAY_MS },
+};
+
 /**
  * Exported for Spec 1273: `afx reset` identifies a running builder's harness from
  * its launch script and must check `supportsContextReset` before typing into the
@@ -224,6 +790,7 @@ export const BUILTIN_HARNESSES: Record<string, HarnessProvider> = {
   claude: CLAUDE_HARNESS,
   codex: CODEX_HARNESS,
   opencode: OPENCODE_HARNESS,
+  kimi: KIMI_HARNESS,
 };
 
 /**
@@ -438,6 +1005,7 @@ export function detectHarnessFromCommand(command: string): string | undefined {
   if (basename.includes('codex')) return 'codex';
   if (basename.includes('gemini')) return 'gemini';
   if (basename.includes('opencode')) return 'opencode';
+  if (basename.includes('kimi')) return 'kimi';
 
   return undefined;
 }

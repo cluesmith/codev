@@ -19,9 +19,9 @@ import { gunzipSync } from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import { RingBuffer } from '../../terminal/ring-buffer.js';
 import { SessionScreen } from '../../terminal/session-screen.js';
-import { classifyScreen, classifyBuffer } from '../servers/render-gate.js';
+import { classifyScreen, classifyBuffer, markerSpanEnd } from '../servers/render-gate.js';
 import type { RingSnapshot, GateProfile } from '../servers/render-gate.js';
-import { CLAUDE_PROFILE, CODEX_PROFILE, AGY_PROFILE, resolveProfile } from '../servers/gate-profiles.js';
+import { CLAUDE_PROFILE, CODEX_PROFILE, AGY_PROFILE, KIMI_PROFILE, resolveProfile } from '../servers/gate-profiles.js';
 
 const COLS = 110;
 const ROWS = 32;
@@ -51,13 +51,14 @@ const FIXTURE_DIR = fileURLToPath(new URL('./fixtures/gate', import.meta.url));
 function profileForFixture(name: string): GateProfile {
   if (name.startsWith('codex')) return CODEX_PROFILE;
   if (name.startsWith('agy')) return AGY_PROFILE;
+  if (name.startsWith('kimi')) return KIMI_PROFILE;
   return CLAUDE_PROFILE; // claude-* and the marker-less wrapper/boot fixture
 }
 
 describe('render-gate — real captured fixtures (Spec 1313)', () => {
   const fixtures = readdirSync(FIXTURE_DIR).filter((f) => f.endsWith('.txt')).sort();
 
-  it('the required states are all captured (claude+codex idle/draft/menu/picker, agy idle/draft/trust, wrapper/boot)', () => {
+  it('the required states are all captured (claude+codex+kimi idle/draft/menu/picker, agy+kimi trust, kimi multiline, wrapper/boot)', () => {
     for (const required of [
       'claude-idle.clean',
       'claude-draft.busy',
@@ -70,6 +71,21 @@ describe('render-gate — real captured fixtures (Spec 1313)', () => {
       'agy-idle.clean',
       'agy-draft.busy',
       'agy-trust.busy',
+      'kimi-idle.clean',
+      'kimi-draft.busy',
+      'kimi-trust.busy',
+      // The multi-row composer states. `kimi-multiline-bare` is the false-CLEAN
+      // this profile's regionStartPatterns exists to close — captured, not
+      // constructed — and menu/picker are the screen class where a LAST-match
+      // marker search is most likely to settle on the wrong row.
+      'kimi-multiline.busy',
+      'kimi-multiline-bare.busy',
+      // The all-exempt draft: every row is whitespace or whitespace+`>`, so no
+      // amount of correct region bounding produces a countable cell. Held on the
+      // region's SHAPE instead (see the multi-row-draft rule).
+      'kimi-newline-bare.busy',
+      'kimi-menu.busy',
+      'kimi-picker.busy',
       'wrapper-boot.busy',
     ]) {
       expect(fixtures.some((f) => f.startsWith(required))).toBe(true);
@@ -91,6 +107,214 @@ describe('render-gate — real captured fixtures (Spec 1313)', () => {
     const snap = snapshotFromRaw(raw);
     expect((await classifyScreen(snap, CLAUDE_PROFILE)).detail).toBe('no-composer-marker');
     expect((await classifyScreen(snap, CODEX_PROFILE)).clean).toBe(false);
+  });
+});
+
+/**
+ * GUARDRAIL for the one cross-cutting edit Issue #1201 makes to shared, just-merged
+ * gate logic: the classifier's marker exemption moved from `col === 0` to
+ * `col < markerSpanEnd(...)`. Every OTHER app's verdicts must be bit-identical
+ * before and after.
+ *
+ * Two independent lines of evidence, because "the fixtures still pass" alone would
+ * not distinguish "unchanged" from "changed but not covered":
+ *
+ *  1. The exact span each shipped profile yields. That number IS the no-op argument:
+ *     claude/codex get 1 (literally the old `col === 0`), agy gets 2 whose extra cell
+ *     is the space in `> ` — already skipped one line earlier by the whitespace rule,
+ *     which runs BEFORE the marker check. If any of these numbers ever moves, the
+ *     no-op claim is void and this test says so.
+ *  2. Behavioural proof in the only direction that can cause harm. Over-skipping would
+ *     swallow real user text and return a false CLEAN — the corruption the gate exists
+ *     to prevent. So each profile is given the tightest possible draft: a single
+ *     character in the first cell the exemption could wrongly reach. All must stay busy.
+ */
+describe('render-gate — marker-span exemption is a no-op for claude/codex/agy (Issue #1201 guardrail)', () => {
+  it('yields exactly the old column-0 span for claude and codex', () => {
+    // `^[❯›]` matches one cell at index 0 → markerEnd 1 → `col < 1` ≡ `col === 0`.
+    expect(markerSpanEnd('❯ ', CLAUDE_PROFILE.markerPattern)).toBe(1);
+    expect(markerSpanEnd('› ', CODEX_PROFILE.markerPattern)).toBe(1);
+  });
+
+  it('yields span 2 for agy, whose extra cell is the whitespace the classifier already skipped', () => {
+    // `^> ` matches TWO cells; cell 1 is a space by construction of the pattern, and the
+    // whitespace guard runs before the marker guard, so it was never counted either way.
+    expect(markerSpanEnd('> ', AGY_PROFILE.markerPattern)).toBe(2);
+    expect('> '[1]).toBe(' ');
+  });
+
+  it('yields span 4 for kimi — the column-3 marker the change exists for', () => {
+    expect(markerSpanEnd(' │ > ', KIMI_PROFILE.markerPattern)).toBe(4);
+  });
+
+  it('does not swallow a 1-char draft sitting in the first exempt-adjacent cell', async () => {
+    // claude/codex: the draft's `x` is at col 1, immediately past a span of 1.
+    for (const p of [CLAUDE_PROFILE, CODEX_PROFILE]) {
+      const marker = p === CLAUDE_PROFILE ? '❯' : '›';
+      const snap = snapshotFromRaw(screen(`${marker}x`, '──────────────────────'));
+      expect(await classifyScreen(snap, p)).toMatchObject({ clean: false, detail: 'user-text' });
+    }
+    // agy: `x` at col 2, immediately past a span of 2.
+    expect(await classifyScreen(
+      snapshotFromRaw(screen('> x', '──────────────────────')), AGY_PROFILE,
+    )).toMatchObject({ clean: false, detail: 'user-text' });
+  });
+
+  it('never treats a non-space second cell as part of agy\'s marker (the span cannot over-reach)', async () => {
+    // `>x` does not match `^> ` at all, so it is not a marker row — the screen has no
+    // composer and is held. The exemption can therefore never reach a typed character:
+    // the only way to get span 2 is for cell 1 to BE a space.
+    expect(markerSpanEnd('>x', AGY_PROFILE.markerPattern)).toBe(1); // no match → the safe default
+    expect(await classifyScreen(
+      snapshotFromRaw(screen('>x', '──────────────────────')), AGY_PROFILE,
+    )).toMatchObject({ clean: false, detail: 'no-composer-marker' });
+  });
+
+  it('is what makes kimi\'s idle composer clean — the `>` glyph is its only occupancy', async () => {
+    // Direct regression pin for the change's PURPOSE, against the real 0.34.0 capture.
+    // A profile identical to kimi's but whose marker stops before the `>` (span 2, the
+    // box edge only) leaves that glyph counted — exactly what the old column-0 rule did —
+    // and the genuinely-empty composer classifies `user-text`, i.e. holds its mail forever.
+    const raw = readFileSync(`${FIXTURE_DIR}/kimi-idle.clean.txt`, 'utf8');
+    const shortMarker: GateProfile = { ...KIMI_PROFILE, markerPattern: /^\s*│/ };
+    expect(await classifyScreen(snapshotFromRaw(raw), shortMarker))
+      .toMatchObject({ clean: false, detail: 'user-text' });
+    // With the shipped profile's full span, the same bytes are clean.
+    expect(await classifyScreen(snapshotFromRaw(raw), KIMI_PROFILE))
+      .toMatchObject({ clean: true, detail: 'empty' });
+  });
+
+  it('scans the WHOLE kimi composer box, so a draft above a bare-`>` row is still counted', async () => {
+    // The false-CLEAN found by the 3-way review (2026-08-09, claude F1), pinned against
+    // the real 0.34.0 capture rather than a constructed screen. kimi renders a two-line
+    // draft as `│ > implement the whole feature` / `│   >`; the second row matches the
+    // marker, findMarkerRow takes the LAST match, so scanning from the marker row left
+    // the real draft ABOVE the region and the composer read empty — a queued message
+    // would then have been typed on top of unsent user text.
+    const raw = readFileSync(`${FIXTURE_DIR}/kimi-multiline-bare.busy.txt`, 'utf8');
+    expect(await classifyScreen(snapshotFromRaw(raw), KIMI_PROFILE))
+      .toMatchObject({ clean: false, detail: 'user-text' });
+
+    // …and the fix is specifically the region start: the SAME bytes under a profile
+    // identical except that it declares no upper bound reproduce the old false CLEAN.
+    // If this ever stops classifying clean, the regionStartPatterns above is no longer
+    // what is protecting the composer, and this test has stopped testing the fix.
+    const { regionStartPatterns: _dropped, ...unbounded } = KIMI_PROFILE;
+    expect(await classifyScreen(snapshotFromRaw(raw), unbounded as GateProfile))
+      .toMatchObject({ clean: true, detail: 'empty' });
+  });
+
+  it('holds an all-exempt multi-row kimi draft, which no cell count can catch', async () => {
+    // Architect review 2026-08-09, finding 1. Enter a newline then `>` and kimi renders
+    // `│ > ` / `│   >`: row 1 is empty, row 2 matches the marker so its `>` is
+    // span-exempted as chrome. userCells is 0 with the region bounded exactly right —
+    // the cell count is simply blind here, and a queued message would be typed on top
+    // of the unsent draft. Real 0.34.0 capture, not a constructed screen.
+    const raw = readFileSync(`${FIXTURE_DIR}/kimi-newline-bare.busy.txt`, 'utf8');
+    expect(await classifyScreen(snapshotFromRaw(raw), KIMI_PROFILE))
+      .toMatchObject({ clean: false, detail: 'multi-row-draft' });
+
+    // …and the before/after half: the SAME bytes under a profile identical except that
+    // it declares no upper bound reproduce the false CLEAN. This pins that the rule is
+    // what protects this screen — if it ever stops classifying clean, the fixture has
+    // drifted and this test has stopped testing the fix.
+    const { regionStartPatterns: _dropped, ...unbounded } = KIMI_PROFILE;
+    expect(await classifyScreen(snapshotFromRaw(raw), unbounded as GateProfile))
+      .toMatchObject({ clean: true, detail: 'empty' });
+  });
+
+  it('leaves the multi-row rule inert for the profiles that do not opt in', async () => {
+    // This is NOT a hypothetical shape. codex's real, captured, genuinely-EMPTY composer
+    // spans TWO interior rows under its shipped profile (measured across every fixture:
+    // codex-idle marker=18 start=18 end=20), so the rule's geometric predicate is
+    // already true on a screen that must stay clean. The opt-in gates are the only
+    // thing standing between that capture and codex mail being held forever — which is
+    // exactly why arming lives in its own field rather than riding regionStartPatterns.
+    const codexIdle = readFileSync(`${FIXTURE_DIR}/codex-idle.clean.txt`, 'utf8');
+    expect(await classifyScreen(snapshotFromRaw(codexIdle), CODEX_PROFILE))
+      .toMatchObject({ clean: true, detail: 'empty' });
+
+    // The differential, on the SAME BYTES: opt the profile in and that identical empty
+    // screen flips to busy. Without this half, deleting the rule outright would leave
+    // the inertness assertion above still passing.
+    const armed: GateProfile = {
+      ...CODEX_PROFILE,
+      regionStartPatterns: [/^\s*$/], // any blank line above the marker bounds the region
+      growsWithDraft: true,
+    };
+    expect(await classifyScreen(snapshotFromRaw(codexIdle), armed))
+      .toMatchObject({ clean: false, detail: 'multi-row-draft' });
+  });
+
+  it('needs BOTH opt-ins: a region start alone never arms the rule', async () => {
+    // The decoupling itself (CMAP 2026-08-09, codex #1 / claude Q5). A profile that
+    // bounds its scan but makes no claim about box growth must classify exactly as it
+    // did before this rule existed — otherwise declaring a region start for an
+    // unrelated reason (a header line, a boxed redesign) is a silent delivery outage.
+    const codexIdle = readFileSync(`${FIXTURE_DIR}/codex-idle.clean.txt`, 'utf8');
+    const boundedOnly: GateProfile = { ...CODEX_PROFILE, regionStartPatterns: [/^\s*$/] };
+    expect(await classifyScreen(snapshotFromRaw(codexIdle), boundedOnly))
+      .toMatchObject({ clean: true, detail: 'empty' });
+
+    // …and the converse: growsWithDraft without a region start is inert too, because
+    // `endRow - startRow` would then measure the distance to the status line rather
+    // than the composer's height — a number the rule has no business reading.
+    const growsOnly: GateProfile = { ...CODEX_PROFILE, growsWithDraft: true };
+    expect(await classifyScreen(snapshotFromRaw(codexIdle), growsOnly))
+      .toMatchObject({ clean: true, detail: 'empty' });
+  });
+
+  it('treats an EMPTY regionStartPatterns array as unbounded in both places that read it', async () => {
+    // The drift the shared hasRegionStart predicate exists to prevent. findRegionStart
+    // falls back to `startRow = markerRow` for an empty array; if the rule instead read
+    // it as "bounded" (a plain truthiness check on the array would), the two would
+    // disagree and the rule would fire on a region it never bounded.
+    const codexIdle = readFileSync(`${FIXTURE_DIR}/codex-idle.clean.txt`, 'utf8');
+    const armed: GateProfile = { ...CODEX_PROFILE, regionStartPatterns: [], growsWithDraft: true };
+    expect(await classifyScreen(snapshotFromRaw(codexIdle), armed))
+      .toMatchObject({ clean: true, detail: 'empty' });
+  });
+
+  it('kimi is the only shipped profile that opts into the rule, and it declares both fields', async () => {
+    for (const p of [CLAUDE_PROFILE, CODEX_PROFILE, AGY_PROFILE]) {
+      expect(p.growsWithDraft).toBeUndefined();
+    }
+    expect(KIMI_PROFILE.growsWithDraft).toBe(true);
+    // growsWithDraft is meaningless without a box top to measure height from, so the
+    // two must be declared together. Pinned as an invariant rather than a convention.
+    expect(KIMI_PROFILE.regionStartPatterns?.length).toBeGreaterThan(0);
+  });
+
+  it('holds a boxed composer whose box top is off-screen instead of scanning a partial region', async () => {
+    // A marker row with no `╭` above it is a torn/mid-repaint frame for a boxed app.
+    // The region has no proven upper bound, so the safe answer is hold — the same call
+    // findRegionEnd already makes downward.
+    const snap = snapshotFromRaw(screen(' │   >', ' ╰────────────'));
+    expect(await classifyScreen(snap, KIMI_PROFILE))
+      .toMatchObject({ clean: false, detail: 'no-region-start' });
+  });
+
+  it('leaves claude/codex/agy on the marker row exactly as before (no region start declared)', async () => {
+    // The new upper bound is opt-in. These profiles declare none, so findRegionStart
+    // returns markerRow and the scan is byte-identical to the pre-change behavior —
+    // including that a row ABOVE the composer is never counted as draft text.
+    for (const p of [CLAUDE_PROFILE, CODEX_PROFILE, AGY_PROFILE]) {
+      expect(p.regionStartPatterns).toBeUndefined();
+    }
+    // Behavioural half, on the two profiles whose marker survives screenLines'
+    // trimEnd on an empty composer (agy's `^> ` cannot — a bare `> ` row trims to
+    // `>` and stops matching, which is why its idle capture carries hint text).
+    // Text on the line ABOVE the composer is chat history, not a draft: still clean.
+    for (const [p, marker] of [[CLAUDE_PROFILE, '❯'], [CODEX_PROFILE, '›']] as const) {
+      const snap = snapshotFromRaw(screen('some earlier assistant output', marker, '──────────────────────'));
+      expect(await classifyScreen(snap, p)).toMatchObject({ clean: true, detail: 'empty' });
+    }
+  });
+
+  it('ignores g/y regex state so a stateful profile pattern cannot alias a previous call', () => {
+    const sticky = /^\s*│\s*>/gy;
+    expect(markerSpanEnd(' │ > ', sticky)).toBe(4);
+    expect(markerSpanEnd(' │ > ', sticky)).toBe(4); // a lastIndex-carrying pattern would drift
   });
 });
 

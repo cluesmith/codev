@@ -232,18 +232,39 @@ export interface DeliveryOutcome {
 /**
  * A gate outcome the render gate CANNOT bound to a decision — an unrecognized app
  * (`no-profile`) or a recognized app whose composer region can't be found
- * (`no-region-end`/`no-composer-marker` = a drifted TUI layout or an unrenderable #1047
- * ring). A sustained streak of these means the mail will NEVER deliver on its own, so it
+ * (`no-region-end`/`no-region-start`/`no-composer-marker` = a drifted TUI layout or an
+ * unrenderable #1047 ring). A sustained streak of these means the mail will NEVER deliver
+ * on its own, so it
  * is the class {@link MailboxDrainer.recordStreak} escalates to liveness telemetry; a
- * `busy`/`user-text` streak is deliberately excluded (a human legitimately at the line).
+ * `busy`/`user-text` streak is deliberately excluded (a human legitimately at the line),
+ * and `multi-row-draft` is excluded for the SAME reason — it is a human sitting on a
+ * multi-line draft, just one whose cells the classifier cannot count (CMAP 2026-08-09,
+ * claude F2). Its other reading — kimi growing its box while idle, i.e. the measured
+ * premise behind the rule having failed — would be a genuine stuck state, but it carries
+ * no recent output, and `surfaceLiveness` only alarms when output is recent, so
+ * including it would add false alarms without catching that case anyway.
  * Shared by `recordStreak` and the cooldown branch of {@link MailboxDrainer.tick} so a
  * skipped tick and a real pass agree on what counts as classifier-stuck (CMAP round 3).
  */
+const CLASSIFIER_STUCK_DETAILS: Record<GateVerdict['detail'], boolean> = {
+  // Held by a drifted profile or an unrenderable frame — will never clear on its own.
+  'no-composer-marker': true,
+  'no-region-end': true,
+  'no-region-start': true,
+  // Held by a human at the composer — clears when they send or clear the draft.
+  'multi-row-draft': false,
+  'user-text': false,
+  empty: false,
+};
+
 function isClassifierStuck(
   reason: MailboxReason | null,
   detail: GateVerdict['detail'] | undefined
 ): boolean {
-  return reason === 'no-profile' || detail === 'no-region-end' || detail === 'no-composer-marker';
+  // Exhaustive by TYPE, not by an `||` chain: widening GateVerdict['detail'] without
+  // classifying the new value is a compile error rather than a silent `false`, which is
+  // exactly how `multi-row-draft` slipped in unclassified when the union last grew.
+  return reason === 'no-profile' || (detail !== undefined && CLASSIFIER_STUCK_DETAILS[detail]);
 }
 
 /**

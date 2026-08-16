@@ -1110,6 +1110,41 @@ regular-file snapshot rather than a write-through symlink, so builder edits
 cannot change the main workspace's personal config. Running `afx setup` again
 refreshes the snapshot from the main workspace.
 
+### Builder harnesses
+
+The builder CLI's role/prompt mechanics are handled by a harness, auto-detected
+from the command basename (`claude`, `codex`, `opencode`, `kimi`) or pinned
+explicitly via `shell.builderHarness`. Example — Kimi Code CLI as the builder
+(builder-only; requires kimi >= 0.33.0, Issue #1201):
+
+```json
+{
+  "shell": {
+    "builder": "kimi"
+  }
+}
+```
+
+Kimi takes no positional prompt, so a Kimi builder gets its role and its task
+through two different channels: the role via `--agent-file` (an agent-definition
+file written into the worktree, composed around kimi's `${base_prompt}` token so
+it extends rather than replaces kimi's own system prompt), and the task via the
+`afx send` mailbox, delivered onto a verified-empty composer by the render gate.
+A crashed builder resumes with `kimi -c`, but only once a store probe confirms a
+conversation exists for that worktree — `kimi -c` with nothing to continue
+silently starts a fresh, roleless session, so the probe fails closed to a
+role-carrying fresh launch instead.
+
+Two notes specific to Kimi builders. Spawning pre-records workspace trust for the
+new worktree, because kimi 0.33.0+ opens on a "Trust this folder?" dialog that an
+unattended builder cannot answer (trust gates only whether project-level MCP
+servers load; it does not gate tool execution). And Kimi builders do NOT yet get
+the worktree write-guard Claude builders have (#1018) — kimi does have a
+blocking `PreToolUse` hook seam, so parity is achievable follow-up work rather
+than a permanent limitation.
+
+Architect use of kimi and opencode is unsupported (claude or codex there).
+
 ### Mailbox retention and escalation
 
 `afx send`'s mailbox (Spec 1313) has two Tower-global knobs under a `mailbox` key:

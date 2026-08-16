@@ -102,6 +102,7 @@ vi.mock('../servers/tower-terminals.js', () => ({
   getTerminalsForWorkspace: mockGetTerminalsForWorkspace,
   getRehydratedTerminalsEntry: mockGetRehydratedTerminalsEntry,
   isStartupReconcileSettled: mockIsStartupReconcileSettled,
+  getTerminalSessionById: vi.fn(() => null),
 }));
 
 vi.mock('../servers/tower-tunnel.js', () => ({

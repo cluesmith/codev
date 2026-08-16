@@ -28,7 +28,7 @@ import { globSync } from 'glob';
 import type { Config, ProtocolDefinition } from '../types.js';
 import { logger, fatal } from '../utils/logger.js';
 import { getBuilderHarness, getWorktreeConfig } from '../utils/config.js';
-import { shellEscapeSingleQuote, type HarnessProvider } from '../utils/harness.js';
+import { shellEscapeSingleQuote, launchLoopTail, type HarnessProvider } from '../utils/harness.js';
 import { defaultSessionOptions } from '../../terminal/index.js';
 import { run, runStreaming, commandExists } from '../utils/shell.js';
 import { fetchIssueOrThrow, type ForgeIssue } from '../../lib/github.js';
@@ -779,42 +779,6 @@ function installHarnessWorktreeFiles(
 }
 
 /**
- * The tail shared by every builder launch loop, appended after the agent
- * invocation inside `while true; do … done`.
- *
- * Issue #1241: exit code 0 is the user deliberately quitting (double Ctrl+C,
- * `/quit`) — auto-respawning overrides that choice and forces them to race a
- * second Ctrl+C into the sleep window, where a mistimed one lands in the fresh
- * agent instead. It also feeds the #1224 class, where a respawn within ~2s
- * collides with the dying predecessor's session lock. So a clean exit clears
- * the screen and gates the relaunch on a keypress: recovery stays one keystroke
- * away without anything happening on its own. Nonzero exits and signal deaths
- * (bash reports those as 128+N) keep the historical auto-restart — that is what
- * the loop is for.
- *
- * `read` failing means EOF on stdin, i.e. the terminal is gone; exit rather
- * than spin the loop on an input that will never arrive.
- *
- * `onCleanExit` (Issue #1267) is an extra statement run just after the keypress,
- * before the loop repeats — how the resume variant switches itself over to the
- * fresh invocation. It sits *after* the `read`, so a terminal that went away
- * (EOF → `exit 0`) never mutates state on its way out.
- */
-function launchLoopTail(onCleanExit?: string): string {
-  const switchToFresh = onCleanExit ? `\n    ${onCleanExit}` : '';
-  return `  status=$?
-  if [ "$status" -eq 0 ]; then
-    clear
-    echo "Agent exited at your request. Press Enter to relaunch fresh, or close this terminal."
-    read -r || exit 0${switchToFresh}
-    continue
-  fi
-  echo ""
-  echo "Agent exited (code $status). Restarting in 2 seconds... (Ctrl+C to quit)"
-  sleep 2`;
-}
-
-/**
  * Build the `while true; do … done` launch loop for a builder script.
  *
  * `initial` is what the loop runs on entry, and what a crash restart reruns —
@@ -1105,6 +1069,29 @@ export async function startBuilderSession(
     logger.info(`Resuming session ${resume.sessionId.slice(0, 8)}…`);
   }
 
+  // Provider-owned launch shape (Issue #1201 — Kimi). Taken before the generic
+  // loops because the reasons for it are exactly what those loops assume away:
+  // a CLI with no positional prompt (the task is queued on the mailbox instead)
+  // and no launch-time session id to pin (the crash path resumes by cwd). Role
+  // injection, the prompt file, and the harness worktree files are all prepared
+  // above on this path too — the provider gets the same inputs, and its script
+  // decides the shape.
+  if (harness.buildBuilderLaunchScript) {
+    harness.prepareWorkspace?.(worktreePath);
+    const scriptContent = harness.buildBuilderLaunchScript({
+      worktreePath, baseCmd, roleFragment, taskFile: promptFile, builderId,
+    });
+    writeFileSync(scriptPath, scriptContent);
+    chmodSync(scriptPath, '755');
+    logger.info('Creating PTY terminal session...');
+    const { terminalId } = await createPtySession(
+      config, '/bin/bash', [scriptPath], worktreePath,
+      { workspacePath: config.workspaceRoot, type: 'builder', roleId: builderId },
+    );
+    logger.info(`Terminal session created: ${terminalId}`);
+    return { terminalId };
+  }
+
   const sessionForms = scriptSessionForms(harness);
   let loop: string;
   if (sessionForms) {
@@ -1202,6 +1189,19 @@ export function buildWorktreeLaunchScript(
     // Install harness worktree files even without a role, so the write-guard
     // (Issue #1018) is deterministic across all Claude spawn modes.
     installHarnessWorktreeFiles(harness, '', '', worktreePath);
+  }
+
+  // Provider-owned launch shape (Issue #1201 — Kimi). Worktree mode has no
+  // initial task, so the provider gets `taskFile: null` and generates its plain
+  // loop: nothing is queued on the mailbox, and the operator drives the session
+  // by typing into it.
+  if (harness.buildBuilderLaunchScript) {
+    harness.prepareWorkspace?.(worktreePath);
+    return harness.buildBuilderLaunchScript({
+      worktreePath, baseCmd,
+      roleFragment: role ? command.slice(baseCmd.length + 1) : '',
+      taskFile: null,
+    });
   }
 
   // Worktree mode never enters on a resume, but the loop itself is

@@ -6,10 +6,12 @@
  * layout change is a profile drift the smoke suite catches, never a silent
  * misdelivery — an unmatched marker classifies NOT clean.
  *
- * Measured apps have a profile: claude, codex (spike g2), and agy (Spec 1313
+ * Measured apps have a profile: claude, codex (spike g2), agy (Spec 1313
  * Phase 3 measurement — its own marker `> ` and a color-keyed placeholder rule,
- * because agy renders its idle hint in palette-8 gray, not SGR-dim). Everything
- * else — gemini, opencode, an unknown binary, or a launch we can't identify —
+ * because agy renders its idle hint in palette-8 gray, not SGR-dim), and kimi
+ * (Issue #1201 measurement on 0.34.0 — a boxed composer whose marker is not at
+ * the row start). Everything else — gemini, opencode, an unknown binary, or a
+ * launch we can't identify —
  * resolves to `null`, and the caller holds the message with reason `no-profile`.
  * This is the strict app-identity table the spike mandates (constraint 10): we
  * deliberately do NOT reuse `resolveHarness`, whose claude fallback would make an
@@ -90,10 +92,102 @@ export const AGY_PROFILE: GateProfile = {
   placeholderFgPalette: 8,
 };
 
+/**
+ * kimi (Kimi Code CLI 0.34.0) composer marker. Unlike claude/codex/agy, kimi
+ * draws its composer inside a rounded box, so the input row is
+ * `` │ > `` — a box edge, then the `>` prompt glyph at column 3, NOT at the row
+ * start. An anchored `^>` would never match it. (Measured, Issue #1201; capture
+ * harness: `codev/spikes/pir-1201-kimi-gate-measure.mjs`.)
+ */
+const KIMI_MARKER = /^\s*│\s*>/;
+
+/**
+ * The rounded box bottom that closes kimi's composer (`` ╰─────╯ ``, indented by
+ * one column). The shared {@link REGION_END_PATTERNS} cannot bound kimi: its rule
+ * pattern requires the line to *start* with the rule glyph, and kimi's starts with
+ * a space then `╰`. Without its own pattern every kimi screen would classify
+ * `no-region-end` and hold forever.
+ */
+const KIMI_REGION_END = [/^\s*╰[─━╌┄]{3,}/];
+
+/**
+ * The rounded box TOP that opens kimi's composer (`` ╭─────╮ ``) — the region's
+ * upper bound, and the reason a multi-row kimi draft is scanned in full.
+ *
+ * kimi's composer grows downward: a two-line draft renders `│ > <line one>` then
+ * `│   <line two>`. When line two begins with `>` (a pasted quote, a markdown
+ * blockquote) it matches {@link KIMI_MARKER} too, and since the classifier takes
+ * the LAST match, the region would start there and line one — real, unsent user
+ * text — would sit above it, uncounted. Measured on 0.34.0 (`kimi-multiline-bare`
+ * fixture): that screen classified `clean`, and a queued message would have been
+ * typed on top of the draft. Anchoring the region to the box top fixes it for any
+ * number of draft rows.
+ *
+ * This bounds the SCAN. The residual case it cannot close is armed separately by
+ * `growsWithDraft` on the profile below — a draft whose every
+ * row is whitespace or whitespace+`>` (enter a newline, then `>`) has zero countable
+ * cells no matter how correctly the region is bounded, because the second row
+ * matches {@link KIMI_MARKER} and its `>` is span-exempted as chrome. Shape, not
+ * cells, is the only evidence left — so a region grown past one interior row is held.
+ *
+ * That rule is sound only because box growth is EXCLUSIVE to multi-line drafts, which
+ * was measured on real kimi 0.34.0 rather than assumed
+ * (`codev/spikes/pir-1201-kimi-box-growth.mjs`): idle, a single-line draft, the `/`
+ * menu, the `@` picker, and the post-reply steady state all hold at exactly one
+ * interior row; only the newline drafts grow to two. The steady-state result is the
+ * load-bearing one — growth on a composer that has already carried a turn would hold
+ * every later message forever, a liveness bug rather than a fail-safe one. (A long
+ * soft-wrapped single line grows the box too, but it carries text and was already
+ * busy, so its verdict is unchanged.)
+ *
+ * The WORKING states were measured separately, because a rule that reads shape could
+ * otherwise turn "deliver while the agent is busy" into "hold until it goes idle"
+ * without anyone noticing (`pir-1201-kimi-working-states.mjs`, CMAP 2026-08-09
+ * claude Q2): mid-generation at 5s and 13s, the shift+tab mode chrome, and a draft
+ * typed while the agent is still working ALL hold at one interior row. So the rule
+ * changes nothing for a working builder. (`!` bash mode replaces the `>` glyph, so it
+ * classifies `no-composer-marker` and holds — pre-existing, fail-safe, and correct:
+ * there is unsent input on that row.)
+ */
+const KIMI_REGION_START = [/^\s*╭[─━╌┄]{3,}/];
+
+/**
+ * kimi composer profile (Issue #1201 — net-new measurement on 0.34.0, the same
+ * shape of live capture the agy Phase-3 profile rests on).
+ *
+ * Measured facts it encodes:
+ *  - marker `│ >` at column 3 (see {@link KIMI_MARKER}); the classifier skips the
+ *    matched span, not just column 0, which is why the `>` glyph is not counted
+ *    as a draft;
+ *  - an idle kimi composer carries **no placeholder text at all** — just the
+ *    marker — so no `placeholderFgPalette` and no dim rule is needed (unlike
+ *    claude/codex's dim placeholder and agy's palette-8 hint);
+ *  - typed text renders **default-fg at normal intensity** → counted → busy;
+ *  - the box chrome (`│ ╭ ╰ ─`) is already in the classifier's ignore set.
+ *
+ * Consequences that matter for delivery, both verified against real captures:
+ * the seed window (`kimi -p --output-format stream-json`, plain JSON lines) has
+ * no marker → `no-composer-marker` → held, which is the readiness barrier the
+ * original design built a PTY sentinel for; and the 0.33.0+ **folder-trust
+ * dialog** likewise has no marker at the row start → held, so a blind Enter can
+ * never confirm filesystem trust (the same guarantee agy's trust dialog gets).
+ */
+export const KIMI_PROFILE: GateProfile = {
+  app: 'kimi',
+  markerPattern: KIMI_MARKER,
+  regionStartPatterns: KIMI_REGION_START,
+  regionEndPatterns: KIMI_REGION_END,
+  // Measured, not assumed: kimi's box grows a row only when the draft gains a line.
+  // See KIMI_REGION_START above for the state-by-state table and why the post-reply
+  // steady state is the load-bearing row. kimi is the only profile that sets this.
+  growsWithDraft: true,
+};
+
 /** Registry keyed by the harness name `detectHarnessFromCommand` returns. */
 const PROFILES_BY_HARNESS: Record<string, GateProfile> = {
   claude: CLAUDE_PROFILE,
   codex: CODEX_PROFILE,
+  kimi: KIMI_PROFILE,
 };
 
 /**
