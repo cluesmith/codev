@@ -317,3 +317,38 @@ byte-identical to what was committed (proven: git diff empty after regenerate),
 so behaviour is unchanged; the importmap and file names are untouched. The files
 are .gitignored and ship in the npm tarball via the `files` allowlist, exactly
 like skeleton/ and dashboard-dist/ (dry-run confirms all 5 present in the tarball).
+
+## pr gate — bridge-mode finding + CODEV_TOWER_KEY migration path (2026-08-17)
+
+Reviewer flagged (verified with a private, isolated repro): on a non-localhost
+BRIDGE_MODE bind, the Host guard admits IP-literal peers and the public dashboard
+shell carries the injected key, so any peer that can load the dashboard can obtain
+the key — i.e. the key is NOT by itself an access control against on-network peers.
+The network (container isolation / firewall / TLS + trusted peers) remains the
+boundary, as bridge mode was originally documented ("your firewall is the security
+boundary", v3.0.2). The default loopback deployment is unaffected and fully
+protected (same-origin policy stops a cross-origin page reading the key).
+
+Also confirmed a BREAKING CHANGE for bridge deployments: with enforcement on, a
+client reaching a bridged/containerized Tower that does NOT share Tower's
+~/.agent-farm/local-key file now 401s (previously connected freely).
+
+Done in this PR:
+1. Corrected the agent-farm.md bridge section (network is the boundary; dropped
+   the "enforcement keeps on-network peers out" implication) + explicit
+   breaking-change callout.
+2. Added a CODEV_TOWER_KEY env override, authoritative on BOTH sides (Tower expects
+   it; clients present it), so a bridge client can be given the key explicitly
+   without sharing the file. Honored by every key resolver — core
+   ensureLocalKey/readLocalKey and the sdk /node readLocalKey (VS Code / Stream
+   Deck; env name duplicated per the #1189 isolation boundary). Unit-tested in both
+   packages (core 5/5, sdk 100/100).
+3. Recorded a pr-gate finding doc: codev/projects/secfix-1-tower-auth-hardening/
+   secfix-1-bridge-mode-finding.md.
+
+Rejected: loopback-gating the key injection — bridge mode's intended use is
+container bridging, where the legitimate host peer is ALSO non-loopback, so gating
+on loopback would break the supported flow, not fix it.
+
+Deferred (architect to file): real per-peer remote auth for non-localhost Tower;
+and a Breaking-changes release-notes entry at changelog time.
