@@ -1,7 +1,7 @@
 id: '1476'
 title: tower-extract-runglobalmigrati
 protocol: air
-phase: implement
+phase: pr
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -11,4 +11,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-08-17T23:01:56.616Z'
-updated_at: '2026-08-17T23:01:56.617Z'
+updated_at: '2026-08-17T23:12:35.307Z'
