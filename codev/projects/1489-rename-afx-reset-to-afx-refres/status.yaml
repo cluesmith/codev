@@ -1,7 +1,7 @@
 id: '1489'
 title: rename-afx-reset-to-afx-refres
 protocol: air
-phase: implement
+phase: pr
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -11,4 +11,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-08-17T23:42:08.661Z'
-updated_at: '2026-08-17T23:42:08.662Z'
+updated_at: '2026-08-17T23:55:50.468Z'
