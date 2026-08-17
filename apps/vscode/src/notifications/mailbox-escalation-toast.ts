@@ -41,6 +41,9 @@ export const MAX_SEEN = 500;
  * workspace is escalated) is the finest-grained signal available here: at that
  * point every id in the set has left the escalated set, and the set is dropped
  * whole. A {@link MAX_SEEN} cap backstops a window that never sees that `false`.
+ * (Tower also reports `false` when it cannot read the mailbox at all, which prunes
+ * a little early — harmless: a row escalates exactly once server-side and there is
+ * no SSE replay, so an evicted id has no second event to be deduped against.)
  *
  * The prune cannot fire on a stale snapshot: `OverviewCache.refresh()` is
  * last-write-wins by sequence, and the escalation event itself triggers a refresh

@@ -54,3 +54,49 @@ after the escalation's own `true` response and wrongly clear `seen`.
    bounding a continuously-escalated window.
 
 Signal: PHASE_COMPLETE.
+
+## Fix
+
+Implemented as planned, commit `850242bf` (~50 LOC of source + 4 tests):
+
+- `mailbox-escalation-toast.ts` takes `OverviewCache` and prunes `seen` whole on
+  `mailboxEscalated === false`; `MAX_SEEN = 500` oldest-first cap as backstop.
+- `extension.ts` — the single call site passes `overviewCache` (already in scope).
+
+**Verified failing without the fix**, not assumed: with the eviction neutered the suite went
+2 failed / 10 passed; restored, 12/12. Full vscode unit suite 72 files / 850 tests green;
+`pnpm check-types` clean; `pnpm lint` has one pre-existing warning in the unrelated
+`src/commands/tunnel.ts`.
+
+Environment note for the next builder in this worktree: it starts with **no `node_modules`**.
+`pnpm install` at the worktree root, then `pnpm --filter @cluesmith/codev-types build &&
+pnpm --filter @cluesmith/codev-sdk build` — without the package builds, 18 vscode unit files
+fail on `Cannot find package '@cluesmith/codev-sdk/...'`, which looks like a code failure and
+is not one.
+
+## PR
+
+PR #1484 — https://github.com/cluesmith/codev/pull/1484. Per the architect's constraint we are
+not maintainers here: the PR is parked for a maintainer to merge; I do not merge it.
+
+`consult` did not auto-detect the project from this worktree (it listed every project and
+exited); `--issue 1472 --project-id bugfix-1472` is required.
+
+### CMAP (PR #1484)
+
+gemini = APPROVE (HIGH) · codex = APPROVE (HIGH) · claude = APPROVE (HIGH). No blocking issues
+from any lane. The claude lane died once on a transient API 500 and was re-run.
+
+Non-blocking notes and what I did with them:
+
+- *Doc slightly stronger than the server guarantees* — Tower also reports
+  `mailboxEscalated: false` when it cannot read the mailbox at all. **Fixed**: the doc comment
+  now says so, and why it is harmless (one escalation per row, no SSE replay).
+- *Uncommitted thread file* — **fixed**, committed with the PR.
+- *A null-workspace window toasts every workspace but reads Tower's fallback-workspace flag, so
+  it can prune on a foreign `false`* — pre-existing quirk of `escalationMatchesWorkspace`'s
+  deliberate null-matches-everything rule; this fix neither introduces nor worsens it, and it
+  is unobservable given single-emission. **Left alone** — widening it into a workspace-scoping
+  change is outside a BUGFIX.
+- *The `while (seen.size > MAX_SEEN)` loop can only iterate once* — deliberate; **left as is**
+  (the reviewer agreed).
