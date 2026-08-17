@@ -3,6 +3,16 @@ import type { MailboxEscalationPayload } from '@cluesmith/codev-types';
 import { parseSseEnvelope, parseSseBody } from '../sse-envelope.js';
 import { escalationToastText, escalationMatchesWorkspace } from '../mailbox-indicators.js';
 import type { ConnectionManager } from '../connection-manager.js';
+import type { OverviewCache } from '../views/overview-data.js';
+
+/**
+ * Backstop bound on the dedupe set for a window that stays escalated all day, so
+ * the de-escalation prune below never gets to run. Oldest-first eviction (a `Set`
+ * iterates in insertion order); an evicted id can only re-toast if Tower re-emits
+ * an escalation for that same row, which the one-way server-side `escalated` flag
+ * makes impossible. Sized far above any plausible live escalated set.
+ */
+export const MAX_SEEN = 500;
 
 /**
  * Spec 1313 Phase 8: toast on `mailbox-escalation`.
@@ -22,12 +32,40 @@ import type { ConnectionManager } from '../connection-manager.js';
  *   - gated by `codev.mailboxEscalationToasts.enabled` (default true) — the same
  *     mute affordance `codev.gateToasts.enabled` gives the gate toasts. The
  *     persistent status-bar count/attention state is unaffected by the mute.
+ *
+ * Issue #1472: the dedupe set is BOUNDED. Its eviction key is the mailbox row
+ * leaving the escalated set — the same signal that would let a legitimate
+ * re-escalation re-notify — mirroring how `activateGateToasts` prunes a builder
+ * that leaves the blocked set. The overview carries no per-row mailbox ids, only
+ * the workspace-level `mailboxEscalated` flag, so `false` (no held row in this
+ * workspace is escalated) is the finest-grained signal available here: at that
+ * point every id in the set has left the escalated set, and the set is dropped
+ * whole. A {@link MAX_SEEN} cap backstops a window that never sees that `false`.
+ *
+ * The prune cannot fire on a stale snapshot: `OverviewCache.refresh()` is
+ * last-write-wins by sequence, and the escalation event itself triggers a refresh
+ * whose request starts after Tower flagged the row, so an older in-flight
+ * `mailboxEscalated: false` response can never commit after it.
  */
 export function activateMailboxEscalationToasts(
   context: vscode.ExtensionContext,
   connectionManager: ConnectionManager,
+  cache: OverviewCache,
 ): void {
   const seen = new Set<string>();
+
+  context.subscriptions.push(
+    cache.onDidChange(() => {
+      const data = cache.getData();
+      // No data yet (or a transient read) says nothing about the escalated set.
+      if (!data) {
+        return;
+      }
+      if (!data.mailboxEscalated) {
+        seen.clear();
+      }
+    }),
+  );
 
   context.subscriptions.push(
     connectionManager.onSSEEvent(({ data }) => {
@@ -56,6 +94,10 @@ export function activateMailboxEscalationToasts(
         return;
       }
       seen.add(payload.mailboxId);
+      while (seen.size > MAX_SEEN) {
+        const oldest = seen.values().next().value as string;
+        seen.delete(oldest);
+      }
 
       void vscode.window.showWarningMessage(escalationToastText(payload));
     }),
