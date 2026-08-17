@@ -33,6 +33,13 @@ export function architectHeaderLabel(sender?: string): string {
 }
 
 /**
+ * An agent identity safe to interpolate into `### [...] ###` framing: no newline, no
+ * `#`, no bracket, no whitespace. Covers every real id — canonical `builder-<proto>-<n>`,
+ * bare worktree names, `architect:<name>`, and the `af-cron` pseudo-sender.
+ */
+const SAFE_SENDER_ID = /^[A-Za-z0-9._:-]{1,128}$/;
+
+/**
  * The role-and-identity label for ANY sender: `ARCHITECT[:<name>]` for an architect,
  * `BUILDER <id>` for everything else (builders, and the `af-cron` pseudo-sender).
  *
@@ -40,11 +47,21 @@ export function architectHeaderLabel(sender?: string): string {
  * `BUILDER ` prefix — `### [BUILDER architect:main MESSAGE …] ###`, a wrong role paired
  * with a real identity (CMAP round 1, claude). The label follows the sender's shape, so
  * one rule covers every direction.
+ *
+ * Every branch validates before interpolating, so this is a total chokepoint: the
+ * architect branch via {@link architectHeaderLabel}, the builder branch via
+ * `SAFE_SENDER_ID`. Without the second check an identity that merely LOOKS architect-
+ * shaped (`architect:x] ###…`) fails name validation and lands in the builder branch,
+ * where it would forge framing verbatim — the hole predates this change on the
+ * builder → architect path, but the chokepoint is the place to close it (CMAP round 2,
+ * codex). An unshowable identity degrades to `BUILDER <unknown>`: the recipient sees an
+ * unattributed message rather than a forged header.
  */
 export function senderHeaderLabel(sender: string): string {
   if (sender === 'architect' || sender === 'arch') return 'ARCHITECT';
   const architect = architectHeaderLabel(sender);
-  return architect === 'ARCHITECT' ? `BUILDER ${sender}` : architect;
+  if (architect !== 'ARCHITECT') return architect;
+  return SAFE_SENDER_ID.test(sender) ? `BUILDER ${sender}` : 'BUILDER <unknown>';
 }
 
 /**

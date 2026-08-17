@@ -116,8 +116,8 @@ describe('send command', () => {
     // resolves deterministically to the architect identity regardless of where the
     // test runner physically lives (it may itself run inside a builder worktree).
     process.chdir(tmpdir());
-    // …and with no CODEV_ARCHITECT_NAME, so the architect name resolves to its
-    // default 'main' even when the runner inherits a Tower-injected env.
+    // …and with no CODEV_ARCHITECT_NAME, so the sender stays the bare 'architect'
+    // (no name is asserted) even when the runner inherits a Tower-injected env.
     delete process.env.CODEV_ARCHITECT_NAME;
     vi.clearAllMocks();
     mockIsRunning.mockResolvedValue(true);
