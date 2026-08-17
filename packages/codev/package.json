@@ -22,9 +22,9 @@
   ],
   "scripts": {
     "clean": "rm -rf dist",
-    "build": "pnpm --filter \"@cluesmith/codev^...\" build && pnpm clean && tsc && pnpm copy-dashboard && pnpm copy-skeleton && pnpm copy-three",
+    "build": "pnpm --filter \"@cluesmith/codev^...\" build && pnpm clean && tsc && pnpm bundle-assets",
+    "bundle-assets": "pnpm copy-dashboard && pnpm copy-skeleton && node ./scripts/copy-three.mjs",
     "copy-dashboard": "rm -rf dashboard-dist && cp -r ../../apps/web/dist dashboard-dist",
-    "copy-three": "node ./scripts/copy-three.mjs",
     "dev:dashboard": "cd ../../apps/web && pnpm dev",
     "copy-skeleton": "rm -rf skeleton && cp -r ../../codev-skeleton skeleton",
     "dev": "tsx src/cli.ts",
