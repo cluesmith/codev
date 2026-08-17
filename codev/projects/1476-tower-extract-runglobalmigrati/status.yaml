@@ -1,0 +1,14 @@
+id: '1476'
+title: tower-extract-runglobalmigrati
+protocol: air
+phase: implement
+plan_phases: []
+current_plan_phase: null
+gates:
+  pr:
+    status: pending
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-08-17T23:01:56.616Z'
+updated_at: '2026-08-17T23:01:56.617Z'
