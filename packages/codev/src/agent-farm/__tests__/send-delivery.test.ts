@@ -43,6 +43,7 @@ const BUSY: GateVerdict = { clean: false, reason: 'busy', detail: 'user-text' };
 function fakeSession(overrides: Partial<DeliverySession> = {}): DeliverySession & { writes: string[] } {
   const writes: string[] = [];
   return {
+    id: 'term-fake',
     bytesWritten: 0,
     info: { cols: 110, rows: 32 },
     command: 'claude',
@@ -120,9 +121,13 @@ function harness(): Harness {
       resolveProfile: () => profile,
       classify: (session: DeliverySession, p: GateProfile): Promise<GateVerdict> =>
         classifyOverride ? classifyOverride(session, p) : Promise.resolve(verdict),
-      writeMessage: (_s, formattedMessage, noEnter) => {
+      writeMessage: (_s, formattedMessage, noEnter, precheck) => {
+        // Mirror the live binding's ordering: the precheck runs INSIDE the lock, before the
+        // first byte (Issue #1365), so an abort must record no write at all.
+        const abort = precheck();
+        if (abort) return { status: 'aborted', abort };
         writes.push({ formattedMessage, noEnter });
-        return h.writeResult;
+        return h.writeResult ? { status: 'written' } : { status: 'dropped' };
       },
       broadcast: (f) => broadcasts.push(f),
       onHeldStateChange: () => {
@@ -318,6 +323,7 @@ describe('deliverAgentMail (Spec 1313, Phase 4)', () => {
     // (the false-clean the gate exists to prevent).
     let bytes = 0;
     const session: DeliverySession = {
+      id: 'term-moving',
       get bytesWritten() {
         return bytes;
       },
@@ -422,7 +428,7 @@ describe('deliverAgentMailSerialized — concurrent-send serialization (Spec 131
     h.ports.writeMessage = (_s, formattedMessage, noEnter) =>
       Promise.resolve().then(() => {
         h.writes.push({ formattedMessage, noEnter });
-        return true; // the write landed (Spec 1313: writeMessage reports delivery success)
+        return { status: 'written' as const }; // the write landed (Spec 1313: the port reports delivery success)
       });
     h.setSession('spir-1', fakeSession());
     mailbox.enqueue(db, { workspacePath: '/ws/a', toAgent: 'spir-1', body: '1', formattedMessage: 'F' }, 1000);
@@ -546,6 +552,7 @@ describe('MailboxDrainer verdict memo (Spec 1313 render-gate follow-up)', () => 
     let bytes = 7;
     // A moving token needs a live getter (a fakeSession spread would freeze bytesWritten to its value).
     h.setSession('spir-1', {
+      id: 'term-moving',
       get bytesWritten() { return bytes; },
       info: { cols: 110, rows: 32 },
       command: 'claude',
@@ -604,6 +611,7 @@ describe('MailboxDrainer verdict memo (Spec 1313 render-gate follow-up)', () => 
     h.ports.writeMessage = (_s, formattedMessage, noEnter) => {
       h.writes.push({ formattedMessage, noEnter });
       if (formattedMessage === 'm1') mailbox.dismiss(db, m1.id, 1002); // operator dismisses during the paced write
+      return { status: 'written' as const };
     };
     const drainer = new MailboxDrainer({ intervalMs: 999999 });
     drainer.start(h.ports, db);
@@ -618,8 +626,8 @@ describe('MailboxDrainer verdict memo (Spec 1313 render-gate follow-up)', () => 
   it('invalidates the memo even when writeMessage REJECTS after partial output (CMAP round 4 — Codex)', async () => {
     const h = harness();
     // Round-4 completion of Fix 1: memo.delete must run on a write REJECTION too (via try/finally),
-    // not only a clean return. writeMessage's port contract is boolean|Promise<boolean>, so a binding
-    // could reject after putting bytes on the wire; without the finally the stale CLEAN survives and a
+    // not only a clean return. writeMessage's port contract is WriteResult|Promise<WriteResult>, so a
+    // binding could reject after putting bytes on the wire; without the finally the stale CLEAN survives and a
     // follow-up could memo-hit it. Here writeMessage records partial output then rejects → the row
     // stays held (deliverAgentMail throws, caught by the per-agent tick guard) → the NEXT tick must
     // re-classify fresh, not memo-hit. Static ring, so a re-classify can only come from invalidation.
@@ -1050,6 +1058,7 @@ describe('MailboxDrainer owner starvation notice (Spec 1313 round 3, change 3)',
     // verdict memo re-classifies (a static token would serve the cached BUSY and never deliver).
     let bytes = 1;
     h.setSession('spir-1', {
+      id: 'term-moving',
       get bytesWritten() { return bytes; },
       info: { cols: 110, rows: 32 },
       command: 'claude',

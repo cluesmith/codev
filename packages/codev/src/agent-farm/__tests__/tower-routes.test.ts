@@ -218,11 +218,17 @@ function makeRes(): { res: http.ServerResponse; body: () => string; statusCode: 
  * requires that proven lower bound, else a bare marker is an indeterminate partial and is held).
  * `bytesWritten` is the monotone change token the delivery path samples.
  */
-function gateSession(mockWrite: (data: string) => void, ring: string, writable = true) {
+function gateSession(mockWrite: (data: string) => void, ring: string, writable = true, id = 'term-001') {
   const raw = `${ring}\r\n${'─'.repeat(20)}\r\n`;
   const gateScreen = new SessionScreen(80, 24);
   gateScreen.feed(raw);
   return {
+    // The per-terminal submission lock's key (Issue #1365). It MUST be a real, distinct id:
+    // this double reaches the live mailbox-wiring binding, and because the port is
+    // structurally typed an omitted `id` would compile and silently key every lock on the
+    // same `undefined` — serialization that looks present and is not. `submitMessagePaced`
+    // throws on a missing id so that mistake fails loudly instead of quietly.
+    id,
     // Model a live PTY: every write lands. The delivery path now threads the write's
     // boolean (Spec 1313 silent-loss fix), so a double whose write returned undefined
     // would read as a DROPPED write and be held. Wrap mockWrite so call-assertions still
