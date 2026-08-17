@@ -82,6 +82,30 @@ Test-only change, `render-gate.test.ts` (+181/−22). No production file touched
 The second is the important one: the verdict stays correct, so *only* the op count catches it —
 which is what the wall-clock bound was proxying for.
 
+## CMAP (PR phase)
+
+All three APPROVE, no blocking issues. PR #1487; all 7 GitHub CI checks pass — including on the
+shared runners the old assertion flaked on.
+
+| Lane | Verdict | Notes |
+|---|---|---|
+| gemini | APPROVE (HIGH) | none |
+| codex | APPROVE (HIGH) | none |
+| claude | APPROVE (HIGH) | independently re-ran the injected-regression experiment and got the same numbers (1131 vs ≤130, 44 other tests still passing); 3 non-blocking notes |
+
+Claude's three notes, all addressed in a follow-up commit:
+
+1. The negative control's comment claimed "per classify" and "same cell reads" but the test did one
+   write + one classify and never compared cell reads. Now it classifies **twice** through
+   throwaway terminals and asserts `cellReads === mirror.cellReads × ROUNDS` and
+   `bytesParsed === replay.length × ROUNDS` — the claims are exercised, not inferred.
+2. `cellReads ≤ cols·rows` is the exact worst case, so a future second per-cell look-ahead would
+   trip it without an O(history) regression. Documented deliberately: such a change doubles the
+   gate's per-check work and deserves a decision, not a silent pass.
+3. `classifyCounted` inlines `classifyAgentScreen`'s body (the facade must sit between `read()` and
+   `classifyBuffer`), so the suite pins the algorithm and not the call-site wiring. Added a pointer
+   to the existing "PRODUCTION data path" suite, which covers that wiring.
+
 **Determinism check.** The full 46-test file passes pinned to one contended core (`taskset -c 0` +
 4 busy loops) — the exact condition under which the old assertion measured 391.7ms against its
 250ms bound. Full package suite: 4860 passed / 48 skipped / 0 failed. `pnpm --filter

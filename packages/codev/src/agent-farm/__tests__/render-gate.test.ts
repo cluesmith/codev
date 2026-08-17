@@ -386,7 +386,13 @@ describe('render-gate — deterministic op count: one classify is O(viewport), n
     return mirror;
   }
 
-  /** The production classify (`SessionScreen.read()` → `classifyBuffer`), with its ops counted. */
+  /**
+   * The production classify with its ops counted. This is `classifyAgentScreen`'s body
+   * (`mailbox-wiring.ts`) — `screen.read()` → `classifyBuffer` — inlined because the facade has to
+   * sit between those two calls. So this suite pins the ALGORITHM's cost, not the call-site wiring;
+   * that the gate reads the mirror rather than the ring is covered by the "PRODUCTION data path"
+   * suite above.
+   */
   async function classifyCounted(mirror: SessionScreen): Promise<{ verdict: GateVerdict; ops: OpCounts }> {
     const { term, cols, rows } = await mirror.read();
     const ops: OpCounts = { lineReads: 0, cellReads: 0, bytesParsed: 0 };
@@ -421,6 +427,11 @@ describe('render-gate — deterministic op count: one classify is O(viewport), n
     // The hard geometric bound. `screenLines` reads `rows` lines; the composer scan re-reads only
     // the region rows and at most `cols` cells each. A regression that walked scrollback or
     // re-rendered history — the failure the old timing bound was there to catch — blows both.
+    //
+    // Note `cols × rows` is the EXACT worst case (region rows × cols, plus the ghost-tail
+    // look-ahead's second pass over one row), not a loose ceiling: a future second per-cell
+    // look-ahead would trip it with no O(history) regression involved. That is deliberate — such a
+    // change doubles the gate's per-check work and deserves a decision, not a silent pass.
     const mirror = mirrorOf(HUGE_HISTORY);
     try {
       const { verdict, ops } = await classifyCounted(mirror);
@@ -449,23 +460,36 @@ describe('render-gate — deterministic op count: one classify is O(viewport), n
     }
   });
 
-  it('negative control: the retired whole-ring path re-parses the WHOLE ring per classify', async () => {
+  it('negative control: the retired whole-ring path re-parses the WHOLE ring on EVERY classify', async () => {
     // Honesty check — the op count above is only meaningful if it can tell the two cost models
-    // apart. Rebuild the screen the pre-round-2 way (a throwaway terminal fed the whole replay per
-    // classify, what `classifyScreen` still does for fixtures) and count it through the same
-    // facade: same screen, same cell reads, but ~4 MB parsed per check instead of zero. That
-    // difference is the regression the wall-clock budget was proxying for, now asserted directly.
-    const term = new Terminal({ cols: GATE_COLS, rows: GATE_ROWS, allowProposedApi: true, scrollback: 2000 });
+    // apart. Classify the same screen TWICE the pre-round-2 way: a throwaway terminal fed the whole
+    // replay per classify, which is what `classifyScreen` still does for the fixture suite. Same
+    // verdict and the same per-classify cell reads as the mirror, but ~4 MB parsed EVERY time
+    // instead of zero — and that gap is what the wall-clock budget was proxying for, now asserted
+    // directly. Two rounds, not one, so "per classify" is exercised rather than inferred.
+    const mirror = mirrorOf(HUGE_HISTORY);
+    const viaMirror = await classifyCounted(mirror);
+    mirror.dispose();
+
     const ops: OpCounts = { lineReads: 0, cellReads: 0, bytesParsed: 0 };
-    try {
-      const counting = countingTerm(term, ops);
-      await new Promise<void>((resolve) => counting.write(HUGE_HISTORY, resolve));
-      expect(ops.bytesParsed).toBe(HUGE_HISTORY.length);
-      expect(ops.bytesParsed).toBeGreaterThan(4 * 1024 * 1024);
-      expect(classifyBuffer(counting, GATE_COLS, GATE_ROWS, CLAUDE_PROFILE)).toMatchObject({ clean: true });
-    } finally {
-      term.dispose();
+    const ROUNDS = 2;
+    for (let i = 0; i < ROUNDS; i++) {
+      const term = new Terminal({ cols: GATE_COLS, rows: GATE_ROWS, allowProposedApi: true, scrollback: 2000 });
+      try {
+        const counting = countingTerm(term, ops);
+        await new Promise<void>((resolve) => counting.write(HUGE_HISTORY, resolve));
+        expect(classifyBuffer(counting, GATE_COLS, GATE_ROWS, CLAUDE_PROFILE)).toEqual(viaMirror.verdict);
+      } finally {
+        term.dispose();
+      }
     }
+
+    // The screen work is identical — it is the same screen — so the ONLY difference between the two
+    // cost models is the re-parse, and it scales with the number of classifies, not the viewport.
+    expect(ops.cellReads).toBe(viaMirror.ops.cellReads * ROUNDS);
+    expect(viaMirror.ops.bytesParsed).toBe(0);
+    expect(ops.bytesParsed).toBe(HUGE_HISTORY.length * ROUNDS);
+    expect(ops.bytesParsed).toBeGreaterThan(8 * 1024 * 1024);
   });
 });
 
