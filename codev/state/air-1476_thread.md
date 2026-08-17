@@ -50,9 +50,32 @@ retargeted from `db/index.ts` to `db/migrations.ts` (same intent, new home).
 Out of scope, left alone: `pir-832`, `bugfix-826`, `spec-755` migration tests. Those replicate
 migrations of the **retired per-workspace state.db**, which has no production runner to call.
 
+## CMAP (PR review)
+
+All three lanes APPROVE, HIGH confidence, zero blocking issues.
+
+- **gemini** — "Clean extraction of runGlobalMigrations with safe test seams and comprehensive
+  full-chain test coverage."
+- **codex** — "Clean, behavior-preserving extraction with strong real-runner migration coverage."
+- **claude** — verified the extraction is a *mechanical* move (diffed it: only the three declared
+  edits, zero SQL changed) and reproduced the full suite independently. Raised three
+  non-blocking minors, all now fixed in commit 5a70fbb2:
+  1. the `runGlobalMigrations` JSDoc claimed unqualified safety — the marker-less-GLOBAL_SCHEMA
+     caveat now sits on the function, since it is publicly re-exported;
+  2. `pir-832` / `spec-755` / `bugfix-826` still pointed at "db/index.ts's vN block", which now
+     holds no migrations and whose vN is a *different* migration from the state.db vN they test;
+  3. the convergence test compared tables only, so `builders_updated_at` was uncovered — it now
+     compares triggers too.
+
+  It also noted something I had not: the full-chain marker assertion is a **bidirectional drift
+  guard on `GLOBAL_CURRENT_VERSION`** — adding a v18 without bumping the constant fails, and so
+  does bumping it without the migration. Spec 1313 actually shipped that mistake once.
+
 ## Status
 
-- Implement phase: code + tests written; targeted tests pass (32/32).
-- Build and full suite: run before signalling `porch done`.
-- Architect instruction on record: we are not cluesmith/codev maintainers — open the PR, address
-  review, do NOT merge; park it for the maintainer.
+- Implement phase: complete. Build green; full suite green (4861 passed, 48 skipped, 0 failures).
+- PR phase: **PR #1485 open**, CMAP fixes pushed, `porch check` green (pr_exists, e2e_tests),
+  PR recorded via `porch done --pr 1485 --branch builder/air-1476`.
+- Now at the **pr gate**, waiting on human approval. Not merging: architect instruction on record
+  is that we are not cluesmith/codev maintainers — open the PR, address review, park it for the
+  maintainer to merge.
