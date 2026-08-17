@@ -1,7 +1,7 @@
 id: bugfix-1471
 title: render-gate-replace-the-perf-w
 protocol: bugfix
-phase: pr
+phase: verified
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -13,5 +13,5 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-08-17T23:26:16.744Z'
-updated_at: '2026-08-17T23:48:29.209Z'
+updated_at: '2026-08-17T23:48:33.936Z'
 pr_ready_for_human: false
