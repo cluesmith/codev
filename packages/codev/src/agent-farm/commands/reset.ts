@@ -12,7 +12,10 @@
  *
  * Addressing, workspace detection and sender identity are reused verbatim from
  * `afx send` — there is exactly one address resolver (the same rule `afx
- * interrupt` follows).
+ * interrupt` follows). "Verbatim" is literal: the sender comes from
+ * `detectCurrentBuilderId()` / `architectSenderId()`, the same two functions
+ * `afx send` calls, so one actor has one `from_agent` form across all three
+ * commands (issue #1478).
  */
 
 import { existsSync, readFileSync, readdirSync, writeFileSync, statSync } from 'node:fs';
@@ -24,7 +27,7 @@ import { loadConfig } from '../../lib/config.js';
 import { loadForgeConfig } from '../../lib/forge.js';
 import { fetchIssue as fetchForgeIssue } from '../../lib/github.js';
 import { buildPromptFromTemplate, buildResumeNotice } from './spawn-roles.js';
-import { detectWorkspaceRoot, detectCurrentBuilderId } from './send.js';
+import { detectWorkspaceRoot, detectCurrentBuilderId, architectSenderId } from './send.js';
 import { resolveBuilderContext } from './reset/context.js';
 import {
   formatResetReport,
@@ -53,7 +56,7 @@ export async function reset(options: ResetOptions): Promise<void> {
 
   let from: string;
   try {
-    from = detectCurrentBuilderId() ?? 'architect';
+    from = detectCurrentBuilderId() ?? architectSenderId();
   } catch (err) {
     fatal(err instanceof Error ? err.message : String(err));
   }

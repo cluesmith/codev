@@ -1475,6 +1475,49 @@ describe('tower-routes', () => {
       expect(mailbox.findHeldForAgent(sendDbHolder.db, '/tmp/ws', 'spir-9')).toHaveLength(1);
     });
 
+    // Issue #1478: the sender's identity must survive into the row both attribution
+    // surfaces read — `from_agent` (what `afx inbox` renders) and `formatted_message`
+    // (the builder's composer header). `formatMessageForTarget`'s any → builder branch
+    // used to discard `from` entirely, so even a corrected sender could not surface.
+    // The registry hold path is the cheapest route that formats AND persists.
+    describe('architect identity in the persisted row (issue #1478)', () => {
+      /** POST /api/send from `from` to an offline-but-known builder → held row. */
+      async function heldRowFrom(from: string | undefined) {
+        mockParseJsonBody.mockResolvedValue({ to: 'spir-9', message: 'ship it', workspace: '/tmp/ws', from });
+        mockResolveTarget.mockReturnValue({ code: 'NOT_FOUND', message: 'no live terminal' });
+        mockResolveAgentInRegistry.mockReturnValue({ workspacePath: '/tmp/ws', agent: 'spir-9', kind: 'builder' });
+        const { res, body } = makeRes();
+        await handleRequest(makeReq('POST', '/api/send'), res, makeCtx());
+        return mailbox.getById(sendDbHolder.db, JSON.parse(body()).mailboxId)!;
+      }
+
+      it('stores the specific architect as from_agent — the identity `afx inbox` renders', async () => {
+        const row = await heldRowFrom('architect:feedback');
+        // Pre-fix this was the generic 'architect' for every architect in the workspace.
+        expect(row.from_agent).toBe('architect:feedback');
+        expect(row.to_agent).toBe('spir-9');
+      });
+
+      it('names the architect in the composer header (the any → builder branch)', async () => {
+        const row = await heldRowFrom('architect:main');
+        expect(row.formatted_message).toMatch(/^### \[ARCHITECT:main INSTRUCTION \| .+\] ###\n/);
+        expect(row.formatted_message).toContain('ship it');
+        // Only the framing gained the name; the stored body stays the raw message.
+        expect(row.body).toBe('ship it');
+      });
+
+      it('leaves a builder → builder send on the bare ARCHITECT header', async () => {
+        const row = await heldRowFrom('builder-spir-109');
+        expect(row.formatted_message).toMatch(/^### \[ARCHITECT INSTRUCTION \| .+\] ###\n/);
+        expect(row.from_agent).toBe('builder-spir-109');
+      });
+
+      it('passes the architect sender to resolveTarget unchanged (affinity routing still sees it)', async () => {
+        await heldRowFrom('architect:main');
+        expect(mockResolveTarget).toHaveBeenCalledWith('spir-9', '/tmp/ws', 'architect:main');
+      });
+    });
+
     // Spec 1273: `escape` delivers a bare ESC keystroke straight to the PTY.
     // The buffer-bypass assertion is the load-bearing one — an interrupt that can
     // be deferred because someone recently typed in that terminal is not an

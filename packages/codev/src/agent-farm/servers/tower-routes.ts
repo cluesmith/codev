@@ -1521,7 +1521,9 @@ function formatMessageForTarget(
   raw: boolean,
 ): string {
   if (isArchitectTarget && from) return formatBuilderMessage(from, message, undefined, raw); // builder → architect
-  if (!isArchitectTarget) return formatArchitectMessage(message, undefined, raw); // any → builder
+  // any → builder: thread the sender so an `architect:<name>` origin is named in the
+  // header (issue #1478) instead of collapsing to a bare `ARCHITECT INSTRUCTION`.
+  if (!isArchitectTarget) return formatArchitectMessage(message, undefined, raw, from); // any → builder
   return raw ? message : formatArchitectMessage(message, undefined, false); // unknown → architect
 }
 

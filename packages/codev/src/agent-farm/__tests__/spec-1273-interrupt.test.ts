@@ -117,6 +117,8 @@ vi.mock('../lib/tower-client.js', () => ({
 vi.mock('../commands/send.js', () => ({
   detectWorkspaceRoot: mockDetectWorkspaceRoot,
   detectCurrentBuilderId: mockDetectCurrentBuilderId,
+  // Issue #1478: a non-builder sender is the SPECIFIC architect, `architect:<name>`.
+  architectSenderId: () => 'architect:main',
 }));
 
 vi.mock('../utils/logger.js', () => ({
@@ -142,6 +144,21 @@ describe('afx interrupt (Spec 1273)', () => {
       '1273',
       '\x1b',
       expect.objectContaining({ escape: true }),
+    );
+  });
+
+  // Issue #1478: the sender identity is shared with `afx send`, so an architect
+  // appears under ONE `from_agent` form everywhere. Without this assertion a revert
+  // to the old inline `?? 'architect'` would leave the suite green.
+  it('sends as the specific architect, not the generic string', async () => {
+    const { interrupt } = await import('../commands/interrupt.js');
+
+    await interrupt({ builder: '1273' });
+
+    expect(mockSendMessage).toHaveBeenCalledWith(
+      '1273',
+      '\x1b',
+      expect.objectContaining({ from: 'architect:main' }),
     );
   });
 

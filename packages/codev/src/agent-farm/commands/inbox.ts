@@ -118,25 +118,37 @@ export async function inboxList(options: InboxListOptions = {}): Promise<void> {
 
   logger.header(`Held messages (${rows.length})`);
 
-  const widths = [38, 6, 13, 22, 14];
-  logger.row(['ID', 'AGE', 'REASON', 'FROM → TO', 'WORKSPACE'], widths);
-  logger.row(
-    ['─'.repeat(36), '─'.repeat(5), '─'.repeat(12), '─'.repeat(21), '─'.repeat(13)],
-    widths,
-  );
-
   const now = Date.now();
-  for (const row of rows) {
-    const wsName = row.workspacePath.split('/').pop() || row.workspacePath;
-    const fromTo = `${row.fromAgent ?? '?'} → ${row.toAgent}`;
+  // Render the cells first so the FROM → TO column can be sized to its content
+  // (issue #1478). That column exists to answer "who sent this, to whom?", and a
+  // fixed 22-char slice cut long builder ids and `architect:<name>` senders
+  // mid-name — silently rendering an identity the operator can't act on.
+  const cells = rows.map((row) => {
     // Spec 1313 round 3: a pre-due delayed (`--delay`) row is SCHEDULED, not stuck — render
     // its due countdown ("→15s") in the AGE column and "scheduled" as the reason, so a delayed
     // send that is simply waiting for its due time is not mistaken for a starving held message.
     const preDue = row.notBefore != null && row.notBefore > now;
-    const ageCell = preDue ? `→${formatDuration(row.notBefore! - now)}` : formatAge(row.createdAt, now);
-    const reason = preDue ? 'scheduled' : `${row.reason ?? 'held'}${row.escalated ? '!' : ''}`;
+    return {
+      id: row.id,
+      age: preDue ? `→${formatDuration(row.notBefore! - now)}` : formatAge(row.createdAt, now),
+      reason: preDue ? 'scheduled' : `${row.reason ?? 'held'}${row.escalated ? '!' : ''}`,
+      fromTo: `${row.fromAgent ?? '?'} → ${row.toAgent}`,
+      workspace: row.workspacePath.split('/').pop() || row.workspacePath,
+    };
+  });
+
+  const fromToHeader = 'FROM → TO';
+  const fromToWidth = Math.max(fromToHeader.length, ...cells.map((c) => c.fromTo.length)) + 2;
+  const widths = [38, 6, 13, fromToWidth, 14];
+  logger.row(['ID', 'AGE', 'REASON', fromToHeader, 'WORKSPACE'], widths);
+  logger.row(
+    ['─'.repeat(36), '─'.repeat(5), '─'.repeat(12), '─'.repeat(fromToWidth - 1), '─'.repeat(13)],
+    widths,
+  );
+
+  for (const cell of cells) {
     logger.row(
-      [row.id, ageCell, reason.slice(0, 13), fromTo.slice(0, 22), wsName.slice(0, 14)],
+      [cell.id, cell.age, cell.reason.slice(0, 13), cell.fromTo, cell.workspace.slice(0, 14)],
       widths,
     );
   }

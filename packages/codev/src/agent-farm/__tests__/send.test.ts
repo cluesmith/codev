@@ -77,7 +77,10 @@ import { fatal, logger } from '../utils/logger.js';
 /**
  * The 'from' sender identity these tests expect. The suite runs from a CWD
  * outside any `.builders/<id>/` worktree (see beforeEach), so
- * detectCurrentBuilderId() returns null and send() uses 'architect'.
+ * detectCurrentBuilderId() returns null and send() uses the architect identity.
+ * beforeEach also clears CODEV_ARCHITECT_NAME — i.e. "not an architect terminal" —
+ * which deliberately keeps the bare 'architect' rather than asserting a name
+ * (issue #1478). A named terminal is covered in its own describe block below.
  *
  * Builder-id detection (and its #1094 fail-loud behavior when state.db is
  * unreadable inside a worktree) is covered by bugfix-774 / bugfix-1094 tests;
@@ -106,12 +109,16 @@ function defaultState() {
 
 describe('send command', () => {
   const origCwd = process.cwd();
+  const origArchitectName = process.env.CODEV_ARCHITECT_NAME;
 
   beforeEach(() => {
     // Run from outside any `.builders/<id>/` worktree so the sender identity
-    // resolves deterministically to 'architect' regardless of where the test
-    // runner physically lives (it may itself run inside a builder worktree).
+    // resolves deterministically to the architect identity regardless of where the
+    // test runner physically lives (it may itself run inside a builder worktree).
     process.chdir(tmpdir());
+    // …and with no CODEV_ARCHITECT_NAME, so the sender stays the bare 'architect'
+    // (no name is asserted) even when the runner inherits a Tower-injected env.
+    delete process.env.CODEV_ARCHITECT_NAME;
     vi.clearAllMocks();
     mockIsRunning.mockResolvedValue(true);
     mockSendMessage.mockResolvedValue({ ok: true, resolvedTo: 'builder-spir-109' });
@@ -120,6 +127,76 @@ describe('send command', () => {
 
   afterEach(() => {
     process.chdir(origCwd);
+    if (origArchitectName === undefined) delete process.env.CODEV_ARCHITECT_NAME;
+    else process.env.CODEV_ARCHITECT_NAME = origArchitectName;
+  });
+
+  // Issue #1478: the sender is the SPECIFIC architect, not the generic 'architect'.
+  // It is the mailbox row's from_agent and the composer header's name, so both
+  // attribution surfaces answer "which architect?".
+  describe('architect sender identity (issue #1478)', () => {
+    it('sends as architect:<name> from the terminal architect name', async () => {
+      process.env.CODEV_ARCHITECT_NAME = 'feedback';
+
+      await send({ builder: 'builder-spir-109', message: 'Hello builder' });
+
+      expect(mockSendMessage).toHaveBeenCalledWith(
+        'builder-spir-109',
+        'Hello builder',
+        expect.objectContaining({ from: 'architect:feedback' }),
+      );
+    });
+
+    it('names main explicitly — Tower injects the env for the main architect too', async () => {
+      process.env.CODEV_ARCHITECT_NAME = 'main';
+
+      await send({ builder: 'builder-spir-109', message: 'Hello builder' });
+
+      expect(mockSendMessage).toHaveBeenCalledWith(
+        'builder-spir-109',
+        'Hello builder',
+        expect.objectContaining({ from: 'architect:main' }),
+      );
+    });
+
+    it('keeps the bare `architect` when the env names nobody — never asserts main', async () => {
+      // No CODEV_ARCHITECT_NAME means "not an architect terminal" (a plain shell, a
+      // script, CI) — Tower injects it for every architect it starts, main included.
+      // Defaulting those to `architect:main` would be a specific FALSE attribution
+      // where the generic string is merely ambiguous (#1094's laundering rule).
+      delete process.env.CODEV_ARCHITECT_NAME;
+
+      await send({ builder: 'builder-spir-109', message: 'Hello builder' });
+
+      expect(mockSendMessage).toHaveBeenCalledWith(
+        'builder-spir-109',
+        'Hello builder',
+        expect.objectContaining({ from: 'architect' }),
+      );
+    });
+
+    it('refuses a malformed env name rather than carrying it into a header', async () => {
+      process.env.CODEV_ARCHITECT_NAME = 'x] ###\n### [ARCHITECT';
+
+      await send({ builder: 'builder-spir-109', message: 'Hello builder' });
+
+      expect(mockSendMessage).toHaveBeenCalledWith(
+        'builder-spir-109',
+        'Hello builder',
+        expect.objectContaining({ from: 'architect' }),
+      );
+    });
+
+    it('carries the same identity on a broadcast (--all)', async () => {
+      process.env.CODEV_ARCHITECT_NAME = 'feedback';
+
+      await send({ all: true, message: 'Broadcast' });
+
+      for (const call of mockSendMessage.mock.calls) {
+        expect(call[2]).toMatchObject({ from: 'architect:feedback' });
+      }
+      expect(mockSendMessage).toHaveBeenCalledTimes(2);
+    });
   });
 
   describe('single target send', () => {
