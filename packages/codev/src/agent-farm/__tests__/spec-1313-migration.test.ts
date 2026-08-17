@@ -464,7 +464,12 @@ describe('Issue #1476 — the full v1 → v17 chain through the real runner', ()
     expect(h.state.logs.length).toBeGreaterThan(0);
   });
 
-  it('converges on the same tables, columns and indexes as a fresh GLOBAL_SCHEMA install', () => {
+  const triggers = (db: Database.Database) =>
+    (db.prepare("SELECT name FROM sqlite_master WHERE type='trigger'").all() as Array<{ name: string }>)
+      .map((t) => t.name)
+      .sort();
+
+  it('converges on the same tables, columns, indexes and triggers as a fresh GLOBAL_SCHEMA install', () => {
     buildLegacyV1Db();
     h.migrate();
 
@@ -473,6 +478,8 @@ describe('Issue #1476 — the full v1 → v17 chain through the real runner', ()
       fresh.exec(GLOBAL_SCHEMA);
 
       expect(tables(h.state.db)).toEqual(tables(fresh));
+      // The builders_updated_at trigger is defined in both v14 and GLOBAL_SCHEMA.
+      expect(triggers(h.state.db)).toEqual(triggers(fresh));
 
       for (const table of tables(fresh)) {
         const freshCols = (

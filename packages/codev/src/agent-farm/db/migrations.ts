@@ -47,9 +47,14 @@ export interface GlobalMigrationOptions {
 /**
  * Run every outstanding global.db migration against `db`.
  *
- * Safe to call on any existing database from v1 onward: each step checks its own
- * `_migrations` marker first, so already-applied steps are skipped and the call
- * converges on the `GLOBAL_CURRENT_VERSION` shape.
+ * Safe to call on any existing database that reached its recorded version through
+ * migrations: each step checks its own `_migrations` marker first, so applied steps
+ * are skipped and the call converges on the `GLOBAL_CURRENT_VERSION` shape.
+ *
+ * NOT for a fresh database. A GLOBAL_SCHEMA-shaped database with no markers fails at
+ * v5, which selects the long-renamed `terminal_sessions.project_path` — which is why
+ * `ensureGlobalDatabase()` stamps every marker on the fresh path instead of running
+ * the chain.
  */
 export function runGlobalMigrations(
   db: Database.Database,
