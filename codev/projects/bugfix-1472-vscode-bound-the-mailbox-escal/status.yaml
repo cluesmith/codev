@@ -1,7 +1,7 @@
 id: bugfix-1472
 title: vscode-bound-the-mailbox-escal
 protocol: bugfix
-phase: investigate
+phase: fix
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -11,4 +11,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-08-17T23:03:26.300Z'
-updated_at: '2026-08-17T23:03:26.301Z'
+updated_at: '2026-08-17T23:05:30.926Z'
