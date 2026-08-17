@@ -5,6 +5,8 @@
  * tower-routes.ts and tower-cron.ts.
  */
 
+import { trySubmitToSession, unserializedWriteCount, type SubmitClock } from './session-submit.js';
+
 /** Minimal writable session interface — avoids coupling to PtySession. */
 export interface WritableSession {
   /**
@@ -111,29 +113,78 @@ export function writeMessageToSession(
 }
 
 /**
- * Paced write of a message (text + trailing Enter unless `noEnter`) that reports
- * whether every byte reached the PTY. Resolves `true` when the whole submit landed,
- * `false` when ANY scheduled write was dropped (#1198: a shellper socket that died
- * mid-pace). This is the delivery layer's authoritative success signal — a mailbox
- * delivery holds a row whose bytes never made it instead of marking it delivered
- * (Spec 1313 integration review — the silent-loss finding).
- *
- * `writeMessageToSession` fires the text, any subsequent lines, and the trailing
- * Enter across `setTimeout` gaps (10–130ms+), and a t=0 `writable` precheck cannot
- * see a socket that dies *during* that sequence. So wrap the session and record
- * whether any of those writes returned false. The returned promise resolves at the
- * final scheduled offset (`doneMs`); `writeMessageToSession` registers the Enter's
- * `setTimeout` at that same offset *before* this resolve is scheduled, so the Enter
- * executes first and its result is observed by resolution time.
- *
- * Awaiting the promise is also what makes the per-agent write serializer's
- * completion-chaining real — the next delivery cannot begin until this submit
- * (Enter included) is entirely on the wire.
+ * Outcome of a {@link submitMessagePaced} attempt. Generic in the caller's own abort
+ * vocabulary so this module stays free of mailbox concepts — the delivery layer
+ * instantiates `A` with its hold reasons.
  */
-export function writeMessagePaced(
-  session: WritableSession, message: string, noEnter: boolean,
-): Promise<boolean> {
+export type PacedSubmitResult<A> =
+  /** The whole submit — text and, unless `noEnter`, the trailing Enter — reached the PTY. */
+  | { status: 'written' }
+  /** #1198: a scheduled write was dropped mid-pace (the shellper socket died). */
+  | { status: 'dropped' }
+  /**
+   * The bytes went out, but an operator submission bypassed the lock while they did
+   * (the ceiling-expired degraded path), so this submit cannot be trusted to have
+   * landed intact.
+   */
+  | { status: 'preempted' }
+  /** Another submission held the terminal. NOTHING was written; the caller may retry later. */
+  | { status: 'contended' }
+  /** The caller's in-lock precheck refused. NOTHING was written. */
+  | { status: 'aborted'; abort: A };
+
+/**
+ * Paced write of a message (text + trailing Enter unless `noEnter`) performed as ONE
+ * submission on the session's per-terminal lock (Issue #1365).
+ *
+ * This is the mailbox delivery path's write edge. Before #1365 it wrote directly, under
+ * the per-agent serializer only, so a gated delivery could interleave with a concurrent
+ * `--interrupt`/`--escape` on the same terminal: a `^C` or ESC landing between the text
+ * and its Enter cleared or truncated the composer while every byte still reported
+ * success, and the row was marked `delivered` for a message the agent never saw whole.
+ * Taking the same lock those paths take is what makes that impossible.
+ *
+ * Two properties are load-bearing and easy to lose in a refactor:
+ *
+ *   - **`precheck` runs INSIDE the lock**, immediately before the first byte. Acquiring
+ *     the lock without it would merely move the race: a delivery that classified a clean
+ *     screen, then waited behind another submission, would write onto the screen that
+ *     submission just changed. Returning non-null aborts with nothing written.
+ *   - **Contention is declined, not queued** (see {@link trySubmitToSession}). The gated
+ *     delivery path must never block, because the drainer walks agents sequentially.
+ *
+ * The completion semantics callers depend on are unchanged from the pre-#1365
+ * `writeMessagePaced`: the returned promise resolves only after the trailing Enter has
+ * been written. `writeMessageToSession` registers the Enter's `setTimeout` before
+ * `submitToSession` schedules its own equal-offset sleep, so the Enter still executes
+ * first — which is what makes the per-agent serializer's completion-chaining real.
+ */
+export async function submitMessagePaced<A>(
+  session: WritableSession & { id: string },
+  message: string,
+  noEnter: boolean,
+  precheck: () => A | null,
+  clock?: SubmitClock,
+): Promise<PacedSubmitResult<A>> {
+  // Fail LOUD on a missing id rather than keying the lock on `undefined`. Sessions reach
+  // this through structurally-typed ports, so a double without an id compiles fine and
+  // would silently collapse every per-terminal lock into one global lock — serialization
+  // that looks present and is not. A throw here surfaces as a held row (the delivery path
+  // never marks a row delivered on a throw), which is the safe failure.
+  if (typeof session.id !== 'string' || session.id === '') {
+    throw new Error('submitMessagePaced: session.id must be a non-empty string (the per-terminal lock key)');
+  }
+
+  // The one thing the lock cannot stop is an operator submission whose wait ceiling expired
+  // and wrote anyway. Sample the session's degraded-write counter around our own submission:
+  // a bump means a `^C`/ESC bypassed us mid-write, so the composer may have been cleared or
+  // truncated under our bytes. Cheaper and more direct than re-classifying the screen — and it
+  // is the difference between re-holding the row and falsely reporting a delivery, which is
+  // the whole point of Issue #1365.
+  const bypassesBefore = unserializedWriteCount(session.id);
+
   let delivered = true;
+  let abort: A | null = null;
   const tracked: WritableSession = {
     write: (data: string): boolean => {
       const ok = session.write(data);
@@ -141,6 +192,23 @@ export function writeMessagePaced(
       return ok;
     },
   };
-  const doneMs = writeMessageToSession(tracked, message, noEnter);
-  return new Promise((resolve) => setTimeout(() => resolve(delivered), doneMs));
+
+  const ran = await trySubmitToSession(
+    session.id,
+    () => {
+      abort = precheck();
+      if (abort !== null) return 0; // refused in-lock: not one byte goes out
+      return writeMessageToSession(tracked, message, noEnter);
+    },
+    clock,
+  );
+
+  if (!ran) return { status: 'contended' };
+  // Read through a cast: both flags are assigned inside the callback above, which
+  // TypeScript's flow analysis does not track back to this scope.
+  const refused = abort as A | null;
+  if (refused !== null) return { status: 'aborted', abort: refused };
+  if (!(delivered as boolean)) return { status: 'dropped' };
+  if (unserializedWriteCount(session.id) !== bypassesBefore) return { status: 'preempted' };
+  return { status: 'written' };
 }
