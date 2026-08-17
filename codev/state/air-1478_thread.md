@@ -123,6 +123,17 @@ non-blocking items). All six addressed:
   three consecutive full runs before and after are green at 4884. Reported as an unidentified
   transient, not as a clean sweep. Nothing in the files this PR touches failed in any targeted run.
 
+## Outcome
+
+Protocol complete. PR **#1486** is open and **deliberately unmerged** — we are not cluesmith/codev
+maintainers on this project, so the merge is the maintainer's, not the architect's or mine. The pr
+gate was approved by the human (relayed via the architect) after two CMAP rounds and one architect
+integration review.
+
+The `e2e_tests` no-op I hit during verification is now tracked as **issue #1488** — it affects AIR,
+SPIR and ASPIR in both trees, so any builder reading a green `porch check` as e2e coverage is being
+misled until that lands.
+
 ## Environment note
 
 The worktree had no `node_modules` and no `.codev/`. Needed `pnpm install --frozen-lockfile` plus
