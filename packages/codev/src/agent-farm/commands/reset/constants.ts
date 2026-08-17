@@ -1,5 +1,5 @@
 /**
- * Tunable parameters for `afx reset` (Spec 1273).
+ * Tunable parameters for `afx refresh` (Spec 1273).
  *
  * Every value here is overridable from the CLI. The defaults are grounded in
  * the one verified manual reset (shannon workspace, 2026-07-27), not guessed.

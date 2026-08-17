@@ -1,5 +1,5 @@
 /**
- * `afx reset` command surface — Spec 1273, phase 6.
+ * `afx refresh` command surface — Spec 1273, phase 6 (renamed from `reset` by #1489).
  *
  * The orchestrator tests prove the state machine's ordering. These prove the
  * WRAPPER: that the right things are bound to the right ports and the target is
@@ -111,7 +111,7 @@ const BUILDER = {
   taskText: undefined,
 };
 
-describe('afx reset — command surface (Spec 1273)', () => {
+describe('afx refresh — command surface (Spec 1273)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockIsRunning.mockResolvedValue(true);
@@ -137,30 +137,30 @@ describe('afx reset — command surface (Spec 1273)', () => {
   // ==========================================================================
 
   it('resolves the target through the shared resolver, not an exact-id lookup', async () => {
-    // `getBuilder` matches the id EXACTLY. Using it meant `afx reset 1273`
+    // `getBuilder` matches the id EXACTLY. Using it meant `afx refresh 1273`
     // failed against a builder registered as `aspir-1273` while `afx send 1273`
     // reached it fine — a command the architect cannot address the way they
     // already type addresses is one that gets typed wrong under pressure.
-    const { reset } = await import('../commands/reset.js');
+    const { refresh } = await import('../commands/reset.js');
 
-    await reset({ builder: '1273' });
+    await refresh({ builder: '1273' });
 
     expect(mockFindBuilderById).toHaveBeenCalledWith('1273');
   });
 
   it('aborts when the target cannot be resolved or is ambiguous', async () => {
     mockFindBuilderById.mockReturnValue(null);
-    const { reset } = await import('../commands/reset.js');
+    const { refresh } = await import('../commands/reset.js');
 
-    await expect(reset({ builder: 'nope' })).rejects.toThrow(/FATAL/);
+    await expect(refresh({ builder: 'nope' })).rejects.toThrow(/FATAL/);
     expect(mockRunReset).not.toHaveBeenCalled();
   });
 
   it('refuses a registry row missing the worktree or branch', async () => {
     mockFindBuilderById.mockReturnValue({ ...BUILDER, worktree: '' });
-    const { reset } = await import('../commands/reset.js');
+    const { refresh } = await import('../commands/reset.js');
 
-    await expect(reset({ builder: '1273' })).rejects.toThrow(/incomplete registry row/);
+    await expect(refresh({ builder: '1273' })).rejects.toThrow(/incomplete registry row/);
     expect(mockRunReset).not.toHaveBeenCalled();
   });
 
@@ -169,8 +169,8 @@ describe('afx reset — command surface (Spec 1273)', () => {
   // ==========================================================================
 
   it('binds /clear to Tower\'s raw channel, and ESC to its escape channel', async () => {
-    const { reset } = await import('../commands/reset.js');
-    await reset({ builder: '1273' });
+    const { refresh } = await import('../commands/reset.js');
+    await refresh({ builder: '1273' });
 
     const terminal = mockRunReset.mock.calls[0][0].terminal;
 
@@ -191,8 +191,8 @@ describe('afx reset — command surface (Spec 1273)', () => {
   });
 
   it('sends the save request and re-orientation as formatted messages', async () => {
-    const { reset } = await import('../commands/reset.js');
-    await reset({ builder: '1273' });
+    const { refresh } = await import('../commands/reset.js');
+    await refresh({ builder: '1273' });
 
     const terminal = mockRunReset.mock.calls[0][0].terminal;
     await terminal.sendMessage('save your state');
@@ -207,8 +207,8 @@ describe('afx reset — command surface (Spec 1273)', () => {
     // "unobservable" and refuses to clear; collapsing it to 0 at this boundary
     // would defeat that check before the orchestrator ever saw it.
     mockGetTerminal.mockResolvedValue({ id: 'term-1', status: 'running' });
-    const { reset } = await import('../commands/reset.js');
-    await reset({ builder: '1273' });
+    const { refresh } = await import('../commands/reset.js');
+    await refresh({ builder: '1273' });
 
     const terminal = mockRunReset.mock.calls[0][0].terminal;
     await expect(terminal.observe()).resolves.toEqual({ exists: true, lastDataAt: undefined });
@@ -223,8 +223,8 @@ describe('afx reset — command surface (Spec 1273)', () => {
       total: 2,
       hasMore: false,
     });
-    const { reset } = await import('../commands/reset.js');
-    await reset({ builder: '1273' });
+    const { refresh } = await import('../commands/reset.js');
+    await refresh({ builder: '1273' });
 
     const terminal = mockRunReset.mock.calls[0][0].terminal;
     expect(terminal.readOutput).toBeDefined();
@@ -238,8 +238,8 @@ describe('afx reset — command surface (Spec 1273)', () => {
     // Confirmation is advisory: an older Tower or a 404 must degrade to
     // "unconfirmed", never fail the reset that already succeeded.
     mockGetTerminalOutput.mockResolvedValue(null);
-    const { reset } = await import('../commands/reset.js');
-    await reset({ builder: '1273' });
+    const { refresh } = await import('../commands/reset.js');
+    await refresh({ builder: '1273' });
 
     const terminal = mockRunReset.mock.calls[0][0].terminal;
     await expect(terminal.readOutput()).resolves.toBeNull();
@@ -247,8 +247,8 @@ describe('afx reset — command surface (Spec 1273)', () => {
 
   it('reports a non-running terminal as absent', async () => {
     mockGetTerminal.mockResolvedValue({ id: 'term-1', status: 'exited' });
-    const { reset } = await import('../commands/reset.js');
-    await reset({ builder: '1273' });
+    const { refresh } = await import('../commands/reset.js');
+    await refresh({ builder: '1273' });
 
     const terminal = mockRunReset.mock.calls[0][0].terminal;
     await expect(terminal.observe()).resolves.toEqual({ exists: false });
@@ -262,22 +262,22 @@ describe('afx reset — command surface (Spec 1273)', () => {
     // The flag is documented in seconds; the orchestrator takes ms. An
     // unconverted 300 would make the receipt wait 0.3s instead of 5 minutes and
     // abort against every real builder.
-    const { reset } = await import('../commands/reset.js');
-    await reset({ builder: '1273', timeout: 300 });
+    const { refresh } = await import('../commands/reset.js');
+    await refresh({ builder: '1273', timeout: 300 });
 
     expect(mockRunReset.mock.calls[0][0].receiptTimeoutMs).toBe(300_000);
   });
 
   it('passes --note through as the addendum', async () => {
-    const { reset } = await import('../commands/reset.js');
-    await reset({ builder: '1273', note: 'Ignore the stale PR comment.' });
+    const { refresh } = await import('../commands/reset.js');
+    await refresh({ builder: '1273', note: 'Ignore the stale PR comment.' });
 
     expect(mockRunReset.mock.calls[0][0].addendum).toBe('Ignore the stale PR comment.');
   });
 
   it('forwards --dry-run and --interrupt-first', async () => {
-    const { reset } = await import('../commands/reset.js');
-    await reset({ builder: '1273', dryRun: true, interruptFirst: true });
+    const { refresh } = await import('../commands/reset.js');
+    await refresh({ builder: '1273', dryRun: true, interruptFirst: true });
 
     const opts = mockRunReset.mock.calls[0][0];
     expect(opts.dryRun).toBe(true);
@@ -290,24 +290,24 @@ describe('afx reset — command surface (Spec 1273)', () => {
 
   it('rejects a gate-disabling numeric option before runReset is called', async () => {
     // The CLI layer validates first, but the wrapper is also reachable
-    // programmatically, and `reset()` must not forward a value that would
+    // programmatically, and `refresh()` must not forward a value that would
     // silently switch off R2 or R4. The orchestrator's own guard is what
     // enforces it; this asserts the wrapper does not swallow that refusal and
     // report success anyway.
     mockRunReset.mockRejectedValue(
       Object.assign(new Error('Invalid quietWindowMs: -1.'), { name: 'ResetPreflightError' }),
     );
-    const { reset } = await import('../commands/reset.js');
+    const { refresh } = await import('../commands/reset.js');
 
-    await expect(reset({ builder: '1273', quietWindow: -1 })).rejects.toThrow(/FATAL/);
+    await expect(refresh({ builder: '1273', quietWindow: -1 })).rejects.toThrow(/FATAL/);
   });
 
   it('omits an unset numeric option rather than passing NaN or zero', async () => {
     // `options.timeout ? ... : undefined` on an absent flag must yield
     // undefined so the orchestrator's own default applies. Passing 0 or NaN
     // here would disable the gate the default exists to enforce.
-    const { reset } = await import('../commands/reset.js');
-    await reset({ builder: '1273' });
+    const { refresh } = await import('../commands/reset.js');
+    await refresh({ builder: '1273' });
 
     const opts = mockRunReset.mock.calls[0][0];
     expect(opts.receiptTimeoutMs).toBeUndefined();
@@ -326,9 +326,9 @@ describe('afx reset — command surface (Spec 1273)', () => {
       saveRequest: 'save request text',
     });
     const previous = process.exitCode;
-    const { reset } = await import('../commands/reset.js');
+    const { refresh } = await import('../commands/reset.js');
 
-    await reset({ builder: '1273' });
+    await refresh({ builder: '1273' });
 
     expect(process.exitCode).toBe(1);
     process.exitCode = previous;

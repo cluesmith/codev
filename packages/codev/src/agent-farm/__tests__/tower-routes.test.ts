@@ -1018,7 +1018,7 @@ describe('tower-routes', () => {
 
   describe('GET /api/terminals/:id (Spec 1273 — lastDataAt on the wire)', () => {
     // Testing `session.info` alone would not pin this: the whole point of the
-    // phase is that the field reaches a *client*, so afx reset can measure
+    // phase is that the field reaches a *client*, so afx refresh can measure
     // output quiescence instead of assuming a builder's turn has ended before
     // typing /clear into its terminal. This asserts the serialised response.
     it('serialises lastDataAt as an epoch-ms number', async () => {

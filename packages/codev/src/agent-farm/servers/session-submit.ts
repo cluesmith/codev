@@ -9,7 +9,7 @@
  * soon as the write was *scheduled*. So an awaited send resolved before its own
  * message had been submitted.
  *
- * In production (`afx reset`, 2026-07-31) that gap swallowed a `/clear`
+ * In production (`afx refresh`, 2026-07-31) that gap swallowed a `/clear`
  * entirely. Reset awaited the raw write of `/clear`, then wrote the
  * re-orientation — landing inside the 50ms window, into the same composer,
  * ahead of the Enter. One Enter then submitted both as a single message

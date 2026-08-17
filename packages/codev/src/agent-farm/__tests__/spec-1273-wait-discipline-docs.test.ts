@@ -58,7 +58,7 @@ describe('Spec 1273 phase 7 — wait discipline reaches the builder role doc', (
       it('names the escape hatch so a stuck builder knows it can be reached', () => {
         const text = read(doc);
         expect(text).toContain('afx interrupt');
-        expect(text).toContain('afx reset');
+        expect(text).toContain('afx refresh');
       });
     });
   }
@@ -76,13 +76,13 @@ describe('Spec 1273 phase 7 — wait discipline reaches the builder role doc', (
 describe('Spec 1273 phase 7 — both commands are documented where they are looked up', () => {
   for (const doc of COMMAND_DOCS) {
     describe(doc, () => {
-      it('documents afx reset and afx interrupt', () => {
+      it('documents afx refresh and afx interrupt', () => {
         const text = read(doc);
-        expect(text).toContain('### afx reset');
+        expect(text).toContain('### afx refresh');
         expect(text).toContain('### afx interrupt');
       });
 
-      it('documents every reset flag the CLI accepts', () => {
+      it('documents every refresh flag the CLI accepts', () => {
         // Kept in sync with cli.ts's registration by hand; a flag that exists
         // and is undocumented is a flag nobody uses.
         const text = read(doc);
@@ -112,13 +112,13 @@ describe('Spec 1273 phase 7 — both commands are documented where they are look
 
 describe('Spec 1273 phase 7 — both skill trees, not just the Claude one', () => {
   for (const doc of SKILL_DOCS) {
-    it(`${doc} lists afx reset and afx interrupt`, () => {
+    it(`${doc} lists afx refresh and afx interrupt`, () => {
       // The repo maintains parallel Claude and Codex skill trees. Updating only
       // the Claude one leaves Codex-driven agents unable to discover the
-      // commands — they would have no reason to believe reset exists.
+      // commands — they would have no reason to believe refresh exists.
       expect(existsSync(resolve(REPO, doc))).toBe(true);
       const text = read(doc);
-      expect(text).toContain('## afx reset');
+      expect(text).toContain('## afx refresh');
       expect(text).toContain('## afx interrupt');
     });
   }

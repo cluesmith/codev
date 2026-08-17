@@ -692,12 +692,12 @@ afx send 0042 "That producer died — stop waiting and report."
 
 ---
 
-### afx reset
+### afx refresh
 
-Reset a builder's context: have it save its working state, clear the conversation, then re-orient it.
+Refresh a builder's context: have it save its working state, clear the conversation, then re-orient it.
 
 ```bash
-afx reset <builder> [options]
+afx refresh <builder> [options]
 ```
 
 **Arguments:**
@@ -713,10 +713,13 @@ afx reset <builder> [options]
 - `--min-bytes <n>` - Minimum state-file size to accept as substantive (default 1000)
 - `--quiet-window <ms>` - Terminal silence that counts as turn-ended (default 1500)
 
+**Deprecated alias:** `afx reset` still runs this command and prints a one-line notice to stderr.
+It will be removed in a future release — use `afx refresh`.
+
 **Description:**
 
 Long-running builders exhaust their context window. `afx spawn --resume` reattaches the *same*
-conversation, so a deep session resumes deep — it does not give the builder a fresh window. `afx reset`
+conversation, so a deep session resumes deep — it does not give the builder a fresh window. `afx refresh`
 does, without losing what the builder knows.
 
 The sequence:
@@ -724,7 +727,7 @@ The sequence:
 1. Assemble the re-orientation and write it to `.builder-reorient.md` in the worktree.
 2. Ask the builder to write its complete working state to `.builder-state.md`, stamped with a one-time
    nonce.
-3. Wait for that file and **verify** it: correct nonce (not a stale file from an earlier reset),
+3. Wait for that file and **verify** it: correct nonce (not a stale file from an earlier refresh),
    substantive size, and stable across two observations (not still being written).
 4. Wait for the terminal to fall silent, so the clear is not typed mid-turn. If it does not settle, send
    **one** ESC and wait again.
@@ -747,19 +750,19 @@ then `afx spawn <id> --resume`).
 
 ```bash
 # See exactly what would be sent, without touching the builder
-afx reset 0042 --dry-run
+afx refresh 0042 --dry-run
 
-# Standard reset
-afx reset 0042
+# Standard refresh
+afx refresh 0042
 
 # Add context that post-dates the builder's saved state
-afx reset 0042 --note "PR #90 merged while you were mid-phase. Rebase before continuing."
+afx refresh 0042 --note "PR #90 merged while you were mid-phase. Rebase before continuing."
 
 # The builder is wedged mid-turn and not reading messages
-afx reset 0042 --interrupt-first
+afx refresh 0042 --interrupt-first
 
 # A builder that legitimately needs longer to write its state
-afx reset 0042 --timeout 600
+afx refresh 0042 --timeout 600
 ```
 
 ---

@@ -72,7 +72,7 @@ nobody can redirect, and you will not notice, because from inside it everything 
 Never chain foreground poll loops.
 
 If you are wedged anyway, the architect can end your turn with `afx interrupt <your-id>`, or
-`afx reset <your-id>` to have you save state and re-orient. Worth knowing so you can suggest
+`afx refresh <your-id>` to have you save state and re-orient. Worth knowing so you can suggest
 them.
 
 ## PRs

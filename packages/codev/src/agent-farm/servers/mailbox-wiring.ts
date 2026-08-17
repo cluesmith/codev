@@ -143,7 +143,7 @@ export function resolveAgentForSession(
  * The classifier profile for a session, resolving the wrapped-launch case. A real
  * builder runs through `.builder-start.sh`, so `session.command` is the shell, not
  * the agent, and the pure {@link resolveProfile} returns `null`. We then read the
- * launch script (exactly as `afx reset` does) to recover the underlying harness
+ * launch script (exactly as `afx refresh` does) to recover the underlying harness
  * command and resolve against that. Still `null` → the delivery holds `no-profile`
  * (fail-safe by construction: an unknown agent is held and surfaced, never guessed
  * — this is what correctly trips on wrapper/boot/relaunch screens too).
