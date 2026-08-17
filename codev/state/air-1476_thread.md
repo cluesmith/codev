@@ -71,6 +71,24 @@ All three lanes APPROVE, HIGH confidence, zero blocking issues.
   guard on `GLOBAL_CURRENT_VERSION`** — adding a v18 without bumping the constant fails, and so
   does bumping it without the migration. Spec 1313 actually shipped that mistake once.
 
+## Architect CMAP (integration review, risk tier High)
+
+Unanimous APPROVE across all three lanes, zero blocking. Four non-blocking findings; response
+posted as a PR comment.
+
+- **1 — precondition guard: accepted, implemented** (`235b490c`). The runner now rejects a
+  marker-less GLOBAL_SCHEMA database at entry (workspace_path-shaped but no v9 marker) with a
+  named error, instead of dying at v5 on `no such column: project_path`. Unreachable in
+  production; it exists because the extraction is precisely what made the runner callable from
+  anywhere. Two tests cover it.
+- **3 — pragma fidelity: accepted, implemented** (same commit). The harness now sets production's
+  full pragma set rather than WAL alone — it matters for v7–v9's DROP + RENAME rebuilds.
+- **4 — stale replica comments: already done** in `5a70fbb2`, pushed before the review landed.
+  The arch.md line is architect/MAINTAIN scope.
+- **2 — redundant `GLOBAL_CURRENT_VERSION` source guard: left in place, rebutted.** The new
+  full-chain marker assertion does cover it better, but deleting an assertion from a Spec 1313
+  test changes *that* test's intent rather than this issue's. Offered to drop it either way.
+
 ## Status
 
 - Implement phase: complete. Build green; full suite green (4861 passed, 48 skipped, 0 failures).
