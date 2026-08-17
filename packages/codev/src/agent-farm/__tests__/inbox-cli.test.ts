@@ -125,6 +125,71 @@ describe('inboxList', () => {
 
     await expect(inboxList()).rejects.toThrow('FATAL: Tower not running');
   });
+
+  // Issue #1478: FROM → TO is the column whose whole job is identity. It used to be
+  // hard-sliced to 22 chars, so long builder ids and `architect:<name>` senders were
+  // silently cut mid-name — an identity the operator cannot act on.
+  describe('FROM → TO column (issue #1478)', () => {
+    /** The FROM → TO cell (index 3) of the single rendered data row. */
+    function fromToCell(): { cell: string; width: number } {
+      const dataRow = mockLogger.row.mock.calls[2];
+      return { cell: (dataRow[0] as string[])[3], width: (dataRow[1] as number[])[3] };
+    }
+
+    it('renders a long from → to pair in full instead of truncating it', async () => {
+      const longFrom = 'architect:integration-review';
+      const longTo = 'builder-aspir-1478-carry-architect-name';
+      mockRequest.mockResolvedValue({
+        ok: true,
+        status: 200,
+        data: [row({ fromAgent: longFrom, toAgent: longTo })],
+      });
+
+      await inboxList();
+
+      const { cell, width } = fromToCell();
+      expect(cell).toBe(`${longFrom} → ${longTo}`);
+      // …and the column is wide enough to hold it, so padEnd can't clip it either.
+      expect(width).toBeGreaterThanOrEqual(cell.length);
+    });
+
+    it('sizes the column to the widest row, and never below its header', async () => {
+      mockRequest.mockResolvedValue({
+        ok: true,
+        status: 200,
+        data: [
+          row({ fromAgent: 'architect:main', toAgent: 'spir-1' }),
+          row({ id: 'ffffffff-0000-0000-0000-000000000000', fromAgent: 'architect:main', toAgent: 'builder-a-very-long-builder-id' }),
+        ],
+      });
+
+      await inboxList();
+
+      const widest = 'architect:main → builder-a-very-long-builder-id'.length;
+      const headerWidth = (mockLogger.row.mock.calls[0][1] as number[])[3];
+      // One width for the whole column — header, separator and every data row share it.
+      expect(headerWidth).toBeGreaterThanOrEqual(widest);
+      for (const call of mockLogger.row.mock.calls) {
+        expect((call[1] as number[])[3]).toBe(headerWidth);
+      }
+    });
+
+    it('keeps a short table compact — the column never shrinks below "FROM → TO"', async () => {
+      mockRequest.mockResolvedValue({ ok: true, status: 200, data: [row({ fromAgent: 'a', toAgent: 'b' })] });
+
+      await inboxList();
+
+      expect(fromToCell().width).toBeGreaterThanOrEqual('FROM → TO'.length);
+    });
+
+    it('renders a missing sender as "?" (unchanged)', async () => {
+      mockRequest.mockResolvedValue({ ok: true, status: 200, data: [row({ fromAgent: null })] });
+
+      await inboxList();
+
+      expect(fromToCell().cell).toBe('? → spir-1');
+    });
+  });
 });
 
 // ============================================================================

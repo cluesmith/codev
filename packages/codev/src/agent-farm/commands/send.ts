@@ -17,6 +17,7 @@ import { loadState } from '../state.js';
 import { getGlobalDbPath } from '../db/index.js';
 import { normalizeWorkspacePath } from '../utils/workspace-path.js';
 import { TowerClient } from '../lib/tower-client.js';
+import { currentArchitectName } from '../utils/architect-name.js';
 
 const MAX_FILE_SIZE = 48 * 1024; // 48KB limit per spec
 
@@ -168,6 +169,25 @@ export function detectCurrentBuilderId(): string | null {
 }
 
 /**
+ * The sender identity for a message that does NOT originate in a builder worktree:
+ * the *specific* architect, as the `architect:<name>` address form (issue #1478).
+ *
+ * Collapsing every architect sender to the bare string `architect` discarded the one
+ * fact both attribution surfaces exist to show — `afx inbox`'s FROM → TO column and
+ * the builder's composer header. The name comes from `currentArchitectName()`
+ * (`CODEV_ARCHITECT_NAME`, injected into every architect terminal Tower starts),
+ * defaulting to `main`.
+ *
+ * The address form is deliberate: it is what Tower already accepts as an architect
+ * address, it stores directly as the mailbox row's `from_agent`, and it stays outside
+ * `looksLikeBuilderId`'s heuristic — so sender-affinity routing and the #1094
+ * anti-spoofing warning behave exactly as they did with the generic string.
+ */
+export function architectSenderId(): string {
+  return `architect:${currentArchitectName()}`;
+}
+
+/**
  * Read file content for --file flag, with size validation.
  */
 function readFileContent(filePath: string): string {
@@ -308,13 +328,14 @@ export async function send(options: SendOptions): Promise<void> {
   // Detect workspace for target resolution and sender provenance
   const workspace = detectWorkspaceRoot() ?? undefined;
 
-  // Detect sender identity (builder ID if in a worktree, otherwise 'architect').
+  // Detect sender identity: builder ID if in a worktree, otherwise this terminal's
+  // specific architect (`architect:<name>`, issue #1478).
   // In a confirmed builder worktree, detectCurrentBuilderId throws when the
   // canonical id can't be verified — abort loudly here rather than send an
   // unverified `from` that Tower would silently route to 'main' (issue #1094).
   let from: string;
   try {
-    from = detectCurrentBuilderId() ?? 'architect';
+    from = detectCurrentBuilderId() ?? architectSenderId();
   } catch (err) {
     fatal(err instanceof Error ? err.message : String(err));
   }
