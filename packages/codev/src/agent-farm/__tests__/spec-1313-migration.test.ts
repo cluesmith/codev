@@ -40,7 +40,12 @@ function harness(name: string) {
     if (existsSync(testDir)) rmSync(testDir, { recursive: true });
     mkdirSync(state.runDir, { recursive: true });
     state.db = new Database(resolve(testDir, 'global.db'));
+    // Match production's configurePragmas(): v7–v9 rebuild tables with DROP + RENAME,
+    // which is exactly the SQL whose behavior depends on `foreign_keys`.
     state.db.pragma('journal_mode = WAL');
+    state.db.pragma('synchronous = FULL');
+    state.db.pragma('busy_timeout = 5000');
+    state.db.pragma('foreign_keys = ON');
     state.logs = [];
   });
 
@@ -565,6 +570,27 @@ describe('Issue #1476 — the full v1 → v17 chain through the real runner', ()
     h.migrate();
 
     expect(readdirSync(h.state.runDir).sort()).toEqual(['shellper-abc.sock', 'unrelated.txt']);
+  });
+
+  it('refuses a marker-less fresh GLOBAL_SCHEMA database with a named error', () => {
+    // The runner is now callable from anywhere, so the one shape it cannot handle must
+    // fail diagnosably rather than dying at v5 on `no such column: project_path`.
+    h.state.db.exec(GLOBAL_SCHEMA);
+    h.state.db.prepare('DELETE FROM _migrations').run();
+
+    expect(() => h.migrate()).toThrow(/no v9 migration marker/);
+    // Nothing was applied — the guard fires before any step runs.
+    expect(h.markers()).toEqual([]);
+  });
+
+  it('accepts a fresh GLOBAL_SCHEMA database once its markers are stamped (the production path)', () => {
+    h.state.db.exec(GLOBAL_SCHEMA);
+    for (let v = 1; v <= GLOBAL_CURRENT_VERSION; v++) {
+      h.state.db.prepare('INSERT OR IGNORE INTO _migrations (version) VALUES (?)').run(v);
+    }
+
+    expect(() => h.migrate()).not.toThrow();
+    expect(h.state.logs).toEqual([]); // every step already marked; nothing re-runs
   });
 
   it('a missing run directory does not fail the chain', () => {

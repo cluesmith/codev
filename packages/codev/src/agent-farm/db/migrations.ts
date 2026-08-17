@@ -51,10 +51,14 @@ export interface GlobalMigrationOptions {
  * migrations: each step checks its own `_migrations` marker first, so applied steps
  * are skipped and the call converges on the `GLOBAL_CURRENT_VERSION` shape.
  *
- * NOT for a fresh database. A GLOBAL_SCHEMA-shaped database with no markers fails at
- * v5, which selects the long-renamed `terminal_sessions.project_path` — which is why
+ * NOT for a fresh database. A GLOBAL_SCHEMA-shaped database with no markers would run
+ * v5 against the long-renamed `terminal_sessions.project_path` — which is why
  * `ensureGlobalDatabase()` stamps every marker on the fresh path instead of running
- * the chain.
+ * the chain. That shape is rejected at entry with a named error rather than an opaque
+ * mid-chain SQLite failure.
+ *
+ * @throws if the database carries the post-v9 `workspace_path` shape without the v9
+ * marker to match (a fresh schema that never walked the chain).
  */
 export function runGlobalMigrations(
   db: Database.Database,
@@ -68,6 +72,29 @@ export function runGlobalMigrations(
     version INTEGER PRIMARY KEY,
     applied_at TEXT NOT NULL DEFAULT (datetime('now'))
   )`);
+
+  // Precondition. Steps v5/v7/v8/v9 read and rebuild the project_path-era tables, so
+  // the chain only makes sense on a database that reached its recorded version through
+  // migrations. A fresh GLOBAL_SCHEMA database with no markers would instead die at v5
+  // with an opaque `no such column: project_path` — so name that shape here. Production
+  // never reaches this (ensureGlobalDatabase stamps every marker on the fresh path); it
+  // exists because the runner is now callable from anywhere.
+  const terminalSessions = db
+    .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='terminal_sessions'")
+    .get();
+  if (terminalSessions) {
+    const renamed = (db.prepare(`PRAGMA table_info(terminal_sessions)`).all() as Array<{ name: string }>)
+      .some((c) => c.name === 'workspace_path');
+    const v9Marker = db.prepare('SELECT version FROM _migrations WHERE version = 9').get();
+    if (renamed && !v9Marker) {
+      throw new Error(
+        'runGlobalMigrations: refusing to run on a database whose terminal_sessions is already ' +
+          'workspace_path-shaped but has no v9 migration marker. This is a fresh GLOBAL_SCHEMA ' +
+          'database that never walked the chain — stamp markers 1..GLOBAL_CURRENT_VERSION instead ' +
+          '(see ensureGlobalDatabase), or the chain will fail mid-way on renamed columns.'
+      );
+    }
+  }
 
   // Migration v2: No-op (previously added columns to port_allocations, now removed by Spec 0098)
   const v2 = db.prepare('SELECT version FROM _migrations WHERE version = 2').get();
