@@ -51,6 +51,8 @@ vi.mock('../lib/tower-client.js', () => ({
 vi.mock('../commands/send.js', () => ({
   detectWorkspaceRoot: mockDetectWorkspaceRoot,
   detectCurrentBuilderId: mockDetectCurrentBuilderId,
+  // Issue #1478: a non-builder sender is the SPECIFIC architect, `architect:<name>`.
+  architectSenderId: () => 'architect:main',
 }));
 
 vi.mock('../lib/builder-lookup.js', () => ({

@@ -17,7 +17,7 @@ import { loadState } from '../state.js';
 import { getGlobalDbPath } from '../db/index.js';
 import { normalizeWorkspacePath } from '../utils/workspace-path.js';
 import { TowerClient } from '../lib/tower-client.js';
-import { currentArchitectName } from '../utils/architect-name.js';
+import { ARCHITECT_NAME_PATTERN, MAX_ARCHITECT_NAME_LENGTH } from '../utils/architect-name.js';
 
 const MAX_FILE_SIZE = 48 * 1024; // 48KB limit per spec
 
@@ -174,9 +174,21 @@ export function detectCurrentBuilderId(): string | null {
  *
  * Collapsing every architect sender to the bare string `architect` discarded the one
  * fact both attribution surfaces exist to show — `afx inbox`'s FROM → TO column and
- * the builder's composer header. The name comes from `currentArchitectName()`
- * (`CODEV_ARCHITECT_NAME`, injected into every architect terminal Tower starts),
- * defaulting to `main`.
+ * the builder's composer header.
+ *
+ * **Why the env is read directly instead of via `currentArchitectName()`** (whose
+ * absent-value default is `main`): Tower injects `CODEV_ARCHITECT_NAME` into EVERY
+ * architect terminal it starts — `main` included (`tower-instances.ts` uses
+ * `DEFAULT_ARCHITECT_NAME`; the shellper-restart path re-injects `role_id || 'main'`).
+ * So a missing value does not mean "the main architect", it means "not an architect
+ * terminal" (a plain shell, a script, CI). Defaulting those to `architect:main` would
+ * turn today's honest ambiguity into a specific FALSE attribution — precisely the
+ * laundering of an unverified identity that #1094 exists to prevent. They keep the bare
+ * `architect` they send today, and every real architect terminal gains its name.
+ *
+ * The name is validated against `ARCHITECT_NAME_PATTERN` before it becomes an identity,
+ * so a malformed env value degrades to `architect` rather than travelling into a
+ * recipient's composer framing.
  *
  * The address form is deliberate: it is what Tower already accepts as an architect
  * address, it stores directly as the mailbox row's `from_agent`, and it stays outside
@@ -184,7 +196,11 @@ export function detectCurrentBuilderId(): string | null {
  * anti-spoofing warning behave exactly as they did with the generic string.
  */
 export function architectSenderId(): string {
-  return `architect:${currentArchitectName()}`;
+  const name = process.env.CODEV_ARCHITECT_NAME?.trim();
+  if (!name || name.length > MAX_ARCHITECT_NAME_LENGTH || !ARCHITECT_NAME_PATTERN.test(name)) {
+    return 'architect';
+  }
+  return `architect:${name}`;
 }
 
 /**
@@ -329,7 +345,8 @@ export async function send(options: SendOptions): Promise<void> {
   const workspace = detectWorkspaceRoot() ?? undefined;
 
   // Detect sender identity: builder ID if in a worktree, otherwise this terminal's
-  // specific architect (`architect:<name>`, issue #1478).
+  // architect — `architect:<name>` when the terminal names one, else the bare
+  // `architect` (issue #1478; see architectSenderId for why it never guesses a name).
   // In a confirmed builder worktree, detectCurrentBuilderId throws when the
   // canonical id can't be verified — abort loudly here rather than send an
   // unverified `from` that Tower would silently route to 'main' (issue #1094).

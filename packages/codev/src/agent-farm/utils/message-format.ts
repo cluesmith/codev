@@ -5,6 +5,8 @@
  * Shared between CLI (commands/send.ts) and Tower server (tower-routes.ts).
  */
 
+import { ARCHITECT_NAME_PATTERN, MAX_ARCHITECT_NAME_LENGTH } from './architect-name.js';
+
 /**
  * The header label for an architect-framed message (issue #1478).
  *
@@ -13,10 +15,36 @@
  * tell WHICH architect is directing it — the same attribution builder → architect
  * messages have always carried. Any other sender (a builder → builder send, cron, or
  * an unattributed call) keeps the historical bare `ARCHITECT` label.
+ *
+ * The name is VALIDATED before interpolation, not merely trimmed: `from` arrives from
+ * a `POST /api/send` body, so an unchecked name could forge `### [...] ###` framing in
+ * the recipient's composer. `ARCHITECT_NAME_PATTERN` is anchored `[a-z][a-z0-9-]*`, so
+ * anything carrying a bracket, newline or space degrades to the bare label rather than
+ * reaching the header. (`validateArchitectName` is deliberately NOT used here — it
+ * rejects the reserved default `main`, which is the most common real sender.)
  */
 export function architectHeaderLabel(sender?: string): string {
-  const name = sender?.startsWith('architect:') ? sender.slice('architect:'.length).trim() : '';
-  return name ? `ARCHITECT:${name}` : 'ARCHITECT';
+  if (!sender?.startsWith('architect:')) return 'ARCHITECT';
+  const name = sender.slice('architect:'.length).trim();
+  if (name.length > MAX_ARCHITECT_NAME_LENGTH || !ARCHITECT_NAME_PATTERN.test(name)) {
+    return 'ARCHITECT';
+  }
+  return `ARCHITECT:${name}`;
+}
+
+/**
+ * The role-and-identity label for ANY sender: `ARCHITECT[:<name>]` for an architect,
+ * `BUILDER <id>` for everything else (builders, and the `af-cron` pseudo-sender).
+ *
+ * Without this, the architect → architect path renders an architect under a hardcoded
+ * `BUILDER ` prefix — `### [BUILDER architect:main MESSAGE …] ###`, a wrong role paired
+ * with a real identity (CMAP round 1, claude). The label follows the sender's shape, so
+ * one rule covers every direction.
+ */
+export function senderHeaderLabel(sender: string): string {
+  if (sender === 'architect' || sender === 'arch') return 'ARCHITECT';
+  const architect = architectHeaderLabel(sender);
+  return architect === 'ARCHITECT' ? `BUILDER ${sender}` : architect;
 }
 
 /**
@@ -50,6 +78,10 @@ ${content}
 /**
  * Format a message from a builder to the architect.
  * Wraps in a structured header/footer unless raw mode is requested.
+ *
+ * `builderId` is the sender's identity; the header names its role from that shape
+ * (see {@link senderHeaderLabel}), so an architect → architect send reads
+ * `ARCHITECT:<name> MESSAGE` rather than being mislabelled `BUILDER architect:<name>`.
  */
 export function formatBuilderMessage(builderId: string, message: string, fileContent?: string, raw: boolean = false): string {
   let content = message;
@@ -62,7 +94,7 @@ export function formatBuilderMessage(builderId: string, message: string, fileCon
   }
 
   const timestamp = new Date().toISOString();
-  return `### [BUILDER ${builderId} MESSAGE | ${timestamp}] ###
+  return `### [${senderHeaderLabel(builderId)} MESSAGE | ${timestamp}] ###
 ${content}
 ###############################`;
 }
