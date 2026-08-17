@@ -432,7 +432,7 @@ afx inbox dismiss <id> [options]
 | `ID` | Mailbox row id (pass to `show` / `dismiss`) |
 | `AGE` | How long the message has been held (`5s`, `3m`, `2h`, `1d`) |
 | `REASON` | Why-held: `busy`, `no-profile`, or `no-live-pty`; a trailing `!` marks a row past the escalation age |
-| `FROM → TO` | Sender → recipient agent |
+| `FROM → TO` | Sender → recipient agent. An architect sender carries its name (`architect:main`); the column is sized to its content, so long ids are never truncated |
 | `WORKSPACE` | Owning workspace |
 
 **Options:**

@@ -60,6 +60,17 @@ describe('senderHeaderLabel (issue #1478)', () => {
     expect(senderHeaderLabel('arch')).toBe('ARCHITECT');
   });
 
+  // CMAP round 2 (claude): `parseAddress` is case-insensitive, so a hand-rolled
+  // `from: 'Architect:main'` reached the BUILDER branch. The prefix match follows
+  // addressing; the NAME stays strictly lowercase-validated.
+  it('recognises an architect sender case-insensitively', () => {
+    expect(senderHeaderLabel('Architect:main')).toBe('ARCHITECT:main');
+    expect(senderHeaderLabel('ARCHITECT')).toBe('ARCHITECT');
+    expect(architectHeaderLabel('Architect:feedback')).toBe('ARCHITECT:feedback');
+    // A mixed-case NAME is not a valid architect name → bare label, not `ARCHITECT:Main`.
+    expect(architectHeaderLabel('architect:Main')).toBe('ARCHITECT');
+  });
+
   it('leaves builder and pseudo-agent senders on the BUILDER label', () => {
     expect(senderHeaderLabel('builder-air-1478')).toBe('BUILDER builder-air-1478');
     expect(senderHeaderLabel('af-cron')).toBe('BUILDER af-cron');

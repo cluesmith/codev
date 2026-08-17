@@ -24,7 +24,11 @@ import { ARCHITECT_NAME_PATTERN, MAX_ARCHITECT_NAME_LENGTH } from './architect-n
  * rejects the reserved default `main`, which is the most common real sender.)
  */
 export function architectHeaderLabel(sender?: string): string {
-  if (!sender?.startsWith('architect:')) return 'ARCHITECT';
+  // Case-insensitive prefix, because `parseAddress` treats addresses that way — a
+  // hand-rolled `from: 'Architect:main'` must not be labelled a BUILDER. The NAME itself
+  // stays strictly validated (the pattern is lowercase-only), so a mixed-case name is
+  // not a real architect name and degrades to the bare label.
+  if (!sender || !sender.toLowerCase().startsWith('architect:')) return 'ARCHITECT';
   const name = sender.slice('architect:'.length).trim();
   if (name.length > MAX_ARCHITECT_NAME_LENGTH || !ARCHITECT_NAME_PATTERN.test(name)) {
     return 'ARCHITECT';
@@ -58,7 +62,8 @@ const SAFE_SENDER_ID = /^[A-Za-z0-9._:-]{1,128}$/;
  * unattributed message rather than a forged header.
  */
 export function senderHeaderLabel(sender: string): string {
-  if (sender === 'architect' || sender === 'arch') return 'ARCHITECT';
+  const bare = sender.toLowerCase();
+  if (bare === 'architect' || bare === 'arch') return 'ARCHITECT';
   const architect = architectHeaderLabel(sender);
   if (architect !== 'ARCHITECT') return architect;
   return SAFE_SENDER_ID.test(sender) ? `BUILDER ${sender}` : 'BUILDER <unknown>';
