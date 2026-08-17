@@ -94,6 +94,9 @@ posted as a PR comment.
 - Implement phase: complete. Build green; full suite green (4861 passed, 48 skipped, 0 failures).
 - PR phase: **PR #1485 open**, CMAP fixes pushed, `porch check` green (pr_exists, e2e_tests),
   PR recorded via `porch done --pr 1485 --branch builder/air-1476`.
-- Now at the **pr gate**, waiting on human approval. Not merging: architect instruction on record
-  is that we are not cluesmith/codev maintainers — open the PR, address review, park it for the
-  maintainer to merge.
+- **pr gate approved by the human** (relayed by the architect); `porch approve 1476 pr` run by me,
+  then `porch done 1476` → **PROTOCOL COMPLETE**.
+- **PR #1485 is deliberately left OPEN and unmerged.** We are not cluesmith/codev maintainers; the
+  PR is parked for a maintainer to merge. That is why the post-merge steps a builder would normally
+  run — `porch done --merged`, closing the issue, worktree cleanup — are not done here. Whoever
+  picks this up after the merge should run them.
