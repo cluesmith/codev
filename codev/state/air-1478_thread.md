@@ -89,6 +89,40 @@ Also took codex's consolidation: the four route-level tests moved into `tower-ro
 existing `POST /api/send` block (real in-memory `global.db`, `message-format` unmocked), which
 deleted ~90 lines of duplicated mock preamble. Net −152 lines, same coverage.
 
+## Review round 2
+
+CMAP: **gemini APPROVE** (no issues), **codex COMMENT** (two items), **claude APPROVE** (four
+non-blocking items). All six addressed:
+
+- codex was right that my PR body understated the framing-injection hole: it is *not* limited to
+  crafted builder ids. A sender that only *looks* architect-shaped (`architect:x] ###…`) fails name
+  validation and lands in `senderHeaderLabel`'s builder branch, which interpolated verbatim. Closed
+  at the chokepoint (`SAFE_SENDER_ID`, degrading to `BUILDER <unknown>`) — the hole predates the PR
+  on the builder → architect path, but the chokepoint is where it belongs.
+- claude caught that my `interrupt`/`reset` change was **unasserted** — both suites mock
+  `architectSenderId`, so a revert would have stayed green. Now pinned in both (end-to-end `from`
+  for interrupt; the helper call for reset, whose `from` reaches a port the mocked `runReset` never
+  invokes).
+- Case-insensitive prefix match, to follow `parseAddress`; the name stays lowercase-validated.
+- Doc clause on the `FROM → TO` row, mirrored in both trees.
+- Recorded in the PR the *symmetric* limit of my own fallback argument: "env present" doesn't prove
+  an architect terminal either (a Tower-spawned process can inherit Tower's own var), so a builder
+  shell outside its worktree now sends a *named* false architect instead of an anonymous one.
+  Display-only, no worse in kind — but honest to state rather than let the reasoning look airtight.
+
+## Verification notes worth carrying forward
+
+- **The AIR protocol's `e2e_tests` check is a no-op**: `npm run test:e2e … || echo 'e2e tests
+  skipped (not configured)'` cannot fail, and from the repo root there is no `test:e2e` script, so
+  it passed in 0.1s having run nothing. Don't read a green `porch check` as e2e coverage.
+- I ran the e2e test that actually covers this change instead — `send-integration.e2e.test.ts`
+  (POST /api/send → `/ws/messages`), which spawns its **own** Tower on port 14600: 7 passed. I did
+  NOT run the full e2e suite: its harness defaults to port 4100, the live Tower hosting this
+  workspace's architect and builders, and stopping that needs human permission.
+- One full-suite run showed a single failure I could not name (that run's stderr was discarded);
+  three consecutive full runs before and after are green at 4884. Reported as an unidentified
+  transient, not as a clean sweep. Nothing in the files this PR touches failed in any targeted run.
+
 ## Environment note
 
 The worktree had no `node_modules` and no `.codev/`. Needed `pnpm install --frozen-lockfile` plus
