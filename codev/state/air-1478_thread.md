@@ -55,6 +55,40 @@ One root cause, three edits:
 - `inbox-cli.test.ts`: long FROM → TO rendered in full, one shared width across header/separator/
   rows, never narrower than the header, `?` for a missing sender.
 
+## Review round 1 (CMAP + architect integration review)
+
+CMAP: **gemini APPROVE** (HIGH, no issues — independently confirmed the routing-safety
+reasoning), **codex COMMENT** (HIGH, no functional or security defects; flagged the 263-line
+standalone route-test file as a duplicated harness), **claude COMMENT** (HIGH, verified green
+itself, four items). The architect's integration review (REQUEST_CHANGES) independently landed on
+the same two defects claude found — good signal that they were real.
+
+Fixed, all four:
+
+1. **`BUILDER architect:main`** — `formatMessageForTarget`'s architect-target branch fed my
+   corrected sender into `formatBuilderMessage`'s hardcoded `BUILDER ` prefix. New
+   `senderHeaderLabel()` derives the label from the sender's *shape*: `ARCHITECT[:<name>]` for an
+   architect (including the bare `architect`/`arch`, which also read as BUILDER before), else
+   `BUILDER <id>`. My original design already said "attribution follows the sender's shape, not
+   the branch" — I applied it to one branch and not the other.
+2. **Header framing injection** — `from` comes from a POST body. `architectHeaderLabel` now
+   validates against `ARCHITECT_NAME_PATTERN` rather than trimming. Note `validateArchitectName`
+   is unusable here: it rejects the reserved `main`, the most common real sender.
+3. **The fallback decision reversed.** I had `architect:main` when `CODEV_ARCHITECT_NAME` is
+   absent. Evidence changed my mind: Tower injects the var into *every* architect terminal it
+   starts, `main` included (`tower-instances.ts:584`, and `tower-terminals.ts:692` re-injects
+   `role_id || 'main'` on shellper restart). So absent ≠ "main", it means "not an architect
+   terminal". Asserting `main` there converts honest ambiguity into a specific false attribution —
+   exactly #1094's laundering rule. Bare `architect` for those; every real terminal keeps its name.
+4. **`interrupt.ts` / `reset.ts`** folded in after all. Their own file comments claim sender
+   identity is "reused verbatim from `afx send`", so leaving them on the literal made that claim
+   false and put one architect under two identities in the surface this PR exists to fix. Both
+   comments now name the shared functions so the claim is checkable.
+
+Also took codex's consolidation: the four route-level tests moved into `tower-routes.test.ts`'s
+existing `POST /api/send` block (real in-memory `global.db`, `message-format` unmocked), which
+deleted ~90 lines of duplicated mock preamble. Net −152 lines, same coverage.
+
 ## Environment note
 
 The worktree had no `node_modules` and no `.codev/`. Needed `pnpm install --frozen-lockfile` plus
