@@ -44,3 +44,45 @@ no-op `^C` is only logged — both are things `--interrupt-after` must design ag
 
 **Standing constraint**: we are not cluesmith/codev maintainers. Never merge the PR; park it
 after review and report protocol-complete.
+
+## Plan revision 2 (2026-08-17) — after the architect's 3-way review
+
+Verdicts gemini APPROVE / codex + claude REQUEST_CHANGES, with both REQUEST_CHANGES reviews
+ratifying Part 1. Every blocking item was in Part 2's design, and every one of the five was
+right. Verified each against the code before revising rather than taking the summaries as
+ground truth:
+
+- **Item 5 confirmed on sight**: `tower-routes.test.ts:221` `gateSession()` is an
+  un-annotated literal with no `id`, and it reaches the *real* `mailbox-wiring` binding. That
+  would have keyed every lock on `undefined` — per-terminal serialization silently collapsing
+  into one global lock, with no failing assertion anywhere. Runtime guard in
+  `submitMessagePaced`, plus a different-terminals test.
+- **Item 2 adopted as proposed** (asymmetric try-lock). The drainer awaits agents
+  sequentially, so a blocking acquisition would let one agent's terminal stall every other
+  agent's delivery *plus* that tick's escalation and prune. Deliveries now fail fast to
+  `busy` — which costs nothing, since a contended terminal means the precheck would have
+  aborted anyway — and the result is a *stronger* liveness property than today.
+- **Item 1**: my revision-1 precheck re-validated writability + ringToken but not the row's
+  own status, which would have *widened* the dismiss→bytes-on-wire window from ~zero to the
+  whole lock wait. `getById` goes in the precheck; `WriteAbort` gains a `row-resolved` case
+  so "no hold, terminal state" stays expressible.
+- **Item 3** was a fair hit. I wrote "the in-lock precheck is not a refinement — it is the
+  fix," which overclaims: `ringToken` tracks *output*, so un-echoed input from a writer that
+  doesn't take the lock still defeats it. Restated: serialization is the structural
+  guarantee, the precheck narrows the echo-lag residual, and that residual is #1473's.
+- **Item 4**: escape is the *more* likely trigger for multi-line bodies, not a milder cousin —
+  the delivery's exposed window is longest exactly when the body is long, and the failure
+  mode is a truncated message marked `delivered` (worse than absent: it can be acted on).
+
+**New finding of my own (D3), flagged for the gate.** Nobody raised interrupt latency. Today
+`--interrupt` never waits; after convergence it waits for any in-flight delivery write, and
+body size is capped only by `parseJsonBody`'s 1 MiB default
+(`agent-farm/utils/server-utils.ts:47`). A 48 KB `--file` of short lines is ~48k lines ≈ 8
+minutes of paced write. An unbounded block on the escape hatch would be a worse regression
+than the bug. Proposed a bounded wait (2000 ms) that degrades to exactly today's unserialized
+behaviour with a loud WARN — never worse than the status quo at any point, and no longer
+silent. The ceiling value is a judgment call; flagged rather than assumed.
+
+Also noted: the suggested `arch-critical.md` hot-tier fact for the lock-order invariant needs
+a *displacement* (the tier is at its 10-fact cap), so it is proposed in the review phase for
+the maintainer rather than applied unilaterally.
