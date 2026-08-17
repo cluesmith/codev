@@ -106,6 +106,21 @@ Claude's three notes, all addressed in a follow-up commit:
    `classifyBuffer`), so the suite pins the algorithm and not the call-site wiring. Added a pointer
    to the existing "PRODUCTION data path" suite, which covers that wiring.
 
+## Outcome
+
+`pr` gate **approved by the human** 2026-08-17T23:48Z (relayed by the architect); I ran
+`porch approve bugfix-1471 pr` and `porch done` → **PROTOCOL COMPLETE**, phase `verified`.
+PR #1487 recorded in `pr_history` against branch `builder/bugfix-1471`.
+
+**The PR is deliberately NOT merged.** We are not cluesmith/codev maintainers on this project —
+per the architect's standing constraint the PR stays parked for the maintainer to merge. Use
+`gh pr merge --merge` (never squash, and no `--delete-branch` — the branch is checked out in this
+worktree). Issue #1471 auto-closes on merge via `Fixes #1471`.
+
+Note for whoever merges: #1361/#1473/#1474 are queued against this same test file, so this one is
+sequenced to land first. The change is confined to `render-gate.test.ts` and adds one self-contained
+`describe` block plus a small edit to the existing 4 MB test, which should keep those rebases cheap.
+
 **Determinism check.** The full 46-test file passes pinned to one contended core (`taskset -c 0` +
 4 busy loops) — the exact condition under which the old assertion measured 391.7ms against its
 250ms bound. Full package suite: 4860 passed / 48 skipped / 0 failed. `pnpm --filter
