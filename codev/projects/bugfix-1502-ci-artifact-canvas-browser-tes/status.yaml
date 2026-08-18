@@ -1,7 +1,7 @@
 id: bugfix-1502
 title: ci-artifact-canvas-browser-tes
 protocol: bugfix
-phase: fix
+phase: pr
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -11,5 +11,5 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-08-18T03:53:32.119Z'
-updated_at: '2026-08-18T04:19:10.004Z'
+updated_at: '2026-08-18T04:21:06.285Z'
 pr_ready_for_human: false
