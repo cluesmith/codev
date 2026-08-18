@@ -79,3 +79,21 @@ Scope: 1 YAML edit + 1 test file. Well under 300 LOC. Fits BUGFIX.
 - Architect explicit: the pr gate is the OWNER's, not the architect's. Integration APPROVE is
   NOT merge authorization. Holding at the pr gate; will not run `porch approve` or merge until
   the owner gives the word, then follow the merge task from `porch next`.
+
+## Reopened at architect's direction — stronger fix
+Amr asked whether a timeout is the best we can do. It is not.
+- Verified in-repo: dashboard-e2e.yml:42 runs `playwright install chromium` (NO --with-deps) on
+  ubuntu-latest, then launches Chromium (line 44-49). 8 consecutive successful scheduled runs on
+  main (08-10 → 08-17). So Chromium's system libs are already on the runner image and the apt
+  phase --with-deps triggers buys nothing.
+- Change: dropped --with-deps from test.yml install step → removes the SOLE log-confirmed stall
+  at its source. KEPT all timeout-minutes bounds as a backstop (not either-or): an unbounded job
+  conceals its own failure, which is #1502's real lesson.
+- --retries: argued AGAINST (not copied from sibling). Retries re-run failed tests not the
+  install step (wouldn't touch this stall), and the canvas suite is deterministic layout
+  invariants where a retry masks real regressions. Different character from dashboard-e2e's async
+  Tower/gh flows.
+- Verification is this PR's own canvas-browser CI run: if canvas needs a lib the dashboard
+  doesn't, it surfaces as a browser launch failure → restore --with-deps + rely on timeout, and
+  say so. Not claiming certainty.
+- Re-running CMAP round 2 on the updated PR.
