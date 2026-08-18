@@ -58,3 +58,38 @@ export const DEFAULT_QUIESCE_TIMEOUT_MS = 60_000;
 
 /** Bounded wait after the ESC escalation. Shorter — ESC should act immediately. */
 export const DEFAULT_QUIESCE_POST_ESCALATION_TIMEOUT_MS = 30_000;
+
+/**
+ * The challenge file the two-step self-refresh handshake writes (Spec 1470).
+ *
+ * `afx self-refresh --begin` mints a nonce and records it here; the execute step
+ * verifies the builder's save against THAT nonce and then deletes the file.
+ *
+ * The handshake exists because the nonce cannot be minted by the executing
+ * command. `verifyReceipt` requires the nonce to already be INSIDE
+ * `.builder-state.md`, but in the self path the builder writes that file before
+ * invoking the command — so a nonce created at invocation could never be in a
+ * file already on disk, and every run would abort `wrong-nonce`. The driven
+ * (`afx refresh`) path avoids this only because an external driver issues the
+ * nonce in the save request and *then* polls.
+ *
+ * `.builder-` prefix for the same reason as the other two: `afx cleanup`
+ * classifies those as scaffold rather than dirt, so a worktree carrying one is
+ * still considered clean.
+ */
+export const CHALLENGE_FILE_NAME = '.builder-refresh-challenge';
+
+/**
+ * Seconds Tower holds the post-clear re-entry before delivering it.
+ *
+ * PROVISIONAL. `/arch-save` uses 15s, tuned by an architect watching it happen;
+ * Spec 1470 requires this value to come from a live measurement instead, which
+ * Phase 8 takes. Until then this is the arch-save number, carried over rather
+ * than invented, and it is deliberately a named constant so the measurement has
+ * exactly one place to land.
+ *
+ * Note the delivery is NOT a bare timer: `--delay` persists the body to the
+ * durable mailbox at request time, so it survives a Tower restart, and the
+ * render gate holds it until the target's prompt is verifiably clean.
+ */
+export const DEFAULT_REENTRY_DELAY_SECONDS = 15;

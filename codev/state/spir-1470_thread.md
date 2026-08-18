@@ -585,3 +585,65 @@ and reported nothing useful.
 
 **CORRECTED**: read porch task descriptions, not just subjects. Never summarize porch output in a
 way that can drop a warning.
+
+## 2026-08-18 — Implement Phase 3 (self-refresh orchestrator)
+
+`reset/self.ts` — the TAIL of the refresh machine, not a second copy. Ports + step log, same
+discipline as `runReset`, because every safety property here is an ORDERING property and ordering
+is what reading cannot prove.
+
+**Two-step handshake** (the defect both reviewers found in the plan round):
+`begin` mints the nonce → writes `.builder-refresh-challenge` → returns the save request; builder
+writes `.builder-state.md` reproducing the nonce; `execute` verifies against THAT nonce → assembles
+→ writes reorient → schedules re-entry → clears → consumes the challenge.
+
+Freshness property the handshake buys: every `begin` OVERWRITES the challenge and every `execute`
+CONSUMES it, so a stale `.builder-state.md` from an earlier boundary fails `wrong-nonce`. The
+driven path gets that free from being externally driven; the self path had to earn it. Pinned by a
+replay test.
+
+**Ordering inverted vs /arch-save**: schedule re-entry FIRST, clear SECOND. Asymmetric damage —
+failed schedule + no clear is recoverable; clear + no re-entry is not.
+
+**Two observations, not one**: `verifyReceipt` returns `still-growing` whenever `previous` is null,
+so a single read would abort every run. The orchestrator sleeps the stability window between reads
+(instant under the fake clock). Fast-fails first on missing/wrong-nonce/too-small, since a second
+look cannot change those.
+
+**Min-bytes DECIDED**: retain `DEFAULT_MIN_BYTES = 1000` (plan required a decision, not a deferral).
+Phase 8 measures real boundary saves to confirm they clear it without padding.
+
+**`buildBoundarySaveRequest` is deliberately NOT `buildSaveRequest`.** The mid-phase request says
+"do not summarise for brevity" and asks for complete working state — wrong for a boundary, where
+the durable state is already externalised and Baked Decision 2 says keep the save minimal. The
+boundary request asks for the RESIDUE artifacts cannot supply: receipts w/ hashes, deviations,
+flaky tests, deferred work, standing orders, next action. Pointers, not prose.
+At `enter:review` it adds the cold-read exclusions — no self-assessment, no defence, no narrative
+of how the code came to be. That exclusion is what makes the review boundary a quality feature
+rather than only a context one: carrying "I did X and it's correct because Y" hands back the exact
+perspective the refresh exists to remove.
+
+**Tests: 35 core + 7 structural.** Every abort path asserts over the STEP LOG via `expectNoClear()`,
+which checks three independent witnesses (log, `didClear()`, and the terminal's raw writes). A
+return-value assertion would pass even if the clear had already been sent — that distinction is the
+whole point after five vacuous tests earlier in this project.
+
+Two bugs caught by typecheck/self-review before any test ran: `describeReceiptFailure`'s third arg
+is `minBytes`, not the nonce (I passed the nonce); and I hand-built paths with string concatenation,
+which is exactly the Windows bug `stateFilePath`'s own comment warns about — switched to
+`path.join`.
+
+### Build broke after the merge — NOT my code
+
+`npm run build` failed with `Cannot find module 'three'`. Cause: `packages/codev/scripts/copy-three.mjs`
+arrived with the origin/main merge, and my `pnpm install` predated it. Fixed by re-running
+`pnpm install --frozen-lockfile`.
+
+**Standing rule for this worktree**: after any merge from main, re-run `pnpm install` BEFORE
+trusting a build or test result. The worktree has no `worktree.postSpawn` hook to do it.
+
+Also a self-inflicted diagnosis delay worth noting: I ran `npm run build 2>&1 | tail -2 && npm test
+... | grep ...`, which threw away the actual error and left me with two useless lines. Same class of
+mistake as filtering `porch next` to subjects — I keep building summarizers that discard the signal
+I need. **Capture full output to a file and grep the file; never pipe a failing command through a
+narrow filter.**
