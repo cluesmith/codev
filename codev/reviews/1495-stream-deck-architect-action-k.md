@@ -136,6 +136,27 @@ For reviewers pulling the branch:
   - Put the keys on a second page and swipe between builders and architects; the shared dials keep
     acting on the selected builder on either page.
 
+## Protocol Note — this lane reproduced #1462 live
+
+Worth recording as evidence, because #1462 was filed off an *inference* and this is a clean
+reproduction: **the protocol wrote its own gate record onto the branch and thereby invalidated the
+merge window that record had just opened.**
+
+Two porch bookkeeping commits — `52f88dfe` ("pr gate-approved") and `c67edf53c` ("protocol
+complete") — landed on `builder/pir-1495` *after* the `pr` gate was approved. They moved the branch
+head off the SHA the gate record was taken against and **restarted all seven required checks**. So
+at the moment the gate opened the merge window, the branch's own gate-bookkeeping commits bumped the
+head and re-pended the checks, and the merge (`gh pr merge --merge`) was refused —
+`mergeStateStatus=BLOCKED` against the new head — until the checks went green again on a now-
+*stationary* head (`c67edf53c`), verified per-run by its own `headSha` rather than by board
+association.
+
+The generalisable shape: on a branch that has **required status checks** *and* a protocol that
+**commits its own gate bookkeeping to that same branch**, the gate-approval SHA and the mergeable
+SHA differ by the protocol's own commits — so the window opens and immediately closes itself, and
+the merge can only land after the checks re-settle on the post-bookkeeping head. (No code in this
+PR is involved; recorded here because the review is where a reader will look for evidence of #1462.)
+
 ## Flaky Tests
 
 None.

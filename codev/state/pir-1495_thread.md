@@ -131,3 +131,27 @@ docs/verification, impl "sound"). Dispositions (rebuttals file in codev/projects
 
 Now at the **pr gate**. Notified architect (led with REQUEST_CHANGES + disposition). Waiting for
 human merge + gate approval; will not merge until porch reports gate_status: approved.
+
+## Pre-gate fixes (architect sanity-check) + MERGED
+
+Architect required two pre-gate fixes (verified at source): (1) the four switch PNGs had NO test
+coverage — manifest-icons.test's generic loop only walks manifest.Actions and switch is
+manifest-less, so added explicit existence + size assertions; (2) corrected the rebuttal overclaim
+"nothing of ours is left unverified" → honest our-vs-platform split (native key BEHAVIOUR is
+Elgato's/out-of-scope; the icons + README procedure are OURS, now pinned). 233 tests. Pushed;
+porch re-fired pr gate (single-pass, no re-consult).
+
+Amr approved ("approve and merge 1495"); architect minted the porch gate record.
+
+MERGE hit the review-required wall: gh pr merge refused ("base branch policy prohibits the merge",
+REVIEW_REQUIRED). Reported + went quiet per merge-window rule. Architect cleared it and MERGED:
+PR #1499 merged 2026-08-18T02:17:57Z, merge commit 9129ab81c, 7/7 green on stationary head
+c67edf53c. Verified against SHA; ran porch done --merged 1499 (protocol complete).
+
+**#1462 reproduced live** (architect's request, added to the review artifact): two porch
+bookkeeping commits (52f88dfe pr gate-approved, c67edf53c protocol complete) bumped the head off
+the gate-record SHA and restarted all 7 checks — the protocol wrote its own gate record onto the
+branch and invalidated the merge window it had just opened. Clean repro of an inference-filed bug.
+
+NOTE: this review/thread addition is post-merge, so it sits on builder/pir-1495 only — NOT in
+main's merged copy. Flagged to architect for a landing decision (follow-up PR vs. branch record).
