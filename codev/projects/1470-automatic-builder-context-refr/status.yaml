@@ -41,8 +41,20 @@ gates:
     status: pending
   verify-approval:
     status: pending
-iteration: 1
-build_complete: true
-history: []
+iteration: 2
+build_complete: false
+history:
+  - iteration: 1
+    plan_phase: phase_1_boundary_declaration
+    build_output: ''
+    reviews:
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-1470/codev/projects/1470-automatic-builder-context-refr/1470-phase_1_boundary_declaration-iter1-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-1470/codev/projects/1470-automatic-builder-context-refr/1470-phase_1_boundary_declaration-iter1-claude.txt
 started_at: '2026-08-18T00:15:05.131Z'
-updated_at: '2026-08-18T02:33:10.290Z'
+updated_at: '2026-08-18T02:38:28.335Z'
