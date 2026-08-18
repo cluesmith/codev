@@ -98,6 +98,7 @@ import {
   type ResumeNoticePort,
   type SpawnPromptPort,
 } from './reorient.js';
+import { enterBoundary } from '../../../commands/porch/context-refresh.js';
 import type { ResolvedBuilderContext } from './context.js';
 
 // ============================================================================
@@ -306,7 +307,12 @@ export function buildBoundarySaveRequest(
   statePath: string,
   boundary?: string,
 ): string {
-  const isReview = boundary === 'enter:review';
+  // Derived, not typed out. A bare `'enter:review'` here is uncoupled from
+  // `enterBoundary()`, which is what actually produces boundary ids — so a
+  // change to that format would silently delete the review-boundary constraint
+  // rather than failing. The constraint is the whole reason the review boundary
+  // is a quality feature and not just a context one.
+  const isReview = boundary === enterBoundary('review');
 
   const lines = [
     'CONTEXT REFRESH — save your working state now.',
@@ -819,7 +825,7 @@ export async function runSelfRefresh(
   // schedule with no clear is recoverable, a clear with no re-entry is not.
   // ------------------------------------------------------------------
   try {
-    await terminal.scheduleReentry(payload.inline, reentryDelaySeconds);
+    await terminal.scheduleReentry(buildAutomaticReentryFrame(payload.inline), reentryDelaySeconds);
   } catch (err) {
     return abort(
       'reentry-failed',
@@ -904,6 +910,41 @@ export async function runSelfRefresh(
     stateBytes: second.bytes,
   };
 }
+
+/**
+ * Mark the re-entry as an AUTOMATIC refresh before it is scheduled.
+ *
+ * A builder cannot tell its own scheduled message from an architect's. Verified
+ * by probe during the specify phase: `afx send <self> "..."` is rendered by the
+ * harness as `### [ARCHITECT INSTRUCTION | … ] ###`. So a frame that merely says
+ * "context refresh" arrives looking like an order from the architect, and a
+ * refreshed builder may treat re-orientation as a new instruction — or, worse,
+ * wait for a follow-up that will never come.
+ *
+ * Added HERE rather than in `assembleReorientation`, which is shared: on the
+ * driven path the message genuinely IS from an architect who typed
+ * `afx refresh`, so labelling it automatic there would be false. The
+ * discriminator belongs to the path that is actually automatic.
+ */
+export function buildAutomaticReentryFrame(inline: string): string {
+  return [
+    AUTOMATIC_REENTRY_MARKER,
+    '',
+    'This message is from YOU, not from the architect. Your own `afx self-refresh`',
+    'scheduled it before clearing your context at a protocol boundary. Nobody is',
+    'waiting on a reply and there is no new instruction here — this is your',
+    're-orientation, and the work to do next is whatever `porch next` returns.',
+    '',
+    inline,
+  ].join('\n');
+}
+
+/**
+ * The literal marker. Exported so tests pin the exact string a builder sees,
+ * rather than a paraphrase that could drift away from it.
+ */
+export const AUTOMATIC_REENTRY_MARKER =
+  '## AUTOMATIC CONTEXT REFRESH — re-entry (not an architect instruction)';
 
 // ============================================================================
 // Reporting

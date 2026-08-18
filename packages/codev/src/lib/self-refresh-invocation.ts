@@ -29,10 +29,12 @@
  *
  * The skill is Markdown and cannot import anything. Rather than adding a third
  * hand-written copy, the skill **defers**: it tells the builder to run the exact
- * commands porch's refresh task supplied, instead of restating them. A parity
- * test asserts the skill contains no hand-written invocation that omits the
- * flag. Deferring beats duplicating-and-checking, because a copy that is merely
- * checked still has to be kept correct in two places.
+ * commands porch's refresh task supplied, instead of restating them.
+ * `spec-1470-reentry-frame.test.ts` asserts the skill contains NO hand-written
+ * invocation at all — stricter than checking each one carries the flag, and it
+ * fails on the first line someone adds rather than on the first mistake.
+ * Deferring beats duplicating-and-checking: a copy that is merely checked still
+ * has to be kept correct in two places.
  *
  * Lives in `src/lib/` because both callers already depend on it and neither
  * depends on the other in this direction: the established import direction is

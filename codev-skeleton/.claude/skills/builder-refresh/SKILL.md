@@ -76,17 +76,20 @@ re-entry, and clears you — in that order, and only if every step succeeds.
 
 ## If it refuses
 
-**A refusal is the safe outcome, and it means your context is intact.** The command names
-the specific gate that failed. Common ones:
+Most refusals happen **before** anything destructive, and those leave your context
+untouched. One does not. Read which you got.
+
+### Pre-clear refusals — your context is intact
 
 | Refusal | What it means |
 |---|---|
 | state file missing / too small / wrong nonce | Your save did not satisfy the gate — check the marker is on line 1 |
 | worktree has uncommitted tracked changes | Commit first; a refreshed context re-orients from git, so uncommitted work is invisible to it |
-| Tower is not running | The re-entry cannot be scheduled, so clearing would strand you |
-| challenge already consumed / for a different boundary | Run the begin step again |
+| Tower is not running, or did not schedule the re-entry | Clearing would strand you, so it refused |
+| challenge missing / already consumed / for a different boundary | Run the begin step again |
+| invalid parameters | A flag is out of range — nothing was read or written |
 
-**Report the refusal to the architect and carry on:**
+For any of these: **report it and carry on.**
 
 ```bash
 afx send architect "Context refresh refused at <boundary>: <the reason it printed>"
@@ -95,6 +98,22 @@ afx send architect "Context refresh refused at <boundary>: <the reason it printe
 Then run `porch next` for your normal tasks. **The refresh never blocks your work** — the
 boundary is recorded as consumed either way, so a failed refresh costs you some context and
 nothing else.
+
+### `clear-failed` — you cannot assume anything
+
+If the command reports that the clear was attempted but **may still have landed**, do not
+treat that as a pre-clear refusal. Sending `/clear` can succeed on the wire and still report
+an error, so from inside this turn it is genuinely unknown whether your context survives.
+
+- A re-entry message **is** already queued and will arrive shortly. If your context was
+  cleared, that message is your re-orientation. If it was not, the message is harmless and
+  can be ignored.
+- Do not start new work in this state.
+- Tell the architect explicitly that the outcome is ambiguous:
+
+```bash
+afx send architect "Self-refresh clear-failed at <boundary> — clear may or may not have landed; re-entry is queued"
+```
 
 ## After the clear
 

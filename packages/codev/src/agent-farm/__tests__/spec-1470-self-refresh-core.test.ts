@@ -20,6 +20,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { join } from 'node:path';
 import {
+  AUTOMATIC_REENTRY_MARKER,
   beginSelfRefresh,
   didClearConfirmed,
   parseChallenge,
@@ -279,6 +280,26 @@ describe('happy path', () => {
     expect(fs.read(reorientPath)).toBeTruthy();
     const names = result.steps.map(s => s.name);
     expect(names.indexOf('reorient-written')).toBeLessThan(names.indexOf('clear'));
+  });
+
+  it('schedules the frame that IDENTIFIES ITSELF as an automatic refresh', async () => {
+    // Asserts the WIRING, not the builder function. Testing
+    // buildAutomaticReentryFrame() in isolation passes even when
+    // runSelfRefresh schedules the bare inline frame instead — verified by
+    // mutation: removing the wrapper left 103 tests green until this existed.
+    //
+    // The stake: a builder cannot tell its own scheduled message from an
+    // architect's, because the harness renders self-sends as
+    // [ARCHITECT INSTRUCTION]. Without the marker a refreshed builder may read
+    // its own re-orientation as a new order.
+    seedHappyPath();
+    await run();
+
+    expect(terminal.scheduled).toHaveLength(1);
+    expect(terminal.scheduled[0].message).toContain(AUTOMATIC_REENTRY_MARKER);
+    expect(terminal.scheduled[0].message).toMatch(/not an architect instruction/i);
+    // And it still carries the re-orientation itself.
+    expect(terminal.scheduled[0].message).toMatch(/porch next/);
   });
 
   it('schedules the re-entry BEFORE clearing — the inversion of /arch-save', async () => {

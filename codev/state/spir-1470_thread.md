@@ -1200,3 +1200,38 @@ relaxing the check; and the containment check's INTENT is correct — only the c
 and the class survives somewhere I did not look. Nonce type vs length. Stability window vs three
 sibling parameters. porch task text vs CLI follow-up. And now one fs port vs three. The cure that
 actually works is not vigilance — it is making the thing singular so there is nowhere else to look.
+
+### Phase 5 iter1 (codex): I never implemented the criterion I DISCOVERED
+
+**The re-entry frame did not identify itself as an automatic refresh** — acceptance criterion 33.
+It scheduled `payload.inline` from the SHARED assembler, whose heading is only
+"CONTEXT REFRESH — re-orientation".
+
+The sting: **I found the need for that criterion myself**, by probe, in the specify phase — I ran
+`afx send spir-1470 "..."` and watched the harness render my own message as
+`### [ARCHITECT INSTRUCTION | ... ] ###`. I wrote the criterion, documented the reason in the spec,
+carried it through the plan, and then implemented the frame using the shared re-orientation
+verbatim. Discovering a requirement is not implementing it, and my own excitement about the probe
+apparently substituted for checking that the code did the thing.
+
+Fixed with `buildAutomaticReentryFrame()` — added on the SELF path only, not in
+`assembleReorientation`, because on the driven path the message genuinely IS from an architect who
+typed `afx refresh`; labelling it automatic there would be false.
+
+**Then the mutation check earned itself a THIRD time.** My new frame tests passed with 11/11 — and
+when I removed the wrapper from the actual `scheduleReentry` call, **103 tests still passed**. I had
+tested `buildAutomaticReentryFrame()` in isolation and never asserted `runSelfRefresh` USES it. Same
+wiring gap as the copied fs binding: the function is right, nothing checks it is called.
+
+Added an assertion on `terminal.scheduled[0].message`, re-applied the mutation, watched it fail,
+restored, confirmed green.
+
+**Also from codex**: all four skill copies claimed every refusal leaves the context intact. But
+`clear-failed` means the clear was ATTEMPTED and may have landed — a distinction Phase 3 built
+deliberately (clear-attempted vs clear) and made the command honest about. My skill flattened it
+back into reassurance. Rewritten to separate pre-clear refusals (context intact, carry on) from
+`clear-failed` (genuinely unknown, do not start new work, tell the architect it is ambiguous).
+
+Missing planned deliverable `spec-1470-reentry-frame.test.ts` now exists: 11 tests covering the
+marker, frame preservation, four-way skill parity, byte-identity, the deferral (no hand-written
+invocations in the skill), and a repo-wide .claude/.codex pairing guard.

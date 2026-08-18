@@ -12,7 +12,6 @@
  * exactly one delivery path (and one per-agent write serializer).
  */
 
-import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { loadConfig } from '../../lib/config.js';
 import { terminalDeliverySignals, type PtySession } from '../../terminal/pty-session.js';
