@@ -110,3 +110,27 @@ Net result: the key never touches a non-Tower origin — mirrors the shipped sam
 Also filed-for-architect (do NOT self-file): claude#6 suggests a `pull_request` paths-filtered
 trigger so this schedule-only suite gets a real gate (closes the class, not just the instance).
 Re-running CMAP on the revised PR before notifying.
+
+## PR phase — CMAP round 2 + end-to-end validation
+
+Round 2 (on the scoped revision): gemini=APPROVE (HIGH), codex=REQUEST_CHANGES (HIGH),
+claude=COMMENT (HIGH). Both non-gemini reviews converged on two things:
+1. PR body was stale (still described the discarded global-`extraHTTPHeaders` approach).
+   → Rewrote the PR body to describe the scoped design + validation.
+2. The vitest lane pins the setup HTTP paths + token correctness but NOT the Playwright
+   fixture / WebSocket *wiring* (Playwright-only). Both reviewers offered "run the workflow"
+   as the accepted alternative. → Dispatched `dashboard-e2e.yml` on the branch.
+
+Plus claude minors (all applied): hardcoded `'30000ms'` → named constant; scoped `request`
+fixture now preserves `baseURL`; regression-test docstring corrected to state exactly what it
+pins vs. what the Playwright run proves.
+
+**End-to-end validation: `dashboard-e2e.yml` GREEN on the final commit 6b03415c3** —
+run https://github.com/cluesmith/codev/actions/runs/32126675026 (Playwright step: success).
+This is the real dashboard-e2e suite against a fresh keyed Tower, so it proves the fixture,
+`page.request`, and WebSocket wiring that vitest can't — the fix works end-to-end, and the
+schedule-only suite that was red is now green.
+
+Round-2 verdicts are final (post-round-2 changes were cosmetic polish, not substantial → no
+round 3). codex's REQUEST_CHANGES points are both resolved (PR body rewritten; wiring proven
+by the green run). Notifying architect and firing the `pr` gate.
