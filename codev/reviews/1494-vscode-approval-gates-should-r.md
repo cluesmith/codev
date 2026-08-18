@@ -116,6 +116,32 @@ Because this lane changed the convention mid-flight: **plan-approval** was run b
 **pr** gate is still ahead. A reader of `status.yaml` seeing two different actors on two gates needs
 that explanation; it is the convention changing, not sloppiness.
 
+### Decision record: the `[USER via VS Code]` header differentiates, it does not prove
+
+Codex flagged that `from: 'vscode-user'` is caller-controlled, so `[USER via VS Code]` does not prove
+a human click. The stakeholder (main architect) ruled the types/Tower change **approved as
+implemented**, with this reconciliation against #1521 (the delivery-race issue this lane filed):
+
+- **#1521 is *accidental* acquisition.** Transport corruption manufactures a marker nobody chose to
+  present; there is no accountable actor, so it must be designed out.
+- **This header is *deliberate* acquisition within a keyed boundary.** Post-#1421 every route
+  accepting this message requires the shared local key, and the population able to forge
+  `from='vscode-user'` is exactly the population already trusted to do strictly worse (send as any
+  non-builder sender, kill terminals, spawn builders). In-band data cannot defend against its own
+  trust tier.
+
+So the header is **triage differentiation, never authorization proof**. Under the standing provenance
+bars a `[USER via VS Code]` header alone clears nothing; a gate-spending or bypass-spending decision
+still needs the human's word in the executing channel or evidence independent of the requesting
+chain. The arch.md "Sender attribution" section now states this limit, so no future reader builds on
+the header as proof (which is how #1457's class of drift starts).
+
+**Hardenings considered and declined:** per-connection attribution requires per-client identity that
+does not exist (the extension presents the same shared key as every client; that is security's
+unfiled per-peer-auth follow-up, where this header is now named as a consumer). A sender-allowlist is
+circular (forgers send exactly the allowlisted value). The one cheap real option, a Tower audit line
+on each `VSCODE_USER_SENDER` acceptance, was noted but not required here.
+
 ## Things to Look At During PR Review
 
 - **The four routing branches** in `decideApprovalRelay` (relay / refuse-offline /
