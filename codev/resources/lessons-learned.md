@@ -367,6 +367,33 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
   bug red. When adding a mode-dependent assertion, select the fixture builder whose phase matches
   the mode you are asserting (`pir-2`, implement phase, is diff mode) rather than reaching for the
   default — a passing assertion against the wrong-phase default proves nothing.
+  [Recurred in #1501] The predicted failure landed: giving canvas-mode rotation its own behaviour
+  flipped a *rotate* test (`:638`) that had ridden the canvas default fixture through
+  mode-independent code — repointing it to `pir-2` created the first genuine diff-mode rotate
+  coverage that never existed.
+
+- [From #1501] **A DOM assumption that unit tests cannot falsify needs a real-browser test, and an
+  approved plan is not evidence about runtime.** The approved plan said the canvas viewport-scroll
+  should pan `root.scrollTop` (the canvas body). But the body is not the vertical scroll container:
+  in vertical reading mode the *host page* scrolls the canvas (`viewportStartLine` measures block
+  visibility against the window top, and the VSCode host leaves body overflow default —
+  `preview-template.ts`). Panning `body.scrollTop` would have silently no-oped in the real webview
+  while passing every jsdom-level unit test, because jsdom reports no scroll geometry — the
+  assumption is invisible to the only suite that runs fast. The catch came from tracing *which
+  element actually scrolls* and proving it in real Chromium (Playwright: pan moves the document
+  scroller, `count: N` == N single steps, huge count edge-stops), not from re-reading the plan.
+  Companion to #1380 (jsdom cannot express CSS layout): the same rule extends from layout *features*
+  to any *which-node-scrolls / which-node-clips* assumption.
+
+- [From #1501] A canvas-command Stream Deck feature spans a THIRD independently-versioned artifact
+  beyond #1414's deck-bundle + VSCode-extension pair: **Tower** (the codev server validates every
+  canvas command against its own allowlist in `canvas-relay.ts`). A stale global Tower — the
+  installed `@cluesmith/codev` rather than the branch build — rejects a newly added command as
+  `invalid-request`, which the deck renders as `Error` on the touchstrip *even when the deck bundle
+  and the extension are both on-branch*. When a cross-surface command shows `Error` on hardware,
+  check which Tower is actually running (`ps` for the `tower-server.js` path) before suspecting the
+  code; restarting Tower to pick up the branch build kills every running builder, so it is the
+  human's call.
 
 ## UI/UX
 

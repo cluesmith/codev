@@ -74,6 +74,8 @@ const CANVAS_COMMANDS = [
   'heading-prev',
   'column-forward',
   'column-back',
+  'viewport-down',
+  'viewport-up',
   'doc-start',
   'doc-end',
   'composer-open',
@@ -97,6 +99,8 @@ const TRAVERSAL_COMMANDS = [
   'heading-prev',
   'column-forward',
   'column-back',
+  'viewport-down',
+  'viewport-up',
 ] as const satisfies readonly TraversalCommand[];
 
 type _EveryTraversalIsListed = Assert<

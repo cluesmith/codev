@@ -20,10 +20,13 @@
  * keyboard actions exactly (#1237, #1380). There is no parallel vocabulary: each command
  * produces the same effect as the in-page action it names.
  *
- * Two members have no key binding and are defined against their in-page equivalents instead:
+ * Some members have no key binding and are defined against their in-page equivalents instead:
  * `block-next`/`block-prev` step `[data-line]` blocks in flow order (deliberately NOT native
- * Tab parity, which also visits affordances, card actions, toolbar controls and links), and
- * `reading-mode-toggle` mirrors the reading-mode toolbar button.
+ * Tab parity, which also visits affordances, card actions, toolbar controls and links),
+ * `reading-mode-toggle` mirrors the reading-mode toolbar button, and `viewport-down`/`viewport-up`
+ * pan the scroll container itself by a fixed step (a raw viewport move, distinct from the
+ * block/heading FOCUS moves) so a controller can scroll a spec/plan for reading — the wheel's
+ * job, which a hardware dial cannot deliver as a DOM event (#1501).
  *
  * One member is context-aware rather than mirroring a single in-page action: `composer-open-or-submit`
  * (#1420) resolves canvas-side against the view's composer state — no composer open means open one at
@@ -45,6 +48,9 @@ export type CanvasCommand =
   // Paging — horizontal reading mode only.
   | 'column-forward'
   | 'column-back'
+  // Viewport pan — vertical scroll of the container by a fixed step (#1501).
+  | 'viewport-down'
+  | 'viewport-up'
   // Absolute movement.
   | 'doc-start'
   | 'doc-end'
@@ -58,9 +64,10 @@ export type CanvasCommand =
   | 'reading-mode-toggle';
 
 /**
- * The commands `count` applies to: relative traversal and column paging, where "do it N
- * times" is meaningful. Absolute moves (`doc-*`), composer actions and the reading-mode
- * toggle are excluded — repeating them is either a no-op or actively wrong.
+ * The commands `count` applies to: relative traversal, column paging, and viewport pan, where
+ * "do it N times" is meaningful (a dial rotate event carries `count = |ticks|`, so N steps in one
+ * send). Absolute moves (`doc-*`), composer actions and the reading-mode toggle are excluded —
+ * repeating them is either a no-op or actively wrong.
  *
  * Deliberately TYPE-LEVEL, not a runtime array. Neither consumer could import a runtime value
  * from this package: `@cluesmith/codev-types` is a compile-time-only dependency of
@@ -80,6 +87,8 @@ export type TraversalCommand = Extract<
   | 'heading-prev'
   | 'column-forward'
   | 'column-back'
+  | 'viewport-down'
+  | 'viewport-up'
 >;
 
 /** Every command `count` does NOT apply to. The complement of `TraversalCommand`. */
