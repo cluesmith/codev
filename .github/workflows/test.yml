@@ -9,6 +9,9 @@ jobs:
   unit:
     name: Unit Tests
     runs-on: ubuntu-latest
+    # Healthy runs finish in ~2-3 min; bound well above that so a stall fails
+    # visibly instead of pending for GitHub's 6-hour default (see #1502).
+    timeout-minutes: 15
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -115,6 +118,12 @@ jobs:
   canvas-browser:
     name: Artifact-Canvas Browser Tests
     runs-on: ubuntu-latest
+    # Root cause of #1502: `playwright install --with-deps` runs `apt-get update`,
+    # whose index fetch to archive.ubuntu.com intermittently stalls indefinitely
+    # (the fast azure.archive.ubuntu.com mirror is Ign-ored, and apt has no network
+    # timeout on the fallback fetch). Healthy runs finish in ~4 min; this bound turns
+    # a multi-hour silent stall into a fast, visible failure that a rerun clears.
+    timeout-minutes: 15
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -144,6 +153,8 @@ jobs:
   integration:
     name: Tower Integration Tests
     runs-on: ubuntu-latest
+    # Healthy runs finish in ~2 min; bound above that so a stall fails visibly (#1502).
+    timeout-minutes: 10
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -179,6 +190,8 @@ jobs:
   cli:
     name: CLI Integration Tests
     runs-on: ubuntu-latest
+    # Healthy runs finish in ~1 min; bound above that so a stall fails visibly (#1502).
+    timeout-minutes: 10
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -214,6 +227,8 @@ jobs:
   package:
     name: Package Install Verification
     runs-on: ubuntu-latest
+    # Healthy runs finish in ~2 min; bound above that so a stall fails visibly (#1502).
+    timeout-minutes: 10
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
