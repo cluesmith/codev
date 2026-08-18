@@ -54,8 +54,13 @@ The relay targets the builder's spawning architect via the explicit addressing f
 
 **We must NOT inherit `builder-grouping.ts:122`'s `b.spawnedByArchitect || 'main'` fallback.** That
 is #1406. A misrouted status line is noise; a misrouted *approval* sends a human's gate decision to
-an architect that did not spawn the builder. The null / offline / CLI-only cases are decided
+an architect that did not spawn the builder. The null / offline / no-live-architect cases are decided
 explicitly below.
+
+**The input `overview.architects` reports LIVENESS, not registration** (`api.ts:298-305`: only
+architects with a live session are listed; `[]` when the workspace has *no architects* **or none are
+live**). This distinction is load-bearing for the last branch and is why the earlier CLI-only framing
+was defective — see the investigation note after the table.
 
 I will extract the decision into a pure, unit-testable function so the branching is provable without
 a running Tower:
@@ -71,11 +76,7 @@ returning a discriminated union:
 | set **and** live | — | `relay` → `architect:<owner>` | normal path: send the relay |
 | set but **not** live | any | `refuse-offline` | modal error, names the offline architect; **no approval** |
 | `null` | non-empty | `refuse-unknown-owner` | modal error, won't guess (avoids #1406); **no approval** |
-| `null` | empty (CLI-only) | `direct-fallback` | **announced** info, then direct `porch approve` |
-
-**This routing table — specifically the two refuse cases and the CLI-only fallback — is a
-route-to-main decision (item 2 below).** My recommendation is above; I have delineated it so the
-main architect can rule on it without reconstructing it.
+| `null` | **empty (no *live* architect)** | `no-live-architect` | **announced** info stating only what is known, then direct `porch approve` |
 
 Rationale for each non-happy branch:
 
@@ -83,17 +84,40 @@ Rationale for each non-happy branch:
   different live architect would be the exact #1406 misroute. Refusing (and naming the offline
   architect so the human can `afx workspace start` it or approve from a shell) is safer than
   guessing. No silent direct fallback here, because an architect *does* exist for this workspace and
-  invisibility is precisely what this issue closes.
+  invisibility is precisely what this issue closes. **(Approved by main.)**
 - **`refuse-unknown-owner`**: architects exist but this builder has no recorded owner (a
   data-integrity edge — a discovered worktree with no `state.db` row, or a legacy row). We cannot
-  safely pick one of several architects. Refuse rather than misroute.
-- **`direct-fallback`** (CLI-only, zero architects): there is genuinely no architect and never was,
-  so a direct `porch approve` reintroduces no invisibility — there is no one to be invisible *to*.
-  This keeps CLI-only workspaces working. **It must be announced in the UI** ("No architect
-  registered in this workspace — approving directly."), never a silent backstop. The main architect
-  has stated they will reject a *silent* fallback; this one is announced. The alternative is to
-  refuse entirely and tell the human to run `porch approve` in a terminal — I recommend the
-  announced fallback but flag the choice for main.
+  safely pick one of several architects. Refuse rather than misroute. **(Approved by main.)**
+- **`no-live-architect`** (owner null, and no architect is *live* right now): a direct `porch approve`
+  keeps the workspace usable when there is no one to relay to. **The announcement states only what is
+  known from liveness** — "No live architect in this workspace; no architect will be notified of this
+  approval." — never "No architect registered", because the signal cannot support that claim (below).
+  This is a route-to-main decision (item 2); resolved to option (b) after the investigation below.
+
+> **Investigation — why not "CLI-only", and why option (b) (main's ruling, resolved 2026-08-18).**
+> The earlier design justified a direct fallback by *registration* ("no architect and never was, so
+> nothing to be invisible to"). That is unsound: `overview.architects` is **liveness**, so `[] `
+> cannot distinguish a genuinely CLI-only workspace from one whose architects are all currently
+> down. Direct-approving in the second case is exactly the invisibility this issue closes, hidden in
+> the branch meant to be safe.
+> Main's ruling was: prefer a *registration* signal (option a) if Tower can already report it
+> separately from liveness; otherwise fall back to option (b), announcing only what liveness knows.
+> **I checked (a) against the server and it is not cheaply reachable:** both client-reachable
+> endpoints — `/api/overview` and `/api/state` — build their architect list from the **same**
+> `liveArchitects` helper (`tower-routes.ts:1077`, `:1153`, `:2709`), which skips dead sessions. The
+> persisted registration table exists server-side (`state.ts getArchitects`, noted at
+> `tower-routes.ts:1070-1071`) but is exposed over **no** client endpoint. Surfacing it is **new wire
+> data — the main architect's surface, which I may not add unilaterally.** So per the ruling I take
+> **option (b)**: the branch is named `no-live-architect` (not `direct-fallback`/CLI-only), and the
+> announcement is liveness-truthful.
+> **Residual, stated for the gate:** under (b), if a workspace *does* have registered architects that
+> are all currently down, this branch still direct-approves after announcing "no live architect will
+> be notified." The human is told exactly that before it happens, so the approval is not invisible to
+> *them*; the down architect learns of it on return. That residual is the accepted cost of not adding
+> wire data in this lane, and option (a) remains the clean follow-up if the owner later wants it. (An
+> incidental finding: the `DashboardState.architects` **type comment** at `api.ts:80-86` says "Full
+> collection of registered architects", but the server fills it via `liveArchitects` too — the
+> comment is stale. Noted, not fixed here; out of scope.)
 
 ### 2. The relay message
 
@@ -224,7 +248,7 @@ phrasing.
 | Protocol | Human gate(s) from `protocol.json` | Prompt state today | Action |
 |---|---|---|---|
 | **bugfix** | `pr` | `pr.md:64` "**architect** approves" ✓ | **Do not touch** — the anchor |
-| **pir** | `plan-approval`, `dev-approval`, `pr` | builder forbidden ✓; human affordance (Cmd+K G / shell) stays valid | Covered by role docs; no prompt edit |
+| **pir** | `plan-approval`, `dev-approval`, `pr` | builder-prohibition half ✓; but `builder-prompt.md:46` also asserts "the human runs `porch approve`" | **One-sentence fix** to `builder-prompt.md:46` (both trees); see below. Other four builder-prohibition sites untouched |
 | **spir** | `spec-approval`, `plan-approval`, `pr`, `verify-approval` | "architect approves verify-approval" ✓ | Covered by role docs; no prompt edit |
 | **aspir** | `pr`, `verify-approval` (no spec/plan gate — autonomous) | "architect approves verify-approval" ✓ | Covered by role docs; no prompt edit |
 | **air** | `pr` | no actor misassignment | Covered by role docs; no prompt edit |
@@ -234,22 +258,42 @@ phrasing.
 | **spike** | **(none)** | — | **No text** — no gate; must not add (would imply a gate exists) |
 | release (codev-only) | none (no `protocol.json`; doc-driven procedure) | — | Out of scope |
 
-**Conclusion:** the entire *prompt* edit surface for the sweep is empty — every protocol either
-already aligns (BUGFIX, the anchor), forbids the builder (PIR), or is governed by the now-universal
-role-doc rule; `spike` has no gate and stays silent. The actual file edits are the **two role docs
-only**. This is deliberate discipline: the rule belongs in the role docs, and rewriting correct
-protocol text to "match phrasing" is the failure mode the anchor warning names.
+**The one PIR builder-prompt fix (`builder-prompt.md:46`, both trees).** The line reads:
 
-**Both trees.** `codev/roles/architect.md` and `codev-skeleton/roles/architect.md` are byte-identical
-today; every edit is mirrored into both, and after the sweep I grep **both** trees for `porch approve`
-actor language before claiming completeness.
+> **The gate stays pending until the human runs `porch approve` — never call it yourself.**
+
+The *prohibition* half ("never call it yourself") is correct and stays. The problem is the actor
+claim in the first half: post-#1494 the primary path is that the human clicks and the **architect**
+runs the command. The sentence is not false (the human can still run it in their own shell), but it
+presents the no-longer-primary path as the *only* one — and this is precisely the file whose reading
+produced a real refusal (`pir-1347` refused a gate by reasoning about who legitimately runs the
+command; a builder reading "the gate stays pending until the human runs it" can conclude an
+architect-approved gate is illegitimate, reproducing that incident from the other direction). That is
+a behavioural risk, not tidiness. Proposed minimal rewrite:
+
+> **The gate stays pending until the human approves and that approval is carried out — never call
+> `porch approve` yourself.**
+
+**Do not touch** `plan.md:117`, `implement.md:143`, `review.md:243`, `protocol.md:42` — those are
+actor-neutral builder prohibitions and remain correct. This stays a one-sentence fix, not a sweep.
+
+**Conclusion:** the sweep's file edits are the **two role docs** plus **one sentence in
+`pir/builder-prompt.md`** — each mirrored across both trees. Everything else already aligns (BUGFIX,
+the anchor — untouched), is an actor-neutral prohibition (the other four PIR sites), or is governed
+by the now-universal role-doc rule; `spike` has no gate and stays silent. This is deliberate
+discipline: the rule belongs in the role docs, and rewriting correct protocol text to "match
+phrasing" is the failure mode the anchor warning names.
+
+**Both trees.** `roles/architect.md`, `roles/builder.md`, and `protocols/pir/builder-prompt.md` are
+byte-identical across `codev/` and `codev-skeleton/` today; every edit is mirrored into both, and
+after the sweep I grep **both** trees for `porch approve` actor language before claiming completeness.
 
 ### 5. `runPorchApprove` disposition
 
-`runPorchApprove` is **not** deleted — it is retained solely for the announced `direct-fallback`
-(CLI-only) branch, and its success message is reworded so it is never used as an unannounced
-backstop for the architect-present paths. Its two current call sites (`:114` toast fast path, `:136`
-sidebar/Cmd+K G) are rewired to go through the new relay decision instead.
+`runPorchApprove` is **not** deleted — it is retained solely for the announced `no-live-architect`
+branch, and its success message is reworded so it is never used as an unannounced backstop for the
+architect-present paths. Its two current call sites (`:114` toast fast path, `:136` sidebar/Cmd+K G)
+are rewired to go through the new relay decision instead.
 
 ## Files to Change
 
@@ -258,7 +302,8 @@ sidebar/Cmd+K G) are rewired to go through the new relay decision instead.
   - New pure `decideApprovalRelay(owner, liveArchitectNames)` returning the discriminated union.
   - New relay helper: build the message, call `client.sendMessage('architect:<name>', msg,
     { workspace })`, interpret `delivered` / `held` / error into distinct UI outcomes.
-  - `runPorchApprove` retained only for the announced CLI-only fallback; success wording reworded.
+  - `runPorchApprove` retained only for the announced `no-live-architect` fallback; wording reworded
+    to state only what liveness knows ("No live architect … no architect will be notified").
   - The command already holds `overview` (`:69`) — reuse it for `overview.architects`; no extra
     fetch.
 - `apps/vscode/src/__tests__/approve-relay.test.ts` — **new**. Unit-tests `decideApprovalRelay`
@@ -270,14 +315,19 @@ sidebar/Cmd+K G) are rewired to go through the new relay decision instead.
 - `codev/roles/builder.md` (`:26-28`) — **rewrite** (not patch): the builder never runs
   `porch approve`; the architect runs it carrying the human's decision.
 - `codev-skeleton/roles/builder.md` — byte-identical mirror of the same rewrite.
+- `codev/protocols/pir/builder-prompt.md` (`:46`) — **one-sentence** precision fix (§4): drop the
+  "the human runs `porch approve`" actor claim, keep the "never call it yourself" prohibition.
+- `codev-skeleton/protocols/pir/builder-prompt.md` — byte-identical mirror of the same sentence.
 
-**Protocol prompts: none edited.** Per the §4 verification table, BUGFIX is already correct (the
-anchor — must not be touched), PIR already forbids the builder, and every other protocol is governed
-by the now-universal role-doc rule; `spike` has no gate and stays silent. After the doc edits I grep
-**both** trees for `porch approve` actor language to confirm no contradiction remains.
+**All other protocol prompts: none edited.** Per the §4 verification table, BUGFIX is already correct
+(the anchor — must not be touched), the other four PIR sites are actor-neutral prohibitions, and every
+other protocol is governed by the now-universal role-doc rule; `spike` has no gate and stays silent.
+After the edits I grep **both** trees for `porch approve` actor language to confirm no contradiction
+remains.
 
 **Not changed:** builder-side *code*, Tower, the SDK `sendMessage` signature, `packages/types`, and
-any protocol `protocol.json` / prompt file. The builder is not in the approval chain.
+any protocol `protocol.json` or any prompt file other than the single `pir/builder-prompt.md`
+sentence. The builder is not in the approval chain.
 
 ## Risks & Alternatives Considered
 
@@ -288,16 +338,17 @@ any protocol `protocol.json` / prompt file. The builder is not in the approval c
   cases refuse explicitly (§1).
 - **Alternative: #1194's notification-from-inside-`porch approve`.** Rejected by the owner on
   surface-area grounds; #1194 is closed. Not re-proposed.
-- **Alternative: refuse in the CLI-only case instead of announced direct fallback.** My
-  recommendation is the announced fallback so CLI-only workspaces keep working; the choice is
-  route-to-main item 2 (§1) for the main architect to rule on.
-- **Alternative: delete `runPorchApprove` entirely.** Rejected — the announced CLI-only path needs
-  it, and that path is a legitimate, announced use, not a silent backstop.
+- **Alternative: a registration signal (option a) instead of the liveness-only `no-live-architect`
+  branch.** Preferred by main *if* cheaply reachable; it is not (both client endpoints are
+  live-filtered; exposing the persisted table is new wire data = main's surface), so resolved to
+  option (b). Clean follow-up if the owner later wants it (§1 investigation note).
+- **Alternative: delete `runPorchApprove` entirely.** Rejected — the announced `no-live-architect`
+  path needs it, and that path is a legitimate, announced use, not a silent backstop.
 
 ## Test Plan
 
 - **Unit** (`approve-relay.test.ts`): `decideApprovalRelay` returns `relay` / `refuse-offline` /
-  `refuse-unknown-owner` / `direct-fallback` for each row of the routing table; the result
+  `refuse-unknown-owner` / `no-live-architect` for each row of the routing table; the result
   interpreter maps `ok:false` → error, `held` → pending warning, `delivered`/legacy → relayed
   success. These prove the *branching*, not the end-to-end effect.
 - **Manual, end-to-end (this is the dev-approval evidence — unit tests alone will be rejected):**
@@ -320,15 +371,20 @@ any protocol `protocol.json` / prompt file. The builder is not in the approval c
 - **Full check set before PR:** `pnpm check-types` (tsc) and the vitest suite from the worktree, not
   just one job.
 
-## Route-to-main items (delineated for the main architect, before the plan gate)
+## Route-to-main rulings (resolved before the plan gate)
 
-Both are framework content shipped to adopters, which is why the main architect reads them before the
-plan gate. The narrow-vs-uniform question is **resolved** (owner ruled uniform, 2026-08-18) — no open
-question remains.
+Both items were routed to the main architect and are now **ruled**. Recorded here for the gate.
 
-1. **Role-doc wording** (§4) — the uniform-rule rewrite of `architect.md` (defect fix + on-receipt
-   instruction) and `builder.md` (rewrite-not-patch), anchored on the bugfix structural-authorization
-   thesis, mirrored into `codev-skeleton/`. The per-protocol verification table shows the edit
-   surface is the two role docs only (BUGFIX untouched as the anchor).
-2. **Null / unregistered-architect routing decision** (§1 table) — the two refuse cases and the
-   announced CLI-only `direct-fallback` (vs. refuse-entirely) choice.
+1. **Role-doc wording + convention sweep** (§4) — **APPROVED.** The uniform-rule rewrite of
+   `architect.md` (defect fix + on-receipt instruction) and `builder.md` (rewrite-not-patch),
+   anchored on the bugfix structural-authorization thesis, mirrored into `codev-skeleton/`. The
+   agents-vs-human carve-out ("the human may always run it in their own shell") is kept as an
+   approved improvement. **One file added on ruling:** `pir/builder-prompt.md:46` (both trees) — a
+   one-sentence precision fix (that file's reading produced the `pir-1347` refusal from the other
+   direction). BUGFIX stays untouched as the anchor; no other prompt is edited.
+2. **Routing table** (§1) — `relay` / `refuse-offline` / `refuse-unknown-owner` **APPROVED** (incl.
+   refuse-not-reroute when the owner is offline, and the pure-function shape). The fourth branch was
+   ruled **defective** (keyed off liveness, not registration); resolved to **option (b)** — renamed
+   `no-live-architect`, announcement states only what liveness knows — after I confirmed a
+   registration signal (option a) needs new wire data I may not add unilaterally (§1 investigation
+   note). Residual for the all-architects-down case is stated there for the gate.

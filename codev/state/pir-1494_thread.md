@@ -51,7 +51,28 @@ Four mid-turn architect corrections landed while at gate; revised the plan:
   (BUGFIX anchor), forbids builder (PIR), or is covered by universal role-doc rule; spike has no gate
   → no text. release = codev-only, no protocol.json, out of scope. Grep BOTH trees after edits.
 
+## Route-to-main rulings back (2026-08-18) — both resolved
+- **Item 1 (role docs): APPROVED.** Kept my agents-vs-human carve-out. Added ONE file per ruling:
+  `pir/builder-prompt.md:46` (both trees) one-sentence fix — that line ("the gate stays pending until
+  THE HUMAN runs porch approve") is the file whose reading caused the pir-1347 refusal from the other
+  direction (a builder could deem an architect-approved gate illegitimate). Keep the "never call it
+  yourself" prohibition; drop the human-runs actor claim. Do NOT touch plan.md:117/implement.md:143/
+  review.md:243/protocol.md:42 (actor-neutral prohibitions). Edit surface now = 2 role docs + 1 PIR
+  builder-prompt sentence, all mirrored both trees.
+- **Item 2 (routing): 3 branches APPROVED** (relay, refuse-offline, refuse-unknown-owner, incl.
+  refuse-not-reroute + pure-function shape). 4th branch was DEFECTIVE: `overview.architects` is
+  LIVENESS not registration (api.ts:298-305), so []==CLI-only is unsound (can't tell from all-down).
+  Ruling: prefer registration signal (opt a) if cheaply reachable, else opt (b). **Checked (a): NOT
+  reachable** — both /api/overview AND /api/state use the SAME live-filtered `liveArchitects` helper
+  (tower-routes.ts:1077/1153/2709); persisted registration table (state.ts getArchitects) is exposed
+  over NO client endpoint; surfacing it = new wire data = MAIN's surface, can't add unilaterally.
+  → Took **opt (b)**: branch renamed `no-live-architect`; announcement states only liveness ("No live
+  architect … no architect will be notified"), never "no architect registered". Residual (all-down
+  workspace still direct-approves after honest announcement) stated for the gate. Incidental: the
+  DashboardState.architects TYPE COMMENT (api.ts:80-86) claims "registered" but server fills via
+  liveArchitects — stale comment, noted not fixed (out of scope).
+
 ## Status
-Plan committed + revised. Awaiting plan-approval gate (Amr owns all three gates; I never run porch
-approve). Two route-to-main items for main before the gate: (1) role-doc wording, (2) null/unregistered
-routing table. Code change (relay + held-first-class) unchanged.
+Plan committed + revised twice. Awaiting plan-approval gate (Amr owns all three gates; I never run
+porch approve). Both route-to-main items now resolved and recorded in the plan. Code change (relay +
+held-first-class) unchanged.
