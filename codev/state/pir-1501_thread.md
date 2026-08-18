@@ -30,3 +30,28 @@ Two decisions flagged for the reviewer:
    is a PIR).
 
 Plan written to `codev/plans/1501-stream-deck-the-scroll-dial-ca.md`. Awaiting plan-approval gate.
+
+## Implement phase (2026-08-18)
+
+Plan APPROVED by Amr (gate minted by architect). Decision 1 ruled: `Scroll · read only` (reasoning:
+names what works; `no send` rejected — `send`/`queue` are delivery modes, so `no send` wrongly
+implies queuing). Decision 2: `VIEWPORT_SCROLL_STEP_PX = 60`, tune on hardware at dev-approval.
+
+Production code implemented (NOT committed yet):
+- types: `viewport-down`/`viewport-up` added to `CanvasCommand` + `TraversalCommand` + type-test map.
+- 3 runtime allowlists updated (canvas-relay, canvas-view-registry, ArtifactCanvas TRAVERSAL_COMMANDS).
+- ArtifactCanvas: `scrollViewport` helper + `VIEWPORT_SCROLL_STEP_PX=60`; count-loop position
+  signature extended `${originLine}:${scrollLeft}:${scrollTop}` (the sharp one-liner — without it a
+  multi-tick rotate scrolls once).
+- ScrollNav.onDialRotate: mode split keyed on `'canvas'` SPECIFICALLY (never "not diff", so `none`
+  keeps editorScroll); canvas branch sends viewport-down/up via sendCanvasCommand, count=|ticks|,
+  workspace-only target; transient `status` line for canvas errors (parity with ReviewNav).
+- ScrollNav.renderTo: canvas qualifier `editor only` → `read only`, doc comment carries the reasoning.
+
+STOP-AND-TELL (architect's literal non-regression): streamdeck suite = 238 passed, 2 failed.
+- :669 label test → `read only` (ruled change, authorized).
+- :638 "scrolls the editor on rotate" FAILS. But the diff path did NOT move: the #1505 guard at :704
+  asserts editorScroll-rotate byte-for-byte and is GREEN. :638 fails only because its fixture is the
+  default selection pir-1 = canvas mode, and it predates the mode split (rotate used to be
+  mode-independent). Architect said to stop before editing :638 — sent evidence + proposed fix
+  (repoint :638 rotate to pir-2 diff mode; add a canvas-mode rotate test; update :669). HOLDING for ruling.
