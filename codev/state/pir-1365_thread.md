@@ -86,3 +86,38 @@ silent. The ceiling value is a judgment call; flagged rather than assumed.
 Also noted: the suggested `arch-critical.md` hot-tier fact for the lock-order invariant needs
 a *displacement* (the tier is at its 10-fact cap), so it is proposed in the review phase for
 the maintainer rather than applied unilaterally.
+
+## Implement phase (2026-08-17)
+
+Human approved the gate including the D3 ceiling at 2000 ms. Four commits: lock primitives →
+convergence → tests → docs. Full suite green (4879 passed, 0 failed), build clean.
+
+**Took the architect's optional degraded-path flag.** It earns its complexity for a specific
+reason: my own D3 ceiling is what opens that hole. Without it I'd have traded one route to a
+false `delivered` (the ^C mid-write) for a rarer one (an operator that gave up waiting and
+wrote into a delivery already on the wire) — which is not a fix, it's a relocation.
+Implemented as a per-session monotone counter of unserialized writes, sampled around the
+delivery's own submission; a bump yields `preempted` → hold for redelivery. No screen
+re-classification: the question is only "did anyone bypass the lock while I held it?", and a
+counter answers exactly that. It does trade a possible **duplicate** for never falsely
+reporting delivery — the same call the existing dropped-write branch already makes, and
+documented as such.
+
+**The review's item-5 hazard was real and it bit immediately.** Adding the runtime id guard
+turned 13 `tower-routes.test.ts` tests red — `gateSession` had no `id`, reached the live
+wiring, and would have keyed every lock on `undefined`. Silent global lock, no failing
+assertion, exactly as claude predicted. Worth recording as the general lesson: a
+structurally-typed port makes an omitted field compile *and* pass, so a new lock key needs a
+runtime guard, not just a type.
+
+**Honest note on the in-lock precheck.** With try-lock semantics the delivery never waits, so
+the precheck cannot fire from a lock wait in production today — no macrotask can interleave
+between the pre-lock checks and the in-lock ones. I kept it (the review asked for it, the
+human ratified it) but documented its *actual* value rather than implying it closes a live
+race: it backstops the injected port boundary, and it is what keeps the acquisition policy a
+free choice if #1481 later wants the delivery to wait behind an interrupt. The tests exercise
+it at its own level rather than pretending a production path reaches it.
+
+Also re-pointed `spec-1313-paced-write-drop` from the retired `writeMessagePaced` onto
+`submitMessagePaced`, so the silent-loss guard stays on the live write edge instead of on a
+function nothing calls.
