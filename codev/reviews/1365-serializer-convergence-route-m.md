@@ -70,8 +70,7 @@ Evidence + docs:
 - `1483d65c` [PIR #1365] Thread log: dev-approval evidence
 - `ad824bf2` [PIR #1365] Review + retrospective
 - `ece06a5e` [PIR #1365] Fix codex/claude finding: kind-aware ceiling + report degraded writes
-- *(this commit)* [PIR #1365] Review round 2: byte-accurate bypass count, counter eviction,
-  claim-site sweep
+- `0dc75d8e` [PIR #1365] Review round 2: byte-accurate bypass count, counter eviction, claim sweep
 
 ## Test Results
 
