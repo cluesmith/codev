@@ -5,6 +5,7 @@
  */
 import { test, expect } from '@playwright/test';
 import path from 'node:path';
+import { towerAuthHeaders } from './tower-key.js';
 
 const TOWER_URL = 'http://localhost:4100';
 const VIDEO_DIR = path.resolve(import.meta.dirname, '../../../../test-results/videos');
@@ -52,7 +53,7 @@ test.describe('Tower Desktop', () => {
 
   test('tower proxy WebSocket terminal works', async ({ page }) => {
     // Get terminalId through tower proxy
-    const stateRes = await page.request.get(`${TOWER_URL}/workspace/${ENCODED_PATH}/api/state`);
+    const stateRes = await page.request.get(`${TOWER_URL}/workspace/${ENCODED_PATH}/api/state`, { headers: towerAuthHeaders() });
     expect(stateRes.ok()).toBe(true);
     const state = await stateRes.json();
     
@@ -61,7 +62,7 @@ test.describe('Tower Desktop', () => {
     if (!terminalId) {
       for (let i = 0; i < 30; i++) {
         await new Promise(r => setTimeout(r, 500));
-        const res = await page.request.get(`${TOWER_URL}/workspace/${ENCODED_PATH}/api/state`);
+        const res = await page.request.get(`${TOWER_URL}/workspace/${ENCODED_PATH}/api/state`, { headers: towerAuthHeaders() });
         const s = await res.json();
         terminalId = s.architect?.terminalId;
         if (terminalId) break;
@@ -82,6 +83,7 @@ test.describe('Tower Desktop', () => {
     // Create shell tab through tower proxy
     const response = await page.request.post(`${TOWER_URL}/workspace/${ENCODED_PATH}/api/tabs/shell`, {
       data: { name: 'tower-test-shell' },
+      headers: towerAuthHeaders(),
     });
     expect(response.status()).toBe(200); // Tower returns 200 for shell creation
     const body = await response.json();
@@ -89,7 +91,7 @@ test.describe('Tower Desktop', () => {
     expect(body.terminalId).toBeTruthy();
 
     // Clean up
-    await page.request.delete(`${TOWER_URL}/workspace/${ENCODED_PATH}/api/tabs/${body.id}`);
+    await page.request.delete(`${TOWER_URL}/workspace/${ENCODED_PATH}/api/tabs/${body.id}`, { headers: towerAuthHeaders() });
   });
 });
 
