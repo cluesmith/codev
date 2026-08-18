@@ -63,9 +63,9 @@ describe('decideApprovalRelay', () => {
 });
 
 describe('buildRelayMessage', () => {
-  it('is an imperative relay instruction with a "pass it to the builder" cue and VS Code provenance', () => {
+  it('is an imperative relay instruction with a "pass it to the builder" cue', () => {
     const msg = buildRelayMessage({ id: '158', gateLabel: 'plan review', issueId: '158' });
-    expect(msg).toBe('Approve the plan review gate for 158, please pass it to the builder (via VS Code).');
+    expect(msg).toBe('Approve the plan review gate for 158, please pass it to the builder.');
   });
 
   it('does NOT name porch or spell out a command (the builder runs it once relayed)', () => {
@@ -83,12 +83,12 @@ describe('buildRelayMessage', () => {
 
   it('appends the issue ref only when the id does not carry it', () => {
     const m = buildRelayMessage({ id: 'task-abc', gateLabel: 'PR', issueId: '42' });
-    expect(m).toBe('Approve the PR gate for task-abc (#42), please pass it to the builder (via VS Code).');
+    expect(m).toBe('Approve the PR gate for task-abc (#42), please pass it to the builder.');
   });
 
   it('omits the issue ref when no issue id is known', () => {
     const m = buildRelayMessage({ id: 'pir-9', gateLabel: 'PR' });
-    expect(m).toBe('Approve the PR gate for pir-9, please pass it to the builder (via VS Code).');
+    expect(m).toBe('Approve the PR gate for pir-9, please pass it to the builder.');
   });
 });
 

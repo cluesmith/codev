@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { OverviewBuilder } from '@cluesmith/codev-types';
+import { VSCODE_USER_SENDER } from '@cluesmith/codev-types';
 import type { TowerClient } from '@cluesmith/codev-sdk/tower-client';
 import type { ConnectionManager } from '../connection-manager.js';
 import type { OverviewCache } from '../views/overview-data.js';
@@ -64,11 +65,12 @@ export function decideApprovalRelay(
  * phrased the way a person would ("Approve ..., please pass it to the builder"),
  * not a passive "X was approved" notice. The imperative framing matters: a
  * past-tense fact reads as "already done", so the architect never relays it and
- * the builder stalls. "(via VS Code)" is the provenance (a person clicked the
- * button, not an agent asserting it). The "please pass it to the builder" cue is
- * load-bearing: it routes execution to the builder (builder-runs-it) rather than
- * the architect running `porch approve` itself. It deliberately does not name
- * `porch` or a command: the builder's own prompt covers running it once relayed.
+ * the builder stalls. The "please pass it to the builder" cue is load-bearing: it
+ * routes execution to the builder (builder-runs-it) rather than the architect
+ * running `porch approve` itself. It deliberately does not name `porch` or a
+ * command: the builder's own prompt covers running it once relayed. Provenance
+ * (a human clicked in VS Code) is carried by the `[USER via VS Code]` header Tower
+ * renders from the `VSCODE_USER_SENDER` `from`, not by text in the body.
  *
  * `id` is the builder handle the architect routes to; `issueId` is appended only
  * when the id doesn't already carry it, so a builder whose id is the issue number
@@ -81,7 +83,7 @@ export function buildRelayMessage(args: {
 }): string {
   const { id, gateLabel, issueId } = args;
   const issuePart = issueId && !id.includes(issueId) ? ` (#${issueId})` : '';
-  return `Approve the ${gateLabel} gate for ${id}${issuePart}, please pass it to the builder (via VS Code).`;
+  return `Approve the ${gateLabel} gate for ${id}${issuePart}, please pass it to the builder.`;
 }
 
 /** Result shape returned by `TowerClient.sendMessage` (Spec 1313 mailbox-first). */
@@ -298,7 +300,10 @@ async function relayApproval(
       });
       let result: SendResult;
       try {
-        result = await client.sendMessage(`architect:${decision.architect}`, message, { workspace: workspacePath });
+        result = await client.sendMessage(`architect:${decision.architect}`, message, {
+          workspace: workspacePath,
+          from: VSCODE_USER_SENDER,
+        });
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         vscode.window.showErrorMessage(

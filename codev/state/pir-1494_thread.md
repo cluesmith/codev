@@ -210,6 +210,22 @@ Fixes to buildRelayMessage:
 - No em dashes (Amr feedback: applies to generated strings too, not just prose).
 16 relay-core tests green, tsc/lint/esbuild clean.
 
+## [USER via VS Code] header (2026-08-18) — Option A, differentiate relay from direct user/architect msgs
+Found via e2e: the relay reached the architect wrapped as [ARCHITECT INSTRUCTION] because the extension
+sent no `from`, and Tower's formatMessageForTarget defaults an unattributed-to-architect message to that
+header. So a human's button click masqueraded as a peer-architect instruction. Fix (Amr chose Option A):
+- New wire constant VSCODE_USER_SENDER='vscode-user' in codev-types (SSOT; both extension + Tower import).
+- New formatUserViaVsCodeMessage → "### [USER via VS Code | ts] ###" in message-format.ts.
+- formatMessageForTarget renders it when from===VSCODE_USER_SENDER (before the builder-message branch).
+- approve.ts sets from: VSCODE_USER_SENDER; dropped "(via VS Code)" from the body (header carries provenance).
+Verified non-builder `from` addressing architect:<name> passes the spoofing check (resolveArchitectByName
+only rejects builder senders whose spawnedByArchitect != name). Tests: formatter test (4) + relay tests (16),
+tsc/lint/esbuild + codev-core tsc all green.
+
+Also: reversed an over-broad em-dash sweep (I'd edited toast strings + doc comments beyond the flagged
+message). Reset approve.ts + test to HEAD, re-applied ONLY Option A + the body change. Committed em dashes
+left untouched. Lesson saved: fix the flagged user-facing string, don't sweep internal comments.
+
 ## Status
 Implement committed (92a4ee58f code+tests, a60bcb2bb docs) + pushed. dev-approval gate PENDING. Amr
 owns dev-approval + pr; architect relays; I never run porch approve.
