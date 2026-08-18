@@ -120,6 +120,41 @@ one dial without a bar. It is mitigated by line 1 + line 2 still matching the ho
 two-line member. Scroll *position* is still never invented, for the same reason as
 before.
 
+**Noted consequence (on the record; not acted on here).** The "unrelated axes" argument
+generalises past this dial: the Files/Changes/Headings/Blocks dials' bars also show the
+*selected builder's progress*, which is equally unrelated to what those dials rotate
+through (files, hunks, headings, blocks). So "the bar must relate to the dial's motion"
+would condemn all four bars, not just this one. The coherent alternative reading is that
+the bar belongs to **line 2** — it describes the builder named there, not the rotation —
+under which Scroll could carry a bar consistently. Both readings are defensible; the
+owner chose "drop it" for this dial. This is recorded so that if the other three dials'
+bars are ever questioned, the reasoning is already here rather than rediscovered. **No
+change to the other dials is proposed or made by this lane.**
+
+### What line 2 carries — the two-line strip is minimal, not broken
+
+Dropping the bar makes line 2 load-bearing: five siblings render title + value + bar and
+this one renders title + value, so if line 2 were thin or often empty the strip would
+degrade to a bare title beside populated neighbours and read as **broken** rather than
+deliberately minimal — reintroducing misinformation by a different door (an apparent
+failure, not a false relationship). It does not, and here is the confirmation the
+hardware gate will ask for:
+
+- **Ordinary use (a builder is selected):** line 2 is the **selected builder**, exactly
+  as its siblings render it — `#<issueId> <issueTitle>` (falling back to the builder
+  `id` when it has no issue title). This is the same `selectedBuilderLine` the review
+  dials use (`actions.ts:816-818`). The press acts on that builder, so naming it is the
+  point, and the line is populated whenever anything is selected.
+- **Nothing selected:** line 2 is `No builder` — a filled, intentional empty state, not
+  a blank. Paired with the inert press (Decision 1), the dial then reads as visibly
+  off, never as a failed render.
+
+So line 2 is **always populated** — a builder line or `No builder`, never absent. The
+strip is a deliberate two-line control (one fewer line than its neighbours: the bar),
+not a broken three-line one. It never degrades to a bare title. There is no case where a
+"viewport scroll" would leave line 2 with no meaningful value, so the lane stays
+title + value and never collapses to title-only.
+
 ## Proposed Change
 
 Rewrite `ScrollNav` to follow the `ReviewNav` subscription-and-`setFeedback` shape, and
@@ -158,7 +193,7 @@ I lean to the helper.)*
 ### 2. Touchscreen layout (`apps/streamdeck/com.cluesmith.codev.sdPlugin/`)
 
 The scroll-nav action currently declares `"layout": "layouts/label.json"` — a
-title-only layout with no `value` or `bar` keys (`manifest.json:263`). It needs a
+title-only layout with no `value` or `bar` keys (`manifest.json:278`). It needs a
 **title + value** layout: line 2 (the builder) is required, the bar is not (Decision 2).
 
 Do **not** point it at the siblings' `layouts/dial.json`: that layout carries a `bar`
@@ -166,20 +201,32 @@ item with a default `value: 0`, so a dial that never sets `bar` would render a
 permanently-empty bar — a false "0% / stalled" signal, the exact ambiguity Decision 2
 avoids.
 
-Instead, evolve the scroll-only `label.json` into that two-line layout and rename it for
-honest naming: **`layouts/label.json` → `layouts/scroll.json`**, redefined to a `title`
-item (line 1) plus a `value` item (line 2), no `bar`; update its internal `id`
-(`codev-label` → `codev-scroll`) and repoint scroll-nav's `Encoder.layout` to it.
-`dial.json` is untouched (the five siblings keep their bar). Optionally refine the
-`Push` `TriggerDescription` to name the mode-dependent behaviour (e.g. "Forward
-selection now, or queue it, per workspace mode").
+Add a **new layout named for its shape** — `layouts/title-value.json`, id
+`codev-title-value` — containing `dial.json`'s `title` and `value` items (title at
+`[8,8]`, value at `[8,40]`, both left-aligned) and **no `bar`** item. Point scroll-nav's
+`Encoder.layout` at it. `dial.json` is untouched (the five siblings keep their bar).
+Optionally refine the `Push` `TriggerDescription` to name the mode-dependent behaviour
+(e.g. "Forward selection now, or queue it, per workspace mode").
 
-This **supersedes the earlier "switch to `dial.json` + delete `label.json`" required
-addition**, which was premised on keeping the bar. `label.json` is not orphaned — it
-becomes `scroll.json`, still the scroll dial's sole layout — so there is no dead asset
-to delete; the rename carries its one and only consumer with it (grep-confirmed: the
-manifest line is the sole reference). The dead-asset concern #1440 addressed does not
-arise because nothing is left unreferenced.
+*Why a new shape-named layout, not a rename of `label.json`:* a rename would be **safe**
+— `label.json` is referenced exactly once (`manifest.json:278`, by scroll-nav itself),
+so orphaning is not the concern. The choice is about naming for reuse. The two files are
+not the same shape — `label.json` (`codev-label`) is a single **centered** line at
+`[8,24,184,52]`, a true label; this dial needs two **left-aligned** lines (`dial.json`
+minus the bar) — so a "rename" is really a rewrite, leaving a file whose name and id
+describe a shape it no longer has. And a `scroll.json` named after its one consumer
+would not survive a second dial wanting title-without-bar (any dial whose readout is
+unrelated to its rotation — the general case this very decision creates). A shape name
+(`title-value.json`) reuses cleanly. This is a preference, not a blocker; the add + the
+`label.json` delete are no more work than the rewrite-under-a-rename would be.
+
+**Then delete the now-orphaned `layouts/label.json` (required).** Scroll was its only
+consumer (grep-confirmed: the manifest line is the sole reference) and Scroll is leaving
+it for `title-value.json`, so nothing references it: no action, no code path, no doc.
+This is #1440's dead-asset precedent applied to a **layout** rather than an icon —
+shipping an unreferenced file in a packaged plugin is the same defect. (The original
+deletion requirement survives the bar reversal; only its reason changes — orphaned
+because Scroll moved off it, not because Scroll moved onto `dial.json`.)
 
 ### 3. Tests (`apps/streamdeck/src/__tests__/actions.test.ts`)
 
@@ -204,12 +251,14 @@ Extend the existing ScrollNav coverage (currently one rotate+press test at
   dial rendering `setFeedback({ title, value })` (no bar); guard the press on a selected
   builder; rotation unchanged. Add module-level `selectedBuilderLine(store)` helper
   (and point `ReviewNav.renderTo` at it).
-- `apps/streamdeck/com.cluesmith.codev.sdPlugin/layouts/label.json` → **rename to
-  `layouts/scroll.json`**, redefined as a title + value layout (no `bar`); `id`
-  `codev-label` → `codev-scroll`.
-- `apps/streamdeck/com.cluesmith.codev.sdPlugin/manifest.json:263` — scroll-nav
-  `Encoder.layout` `layouts/label.json` → `layouts/scroll.json`; optionally refine the
-  `Push` trigger description.
+- `apps/streamdeck/com.cluesmith.codev.sdPlugin/layouts/title-value.json` — **new**
+  layout, id `codev-title-value`: `dial.json`'s title + value items, no `bar`.
+- `apps/streamdeck/com.cluesmith.codev.sdPlugin/layouts/label.json` — **delete**
+  (orphaned once Scroll moves to `title-value.json`; grep-verified as its only
+  consumer). #1440 dead-asset precedent, applied to a layout.
+- `apps/streamdeck/com.cluesmith.codev.sdPlugin/manifest.json:278` — scroll-nav
+  `Encoder.layout` `layouts/label.json` → `layouts/title-value.json`; optionally refine
+  the `Push` trigger description.
 - `apps/streamdeck/src/__tests__/actions.test.ts` — extend ScrollNav coverage
   (mode label, builder line, no-bar assertion, empty state + inert press, onChange
   re-render).
@@ -228,13 +277,12 @@ and in the consult pass:
 
 ## Risks & Alternatives Considered
 
-- **Risk: renaming the layout file changes an installed board.** The layout is read
-  from the manifest at plugin load; a reinstalled/reloaded plugin picks up
-  `scroll.json`. No user data or key placement changes. A stale install pointing at the
-  removed `label.json` path is not a concern — the manifest that names the layout and
-  the layout file ship together in the same package. Verified on hardware at the
-  dev-approval gate. Mitigation: display-only layout change; rotation and press wiring
-  are independent of it.
+- **Risk: the layout change alters an installed board.** The layout is read from the
+  manifest at plugin load; a reinstalled/reloaded plugin picks up `title-value.json`. No
+  user data or key placement changes. A stale install pointing at the removed
+  `label.json` path is not a concern — the manifest that names the layout and the layout
+  files ship together in the same package. Verified on hardware at the dev-approval gate.
+  Mitigation: display-only layout change; rotation and press wiring are independent of it.
 - **Risk: press-gating is a behaviour change.** Today the press always fires; gating it
   on `selectedBuilder()` means it no-ops when nothing is selected. This is deliberate
   (Decision 1) and matches `ReviewNav`. It only affects the no-builder case, which
@@ -255,10 +303,11 @@ and in the consult pass:
   a dedicated title+value layout is declarative and assertable in the manifest tests.
 - **Alternative — inline the line-2 logic** instead of the shared helper. Acceptable;
   the helper is the SSOT-cleaner choice and both live in one file.
-- **Risk: renaming `label.json` breaks a packaged/validation test.** The rename keeps
-  the file referenced (as `scroll.json`) rather than orphaning it; the streamdeck suite
-  (`validate`, `manifest-icons`) runs green as a gate on this — every referenced layout
-  must ship and be reachable.
+- **Risk: adding `title-value.json` + deleting `label.json` breaks a packaged/validation
+  test.** The new layout is referenced by scroll-nav; `label.json` is deleted only after
+  grep confirms scroll-nav was its sole reference (`manifest.json:278`). The streamdeck
+  suite (`validate`, `manifest-icons`) runs green as a gate — every referenced layout
+  must ship and every shipped layout must be referenced.
 
 ## Test Plan
 

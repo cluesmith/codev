@@ -57,3 +57,25 @@ reproduced #1462 live" to codev/reviews/1495-stream-deck-architect-action-k.md O
 stays separable in consult/review. Must fetch origin/main first so the append lands on
 the file's live content (my branch predates pir-1495's merge). Recorded in plan under
 "Out-of-band".
+
+### Rebased on origin/main (user request)
+Fetched + rebased my 5 commits onto origin/main (advanced 27 commits incl. pir-1495
+merge #1499). Clean — my plan-phase commits only add 1498 docs, no overlap with main's
+streamdeck code. Force-pushed with lease. 1495 review file now present in worktree
+(needed for the folded doc note). Manifest line numbers shifted: scroll-nav layout now
+:278 (was :263) — updated all plan refs.
+
+### Architect layout correction + line-2 requirement (applied, supersedes rename)
+- Layout: DON'T rename label.json→scroll.json (it's a rewrite; consumer-naming breaks
+  the shape/role convention). Instead ADD layouts/title-value.json (id codev-title-value,
+  = dial.json minus bar), point scroll-nav at it, DELETE orphaned label.json (grep:
+  scroll-nav sole ref, manifest:278). #1440 dead-asset precedent applied to a layout.
+  (Architect later downgraded shape-name to a preference; rename would be safe. Kept
+  title-value.json — the reuse-friendly option.)
+- On the record (not acted on): the "unrelated axes" argument generalises to all four
+  dials' bars; coherent alt reading is the bar belongs to LINE 2. Owner chose
+  drop-for-this-dial. No change to other dials.
+- REQUIRED + added: explicit statement of what populates line 2 — the selected builder
+  (#issue title) as siblings, "No builder" when none, so line 2 is ALWAYS populated and
+  the two-line strip reads as deliberately minimal, never broken/title-only.
+Revised + recommitted; re-requesting gate.
