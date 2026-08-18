@@ -24,6 +24,8 @@ import { TerminalManager } from '../../terminal/pty-manager.js';
 import type { IShellperClient } from '../../terminal/shellper-client.js';
 import { resolveProfileForSession } from '../servers/mailbox-wiring.js';
 import { persistableCommand } from '../servers/tower-utils.js';
+import { updateTerminalCommand } from '../servers/tower-terminals.js';
+import { getGlobalDb } from '../db/index.js';
 import { AGY_PROFILE, CLAUDE_PROFILE, CODEX_PROFILE } from '../servers/gate-profiles.js';
 
 /**
@@ -252,5 +254,55 @@ describe('PIR #1475 — persistable identity', () => {
   it('handles a missing session without inventing a value', () => {
     expect(persistableCommand(null)).toBeNull();
     expect(persistableCommand(undefined)).toBeNull();
+  });
+});
+
+describe('PIR #1475 — updateTerminalCommand never downgrades a known row', () => {
+  // The one persist path with no row rewrite behind it, exercised against the real
+  // DB helper rather than a source-string assertion. `null` means "this attach
+  // produced no identity" (legacy shellper, or a WELCOME that failed validation) —
+  // an absence of news. Writing it through would erase a good row AND hand the
+  // Spec 1313 self-heal a NULL to re-heal from config, turning a rejected frame
+  // into a silent identity change.
+  const ids: string[] = [];
+
+  const seed = (command: string | null): string => {
+    const id = `pir1475-${ids.length}-${process.pid}`;
+    ids.push(id);
+    getGlobalDb()
+      .prepare(
+        `INSERT INTO terminal_sessions (id, workspace_path, type, role_id, command)
+         VALUES (?, '/tmp/pir1475-ws', 'architect', 'evidence', ?)`,
+      )
+      .run(id, command);
+    return id;
+  };
+  const read = (id: string): string | null | undefined =>
+    (getGlobalDb().prepare('SELECT command FROM terminal_sessions WHERE id = ?').get(id) as
+      | { command: string | null }
+      | undefined)?.command;
+
+  afterEach(() => {
+    for (const id of ids.splice(0)) {
+      getGlobalDb().prepare('DELETE FROM terminal_sessions WHERE id = ?').run(id);
+    }
+  });
+
+  it('leaves a known command intact when the attach produced no identity', () => {
+    const id = seed('/usr/local/bin/claude');
+    updateTerminalCommand(id, null);
+    expect(read(id)).toBe('/usr/local/bin/claude');
+  });
+
+  it('leaves a legacy NULL row NULL (the Spec 1313 self-heal stays armed)', () => {
+    const id = seed(null);
+    updateTerminalCommand(id, null);
+    expect(read(id)).toBeNull();
+  });
+
+  it('still writes through a STATED identity that differs from the row', () => {
+    const id = seed('agy');
+    updateTerminalCommand(id, '/usr/local/bin/claude');
+    expect(read(id)).toBe('/usr/local/bin/claude');
   });
 });

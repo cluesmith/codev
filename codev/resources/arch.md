@@ -278,7 +278,7 @@ Binary frame format: `[1-byte type] [4-byte big-endian length] [payload]`
 | REPLAY | 0x05 | Shellper->Tower | Replay buffer dump on connect |
 | PING/PONG | 0x06/0x07 | Both | Keepalive |
 | HELLO | 0x08 | Tower->Shellper | Handshake (JSON: version) |
-| WELCOME | 0x09 | Shellper->Tower | Handshake response (JSON: pid, cols, rows, startTime) |
+| WELCOME | 0x09 | Shellper->Tower | Handshake response (JSON: required `version`, `pid`, `cols`, `rows`, `startTime`; optional post-v1 additions `lastDataAt`, `alwaysSendsReplay`, and the spawned `command`/`args` — the authoritative identity, PIR #1475) |
 | SPAWN | 0x0A | Tower->Shellper | Restart child process (JSON: command, args, cwd, env) |
 
 Max frame payload: 16MB. Unknown frame types are silently ignored.

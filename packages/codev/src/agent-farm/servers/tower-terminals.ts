@@ -350,8 +350,16 @@ export function updateTerminalLabel(terminalId: string, label: string): void {
  *
  * No-ops when the value is unchanged, so a steady-state Tower writes at most once
  * per session.
+ *
+ * Never DOWNGRADES a known row to NULL. `null` here means "this attach produced no
+ * identity" — a legacy shellper, or a WELCOME whose payload failed validation — and
+ * that is an absence of news, not news that the recorded command is wrong. Writing
+ * it through would erase a good row and, worse, hand the Spec 1313 self-heal a
+ * NULL it would then re-heal from config, converting a rejected frame into a
+ * silent identity change. Only a stated identity may rewrite the row.
  */
 export function updateTerminalCommand(terminalId: string, command: string | null): void {
+  if (command === null) return;
   try {
     const db = getGlobalDb();
     const row = db.prepare('SELECT command FROM terminal_sessions WHERE id = ?').get(terminalId) as

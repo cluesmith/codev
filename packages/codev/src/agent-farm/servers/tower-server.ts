@@ -47,6 +47,7 @@ import {
   getWorkspaceTerminalsEntry,
   saveTerminalSession,
   updateTerminalCommand,
+  getTerminalSessionById,
   deleteTerminalSession,
   deleteWorkspaceTerminalSessions,
   deleteFileTabsForWorkspace,
@@ -545,7 +546,13 @@ async function bootSequence(): Promise<void> {
     // current argv, which may differ from what the row holds (a relaunch swapped
     // it, or the row was healed from config). Write it back so the fallback SSOT
     // converges instead of drifting. No-ops when unchanged.
-    logSessionIdentity(log, 'session-reconnected', ptySession.id, ptySession, null);
+    // Read the row BEFORE the write below, so `row=` reports what the reconnect
+    // actually found rather than what it left behind. This is the site the log
+    // was built for — the one place a fresh WELCOME can disagree with the row —
+    // so a hardcoded `row=null` here would misreport exactly the case worth
+    // seeing.
+    const rowBefore = getTerminalSessionById(ptySession.id)?.command ?? null;
+    logSessionIdentity(log, 'session-reconnected', ptySession.id, ptySession, rowBefore);
     updateTerminalCommand(ptySession.id, persistableCommand(ptySession));
     log('INFO', `Shellper session ${sessionId} re-attached to terminal ${ptySession.id}`);
   });

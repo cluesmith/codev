@@ -61,10 +61,10 @@ Against `git merge-base main HEAD` (`9129ab81c`):
 
 - `pnpm build` (packages/codev): ✓ pass
 - `tsc --noEmit`: ✓ clean
-- `vitest run`: ✓ **4947 passed / 0 failed / 48 skipped** (249 files passed, 3 skipped), of which
-  **35 are new** across the two new suites (20 in `welcome-identity.test.ts`, 15 in
-  `pir-1475-welcome-identity.test.ts`). Re-run after merging `main` (`ec1f9fe5e`) and after the
-  consultation fixes.
+- `vitest run`: ✓ **4950 passed / 0 failed / 48 skipped** (249 files passed, 3 skipped), of which
+  **38 are new** across the two new suites (20 in `welcome-identity.test.ts`, 18 in
+  `pir-1475-welcome-identity.test.ts`). Re-run after merging `main` (`ec1f9fe5e`), after the
+  consultation fixes, and after the integration-review fixes.
 - **Manual verification (dev-approval gate)**: the plan's Manual steps 2–7 were **scripted against a
   real, isolated Tower** rather than asserted from the unit suite —
   `packages/codev/scripts/pir-1475-dev-approval-evidence.mts` spawns this branch's built
@@ -147,6 +147,23 @@ answered here.
 | codex-2 | The plan asked for the SPAWN relaunch driven through **both** real `SessionManager` paths; the unit test uses a fake client, and the evidence covers only clean-exit | **Accepted as a real gap; documented, not papered over.** See below |
 | codex-3 | The review's Files Changed omitted `lessons-learned.md` | **Fixed** — the list was generated before that file was committed |
 | claude-3 | The evidence script/transcript are outside the plan's "Files to Change" | **No change.** Scope addition, disclosed: producing running evidence is what PIR's dev-approval gate asks for, and it is what caught the arg-bound bug |
+
+### Architect integration review (second pass, on PR #1511)
+
+A second 3-way CMAP plus an architect read of the full production diff returned **gemini APPROVE ·
+codex COMMENT · claude COMMENT — again no `REQUEST_CHANGES`** — with three one-line items to fix
+before the gate. All three are addressed:
+
+| # | Finding | Fix |
+|---|---|---|
+| 1 | `updateTerminalCommand` was the only persist path with no null guard: a rejected reconnect WELCOME plus an empty `config.command` could write `NULL` over a known-good row | `if (command === null) return;`. `null` means *this attach produced no identity* — an absence of news, not news that the row is wrong. Writing it through would erase a good row **and** hand the Spec 1313 self-heal a NULL to re-heal from config, converting a rejected frame into a silent identity change. Three tests pin it (known row survives; legacy NULL stays NULL; a stated identity still writes through) — and I removed the guard to watch the first one fail before keeping it |
+| 2 | The `arch.md` frame table still described WELCOME's payload as `pid, cols, rows, startTime`, contradicting the lifecycle prose this PR updated | Table row now names the required v1 core and the optional post-v1 additions, matching the Connect step |
+| 3 | The `session-reconnected` `logSessionIdentity` call hardcoded `null` for `rowCommand`, so it always printed `row=null` — misleading at the one site the log exists for | Reads the row *before* the write, so `row=` reports what the reconnect found. This is the only site where a fresh WELCOME can disagree with the row, which is precisely the case worth seeing |
+
+Items 4–7 in that review were marked non-blocking by the architect and filed as follow-ups: the
+crash-loop end-to-end test (same gap as codex-2 below), whether `codev/evidence/` should become a
+documented PIR convention, a defense-in-depth note about bounding identity shellper-side, and the
+`console.warn` style note (`ShellperClient` is otherwise logger-free).
 
 **On codex-2, precisely.** The relaunch chain is pinned in two halves rather than end-to-end: the
 *real* `ShellperClient` is tested for adopting new identity on `spawn()` with no reconnect
