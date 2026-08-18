@@ -48,6 +48,9 @@ encodes the expected verdict: `<app>-<state>.<clean|busy>.txt`.
   | `agy-turn-echo.clean.txt` | a settled answer above an empty composer | agy echoes every submitted turn as `> <message>` (palette-4) — a `> ` row that must not steal the marker |
   | `agy-torn-echo.busy.txt` | the same stream **cut mid-repaint** | real bytes, composer not yet repainted; the only `> ` row left is the palette-4 echo (the tear shape #1361 documents) |
 
+  The capture + sanitization harness is committed at `codev/air-1474-captures/` — re-measuring
+  against a future agy starts there, not from scratch.
+
   Measured attribute facts these encode: the marker glyph is **palette-12** (bright blue)
   in every mode; the idle mode-hint (`Accept-edits mode: …`) is **palette-8 (gray)** at
   normal intensity (dim=0); user-typed text is **default-fg**; the transcript echo of a

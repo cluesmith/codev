@@ -68,7 +68,7 @@ function profileForFixture(name: string): GateProfile {
 describe('render-gate — real captured fixtures (Spec 1313)', () => {
   const fixtures = readdirSync(FIXTURE_DIR).filter((f) => f.endsWith('.txt')).sort();
 
-  it('the required states are all captured (claude+codex idle/draft/menu/picker, agy idle/draft/trust, wrapper/boot)', () => {
+  it('the required states are all captured (claude+codex idle/draft/menu/picker, agy idle/bare-marker/draft/menu/trust/turn-echo/torn, wrapper/boot)', () => {
     for (const required of [
       'claude-idle.clean',
       'claude-draft.busy',
@@ -404,6 +404,36 @@ describe('render-gate — PRODUCTION data path: capped ring TEARS, persistent mi
       const { term } = await screen.read();
       expect(classifyBuffer(term, cols, rows, CLAUDE_PROFILE)).toMatchObject({ clean: true, detail: 'empty' });
       screen.dispose();
+    });
+  }
+
+  /**
+   * agy path-parity (#1474). The agy anchors are the first classifier input that depends on
+   * CURSOR STATE rather than on cell text/attributes, and the cursor is the one thing the two
+   * gate paths could plausibly disagree about: the transient path renders a replay into a
+   * THROWAWAY terminal, while production reads a LONG-LIVED mirror fed the byte stream
+   * incrementally. Same bytes, same verdict — asserted per fixture, so a future divergence
+   * (a mirror that resizes, reseeds, or scrolls the cursor out of the viewport) fails here
+   * rather than silently in delivery.
+   *
+   * Each fixture is fed twice: once in production-sized chunks, and once in 7-byte chunks that
+   * deliberately SPLIT escape sequences across `feed()` calls — the cursor-positioning CSI
+   * (`ESC[<row>;<col>H`, and the relative `ESC[2A`/`ESC[2C` agy actually emits) is exactly what
+   * a torn chunk boundary would corrupt, and a mis-parsed cursor is now a verdict change.
+   */
+  for (const name of readdirSync(FIXTURE_DIR).filter((f) => f.startsWith('agy') && f.endsWith('.txt')).sort()) {
+    it(`${name}: persistent mirror agrees with the transient path (agy cursor-state parity)`, async () => {
+      const raw = readFileSync(`${FIXTURE_DIR}/${name}`, 'utf8');
+      const expected = await classifyScreen(snapshotFromRaw(raw), AGY_PROFILE);
+      expect(expected.clean).toBe(name.includes('.clean.')); // the transient path is itself correct
+
+      for (const chunkSize of [CHUNK, 7]) {
+        const screen = new SessionScreen(COLS, ROWS);
+        for (let i = 0; i < raw.length; i += chunkSize) screen.feed(raw.slice(i, i + chunkSize));
+        const { term } = await screen.read();
+        expect(classifyBuffer(term, COLS, ROWS, AGY_PROFILE), `chunkSize=${chunkSize}`).toEqual(expected);
+        screen.dispose();
+      }
     });
   }
 });
