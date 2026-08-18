@@ -72,5 +72,40 @@ Consequences vs the approved plan:
   deliberately, noted in the plan so the architect sees why.
 - Still reuse #1465: extract `PlacedKeys` base from `SlotKey`; `ArchitectAction` extends it.
 
-Rewrote the plan to this shape (commit below). This reverses the plan the architect (main)
-approved on the scope model — flagging to main; Amr's word governs. Gate stays pending Amr.
+Rewrote the plan to this shape. This reverses the plan the architect (main)
+approved on the scope model — flagged to main; Amr's word governs. Gate stays pending Amr.
+
+## SECOND REFRAME — architect list SOURCE (owner decision, 2026-08-18)
+
+During implement, Amr reversed the list source: the Architects board enumerates the LIVE
+ARCHITECT VIEW (`OverviewData.architects`), NOT distinct `spawnedByArchitect`. Reason: the board
+now SUMMONS, so it must list "architects that exist" — a live architect owning no builders
+(demos, reviewer) must still get a key or it's permanently unopenable. Verified live: 6 live
+architects, only 4 own builders.
+
+Key rulings folded in (plan + code comments):
+- Read `OverviewData.architects` (live sessions), NEVER `DashboardState.architects` (its
+  "registered" doc comment is wrong — filed #1496; sibling lane #1494 built on the lie).
+- Ruling-2 reconciliation: #1463's "deck never consumes the live view" guards a SILENTLY-WRONG
+  single-target key; an ENUMERATION board is safe because press → open-architect-terminal →
+  VSCode resolves + warns, so a stale list FAILS LOUDLY. Amended OpenArchitectAction's doc
+  comment narrowly (don't let a maintainer "restore" the derivation).
+- DECLINED pinning main: an explicit 'main' arms VSCode's main-else-first fallback (#1497) → a
+  pinned key could open the wrong terminal under main's own unqualified label, wrong-until-next-
+  press. So SORT main-first but never INJECT. Cite #1497, don't restate the trace.
+- Three failure modes decided in plan: (a) empty board → dim inert "No architect" face,
+  self-correcting; (b) missing main → unpinned/absent (safer); (c) dead PTY behind live row →
+  VSCode owns the warning, no deck-side pre-validation.
+- Inverse test (replaces dropped null-superset): an architect with ZERO builders still appears.
+
+## IMPLEMENT — DONE (awaiting dev-approval)
+
+Built: store.architects() (live view, main-first sort, no pin); extracted PlacedKeys base from
+SlotKey (reuses #1465 ordering, non-generic — settings read from event, sidesteps unimportable
+JsonObject); ArchitectAction (press → open-architect-terminal, no selection change);
+architectKeyFaceSvg; new `switch` glyph; manifest action + architect-action/switch icons (via
+render script); registered in plugin.ts; README Design + Actions docs.
+
+Verified in worktree: check-types ✓, build ✓, Elgato validate ✓, 231 tests (+14 new) ✓.
+Restored unrelated regenerated icons (render script is non-deterministic) to avoid PR churn.
+Dev-approval is hardware — 6-architect fleet is live, demo steps in the plan's Test Plan.
