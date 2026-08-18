@@ -509,7 +509,11 @@ sits between here and there. **Do not write the review without walking this list
 3. **Nine vacuous negatives repaired** (Phase 2). `isBuildVerify` needs BOTH `build` and `verify`;
    the fixtures had neither on `implement`, so five "negative" tests ran through `handleOncePhase`
    and asserted nothing. Belongs in the lessons section — architect asked for it explicitly.
-4. **Force-advance can prepend its safety-ceiling notice to a refresh task** the builder is about to
+4. **Force-advance ACTUALLY OCCURRED on this project** (Phase 2 iter-3 ceiling, 83c9e5a2a) — not
+   hypothetical. Nothing real was unresolved (codex's sole objection was already settled by
+   Waleed's ruling), but I missed the notice because I was filtering porch output to task subjects.
+   Report both the event and that failure mode. Related: **force-advance can prepend its
+   safety-ceiling notice to a refresh task** the builder is about to
    clear on (`next.ts` force-advance path calls `handleVerifyApproved`, which may return a refresh
    response). Recoverable — `force_advanced` is in status.yaml and the rebuttal file is on disk —
    and refreshing after a long REQUEST_CHANGES spiral is arguably the most valuable moment to
@@ -547,3 +551,37 @@ the suppression narrowed an approved artifact on a builder's judgement — and t
 explicit human amendment, not a counter-argument. That distinction goes in the review artifact: a
 reviewer being overruled on the merits and a reviewer being right about process are different
 things, and this was the second.
+
+## 2026-08-18 — main merged (URGENT, architect-directed)
+
+`git merge origin/main` → **a117d6f45, NO CONFLICTS**. My Phase 1–2 work intact.
+
+Reason: my branch predated PR #1516, so my worktree carried the unguarded
+`tower-cloud-cli.test.ts`. My 17:54Z suite run deregistered the owner's PRODUCTION Tower for the
+third time (breaks his Stream Deck feed). Root cause per af9cf3cab: `towerRegister()/towerDeregister()`
+with no `port` target localhost:4100 — the developer's live Tower — authenticated with the real
+`~/.agent-farm/local-key`.
+
+I VERIFIED the guard is actually wired rather than assuming: `test-env.ts:157`
+`assertTunnelMutationAllowedUnderTest` is imported at `tower-client.ts:18` and called at `:47` on
+every request. Refuses `/api/tunnel/(connect|disconnect)` against the default port under a test
+runner. Also `CODEV_AGENT_FARM_DIR` now overrides `AGENT_FARM_DIR` for spawned test Towers.
+
+## FORCE-ADVANCE at Phase 2 iter-3 ceiling — and why I missed it
+
+Porch force-advanced Phase 2 at 17:56Z (83c9e5a2a), max_iterations 3 reached with codex
+REQUEST_CHANGES / claude APPROVE on iter 3.
+
+**Nothing real was left unresolved**: codex's iter-3 verdict contained exactly ONE issue — the
+pre-approval suppression — and that is the objection Waleed ruled on ("definitely suppress"),
+resolved by explicit artifact amendment in 593419d9a about four hours earlier. The state machine
+simply had not been told.
+
+**Why I did not flag it — my process failure.** Porch prepends a `⚠️ FORCE-ADVANCE` notice to the
+FIRST TASK'S DESCRIPTION. I had been piping `porch next` through a python filter printing only task
+SUBJECTS. The warning was emitted; I never saw it. I built a summarizer for readability and it
+silently dropped a safety signal — the same class of failure as the vacuous tests: the check ran
+and reported nothing useful.
+
+**CORRECTED**: read porch task descriptions, not just subjects. Never summarize porch output in a
+way that can drop a warning.
