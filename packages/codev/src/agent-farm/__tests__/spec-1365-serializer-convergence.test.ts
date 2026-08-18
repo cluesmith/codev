@@ -295,7 +295,10 @@ describe('Issue #1365 — deliveries decline contention, operators wait (bounded
     const ceilingMs = 40;
     const expired: number[] = [];
 
-    const holder = submitToSession(c.session.id, () => {
+    // The holder must be a DELIVERY write: since the codex review of PR #1492 the ceiling
+    // deliberately refuses to bypass another OPERATOR, so an operator holder would (correctly)
+    // never expire this ceiling at all.
+    const holder = trySubmitToSession(c.session.id, () => {
       setTimeout(() => c.session.write('\r'), 400);
       return 400;
     });
@@ -326,6 +329,50 @@ describe('Issue #1365 — deliveries decline contention, operators wait (bounded
     expect(expired).toEqual([]);
     expect(await delivery).toEqual({ status: 'written' });
     expect(c.submitted).toEqual([MULTILINE, 'INT']);
+  });
+
+  it('operator vs operator NEVER degrades — the wait stays unbounded, as before #1365', async () => {
+    // The regression codex caught in PR #1492 review. Before this change `submitToSession` had
+    // no ceiling at all, so two operator submissions to one terminal were ALWAYS fully
+    // serialized. A ceiling that could skip a body-bearing operator would make this one pair
+    // strictly WORSE than the old behaviour — the opposite of the point.
+    const c = makeComposer();
+    const expired: number[] = [];
+
+    // A body-bearing interrupt that holds the line far longer than the ceiling.
+    const first = submitToSession(c.session.id, interruptSubmission(c.session, 'OP-ONE'), undefined, {
+      waitCeilingMs: 30,
+      onCeilingExpired: (ms) => expired.push(ms),
+    });
+    await sleep(5);
+    const second = submitToSession(c.session.id, interruptSubmission(c.session, 'OP-TWO'), undefined, {
+      waitCeilingMs: 30, // would fire long before the first operator finishes, if it were armed
+      onCeilingExpired: (ms) => expired.push(ms),
+    });
+    await Promise.all([first, second]);
+
+    expect(expired).toEqual([]); // neither operator gave up on the other
+    expect(c.submitted).toEqual(['OP-ONE', 'OP-TWO']); // strictly ordered, neither clobbered
+  });
+
+  it('a THIRD operator does not bypass a QUEUED one (a waiting operator counts, not just a writing one)', async () => {
+    const c = makeComposer();
+    const expired: number[] = [];
+    const opts = { waitCeilingMs: 30, onCeilingExpired: (ms: number) => expired.push(ms) };
+
+    // Head is a DELIVERY (bypassable); B queues behind it; C must not skip B.
+    const delivery = deliveryWrite(c.session, MULTILINE);
+    await sleep(5);
+    const b = submitToSession(c.session.id, interruptSubmission(c.session, 'OP-B'), undefined, opts);
+    await sleep(5);
+    const c3 = submitToSession(c.session.id, interruptSubmission(c.session, 'OP-C'), undefined, opts);
+    await Promise.all([delivery, b, c3]);
+
+    // B may degrade past the delivery (that is the ceiling's whole purpose); C may not
+    // degrade past B, so at most one degradation is recorded and the operators stay ordered.
+    expect(expired.length).toBeLessThanOrEqual(1);
+    const ops = c.submitted.filter((s) => s.startsWith('OP-'));
+    expect(ops).toEqual(['OP-B', 'OP-C']);
   });
 
   it('a delivery raced by a ceiling-expired write reports preempted, never written', async () => {

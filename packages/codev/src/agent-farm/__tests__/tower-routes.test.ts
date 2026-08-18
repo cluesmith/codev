@@ -21,7 +21,7 @@ import { SessionScreen } from '../../terminal/session-screen.js';
 // generation); submitToSession lets a test pre-occupy a session's lock to drive the
 // shutdown-during-lock-wait window deterministically.
 import { shutdownDelayedSends } from '../servers/delayed-send.js';
-import { submitToSession, resetSubmissionChains } from '../servers/session-submit.js';
+import { submitToSession, trySubmitToSession, resetSubmissionChains } from '../servers/session-submit.js';
 
 // ============================================================================
 // Mocks
@@ -1718,6 +1718,41 @@ describe('tower-routes', () => {
       // Message SHOULD be written — user is idle (Bugfix #492)
       expect(mockWrite).toHaveBeenCalled();
     });
+
+    it('a body-bearing interrupt that crosses the wait ceiling reports degraded (Issue #1365)', async () => {
+      // codex review of PR #1492: the interrupt claims its mailbox row `delivered` BEFORE the
+      // write (un-claiming would risk a double delivery), so if the ceiling expires and the
+      // write goes out unserialized — possibly interleaving with the delivery it skipped — an
+      // unqualified `delivered: true` would be a lie of omission. The response must say so.
+      mockParseJsonBody.mockResolvedValue({
+        to: 'architect', message: 'urgent', workspace: '/tmp/ws', options: { interrupt: true },
+      });
+      mockResolveTarget.mockReturnValue({
+        terminalId: 'term-ceiling', workspacePath: '/tmp/ws', agent: 'architect',
+      });
+      const mockWrite = vi.fn();
+      mockGetTerminalManager.mockReturnValue({
+        getSession: () => gateSession(mockWrite, '❯ ', true, 'term-ceiling'),
+        listSessions: () => [],
+      });
+
+      // Occupy the terminal with a DELIVERY write long enough to outlast the ceiling. A
+      // delivery is the only thing the ceiling is allowed to bypass.
+      const holder = trySubmitToSession('term-ceiling', () => 4000);
+
+      const req = makeReq('POST', '/api/send');
+      const ctx = makeCtx();
+      const { res, statusCode, body } = makeRes();
+      await handleRequest(req, res, ctx);
+
+      expect(statusCode()).toBe(200);
+      const parsed = JSON.parse(body());
+      expect(parsed.delivered).toBe(true); // claim-first is preserved...
+      expect(parsed.degraded).toBe(true); // ...but the sender is told it was not serialized
+      expect(parsed.degradedReason).toBe('submit-wait-ceiling-expired');
+      expect(mockWrite).toHaveBeenCalled(); // the escape hatch still landed
+      await holder;
+    }, 10_000);
   });
 
   // ==========================================================================

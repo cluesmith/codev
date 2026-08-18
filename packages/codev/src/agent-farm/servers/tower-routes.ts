@@ -1624,6 +1624,9 @@ function holdAndRespond(
  * that shipped before #1365 (an operator write that never waited). So the degradation is never
  * worse than the old status quo — but it used to be invisible, and now it is not.
  */
+/** Machine-readable reason paired with `degraded: true` on an operator send response. */
+const DEGRADED_SUBMIT_REASON = 'submit-wait-ceiling-expired';
+
 function logCeilingExpired(
   ctx: RouteContext,
   action: string,
@@ -1999,9 +2002,13 @@ async function handleSend(
     // Issue #1365: escape is an operator submission — it blocks behind an in-flight write
     // (including a gated mailbox delivery, which now takes this same lock) so its ESC and
     // Enter can no longer truncate a delivery mid-pace, but only up to the wait ceiling.
+    let escapeDegraded = false;
     await submitToSession(result.terminalId, () => writeEscapeToSession(session, noEnter), undefined, {
       waitCeilingMs: OPERATOR_SUBMIT_WAIT_CEILING_MS,
-      onCeilingExpired: (waitedMs) => logCeilingExpired(ctx, 'ESC', toAgent, result.terminalId, waitedMs),
+      onCeilingExpired: (waitedMs) => {
+        escapeDegraded = true;
+        logCeilingExpired(ctx, 'ESC', toAgent, result.terminalId, waitedMs);
+      },
     });
     broadcastMessage({
       type: 'message',
@@ -2012,7 +2019,13 @@ async function handleSend(
       timestamp: new Date().toISOString(),
     });
     ctx.log('INFO', `Interrupt (ESC) sent: ${from ?? 'unknown'} → ${toAgent} (terminal ${result.terminalId.slice(0, 8)}...)`);
-    sendJson(res, 200, { ok: true, terminalId: result.terminalId, resolvedTo: toAgent, deferred: false });
+    sendJson(res, 200, {
+      ok: true,
+      terminalId: result.terminalId,
+      resolvedTo: toAgent,
+      deferred: false,
+      ...(escapeDegraded ? { degraded: true, degradedReason: DEGRADED_SUBMIT_REASON } : {}),
+    });
     return;
   }
 
@@ -2063,6 +2076,13 @@ async function handleSend(
     //   reported success — the row read `delivered` for a message the agent never saw. The lock
     //   order is per-agent → per-terminal (the delivery takes this one as a leaf), never the
     //   reverse, so there is no cycle. See session-submit.ts for the full boundary.
+    // Whether this interrupt gave up waiting and wrote unserialized. It must reach the SENDER,
+    // not just the Tower log (codex review of PR #1492): the row above was claimed `delivered`
+    // before the write, so a degraded interrupt would otherwise report an unqualified success
+    // for a body that may have interleaved with the delivery it skipped. We keep the
+    // claim-first tradeoff (un-claiming risks a double delivery — see above) and tell the
+    // truth about it instead.
+    let degraded = false;
     await submitToSession(
       result.terminalId,
       () => {
@@ -2072,7 +2092,10 @@ async function handleSend(
       undefined,
       {
         waitCeilingMs: OPERATOR_SUBMIT_WAIT_CEILING_MS,
-        onCeilingExpired: (waitedMs) => logCeilingExpired(ctx, 'interrupt', toAgent, result.terminalId, waitedMs),
+        onCeilingExpired: (waitedMs) => {
+          degraded = true;
+          logCeilingExpired(ctx, 'interrupt', toAgent, result.terminalId, waitedMs);
+        },
       },
     );
     broadcastMessage({
@@ -2093,6 +2116,8 @@ async function handleSend(
       held: false,
       mailboxId: row.id,
       reason: null,
+      // Additive and present only when it happened, so older clients are unaffected.
+      ...(degraded ? { degraded: true, degradedReason: DEGRADED_SUBMIT_REASON } : {}),
     });
     return;
   }

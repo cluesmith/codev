@@ -99,6 +99,18 @@
  * Operators block — bounded by {@link OPERATOR_SUBMIT_WAIT_CEILING_MS}, because a paced
  * write runs `(lines−1)×10+80` ms and a body is capped only by `parseJsonBody`'s 1 MiB.
  *
+ * The ceiling may only ever bypass a DELIVERY write, never another operator (codex review of
+ * PR #1492). Operator-vs-operator was ALWAYS fully serialized before #1365 — `submitToSession`
+ * had no ceiling — so a ceiling that could skip a queued or in-flight operator would make that
+ * one pair strictly WORSE than the old behaviour, which is the opposite of the point. The
+ * {@link SubmissionKind} tag plus the pending-operator count is what keeps the guarantee true
+ * per pair:
+ *
+ *   - operator vs operator — fully serialized, unbounded wait, exactly as before #1365;
+ *   - operator vs delivery — serialized under the ceiling, and above it degraded to the
+ *     pre-#1365 behaviour (two disjoint locks, i.e. no serialization at all), so never worse;
+ *   - delivery vs delivery — the per-agent serializer, unchanged, plus a declined contention.
+ *
  * ### What is guaranteed, and what is not
  *
  * **Serialization is the structural guarantee**: no lock-taking writer can put bytes on a
@@ -144,11 +156,32 @@ const realClock: SubmitClock = {
   sleep: (ms: number) => new Promise(resolve => setTimeout(resolve, ms)),
 };
 
+/**
+ * What kind of writer a submission is (Issue #1365, codex review).
+ *
+ * Load-bearing for the wait ceiling: the ceiling may only ever let a writer bypass a
+ * DELIVERY write, never another operator. See {@link SubmitOptions.waitCeilingMs}.
+ */
+export type SubmissionKind = 'operator' | 'delivery-write';
+
 /** Options for an operator submission that must not wait unboundedly (Issue #1365). */
 export interface SubmitOptions {
   /**
+   * What this submission is. Defaults to `operator` — every pre-#1365 caller of this
+   * function is one, and defaulting to the kind that is never bypassable is the safe way
+   * round.
+   */
+  kind?: SubmissionKind;
+  /**
    * Max ms to wait for an in-flight submission before proceeding UNSERIALIZED.
    * Omitted (the default) means wait as long as it takes.
+   *
+   * **Only armed when nothing ahead of us is an operator submission.** Two operator
+   * submissions to one terminal were ALWAYS fully serialized before #1365, and a ceiling
+   * that could bypass an operator would make this pair strictly worse than that — the one
+   * corner where "never worse than the old status quo" would otherwise be false. The
+   * ceiling exists to keep the escape hatch responsive against a long DELIVERY, which is
+   * the only thing it may skip.
    */
   waitCeilingMs?: number;
   /** Called instead of the write's serialization when {@link waitCeilingMs} expires. */
@@ -167,6 +200,11 @@ const CEILING_EXPIRED = Symbol('ceiling-expired');
  * Blocking `--interrupt` — the human's escape hatch for a wedged agent — behind that would be a
  * worse regression than the interleaving this lock closes. Two seconds comfortably covers every
  * realistic message while keeping the escape hatch responsive.
+ *
+ * It applies ONLY against a delivery write; behind another operator the wait stays unbounded
+ * (see {@link SubmitOptions.waitCeilingMs}). And when it does expire, the caller must SAY so —
+ * `/api/send` reports `degraded: true` — because a degraded operator write may interleave with
+ * the write it skipped, and the interrupt path has already claimed its row `delivered`.
  */
 export const OPERATOR_SUBMIT_WAIT_CEILING_MS = 2000;
 
@@ -181,6 +219,16 @@ export const OPERATOR_SUBMIT_WAIT_CEILING_MS = 2000;
  * concurrent operator action.
  */
 const unserializedWrites = new Map<string, number>();
+
+/**
+ * Per-session count of OPERATOR submissions queued or in flight (Issue #1365, codex review).
+ *
+ * The ceiling consults this before arming: while any operator is ahead of us — running OR
+ * merely queued — we wait as long as it takes, exactly as every submission did before the
+ * ceiling existed. A queued operator counts because bypassing one that has not started yet
+ * is the same violation as bypassing one mid-write.
+ */
+const pendingOperators = new Map<string, number>();
 
 /**
  * How many unserialized (ceiling-expired) writes this session has seen.
@@ -237,7 +285,15 @@ export function submitToSession(
   // ceiling timer it would then leave dangling for its whole duration.
   const contended = chains.has(sessionId);
   const ceilingMs = options.waitCeilingMs;
-  const bounded = contended && ceilingMs !== undefined && ceilingMs >= 0;
+  // An operator ahead of us — in flight or merely queued — makes this an operator-vs-operator
+  // wait, which was UNBOUNDED before #1365 and must stay unbounded (see waitCeilingMs).
+  const behindOperator = (pendingOperators.get(sessionId) ?? 0) > 0;
+  const bounded = contended && ceilingMs !== undefined && ceilingMs >= 0 && !behindOperator;
+
+  // Count ourselves only AFTER the check above, so we do not read our own presence as a
+  // reason to block, and BEFORE any await, so a later operator sees us while we are queued.
+  const kind = options.kind ?? 'operator';
+  if (kind === 'operator') pendingOperators.set(sessionId, (pendingOperators.get(sessionId) ?? 0) + 1);
 
   const current = (async () => {
     if (bounded) {
@@ -280,6 +336,19 @@ export function submitToSession(
 
   chains.set(sessionId, tail);
 
+  // Release our operator claim as soon as OUR write is done — a later operator may then be
+  // bypass-eligible again if only deliveries remain ahead of it.
+  if (kind === 'operator') {
+    void current.then(
+      () => undefined,
+      () => undefined,
+    ).then(() => {
+      const remaining = (pendingOperators.get(sessionId) ?? 1) - 1;
+      if (remaining > 0) pendingOperators.set(sessionId, remaining);
+      else pendingOperators.delete(sessionId);
+    });
+  }
+
   // Drop the entry once this is the last submission in flight, so the map does
   // not accumulate one promise per session for the life of the process.
   //
@@ -319,7 +388,7 @@ export async function trySubmitToSession(
   clock: SubmitClock = realClock,
 ): Promise<boolean> {
   if (isSubmissionInFlight(sessionId)) return false;
-  await submitToSession(sessionId, write, clock);
+  await submitToSession(sessionId, write, clock, { kind: 'delivery-write' });
   return true;
 }
 
@@ -332,4 +401,5 @@ export function pendingSubmissionSessions(): number {
 export function resetSubmissionChains(): void {
   chains.clear();
   unserializedWrites.clear();
+  pendingOperators.clear();
 }
