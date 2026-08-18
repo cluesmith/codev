@@ -195,3 +195,44 @@ for the page's lifetime. Used `domcontentloaded`.
 - No pre-existing failures encountered, so nothing to quarantine.
 
 Awaiting `dev-approval`. PR gets parked open at the end — maintainer merges.
+
+## dev-approval (2026-08-18)
+
+Human asked to exercise the UX personally before deciding, so I stood up an INTERACTIVE version of
+the evidence environment (same AF_TEST_DB isolation, port 14700, Tower detached via
+`spawn({detached:true})` + `unref()` so it outlived my turn) seeded with 2 held + 1 scheduled, and
+left it running.
+
+Two things worth recording from that:
+
+- **`MAX_DELAY_SECONDS` is 3600** (`delayed-send.ts:102`). The architect asked for "a long
+  notBefore so the scheduled row doesn't come due mid-inspection"; one hour is the product's cap on
+  `--delay`, so that wasn't available. Said so rather than quietly seeding something shorter.
+- **My first seeding run silently produced only 2 rows.** The 7-day send was rejected with a 400
+  and my helper swallowed the response. Fixed the helper to throw on `!res.ok` — a fixture that
+  comes up short without saying so is worse than one that fails loudly.
+- Started the interactive session on a **fresh** db name: my four evidence runs had left ~12 stale
+  held rows in `test-1450-14700.db`, which would have shown the reviewer a pile of junk instead of
+  the fixture.
+
+Approved. Torn down and verified: pid gone, 14700 closed, fixture db + scratch workspaces removed,
+live Tower on 4100 still listening, `global.db` timestamp unchanged. Also deleted my stale
+`test-1450-14700.db` litter.
+
+## Review phase (2026-08-18)
+
+Retrospective written. Governance routed **COLD only** — both hot files are at their 10-entry cap
+and nothing here justifies displacing an existing entry:
+
+- `arch.md` — (1) the **two route tables** fact under Agent Farm Internals: Tower-level `ROUTES`
+  vs `handleWorkspaceRoutes`, why a CLI-live endpoint can still 404 for the dashboard, and why
+  `workspaceOverride` must win over `?workspace=`. This is the root of the whole issue and would
+  bite the next person wiring a dashboard feature to an "existing" endpoint. (2) the
+  count-vs-list asymmetry in the mailbox section, framed as "do not fix it".
+- `lessons-learned.md` → Testing — (1) a browser assertion can pass while proving nothing; assert
+  the precondition (my z-index check). (2) `networkidle` never fires against an SSE-holding page;
+  wait on loaded content, and assert the status code because auth failures render as tidy error
+  states.
+
+Next: open the PR, record with porch, `porch done` triggers the single 3-way consult, then the
+`pr` gate. **Park it open — never merge, never close #1450.** We are not maintainers here.

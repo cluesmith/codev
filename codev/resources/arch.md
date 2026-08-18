@@ -660,6 +660,30 @@ As of v2.0.0 (Spec 0090 Phase 4), Agent Farm uses a **Tower Single Daemon** arch
 4. **Tower serves React dashboard directly**: No separate dashboard-server processes - Tower serves `/workspace/<encoded>/` routes
 5. **WebSocket paths include workspace context**: Format is `/workspace/<base64url>/ws/terminal/<id>`
 
+##### Two route tables, and why a "working" endpoint can still 404 for the dashboard (Issue 1450)
+
+`tower-routes.ts` dispatches HTTP through **two independent tables**, and registering in one
+does not register in the other:
+
+| | Tower-level `ROUTES` map (~`:180`) | Workspace-scoped dispatcher (`handleWorkspaceRoutes`) |
+|---|---|---|
+| URL | `/api/<thing>` | `/workspace/<base64url>/api/<thing>` |
+| Callers | CLI (`afx …` via the Tower client), direct HTTP | **The React dashboard** |
+| Workspace | from `?workspace=`, else "first known" | decoded + normalized from the URL prefix |
+
+The dashboard's `getApiBase()` returns `'./'`, so every call it makes is **relative** and lands
+in the second table. It never decodes its own workspace path — the server resolves it from the
+prefix, which is why workspace-scoped handlers take a `workspaceOverride` argument
+(`handleOverview`, `handleAnalytics`, `handleInboxList`) that **wins over** `?workspace=` so a
+query param cannot redirect a scoped call to another workspace's data.
+
+Consequence: a CLI-facing endpoint being live and tested says nothing about whether the
+dashboard can reach it. `GET /api/inbox` had backed `afx inbox` since Spec 1313 while
+`./api/inbox` 404'd for the dashboard. When wiring a dashboard feature to an existing endpoint,
+check the workspace-scoped dispatcher, not just the `ROUTES` map. The exact-vs-prefix match
+there is also a security boundary: matching `'inbox'` exactly keeps `inbox/:id` (body-bearing)
+and `inbox/:id/dismiss` (mutating) unreachable from the browser surface.
+
 #### State Split Problem & Reconciliation
 
 **WARNING**: The system has a known state split between:
@@ -1803,7 +1827,19 @@ Spec 1313 replaced Spec 403's in-memory, timer-based, force-flushing `SendBuffer
 
 #### Escalation & visibility (never delivery)
 
-A held row past the escalation age (`DEFAULT_ESCALATION_MS`, default 60s; `.codev/config.json` `mailbox.escalationSeconds`) is flagged `escalated` and emits the `mailbox-escalation` SSE event — **visibility only, never a delivery trigger**. Every held-state change (hold/deliver/supersede/dismiss) fires `overview-changed` so the dashboard/VSCode held-count indicators stay live (`setMailboxBroadcaster(broadcastNotification)` wires the boot-time drainer, which has no `RouteContext`, into the SSE fan-out). `afx inbox` lists held rows (workspace-scoped; metadata only, never bodies), `afx inbox show <id>` displays a single row including its body (the one body-surfacing CLI view; works on a row of any status), and `afx inbox dismiss <id>` soft-marks a row dismissed (any workspace operator; CLI-only). Terminal rows (delivered/superseded/dismissed) are pruned after `mailbox.retentionDays` (default 30) by the drainer; **held rows are never pruned**. Cron delivers through the same gate via `deliverCronMessage` (`cron-delivery.ts`) with a per-task supersede key (a newer run replaces the older *held* row) and logs the real outcome.
+A held row past the escalation age (`DEFAULT_ESCALATION_MS`, default 60s; `.codev/config.json` `mailbox.escalationSeconds`) is flagged `escalated` and emits the `mailbox-escalation` SSE event — **visibility only, never a delivery trigger**. Every held-state change (hold/deliver/supersede/dismiss) fires `overview-changed` so the dashboard/VSCode held-count indicators stay live (`setMailboxBroadcaster(broadcastNotification)` wires the boot-time drainer, which has no `RouteContext`, into the SSE fan-out). `afx inbox` lists held rows (workspace-scoped; metadata only, never bodies), `afx inbox show <id>` displays a single row including its body (the one body-surfacing CLI view; works on a row of any status), and `afx inbox dismiss <id>` soft-marks a row dismissed (any workspace operator; CLI-only).
+
+**The held COUNT and the held LIST disagree by design — do not "fix" it (Issue 1450).** The
+count (`heldSummaryForWorkspace`, behind `OverviewData.heldCount` and every badge/alarm surface)
+filters `not_before IS NULL OR not_before <= now`; the list (`listHeld`, behind `GET /api/inbox`)
+has **no** `not_before` filter. So a pre-due `--delay` send is listed but not counted, and
+`heldCount <= inbox.length` always. This is deliberate: a scheduled send is "scheduled, not
+stuck" and must not raise an attention indicator. Any surface rendering both must show the split
+rather than reconcile it — `afx inbox` labels pre-due rows `scheduled`, and the dashboard popover
+groups `Held (N)` (N === the badge count) above a separate `Scheduled (M)`. The corollary is that
+with 0 due and 1 scheduled row the badge does not render at all, so a scheduled-only state is
+visible **only** in `afx inbox`; changing that means changing what the badge counts, not how the
+list is filtered. Terminal rows (delivered/superseded/dismissed) are pruned after `mailbox.retentionDays` (default 30) by the drainer; **held rows are never pruned**. Cron delivers through the same gate via `deliverCronMessage` (`cron-delivery.ts`) with a per-task supersede key (a newer run replaces the older *held* row) and logs the real outcome.
 
 #### Address Resolution
 
