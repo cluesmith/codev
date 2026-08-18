@@ -234,7 +234,7 @@ export async function startTower(
   if (!started) {
     proc.kill();
     try { rmSync(socketDir, { recursive: true, force: true }); } catch { /* ignore */ }
-    try { rmSync(agentFarmDir, { recursive: true, force: true }); } catch { /* ignore */ }
+    removeIsolatedAgentFarmDir(agentFarmDir);
     throw new Error(`Tower failed to start on port ${actualPort}. stderr: ${stderr}`);
   }
 
@@ -254,7 +254,7 @@ export async function startTower(
       });
       // Clean up isolated socket dir and agent-farm dir
       try { rmSync(socketDir, { recursive: true, force: true }); } catch { /* ignore */ }
-      try { rmSync(agentFarmDir, { recursive: true, force: true }); } catch { /* ignore */ }
+      removeIsolatedAgentFarmDir(agentFarmDir);
     },
   };
 }
