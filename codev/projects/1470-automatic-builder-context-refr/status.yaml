@@ -1,7 +1,7 @@
 id: '1470'
 title: automatic-builder-context-refr
 protocol: spir
-phase: specify
+phase: plan
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -16,7 +16,7 @@ gates:
   verify-approval:
     status: pending
 iteration: 1
-build_complete: true
+build_complete: false
 history: []
 started_at: '2026-08-18T00:15:05.131Z'
-updated_at: '2026-08-18T00:34:58.672Z'
+updated_at: '2026-08-18T00:35:03.252Z'
