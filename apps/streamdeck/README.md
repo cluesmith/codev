@@ -96,10 +96,26 @@ an absent key is the safer, self-correcting failure.
 
 **A native switch, not a plugin one.** The Builders and Architects boards are two
 placements (a second page, a folder, or a second profile) that you flip between with Stream
-Deck's own **Switch Profile** or **Folder** key — the plugin ships a Codev-styled *switch*
-icon so that native key blends with the rest, but drives no page flip itself. A
-plugin-driven toggle (`switchToProfile`) waits on bundled-profile authoring (deferred with
-\#1381/#1440); the native route delivers the button today without it.
+Deck's own navigation — the plugin ships a Codev-styled *switch* icon so a native switch key
+blends with the rest, but drives no page flip itself. A plugin-driven toggle
+(`switchToProfile`) waits on bundled-profile authoring (deferred with #1381/#1440); the
+native route delivers the button today without it.
+
+**Wiring the native switch.** Pick whichever native mechanism you prefer — none of them is a
+Codev action; the plugin only supplies the icon (`com.cluesmith.codev.sdPlugin/icons/switch.png`,
+`@2x` for retina):
+
+- **Swipe (no key).** Put page 1 (builders) and page 2 (architects) in one profile and swipe
+  the touchscreen / tap the page dots. This is the simplest, and needs no switch key at all.
+- **Folder key.** Select the Architect keys → **Create Folder**; a native **Back** key returns.
+  Click the folder key → set its image to `switch.png`.
+- **Switch Profile key.** Put the Architect keys on a second profile, then drag Stream Deck's
+  built-in **Switch Profile** action onto a key on each profile (pointing at the other) → set
+  each one's image to `switch.png`.
+
+Within a single profile there is no built-in *key* that jumps to a specific page, so a switch
+*button* (as opposed to a swipe) means a Folder or a second profile — the page-jump key is the
+deferred `switchToProfile` work above.
 
 ## Hardware
 
@@ -207,17 +223,16 @@ page 1's review dials.
   (dimmed, "None") when nothing is selected or the builder has no recorded owner;
   **Main** always opens the workspace's `main` architect. The key face shows the
   resolved architect's name — the constant title `Architect` over the name — so you
-  see who a press would summon before pressing. Recommended home is Row 2 with the
-  other builder-scoped keys; the natural donor slot is **Send Feedback while the
-  workspace is in forward mode**, where that key is inert by design. Known edges:
-  in Main mode when `main` isn't live, VSCode opens the first architect while the
-  face still reads `Main` (the mode reflects your configured intent); and a live
-  architect registration behind a dead terminal opens a session nobody reads (the
-  deck can't detect it). Placement: the Main-mode key is selection-independent, so
-  it can live on a **Row 1** key without affecting selection — and because Row 1's
-  window sizes itself to the Builder Action keys you actually place (#1465), giving a
-  Row 1 key to this one simply leaves a correctly-sized three-wide builder window,
-  with no hidden builders. That is the recommended layout above (Row 1 slot 1).
+  see who a press would summon before pressing. Recommended home is **Row 2 in Builder
+  mode** with the other builder-scoped keys (the recommended layout above), so it opens
+  the *selected builder's* architect; reaching **any other** architect — `main` included —
+  is now the **Architects board's** job (**Architect Action**, below), so this key needn't
+  carry Main mode. Known edges (Main mode): when `main` isn't live, VSCode opens the first
+  architect while the face still reads `Main` (the #1497 residual — the mode reflects your
+  configured intent); and a live architect registration behind a dead terminal opens a
+  session nobody reads (the deck can't detect it). Main mode remains available and is
+  selection-independent, so it can sit on any spare key if you want a fixed `main` shortcut
+  on the main board.
 - **Architect Action** (Architects board) — a live tile for an architect, one key per
   live architect. Like Builder Action it **self-orders** by placement (reading order,
   row then column), so the Nth key shows the Nth architect; the list is the workspace's

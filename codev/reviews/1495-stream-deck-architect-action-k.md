@@ -54,7 +54,12 @@ Against the merge-base (`e53cab9`):
   extraction).
 - Manual (dev-approval, on hardware): approved after relinking the plugin to this worktree and
   driving a two-page profile — builders on page 1, Architect Action keys on page 2 reached by
-  swipe; the architect keys enumerate the live fleet and a press opens the architect's terminal.
+  **swipe**; the architect keys enumerate the live fleet and a press opens the architect's terminal.
+  The owner elected **page-swipe** for board navigation over a switch *button* (his words: "swiping
+  is enough"). The Folder / Switch-Profile switch button is an **optional native Stream Deck
+  affordance** (not plugin code — the plugin only supplies the `switch` icon); its wiring is
+  documented in the README but it was not itself exercised on hardware, since page-swipe is the
+  chosen navigation and the switch key's behavior is Stream Deck's, not ours.
 
 ## Architecture Updates
 
@@ -98,6 +103,17 @@ duplicated.)
   would be a silent-wrong-target regression on the most-pressed key.
 - **The switch is native, not a plugin action** — the plugin ships only the `switch` *icon*; a
   plugin-driven `switchToProfile` toggle is out of scope (deferred #1381/#1440).
+
+**3-way consultation (single pass): Gemini APPROVE, Claude APPROVE, Codex REQUEST_CHANGES.** All
+three Codex points were documentation/verification (implementation called "sound"). Dispositions
+(full text in `codev/projects/1495-*/1495-review-iter1-rebuttals.md`):
+- *Fixed* — added README "Wiring the native switch" steps (which native key gets the `switch.png`).
+- *Fixed* — removed a stale "Main-mode key in Row 1 slot 1" recommendation that contradicted the
+  new two-page layout.
+- *Rebutted* — "review records swipe, not the switch button": page-swipe was the owner's chosen
+  navigation ("swiping is enough"); the switch button is an optional *native* affordance, not
+  plugin code, so nothing of ours is left unverified. The review's manual-verification note now
+  says this explicitly. PIR is single-pass, so please sanity-check this disposition at the gate.
 
 ## How to Test Locally
 
