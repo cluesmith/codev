@@ -144,6 +144,21 @@
       ]
     },
     {
+      "Name": "Architect Action",
+      "UUID": "com.cluesmith.codev.architect-action",
+      "Tooltip": "Live tile for an architect — its slot is where you place the key (the keys self-order left to right, top row first). Shows the Nth live architect's name; press opens that architect's terminal. Place these on a second page/profile and switch to it with a native Stream Deck Switch Profile or Folder key.",
+      "Icon": "icons/list/architect-action",
+      "Controllers": [
+        "Keypad"
+      ],
+      "States": [
+        {
+          "Image": "icons/architect-action",
+          "TitleAlignment": "bottom"
+        }
+      ]
+    },
+    {
       "Name": "Zoom Navigator",
       "UUID": "com.cluesmith.codev.zoom-nav",
       "Tooltip": "Zoom navigator: rotate to browse workspaces / builders, tap the touch strip to zoom in (open the diff), press the dial to zoom back out / reset.",
