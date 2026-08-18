@@ -10,12 +10,21 @@
  * workspace never activated, and the suite went red with `element(s) not
  * found` the first time its schedule fired after merge.
  *
- * These assertions pin the shared auth tokens (`tower-key.ts`) that the harness
- * now presents on every Tower-bound path: HTTP setup calls (A), the direct-API
- * request fixture / `page.request` calls (B), and raw WebSocket opens (C). They
- * fail against the pre-fix harness and pass with it. The tokens are keyed to
- * Tower only — never installed as an all-origins header — so the key is never
- * disclosed to a cross-origin request.
+ * What this required-CI test pins, and what it deliberately leaves to the
+ * Playwright suite itself:
+ *   - The `global-setup.ts` HTTP paths (launch POST + state poll) are pinned
+ *     end-to-end: each is exercised through a mock `fetch` and asserted to carry
+ *     the key. Reverting either regresses this test. These are the paths that
+ *     caused the whole-suite cascade, so they are the ones worth gating here.
+ *   - The shared tokens (`towerAuthHeaders` / `towerWsProtocols`) are asserted
+ *     to carry the local key, keyed to Tower only — never an all-origins header.
+ *     This pins token *correctness*, not that the Playwright `request` fixture or
+ *     the WebSocket opens actually use them: that wiring lives in Playwright
+ *     files vitest doesn't execute, and is proven by the `workflow_dispatch` run
+ *     of `dashboard-e2e.yml` cited in the PR.
+ *
+ * All assertions compare against `ensureLocalKey()`, so they fail against the
+ * pre-fix harness and pass with it.
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -29,14 +38,14 @@ function headerOf(init: RequestInit | undefined, name: string): string | undefin
 }
 
 describe('bugfix #1519: Playwright e2e harness authenticates to Tower', () => {
-  it('towerAuthHeaders carries the local key under the tower-key header (B)', () => {
+  it('towerAuthHeaders carries the local key under the tower-key header (token)', () => {
     // Asserted against ensureLocalKey() rather than a hex shape so a
     // CODEV_TOWER_KEY override (which auth.ts supports and does not force to
     // 64 hex) does not false-fail this required-CI check.
     expect(towerAuthHeaders()[TOWER_KEY_HEADER]).toBe(ensureLocalKey());
   });
 
-  it('towerWsProtocols offers the codev-key.<key> subprotocol (C)', () => {
+  it('towerWsProtocols offers the codev-key.<key> subprotocol (token)', () => {
     const protocols = towerWsProtocols();
     expect(protocols).toContain(`${WS_KEY_PROTOCOL_PREFIX}${ensureLocalKey()}`);
   });

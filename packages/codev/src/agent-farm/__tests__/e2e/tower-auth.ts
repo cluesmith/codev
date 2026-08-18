@@ -16,8 +16,11 @@ import { test as base, expect } from '@playwright/test';
 import { towerAuthHeaders } from './tower-key.js';
 
 export const test = base.extend({
-  request: async ({ playwright }, use) => {
+  request: async ({ playwright, baseURL }, use) => {
+    // Preserve the config's `baseURL` (a fresh APIRequestContext would otherwise
+    // drop it) so relative-URL calls keep resolving against Tower.
     const context = await playwright.request.newContext({
+      baseURL,
       extraHTTPHeaders: towerAuthHeaders(),
     });
     await use(context);

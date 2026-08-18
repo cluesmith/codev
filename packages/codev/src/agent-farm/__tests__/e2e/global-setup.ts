@@ -41,6 +41,9 @@ const STATE_URL = `${TOWER_URL}/workspace/${ENCODED_PATH}/api/state`;
  */
 const TOWER_STARTING_MARKER = 'Tower is still starting up';
 
+/** How long globalSetup waits for the architect terminal before giving up. */
+const ARCHITECT_READY_TIMEOUT_MS = 30_000;
+
 export interface LaunchResult {
   ok: boolean;
   status: number;
@@ -110,7 +113,7 @@ export async function waitForArchitectReady(
     fetchFn?: typeof fetch;
   } = {},
 ): Promise<boolean> {
-  const timeout = options.timeout ?? 30_000;
+  const timeout = options.timeout ?? ARCHITECT_READY_TIMEOUT_MS;
   const interval = options.interval ?? 500;
   const fetchFn = options.fetchFn ?? fetch;
   const start = Date.now();
@@ -160,7 +163,7 @@ export default async function globalSetup() {
   // Don't fail hard — some tests don't need the terminal.
   // Terminal-dependent tests will fail on their own with clear timeout errors.
   console.warn(
-    '[global-setup] Architect terminal not ready after 30000ms. ' +
+    `[global-setup] Architect terminal not ready after ${ARCHITECT_READY_TIMEOUT_MS}ms. ` +
       'Terminal-dependent tests will likely fail. ' +
       'In CI, ensure TOWER_ARCHITECT_CMD=bash is set.',
   );
