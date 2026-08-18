@@ -184,7 +184,17 @@ the boundaries. Adding a protocol to the feature later is a config line with no 
 **Coincident boundaries are excluded by construction, not by a special case.** Entering
 `implement` *is* entering the first plan phase. The per-plan-phase boundary is therefore
 defined as firing on **advance between** plan phases, which excludes the first one by
-definition. No two boundaries can fire back to back.
+definition.
+
+**A skip is not work: a pre-approval skip fires no entry refresh.** *(Amended 2026-08-18 by
+explicit human ruling — see Amendments below.)* When an artifact already carries `approved:`
+frontmatter, porch auto-approves and transitions without the builder doing anything in that
+phase. A skipped phase produced no in-context work to shed, so there is nothing to refresh.
+This also keeps the two rules consistent in the repo's documented default shape, where spec
+**and** plan are both pre-approved before spawn and would otherwise fire two refreshes on
+consecutive `porch next` calls with no work in between.
+
+Together these two rules mean no two refresh tasks can fire back to back.
 
 ### The review boundary is a quality feature
 
@@ -263,9 +273,11 @@ git. The refresh does not invent a parallel record.
 - [ ] Calling `porch next` again at the same boundary emits the phase's normal tasks, not a
       second refresh — including when a transition is re-entered (the failure class in #1408,
       where verify-approval reset every plan phase to pending).
-- [ ] A refresh task is never emitted twice in a row: entering `implement` and entering the
-      first plan phase are the same moment, and the per-plan-phase boundary fires only on
-      advance *between* plan phases.
+- [ ] A refresh task is never emitted twice in a row. Two independent rules guarantee this:
+      (a) entering `implement` and entering the first plan phase are the same moment, so the
+      per-plan-phase boundary fires only on advance *between* plan phases; and (b) a
+      pre-approval skip fires no entry refresh at all, because a skipped phase produced no
+      in-context work to shed. *(Clause (b) amended 2026-08-18 — see Amendments.)*
 - [ ] No refresh while parked at a pending gate; refreshes fire only *after* the gate outcome
       is durable in `status.yaml`.
 - [ ] No refresh mid build-verify iteration — not between build and verify, not on a rebuttal
@@ -634,6 +646,36 @@ an undeclarable boundary is rejected at load rather than silently ignored.
 | The two refresh paths (driven and self) drift apart | Medium | Medium | Shared modules for receipt and re-orientation, pinned by a structural test (31); shared constants. |
 | A refreshed builder mistakes its own re-entry for an architect instruction | Medium | Medium | The re-entry frame self-identifies as an automatic context refresh (this failure mode was observed during the specification probe). |
 | Skeleton and instance drift | Medium | Medium | Parity test (39); repo-wide grep across both trees before claiming completion. |
+
+## Amendments
+
+Changes to this spec after its 2026-08-18 approval, each by explicit human ruling.
+
+### 2026-08-18 — a pre-approval skip fires no entry refresh
+
+**What changed**: Desired State and the "never emitted twice in a row" success criterion now
+state that the pre-approval path emits no entry refresh.
+
+**Why**: implementation review found the original wording unsatisfiable in this repo's own
+documented default shape. `CLAUDE.md` directs that approved specs and plans carry `approved:`
+frontmatter and be committed to `main` before spawning — so a project routinely skips both
+`specify` and `plan` on consecutive `porch next` calls. Firing an entry refresh at each would
+clear the builder twice in a row with no work between, and at both moments the builder's
+context is near-empty, so the inherited ≥1000-byte save gate would either be padded to pass or
+abort outright.
+
+**The rule**: a pre-approval skip means the builder did no work in that phase — the branch runs
+only at iteration 1 with `build_complete` false — so there is nothing to refresh. The valuable
+boundary is not lost: whenever the builder *actually* writes the plan, `enter:implement` still
+fires from the gate-approved transition.
+
+**Provenance**: the two reviewers split. Claude identified the double-fire as a defect and
+recommended suppression, then approved the result as a divergence to document; Codex read the
+original criterion as scoped only to the `implement`/first-plan-phase coincidence and objected
+that suppression dropped an approved deliverable without amendment. Codex's objection was a
+**process** objection and it was correct: the fix narrowed an approved artifact on a builder's
+judgement. It is resolved by this amendment, made on Waleed's explicit ruling ("definitely
+suppress") rather than by the builder's own reading.
 
 ## References
 

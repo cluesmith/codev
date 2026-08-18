@@ -520,8 +520,9 @@ sits between here and there. **Do not write the review without walking this list
    (a) plan says the refresh task "carries the phase's normal tasks with it"; the spec says "none of
        the phase's normal tasks". Implementation follows the SPEC. Plan wording was my drafting
        error.
-   (b) "wire all four sites" narrowed to "wire all four, but a skip is not work" — **PENDING
-       WALEED'S RULING**, see below.
+   (b) "wire all four sites" narrowed to "wire all four, but a skip is not work" — RESOLVED
+       2026-08-18 by Waleed's explicit ruling; both artifacts amended. Record the amendment AND the
+       reviewer split, and note Codex's process objection as resolved by the human amendment.
 6. **`extractPlanPhases` silently invents a `phase_1`** for a plan with no phases JSON rather than
    reporting the absence. Not my bug, not in scope; worth reporting as a follow-up because it makes
    a malformed plan look fine.
@@ -529,12 +530,20 @@ sits between here and there. **Do not write the review without walking this list
    node_modules and cannot run build/tests until someone installs by hand. Related: the failing
    vitest startup exited 0, so an exit-code-only check would have called it green.
 
-## OPEN — awaiting Waleed's ruling (architect recommending SUPPRESS + explicit artifact amendment)
+## RESOLVED 2026-08-18 — Waleed ruled SUPPRESS
 
-The approved plan contradicts itself: line 206 "the pre-approval path FIRES enter:plan and
-enter:implement" vs line 209 "two refresh tasks never fire back to back, AT ANY SITE". Unsatisfiable
-together in the doubly-pre-approved case. Codex says restore-or-amend; Claude approves and says
-document. **Contested code held as-is at 1a513bf9c. Do not touch it until the ruling arrives.**
-If SUPPRESS: amend plan line 206 and spec line 266, note in review.
-If RESTORE: revert to firing at both, and the >=1000-byte save gate likely needs a boundary-aware
-exception — that becomes a Phase 3 change.
+The approved plan contradicted itself: line 206 "the pre-approval path FIRES enter:plan and
+enter:implement" vs line 209 "two refresh tasks never fire back to back, AT ANY SITE" —
+unsatisfiable together in the doubly-pre-approved case, which is this repo's documented default.
+Codex said restore-or-amend; Claude approved and said document.
+
+**Human ruling: "definitely suppress."** Code at 1a513bf9c stands unchanged. Both artifacts are now
+amended (spec: Desired State + success criterion + a new Amendments section; plan: executive summary
++ two acceptance criteria), each amendment dated and attributed to the ruling rather than to my
+reading.
+
+**Codex's objection is recorded as RESOLVED, and it was correct.** It was a *process* objection —
+the suppression narrowed an approved artifact on a builder's judgement — and the resolution is the
+explicit human amendment, not a counter-argument. That distinction goes in the review artifact: a
+reviewer being overruled on the merits and a reviewer being right about process are different
+things, and this was the second.

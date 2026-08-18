@@ -50,6 +50,11 @@ operation. Phase 7 is the incidental doc correction plus the parity sweep. Phase
 end-to-end proof, including the **live** run that is the only thing that tests the harness
 behavior this feature rests on.
 
+**Amended 2026-08-18** (explicit human ruling): the pre-approval site is wired — it performs the
+gate auto-approval and `plan_phases` extraction that were genuinely missing — but it fires **no**
+entry refresh. Wiring a site and firing a boundary turned out to be two separate questions, and
+this plan's first draft merged them. See the spec's Amendments section.
+
 **Naming decision**: the builder-side command is **`afx self-refresh`**, a distinct command
 rather than a flag on `afx refresh`. It takes **no positional argument at all**, which makes the
 spec's "cannot target another session" property structural rather than validated — there is
@@ -203,10 +208,16 @@ builder-side command never writes `status.yaml`, so there is no completion signa
 #### Acceptance Criteria
 
 - [ ] Spec tests 2, 3, 5, 6: each boundary fires on the right transition, for SPIR and ASPIR
-- [ ] The pre-approval path fires `enter:plan` and `enter:implement`, and its `plan_phases`
-      extraction still yields no refresh on the first plan phase
+- [ ] The pre-approval path performs its full transition — gate auto-approval and `plan_phases`
+      extraction — but fires **no** entry refresh. *(Amended 2026-08-18 by explicit human ruling:
+      a skip is not work. The branch runs only at iteration 1 with `build_complete` false, so a
+      skipped phase produced no in-context work to shed. Originally this line required the site to
+      fire `enter:plan` and `enter:implement`, which is unsatisfiable together with the
+      never-back-to-back rule below in the repo's default doubly-pre-approved shape. See the
+      spec's Amendments section.)*
 - [ ] Spec test 4: **no** refresh on entering the first plan phase (coincident with `implement`);
-      two refresh tasks never fire back to back, at any site
+      two refresh tasks never fire back to back, at any site — guaranteed by that coincidence rule
+      together with the skip-is-not-work rule above
 - [ ] Spec tests 9, 10: second `porch next` at the same boundary returns normal tasks; a
       transition re-entered after the #1408 failure mode produces no second refresh
 - [ ] Spec test 11: pre-feature `status.yaml` loads; a project already past a boundary does not
