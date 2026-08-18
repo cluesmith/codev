@@ -56,9 +56,24 @@ Known accepted cost: a mid-repaint frame can park the cursor on the status line 
 which now HOLDs where it previously classified clean. Transient and fail-safe — retried on the
 next check — and every *settled* capture puts the cursor on the composer row.
 
+## Pre-existing e2e failures (NOT from this change)
+
+The AIR `pr` phase's `e2e_tests` check is `npm run test:e2e … || echo 'skipped'` and the repo root
+has no `test:e2e` script, so it passes in 0.1s having run nothing. Ran the real suite instead
+(`pnpm --filter @cluesmith/codev test:e2e`): **3 failed | 171 passed | 21 skipped**, all three in
+`tower-api.e2e.test.ts` — `POST /api/terminals` returning 500 where 201 is expected.
+
+Confirmed pre-existing, not flaky: reverted both changed source files to the branch base
+(141b4935), rebuilt, re-ran that file — **identical 3 failures**. Restored the files afterwards
+(everything was committed, so lossless; verified clean against HEAD). Not skipped or annotated,
+since they are neither mine nor flaky — flagged for the maintainer instead. Plausibly
+environmental: this box is running four-plus live builder sessions plus Tower, and the failures
+are all PTY-spawn-via-API.
+
 ## Status
 
 - [x] Real agy fixtures captured across idle / draft / trust / menu / echo / bare-marker / torn
 - [x] Classifier + profile change
-- [x] Tests
-- [ ] PR (maintainer reviews and merges — this cohort does not merge)
+- [x] Tests (55 pass; build ✓, unit ✓ via `porch check`)
+- [x] PR #1491 opened — parked for maintainer review
+- [ ] `pr` gate: awaiting an explicit human decision (this cohort does not merge)
