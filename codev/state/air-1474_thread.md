@@ -76,4 +76,34 @@ are all PTY-spawn-via-API.
 - [x] Classifier + profile change
 - [x] Tests (55 pass; build ✓, unit ✓ via `porch check`)
 - [x] PR #1491 opened — parked for maintainer review
-- [ ] `pr` gate: awaiting an explicit human decision (this cohort does not merge)
+- [x] 3-way CMAP: gemini APPROVE, codex APPROVE, claude COMMENT — zero blocking correctness issues
+- [x] CMAP blocking item: agy parity case on the production mirror path (7 fixtures × 2 chunk sizes)
+- [x] CMAP follow-ups all taken in-PR: arch.md entry, capture harness, cosmetic title
+- [x] `pr` gate approved by the human (relayed by the architect), `porch approve` run by me
+- [x] **PROTOCOL COMPLETE** — verified PR #1491 still OPEN / unmerged
+
+## CMAP round (2026-08-18)
+
+The one requested item was a parity case in the production-mirror-path suite: these anchors are
+the first classifier input that depends on **cursor state**, so the transient-replay vs
+`SessionScreen`-mirror seam became load-bearing. Added one case per agy fixture (7, not a
+representative), `toEqual` on the whole verdict, each fed twice — production-sized chunks and
+7-byte chunks that split the cursor-positioning CSI across `feed()` calls, since a mis-parsed
+cursor is now a verdict change. Both pass.
+
+Committing the capture harness turned up a real defect in my own tooling: the sanitizer's leak
+check tested for the bare prefix `/home/`, while the replacement path IS `/home/agent/project` —
+so it reported a leak on every successful run. A check that always fires checks nothing. Fixed to
+match non-placeholder paths and to refuse to write on a leak. The committed fixtures were always
+clean (independent grep before the first push; confirmed again by re-deriving four of them
+byte-identically from the raw captures) — the defect was in the check, not the fixtures.
+
+## For whoever picks this up
+
+- The PR is **not merged** — deliberately. This cohort is not a maintainer of cluesmith/codev.
+- Merge-order note from the architect: PR #1487 (issue #1471) also touches `render-gate.test.ts`
+  in a different region; whichever merges second may need a trivial rebase.
+- `codev/air-1474-captures/` regenerates the fixtures. Set `EMAIL` in `sanitize.py` first, and
+  keep the 110×32 geometry — the cursor anchor compares row indices, so a different width moves
+  the wrap points and invalidates the committed fixtures.
+- Related issue filed by the architect: #1488 (the AIR `e2e_tests` check is a no-op).
