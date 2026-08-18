@@ -121,3 +121,65 @@ side), so the two halves could be split across builders if the architect ever wa
 
 If the live run in phase 8 shows the queued `/clear` CAN consume the re-entry, that is a finding
 to report, not something to quietly work around.
+
+## 2026-08-17 — Plan iteration 1 review
+
+Both REQUEST_CHANGES. 13 points, all accepted. **Two were defects that would have shipped a
+broken feature, not a rough one** — and both reviewers found the first one independently.
+
+### Defect 1: the nonce could never exist (found by BOTH reviewers)
+
+`verifyReceipt` requires the nonce to already be inside `.builder-state.md`. My plan had the
+builder write that file BEFORE invoking `afx self-refresh`, which is where the nonce was minted.
+Every self-refresh would have aborted `wrong-nonce`. Unit tests would have passed — they'd inject
+the nonce on both sides.
+
+Root cause worth remembering: the driven path works because the driver issues the nonce in the
+save request and THEN polls. Removing the external driver removed the thing that made the
+handshake possible, and I carried the mechanism over without noticing its precondition had gone.
+
+Fix: real two-step handshake. `afx self-refresh --begin` mints the nonce and writes
+`.builder-refresh-challenge`; builder writes its save; `afx self-refresh` verifies against that
+nonce and executes, deleting the challenge. Bonus property: a stale `.builder-state.md` from an
+earlier boundary now fails `wrong-nonce` instead of passing — replay protection the driven path
+got free from being externally driven.
+
+### Defect 2: a fourth transition site (found by Claude)
+
+`next.ts:240-276` — the pre-approval path. Artifact carries `approved:` frontmatter →
+`hasPreApproval` → auto-approve → transition → recurse. **This is the path CLAUDE.md documents as
+normal.** My three sites would have left `enter:plan` and `enter:implement` dead for exactly the
+projects most likely to use them. It also owns plan_phases extraction, so the
+implement/first-plan-phase coincidence rule has to hold there too.
+
+### Phase 6 was wrong for a checkable reason
+
+I "derived" the stall from `updated_at` vs the boundary timestamp. Verified: the only two
+`writeStateAndCommit` calls in the build-verify range are force-advance and re-iter — the normal
+task-emission path writes NOTHING. So `updated_at` sits at the transition for a whole healthy
+build and a busy builder is indistinguishable from a stalled one. Replaced with a porch-owned
+`acknowledged_at`, set once on the first normal-path pass. Chose that over an untracked marker
+file because it keeps the signal in the artifact porch already owns and commits.
+
+### The live-run ownership problem (Claude)
+
+**I cannot clear my own context to test self-clearing and still be there to report.** Phase 8 now
+names the architect as driver on a separate subject builder; I prepare the runbook and analyse the
+transcript. Flagged as a coordination dependency at the START of the phase. Blocked, not waived,
+if it can't be scheduled.
+
+### Also fixed
+Min-bytes DECIDED (retain 1000, with Phase 8 measuring real boundary saves as evidence) instead of
+left in the risks table where nothing would execute it. `buildBoundarySaveRequest` for ALL
+boundaries, not just review — the existing request says "do not summarise", which contradicts the
+bounded save everywhere. `on_plan_phase_advance` rejected on protocols with no per_plan_phase.
+Phase 2 ordering stated unambiguously (mutate + append, ONE write, return without recursing).
+Failed live test now BLOCKS rather than being documented. `release` protocol's missing skeleton
+counterpart allowlisted in the parity test (pre-existing, not mine to fix).
+
+### The pattern across two review rounds
+
+Spec round: two false claims, both from reading docs instead of code. Plan round: three errors,
+each one grep from being caught. I am reasoning about code I've read *around* rather than *read*.
+Concretely for the rest of this project: before asserting any behavior of an existing function,
+open it.
