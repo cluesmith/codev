@@ -16,6 +16,8 @@
 
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { ensureLocalKey } from '@cluesmith/codev-core/auth';
+import { TOWER_KEY_HEADER } from '@cluesmith/codev-types';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -24,6 +26,22 @@ const TOWER_URL = `http://localhost:${TOWER_PORT}`;
 const WORKSPACE_PATH = resolve(__dirname, '../../../../../../');
 const ENCODED_PATH = Buffer.from(WORKSPACE_PATH).toString('base64url');
 const STATE_URL = `${TOWER_URL}/workspace/${ENCODED_PATH}/api/state`;
+
+/**
+ * The `codev-tower-key` header authenticating this setup's requests to Tower.
+ *
+ * `/api/launch` and `/workspace/<enc>/api/state` are non-public routes, so
+ * Tower (advisory GHSA-xvjp-7748-v88v) rejects a keyless request with 401 —
+ * which left the workspace un-activated and cascaded into `element(s) not
+ * found` failures across the whole Playwright suite (issue #1519). These calls
+ * run outside Playwright's request contexts, so `use.extraHTTPHeaders` in
+ * playwright.config.ts cannot reach them; the key is attached here directly.
+ *
+ * Exported for the regression test.
+ */
+export function towerAuthHeaders(): Record<string, string> {
+  return { [TOWER_KEY_HEADER]: ensureLocalKey() };
+}
 
 /**
  * Tower returns this exact error string while its async `_deps` initialization
@@ -68,7 +86,7 @@ export async function launchWorkspaceWithRetry(
     const res = await fetchFn(url, {
       method: 'POST',
       body: JSON.stringify({ workspacePath }),
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...towerAuthHeaders() },
     });
     const body = await res.text();
 
@@ -108,7 +126,7 @@ export default async function globalSetup() {
 
   while (Date.now() - start < timeout) {
     try {
-      const stateRes = await fetch(STATE_URL);
+      const stateRes = await fetch(STATE_URL, { headers: towerAuthHeaders() });
       if (stateRes.ok) {
         const state = await stateRes.json();
         if ((state as { architect?: { terminalId?: string } }).architect?.terminalId) {
