@@ -8,10 +8,10 @@ plan_phases:
     status: complete
   - id: phase_2_porch_trigger
     title: Porch refresh trigger with at-most-once boundary record
-    status: in_progress
+    status: complete
   - id: phase_3_selfrefresh_core
     title: Self-refresh orchestrator with challenge handshake and fail-safe ordering
-    status: pending
+    status: in_progress
   - id: phase_4_selfrefresh_command
     title: afx self-refresh command and identity authorization
     status: pending
@@ -27,7 +27,7 @@ plan_phases:
   - id: phase_8_end_to_end
     title: End-to-end verification including live run
     status: pending
-current_plan_phase: phase_2_porch_trigger
+current_plan_phase: phase_3_selfrefresh_core
 gates:
   spec-approval:
     status: approved
@@ -41,8 +41,8 @@ gates:
     status: pending
   verify-approval:
     status: pending
-iteration: 3
-build_complete: true
+iteration: 1
+build_complete: false
 history:
   - iteration: 1
     plan_phase: phase_1_boundary_declaration
@@ -93,7 +93,7 @@ history:
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/spir-1470/codev/projects/1470-automatic-builder-context-refr/1470-phase_2_porch_trigger-iter3-claude.txt
 started_at: '2026-08-18T00:15:05.131Z'
-updated_at: '2026-08-18T17:56:24.206Z'
+updated_at: '2026-08-18T17:56:26.524Z'
 force_advanced:
   phase: phase_2_porch_trigger
   iteration: 3
