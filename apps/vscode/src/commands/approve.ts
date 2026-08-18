@@ -1,10 +1,144 @@
 import * as vscode from 'vscode';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import type { OverviewBuilder } from '@cluesmith/codev-types';
+import type { TowerClient } from '@cluesmith/codev-sdk/tower-client';
 import type { ConnectionManager } from '../connection-manager.js';
 import type { OverviewCache } from '../views/overview-data.js';
 
 const execFileAsync = promisify(execFile);
+
+/**
+ * #1494: the Approve button relays the human's decision to the builder's
+ * spawning architect, who runs `porch approve`, instead of the extension
+ * shelling out to `porch approve` itself. This mirrors how humans already work
+ * with codev — they tell the architect to approve, and the architect runs the
+ * command — and keeps the architect in the loop so its model of the builder
+ * doesn't go stale between gates.
+ *
+ * `decideApprovalRelay` is the pure routing core: given the builder's owning
+ * architect and the workspace's *live* architects, it decides where (or whether)
+ * the decision goes. It is deliberately free of `vscode`/Tower so the four
+ * branches are unit-testable without a running Tower.
+ *
+ * The `owner` input is `OverviewBuilder.spawnedByArchitect`. `liveArchitectNames`
+ * is `OverviewData.architects.map(a => a.name)` — which reports LIVENESS, not
+ * registration (Tower skips architects with no live session), so an empty list
+ * means "no architect is live right now", NOT "this is a CLI-only workspace".
+ * That distinction is why the last branch is named `no-live-architect` and
+ * announces only what liveness can support.
+ *
+ * We must NOT fold a null owner into `main` the way `builder-grouping.ts` does
+ * for display (#1406): a misrouted status line is noise, but a misrouted
+ * *approval* sends a human's gate decision to an architect that did not spawn
+ * the builder.
+ */
+export type ApprovalRelayDecision =
+  /** Owner is set and live — relay the decision to `architect:<architect>`. */
+  | { kind: 'relay'; architect: string }
+  /** Owner is set but not live — refuse rather than reroute to a different architect. */
+  | { kind: 'refuse-offline'; architect: string }
+  /** Owner unknown but other architects are live — refuse rather than guess which one. */
+  | { kind: 'refuse-unknown-owner' }
+  /** No architect is live — announce that and approve directly (nobody to relay to). */
+  | { kind: 'no-live-architect' };
+
+export function decideApprovalRelay(
+  owner: string | null,
+  liveArchitectNames: string[],
+): ApprovalRelayDecision {
+  if (owner) {
+    if (liveArchitectNames.includes(owner)) {
+      return { kind: 'relay', architect: owner };
+    }
+    return { kind: 'refuse-offline', architect: owner };
+  }
+  if (liveArchitectNames.length > 0) {
+    return { kind: 'refuse-unknown-owner' };
+  }
+  return { kind: 'no-live-architect' };
+}
+
+/** Gate-appropriate name for the artifact the architect should inspect. */
+function artifactHintForGate(gate: string): string {
+  switch (gate) {
+    case 'plan-approval': return 'the plan file in codev/plans/';
+    case 'dev-approval':  return 'the running worktree (run its dev server / read the diff)';
+    case 'pr':            return 'the open PR';
+    default:              return 'the gate artifact';
+  }
+}
+
+/**
+ * The relay message body. Names the gate, the builder, the artifact, and the
+ * fact that a human approved by clicking, and hands the architect the exact
+ * command so it can act without re-asking the human to confirm.
+ */
+export function buildRelayMessage(args: {
+  id: string;
+  gate: string;
+  gateLabel: string;
+  issueRef: string;
+  issueTitle?: string | null;
+  worktreePath?: string | null;
+}): string {
+  const { id, gate, gateLabel, issueRef, issueTitle, worktreePath } = args;
+  const titlePart = issueTitle ? ` — ${issueTitle}` : '';
+  const worktreeLine = worktreePath ? `\nWorktree: ${worktreePath}` : '';
+  return [
+    '[Gate approval — human clicked Approve in VS Code]',
+    '',
+    `The human approved the "${gateLabel}" gate for builder ${id} (issue ${issueRef}${titlePart}) ` +
+      'by clicking Approve in VS Code. This carries stronger provenance than free text: the extension ' +
+      'generated it in direct response to an authenticated human click in their own IDE.',
+    '',
+    `Artifact: ${artifactHintForGate(gate)}${worktreeLine}`,
+    '',
+    'Please run:',
+    `  porch approve ${id} ${gate} --a-human-explicitly-approved-this`,
+  ].join('\n');
+}
+
+/** Result shape returned by `TowerClient.sendMessage` (Spec 1313 mailbox-first). */
+type SendResult = { ok: boolean; delivered?: boolean; held?: boolean; reason?: string; error?: string };
+
+/**
+ * How the send result is surfaced. The click no longer *approves* — it relays —
+ * so the wording is "relayed / held / failed", never "approved". The `held` case
+ * is first-class: on a held relay the approval has NOT happened, and a UI that
+ * reports success there is a defect (#1494).
+ */
+export type RelayOutcome =
+  | { kind: 'error'; message: string }
+  | { kind: 'held'; message: string }
+  | { kind: 'relayed'; message: string };
+
+export function interpretRelayResult(
+  result: SendResult,
+  architect: string,
+  gateLabel: string,
+  issueRef: string,
+): RelayOutcome {
+  if (!result.ok) {
+    return {
+      kind: 'error',
+      message: `Codev: relay to architect ${architect} failed — ${result.error ?? 'unknown error'}. The gate is NOT approved.`,
+    };
+  }
+  // `held` is only set by Spec-1313 Tower binaries; older binaries omit it, and a
+  // bare `{ ok }` then reads as delivered — preserving prior behavior.
+  if (result.held) {
+    const reason = result.reason ? ` (${result.reason})` : '';
+    return {
+      kind: 'held',
+      message: `Codev: approval sent to ${architect} but held${reason} — it will reach them when their prompt is clear. The ${gateLabel} gate for ${issueRef} is NOT yet approved.`,
+    };
+  }
+  return {
+    kind: 'relayed',
+    message: `Codev: approval relayed to ${architect} — they will run porch approve for ${gateLabel} (${issueRef}).`,
+  };
+}
 
 /**
  * Per-gate side-button mapping for the approval-confirmation dialog.
@@ -108,10 +242,14 @@ export async function approveGate(
   // canonical gate name if the display label isn't set.
   const gateLabel = builder.blocked ?? gate;
 
+  // #1494: the workspace's *live* architects (Tower skips dead registrations).
+  // Reused from the overview we already fetched — no extra round-trip.
+  const liveArchitects = (overview?.architects ?? []).map(a => a.name);
+
   // Fast path: caller already has context (gate-pending toast). Skip the
-  // confirmation dialog and go straight to porch approve.
+  // confirmation dialog and go straight to the relay decision.
   if (options?.skipConfirmation) {
-    await runPorchApprove(workspacePath, id, gate, gateLabel, issueRef);
+    await relayApproval(client, workspacePath, builder, liveArchitects, gate, gateLabel, issueRef);
     cache?.refresh();
     return;
   }
@@ -133,7 +271,7 @@ export async function approveGate(
   if (!selection) { return; }
 
   if (selection === 'Approve') {
-    await runPorchApprove(workspacePath, id, gate, gateLabel, issueRef);
+    await relayApproval(client, workspacePath, builder, liveArchitects, gate, gateLabel, issueRef);
     cache?.refresh();
     return;
   }
@@ -145,7 +283,83 @@ export async function approveGate(
   }
 }
 
-async function runPorchApprove(
+/**
+ * Route the human's approval to the builder's spawning architect (#1494).
+ *
+ * Four outcomes (see `decideApprovalRelay`):
+ *  - relay             → send the decision to `architect:<owner>`; report relayed / held / failed.
+ *  - refuse-offline    → the owning architect is down; refuse (don't reroute — #1406) with a modal.
+ *  - refuse-unknown-owner → owner unknown but architects are live; refuse rather than guess.
+ *  - no-live-architect → nobody to relay to; announce that and approve directly.
+ */
+async function relayApproval(
+  client: TowerClient,
+  workspacePath: string,
+  builder: OverviewBuilder,
+  liveArchitectNames: string[],
+  gate: string,
+  gateLabel: string,
+  issueRef: string,
+): Promise<void> {
+  const decision = decideApprovalRelay(builder.spawnedByArchitect ?? null, liveArchitectNames);
+
+  switch (decision.kind) {
+    case 'relay': {
+      const message = buildRelayMessage({
+        id: builder.id,
+        gate,
+        gateLabel,
+        issueRef,
+        issueTitle: builder.issueTitle,
+        worktreePath: builder.worktreePath,
+      });
+      let result: SendResult;
+      try {
+        result = await client.sendMessage(`architect:${decision.architect}`, message, { workspace: workspacePath });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        vscode.window.showErrorMessage(
+          `Codev: relay to architect ${decision.architect} failed — ${msg}. The gate is NOT approved.`,
+        );
+        return;
+      }
+      const outcome = interpretRelayResult(result, decision.architect, gateLabel, issueRef);
+      switch (outcome.kind) {
+        case 'error':   vscode.window.showErrorMessage(outcome.message); break;
+        case 'held':    vscode.window.showWarningMessage(outcome.message); break;
+        case 'relayed': vscode.window.showInformationMessage(outcome.message); break;
+      }
+      return;
+    }
+    case 'refuse-offline':
+      vscode.window.showErrorMessage(
+        `Codev: architect "${decision.architect}" spawned ${builder.id} but is not running, so the approval can't be relayed to it. ` +
+          `Start it (afx workspace start) or approve from a shell with porch approve. The gate is NOT approved.`,
+        { modal: true },
+      );
+      return;
+    case 'refuse-unknown-owner':
+      vscode.window.showErrorMessage(
+        `Codev: ${builder.id} has no recorded spawning architect and there are live architects — refusing to guess which should receive the approval. ` +
+          `Approve from a shell with porch approve. The gate is NOT approved.`,
+        { modal: true },
+      );
+      return;
+    case 'no-live-architect':
+      await approveDirectlyNoLiveArchitect(workspacePath, builder.id, gate, gateLabel, issueRef);
+      return;
+  }
+}
+
+/**
+ * The `no-live-architect` fallback: there is no live architect to relay to, so
+ * the extension runs `porch approve` directly. The announcement states only what
+ * liveness can support ("no live architect … no architect was notified") — never
+ * "no architect registered", because `overview.architects` reports liveness, not
+ * registration (#1494 route-to-main item 2, option b). Retained only for this
+ * branch; the architect-present paths never reach it.
+ */
+async function approveDirectlyNoLiveArchitect(
   workspacePath: string,
   id: string,
   gate: string,
@@ -164,7 +378,9 @@ async function runPorchApprove(
     vscode.window.showErrorMessage(`Codev: porch approve failed — ${msg}`);
     return;
   }
-  vscode.window.showInformationMessage(`Codev: Approved ${gateLabel} for ${issueRef}`);
+  vscode.window.showWarningMessage(
+    `Codev: no live architect in this workspace — approved ${gateLabel} for ${issueRef} directly. No architect was notified of this approval.`,
+  );
 }
 
 function truncate(s: string, max: number): string {
