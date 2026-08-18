@@ -158,6 +158,17 @@ test('viewport-scroll is a pure viewport move — block focus is untouched (#150
   expect(await focusedLine(page)).toBe(null); // nothing was focused; a pan never moves focus
 });
 
+test('viewport-scroll is inert in horizontal reading mode (#1501)', async ({ page }) => {
+  await openFixture(page, 'horizontal');
+  // Mirror of "column paging is inert in vertical mode": horizontal mode clips the body vertically
+  // (`overflow-y: hidden`) and fills the viewport, so there is nothing to pan up/down. The command
+  // is a defined no-op — the document scroller never moves — not an error.
+  expect(await docScrollTop(page)).toBe(0);
+  await send(page, 'viewport-down', 3);
+  await send(page, 'viewport-up');
+  expect(await docScrollTop(page)).toBe(0);
+});
+
 // The clean-state origin rule has two halves. jsdom covers the unscrolled one (nothing focused,
 // start from the top); only a real layout can prove the other, that a SCROLLED but never-focused
 // view starts from the block the reviewer is actually looking at rather than the document start.

@@ -103,6 +103,19 @@ real user path" rather than displacing a capped entry; both are spec-adjacent re
 - **Two review nits deliberately left, ruled by the architect:** the focus-ring re-arm on a pure pan
   (via `runCanvasCommand`, accepted after hardware use) and the ~5-line overlap with
   `ReviewNav.runCanvas` (extracting a shared helper would couple two actions with different semantics).
+- **Horizontal reading mode is a defined no-op.** `scrollViewport` clamps to `max = 0` when the body
+  clips vertically (`overflow-y: hidden`), so `viewport-down`/`up` do nothing in horizontal mode —
+  "up/down" has no meaning there. Tower still answers `ok` and the label still reads `Scroll · read
+  only` (no per-mode label was in scope). Pinned by `viewport-scroll is inert in horizontal reading
+  mode`, the mirror of the existing `column paging is inert in vertical mode`.
+- **A deliberate deviation from the plan:** the plan said cancel the in-flight wheel glide (as
+  `pageColumn` does). The implementation does not — the glide is horizontal-only and drives
+  `body.scrollLeft`, which a document-scroller vertical pan never fights, so the cancel was dead code
+  (flagged in the impl-review and removed).
+- **Why the count-loop signature change is safe:** `runCanvasCommand` is fully synchronous — no
+  animation frames run mid-loop — so a smooth `scrollIntoView` from an earlier command cannot advance
+  the signature between iterations and defeat the edge-stop (which is also the `count: 1_000_000`
+  spin guard). The huge-count Playwright test corroborates.
 
 ## How to Test Locally
 
