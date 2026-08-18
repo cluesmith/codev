@@ -75,3 +75,31 @@ The obvious hooks would not even work: `session-fresh-restart`/`session-restart`
 delayed `client.spawn()`. Pinned with a test instead of new terminal→DB event plumbing.
 
 Amended plan committed; architect will present it at the gate.
+
+## Implement phase (2026-08-18)
+
+plan-approval approved by the human (rev 2, ba15d2723); codex-#3 rebuttal accepted. Implemented in
+four commits: protocol/shellper/client → PtySession read-through → persist-back → tests/docs.
+
+Notes for whoever picks this up:
+
+- **The worktree had no `node_modules`.** This repo ships no `.codev/config.json`, so worktrees get
+  no `symlinks`/`postSpawn` install (see the `runnable-worktrees` skill for what a configured repo
+  would do). Ran `pnpm install --frozen-lockfile` at the worktree root, then
+  `pnpm --filter "@cluesmith/codev^..." build` — without the second step `tsc` reports ~100 bogus
+  errors against `TowerClient`, because codev-sdk/codev-types are unbuilt, not because anything is
+  wrong. Binaries land in `packages/codev/node_modules/.bin/`.
+- **`persistableCommand` lives in `tower-utils.ts`, not `tower-terminals.ts`.** The plan put it in
+  the latter; `tower-terminals` already imports `tower-instances`, so exporting from there and
+  importing into `tower-instances` would have closed an import cycle. `tower-utils` is leaf-ward and
+  already imported by all four consumers. Deviation from the plan's file list, same behavior.
+- **Two reconcile sites needed a hoisted `identitySeed`.** Passing `persistableCommand(ptySession)`
+  straight into the save would have dropped the Spec 1313 heal in the edge case where
+  `manager.getSession()` returns undefined — there is no session to read identity from, so the seed
+  is the only value left. Now `ptySession ? persistableCommand(ptySession) : identitySeed`.
+- **Fresh-launch sites use `?? cmd` / `?? command` / `?? shellCmd`.** Hydration is a no-op there
+  (the shellper echoes what we just asked for), but routing them through the same accessor keeps one
+  rule at every persist site: the row records what is RUNNING, not what was requested.
+- Two of the new tests are real regression tests, not decoration: the SPAWN-relaunch case fails
+  against a snapshot-at-attach implementation, and the legacy-NULL case fails against a naive
+  persist. Both were written to fail first against the design I originally proposed.
