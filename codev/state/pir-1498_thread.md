@@ -140,3 +140,22 @@ Reported to architect; proposed line-1 canvas wording `Scroll · editor only` (h
 qualifier, not-an-error, inert-HERE-not-broken). HOLDING for their wording confirmation
 before implementing — do NOT gate the press in code (no-ops server-side already); add
 canvas-mode test + #1501 cross-ref comment; hardware re-check needs a spec/plan-phase builder.
+
+### Wording APPROVED (Scroll · editor only) — implemented
+Architect verified the finding, approved the wording, and corrected their own #1501 instruction:
+a canvas-scroll capability revives ROTATION only; the press stays diff-bound (feedbackSelection
+anchors to a diff entry), so the label can't simply collapse to send/queue even after #1501.
+Implemented:
+- ScrollNav.renderTo: reviewMode(selectedBuilder())==='canvas' → line 1 `Scroll · editor only`
+  (delivery mode suppressed); else `Scroll · send/queue`. If/else (no ternary per pref). Press
+  NOT gated on reviewMode (still relays; no-ops server-side). Render-site comment cross-refs
+  #1501 and states the two gestures have different scopes (rotation any-editor, press diff-only)
+  so no clean future collapse. Updated class doc too.
+- Tests: fixed the two `Scroll · send/queue` tests to use pir-2 (diff; pir-1 is canvas!), added
+  a canvas-mode test (editor only, feedbackMode suppressed, press still relays). 238 pass.
+- #1501 body edited: added "What 'fixed' means — the two gestures have different scopes" section
+  (canvas-scroll revives rotation only; press stays diff-bound by design).
+- The asymmetry (rotation any-text-editor vs press builder-diff-only) is the real finding —
+  will state it in the review artifact.
+build ✓ / test ✓ 238 / check-types ✓. Re-requesting dev-approval; hardware now needs a
+spec/plan-phase builder selected too (to see `Scroll · editor only`).
