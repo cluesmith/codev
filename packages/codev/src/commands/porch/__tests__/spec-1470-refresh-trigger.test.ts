@@ -57,6 +57,28 @@ vi.mock('../../../lib/github.js', () => ({
   fetchIssue: vi.fn().mockResolvedValue(null),
 }));
 
+/**
+ * Count `writeStateAndCommit` calls.
+ *
+ * Inspecting only the FINAL state cannot distinguish one atomic write from a
+ * transition write followed by a separate boundary write — and that distinction
+ * is the entire at-most-once mechanism. If the record could land in a second
+ * write, a crash between the two would leave a project transitioned but not
+ * marked, and the next `porch next` would clear the builder again.
+ */
+const { writeCounter } = vi.hoisted(() => ({ writeCounter: { count: 0 } }));
+
+vi.mock('../state.js', async importOriginal => {
+  const original = await importOriginal<typeof import('../state.js')>();
+  return {
+    ...original,
+    writeStateAndCommit: async (...args: Parameters<typeof original.writeStateAndCommit>) => {
+      writeCounter.count += 1;
+      return original.writeStateAndCommit(...args);
+    },
+  };
+});
+
 // ---------------------------------------------------------------------------
 // Harness
 // ---------------------------------------------------------------------------
@@ -180,8 +202,15 @@ function readState(): ProjectState {
   return yaml.load(fs.readFileSync(p, 'utf-8')) as ProjectState;
 }
 
-/** A plan whose phases porch can extract. */
-function writePlan(phaseIds: string[]): void {
+/**
+ * A plan whose phases porch can extract.
+ *
+ * `approved` prepends the frontmatter IN THE SAME FILE rather than writing it
+ * separately: the plan artifact and the pre-approval marker are one file, and
+ * writing them in two calls silently clobbered the phases JSON — which made
+ * `extractPlanPhases` fall back to inventing a `phase_1`.
+ */
+function writePlan(phaseIds: string[], approved = false): void {
   const dir = path.join(root, 'codev/plans');
   fs.mkdirSync(dir, { recursive: true });
   const json = JSON.stringify(
@@ -189,9 +218,12 @@ function writePlan(phaseIds: string[]): void {
     null,
     2,
   );
+  const frontmatter = approved
+    ? '---\napproved: 2026-01-01\nvalidated: [codex, claude]\n---\n\n'
+    : '';
   fs.writeFileSync(
     path.join(dir, `${PROJECT_TITLE}.md`),
-    `# Plan\n\n## Phases (Machine Readable)\n\n\`\`\`json\n${json}\n\`\`\`\n`,
+    `${frontmatter}# Plan\n\n## Phases (Machine Readable)\n\n\`\`\`json\n${json}\n\`\`\`\n`,
   );
 }
 
@@ -199,7 +231,36 @@ function isRefreshTask(response: { tasks?: Array<{ subject: string }> }): boolea
   return response.tasks?.[0]?.subject === 'Refresh your context';
 }
 
+/**
+ * Write APPROVE verdicts for the models the mocked config resolves to.
+ *
+ * Reaching any transition site requires a completed verify round — without
+ * these, `next()` returns "Run remaining consultations" and every
+ * transition-site assertion becomes vacuous.
+ */
+function writeApprovingReviews(phase: string, iteration: number): void {
+  const dir = path.join(root, 'codev/projects', PROJECT_TITLE);
+  fs.mkdirSync(dir, { recursive: true });
+  for (const model of ['codex', 'claude']) {
+    fs.writeFileSync(
+      path.join(dir, `${PROJECT_ID}-${phase}-iter${iteration}-${model}.txt`),
+      '---\nVERDICT: APPROVE\nSUMMARY: ok\nCONFIDENCE: HIGH\n---\nKEY_ISSUES:\n- None\n',
+    );
+  }
+}
+
+/** Write a spec carrying `approved:` frontmatter. (Plans: use writePlan(ids, true).) */
+function writeApprovedSpec(): void {
+  const dir = path.join(root, 'codev/specs');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, `${PROJECT_TITLE}.md`),
+    '---\napproved: 2026-01-01\nvalidated: [codex, claude]\n---\n\n# Spec\n',
+  );
+}
+
 beforeEach(() => {
+  writeCounter.count = 0;
   root = fs.mkdtempSync(path.join(tmpdir(), 'porch-1470-trigger-'));
   // git init so writeStateAndCommit has a repo to commit into
   fs.mkdirSync(path.join(root, 'codev'), { recursive: true });
@@ -345,17 +406,6 @@ describe('ungated transition (ASPIR shape)', () => {
    * below entirely. Testing the decision without the wiring proves nothing
    * about whether the wiring runs.
    */
-  function writeApprovingReviews(phase: string, iteration: number): void {
-    const dir = path.join(root, 'codev/projects', PROJECT_TITLE);
-    fs.mkdirSync(dir, { recursive: true });
-    for (const model of ['codex', 'claude']) {
-      fs.writeFileSync(
-        path.join(dir, `${PROJECT_ID}-${phase}-iter${iteration}-${model}.txt`),
-        '---\nVERDICT: APPROVE\nSUMMARY: ok\nCONFIDENCE: HIGH\n---\nKEY_ISSUES:\n- None\n',
-      );
-    }
-  }
-
   it('emits a refresh entering implement, and extracts plan phases there', async () => {
     // ASPIR runs UNSUPERVISED — the case the fail-safes exist for — so it must
     // get the same boundaries as SPIR.
@@ -394,15 +444,6 @@ describe('ungated transition (ASPIR shape)', () => {
 // ---------------------------------------------------------------------------
 
 describe('pre-approval transition', () => {
-  function writeApprovedSpec(): void {
-    const dir = path.join(root, 'codev/specs');
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(
-      path.join(dir, `${PROJECT_TITLE}.md`),
-      '---\napproved: 2026-01-01\nvalidated: [codex, claude]\n---\n\n# Spec\n',
-    );
-  }
-
   it('emits a refresh when an approved: artifact skips the gate', async () => {
     // The first plan draft wired only three sites and missed this one — which
     // would have left enter:plan and enter:implement dead for exactly the
@@ -427,17 +468,6 @@ describe('pre-approval transition', () => {
 // ---------------------------------------------------------------------------
 
 describe('plan-phase advance and review entry', () => {
-  function writeApprovingReviews(phase: string, iteration: number): void {
-    const dir = path.join(root, 'codev/projects', PROJECT_TITLE);
-    fs.mkdirSync(dir, { recursive: true });
-    for (const model of ['codex', 'claude']) {
-      fs.writeFileSync(
-        path.join(dir, `${PROJECT_ID}-${phase}-iter${iteration}-${model}.txt`),
-        '---\nVERDICT: APPROVE\nSUMMARY: ok\nCONFIDENCE: HIGH\n---\nKEY_ISSUES:\n- None\n',
-      );
-    }
-  }
-
   it('emits a refresh advancing from plan phase 1 to 2', async () => {
     writeProtocol(spirLike());
     writePlan(['phase_1_a', 'phase_2_b']);
@@ -540,38 +570,282 @@ describe('never fires at an unsafe moment', () => {
 // ---------------------------------------------------------------------------
 
 describe('#1408 transition loop', () => {
-  it('does not re-fire boundaries already recorded when plan phases reset to pending', async () => {
-    // Reproduce the post-loop state: every plan phase back to `pending`,
-    // current back at the first, boundaries already recorded. If at-most-once
-    // were inferred rather than recorded, this would clear the builder again
-    // for every plan phase.
+  it('advances into an already-recorded plan-phase boundary WITHOUT re-firing', async () => {
+    // The real shape of #1408: verify-approval reset every plan phase to
+    // `pending`, so the project re-walks advances it already made. An earlier
+    // version of this test left `build_complete: false`, so porch returned a
+    // build task and never re-entered a transition at all — it asserted "no
+    // refresh" about a call that could not have produced one.
+    //
+    // This drives a genuine approving verify round that ADVANCES into a
+    // boundary already present in context_refreshes, which is the only way to
+    // prove the record (not the control flow) is what suppresses the second
+    // refresh.
     writeProtocol(spirLike());
-    writePlan(['phase_1_a', 'phase_2_b', 'phase_3_c']);
-    const recorded = [
-      { boundary: 'enter:implement', at: 'T1' },
-      { boundary: 'plan-phase:phase_2_b', at: 'T2' },
-      { boundary: 'plan-phase:phase_3_c', at: 'T3' },
-    ];
-    const state = baseState({
-      phase: 'implement',
-      plan_phases: [
-        { id: 'phase_1_a', title: 'A', status: 'pending' },
-        { id: 'phase_2_b', title: 'B', status: 'pending' },
-        { id: 'phase_3_c', title: 'C', status: 'pending' },
-      ],
-      current_plan_phase: 'phase_1_a',
-      context_refreshes: recorded,
-    });
+    writePlan(['phase_1_a', 'phase_2_b']);
+    writeState(
+      baseState({
+        phase: 'implement',
+        plan_phases: [
+          { id: 'phase_1_a', title: 'A', status: 'in_progress' },
+          { id: 'phase_2_b', title: 'B', status: 'pending' },
+        ],
+        current_plan_phase: 'phase_1_a',
+        build_complete: true,
+        iteration: 1,
+        // The boundary we are about to advance into is ALREADY recorded.
+        context_refreshes: [{ boundary: 'plan-phase:phase_2_b', at: 'T-earlier' }],
+      }),
+    );
+    writeApprovingReviews('phase_1_a', 1);
 
-    for (const r of recorded) {
-      expect(shouldRefresh(state, true, r.boundary)).toBe(false);
-    }
-
-    writeState(state);
     const response = await next(root, PROJECT_ID);
+
+    // The transition MUST still happen — suppressing the refresh must not
+    // suppress protocol progress.
+    const after = readState();
+    expect(after.current_plan_phase).toBe('phase_2_b');
     expect(isRefreshTask(response)).toBe(false);
-    expect(readState().context_refreshes).toHaveLength(3);
+    // Still exactly one record, with its ORIGINAL timestamp: not re-appended,
+    // not overwritten.
+    expect(after.context_refreshes).toHaveLength(1);
+    expect(after.context_refreshes?.[0].at).toBe('T-earlier');
   });
+
+  it('does not re-fire an entry boundary re-entered after a reset', async () => {
+    writeProtocol(spirLike());
+    writePlan(['phase_1_a']);
+    writeState(
+      baseState({
+        phase: 'specify',
+        gates: { 'spec-approval': { status: 'approved' } },
+        context_refreshes: [{ boundary: 'enter:plan', at: 'T-earlier' }],
+      }),
+    );
+
+    const response = await next(root, PROJECT_ID);
+
+    expect(readState().phase).toBe('plan');
+    expect(isRefreshTask(response)).toBe(false);
+    expect(readState().context_refreshes).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// One write per boundary transition
+// ---------------------------------------------------------------------------
+
+describe('atomicity', () => {
+  it('records the boundary and the transition in ONE state write', async () => {
+    // Final-state inspection cannot tell one atomic write from two sequential
+    // ones. If the record landed in a second write, a crash between them would
+    // leave a project transitioned but unmarked — and the next porch next would
+    // clear the builder a second time.
+    writeProtocol(spirLike());
+    writeState(baseState({ phase: 'specify', gates: { 'spec-approval': { status: 'approved' } } }));
+
+    const response = await next(root, PROJECT_ID);
+
+    expect(isRefreshTask(response)).toBe(true);
+    expect(writeCounter.count).toBe(1);
+    const after = readState();
+    expect(after.phase).toBe('plan');
+    expect(after.context_refreshes).toHaveLength(1);
+  });
+
+  it('writes once for a plan-phase advance too', async () => {
+    writeProtocol(spirLike());
+    writePlan(['phase_1_a', 'phase_2_b']);
+    writeState(
+      baseState({
+        phase: 'implement',
+        plan_phases: [
+          { id: 'phase_1_a', title: 'A', status: 'in_progress' },
+          { id: 'phase_2_b', title: 'B', status: 'pending' },
+        ],
+        current_plan_phase: 'phase_1_a',
+        build_complete: true,
+        iteration: 1,
+      }),
+    );
+    writeApprovingReviews('phase_1_a', 1);
+
+    await next(root, PROJECT_ID);
+
+    expect(writeCounter.count).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Transition matrix — every declared boundary reached by every route
+// ---------------------------------------------------------------------------
+
+describe('transition matrix', () => {
+  /**
+   * Each case names the ROUTE as well as the boundary, because the same
+   * boundary reached by a different route is a different code path — and the
+   * first plan draft shipped three of the four routes precisely because the
+   * boundary list looked complete.
+   */
+  interface MatrixCase {
+    name: string;
+    setUp: () => void;
+    expectBoundary: string;
+    expectPhase?: string;
+    expectPlanPhase?: string | null;
+  }
+
+  const cases: MatrixCase[] = [
+    {
+      name: 'gated: specify → plan',
+      setUp: () => {
+        writeProtocol(spirLike());
+        writeState(
+          baseState({ phase: 'specify', gates: { 'spec-approval': { status: 'approved' } } }),
+        );
+      },
+      expectBoundary: 'enter:plan',
+      expectPhase: 'plan',
+    },
+    {
+      name: 'gated: plan → implement (extracts plan phases, no first-phase refresh)',
+      setUp: () => {
+        writeProtocol(spirLike());
+        writePlan(['phase_1_a', 'phase_2_b']);
+        writeState(
+          baseState({ phase: 'plan', gates: { 'plan-approval': { status: 'approved' } } }),
+        );
+      },
+      expectBoundary: 'enter:implement',
+      expectPhase: 'implement',
+      expectPlanPhase: 'phase_1_a',
+    },
+    {
+      name: 'pre-approved: specify → plan',
+      setUp: () => {
+        writeProtocol(spirLike());
+        writeApprovedSpec();
+        writeState(baseState({ phase: 'specify' }));
+      },
+      expectBoundary: 'enter:plan',
+      expectPhase: 'plan',
+    },
+    {
+      name: 'pre-approved: plan → implement (extracts plan phases)',
+      setUp: () => {
+        writeProtocol(spirLike());
+        writePlan(['phase_1_a', 'phase_2_b'], true);
+        writeState(baseState({ phase: 'plan' }));
+      },
+      expectBoundary: 'enter:implement',
+      expectPhase: 'implement',
+      expectPlanPhase: 'phase_1_a',
+    },
+    {
+      name: 'ungated (ASPIR): specify → plan',
+      setUp: () => {
+        writeProtocol(aspirLike());
+        writeState(
+          baseState({
+            protocol: 'fixture-aspir',
+            phase: 'specify',
+            build_complete: true,
+            iteration: 1,
+          }),
+        );
+        writeApprovingReviews('specify', 1);
+      },
+      expectBoundary: 'enter:plan',
+      expectPhase: 'plan',
+    },
+    {
+      name: 'ungated (ASPIR): plan → implement (extracts plan phases)',
+      setUp: () => {
+        writeProtocol(aspirLike());
+        writePlan(['phase_1_a', 'phase_2_b']);
+        writeState(
+          baseState({
+            protocol: 'fixture-aspir',
+            phase: 'plan',
+            build_complete: true,
+            iteration: 1,
+          }),
+        );
+        writeApprovingReviews('plan', 1);
+      },
+      expectBoundary: 'enter:implement',
+      expectPhase: 'implement',
+      expectPlanPhase: 'phase_1_a',
+    },
+    {
+      name: 'ungated (ASPIR): plan-phase advance',
+      setUp: () => {
+        writeProtocol(aspirLike());
+        writePlan(['phase_1_a', 'phase_2_b']);
+        writeState(
+          baseState({
+            protocol: 'fixture-aspir',
+            phase: 'implement',
+            plan_phases: [
+              { id: 'phase_1_a', title: 'A', status: 'in_progress' },
+              { id: 'phase_2_b', title: 'B', status: 'pending' },
+            ],
+            current_plan_phase: 'phase_1_a',
+            build_complete: true,
+            iteration: 1,
+          }),
+        );
+        writeApprovingReviews('phase_1_a', 1);
+      },
+      expectBoundary: 'plan-phase:phase_2_b',
+      expectPhase: 'implement',
+      expectPlanPhase: 'phase_2_b',
+    },
+    {
+      name: 'ungated (ASPIR): last plan phase → review',
+      setUp: () => {
+        writeProtocol(aspirLike());
+        writePlan(['phase_1_a']);
+        writeState(
+          baseState({
+            protocol: 'fixture-aspir',
+            phase: 'implement',
+            plan_phases: [{ id: 'phase_1_a', title: 'A', status: 'in_progress' }],
+            current_plan_phase: 'phase_1_a',
+            build_complete: true,
+            iteration: 1,
+          }),
+        );
+        writeApprovingReviews('phase_1_a', 1);
+      },
+      expectBoundary: 'enter:review',
+      expectPhase: 'review',
+      expectPlanPhase: null,
+    },
+  ];
+
+  for (const c of cases) {
+    it(`fires ${c.expectBoundary} via ${c.name}`, async () => {
+      c.setUp();
+
+      const response = await next(root, PROJECT_ID);
+
+      expect(isRefreshTask(response), `${c.name} did not emit a refresh`).toBe(true);
+      expect(response.tasks?.[0].description).toContain(c.expectBoundary);
+
+      const after = readState();
+      expect(after.context_refreshes?.map(r => r.boundary)).toEqual([c.expectBoundary]);
+      if (c.expectPhase) expect(after.phase).toBe(c.expectPhase);
+      if (c.expectPlanPhase !== undefined) {
+        expect(after.current_plan_phase).toBe(c.expectPlanPhase);
+      }
+      // Never two boundaries at one moment: entering `implement` IS entering
+      // plan phase 1, and only the entry boundary may be recorded there.
+      expect(after.context_refreshes).toHaveLength(1);
+      // And one write for the whole thing.
+      expect(writeCounter.count).toBe(1);
+    });
+  }
 });
 
 // ---------------------------------------------------------------------------

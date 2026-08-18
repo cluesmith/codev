@@ -431,3 +431,33 @@ now.
 
 **Carry into the review doc**: the nine repaired vacuous negatives deserve a line in the lessons
 section.
+
+### Phase 2 iter2 (codex): the #1408 test was STILL vacuous
+
+Fifth instance of the pattern — and in the one test I had explicitly called out as the important
+one. My #1408 test left `build_complete: false` (the baseState default), so `next()` returned a
+build task and never re-entered a transition at all. It asserted "no refresh fired" about a call
+that could not have produced one.
+
+Rewritten to drive a genuine approving verify round that ADVANCES into a boundary already present
+in `context_refreshes`, then assert (a) the transition still happens — suppressing the refresh must
+not suppress protocol progress — and (b) the record is neither re-appended nor overwritten (checks
+the ORIGINAL timestamp survives).
+
+Also added, both from codex:
+- **Transition matrix**: 8 parameterized cases naming the ROUTE as well as the boundary, because
+  the same boundary reached by a different route is a different code path. This is exactly how the
+  first plan draft shipped 3 of 4 routes — the boundary list looked complete.
+- **Atomicity assertion**: a `writeStateAndCommit` spy counting calls. Final-state inspection
+  cannot distinguish one atomic write from transition-then-boundary, and that distinction IS the
+  at-most-once mechanism (a crash between two writes leaves a project transitioned but unmarked,
+  and the next porch next clears the builder again).
+
+**The matrix immediately earned itself**: the `pre-approved: plan → implement` case failed on the
+first run. Cause was a fixture bug — `writeApprovedArtifact('plans')` clobbered the file
+`writePlan()` had written, so the phases JSON vanished and `extractPlanPhases` fell back to
+inventing `phase_1`. Fixed by having `writePlan(ids, approved)` emit frontmatter and phases in ONE
+file. (Side observation, not my bug: extractPlanPhases silently invents `phase_1` for a plan with
+no phases JSON rather than reporting the absence.)
+
+33/33.
