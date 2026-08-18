@@ -537,7 +537,23 @@ sits between here and there. **Do not write the review without walking this list
    `worktree-checked`, `challenge-marked`, `clear-attempted`, `challenge-consumed` are extra). The
    required subsequence and its ordering ARE asserted; the extras are gates the handshake needs.
    Record so it is not scored as a miss.
-9. **This repo has no `worktree` block** in `.codev/config.json`, so builder worktrees spawn without
+9. **LESSON (architect asked for its own line): tests can exercise the CLI but not the INSTRUCTED
+   WORKFLOW.** The boundary guard was correct at three layers and never invoked in production,
+   because the thing that calls it is a string in a porch task description that no test reads. My
+   tests passed `expectedBoundary` directly. Coverage measured against my own implementation cannot
+   find this class — only asking "what does the thing that calls this actually pass?" does.
+   Companion lesson from the same review: the echo-the-request bypass passed every gate AND every
+   test, because both reasoned about a file that contains the nonce rather than one that ANSWERS
+   the request.
+10. **FOLLOW-UPS list for the review doc** (architect-confirmed, out of scope here):
+   - `runReset` logs its clear AFTER sending it (`index.ts:540`) — a send that succeeds on the wire
+     but throws leaves the log claiming no clear happened. Driven path; same weakness Codex found
+     in my self path at Phase 3 iter1.
+   - `sizeOf()`/`read()` TOCTOU in shared `verifyReceipt` — mid-write race the two-observation
+     stability gate already catches.
+   - `extractPlanPhases` silently invents a `phase_1` for a plan with no phases JSON.
+   - `codev/protocols/spir/protocol.json`'s `$schema` path does not resolve (Phase 7 fixes).
+11. **This repo has no `worktree` block** in `.codev/config.json`, so builder worktrees spawn without
    node_modules and cannot run build/tests until someone installs by hand. Related: the failing
    vitest startup exited 0, so an exit-code-only check would have called it green.
 
