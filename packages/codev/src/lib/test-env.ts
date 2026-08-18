@@ -106,6 +106,13 @@ export function assertAgyLaneAllowedUnderTest(): void {
  * `NODE_ENV=test` explicitly on the Towers they spawn, and `VITEST` is checked
  * alongside `NODE_ENV` because children inherit it through `{ ...process.env }`
  * even when a suite forgets to set `NODE_ENV`. Either marker is enough.
+ *
+ * `isUnderTestRunner()` above deliberately refuses generic markers, because a
+ * false positive there makes a real consultation *throw*. The trade here runs
+ * the other way, so `NODE_ENV` earns its place: a false positive costs a user
+ * running Tower with `NODE_ENV=test` a 403 that names the override, while a
+ * false negative deregisters their Tower and drops the tunnel until they
+ * notice. Loud and recoverable beats silent and destructive.
  */
 export function isUnderTest(): boolean {
   return isUnderTestRunner() || process.env.NODE_ENV === 'test';

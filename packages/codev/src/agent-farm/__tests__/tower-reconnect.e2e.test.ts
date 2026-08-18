@@ -15,6 +15,7 @@ import {
   encodeWorkspacePath,
   cleanupTestDb,
   createIsolatedAgentFarmDir,
+  removeIsolatedAgentFarmDir,
 } from './helpers/tower-test-utils.js';
 
 const TEST_TOWER_PORT = 14800;
@@ -131,6 +132,8 @@ describe('Tower stop/start reconnection (Spec 0122)', () => {
       rmSync(socketDir, { recursive: true, force: true });
     }
     cleanupTestDb(TEST_TOWER_PORT);
+    // #1515: holds a copy of the shared local key — don't leave it behind.
+    removeIsolatedAgentFarmDir(agentFarmDir);
   });
 
   it('reconnects shellper sessions after Tower restart', async () => {

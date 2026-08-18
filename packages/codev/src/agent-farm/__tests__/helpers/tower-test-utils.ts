@@ -142,7 +142,40 @@ async function findAvailablePort(startPort: number): Promise<number> {
 export function createIsolatedAgentFarmDir(): string {
   const dir = mkdtempSync(resolve(tmpdir(), 'codev-af-'));
   writeFileSync(resolve(dir, 'local-key'), ensureLocalKey(), { mode: 0o600 });
+  registerForCleanup(dir);
   return dir;
+}
+
+/**
+ * Every isolated dir created in this process, removed when it exits.
+ *
+ * These hold a copy of the shared local key, so they must not accumulate under
+ * the system temp dir. `startTower()` removes its own in `stop()`; this is the
+ * safety net for that path failing and the only cleanup for callers that spawn
+ * Towers themselves. `rmSync(force)` makes the double-removal a no-op.
+ */
+const isolatedDirs = new Set<string>();
+
+/**
+ * Remove an isolated agent-farm dir. Callers that create one directly should
+ * call this in their teardown: vitest's pooled workers are not guaranteed to
+ * run `process.on('exit')` handlers, so the net below is a backstop, not the
+ * primary cleanup.
+ */
+export function removeIsolatedAgentFarmDir(dir: string): void {
+  isolatedDirs.delete(dir);
+  try { rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
+}
+
+function registerForCleanup(dir: string): void {
+  if (isolatedDirs.size === 0) {
+    process.once('exit', () => {
+      for (const d of isolatedDirs) {
+        try { rmSync(d, { recursive: true, force: true }); } catch { /* ignore */ }
+      }
+    });
+  }
+  isolatedDirs.add(dir);
 }
 
 export interface StartTowerOptions {

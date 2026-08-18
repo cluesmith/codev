@@ -8,7 +8,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
-import { homedir } from 'node:os';
 import Database from 'better-sqlite3';
 import type { TowerHandle } from './helpers/tower-test-utils.js';
 import { startTower, cleanupAllTerminals, cleanupTestDb } from './helpers/tower-test-utils.js';
@@ -60,8 +59,9 @@ async function createPersistentTerminal(port: number, label: string): Promise<{ 
   return { id: created.id, pid: info.pid };
 }
 
-function unregisterAndOrphan(port: number, shellperPid: number): void {
-  const dbPath = resolve(homedir(), '.agent-farm', `test-${port}.db`);
+function unregisterAndOrphan(agentFarmDir: string, port: number, shellperPid: number): void {
+  // #1515: the Tower's DB lives in its isolated agent-farm dir, not ~/.agent-farm.
+  const dbPath = resolve(agentFarmDir, `test-${port}.db`);
   const db = new Database(dbPath);
   db.pragma('busy_timeout = 5000');
   db.prepare('DELETE FROM terminal_sessions WHERE shellper_pid = ?').run(shellperPid);
@@ -107,7 +107,7 @@ describe('Issue #1227: on-demand husk routes + /health fleet fields', () => {
     const shellperPid = terminal.pid;
     expect(isAlive(shellperPid)).toBe(true);
 
-    unregisterAndOrphan(TEST_TOWER_PORT, shellperPid);
+    unregisterAndOrphan(tower.agentFarmDir, TEST_TOWER_PORT, shellperPid);
     // Let the childless state settle before probing.
     await new Promise((r) => setTimeout(r, 300));
 

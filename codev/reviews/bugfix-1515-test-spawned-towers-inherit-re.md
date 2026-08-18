@@ -89,8 +89,50 @@ config already absent so a disconnect was a no-op:
 - `tower-tunnel.test.ts` — new case: disconnect 403s and runs **neither** irreversible half
   without an opt-in. Existing disconnect tests opt in explicitly; they mock cloud-config, so
   they own their cloud state.
-- 4927 unit tests pass; the five Tower-spawning e2e files re-run green (52 tests), which is
-  what proves the isolated-dir key handoff works. TypeScript compiles clean.
+- Unit suite green. All **fourteen** Tower-spawning e2e files re-run green — the twelve that
+  use the shared `startTower()` helper, plus `tower-reconnect` and the new regression — which
+  is what proves the isolated-dir key handoff works. TypeScript compiles clean. No isolated
+  agent-farm dirs are left behind after a run.
+
+## CMAP Review
+
+| Model | Verdict |
+|---|---|
+| Gemini | APPROVE — no issues |
+| Codex | COMMENT — one real issue (below) |
+| Claude | REQUEST_CHANGES — one **blocking** issue (below) |
+
+**Claude, blocking — accepted and fixed.** Isolating the DB into the throwaway dir broke
+`tower-routes-husks.e2e.test.ts` and `shellper-husk-sweep.e2e.test.ts`: both open the Tower's
+SQLite DB directly at `resolve(homedir(), '.agent-farm', 'test-<port>.db')`, which no longer
+exists, so they threw `SqliteError: no such table: terminal_sessions`. Both now read
+`tower.agentFarmDir`. This is exactly the kind of miss the reviewer was right to insist on:
+my "all tests pass" claim rested on **five** Tower-spawning e2e files when **twelve** use the
+shared `startTower()` helper. All fourteen (those twelve plus `tower-reconnect` and the new
+regression) are now run.
+
+**Codex, non-blocking — accepted and fixed.** The three direct callers of
+`createIsolatedAgentFarmDir()` never removed their dirs, each holding a copy of the real
+local key. Added `removeIsolatedAgentFarmDir()` and wired it into all three teardowns, plus a
+process-exit backstop. Verified: a run that previously left dirs behind now leaves zero.
+(The exit handler alone was **not** sufficient — vitest's pooled workers do not reliably run
+`process.on('exit')`, so the explicit teardown is the primary mechanism and the handler is
+only a net. Worth knowing before relying on `exit` in a vitest helper.)
+
+**Claude, non-blocking — considered, declined with reasons.**
+
+- *`isUnderTest()` adds `NODE_ENV === 'test'`, which `test-env.ts`'s own #1323 comment argues
+  against.* Correct reading, but the trade is inverted here. #1323's guard makes a real
+  consultation **throw**, so a false positive is expensive. This guard's false positive costs
+  a user running Tower with `NODE_ENV=test` a 403 that names the override; its false negative
+  deregisters their Tower. Kept, with that asymmetry documented at the call site.
+- *`packages/sdk/src/node/local-key.ts` doesn't honour `CODEV_AGENT_FARM_DIR`, leaving the
+  isolation partial.* That module is the read-only key reader for **external Node clients**
+  (the VS Code host, the Stream Deck plugin), not the Tower. It intentionally reads the real
+  key — which is the same value `createIsolatedAgentFarmDir()` copies in, so those clients
+  still authenticate correctly and the isolation is not partial in any path this bug touches.
+  Making it honour the override would also require duplicating the env handling, since the sdk
+  cannot import `codev-core` at runtime (server/client isolation, #1189). Out of scope.
 
 ## Lessons Learned
 
@@ -109,6 +151,10 @@ config already absent so a disconnect was a no-op:
 - **"Two processes wrote one log" is a claim you can check.** It was falsified by a single
   grep for `--log-file`, and the sub-second interleaving with mailbox and cron lines said
   "one process" plainly.
+- **"All tests pass" is a claim about what you ran, not what exists.** I ran five
+  Tower-spawning e2e files and wrote "all tests pass"; twelve use the helper I changed, and
+  two of the seven I skipped were broken by the change. Enumerate the call sites of anything
+  you modify and run *those*, rather than the ones that came to mind.
 - **A default port is an ambient dependency on someone's live system.** `getTowerClient()`
   with no argument silently means "whatever Tower is running on this machine". Any test
   helper that can reach a default-port service should be assumed to reach production until

@@ -81,6 +81,22 @@ describe('#1515 agent-farm dir isolation', () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it('registers every isolated dir for removal at process exit', async () => {
+    const utils = await import('./helpers/tower-test-utils.js');
+    const dir = utils.createIsolatedAgentFarmDir();
+    try {
+      // The dirs hold a copy of the shared local key, so callers that spawn
+      // Towers themselves must not leave them behind.
+      const listeners = process.listeners('exit');
+      expect(listeners.length).toBeGreaterThan(0);
+      rmSync(dir, { recursive: true, force: true });
+      // Removing twice must not throw when the exit handler runs.
+      expect(() => rmSync(dir, { recursive: true, force: true })).not.toThrow();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('#1515 client guard on the default Tower port', () => {
