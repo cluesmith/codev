@@ -109,3 +109,25 @@ render script); registered in plugin.ts; README Design + Actions docs.
 Verified in worktree: check-types ✓, build ✓, Elgato validate ✓, 231 tests (+14 new) ✓.
 Restored unrelated regenerated icons (render script is non-deterministic) to avoid PR churn.
 Dev-approval is hardware — 6-architect fleet is live, demo steps in the plan's Test Plan.
+
+## dev-approval APPROVED → REVIEW phase → PR gate
+
+Owner approved dev-approval after hardware check (relinked plugin to worktree, two-page profile,
+swiped to page 2; chose page-SWIPE over a switch button — "swiping is enough"). Along the way,
+per owner requests: page-1 layout became all-builders (Row 1 = 4 Builder Action, Row 2 =
+OpenArch(bldr)/OpenBldrTerm/Approve/Dev), page-2 = Architect keys across both rows; README
+layout rewritten (two stacked vertical diagrams, shared dials).
+
+Review phase: wrote codev/reviews/1495-*.md (retrospective), COLD lessons-learned.md UI/UX entry
+(enumerate-vs-resolve; sort-not-pin/#1497), no arch changes (app-local, design lives in README).
+PR #1499 opened (body=review, Fixes #1495), recorded with porch.
+
+3-way consultation (single pass): gemini=APPROVE, claude=APPROVE, codex=REQUEST_CHANGES (all
+docs/verification, impl "sound"). Dispositions (rebuttals file in codev/projects/1495-*/):
+- FIXED: README "Wiring the native switch" steps (which native key gets switch.png).
+- FIXED: dropped stale "Main-mode key in Row 1 slot 1" rec contradicting the new layout.
+- REBUTTED: "review records swipe not switch button" — swipe was owner's choice; switch button is
+  optional NATIVE affordance, not plugin code. Review manual-verify note made explicit.
+
+Now at the **pr gate**. Notified architect (led with REQUEST_CHANGES + disposition). Waiting for
+human merge + gate approval; will not merge until porch reports gate_status: approved.
