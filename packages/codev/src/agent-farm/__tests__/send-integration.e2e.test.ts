@@ -18,6 +18,7 @@ import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import net from 'node:net';
 import WebSocket from 'ws';
+import { towerWsProtocols } from './helpers/tower-test-utils.js';
 
 // Use a unique port to avoid conflicts with other e2e test suites
 // Port 14500 is used by cli-tower-mode.e2e.test.ts — use 14600 here
@@ -244,7 +245,7 @@ function connectMessageBus(
     ? `ws://localhost:${port}/ws/messages?project=${encodeURIComponent(projectFilter)}`
     : `ws://localhost:${port}/ws/messages`;
 
-  const ws = new WebSocket(url);
+  const ws = new WebSocket(url, towerWsProtocols());
   const messageQueue: any[] = [];
   let waitingResolve: ((msg: any) => void) | null = null;
 

@@ -732,10 +732,14 @@ export class TunnelClient {
   }
 
   private handleWebSocketConnect(stream: http2.ServerHttp2Stream, headers: http2.IncomingHttpHeaders): void {
-    const authority = headers[':authority'] as string || `localhost:${this.options.localPort}`;
     const path = headers[':path'] as string || '/';
 
-    // WebSocket CONNECT: proxy to local server
+    // WebSocket CONNECT: proxy to local server. The upgrade goes to localhost,
+    // so the Host must be localhost too — Tower's Host guard (advisory
+    // GHSA-xvjp-7748-v88v) rejects the tunnel's public :authority, and the HTTP
+    // proxy path already lets Node default Host to localhost. Matching it here
+    // keeps tunneled terminals working.
+    const localHost = `localhost:${this.options.localPort}`;
 
     // Forward non-hop-by-hop headers from the H2 CONNECT to the local WS upgrade
     const forwardHeaders: Record<string, string | string[]> = {
@@ -743,7 +747,7 @@ export class TunnelClient {
       'Connection': 'Upgrade',
       'Sec-WebSocket-Version': '13',
       'Sec-WebSocket-Key': randomBytes(16).toString('base64'),
-      'Host': authority,
+      'Host': localHost,
     };
     for (const [key, value] of Object.entries(headers)) {
       if (key.startsWith(':')) continue;

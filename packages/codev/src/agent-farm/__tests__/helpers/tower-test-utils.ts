@@ -9,8 +9,20 @@ import { resolve } from 'node:path';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import net from 'node:net';
+import { ensureLocalKey } from '@cluesmith/codev-core/auth';
+import { terminalWsProtocols } from '@cluesmith/codev-types';
 
 const TOWER_START_TIMEOUT = 15_000;
+
+/**
+ * WebSocket subprotocols carrying the shared local key, for authenticated
+ * terminal/message sockets against the test Tower. Tower enforces request
+ * authentication (advisory GHSA-xvjp-7748-v88v); a keyless upgrade is rejected
+ * at the handshake. HTTP calls are keyed centrally in vitest-e2e-setup.ts.
+ */
+export function towerWsProtocols(): string[] | undefined {
+  return terminalWsProtocols(ensureLocalKey());
+}
 
 // Path to compiled tower-server.js (4 levels up from helpers/ to packages/codev/)
 const TOWER_SERVER_PATH = resolve(

@@ -238,6 +238,14 @@ jobs:
         working-directory: packages/core
         run: pnpm build
 
+      # codev-types is a runtime dependency of codev (server-utils imports its
+      # wire constants at module load), so the install-verification install must
+      # include its tarball too — else `afx --help` crashes at boot with
+      # "Cannot find module '@cluesmith/codev-types'".
+      - name: Build types package
+        working-directory: packages/types
+        run: pnpm build
+
       - name: Build package
         working-directory: packages/codev
         run: pnpm build
@@ -250,11 +258,15 @@ jobs:
         working-directory: packages/sdk
         run: pnpm pack
 
+      - name: Pack types tarball
+        working-directory: packages/types
+        run: pnpm pack
+
       - name: Pack tarball
         working-directory: packages/codev
         run: pnpm pack
 
       - name: Verify install from tarball
         working-directory: packages/codev
-        run: node scripts/verify-install.mjs cluesmith-codev-*.tgz ../core/cluesmith-codev-core-*.tgz ../sdk/cluesmith-codev-sdk-*.tgz
+        run: node scripts/verify-install.mjs cluesmith-codev-*.tgz ../core/cluesmith-codev-core-*.tgz ../sdk/cluesmith-codev-sdk-*.tgz ../types/cluesmith-codev-types-*.tgz
 

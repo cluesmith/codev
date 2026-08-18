@@ -107,6 +107,8 @@ tail -f ~/.agent-farm/tower.log
 
 8. **Consultation Requirements**: External AI consultation (Gemini, Codex) is mandatory at SPIR checkpoints unless explicitly disabled.
 
+9. **Tower API Authentication**: Tower's local HTTP + WebSocket API enforces request authentication (advisory GHSA-xvjp-7748-v88v). Every route outside the narrow public-route allowlist (`isPublicRoute` in `agent-farm/utils/server-utils.ts`) requires the shared local key (`~/.agent-farm/local-key`), sent as the `codev-tower-key` HTTP header or a `Sec-WebSocket-Protocol` subprotocol, and fails closed with 401 (the server also accepts the legacy `codev-web-key` header for one release). Any new Tower route must decide public-vs-keyed — a wrong allowlist entry either breaks a pre-auth path (health/version probes, the served HTML shells + static assets) or exposes a data route. The key is delivered to browser shells via same-origin serve-time injection; those shell responses omit `Access-Control-Allow-Origin` so the injected key is not cross-origin readable.
+
 ## Agent Farm Internals
 
 This section provides comprehensive documentation of how the Agent Farm (`afx`) system works internally. Agent Farm is the most complex component of Codev, enabling parallel AI-assisted development through the architect-builder pattern.

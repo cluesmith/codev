@@ -48,6 +48,11 @@ test-results/
 packages/codev/dashboard-dist/
 apps/web/dist/
 
+# three.js vendored at build time from the `three` devDependency (copy-three.mjs);
+# copied into templates/vendor/ and shipped in the npm tarball, not committed.
+packages/codev/templates/vendor/three.module.js
+packages/codev/templates/vendor/three-*.js
+
 # Checklister runtime state (per-project JSON files)
 codev/checklists/*.json
 

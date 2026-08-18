@@ -63,7 +63,7 @@ import { setCodevConfigNotifier, stopAllCodevConfigWatchers } from './codev-conf
 import { getGlobalDb } from '../db/index.js';
 import { runBootConsolidation } from '../db/consolidate.js';
 import { DEFAULT_TOWER_PORT, AGENT_FARM_DIR } from '../lib/tower-client.js';
-import { validateHost } from '../utils/server-utils.js';
+import { validateHost, getExpectedKey, selectWsSubprotocol } from '../utils/server-utils.js';
 import { version } from '../../version.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -114,6 +114,15 @@ const bridgeMode = process.env.BRIDGE_MODE === '1';
 const bindHost = bridgeMode
   ? validateHost(process.env.BRIDGE_TOWER_HOST || '127.0.0.1')
   : '127.0.0.1';
+
+// Request authentication (advisory GHSA-xvjp-7748-v88v): ensure the shared local
+// key exists at boot so HTTP/WS enforcement has an expected value to compare
+// against. getExpectedKey() issues the key if missing (Tower owns generation)
+// and returns null only if it cannot be created (e.g. an unwritable
+// ~/.agent-farm). Enforcement fails closed in that case; under BRIDGE_MODE the
+// bind is non-localhost, so refuse to start a network-reachable Tower with no
+// request authentication at all.
+const expectedKeyAtBoot = getExpectedKey();
 
 // Logging utility
 function log(level: 'INFO' | 'ERROR' | 'WARN', message: string): void {
@@ -454,7 +463,13 @@ const server = http.createServer(async (req, res) => {
 // Bridge mode enables non-localhost binding when BRIDGE_MODE=1 is set.
 server.listen(port, bindHost, () => {
   if (bridgeMode) {
-    log('WARN', `Bridge mode is ENABLED — Tower is listening on ${bindHost} network interfaces.`);
+    if (!expectedKeyAtBoot) {
+      log('ERROR', 'BRIDGE_MODE requires the shared local key at ~/.agent-farm/local-key, which could not be created. Refusing to start a network-reachable Tower without request authentication.');
+      process.exit(1);
+    }
+    log('WARN', `Bridge mode is ENABLED — Tower is listening on ${bindHost} network interfaces. Request authentication is enforced, but the shared key travels in cleartext over plain HTTP — terminate TLS at the tunnel/proxy so the key is not exposed on the wire.`);
+  } else if (!expectedKeyAtBoot) {
+    log('WARN', 'Shared local key could not be created at ~/.agent-farm/local-key; Tower will reject authenticated requests (fail closed).');
   }
   // Display localhost in URLs for local UX even when bound to all interfaces.
   const displayHost = bindHost === '0.0.0.0' ? 'localhost' : bindHost;
@@ -739,7 +754,14 @@ async function bootSequence(): Promise<void> {
 }
 
 // Initialize terminal WebSocket server (Phase 2 - Spec 0090)
-terminalWss = new WebSocketServer({ noServer: true });
+// handleProtocols echoes the non-secret marker subprotocol back on the
+// handshake (advisory GHSA-xvjp-7748-v88v Layer 2) so strict `ws` clients that
+// offer it accept the connection; the `codev-key.<KEY>` token the client also
+// offers is validated at the upgrade and never echoed.
+terminalWss = new WebSocketServer({
+  noServer: true,
+  handleProtocols: (protocols: Set<string>) => selectWsSubprotocol(protocols),
+});
 
 // Spec 0105 Phase 5: WebSocket upgrade handler extracted to tower-websocket.ts
 setupUpgradeHandler(server, terminalWss, port);

@@ -252,7 +252,7 @@ export interface TowerClientOptions {
   host?: string;
   /**
    * Injectable auth key provider. Defaults to no auth (requests carry no
-   * `codev-web-key` header). Consumers entitled to the local key inject a
+   * `codev-tower-key` header). Consumers entitled to the local key inject a
    * reader; see the module header for the per-environment profiles.
    */
   getAuthKey?: () => string | null;
@@ -322,7 +322,7 @@ export class TowerClient {
         'Content-Type': 'application/json',
       };
       if (authKey) {
-        headers['codev-web-key'] = authKey;
+        headers['codev-tower-key'] = authKey;
       }
 
       const response = await this.fetchFn(`${this.baseUrl}${path}`, {
@@ -720,7 +720,7 @@ export class TowerClient {
    * Deliberately does NOT route through request<T>(): that helper force-sets
    * `Content-Type: application/json` after spreading options.headers, so a
    * binary content-type can't pass through. This mirrors request()'s auth
-   * (codev-web-key), timeout, and error-normalization for a raw binary body.
+   * (codev-tower-key), timeout, and error-normalization for a raw binary body.
    */
   async pasteImage(
     workspacePath: string,
@@ -731,7 +731,7 @@ export class TowerClient {
       const authKey = this.getAuthKey();
       const headers: Record<string, string> = { 'Content-Type': mime };
       if (authKey) {
-        headers['codev-web-key'] = authKey;
+        headers['codev-tower-key'] = authKey;
       }
       // A typed-array view isn't reliably assignable to fetch's BodyInit
       // across lib versions; an ArrayBuffer slice always is.
@@ -948,7 +948,7 @@ export class TowerClient {
         'Content-Type': 'application/json',
       };
       if (authKey) {
-        headers['codev-web-key'] = authKey;
+        headers['codev-tower-key'] = authKey;
       }
       const response = await this.fetchFn(`${this.baseUrl}${path}`, {
         ...options,
@@ -1085,7 +1085,7 @@ export class TowerClient {
           const authKey = this.getAuthKey();
           const headers: Record<string, string> = { Accept: 'text/event-stream' };
           if (authKey) {
-            headers['codev-web-key'] = authKey;
+            headers['codev-tower-key'] = authKey;
           }
           const res = await this.fetchFn(`${this.baseUrl}/api/events`, {
             headers,

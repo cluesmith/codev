@@ -32,7 +32,8 @@ import { getBuilders, setArchitectByName } from '../state.js';
 import { DEFAULT_COLS, defaultSessionOptions } from '../../terminal/index.js';
 import type { SSEClient, WorkspaceTerminals } from './tower-types.js';
 import type { TerminalManager } from '../../terminal/pty-manager.js';
-import { parseJsonBody, isRequestAllowed } from '../utils/server-utils.js';
+import { parseJsonBody, isRequestAllowed, isAllowedOrigin, isAllowedHost, getExpectedKey, escapeHtml } from '../utils/server-utils.js';
+import { TOWER_KEY_HEADER, LEGACY_WEB_KEY_HEADER } from '@cluesmith/codev-types';
 import {
   isRateLimited,
   normalizeWorkspacePath,
@@ -229,29 +230,38 @@ export async function handleRequest(
   res: http.ServerResponse,
   ctx: RouteContext,
 ): Promise<void> {
-  // Security: Validate Host and Origin headers
-  if (!isRequestAllowed(req)) {
-    res.writeHead(403, { 'Content-Type': 'text/plain' });
-    res.end('Forbidden');
-    return;
-  }
-
-  // CORS headers — allow localhost and tunnel proxy origins
+  // CORS headers — reflect only allowlisted origins (advisory Layer 3).
   const origin = req.headers.origin;
-  if (origin && (
-    origin.startsWith('http://localhost:') ||
-    origin.startsWith('http://127.0.0.1:') ||
-    origin.startsWith('https://')
-  )) {
+  if (origin && isAllowedOrigin(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
   }
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Allow-Headers', `Content-Type, ${TOWER_KEY_HEADER}, ${LEGACY_WEB_KEY_HEADER}`);
   res.setHeader('Cache-Control', 'no-store');
 
+  // A CORS preflight carries no credentials and performs no action, so it is
+  // answered before the key check — otherwise browser clients could never
+  // complete the preflight that precedes an authenticated request.
   if (req.method === 'OPTIONS') {
     res.writeHead(200);
     res.end();
+    return;
+  }
+
+  // Request authentication (advisory GHSA-xvjp-7748-v88v): every route outside
+  // the narrow public-route allowlist must present the shared local key. This
+  // is the single HTTP choke point every route passes through. CORS above is
+  // defense-in-depth only — a no-preflight "simple" request still lands here.
+  if (!isRequestAllowed(req)) {
+    // Log the reason so a broken legitimate client (disallowed Host vs missing
+    // key) is diagnosable — a bare 401 is indistinguishable from either side.
+    const reason = isAllowedHost(req.headers.host)
+      ? 'missing or invalid key'
+      : `disallowed Host "${req.headers.host ?? ''}"`;
+    ctx.log('WARN', `401 ${req.method ?? 'GET'} ${req.url ?? '/'} — ${reason}`);
+    res.writeHead(401, { 'Content-Type': 'text/plain' });
+    res.end('Unauthorized');
     return;
   }
 
@@ -2369,11 +2379,67 @@ function handleDashboard(res: http.ServerResponse, ctx: RouteContext): void {
 
   try {
     const template = fs.readFileSync(ctx.templatePath, 'utf-8');
-    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-    res.end(template);
+    sendKeyInjectedHtml(res, template);
   } catch (err) {
     res.writeHead(500, { 'Content-Type': 'text/plain' });
     res.end('Error loading template: ' + (err as Error).message);
+  }
+}
+
+/**
+ * Same-origin key injection (advisory GHSA-xvjp-7748-v88v Layer 4). Writes the
+ * shared local key into an HTML shell Tower serves (tower.html or the React SPA
+ * index.html) so the page can authenticate its own API/WebSocket calls, without
+ * embedding a readable secret in the shipped template. The key is hex, so
+ * JSON.stringify yields a safe `<script>`-embeddable literal.
+ *
+ * tower.html carries an explicit placeholder; the built SPA index.html does not,
+ * so the script is inserted before `</head>` there — ahead of the deferred SPA
+ * module, so `window.__CODEV_TOWER_KEY__` is set before the app's first request.
+ */
+function injectWebKey(html: string): string {
+  const key = getExpectedKey();
+  // Only embed a well-formed hex key. `ensureLocalKey` always produces 64 hex
+  // chars; validating before embedding means a hand-edited or third-party-written
+  // key file containing e.g. `</script>` can never become stored XSS in a shell.
+  // A malformed key yields no injection (clients then fail closed with 401).
+  const injection = key && /^[0-9a-f]{64}$/.test(key)
+    ? `<script>window.__CODEV_TOWER_KEY__ = ${JSON.stringify(key)};</script>`
+    : '';
+  if (html.includes('<!-- CODEV_TOWER_KEY_INJECTION -->')) {
+    return html.replace('<!-- CODEV_TOWER_KEY_INJECTION -->', injection);
+  }
+  if (injection && html.includes('</head>')) {
+    return html.replace('</head>', `${injection}</head>`);
+  }
+  return html;
+}
+
+/**
+ * Send a key-injected HTML shell. Strips the CORS `Access-Control-Allow-Origin`
+ * header set by the front door: this response body carries the key, and the
+ * shell is only ever loaded by a same-origin navigation, so it must never be
+ * readable by a cross-origin `fetch` (advisory GHSA-xvjp-7748-v88v). Same-origin
+ * reads are unaffected; the key check still guards the actual API routes.
+ */
+function sendKeyInjectedHtml(res: http.ServerResponse, template: string): void {
+  res.removeHeader('Access-Control-Allow-Origin');
+  res.removeHeader('Vary');
+  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+  res.end(injectWebKey(template));
+}
+
+/**
+ * Serve the React dashboard's index.html with the key injected (SPA shell + SPA
+ * client-side-routing fallback). Returns false if the file cannot be read.
+ */
+function serveDashboardIndex(dashboardPath: string, res: http.ServerResponse): boolean {
+  try {
+    const html = fs.readFileSync(path.join(dashboardPath, 'index.html'), 'utf-8');
+    sendKeyInjectedHtml(res, html);
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -2449,23 +2515,24 @@ async function handleWorkspaceRoutes(
   // 3. React dashboard is available
   // 4. Workspace doesn't need to be running for static files
   if (!isApiCall && !isWsPath && ctx.hasReactDashboard) {
-    // Determine which static file to serve
-    let staticPath: string;
-    if (!subPath || subPath === '' || subPath === 'index.html') {
-      staticPath = path.join(ctx.reactDashboardPath, 'index.html');
+    // The SPA shell (index.html) is served with the shared key injected same-origin
+    // (advisory GHSA-xvjp-7748-v88v) so a direct navigation to a workspace URL can
+    // authenticate without first visiting the Tower root. Other static assets
+    // (JS/CSS/images) carry no secret and stream as-is.
+    const isIndex = !subPath || subPath === '' || subPath === 'index.html';
+    if (isIndex) {
+      if (serveDashboardIndex(ctx.reactDashboardPath, res)) {
+        return;
+      }
     } else {
-      // Check if it's a static asset
-      staticPath = path.join(ctx.reactDashboardPath, subPath);
+      const staticPath = path.join(ctx.reactDashboardPath, subPath);
+      if (serveStaticFile(staticPath, res)) {
+        return;
+      }
     }
 
-    // Try to serve the static file
-    if (serveStaticFile(staticPath, res)) {
-      return;
-    }
-
-    // SPA fallback: serve index.html for client-side routing
-    const indexPath = path.join(ctx.reactDashboardPath, 'index.html');
-    if (serveStaticFile(indexPath, res)) {
+    // SPA fallback: serve the (key-injected) index.html for client-side routing.
+    if (serveDashboardIndex(ctx.reactDashboardPath, res)) {
       return;
     }
   }
@@ -3529,15 +3596,23 @@ function handleWorkspaceAnnotate(
       const fileName = path.basename(filePath);
       const fileSize = fs.statSync(filePath).size;
 
+      // The shell carries the injected key (advisory GHSA-xvjp-7748-v88v), so a
+      // maliciously-named file must not become XSS (which would read the key).
+      // HTML-escape values that land in markup/attributes (safe in the JS string
+      // contexts too — it blocks `<`, `"`, `'`), and for the JSON-in-<script>
+      // value escape `<` so a filename containing `</script>` can't break out.
+      const safeFileName = escapeHtml(fileName);
+      const safeFilePath = escapeHtml(filePath);
+      const filePathJson = JSON.stringify(filePath).replace(/</g, '\\u003c');
       if (is3D) {
-        html = html.replace(/\{\{FILE\}\}/g, fileName);
-        html = html.replace(/\{\{FILE_PATH_JSON\}\}/g, JSON.stringify(filePath));
-        html = html.replace(/\{\{FORMAT\}\}/g, ext);
+        html = html.replace(/\{\{FILE\}\}/g, safeFileName);
+        html = html.replace(/\{\{FILE_PATH_JSON\}\}/g, filePathJson);
+        html = html.replace(/\{\{FORMAT\}\}/g, escapeHtml(ext));
       } else {
-        html = html.replace(/\{\{FILE\}\}/g, fileName);
-        html = html.replace(/\{\{FILE_PATH\}\}/g, filePath);
+        html = html.replace(/\{\{FILE\}\}/g, safeFileName);
+        html = html.replace(/\{\{FILE_PATH\}\}/g, safeFilePath);
         html = html.replace(/\{\{BUILDER_ID\}\}/g, '');
-        html = html.replace(/\{\{LANG\}\}/g, getLanguageForExt(ext));
+        html = html.replace(/\{\{LANG\}\}/g, escapeHtml(getLanguageForExt(ext)));
         html = html.replace(/\{\{IS_MARKDOWN\}\}/g, String(isMarkdown));
         html = html.replace(/\{\{IS_IMAGE\}\}/g, String(isImage));
         html = html.replace(/\{\{IS_VIDEO\}\}/g, String(isVideo));
@@ -3554,20 +3629,24 @@ function handleWorkspaceAnnotate(
         } else if (isPdf) {
           initScript = `initPdf(${fileSize});`;
         } else {
-          initScript = `fetch('file').then(r=>r.text()).then(init);`;
+          initScript = `fetch('file',{headers:authHeaders()}).then(r=>r.text()).then(init);`;
         }
         html = html.replace('// FILE_CONTENT will be injected by the server', initScript);
       }
 
-      // Handle ?line= query param for scroll-to-line
+      // Handle ?line= query param for scroll-to-line. Validate as a bare integer
+      // before interpolating into the script — untrusted query input must never
+      // reach the key-bearing shell's markup unescaped.
       const lineParam = url.searchParams.get('line');
-      if (lineParam) {
+      if (lineParam && /^\d+$/.test(lineParam)) {
         const scrollScript = `<script>window.addEventListener('load',()=>{setTimeout(()=>{const el=document.querySelector('[data-line="${lineParam}"]');if(el){el.scrollIntoView({block:'center'});el.classList.add('highlighted-line');}},200);})</script>`;
         html = html.replace('</body>', `${scrollScript}</body>`);
       }
 
-      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-      res.end(html);
+      // Same-origin key injection so the annotator's fetches can authenticate
+      // (advisory GHSA-xvjp-7748-v88v). The shell is public (iframe navigation);
+      // its data/media sub-routes stay keyed.
+      sendKeyInjectedHtml(res, html);
     } catch (err) {
       res.writeHead(500, { 'Content-Type': 'text/plain' });
       res.end(`Failed to serve annotator: ${(err as Error).message}`);
