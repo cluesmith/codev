@@ -259,3 +259,21 @@ Lessons worth carrying:
   changed and run those.
 - **A default port is an ambient dependency on someone's live system.** `getTowerClient()`
   with no argument means "whatever Tower is running on this machine".
+
+Round 2 detail: gemini APPROVE, claude APPROVE, codex REQUEST_CHANGES (the artifact-file
+point above). Claude's round-2 nits, all accepted:
+- `registerForCleanup()` re-armed a `process.once('exit')` handler every time the tracking
+  set drained — a real MaxListeners risk. Now a boolean flag.
+- A weak assertion (`expect(process.listeners('exit').length).toBeGreaterThan(0)` — a
+  tautology under vitest) replaced with two behavioural tests. **My first replacement passed
+  against the buggy code too**: entries left by earlier tests in the same file kept the set
+  non-empty, so the re-arm never occurred and the assertion was vacuous. Fixed with
+  `vi.resetModules()` for a fresh module instance, then verified it fails on the bug (5
+  listeners vs 3). Second time this session that instrumentation looked like proof and
+  wasn't.
+- A doc comment named a file that does not exist.
+
+Flagged, not fixed: the client guard lives on the CLI's `TowerClient` subclass, so
+`apps/vscode`'s `signalTunnel` path (which constructs the sdk client directly) is unguarded.
+Not a test-suite path and not what caused this incident — out of BUGFIX scope, worth a
+follow-up if the architect wants defence there too.

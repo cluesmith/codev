@@ -12,7 +12,7 @@
  *      `vitest-e2e-setup.ts` hands the real local key to.
  *
  * The Tower-spawning half of the fix is pinned end-to-end in
- * `bugfix-1515-test-tower-isolation.e2e.test.ts`; this file covers the units.
+ * `bugfix-1515-tower-isolation.e2e.test.ts`; this file covers the units.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -82,20 +82,33 @@ describe('#1515 agent-farm dir isolation', () => {
     }
   });
 
-  it('registers every isolated dir for removal at process exit', async () => {
+  it('removeIsolatedAgentFarmDir deletes the dir and the key copied into it', async () => {
     const utils = await import('./helpers/tower-test-utils.js');
+    const { existsSync } = await import('node:fs');
     const dir = utils.createIsolatedAgentFarmDir();
-    try {
-      // The dirs hold a copy of the shared local key, so callers that spawn
-      // Towers themselves must not leave them behind.
-      const listeners = process.listeners('exit');
-      expect(listeners.length).toBeGreaterThan(0);
-      rmSync(dir, { recursive: true, force: true });
-      // Removing twice must not throw when the exit handler runs.
-      expect(() => rmSync(dir, { recursive: true, force: true })).not.toThrow();
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
+    expect(existsSync(resolve(dir, 'local-key'))).toBe(true);
+
+    utils.removeIsolatedAgentFarmDir(dir);
+    expect(existsSync(dir)).toBe(false);
+    // Idempotent — the process-exit backstop may pass over it again.
+    expect(() => utils.removeIsolatedAgentFarmDir(dir)).not.toThrow();
+  });
+
+  it('does not add an exit listener per isolated dir', async () => {
+    // A fresh module instance, so the tracking set starts empty — otherwise
+    // entries left by earlier tests keep it non-empty and the re-arm this
+    // guards against can never occur, making the assertion vacuous.
+    vi.resetModules();
+    const utils = await import('./helpers/tower-test-utils.js');
+
+    const before = process.listenerCount('exit');
+    // Each round drains the set completely. Registration must not re-arm when
+    // it empties, or a long run trips MaxListeners.
+    for (let round = 0; round < 3; round++) {
+      const dirs = Array.from({ length: 3 }, () => utils.createIsolatedAgentFarmDir());
+      for (const dir of dirs) utils.removeIsolatedAgentFarmDir(dir);
     }
+    expect(process.listenerCount('exit')).toBe(before + 1);
   });
 });
 

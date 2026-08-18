@@ -155,6 +155,7 @@ export function createIsolatedAgentFarmDir(): string {
  * Towers themselves. `rmSync(force)` makes the double-removal a no-op.
  */
 const isolatedDirs = new Set<string>();
+let exitHandlerRegistered = false;
 
 /**
  * Remove an isolated agent-farm dir. Callers that create one directly should
@@ -168,7 +169,11 @@ export function removeIsolatedAgentFarmDir(dir: string): void {
 }
 
 function registerForCleanup(dir: string): void {
-  if (isolatedDirs.size === 0) {
+  // A flag, not `isolatedDirs.size === 0`: the set drains as callers clean up,
+  // so a size check would arm a fresh listener each time it empties and would
+  // eventually trip MaxListeners on a long run.
+  if (!exitHandlerRegistered) {
+    exitHandlerRegistered = true;
     process.once('exit', () => {
       for (const d of isolatedDirs) {
         try { rmSync(d, { recursive: true, force: true }); } catch { /* ignore */ }
