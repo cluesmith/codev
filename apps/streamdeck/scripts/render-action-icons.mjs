@@ -41,6 +41,8 @@ export const ICONS = [
   { name: 'send-queue', glyph: 'comment' },
   { name: 'open-terminal', glyph: 'terminal' },
   { name: 'open-architect', glyph: 'architect' },
+  { name: 'architect-action', glyph: 'architect' },
+  { name: 'switch', glyph: 'switch' },
 ];
 
 // name → rendered from the brand mark in icons/plugin.svg instead of a face.ts glyph (#1444).
