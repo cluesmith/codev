@@ -31,6 +31,7 @@ const mockFetchOverview = vi.fn<() => Promise<OverviewData>>();
 const mockRefreshOverview = vi.fn<() => Promise<void>>();
 
 vi.mock('../src/lib/api.js', () => ({
+  getWebKey: () => null,
   fetchOverview: (...args: unknown[]) => mockFetchOverview(...(args as [])),
   refreshOverview: (...args: unknown[]) => mockRefreshOverview(...(args as [])),
   getSSEEventsUrl: () => 'http://localhost:0/api/events',

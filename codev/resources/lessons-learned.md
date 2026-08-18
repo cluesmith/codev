@@ -63,6 +63,8 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 - [From 0097] `writeFileSync` with `{ mode: 0o600 }` only applies mode on file creation -- pre-existing files keep their old permissions. Always follow with `chmodSync(path, 0o600)` to enforce permissions regardless.
 - [From 0099] Always use `path.sep` in path security checks. The `startsWith(projectPath)` vulnerability allows sibling directory traversal. Always use `startsWith(base + path.sep)` or `path.relative()` -- never bare `startsWith(base)`.
 - [From 0099] Use collision-resistant IDs by default. Using `Date.now()` for IDs is a known anti-pattern when multiple operations can occur in the same millisecond. Use `crypto.randomUUID()` or a counter -- never timestamp-only.
+- [secfix-1] An auth gate's public-route allowlist must include the tooling's own readiness/uptime probes. Adding key enforcement to a route that `afx tower start` polls for readiness (`/api/status`) made the probe 401 forever, so startup never detected "ready" and the launcher killed a healthy Tower after its 30s timeout — a self-inflicted boot failure, invisible to build+tests. Either keep such probes on the public allowlist (e.g. `/health`) or have the (trusted, local) probe authenticate.
+- [secfix-1] In a key-bearing page, ANY XSS is credential theft: once the shared key is injected into a document, an XSS there reads the key and yields full API access, so the "no XSS" bar on those specific pages is load-bearing, not cosmetic. Sweep every sink where attacker-influenceable input (filenames, paths, query params, file-derived server values) reaches the key-bearing document's HTML/JS and encode at the sink; a media route that can only be loaded via a `src` attribute (no header possible) must be re-plumbed to an authenticated blob fetch rather than left keyless.
 
 ## Architecture
 
@@ -107,6 +109,7 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 - [From #1018] A guard's *surface* and its *blast radius* must match the actual hazard, not the role. The write-guard is builder-only and write-only by design: (a) the architect legitimately owns `main`, so the same hook there is a structural no-op (root resolves to the main checkout) and was deliberately not installed; (b) reads are left unguarded so codev's intentional cross-checkout reads (architect↔builder threads, sibling threads) keep working. Guarding "outside the worktree" symmetrically across roles or across read+write would have broken designed-in behavior. Scope the invariant to where the silent failure actually occurs.
 - [From #1018] `fs.writeFileSync` does not create missing parent dirs, and a git worktree only materializes directories that contain *tracked* files — git never checks out an empty dir. A path like `.claude/hooks/` (holding only a generated, intentionally-untracked file) therefore does not exist in a fresh worktree, and even `.claude/` may be absent in an adopter repo that tracks nothing under it. Any code that writes a generated file into a worktree subdir must `mkdir -p` its parent first; don't assume a dir exists just because a sibling tracked dir (e.g. `.claude/skills/`) does.
 - [From #1139] When you add an interactive resolution step (a picker, a prompt) in front of an API that has a documented defaulting parameter, the resolution must flow to every consumer of that default: return the resolved value from the command/function that owns the interaction and audit downstream callers. Two independently-correct changes composed into a silent no-op here. Spec 786 Phase 6 deliberately defaulted `injectArchitectText(architectName = 'main')` so the Backlog button kept working, and Issue 841 Gap 2 later added a QuickPick upstream in `codev.openArchitectTerminal`, but the picker's choice was consumed only for "which terminal to open," never returned, so the reference commands kept injecting into `main` no matter what the user picked. Neither change was wrong; the seam between them was. The tell to grep for: a `showQuickPick`/resolution whose result is used locally but not returned, sitting upstream of a call site that relies on a default the resolution was meant to supersede.
+- [From #1497] A name that is only a *caption* can carry a convenience fallback safely; the moment that same name becomes an *address* — a cache key, a lookup key, a routing target — the fallback turns into a misdelivery bug. `codev.openArchitectTerminal` resolved a non-live `main` to `architects[0]` but flowed the *requested* name `'main'` onward, and in `terminal-manager.ts` that name keys both the terminal cache (`architect:${name}`) and the `injectArchitectText` lookup: the wrong architect was cached under `architect:main`, wore the unqualified "Codev: Architect" label (the exact form that denotes `main`), and captured any text later injected at `main`. Two structural defenses, both applied: (1) flow the *resolved occupant's own name* onward, never the requested name, so key/label/injection all address the real occupant even if a fallback is ever reintroduced; (2) drop the `|| 'main'` fallback whose *entire realized behaviour was the failure window* — it was only ever consulted when `main` was absent from the roster, so it served no healthy case and removing it cost nothing legitimate. The same `|| 'main'`-as-address shape recurs (sibling lane pir-1494's approval-relay refusal; Tower `role_id || 'main'` #1214; owner-fallback #1406): audit any `|| 'main'` / `?? <default>` where the resolved value then *keys an action*, not just a display. Divergence note worth recording: the terminal path here and the approval-relay both **refuse** rather than substitute — a request for `main` that can't be honoured is answered by saying so, not by handing over a different recipient — so the two lanes deliberately did **not** diverge. Sibling to #1139 (resolved-name-must-flow-to-every-consumer).
 - [From 810] The builder-overview shape is defined twice — the `OverviewBuilder` wire type (`packages/types`) and a structurally-identical local `BuilderOverview` interface in `overview.ts`, kept in sync by hand. Adding a field to only the wire type compiles for clients (vscode/dashboard) but breaks the codev build at the server-side `builders.push({...})` sites. Compounding footgun: the codev package has no `check-types` script, so the mismatch is invisible until a full `pnpm build` runs `tsc` over `codev/src` — vscode/dashboard type-checks pass meanwhile. When touching the overview projection, build the codev package, not just the client type-check.
 - [From 0395] Prompt-based instructions beat programmatic file manipulation for flexible document generation — the Builder already has context and can write natural responses, while code would need fragile parsing and placeholder logic
 - [From 0395] Keep specs and plans clean as forward-looking documents — append review history (consultation feedback, lessons learned) to review files, not to the documents being reviewed
@@ -192,6 +195,7 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 - [From 818] An acceptance criterion of "rule structurally identical to X" is a written-rule trap when the rule lives as duplicated prose in two views. Two copies drift even with diligence; the only durable enforcement is one shared function both views import. Extract when the second consumer lands — not before (no abstraction without users) and not later (drift starts on day one).
 - [From 1107] To place an *interactive* React widget (text input, buttons) inside an `innerHTML`-managed body, don't hand-build DOM there — inject an empty placeholder node in an effect and `createPortal` the React component into it. React owns the widget's state/focus/keyboard, while it still sits in normal document flow. Make the placeholder-injection effect idempotent (reuse a correctly-placed node; bail when `previousElementSibling` already matches the anchor) or the `setState`-on-inject loops; an `html` rebuild disconnects the node, which the same guard detects and re-creates. This is the read-while-write composer (#1107) but applies to any overlay/widget over imperatively-rendered content.
 - [From #1338] Retiring an entry from a shared resolver/registry must **fail closed at every resolution path**, not just delete the entry: a pure delete makes the explicit-name path throw a generic "unknown" error (no migration guidance) and the auto-detect path *silently* fall back to the default provider (here, the claude harness) — a dangerous mis-injection, not a visible failure. Keep the retired name in the detector and add a retirement sentinel checked BEFORE both exits so every path yields the same specific message; then grep every caller — spawn preflight, launch, and especially the reconnect/clean-exit relaunch paths that mint fresh sessions — because those are exactly the ones an "it's unreachable" analysis misses (three of them surfaced only under adversarial review here).
+- [secfix-1] Adding the first **runtime (value)** import of a workspace package that was previously only **type-imported** (`import type`, erased at build) requires moving that dep from `devDependencies` to `dependencies` in the importing package. A devDependency is not installed for a published/deployed consumer, so the packaged build throws `Cannot find module` at **module load** — before any logger initializes, so it surfaces as a silent boot crash (e.g. a 30s startup timeout with zero log lines), not an obvious error. It is invisible to build+test because the monorepo symlinks everything at dev time. Verify the **packaged** artifact: `pnpm --filter <pkg> deploy --prod --legacy <dir>` (or a throwaway-prefix `npm install` of the tarballs) resolves only real `dependencies`, mimicking a published install — then load the entry module from it. Also update any hand-rolled local-install/packaging script that packs a *hand-picked subset* of workspace packages: it must now pack the newly-runtime dep too, or the install can't satisfy it.
 
 ## Process
 
@@ -266,6 +270,7 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 
 ## Testing
 
+- [From #1497] A vitest unit test that (transitively) value-imports a workspace package needs that package's `dist` built first — vite resolves the runtime `exports.default → ./dist`, not the TS source. Type-only imports are elided, which is why most vscode `__tests__` never hit this and why the pre-existing `terminal-manager.test.ts` retreated to source-string assertions ("constructing a full `TerminalManager` requires heavyweight deps"). But a *behavioural* capture from a class buried behind such imports is viable: importing the real `TerminalManager` (it value-imports `@cluesmith/codev-types` + `codev-sdk` via `terminal-adapter`) worked once `codev-types`/`codev-sdk` were built, letting the test assert real `injectArchitectText` `sendText` routing instead of a source regex. It passes in CI because `test.yml` runs `pnpm build` before vitest; locally, build the deps first. Companion to #907 (esbuild's `default → ./dist` condition needs the package built) — the same dist-before-consume rule, on the vitest side.
 - [From #1401] **A guard is not a guard until you have watched it fail.** Two variants bit in one
   project. (a) A compile-time exhaustiveness check written as a bare conditional type alias
   (`type _X = Cond extends never ? true : never`) constrains nothing — an omitted member resolves
@@ -353,6 +358,43 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 
 - [From #1414] A Stream Deck feature spans TWO independently-loaded artifacts — the deck plugin bundle (`streamdeck link` → `apps/streamdeck/…sdPlugin`) and the VSCode extension (the command PROVIDER). Hardware verification requires BOTH to be on the branch under test; either one stale silently masks the change. The trap: `streamdeck link` is global app state, so a sibling worktree's live symlink (here pir-1425) keeps serving its OLD `actions.ts`, and the deck fires the pre-change verb even though your branch's bundle is built. Diagnose before reinstalling: `streamdeck list` shows which checkout is linked; the aggregate-vs-nothing symptom localizes the stale half (old deck fires `view-diff` → aggregate opens; new deck + old extension fires an unknown verb → nothing opens). Relink the deck to the test worktree AND install the branch's extension vsix (or run its Extension Development Host, focused), then hand the deck back to the sibling's symlink when done. [Sharpened by #1410] *Why the bundle can be silently absent:* the root `pnpm build` builds only the published `@cluesmith/codev` package + its deps — NOT `apps/streamdeck` / `apps/vscode` (they're never npm-published; CI builds them in dedicated jobs, per the comment in `test.yml`). So after `streamdeck link` a fresh worktree may have no `bin/plugin.js` (`CodePath`) at all and the plugin renders nothing — build it explicitly with `pnpm --filter @cluesmith/codev-streamdeck build` (the extension likewise via its own `vsix`/build). "Ran `pnpm build`" does not mean the apps are built.
 
+- [From #1498] A green mode-dependent test can be semantically wrong when the default fixture's
+  state contradicts the mode under assertion. The streamdeck `makeStore()` default selection is
+  `pir-1`, blocked at plan-approval — i.e. a **canvas**-phase builder. A `ScrollNav` test
+  asserting `Scroll · send` (a *diff*-mode delivery label) against it passed, while claiming a
+  label that builder should never show. The contradiction was invisible until canvas mode was
+  given its own meaning (`Scroll · editor only`), which flipped the expected label and turned the
+  bug red. When adding a mode-dependent assertion, select the fixture builder whose phase matches
+  the mode you are asserting (`pir-2`, implement phase, is diff mode) rather than reaching for the
+  default — a passing assertion against the wrong-phase default proves nothing.
+  [Recurred in #1501] The predicted failure landed: giving canvas-mode rotation its own behaviour
+  flipped a *rotate* test (`:638`) that had ridden the canvas default fixture through
+  mode-independent code — repointing it to `pir-2` created the first genuine diff-mode rotate
+  coverage that never existed.
+
+- [From #1501] **A DOM assumption that unit tests cannot falsify needs a real-browser test, and an
+  approved plan is not evidence about runtime.** The approved plan said the canvas viewport-scroll
+  should pan `root.scrollTop` (the canvas body). But the body is not the vertical scroll container:
+  in vertical reading mode the *host page* scrolls the canvas (`viewportStartLine` measures block
+  visibility against the window top, and the VSCode host leaves body overflow default —
+  `preview-template.ts`). Panning `body.scrollTop` would have silently no-oped in the real webview
+  while passing every jsdom-level unit test, because jsdom reports no scroll geometry — the
+  assumption is invisible to the only suite that runs fast. The catch came from tracing *which
+  element actually scrolls* and proving it in real Chromium (Playwright: pan moves the document
+  scroller, `count: N` == N single steps, huge count edge-stops), not from re-reading the plan.
+  Companion to #1380 (jsdom cannot express CSS layout): the same rule extends from layout *features*
+  to any *which-node-scrolls / which-node-clips* assumption.
+
+- [From #1501] A canvas-command Stream Deck feature spans a THIRD independently-versioned artifact
+  beyond #1414's deck-bundle + VSCode-extension pair: **Tower** (the codev server validates every
+  canvas command against its own allowlist in `canvas-relay.ts`). A stale global Tower — the
+  installed `@cluesmith/codev` rather than the branch build — rejects a newly added command as
+  `invalid-request`, which the deck renders as `Error` on the touchstrip *even when the deck bundle
+  and the extension are both on-branch*. When a cross-surface command shows `Error` on hardware,
+  check which Tower is actually running (`ps` for the `tower-server.js` path) before suspecting the
+  code; restarting Tower to pick up the branch build kills every running builder, so it is the
+  human's call.
+
 ## UI/UX
 
 - [From #1463] A Stream Deck action's identity is its **UUID**, not its `Name`. Renaming a key's
@@ -378,6 +420,19 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
   events at page load, so an eager recompute thrashes the size and flickers the faces. General rule: when
   a fixed count and a hand-numbered index can disagree with the true placed set, tie both to the placed
   set so a selection can never point at nothing.
+- [From #1495] "The deck never consumes the live-architect view" (#1463) is really "the deck never
+  **resolves** liveness" — the safety hinges on a key's **arity**, not its data source. A
+  **single-target** key that resolves one name from a stale list renders the wrong name faithfully
+  and opens the wrong person **silently**; an **enumeration** board that lists every candidate and
+  relays each name for the *editor* to resolve **fails loudly** (VSCode's "no such architect"
+  warning) when a name is stale. So the Architects board safely enumerates `OverviewData.architects`
+  (the live view) where #1463's single-target key must not. Corollary (filed #1497): **sort a
+  privileged default first but never *pin* it** — an explicit `'main'` arms VSCode's main-else-first
+  fallback, so a pinned `main` pressed while `main` is briefly offscreen opens whoever sorts first
+  under main's *own unqualified* terminal label (mislabel by qualifier-strip), wrong until the next
+  press; an absent key is the visible, self-correcting, safer failure. And when a doc comment encodes
+  a since-narrowed invariant, **amend it in place** (keep the original reasoning) — deleting it invites
+  the next maintainer to "restore" the old behavior as a repair.
 - [From #1428] Stream Deck's `setImage` accepts an SVG per the SDK d.ts, but a *raw* `<svg>`
   string is silently dropped on-device (Stream Deck 6.9) — the key reverts to its manifest PNG
   with no error. Two undocumented requirements: encode as a base64 `data:image/svg+xml` data URI,
@@ -536,6 +591,7 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 - [From 1011] Soft-mode protocols (experiment/spike) have no porch phase prompts, so `protocol.md` is their only guidance channel and templates must be injected into it; strict-mode protocols carry structure in phase prompts. A delivery fix has to cover both channels.
 - [From 1011] Don't drop a "use the template at `<path>`" pointer as a dead reference. The spir/aspir plan template carries the machine-readable phases JSON porch's plan gate requires (`has_phases_json`), so it must be *delivered* via a porch-resolved `{{> }}` include, not removed.
 - [From 1233] `--resume` restores the transcript, not the momentum: a resumed interactive agent sits idle until a user turn arrives. For unattended agents (builders), deliver a short nudge prompt with the resume (`claude --resume <id> "<msg>"` — verified to process the positional prompt as the next turn); otherwise a fix for context loss silently becomes a stalled-lane incident, which is harder to spot because the pane looks healthy. Human-attended sessions (architects) don't need the nudge.
+- [From #1494] A relay meant to *trigger* an action must read as an imperative instruction, not a past-tense fact. A VS Code gate approval phrased "Human approved X in VS Code" was read by the receiving architect as *already done*, so it never relayed and the builder stalled at the gate; "Approve X, please pass it to the builder" is a call to act. Corollary: message provenance (who sent it, from where) belongs in **structured attribution** (the `from` field and the rendered header `[USER via VS Code]`), not in body text, or it leaks to downstream recipients and can be misread. Both failure modes surfaced only in a live end-to-end run, never in unit tests.
 
 ## Debugging and Root Cause Analysis
 

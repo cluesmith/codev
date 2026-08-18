@@ -18,7 +18,7 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     // Sandboxes the real agy binary and the user-global metrics DB (#1323).
-    setupFiles: ['./vitest-setup.ts'],
+    setupFiles: ['./vitest-setup.ts', './vitest-e2e-setup.ts'],
     include: [
       'src/commands/porch/__tests__/e2e/**/*.test.ts',
       'src/**/*.e2e.test.ts',  // All server-spawning / integration tests

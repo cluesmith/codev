@@ -9,8 +9,20 @@ import { resolve } from 'node:path';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import net from 'node:net';
+import { ensureLocalKey } from '@cluesmith/codev-core/auth';
+import { terminalWsProtocols } from '@cluesmith/codev-types';
 
 const TOWER_START_TIMEOUT = 15_000;
+
+/**
+ * WebSocket subprotocols carrying the shared local key, for authenticated
+ * terminal/message sockets against the test Tower. Tower enforces request
+ * authentication (advisory GHSA-xvjp-7748-v88v); a keyless upgrade is rejected
+ * at the handshake. HTTP calls are keyed centrally in vitest-e2e-setup.ts.
+ */
+export function towerWsProtocols(): string[] | undefined {
+  return terminalWsProtocols(ensureLocalKey());
+}
 
 // Path to compiled tower-server.js (4 levels up from helpers/ to packages/codev/)
 const TOWER_SERVER_PATH = resolve(
@@ -22,6 +34,11 @@ export interface TowerHandle {
   port: number;
   process: ChildProcess;
   socketDir: string;
+  /**
+   * The throwaway `~/.agent-farm` this Tower was pointed at (#1515). Nothing
+   * the child writes — cloud config, local key, DB, logs — reaches the real one.
+   */
+  agentFarmDir: string;
   stop: () => Promise<void>;
 }
 
@@ -108,6 +125,64 @@ async function findAvailablePort(startPort: number): Promise<number> {
   throw new Error(`No available port found starting from ${startPort}`);
 }
 
+/**
+ * Build a throwaway agent-farm directory for a spawned test Tower (#1515).
+ *
+ * The child used to inherit `~/.agent-farm` wholesale: it read the developer's
+ * real cloud credentials (so a tunnel-disconnect test deregistered their actual
+ * Tower and deleted their actual credentials), and dropped `test-<port>.db`
+ * files into the real directory.
+ *
+ * The shared local key is copied in rather than left to be regenerated: the
+ * test process authenticates its own HTTP/WS calls with the key from the real
+ * directory (see `vitest-e2e-setup.ts` and `towerWsProtocols()`), so both sides
+ * must present the same value or every request 401s. The key is the only thing
+ * carried over — no cloud config, no DB, no log.
+ */
+export function createIsolatedAgentFarmDir(): string {
+  const dir = mkdtempSync(resolve(tmpdir(), 'codev-af-'));
+  writeFileSync(resolve(dir, 'local-key'), ensureLocalKey(), { mode: 0o600 });
+  registerForCleanup(dir);
+  return dir;
+}
+
+/**
+ * Every isolated dir created in this process, removed when it exits.
+ *
+ * These hold a copy of the shared local key, so they must not accumulate under
+ * the system temp dir. `startTower()` removes its own in `stop()`; this is the
+ * safety net for that path failing and the only cleanup for callers that spawn
+ * Towers themselves. `rmSync(force)` makes the double-removal a no-op.
+ */
+const isolatedDirs = new Set<string>();
+let exitHandlerRegistered = false;
+
+/**
+ * Remove an isolated agent-farm dir. Callers that create one directly should
+ * call this in their teardown: vitest's pooled workers are not guaranteed to
+ * run `process.on('exit')` handlers, so the net below is a backstop, not the
+ * primary cleanup.
+ */
+export function removeIsolatedAgentFarmDir(dir: string): void {
+  isolatedDirs.delete(dir);
+  try { rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
+}
+
+function registerForCleanup(dir: string): void {
+  // A flag, not `isolatedDirs.size === 0`: the set drains as callers clean up,
+  // so a size check would arm a fresh listener each time it empties and would
+  // eventually trip MaxListeners on a long run.
+  if (!exitHandlerRegistered) {
+    exitHandlerRegistered = true;
+    process.once('exit', () => {
+      for (const d of isolatedDirs) {
+        try { rmSync(d, { recursive: true, force: true }); } catch { /* ignore */ }
+      }
+    });
+  }
+  isolatedDirs.add(dir);
+}
+
 export interface StartTowerOptions {
   /**
    * Return the moment the port accepts a connection rather than on the next
@@ -132,6 +207,9 @@ export async function startTower(
   // too long for Unix sockets (sun_path max ~104 bytes).
   const socketDir = mkdtempSync('/tmp/codev-sock-');
 
+  // #1515: isolate the agent-farm dir too, not just the DB name and sockets.
+  const agentFarmDir = createIsolatedAgentFarmDir();
+
   const proc = spawn('node', [TOWER_SERVER_PATH, String(actualPort)], {
     stdio: ['ignore', 'pipe', 'pipe'],
     detached: false,
@@ -140,6 +218,7 @@ export async function startTower(
       NODE_ENV: 'test',
       AF_TEST_DB: `test-${actualPort}.db`,
       SHELLPER_SOCKET_DIR: socketDir,
+      CODEV_AGENT_FARM_DIR: agentFarmDir,
       ...extraEnv,
     },
   });
@@ -155,6 +234,7 @@ export async function startTower(
   if (!started) {
     proc.kill();
     try { rmSync(socketDir, { recursive: true, force: true }); } catch { /* ignore */ }
+    removeIsolatedAgentFarmDir(agentFarmDir);
     throw new Error(`Tower failed to start on port ${actualPort}. stderr: ${stderr}`);
   }
 
@@ -162,6 +242,7 @@ export async function startTower(
     port: actualPort,
     process: proc,
     socketDir,
+    agentFarmDir,
     stop: async () => {
       proc.kill('SIGTERM');
       await new Promise<void>((resolve) => {
@@ -171,8 +252,9 @@ export async function startTower(
           resolve();
         }, 2000);
       });
-      // Clean up isolated socket dir
+      // Clean up isolated socket dir and agent-farm dir
       try { rmSync(socketDir, { recursive: true, force: true }); } catch { /* ignore */ }
+      removeIsolatedAgentFarmDir(agentFarmDir);
     },
   };
 }
@@ -211,6 +293,9 @@ export async function cleanupAllTerminals(port: number): Promise<void> {
 
 /**
  * Clean up test DB files created by a Tower instance.
+ *
+ * Since #1515 a spawned Tower writes its DB into the throwaway agent-farm dir
+ * that `stop()` removes, so this only sweeps leftovers from before that fix.
  */
 export function cleanupTestDb(port: number): void {
   const dbBase = resolve(homedir(), '.agent-farm', `test-${port}.db`);

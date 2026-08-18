@@ -9,10 +9,14 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
-import { homedir } from 'node:os';
 import Database from 'better-sqlite3';
 import type { TowerHandle } from './helpers/tower-test-utils.js';
-import { startTower, cleanupAllTerminals, cleanupTestDb } from './helpers/tower-test-utils.js';
+import {
+  startTower,
+  cleanupAllTerminals,
+  cleanupTestDb,
+  removeIsolatedAgentFarmDir,
+} from './helpers/tower-test-utils.js';
 
 const TEST_TOWER_PORT = 14710;
 // Short interval + zero grace so a genuine husk (created below) is reaped on
@@ -112,7 +116,8 @@ describe('Issue #1227: husk-sweep periodic timer E2E', () => {
     // re-adopt a shellper (the exact scenario Issue #1227 describes) — the
     // shellper survives the deletion because SessionManager never disconnects
     // it just because a DB row disappeared.
-    const dbPath = resolve(homedir(), '.agent-farm', `test-${TEST_TOWER_PORT}.db`);
+    // #1515: the Tower's DB lives in its isolated agent-farm dir, not ~/.agent-farm.
+    const dbPath = resolve(tower.agentFarmDir, `test-${TEST_TOWER_PORT}.db`);
     const db = new Database(dbPath);
     db.pragma('busy_timeout = 5000');
     const deleted = db.prepare('DELETE FROM terminal_sessions WHERE shellper_pid = ?').run(shellperPid);
@@ -173,5 +178,9 @@ describe('Issue #1227: husk-sweep graceful shutdown', () => {
       const { rmSync } = await import('node:fs');
       rmSync(handle.socketDir, { recursive: true, force: true });
     } catch { /* ignore */ }
+    // #1515: this tower is killed directly rather than via handle.stop(), so
+    // its isolated agent-farm dir — which holds a copy of the shared local key
+    // — has to be removed here too.
+    removeIsolatedAgentFarmDir(handle.agentFarmDir);
   }, 20_000);
 });

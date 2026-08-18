@@ -16,7 +16,7 @@ import type {
   CanvasCommandClientErrorCode,
 } from '@cluesmith/codev-sdk/controller';
 import type { CodevStore } from './store.js';
-import { approveFaceSvg, architectFaceSvg, builderFaceSvg, faceForBuilder, labelFaceSvg, sendFbFaceSvg, svgToDataUri } from './face.js';
+import { approveFaceSvg, architectFaceSvg, architectKeyFaceSvg, builderFaceSvg, faceForBuilder, labelFaceSvg, sendFbFaceSvg, svgToDataUri } from './face.js';
 
 /**
  * The Stream Deck actions — thin adapters over CodevStore. Each maps a physical
@@ -43,7 +43,15 @@ async function ack(action: KeyAction, ok: boolean): Promise<void> {
 
 // ── Verb keypads ──────────────────────────────────────────────────────────
 
-/** A keypad that fires one canonical verb (overridable via settings). */
+/**
+ * A keypad that fires one canonical verb (overridable via settings).
+ *
+ * VerbKey keys have no RUNTIME face: this base never calls `setImage`, so the key's manifest
+ * `Image` IS its hardware face (#1459). Subclasses that need a composed face (an icon plus a
+ * label, e.g. DevServerAction) render it themselves in `onWillAppear`, and for those the
+ * manifest image is only the placeholder the deck shows until that first render lands. So an
+ * unstyled VerbKey shows its static manifest icon; a compositing one overwrites it on appear.
+ */
 abstract class VerbKey extends SingletonAction<VerbSettings> {
   protected abstract readonly defaultVerb: string;
   constructor(protected readonly store: CodevStore) {
@@ -84,12 +92,7 @@ export class DevServerAction extends VerbKey {
 }
 
 
-// ── Slot keys (pinned builder board) ────────────────────────────────────────
-
-/** PI settings for the slot-based keys: an optional per-key verb. The former manual
- *  `slot` field is retired (#1465) — a key's slot is derived from where it physically
- *  sits, not hand-numbered, so the window can never disagree with the placed keys. */
-type SlotSettings = { verb?: string };
+// ── Placed keys (self-ordering board of keys) ───────────────────────────────
 
 /** How long to let the page-load `willAppear`/`willDisappear` burst settle before
  *  the full re-render (#1465). Keys arrive over several events at load, and a later
@@ -98,22 +101,25 @@ type SlotSettings = { verb?: string };
 const WINDOW_SETTLE_MS = 50;
 
 /**
- * A keypad pinned to a builder SLOT — the Nth builder in Row-1's window onto the
- * fleet — that fires a verb for that builder. A key's slot is its RANK among the
- * placed builder keys sorted by physical position (row, then column), derived from
- * `KeyAction.coordinates`, NOT a hand-numbered setting (#1465): so the window is
- * exactly as wide as the keys you placed, and a builder is never selectable while
- * shown on no key. The press indexes by position, so it survives builder ids
- * changing. Subclasses override the default verb, the render, and (optionally) the
- * verb resolution (BuilderAction resolves its `automatic` default to a phase artifact).
+ * A board of keys that SELF-ORDER by physical position: each placed key's SLOT is its
+ * RANK among the placed keys sorted by `KeyAction.coordinates` (row, then column), NOT a
+ * hand-numbered setting (#1465). Multi-action instances report `coordinates: undefined`
+ * and are excluded, so the board is exactly as wide as the keys you placed and the slot
+ * indexing survives keys being added or removed. This is the shared mechanism behind both
+ * the builder board (`SlotKey` → Row-1 window) and the architect board (`ArchitectAction`),
+ * extracted so neither reimplements the ordering.
+ *
+ * Subclasses render each key (`renderTo`) and may react to the placed set changing
+ * (`onPlacementChanged` — e.g. `SlotKey` resizes the Row-1 window from the placed count).
+ * Per-key settings are read from the press event where needed, so the shared tracking does
+ * not carry a settings type.
  */
-abstract class SlotKey extends SingletonAction<SlotSettings> {
-  protected abstract readonly defaultVerb: string;
-  // One SingletonAction instance serves EVERY key of this type, so per-key state
-  // (its action handle, settings, and board coordinates) is tracked per instance,
-  // keyed by the action context id — never in shared fields, which would collide.
-  // `coordinates` is `undefined` for a multi-action instance (excluded from the window).
-  private readonly keys = new Map<string, { action: KeyAction; settings: SlotSettings; coordinates?: Coordinates }>();
+abstract class PlacedKeys extends SingletonAction {
+  // One SingletonAction instance serves EVERY key of this type, so per-key state (its action
+  // handle and board coordinates) is tracked per instance, keyed by the action context id —
+  // never in shared fields, which would collide. `coordinates` is `undefined` for a
+  // multi-action instance (excluded from the board).
+  private readonly keys = new Map<string, { action: KeyAction; coordinates?: Coordinates }>();
   private settleTimer?: ReturnType<typeof setTimeout>;
 
   constructor(protected readonly store: CodevStore) {
@@ -121,51 +127,34 @@ abstract class SlotKey extends SingletonAction<SlotSettings> {
     this.store.onChange(() => this.renderAll());
   }
 
-  override onWillAppear(ev: WillAppearEvent<SlotSettings>): void {
+  override onWillAppear(ev: WillAppearEvent): void {
     if (!ev.action.isKey()) return;
-    const settings = ev.payload.settings ?? {};
-    this.keys.set(ev.action.id, { action: ev.action, settings, coordinates: ev.action.coordinates });
-    // Size the window from the placed keys right away so a press resolves against the
-    // current layout, and render THIS key now; the debounced pass re-renders the rest
-    // once the page-load burst settles (a later key can shift an earlier key's page).
-    this.store.setBuilderWindowSize(this.placedKeys().length);
+    this.keys.set(ev.action.id, { action: ev.action, coordinates: ev.action.coordinates });
+    // React to the new layout right away so a press resolves against the current key set, and
+    // render THIS key now; the debounced pass re-renders the rest once the page-load burst
+    // settles (a later key can shift an earlier key's slot).
+    this.onPlacementChanged();
     this.renderTo(ev.action);
     this.scheduleSettle();
   }
-  override onWillDisappear(ev: WillDisappearEvent<SlotSettings>): void {
+  override onWillDisappear(ev: WillDisappearEvent): void {
     this.keys.delete(ev.action.id);
-    this.store.setBuilderWindowSize(this.placedKeys().length);
+    this.onPlacementChanged();
     this.scheduleSettle();
   }
-  override onDidReceiveSettings(ev: DidReceiveSettingsEvent<SlotSettings>): void {
+  override onDidReceiveSettings(ev: DidReceiveSettingsEvent): void {
     const entry = this.keys.get(ev.action.id);
     if (!entry) return;
-    entry.settings = ev.payload.settings ?? {};
-    // A verb change doesn't move any key, so just re-render this one.
+    // A settings change doesn't move any key, so just re-render this one.
     this.renderTo(entry.action);
   }
-  override async onKeyDown(ev: KeyDownEvent<SlotSettings>): Promise<void> {
-    const b = this.builderFor(ev.action);
-    if (!b) {
-      await ev.action.showAlert();
-      return;
-    }
-    // Pressing a builder key focuses it: the shared cursor follows, so the diff
-    // dials and other selection-scoped keys now act on the builder you pressed.
-    this.store.syncToBuilder(b.id);
-    const settings = ev.payload.settings ?? {};
-    const verb = this.resolveVerb(settings, b);
-    const res = await this.store.client.sendCommand(verb, [b.id], this.store.selectedWorkspacePath());
-    await ack(ev.action, res.ok);
-  }
 
-  /** Placed builder keys — those with defined coordinates (multi-action instances
-   *  report `undefined` and are excluded) — in reading order: row, then column. */
-  private placedKeys(): KeyAction[] {
+  /** Placed keys — those with defined coordinates (multi-action instances report `undefined`
+   *  and are excluded) — in reading order: row, then column. */
+  protected placedKeys(): KeyAction[] {
     return [...this.keys.values()]
       .filter(
-        (e): e is { action: KeyAction; settings: SlotSettings; coordinates: Coordinates } =>
-          e.coordinates !== undefined,
+        (e): e is { action: KeyAction; coordinates: Coordinates } => e.coordinates !== undefined,
       )
       .sort((a, b) => a.coordinates.row - b.coordinates.row || a.coordinates.column - b.coordinates.column)
       .map((e) => e.action);
@@ -176,6 +165,60 @@ abstract class SlotKey extends SingletonAction<SlotSettings> {
     const slotIndex = this.placedKeys().findIndex((a) => a.id === action.id);
     return slotIndex < 0 ? undefined : slotIndex;
   }
+
+  /** Debounce a full re-render across the willAppear/willDisappear settle (#1465);
+   *  let the subclass react to the settled key set before rendering. */
+  private scheduleSettle(): void {
+    if (this.settleTimer) clearTimeout(this.settleTimer);
+    this.settleTimer = setTimeout(() => {
+      this.settleTimer = undefined;
+      this.onPlacementChanged();
+      this.renderAll();
+    }, WINDOW_SETTLE_MS);
+  }
+  private renderAll(): void {
+    for (const { action } of this.keys.values()) this.renderTo(action);
+  }
+
+  /** Hook: the placed-key set changed (appear / disappear / settle). Default no-op;
+   *  `SlotKey` resizes the Row-1 window here. */
+  protected onPlacementChanged(): void {}
+  protected abstract renderTo(action: KeyAction): void;
+}
+
+// ── Slot keys (pinned builder board) ────────────────────────────────────────
+
+/**
+ * A keypad pinned to a builder SLOT — the Nth builder in Row-1's window onto the
+ * fleet — that fires a verb for that builder. Reuses `PlacedKeys` for the self-ordering
+ * (#1465), and sizes the Row-1 window from the placed-key count so the window is exactly as
+ * wide as the keys you placed and a builder is never selectable while shown on no key. The
+ * press indexes by position, so it survives builder ids changing. Subclasses override the
+ * default verb, the render, and (optionally) the verb resolution (BuilderAction resolves its
+ * `automatic` default to a phase artifact).
+ */
+abstract class SlotKey extends PlacedKeys {
+  protected abstract readonly defaultVerb: string;
+
+  /** The Row-1 window is exactly as wide as the placed builder keys (#1465). */
+  protected override onPlacementChanged(): void {
+    this.store.setBuilderWindowSize(this.placedKeys().length);
+  }
+
+  override async onKeyDown(ev: KeyDownEvent): Promise<void> {
+    const b = this.builderFor(ev.action);
+    if (!b) {
+      await ev.action.showAlert();
+      return;
+    }
+    // Pressing a builder key focuses it: the shared cursor follows, so the diff
+    // dials and other selection-scoped keys now act on the builder you pressed.
+    this.store.syncToBuilder(b.id);
+    const verb = this.resolveVerb(ev.payload.settings, b);
+    const res = await this.store.client.sendCommand(verb, [b.id], this.store.selectedWorkspacePath());
+    await ack(ev.action, res.ok);
+  }
+
   /** The builder a key shows: its slot indexes the fleet window. `undefined` for a
    *  multi-action key (no slot) or a slot past the end of the fleet (trailing empty). */
   protected builderFor(action: KeyAction): OverviewBuilder | undefined {
@@ -184,25 +227,10 @@ abstract class SlotKey extends SingletonAction<SlotSettings> {
     return this.store.windowedBuilder(slotIndex);
   }
 
-  /** Debounce a full re-render across the willAppear/willDisappear settle (#1465);
-   *  reassert the window size from the settled key set before rendering. */
-  private scheduleSettle(): void {
-    if (this.settleTimer) clearTimeout(this.settleTimer);
-    this.settleTimer = setTimeout(() => {
-      this.settleTimer = undefined;
-      this.store.setBuilderWindowSize(this.placedKeys().length);
-      this.renderAll();
-    }, WINDOW_SETTLE_MS);
+  /** The verb a press fires. Base: the per-key `verb` setting, else the default. */
+  protected resolveVerb(settings: Record<string, unknown>, _b: OverviewBuilder): string {
+    return typeof settings.verb === 'string' ? settings.verb : this.defaultVerb;
   }
-
-  /** The verb a press fires. Base: the per-key setting, else the default. */
-  protected resolveVerb(settings: SlotSettings, _b: OverviewBuilder): string {
-    return settings.verb ?? this.defaultVerb;
-  }
-  private renderAll(): void {
-    for (const { action } of this.keys.values()) this.renderTo(action);
-  }
-  protected abstract renderTo(action: KeyAction): void;
 }
 
 /**
@@ -215,8 +243,8 @@ abstract class SlotKey extends SingletonAction<SlotSettings> {
 export class BuilderAction extends SlotKey {
   override readonly manifestId = 'com.cluesmith.codev.builder-action';
   protected readonly defaultVerb = 'automatic';
-  protected override resolveVerb(settings: SlotSettings, b: OverviewBuilder): string {
-    const verb = settings.verb;
+  protected override resolveVerb(settings: Record<string, unknown>, b: OverviewBuilder): string {
+    const verb = typeof settings.verb === 'string' ? settings.verb : undefined;
     if (verb && verb !== 'automatic') return verb;
     // Automatic: the current phase's artifact, else a terminal when there's none.
     // When that artifact is the diff, open the builder's FIRST file in per-file mode
@@ -243,6 +271,47 @@ export class BuilderAction extends SlotKey {
       svg = builderFaceSvg({ kind: 'empty', slot: slotIndex === undefined ? '—' : String(slotIndex + 1) });
     }
     void action.setImage(svgToDataUri(svg));
+    void action.setTitle('');
+  }
+}
+
+/**
+ * Architect Action (#1495): a key on the Architects board that opens the Nth architect's
+ * terminal. Its slot is its rank among the placed Architect Action keys (self-ordering via
+ * `PlacedKeys`, reusing #1465), so key N shows and opens `store.architects()[N]`. On press it
+ * relays `open-architect-terminal <name>` — the same verb #1463's Open Architect key uses — so
+ * VSCode owns resolution and the not-found warning (the deck never resolves liveness).
+ *
+ * Distinct from #1463's key, which resolves ONE target (the selected builder's owner, or
+ * `main`). This is an ENUMERATION of every live architect, one key each, for a board you switch
+ * to natively. It carries no scope and no selection: pressing it opens a terminal and changes
+ * nothing about the builder selection, Row 2, or the dials. A slot past the end of the architect
+ * list renders visibly empty and is inert on press.
+ */
+export class ArchitectAction extends PlacedKeys {
+  override readonly manifestId = 'com.cluesmith.codev.architect-action';
+
+  /** The architect a key shows: its slot indexes the enumerated architect list. `undefined`
+   *  for a multi-action key (no slot) or a slot past the end of the list (trailing empty). */
+  private architectFor(action: KeyAction): string | undefined {
+    const slotIndex = this.slotIndexOf(action);
+    if (slotIndex === undefined) return undefined;
+    return this.store.architects()[slotIndex];
+  }
+
+  override async onKeyDown(ev: KeyDownEvent): Promise<void> {
+    const name = this.architectFor(ev.action);
+    if (!name) {
+      // A slot with no architect (empty board, or past the end of the list) is inert.
+      await ev.action.showAlert();
+      return;
+    }
+    const res = await this.store.client.sendCommand('open-architect-terminal', [name], this.store.selectedWorkspacePath());
+    await ack(ev.action, res.ok);
+  }
+
+  protected renderTo(action: KeyAction): void {
+    void action.setImage(svgToDataUri(architectKeyFaceSvg(this.architectFor(action))));
     void action.setTitle('');
   }
 }
@@ -369,7 +438,17 @@ type ArchitectSettings = { target?: ArchitectTarget };
  *    recorded owner (ruling 3).
  *  - `main`: always the workspace's `main` architect. VSCode resolves `'main'` as
  *    main-else-first and owns the not-found warning, so the deck defers liveness to
- *    it (ruling 2) — the deck never consumes the live-architect view.
+ *    it (ruling 2).
+ *
+ * This key — both target modes — defers resolution to VSCode and does NOT consume the
+ * live-architect view. That was once true of the whole deck, but is NO LONGER a
+ * blanket rule: per Amr's ruling of 2026-08-18, the separate Architects board
+ * (`ArchitectAction`) DOES enumerate `OverviewData.architects`. That is safe for an
+ * ENUMERATION (a stale/incomplete list yields a key that fails loudly on press via
+ * VSCode's not-found warning), whereas it would be unsafe here: a single-target key
+ * that resolved a stale name would render the wrong name faithfully and open the wrong
+ * person silently. So this key stays deferred; do not "restore" a derivation here from
+ * the old blanket sentence. See `CodevStore.architects()` for the board's reasoning.
  *
  * The face is dynamic (title `Architect` over the resolved name, dim `None` when
  * inert), and the resolved name IS the safeguard against a wrong-architect press —
@@ -748,7 +827,22 @@ interface CanvasSpec {
 function canvasErrorLine(code: CanvasCommandClientErrorCode): string {
   if (code === 'no-canvas') return 'Open artifact';
   if (code === 'unreachable') return 'Tower offline';
-  return 'Error'; // invalid-request: defensive — we only ever send valid commands
+  // invalid-request. NOT unreachable: it fires on VERSION SKEW, when a Tower whose canvas-relay
+  // allowlist predates a newly added command rejects that command. On hardware this renders as
+  // `Error`, and the first move is to check which Tower is actually running (see
+  // lessons-learned.md, Testing, the stale-Tower entry from #1501) rather than the deck code.
+  return 'Error';
+}
+
+/** Line-2 text for a builder-scoped dial: the selected builder as `#issue title`
+ *  (falling back to its id when it has no issue title), or `No builder` when nothing is
+ *  selected. Shared by the review dials and the Scroll dial (#1498) — both name the
+ *  builder their press acts on, so this is the single source for that line. */
+function selectedBuilderLine(store: CodevStore): string {
+  const b = store.selectedBuilder();
+  if (!b) return 'No builder';
+  const id = b.issueId ? `#${b.issueId}` : b.id;
+  return b.issueTitle ? `${id} ${b.issueTitle}` : id;
 }
 
 /**
@@ -814,9 +908,11 @@ abstract class ReviewNav extends SingletonAction {
         ? `${this.canvas.label} · ${this.canvas.pressLabel}`
         : `${this.diff.label} · ${this.store.feedbackMode() === 'queue' ? 'queue' : 'send'}`;
     const b = this.store.selectedBuilder();
-    const id = b ? (b.issueId ? `#${b.issueId}` : b.id) : '';
-    const details = b ? (b.issueTitle ? `${id} ${b.issueTitle}` : id) : 'No builder';
-    void action.setFeedback({ title: label, value: this.status ?? details, bar: Math.round(b?.progress ?? 0) });
+    void action.setFeedback({
+      title: label,
+      value: this.status ?? selectedBuilderLine(this.store),
+      bar: Math.round(b?.progress ?? 0),
+    });
   }
 
   override async onDialRotate(ev: DialRotateEvent): Promise<void> {
@@ -925,20 +1021,82 @@ export class DiffHunkNav extends ReviewNav {
 const SCROLL_LINES_PER_TICK = 3;
 
 /**
- * Scroll dial: rotate scrolls the focused editor's viewport up/down (so you can
- * read a diff without the keyboard); a dial press submits the current selection as
- * feedback (forwarded now or queued per the workspace setting, #1410). Scroll is a
- * viewport move (`revealCursor: false`), so select your text first, then scroll/submit.
+ * Scroll dial: rotate scrolls the viewport up/down so you can read without the keyboard; a
+ * dial press submits the current selection as feedback (forwarded now or queued per the
+ * workspace setting, #1410). Rotation is phase-aware, mirroring the review dials' split
+ * (#1501): in diff/text-editor mode it relays `editorScroll` of the focused editor; in canvas
+ * mode (a spec/plan under review) the focused surface is the artifact-canvas webview, which
+ * `editorScroll` cannot reach, so rotation drives the canvas's own viewport-scroll command.
+ * Scroll is a viewport move (`revealCursor: false`), so select your text first, then
+ * scroll/submit.
+ *
+ * The PRESS is builder-diff-only by design (#1498) and is NOT phase-switched: on a canvas its
+ * `feedback-selection` anchor has no diff entry, so it stays inert there. So on a canvas the
+ * dial is half-live — rotation scrolls, press does not.
+ *
+ * Like the review dials, the touchstrip narrates itself (#1498): a `store.onChange`
+ * subscription re-renders `setFeedback` on every overview tick, so
+ *
+ *   - **line 1** pairs the axis with a qualifier. In diff/text-editor mode that is the
+ *     LIVE delivery mode (`Scroll · queue` / `Scroll · send`, #1410) — the press is the
+ *     one mode-dependent gesture on the board, so naming its mode is what keeps a press
+ *     from ever being a surprise. In canvas mode it is `Scroll · read only`: rotation scrolls
+ *     the canvas (you can read), but the press is inert, so line 1 names what works rather
+ *     than a delivery mode the press cannot fire (see `renderTo`);
+ *   - **line 2** names the selected builder the press acts on (`No builder` when none —
+ *     a visibly inert empty state, never a live-looking static word).
+ *
+ * No progress bar: on this dial the rotation (viewport scroll) and builder progress are
+ * unrelated axes, and scroll position is not available (VSCode owns the viewport, and the
+ * deck deliberately shows what the dial does, not a counter — see `ReviewNav`). So the
+ * strip is a deliberate two-line control (title + value; `layouts/title-value.json`), not
+ * the siblings' three-line title/value/bar.
  */
 export class ScrollNav extends SingletonAction {
   override readonly manifestId = 'com.cluesmith.codev.scroll-nav';
+  private current?: DialAction;
+  /** Transient canvas-error line; shown until the next overview tick clears it (as `ReviewNav`). */
+  private status?: string;
   constructor(private readonly store: CodevStore) {
     super();
+    this.store.onChange(() => this.render());
   }
   override onWillAppear(ev: WillAppearEvent): void {
-    if (ev.action.isDial()) void ev.action.setTitle('Scroll');
+    if (ev.action.isDial()) {
+      this.current = ev.action;
+      this.renderTo(ev.action);
+    }
+  }
+  override onWillDisappear(): void {
+    this.current = undefined;
   }
   override async onDialRotate(ev: DialRotateEvent): Promise<void> {
+    // Canvas mode (a spec/plan under review): the focused surface is the artifact-canvas webview,
+    // which `editorScroll` cannot reach, so drive the canvas's own viewport-scroll command instead
+    // (#1501) — the raw scroll the mouse wheel does natively, which this dial cannot deliver as a
+    // DOM event. Keyed on `'canvas'` SPECIFICALLY, never "not diff": in `'none'` mode (no builder
+    // or unknown phase) rotation must still take the `editorScroll` path below, so a canvas command
+    // never fires with nothing selected. Mirrors the `ReviewNav` mode split.
+    if (reviewMode(this.store.selectedBuilder()) === 'canvas') {
+      const workspace = this.store.selectedWorkspacePath();
+      if (!workspace) return; // no active workspace to target
+      const command = dir(ev) >= 0 ? 'viewport-down' : 'viewport-up';
+      // One call per rotate event: count = |ticks| (N steps), never a burst of single-tick sends.
+      const res = await this.store.client.sendCanvasCommand(
+        command,
+        { workspace },
+        { count: Math.abs(ev.payload.ticks) || 1 },
+      );
+      if (res.ok) {
+        this.status = undefined;
+      } else {
+        this.status = canvasErrorLine(res.code);
+      }
+      if (this.current) this.renderTo(this.current);
+      return;
+    }
+    // Diff / text-editor mode (and `none`): relay `editorScroll` of the focused editor's viewport.
+    // Unchanged from before this dial learned canvas mode.
     const to = dir(ev) >= 0 ? 'down' : 'up';
     await this.store.client.sendCommand(
       'scroll',
@@ -947,8 +1105,58 @@ export class ScrollNav extends SingletonAction {
     );
   }
   override async onDialDown(): Promise<void> {
+    // The press acts on the selected builder, so it is inert when nothing is selected —
+    // a silent no-op, like the review dials in their `none` mode — so the `No builder`
+    // state is honestly dead rather than a press that forwards whatever editor happens
+    // to be focused.
+    if (!this.store.selectedBuilder()) return;
     // Mode-neutral feedback (#1410): submit the selection, routed forward-now or
     // enqueue by VSCode per the workspace setting.
     await this.store.client.sendCommand('feedback-selection', [], this.store.selectedWorkspacePath());
+  }
+  /** onChange re-render: a fresh overview clears the transient canvas-error line (as `ReviewNav`). */
+  private render(): void {
+    this.status = undefined;
+    if (this.current) this.renderTo(this.current);
+  }
+  /** Line 1 = axis · qualifier; line 2 = the selected builder the press acts on
+   *  (`No builder` when none). No bar (Decision 2). A pending canvas error takes line 2 for one
+   *  cycle, exactly as the review dials do.
+   *
+   *  In diff/text-editor mode the qualifier is the live delivery mode (`send`/`queue`,
+   *  #1410) so the press is never a surprise. In CANVAS mode (a spec/plan under review) it is
+   *  `read only`: since #1501 ROTATION scrolls the artifact-canvas viewport (you can scroll to
+   *  read), but the press (`feedback-selection`) stays inert — its anchor requires a builder-diff
+   *  entry, which a spec/plan in the webview never has. `read only` names what DOES work and
+   *  implies the press will not act, continuing this branch's habit of naming where the dial works
+   *  rather than reading as a fault. It is deliberately NOT `no send`: `send`/`queue` are the two
+   *  DELIVERY modes, so `no send` invites the reading "not sending, therefore queuing" — the exact
+   *  wrong inference, since the press is inert, not queuing. (Before #1501 both gestures were inert
+   *  on a canvas and this read `editor only`; rotation now works, so the label moved but did not
+   *  collapse back to `send`/`queue` — the two gestures have different scopes.)
+   *
+   *  With NO builder selected the press is inert too (`onDialDown` returns early), so the
+   *  delivery-mode qualifier is suppressed and line 1 reads a bare `Scroll` (#1505) — the
+   *  same canvas-branch rule that the qualifier appears only where the gesture it names is
+   *  live. Rotation still works with nothing selected (relaying `scroll` needs only the
+   *  workspace path), so the axis word stays honest; only the qualifier drops. */
+  private renderTo(action: DialAction): void {
+    const b = this.store.selectedBuilder();
+    if (!b) {
+      void action.setFeedback({ title: 'Scroll', value: selectedBuilderLine(this.store) });
+      return;
+    }
+    let qualifier: string;
+    if (reviewMode(b) === 'canvas') {
+      qualifier = 'read only';
+    } else if (this.store.feedbackMode() === 'queue') {
+      qualifier = 'queue';
+    } else {
+      qualifier = 'send';
+    }
+    void action.setFeedback({
+      title: `Scroll · ${qualifier}`,
+      value: this.status ?? selectedBuilderLine(this.store),
+    });
   }
 }
