@@ -1,9 +1,33 @@
 id: '1470'
 title: automatic-builder-context-refr
 protocol: spir
-phase: plan
-plan_phases: []
-current_plan_phase: null
+phase: implement
+plan_phases:
+  - id: phase_1_boundary_declaration
+    title: Boundary declaration and protocol validation
+    status: in_progress
+  - id: phase_2_porch_trigger
+    title: Porch refresh trigger with at-most-once boundary record
+    status: pending
+  - id: phase_3_selfrefresh_core
+    title: Self-refresh orchestrator with challenge handshake and fail-safe ordering
+    status: pending
+  - id: phase_4_selfrefresh_command
+    title: afx self-refresh command and identity authorization
+    status: pending
+  - id: phase_5_skill_and_reentry
+    title: Builder refresh skill and re-entry frame
+    status: pending
+  - id: phase_6_status_visibility
+    title: Stalled-refresh visibility via porch-owned acknowledgment
+    status: pending
+  - id: phase_7_docs_and_parity
+    title: Delay documentation correction and skeleton parity
+    status: pending
+  - id: phase_8_end_to_end
+    title: End-to-end verification including live run
+    status: pending
+current_plan_phase: phase_1_boundary_declaration
 gates:
   spec-approval:
     status: approved
@@ -18,7 +42,7 @@ gates:
   verify-approval:
     status: pending
 iteration: 1
-build_complete: true
+build_complete: false
 history: []
 started_at: '2026-08-18T00:15:05.131Z'
-updated_at: '2026-08-18T02:28:34.196Z'
+updated_at: '2026-08-18T02:28:39.368Z'
