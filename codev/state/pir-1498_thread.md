@@ -79,3 +79,36 @@ streamdeck code. Force-pushed with lease. 1495 review file now present in worktr
   (#issue title) as siblings, "No builder" when none, so line 2 is ALWAYS populated and
   the two-line strip reads as deliberately minimal, never broken/title-only.
 Revised + recommitted; re-requesting gate.
+
+## Implement phase
+plan-approval APPROVED by Amr (porch record minted by architect as relay). Implemented:
+- Commit 1 (layout): added `layouts/title-value.json` (id codev-title-value = dial.json
+  minus bar), repointed scroll-nav Encoder.layout to it, deleted orphaned label.json
+  (grep-confirmed sole ref was manifest:278). Refined Push TriggerDescription to name the
+  mode-dependent behaviour.
+- Commit 2 (code, actions.ts): rewrote ScrollNav to a store-subscribed SingletonAction —
+  tracks `current` DialAction, `onChange`→render, `setFeedback({title,value})` NO bar.
+  title = `Scroll · queue|send` (feedbackMode); value = selected builder / No builder.
+  Press gated on selectedBuilder() (silent no-op when none). Rotation unchanged. Extracted
+  module-level `selectedBuilderLine(store)` helper, pointed ReviewNav.renderTo at it too
+  (byte-identical → its string-assert tests stayed green). +4 ScrollNav tests (axis·mode +
+  builder line + NO-bar assertion; queue mode; empty-state value=No builder + inert press;
+  onChange re-render). Existing rotate+press test still green.
+- Commit 3 (docs): folded #1495 note — appended "Protocol Note — the pir-1495 lane
+  reproduced #1462 live" to codev/reviews/1495-*.md (one edit: "this lane"→"the pir-1495
+  lane"), on the rebased live-main copy. Separate labelled commit.
+
+VERIFY (from worktree): build ✓ (needed sdk build first — pre-existing ordering, not my
+change), streamdeck test ✓ 237 passed, check-types (tsc --noEmit) ✓, validate (manifest↔
+layouts) ✓. plugin.js is gitignored build output — not committed.
+
+Learnings for the review artifact (write in review phase; capture BEFORE the PR per
+architect carry-through #5):
+- Root cause was a manifest DECLARATION mismatch (scroll-nav on label.json vs siblings on
+  dial.json), not just missing render code — a "declared a different control type" bug.
+- Bar-drop makes line 2 load-bearing; kept it always-populated (builder / No builder) so
+  the two-line strip reads as deliberately minimal, not broken.
+- Generalisation on record: unrelated-axes argument condemns all four dials' bars; coherent
+  alt reading is the bar belongs to line 2. Owner chose drop-for-this-dial only.
+
+Heading to dev-approval gate (hardware): must exercise BOTH delivery modes + no-builder.
