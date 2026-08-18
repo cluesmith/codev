@@ -42,7 +42,7 @@ gates:
   verify-approval:
     status: pending
 iteration: 3
-build_complete: false
+build_complete: true
 history:
   - iteration: 1
     plan_phase: phase_1_boundary_declaration
@@ -117,7 +117,7 @@ history:
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/spir-1470/codev/projects/1470-automatic-builder-context-refr/1470-phase_3_selfrefresh_core-iter2-claude.txt
 started_at: '2026-08-18T00:15:05.131Z'
-updated_at: '2026-08-18T22:49:04.666Z'
+updated_at: '2026-08-18T22:49:45.851Z'
 force_advanced:
   phase: phase_2_porch_trigger
   iteration: 3
