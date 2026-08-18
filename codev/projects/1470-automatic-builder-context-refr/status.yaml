@@ -41,8 +41,8 @@ gates:
     status: pending
   verify-approval:
     status: pending
-iteration: 1
-build_complete: true
+iteration: 2
+build_complete: false
 history:
   - iteration: 1
     plan_phase: phase_1_boundary_declaration
@@ -164,8 +164,20 @@ history:
         verdict: APPROVE
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/spir-1470/codev/projects/1470-automatic-builder-context-refr/1470-phase_4_selfrefresh_command-iter3-claude.txt
+  - iteration: 1
+    plan_phase: phase_5_skill_and_reentry
+    build_output: ''
+    reviews:
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-1470/codev/projects/1470-automatic-builder-context-refr/1470-phase_5_skill_and_reentry-iter1-codex.txt
+      - model: claude
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-1470/codev/projects/1470-automatic-builder-context-refr/1470-phase_5_skill_and_reentry-iter1-claude.txt
 started_at: '2026-08-18T00:15:05.131Z'
-updated_at: '2026-08-18T23:49:01.894Z'
+updated_at: '2026-08-18T23:56:30.114Z'
 force_advanced:
   phase: phase_4_selfrefresh_command
   iteration: 3
