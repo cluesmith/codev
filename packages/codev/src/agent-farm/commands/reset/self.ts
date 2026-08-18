@@ -51,16 +51,25 @@
  *
  * Same discipline as `runReset`, for the same reason: every safety property here
  * is an ORDERING property ("the clear never happens before X"), and ordering is
- * what is hardest to prove by reading. Actions go through injected ports and are
- * appended to an ordered step log BEFORE being performed, so the invariant tests
- * assert over the log rather than over mocks. "No clear without a verified save"
- * becomes something a test can fail on.
+ * what is hardest to prove by reading. Actions go through injected ports and the
+ * invariant tests assert over an ordered step log rather than over mocks, so "no
+ * clear without a verified save" becomes something a test can fail on.
+ *
+ * The IRREVERSIBLE action is logged BEFORE it is attempted (`clear-attempted`),
+ * with a second entry (`clear`) only on success. That asymmetry is deliberate:
+ * `sendRaw` can succeed on the wire and still throw, and a log written only on
+ * success would then claim no clear occurred about a context that no longer
+ * exists — with every `expectNoClear` assertion agreeing. Reversible steps are
+ * logged after they succeed, where a failure is genuinely a non-event.
+ * (`runReset` logs its clear after the fact; that same weakness is noted for the
+ * review artifact rather than fixed here, since this phase does not own it.)
  */
 
 import { join } from 'node:path';
 
 import {
   CHALLENGE_FILE_NAME,
+  DEFAULT_CHALLENGE_MAX_AGE_MS,
   DEFAULT_MIN_BYTES,
   DEFAULT_REENTRY_DELAY_SECONDS,
   DEFAULT_STABILITY_WINDOW_MS,
@@ -94,7 +103,6 @@ import type { ResolvedBuilderContext } from './context.js';
 export interface SelfRefreshFsPort extends ReceiptFsPort {
   write(path: string, content: string): void;
   remove(path: string): void;
-  exists(path: string): boolean;
 }
 
 /** Wall clock and sleep, injected so tests run instantly and deterministically. */
@@ -142,6 +150,23 @@ export type SelfRefreshStepName =
   | 'assemble'
   | 'reorient-written'
   | 'reentry-scheduled'
+  | 'challenge-marked'
+  /**
+   * Logged BEFORE the clear is sent, and never removed.
+   *
+   * The distinction from `clear` is the whole point. `terminal.sendRaw` can
+   * succeed on the wire and still throw client-side — a dropped socket after
+   * delivery, say — and in that case the builder IS cleared while the call
+   * reports failure. Logging only on success would produce a run that says "no
+   * clear happened" about a context that no longer exists, and every
+   * `expectNoClear` assertion would agree with it.
+   *
+   * So the log records the INTENT before the irreversible act. `clear-attempted`
+   * without `clear` means "we do not know" — which is the truth, and is
+   * reportable. Anything asserting that no clear occurred must check for both.
+   */
+  | 'clear-attempted'
+  /** Logged only after `sendRaw` returned successfully. */
   | 'clear'
   | 'challenge-consumed';
 
@@ -172,7 +197,15 @@ export interface BeginResult {
 }
 
 export interface SelfRefreshResult {
-  outcome: 'completed' | 'aborted';
+  /**
+   * `dry-run` is deliberately distinct from `aborted`.
+   *
+   * A rehearsal that verified and assembled cleanly is a SUCCESS, and folding it
+   * into `aborted` would make the report announce "ABORTED" on a healthy run and
+   * force every caller's exit-code logic to special-case `failure === undefined`
+   * — a contract nobody would guess from the type.
+   */
+  outcome: 'completed' | 'aborted' | 'dry-run';
   steps: SelfRefreshStep[];
   /** Present when aborted — which gate refused, for the report. */
   failure?: SelfRefreshFailure;
@@ -190,6 +223,12 @@ export interface Challenge {
   issuedAt: number;
   /** Boundary id from porch, e.g. `enter:review`. Shapes the save request. */
   boundary?: string;
+  /**
+   * Set immediately BEFORE the clear is attempted; refused by the gate on any
+   * later run. Makes a challenge single-use even when the post-clear delete
+   * fails, which is the difference between "tidied up" and "cannot be replayed".
+   */
+  consumedAt?: number;
 }
 
 // ============================================================================
@@ -356,6 +395,22 @@ export interface RunSelfRefreshOptions {
   minBytes?: number;
   stabilityWindowMs?: number;
   reentryDelaySeconds?: number;
+  /**
+   * Reject a challenge older than this. Defaults to
+   * {@link DEFAULT_CHALLENGE_MAX_AGE_MS}.
+   */
+  challengeMaxAgeMs?: number;
+  /**
+   * Boundary this run is FOR, when the caller knows it.
+   *
+   * A challenge names the boundary it was issued at. If an execute aborts
+   * (dirty worktree, Tower down) the challenge survives on disk, and the builder
+   * may then commit, work on, and reach a LATER boundary. Running execute there
+   * without a fresh `begin` would let the lingering challenge validate a
+   * `.builder-state.md` describing superseded work — precisely the staleness the
+   * handshake exists to stop.
+   */
+  expectedBoundary?: string;
   /** Report what would happen; send nothing, clear nothing, consume nothing. */
   dryRun?: boolean;
   /** Escape hatch for a worktree that is legitimately dirty. Off by default. */
@@ -378,6 +433,8 @@ export async function runSelfRefresh(
     minBytes = DEFAULT_MIN_BYTES,
     stabilityWindowMs = DEFAULT_STABILITY_WINDOW_MS,
     reentryDelaySeconds = DEFAULT_REENTRY_DELAY_SECONDS,
+    challengeMaxAgeMs = DEFAULT_CHALLENGE_MAX_AGE_MS,
+    expectedBoundary,
     dryRun = false,
     allowDirty = false,
   } = options;
@@ -421,6 +478,38 @@ export async function runSelfRefresh(
   if (!challenge.nonce) {
     return abort('no-challenge', `Refresh challenge at ${challengePath} carries no nonce.`);
   }
+  if (challenge.consumedAt !== undefined) {
+    // Burned by an earlier execute whose delete did not land. Refusing here is
+    // what makes the pre-clear mark sufficient on its own.
+    return abort(
+      'no-challenge',
+      `Refresh challenge at ${challengePath} was already consumed. A challenge is ` +
+        `single-use; run the begin step again if you mean to refresh once more.`,
+    );
+  }
+  // A challenge is for ONE boundary at ONE moment. Both checks close the same
+  // hole from different sides: a run that aborted leaves its challenge on disk,
+  // and without these it would still satisfy the gate at a later boundary,
+  // against a state file describing work that has since moved on.
+  if (expectedBoundary !== undefined && challenge.boundary !== expectedBoundary) {
+    return abort(
+      'no-challenge',
+      `Refresh challenge was issued for boundary '${challenge.boundary ?? '(none)'}' but this ` +
+        `run is for '${expectedBoundary}'. Run the begin step again — a challenge does not ` +
+        `carry across boundaries.`,
+    );
+  }
+
+  const age = clock.now() - (challenge.issuedAt ?? 0);
+  if (age > challengeMaxAgeMs) {
+    return abort(
+      'no-challenge',
+      `Refresh challenge is ${Math.round(age / 1000)}s old (limit ` +
+        `${Math.round(challengeMaxAgeMs / 1000)}s). A save verified against a stale challenge ` +
+        `may describe work that has since moved on. Run the begin step again.`,
+    );
+  }
+
   step('challenge-read', challenge.boundary ?? 'no-boundary');
 
   // ------------------------------------------------------------------
@@ -509,9 +598,8 @@ export async function runSelfRefresh(
     // without any of it having happened. The challenge is left intact so the
     // real run can still use it.
     return {
-      outcome: 'aborted',
+      outcome: 'dry-run',
       steps,
-      failure: undefined,
       reason: 'dry run — verified and assembled, nothing sent',
       statePath,
       reorientPath,
@@ -553,31 +641,65 @@ export async function runSelfRefresh(
   step('reentry-scheduled', `+${reentryDelaySeconds}s`);
 
   // ------------------------------------------------------------------
+  // Burn the challenge BEFORE clearing, not after.
+  // ------------------------------------------------------------------
+  // Deleting it afterwards is not enough: if the delete fails, the challenge and
+  // the already-verified state file both remain, so a second `execute` would
+  // sail through every gate and clear the builder AGAIN — scheduling a second
+  // re-entry into a context that just lost the first one.
+  //
+  // Marking is a write rather than a delete, and it happens while aborting is
+  // still free. If it fails we stop here with nothing destroyed. The delete
+  // after the clear is then pure tidiness: the mark alone already makes the
+  // challenge unusable.
+  try {
+    fs.write(
+      challengePath,
+      JSON.stringify({ ...challenge, consumedAt: clock.now() } satisfies Challenge, null, 2),
+    );
+  } catch (err) {
+    return abort(
+      'reentry-failed',
+      `Could not mark the refresh challenge consumed: ` +
+        `${err instanceof Error ? err.message : String(err)}. ` +
+        `NOT clearing — an unburnable challenge could be replayed into a second clear. ` +
+        `Your context is intact.`,
+    );
+  }
+  step('challenge-marked');
+
+  // ------------------------------------------------------------------
   // The irreversible step. Everything above had to succeed to get here.
   // ------------------------------------------------------------------
+  // Logged BEFORE it is attempted: see `clear-attempted`.
+  step('clear-attempted');
   try {
     await terminal.sendRaw('/clear');
   } catch (err) {
-    // The re-entry is already queued and will arrive into a context that was
-    // never cleared. Harmless — the builder re-reads its re-orientation and
-    // carries on — but report it, because the refresh did not happen.
+    // Deliberately NOT "your context is intact". `sendRaw` can fail after the
+    // write reached the terminal, so from here we genuinely cannot tell whether
+    // the clear landed. Saying it did not would be a guess presented as a fact,
+    // and the reader would act on it. The re-entry is queued either way, so both
+    // outcomes recover.
     return abort(
       'clear-failed',
-      `Re-entry was scheduled but the clear failed: ` +
+      `Re-entry was scheduled but sending the clear reported an error: ` +
         `${err instanceof Error ? err.message : String(err)}. ` +
-        `Your context is intact; a re-orientation message will arrive shortly and can be ignored.`,
+        `The clear MAY still have landed — this path cannot tell. Either way the ` +
+        `re-orientation is at ${reorientPath} and a re-entry message is already queued.`,
     );
   }
   step('clear');
 
-  // Consume the challenge last. A challenge that outlived its clear would let a
-  // second execute run against the same save.
+  // Tidy up. Genuinely optional now: the challenge was marked consumed before
+  // the clear, so even if this delete fails the file cannot be replayed — a
+  // marked challenge is refused at the gate above. Never turn a completed
+  // refresh into a failure over housekeeping.
   try {
     fs.remove(challengePath);
     step('challenge-consumed');
   } catch {
-    // Non-fatal: the clear has happened, and a leftover challenge only means the
-    // next `begin` overwrites it. Never turn a completed refresh into a failure.
+    // Left on disk, already neutralised. The next `begin` overwrites it.
   }
 
   return {
@@ -599,6 +721,15 @@ export function formatSelfRefreshReport(result: SelfRefreshResult): string {
   const lines: string[] = [];
   const order = result.steps.map(s => s.name).join(' → ');
 
+  if (result.outcome === 'dry-run') {
+    lines.push('Dry run — this refresh WOULD proceed.');
+    lines.push(`  state file:     ${result.statePath} (${result.stateBytes} bytes)`);
+    lines.push(`  steps:          ${order}`);
+    lines.push('');
+    lines.push('Nothing was sent, written or consumed.');
+    return lines.join('\n');
+  }
+
   if (result.outcome === 'completed') {
     lines.push('Context refresh complete.');
     lines.push(`  state file:     ${result.statePath} (${result.stateBytes} bytes)`);
@@ -612,15 +743,30 @@ export function formatSelfRefreshReport(result: SelfRefreshResult): string {
   lines.push(`Context refresh ABORTED${result.failure ? ` (${result.failure})` : ''}.`);
   lines.push(`  reason: ${result.reason}`);
   lines.push(`  steps:  ${order || '(none)'}`);
-  if (!result.steps.some(s => s.name === 'clear')) {
+  if (result.steps.some(s => s.name === 'clear-attempted')) {
     lines.push('');
-    lines.push('No clear was sent. Your context is intact.');
+    lines.push('A clear WAS attempted and may have landed. Do not assume your context survived.');
+  } else {
+    lines.push('');
+    lines.push('No clear was attempted. Your context is intact.');
   }
   return lines.join('\n');
 }
 
-/** Did this run reach the irreversible step? Used by tests and the CLI's exit code. */
+/**
+ * Did this run reach the irreversible step?
+ *
+ * True for a CONFIRMED clear and for an ATTEMPTED one, because an attempt whose
+ * send threw may still have landed. Anything asking "is this builder's context
+ * safe?" must treat both as unsafe; a helper that answered only about confirmed
+ * clears would be the optimistic reading of an ambiguous event.
+ */
 export function didClear(result: SelfRefreshResult): boolean {
+  return result.steps.some(s => s.name === 'clear' || s.name === 'clear-attempted');
+}
+
+/** Strictly confirmed: `sendRaw` returned successfully. */
+export function didClearConfirmed(result: SelfRefreshResult): boolean {
   return result.steps.some(s => s.name === 'clear');
 }
 

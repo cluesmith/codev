@@ -21,6 +21,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { join } from 'node:path';
 import {
   beginSelfRefresh,
+  didClearConfirmed,
   buildBoundarySaveRequest,
   challengeFilePath,
   didClear,
@@ -189,7 +190,13 @@ function seedHappyPath(nonce = NONCE, boundary = 'enter:review'): void {
  * matches what the ports actually saw.
  */
 function expectNoClear(result: SelfRefreshResult): void {
-  expect(result.steps.map(s => s.name)).not.toContain('clear');
+  const names = result.steps.map(s => s.name);
+  // BOTH names. `clear-attempted` without `clear` means the send threw and the
+  // clear may still have landed — checking only the confirmed step would let a
+  // "no clear happened" assertion pass over an ambiguous, possibly-cleared
+  // builder.
+  expect(names).not.toContain('clear');
+  expect(names).not.toContain('clear-attempted');
   expect(didClear(result)).toBe(false);
   expect(terminal.raw).toHaveLength(0);
 }
@@ -253,6 +260,8 @@ describe('happy path', () => {
       'assemble',
       'reorient-written',
       'reentry-scheduled',
+      'challenge-marked',
+      'clear-attempted',
       'clear',
       'challenge-consumed',
     ]);
@@ -442,18 +451,124 @@ describe('gate refusals never clear', () => {
 // ---------------------------------------------------------------------------
 
 describe('clear failure', () => {
-  it('reports the harmless direction: re-entry queued, context intact', async () => {
+  it('records the ATTEMPT even though the send threw, and does not claim safety', async () => {
+    // The failure this models: sendRaw can succeed on the wire and still throw.
+    // A log written only on success would claim no clear happened about a
+    // context that may no longer exist.
     seedHappyPath();
     terminal.failRaw = true;
 
     const result = await run();
 
     expect(result.failure).toBe('clear-failed');
-    // The clear step is NOT logged, because it never succeeded.
-    expect(result.steps.map(s => s.name)).not.toContain('clear');
-    // But the re-entry IS queued — this is the benign asymmetry.
+    const names = result.steps.map(s => s.name);
+    expect(names).toContain('clear-attempted');
+    expect(names).not.toContain('clear');
+    // didClear() reads the ambiguous case as UNSAFE.
+    expect(didClear(result)).toBe(true);
+    expect(didClearConfirmed(result)).toBe(false);
+    // The re-entry is queued either way, so both outcomes recover.
     expect(terminal.scheduled).toHaveLength(1);
-    expect(result.reason).toMatch(/context is intact/i);
+    // Must NOT assert the context survived — we cannot know.
+    expect(result.reason).toMatch(/MAY still have landed/i);
+    expect(result.reason).not.toMatch(/context is intact/i);
+  });
+
+  it('the report warns rather than reassuring after an attempt', async () => {
+    seedHappyPath();
+    terminal.failRaw = true;
+    const report = formatSelfRefreshReport(await run());
+    expect(report).toMatch(/may have landed/i);
+    expect(report).not.toMatch(/Your context is intact/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The challenge is single-use even when tidying fails
+// ---------------------------------------------------------------------------
+
+describe('challenge burn', () => {
+  it('marks the challenge consumed BEFORE clearing', async () => {
+    seedHappyPath();
+    const result = await run();
+    const names = result.steps.map(s => s.name);
+    expect(names.indexOf('challenge-marked')).toBeLessThan(names.indexOf('clear-attempted'));
+  });
+
+  it('refuses to clear when the challenge cannot be marked', async () => {
+    // Marking is a write, and it happens while aborting is still free. An
+    // unburnable challenge could be replayed into a SECOND clear.
+    seedHappyPath();
+    fs.failWrites.add(challengePath);
+
+    const result = await run();
+
+    expect(result.reason).toMatch(/could not mark the refresh challenge/i);
+    expectNoClear(result);
+  });
+
+  it('a challenge left on disk by a failed delete cannot be replayed', async () => {
+    // The precise hole: delete fails after a successful clear, so the file and
+    // the verified save both survive. Without the pre-clear mark, a second
+    // execute would sail through every gate and clear again.
+    seedHappyPath();
+    fs.failRemoves.add(challengePath);
+
+    const first = await run();
+    expect(first.outcome).toBe('completed');
+    expect(fs.read(challengePath)).toBeTruthy(); // delete really did fail
+
+    terminal.raw = [];
+    const second = await run();
+
+    expect(second.outcome).toBe('aborted');
+    expect(second.failure).toBe('no-challenge');
+    expect(second.reason).toMatch(/already consumed/i);
+    expectNoClear(second);
+  });
+
+  it('a completed refresh is not failed by a delete that could not run', async () => {
+    seedHappyPath();
+    fs.failRemoves.add(challengePath);
+    const result = await run();
+    expect(result.outcome).toBe('completed');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A challenge is for ONE boundary at ONE moment
+// ---------------------------------------------------------------------------
+
+describe('challenge scope', () => {
+  it('refuses a challenge issued for a different boundary', async () => {
+    // An execute that aborted at boundary A leaves its challenge behind. The
+    // builder commits, works on, and reaches boundary B — where the stale
+    // challenge plus a stale save would otherwise pass.
+    seedHappyPath(NONCE, 'enter:implement');
+
+    const result = await run({ expectedBoundary: 'enter:review' });
+
+    expect(result.failure).toBe('no-challenge');
+    expect(result.reason).toMatch(/does not carry across boundaries/i);
+    expectNoClear(result);
+  });
+
+  it('accepts a challenge whose boundary matches', async () => {
+    seedHappyPath(NONCE, 'enter:review');
+    const result = await run({ expectedBoundary: 'enter:review' });
+    expect(result.outcome).toBe('completed');
+  });
+
+  it('refuses a challenge older than the age bound', async () => {
+    fs.write(challengePath, JSON.stringify({ nonce: NONCE, issuedAt: 0 }));
+    fs.write(statePath, goodSave());
+    clock.t = 10 * 60 * 60 * 1000; // ten hours later
+
+    const result = await run();
+
+    expect(result.failure).toBe('no-challenge');
+    expect(result.reason).toMatch(/old \(limit/i);
+    expectNoClear(result);
   });
 });
 
@@ -518,6 +633,8 @@ describe('dry run', () => {
 
     const result = await run({ dryRun: true });
 
+    expect(result.outcome).toBe('dry-run');
+    expect(result.failure).toBeUndefined();
     expect(result.steps.map(s => s.name)).toEqual([
       'challenge-read',
       'worktree-checked',
@@ -578,7 +695,16 @@ describe('formatSelfRefreshReport', () => {
 
     const report = formatSelfRefreshReport(result);
     expect(report).toMatch(/ABORTED/);
-    expect(report).toMatch(/No clear was sent\. Your context is intact\./);
+    // "attempted", not "sent": the report distinguishes a clear that was never
+    // tried from one whose send threw ambiguously.
+    expect(report).toMatch(/No clear was attempted\. Your context is intact\./);
+  });
+
+  it('reports a dry run as a rehearsal, not an abort', async () => {
+    seedHappyPath();
+    const report = formatSelfRefreshReport(await run({ dryRun: true }));
+    expect(report).toMatch(/WOULD proceed/i);
+    expect(report).not.toMatch(/ABORTED/);
   });
 
   it('reports the completed path with its step order', async () => {

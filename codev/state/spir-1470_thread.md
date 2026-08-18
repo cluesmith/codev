@@ -647,3 +647,44 @@ Also a self-inflicted diagnosis delay worth noting: I ran `npm run build 2>&1 | 
 mistake as filtering `porch next` to subjects — I keep building summarizers that discard the signal
 I need. **Capture full output to a file and grep the file; never pipe a failing command through a
 narrow filter.**
+
+### Phase 3 review: codex found the flaw IN my testing discipline
+
+Codex REQUEST_CHANGES (2), Claude APPROVE (5 comments). All taken. 51 tests, full suite 5044.
+
+**Codex 1 — the log recorded actions AFTER performing them.** My header claimed "logged BEFORE
+being performed"; the code did `await sendRaw('/clear'); step('clear')`. The failure mode is the
+one that matters: **`sendRaw` can succeed on the wire and still throw**, so the builder IS cleared,
+no `clear` step is logged, and the run reports "no clear happened" about a destroyed context — with
+every `expectNoClear()` assertion agreeing.
+
+I had built three-witness assertions and step-log checks on every abort path, and the whole
+apparatus rested on a log that could not record the one event it existed to catch. **Rigour applied
+to the wrong layer looks exactly like rigour.**
+
+Fix: `clear-attempted` logged BEFORE the send, `clear` only on success. `clear-attempted` without
+`clear` = "we do not know", which is the truth. `didClear()` now reads the ambiguous case as UNSAFE
+(`didClearConfirmed()` is the strict variant); the failure message says the clear MAY have landed
+rather than claiming the context is intact.
+
+`runReset` (index.ts:540) has the SAME pattern. Deliberately NOT fixed — this phase doesn't own the
+driven path and I already widened scope once. → review artifact as follow-up.
+
+**Codex 2 — swallowed challenge-delete failure left it replayable.** Delete-after-clear cannot fail
+safe: the destructive act already happened. Moved the guarantee earlier — MARK the challenge
+consumed BEFORE the clear (a write, while aborting is still free), gate refuses any challenge with
+`consumedAt`, post-clear delete becomes tidiness. Inverts the failure mode from "replayable" to
+"already neutralised, just untidy".
+
+**Claude 1 — challenge not age-bounded or boundary-matched.** Claude suggested Phase 4; I closed it
+HERE, because the invariant belongs to the module whose header claims it — a guard one layer up can
+be bypassed by any other caller, and the header stays wrong meanwhile. Added `expectedBoundary`
+(Phase 4 passes it) + `challengeMaxAgeMs` (1h).
+
+Also taken: distinct `'dry-run'` outcome (was `aborted` with `failure: undefined`, so the report
+said ABORTED on success); dropped unused `exists()` from the port; moved the min-bytes retention
+decision into `constants.ts` where a reader looks.
+
+**CARRY TO PHASE 4**: the real-port binding must NOT introduce a Tower call that can fail AFTER the
+clear. Spec tests 21/22 collapse into one scenario today precisely because `scheduleReentry` is the
+only pre-clear Tower touch; adding another would break that property silently.

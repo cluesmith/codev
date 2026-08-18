@@ -28,6 +28,15 @@ export const REORIENT_FILE_NAME = '.builder-reorient.md';
  * The one verified example ran 203 lines (~8-10KB). A genuine cold-reader save
  * is comfortably over 1KB; a three-line stub is 100-200 bytes. 1000 rejects
  * stubs without false-rejecting a terse but real save.
+ *
+ * Spec 1470 RETAINED this value for the automatic boundary path, deliberately
+ * rather than by inheritance. The calibration mismatch is real — 1000 was tuned
+ * on a MID-PHASE save, and a boundary save is smaller by design — but the
+ * floor's job is to reject a stub, and a genuine boundary save (receipts with
+ * commit hashes, deviations, flaky tests, standing orders) clears it on pointers
+ * alone. Lowering it would weaken the R2 substance gate to buy nothing. Phase 8
+ * measures real boundary saves to confirm they clear it without padding; if they
+ * cluster at the floor, revisit here with that data.
  */
 export const DEFAULT_MIN_BYTES = 1000;
 
@@ -93,3 +102,18 @@ export const CHALLENGE_FILE_NAME = '.builder-refresh-challenge';
  * render gate holds it until the target's prompt is verifiably clean.
  */
 export const DEFAULT_REENTRY_DELAY_SECONDS = 15;
+
+/**
+ * How long a self-refresh challenge stays valid (Spec 1470).
+ *
+ * A challenge names one boundary at one moment. When an execute aborts — dirty
+ * worktree, Tower unreachable — the challenge stays on disk, and the builder may
+ * then commit, keep working, and reach a LATER boundary. Without an age bound,
+ * running execute there without a fresh `begin` would validate a
+ * `.builder-state.md` describing work that has since moved on.
+ *
+ * An hour is far longer than the seconds a real begin→execute pair takes, so it
+ * never interrupts normal use; it exists to stop a forgotten challenge being
+ * replayed much later.
+ */
+export const DEFAULT_CHALLENGE_MAX_AGE_MS = 60 * 60 * 1000;
