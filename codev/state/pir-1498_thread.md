@@ -37,3 +37,23 @@ Architect ratified both decisions and required three additions (commit revising)
 Cross-lane awareness only: pir-1495 adds explicit assertions for four manifest-less
 PNGs (the inverse case); no general "every shipped asset referenced" check here.
 Revised + recommitted; re-requesting gate.
+
+### Decision 2 reversed by human reviewer — DROP THE BAR
+Human (in-pane) directed dropping the bar: on this dial rotation (viewport scroll) and
+builder-progress are unrelated axes, and scroll-position (the only related bar) isn't
+available. Neither candidate bar is both available AND related → show none.
+Ripple: layout is now title+value (no bar), NOT the siblings' dial.json (whose default
+bar:0 would render a false empty bar). So `label.json` → renamed `scroll.json`
+(title+value), NOT switched-to-dial.json + deleted. This SUPERSEDES the architect's
+earlier required addition (switch to dial.json + delete label.json). Flagged to architect.
+This trades strict visual uniformity for honesty; the Scroll dial becomes the one dial
+without a bar (line1+line2 still match house shape).
+
+### Scope addition (architect) — fold a stranded doc from pir-1495
+Carrying a doc-only append into this PR: append "Protocol Note — the pir-1495 lane
+reproduced #1462 live" to codev/reviews/1495-stream-deck-architect-action-k.md ON MAIN
+(one edit: "this lane"→"the pir-1495 lane"). Saves a standalone CI cycle (precedent
+#1454). Accepted — it touches a file mine doesn't; keep as its own labelled commit so it
+stays separable in consult/review. Must fetch origin/main first so the append lands on
+the file's live content (my branch predates pir-1495's merge). Recorded in plan under
+"Out-of-band".

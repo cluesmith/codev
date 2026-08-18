@@ -40,9 +40,16 @@ keys), while the other five dials declare `layouts/dial.json` (title / value / b
 the code (`setTitle('Scroll')`, no subscription) and the manifest (a label-only layout)
 were *consistent with each other* and *inconsistent with every sibling* — the dial was
 built as a different class of control. That is why the fix is two-sided: the render code
-adopts the `ReviewNav` shape **and** the manifest declaration is corrected to the house
-dial layout. Fixing only the code would set `value`/`bar` a label-only layout cannot
-draw; fixing only the manifest would leave a dial with a bar it never populates.
+adopts the `ReviewNav` subscription-and-`setFeedback` shape **and** the manifest
+declaration is corrected from title-only to a two-line (title + value) layout. Fixing
+only the code would set a `value` line a title-only layout cannot draw; fixing only the
+manifest would leave a static word under a layout that expects a live second line.
+
+Note (per Decision 2 below): this dial adopts the *mechanism* of the house pattern — a
+subscription that re-renders `setFeedback` — but deliberately **not** the progress bar.
+So its corrected layout is title + value (line 1 + line 2), a third shape distinct from
+both the old title-only `label.json` and the five siblings' title/value/**bar**
+`dial.json`.
 
 ## The two plan-time decisions
 
@@ -89,21 +96,34 @@ be focused — the opposite of "visibly inert". Gating the press on `selectedBui
 makes the `No builder` state honest: the dial says No builder *and* the press does
 nothing. Rotation is unaffected (see Scope).
 
-### Decision 2 — What does the bar show? **Recommendation: builder progress.**
+### Decision 2 — What does the bar show? **Decision (human reviewer): drop the bar.**
 
-The selected builder's `progress`, exactly as the three neighbours render it. This is
-honest and consistent.
+The bar is removed from this dial. Its touchstrip is line 1 (`Scroll · queue`/`send`)
+and line 2 (the selected builder / `No builder`) — no progress bar.
 
-Scroll *position* is deliberately **not** shown. VS Code owns the viewport and the deck
-never mirrors it — `ReviewNav`'s own comment (`actions.ts:773-774`) records the
-principle: "VSCode owns the actual position, so the screen shows what the dial does
-(line 1) and which builder is under review (line 2 + progress bar) — not a counter."
-No scroll-position bar will be invented.
+The reasoning that moved this off the earlier "builder progress" recommendation: on
+this dial the rotation and the bar would be **unrelated axes**. Rotation scrolls the
+*viewport within a file*; builder `progress` is *how far the builder is through its
+protocol run*. The bar would not report anything the dial does. The two candidate bars
+are therefore: builder progress (available, but unrelated to the dial's motion) or
+scroll position (related to the motion, but **not available** — VS Code owns the
+viewport and never publishes it to the overview; inventing it is out of scope and
+against the deck's stated principle, `actions.ts:773-774`). Given neither bar is both
+available *and* related, the honest choice is to show none rather than a bar whose fill
+means something the reviewer's hand is not moving.
+
+This is a deliberate, reviewer-made trade of **strict visual uniformity** (a bar like
+the three neighbours) for **honesty** (no readout that implies a relationship that
+isn't there). The uniformity cost is real and acknowledged: the Scroll dial will be the
+one dial without a bar. It is mitigated by line 1 + line 2 still matching the house
+`A · B` + builder-line shape, so the dial reads as a member of the cluster, just a
+two-line member. Scroll *position* is still never invented, for the same reason as
+before.
 
 ## Proposed Change
 
-Rewrite `ScrollNav` to follow the `ReviewNav` shape, and switch its touchscreen layout
-to the house dial layout so it can render a bar.
+Rewrite `ScrollNav` to follow the `ReviewNav` subscription-and-`setFeedback` shape, and
+give its touchscreen a two-line (title + value) layout — no bar (Decision 2).
 
 ### 1. `ScrollNav` (`apps/streamdeck/src/actions.ts:933`)
 
@@ -114,13 +134,13 @@ on every overview tick:
 - Track `current?: DialAction`; set it in `onWillAppear`, clear it in
   `onWillDisappear` (mirrors `ReviewNav`).
 - `onWillAppear` calls `renderTo(action)` instead of `setTitle('Scroll')`.
-- `renderTo(action)` composes `setFeedback({ title, value, bar })`:
+- `renderTo(action)` composes `setFeedback({ title, value })` — **no `bar` key**
+  (Decision 2):
   - **title** = `Scroll · ${this.store.feedbackMode() === 'queue' ? 'queue' : 'send'}`
     — the `A · B` form the neighbours use.
   - **value** = the selected builder's `#issueId issueTitle` (falling back to `id`), or
     `No builder` when none — identical to `ReviewNav`'s line-2 logic
     (`actions.ts:816-818`).
-  - **bar** = `Math.round(b?.progress ?? 0)`.
 - `onDialRotate` is **unchanged** — the same viewport `scroll` command,
   `revealCursor: false`, `SCROLL_LINES_PER_TICK`.
 - `onDialDown` gains a guard: if `!this.store.selectedBuilder()` return (silent no-op,
@@ -135,23 +155,31 @@ inside the file. *(Alternative if a reviewer prefers minimal blast radius: inlin
 three lines in `ScrollNav` and leave `ReviewNav` untouched — the duplication is small.
 I lean to the helper.)*
 
-### 2. Manifest layout (`apps/streamdeck/com.cluesmith.codev.sdPlugin/manifest.json`)
+### 2. Touchscreen layout (`apps/streamdeck/com.cluesmith.codev.sdPlugin/`)
 
 The scroll-nav action currently declares `"layout": "layouts/label.json"` — a
-title-only layout with no `value` or `bar` keys (`manifest.json:263`). Every
-house-layout dial uses `layouts/dial.json`, which defines `title` / `value` / `bar`.
-Change scroll-nav's `Encoder.layout` to `layouts/dial.json` so `setFeedback` can render
-line 2 and the bar. Optionally refine the `Push` `TriggerDescription` to name the
-mode-dependent behaviour (e.g. "Forward selection now, or queue it, per workspace
-mode").
+title-only layout with no `value` or `bar` keys (`manifest.json:263`). It needs a
+**title + value** layout: line 2 (the builder) is required, the bar is not (Decision 2).
 
-**Delete the orphaned `layouts/label.json` in the same PR (required).** It is used
-**only** by scroll-nav — verified by grep across `apps/streamdeck` and the repo, the
-sole reference is the manifest line being changed (my own thread note aside) — so once
-scroll-nav moves to `dial.json` nothing references it: no action, no code path, no doc.
-Shipping an unreferenced file in a packaged plugin is a dead-asset defect, the same one
-#1440 removed six dead PNGs for. Leaving it is not an option here; it is dead weight in
-the shipped plugin.
+Do **not** point it at the siblings' `layouts/dial.json`: that layout carries a `bar`
+item with a default `value: 0`, so a dial that never sets `bar` would render a
+permanently-empty bar — a false "0% / stalled" signal, the exact ambiguity Decision 2
+avoids.
+
+Instead, evolve the scroll-only `label.json` into that two-line layout and rename it for
+honest naming: **`layouts/label.json` → `layouts/scroll.json`**, redefined to a `title`
+item (line 1) plus a `value` item (line 2), no `bar`; update its internal `id`
+(`codev-label` → `codev-scroll`) and repoint scroll-nav's `Encoder.layout` to it.
+`dial.json` is untouched (the five siblings keep their bar). Optionally refine the
+`Push` `TriggerDescription` to name the mode-dependent behaviour (e.g. "Forward
+selection now, or queue it, per workspace mode").
+
+This **supersedes the earlier "switch to `dial.json` + delete `label.json`" required
+addition**, which was premised on keeping the bar. `label.json` is not orphaned — it
+becomes `scroll.json`, still the scroll dial's sole layout — so there is no dead asset
+to delete; the rename carries its one and only consumer with it (grep-confirmed: the
+manifest line is the sole reference). The dead-asset concern #1440 addressed does not
+arise because nothing is left unreferenced.
 
 ### 3. Tests (`apps/streamdeck/src/__tests__/actions.test.ts`)
 
@@ -161,35 +189,52 @@ Extend the existing ScrollNav coverage (currently one rotate+press test at
 
 - Existing rotate+press test stays valid — the fixture has a selected builder
   (`pir-1`), so the guarded press still fires `feedback-selection`.
-- New: renders `Scroll · send` / `#101 Add the relay` / bar `45` for the selected
-  builder under the default (forward) fixture.
+- New: renders `{ title: 'Scroll · send', value: '#101 Add the relay' }` for the
+  selected builder under the default (forward) fixture — and asserts **no `bar` key** is
+  passed to `setFeedback` (Decision 2), so a regression that re-adds the bar is caught.
 - New: renders `Scroll · queue` when the overview's `feedbackMode` is `queue`.
-- New: no-builder state renders `value: 'No builder'`, `bar: 0`, and the press is a
-  silent no-op (no `feedback-selection` sent).
+- New: no-builder state renders `value: 'No builder'`, and the press is a silent no-op
+  (no `feedback-selection` sent).
 - New: the dial re-titles on a store change (subscription wired), e.g. selection moves
   between builders — asserting `onChange` re-render like ReviewNav's move test.
 
 ## Files to Change
 
 - `apps/streamdeck/src/actions.ts:933-954` — rewrite `ScrollNav` to a store-subscribed
-  dial rendering `setFeedback({title,value,bar})`; guard the press on a selected
+  dial rendering `setFeedback({ title, value })` (no bar); guard the press on a selected
   builder; rotation unchanged. Add module-level `selectedBuilderLine(store)` helper
   (and point `ReviewNav.renderTo` at it).
+- `apps/streamdeck/com.cluesmith.codev.sdPlugin/layouts/label.json` → **rename to
+  `layouts/scroll.json`**, redefined as a title + value layout (no `bar`); `id`
+  `codev-label` → `codev-scroll`.
 - `apps/streamdeck/com.cluesmith.codev.sdPlugin/manifest.json:263` — scroll-nav
-  `Encoder.layout` `layouts/label.json` → `layouts/dial.json`; optionally refine the
+  `Encoder.layout` `layouts/label.json` → `layouts/scroll.json`; optionally refine the
   `Push` trigger description.
-- `apps/streamdeck/com.cluesmith.codev.sdPlugin/layouts/label.json` — **delete**
-  (orphaned after the switch; grep-verified as unreferenced).
 - `apps/streamdeck/src/__tests__/actions.test.ts` — extend ScrollNav coverage
-  (mode label, builder line, empty state + inert press, onChange re-render).
+  (mode label, builder line, no-bar assertion, empty state + inert press, onChange
+  re-render).
+
+### Out-of-band: one doc file folded from a merged sibling lane
+
+Not part of the Scroll change; carried in this PR at the architect's direction to save a
+standalone CI cycle (precedent #1454). A doc-only append to a file this lane does not
+otherwise touch, kept as its own clearly-labelled commit so it stays separable in review
+and in the consult pass:
+
+- `codev/reviews/1495-stream-deck-architect-action-k.md` — append the "Protocol Note —
+  the pir-1495 lane reproduced #1462 live" section (verbatim from the architect, with
+  the one edit "this lane" → "the pir-1495 lane"). Landed against the current `main`
+  copy of the file (fetch `origin/main` first so the append lands on its live content).
 
 ## Risks & Alternatives Considered
 
-- **Risk: switching the manifest layout changes an installed board.** The layout key is
-  read from the manifest at plugin load; a reinstalled/reloaded plugin picks up
-  `dial.json`. No user data or key placement changes. Verified on hardware at the
-  dev-approval gate. Mitigation: this is a display-only layout swap; rotation and press
-  wiring are independent of it.
+- **Risk: renaming the layout file changes an installed board.** The layout is read
+  from the manifest at plugin load; a reinstalled/reloaded plugin picks up
+  `scroll.json`. No user data or key placement changes. A stale install pointing at the
+  removed `label.json` path is not a concern — the manifest that names the layout and
+  the layout file ship together in the same package. Verified on hardware at the
+  dev-approval gate. Mitigation: display-only layout change; rotation and press wiring
+  are independent of it.
 - **Risk: press-gating is a behaviour change.** Today the press always fires; gating it
   on `selectedBuilder()` means it no-ops when nothing is selected. This is deliberate
   (Decision 1) and matches `ReviewNav`. It only affects the no-builder case, which
@@ -198,25 +243,33 @@ Extend the existing ScrollNav coverage (currently one rotate+press test at
 - **Alternative — drop the press entirely** (Decision 1). Rejected: it removes the
   queue-mode reversible loop and leaves line 1 as a bare `Scroll` with no mode to name,
   which defeats the issue's core goal.
+- **Alternative — builder-progress bar** (Decision 2, the earlier recommendation).
+  Set aside by the reviewer: on this dial the bar's fill and the dial's rotation are
+  unrelated axes, so a builder-progress bar would imply a relationship that isn't there.
+  Uniformity with the neighbours was judged the weaker value here.
 - **Alternative — scroll-position bar** (Decision 2). Rejected: position is not on the
   overview; VS Code owns it; the deck deliberately shows what the dial does, not a
   counter (`actions.ts:773-774`).
+- **Alternative — keep `dial.json` and hide the bar via `setFeedback`.** Rejected:
+  relies on per-item feedback overrides and still ships a bar item the dial never means;
+  a dedicated title+value layout is declarative and assertable in the manifest tests.
 - **Alternative — inline the line-2 logic** instead of the shared helper. Acceptable;
   the helper is the SSOT-cleaner choice and both live in one file.
-- **Risk: deleting `label.json` breaks a packaged/validation test.** Verified there is
-  no reference beyond the manifest line being changed; the streamdeck suite
-  (`validate`, `manifest-icons`) runs green as a gate on this. Precedent: #1440.
+- **Risk: renaming `label.json` breaks a packaged/validation test.** The rename keeps
+  the file referenced (as `scroll.json`) rather than orphaning it; the streamdeck suite
+  (`validate`, `manifest-icons`) runs green as a gate on this — every referenced layout
+  must ship and be reachable.
 
 ## Test Plan
 
 - **Unit** (`apps/streamdeck`, `pnpm --filter @cluesmith/codev-streamdeck test` or the
-  repo test runner): the four new/updated ScrollNav cases above, plus the full
-  streamdeck suite green (ReviewNav string assertions must remain unchanged, proving the
-  shared helper is byte-identical). Run `check-types` too, not just vitest.
+  repo test runner): the new/updated ScrollNav cases above, plus the full streamdeck
+  suite green (ReviewNav string assertions must remain unchanged, proving the shared
+  helper is byte-identical). Run `check-types` too, not just vitest.
 - **Manual (dev-approval — hardware session, both modes are mandatory):** the mode label
   is the entire point, so a single-mode demo proves nothing.
   1. Select a builder with a diff. Confirm the Scroll dial reads `Scroll · send` (line
-     1), `#<id> <title>` (line 2), and a progress bar matching the builder.
+     1) and `#<id> <title>` (line 2), with **no progress bar** on the strip.
   2. Rotate: the focused editor's viewport scrolls up/down, caret unmoved
      (`revealCursor:false`) — unchanged from today.
   3. With the workspace in **forward** mode (`codev.diffCodelensMode`), select text and
@@ -225,7 +278,6 @@ Extend the existing ScrollNav coverage (currently one rotate+press test at
   4. Switch the workspace to **comment/queue** mode. Confirm line 1 now reads
      `Scroll · queue`. Select text and press: it stages into the review queue (visible
      on the Send Fb key's badge) rather than interrupting the builder.
-  5. Deselect (no builder selected / empty fleet): confirm the dial reads `No builder`
-     with an empty/zero bar, and a press does nothing (no forward, no queue) — visibly
-     inert.
+  5. Deselect (no builder selected / empty fleet): confirm the dial reads `No builder`,
+     and a press does nothing (no forward, no queue) — visibly inert.
 - **Cross-platform:** n/a (Stream Deck plugin only).
