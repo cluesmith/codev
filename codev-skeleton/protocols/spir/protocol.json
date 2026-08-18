@@ -9,6 +9,10 @@
     "required": false,
     "default_for": ["--project", "-p"]
   },
+  "context_refresh": {
+    "on_enter": ["plan", "implement", "review"],
+    "on_plan_phase_advance": true
+  },
   "phases": [
     {
       "id": "specify",

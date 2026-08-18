@@ -39,6 +39,22 @@
       "description": "Signals that can be emitted during protocol execution",
       "additionalProperties": { "$ref": "#/$defs/signal" }
     },
+    "context_refresh": {
+      "type": "object",
+      "description": "Boundaries at which builders automatically refresh their context (Spec 1470). Absent means no refreshes.",
+      "additionalProperties": false,
+      "properties": {
+        "on_enter": {
+          "type": "array",
+          "description": "Protocol phase ids to refresh on entry to. Each must name a phase this protocol declares.",
+          "items": { "type": "string" }
+        },
+        "on_plan_phase_advance": {
+          "type": "boolean",
+          "description": "Refresh when advancing from one plan phase to the next. Requires a 'per_plan_phase' phase. Excludes the first plan phase, which coincides with entering the phase itself."
+        }
+      }
+    },
     "phase_completion": {
       "type": "object",
       "description": "Checks run when a plan phase completes",

@@ -72,6 +72,44 @@ export interface CheckOverride {
 export type CheckOverrides = Record<string, CheckOverride>;
 
 /**
+ * Context-refresh boundaries a protocol declares (Spec 1470).
+ *
+ * A "boundary" is a moment porch already transitions the state machine, at which
+ * a builder's context can be refreshed without losing anything: the artifacts,
+ * `status.yaml`, the thread narrative and git carry the durable state, so a
+ * refreshed builder re-orients from disk rather than from memory.
+ *
+ * Keyed by porch's OWN transition points rather than by protocol-shaped literal
+ * names (`after-spec`, `before-review`). A literal name has to be mapped onto a
+ * real transition somewhere, and that mapping is exactly what goes stale when a
+ * protocol changes shape — leaving a boundary that can be declared but never
+ * fires. Naming the transition directly removes the translation layer.
+ *
+ * Absent key means no refreshes, which is the default for every protocol that
+ * does not opt in.
+ */
+export interface ContextRefreshConfig {
+  /**
+   * Protocol phase ids to refresh on ENTRY to.
+   *
+   * Entry, not exit: the spec requires the refresh to happen after the gate
+   * outcome and the phase transition are durable in `status.yaml`, so a
+   * refreshed builder cannot mistake "waiting at a gate" for "approved".
+   */
+  on_enter?: string[];
+  /**
+   * Refresh when advancing from one plan phase to the NEXT one.
+   *
+   * "Advance between", not "enter each": entering the `implement` phase IS
+   * entering the first plan phase, so a per-plan-phase boundary that fired on
+   * entry would fire twice in a row at that moment. Defining it as advancement
+   * excludes the first plan phase by construction rather than by a dedup rule
+   * somebody has to remember.
+   */
+  on_plan_phase_advance?: boolean;
+}
+
+/**
  * Protocol definition (loaded from protocol.json)
  */
 export interface Protocol {
@@ -81,6 +119,7 @@ export interface Protocol {
   phases: ProtocolPhase[];
   checks?: Record<string, CheckDef>;           // Check name -> definition
   phase_completion?: Record<string, string>; // Checks run when a plan phase completes (after evaluate)
+  context_refresh?: ContextRefreshConfig;    // Boundaries at which builders refresh context (Spec 1470)
 }
 
 // ============================================================================

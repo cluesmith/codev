@@ -183,3 +183,40 @@ Spec round: two false claims, both from reading docs instead of code. Plan round
 each one grep from being caught. I am reasoning about code I've read *around* rather than *read*.
 Concretely for the rest of this project: before asserting any behavior of an existing function,
 open it.
+
+## 2026-08-18 — Implement Phase 1
+
+Plan approved (human, relayed by architect). Architect confirmed: Phase 8 live runs are
+architect-driven on a disposable subject builder — **flag them when the runbook is ready, not
+before**; the Phase 2 no-chaining behavior change is accepted; tests 37/38 are blocking.
+
+### Friction worth reporting: this repo has no `worktree` block
+
+`.codev/config.json` has `porch.checks` but no `worktree` block, so builder worktrees spawn with
+**no node_modules** and cannot run `npm run build` / `npm test` until someone runs an install by
+hand. My first `vitest run` died with "Cannot find package 'vitest'". Ran `pnpm install
+--frozen-lockfile` in the worktree to unblock.
+
+Also worth flagging: that failing vitest run **exited with code 0** despite a startup error, so a
+check that only inspects the exit code would have called it green. Porch's `tests` check runs
+`npm test` with cwd `packages/codev`; if that inherits the same behavior, a worktree without
+node_modules could pass the check while running nothing.
+
+Candidate follow-up (not this project's scope): add a `worktree.postSpawn: ["pnpm install
+--frozen-lockfile"]` to `.codev/config.json` so builders are runnable on spawn.
+
+### Phase 1 as built
+
+- `ContextRefreshConfig` on the `Protocol` type; `context_refresh?` optional so absent = no
+  refreshes.
+- `normalizeContextRefresh` in protocol.ts — validates and REJECTS, because there is no other
+  layer that could. Rejects: unknown phase in `on_enter` (names it, and lists what IS available);
+  `on_plan_phase_advance: true` with no per_plan_phase phase; wrong types; unknown keys.
+- Unknown keys are rejected rather than ignored — a typo'd `on_entry` is indistinguishable from
+  "declared nothing" if skipped, which is the exact silent no-op the validator exists to prevent.
+- spir + aspir declare the four boundaries in BOTH trees.
+- All three `protocol-schema.json` copies got the same block. Note: those three are **not**
+  byte-identical to each other and never were — the skeleton root copy is draft 2020-12 with a
+  different `required` set, the two `protocols/` copies are draft-07. Pre-existing, out of scope;
+  the parity test asserts the `context_refresh` block agrees rather than whole-file equality, and
+  says why inline.
