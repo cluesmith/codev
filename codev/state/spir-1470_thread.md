@@ -553,7 +553,24 @@ sits between here and there. **Do not write the review without walking this list
      stability gate already catches.
    - `extractPlanPhases` silently invents a `phase_1` for a plan with no phases JSON.
    - `codev/protocols/spir/protocol.json`'s `$schema` path does not resolve (Phase 7 fixes).
-11. **This repo has no `worktree` block** in `.codev/config.json`, so builder worktrees spawn without
+11. **LESSON, architect-routed to `lessons-learned.md` (COLD tier)** — it sharpens the existing HOT
+   lesson "'tests pass' is not 'it works'" by supplying a MECHANISM and a CURE rather than a
+   warning:
+
+   > **Where a helper derives context internally, pass the context in instead — mocking the
+   > resolver hides the resolution.** A test that mocks `findBuilderById` cannot see which
+   > workspace it scoped to; a test against `getBuilder(id, workspace)` can assert the scope.
+   > Identity and lookup should agree BY CONSTRUCTION (same resolver, passed explicitly), not by
+   > two call sites happening to derive the same value. Three production-fatal defects in Spec 1470
+   > were invisible to unit tests for exactly this reason.
+
+12. **PHASE 8 RUNBOOK REQUIREMENT (architect)**: begin with a **preflight** that runs
+   `afx self-refresh --begin` from the subject worktree and verifies IDENTITY RESOLUTION before
+   anything goes near a clear. `--begin` is the harmless half — no Tower needed, writes one file,
+   destroys nothing — so it is the ideal cheap probe for the dead-on-arrival class. Do not let the
+   live run reach a clear until the preflight resolves an identity and a registry row.
+
+13. **This repo has no `worktree` block** in `.codev/config.json`, so builder worktrees spawn without
    node_modules and cannot run build/tests until someone installs by hand. Related: the failing
    vitest startup exited 0, so an exit-code-only check would have called it green.
 
