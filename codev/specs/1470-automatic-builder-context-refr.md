@@ -1,3 +1,8 @@
+---
+approved: 2026-08-18
+validated: [codex, claude]
+---
+
 # Specification: Automatic Builder Context Refresh at Porch Phase Boundaries
 
 <!--
