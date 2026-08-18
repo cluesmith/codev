@@ -112,3 +112,14 @@ architect carry-through #5):
   alt reading is the bar belongs to line 2. Owner chose drop-for-this-dial only.
 
 Heading to dev-approval gate (hardware): must exercise BOTH delivery modes + no-builder.
+
+### dev-approval hardware finding → follow-up #1501 (not a #1498 regression)
+Amr observed the Scroll dial does nothing when reviewing a spec/plan. Root cause
+(verified): rotation relays `scroll`→VSCode built-in `editorScroll` (command-relay.ts:59),
+which acts only on the active TEXT editor; a spec/plan opens in the artifact-canvas
+WebviewPanel (no text editor focused) → editorScroll no-ops. The 2nd/3rd dials work there
+because ReviewNav switches to sendCanvasCommand in canvas mode; ScrollNav has only the
+editorScroll channel. Pre-existing + explicitly out of #1498 scope (rotation unchanged;
+deck-only). A fix needs a NEW canvas viewport-scroll command (canvas + wire/types + vscode),
+so filed as separate follow-up #1501 (area/streamdeck) rather than expanding this lane.
+#1498's narration work is unaffected and still at dev-approval.
