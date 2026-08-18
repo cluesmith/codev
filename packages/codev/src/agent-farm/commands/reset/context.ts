@@ -1,5 +1,5 @@
 /**
- * Builder context resolution for `afx reset` (Spec 1273, phase 4).
+ * Builder context resolution for `afx refresh` (Spec 1273, phase 4).
  *
  * Invariant R3 requires a re-orientation carrying protocol, mode, worktree,
  * branch, project identity and porch re-entry. The first draft of the plan
@@ -140,7 +140,7 @@ export class ContextResolutionError extends Error {
  * one project directory. **This repo commits porch history to `main`**, so every
  * worktree inherits every project ever run — 203 of them at the time of writing.
  * The alphabetically-first is `0087-porch-timeout-termination-retries`, whose
- * protocol is `spider`, so `afx reset` resolved protocol "spider" for *every*
+ * protocol is `spider`, so `afx refresh` resolved protocol "spider" for *every*
  * builder and died on `Protocol "spider" has no builder-prompt.md`. It failed
  * loudly, which is why nothing was corrupted — but it failed for every lane.
  *
@@ -577,7 +577,7 @@ export function resolveBuilderContext(options: ResolveContextOptions): ResolvedB
   }
   if (!mode && isBareTask) {
     // A `--task` spawn writes a bare prompt with no `## Mode:` heading, so this
-    // lane could never auto-detect and every `afx reset <task>` hard-errored.
+    // lane could never auto-detect and every `afx refresh <task>` hard-errored.
     //
     // Defaulting to SOFT is not a guess dressed up as a fact: "strict" means
     // *porch orchestrates this builder*, and a builder with no porch project
@@ -615,7 +615,7 @@ export function resolveBuilderContext(options: ResolveContextOptions): ResolvedB
   }
   if (!harness.supportsContextReset) {
     throw new ContextResolutionError(
-      `Harness '${harnessName}' has no in-session context reset, so 'afx reset' cannot clear this ` +
+      `Harness '${harnessName}' has no in-session context reset, so 'afx refresh' cannot clear this ` +
         `builder's context. Only the claude harness supports it today. ` +
         `To give this builder a fresh window, stop it and respawn without --resume.`,
     );

@@ -189,7 +189,7 @@ export interface InterruptOptions {
 }
 
 /**
- * Options for `afx reset` — save-state → /clear → re-orient (Spec 1273).
+ * Options for `afx refresh` — save-state → /clear → re-orient (Spec 1273).
  *
  * The timing knobs exist because the safe failure of every gate is "abort
  * without clearing". A builder that legitimately needs longer than a default

@@ -46,11 +46,11 @@ export interface HarnessProvider {
 
   /**
    * Whether this harness can clear its conversation context in-session, without
-   * restarting the process (Spec 1273 — `afx reset`).
+   * restarting the process (Spec 1273 — `afx refresh`).
    *
    * Optional, and absence means "no": a harness that has not declared support
    * must not be reset, and defaulting to unsupported is the safe direction. Only
-   * Claude declares it today (`/clear`), which is why `afx reset` refuses other
+   * Claude declares it today (`/clear`), which is why `afx refresh` refuses other
    * harnesses loudly rather than improvising a substitute mechanism.
    */
   supportsContextReset?: boolean;
@@ -216,7 +216,7 @@ export const OPENCODE_HARNESS: HarnessProvider = {
 };
 
 /**
- * Exported for Spec 1273: `afx reset` identifies a running builder's harness from
+ * Exported for Spec 1273: `afx refresh` identifies a running builder's harness from
  * its launch script and must check `supportsContextReset` before typing into the
  * terminal. It needs the name→provider map, not just the workspace default.
  */

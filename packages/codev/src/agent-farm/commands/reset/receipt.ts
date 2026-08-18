@@ -1,7 +1,7 @@
 /**
  * The reset receipt gate — invariant R2 (Spec 1273).
  *
- * `afx reset` clears a builder's context, which is irreversible. The manual
+ * `afx refresh` clears a builder's context, which is irreversible. The manual
  * version of this flow guarded that step by eyeballing the state file ("ours was
  * 203 lines"). This module replaces the eyeball with evidence: a state file is
  * accepted only if it proves it is *this run's* save, is substantive, and has
@@ -75,7 +75,7 @@ export function nonceMarker(nonce: string): string {
  */
 export function buildSaveRequest(nonce: string, statePath: string): string {
   return [
-    'CONTEXT RESET INCOMING — save your working state now.',
+    'CONTEXT REFRESH INCOMING — save your working state now.',
     '',
     `Write your complete working state to \`${statePath}\` (untracked; do not stage or commit it).`,
     '',
@@ -95,7 +95,7 @@ export function buildSaveRequest(nonce: string, statePath: string): string {
     '5. **Open questions** — decisions you deferred, and what they hinge on.',
     '6. **Standing orders** — instructions from the architect you are still bound by,',
     '   including anything you were told NOT to do.',
-    '7. **Next concrete action** — the single thing to do first after the reset.',
+    '7. **Next concrete action** — the single thing to do first after the refresh.',
     '',
     'Do not summarise for brevity. A save that omits a standing order or a receipt',
     'costs more than a long file does. When the file is written, stop and wait.',
@@ -194,7 +194,7 @@ export function describeReceiptFailure(
     case 'missing':
       return `${statePath} was never written. The builder may not have read the request (if it is wedged mid-turn, retry with --interrupt-first).`;
     case 'wrong-nonce':
-      return `${statePath} exists (${observation.bytes} bytes) but does not carry this run's nonce — it is stale, left by an earlier reset. Refusing to clear on superseded state.`;
+      return `${statePath} exists (${observation.bytes} bytes) but does not carry this run's nonce — it is stale, left by an earlier refresh. Refusing to clear on superseded state.`;
     case 'too-small':
       return `${statePath} carries the nonce but is only ${observation.bytes} bytes (minimum ${minBytes}). That is a stub, not a working-state save. Override with --min-bytes if this is genuinely all there was.`;
     case 'still-growing':
