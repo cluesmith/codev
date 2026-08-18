@@ -358,6 +358,16 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 
 - [From #1414] A Stream Deck feature spans TWO independently-loaded artifacts — the deck plugin bundle (`streamdeck link` → `apps/streamdeck/…sdPlugin`) and the VSCode extension (the command PROVIDER). Hardware verification requires BOTH to be on the branch under test; either one stale silently masks the change. The trap: `streamdeck link` is global app state, so a sibling worktree's live symlink (here pir-1425) keeps serving its OLD `actions.ts`, and the deck fires the pre-change verb even though your branch's bundle is built. Diagnose before reinstalling: `streamdeck list` shows which checkout is linked; the aggregate-vs-nothing symptom localizes the stale half (old deck fires `view-diff` → aggregate opens; new deck + old extension fires an unknown verb → nothing opens). Relink the deck to the test worktree AND install the branch's extension vsix (or run its Extension Development Host, focused), then hand the deck back to the sibling's symlink when done. [Sharpened by #1410] *Why the bundle can be silently absent:* the root `pnpm build` builds only the published `@cluesmith/codev` package + its deps — NOT `apps/streamdeck` / `apps/vscode` (they're never npm-published; CI builds them in dedicated jobs, per the comment in `test.yml`). So after `streamdeck link` a fresh worktree may have no `bin/plugin.js` (`CodePath`) at all and the plugin renders nothing — build it explicitly with `pnpm --filter @cluesmith/codev-streamdeck build` (the extension likewise via its own `vsix`/build). "Ran `pnpm build`" does not mean the apps are built.
 
+- [From #1498] A green mode-dependent test can be semantically wrong when the default fixture's
+  state contradicts the mode under assertion. The streamdeck `makeStore()` default selection is
+  `pir-1`, blocked at plan-approval — i.e. a **canvas**-phase builder. A `ScrollNav` test
+  asserting `Scroll · send` (a *diff*-mode delivery label) against it passed, while claiming a
+  label that builder should never show. The contradiction was invisible until canvas mode was
+  given its own meaning (`Scroll · editor only`), which flipped the expected label and turned the
+  bug red. When adding a mode-dependent assertion, select the fixture builder whose phase matches
+  the mode you are asserting (`pir-2`, implement phase, is diff mode) rather than reaching for the
+  default — a passing assertion against the wrong-phase default proves nothing.
+
 ## UI/UX
 
 - [From #1463] A Stream Deck action's identity is its **UUID**, not its `Name`. Renaming a key's

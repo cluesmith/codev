@@ -646,6 +646,60 @@ describe('encoders', () => {
     expect(ctx.sent[2]).toEqual({ verb: 'feedback-selection', args: [], ws: '/work/alpha' });
   });
 
+  it('ScrollNav legibility: diff-phase builder → line 1 = axis · delivery mode, line 2 = builder, NO bar (#1498)', () => {
+    const ctx = makeStore(); // no feedbackMode on the fixture → defaults to forward → "send"
+    ctx.store.syncToBuilder('pir-2'); // implement phase → diff mode (#102, "Wire the dial")
+    const action = { isDial: () => true, setFeedback: vi.fn() };
+    new ScrollNav(ctx.store).onWillAppear({ action, payload: {} } as never);
+    const fb = action.setFeedback.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+    expect(fb).toEqual({ title: 'Scroll · send', value: '#102 Wire the dial' });
+    // The dropped bar is load-bearing: assert no `bar` key so a regression that re-adds it is caught.
+    expect(fb).not.toHaveProperty('bar');
+  });
+
+  it('ScrollNav legibility: names the queue mode when the workspace queues (Scroll · queue)', () => {
+    const ctx = makeStore();
+    ctx.store.overview = { ...ctx.store.overview!, feedbackMode: 'queue' } as never;
+    ctx.store.syncToBuilder('pir-2'); // diff mode — the delivery-mode qualifier applies here
+    const action = { isDial: () => true, setFeedback: vi.fn() };
+    new ScrollNav(ctx.store).onWillAppear({ action, payload: {} } as never);
+    expect(action.setFeedback.mock.calls.at(-1)?.[0]).toMatchObject({ title: 'Scroll · queue' });
+  });
+
+  it('ScrollNav canvas mode: line 1 reads "Scroll · editor only" (both gestures inert), mode label suppressed', async () => {
+    const ctx = makeStore(); // default selection pir-1 is blocked at plan-approval → canvas mode
+    ctx.store.overview = { ...ctx.store.overview!, feedbackMode: 'queue' } as never; // must NOT leak into line 1
+    const action = { isDial: () => true, setFeedback: vi.fn() };
+    const nav = new ScrollNav(ctx.store);
+    nav.onWillAppear({ action, payload: {} } as never);
+    // The delivery mode is replaced entirely: neither `send` nor `queue`, because in canvas
+    // mode rotation (editorScroll) and the press (diff-only feedback-selection) are both inert.
+    expect(action.setFeedback.mock.calls.at(-1)?.[0]).toEqual({ title: 'Scroll · editor only', value: '#101 Add the relay' });
+    // The press is NOT gated on reviewMode (it no-ops server-side already); the deck still relays it.
+    await nav.onDialDown();
+    expect(ctx.sent).toEqual([{ verb: 'feedback-selection', args: [], ws: '/work/alpha' }]);
+  });
+
+  it('ScrollNav empty state: line 2 reads "No builder" and the press is a silent no-op', async () => {
+    const ctx = makeStore();
+    ctx.store.overview = { builders: [], pendingPRs: [], backlog: [], recentlyClosed: [] } as never;
+    const action = { isDial: () => true, setFeedback: vi.fn() };
+    const nav = new ScrollNav(ctx.store);
+    nav.onWillAppear({ action, payload: {} } as never);
+    expect(action.setFeedback.mock.calls.at(-1)?.[0]).toMatchObject({ title: 'Scroll · send', value: 'No builder' });
+    await nav.onDialDown();
+    expect(ctx.sent).toHaveLength(0); // inert: no feedback-selection with nothing selected
+  });
+
+  it('ScrollNav re-renders line 2 on a store change (subscription wired)', () => {
+    const ctx = makeStore();
+    const action = { isDial: () => true, setFeedback: vi.fn() };
+    new ScrollNav(ctx.store).onWillAppear({ action, payload: {} } as never); // pir-1
+    expect(action.setFeedback.mock.calls.at(-1)?.[0]).toMatchObject({ value: '#101 Add the relay' });
+    ctx.store.syncToBuilder('pir-2'); // onChange → re-render
+    expect(action.setFeedback.mock.calls.at(-1)?.[0]).toMatchObject({ value: '#102 Wire the dial' });
+  });
+
   it('PrNav opens the selected PR url on press', async () => {
     const ctx = makeStore();
     await new PrNav(ctx.store).onDialDown();
