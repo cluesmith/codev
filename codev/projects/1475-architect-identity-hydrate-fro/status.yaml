@@ -1,0 +1,18 @@
+id: '1475'
+title: architect-identity-hydrate-fro
+protocol: pir
+phase: plan
+plan_phases: []
+current_plan_phase: null
+gates:
+  plan-approval:
+    status: pending
+  dev-approval:
+    status: pending
+  pr:
+    status: pending
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-08-18T03:14:15.995Z'
+updated_at: '2026-08-18T03:14:15.996Z'
