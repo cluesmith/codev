@@ -76,6 +76,31 @@ editor, where the artifact is, rather than behind a one-touch key on a desk
 peripheral. Silent one-touch approval is deliberately out of scope for that reason,
 not for want of a spare key.
 
+**The Architects board is an enumeration, not a scope.** A second board of **Architect
+Action** keys lists the workspace's live architects, one key each — you reach it with a
+*native* Stream Deck page/profile switch, not a plugin mode. Two decisions shape it.
+First, it does **not** filter the builders board: pressing an architect opens that
+architect's terminal and changes nothing about the shared builder selection, because a
+builder already links back to its architect, and a "list architects" *mode* would leave
+Row 2 and the review dials with nothing coherent to act on. Second, the list is the
+**live-session view** (`OverviewData.architects`), not the architects derived from the
+builders' `spawnedByArchitect`: the board *summons*, so it must list every architect that
+exists — including one that owns no builders — or that architect would be permanently
+unopenable. That is safe here where it would not be for a single-target key: this board
+enumerates candidates and still delegates resolution (and the "no such architect" warning)
+to VSCode, so a stale or incomplete list yields a key that **fails loudly** on press, never
+one that silently opens the wrong person. For the same reason `main` is **sorted** first
+but never **pinned** — an injected `main` pressed while `main` is briefly offscreen would
+resolve to whoever sorts first, opening the wrong terminal under main's own label (#1497);
+an absent key is the safer, self-correcting failure.
+
+**A native switch, not a plugin one.** The Builders and Architects boards are two
+placements (a second page, a folder, or a second profile) that you flip between with Stream
+Deck's own **Switch Profile** or **Folder** key — the plugin ships a Codev-styled *switch*
+icon so that native key blends with the rest, but drives no page flip itself. A
+plugin-driven toggle (`switchToProfile`) waits on bundled-profile authoring (deferred with
+\#1381/#1440); the native route delivers the button today without it.
+
 ## Hardware
 
 The plugin targets the **Stream Deck +** (8 LCD keys + 4 dials + touchscreen),
@@ -184,6 +209,17 @@ the four above (e.g. replace PR Nav when you are triaging the backlog).
   window sizes itself to the Builder Action keys you actually place (#1465), giving a
   Row 1 key to this one simply leaves a correctly-sized three-wide builder window,
   with no hidden builders. That is the recommended layout above (Row 1 slot 1).
+- **Architect Action** (Architects board) — a live tile for an architect, one key per
+  live architect. Like Builder Action it **self-orders** by placement (reading order,
+  row then column), so the Nth key shows the Nth architect; the list is the workspace's
+  live architects (`main` first, then alphabetical), including architects that own no
+  builders. Press **opens that architect's terminal** — it sets no scope, moves no
+  selection, and touches neither Row 2 nor the dials. A key past the end of the list
+  renders a dim, inert **No architect** face. Place several on a second page/profile (or a
+  folder) and reach them with a native Stream Deck **Switch Profile** / **Folder** key
+  (the plugin ships a *switch* icon to put on it). Distinct from **Open Architect
+  Terminal**, which resolves a *single* target (the selected builder's owner, or `main`)
+  on the main board; this is the full enumeration on its own board.
 - **Codev Action** — fires a workspace verb. Choose it in the Property Inspector
   (Open Architect/Builder Terminal, View Diff, Send Message, Spawn Builder,
   Refresh Overview). Defaults to Refresh Overview. (The Open Architect Terminal
