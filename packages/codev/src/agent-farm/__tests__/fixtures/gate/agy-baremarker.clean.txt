@@ -14,4 +14,8 @@
 [90m──────────────────────────────────────────────────────────────────────────────────────────────────────────────[m
 [94m>[m [90mAccept-edits mode: file edits auto-approved (shift+tab to cycle)[m
 [90m──────────────────────────────────────────────────────────────────────────────────────────────────────────────[m
-[90m? for shortcuts[m[57X[57C[32maccept-edits[39;2m · Gemini 3.7 Flash · high[m[2A[2C[?25h
+[90m? for shortcuts[m[57X[57C[32maccept-edits[39;2m · Gemini 3.7 Flash · high[m[2A[2C[?25h[?25l[90mPlan mode: research & plan only [m[12P
+
+[38C        [94mplan[m[2A[82D[?25h[?25l[K
+
+[78C       [2A[85D[?25h

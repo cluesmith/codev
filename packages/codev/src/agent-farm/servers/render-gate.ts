@@ -35,7 +35,10 @@
  * the same capped seed), not a round-2 regression; tracked as #1361.
  *
  * Classifier (fail-toward-not-clean): CLEAN requires
- *   (a) a recognized composer marker on the screen, AND
+ *   (a) a recognized composer marker on the screen — a text match, plus whatever further
+ *       positive evidence the profile demands that the row is the LIVE composer and not
+ *       just a row the app prefixes alike (agy anchors on the cursor row and the marker's
+ *       own palette color; see `markerRequiresCursorRow` / `markerFgPalette`), AND
  *   (b) a positively-bounded composer region (a rule/status line BELOW the
  *       marker — never a scan to the screen bottom), AND
  *   (c) zero normal-intensity (non-dim), non-whitespace, non-chrome cells in that
@@ -108,6 +111,26 @@ export interface GateProfile {
    */
   regionEndPatterns: RegExp[];
   /**
+   * Optional per-app marker anchor: when true, the marker row must ALSO be the row
+   * holding the buffer cursor. `markerPattern` alone is a text test, and a text test
+   * cannot tell a composer from any other row an app happens to prefix the same way —
+   * agy's `> ` matches its slash-menu selection cursor and its per-turn transcript echo
+   * as readily as its composer (measured, #1474). The cursor is the one signal only the
+   * live input row carries, so this converts "a row that looks like a prompt" into "the
+   * row the user would actually type into". Fail-safe: an app whose cursor is parked
+   * elsewhere yields NO marker ⇒ `no-composer-marker` ⇒ hold. Left unset, the marker is
+   * the text match alone (claude/codex behavior is unchanged).
+   */
+  markerRequiresCursorRow?: boolean;
+  /**
+   * Optional per-app marker anchor: the 16-color palette index the marker GLYPH cell must
+   * render in. The color-attribute analogue of {@link markerRequiresCursorRow}, and the
+   * signal that separates agy's composer marker (palette 12, bright blue) from its
+   * transcript echo of a submitted turn (palette 4 — measured, #1474). Left unset, the
+   * marker cell's color is not examined.
+   */
+  markerFgPalette?: number;
+  /**
    * Optional per-app placeholder signal: a 16-color palette index whose cells are
    * treated as placeholder/hint chrome (ignored), NOT user text. This is the
    * color-attribute analogue of the universal dim-placeholder skip. claude/codex
@@ -157,11 +180,44 @@ function screenLines(term: HeadlessTerminal, rows: number): string[] {
   return lines;
 }
 
-/** Last row index whose text starts with the profile's composer marker, or -1. */
-function findMarkerRow(lines: string[], markerPattern: RegExp): number {
+/**
+ * Last row index that is the profile's composer marker, or -1 when no row qualifies.
+ *
+ * The text match (`markerPattern`) is the necessary condition; a profile may demand
+ * further POSITIVE evidence that the row is the live composer and not merely a row the
+ * app prefixes the same way (`markerRequiresCursorRow`, `markerFgPalette` — both measured
+ * per app, see their docs on {@link GateProfile}). Last-match-wins is retained: with the
+ * anchors applied, the qualifying rows are the composer, and the lowest one is it.
+ *
+ * Why the anchors exist (#1474): agy's marker is `> `, which its slash-menu selection
+ * cursor and its per-turn transcript echo also render — and the menu's item rows sit BELOW
+ * the composer, so text-only last-match-wins bounded the wrong region on real screens.
+ * Requiring the cursor row (and the marker's own color) makes the composer the only row
+ * that can qualify. A row that fails the anchors is simply not a marker, so an app that
+ * drifts fails toward `no-composer-marker` ⇒ hold, never toward a false clean.
+ *
+ * `cursorRow` is viewport-relative, matching `lines`' indexing from `viewportY` (the same
+ * convention {@link isGhostCursorCell} uses).
+ */
+function findMarkerRow(
+  lines: string[],
+  profile: GateProfile,
+  buf: HeadlessTerminal['buffer']['active'],
+  top: number,
+  cursorRow: number,
+  cell: BufferCell,
+): number {
   let markerRow = -1;
   for (let i = 0; i < lines.length; i++) {
-    if (markerPattern.test(lines[i])) markerRow = i;
+    if (!profile.markerPattern.test(lines[i])) continue;
+    if (profile.markerRequiresCursorRow && i !== cursorRow) continue;
+    if (profile.markerFgPalette !== undefined) {
+      const line = buf.getLine(top + i);
+      if (!line) continue;
+      line.getCell(0, cell);
+      if (!cell.isFgPalette() || cell.getFgColor() !== profile.markerFgPalette) continue;
+    }
+    markerRow = i;
   }
   return markerRow;
 }
@@ -263,8 +319,14 @@ export function classifyBuffer(
 ): GateVerdict {
   const buf = term.buffer.active;
   const lines = screenLines(term, rows);
+  const top = buf.viewportY;
+  const cell = buf.getNullCell();
+  const probe = buf.getNullCell(); // scratch cell for the ghost-tail look-ahead (never clobbers `cell`)
+  // Cursor position is viewport-relative (matching `row`, which indexes from `viewportY`).
+  const cursorRow = buf.cursorY;
+  const cursorCol = buf.cursorX;
 
-  const markerRow = findMarkerRow(lines, profile.markerPattern);
+  const markerRow = findMarkerRow(lines, profile, buf, top, cursorRow, cell);
   if (markerRow === -1) {
     // No composer marker: a wrapper/boot screen, a full-screen picker with no marker, a
     // mirror that has not yet repainted a coherent frame, or an unrenderable snapshot.
@@ -280,12 +342,6 @@ export function classifyBuffer(
     // empty/dim, return a false CLEAN).
     return { clean: false, reason: 'busy', detail: 'no-region-end' };
   }
-  const top = buf.viewportY;
-  const cell = buf.getNullCell();
-  const probe = buf.getNullCell(); // scratch cell for the ghost-tail look-ahead (never clobbers `cell`)
-  // Cursor position is viewport-relative (matching `row`, which indexes from `viewportY`).
-  const cursorRow = buf.cursorY;
-  const cursorCol = buf.cursorX;
   let userCells = 0;
 
   for (let row = markerRow; row < endRow; row++) {

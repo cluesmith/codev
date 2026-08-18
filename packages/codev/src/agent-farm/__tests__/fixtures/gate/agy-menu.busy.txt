@@ -14,4 +14,24 @@
 [90m──────────────────────────────────────────────────────────────────────────────────────────────────────────────[m
 [94m>[m [90mAccept-edits mode: file edits auto-approved (shift+tab to cycle)[m
 [90m──────────────────────────────────────────────────────────────────────────────────────────────────────────────[m
-[90m? for shortcuts[m[57X[57C[32maccept-edits[39;2m · Gemini 3.7 Flash · high[m[2A[2C[?25h
+[90m? for shortcuts[m[57X[57C[32maccept-edits[39;2m · Gemini 3.7 Flash · high[m[2A[2C[?25h[?25l/[K
+
+[94m> /add-dir           [m  [2mAdd a directory to the workspace[m[K
+  /agents[14X[14C[2mList available custom agents[m[K
+  /artifact            [2mView and review artifacts[m[K
+  /btw[17X[17C[2mAsk a side question without interrupting the current task[m[K
+  /changelog           [2mShow release notes and changes[m[K
+[2m   ↓ 32 more[m[K
+[K
+  [94;1m↑/↓[90;22m Navigate · [94;1menter[90;22m Select · [94;1mtab[90;22m Complete[m[K
+[27C[1K [32maccept-edits[39;2m · Gemini 3.7 Flash · high[m[10A[3C[?25h[?25l
+
+
+
+
+
+
+
+
+
+[90mesc to cancel[m[10A[10D[?25h

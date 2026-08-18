@@ -30,25 +30,40 @@ encodes the expected verdict: `<app>-<state>.<clean|busy>.txt`.
   path — the marker matches the cursor, the model names count as occupancy), never
   mistaken for an empty composer. Mirrors the real **codex-picker** capture, whose
   `› 1. …` selection cursor exercises the same path.
-- **agy-idle.clean.txt, agy-draft.busy.txt, agy-trust.busy.txt** — **synthesized** to
-  the **Phase 3 live measurement** of agy (Antigravity CLI 1.1.8). agy was captured
-  under the spike harness (`agy-measure.cjs`), but its banner embeds the authenticated
-  **account email**, so the raw capture is not committed; the fixtures reproduce the
-  measured *attributes* with sanitized content. Measured facts they encode: agy's
-  marker is `> ` (palette-12 bright blue), its idle mode-hint (`Accept-edits mode: …`)
-  renders in **palette-8 (gray)** at normal intensity (dim=0), user-typed text is
-  **default-fg**, and the per-folder trust dialog's selected `> Yes, I trust this
-  folder` option is **palette-12**. So idle → clean (gray hint ignored), draft → busy
-  (default-fg text counts), trust → busy (palette-12 option counts — a blind Enter
-  never confirms filesystem trust). The raw measurement (with real render + per-cell
-  fg attributes) is archived in the Phase 3 review.
+- **agy-\*.txt** — **real captures** from `agy` (Antigravity CLI **1.1.13**) running under
+  a PTY at 110×32, one per composer state (#1474; they replace the Phase 3 fixtures, which
+  were synthesized from the 1.1.8 measurement because no authenticated agy was available
+  then). agy's banner embeds the authenticated **account email** and the session cwd, so
+  each capture is sanitized before committing: both are replaced with **same-length**
+  placeholders, which leaves the rendered screen byte-for-byte equivalent. Nothing else is
+  edited — no attribute is retouched. The seven states:
+
+  | fixture | what it is | why it is here |
+  |---|---|---|
+  | `agy-idle.clean.txt` | empty composer, accept-edits mode | the baseline clean screen: `> ` marker (palette-12) + palette-8 gray hint |
+  | `agy-baremarker.clean.txt` | empty composer, no-hint mode | agy renders a **bare `>`** here; the old `/^> /` never matched it, so every send held forever |
+  | `agy-draft.busy.txt` | a typed, unsent draft | default-fg text in the region ⇒ occupancy |
+  | `agy-menu.busy.txt` | the `/` slash-command menu | its selection cursor is **also `> `, also palette-12, and renders BELOW the composer** — last-match-wins picked it, not the composer |
+  | `agy-trust.busy.txt` | the per-folder trust dialog | selected `> Yes, I trust this folder` is palette-12, with **no composer on screen at all** |
+  | `agy-turn-echo.clean.txt` | a settled answer above an empty composer | agy echoes every submitted turn as `> <message>` (palette-4) — a `> ` row that must not steal the marker |
+  | `agy-torn-echo.busy.txt` | the same stream **cut mid-repaint** | real bytes, composer not yet repainted; the only `> ` row left is the palette-4 echo (the tear shape #1361 documents) |
+
+  Measured attribute facts these encode: the marker glyph is **palette-12** (bright blue)
+  in every mode; the idle mode-hint (`Accept-edits mode: …`) is **palette-8 (gray)** at
+  normal intensity (dim=0); user-typed text is **default-fg**; the transcript echo of a
+  submitted turn is **palette-4**; and in every settled state the **cursor rests on the
+  composer row**. Markdown blockquotes render as `│`, not `> `.
 - **wrapper-boot.busy.txt** — **synthetic** builder launch-loop screen (a born-dirty
   state with no composer marker). App-agnostic: no marker → busy under any profile.
 
 ## Classifier assumption
 
 CLEAN requires a composer marker **and** zero normal-intensity, non-whitespace,
-non-chrome cells in the composer region. Placeholder/hint text is excluded by an
+non-chrome cells in the composer region. "A composer marker" is more than a text match
+where the profile says so: agy additionally requires the marker row to hold the **cursor**
+and the marker glyph to render in the profile's palette (`markerRequiresCursorRow` /
+`markerFgPalette`, #1474), because `> ` alone matches its menu cursor, its dialog options
+and its transcript echoes as readily as its composer. Placeholder/hint text is excluded by an
 **attribute** the profile names: claude/codex de-emphasize it with SGR-**dim**
 (universal skip); agy uses a **foreground color** instead (palette-8), declared per
 profile as `placeholderFgPalette`. Either way the exclusion is attribute-based, never

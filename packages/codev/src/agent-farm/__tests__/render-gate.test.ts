@@ -32,7 +32,18 @@ const INV = '\x1b[7m'; // SGR-7 inverse (claude's software block cursor over the
 const INV_OFF = '\x1b[27m'; // SGR-27 inverse off
 const PAL8 = '\x1b[38;5;8m'; // agy's placeholder gray
 const PAL12 = '\x1b[38;5;12m'; // agy's marker / selected-option bright blue
+const PAL4 = '\x1b[38;5;4m'; // agy's transcript echo of a submitted turn (`> <message>`)
 const FG = '\x1b[39m'; // reset foreground to default
+
+/**
+ * Park the cursor at a 1-based row/col. agy's profile anchors its marker to the cursor
+ * row (#1474), so a synthetic agy screen must place the cursor the way the real TUI does
+ * — on the composer input row. Absolute positioning, so it is independent of how the
+ * `RingBuffer` round-trip rewrites line endings.
+ */
+function cursorAt(row: number, col: number): string {
+  return `\x1b[${row};${col}H`;
+}
 
 /** Production data path: raw PTY bytes → RingBuffer.pushData → getAll().join('\n'). */
 function snapshotFromRaw(raw: string, cols = COLS, rows = ROWS): RingSnapshot {
@@ -70,6 +81,11 @@ describe('render-gate — real captured fixtures (Spec 1313)', () => {
       'agy-idle.clean',
       'agy-draft.busy',
       'agy-trust.busy',
+      // #1474 — the states that pin the tightened agy marker (all real captures).
+      'agy-menu.busy',
+      'agy-baremarker.clean',
+      'agy-turn-echo.clean',
+      'agy-torn-echo.busy',
       'wrapper-boot.busy',
     ]) {
       expect(fixtures.some((f) => f.startsWith(required))).toBe(true);
@@ -85,6 +101,53 @@ describe('render-gate — real captured fixtures (Spec 1313)', () => {
       if (!expectClean) expect(verdict.reason).toBe('busy');
     });
   }
+
+  /**
+   * #1474 — the tightened agy marker, asserted on REAL agy 1.1.13 captures. The filename
+   * loop above already pins each verdict; these pin the *reason*, which is the whole point:
+   * on every one of these screens the old text-only `/^> /` marker selected a row that is
+   * not the composer (or missed the composer entirely), so the region it bounded was the
+   * wrong region. Getting `busy` out of a mis-bounded region is luck, not a guarantee.
+   */
+  describe('agy marker anchors (#1474)', () => {
+    const verdictFor = async (name: string) =>
+      classifyScreen(snapshotFromRaw(readFileSync(`${FIXTURE_DIR}/${name}`, 'utf8')), AGY_PROFILE);
+
+    it('the slash menu: the marker is the composer, NOT the menu selection row below it', async () => {
+      // The menu's selected item renders `> /add-dir …` in palette-12 — the same glyph AND
+      // the same color as the composer marker — and it sits BELOW the composer, so
+      // last-match-wins picked it. Only the cursor row separates them. `user-text` here is
+      // the `/` the user typed into the composer: the right region, counted correctly.
+      expect(await verdictFor('agy-menu.busy.txt')).toMatchObject({ clean: false, detail: 'user-text' });
+    });
+
+    it('the trust dialog: no composer on screen at all ⇒ no-composer-marker', async () => {
+      // Its selected `> Yes, I trust this folder` option is palette-12 too, but the cursor
+      // is parked off that row. Held for the honest reason — there is no composer — rather
+      // than by the incidental absence of a rule line beneath the option.
+      expect(await verdictFor('agy-trust.busy.txt')).toMatchObject({ clean: false, detail: 'no-composer-marker' });
+    });
+
+    it('a torn mid-repaint frame: the palette-4 turn echo is never mistaken for a composer', async () => {
+      // Real bytes, cut mid-repaint (the shape #1361 documents for the adopt seed): the
+      // composer row is gone and the only `> ` row left is agy's echo of the submitted
+      // message. That row must not become a marker — this is the false-CLEAN direction.
+      expect(await verdictFor('agy-torn-echo.busy.txt')).toMatchObject({ clean: false, detail: 'no-composer-marker' });
+    });
+
+    it('a turn echo ABOVE an empty composer does not steal the marker (still clean)', async () => {
+      // The companion to the torn case: when the composer IS on screen, an earlier `> `
+      // echo must not shift the verdict. Guards against over-tightening into a false HOLD.
+      expect(await verdictFor('agy-turn-echo.clean.txt')).toMatchObject({ clean: true, detail: 'empty' });
+    });
+
+    it('the bare `>` composer (no-hint mode) is recognized — closes a pre-existing false HOLD', async () => {
+      // agy renders the empty composer as a bare `>` in its no-hint mode; right-trimmed
+      // that is `">"`, which `/^> /` never matched, so EVERY message to an agy in that mode
+      // was held forever. The marker's separator is now `\s|$`.
+      expect(await verdictFor('agy-baremarker.clean.txt')).toMatchObject({ clean: true, detail: 'empty' });
+    });
+  });
 
   it('a marker-less screen is busy under BOTH profiles (wrapper/boot is app-agnostic)', async () => {
     const raw = readFileSync(`${FIXTURE_DIR}/wrapper-boot.busy.txt`, 'utf8');
@@ -146,10 +209,44 @@ describe('render-gate — synthetic branch coverage (Spec 1313)', () => {
   it('agy: `> ` marker + palette-8 (gray) hint → clean; default-fg draft → busy', async () => {
     // agy de-emphasizes its idle hint with a FOREGROUND COLOR (palette-8), not
     // SGR-dim — so the placeholder rule is color-keyed for agy (placeholderFgPalette).
-    const idle = snapshotFromRaw(screen(`${PAL12}>${FG} ${PAL8}Accept-edits mode: file edits auto-approved${FG}`, '──────'));
-    const draft = snapshotFromRaw(screen(`${PAL12}>${FG} review the mailbox change`, '──────'));
+    // The cursor sits on the composer row, as the real TUI leaves it (#1474).
+    const idle = snapshotFromRaw(
+      screen(`${PAL12}>${FG} ${PAL8}Accept-edits mode: file edits auto-approved${FG}`, '──────') + cursorAt(1, 3)
+    );
+    const draft = snapshotFromRaw(screen(`${PAL12}>${FG} review the mailbox change`, '──────') + cursorAt(1, 28));
     expect((await classifyScreen(idle, AGY_PROFILE)).clean).toBe(true);
     expect((await classifyScreen(draft, AGY_PROFILE)).clean).toBe(false);
+  });
+
+  it('agy: the marker must be the CURSOR row — an identical `> ` row elsewhere is not a composer (#1474)', async () => {
+    // Same bytes as the clean idle screen above, with the cursor parked off the marker row
+    // (a menu selection cursor, a dialog option, a mid-repaint frame). No row qualifies as
+    // the composer, so the gate holds instead of bounding a region around a row that merely
+    // looks like a prompt.
+    const parked = snapshotFromRaw(
+      screen(`${PAL12}>${FG} ${PAL8}Accept-edits mode: file edits auto-approved${FG}`, '──────') + cursorAt(2, 1)
+    );
+    expect(await classifyScreen(parked, AGY_PROFILE)).toMatchObject({ clean: false, detail: 'no-composer-marker' });
+  });
+
+  it('agy: the marker GLYPH must render in the profile palette — a palette-4 turn echo is not a composer (#1474)', async () => {
+    // agy echoes each submitted message into the transcript as `> <message>` in palette-4.
+    // Even with the cursor on that row, the marker's own color rules it out.
+    const echo = snapshotFromRaw(screen(`${PAL4}> deploy the hotfix${FG}`, '──────') + cursorAt(1, 3));
+    expect(await classifyScreen(echo, AGY_PROFILE)).toMatchObject({ clean: false, detail: 'no-composer-marker' });
+  });
+
+  it('agy: a bare `>` composer (no-hint mode) is a marker — the separator is `\\s|$`, not a literal space (#1474)', async () => {
+    const bare = snapshotFromRaw(screen(`${PAL12}>${FG}`, '──────') + cursorAt(1, 3));
+    expect(await classifyScreen(bare, AGY_PROFILE)).toMatchObject({ clean: true, detail: 'empty' });
+  });
+
+  it('the agy anchors are per-profile data — claude/codex are unchanged by cursor position (#1474)', async () => {
+    // CLAUDE_PROFILE/CODEX_PROFILE set neither anchor, so an idle claude composer stays
+    // clean with the cursor anywhere. Pins that the tightening did not leak into the
+    // profiles measured against the other two TUIs.
+    const parked = snapshotFromRaw(screen(`❯ ${DIM}Try "refactor doctor.ts"${RESET}`, '──────') + cursorAt(2, 1));
+    expect((await classifyScreen(parked, CLAUDE_PROFILE)).clean).toBe(true);
   });
 
   it('agy: only palette-8 is placeholder — a non-gray (palette-12) option still counts (trust-dialog guard)', async () => {
@@ -160,7 +257,12 @@ describe('render-gate — synthetic branch coverage (Spec 1313)', () => {
     // bounds the region so the color-counting branch runs and palette-12 is the sole
     // occupancy signal. (Dual protection: a real dialog with NO rule below fails safe
     // the OTHER way — via the no-region-end guard — also busy, never a blind confirm.)
-    const trust = snapshotFromRaw(screen(`${PAL12}>${FG} ${PAL12}Yes, I trust this folder${FG}`, '──────'));
+    // The cursor is placed ON the option row deliberately (#1474): that is the one shape
+    // the marker anchors CANNOT reject — the option is palette-12, like the composer marker
+    // — so this pins the layer that still catches it, the occupancy count.
+    const trust = snapshotFromRaw(
+      screen(`${PAL12}>${FG} ${PAL12}Yes, I trust this folder${FG}`, '──────') + cursorAt(1, 3)
+    );
     const v = await classifyScreen(trust, AGY_PROFILE);
     expect(v.clean).toBe(false);
     expect(v.detail).toBe('user-text');
