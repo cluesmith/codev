@@ -81,3 +81,43 @@ Decisions I made in the rewrite:
   implementation; deviations, flaky tests, deferred work are exactly what it should carry.
 - **Min-bytes**: kept, but flagged that 1000 was calibrated on a *mid-phase* manual reset, not a
   clean boundary. Plan decides the number deliberately.
+
+## 2026-08-17 — Spec approved; plan drafted
+
+Human approved spec-approval (relayed by architect). Two architect notes carried forward:
+ASPIR stays in scope; my reading of Baked Decision 1 (reuse the modules, since full
+self-invocation is structurally impossible) is the accepted interpretation, and the structural
+test pinning the shared modules must stay. Both are recorded in the plan's Executive Summary so
+they survive a context refresh.
+
+Frontmatter: `approved: 2026-08-18`, `validated: [codex, claude]`. Gemini is NOT listed — porch
+ran a 2-way consultation, not 3-way, so claiming gemini would be false.
+
+### Plan shape (8 phases)
+
+Ordering is dependency-driven, and phases 3–5 (builder side) depend on nothing in 1–2 (porch
+side), so the two halves could be split across builders if the architect ever wants to.
+
+1. Boundary declaration + protocol validation — config surface; rejection is NEW CODE in
+   `normalizeProtocol` (there is no runtime schema validation), 3 schema copies.
+2. Porch trigger with at-most-once record — the key insight: all three transition sites already
+   `writeStateAndCommit` then recurse into `next()`. So record the boundary and **return the
+   refresh task instead of recursing**. At-most-once becomes a property of the control flow
+   rather than a guard bolted on top.
+3. Self-refresh orchestrator — port-injected, step-log-asserted, reusing receipt.ts +
+   reorient.ts verbatim. Ordering: schedule re-entry FIRST, clear SECOND (inverts /arch-save).
+4. `afx self-refresh` command — named as a distinct command, NOT a flag on `afx refresh`, and
+   takes no positional argument at all. That makes "cannot target another session" structural:
+   there is nothing to pass.
+5. Skill + re-entry frame — incl. the pointers-not-persuasion constraint at the review boundary.
+6. Stalled-refresh visibility in `porch status` — resolved the open question by DERIVING the
+   stall (boundary recorded + no subsequent activity) rather than storing an in-flight flag. A
+   stored flag would need a clearing writer, and the only candidate is the builder-side command,
+   which the spec forbids from writing status.yaml.
+7. Docs correction + parity — the stale `--delay` text in 4 places (it caused the error in my own
+   spec), plus spir's broken `$schema` path.
+8. End-to-end incl. the LIVE run — the only thing that tests the harness property the feature
+   rests on. Delay constant gets set from that measurement, not inherited from arch-save's 15s.
+
+If the live run in phase 8 shows the queued `/clear` CAN consume the re-entry, that is a finding
+to report, not something to quietly work around.
