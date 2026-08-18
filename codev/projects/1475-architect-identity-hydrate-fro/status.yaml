@@ -1,7 +1,7 @@
 id: '1475'
 title: architect-identity-hydrate-fro
 protocol: pir
-phase: review
+phase: verified
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -21,7 +21,7 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-08-18T03:14:15.995Z'
-updated_at: '2026-08-18T10:15:27.623Z'
+updated_at: '2026-08-18T10:15:33.343Z'
 pr_history:
   - phase: review
     pr_number: 1511
