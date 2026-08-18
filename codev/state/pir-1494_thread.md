@@ -226,6 +226,29 @@ Also: reversed an over-broad em-dash sweep (I'd edited toast strings + doc comme
 message). Reset approve.ts + test to HEAD, re-applied ONLY Option A + the body change. Committed em dashes
 left untouched. Lesson saved: fix the flagged user-facing string, don't sweep internal comments.
 
+## dev-approval EXECUTED by the builder (2026-08-18) — builder-runs-it, first live use of this lane's convention
+Amr approved via VS Code ("Approve the dev review gate for 1494, please pass it to the builder.",
+2026-08-18T10:52:43Z), architect relayed it, and I (builder) ran
+`porch approve 1494 dev-approval --a-human-explicitly-approved-this` against my own porch state. The
+flag is legitimate here: a human explicitly decided and the architect's relay carried that decision;
+I executed it, I did not spend it on my own authority. porch re-ran tests (green) and advanced to review.
+
+**THREE GATES, THREE CHAINS (record for future status.yaml readers):** this lane's gates ran under
+three different conventions BECAUSE this lane is the one that changed the convention mid-flight:
+- plan-approval: run by the ARCHITECT (carrying Amr's word) under the morning's uniform ruling.
+- dev-approval: run by ME (builder) under the builder-runs-it ruling this lane implemented.
+- pr: still ahead.
+A reader seeing two different actors on two gates needs this note; it is the convention changing, not sloppiness.
+
+## Header delivery quirk (not a code bug, noted for the review)
+Amr saw the [USER via VS Code] header intermittently lose its leading bytes ("ER via VS Code"). Diagnosed:
+NOT the formatter (string always correct; test-pinned) and NOT my change (I didn't touch the write path).
+It's a pre-existing Tower mailbox-delivery race: the render-gate classifies a clean prompt then writes,
+but if the write lands while the architect's composer is still settling (just finished a turn), the
+terminal eats the first bytes of the burst. Intermittent; button relay surfaces it more because it fires
+on-demand. Hardening = a delivery-layer change (settle-before-write / sacrificial leading byte), out of
+#1494 scope. Offered to file separately.
+
 ## Status
 Implement committed (92a4ee58f code+tests, a60bcb2bb docs) + pushed. dev-approval gate PENDING. Amr
 owns dev-approval + pr; architect relays; I never run porch approve.
