@@ -1,5 +1,12 @@
 # PIR Plan: Relay VS Code approval gates through the spawning architect
 
+> **SUPERSEDED at the dev-approval gate (2026-08-18).** This plan describes the *architect-runs-it*
+> design (the architect receives the decision and runs `porch approve` itself; role docs rewritten
+> uniformly). At the dev-approval review the owner re-ruled **builder-runs-it**: the architect only
+> relays, and the **builder** runs `porch approve`, matching SPIR/AIR. What actually shipped, and why
+> the direction changed, is in `codev/reviews/1494-vscode-approval-gates-should-r.md` ("Design
+> journey"). Read the review for the as-built design; this plan is kept for the record.
+
 ## Understanding
 
 Today every VS Code approval surface — the sidebar ✓, `Cmd+K G`, and the gate-pending

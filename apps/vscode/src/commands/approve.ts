@@ -171,9 +171,10 @@ export interface ApproveGateOptions {
  *      { skipConfirmation: true }. The toast was the context; approving
  *      from there commits directly with no second confirmation.
  *
- * After `porch approve` succeeds, refresh the OverviewCache so the
- * sidebar updates immediately rather than waiting for the SSE round-trip
- * triggered by porch's overview-refresh broadcast.
+ * After the approval is relayed (or, in the no-live-architect fallback, run
+ * directly), refresh the OverviewCache so the sidebar updates immediately rather
+ * than waiting for the SSE round-trip triggered by porch's overview-refresh
+ * broadcast once the gate actually clears.
  */
 export async function approveGate(
   connectionManager: ConnectionManager,
@@ -280,7 +281,7 @@ export async function approveGate(
  *  - refuse-unknown-owner → owner unknown but architects are live; refuse rather than guess.
  *  - no-live-architect → nobody to relay to; announce that and approve directly.
  */
-async function relayApproval(
+export async function relayApproval(
   client: TowerClient,
   workspacePath: string,
   builder: OverviewBuilder,

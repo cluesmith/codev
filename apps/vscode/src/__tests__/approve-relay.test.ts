@@ -4,7 +4,7 @@
  *
  * These tests pin the pure core of that change:
  *  - `decideApprovalRelay` — the four routing branches, provable without a Tower.
- *  - `buildRelayMessage`   — the message names gate, builder, artifact, provenance, and the command.
+ *  - `buildRelayMessage`: an imperative relay instruction; no porch, no command, no double-rendered id.
  *  - `interpretRelayResult`— relayed / held / failed, never "approved" (the `held` case is first-class).
  *
  * `approve.ts` imports `vscode` at module load, so we mock it even though the
@@ -23,10 +23,13 @@ vi.mock('vscode', () => ({
   commands: { executeCommand: vi.fn() },
 }));
 
+import { VSCODE_USER_SENDER } from '@cluesmith/codev-types';
+import type { OverviewBuilder } from '@cluesmith/codev-types';
 import {
   decideApprovalRelay,
   buildRelayMessage,
   interpretRelayResult,
+  relayApproval,
 } from '../commands/approve.js';
 
 describe('decideApprovalRelay', () => {
@@ -117,5 +120,51 @@ describe('interpretRelayResult', () => {
   it('older Tower omitting held/delivered reads as relayed (back-compat)', () => {
     const o = interpretRelayResult({ ok: true }, 'vscode', 'plan review', '#1494');
     expect(o.kind).toBe('relayed');
+  });
+});
+
+describe('relayApproval (send wiring)', () => {
+  function fakeBuilder(overrides: Partial<OverviewBuilder>): OverviewBuilder {
+    return { id: '158', issueId: '158', spawnedByArchitect: 'vscode', ...overrides } as OverviewBuilder;
+  }
+
+  // The [ARCHITECT INSTRUCTION] masquerade bug lived exactly here: the relay must
+  // go to architect:<owner> WITH from=VSCODE_USER_SENDER, or Tower dresses it as a
+  // peer-architect instruction. Pin the target, the from, and the message body.
+  it('relays to architect:<owner> with from=VSCODE_USER_SENDER and the imperative message', async () => {
+    const calls: Array<{ to: string; message: string; opts: unknown }> = [];
+    const client = {
+      sendMessage: async (to: string, message: string, opts: unknown) => {
+        calls.push({ to, message, opts });
+        return { ok: true, delivered: true };
+      },
+    };
+
+    await relayApproval(
+      client as never,
+      '/ws',
+      fakeBuilder({ spawnedByArchitect: 'vscode', id: '158', issueId: '158' }),
+      ['main', 'vscode'],
+      'plan-approval',
+      'plan review',
+      '#158',
+    );
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].to).toBe('architect:vscode');
+    expect(calls[0].opts).toMatchObject({ workspace: '/ws', from: VSCODE_USER_SENDER });
+    expect(calls[0].message).toBe('Approve the plan review gate for 158, please pass it to the builder.');
+  });
+
+  it('does NOT send when the owning architect is offline (refuse-offline)', async () => {
+    const calls: unknown[] = [];
+    const client = { sendMessage: async (...args: unknown[]) => { calls.push(args); return { ok: true }; } };
+    await relayApproval(
+      client as never, '/ws',
+      fakeBuilder({ spawnedByArchitect: 'vscode' }),
+      ['main'], // vscode not live
+      'plan-approval', 'plan review', '#158',
+    );
+    expect(calls).toHaveLength(0);
   });
 });
