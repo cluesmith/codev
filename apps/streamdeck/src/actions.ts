@@ -822,6 +822,17 @@ function canvasErrorLine(code: CanvasCommandClientErrorCode): string {
   return 'Error'; // invalid-request: defensive — we only ever send valid commands
 }
 
+/** Line-2 text for a builder-scoped dial: the selected builder as `#issue title`
+ *  (falling back to its id when it has no issue title), or `No builder` when nothing is
+ *  selected. Shared by the review dials and the Scroll dial (#1498) — both name the
+ *  builder their press acts on, so this is the single source for that line. */
+function selectedBuilderLine(store: CodevStore): string {
+  const b = store.selectedBuilder();
+  if (!b) return 'No builder';
+  const id = b.issueId ? `#${b.issueId}` : b.id;
+  return b.issueTitle ? `${id} ${b.issueTitle}` : id;
+}
+
 /**
  * A phase-aware review dial. The selected builder's phase picks the MODE:
  *
@@ -885,9 +896,11 @@ abstract class ReviewNav extends SingletonAction {
         ? `${this.canvas.label} · ${this.canvas.pressLabel}`
         : `${this.diff.label} · ${this.store.feedbackMode() === 'queue' ? 'queue' : 'send'}`;
     const b = this.store.selectedBuilder();
-    const id = b ? (b.issueId ? `#${b.issueId}` : b.id) : '';
-    const details = b ? (b.issueTitle ? `${id} ${b.issueTitle}` : id) : 'No builder';
-    void action.setFeedback({ title: label, value: this.status ?? details, bar: Math.round(b?.progress ?? 0) });
+    void action.setFeedback({
+      title: label,
+      value: this.status ?? selectedBuilderLine(this.store),
+      bar: Math.round(b?.progress ?? 0),
+    });
   }
 
   override async onDialRotate(ev: DialRotateEvent): Promise<void> {
@@ -1000,14 +1013,37 @@ const SCROLL_LINES_PER_TICK = 3;
  * read a diff without the keyboard); a dial press submits the current selection as
  * feedback (forwarded now or queued per the workspace setting, #1410). Scroll is a
  * viewport move (`revealCursor: false`), so select your text first, then scroll/submit.
+ *
+ * Like the review dials, the touchstrip narrates itself (#1498): a `store.onChange`
+ * subscription re-renders `setFeedback` on every overview tick, so
+ *
+ *   - **line 1** pairs the axis with the LIVE delivery mode (`Scroll · queue` /
+ *     `Scroll · send`, #1410) — the press is the one mode-dependent gesture on the
+ *     board, so naming its mode is what keeps a press from ever being a surprise;
+ *   - **line 2** names the selected builder the press acts on (`No builder` when none —
+ *     a visibly inert empty state, never a live-looking static word).
+ *
+ * No progress bar: on this dial the rotation (viewport scroll) and builder progress are
+ * unrelated axes, and scroll position is not available (VSCode owns the viewport, and the
+ * deck deliberately shows what the dial does, not a counter — see `ReviewNav`). So the
+ * strip is a deliberate two-line control (title + value; `layouts/title-value.json`), not
+ * the siblings' three-line title/value/bar.
  */
 export class ScrollNav extends SingletonAction {
   override readonly manifestId = 'com.cluesmith.codev.scroll-nav';
+  private current?: DialAction;
   constructor(private readonly store: CodevStore) {
     super();
+    this.store.onChange(() => this.render());
   }
   override onWillAppear(ev: WillAppearEvent): void {
-    if (ev.action.isDial()) void ev.action.setTitle('Scroll');
+    if (ev.action.isDial()) {
+      this.current = ev.action;
+      this.renderTo(ev.action);
+    }
+  }
+  override onWillDisappear(): void {
+    this.current = undefined;
   }
   override async onDialRotate(ev: DialRotateEvent): Promise<void> {
     const to = dir(ev) >= 0 ? 'down' : 'up';
@@ -1018,8 +1054,22 @@ export class ScrollNav extends SingletonAction {
     );
   }
   override async onDialDown(): Promise<void> {
+    // The press acts on the selected builder, so it is inert when nothing is selected —
+    // a silent no-op, like the review dials in their `none` mode — so the `No builder`
+    // state is honestly dead rather than a press that forwards whatever editor happens
+    // to be focused.
+    if (!this.store.selectedBuilder()) return;
     // Mode-neutral feedback (#1410): submit the selection, routed forward-now or
     // enqueue by VSCode per the workspace setting.
     await this.store.client.sendCommand('feedback-selection', [], this.store.selectedWorkspacePath());
+  }
+  private render(): void {
+    if (this.current) this.renderTo(this.current);
+  }
+  /** Line 1 = axis · live delivery mode (#1410); line 2 = the selected builder the press
+   *  acts on (`No builder` when none). No bar (Decision 2). */
+  private renderTo(action: DialAction): void {
+    const mode = this.store.feedbackMode() === 'queue' ? 'queue' : 'send';
+    void action.setFeedback({ title: `Scroll · ${mode}`, value: selectedBuilderLine(this.store) });
   }
 }
