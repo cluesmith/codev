@@ -254,3 +254,20 @@ protocol.json with a future context_refresh key hard-fails the protocol. Deliber
 the spec; the alternative reintroduces the silent no-op the design rejects.
 
 Porch suite 408/408 after the fixes.
+
+### Phase 1 iter2: both APPROVE
+
+Codex: no issues. Claude: no blocking issues, verified independently (21/21 new tests, 408 porch
+tests, `tsc --noEmit` clean, and it re-parsed all four protocol files + three schemas itself rather
+than trusting my test).
+
+**Two constraints now queued for Phase 2:**
+
+1. `context_refresh: {}` is truthy while declaring nothing → `isBoundaryDeclared` must inspect
+   FIELDS, not object presence.
+2. **`on_enter` accepts the protocol's ENTRY phase** (e.g. `on_enter: ["specify"]`). A project's
+   state *starts* at `specify` — init sets `phase: 'specify'` directly, nothing ever transitions
+   INTO it — so that boundary would validate cleanly and never fire. Same silent-no-op class the
+   validator deliberately rejects for `on_plan_phase_advance`. No shipped protocol declares it, so
+   it is not live, but Phase 2 owns firing semantics and must either reject the entry phase in
+   Phase 1's validator or record why it can fire. Do not leave it undecided.
