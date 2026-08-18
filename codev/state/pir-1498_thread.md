@@ -181,3 +181,13 @@ Amr: "Scroll · send but doesn't scroll." Diagnosed: rotation works (scrolls a p
 editorScroll needs an ACTIVE TEXT EDITOR, and line 1 reflects the selected BUILDER's phase,
 not the focused doc — so `send` can show while focus is on a non-editor. Not a bug, not my
 change (rotation untouched). Canvas scroll itself is #1501.
+
+### 3-way consult: ALL APPROVE — at pr gate
+Gemini APPROVE, Codex APPROVE, Claude APPROVE. No REQUEST_CHANGES. Claude's non-blocking:
+(1) add explicit plan-deviation note → DONE (commit d02f06827, review + PR body updated;
+made the edit BEFORE porch next so the head didn't move after the gate opened — the #1462
+trap). (2) none-mode (no builder) shows `Scroll · send` while press gated inert — same shape
+as canvas; I did NOT fix in-lane (matches approved plan; line 2 `No builder` mitigates; and
+unlike canvas, none-mode ROTATION works so `editor only` wouldn't fit). Recommended a
+follow-up to the architect rather than widening scope; awaiting their call.
+pr gate PENDING — human merges #1504 (gh pr merge --merge, never squash). Not mine to run.
