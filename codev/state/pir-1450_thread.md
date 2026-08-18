@@ -296,6 +296,15 @@ Final state: PR #1510 OPEN, issue #1450 OPEN, branch `builder/pir-1450` pushed, 
 No `porch done --merged` recorded, because nothing was merged — recording it would put a false
 lifecycle event in `status.yaml`.
 
+### PENDING — post-merge follow-through
+
+Architect confirmed: leave `status.yaml` at `verified` / created-but-not-merged. **When the
+maintainer merges PR #1510, run `porch done 1450 --merged 1510`** to close the lifecycle record.
+Nothing else is owed. Do not merge or close anything yourself — we are contributors here, not
+maintainers.
+
+(Recorded here rather than only in the session, so a crash-and-relaunch doesn't lose it.)
+
 ### What I'd tell the next builder on this code
 
 - The whole issue existed because `tower-routes.ts` has **two** route tables and `GET /api/inbox`
