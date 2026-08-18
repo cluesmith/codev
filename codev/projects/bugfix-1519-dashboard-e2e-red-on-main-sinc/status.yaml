@@ -1,7 +1,7 @@
 id: bugfix-1519
 title: dashboard-e2e-red-on-main-sinc
 protocol: bugfix
-phase: fix
+phase: pr
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -11,4 +11,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-08-18T09:53:20.690Z'
-updated_at: '2026-08-18T09:57:05.723Z'
+updated_at: '2026-08-18T10:03:24.597Z'
