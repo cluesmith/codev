@@ -60,3 +60,15 @@ carries a numeric `timeout-minutes`. Fails on current main (zero timeouts), pass
 Precedent: `packages/codev/src/__tests__/bugfix-566-dashboard-e2e-gh-token.test.ts`.
 
 Scope: 1 YAML edit + 1 test file. Well under 300 LOC. Fits BUGFIX.
+
+## PR phase
+- PR #1507 opened. Fixes #1502.
+- CMAP (3-way, --issue 1502 needed to disambiguate from builder context):
+  - gemini = APPROVE (HIGH, no issues)
+  - codex  = COMMENT (HIGH) — nit: PR body said "four node-only jobs = 10" but `unit` is 15.
+             Fixed the PR body (description-only, no re-run needed).
+  - claude = APPROVE (HIGH). Non-blocking: other workflows (dashboard-e2e, e2e,
+             post-release-e2e, sdk-canary) remain unbounded — candidate follow-up issue to
+             raise with the architect (not self-filing, per scope discipline).
+- No REQUEST_CHANGES; the one actionable item (PR-body accuracy) is addressed.
+- Handing off at the pr gate; waiting for architect approval before merge.
