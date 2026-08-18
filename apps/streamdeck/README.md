@@ -120,17 +120,29 @@ dials** serve both pages — swiping doesn't change the selected builder, so the
 dials keep reviewing it whichever page is showing.
 
 ```
-Page 1 — Builders                              Page 2 — Architects  (swipe →)
-┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐    ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐
-│ Builder│ │ Builder│ │ Builder│ │ Builder│    │  Arch  │ │  Arch  │ │  Arch  │ │  Arch  │  Row 1
-│  (1st) │ │  (2nd) │ │  (3rd) │ │  (4th) │    │ (main) │ │  (2nd) │ │  (3rd) │ │  (4th) │
-└────────┘ └────────┘ └────────┘ └────────┘    └────────┘ └────────┘ └────────┘ └────────┘
-┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐    ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐
-│OpenArch│ │  Bldr  │ │Approve │ │  Dev   │    │  Arch  │ │  Arch  │ │No arch │ │No arch │  Row 2
-│ (bldr) │ │  Term  │ │ Gate   │ │ Server │    │  (5th) │ │  (6th) │ │(empty) │ │(empty) │
-└────────┘ └────────┘ └────────┘ └────────┘    └────────┘ └────────┘ └────────┘ └────────┘
+Page 1 — Builders
+┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐
+│ Builder│ │ Builder│ │ Builder│ │ Builder│  Row 1
+│  (1st) │ │  (2nd) │ │  (3rd) │ │  (4th) │
+└────────┘ └────────┘ └────────┘ └────────┘
+┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐
+│OpenArch│ │  Bldr  │ │Approve │ │  Dev   │  Row 2
+│ (bldr) │ │  Term  │ │ Gate   │ │ Server │
+└────────┘ └────────┘ └────────┘ └────────┘
 
-  ◉            ◉            ◉            ◉         ← the SAME four dials on both pages
+              ⇅ swipe
+
+Page 2 — Architects
+┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐
+│  Arch  │ │  Arch  │ │  Arch  │ │  Arch  │  Row 1
+│ (main) │ │  (2nd) │ │  (3rd) │ │  (4th) │
+└────────┘ └────────┘ └────────┘ └────────┘
+┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐
+│  Arch  │ │  Arch  │ │No arch │ │No arch │  Row 2
+│  (5th) │ │  (6th) │ │(empty) │ │(empty) │
+└────────┘ └────────┘ └────────┘ └────────┘
+
+  ◉            ◉            ◉            ◉     ← the SAME four dials on both pages
 Select       Review       Review       Scroll
 (Zoom)       Files        Changes
 ```
