@@ -249,6 +249,25 @@ terminal eats the first bytes of the burst. Intermittent; button relay surfaces 
 on-demand. Hardening = a delivery-layer change (settle-before-write / sacrificial leading byte), out of
 #1494 scope. Offered to file separately.
 
+## Review phase → pr gate (2026-08-18)
+Wrote review (codev/reviews/1494), updated arch.md + lessons-learned.md (COLD: [USER via VS Code]
+attribution note + imperative-relay/structured-provenance lesson). Opened PR #1522 with the review as
+body. CMAP single advisory pass: Gemini APPROVE, Codex REQUEST_CHANGES, Claude REQUEST_CHANGES.
+
+Both REQUEST_CHANGES traced to the STALE PLAN (still described the superseded architect-runs-it). Root
+cause, not a code defect. Addressed all actionable points (commit 1b4a04f57):
+- Plan superseded-marker (top of plan → review Design journey).
+- Issue #1494 comment recording the builder-runs-it reversal (AC already updated).
+- Fixed stale comments (test header, approveGate docstring).
+- Exported relayApproval + tests pinning target=architect:<owner> + from=VSCODE_USER_SENDER (where the
+  [ARCHITECT INSTRUCTION] masquerade bug lived) + refuse-offline sends nothing. 18 relay tests, 874 suite.
+Not changed (Amr's rulings / acknowledged tradeoffs): short message + [USER via VS Code] header (both
+his dev-approval rulings); forgeable-from (Codex right: header DIFFERENTIATES, doesn't PROVE a human
+click; same class as #1457, Tower access already trusted). Rebuttal in codev/projects/.../1494-review-iter1-rebuttals.md.
+
+pr gate PENDING (Amr's). Branch now QUIET for the merge window (expect the architect's freeze; no commits
+through it). Three-gate chain complete-so-far: plan=architect, dev=builder, pr=ahead.
+
 ## Status
 Implement committed (92a4ee58f code+tests, a60bcb2bb docs) + pushed. dev-approval gate PENDING. Amr
 owns dev-approval + pr; architect relays; I never run porch approve.
