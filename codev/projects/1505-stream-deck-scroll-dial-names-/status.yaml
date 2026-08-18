@@ -1,0 +1,14 @@
+id: '1505'
+title: stream-deck-scroll-dial-names-
+protocol: air
+phase: implement
+plan_phases: []
+current_plan_phase: null
+gates:
+  pr:
+    status: pending
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-08-18T03:57:22.238Z'
+updated_at: '2026-08-18T03:57:22.239Z'
