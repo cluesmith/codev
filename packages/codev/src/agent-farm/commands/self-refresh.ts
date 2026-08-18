@@ -37,8 +37,8 @@
  *   in the sequence could fail once the context is already gone.
  */
 
-import { existsSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { existsSync, readFileSync, realpathSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { TowerClient } from '../lib/tower-client.js';
 import { logger, fatal } from '../utils/logger.js';
@@ -49,8 +49,9 @@ import { fetchIssue as fetchForgeIssue } from '../../lib/github.js';
 import { loadForgeConfig } from '../../lib/forge.js';
 import { buildPromptFromTemplate, buildResumeNotice } from './spawn-roles.js';
 import { detectWorkspaceRoot, detectCurrentBuilderId } from './send.js';
-import { resolveBuilderContext } from './reset/context.js';
+import { buildContextFsPort, resolveBuilderContext } from './reset/context.js';
 import {
+  DEFAULT_REENTRY_DELAY_SECONDS,
   MIN_ALLOWED_CHALLENGE_MAX_AGE_MS,
   MIN_ALLOWED_MIN_BYTES,
   MIN_ALLOWED_REENTRY_DELAY_SECONDS,
@@ -73,6 +74,13 @@ import type { SelfRefreshOptions } from '../types.js';
 // ============================================================================
 // Entry point
 // ============================================================================
+
+/**
+ * Re-exported from `reset/context.ts`, where the single implementation lives.
+ * Kept as a named re-export so existing importers do not have to care which
+ * module owns it — what matters is that there is exactly one.
+ */
+export { buildContextFsPort };
 
 export async function selfRefresh(options: SelfRefreshOptions): Promise<void> {
   logger.header(options.begin ? 'Context Refresh — Begin' : 'Context Refresh');
@@ -177,9 +185,19 @@ export async function selfRefresh(options: SelfRefreshOptions): Promise<void> {
   // built from `builder.worktree`, so a mismatch would read and write in a
   // DIFFERENT worktree and then abort with "state file missing", which sends the
   // reader looking for a save they did write, in a place nobody looked.
-  // The test is simply "am I inside the tree this row describes?" — which
-  // tolerates being run from a subdirectory, as a builder often is.
-  if (!resolve(process.cwd()).startsWith(resolve(builder.worktree))) {
+  // Path CONTAINMENT, not string prefix.
+  //
+  // `startsWith` is not a containment test: `/a/b-other` starts with `/a/b`, so
+  // a registry row pointing at a sibling directory would sail through the very
+  // check meant to catch a mismatched row. It also refuses legitimate runs when
+  // one side is a symlink and the other is its physical target — the worktree
+  // path in the registry and the one `process.cwd()` reports need not be spelled
+  // the same way.
+  //
+  // `realpathSync` canonicalises both sides; `relative()` then answers the real
+  // question — is cwd at or below the worktree — component by component rather
+  // than character by character.
+  if (!isInside(builder.worktree, process.cwd())) {
     fatal(
       `Registry row for '${builderId}' points at ${builder.worktree}, but this command is ` +
         `running in ${process.cwd()}. Refusing to refresh: every path below is built from the ` +
@@ -310,10 +328,20 @@ export async function selfRefresh(options: SelfRefreshOptions): Promise<void> {
     // A rehearsal that shows one of three actions invites the reader to assume
     // the other two do not exist.
     console.log('');
-    logger.info(`WOULD WRITE  ${result.reorientPath}`);
-    logger.info(`WOULD SEND   re-entry to this builder, delayed ${delaySeconds ?? 15}s`);
-    logger.info('WOULD SEND   /clear as raw input to this terminal');
-    logger.info('WOULD DELETE the refresh challenge');
+    // The list must match `runSelfRefresh`'s real order, including the
+    // challenge rewrite — that is a pre-clear write and a safety-critical one
+    // (it is what makes the challenge single-use), not housekeeping. Omitting it
+    // would tell a reader the rehearsal covers every mutation when it does not.
+    //
+    // "ATTEMPT TO DELETE" rather than "DELETE": the deletion is best-effort and
+    // its failure is deliberately swallowed, because the challenge is already
+    // neutralised by the rewrite. Promising a deletion that may not happen is
+    // the kind of small inaccuracy that costs someone an hour later.
+    logger.info(`WOULD WRITE             ${result.reorientPath}`);
+    logger.info(`WOULD SEND              delayed re-entry (+${delaySeconds ?? DEFAULT_REENTRY_DELAY_SECONDS}s)`);
+    logger.info('WOULD REWRITE           the challenge as consumed');
+    logger.info('WOULD SEND              /clear as raw input to this terminal');
+    logger.info('WOULD ATTEMPT TO DELETE the challenge');
     console.log('');
     logger.info('--- inline re-entry (what would arrive after the clear) ---');
     console.log(result.payload?.inline ?? '');
@@ -403,40 +431,29 @@ function buildFsPort(): SelfRefreshFsPort {
 }
 
 /**
- * The filesystem port used for context resolution.
+ * Is `child` the same directory as `parent`, or below it?
  *
- * EXPORTED so tests can exercise this exact binding against a real worktree
- * rather than re-declaring their own copy. That distinction is not academic: an
- * earlier version of the regression test copied the expected binding into the
- * test file, which meant reverting production to `listDirs: () => []` would have
- * left every test green — the test pinned a copy of the fix, not the fix.
+ * Exported for test: the prefix-sibling case (`/a/b-other` inside `/a/b`) is not
+ * reachable through the command without constructing a real directory pair, and
+ * a containment predicate is worth pinning directly.
  *
- * `listDirs` in particular must be bound for real. `readPorchContext` returns
- * null the moment it yields an empty array, and a null porch context is SILENT:
- * `assembleReorientation` requires the porch fields only `if (context.porch)`,
- * so the frame still assembles — just without project id, project name, phase,
- * plan phase, spec/plan paths, or the `porch next` resume notice. A refreshed
- * builder would come back knowing it is a builder and nothing about where it is
- * in the protocol, which is most of what this feature exists to restore.
+ * Falls back to lexical resolution when `realpathSync` throws — a path that does
+ * not exist yet cannot be canonicalised, and refusing on that basis would turn a
+ * missing directory into a confusing identity error.
  */
-export function buildContextFsPort(): {
-  exists(p: string): boolean;
-  read(p: string): string | null;
-  listDirs(p: string): string[] | null;
-} {
-  return {
-    exists: (p: string) => existsSync(p),
-    read: (p: string) => safeRead(p),
-    listDirs: (p: string) => {
-      try {
-        return readdirSync(p, { withFileTypes: true })
-          .filter(e => e.isDirectory())
-          .map(e => e.name);
-      } catch {
-        return null;
-      }
-    },
+export function isInside(parent: string, child: string): boolean {
+  const canon = (p: string): string => {
+    try {
+      return realpathSync(p);
+    } catch {
+      return resolve(p);
+    }
   };
+
+  const rel = relative(canon(parent), canon(child));
+  // '' means the same directory; anything starting with '..' escapes it; an
+  // absolute result means the two share no root at all.
+  return rel === '' || (!rel.startsWith(`..${sep}`) && rel !== '..' && !isAbsolute(rel));
 }
 
 function safeRead(p: string): string | null {

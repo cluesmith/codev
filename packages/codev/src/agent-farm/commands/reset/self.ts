@@ -915,7 +915,13 @@ export function formatSelfRefreshReport(result: SelfRefreshResult): string {
   const order = result.steps.map(s => s.name).join(' → ');
 
   if (result.outcome === 'dry-run') {
-    lines.push('Dry run — this refresh WOULD proceed.');
+    // NOT "this refresh would proceed" — the rehearsal stops before the
+    // reorientation write, Tower scheduling, the challenge rewrite, the clear
+    // and the deletion, so it cannot speak for any of them. It establishes that
+    // the non-mutating preflight passes, which is genuinely useful and is not
+    // the same claim.
+    lines.push('Dry run — passed all non-mutating preflight checks.');
+    lines.push('  (verification and assembly only; nothing was written or sent)');
     lines.push(`  state file:     ${result.statePath} (${result.stateBytes} bytes)`);
     lines.push(`  steps:          ${order}`);
     lines.push('');

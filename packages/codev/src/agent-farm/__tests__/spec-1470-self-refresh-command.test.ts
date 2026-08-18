@@ -100,23 +100,30 @@ vi.mock('node:child_process', async importOriginal => {
   return { ...actual, execFileSync: mockExecFileSync };
 });
 
-vi.mock('../commands/reset/context.js', () => ({
-  resolveBuilderContext: (opts: Record<string, unknown>) => ({
-    builderId: opts.builderId,
-    worktree: opts.worktree,
-    branch: opts.branch,
-    protocol: 'spir',
-    mode: 'strict',
-    harnessName: 'claude',
-    harness: { supportsContextReset: true },
-    porch: { projectId: '1470', projectName: 'ctx-refresh', phase: 'implement' },
-    specName: null,
-    specPath: null,
-    planPath: null,
-    issueNumber: opts.issueNumber,
-    taskText: opts.taskText,
-  }),
-}));
+// Spread the original: the fs port now lives in this module too, and a partial
+// factory omits it. Third time this exact failure has appeared today — a partial
+// module mock is fine only while the module's export surface stays still.
+vi.mock('../commands/reset/context.js', async importOriginal => {
+  const actual = await importOriginal<typeof import('../commands/reset/context.js')>();
+  return {
+    ...actual,
+    resolveBuilderContext: (opts: Record<string, unknown>) => ({
+      builderId: opts.builderId,
+      worktree: opts.worktree,
+      branch: opts.branch,
+      protocol: 'spir',
+      mode: 'strict',
+      harnessName: 'claude',
+      harness: { supportsContextReset: true },
+      porch: { projectId: '1470', projectName: 'ctx-refresh', phase: 'implement' },
+      specName: null,
+      specPath: null,
+      planPath: null,
+      issueNumber: opts.issueNumber,
+      taskText: opts.taskText,
+    }),
+  };
+});
 
 vi.mock('../commands/reset/self.js', async importOriginal => {
   const actual = await importOriginal<typeof import('../commands/reset/self.js')>();
@@ -156,7 +163,10 @@ beforeEach(() => {
   // every test — correctly, since the real cwd is not inside the fixture's
   // worktree. Stating the simulated location is more honest than relaxing the
   // check to accommodate a fixture that was lying about where it ran.
-  vi.spyOn(process, 'cwd').mockReturnValue('/tmp/ws/.builders/spir-1470');
+  // A SUBDIRECTORY, not the worktree root: builders routinely run commands from
+  // inside packages/, and the containment check is documented as tolerating it.
+  // Using the root would leave that behaviour unexercised.
+  vi.spyOn(process, 'cwd').mockReturnValue('/tmp/ws/.builders/spir-1470/packages/codev');
   mockIsRunning.mockResolvedValue(true);
   mockDetectWorkspaceRoot.mockReturnValue('/tmp/ws');
   mockDetectCurrentBuilderId.mockReturnValue('spir-1470');
@@ -302,8 +312,11 @@ describe('CLI argument surface', () => {
     expect(rejected.error, 'control: a positional must be rejected').toBeTruthy();
 
     const accepted = await runCli(['self-refresh', '--dry-run']);
-    // Reached the command body rather than dying in the parser.
-    expect(accepted.error?.message ?? '').not.toMatch(/EXIT:1/);
+    // Stronger than "no EXIT:1": the parse must succeed outright AND the command
+    // body must have run, or this would pass for a command that failed some
+    // other way before reaching it.
+    expect(accepted.error).toBeUndefined();
+    expect(mockRunSelfRefresh).toHaveBeenCalled();
   });
 });
 
@@ -693,6 +706,22 @@ describe('begin', () => {
     expect(mockWriteFileSync).toHaveBeenCalled();
   });
 
+  it('warns that a dry-run nonce is illustrative', async () => {
+    // Untested previously. Someone following an unwarned dry-run would write a
+    // save against a nonce no challenge carries, and execute would refuse it as
+    // wrong-nonce — a confusing failure two steps from its cause.
+    const warnings: string[] = [];
+    const { logger } = await import('../utils/logger.js');
+    vi.mocked(logger.warn).mockImplementation((m: string) => {
+      warnings.push(m);
+    });
+
+    await (await importCommand()).selfRefresh({ begin: true, dryRun: true });
+
+    expect(warnings.join('\n')).toMatch(/ILLUSTRATIVE/i);
+    expect(warnings.join('\n')).toMatch(/wrong-nonce/);
+  });
+
   it('does not require Tower, because it destroys nothing', async () => {
     // Requiring a live Tower here would fail the harmless half of the handshake
     // for a reason that only matters to the destructive half.
@@ -753,6 +782,56 @@ describe('exit codes', () => {
     expect(process.exitCode).toBeUndefined();
   });
 
+  it('lists every mutation the real run performs, in order', async () => {
+    // The list previously omitted the challenge rewrite — a pre-clear write and
+    // the thing that makes the challenge single-use. Reporting four of five
+    // actions tells a reader the rehearsal covers every mutation when it does
+    // not.
+    const infos: string[] = [];
+    const { logger } = await import('../utils/logger.js');
+    vi.mocked(logger.info).mockImplementation((m: string) => {
+      infos.push(m);
+    });
+
+    mockRunSelfRefresh.mockResolvedValue({
+      outcome: 'dry-run',
+      steps: [],
+      statePath: '/s',
+      reorientPath: '/tmp/ws/.builders/spir-1470/.builder-reorient.md',
+      stateBytes: 2048,
+      payload: { inline: 'FRAME', longForm: 'LONG', longFormFileName: 'f' },
+    });
+
+    await (await importCommand()).selfRefresh({ dryRun: true });
+
+    const listed = infos.filter(l => l.startsWith('WOULD'));
+    // Match against known verbs rather than splitting on whitespace — the
+    // column alignment is presentation, and pinning it makes the test fail on
+    // formatting rather than on the property it cares about.
+    const VERBS = [
+      'WOULD ATTEMPT TO DELETE',
+      'WOULD REWRITE',
+      'WOULD WRITE',
+      'WOULD SEND',
+    ];
+    const order = listed.map(line => VERBS.find(v => line.startsWith(v)) ?? `UNKNOWN: ${line}`);
+    expect(order).toEqual([
+      'WOULD WRITE',
+      'WOULD SEND',
+      'WOULD REWRITE',
+      'WOULD SEND',
+      'WOULD ATTEMPT TO DELETE',
+    ]);
+    // The challenge rewrite must be reported BETWEEN the re-entry and the clear,
+    // which is where it actually happens.
+    const rewriteAt = listed.findIndex(l => l.includes('REWRITE'));
+    const clearAt = listed.findIndex(l => l.includes('/clear'));
+    expect(rewriteAt).toBeGreaterThan(0);
+    expect(rewriteAt).toBeLessThan(clearAt);
+    // "attempt to delete" rather than "delete": the deletion is best-effort.
+    expect(listed.some(l => /ATTEMPT TO DELETE/.test(l))).toBe(true);
+  });
+
   it('does NOT exit non-zero on a clean dry run', async () => {
     // A rehearsal that verified and assembled is a success. Phase 3 gave it a
     // distinct outcome precisely so this branch could not be got wrong.
@@ -760,6 +839,7 @@ describe('exit codes', () => {
       outcome: 'dry-run',
       steps: [],
       statePath: '/s',
+      reorientPath: '/tmp/ws/.builders/spir-1470/.builder-reorient.md',
       stateBytes: 2048,
       payload: { inline: 'FRAME', longForm: 'L', longFormFileName: 'f' },
     });

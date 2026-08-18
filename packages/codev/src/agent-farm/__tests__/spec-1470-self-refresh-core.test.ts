@@ -1070,7 +1070,11 @@ describe('formatSelfRefreshReport', () => {
   it('reports a dry run as a rehearsal, not an abort', async () => {
     seedHappyPath();
     const report = formatSelfRefreshReport(await run({ dryRun: true }));
-    expect(report).toMatch(/WOULD proceed/i);
+    // Narrowed deliberately: a dry run stops before the reorient write, Tower
+    // scheduling, the challenge rewrite, the clear and the deletion, so it
+    // cannot claim the refresh "would proceed".
+    expect(report).toMatch(/passed all non-mutating preflight checks/i);
+    expect(report).not.toMatch(/WOULD proceed/i);
     expect(report).not.toMatch(/ABORTED/);
   });
 

@@ -1136,3 +1136,67 @@ reviewer-found instances, and the moment I actually tested the test, it took one
 **Standing practice for the rest of this project**: after writing any test whose value is that it
 FAILS under some condition, produce that condition and watch it fail. Reading a test proves it
 compiles; mutating proves it discriminates.
+
+### AD-HOC #2 (codex) on 645289e64 — the safety check I added an hour earlier was bypassable
+
+**HIGH — the containment check was a string test, not a path test.**
+`resolve(cwd).startsWith(resolve(builder.worktree))` accepts a PREFIX SIBLING:
+`/a/b-other`.startsWith(`/a/b`) is true. So a registry row pointing at a sibling directory sailed
+through the very guard I had just added to catch mismatched rows. Verified in node before fixing.
+
+It also FALSELY REFUSES legitimate runs where one side is a symlink and the other its physical
+target — the registry spelling and `process.cwd()` need not match.
+
+Fixed with `isInside()`: `realpathSync` both sides, then `relative()` — component-wise, not
+character-wise. Tested against REAL directories (prefix sibling, symlink both directions, parent,
+unrelated, missing path), with a control asserting the old `startsWith` WOULD have accepted the
+sibling, so the test cannot stop discriminating if the predicate is rewritten.
+
+**MEDIUM — my dry-run action list was wrong in two ways.** It omitted the challenge rewrite (a
+PRE-CLEAR write, and the thing that makes the challenge single-use — safety-critical, not
+housekeeping), and said "WOULD DELETE" for a deletion that is best-effort and whose failure is
+deliberately swallowed. Corrected to the real five-step order with accurate verbs.
+
+**MEDIUM — "this refresh WOULD proceed" overstated what a rehearsal establishes.** Dry-run stops
+before the reorient write, Tower scheduling, the challenge rewrite, the clear, and the deletion — so
+it cannot speak for any of them. Now: "passed all non-mutating preflight checks", which is the
+true and still-useful claim.
+
+Codex's non-vacuity table was the most useful part: it went fix by fix and said which would survive
+reverting. Fixes 2 (dry-run output) and 5 (nonce warning) had **no assertions at all** — I had
+changed behaviour and tested nothing. Both now asserted. Fix 6's acceptance check excluded only
+`EXIT:1`; now requires `error === undefined` AND that the command body ran.
+
+Also took: test cwd is now a SUBDIRECTORY (`/packages/codev`), exercising the documented
+"may run from a subdirectory" behaviour that the worktree-root fixture left uncovered.
+
+### AD-HOC #2 (claude): "fix 1 protects one of THREE doors"
+
+Claude's sharpest point. My exported `buildContextFsPort` closed the copied-binding hole **for one
+call site**. There were THREE hand-rolled copies of the identical port:
+
+- `commands/reset.ts:115` (the driven `afx refresh` path)
+- `servers/mailbox-wiring.ts:85` (Tower's harness detection)
+- `commands/self-refresh.ts` (mine)
+
+A stub in ANY of them silently nulls the porch context for that path, and a regression test can only
+observe the copy it imports. So my fix protected my door and left two open.
+
+**Consolidated all three into one implementation**, moved to `reset/context.ts` — beside the
+`ContextFsPort` interface it implements, rather than in my command, so a Tower server does not have
+to import a command module to get it. `grep -rn "listDirs: (p"` over src now returns exactly ONE
+hit. `self-refresh.ts` re-exports it so existing importers do not care which module owns it.
+
+Also took Claude's #1: the dry-run line hardcoded `?? 15` for the delay. Phase 8 is scheduled to
+change `DEFAULT_REENTRY_DELAY_SECONDS` from a live measurement, and a hardcoded default would have
+started lying the moment it did. Now references the constant.
+
+Claude also confirmed several things hold, which is worth recording since the reviews mostly surface
+defects: the dry-run actions ARE in true chronological order with nothing reported that the run does
+not do (the omission was one-directional); mocking `process.cwd()` was the right repair rather than
+relaxing the check; and the containment check's INTENT is correct — only the comparator was wrong.
+
+**The pattern, stated once more because it keeps recurring in a new disguise**: I fix the instance,
+and the class survives somewhere I did not look. Nonce type vs length. Stability window vs three
+sibling parameters. porch task text vs CLI follow-up. And now one fs port vs three. The cure that
+actually works is not vigilance — it is making the thing singular so there is nowhere else to look.
