@@ -49,3 +49,36 @@ written at the time and are not rewritten.
 The worktree ships without `node_modules`; `pnpm install --frozen-lockfile` plus
 `pnpm --filter "@cluesmith/codev^..." build` were needed before vitest could resolve
 `@cluesmith/codev-sdk/tower-client`.
+
+## 2026-08-17 — PR #1490 + CMAP
+
+`gemini=APPROVE (HIGH)`, `codex=COMMENT (HIGH)`, `claude=APPROVE (HIGH)`. **No blocking findings.**
+
+Codex's only note is diff size (693 lines) against AIR's nominal ~300 — it says explicitly this is
+"not blocking", and the production-code delta is small; the bulk is comment rewrites, docs, the
+alias test suite and this thread file. Claude independently re-ran the affected suites (6 files /
+197 tests green) and re-verified the sweep, and both it and Codex endorsed the `CONTEXT REFRESH`
+payload rename that I had flagged as the debatable call.
+
+### Verified reviewer claims rather than taking them on trust
+
+**Claude's finding #1 is real.** `codev-skeleton/.claude/skills/afx/SKILL.md` and its `.codex` twin
+have no `afx reset`/`afx interrupt` section at all — their headings stop at `afx cron`, and the file
+was last touched by #1143, well before Spec 1273. So there was nothing in the skeleton skill trees
+for this PR to rename, and the issue's sweep is complete by its own terms; but **adopters will never
+discover `afx refresh`**. The docs test's `SKILL_DOCS` only covers the root `.claude`/`.codex`
+trees, which is why the drift is invisible. Backfilling a whole missing section is Spec 1273 work,
+not a rename — flagged to the architect for a follow-up issue rather than widened into this PR.
+
+**The reviewers' suggested live `--dry-run` could not run from here.** I first confirmed by reading
+`runReset` that `dryRun` returns before `fs.write`, before the optional interrupt and before any
+terminal send — genuinely zero-write, so self-targeting was safe. But `afx refresh air-1489
+--dry-run` fails at the registry lookup: from inside a worktree the workspace resolves to the
+worktree path, and `afx status` reports "Workspace: not active in tower". Pre-existing scoping,
+untouched by this change, and running afx from the main workspace root is not a builder's call. So
+the attempt did exercise the real resolve path under the new name and emitted the renamed error
+text, but assembly end-to-end remains covered by the orchestrator tests rather than a live run.
+
+**`afx db reset` still exists** and is legitimately destructive (Claude's minor note #2). No
+collision with the top-level registration — commander scopes it under `db` — but "reset is
+deprecated" is now marginally ambiguous in the help surface. Left alone.
