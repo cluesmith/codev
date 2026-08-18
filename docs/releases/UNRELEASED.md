@@ -53,6 +53,7 @@ The annotation viewer can now lay documents out in side-by-side columns — news
 
 ## Polish
 
+- **Open-architect no longer substitutes a different architect.** Asking for an architect that is not running now reports that plainly and opens nothing, rather than opening whichever architect was first in the roster while presenting it under the requested name. The substituted terminal also captured text aimed at the requested architect, so a later "Reference issue in architect" could land in the wrong place silently (#1497, PR #1500).
 <!-- Small vscode items as bullets:
        - **<Headline>** (#<issue>, PR #<pr>). <One short paragraph of context.>
      Move out to its own ## section if the entry grows past ~3 sentences. -->

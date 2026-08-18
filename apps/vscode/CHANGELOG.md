@@ -14,6 +14,7 @@
 
 ### Fixes
 
+- **Opening an architect terminal never lands you in a different architect.** When the architect you asked for is not currently running, Codev now says so and opens nothing, instead of quietly opening whichever architect happened to be first in the list. Previously that substitute terminal was also labelled as the one you asked for, so a follow-up action like "Reference issue in architect" could type into the wrong terminal without any visible sign. Requesting an architect that is running is unchanged.
 - **Recently Closed is sorted by recency.** The sidebar's Recently Closed section now lists items most-recently-closed first. It previously showed whatever order the forge's search API returned (relevance ranking), so an issue closed this morning could render below one closed yesterday. Correct for every forge.
 - **Annotation viewer: the add-comment "+" lives in the row itself.** Hovering anywhere in a block — including the right edge and the margins — shows the "+" right there in the row, instead of a button floating in the left gutter that could vanish while you traveled to it. Code blocks and quotes now extend to the canvas edge (text position unchanged); wide code scrolls inside its block so the button stays put. Keyboard focus lights the same affordance.
 - **Annotation viewer: the add-comment "+" button no longer vanishes en route.** Moving the mouse toward the button could dismiss or relocate it; it now stays put while you travel to it. It is also larger — sized to the document font with a comfortable click target.
