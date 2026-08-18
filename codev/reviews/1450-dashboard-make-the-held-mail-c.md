@@ -163,7 +163,7 @@ announced inconsistently, and this panel should not steal focus from the termina
 
 The 3-way consult and the architect's integration review both landed as non-blocking
 (APPROVE / COMMENT / APPROVE). Every finding was verified against the files before acting; all
-were real and all are fixed in `dd7a6b1` (see the PR's commit list).
+were real and all are fixed in `2cb2b3623` (see the PR's commit list).
 
 | Finding | Source | Disposition |
 |---|---|---|
