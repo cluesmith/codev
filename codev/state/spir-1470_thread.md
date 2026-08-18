@@ -781,3 +781,21 @@ the same route?"**
 **CARRY TO PHASE 4**: always pass `expectedBoundary` (optional param = opt-in guard = protects
 nobody by default — assert it); validate flags at the CLI boundary too; no Tower call that can fail
 AFTER the clear.
+
+## 2026-08-18 — Phase 3 force-advance: architect ruling + STANDING ORDER
+
+Force-advance at phase_3 iter-3 ceiling (max_iterations 3). Verdicts at ceiling: codex
+REQUEST_CHANGES (2), claude APPROVE. Both codex issues were FIXED before the ceiling fired
+(1cad0ec75) — but the fixes never went through a CMAP round, which is the honest caveat I reported.
+
+**RULING**: NO porch rollback (do not mutate protocol state backwards). Instead an AD-HOC consult
+outside porch, scoped to 1cad0ec75 only, adversarially framed: "can the nonce gate still be
+satisfied by a degenerate save, and can any safety parameter still be silently disabled?" Fold
+findings into Phase 4 as ordinary commits; keep the consult outputs with the phase artifacts.
+Phase 2's force-advance: accounted for, no action.
+
+**STANDING ORDER — report EVERY force-advance the moment it happens, with verdicts-at-ceiling.
+Keep porch output un-filtered.** (I caught this one only because I stopped summarising `porch next`
+to task subjects after missing the Phase 2 one.)
+
+Ad-hoc consults launched: `1470-adhoc-1cad0ec75-{codex,claude}.txt`.
