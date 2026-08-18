@@ -493,3 +493,48 @@ Claude also flagged my iter2 test work as uncommitted — it reviewed a stale tr
 Minor taken: documented the `moveToReview` hardcoded-'review' coupling (phase assignment and
 boundary id derive from the same literal, so they cannot disagree — but a protocol with a
 differently-named successor would silently mis-target both).
+
+## FOR THE REVIEW ARTIFACT (codev/reviews/1470-*.md) — running list
+
+Accumulated as found, because the review phase is several boundaries away and a context refresh
+sits between here and there. **Do not write the review without walking this list.**
+
+1. **PR body needs a "Pre-existing fix" section** referencing **issue #1503** (ASPIR implement
+   single-shot; ungated direct-advance never extracted plan_phases). State that #1503 **closes with
+   this PR**. Architect ruling: ship it here rather than splitting.
+2. **No retroactive repair of in-flight ASPIR projects** — transition-only by design;
+   repair-by-human-tool if ever wanted. Retroactively populating plan_phases mid-implement would
+   reset phase statuses to pending and rewind progress: the #1408 harm class. Endorsed by the
+   architect; rationale also on #1503.
+3. **Nine vacuous negatives repaired** (Phase 2). `isBuildVerify` needs BOTH `build` and `verify`;
+   the fixtures had neither on `implement`, so five "negative" tests ran through `handleOncePhase`
+   and asserted nothing. Belongs in the lessons section — architect asked for it explicitly.
+4. **Force-advance can prepend its safety-ceiling notice to a refresh task** the builder is about to
+   clear on (`next.ts` force-advance path calls `handleVerifyApproved`, which may return a refresh
+   response). Recoverable — `force_advanced` is in status.yaml and the rebuttal file is on disk —
+   and refreshing after a long REQUEST_CHANGES spiral is arguably the most valuable moment to
+   refresh. Architect: put this in the REVIEW ARTIFACT, not only in a code comment; it is the kind
+   of surprise that gets rediscovered expensively.
+5. **Two plan-vs-implementation divergences to record** so a later reader does not score them as
+   skipped deliverables:
+   (a) plan says the refresh task "carries the phase's normal tasks with it"; the spec says "none of
+       the phase's normal tasks". Implementation follows the SPEC. Plan wording was my drafting
+       error.
+   (b) "wire all four sites" narrowed to "wire all four, but a skip is not work" — **PENDING
+       WALEED'S RULING**, see below.
+6. **`extractPlanPhases` silently invents a `phase_1`** for a plan with no phases JSON rather than
+   reporting the absence. Not my bug, not in scope; worth reporting as a follow-up because it makes
+   a malformed plan look fine.
+7. **This repo has no `worktree` block** in `.codev/config.json`, so builder worktrees spawn without
+   node_modules and cannot run build/tests until someone installs by hand. Related: the failing
+   vitest startup exited 0, so an exit-code-only check would have called it green.
+
+## OPEN — awaiting Waleed's ruling (architect recommending SUPPRESS + explicit artifact amendment)
+
+The approved plan contradicts itself: line 206 "the pre-approval path FIRES enter:plan and
+enter:implement" vs line 209 "two refresh tasks never fire back to back, AT ANY SITE". Unsatisfiable
+together in the doubly-pre-approved case. Codex says restore-or-amend; Claude approves and says
+document. **Contested code held as-is at 1a513bf9c. Do not touch it until the ruling arrives.**
+If SUPPRESS: amend plan line 206 and spec line 266, note in review.
+If RESTORE: revert to firing at both, and the >=1000-byte save gate likely needs a boundary-aware
+exception — that becomes a Phase 3 change.

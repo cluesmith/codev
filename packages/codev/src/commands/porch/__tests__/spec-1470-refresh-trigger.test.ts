@@ -557,6 +557,41 @@ describe('never fires at an unsafe moment', () => {
     expect(readState().context_refreshes ?? []).toHaveLength(0);
   });
 
+  it('does not fire between build and verify (build done, no reviews yet)', async () => {
+    // Unreachable by control flow — handleBuildVerify returns consultation
+    // tasks before reaching any transition site — but this project has shipped
+    // five tests that passed without exercising what they named, so the
+    // criterion is closed by assertion rather than by reading the code.
+    writeProtocol(spirLike());
+    writeState(baseState({ phase: 'plan', iteration: 1, build_complete: true }));
+
+    const response = await next(root, PROJECT_ID);
+
+    expect(isRefreshTask(response)).toBe(false);
+    expect(readState().context_refreshes ?? []).toHaveLength(0);
+    // Prove we really are in the between-build-and-verify state, not somewhere
+    // else that trivially cannot refresh.
+    expect(response.tasks?.[0].subject).toMatch(/consultation/i);
+  });
+
+  it('does not fire during a partially-complete consultation round', async () => {
+    writeProtocol(spirLike());
+    writeState(baseState({ phase: 'plan', iteration: 1, build_complete: true }));
+    // Only ONE of the two configured models has reported.
+    const dir = path.join(root, 'codev/projects', PROJECT_TITLE);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, `${PROJECT_ID}-plan-iter1-codex.txt`),
+      '---\nVERDICT: APPROVE\nSUMMARY: ok\nCONFIDENCE: HIGH\n---\nKEY_ISSUES:\n- None\n',
+    );
+
+    const response = await next(root, PROJECT_ID);
+
+    expect(isRefreshTask(response)).toBe(false);
+    expect(readState().context_refreshes ?? []).toHaveLength(0);
+    expect(readState().phase).toBe('plan');
+  });
+
   it('does not fire on a plain build task', async () => {
     writeProtocol(spirLike());
     writeState(baseState({ phase: 'plan', iteration: 1, build_complete: false }));
