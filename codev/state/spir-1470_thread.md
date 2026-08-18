@@ -271,3 +271,74 @@ than trusting my test).
    validator deliberately rejects for `on_plan_phase_advance`. No shipped protocol declares it, so
    it is not live, but Phase 2 owns firing semantics and must either reject the entry phase in
    Phase 1's validator or record why it can fire. Do not leave it undecided.
+
+## 2026-08-18 — Implement Phase 2
+
+### Architect ruling on self-application: my concern was unfounded
+
+I flagged that once Phase 2 landed, porch would start emitting refresh tasks to ME at my own
+plan-phase advances. **It won't.** The porch driving me is the globally installed
+`@cluesmith/codev` 3.3.0 at `/opt/homebrew/lib/node_modules/@cluesmith/codev` — I verified this
+myself: `grep -rl context_refresh` over that install returns nothing. My worktree's protocol.json
+key is inert data to it, ignored at load (3.3.0 has no runtime validation — the gap Phase 1
+closes). Worktree source only becomes live porch behavior after merge + local-install/release.
+
+**I raised this without first checking which binary was running.** That is precisely the pattern I
+told myself to stop after the plan round ("before asserting any behavior, open it") — and I
+repeated it one phase later, on a question about my own runtime. `which porch` was two seconds.
+
+### COROLLARY — folds into the Phase 8 runbook (architect's instruction)
+
+The same fact means **the subject builder's installed porch won't emit refresh tasks either**. So
+the live run cannot just be "spawn a builder on a SPIR lane and wait" — the runbook must state
+explicitly how the subject lane runs the *feature build*: invoking the worktree-built porch/afx
+binaries by path, or a local-install of this branch into a scratch prefix. Architect calls this the
+main logistics question of the live run. Do not write the runbook without answering it.
+
+### Phase 2 as built
+
+Four transition sites, five call sites (the plan-phase site has two branches):
+
+| Site | next.ts | Covers |
+|---|---|---|
+| pre-approval skip | ~317 | enter:plan / enter:implement for `approved:` frontmatter — the documented normal path |
+| gate-approved | ~387 | SPIR's human-gated transitions |
+| moveToReview | ~756 | enter:review (the quality boundary) |
+| plan-phase advance | ~775 | plan-phase:<id>, excludes the first by construction |
+| no-gate direct | ~830 | ASPIR's ungated transitions |
+
+`refreshResponse()` is folded in AFTER the phase mutation but BEFORE `writeStateAndCommit`, so the
+boundary record and the transition are ONE write. That atomicity is the entire at-most-once
+mechanism — there is no moment where state says "transitioned" but not "refreshed here". A firing
+boundary returns INSTEAD of recursing, so each refresh gets its own turn.
+
+Took Phase 1's carried constraint: `declaresEnter` / `declaresPlanPhaseAdvance` inspect the
+FIELDS, never the truthiness of the `context_refresh` object, because `{}` is valid and declares
+nothing.
+
+Still open from Phase 1 review: whether `on_enter` should reject the protocol's ENTRY phase
+(`specify`), which is never transitioned into and so could never fire. Now that firing semantics
+exist, the answer is visible — no site transitions INTO the first phase — so it should be rejected
+in Phase 1's validator. Doing that before this phase's checks.
+
+### Two test bugs caught by running them (Phase 2)
+
+Both were MY test bugs, not product bugs, but the second one is the interesting kind:
+
+1. `expect(description).not.toMatch(/run `porch done`/i)` — the task text says "Do NOT run
+   `porch done`", which *contains* "run `porch done`". The negative assertion matched its own
+   positive. Replaced with a line-level check that no line INSTRUCTS running it.
+
+2. **`spirLike(undefined)` triggered the DEFAULT parameter.** The fixture meant to declare NO
+   boundaries was silently declaring all four, so the "emits no refresh when the protocol declares
+   none" negative would have passed for the wrong reason had the product been broken. Added an
+   explicit `OMIT` symbol, because `undefined` cannot express "omit" in a defaulted parameter.
+
+That second one is the same failure class as the Phase 1 `null` bug: a *negative* test that does
+not actually establish the negative condition. Worth watching for in the remaining phases — the
+negatives here are the ones guarding a destructive operation, so a negative that silently tests
+nothing is worse than no test.
+
+Entry-phase question from Phase 1 review: SETTLED. No transition site transitions INTO the
+protocol's first phase (`porch init` sets it directly), so `on_enter: ["specify"]` could never
+fire. Now rejected in Phase 1's validator, with the reason inline.

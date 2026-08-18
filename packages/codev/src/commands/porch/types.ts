@@ -223,6 +223,29 @@ export interface ProjectState {
    * pre-date this field stay parseable.
    */
   pr_ready_for_human?: boolean;
+  /**
+   * Context-refresh boundaries already consumed for this project (Spec 1470).
+   *
+   * Appended in the SAME state write as the transition that triggered the
+   * boundary, which is what makes at-most-once a property of the control flow
+   * rather than a guard. A refresh is destructive (`/clear` has no undo) and
+   * porch transitions can loop — #1408 reset every plan phase to `pending` —
+   * so "already refreshed here" must be a recorded fact, never inferred from
+   * phase or iteration.
+   *
+   * `acknowledged_at` is set by PORCH (never by the builder, which is forbidden
+   * from writing this file) on the first normal-path `porch next` after the
+   * boundary. A boundary recorded but never acknowledged means the builder did
+   * not come back — the unattended-stall signal, which cannot be derived from
+   * `updated_at` because the normal task-emission path writes no state at all.
+   *
+   * Optional so status files predating this field stay parseable.
+   */
+  context_refreshes?: Array<{
+    boundary: string;
+    at: string;
+    acknowledged_at?: string;
+  }>;
   started_at: string;
   updated_at: string;
 }

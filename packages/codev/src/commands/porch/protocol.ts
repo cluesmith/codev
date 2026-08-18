@@ -155,6 +155,17 @@ function normalizeContextRefresh(
             `(phases: ${[...phaseIds].join(', ')})`,
         );
       }
+      // The protocol's FIRST phase is never transitioned INTO — `porch init`
+      // sets it directly as the starting state, and every transition site moves
+      // to a SUCCESSOR. So an entry boundary on it would validate cleanly and
+      // then never fire: the same silent no-op rejected just above for
+      // `on_plan_phase_advance`, and the reason this validator exists.
+      if (entry === phases[0]?.id) {
+        return fail(
+          `on_enter names '${entry}', which is this protocol's first phase. A project ` +
+            `STARTS there rather than transitioning into it, so the boundary could never fire`,
+        );
+      }
     }
     // Duplicates resolve fine but say something the author did not mean — a
     // boundary cannot fire twice on one transition. Rejecting keeps the runtime

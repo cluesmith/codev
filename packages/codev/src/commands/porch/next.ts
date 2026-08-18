@@ -36,6 +36,15 @@ import { buildPhasePrompt } from './prompts.js';
 import { parseVerdict, allApprove } from './verdict.js';
 import { loadCheckOverrides, resolveConsultationModels } from './config.js';
 import { getResolver, type ArtifactResolver } from './artifacts.js';
+import {
+  buildRefreshTask,
+  declaresEnter,
+  declaresPlanPhaseAdvance,
+  enterBoundary,
+  planPhaseBoundary,
+  recordRefresh,
+  shouldRefresh,
+} from './context-refresh.js';
 
 import type {
   ProjectState,
@@ -182,6 +191,39 @@ function buildReviewContext(
  * State is only mutated when completed work is detected (filesystem-as-truth).
  * If called twice without filesystem changes, returns the same output.
  */
+/**
+ * Fold a context-refresh boundary into a pending transition (Spec 1470).
+ *
+ * Called by every transition site AFTER the phase fields are mutated but BEFORE
+ * `writeStateAndCommit`, so the boundary record and the transition land in one
+ * write. That atomicity is the whole at-most-once mechanism: there is no moment
+ * at which the state says "transitioned" but not "refreshed here".
+ *
+ * Returns the response to hand back when a refresh fires, or `null` to continue
+ * the normal path. A firing boundary returns INSTEAD of recursing into `next()`,
+ * so a single `porch next` no longer chains several transitions at once — each
+ * refresh gets its own turn, which is the point.
+ *
+ * Uses `status: 'tasks'` rather than a new status variant: dashboards, the VS Code
+ * tree and any other consumer parse the existing set, and a refresh IS actionable
+ * work, so it needs no new category.
+ */
+function refreshResponse(
+  state: ProjectState,
+  boundary: string,
+  declared: boolean,
+): PorchNextResponse | null {
+  if (!shouldRefresh(state, declared, boundary)) return null;
+  recordRefresh(state, boundary, new Date().toISOString());
+  return {
+    status: 'tasks',
+    phase: state.phase,
+    iteration: state.iteration,
+    plan_phase: state.current_plan_phase || undefined,
+    tasks: [buildRefreshTask(state, boundary)],
+  };
+}
+
 export async function next(workspaceRoot: string, projectId: string): Promise<PorchNextResponse> {
   const statusPath = findStatusPath(workspaceRoot, projectId);
   if (!statusPath) {
@@ -267,7 +309,18 @@ export async function next(workspaceRoot: string, projectId: string): Promise<Po
           state.iteration = 1;
           state.build_complete = false;
           state.history = [];
+          // Boundary folded in BEFORE the write, so record and transition are atomic.
+          // This site is the path CLAUDE.md documents as normal (artifacts carrying
+          // `approved:` frontmatter), so omitting it would leave enter:plan and
+          // enter:implement dead for exactly the projects most likely to want them.
+          const preApprovalBoundary = enterBoundary(nextPhase.id);
+          const preApprovalRefresh = refreshResponse(
+            state,
+            preApprovalBoundary,
+            declaresEnter(protocol, nextPhase.id),
+          );
           await writeStateAndCommit(statusPath, state, `chore(porch): ${state.id} skip pre-approved ${state.phase}`);
+          if (preApprovalRefresh) return preApprovalRefresh;
           // Recurse to compute tasks for the new phase
           return next(workspaceRoot, projectId);
         }
@@ -327,7 +380,17 @@ export async function next(workspaceRoot: string, projectId: string): Promise<Po
         }
       }
 
+      // Post-approval, per the spec: the gate outcome is durable in status.yaml
+      // before any refresh fires, so a refreshed builder cannot mistake
+      // "waiting at a gate" for "approved".
+      const gateBoundary = enterBoundary(nextPhase.id);
+      const gateRefresh = refreshResponse(
+            state,
+            gateBoundary,
+        declaresEnter(protocol, nextPhase.id),
+      );
       await writeStateAndCommit(statusPath, state, `chore(porch): ${state.id} ${state.phase} phase-transition`);
+      if (gateRefresh) return gateRefresh;
       return next(workspaceRoot, projectId);
     }
   }
@@ -683,17 +746,40 @@ async function handleVerifyApproved(
       // (plan_phase field on each entry disambiguates iterations)
 
       if (moveToReview) {
-        // All plan phases done — move to review
+        // All plan phases done — move to review.
+        //
+        // This boundary is a QUALITY feature as much as a context one: a builder
+        // that enters review in a fresh context reads its own diff cold, without
+        // the memory of intending the code to be correct.
         state.phase = 'review';
         state.current_plan_phase = null;
+        const reviewRefresh = refreshResponse(
+            state,
+            enterBoundary('review'),
+          declaresEnter(protocol, 'review'),
+        );
         await writeStateAndCommit(statusPath, state, `chore(porch): ${state.id} all plan phases complete → review`);
+        if (reviewRefresh) return reviewRefresh;
         return next(workspaceRoot, projectId);
       }
 
       // Next plan phase
       const newCurrent = getCurrentPlanPhase(state.plan_phases);
       state.current_plan_phase = newCurrent?.id || null;
+      // Fires on ADVANCE BETWEEN plan phases, which excludes the first one by
+      // construction: entering `implement` IS entering plan phase 1, and this
+      // code only runs when a phase completes and hands off to a successor. So
+      // two refresh tasks can never fire back to back at that moment, without a
+      // dedup rule anyone has to remember.
+      const advanceRefresh = state.current_plan_phase
+        ? refreshResponse(
+            state,
+            planPhaseBoundary(state.current_plan_phase),
+            declaresPlanPhaseAdvance(protocol),
+          )
+        : null;
       await writeStateAndCommit(statusPath, state, `chore(porch): ${state.id} advance plan phase → ${state.current_plan_phase}`);
+      if (advanceRefresh) return advanceRefresh;
       return next(workspaceRoot, projectId);
     }
   }
@@ -738,7 +824,16 @@ async function handleVerifyApproved(
   state.iteration = 1;
   state.build_complete = false;
   state.history = [];
+  // ASPIR's path: no spec/plan gates, so the transition happens here rather than
+  // on gate approval. Same boundary, same atomicity — and this is the protocol
+  // that runs UNSUPERVISED, which is the case the fail-safes exist for.
+  const directRefresh = refreshResponse(
+            state,
+            enterBoundary(nextPhase.id),
+    declaresEnter(protocol, nextPhase.id),
+  );
   await writeStateAndCommit(statusPath, state, `chore(porch): ${state.id} ${state.phase} phase-transition`);
+  if (directRefresh) return directRefresh;
   return next(workspaceRoot, projectId);
 }
 
