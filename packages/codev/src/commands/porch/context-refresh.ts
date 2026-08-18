@@ -139,7 +139,7 @@ export function shouldRefresh(
  * `porch next`, which is also what the post-clear re-entry frame says — so both
  * paths converge on the same next command whether or not the clear lands.
  */
-export function buildRefreshTask(state: ProjectState, boundary: string): PorchTask {
+export function buildRefreshTask(boundary: string): PorchTask {
   return {
     subject: 'Refresh your context',
     activeForm: 'Refreshing context',

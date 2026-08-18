@@ -220,7 +220,7 @@ function refreshResponse(
     phase: state.phase,
     iteration: state.iteration,
     plan_phase: state.current_plan_phase || undefined,
-    tasks: [buildRefreshTask(state, boundary)],
+    tasks: [buildRefreshTask(boundary)],
   };
 }
 
@@ -385,8 +385,8 @@ export async function next(workspaceRoot: string, projectId: string): Promise<Po
       // "waiting at a gate" for "approved".
       const gateBoundary = enterBoundary(nextPhase.id);
       const gateRefresh = refreshResponse(
-            state,
-            gateBoundary,
+        state,
+        gateBoundary,
         declaresEnter(protocol, nextPhase.id),
       );
       await writeStateAndCommit(statusPath, state, `chore(porch): ${state.id} ${state.phase} phase-transition`);
@@ -596,7 +596,7 @@ async function handleBuildVerify(
     // All reviews in — parse verdicts and decide
     if (allApprove(reviews)) {
       // All approve — advance
-      return await handleVerifyApproved(workspaceRoot, projectId, state, protocol, statusPath, reviews);
+      return await handleVerifyApproved(workspaceRoot, projectId, state, protocol, statusPath, reviews, resolver);
     }
 
     // At least one reviewer returned REQUEST_CHANGES (allApprove above
@@ -642,7 +642,7 @@ async function handleBuildVerify(
           state,
           `chore(porch): ${state.id} ${state.phase} force-advance (safety ceiling reached at iter ${state.iteration})`,
         );
-        const response = await handleVerifyApproved(workspaceRoot, projectId, state, protocol, statusPath, reviews);
+        const response = await handleVerifyApproved(workspaceRoot, projectId, state, protocol, statusPath, reviews, resolver);
         // Prepend the force-advance notice to whatever the approval path emitted.
         const ceilingNotice =
           `⚠️ FORCE-ADVANCE: REQUEST_CHANGES persisted for ${state.iteration} iterations ` +
@@ -727,6 +727,7 @@ async function handleVerifyApproved(
   protocol: Protocol,
   statusPath: string,
   reviews: ReviewResult[],
+  resolver?: ArtifactResolver,
 ): Promise<PorchNextResponse> {
   const gateName = getPhaseGate(protocol, state.phase);
 
@@ -754,8 +755,8 @@ async function handleVerifyApproved(
         state.phase = 'review';
         state.current_plan_phase = null;
         const reviewRefresh = refreshResponse(
-            state,
-            enterBoundary('review'),
+          state,
+          enterBoundary('review'),
           declaresEnter(protocol, 'review'),
         );
         await writeStateAndCommit(statusPath, state, `chore(porch): ${state.id} all plan phases complete → review`);
@@ -824,12 +825,33 @@ async function handleVerifyApproved(
   state.iteration = 1;
   state.build_complete = false;
   state.history = [];
+
+  // Extract plan phases when entering a per_plan_phase phase.
+  //
+  // PRE-EXISTING BUG, fixed here because Spec 1470 depends on it: the gated
+  // (`next()`) and pre-approved paths both do this, but this ungated path did
+  // not. ASPIR has no spec/plan gates, so plan→implement ALWAYS comes through
+  // here — meaning ASPIR entered `implement` with an empty `plan_phases` and
+  // never reached the per-plan-phase advance branch at all. That silently cost
+  // ASPIR its per-phase iteration long before this project; it surfaces now
+  // because ASPIR's declared `plan-phase:*` refresh boundaries could never fire
+  // without it.
+  if (isPhased(protocol, nextPhase.id)) {
+    const planContent = (resolver ?? getResolver(workspaceRoot)).getPlanContent(state.id, state.title);
+    if (planContent) {
+      state.plan_phases = extractPlanPhases(planContent);
+      if (state.plan_phases.length > 0) {
+        state.current_plan_phase = state.plan_phases[0].id;
+      }
+    }
+  }
+
   // ASPIR's path: no spec/plan gates, so the transition happens here rather than
   // on gate approval. Same boundary, same atomicity — and this is the protocol
   // that runs UNSUPERVISED, which is the case the fail-safes exist for.
   const directRefresh = refreshResponse(
-            state,
-            enterBoundary(nextPhase.id),
+    state,
+    enterBoundary(nextPhase.id),
     declaresEnter(protocol, nextPhase.id),
   );
   await writeStateAndCommit(statusPath, state, `chore(porch): ${state.id} ${state.phase} phase-transition`);

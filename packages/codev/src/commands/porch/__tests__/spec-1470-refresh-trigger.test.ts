@@ -16,7 +16,7 @@
  * instead of recorded, that loop would clear a builder once per plan phase.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { tmpdir } from 'node:os';
@@ -32,6 +32,30 @@ import {
   shouldRefresh,
 } from '../context-refresh.js';
 import type { ProjectState, Protocol } from '../types.js';
+
+// Mock loadConfig, following the convention in next.test.ts.
+//
+// `resolveConsultationModels` does NOT read the phase's `verify.models` — it
+// reads workspace/global config, which in a temp root falls back to the
+// three-model default. So porch sat waiting for a `gemini` review that the
+// fixture never writes, and every transition-site test returned "Run remaining
+// consultations" instead of transitioning. Pinning the models here makes the
+// fixture's two review files sufficient.
+vi.mock('../../../lib/config.js', async importOriginal => {
+  const original = await importOriginal<typeof import('../../../lib/config.js')>();
+  return {
+    ...original,
+    loadConfig: (_workspaceRoot: string) => ({
+      porch: { consultation: { models: ['codex', 'claude'] } },
+    }),
+  };
+});
+
+// Mock fetchIssue so buildPhasePrompt does not shell out to `gh issue view`
+// once per test (the flake fixed in #894).
+vi.mock('../../../lib/github.js', () => ({
+  fetchIssue: vi.fn().mockResolvedValue(null),
+}));
 
 // ---------------------------------------------------------------------------
 // Harness
@@ -66,6 +90,7 @@ function spirLike(contextRefresh: unknown = {
         name: 'Specify',
         type: 'build_verify',
         build: { prompt: 'specify.md', artifact: 'codev/specs/${PROJECT_TITLE}.md' },
+        verify: { type: 'spec', models: ['codex', 'claude'], parallel: true },
         gate: 'spec-approval',
         next: 'plan',
       },
@@ -74,12 +99,35 @@ function spirLike(contextRefresh: unknown = {
         name: 'Plan',
         type: 'build_verify',
         build: { prompt: 'plan.md', artifact: 'codev/plans/${PROJECT_TITLE}.md' },
+        verify: { type: 'plan', models: ['codex', 'claude'], parallel: true },
         gate: 'plan-approval',
         next: 'implement',
       },
-      { id: 'implement', name: 'Implement', type: 'per_plan_phase', next: 'review' },
-      { id: 'review', name: 'Review', type: 'build_verify', gate: 'pr', next: null },
+      {
+        id: 'implement',
+        name: 'Implement',
+        type: 'per_plan_phase',
+        // BOTH build and verify are required: `isBuildVerify` is
+        // `!!(phase.build && phase.verify)`, so a phase missing either one
+        // falls through to `handleOncePhase` and the transition sites under
+        // test are never reached at all.
+        build: { prompt: 'implement.md', artifact: 'src/**/*.ts' },
+        verify: { type: 'impl', models: ['codex', 'claude'], parallel: true },
+        next: 'review',
+      },
+      {
+        id: 'review',
+        name: 'Review',
+        type: 'build_verify',
+        build: { prompt: 'review.md', artifact: 'codev/reviews/${PROJECT_TITLE}.md' },
+        verify: { type: 'pr', models: ['codex', 'claude'], parallel: true },
+        gate: 'pr',
+        next: null,
+      },
     ],
+    // Without a verify config the fixture never reaches handleVerifyApproved,
+    // so every transition-site test would silently assert on a build task.
+    defaults: { verify: { models: ['codex', 'claude'], parallel: true } },
   };
   if (contextRefresh !== OMIT) p.context_refresh = contextRefresh;
   return p;
@@ -288,9 +336,29 @@ describe('gate-approved transition', () => {
 // ---------------------------------------------------------------------------
 
 describe('ungated transition (ASPIR shape)', () => {
-  it('emits a refresh on a gate-free phase transition', async () => {
-    // ASPIR runs UNSUPERVISED, which is the case the fail-safes exist for, so
-    // it must get the same boundaries as SPIR.
+  /**
+   * Drive the no-gate advance through `next()` for real.
+   *
+   * Reaching it requires a completed verify round, so the fixture writes review
+   * files whose verdicts porch parses. An earlier version of this test only
+   * called the pure helpers — which is why it missed the plan_phases defect
+   * below entirely. Testing the decision without the wiring proves nothing
+   * about whether the wiring runs.
+   */
+  function writeApprovingReviews(phase: string, iteration: number): void {
+    const dir = path.join(root, 'codev/projects', PROJECT_TITLE);
+    fs.mkdirSync(dir, { recursive: true });
+    for (const model of ['codex', 'claude']) {
+      fs.writeFileSync(
+        path.join(dir, `${PROJECT_ID}-${phase}-iter${iteration}-${model}.txt`),
+        '---\nVERDICT: APPROVE\nSUMMARY: ok\nCONFIDENCE: HIGH\n---\nKEY_ISSUES:\n- None\n',
+      );
+    }
+  }
+
+  it('emits a refresh entering implement, and extracts plan phases there', async () => {
+    // ASPIR runs UNSUPERVISED — the case the fail-safes exist for — so it must
+    // get the same boundaries as SPIR.
     writeProtocol(aspirLike());
     writePlan(['phase_1_a', 'phase_2_b']);
     writeState(
@@ -301,12 +369,126 @@ describe('ungated transition (ASPIR shape)', () => {
         iteration: 1,
       }),
     );
+    writeApprovingReviews('plan', 1);
 
-    // Drive the no-gate advance directly through the helper the site uses,
-    // since reaching it through next() requires a full verify cycle.
-    const state = readState();
-    expect(declaresEnter({ context_refresh: { on_enter: ['plan', 'implement', 'review'] } } as Protocol, 'implement')).toBe(true);
-    expect(shouldRefresh(state, true, enterBoundary('implement'))).toBe(true);
+    const response = await next(root, PROJECT_ID);
+
+    expect(isRefreshTask(response)).toBe(true);
+    expect(response.tasks?.[0].description).toContain('enter:implement');
+
+    const after = readState();
+    expect(after.phase).toBe('implement');
+    // REGRESSION GUARD (pre-existing bug, fixed in this phase): the ungated
+    // path did not extract plan_phases, unlike the gated and pre-approved
+    // paths. ASPIR always reaches implement through here, so it entered with an
+    // empty plan_phases and never reached the per-plan-phase advance branch —
+    // silently costing ASPIR its per-phase iteration, and making its declared
+    // plan-phase:* boundaries unreachable.
+    expect(after.plan_phases.map(p => p.id)).toEqual(['phase_1_a', 'phase_2_b']);
+    expect(after.current_plan_phase).toBe('phase_1_a');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Site 1: pre-approval skip — the path CLAUDE.md documents as normal
+// ---------------------------------------------------------------------------
+
+describe('pre-approval transition', () => {
+  function writeApprovedSpec(): void {
+    const dir = path.join(root, 'codev/specs');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, `${PROJECT_TITLE}.md`),
+      '---\napproved: 2026-01-01\nvalidated: [codex, claude]\n---\n\n# Spec\n',
+    );
+  }
+
+  it('emits a refresh when an approved: artifact skips the gate', async () => {
+    // The first plan draft wired only three sites and missed this one — which
+    // would have left enter:plan and enter:implement dead for exactly the
+    // projects most likely to want them.
+    writeProtocol(spirLike());
+    writeApprovedSpec();
+    writeState(baseState({ phase: 'specify', iteration: 1, build_complete: false }));
+
+    const response = await next(root, PROJECT_ID);
+
+    expect(isRefreshTask(response)).toBe(true);
+    expect(response.tasks?.[0].description).toContain('enter:plan');
+    const after = readState();
+    expect(after.phase).toBe('plan');
+    expect(after.gates['spec-approval'].status).toBe('approved');
+    expect(after.context_refreshes?.map(r => r.boundary)).toEqual(['enter:plan']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Site 3: plan-phase advance, and entering review
+// ---------------------------------------------------------------------------
+
+describe('plan-phase advance and review entry', () => {
+  function writeApprovingReviews(phase: string, iteration: number): void {
+    const dir = path.join(root, 'codev/projects', PROJECT_TITLE);
+    fs.mkdirSync(dir, { recursive: true });
+    for (const model of ['codex', 'claude']) {
+      fs.writeFileSync(
+        path.join(dir, `${PROJECT_ID}-${phase}-iter${iteration}-${model}.txt`),
+        '---\nVERDICT: APPROVE\nSUMMARY: ok\nCONFIDENCE: HIGH\n---\nKEY_ISSUES:\n- None\n',
+      );
+    }
+  }
+
+  it('emits a refresh advancing from plan phase 1 to 2', async () => {
+    writeProtocol(spirLike());
+    writePlan(['phase_1_a', 'phase_2_b']);
+    writeState(
+      baseState({
+        phase: 'implement',
+        plan_phases: [
+          { id: 'phase_1_a', title: 'A', status: 'in_progress' },
+          { id: 'phase_2_b', title: 'B', status: 'pending' },
+        ],
+        current_plan_phase: 'phase_1_a',
+        build_complete: true,
+        iteration: 1,
+      }),
+    );
+    writeApprovingReviews('phase_1_a', 1);
+
+    const response = await next(root, PROJECT_ID);
+
+    expect(isRefreshTask(response)).toBe(true);
+    expect(response.tasks?.[0].description).toContain('plan-phase:phase_2_b');
+    const after = readState();
+    expect(after.current_plan_phase).toBe('phase_2_b');
+    // NOT plan-phase:phase_1_a — the first plan phase coincides with entering
+    // `implement`, and this boundary fires only on advance BETWEEN phases.
+    expect(after.context_refreshes?.map(r => r.boundary)).toEqual(['plan-phase:phase_2_b']);
+  });
+
+  it('emits a refresh entering review when the last plan phase completes', async () => {
+    // The quality boundary: a builder entering review in a fresh context reads
+    // its own diff cold.
+    writeProtocol(spirLike());
+    writePlan(['phase_1_a']);
+    writeState(
+      baseState({
+        phase: 'implement',
+        plan_phases: [{ id: 'phase_1_a', title: 'A', status: 'in_progress' }],
+        current_plan_phase: 'phase_1_a',
+        build_complete: true,
+        iteration: 1,
+      }),
+    );
+    writeApprovingReviews('phase_1_a', 1);
+
+    const response = await next(root, PROJECT_ID);
+
+    expect(isRefreshTask(response)).toBe(true);
+    expect(response.tasks?.[0].description).toContain('enter:review');
+    const after = readState();
+    expect(after.phase).toBe('review');
+    expect(after.context_refreshes?.map(r => r.boundary)).toEqual(['enter:review']);
   });
 });
 

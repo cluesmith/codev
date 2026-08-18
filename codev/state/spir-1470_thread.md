@@ -342,3 +342,74 @@ nothing is worse than no test.
 Entry-phase question from Phase 1 review: SETTLED. No transition site transitions INTO the
 protocol's first phase (`porch init` sets it directly), so `on_enter: ["specify"]` could never
 fire. Now rejected in Phase 1's validator, with the reason inline.
+
+### Phase 2 review (codex): a REAL pre-existing bug, and a real test gap
+
+Codex REQUEST_CHANGES, both points valid, and the first is the most substantive finding of the
+project so far.
+
+**1. Pre-existing ASPIR bug, verified myself before fixing.** Only TWO `extractPlanPhases` call
+sites existed in next.ts (303 = pre-approval, 376 = gate-approved). The ungated direct-advance path
+had none. ASPIR has no spec/plan gates, so plan→implement ALWAYS goes through that path — meaning
+**ASPIR entered `implement` with an empty `plan_phases` and never reached the per-plan-phase
+advance branch at all.** That silently cost ASPIR its per-phase iteration long before this project
+existed; it surfaced now only because ASPIR's declared `plan-phase:*` boundaries could never fire
+without it.
+
+This is NOT my bug, but fixing it is inside my deliverable (spec test 6 / Phase 2 acceptance
+criterion says ASPIR refreshes at the same four boundaries). Fixed minimally by mirroring what the
+other two sites already do, with the pre-existing nature documented inline and a regression guard
+in the test. Reporting it to the architect rather than burying it in a commit — the change is not
+purely additive.
+
+**2. My tests only drove the gate-approved site end to end.** The ASPIR "test" called
+`declaresEnter`/`shouldRefresh` and never invoked `next()` — so it asserted the decision logic
+while proving nothing about whether the wiring runs. That is exactly why it missed the
+plan_phases defect sitting three lines away from the code it was nominally covering. My own plan
+said "each of the four sites gets its own positive test"; I under-delivered and the gap was
+load-bearing.
+
+Added real end-to-end tests for all four sites (pre-approval with `approved:` frontmatter,
+gate-approved, plan-phase advance, review entry, ASPIR ungated).
+
+**Third fixture bug found while doing it**: the fixture protocol had no `verify` config, so
+`handleVerifyApproved` was never reached and the tests were silently asserting against build
+tasks. Pattern for the third time this project: *a test that passes without exercising the thing
+it names.* Phase 1's `null`, Phase 2's `spirLike(undefined)`, now this. For the remaining phases:
+when writing a test for a transition, assert on an observable EFFECT of that transition (state
+mutation), never only on the response shape.
+
+### Phase 2 iter1: both REQUEST_CHANGES, converged on the same two problems
+
+Claude independently found the fixture gap my repro found, and went further: **the EXISTING
+negatives were vacuous too.** mid-iteration, plain-build-task, the #1408 reproduction, and the
+legacy-state test were all passing via `handleOncePhase` — asserting "no refresh fired" about a
+code path where no refresh could ever fire. Nine tests green for no reason.
+
+Root cause: `isBuildVerify` is `!!(phase.build && phase.verify)` (protocol.ts:500). My fixture's
+`implement` had neither, so everything fell through to handleOncePhase.
+
+Then three more failures after that fix, cause found by repro not by guessing:
+`resolveConsultationModels` does NOT read the phase's `verify.models` — it reads workspace config,
+which defaults to three models in a temp root. Porch was waiting for a gemini review the fixture
+never writes. `next.test.ts:22-37` already had the convention (mock loadConfig + fetchIssue) and I
+hadn't followed it. Adopting it also cut per-test time from ~350ms to ~2ms — that was the
+`gh issue view` round-trip per test (#894's flake).
+
+22/22 now, full suite 4911.
+
+**Fourth instance of one pattern**: a test that passes without exercising the thing it names.
+Phase 1 `null`, Phase 2 `spirLike(undefined)`, this fixture gap, and the vacuous negatives it
+created. Correction now applied and to carry forward: **assert on an observable EFFECT of the
+transition (state mutation) — never only on the response shape.** All new tests check
+`after.phase` / `after.current_plan_phase` / `after.context_refreshes`, which makes a vacuous pass
+impossible.
+
+**In-flight ASPIR projects are NOT repaired by the plan_phases fix** (it runs on transition only).
+Deliberate: retroactively populating plan_phases for a project mid-implement would reset its phase
+statuses to pending and rewind recorded progress — the exact #1408 class of harm. A repair, if
+ever wanted, belongs in a human-run tool against a named project, not a read path that mutates
+state as a side effect.
+
+**Open for the architect**: the ASPIR fix is a behavior change beyond Spec 1470 (single-shot →
+real per-plan-phase cycle). Their call whether it ships in this PR or splits out.
