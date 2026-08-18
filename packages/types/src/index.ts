@@ -57,6 +57,7 @@ export {
   type OverviewBacklogItem,
   type OverviewRecentlyClosed,
   type OverviewData,
+  type HeldMessage,
   type IssueView,
   type PRView,
   type IssueSearchItem,

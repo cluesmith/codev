@@ -2130,9 +2130,21 @@ async function handleSend(
  * redaction rule): id, addresses, why-held reason, escalation flag, and enqueue time —
  * the message BODY is deliberately never surfaced here (it travels only over the live
  * terminal stream on delivery). `escalated` is normalized from SQLite's 0/1 to a bool.
+ *
+ * Issue 1450: `workspaceOverride` lets the workspace-scoped route
+ * (`/workspace/<base64>/api/inbox`, which backs the dashboard's held-mail popover) pass the
+ * workspace resolved from the URL prefix, exactly as `handleOverview` / `handleAnalytics` do.
+ * The override WINS over `?workspace=` (`??`, so even an empty-string override is honored
+ * rather than falling through) — a workspace-scoped call must never be redirected to another
+ * workspace's held mail by a query parameter. The override arrives already normalized by the
+ * prefix decoder, so `normalizeWorkspacePath` re-running on it is a safe no-op.
+ *
+ * NOTE: this lists ALL held rows, including pre-due `--delay` rows, while the badge count
+ * (`heldSummaryForWorkspace`) excludes them — see the `HeldMessage` type for why the two
+ * legitimately disagree.
  */
-function handleInboxList(res: http.ServerResponse, url: URL): void {
-  const rawWorkspace = url.searchParams.get('workspace');
+function handleInboxList(res: http.ServerResponse, url: URL, workspaceOverride?: string): void {
+  const rawWorkspace = workspaceOverride ?? url.searchParams.get('workspace');
   // Normalize to the stored realpath key (mailbox workspace_path is normalized at
   // enqueue — tower-routes handleSend / holdAndRespond — matching overview.ts). Without
   // this a symlinked workspace root would miss its own held rows.
@@ -2698,6 +2710,20 @@ async function handleWorkspaceRoutes(
     // GET /api/overview - Work view overview data (Spec 0126 Phase 4)
     if (req.method === 'GET' && apiPath === 'overview') {
       return handleOverview(res, url, workspacePath, ctx);
+    }
+
+    // GET /api/inbox - held mailbox rows for THIS workspace (Issue 1450). Backs the
+    // dashboard's clickable held-mail counter. Reuses the Tower-level handler with the
+    // workspace resolved from the /workspace/<base64>/ prefix, the same way `overview`
+    // and `analytics` above do — the dashboard calls relative `./api/...` and has no
+    // absolute workspace path of its own to pass as `?workspace=`.
+    //
+    // Deliberately an EXACT match on 'inbox', not a prefix: `inbox/:id` (which returns the
+    // message BODY) and `inbox/:id/dismiss` (which mutates) do not match, fall through to
+    // the 404 below, and so stay off the dashboard surface. That is what keeps this read
+    // path inside Spec 1313's redaction rule and decision 8 (dismissal is CLI-only).
+    if (req.method === 'GET' && apiPath === 'inbox') {
+      return handleInboxList(res, url, workspacePath);
     }
 
     // POST /api/overview/refresh - Invalidate overview cache (Spec 0126 Phase 4)

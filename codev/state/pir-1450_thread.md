@@ -124,3 +124,74 @@ argument was weak — real reasons are cached-aggregate cost + VSCode overview f
 
 Open note back to architect: couldn't find pir-1365's artifacts in this worktree, so the
 isolated-Tower recipe is reconstructed from the CLI rather than copied from that precedent.
+
+**Resolved:** architect pointed at `spec-1365-e2e-evidence.mts`. pir-1365 did NOT redirect HOME —
+it spawns the built `tower-server.js` with `NODE_ENV=test` + `AF_TEST_DB`, the dedicated seam at
+`db/index.ts:117-127`. Strictly better than my HOME idea (isolates the db without touching the
+environment's home), so the plan was amended before implementing. Plan gate approved on rev 2.
+
+## Implement phase (2026-08-18)
+
+Shipped. Server + types + web + tests + a real-browser evidence script.
+
+### Shape of the change
+
+- `handleInboxList(res, url, workspaceOverride?)` — `??` ordering so the override WINS over
+  `?workspace=`; the Tower-level registration is untouched.
+- New `apiPath === 'inbox'` GET branch in the workspace-scoped dispatcher. **Exact match**, so
+  `inbox/:id` (body) and `inbox/:id/dismiss` (mutating) fall through to 404 and stay off the
+  dashboard. Three tests pin that non-reachability — it's what the redaction argument rests on.
+- `HeldMessage` in `packages/types`, with the Held-vs-Scheduled asymmetry documented ON the type
+  and a cross-reference added to `OverviewData.heldCount`. The next person to wire a UI to these
+  two fields shouldn't have to rediscover it from SQL.
+- Badge → disclosure button (dotted underline, `aria-expanded` + `aria-controls`, real `<ul>`),
+  generation-guarded lazy fetch, grouped popover, stays mounted while open at count 0.
+
+### Things worth recording
+
+- **`user-event` is not a dependency here.** I wrote the first test pass against it out of habit;
+  the repo convention is `fireEvent` from `@testing-library/react`. Rewrote rather than add a
+  devDependency for one test file.
+- **A `cd` in a Bash call persists across calls.** I cd'd into `apps/web/src` for a sed-style
+  edit and then spent two tool calls confused about why `apps/web/__tests__` "didn't exist".
+  Use absolute paths or cd back in the same command.
+- **Nearly wrote to main's tree.** An Edit call with a path missing the `.builders/pir-1450/`
+  segment was blocked by the guard. The nesting hazard in the role doc is real.
+- My first `heldCount` docstring edit spliced a note into the MIDDLE of the neighbouring
+  `queuedFeedback` comment, breaking its sentence. Caught on reread and moved.
+
+### Evidence (the part that actually proves this works)
+
+`packages/codev/scripts/issue-1450-dashboard-evidence.mts` — 23/23 checks, committed.
+
+Isolated Tower on **14700**, `NODE_ENV=test` + `AF_TEST_DB=test-1450-14700.db`, so the cohort's
+live `global.db` is never touched and no second delivery loop runs against their held mail.
+Real workspace, real shellper PTYs painted with an occupied composer, real `POST /api/send`
+held by the render gate, real built SPA in real Chromium.
+
+The run produced the exact scenario the blocking finding predicted: **badge says "2 held" while
+the mailbox has 3 rows**, and the popover renders `Held (2)` + `Scheduled (1)`. The
+`heldRows === badgeCount` assertion is in the script.
+
+`playwright-core` isn't a repo dependency — installed out-of-tree in the scratchpad and passed
+via `PW_CORE`/`PW_CHROMIUM` rather than adding a heavy devDependency for one script.
+
+Two flaws in my *own* evidence surfaced and were fixed rather than papered over:
+1. The z-index check used `querySelector('.xterm')`, which returned the LEFT pane's architect
+   terminal — never overlapping a top-right popover. The check passed while proving nothing.
+   Now it opens a builder terminal in the right pane, checks every mounted `.xterm`, and asserts
+   a terminal genuinely overlaps before testing what paints on top.
+2. Panel text was read before the lazy fetch resolved, so it was asserting against "Loading…".
+
+Also: `waitUntil: 'networkidle'` can never fire on this dashboard — the SSE stream stays open
+for the page's lifetime. Used `domcontentloaded`.
+
+### Test results
+
+- Full `pnpm test` (@cluesmith/codev): **4916 passed**, 48 skipped, 0 failures.
+- `apps/web`: **371 passed**, 1 skipped, 0 failures (33 files). Note the root `test` script only
+  runs the codev package — web tests need `pnpm --filter @cluesmith/codev-web test`.
+- New: 20 web component tests, 4 formatter tests, 13 route tests.
+- No pre-existing failures encountered, so nothing to quarantine.
+
+Awaiting `dev-approval`. PR gets parked open at the end — maintainer merges.
