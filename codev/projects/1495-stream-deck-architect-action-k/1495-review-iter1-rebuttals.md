@@ -25,25 +25,39 @@ selected builder's architect) and states that reaching any *other* architect, `m
 the new **Architects board's** job, so the key needn't carry Main mode. Main mode is still
 documented as available on a spare key, but the stale "Row 1 slot 1 recommended" line is gone.
 
-## Codex 2 — "Review records testing via page swipe, not the native switch button" — REBUTTED (with an honesty fix)
+## Codex 2 — "Review records testing via page swipe, not the native switch button" — PARTIALLY REBUTTED + GAP CLOSED
 
-Not a defect — a scope decision by the owner, now made explicit in the review. During the
-dev-approval gate the owner elected **page-swipe** for board navigation over a switch *button*
-(verbatim: "swiping is enough actually"). The switch button is an **optional, native Stream Deck
-affordance** (a Folder or Switch-Profile key), **not plugin code** — the plugin ships only the
-`switch` icon; the key's behavior is Stream Deck's own. So there is nothing of *ours* to
-hardware-verify on that path beyond the icon rendering, and re-driving it wouldn't test any code in
-this PR.
+Codex pointed at the switch *button press*, which is genuinely **not ours** — so that framing is
+dismissed — but there was a real gap underneath it, and the honest split matters because a rebuttal
+outlives the PR:
 
-What I *did* change: the review's manual-verification note now states plainly that page-swipe was
-the chosen and verified navigation, and that the switch button is documented-but-not-hardware-
-exercised because it is native, not plugin, behavior. That keeps the record honest without
-claiming a verification that (a) the owner descoped and (b) would exercise Stream Deck, not this
-change.
+- **The native key's BEHAVIOUR is Elgato's.** A Switch-Profile / Folder key runs Stream Deck's own
+  code; the plugin contributes none of it. During the dev-approval gate the owner elected
+  **page-swipe** for board navigation over a switch button ("swiping is enough actually"), so there
+  is no *plugin* behaviour to hardware-verify on that path. Correctly out of scope.
+- **The icons and the documented procedure ARE ours.** The four `switch` PNGs and the README wiring
+  steps are things this PR ships. My first draft said "nothing of ours is left unverified" — that
+  was **wrong**: the `switch` icon was the plugin's one shipped asset with **no test coverage**,
+  because `manifest-icons.test.ts` builds its ref set from `manifest.Actions` and the switch icon is
+  manifest-less (no action references it), so the generic loop structurally can't see it. **Gap
+  closed:** added explicit existence + convention-size assertions for all four switch PNGs, matching
+  the pinned form the file already uses for the other dedicated icons.
+
+The useful generalisation: **the gap lived in the seam between "our code" and "the platform's
+feature".** Everything on our side (store, action, face, the action icon) had coverage; everything
+on Elgato's side (the switch key's behaviour) was correctly out of scope; and four PNGs plus a
+README procedure sat *in between* — belonging to us while looking like the platform's — which is
+exactly where an asset slips through both the manifest-driven test and the "it's native" dismissal.
+
+The review's manual-verification note also now states plainly that page-swipe was the chosen and
+verified navigation, and that the switch button itself is native (not plugin) behaviour, documented
+but not hardware-exercised.
 
 ## Single-pass note
 
 PIR consultation is `max_iterations: 1`, so these dispositions are **not** independently
-re-reviewed. The two fixes are documentation-only (no code, so no regression test applies); the
-one rebuttal rests on an owner decision recorded in the session. The human at the `pr` gate is the
-remaining reviewer — this rebuttal + the README/review edits are for that review.
+re-reviewed. Fixes 1 and 3 are documentation; the Codex-2 gap-close adds a real test
+(`manifest-icons.test.ts` switch-PNG assertions) that fails if any of the four assets go missing or
+ship at the wrong size. The switch-button *rebuttal* rests on an owner decision recorded in the
+session. The human at the `pr` gate is the remaining reviewer — this rebuttal + the README/review/
+test edits are for that review.

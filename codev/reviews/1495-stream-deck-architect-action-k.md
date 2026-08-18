@@ -28,7 +28,8 @@ Against the merge-base (`e53cab9`):
   `icons/list/{architect-action,switch}{,@2x}.png` — generated assets (8 new PNGs).
 - `apps/streamdeck/README.md` (+135 / −...) — Design + Actions entries and a two-page recommended
   layout (builders / architects, shared dials).
-- `apps/streamdeck/src/__tests__/actions.test.ts` (+116), `face.test.ts` (+24 / −...) — 14 new tests.
+- `apps/streamdeck/src/__tests__/actions.test.ts` (+116), `face.test.ts` (+24 / −...),
+  `manifest-icons.test.ts` (+2 assertions pinning the manifest-less `switch` PNGs) — 16 new tests.
 - `codev/resources/lessons-learned.md` — one UI/UX lesson (enumerate-vs-resolve; sort-not-pin).
 - `codev/plans/1495-*.md`, `codev/state/pir-1495_thread.md` — plan + builder thread.
 
@@ -49,9 +50,9 @@ Against the merge-base (`e53cab9`):
 - `npm run check-types` (tsc): ✓ pass
 - `npm run build` (esbuild): ✓ pass
 - `npm run validate` (Elgato manifest/icon validation): ✓ pass
-- `npm test`: ✓ pass — **231 tests, 14 new** (the existing #1465 windowing, manifest-icons,
-  render-action-icons, and validate guards all stayed green through the `SlotKey`→`PlacedKeys`
-  extraction).
+- `npm test`: ✓ pass — **233 tests, 16 new** (14 for the architect board + 2 pinning the
+  manifest-less `switch` PNGs; the existing #1465 windowing, manifest-icons, render-action-icons,
+  and validate guards all stayed green through the `SlotKey`→`PlacedKeys` extraction).
 - Manual (dev-approval, on hardware): approved after relinking the plugin to this worktree and
   driving a two-page profile — builders on page 1, Architect Action keys on page 2 reached by
   **swipe**; the architect keys enumerate the live fleet and a press opens the architect's terminal.
@@ -110,10 +111,14 @@ three Codex points were documentation/verification (implementation called "sound
 - *Fixed* — added README "Wiring the native switch" steps (which native key gets the `switch.png`).
 - *Fixed* — removed a stale "Main-mode key in Row 1 slot 1" recommendation that contradicted the
   new two-page layout.
-- *Rebutted* — "review records swipe, not the switch button": page-swipe was the owner's chosen
-  navigation ("swiping is enough"); the switch button is an optional *native* affordance, not
-  plugin code, so nothing of ours is left unverified. The review's manual-verification note now
-  says this explicitly. PIR is single-pass, so please sanity-check this disposition at the gate.
+- *Partially rebutted + gap closed* — Codex pointed at the switch-button *press*, which is genuinely
+  **not ours** (a native Switch-Profile / Folder key runs Elgato's code, out of scope; the owner
+  also chose page-swipe over a button). But underneath it was a real gap: the four `switch` PNGs
+  were the plugin's one shipped asset with **no test coverage**, because they are manifest-less and
+  `manifest-icons.test.ts`'s generic loop only walks `manifest.Actions`. **Closed** by adding
+  explicit existence + convention-size assertions for the switch PNGs. The seam this fell through:
+  the icons + README procedure are *ours* while looking like the platform's. PIR is single-pass —
+  please sanity-check this disposition at the gate.
 
 ## How to Test Locally
 
