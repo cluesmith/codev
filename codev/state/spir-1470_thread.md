@@ -38,3 +38,46 @@ inside my running turn as `### [ARCHITECT INSTRUCTION | ...] ###`. Two facts fal
    as an order from the architect.
 
 `afx send --delay <seconds>` exists (Tower-side; its own help text says "dropped if Tower restarts").
+
+## 2026-08-17 — Specify, iteration 1 review
+
+Both reviewers returned REQUEST_CHANGES. Both were right, and one caught a real factual error.
+
+**Codex** (6 issues): undefined failure semantics; coincident boundaries (entering `implement`
+IS entering plan phase 1); cold-review goal vs the cold-reader save request; the re-entry
+mechanism has no adequate acceptance test; self-target authorization unspecified; protocol
+scope (ASPIR) unstated.
+
+**Claude** (verified claims against the tree, which is how it found this): my Constraint that
+`afx send --delay` is "not persisted" was **false**. I sourced it from the CLI help text at
+`cli.ts:455` and `arch-save/SKILL.md:110` — both stale. I verified independently before acting:
+`servers/delayed-send.ts` says a plain `--delay` "keeps no timer at all and survives a Tower
+restart by construction"; `handleDelayedSend` persists the body to the durable mailbox at
+request time with `not_before`. Only the delayed-`--interrupt` ^C is dropped at shutdown. This
+was the conscious reversal of Spec 1307's trade, per review 1313.
+
+That correction *improves* the design rather than complicating it: the re-entry can ride the
+durable mailbox, and Spec 1313's render gate delivers a body only onto a prompt proven empty —
+so a busy terminal holds it instead of eating it. I did not overclaim, though: the gate covers
+the window *before* turn-end; whether a queued `/clear` can consume a re-entry delivered just
+after turn-end is an empirical harness property. So it is now an explicit live acceptance test
+(scenario 37) plus an in-flight marker in `porch status`, not an assumption.
+
+Also verified rather than trusted: porch has **no runtime schema validation** (`loadProtocol` =
+JSON.parse + a hand-rolled `normalizeProtocol` checking only name/phases; no ajv/zod). So
+"the schema validates the key" was wrong too — rejection is new code. Three `protocol-schema.json`
+copies exist, not two. And `detectCurrentBuilderId` already throws rather than guessing (#1094),
+so codex's self-target-authorization point is satisfiable by construction: the command takes no
+target argument at all.
+
+Decisions I made in the rewrite:
+- **Failure semantics**: boundary consumed at emission, never retried, refresh never blocks,
+  builder-side command never writes status.yaml. A failed refresh costs one refresh, nothing else.
+- **Coincident boundaries**: per-plan-phase fires on *advance between* plan phases — excludes the
+  first by definition, no special case.
+- **ASPIR is in.** It has SPIR's exact phase shape and no spec/plan gates, i.e. it is *the*
+  unattended case. Excluding it while the problem statement named it was incoherent.
+- **Review-boundary save**: pointers, not persuasion. No self-assessment or defense of the
+  implementation; deviations, flaky tests, deferred work are exactly what it should carry.
+- **Min-bytes**: kept, but flagged that 1000 was calibrated on a *mid-phase* manual reset, not a
+  clean boundary. Plan decides the number deliberately.
