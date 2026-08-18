@@ -33,7 +33,7 @@ import { DEFAULT_COLS, defaultSessionOptions } from '../../terminal/index.js';
 import type { SSEClient, WorkspaceTerminals } from './tower-types.js';
 import type { TerminalManager } from '../../terminal/pty-manager.js';
 import { parseJsonBody, isRequestAllowed, isAllowedOrigin, isAllowedHost, getExpectedKey, escapeHtml } from '../utils/server-utils.js';
-import { TOWER_KEY_HEADER, LEGACY_WEB_KEY_HEADER } from '@cluesmith/codev-types';
+import { TOWER_KEY_HEADER, LEGACY_WEB_KEY_HEADER, VSCODE_USER_SENDER } from '@cluesmith/codev-types';
 import {
   isRateLimited,
   normalizeWorkspacePath,
@@ -49,7 +49,7 @@ import { fetchTeamGitHubData, type TeamMemberGitHubData } from '../../lib/team-g
 import { resolveTarget, resolveAgentInRegistry, broadcastMessage, isResolveError, type ResolveResult } from './tower-messages.js';
 import { handleCommandRoute, COMMAND_ROUTE } from './command-relay.js';
 import { handleCanvasRoute, CANVAS_ROUTE_PREFIX } from './canvas-relay.js';
-import { formatArchitectMessage, formatBuilderMessage } from '../utils/message-format.js';
+import { formatArchitectMessage, formatBuilderMessage, formatUserViaVsCodeMessage } from '../utils/message-format.js';
 import type { PtySession } from '../../terminal/pty-session.js';
 import { writeMessageToSession, writeEscapeToSession } from './message-write.js';
 import { makeDeliveryPorts, getMailboxDrainer } from './mailbox-wiring.js';
@@ -1530,6 +1530,9 @@ function formatMessageForTarget(
   message: string,
   raw: boolean,
 ): string {
+  // #1494: a human's approval relayed by the VS Code extension gets its own
+  // header, so the architect can tell it from a peer-architect instruction.
+  if (isArchitectTarget && from === VSCODE_USER_SENDER) return formatUserViaVsCodeMessage(message, undefined, raw);
   if (isArchitectTarget && from) return formatBuilderMessage(from, message, undefined, raw); // builder → architect
   if (!isArchitectTarget) return formatArchitectMessage(message, undefined, raw); // any → builder
   return raw ? message : formatArchitectMessage(message, undefined, false); // unknown → architect

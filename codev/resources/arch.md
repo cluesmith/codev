@@ -1809,6 +1809,12 @@ A held row past the escalation age (`DEFAULT_ESCALATION_MS`, default 60s; `.code
 
 `afx send` resolves addresses via Tower API with tail-matching: `"0109"` matches `"builder-spir-0109"`. Supports `--all` for broadcast, `--file` for file attachments (48KB max), and `--raw` to skip structured formatting. With no live PTY, resolution falls back to the global.db agent registry so the message holds (`no-live-pty`) instead of 404ing.
 
+#### Sender attribution (message headers)
+
+`formatMessageForTarget` (`tower-routes.ts`, via `utils/message-format.ts`) wraps a delivered body in a header keyed by target + `from`: a message **to a builder** renders as `[ARCHITECT INSTRUCTION]`, a message **to an architect with a builder `from`** as `[BUILDER <id> MESSAGE]`, and (#1494) a message **to an architect with `from === VSCODE_USER_SENDER`** (the `'vscode-user'` wire constant in `@cluesmith/codev-types`) as `[USER via VS Code]`. That third class exists so a human's VS Code action relayed to the architect is distinguishable from a peer-architect instruction. The VS Code Approve-gate button sends its relay with that `from`; the extension itself never runs `porch approve`. Under the builder-runs-it convention the architect passes the relay to the builder, which runs the command in its own worktree.
+
+**The limit (do not build on this header as proof):** `from` is caller-controlled, so within Tower's keyed boundary (post-#1421 every route accepting this message requires the shared local key) the header **differentiates** a VS Code relay for triage, it does **not** prove a human click. A gate-spending or bypass-spending decision still requires the standing provenance bars (the human's word in the executing channel, or evidence independent of the requesting chain), never a `[USER via VS Code]` header alone.
+
 ### 8. Identity Resolution (`afx whoami`) (Spec 1134)
 
 **Location**: `commands/whoami.ts` (composes `detectCurrentBuilderId`/`detectWorkspaceRoot` from `commands/send.ts` and `lookupBuilderSpawningArchitect` from `state.ts`)
