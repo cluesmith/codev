@@ -992,3 +992,29 @@ commander passes strings (declaring a type the runtime does not honour is a lie 
 enforces); `--challenge-max-age`'s bare `1` floor → named constant; a comment explaining that
 `--dry-run` deliberately requires Tower, because a rehearsal answering "would this proceed?" must
 not report success in the one state most likely to stop the real run.
+
+### Phase 4 iter2 (codex): the SAME omission, at a second instructed workflow
+
+**`afx self-refresh --begin --boundary X` printed `afx self-refresh` as the follow-up — without
+`--boundary`.** So anyone following my own command's printed instruction silently dropped the
+stale-boundary guard.
+
+This is the identical defect I had just fixed in porch's task text, one file away. I fixed ONE
+instructed workflow and left the other. Fix-the-instance-miss-the-class, third occurrence, and this
+time within the same phase.
+
+**Generalisation to actually apply**: when a guard depends on a flag, EVERY place that tells a human
+or agent how to invoke the command is part of the guard. Grep for all of them — porch task text, CLI
+follow-up output, skill docs (Phase 5!), README examples — not just the one that failed.
+
+**Codex #2**: acceptance test 25 ("no target argument") was asserted in prose and by construction,
+never by exercising Commander. Added three real parser tests via `runAgentFarm([...])`. Found that
+**Commander ALLOWS excess arguments by default** — so `afx self-refresh spir-9999` would have parsed,
+been ignored, and refreshed the caller. The safety property held (identity comes from the worktree),
+but the command would have advertised a targeting capability it does not have, which invites exactly
+the wrong belief. Added `.allowExcessArguments(false)`.
+
+Two mock-completeness failures on the way: importing all of cli.ts drags in transitive deps, so
+partial `vi.mock` factories exploded with "No export is defined on the mock" for `exec` and
+`AGENT_FARM_DIR`. Fixed by spreading `importOriginal()` in both. Worth remembering: a partial module
+mock is fine for a narrow import and lethal for a wide one.

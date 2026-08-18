@@ -40,12 +40,18 @@ const {
   mockExecFileSync: vi.fn(),
 }));
 
-vi.mock('../lib/tower-client.js', () => ({
-  TowerClient: class {
-    isRunning = mockIsRunning;
-    sendMessage = mockSendMessage;
-  },
-}));
+// Spread the original: the CLI-parser tests import all of cli.ts, which pulls
+// other exports out of this module (AGENT_FARM_DIR among them).
+vi.mock('../lib/tower-client.js', async importOriginal => {
+  const actual = await importOriginal<typeof import('../lib/tower-client.js')>();
+  return {
+    ...actual,
+    TowerClient: class {
+      isRunning = mockIsRunning;
+      sendMessage = mockSendMessage;
+    },
+  };
+});
 
 vi.mock('../commands/send.js', () => ({
   detectWorkspaceRoot: mockDetectWorkspaceRoot,
@@ -77,7 +83,14 @@ vi.mock('../commands/spawn-roles.js', () => ({
   buildResumeNotice: (id: string) => `resume ${id}`,
 }));
 
-vi.mock('node:child_process', () => ({ execFileSync: mockExecFileSync }));
+// Spread the ORIGINAL rather than replacing the module. The CLI-parser tests
+// import all of cli.ts, whose transitive deps use `exec` and friends; a partial
+// mock makes those explode with "No export is defined on the mock" — a failure
+// about the mock, not about the code under test.
+vi.mock('node:child_process', async importOriginal => {
+  const actual = await importOriginal<typeof import('node:child_process')>();
+  return { ...actual, execFileSync: mockExecFileSync };
+});
 
 vi.mock('../commands/reset/context.js', () => ({
   resolveBuilderContext: (opts: Record<string, unknown>) => ({
@@ -200,6 +213,102 @@ describe('identity', () => {
 
     await expect(selfRefresh({})).rejects.toThrow(/incomplete registry row/i);
     expect(mockSendMessage).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The CLI itself rejects a positional target (spec test 25)
+// ---------------------------------------------------------------------------
+
+describe('CLI argument surface', () => {
+  /**
+   * Exercises COMMANDER, not `selfRefresh()` directly.
+   *
+   * "Takes no target" is a property of the command REGISTRATION, and calling the
+   * function with an options object cannot demonstrate it — the earlier tests
+   * asserted around the property rather than on it. This drives the real parser.
+   *
+   * It matters that this is an explicit rejection rather than an argument that
+   * is merely unused: Commander allows excess arguments by default, so
+   * `afx self-refresh spir-9999` would have parsed, been ignored, and refreshed
+   * the caller instead. Safe, but it would advertise a targeting capability the
+   * command does not have.
+   */
+  async function runCli(argv: string[]): Promise<{ error?: Error }> {
+    const { runAgentFarm } = await import('../cli.js');
+    try {
+      await runAgentFarm(argv);
+      return {};
+    } catch (err) {
+      return { error: err as Error };
+    }
+  }
+
+  beforeEach(() => {
+    // Commander calls process.exit on a parse error; trap it so the test can
+    // observe the refusal instead of dying with the process.
+    vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+      throw new Error(`EXIT:${code}`);
+    }) as never);
+    vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+  });
+
+  it('rejects a positional target in execute mode', async () => {
+    const { error } = await runCli(['self-refresh', 'spir-9999']);
+    expect(error, 'a positional target must be refused, not ignored').toBeTruthy();
+    expect(mockRunSelfRefresh).not.toHaveBeenCalled();
+    expect(mockSendMessage).not.toHaveBeenCalled();
+  });
+
+  it('rejects a positional target in begin mode', async () => {
+    const { error } = await runCli(['self-refresh', '--begin', 'spir-9999']);
+    expect(error).toBeTruthy();
+    expect(mockBeginSelfRefresh).not.toHaveBeenCalled();
+  });
+
+  it('accepts the no-argument form', async () => {
+    const { error } = await runCli(['self-refresh', '--dry-run']);
+    // No parse error: the command genuinely takes no positional.
+    expect(error?.message ?? '').not.toMatch(/EXIT:1/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The begin output must not hand back an unsafe follow-up
+// ---------------------------------------------------------------------------
+
+describe('begin follow-up instruction', () => {
+  it('carries --boundary through to the printed execute command', async () => {
+    // An instruction that drops the flag silently disables the stale-boundary
+    // guard for anyone who follows it. The same omission had already made the
+    // guard inert once, in porch's task text.
+    const logged: string[] = [];
+    const { logger } = await import('../utils/logger.js');
+    vi.mocked(logger.info).mockImplementation((msg: string) => {
+      logged.push(msg);
+    });
+
+    const { selfRefresh } = await importCommand();
+    await selfRefresh({ begin: true, boundary: 'enter:review' });
+
+    const followUp = logged.find(l => l.includes('When the file is written'));
+    expect(followUp).toBeTruthy();
+    expect(followUp).toContain('--boundary');
+    expect(followUp).toContain('enter:review');
+  });
+
+  it('omits --boundary only when there was none to carry', async () => {
+    const logged: string[] = [];
+    const { logger } = await import('../utils/logger.js');
+    vi.mocked(logger.info).mockImplementation((msg: string) => {
+      logged.push(msg);
+    });
+
+    const { selfRefresh } = await importCommand();
+    await selfRefresh({ begin: true });
+
+    const followUp = logged.find(l => l.includes('When the file is written'));
+    expect(followUp).toBe('When the file is written, run: afx self-refresh');
   });
 });
 

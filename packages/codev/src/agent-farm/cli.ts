@@ -589,6 +589,13 @@ export async function runAgentFarm(args: string[]): Promise<void> {
   program
     .command('self-refresh')
     .description('Refresh THIS builder\'s own context: verify your saved state, clear, re-orient')
+    // Commander ALLOWS excess arguments by default, so without this
+    // `afx self-refresh <some-builder>` would be accepted and silently ignored.
+    // The safety property would still hold — identity comes from the worktree,
+    // so the argument could not retarget anything — but the command would appear
+    // to accept a target it does not honour, which is worse than refusing: it
+    // invites the belief that targeting works.
+    .allowExcessArguments(false)
     .option('--begin', 'Issue the challenge and print what to save (step 1 of 2)')
     .option('--boundary <id>', 'Protocol boundary this refresh is for (e.g. enter:review)')
     .option('--note <text>', 'Addendum appended to the re-orientation')

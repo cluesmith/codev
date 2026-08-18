@@ -190,7 +190,19 @@ export async function selfRefresh(options: SelfRefreshOptions): Promise<void> {
     console.log('');
     console.log(result.saveRequest);
     console.log('');
-    logger.info('When the file is written, run: afx self-refresh');
+    // The follow-up MUST carry --boundary through.
+    //
+    // Printing a bare `afx self-refresh` would hand the operator an instruction
+    // that silently drops the stale-boundary guard: `expectedBoundary` becomes
+    // undefined, and a challenge left over from an aborted refresh could then
+    // clear the builder at a LATER boundary against a superseded save. The same
+    // omission had already made the guard inert once, in porch's task text —
+    // fixing that and leaving this would be the same mistake at a second
+    // instructed workflow.
+    const followUp = options.boundary
+      ? `afx self-refresh --boundary '${options.boundary}'`
+      : 'afx self-refresh';
+    logger.info(`When the file is written, run: ${followUp}`);
     return;
   }
 
