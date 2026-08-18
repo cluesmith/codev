@@ -14,6 +14,18 @@ no progress bar (the dial's rotation and any builder-progress bar are unrelated 
 root fix has two halves — a manifest layout declaration and the render code — because the
 dial was *declared* title-only, not merely un-rendered.
 
+## Deviation From the Approved Plan
+
+The approved plan specified only the `send` / `queue` line-1 qualifiers. The third
+qualifier, **`Scroll · editor only` for canvas mode, was added after plan approval** — the
+owner (Amr) ruled during the dev-approval hardware session that the dial silently doing
+nothing on a spec/plan violated this lane's own "inert must be visibly inert" principle, so
+the canvas-mode honesty was absorbed here rather than deferred. It landed *before*
+dev-approval was granted, was flagged to the architect in the thread, and is unit-tested —
+human-visible, not silent scope creep. Naming it explicitly here so the `pr` gate is clean.
+(The separate *capability* gap — actually scrolling a canvas — stayed out of scope as
+follow-up #1501.)
+
 ## Files Changed
 
 Against `git merge-base main HEAD` (`9129ab81c`):
