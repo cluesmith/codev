@@ -186,6 +186,14 @@ export type SelfRefreshFailure =
   | 'receipt-rejected'
   | 'assembly-failed'
   | 'reentry-failed'
+  /**
+   * The challenge could not be marked consumed, so the clear was not attempted.
+   *
+   * Distinct from `reentry-failed` because the recovery differs: by this point a
+   * re-entry is already queued, so a retry queues a SECOND one. The message has
+   * to say so.
+   */
+  | 'challenge-burn-failed'
   | 'clear-failed';
 
 export interface BeginResult {
@@ -314,6 +322,12 @@ export function buildBoundarySaveRequest(
 
   lines.push(
     '',
+    `The save must be at least ${DEFAULT_MIN_BYTES} bytes to be accepted — not as a`,
+    'word count to pad out, but because a file below it is indistinguishable from a',
+    'stub. If you genuinely have less than that to say, you are probably omitting',
+    'receipts or standing orders. This boundary is refreshed AT MOST ONCE and is',
+    'never retried, so a save rejected here means the refresh simply does not happen.',
+    '',
     'Pointers, not prose. When the file is written, run the execute step.',
   );
 
@@ -381,6 +395,91 @@ export function beginSelfRefresh(options: BeginOptions): BeginResult {
 // ============================================================================
 // Step 2 — execute
 // ============================================================================
+
+/**
+ * Parse and FULLY validate a persisted challenge.
+ *
+ * `JSON.parse` returns `any`, and casting it to {@link Challenge} buys a
+ * compile-time guarantee about a runtime value that came off disk. That gap is
+ * exploitable, and not theoretically:
+ *
+ *   `{"nonce": []}` survives a truthiness check, because `![]` is `false`. It is
+ *   then handed to `verifyReceipt`, whose `content.includes(nonce)` coerces the
+ *   array to `''` — and `String.includes('')` is true for EVERY string. The
+ *   freshness gate does not merely weaken, it inverts: any file over the size
+ *   floor passes as a fresh save.
+ *
+ *   A non-numeric or `NaN` `issuedAt` defeats the age bound the same way, since
+ *   every comparison with `NaN` is false. A FUTURE `issuedAt` yields a negative
+ *   age, which is likewise never "too old".
+ *
+ * So the shape is checked here, at the trust boundary, rather than assumed. The
+ * driven path needs no equivalent because it mints its nonce in-process and
+ * never reads one back from disk; only the self path takes a challenge from a
+ * file, which is exactly where validation belongs.
+ */
+export function parseChallenge(
+  raw: string,
+  now: number,
+): { ok: true; challenge: Challenge } | { ok: false; reason: string } {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return { ok: false, reason: 'is not valid JSON' };
+  }
+
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    return { ok: false, reason: 'is not a JSON object' };
+  }
+
+  const obj = parsed as Record<string, unknown>;
+
+  if (typeof obj.nonce !== 'string' || obj.nonce.length === 0) {
+    return {
+      ok: false,
+      reason: `carries a non-string or empty nonce (${JSON.stringify(obj.nonce)}). A nonce that ` +
+        `is not a string can coerce to '' and match every file, defeating the freshness gate`,
+    };
+  }
+
+  if (typeof obj.issuedAt !== 'number' || !Number.isFinite(obj.issuedAt)) {
+    return {
+      ok: false,
+      reason: `carries a non-finite issuedAt (${JSON.stringify(obj.issuedAt)}); the age bound ` +
+        `cannot be evaluated against it`,
+    };
+  }
+
+  // A future timestamp yields a negative age, which no maximum can reject.
+  // Allow a small skew so an ordinary clock adjustment is not fatal.
+  const SKEW_MS = 60_000;
+  if (obj.issuedAt > now + SKEW_MS) {
+    return {
+      ok: false,
+      reason: `was issued in the future (issuedAt ${obj.issuedAt}, now ${now}); a future ` +
+        `timestamp cannot expire`,
+    };
+  }
+
+  if (obj.boundary !== undefined && typeof obj.boundary !== 'string') {
+    return { ok: false, reason: 'carries a non-string boundary' };
+  }
+
+  if (obj.consumedAt !== undefined && typeof obj.consumedAt !== 'number') {
+    return { ok: false, reason: 'carries a non-numeric consumedAt' };
+  }
+
+  return {
+    ok: true,
+    challenge: {
+      nonce: obj.nonce,
+      issuedAt: obj.issuedAt,
+      boundary: obj.boundary as string | undefined,
+      consumedAt: obj.consumedAt as number | undefined,
+    },
+  };
+}
 
 export interface RunSelfRefreshOptions {
   fs: SelfRefreshFsPort;
@@ -469,15 +568,15 @@ export async function runSelfRefresh(
     );
   }
 
-  let challenge: Challenge;
-  try {
-    challenge = JSON.parse(rawChallenge) as Challenge;
-  } catch {
-    return abort('no-challenge', `Refresh challenge at ${challengePath} is not valid JSON.`);
+  const parsedChallenge = parseChallenge(rawChallenge, clock.now());
+  if (!parsedChallenge.ok) {
+    return abort(
+      'no-challenge',
+      `Refresh challenge at ${challengePath} ${parsedChallenge.reason}. ` +
+        `Run the begin step again.`,
+    );
   }
-  if (!challenge.nonce) {
-    return abort('no-challenge', `Refresh challenge at ${challengePath} carries no nonce.`);
-  }
+  const challenge = parsedChallenge.challenge;
   if (challenge.consumedAt !== undefined) {
     // Burned by an earlier execute whose delete did not land. Refusing here is
     // what makes the pre-clear mark sufficient on its own.
@@ -500,7 +599,7 @@ export async function runSelfRefresh(
     );
   }
 
-  const age = clock.now() - (challenge.issuedAt ?? 0);
+  const age = clock.now() - challenge.issuedAt;
   if (age > challengeMaxAgeMs) {
     return abort(
       'no-challenge',
@@ -553,7 +652,26 @@ export async function runSelfRefresh(
     return abort('receipt-rejected', describeReceiptFailure(first, statePath, minBytes));
   }
 
+  // A non-positive window would make `msSincePrevious >= stabilityWindowMs`
+  // trivially true, collapsing two observations into one and letting a file
+  // still being written pass as stable. Refuse rather than silently disable a
+  // gate. (Phase 4 also validates this at the CLI boundary, following the
+  // precedent `afx refresh` set for its own safety flags.)
+  if (!Number.isFinite(stabilityWindowMs) || stabilityWindowMs <= 0) {
+    return abort(
+      'receipt-rejected',
+      `stabilityWindowMs must be a positive number (got ${stabilityWindowMs}); a ` +
+        `non-positive window disables the stability gate entirely.`,
+    );
+  }
+
+  const beforeSleep = clock.now();
   await clock.sleep(stabilityWindowMs);
+  // MEASURE the gap rather than asserting it. Passing `stabilityWindowMs` on
+  // faith would keep the gate passing even if the sleep did not actually
+  // advance the clock — the stability check would then be comparing two reads
+  // taken back to back while claiming they were seconds apart.
+  const elapsed = clock.now() - beforeSleep;
 
   const second = verifyReceipt({
     fs,
@@ -561,7 +679,7 @@ export async function runSelfRefresh(
     nonce: challenge.nonce,
     minBytes,
     previous: first,
-    msSincePrevious: stabilityWindowMs,
+    msSincePrevious: elapsed,
     stabilityWindowMs,
   });
 
@@ -659,11 +777,13 @@ export async function runSelfRefresh(
     );
   } catch (err) {
     return abort(
-      'reentry-failed',
+      'challenge-burn-failed',
       `Could not mark the refresh challenge consumed: ` +
         `${err instanceof Error ? err.message : String(err)}. ` +
         `NOT clearing — an unburnable challenge could be replayed into a second clear. ` +
-        `Your context is intact.`,
+        `Your context is intact, but a re-entry message is ALREADY QUEUED from the ` +
+        `previous step and will arrive shortly; it can be ignored. Note that retrying ` +
+        `queues a second one.`,
     );
   }
   step('challenge-marked');

@@ -530,7 +530,14 @@ sits between here and there. **Do not write the review without walking this list
 6. **`extractPlanPhases` silently invents a `phase_1`** for a plan with no phases JSON rather than
    reporting the absence. Not my bug, not in scope; worth reporting as a follow-up because it makes
    a malformed plan look fine.
-7. **This repo has no `worktree` block** in `.codev/config.json`, so builder worktrees spawn without
+7. **`runReset` (index.ts:540) logs its clear AFTER sending it** — same weakness Codex found in my
+   self path, where a send that succeeds on the wire but throws leaves the log claiming no clear
+   happened. Not fixed: this project does not own the driven path. Follow-up.
+8. **Happy-path step log is a SUPERSET of spec test 30's literal sequence** (`challenge-read`,
+   `worktree-checked`, `challenge-marked`, `clear-attempted`, `challenge-consumed` are extra). The
+   required subsequence and its ordering ARE asserted; the extras are gates the handshake needs.
+   Record so it is not scored as a miss.
+9. **This repo has no `worktree` block** in `.codev/config.json`, so builder worktrees spawn without
    node_modules and cannot run build/tests until someone installs by hand. Related: the failing
    vitest startup exited 0, so an exit-code-only check would have called it green.
 
@@ -688,3 +695,41 @@ decision into `constants.ts` where a reader looks.
 **CARRY TO PHASE 4**: the real-port binding must NOT introduce a Tower call that can fail AFTER the
 clear. Spec tests 21/22 collapse into one scenario today precisely because `scheduleReentry` is the
 only pre-clear Tower touch; adding another would break that property silently.
+
+### Phase 3 iter2: a real freshness BYPASS (codex) + 5 more from claude
+
+Codex REQUEST_CHANGES, Claude APPROVE. 59 tests now.
+
+**Codex: type-confusion bypass of the nonce gate.** `JSON.parse` returns `any`, I cast it to
+`Challenge`, and validated `nonce` by truthiness only. I verified the mechanism in node before
+fixing:
+
+    ![]                          === false   → passes the truthiness check
+    'any content'.includes([])   === true    → String.includes coerces [] to '' — matches EVERYTHING
+    NaN > maxAge                 === false   → non-numeric issuedAt defeats expiry
+    (now - futureTs) > maxAge    === false   → future issuedAt defeats expiry
+
+So `{"nonce": []}` didn't weaken the freshness gate, it INVERTED it: any file over the size floor
+would pass as a fresh save and the builder would clear on arbitrary content. Three bypasses through
+one unvalidated parse.
+
+Fixed with `parseChallenge()` — full runtime shape validation at the trust boundary (non-empty
+string nonce, finite non-future numeric issuedAt, typed boundary/consumedAt). The driven path needs
+no equivalent: it mints its nonce in-process and never reads one from disk. Validation belongs
+exactly where a value crosses from file into logic.
+
+**Claude's 5**, all taken:
+- `JSON.parse('null')` threw an uncaught TypeError rather than a named abort → covered by the new parser.
+- Challenge-mark failure was labelled `reentry-failed` and claimed "context is intact" without
+  mentioning that a re-entry is ALREADY QUEUED by then (a retry queues a second) → own failure code
+  `challenge-burn-failed` + honest message.
+- Stability window was ASSERTED (`msSincePrevious: stabilityWindowMs`) not measured → now measures
+  real elapsed clock time, and refuses a non-positive window (which would collapse two observations
+  into one). Test uses a frozen clock to prove a non-advancing sleep can't yield "stable".
+- Save request omitted the 1000-byte floor → now states it AND that the boundary is refreshed at
+  most once and never retried, so a rejected save means no refresh happens at all.
+- Happy-path log is a superset of spec test 30's literal sequence → documented divergence, review artifact.
+
+**CARRY TO PHASE 4** (accumulating): pass `expectedBoundary`; validate `--min-bytes`/`--delay`/
+`--stability-window` as positive at the CLI boundary; do NOT introduce a Tower call that can fail
+AFTER the clear.

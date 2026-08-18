@@ -22,6 +22,7 @@ import { join } from 'node:path';
 import {
   beginSelfRefresh,
   didClearConfirmed,
+  parseChallenge,
   buildBoundarySaveRequest,
   challengeFilePath,
   didClear,
@@ -484,6 +485,151 @@ describe('clear failure', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Malformed challenge data must not bypass the freshness gate
+// ---------------------------------------------------------------------------
+
+describe('challenge shape validation', () => {
+  /**
+   * The bypass this closes, spelled out because it is not obvious:
+   *
+   *   `{"nonce": []}` survives a truthiness check — `![]` is `false` — and is
+   *   then handed to `verifyReceipt`, whose `content.includes(nonce)` coerces
+   *   the array to `''`. `String.includes('')` is TRUE for every string, so the
+   *   freshness gate does not weaken, it inverts: any file over the size floor
+   *   passes as a fresh save, and the builder clears on arbitrary content.
+   */
+  it('refuses an array nonce, which would otherwise match every file', async () => {
+    // Prove the coercion is real before asserting we defend against it.
+    expect(![]).toBe(false);
+    expect('any file contents'.includes([] as unknown as string)).toBe(true);
+
+    fs.write(challengePath, JSON.stringify({ nonce: [], issuedAt: 1 }));
+    fs.write(statePath, `no nonce anywhere\n${'x'.repeat(DEFAULT_MIN_BYTES + 50)}`);
+
+    const result = await run();
+
+    expect(result.failure).toBe('no-challenge');
+    expect(result.reason).toMatch(/non-string or empty nonce/i);
+    expectNoClear(result);
+  });
+
+  it.each([
+    ['numeric nonce', { nonce: 12345, issuedAt: 1 }],
+    ['object nonce', { nonce: {}, issuedAt: 1 }],
+    ['null nonce', { nonce: null, issuedAt: 1 }],
+    ['empty-string nonce', { nonce: '', issuedAt: 1 }],
+  ])('refuses a %s', async (_label, challenge) => {
+    fs.write(challengePath, JSON.stringify(challenge));
+    fs.write(statePath, goodSave());
+
+    const result = await run();
+
+    expect(result.failure).toBe('no-challenge');
+    expectNoClear(result);
+  });
+
+  it('refuses a non-finite issuedAt, which no age bound can reject', async () => {
+    // Every comparison with NaN is false, so `age > max` never fires.
+    expect(NaN > 1000).toBe(false);
+
+    fs.write(challengePath, '{"nonce":"abc123def456","issuedAt":"yesterday"}');
+    fs.write(statePath, goodSave());
+
+    const result = await run();
+
+    expect(result.failure).toBe('no-challenge');
+    expect(result.reason).toMatch(/non-finite issuedAt/i);
+    expectNoClear(result);
+  });
+
+  it('refuses a challenge issued in the future, whose age is negative', async () => {
+    fs.write(
+      challengePath,
+      JSON.stringify({ nonce: NONCE, issuedAt: clock.now() + 10 * 60 * 60 * 1000 }),
+    );
+    fs.write(statePath, goodSave());
+
+    const result = await run();
+
+    expect(result.failure).toBe('no-challenge');
+    expect(result.reason).toMatch(/issued in the future/i);
+    expectNoClear(result);
+  });
+
+  it('refuses a bare JSON null without throwing', async () => {
+    // `JSON.parse('null')` succeeds and returns null; reading `.nonce` off it
+    // would be an uncaught TypeError rather than a named abort.
+    fs.write(challengePath, 'null');
+    fs.write(statePath, goodSave());
+
+    const result = await run();
+
+    expect(result.failure).toBe('no-challenge');
+    expectNoClear(result);
+  });
+
+  it('refuses a JSON array', async () => {
+    fs.write(challengePath, '[]');
+    fs.write(statePath, goodSave());
+    const result = await run();
+    expect(result.failure).toBe('no-challenge');
+    expectNoClear(result);
+  });
+
+  it('accepts a well-formed challenge', () => {
+    const parsed = parseChallenge(
+      JSON.stringify({ nonce: NONCE, issuedAt: 500, boundary: 'enter:review' }),
+      1000,
+    );
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) {
+      expect(parsed.challenge.nonce).toBe(NONCE);
+      expect(parsed.challenge.boundary).toBe('enter:review');
+    }
+  });
+
+  it('tolerates clock skew rather than failing on it', () => {
+    // A timestamp a few seconds ahead is an ordinary clock adjustment, not an
+    // attack; failing there would make the gate flaky for no safety gain.
+    const parsed = parseChallenge(JSON.stringify({ nonce: NONCE, issuedAt: 1_030 }), 1_000);
+    expect(parsed.ok).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The stability gate cannot be disabled
+// ---------------------------------------------------------------------------
+
+describe('stability window', () => {
+  it.each([0, -1, NaN])('refuses a non-positive window (%s)', async windowMs => {
+    seedHappyPath();
+    const result = await run({ stabilityWindowMs: windowMs });
+
+    expect(result.failure).toBe('receipt-rejected');
+    expect(result.reason).toMatch(/positive number/i);
+    expectNoClear(result);
+  });
+
+  it('measures the elapsed gap rather than assuming it', async () => {
+    // A clock whose sleep does not advance time must NOT yield a stable
+    // verdict: the two reads would be back to back while claiming a gap.
+    seedHappyPath();
+    const frozen = {
+      now: () => 1_000,
+      sleep: async () => {
+        /* deliberately advances nothing */
+      },
+    };
+
+    const result = await run({ clock: frozen });
+
+    expect(result.outcome).toBe('aborted');
+    expect(result.failure).toBe('receipt-rejected');
+    expectNoClear(result);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // The challenge is single-use even when tidying fails
 // ---------------------------------------------------------------------------
 
@@ -503,7 +649,10 @@ describe('challenge burn', () => {
 
     const result = await run();
 
+    expect(result.failure).toBe('challenge-burn-failed');
     expect(result.reason).toMatch(/could not mark the refresh challenge/i);
+    // Must disclose the already-queued re-entry: a retry would queue a second.
+    expect(result.reason).toMatch(/ALREADY QUEUED/);
     expectNoClear(result);
   });
 
@@ -660,6 +809,10 @@ describe('buildBoundarySaveRequest', () => {
 
     expect(request).toContain(nonceMarker(NONCE));
     expect(request).toMatch(/Pointers, not prose/i);
+    // The floor must be stated: a save under it loses a refresh that is never
+    // retried, and the builder cannot know that from the request otherwise.
+    expect(request).toContain(String(DEFAULT_MIN_BYTES));
+    expect(request).toMatch(/AT MOST ONCE/);
     expect(request).toMatch(/Do not restate them/i);
     // The mid-phase request's instruction must NOT leak into a boundary save.
     expect(request).not.toMatch(/Do not summarise for brevity/i);
