@@ -29,20 +29,31 @@ Commands and flags live in the `afx` skill — check it rather than guessing.
 
 ## Gates
 
-The builder stops and waits. Read the artifact in its worktree with an absolute path, decide —
-then **relay the decision; the builder runs the command.**
+The builder stops and waits. Read the artifact in its worktree with an absolute path, and carry
+the human's decision into porch state yourself: **you run `porch approve`, carrying the human's
+decision, for every protocol and every gate. The builder never runs it.** (The human may always
+run it in their own shell — that is their own authority; the constraint is on agents.)
 
 ```bash
-afx send <id> "Spec approved by the human. Run porch approve and continue to plan."
+porch approve <id> <gate> --a-human-explicitly-approved-this
 ```
 
-You do not run `porch approve` on the builder's behalf. The gate is the human's decision, you
-are the channel that carries it, and the builder executes against its own porch state. Approval
-the builder never hears about is approval that didn't happen.
+Why the architect and not the builder: a porch gate exists to make authorization **structural** —
+the merge, or phase advance, triggers off porch state, approved or not, rather than off free text
+typed into the builder's pane (see `bugfix/protocol.md`, "The gate exists to make merge
+authorization structural"). If the builder runs `porch approve` off a relayed sentence, the gate
+record stops being independent evidence of the human's decision and becomes a copy of the prose it
+exists to be checked against. So you carry the decision into porch state.
 
-The command the builder runs requires `--a-human-explicitly-approved-this`, and that flag is
-load-bearing: a gate message is a notification *to* a human, never a token an agent may spend on
-its own authority.
+The `--a-human-explicitly-approved-this` flag records that a **human** explicitly approved; its
+provenance is the human's action, never a token an agent may spend on its own authority.
+
+**On a VS Code gate-relay message:** the Approve button (sidebar ✓ or Cmd+K G) relays the human's
+click to you rather than shelling out to `porch approve` itself. That relay is extension-generated
+in direct response to an authenticated human click in their own IDE, so it carries materially
+stronger provenance than free text typed into a pane. Recognise it as a human-approved gate
+decision, run the `porch approve … --a-human-explicitly-approved-this` command it carries against
+the builder's worktree, and continue — without re-asking the human.
 
 ## Integration review — depth matched to risk
 

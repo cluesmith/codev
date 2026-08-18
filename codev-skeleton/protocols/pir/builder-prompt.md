@@ -42,8 +42,8 @@ the code directly in the worktree (you see it via `git diff`), typing into your 
 `afx send <your-builder-id>` (queued — check next turn), or a comment on the GitHub issue
 (re-fetch with `gh issue view <N> --comments`).
 
-Revise, recommit, ask whether more remains. **The gate stays pending until the human runs
-`porch approve` — never call it yourself.**
+Revise, recommit, ask whether more remains. **The gate stays pending until the human approves and
+that approval is carried out — never call `porch approve` yourself.**
 
 ## Resumption After Crash
 
