@@ -1,7 +1,7 @@
 id: '1498'
 title: stream-deck-the-scroll-dial-do
 protocol: pir
-phase: review
+phase: verified
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -21,7 +21,7 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-08-18T02:05:51.288Z'
-updated_at: '2026-08-18T03:27:12.681Z'
+updated_at: '2026-08-18T03:27:14.836Z'
 pr_history:
   - phase: review
     pr_number: 1504
