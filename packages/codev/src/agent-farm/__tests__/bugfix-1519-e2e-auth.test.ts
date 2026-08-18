@@ -10,29 +10,38 @@
  * workspace never activated, and the suite went red with `element(s) not
  * found` the first time its schedule fired after merge.
  *
- * These assertions pin the harness to presenting the key the way a real client
- * does. They fail against the pre-fix harness (no key header) and pass with it.
+ * These assertions pin the shared auth tokens (`tower-key.ts`) that the harness
+ * now presents on every Tower-bound path: HTTP setup calls (A), the direct-API
+ * request fixture / `page.request` calls (B), and raw WebSocket opens (C). They
+ * fail against the pre-fix harness and pass with it. The tokens are keyed to
+ * Tower only — never installed as an all-origins header — so the key is never
+ * disclosed to a cross-origin request.
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { TOWER_KEY_HEADER } from '@cluesmith/codev-types';
-import { launchWorkspaceWithRetry, towerAuthHeaders } from './e2e/global-setup.js';
-import playwrightConfig from '../../../playwright.config.js';
-
-const HEX_64 = /^[0-9a-f]{64}$/;
+import { ensureLocalKey } from '@cluesmith/codev-core/auth';
+import { TOWER_KEY_HEADER, WS_KEY_PROTOCOL_PREFIX } from '@cluesmith/codev-types';
+import { towerAuthHeaders, towerWsProtocols } from './e2e/tower-key.js';
+import { launchWorkspaceWithRetry, waitForArchitectReady } from './e2e/global-setup.js';
 
 function headerOf(init: RequestInit | undefined, name: string): string | undefined {
   return new Headers(init?.headers).get(name) ?? undefined;
 }
 
 describe('bugfix #1519: Playwright e2e harness authenticates to Tower', () => {
-  it('towerAuthHeaders carries a well-formed local key under the tower-key header', () => {
-    const headers = towerAuthHeaders();
-    const key = headers[TOWER_KEY_HEADER];
-    expect(key).toMatch(HEX_64);
+  it('towerAuthHeaders carries the local key under the tower-key header (B)', () => {
+    // Asserted against ensureLocalKey() rather than a hex shape so a
+    // CODEV_TOWER_KEY override (which auth.ts supports and does not force to
+    // 64 hex) does not false-fail this required-CI check.
+    expect(towerAuthHeaders()[TOWER_KEY_HEADER]).toBe(ensureLocalKey());
   });
 
-  it('global-setup POST /api/launch presents the tower-key header', async () => {
+  it('towerWsProtocols offers the codev-key.<key> subprotocol (C)', () => {
+    const protocols = towerWsProtocols();
+    expect(protocols).toContain(`${WS_KEY_PROTOCOL_PREFIX}${ensureLocalKey()}`);
+  });
+
+  it('global-setup POST /api/launch presents the tower-key header (A)', async () => {
     const seen: Array<RequestInit | undefined> = [];
     const fetchFn = vi.fn(async (_url: string, init?: RequestInit) => {
       seen.push(init);
@@ -47,13 +56,27 @@ describe('bugfix #1519: Playwright e2e harness authenticates to Tower', () => {
     });
 
     expect(seen).toHaveLength(1);
-    expect(headerOf(seen[0], TOWER_KEY_HEADER)).toMatch(HEX_64);
+    expect(headerOf(seen[0], TOWER_KEY_HEADER)).toBe(ensureLocalKey());
     // The pre-existing Content-Type is preserved alongside the injected key.
     expect(headerOf(seen[0], 'Content-Type')).toBe('application/json');
   });
 
-  it('playwright.config injects the tower-key header into every request context', () => {
-    const key = playwrightConfig.use?.extraHTTPHeaders?.[TOWER_KEY_HEADER];
-    expect(key).toMatch(HEX_64);
+  it('global-setup state poll presents the tower-key header (A)', async () => {
+    const seen: Array<RequestInit | undefined> = [];
+    const fetchFn = vi.fn(async (_url: string, init?: RequestInit) => {
+      seen.push(init);
+      return new Response(JSON.stringify({ architect: { terminalId: 'term-1' } }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    });
+
+    const ready = await waitForArchitectReady('http://localhost:4100/workspace/x/api/state', {
+      fetchFn: fetchFn as unknown as typeof fetch,
+    });
+
+    expect(ready).toBe(true);
+    expect(seen).toHaveLength(1);
+    expect(headerOf(seen[0], TOWER_KEY_HEADER)).toBe(ensureLocalKey());
   });
 });

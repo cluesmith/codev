@@ -9,10 +9,9 @@
  * Run: npx playwright test
  */
 
-import { test, expect } from '@playwright/test';
 import { resolve } from 'node:path';
-import { ensureLocalKey } from '@cluesmith/codev-core/auth';
-import { terminalWsProtocols } from '@cluesmith/codev-types';
+import { test, expect } from './tower-auth.js';
+import { towerWsProtocols } from './tower-key.js';
 
 const TOWER_URL = 'http://localhost:4100';
 const WORKSPACE_PATH = resolve(import.meta.dirname, '../../../../../../');
@@ -21,7 +20,7 @@ const ENCODED_PATH = Buffer.from(WORKSPACE_PATH).toString('base64url');
 // `Sec-WebSocket-Protocol` offer (advisory GHSA-xvjp-7748-v88v); a keyless
 // upgrade is rejected at the handshake. Mirror the real dashboard client and
 // offer the marker + `codev-key.<key>` subprotocol on raw WebSocket opens.
-const WS_PROTOCOLS = terminalWsProtocols(ensureLocalKey());
+const WS_PROTOCOLS = towerWsProtocols();
 // BASE_URL without trailing slash for API calls
 const BASE_URL = `${TOWER_URL}/workspace/${ENCODED_PATH}`;
 // PAGE_URL with trailing slash for page loads (needed for relative asset resolution)

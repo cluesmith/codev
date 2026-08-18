@@ -83,3 +83,30 @@ Validation caveat for PR: dashboard-e2e is schedule-only, so PR CI can't turn it
 Did NOT run the Playwright suite locally (it would target the LIVE :4100 Tower / real
 architect sessions — architect's caution). Will note in the PR that validation was via the
 vitest regression test + a dispatched `workflow_dispatch` run of dashboard-e2e.yml.
+
+## PR phase — CMAP round 1 + revision
+
+PR #1520 opened. CMAP round 1: gemini=APPROVE (HIGH), claude=APPROVE (HIGH),
+codex=REQUEST_CHANGES (HIGH). Codex's real point: global `use.extraHTTPHeaders` attaches
+the key to EVERY origin, not just Tower — broader than a real client (same-origin only) and
+a latent cross-origin key-disclosure vector. (Verified no cross-origin browser request exists
+in the suite today, so not an active leak — but the issue's own lesson is "don't defer the
+auth fast-follow," so I scoped it now rather than punting.)
+
+Revision (round 2): scoped the key to Tower-bound traffic only, one source of truth.
+- NEW `e2e/tower-key.ts` (pure, no Playwright import): `towerAuthHeaders()` + `towerWsProtocols()`.
+- NEW `e2e/tower-auth.ts`: Playwright fixtures — `request` fixture is a Tower-scoped keyed
+  APIRequestContext; browser page fetches rely on same-origin injection (shipped behavior).
+- `playwright.config.ts`: REMOVED global `extraHTTPHeaders` (no all-origins header).
+- Direct-API tests import the scoped `test` from `./tower-auth.js`; `page.request` sites
+  (tower-integration, work-view-backlog) pass `{ headers: towerAuthHeaders() }` explicitly.
+- `dashboard-terminals.test.ts` WS uses `towerWsProtocols()` (consolidation, claude#2).
+- `global-setup.ts`: extracted `waitForArchitectReady()` (testable), imports the shared helper.
+- Regression test strengthened: pins launch (A), state poll (A), request-header token (B),
+  WS subprotocol token (C); uses `toBe(ensureLocalKey())` not a hex regex (claude#1: avoids
+  CODEV_TOWER_KEY false-fail). 5 assertions; reverting either global-setup key → 2 fail.
+
+Net result: the key never touches a non-Tower origin — mirrors the shipped same-origin design.
+Also filed-for-architect (do NOT self-file): claude#6 suggests a `pull_request` paths-filtered
+trigger so this schedule-only suite gets a real gate (closes the class, not just the instance).
+Re-running CMAP on the revised PR before notifying.

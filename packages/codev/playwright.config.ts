@@ -8,17 +8,16 @@
  *
  * Tower enforces request authentication (advisory GHSA-xvjp-7748-v88v): every
  * non-public route requires the shared local key (`~/.agent-farm/local-key`)
- * presented as the `codev-tower-key` header. The `use.extraHTTPHeaders` below
- * injects it into every request Playwright makes — the `request` fixture,
- * `page.request`, and page navigations — so this harness authenticates the way
- * a real client does, mirroring what `vitest-e2e-setup.ts` did for the vitest
- * harness. (Raw WebSocket opens and `global-setup.ts`'s node-`fetch` calls run
- * outside Playwright's request contexts and carry the key separately.)
+ * presented as the `codev-tower-key` header. Authentication is scoped to
+ * Tower-bound traffic rather than installed as an all-origins
+ * `use.extraHTTPHeaders`, so the key is never disclosed to a cross-origin
+ * request: direct-API tests use the Tower-scoped `request` fixture from
+ * `tower-auth.ts`, browser page fetches use the key Tower injects into the
+ * shell same-origin, and raw WebSocket / `page.request` / `global-setup.ts`
+ * calls carry the key explicitly via `tower-key.ts`.
  */
 
 import { defineConfig } from '@playwright/test';
-import { ensureLocalKey } from '@cluesmith/codev-core/auth';
-import { TOWER_KEY_HEADER } from '@cluesmith/codev-types';
 
 const port = Number(process.env.TOWER_TEST_PORT || '4100');
 
@@ -29,9 +28,6 @@ export default defineConfig({
   globalSetup: './src/agent-farm/__tests__/e2e/global-setup.ts',
   use: {
     baseURL: `http://localhost:${port}`,
-    extraHTTPHeaders: {
-      [TOWER_KEY_HEADER]: ensureLocalKey(),
-    },
   },
   webServer: {
     command: `node dist/agent-farm/servers/tower-server.js ${port}`,
