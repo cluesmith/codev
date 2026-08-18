@@ -33,6 +33,10 @@
     6. Re-cp the template back to UNRELEASED.md to start the next cycle
 -->
 
+## Gate approvals relay through your architect (#1494, PR #1522)
+
+The VS Code Approve button changes character: instead of the extension executing the approval command itself — silently, from the wrong directory, with no agent aware it happened — the click is relayed to the builder's owning architect under a `[USER via VS Code]` header, and the approval runs where the project state lives. Your architect sees every decision you make, so its picture of a lane no longer goes stale at the exact moments that matter. The routing refuses rather than guesses: an offline owner or an unknown owner gets a clear refusal instead of a silent reroute to the wrong architect, and a workspace with no architect running approves directly while saying exactly that. Held deliveries are reported as held, never as approved. The same change settles who runs the approval command across every protocol — the builder executes it, carrying the human's relayed decision — ending a season of three documents giving three different answers.
+
 ## Zoom controls for the annotation viewer (#1070, PR #1461)
 
 Long specs and plans can now be sized for comfortable reading from inside the document itself. Zoom in and zoom out buttons sit on the annotation viewer's title bar, with matching command-palette entries and a reset, and the chosen size is written straight back to the `codev.markdownPreview.fontSize` setting: it survives closing and reopening the document, and the in-document control and the Settings editor stay in step with each other rather than drifting apart. Unlike the workbench zoom this leaves the rest of the IDE where it is, so sizing up a spec for a read-through does not rearrange the editor around it.
