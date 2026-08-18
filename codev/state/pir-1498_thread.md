@@ -159,3 +159,25 @@ Implemented:
   will state it in the review artifact.
 build ✓ / test ✓ 238 / check-types ✓. Re-requesting dev-approval; hardware now needs a
 spec/plan-phase builder selected too (to see `Scroll · editor only`).
+
+## Review phase
+dev-approval APPROVED by Amr (all FIVE hardware checks attested in VS Code 3.3.0 — the
+Cursor-3.2.x attestation caveat the architect raised was retracted; extension knows the
+feedback-* verbs, so the press-path checks 2-3 were genuinely exercised).
+- Wrote codev/reviews/1498-*.md with the 4 durable findings the architect flagged:
+  (1) gesture-scope asymmetry (rotation any-editor vs press diff-only) — the finding that
+  outlives the wording; (2) root cause = declaration mismatch (label.json vs dial.json);
+  (3) the fixture trap (send/queue tests ran against pir-1 = canvas default, green but
+  semantically wrong until canvas got meaning); (4) #1501 narrows-not-disappears.
+- Routed ONE COLD lesson to lessons-learned.md ## Testing (the fixture-semantic-trap).
+  No HOT arch/lessons change (single-dial legibility fix; the other findings reinforce the
+  existing HOT "verify claims against the actual file" lesson). The #1414 two-artifact-link
+  lesson already covers the streamdeck reload trap that came up in hardware debugging.
+- Opened PR #1504 (review file as body, Fixes #1498). Recorded with porch (--pr 1504).
+- porch done running the single 3-way consult (background). pr gate next; human merges.
+
+### Hardware Q&A during dev-approval (resolved, no code change)
+Amr: "Scroll · send but doesn't scroll." Diagnosed: rotation works (scrolls a plain file);
+editorScroll needs an ACTIVE TEXT EDITOR, and line 1 reflects the selected BUILDER's phase,
+not the focused doc — so `send` can show while focus is on a non-editor. Not a bug, not my
+change (rotation untouched). Canvas scroll itself is #1501.
