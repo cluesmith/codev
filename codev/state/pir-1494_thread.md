@@ -27,5 +27,31 @@ Wrote `codev/plans/1494-vscode-approval-gates-should-r.md`. Key decisions:
 Two route-to-main items delineated in the plan for main to act on before the plan gate:
 (1) role-doc correction, (2) null/unregistered routing table.
 
+## Plan revision (2026-08-18, at gate) — owner ruled UNIFORM
+Four mid-turn architect corrections landed while at gate; revised the plan:
+- **UNIFORM ruling** (supersedes earlier narrow-vs-uniform open question, now removed): the ARCHITECT
+  runs porch approve carrying the human's decision, every protocol, every gate; the BUILDER never
+  runs it (human may always run their own shell). Both role docs state the rule directly.
+- **Anchor** = bugfix/protocol.md:38-42 "The gate exists to make merge authorization structural"
+  (porch state independent of prose; closes self-merge class). Cite it; don't invent per-protocol
+  wording. BUGFIX is the one that got it right — DO NOT rewrite bugfix/prompts/pr.md:64 (already
+  "architect approves").
+- **pir-1070 framed EXACTLY** (architect overstated twice, corrected twice): NO unauthorized merge;
+  Amr decided and got the merge he wanted; only the pr gate deviated. What failed = the structural
+  GUARANTEE (porch state was produced FROM prose = a transcription, not independent evidence). It's
+  the PRECONDITION for the self-merge class, silent. Phrase: "the guarantee this passage exists to
+  provide was not in force." Never "a self-merge occurred." Lesson: hold architect citations to the
+  same standard as a reviewer's — verify against artifacts (I verified the anchor + gates + role docs).
+- **Packaging**: one lane, one PR (docs + button ship together, no contradiction window). Issue
+  relabelled area/cross-cutting; larger review accepted.
+- **builder.md:26-28 = REWRITE not patch** (its "by default...unless" structure has no default under
+  uniform).
+- **Per-protocol verification = plan deliverable**, gates enumerated from protocol.json (authoritative),
+  NOT prose grep. Result: edit surface = the TWO role docs only. Every protocol prompt already aligns
+  (BUGFIX anchor), forbids builder (PIR), or is covered by universal role-doc rule; spike has no gate
+  → no text. release = codev-only, no protocol.json, out of scope. Grep BOTH trees after edits.
+
 ## Status
-Plan committed. Awaiting plan-approval gate (Amr owns all three gates; I never run porch approve).
+Plan committed + revised. Awaiting plan-approval gate (Amr owns all three gates; I never run porch
+approve). Two route-to-main items for main before the gate: (1) role-doc wording, (2) null/unregistered
+routing table. Code change (relay + held-first-class) unchanged.

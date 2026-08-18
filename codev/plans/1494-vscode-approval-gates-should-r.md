@@ -25,6 +25,15 @@ proposed:  sidebar ✓  ──> architect ──> porch approve   (architect exe
 The builder is **not** in this chain; it is woken by porch exactly as it is today. No builder-side
 change.
 
+**Two coupled changes, one PR (owner's packaging call).** #1494 is two halves that must ship
+together: the VS Code button (relay instead of direct invocation) and the framework convention that
+the button implements (the architect runs `porch approve`, carrying the human's decision, for every
+protocol and every gate — §4). Shipping them separately opens a window where the button relays to an
+architect while the role docs still say the builder runs the command — the exact two-texts-disagree
+condition this lane exists to close. So the doc sweep stays **inside** #1494, and the issue is
+relabelled `area/cross-cutting`; a larger review is the accepted cost of not shipping a contradiction
+window.
+
 **Explicit scope fence (per architect kickoff).** This reuses `client.sendMessage(target, msg,
 { workspace })` → Tower `/api/send` (mailbox-first, Spec 1313) and the `spawnedByArchitect` field
 the extension already reads. It introduces **no** typed gate-event frame, **no** system sender type,
@@ -129,71 +138,111 @@ In every branch the UI truthfully distinguishes "relayed / held / failed" from "
 sidebar cache refresh (`cache?.refresh()`) stays, but the gate will only clear once the architect
 actually runs `porch approve` — the refresh reflects Tower state, it does not fake approval.
 
-### 4. Role-doc correction (route-to-main item 1)
+### 4. Role-doc correction + convention sweep (route-to-main item 1)
 
-This is **not** "fix one stale sentence." There are **four** documents that speak to who runs
-`porch approve`, and only one is a straight defect. Mapping them precisely matters, because a
-reviewer who reads `builder.md` and thinks it was already right will otherwise read this change as
-contradicting a correct doc and reject it.
+**Owner's ruling (relayed 2026-08-18): UNIFORM.** The rule, stated in both role docs directly
+rather than deferred to protocol prompts:
 
-| Document | Who it says runs `porch approve` |
-|---|---|
-| `codev/roles/architect.md:33,39` | the **builder**; the architect "does not run it on the builder's behalf" |
-| PIR prompts (five places, below) | **not** the builder |
-| `codev/roles/builder.md:26-28` | the builder **by default**; for **PIR**, the **human** via Cmd+K G / their shell |
-| **#1494 as designed** | the **architect**, carrying the human's click |
+> The **architect** runs `porch approve`, carrying the human's decision, for every protocol and
+> every gate. **The builder never runs it.** (The human may always run it in their own shell —
+> that is their own authority; the constraint is on *agents*: the builder never, the architect only
+> as the carrier of the human's decision.)
 
-**Nothing currently says "the architect runs it." That is the change.** Two distinct edits, framed
-distinctly:
+#### The rationale is already canon — anchor on it, do not re-invent
 
-**(a) `architect.md:32-45` is a straight defect fix — wrong regardless of #1494.** It instructs the
-architect to relay and *not execute*, and it tells the builder to run the command. But PIR's own
-prompts forbid the builder from running it in **five** places:
-`codev/protocols/pir/protocol.md:42`, `codev/protocols/pir/builder-prompt.md:46`,
-`codev/protocols/pir/prompts/plan.md:117`, `codev/protocols/pir/prompts/implement.md:143`,
-`codev/protocols/pir/prompts/review.md:243`. So `architect.md` contradicts the PIR protocol today,
-independent of this issue. Cite the pir-1070 incident **precisely** (see box below) as evidence that
-this defect misbehaves in practice — the incident is the evidence, not any commit author.
+The argument for this rule was written well before #1494, as the section heading of
+`codev/protocols/bugfix/protocol.md:38-42` (verbatim):
 
-> **pir-1070 incident, stated precisely.** On lane pir-1070, the human (Amr) typed the
-> `plan-approval` and `dev-approval` gates himself — exactly what `builder.md`'s PIR carve-out
-> prescribes. The deviation was the **`pr` gate alone**: the architect, following `architect.md:39`,
-> relayed the decision and instructed the builder to run `porch approve`, inserting the builder into
-> a chain it should not be in. So two of three gates followed the correct convention; on the third,
-> an architect following `architect.md` deviated. This isolates the defect to the one document that
-> is actually wrong. **The commit (`d022dcfaa`) does not prove who ran the command** — every agent in
-> this workspace shares one git identity, so authorship cannot attest the actor (the same
-> missing-`approved_by` gap #1457 exists to close). The architect's own account is the evidence.
+> **## The gate exists to make merge authorization structural**
+> BUGFIX has one human gate, `pr`. Its purpose is that the merge trigger is **porch state** —
+> approved or not — rather than free text typed into the builder's pane. That closes the
+> self-merge bug class: a builder cannot infer authorization from ambiguous prose.
 
-**(b) `builder.md:26-28` for PIR is a documented-actor change, not a defect fix.** It is *accurate
-today*: for PIR the human types the gate, via Cmd+K G or their shell. #1494 changes `Cmd+K G` so the
-click now relays to the spawning architect, who runs the command. So for PIR this edit **changes the
-documented actor from the human to the architect** — say that plainly in the correction so it does
-not read as overturning a doc that was right.
+That is the thesis: **porch gate state must be authorization that is independent of prose.** The
+role-doc correction cites this passage as its anchor and aligns the other protocols to it, rather
+than inventing fresh per-protocol wording. It answers "why not just let the builder run it" crisply:
+because then authorization arrives as prose in the builder's pane instead of as porch state.
 
-Proposed corrected story for **PIR** (both role docs), naming the flag's provenance and what the
-architect does on receipt:
+**BUGFIX is the protocol that got this right; the others drifted.** `bugfix/prompts/pr.md:64`
+already reads "Wait for the **architect** to approve it (`porch approve <project-id> pr`)" — it
+already satisfies the uniform rule and is the anchor for the whole change. **It must not be
+rewritten** beyond any genuinely required minimal wording alignment; a sweep that rewrites
+already-correct text is how correct text becomes wrong.
 
-> Under PIR the **human** decides at the gate. When they approve via the VS Code button (Cmd+K G or
-> the sidebar ✓), the extension relays the click to the builder's **spawning architect**, who runs
-> `porch approve … --a-human-explicitly-approved-this` against the builder's worktree and continues
-> — without re-asking the human. The flag records that a human explicitly approved; its provenance
-> is the human's action, not an agent's self-authority. A relay generated by the extension in direct
-> response to an authenticated human click carries materially stronger provenance than free text
-> typed into a pane, and that is what makes architect execution legitimate here (the same property
-> #1457 exists to make recordable). On receipt of such a relay, the architect recognises it as a
-> human-approved gate decision and executes the command it carries.
+#### The pir-1070 evidence, stated exactly (checked against the artifact)
 
-**Scope of the correction is PIR only.** `builder.md`'s default — the *builder* runs `porch approve`
-when the architect relays — still governs SPIR / AIR / ASPIR (they have gates but no `porch approve`
-text of their own). This lane corrects **PIR and the two role docs** and does **not** generalise the
-wording to those protocols. Whether to unify everything on "architect runs it" or keep PIR narrow is
-an **OPEN QUESTION** (below); the main architect is taking that call to the owner and will relay the
-answer before the plan gate. I will not pre-empt it or quietly generalise.
+The incident is evidence that the drift misbehaves, but it must be framed precisely — an
+overstatement is the seam a reviewer uses to discard the whole argument:
 
-**Both trees.** `codev/roles/architect.md` and `codev-skeleton/roles/architect.md` are currently
-byte-identical; every edit is mirrored into both. Framework content shipped to adopters, which is
-why the main architect reads it before the plan gate.
+> **No unauthorized merge occurred.** On pir-1070 the human (Amr) genuinely decided and said
+> "merge it" in the architect's channel, and the merge that happened is exactly the merge he wanted.
+> Amr typed the `plan-approval` and `dev-approval` gates himself; only the `pr` gate deviated. What
+> failed was **the structural guarantee, not the decision**: the architect relayed a sentence and
+> the builder transcribed that sentence into `pr`-gate state. So the gate record stopped being
+> *independent* evidence of authorization and became a copy of the very prose it exists to be
+> checked against. That is the **precondition** for the self-merge class, not an instance of it —
+> and worse than an instance, because it is silent: the mechanism did not fail visibly, it degraded
+> into a transcription step while the resulting gate record still looks exactly like one a human
+> typed. Nothing in the artifact distinguishes them (the same reason the commit author,
+> `d022dcfaa`, proves nothing — one shared git identity; #1457 from a third direction). **The
+> guarantee this passage exists to provide was not in force.** Uniform restores it.
+
+So the lane's justification is not "two documents disagree, tidy them up." It is: one protocol
+identified this failure mode and designed the guarantee; the convention drifted; the drift left the
+guarantee inoperative on a real gate while the record continued to look valid. Uniform is
+**restoring an existing design**, not imposing a new one.
+
+#### The two edits
+
+**(a) `architect.md:32-45` is a straight defect fix — wrong regardless of #1494.** It tells the
+architect to relay and *not execute*, and it tells the builder to run the command. That contradicts
+PIR's own prompts, which forbid the builder from running it in five places
+(`codev/protocols/pir/protocol.md:42`, `builder-prompt.md:46`, `prompts/plan.md:117`,
+`prompts/implement.md:143`, `prompts/review.md:243`), and it is the document the pir-1070 architect
+was following. Replace the passage with the uniform rule above, anchored on the structural-
+authorization thesis, and add **what the architect does on receipt** of a VS Code gate-relay
+message: recognise it as a human-approved gate decision (materially stronger provenance than pane
+prose — extension-generated in direct response to an authenticated human click) and run the
+`porch approve … --a-human-explicitly-approved-this` command it carries against the builder's
+worktree, without re-asking the human.
+
+**(b) `builder.md:26-28` is a rewrite, not a patch.** Its structure is "you run it **by default**,
+*unless* your protocol routes it to the human." Under uniform there is no default and no carve-out:
+the builder never runs it. Patching only the exception clause would leave the default sentence
+asserting something now false, so the whole passage is rewritten to: the builder never runs
+`porch approve`; the architect runs it, carrying the human's decision.
+
+#### Per-protocol verification (plan deliverable — gates enumerated from `protocol.json`, not prose)
+
+Enumerating gates by grepping prose is unreliable (authors name gates in their own words). The table
+below is built from the authoritative `"gate"` fields in each protocol's `protocol.json` phases
+(identical across `codev/` and `codev-skeleton/`). The uniform rule lives in the two role docs and
+therefore governs every protocol at once; the job here is to confirm no protocol *prompt* contradicts
+it, and to leave correct text (BUGFIX) untouched — **not** to normalise every mention into identical
+phrasing.
+
+| Protocol | Human gate(s) from `protocol.json` | Prompt state today | Action |
+|---|---|---|---|
+| **bugfix** | `pr` | `pr.md:64` "**architect** approves" ✓ | **Do not touch** — the anchor |
+| **pir** | `plan-approval`, `dev-approval`, `pr` | builder forbidden ✓; human affordance (Cmd+K G / shell) stays valid | Covered by role docs; no prompt edit |
+| **spir** | `spec-approval`, `plan-approval`, `pr`, `verify-approval` | "architect approves verify-approval" ✓ | Covered by role docs; no prompt edit |
+| **aspir** | `pr`, `verify-approval` (no spec/plan gate — autonomous) | "architect approves verify-approval" ✓ | Covered by role docs; no prompt edit |
+| **air** | `pr` | no actor misassignment | Covered by role docs; no prompt edit |
+| **experiment** | `experiment-complete` (terminal) | no `porch approve` prose | Covered by role docs; no prompt edit |
+| **maintain** | `maintain-complete` (terminal) | no `porch approve` prose | Covered by role docs; no prompt edit |
+| **research** | `scope-approval`, `research-complete` | no `porch approve` prose | Covered by role docs; no prompt edit |
+| **spike** | **(none)** | — | **No text** — no gate; must not add (would imply a gate exists) |
+| release (codev-only) | none (no `protocol.json`; doc-driven procedure) | — | Out of scope |
+
+**Conclusion:** the entire *prompt* edit surface for the sweep is empty — every protocol either
+already aligns (BUGFIX, the anchor), forbids the builder (PIR), or is governed by the now-universal
+role-doc rule; `spike` has no gate and stays silent. The actual file edits are the **two role docs
+only**. This is deliberate discipline: the rule belongs in the role docs, and rewriting correct
+protocol text to "match phrasing" is the failure mode the anchor warning names.
+
+**Both trees.** `codev/roles/architect.md` and `codev-skeleton/roles/architect.md` are byte-identical
+today; every edit is mirrored into both, and after the sweep I grep **both** trees for `porch approve`
+actor language before claiming completeness.
 
 ### 5. `runPorchApprove` disposition
 
@@ -215,11 +264,20 @@ sidebar/Cmd+K G) are rewired to go through the new relay decision instead.
 - `apps/vscode/src/__tests__/approve-relay.test.ts` — **new**. Unit-tests `decideApprovalRelay`
   across all four table rows, and the send-result interpreter across `ok:false`, `held`, and
   `delivered` (mocking `vscode` per the established `__tests__` pattern).
-- `codev/roles/architect.md` (gate section `:32-45`) — correction + on-receipt instruction.
+- `codev/roles/architect.md` (gate section `:32-45`) — replace with the uniform rule (anchored on
+  the bugfix structural-authorization thesis) + on-receipt instruction for the VS Code relay.
 - `codev-skeleton/roles/architect.md` — byte-identical mirror of the same edit.
+- `codev/roles/builder.md` (`:26-28`) — **rewrite** (not patch): the builder never runs
+  `porch approve`; the architect runs it carrying the human's decision.
+- `codev-skeleton/roles/builder.md` — byte-identical mirror of the same rewrite.
 
-**Not changed:** builder-side anything, Tower, the SDK `sendMessage` signature, `packages/types`.
-The builder is not in the approval chain.
+**Protocol prompts: none edited.** Per the §4 verification table, BUGFIX is already correct (the
+anchor — must not be touched), PIR already forbids the builder, and every other protocol is governed
+by the now-universal role-doc rule; `spike` has no gate and stays silent. After the doc edits I grep
+**both** trees for `porch approve` actor language to confirm no contradiction remains.
+
+**Not changed:** builder-side *code*, Tower, the SDK `sendMessage` signature, `packages/types`, and
+any protocol `protocol.json` / prompt file. The builder is not in the approval chain.
 
 ## Risks & Alternatives Considered
 
@@ -230,9 +288,9 @@ The builder is not in the approval chain.
   cases refuse explicitly (§1).
 - **Alternative: #1194's notification-from-inside-`porch approve`.** Rejected by the owner on
   surface-area grounds; #1194 is closed. Not re-proposed.
-- **Alternative: refuse in the CLI-only case instead of announced direct fallback.** Flagged for
-  main (§1); I recommend the announced fallback so CLI-only workspaces keep working, but defer the
-  ruling.
+- **Alternative: refuse in the CLI-only case instead of announced direct fallback.** My
+  recommendation is the announced fallback so CLI-only workspaces keep working; the choice is
+  route-to-main item 2 (§1) for the main architect to rule on.
 - **Alternative: delete `runPorchApprove` entirely.** Rejected — the announced CLI-only path needs
   it, and that path is a legitimate, announced use, not a silent backstop.
 
@@ -264,17 +322,13 @@ The builder is not in the approval chain.
 
 ## Route-to-main items (delineated for the main architect, before the plan gate)
 
-1. **Role-doc correction** (§4) — framework content in both `codev/` and `codev-skeleton/`. Two
-   framed edits: (a) the straight defect fix to `architect.md:32-45`, and (b) the PIR
-   documented-actor change (human → architect) in both role docs, plus the on-receipt instruction.
-2. **Null / unregistered-architect routing decision** (§1 table) — specifically the two refuse cases
-   and the announced CLI-only `direct-fallback` (vs. refuse-entirely) choice.
+Both are framework content shipped to adopters, which is why the main architect reads them before the
+plan gate. The narrow-vs-uniform question is **resolved** (owner ruled uniform, 2026-08-18) — no open
+question remains.
 
-### OPEN QUESTION (main architect is taking this to the owner before the plan gate)
-
-**Narrow vs. uniform for the other protocols.** This lane corrects **PIR only**. SPIR / AIR / ASPIR
-have gates but no `porch approve` text of their own, and `builder.md`'s default (the *builder* runs
-it when the architect relays) still governs them. Should the correction stay PIR-narrow, or unify
-all protocols on "architect runs it"? Unifying reaches past #1494's `area/vscode` surface into every
-protocol — the kind of expansion the owner chose this design to avoid — so I keep it narrow and
-**do not** resolve it here. Awaiting the owner's ruling relayed through the main architect.
+1. **Role-doc wording** (§4) — the uniform-rule rewrite of `architect.md` (defect fix + on-receipt
+   instruction) and `builder.md` (rewrite-not-patch), anchored on the bugfix structural-authorization
+   thesis, mirrored into `codev-skeleton/`. The per-protocol verification table shows the edit
+   surface is the two role docs only (BUGFIX untouched as the anchor).
+2. **Null / unregistered-architect routing decision** (§1 table) — the two refuse cases and the
+   announced CLI-only `direct-fallback` (vs. refuse-entirely) choice.
