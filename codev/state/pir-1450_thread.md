@@ -279,3 +279,29 @@ optional.
 
 Sitting at the `pr` gate. **Park it open — never merge, never close #1450.** We are not
 maintainers here.
+
+## Protocol complete (2026-08-18)
+
+`pr` gate approved by the human; `porch next 1450` reports `status: complete`, `phase: verified`.
+
+**Deliberately did NOT run the protocol's final task.** Porch's completion task says "Merge the
+pull request" — that is the PIR default for a repo the cohort owns. It does not apply here: we
+are contributors to cluesmith/codev, not maintainers, and the architect's standing instruction
+across four separate messages was park / never merge / never close #1450. A standing instruction
+from the human beats a protocol default, and merging is both irreversible and outward-facing.
+`Fixes #1450` in the PR body closes the issue at the maintainer's merge, which is the intended
+two-phase signal (#1483 precedent).
+
+Final state: PR #1510 OPEN, issue #1450 OPEN, branch `builder/pir-1450` pushed, worktree clean.
+No `porch done --merged` recorded, because nothing was merged — recording it would put a false
+lifecycle event in `status.yaml`.
+
+### What I'd tell the next builder on this code
+
+- The whole issue existed because `tower-routes.ts` has **two** route tables and `GET /api/inbox`
+  was only in the CLI-facing one. Check `handleWorkspaceRoutes` before assuming the dashboard can
+  reach an endpoint. Now in arch.md.
+- `heldCount` and `GET /api/inbox` disagree on purpose. Don't "fix" it. Also in arch.md.
+- The evidence script (`packages/codev/scripts/issue-1450-dashboard-evidence.mts`) is reusable for
+  any dashboard change: isolated Tower via `AF_TEST_DB`, real PTYs, real render gate, real SPA. It
+  needs an out-of-tree `playwright-core` via `PW_CORE`/`PW_CHROMIUM`.
