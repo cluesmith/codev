@@ -185,6 +185,14 @@ export type SelfRefreshFailure =
   | 'dirty-worktree'
   | 'receipt-rejected'
   | 'assembly-failed'
+  /**
+   * The frame was built but could not be persisted.
+   *
+   * Distinct from `assembly-failed` because the causes and the fixes differ: one
+   * is a missing input (a context field), the other is the filesystem. A caller
+   * that cannot tell them apart cannot advise.
+   */
+  | 'reorient-write-failed'
   | 'reentry-failed'
   /**
    * The challenge could not be marked consumed, so the clear was not attempted.
@@ -418,6 +426,21 @@ export function beginSelfRefresh(options: BeginOptions): BeginResult {
  * never reads one back from disk; only the self path takes a challenge from a
  * file, which is exactly where validation belongs.
  */
+/**
+ * Minimum nonce length, in hex characters.
+ *
+ * `generateNonce()` produces `randomBytes(6).toString('hex')` — 12 lowercase hex
+ * characters. Validating a FLOOR rather than an exact length keeps a future
+ * longer nonce valid while rejecting a short one.
+ *
+ * Length is a safety property here, not tidiness: freshness is proved by
+ * `content.includes(nonce)`, so a one-character nonce is found in nearly every
+ * state file ever written. A nonce short enough to collide is a nonce that
+ * proves nothing.
+ */
+const MIN_NONCE_HEX_CHARS = 12;
+const NONCE_PATTERN = new RegExp(`^[0-9a-f]{${MIN_NONCE_HEX_CHARS},}$`);
+
 export function parseChallenge(
   raw: string,
   now: number,
@@ -435,11 +458,13 @@ export function parseChallenge(
 
   const obj = parsed as Record<string, unknown>;
 
-  if (typeof obj.nonce !== 'string' || obj.nonce.length === 0) {
+  if (typeof obj.nonce !== 'string' || !NONCE_PATTERN.test(obj.nonce)) {
     return {
       ok: false,
-      reason: `carries a non-string or empty nonce (${JSON.stringify(obj.nonce)}). A nonce that ` +
-        `is not a string can coerce to '' and match every file, defeating the freshness gate`,
+      reason: `carries a nonce that is not ${MIN_NONCE_HEX_CHARS}+ lowercase hex characters ` +
+        `(${JSON.stringify(obj.nonce)}). Freshness is proved by \`content.includes(nonce)\`, so a ` +
+        `short or non-hex nonce matches almost any file: "a" would be found in nearly every save, ` +
+        `and "" in all of them`,
     };
   }
 
@@ -554,6 +579,36 @@ export async function runSelfRefresh(
   ): SelfRefreshResult => ({ outcome: 'aborted', steps, failure, reason, statePath });
 
   // ------------------------------------------------------------------
+  // Gate 0 — the safety parameters themselves must be sane.
+  // ------------------------------------------------------------------
+  // Every one of these TUNES A GATE, so a bad value does not degrade the run —
+  // it silently disables a protection while everything still reports success.
+  // `minBytes: 0` accepts an empty save; `challengeMaxAgeMs: NaN` makes every
+  // comparison false so nothing ever expires; a non-positive stability window
+  // collapses two observations into one.
+  //
+  // Validated HERE rather than only at the CLI boundary: this function is the
+  // thing that clears a builder, and it should not depend on every future caller
+  // having remembered to check. `runReset` sets the same precedent for its own
+  // flags.
+  const parameterChecks: Array<[string, number]> = [
+    ['minBytes', minBytes],
+    ['stabilityWindowMs', stabilityWindowMs],
+    ['reentryDelaySeconds', reentryDelaySeconds],
+    ['challengeMaxAgeMs', challengeMaxAgeMs],
+  ];
+  for (const [name, value] of parameterChecks) {
+    if (!Number.isFinite(value) || value <= 0) {
+      return abort(
+        'receipt-rejected',
+        `${name} must be a finite positive number (got ${value}). Every safety parameter ` +
+          `here gates a check, so an invalid value disables a protection rather than ` +
+          `failing loudly — refusing instead.`,
+      );
+    }
+  }
+
+  // ------------------------------------------------------------------
   // Gate 1 — the challenge must exist and be readable.
   // ------------------------------------------------------------------
   // Without it there is no nonce to verify against, so freshness is
@@ -652,19 +707,6 @@ export async function runSelfRefresh(
     return abort('receipt-rejected', describeReceiptFailure(first, statePath, minBytes));
   }
 
-  // A non-positive window would make `msSincePrevious >= stabilityWindowMs`
-  // trivially true, collapsing two observations into one and letting a file
-  // still being written pass as stable. Refuse rather than silently disable a
-  // gate. (Phase 4 also validates this at the CLI boundary, following the
-  // precedent `afx refresh` set for its own safety flags.)
-  if (!Number.isFinite(stabilityWindowMs) || stabilityWindowMs <= 0) {
-    return abort(
-      'receipt-rejected',
-      `stabilityWindowMs must be a positive number (got ${stabilityWindowMs}); a ` +
-        `non-positive window disables the stability gate entirely.`,
-    );
-  }
-
   const beforeSleep = clock.now();
   await clock.sleep(stabilityWindowMs);
   // MEASURE the gap rather than asserting it. Passing `stabilityWindowMs` on
@@ -733,7 +775,7 @@ export async function runSelfRefresh(
     fs.write(reorientPath, payload.longForm);
   } catch (err) {
     return abort(
-      'assembly-failed',
+      'reorient-write-failed',
       `Could not write ${reorientPath}: ${err instanceof Error ? err.message : String(err)}. ` +
         `Refusing to clear without the re-orientation on disk (R1).`,
     );

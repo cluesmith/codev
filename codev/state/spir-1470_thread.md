@@ -733,3 +733,51 @@ exactly where a value crosses from file into logic.
 **CARRY TO PHASE 4** (accumulating): pass `expectedBoundary`; validate `--min-bytes`/`--delay`/
 `--stability-window` as positive at the CLI boundary; do NOT introduce a Tower call that can fail
 AFTER the clear.
+
+### Phase 3 iter3: I fixed the instance and missed the class — twice
+
+Codex REQUEST_CHANGES (2), Claude APPROVE (4 comments). All taken. 84 tests in the two Phase 3
+files; full suite 5077.
+
+**Codex 1: my iter2 nonce fix was incomplete.** I replaced truthiness with "non-empty string" —
+but freshness is proved by `content.includes(nonce)`, so `"a"` is found in nearly every save ever
+written. Non-emptiness was never the property that mattered; COLLISION RESISTANCE is. I had been
+thinking about `[]` coercing to `''` rather than about what makes a nonce work.
+Fixed: `^[0-9a-f]{12,}$` — 12 because `generateNonce()` is `randomBytes(6).toString('hex')`, and a
+FLOOR not an exact length so a future stronger nonce stays valid.
+
+**Bonus bug from that**: two older tests used placeholder nonces (`'this-run-nonce'`) which the
+stricter validator now rejects — including the REPLAY test, whose point is that a well-formed but
+DIFFERENT nonce is refused. It had started passing for the wrong reason (malformed, not mismatch),
+hollowing out the guarantee. Both now use valid hex.
+
+**Codex 2 + Claude 3 (same gap, two directions): safety params unvalidated.** I added the
+stabilityWindowMs check in iter2 and did not generalise it. `minBytes:0` accepts an empty save;
+`challengeMaxAgeMs:NaN` makes every expiry comparison false; `reentryDelaySeconds:-1` still reaches
+scheduling then the clear. Now one Gate 0 validates all four as finite+positive, matrix-tested
+4 params × 4 bad values.
+
+Codex's principle is right and worth keeping: validate in the CORE, not only at the CLI. This
+function is the thing that clears a builder; it must not depend on every future caller having
+remembered. Phase 4 validates too — complementary, since they catch different mistakes (bad flag
+typed by a human vs bad argument passed by code).
+
+**Claude 1 matters for Phase 8**: `DEFAULT_REENTRY_DELAY_SECONDS` doc called it a "post-clear"
+hold. It is NOT — the re-entry is scheduled BEFORE the clear, so the window is the remainder of the
+current turn PLUS the clear executing at turn end. Framed as time-after-the-clear, Phase 8 would
+measure the wrong interval and pick a value too short. Doc corrected so the measurement inherits
+the right definition.
+
+Also: distinct `reorient-write-failed` code (was reusing `assembly-failed` — different cause,
+different fix).
+
+**THE PATTERN, stated so I stop repeating it**: I fix the instance and miss the class. iter2's
+bypass was "unvalidated value from disk" — I validated the TYPE and left the LENGTH. The stability
+window got validated; the other three params guarding the same clear did not. Both times the
+reviewer's finding was ONE GENERALISATION away from the fix I had just written.
+**Before calling a gate done: not "is this input checked?" but "what else reaches this decision by
+the same route?"**
+
+**CARRY TO PHASE 4**: always pass `expectedBoundary` (optional param = opt-in guard = protects
+nobody by default — assert it); validate flags at the CLI boundary too; no Tower call that can fail
+AFTER the clear.

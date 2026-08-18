@@ -89,7 +89,13 @@ export const DEFAULT_QUIESCE_POST_ESCALATION_TIMEOUT_MS = 30_000;
 export const CHALLENGE_FILE_NAME = '.builder-refresh-challenge';
 
 /**
- * Seconds Tower holds the post-clear re-entry before delivering it.
+ * Seconds Tower holds the re-entry before delivering it.
+ *
+ * NOT a "post-clear" hold, despite what it looks like. The re-entry is scheduled
+ * BEFORE the clear is sent (see `self.ts` on why the destructive step goes last),
+ * so the window this value has to cover is: the remainder of the current turn,
+ * plus the clear executing at turn end. Framing it as time-after-the-clear would
+ * make Phase 8 measure the wrong interval and pick a value that is too short.
  *
  * PROVISIONAL. `/arch-save` uses 15s, tuned by an architect watching it happen;
  * Spec 1470 requires this value to come from a live measurement instead, which

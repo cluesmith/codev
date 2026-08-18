@@ -376,8 +376,10 @@ describe('gate refusals never clear', () => {
 
   it('state file carrying a PREVIOUS boundary nonce → wrong-nonce, no clear', async () => {
     // The replay case the challenge handshake exists to prevent.
-    fs.write(challengePath, JSON.stringify({ nonce: 'this-run-nonce', issuedAt: 2 }));
-    fs.write(statePath, goodSave('an-older-nonce'));
+    // Both are well-formed 12-char hex — the rejection must come from the
+    // MISMATCH, not from the format guard, or this test stops testing replay.
+    fs.write(challengePath, JSON.stringify({ nonce: 'aaaa1111bbbb', issuedAt: 2 }));
+    fs.write(statePath, goodSave('cccc2222dddd'));
     const result = await run();
 
     expect(result.failure).toBe('receipt-rejected');
@@ -420,7 +422,8 @@ describe('gate refusals never clear', () => {
 
     const result = await run();
 
-    expect(result.failure).toBe('assembly-failed');
+    // Distinct from assembly-failed: the frame built fine, the disk refused it.
+    expect(result.failure).toBe('reorient-write-failed');
     expect(result.reason).toMatch(/R1/);
     expectNoClear(result);
   });
@@ -509,7 +512,7 @@ describe('challenge shape validation', () => {
     const result = await run();
 
     expect(result.failure).toBe('no-challenge');
-    expect(result.reason).toMatch(/non-string or empty nonce/i);
+    expect(result.reason).toMatch(/lowercase hex/i);
     expectNoClear(result);
   });
 
@@ -576,6 +579,46 @@ describe('challenge shape validation', () => {
     expectNoClear(result);
   });
 
+  it('refuses a SHORT nonce, which would match almost any file', async () => {
+    // "a" is non-empty, so length alone is not the guard — `content.includes("a")`
+    // is true for nearly every state file ever written. A nonce short enough to
+    // collide proves nothing about freshness.
+    expect('any ordinary save file'.includes('a')).toBe(true);
+
+    fs.write(challengePath, JSON.stringify({ nonce: 'a', issuedAt: 1 }));
+    fs.write(statePath, `a stale save with no marker\n${'x'.repeat(DEFAULT_MIN_BYTES + 50)}`);
+
+    const result = await run();
+
+    expect(result.failure).toBe('no-challenge');
+    expect(result.reason).toMatch(/lowercase hex/i);
+    expectNoClear(result);
+  });
+
+  it.each([
+    ['non-hex characters', 'zzzzzzzzzzzz'],
+    ['uppercase hex', 'ABC123DEF456'],
+    ['too short by one', 'abc123def45'],
+  ])('refuses a nonce with %s', async (_label, nonce) => {
+    fs.write(challengePath, JSON.stringify({ nonce, issuedAt: 1 }));
+    fs.write(statePath, `${nonceMarker(nonce)}\n${'x'.repeat(DEFAULT_MIN_BYTES + 50)}`);
+
+    const result = await run();
+
+    expect(result.failure).toBe('no-challenge');
+    expectNoClear(result);
+  });
+
+  it('accepts a LONGER nonce, so the format can grow', () => {
+    // A floor, not an exact length: a future generateNonce with more entropy
+    // must not be rejected by a validator pinned to today's width.
+    const parsed = parseChallenge(
+      JSON.stringify({ nonce: 'abcdef0123456789abcdef', issuedAt: 500 }),
+      1000,
+    );
+    expect(parsed.ok).toBe(true);
+  });
+
   it('accepts a well-formed challenge', () => {
     const parsed = parseChallenge(
       JSON.stringify({ nonce: NONCE, issuedAt: 500, boundary: 'enter:review' }),
@@ -600,15 +643,34 @@ describe('challenge shape validation', () => {
 // The stability gate cannot be disabled
 // ---------------------------------------------------------------------------
 
-describe('stability window', () => {
-  it.each([0, -1, NaN])('refuses a non-positive window (%s)', async windowMs => {
-    seedHappyPath();
-    const result = await run({ stabilityWindowMs: windowMs });
+describe('safety parameters', () => {
+  /**
+   * Every parameter here TUNES A GATE, so an invalid value does not degrade the
+   * run — it disables a protection while everything still reports success.
+   * `minBytes: 0` accepts an empty save; `challengeMaxAgeMs: NaN` makes every
+   * expiry comparison false; a non-positive window collapses the two-observation
+   * stability check into one read.
+   */
+  const params = [
+    'minBytes',
+    'stabilityWindowMs',
+    'reentryDelaySeconds',
+    'challengeMaxAgeMs',
+  ] as const;
+  const badValues = [0, -1, NaN, Infinity];
 
-    expect(result.failure).toBe('receipt-rejected');
-    expect(result.reason).toMatch(/positive number/i);
-    expectNoClear(result);
-  });
+  for (const param of params) {
+    for (const value of badValues) {
+      it(`refuses ${param} = ${value}`, async () => {
+        seedHappyPath();
+        const result = await run({ [param]: value });
+
+        expect(result.failure, `${param}=${value} must be refused`).toBe('receipt-rejected');
+        expect(result.reason).toMatch(/finite positive number/i);
+        expectNoClear(result);
+      });
+    }
+  }
 
   it('measures the elapsed gap rather than assuming it', async () => {
     // A clock whose sleep does not advance time must NOT yield a stable
