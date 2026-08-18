@@ -82,3 +82,35 @@ text, but assembly end-to-end remains covered by the orchestrator tests rather t
 **`afx db reset` still exists** and is legitimately destructive (Claude's minor note #2). No
 collision with the top-level registration — commander scopes it under `db` — but "reset is
 deprecated" is now marginally ambiguous in the help surface. Left alone.
+
+## 2026-08-18 — Backfill, gate, merge
+
+Human decision (relayed by the architect): approve **with backfill first**.
+
+Backfilled `## afx interrupt` and `## afx refresh` into both skeleton skill files, lifted
+**verbatim** from the root skill files updated earlier in the PR so the adopter-facing copies cannot
+drift from what shipped. Then closed the hole that hid the drift: the docs test's `SKILL_DOCS`
+covered only the ROOT `.claude`/`.codex` trees, so it now asserts the skeleton twins too — both
+commands present, `## afx reset` absent, deprecation line present, copies byte-identical. Confirmed
+non-vacuous against `git show HEAD:<file>` before trusting it (a docs test that cannot fail is
+worse than no docs test).
+
+CI was revalidated against the **exact new head SHA** `1c0a59eda`, not a stale rollup — 7/7 success
+— and the PR head was re-checked to still equal that SHA before approving the gate. `porch approve
+1489 pr` needed the explicit `--a-human-explicitly-approved-this` flag.
+
+`gh pr merge 1490 --merge` was refused: `reviewDecision=REVIEW_REQUIRED`, `main` requires 1
+approving review and I authored the PR. **Did not reach for `--admin`** — that is the owner's call.
+Waleed admin-merged at 00:14:52Z as merge commit `10eef2d62` (verified 2 parents: a true merge, not
+a squash). Issue #1489 auto-closed via `Closes #1489`.
+
+Verified on `origin/main` after the merge: all four skill trees carry refresh + interrupt with zero
+stale `## afx reset` headings, and the only surviving `afx reset` strings outside historical
+artifacts are the intentional deprecation notice and the test that asserts the heading's absence.
+
+Protocol complete (phase `verified`). **Worktree deliberately left in place** — cleanup awaits the
+owner's word.
+
+> Note: this final entry post-dates the merge, so it lives on `builder/air-1489` only, not on
+> `main`. Everything decision-relevant in it is also captured in the merged commit messages and the
+> merged test.
