@@ -18,7 +18,7 @@ import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import net from 'node:net';
 import WebSocket from 'ws';
-import { towerWsProtocols } from './helpers/tower-test-utils.js';
+import { towerWsProtocols, createIsolatedAgentFarmDir } from './helpers/tower-test-utils.js';
 
 // Use a unique port to avoid conflicts with other e2e test suites
 // Port 14500 is used by cli-tower-mode.e2e.test.ts — use 14600 here
@@ -60,7 +60,12 @@ async function startTower(port: number): Promise<ChildProcess> {
   const proc = spawn('node', [TOWER_SERVER_PATH, String(port)], {
     stdio: ['ignore', 'pipe', 'pipe'],
     detached: false,
-    env: { ...process.env, NODE_ENV: 'test', AF_TEST_DB: `test-${port}.db` },
+    env: {
+      ...process.env,
+      NODE_ENV: 'test',
+      AF_TEST_DB: `test-${port}.db`,
+      CODEV_AGENT_FARM_DIR: createIsolatedAgentFarmDir(),
+    },
   });
 
   let stderr = '';

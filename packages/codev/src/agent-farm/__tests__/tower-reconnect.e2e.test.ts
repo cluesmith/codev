@@ -14,6 +14,7 @@ import {
   waitForPort,
   encodeWorkspacePath,
   cleanupTestDb,
+  createIsolatedAgentFarmDir,
 } from './helpers/tower-test-utils.js';
 
 const TEST_TOWER_PORT = 14800;
@@ -28,6 +29,7 @@ let socketDir: string;
 let workspacePath: string;
 let shellTerminalId: string;
 let shellperPid: number;
+const agentFarmDir = createIsolatedAgentFarmDir();
 
 /**
  * Create a test workspace in a non-temp location so reconciliation
@@ -60,6 +62,10 @@ function spawnTower(port: number, sockDir: string): ChildProcess {
       NODE_ENV: 'test',
       AF_TEST_DB: `test-${port}.db`,
       SHELLPER_SOCKET_DIR: sockDir,
+      // #1515: the two Towers this test starts must share one agent-farm dir
+      // (the restart has to find the first one's DB), but it must not be the
+      // developer's real one.
+      CODEV_AGENT_FARM_DIR: agentFarmDir,
     },
   });
 }

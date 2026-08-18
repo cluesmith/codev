@@ -34,6 +34,11 @@ export interface TowerHandle {
   port: number;
   process: ChildProcess;
   socketDir: string;
+  /**
+   * The throwaway `~/.agent-farm` this Tower was pointed at (#1515). Nothing
+   * the child writes — cloud config, local key, DB, logs — reaches the real one.
+   */
+  agentFarmDir: string;
   stop: () => Promise<void>;
 }
 
@@ -120,6 +125,26 @@ async function findAvailablePort(startPort: number): Promise<number> {
   throw new Error(`No available port found starting from ${startPort}`);
 }
 
+/**
+ * Build a throwaway agent-farm directory for a spawned test Tower (#1515).
+ *
+ * The child used to inherit `~/.agent-farm` wholesale: it read the developer's
+ * real cloud credentials (so a tunnel-disconnect test deregistered their actual
+ * Tower and deleted their actual credentials), and dropped `test-<port>.db`
+ * files into the real directory.
+ *
+ * The shared local key is copied in rather than left to be regenerated: the
+ * test process authenticates its own HTTP/WS calls with the key from the real
+ * directory (see `vitest-e2e-setup.ts` and `towerWsProtocols()`), so both sides
+ * must present the same value or every request 401s. The key is the only thing
+ * carried over — no cloud config, no DB, no log.
+ */
+export function createIsolatedAgentFarmDir(): string {
+  const dir = mkdtempSync(resolve(tmpdir(), 'codev-af-'));
+  writeFileSync(resolve(dir, 'local-key'), ensureLocalKey(), { mode: 0o600 });
+  return dir;
+}
+
 export interface StartTowerOptions {
   /**
    * Return the moment the port accepts a connection rather than on the next
@@ -144,6 +169,9 @@ export async function startTower(
   // too long for Unix sockets (sun_path max ~104 bytes).
   const socketDir = mkdtempSync('/tmp/codev-sock-');
 
+  // #1515: isolate the agent-farm dir too, not just the DB name and sockets.
+  const agentFarmDir = createIsolatedAgentFarmDir();
+
   const proc = spawn('node', [TOWER_SERVER_PATH, String(actualPort)], {
     stdio: ['ignore', 'pipe', 'pipe'],
     detached: false,
@@ -152,6 +180,7 @@ export async function startTower(
       NODE_ENV: 'test',
       AF_TEST_DB: `test-${actualPort}.db`,
       SHELLPER_SOCKET_DIR: socketDir,
+      CODEV_AGENT_FARM_DIR: agentFarmDir,
       ...extraEnv,
     },
   });
@@ -167,6 +196,7 @@ export async function startTower(
   if (!started) {
     proc.kill();
     try { rmSync(socketDir, { recursive: true, force: true }); } catch { /* ignore */ }
+    try { rmSync(agentFarmDir, { recursive: true, force: true }); } catch { /* ignore */ }
     throw new Error(`Tower failed to start on port ${actualPort}. stderr: ${stderr}`);
   }
 
@@ -174,6 +204,7 @@ export async function startTower(
     port: actualPort,
     process: proc,
     socketDir,
+    agentFarmDir,
     stop: async () => {
       proc.kill('SIGTERM');
       await new Promise<void>((resolve) => {
@@ -183,8 +214,9 @@ export async function startTower(
           resolve();
         }, 2000);
       });
-      // Clean up isolated socket dir
+      // Clean up isolated socket dir and agent-farm dir
       try { rmSync(socketDir, { recursive: true, force: true }); } catch { /* ignore */ }
+      try { rmSync(agentFarmDir, { recursive: true, force: true }); } catch { /* ignore */ }
     },
   };
 }
@@ -223,6 +255,9 @@ export async function cleanupAllTerminals(port: number): Promise<void> {
 
 /**
  * Clean up test DB files created by a Tower instance.
+ *
+ * Since #1515 a spawned Tower writes its DB into the throwaway agent-farm dir
+ * that `stop()` removes, so this only sweeps leftovers from before that fix.
  */
 export function cleanupTestDb(port: number): void {
   const dbBase = resolve(homedir(), '.agent-farm', `test-${port}.db`);
