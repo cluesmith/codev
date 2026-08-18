@@ -41,7 +41,7 @@ import { existsSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'n
 import { execFileSync } from 'node:child_process';
 import { TowerClient } from '../lib/tower-client.js';
 import { logger, fatal } from '../utils/logger.js';
-import { findBuilderById } from '../lib/builder-lookup.js';
+import { getBuilder } from '../state.js';
 import { getConfig } from '../utils/index.js';
 import { loadConfig } from '../../lib/config.js';
 import { fetchIssue as fetchForgeIssue } from '../../lib/github.js';
@@ -124,11 +124,33 @@ export async function selfRefresh(options: SelfRefreshOptions): Promise<void> {
     return;
   }
 
-  const builder = findBuilderById(builderId);
+  // Look the row up scoped to the PARENT workspace, not `getConfig().workspaceRoot`.
+  //
+  // This is the one place `afx refresh`'s pattern cannot be copied. That command
+  // runs from the main workspace root, where `getConfig().workspaceRoot` and the
+  // workspace the registry rows are keyed by are the same directory, so
+  // `findBuilderById` works. This one runs INSIDE `.builders/<id>/`, where
+  // `findWorkspaceRoot()` returns the WORKTREE (it has its own `codev/`) while
+  // rows are keyed by the parent — so `findBuilderById` would scope the query to
+  // a workspace that owns no builders and report "no matching row" for every
+  // valid builder.
+  //
+  // `detectWorkspaceRoot()` is the same resolver `detectCurrentBuilderId()` used
+  // to derive the id a line above, so identity and lookup now agree by
+  // construction rather than by coincidence.
+  if (!workspace) {
+    fatal(
+      'Could not determine the parent workspace for this worktree. Refusing to refresh ' +
+        'against unresolved state.',
+    );
+    return;
+  }
+
+  const builder = getBuilder(builderId, workspace);
   if (!builder) {
     fatal(
       `Resolved builder id '${builderId}' from this worktree, but no matching registry row ` +
-        `exists. Refusing to refresh against unresolved state.`,
+        `exists in workspace ${workspace}. Refusing to refresh against unresolved state.`,
     );
     return;
   }

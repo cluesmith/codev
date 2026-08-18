@@ -897,3 +897,40 @@ drift below the challenge read unobserved); parameter errors touch nothing at al
 - Predictable-but-well-formed nonce — generateNonce uses randomBytes; a hand-written challenge is
   outside the honest-builder threat model.
 - `runReset` logs its clear after sending it (index.ts:540) — driven path, not this phase's.
+
+### Phase 4 iter1 (codex): the command was DEAD ON ARRIVAL in production
+
+Codex REQUEST_CHANGES. Verified before fixing, and it is decisive:
+
+- `detectCurrentBuilderId()` (send.ts:38) derives the workspace as the prefix BEFORE `/.builders/`
+  — i.e. the PARENT.
+- `getConfig().workspaceRoot` → `findWorkspaceRoot()` (utils/config.ts:76) returns the **WORKTREE**
+  when it has its own `codev/` — which every builder worktree does.
+- `findBuilderById()` scopes its DB query by `getConfig().workspaceRoot`.
+- Builder rows are keyed by the PARENT workspace_path (#1118).
+
+So identity resolved against the parent and the row lookup asked the worktree → no row → **"no
+matching registry row" for every valid builder.** Both `--begin` and execute would have refused.
+
+**Why `afx refresh` doesn't hit it**: it runs from the MAIN workspace root, where
+`getConfig().workspaceRoot` IS the workspace the rows are keyed by. I copied a sibling command's
+pattern into a different calling context. Same helper, different cwd, opposite result.
+
+Fixed: `getBuilder(builderId, workspace)` scoped explicitly to `detectWorkspaceRoot()` — the SAME
+resolver that derived the id, so identity and lookup now agree by construction rather than by
+coincidence. Also refuses when the parent cannot be determined, and names the workspace in the
+not-found message (the bare "no matching registry row" sent me looking at the registry when the bug
+was in WHICH workspace was being asked).
+
+**Codex's second point is the sharper one**: my tests mocked `findBuilderById`, so the scope it
+derived internally was invisible to them. They could not have caught this. The fix makes the scope
+an ARGUMENT, which is what makes it assertable — and the new tests pin it explicitly, including
+that the lookup scope never contains `.builders`.
+
+**This is the THIRD production-fatal defect in this project that unit tests could not see**:
+1. the nonce that could never exist when the command ran (plan round),
+2. the boundary guard inert because the porch task text didn't pass `--boundary`,
+3. this one — the lookup scoped to the wrong workspace.
+All three: correct at every layer I tested, dead in the real calling context. **Mocking the thing
+that resolves context hides the resolution.** Where a helper derives something internally, pass it
+in instead — then the test can see it.

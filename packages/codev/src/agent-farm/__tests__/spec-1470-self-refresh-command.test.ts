@@ -17,21 +17,21 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 const {
+  mockGetBuilder,
   mockSendMessage,
   mockIsRunning,
   mockDetectWorkspaceRoot,
   mockDetectCurrentBuilderId,
-  mockFindBuilderById,
   mockFatal,
   mockRunSelfRefresh,
   mockBeginSelfRefresh,
   mockExecFileSync,
 } = vi.hoisted(() => ({
+  mockGetBuilder: vi.fn(),
   mockSendMessage: vi.fn(),
   mockIsRunning: vi.fn(),
   mockDetectWorkspaceRoot: vi.fn(),
   mockDetectCurrentBuilderId: vi.fn(),
-  mockFindBuilderById: vi.fn(),
   mockFatal: vi.fn((msg: string) => {
     throw new Error(`FATAL: ${msg}`);
   }),
@@ -52,7 +52,7 @@ vi.mock('../commands/send.js', () => ({
   detectCurrentBuilderId: mockDetectCurrentBuilderId,
 }));
 
-vi.mock('../lib/builder-lookup.js', () => ({ findBuilderById: mockFindBuilderById }));
+vi.mock('../state.js', () => ({ getBuilder: mockGetBuilder }));
 
 vi.mock('../utils/logger.js', () => ({
   logger: {
@@ -133,7 +133,7 @@ beforeEach(() => {
   mockIsRunning.mockResolvedValue(true);
   mockDetectWorkspaceRoot.mockReturnValue('/tmp/ws');
   mockDetectCurrentBuilderId.mockReturnValue('spir-1470');
-  mockFindBuilderById.mockReturnValue(SELF);
+  mockGetBuilder.mockReturnValue(SELF);
   mockSendMessage.mockResolvedValue({ ok: true, resolvedTo: 'spir-1470' });
   mockExecFileSync.mockReturnValue(Buffer.from(''));
   mockBeginSelfRefresh.mockReturnValue({
@@ -163,7 +163,7 @@ describe('identity', () => {
 
     // The ONLY lookup is of the derived id. Nothing consults an argument.
     expect(mockDetectCurrentBuilderId).toHaveBeenCalled();
-    expect(mockFindBuilderById).toHaveBeenCalledWith('spir-1470');
+    expect(mockGetBuilder).toHaveBeenCalledWith('spir-1470', '/tmp/ws');
   });
 
   it('refuses when run outside a builder worktree', async () => {
@@ -187,7 +187,7 @@ describe('identity', () => {
   });
 
   it('refuses when the registry row is missing', async () => {
-    mockFindBuilderById.mockReturnValue(null);
+    mockGetBuilder.mockReturnValue(null);
     const { selfRefresh } = await importCommand();
 
     await expect(selfRefresh({})).rejects.toThrow(/no matching registry row/i);
@@ -195,11 +195,78 @@ describe('identity', () => {
   });
 
   it('refuses when the registry row is incomplete', async () => {
-    mockFindBuilderById.mockReturnValue({ ...SELF, worktree: undefined });
+    mockGetBuilder.mockReturnValue({ ...SELF, worktree: undefined });
     const { selfRefresh } = await importCommand();
 
     await expect(selfRefresh({})).rejects.toThrow(/incomplete registry row/i);
     expect(mockSendMessage).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The registry lookup must be scoped to the PARENT workspace
+// ---------------------------------------------------------------------------
+
+describe('workspace scoping', () => {
+  /**
+   * The defect this pins would have made the command dead on arrival.
+   *
+   * `afx refresh` runs from the MAIN workspace root, where
+   * `getConfig().workspaceRoot` and the workspace the registry rows are keyed by
+   * are the same directory — so `findBuilderById`, which self-scopes to
+   * `getConfig().workspaceRoot`, works there.
+   *
+   * This command runs INSIDE `.builders/<id>/`, where `findWorkspaceRoot()`
+   * returns the WORKTREE (it has its own `codev/`) while rows remain keyed by
+   * the parent. Copying the sibling command's pattern therefore scoped the query
+   * to a workspace owning no builders, and every valid builder got "no matching
+   * registry row".
+   *
+   * The original tests could not catch it: they mocked the lookup helper, so the
+   * scope it derived internally was invisible. This asserts the scope EXPLICITLY,
+   * which is only possible because the lookup now takes it as an argument.
+   */
+  it('looks the row up in the parent workspace, not the worktree', async () => {
+    mockDetectWorkspaceRoot.mockReturnValue('/tmp/ws');
+    const { selfRefresh } = await importCommand();
+
+    await selfRefresh({});
+
+    expect(mockGetBuilder).toHaveBeenCalledWith('spir-1470', '/tmp/ws');
+    // The worktree path must never be used as the lookup scope.
+    for (const [, scope] of mockGetBuilder.mock.calls) {
+      expect(scope).not.toContain('.builders');
+    }
+  });
+
+  it('uses the SAME resolver that derived the identity', async () => {
+    // Identity comes from detectCurrentBuilderId, which derives its workspace
+    // the same way detectWorkspaceRoot does. If the lookup used a different
+    // resolver the two could disagree, which is exactly what went wrong.
+    mockDetectWorkspaceRoot.mockReturnValue('/other/workspace');
+    const { selfRefresh } = await importCommand();
+
+    await selfRefresh({});
+
+    expect(mockGetBuilder).toHaveBeenCalledWith('spir-1470', '/other/workspace');
+  });
+
+  it('refuses when the parent workspace cannot be determined', async () => {
+    mockDetectWorkspaceRoot.mockReturnValue(null);
+    const { selfRefresh } = await importCommand();
+
+    await expect(selfRefresh({})).rejects.toThrow(/could not determine the parent workspace/i);
+    expect(mockGetBuilder).not.toHaveBeenCalled();
+    expect(mockSendMessage).not.toHaveBeenCalled();
+  });
+
+  it('names the workspace in the not-found message', async () => {
+    // "no matching registry row" without the scope sent me looking at the
+    // registry when the bug was in which workspace was being asked.
+    mockGetBuilder.mockReturnValue(null);
+    const { selfRefresh } = await importCommand();
+
+    await expect(selfRefresh({})).rejects.toThrow(/in workspace \/tmp\/ws/);
   });
 });
 
@@ -239,7 +306,7 @@ describe('cannot target another session', () => {
   it('addresses ITS OWN id even when another builder exists in the registry', async () => {
     // If the command ever resolved a target from anywhere but the worktree,
     // this is where it would show up.
-    mockFindBuilderById.mockImplementation((id: string) => (id === 'spir-1470' ? SELF : OTHER));
+    mockGetBuilder.mockImplementation((id: string) => (id === 'spir-1470' ? SELF : OTHER));
     mockRunSelfRefresh.mockImplementation(async (opts: Record<string, unknown>) => {
       const terminal = opts.terminal as { sendRaw: (t: string) => Promise<void> };
       await terminal.sendRaw('/clear');
