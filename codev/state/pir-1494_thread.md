@@ -94,7 +94,57 @@ gate-toast, tower-client, api.ts, tower-routes.ts, role docs, protocols). Spot-v
 approve.ts:114/:136, api.ts:295/:305, tower-routes liveArchitects :1163/:2776, builder-grouping:122,
 pir/builder-prompt.md:46, bugfix protocol.md:38 + pr.md:64 — all EXACT, no plan edits needed. Force-pushed.
 
+## REVIEW-PHASE MATERIAL (architect, capture in codev/reviews/1494 — do NOT lose)
+Two instances, DIFFERENT failure modes, pair stronger than either alone. Frame as demonstration, NOT mea culpa.
+- **pir-1070**: structural guarantee BYPASSED — porch state produced from prose typed into a builder's
+  pane, so the record stopped being independent evidence and became a copy of what it exists to check.
+  Precondition for the self-merge class. NEVER say a self-merge occurred; no unauthorized merge happened.
+- **pir-1494 (this lane, tonight)**: guarantee NOT bypassed — a human genuinely decided ("approve 1494"
+  verbatim in the architect's channel, replying to a status report that named the residual he approved)
+  and an architect genuinely carried it — and the RECORD still could not demonstrate it. porch stores
+  approved_at, never approved_by (#1457), so the state machine can't settle it either. Correct conduct,
+  unprovable afterward. The lane whose whole purpose is human-traceable gate decisions had its OWN plan
+  gate reach a reviewer as an unverifiable assertion, inside a system structurally unable to answer.
+- Together: the gap is NOT a discipline problem — one instance had a defect in the chain, one had none,
+  neither settleable from the artifact.
+- **Process correction (load-bearing for the convention this lane writes)**: full provenance was given
+  on a pr gate but not a plan gate (merge felt irreversible, plan routine). That distinction should not
+  exist. An attestation is for the RECORD, not for the risk; a record that only exists for irreversible
+  acts is not a record. Plan and dev gates get the SAME treatment as pr.
+
+## Implement phase (2026-08-18)
+Gate approved (Amr "approve 1494" → architect ran porch approve, uniform rule in action). porch at
+implement. Building exactly the approved plan incl. the item-2 residual (Amr approved it knowingly) —
+NOT reopening option (a), NOT improving the residual away. pir-1497 (merged) converged on REFUSE for
+the same routing question; my table is consistent. At pr gate expect a FREEZE (don't narrate through).
+CI has a hung job: Artifact-Canvas Browser Tests (#1502, no timeout) — if board sits on that, not my
+lane; tell architect, don't retry.
+
+## Implement complete → dev-approval gate (2026-08-18)
+Built exactly the approved plan. Code: approve.ts relayApproval + pure decideApprovalRelay (4 branches)
++ buildRelayMessage + interpretRelayResult (held first-class); runPorchApprove kept ONLY for the
+no-live-architect fallback (reworded, liveness-truthful). Tests: approve-relay.test.ts, 15 new. Docs:
+uniform rule in architect.md (defect fix + VS Code on-receipt) + builder.md (rewrite) + pir/builder-
+prompt.md:46 (one-sentence), all mirrored to codev-skeleton (twins byte-identical). BUGFIX untouched.
+Checks: full vitest 873 green, tsc (both configs) clean, eslint clean, esbuild bundle builds. porch
+build+tests green → dev-approval pending.
+
+Note: porch build check first failed on `Cannot find module 'three'` — a STALE-DEPS issue (three is
+declared at packages/codev/package.json:70 but wasn't in this worktree's node_modules after the
+rebase). Fixed with `pnpm install` (legitimate setup, NOT routing around a check; unrelated to my
+diff). Separate from the #1502 hung CI job the architect flagged.
+
+## dev-approval evidence — capture + HONEST scope split (architect requires real e2e, not unit-only)
+Capturable from builder shell (real): 15 relay-core unit tests; full 873 suite; tsc+lint+esbuild;
+AND tonight's live proof of the SECOND half of the button's chain — the architect ran porch approve
+carrying Amr's decision and THIS builder's plan-approval gate advanced (porch next → implement). The
+relay TRANSPORT is the same Tower /api/send mailbox path every `afx send architect` this session used
+(delivered/held). This builder has spawnedByArchitect set + architect live → the `relay` branch fires.
+Needs the HUMAN's VS Code window (cannot come from builder shell): the literal button click (sidebar ✓
+/ Cmd+K G / gate toast) invoking codev.approveGate in an Extension Development Host against a live
+blocked builder, observing the relay land in the architect terminal. Loading the extension UI is not
+a builder-shell action; stated plainly rather than claimed.
+
 ## Status
-Plan committed + revised twice + rebased on main (x2). Awaiting plan-approval gate (Amr owns all three
-gates; I never run porch approve). Both route-to-main items resolved and recorded. Code change (relay
-+ held-first-class) unchanged and re-verified against latest main.
+Implement committed (92a4ee58f code+tests, a60bcb2bb docs) + pushed. dev-approval gate PENDING. Amr
+owns dev-approval + pr; architect relays; I never run porch approve.
