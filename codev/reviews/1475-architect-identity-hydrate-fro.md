@@ -136,8 +136,8 @@ because they never go red.
 ## Consultation Response (3-way, single pass)
 
 **gemini APPROVE · codex COMMENT · claude APPROVE** — no `REQUEST_CHANGES`. Every finding was
-checked against the file before acting; five led to changes in commit `2ff8f9b` and one is answered
-here.
+checked against the file before acting; five led to changes in commit `01276127a` and one is
+answered here.
 
 | # | Finding | Disposition |
 |---|---|---|
