@@ -123,3 +123,20 @@ editorScroll channel. Pre-existing + explicitly out of #1498 scope (rotation unc
 deck-only). A fix needs a NEW canvas viewport-scroll command (canvas + wire/types + vscode),
 so filed as separate follow-up #1501 (area/streamdeck) rather than expanding this lane.
 #1498's narration work is unaffected and still at dev-approval.
+
+### Owner decision: ABSORB canvas-mode honesty into #1498 (gate stays open)
+Amr ruled the canvas-mode inertness is a HONESTY gap (line 1 claims a live scroll mode
+while rotation is silently inert on a spec/plan canvas) = this lane's own principle. NOT
+#1501 (that's the capability gap, still out of scope). Implement, then re-request dev-approval.
+
+### STOP-and-report finding (per architect): the PRESS is also dead in canvas mode
+Architect assumed only rotation was inert (press = live). Verified otherwise: press verb
+feedback-selection → feedbackSelection → selectionAnchor() (feedback.ts:76-90) requires
+BOTH activeTextEditor AND activeEntry(); activeEntry() (feedback.ts:48-52) returns undefined
+unless the focused editor is a builder-DIFF entry ("...not a builder diff... or none"). A
+spec/plan canvas is neither a text editor nor a diff → press no-ops. So BOTH gestures are
+inert in canvas mode; the whole dial does nothing reviewing a spec/plan.
+Reported to architect; proposed line-1 canvas wording `Scroll · editor only` (honest, axis·
+qualifier, not-an-error, inert-HERE-not-broken). HOLDING for their wording confirmation
+before implementing — do NOT gate the press in code (no-ops server-side already); add
+canvas-mode test + #1501 cross-ref comment; hardware re-check needs a spec/plan-phase builder.
