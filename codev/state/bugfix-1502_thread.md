@@ -108,3 +108,12 @@ Amr asked whether a timeout is the best we can do. It is not.
         --with-deps (tamper-proven: fails when --with-deps reintroduced, passes without).
     (2) canvas verification unchecked → verified green above.
 - CMAP r3 running on final commit (0bacf777, includes the new assertion) so all three see it.
+
+## CMAP round 3 (final commit with assertion) — all APPROVE
+- gemini = APPROVE (HIGH, none)
+- codex  = APPROVE (HIGH, none) — flipped from REQUEST_CHANGES; both its points resolved.
+- claude = APPROVE (HIGH, none blocking). Actioned its non-blocking notes: ticked the satisfied
+  canvas checkbox in PR body; merged origin/main (branch was 8 behind) so CI validates integrated
+  state. Left its forward-compat note (timeout assertion vs a hypothetical `jobs.<id>.uses`
+  reusable-workflow job) unaddressed — speculative; all current jobs are `runs-on`.
+- Re-firing pr gate. Still the OWNER's gate — will not merge until his word.
