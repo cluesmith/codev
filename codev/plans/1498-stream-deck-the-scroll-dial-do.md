@@ -31,6 +31,19 @@ wire, relay, types, or VS Code change is required. `ReviewNav` (`actions.ts:775`
 already implements the exact target shape; this is adopting an existing pattern, not
 inventing one.
 
+### Root cause: the dial was *declared* a different kind of control
+
+This is not "nobody wrote the render code". The Scroll dial renders one static word
+because it is **declared** title-only in the manifest: it is the only dial whose
+`Encoder.layout` is `layouts/label.json` (a title-only layout, no `value` or `bar`
+keys), while the other five dials declare `layouts/dial.json` (title / value / bar). So
+the code (`setTitle('Scroll')`, no subscription) and the manifest (a label-only layout)
+were *consistent with each other* and *inconsistent with every sibling* — the dial was
+built as a different class of control. That is why the fix is two-sided: the render code
+adopts the `ReviewNav` shape **and** the manifest declaration is corrected to the house
+dial layout. Fixing only the code would set `value`/`bar` a label-only layout cannot
+draw; fixing only the manifest would leave a dial with a bar it never populates.
+
 ## The two plan-time decisions
 
 ### Decision 1 — Does the press earn its place? **Recommendation: keep it.**
@@ -57,6 +70,16 @@ The honest tension is `send` (forward) mode, where the press *does* interrupt th
 builder immediately — not deck-shaped. The fix is not to remove the press but to
 label it: `Scroll · send` warns you before you press. That is precisely the legibility
 this issue exists to add.
+
+**The two halves are mutually reinforcing, not merely compatible — and this is *the*
+argument.** The press justifies the label: a dial whose press stages reversibly into
+the review queue is the deck-shaped loop the earns-its-place test asks for, and a press
+that swings between forward and queue *needs* a mode label so it is never a surprise.
+And the label justifies the press: a dial that only scrolls has no mode to name, so
+line 1 would carry nothing but the bare word `Scroll` and the whole touchstrip lane
+evaporates. Drop the press and you have not simplified the dial — you have removed the
+reason the strip exists. This forecloses a later "simplification" that deletes the
+press without noticing it has also deleted the point of the label.
 
 **Consequence for the empty state (small behaviour change, argued):** when there is no
 selected builder, the press becomes a **silent no-op**, matching `ReviewNav`'s press in
@@ -122,10 +145,13 @@ line 2 and the bar. Optionally refine the `Push` `TriggerDescription` to name th
 mode-dependent behaviour (e.g. "Forward selection now, or queue it, per workspace
 mode").
 
-`layouts/label.json` is used **only** by scroll-nav (confirmed by grep), so after the
-switch it is orphaned. Delete it as dead weight, provided no test enumerates it (the
-only reference is the manifest line being changed). *(Alternative: leave it in place —
-harmless but dead; I lean to deleting.)*
+**Delete the orphaned `layouts/label.json` in the same PR (required).** It is used
+**only** by scroll-nav — verified by grep across `apps/streamdeck` and the repo, the
+sole reference is the manifest line being changed (my own thread note aside) — so once
+scroll-nav moves to `dial.json` nothing references it: no action, no code path, no doc.
+Shipping an unreferenced file in a packaged plugin is a dead-asset defect, the same one
+#1440 removed six dead PNGs for. Leaving it is not an option here; it is dead weight in
+the shipped plugin.
 
 ### 3. Tests (`apps/streamdeck/src/__tests__/actions.test.ts`)
 
@@ -152,8 +178,8 @@ Extend the existing ScrollNav coverage (currently one rotate+press test at
 - `apps/streamdeck/com.cluesmith.codev.sdPlugin/manifest.json:263` — scroll-nav
   `Encoder.layout` `layouts/label.json` → `layouts/dial.json`; optionally refine the
   `Push` trigger description.
-- `apps/streamdeck/com.cluesmith.codev.sdPlugin/layouts/label.json` — delete (orphaned
-  after the switch).
+- `apps/streamdeck/com.cluesmith.codev.sdPlugin/layouts/label.json` — **delete**
+  (orphaned after the switch; grep-verified as unreferenced).
 - `apps/streamdeck/src/__tests__/actions.test.ts` — extend ScrollNav coverage
   (mode label, builder line, empty state + inert press, onChange re-render).
 
@@ -177,6 +203,9 @@ Extend the existing ScrollNav coverage (currently one rotate+press test at
   counter (`actions.ts:773-774`).
 - **Alternative — inline the line-2 logic** instead of the shared helper. Acceptable;
   the helper is the SSOT-cleaner choice and both live in one file.
+- **Risk: deleting `label.json` breaks a packaged/validation test.** Verified there is
+  no reference beyond the manifest line being changed; the streamdeck suite
+  (`validate`, `manifest-icons`) runs green as a gate on this. Precedent: #1440.
 
 ## Test Plan
 

@@ -24,3 +24,16 @@ a progress bar, and a visibly-inert `No builder` empty state. Rotation unchanged
 
 Plan drafted → `codev/plans/1498-stream-deck-the-scroll-dial-do.md`. Awaiting
 plan-approval gate.
+
+### Plan review (architect) — APPROVED with additions, revised
+Architect ratified both decisions and required three additions (commit revising):
+- Decision 1: state the mutual-reinforcement argument — the press justifies the label
+  AND the label justifies the press; dropping the press removes the reason the strip
+  exists. Forecloses a later "simplify away the press".
+- Reframe root cause: the dial was *declared* a different control type (label.json vs
+  the siblings' dial.json); code + manifest were self-consistent but sibling-inconsistent.
+- REQUIRED: delete orphaned layouts/label.json in the same PR (grep-verified sole ref is
+  the manifest line being changed). Precedent #1440 (six dead PNGs).
+Cross-lane awareness only: pir-1495 adds explicit assertions for four manifest-less
+PNGs (the inverse case); no general "every shipped asset referenced" check here.
+Revised + recommitted; re-requesting gate.
