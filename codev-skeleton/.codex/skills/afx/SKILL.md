@@ -69,6 +69,60 @@ afx send 0042 "PR approved, please merge"
 afx send 0585 "check the test output" --file /tmp/test-results.txt
 ```
 
+## afx interrupt
+
+Sends an ESC keystroke to a builder's PTY — the only thing that reaches it **mid-turn**.
+
+```
+afx interrupt <builder>
+```
+
+| Flag | Description |
+|------|-------------|
+| `--no-enter` | Send ESC alone, without the trailing Enter |
+
+A builder chaining foreground waits inside one turn queues every `afx send` unread — including your order
+to stop. ESC ends the turn so the queue processes. Distinct from `afx send --interrupt` (Ctrl+C).
+
+```bash
+afx interrupt 0042
+afx send 0042 "That producer died — stop waiting and report."
+```
+
+## afx refresh
+
+Refreshes a builder's context: save working state → `/clear` → re-orient. Use when a builder's context window
+is exhausted; `afx spawn --resume` reattaches the *same* conversation and does **not** give it a fresh one.
+
+```
+afx refresh <builder>
+```
+
+| Flag | Description |
+|------|-------------|
+| `--dry-run` | Print what would be sent; write nothing to the builder |
+| `--note <text>` | Extra context appended to the re-orientation |
+| `--file <path>` | Append file content (48KB max, read from *your* filesystem) |
+| `--interrupt-first` | ESC before the save request, for a builder already wedged |
+| `--mode <strict\|soft>` | Override mode if it cannot be detected |
+| `--timeout <seconds>` | Wait for the save-state receipt (default 300) |
+| `--min-bytes <n>` | Minimum state-file size to accept (default 1000) |
+| `--quiet-window <ms>` | Terminal silence counting as turn-ended (default 1500) |
+
+Every gate fails safe: if the state file never arrives, carries a stale nonce, is a stub, is still being
+written, or the builder will not go quiet, the command **aborts without clearing** and exits non-zero,
+naming the gate. Requires a harness with in-session context clearing (Claude Code); others abort loudly.
+
+`afx reset` is a deprecated alias: it still works, prints a one-line notice to stderr, and will be removed
+in a future release.
+
+```bash
+afx refresh 0042 --dry-run                # inspect first — touches nothing
+afx refresh 0042
+afx refresh 0042 --note "PR #90 merged while you were mid-phase. Rebase first."
+afx refresh 0042 --interrupt-first        # builder is wedged mid-turn
+```
+
 ## afx cleanup
 
 Removes a builder's worktree and branch after work is done.
