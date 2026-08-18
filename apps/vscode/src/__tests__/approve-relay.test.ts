@@ -63,20 +63,32 @@ describe('decideApprovalRelay', () => {
 });
 
 describe('buildRelayMessage', () => {
-  const msg = buildRelayMessage({ id: 'pir-1494', gateLabel: 'plan review', issueId: '1494' });
-
-  it('is a short, human-style notice naming the gate, builder, issue, and VS Code provenance', () => {
-    expect(msg).toBe('Human approved the plan review gate for pir-1494 (#1494) in VS Code.');
+  it('is an imperative relay instruction with a "pass it to the builder" cue and VS Code provenance', () => {
+    const msg = buildRelayMessage({ id: '158', gateLabel: 'plan review', issueId: '158' });
+    expect(msg).toBe('Approve the plan review gate for 158, please pass it to the builder (via VS Code).');
   });
 
-  it('does NOT name porch or spell out a command (the architect passes it on)', () => {
+  it('does NOT name porch or spell out a command (the builder runs it once relayed)', () => {
+    const msg = buildRelayMessage({ id: '158', gateLabel: 'plan review', issueId: '158' });
     expect(msg).not.toContain('porch');
     expect(msg).not.toContain('--a-human-explicitly-approved-this');
   });
 
+  it('does not render the issue number twice when the id already carries it', () => {
+    // id === issueId (numeric project id): no "(#158)".
+    expect(buildRelayMessage({ id: '158', gateLabel: 'plan review', issueId: '158' })).not.toContain('(#158)');
+    // id contains the issue number (prefixed id): still no separate "(#1494)".
+    expect(buildRelayMessage({ id: 'pir-1494', gateLabel: 'plan review', issueId: '1494' })).not.toContain('(#1494)');
+  });
+
+  it('appends the issue ref only when the id does not carry it', () => {
+    const m = buildRelayMessage({ id: 'task-abc', gateLabel: 'PR', issueId: '42' });
+    expect(m).toBe('Approve the PR gate for task-abc (#42), please pass it to the builder (via VS Code).');
+  });
+
   it('omits the issue ref when no issue id is known', () => {
     const m = buildRelayMessage({ id: 'pir-9', gateLabel: 'PR' });
-    expect(m).toBe('Human approved the PR gate for pir-9 in VS Code.');
+    expect(m).toBe('Approve the PR gate for pir-9, please pass it to the builder (via VS Code).');
   });
 });
 

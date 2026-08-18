@@ -60,12 +60,19 @@ export function decideApprovalRelay(
 }
 
 /**
- * The relay message body — a short, human-style notice to the architect that a
- * *human* approved the gate (that "in VS Code" is the provenance: a person
- * clicked the button, not an agent asserting it). It deliberately does not name
- * `porch` or spell out a command: the architect's own role/prompt already
- * covers passing the decision on to the builder, and the builder runs the
- * command. Keep it to the point, the way a person would tell the architect.
+ * The relay message body: a short, human-style instruction to the architect,
+ * phrased the way a person would ("Approve ..., please pass it to the builder"),
+ * not a passive "X was approved" notice. The imperative framing matters: a
+ * past-tense fact reads as "already done", so the architect never relays it and
+ * the builder stalls. "(via VS Code)" is the provenance (a person clicked the
+ * button, not an agent asserting it). The "please pass it to the builder" cue is
+ * load-bearing: it routes execution to the builder (builder-runs-it) rather than
+ * the architect running `porch approve` itself. It deliberately does not name
+ * `porch` or a command: the builder's own prompt covers running it once relayed.
+ *
+ * `id` is the builder handle the architect routes to; `issueId` is appended only
+ * when the id doesn't already carry it, so a builder whose id is the issue number
+ * (e.g. `158`, issue `#158`) doesn't render the number twice.
  */
 export function buildRelayMessage(args: {
   id: string;
@@ -73,8 +80,8 @@ export function buildRelayMessage(args: {
   issueId?: string | null;
 }): string {
   const { id, gateLabel, issueId } = args;
-  const issuePart = issueId ? ` (#${issueId})` : '';
-  return `Human approved the ${gateLabel} gate for ${id}${issuePart} in VS Code.`;
+  const issuePart = issueId && !id.includes(issueId) ? ` (#${issueId})` : '';
+  return `Approve the ${gateLabel} gate for ${id}${issuePart}, please pass it to the builder (via VS Code).`;
 }
 
 /** Result shape returned by `TowerClient.sendMessage` (Spec 1313 mailbox-first). */

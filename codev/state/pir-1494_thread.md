@@ -196,6 +196,20 @@ annotate the issue that the shipped design is builder-runs-it. Asked Amr whether
 REVIEW-ARTIFACT TODO still stands (see TRADEOFF block above): record that BUGFIX's structural-authorization
 canon is knowingly NOT extended to PIR/others; owner accepted with the argument in front of him.
 
+## E2E bug found + fixed (2026-08-18) — relay message was passive, architect misread it as "done"
+Amr's real VS Code test: architect received "Human approved the plan review gate for 158 (#158) in
+VS Code", read it as a COMPLETED FACT, said "all plans approved" and never relayed → builders stuck
+at plan-approval (nothing ran porch approve). Root cause = the message, not the code path.
+Fixes to buildRelayMessage:
+- Imperative, not past-tense: "Approve the <gate> gate for <id>, please pass it to the builder (via VS Code)."
+- "please pass it to the builder" cue is LOAD-BEARING: without it "Approve X" reads as "architect, you
+  approve it" → architect runs porch itself (architect-runs-it, wrong cwd/#1235). The cue pins it to
+  builder-runs-it.
+- "(via VS Code)" provenance at the very end (Amr's placement).
+- id/issueId dedup: no more "158 (#158)" (only append (#issue) when id doesn't already contain it).
+- No em dashes (Amr feedback: applies to generated strings too, not just prose).
+16 relay-core tests green, tsc/lint/esbuild clean.
+
 ## Status
 Implement committed (92a4ee58f code+tests, a60bcb2bb docs) + pushed. dev-approval gate PENDING. Amr
 owns dev-approval + pr; architect relays; I never run porch approve.
