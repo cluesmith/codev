@@ -70,6 +70,7 @@ import { join } from 'node:path';
 import {
   CHALLENGE_FILE_NAME,
   DEFAULT_CHALLENGE_MAX_AGE_MS,
+  MIN_ALLOWED_CHALLENGE_MAX_AGE_MS,
   DEFAULT_MIN_BYTES,
   MAX_NONCE_HEX_CHARS,
   MIN_ALLOWED_MIN_BYTES,
@@ -624,7 +625,7 @@ export async function runSelfRefresh(
     ['minBytes', minBytes, MIN_ALLOWED_MIN_BYTES],
     ['stabilityWindowMs', stabilityWindowMs, MIN_ALLOWED_STABILITY_WINDOW_MS],
     ['reentryDelaySeconds', reentryDelaySeconds, MIN_ALLOWED_REENTRY_DELAY_SECONDS],
-    ['challengeMaxAgeMs', challengeMaxAgeMs, 1],
+    ['challengeMaxAgeMs', challengeMaxAgeMs, MIN_ALLOWED_CHALLENGE_MAX_AGE_MS],
   ];
   for (const [name, value, floor] of parameterChecks) {
     if (!Number.isFinite(value) || value < floor) {

@@ -26,6 +26,7 @@ const {
   mockRunSelfRefresh,
   mockBeginSelfRefresh,
   mockExecFileSync,
+  mockWriteFileSync,
 } = vi.hoisted(() => ({
   mockGetBuilder: vi.fn(),
   mockSendMessage: vi.fn(),
@@ -38,6 +39,7 @@ const {
   mockRunSelfRefresh: vi.fn(),
   mockBeginSelfRefresh: vi.fn(),
   mockExecFileSync: vi.fn(),
+  mockWriteFileSync: vi.fn(),
 }));
 
 // Spread the original: the CLI-parser tests import all of cli.ts, which pulls
@@ -87,6 +89,12 @@ vi.mock('../commands/spawn-roles.js', () => ({
 // import all of cli.ts, whose transitive deps use `exec` and friends; a partial
 // mock makes those explode with "No export is defined on the mock" — a failure
 // about the mock, not about the code under test.
+// Spy on the real write so the dry-run assertion is about an observable effect.
+vi.mock('node:fs', async importOriginal => {
+  const actual = await importOriginal<typeof import('node:fs')>();
+  return { ...actual, writeFileSync: mockWriteFileSync };
+});
+
 vi.mock('node:child_process', async importOriginal => {
   const actual = await importOriginal<typeof import('node:child_process')>();
   return { ...actual, execFileSync: mockExecFileSync };
@@ -147,7 +155,7 @@ beforeEach(() => {
   mockDetectWorkspaceRoot.mockReturnValue('/tmp/ws');
   mockDetectCurrentBuilderId.mockReturnValue('spir-1470');
   mockGetBuilder.mockReturnValue(SELF);
-  mockSendMessage.mockResolvedValue({ ok: true, resolvedTo: 'spir-1470' });
+  mockSendMessage.mockResolvedValue({ ok: true, resolvedTo: 'spir-1470', scheduled: true });
   mockExecFileSync.mockReturnValue(Buffer.from(''));
   mockBeginSelfRefresh.mockReturnValue({
     nonce: 'abc123def456',
@@ -478,6 +486,27 @@ describe('port bindings', () => {
     expect((opts as { raw?: boolean }).raw).toBeUndefined();
   });
 
+  it('refuses when Tower accepted the re-entry but did NOT schedule it', async () => {
+    // A Tower that ignores deliverAfter reports ok and delivers immediately,
+    // which turns the re-entry and the not-yet-sent clear into the damaging
+    // race. Version skew is the realistic cause, and it is about to matter:
+    // Phase 8's live run drives a subject builder whose Tower may predate this.
+    mockSendMessage.mockResolvedValue({ ok: true, resolvedTo: 'spir-1470', scheduled: false });
+    mockRunSelfRefresh.mockImplementation(async (opts: Record<string, unknown>) => {
+      const terminal = opts.terminal as {
+        scheduleReentry: (m: string, d: number) => Promise<void>;
+      };
+      await expect(terminal.scheduleReentry('FRAME', 15)).rejects.toThrow(/did not schedule/i);
+      return { outcome: 'aborted', steps: [], statePath: '/s', failure: 'reentry-failed' };
+    });
+
+    const { selfRefresh } = await importCommand();
+    await selfRefresh({});
+    // Aborting here is the point: it happens BEFORE the clear, so an old Tower
+    // costs a refused refresh rather than a lost builder.
+    expect(process.exitCode).toBe(1);
+  });
+
   it('reports a failed Tower send as a thrown error, not a silent success', async () => {
     mockSendMessage.mockResolvedValue({ ok: false, error: 'tower said no' });
     mockRunSelfRefresh.mockImplementation(async (opts: Record<string, unknown>) => {
@@ -607,6 +636,37 @@ describe('safety flag validation', () => {
 // ---------------------------------------------------------------------------
 
 describe('begin', () => {
+  it('--dry-run writes NO challenge and invalidates none', async () => {
+    // Minting one would both write a file and INVALIDATE any challenge already
+    // outstanding, so a rehearsal would silently break the real handshake it
+    // was rehearsing.
+    //
+    // Asserted on the observable effect — did anything reach the filesystem —
+    // rather than on a flag, because a flag can be threaded correctly and still
+    // land on a port that writes.
+    mockBeginSelfRefresh.mockImplementation(
+      (opts: { fs: { write: (p: string, c: string) => void }; worktree: string }) => {
+        opts.fs.write(`${opts.worktree}/.builder-refresh-challenge`, 'challenge');
+        return {
+          nonce: 'abc123def456',
+          statePath: `${opts.worktree}/.builder-state.md`,
+          challengePath: `${opts.worktree}/.builder-refresh-challenge`,
+          saveRequest: 'REQ',
+        };
+      },
+    );
+
+    mockWriteFileSync.mockClear();
+    await (await importCommand()).selfRefresh({ begin: true, dryRun: true });
+    expect(mockWriteFileSync, 'dry-run must not touch the filesystem').not.toHaveBeenCalled();
+
+    // Control: the same probe DOES write when not rehearsing, so the assertion
+    // above cannot pass merely because the probe never ran.
+    mockWriteFileSync.mockClear();
+    await (await importCommand()).selfRefresh({ begin: true });
+    expect(mockWriteFileSync).toHaveBeenCalled();
+  });
+
   it('does not require Tower, because it destroys nothing', async () => {
     // Requiring a live Tower here would fail the harmless half of the handshake
     // for a reason that only matters to the destructive half.

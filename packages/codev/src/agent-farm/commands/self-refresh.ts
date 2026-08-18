@@ -178,12 +178,25 @@ export async function selfRefresh(options: SelfRefreshOptions): Promise<void> {
     // No Tower needed: begin writes one file and prints. Requiring a live Tower
     // here would make the harmless half of the handshake fail for a reason that
     // only matters to the destructive half.
+    //
+    // `--dry-run` is honoured here too. It is documented as writing and
+    // consuming nothing, and minting a challenge would both write a file and
+    // INVALIDATE any challenge already outstanding — so a rehearsal would
+    // silently break the real handshake it was rehearsing.
     const result = beginSelfRefresh({
-      fs,
+      fs: options.dryRun ? { ...fs, write: () => {} } : fs,
       clock: realClock,
       worktree: builder.worktree,
       boundary: options.boundary,
     });
+
+    if (options.dryRun) {
+      logger.info('DRY RUN — no challenge was written and none was invalidated.');
+      logger.info(`Would write the challenge to: ${result.challengePath}`);
+      console.log('');
+      console.log(result.saveRequest);
+      return;
+    }
 
     logger.success(`Challenge issued (${result.nonce}).`);
     logger.info(`Write your working state to: ${result.statePath}`);
@@ -432,6 +445,24 @@ function buildSelfTerminalPort(
         deliverAfter: delaySeconds,
       });
       if (!result.ok) throw new Error(result.error || 'Re-entry scheduling failed');
+      // `ok` alone is not enough: a Tower that does not honour `deliverAfter`
+      // reports success and delivers the frame IMMEDIATELY, which turns the
+      // re-entry and the not-yet-sent `/clear` into the race the spec calls the
+      // damaging direction — the frame lands, the clear wipes it, and nobody
+      // comes back.
+      //
+      // Version skew is the realistic cause and it is about to matter: the live
+      // run in Phase 8 drives a subject builder whose Tower may predate this.
+      // Throwing here aborts BEFORE the clear, so an old Tower costs a refused
+      // refresh rather than a lost builder.
+      if (result.scheduled !== true) {
+        throw new Error(
+          'Tower accepted the re-entry but did not schedule it (no `scheduled` flag). ' +
+            'That means it would be delivered immediately and then wiped by the clear. ' +
+            'Refusing to continue — a Tower that ignores deliverAfter cannot be used for a ' +
+            'self-refresh.',
+        );
+      }
     },
     /**
      * `raw: true`, NOT `escape: true` — the same trap `afx refresh` documents.

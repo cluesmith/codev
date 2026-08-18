@@ -553,6 +553,9 @@ sits between here and there. **Do not write the review without walking this list
      stability gate already catches.
    - `extractPlanPhases` silently invents a `phase_1` for a plan with no phases JSON.
    - `codev/protocols/spir/protocol.json`'s `$schema` path does not resolve (Phase 7 fixes).
+   - **Phase 7 stale-`--delay`-doc list is FOUR files + one more**: `cli.ts:455`, the four
+     `arch-save/SKILL.md` copies, AND `types.ts`'s `SendOptions.delay` comment. I had missed the
+     last one.
 11. **LESSON, architect-routed to `lessons-learned.md` (COLD tier)** — it sharpens the existing HOT
    lesson "'tests pass' is not 'it works'" by supplying a MECHANISM and a CURE rather than a
    warning:
@@ -1018,3 +1021,29 @@ Two mock-completeness failures on the way: importing all of cli.ts drags in tran
 partial `vi.mock` factories exploded with "No export is defined on the mock" for `exec` and
 `AGENT_FARM_DIR`. Fixed by spreading `importOriginal()` in both. Worth remembering: a partial module
 mock is fine for a narrow import and lethal for a wide one.
+
+### Phase 4 iter2 (claude): COMMENT — criteria met, 5 non-blocking
+
+**The one that matters before Phase 8**: `scheduleReentry` accepted `result.ok` without checking
+`result.scheduled`. A Tower that does not honour `deliverAfter` reports ok and delivers the frame
+IMMEDIATELY — turning the re-entry and the not-yet-sent `/clear` into the damaging race. **Version
+skew is the realistic cause and it is about to matter**: the Phase 8 live run drives a subject
+builder whose Tower may predate this. Now throws, which aborts BEFORE the clear, so an old Tower
+costs a refused refresh rather than a lost builder.
+
+Also fixed: `--begin --dry-run` was minting and OVERWRITING the challenge despite dry-run being
+documented as writing nothing — a rehearsal would have silently invalidated the real handshake it
+was rehearsing. And the core's `challengeMaxAgeMs` floor was a bare `1` while the command used the
+named constant.
+
+**I nearly shipped a vacuous test while fixing this.** My first dry-run test declared
+`const written: string[] = []` and never pushed to it, so `expect(written).toHaveLength(0)` passed
+trivially — the exact pattern I had just written a rebuttal about. Caught it on re-read. Rewritten
+to assert an OBSERVABLE EFFECT (spy on `writeFileSync`) **with a control arm** proving the same
+probe DOES write when not rehearsing, so it cannot pass merely because the probe never ran.
+
+Rule worth keeping: **a negative assertion needs a positive control.** "X did not happen" is only
+meaningful if the same setup demonstrably makes X happen when it should.
+
+For Phase 7's correction list: `types.ts` `SendOptions.delay` carries the stale "not persisted"
+claim too — I had cli.ts and the four arch-save copies but missed this one.
