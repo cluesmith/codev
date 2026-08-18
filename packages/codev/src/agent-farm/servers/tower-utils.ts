@@ -683,3 +683,26 @@ export function serveStaticFile(filePath: string, res: ServerResponse): boolean 
     return false;
   }
 }
+
+/**
+ * Resolve the launch command to PERSIST for a session (PIR #1475).
+ *
+ * `PtySession.command` prefers the identity the attached shellper reported (its
+ * WELCOME frame) over the one Tower recorded, so writing that value back keeps
+ * the fallback SSOT — `terminal_sessions.command`, Spec 1313 migration v16 —
+ * converging on the truth instead of drifting from it.
+ *
+ * The `|| null` is load-bearing, not defensive style. `createSessionRaw` defaults
+ * `command` to `''` for an unknown agent (`pty-manager.ts`), so a legacy row
+ * (`command` NULL) adopted with a legacy shellper yields `''` here. The Spec 1313
+ * self-heal is `dbSession.command ?? restartOptions?.command`, and `'' ?? x` is
+ * `''` — `??` catches only null/undefined. Persisting `''` would therefore turn a
+ * healable NULL row into one that can never resolve a profile again, breaking the
+ * exact path Spec 1313 fixed. Normalizing back to NULL keeps the heal alive.
+ *
+ * Lives here rather than in `tower-terminals.ts` so `tower-instances.ts` can use
+ * it without an import cycle (`tower-terminals` already imports `tower-instances`).
+ */
+export function persistableCommand(session: { command: string } | null | undefined): string | null {
+  return session?.command || null;
+}

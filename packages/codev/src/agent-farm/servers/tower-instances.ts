@@ -30,6 +30,7 @@ import {
   siblingRegistrationIsLive,
   buildArchitectCrashLoopFallback,
   buildArchitectFreshLaunch,
+  persistableCommand,
 } from './tower-utils.js';
 import {
   reconcileArchitectSessionHolder,
@@ -649,8 +650,13 @@ export async function launchInstance(workspacePath: string): Promise<{ success: 
 
             // Spec 755: default architect is named 'main'; role_id stores the name.
             entry.architects.set('main', session.id);
+            // PIR #1475: persist what the session reports. A fresh spawn is the
+            // no-op case — the shellper's WELCOME echoes the `cmd` we just gave
+            // it — but the accessor keeps one rule at every persist site: the row
+            // records what is RUNNING, not what was requested.
             _deps.saveTerminalSession(session.id, resolvedPath, 'architect', 'main', shellperInfo.pid,
-              shellperInfo.socketPath, shellperInfo.pid, shellperInfo.startTime, null, workspacePath, cmd);
+              shellperInfo.socketPath, shellperInfo.pid, shellperInfo.startTime, null, workspacePath,
+              persistableCommand(ptySession) ?? cmd);
 
             // Spec 755: persist to local state.db (architect table) so afx
             // status / stop see the architect via loadState's scalar shim.
@@ -1167,9 +1173,12 @@ export async function addArchitect(
       }
 
       entry.architects.set(name, session.id);
+      // PIR #1475: hydrated identity wins; a fresh spawn echoes `cmd` (see the
+      // main-architect launch above).
       _deps.saveTerminalSession(
         session.id, resolvedPath, 'architect', name, shellperInfo.pid,
-        shellperInfo.socketPath, shellperInfo.pid, shellperInfo.startTime, null, workspacePath, cmd,
+        shellperInfo.socketPath, shellperInfo.pid, shellperInfo.startTime, null, workspacePath,
+        persistableCommand(ptySession) ?? cmd,
       );
 
       // Spec 755: persist to local state.db so the architect appears in

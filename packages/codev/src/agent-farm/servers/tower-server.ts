@@ -17,7 +17,7 @@ import { Command } from 'commander';
 import { WebSocketServer } from 'ws';
 import { SessionManager } from '../../terminal/session-manager.js';
 import type { SSEClient } from './tower-types.js';
-import { startRateLimitCleanup } from './tower-utils.js';
+import { startRateLimitCleanup, persistableCommand } from './tower-utils.js';
 import { sweepShellperHusks, resolveHuskGraceMs } from './shellper-husk-sweep.js';
 import {
   sweepSessionLogs,
@@ -46,6 +46,7 @@ import {
   getTerminalManager,
   getWorkspaceTerminalsEntry,
   saveTerminalSession,
+  updateTerminalCommand,
   deleteTerminalSession,
   deleteWorkspaceTerminalSessions,
   deleteFileTabsForWorkspace,
@@ -539,7 +540,17 @@ async function bootSequence(): Promise<void> {
       pid = info.pid;
     }
     ptySession.attachShellper(client, Buffer.alloc(0), pid, ptySession.shellperSessionId ?? sessionId);
-    log('INFO', `Shellper session ${sessionId} re-attached to terminal ${ptySession.id}`);
+    // PIR #1475: this is the one attach site with no row rewrite behind it, and
+    // the client is a FRESH connection — its WELCOME carries the shellper's
+    // current argv, which may differ from what the row holds (a relaunch swapped
+    // it, or the row was healed from config). Write it back so the fallback SSOT
+    // converges instead of drifting. No-ops when unchanged.
+    updateTerminalCommand(ptySession.id, persistableCommand(ptySession));
+    log(
+      'INFO',
+      `Shellper session ${sessionId} re-attached to terminal ${ptySession.id} ` +
+        `(identity: ${ptySession.command || 'unknown'}, source: ${ptySession.identitySource})`,
+    );
   });
   const staleCleaned = await shellperManager.cleanupStaleSockets();
   if (staleCleaned > 0) {
