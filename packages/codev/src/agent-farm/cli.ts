@@ -580,6 +580,50 @@ export async function runAgentFarm(args: string[]): Promise<void> {
     true,
   );
 
+  // Self-refresh — a builder refreshing its OWN context (Spec 1470).
+  //
+  // No positional argument, deliberately: with nothing to pass there is nothing
+  // to point at another session, so "cannot target another builder" holds by
+  // construction rather than by a validation rule. Identity comes from the
+  // worktree via the #1094 anti-spoofing resolver.
+  program
+    .command('self-refresh')
+    .description('Refresh THIS builder\'s own context: verify your saved state, clear, re-orient')
+    .option('--begin', 'Issue the challenge and print what to save (step 1 of 2)')
+    .option('--boundary <id>', 'Protocol boundary this refresh is for (e.g. enter:review)')
+    .option('--note <text>', 'Addendum appended to the re-orientation')
+    .option('--dry-run', 'Verify and assemble, but send nothing and clear nothing')
+    .option('--allow-dirty', 'Proceed despite uncommitted tracked changes')
+    .option('--mode <mode>', 'Override the builder mode (strict|soft) if it cannot be detected')
+    .option('--min-bytes <n>', 'Minimum state-file size to accept as substantive')
+    .option('--delay <seconds>', 'Seconds Tower holds the re-entry before delivering it')
+    .option('--stability-window <ms>', 'How long the state file must be unchanged')
+    .option('--challenge-max-age <ms>', 'Reject a challenge older than this')
+    .action(async options => {
+      const { selfRefresh } = await import('./commands/self-refresh.js');
+      try {
+        if (options.mode && options.mode !== 'strict' && options.mode !== 'soft') {
+          logger.error(`--mode must be 'strict' or 'soft', got '${options.mode}'`);
+          process.exit(1);
+        }
+        await selfRefresh({
+          begin: options.begin,
+          boundary: options.boundary,
+          note: options.note,
+          dryRun: options.dryRun,
+          allowDirty: options.allowDirty,
+          mode: options.mode,
+          minBytes: options.minBytes,
+          delay: options.delay,
+          stabilityWindow: options.stabilityWindow,
+          challengeMaxAge: options.challengeMaxAge,
+        });
+      } catch (error) {
+        logger.error(error instanceof Error ? error.message : String(error));
+        process.exit(1);
+      }
+    });
+
   // Bench command - consultation benchmarking
   program
     .command('bench')

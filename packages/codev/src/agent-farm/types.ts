@@ -208,6 +208,37 @@ export interface ResetOptions {
 }
 
 /**
+ * Options for `afx self-refresh` (Spec 1470).
+ *
+ * NOTE what is absent: there is no `builder` field. This command refreshes the
+ * builder that RUNS it, and identity is derived from the worktree rather than
+ * supplied — so "cannot target another session" is structural rather than a
+ * validation rule a later edit could drop.
+ */
+export interface SelfRefreshOptions {
+  /** Mode flag, not a target: mint a challenge and print the save request. */
+  begin?: boolean;
+  /** Boundary id from porch (e.g. `enter:review`), bound into the challenge. */
+  boundary?: string;
+  /** Inline addendum appended to the re-orientation. */
+  note?: string;
+  /** Report what would happen; send nothing, clear nothing, consume nothing. */
+  dryRun?: boolean;
+  /** Proceed despite uncommitted tracked changes. Off by default. */
+  allowDirty?: boolean;
+  /** Override when the builder prompt file is gone. */
+  mode?: 'strict' | 'soft';
+  /** Minimum state-file size to count as substantive. */
+  minBytes?: number;
+  /** Seconds Tower holds the re-entry before delivering it. */
+  delay?: number;
+  /** ms the state file must be unchanged across two observations. */
+  stabilityWindow?: number;
+  /** ms after which an unused challenge is refused. */
+  challengeMaxAge?: number;
+}
+
+/**
  * User-facing config.json structure
  */
 export interface UserConfig {

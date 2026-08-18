@@ -799,3 +799,36 @@ Keep porch output un-filtered.** (I caught this one only because I stopped summa
 to task subjects after missing the Phase 2 one.)
 
 Ad-hoc consults launched: `1470-adhoc-1cad0ec75-{codex,claude}.txt`.
+
+## 2026-08-18 — Implement Phase 4 (afx self-refresh command)
+
+`commands/self-refresh.ts` + CLI registration + `SelfRefreshOptions`. Thin wrapper, same shape as
+`reset.ts`: resolve identity, bind real ports, print the report. All decisions live in
+`reset/self.ts`.
+
+**All three carried-forward items landed:**
+1. `expectedBoundary` is ALWAYS passed — never conditionally. Test asserts the KEY is present even
+   when undefined, so an omission is distinguishable from an explicit no-expectation.
+2. Every safety flag validated at the CLI boundary (`--min-bytes`, `--delay`,
+   `--stability-window`, `--challenge-max-age`), matrix-tested 4 flags × 3 bad values. The core
+   validates too — complementary, since they catch different mistakes.
+3. NO Tower call that can fail after the clear. `scheduleReentry` remains the only pre-clear Tower
+   touch, and the port interface has exactly two methods so adding one is a visible decision.
+
+**Design property worth keeping**: the command takes NO positional argument. `--begin` is a mode
+flag, not a target. "Cannot target another session" is therefore structural — with nothing to pass,
+there is nothing to point elsewhere — rather than a validation rule a later edit could drop.
+
+**Tests (33)**: identity derivation + all four refusal paths; the raw-vs-escape wiring (the mistake
+the orchestrator physically cannot see); deliverAfter vs raw for the re-entry; a test that drives
+the REAL port bindings through a mocked orchestrator and asserts every Tower call addresses the
+derived self id — including one where a second builder exists in the registry, which is where a
+target resolved from anywhere but the worktree would show up.
+
+Also: `begin` deliberately does NOT require Tower. It writes one file and prints; requiring a live
+Tower would fail the harmless half of the handshake for a reason that only matters to the
+destructive half.
+
+One bug caught by typecheck: I guessed `fetchIssue(issueNumber, forge)` instead of reading its
+signature — it takes `{cwd, forgeConfig}`. Fixed by copying reset.ts's `fetchIssuePayload` verbatim.
+Same "reasoning about code I read around rather than read" pattern; typecheck caught it this time.
