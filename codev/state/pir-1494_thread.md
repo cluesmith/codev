@@ -72,7 +72,22 @@ Four mid-turn architect corrections landed while at gate; revised the plan:
   DashboardState.architects TYPE COMMENT (api.ts:80-86) claims "registered" but server fills via
   liveArchitects — stale comment, noted not fixed (out of scope).
 
+## Rebase on main (2026-08-18)
+Rebased builder/pir-1494 onto origin/main (was 115 commits behind; clean, no conflicts). porch state
+intact (still WAITING FOR HUMAN APPROVAL at plan-approval). Re-verified EVERY file:line in the plan:
+- approve.ts (:69/:114/:136/:148/:160) and builder-grouping.ts:122 — UNCHANGED (untouched by the 115).
+- api.ts spawnedByArchitect :45/:201, overview.architects :305 (+liveness comment :295), DashboardState
+  :80-86 — all still exact. sendMessage :774 + held/delivered fields intact.
+- Role docs architect.md:39 / builder.md:26, all 5 PIR prompt sites, bugfix anchor protocol.md:38 +
+  pr.md:64 — all exact. Twin parity CONFIRMED (all 5 key files byte-identical codev/ vs skeleton).
+- Gate enumeration re-run from protocol.json: identical to plan table. release still codev-only.
+- ONLY drift: tower-routes.ts liveArchitects call sites shifted → updated plan citations to :1087,
+  :1163, :2776 and the getArchitects note to :1080-1081 (+ state.ts:511). api.ts range → :295-305.
+- Only 1 of the 115 commits touched a target file: an auth-header rename in tower-client.ts
+  (codev-web-key→codev-tower-key) — does NOT affect sendMessage's held/delivered contract.
+Plan remains valid; implementation targets stable. Force-pushed rebased branch.
+
 ## Status
-Plan committed + revised twice. Awaiting plan-approval gate (Amr owns all three gates; I never run
-porch approve). Both route-to-main items now resolved and recorded in the plan. Code change (relay +
-held-first-class) unchanged.
+Plan committed + revised twice + rebased on main. Awaiting plan-approval gate (Amr owns all three
+gates; I never run porch approve). Both route-to-main items resolved and recorded. Code change (relay
++ held-first-class) unchanged and re-verified against latest main.

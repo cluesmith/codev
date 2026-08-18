@@ -57,7 +57,7 @@ is #1406. A misrouted status line is noise; a misrouted *approval* sends a human
 an architect that did not spawn the builder. The null / offline / no-live-architect cases are decided
 explicitly below.
 
-**The input `overview.architects` reports LIVENESS, not registration** (`api.ts:298-305`: only
+**The input `overview.architects` reports LIVENESS, not registration** (`api.ts:295-305`: only
 architects with a live session are listed; `[]` when the workspace has *no architects* **or none are
 live**). This distinction is load-bearing for the last branch and is why the earlier CLI-only framing
 was defective — see the investigation note after the table.
@@ -104,9 +104,9 @@ Rationale for each non-happy branch:
 > separately from liveness; otherwise fall back to option (b), announcing only what liveness knows.
 > **I checked (a) against the server and it is not cheaply reachable:** both client-reachable
 > endpoints — `/api/overview` and `/api/state` — build their architect list from the **same**
-> `liveArchitects` helper (`tower-routes.ts:1077`, `:1153`, `:2709`), which skips dead sessions. The
-> persisted registration table exists server-side (`state.ts getArchitects`, noted at
-> `tower-routes.ts:1070-1071`) but is exposed over **no** client endpoint. Surfacing it is **new wire
+> `liveArchitects` helper (`tower-routes.ts:1087`, `:1163`, `:2776`), which skips dead sessions. The
+> persisted registration table exists server-side (`state.ts getArchitects` at `state.ts:511`, noted
+> at `tower-routes.ts:1080-1081`) but is exposed over **no** client endpoint. Surfacing it is **new wire
 > data — the main architect's surface, which I may not add unilaterally.** So per the ruling I take
 > **option (b)**: the branch is named `no-live-architect` (not `direct-fallback`/CLI-only), and the
 > announcement is liveness-truthful.
