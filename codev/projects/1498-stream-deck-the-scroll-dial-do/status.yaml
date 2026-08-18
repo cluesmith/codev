@@ -10,12 +10,13 @@ gates:
     requested_at: '2026-08-18T02:09:21.146Z'
     approved_at: '2026-08-18T02:30:52.030Z'
   dev-approval:
-    status: pending
+    status: approved
     requested_at: '2026-08-18T02:37:13.748Z'
+    approved_at: '2026-08-18T03:03:55.314Z'
   pr:
     status: pending
 iteration: 1
 build_complete: false
 history: []
 started_at: '2026-08-18T02:05:51.288Z'
-updated_at: '2026-08-18T02:37:13.749Z'
+updated_at: '2026-08-18T03:03:55.315Z'
