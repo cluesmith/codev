@@ -1,3 +1,8 @@
+---
+approved: 2026-08-18
+validated: [codex, claude]
+---
+
 # Plan: Automatic Builder Context Refresh at Porch Phase Boundaries
 
 **Specification**: [codev/specs/1470-automatic-builder-context-refr.md](../specs/1470-automatic-builder-context-refr.md)
