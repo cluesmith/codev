@@ -14,10 +14,10 @@ plan_phases:
     status: complete
   - id: phase_4_selfrefresh_command
     title: afx self-refresh command and identity authorization
-    status: in_progress
+    status: complete
   - id: phase_5_skill_and_reentry
     title: Builder refresh skill and re-entry frame
-    status: pending
+    status: in_progress
   - id: phase_6_status_visibility
     title: Stalled-refresh visibility via porch-owned acknowledgment
     status: pending
@@ -27,7 +27,7 @@ plan_phases:
   - id: phase_8_end_to_end
     title: End-to-end verification including live run
     status: pending
-current_plan_phase: phase_4_selfrefresh_command
+current_plan_phase: phase_5_skill_and_reentry
 gates:
   spec-approval:
     status: approved
@@ -41,8 +41,8 @@ gates:
     status: pending
   verify-approval:
     status: pending
-iteration: 3
-build_complete: true
+iteration: 1
+build_complete: false
 history:
   - iteration: 1
     plan_phase: phase_1_boundary_declaration
@@ -165,7 +165,7 @@ history:
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/spir-1470/codev/projects/1470-automatic-builder-context-refr/1470-phase_4_selfrefresh_command-iter3-claude.txt
 started_at: '2026-08-18T00:15:05.131Z'
-updated_at: '2026-08-18T23:34:57.695Z'
+updated_at: '2026-08-18T23:34:59.512Z'
 force_advanced:
   phase: phase_4_selfrefresh_command
   iteration: 3
