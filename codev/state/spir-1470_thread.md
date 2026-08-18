@@ -413,3 +413,21 @@ state as a side effect.
 
 **Open for the architect**: the ASPIR fix is a behavior change beyond Spec 1470 (single-shot →
 real per-plan-phase cycle). Their call whether it ships in this PR or splits out.
+
+### ARCHITECT RULING on the ASPIR fix (2026-08-18)
+
+**SHIP IT IN THIS PR.** Rationale: the spec's ASPIR deliverable is unreachable without it, and
+splitting would make this PR depend on a second lane for a small, documented, regression-tested
+change.
+
+**Carry into the PR body — do not lose this:**
+- Add a **"Pre-existing fix"** section referencing **issue #1503** (ASPIR implement single-shot;
+  ungated direct-advance never extracts plan_phases).
+- State that #1503 **closes with this PR**.
+
+**Endorsed as recorded**: the no-retroactive-repair sub-decision (transition-only;
+repair-by-human-tool-if-ever; #1408 harm-class reasoning). That rationale is also on issue #1503
+now.
+
+**Carry into the review doc**: the nine repaired vacuous negatives deserve a line in the lessons
+section.
