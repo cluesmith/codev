@@ -4,6 +4,7 @@ import { wireCommandProvider } from './command-relay.js';
 import { fireActivity, setActivityHooks } from './activity-hooks.js';
 import { loadActivityHooks } from './load-activity-hooks.js';
 import { TerminalManager } from './terminal-manager.js';
+import { openResolvedArchitect } from './open-architect.js';
 import { OverviewCache } from './views/overview-data.js';
 import { spawnBuilder } from './commands/spawn.js';
 import { sendMessage } from './commands/send.js';
@@ -917,15 +918,16 @@ export async function activate(context: vscode.ExtensionContext) {
 					}
 				}
 
-				const match = architects.find(a => a.name === targetName);
-				const fallback = targetName === 'main' ? architects[0] : undefined;
-				const target = match ?? fallback;
-				if (target?.terminalId) {
-					await terminalManager?.openArchitect(target.terminalId, targetName, true);
-					return targetName;
-				}
-				vscode.window.showWarningMessage(`Codev: No '${targetName}' architect found — is the workspace activated?`);
-				return undefined;
+				// Issue 1497: resolve by exact name and open under the resolved
+				// architect's OWN name. A non-live `main` refuses with the existing
+				// warning rather than substituting `architects[0]` while presenting
+				// as `main` (which would cache the wrong architect under
+				// `architect:main` and capture text injected at `main`).
+				return await openResolvedArchitect(architects, targetName, {
+					openArchitect: (terminalId, name, focus) =>
+						terminalManager?.openArchitect(terminalId, name, focus) ?? Promise.resolve(),
+					warn: message => { vscode.window.showWarningMessage(message); },
+				});
 			} catch {
 				vscode.window.showErrorMessage('Codev: Failed to get workspace state');
 				return undefined;

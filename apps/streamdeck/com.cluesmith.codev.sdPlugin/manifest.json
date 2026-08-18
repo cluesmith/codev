@@ -275,10 +275,10 @@
         "Encoder"
       ],
       "Encoder": {
-        "layout": "layouts/label.json",
+        "layout": "layouts/title-value.json",
         "TriggerDescription": {
           "Rotate": "Scroll up / down",
-          "Push": "Forward selection to builder"
+          "Push": "Forward the selection to the builder now, or queue it, per workspace mode"
         }
       },
       "States": [
