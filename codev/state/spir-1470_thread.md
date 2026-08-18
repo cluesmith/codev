@@ -1087,3 +1087,52 @@ Also taken:
 - Parser test `accepts the no-argument form` got a POSITIVE CONTROL — it now first asserts a
   positional IS rejected by the same harness, so "accepted" cannot pass because everything is
   accepted.
+
+## 2026-08-18 — DECISION RECORDED (architect asked): --boundary single source vs parity test
+
+The flag had reached THREE emission points (porch task text, CLI follow-up, and the skill about to
+be written in Phase 5), and had already been dropped at two of them in consecutive commits.
+
+**Decision: SINGLE SOURCE for the two TypeScript sites, DEFERRAL for the skill, parity test for the
+deferral.** Not a parity test across three copies.
+
+- `packages/codev/src/lib/self-refresh-invocation.ts` exports `selfRefreshInvocation(boundary?)`
+  returning `{begin, execute}`. Both porch's `buildRefreshTask` and the CLI's `--begin` follow-up
+  now call it. Zero hand-typed invocations remain in TS.
+- **Location**: `src/lib/`, because the established import direction is agent-farm → porch
+  (spawn.ts imports porch/artifacts). Putting the helper in agent-farm and importing it from porch
+  would reverse that; `src/lib/` is already a dependency of both.
+- **The skill (Phase 5) will DEFER, not restate** — it tells the builder to run the exact commands
+  porch's refresh task supplied. Markdown cannot import, so the only alternatives were a third
+  hand-written copy plus a parity test, or no copy at all. **Deferring beats duplicating-and-
+  checking**: a copy that is merely checked still has to be kept correct in two places, and the
+  check only fires after someone has already got it wrong.
+- Parity test in Phase 5 asserts the skill contains NO hand-written `afx self-refresh` invocation
+  that omits `--boundary`.
+
+Also handled: the boundary is now shell-quoted with proper escaping, which the two hand-written
+copies were not doing.
+
+### MUTATION CHECK caught my own vacuous test — before a reviewer did
+
+After writing the single-source sweep, I ran the check I should have been running all along:
+**inject the regression and confirm the test fails.**
+
+Injected `logger.info('When the file is written, run: afx self-refresh');` — the exact bug shape the
+sweep exists to catch. **The sweep PASSED.** Vacuous.
+
+Cause: my regex was `/['"`]afx self-refresh/`, requiring a quote IMMEDIATELY before the command. The
+injected line has the quote at the start of the sentence, not adjacent to the command — so the
+detector only caught invocations at the very start of a string literal, which is the rarer form.
+
+Widened to "any non-comment line mentioning the command that does not use the helper", re-ran the
+mutation, confirmed it now FAILS with a message naming the fix, then restored the real code and
+confirmed green.
+
+**This is the eighth vacuous test on this project and the FIRST I caught myself.** The difference
+was purely procedural: I ran the mutation instead of reading the code and being satisfied. Seven
+reviewer-found instances, and the moment I actually tested the test, it took one attempt.
+
+**Standing practice for the rest of this project**: after writing any test whose value is that it
+FAILS under some condition, produce that condition and watch it fail. Reading a test proves it
+compiles; mutating proves it discriminates.

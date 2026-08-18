@@ -67,6 +67,7 @@ import {
 } from './reset/self.js';
 import type { IssuePayload } from './reset/reorient.js';
 import type { CustomHarnessConfig } from '../utils/harness.js';
+import { selfRefreshInvocation } from '../../lib/self-refresh-invocation.js';
 import type { SelfRefreshOptions } from '../types.js';
 
 // ============================================================================
@@ -244,10 +245,9 @@ export async function selfRefresh(options: SelfRefreshOptions): Promise<void> {
     // omission had already made the guard inert once, in porch's task text —
     // fixing that and leaving this would be the same mistake at a second
     // instructed workflow.
-    const followUp = options.boundary
-      ? `afx self-refresh --boundary '${options.boundary}'`
-      : 'afx self-refresh';
-    logger.info(`When the file is written, run: ${followUp}`);
+    logger.info(
+      `When the file is written, run: ${selfRefreshInvocation(options.boundary).execute}`,
+    );
     return;
   }
 

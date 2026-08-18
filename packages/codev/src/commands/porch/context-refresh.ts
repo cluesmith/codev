@@ -39,6 +39,7 @@
  * Asymmetric costs, so the design fails toward doing nothing.
  */
 
+import { selfRefreshInvocation } from '../../lib/self-refresh-invocation.js';
 import type { ContextRefreshConfig, PorchTask, ProjectState, Protocol } from './types.js';
 
 // ============================================================================
@@ -140,6 +141,9 @@ export function shouldRefresh(
  * paths converge on the same next command whether or not the clear lands.
  */
 export function buildRefreshTask(boundary: string): PorchTask {
+  // Single source: see `lib/self-refresh-invocation.ts` for why this is not
+  // typed out here. Two hand-written copies have already dropped the flag.
+  const invocation = selfRefreshInvocation(boundary);
   return {
     subject: 'Refresh your context',
     activeForm: 'Refreshing context',
@@ -154,9 +158,9 @@ export function buildRefreshTask(boundary: string): PorchTask {
       'Run the builder-refresh procedure:',
       '',
       '```bash',
-      `afx self-refresh --begin --boundary '${boundary}'   # issue the challenge`,
+      `${invocation.begin}   # issue the challenge`,
       '# ...write your working state to the file it names...',
-      `afx self-refresh --boundary '${boundary}'           # verify, then clear and re-orient`,
+      `${invocation.execute}   # verify, then clear and re-orient`,
       '```',
       '',
       'Pass `--boundary` on BOTH commands. It binds the challenge to this boundary, so a',
