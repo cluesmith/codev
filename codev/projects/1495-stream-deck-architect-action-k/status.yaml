@@ -1,0 +1,18 @@
+id: '1495'
+title: stream-deck-architect-action-k
+protocol: pir
+phase: plan
+plan_phases: []
+current_plan_phase: null
+gates:
+  plan-approval:
+    status: pending
+  dev-approval:
+    status: pending
+  pr:
+    status: pending
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-08-18T00:50:28.125Z'
+updated_at: '2026-08-18T00:50:28.126Z'
