@@ -234,5 +234,48 @@ and nothing here justifies displacing an existing entry:
   wait on loaded content, and assert the status code because auth failures render as tidy error
   states.
 
-Next: open the PR, record with porch, `porch done` triggers the single 3-way consult, then the
-`pr` gate. **Park it open — never merge, never close #1450.** We are not maintainers here.
+PR #1510 opened and recorded with porch. `Fixes #1450` kept per architect (matches program
+precedent and the #1483 two-phase signal — the issue closing exactly at maintainer merge is the
+intended semantics).
+
+## Consult round (2026-08-18) — APPROVE / COMMENT / APPROVE, all non-blocking
+
+Gemini APPROVE, Codex COMMENT, Claude APPROVE; plus the architect's own integration review
+(COMMENT). Nine distinct findings, **every one real**, all fixed. Verified each against the files
+before acting rather than taking the summaries at face value — which mattered, because the one I
+could *not* reproduce was the architect's jsdoc typo (`/api/inbox:id`); the file already read
+`/api/inbox/:id`, so I reported "not reproduced" instead of making a cosmetic no-op edit.
+
+The two that actually mattered:
+
+1. **`handleInboxList` doc/code disagreement (Codex + architect).** My docstring bragged that an
+   empty `workspaceOverride` stays scoped. It didn't — `rawWorkspace ? … : undefined` turned it
+   into an all-workspaces query. Unreachable today (the dispatcher 400s a missing prefix), but I
+   had written a security guarantee the code did not make. Fixed by making the code true rather
+   than softening the comment: a scoped call with a blank override scopes to `''`, matching no
+   rows. Needed a narrow `export` of the handler to test it, since the branch is unreachable
+   through `handleRequest` — documented as a test seam at the export.
+2. **My review file's test counts were wrong.** Claimed 20 new component tests / 37 total; the
+   real numbers from the merge-base are 27 + 10 + 12 = **49**. I had eyeballed rather than
+   counted. Corrected. A retrospective is durable team knowledge — wrong numbers in it are worse
+   than no numbers.
+
+Also fixed: arch.md paragraph splice (the pruning/cron sentences got glued onto my new
+paragraph — **second splice of this kind this project**, after the api.ts docstring; I should
+reread the surrounding block after every insertion into prose, not just after code edits);
+`loadMessages` identity driving the refetch effect (latched in a ref, so an inline lambda from a
+future caller can't cause a refetch loop); missing `aria-live`; a footer naming an id the panel
+never renders; the untyped server projection (now `const projected: HeldMessage[]`, so drift
+fails the build); and blanking to "Loading…" on refetch (now keeps rows, `aria-busy` carries the
+in-flight state — but an *error* still replaces them, because a failed refetch means the old list
+is no longer known to be current).
+
+One self-inflicted detour: my `aria-live` edit put a JSX comment as a sibling expression inside
+`{open && ( … )}`, which doesn't parse. Caught by the build immediately.
+
+Re-verified after all fixes: build ✓, full suite **4917 passed / 0 failures**, web 373, routes 26,
+and the **browser evidence re-run 23/23** — the component changed, so re-running it was not
+optional.
+
+Sitting at the `pr` gate. **Park it open — never merge, never close #1450.** We are not
+maintainers here.

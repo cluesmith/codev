@@ -80,6 +80,9 @@ function HeldRow({ message, now }: { message: HeldMessage; now: number }) {
 export function HeldCountBadge({ count, escalated, loadMessages }: HeldCountBadgeProps) {
   const [open, setOpen] = useState(false);
   const [state, setState] = useState<LoadState>({ kind: 'loading' });
+  // In-flight flag, separate from `state`: a refetch keeps the previous rows rendered, so
+  // "is a request outstanding" can no longer be read off the state union.
+  const [busy, setBusy] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const panelId = useId();
@@ -89,20 +92,41 @@ export function HeldCountBadge({ count, escalated, loadMessages }: HeldCountBadg
   // does not warn about setState on an unmounted/stale path, so the bug would be silent.
   const generationRef = useRef(0);
 
+  // The loader is read through a ref so `load` (and therefore the fetch effect) does not
+  // depend on the prop's IDENTITY. App.tsx passes the module-level `fetchInbox`, which is
+  // stable — but an inline lambda from any future caller would change identity every render
+  // and turn the effect into a refetch loop. Behaviour should not hinge on a caller
+  // remembering to memoize.
+  const loaderRef = useRef(loadMessages);
+  useEffect(() => {
+    loaderRef.current = loadMessages;
+  }, [loadMessages]);
+
   const load = useCallback(() => {
     const generation = ++generationRef.current;
-    setState({ kind: 'loading' });
-    loadMessages().then(
+    setBusy(true);
+    // Keep already-loaded rows on screen while refetching rather than blanking to "Loading…".
+    // A refetch fires whenever `count` changes while the panel is open, and flashing the list
+    // away is exactly the wrong moment to do it — the user is watching to see what moved.
+    // `aria-busy` carries the in-flight state instead. Only a cold open shows the spinner.
+    setState((prev) => (prev.kind === 'ready' ? prev : { kind: 'loading' }));
+    loaderRef.current().then(
       (messages) => {
         if (generationRef.current !== generation) return;
+        setBusy(false);
         setState({ kind: 'ready', messages });
       },
       (err: unknown) => {
         if (generationRef.current !== generation) return;
+        setBusy(false);
+        // An error DOES replace the rows: once a refetch has failed, the previous list is no
+        // longer known to be current, and showing it as if it were would be a lie.
         setState({ kind: 'error', message: err instanceof Error ? err.message : String(err) });
       },
     );
-  }, [loadMessages]);
+    // No deps: the loader is reached through `loaderRef`, so `load` is stable for the
+    // lifetime of the component and the fetch effect fires only on open / count change.
+  }, []);
 
   // Load on open, and again when `count` changes while open. Refetch rather than snapshot:
   // the count is SSE-driven, so a change means the mailbox actually moved — precisely when a
@@ -168,17 +192,30 @@ export function HeldCountBadge({ count, escalated, loadMessages }: HeldCountBadg
         <span className={`held-dot${escalated ? ' held-dot--attention' : ''}`} />
         {label}
       </button>
+      {/* aria-live: the rows arrive asynchronously after the panel opens, so without it a
+          screen reader announces an empty container and never mentions the messages. */}
       {open && (
-        <div className="held-popover" id={panelId} data-testid="held-popover">
+        <div
+          className="held-popover"
+          id={panelId}
+          data-testid="held-popover"
+          aria-live="polite"
+          aria-busy={busy}
+        >
           {state.kind === 'loading' && <p className="held-popover-note">Loading…</p>}
           {state.kind === 'error' && (
             <p className="held-popover-note held-popover-note--error" data-testid="held-error">
               Could not load held messages: {state.message}
             </p>
           )}
-          {state.kind === 'ready' && messages.length === 0 && (
+          {/* Keyed on heldRows, not messages: when the held rows drain but a SCHEDULED row
+              remains, the panel is not empty yet there is still nothing held — and the
+              Scheduled group's "not counted above" needs something above it to refer to. */}
+          {state.kind === 'ready' && heldRows.length === 0 && (
             <p className="held-popover-note" data-testid="held-empty">
-              {count <= 0 ? 'Held mail cleared.' : 'No held messages.'}
+              {count <= 0 && messages.length > 0 ? 'No held messages — the rows below are scheduled.'
+                : count <= 0 ? 'Held mail cleared.'
+                : 'No held messages.'}
             </p>
           )}
           {heldRows.length > 0 && (
@@ -204,7 +241,10 @@ export function HeldCountBadge({ count, escalated, loadMessages }: HeldCountBadg
               </ul>
             </section>
           )}
-          <p className="held-popover-foot">Dismiss with <code>afx inbox dismiss &lt;id&gt;</code></p>
+          {/* Points at `afx inbox` rather than `afx inbox dismiss <id>`: dismissal needs a row
+              id, and this panel deliberately shows none (a full uuid would dominate the row
+              and this surface never mutates anyway). `afx inbox` is where the ids live. */}
+          <p className="held-popover-foot">Ids and dismissal: <code>afx inbox</code></p>
         </div>
       )}
     </div>

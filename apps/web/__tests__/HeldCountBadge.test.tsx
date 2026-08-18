@@ -341,6 +341,21 @@ describe('HeldCountBadge', () => {
     expect((await screen.findByTestId('held-empty')).textContent).toContain('Held mail cleared');
   });
 
+  it('says nothing is held when the held rows drain but a scheduled row remains', async () => {
+    // count -> 0 with a pre-due row still listed: the panel is NOT empty, but there is
+    // nothing HELD, and the Scheduled group's "not counted above" needs a line above it.
+    const now = Date.now();
+    const loadMessages = () => Promise.resolve([row({ id: 'sched', notBefore: now + 15_000 })]);
+    const { rerender } = render(<HeldCountBadge count={1} escalated={false} loadMessages={loadMessages} />);
+    await open();
+    rerender(<HeldCountBadge count={0} escalated={false} loadMessages={loadMessages} />);
+
+    const note = await screen.findByTestId('held-empty');
+    expect(note.textContent).toContain('scheduled');
+    expect(screen.queryByTestId('held-group-held')).toBeNull();
+    expect(screen.getByTestId('held-group-scheduled')).toBeTruthy();
+  });
+
   it('unmounts once the user closes a panel whose count already dropped to 0', async () => {
     const { rerender, container } = render(
       <HeldCountBadge count={1} escalated={false} loadMessages={noMessages} />,

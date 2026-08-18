@@ -1839,7 +1839,9 @@ rather than reconcile it — `afx inbox` labels pre-due rows `scheduled`, and th
 groups `Held (N)` (N === the badge count) above a separate `Scheduled (M)`. The corollary is that
 with 0 due and 1 scheduled row the badge does not render at all, so a scheduled-only state is
 visible **only** in `afx inbox`; changing that means changing what the badge counts, not how the
-list is filtered. Terminal rows (delivered/superseded/dismissed) are pruned after `mailbox.retentionDays` (default 30) by the drainer; **held rows are never pruned**. Cron delivers through the same gate via `deliverCronMessage` (`cron-delivery.ts`) with a per-task supersede key (a newer run replaces the older *held* row) and logs the real outcome.
+list is filtered.
+
+Terminal rows (delivered/superseded/dismissed) are pruned after `mailbox.retentionDays` (default 30) by the drainer; **held rows are never pruned**. Cron delivers through the same gate via `deliverCronMessage` (`cron-delivery.ts`) with a per-task supersede key (a newer run replaces the older *held* row) and logs the real outcome.
 
 #### Address Resolution
 

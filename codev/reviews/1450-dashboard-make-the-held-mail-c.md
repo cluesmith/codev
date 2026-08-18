@@ -24,9 +24,9 @@ The one genuinely subtle part is that **the badge count and the list disagree by
 - `packages/codev/src/agent-farm/servers/tower-routes.ts` (+30 / -3) — `workspaceOverride` param + workspace-scoped branch
 - `packages/types/src/api.ts` (+46 / -0) — `HeldMessage`
 - `packages/types/src/index.ts` (+1 / -0) — export it
-- `apps/web/__tests__/HeldCountBadge.test.tsx` (+386 / -…) — 20 new cases, 5 originals kept unchanged
-- `apps/web/__tests__/heldMail.test.ts` (+59 / -0) — new
-- `packages/codev/src/agent-farm/__tests__/inbox-routes.test.ts` (+168 / -0) — 13 new route cases
+- `apps/web/__tests__/HeldCountBadge.test.tsx` — 32 cases total: 5 originals kept unchanged, **27 new**
+- `apps/web/__tests__/heldMail.test.ts` — new, **10 cases**
+- `packages/codev/src/agent-farm/__tests__/inbox-routes.test.ts` — **12 new** route cases (14 → 26 in the file)
 - `packages/codev/scripts/issue-1450-dashboard-evidence.mts` (+370 / -0) — new; real-browser evidence harness
 - `codev/plans/1450-dashboard-make-the-held-mail-c.md`, `codev/state/pir-1450_thread.md`, `codev/resources/arch.md`, `codev/resources/lessons-learned.md` — artifacts and governance
 
@@ -41,8 +41,9 @@ The one genuinely subtle part is that **the badge count and the list disagree by
 
 - `pnpm build`: ✓ pass
 - `pnpm test` (`@cluesmith/codev`): ✓ 4916 passed, 48 skipped, **0 failures**
-- `apps/web` (`pnpm --filter @cluesmith/codev-web test`): ✓ 371 passed, 1 skipped, 33 files — **37 new tests**
+- `apps/web` (`pnpm --filter @cluesmith/codev-web test`): ✓ 33 files — **37 new web tests** (27 component + 10 formatter)
   - Note: the root `test` script runs only the `codev` package; web tests need the filtered command.
+- **49 new tests total** across the three files (27 + 10 + 12).
 - **Manual, real browser**: `packages/codev/scripts/issue-1450-dashboard-evidence.mts` — 23/23 checks
   in headless Chromium against an isolated Tower (worktree build, port 14700, `NODE_ENV=test` +
   `AF_TEST_DB`). Real workspace, real shellper PTYs painted with an occupied composer, real
@@ -158,9 +159,31 @@ announced inconsistently, and this panel should not steal focus from the termina
   - On a normally-running dashboard, the union of both groups matches `afx inbox -w <workspace>`
     row for row, and the Held group alone matches the badge count.
 
+## Post-Consultation Fixes
+
+The 3-way consult and the architect's integration review both landed as non-blocking
+(APPROVE / COMMENT / APPROVE). Every finding was verified against the files before acting; all
+were real and all are fixed in `dd7a6b1` (see the PR's commit list).
+
+| Finding | Source | Disposition |
+|---|---|---|
+| `handleInboxList`'s docstring claimed an empty `workspaceOverride` stays scoped, but `rawWorkspace ? … : undefined` widened it to **all workspaces** | Codex + architect (3) | **Real.** Unreachable today (the dispatcher 400s a missing/relative prefix first), but the comment promised a guarantee the code did not make. Made the code true rather than weakening the comment: a scoped call with a blank override now scopes to `''`, which matches no rows. The safe failure for a scoped call is zero rows, never every row. |
+| Review file's test counts were wrong | Codex | **Real.** Recounted from the merge-base: **27** new component + **10** formatter + **12** route = **49**, not the 37 originally claimed. Corrected above. |
+| `count → 0` with scheduled rows left the panel with no "cleared" notice, and `Scheduled`'s "not counted above" had nothing above it | Codex | **Real.** The notice now keys on `heldRows.length === 0` rather than `messages.length === 0`, with copy that distinguishes "cleared" from "nothing held, rows below are scheduled". |
+| arch.md edit swallowed the pre-existing pruning/cron sentences into the new count-vs-list paragraph | Claude + architect (2) | **Real** — content survived but read as part of the Held/Scheduled discussion. Paragraph break restored. (Second splice of this kind in this project; the first was caught in `packages/types/src/api.ts` before commit.) |
+| `loadMessages` prop identity drove the refetch effect — an inline lambda from a future caller would loop | Claude + architect (4) | **Real footgun.** Latched in a ref; `load` now has empty deps, so behaviour no longer depends on a caller remembering to memoize. |
+| Popover lacked `aria-live`, so asynchronously-loaded rows were never announced | Claude | **Real.** Added `aria-live="polite"` + `aria-busy`. |
+| Footer said `afx inbox dismiss <id>` but no id is rendered anywhere | Claude | **Real.** Reworded to `Ids and dismissal: afx inbox`. Rendering a full uuid per row would dominate the row, and this surface never mutates. |
+| Server projection was untyped — `HeldMessage` was client-side decoration only | architect (1) | **Real.** Annotated `const projected: HeldMessage[]`, so a drifting projection (dropped field, or a `body` slipping in) fails the server build. |
+| Keep prior rows during refetch instead of blanking to "Loading…" | architect (5), optional | **Taken.** A refetch fires on every `count` change while open; flashing the list away is the worst moment to do it. `aria-busy` carries the in-flight state; only a cold open shows the spinner. An **error** still replaces the rows — once a refetch fails, the old list is no longer known to be current. |
+| `HeldMessage` jsdoc typo `/api/inbox:id` | architect (6) | **Not reproduced.** The jsdoc already reads `GET /api/inbox/:id` (`packages/types/src/api.ts:597`). No change made. |
+
+Re-verified after the fixes: `pnpm build` ✓, web suite ✓ (373 passed), route suite ✓ (26 passed),
+and the browser evidence re-run ✓ **23/23**.
+
 ## Flaky Tests
 
-None. No pre-existing failures were encountered in the full suite (4916 passed), so nothing was
+None. No pre-existing failures were encountered in the full suite, so nothing was
 skipped or quarantined.
 
 ## Scope Note

@@ -13,7 +13,7 @@ import { EventEmitter } from 'node:events';
 import Database from 'better-sqlite3';
 import { GLOBAL_SCHEMA } from '../db/schema.js';
 import * as mailbox from '../db/mailbox.js';
-import { handleRequest } from '../servers/tower-routes.js';
+import { handleRequest, handleInboxList } from '../servers/tower-routes.js';
 import type { RouteContext } from '../servers/tower-routes.js';
 
 // The one db seam tower-routes uses: return a real in-memory DB, reseeded per test.
@@ -407,6 +407,19 @@ describe('GET /workspace/<b64>/api/inbox (Issue 1450)', () => {
     expect(rows).toHaveLength(1);
     expect(rows[0].id).toBe(mine.id);
     expect(rows[0].workspacePath).toBe(WS);
+  });
+
+  it('an EMPTY override scopes to nothing rather than widening to every workspace', async () => {
+    // Defensive: the dispatcher 400s a missing prefix, so a blank override is unreachable
+    // from the route today. But "unreachable" is a property of the caller, and the safe
+    // failure for a scoped call is zero rows, never every workspace's held mail.
+    seedHeld();
+    seedHeld({ workspacePath: '/home/user/other-project', toAgent: 'other-1' });
+
+    const res = makeRes();
+    handleInboxList(res, new URL('http://localhost/api/inbox'), '');
+
+    expect(JSON.parse(res._body)).toEqual([]);
   });
 
   it('lists pre-due --delay rows too, so the popover can group them as scheduled', async () => {
