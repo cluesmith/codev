@@ -48,4 +48,29 @@ security, vscode, streamdeck); reviewer + demos own none and must NOT appear —
 that absence is the derive-from-builders decision made visible.
 
 Architect endorsed keeping scope-through-`builders()` and the id-preserving selection as
-written, and the `PlacedKeys` extraction over a copy. Gate now goes to Amr.
+written, and the `PlacedKeys` extraction over a copy.
+
+## MAJOR REFRAME (owner decision, Amr, 2026-08-18) — scope model DROPPED
+
+Amr (issue author/owner) reversed the "scope, not a mode" framing in the interactive session:
+**no filtering of builders at all.** The feature is two independent boards + a native switch:
+
+- **Builders board** — full fleet, unchanged.
+- **Architects board** — self-ordering Architect Action keys (reuse #1465), one per architect;
+  press opens that architect's terminal (`open-architect-terminal`, reusing #1463's verb).
+- **Switch** — a NATIVE Stream Deck key (Switch Profile, recommended two-profile symmetric, or
+  a Folder) carrying a CUSTOM Codev-styled icon we ship (new `switch` glyph). Stream Deck does
+  the flip; no plugin switch code. Plugin-driven `switchToProfile` stays deferred (#1381/#1440).
+
+Consequences vs the approved plan:
+- `scopedArchitect`, `builders()` filtering, selection preservation → all GONE.
+- Store gains ONLY `architects()` (distinct non-null spawnedByArchitect, main-first then
+  alphabetical, twinning `sortArchitectsForPicker`).
+- Ruling 3 ("no summoning") intentionally lifted — the key opens the terminal.
+- Rulings 1 & 2 (scope reset / empty-scope) no longer apply.
+- The null-attribution superset test is moot (builders board never filtered) — dropped
+  deliberately, noted in the plan so the architect sees why.
+- Still reuse #1465: extract `PlacedKeys` base from `SlotKey`; `ArchitectAction` extends it.
+
+Rewrote the plan to this shape (commit below). This reverses the plan the architect (main)
+approved on the scope model — flagging to main; Amr's word governs. Gate stays pending Amr.
