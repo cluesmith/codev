@@ -100,6 +100,11 @@ export interface IShellperClient extends EventEmitter {
 // fallback — the exact sessions this feature exists to make authoritative.
 // Bound the aggregate instead, well above any real argv and far below the frame
 // cap. A command is a path, so PATH_MAX is the right shape of limit for it.
+//
+// The args bound is measured in real UTF-8 BYTES (`Buffer.byteLength`), not
+// `String.length` — the latter counts UTF-16 code units, which would hand a
+// non-ASCII argv up to ~3x the nominal budget. The command bound stays in chars
+// deliberately: it is a path-shaped sanity check, not an allocation guard.
 const MAX_IDENTITY_COMMAND_LENGTH = 4096;
 const MAX_IDENTITY_ARGS = 256;
 const MAX_IDENTITY_ARGS_TOTAL_BYTES = 512 * 1024;
@@ -207,22 +212,48 @@ export class ShellperClient extends EventEmitter implements IShellperClient {
    * profile.
    */
   private setIdentity(command: unknown, args: unknown): void {
-    const trimmed = typeof command === 'string' ? command.trim() : '';
-    if (!trimmed || trimmed.length > MAX_IDENTITY_COMMAND_LENGTH) {
+    // A shellper that states NO identity is the legacy case, and silence is the
+    // right response. A shellper that states one we then throw away is not: that
+    // is the failure mode this project already shipped once (a per-argument bound
+    // an architect's multi-KB `--append-system-prompt` tripped), and it was
+    // invisible because a rejection and a legacy shellper look identical
+    // downstream — both land on `source=config`. Warn only in the second case, so
+    // a recurrence is visible where it happens instead of being inferred.
+    const reject = (why: string): void => {
       this._welcomeCommand = null;
       this._welcomeArgs = null;
+      if (command !== undefined || args !== undefined) {
+        console.warn(`[shellper-client] discarding WELCOME identity from ${this.socketPath}: ${why}`);
+      }
+    };
+    const trimmed = typeof command === 'string' ? command.trim() : '';
+    if (!trimmed || trimmed.length > MAX_IDENTITY_COMMAND_LENGTH) {
+      reject(
+        typeof command === 'string'
+          ? `command is empty or exceeds ${MAX_IDENTITY_COMMAND_LENGTH} chars (${command.length})`
+          : `command is ${typeof command}, expected string`,
+      );
       return;
     }
     let resolvedArgs: string[] = [];
     if (args !== undefined) {
-      const valid =
-        Array.isArray(args) &&
-        args.length <= MAX_IDENTITY_ARGS &&
-        args.every((a) => typeof a === 'string') &&
-        (args as string[]).reduce((n, a) => n + a.length, 0) <= MAX_IDENTITY_ARGS_TOTAL_BYTES;
-      if (!valid) {
-        this._welcomeCommand = null;
-        this._welcomeArgs = null;
+      if (!Array.isArray(args)) {
+        reject(`args is ${typeof args}, expected array`);
+        return;
+      }
+      if (args.length > MAX_IDENTITY_ARGS) {
+        reject(`args has ${args.length} elements, limit ${MAX_IDENTITY_ARGS}`);
+        return;
+      }
+      if (!args.every((a) => typeof a === 'string')) {
+        reject('args contains a non-string element');
+        return;
+      }
+      // Byte length, not `String.length`: the latter counts UTF-16 code units, so a
+      // non-ASCII argv would silently get several times the nominal budget.
+      const total = (args as string[]).reduce((n, a) => n + Buffer.byteLength(a, 'utf8'), 0);
+      if (total > MAX_IDENTITY_ARGS_TOTAL_BYTES) {
+        reject(`args total ${total} bytes, limit ${MAX_IDENTITY_ARGS_TOTAL_BYTES}`);
         return;
       }
       resolvedArgs = args as string[];

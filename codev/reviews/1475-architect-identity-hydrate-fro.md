@@ -39,6 +39,7 @@ Against `git merge-base main HEAD` (`9129ab81c`):
 - `packages/codev/scripts/pir-1475-dev-approval-evidence.mts` (+666 / -0, new)
 - `codev/evidence/1475-dev-approval-transcript.txt` (+82 / -0, new)
 - `codev/resources/arch.md` (+1 / -1)
+- `codev/resources/lessons-learned.md` (+2 / -0)
 - `codev/plans/1475-architect-identity-hydrate-fro.md` (+340 / -0, new)
 - `codev/state/pir-1475_thread.md` (+149 / -0, new)
 - `codev/projects/1475-architect-identity-hydrate-fro/status.yaml` (+22 / -0, porch bookkeeping)
@@ -60,9 +61,10 @@ Against `git merge-base main HEAD` (`9129ab81c`):
 
 - `pnpm build` (packages/codev): ✓ pass
 - `tsc --noEmit`: ✓ clean
-- `vitest run`: ✓ **4944 passed / 0 failed / 48 skipped** (249 files passed, 3 skipped), of which
-  **32 are new** across the two new suites (17 in `welcome-identity.test.ts`, 15 in
-  `pir-1475-welcome-identity.test.ts`).
+- `vitest run`: ✓ **4947 passed / 0 failed / 48 skipped** (249 files passed, 3 skipped), of which
+  **35 are new** across the two new suites (20 in `welcome-identity.test.ts`, 15 in
+  `pir-1475-welcome-identity.test.ts`). Re-run after merging `main` (`ec1f9fe5e`) and after the
+  consultation fixes.
 - **Manual verification (dev-approval gate)**: the plan's Manual steps 2–7 were **scripted against a
   real, isolated Tower** rather than asserted from the unit suite —
   `packages/codev/scripts/pir-1475-dev-approval-evidence.mts` spawns this branch's built
@@ -130,6 +132,32 @@ argument."*
 Two things made this findable only by running it: the cap was reasonable-looking, and the failure
 was **silent** — a fallback, not an error. Fail-soft paths need evidence from real inputs precisely
 because they never go red.
+
+## Consultation Response (3-way, single pass)
+
+**gemini APPROVE · codex COMMENT · claude APPROVE** — no `REQUEST_CHANGES`. Every finding was
+checked against the file before acting; five led to changes in commit `2ff8f9b` and one is answered
+here.
+
+| # | Finding | Disposition |
+|---|---|---|
+| claude-1 | `MAX_IDENTITY_ARGS_TOTAL_BYTES` counted UTF-16 code units via `String.length`, so a non-ASCII argv got up to ~3× the nominal budget | **Fixed** — `Buffer.byteLength(a, 'utf8')`. Pinned by *"measures the args budget in UTF-8 BYTES, not UTF-16 code units"* |
+| claude-2 | `setIdentity` discards a malformed-but-present payload silently — the same shape as the bug this PR just fixed | **Fixed** — `console.warn` naming the reason, but only when the shellper actually *stated* an identity; a legacy shellper stays silent. Pinned by a test asserting both halves |
+| codex-1 | `arch.md` claimed "every WELCOME field is optional"; only fields added after v1 are | **Fixed** — the v1 core (`version`, `pid`, `cols`, `rows`, `startTime`) is required; `lastDataAt`, `alwaysSendsReplay`, `command`/`args` are the optional additions. Verified against `shellper-protocol.ts` |
+| codex-2 | The plan asked for the SPAWN relaunch driven through **both** real `SessionManager` paths; the unit test uses a fake client, and the evidence covers only clean-exit | **Accepted as a real gap; documented, not papered over.** See below |
+| codex-3 | The review's Files Changed omitted `lessons-learned.md` | **Fixed** — the list was generated before that file was committed |
+| claude-3 | The evidence script/transcript are outside the plan's "Files to Change" | **No change.** Scope addition, disclosed: producing running evidence is what PIR's dev-approval gate asks for, and it is what caught the arg-bound bug |
+
+**On codex-2, precisely.** The relaunch chain is pinned in two halves rather than end-to-end: the
+*real* `ShellperClient` is tested for adopting new identity on `spawn()` with no reconnect
+(`updates identity immediately on spawn(), with no reconnect`), and the *real* `PtySession` is
+tested for reading through a client whose identity changes mid-session
+(`tracks a SPAWN relaunch with no re-attach and no reconnect`, using a `FakeShellper`). The running
+evidence then drives the whole chain — real `SessionManager`, real client, real PTY — for the
+**clean-exit rerun** (#1264) only. What no test drives end-to-end is the **crash-loop fallback**
+(#1149). Both paths call the identical `session.client.spawn({...})` in `session-manager.ts`, which
+is why I judged the seam covered; a reviewer who wants that path exercised should say so, and it is
+a test worth adding rather than an argument worth having.
 
 ## Things to Look At During PR Review
 

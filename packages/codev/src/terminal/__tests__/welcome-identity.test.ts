@@ -14,7 +14,7 @@
  *      together, so no consumer ever sees a valid command paired with garbage.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import net from 'node:net';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -268,6 +268,47 @@ describe('PIR #1475 — WELCOME identity: ShellperClient hydration', () => {
       expect(client.welcomeArgs).toBeNull();
     });
   }
+
+  it('measures the args budget in UTF-8 BYTES, not UTF-16 code units', async () => {
+    // A 3-byte-per-char argv sized just under the budget in `String.length` is
+    // ~1.5 MB on the wire. Counting code units would wave it through; counting
+    // bytes rejects it. (Consultation follow-up, PIR #1475.)
+    const overBudgetInBytes = '☃'.repeat(200 * 1024); // 200K chars = 600 KB
+    const client = await connectWith({
+      ...BASE_WELCOME, command: 'claude', args: [overBudgetInBytes],
+    });
+    expect(client.welcomeCommand).toBeNull();
+    expect(client.welcomeArgs).toBeNull();
+  });
+
+  // The failure this project shipped once was invisible precisely because a
+  // rejected payload and a legacy shellper look identical downstream (both land
+  // on source=config). A warning at the point of rejection is what makes a
+  // recurrence visible; a legacy shellper must NOT produce one, or the log is
+  // noise on every pre-upgrade session. (One connection per test: the helper
+  // binds a single socket path per `it`.)
+  it('warns when it discards an identity the shellper actually STATED', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const client = await connectWith({ ...BASE_WELCOME, command: 'claude', args: 'not-an-array' });
+      expect(client.welcomeCommand).toBeNull();
+      expect(warn).toHaveBeenCalledOnce();
+      expect(String(warn.mock.calls[0]?.[0])).toContain('discarding WELCOME identity');
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('stays silent for a legacy shellper that states no identity at all', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const client = await connectWith({ ...BASE_WELCOME });
+      expect(client.welcomeCommand).toBeNull();
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  });
 
   it('accepts a REAL architect argv, whose system prompt is several KB in one argument', async () => {
     // Regression, PIR #1475. An earlier revision capped each argument at 4096
