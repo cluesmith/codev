@@ -39,3 +39,39 @@ Investigated the seam end to end before writing anything. Findings:
 
 Plan written to `codev/plans/1475-architect-identity-hydrate-fro.md` (6 layers: protocol → shellper
 → client → PtySession → persist-back → comment/doc truth-up). Sitting at the `plan-approval` gate.
+
+## Plan revision 2 — 3-way review (2026-08-18)
+
+Architect relayed a consolidated 3-way: gemini APPROVE / codex REQUEST_CHANGES / claude
+REQUEST_CHANGES. I re-verified every finding against source before amending (not taken on trust);
+all eight held. Two were genuinely blocking and both were **defects in my design, not nitpicks**:
+
+1. **Snapshot-at-attach would have gone stale.** I had `attachShellper` *copy* the client's
+   identity. An ordinary SPAWN relaunch replaces the PTY with no reconnect, so `attachShellper`
+   never re-runs — the copy would freeze at the pre-relaunch value, defeating the very seam I
+   listed as motivation. Now read-through: `this.shellperClient?.welcomeCommand ?? config`.
+   `detachShellper` already nulls the client, so degradation is free.
+   *Calibration I had wrong in the other direction*: both relaunch paths swap **args/env only**
+   (`session.options.command` is never mutated, session-manager.ts:1187), and `resolveProfile`
+   ignores args — so this closes a structural hazard, not a live drift. Plan no longer oversells it.
+2. **Persist-back would have written `''` and permanently killed the legacy self-heal.**
+   `createSessionRaw` defaults `command: opts.command ?? ''` (pty-manager.ts:156). Legacy NULL row
+   + legacy shellper → `ptySession.command === ''` → saving that turns a healable NULL into `''`,
+   and the heal is `??`, which does not catch `''`. That would have been a regression *introduced*
+   in the exact path #1313 fixed. Now `ptySession.command || null` with a round-trip test.
+
+Other verified corrections: **7** production `attachShellper` sites, not 3 (I had missed
+`tower-server.ts:541`, the in-place `session-reconnected` re-attach — which is now the only place
+`updateTerminalCommand` is used, since the reconcile sites DELETE+re-save the row and would wipe
+it); interface members made **optional** because `tower-shellper-integration.test.ts:21` is a real
+`implements` while five other doubles are `as unknown as` casts yielding `undefined`; and my
+trust-boundary claim was **wrong** — `resolveProfile` matches by substring, so a garbled command
+containing `claude` resolves a REAL profile. Socket is 0600, not 0700.
+
+**One rebuttal** (codex #3, SPAWN-time row persistence): the row can go stale after a relaunch, but
+it is never *observable* — `terminal_sessions.command` is read only at the two reconcile paths,
+both of which attach a fresh client whose WELCOME supersedes it and then persist the correction.
+The obvious hooks would not even work: `session-fresh-restart`/`session-restart` fire *before* the
+delayed `client.spawn()`. Pinned with a test instead of new terminal→DB event plumbing.
+
+Amended plan committed; architect will present it at the gate.
