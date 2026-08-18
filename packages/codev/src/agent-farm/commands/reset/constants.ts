@@ -123,3 +123,35 @@ export const DEFAULT_REENTRY_DELAY_SECONDS = 15;
  * replayed much later.
  */
 export const DEFAULT_CHALLENGE_MAX_AGE_MS = 60 * 60 * 1000;
+
+/**
+ * Upper bound on a challenge nonce, in hex characters.
+ *
+ * Without a ceiling, a hand-written challenge carrying a multi-kilobyte nonce
+ * would make the SUBSTANCE gate trivially satisfiable: a state file containing
+ * only the marker already exceeds `DEFAULT_MIN_BYTES`, so "wrote enough to be a
+ * real save" would be proved by the marker alone.
+ */
+export const MAX_NONCE_HEX_CHARS = 128;
+
+/**
+ * Floors for the tunable safety parameters.
+ *
+ * Gate 0 originally checked only "finite and positive", which is validity rather
+ * than SANITY — and for these three, a small positive value neuters the gate it
+ * configures while still reporting success:
+ *
+ * - `--min-bytes 1` reduces the substance gate to "contains the nonce" (~12 bytes).
+ * - `--stability-window 1` makes the sleep a single event-loop tick; two reads
+ *   1ms apart do not detect a mid-write file.
+ * - `--delay 0.001` is the dangerous one. The re-entry and the `/clear` then race
+ *   for the same clean prompt, and if the render gate opens first the re-entry is
+ *   delivered and immediately wiped — a cleared builder with nobody coming back,
+ *   which is the exact outcome scheduling-before-clearing exists to prevent.
+ *
+ * Hard floors rather than warnings: a warning on a safety parameter is a warning
+ * nobody reads in an unattended run.
+ */
+export const MIN_ALLOWED_MIN_BYTES = 200;
+export const MIN_ALLOWED_STABILITY_WINDOW_MS = 500;
+export const MIN_ALLOWED_REENTRY_DELAY_SECONDS = 5;

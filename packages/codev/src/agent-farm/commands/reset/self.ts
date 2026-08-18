@@ -71,6 +71,10 @@ import {
   CHALLENGE_FILE_NAME,
   DEFAULT_CHALLENGE_MAX_AGE_MS,
   DEFAULT_MIN_BYTES,
+  MAX_NONCE_HEX_CHARS,
+  MIN_ALLOWED_MIN_BYTES,
+  MIN_ALLOWED_REENTRY_DELAY_SECONDS,
+  MIN_ALLOWED_STABILITY_WINDOW_MS,
   DEFAULT_REENTRY_DELAY_SECONDS,
   DEFAULT_STABILITY_WINDOW_MS,
   REORIENT_FILE_NAME,
@@ -107,8 +111,22 @@ export interface SelfRefreshFsPort extends ReceiptFsPort {
 
 /** Wall clock and sleep, injected so tests run instantly and deterministically. */
 export interface SelfRefreshClockPort {
+  /** Wall clock, for timestamps that cross process boundaries (`issuedAt`). */
   now(): number;
   sleep(ms: number): Promise<void>;
+  /**
+   * MONOTONIC reading, for measuring the stability gap.
+   *
+   * `Date.now()` is not monotonic: an NTP step forward inside the window would
+   * make the measured gap satisfy the stability check when no real time passed —
+   * spoofing the very measurement that replaced an asserted value. (A backward
+   * step is already fail-safe: negative elapsed reads as still-growing.)
+   *
+   * Optional so existing callers and fakes keep working; when absent the code
+   * falls back to `now()`, which is the previous behaviour rather than a new
+   * hazard.
+   */
+  monotonicNow?(): number;
 }
 
 /**
@@ -182,6 +200,13 @@ export interface SelfRefreshStep {
 
 export type SelfRefreshFailure =
   | 'no-challenge'
+  /**
+   * A safety PARAMETER was invalid — a configuration error, not a bad save.
+   *
+   * Distinct from `receipt-rejected` because the advice differs completely:
+   * "rewrite your save" is exactly wrong when the real problem is `--min-bytes 0`.
+   */
+  | 'invalid-parameters'
   | 'dirty-worktree'
   | 'receipt-rejected'
   | 'assembly-failed'
@@ -439,7 +464,7 @@ export function beginSelfRefresh(options: BeginOptions): BeginResult {
  * proves nothing.
  */
 const MIN_NONCE_HEX_CHARS = 12;
-const NONCE_PATTERN = new RegExp(`^[0-9a-f]{${MIN_NONCE_HEX_CHARS},}$`);
+const NONCE_PATTERN = new RegExp(`^[0-9a-f]{${MIN_NONCE_HEX_CHARS},${MAX_NONCE_HEX_CHARS}}$`);
 
 export function parseChallenge(
   raw: string,
@@ -461,7 +486,7 @@ export function parseChallenge(
   if (typeof obj.nonce !== 'string' || !NONCE_PATTERN.test(obj.nonce)) {
     return {
       ok: false,
-      reason: `carries a nonce that is not ${MIN_NONCE_HEX_CHARS}+ lowercase hex characters ` +
+      reason: `carries a nonce that is not ${MIN_NONCE_HEX_CHARS}-${MAX_NONCE_HEX_CHARS} lowercase hex characters ` +
         `(${JSON.stringify(obj.nonce)}). Freshness is proved by \`content.includes(nonce)\`, so a ` +
         `short or non-hex nonce matches almost any file: "a" would be found in nearly every save, ` +
         `and "" in all of them`,
@@ -591,18 +616,22 @@ export async function runSelfRefresh(
   // thing that clears a builder, and it should not depend on every future caller
   // having remembered to check. `runReset` sets the same precedent for its own
   // flags.
-  const parameterChecks: Array<[string, number]> = [
-    ['minBytes', minBytes],
-    ['stabilityWindowMs', stabilityWindowMs],
-    ['reentryDelaySeconds', reentryDelaySeconds],
-    ['challengeMaxAgeMs', challengeMaxAgeMs],
+  // Floors, not just positivity. "Finite and positive" is VALIDITY; these gates
+  // need SANITY, because a small positive value neuters the check it configures
+  // while everything still reports success. `--delay 0.001` is the dangerous
+  // one: the re-entry and the clear then race for the same clean prompt.
+  const parameterChecks: Array<[string, number, number]> = [
+    ['minBytes', minBytes, MIN_ALLOWED_MIN_BYTES],
+    ['stabilityWindowMs', stabilityWindowMs, MIN_ALLOWED_STABILITY_WINDOW_MS],
+    ['reentryDelaySeconds', reentryDelaySeconds, MIN_ALLOWED_REENTRY_DELAY_SECONDS],
+    ['challengeMaxAgeMs', challengeMaxAgeMs, 1],
   ];
-  for (const [name, value] of parameterChecks) {
-    if (!Number.isFinite(value) || value <= 0) {
+  for (const [name, value, floor] of parameterChecks) {
+    if (!Number.isFinite(value) || value < floor) {
       return abort(
-        'receipt-rejected',
-        `${name} must be a finite positive number (got ${value}). Every safety parameter ` +
-          `here gates a check, so an invalid value disables a protection rather than ` +
+        'invalid-parameters',
+        `${name} must be a finite number >= ${floor} (got ${value}). Every safety parameter ` +
+          `here gates a check, so a too-small value disables a protection rather than ` +
           `failing loudly — refusing instead.`,
       );
     }
@@ -707,13 +736,14 @@ export async function runSelfRefresh(
     return abort('receipt-rejected', describeReceiptFailure(first, statePath, minBytes));
   }
 
-  const beforeSleep = clock.now();
+  const readMonotonic = (): number => (clock.monotonicNow ? clock.monotonicNow() : clock.now());
+  const beforeSleep = readMonotonic();
   await clock.sleep(stabilityWindowMs);
   // MEASURE the gap rather than asserting it. Passing `stabilityWindowMs` on
   // faith would keep the gate passing even if the sleep did not actually
   // advance the clock — the stability check would then be comparing two reads
   // taken back to back while claiming they were seconds apart.
-  const elapsed = clock.now() - beforeSleep;
+  const elapsed = readMonotonic() - beforeSleep;
 
   const second = verifyReceipt({
     fs,

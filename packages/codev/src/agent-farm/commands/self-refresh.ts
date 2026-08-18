@@ -50,6 +50,11 @@ import { buildPromptFromTemplate, buildResumeNotice } from './spawn-roles.js';
 import { detectWorkspaceRoot, detectCurrentBuilderId } from './send.js';
 import { resolveBuilderContext } from './reset/context.js';
 import {
+  MIN_ALLOWED_MIN_BYTES,
+  MIN_ALLOWED_REENTRY_DELAY_SECONDS,
+  MIN_ALLOWED_STABILITY_WINDOW_MS,
+} from './reset/constants.js';
+import {
   beginSelfRefresh,
   formatSelfRefreshReport,
   runSelfRefresh,
@@ -77,10 +82,23 @@ export async function selfRefresh(options: SelfRefreshOptions): Promise<void> {
   // disables a protection while still reporting success. `--min-bytes 0`
   // accepts an empty save; a non-positive stability window collapses the
   // two-observation check into one read.
-  const minBytes = positiveInt(options.minBytes, '--min-bytes');
-  const delaySeconds = positiveInt(options.delay, '--delay');
-  const stabilityWindowMs = positiveInt(options.stabilityWindow, '--stability-window');
-  const challengeMaxAgeMs = positiveInt(options.challengeMaxAge, '--challenge-max-age');
+  // FLOORS, not merely positivity. A small positive value neuters the gate it
+  // configures while still reporting success — and `--delay 0.001` is the fatal
+  // direction, because the re-entry and the clear then race for the same clean
+  // prompt. If the re-entry lands first it is delivered and immediately wiped:
+  // a cleared builder with nobody coming back.
+  const minBytes = boundedInt(options.minBytes, '--min-bytes', MIN_ALLOWED_MIN_BYTES);
+  const delaySeconds = boundedInt(
+    options.delay,
+    '--delay',
+    MIN_ALLOWED_REENTRY_DELAY_SECONDS,
+  );
+  const stabilityWindowMs = boundedInt(
+    options.stabilityWindow,
+    '--stability-window',
+    MIN_ALLOWED_STABILITY_WINDOW_MS,
+  );
+  const challengeMaxAgeMs = boundedInt(options.challengeMaxAge, '--challenge-max-age', 1);
 
   // ------------------------------------------------------------------
   // Identity — derived from the worktree, never supplied.
@@ -223,18 +241,34 @@ export async function selfRefresh(options: SelfRefreshOptions): Promise<void> {
 // ============================================================================
 
 /**
- * Reject a non-positive or non-numeric value for a safety flag.
+ * Reject a safety flag that is non-numeric, fractional, or below its floor.
  *
- * Modelled on `afx refresh`'s identical guard, and for the identical reason:
- * `--min-bytes -1` accepts any state file however empty, and a non-numeric
- * `--delay` yields NaN, whose comparisons are all false. A flag that silently
- * disables a protection is worse than one that errors.
+ * Modelled on `afx refresh`'s guard and extended past it. That one checks
+ * positivity, which is VALIDITY; these gates need SANITY. `--min-bytes 1`
+ * reduces the substance check to "contains the nonce"; `--stability-window 1`
+ * makes the sleep a single event-loop tick, which detects nothing; and
+ * `--delay 0.001` risks the unrecoverable outcome the whole ordering exists to
+ * avoid.
+ *
+ * Integers only, despite `Number` accepting `0.001` happily — every one of these
+ * is a count of bytes, milliseconds or seconds, and a fractional value is a typo
+ * rather than an intent.
  */
-function positiveInt(raw: string | number | undefined, flag: string): number | undefined {
+function boundedInt(
+  raw: string | number | undefined,
+  flag: string,
+  floor: number,
+): number | undefined {
   if (raw === undefined) return undefined;
   const parsed = typeof raw === 'number' ? raw : Number(raw);
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    fatal(`${flag} must be a positive number, got '${raw}'`);
+  if (!Number.isInteger(parsed)) {
+    fatal(`${flag} must be a whole number, got '${raw}'`);
+  }
+  if (parsed < floor) {
+    fatal(
+      `${flag} must be at least ${floor}, got '${raw}'. Values below that disable the ` +
+        `protection this flag configures instead of failing loudly.`,
+    );
   }
   return parsed;
 }
@@ -246,6 +280,16 @@ function positiveInt(raw: string | number | undefined, flag: string): number | u
 const realClock: SelfRefreshClockPort = {
   now: () => Date.now(),
   sleep: (ms: number) => new Promise(resolve => setTimeout(resolve, ms)),
+  /**
+   * Monotonic, deliberately distinct from `now()`.
+   *
+   * `Date.now()` can step forward under NTP, which would make the measured
+   * stability gap satisfy the check when no real time had passed — spoofing the
+   * measurement that was introduced precisely to stop the gap being asserted on
+   * faith. Timestamps still use the wall clock, because `issuedAt` is compared
+   * across processes.
+   */
+  monotonicNow: () => performance.now(),
 };
 
 function buildFsPort(): SelfRefreshFsPort {

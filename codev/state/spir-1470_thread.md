@@ -832,3 +832,52 @@ destructive half.
 One bug caught by typecheck: I guessed `fetchIssue(issueNumber, forge)` instead of reading its
 signature — it takes `{cwd, forgeConfig}`. Fixed by copying reset.ts's `fetchIssuePayload` verbatim.
 Same "reasoning about code I read around rather than read" pattern; typecheck caught it this time.
+
+### AD-HOC ADVERSARIAL CONSULT on 1cad0ec75 — found a bypass I'd have shipped
+
+Architect-ordered, outside porch. Both reviewers confirmed the two fixes work *narrowly* and that
+the tests are NOT vacuous (claude mutation-checked each one). But they found the fixes prove weaker
+properties than advertised, and one finding is the most serious of the project.
+
+**F1 (claude, HIGH) — echoing the save request back passes every gate.**
+`buildBoundarySaveRequest` is ~2KB and CONTAINS the nonce marker. So:
+    cp <the request text> .builder-state.md
+→ nonce present, over minBytes, size stable → receipt-accepted → /clear.
+**This is not adversarial — agents echo their instructions routinely.** And the fix was already
+written in my own request text ("MUST begin with this exact line") and simply never enforced.
+
+Fixed in the SHARED `verifyReceipt`: the nonce must appear in the FIRST LINE. Fixes the driven path
+too, which had the identical bypass — deliberately not "fix mine, leave theirs", which is the
+fix-the-instance-miss-the-class error I keep making. Still matches the nonce TOKEN not the exact
+marker, so the existing whitespace-tolerance contract (and its test) survives; verified that test
+keeps its marker on line 1.
+
+**F5 (claude, HIGH) — `--delay 0.001` reaches Tower.** positiveInt accepted fractions; deliverAfter
+0.001 makes the re-entry and the /clear race for the same clean prompt. If the render gate opens
+first, the re-entry is delivered and immediately wiped: cleared builder, no re-entry, nobody coming
+back — the exact outcome schedule-before-clear exists to prevent.
+
+**Codex #10 — the boundary guard was INERT IN PRODUCTION.** My porch task text said
+`afx self-refresh --begin` with no `--boundary`, so the challenge carried no boundary and the guard
+I built in Phase 3 (and wired in Phase 4) never engaged in the real flow. Tests passed because they
+passed expectedBoundary explicitly. Fixed the task text.
+
+Also fixed: nonce CEILING (codex — an unbounded nonce satisfies minBytes by itself); sanity FLOORS
+not just positivity (minBytes>=200, stability>=500ms, delay>=5s); `invalid-parameters` failure code
+(was reusing receipt-rejected, which tells a builder to rewrite a save when the real problem is a
+flag); monotonic `performance.now()` for the stability measurement (Date.now() can step forward
+under NTP and spoof the gap — the same asserted-vs-measured trap one level down).
+
+Test gaps closed: anchor cases (`'abc123def456\n'`, `' abc123def456'`, trailing text — without
+`^...$` these all contain a valid 12-hex run, so they pin the ANCHORS not the character class);
+Gate 0 position (bad params + NO challenge must still report invalid-parameters, else Gate 0 could
+drift below the challenge read unobserved); parameter errors touch nothing at all.
+
+92 tests in the core file.
+
+**Documented, not fixed** (threat model / scope):
+- sizeOf/read TOCTOU in shared verifyReceipt — realistically a mid-write race, which the
+  two-observation stability gate already catches.
+- Predictable-but-well-formed nonce — generateNonce uses randomBytes; a hand-written challenge is
+  outside the honest-builder threat model.
+- `runReset` logs its clear after sending it (index.ts:540) — driven path, not this phase's.

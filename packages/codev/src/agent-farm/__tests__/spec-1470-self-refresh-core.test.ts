@@ -38,6 +38,10 @@ import {
 import {
   CHALLENGE_FILE_NAME,
   DEFAULT_MIN_BYTES,
+  MAX_NONCE_HEX_CHARS,
+  MIN_ALLOWED_MIN_BYTES,
+  MIN_ALLOWED_REENTRY_DELAY_SECONDS,
+  MIN_ALLOWED_STABILITY_WINDOW_MS,
   DEFAULT_STABILITY_WINDOW_MS,
   REORIENT_FILE_NAME,
   STATE_FILE_NAME,
@@ -599,6 +603,12 @@ describe('challenge shape validation', () => {
     ['non-hex characters', 'zzzzzzzzzzzz'],
     ['uppercase hex', 'ABC123DEF456'],
     ['too short by one', 'abc123def45'],
+    // Anchor cases: without ^...$ these all contain a valid 12-hex run, so they
+    // pin the anchors rather than the character class.
+    ['a trailing newline', 'abc123def456\n'],
+    ['a leading space', ' abc123def456'],
+    ['trailing text', 'abc123def456 OR ANYTHING'],
+    ['a leading prefix', 'x abc123def456'],
   ])('refuses a nonce with %s', async (_label, nonce) => {
     fs.write(challengePath, JSON.stringify({ nonce, issuedAt: 1 }));
     fs.write(statePath, `${nonceMarker(nonce)}\n${'x'.repeat(DEFAULT_MIN_BYTES + 50)}`);
@@ -665,12 +675,71 @@ describe('safety parameters', () => {
         seedHappyPath();
         const result = await run({ [param]: value });
 
-        expect(result.failure, `${param}=${value} must be refused`).toBe('receipt-rejected');
-        expect(result.reason).toMatch(/finite positive number/i);
+        expect(result.failure, `${param}=${value} must be refused`).toBe('invalid-parameters');
         expectNoClear(result);
       });
     }
   }
+
+  // Positive but INSANE: validity is not sanity, and each of these neuters the
+  // gate it configures while still reporting success.
+  it.each([
+    ['minBytes', 1, MIN_ALLOWED_MIN_BYTES],
+    ['stabilityWindowMs', 1, MIN_ALLOWED_STABILITY_WINDOW_MS],
+    ['reentryDelaySeconds', 0.001, MIN_ALLOWED_REENTRY_DELAY_SECONDS],
+  ])('refuses a positive-but-too-small %s (%s)', async (param, value) => {
+    seedHappyPath();
+    const result = await run({ [param]: value });
+
+    expect(result.failure).toBe('invalid-parameters');
+    expectNoClear(result);
+  });
+
+  it('validates parameters BEFORE reading any state', async () => {
+    // Without this, Gate 0 could drift below the challenge read and every other
+    // parameter test would still pass — they all seed a valid challenge first.
+    // With no challenge on disk, a parameter error must still win.
+    const result = await run({ minBytes: 0 });
+
+    expect(result.failure).toBe('invalid-parameters');
+    expect(result.steps).toHaveLength(0);
+    expectNoClear(result);
+  });
+
+  it('a parameter error touches nothing at all', async () => {
+    seedHappyPath();
+    const result = await run({ minBytes: 0 });
+
+    expect(result.steps).toHaveLength(0);
+    expect(fs.exists(reorientPath)).toBe(false);
+    expect(terminal.scheduled).toHaveLength(0);
+    // The challenge is left intact for a corrected retry.
+    expect(fs.read(challengePath)).toBeTruthy();
+  });
+
+  it('uses the MONOTONIC reading, so a wall-clock jump cannot spoof the gap', async () => {
+    // An NTP step forward inside the window would make Date.now()'s delta
+    // satisfy the check when no real time passed — spoofing the measurement
+    // that replaced an asserted value.
+    seedHappyPath();
+    let wall = 1_000;
+    const spoofing = {
+      now: () => {
+        wall += 10 * 60 * 1000; // every wall read jumps ten minutes forward
+        return wall;
+      },
+      sleep: async () => {
+        /* no real time passes */
+      },
+      monotonicNow: () => 5_000, // monotonic clock is honest: no gap
+    };
+
+    const result = await run({ clock: spoofing });
+
+    expect(result.outcome).toBe('aborted');
+    expect(result.failure).toBe('receipt-rejected');
+    expectNoClear(result);
+  });
 
   it('measures the elapsed gap rather than assuming it', async () => {
     // A clock whose sleep does not advance time must NOT yield a stable
@@ -688,6 +757,89 @@ describe('safety parameters', () => {
     expect(result.outcome).toBe('aborted');
     expect(result.failure).toBe('receipt-rejected');
     expectNoClear(result);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The save must ANSWER the request, not echo it
+// ---------------------------------------------------------------------------
+
+describe('echoed save request', () => {
+  it('refuses a state file that is the save request copied back', async () => {
+    // The highest-value finding of the ad-hoc review, and not an adversarial
+    // case: the request text itself contains the marker and runs ~2KB, so
+    // `cp <request> .builder-state.md` cleared every gate — nonce present, over
+    // the size floor, stable. Agents echo their instructions routinely.
+    //
+    // The request already says the file "MUST begin with this exact line". This
+    // asserts we enforce what we ask for.
+    const begun = beginSelfRefresh({
+      fs,
+      clock,
+      worktree: WORKTREE,
+      boundary: 'enter:review',
+      makeNonce: () => NONCE,
+    });
+
+    // Sanity: the request really would have passed the old gate.
+    expect(begun.saveRequest).toContain(NONCE);
+    expect(Buffer.byteLength(begun.saveRequest, 'utf-8')).toBeGreaterThan(DEFAULT_MIN_BYTES);
+
+    fs.write(statePath, begun.saveRequest);
+
+    const result = await run({ expectedBoundary: 'enter:review' });
+
+    expect(result.failure).toBe('receipt-rejected');
+    expect(result.reason).toMatch(/first line|echoed/i);
+    expectNoClear(result);
+  });
+
+  it('refuses a stale save with the new nonce merely appended', async () => {
+    seedHappyPath();
+    fs.write(statePath, `${'old content '.repeat(200)}\n${nonceMarker(NONCE)}`);
+
+    const result = await run({ expectedBoundary: 'enter:review' });
+
+    expect(result.failure).toBe('receipt-rejected');
+    expectNoClear(result);
+  });
+
+  it('still accepts a marker whose spacing differs, on the first line', async () => {
+    // Freshness is proved by the nonce token; rejecting a real save over comment
+    // spacing would discard work that cost the builder real effort.
+    fs.write(challengePath, JSON.stringify({ nonce: NONCE, issuedAt: 1 }));
+    fs.write(statePath, `<!--codev-reset:${NONCE}-->\n${'x'.repeat(DEFAULT_MIN_BYTES + 50)}`);
+
+    const result = await run();
+
+    expect(result.outcome).toBe('completed');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Nonce bounds
+// ---------------------------------------------------------------------------
+
+describe('nonce ceiling', () => {
+  it('refuses a nonce long enough to satisfy the size floor by itself', async () => {
+    // Without a ceiling, a multi-kilobyte nonce makes the SUBSTANCE gate
+    // meaningless: a file containing only the marker already clears minBytes.
+    const huge = 'a'.repeat(MAX_NONCE_HEX_CHARS + 1);
+    fs.write(challengePath, JSON.stringify({ nonce: huge, issuedAt: 1 }));
+    fs.write(statePath, `${nonceMarker(huge)}\n`);
+
+    const result = await run();
+
+    expect(result.failure).toBe('no-challenge');
+    expectNoClear(result);
+  });
+
+  it('accepts a nonce at the ceiling', () => {
+    const parsed = parseChallenge(
+      JSON.stringify({ nonce: 'a'.repeat(MAX_NONCE_HEX_CHARS), issuedAt: 500 }),
+      1000,
+    );
+    expect(parsed.ok).toBe(true);
   });
 });
 

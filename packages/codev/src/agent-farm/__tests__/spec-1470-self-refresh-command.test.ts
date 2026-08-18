@@ -384,14 +384,37 @@ describe('safety flag validation', () => {
     for (const bad of ['0', '-1', 'abc']) {
       it(`rejects ${flag} ${bad}`, async () => {
         const { selfRefresh } = await importCommand();
+        // Message differs by reason — non-numeric vs below floor — so assert the
+        // flag is named and that nothing ran, rather than pinning prose.
         await expect(selfRefresh({ [key]: bad })).rejects.toThrow(
-          new RegExp(`${flag.replace(/-/g, '\\-')} must be a positive number`),
+          new RegExp(flag.replace(/-/g, '\\-')),
         );
         expect(mockRunSelfRefresh).not.toHaveBeenCalled();
         expect(mockSendMessage).not.toHaveBeenCalled();
       });
     }
   }
+
+  it('rejects a FRACTIONAL delay, the fatal direction', async () => {
+    // `--delay 0.001` would let the re-entry and the clear race for the same
+    // clean prompt; if the re-entry lands first it is delivered and immediately
+    // wiped — a cleared builder with nobody coming back.
+    const { selfRefresh } = await importCommand();
+    await expect(selfRefresh({ delay: '0.001' })).rejects.toThrow(/whole number/i);
+    expect(mockRunSelfRefresh).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['minBytes', '1', '--min-bytes'],
+    ['stabilityWindow', '1', '--stability-window'],
+    ['delay', '1', '--delay'],
+  ])('rejects a positive-but-too-small %s', async (key, value) => {
+    // Validity is not sanity: each of these neuters the gate it configures while
+    // still reporting success.
+    const { selfRefresh } = await importCommand();
+    await expect(selfRefresh({ [key]: value })).rejects.toThrow(/must be at least/i);
+    expect(mockRunSelfRefresh).not.toHaveBeenCalled();
+  });
 
   it('accepts valid values and forwards them', async () => {
     const { selfRefresh } = await importCommand();
