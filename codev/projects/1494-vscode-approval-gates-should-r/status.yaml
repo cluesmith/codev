@@ -1,7 +1,7 @@
 id: '1494'
 title: vscode-approval-gates-should-r
 protocol: pir
-phase: plan
+phase: implement
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -17,4 +17,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-08-18T00:54:19.918Z'
-updated_at: '2026-08-18T05:46:41.475Z'
+updated_at: '2026-08-18T05:46:50.502Z'
