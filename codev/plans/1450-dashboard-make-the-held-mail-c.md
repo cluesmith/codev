@@ -321,16 +321,22 @@ The stub-server fallback from revision 1 is withdrawn as the primary path: it wo
 architect's steer, an **isolated second Tower**:
 
 1. Build the monorepo (including `apps/web`) from this worktree.
-2. Start a second Tower from the worktree build on a **non-default port**
-   (`afx tower start --port 14650`; `-p/--port` exists, `cli.ts:896`), with **`HOME` pointed at a
-   scratch directory** so `AGENT_FARM_DIR` (`packages/core/src/constants.ts:4` —
-   `resolve(homedir(), '.agent-farm')`, and `os.homedir()` honours `$HOME` on POSIX) resolves to
-   an **isolated `global.db`**. This matters beyond tidiness: a second Tower sharing the live
-   `~/.agent-farm/global.db` would run its own mailbox-delivery loop against the cohort's real
-   held mail. The shared Tower on 4100 is never restarted or repointed.
-3. Seed held rows the honest way — `afx send` against that Tower to an agent that cannot receive —
-   so the rows are real mailbox rows, not hand-inserted. Include one `--delay` row to exercise the
-   Scheduled group.
+2. Spawn **this worktree's built Tower directly** on a fresh private port —
+   `node dist/agent-farm/servers/tower-server.js 14700` with
+   `NODE_ENV=test` and `AF_TEST_DB=test-1450-14700.db`. That is the **purpose-built DB-isolation
+   seam** (`db/index.ts:117-127`: under `NODE_ENV=test`, `AF_TEST_DB` names the db file inside
+   `AGENT_FARM_DIR`), the same one `send-integration.e2e.test.ts:63` and pir-1365's
+   `spec-1365-e2e-evidence.mts` use. Ports 14500/14600/14650 are taken; 14700 is fresh.
+   Isolation matters beyond tidiness: a second Tower on the live `global.db` would run its own
+   mailbox-delivery loop against the cohort's real held mail — `AF_TEST_DB` is exactly what
+   prevents that. The shared Tower on 4100 is never restarted or repointed.
+   *(Revision 2 proposed redirecting `HOME` to move `AGENT_FARM_DIR`; the architect pointed at
+   this seam instead — it isolates the db without touching the environment's home, so it is
+   strictly better and is what pir-1365 actually did.)*
+3. Activate a scratch workspace (`POST /api/workspaces/<b64>/activate`), register a real
+   shellper-backed PTY (`POST /api/terminals`), and seed held rows the honest way — `POST /api/send`
+   to an agent whose composer is occupied, so the render gate holds them. Real mailbox rows, not
+   hand-inserted. Include one `--delay` row to exercise the Scheduled group.
 4. Navigate to the workspace dashboard; screenshot the header — the counter is **underlined** and
    reads as interactive.
 5. Click it; screenshot the open panel showing `from → to` per row with age and reason, and the
@@ -371,7 +377,9 @@ badge count.
 | NIT — pin `inbox/:id` and `/dismiss` 404s | Accepted; both added as tests, not just the POST case. |
 | NIT — rewrite the rejected-overview rationale | Accepted. `JSON.stringify`-churn argument withdrawn as weak; replaced with cached-aggregate cost, VSCode fanout, and the steer — and it now says what that alternative would have bought (one source of truth, i.e. the blocking finding) and why `/api/inbox` + grouping still wins. |
 
-**One note back:** I could not find pir-1365's artifacts in this worktree to follow the cited
-port-14650 precedent directly, so the isolated-Tower recipe above is reconstructed from the CLI
-(`afx tower start --port`) and the `AGENT_FARM_DIR` definition. If pir-1365 did something
-materially different, point me at it and I will match it.
+**Resolved after approval:** the architect pointed at pir-1365's actual recipe
+(`spec-1365-e2e-evidence.mts`). It did **not** redirect `HOME` — it spawns the worktree's built
+`tower-server.js` with `NODE_ENV=test` + `AF_TEST_DB`, the dedicated isolation seam at
+`db/index.ts:117-127`. The Playwright section above is updated to use that seam; the HOME
+redirect is withdrawn. The point it was protecting — the delivery loop must never see the
+cohort's live mail — is exactly what `AF_TEST_DB` guarantees.
