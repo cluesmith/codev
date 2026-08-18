@@ -38,6 +38,7 @@
  */
 
 import { existsSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { TowerClient } from '../lib/tower-client.js';
 import { logger, fatal } from '../utils/logger.js';
@@ -167,6 +168,32 @@ export async function selfRefresh(options: SelfRefreshOptions): Promise<void> {
     return;
   }
 
+  // The registry row must describe THIS worktree.
+  //
+  // `detectCurrentBuilderId` falls back to a tail-segment match for legacy rows,
+  // so a row whose `worktree` points somewhere else can still resolve. Every
+  // path downstream — the challenge, the state file, the re-orientation — is
+  // built from `builder.worktree`, so a mismatch would read and write in a
+  // DIFFERENT worktree and then abort with "state file missing", which sends the
+  // reader looking for a save they did write, in a place nobody looked.
+  // The test is simply "am I inside the tree this row describes?" — which
+  // tolerates being run from a subdirectory, as a builder often is.
+  if (!resolve(process.cwd()).startsWith(resolve(builder.worktree))) {
+    fatal(
+      `Registry row for '${builderId}' points at ${builder.worktree}, but this command is ` +
+        `running in ${process.cwd()}. Refusing to refresh: every path below is built from the ` +
+        `registry worktree, so continuing would read and write in the wrong tree and then fail ` +
+        `with a misleading "state file missing".`,
+    );
+    return;
+  }
+
+  // NOTE: `getConfig().workspaceRoot` resolves to the WORKTREE here, not the
+  // parent — that is the ambiguity that produced the registry-lookup defect
+  // earlier in this phase. It is correct for the three uses below (loading the
+  // worktree's own config, resolving its prompt templates, and reading its
+  // forge config), all of which genuinely want worktree-local files. The
+  // registry lookup above deliberately uses `workspace` instead.
   const config = getConfig();
   const userConfig = loadConfig(config.workspaceRoot);
   const fs = buildFsPort();
@@ -193,6 +220,11 @@ export async function selfRefresh(options: SelfRefreshOptions): Promise<void> {
     if (options.dryRun) {
       logger.info('DRY RUN — no challenge was written and none was invalidated.');
       logger.info(`Would write the challenge to: ${result.challengePath}`);
+      logger.warn(
+        `The nonce below (${result.nonce}) is ILLUSTRATIVE — no challenge carries it. A save ` +
+          `written against it would be refused as wrong-nonce. Re-run without --dry-run to get a ` +
+          `real one.`,
+      );
       console.log('');
       console.log(result.saveRequest);
       return;
@@ -237,28 +269,7 @@ export async function selfRefresh(options: SelfRefreshOptions): Promise<void> {
   }
 
   const context = resolveBuilderContext({
-    fs: {
-      exists: (p: string) => existsSync(p),
-      read: (p: string) => safeRead(p),
-      // Bound for real, NOT stubbed.
-      //
-      // `readPorchContext` returns null the moment this yields an empty array,
-      // and a null porch context is SILENT: `assembleReorientation` only
-      // requires the porch fields `if (context.porch)`, so the frame still
-      // assembles — just without project id, project name, phase, plan phase,
-      // spec/plan paths, or the `porch next` resume notice. A refreshed builder
-      // would come back knowing it is a builder and nothing about where it is in
-      // the protocol, which is most of what this feature exists to restore.
-      listDirs: (p: string) => {
-        try {
-          return readdirSync(p, { withFileTypes: true })
-            .filter(e => e.isDirectory())
-            .map(e => e.name);
-        } catch {
-          return null;
-        }
-      },
-    },
+    fs: buildContextFsPort(),
     builderId: builder.id,
     worktree: builder.worktree,
     branch: builder.branch,
@@ -295,9 +306,20 @@ export async function selfRefresh(options: SelfRefreshOptions): Promise<void> {
   console.log(formatSelfRefreshReport(result));
 
   if (result.outcome === 'dry-run') {
+    // Report every side effect the real run WOULD have, not just the frame.
+    // A rehearsal that shows one of three actions invites the reader to assume
+    // the other two do not exist.
+    console.log('');
+    logger.info(`WOULD WRITE  ${result.reorientPath}`);
+    logger.info(`WOULD SEND   re-entry to this builder, delayed ${delaySeconds ?? 15}s`);
+    logger.info('WOULD SEND   /clear as raw input to this terminal');
+    logger.info('WOULD DELETE the refresh challenge');
     console.log('');
     logger.info('--- inline re-entry (what would arrive after the clear) ---');
     console.log(result.payload?.inline ?? '');
+    console.log('');
+    logger.info(`--- long form that would be written to ${result.reorientPath} ---`);
+    console.log(result.payload?.longForm ?? '');
     return;
   }
 
@@ -377,6 +399,43 @@ function buildFsPort(): SelfRefreshFsPort {
     },
     write: (p: string, content: string) => writeFileSync(p, content, 'utf-8'),
     remove: (p: string) => unlinkSync(p),
+  };
+}
+
+/**
+ * The filesystem port used for context resolution.
+ *
+ * EXPORTED so tests can exercise this exact binding against a real worktree
+ * rather than re-declaring their own copy. That distinction is not academic: an
+ * earlier version of the regression test copied the expected binding into the
+ * test file, which meant reverting production to `listDirs: () => []` would have
+ * left every test green — the test pinned a copy of the fix, not the fix.
+ *
+ * `listDirs` in particular must be bound for real. `readPorchContext` returns
+ * null the moment it yields an empty array, and a null porch context is SILENT:
+ * `assembleReorientation` requires the porch fields only `if (context.porch)`,
+ * so the frame still assembles — just without project id, project name, phase,
+ * plan phase, spec/plan paths, or the `porch next` resume notice. A refreshed
+ * builder would come back knowing it is a builder and nothing about where it is
+ * in the protocol, which is most of what this feature exists to restore.
+ */
+export function buildContextFsPort(): {
+  exists(p: string): boolean;
+  read(p: string): string | null;
+  listDirs(p: string): string[] | null;
+} {
+  return {
+    exists: (p: string) => existsSync(p),
+    read: (p: string) => safeRead(p),
+    listDirs: (p: string) => {
+      try {
+        return readdirSync(p, { withFileTypes: true })
+          .filter(e => e.isDirectory())
+          .map(e => e.name);
+      } catch {
+        return null;
+      }
+    },
   };
 }
 

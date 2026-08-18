@@ -27,11 +27,12 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { resolveBuilderContext } from '../commands/reset/context.js';
+import { buildContextFsPort } from '../commands/self-refresh.js';
 
 let workspace: string;
 let worktree: string;
@@ -51,33 +52,18 @@ const BUILDER_ID = 'builder-spir-1470';
 const WORKTREE_DIR = 'spir-1470';
 
 /**
- * The REAL port binding, copied from the command under test.
+ * THE PRODUCTION BINDING, imported — not a copy.
  *
- * Copied deliberately rather than imported: the defect was that this binding
- * differed from `reset.ts`'s, so a test that imported whatever the command
- * happens to use would have accepted the stub as correct. Stating it here means
- * the test asserts what the binding must DO, and a regression shows up as this
- * file disagreeing with the command.
+ * The first version of this file declared its own equivalent, with a comment
+ * arguing that was deliberate. That reasoning was wrong, and the review caught
+ * it: reverting production to `listDirs: () => []` would have left every test
+ * here green, because they pinned a copy of the fix rather than the fix. A
+ * regression test that cannot observe the regression is decoration.
+ *
+ * Importing it means this file fails the moment the real binding is weakened,
+ * which is the only behaviour that makes it a regression test at all.
  */
-const realFsPort = {
-  exists: (p: string) => existsSync(p),
-  read: (p: string) => {
-    try {
-      return readFileSync(p, 'utf-8');
-    } catch {
-      return null;
-    }
-  },
-  listDirs: (p: string) => {
-    try {
-      return readdirSync(p, { withFileTypes: true })
-        .filter(e => e.isDirectory())
-        .map(e => e.name);
-    } catch {
-      return null;
-    }
-  },
-};
+const realFsPort = buildContextFsPort();
 
 /** Build the layout production actually has: <ws>/.builders/<id>/codev/... */
 function buildWorktree(statusYaml: string): void {

@@ -151,6 +151,12 @@ async function importCommand() {
 beforeEach(() => {
   vi.clearAllMocks();
   process.exitCode = undefined;
+  // These tests simulate running INSIDE a builder worktree, so cwd must say so.
+  // Leaving it as the vitest cwd made the command's worktree-match check fire on
+  // every test — correctly, since the real cwd is not inside the fixture's
+  // worktree. Stating the simulated location is more honest than relaxing the
+  // check to accommodate a fixture that was lying about where it ran.
+  vi.spyOn(process, 'cwd').mockReturnValue('/tmp/ws/.builders/spir-1470');
   mockIsRunning.mockResolvedValue(true);
   mockDetectWorkspaceRoot.mockReturnValue('/tmp/ws');
   mockDetectCurrentBuilderId.mockReturnValue('spir-1470');
@@ -215,6 +221,20 @@ describe('identity', () => {
     expect(mockSendMessage).not.toHaveBeenCalled();
   });
 
+  it('refuses when the registry row points at a DIFFERENT worktree', async () => {
+    // detectCurrentBuilderId falls back to a tail-segment match for legacy rows,
+    // so a row whose worktree points elsewhere can still resolve. Every path
+    // below is built from builder.worktree, so continuing would read and write
+    // in the wrong tree and then abort with "state file missing" — sending the
+    // reader to look for a save they did write, in a place nobody looked.
+    mockGetBuilder.mockReturnValue({ ...SELF, worktree: '/tmp/ws/.builders/some-other-builder' });
+    const { selfRefresh } = await importCommand();
+
+    await expect(selfRefresh({})).rejects.toThrow(/running in|wrong tree/i);
+    expect(mockRunSelfRefresh).not.toHaveBeenCalled();
+    expect(mockSendMessage).not.toHaveBeenCalled();
+  });
+
   it('refuses when the registry row is incomplete', async () => {
     mockGetBuilder.mockReturnValue({ ...SELF, worktree: undefined });
     const { selfRefresh } = await importCommand();
@@ -275,9 +295,15 @@ describe('CLI argument surface', () => {
   });
 
   it('accepts the no-argument form', async () => {
-    const { error } = await runCli(['self-refresh', '--dry-run']);
-    // No parse error: the command genuinely takes no positional.
-    expect(error?.message ?? '').not.toMatch(/EXIT:1/);
+    // Positive control for the two refusals above: the same harness must let a
+    // well-formed invocation THROUGH, or "rejected" would prove nothing —
+    // everything would be rejected.
+    const rejected = await runCli(['self-refresh', 'a-target']);
+    expect(rejected.error, 'control: a positional must be rejected').toBeTruthy();
+
+    const accepted = await runCli(['self-refresh', '--dry-run']);
+    // Reached the command body rather than dying in the parser.
+    expect(accepted.error?.message ?? '').not.toMatch(/EXIT:1/);
   });
 });
 

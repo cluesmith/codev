@@ -1047,3 +1047,43 @@ meaningful if the same setup demonstrably makes X happen when it should.
 
 For Phase 7's correction list: `types.ts` `SendOptions.delay` carries the stale "not persisted"
 claim too — I had cli.ts and the four arch-save copies but missed this one.
+
+### Phase 4 iter3: BOTH reviewers found my regression test was pinning a COPY
+
+Codex REQUEST_CHANGES, Claude COMMENT (0 blocking) — and both independently said the same thing
+about `spec-1470-real-worktree-context.test.ts`: it **copied** the `listDirs` binding into the test
+file instead of importing the production one. **Reverting production to `() => []` would have left
+every test green.**
+
+Worse: I had written a comment DEFENDING the copy ("copied deliberately rather than imported... so
+the test asserts what the binding must DO"). Claude called the stated rationale backwards, and it
+is. The whole point of a regression test is to detect divergence; copying guarantees it cannot.
+**A regression test that cannot observe the regression is decoration.**
+
+Fixed by exporting `buildContextFsPort()` from self-refresh.ts and importing it in the test. Now a
+re-stub fails the test.
+
+That is the SEVENTH vacuous-test instance in this project, and the first where I had explicitly
+argued for the vacuity in a comment. Reasoning about why a shortcut is fine is not the same as
+checking whether it is.
+
+Also taken:
+- **Registry row's worktree never compared to cwd** (claude). `detectCurrentBuilderId`'s tail-match
+  fallback can resolve a row pointing elsewhere; every path downstream is built from
+  `builder.worktree`, so a mismatch reads/writes in the WRONG tree and then aborts with a
+  misleading "state file missing" — sending the reader to look for a save they did write, in a
+  place nobody looked. Now a named refusal.
+  - Implementing it exposed that my command tests never simulated running inside a worktree — the
+    check fired on all 24. Fixed by mocking `process.cwd()` to the fixture worktree, which is more
+    honest than relaxing the check to accommodate a fixture that was lying about where it ran.
+- **`--dry-run` reported only the frame**, not the reorient write, the clear, or the challenge
+  delete (codex). A rehearsal showing one of three actions invites the reader to assume the other
+  two do not exist. Now lists every side effect.
+- **`--begin --dry-run` printed a usable-looking nonce** for a challenge never written. Now warns it
+  is illustrative and would be refused as wrong-nonce.
+- **`getConfig().workspaceRoot` is the WORKTREE here** and is correct for its three remaining uses
+  (worktree-local config, prompt templates, forge config). Given a defect already came from this
+  ambiguity, that is now an explicit comment rather than something a reader must re-derive.
+- Parser test `accepts the no-argument form` got a POSITIVE CONTROL — it now first asserts a
+  positional IS rejected by the same harness, so "accepted" cannot pass because everything is
+  accepted.
