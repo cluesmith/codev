@@ -378,6 +378,19 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
   events at page load, so an eager recompute thrashes the size and flickers the faces. General rule: when
   a fixed count and a hand-numbered index can disagree with the true placed set, tie both to the placed
   set so a selection can never point at nothing.
+- [From #1495] "The deck never consumes the live-architect view" (#1463) is really "the deck never
+  **resolves** liveness" — the safety hinges on a key's **arity**, not its data source. A
+  **single-target** key that resolves one name from a stale list renders the wrong name faithfully
+  and opens the wrong person **silently**; an **enumeration** board that lists every candidate and
+  relays each name for the *editor* to resolve **fails loudly** (VSCode's "no such architect"
+  warning) when a name is stale. So the Architects board safely enumerates `OverviewData.architects`
+  (the live view) where #1463's single-target key must not. Corollary (filed #1497): **sort a
+  privileged default first but never *pin* it** — an explicit `'main'` arms VSCode's main-else-first
+  fallback, so a pinned `main` pressed while `main` is briefly offscreen opens whoever sorts first
+  under main's *own unqualified* terminal label (mislabel by qualifier-strip), wrong until the next
+  press; an absent key is the visible, self-correcting, safer failure. And when a doc comment encodes
+  a since-narrowed invariant, **amend it in place** (keep the original reasoning) — deleting it invites
+  the next maintainer to "restore" the old behavior as a repair.
 - [From #1428] Stream Deck's `setImage` accepts an SVG per the SDK d.ts, but a *raw* `<svg>`
   string is silently dropped on-device (Stream Deck 6.9) — the key reverts to its manifest PNG
   with no error. Two undocumented requirements: encode as a base64 `data:image/svg+xml` data URI,
