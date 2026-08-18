@@ -680,15 +680,25 @@ describe('encoders', () => {
     expect(ctx.sent).toEqual([{ verb: 'feedback-selection', args: [], ws: '/work/alpha' }]);
   });
 
-  it('ScrollNav empty state: line 2 reads "No builder" and the press is a silent no-op', async () => {
+  it('ScrollNav empty state: line 1 is a bare "Scroll" (no delivery mode), line 2 reads "No builder", press is a silent no-op (#1505)', async () => {
     const ctx = makeStore();
     ctx.store.overview = { builders: [], pendingPRs: [], backlog: [], recentlyClosed: [] } as never;
     const action = { isDial: () => true, setFeedback: vi.fn() };
     const nav = new ScrollNav(ctx.store);
     nav.onWillAppear({ action, payload: {} } as never);
-    expect(action.setFeedback.mock.calls.at(-1)?.[0]).toMatchObject({ title: 'Scroll · send', value: 'No builder' });
+    // With nothing selected the press is inert, so line 1 must not name a delivery mode it
+    // cannot fire: neither `send` nor `queue`, just the bare axis.
+    expect(action.setFeedback.mock.calls.at(-1)?.[0]).toEqual({ title: 'Scroll', value: 'No builder' });
     await nav.onDialDown();
     expect(ctx.sent).toHaveLength(0); // inert: no feedback-selection with nothing selected
+  });
+
+  it('ScrollNav empty state: the queue delivery mode does NOT leak into line 1 (#1505)', () => {
+    const ctx = makeStore();
+    ctx.store.overview = { builders: [], pendingPRs: [], backlog: [], recentlyClosed: [], feedbackMode: 'queue' } as never;
+    const action = { isDial: () => true, setFeedback: vi.fn() };
+    new ScrollNav(ctx.store).onWillAppear({ action, payload: {} } as never);
+    expect(action.setFeedback.mock.calls.at(-1)?.[0]).toEqual({ title: 'Scroll', value: 'No builder' });
   });
 
   it('ScrollNav re-renders line 2 on a store change (subscription wired)', () => {

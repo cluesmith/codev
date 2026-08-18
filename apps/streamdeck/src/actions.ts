@@ -1081,10 +1081,21 @@ export class ScrollNav extends SingletonAction {
    *  which is neither. The qualifier names where the dial DOES work rather than reading as
    *  a fault. (#1501 would restore ROTATION on a canvas via a canvas viewport-scroll
    *  command, but the press stays diff-bound by design, so this does not simply collapse
-   *  back to `send`/`queue` when #1501 lands — the two gestures have different scopes.) */
+   *  back to `send`/`queue` when #1501 lands — the two gestures have different scopes.)
+   *
+   *  With NO builder selected the press is inert too (`onDialDown` returns early), so the
+   *  delivery-mode qualifier is suppressed and line 1 reads a bare `Scroll` (#1505) — the
+   *  same canvas-branch rule that the qualifier appears only where the gesture it names is
+   *  live. Rotation still works with nothing selected (relaying `scroll` needs only the
+   *  workspace path), so the axis word stays honest; only the qualifier drops. */
   private renderTo(action: DialAction): void {
+    const b = this.store.selectedBuilder();
+    if (!b) {
+      void action.setFeedback({ title: 'Scroll', value: selectedBuilderLine(this.store) });
+      return;
+    }
     let qualifier: string;
-    if (reviewMode(this.store.selectedBuilder()) === 'canvas') {
+    if (reviewMode(b) === 'canvas') {
       qualifier = 'editor only';
     } else if (this.store.feedbackMode() === 'queue') {
       qualifier = 'queue';
