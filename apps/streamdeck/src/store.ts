@@ -147,6 +147,50 @@ export class CodevStore {
     return this.builders()[this.cursor.builder];
   }
 
+  /**
+   * The architects the Architects board enumerates (#1495): the names of the workspace's
+   * architects with a LIVE session, from `OverviewData.architects`, ordered `main` first then
+   * alphabetically. An `ArchitectAction` key indexes this by its slot rank and, on press,
+   * relays `open-architect-terminal <name>` — so the board must list "architects that exist",
+   * every one of them, not "architects that own visible work". Deriving from builders'
+   * `spawnedByArchitect` would omit a live architect that owns no builders (e.g. `demos`,
+   * `reviewer`), leaving it permanently unopenable from the deck.
+   *
+   * This does NOT violate #1463's "the deck never consumes the live-architect view". That
+   * ruling guards against a SILENTLY WRONG ACTION on a single-target key: a stale list could
+   * resolve the wrong architect and the face would faithfully render the wrong name, so the
+   * human never learns. This is an ENUMERATION board: the press still relays the name and
+   * VSCode still performs resolution — including its "No 'X' architect found — is the workspace
+   * activated?" warning — so a stale or incomplete list yields a key that FAILS LOUDLY when
+   * pressed, never one that quietly opens the wrong person. The deck does not RESOLVE liveness;
+   * it enumerates candidates and delegates resolution to VSCode. An empty list (Tower
+   * restarting, sessions not yet reattached) renders no keys — visibly empty, self-correcting
+   * on the next overview; we deliberately add no deck-side pre-validation.
+   *
+   * Main-first ordering keeps `main` on key 1 WHENEVER it is live — the keys are positional, so
+   * a new architect can't displace it while main has a session. This replicates VS Code's
+   * `sortArchitectsForPicker` (`apps/vscode/src/views/architect-display.ts`); the two apps can't
+   * import each other, so the rule is twinned here. Tower already returns the list main-first,
+   * but we sort anyway rather than depend on the server's order. Keep it in sync with that
+   * function.
+   *
+   * We SORT main first but do NOT PIN it — main is never injected when it has no live session.
+   * A pinned main key pressed while main is transiently invisible would not fail loudly: an
+   * explicit `'main'` arms VSCode's main-else-first fallback (#1497), so it could silently open
+   * the wrong architect's terminal under main's own unqualified label, self-correcting only on the
+   * next press. That is the silently-wrong-action failure ruling 2 exists to prevent. An unpinned
+   * main is simply absent during the flicker: visible, self-correcting, and unable to open the
+   * wrong person — the safer failure.
+   */
+  architects(): string[] {
+    const names = (this.overview?.architects ?? []).map((a) => a.name);
+    return names.sort((a, b) => {
+      if (a === 'main') return -1;
+      if (b === 'main') return 1;
+      return a.localeCompare(b);
+    });
+  }
+
   /** Report how many `BuilderAction` selector keys are currently placed (#1465). The
    *  window pages the fleet by this count, so the Row-1 window is exactly as wide as
    *  the keys on the board and a builder can't be selected while shown on no key.
