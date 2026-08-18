@@ -1017,9 +1017,12 @@ const SCROLL_LINES_PER_TICK = 3;
  * Like the review dials, the touchstrip narrates itself (#1498): a `store.onChange`
  * subscription re-renders `setFeedback` on every overview tick, so
  *
- *   - **line 1** pairs the axis with the LIVE delivery mode (`Scroll · queue` /
- *     `Scroll · send`, #1410) — the press is the one mode-dependent gesture on the
- *     board, so naming its mode is what keeps a press from ever being a surprise;
+ *   - **line 1** pairs the axis with a qualifier. In diff/text-editor mode that is the
+ *     LIVE delivery mode (`Scroll · queue` / `Scroll · send`, #1410) — the press is the
+ *     one mode-dependent gesture on the board, so naming its mode is what keeps a press
+ *     from ever being a surprise. In canvas mode (a spec/plan under review) it is
+ *     `Scroll · editor only` instead: both gestures are inert on a canvas, so line 1 must
+ *     not claim a live mode (see `renderTo`);
  *   - **line 2** names the selected builder the press acts on (`No builder` when none —
  *     a visibly inert empty state, never a live-looking static word).
  *
@@ -1066,10 +1069,28 @@ export class ScrollNav extends SingletonAction {
   private render(): void {
     if (this.current) this.renderTo(this.current);
   }
-  /** Line 1 = axis · live delivery mode (#1410); line 2 = the selected builder the press
-   *  acts on (`No builder` when none). No bar (Decision 2). */
+  /** Line 1 = axis · qualifier; line 2 = the selected builder the press acts on
+   *  (`No builder` when none). No bar (Decision 2).
+   *
+   *  In diff/text-editor mode the qualifier is the live delivery mode (`send`/`queue`,
+   *  #1410) so the press is never a surprise. In CANVAS mode (a spec/plan under review) it
+   *  is `editor only` instead: both gestures are inert there, so line 1 must not claim a
+   *  live scroll or delivery mode. Rotation relays `editorScroll`, which needs an active
+   *  text editor; the press (`feedback-selection`) is a diff-only gesture whose anchor
+   *  requires a builder-diff entry — and a spec/plan opens in the artifact-canvas webview,
+   *  which is neither. The qualifier names where the dial DOES work rather than reading as
+   *  a fault. (#1501 would restore ROTATION on a canvas via a canvas viewport-scroll
+   *  command, but the press stays diff-bound by design, so this does not simply collapse
+   *  back to `send`/`queue` when #1501 lands — the two gestures have different scopes.) */
   private renderTo(action: DialAction): void {
-    const mode = this.store.feedbackMode() === 'queue' ? 'queue' : 'send';
-    void action.setFeedback({ title: `Scroll · ${mode}`, value: selectedBuilderLine(this.store) });
+    let qualifier: string;
+    if (reviewMode(this.store.selectedBuilder()) === 'canvas') {
+      qualifier = 'editor only';
+    } else if (this.store.feedbackMode() === 'queue') {
+      qualifier = 'queue';
+    } else {
+      qualifier = 'send';
+    }
+    void action.setFeedback({ title: `Scroll · ${qualifier}`, value: selectedBuilderLine(this.store) });
   }
 }
