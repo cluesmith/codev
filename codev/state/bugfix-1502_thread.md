@@ -97,3 +97,14 @@ Amr asked whether a timeout is the best we can do. It is not.
   doesn't, it surfaces as a browser launch failure → restore --with-deps + rely on timeout, and
   say so. Not claiming certainty.
 - Re-running CMAP round 2 on the updated PR.
+
+## Verification + CMAP rounds 2/3
+- Canvas-browser CI on this PR (run 32098830832): SUCCESS in 45s. Install step (no --with-deps)
+  and browser-test step both green → Chromium launches without --with-deps. This is the
+  architect's cheap verification; it passed, so no fallback needed.
+- CMAP r2 (pre-assertion commit): gemini=APPROVE, claude=APPROVE, codex=REQUEST_CHANGES.
+  Codex's two points, both now resolved:
+    (1) regression test only guarded timeouts → added assertion that canvas install excludes
+        --with-deps (tamper-proven: fails when --with-deps reintroduced, passes without).
+    (2) canvas verification unchecked → verified green above.
+- CMAP r3 running on final commit (0bacf777, includes the new assertion) so all three see it.
