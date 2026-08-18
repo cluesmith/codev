@@ -121,3 +121,43 @@ it at its own level rather than pretending a production path reaches it.
 Also re-pointed `spec-1313-paced-write-drop` from the retired `writeMessagePaced` onto
 `submitMessagePaced`, so the silent-loss guard stays on the live write edge instead of on a
 function nothing calls.
+
+## dev-approval evidence (2026-08-18)
+
+`afx dev` was off the table (4100 is shared; restarting the live Tower kills every builder),
+so I built the evidence the way `send-integration.e2e.test.ts` does: this worktree's Tower on
+port 14650, real shellper-backed PTYs, real HTTP endpoints, nothing stubbed. Script +
+transcript committed (`packages/codev/scripts/spec-1365-e2e-evidence.mts`,
+`codev/evidence/1365-dev-approval-transcript.txt`). 66/66. Live Tower on 4100 verified
+untouched afterwards; no orphan processes.
+
+**The oracle is the interesting part.** The echo terminal (`stty raw -echo; exec cat`) re-emits
+every byte written to it in order, so `GET /api/terminals/:id/output` is a faithful ordered
+record of what each writer actually put on the terminal. That turns "did these two writers
+interleave?" into a string question instead of an inference.
+
+**Two wrong turns worth recording, both mine, both fixed rather than papered over:**
+
+1. First run: every send held `no-profile`, so nothing ever delivered and the whole scenario
+   asserted nothing. Cause: a shellper-backed session reports `command: ''`. Fix was to write
+   a real `.builder-start.sh` so the profile resolves through the *wrapped-launch fallback* —
+   which is how a genuine builder's profile resolves, so this is fidelity, not a workaround.
+2. A run reported `held` at request time and then had bytes on the wire 400 ms later, which my
+   assertion called a lie. It wasn't: the fast trigger/backstop had legitimately delivered the
+   row after the response. My assertion was wrong. Rather than loosen it I made it *sharper* —
+   count whole bodies vs. count first-lines, so any fragment without a whole body behind it
+   fails. That is a better interleaving detector than "is the body present", because
+   fragmentation is precisely what interleaving looks like on the wire.
+
+**Scenario 3 is the strongest single piece of evidence** and it exercises the degraded path I
+added: the interrupt returned in 2156 ms instead of waiting out a ~4.1 s paced write; Tower
+logged the degradation at WARN; and the raced delivery reported `preempted` and *held its row*
+— `delivered=false held=true reason=busy`. The ceiling and its compensating flag both firing
+end to end, on the real wire.
+
+**Two limits stated rather than approximated:** the 503 `TERMINAL_NOT_WRITABLE` branch needs a
+shellper socket that died while the session still reports `running`, which can't be produced
+from the public API without staging it (covered by `tower-routes.test.ts:1560`, untouched by
+this change); and this fixture's agent is only ever a live terminal, never a registry-known
+builder, so a send after its death correctly 404s instead of exercising the
+hold-instead-of-404 seam.
