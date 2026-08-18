@@ -37,7 +37,7 @@
  *   in the sequence could fail once the context is already gone.
  */
 
-import { existsSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { TowerClient } from '../lib/tower-client.js';
 import { logger, fatal } from '../utils/logger.js';
@@ -50,6 +50,7 @@ import { buildPromptFromTemplate, buildResumeNotice } from './spawn-roles.js';
 import { detectWorkspaceRoot, detectCurrentBuilderId } from './send.js';
 import { resolveBuilderContext } from './reset/context.js';
 import {
+  MIN_ALLOWED_CHALLENGE_MAX_AGE_MS,
   MIN_ALLOWED_MIN_BYTES,
   MIN_ALLOWED_REENTRY_DELAY_SECONDS,
   MIN_ALLOWED_STABILITY_WINDOW_MS,
@@ -98,7 +99,11 @@ export async function selfRefresh(options: SelfRefreshOptions): Promise<void> {
     '--stability-window',
     MIN_ALLOWED_STABILITY_WINDOW_MS,
   );
-  const challengeMaxAgeMs = boundedInt(options.challengeMaxAge, '--challenge-max-age', 1);
+  const challengeMaxAgeMs = boundedInt(
+    options.challengeMaxAge,
+    '--challenge-max-age',
+    MIN_ALLOWED_CHALLENGE_MAX_AGE_MS,
+  );
 
   // ------------------------------------------------------------------
   // Identity — derived from the worktree, never supplied.
@@ -192,6 +197,10 @@ export async function selfRefresh(options: SelfRefreshOptions): Promise<void> {
   // ------------------------------------------------------------------
   // execute — verify, assemble, schedule, clear.
   // ------------------------------------------------------------------
+  // Checked before the dry-run branch too, deliberately. A rehearsal whose point
+  // is "would this refresh proceed?" must answer honestly, and it would not
+  // proceed with Tower down — reporting a clean dry run in that state would be
+  // the rehearsal lying about the thing most likely to stop the real run.
   const client = new TowerClient();
   if (!(await client.isRunning())) {
     fatal(
@@ -206,7 +215,24 @@ export async function selfRefresh(options: SelfRefreshOptions): Promise<void> {
     fs: {
       exists: (p: string) => existsSync(p),
       read: (p: string) => safeRead(p),
-      listDirs: () => [],
+      // Bound for real, NOT stubbed.
+      //
+      // `readPorchContext` returns null the moment this yields an empty array,
+      // and a null porch context is SILENT: `assembleReorientation` only
+      // requires the porch fields `if (context.porch)`, so the frame still
+      // assembles — just without project id, project name, phase, plan phase,
+      // spec/plan paths, or the `porch next` resume notice. A refreshed builder
+      // would come back knowing it is a builder and nothing about where it is in
+      // the protocol, which is most of what this feature exists to restore.
+      listDirs: (p: string) => {
+        try {
+          return readdirSync(p, { withFileTypes: true })
+            .filter(e => e.isDirectory())
+            .map(e => e.name);
+        } catch {
+          return null;
+        }
+      },
     },
     builderId: builder.id,
     worktree: builder.worktree,

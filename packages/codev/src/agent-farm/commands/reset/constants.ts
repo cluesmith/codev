@@ -155,3 +155,12 @@ export const MAX_NONCE_HEX_CHARS = 128;
 export const MIN_ALLOWED_MIN_BYTES = 200;
 export const MIN_ALLOWED_STABILITY_WINDOW_MS = 500;
 export const MIN_ALLOWED_REENTRY_DELAY_SECONDS = 5;
+
+/**
+ * Floor for the challenge age bound.
+ *
+ * Named rather than a bare `1` so it reads like its three siblings; the value is
+ * genuinely permissive because any positive age bound still expires a forgotten
+ * challenge, which is all this parameter is for.
+ */
+export const MIN_ALLOWED_CHALLENGE_MAX_AGE_MS = 1;

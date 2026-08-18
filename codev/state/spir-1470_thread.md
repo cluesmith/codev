@@ -951,3 +951,44 @@ that the lookup scope never contains `.builders`.
 All three: correct at every layer I tested, dead in the real calling context. **Mocking the thing
 that resolves context hides the resolution.** Where a helper derives something internally, pass it
 in instead — then the test can see it.
+
+### Phase 4 iter1 (claude): a SECOND port-binding defect — silent this time
+
+Claude independently confirmed the workspace-scoping bug AND found one I had missed:
+
+**`listDirs: () => []`** — I STUBBED it in the real port binding. `reset.ts` binds a real
+`readdirSync`. `readPorchContext` returns null the instant listDirs gives an empty array, so the
+re-orientation lost project id, project name, phase, plan phase, spec/plan paths and the
+`porch next` resume notice.
+
+**And it is SILENT**: `assembleReorientation` only requires porch fields `if (context.porch)`, so a
+null porch skips the requirement rather than throwing R3. The frame assembles, looks complete, and
+tells a refreshed builder nothing about where it is in the protocol — which is most of what this
+feature exists to restore. A refreshed builder would know it is a builder and not which phase it
+was in.
+
+That is the SECOND wrong port binding in one file, in a test file whose own docstring says it
+exists to catch exactly this ("the orchestrator cannot tell whether sendRaw was wired to raw or
+escape"). My tests mocked `resolveBuilderContext` whole, so the binding never ran.
+
+### New test file: real `.builders/<id>` layout, no mocked resolvers
+
+`spec-1470-real-worktree-context.test.ts` — both reviewers asked for it. Real fs, real layout, no
+mocks. It immediately taught me three things my mocks had papered over:
+
+1. **Canonical builder ids are `builder-spir-1470`, not `spir-1470`.** `parseAgentName` only matches
+   `builder-<protocol>-<id>`, and a weak porch claim is REFUSED when the protocol cannot be
+   corroborated — so a non-canonical id resolves NO porch context. The worktree DIRECTORY is
+   `spir-1470`; the registry id is not.
+2. `.builder-prompt.txt` with a `## Mode:` line is required — mode is persisted nowhere else.
+3. `.builder-start.sh` with a recognisable launch command is required — re-orientation refuses to
+   type into a terminal whose agent it cannot name.
+
+Every one of those is real production scaffolding that a mocked context never needed, and each
+failure was a genuine "your fixture is not the layout production sees".
+
+Also fixed from claude's minor list: `SelfRefreshOptions` numeric fields typed `number` while
+commander passes strings (declaring a type the runtime does not honour is a lie the compiler then
+enforces); `--challenge-max-age`'s bare `1` floor → named constant; a comment explaining that
+`--dry-run` deliberately requires Tower, because a rehearsal answering "would this proceed?" must
+not report success in the one state most likely to stop the real run.

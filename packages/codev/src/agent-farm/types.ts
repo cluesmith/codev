@@ -228,14 +228,18 @@ export interface SelfRefreshOptions {
   allowDirty?: boolean;
   /** Override when the builder prompt file is gone. */
   mode?: 'strict' | 'soft';
+  // The four below arrive from commander as STRINGS when typed as flags, and as
+  // numbers when called programmatically. Typed for both rather than `number`
+  // alone: declaring a type the runtime does not honour is a lie the compiler
+  // then helps enforce, and `boundedInt` parses either.
   /** Minimum state-file size to count as substantive. */
-  minBytes?: number;
+  minBytes?: string | number;
   /** Seconds Tower holds the re-entry before delivering it. */
-  delay?: number;
+  delay?: string | number;
   /** ms the state file must be unchanged across two observations. */
-  stabilityWindow?: number;
+  stabilityWindow?: string | number;
   /** ms after which an unused challenge is refused. */
-  challengeMaxAge?: number;
+  challengeMaxAge?: string | number;
 }
 
 /**
