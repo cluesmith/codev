@@ -47,3 +47,30 @@ approve.ts / role docs / protocol prompts / types / Tower.
 **Open item to confirm in implement:** whether the pure helper can live/export in `extension.ts` and
 be vitest-importable (deep import graph; nothing imports extension.ts in __tests__ today). Fallback:
 tiny new `apps/vscode/src/open-architect.ts` — will flag before adding a third file.
+
+## Implement phase (done, awaiting dev-approval)
+
+Confirmed extension.ts is NOT vitest-importable (78 imports, deep value-import graph). Took the
+flagged contingency: new `apps/vscode/src/open-architect.ts` holding `resolveArchitectTarget` (no
+fallback) + `openResolvedArchitect` (flows the occupant's own name onward, refuses non-live main).
+extension.ts command is now a thin adapter over it; added an invariant comment in terminal-manager.ts
+at the openArchitect cache-key line.
+
+**Harness note (matters for reviewer):** the injection-capture test DOES import the real
+TerminalManager and captures real `sendText` — this only resolves because CI's test.yml runs
+`pnpm build` before vitest (codev-types/sdk `dist` must exist). Locally I had to build
+codev-types + codev-sdk (+ artifact-canvas for the pre-existing webview check-types) first. The
+existing terminal-manager.test.ts avoids importing TerminalManager for this reason; my test is the
+first to import it, relying on the build-first ordering.
+
+**Pre-existing (NOT mine):** `check-types` webview step fails on `@cluesmith/codev-artifact-canvas`
+missing dist unless that package is built first (CI builds it in a dedicated step). Untouched file.
+
+Commits: fix (open-architect.ts + extension.ts + terminal-manager.ts), tests (new test + updated
+extension-architect-commands source guard for the delegation). Full suite: 856 pass, check-types
+green (after building deps), lint clean, esbuild bundles.
+
+**Dev-approval demo needing the human's machine** (a real openArchitect dials a Tower pty; can't run
+headless): workspace with `web` + `main`, stop main → open-architect(main) shows the warning + no
+terminal, referenceIssueInArchitect lands nowhere (not in web); main up → both land in main. Option-B
+switch (if reviewer prefers) is one line in resolveArchitectTarget.
