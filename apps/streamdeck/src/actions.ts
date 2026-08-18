@@ -1017,10 +1017,18 @@ export class DiffHunkNav extends ReviewNav {
 const SCROLL_LINES_PER_TICK = 3;
 
 /**
- * Scroll dial: rotate scrolls the focused editor's viewport up/down (so you can
- * read a diff without the keyboard); a dial press submits the current selection as
- * feedback (forwarded now or queued per the workspace setting, #1410). Scroll is a
- * viewport move (`revealCursor: false`), so select your text first, then scroll/submit.
+ * Scroll dial: rotate scrolls the viewport up/down so you can read without the keyboard; a
+ * dial press submits the current selection as feedback (forwarded now or queued per the
+ * workspace setting, #1410). Rotation is phase-aware, mirroring the review dials' split
+ * (#1501): in diff/text-editor mode it relays `editorScroll` of the focused editor; in canvas
+ * mode (a spec/plan under review) the focused surface is the artifact-canvas webview, which
+ * `editorScroll` cannot reach, so rotation drives the canvas's own viewport-scroll command.
+ * Scroll is a viewport move (`revealCursor: false`), so select your text first, then
+ * scroll/submit.
+ *
+ * The PRESS is builder-diff-only by design (#1498) and is NOT phase-switched: on a canvas its
+ * `feedback-selection` anchor has no diff entry, so it stays inert there. So on a canvas the
+ * dial is half-live — rotation scrolls, press does not.
  *
  * Like the review dials, the touchstrip narrates itself (#1498): a `store.onChange`
  * subscription re-renders `setFeedback` on every overview tick, so
@@ -1028,9 +1036,9 @@ const SCROLL_LINES_PER_TICK = 3;
  *   - **line 1** pairs the axis with a qualifier. In diff/text-editor mode that is the
  *     LIVE delivery mode (`Scroll · queue` / `Scroll · send`, #1410) — the press is the
  *     one mode-dependent gesture on the board, so naming its mode is what keeps a press
- *     from ever being a surprise. In canvas mode (a spec/plan under review) it is
- *     `Scroll · editor only` instead: both gestures are inert on a canvas, so line 1 must
- *     not claim a live mode (see `renderTo`);
+ *     from ever being a surprise. In canvas mode it is `Scroll · read only`: rotation scrolls
+ *     the canvas (you can read), but the press is inert, so line 1 names what works rather
+ *     than a delivery mode the press cannot fire (see `renderTo`);
  *   - **line 2** names the selected builder the press acts on (`No builder` when none —
  *     a visibly inert empty state, never a live-looking static word).
  *
@@ -1075,7 +1083,11 @@ export class ScrollNav extends SingletonAction {
         { workspace },
         { count: Math.abs(ev.payload.ticks) || 1 },
       );
-      this.status = res.ok ? undefined : canvasErrorLine(res.code);
+      if (res.ok) {
+        this.status = undefined;
+      } else {
+        this.status = canvasErrorLine(res.code);
+      }
       if (this.current) this.renderTo(this.current);
       return;
     }

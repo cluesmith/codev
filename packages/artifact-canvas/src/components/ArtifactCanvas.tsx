@@ -917,16 +917,16 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
   // cannot deliver as a DOM event, so it arrives as a command instead. A viewport move only:
   // block focus stays put.
   //
-  // In vertical reading mode the HOST PAGE scrolls the canvas, NOT the body — the body is not a
-  // vertical scroll container (see `viewportStartLine`, which measures against the window top, and
-  // the VS Code host, whose vertical mode leaves body overflow default so the page scrolls). So we
-  // pan the document's scrolling element. In horizontal mode the body clips vertically
-  // (`overflow-y: hidden`) and the page does not scroll vertically, so this is a natural no-op —
-  // "up/down" has no meaning there. Cancels any in-flight wheel glide first, exactly as
-  // `pageColumn` does, so a dial tick lands where asked rather than being dragged by a decaying
-  // wheel animation.
+  // HOST CONTRACT: in vertical reading mode the host page scrolls the canvas, NOT the body — the
+  // body is not a vertical scroll container. This is the SAME assumption `viewportStartLine`
+  // already encodes (it measures block visibility against the window top, not the body rect), so
+  // this adds no new host requirement. Both current hosts satisfy it: the VS Code webview leaves
+  // body overflow default in vertical mode (`preview-template.ts`), and the example page lets the
+  // document scroll. So we pan the document's scrolling element. A future host that put the
+  // canvas inside its own `overflow` scroller would break `viewportStartLine` too, not just this.
+  // In horizontal mode the body clips vertically (`overflow-y: hidden`) and the page does not
+  // scroll vertically, so this is a natural no-op — "up/down" has no meaning there.
   const scrollViewport = (root: HTMLElement, dir: 1 | -1): void => {
-    cancelWheelGlideRef.current?.();
     const scroller = root.ownerDocument.scrollingElement;
     if (!scroller) return;
     const max = Math.max(scroller.scrollHeight - scroller.clientHeight, 0);
