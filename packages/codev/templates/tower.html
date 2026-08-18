@@ -8,6 +8,7 @@
   <meta name="theme-color" content="#252525">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🗼</text></svg>">
   <title>Agent Farm Tower</title>
+  <!-- CODEV_TOWER_KEY_INJECTION -->
   <style>
     * {
       box-sizing: border-box;
@@ -989,21 +990,39 @@
     let runningInstances = [];
     let recentInstances = [];
 
-    // Auth helper: get headers with auth token if available
+    // Auth helper: resolve the shared local key. Prefer the value Tower injects
+    // same-origin at serve time (window.__CODEV_TOWER_KEY__); fall back to any
+    // previously stored value. The injected value is persisted so later loads
+    // and manual navigations keep working.
+    function getWebKey() {
+      if (window.__CODEV_TOWER_KEY__) {
+        try { localStorage.setItem('codev-tower-key', window.__CODEV_TOWER_KEY__); } catch (e) {}
+        return window.__CODEV_TOWER_KEY__;
+      }
+      return localStorage.getItem('codev-tower-key');
+    }
+
+    // Auth helper: get headers with the auth key if available
     function getAuthHeaders() {
-      const key = localStorage.getItem('codev-web-key');
-      return key ? { 'Authorization': `Bearer ${key}` } : {};
+      const key = getWebKey();
+      return key ? { 'codev-tower-key': key } : {};
     }
 
     // Auth helper: make authenticated fetch request
     async function authFetch(url, options = {}) {
+      const hadKey = !!getWebKey();
       const headers = { ...getAuthHeaders(), ...(options.headers || {}) };
       const response = await fetch(url, { ...options, headers });
 
-      // If 401, clear key and redirect to login
+      // If 401, clear a now-stale key. Only reload when we actually sent a key:
+      // a reload re-fetches the shell and picks up a freshly injected key. With
+      // no key to begin with, the shell has none to inject, so reloading would
+      // loop forever (advisory GHSA-xvjp-7748-v88v) — surface the error instead.
       if (response.status === 401) {
-        localStorage.removeItem('codev-web-key');
-        location.reload();
+        localStorage.removeItem('codev-tower-key');
+        if (hadKey) {
+          location.reload();
+        }
         throw new Error('Unauthorized');
       }
       return response;
@@ -1011,7 +1030,7 @@
 
     // Logout function
     function logout() {
-      localStorage.removeItem('codev-web-key');
+      localStorage.removeItem('codev-tower-key');
       window.location.href = './';
     }
 

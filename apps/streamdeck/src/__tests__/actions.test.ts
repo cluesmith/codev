@@ -5,6 +5,7 @@ import {
   CodevAction,
   DevServerAction,
   BuilderAction,
+  ArchitectAction,
   ApproveGate,
   SendQueueAction,
   OpenTerminalAction,
@@ -1081,5 +1082,120 @@ describe('OpenArchitectAction (Row 2 — open architect, #1463)', () => {
     const face = Buffer.from(String(key.setImage.mock.calls.at(-1)?.[0]).split(',')[1], 'base64').toString('utf8');
     expect(face).toContain('Architect');
     expect(face).toContain('None');
+  });
+});
+
+// ── Architects board (#1495) ────────────────────────────────────────────────
+
+/** Decode the base64 SVG face handed to a key's `setImage`. */
+const decodeFace = (key: { setImage: { mock: { calls: unknown[][] } } }): string =>
+  Buffer.from(String(key.setImage.mock.calls.at(-1)?.[0]).split(',')[1], 'base64').toString('utf8');
+
+/** Put a live-architect list on the store's overview — the field #1495's board enumerates.
+ *  `ArchitectState` only needs `.name`; the overview is cast, so partial rows are fine. */
+function withArchitects(store: CodevStore, names: string[], builders: unknown[] = []): void {
+  store.overview = {
+    builders,
+    architects: names.map((name) => ({ name, port: 0, pid: 0 })),
+    pendingPRs: [],
+    backlog: [],
+    recentlyClosed: [],
+  } as never;
+}
+
+describe('store.architects() — the live-architect enumeration (#1495)', () => {
+  it('returns the names of OverviewData.architects, main-first then alphabetical', () => {
+    const { store } = makeStore();
+    // Deliberately NOT main-first at the source, so the sort (not the server order) is what proves out.
+    withArchitects(store, ['vscode', 'demos', 'main', 'security']);
+    expect(store.architects()).toEqual(['main', 'demos', 'security', 'vscode']);
+  });
+
+  it('lists an architect with ZERO builders (enumerates the live view, not the builders)', () => {
+    const { store } = makeStore();
+    // `reviewer` owns no builder but has a live session — it must still appear (the inverse of the
+    // dropped superset test: the board lists "architects that exist", not "that own work").
+    withArchitects(store, ['main', 'reviewer'], [{ id: 'b1', spawnedByArchitect: 'main' }]);
+    expect(store.architects()).toEqual(['main', 'reviewer']);
+  });
+
+  it('is empty when no architect has a live session', () => {
+    const { store } = makeStore();
+    withArchitects(store, []);
+    expect(store.architects()).toEqual([]);
+  });
+
+  it('does NOT inject main when main has no live session (unpinned — the safer failure)', () => {
+    const { store } = makeStore();
+    withArchitects(store, ['security', 'vscode']);
+    expect(store.architects()).toEqual(['security', 'vscode']);
+  });
+});
+
+describe('ArchitectAction — one key per live architect (#1495)', () => {
+  /** Place `n` architect keys left-to-right on row 0 and return the instance + keys. */
+  function place(store: CodevStore, n: number) {
+    const aa = new ArchitectAction(store);
+    const keys = Array.from({ length: n }, (_, i) => bkey(`a${i}`, i));
+    keys.forEach((k) => aa.onWillAppear({ action: k, payload: { settings: {} } } as never));
+    return { aa, keys };
+  }
+
+  it('key N (by coordinates) shows the Nth architect name', () => {
+    const { store } = makeStore();
+    withArchitects(store, ['main', 'security', 'streamdeck']);
+    const { keys } = place(store, 3);
+    expect(decodeFace(keys[0])).toContain('Main');
+    expect(decodeFace(keys[1])).toContain('Security');
+    expect(decodeFace(keys[2])).toContain('Streamdeck');
+  });
+
+  it('press opens that architect’s terminal and leaves the builder selection untouched', async () => {
+    const ctx = makeStore();
+    const builders = ctx.store.builders(); // preserve the makeStore fixture so a selection exists
+    withArchitects(ctx.store, ['main', 'streamdeck'], builders);
+    const before = ctx.store.selectedBuilder()?.id;
+    const { aa, keys } = place(ctx.store, 2);
+    await aa.onKeyDown({ action: keys[1], payload: { settings: {} } } as never);
+    expect(ctx.sent).toEqual([{ verb: 'open-architect-terminal', args: ['streamdeck'], ws: '/work/alpha' }]);
+    expect(ctx.store.selectedBuilder()?.id).toBe(before); // no selection/scope change
+  });
+
+  it('a slot past the end of the live list is inert — alerts, relays nothing', async () => {
+    const ctx = makeStore();
+    withArchitects(ctx.store, ['main']); // only one architect...
+    const { aa, keys } = place(ctx.store, 2); // ...but two keys placed
+    await aa.onKeyDown({ action: keys[1], payload: { settings: {} } } as never);
+    expect(keys[1].showAlert).toHaveBeenCalled();
+    expect(ctx.sent).toEqual([]);
+  });
+
+  it('a multi-action key (no coordinates) has no slot — alerts, relays nothing', async () => {
+    const ctx = makeStore();
+    withArchitects(ctx.store, ['main']);
+    const aa = new ArchitectAction(ctx.store);
+    const m = multiKey('m');
+    aa.onWillAppear({ action: m, payload: { settings: {} } } as never);
+    await aa.onKeyDown({ action: m, payload: { settings: {} } } as never);
+    expect(m.showAlert).toHaveBeenCalled();
+    expect(ctx.sent).toEqual([]);
+  });
+
+  it('an empty slot renders the dim inert "No architect" face, never blank', () => {
+    const { store } = makeStore();
+    withArchitects(store, ['main']);
+    const { keys } = place(store, 2);
+    expect(decodeFace(keys[1])).toContain('No architect');
+  });
+
+  it('re-renders when the overview architect list changes (store.onChange)', () => {
+    const { store } = makeStore();
+    withArchitects(store, ['main']);
+    const { keys } = place(store, 1);
+    expect(decodeFace(keys[0])).toContain('Main');
+    // A new overview brings a different architect into slot 0; an emit re-renders the placed keys.
+    withArchitects(store, ['security']);
+    store.rotateCursor(0); // no-op cursor move, but emits → onChange → renderAll
+    expect(decodeFace(keys[0])).toContain('Security');
   });
 });

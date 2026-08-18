@@ -1051,7 +1051,7 @@ export async function startBuilderSession(
 
   // Write the initial prompt to a file the launch command reads back.
   //
-  // Issue #1267: a resume must NOT rewrite it. `afx reset` reads the literal
+  // Issue #1267: a resume must NOT rewrite it. `afx refresh` reads the literal
   // `## Mode: STRICT|SOFT` heading out of this file as spawn-time ground truth
   // (reset/context.ts: modeFromBuilderPrompt) precisely *because* `--resume`
   // never regenerates it — `resolveMode` cannot recover a spawn-time `--soft`

@@ -16,7 +16,7 @@ import type {
   CanvasCommandClientErrorCode,
 } from '@cluesmith/codev-sdk/controller';
 import type { CodevStore } from './store.js';
-import { approveFaceSvg, architectFaceSvg, builderFaceSvg, faceForBuilder, labelFaceSvg, sendFbFaceSvg, svgToDataUri } from './face.js';
+import { approveFaceSvg, architectFaceSvg, architectKeyFaceSvg, builderFaceSvg, faceForBuilder, labelFaceSvg, sendFbFaceSvg, svgToDataUri } from './face.js';
 
 /**
  * The Stream Deck actions — thin adapters over CodevStore. Each maps a physical
@@ -84,12 +84,7 @@ export class DevServerAction extends VerbKey {
 }
 
 
-// ── Slot keys (pinned builder board) ────────────────────────────────────────
-
-/** PI settings for the slot-based keys: an optional per-key verb. The former manual
- *  `slot` field is retired (#1465) — a key's slot is derived from where it physically
- *  sits, not hand-numbered, so the window can never disagree with the placed keys. */
-type SlotSettings = { verb?: string };
+// ── Placed keys (self-ordering board of keys) ───────────────────────────────
 
 /** How long to let the page-load `willAppear`/`willDisappear` burst settle before
  *  the full re-render (#1465). Keys arrive over several events at load, and a later
@@ -98,22 +93,25 @@ type SlotSettings = { verb?: string };
 const WINDOW_SETTLE_MS = 50;
 
 /**
- * A keypad pinned to a builder SLOT — the Nth builder in Row-1's window onto the
- * fleet — that fires a verb for that builder. A key's slot is its RANK among the
- * placed builder keys sorted by physical position (row, then column), derived from
- * `KeyAction.coordinates`, NOT a hand-numbered setting (#1465): so the window is
- * exactly as wide as the keys you placed, and a builder is never selectable while
- * shown on no key. The press indexes by position, so it survives builder ids
- * changing. Subclasses override the default verb, the render, and (optionally) the
- * verb resolution (BuilderAction resolves its `automatic` default to a phase artifact).
+ * A board of keys that SELF-ORDER by physical position: each placed key's SLOT is its
+ * RANK among the placed keys sorted by `KeyAction.coordinates` (row, then column), NOT a
+ * hand-numbered setting (#1465). Multi-action instances report `coordinates: undefined`
+ * and are excluded, so the board is exactly as wide as the keys you placed and the slot
+ * indexing survives keys being added or removed. This is the shared mechanism behind both
+ * the builder board (`SlotKey` → Row-1 window) and the architect board (`ArchitectAction`),
+ * extracted so neither reimplements the ordering.
+ *
+ * Subclasses render each key (`renderTo`) and may react to the placed set changing
+ * (`onPlacementChanged` — e.g. `SlotKey` resizes the Row-1 window from the placed count).
+ * Per-key settings are read from the press event where needed, so the shared tracking does
+ * not carry a settings type.
  */
-abstract class SlotKey extends SingletonAction<SlotSettings> {
-  protected abstract readonly defaultVerb: string;
-  // One SingletonAction instance serves EVERY key of this type, so per-key state
-  // (its action handle, settings, and board coordinates) is tracked per instance,
-  // keyed by the action context id — never in shared fields, which would collide.
-  // `coordinates` is `undefined` for a multi-action instance (excluded from the window).
-  private readonly keys = new Map<string, { action: KeyAction; settings: SlotSettings; coordinates?: Coordinates }>();
+abstract class PlacedKeys extends SingletonAction {
+  // One SingletonAction instance serves EVERY key of this type, so per-key state (its action
+  // handle and board coordinates) is tracked per instance, keyed by the action context id —
+  // never in shared fields, which would collide. `coordinates` is `undefined` for a
+  // multi-action instance (excluded from the board).
+  private readonly keys = new Map<string, { action: KeyAction; coordinates?: Coordinates }>();
   private settleTimer?: ReturnType<typeof setTimeout>;
 
   constructor(protected readonly store: CodevStore) {
@@ -121,51 +119,34 @@ abstract class SlotKey extends SingletonAction<SlotSettings> {
     this.store.onChange(() => this.renderAll());
   }
 
-  override onWillAppear(ev: WillAppearEvent<SlotSettings>): void {
+  override onWillAppear(ev: WillAppearEvent): void {
     if (!ev.action.isKey()) return;
-    const settings = ev.payload.settings ?? {};
-    this.keys.set(ev.action.id, { action: ev.action, settings, coordinates: ev.action.coordinates });
-    // Size the window from the placed keys right away so a press resolves against the
-    // current layout, and render THIS key now; the debounced pass re-renders the rest
-    // once the page-load burst settles (a later key can shift an earlier key's page).
-    this.store.setBuilderWindowSize(this.placedKeys().length);
+    this.keys.set(ev.action.id, { action: ev.action, coordinates: ev.action.coordinates });
+    // React to the new layout right away so a press resolves against the current key set, and
+    // render THIS key now; the debounced pass re-renders the rest once the page-load burst
+    // settles (a later key can shift an earlier key's slot).
+    this.onPlacementChanged();
     this.renderTo(ev.action);
     this.scheduleSettle();
   }
-  override onWillDisappear(ev: WillDisappearEvent<SlotSettings>): void {
+  override onWillDisappear(ev: WillDisappearEvent): void {
     this.keys.delete(ev.action.id);
-    this.store.setBuilderWindowSize(this.placedKeys().length);
+    this.onPlacementChanged();
     this.scheduleSettle();
   }
-  override onDidReceiveSettings(ev: DidReceiveSettingsEvent<SlotSettings>): void {
+  override onDidReceiveSettings(ev: DidReceiveSettingsEvent): void {
     const entry = this.keys.get(ev.action.id);
     if (!entry) return;
-    entry.settings = ev.payload.settings ?? {};
-    // A verb change doesn't move any key, so just re-render this one.
+    // A settings change doesn't move any key, so just re-render this one.
     this.renderTo(entry.action);
   }
-  override async onKeyDown(ev: KeyDownEvent<SlotSettings>): Promise<void> {
-    const b = this.builderFor(ev.action);
-    if (!b) {
-      await ev.action.showAlert();
-      return;
-    }
-    // Pressing a builder key focuses it: the shared cursor follows, so the diff
-    // dials and other selection-scoped keys now act on the builder you pressed.
-    this.store.syncToBuilder(b.id);
-    const settings = ev.payload.settings ?? {};
-    const verb = this.resolveVerb(settings, b);
-    const res = await this.store.client.sendCommand(verb, [b.id], this.store.selectedWorkspacePath());
-    await ack(ev.action, res.ok);
-  }
 
-  /** Placed builder keys — those with defined coordinates (multi-action instances
-   *  report `undefined` and are excluded) — in reading order: row, then column. */
-  private placedKeys(): KeyAction[] {
+  /** Placed keys — those with defined coordinates (multi-action instances report `undefined`
+   *  and are excluded) — in reading order: row, then column. */
+  protected placedKeys(): KeyAction[] {
     return [...this.keys.values()]
       .filter(
-        (e): e is { action: KeyAction; settings: SlotSettings; coordinates: Coordinates } =>
-          e.coordinates !== undefined,
+        (e): e is { action: KeyAction; coordinates: Coordinates } => e.coordinates !== undefined,
       )
       .sort((a, b) => a.coordinates.row - b.coordinates.row || a.coordinates.column - b.coordinates.column)
       .map((e) => e.action);
@@ -176,6 +157,60 @@ abstract class SlotKey extends SingletonAction<SlotSettings> {
     const slotIndex = this.placedKeys().findIndex((a) => a.id === action.id);
     return slotIndex < 0 ? undefined : slotIndex;
   }
+
+  /** Debounce a full re-render across the willAppear/willDisappear settle (#1465);
+   *  let the subclass react to the settled key set before rendering. */
+  private scheduleSettle(): void {
+    if (this.settleTimer) clearTimeout(this.settleTimer);
+    this.settleTimer = setTimeout(() => {
+      this.settleTimer = undefined;
+      this.onPlacementChanged();
+      this.renderAll();
+    }, WINDOW_SETTLE_MS);
+  }
+  private renderAll(): void {
+    for (const { action } of this.keys.values()) this.renderTo(action);
+  }
+
+  /** Hook: the placed-key set changed (appear / disappear / settle). Default no-op;
+   *  `SlotKey` resizes the Row-1 window here. */
+  protected onPlacementChanged(): void {}
+  protected abstract renderTo(action: KeyAction): void;
+}
+
+// ── Slot keys (pinned builder board) ────────────────────────────────────────
+
+/**
+ * A keypad pinned to a builder SLOT — the Nth builder in Row-1's window onto the
+ * fleet — that fires a verb for that builder. Reuses `PlacedKeys` for the self-ordering
+ * (#1465), and sizes the Row-1 window from the placed-key count so the window is exactly as
+ * wide as the keys you placed and a builder is never selectable while shown on no key. The
+ * press indexes by position, so it survives builder ids changing. Subclasses override the
+ * default verb, the render, and (optionally) the verb resolution (BuilderAction resolves its
+ * `automatic` default to a phase artifact).
+ */
+abstract class SlotKey extends PlacedKeys {
+  protected abstract readonly defaultVerb: string;
+
+  /** The Row-1 window is exactly as wide as the placed builder keys (#1465). */
+  protected override onPlacementChanged(): void {
+    this.store.setBuilderWindowSize(this.placedKeys().length);
+  }
+
+  override async onKeyDown(ev: KeyDownEvent): Promise<void> {
+    const b = this.builderFor(ev.action);
+    if (!b) {
+      await ev.action.showAlert();
+      return;
+    }
+    // Pressing a builder key focuses it: the shared cursor follows, so the diff
+    // dials and other selection-scoped keys now act on the builder you pressed.
+    this.store.syncToBuilder(b.id);
+    const verb = this.resolveVerb(ev.payload.settings, b);
+    const res = await this.store.client.sendCommand(verb, [b.id], this.store.selectedWorkspacePath());
+    await ack(ev.action, res.ok);
+  }
+
   /** The builder a key shows: its slot indexes the fleet window. `undefined` for a
    *  multi-action key (no slot) or a slot past the end of the fleet (trailing empty). */
   protected builderFor(action: KeyAction): OverviewBuilder | undefined {
@@ -184,25 +219,10 @@ abstract class SlotKey extends SingletonAction<SlotSettings> {
     return this.store.windowedBuilder(slotIndex);
   }
 
-  /** Debounce a full re-render across the willAppear/willDisappear settle (#1465);
-   *  reassert the window size from the settled key set before rendering. */
-  private scheduleSettle(): void {
-    if (this.settleTimer) clearTimeout(this.settleTimer);
-    this.settleTimer = setTimeout(() => {
-      this.settleTimer = undefined;
-      this.store.setBuilderWindowSize(this.placedKeys().length);
-      this.renderAll();
-    }, WINDOW_SETTLE_MS);
+  /** The verb a press fires. Base: the per-key `verb` setting, else the default. */
+  protected resolveVerb(settings: Record<string, unknown>, _b: OverviewBuilder): string {
+    return typeof settings.verb === 'string' ? settings.verb : this.defaultVerb;
   }
-
-  /** The verb a press fires. Base: the per-key setting, else the default. */
-  protected resolveVerb(settings: SlotSettings, _b: OverviewBuilder): string {
-    return settings.verb ?? this.defaultVerb;
-  }
-  private renderAll(): void {
-    for (const { action } of this.keys.values()) this.renderTo(action);
-  }
-  protected abstract renderTo(action: KeyAction): void;
 }
 
 /**
@@ -215,8 +235,8 @@ abstract class SlotKey extends SingletonAction<SlotSettings> {
 export class BuilderAction extends SlotKey {
   override readonly manifestId = 'com.cluesmith.codev.builder-action';
   protected readonly defaultVerb = 'automatic';
-  protected override resolveVerb(settings: SlotSettings, b: OverviewBuilder): string {
-    const verb = settings.verb;
+  protected override resolveVerb(settings: Record<string, unknown>, b: OverviewBuilder): string {
+    const verb = typeof settings.verb === 'string' ? settings.verb : undefined;
     if (verb && verb !== 'automatic') return verb;
     // Automatic: the current phase's artifact, else a terminal when there's none.
     // When that artifact is the diff, open the builder's FIRST file in per-file mode
@@ -243,6 +263,47 @@ export class BuilderAction extends SlotKey {
       svg = builderFaceSvg({ kind: 'empty', slot: slotIndex === undefined ? '—' : String(slotIndex + 1) });
     }
     void action.setImage(svgToDataUri(svg));
+    void action.setTitle('');
+  }
+}
+
+/**
+ * Architect Action (#1495): a key on the Architects board that opens the Nth architect's
+ * terminal. Its slot is its rank among the placed Architect Action keys (self-ordering via
+ * `PlacedKeys`, reusing #1465), so key N shows and opens `store.architects()[N]`. On press it
+ * relays `open-architect-terminal <name>` — the same verb #1463's Open Architect key uses — so
+ * VSCode owns resolution and the not-found warning (the deck never resolves liveness).
+ *
+ * Distinct from #1463's key, which resolves ONE target (the selected builder's owner, or
+ * `main`). This is an ENUMERATION of every live architect, one key each, for a board you switch
+ * to natively. It carries no scope and no selection: pressing it opens a terminal and changes
+ * nothing about the builder selection, Row 2, or the dials. A slot past the end of the architect
+ * list renders visibly empty and is inert on press.
+ */
+export class ArchitectAction extends PlacedKeys {
+  override readonly manifestId = 'com.cluesmith.codev.architect-action';
+
+  /** The architect a key shows: its slot indexes the enumerated architect list. `undefined`
+   *  for a multi-action key (no slot) or a slot past the end of the list (trailing empty). */
+  private architectFor(action: KeyAction): string | undefined {
+    const slotIndex = this.slotIndexOf(action);
+    if (slotIndex === undefined) return undefined;
+    return this.store.architects()[slotIndex];
+  }
+
+  override async onKeyDown(ev: KeyDownEvent): Promise<void> {
+    const name = this.architectFor(ev.action);
+    if (!name) {
+      // A slot with no architect (empty board, or past the end of the list) is inert.
+      await ev.action.showAlert();
+      return;
+    }
+    const res = await this.store.client.sendCommand('open-architect-terminal', [name], this.store.selectedWorkspacePath());
+    await ack(ev.action, res.ok);
+  }
+
+  protected renderTo(action: KeyAction): void {
+    void action.setImage(svgToDataUri(architectKeyFaceSvg(this.architectFor(action))));
     void action.setTitle('');
   }
 }
@@ -369,7 +430,17 @@ type ArchitectSettings = { target?: ArchitectTarget };
  *    recorded owner (ruling 3).
  *  - `main`: always the workspace's `main` architect. VSCode resolves `'main'` as
  *    main-else-first and owns the not-found warning, so the deck defers liveness to
- *    it (ruling 2) — the deck never consumes the live-architect view.
+ *    it (ruling 2).
+ *
+ * This key — both target modes — defers resolution to VSCode and does NOT consume the
+ * live-architect view. That was once true of the whole deck, but is NO LONGER a
+ * blanket rule: per Amr's ruling of 2026-08-18, the separate Architects board
+ * (`ArchitectAction`) DOES enumerate `OverviewData.architects`. That is safe for an
+ * ENUMERATION (a stale/incomplete list yields a key that fails loudly on press via
+ * VSCode's not-found warning), whereas it would be unsafe here: a single-target key
+ * that resolved a stale name would render the wrong name faithfully and open the wrong
+ * person silently. So this key stays deferred; do not "restore" a derivation here from
+ * the old blanket sentence. See `CodevStore.architects()` for the board's reasoning.
  *
  * The face is dynamic (title `Architect` over the resolved name, dim `None` when
  * inert), and the resolved name IS the safeguard against a wrong-architect press —

@@ -63,6 +63,8 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 - [From 0097] `writeFileSync` with `{ mode: 0o600 }` only applies mode on file creation -- pre-existing files keep their old permissions. Always follow with `chmodSync(path, 0o600)` to enforce permissions regardless.
 - [From 0099] Always use `path.sep` in path security checks. The `startsWith(projectPath)` vulnerability allows sibling directory traversal. Always use `startsWith(base + path.sep)` or `path.relative()` -- never bare `startsWith(base)`.
 - [From 0099] Use collision-resistant IDs by default. Using `Date.now()` for IDs is a known anti-pattern when multiple operations can occur in the same millisecond. Use `crypto.randomUUID()` or a counter -- never timestamp-only.
+- [secfix-1] An auth gate's public-route allowlist must include the tooling's own readiness/uptime probes. Adding key enforcement to a route that `afx tower start` polls for readiness (`/api/status`) made the probe 401 forever, so startup never detected "ready" and the launcher killed a healthy Tower after its 30s timeout — a self-inflicted boot failure, invisible to build+tests. Either keep such probes on the public allowlist (e.g. `/health`) or have the (trusted, local) probe authenticate.
+- [secfix-1] In a key-bearing page, ANY XSS is credential theft: once the shared key is injected into a document, an XSS there reads the key and yields full API access, so the "no XSS" bar on those specific pages is load-bearing, not cosmetic. Sweep every sink where attacker-influenceable input (filenames, paths, query params, file-derived server values) reaches the key-bearing document's HTML/JS and encode at the sink; a media route that can only be loaded via a `src` attribute (no header possible) must be re-plumbed to an authenticated blob fetch rather than left keyless.
 
 ## Architecture
 
@@ -195,6 +197,7 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 - [From #1365] "Every byte reached the PTY" is not "the message landed." A write-success boolean sees transport acceptance, not semantic loss: a `^C` or ESC that clears a TUI composer mid-write leaves every `write()` returning `true`, so the row was marked `delivered` for a message the agent never saw. Any success signal derived from "did the transport accept the bytes" needs a second question — "could anything have discarded them?" — answered from a source the transport can't lie about. Here that is a per-terminal counter of lock bypasses sampled around the write, deliberately NOT a re-read of the screen (detect-and-repair is the architecture Spec 1313 replaced).
 - [From #1365] A structurally-typed port makes an omitted field compile AND pass, so a new lock/identity key needs a **runtime** guard, not just a type. A test double reaching the live wiring without an `id` keyed every per-terminal lock on `undefined` — one silently global lock, serialization that looks present and is not, with no failing assertion anywhere. Adding a throw on the missing key turned it into 13 loud failures immediately. The general shape: when a value becomes a *key* (lock, cache, registry), assert its presence at the boundary — type-checking the shape does not check the key.
 - [From #1365] Converging two locks is not just "take the same lock": the acquisition POLICY has to match each caller's liveness needs. A blocking acquisition would have been a regression in both directions — a gated delivery blocking would stall the drainer's sequential walk over every OTHER agent, and an operator action blocking behind a paced write (bounded only by the 1 MiB body cap ≈ minutes) would stall the human's escape hatch. The shape that works is asymmetric: the background writer declines contention and retries on its existing schedule; the operator waits, but boundedly, degrading to the documented pre-existing behaviour with a loud log rather than to a hang.
+- [secfix-1] Adding the first **runtime (value)** import of a workspace package that was previously only **type-imported** (`import type`, erased at build) requires moving that dep from `devDependencies` to `dependencies` in the importing package. A devDependency is not installed for a published/deployed consumer, so the packaged build throws `Cannot find module` at **module load** — before any logger initializes, so it surfaces as a silent boot crash (e.g. a 30s startup timeout with zero log lines), not an obvious error. It is invisible to build+test because the monorepo symlinks everything at dev time. Verify the **packaged** artifact: `pnpm --filter <pkg> deploy --prod --legacy <dir>` (or a throwaway-prefix `npm install` of the tarballs) resolves only real `dependencies`, mimicking a published install — then load the entry module from it. Also update any hand-rolled local-install/packaging script that packs a *hand-picked subset* of workspace packages: it must now pack the newly-runtime dep too, or the install can't satisfy it.
 
 ## Process
 
@@ -381,6 +384,19 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
   events at page load, so an eager recompute thrashes the size and flickers the faces. General rule: when
   a fixed count and a hand-numbered index can disagree with the true placed set, tie both to the placed
   set so a selection can never point at nothing.
+- [From #1495] "The deck never consumes the live-architect view" (#1463) is really "the deck never
+  **resolves** liveness" — the safety hinges on a key's **arity**, not its data source. A
+  **single-target** key that resolves one name from a stale list renders the wrong name faithfully
+  and opens the wrong person **silently**; an **enumeration** board that lists every candidate and
+  relays each name for the *editor* to resolve **fails loudly** (VSCode's "no such architect"
+  warning) when a name is stale. So the Architects board safely enumerates `OverviewData.architects`
+  (the live view) where #1463's single-target key must not. Corollary (filed #1497): **sort a
+  privileged default first but never *pin* it** — an explicit `'main'` arms VSCode's main-else-first
+  fallback, so a pinned `main` pressed while `main` is briefly offscreen opens whoever sorts first
+  under main's *own unqualified* terminal label (mislabel by qualifier-strip), wrong until the next
+  press; an absent key is the visible, self-correcting, safer failure. And when a doc comment encodes
+  a since-narrowed invariant, **amend it in place** (keep the original reasoning) — deleting it invites
+  the next maintainer to "restore" the old behavior as a repair.
 - [From #1428] Stream Deck's `setImage` accepts an SVG per the SDK d.ts, but a *raw* `<svg>`
   string is silently dropped on-device (Stream Deck 6.9) — the key reverts to its manifest PNG
   with no error. Two undocumented requirements: encode as a base64 `data:image/svg+xml` data URI,

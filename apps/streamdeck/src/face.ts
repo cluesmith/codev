@@ -44,7 +44,7 @@ const STATE_COLOR: Record<BuilderState, string> = {
 };
 
 /** The glyphs the face can draw: a gate shape when blocked, the bolt otherwise. */
-export type GlyphKey = 'bolt' | 'book' | 'checklist' | 'code' | 'pull-request' | 'verified' | 'bell' | 'comment' | 'terminal' | 'play' | 'architect';
+export type GlyphKey = 'bolt' | 'book' | 'checklist' | 'code' | 'pull-request' | 'verified' | 'bell' | 'comment' | 'terminal' | 'play' | 'architect' | 'switch';
 
 /**
  * Gate id → glyph. The streamdeck twin of `gateIconFor` in `apps/vscode/src/views/builder-row.ts`
@@ -81,6 +81,10 @@ const GLYPHS: Record<GlyphKey, (color: string) => string> = {
   // architect: a person mark — the architect you talk to (#1463). No trailing comment: the icon
   // render script (scripts/render-action-icons.mjs) parses this exact line and rejects one.
   architect: (c) => stroked(c, '<circle cx="12" cy="8" r="3.5"/><path d="M5.5 20a6.5 6.5 0 0 1 13 0"/>'),
+  // switch: two opposed arrows — the Builders/Architects board toggle (#1495). Rendered onto a
+  // Codev key ground so a native Switch-Profile / Folder key blends with the plugin's own keys. No
+  // trailing comment ON the entry line: the icon render script parses that line and rejects one.
+  switch: (c) => stroked(c, '<path d="M4 9h13"/><path d="M14 6l3 3-3 3"/><path d="M20 15H7"/><path d="M10 18l-3-3 3-3"/>'),
 };
 
 /** Wrap line-glyph paths in a shared stroke group (round caps/joins, like the codicons). */
@@ -259,6 +263,30 @@ export function architectFaceSvg(name: string | undefined): string {
   return svg(
     `${BG}${iconZone('architect', '#a9a9b2')}${DIVIDER}` +
       `${primaryLine('Architect')}${secondaryLine(capitalizeFirst(name))}`,
+  );
+}
+
+/**
+ * The Architect Action key face (#1495): the architect glyph over that architect's NAME — one
+ * key per live architect on the Architects board. Unlike the Open Architect key (which titles a
+ * single resolved target `Architect` / name), an enumeration key IS the name, so the name is the
+ * prominent line, shrink-to-fit for long names. `undefined` — a slot past the end of the
+ * enumerated list, or an empty board during a Tower restart — renders VISIBLY INERT (dim glyph +
+ * dim `No architect`), never blank-but-live; these are physical key placements that cannot
+ * vanish, so an emptied board must read as inert and self-corrects on the next overview. No
+ * active/accent state: the board carries no scope, so nothing is "selected".
+ */
+export function architectKeyFaceSvg(name: string | undefined): string {
+  if (name === undefined) {
+    return svg(
+      `${BG}${iconZone('architect', '#63636b')}${DIVIDER}` +
+        `<text ${textAttrs(36, 55, 12, 500)}${fit('No architect', 9)} fill="#63636b">No architect</text>`,
+    );
+  }
+  const label = capitalizeFirst(name);
+  return svg(
+    `${BG}${iconZone('architect', '#a9a9b2')}${DIVIDER}` +
+      `<text ${textAttrs(36, 55, 14, 600)}${fit(label, 9)} fill="#f4f4f6">${escapeXml(label)}</text>`,
   );
 }
 

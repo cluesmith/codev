@@ -692,12 +692,12 @@ afx send 0042 "That producer died — stop waiting and report."
 
 ---
 
-### afx reset
+### afx refresh
 
-Reset a builder's context: have it save its working state, clear the conversation, then re-orient it.
+Refresh a builder's context: have it save its working state, clear the conversation, then re-orient it.
 
 ```bash
-afx reset <builder> [options]
+afx refresh <builder> [options]
 ```
 
 **Arguments:**
@@ -713,10 +713,13 @@ afx reset <builder> [options]
 - `--min-bytes <n>` - Minimum state-file size to accept as substantive (default 1000)
 - `--quiet-window <ms>` - Terminal silence that counts as turn-ended (default 1500)
 
+**Deprecated alias:** `afx reset` still runs this command and prints a one-line notice to stderr.
+It will be removed in a future release — use `afx refresh`.
+
 **Description:**
 
 Long-running builders exhaust their context window. `afx spawn --resume` reattaches the *same*
-conversation, so a deep session resumes deep — it does not give the builder a fresh window. `afx reset`
+conversation, so a deep session resumes deep — it does not give the builder a fresh window. `afx refresh`
 does, without losing what the builder knows.
 
 The sequence:
@@ -724,7 +727,7 @@ The sequence:
 1. Assemble the re-orientation and write it to `.builder-reorient.md` in the worktree.
 2. Ask the builder to write its complete working state to `.builder-state.md`, stamped with a one-time
    nonce.
-3. Wait for that file and **verify** it: correct nonce (not a stale file from an earlier reset),
+3. Wait for that file and **verify** it: correct nonce (not a stale file from an earlier refresh),
    substantive size, and stable across two observations (not still being written).
 4. Wait for the terminal to fall silent, so the clear is not typed mid-turn. If it does not settle, send
    **one** ESC and wait again.
@@ -747,19 +750,19 @@ then `afx spawn <id> --resume`).
 
 ```bash
 # See exactly what would be sent, without touching the builder
-afx reset 0042 --dry-run
+afx refresh 0042 --dry-run
 
-# Standard reset
-afx reset 0042
+# Standard refresh
+afx refresh 0042
 
 # Add context that post-dates the builder's saved state
-afx reset 0042 --note "PR #90 merged while you were mid-phase. Rebase before continuing."
+afx refresh 0042 --note "PR #90 merged while you were mid-phase. Rebase before continuing."
 
 # The builder is wedged mid-turn and not reading messages
-afx reset 0042 --interrupt-first
+afx refresh 0042 --interrupt-first
 
 # A builder that legitimately needs longer to write its state
-afx reset 0042 --timeout 600
+afx refresh 0042 --timeout 600
 ```
 
 ---
@@ -897,6 +900,12 @@ afx tower start [options]
 **Environment Variables:**
 - `BRIDGE_MODE=1` — Enable non-localhost binding (required). Without this flag, Tower only binds to `127.0.0.1`.
 - `BRIDGE_TOWER_HOST` — Bind address when bridge mode is enabled (default: `127.0.0.1`). Only consulted when `BRIDGE_MODE=1`. Set to `0.0.0.0` for all network interfaces. Accepts IP literals only (no hostnames). Note: `BRIDGE_TOWER_HOST` has no effect unless `BRIDGE_MODE=1`.
+- `CODEV_TOWER_ALLOWED_ORIGINS` — Comma-separated list of extra origins (e.g. `https://tunnel.example.com`) that Tower's request-authentication layer accepts for **both** the `Host` guard and CORS. Loopback (`localhost`/`127.0.0.1`/`::1`) is always allowed, and under `BRIDGE_MODE` any IP-literal `Host` is accepted (a LAN client reaches Tower by IP). Set this only when clients reach Tower by a **hostname** (a tunnel/proxy domain, a custom `.local` name); otherwise those requests are rejected with `401` and a `disallowed Host` log line. DNS names not on this list stay rejected even under `BRIDGE_MODE` (the DNS-rebinding guard).
+- `CODEV_TOWER_KEY` — Explicit shared key (the Tower's 64-hex `local-key` value) for a client that does **not** share Tower's `~/.agent-farm/local-key` file — a host CLI/SDK reaching a Tower inside a container, or across a `BRIDGE_MODE` bind. Set the **same** value on Tower and every client (`export CODEV_TOWER_KEY=<key>`, Docker `-e CODEV_TOWER_KEY=…`, a systemd unit, a compose file). When set it is authoritative on that side (Tower expects it; clients present it); unset, the on-disk `local-key` file is used. This is the migration path for bridge clients — see the breaking-change note below.
+
+**Authentication & `BRIDGE_MODE` (advisory GHSA-xvjp-7748-v88v):** Tower's local API enforces request authentication with a shared key (`~/.agent-farm/local-key`, or the `CODEV_TOWER_KEY` override). Under `BRIDGE_MODE` the key is **mandatory** — Tower refuses to start on a network-reachable bind if it cannot obtain one, and an unkeyed request is rejected with `401`. This fully protects the default **loopback** deployment: a page on another origin cannot read the key (same-origin policy), so it cannot drive the API. **On a non-localhost bind, though, the key is not by itself an access control against on-network peers** — the dashboard shell is served to any peer the `Host` guard admits and carries the key so that same-origin client can call the API, so a peer able to load the dashboard can obtain the key. Treat the **network as the security boundary** for a bridged Tower: run it only on a trusted network / inside container isolation, and **front it with TLS** (a non-localhost bind serves plain HTTP, so the key otherwise travels in cleartext). `CODEV_TOWER_ALLOWED_ORIGINS` narrows CORS/`Host` as defense-in-depth, not a substitute for network controls.
+
+> **Breaking change (bridge/containerized deployments):** now that request authentication is enforced, a client reaching a bridged Tower must present the key. Clients that **share** Tower's `~/.agent-farm/local-key` file (same host, or a bind-mounted `~/.agent-farm`) keep working unchanged. A client that does **not** share the file — a host `afx`/SDK talking to a Tower in a container, or a client on another machine — will get `401` until you set `CODEV_TOWER_KEY` to the Tower's key on that client (and on Tower). Same-host/loopback use is unaffected.
 
 #### afx tower stop
 
