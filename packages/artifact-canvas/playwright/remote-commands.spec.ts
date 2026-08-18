@@ -33,6 +33,14 @@ const focusedLine = (page: Page) =>
 
 const scrollLeft = (body: Locator) => body.evaluate((el) => el.scrollLeft);
 
+/** The vertical scroll position of the host page — the scroller for vertical reading mode (#1501),
+ *  not the canvas body. */
+const docScrollTop = (page: Page) => page.evaluate(() => document.scrollingElement?.scrollTop ?? 0);
+const resetDocScroll = (page: Page) =>
+  page.evaluate(() => {
+    if (document.scrollingElement) document.scrollingElement.scrollTop = 0;
+  });
+
 /** One column step: the first fragment's width plus the column gap. */
 const measureStep = (body: Locator) =>
   body.evaluate((el) => {
@@ -90,6 +98,64 @@ test('column paging is inert in vertical mode', async ({ page }) => {
   await send(page, 'column-forward');
   await send(page, 'column-back');
   expect(await scrollLeft(body)).toBe(0);
+});
+
+// Viewport pan (#1501): the Scroll dial's rotation on a spec/plan. In vertical mode the HOST PAGE
+// scrolls the canvas, so these assert on the document scrolling element, not the body. Only a real
+// layout can prove this — jsdom reports no scroll height.
+test('remote viewport-scroll pans the page vertically, down and back to the top (#1501)', async ({ page }) => {
+  await openFixture(page, 'vertical');
+  // The document scrolling element is the vertical scroll container; confirm there is room to move.
+  const scrollable = await page.evaluate(
+    () =>
+      (document.scrollingElement?.scrollHeight ?? 0) > (document.scrollingElement?.clientHeight ?? 0),
+  );
+  expect(scrollable).toBe(true);
+
+  await send(page, 'viewport-down');
+  await expect.poll(() => docScrollTop(page)).toBeGreaterThan(0);
+  const afterOne = await docScrollTop(page);
+
+  await send(page, 'viewport-down');
+  await expect.poll(async () => (await docScrollTop(page)) > afterOne).toBe(true);
+
+  // Up by two steps returns to the top and clamps there (no negative overshoot).
+  await send(page, 'viewport-up', 2);
+  await expect.poll(() => docScrollTop(page)).toBe(0);
+});
+
+test('viewport-scroll count N lands exactly where N single steps do (#1501)', async ({ page }) => {
+  await openFixture(page, 'vertical');
+  await send(page, 'viewport-down');
+  await send(page, 'viewport-down');
+  await send(page, 'viewport-down');
+  const threeSingles = await docScrollTop(page);
+  expect(threeSingles).toBeGreaterThan(0);
+
+  await resetDocScroll(page);
+  await send(page, 'viewport-down', 3);
+  // count = |ticks| repeats the step, so one command with count 3 == three separate commands.
+  await expect.poll(() => docScrollTop(page)).toBe(threeSingles);
+});
+
+test('viewport-scroll with a huge count stops at the bottom instead of spinning (#1501)', async ({ page }) => {
+  await openFixture(page, 'vertical');
+  const started = Date.now();
+  await send(page, 'viewport-down', 1_000_000);
+  const elapsed = Date.now() - started;
+
+  const max = await page.evaluate(
+    () =>
+      (document.scrollingElement?.scrollHeight ?? 0) - (document.scrollingElement?.clientHeight ?? 0),
+  );
+  await expect.poll(() => docScrollTop(page)).toBe(max);
+  expect(elapsed).toBeLessThan(5000);
+});
+
+test('viewport-scroll is a pure viewport move — block focus is untouched (#1501)', async ({ page }) => {
+  await openFixture(page, 'vertical');
+  await send(page, 'viewport-down', 2);
+  expect(await focusedLine(page)).toBe(null); // nothing was focused; a pan never moves focus
 });
 
 // The clean-state origin rule has two halves. jsdom covers the unscrolled one (nothing focused,

@@ -42,6 +42,8 @@ const TRAVERSAL_COMMANDS = [
   'heading-prev',
   'column-forward',
   'column-back',
+  'viewport-down',
+  'viewport-up',
 ] as const satisfies readonly TraversalCommand[];
 
 /**
@@ -77,6 +79,14 @@ const isMarkedBlock = (el: HTMLElement): boolean => el.classList.contains('codev
 const isHeadingBlock = (el: HTMLElement): boolean => /^H[1-6]$/.test(el.tagName);
 /** "Any block" turns the generic scan into plain adjacent-block stepping. */
 const anyBlock = (): boolean => true;
+
+/**
+ * Pixels the viewport pans per `viewport-down`/`viewport-up` step (#1501). The canvas has no
+ * fixed line height, so exact parity with the text editor's 3-lines/tick is impossible; this
+ * approximates a few lines and is deliberately a single named constant so its feel can be tuned
+ * on the physical dial with a one-line change rather than a hunt.
+ */
+const VIEWPORT_SCROLL_STEP_PX = 60;
 
 /**
  * ArtifactCanvas — the composed review surface (Phase 3).
@@ -902,6 +912,30 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
     return true;
   };
 
+  // Pan the vertical viewport one fixed step (#1501). This is what the Scroll dial's rotation
+  // drives on a canvas — the raw scroll the mouse wheel does natively, which a hardware dial
+  // cannot deliver as a DOM event, so it arrives as a command instead. A viewport move only:
+  // block focus stays put.
+  //
+  // In vertical reading mode the HOST PAGE scrolls the canvas, NOT the body — the body is not a
+  // vertical scroll container (see `viewportStartLine`, which measures against the window top, and
+  // the VS Code host, whose vertical mode leaves body overflow default so the page scrolls). So we
+  // pan the document's scrolling element. In horizontal mode the body clips vertically
+  // (`overflow-y: hidden`) and the page does not scroll vertically, so this is a natural no-op —
+  // "up/down" has no meaning there. Cancels any in-flight wheel glide first, exactly as
+  // `pageColumn` does, so a dial tick lands where asked rather than being dragged by a decaying
+  // wheel animation.
+  const scrollViewport = (root: HTMLElement, dir: 1 | -1): void => {
+    cancelWheelGlideRef.current?.();
+    const scroller = root.ownerDocument.scrollingElement;
+    if (!scroller) return;
+    const max = Math.max(scroller.scrollHeight - scroller.clientHeight, 0);
+    let target = scroller.scrollTop + dir * VIEWPORT_SCROLL_STEP_PX;
+    if (target < 0) target = 0;
+    if (target > max) target = max;
+    scroller.scrollTop = target;
+  };
+
   interface CanvasActionContext {
     /** The canvas body: scroll container and query root. Callers guarantee it. */
     root: HTMLElement;
@@ -935,6 +969,10 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
     'column-back': ({ root }) => {
       if (readingModeRef.current === 'horizontal') pageColumn(root, -1);
     },
+    // Raw vertical viewport pan (#1501), mode-independent: "up/down" is the same gesture in
+    // either reading mode, and the count loop repeats it per dial tick (see `runCanvasCommand`).
+    'viewport-down': ({ root }) => scrollViewport(root, 1),
+    'viewport-up': ({ root }) => scrollViewport(root, -1),
     'composer-open': ({ originLine }) => {
       if (originLine === null) return;
       const line = Number(originLine);
@@ -992,10 +1030,16 @@ export function ArtifactCanvas(props: ArtifactCanvasProps): React.ReactElement {
       let previous: string | null = null;
       for (let i = 0; i < times; i += 1) {
         // Resolve the origin ONCE per step and derive the progress signature from it. Traversal
-        // moves the origin block; column paging moves the scroll offset and leaves focus alone,
-        // so both belong in the signature or a counted page would stop after one step.
+        // moves the origin block; column paging moves the body's horizontal offset and leaves focus
+        // alone; a viewport pan (#1501) moves the host page's VERTICAL offset and leaves focus
+        // alone. All three axes belong in the signature, or a counted step on the axis a command
+        // actually moves would look unchanged and stop after one step (the same reason `scrollLeft`
+        // was already here for paging). The vertical axis is the document scroller, not the body,
+        // because in vertical mode the page scrolls the canvas (see `scrollViewport`). At an edge
+        // nothing moves and the loop still breaks correctly.
         const ctx = actionContext(root, currentBlock(root));
-        const position = `${ctx.originLine ?? ''}:${root.scrollLeft}`;
+        const scrollTop = root.ownerDocument.scrollingElement?.scrollTop ?? 0;
+        const position = `${ctx.originLine ?? ''}:${root.scrollLeft}:${scrollTop}`;
         // Stop as soon as a step changes nothing: that is the edge, and it also bounds the work
         // to what actually exists. `count` is only validated as a positive integer on the wire,
         // so without this a controller sending a huge value would pin the UI thread walking a
