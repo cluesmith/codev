@@ -55,3 +55,27 @@ STOP-AND-TELL (architect's literal non-regression): streamdeck suite = 238 passe
   default selection pir-1 = canvas mode, and it predates the mode split (rotate used to be
   mode-independent). Architect said to stop before editing :638 — sent evidence + proposed fix
   (repoint :638 rotate to pir-2 diff mode; add a canvas-mode rotate test; update :669). HOLDING for ruling.
+
+## Implement phase — ruling applied + consult (2026-08-18)
+
+Architect ruled: (a) repoint :638 in place with mode stated, (b) add canvas-mode rotate test,
+(c) :669 → read only. Plus audit rest of ScrollNav block for latent mis-fixtures. Done all;
+audit found NOTHING else exposed (negative result reported). 6 commits pushed.
+
+Correctness find during implement (beyond plan): the canvas body is NOT the vertical scroller —
+in vertical mode the HOST PAGE scrolls (viewportStartLine measures window top;
+preview-template.ts leaves body overflow default). Plan said pan root.scrollTop (would no-op in
+VS Code). Fixed: pan document.scrollingElement; count-loop signature tracks that scroller's
+scrollTop. Proven by 4 new Playwright tests in real Chromium.
+
+CMAP (impl review, borrowed aspir template + --project-id 1501 after tooling friction):
+- Gemini APPROVE (no issues); Codex COMMENT (stale doc comment); Claude REQUEST_CHANGES.
+- Addressed: (1) stale ScrollNav CLASS-level doc comment still said "editor only / both inert"
+  (I'd updated renderTo's doc but missed the class header — real miss) → fixed; (2) README.md:282
+  Scroll bullet lacked the mode split unlike siblings → fixed; (3) host-contract note made
+  explicit in scrollViewport (no speculative fallback — it'd also no-op; matches viewportStartLine's
+  single assumption); nit removed dead cancelWheelGlide call (glide is horizontal-only, pan is
+  vertical-only) + fixed misleading comment; nit ternary→if/else (user pref).
+- Declined (noted for dev-approval / review): focus-ring re-arm on pure pan via runCanvasCommand
+  (eyeball on hardware); ReviewNav.runCanvas duplication (would widen diff into ReviewNav; low pri).
+- Re-verified after fixes: streamdeck 242, artifact-canvas 177 unit + 10 Playwright, all check-types.
