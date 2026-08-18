@@ -87,7 +87,14 @@ intact (still WAITING FOR HUMAN APPROVAL at plan-approval). Re-verified EVERY fi
   (codev-web-key→codev-tower-key) — does NOT affect sendMessage's held/delivered contract.
 Plan remains valid; implementation targets stable. Force-pushed rebased branch.
 
+## Rebase on main #2 (2026-08-18)
+Rebased again onto origin/main (was 50 behind; clean, no conflicts). porch state intact (plan-approval
+pending). git log confirmed NONE of the 50 commits touched any plan target file (approve.ts, send.ts,
+gate-toast, tower-client, api.ts, tower-routes.ts, role docs, protocols). Spot-verified anchors:
+approve.ts:114/:136, api.ts:295/:305, tower-routes liveArchitects :1163/:2776, builder-grouping:122,
+pir/builder-prompt.md:46, bugfix protocol.md:38 + pr.md:64 — all EXACT, no plan edits needed. Force-pushed.
+
 ## Status
-Plan committed + revised twice + rebased on main. Awaiting plan-approval gate (Amr owns all three
+Plan committed + revised twice + rebased on main (x2). Awaiting plan-approval gate (Amr owns all three
 gates; I never run porch approve). Both route-to-main items resolved and recorded. Code change (relay
 + held-first-class) unchanged and re-verified against latest main.
