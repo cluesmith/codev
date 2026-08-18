@@ -36,11 +36,13 @@ The one genuinely subtle part is that **the badge count and the list disagree by
 - `934e9354e` [PIR #1450] Plan revised: Held/Scheduled split, a11y disclosure pattern, isolated-Tower Playwright
 - `5a782c0b7` [PIR #1450] Plan: use AF_TEST_DB isolation seam for the evidence Tower (not a HOME redirect)
 - `d70e3503f` [PIR #1450] feat: clickable held-mail counter with a held-messages popover
+- `7483bcce9` [PIR #1450] Review + retrospective
+- `2cb2b3623` [PIR #1450] Address 3-way consult + architect integration review
 
 ## Test Results
 
 - `pnpm build`: ✓ pass
-- `pnpm test` (`@cluesmith/codev`): ✓ 4916 passed, 48 skipped, **0 failures**
+- `pnpm test` (`@cluesmith/codev`): ✓ 4917 passed, 48 skipped, **0 failures**
 - `apps/web` (`pnpm --filter @cluesmith/codev-web test`): ✓ 33 files — **37 new web tests** (27 component + 10 formatter)
   - Note: the root `test` script runs only the `codev` package; web tests need the filtered command.
 - **49 new tests total** across the three files (27 + 10 + 12).
