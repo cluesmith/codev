@@ -713,20 +713,60 @@ export class PtySession extends EventEmitter {
   }
 
   /**
+   * The identity the attached shellper reported for its CURRENT PTY, or null
+   * when there is none to be had — no shellper attached (a local node-pty
+   * session), an older shellper that omits the WELCOME fields, or a payload that
+   * failed validation (PIR #1475).
+   *
+   * Read THROUGH to the live client on every access rather than snapshotted at
+   * `attachShellper`. An ordinary SPAWN relaunch (the #1149 crash-loop fallback,
+   * the #1264 clean-exit rerun) replaces the PTY without a socket reconnect, so
+   * `attachShellper` never runs again — a snapshot would freeze at the
+   * pre-relaunch identity for the rest of the session. `detachShellper` nulls
+   * `shellperClient`, so falling back is automatic with no extra state.
+   *
+   * Command and args are resolved as ONE unit: with no usable command there is
+   * no usable identity, and `config` supplies both. That keeps the atomicity the
+   * client's validation establishes, and lets a legitimately empty argv stay `[]`
+   * instead of silently falling back to the config's args.
+   */
+  private get hydratedIdentity(): { command: string; args: string[] } | null {
+    // Falsy, not `!= null`: interface members are optional, so a test double or
+    // an unhydrated client yields `undefined`, and a rejected payload yields
+    // `null`. Empty string means "unknown" everywhere in this codebase.
+    const command = this.shellperClient?.welcomeCommand;
+    if (!command) return null;
+    return { command, args: this.shellperClient?.welcomeArgs ?? [] };
+  }
+
+  /**
    * Launch command of this session's process (Spec 1313 — render-gate identity seam).
    *
-   * `command` and `args` live in the private `config`; the render-gate's
-   * `resolveProfile` needs an authoritative source to map a session to its
-   * classifier profile (claude/codex/unknown). Exposed as read-only getters so
-   * the gate never guesses app identity from the label alone.
+   * The render-gate's `resolveProfile` needs an authoritative source to map a
+   * session to its classifier profile (claude/codex/agy/unknown). Precedence
+   * (PIR #1475): the shellper's own WELCOME report — what actually got spawned —
+   * then the launch command Tower recorded in `config` (restored from
+   * `terminal_sessions.command` on reconnect, with the Spec 1313 legacy
+   * self-heal behind it). Exposed as read-only getters so the gate never guesses
+   * app identity from the label alone.
    */
   get command(): string {
-    return this.config.command;
+    return this.hydratedIdentity?.command ?? this.config.command;
   }
 
   /** Launch arguments of this session's process (Spec 1313 — paired with `command`). */
   get launchArgs(): string[] {
-    return this.config.args;
+    return this.hydratedIdentity?.args ?? this.config.args;
+  }
+
+  /**
+   * Which source {@link PtySession.command} is currently answering from
+   * (PIR #1475) — `'welcome'` when the shellper stated its own identity,
+   * `'config'` when we fell back to the recorded launch command. Exists so the
+   * fallback is observable in logs and tests rather than inferred.
+   */
+  get identitySource(): 'welcome' | 'config' {
+    return this.hydratedIdentity ? 'welcome' : 'config';
   }
 
   get status(): 'running' | 'exited' {

@@ -148,11 +148,15 @@ export class TerminalManager {
       // the session to its classifier profile (claude/codex) so `afx send` can
       // deliver. Threaded from the creation/reconnect sites for shellper-backed
       // agent sessions; '' for sessions without a known agent (plain shells).
-      // `args` is CREATION-ONLY: it is NOT persisted on the session row and is NOT
-      // read by `resolveProfile` today. A reconnected session gets `[]`. Do not make
-      // args a resolution input (e.g. to support `env codex` / `npx claude`) without
-      // adding matching persistence, or fresh and post-restart sessions will classify
-      // differently.
+      // `args` is CREATION-ONLY *here*: it is NOT persisted on the session row and
+      // is NOT read by `resolveProfile` today. Since PIR #1475 a reconnected
+      // shellper-backed session no longer gets `[]` — `PtySession.launchArgs` reads
+      // through to the argv the shellper reports in its WELCOME frame, which is
+      // real across reconnects and SPAWN relaunches. The rule still stands for this
+      // config value: do not make args a resolution input (e.g. to support
+      // `env codex` / `npx claude`) on the strength of what is threaded in here, or
+      // fresh and post-restart sessions will classify differently. WELCOME
+      // hydration — not this field — is the seam that can satisfy that invariant.
       command: opts.command ?? '',
       args: opts.args ?? [],
       cols,
