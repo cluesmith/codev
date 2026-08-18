@@ -59,8 +59,14 @@ dial) narrows coherently with **no** re-plumbing:
   dial's counts all follow the scope automatically — the cursor can only ever land on a builder
   that is listed.
 - Add `architects(): string[]` — the distinct non-null `spawnedByArchitect` across
-  `allBuilders()`, **sorted alphabetically** (deterministic, stable as builders come and go).
-  This is what an Architect Action key indexes by its slot rank.
+  `allBuilders()`, ordered **`main` first, then the rest alphabetically**. This twins
+  `sortArchitectsForPicker` (`apps/vscode/src/views/architect-display.ts:31`) — the ordering the
+  VSCode architect picker already uses — replicated here (not imported across apps) with a
+  sync-note, per the accepted twinned-presentation-map pattern. **This ordering is load-bearing
+  because the keys are positional:** slot 1 is whichever architect sorts first, so main-first
+  permanently pins the one architect every workspace has to the first key. Plain alphabetical
+  would let a new architect named e.g. `ai` or `casa` silently displace `main` off key 1 and
+  break muscle memory. This is what an Architect Action key indexes by its slot rank.
 - Add `toggleArchitectScope(name: string): void` — press semantics:
   - if `scopedArchitect === name` → clear (`undefined`); else set to `name`.
   - **Preserve the shared selection across the toggle**: capture the selected builder's `id`
@@ -195,10 +201,18 @@ the overview carries.
 **Unit (vitest, run from the worktree):**
 
 - `store`: `builders()` narrows to the scoped architect; `allBuilders()` stays full;
-  `architects()` returns distinct non-null `spawnedByArchitect`, sorted, de-duplicated;
+  `architects()` returns distinct non-null `spawnedByArchitect`, de-duplicated, ordered
+  **`main` first then alphabetical** (a fixture with `main` not already first proves the pin);
   `toggleArchitectScope` sets → clears on re-press; selection preserved by id across a toggle
   and reset to 0 when the selected builder isn't in the new scope; scope cleared on
   `syncToWorkspace` and on a workspace-change rotate.
+- **Null-attribution superset (guards #1406 reachability, requested at plan review):** with a
+  builder whose `spawnedByArchitect` is `null` present, pin that (a) it appears in the unscoped
+  `builders()` list, (b) it appears under **no** scope (unreachable by any architect — `null`
+  never equals a scope name and is excluded from `architects()`), and (c) clearing the scope
+  restores it. This keeps the unscoped view a **true superset** so a mis-attributed builder
+  stays a display bug, never a reachability bug — a null-attributed builder is always reachable
+  from the unscoped deck.
 - `actions` (`ArchitectAction`): key N (by coordinates) shows the Nth architect; press toggles
   scope and relays **no** command; a slot past the architect list is inert (`showAlert`); a
   multi-action instance (undefined coordinates) has no slot; re-render on `store.onChange`.
@@ -209,23 +223,24 @@ the overview carries.
 
 **Manual (dev-approval — hardware, needs ≥2 architects owning builders):**
 
-The scoping behaviour only proves itself where more than one architect owns builders. To
-demonstrate at the gate I will stand up a workspace with **two architects each owning ≥1
-builder** (e.g. `main` plus a second `afx workspace add-architect`, each spawning a builder),
-place two Architect Action keys plus a row of Builder Action keys, and verify on the physical
-board:
+The scoping behaviour only proves itself where more than one architect owns builders. The
+current fleet already satisfies this: **four architects own builders** (`main`, `security`,
+`vscode`, `streamdeck`), while `reviewer` and `demos` own none. I will place several Architect
+Action keys plus a row of Builder Action keys and verify on the physical board:
 
-1. With no scope, Row 1 lists **both** architects' builders; both Architect Action keys show
-   their names, neither accented.
-2. Press architect A → Row 1 narrows to A's builders; A's key shows the active accent; the
-   selected builder (if it was A's) stays selected and the dials still review it.
-3. Press A again → scope clears, Row 1 shows all builders, accent gone.
-4. Press B while scoped to A → scope switches to B (single active accent, not two).
-5. Switch workspace (zoom out/in) → scope resets (ruling 1); Row 1 shows the new fleet
+1. **Derive-from-builders made visible:** the placed keys show exactly the architects that own
+   builders — `main` on key 1 (main-first ordering), then `security` / `streamdeck` / `vscode`
+   alphabetically — and `reviewer` / `demos` **do not appear** at all (they own no builders).
+   That absence is the derive-from-builders decision made visible.
+2. With no scope, Row 1 lists **all** architects' builders; no Architect Action key is accented.
+3. Press an architect → Row 1 narrows to that architect's builders; its key shows the active
+   accent; the selected builder (if it was that architect's) stays selected and the dials still
+   review it.
+4. Press the same key again → scope clears, Row 1 shows all builders, accent gone.
+5. Press a different architect while scoped → scope switches (single active accent, not two).
+6. Switch workspace (zoom out/in) → scope resets (ruling 1); Row 1 shows the new fleet
    unfiltered.
-6. Scope to an architect, then let its builders drain (merge/cleanup) → Row 1 goes visibly
+7. Scope to an architect, then let its builders drain (merge/cleanup) → Row 1 goes visibly
    empty rather than widening (ruling 2).
 
-I will capture this as a short narration in the review; if a two-architect board can't be stood
-up at review time, I will flag it and fall back to the unit coverage plus a single-architect
-smoke (scope-to-self narrows to that architect, re-press clears).
+I will capture this as a short narration in the review.

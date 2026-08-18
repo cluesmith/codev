@@ -34,3 +34,18 @@ Key design decisions, all confirmed against the code:
 demo in the Test Plan; will flag if a two-architect board can't be stood up at review time.
 
 Routed the plan to the architect before the gate (architect asked to review pre-gate).
+
+**Plan review — APPROVED WITH TWO ADDITIONS (folded in, commit below):**
+1. **Ordering:** `architects()` is `main`-first then alphabetical, twinning
+   `sortArchitectsForPicker` (`apps/vscode/src/views/architect-display.ts:31`) with a sync-note.
+   Load-bearing because keys are positional — pins `main` to key 1 permanently.
+2. **Null-attribution superset test:** a `null`-`spawnedByArchitect` builder must (a) show in
+   the unscoped list, (b) be reachable under no scope, (c) be restored on clear — keeps #1406 a
+   display bug, not a reachability bug.
+
+Also folded the real fleet into the dev-approval demo: four architects own builders (main,
+security, vscode, streamdeck); reviewer + demos own none and must NOT appear — demonstrating
+that absence is the derive-from-builders decision made visible.
+
+Architect endorsed keeping scope-through-`builders()` and the id-preserving selection as
+written, and the `PlacedKeys` extraction over a copy. Gate now goes to Amr.
