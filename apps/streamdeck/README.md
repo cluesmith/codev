@@ -113,55 +113,52 @@ but degrades by model:
 
 ## Recommended layout (Stream Deck +)
 
-A two-zone board bound by one shared selection: **Row 1 selects, Row 2 acts on
-the selection, the dials review it.**
+**Two pages in one profile, one shared selection.** Page 1 is the builders board
+(Row 1 selects, Row 2 acts on the selection); page 2 is the architects board. You
+**swipe** between them (the Stream Deck + touchscreen / page dots). The **same four
+dials** serve both pages — swiping doesn't change the selected builder, so the review
+dials keep reviewing it whichever page is showing.
 
 ```
-┌──────────────────────────────────────────────────────────┐
-│  STREAM DECK +                                             │
-│                                                            │
-│  ┌────────┐  ┌────────┐  ┌────────┐  ┌────────┐           │
-│  │OpenArch│  │ Builder│  │ Builder│  │ Builder│  Row 1:    │
-│  │ (main) │  │  (1st) │  │  (2nd) │  │  (3rd) │  selectors │
-│  └────────┘  └────────┘  └────────┘  └────────┘           │
-│  ┌────────┐  ┌────────┐  ┌────────┐  ┌────────┐           │
-│  │        │  │Approve │  │OpenArch│  │  Bldr  │  Row 2:    │
-│  │ (free) │  │ Gate   │  │ (bldr) │  │  Term  │  palette   │
-│  └────────┘  └────────┘  └────────┘  └────────┘           │
-│  ┌──────────────────────────────────────────────┐         │
-│  │  touch strip: each dial's title + live detail  │         │
-│  └──────────────────────────────────────────────┘         │
-│      ◉            ◉            ◉            ◉               │
-│   Select        Review       Review       Scroll  4 dials  │
-│   (Zoom)        Files        Changes               /PR     │
-└──────────────────────────────────────────────────────────┘
+Page 1 — Builders                              Page 2 — Architects  (swipe →)
+┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐    ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐
+│ Builder│ │ Builder│ │ Builder│ │ Builder│    │  Arch  │ │  Arch  │ │  Arch  │ │  Arch  │  Row 1
+│  (1st) │ │  (2nd) │ │  (3rd) │ │  (4th) │    │ (main) │ │  (2nd) │ │  (3rd) │ │  (4th) │
+└────────┘ └────────┘ └────────┘ └────────┘    └────────┘ └────────┘ └────────┘ └────────┘
+┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐    ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐
+│OpenArch│ │  Bldr  │ │Approve │ │  Dev   │    │  Arch  │ │  Arch  │ │No arch │ │No arch │  Row 2
+│ (bldr) │ │  Term  │ │ Gate   │ │ Server │    │  (5th) │ │  (6th) │ │(empty) │ │(empty) │
+└────────┘ └────────┘ └────────┘ └────────┘    └────────┘ └────────┘ └────────┘ └────────┘
+
+  ◉            ◉            ◉            ◉         ← the SAME four dials on both pages
+Select       Review       Review       Scroll
+(Zoom)       Files        Changes
 ```
 
-- **Row 1 — selectors, anchored by the architect.** Slot 1 is **Open Architect
-  Terminal** pinned to **Main** mode: a fixed anchor at the left of the board that
-  opens the workspace's `main` architect. It can sit in Row 1 without breaking the
-  "Row 1 selects" invariant precisely because Main mode is **selection-independent** —
-  it always targets `main`, so it neither reads nor moves the shared selection. Slots
-  2–4 are **Builder Action** selectors — here **three** of them.
-  The selectors are a **window** onto the fleet whose width is **exactly the number of
-  Builder Action keys you place** (three here), not a fixed count: the keys self-order
-  by physical position (left to right, top row first), so there are no slot numbers to
-  set, and a Mini or an XL sizes itself the same way. With more builders than keys the
-  **Select dial** (Zoom Navigator rotate) scrolls the window a page at a time, and the
-  slot holding the current selection is accented. Because the window follows the placed
-  keys, a builder is never selectable while shown on no key. Press selects the builder
-  (Row 2 + the dials follow) and opens its phase artifact.
-- **Row 2 — action palette**, fixed in place, always acting on the **selected**
-  builder: slot 1 is **free** (drop any key here — e.g. Dev Server or Send Feedback),
-  then **Approve Gate · Open Architect Terminal (builder mode) · Open Builder
-  Terminal**. The Row-2 architect key is pinned to **builder** mode, so it opens the
-  **selected builder's owning architect** — the per-builder complement to Row 1's
-  `main`-mode anchor. Between the two keys, both `main` and whoever spawned the current
-  builder are one press away.
+- **Page 1, Row 1 — builder selectors.** Four **Builder Action** keys: a **window**
+  onto the fleet whose width is exactly the number of keys you place (four here), not a
+  fixed count. The keys self-order by physical position (left to right, top row first),
+  so there are no slot numbers to set. With more builders than keys the **Select dial**
+  (Zoom Navigator rotate) scrolls the window a page at a time, and the slot holding the
+  selection is accented. Press selects the builder (Row 2 + the dials follow) and opens
+  its phase artifact. There is no `main`-anchor key here any more — page 2 reaches every
+  architect, `main` included, so Row 1 is all builders.
+- **Page 1, Row 2 — action palette**, fixed, always acting on the **selected** builder:
+  **Open Architect Terminal (builder mode) · Open Builder Terminal · Approve Gate · Dev
+  Server**. The architect key is pinned to **builder** mode — it opens the *selected
+  builder's* owning architect (the per-builder complement); reaching any *other*
+  architect is page 2's job, so this key needn't carry `main`.
+- **Page 2 — architects board.** **Architect Action** keys, one per live architect,
+  self-ordering left-to-right then top-to-bottom **across both rows** — so `main` is
+  top-left and the eight slots hold up to eight architects (fill Row 2 to see more than
+  four). Press opens that architect's terminal. Trailing slots past the live list read a
+  dim **No architect**. This page sets **no scope**: the selection stays the builder you
+  left on page 1, which is why the shared dials keep working here unchanged.
 
-Nothing is fixed — drag whatever you want onto each slot in the Stream Deck app.
-The 5th encoder, **Spawn from Backlog**, can swap onto a dial in place of any of
-the four above (e.g. replace PR Nav when you are triaging the backlog).
+Nothing is fixed — drag whatever you want onto each slot in the Stream Deck app. On
+page 2 the **PR Navigator** and **Spawn from Backlog** encoders make a natural
+fleet-level dial strip (neither needs a selected builder) if you'd rather not mirror
+page 1's review dials.
 
 ## Actions
 
