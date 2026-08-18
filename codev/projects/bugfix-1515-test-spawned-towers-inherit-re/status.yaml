@@ -1,0 +1,14 @@
+id: bugfix-1515
+title: test-spawned-towers-inherit-re
+protocol: bugfix
+phase: investigate
+plan_phases: []
+current_plan_phase: null
+gates:
+  pr:
+    status: pending
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-08-18T06:21:58.071Z'
+updated_at: '2026-08-18T06:21:58.071Z'
