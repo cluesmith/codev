@@ -444,22 +444,24 @@ describe('ungated transition (ASPIR shape)', () => {
 // ---------------------------------------------------------------------------
 
 describe('pre-approval transition', () => {
-  it('emits a refresh when an approved: artifact skips the gate', async () => {
-    // The first plan draft wired only three sites and missed this one — which
-    // would have left enter:plan and enter:implement dead for exactly the
-    // projects most likely to want them.
+  it('transitions and extracts plan phases, but does NOT refresh', async () => {
+    // A skip is not work. The branch runs at iteration 1 with build_complete
+    // false — before the builder has done anything in the skipped phase — so
+    // there is no context to refresh. The transition itself must still be
+    // complete, including plan-phase extraction.
     writeProtocol(spirLike());
-    writeApprovedSpec();
-    writeState(baseState({ phase: 'specify', iteration: 1, build_complete: false }));
+    writePlan(['phase_1_a', 'phase_2_b'], true);
+    writeState(baseState({ phase: 'plan', iteration: 1, build_complete: false }));
 
     const response = await next(root, PROJECT_ID);
 
-    expect(isRefreshTask(response)).toBe(true);
-    expect(response.tasks?.[0].description).toContain('enter:plan');
+    expect(isRefreshTask(response)).toBe(false);
     const after = readState();
-    expect(after.phase).toBe('plan');
-    expect(after.gates['spec-approval'].status).toBe('approved');
-    expect(after.context_refreshes?.map(r => r.boundary)).toEqual(['enter:plan']);
+    expect(after.phase).toBe('implement');
+    expect(after.gates['plan-approval'].status).toBe('approved');
+    expect(after.plan_phases.map(p => p.id)).toEqual(['phase_1_a', 'phase_2_b']);
+    expect(after.current_plan_phase).toBe('phase_1_a');
+    expect(after.context_refreshes ?? []).toHaveLength(0);
   });
 });
 
@@ -721,27 +723,6 @@ describe('transition matrix', () => {
       expectPlanPhase: 'phase_1_a',
     },
     {
-      name: 'pre-approved: specify → plan',
-      setUp: () => {
-        writeProtocol(spirLike());
-        writeApprovedSpec();
-        writeState(baseState({ phase: 'specify' }));
-      },
-      expectBoundary: 'enter:plan',
-      expectPhase: 'plan',
-    },
-    {
-      name: 'pre-approved: plan → implement (extracts plan phases)',
-      setUp: () => {
-        writeProtocol(spirLike());
-        writePlan(['phase_1_a', 'phase_2_b'], true);
-        writeState(baseState({ phase: 'plan' }));
-      },
-      expectBoundary: 'enter:implement',
-      expectPhase: 'implement',
-      expectPlanPhase: 'phase_1_a',
-    },
-    {
       name: 'ungated (ASPIR): specify → plan',
       setUp: () => {
         writeProtocol(aspirLike());
@@ -846,6 +827,67 @@ describe('transition matrix', () => {
       expect(writeCounter.count).toBe(1);
     });
   }
+});
+
+// ---------------------------------------------------------------------------
+// A skip is not work
+// ---------------------------------------------------------------------------
+
+describe('pre-approval chains', () => {
+  it('emits NO refresh when both spec and plan are pre-approved', async () => {
+    // This repo's documented default shape: "Approved specs and plans need
+    // frontmatter and must be committed to main before spawning."
+    //
+    // Such a project skips specify AND plan on consecutive `porch next` calls,
+    // with no builder work in between. Firing at both would clear a builder
+    // twice back to back — violating the spec's "never emitted twice in a row"
+    // — and at both moments the context is near-empty, so the >=1000-byte save
+    // gate would be padded or would abort.
+    //
+    // The rule: a pre-approval SKIP means the builder did no work in that phase
+    // (the branch only runs at iteration 1 with build_complete false), so there
+    // is nothing to refresh. The valuable enter:implement boundary still fires
+    // from the gate-approved site whenever the builder actually wrote the plan.
+    writeProtocol(spirLike());
+    writeApprovedSpec();
+    writePlan(['phase_1_a', 'phase_2_b'], true);
+    writeState(baseState({ phase: 'specify' }));
+
+    const first = await next(root, PROJECT_ID);
+    expect(isRefreshTask(first)).toBe(false);
+
+    const second = await next(root, PROJECT_ID);
+    expect(isRefreshTask(second)).toBe(false);
+
+    const after = readState();
+    expect(after.phase).toBe('implement');
+    expect(after.current_plan_phase).toBe('phase_1_a');
+    expect(after.context_refreshes ?? []).toHaveLength(0);
+  });
+
+  it('still refreshes entering implement when the builder actually wrote the plan', async () => {
+    // Spec pre-approved (no refresh — the builder had done nothing yet), plan
+    // written by the builder, so the gate-approved transition into implement
+    // DOES refresh. Suppressing the skip must not cost the boundary that matters.
+    writeProtocol(spirLike());
+    writeApprovedSpec();
+    writePlan(['phase_1_a', 'phase_2_b']);
+    writeState(baseState({ phase: 'specify' }));
+
+    expect(isRefreshTask(await next(root, PROJECT_ID))).toBe(false);
+    expect(readState().phase).toBe('plan');
+    expect(readState().context_refreshes ?? []).toHaveLength(0);
+
+    // Builder finishes the plan; the human approves the gate.
+    const state = readState();
+    state.gates['plan-approval'] = { status: 'approved' };
+    writeState(state);
+
+    const response = await next(root, PROJECT_ID);
+    expect(isRefreshTask(response)).toBe(true);
+    expect(response.tasks?.[0].description).toContain('enter:implement');
+    expect(readState().context_refreshes?.map(r => r.boundary)).toEqual(['enter:implement']);
+  });
 });
 
 // ---------------------------------------------------------------------------

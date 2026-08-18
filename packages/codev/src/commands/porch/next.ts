@@ -309,18 +309,24 @@ export async function next(workspaceRoot: string, projectId: string): Promise<Po
           state.iteration = 1;
           state.build_complete = false;
           state.history = [];
-          // Boundary folded in BEFORE the write, so record and transition are atomic.
-          // This site is the path CLAUDE.md documents as normal (artifacts carrying
-          // `approved:` frontmatter), so omitting it would leave enter:plan and
-          // enter:implement dead for exactly the projects most likely to want them.
-          const preApprovalBoundary = enterBoundary(nextPhase.id);
-          const preApprovalRefresh = refreshResponse(
-            state,
-            preApprovalBoundary,
-            declaresEnter(protocol, nextPhase.id),
-          );
+          // NO context refresh here, deliberately: a SKIP IS NOT WORK.
+          //
+          // This branch only runs at iteration 1 with `build_complete` false —
+          // i.e. before the builder has done anything in the phase being
+          // skipped. There is no context to refresh, and firing anyway is
+          // actively harmful in this repo's documented default shape ("Approved
+          // specs and plans need frontmatter and must be committed to main
+          // before spawning"): a project whose spec AND plan are both
+          // pre-approved skips two phases on consecutive `porch next` calls, so
+          // firing at each would clear the builder twice back to back with no
+          // work in between. That violates the spec's "never emitted twice in a
+          // row", and at both moments the context is near-empty, so the
+          // >=1000-byte save gate would either be padded or abort.
+          //
+          // The boundary that matters is not lost: whenever the builder
+          // actually writes the plan, `enter:implement` fires from the
+          // gate-approved transition below.
           await writeStateAndCommit(statusPath, state, `chore(porch): ${state.id} skip pre-approved ${state.phase}`);
-          if (preApprovalRefresh) return preApprovalRefresh;
           // Recurse to compute tasks for the new phase
           return next(workspaceRoot, projectId);
         }
@@ -752,6 +758,13 @@ async function handleVerifyApproved(
         // This boundary is a QUALITY feature as much as a context one: a builder
         // that enters review in a fresh context reads its own diff cold, without
         // the memory of intending the code to be correct.
+        //
+        // NOTE the coupling: the successor phase is hardcoded `'review'` here
+        // (pre-existing), and the boundary id is derived from the same literal.
+        // Record and event therefore cannot disagree — but a protocol whose
+        // per_plan_phase phase transitions to a differently-named successor
+        // would silently mis-target BOTH. Change them together, or derive both
+        // from `getNextPhase`.
         state.phase = 'review';
         state.current_plan_phase = null;
         const reviewRefresh = refreshResponse(

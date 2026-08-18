@@ -461,3 +461,35 @@ file. (Side observation, not my bug: extractPlanPhases silently invents `phase_1
 no phases JSON rather than reporting the absence.)
 
 33/33.
+
+### Phase 2 iter2 (claude): a real defect in THIS repo's default shape
+
+**"A skip is not work."** With both spec and plan carrying `approved:` frontmatter — which
+CLAUDE.md documents as the normal way to spawn — porch skipped specify and plan on consecutive
+`porch next` calls and fired a refresh at BOTH, with no builder work in between. Two clears back to
+back, violating the spec's "never emitted twice in a row"; and at both moments the context is
+near-empty, so the >=1000-byte save gate would be padded or would abort.
+
+I reproduced it before fixing (two failing tests first, then the fix).
+
+**Fix**: no refresh at the pre-approval site. That branch only runs at iteration 1 with
+build_complete false — i.e. BEFORE the builder does anything in the skipped phase — so there is
+nothing to refresh. Crucially the valuable boundary is not lost: whenever the builder actually
+writes the plan, `enter:implement` still fires from the gate-approved site. Both directions are now
+pinned by tests.
+
+This NARROWS Phase 2's "wire all four sites" to "wire all four, but a skip is not work". It
+satisfies the spec criterion rather than contradicting it, so I implemented it rather than
+blocking — reporting to the architect for the record.
+
+Note the arc across two reviews: iter1 said the pre-approval site was MISSING and had to be wired;
+iter2 said it must not FIRE. Both are right — the site needs its plan_phases extraction and gate
+approval (that half was genuinely missing), but not the refresh. "Wire the site" and "fire the
+boundary" turned out to be different questions, and I had merged them.
+
+Claude also flagged my iter2 test work as uncommitted — it reviewed a stale tree; that work is
+1d9581595. Not a real issue, but a reminder that reviewers see a snapshot.
+
+Minor taken: documented the `moveToReview` hardcoded-'review' coupling (phase assignment and
+boundary id derive from the same literal, so they cannot disagree — but a protocol with a
+differently-named successor would silently mis-target both).
