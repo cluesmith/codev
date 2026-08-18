@@ -107,11 +107,20 @@ function normalizeContextRefresh(
   phases: ProtocolPhase[],
   protocolName: string,
 ): ContextRefreshConfig | undefined {
-  if (raw === undefined || raw === null) return undefined;
+  // ONLY `undefined` means "omitted". An explicit `null` is a configuration
+  // act that would silently do nothing, which is the same silent no-op this
+  // function exists to reject — and all three schemas type this key as an
+  // object, so `null` violates them too. An author who wants no refreshes omits
+  // the key.
+  if (raw === undefined) return undefined;
 
   const fail = (msg: string): never => {
     throw new Error(`Invalid protocol '${protocolName}': context_refresh ${msg}`);
   };
+
+  if (raw === null) {
+    return fail('is null; omit the key entirely to declare no refresh boundaries');
+  }
 
   if (typeof raw !== 'object' || Array.isArray(raw)) {
     return fail(`must be an object, got ${Array.isArray(raw) ? 'array' : typeof raw}`);
@@ -146,6 +155,14 @@ function normalizeContextRefresh(
             `(phases: ${[...phaseIds].join(', ')})`,
         );
       }
+    }
+    // Duplicates resolve fine but say something the author did not mean — a
+    // boundary cannot fire twice on one transition. Rejecting keeps the runtime
+    // in step with the schemas' `uniqueItems`, so the two cannot disagree.
+    const seen = new Set<string>();
+    for (const entry of obj.on_enter as string[]) {
+      if (seen.has(entry)) return fail(`on_enter lists phase '${entry}' more than once`);
+      seen.add(entry);
     }
     on_enter = obj.on_enter as string[];
   }

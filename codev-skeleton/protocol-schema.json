@@ -47,6 +47,7 @@
         "on_enter": {
           "type": "array",
           "description": "Protocol phase ids to refresh on entry to. Each must name a phase this protocol declares.",
+          "uniqueItems": true,
           "items": { "type": "string" }
         },
         "on_plan_phase_advance": {

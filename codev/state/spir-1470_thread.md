@@ -220,3 +220,37 @@ Candidate follow-up (not this project's scope): add a `worktree.postSpawn: ["pnp
   different `required` set, the two `protocols/` copies are draft-07. Pre-existing, out of scope;
   the parity test asserts the `context_refresh` block agrees rather than whole-file equality, and
   says why inline.
+
+### Phase 1 review: split verdict, both taken
+
+Codex REQUEST_CHANGES (1 issue), Claude APPROVE (4 non-blocking). Accepted everything.
+
+**Codex's issue was a self-inflicted one worth remembering.** I accepted
+`"context_refresh": null` as equivalent to an omitted key — while the entire doc comment on that
+function argues "reject rather than ignore, because a silent no-op is the failure mode". `null` is
+an explicit configuration ACT that silently declares nothing. And all three schemas type the key
+as an object, so runtime and schema disagreed.
+
+How it got in: **I wrote a test that codified the wrong behavior** ("yields no boundaries when the
+key is explicitly null"). It passed, so nothing pushed back. A test asserting what I happened to
+write, rather than what the design calls for, converts an oversight into an apparent decision.
+Both reviewers read the code against the stated principle; my test only read it against itself.
+
+**Claude's skeleton-coverage catch is bigger than "non-blocking".** The resolver hits `codev/`
+first, so `loadProtocol(repoRoot, name)` NEVER parses `codev-skeleton/protocols/*/protocol.json` —
+and for an adopter those ARE the shipped protocols. A broken skeleton protocol would ship past a
+green suite. Claude suggested deferring to Phase 7; I fixed it here instead, since Phase 7's parity
+test asserts block *equality*, which is weaker than *parses successfully*.
+
+Also: added `uniqueItems` to the three schemas AND duplicate rejection at runtime. Schema-only
+would have left editor and runtime disagreeing about the same input — and since the schema
+validates nothing at run time, a schema-only rule is advice, not a rule.
+
+**Carried to Phase 2**: `context_refresh: {}` is truthy while declaring nothing, so
+`isBoundaryDeclared` must inspect the FIELDS, not the object's presence.
+
+**Recorded trade** (no action): unknown-key rejection means an older codev loading a newer
+protocol.json with a future context_refresh key hard-fails the protocol. Deliberate fail-fast per
+the spec; the alternative reintroduces the silent no-op the design rejects.
+
+Porch suite 408/408 after the fixes.

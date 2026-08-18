@@ -84,10 +84,14 @@ describe('context_refresh: absent key', () => {
     expect(protocol.context_refresh).toBeUndefined();
   });
 
-  it('yields no boundaries when the key is explicitly null', () => {
+  it('rejects an explicit null rather than treating it as omitted', () => {
+    // `null` is a configuration ACT that would silently declare nothing — the
+    // same silent no-op the rest of this validation exists to reject — and all
+    // three schemas type the key as an object. Omitting the key is the way to
+    // declare no boundaries.
     writeProtocol(baseProtocol(null));
-    const protocol = loadProtocol(testDir, 'fixture-protocol');
-    expect(protocol.context_refresh).toBeUndefined();
+    expect(() => loadProtocol(testDir, 'fixture-protocol')).toThrow(/context_refresh is null/);
+    expect(() => loadProtocol(testDir, 'fixture-protocol')).toThrow(/omit the key/);
   });
 });
 
@@ -162,6 +166,12 @@ describe('context_refresh: rejection', () => {
     expect(() => loadProtocol(testDir, 'fixture-protocol')).toThrow(/unknown key 'on_entry'/);
   });
 
+  it('rejects duplicate entries in on_enter', () => {
+    // Keeps the runtime in step with the schemas' uniqueItems.
+    writeProtocol(baseProtocol({ on_enter: ['plan', 'plan'] }));
+    expect(() => loadProtocol(testDir, 'fixture-protocol')).toThrow(/more than once/);
+  });
+
   it('rejects a non-object context_refresh', () => {
     writeProtocol(baseProtocol(['plan']));
     expect(() => loadProtocol(testDir, 'fixture-protocol')).toThrow(/must be an object/);
@@ -197,6 +207,25 @@ describe('shipped protocols', () => {
     expect(names.length).toBeGreaterThan(0);
     for (const name of names) {
       expect(() => loadProtocol(repoRoot, name), `protocol '${name}' failed to load`).not.toThrow();
+    }
+  });
+
+  it('loads every protocol shipped in codev-skeleton/', () => {
+    // The four-tier resolver hits codev/ first, so loading by name never parses
+    // the skeleton copies — yet for an ADOPTER those copies are the shipped
+    // protocols. Parse them directly, from a temp root that has no codev/ tier
+    // to shadow them, or a broken skeleton protocol ships undetected.
+    const names = shippedProtocolNames('codev-skeleton');
+    expect(names.length).toBeGreaterThan(0);
+    for (const name of names) {
+      const src = path.join(repoRoot, 'codev-skeleton/protocols', name, 'protocol.json');
+      const dest = path.join(testDir, 'codev/protocols', name);
+      fs.mkdirSync(dest, { recursive: true });
+      fs.copyFileSync(src, path.join(dest, 'protocol.json'));
+      expect(
+        () => loadProtocol(testDir, name),
+        `skeleton protocol '${name}' failed to load`,
+      ).not.toThrow();
     }
   });
 
@@ -267,5 +296,8 @@ describe('protocol-schema.json copies', () => {
     const schema = JSON.parse(fs.readFileSync(path.join(repoRoot, copies[0]), 'utf-8'));
     const props = schema.properties.context_refresh.properties;
     expect(Object.keys(props).sort()).toEqual(['on_enter', 'on_plan_phase_advance']);
+    // Pins the schema to the runtime's duplicate rejection.
+    expect(props.on_enter.uniqueItems).toBe(true);
+    expect(schema.properties.context_refresh.additionalProperties).toBe(false);
   });
 });
