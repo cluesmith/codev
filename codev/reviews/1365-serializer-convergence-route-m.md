@@ -76,9 +76,19 @@ Evidence + docs:
 
 - `pnpm --filter @cluesmith/codev build`: ✓ pass
 - `pnpm --filter @cluesmith/codev-sdk build`: ✓ pass
-- `pnpm --filter @cluesmith/codev test`: ✓ pass — **4885 passed / 0 failed / 48 skipped**,
-  246 files. 28 new tests in `spec-1365-serializer-convergence.test.ts`, plus the degraded-
-  interrupt response test in `tower-routes.test.ts`.
+- `pnpm --filter @cluesmith/codev test`: ✓ pass — **4934 passed / 0 failed / 48 skipped**,
+  248 files, after merging `origin/main`. 28 new tests in
+  `spec-1365-serializer-convergence.test.ts`, plus the degraded-interrupt response test in
+  `tower-routes.test.ts`. (Before the merge, on the #1365 work alone: 4885 / 0 / 48, 246 files
+  — the delta is main's own tests arriving, not tests changing behaviour here.)
+- **Merged `origin/main` after the `pr` gate was approved** (merge `ebbc495dc`, not a rebase —
+  the reviewed history is preserved). `main` had advanced 25 commits during the review round
+  (AIR #1489's `afx reset` → `afx refresh`, secfix-1's Tower auth hardening, PIR #1495). One
+  conflict, in `codev/resources/lessons-learned.md` § Architecture: an append-only collision
+  (three #1365 entries vs one secfix-1 entry at the same point), resolved **keep-both**, all
+  four entries present and unmodified. Every code file auto-merged; every #1365 hunk survives
+  byte-identical, and `message-write.ts`, `mailbox-delivery.ts`, `commands/send.ts` and
+  `spec-1365-serializer-convergence.test.ts` were untouched by the merge.
 - **Manual verification** (dev-approval gate, human-approved): `afx dev` was not usable —
   4100 is shared by design and restarting the live Tower kills every builder session — so the
   running-worktree evidence was scripted against an **isolated Tower on port 14650** with real

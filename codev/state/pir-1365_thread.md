@@ -215,3 +215,40 @@ the human-facing version, including the two files that fell outside the stated P
 `codev/evidence/` placement the maintainer may veto, is in the review doc.
 
 Build clean (codev + sdk); full suite **4885 passed / 0 failed / 48 skipped**, 246 files.
+
+---
+
+## Post-gate: merging main back in
+
+**2026-08-18.** The human approved the `pr` gate and porch reported the protocol complete
+(`phase: verified`). Porch's final task says "merge the PR" — not taken; PR #1492 and issue
+#1365 are parked for the maintainer, per standing order.
+
+Then GitHub flagged the PR `mergeable=CONFLICTING`: `main` had moved 25 commits during the
+review round. I reported it rather than fixing it unasked, because merging would have changed
+the tree the architect had just verified with a 129/129 re-run — and got the go-ahead.
+
+**The conflict was a nothing, and that is worth recording precisely because it looked
+alarming.** Exactly one file: `codev/resources/lessons-learned.md`, § Architecture. Both sides
+had *appended* — three #1365 lessons here, one secfix-1 lesson on main, at the same insertion
+point. Not a competing edit; git simply cannot know that two appends at one anchor are
+independent. Keep-both, all four entries intact.
+
+Every code file auto-merged. What the merge *did* change in this PR's files came entirely from
+main: AIR #1489's `afx reset` → `afx refresh` rename landed in two of my comments
+(`session-submit.ts`, `mailbox-wiring.ts`), and secfix-1's auth hardening rewrote parts of
+`tower-routes.ts`, `tower-client.ts` (`codev-web-key` → `codev-tower-key`) and
+`tower-routes.test.ts`. I verified this rather than assuming it: blob-hashed the nine files
+before the merge and diffed each afterwards, then grepped every #1365 marker
+(`wroteBytes`, `watchBypasses`, `pendingOperators`, `SubmissionKind`, `logCeilingExpired`,
+`DEGRADED_SUBMIT_REASON`, the degraded-interrupt test) to confirm each survived. Four files
+were byte-identical: `message-write.ts`, `mailbox-delivery.ts`, `commands/send.ts`,
+`spec-1365-serializer-convergence.test.ts`.
+
+`pnpm install --frozen-lockfile` was necessary before rebuilding — main moved `pnpm-lock.yaml`,
+and secfix-1's own lesson in that very file is about a dep that only fails in a *packaged*
+install. Build clean (codev + sdk). Full suite **4934 passed / 0 failed / 48 skipped, 248
+files** — up from 4885/246, the delta being main's own new tests, not behaviour change here.
+
+Merge commit `ebbc495dc`. Merge, not rebase: rebasing would have rewritten 83 pushed commits
+and destroyed the history the human just approved.
