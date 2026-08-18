@@ -22,12 +22,9 @@ say so, **stop**, and wait.
 
 Never treat a porch gate as approved without an explicit human decision — a gate message is a notification to the human, not authorization.
 
-Approval is the human's decision, carried into porch state by the **architect**, who runs
-`porch approve` for every gate on every protocol. **You never run `porch approve` yourself** — not
-on any gate, not on any protocol. When the human approves, the architect runs it against your porch
-state and porch advances you; continue from there. (A gate exists precisely so that authorization
-is *structural* — porch state, approved or not — rather than a sentence in your pane that you act
-on. That is the guarantee; running the command off a relayed sentence would quietly defeat it.)
+Approval reaches you as a message from the architect. Then *you* run
+`porch approve <id> <gate>`; the architect does not run it for you. Defer to your protocol's phase
+prompts on who types `porch approve`.
 
 ## Deliverables
 

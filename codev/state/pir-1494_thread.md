@@ -145,6 +145,57 @@ Needs the HUMAN's VS Code window (cannot come from builder shell): the literal b
 blocked builder, observing the relay land in the architect terminal. Loading the extension UI is not
 a builder-shell action; stated plainly rather than claimed.
 
+## DESIGN REVERSAL (2026-08-18) — Amr ruled builder-runs-it (opposite of the relayed uniform ruling)
+At dev-approval Amr reviewed the built (architect-runs-it) version and chose the OPPOSITE unification:
+- VS Code button relays a SHORT human-style notice to the spawning architect (no porch command).
+  Message (option B): "Human approved the <gate> gate for <id> (#<issue>) in VS Code."
+- Architect RELAYS to the builder (does not run porch).
+- Builder runs porch approve — matching SPIR/AIR (roles/builder.md default).
+Rationale (Amr): minimal blast radius, no role-md churn, porch runs in the builder's worktree.
+vscode architect stood down, confirmed "follow Amr," is raising its objection to Amr directly (not
+through me), and told me: don't carry its dissent into code/comments.
+
+### TRADEOFF TO RECORD IN codev/reviews/1494 (architect's explicit request — state plainly, don't soften, don't editorialize)
+BUGFIX's canon (bugfix/protocol.md:38) — "the merge trigger is porch state rather than free text
+typed into the builder's pane... a builder cannot infer authorization from ambiguous prose" — is
+KNOWINGLY NOT extended to the other protocols under this decision. PIR's own protocol.md:35-37 states
+the SAME principle for its pr gate; builder-runs-it reverses it (the builder now records porch state
+from the architect's relayed prose = inferring authorization from prose, the exact self-merge
+precondition the passage names). The owner accepted this tradeoff with the argument in front of him.
+Record it as a decision-with-reasoning so it stays revisitable. Two instances remain relevant
+(pir-1070 bypass, pir-1494 unprovable-record) — keep those too.
+
+### PIR change is BIGGER than "5 lines" — surfaced to Amr for confirmation before cutting:
+- 5 prohibition lines (builder-prompt.md:46, plan.md:117, implement.md:143, review.md:243, protocol.md:42).
+- PLUS protocol.md:35-37 — PIR's flagship self-merge/structural-authorization rationale, becomes false.
+- PLUS roles/builder.md parenthetical ("PIR's gates are typed by the human reviewer, via Cmd+K G")
+  becomes false when prohibitions are stripped — a NEW two-texts-disagree instance (the exact defect
+  this lane fixes). Role-doc scope Amr forbade → asking him, not fixing unilaterally (architect concurred).
+
+## FINAL builder-runs-it implementation (2026-08-18) — reworked from architect-runs-it at Amr's direction
+Resolved all open items with Amr at the gate:
+- **Message** = option B (short, human-style, no porch): "Human approved the <gate> gate for <id> (#<issue>) in VS Code."
+- **approve.ts**: buildRelayMessage simplified to option B; interpretRelayResult reworded (sent/held/failed,
+  "they'll pass it on to the builder", never "approved"); routing (4 branches) + held-first-class kept.
+  Tests updated. 872 suite green, tsc+lint clean, esbuild builds.
+- **roles/architect.md**: REVERTED to original (untouched) — it already said "relay; the builder runs the
+  command", which IS the builder-runs-it design. No change needed. Vindicates the minimal approach.
+- **roles/builder.md**: removed the PIR carve-out parenthetical ("PIR's gates are typed by the human via
+  Cmd+K G") so PIR inherits the "you run it" default like SPIR (Amr chose option a). This was the one
+  authorized role-doc edit — it fixes the two-texts-disagree contradiction the rework would otherwise ship.
+- **PIR prompts** (both trees): all 5 prohibitions reframed to "run porch approve only when the architect
+  relays the human's approval, never on your own initiative" (builder-prompt.md:46, plan.md:117,
+  implement.md:143, review.md:243, protocol.md:41); protocol.md:35-36 self-merge rationale reworked to
+  describe the mechanism without the now-false "porch state independent of prose" claim.
+- Final consistency: architect relays → builder runs it, stated coherently across architect.md (relay),
+  builder.md (default + defer to phase prompts), PIR prompts (run when relayed). Matches SPIR.
+
+OPEN: issue #1494 AC still says "architect runs it / builder not in chain" (the reverted design). Need to
+annotate the issue that the shipped design is builder-runs-it. Asked Amr whether to edit AC or add a comment.
+
+REVIEW-ARTIFACT TODO still stands (see TRADEOFF block above): record that BUGFIX's structural-authorization
+canon is knowingly NOT extended to PIR/others; owner accepted with the argument in front of him.
+
 ## Status
 Implement committed (92a4ee58f code+tests, a60bcb2bb docs) + pushed. dev-approval gate PENDING. Amr
 owns dev-approval + pr; architect relays; I never run porch approve.

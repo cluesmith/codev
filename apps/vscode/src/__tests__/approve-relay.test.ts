@@ -63,36 +63,20 @@ describe('decideApprovalRelay', () => {
 });
 
 describe('buildRelayMessage', () => {
-  const msg = buildRelayMessage({
-    id: 'pir-1494',
-    gate: 'plan-approval',
-    gateLabel: 'plan review',
-    issueRef: '#1494',
-    issueTitle: 'relay approvals through the architect',
-    worktreePath: '/repo/.builders/pir-1494',
+  const msg = buildRelayMessage({ id: 'pir-1494', gateLabel: 'plan review', issueId: '1494' });
+
+  it('is a short, human-style notice naming the gate, builder, issue, and VS Code provenance', () => {
+    expect(msg).toBe('Human approved the plan review gate for pir-1494 (#1494) in VS Code.');
   });
 
-  it('names the gate, the builder, the issue, and the human-click provenance', () => {
-    expect(msg).toContain('plan review');
-    expect(msg).toContain('pir-1494');
-    expect(msg).toContain('#1494');
-    expect(msg).toContain('relay approvals through the architect');
-    expect(msg).toContain('clicking Approve in VS Code');
+  it('does NOT name porch or spell out a command (the architect passes it on)', () => {
+    expect(msg).not.toContain('porch');
+    expect(msg).not.toContain('--a-human-explicitly-approved-this');
   });
 
-  it('carries the exact command including the human-approval flag', () => {
-    expect(msg).toContain('porch approve pir-1494 plan-approval --a-human-explicitly-approved-this');
-  });
-
-  it('names a gate-appropriate artifact and the worktree', () => {
-    expect(msg).toContain('codev/plans/');
-    expect(msg).toContain('/repo/.builders/pir-1494');
-  });
-
-  it('omits the worktree line when no path is known', () => {
-    const m = buildRelayMessage({ id: 'x', gate: 'pr', gateLabel: 'PR', issueRef: 'x' });
-    expect(m).not.toContain('Worktree:');
-    expect(m).toContain('the open PR');
+  it('omits the issue ref when no issue id is known', () => {
+    const m = buildRelayMessage({ id: 'pir-9', gateLabel: 'PR' });
+    expect(m).toBe('Human approved the PR gate for pir-9 in VS Code.');
   });
 });
 
@@ -104,18 +88,18 @@ describe('interpretRelayResult', () => {
     expect(o.message).toContain('NOT approved');
   });
 
-  it('held → held outcome, names the reason, and says NOT yet approved (first-class)', () => {
+  it('held → held outcome, names the reason, and says NOT approved yet (first-class)', () => {
     const o = interpretRelayResult({ ok: true, held: true, reason: 'busy' }, 'vscode', 'plan review', '#1494');
     expect(o.kind).toBe('held');
     expect(o.message).toContain('busy');
-    expect(o.message).toContain('NOT yet approved');
+    expect(o.message).toContain('NOT approved yet');
   });
 
-  it('delivered → relayed (NOT "approved" — the architect still runs the command)', () => {
+  it('delivered → relayed (NOT "approved" — the architect passes it to the builder)', () => {
     const o = interpretRelayResult({ ok: true, delivered: true, held: false }, 'vscode', 'plan review', '#1494');
     expect(o.kind).toBe('relayed');
-    expect(o.message).toContain('relayed');
-    expect(o.message).toContain('they will run porch approve');
+    expect(o.message).toContain('pass it on to the builder');
+    expect(o.message).not.toContain('approved.');
   });
 
   it('older Tower omitting held/delivered reads as relayed (back-compat)', () => {

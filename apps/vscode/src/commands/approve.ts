@@ -10,11 +10,11 @@ const execFileAsync = promisify(execFile);
 
 /**
  * #1494: the Approve button relays the human's decision to the builder's
- * spawning architect, who runs `porch approve`, instead of the extension
- * shelling out to `porch approve` itself. This mirrors how humans already work
- * with codev — they tell the architect to approve, and the architect runs the
- * command — and keeps the architect in the loop so its model of the builder
- * doesn't go stale between gates.
+ * spawning architect, instead of the extension shelling out to `porch approve`
+ * itself. This mirrors how humans already work with codev — they tell the
+ * architect a gate was approved, and the architect passes it on to the builder,
+ * who runs the command — and keeps the architect in the loop so its model of the
+ * builder doesn't go stale between gates.
  *
  * `decideApprovalRelay` is the pure routing core: given the builder's owning
  * architect and the workspace's *live* architects, it decides where (or whether)
@@ -59,54 +59,33 @@ export function decideApprovalRelay(
   return { kind: 'no-live-architect' };
 }
 
-/** Gate-appropriate name for the artifact the architect should inspect. */
-function artifactHintForGate(gate: string): string {
-  switch (gate) {
-    case 'plan-approval': return 'the plan file in codev/plans/';
-    case 'dev-approval':  return 'the running worktree (run its dev server / read the diff)';
-    case 'pr':            return 'the open PR';
-    default:              return 'the gate artifact';
-  }
-}
-
 /**
- * The relay message body. Names the gate, the builder, the artifact, and the
- * fact that a human approved by clicking, and hands the architect the exact
- * command so it can act without re-asking the human to confirm.
+ * The relay message body — a short, human-style notice to the architect that a
+ * *human* approved the gate (that "in VS Code" is the provenance: a person
+ * clicked the button, not an agent asserting it). It deliberately does not name
+ * `porch` or spell out a command: the architect's own role/prompt already
+ * covers passing the decision on to the builder, and the builder runs the
+ * command. Keep it to the point, the way a person would tell the architect.
  */
 export function buildRelayMessage(args: {
   id: string;
-  gate: string;
   gateLabel: string;
-  issueRef: string;
-  issueTitle?: string | null;
-  worktreePath?: string | null;
+  issueId?: string | null;
 }): string {
-  const { id, gate, gateLabel, issueRef, issueTitle, worktreePath } = args;
-  const titlePart = issueTitle ? ` — ${issueTitle}` : '';
-  const worktreeLine = worktreePath ? `\nWorktree: ${worktreePath}` : '';
-  return [
-    '[Gate approval — human clicked Approve in VS Code]',
-    '',
-    `The human approved the "${gateLabel}" gate for builder ${id} (issue ${issueRef}${titlePart}) ` +
-      'by clicking Approve in VS Code. This carries stronger provenance than free text: the extension ' +
-      'generated it in direct response to an authenticated human click in their own IDE.',
-    '',
-    `Artifact: ${artifactHintForGate(gate)}${worktreeLine}`,
-    '',
-    'Please run:',
-    `  porch approve ${id} ${gate} --a-human-explicitly-approved-this`,
-  ].join('\n');
+  const { id, gateLabel, issueId } = args;
+  const issuePart = issueId ? ` (#${issueId})` : '';
+  return `Human approved the ${gateLabel} gate for ${id}${issuePart} in VS Code.`;
 }
 
 /** Result shape returned by `TowerClient.sendMessage` (Spec 1313 mailbox-first). */
 type SendResult = { ok: boolean; delivered?: boolean; held?: boolean; reason?: string; error?: string };
 
 /**
- * How the send result is surfaced. The click no longer *approves* — it relays —
- * so the wording is "relayed / held / failed", never "approved". The `held` case
- * is first-class: on a held relay the approval has NOT happened, and a UI that
- * reports success there is a defect (#1494).
+ * How the send result is surfaced to the human who clicked. The click does not
+ * *approve* — it hands the decision to the architect, who passes it to the
+ * builder — so the wording is "sent / held / failed", never "approved". The
+ * `held` case is first-class: on a held relay the approval has NOT happened, and
+ * a UI that reports success there is a defect (#1494).
  */
 export type RelayOutcome =
   | { kind: 'error'; message: string }
@@ -122,7 +101,7 @@ export function interpretRelayResult(
   if (!result.ok) {
     return {
       kind: 'error',
-      message: `Codev: relay to architect ${architect} failed — ${result.error ?? 'unknown error'}. The gate is NOT approved.`,
+      message: `Codev: couldn't reach architect ${architect} — ${result.error ?? 'unknown error'}. The gate is NOT approved.`,
     };
   }
   // `held` is only set by Spec-1313 Tower binaries; older binaries omit it, and a
@@ -131,12 +110,12 @@ export function interpretRelayResult(
     const reason = result.reason ? ` (${result.reason})` : '';
     return {
       kind: 'held',
-      message: `Codev: approval sent to ${architect} but held${reason} — it will reach them when their prompt is clear. The ${gateLabel} gate for ${issueRef} is NOT yet approved.`,
+      message: `Codev: sent to ${architect} but held${reason} — it will reach them when their prompt is clear. The ${gateLabel} gate (${issueRef}) is NOT approved yet.`,
     };
   }
   return {
     kind: 'relayed',
-    message: `Codev: approval relayed to ${architect} — they will run porch approve for ${gateLabel} (${issueRef}).`,
+    message: `Codev: sent the ${gateLabel} approval to ${architect} (${issueRef}) — they'll pass it on to the builder.`,
   };
 }
 
@@ -307,11 +286,8 @@ async function relayApproval(
     case 'relay': {
       const message = buildRelayMessage({
         id: builder.id,
-        gate,
         gateLabel,
-        issueRef,
-        issueTitle: builder.issueTitle,
-        worktreePath: builder.worktreePath,
+        issueId: builder.issueId,
       });
       let result: SendResult;
       try {
