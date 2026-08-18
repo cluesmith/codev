@@ -72,3 +72,10 @@ Scope: 1 YAML edit + 1 test file. Well under 300 LOC. Fits BUGFIX.
              raise with the architect (not self-filing, per scope discipline).
 - No REQUEST_CHANGES; the one actionable item (PR-body accuracy) is addressed.
 - Handing off at the pr gate; waiting for architect approval before merge.
+
+## Gate status
+- Architect posted integration-review APPROVE on PR #1507 (verified claims against artifacts).
+- Other-workflows unbounded gap filed by architect as #1509 (not folded into this PR).
+- Architect explicit: the pr gate is the OWNER's, not the architect's. Integration APPROVE is
+  NOT merge authorization. Holding at the pr gate; will not run `porch approve` or merge until
+  the owner gives the word, then follow the merge task from `porch next`.
