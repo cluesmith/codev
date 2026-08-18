@@ -79,3 +79,26 @@ CMAP (impl review, borrowed aspir template + --project-id 1501 after tooling fri
 - Declined (noted for dev-approval / review): focus-ring re-arm on pure pan via runCanvasCommand
   (eyeball on hardware); ReviewNav.runCanvas duplication (would widen diff into ReviewNav; low pri).
 - Re-verified after fixes: streamdeck 242, artifact-canvas 177 unit + 10 Playwright, all check-types.
+
+## Dev-approval + review phase (2026-08-18)
+
+Dev-approval GRANTED — Amr tested on hardware, all good. Rulings: 60px stays (named for
+tunability), focus-ring re-arm on pure pan accepted as-is, nit (b) ReviewNav.runCanvas overlap
+LEAVE IT. Architect will run a full 3-way integration CMAP on the PR (heavier than #1508).
+
+Hardware "Error" the reviewer saw = stale-Tower, NOT a code defect: the running Tower was the
+globally-installed @cluesmith/codev (~/.nvm/.../dist, started before my change), which rejected
+viewport-down as invalid-request → deck shows "Error". Confirmed via ps (tower-server.js path).
+Did NOT restart Tower (kills running builders — human's call). Captured as a lesson (#1414 sharpen).
+
+Review phase: wrote codev/reviews/1501-...md (Summary/Files/Commits/Tests/Arch/Lessons/Look-at/
+How-to-test). Governance routing (COLD only — these are our instance docs, not skeleton):
+- lessons-learned.md Testing: (1) host-scroller find = the architect-credited lesson (DOM
+  assumption unit tests can't falsify needs a real-browser test; approved plan ≠ runtime evidence),
+  (2) stale-Tower third-artifact (sharpens #1414), + a [Recurred in #1501] note on the #1498 lesson.
+- arch.md #1380 canvas entry: one clause — vertical-mode scroller is the host page, not the body.
+No HOT changes (no new module boundary; hot lessons file full, this sharpens existing entries).
+
+PR #1513 opened (Closes #1501 in body), recorded with porch. Running porch done → triggers the
+single-pass 3-way consult (verify block). Then pr gate; notify architect leading with any
+REQUEST_CHANGES; wait for human merge (gh pr merge --merge, never squash).
