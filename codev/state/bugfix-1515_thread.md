@@ -209,3 +209,53 @@ the whole unit suite clean and I briefly believed the suite was innocent. It was
 self-check showed Node's global `fetch` (undici) creates sockets through internal bindings
 and ignores every userland patch of `node:net`. **A guard that has not been shown to fire
 proves nothing.**
+
+## CMAP
+
+Round 1: gemini APPROVE, codex COMMENT, claude REQUEST_CHANGES.
+
+**claude, blocking — accepted.** Moving the DB into the throwaway dir broke
+`tower-routes-husks.e2e.test.ts` and `shellper-husk-sweep.e2e.test.ts`, which open the
+Tower's SQLite file directly at `resolve(homedir(), '.agent-farm', 'test-<port>.db')`
+(`no such table: terminal_sessions`). Both now read `tower.agentFarmDir`. The reviewer also
+caught that my "all tests pass" rested on **five** Tower-spawning e2e files when **twelve**
+use the helper I changed — and two of the seven I skipped were the broken ones. All fourteen
+now run green (85 tests).
+
+**codex, non-blocking — accepted.** Isolated dirs hold a copy of the shared local key and
+were never removed by callers that spawn Towers themselves. Added
+`removeIsolatedAgentFarmDir()` and wired it into every such teardown. Note: a
+`process.on('exit')` backstop was **not** sufficient on its own — vitest's pooled workers do
+not reliably run exit handlers — so explicit teardown is the primary mechanism.
+
+**claude, non-blocking — declined with reasons.**
+- `isUnderTest()` accepting `NODE_ENV` contradicts the #1323 comment in the same file. True,
+  but the trade is inverted: #1323's guard makes a real consultation *throw*, so its false
+  positive is expensive. Here a false positive costs a 403 that names its own override; a
+  false negative deregisters someone's Tower. Kept, documented at the call site.
+- `packages/sdk/src/node/local-key.ts` not honouring `CODEV_AGENT_FARM_DIR`. That reader
+  serves external Node clients (VS Code host, Stream Deck plugin), not the Tower, and
+  intentionally reads the real key — the same value the isolated dir receives — so no path
+  this bug touches is left partial. It also cannot import `codev-core` at runtime (#1189).
+
+Round 2: gemini APPROVE, codex REQUEST_CHANGES.
+
+**codex round 2 — accepted, and it was right where I was wrong.** I had added
+`codev/reviews/bugfix-1515-*.md`. The BUGFIX protocol opens with "No spec, no plan, **no
+artifact files**: the issue is the specification and the PR body carries the reasoning."
+The three-artifacts rule in the generic builder role does not apply to BUGFIX, and the
+handful of `bugfix-*.md` files already in `codev/reviews/` are exceptions rather than the
+convention. Removed; its substance lives in the PR body and in this thread.
+
+Lessons worth carrying:
+- **A guard that has not been shown to fire proves nothing.** The `net.Socket.prototype.connect`
+  guard ran the whole unit suite clean and looked like proof of innocence. Node's global
+  `fetch` (undici) creates sockets through internal bindings and ignores every userland patch
+  of `node:net`. Assert instrumentation triggers on a known positive before trusting silence.
+- **An issue's root-cause section is a hypothesis, not a finding.** This one was written from
+  real evidence and was still wrong about the mechanism, in a way that would have left the bug
+  live.
+- **"All tests pass" is a claim about what you ran.** Enumerate the call sites of what you
+  changed and run those.
+- **A default port is an ambient dependency on someone's live system.** `getTowerClient()`
+  with no argument means "whatever Tower is running on this machine".
