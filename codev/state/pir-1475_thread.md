@@ -103,3 +103,47 @@ Notes for whoever picks this up:
 - Two of the new tests are real regression tests, not decoration: the SPAWN-relaunch case fails
   against a snapshot-at-attach implementation, and the legacy-NULL case fails against a naive
   persist. Both were written to fail first against the design I originally proposed.
+
+## Dev-approval evidence (2026-08-18)
+
+The architect pushed back on my first dev-approval request: dev-approval is PIR's *tested-running*
+gate, and "4943 tests pass" is not evidence that the thing runs. Right call — scripting the plan's
+Manual section against a real Tower found a bug the whole unit suite missed.
+
+`packages/codev/scripts/pir-1475-dev-approval-evidence.mts` spawns THIS worktree's built
+`tower-server.js` on private ports 14782/14783 (`NODE_ENV=test`, `AF_TEST_DB=test-1475-<port>.db`,
+its own `SHELLPER_SOCKET_DIR`), registers real shellper-backed PTYs and drives the real HTTP
+endpoints — nothing about the identity path is stubbed. Transcript committed at
+`codev/evidence/1475-dev-approval-transcript.txt`: **23/23 checks, 0 skips**, and the live Tower on
+4100 asserted untouched before and after.
+
+**The bug the evidence caught.** My bounded validation capped each WELCOME argument at 4096 bytes
+and rejected the identity *atomically*. Architects launch as
+`claude --session-id <uuid> --append-system-prompt "<entire role doc>"` — one argument several KB
+long. Every architect tripped the cap and silently fell back to `source=config`: precisely the
+sessions this feature exists to make authoritative, and precisely the `afx send architect` case
+#1313 was about. The fix bounds the **aggregate** args size (512 KB) instead of each argument,
+keeping the count bound (256) and the PATH_MAX-shaped command bound. Regression test:
+"accepts a REAL architect argv, whose system prompt is several KB in one argument".
+
+Lesson for the review: *a bound that rejects atomically must be sized against the largest real
+input, not the typical one* — and a unit suite that builds its own fixtures will never tell you
+what the real input is.
+
+**Also added**: `logSessionIdentity()` in `tower-utils.ts`, wired at every attach site. The plan's
+Manual step 3 promised an "identity hydrated from WELCOME" log line and the implementation had only
+an ad-hoc one at `session-reconnected`. It is the line an operator wants when `afx send` holds
+`no-profile`: what the gate thinks is running, whether that came from the process or the fallback,
+and what the row held going in.
+
+**One fixture trap, worth knowing.** Step 5's relaunched harness looked dead (`status=exited`,
+delivery held `no-live-pty` forever). Not a Tower bug: `PtySession.startRestartWait` clears
+`exitCode` on the respawned child's first `data` event (#1264), and my shim was a bare `cat`, which
+prints nothing on startup. Real harnesses paint their UI. The canonical shim now paints its
+composer, and `status=running` after the relaunch became evidence in its own right. The script also
+resets its own `test-1475-*.db` per run — stale held rows from earlier runs were emitting
+starvation notices for dead workspaces into the transcript.
+
+Step 5 still cannot show the identity VALUE changing across a relaunch, because neither production
+relaunch path mutates `session.options.command` (#1338). The transcript says so in a `note`; the
+read-through-vs-snapshot distinction is pinned by the unit test instead. Keep it honest.

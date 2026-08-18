@@ -17,7 +17,7 @@ import { Command } from 'commander';
 import { WebSocketServer } from 'ws';
 import { SessionManager } from '../../terminal/session-manager.js';
 import type { SSEClient } from './tower-types.js';
-import { startRateLimitCleanup, persistableCommand } from './tower-utils.js';
+import { startRateLimitCleanup, persistableCommand, logSessionIdentity } from './tower-utils.js';
 import { sweepShellperHusks, resolveHuskGraceMs } from './shellper-husk-sweep.js';
 import {
   sweepSessionLogs,
@@ -545,12 +545,9 @@ async function bootSequence(): Promise<void> {
     // current argv, which may differ from what the row holds (a relaunch swapped
     // it, or the row was healed from config). Write it back so the fallback SSOT
     // converges instead of drifting. No-ops when unchanged.
+    logSessionIdentity(log, 'session-reconnected', ptySession.id, ptySession, null);
     updateTerminalCommand(ptySession.id, persistableCommand(ptySession));
-    log(
-      'INFO',
-      `Shellper session ${sessionId} re-attached to terminal ${ptySession.id} ` +
-        `(identity: ${ptySession.command || 'unknown'}, source: ${ptySession.identitySource})`,
-    );
+    log('INFO', `Shellper session ${sessionId} re-attached to terminal ${ptySession.id}`);
   });
   const staleCleaned = await shellperManager.cleanupStaleSockets();
   if (staleCleaned > 0) {

@@ -53,7 +53,12 @@ function extractShellperSessionId(socketPath: string | null): string | null {
 import type { SessionManager, ReconnectRestartOptions } from '../../terminal/session-manager.js';
 import type { PtySession } from '../../terminal/pty-session.js';
 import type { WorkspaceTerminals, TerminalEntry, DbTerminalSession } from './tower-types.js';
-import { normalizeWorkspacePath, buildArchitectReconnectRestartOptions, persistableCommand } from './tower-utils.js';
+import {
+  normalizeWorkspacePath,
+  buildArchitectReconnectRestartOptions,
+  persistableCommand,
+  logSessionIdentity,
+} from './tower-utils.js';
 import { setArchitectByName } from '../state.js';
 import { isIntentionallyStopping } from './tower-instances.js';
 
@@ -864,6 +869,7 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
     // command, then the legacy heal). This is the site's ONE persist mechanism:
     // the row is deleted and re-inserted here, so an update written back at
     // attach time would be wiped.
+    logSessionIdentity(_deps.log, 'reconcile-adopt', session.id, ptySession, dbSession.command);
     db.prepare('DELETE FROM terminal_sessions WHERE id = ?').run(dbSession.id);
     saveTerminalSession(session.id, workspacePath, dbSession.type, dbSession.role_id, dbSession.shellper_pid,
       dbSession.shellper_socket, dbSession.shellper_pid, dbSession.shellper_start_time, dbSession.label, sessionCwd,
@@ -1083,6 +1089,7 @@ export async function getTerminalsForWorkspace(
             });
           }
           // Refresh the SQLite row under the same (preserved) id.
+          logSessionIdentity(_deps.log, 'reconnect-onthefly', newSession.id, ptySession, dbSession.command);
           deleteTerminalSession(dbSession.id);
           saveTerminalSession(newSession.id, dbSession.workspace_path, dbSession.type, dbSession.role_id, dbSession.shellper_pid,
             dbSession.shellper_socket, dbSession.shellper_pid, dbSession.shellper_start_time, dbSession.label, dbSession.cwd,

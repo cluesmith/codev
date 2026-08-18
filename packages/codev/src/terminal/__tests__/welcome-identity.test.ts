@@ -258,7 +258,7 @@ describe('PIR #1475 — WELCOME identity: ShellperClient hydration', () => {
     ['non-array args', { command: 'claude', args: 'not-an-array' }],
     ['non-string args element', { command: 'claude', args: ['--ok', 7] }],
     ['too many args', { command: 'claude', args: new Array(257).fill('--x') }],
-    ['over-long arg', { command: 'claude', args: ['a'.repeat(4097)] }],
+    ['args exceeding the total budget', { command: 'claude', args: ['a'.repeat(512 * 1024 + 1)] }],
   ];
 
   for (const [label, identity] of REJECTED) {
@@ -268,6 +268,27 @@ describe('PIR #1475 — WELCOME identity: ShellperClient hydration', () => {
       expect(client.welcomeArgs).toBeNull();
     });
   }
+
+  it('accepts a REAL architect argv, whose system prompt is several KB in one argument', async () => {
+    // Regression, PIR #1475. An earlier revision capped each argument at 4096
+    // chars. Architects launch as
+    //   claude --session-id <uuid> --append-system-prompt "<entire role doc>"
+    // so one argument is several KB — the cap rejected it, and because rejection
+    // is atomic the WHOLE identity was dropped. Every architect silently fell
+    // back to the recorded command: the precise case this feature exists to make
+    // authoritative, and invisible to every other test here.
+    //
+    // Caught by running the real thing (dev-approval evidence), not by unit
+    // tests — hence this one.
+    const roleDoc = '# Role: Architect\n'.repeat(400); // ~6.8 KB, the real shape
+    const client = await connectWith({
+      ...BASE_WELCOME,
+      command: '/usr/local/bin/claude',
+      args: ['--session-id', 'bd222bbd-d59f-41ed-93b7-89fb8c0262a7', '--append-system-prompt', roleDoc],
+    });
+    expect(client.welcomeCommand).toBe('/usr/local/bin/claude');
+    expect(client.welcomeArgs?.[3]).toBe(roleDoc);
+  });
 
   it('updates identity immediately on spawn(), with no reconnect', async () => {
     // An ordinary SPAWN relaunch never reconnects the socket, so this in-memory

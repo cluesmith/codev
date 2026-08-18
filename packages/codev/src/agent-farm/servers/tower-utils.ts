@@ -706,3 +706,29 @@ export function serveStaticFile(filePath: string, res: ServerResponse): boolean 
 export function persistableCommand(session: { command: string } | null | undefined): string | null {
   return session?.command || null;
 }
+
+/**
+ * The identity a session resolved to, and where it came from (PIR #1475).
+ *
+ * Emitted at every site that attaches a shellper and records identity. This is
+ * the line an operator wants when `afx send` holds `no-profile`: it says what the
+ * gate thinks is running, whether that came from the process itself or from the
+ * recorded fallback, and what the row held going in. Without it the difference
+ * between "authoritative" and "fell back" is invisible in production.
+ */
+export function logSessionIdentity(
+  log: (level: 'INFO' | 'WARN' | 'ERROR', msg: string) => void,
+  where: string,
+  terminalId: string,
+  session: { command: string; identitySource: 'welcome' | 'config' } | null | undefined,
+  rowCommand: string | null,
+): void {
+  if (!session) return;
+  const source = session.identitySource;
+  const origin = source === 'welcome' ? 'identity hydrated from WELCOME' : 'identity fell back to recorded command';
+  log(
+    'INFO',
+    `[identity] ${where} ${terminalId}: ${origin} — command=${session.command || 'unknown'}, ` +
+      `source=${source}, row=${rowCommand ?? 'null'}`,
+  );
+}

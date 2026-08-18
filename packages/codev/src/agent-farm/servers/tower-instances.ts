@@ -31,6 +31,7 @@ import {
   buildArchitectCrashLoopFallback,
   buildArchitectFreshLaunch,
   persistableCommand,
+  logSessionIdentity,
 } from './tower-utils.js';
 import {
   reconcileArchitectSessionHolder,
@@ -654,6 +655,7 @@ export async function launchInstance(workspacePath: string): Promise<{ success: 
             // no-op case — the shellper's WELCOME echoes the `cmd` we just gave
             // it — but the accessor keeps one rule at every persist site: the row
             // records what is RUNNING, not what was requested.
+            logSessionIdentity(_deps.log, 'architect-launch', session.id, ptySession, cmd);
             _deps.saveTerminalSession(session.id, resolvedPath, 'architect', 'main', shellperInfo.pid,
               shellperInfo.socketPath, shellperInfo.pid, shellperInfo.startTime, null, workspacePath,
               persistableCommand(ptySession) ?? cmd);
@@ -1175,6 +1177,7 @@ export async function addArchitect(
       entry.architects.set(name, session.id);
       // PIR #1475: hydrated identity wins; a fresh spawn echoes `cmd` (see the
       // main-architect launch above).
+      logSessionIdentity(_deps.log, 'architect-launch-sibling', session.id, ptySession, cmd);
       _deps.saveTerminalSession(
         session.id, resolvedPath, 'architect', name, shellperInfo.pid,
         shellperInfo.socketPath, shellperInfo.pid, shellperInfo.startTime, null, workspacePath,

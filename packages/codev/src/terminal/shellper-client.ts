@@ -88,12 +88,21 @@ export interface IShellperClient extends EventEmitter {
   readonly welcomeArgs?: string[] | null;
 }
 
-// PIR #1475: bounds on the WELCOME identity payload. Generous enough that no
-// real launch comes close, tight enough that a garbled or hostile frame can't
-// push unbounded strings into Tower's identity path and the DB row behind it.
+// PIR #1475: bounds on the WELCOME identity payload — a sanity check against a
+// garbled frame, NOT a security boundary (the frame already arrives over an
+// owner-only socket and is capped at MAX_FRAME_SIZE by the parser).
+//
+// These are deliberately generous, and the arg bound is on the TOTAL rather than
+// per-argument. A per-arg cap of 4096 looked reasonable and was wrong in the
+// field: an architect launches with `--append-system-prompt <entire role doc>`,
+// several KB in a single argument. Because rejection is atomic, that cap threw
+// away the whole identity and silently sent every architect down the config
+// fallback — the exact sessions this feature exists to make authoritative.
+// Bound the aggregate instead, well above any real argv and far below the frame
+// cap. A command is a path, so PATH_MAX is the right shape of limit for it.
 const MAX_IDENTITY_COMMAND_LENGTH = 4096;
-const MAX_IDENTITY_ARG_LENGTH = 4096;
 const MAX_IDENTITY_ARGS = 256;
+const MAX_IDENTITY_ARGS_TOTAL_BYTES = 512 * 1024;
 
 export class ShellperClient extends EventEmitter implements IShellperClient {
   private socket: net.Socket | null = null;
@@ -209,7 +218,8 @@ export class ShellperClient extends EventEmitter implements IShellperClient {
       const valid =
         Array.isArray(args) &&
         args.length <= MAX_IDENTITY_ARGS &&
-        args.every((a) => typeof a === 'string' && a.length <= MAX_IDENTITY_ARG_LENGTH);
+        args.every((a) => typeof a === 'string') &&
+        (args as string[]).reduce((n, a) => n + a.length, 0) <= MAX_IDENTITY_ARGS_TOTAL_BYTES;
       if (!valid) {
         this._welcomeCommand = null;
         this._welcomeArgs = null;
