@@ -827,7 +827,11 @@ interface CanvasSpec {
 function canvasErrorLine(code: CanvasCommandClientErrorCode): string {
   if (code === 'no-canvas') return 'Open artifact';
   if (code === 'unreachable') return 'Tower offline';
-  return 'Error'; // invalid-request: defensive — we only ever send valid commands
+  // invalid-request. NOT unreachable: it fires on VERSION SKEW, when a Tower whose canvas-relay
+  // allowlist predates a newly added command rejects that command. On hardware this renders as
+  // `Error`, and the first move is to check which Tower is actually running (see
+  // lessons-learned.md, Testing, the stale-Tower entry from #1501) rather than the deck code.
+  return 'Error';
 }
 
 /** Line-2 text for a builder-scoped dial: the selected builder as `#issue title`
