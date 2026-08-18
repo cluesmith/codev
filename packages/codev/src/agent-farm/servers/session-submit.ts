@@ -131,11 +131,14 @@
  *
  * The one hole this lock opens is its own degraded path: an operator whose ceiling expires
  * writes unserialized. Rather than leave that as a second silent-loss route, degraded writes
- * are COUNTED per session ({@link unserializedWriteCount}); `submitMessagePaced` samples the
- * counter around its write and reports `preempted`, so the delivery holds its row for
- * redelivery instead of reporting a delivery that may have been clobbered. Deliberately no
- * screen re-classification — the question is only "did anyone bypass the lock while I held
- * it?", and a counter answers exactly that.
+ * are COUNTED per session ({@link unserializedWriteCount}); `submitMessagePaced` holds a
+ * {@link watchBypasses} watch across its write and reports `preempted`, so the delivery holds
+ * its row for redelivery instead of reporting a delivery that may have been clobbered.
+ * Deliberately no screen re-classification — the question is only "did anyone bypass the lock
+ * while I held it?", and a counter answers exactly that. The count is BYTES, not intent: a
+ * degraded write whose callback declines to write anything (the delayed `^C` re-checks
+ * liveness inside the lock) bumps nothing, because there is nothing for a delivery to have
+ * been raced by.
  */
 
 /**
@@ -186,6 +189,17 @@ export interface SubmitOptions {
   waitCeilingMs?: number;
   /** Called instead of the write's serialization when {@link waitCeilingMs} expires. */
   onCeilingExpired?: (waitedMs: number) => void;
+  /**
+   * Consulted immediately after the write callback returns, on the DEGRADED path only:
+   * did the write actually put bytes on the terminal? Defaults to yes.
+   *
+   * The delayed `^C` re-checks `isStillLive()` and `writable` INSIDE the lock and can
+   * legitimately write nothing. Counting that as a bypass would make a concurrent delivery
+   * report `preempted` and re-deliver — a duplicate charged for a race that never happened.
+   * {@link unserializedWriteCount} answers "did bytes bypass the lock while I held it?", so
+   * only bytes may bump it.
+   */
+  wroteBytes?: () => boolean;
 }
 
 /** Marker resolved by the ceiling timer so the race can tell who won. */
@@ -217,8 +231,74 @@ export const OPERATOR_SUBMIT_WAIT_CEILING_MS = 2000;
  * per session id and only ever created on the degraded path, which is rare by
  * construction — it needs a write long enough to hold the line past the ceiling AND a
  * concurrent operator action.
+ *
+ * Evicted by {@link evictBypassCountIfIdle} once the session has no submission in flight and
+ * no {@link watchBypasses} watch outstanding, so a long-lived Tower does not retain one entry
+ * per session that ever degraded (claude review of PR #1492 — the leak class #1472 fixed).
+ * Unlike {@link chains} it cannot simply self-delete on drain: it must outlive the submission
+ * whose watcher is about to compare against it.
  */
 const unserializedWrites = new Map<string, number>();
+
+/**
+ * Open {@link watchBypasses} watches per session — the interlock that makes eviction safe.
+ *
+ * A watcher compares the counter before and after its own write. Resetting the counter to 0
+ * between those two reads would read as "nobody raced me", which is exactly the false
+ * `delivered` this whole issue exists to eliminate. So eviction is refused while a watch is
+ * open, and re-attempted when the last one closes.
+ */
+const bypassWatchers = new Map<string, number>();
+
+/** A live comparison window over a session's degraded-write count. See {@link watchBypasses}. */
+export interface BypassWatch {
+  /** Did a degraded write put bytes on this terminal since the watch opened? */
+  raced(): boolean;
+  /** Close the watch. Idempotent; call it from a `finally` so no path leaks a watcher. */
+  release(): void;
+}
+
+/**
+ * Watch a session for degraded (ceiling-bypassing) writes across your own write.
+ *
+ * Open before the first byte, {@link BypassWatch.raced} after the last, and
+ * {@link BypassWatch.release} in a `finally`. Holding the watch is what pins the underlying
+ * count in place: without it the entry may be evicted the moment the session goes idle, and
+ * a reset between the two reads would look like "no race".
+ */
+export function watchBypasses(sessionId: string): BypassWatch {
+  const before = unserializedWrites.get(sessionId) ?? 0;
+  bypassWatchers.set(sessionId, (bypassWatchers.get(sessionId) ?? 0) + 1);
+  let released = false;
+  return {
+    raced: () => (unserializedWrites.get(sessionId) ?? 0) !== before,
+    release: () => {
+      if (released) return; // idempotent: a `finally` may run after an explicit release
+      released = true;
+      const remaining = (bypassWatchers.get(sessionId) ?? 1) - 1;
+      if (remaining > 0) {
+        bypassWatchers.set(sessionId, remaining);
+      } else {
+        bypassWatchers.delete(sessionId);
+        evictBypassCountIfIdle(sessionId);
+      }
+    },
+  };
+}
+
+/**
+ * Drop a session's degraded-write count once nothing can still be comparing against it.
+ *
+ * Called from BOTH ends of the interlock — the chain's drain cleanup and the last watch's
+ * release — so whichever happens second is the one that evicts, and neither ordering leaks.
+ * Requires no session-teardown hook: a session with no chain and no watcher is quiescent by
+ * definition, and the next degraded write simply re-creates the entry at 0.
+ */
+function evictBypassCountIfIdle(sessionId: string): void {
+  if (bypassWatchers.has(sessionId)) return; // a comparison window is open — resetting would lie
+  if (chains.has(sessionId)) return; // a submission is live and could still degrade
+  unserializedWrites.delete(sessionId);
+}
 
 /**
  * Per-session count of OPERATOR submissions queued or in flight (Issue #1365, codex review).
@@ -296,28 +376,34 @@ export function submitToSession(
   if (kind === 'operator') pendingOperators.set(sessionId, (pendingOperators.get(sessionId) ?? 0) + 1);
 
   const current = (async () => {
+    let bypassed = false;
     if (bounded) {
       const winner = await Promise.race([
         previousSettled,
         clock.sleep(ceilingMs).then(() => CEILING_EXPIRED),
       ]);
       // Ceiling expired → proceed WITHOUT serialization. This is a deliberate,
-      // announced degradation to the pre-Issue-#1365 behaviour (where an operator
-      // write never waited at all), taken only when the alternative is stalling
-      // `--interrupt` — the human's escape hatch — behind a write that may run for
-      // minutes. See the boundary comment above for why it is never worse than the
-      // status quo.
+      // announced degradation to exactly the pre-Issue-#1365 behaviour for the ONE pair it
+      // can affect: an operator write against a delivery, which held a disjoint lock and so
+      // was never serialized against an operator at all. (Operator-vs-operator never arms
+      // the ceiling — see `bounded` above — so that pair keeps its unbounded wait.) Taken
+      // only when the alternative is stalling `--interrupt`, the human's escape hatch,
+      // behind a write that may run for minutes. See the boundary comment above.
       if (winner === CEILING_EXPIRED) {
-        // Record it BEFORE the first byte so a delivery already holding the line sees the
-        // bump when it re-samples after its own write, and re-holds its row instead of
-        // reporting a delivery this write may have just clobbered.
-        unserializedWrites.set(sessionId, unserializedWriteCount(sessionId) + 1);
+        bypassed = true;
         options.onCeilingExpired?.(ceilingMs);
       }
     } else {
       await previousSettled;
     }
     const completesInMs = write();
+    // Count the bypass only once bytes actually went out: a degraded write that declined to
+    // write anything raced nobody. Placed straight after `write()` with NO await in between,
+    // so a delivery holding the line still cannot observe our bytes without also observing
+    // the bump when it re-samples after its own write.
+    if (bypassed && (options.wroteBytes?.() ?? true)) {
+      unserializedWrites.set(sessionId, unserializedWriteCount(sessionId) + 1);
+    }
     // Wait out the scheduled Enter. Zero means the write was fully synchronous
     // (`noEnter`), so there is nothing pending to wait for.
     if (completesInMs > 0) await clock.sleep(completesInMs);
@@ -357,6 +443,9 @@ export function submitToSession(
   // through the returned `current`.
   void tail.then(() => {
     if (chains.get(sessionId) === tail) chains.delete(sessionId);
+    // The session may now be quiescent — try to drop its degraded-write count too. Refused
+    // while a watch is open; that watch's release re-tries, so the second one wins.
+    evictBypassCountIfIdle(sessionId);
   });
 
   return current;
@@ -402,4 +491,14 @@ export function resetSubmissionChains(): void {
   chains.clear();
   unserializedWrites.clear();
   pendingOperators.clear();
+  bypassWatchers.clear();
+}
+
+/**
+ * How many sessions still carry a degraded-write count. Test/observability only — the
+ * assertion that {@link unserializedWrites} self-evicts rather than growing for the life of
+ * a Tower.
+ */
+export function bypassCountedSessions(): number {
+  return unserializedWrites.size;
 }

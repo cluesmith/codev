@@ -5,14 +5,14 @@
  * tower-routes.ts and tower-cron.ts.
  */
 
-import { trySubmitToSession, unserializedWriteCount, type SubmitClock } from './session-submit.js';
+import { trySubmitToSession, watchBypasses, type SubmitClock } from './session-submit.js';
 
 /** Minimal writable session interface — avoids coupling to PtySession. */
 export interface WritableSession {
   /**
    * Write input to the underlying PTY. Returns `false` when the write was dropped
    * (#1198: a shellper-backed session whose socket has died still reports status
-   * 'running', yet its writes silently no-op). {@link writeMessagePaced} threads this
+   * 'running', yet its writes silently no-op). {@link submitMessagePaced} threads this
    * boolean so a mailbox delivery whose bytes never reached the terminal is held, not
    * marked delivered (Spec 1313 integration review — the silent-loss finding).
    */
@@ -176,39 +176,43 @@ export async function submitMessagePaced<A>(
   }
 
   // The one thing the lock cannot stop is an operator submission whose wait ceiling expired
-  // and wrote anyway. Sample the session's degraded-write counter around our own submission:
+  // and wrote anyway. Watch the session's degraded-write counter across our own submission:
   // a bump means a `^C`/ESC bypassed us mid-write, so the composer may have been cleared or
   // truncated under our bytes. Cheaper and more direct than re-classifying the screen — and it
   // is the difference between re-holding the row and falsely reporting a delivery, which is
-  // the whole point of Issue #1365.
-  const bypassesBefore = unserializedWriteCount(session.id);
+  // the whole point of Issue #1365. The watch also pins the counter against eviction for
+  // exactly as long as we need to compare it; `finally` is what keeps that pin from leaking.
+  const bypasses = watchBypasses(session.id);
+  try {
+    let delivered = true;
+    let abort: A | null = null;
+    const tracked: WritableSession = {
+      write: (data: string): boolean => {
+        const ok = session.write(data);
+        if (!ok) delivered = false;
+        return ok;
+      },
+    };
 
-  let delivered = true;
-  let abort: A | null = null;
-  const tracked: WritableSession = {
-    write: (data: string): boolean => {
-      const ok = session.write(data);
-      if (!ok) delivered = false;
-      return ok;
-    },
-  };
+    const ran = await trySubmitToSession(
+      session.id,
+      () => {
+        abort = precheck();
+        if (abort !== null) return 0; // refused in-lock: not one byte goes out
+        return writeMessageToSession(tracked, message, noEnter);
+      },
+      clock,
+    );
 
-  const ran = await trySubmitToSession(
-    session.id,
-    () => {
-      abort = precheck();
-      if (abort !== null) return 0; // refused in-lock: not one byte goes out
-      return writeMessageToSession(tracked, message, noEnter);
-    },
-    clock,
-  );
-
-  if (!ran) return { status: 'contended' };
-  // Read through a cast: both flags are assigned inside the callback above, which
-  // TypeScript's flow analysis does not track back to this scope.
-  const refused = abort as A | null;
-  if (refused !== null) return { status: 'aborted', abort: refused };
-  if (!(delivered as boolean)) return { status: 'dropped' };
-  if (unserializedWriteCount(session.id) !== bypassesBefore) return { status: 'preempted' };
-  return { status: 'written' };
+    if (!ran) return { status: 'contended' };
+    // Read through a cast: both flags are assigned inside the callback above, which
+    // TypeScript's flow analysis does not track back to this scope.
+    const refused = abort as A | null;
+    if (refused !== null) return { status: 'aborted', abort: refused };
+    if (!(delivered as boolean)) return { status: 'dropped' };
+    if (bypasses.raced()) return { status: 'preempted' };
+    return { status: 'written' };
+  } finally {
+    bypasses.release();
+  }
 }

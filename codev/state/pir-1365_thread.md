@@ -161,3 +161,57 @@ from the public API without staging it (covered by `tower-routes.test.ts:1560`, 
 this change); and this fixture's agent is only ever a live terminal, never a registry-known
 builder, so a send after its death correctly 404s instead of exercising the
 hold-instead-of-404 seam.
+
+---
+
+## Review phase — two CMAP rounds, and the one that mattered was not mine
+
+**2026-08-18.** The protocol's own consultation lane came back gemini APPROVE / codex APPROVE /
+claude REQUEST_CHANGES. The architect independently ran a *second* CMAP against PR #1492 and got
+gemini APPROVE / **codex REQUEST_CHANGES** / claude REQUEST_CHANGES. Same model, opposite
+verdicts, on the same branch.
+
+The lesson I want a future builder to take from this: **my codex lane approved and it was
+wrong.** Two of the three lanes on the other CMAP converged, independently, on a real bug I had
+introduced — and the temptation, when one lane says APPROVE, is to treat the outlier as noise. I
+verified every finding against the code myself before acting on it. Both blocking ones were
+real. An APPROVE is not evidence that a finding is false; it is evidence that one reviewer did
+not find it.
+
+**The bug was my own D3 ceiling, and it was the classic shape: a fix that relocates its defect.**
+`OPERATOR_SUBMIT_WAIT_CEILING_MS` existed so `--interrupt` could not be stalled for minutes
+behind a long delivery. But `bounded` only asked "is anything in flight", never "*what kind* of
+writer is ahead" — so a second `--interrupt` could bypass a first one carrying a 48 KB body.
+Operator-vs-operator had been *fully* serialized since Spec 1273 (it is the `/clear` fusion bug),
+so my ceiling made exactly one pair strictly worse than the status quo, in a PR whose review doc
+claimed "never worse". Fixed in `ece06a5e` by tagging chain entries with a `SubmissionKind` and
+counting operators that are **queued** as well as in-flight — bypassing an operator that has not
+started yet is the same violation as bypassing one mid-write. The guarantee is now stated **per
+pair**, which is the only way it is true.
+
+The second blocking finding was the same class one layer out: a degraded interrupt still
+returned `delivered: true`. In a PR whose entire thesis is *a success signal must not lie*. That
+one stung. Fixed by surfacing `degraded` through `/api/send` → SDK → `afx send` rather than by
+un-claiming the row (un-claiming reopens double-delivery, which round 3 of the implement-phase
+CMAP had already settled).
+
+**Round 2 (this commit)** took the two non-blocking correctness notes and swept the doc claims.
+The counter-eviction one was the only part with real design content: `unserializedWrites` cannot
+self-delete on drain the way `chains` does, because it has to *outlive* the submission whose
+watcher is about to compare against it — a reset landing between a watcher's two reads reads as
+"nobody raced me", which is the precise false `delivered` this whole issue exists to kill. So
+eviction is interlocked with an explicit `watchBypasses` window and attempted from both ends
+(drain cleanup and last release), whichever runs second winning. That also avoids needing a
+session-teardown hook, which would have meant `terminal/` importing `agent-farm/` — a layer
+crossing not worth a memory nit.
+
+I refused two nits and said why in the rebuttal rather than quietly skipping them: cancelling the
+ceiling timer needs abort semantics on the injected `SubmitClock` that every test double
+implements, and the timing assertions are load-bearing (they are what makes "the escape hatch
+stays responsive" a testable claim instead of prose).
+
+Dispositions in `codev/projects/1365-serializer-convergence-route-m/1365-review-iter1-rebuttals.md`;
+the human-facing version, including the two files that fell outside the stated PR scope and the
+`codev/evidence/` placement the maintainer may veto, is in the review doc.
+
+Build clean (codev + sdk); full suite **4885 passed / 0 failed / 48 skipped**, 246 files.

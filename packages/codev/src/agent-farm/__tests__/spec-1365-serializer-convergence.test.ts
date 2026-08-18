@@ -29,6 +29,7 @@ import {
   pendingSubmissionSessions,
   resetSubmissionChains,
   unserializedWriteCount,
+  bypassCountedSessions,
   OPERATOR_SUBMIT_WAIT_CEILING_MS,
 } from '../servers/session-submit.js';
 import {
@@ -387,6 +388,74 @@ describe('Issue #1365 — deliveries decline contention, operators wait (bounded
     });
 
     expect(await delivery).toEqual({ status: 'preempted' });
+  });
+
+  it('a degraded write that writes NOTHING is not counted as a bypass', async () => {
+    // The delayed `^C` re-checks liveness INSIDE the lock and can legitimately return without
+    // writing a byte. Counting that as a bypass would hold and re-deliver a message that
+    // nothing actually raced — a duplicate charged for a race that never happened (claude
+    // review of PR #1492).
+    const c = makeComposer();
+    const expired: number[] = [];
+
+    const delivery = deliveryWrite(c.session, MULTILINE);
+    await sleep(5); // let the delivery take the lock
+    await submitToSession(
+      c.session.id,
+      () => 0, // the liveness re-check failed: no ^C, no bytes
+      undefined,
+      {
+        waitCeilingMs: 0, // give up at once — the degraded path
+        onCeilingExpired: (ms) => expired.push(ms),
+        wroteBytes: () => false,
+      },
+    );
+
+    expect(expired).toEqual([0]); // it DID give up waiting, and still says so
+    expect(unserializedWriteCount(c.session.id)).toBe(0); // but nothing bypassed the line
+    expect(await delivery).toEqual({ status: 'written' }); // so the delivery is not re-held
+    expect(c.submitted).toEqual([MULTILINE]);
+  });
+
+  it('the degraded-write counter is evicted once the session goes idle', async () => {
+    // `chains` and `pendingOperators` self-delete when they drain; this counter cannot, because
+    // it must outlive the submission whose watcher is about to compare against it. Left
+    // unevicted it would retain one entry per session that ever degraded, for the life of the
+    // Tower — the leak class #1472 fixed (claude review of PR #1492).
+    const c = makeComposer();
+
+    const delivery = deliveryWrite(c.session, MULTILINE);
+    await sleep(5);
+    await submitToSession(c.session.id, () => { c.session.write('\x03'); return 0; }, undefined, {
+      waitCeilingMs: 0,
+    });
+
+    expect(unserializedWriteCount(c.session.id)).toBe(1); // counted while it still matters
+    expect(await delivery).toEqual({ status: 'preempted' }); // and the watcher saw it
+    await sleep(0); // let the chain's drain cleanup run
+
+    expect(bypassCountedSessions()).toBe(0); // then it is gone, with no teardown hook
+    expect(pendingSubmissionSessions()).toBe(0);
+  });
+
+  it('eviction cannot land inside a watcher window and mask a race', async () => {
+    // The interlock that makes eviction safe: a watch pins the count. If the drain cleanup
+    // could reset it to 0 between the watcher's two reads, a raced delivery would read
+    // "nobody bypassed me" and report `written` — the exact false `delivered` this issue
+    // exists to eliminate. Two deliveries, both raced, both must report preempted.
+    const a = makeComposer('term-a');
+    const b = makeComposer('term-b');
+
+    const first = deliveryWrite(a.session, MULTILINE);
+    const second = deliveryWrite(b.session, MULTILINE);
+    await sleep(5);
+    await submitToSession(a.session.id, () => { a.session.write('\x03'); return 0; }, undefined, { waitCeilingMs: 0 });
+    await submitToSession(b.session.id, () => { b.session.write('\x03'); return 0; }, undefined, { waitCeilingMs: 0 });
+
+    expect(await first).toEqual({ status: 'preempted' });
+    expect(await second).toEqual({ status: 'preempted' });
+    await sleep(0);
+    expect(bypassCountedSessions()).toBe(0);
   });
 });
 

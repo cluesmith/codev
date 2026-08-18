@@ -1615,18 +1615,19 @@ function holdAndRespond(
   });
 }
 
+/** Machine-readable reason paired with `degraded: true` on an operator send response. */
+const DEGRADED_SUBMIT_REASON = 'submit-wait-ceiling-expired';
+
 /**
  * Announce that an operator submission gave up waiting for the per-terminal lock and wrote
  * unserialized (Issue #1365).
  *
- * This is the degraded path, and it is deliberately loud: below the ceiling an operator write
- * cannot interleave with a gated delivery, and above it we fall back to exactly the behaviour
- * that shipped before #1365 (an operator write that never waited). So the degradation is never
- * worse than the old status quo — but it used to be invisible, and now it is not.
+ * This is the degraded path, and it is deliberately loud. The ceiling arms only against a
+ * DELIVERY write (behind another operator the wait stays unbounded, as before #1365), so what
+ * expiry falls back to is exactly the pre-#1365 operator-vs-delivery behaviour: two disjoint
+ * locks, no serialization. That one pair is therefore no worse than the old status quo — but
+ * it used to be invisible, and now it is not, here and in the `degraded` flag on the response.
  */
-/** Machine-readable reason paired with `degraded: true` on an operator send response. */
-const DEGRADED_SUBMIT_REASON = 'submit-wait-ceiling-expired';
-
 function logCeilingExpired(
   ctx: RouteContext,
   action: string,
@@ -1774,6 +1775,10 @@ function handleDelayedSend(
           {
             waitCeilingMs: OPERATOR_SUBMIT_WAIT_CEILING_MS,
             onCeilingExpired: (waitedMs) => logCeilingExpired(ctx, 'delayed interrupt ^C', toAgent, terminalId, waitedMs),
+            // This is the one operator path whose write can be a NO-OP (the liveness re-check
+            // above). A degraded no-op raced nobody, so it must not bump the bypass counter —
+            // that would make a concurrent delivery hold and re-deliver for nothing.
+            wroteBytes: () => fired,
           },
         )
           .then(() =>

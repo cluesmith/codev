@@ -22,24 +22,32 @@ this is its implementation.
 
 Implementation:
 
-- `packages/codev/src/agent-farm/servers/session-submit.ts` (+288 / −33) — `trySubmitToSession`,
-  `isSubmissionInFlight`, `OPERATOR_SUBMIT_WAIT_CEILING_MS` + `SubmitOptions`,
-  `unserializedWriteCount`, and the rewritten boundary comment
+- `packages/codev/src/agent-farm/servers/session-submit.ts` — `trySubmitToSession`,
+  `isSubmissionInFlight`, `OPERATOR_SUBMIT_WAIT_CEILING_MS` + `SubmitOptions`, `SubmissionKind`
+  + `pendingOperators`, `unserializedWriteCount` / `watchBypasses`, and the rewritten boundary
+  comment
 - `packages/codev/src/agent-farm/servers/mailbox-delivery.ts` (+144 / −20) — `DeliverySession.id`,
   `WriteAbort` / `WriteResult`, the in-lock precheck, the outcome mapping
-- `packages/codev/src/agent-farm/servers/message-write.ts` (+110 / −24) — `submitMessagePaced`
+- `packages/codev/src/agent-farm/servers/message-write.ts` — `submitMessagePaced`
   (replaces `writeMessagePaced`), `PacedSubmitResult`
-- `packages/codev/src/agent-farm/servers/tower-routes.ts` (+105 / −38) — wait ceiling at the three
-  operator call sites, `logCeilingExpired`, updated scope comments
-- `packages/codev/src/agent-farm/servers/mailbox-wiring.ts` (+8 / −2) — binds the new write edge
+- `packages/codev/src/agent-farm/servers/tower-routes.ts` — wait ceiling at the three
+  operator call sites, `logCeilingExpired`, `degraded` on the send response, updated scope comments
+- `packages/codev/src/agent-farm/servers/mailbox-wiring.ts` — binds the new write edge
+- `packages/codev/src/agent-farm/commands/send.ts` — warns the sender on a degraded write
+- `packages/sdk/src/tower-client.ts` — `degraded` / `degradedReason` on the sendMessage result
+
+**Two of those are outside the 21-file scope this PR originally stated** (`commands/send.ts`
+and the SDK client), added by the review round below. They are the minimum needed to make a
+degraded operator write visible to the *sender* rather than only to the Tower log, which
+required crossing the server→client boundary. Flagged so the diff holds no surprises; the
+boundary rule itself is respected (`codev-sdk` still imports only `codev-types`).
 
 Tests:
 
-- `packages/codev/src/agent-farm/__tests__/spec-1365-serializer-convergence.test.ts` (+516 / −0) — new
-- `packages/codev/src/agent-farm/__tests__/spec-1313-paced-write-drop.test.ts` (+63 / −18) — re-pointed
-- `tower-routes.test.ts` (+8 / −2), `send-delivery.test.ts` (+19 / −8),
-  `send-mailbox-repro.test.ts` (+7 / −2), `cron-delivery.test.ts` (+8 / −3),
-  `send-architect-identity.test.ts` (+6 / −2) — fakes updated
+- `packages/codev/src/agent-farm/__tests__/spec-1365-serializer-convergence.test.ts` — new
+- `packages/codev/src/agent-farm/__tests__/spec-1313-paced-write-drop.test.ts` — re-pointed
+- `tower-routes.test.ts`, `send-delivery.test.ts`, `send-mailbox-repro.test.ts`,
+  `cron-delivery.test.ts`, `send-architect-identity.test.ts` — fakes updated
 
 Evidence + docs:
 
@@ -60,12 +68,18 @@ Evidence + docs:
 - `54d57008` [PIR #1365] Thread log: implement phase
 - `ee3a17df` [PIR #1365] dev-approval evidence: 4 scenarios against an isolated live Tower
 - `1483d65c` [PIR #1365] Thread log: dev-approval evidence
+- `ad824bf2` [PIR #1365] Review + retrospective
+- `ece06a5e` [PIR #1365] Fix codex/claude finding: kind-aware ceiling + report degraded writes
+- *(this commit)* [PIR #1365] Review round 2: byte-accurate bypass count, counter eviction,
+  claim-site sweep
 
 ## Test Results
 
 - `pnpm --filter @cluesmith/codev build`: ✓ pass
-- `pnpm --filter @cluesmith/codev test`: ✓ pass — **4879 passed / 0 failed / 48 skipped**,
-  246 files. 23 new tests in `spec-1365-serializer-convergence.test.ts`.
+- `pnpm --filter @cluesmith/codev-sdk build`: ✓ pass
+- `pnpm --filter @cluesmith/codev test`: ✓ pass — **4885 passed / 0 failed / 48 skipped**,
+  246 files. 28 new tests in `spec-1365-serializer-convergence.test.ts`, plus the degraded-
+  interrupt response test in `tower-routes.test.ts`.
 - **Manual verification** (dev-approval gate, human-approved): `afx dev` was not usable —
   4100 is shared by design and restarting the live Tower kills every builder session — so the
   running-worktree evidence was scripted against an **isolated Tower on port 14650** with real
@@ -125,6 +139,95 @@ current ten hot lessons, and promoting either would require *displacing* an exis
 Displacement at the cap is the maintainer's call, not a builder's — flagged here rather than
 taken unilaterally.
 
+## Review Round: two REQUEST_CHANGES, and what happened to each
+
+PIR's consultation is **single-pass** — there is no second automated round — so the human at
+the `pr` gate is the only remaining reviewer of these dispositions. They are written out in
+full rather than summarised.
+
+Two independent review sets ran, and they did not agree:
+
+| Reviewer | Protocol CMAP (`codev/projects/1365-.../`) | Architect's CMAP on PR #1492 |
+|---|---|---|
+| gemini | APPROVE | APPROVE |
+| codex | APPROVE | **REQUEST_CHANGES** |
+| claude | **REQUEST_CHANGES** | **REQUEST_CHANGES** |
+
+My own codex lane approved; the architect's codex lane found a real bug. I verified every
+finding against the code before acting on it, and **none was dismissed on the strength of
+another lane's APPROVE**. Both REQUEST_CHANGES lanes converged independently on the same two
+blocking findings.
+
+**Blocking 1 — the ceiling could bypass another *operator's* submission.** ACCEPTED, real,
+fixed in `ece06a5e`. `bounded` keyed only off "is anything in flight" without asking *what
+kind* of writer was ahead, so a second `--interrupt` could skip a first one carrying a long
+body after 2 s. Operator-vs-operator was **always** fully serialized before #1365
+(`submitToSession` had no ceiling at all — it is Spec 1273's `/clear` fusion bug), so my
+ceiling made that one pair strictly *worse* than the status quo. That also falsified this
+document's own "never worse" claim. Fix: chain entries carry a `SubmissionKind`, a
+`pendingOperators` count tracks operators **queued as well as in flight**, and the ceiling arms
+only when nothing ahead is an operator. Queued has to count — bypassing an operator that has
+not started yet is the same violation as bypassing one mid-write. Pinned by *"operator vs
+operator NEVER degrades"* and *"a THIRD operator does not bypass a QUEUED one"*. Note the
+pre-existing ceiling test needed its holder changed from an operator to a delivery: **that
+fixture change is the behaviour change**, not a workaround for it.
+
+**Blocking 2 — a ceiling-degraded `--interrupt` still reported unqualified success.**
+ACCEPTED, real, fixed in `ece06a5e`. The row is claimed `delivered` before the write, so a
+degraded interrupt returned `delivered: true` with only a Tower-side WARN — the same
+lying-success-signal class this whole issue exists to remove, relocated from the delivery path
+to the operator path. Claim-first is *kept* (un-claiming risks a double delivery, reasoned
+through at CMAP round 3 of the implement phase); what changed is that the truth is now
+surfaced: `/api/send` returns `degraded: true` + `degradedReason`, threaded through the SDK
+client and warned about by `afx send`. An indicator nobody surfaces is half a fix. Pinned by
+*"a body-bearing interrupt that crosses the wait ceiling reports degraded"* in
+`tower-routes.test.ts`.
+
+**Non-blocking, taken anyway (this commit):**
+
+- *The bypass counter was bumped on ceiling expiry regardless of whether bytes went out.* The
+  delayed `^C` re-checks `isStillLive()` / `writable` **inside** the lock and can return having
+  written nothing; that no-op was still counted, forcing a concurrent delivery into a spurious
+  `preempted` re-delivery. The counter answers "did bytes bypass the lock while I held it?", so
+  only bytes may bump it: `SubmitOptions.wroteBytes` is consulted straight after the write
+  callback, with no `await` in between, so the ordering guarantee the old placement provided is
+  unchanged. Pinned by *"a degraded write that writes NOTHING is not counted as a bypass"*.
+- *`unserializedWrites` was never pruned* — one entry per session that ever degraded, retained
+  for the life of the Tower. The leak class #1472 just fixed. It cannot self-delete on drain
+  the way `chains` and `pendingOperators` do, because it must **outlive** the submission whose
+  watcher is about to compare against it: a reset landing between a watcher's two reads would
+  read as "nobody raced me" — the exact false `delivered` this issue exists to eliminate. So
+  eviction is interlocked with an explicit `watchBypasses` window: refused while a watch is
+  open, attempted from *both* the chain's drain cleanup and the last watch's release, so
+  whichever runs second is the one that evicts and no ordering leaks. This needs **no
+  session-teardown hook** and therefore no `terminal/` → `agent-farm/` layer crossing. Pinned by
+  *"the degraded-write counter is evicted once the session goes idle"* and *"eviction cannot
+  land inside a watcher window and mask a race"*.
+- *Stale `{@link writeMessagePaced}`* in `message-write.ts` — repointed at `submitMessagePaced`.
+- *`DEGRADED_SUBMIT_REASON` was inserted between `logCeilingExpired`'s JSDoc and its function*,
+  orphaning the comment — moved above it.
+- *The residual "never worse than the status quo" claim-sites* — swept and rewritten to state
+  the guarantee **per pair** (op↔op unchanged and unbounded; op↔delivery serialized under the
+  ceiling and degraded to the old disjoint-lock behaviour above it; delivery↔delivery
+  unchanged). `arch.md` §7 item 5 and the `session-submit.ts` boundary comment were corrected in
+  `ece06a5e`; `tower-routes.ts`'s `logCeilingExpired` doc comment and the degraded-path inline
+  comment in this one.
+
+**Non-blocking, NOT taken — flagged instead:**
+
+- *The ceiling timer is not cancelled when the predecessor wins the race.* `Promise.race`
+  leaves a ≤2 s `setTimeout` pending whose resolution is then discarded. Cancelling it means
+  adding abort semantics to the injected `SubmitClock` interface, which every test double
+  implements. The cost of leaving it is one short-lived timer per *contended* operator
+  submission; the cost of fixing it is a broader interface change late in a review round. A
+  reviewer who disagrees should say so — it is a small change, just not a free one.
+- *`waited < 100` / `tickMs < 250` are timing-sensitive under CI load.* Real, and deliberate:
+  these are the assertions that make "the drainer does not stall" and "the escape hatch stays
+  responsive" *testable* claims rather than prose. Both have ≥2.5× headroom over the behaviour
+  they exclude. If they flake in CI, raising the bounds preserves the property.
+- *Hot-tier `arch-critical.md` was appended to directly, where the plan said it would be
+  proposed.* Disclosed below; it is the human's call, and reverting it is a one-line edit.
+
 ## Things to Look At During PR Review
 
 1. **The in-lock precheck's honest status.** With try-lock semantics the delivery never waits,
@@ -138,9 +241,13 @@ taken unilaterally.
 2. **The wait ceiling is a judgment call** (`OPERATOR_SUBMIT_WAIT_CEILING_MS = 2000`, human-
    ratified at the plan gate). It exists because `--interrupt` previously never waited, and a
    paced write runs `(lines−1)×10+80` ms against a body capped only by `parseJsonBody`'s
-   1 MiB — a 48 KB `--file` of short lines is ~8 minutes. Past the ceiling the operator write
-   proceeds unserialized, which is exactly the pre-#1365 behaviour, so it is never worse than
-   the old status quo — only no longer silent.
+   1 MiB — a 48 KB `--file` of short lines is ~8 minutes. It arms **only against a delivery
+   write**: behind another operator the wait stays unbounded, exactly as before #1365 (see the
+   review round above — a ceiling that could skip an operator made that pair strictly worse,
+   and that was a real blocking finding, not a hypothetical). So past the ceiling the operator
+   write falls back to precisely the pre-#1365 operator-vs-delivery behaviour — two disjoint
+   locks, no serialization — which is no worse for that pair, only no longer silent. The
+   guarantee is **per pair**, and the 2 s value itself remains a judgment call.
 3. **`preempted` trades a possible duplicate for never falsely reporting delivery.** A
    delivery raced by a ceiling-expired write holds its row instead of marking it delivered, so
    if the message *did* land intact the gate may deliver it again later. That is the same call
@@ -153,6 +260,14 @@ taken unilaterally.
 5. **`writeMessagePaced` was removed**, not deprecated — its only live caller was the mailbox
    wiring. Its drop-semantics test is re-pointed at `submitMessagePaced` so the #1198
    silent-loss guard stays on the live write edge rather than on a function nothing calls.
+6. **The dev-approval transcript is committed under `codev/evidence/`, a new directory.** That
+   placement is a deliberate choice, not an accident: the evidence is part of the PIR record
+   for this project, the way `codev/specs/`, `codev/plans/` and `codev/reviews/` are, and a
+   gate approved on evidence that then vanishes leaves the approval unauditable. It is
+   nonetheless a new top-level convention in the repo, and **the maintainer may veto it** —
+   moving or dropping the file changes nothing else in the PR (the generating script,
+   `packages/codev/scripts/spec-1365-e2e-evidence.mts`, is re-runnable and is the durable
+   artifact).
 
 **Interlock for #1481 (`--interrupt-after`)**: "interrupt, then deliver this body" is now
 expressible as ordered acquisitions of *one* lock rather than a race between two. Two
