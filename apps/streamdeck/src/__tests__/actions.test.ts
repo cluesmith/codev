@@ -701,6 +701,18 @@ describe('encoders', () => {
     expect(action.setFeedback.mock.calls.at(-1)?.[0]).toEqual({ title: 'Scroll', value: 'No builder' });
   });
 
+  it('ScrollNav empty state: rotation still relays the scroll verb with the workspace path — the half-live premise the bare "Scroll" rests on (#1505)', async () => {
+    const ctx = makeStore();
+    ctx.store.overview = { builders: [], pendingPRs: [], backlog: [], recentlyClosed: [] } as never;
+    const nav = new ScrollNav(ctx.store);
+    // The press is inert with nothing selected, but rotation is NOT: relaying `scroll` needs
+    // only the workspace path, never a builder. If a future edit early-returns onDialRotate on
+    // no builder (mirroring onDialDown), the dial goes fully inert and the bare "Scroll" line 1
+    // becomes a lie — this guard fails first.
+    await nav.onDialRotate(dial(1) as never);
+    expect(ctx.sent).toEqual([{ verb: 'scroll', args: [{ to: 'down', by: 'line', value: 3, revealCursor: false }], ws: '/work/alpha' }]);
+  });
+
   it('ScrollNav re-renders line 2 on a store change (subscription wired)', () => {
     const ctx = makeStore();
     const action = { isDial: () => true, setFeedback: vi.fn() };

@@ -43,7 +43,15 @@ async function ack(action: KeyAction, ok: boolean): Promise<void> {
 
 // ── Verb keypads ──────────────────────────────────────────────────────────
 
-/** A keypad that fires one canonical verb (overridable via settings). */
+/**
+ * A keypad that fires one canonical verb (overridable via settings).
+ *
+ * VerbKey keys have no RUNTIME face: this base never calls `setImage`, so the key's manifest
+ * `Image` IS its hardware face (#1459). Subclasses that need a composed face (an icon plus a
+ * label, e.g. DevServerAction) render it themselves in `onWillAppear`, and for those the
+ * manifest image is only the placeholder the deck shows until that first render lands. So an
+ * unstyled VerbKey shows its static manifest icon; a compositing one overwrites it on appear.
+ */
 abstract class VerbKey extends SingletonAction<VerbSettings> {
   protected abstract readonly defaultVerb: string;
   constructor(protected readonly store: CodevStore) {
