@@ -29,6 +29,26 @@ run repeats.
 
 ---
 
+## ADDENDUM (2026-08-19, after pass 3) — a constraint stated below is FALSE
+
+The section that follows says the subject's porch "will not emit a refresh task" and that Option B
+"skips porch entirely". **Both are wrong, and pass 3 disproved them.**
+
+What is true: the *installed* porch (3.3.0) predates this feature and cannot emit. But `porch` is
+driveable by path exactly as `afx` is —
+
+```bash
+node /Users/mwk/Development/cluesmith/codev/.builders/spir-1470/packages/codev/bin/porch.js next <id>
+```
+
+— so the feature porch emits refresh tasks at real boundaries with **no Tower restart**. Pass 3 did
+exactly that on a real ASPIR project and closed both of spec test 37's remaining clauses.
+
+The original framing was mine and it removed a cheaper, more complete option from consideration for
+two rounds. It is corrected here rather than deleted, because the text below is what the first two
+passes were actually run against, and a runbook that quietly rewrites its own history is worse than
+one carrying a correction.
+
 ## HOW THE SUBJECT LANE RUNS THE FEATURE BUILD — decided: OPTION B
 
 Per the subject builder's *installed* `@cluesmith/codev` (3.3.0) predating this feature, its

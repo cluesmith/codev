@@ -216,6 +216,34 @@ while phase 2 had, by execute time, been finished. The subject noticed and rewro
 reader following the stale text would have re-implemented completed work** — which is exactly the
 harm the refresh exists to prevent, produced by the refresh itself.
 
+### The same gap breaks stall visibility, and that is worse
+
+Found by Claude reading the pass-3 timeline, and it is the more serious half.
+
+```
+15:06:40  boundary recorded, refresh task emitted
+15:08:01  acknowledged_at SET          ← the builder ran `porch next` again
+15:12:01  the clear
+```
+
+Between the emission and the clear, the builder went round the loop again — a refusal, an
+escalation, an authorization — and **each `porch next` acknowledged the boundary**. So by the time
+the clear happened, the record already read *acknowledged*.
+
+Now suppose the re-entry had been lost. `porch status` would have shown a healthy, acknowledged
+boundary and flagged **nothing** — while a cleared builder sat idle. That is precisely the
+invisible-stall case the marker was built for, and the marker would have been looking the other way.
+
+Phase 6's own doc comment states the honest reading — *"no builder has asked for work since this
+boundary was recorded"* — and that reading is exactly what fails here: a builder asked for work
+**before** clearing, which the acknowledgment cannot distinguish from asking for work **after**.
+The comment was right about what the signal means and I did not notice the case where what it means
+is not what it is used for.
+
+Same root as the staleness gap: the `--begin` → execute window is where the model assumes nothing
+happens, and both real live runs put real events in it. That window is the thing to fix, and fixing
+it plausibly addresses both.
+
 ### What shipped, and what did not
 
 **Shipped**: the boundary save request now tells the builder, in as many words, that if work
@@ -419,11 +447,13 @@ Confirmed out of scope for this project; none block the PR.
    re-emits implement tasks and resets `build_complete`. Running `done` again, then `next`
    separately, works. The tell is in `done`'s own output: "Ready for 2-way review" resets, "Ready
    for verification" advances. Hit twice, worked around both times.
-9. **Save staleness between `--begin` and execute** — the gates check that a save is authentic,
-   substantive, settled and in-window, and nothing checks that it is still *accurate*. Observed in
-   pass 3; mitigated in this PR by instruction only. Needs design (what counts as stale) before it
-   gets a mechanism — see *A hole in the central guarantee* above. **The most important item on
-   this list.**
+9. **The `--begin` → execute window** — two distinct defects with one root, and **the most important
+   item on this list**. (a) *Save staleness*: the gates check a save is authentic, substantive,
+   settled and in-window; nothing checks it is still accurate. (b) *False acknowledgment*: a
+   `porch next` inside that window marks the boundary acknowledged before the clear, so a lost
+   re-entry would leave `porch status` showing health while a cleared builder sits idle — the
+   invisible-stall case the marker exists for. Both observed live in pass 3. (a) is mitigated in
+   this PR by instruction; (b) is not mitigated at all. See *A hole in the central guarantee*.
 10. **Task-lane `afx` replies to the architect were silently lost** during the live runs — the
    subject's `STATE WRITTEN` / `STATE UPDATED` notices and its first probe answer never arrived,
    while every *file* action it took executed correctly. So the lane's file side worked and its

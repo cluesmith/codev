@@ -40,6 +40,14 @@ const runbook = (): string => fs.readFileSync(path.join(repoRoot, RUNBOOK), 'utf
  */
 const flowed = (): string => runbook().replace(/\s+/g, ' ');
 
+/**
+ * Whitespace-flowed AND stripped of markdown emphasis. A claim written as
+ * `*installed* porch` is the same claim as `installed porch`, and a test that
+ * fails on the asterisks punishes formatting rather than checking content —
+ * the same mistake as failing on a line wrap.
+ */
+const plain = (): string => flowed().replace(/[*_`]/g, '');
+
 describe('live-run runbook accuracy', () => {
   it('exists — the phase is blocked without it', () => {
     expect(fs.existsSync(path.join(repoRoot, RUNBOOK))).toBe(true);
@@ -152,9 +160,19 @@ describe('live-run runbook accuracy', () => {
     expect(flowed().toLowerCase()).toContain('disposable');
   });
 
-  it('tells the architect the subject porch will not emit refresh tasks', () => {
-    // The correction the architect supplied. Without it the runbook would have
-    // an architect waiting at a boundary for a task that can never arrive.
-    expect(flowed()).toMatch(/will not emit|does not emit|predates this feature/i);
+  it('distinguishes the INSTALLED porch from the feature build', () => {
+    // This test used to assert only that the runbook said the subject's porch
+    // "will not emit refresh tasks" — which pinned a FALSE constraint. Only the
+    // *installed* porch cannot emit; the feature build is driveable by path and
+    // pass 3 proved it, closing two spec clauses with no Tower restart.
+    //
+    // A test that enforces its author's mistaken framing is worse than no test:
+    // it makes the error durable and gives the next reader a reason to trust it.
+    const text = plain();
+    expect(text).toMatch(/installed porch/i);
+    // And the correction must be present, so the false framing can never stand
+    // alone again.
+    expect(text).toMatch(/ADDENDUM/);
+    expect(text).toMatch(/porch\.js next/);
   });
 });

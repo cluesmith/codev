@@ -1683,3 +1683,43 @@ cheap HEAD-moved guard, for three reasons worth keeping:
 Filed as a follow-up and written up in the review under its own heading rather than buried in the
 list, because it deserves to be found as an issue rather than as a paragraph in someone else's
 review. It is the most important follow-up on the list.
+
+## Phase 8 iter-2 — Codex REQUEST_CHANGES (2), Claude APPROVE (2 non-blocking). All four taken.
+
+**Codex 1 — the simulation never drove the orchestrator.** Plan line 630 says the simulation drives
+"`next()` and the orchestrator together with fake ports". Mine drove only `next()`; on a refresh task
+it recorded and moved on. So it would have passed unchanged if every refresh failed verification,
+never scheduled a re-entry, or never cleared. New `spec-1470-integration.test.ts` composes them, with
+the Phase 3 fakes EXTRACTED and imported rather than re-declared. Mutation-checked against all three
+scenarios Codex named plus a dropped byte floor — every one fails now.
+
+Three defects in that test while writing it, all from guessing a shape instead of reading it:
+`.step` vs `.name` on the step log; `.failure?.code` on a plain string union (so the assertion meant
+to surface an abort reported "no failure" while the run HAD aborted); and a missing
+`buildResumeNotice` that made every refresh abort at `assembly-failed`. The middle one is the worst
+kind — a diagnostic that lies in the reassuring direction.
+
+**Codex 2 — arms under-asserted.** Pinned exact boundary sets on the gated and ASPIR arms, not just
+the pre-approved one. Doing so exposed that my ASPIR arm PRE-APPROVED its artifacts, so it took the
+skip path and never exercised the no-gate direct advance — ASPIR's distinguishing feature and the
+site the arm exists for. Now ungated; all five boundaries pinned.
+
+**Claude 1 (item 25) — the acknowledgment fired 4 minutes BEFORE the clear.** Pass-3 timeline:
+boundary 15:06:40, acknowledged 15:08:01, clear 15:12:01. The refusal/escalation round-trip meant the
+builder ran `porch next` inside the window, acknowledging the boundary before it was cleared. **Had
+the re-entry been lost, `porch status` would have flagged nothing** — the invisible-stall case the
+marker exists for.
+
+Phase 6's own comment states the honest reading ("no builder has asked for work since this boundary
+was recorded") and that is exactly what fails: asking for work BEFORE the clear is indistinguishable
+from asking after. I wrote down what the signal means and did not notice the case where what it means
+is not what it is used for. Same root as staleness — the `--begin`→execute window is where the model
+assumes nothing happens, and both live runs put real events there. Recorded as ONE follow-up with one
+root; staleness is mitigated by instruction, this is not mitigated at all.
+
+**Claude 2 (item 26) — my own test had fossilised my error.** The runbook says the subject's porch
+"cannot emit refresh tasks"; pass 3 disproved it, and `spec-1470-runbook-accuracy.test.ts` was
+PINNING the false framing. A test that enforces its author's mistaken belief is worse than no test:
+it makes the error durable and gives the next reader a reason to trust it. Corrected by addendum
+rather than rewrite, since the original text is what passes 1 and 2 were run against — a runbook that
+quietly rewrites its own history is worse than one carrying a correction.

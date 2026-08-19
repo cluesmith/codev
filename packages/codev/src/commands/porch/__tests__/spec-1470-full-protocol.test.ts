@@ -292,6 +292,20 @@ describe('spec test 36 — one refresh per declared boundary across a full proto
       gated.boundaries,
       'a gate a human actually approved must fire, unlike a skip',
     ).toContain(enterBoundary('plan'));
+
+    // The gated path reaches ALL FIVE boundaries, so it is where the full
+    // transition-site set gets pinned. Checking only `enter:plan` would let
+    // `enter:implement`, either plan-phase advance, or the review boundary
+    // disappear without a failure.
+    expect([...gated.boundaries].sort()).toEqual(
+      [
+        enterBoundary('plan'),
+        enterBoundary('implement'),
+        planPhaseBoundary('phase_b'),
+        planPhaseBoundary('phase_c'),
+        enterBoundary('review'),
+      ].sort(),
+    );
   });
 
   it('emits no refresh at all for a protocol declaring none', async () => {
@@ -319,23 +333,31 @@ describe('spec test 36 — one refresh per declared boundary across a full proto
     // ASPIR has no spec/plan gates, so it reaches later phases through the
     // no-gate transition site rather than the gate-approved one. ASPIR's
     // inclusion was explicitly endorsed at the spec gate.
+    // NOT pre-approved, deliberately. With approval frontmatter ASPIR takes the
+    // pre-approval SKIP — the same path the first arm already covers — and the
+    // no-gate direct-advance site, which is ASPIR's distinguishing feature, goes
+    // untested. Without it, ASPIR has no gates to park at and advances directly,
+    // which is the site under test.
     writeProtocol(root, aspirLike());
-    writeApprovedSpec(root);
-    writePlan(root, PLAN_PHASES, true);
+    writePlan(root, PLAN_PHASES, false);
     writeState(root, baseState({ protocol: 'fixture-aspir', phase: 'specify' }));
 
     const { boundaries, hitCeiling, finalStatus } = await drive();
 
     expect(hitCeiling).toBe(false);
     expect(finalStatus, 'the ASPIR arm must also reach completion').toBe('complete');
-    // The floor comes FIRST and deliberately. "No duplicates" is satisfied by
-    // an empty run, so without this the ASPIR arm would pass while testing
-    // nothing — which is exactly how the gated arm of the test above failed
-    // silently until a positive expectation was pinned there too.
-    expect(boundaries.length, 'ASPIR run fired no boundaries at all').toBeGreaterThan(0);
-    const counts = new Map<string, number>();
-    for (const b of boundaries) counts.set(b, (counts.get(b) ?? 0) + 1);
-    expect([...counts.entries()].filter(([, n]) => n > 1)).toEqual([]);
+    // Pinned exactly, like the other arms. "At least one, no duplicates" would
+    // pass with `enter:implement` or either plan-phase advance missing — which
+    // is precisely the ungated-site behaviour this arm exists to cover.
+    expect([...boundaries].sort()).toEqual(
+      [
+        enterBoundary('plan'),
+        enterBoundary('implement'),
+        planPhaseBoundary('phase_b'),
+        planPhaseBoundary('phase_c'),
+        enterBoundary('review'),
+      ].sort(),
+    );
   });
 });
 

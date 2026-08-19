@@ -49,98 +49,22 @@ import {
 } from '../commands/reset/constants.js';
 import { nonceMarker } from '../commands/reset/receipt.js';
 import type { ResolvedBuilderContext } from '../commands/reset/context.js';
+import {
+  FakeClock,
+  FakeFs,
+  FakeGit,
+  FakeTerminal,
+  NONCE,
+  WORKTREE,
+  makeContext,
+} from './helpers/spec-1470-fakes.js';
 
 // ---------------------------------------------------------------------------
 // Fakes
 // ---------------------------------------------------------------------------
 
-const WORKTREE = '/tmp/fake-worktree';
-const NONCE = 'abc123def456';
-
-class FakeFs implements SelfRefreshFsPort {
-  files = new Map<string, string>();
-  /** Paths whose write() should throw, to exercise the R1 failure. */
-  failWrites = new Set<string>();
-  /** Paths whose remove() should throw. */
-  failRemoves = new Set<string>();
-
-  sizeOf(path: string): number | null {
-    const v = this.files.get(path);
-    return v === undefined ? null : Buffer.byteLength(v, 'utf-8');
-  }
-  read(path: string): string | null {
-    return this.files.get(path) ?? null;
-  }
-  write(path: string, content: string): void {
-    if (this.failWrites.has(path)) throw new Error(`simulated write failure: ${path}`);
-    this.files.set(path, content);
-  }
-  remove(path: string): void {
-    if (this.failRemoves.has(path)) throw new Error(`simulated remove failure: ${path}`);
-    this.files.delete(path);
-  }
-  exists(path: string): boolean {
-    return this.files.has(path);
-  }
-}
-
-class FakeClock implements SelfRefreshClockPort {
-  t = 1_000;
-  now(): number {
-    return this.t;
-  }
-  async sleep(ms: number): Promise<void> {
-    this.t += ms;
-  }
-}
-
-class FakeTerminal implements SelfTerminalPort {
-  scheduled: Array<{ message: string; delaySeconds: number }> = [];
-  raw: string[] = [];
-  failSchedule = false;
-  failRaw = false;
-
-  async scheduleReentry(message: string, delaySeconds: number): Promise<void> {
-    if (this.failSchedule) throw new Error('simulated Tower unreachable');
-    this.scheduled.push({ message, delaySeconds });
-  }
-  async sendRaw(text: string): Promise<void> {
-    if (this.failRaw) throw new Error('simulated PTY write failure');
-    this.raw.push(text);
-  }
-}
-
-class FakeGit implements SelfGitPort {
-  dirty = false;
-  hasUncommittedTrackedChanges(): boolean {
-    return this.dirty;
-  }
-}
-
-function makeContext(overrides: Partial<ResolvedBuilderContext> = {}): ResolvedBuilderContext {
-  return {
-    builderId: 'spir-1470',
-    worktree: WORKTREE,
-    branch: 'builder/spir-1470',
-    protocol: 'spir',
-    protocolSource: 'status.yaml',
-    mode: 'strict',
-    modeSource: 'builder-prompt',
-    harnessName: 'claude',
-    harness: {} as ResolvedBuilderContext['harness'],
-    porch: {
-      projectId: '1470',
-      projectName: 'automatic-builder-context-refr',
-      phase: 'implement',
-    } as ResolvedBuilderContext['porch'],
-    specName: '1470-automatic-builder-context-refr',
-    specPath: 'codev/specs/1470-automatic-builder-context-refr.md',
-    planPath: 'codev/plans/1470-automatic-builder-context-refr.md',
-    issueNumber: '1470',
-    ...overrides,
-  } as ResolvedBuilderContext;
-}
-
+// Fakes live in ./helpers/spec-1470-fakes.ts so the porch↔orchestrator
+// integration test drives the same ones these unit tests do.
 /** A spawn prompt that satisfies R3's required markers. */
 const buildSpawnPrompt = (): string => 'FULL SPAWN PROMPT BODY';
 const buildResumeNotice = (id: string): string => `## RESUME SESSION\n\nRun porch next for ${id}.`;
