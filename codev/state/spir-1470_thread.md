@@ -1491,3 +1491,52 @@ the gap was in this file's claim about itself, which is its own kind of defect.
 artifacts carry approval frontmatter, because porch takes the pre-approval skip. That is the human's
 SUPPRESS ruling working end to end, and it is now asserted as a PAIR with the gate-approved case in
 one test, so neither half can be "fixed" without confronting the other.
+
+## Phase 8 — re-entry delivery, measurements, runbook
+
+**Spec tests 34/35** (`spec-1470-reentry-delivery.test.ts`, 8 tests) against a real
+file-backed SQLite DB seeded from the production schema. File-backed matters: a restart is
+simulated by closing and reopening the connection, which an in-memory DB cannot express —
+it would vanish on close and the test would prove the opposite of its claim. Mutation-checked
+two ways (ignore `not_before`; make `markDelivered` a no-op), 4 and 1 failures respectively.
+
+**Boundary-save measurement — the evidence Phase 3 promised, and it does not say what Phase 3
+expected (item 21).** Phase 3 retained the 1000-byte floor and promised Phase 8 would "confirm
+they clear it without padding; if they cluster at the floor, revisit". They do not cluster —
+they straddle:
+
+| Sample | Bytes | vs floor |
+|---|---:|---|
+| Real save for THIS project at `enter:review` | 2952 | 3.0× — clears easily |
+| Constructed terse save, small project | 634 | 0.6× — **would be rejected** |
+
+**Not lowering the floor**, and the order of reasons matters. (1) **Baked Decision 4 forbids
+it** — the auto path must be *more* conservative than the manual one, and lowering the
+substance gate inverts that. A builder does not relitigate a Baked Decision because a
+measurement came out inconvenient. (2) The failure is safe: a rejected save means no clear, so
+the builder loses the refresh, not its memory. (3) The floor self-selects roughly right — small
+saves come from projects carrying little context, which need refreshing least. Reason 3 is
+post-hoc and I have labelled it as such; reason 1 is the reason.
+
+Flagged to the architect as a decision, with evidence in `measurements/`. The terse sample is
+**constructed, not observed** — one real point and one plausible one is thin for a threshold,
+and the live run supplies real ones. `MIN_ALLOWED_MIN_BYTES = 200` already permits a lower
+operator-set floor with no code change, so nothing needs building — only deciding.
+
+**Runbook written** with the preflight the architect asked for, and it caught a real defect in
+itself: I named the challenge file `.builder-challenge.json`; it is `.builder-refresh-challenge`.
+The cleanup step would have silently left a stale challenge in place — the exact state the
+boundary binding defends against — while the architect believed it was cleared.
+
+So the runbook's facts are now pinned to the constants by `spec-1470-runbook-accuracy.test.ts`
+(item 22): filenames, `--boundary` on every printed invocation, the blocking language, the
+disposable-subject warning, and the architect's own correction that the subject's installed
+porch cannot emit refresh tasks. **This document is the only one in the project that gets RUN
+rather than read**, by a human, by hand, against a builder whose context the procedure destroys
+on purpose — a wrong path in it does not go red, it produces an architect typing a command that
+does nothing one step before a clear.
+
+Two of my assertions in that test were themselves brittle and had to be fixed: one treated a
+prose mention of the command as an invocation (which would force flags into English sentences),
+and one asserted a sentence that Markdown had wrapped across a line break (which would fail on
+re-wrapping rather than on a changed claim).
