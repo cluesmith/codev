@@ -40,7 +40,8 @@ moved on. That guard has been silently disabled twice by an instruction that dro
 flag, which is why this document deliberately does not restate the commands.
 
 If you arrived here without a porch task — an architect-directed refresh, say — there is no
-boundary to bind, and the flagless form is correct.
+boundary to bind, and the flagless form is correct. Run `afx self-refresh --help` for the
+exact spelling rather than guessing it.
 
 ### 2. Write your working state
 
@@ -88,6 +89,7 @@ untouched. One does not. Read which you got.
 | Tower is not running, or did not schedule the re-entry | Clearing would strand you, so it refused |
 | challenge missing / already consumed / for a different boundary | Run the begin step again |
 | invalid parameters | A flag is out of range — nothing was read or written |
+| challenge could not be marked consumed | Nothing was cleared, but a re-entry **is** already queued and will arrive; ignore it. Retrying queues a second one |
 
 For any of these: **report it and carry on.**
 

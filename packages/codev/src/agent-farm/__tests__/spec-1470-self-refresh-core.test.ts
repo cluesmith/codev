@@ -300,6 +300,15 @@ describe('happy path', () => {
     expect(terminal.scheduled[0].message).toMatch(/not an architect instruction/i);
     // And it still carries the re-orientation itself.
     expect(terminal.scheduled[0].message).toMatch(/porch next/);
+
+    // Spec test 32 over a REAL assembled payload, not a synthetic one: the
+    // frame elements were otherwise guaranteed only indirectly, by
+    // assembleReorientation's own marker check. Two lines to assert them where
+    // the builder actually receives them.
+    const scheduled = terminal.scheduled[0].message;
+    for (const element of ['You are a Builder', 'spir', 'builder/spir-1470', WORKTREE]) {
+      expect(scheduled, `scheduled frame must carry: ${element}`).toContain(element);
+    }
   });
 
   it('schedules the re-entry BEFORE clearing — the inversion of /arch-save', async () => {

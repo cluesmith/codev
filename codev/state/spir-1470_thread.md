@@ -553,9 +553,18 @@ sits between here and there. **Do not write the review without walking this list
      stability gate already catches.
    - `extractPlanPhases` silently invents a `phase_1` for a plan with no phases JSON.
    - `codev/protocols/spir/protocol.json`'s `$schema` path does not resolve (Phase 7 fixes).
-   - **Phase 7 stale-`--delay`-doc list is FOUR files + one more**: `cli.ts:455`, the four
-     `arch-save/SKILL.md` copies, AND `types.ts`'s `SendOptions.delay` comment. I had missed the
-     last one.
+   - **Phase 7 stale-`--delay`-doc list, VERIFIED by grep (6 locations)**:
+     1. `packages/codev/src/agent-farm/cli.ts:455` — "dropped if Tower restarts"
+     2. `packages/codev/src/agent-farm/types.ts:170` — "Not persisted — a Tower restart drops
+        pending sends." (claude found this; my earlier list missed it)
+     3. `.claude/skills/arch-save/SKILL.md`
+     4. `.codex/skills/arch-save/SKILL.md`
+     5. `codev-skeleton/.claude/skills/arch-save/SKILL.md`
+     6. `codev-skeleton/.codex/skills/arch-save/SKILL.md`
+     FALSE POSITIVES to skip — a bare "not persisted" grep also hits `tower-types.ts:78`
+     (architect entries in state.db), `reset/context.ts:14,637` (MODE is not persisted), and
+     `skill-creator/references/schemas.md:201` (subagent token counts). None concern `--delay`.
+     Match on the DELAY claim, not the phrase.
 11. **LESSON, architect-routed to `lessons-learned.md` (COLD tier)** — it sharpens the existing HOT
    lesson "'tests pass' is not 'it works'" by supplying a MECHANISM and a CURE rather than a
    warning:
@@ -1235,3 +1244,18 @@ back into reassurance. Rewritten to separate pre-clear refusals (context intact,
 Missing planned deliverable `spec-1470-reentry-frame.test.ts` now exists: 11 tests covering the
 marker, frame preservation, four-way skill parity, byte-identity, the deferral (no hand-written
 invocations in the skill), and a repo-wide .claude/.codex pairing guard.
+
+### Phase 5 iter2: BOTH APPROVE — first clean pair of the project
+
+Codex APPROVE (no issues). Claude APPROVE (3 non-blocking suggestions, all taken):
+- `challenge-burn-failed` added to the skill's refusal table, noting a re-entry is ALREADY queued by
+  that point so retrying queues a second.
+- The flagless/architect-directed case now points at `afx self-refresh --help` rather than leaving
+  the reader to guess a spelling the skill deliberately does not restate.
+- Spec test 32 now asserts frame elements against a REAL assembled payload, not a synthetic one —
+  they were previously guaranteed only indirectly via assembleReorientation's marker check.
+
+**FOR THE PHASE 8 OBSERVATION CHECKLIST** (claude): the discriminator adds ~7 lines to the inline
+payload, and `reorient.ts` documents that inline is kept compact because multi-line writes are PACED
+(#584). Marginal against an already ~25-line frame, but it only shows up when a real message goes
+down a real PTY — so watch the delivery during the live run rather than guessing now.
