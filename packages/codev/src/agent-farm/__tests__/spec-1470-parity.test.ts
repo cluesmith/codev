@@ -28,6 +28,19 @@ import path from 'node:path';
 import { copyProtocols } from '../../lib/scaffold.js';
 
 const repoRoot = path.resolve(__dirname, '../../../../../');
+
+/**
+ * `release` is ours and only ours: it is the procedure for cutting a Codev
+ * release, referenced from CLAUDE.md, and adopters have no use for it. It is
+ * also `.md`-only — it carries no `protocol.json`.
+ *
+ * Allowlisted rather than fixed. The asymmetry pre-dates this project and
+ * correcting it (either by shipping our release process to adopters or by
+ * deleting it) is a decision this phase has no standing to make. What the
+ * allowlist buys is that the test fails on a NEW asymmetry, which is the
+ * condition worth catching.
+ */
+const CODEV_ONLY = new Set(['release']);
 const read = (rel: string) => fs.readFileSync(path.join(repoRoot, rel), 'utf-8');
 const exists = (rel: string) => fs.existsSync(path.join(repoRoot, rel));
 
@@ -36,19 +49,6 @@ const exists = (rel: string) => fs.existsSync(path.join(repoRoot, rel));
 // ---------------------------------------------------------------------------
 
 describe('protocol parity between codev/ and codev-skeleton/', () => {
-  /**
-   * `release` is ours and only ours: it is the procedure for cutting a Codev
-   * release, referenced from CLAUDE.md, and adopters have no use for it. It is
-   * also `.md`-only — it carries no `protocol.json`.
-   *
-   * Allowlisted rather than fixed. The asymmetry pre-dates this project and
-   * correcting it (either by shipping our release process to adopters or by
-   * deleting it) is a decision this phase has no standing to make. What the
-   * allowlist buys is that the test fails on a NEW asymmetry, which is the
-   * condition worth catching.
-   */
-  const CODEV_ONLY = new Set(['release']);
-
   const protocolDirs = (tree: string) =>
     fs
       .readdirSync(path.join(repoRoot, tree, 'protocols'), { withFileTypes: true })
@@ -97,18 +97,28 @@ describe('protocol.json $schema references', () => {
    * schema only at `protocols/`, while the skeleton also has a root-level copy.
    * So the invariant worth pinning is "it resolves", not "the string matches".
    */
+  /**
+   * Enumerated WITHOUT filtering on existence. Skipping absent files would make
+   * a deleted `protocol.json` shrink this suite instead of failing it — the
+   * quiet failure mode where coverage evaporates and the run still goes green.
+   * `release` is excluded by name (it is `.md`-only), so every remaining
+   * directory is required to carry one.
+   */
   const cases = ['codev', 'codev-skeleton'].flatMap(tree =>
     fs
       .readdirSync(path.join(repoRoot, tree, 'protocols'), { withFileTypes: true })
-      .filter(e => e.isDirectory())
-      .map(e => `${tree}/protocols/${e.name}/protocol.json`)
-      .filter(rel => exists(rel)),
+      .filter(e => e.isDirectory() && !CODEV_ONLY.has(e.name))
+      .map(e => `${tree}/protocols/${e.name}/protocol.json`),
   );
 
   it('covers every protocol.json in both trees', () => {
-    // Guards the enumeration itself: a glob that silently matches nothing would
-    // make every assertion below vacuously pass.
+    // Guards the enumeration itself: an enumeration that silently matched
+    // nothing would make every assertion below vacuously pass.
     expect(cases.length).toBeGreaterThanOrEqual(18);
+  });
+
+  it.each(cases)('%s exists', rel => {
+    expect(exists(rel), `${rel} is missing — coverage would have shrunk silently`).toBe(true);
   });
 
   it.each(cases)('%s resolves its $schema to a real file', rel => {
@@ -197,9 +207,16 @@ describe('--delay persistence documentation', () => {
    */
   const delayRegion = (rel: string): string => {
     const text = read(rel);
-    if (rel.endsWith('SKILL.md')) return text;
     const lines = text.split('\n');
-    const anchor = lines.findIndex(l => /--delay|SendOptions|\bdelay\?:/.test(l));
+    // Every entry gets a scoped region, including skills. Falling back to a
+    // whole-file scan for `SKILL.md` would leave the false-positive hole open
+    // for whatever skill is added to LIVE_DOCS next — the protection has to be
+    // a property of the helper, not of today's file list.
+    const anchor = lines.findIndex(l =>
+      rel.endsWith('SKILL.md')
+        ? /Delayed sends/.test(l)
+        : /--delay|SendOptions|\bdelay\?:/.test(l),
+    );
     expect(anchor, `${rel}: found no --delay/SendOptions anchor to scope the scan to`).toBeGreaterThan(-1);
     return lines.slice(Math.max(0, anchor - 6), anchor + 20).join('\n');
   };

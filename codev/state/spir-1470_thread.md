@@ -1421,3 +1421,34 @@ review, caught it.** The discipline is earning its cost.
 Also accepted: stale-phrase scan narrowed to each file's delay-describing region (a blanket scan
 would fail on an unrelated legitimate "not persisted", and point at the wrong thing), and a
 cross-reference recording that spec test 39 is covered jointly with the Phase 1 boundary-config test.
+
+### Phase 7 iteration 2 — both APPROVE
+
+Codex: APPROVE, none. Claude: APPROVE, three minors. Took two, recorded one as a follow-up.
+
+**Minor 3 was the same disease as the vacuous test, in a new place.** My `$schema` enumeration
+filtered out non-existent files, so deleting a `protocol.json` would have *shrunk* the suite rather
+than failing it — coverage evaporating while the run stayed green. Now `release` is excluded by name
+(it is `.md`-only) and every remaining directory is *required* to carry one. Mutation-checked:
+removing `codev-skeleton/protocols/spike/protocol.json` now fails three tests; before, it would have
+quietly reduced the count.
+
+Worth naming because the enumeration guard I had written (`>= 18`) was me *already thinking about
+this exact failure*, and it still let the case through — a floor catches "matched nothing", not
+"matched one fewer". A bound is not a check.
+
+**Minor 2**: `delayRegion` fell back to whole-file scanning for `SKILL.md`, so the false-positive
+protection I added that same iteration did not extend to whatever skill lands in `LIVE_DOCS` next.
+Fixed by anchoring skills on their own paragraph. **The protection has to be a property of the
+helper, not of today's file list** — same shape as the fs-port consolidation in Phase 4.
+
+**Follow-up (item 18)**: `codev-skeleton/protocol-schema.json` is now referenced by nothing, since
+the skeleton's protocols point at the `protocols/`-level copy. Claude flags it as a dead file kept
+alive only by the Phase 1 parity test. Out of scope here and I am not deleting a file on my own
+judgement — routed to the review's follow-ups as a MAINTAIN candidate.
+
+**Follow-up (item 19)**: `porch done` → `porch next` chained in ONE shell invocation never reaches
+verification — the `next` re-emits implement tasks and resets `build_complete` to false. Running
+`porch done` again, then `porch next` separately, works. The tell is in `done`'s own output:
+"Ready for 2-way review" resets, "Ready for verification" advances. Hit twice, worked around both
+times. Out of scope for this spec; recording it so it does not die in a scrollback.
