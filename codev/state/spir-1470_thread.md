@@ -1583,3 +1583,20 @@ a convention now asserted by its own test rather than assumed.
 Also fixed the template itself rather than exempting it: it said `self-refresh <flags>`, and now
 carries `--boundary 'enter:review' [--begin | --dry-run]`. A template that omits the guard teaches
 the omission.
+
+## Review artifact drafted (live-run sections stubbed)
+
+`codev/reviews/1470-automatic-builder-context-refr.md`, 297 lines. Walked all 23 items on the
+running list; two were missing on first pass and are now in (Spec 1313's review claiming a fix a
+grep refutes; the simulation being green about a claim it did not make).
+
+Live-run evidence is a **stub table with ⏳ rows**, not prose written around the gap. Spec tests
+37/38 are marked PENDING in the compliance table rather than quietly omitted, and
+`DEFAULT_REENTRY_DELAY_SECONDS` is called out as the one number in the feature still resting on
+inheritance rather than measurement. A reader who picks this up cold can see exactly what is
+unproven.
+
+One correction recorded against my own thread: item 10 said "the skeleton is CORRECT and must not
+be touched" about the `$schema` paths. The skeleton *resolved*; it was not correct — it was
+emitting the bug into every scaffolded project. Left the original note in place and corrected it in
+the review rather than editing history, since the wrong belief is part of how the finding happened.
