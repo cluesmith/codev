@@ -1,7 +1,7 @@
 id: '1534'
 title: vscode-forward-hunk-press-erro
 protocol: pir
-phase: plan
+phase: implement
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -17,4 +17,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-08-19T22:39:48.722Z'
-updated_at: '2026-08-19T23:10:12.058Z'
+updated_at: '2026-08-19T23:10:17.864Z'
