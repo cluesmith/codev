@@ -1,7 +1,7 @@
 id: '1470'
 title: automatic-builder-context-refr
 protocol: spir
-phase: implement
+phase: review
 plan_phases:
   - id: phase_1_boundary_declaration
     title: Boundary declaration and protocol validation
@@ -26,8 +26,8 @@ plan_phases:
     status: complete
   - id: phase_8_end_to_end
     title: End-to-end verification including live run
-    status: in_progress
-current_plan_phase: phase_8_end_to_end
+    status: complete
+current_plan_phase: null
 gates:
   spec-approval:
     status: approved
@@ -41,8 +41,8 @@ gates:
     status: pending
   verify-approval:
     status: pending
-iteration: 3
-build_complete: true
+iteration: 1
+build_complete: false
 history:
   - iteration: 1
     plan_phase: phase_1_boundary_declaration
@@ -225,7 +225,7 @@ history:
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/spir-1470/codev/projects/1470-automatic-builder-context-refr/1470-phase_8_end_to_end-iter2-claude.txt
 started_at: '2026-08-18T00:15:05.131Z'
-updated_at: '2026-08-19T15:31:55.464Z'
+updated_at: '2026-08-19T15:38:09.201Z'
 force_advanced:
   phase: phase_4_selfrefresh_command
   iteration: 3
