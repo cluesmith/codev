@@ -3,6 +3,24 @@
 **Spec**: `codev/specs/1470-automatic-builder-context-refr.md` · **Plan**:
 `codev/plans/1470-automatic-builder-context-refr.md` · **Issue**: #1470 · **Protocol**: SPIR (strict)
 
+> ## ⚠ Porch state reads `review / iteration 1` — this project is COMPLETE, not abandoned
+>
+> PR #1528 is **merged** (true merge, 2026-08-19). The feature is on `main`, issues #1470 and #1503
+> are closed, and every plan phase passed its review.
+>
+> Porch is **parked**, deliberately and honestly. SPIR's review phase requires a `pr`-type
+> consultation; `consult` cannot resolve a **merged** PR by branch or by `--issue`, and porch has no
+> command that records an unrunnable consultation — so the phase can neither complete nor escape.
+> Both halves are **issue #1531**.
+>
+> The architect ruled the consultation satisfied by this project's 24 completed review rounds. That
+> ruling lives here, in the artifact. It was deliberately **not** written into `status.yaml`, which
+> records only what mechanically happened — no hand-written verdict files, no faked pass. A parked
+> state at a visible, explained boundary is a truer record than one force-marched to `verified`
+> through a lever built for a different phase.
+>
+> See *Protocol deviation: the review-phase consultation could not run*.
+
 ## Summary
 
 Porch now emits a context-refresh step at boundaries a protocol declares, so a builder gets the

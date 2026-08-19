@@ -1763,3 +1763,54 @@ experiment** — I spent eight phases insisting a test proves nothing until you 
 trusted an ad-hoc display pipeline never checked at all. And **a wrong report does not stay local**:
 it became a public issue with a fix direction attached. The correction had to be louder than the
 original claim and had to land before the issue aged into received knowledge.
+
+---
+
+# FINAL — Spec 1470 complete (2026-08-19)
+
+**PR #1528 merged.** True merge, 2 parents, individual commits preserved. Feature verified on
+`origin/main`: `context_refresh` declared in both trees, 18/18 `$schema` paths correct including the
+generator fix that stops adopters inheriting the bug. Issues #1470 and #1503 closed by the PR.
+
+## ⚠ Porch reads `review / iteration 1`. That is PARKED, not abandoned.
+
+SPIR's review phase requires a `pr`-type consultation. `consult` cannot resolve a **merged** PR —
+by branch or by `--issue`, four runs, both models, all exit 1, no files written. And porch has no
+command that records an unrunnable consultation: `verify --skip` is scoped to the verify phase and
+refuses in review, while the force-advance ceiling counts iterations that only advance on completed
+verdict rounds. So the phase can neither finish nor escape. **Issue #1531**, both halves.
+
+Architect ruled the consultation satisfied by the project's 24 completed rounds. That ruling is in
+the review **artifact**; `status.yaml` records only what mechanically happened. No verdict files were
+hand-written, no pass faked, no `rollback` used to manufacture a tidier history.
+
+## What shipped
+
+8 plan phases, 24 consultation rounds, ~370 tests across 17 files, suite 5289 green. Three
+architect-driven live passes proved the one property no unit test can reach: the queued `/clear` does
+not consume the re-entry (15.9s and 15.8s, two independent measurements), and a failed receipt gate
+leaves the context intact. Four fail-safes fired live — receipt rejection, stale challenge, dirty
+worktree, and the echo-the-request bypass — three of them unplanned.
+
+## Open, deliberately
+
+- **#1529** false acknowledgment — unmitigated, and it weakens a signal shipping in this PR.
+- **#1530** task-lane reply loss.
+- **#1531** consult cannot resolve a merged PR; porch cannot record an unrunnable consultation.
+- Save staleness — mitigated by instruction only; belongs with #1529, same root.
+- Adopter projects keep their broken `$schema`; the generator is fixed going forward.
+
+## The through-line, for whoever reads this next
+
+Every serious defect on this project was **green and wrong**. Nine vacuous tests. A guard correct at
+three layers and never invoked in production. A test proving only that `enqueue` stores its argument.
+A simulation that never drove the thing it was named for. A live pass satisfying two of four clauses.
+A diagnostic that lied in the reassuring direction. And, at the very end, me misreading my own `sed`
+pipeline and reporting a tool bug that did not exist — into a public issue, with a fix direction
+attached.
+
+The cure that worked was never vigilance. It was **making things singular** (one invocation builder,
+one fs port, one fixture, one set of fakes) and **mutation checking** — inject the defect, watch the
+test fail. What that discipline cannot reach is the class the reviewers caught: asking *what does the
+caller actually pass?* and *does this evidence answer the clause that was asked?*
+
