@@ -27,6 +27,7 @@
  * builder — the exact drift R3 exists to prevent.
  */
 
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseAgentName } from '../../utils/agent-names.js';
 import {
@@ -247,6 +248,45 @@ function claimStrength(
   // Directory-name fallback applies ONLY when the file states no id at all.
   const dirNorm = normalizeId(dir);
   return wanted.some(c => dirNorm === c || dirNorm.startsWith(`${c}-`)) ? 'weak' : 'none';
+}
+
+/**
+ * The standard real implementation of {@link ContextFsPort}.
+ *
+ * Lives here, beside the interface, because THREE call sites had each hand-rolled
+ * an identical copy — `afx refresh`, `afx self-refresh`, and the mailbox wiring —
+ * and a stub in any one of them silently nulls the porch context for that path.
+ *
+ * That is not hypothetical: `listDirs` was stubbed to `() => []` in the
+ * self-refresh copy, which made `readPorchContext` return null and stripped
+ * project id, phase, plan phase and the resume notice from the re-orientation —
+ * without failing, because `assembleReorientation` requires the porch fields only
+ * `if (context.porch)`. A regression test then pinned a COPY of the fix rather
+ * than the fix, so reverting it would have left the suite green.
+ *
+ * One implementation, imported everywhere, is what makes that regression
+ * observable from a single test.
+ */
+export function buildContextFsPort(): ContextFsPort {
+  return {
+    exists: (p: string) => existsSync(p),
+    read: (p: string) => {
+      try {
+        return readFileSync(p, 'utf-8');
+      } catch {
+        return null;
+      }
+    },
+    listDirs: (p: string) => {
+      try {
+        return readdirSync(p, { withFileTypes: true })
+          .filter(e => e.isDirectory())
+          .map(e => e.name);
+      } catch {
+        return null;
+      }
+    },
+  };
 }
 
 export function readPorchContext(

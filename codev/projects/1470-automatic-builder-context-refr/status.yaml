@@ -1,0 +1,239 @@
+id: '1470'
+title: automatic-builder-context-refr
+protocol: spir
+phase: review
+plan_phases:
+  - id: phase_1_boundary_declaration
+    title: Boundary declaration and protocol validation
+    status: complete
+  - id: phase_2_porch_trigger
+    title: Porch refresh trigger with at-most-once boundary record
+    status: complete
+  - id: phase_3_selfrefresh_core
+    title: Self-refresh orchestrator with challenge handshake and fail-safe ordering
+    status: complete
+  - id: phase_4_selfrefresh_command
+    title: afx self-refresh command and identity authorization
+    status: complete
+  - id: phase_5_skill_and_reentry
+    title: Builder refresh skill and re-entry frame
+    status: complete
+  - id: phase_6_status_visibility
+    title: Stalled-refresh visibility via porch-owned acknowledgment
+    status: complete
+  - id: phase_7_docs_and_parity
+    title: Delay documentation correction and skeleton parity
+    status: complete
+  - id: phase_8_end_to_end
+    title: End-to-end verification including live run
+    status: complete
+current_plan_phase: null
+gates:
+  spec-approval:
+    status: approved
+    requested_at: '2026-08-18T00:29:07.491Z'
+    approved_at: '2026-08-18T00:34:58.671Z'
+  plan-approval:
+    status: approved
+    requested_at: '2026-08-18T00:46:06.212Z'
+    approved_at: '2026-08-18T02:28:34.196Z'
+  pr:
+    status: pending
+  verify-approval:
+    status: pending
+iteration: 1
+build_complete: false
+history:
+  - iteration: 1
+    plan_phase: phase_1_boundary_declaration
+    build_output: ''
+    reviews:
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-1470/codev/projects/1470-automatic-builder-context-refr/1470-phase_1_boundary_declaration-iter1-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-1470/codev/projects/1470-automatic-builder-context-refr/1470-phase_1_boundary_declaration-iter1-claude.txt
+  - iteration: 1
+    plan_phase: phase_2_porch_trigger
+    build_output: ''
+    reviews:
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-1470/codev/projects/1470-automatic-builder-context-refr/1470-phase_2_porch_trigger-iter1-codex.txt
+      - model: claude
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-1470/codev/projects/1470-automatic-builder-context-refr/1470-phase_2_porch_trigger-iter1-claude.txt
+  - iteration: 2
+    plan_phase: phase_2_porch_trigger
+    build_output: ''
+    reviews:
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-1470/codev/projects/1470-automatic-builder-context-refr/1470-phase_2_porch_trigger-iter2-codex.txt
+      - model: claude
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-1470/codev/projects/1470-automatic-builder-context-refr/1470-phase_2_porch_trigger-iter2-claude.txt
+  - iteration: 3
+    plan_phase: phase_2_porch_trigger
+    build_output: ''
+    reviews:
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-1470/codev/projects/1470-automatic-builder-context-refr/1470-phase_2_porch_trigger-iter3-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-1470/codev/projects/1470-automatic-builder-context-refr/1470-phase_2_porch_trigger-iter3-claude.txt
+  - iteration: 1
+    plan_phase: phase_3_selfrefresh_core
+    build_output: ''
+    reviews:
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-1470/codev/projects/1470-automatic-builder-context-refr/1470-phase_3_selfrefresh_core-iter1-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-1470/codev/projects/1470-automatic-builder-context-refr/1470-phase_3_selfrefresh_core-iter1-claude.txt
+  - iteration: 2
+    plan_phase: phase_3_selfrefresh_core
+    build_output: ''
+    reviews:
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-1470/codev/projects/1470-automatic-builder-context-refr/1470-phase_3_selfrefresh_core-iter2-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-1470/codev/projects/1470-automatic-builder-context-refr/1470-phase_3_selfrefresh_core-iter2-claude.txt
+  - iteration: 3
+    plan_phase: phase_3_selfrefresh_core
+    build_output: ''
+    reviews:
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-1470/codev/projects/1470-automatic-builder-context-refr/1470-phase_3_selfrefresh_core-iter3-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-1470/codev/projects/1470-automatic-builder-context-refr/1470-phase_3_selfrefresh_core-iter3-claude.txt
+  - iteration: 1
+    plan_phase: phase_4_selfrefresh_command
+    build_output: ''
+    reviews:
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-1470/codev/projects/1470-automatic-builder-context-refr/1470-phase_4_selfrefresh_command-iter1-codex.txt
+      - model: claude
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-1470/codev/projects/1470-automatic-builder-context-refr/1470-phase_4_selfrefresh_command-iter1-claude.txt
+  - iteration: 2
+    plan_phase: phase_4_selfrefresh_command
+    build_output: ''
+    reviews:
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-1470/codev/projects/1470-automatic-builder-context-refr/1470-phase_4_selfrefresh_command-iter2-codex.txt
+      - model: claude
+        verdict: COMMENT
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-1470/codev/projects/1470-automatic-builder-context-refr/1470-phase_4_selfrefresh_command-iter2-claude.txt
+  - iteration: 3
+    plan_phase: phase_4_selfrefresh_command
+    build_output: ''
+    reviews:
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-1470/codev/projects/1470-automatic-builder-context-refr/1470-phase_4_selfrefresh_command-iter3-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-1470/codev/projects/1470-automatic-builder-context-refr/1470-phase_4_selfrefresh_command-iter3-claude.txt
+  - iteration: 1
+    plan_phase: phase_5_skill_and_reentry
+    build_output: ''
+    reviews:
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-1470/codev/projects/1470-automatic-builder-context-refr/1470-phase_5_skill_and_reentry-iter1-codex.txt
+      - model: claude
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-1470/codev/projects/1470-automatic-builder-context-refr/1470-phase_5_skill_and_reentry-iter1-claude.txt
+  - iteration: 1
+    plan_phase: phase_6_status_visibility
+    build_output: ''
+    reviews:
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-1470/codev/projects/1470-automatic-builder-context-refr/1470-phase_6_status_visibility-iter1-codex.txt
+      - model: claude
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-1470/codev/projects/1470-automatic-builder-context-refr/1470-phase_6_status_visibility-iter1-claude.txt
+  - iteration: 1
+    plan_phase: phase_7_docs_and_parity
+    build_output: ''
+    reviews:
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-1470/codev/projects/1470-automatic-builder-context-refr/1470-phase_7_docs_and_parity-iter1-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-1470/codev/projects/1470-automatic-builder-context-refr/1470-phase_7_docs_and_parity-iter1-claude.txt
+  - iteration: 1
+    plan_phase: phase_8_end_to_end
+    build_output: ''
+    reviews:
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-1470/codev/projects/1470-automatic-builder-context-refr/1470-phase_8_end_to_end-iter1-codex.txt
+      - model: claude
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-1470/codev/projects/1470-automatic-builder-context-refr/1470-phase_8_end_to_end-iter1-claude.txt
+  - iteration: 2
+    plan_phase: phase_8_end_to_end
+    build_output: ''
+    reviews:
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-1470/codev/projects/1470-automatic-builder-context-refr/1470-phase_8_end_to_end-iter2-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-1470/codev/projects/1470-automatic-builder-context-refr/1470-phase_8_end_to_end-iter2-claude.txt
+started_at: '2026-08-18T00:15:05.131Z'
+updated_at: '2026-08-19T15:38:47.472Z'
+force_advanced:
+  phase: phase_4_selfrefresh_command
+  iteration: 3
+  max_iterations: 3
+  rebuttal_file: 1470-phase_4_selfrefresh_command-iter3-rebuttals.md
+  at: '2026-08-18T23:34:57.694Z'
+pr_history:
+  - phase: review
+    pr_number: 1528
+    branch: builder/spir-1470
+    created_at: '2026-08-19T15:38:47.471Z'
