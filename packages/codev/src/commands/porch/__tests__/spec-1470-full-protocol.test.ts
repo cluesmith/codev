@@ -209,6 +209,16 @@ describe('spec test 36 — one refresh per declared boundary across a full proto
     expect(result.hitCeiling, 'hit the step ceiling — porch stopped advancing').toBe(false);
     expect(result.phasesSeen.length, `only reached: ${result.phasesSeen.join(' → ')}`)
       .toBeGreaterThan(1);
+
+    // Spec test 36 says "reaching completion", and this is the assertion that
+    // makes that a checked claim rather than a hope.
+    //
+    // `drive()` breaks on `status === 'error'` WITHOUT hitting the ceiling, so
+    // before this line an errored run satisfied both assertions above and read
+    // as healthy. `finalStatus` was even being captured — and never asserted,
+    // which is worse than not capturing it: it looks like the check exists.
+    expect(result.finalStatus, `run ended '${result.finalStatus}' after ${result.steps} steps`)
+      .toBe('complete');
   });
 
   it('never reaches the same boundary twice in a healthy sequence', async () => {
@@ -294,9 +304,13 @@ describe('spec test 36 — one refresh per declared boundary across a full proto
     writePlan(root, PLAN_PHASES, true);
     writeState(root, baseState({ phase: 'specify' }));
 
-    const { boundaries, refreshTasksSeen, phasesSeen } = await drive();
+    const { boundaries, refreshTasksSeen, phasesSeen, finalStatus } = await drive();
 
     expect(phasesSeen.length, 'the no-refresh run must still progress').toBeGreaterThan(1);
+    // A protocol declaring no boundaries must still reach the end — the point
+    // is that this feature does not disturb it, which "it errored early" would
+    // also satisfy for the two assertions below.
+    expect(finalStatus).toBe('complete');
     expect(boundaries).toEqual([]);
     expect(refreshTasksSeen).toBe(0);
   });
@@ -310,9 +324,10 @@ describe('spec test 36 — one refresh per declared boundary across a full proto
     writePlan(root, PLAN_PHASES, true);
     writeState(root, baseState({ protocol: 'fixture-aspir', phase: 'specify' }));
 
-    const { boundaries, hitCeiling } = await drive();
+    const { boundaries, hitCeiling, finalStatus } = await drive();
 
     expect(hitCeiling).toBe(false);
+    expect(finalStatus, 'the ASPIR arm must also reach completion').toBe('complete');
     // The floor comes FIRST and deliberately. "No duplicates" is satisfied by
     // an empty run, so without this the ASPIR arm would pass while testing
     // nothing — which is exactly how the gated arm of the test above failed

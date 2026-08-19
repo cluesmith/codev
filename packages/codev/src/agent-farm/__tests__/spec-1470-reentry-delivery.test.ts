@@ -26,6 +26,9 @@ import { resolve } from 'node:path';
 import { GLOBAL_SCHEMA } from '../db/schema.js';
 import * as mailbox from '../db/mailbox.js';
 import type { EnqueueInput } from '../db/mailbox.js';
+import { deliverAgentMail } from '../servers/mailbox-delivery.js';
+import type { DeliveryPorts, DeliverySession } from '../servers/mailbox-delivery.js';
+import type { GateVerdict } from '../servers/render-gate.js';
 import { DEFAULT_REENTRY_DELAY_SECONDS } from '../commands/reset/constants.js';
 
 describe('Spec 1470 — automatic re-entry delivery', () => {
@@ -135,16 +138,100 @@ describe('Spec 1470 — automatic re-entry delivery', () => {
   // -------------------------------------------------------------------------
 
   describe('spec test 35 — a busy terminal holds the re-entry', () => {
-    it('stays held with a reason rather than being delivered or lost', () => {
-      const row = mailbox.enqueue(db, reentry({ reason: 'busy' }), T0);
+    /**
+     * Ports driving the REAL delivery path, with the gate verdict as the only
+     * variable.
+     *
+     * The first version of this test enqueued a row already marked
+     * `reason: 'busy'` and read it back — which proves `enqueue` stores what it
+     * is given and would have passed even if production delivered onto busy
+     * terminals. Codex caught it. The claim is about the DECISION, so the
+     * decision has to be exercised.
+     */
+    function portsWith(verdict: GateVerdict, writes: string[]): DeliveryPorts {
+      const session = {
+        bytesWritten: 1,
+        info: { cols: 80, rows: 24 },
+        command: 'claude',
+        launchArgs: [],
+        cwd: WORKSPACE,
+        writable: true,
+        write: () => true,
+      } as unknown as DeliverySession;
 
-      // Due, but the terminal is busy: the row is still there, still held, and
-      // still carries why. "Held" and "lost" look identical to a waiting
-      // builder, so the distinction has to be visible in the record.
-      const found = mailbox.getById(db, row.id);
-      expect(found!.status).toBe('held');
-      expect(found!.reason).toBe('busy');
-      expect(found!.resolved_at).toBeNull();
+      return {
+        getSessionForAgent: () => session,
+        resolveProfile: () => ({ markerPattern: /›/, regionEndPatterns: [] }) as never,
+        classify: async () => verdict,
+        writeMessage: (_s, formatted) => {
+          writes.push(formatted);
+          return true;
+        },
+        broadcast: () => {},
+        log: () => {},
+        onHeldStateChange: () => {},
+        onEscalation: () => {},
+        onLiveness: () => {},
+        now: () => T0 + DELAY_MS,
+      } as unknown as DeliveryPorts;
+    }
+
+    it('a BUSY gate holds the re-entry: nothing is written, the row stays held', async () => {
+      const row = mailbox.enqueue(db, reentry(), T0);
+      const writes: string[] = [];
+
+      const outcome = await deliverAgentMail(
+        portsWith({ clean: false, reason: 'busy', detail: 'user-text' }, writes),
+        db,
+        WORKSPACE,
+        BUILDER,
+      );
+
+      // Nothing delivered, and — the part that matters — nothing WRITTEN. A
+      // re-entry written onto a busy prompt fuses with whatever the builder was
+      // typing.
+      expect(writes, 'wrote onto a busy terminal').toEqual([]);
+      expect(outcome.delivered).toEqual([]);
+      expect(outcome.reason).toBe('busy');
+
+      const after = mailbox.getById(db, row.id);
+      expect(after!.status, 'a busy gate must HOLD, never drop').toBe('held');
+      expect(after!.reason).toBe('busy');
+      expect(after!.resolved_at).toBeNull();
+    });
+
+    it('a CLEAN gate delivers it', async () => {
+      // The paired positive. Without it the test above would pass equally well
+      // against a delivery path that never delivers anything at all.
+      const row = mailbox.enqueue(db, reentry(), T0);
+      const writes: string[] = [];
+
+      const outcome = await deliverAgentMail(
+        portsWith({ clean: true, detail: 'empty' } as GateVerdict, writes),
+        db,
+        WORKSPACE,
+        BUILDER,
+      );
+
+      expect(writes).toHaveLength(1);
+      expect(writes[0]).toContain('resume from porch next');
+      expect(outcome.delivered).toEqual([row.id]);
+      expect(mailbox.getById(db, row.id)!.status).toBe('delivered');
+    });
+
+    it('a PRE-DUE re-entry is not delivered even onto a clean prompt', async () => {
+      // The delay is a lower bound the gate must not override: an early
+      // delivery is the race the whole schedule-before-clear ordering exists to
+      // avoid.
+      mailbox.enqueue(db, reentry(), T0);
+      const writes: string[] = [];
+      const ports = portsWith({ clean: true, detail: 'empty' } as GateVerdict, writes);
+      (ports as { now: () => number }).now = () => T0 + DELAY_MS - 1;
+
+      const outcome = await deliverAgentMail(ports, db, WORKSPACE, BUILDER);
+
+      expect(writes, 'delivered a re-entry before its due time').toEqual([]);
+      expect(outcome.delivered).toEqual([]);
     });
 
     it('is delivered once, and is no longer deliverable afterwards', () => {
