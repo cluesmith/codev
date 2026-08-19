@@ -186,7 +186,6 @@ describe('porch emission composed with the real orchestrator', () => {
       nonce => `${nonceMarker(nonce)}\n\n${'Receipts, deviations, standing orders. '.repeat(60)}`,
     );
 
-    fsNode.writeFileSync('/tmp/integ-diag.json', JSON.stringify(performed, null, 2));
     expect(finalStatus).toBe('complete');
     expect(performed.length, 'no refresh was performed').toBeGreaterThan(0);
     expect(performed.length).toBe(refreshTasks);
