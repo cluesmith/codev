@@ -144,6 +144,12 @@ function logCheckOverrides(
  *     "gate_requested_at": string | null,   // ISO timestamp
  *     "gate_approved_at": string | null     // ISO timestamp
  *   }
+ *
+ * `--json` also carries the Spec 1470 refresh fields: `context_refreshes` (the
+ * full history, each with `boundary`, `at`, and `acknowledged_at` once a builder
+ * has returned), `unacknowledged_refreshes` (the raw fact, any age), and
+ * `stalled_refreshes` (only those past the grace period, each with `ageMs`).
+ * Fields are ADDED; nothing pre-existing is removed or retyped.
  */
 export async function status(
   workspaceRoot: string,

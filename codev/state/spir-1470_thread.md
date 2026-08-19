@@ -552,7 +552,16 @@ sits between here and there. **Do not write the review without walking this list
    - `sizeOf()`/`read()` TOCTOU in shared `verifyReceipt` — mid-write race the two-observation
      stability gate already catches.
    - `extractPlanPhases` silently invents a `phase_1` for a plan with no phases JSON.
-   - `codev/protocols/spir/protocol.json`'s `$schema` path does not resolve (Phase 7 fixes).
+   - **`$schema` paths — VERIFIED, and broader than I first recorded.** ALL NINE protocols in
+     `codev/protocols/` declare `../../protocol-schema.json`, which resolves to
+     `codev/protocol-schema.json` — MISSING. The file is at `codev/protocols/protocol-schema.json`,
+     so the correct relative path in our tree is `../protocol-schema.json`.
+     **The skeleton is CORRECT and must not be touched**: `codev-skeleton/protocols/*/` →
+     `codev-skeleton/protocol-schema.json` EXISTS (the skeleton has a copy at its root; our tree
+     does not). So this is a nine-file fix in ONE tree, not a mirrored change — the one case in this
+     project where the two trees legitimately differ.
+     I had recorded it as "spir's $schema path" because spir is the file I happened to open.
+     Fix-the-instance-miss-the-class again, caught this time by surveying before editing.
    - **Phase 7 stale-`--delay`-doc list, VERIFIED by grep (6 locations)**:
      1. `packages/codev/src/agent-farm/cli.ts:455` — "dropped if Tower restarts"
      2. `packages/codev/src/agent-farm/types.ts:170` — "Not persisted — a Tower restart drops
@@ -1323,3 +1332,25 @@ the thing I was thinking about, not the thing I had touched.
 
 Fixture now has plan phases; two regression tests (with and without refreshes both showing CURRENT +
 CRITICAL RULES); re-introduced the nesting bug and confirmed the test fails.
+
+## Phase 6 iteration 2 — both APPROVE
+
+Codex: APPROVE, no issues. Claude: APPROVE with 3 minor. All three accepted and fixed.
+
+The one that mattered: I had put the FIRST git IO onto porch's normal task-emission path, for a
+purely informational record. `writeStateAndCommit` pushes and throws, so a transient push failure
+meant a builder could not get its next task because a *visibility* record could not be filed. Now
+wrapped in try/catch — the only deliberately swallowed error in `next()` — with a test that forces
+the throw and asserts BOTH that tasks still come back AND that the boundary stays unacknowledged
+(so the retry is real rather than the record being silently marked done).
+
+Lesson for the review artifact (item 14): **reusing the established helper imports the established
+failure policy.** `writeStateAndCommit` was right for every existing caller because every existing
+caller was on a path where failing loudly was correct. I reached for it without asking whether
+failing *the way it fails* was right on this path. The reuse question is not "is this the right
+helper" but "is this the right failure behaviour here".
+
+Also fixed: `--json` docstring (4th prose-drift instance), and documented that acknowledgment cannot
+distinguish cleared-and-returned from never-cleared from hand-rescued — porch has one piece of
+evidence (a builder asked for work), so the honest reading is "no builder has asked for work since
+this boundary was recorded", which is weaker than "the refresh succeeded".

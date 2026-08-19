@@ -409,11 +409,28 @@ export async function next(workspaceRoot: string, projectId: string): Promise<Po
   // nobody returned. This is the ONLY write on the normal path, and it happens
   // at most once per refresh rather than once per call.
   if (acknowledgeRefreshes(state, new Date().toISOString())) {
-    await writeStateAndCommit(
-      statusPath,
-      state,
-      `chore(porch): ${state.id} acknowledge context refresh`,
-    );
+    try {
+      await writeStateAndCommit(
+        statusPath,
+        state,
+        `chore(porch): ${state.id} acknowledge context refresh`,
+      );
+    } catch {
+      // Swallowed DELIBERATELY, and this is the only place in `next()` where
+      // that is right.
+      //
+      // `writeStateAndCommit` commits and pushes, and throws on failure. This
+      // acknowledgment is the ONLY write on the normal task-emission path, so
+      // without this catch a network blip during a push would make `porch next`
+      // fail outright — and a builder would be unable to get its next task
+      // because a VISIBILITY record could not be filed. Bookkeeping must never
+      // gate the work it is bookkeeping for.
+      //
+      // Losing it is cheap and self-healing: the boundary stays unacknowledged,
+      // the next `porch next` tries again, and the only cost of a persistent
+      // failure is a stall warning for a builder that is in fact fine — which is
+      // the safe direction for this particular signal.
+    }
   }
 
   if (isBuildVerify(protocol, state.phase)) {

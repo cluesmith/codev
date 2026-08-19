@@ -66,7 +66,10 @@ vi.mock('../../../lib/github.js', () => ({
  * write, a crash between the two would leave a project transitioned but not
  * marked, and the next `porch next` would clear the builder again.
  */
-const { writeCounter } = vi.hoisted(() => ({ writeCounter: { count: 0 } }));
+const { writeCounter, writeShouldThrow } = vi.hoisted(() => ({
+  writeCounter: { count: 0 },
+  writeShouldThrow: { value: false },
+}));
 
 vi.mock('../state.js', async importOriginal => {
   const original = await importOriginal<typeof import('../state.js')>();
@@ -74,6 +77,9 @@ vi.mock('../state.js', async importOriginal => {
     ...original,
     writeStateAndCommit: async (...args: Parameters<typeof original.writeStateAndCommit>) => {
       writeCounter.count += 1;
+      // Simulates the real failure mode: writeStateAndCommit commits and pushes,
+      // and throws when git does.
+      if (writeShouldThrow.value) throw new Error('simulated push failure');
       return original.writeStateAndCommit(...args);
     },
   };
@@ -994,6 +1000,35 @@ describe('refresh acknowledgment', () => {
     // write per refresh, not one per porch next.
     expect(readState().context_refreshes?.[0].acknowledged_at).toBe(firstAck);
     expect(writeCounter.count).toBe(0);
+  });
+
+  it('never lets a failed acknowledgment break porch next', async () => {
+    // The acknowledgment commits and pushes, and writeStateAndCommit throws on
+    // failure. It is the ONLY write on the normal task-emission path, so an
+    // unguarded failure would mean a network blip during a push stops a builder
+    // getting its next task — because a VISIBILITY record could not be filed.
+    // Bookkeeping must never gate the work it is bookkeeping for.
+    writeProtocol(spirLike());
+    writeState(
+      baseState({
+        phase: 'plan',
+        context_refreshes: [{ boundary: 'enter:plan', at: 'T1' }],
+      }),
+    );
+
+    writeShouldThrow.value = true;
+    try {
+      const response = await next(root, PROJECT_ID);
+      // Tasks still returned — the builder can work.
+      expect(response.status).toBe('tasks');
+      expect(response.tasks?.length).toBeGreaterThan(0);
+    } finally {
+      writeShouldThrow.value = false;
+    }
+
+    // And the boundary stays unacknowledged, so the next call retries rather
+    // than losing the record.
+    expect(readState().context_refreshes?.[0].acknowledged_at).toBeUndefined();
   });
 
   it('leaves a project with no refreshes untouched', async () => {

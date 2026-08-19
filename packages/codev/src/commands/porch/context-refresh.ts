@@ -134,6 +134,19 @@ export function recordRefresh(state: ProjectState, boundary: string, now: string
  *
  * Writes at most once per boundary, so this costs one extra state write per
  * refresh rather than one per `porch next`.
+ *
+ * ## What this cannot distinguish, and why that is accepted
+ *
+ * Any normal-path pass acknowledges EVERY outstanding boundary. So a refresh
+ * that was refused before clearing — after which the builder simply runs `porch
+ * next` — reads as acknowledged, as does a stall a human recovered by hand.
+ *
+ * That is not a bug to fix here, because porch has exactly one piece of
+ * evidence: the builder asked for work. It cannot tell "cleared and came back"
+ * from "never cleared" from "was rescued", and inventing a distinction it cannot
+ * observe would be worse than admitting the limit. What the signal genuinely
+ * means is narrow and still useful: **no builder has asked for work since this
+ * boundary was recorded.**
  */
 export function acknowledgeRefreshes(state: ProjectState, now: string): boolean {
   let changed = false;
