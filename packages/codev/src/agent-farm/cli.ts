@@ -452,7 +452,7 @@ export async function runAgentFarm(args: string[]): Promise<void> {
     .option('--interrupt', 'Send Ctrl+C first')
     .option('--raw', 'Skip structured message formatting')
     .option('--no-enter', 'Do not send Enter after message')
-    .option('--delay <seconds>', 'Deliver after N seconds (persisted; survives a Tower restart)')
+    .option('--delay <seconds>', 'Deliver after N seconds (persisted; survives a Tower restart, except a delayed --interrupt ^C nudge)')
     .action(async (builder, message, options) => {
       const { send } = await import('./commands/send.js');
       try {

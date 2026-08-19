@@ -1,6 +1,13 @@
 /**
  * Spec 1470, Phase 7 — cross-tree parity and the delay-documentation correction.
  *
+ * Spec test 39 (cross-tree parity) is covered JOINTLY by this file and
+ * `commands/porch/__tests__/spec-1470-boundary-config.test.ts`. That file owns
+ * schema-content parity — that all three `protocol-schema.json` copies describe
+ * `context_refresh` identically. This file owns structural parity: protocol
+ * directories, `$schema` resolution (including through a real scaffold), skill
+ * copies, and the delay claim. Neither is complete alone.
+ *
  * This phase exists because a false sentence in `--delay`'s help text propagated
  * into this project's own spec as a Constraint and survived until review. The
  * lesson is not "fix the sentence" — it is that a claim repeated across four
@@ -16,7 +23,9 @@
 
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
+import { copyProtocols } from '../../lib/scaffold.js';
 
 const repoRoot = path.resolve(__dirname, '../../../../../');
 const read = (rel: string) => fs.readFileSync(path.join(repoRoot, rel), 'utf-8');
@@ -110,6 +119,46 @@ describe('protocol.json $schema references', () => {
       true,
     );
   });
+
+  /**
+   * The discriminating test, and the reason the skeleton was changed too.
+   *
+   * Asserting resolution *inside* the skeleton tree passes with either `../` or
+   * `../../`, because the skeleton happens to carry a schema at both levels. But
+   * `copyProtocols` copies `codev-skeleton/protocols/*` into a project's
+   * `codev/protocols/` and does NOT copy the skeleton's root-level schema — so
+   * `../../` resolved in the skeleton and broke the moment it was scaffolded.
+   * That is precisely how all nine files in our own `codev/` came to be broken.
+   *
+   * Fixing only our tree would have left the generator emitting the same bug
+   * into every adopter's project. This drives the REAL scaffold function, so it
+   * fails if either the paths or the copy behaviour regresses.
+   */
+  it('every scaffolded project gets a $schema that resolves', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'spec1470-scaffold-'));
+    try {
+      copyProtocols(tmp, path.join(repoRoot, 'codev-skeleton'));
+      const dir = path.join(tmp, 'codev', 'protocols');
+      const protocols = fs
+        .readdirSync(dir, { withFileTypes: true })
+        .filter(e => e.isDirectory() && fs.existsSync(path.join(dir, e.name, 'protocol.json')));
+
+      expect(protocols.length, 'scaffold copied no protocols — the check would be vacuous')
+        .toBeGreaterThanOrEqual(9);
+
+      for (const entry of protocols) {
+        const file = path.join(dir, entry.name, 'protocol.json');
+        const declared = JSON.parse(fs.readFileSync(file, 'utf-8')).$schema as string;
+        const resolved = path.resolve(path.dirname(file), declared);
+        expect(
+          fs.existsSync(resolved),
+          `scaffolded ${entry.name}: $schema "${declared}" does not resolve`,
+        ).toBe(true);
+      }
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -140,15 +189,50 @@ describe('--delay persistence documentation', () => {
     expect(src).toContain('Only the in-memory ^C');
   });
 
-  it.each(LIVE_DOCS)('%s carries no stale not-persisted claim', rel => {
+  /**
+   * Scoped to the delay-describing region of each file rather than the whole
+   * file. A blanket scan would fail on an unrelated, entirely legitimate "not
+   * persisted" elsewhere in `cli.ts` or `types.ts` — and it would fail with a
+   * message pointing at the wrong thing, which is worse than not checking.
+   */
+  const delayRegion = (rel: string): string => {
     const text = read(rel);
-    for (const stale of [
-      'dropped if Tower restarts',
-      'Not persisted',
-      'not persisted',
-      'are **not persisted**',
+    if (rel.endsWith('SKILL.md')) return text;
+    const lines = text.split('\n');
+    const anchor = lines.findIndex(l => /--delay|SendOptions|\bdelay\?:/.test(l));
+    expect(anchor, `${rel}: found no --delay/SendOptions anchor to scope the scan to`).toBeGreaterThan(-1);
+    return lines.slice(Math.max(0, anchor - 6), anchor + 20).join('\n');
+  };
+
+  it.each(LIVE_DOCS)('%s carries no stale not-persisted claim', rel => {
+    const text = delayRegion(rel);
+    for (const stale of ['dropped if Tower restarts', 'not persisted', 'Not persisted']) {
+      expect(text.includes(stale), `${rel} still claims "${stale}" near its delay docs`).toBe(false);
+    }
+  });
+
+  it('names the one thing a restart DOES drop', () => {
+    // "Survives a restart" alone is over-broad: a delayed `--interrupt` still
+    // loses its Ctrl+C nudge. A correction that trades one imprecise claim for
+    // another has not fixed anything.
+    // Scoped to the `--delay` option's OWN line. A whole-file `toContain('--interrupt')`
+    // passes on the unrelated `--interrupt` option defined a few lines above — it
+    // was written that way first, and a mutation check caught that deleting the
+    // caveat changed nothing.
+    const delayOption = read('packages/codev/src/agent-farm/cli.ts')
+      .split('\n')
+      .find(l => l.includes(".option('--delay <seconds>'"));
+    expect(delayOption, "cli.ts no longer defines a --delay option").toBeDefined();
+    expect(delayOption, 'the --delay help claims restart-survival without naming the exception')
+      .toContain('--interrupt');
+    expect(read('packages/codev/src/agent-farm/types.ts')).toContain('Ctrl+C nudge');
+    for (const rel of [
+      '.claude/skills/arch-save/SKILL.md',
+      '.codex/skills/arch-save/SKILL.md',
+      'codev-skeleton/.claude/skills/arch-save/SKILL.md',
+      'codev-skeleton/.codex/skills/arch-save/SKILL.md',
     ]) {
-      expect(text.includes(stale), `${rel} still claims "${stale}"`).toBe(false);
+      expect(read(rel), rel).toContain('delayed `--interrupt`');
     }
   });
 

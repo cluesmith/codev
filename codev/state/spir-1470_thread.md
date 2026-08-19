@@ -1389,3 +1389,35 @@ it was stale*, so the parity test scans live docs only and says so inline.
 
 Mutation-checked all four assertions (revert one `$schema`, restore one stale claim, drift one
 skeleton copy, empty the allowlist) — each fails, all restored, 33 green.
+
+### Phase 7 iteration 1 — Codex REQUEST_CHANGES, Claude APPROVE + 3 minor. All accepted.
+
+**Claude's first minor was the root cause, and my Phase 7 fix had treated the symptom.** I fixed the
+nine broken `$schema` paths in `codev/` and left the *generator* emitting the same bug: `copyProtocols`
+copies `codev-skeleton/protocols/*` into a project's `codev/protocols/` and does **not** copy the
+skeleton's root-level schema. So `../../` resolved in the skeleton and broke the instant it was
+scaffolded — which is exactly how our own nine came to be broken, and it ships that way to **every
+adopter**. Skeleton now uses `../` too, which resolves in both layouts.
+
+This is my recurring pattern at one level up. I have been saying "fix the class, not the instance",
+and I did fix all nine rather than the one the plan named — then stopped at the edge of our tree
+without asking where the nine came from. **The class was not "nine files", it was "the generator".**
+
+The test that catches it drives the REAL `copyProtocols` into a temp dir, because asserting
+resolution *within* the skeleton passes with either path — the skeleton carries a schema at both
+levels. Mutation check confirmed this precisely: reverting the skeleton failed **exactly one** test,
+the scaffold one, with the in-tree resolution test still green. Without it the fix would have been
+unverifiable.
+
+**A vacuous assertion of mine, caught by mutation check (item 17 for the review).** Codex asked the
+CLI help to name the one thing a restart *does* drop (the delayed-`--interrupt` ^C nudge). I added
+the caveat and a test asserting `cli.ts` contains `--interrupt` — which passes on the unrelated
+`--interrupt` option defined a few lines above. Deleting the caveat changed nothing. Now scoped to
+the `--delay` option's own line and re-checked: it fails when the caveat goes.
+
+That is the ninth vacuous test on this project and the second one where **the mutation check, not
+review, caught it.** The discipline is earning its cost.
+
+Also accepted: stale-phrase scan narrowed to each file's delay-describing region (a blanket scan
+would fail on an unrelated legitimate "not persisted", and point at the wrong thing), and a
+cross-reference recording that spec test 39 is covered jointly with the Phase 1 boundary-config test.

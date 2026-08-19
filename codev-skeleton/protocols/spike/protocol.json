@@ -1,5 +1,5 @@
 {
-  "$schema": "../../protocol-schema.json",
+  "$schema": "../protocol-schema.json",
   "name": "spike",
   "version": "1.0.0",
   "description": "Time-boxed technical feasibility exploration",
