@@ -1,9 +1,15 @@
 id: '1527'
 title: disposable-live-run-subject-la
 protocol: aspir
-phase: plan
-plan_phases: []
-current_plan_phase: null
+phase: implement
+plan_phases:
+  - id: phase_1_alpha_notes
+    title: Summarize MANIFESTO.md into tmp/notes-alpha.md
+    status: in_progress
+  - id: phase_2_index
+    title: Write the index file tmp/notes-index.md
+    status: pending
+current_plan_phase: phase_1_alpha_notes
 gates:
   pr:
     status: pending
@@ -13,4 +19,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-08-19T15:00:47.395Z'
-updated_at: '2026-08-19T15:03:07.808Z'
+updated_at: '2026-08-19T15:03:10.137Z'
