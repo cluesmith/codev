@@ -1289,3 +1289,37 @@ That is three phases in a row where "the function is right and nothing checks it
 gap: the copied fs binding, the re-entry marker, and now this. **The mutation check is the only
 thing that has found it each time** — reading the test file never does, because the test looks
 correct in isolation. It IS correct in isolation. That is the problem.
+
+### Phase 6 iter1: a design error I argued myself into, and a regression I introduced
+
+**Codex — the stall warning fired on EVERY healthy refresh.** `unacknowledgedRefreshes()` flagged
+any unacknowledged boundary immediately, so a builder mid-refresh showed a stall. False positive
+during completely normal operation, every time.
+
+My code comment DEFENDED this ("deliberately NOT time-based"). I had conflated two things:
+- deriving the stall from `updated_at` — genuinely broken, that timestamp does not move;
+- a grace period on the ACKNOWLEDGMENT — perfectly sound, because the acknowledgment DOES move,
+  exactly when the builder returns.
+
+Given a reliable event, a grace period is just "has enough time passed that silence is suspicious?"
+— the actual question, and what the plan asked for in the words "past a threshold".
+**A signal that fires during normal operation is not a signal.**
+
+Now: `stalledRefreshes(state, now, grace)` with a 10-minute default (save + 15s delay + mailbox
+gate + porch next, comfortably covered). Three display states instead of two: ✓ acknowledged,
+… in flight, ! stalled. An unparseable `at` counts as STALLED, not ignored — NaN comparisons are all
+false, so a naive filter would silently never warn.
+
+**Claude — I introduced a REGRESSION.** My new section closed the `isPhased` block early, nesting
+the pre-existing CURRENT / FROM THE PLAN / CRITICAL RULES output inside
+`if (refreshes.length > 0)`. Any project WITHOUT refreshes silently lost all of it: legacy projects,
+non-declaring protocols, SPIR before its first plan-phase advance.
+
+**458 porch tests passed with it present.** And the humbling part: I had JUST written status-level
+tests and run a mutation check — but my fixture had no plan phases, so the swallowed block was
+unreachable, and the mutation I picked targeted the acknowledgment rather than the rendering.
+**The mutation discipline is only as good as the fixture's coverage of what is NEARBY.** I mutated
+the thing I was thinking about, not the thing I had touched.
+
+Fixture now has plan phases; two regression tests (with and without refreshes both showing CURRENT +
+CRITICAL RULES); re-introduced the nesting bug and confirmed the test fails.

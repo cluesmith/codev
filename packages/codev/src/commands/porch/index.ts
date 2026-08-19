@@ -10,7 +10,7 @@ import * as path from 'node:path';
 import chalk from 'chalk';
 import { globSync } from 'glob';
 import type { ProjectState, Protocol, PlanPhase } from './types.js';
-import { unacknowledgedRefreshes } from './context-refresh.js';
+import { stalledRefreshes, unacknowledgedRefreshes } from './context-refresh.js';
 import {
   readState,
   writeStateAndCommit,
@@ -182,6 +182,7 @@ export async function status(
       // (dashboard, VS Code tree) keep parsing unchanged.
       context_refreshes: state.context_refreshes ?? [],
       unacknowledged_refreshes: unacknowledgedRefreshes(state),
+      stalled_refreshes: stalledRefreshes(state, Date.now()),
     };
     process.stdout.write(JSON.stringify(out) + '\n');
     return;
@@ -223,14 +224,21 @@ export async function status(
   // only phased ones — a boundary can fire on entering `plan` too.
   const refreshes = state.context_refreshes ?? [];
   if (refreshes.length > 0) {
-    const stalled = unacknowledgedRefreshes(state);
+    const stalled = stalledRefreshes(state, Date.now());
     console.log('');
     console.log(chalk.bold('CONTEXT REFRESHES:'));
     console.log('');
     for (const r of refreshes) {
       const done = r.acknowledged_at !== undefined;
-      const mark = done ? chalk.green('✓') : chalk.yellow('!');
-      const when = done ? '' : chalk.yellow('  ← no builder has returned since');
+      const isStalled = stalled.some(sr => sr.boundary === r.boundary);
+      // Three states, not two: acknowledged, in flight, and stalled. Marking an
+      // in-flight refresh as a fault would cry wolf on every healthy one.
+      const mark = done ? chalk.green('✓') : isStalled ? chalk.yellow('!') : chalk.cyan('…');
+      const when = done
+        ? ''
+        : isStalled
+          ? chalk.yellow('  ← no builder has returned since')
+          : chalk.cyan('  ← refresh in flight');
       console.log(`  ${mark} ${r.boundary}  ${chalk.gray(r.at)}${when}`);
     }
 
@@ -250,7 +258,9 @@ export async function status(
           `afx send <builder> "Read .builder-reorient.md, then run porch next"`,
       );
     }
+  }
 
+  {
     const currentPlanPhase = getCurrentPlanPhase(state.plan_phases);
     if (currentPlanPhase) {
       console.log('');

@@ -40,6 +40,7 @@
  */
 
 import { selfRefreshInvocation } from '../../lib/self-refresh-invocation.js';
+import { DEFAULT_REENTRY_DELAY_SECONDS } from '../../agent-farm/commands/reset/constants.js';
 import type { ContextRefreshConfig, PorchTask, ProjectState, Protocol } from './types.js';
 
 // ============================================================================
@@ -146,13 +147,22 @@ export function acknowledgeRefreshes(state: ProjectState, now: string): boolean 
 }
 
 /**
- * Boundaries recorded but never acknowledged — the unattended-stall signal.
+ * How long a refresh may legitimately take before silence means trouble.
  *
- * Deliberately NOT time-based. An unacknowledged boundary is suspicious the
- * moment the builder should have come back, and "should have" is unknowable from
- * here; a wall-clock threshold would either fire during a long healthy build or
- * miss a stall for hours. Presence is the signal, and `status` shows how long it
- * has been so a human can judge.
+ * A refresh is not instant: the builder writes a save (minutes, for a real one),
+ * the re-entry is held by Tower for {@link DEFAULT_REENTRY_DELAY_SECONDS}, the
+ * mailbox waits for a clean prompt, and only then does the builder run `porch
+ * next`. Ten minutes is comfortably past all of that and still far sooner than a
+ * human would otherwise notice a builder sitting cleared and idle.
+ */
+export const REFRESH_STALL_GRACE_MS = 10 * 60 * 1000;
+
+/**
+ * Boundaries recorded but never acknowledged — the raw fact, no timing applied.
+ *
+ * Use this for HISTORY (what has and has not been acknowledged). For deciding
+ * whether to warn a human, use {@link stalledRefreshes}, which adds the grace
+ * period.
  */
 export function unacknowledgedRefreshes(
   state: ProjectState,
@@ -160,6 +170,39 @@ export function unacknowledgedRefreshes(
   return (state.context_refreshes ?? [])
     .filter(r => r.acknowledged_at === undefined)
     .map(r => ({ boundary: r.boundary, at: r.at }));
+}
+
+/**
+ * Unacknowledged boundaries old enough that silence is a problem.
+ *
+ * ## Why a grace period after all
+ *
+ * An earlier version of this warned on ANY unacknowledged boundary, with a
+ * comment arguing that time-based rules do not work here. That argument
+ * conflated two different things, and the result was a warning on every healthy
+ * refresh — a false positive during completely normal operation, every single
+ * time.
+ *
+ * What genuinely does not work is deriving the stall from `updated_at`, because
+ * that timestamp does not move during a healthy build. But the ACKNOWLEDGMENT
+ * does move, exactly when the builder returns. Given a reliable event, a grace
+ * period is simply the answer to "has enough time passed that silence is
+ * suspicious?" — which is the question, and which the plan asked for in the
+ * words "past a threshold".
+ *
+ * A signal that fires during normal operation is not a signal.
+ */
+export function stalledRefreshes(
+  state: ProjectState,
+  now: number,
+  graceMs = REFRESH_STALL_GRACE_MS,
+): Array<{ boundary: string; at: string; ageMs: number }> {
+  return unacknowledgedRefreshes(state)
+    .map(r => ({ ...r, ageMs: now - Date.parse(r.at) }))
+    // An unparseable timestamp yields NaN, and every NaN comparison is false —
+    // so it would never warn. Treat it as stalled rather than silently ignoring
+    // it: a record we cannot age is a record we cannot vouch for.
+    .filter(r => Number.isNaN(r.ageMs) || r.ageMs >= graceMs);
 }
 
 // ============================================================================
