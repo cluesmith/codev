@@ -1452,3 +1452,42 @@ verification — the `next` re-emits implement tasks and resets `build_complete`
 `porch done` again, then `porch next` separately, works. The tell is in `done`'s own output:
 "Ready for 2-way review" resets, "Ready for verification" advances. Hit twice, worked around both
 times. Out of scope for this spec; recording it so it does not die in a scrollback.
+
+## Phase 8 — full-protocol simulation (spec test 36)
+
+Extracted the Phase 2 harness into `__tests__/helpers/spec-1470-fixture.ts` rather than copying it,
+and rewired the Phase 2 file to import it — 40 tests still green, so the extraction is
+behaviour-preserving. A simulation asserting "all four boundaries" against a *near-copy* of the
+protocol could have passed while testing a shape nobody ships.
+
+**Three defects in my own test code, all caught by mutation or by pinning a positive expectation:**
+
+1. **Hardcoded `plan_phase:` when the code emits `plan-phase:`.** The test asserted my memory of a
+   format string. Now it imports `enterBoundary`/`planPhaseBoundary` and builds expectations from
+   the functions under test, so it cannot drift.
+
+2. **The gated scenario ran completely empty.** My driver looked for a gate with status
+   `'requested'`; porch writes `'pending'`. So it broke at the first gate, and every gated
+   assertion passed on a run that never left `specify`. Caught *only* because I had pinned
+   `toContain(enter:plan)` — "no duplicates" is satisfied by an empty run. Every scenario-wide
+   check now carries a non-vacuity floor, and the floor is written first.
+
+3. **The simulation did not test the thing it was named for (item 20).** Disabling `hasRefreshed`
+   entirely — breaking at-most-once outright — left all 8 tests green. A healthy sequence never
+   revisits a transition, so the guard is never stressed; the test proved "the ordinary sequence
+   produces no accidental repeat", which is a different and weaker claim than its name implied.
+
+   Two fixes, both needed. Renamed it to say what it actually checks. And added a replay arm that
+   drives a **real** run to completion, then applies the #1408 reset (plan phases back to
+   `pending`) and re-drives — asserting no new records and no new refresh tasks. That arm catches
+   the mutation. It is also not redundant with Phase 2's #1408 test: Phase 2 proves the guard from
+   a hand-built state, this proves it against history a real run *wrote itself*, which is the only
+   way to know the records come back in a form the guard can read.
+
+Confirmed Phase 2 catches the same mutation in four places, so the guard was never unprotected —
+the gap was in this file's claim about itself, which is its own kind of defect.
+
+**Also confirmed by the pre-approved run**: `enter:plan` and `enter:implement` do NOT fire when the
+artifacts carry approval frontmatter, because porch takes the pre-approval skip. That is the human's
+SUPPRESS ruling working end to end, and it is now asserted as a PAIR with the gate-approved case in
+one test, so neither half can be "fixed" without confronting the other.

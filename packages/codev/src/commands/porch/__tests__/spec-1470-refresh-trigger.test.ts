@@ -32,6 +32,22 @@ import {
   shouldRefresh,
 } from '../context-refresh.js';
 import type { ProjectState, Protocol } from '../types.js';
+import {
+  OMIT,
+  PROJECT_ID,
+  PROJECT_TITLE,
+  SPIR_ON_ENTER,
+  aspirLike,
+  baseState as makeBaseState,
+  isRefreshTask,
+  readState as readStateAt,
+  spirLike as makeSpirLike,
+  writeApprovedSpec as writeApprovedSpecAt,
+  writeApprovingReviews as writeApprovingReviewsAt,
+  writePlan as writePlanAt,
+  writeProtocol as writeProtocolAt,
+  writeState as writeStateAt,
+} from './helpers/spec-1470-fixture.js';
 
 // Mock loadConfig, following the convention in next.test.ts.
 //
@@ -91,179 +107,18 @@ vi.mock('../state.js', async importOriginal => {
 
 let root: string;
 
-const PROJECT_ID = '9001';
-const PROJECT_TITLE = '9001-refresh-fixture';
-
-/**
- * Sentinel for "omit the key entirely".
- *
- * `undefined` cannot express this: passing it triggers the default parameter, so
- * a fixture meant to declare NOTHING would silently declare everything and the
- * negative test would pass for the wrong reason.
- */
-const OMIT = Symbol('omit-context-refresh');
-
-/** SPIR-shaped protocol with the four boundaries declared. */
-function spirLike(contextRefresh: unknown = {
-  on_enter: ['plan', 'implement', 'review'],
-  on_plan_phase_advance: true,
-}): Record<string, unknown> {
-  const p: Record<string, unknown> = {
-    name: 'fixture-spir',
-    version: '1.0.0',
-    description: 'fixture',
-    phases: [
-      {
-        id: 'specify',
-        name: 'Specify',
-        type: 'build_verify',
-        build: { prompt: 'specify.md', artifact: 'codev/specs/${PROJECT_TITLE}.md' },
-        verify: { type: 'spec', models: ['codex', 'claude'], parallel: true },
-        gate: 'spec-approval',
-        next: 'plan',
-      },
-      {
-        id: 'plan',
-        name: 'Plan',
-        type: 'build_verify',
-        build: { prompt: 'plan.md', artifact: 'codev/plans/${PROJECT_TITLE}.md' },
-        verify: { type: 'plan', models: ['codex', 'claude'], parallel: true },
-        gate: 'plan-approval',
-        next: 'implement',
-      },
-      {
-        id: 'implement',
-        name: 'Implement',
-        type: 'per_plan_phase',
-        // BOTH build and verify are required: `isBuildVerify` is
-        // `!!(phase.build && phase.verify)`, so a phase missing either one
-        // falls through to `handleOncePhase` and the transition sites under
-        // test are never reached at all.
-        build: { prompt: 'implement.md', artifact: 'src/**/*.ts' },
-        verify: { type: 'impl', models: ['codex', 'claude'], parallel: true },
-        next: 'review',
-      },
-      {
-        id: 'review',
-        name: 'Review',
-        type: 'build_verify',
-        build: { prompt: 'review.md', artifact: 'codev/reviews/${PROJECT_TITLE}.md' },
-        verify: { type: 'pr', models: ['codex', 'claude'], parallel: true },
-        gate: 'pr',
-        next: null,
-      },
-    ],
-    // Without a verify config the fixture never reaches handleVerifyApproved,
-    // so every transition-site test would silently assert on a build task.
-    defaults: { verify: { models: ['codex', 'claude'], parallel: true } },
-  };
-  if (contextRefresh !== OMIT) p.context_refresh = contextRefresh;
-  return p;
-}
-
-/** ASPIR-shaped: same phases, NO spec/plan gates. */
-function aspirLike(): Record<string, unknown> {
-  const p = spirLike() as Record<string, unknown>;
-  const phases = p.phases as Array<Record<string, unknown>>;
-  delete phases[0].gate;
-  delete phases[1].gate;
-  p.name = 'fixture-aspir';
-  return p;
-}
-
-function writeProtocol(json: Record<string, unknown>): void {
-  const dir = path.join(root, 'codev/protocols', json.name as string);
-  fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(path.join(dir, 'protocol.json'), JSON.stringify(json, null, 2));
-}
-
-function baseState(overrides: Partial<ProjectState> = {}): ProjectState {
-  return {
-    id: PROJECT_ID,
-    title: PROJECT_TITLE,
-    protocol: 'fixture-spir',
-    phase: 'specify',
-    plan_phases: [],
-    current_plan_phase: null,
-    gates: {},
-    iteration: 1,
-    build_complete: false,
-    history: [],
-    started_at: '2026-01-01T00:00:00.000Z',
-    updated_at: '2026-01-01T00:00:00.000Z',
-    ...overrides,
-  };
-}
-
-function writeState(state: ProjectState): string {
-  const dir = path.join(root, 'codev/projects', PROJECT_TITLE);
-  fs.mkdirSync(dir, { recursive: true });
-  const p = path.join(dir, 'status.yaml');
-  fs.writeFileSync(p, yaml.dump(state));
-  return p;
-}
-
-function readState(): ProjectState {
-  const p = path.join(root, 'codev/projects', PROJECT_TITLE, 'status.yaml');
-  return yaml.load(fs.readFileSync(p, 'utf-8')) as ProjectState;
-}
-
-/**
- * A plan whose phases porch can extract.
- *
- * `approved` prepends the frontmatter IN THE SAME FILE rather than writing it
- * separately: the plan artifact and the pre-approval marker are one file, and
- * writing them in two calls silently clobbered the phases JSON — which made
- * `extractPlanPhases` fall back to inventing a `phase_1`.
- */
-function writePlan(phaseIds: string[], approved = false): void {
-  const dir = path.join(root, 'codev/plans');
-  fs.mkdirSync(dir, { recursive: true });
-  const json = JSON.stringify(
-    { phases: phaseIds.map(id => ({ id, title: `Title for ${id}` })) },
-    null,
-    2,
-  );
-  const frontmatter = approved
-    ? '---\napproved: 2026-01-01\nvalidated: [codex, claude]\n---\n\n'
-    : '';
-  fs.writeFileSync(
-    path.join(dir, `${PROJECT_TITLE}.md`),
-    `${frontmatter}# Plan\n\n## Phases (Machine Readable)\n\n\`\`\`json\n${json}\n\`\`\`\n`,
-  );
-}
-
-function isRefreshTask(response: { tasks?: Array<{ subject: string }> }): boolean {
-  return response.tasks?.[0]?.subject === 'Refresh your context';
-}
-
-/**
- * Write APPROVE verdicts for the models the mocked config resolves to.
- *
- * Reaching any transition site requires a completed verify round — without
- * these, `next()` returns "Run remaining consultations" and every
- * transition-site assertion becomes vacuous.
- */
-function writeApprovingReviews(phase: string, iteration: number): void {
-  const dir = path.join(root, 'codev/projects', PROJECT_TITLE);
-  fs.mkdirSync(dir, { recursive: true });
-  for (const model of ['codex', 'claude']) {
-    fs.writeFileSync(
-      path.join(dir, `${PROJECT_ID}-${phase}-iter${iteration}-${model}.txt`),
-      '---\nVERDICT: APPROVE\nSUMMARY: ok\nCONFIDENCE: HIGH\n---\nKEY_ISSUES:\n- None\n',
-    );
-  }
-}
-
-/** Write a spec carrying `approved:` frontmatter. (Plans: use writePlan(ids, true).) */
-function writeApprovedSpec(): void {
-  const dir = path.join(root, 'codev/specs');
-  fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(
-    path.join(dir, `${PROJECT_TITLE}.md`),
-    '---\napproved: 2026-01-01\nvalidated: [codex, claude]\n---\n\n# Spec\n',
-  );
-}
+// Thin wrappers binding the shared fixture to this file's `root`. The fixture
+// itself lives in ./helpers/spec-1470-fixture.ts so the Phase 8 simulation
+// drives the SAME protocol shape rather than a near-copy that can drift.
+const spirLike = makeSpirLike;
+const baseState = makeBaseState;
+const writeProtocol = (json: Record<string, unknown>) => writeProtocolAt(root, json);
+const writeState = (state: ProjectState) => writeStateAt(root, state);
+const readState = () => readStateAt(root);
+const writePlan = (ids: string[], approved = false) => writePlanAt(root, ids, approved);
+const writeApprovedSpec = () => writeApprovedSpecAt(root);
+const writeApprovingReviews = (phase: string, iteration: number) =>
+  writeApprovingReviewsAt(root, phase, iteration);
 
 beforeEach(() => {
   writeCounter.count = 0;
