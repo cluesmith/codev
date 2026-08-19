@@ -1740,3 +1740,26 @@ rather than an issue pointing at a doc that merged three weeks ago.
 
 **Not merging.** The merge word is Waleed's; the architect is presenting #1528 to him now. When it
 lands: `porch done 1470 --merged 1528`, then the verify phase.
+
+## Verify phase — merge clean, review consult blocked, architect ruled (b)
+
+Merge verified against origin/main (not my worktree): true merge with 2 parents, commits preserved,
+`context_refresh` in both trees, 18/18 `$schema` correct, #1470 + #1503 closed by the PR, #1529/#1530
+open. Review-phase checks all green including e2e.
+
+**The review-phase `pr` consult cannot run**: consult's PR lookup is open-PR-only, so a merged PR is
+invisible by branch AND by `--issue` (four runs, both models, all exit 1, no files). Issue #1531.
+Architect ruled the consultation satisfied by the 24 completed rounds — recorded in the review as a
+ruling with its reasoning, not as if the consult had run. No verdict files hand-written.
+
+**My worst mistake of the project, and it was in the reporting, not the code (item 27).** I told the
+architect consult "exited 0 and wrote empty verdict files" and speculated porch might score files by
+presence. Both false — it exits 1 and writes nothing. I had `sed`-piped filenames that did not exist,
+seen no output, and read absence-of-file as empty-file. The architect had already filed #1531 with my
+error in the title and a prescribed fix for an exit code that was already correct.
+
+The lesson has two halves and I have put both in the review. **The harness is part of the
+experiment** — I spent eight phases insisting a test proves nothing until you check it can fail, then
+trusted an ad-hoc display pipeline never checked at all. And **a wrong report does not stay local**:
+it became a public issue with a fix direction attached. The correction had to be louder than the
+original claim and had to land before the issue aged into received knowledge.
