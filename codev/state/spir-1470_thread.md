@@ -1723,3 +1723,20 @@ PINNING the false framing. A test that enforces its author's mistaken belief is 
 it makes the error durable and gives the next reader a reason to trust it. Corrected by addendum
 rather than rewrite, since the original text is what passes 1 and 2 were run against — a runbook that
 quietly rewrites its own history is worse than one carrying a correction.
+
+## PR #1528 open; issues #1529 and #1530 filed by the architect
+
+Phase 8 converged at iteration 3, both APPROVE, no force-advance. All 8 plan phases complete.
+Suite 5289 green. PR recorded via `porch done --pr 1528 --branch builder/spir-1470`.
+
+Architect filed the two gaps I routed rather than acted on:
+- **#1529** — false acknowledgment (my 9b). Unmitigated, and it weakens a signal shipping in this
+  same PR, which is exactly why it needed a number rather than a paragraph.
+- **#1530** — task-lane reply loss (my 10).
+- The `porch done`→`next` chaining trap (my 8) stays a review-doc follow-up; file later if it bites.
+
+Both referenced in the review artifact now, so the issues point forward and the doc points back —
+rather than an issue pointing at a doc that merged three weeks ago.
+
+**Not merging.** The merge word is Waleed's; the architect is presenting #1528 to him now. When it
+lands: `porch done 1470 --merged 1528`, then the verify phase.

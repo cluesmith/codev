@@ -264,6 +264,11 @@ a spec rather than a last-phase patch.
 Filed as a follow-up rather than absorbed here. It is a real gap, not a nit, and it deserves to be
 found as an issue rather than as a paragraph in someone else's review.
 
+**The acknowledgment half is now issue #1529**, carrying the pass-3 timeline, the trigger conditions
+(which are ordinary, not exotic — any refusal or escalation between the two steps produces them), and
+a design direction that keeps porch the only writer of `status.yaml`. The staleness half stays here
+with its shipped instruction; both belong to the same window and should probably be closed together.
+
 ## Consultation feedback
 
 24 rounds (codex + claude; gemini's review lane is broken — #1032/#1033). Every round's verdicts and
@@ -449,12 +454,13 @@ Confirmed out of scope for this project; none block the PR.
    for verification" advances. Hit twice, worked around both times.
 9. **The `--begin` → execute window** — two distinct defects with one root, and **the most important
    item on this list**. (a) *Save staleness*: the gates check a save is authentic, substantive,
-   settled and in-window; nothing checks it is still accurate. (b) *False acknowledgment*: a
-   `porch next` inside that window marks the boundary acknowledged before the clear, so a lost
-   re-entry would leave `porch status` showing health while a cleared builder sits idle — the
-   invisible-stall case the marker exists for. Both observed live in pass 3. (a) is mitigated in
-   this PR by instruction; (b) is not mitigated at all. See *A hole in the central guarantee*.
-10. **Task-lane `afx` replies to the architect were silently lost** during the live runs — the
+   settled and in-window; nothing checks it is still accurate. (b) *False acknowledgment*
+   (**issue #1529**): a `porch next` inside that window marks the boundary acknowledged before the
+   clear, so a lost re-entry would leave `porch status` showing health while a cleared builder sits
+   idle — the invisible-stall case the marker exists for. Both observed live in pass 3. (a) is
+   mitigated in this PR by instruction; (b) is **not mitigated at all**, which is why it is filed
+   rather than left here. See *A hole in the central guarantee*.
+10. **Task-lane `afx` replies to the architect were silently lost** (**issue #1530**) during the live runs — the
    subject's `STATE WRITTEN` / `STATE UPDATED` notices and its first probe answer never arrived,
    while every *file* action it took executed correctly. So the lane's file side worked and its
    reply side did not, which is the combination most likely to be misread as a stalled agent.
