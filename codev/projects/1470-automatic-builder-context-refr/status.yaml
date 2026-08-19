@@ -23,11 +23,11 @@ plan_phases:
     status: complete
   - id: phase_7_docs_and_parity
     title: Delay documentation correction and skeleton parity
-    status: in_progress
+    status: complete
   - id: phase_8_end_to_end
     title: End-to-end verification including live run
-    status: pending
-current_plan_phase: phase_7_docs_and_parity
+    status: in_progress
+current_plan_phase: phase_8_end_to_end
 gates:
   spec-approval:
     status: approved
@@ -41,8 +41,8 @@ gates:
     status: pending
   verify-approval:
     status: pending
-iteration: 2
-build_complete: true
+iteration: 1
+build_complete: false
 history:
   - iteration: 1
     plan_phase: phase_1_boundary_declaration
@@ -201,7 +201,7 @@ history:
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/spir-1470/codev/projects/1470-automatic-builder-context-refr/1470-phase_7_docs_and_parity-iter1-claude.txt
 started_at: '2026-08-18T00:15:05.131Z'
-updated_at: '2026-08-19T00:36:27.288Z'
+updated_at: '2026-08-19T00:40:59.154Z'
 force_advanced:
   phase: phase_4_selfrefresh_command
   iteration: 3
