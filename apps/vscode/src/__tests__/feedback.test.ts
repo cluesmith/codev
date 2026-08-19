@@ -14,9 +14,21 @@ const h = vi.hoisted(() => {
     executed: [] as Array<{ command: string; args: unknown[] }>,
     warnings: [] as string[],
     statusMessages: [] as string[],
+    // Stdout the press helper's fresh `git diff` returns; null → the call rejects,
+    // which makes `resolvePressCursorRef` fall back to the frozen `entry.hunks`.
+    gitStdout: null as string | null,
   };
   return { state };
 });
+
+// The press helper (#1534) re-parses the file live at press time. Stub the git
+// call so these routing tests stay deterministic and never spawn a subprocess.
+vi.mock('node:child_process', () => ({
+  execFile: (_cmd: string, _args: string[], _opts: unknown, cb: (e: Error | null, r?: { stdout: string; stderr: string }) => void) => {
+    if (h.state.gitStdout === null) { cb(new Error('no repo')); return; }
+    cb(null, { stdout: h.state.gitStdout, stderr: '' });
+  },
+}));
 
 vi.mock('vscode', () => ({
   EventEmitter: class { event = (): { dispose(): void } => ({ dispose() {} }); fire(): void {} dispose(): void {} },
@@ -68,7 +80,8 @@ describe('feedback mode-router (#1410)', () => {
     h.state.executed = [];
     h.state.warnings = [];
     h.state.statusMessages = [];
-    setDiffInjectSession([{ fsPath: FS_PATH, builderId: 'pir-1', relPath: 'src/a.ts', hunks: [{ start: 5, end: 9 }] }]);
+    h.state.gitStdout = null; // default: git rejects → fall back to the frozen entry.hunks
+    setDiffInjectSession([{ fsPath: FS_PATH, builderId: 'pir-1', relPath: 'src/a.ts', hunks: [{ start: 5, end: 9 }], baseRef: 'main', worktreePath: '/w/alpha/.builders/pir-1' }]);
   });
 
   it('forward mode: a file press injects immediately via forwardToBuilder', async () => {
@@ -98,6 +111,27 @@ describe('feedback mode-router (#1410)', () => {
     const { store, added } = makeStore();
     await feedbackHunk({ store: store as never });
     expect(added[0].comment.lineRange).toEqual({ start: 5, end: 9 });
+  });
+
+  it('a hunk press resolves against the FRESH git parse, not the stale frozen ranges (#1534)', async () => {
+    // Frozen entry.hunks is [{5,9}] and does NOT cover line 20; the live diff does.
+    h.state.gitStdout = '@@ -0,0 +20,2 @@\n+const added = 1;\n+const more = 2;\n';
+    h.state.selection = { active: { line: 19 }, start: { line: 19, character: 0 }, end: { line: 19, character: 0 }, isEmpty: true }; // line 20
+    const { store } = makeStore();
+    await feedbackHunk({ store: store as never }); // forward mode (default)
+    expect(h.state.executed).toContainEqual({ command: 'codev.forwardToBuilder', args: ['pir-1', 'src/a.ts:L20-L21 '] });
+    expect(h.state.statusMessages).toHaveLength(0);
+  });
+
+  it('a hunk press with no changed lines at the cursor anchors the whole file with an honest note, never the old error (#1534)', async () => {
+    h.state.mode = 'comment';
+    h.state.gitStdout = ''; // a fresh parse that records no ranges
+    h.state.selection = { active: { line: 0 }, start: { line: 0, character: 0 }, end: { line: 0, character: 0 }, isEmpty: true }; // line 1 ∉ any hunk
+    const { store, added } = makeStore();
+    await feedbackHunk({ store: store as never });
+    expect(added[0].comment.lineRange).toBeNull(); // whole file, not an error
+    expect(h.state.statusMessages.join('\n')).toContain('no changed lines at the cursor');
+    expect(h.state.statusMessages.join('\n')).not.toContain('place the cursor in a changed hunk');
   });
 
   it('comment mode: a selection press enqueues the selected range', async () => {
