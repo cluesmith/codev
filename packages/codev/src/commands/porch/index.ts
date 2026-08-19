@@ -10,6 +10,7 @@ import * as path from 'node:path';
 import chalk from 'chalk';
 import { globSync } from 'glob';
 import type { ProjectState, Protocol, PlanPhase } from './types.js';
+import { unacknowledgedRefreshes } from './context-refresh.js';
 import {
   readState,
   writeStateAndCommit,
@@ -177,6 +178,10 @@ export async function status(
       gate_status: gateStatus?.status ?? null,
       gate_requested_at: gateStatus?.requested_at ?? null,
       gate_approved_at: gateStatus?.approved_at ?? null,
+      // Spec 1470. Fields ADDED, none removed or retyped, so existing consumers
+      // (dashboard, VS Code tree) keep parsing unchanged.
+      context_refreshes: state.context_refreshes ?? [],
+      unacknowledged_refreshes: unacknowledgedRefreshes(state),
     };
     process.stdout.write(JSON.stringify(out) + '\n');
     return;
@@ -211,6 +216,39 @@ export async function status(
       const title = isCurrent ? chalk.bold(phase.title) : phase.title;
 
       console.log(`${prefix}${icon(phase.status)} ${phase.id}: ${title}`);
+    }
+  }
+
+  // Context refreshes (Spec 1470). Shown for any protocol that has them, not
+  // only phased ones — a boundary can fire on entering `plan` too.
+  const refreshes = state.context_refreshes ?? [];
+  if (refreshes.length > 0) {
+    const stalled = unacknowledgedRefreshes(state);
+    console.log('');
+    console.log(chalk.bold('CONTEXT REFRESHES:'));
+    console.log('');
+    for (const r of refreshes) {
+      const done = r.acknowledged_at !== undefined;
+      const mark = done ? chalk.green('✓') : chalk.yellow('!');
+      const when = done ? '' : chalk.yellow('  ← no builder has returned since');
+      console.log(`  ${mark} ${r.boundary}  ${chalk.gray(r.at)}${when}`);
+    }
+
+    if (stalled.length > 0) {
+      // The unattended failure this whole field exists to surface: the builder
+      // cleared and nothing came back. Say what to do, because the person
+      // reading this is not necessarily the person who built the feature.
+      console.log('');
+      console.log(
+        chalk.yellow(
+          `  ⚠ ${stalled.length} refresh(es) recorded but never acknowledged. A builder that ` +
+            `cleared and did not return looks idle, not broken.`,
+        ),
+      );
+      console.log(
+        chalk.gray('    Recover with:  ') +
+          `afx send <builder> "Read .builder-reorient.md, then run porch next"`,
+      );
     }
 
     const currentPlanPhase = getCurrentPlanPhase(state.plan_phases);

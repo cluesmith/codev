@@ -106,6 +106,62 @@ export function recordRefresh(state: ProjectState, boundary: string, now: string
   state.context_refreshes.push({ boundary, at: now });
 }
 
+/**
+ * Mark every recorded boundary as acknowledged, returning true if anything changed.
+ *
+ * ## Why an acknowledgment exists at all
+ *
+ * A refresh is unattended, and its worst failure is silent: the builder clears,
+ * the re-entry never arrives, and nothing ever says so. The plan's first design
+ * tried to DERIVE that from `updated_at` — but the normal task-emission path in
+ * `next()` writes no state, so `updated_at` stays pinned at the transition for
+ * the whole of a healthy build. A threshold long enough to avoid false positives
+ * would be far too long to catch the stall it exists for.
+ *
+ * So porch records the fact instead. This runs on the first `porch next` that
+ * reaches the NORMAL path after a boundary — which only happens if a builder came
+ * back and asked for work. A boundary recorded but never acknowledged therefore
+ * means exactly one thing: nobody returned.
+ *
+ * ## Why porch owns it
+ *
+ * The builder-side command is forbidden from writing `status.yaml`, and that
+ * prohibition is load-bearing — it is what makes a failed refresh incapable of
+ * corrupting protocol state. So the acknowledgment cannot come from the side that
+ * would most naturally report "I'm back"; it has to be inferred by the only
+ * writer, from the only evidence it has: the builder asked for its next task.
+ *
+ * Writes at most once per boundary, so this costs one extra state write per
+ * refresh rather than one per `porch next`.
+ */
+export function acknowledgeRefreshes(state: ProjectState, now: string): boolean {
+  let changed = false;
+  for (const record of state.context_refreshes ?? []) {
+    if (record.acknowledged_at === undefined) {
+      record.acknowledged_at = now;
+      changed = true;
+    }
+  }
+  return changed;
+}
+
+/**
+ * Boundaries recorded but never acknowledged — the unattended-stall signal.
+ *
+ * Deliberately NOT time-based. An unacknowledged boundary is suspicious the
+ * moment the builder should have come back, and "should have" is unknowable from
+ * here; a wall-clock threshold would either fire during a long healthy build or
+ * miss a stall for hours. Presence is the signal, and `status` shows how long it
+ * has been so a human can judge.
+ */
+export function unacknowledgedRefreshes(
+  state: ProjectState,
+): Array<{ boundary: string; at: string }> {
+  return (state.context_refreshes ?? [])
+    .filter(r => r.acknowledged_at === undefined)
+    .map(r => ({ boundary: r.boundary, at: r.at }));
+}
+
 // ============================================================================
 // Decision
 // ============================================================================

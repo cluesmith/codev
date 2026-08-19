@@ -1259,3 +1259,33 @@ Codex APPROVE (no issues). Claude APPROVE (3 non-blocking suggestions, all taken
 payload, and `reorient.ts` documents that inline is kept compact because multi-line writes are PACED
 (#584). Marginal against an already ~25-line frame, but it only shows up when a real message goes
 down a real PTY — so watch the delivery during the live run rather than guessing now.
+
+## 2026-08-19 — Implement Phase 6 (stalled-refresh visibility)
+
+Porch-owned `acknowledged_at`, set on the first `porch next` that reaches the NORMAL path after a
+boundary. Reaching that path is the only evidence porch has that a builder came back, so
+"recorded but never acknowledged" means exactly one thing: nobody returned.
+
+Why not derive it from `updated_at` (the plan's first idea): `next()` writes NO state on the normal
+task-emission path, so `updated_at` stays pinned at the transition for a whole healthy build. Any
+threshold long enough to avoid false positives would be far too long to catch the stall.
+
+Why porch owns it: the builder-side command is forbidden from writing status.yaml, and that
+prohibition is load-bearing — it is what stops a failed refresh corrupting protocol state. So the
+acknowledgment cannot come from the side that would naturally report "I'm back"; it has to be
+inferred by the only writer.
+
+`porch status` now shows refresh history with ✓/! per boundary, and on a stall prints the warning
+plus the one-line recovery command — because the person reading it is not necessarily the person
+who built the feature. `--json` gains `context_refreshes` and `unacknowledged_refreshes`; fields
+ADDED, none removed or retyped, so dashboard/VSCode consumers keep parsing.
+
+**MUTATION CHECK CAUGHT THE WIRING GAP AGAIN — third time.** 11 unit tests green, then I disabled
+the acknowledgment in next() and **454 porch tests still passed**. The helpers were tested in
+isolation; nothing asserted next() calls them. Added 4 wiring tests, re-mutated, 2 now fail,
+restored.
+
+That is three phases in a row where "the function is right and nothing checks it is called" was the
+gap: the copied fs binding, the re-entry marker, and now this. **The mutation check is the only
+thing that has found it each time** — reading the test file never does, because the test looks
+correct in isolation. It IS correct in isolation. That is the problem.

@@ -926,6 +926,89 @@ describe('pre-approval chains', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Porch acknowledges a refresh when the builder comes back
+// ---------------------------------------------------------------------------
+
+describe('refresh acknowledgment', () => {
+  it('marks the boundary acknowledged on the first normal-path call', async () => {
+    // Asserts the WIRING. Verified by mutation: disabling the acknowledgment in
+    // next() left 454 porch tests green, because the helpers were tested in
+    // isolation and nothing checked next() calls them — the same gap that hid
+    // the copied fs binding and the missing re-entry marker.
+    //
+    // Reaching the normal path is the ONLY evidence porch has that a builder
+    // came back, so this is what makes "recorded but never acknowledged" mean
+    // "nobody returned".
+    writeProtocol(spirLike());
+    writeState(
+      baseState({
+        phase: 'plan',
+        iteration: 1,
+        build_complete: false,
+        context_refreshes: [{ boundary: 'enter:plan', at: 'T1' }],
+      }),
+    );
+
+    const response = await next(root, PROJECT_ID);
+
+    // A normal build task, not a refresh — the boundary is already recorded.
+    expect(isRefreshTask(response)).toBe(false);
+
+    const after = readState();
+    expect(after.context_refreshes?.[0].acknowledged_at).toBeTruthy();
+    expect(after.context_refreshes?.[0].at).toBe('T1');
+  });
+
+  it('does NOT acknowledge while the refresh task is still being emitted', async () => {
+    // The boundary is recorded and the task returned in the same call. If that
+    // call also acknowledged, every refresh would look completed the instant it
+    // was requested and the stall signal would never fire at all.
+    writeProtocol(spirLike());
+    writeState(baseState({ phase: 'specify', gates: { 'spec-approval': { status: 'approved' } } }));
+
+    const response = await next(root, PROJECT_ID);
+
+    expect(isRefreshTask(response)).toBe(true);
+    const after = readState();
+    expect(after.context_refreshes).toHaveLength(1);
+    expect(after.context_refreshes?.[0].acknowledged_at).toBeUndefined();
+  });
+
+  it('acknowledges only once, not on every subsequent call', async () => {
+    writeProtocol(spirLike());
+    writeState(
+      baseState({
+        phase: 'plan',
+        context_refreshes: [{ boundary: 'enter:plan', at: 'T1' }],
+      }),
+    );
+
+    await next(root, PROJECT_ID);
+    const firstAck = readState().context_refreshes?.[0].acknowledged_at;
+    expect(firstAck).toBeTruthy();
+
+    writeCounter.count = 0;
+    await next(root, PROJECT_ID);
+
+    // Same timestamp, and no further state write: the acknowledgment costs one
+    // write per refresh, not one per porch next.
+    expect(readState().context_refreshes?.[0].acknowledged_at).toBe(firstAck);
+    expect(writeCounter.count).toBe(0);
+  });
+
+  it('leaves a project with no refreshes untouched', async () => {
+    writeProtocol(spirLike());
+    writeState(baseState({ phase: 'plan' }));
+
+    writeCounter.count = 0;
+    await next(root, PROJECT_ID);
+
+    expect(writeCounter.count).toBe(0);
+    expect(readState().context_refreshes ?? []).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Backward compatibility
 // ---------------------------------------------------------------------------
 

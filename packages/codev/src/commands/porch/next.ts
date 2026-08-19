@@ -37,6 +37,7 @@ import { parseVerdict, allApprove } from './verdict.js';
 import { loadCheckOverrides, resolveConsultationModels } from './config.js';
 import { getResolver, type ArtifactResolver } from './artifacts.js';
 import {
+  acknowledgeRefreshes,
   buildRefreshTask,
   declaresEnter,
   declaresPlanPhaseAdvance,
@@ -402,6 +403,19 @@ export async function next(workspaceRoot: string, projectId: string): Promise<Po
   }
 
   // Handle build_verify / per_plan_phase phases
+  // Reaching here means the builder came back and asked for work — which is the
+  // only evidence porch has that a refresh completed. Record it once per
+  // boundary, so a boundary that is recorded but never acknowledged means
+  // nobody returned. This is the ONLY write on the normal path, and it happens
+  // at most once per refresh rather than once per call.
+  if (acknowledgeRefreshes(state, new Date().toISOString())) {
+    await writeStateAndCommit(
+      statusPath,
+      state,
+      `chore(porch): ${state.id} acknowledge context refresh`,
+    );
+  }
+
   if (isBuildVerify(protocol, state.phase)) {
     return await handleBuildVerify(workspaceRoot, projectId, state, protocol, phaseConfig, statusPath, resolver);
   }
