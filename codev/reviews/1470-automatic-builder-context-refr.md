@@ -34,7 +34,7 @@ Eight plan phases, one PR, 24 consultation rounds across 8 phases, ~350 new test
 | Stalled refresh is visible with recovery command | ✅ | `porch status` three states; `--json` fields |
 | Spec test 36 — full protocol, one record per boundary | ✅ | `spec-1470-full-protocol.test.ts` |
 | Spec tests 34, 35 — re-entry survives restart; held when busy | ✅ | `spec-1470-reentry-delivery.test.ts` |
-| **Spec test 37 — live: clear lands, re-entry not consumed** | ✅ **PASS** | Live run 2026-08-19; re-entry delivered 15.9s after the clear |
+| **Spec test 37 — live: real boundary, clear lands, re-entry not consumed, resumes from `porch next`** | ✅ **PASS — all four clauses** | Passes 1 and 3; the two porch-side clauses closed on a real ASPIR project |
 | **Spec test 38 — live: failed gate leaves context intact** | ✅ **PASS** | Live run; echo-bypass variant rejected, no clear attempted |
 | Spec test 39 — cross-tree parity | ✅ | Split across `spec-1470-parity.test.ts` and the Phase 1 boundary-config test, cross-referenced in both |
 
@@ -82,7 +82,10 @@ the cheaper instrument that genuinely covers it.
 | Run 1 — measured clear→re-entry delay | ✅ | **15.9s** — validates the 15s constant |
 | Run 1 — real boundary-save size | ✅ | **4506 bytes**, 4.5× the floor, unpadded |
 | Run 2 / test 38 — failed gate leaves context intact | ✅ | Echo-bypass variant; aborted before any clear |
+| **Pass 3 — emission at a real boundary** | ✅ | Feature porch emitted the task at `plan-phase:phase_2_index` on a real ASPIR advance |
+| **Pass 3 — resumption from `porch next`** | ✅ | Fresh context read both files, ran `porch next`, and porch recovered the consultation that died with the clear |
 | Bonus — stale-challenge fail-safe | ✅ | Challenge aged 18320s vs 3600 limit → aborted, context intact |
+| Bonus — dirty-worktree fail-safe | ✅ | Refused at `challenge-read`; subject escalated rather than using an escape hatch |
 
 ### Run 1 — the property no unit test can reach
 
@@ -127,6 +130,41 @@ Choosing 2c rather than the empty-file variant is what makes this evidence worth
 the *specific* bypass this project closed is closed in production, not merely that an empty file is
 rejected.
 
+### Pass 3 — the two porch-side clauses, on a real project
+
+The first pass proved the harness property but left two of spec test 37's four clauses unproven:
+*"at a real boundary"* (the boundary was supplied by hand) and *"resumes from `porch next`"* (the
+subject was a task-lane builder, for which `porch next` is not meaningful).
+
+Codex caught this in review, correctly noting that an architect ruling recorded in a runbook is not
+an amendment to an approved spec. Rather than amend, a third pass ran on a **real ASPIR porch
+project** (sandbox issue #1527) with both binaries driven by path — which turned out to need no
+Tower restart, an option the first runbook had framed away.
+
+- **Real boundary**: the feature porch emitted the refresh task at `plan-phase:phase_2_index`
+  after genuine phase-1 work that had been consulted and approved.
+- **Real resumption**: after the clear, the fresh context read `.builder-state.md` and
+  `.builder-reorient.md`, ran `porch next` — and porch **recovered the consultation that had died
+  with the clear**, asking for it to be re-run. That is more than resumption; it is the planner
+  repairing in-flight state the refresh disturbed.
+- Save: 5751 bytes. Clear at 15:12:01.490, re-entry at 15:12:17.339 — **15.8s after, not
+  consumed**, independently reproducing pass 1's 15.9s.
+
+Two properties got their second live confirmation for free: the **pre-approval skip fired nothing**
+(the SUPPRESS ruling), and **`plan_phases` were extracted on the ungated path** (the #1503 fix).
+
+### Bonus — two fail-safes fired live, neither by test design
+
+**The dirty-worktree gate.** The first execute attempt refused at `challenge-read` because a tracked
+file was dirty — the architect's own harness edit enabling the boundary. No clear attempted, context
+intact. The subject then **refused both escape hatches without authorization and escalated**, which
+is the behaviour the guard exists to produce rather than merely permit.
+
+Worth recording as a decision rather than a bug: out of the box, enabling this feature by editing
+`protocol.json` in a working tree trips the guard. In real adoption that edit arrives committed, so
+this is friction on the *enabling* path, not the using path — judged intended, and recorded here so
+the next person meeting it knows it was considered.
+
 ### Bonus — the stale-challenge guard fired live
 
 Unplanned, and the most reassuring result of the set. A challenge aged **18320s** against a 3600s
@@ -145,7 +183,8 @@ cluster at the floor, they straddle it:
 
 | Sample | Bytes | vs floor | Provenance |
 |---|---:|---|---|
-| **Live subject at a real boundary** | **4506** | **4.5×** | **Real, observed in the live run** |
+| Live subject, pass 3, real plan-phase boundary | **5751** | **5.8×** | **Real, observed** |
+| Live subject, pass 1, real boundary | **4506** | **4.5×** | **Real, observed** |
 | This project's own save at `enter:review` | 2952 | 3.0× | **Real** |
 | Small project at a plan-phase advance | 634 | **0.6× — rejected** | **Constructed** |
 
@@ -157,11 +196,45 @@ a rejected save means no clear, so a builder loses the refresh rather than its m
 **Revisit trigger, architect-set**: a **real** boundary save rejected in production use reopens the
 number, via `MIN_ALLOWED_MIN_BYTES = 200` operator config. Nothing needs building.
 
-The live run supplied a third data point and it is the largest yet — 4506 bytes, unpadded, from a
-subject that had done ordinary work. So **every real save observed clears the floor comfortably**
-(4.5× and 3.0×), and the only sample below it remains the *constructed* one. That strengthens the
-keep-1000 decision without settling it: no observed save has been rejected, which is exactly the
-condition the revisit trigger waits on.
+Three real saves have now been observed — 5751, 4506 and 2952 bytes — and **every one clears the
+floor comfortably**, unpadded, from builders doing ordinary work. The only sample below the floor
+remains the *constructed* one. That strengthens keep-1000 without settling it: no observed save has
+been rejected, which is exactly the condition the revisit trigger waits on.
+
+## A hole in the central guarantee: save staleness
+
+Found by the pass-3 subject, in production, and worth stating plainly because it is the one place
+this feature's core promise is weaker than it reads.
+
+The promise is *never clear on an unverified save*. "Verified" currently means the save is
+**authentic** (nonce on line 1), **substantive** (byte floor), **settled** (stability window) and
+**recent enough** (challenge age ≤ 1h). What no gate checks is whether it is still **true**.
+
+The save is written at `--begin`; the execute step can come much later. In pass 3 a refusal, an
+authorization round-trip and a retry opened that gap wide: the save said *"phase 2 not started"*
+while phase 2 had, by execute time, been finished. The subject noticed and rewrote it. **A cold
+reader following the stale text would have re-implemented completed work** — which is exactly the
+harm the refresh exists to prevent, produced by the refresh itself.
+
+### What shipped, and what did not
+
+**Shipped**: the boundary save request now tells the builder, in as many words, that if work
+happened between the two steps the save must be rewritten first — and says *why*, that the gates
+check authenticity and substance but nothing checks accuracy. That addresses the observed case
+directly: the subject already did the right thing by noticing, and an instruction makes it reliable
+rather than dependent on noticing.
+
+**Not shipped**: a mechanism. Deliberately, and the reasoning is the point of this section.
+
+A cheap partial guard exists — record `HEAD` at `--begin`, refuse at execute if it moved. I did not
+ship it, for three reasons. It catches only *committed* drift, so it would advertise a staleness
+check that misses uncommitted work — **false confidence is worse than a known gap**. It adds a new
+gate to the destructive path in the final phase, after the review cycle that would normally scrutinise
+it. And "what counts as stale" is a design question — HEAD? mtime? phase state? — which belongs in
+a spec rather than a last-phase patch.
+
+Filed as a follow-up rather than absorbed here. It is a real gap, not a nit, and it deserves to be
+found as an issue rather than as a paragraph in someone else's review.
 
 ## Consultation feedback
 
@@ -346,14 +419,19 @@ Confirmed out of scope for this project; none block the PR.
    re-emits implement tasks and resets `build_complete`. Running `done` again, then `next`
    separately, works. The tell is in `done`'s own output: "Ready for 2-way review" resets, "Ready
    for verification" advances. Hit twice, worked around both times.
-9. **Task-lane `afx` replies to the architect were silently lost** during the live runs — the
+9. **Save staleness between `--begin` and execute** — the gates check that a save is authentic,
+   substantive, settled and in-window, and nothing checks that it is still *accurate*. Observed in
+   pass 3; mitigated in this PR by instruction only. Needs design (what counts as stale) before it
+   gets a mechanism — see *A hole in the central guarantee* above. **The most important item on
+   this list.**
+10. **Task-lane `afx` replies to the architect were silently lost** during the live runs — the
    subject's `STATE WRITTEN` / `STATE UPDATED` notices and its first probe answer never arrived,
    while every *file* action it took executed correctly. So the lane's file side worked and its
    reply side did not, which is the combination most likely to be misread as a stalled agent.
    Observed on a task-lane builder, not a protocol builder; unrelated to this spec's changes and
    explicitly **not fixed here** per architect direction. Worth its own issue: a lost reply looks
    identical to no reply, which is the same failure shape this feature exists to make visible.
-10. **Happy-path step log is a superset of spec test 30's literal sequence** —
+11. **Happy-path step log is a superset of spec test 30's literal sequence** —
    `challenge-read`, `worktree-checked`, `challenge-marked`, `clear-attempted` and
    `challenge-consumed` are extra. The required subsequence and its ordering *are* asserted; the
    extras are gates the handshake needs. Recorded so it is not scored as a miss.

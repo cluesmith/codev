@@ -1645,3 +1645,41 @@ Strengthens keep-1000 without settling it, since the revisit trigger waits on a 
 the architect were lost while its file actions all executed. File side worked, reply side did not —
 the combination most likely to be misread as a stalled agent, and the same failure shape this
 feature exists to make visible.
+
+## THIRD PASS — test 37 fully closed (2026-08-19)
+
+Both open clauses closed on a real ASPIR porch project (#1527), no Tower restart, using the by-path
+route I had wrongly framed away. Real boundary emission at `plan-phase:phase_2_index`; post-clear
+resumption via `porch next` — with porch **recovering the consultation that died with the clear**,
+which is more than resumption: the planner repairing in-flight state the refresh disturbed.
+
+Second independent measurements: clear→re-entry **15.8s** (vs 15.9s), save **5751B**. Two passes on
+different subjects agreeing to 0.1s is what turns 15 from an anecdote into a measurement.
+Suppress-on-skip and the #1503 extraction each got a second live confirmation free.
+
+**Fourth live fail-safe, unplanned**: the dirty-worktree gate refused, and the subject **escalated
+rather than reaching for `--allow-dirty` itself**. The guard producing the right *behaviour*, not
+merely permitting it.
+
+### The staleness finding, and why I shipped an instruction rather than a mechanism (item 24)
+
+The subject found the one place this feature's core promise is weaker than it reads. "Never clear on
+an unverified save" means authentic + substantive + settled + recent. **Nothing checks that it is
+still TRUE.** In pass 3 a refusal/authorization/retry cycle left a save saying "phase 2 not started"
+when phase 2 was done. The subject noticed and rewrote it; a cold reader would have re-implemented
+finished work — the exact harm the refresh exists to prevent, produced by the refresh.
+
+Architect left the call to me. I shipped the instruction (the request now says: if you did work
+between the two steps, rewrite the save first, and says *why*) and deliberately did **not** ship the
+cheap HEAD-moved guard, for three reasons worth keeping:
+
+1. It catches only *committed* drift, so it would advertise a staleness check that misses
+   uncommitted work. **False confidence is worse than a known gap.**
+2. It adds a gate to the *destructive* path in the final phase, after the review cycle that would
+   normally scrutinise it — and gates are exactly where my defects clustered all project.
+3. "What counts as stale" is a design question (HEAD? mtime? phase state?) and belongs in a spec,
+   not a last-phase patch.
+
+Filed as a follow-up and written up in the review under its own heading rather than buried in the
+list, because it deserves to be found as an issue rather than as a paragraph in someone else's
+review. It is the most important follow-up on the list.

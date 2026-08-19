@@ -369,6 +369,23 @@ export function buildBoundarySaveRequest(
     'never retried, so a save rejected here means the refresh simply does not happen.',
     '',
     'Pointers, not prose. When the file is written, run the execute step.',
+    '',
+    // Observed live (Spec 1470, third pass): a refusal-and-retry put real work
+    // between `--begin` and the execute step, and the save still said "phase 2
+    // not started" when phase 2 was by then DONE. The subject noticed and
+    // rewrote it; a cold reader following the stale text would have
+    // re-implemented completed work.
+    //
+    // No gate can catch this — the file is authentic, substantive, settled and
+    // inside its age window, and simply false. The mechanism-level fix needs
+    // design (see the follow-up issue), so what ships here is the instruction,
+    // which addresses the observed case directly rather than pretending a new
+    // check would.
+    'IF YOU DID ANY WORK between the challenge step and this one — committed anything,',
+    'finished a phase, changed what is true — REWRITE THE SAVE FIRST. The gates check that',
+    'your file is authentic, substantial and settled; NOTHING checks that it is still',
+    'accurate. A save that was true when you wrote it and is stale when you clear on it',
+    'sends your successor to redo finished work.',
   );
 
   return lines.join('\n');

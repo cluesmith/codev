@@ -1048,6 +1048,18 @@ describe('dry run', () => {
 // ---------------------------------------------------------------------------
 
 describe('buildBoundarySaveRequest', () => {
+  it('tells the builder to rewrite a save that work has made stale', () => {
+    // Observed live: a refusal-and-retry put real work between the challenge and
+    // the execute step, leaving a save that said "phase 2 not started" when
+    // phase 2 was done. No gate can catch that — the file is authentic,
+    // substantive, settled and in-window, and simply false. So the instruction
+    // is the mitigation, and it must actually be present.
+    const request = buildBoundarySaveRequest('abc123def456', '/w/.builder-state.md', 'enter:review');
+    expect(request).toContain('REWRITE THE SAVE FIRST');
+    // The reason, not just the imperative — a bare order gets skimmed past.
+    expect(request).toMatch(/NOTHING checks that it is still[\s\S]*accurate/);
+  });
+
   it('asks for pointers rather than a full working-state dump', () => {
     const request = buildBoundarySaveRequest(NONCE, statePath, 'enter:implement');
 
