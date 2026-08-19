@@ -1354,3 +1354,38 @@ Also fixed: `--json` docstring (4th prose-drift instance), and documented that a
 distinguish cleared-and-returned from never-cleared from hand-rescued — porch has one piece of
 evidence (a builder asked for work), so the honest reading is "no builder has asked for work since
 this boundary was recorded", which is weaker than "the refresh succeeded".
+
+## Phase 7 — docs and parity
+
+Three findings worth carrying, two of them corrections to what I believed going in.
+
+**1. My pre-compaction note about `$schema` was right but for the wrong reason.** I had recorded
+"all nine broken in `codev/`, skeleton correct, don't touch the skeleton." The conclusion holds; the
+reasoning did not. The skeleton uses the *identical* `../../protocol-schema.json` string — it
+resolves only because the skeleton has a schema copy at its root that `codev/` lacks. Had I acted on
+"the skeleton uses a different path", I would have made the wrong edit. **The path string was never
+the invariant; resolution was.** The parity test asserts resolution in both trees, not string
+equality, which is why it can cover trees that legitimately differ.
+
+**2. There are two genuinely different protocol schemas, not five copies of one.** Root-level
+(draft 2020-12, `required: [name, phases]`, models `$schema` and `alias`) vs protocols-level
+(draft-07, `required: [name, version, description, phases]`). Both carry `context_refresh` — Phase 1
+updated both — and neither sets `additionalProperties`, so all nine files validate under either.
+`codev/` now points at draft-07 and the skeleton at 2020-12: a real divergence in editor experience,
+pre-existing, and out of scope. **Follow-up for the review artifact (item 15).**
+
+**3. Spec 1313's review claims a fix that only partly landed.** Its review says "both 'dropped if
+Tower restarts' messages were removed; the `--delay` docs were re-trued in **both** trees." The
+messages were indeed removed — but the CLI *option help* (`cli.ts:455`) and `SendOptions.delay`
+(`types.ts:170`) still carried the stale claim, which is exactly where I read it and put it into my
+own spec as a Constraint. A completed project's review asserted completeness that a grep would have
+refuted. This is the sharpest instance yet of "verify claims against the actual file — summaries are
+evidence, not ground truth", and it is worth the review artifact (item 16) because the failure was
+not a builder's carelessness but a *review* that generalised from the files it happened to touch.
+
+Also confirmed as deliberate non-changes: `delayed-send.ts:63` describes the in-memory ^C nudge and
+is accurate; specs/plans/reviews/projects/state quote the stale wording *because they document that
+it was stale*, so the parity test scans live docs only and says so inline.
+
+Mutation-checked all four assertions (revert one `$schema`, restore one stale claim, drift one
+skeleton copy, empty the allowlist) — each fails, all restored, 33 green.
