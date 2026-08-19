@@ -5,18 +5,21 @@ phase: implement
 plan_phases:
   - id: phase_1_alpha_notes
     title: Summarize MANIFESTO.md into tmp/notes-alpha.md
-    status: in_progress
+    status: complete
   - id: phase_2_index
     title: Write the index file tmp/notes-index.md
-    status: pending
-current_plan_phase: phase_1_alpha_notes
+    status: in_progress
+current_plan_phase: phase_2_index
 gates:
   pr:
     status: pending
   verify-approval:
     status: pending
 iteration: 1
-build_complete: true
+build_complete: false
 history: []
 started_at: '2026-08-19T15:00:47.395Z'
-updated_at: '2026-08-19T15:03:48.086Z'
+updated_at: '2026-08-19T15:06:13.241Z'
+context_refreshes:
+  - boundary: plan-phase:phase_2_index
+    at: '2026-08-19T15:06:13.241Z'
