@@ -29,24 +29,49 @@ run repeats.
 
 ---
 
-## CRITICAL: the subject's porch will not emit refresh tasks
+## HOW THE SUBJECT LANE RUNS THE FEATURE BUILD — decided: OPTION B
 
-Per your own ruling: the subject builder's *installed* `@cluesmith/codev` (3.3.0) predates
-this feature, so **its porch will not emit a refresh task on its own**. If the runbook
-assumed otherwise you would sit waiting at a boundary for something that can never arrive.
+Per the subject builder's *installed* `@cluesmith/codev` (3.3.0) predating this feature, its
+porch **will not emit a refresh task**. Waiting at a boundary for one would be waiting for
+something that can never arrive.
 
-So the subject lane runs the feature build. Pick one:
+**Ruling (architect, 2026-08-19): OPTION B — drive the CLI by hand, no Tower restart.**
 
-| Option | How | Trade-off |
-|---|---|---|
-| **A — local-install (recommended)** | From the main workspace: `pnpm -w run local-install` after merging this branch, so the subject's `porch`/`afx` are the built feature | Closest to production. **Restarts Tower** — needs your say-so, and use the `env -u CLAUDE_CODE_*` scrub |
-| **B — drive the CLI by hand** | Skip porch entirely; run the two `afx self-refresh` steps manually at a chosen moment | No Tower restart, but does **not** exercise porch's emission — proves the clear/re-entry half only |
+The reasoning, recorded because it is the kind of trade-off that looks like a shortcut later
+and was not:
 
-**Option B still satisfies tests 37 and 38.** They are about the *harness* (does the clear
-eat the re-entry), not about porch's emission — which is covered by the simulation. If you
-want the cheaper run, B is sufficient and honest; say so and I will record it that way.
+- Option A (`pnpm -w run local-install`) would be closer to production, but it **restarts
+  Tower, killing every builder across 14 workspaces** — including another project's fleet.
+  The cost is not "a restart"; it is other people's in-flight work.
+- Option B satisfies tests 37 and 38 **honestly**, because those tests are about the
+  *harness* — can a queued `/clear` consume a re-entry delivered just after turn-end — and
+  not about porch's emission. Porch's emission is covered by the full-protocol simulation
+  (`spec-1470-full-protocol.test.ts`, spec test 36), which drives all four transition sites.
+- So the two halves are each covered by the cheaper instrument that genuinely covers them,
+  rather than one expensive instrument covering both and taking down live work.
 
----
+### The exact invocation — VERIFIED, not assumed
+
+Run the **worktree-built** binary by path so PATH's installed 3.3.0 cannot shadow it:
+
+```bash
+node /Users/mwk/Development/cluesmith/codev/.builders/spir-1470/packages/codev/bin/afx.js \
+  self-refresh --boundary 'enter:review' [--begin | --dry-run]
+```
+
+`bin/afx.js` imports `../dist/agent-farm/cli.js`; `dist` is current in this worktree (built
+newer than every `.ts` under `src/`). Verified by running it: `self-refresh --help` lists
+`--begin`, `--boundary`, `--dry-run` and the rest, which installed 3.3.0 does not have.
+
+**Identity comes from the working directory, not from the binary's location** — so run it
+with `cwd` = the SUBJECT's worktree while pointing at this worktree's binary. Verified
+directly: invoked from `/tmp`, the same binary refuses with
+
+> `afx self-refresh must be run from inside a builder worktree`
+
+and **exits 1**, so a scripted preflight sees the failure.
+
+This cross-worktree shape is the whole point: my build, the subject's identity.
 
 ## PREFLIGHT — run this first, always
 
@@ -57,8 +82,9 @@ to check and catastrophic to discover mid-clear.
 From **inside the subject's worktree**:
 
 ```bash
-cd .builders/<subject-id>
-afx self-refresh --begin --boundary 'enter:review'
+cd /Users/mwk/Development/cluesmith/codev/.builders/<subject-id>
+node /Users/mwk/Development/cluesmith/codev/.builders/spir-1470/packages/codev/bin/afx.js \
+  self-refresh --begin --boundary 'enter:review'
 ```
 
 **Pass** — it prints a challenge and the save instructions, naming the subject's own id.
@@ -75,10 +101,15 @@ rm -f .builders/<subject-id>/.builder-refresh-challenge
 A `--dry-run` pass is also available and clears nothing:
 
 ```bash
-afx self-refresh --dry-run --boundary 'enter:review'
+node /Users/mwk/Development/cluesmith/codev/.builders/spir-1470/packages/codev/bin/afx.js \
+  self-refresh --dry-run --boundary 'enter:review'
 ```
 
 ---
+
+> In the two runs below, `<AFX>` means
+> `node /Users/mwk/Development/cluesmith/codev/.builders/spir-1470/packages/codev/bin/afx.js`,
+> and every command is run with `cwd` = the subject's worktree.
 
 ## RUN 1 — spec test 37 (the happy path). BLOCKING.
 
@@ -88,10 +119,10 @@ with an empty context proves nothing.
 
 **Steps**, from inside the subject's worktree:
 
-1. `afx self-refresh --begin --boundary 'enter:review'`
+1. `<AFX> self-refresh --begin --boundary 'enter:review'`
 2. Have the subject write `.builder-state.md` per the printed instructions. It must begin
    with the nonce line **exactly**, on the **first line**.
-3. `afx self-refresh --boundary 'enter:review'`
+3. `<AFX> self-refresh --boundary 'enter:review'`
 
 **Observation checklist** — record each, with the timestamp:
 
@@ -115,12 +146,12 @@ Proves the fail-safe: **a refresh that cannot verify its save must leave the con
 
 **Steps:**
 
-1. `afx self-refresh --begin --boundary 'enter:review'`
+1. `<AFX> self-refresh --begin --boundary 'enter:review'`
 2. Deliberately fail the gate — pick **one** and note which:
    - write nothing at all; or
    - write a 3-line stub (under the byte floor); or
    - write a real-looking file **without** the nonce on the first line.
-3. `afx self-refresh --boundary 'enter:review'`
+3. `<AFX> self-refresh --boundary 'enter:review'`
 
 **Observation checklist:**
 

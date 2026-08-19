@@ -68,26 +68,77 @@ describe('live-run runbook accuracy', () => {
     }
   });
 
-  it('carries --boundary on every self-refresh invocation it prints', () => {
+  it('carries --boundary on every self-refresh command it prints', () => {
     // The guard this whole feature learned the hard way: a challenge without a
     // boundary can be replayed at a LATER boundary, clearing a builder against
     // a save describing work that has moved on. Two shipped call sites once
     // omitted it. A runbook a human copy-pastes is a third.
-    // Only actual invocations, not prose that mentions the command. The match
-    // stops at a backtick, so "run the two `afx self-refresh` steps" yields an
-    // empty argument list and is excluded — whereas a real command line keeps
-    // its flags. Treating a prose mention as an invocation would force flags
-    // into English sentences.
-    const invocations = [...runbook().matchAll(/afx self-refresh([^`\n]*)/g)]
-      .map(m => m[0])
-      .filter(m => m.replace('afx self-refresh', '').trim().length > 0);
+    //
+    // Scanned in two passes, because one pass cannot do both jobs without
+    // either missing the dangerous case or flagging English.
 
-    expect(invocations.length, 'runbook prints no self-refresh commands at all').toBeGreaterThan(2);
+    const text = runbook();
 
-    const missing = invocations.filter(l => !l.includes('--boundary') && !l.includes('--dry-run'));
-    expect(missing, `self-refresh invocations without --boundary:\n${missing.join('\n')}`).toEqual(
+    // Shell line-continuations joined first: the runbook wraps long commands,
+    // putting flags on the next line, so a line-based scan would see a bare
+    // `self-refresh` and report a missing flag that is right there. Read the
+    // command the way a shell does, not the way an editor displays it.
+    const joined = text.replace(/\\\n\s*/g, ' ');
+
+    // PASS 1 — fenced code blocks. This is what a human copies, so it is
+    // checked WITHOUT an "only if it has arguments" filter: a bare
+    // `afx self-refresh` in a copy-paste block is precisely the dangerous
+    // case, and skipping it for having no flags would skip the bug.
+    const fenced = [...joined.matchAll(/```[a-z]*\n([\s\S]*?)```/g)].map(m => m[1]);
+    const fencedCommands = fenced
+      .flatMap(block => block.split('\n'))
+      .filter(line => /self-refresh/.test(line));
+
+    expect(fencedCommands.length, 'no self-refresh commands in any code block').toBeGreaterThan(0);
+
+    const badFenced = fencedCommands.filter(
+      l => !l.includes('--boundary') && !l.includes('--dry-run'),
+    );
+    expect(badFenced, `code-block commands without --boundary:\n${badFenced.join('\n')}`).toEqual(
       [],
     );
+
+    // PASS 2 — inline commands in the numbered steps.
+    //
+    // The discriminator is the `<AFX>` placeholder, NOT the presence of
+    // arguments. An earlier version filtered on "has arguments" to exclude
+    // prose, and a mutation check found the hole immediately: a bare
+    // `<AFX> self-refresh` has no arguments, so the check that exists to catch
+    // a missing `--boundary` skipped the one command that was missing
+    // everything.
+    //
+    // `<AFX>` is defined by this runbook for exactly one purpose — a command
+    // the architect runs — while prose that merely names the tool writes `afx`.
+    // So the placeholder identifies commands by construction, and the check
+    // needs no argument heuristic at all.
+    // Requires the subcommand, so the line that DEFINES the placeholder is not
+    // mistaken for a command. A bare `<AFX> self-refresh` still matches, with
+    // empty arguments — which is the case this exists to catch.
+    const inline = [...joined.matchAll(/<AFX> self-refresh[^`\n]*/g)].map(m => m[0]);
+
+    expect(inline.length, 'no <AFX> commands found in the numbered steps').toBeGreaterThan(1);
+
+    const badInline = inline.filter(
+      l => !l.includes('--boundary') && !l.includes('--dry-run'),
+    );
+    expect(badInline, `inline commands without --boundary:\n${badInline.join('\n')}`).toEqual([]);
+  });
+
+  it('reserves the <AFX> placeholder for commands, never for prose', () => {
+    // The convention the check above depends on. If prose starts using <AFX>,
+    // the discriminator degrades silently into flagging English — so the
+    // convention is asserted rather than assumed.
+    const proseUses = runbook()
+      .split('\n')
+      .filter(l => l.includes('<AFX>') && !l.includes('self-refresh'))
+      // The line that DEFINES the placeholder necessarily mentions it.
+      .filter(l => !l.includes('means'));
+    expect(proseUses, `<AFX> used outside a command:\n${proseUses.join('\n')}`).toEqual([]);
   });
 
   it('states that both live tests block the phase', () => {

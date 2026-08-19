@@ -1540,3 +1540,46 @@ Two of my assertions in that test were themselves brittle and had to be fixed: o
 prose mention of the command as an invocation (which would force flags into English sentences),
 and one asserted a sentence that Markdown had wrapped across a line break (which would fail on
 re-wrapping rather than on a changed claim).
+
+### Architect rulings folded in (2026-08-19)
+
+**OPTION B ruled** — drive the CLI by hand, no Tower restart. Recorded in the runbook with the
+reasoning, because this is the kind of trade-off that looks like a shortcut in six months and is
+not: Option A restarts Tower, killing every builder across 14 workspaces including another
+project's fleet. The cost was never "a restart", it was other people's in-flight work. B covers
+37/38 honestly because those test the HARNESS (can a queued clear consume a re-entry delivered
+just after turn-end), while porch's emission is covered by the simulation. Each half gets the
+cheaper instrument that genuinely covers it.
+
+**FLOOR STAYS 1000** — endorsed, with an explicit revisit trigger to record in the review: a REAL
+boundary save rejected in production reopens the number via `MIN_ALLOWED_MIN_BYTES=200` operator
+config. Nothing to build.
+
+**Invocation verified, not assumed** (they asked, and a wrong answer means they drive installed
+3.3.0 and get a false result):
+- Entry is `packages/codev/bin/afx.js`, NOT dist directly — it imports `../dist/agent-farm/cli.js`.
+- `dist` is current: newer than every `.ts` under `src/`.
+- Ran it: `self-refresh --help` lists `--begin`/`--boundary`/`--dry-run`, which 3.3.0 lacks.
+- **Identity is cwd-derived, not binary-derived** — verified by running the same binary from
+  `/tmp`, which refuses with "must be run from inside a builder worktree" and **exits 1** (checked
+  the real code, not through a pipe). So the cross-worktree shape works: my build, their cwd.
+
+**The runbook guard had the exact hole it was written to close (item 23).** Updating the runbook
+broke the `--boundary` check, and fixing it took three passes, each caught by mutation:
+
+1. Line-based scan missed flags that a `\` continuation had put on the next line — the test read
+   the command as an editor displays it, not as a shell parses it.
+2. Filtering on "has arguments" (to exclude prose) meant a **bare** `<AFX> self-refresh` — no
+   flags at all — was skipped. The check that exists to catch a missing `--boundary` skipped the
+   one command missing everything. This is the third time on this project that an exclusion
+   written to reduce noise also excluded the target.
+3. Matching `<AFX>` alone flagged the line that DEFINES the placeholder. Requiring the subcommand
+   fixes it without reintroducing (2).
+
+Now two passes: fenced code blocks checked with NO argument filter (that is what gets copied), and
+inline steps discriminated by the `<AFX>` placeholder — which the runbook reserves for commands,
+a convention now asserted by its own test rather than assumed.
+
+Also fixed the template itself rather than exempting it: it said `self-refresh <flags>`, and now
+carries `--boundary 'enter:review' [--begin | --dry-run]`. A template that omits the guard teaches
+the omission.
