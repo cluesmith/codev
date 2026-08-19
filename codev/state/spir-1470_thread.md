@@ -1792,6 +1792,16 @@ not consume the re-entry (15.9s and 15.8s, two independent measurements), and a 
 leaves the context intact. Four fail-safes fired live — receipt rejection, stale challenge, dirty
 worktree, and the echo-the-request bypass — three of them unplanned.
 
+## One near-miss, worth carrying
+
+Composing a message to the architect, I put command names in backticks inside a **double-quoted**
+bash string. The shell substituted them and actually ran `porch rollback` and `porch verify` — both
+died on argument errors, nothing changed, verified immediately. Luck, not design: quoting a *valid*
+`porch rollback 1470 implement` would have rewound this project silently. **Issue #1532.** Build
+message bodies with a quoted heredoc and pass the variable. Same category as `git add .` — an
+ordinary convenience with an unguarded path to something irreversible, and it hides inside writing
+*about* dangerous commands, which is exactly when they get typed.
+
 ## Open, deliberately
 
 - **#1529** false acknowledgment — unmitigated, and it weakens a signal shipping in this PR.

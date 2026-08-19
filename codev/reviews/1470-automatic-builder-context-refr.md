@@ -430,6 +430,20 @@ wrong locally: it became a public issue with a fix direction attached, and someo
 would have hunted a bug that did not exist. The correction had to be as loud as the original claim,
 and had to go out before the issue aged into received knowledge.
 
+**A formatting habit reached a state-destroying command.** Composing a message to the architect, I
+wrote command names in backticks for readability and passed the body as a **double-quoted** bash
+string. The shell performed command substitution: `porch rollback` and `porch verify …` actually
+executed. Both died on argument errors and nothing changed — verified immediately, phase, iteration,
+timestamp and tree all unmoved — but that was luck. Had I quoted `porch rollback 1470 implement`,
+which is exactly the kind of concrete example worth putting in a message, it would have silently
+rewound this project.
+
+Filed as **issue #1532**. The rule: build message bodies with a quoted heredoc and pass the variable
+— parameter expansion does not re-run substitution — never a double-quoted string containing
+backticks. It belongs with `git add .` and `git reset --hard` in the same category: an ordinary
+convenience with an unguarded path to something irreversible. The difference is that this one hides
+inside *writing prose about* dangerous commands, which is precisely when they get typed.
+
 ### What would be done differently
 
 Survey before editing. Three of the five instance/class misses would have been caught by one grep
