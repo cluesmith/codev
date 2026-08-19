@@ -1,7 +1,7 @@
 id: '1527'
 title: disposable-live-run-subject-la
 protocol: aspir
-phase: specify
+phase: plan
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -13,4 +13,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-08-19T15:00:47.395Z'
-updated_at: '2026-08-19T15:00:47.396Z'
+updated_at: '2026-08-19T15:03:07.808Z'
