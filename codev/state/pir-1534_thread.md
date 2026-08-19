@@ -30,3 +30,35 @@ press can re-run `git diff -M --unified=3 <baseRef> -- <relPath>`.
 
 Plan written to `codev/plans/1534-vscode-forward-hunk-press-erro.md`. Awaiting plan-approval
 gate (Amr owns all 3 gates; architect relays, I run `porch approve`).
+
+## Plan-approval — APPROVED (2026-08-20)
+
+Amr approved verbatim ("approve 1534"), degrade-to-whole-file default + (c)-as-follow-up both
+approved. Architect confirmed the (c2) API constraint: `textEditorDiffInformation` is
+PROPOSED-only (sole consumer = built-in git extension), so a marketplace extension can command
+compare-editor navigation but cannot enumerate the change model — (c) only becomes clean in an
+IDE-bundled build with a product.json grant. Record that in the review's residual note so the
+follow-up issue is actionable.
+
+## Implement phase (2026-08-20) — COMPLETE, at dev-approval gate
+
+Implemented exactly as planned:
+- `diff-inject-codelens.ts` — `DiffInjectSessionEntry` gains `baseRef` + `worktreePath`.
+- `commands/press-cursor-ref.ts` (NEW) — `resolvePressCursorRef`: fresh single-file
+  `git diff -M --unified=3 <baseRef> -- <relPath>` (fallback to frozen `entry.hunks` on git
+  failure) + document symbols → the existing pure `resolveCursorRef` (symbol→hunk→file).
+- `extension.ts` — both `forwardCurrentHunkToBuilder` AND `forwardCursorContextToBuilder`
+  (Cmd+K H) route through the helper; honest fallback message replaces the misleading error.
+- `feedback.ts` — `hunkAnchor` async via the helper; `feedbackHunk` awaits it.
+- `view-diff.ts` — 3 construction sites pass baseRef + worktreePath.
+- Tests: new `press-cursor-ref.test.ts` (fresh-parse-catches-stale, deletion-only→symbol,
+  no-coverage→file, git-fail→frozen-fallback); feedback.test.ts +staleness +whole-file-fallback,
+  with a deterministic node:child_process mock; 4 fixture files updated for the new fields.
+
+Verification (from the worktree): `check-types` clean (tsc); `porch check 1534` → build ✓ +
+tests ✓; full vitest suite 882 passed. NOTE: `pnpm test` (vscode-test/Electron integration
+harness) can't spawn Electron in this sandbox (ENOENT) — that's an environment limit, not a
+code failure; the unit tests run under `test:unit` (vitest) and porch's `tests` check passed.
+
+Deck/physical-dial confirmation is the part I can't drive from the builder shell → routes to
+the streamdeck architect / Amr at dev-approval.
