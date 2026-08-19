@@ -41,8 +41,8 @@ gates:
     status: pending
   verify-approval:
     status: pending
-iteration: 1
-build_complete: true
+iteration: 2
+build_complete: false
 history:
   - iteration: 1
     plan_phase: phase_1_boundary_declaration
@@ -200,8 +200,20 @@ history:
         verdict: APPROVE
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/spir-1470/codev/projects/1470-automatic-builder-context-refr/1470-phase_7_docs_and_parity-iter1-claude.txt
+  - iteration: 1
+    plan_phase: phase_8_end_to_end
+    build_output: ''
+    reviews:
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-1470/codev/projects/1470-automatic-builder-context-refr/1470-phase_8_end_to_end-iter1-codex.txt
+      - model: claude
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-1470/codev/projects/1470-automatic-builder-context-refr/1470-phase_8_end_to_end-iter1-claude.txt
 started_at: '2026-08-18T00:15:05.131Z'
-updated_at: '2026-08-19T14:50:21.847Z'
+updated_at: '2026-08-19T15:19:27.642Z'
 force_advanced:
   phase: phase_4_selfrefresh_command
   iteration: 3
