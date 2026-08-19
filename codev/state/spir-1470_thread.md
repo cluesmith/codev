@@ -1600,3 +1600,48 @@ One correction recorded against my own thread: item 10 said "the skeleton is COR
 be touched" about the `$schema` paths. The skeleton *resolved*; it was not correct — it was
 emitting the bug into every scaffolded project. Left the original note in place and corrected it in
 the review rather than editing history, since the wrong belief is part of how the finding happened.
+
+## LIVE RUNS COMPLETE — tests 37 and 38 both PASS (2026-08-19)
+
+Architect-driven on disposable `builder-task-x47-`, Option B. Raw evidence preserved verbatim at
+`measurements/live-run-evidence.md`; review artifact summarises it.
+
+**Test 37**: re-entry delivered at 06:22:07.860, the clear at 06:21:51.984 — **15.9s after, not
+consumed**. Step log came out exactly as specified, all ten steps in order. The property no unit
+test can reach is now demonstrated rather than argued.
+
+**Resumption proven, not inferred.** The post-clear probe had the subject say in its own words that
+it sourced its answer "from `.builder-state.md` … then confirmed against the worktree — not from
+memory of doing the work, which is gone." That sentence is the feature: the context really is
+destroyed, and the builder returns by reading rather than remembering.
+
+**Test 38**: the architect picked variant **2c**, the echo-the-request bypass — the exact attack that
+once passed every gate AND every test. Rejected, reason naming the echo case verbatim, steps
+stopping before any clear, no re-entry scheduled. Choosing the sharpest variant is what makes this
+evidence worth having; an empty-file rejection would have proven much less.
+
+**Bonus, unplanned: the stale-challenge guard fired live.** A challenge aged 18320s against a 3600s
+limit was refused with an empty step log and "your context is intact". The replay guard demonstrated
+on the destructive path without anything being destroyed — and by accident, not by test design,
+which is the strongest evidence it is load-bearing rather than decorative.
+
+**Delay constant: stays 15, but the reason changed.** Measured, not inherited. The value is
+unchanged and that is the honest outcome — the inherited guess was right, and saying so beats
+adjusting a number to make the measurement look consequential.
+
+Two facts the measurement adds that reasoning alone would have got wrong (now in the constant's
+comment):
+- Delivery lags due time by ~1s (0.985s) because a **drainer pass**, not a timer, delivers. So the
+  constant is a FLOOR on the wait, never an exact interval.
+- The clear lands ~0.1s after scheduling, so **nearly the whole window is post-clear margin** — not
+  time spent waiting for the clear to take effect. It would have been natural to assume the
+  opposite and "optimise" the delay downward on that basis.
+
+**Save size: 4506 bytes**, 4.5× the floor, unpadded — third real data point and the largest. Every
+*observed* save clears the floor comfortably; the only sample below it is still the constructed one.
+Strengthens keep-1000 without settling it, since the revisit trigger waits on a real rejection.
+
+**Operational quirk recorded as follow-up 9, deliberately not fixed**: the subject's afx replies to
+the architect were lost while its file actions all executed. File side worked, reply side did not —
+the combination most likely to be misread as a stalled agent, and the same failure shape this
+feature exists to make visible.

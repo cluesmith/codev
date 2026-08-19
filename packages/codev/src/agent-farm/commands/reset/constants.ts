@@ -97,15 +97,33 @@ export const CHALLENGE_FILE_NAME = '.builder-refresh-challenge';
  * plus the clear executing at turn end. Framing it as time-after-the-clear would
  * make Phase 8 measure the wrong interval and pick a value that is too short.
  *
- * PROVISIONAL. `/arch-save` uses 15s, tuned by an architect watching it happen;
- * Spec 1470 requires this value to come from a live measurement instead, which
- * Phase 8 takes. Until then this is the arch-save number, carried over rather
- * than invented, and it is deliberately a named constant so the measurement has
- * exactly one place to land.
+ * MEASURED, no longer provisional. `/arch-save` used 15s tuned by an architect
+ * watching it happen; Spec 1470 required the number to come from a live
+ * measurement rather than inheritance, and Phase 8's architect-driven live run
+ * took it (2026-08-19, subject `builder-task-x47-`):
+ *
+ *   06:21:51.875  re-entry scheduled, +15s   → due 06:22:06.875
+ *   06:21:51.984  the `/clear` delivered
+ *   06:22:07.860  the re-entry delivered
+ *
+ * So the re-entry landed **15.9s after the clear** and was NOT consumed by it —
+ * the one property no unit test can reach, and the reason the whole feature
+ * schedules before it clears. 15 is kept because it was measured to work, not
+ * because it was inherited.
+ *
+ * Two facts the measurement adds that the number alone does not carry:
+ *
+ *  - **Delivery lags the due time by roughly a second** (0.985s here) because a
+ *    drainer pass, not a timer, does the delivering. So this constant is a
+ *    FLOOR on the wait, never an exact interval. Anything that ever needs the
+ *    two events strictly ordered must not shave the margin to near zero.
+ *  - **The clear is delivered ~0.1s after scheduling**, so almost the whole
+ *    window is post-clear margin rather than time spent waiting to clear.
  *
  * Note the delivery is NOT a bare timer: `--delay` persists the body to the
  * durable mailbox at request time, so it survives a Tower restart, and the
- * render gate holds it until the target's prompt is verifiably clean.
+ * render gate holds it until the target's prompt is verifiably clean. The
+ * drainer granularity above is a direct consequence of that design.
  */
 export const DEFAULT_REENTRY_DELAY_SECONDS = 15;
 

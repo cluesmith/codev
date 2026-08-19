@@ -34,8 +34,8 @@ Eight plan phases, one PR, 24 consultation rounds across 8 phases, ~350 new test
 | Stalled refresh is visible with recovery command | ✅ | `porch status` three states; `--json` fields |
 | Spec test 36 — full protocol, one record per boundary | ✅ | `spec-1470-full-protocol.test.ts` |
 | Spec tests 34, 35 — re-entry survives restart; held when busy | ✅ | `spec-1470-reentry-delivery.test.ts` |
-| **Spec test 37 — live: clear lands, re-entry not consumed** | ⏳ **PENDING** | Architect-driven; see *Live-run evidence* |
-| **Spec test 38 — live: failed gate leaves context intact** | ⏳ **PENDING** | Architect-driven; see *Live-run evidence* |
+| **Spec test 37 — live: clear lands, re-entry not consumed** | ✅ **PASS** | Live run 2026-08-19; re-entry delivered 15.9s after the clear |
+| **Spec test 38 — live: failed gate leaves context intact** | ✅ **PASS** | Live run; echo-bypass variant rejected, no clear attempted |
 | Spec test 39 — cross-tree parity | ✅ | Split across `spec-1470-parity.test.ts` and the Phase 1 boundary-config test, cross-referenced in both |
 
 ## Deviations from Plan
@@ -65,27 +65,77 @@ Recorded so a later reader does not score them as skipped deliverables.
 
 ## Live-run evidence
 
-> **PENDING — architect-driven.** Runbook: `codev/projects/1470-automatic-builder-context-refr/1470-live-run-runbook.md`.
->
-> Ruled **Option B** (drive the CLI by hand, no Tower restart): Option A restarts Tower and kills
-> every builder across 14 workspaces including another project's fleet. Option B satisfies 37/38
-> honestly because they test the *harness* — can a queued `/clear` consume a re-entry delivered
-> just after turn-end — while porch's emission is covered by the full-protocol simulation. Each
-> half gets the cheaper instrument that genuinely covers it.
->
-> **Both tests are blocking.** A red 37 or 38 is not written up and merged past; the implementation
-> or the spec is revised and the run repeats.
+**Both blocking criteria PASS.** Architect-driven, 2026-08-19, on disposable subject
+`builder-task-x47-`. Runbook:
+`codev/projects/1470-automatic-builder-context-refr/1470-live-run-runbook.md`.
+
+Ruled **Option B** (drive the CLI by hand, no Tower restart): Option A restarts Tower and kills
+every builder across 14 workspaces including another project's fleet. Option B satisfies 37/38
+honestly because they test the *harness* — can a queued `/clear` consume a re-entry delivered just
+after turn-end — while porch's emission is covered by the full-protocol simulation. Each half got
+the cheaper instrument that genuinely covers it.
 
 | | Result | Evidence |
 |---|---|---|
-| Preflight — identity resolves before any clear | ⏳ | |
-| Run 1 / test 37 — re-entry arrives after the clear, not consumed | ⏳ | |
-| Run 1 — measured clear→re-entry delay | ⏳ | sets `DEFAULT_REENTRY_DELAY_SECONDS` |
-| Run 1 — real boundary-save size | ⏳ | adds to the straddle measurement below |
-| Run 2 / test 38 — failed gate leaves context intact | ⏳ | |
+| Preflight — identity resolves before any clear | ✅ | Challenge issued naming the **subject's** path, exit 0. Control: same binary from `/tmp` refused, exit 1 |
+| Run 1 / test 37 — re-entry arrives after the clear, not consumed | ✅ | See timeline below |
+| Run 1 — measured clear→re-entry delay | ✅ | **15.9s** — validates the 15s constant |
+| Run 1 — real boundary-save size | ✅ | **4506 bytes**, 4.5× the floor, unpadded |
+| Run 2 / test 38 — failed gate leaves context intact | ✅ | Echo-bypass variant; aborted before any clear |
+| Bonus — stale-challenge fail-safe | ✅ | Challenge aged 18320s vs 3600 limit → aborted, context intact |
 
-`DEFAULT_REENTRY_DELAY_SECONDS` is **15 by inheritance** until Run 1 measures it. That is the one
-number in this feature still resting on someone else's guess.
+### Run 1 — the property no unit test can reach
+
+Subject had genuine context (two large documents read, a deliverable written). Save was real:
+4506 bytes, nonce on the first line. Step log came out **exactly** as specified:
+
+```
+challenge-read → worktree-checked → receipt-accepted → assemble → reorient-written →
+reentry-scheduled → challenge-marked → clear-attempted → clear → challenge-consumed
+```
+
+The ordering that matters, from `tower.log`:
+
+```
+06:21:51.875  re-entry scheduled (+15s)  → due 06:22:06.875
+06:21:51.984  the /clear delivered, onto a verified-empty prompt
+06:22:07.860  THE RE-ENTRY delivered — 15.9s after the clear, NOT consumed by it
+```
+
+**Resumption was proven, not inferred.** A post-clear probe asked the subject to identify itself
+and its state. It answered from disk and said so in its own words:
+
+> sourced "from `.builder-state.md` … then confirmed against the worktree (`git status`,
+> `git log -1`, and the deliverable on disk) — **not from memory of doing the work, which is
+> gone**."
+
+That is the feature working as designed: the context is genuinely destroyed, and the builder comes
+back by reading rather than remembering.
+
+### Run 2 — the fail-safe, tested at its sharpest point
+
+The architect chose variant **2c**, the echo-the-request bypass — the exact attack that once passed
+every gate and every test. `cp <begin-output> .builder-state.md` produced a 2557-byte file, over the
+floor, nonce present but **not on the first line**.
+
+Result: aborted with `receipt-rejected`, the reason naming the echo case verbatim, steps stopping at
+`challenge-read → worktree-checked`, **"No clear was attempted"**, exit 1. No re-entry was scheduled
+— `tower.log` shows Run 1's message as the only one ever scheduled. The subject kept working
+normally afterwards.
+
+Choosing 2c rather than the empty-file variant is what makes this evidence worth having: it proves
+the *specific* bypass this project closed is closed in production, not merely that an empty file is
+rejected.
+
+### Bonus — the stale-challenge guard fired live
+
+Unplanned, and the most reassuring result of the set. A challenge aged **18320s** against a 3600s
+limit was refused (`no-challenge`), with an empty step log and *"No clear was attempted. Your
+context is intact."* Recovery per the message's own instructions worked.
+
+This is the replay guard the `--boundary` binding exists for, demonstrated on the destructive path
+without anything being destroyed — and it fired by accident rather than by test design, which is
+the strongest kind of evidence that it is load-bearing rather than decorative.
 
 ## Boundary-save size measurement
 
@@ -95,6 +145,7 @@ cluster at the floor, they straddle it:
 
 | Sample | Bytes | vs floor | Provenance |
 |---|---:|---|---|
+| **Live subject at a real boundary** | **4506** | **4.5×** | **Real, observed in the live run** |
 | This project's own save at `enter:review` | 2952 | 3.0× | **Real** |
 | Small project at a plan-phase advance | 634 | **0.6× — rejected** | **Constructed** |
 
@@ -104,9 +155,13 @@ inconvenient is not grounds for a builder to relitigate a Baked Decision. The fa
 a rejected save means no clear, so a builder loses the refresh rather than its memory.
 
 **Revisit trigger, architect-set**: a **real** boundary save rejected in production use reopens the
-number, via `MIN_ALLOWED_MIN_BYTES = 200` operator config. Nothing needs building. The caveat that
-matters: the terse sample is *constructed, not observed*, and one real data point plus one
-plausible one is thin evidence for a threshold.
+number, via `MIN_ALLOWED_MIN_BYTES = 200` operator config. Nothing needs building.
+
+The live run supplied a third data point and it is the largest yet — 4506 bytes, unpadded, from a
+subject that had done ordinary work. So **every real save observed clears the floor comfortably**
+(4.5× and 3.0×), and the only sample below it remains the *constructed* one. That strengthens the
+keep-1000 decision without settling it: no observed save has been rejected, which is exactly the
+condition the revisit trigger waits on.
 
 ## Consultation feedback
 
@@ -291,7 +346,14 @@ Confirmed out of scope for this project; none block the PR.
    re-emits implement tasks and resets `build_complete`. Running `done` again, then `next`
    separately, works. The tell is in `done`'s own output: "Ready for 2-way review" resets, "Ready
    for verification" advances. Hit twice, worked around both times.
-9. **Happy-path step log is a superset of spec test 30's literal sequence** —
+9. **Task-lane `afx` replies to the architect were silently lost** during the live runs — the
+   subject's `STATE WRITTEN` / `STATE UPDATED` notices and its first probe answer never arrived,
+   while every *file* action it took executed correctly. So the lane's file side worked and its
+   reply side did not, which is the combination most likely to be misread as a stalled agent.
+   Observed on a task-lane builder, not a protocol builder; unrelated to this spec's changes and
+   explicitly **not fixed here** per architect direction. Worth its own issue: a lost reply looks
+   identical to no reply, which is the same failure shape this feature exists to make visible.
+10. **Happy-path step log is a superset of spec test 30's literal sequence** —
    `challenge-read`, `worktree-checked`, `challenge-marked`, `clear-attempted` and
    `challenge-consumed` are extra. The required subsequence and its ordering *are* asserted; the
    extras are gates the handshake needs. Recorded so it is not scored as a miss.
