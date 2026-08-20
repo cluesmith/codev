@@ -91,6 +91,7 @@ export type {
   OverviewBacklogItem,
   OverviewRecentlyClosed,
   OverviewData,
+  HeldMessage,
   ProtocolStats,
   AnalyticsResponse,
 } from '@cluesmith/codev-types';
@@ -100,6 +101,7 @@ import type {
   AnalyticsResponse,
   TeamApiResponse,
   OverviewData,
+  HeldMessage,
   DashboardState,
 } from '@cluesmith/codev-types';
 
@@ -120,6 +122,23 @@ export async function fetchTeam(): Promise<TeamApiResponse> {
 export async function fetchOverview(): Promise<OverviewData> {
   const res = await fetch(apiUrl('api/overview'), { headers: getAuthHeaders() });
   if (!res.ok) throw new Error(`Failed to fetch overview: ${res.status}`);
+  return res.json();
+}
+
+/**
+ * Issue 1450: the workspace's currently-held mailbox rows — the payload behind the
+ * held-mail popover, and the same projection `afx inbox` renders.
+ *
+ * Hits the workspace-scoped `GET /api/inbox`, which resolves the workspace server-side from
+ * the `/workspace/<base64>/` URL prefix (the dashboard has no absolute workspace path of its
+ * own). Metadata only — never message bodies.
+ *
+ * Called lazily, on popover open, rather than folded into the 2.5s overview poll: this is a
+ * cold path that only matters when the user asks.
+ */
+export async function fetchInbox(): Promise<HeldMessage[]> {
+  const res = await fetch(apiUrl('api/inbox'), { headers: getAuthHeaders() });
+  if (!res.ok) throw new Error(`Failed to fetch held messages: ${res.status}`);
   return res.json();
 }
 
