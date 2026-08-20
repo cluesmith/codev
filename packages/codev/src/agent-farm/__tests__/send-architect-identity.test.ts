@@ -229,7 +229,9 @@ describe('Spec 1313 — migration + self-heal source guards', () => {
   const read = (rel: string) => fs.readFileSync(path.resolve(import.meta.dirname, rel), 'utf-8');
 
   it('db migration v16 is registered, bumps the version, and adds the command column', () => {
-    const dbSrc = read('../db/index.ts');
+    // Issue #1476: the migration chain moved out of db/index.ts into db/migrations.ts
+    // (`runGlobalMigrations`), which the migration tests now drive directly.
+    const dbSrc = read('../db/migrations.ts');
     // The version constant MUST advance — else a fresh install records only 1..15
     // and the v16 block only converges on a later open (the omission #23 flagged).
     // It now sits at 17 (Spec 1313 round 3 added the not_before mailbox migration);
