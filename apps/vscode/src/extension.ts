@@ -1521,7 +1521,7 @@ export async function activate(context: vscode.ExtensionContext) {
 	// Spec 1313 Phase 8: toast when a held message crosses the escalation age
 	// (the `mailbox-escalation` SSE event). Visibility only — read/dismiss via
 	// `afx inbox`. Respects `codev.mailboxEscalationToasts.enabled`.
-	activateMailboxEscalationToasts(context, connectionManager);
+	activateMailboxEscalationToasts(context, connectionManager, overviewCache);
 
 	// Auto-open builder terminals on Tower spawn events
 	const builderSpawnHandler = new BuilderSpawnHandler(connectionManager, terminalManager, outputChannel);
