@@ -72,6 +72,19 @@ beforeAll(() => {
     '#!/bin/sh\necho "diff --git a/file.ts b/file.ts"\necho "--- a/file.ts"\necho "+++ b/file.ts"\n');
   chmodSync(join(MOCK_SCRIPTS_DIR, 'diff-output.sh'), 0o755);
 
+  // Script opening with `. "$(dirname "$0")/_lib.sh"` — the shape #1146's read
+  // scripts use. Without treating `.`/`source` as builtins, extractExecutable
+  // would report the executable as literally "." and `codev doctor` would warn
+  // that "." is missing from PATH instead of naming the real CLI (gh).
+  writeFileSync(join(MOCK_SCRIPTS_DIR, 'lib.sh'), '#!/bin/sh\n');
+  chmodSync(join(MOCK_SCRIPTS_DIR, 'lib.sh'), 0o755);
+  writeFileSync(join(MOCK_SCRIPTS_DIR, 'dot-source.sh'),
+    `#!/bin/sh\n. "\${0%/*}/lib.sh"\ngh issue view "$1"\n`);
+  chmodSync(join(MOCK_SCRIPTS_DIR, 'dot-source.sh'), 0o755);
+  writeFileSync(join(MOCK_SCRIPTS_DIR, 'source-keyword.sh'),
+    `#!/bin/sh\nsource "\${0%/*}/lib.sh"\ngh issue view "$1"\n`);
+  chmodSync(join(MOCK_SCRIPTS_DIR, 'source-keyword.sh'), 0o755);
+
   // .codev/config.json with forge overrides
   mkdirSync(join(TEST_DIR, '.codev'), { recursive: true });
   writeFileSync(join(TEST_DIR, '.codev', 'config.json'), JSON.stringify({
@@ -504,6 +517,17 @@ describe('provider presets', () => {
     expect(teamActivity?.command).toBeNull();
   });
 
+  it('linear provider disables pr-create instead of falling through to gh (#1455)', () => {
+    // Linear has no PR concept of its own and ships no pr-create script. Without
+    // an explicit disable, it would silently fall through to the github default
+    // (`gh pr create`) — the exact silent-fallthrough bug class #1455 closes.
+    const config = { provider: 'linear' };
+    expect(getForgeCommand('pr-create', config)).toBeNull();
+    const prCreate = resolveAllConcepts(config).find(r => r.concept === 'pr-create');
+    expect(prCreate?.source).toBe('disabled');
+    expect(prCreate?.command).toBeNull();
+  });
+
   it('linear provider resolves issue-view as preset', () => {
     const config = { provider: 'linear' };
     const resolutions = resolveAllConcepts(config);
@@ -602,4 +626,18 @@ describe('resolveAllConcepts', () => {
     // Default command is: if [ -n "$CODEV_SINCE_DATE" ]; then gh issue list ...
     expect(recentlyClosed?.executable).toBe('gh');
   });
+
+  it.each(['dot-source.sh', 'source-keyword.sh'])(
+    'skips `.`/`source` when a script opens by sourcing a helper (%s)',
+    (script) => {
+      // #1146's read scripts open with `. "$(dirname "$0")/_lib.sh"`. Without
+      // treating `.`/`source` as builtins, this reports the executable as "."
+      // (or "source") and `codev doctor` warns that's missing from PATH,
+      // instead of naming the real CLI the script actually needs.
+      const config = { 'issue-view': join(MOCK_SCRIPTS_DIR, script) };
+      const resolutions = resolveAllConcepts(config);
+      const issueView = resolutions.find(r => r.concept === 'issue-view');
+      expect(issueView?.executable).toBe('gh');
+    },
+  );
 });

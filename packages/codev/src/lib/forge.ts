@@ -127,7 +127,11 @@ function getProviderPresets(): Record<string, Record<string, string | null>> {
     github: getDefaultCommands(),
     gitlab: buildPresetFromScripts('gitlab', ['team-activity', 'on-it-timestamps']),
     gitea: buildPresetFromScripts('gitea', ['team-activity', 'on-it-timestamps', 'pr-search', 'pr-diff']),
-    linear: buildPresetFromScripts('linear', ['team-activity', 'on-it-timestamps']),
+    // pr-create is explicitly disabled (not just "no script") — Linear has no PR
+    // concept of its own, and without this it silently falls through to the
+    // github default (`gh pr create`) instead of failing loudly. That's the
+    // exact silent-fallthrough bug class #1455 closes.
+    linear: buildPresetFromScripts('linear', ['team-activity', 'on-it-timestamps', 'pr-create']),
   };
   return _providerPresets;
 }
@@ -190,7 +194,7 @@ export function resolveAllConcepts(forgeConfig?: ForgeConfig | null): ConceptRes
  * For inline commands: handles `if [ ... ]; then cmd ...` patterns and pipes.
  */
 /** Shell builtins and keywords that are never the executable a concept needs on PATH. */
-const SHELL_BUILTINS = ['if', 'then', 'else', 'fi', 'test', '[', '[[', 'set', 'export', 'readonly', 'local', 'shift', ':'];
+const SHELL_BUILTINS = ['if', 'then', 'else', 'fi', 'test', '[', '[[', 'set', 'export', 'readonly', 'local', 'shift', ':', '.', 'source'];
 
 function extractExecutable(command: string): string | null {
   const trimmed = command.trim();

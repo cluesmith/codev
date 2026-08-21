@@ -74,9 +74,21 @@ if [ -n "$CODEV_PR_LOGIN" ]; then set -- "$@" --login "$CODEV_PR_LOGIN"; fi
 base=$CODEV_PR_BASE
 if [ -z "$base" ]; then
   # The API rejects a missing base, so mirror `tea pulls create`'s default.
-  base=$(tea api "$@" 'repos/{owner}/{repo}' | jq -r '.default_branch // empty') || base=
+  base_response=$(tea api "$@" 'repos/{owner}/{repo}') || base_response=
+  base=$(printf '%s' "$base_response" | jq -r '.default_branch // empty' 2>/dev/null) || base=
   if [ -z "$base" ]; then
-    echo "pr-create: could not resolve the repository's default branch; set CODEV_PR_BASE" >&2
+    # An unresolvable repo (404 — same cause as the POST path below) means the
+    # actual remedy is CODEV_PR_REPO, not CODEV_PR_BASE; only a resolvable repo
+    # with a genuinely missing default_branch calls for CODEV_PR_BASE.
+    case "$base_response" in
+      404*)
+        echo "pr-create: Gitea answered 404 — could not resolve owner/repo for this repository." >&2
+        echo "pr-create: set CODEV_PR_REPO=owner/repo, or run from a checkout whose remote is a configured Gitea host." >&2
+        ;;
+      *)
+        echo "pr-create: could not resolve the repository's default branch; set CODEV_PR_BASE" >&2
+        ;;
+    esac
     exit 1
   fi
 fi

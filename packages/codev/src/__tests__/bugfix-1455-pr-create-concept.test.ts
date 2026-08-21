@@ -457,6 +457,31 @@ describe('#1455 — pr-create scripts honour the contract', () => {
     }
     expect(stderr).toContain('CODEV_PR_REPO=owner/repo');
   });
+
+  it.skipIf(!hasJq())(
+    'gitea: names CODEV_PR_REPO, not CODEV_PR_BASE, when base is unset and the repo does not resolve',
+    () => {
+      // Same unresolvable-repo 404 as above, but hit via the OTHER call site:
+      // resolving the default branch because CODEV_PR_BASE was never set. The
+      // remedy is still "the repo didn't resolve" — CODEV_PR_REPO — not
+      // CODEV_PR_BASE, which is what this failure used to say.
+      stub('tea', ['if [ "$1" = "api" ]; then', '  echo "404 page not found"', '  exit 0', 'fi', 'exit 1'].join('\n'));
+
+      let stderr = '';
+      try {
+        run('gitea', {
+          CODEV_PR_TITLE: 't',
+          CODEV_PR_BODY: 'b',
+          CODEV_PR_HEAD: 'x',
+        });
+        expect.unreachable('the script exited 0 for a PR that was never created');
+      } catch (e) {
+        stderr = String((e as { stderr?: Buffer }).stderr ?? '');
+      }
+      expect(stderr).toContain('CODEV_PR_REPO=owner/repo');
+      expect(stderr).not.toContain('set CODEV_PR_BASE');
+    },
+  );
 });
 
 describe('#1455 — prompts route PR creation through the concept', () => {
