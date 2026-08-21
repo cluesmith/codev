@@ -18,8 +18,12 @@
 # past the first page — tea_api_paged walks every page (see _lib.sh).
 . "$(dirname "$0")/_lib.sh"
 REPO="$(gitea_repo)" || exit 1
-tea_api_paged "repos/${REPO}/pulls" "state=closed" \
-  | jq '[.[] | select(.merged == true) | {
+# Capture the paginator's output before piping to jq: in POSIX sh (no
+# pipefail), a `cmd | jq` pipeline reports jq's exit status (0) even when
+# `cmd` failed mid-walk, which would silently truncate the list instead of
+# surfacing the error.
+PULLS="$(tea_api_paged "repos/${REPO}/pulls" "state=closed")" || exit 1
+printf '%s' "$PULLS" | jq '[.[] | select(.merged == true) | {
       number,
       title,
       url: (.html_url // .url),

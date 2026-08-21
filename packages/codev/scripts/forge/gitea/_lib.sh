@@ -58,6 +58,7 @@ tea_api_paged() {
   _query="$2"
   _page=1
   _acc='[]'
+  _page_size=''
   while [ "$_page" -le "$GITEA_MAX_PAGES" ]; do
     if [ -n "$_query" ]; then
       _url="${_path}?${_query}&limit=${GITEA_PAGE_LIMIT}&page=${_page}"
@@ -68,8 +69,15 @@ tea_api_paged() {
     # Blank body or an empty array → no more pages.
     [ -n "$_resp" ] || break
     _count="$(printf '%s' "$_resp" | jq 'length')" || return 1
+    [ "$_count" -eq 0 ] && break
     _acc="$(printf '%s\n%s' "$_acc" "$_resp" | jq -s 'add')" || return 1
-    [ "$_count" -lt "$GITEA_PAGE_LIMIT" ] && break
+    # A server whose max_response_items is tuned below GITEA_PAGE_LIMIT
+    # truncates every page to its own cap, not the requested limit — so
+    # stopping when a page is shorter than the *requested* limit would break
+    # after page 1 even though more pages exist. Compare against the size
+    # actually observed on the first page instead.
+    [ -z "$_page_size" ] && _page_size="$_count"
+    [ "$_count" -lt "$_page_size" ] && break
     _page=$((_page + 1))
   done
   printf '%s' "$_acc"

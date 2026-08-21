@@ -24,6 +24,10 @@
 # block a porch pr_exists gate — tea_api_paged walks every page (see _lib.sh).
 . "$(dirname "$0")/_lib.sh"
 REPO="$(gitea_repo)" || exit 1
-tea_api_paged "repos/${REPO}/pulls" "state=all" \
-  | jq --arg branch "$CODEV_BRANCH_NAME" \
-      '[.[] | select(.head.ref == $branch and (.state == "open" or .merged == true))] | length > 0'
+# Capture the paginator's output before piping to jq: in POSIX sh (no
+# pipefail), a `cmd | jq` pipeline reports jq's exit status (0) even when
+# `cmd` failed mid-walk, which would surface a real error as a false-negative
+# "no PR exists" and silently pass a porch pr_exists gate.
+PULLS="$(tea_api_paged "repos/${REPO}/pulls" "state=all")" || exit 1
+printf '%s' "$PULLS" | jq --arg branch "$CODEV_BRANCH_NAME" \
+    '[.[] | select(.head.ref == $branch and (.state == "open" or .merged == true))] | length > 0'

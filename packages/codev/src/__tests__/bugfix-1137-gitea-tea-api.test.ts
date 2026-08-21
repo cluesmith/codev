@@ -19,10 +19,22 @@
  *   - `issue-view` warns on stderr when the comments fetch degrades to [].
  *
  * `tea` isn't available in CI (see the in-repo #920 note), so this test stubs a
- * fake `tea` on PATH that answers `api <endpoint>` (and `comments add`) with
+ * fake `tea` on PATH that answers `api <endpoint>` (and `comment`) with
  * captured Gitea REST fixtures, points the scripts at a throwaway git repo with
  * a gitea remote, runs each real script, and asserts the normalized output
  * conforms to the contract in forge-contracts.ts.
+ *
+ * Integration-review follow-up (2026-08-17, amrmelsayed):
+ *   - `issue-comment` now calls the top-level `tea comment` shorthand rather
+ *     than `tea comments add`, which only exists on tea 0.14.2+ and fails on
+ *     the still-current 0.14.1 release.
+ *   - `pr-exists`/`pr-list`/`recently-merged` now capture `tea_api_paged`'s
+ *     output before piping to jq, so a mid-walk failure exits non-zero instead
+ *     of surfacing as jq's exit-0-on-empty-stdin.
+ *   - `tea_api_paged`'s stop condition now compares against the page size
+ *     actually observed on page 1, not the requested limit, so a server whose
+ *     `max_response_items` is tuned below the requested limit doesn't stop
+ *     after page 1 while more pages remain.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -48,8 +60,9 @@ const giteaDir = resolve(__dirname, '..', '..', 'scripts', 'forge', 'gitea');
 // scripts walk past the server's page cap: each carries a "signature" item plus
 // filler, and a distinct item that lives ONLY on page 2.
 const FAKE_TEA = `#!/bin/sh
-if [ "$1" = "comments" ] && [ "$2" = "add" ]; then
-  # comments add <id> <body>
+if [ "$1" = "comment" ]; then
+  # comment <id> <body> (the tea 0.14.1-compatible shorthand for
+  # \`tea comments add\`, which only exists on 0.14.2+)
   echo "commented"
   exit 0
 fi
@@ -59,6 +72,35 @@ case "$2" in
     echo '{"login":"octo","id":7}' ;;
   repos/acme/widgets/pulls/42)
     echo '{"number":42,"title":"Add widget","body":"PR body","state":"open","html_url":"https://git.example.com/acme/widgets/pulls/42","url":"https://git.example.com/api/v1/repos/acme/widgets/pulls/42","user":{"login":"alice"},"base":{"ref":"main"},"head":{"ref":"feature/x"},"additions":10,"deletions":3}' ;;
+
+  # --- mid-walk pagination failure: page 1 is a full 50 items (so the
+  # paginator commits to a page 2), page 2 errors. Used to prove pr-exists/
+  # pr-list/recently-merged exit non-zero instead of silently succeeding with
+  # a truncated/empty result (the jq-exit-status-masks-a-failed-pipe bug). ---
+  "repos/acme/failing/pulls?state=all&limit=50&page=1")
+    jq -cn '[range(50)|{number:(3000+.),state:"open",merged:false,head:{ref:("pad-"+(.|tostring))}}]' ;;
+  "repos/acme/failing/pulls?state=all&limit=50&page=2")
+    echo "fake-tea: page 2 unavailable" >&2; exit 9 ;;
+  "repos/acme/failing/pulls?state=open&limit=50&page=1")
+    jq -cn '[range(50)|{number:(3000+.),title:"pad",html_url:"u",body:"",state:"open",created_at:"d",user:{login:"pad"},requested_reviewers:[],draft:false}]' ;;
+  "repos/acme/failing/pulls?state=open&limit=50&page=2")
+    echo "fake-tea: page 2 unavailable" >&2; exit 9 ;;
+  "repos/acme/failing/pulls?state=closed&limit=50&page=1")
+    jq -cn '[range(50)|{number:(3000+.),title:"pad",state:"closed",merged:false,head:{ref:"pad"}}]' ;;
+  "repos/acme/failing/pulls?state=closed&limit=50&page=2")
+    echo "fake-tea: page 2 unavailable" >&2; exit 9 ;;
+
+  # --- sub-limit server cap: max_response_items tuned to 30 (below the
+  # requested limit of 50), so EVERY page — including the last — is capped at
+  # 30. Three pages: 30 + 30 + 6 (66 total). Proves the paginator keeps
+  # walking past a full-but-capped page instead of stopping after page 1
+  # because 30 < the requested 50. ---
+  "repos/acme/capped/pulls?state=open&limit=50&page=1")
+    jq -cn '[range(30)|{number:(4000+.),title:"pad",html_url:"u",body:"",state:"open",created_at:"d",user:{login:"pad"},requested_reviewers:[],draft:false}]' ;;
+  "repos/acme/capped/pulls?state=open&limit=50&page=2")
+    jq -cn '[range(30)|{number:(4100+.),title:"pad",html_url:"u",body:"",state:"open",created_at:"d",user:{login:"pad"},requested_reviewers:[],draft:false}]' ;;
+  "repos/acme/capped/pulls?state=open&limit=50&page=3")
+    jq -cn '[range(5)|{number:(4200+.),title:"pad",html_url:"u",body:"",state:"open",created_at:"d",user:{login:"pad"},requested_reviewers:[],draft:false}] + [{number:4299,title:"Last capped page item",html_url:"u",body:"",state:"open",created_at:"d",user:{login:"pad"},requested_reviewers:[],draft:false}]' ;;
 
   # --- pr-exists: state=all, paginated -------------------------------------
   # page 1 = 50 items (open feature/x, merged feature/done, closed-not-merged
@@ -282,10 +324,46 @@ describe.skipIf(!jqAvailable)('bugfix #1137: gitea preset routes reads through `
     });
   });
 
-  it('issue-comment uses `tea comments add` and exits 0', () => {
+  it('issue-comment uses `tea comment` (not the 0.14.2-only `tea comments add`) and exits 0', () => {
     // Would exit non-zero (throwing) if it invoked the non-existent
-    // `tea issues comment` subcommand.
+    // `tea issues comment` subcommand, or the 0.14.2+-only `tea comments add`.
     expect(runScript('issue-comment.sh', { CODEV_ISSUE_ID: '99', CODEV_COMMENT_BODY: 'hi' })).toBe('commented');
+  });
+
+  it('pr-exists exits non-zero (not "false") on a mid-walk pagination failure', () => {
+    // Page 1 is a full 50 items so the paginator commits to fetching page 2,
+    // which the fixture makes error. Without capturing tea_api_paged's output
+    // before the jq pipe, POSIX sh (no pipefail) reports jq's exit status (0)
+    // on empty stdin, which prints "false" — a silent false-negative that
+    // would pass a porch pr_exists gate instead of surfacing the failure.
+    const { status, stdout } = runScriptFull('pr-exists.sh', {
+      CODEV_BRANCH_NAME: 'whatever',
+      CODEV_REPO: 'acme/failing',
+    });
+    expect(status).not.toBe(0);
+    expect(stdout.trim()).toBe('');
+  });
+
+  it('pr-list exits non-zero on a mid-walk pagination failure', () => {
+    const { status, stdout } = runScriptFull('pr-list.sh', { CODEV_REPO: 'acme/failing' });
+    expect(status).not.toBe(0);
+    expect(stdout.trim()).toBe('');
+  });
+
+  it('recently-merged exits non-zero on a mid-walk pagination failure', () => {
+    const { status, stdout } = runScriptFull('recently-merged.sh', { CODEV_REPO: 'acme/failing' });
+    expect(status).not.toBe(0);
+    expect(stdout.trim()).toBe('');
+  });
+
+  it('pr-list keeps walking past a page capped below the requested limit', () => {
+    // Server's max_response_items is tuned to 30 (below the requested 50), so
+    // every page — including the last — returns exactly 30 or fewer. Stopping
+    // when a page is shorter than the *requested* limit (50) would break after
+    // page 1, even though pages 2 and 3 carry real items.
+    const list = JSON.parse(runScript('pr-list.sh', { CODEV_REPO: 'acme/capped' }));
+    expect(list).toHaveLength(66); // 30 + 30 + 6
+    expect(list.some((p: { number: number }) => p.number === 4299)).toBe(true);
   });
 
   it('CODEV_REPO overrides the git-remote-derived owner/repo', () => {
