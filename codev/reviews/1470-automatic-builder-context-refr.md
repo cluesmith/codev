@@ -3,6 +3,24 @@
 **Spec**: `codev/specs/1470-automatic-builder-context-refr.md` · **Plan**:
 `codev/plans/1470-automatic-builder-context-refr.md` · **Issue**: #1470 · **Protocol**: SPIR (strict)
 
+> ## ⚠ Porch state reads `review / iteration 1` — this project is COMPLETE, not abandoned
+>
+> PR #1528 is **merged** (true merge, 2026-08-19). The feature is on `main`, issues #1470 and #1503
+> are closed, and every plan phase passed its review.
+>
+> Porch is **parked**, deliberately and honestly. SPIR's review phase requires a `pr`-type
+> consultation; `consult` cannot resolve a **merged** PR by branch or by `--issue`, and porch has no
+> command that records an unrunnable consultation — so the phase can neither complete nor escape.
+> Both halves are **issue #1531**.
+>
+> The architect ruled the consultation satisfied by this project's 24 completed review rounds. That
+> ruling lives here, in the artifact. It was deliberately **not** written into `status.yaml`, which
+> records only what mechanically happened — no hand-written verdict files, no faked pass. A parked
+> state at a visible, explained boundary is a truer record than one force-marched to `verified`
+> through a lever built for a different phase.
+>
+> See *Protocol deviation: the review-phase consultation could not run*.
+
 ## Summary
 
 Porch now emits a context-refresh step at boundaries a protocol declares, so a builder gets the
@@ -303,6 +321,37 @@ in `status.yaml` and the rebuttal file is on disk — and refreshing right after
 REQUEST_CHANGES spiral is arguably the most valuable moment to refresh. But it is a surprise, and
 surprises get rediscovered expensively.
 
+## Protocol deviation: the review-phase consultation could not run
+
+Recorded because a `status.yaml` that says "reviewed" should be traceable to what actually happened.
+
+SPIR's review phase emits a `pr`-type consultation. By the time that phase ran, PR #1528 was merged
+— and **consult cannot resolve a merged PR by either route**:
+
+```
+consult --type pr                 → No PR found for branch: builder/spir-1470   (exit 1)
+consult --type pr --issue 1528    → No PR found for issue #1528                 (exit 1)
+```
+
+Verified across four runs, both models. `gh pr list --head builder/spir-1470 --state all` finds
+#1528 immediately, so consult's own query is open-PR-only. Filed as **issue #1531**, with the fix
+direction recorded there (teach consult `--state all`, and have porch pass the `pr_history` number
+rather than re-deriving from the branch).
+
+This is a protocol-level chicken-and-egg rather than a quirk of this project: **any** SPIR project
+that merges before its review phase completes has no findable PR left for the consult that phase
+requires.
+
+**Architect ruling: the consultation is satisfied by the project's 24 completed review rounds.** The
+reasoning, recorded rather than summarised: the diff this consult would examine was already
+consulted pre-merge across the PR phase and all of phase 8, so a post-merge re-review adds no
+information — and blocking a finished project on a lookup bug is disproportionate. The phase's four
+checks (`pr_exists`, `review_has_arch_updates`, `review_has_lessons_updates`, `e2e_tests`) all
+passed on their own merits.
+
+What was *not* done: no verdict files were hand-written and no pass was recorded as if the consult
+had run. A false entry in `status.yaml` would outlive every memory of why it was convenient.
+
 ## Lessons Learned
 
 ### What went well
@@ -367,6 +416,33 @@ loudly was correct. I put it on porch's normal task-emission path for a purely i
 record, where a transient push failure would have stopped a builder getting work because a
 *visibility* row could not be filed. The reuse question is not "is this the right helper" but "is
 failing the way this helper fails right here".
+
+**I misdiagnosed a tool by misreading my own harness.** I reported to the architect that consult
+"exited 0 and wrote empty verdict files", and they filed an issue on it — including a prescribed fix
+for an exit code that was already correct. The truth was that consult exits 1 and writes nothing; I
+had piped `sed` over filenames that did not exist, seen no output, and read absence-of-file as
+empty-file.
+
+Two things worth keeping from it. First, **the harness is part of the experiment** — I spent this
+whole project insisting that a test proves nothing until you check it can fail, and then trusted an
+ad-hoc display pipeline that had never been checked at all. Second, a wrong report does not stay
+wrong locally: it became a public issue with a fix direction attached, and someone acting on it
+would have hunted a bug that did not exist. The correction had to be as loud as the original claim,
+and had to go out before the issue aged into received knowledge.
+
+**A formatting habit reached a state-destroying command.** Composing a message to the architect, I
+wrote command names in backticks for readability and passed the body as a **double-quoted** bash
+string. The shell performed command substitution: `porch rollback` and `porch verify …` actually
+executed. Both died on argument errors and nothing changed — verified immediately, phase, iteration,
+timestamp and tree all unmoved — but that was luck. Had I quoted `porch rollback 1470 implement`,
+which is exactly the kind of concrete example worth putting in a message, it would have silently
+rewound this project.
+
+Filed as **issue #1532**. The rule: build message bodies with a quoted heredoc and pass the variable
+— parameter expansion does not re-run substitution — never a double-quoted string containing
+backticks. It belongs with `git add .` and `git reset --hard` in the same category: an ordinary
+convenience with an unguarded path to something irreversible. The difference is that this one hides
+inside *writing prose about* dangerous commands, which is precisely when they get typed.
 
 ### What would be done differently
 
@@ -467,7 +543,11 @@ Confirmed out of scope for this project; none block the PR.
    Observed on a task-lane builder, not a protocol builder; unrelated to this spec's changes and
    explicitly **not fixed here** per architect direction. Worth its own issue: a lost reply looks
    identical to no reply, which is the same failure shape this feature exists to make visible.
-11. **Happy-path step log is a superset of spec test 30's literal sequence** —
+11. **`consult` cannot resolve a merged PR** (**issue #1531**) — the `pr`-type review's lookup is
+   open-PR-only, by branch and by `--issue` alike, so SPIR's review phase cannot run its
+   consultation on any project that merges first. Hit by this project; see *Protocol deviation*
+   above.
+12. **Happy-path step log is a superset of spec test 30's literal sequence** —
    `challenge-read`, `worktree-checked`, `challenge-marked`, `clear-attempted` and
    `challenge-consumed` are extra. The required subsequence and its ordering *are* asserted; the
    extras are gates the handshake needs. Recorded so it is not scored as a miss.

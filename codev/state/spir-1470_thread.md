@@ -1740,3 +1740,87 @@ rather than an issue pointing at a doc that merged three weeks ago.
 
 **Not merging.** The merge word is Waleed's; the architect is presenting #1528 to him now. When it
 lands: `porch done 1470 --merged 1528`, then the verify phase.
+
+## Verify phase — merge clean, review consult blocked, architect ruled (b)
+
+Merge verified against origin/main (not my worktree): true merge with 2 parents, commits preserved,
+`context_refresh` in both trees, 18/18 `$schema` correct, #1470 + #1503 closed by the PR, #1529/#1530
+open. Review-phase checks all green including e2e.
+
+**The review-phase `pr` consult cannot run**: consult's PR lookup is open-PR-only, so a merged PR is
+invisible by branch AND by `--issue` (four runs, both models, all exit 1, no files). Issue #1531.
+Architect ruled the consultation satisfied by the 24 completed rounds — recorded in the review as a
+ruling with its reasoning, not as if the consult had run. No verdict files hand-written.
+
+**My worst mistake of the project, and it was in the reporting, not the code (item 27).** I told the
+architect consult "exited 0 and wrote empty verdict files" and speculated porch might score files by
+presence. Both false — it exits 1 and writes nothing. I had `sed`-piped filenames that did not exist,
+seen no output, and read absence-of-file as empty-file. The architect had already filed #1531 with my
+error in the title and a prescribed fix for an exit code that was already correct.
+
+The lesson has two halves and I have put both in the review. **The harness is part of the
+experiment** — I spent eight phases insisting a test proves nothing until you check it can fail, then
+trusted an ad-hoc display pipeline never checked at all. And **a wrong report does not stay local**:
+it became a public issue with a fix direction attached. The correction had to be louder than the
+original claim and had to land before the issue aged into received knowledge.
+
+---
+
+# FINAL — Spec 1470 complete (2026-08-19)
+
+**PR #1528 merged.** True merge, 2 parents, individual commits preserved. Feature verified on
+`origin/main`: `context_refresh` declared in both trees, 18/18 `$schema` paths correct including the
+generator fix that stops adopters inheriting the bug. Issues #1470 and #1503 closed by the PR.
+
+## ⚠ Porch reads `review / iteration 1`. That is PARKED, not abandoned.
+
+SPIR's review phase requires a `pr`-type consultation. `consult` cannot resolve a **merged** PR —
+by branch or by `--issue`, four runs, both models, all exit 1, no files written. And porch has no
+command that records an unrunnable consultation: `verify --skip` is scoped to the verify phase and
+refuses in review, while the force-advance ceiling counts iterations that only advance on completed
+verdict rounds. So the phase can neither finish nor escape. **Issue #1531**, both halves.
+
+Architect ruled the consultation satisfied by the project's 24 completed rounds. That ruling is in
+the review **artifact**; `status.yaml` records only what mechanically happened. No verdict files were
+hand-written, no pass faked, no `rollback` used to manufacture a tidier history.
+
+## What shipped
+
+8 plan phases, 24 consultation rounds, ~370 tests across 17 files, suite 5289 green. Three
+architect-driven live passes proved the one property no unit test can reach: the queued `/clear` does
+not consume the re-entry (15.9s and 15.8s, two independent measurements), and a failed receipt gate
+leaves the context intact. Four fail-safes fired live — receipt rejection, stale challenge, dirty
+worktree, and the echo-the-request bypass — three of them unplanned.
+
+## One near-miss, worth carrying
+
+Composing a message to the architect, I put command names in backticks inside a **double-quoted**
+bash string. The shell substituted them and actually ran `porch rollback` and `porch verify` — both
+died on argument errors, nothing changed, verified immediately. Luck, not design: quoting a *valid*
+`porch rollback 1470 implement` would have rewound this project silently. **Issue #1532.** Build
+message bodies with a quoted heredoc and pass the variable. Same category as `git add .` — an
+ordinary convenience with an unguarded path to something irreversible, and it hides inside writing
+*about* dangerous commands, which is exactly when they get typed.
+
+## Open, deliberately
+
+- **#1529** false acknowledgment — unmitigated, and it weakens a signal shipping in this PR.
+- **#1530** task-lane reply loss.
+- **#1531** consult cannot resolve a merged PR; porch cannot record an unrunnable consultation.
+- Save staleness — mitigated by instruction only; belongs with #1529, same root.
+- Adopter projects keep their broken `$schema`; the generator is fixed going forward.
+
+## The through-line, for whoever reads this next
+
+Every serious defect on this project was **green and wrong**. Nine vacuous tests. A guard correct at
+three layers and never invoked in production. A test proving only that `enqueue` stores its argument.
+A simulation that never drove the thing it was named for. A live pass satisfying two of four clauses.
+A diagnostic that lied in the reassuring direction. And, at the very end, me misreading my own `sed`
+pipeline and reporting a tool bug that did not exist — into a public issue, with a fix direction
+attached.
+
+The cure that worked was never vigilance. It was **making things singular** (one invocation builder,
+one fs port, one fixture, one set of fakes) and **mutation checking** — inject the defect, watch the
+test fail. What that discipline cannot reach is the class the reviewers caught: asking *what does the
+caller actually pass?* and *does this evidence answer the clause that was asked?*
+
