@@ -30,12 +30,13 @@ The hook already canonicalizes the worktree `root` (baked-in `CODEV_WORKTREE_ROO
 
 ### 3. Scan Bash commands
 
-For `tool_name === 'Bash'`, read `tool_input.command` (a string; missing/non-string → allow). Tokenize the command on shell whitespace/operators and, for each **absolute** token:
+For `tool_name === 'Bash'`, read `tool_input.command` (a string; missing/non-string → allow). Tokenize the command on shell whitespace/operators and, for each **absolute** token, apply this order (the lexical check must come **first**):
 
-- canonicalize it (reusing the existing `canonicalize()` helper);
-- if it `isInside` the worktree root → fine (an explicit worktree-absolute path is legitimate);
-- else if it equals the main root or `isInside` the main root → **deny** (this is the trap: a main-checkout path outside the worktree, e.g. bare `cd <main>` or `<main>/apps/x`);
-- otherwise → ignore (system paths like `/usr/bin/node`, `/tmp`, `$HOME/...`, and all relative paths are untouched).
+1. **Lexical worktree check (allow):** normalize the token *lexically only* (`path.normalize`, no `realpath`) and, if it `isInside` the worktree root (compared as-written against the baked/normalized worktree path), allow it and move on. This is load-bearing: every worktree contains spawn-created symlinks into the main checkout (`.env`, `.codev/config.json`, and any `worktree.symlinks` entries), so a legitimate worktree-absolute reference like `cat <worktree>/.env` would *canonicalize into the main root*. Checking the as-written token against the worktree root first means those references are allowed without ever being realpath'd.
+2. **Canonicalize + main-root check (deny):** only tokens that are lexically *outside* the worktree proceed. Canonicalize the token (reusing `canonicalize()`); if it equals the main root or `isInside` the main root, **deny** (the trap: a main-checkout path outside the worktree, e.g. bare `cd <main>` or `<main>/apps/x`).
+3. Otherwise → ignore (system paths like `/usr/bin/node`, `/tmp`, `$HOME/...`, and all relative paths are untouched).
+
+This differs deliberately from the Write/Edit path, which canonicalizes first (resolving symlinks there is **correct** — writing through a link into main mutates main's file, so a Write to `<worktree>/.env` *should* deny). The lexical-first order applies to Bash only.
 
 Only paths under the main checkout are candidates, so ordinary absolute references outside the repo entirely are never blocked. Relative paths are never touched — `cwd` is the worktree, so they resolve correctly by construction. The scan is a heuristic over a shell string (quoting/`$()`/spaces-in-paths are not fully parsed); any parse surprise falls through to allow, consistent with the fail-open contract. The check is deliberately narrow (main-checkout-rooted only) to keep false positives near zero.
 
@@ -86,6 +87,7 @@ Note: `packages/codev/src/agent-farm/__tests__/spawn-worktree.test.ts` asserts o
 
 - **Risk — false positive blocks a legit command.** Mitigated by scoping the scan to main-checkout-rooted absolute paths only (system/tmp/home/relative paths are never candidates) and by the per-command escape hatch. Fail-open on any parse surprise means the worst case is today's unguarded behavior, never a bricked command.
 - **Risk — heuristic shell parsing misses an obfuscated path** (quotes, `$()`, spaces-in-paths). Accepted: the guard targets the *common accidental* form (`cd <main>/… && …`), not an adversary. Misses fall through to allow (fail-open), matching #1018's contract.
+- **Risk — worktree symlinks into main false-positive the Bash scan.** Real: every worktree has spawn-created symlinks (`.env`, `.codev/config.json`, `worktree.symlinks`) whose realpath is in main. Mitigated by the lexical-first order (step 3.1) — a worktree-absolute token is allowed on its as-written form before any `realpath`. Write/Edit deliberately keep canonicalize-first, since writing through such a link mutates main's file and *should* be denied. Both directions are covered by tests.
 - **Risk — the escape hatch gets used reflexively.** Addressed by choosing the per-command (non-sticky) form and by not advertising the marker in the deny message (Option B rationale).
 - **Alternative — full shell AST parse.** Rejected: heavy, still imperfect, and violates the "self-contained, Node-core-only, no deps" constraint of the emitted `.cjs`.
 - **Alternative — guard by cwd instead of scanning the command.** Rejected: the trap is an absolute path *inside* an otherwise correct command; the harness cwd is already the worktree, so cwd alone cannot catch `cd <main>/…`.
@@ -96,6 +98,7 @@ Note: `packages/codev/src/agent-farm/__tests__/spawn-worktree.test.ts` asserts o
 - **Unit (vitest), the primary bar** — extend `worktree-write-guard.test.ts` (it spawns the *exact* emitted `.cjs` with fixture stdin, so it tests what builders get):
   - Bash deny: `cd <main>/apps/x && npx jest`; bare `cd <main>`.
   - Bash allow: worktree-absolute (`cd <worktree>/apps/x`); relative (`npx jest`); system path (`/usr/bin/node`); `/tmp` reference; escape-hatch marker present (Option B); fail-open when worktree root unresolved.
+  - **Symlink regression (the architect-flagged false-positive):** a fixture symlink inside the worktree that points into the main checkout (e.g. `<worktree>/.env` → `<main>/.env`); Bash `cat <worktree>/.env` **allows** (lexical-first), while `Write` to that same `<worktree>/.env` still **denies** (canonicalize-first — writing through the link mutates main).
   - Deny reason contains both `<mainRoot>` and `<worktreeRoot>`.
   - Matcher assertions include `Bash`.
   - Run from the worktree: `cd packages/codev && npx vitest run src/__tests__/worktree-write-guard.test.ts src/agent-farm/__tests__/harness.test.ts` (worktree-relative — no main-checkout path).
