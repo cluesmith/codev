@@ -101,6 +101,34 @@ export interface WelcomeMessage {
    * flag; this just makes it discoverable by the client instead of PROTOCOL_VERSION.
    */
   alwaysSendsReplay?: boolean;
+  /**
+   * The command this shellper actually spawned its PTY with — argv[0] in
+   * `command`, argv[1..] in `args` (PIR #1475).
+   *
+   * This is the AUTHORITATIVE statement of a session's app identity, which
+   * drives the render-gate's classifier-profile lookup (`resolveProfile`) and
+   * therefore whether `afx send <agent>` can deliver. Tower previously had to
+   * infer identity from the launch command it *asked for* and persisted
+   * (`terminal_sessions.command`, Spec 1313 migration v16); this is what the
+   * PTY-owning process actually *ran*. Sent on every WELCOME, including
+   * reconnects, and re-read from the live PTY after a SPAWN replacement — so a
+   * relaunched session reports its current argv, not its original one.
+   *
+   * Optional for backward compatibility, same pattern as `lastDataAt` and
+   * `alwaysSendsReplay`, and for the same load-bearing reason: `PROTOCOL_VERSION`
+   * is deliberately NOT bumped for this. `ShellperClient` rejects any shellper
+   * whose version is LOWER than Tower's, so a bump would disconnect every live
+   * pre-upgrade shellper on the first Tower restart after an upgrade — killing
+   * running sessions. An older shellper simply omits these, and Tower falls back
+   * to the persisted command (the Spec 1313 SSOT + its legacy self-heal).
+   *
+   * The two fields are one capability: a consumer must accept or reject them
+   * TOGETHER (see `ShellperClient`'s hydration), never mixing a valid command
+   * with a garbage args array.
+   */
+  command?: string;
+  /** argv[1..] of the spawned PTY — paired with {@link WelcomeMessage.command}. */
+  args?: string[];
 }
 
 export interface SpawnMessage {

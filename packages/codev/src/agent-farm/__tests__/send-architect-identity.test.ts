@@ -253,8 +253,41 @@ describe('Spec 1313 — migration + self-heal source guards', () => {
     // so an upgraded architect resolves on the first Tower restart, not never.
     const termSrc = read('../servers/tower-terminals.ts');
     const matches = termSrc.match(/dbSession\.command \?\? restartOptions\?\.command/g) ?? [];
-    // Two reconstruction paths (reconcile + on-the-fly), each threading at the
-    // createSessionRaw call AND the re-save → four occurrences.
-    expect(matches.length).toBe(4);
+    // Two reconstruction paths (reconcile + on-the-fly). Each computes the heal
+    // ONCE, as the `identitySeed` the session starts from.
+    //
+    // This was four before PIR #1475, when each path also repeated the expression
+    // at its re-save. The saves now persist the session's own resolved identity
+    // instead — the shellper's WELCOME statement when it made one, else this same
+    // seed — so the heal is still what a legacy row falls back to, it just is not
+    // re-derived at the save. Asserted positively below.
+    expect(matches.length).toBe(2);
+    expect(termSrc.match(/const identitySeed = dbSession\.command \?\? restartOptions\?\.command \?\? null;/g) ?? [])
+      .toHaveLength(2);
+  });
+
+  it('both reconstruction paths persist the session identity, normalized away from empty string', () => {
+    // PIR #1475. Two properties this guard exists to keep:
+    //
+    // 1. The re-saves persist what the session REPORTS (hydrated from WELCOME when
+    //    available), falling back to the seed only when there is no PtySession.
+    // 2. That value goes through `persistableCommand`, which maps '' to NULL.
+    //    `createSessionRaw` defaults command to '' for an unknown agent, and the
+    //    heal above is `??`, which does not catch '' — so persisting '' would turn
+    //    a healable NULL row into a permanently unhealable one.
+    const termSrc = read('../servers/tower-terminals.ts');
+    expect(termSrc.match(/ptySession \? persistableCommand\(ptySession\) : identitySeed/g) ?? [])
+      .toHaveLength(2);
+    expect(read('../servers/tower-utils.ts')).toContain('return session?.command || null;');
+  });
+
+  it('the in-place session-reconnected re-attach persists identity too', () => {
+    // The one attach site with no row rewrite behind it, and the only one where a
+    // FRESH client can bring a changed identity to an existing PtySession — so it
+    // needs the update helper rather than a save. Missing it would leave the
+    // fallback row drifting with no path back to the truth.
+    const serverSrc = read('../servers/tower-server.ts');
+    const handler = serverSrc.slice(serverSrc.indexOf("shellperManager.on('session-reconnected'"));
+    expect(handler).toContain('updateTerminalCommand(ptySession.id, persistableCommand(ptySession))');
   });
 });
