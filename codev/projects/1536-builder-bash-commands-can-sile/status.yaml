@@ -1,0 +1,18 @@
+id: '1536'
+title: builder-bash-commands-can-sile
+protocol: pir
+phase: plan
+plan_phases: []
+current_plan_phase: null
+gates:
+  plan-approval:
+    status: pending
+  dev-approval:
+    status: pending
+  pr:
+    status: pending
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-08-22T07:39:41.651Z'
+updated_at: '2026-08-22T07:39:41.652Z'
