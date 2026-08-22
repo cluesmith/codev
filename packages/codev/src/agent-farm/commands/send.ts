@@ -385,6 +385,18 @@ export async function send(options: SendOptions): Promise<void> {
         );
       } else {
         logger.success(`Message delivered to ${result.resolvedTo ?? target}`);
+        // Issue #1365: an interrupt/escape that gave up waiting for the terminal's submission
+        // lock wrote unserialized, so its bytes may have interleaved with the delivery it
+        // skipped. The row is claimed `delivered` before the write (un-claiming would risk a
+        // double delivery), so without this the sender would read an unqualified success for a
+        // possibly-mangled body. Warn rather than fail: the write did happen.
+        if (result.degraded) {
+          logger.warn(
+            `...but it was NOT serialized against a write already in flight on that terminal ` +
+              `(${result.degradedReason ?? 'wait ceiling expired'}), so it may have interleaved. ` +
+              `Check the agent's prompt before assuming it read cleanly.`,
+          );
+        }
       }
     } catch (error) {
       fatal(error instanceof Error ? error.message : String(error));

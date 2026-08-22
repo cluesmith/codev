@@ -822,6 +822,17 @@ export class TowerClient {
     reason?: string;
     mailboxId?: string;
     /**
+     * Issue #1365: an `interrupt`/`escape` submission that gave up waiting for the terminal's
+     * submission lock and wrote UNSERIALIZED, so its bytes may have interleaved with the
+     * delivery write it skipped. Present only when it happened; absent means normally
+     * serialized. It matters most for `interrupt`, whose mailbox row is claimed `delivered`
+     * BEFORE the write (un-claiming would risk a double delivery), so `delivered: true` alone
+     * would otherwise be an unqualified success for a possibly-mangled body.
+     */
+    degraded?: boolean;
+    /** Machine-readable companion to {@link degraded} (`submit-wait-ceiling-expired`). */
+    degradedReason?: string;
+    /**
      * Spec 1313 round 3: due time (epoch ms) of a scheduled (`deliverAfter`) send. Present
      * only when `scheduled` — the row is persisted at request time and delivers not before
      * this instant. Omitted by older Tower binaries.
@@ -837,6 +848,8 @@ export class TowerClient {
       held?: boolean;
       reason?: string | null;
       mailboxId?: string;
+      degraded?: boolean;
+      degradedReason?: string;
       notBefore?: number;
     }>(
       '/api/send',
@@ -872,6 +885,8 @@ export class TowerClient {
       held: result.data!.held,
       reason: result.data!.reason ?? undefined,
       mailboxId: result.data!.mailboxId,
+      degraded: result.data!.degraded,
+      degradedReason: result.data!.degradedReason,
       notBefore: result.data!.notBefore,
     };
   }
