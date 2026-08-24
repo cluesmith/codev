@@ -97,7 +97,10 @@ reads succeed, writes succeed, and nothing corrects you until a later `git add` 
 - Absolute paths for file writes must be rooted at your worktree. A guard blocks writes outside
   it; if you see that denial, re-root the path.
 - In Bash, prefer relative paths — `cwd` is your worktree, so a relative path cannot be anchored
-  to the wrong root.
+  to the wrong root. The same guard blocks a Bash command that reads or runs against an absolute
+  main-checkout path (a silent wrong-tree run yields plausible-but-wrong results); re-root under
+  your worktree. To deliberately reference the main checkout from one command, put the comment
+  `# codev:allow-main-checkout` in that command.
 
 ## Scope
 
