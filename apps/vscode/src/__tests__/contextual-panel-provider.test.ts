@@ -129,6 +129,11 @@ function artifactTab(path: string): unknown {
   return new vscode.TabInputText({ path, fsPath: path } as unknown as import('vscode').Uri);
 }
 
+function diffTab(modifiedPath: string): unknown {
+  const uri = (p: string) => ({ path: p, fsPath: p } as unknown as import('vscode').Uri);
+  return new vscode.TabInputTextDiff(uri('/orig'), uri(modifiedPath));
+}
+
 beforeEach(() => {
   hoisted.state.activeTabInput = undefined;
   hoisted.state.activeEditorFsPath = undefined;
@@ -204,6 +209,59 @@ describe('ContextualPanelProvider — posting', () => {
     const last = posted[posted.length - 1];
     expect(last.descriptor.kind).toBe('builder-inspector');
     expect(last.descriptor.context.builderId).toBe('spir-1049');
+  });
+
+  it('resolves a builder diff from the modified (right) side via the registry', () => {
+    hoisted.state.diffBuilders['/w/.builders/b/x.ts'] = 'b';
+    hoisted.state.activeTabInput = diffTab('/w/.builders/b/x.ts');
+    const provider = newProvider();
+    const { view, posted } = makeView();
+    provider.resolveWebviewView(view);
+    expect(posted[0].descriptor.kind).toBe('code-review');
+    expect(posted[0].descriptor.context.builderId).toBe('b');
+  });
+
+  it('re-resolves when the diff-inject registry populates after the diff opens', () => {
+    hoisted.state.activeTabInput = diffTab('/w/.builders/b/x.ts'); // registry still empty
+    const provider = newProvider();
+    const { view, posted } = makeView();
+    provider.resolveWebviewView(view);
+    expect(posted[0].descriptor.kind).toBe('attention'); // builder not yet known
+
+    hoisted.state.diffBuilders['/w/.builders/b/x.ts'] = 'b';
+    hoisted.state.listeners['registry']?.();
+    const last = posted[posted.length - 1];
+    expect(last.descriptor.kind).toBe('code-review');
+    expect(last.descriptor.context.builderId).toBe('b');
+  });
+
+  it('re-posts when switching between two ordinary files that both resolve to Attention', () => {
+    hoisted.state.activeTabInput = artifactTab('/w/src/a.ts');
+    const provider = newProvider();
+    const { view, posted } = makeView();
+    provider.resolveWebviewView(view);
+    expect(posted).toHaveLength(1);
+    expect(posted[0].descriptor.kind).toBe('attention');
+
+    hoisted.state.activeTabInput = artifactTab('/w/src/b.ts');
+    hoisted.state.listeners['tabs']?.();
+    expect(posted).toHaveLength(2); // different surface, even though both are Attention
+    expect(posted[1].descriptor.kind).toBe('attention');
+  });
+
+  it('does not demote a focused builder terminal on background tab churn', () => {
+    hoisted.state.activeTabInput = artifactTab('/w/src/a.ts');
+    hoisted.state.activeBuilderId = 'b';
+    const provider = newProvider();
+    const { view, posted } = makeView();
+    provider.resolveWebviewView(view);
+
+    hoisted.state.listeners['terminal']?.({}); // focus terminal → Builder Inspector
+    expect(posted[posted.length - 1].descriptor.kind).toBe('builder-inspector');
+
+    // A tab event with the SAME active tab (e.g. a dirty/pin/label change) must not note editor focus.
+    hoisted.state.listeners['tabs']?.();
+    expect(posted[posted.length - 1].descriptor.kind).toBe('builder-inspector');
   });
 
   it('returning focus to the editor exits Builder Inspector even though the terminal still exists', () => {

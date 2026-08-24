@@ -6,6 +6,8 @@
  * scoped to the webview `cspSource` — which Phase 3 will extend with header-text escaping.
  */
 
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { describe, it, expect } from 'vitest';
 import { renderContextualPanelHtml } from '../contextual-panel/panel-template.js';
 
@@ -49,4 +51,20 @@ describe('renderContextualPanelHtml — CSP / nonce hardening', () => {
     const second = again.match(/nonce-([A-Za-z0-9]+)/)?.[1];
     expect(first).not.toBe(second);
   });
+});
+
+describe('webview header text is safe by construction (no raw HTML injection)', () => {
+  // Descriptor-derived text (file paths, builder ids) reaches the webview as postMessage DATA and is
+  // rendered through React children (auto-escaped). Enforce that the webview never uses innerHTML or
+  // dangerouslySetInnerHTML, so a crafted path/builder id cannot render as markup.
+  const webviewSources = ['../contextual-panel/webview/main.ts', '../contextual-panel/webview/components.ts'];
+
+  for (const relative of webviewSources) {
+    it(`${relative} uses no innerHTML / dangerouslySetInnerHTML`, () => {
+      const source = readFileSync(fileURLToPath(new URL(relative, import.meta.url)), 'utf8');
+      expect(source).not.toMatch(/dangerouslySetInnerHTML/);
+      expect(source).not.toMatch(/\.innerHTML\b/);
+      expect(source).not.toMatch(/insertAdjacentHTML/);
+    });
+  }
 });

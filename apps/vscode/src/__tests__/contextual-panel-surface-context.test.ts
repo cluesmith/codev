@@ -9,11 +9,10 @@
 import { describe, it, expect } from 'vitest';
 import {
   deriveSurfaceContext,
-  surfaceIdentity,
+  surfaceKey,
   type DeriveInputs,
   type TabInfo,
 } from '../contextual-panel/surface-context.js';
-import type { ModeDescriptor, ModeKind } from '../contextual-panel/types.js';
 
 function inputs(partial: Partial<DeriveInputs> & { tab: TabInfo }): DeriveInputs {
   return {
@@ -21,17 +20,6 @@ function inputs(partial: Partial<DeriveInputs> & { tab: TabInfo }): DeriveInputs
     lookupDiffBuilderId: () => undefined,
     ...partial,
   };
-}
-
-const ALL_APPLICABLE: Record<ModeKind, boolean> = {
-  'document-review': true,
-  'code-review': true,
-  'builder-inspector': true,
-  'attention': true,
-};
-
-function descriptor(kind: ModeKind, builderId?: string, resourcePath?: string): ModeDescriptor {
-  return { kind, level: 'detail', context: { builderId, resourcePath }, applicability: ALL_APPLICABLE };
 }
 
 describe('deriveSurfaceContext — artifact predicate', () => {
@@ -105,9 +93,25 @@ describe('deriveSurfaceContext — builder-diff predicate', () => {
     expect(ctx.builderDiff).toBeUndefined();
   });
 
-  it('a diff tab on a codev artifact path yields only builderDiff (precedence handled by the resolver)', () => {
+  it('a diff on a codev artifact emits BOTH builderDiff and artifact (independent predicates)', () => {
     const ctx = deriveSurfaceContext(
-      inputs({ tab: { kind: 'diff', modifiedFsPath: '/w/.builders/b/codev/specs/x.md' }, lookupDiffBuilderId: () => 'b' }),
+      inputs({
+        tab: {
+          kind: 'diff',
+          modifiedPath: '/w/.builders/b/codev/specs/x.md',
+          modifiedFsPath: '/w/.builders/b/codev/specs/x.md',
+        },
+        lookupDiffBuilderId: () => 'b',
+      }),
+    );
+    // The resolver picks code-review (diff wins); the artifact predicate keeps Document Review navigable.
+    expect(ctx.builderDiff).toEqual({ builderId: 'b' });
+    expect(ctx.artifact).toEqual({ resourcePath: '/w/.builders/b/codev/specs/x.md', builderId: 'b' });
+  });
+
+  it('a diff on a NON-artifact file emits only builderDiff', () => {
+    const ctx = deriveSurfaceContext(
+      inputs({ tab: { kind: 'diff', modifiedPath: '/w/.builders/b/src/x.ts', modifiedFsPath: '/w/.builders/b/src/x.ts' }, lookupDiffBuilderId: () => 'b' }),
     );
     expect(ctx).toEqual({ builderDiff: { builderId: 'b' } });
   });
@@ -122,16 +126,27 @@ describe('deriveSurfaceContext — terminal predicate (focus-gated)', () => {
   });
 });
 
-describe('surfaceIdentity', () => {
-  it('differs when builderId changes at the same kind (cross-builder transition, #1497 guard)', () => {
-    expect(surfaceIdentity(descriptor('builder-inspector', 'a'))).not.toBe(surfaceIdentity(descriptor('builder-inspector', 'b')));
+describe('surfaceKey — raw surface identity for transition detection', () => {
+  it('distinguishes two ordinary files that both resolve to Attention', () => {
+    const a = surfaceKey(inputs({ tab: { kind: 'text', uriPath: '/w/a.ts', uriFsPath: '/w/a.ts' } }));
+    const b = surfaceKey(inputs({ tab: { kind: 'text', uriPath: '/w/b.ts', uriFsPath: '/w/b.ts' } }));
+    expect(a).not.toBe(b);
   });
 
-  it('is stable when nothing changes', () => {
-    expect(surfaceIdentity(descriptor('code-review', 'a'))).toBe(surfaceIdentity(descriptor('code-review', 'a')));
+  it('is stable for the same file (a cursor move must not read as a transition)', () => {
+    const key = () => surfaceKey(inputs({ tab: { kind: 'text', uriPath: '/w/a.ts', uriFsPath: '/w/a.ts' } }));
+    expect(key()).toBe(key());
   });
 
-  it('differs when the kind changes', () => {
-    expect(surfaceIdentity(descriptor('attention'))).not.toBe(surfaceIdentity(descriptor('document-review', undefined, '/x.md')));
+  it('distinguishes two different builder terminals', () => {
+    const a = surfaceKey(inputs({ tab: { kind: 'none' }, focused: 'terminal', activeTerminalBuilderId: 'a' }));
+    const b = surfaceKey(inputs({ tab: { kind: 'none' }, focused: 'terminal', activeTerminalBuilderId: 'b' }));
+    expect(a).not.toBe(b);
+  });
+
+  it('changes when focus moves from an editor tab to a terminal', () => {
+    const editor = surfaceKey(inputs({ tab: { kind: 'text', uriPath: '/w/a.ts', uriFsPath: '/w/a.ts' }, activeTerminalBuilderId: 'b' }));
+    const terminal = surfaceKey(inputs({ tab: { kind: 'text', uriPath: '/w/a.ts', uriFsPath: '/w/a.ts' }, focused: 'terminal', activeTerminalBuilderId: 'b' }));
+    expect(editor).not.toBe(terminal);
   });
 });

@@ -4,13 +4,20 @@
  *
  * It resolves the active surface (via `SurfaceContextReader` + the pure `resolveMode`) on each
  * trigger event and posts the resulting `ModeDescriptor` to the webview, which renders it. To keep
- * the switch path O(1)-cheap and avoid churn, it re-posts only when the resolved surface *identity*
- * changes (a cursor move that leaves the surface unchanged posts nothing).
+ * the switch path O(1)-cheap and avoid churn, it re-posts only when the *transition id* changes — a
+ * raw surface key (which distinguishes two ordinary files that both resolve to Attention) combined
+ * with the resolved descriptor (which catches the diff-registry populating on the same tab). A cursor
+ * move within one surface changes neither, so it posts nothing.
  *
- * Visibility: the view is registered with `retainContextWhenHidden: true`, so its context persists
- * while hidden and `resolveWebviewView` is NOT called again on re-show. The provider therefore caches
- * the last descriptor and re-posts it on `onDidChangeVisibility` when the view becomes visible, so a
- * surface change made while the panel was collapsed reaches the reopened panel.
+ * Focus: the last-focused surface (editor vs terminal) drives the terminal-exit. It flips to
+ * `terminal` on `onDidChangeActiveTerminal` and to `editor` on an editor selection or a genuine tab
+ * *activation* (not background tab churn like dirty/pin/label changes, which must not demote a
+ * focused terminal out of Builder Inspector).
+ *
+ * Visibility: registered with `retainContextWhenHidden: true`, so its context persists while hidden
+ * and `resolveWebviewView` is NOT called again on re-show. The provider caches the last descriptor
+ * and re-posts it on `onDidChangeVisibility`, so a surface change made while collapsed reaches the
+ * reopened panel.
  *
  * Transient pill navigation (a `ManualSelection` fed into `resolveMode`) arrives in Phase 4.
  */
@@ -19,7 +26,6 @@ import * as vscode from 'vscode';
 import type { TerminalManager } from '../terminal-manager.js';
 import { onDidChangeDiffInjectRegistry } from '../diff-inject-codelens.js';
 import { resolveMode } from './resolver.js';
-import { surfaceIdentity } from './surface-context.js';
 import { SurfaceContextReader } from './surface-reader.js';
 import { renderContextualPanelHtml } from './panel-template.js';
 import { isReadyMessage, type HostToWebviewMessage } from './messages.js';
@@ -30,8 +36,11 @@ export class ContextualPanelProvider implements vscode.WebviewViewProvider {
 
   private view: vscode.WebviewView | undefined;
   private lastDescriptor: ModeDescriptor | undefined;
+  private lastTransitionId: string | undefined;
+  private lastTabResource: string | undefined;
   private readonly reader: SurfaceContextReader;
   private readonly disposables: vscode.Disposable[] = [];
+  private readonly viewDisposables: vscode.Disposable[] = [];
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -45,20 +54,14 @@ export class ContextualPanelProvider implements vscode.WebviewViewProvider {
         }
         this.refresh();
       }),
-      // Cursor moves fire this frequently, but `refresh` only posts on an identity change, so a
-      // move within the same surface is cheap and does not re-render.
+      // Fires on clicking into an editor (including the already-active one — the terminal-exit
+      // proxy) and on cursor moves; `refresh` only posts on a transition, so moves are cheap.
       vscode.window.onDidChangeTextEditorSelection(() => {
         this.reader.noteEditorFocused();
         this.refresh();
       }),
-      vscode.window.tabGroups.onDidChangeTabs(() => {
-        this.reader.noteEditorFocused();
-        this.refresh();
-      }),
-      vscode.window.tabGroups.onDidChangeTabGroups(() => {
-        this.reader.noteEditorFocused();
-        this.refresh();
-      }),
+      vscode.window.tabGroups.onDidChangeTabs(() => this.onTabEvent()),
+      vscode.window.tabGroups.onDidChangeTabGroups(() => this.onTabEvent()),
       // The diff-inject registry populates AFTER the diff editor activates, so a diff's builder id
       // is only knowable once this fires.
       onDidChangeDiffInjectRegistry(() => this.refresh()),
@@ -66,6 +69,9 @@ export class ContextualPanelProvider implements vscode.WebviewViewProvider {
   }
 
   resolveWebviewView(webviewView: vscode.WebviewView): void {
+    // Guard re-resolve (a non-retained view can resolve more than once): drop the previous view's
+    // listeners before re-wiring, so they do not accumulate.
+    this.disposeViewListeners();
     this.view = webviewView;
     webviewView.webview.options = {
       enableScripts: true,
@@ -73,7 +79,7 @@ export class ContextualPanelProvider implements vscode.WebviewViewProvider {
     };
     webviewView.webview.html = this.buildHtml(webviewView.webview);
 
-    this.disposables.push(
+    this.viewDisposables.push(
       webviewView.webview.onDidReceiveMessage((message) => this.onMessage(message)),
       webviewView.onDidChangeVisibility(() => {
         if (webviewView.visible) {
@@ -82,14 +88,38 @@ export class ContextualPanelProvider implements vscode.WebviewViewProvider {
       }),
     );
 
-    this.resolveAndPost();
+    // Seed the active-tab resource so the first tab event that is mere background churn (same active
+    // tab) is not mistaken for an activation. The webview is fresh, so force the current descriptor.
+    this.lastTabResource = this.reader.activeTabResource();
+    this.lastTransitionId = undefined;
+    this.refresh();
   }
 
   dispose(): void {
+    this.disposeViewListeners();
     for (const disposable of this.disposables) {
       disposable.dispose();
     }
     this.disposables.length = 0;
+  }
+
+  private disposeViewListeners(): void {
+    for (const disposable of this.viewDisposables) {
+      disposable.dispose();
+    }
+    this.viewDisposables.length = 0;
+  }
+
+  private onTabEvent(): void {
+    // Only a genuine active-tab activation counts as editor focus. Background tab churn (dirty /
+    // pinned / label) fires the same event but leaves the active tab unchanged — it must not demote
+    // a focused terminal out of Builder Inspector.
+    const tabResource = this.reader.activeTabResource();
+    if (tabResource !== this.lastTabResource) {
+      this.lastTabResource = tabResource;
+      this.reader.noteEditorFocused();
+    }
+    this.refresh();
   }
 
   private onMessage(message: unknown): void {
@@ -99,25 +129,21 @@ export class ContextualPanelProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  /** Re-resolve the active surface and post only if the resolved identity changed. */
+  /** Re-resolve the active surface and post only if the transition id changed. */
   private refresh(): void {
-    const descriptor = resolveMode(this.reader.read(), null);
-    const previousId = this.lastDescriptor === undefined ? undefined : surfaceIdentity(this.lastDescriptor);
+    const { context, key } = this.reader.read();
+    const descriptor = resolveMode(context, null);
+    const transitionId = transitionIdOf(key, descriptor);
     this.lastDescriptor = descriptor;
-    if (surfaceIdentity(descriptor) !== previousId) {
+    if (transitionId !== this.lastTransitionId) {
+      this.lastTransitionId = transitionId;
       this.post(descriptor);
     }
   }
 
-  private resolveAndPost(): void {
-    const descriptor = resolveMode(this.reader.read(), null);
-    this.lastDescriptor = descriptor;
-    this.post(descriptor);
-  }
-
   private repost(): void {
     if (this.lastDescriptor === undefined) {
-      this.resolveAndPost();
+      this.refresh();
       return;
     }
     this.post(this.lastDescriptor);
@@ -137,4 +163,15 @@ export class ContextualPanelProvider implements vscode.WebviewViewProvider {
       styleUri: asset('contextual-panel.css'),
     });
   }
+}
+
+/** Raw surface key + resolved descriptor. Distinguishes ordinary-file-A vs B (same Attention) AND a
+ *  diff whose builder becomes known on the same tab (Attention -> Code Review). */
+function transitionIdOf(surfaceKey: string, descriptor: ModeDescriptor): string {
+  return [
+    surfaceKey,
+    descriptor.kind,
+    descriptor.context.builderId ?? '',
+    descriptor.context.resourcePath ?? '',
+  ].join('|');
 }

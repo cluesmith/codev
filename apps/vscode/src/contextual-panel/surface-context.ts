@@ -7,7 +7,7 @@
  * and overlaps stay representable.
  */
 
-import type { ModeDescriptor, SurfaceContext } from './types.js';
+import type { SurfaceContext } from './types.js';
 
 const ARTIFACT_PATH = /\/codev\/(plans|specs|reviews)\//;
 const WORKTREE_SEGMENT = /(?:^|\/)\.builders\/([^/]+)\//;
@@ -23,6 +23,8 @@ export interface TabInfo {
   uriPath?: string;
   /** Fs path (the resourcePath value) — `text` / `custom` tabs. */
   uriFsPath?: string;
+  /** The modified (right/worktree) side — `diff` tabs. Posix path for matching. */
+  modifiedPath?: string;
   /** The modified (right/worktree) side fs path — `diff` tabs. */
   modifiedFsPath?: string;
   /** Custom-editor view type — `custom` tabs. */
@@ -33,11 +35,18 @@ export interface DeriveInputs {
   tab: TabInfo;
   /** `window.activeTextEditor?.document.uri.fsPath`. */
   activeEditorFsPath?: string;
+  /** `window.activeTextEditor?.document.uri.path` (posix) — for the multi-diff artifact match. */
+  activeEditorPath?: string;
   focused: FocusedSurface;
   /** `getActiveBuilderId()` (null coerced to undefined). */
   activeTerminalBuilderId?: string;
   /** Registry lookup: `getDiffInjectEntry(fsPath)?.builderId`. */
   lookupDiffBuilderId(fsPath: string): string | undefined;
+}
+
+interface ArtifactSignal {
+  resourcePath: string;
+  builderId?: string;
 }
 
 /** Pure derivation: collect every predicate the surface satisfies (the resolver picks one). */
@@ -53,7 +62,10 @@ export function deriveSurfaceContext(inputs: DeriveInputs): SurfaceContext {
     context.builderDiff = { builderId: diffBuilderId };
   }
 
-  const artifact = deriveArtifact(inputs.tab);
+  // The artifact predicate is INDEPENDENT of the diff predicate: a spec/plan/review viewed inside a
+  // diff is both a diff (Code Review wins) AND an artifact (so Document Review stays navigable). The
+  // resolver applies precedence; the adapter reports every predicate that holds.
+  const artifact = deriveArtifact(inputs);
   if (artifact !== undefined) {
     context.artifact = artifact;
   }
@@ -70,36 +82,47 @@ function deriveDiffBuilderId(inputs: DeriveInputs): string | undefined {
   // so its focused sub-file surfaces as the active text editor. Treat that as a diff ONLY when the
   // active tab is not a plain text/custom editor — otherwise a builder file opened as a NORMAL tab
   // (also present in the registry) would be misread as a diff, which the spec forbids.
-  const tabIsPlainEditor = tab.kind === 'text' || tab.kind === 'custom';
-  if (!tabIsPlainEditor && inputs.activeEditorFsPath !== undefined) {
+  if (!tabIsPlainEditor(tab) && inputs.activeEditorFsPath !== undefined) {
     return inputs.lookupDiffBuilderId(inputs.activeEditorFsPath);
   }
   return undefined;
 }
 
-function deriveArtifact(tab: TabInfo): { resourcePath: string; builderId?: string } | undefined {
-  let uriPath: string | undefined;
-  let uriFsPath: string | undefined;
+function deriveArtifact(inputs: DeriveInputs): ArtifactSignal | undefined {
+  const { tab } = inputs;
   if (tab.kind === 'text') {
-    uriPath = tab.uriPath;
-    uriFsPath = tab.uriFsPath;
+    return artifactFromPath(tab.uriPath, tab.uriFsPath);
   }
   if (tab.kind === 'custom' && tab.viewType === 'codev.markdownPreview') {
-    uriPath = tab.uriPath;
-    uriFsPath = tab.uriFsPath;
+    return artifactFromPath(tab.uriPath, tab.uriFsPath);
   }
-  if (uriPath === undefined || uriFsPath === undefined) {
+  if (tab.kind === 'diff') {
+    return artifactFromPath(tab.modifiedPath, tab.modifiedFsPath);
+  }
+  // Multi-file diff: the focused sub-file (active editor) may itself be an artifact.
+  if (!tabIsPlainEditor(tab)) {
+    return artifactFromPath(inputs.activeEditorPath, inputs.activeEditorFsPath);
+  }
+  return undefined;
+}
+
+function artifactFromPath(posixPath: string | undefined, fsPath: string | undefined): ArtifactSignal | undefined {
+  if (posixPath === undefined || fsPath === undefined) {
     return undefined;
   }
-  if (!ARTIFACT_PATH.test(uriPath)) {
+  if (!ARTIFACT_PATH.test(posixPath)) {
     return undefined;
   }
-  const artifact: { resourcePath: string; builderId?: string } = { resourcePath: uriFsPath };
-  const builderId = builderIdFromPath(uriPath);
+  const artifact: ArtifactSignal = { resourcePath: fsPath };
+  const builderId = builderIdFromPath(posixPath);
   if (builderId !== undefined) {
     artifact.builderId = builderId;
   }
   return artifact;
+}
+
+function tabIsPlainEditor(tab: TabInfo): boolean {
+  return tab.kind === 'text' || tab.kind === 'custom';
 }
 
 function builderIdFromPath(path: string): string | undefined {
@@ -111,14 +134,25 @@ function builderIdFromPath(path: string): string | undefined {
 }
 
 /**
- * Stable identity of a resolved surface: `(kind, builderId, resourcePath)`. A change in builderId
- * or resourcePath is a transition even when the kind is unchanged (builder A terminal -> builder B
- * terminal), which is what keeps a transient selection from crossing builders (#1497 class).
+ * A key identifying the raw active surface (not the resolved mode): the focused terminal's builder,
+ * or the active tab's resource, or the multi-diff's focused file. Unlike the resolved descriptor,
+ * this distinguishes two *different* ordinary files that both resolve to Attention — which is what a
+ * transition (re-post, and the Phase 4 transient-selection clear) must detect. It is stable across
+ * cursor moves within one surface.
  */
-export function surfaceIdentity(descriptor: ModeDescriptor): string {
-  return [
-    descriptor.kind,
-    descriptor.context.builderId ?? '',
-    descriptor.context.resourcePath ?? '',
-  ].join('|');
+export function surfaceKey(inputs: DeriveInputs): string {
+  if (inputs.focused === 'terminal' && inputs.activeTerminalBuilderId !== undefined) {
+    return `terminal:${inputs.activeTerminalBuilderId}`;
+  }
+  const { tab } = inputs;
+  if (tab.kind === 'diff') {
+    return `diff:${tab.modifiedFsPath ?? ''}`;
+  }
+  if (tab.kind === 'text' || tab.kind === 'custom') {
+    return `tab:${tab.uriFsPath ?? ''}`;
+  }
+  if (inputs.activeEditorFsPath !== undefined) {
+    return `editor:${inputs.activeEditorFsPath}`;
+  }
+  return 'none';
 }

@@ -344,3 +344,15 @@ stubs; these three render their content into my mode render-targets in their own
 - Verify: 71 files / 862 tests, check-types + eslint + build all clean. Committed before signaling.
 - Visibility cache (relocated from P2) DONE here as promised.
 - Next: PHASE_COMPLETE → porch checks + cmap.
+
+### 2026-08-25 — Phase 3 cmap iter1 → fixed
+- Gemini APPROVE; Codex + Claude REQUEST_CHANGES (real bugs, some forward into P4).
+- FIXES: (1) surfaceIdentity(descriptor) → surfaceKey(inputs) [raw surface] + provider transition id =
+  surfaceKey|descriptor (catches file-A→B same-Attention AND diff-registry-populate same-tab); (2) diff
+  now emits BOTH builderDiff + artifact when modified is a codev artifact (Document Review stays navigable);
+  (3) tab-focus gated on ACTIVE-TAB ACTIVATION (seeded lastTabResource on resolveWebviewView) — background
+  churn no longer demotes a focused terminal; (4) added provider diff + registry-populate tests (real
+  getDiffInjectEntry + onDidChangeDiffInjectRegistry wiring); (5) header-escaping source-scan (no
+  innerHTML/dangerouslySetInnerHTML); (6) per-view disposables in separate array, disposed on re-resolve.
+- Caught a self-bug mid-fix: lastTabResource started undefined → first churn read as activation → seed it.
+- 71 files / 870 tests, check-types+eslint+build clean. Rebuttal: 1049-phase_3-iter1-rebuttals.md.
