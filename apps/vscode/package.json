@@ -997,7 +997,7 @@
         { "id": "codev.status", "name": "Status", "when": "codev.hasWorkspace || codev.ideMode", "visibility": "collapsed" }
       ],
       "codevPanel": [
-        { "id": "codev.placeholder", "name": "Codev", "when": "codev.panelContainerEmpty", "visibility": "collapsed" },
+        { "id": "codev.contextualPanel", "name": "Codev", "type": "webview" },
         { "id": "codev.dev", "name": "Codev Dev" }
       ]
     },

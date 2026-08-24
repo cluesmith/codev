@@ -55,7 +55,7 @@ import { visibleBacklogCount, formatBacklogTitle } from './views/backlog-filter.
 import { RecentlyClosedProvider } from './views/recently-closed.js';
 import { TeamProvider } from './views/team.js';
 import { StatusProvider } from './views/status.js';
-import { PanelPlaceholderProvider } from './views/panel-placeholder.js';
+import { ContextualPanelProvider } from './contextual-panel/panel-provider.js';
 import { DevTreeProvider } from './views/dev.js';
 import { formatTargetName } from './views/dev-format.js';
 import { WorkspaceProvider } from './views/workspace.js';
@@ -541,16 +541,14 @@ export async function activate(context: vscode.ExtensionContext) {
 		vscode.window.registerTreeDataProvider('codev.workspace', workspaceProvider),
 		vscode.window.registerTreeDataProvider('codev.team', teamProvider),
 		vscode.window.registerTreeDataProvider('codev.status', statusProvider),
-		vscode.window.registerTreeDataProvider('codev.placeholder', new PanelPlaceholderProvider()),
+		vscode.window.registerWebviewViewProvider(
+			ContextualPanelProvider.viewType,
+			new ContextualPanelProvider(context.extensionUri),
+			{ webviewOptions: { retainContextWhenHidden: true } },
+		),
 		devView,
 		{ dispose: () => devProvider.dispose() },
 	);
-
-	// Panel container (#812) ships a placeholder signpost gated by
-	// `codev.panelContainerEmpty`. codev.dev (#921) is a real, always-present
-	// panel view, so the container is never empty — flip the key false to hide the
-	// signpost. (Sibling tabs #813/#814/#815 set the same key; idempotent.)
-	vscode.commands.executeCommand('setContext', 'codev.panelContainerEmpty', false);
 
 	// Status-bar chip + title-bar gating for the dev surface (#921). Both derive
 	// from the single dev-terminal source of truth, so the chip, the Codev Dev

@@ -1,0 +1,115 @@
+/*
+ * Contextual panel webview styles. Theme-aware by construction: every colour is a
+ * `--vscode-*` token, so the panel tracks the reviewer's VS Code theme (light/dark/high-
+ * contrast) with no palette of our own. Bundled by esbuild to dist/webview/contextual-panel.css.
+ *
+ * These are LOCAL primitives with clean extraction seams for #1549 (a shared webview UI
+ * layer); they are intentionally NOT a shared package yet.
+ */
+
+:root {
+  color-scheme: light dark;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--vscode-panel-background, var(--vscode-editor-background));
+  color: var(--vscode-foreground);
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size);
+}
+
+#root {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+/* Header strip: context label + mode pills */
+.cp-header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--vscode-panel-border, transparent);
+}
+
+.cp-context {
+  font-size: 12px;
+  color: var(--vscode-foreground);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 40ch;
+}
+
+.cp-context .cp-builder {
+  color: var(--vscode-textLink-foreground);
+}
+
+.cp-pills {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+
+.cp-pill {
+  height: 22px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid var(--vscode-panel-border, var(--vscode-input-border, transparent));
+  background: transparent;
+  color: var(--vscode-descriptionForeground);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 20px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.cp-pill:hover {
+  background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.15));
+}
+
+.cp-pill:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: 1px;
+}
+
+.cp-pill--active {
+  background: var(--vscode-button-background);
+  border-color: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
+  font-weight: 600;
+  cursor: default;
+}
+
+.cp-pill--active:hover {
+  background: var(--vscode-button-background);
+}
+
+.cp-pill--disabled {
+  border-style: dashed;
+  color: var(--vscode-disabledForeground, var(--vscode-descriptionForeground));
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.cp-pill--disabled:hover {
+  background: transparent;
+}
+
+/* Body region (placeholder in this phase) */
+.cp-body {
+  flex: 1;
+  padding: 12px;
+  overflow: auto;
+}
+
+.cp-body-empty {
+  color: var(--vscode-descriptionForeground);
+  font-size: 12px;
+}

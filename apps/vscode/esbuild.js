@@ -62,8 +62,29 @@ const webviewConfig = {
 	plugins: [esbuildProblemMatcherPlugin],
 };
 
+/**
+ * Contextual panel webview bundle (#1049) — a browser IIFE mounting the React shell for the
+ * contextual `Codev` bottom-panel view. Same shape as the markdown-preview `webviewConfig`
+ * (its `default-theme.css` analogue here is the local `styles.css`, emitted next to the JS as
+ * `dist/webview/contextual-panel.css`).
+ */
+const contextualPanelWebviewConfig = {
+	entryPoints: ['src/contextual-panel/webview/main.ts'],
+	bundle: true,
+	format: 'iife',
+	minify: production,
+	sourcemap: !production,
+	sourcesContent: false,
+	platform: 'browser',
+	outfile: 'dist/webview/contextual-panel.js',
+	loader: { '.css': 'css' },
+	define: { 'process.env.NODE_ENV': production ? '"production"' : '"development"' },
+	logLevel: 'silent',
+	plugins: [esbuildProblemMatcherPlugin],
+};
+
 async function main() {
-	const configs = [extensionConfig, webviewConfig];
+	const configs = [extensionConfig, webviewConfig, contextualPanelWebviewConfig];
 	if (watch) {
 		const contexts = await Promise.all(configs.map((c) => esbuild.context(c)));
 		await Promise.all(contexts.map((c) => c.watch()));

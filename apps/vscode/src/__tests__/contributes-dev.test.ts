@@ -1,8 +1,8 @@
 /**
  * Contributes invariants for the Codev Dev surface (#921):
- * - the `codev.dev` view is the real tab in #812's `codevPanel` container;
- * - extension.ts flips `codev.panelContainerEmpty` false (so #812's placeholder
- *   yields) and registers the view + the chip refresh;
+ * - the `codev.dev` view is a real tab in #812's `codevPanel` container (alongside the
+ *   contextual `codev.contextualPanel` view added by #1049);
+ * - extension.ts registers the view + the chip refresh;
  * - the four title-bar actions are declared with icons and the right `when`
  *   gating (Stop/Restart only while running; Switch/Reveal always).
  */
