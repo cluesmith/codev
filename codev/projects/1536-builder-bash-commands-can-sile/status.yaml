@@ -1,7 +1,7 @@
 id: '1536'
 title: builder-bash-commands-can-sile
 protocol: pir
-phase: plan
+phase: implement
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -17,4 +17,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-08-22T07:39:41.651Z'
-updated_at: '2026-08-24T21:52:14.525Z'
+updated_at: '2026-08-24T21:52:29.110Z'
