@@ -109,6 +109,16 @@ not just add the new view. Verified:
 - Existing manifest tests already flagged in spec Constraints (contributes-panel / panel-placeholder /
   contributes-dev) will need updating in lockstep.
 
+### Architect confirmations on follow-ons (2026-08-24) — carry into PLAN/IMPLEMENT
+- **1049 spec stays BYTE-FROZEN at the owner gate** — NO scope movement from either follow-on
+  (#1548, #1549). Do not edit the spec for them.
+- **Implementation rule:** build the panel's local primitives (pill/header/list-row) with clean
+  EXTRACTION SEAMS in mind, but do NOT pre-build the shared layer. #1549 extracts from proven code,
+  not speculation. => local + small now; generalize later.
+- **#1548** is a sibling follow-on: "generalizes contexts"; **#1549** "generalizes the rendering
+  substrate". Both follow the same ruling as here: surface first, generalize after. #1049 is the
+  proving ground for both; #1049 must not block on either.
+
 ### #1549 — shared webview foundation (filed 2026-08-25, architect-directed)
 Spun off from a #1049 design discussion: no shared Codev webview component/style layer exists
 (only VSCode `--vscode-*` tokens); artifact-canvas is currently scoped to markdown artifacts only.
