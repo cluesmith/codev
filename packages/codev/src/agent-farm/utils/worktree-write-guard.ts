@@ -23,12 +23,13 @@
  *
  * Issue #1536 extends the same guard to Bash: reads and executions against the
  * wrong tree are the other, self-concealing half of the threat model (running
- * main's copy yields plausible-but-wrong results, not an error). For a Bash
- * command the hook scans the command's absolute-path tokens and denies any that
- * land in the main checkout but outside the worktree. Unlike the Write/Edit path
- * it checks each token LEXICALLY against the worktree root first, so the
- * spawn-created worktree symlinks into main (`.env`, `.codev/config.json`,
- * `worktree.symlinks`) are not resolved into the main root and false-denied. A
+ * main's copy yields plausible-but-wrong results, not an error). The guard
+ * already knows both roots, so for a Bash command it does not parse the shell —
+ * it searches the command for literal occurrences of the main-checkout root and
+ * denies any that fall outside the worktree. A match that continues into the
+ * worktree's own `.builders/<id>/` tail is allowed as-written, which naturally
+ * covers the spawn-created worktree symlinks into main (`.env`,
+ * `.codev/config.json`, `worktree.symlinks`) with no realpath needed. A
  * per-command sentinel comment (`codev:allow-main-checkout`) is a deliberate,
  * non-sticky escape hatch for the rare legitimate main-checkout reference.
  *
@@ -162,44 +163,30 @@ function worktreeRootFor(cwd) {
 }
 
 // Main checkout = the worktree path with its trailing '/.builders/<id>' removed.
+// Uses the LAST '/.builders/' so the derived root is correct (and the deny
+// message accurate) even when the main checkout's own path contains '.builders'.
 // Returns '' when the worktree is not a nested .builders worktree (nothing to
 // compare a Bash path against).
 function mainCheckoutFor(worktreeRoot) {
   const norm = path.normalize(worktreeRoot);
   const marker = path.sep + '.builders' + path.sep;
-  const idx = norm.indexOf(marker);
+  const idx = norm.lastIndexOf(marker);
   if (idx === -1) {
     return '';
   }
   return norm.slice(0, idx);
 }
 
-// Heuristic tokenizer: split a shell command on whitespace, quotes, and common
-// shell operators, then keep the absolute-path tokens. Not a full shell parser:
-// any token it misses simply falls through to allow (fail-open). It targets the
-// common accidental form, cd <main>/... && <cmd>.
-function absoluteTokens(command) {
-  const isDelim = (ch) =>
-    ch <= ' ' || ch === "'" || ch === '"' || ch === '(' || ch === ')' ||
-    ch === '|' || ch === '&' || ch === ';' || ch === '<' || ch === '>' ||
-    ch === '\`' || ch === '$' || ch === '=' || ch === ',' || ch === ':';
-  const tokens = [];
-  let cur = '';
-  for (let i = 0; i < command.length; i++) {
-    const ch = command[i];
-    if (isDelim(ch)) {
-      if (cur) {
-        tokens.push(cur);
-        cur = '';
-      }
-    } else {
-      cur += ch;
-    }
-  }
-  if (cur) {
-    tokens.push(cur);
-  }
-  return tokens.filter((t) => path.isAbsolute(t));
+// True at a shell "edge": the empty string (start or end of the command) or any
+// char that cannot be part of a path (whitespace, quotes, redirections, list and
+// pipe operators, and the assignment/separator chars that can prefix a path).
+// Used ONLY to check that a matched main-root occurrence sits on a real path
+// boundary — never to tokenize the command.
+function isBoundary(ch) {
+  return ch === '' || ch <= ' ' || ch === "'" || ch === '"' ||
+    ch === '(' || ch === ')' || ch === '|' || ch === '&' || ch === ';' ||
+    ch === '<' || ch === '>' || ch === '\`' || ch === '$' || ch === '=' ||
+    ch === ',' || ch === ':';
 }
 
 function guardWrite(input, cwd) {
@@ -262,35 +249,64 @@ function guardBash(input, cwd) {
     // Can't determine the boundary, fail open.
     return allow();
   }
-  const mainRoot = mainCheckoutFor(worktreeRoot);
+  const worktreeNorm = path.normalize(worktreeRoot);
+  const mainRoot = mainCheckoutFor(worktreeNorm);
   if (!mainRoot) {
     // Not a nested .builders worktree, nothing to compare against.
     return allow();
   }
 
-  // As-written worktree root for the LEXICAL check (normalize only, no realpath).
-  const worktreeLexical = path.normalize(worktreeRoot);
-  const worktreeCanon = canonicalize(worktreeRoot, cwd);
-  const mainCanon = canonicalize(mainRoot, cwd);
+  // We already KNOW both roots, so there is no need to parse the shell. We search
+  // the command for literal occurrences of the main-checkout root and inspect the
+  // boundaries of each match. worktreeTail is the worktree expressed relative to
+  // the main root, e.g. '/.builders/pir-1536'; a match that continues INTO this
+  // tail is a worktree reference (allowed as-written, which also covers the
+  // spawn-created worktree symlinks into main — no realpath needed). Anything else
+  // under the main root is a wrong-tree reference.
+  const sep = path.sep;
+  const worktreeTail = worktreeNorm.slice(mainRoot.length);
 
-  for (const token of absoluteTokens(command)) {
-    // 1. LEXICAL worktree check FIRST — allow a worktree-absolute reference on its
-    //    as-written form, before any realpath. Load-bearing: every worktree holds
-    //    spawn-created symlinks into main (.env, .codev/config.json, worktree.symlinks),
-    //    and canonicalizing them would resolve into mainRoot and false-deny a
-    //    legitimate <worktree>/.env read.
-    if (isInside(path.normalize(token), worktreeLexical)) {
+  let from = 0;
+  for (;;) {
+    const idx = command.indexOf(mainRoot, from);
+    if (idx === -1) {
+      break;
+    }
+    from = idx + mainRoot.length;
+
+    // The char before must be a boundary; otherwise the main root only matched
+    // inside a longer name (e.g. mainRoot '/repo' inside '/x/repo-backup').
+    if (!isBoundary(idx === 0 ? '' : command[idx - 1])) {
       continue;
     }
-    // 2. Otherwise canonicalize and compare against the two roots.
-    const tokenCanon = canonicalize(token, cwd);
-    if (isInside(tokenCanon, worktreeCanon)) {
-      // Resolves back into the worktree, fine.
+
+    const rest = command.slice(from);
+
+    // A reference into (or exactly at) this worktree — allow. The char after the
+    // tail must be a real boundary so 'pir-1536-backup' is not mistaken for the
+    // 'pir-1536' worktree.
+    if (rest.startsWith(worktreeTail)) {
+      const afterTail = rest.length > worktreeTail.length ? rest[worktreeTail.length] : '';
+      if (afterTail === '' || afterTail === sep || isBoundary(afterTail)) {
+        continue;
+      }
+    }
+
+    // A wrong-tree reference: the main root at end-of-path — a subpath
+    // ('/repo/apps') or the bare root at an edge ('cd /repo && ...'). If the next
+    // char is a non-sep path char, the main root was again only a prefix of a
+    // longer name and this is not a real match.
+    const next = rest.length ? rest[0] : '';
+    if (next !== '' && next !== sep && !isBoundary(next)) {
       continue;
     }
-    if (isInside(tokenCanon, mainCanon)) {
-      return denyBash(tokenCanon, worktreeCanon, mainCanon);
+
+    // Extract the offending path (up to the next boundary) for the message.
+    let end = 0;
+    while (end < rest.length && !isBoundary(rest[end])) {
+      end++;
     }
+    return denyBash(mainRoot + rest.slice(0, end), worktreeNorm, mainRoot);
   }
 
   return allow();
