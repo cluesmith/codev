@@ -198,6 +198,10 @@ Make the pills transient navigation and give the builder-scoped modes a minimal 
 - Webview→host: `{ type: 'mode-navigate', mode: ModeKind } | { type: 'drill-in', mode: ModeKind, builderId: string }`.
 - **Validate field *values*, not just the type** (architect note A4): reject unless `mode ∈ ModeKind` **and** (for `drill-in`) `builderId ∈` the known-builders set; unknown type *or* invalid value → **ignore**. Webview→host messages are lower-trust.
 - Selection semantics: `mode-navigate` sets a transient `ManualSelection`; `drill-in` sets one with a `builderId`; a real active-surface **transition** (Phase 3 identity change) clears it. Never written to `workspaceState`/`globalState`/configuration.
+- **Pill gesture family (designed behavior; architect-accepted A2 refinement).** A2 navigation-scoping lives in the *provider* (`selectionForNavigate`), not the pure resolver:
+  - First-navigating to Code Review / Builder Inspector **while viewing a worktree artifact** scopes to that artifact's builder — its *detail* (A2: richer context for free). Otherwise it lands on the cross-builder *summary*.
+  - Clicking the mode you are **already in** returns `{ mode }` (no builder): a builder-scoped *detail* zooms out to its *summary*; a *summary* (or the detail-only Document Review) is a **no-op** (post-dedup). A2 is not re-applied once you are in a mode, so click-active-at-summary stays at summary even over a worktree artifact.
+  - The zoom-out is an ordinary transient `ManualSelection` — a real surface change clears it and contextual scoping resumes.
 
 #### Deliverables
 

@@ -158,15 +158,20 @@ export class ContextualPanelProvider implements vscode.WebviewViewProvider {
   }
 
   /**
-   * The transient selection for a pill click. Clicking the mode you are already in at DETAIL zooms
-   * out to its summary. Otherwise, first-navigating to a builder-scoped mode while viewing a worktree
-   * artifact scopes to that artifact's builder (architect note A2 — richer context for free); with no
-   * such builder in scope it lands on the summary.
+   * The transient selection for a pill click, as a complete gesture family:
+   *  - Clicking the mode you are ALREADY in returns `{ mode }` (no builder). For a builder-scoped
+   *    detail that zooms out to the summary; from a summary, or a detail-only mode (Document Review),
+   *    the resolved level is unchanged so the post dedup makes it a no-op. A2 scoping is NOT re-applied
+   *    once you are in a mode, so click-active-at-summary stays at summary even over a worktree artifact.
+   *  - First-navigating to a builder-scoped mode while viewing a worktree artifact scopes to that
+   *    artifact's builder (architect note A2 — richer context for free); otherwise it lands on the summary.
    */
   private selectionForNavigate(mode: ModeKind): ManualSelection {
     const current = this.lastDescriptor;
-    const zoomingOut = current !== undefined && current.kind === mode && current.level === 'detail';
-    if (!zoomingOut && (mode === 'code-review' || mode === 'builder-inspector')) {
+    if (current !== undefined && current.kind === mode) {
+      return { mode };
+    }
+    if (mode === 'code-review' || mode === 'builder-inspector') {
       const builderId = this.reader.read().context.artifact?.builderId;
       if (builderId !== undefined) {
         return { mode, builderId };
@@ -190,14 +195,16 @@ export class ContextualPanelProvider implements vscode.WebviewViewProvider {
     const summary = this.summaryFor(descriptor);
     this.lastDescriptor = descriptor;
 
+    // The render is fully determined by the descriptor + summary (not by whether a manual selection
+    // produced it), so a navigation that resolves to the same view as the context is a true no-op.
+    const summaryIds = summary === undefined ? '' : summary.builderIds.join(',');
     const postId = [
       key,
-      this.selection === null ? 'ctx' : 'sel',
       descriptor.kind,
       descriptor.level,
       descriptor.context.builderId ?? '',
       descriptor.context.resourcePath ?? '',
-      summary === undefined ? '' : summary.builderIds.join(','),
+      summaryIds,
     ].join('|');
     if (postId !== this.lastPostId) {
       this.lastPostId = postId;

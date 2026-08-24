@@ -413,3 +413,15 @@ offering mode pills to browse. Purely contextual: no pinning, no persisted panel
   to that builder (A2 kept); clicking the ACTIVE detail mode zooms out to summary. Satisfies both.
 - FLAGGED to architect: this refines A2's navigation semantics (zoom-out) — they can veto.
 - 74 files/891 tests (consolidated 2 resolver A2 tests → 1).
+
+### 2026-08-25 — A2 refinement ACCEPTED by architect (no veto) + gesture-family requirements
+- Architect confirmed Codex's bug reading had spec grounding (always-navigable criterion promises the
+  cross-builder summary is reachable). My synthesis kept all rulings. Two pre-PR requirements: complete
+  gesture-family TEST+DOC, and state it as designed behavior in PR body + plan/review.
+- Found+fixed a gap: click-active-at-SUMMARY over a worktree artifact re-scoped to detail (A2 fallback).
+  Fix: selectionForNavigate — once already-in-mode (current.kind===mode), return {mode} (no A2 re-scope).
+  Also removed the ctx/sel flag from postId (it broke the active-DocReview no-op: identical descriptor
+  re-posted only because selection flag changed). Render = descriptor+summary only.
+- Gesture family now: active+detail→summary; active+summary→no-op; active+DocReview→no-op(detail-only);
+  zoom-out is transient, cleared on surface change→contextual. All 4 TESTED. Documented in plan Phase 4.
+- 74 files/894 tests, types+eslint+build clean. Next: porch done → phase complete → PR.

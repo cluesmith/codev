@@ -414,6 +414,55 @@ describe('ContextualPanelProvider — transient navigation (Phase 4)', () => {
     expect(lastMessage(posted).summary?.builderIds).toEqual(['spir-1049', 'bugfix-1408']);
   });
 
+  it('clicking the active pill at SUMMARY is a no-op — even over a worktree artifact (no A2 re-scope)', () => {
+    hoisted.state.activeTabInput = artifactTab('/w/.builders/spir-1049/codev/specs/x.md');
+    hoisted.state.pendingBuilders = ['spir-1049'];
+    const provider = newProvider();
+    const { view, posted, fireMessage } = makeView();
+    provider.resolveWebviewView(view);
+
+    fireMessage({ type: 'mode-navigate', mode: 'code-review' }); // → detail (A2)
+    fireMessage({ type: 'mode-navigate', mode: 'code-review' }); // → summary (zoom out)
+    expect(lastMessage(posted).descriptor.level).toBe('summary');
+    const countAtSummary = posted.length;
+
+    fireMessage({ type: 'mode-navigate', mode: 'code-review' }); // active at summary → no-op
+    expect(posted.length).toBe(countAtSummary); // nothing posted; did not re-scope back to detail
+    expect(lastMessage(posted).descriptor.level).toBe('summary');
+  });
+
+  it('clicking the active Document Review pill is a no-op (detail-only mode)', () => {
+    hoisted.state.activeTabInput = artifactTab('/w/codev/specs/x.md'); // → document-review detail
+    const provider = newProvider();
+    const { view, posted, fireMessage } = makeView();
+    provider.resolveWebviewView(view);
+    expect(posted[0].descriptor.kind).toBe('document-review');
+    const before = posted.length;
+
+    fireMessage({ type: 'mode-navigate', mode: 'document-review' });
+    expect(posted.length).toBe(before); // no-op — Document Review has no summary level
+    expect(lastMessage(posted).descriptor.kind).toBe('document-review');
+  });
+
+  it('a zoom-out selection is transient: a surface change clears it and returns to contextual scoping', () => {
+    hoisted.state.activeTabInput = artifactTab('/w/.builders/spir-1049/codev/specs/x.md');
+    hoisted.state.pendingBuilders = ['spir-1049'];
+    const provider = newProvider();
+    const { view, posted, fireMessage } = makeView();
+    provider.resolveWebviewView(view);
+
+    fireMessage({ type: 'mode-navigate', mode: 'code-review' }); // detail (A2)
+    fireMessage({ type: 'mode-navigate', mode: 'code-review' }); // zoom out → summary
+    expect(lastMessage(posted).descriptor.level).toBe('summary');
+
+    // Switch to a different builder's worktree artifact — a real surface change.
+    hoisted.state.activeTabInput = artifactTab('/w/.builders/bugfix-1408/codev/plans/y.md');
+    hoisted.state.listeners['tabs']?.();
+    // Selection cleared → contextual: Document Review for the new artifact, scoped to its builder.
+    expect(lastMessage(posted).descriptor.kind).toBe('document-review');
+    expect(lastMessage(posted).descriptor.context.builderId).toBe('bugfix-1408');
+  });
+
   it('clicking the active builder-scoped pill navigates from a drilled-in detail back to its summary', () => {
     hoisted.state.activeTabInput = artifactTab('/w/src/foo.ts');
     hoisted.state.pendingBuilders = ['spir-1049'];
