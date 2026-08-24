@@ -214,3 +214,18 @@ rescoped as PARTICIPATING FEATURES rendering into the contextual panel's modes (
 sub-views), NOT sibling panel tabs. => The umbrella/participating boundary is the load-bearing part
 of that design — keep it CRISP in the plan (umbrella ships skeleton + resolver + switching + minimal
 stubs; these three render their content into my mode render-targets in their own PRs).
+
+### 2026-08-24 — Pre-gate flags addressed (commit fd07b555a); PROTOCOL correction noted
+- Architect delta review APPROVED both mechanism changes (independent predicates; TabInputTextDiff.modified).
+- Two pre-gate flags addressed IN PLAN (messages had crossed):
+  1. Surface identity = TUPLE (kind, resourcePath, builderId). builderId/resourcePath change is a
+     transition even at same kind → builder A terminal → builder B terminal CLEARS transient nav
+     (#1497 guard). Added explicit sentence + test case.
+  2. 6-vs-7 render targets ENUMERATED + MAPPED in plan: spec's own list = 6 (1+2+2+1); "seven"
+     miscounts its own list → counting artifact, NO dropped/merged target → documentation-only, no
+     scope change. Per architect, no re-route needed (only if a target were dropped).
+- PROTOCOL CORRECTION (architect): I do NOT run porch approve, EVER. Flow: Amr decides → architect
+  records via porch approve. My post-approval action = porch done to advance. (My earlier "I'll run
+  porch approve on Amr's decision" was wrong wording; corrected.)
+- Plan-approval gate refreshed for Amr; HOLDING. Post-approval: architect runs porch approve, then I
+  run porch done → begin Phase 1 (resolver + types).
