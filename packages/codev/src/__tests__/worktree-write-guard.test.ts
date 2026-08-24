@@ -234,9 +234,22 @@ describe('worktree-write-guard Bash scan (Issue #1536)', () => {
     const r = runBash(`cd ${path.join(mainCheckout, 'apps', 'x')} && npx jest`);
     expect(r.status).toBe(0);
     expect(r.denied).toBe(true);
-    // The reason teaches by naming BOTH roots so the model can re-root.
-    expect(r.reason).toContain(fs.realpathSync(worktree));
-    expect(r.reason).toContain(fs.realpathSync(mainCheckout));
+    // The reason teaches by naming BOTH roots (as-written, not realpath'd) so the
+    // model can re-root.
+    expect(r.reason).toContain(worktree);
+    expect(r.reason).toContain(mainCheckout);
+  });
+
+  it('reports the DEEPEST main root when the main checkout path itself contains .builders', () => {
+    // With a naive first-match the derived main root would be the shallow '/srv';
+    // the guard uses the LAST '/.builders/' so the reported root is correct.
+    const nestedWorktree = '/srv/.builders/teamrepo/.builders/pir-42';
+    const r = runBash('cat /srv/.builders/teamrepo/config.json', {
+      root: nestedWorktree,
+      cwd: worktree,
+    });
+    expect(r.denied).toBe(true);
+    expect(r.reason).toContain('checkout (/srv/.builders/teamrepo)');
   });
 
   it('DENIES a bare `cd <main-checkout>`', () => {
@@ -252,6 +265,22 @@ describe('worktree-write-guard Bash scan (Issue #1536)', () => {
   it('allows a worktree-absolute command', () => {
     const r = runBash(`cd ${path.join(worktree, 'apps', 'x')} && npx jest`);
     expect(r.denied).toBe(false);
+  });
+
+  it('allows the bare worktree root followed by a shell operator', () => {
+    const r = runBash(`cd ${worktree} && npx jest`);
+    expect(r.denied).toBe(false);
+  });
+
+  it('DENIES a reference to a SIBLING builder worktree under the same main', () => {
+    const r = runBash(`cat ${path.join(mainCheckout, '.builders', 'other', 'x.txt')}`);
+    expect(r.denied).toBe(true);
+  });
+
+  it('DENIES a sibling whose name is a prefix-superset of this worktree', () => {
+    // worktree basename is 'wt'; 'wt-backup' is a different tree under main.
+    const r = runBash(`cat ${worktree}-backup/x.txt`);
+    expect(r.denied).toBe(true);
   });
 
   it('allows a relative command (no absolute main-checkout path)', () => {
