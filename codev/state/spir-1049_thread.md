@@ -404,3 +404,12 @@ offering mode pills to browse. Purely contextual: no pinning, no persisted panel
   FIXED: pillIsInteractive(state)=state!=='disabled'; Pill attaches onClick for active too; clicking
   active builder-scoped pill → mode-navigate (no builderId) → summary. +tests. Provided changelog text
   in thread (was promised, missing). 74 files/892 tests.
+
+### 2026-08-25 — Phase 4 cmap iter2 (Codex vs Claude SPLIT on A2 navigation)
+- Gemini+Claude APPROVE; Codex REQUEST_CHANGES: resolveSelection artifact fallback → summary
+  unreachable while viewing a worktree artifact. Claude: intended per A2, non-blocking.
+- RESOLUTION: moved A2 nav-scoping resolver→provider. resolveSelection now pure (builderId→detail
+  else summary). Provider selectionForNavigate: first-click on CR/BI over a worktree artifact scopes
+  to that builder (A2 kept); clicking the ACTIVE detail mode zooms out to summary. Satisfies both.
+- FLAGGED to architect: this refines A2's navigation semantics (zoom-out) — they can veto.
+- 74 files/891 tests (consolidated 2 resolver A2 tests → 1).

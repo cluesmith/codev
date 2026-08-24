@@ -395,6 +395,25 @@ describe('ContextualPanelProvider — transient navigation (Phase 4)', () => {
     expect(lastMessage(posted).descriptor.kind).toBe('document-review');
   });
 
+  it('first-navigating Code Review while viewing a worktree artifact scopes to that builder (A2), then zooms out to summary', () => {
+    hoisted.state.activeTabInput = artifactTab('/w/.builders/spir-1049/codev/specs/x.md'); // worktree artifact → document-review
+    hoisted.state.pendingBuilders = ['spir-1049', 'bugfix-1408'];
+    const provider = newProvider();
+    const { view, posted, fireMessage } = makeView();
+    provider.resolveWebviewView(view);
+    expect(posted[0].descriptor.kind).toBe('document-review');
+
+    // First click on Code Review (not currently in it) scopes to the artifact's builder (A2).
+    fireMessage({ type: 'mode-navigate', mode: 'code-review' });
+    expect(lastMessage(posted).descriptor.level).toBe('detail');
+    expect(lastMessage(posted).descriptor.context.builderId).toBe('spir-1049');
+
+    // Clicking the now-active Code Review pill zooms out to the cross-builder summary.
+    fireMessage({ type: 'mode-navigate', mode: 'code-review' });
+    expect(lastMessage(posted).descriptor.level).toBe('summary');
+    expect(lastMessage(posted).summary?.builderIds).toEqual(['spir-1049', 'bugfix-1408']);
+  });
+
   it('clicking the active builder-scoped pill navigates from a drilled-in detail back to its summary', () => {
     hoisted.state.activeTabInput = artifactTab('/w/src/foo.ts');
     hoisted.state.pendingBuilders = ['spir-1049'];

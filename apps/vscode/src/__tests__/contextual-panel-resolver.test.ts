@@ -89,31 +89,19 @@ describe('resolveMode — worktree artifact carries a builder (architect note A2
     expect(d.applicability['builder-inspector']).toBe(true);
   });
 
-  it('clicking Code Review while viewing a worktree artifact scopes to that builder (A2 realized)', () => {
+  it('A2 navigation scoping is a host policy, not a resolver fallback: a bare {mode} selection over a worktree artifact still resolves to the summary', () => {
+    // The provider decides whether to scope a navigation to the artifact's builder (by setting the
+    // selection's builderId); the pure resolver applies no artifact fallback, which keeps a zoom-out
+    // to the summary reachable.
     const surface: SurfaceContext = {
       artifact: { resourcePath: '.builders/spir-1049/codev/specs/x.md', builderId: 'spir-1049' },
     };
-    const d = resolveMode(surface, { mode: 'code-review' });
-    expect(d.kind).toBe('code-review');
-    expect(d.level).toBe('detail'); // that builder's detail, not the generic summary
-    expect(d.context).toEqual({ builderId: 'spir-1049' });
-  });
-
-  it('clicking Builder Inspector while viewing a worktree artifact scopes to that builder (A2 realized)', () => {
-    const surface: SurfaceContext = {
-      artifact: { resourcePath: '.builders/spir-1049/codev/specs/x.md', builderId: 'spir-1049' },
-    };
-    const d = resolveMode(surface, { mode: 'builder-inspector' });
-    expect(d.kind).toBe('builder-inspector');
-    expect(d.level).toBe('detail');
-    expect(d.context).toEqual({ builderId: 'spir-1049' });
-  });
-
-  it('clicking Code Review on a plain (non-worktree) artifact has no builder in scope → summary', () => {
-    const surface: SurfaceContext = { artifact: { resourcePath: 'codev/specs/x.md' } };
-    const d = resolveMode(surface, { mode: 'code-review' });
-    expect(d.level).toBe('summary');
-    expect(d.context).toEqual({});
+    expect(resolveMode(surface, { mode: 'code-review' }).level).toBe('summary');
+    expect(resolveMode(surface, { mode: 'builder-inspector' }).level).toBe('summary');
+    // A selection that DOES carry the builder (as the provider sets for A2) yields that detail.
+    const scoped = resolveMode(surface, { mode: 'code-review', builderId: 'spir-1049' });
+    expect(scoped.level).toBe('detail');
+    expect(scoped.context).toEqual({ builderId: 'spir-1049' });
   });
 });
 

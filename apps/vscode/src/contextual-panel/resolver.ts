@@ -140,13 +140,12 @@ function resolveSelection(
       applicability,
     };
   }
-  // code-review / builder-inspector: navigate to that builder's detail when a builder is in
-  // scope — either drilled in from a summary row, or carried by a worktree artifact the user is
-  // viewing (architect note A2: clicking Code Review on `.builders/<id>/…` lands on <id>'s detail,
-  // not the generic list). With no builder in scope, show the cross-builder summary.
-  const scopedBuilderId = drilledBuilderId ?? artifact?.builderId;
-  if (scopedBuilderId !== undefined) {
-    return { kind: selection.mode, level: 'detail', context: context({ builderId: scopedBuilderId }), applicability };
+  // code-review / builder-inspector: a builder in the selection yields that builder's detail;
+  // otherwise the cross-builder summary. Whether a navigation scopes to a worktree artifact's builder
+  // (architect note A2) is a host navigation policy decided by the provider, so it sets the builderId
+  // — the pure resolver has no artifact fallback here (that also keeps a zoom-out to summary reachable).
+  if (drilledBuilderId !== undefined) {
+    return { kind: selection.mode, level: 'detail', context: context({ builderId: drilledBuilderId }), applicability };
   }
   return { kind: selection.mode, level: 'summary', context: {}, applicability };
 }

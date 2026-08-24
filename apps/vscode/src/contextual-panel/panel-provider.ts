@@ -30,7 +30,7 @@ import { resolveMode } from './resolver.js';
 import { SurfaceContextReader } from './surface-reader.js';
 import { renderContextualPanelHtml } from './panel-template.js';
 import { isReadyMessage, parseNavigation, type HostToWebviewMessage } from './messages.js';
-import type { ManualSelection, ModeDescriptor } from './types.js';
+import type { ManualSelection, ModeDescriptor, ModeKind } from './types.js';
 
 interface Summary {
   builderIds: string[];
@@ -150,11 +150,29 @@ export class ContextualPanelProvider implements vscode.WebviewViewProvider {
       return;
     }
     if (navigation.type === 'mode-navigate') {
-      this.selection = { mode: navigation.mode };
+      this.selection = this.selectionForNavigate(navigation.mode);
     } else {
       this.selection = { mode: navigation.mode, builderId: navigation.builderId };
     }
     this.evaluate('manual');
+  }
+
+  /**
+   * The transient selection for a pill click. Clicking the mode you are already in at DETAIL zooms
+   * out to its summary. Otherwise, first-navigating to a builder-scoped mode while viewing a worktree
+   * artifact scopes to that artifact's builder (architect note A2 — richer context for free); with no
+   * such builder in scope it lands on the summary.
+   */
+  private selectionForNavigate(mode: ModeKind): ManualSelection {
+    const current = this.lastDescriptor;
+    const zoomingOut = current !== undefined && current.kind === mode && current.level === 'detail';
+    if (!zoomingOut && (mode === 'code-review' || mode === 'builder-inspector')) {
+      const builderId = this.reader.read().context.artifact?.builderId;
+      if (builderId !== undefined) {
+        return { mode, builderId };
+      }
+    }
+    return { mode };
   }
 
   /**
