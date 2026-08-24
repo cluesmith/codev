@@ -134,6 +134,12 @@ function diffTab(modifiedPath: string): unknown {
   return new vscode.TabInputTextDiff(uri('/orig'), uri(modifiedPath));
 }
 
+/** Fire an editor-selection event carrying the active editor (the provider gates focus on it). */
+function fireSelection(): void {
+  const active = (vscode.window as { activeTextEditor?: unknown }).activeTextEditor;
+  hoisted.state.listeners['selection']?.({ textEditor: active });
+}
+
 beforeEach(() => {
   hoisted.state.activeTabInput = undefined;
   hoisted.state.activeEditorFsPath = undefined;
@@ -162,7 +168,7 @@ describe('ContextualPanelProvider — posting', () => {
     expect(posted[0].descriptor.kind).toBe('attention');
 
     // Same surface → a selection change posts nothing.
-    hoisted.state.listeners['selection']?.();
+    fireSelection();
     expect(posted).toHaveLength(1);
 
     // Change the surface → a tab change posts the new descriptor.
@@ -276,7 +282,7 @@ describe('ContextualPanelProvider — posting', () => {
 
     // A selection change means the editor is focused again. The terminal is not gone
     // (getActiveBuilderId is still 'spir-1049'), but last-focus demotes it — the #1497-safe exit.
-    hoisted.state.listeners['selection']?.();
+    fireSelection();
     expect(posted[posted.length - 1].descriptor.kind).toBe('attention');
   });
 });

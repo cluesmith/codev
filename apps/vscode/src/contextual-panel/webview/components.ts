@@ -1,39 +1,19 @@
 /**
  * Local webview UI primitives for the contextual panel (mode pills + header strip).
  *
- * No JSX — elements are built with `React.createElement` (matching the markdown-preview webview,
- * so the extension package needs no JSX build config). These are LOCAL primitives with clean
- * extraction seams for #1549 (a shared webview UI layer); do not promote them to a shared
- * package here — #1549 extracts from proven code.
+ * No JSX — elements are built with `React.createElement` (matching the markdown-preview webview, so
+ * the extension package needs no JSX build config). These are LOCAL primitives with clean extraction
+ * seams for #1549 (a shared webview UI layer); do not promote them to a shared package here. The pure
+ * pill model (order, labels, descriptor → state) lives in `../pills.ts` so it can be tested without a DOM.
  */
 
 import * as React from 'react';
-import type { ModeDescriptor, ModeKind } from '../types.js';
+import type { ModeKind } from '../types.js';
+import { type ModePill } from '../pills.js';
 
 const h = React.createElement;
 
-export const MODE_ORDER: readonly ModeKind[] = [
-  'document-review',
-  'code-review',
-  'builder-inspector',
-  'attention',
-];
-
-export const MODE_LABELS: Record<ModeKind, string> = {
-  'document-review': 'Document Review',
-  'code-review': 'Code Review',
-  'builder-inspector': 'Builder Inspector',
-  'attention': 'Attention',
-};
-
-/** A single mode pill's display state, derived host-side from the resolved descriptor. */
-export type PillState = 'active' | 'navigable' | 'disabled';
-
-export interface ModePill {
-  mode: ModeKind;
-  label: string;
-  state: PillState;
-}
+export { MODE_ORDER, MODE_LABELS, pillsFromDescriptor, type ModePill, type PillState } from '../pills.js';
 
 export function Pill(props: { pill: ModePill; onNavigate?: (mode: ModeKind) => void }): React.ReactElement {
   const { pill, onNavigate } = props;
@@ -63,20 +43,6 @@ export function Pill(props: { pill: ModePill; onNavigate?: (mode: ModeKind) => v
   }
 
   return h('button', buttonProps, pill.label);
-}
-
-/** Map a resolved descriptor to the four pills' display states (active / navigable / disabled). */
-export function pillsFromDescriptor(descriptor: ModeDescriptor): ModePill[] {
-  return MODE_ORDER.map((mode) => {
-    let state: PillState = 'navigable';
-    if (!descriptor.applicability[mode]) {
-      state = 'disabled';
-    }
-    if (mode === descriptor.kind) {
-      state = 'active';
-    }
-    return { mode, label: MODE_LABELS[mode], state };
-  });
 }
 
 export function HeaderStrip(props: {

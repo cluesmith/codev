@@ -34,13 +34,14 @@ export function classifyTab(input: unknown): TabInfo {
   return { kind: 'other' };
 }
 
-/** The raw resource of a `TabInfo` — used to detect a genuine active-tab *activation*. */
+/** The raw resource of a `TabInfo` — used to detect a genuine active-tab *activation*. Includes kind
+ *  + viewType so the same file's raw editor and its codev.markdownPreview count as distinct tabs. */
 function tabResource(tab: TabInfo): string {
   if (tab.kind === 'diff') {
-    return tab.modifiedFsPath ?? 'diff';
+    return `diff:${tab.modifiedFsPath ?? ''}`;
   }
   if (tab.kind === 'text' || tab.kind === 'custom') {
-    return tab.uriFsPath ?? 'tab';
+    return `${tab.kind}:${tab.viewType ?? ''}:${tab.uriFsPath ?? ''}`;
   }
   return tab.kind;
 }

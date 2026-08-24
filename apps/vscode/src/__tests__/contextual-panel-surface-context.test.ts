@@ -138,6 +138,14 @@ describe('surfaceKey — raw surface identity for transition detection', () => {
     expect(key()).toBe(key());
   });
 
+  it("distinguishes a file's raw editor from its codev.markdownPreview (same path, different surface)", () => {
+    const text = surfaceKey(inputs({ tab: { kind: 'text', uriPath: '/w/codev/specs/x.md', uriFsPath: '/w/codev/specs/x.md' } }));
+    const custom = surfaceKey(
+      inputs({ tab: { kind: 'custom', viewType: 'codev.markdownPreview', uriPath: '/w/codev/specs/x.md', uriFsPath: '/w/codev/specs/x.md' } }),
+    );
+    expect(text).not.toBe(custom);
+  });
+
   it('distinguishes two different builder terminals', () => {
     const a = surfaceKey(inputs({ tab: { kind: 'none' }, focused: 'terminal', activeTerminalBuilderId: 'a' }));
     const b = surfaceKey(inputs({ tab: { kind: 'none' }, focused: 'terminal', activeTerminalBuilderId: 'b' }));

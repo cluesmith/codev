@@ -149,7 +149,9 @@ export function surfaceKey(inputs: DeriveInputs): string {
     return `diff:${tab.modifiedFsPath ?? ''}`;
   }
   if (tab.kind === 'text' || tab.kind === 'custom') {
-    return `tab:${tab.uriFsPath ?? ''}`;
+    // Include kind + viewType so the same file's raw editor and its codev.markdownPreview are
+    // distinct surfaces — switching between them is a real transition (focus / re-post / Phase 4 clear).
+    return `tab:${tab.kind}:${tab.viewType ?? ''}:${tab.uriFsPath ?? ''}`;
   }
   if (inputs.activeEditorFsPath !== undefined) {
     return `editor:${inputs.activeEditorFsPath}`;

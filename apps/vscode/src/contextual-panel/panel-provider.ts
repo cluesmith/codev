@@ -54,10 +54,16 @@ export class ContextualPanelProvider implements vscode.WebviewViewProvider {
         }
         this.refresh();
       }),
-      // Fires on clicking into an editor (including the already-active one — the terminal-exit
-      // proxy) and on cursor moves; `refresh` only posts on a transition, so moves are cheap.
-      vscode.window.onDidChangeTextEditorSelection(() => {
-        this.reader.noteEditorFocused();
+      // The terminal-exit proxy: interacting with an editor (cursor move / click into it) means the
+      // editor is focused. Gate on the ACTIVE editor so a programmatic selection change in a
+      // background visible editor does not demote a focused builder terminal. Residual limitation
+      // (accepted per the spec, not engineered around): some focus returns — e.g. clicking into the
+      // already-active editor without moving the cursor, or focus paths VS Code emits no event for —
+      // fire nothing, so the panel can stay in Builder Inspector until the next real surface change.
+      vscode.window.onDidChangeTextEditorSelection((event) => {
+        if (event.textEditor === vscode.window.activeTextEditor) {
+          this.reader.noteEditorFocused();
+        }
         this.refresh();
       }),
       vscode.window.tabGroups.onDidChangeTabs(() => this.onTabEvent()),
