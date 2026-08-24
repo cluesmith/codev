@@ -356,3 +356,11 @@ stubs; these three render their content into my mode render-targets in their own
   innerHTML/dangerouslySetInnerHTML); (6) per-view disposables in separate array, disposed on re-resolve.
 - Caught a self-bug mid-fix: lastTabResource started undefined → first churn read as activation → seed it.
 - 71 files / 870 tests, check-types+eslint+build clean. Rebuttal: 1049-phase_3-iter1-rebuttals.md.
+
+### 2026-08-25 — Phase 3 cmap iter3
+- Gemini+Claude APPROVE; Codex REQUEST_CHANGES: multi-diff sub-file nav stale (no onDidChangeActiveTextEditor).
+  FIXED: added onDidChangeActiveTextEditor trigger + multi-diff provider test (sub-file change re-resolves,
+  artifact applicability flips). 72 files/875 tests.
+- Claude non-blocking → PHASE 4 TODOs: (a) 'other' tabs share identity (edge, webview/settings); (b) disabled
+  hint wording is artifact-specific (fine — DocReview only disable-able mode); (c) transitionIdOf omits
+  level/applicability (re-verify when ManualSelection lands).

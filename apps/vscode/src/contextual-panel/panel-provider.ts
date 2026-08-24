@@ -66,6 +66,15 @@ export class ContextualPanelProvider implements vscode.WebviewViewProvider {
         }
         this.refresh();
       }),
+      // The active text editor changes without a tab change when navigating between files inside a
+      // multi-file diff (`vscode.changes`) — whose container tab stays active while its focused
+      // sub-file (the active editor) changes. This is the canonical signal for that navigation.
+      vscode.window.onDidChangeActiveTextEditor((editor) => {
+        if (editor !== undefined) {
+          this.reader.noteEditorFocused();
+        }
+        this.refresh();
+      }),
       vscode.window.tabGroups.onDidChangeTabs(() => this.onTabEvent()),
       vscode.window.tabGroups.onDidChangeTabGroups(() => this.onTabEvent()),
       // The diff-inject registry populates AFTER the diff editor activates, so a diff's builder id

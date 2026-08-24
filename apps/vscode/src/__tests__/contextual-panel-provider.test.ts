@@ -45,9 +45,10 @@ vi.mock('vscode', () => {
         if (state.activeEditorFsPath === undefined) {
           return undefined;
         }
-        return { document: { uri: { fsPath: state.activeEditorFsPath } } };
+        return { document: { uri: { fsPath: state.activeEditorFsPath, path: state.activeEditorFsPath } } };
       },
       onDidChangeActiveTerminal: capture('terminal'),
+      onDidChangeActiveTextEditor: capture('activeEditor'),
       onDidChangeTextEditorSelection: capture('selection'),
       tabGroups: {
         get activeTabGroup() {
@@ -253,6 +254,28 @@ describe('ContextualPanelProvider — posting', () => {
     hoisted.state.listeners['tabs']?.();
     expect(posted).toHaveLength(2); // different surface, even though both are Attention
     expect(posted[1].descriptor.kind).toBe('attention');
+  });
+
+  it('re-resolves when navigating between files inside a multi-file diff (active editor changes)', () => {
+    // A multi-diff container tab has an untyped input (classifies as `other`); its focused sub-file
+    // surfaces as the active editor, and the tab does not change as you move between files.
+    hoisted.state.activeTabInput = { multiDiff: true }; // not a TabInput* class → 'other'
+    hoisted.state.activeEditorFsPath = '/w/.builders/b/src/a.ts';
+    hoisted.state.diffBuilders['/w/.builders/b/src/a.ts'] = 'b';
+    hoisted.state.diffBuilders['/w/.builders/b/codev/specs/x.md'] = 'b';
+    const provider = newProvider();
+    const { view, posted } = makeView();
+    provider.resolveWebviewView(view);
+    expect(posted[0].descriptor.kind).toBe('code-review');
+    expect(posted[0].descriptor.context.builderId).toBe('b');
+    expect(posted[0].descriptor.applicability['document-review']).toBe(false); // a.ts is not an artifact
+
+    // Move to a different sub-file that IS an artifact — active editor changes, tab does not.
+    hoisted.state.activeEditorFsPath = '/w/.builders/b/codev/specs/x.md';
+    hoisted.state.listeners['activeEditor']?.({});
+    const last = posted[posted.length - 1];
+    expect(last.descriptor.kind).toBe('code-review'); // diff still wins
+    expect(last.descriptor.applicability['document-review']).toBe(true); // now an artifact → navigable
   });
 
   it('does not demote a focused builder terminal on background tab churn', () => {
