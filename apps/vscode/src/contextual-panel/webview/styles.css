@@ -113,3 +113,47 @@ body {
   color: var(--vscode-descriptionForeground);
   font-size: 12px;
 }
+
+/* Summary list (builder-id stub) */
+.cp-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.cp-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--vscode-foreground);
+  font-family: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.cp-row:hover {
+  background: var(--vscode-list-hoverBackground);
+}
+
+.cp-row:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: -1px;
+}
+
+.cp-row-id {
+  font-family: var(--vscode-editor-font-family, monospace);
+}
+
+.cp-row-chevron {
+  margin-left: auto;
+  color: var(--vscode-descriptionForeground);
+}

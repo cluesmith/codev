@@ -61,3 +61,37 @@ export function HeaderStrip(props: {
     ),
   );
 }
+
+export function EmptyState(props: { text: string }): React.ReactElement {
+  return h('div', { className: 'cp-body-empty' }, props.text);
+}
+
+/**
+ * The minimum summary stub: a clickable list of builder ids. Umbrella scope is the id-level list +
+ * drill-in plumbing; the rich per-row content (comment counts, gate state) is a participating feature.
+ */
+export function SummaryList(props: {
+  builderIds: string[];
+  emptyText: string;
+  onDrillIn: (builderId: string) => void;
+}): React.ReactElement {
+  if (props.builderIds.length === 0) {
+    return h(EmptyState, { text: props.emptyText });
+  }
+  return h(
+    'ul',
+    { className: 'cp-list' },
+    props.builderIds.map((builderId) =>
+      h(
+        'li',
+        { key: builderId },
+        h(
+          'button',
+          { type: 'button', className: 'cp-row', onClick: () => props.onDrillIn(builderId) },
+          h('span', { className: 'cp-row-id' }, builderId),
+          h('span', { className: 'cp-row-chevron', 'aria-hidden': true }, '›'),
+        ),
+      ),
+    ),
+  );
+}

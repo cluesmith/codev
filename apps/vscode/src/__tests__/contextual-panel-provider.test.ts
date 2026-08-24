@@ -15,6 +15,8 @@ const hoisted = vi.hoisted(() => {
     activeEditorFsPath: undefined as string | undefined,
     activeBuilderId: null as string | null,
     diffBuilders: {} as Record<string, string>,
+    pendingBuilders: [] as string[],
+    overviewBuilderIds: [] as string[],
     listeners: {} as Record<string, (arg?: unknown) => void>,
   };
   class TabInputText {
@@ -81,6 +83,7 @@ const vscode = await import('vscode');
 interface RenderMessage {
   type: string;
   descriptor: ModeDescriptor;
+  summary?: { builderIds: string[] };
 }
 
 function makeView() {
@@ -118,9 +121,25 @@ function makeView() {
 
 function newProvider() {
   const terminalManager = { getActiveBuilderId: () => hoisted.state.activeBuilderId };
+  const reviewQueueStore = {
+    buildersWithPending: () => hoisted.state.pendingBuilders,
+    onDidChangeQueue: (fn: () => void) => {
+      hoisted.state.listeners['queue'] = fn;
+      return { dispose() {} };
+    },
+  };
+  const overviewCache = {
+    getData: () => ({ builders: hoisted.state.overviewBuilderIds.map((id) => ({ id })) }),
+    onDidChange: (fn: () => void) => {
+      hoisted.state.listeners['overview'] = fn;
+      return { dispose() {} };
+    },
+  };
   return new ContextualPanelProvider(
     {} as unknown as import('vscode').Uri,
     terminalManager as unknown as import('../terminal-manager.js').TerminalManager,
+    reviewQueueStore as unknown as import('../review-queue/store.js').ReviewQueueStore,
+    overviewCache as unknown as import('../views/overview-data.js').OverviewCache,
   );
 }
 
@@ -146,6 +165,8 @@ beforeEach(() => {
   hoisted.state.activeEditorFsPath = undefined;
   hoisted.state.activeBuilderId = null;
   hoisted.state.diffBuilders = {};
+  hoisted.state.pendingBuilders = [];
+  hoisted.state.overviewBuilderIds = [];
   hoisted.state.listeners = {};
 });
 
@@ -307,5 +328,85 @@ describe('ContextualPanelProvider — posting', () => {
     // (getActiveBuilderId is still 'spir-1049'), but last-focus demotes it — the #1497-safe exit.
     fireSelection();
     expect(posted[posted.length - 1].descriptor.kind).toBe('attention');
+  });
+});
+
+describe('ContextualPanelProvider — transient navigation (Phase 4)', () => {
+  function lastMessage(posted: RenderMessage[]): RenderMessage {
+    return posted[posted.length - 1];
+  }
+
+  it('a mode-navigate message shows that mode as a summary with the builder-id stub', () => {
+    hoisted.state.activeTabInput = artifactTab('/w/src/foo.ts'); // contextual = attention
+    hoisted.state.pendingBuilders = ['spir-1049', 'bugfix-1408'];
+    const provider = newProvider();
+    const { view, posted, fireMessage } = makeView();
+    provider.resolveWebviewView(view);
+    expect(posted[0].descriptor.kind).toBe('attention');
+
+    fireMessage({ type: 'mode-navigate', mode: 'code-review' });
+    const last = lastMessage(posted);
+    expect(last.descriptor.kind).toBe('code-review');
+    expect(last.descriptor.level).toBe('summary');
+    expect(last.summary?.builderIds).toEqual(['spir-1049', 'bugfix-1408']);
+  });
+
+  it('a drill-in message on a known builder shows that builder detail', () => {
+    hoisted.state.activeTabInput = artifactTab('/w/src/foo.ts');
+    hoisted.state.pendingBuilders = ['spir-1049'];
+    const provider = newProvider();
+    const { view, posted, fireMessage } = makeView();
+    provider.resolveWebviewView(view);
+
+    fireMessage({ type: 'drill-in', mode: 'code-review', builderId: 'spir-1049' });
+    const last = lastMessage(posted);
+    expect(last.descriptor.kind).toBe('code-review');
+    expect(last.descriptor.level).toBe('detail');
+    expect(last.descriptor.context.builderId).toBe('spir-1049');
+  });
+
+  it('ignores navigation to an unknown builder and to an invalid mode', () => {
+    hoisted.state.activeTabInput = artifactTab('/w/src/foo.ts');
+    hoisted.state.pendingBuilders = ['spir-1049'];
+    const provider = newProvider();
+    const { view, posted, fireMessage } = makeView();
+    provider.resolveWebviewView(view);
+    const before = posted.length;
+
+    fireMessage({ type: 'drill-in', mode: 'code-review', builderId: 'unknown-builder' });
+    fireMessage({ type: 'mode-navigate', mode: 'not-a-mode' });
+    fireMessage({ type: 'drill-in', mode: 'code-review' }); // missing builderId
+    expect(posted.length).toBe(before); // all ignored, nothing posted
+  });
+
+  it('a real surface change clears the transient selection and returns to context', () => {
+    hoisted.state.activeTabInput = artifactTab('/w/src/foo.ts'); // attention
+    hoisted.state.pendingBuilders = ['spir-1049'];
+    const provider = newProvider();
+    const { view, posted, fireMessage } = makeView();
+    provider.resolveWebviewView(view);
+
+    fireMessage({ type: 'mode-navigate', mode: 'code-review' }); // navigate away
+    expect(lastMessage(posted).descriptor.kind).toBe('code-review');
+
+    // Open a spec: a genuine surface change clears the manual selection.
+    hoisted.state.activeTabInput = artifactTab('/w/codev/specs/x.md');
+    hoisted.state.listeners['tabs']?.();
+    expect(lastMessage(posted).descriptor.kind).toBe('document-review');
+  });
+
+  it('re-posts a summary when its builder-id list changes under the panel', () => {
+    hoisted.state.activeTabInput = artifactTab('/w/src/foo.ts');
+    hoisted.state.pendingBuilders = ['spir-1049'];
+    const provider = newProvider();
+    const { view, posted, fireMessage } = makeView();
+    provider.resolveWebviewView(view);
+    fireMessage({ type: 'mode-navigate', mode: 'code-review' });
+    const before = posted.length;
+
+    hoisted.state.pendingBuilders = ['spir-1049', 'bugfix-1408'];
+    hoisted.state.listeners['queue']?.();
+    expect(posted.length).toBe(before + 1);
+    expect(lastMessage(posted).summary?.builderIds).toEqual(['spir-1049', 'bugfix-1408']);
   });
 });

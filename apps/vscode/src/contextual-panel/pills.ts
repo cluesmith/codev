@@ -15,6 +15,10 @@ export const MODE_ORDER: readonly ModeKind[] = [
   'attention',
 ];
 
+export function isModeKind(value: unknown): value is ModeKind {
+  return typeof value === 'string' && (MODE_ORDER as readonly string[]).includes(value);
+}
+
 export const MODE_LABELS: Record<ModeKind, string> = {
   'document-review': 'Document Review',
   'code-review': 'Code Review',

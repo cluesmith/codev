@@ -190,7 +190,7 @@ Make the pills transient navigation and give the builder-scoped modes a minimal 
 - Modify `apps/vscode/src/contextual-panel/panel-provider.ts` — hold the transient `ManualSelection` in memory; handle validated `mode-navigate` / `drill-in`; clear on a real surface transition (Phase 3 identity); enumerate builder ids for the summary from `ReviewQueueStore.buildersWithPending()` / `OverviewCache`.
 - Modify `apps/vscode/src/contextual-panel/webview/main.ts` + `components/` — clickable navigable pills; minimal summary list (builder-id rows) for Code Review / Builder Inspector with drill-in; local `List`/`Row`/`EmptyState` primitives (seams for [#1549]).
 - Create `apps/vscode/src/__tests__/contextual-panel-messages.test.ts`; extend the provider test for navigation + clear-on-transition.
-- Modify `apps/vscode/CHANGELOG.md` and `docs/releases/UNRELEASED.md` — the user-facing entry for the contextual `Codev` panel (this phase makes the feature complete/user-visible; dual-changelog per convention).
+- **Changelog:** the entry is NOT committed on this feature branch. Per the repo convention (self-documented in `docs/releases/UNRELEASED.md`), `apps/vscode/CHANGELOG.md` + `docs/releases/UNRELEASED.md` are updated on the separate `docs/vscode-changelog` branch (via `worktrees/changelog`) as the architect's post-merge workflow — the two branches never touch each other's files by design. The entry text is prepared in the phase-4 review/thread for that workflow.
 
 #### [CONTRACT SURFACE] Host↔webview message contract (revised per cmap)
 
@@ -236,6 +236,6 @@ Vitest (mocked `vscode`) for the message contract, value validation, and clear-o
 
 ## Documentation Updates
 
-- `apps/vscode/CHANGELOG.md` + `docs/releases/UNRELEASED.md` — user-facing entry for the contextual `Codev` panel tab (**assigned to Phase 4**, when the feature is complete/user-visible).
+- `apps/vscode/CHANGELOG.md` + `docs/releases/UNRELEASED.md` — user-facing entry for the contextual `Codev` panel tab. **Added via the `docs/vscode-changelog` branch (architect post-merge workflow), not this feature branch** (the branches diverge by design). Entry text prepared in the phase-4 review.
 - No arch.md / lessons-learned.md change anticipated (no new system-shape invariant); revisit at review.
 - `#813/#814/#815` rescope and [#1549] extraction are tracked in their own issues — no doc change here.

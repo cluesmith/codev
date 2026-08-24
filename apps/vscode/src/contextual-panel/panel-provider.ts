@@ -2,42 +2,49 @@
  * WebviewViewProvider for the contextual `Codev` bottom-panel tab — the extension's first webview
  * *view*.
  *
- * It resolves the active surface (via `SurfaceContextReader` + the pure `resolveMode`) on each
- * trigger event and posts the resulting `ModeDescriptor` to the webview, which renders it. To keep
- * the switch path O(1)-cheap and avoid churn, it re-posts only when the *transition id* changes — a
- * raw surface key (which distinguishes two ordinary files that both resolve to Attention) combined
- * with the resolved descriptor (which catches the diff-registry populating on the same tab). A cursor
- * move within one surface changes neither, so it posts nothing.
+ * It resolves the active surface (via `SurfaceContextReader` + the pure `resolveMode`, plus an
+ * optional transient `ManualSelection` from pill navigation) on each trigger event and posts the
+ * resulting `ModeDescriptor` to the webview. To keep the switch path O(1)-cheap it posts only when
+ * the render would change (surface key + selection + descriptor + summary ids); a cursor move within
+ * one surface posts nothing.
+ *
+ * Transient navigation: clicking a pill / drilling into a summary row sets an in-memory
+ * `ManualSelection` (NEVER persisted). Any real active-surface change — a change in the raw surface
+ * key — clears it, so the panel returns to following context.
  *
  * Focus: the last-focused surface (editor vs terminal) drives the terminal-exit. It flips to
- * `terminal` on `onDidChangeActiveTerminal` and to `editor` on an editor selection or a genuine tab
- * *activation* (not background tab churn like dirty/pin/label changes, which must not demote a
- * focused terminal out of Builder Inspector).
+ * `terminal` on `onDidChangeActiveTerminal` and to `editor` on an editor selection, an active-editor
+ * change, or a genuine tab *activation* (not background tab churn).
  *
- * Visibility: registered with `retainContextWhenHidden: true`, so its context persists while hidden
- * and `resolveWebviewView` is NOT called again on re-show. The provider caches the last descriptor
- * and re-posts it on `onDidChangeVisibility`, so a surface change made while collapsed reaches the
+ * Visibility: registered with `retainContextWhenHidden: true`; the provider caches the last
+ * descriptor and re-posts it on `onDidChangeVisibility` so a change made while hidden reaches the
  * reopened panel.
- *
- * Transient pill navigation (a `ManualSelection` fed into `resolveMode`) arrives in Phase 4.
  */
 
 import * as vscode from 'vscode';
 import type { TerminalManager } from '../terminal-manager.js';
+import type { ReviewQueueStore } from '../review-queue/store.js';
+import type { OverviewCache } from '../views/overview-data.js';
 import { onDidChangeDiffInjectRegistry } from '../diff-inject-codelens.js';
 import { resolveMode } from './resolver.js';
 import { SurfaceContextReader } from './surface-reader.js';
 import { renderContextualPanelHtml } from './panel-template.js';
-import { isReadyMessage, type HostToWebviewMessage } from './messages.js';
-import type { ModeDescriptor } from './types.js';
+import { isReadyMessage, parseNavigation, type HostToWebviewMessage } from './messages.js';
+import type { ManualSelection, ModeDescriptor } from './types.js';
+
+interface Summary {
+  builderIds: string[];
+}
 
 export class ContextualPanelProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'codev.contextualPanel';
 
   private view: vscode.WebviewView | undefined;
   private lastDescriptor: ModeDescriptor | undefined;
-  private lastTransitionId: string | undefined;
+  private lastPostId: string | undefined;
+  private lastSurfaceKey: string | undefined;
   private lastTabResource: string | undefined;
+  private selection: ManualSelection | null = null;
   private readonly reader: SurfaceContextReader;
   private readonly disposables: vscode.Disposable[] = [];
   private readonly viewDisposables: vscode.Disposable[] = [];
@@ -45,6 +52,8 @@ export class ContextualPanelProvider implements vscode.WebviewViewProvider {
   constructor(
     private readonly extensionUri: vscode.Uri,
     terminalManager: TerminalManager,
+    private readonly reviewQueueStore: ReviewQueueStore,
+    private readonly overviewCache: OverviewCache,
   ) {
     this.reader = new SurfaceContextReader(() => terminalManager.getActiveBuilderId());
     this.disposables.push(
@@ -52,40 +61,35 @@ export class ContextualPanelProvider implements vscode.WebviewViewProvider {
         if (terminal !== undefined) {
           this.reader.noteTerminalFocused();
         }
-        this.refresh();
+        this.evaluate('surface');
       }),
-      // The terminal-exit proxy: interacting with an editor (cursor move / click into it) means the
-      // editor is focused. Gate on the ACTIVE editor so a programmatic selection change in a
-      // background visible editor does not demote a focused builder terminal. Residual limitation
-      // (accepted per the spec, not engineered around): some focus returns — e.g. clicking into the
-      // already-active editor without moving the cursor, or focus paths VS Code emits no event for —
-      // fire nothing, so the panel can stay in Builder Inspector until the next real surface change.
+      // The terminal-exit proxy, gated to the active editor so a background editor's programmatic
+      // selection does not demote a focused terminal. Residual (accepted per spec): some focus
+      // returns fire nothing.
       vscode.window.onDidChangeTextEditorSelection((event) => {
         if (event.textEditor === vscode.window.activeTextEditor) {
           this.reader.noteEditorFocused();
         }
-        this.refresh();
+        this.evaluate('surface');
       }),
-      // The active text editor changes without a tab change when navigating between files inside a
-      // multi-file diff (`vscode.changes`) — whose container tab stays active while its focused
-      // sub-file (the active editor) changes. This is the canonical signal for that navigation.
+      // The active editor can change without a tab change when navigating between files inside a
+      // multi-file diff (`vscode.changes`).
       vscode.window.onDidChangeActiveTextEditor((editor) => {
         if (editor !== undefined) {
           this.reader.noteEditorFocused();
         }
-        this.refresh();
+        this.evaluate('surface');
       }),
       vscode.window.tabGroups.onDidChangeTabs(() => this.onTabEvent()),
       vscode.window.tabGroups.onDidChangeTabGroups(() => this.onTabEvent()),
-      // The diff-inject registry populates AFTER the diff editor activates, so a diff's builder id
-      // is only knowable once this fires.
-      onDidChangeDiffInjectRegistry(() => this.refresh()),
+      onDidChangeDiffInjectRegistry(() => this.evaluate('surface')),
+      // A summary's builder-id list can change under the panel; re-post if it does.
+      this.reviewQueueStore.onDidChangeQueue(() => this.evaluate('surface')),
+      this.overviewCache.onDidChange(() => this.evaluate('surface')),
     );
   }
 
   resolveWebviewView(webviewView: vscode.WebviewView): void {
-    // Guard re-resolve (a non-retained view can resolve more than once): drop the previous view's
-    // listeners before re-wiring, so they do not accumulate.
     this.disposeViewListeners();
     this.view = webviewView;
     webviewView.webview.options = {
@@ -103,11 +107,11 @@ export class ContextualPanelProvider implements vscode.WebviewViewProvider {
       }),
     );
 
-    // Seed the active-tab resource so the first tab event that is mere background churn (same active
-    // tab) is not mistaken for an activation. The webview is fresh, so force the current descriptor.
+    // Seed focus/transition state, then force the current descriptor to the fresh webview.
     this.lastTabResource = this.reader.activeTabResource();
-    this.lastTransitionId = undefined;
-    this.refresh();
+    this.lastPostId = undefined;
+    this.lastSurfaceKey = undefined;
+    this.evaluate('surface');
   }
 
   dispose(): void {
@@ -126,46 +130,96 @@ export class ContextualPanelProvider implements vscode.WebviewViewProvider {
   }
 
   private onTabEvent(): void {
-    // Only a genuine active-tab activation counts as editor focus. Background tab churn (dirty /
-    // pinned / label) fires the same event but leaves the active tab unchanged — it must not demote
-    // a focused terminal out of Builder Inspector.
+    // Only a genuine active-tab activation counts as editor focus; background tab churn (dirty /
+    // pinned / label) leaves the active tab unchanged and must not demote a focused terminal.
     const tabResource = this.reader.activeTabResource();
     if (tabResource !== this.lastTabResource) {
       this.lastTabResource = tabResource;
       this.reader.noteEditorFocused();
     }
-    this.refresh();
+    this.evaluate('surface');
   }
 
   private onMessage(message: unknown): void {
-    // The webview mounts and asks for the current descriptor. (Phase 4 adds navigation messages.)
     if (isReadyMessage(message)) {
       this.repost();
+      return;
     }
+    const navigation = parseNavigation(message, (id) => this.isKnownBuilder(id));
+    if (navigation === null) {
+      return;
+    }
+    if (navigation.type === 'mode-navigate') {
+      this.selection = { mode: navigation.mode };
+    } else {
+      this.selection = { mode: navigation.mode, builderId: navigation.builderId };
+    }
+    this.evaluate('manual');
   }
 
-  /** Re-resolve the active surface and post only if the transition id changed. */
-  private refresh(): void {
+  /**
+   * Resolve and post. `surface` events clear the transient selection when the raw surface key
+   * changes; `manual` events (pill navigation) keep the selection they just set.
+   */
+  private evaluate(source: 'surface' | 'manual'): void {
     const { context, key } = this.reader.read();
-    const descriptor = resolveMode(context, null);
-    const transitionId = transitionIdOf(key, descriptor);
+    if (source === 'surface' && key !== this.lastSurfaceKey) {
+      this.selection = null;
+    }
+    this.lastSurfaceKey = key;
+
+    const descriptor = resolveMode(context, this.selection);
+    const summary = this.summaryFor(descriptor);
     this.lastDescriptor = descriptor;
-    if (transitionId !== this.lastTransitionId) {
-      this.lastTransitionId = transitionId;
-      this.post(descriptor);
+
+    const postId = [
+      key,
+      this.selection === null ? 'ctx' : 'sel',
+      descriptor.kind,
+      descriptor.level,
+      descriptor.context.builderId ?? '',
+      descriptor.context.resourcePath ?? '',
+      summary === undefined ? '' : summary.builderIds.join(','),
+    ].join('|');
+    if (postId !== this.lastPostId) {
+      this.lastPostId = postId;
+      this.post(descriptor, summary);
     }
   }
 
   private repost(): void {
     if (this.lastDescriptor === undefined) {
-      this.refresh();
+      this.evaluate('surface');
       return;
     }
-    this.post(this.lastDescriptor);
+    this.post(this.lastDescriptor, this.summaryFor(this.lastDescriptor));
   }
 
-  private post(descriptor: ModeDescriptor): void {
-    const message: HostToWebviewMessage = { type: 'render', descriptor };
+  /** Minimal summary stub: the builder ids the two builder-scoped summaries list (umbrella scope —
+   *  rich per-row content is owned by the participating features). */
+  private summaryFor(descriptor: ModeDescriptor): Summary | undefined {
+    if (descriptor.level !== 'summary') {
+      return undefined;
+    }
+    if (descriptor.kind === 'code-review') {
+      return { builderIds: this.reviewQueueStore.buildersWithPending() };
+    }
+    if (descriptor.kind === 'builder-inspector') {
+      return { builderIds: this.overviewBuilderIds() };
+    }
+    return undefined;
+  }
+
+  private overviewBuilderIds(): string[] {
+    return this.overviewCache.getData()?.builders.map((builder) => builder.id) ?? [];
+  }
+
+  private isKnownBuilder(id: string): boolean {
+    return this.overviewBuilderIds().includes(id) || this.reviewQueueStore.buildersWithPending().includes(id);
+  }
+
+  private post(descriptor: ModeDescriptor, summary: Summary | undefined): void {
+    const message: HostToWebviewMessage = { type: 'render', descriptor, summary };
     void this.view?.webview.postMessage(message);
   }
 
@@ -178,15 +232,4 @@ export class ContextualPanelProvider implements vscode.WebviewViewProvider {
       styleUri: asset('contextual-panel.css'),
     });
   }
-}
-
-/** Raw surface key + resolved descriptor. Distinguishes ordinary-file-A vs B (same Attention) AND a
- *  diff whose builder becomes known on the same tab (Attention -> Code Review). */
-function transitionIdOf(surfaceKey: string, descriptor: ModeDescriptor): string {
-  return [
-    surfaceKey,
-    descriptor.kind,
-    descriptor.context.builderId ?? '',
-    descriptor.context.resourcePath ?? '',
-  ].join('|');
 }

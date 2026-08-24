@@ -534,8 +534,14 @@ export async function activate(context: vscode.ExtensionContext) {
 	const devProvider = new DevTreeProvider(connectionManager, terminalManager!);
 	const devView = vscode.window.createTreeView('codev.dev', { treeDataProvider: devProvider });
 	// Contextual bottom-panel view (#1049): resolves the active surface and posts a ModeDescriptor
-	// to its webview. Takes the terminal manager for the builder-terminal surface (getActiveBuilderId).
-	const contextualPanelProvider = new ContextualPanelProvider(context.extensionUri, terminalManager!);
+	// to its webview. Takes the terminal manager (builder-terminal surface) and the review-queue +
+	// overview caches (the builder-id summary stubs and drill-in validation).
+	const contextualPanelProvider = new ContextualPanelProvider(
+		context.extensionUri,
+		terminalManager!,
+		reviewQueueStore,
+		overviewCache,
+	);
 	context.subscriptions.push(
 		buildersView,
 		pullRequestsView,
