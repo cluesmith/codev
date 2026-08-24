@@ -62,3 +62,25 @@ code failure; the unit tests run under `test:unit` (vitest) and porch's `tests` 
 
 Deck/physical-dial confirmation is the part I can't drive from the builder shell → routes to
 the streamdeck architect / Amr at dev-approval.
+
+## Dev-approval — APPROVED (2026-08-24)
+
+Amr approved via VS Code ("Approve the dev review gate for 1534, please pass it to the builder").
+Honest evidence note (per architect): unit + source verification done; deck script handed to
+owner 5 days ago, NO deck-run result relayed back; gate approved on his word — do NOT write
+"deck-verified" anywhere. Recorded that framing in the review's Test Results section.
+
+## Review phase (2026-08-24)
+
+Rebase check (architect flagged 5-day drift): origin/main advanced 10 commits since branch cut,
+ZERO overlap with my files (main touched other projects' state, codev/resources/arch.md,
+codev/reviews, README). Rebased onto origin/main cleanly, no conflicts. Reported trivial to
+architect.
+
+Wrote `codev/reviews/1534-vscode-forward-hunk-press-erro.md` (Summary / Files / Commits / Test
+Results / Architecture Updates / Lessons Learned Updates / Follow-ups). Arch: no changes (local
+bug fix, no boundary/contract/system-shape fact). Lessons: routed ONE cold entry to
+lessons-learned.md Debugging section ("misleading instrument = stale/parallel model" +
+two-models-drift + deletion-only structural mismatch + the textEditorDiffInformation proposed-API
+ceiling on direction c). Next: commit review+lesson, push, gh pr create (body = review file),
+porch done --pr, then porch runs CMAP once → pr gate.
