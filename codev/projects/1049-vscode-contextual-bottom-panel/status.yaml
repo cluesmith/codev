@@ -1,7 +1,7 @@
 id: '1049'
 title: vscode-contextual-bottom-panel
 protocol: spir
-phase: specify
+phase: plan
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -16,7 +16,7 @@ gates:
   verify-approval:
     status: pending
 iteration: 1
-build_complete: true
+build_complete: false
 history: []
 started_at: '2026-08-12T12:09:59.640Z'
-updated_at: '2026-08-24T21:44:21.919Z'
+updated_at: '2026-08-24T21:44:53.133Z'
