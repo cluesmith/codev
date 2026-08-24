@@ -309,3 +309,20 @@ stubs; these three render their content into my mode render-targets in their own
 - Cosmetic (left, justified): style-src 'unsafe-inline' kept (matches markdown-preview; P3/P4 bodies +
   React inline styles will use it); .cp-context .cp-builder CSS is for P3's builder-name label.
 - Next: porch should advance to Phase 3 (Context adapter + contextual switching).
+
+### 2026-08-25 — IMPLEMENT Phase 3 START (Context adapter + contextual switching)
+- KEY API finding: @types/vscode 1.105 Tab.input union = TabInputText|TabInputTextDiff|TabInputCustom|
+  TabInputWebview|TabInputNotebook|TabInputNotebookDiff|TabInputTerminal|unknown. NO TabInputTextMultiDiff!
+  → multi-file vscode.changes diff has UNKNOWN tab input. Handle diff predicate as: (a) TabInputTextDiff
+  → getDiffInjectEntry(input.modified.fsPath).builderId; (b) multi-diff (unknown tab) → focused sub-file =
+  activeTextEditor.fsPath → registry lookup, BUT only when tab is NOT text/custom (else a normal-tab builder
+  file misreads as diff). Registry lookup = getDiffInjectEntry(fsPath) (diff-inject-codelens.ts:217);
+  change event = onDidChangeDiffInjectRegistry.
+- Design: pure deriveSurfaceContext(TabInfo,...) returns INDEPENDENT predicates (collects all, resolver
+  picks precedence — the C3 contract); surfaceIdentity(descriptor) pure. Thin SurfaceContextReader does
+  vscode instanceof classify + reads live state + tracks lastFocused. Provider subscribes triggers in ctor,
+  re-derive+resolve, POST ONLY when surfaceIdentity changes (cheap on cursor-moves), cache lastDescriptor,
+  re-post on onDidChangeVisibility (retain:true → resolveWebviewView NOT re-fired). Inject TerminalManager.
+- Also fixing P3-TODO-A (provider lifecycle comment) + P3-TODO-B (Pill: aria-disabled not disabled attr so
+  title tooltip renders). Header text escaping = React auto-escape (descriptor via postMessage as DATA, never
+  interpolated into HTML) — document it.
