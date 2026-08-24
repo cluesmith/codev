@@ -425,3 +425,11 @@ offering mode pills to browse. Purely contextual: no pinning, no persisted panel
 - Gesture family now: active+detail→summary; active+summary→no-op; active+DocReview→no-op(detail-only);
   zoom-out is transient, cleared on surface change→contextual. All 4 TESTED. Documented in plan Phase 4.
 - 74 files/894 tests, types+eslint+build clean. Next: porch done → phase complete → PR.
+
+### 2026-08-25 — Phase 4 cmap iter3: ALL THREE APPROVE. ALL 4 PHASES COMPLETE.
+- Gemini/Codex/Claude all APPROVE, no blocking. Gesture family + A2 refinement validated.
+- Claude non-blocking (2): (1) DEV-APPROVAL feel item — on a stationary diff/terminal surface, a
+  pill zoom-out to summary has no in-mode path back to the contextual detail (verify feel; may add
+  a "back to context" affordance if it feels off). (2) drill-in on a builder that just left the known
+  set is silently ignored (correct behavior — edge).
+- Next: porch advance → PR. All commits on builder/spir-1049. Open PR with gesture family in body.
