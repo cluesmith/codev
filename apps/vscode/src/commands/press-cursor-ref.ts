@@ -14,13 +14,16 @@
  *      no range for it; the dial rotation (VS Code's live change model) stops on
  *      it, then the press against our model finds nothing.
  *
- * This helper collapses both press paths onto the SAME resolution the keyboard
- * path (Cmd/Ctrl+K H, `resolveCursorRef`, #1073) already uses — symbol → hunk →
- * file — but against a FRESHLY re-parsed hunk snapshot: a single-file
- * `git diff -M --unified=3 <baseRef> -- <relPath>` at press time (cheap: one
- * file, one git call). Staleness is gone; a deletion-only or otherwise
- * unrepresentable cursor degrades to the enclosing symbol or the file instead of
- * erroring. On git failure it falls back to the frozen `entry.hunks`, so the
+ * This module resolves all three cursor entry points against a FRESHLY re-parsed
+ * hunk snapshot — a single-file `git diff -M --unified=3 <baseRef> -- <relPath>`
+ * at press time (cheap: one file, one git call) — while keeping each verb's
+ * intended precedence: the two "hunk" press verbs are **hunk → symbol → file**
+ * (`resolvePressCursorRef`, so a press named for the hunk forwards the tight
+ * changed range, not the whole enclosing symbol), and the Cmd/Ctrl+K H keyboard
+ * verb is **symbol → hunk → file** (`resolveCursorContextRef`, its #1073 design).
+ * Staleness is gone; a deletion-only or otherwise unrepresentable cursor degrades
+ * to the next anchor instead of erroring. On git failure it falls back to the
+ * frozen `entry.hunks`, so the
  * worst case is exactly the old behavior — never worse.
  */
 

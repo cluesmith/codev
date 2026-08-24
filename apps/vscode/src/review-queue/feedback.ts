@@ -60,8 +60,9 @@ function fileAnchor(): Anchor | undefined {
 
 /** The changed hunk under the cursor (mirrors `codev.forwardCurrentHunkToBuilder`).
  *  Resolves through the shared press helper (#1534): fresh single-file re-parse
- *  plus the symbol → hunk → file degrade, so a cursor on a deletion-only change
- *  or outside any recorded range anchors the whole file with an honest note
+ *  with hunk → symbol → file precedence (hunk-first, so a hunk press keeps the
+ *  tight changed range), so a cursor on a deletion-only change or outside any
+ *  recorded range anchors the enclosing symbol / whole file with an honest note
  *  instead of the old (misleading, when the cursor sat in green) error. */
 async function hunkAnchor(): Promise<Anchor | undefined> {
   const editor = vscode.window.activeTextEditor;
