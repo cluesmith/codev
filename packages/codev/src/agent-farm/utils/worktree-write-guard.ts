@@ -13,7 +13,7 @@
  * This module is the single source of truth for the guard. It emits two files
  * into each Claude builder worktree at spawn time (via CLAUDE_HARNESS):
  *   - `.claude/hooks/worktree-write-guard.cjs` — a self-contained Node hook
- *   - `.claude/settings.local.json` — a PreToolUse hook wiring on Write/Edit
+ *   - `.claude/settings.local.json` — a PreToolUse hook wiring on Write/Edit/Bash
  *
  * The hook denies any absolute Write/Edit path that resolves outside the
  * worktree root, with an allowlist for temp dirs and `$HOME/.claude` (so builder
@@ -21,7 +21,19 @@
  * command as `CODEV_WORKTREE_ROOT` (deterministic), with `git rev-parse
  * --show-toplevel` as a runtime fallback.
  *
+ * Issue #1536 extends the same guard to Bash: reads and executions against the
+ * wrong tree are the other, self-concealing half of the threat model (running
+ * main's copy yields plausible-but-wrong results, not an error). For a Bash
+ * command the hook scans the command's absolute-path tokens and denies any that
+ * land in the main checkout but outside the worktree. Unlike the Write/Edit path
+ * it checks each token LEXICALLY against the worktree root first, so the
+ * spawn-created worktree symlinks into main (`.env`, `.codev/config.json`,
+ * `worktree.symlinks`) are not resolved into the main root and false-denied. A
+ * per-command sentinel comment (`codev:allow-main-checkout`) is a deliberate,
+ * non-sticky escape hatch for the rare legitimate main-checkout reference.
+ *
  * @see codev/plans/1018-builder-worktree-write-guard-p.md
+ * @see codev/plans/1536-builder-bash-commands-can-sile.md
  */
 
 import { isAbsolute, join, resolve } from 'node:path';
@@ -56,19 +68,23 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { execSync } = require('node:child_process');
 
-// Tools whose file_path we guard. NotebookEdit (notebook_path) is out of scope.
-const GUARDED_TOOLS = new Set(['Write', 'Edit', 'MultiEdit']);
+// Write-family tools whose file_path we guard (canonicalize-first: resolving a
+// symlink is correct here, because writing THROUGH a link into main mutates
+// main's file). Bash is guarded separately below (lexical-first). NotebookEdit
+// (notebook_path) is out of scope.
+const GUARDED_WRITE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit']);
+
+// Per-command escape hatch for the rare legitimate main-checkout reference from
+// Bash. A sentinel COMMENT (not an env toggle) so it is scoped to exactly one
+// command and visible in the transcript, never sticky. Intentionally NOT named
+// in the deny message, so it is not reached for reflexively.
+const MAIN_CHECKOUT_ESCAPE = 'codev:allow-main-checkout';
 
 function allow() {
   process.exit(0);
 }
 
-function deny(target, root) {
-  const reason =
-    'Blocked: ' + target + ' is outside this builder\\'s worktree (' + root + '). ' +
-    'Builders are isolated to their worktree — a path anchored at the main checkout ' +
-    'root silently pollutes it. Re-root the path under ' + root +
-    ' (prefer a worktree-relative path). Allowed exceptions: temp dirs and ~/.claude.';
+function emitDeny(reason) {
   process.stdout.write(JSON.stringify({
     hookSpecificOutput: {
       hookEventName: 'PreToolUse',
@@ -77,6 +93,26 @@ function deny(target, root) {
     },
   }));
   process.exit(0);
+}
+
+function deny(target, root) {
+  emitDeny(
+    'Blocked: ' + target + ' is outside this builder\\'s worktree (' + root + '). ' +
+    'Builders are isolated to their worktree — a path anchored at the main checkout ' +
+    'root silently pollutes it. Re-root the path under ' + root +
+    ' (prefer a worktree-relative path). Allowed exceptions: temp dirs and ~/.claude.'
+  );
+}
+
+function denyBash(target, worktreeRoot, mainRoot) {
+  emitDeny(
+    'Blocked: this Bash command references ' + target + ', which is in the main ' +
+    'checkout (' + mainRoot + ') but OUTSIDE this builder\\'s worktree (' + worktreeRoot +
+    '). A path that drops the .builders/<id>/ segment silently reads or runs against ' +
+    'main\\'s copy and yields plausible-but-wrong results (missing test suites, stale ' +
+    'behavior). Use a relative path (cwd is your worktree) or re-root the path under ' +
+    worktreeRoot + '.'
+  );
 }
 
 // Resolve a path to a canonical absolute form WITHOUT requiring it to exist:
@@ -112,28 +148,8 @@ function isInside(child, parent) {
   return child.startsWith(parent + path.sep);
 }
 
-function main(raw) {
-  let input;
-  try {
-    input = JSON.parse(raw);
-  } catch (e) {
-    return allow();
-  }
-
-  const toolName = input && input.tool_name;
-  if (!GUARDED_TOOLS.has(toolName)) {
-    return allow();
-  }
-
-  const toolInput = (input && input.tool_input) || {};
-  const filePath = toolInput.file_path;
-  if (!filePath || typeof filePath !== 'string') {
-    return allow();
-  }
-
-  const cwd = (input && input.cwd) || process.cwd();
-
-  // Worktree root: baked-in env (deterministic) first, then git as a fallback.
+// Worktree root: baked-in env (deterministic) first, then git as a fallback.
+function worktreeRootFor(cwd) {
   let root = process.env.CODEV_WORKTREE_ROOT;
   if (!root) {
     try {
@@ -142,6 +158,58 @@ function main(raw) {
       root = '';
     }
   }
+  return root;
+}
+
+// Main checkout = the worktree path with its trailing '/.builders/<id>' removed.
+// Returns '' when the worktree is not a nested .builders worktree (nothing to
+// compare a Bash path against).
+function mainCheckoutFor(worktreeRoot) {
+  const norm = path.normalize(worktreeRoot);
+  const marker = path.sep + '.builders' + path.sep;
+  const idx = norm.indexOf(marker);
+  if (idx === -1) {
+    return '';
+  }
+  return norm.slice(0, idx);
+}
+
+// Heuristic tokenizer: split a shell command on whitespace, quotes, and common
+// shell operators, then keep the absolute-path tokens. Not a full shell parser:
+// any token it misses simply falls through to allow (fail-open). It targets the
+// common accidental form, cd <main>/... && <cmd>.
+function absoluteTokens(command) {
+  const isDelim = (ch) =>
+    ch <= ' ' || ch === "'" || ch === '"' || ch === '(' || ch === ')' ||
+    ch === '|' || ch === '&' || ch === ';' || ch === '<' || ch === '>' ||
+    ch === '\`' || ch === '$' || ch === '=' || ch === ',' || ch === ':';
+  const tokens = [];
+  let cur = '';
+  for (let i = 0; i < command.length; i++) {
+    const ch = command[i];
+    if (isDelim(ch)) {
+      if (cur) {
+        tokens.push(cur);
+        cur = '';
+      }
+    } else {
+      cur += ch;
+    }
+  }
+  if (cur) {
+    tokens.push(cur);
+  }
+  return tokens.filter((t) => path.isAbsolute(t));
+}
+
+function guardWrite(input, cwd) {
+  const toolInput = (input && input.tool_input) || {};
+  const filePath = toolInput.file_path;
+  if (!filePath || typeof filePath !== 'string') {
+    return allow();
+  }
+
+  let root = worktreeRootFor(cwd);
   if (!root) {
     // Can't determine the boundary — fail open rather than block every write.
     return allow();
@@ -175,6 +243,77 @@ function main(raw) {
   }
 
   return deny(target, root);
+}
+
+function guardBash(input, cwd) {
+  const toolInput = (input && input.tool_input) || {};
+  const command = toolInput.command;
+  if (!command || typeof command !== 'string') {
+    return allow();
+  }
+
+  // Per-command escape hatch: a deliberate main-checkout reference stays possible.
+  if (command.indexOf(MAIN_CHECKOUT_ESCAPE) !== -1) {
+    return allow();
+  }
+
+  const worktreeRoot = worktreeRootFor(cwd);
+  if (!worktreeRoot) {
+    // Can't determine the boundary, fail open.
+    return allow();
+  }
+  const mainRoot = mainCheckoutFor(worktreeRoot);
+  if (!mainRoot) {
+    // Not a nested .builders worktree, nothing to compare against.
+    return allow();
+  }
+
+  // As-written worktree root for the LEXICAL check (normalize only, no realpath).
+  const worktreeLexical = path.normalize(worktreeRoot);
+  const worktreeCanon = canonicalize(worktreeRoot, cwd);
+  const mainCanon = canonicalize(mainRoot, cwd);
+
+  for (const token of absoluteTokens(command)) {
+    // 1. LEXICAL worktree check FIRST — allow a worktree-absolute reference on its
+    //    as-written form, before any realpath. Load-bearing: every worktree holds
+    //    spawn-created symlinks into main (.env, .codev/config.json, worktree.symlinks),
+    //    and canonicalizing them would resolve into mainRoot and false-deny a
+    //    legitimate <worktree>/.env read.
+    if (isInside(path.normalize(token), worktreeLexical)) {
+      continue;
+    }
+    // 2. Otherwise canonicalize and compare against the two roots.
+    const tokenCanon = canonicalize(token, cwd);
+    if (isInside(tokenCanon, worktreeCanon)) {
+      // Resolves back into the worktree, fine.
+      continue;
+    }
+    if (isInside(tokenCanon, mainCanon)) {
+      return denyBash(tokenCanon, worktreeCanon, mainCanon);
+    }
+  }
+
+  return allow();
+}
+
+function main(raw) {
+  let input;
+  try {
+    input = JSON.parse(raw);
+  } catch (e) {
+    return allow();
+  }
+
+  const toolName = input && input.tool_name;
+  const cwd = (input && input.cwd) || process.cwd();
+
+  if (GUARDED_WRITE_TOOLS.has(toolName)) {
+    return guardWrite(input, cwd);
+  }
+  if (toolName === 'Bash') {
+    return guardBash(input, cwd);
+  }
+  return allow();
 }
 
 let buf = '';
@@ -219,7 +358,7 @@ export function buildWorktreeGuardFiles(
     hooks: {
       PreToolUse: [
         {
-          matcher: 'Write|Edit|MultiEdit',
+          matcher: 'Write|Edit|MultiEdit|Bash',
           hooks: [{ type: 'command', command }],
         },
       ],
