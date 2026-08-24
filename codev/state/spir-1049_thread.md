@@ -296,3 +296,16 @@ stubs; these three render their content into my mode render-targets in their own
   inline/wildcard, cspSource scoping, distinct nonce/render). Security-relevant surface.
 - Manual EDH render: can't evidence headless → flagged as dev-approval item (honest).
 - 69 files / 843 tests, types+lint clean. Rebuttal: 1049-phase_2-iter1-rebuttals.md.
+
+### 2026-08-25 — Phase 2 cmap iter2: Gemini APPROVE, Claude APPROVE, Codex COMMENT (phase accepted)
+- No REQUEST_CHANGES. Two non-blocking notes, BOTH reviewer-scoped to Phase 3 (they live in files P3
+  rewrites) → deferred to Phase 3, NOT re-iterating Phase 2:
+  * P3-TODO-A: panel-provider.ts comment is INVERTED — under retainContextWhenHidden:true,
+    resolveWebviewView does NOT re-fire on re-show (my comment says it does). Fix when P3 adds the
+    cache/re-post. Correct statement: context persists; re-post cached descriptor on onDidChangeVisibility.
+  * P3-TODO-B: components.ts Pill uses `disabled` attr + title → tooltip won't render in Chromium
+    (greyed-pill hover hint invisible). Switch to aria-disabled + no onClick (also better a11y:
+    keeps pill focusable/discoverable). Do in P3 when pills get real applicability wiring.
+- Cosmetic (left, justified): style-src 'unsafe-inline' kept (matches markdown-preview; P3/P4 bodies +
+  React inline styles will use it); .cp-context .cp-builder CSS is for P3's builder-name label.
+- Next: porch should advance to Phase 3 (Context adapter + contextual switching).
