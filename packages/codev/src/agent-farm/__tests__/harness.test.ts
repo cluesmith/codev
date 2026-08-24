@@ -108,6 +108,7 @@ describe('harness', () => {
       const settings = files.find((f) => f.relativePath === '.claude/settings.local.json');
       const parsed = JSON.parse(settings!.content);
       expect(parsed.hooks.PreToolUse[0].matcher).toContain('Write');
+      expect(parsed.hooks.PreToolUse[0].matcher).toContain('Bash');
     });
 
     it('CODEX_HARNESS does not have getWorktreeFiles', () => {

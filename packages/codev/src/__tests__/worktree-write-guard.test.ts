@@ -99,6 +99,46 @@ function runGuard(
   return { status: res.status, denied, reason };
 }
 
+/**
+ * Run the guard against a Bash tool call (Issue #1536). Mirrors runGuard but
+ * populates tool_input.command instead of file_path.
+ */
+function runBash(
+  command: string | undefined,
+  opts: { root?: string; home?: string; cwd?: string; bakeRoot?: boolean } = {},
+): GuardResult {
+  const cwd = opts.cwd ?? opts.root ?? worktree;
+  const env: Record<string, string> = {
+    PATH: process.env.PATH ?? '',
+    HOME: opts.home ?? homeDir,
+  };
+  const bakeRoot = opts.bakeRoot ?? true;
+  if (bakeRoot && opts.root !== null) {
+    env.CODEV_WORKTREE_ROOT = opts.root ?? worktree;
+  }
+
+  const toolInput: Record<string, unknown> = {};
+  if (command !== undefined) {
+    toolInput.command = command;
+  }
+
+  const res = spawnSync('node', [scriptPath], {
+    input: JSON.stringify({ tool_name: 'Bash', tool_input: toolInput, cwd }),
+    env,
+    encoding: 'utf8',
+  });
+
+  let denied = false;
+  let reason = '';
+  const out = (res.stdout ?? '').trim();
+  if (out) {
+    const parsed = JSON.parse(out);
+    denied = parsed?.hookSpecificOutput?.permissionDecision === 'deny';
+    reason = parsed?.hookSpecificOutput?.permissionDecisionReason ?? '';
+  }
+  return { status: res.status, denied, reason };
+}
+
 describe('worktree-write-guard script', () => {
   it('allows a Write inside the worktree', () => {
     const r = runGuard('Write', path.join(worktree, 'codev', 'plans', 'x.md'));
@@ -139,11 +179,6 @@ describe('worktree-write-guard script', () => {
       'Write',
       path.join(homeDir, '.claude', 'projects', 'p', 'memory', 'm.md'),
     );
-    expect(r.denied).toBe(false);
-  });
-
-  it('allows a non-guarded tool (Bash) regardless of path', () => {
-    const r = runGuard('Bash', undefined);
     expect(r.denied).toBe(false);
   });
 
@@ -194,6 +229,95 @@ describe('worktree-write-guard script', () => {
   });
 });
 
+describe('worktree-write-guard Bash scan (Issue #1536)', () => {
+  it('DENIES a Bash command that cd\'s into the main checkout and runs tests', () => {
+    const r = runBash(`cd ${path.join(mainCheckout, 'apps', 'x')} && npx jest`);
+    expect(r.status).toBe(0);
+    expect(r.denied).toBe(true);
+    // The reason teaches by naming BOTH roots so the model can re-root.
+    expect(r.reason).toContain(fs.realpathSync(worktree));
+    expect(r.reason).toContain(fs.realpathSync(mainCheckout));
+  });
+
+  it('DENIES a bare `cd <main-checkout>`', () => {
+    const r = runBash(`cd ${mainCheckout} && npx jest`);
+    expect(r.denied).toBe(true);
+  });
+
+  it('does NOT advertise the escape hatch in the deny message', () => {
+    const r = runBash(`cd ${mainCheckout} && npx jest`);
+    expect(r.reason).not.toContain('codev:allow-main-checkout');
+  });
+
+  it('allows a worktree-absolute command', () => {
+    const r = runBash(`cd ${path.join(worktree, 'apps', 'x')} && npx jest`);
+    expect(r.denied).toBe(false);
+  });
+
+  it('allows a relative command (no absolute main-checkout path)', () => {
+    const r = runBash('npx jest apps/x');
+    expect(r.denied).toBe(false);
+  });
+
+  it('allows a system-path execution outside the repo', () => {
+    const r = runBash('/usr/bin/node -v');
+    expect(r.denied).toBe(false);
+  });
+
+  it('allows a /tmp reference', () => {
+    const r = runBash('cat /tmp/codev-guard-scratch/out.txt');
+    expect(r.denied).toBe(false);
+  });
+
+  it('allows a main-checkout command carrying the per-command escape hatch', () => {
+    const r = runBash(
+      `cd ${path.join(mainCheckout, 'apps', 'x')} && npx jest # codev:allow-main-checkout`,
+    );
+    expect(r.denied).toBe(false);
+  });
+
+  it('fails open when the worktree is not a nested .builders worktree', () => {
+    // A root with no `.builders/<id>` segment yields no main-checkout boundary to
+    // compare against, so the scan cannot run — allow rather than block.
+    const r = runBash(`cd ${path.join(mainCheckout, 'apps', 'x')} && npx jest`, {
+      root: mainCheckout,
+    });
+    expect(r.denied).toBe(false);
+  });
+
+  it('allows on malformed JSON for a Bash call (fail-open)', () => {
+    const res = spawnSync('node', [scriptPath], {
+      input: 'not json',
+      env: { PATH: process.env.PATH ?? '', HOME: homeDir, CODEV_WORKTREE_ROOT: worktree },
+      encoding: 'utf8',
+    });
+    expect(res.status).toBe(0);
+    expect((res.stdout ?? '').trim()).toBe('');
+  });
+
+  // The load-bearing case: worktrees hold spawn-created symlinks into main
+  // (.env, .codev/config.json, worktree.symlinks). A lexical worktree check must
+  // allow reading them via Bash, while Write to the same path stays denied
+  // (writing through the link mutates main's file).
+  it('allows Bash reading a worktree symlink into main, but DENIES Write to it', () => {
+    const linkName = '.env-1536';
+    const mainFile = path.join(mainCheckout, linkName);
+    const worktreeLink = path.join(worktree, linkName);
+    fs.writeFileSync(mainFile, 'MAIN');
+    fs.symlinkSync(mainFile, worktreeLink);
+    try {
+      const read = runBash(`cat ${worktreeLink}`);
+      expect(read.denied).toBe(false);
+
+      const write = runGuard('Write', worktreeLink);
+      expect(write.denied).toBe(true);
+    } finally {
+      fs.rmSync(worktreeLink, { force: true });
+      fs.rmSync(mainFile, { force: true });
+    }
+  });
+});
+
 describe('buildWorktreeGuardFiles', () => {
   it('returns the guard script and a settings file at the expected paths', () => {
     const files = buildWorktreeGuardFiles('/abs/worktree');
@@ -211,6 +335,7 @@ describe('buildWorktreeGuardFiles', () => {
     const entry = parsed.hooks.PreToolUse[0];
     expect(entry.matcher).toContain('Write');
     expect(entry.matcher).toContain('Edit');
+    expect(entry.matcher).toContain('Bash');
     const command = entry.hooks[0].command;
     expect(command).toContain("CODEV_WORKTREE_ROOT='/abs/worktree'");
     expect(command).toContain(`node '/abs/worktree/${GUARD_SCRIPT_RELPATH}'`);
