@@ -381,3 +381,26 @@ stubs; these three render their content into my mode render-targets in their own
   post-merge docs/vscode-changelog workflow (worktrees/changelog). Updated plan to reflect. Entry text
   provided to architect below.
 - ALL 4 PHASES IMPLEMENTED. Next: PHASE_COMPLETE → cmap; then PR.
+
+### CHANGELOG ENTRY TEXT — for the architect's docs/vscode-changelog post-merge workflow (#1049)
+apps/vscode/CHANGELOG.md (under [Unreleased] → What's new):
+- **Contextual `Codev` bottom-panel tab.** A single panel tab that follows what you're looking at:
+  spec/plan/review markers when an artifact is open (Document Review), a builder's review queue on its
+  diff (Code Review), a builder's phase/gate/activity on its terminal (Builder Inspector), or a
+  cross-builder "what needs my attention" roll-up otherwise. Mode pills navigate between them and snap
+  back to context the moment you change what you're looking at; nothing is pinned or persisted. This
+  ships the panel skeleton, resolver, and switching — each mode's rich content arrives with its own
+  feature (#1037 review comments, #859/#945 markers, files-not-yet-reviewed). The old empty "Codev"
+  placeholder tab is replaced; `Codev Dev` is unchanged.
+
+docs/releases/UNRELEASED.md (its own ## section):
+## Contextual bottom panel
+The `Codev` bottom-panel tab now adapts to what you're doing — Document Review, Code Review, Builder
+Inspector, or an Attention roll-up — switching automatically with the active editor/terminal and
+offering mode pills to browse. Purely contextual: no pinning, no persisted panel state.
+
+### 2026-08-25 — Phase 4 cmap iter1 → fixed
+- Gemini+Claude APPROVE; Codex REQUEST_CHANGES: active pill not clickable (no path detail→summary).
+  FIXED: pillIsInteractive(state)=state!=='disabled'; Pill attaches onClick for active too; clicking
+  active builder-scoped pill → mode-navigate (no builderId) → summary. +tests. Provided changelog text
+  in thread (was promised, missing). 74 files/892 tests.

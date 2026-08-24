@@ -395,6 +395,22 @@ describe('ContextualPanelProvider — transient navigation (Phase 4)', () => {
     expect(lastMessage(posted).descriptor.kind).toBe('document-review');
   });
 
+  it('clicking the active builder-scoped pill navigates from a drilled-in detail back to its summary', () => {
+    hoisted.state.activeTabInput = artifactTab('/w/src/foo.ts');
+    hoisted.state.pendingBuilders = ['spir-1049'];
+    const provider = newProvider();
+    const { view, posted, fireMessage } = makeView();
+    provider.resolveWebviewView(view);
+
+    fireMessage({ type: 'drill-in', mode: 'code-review', builderId: 'spir-1049' });
+    expect(lastMessage(posted).descriptor.level).toBe('detail');
+
+    // Clicking the (active) Code Review pill re-navigates to the mode with no builder → summary.
+    fireMessage({ type: 'mode-navigate', mode: 'code-review' });
+    expect(lastMessage(posted).descriptor.level).toBe('summary');
+    expect(lastMessage(posted).descriptor.context.builderId).toBeUndefined();
+  });
+
   it('re-posts a summary when its builder-id list changes under the panel', () => {
     hoisted.state.activeTabInput = artifactTab('/w/src/foo.ts');
     hoisted.state.pendingBuilders = ['spir-1049'];

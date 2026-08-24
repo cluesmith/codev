@@ -84,11 +84,10 @@ body {
   border-color: var(--vscode-button-background);
   color: var(--vscode-button-foreground);
   font-weight: 600;
-  cursor: default;
 }
 
 .cp-pill--active:hover {
-  background: var(--vscode-button-background);
+  background: var(--vscode-button-hoverBackground, var(--vscode-button-background));
 }
 
 .cp-pill--disabled {

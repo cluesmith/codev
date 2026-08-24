@@ -9,7 +9,7 @@
 
 import * as React from 'react';
 import type { ModeKind } from '../types.js';
-import { type ModePill } from '../pills.js';
+import { pillIsInteractive, type ModePill } from '../pills.js';
 
 const h = React.createElement;
 
@@ -38,7 +38,9 @@ export function Pill(props: { pill: ModePill; onNavigate?: (mode: ModeKind) => v
     buttonProps['aria-disabled'] = true;
     buttonProps.title = `Open a spec, plan, or review to activate ${pill.label}`;
   }
-  if (pill.state === 'navigable' && onNavigate !== undefined) {
+  // Every applicable pill navigates — including the active one, so clicking the active builder-scoped
+  // mode returns from a drilled-in detail to its summary.
+  if (pillIsInteractive(pill.state) && onNavigate !== undefined) {
     buttonProps.onClick = () => onNavigate(pill.mode);
   }
 

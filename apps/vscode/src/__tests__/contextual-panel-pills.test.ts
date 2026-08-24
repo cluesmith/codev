@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { pillsFromDescriptor, MODE_ORDER } from '../contextual-panel/pills.js';
+import { pillsFromDescriptor, pillIsInteractive, MODE_ORDER } from '../contextual-panel/pills.js';
 import type { ModeDescriptor, ModeKind } from '../contextual-panel/types.js';
 
 function descriptor(kind: ModeKind, applicability: Record<ModeKind, boolean>): ModeDescriptor {
@@ -45,5 +45,14 @@ describe('pillsFromDescriptor', () => {
       'attention': true,
     });
     expect(pillsFromDescriptor(d).find((p) => p.mode === 'document-review')?.state).toBe('active');
+  });
+});
+
+describe('pillIsInteractive', () => {
+  it('the active and navigable pills are clickable; only disabled is inert', () => {
+    // The active pill must stay clickable so a drilled-in detail can navigate back to its summary.
+    expect(pillIsInteractive('active')).toBe(true);
+    expect(pillIsInteractive('navigable')).toBe(true);
+    expect(pillIsInteractive('disabled')).toBe(false);
   });
 });

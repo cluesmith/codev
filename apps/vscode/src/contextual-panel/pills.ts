@@ -35,6 +35,15 @@ export interface ModePill {
   state: PillState;
 }
 
+/**
+ * Whether a pill accepts a navigation click. Every applicable pill does — including the ACTIVE one,
+ * so that clicking the active builder-scoped mode navigates from a drilled-in detail back to its
+ * summary. Only a disabled (inapplicable) pill is inert.
+ */
+export function pillIsInteractive(state: PillState): boolean {
+  return state !== 'disabled';
+}
+
 /** Map a resolved descriptor to the four pills' display states. */
 export function pillsFromDescriptor(descriptor: ModeDescriptor): ModePill[] {
   return MODE_ORDER.map((mode) => {
