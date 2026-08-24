@@ -1,9 +1,21 @@
 id: '1049'
 title: vscode-contextual-bottom-panel
 protocol: spir
-phase: plan
-plan_phases: []
-current_plan_phase: null
+phase: implement
+plan_phases:
+  - id: phase_1
+    title: Mode resolver + contract types
+    status: in_progress
+  - id: phase_2
+    title: Panel surface + placeholder retirement
+    status: pending
+  - id: phase_3
+    title: Context adapter + contextual mode switching
+    status: pending
+  - id: phase_4
+    title: Transient navigation + minimum summary stubs
+    status: pending
+current_plan_phase: phase_1
 gates:
   spec-approval:
     status: approved
@@ -18,7 +30,7 @@ gates:
   verify-approval:
     status: pending
 iteration: 1
-build_complete: true
+build_complete: false
 history: []
 started_at: '2026-08-12T12:09:59.640Z'
-updated_at: '2026-08-24T22:07:59.863Z'
+updated_at: '2026-08-24T22:08:13.581Z'
