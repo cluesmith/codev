@@ -100,19 +100,19 @@ Make the contextual `Codev` tab exist and render a static themed shell (header +
 #### Files to Create / Modify
 
 - Modify `apps/vscode/package.json` — in `contributes.views.codevPanel`, **remove** the `codev.placeholder` entry and **add** `{ "id": "codev.contextualPanel", "name": "Codev", "type": "webview" }` (**`"type": "webview"` is required** — a `WebviewViewProvider` on a view lacking it does not render). `codev.dev` unchanged. (View id decision: new `codev.contextualPanel`; `codev.placeholder` removed entirely so the grep-clean criterion is satisfiable.)
-- Create `apps/vscode/src/contextual-panel/panel-provider.ts` — the `WebviewViewProvider` (`resolveWebviewView`): builds HTML with nonce/CSP/`localResourceRoots` (modeled on `src/markdown-preview/preview-template.ts`), loads the bundled script; static shell this phase. **Caches the last `ModeDescriptor` and re-posts it on `resolveWebviewView` and on `WebviewView.onDidChangeVisibility`** — a hidden webview cannot receive messages and `resolveWebviewView` re-fires on re-show, so a surface change made while the panel is collapsed must not leave it blank/stale on reopen.
+- Create `apps/vscode/src/contextual-panel/panel-provider.ts` — the `WebviewViewProvider` (`resolveWebviewView`): builds HTML with nonce/CSP/`localResourceRoots` (modeled on `src/markdown-preview/preview-template.ts`), loads the bundled script; static shell this phase. **(Relocated to Phase 3 after cmap:** the descriptor cache + re-post on `onDidChangeVisibility` is inseparable from descriptor *posting*, which Phase 3 introduces — in Phase 2 there is no descriptor to cache, so the mechanism would be dead, untested scaffolding. It is a Phase 3 deliverable, not dropped.)
 - Create `apps/vscode/src/contextual-panel/webview/main.ts` — React entry via `React.createElement` (no JSX), rendering header + pills + empty body.
 - Create `apps/vscode/src/contextual-panel/webview/components/` — local primitives (`Pill`, `HeaderStrip`), `createElement` style; extraction seams for [#1549].
 - Modify `apps/vscode/esbuild.js` — add a webview bundle entry `src/contextual-panel/webview/main.ts` → `dist/webview/contextual-panel.js`, mirroring `webviewConfig`.
 - Modify `apps/vscode/tsconfig.json` — add `src/contextual-panel/webview` to `exclude`; and `apps/vscode/tsconfig.webview.json` — add it to `include` (so browser DOM type-checking is correct and `check-types` — which runs both configs — passes).
-- Modify `apps/vscode/src/extension.ts` — register via `registerWebviewViewProvider('codev.contextualPanel', provider, { webviewOptions: { retainContextWhenHidden: … } })`, injecting `extensionUri`, `OverviewCache`, `ReviewQueueStore`, `TerminalManager` (needed in Phases 3–4). **Retire the dead `setContext 'codev.panelContainerEmpty' false` flip (~:555) and its stale `#813/#814/#815 "sibling tabs"` comment (~:552).**
+- Modify `apps/vscode/src/extension.ts` — register via `registerWebviewViewProvider('codev.contextualPanel', provider, { webviewOptions: { retainContextWhenHidden: true } })`, injecting `extensionUri` only. **DI-when-needed:** `TerminalManager` (Phase 3) and `OverviewCache` / `ReviewQueueStore` (Phase 4) are added to the constructor in the phase whose code uses them — injecting them here, unused, would be dead params tripping `noUnusedLocals`. **Retire the dead `setContext 'codev.panelContainerEmpty' false` flip (~:555) and its stale `#813/#814/#815 "sibling tabs"` comment (~:552).**
 - Delete `apps/vscode/src/views/panel-placeholder.ts` + its registration (the stale `#813/#814/#815` body/tooltip text at lines 18/20 goes with it).
 - **Delete** `apps/vscode/src/__tests__/panel-placeholder.test.ts` (its subject `PanelPlaceholderProvider` is removed). Modify `contributes-panel.test.ts` (drop the placeholder/`panelContainerEmpty` assertions; **keep** its sidebar-view-list and `PANEL_REVEALED_KEY` assertions) and `contributes-dev.test.ts` (update its placeholder reference).
 
 #### Deliverables
 
 - [ ] `codev.contextualPanel` webview view registered, always present, `"type": "webview"`, rendering a static header + four pills + empty body.
-- [ ] Visibility lifecycle handled (cache + re-post on resolve and `onDidChangeVisibility`).
+- [ ] `panel-template.ts` CSP/nonce hardening unit-tested (nonce bound into CSP + script tag, no inline/wildcard scripts, resources scoped to `cspSource`). *(Visibility cache + re-post relocated to Phase 3 — see Files above.)*
 - [ ] Placeholder provider, registration, the `panelContainerEmpty` flip, and the `#813/#814/#815` text/comment removed.
 - [ ] esbuild produces `dist/webview/contextual-panel.js`; both tsconfigs updated.
 - [ ] `panel-placeholder.test.ts` deleted; `contributes-panel.test.ts` / `contributes-dev.test.ts` updated (non-placeholder assertions preserved).
@@ -158,6 +158,7 @@ Wire the panel to follow the active surface: derive `SurfaceContext` from the ac
 #### Deliverables
 
 - [ ] `surface-context.ts` (derivation + last-focus + identity comparison) and trigger wiring.
+- [ ] **Visibility cache + re-post (relocated from Phase 2):** the provider holds the `WebviewView`, caches the last posted `ModeDescriptor`, and re-posts it on `resolveWebviewView` and `WebviewView.onDidChangeVisibility`. With `retainContextWhenHidden: true` the webview is not re-resolved on re-show, so `onDidChangeVisibility` (not resolve re-fire) is the re-post trigger; a surface change made while the panel is collapsed must not leave it blank/stale on reopen. Inject `TerminalManager` into the provider here (first use).
 - [ ] Webview renders the resolved mode (active pill; greyed/disabled inapplicable pills; per-mode detail placeholder).
 - [ ] Tests: each predicate (artifact incl. custom editor; worktree-artifact builderId; builderDiff via `TabInputTextDiff.modified` + registry; builderTerminal gated by last-focus; none); registry-not-yet-populated → re-resolve on registry change; terminal→editor exit demotes terminal; identity-unchanged event does **not** clear selection; **cross-builder transition with the same kind (builder A terminal → builder B terminal, `builderId` A→B) IS a transition and clears the transient selection** (#1497 guard); each real transition → one re-resolution.
 
@@ -165,6 +166,7 @@ Wire the panel to follow the active surface: derive `SurfaceContext` from the ac
 
 - [ ] O(1) derivation, no filesystem/network on the switch path (asserted); no reliance on reading back a context key.
 - [ ] Custom-editor spec → Document Review; `TabInputTextDiff` builder diff → Code Review (builder from `modified` side); builder terminal (last-focused) → Builder Inspector; return-to-editor exits Builder Inspector; unmatched → Attention.
+- [ ] Visibility cache: after a descriptor is posted, hiding then showing the panel re-posts the cached descriptor (tested via a mocked `WebviewView` + `onDidChangeVisibility`), so the reopened panel is never blank/stale.
 - [ ] Residual "fires nothing" cases documented in code comments.
 - [ ] `test:unit` + `check-types` pass.
 

@@ -282,3 +282,17 @@ stubs; these three render their content into my mode render-targets in their own
 - Verify: esbuild 3 bundles OK; check-types clean (both); eslint clean; vitest 68 files / 838 tests PASS.
 - Descriptor cache + re-post on visibility deferred to Phase 3 (when host posts descriptors) — noted.
 - Next: signal PHASE_COMPLETE → porch checks + cmap.
+
+### 2026-08-25 — Phase 2 cmap iter1 → addressed
+- Gemini APPROVE, Claude APPROVE, Codex REQUEST_CHANGES. Convergent: visibility-cache deliverable
+  was assigned to Phase 2 but deferred (silent). DI omitted. No template test.
+- Visibility cache: FORMALLY RELOCATED to Phase 3 in the plan (not dropped) — it's inseparable from
+  descriptor posting (Phase 3); implementing in P2 = dead untested scaffolding + noUnusedLocals. Added
+  as P3 deliverable+AC+test. Captured retainContextWhenHidden coupling (view NOT re-resolved on
+  re-show → onDidChangeVisibility is the re-post trigger, per Claude).
+- DI: documented DI-when-needed in plan (TerminalManager P3, stores P4) — injecting unused deps = dead
+  params.
+- Added contextual-panel-template.test.ts (5 tests: nonce↔CSP↔script binding, default-src none, no
+  inline/wildcard, cspSource scoping, distinct nonce/render). Security-relevant surface.
+- Manual EDH render: can't evidence headless → flagged as dev-approval item (honest).
+- 69 files / 843 tests, types+lint clean. Rebuttal: 1049-phase_2-iter1-rebuttals.md.
