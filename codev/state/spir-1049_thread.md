@@ -122,6 +122,57 @@ Actual per-mode rendering is out of scope (owned by participating-feature issues
 - afx send note: `--file` AUGMENTS a message, needs a message string too (not a replacement).
 - Next: read cmap verdicts + architect contract feedback → revise → rebuttal → plan gate.
 
+### Plan iter1 feedback to fold (architect + Codex REQUEST_CHANGES + Gemini APPROVE; Claude cmap PENDING)
+ARCHITECT contract review (4 notes + 1 minor):
+- A1 [BLOCKING] Type placement: SurfaceContext/ManualSelection/ModeDescriptor/messages are EXTENSION-
+  INTERNAL → apps/vscode local module, NOT codev-types. My plan already puts them in apps/vscode/src/
+  contextual-panel/types.ts (compliant) — STATE IT EXPLICITLY in plan.
+- A2 Artifact regex also matches .builders/<id>/codev/... (COMMON case): worktree artifact = surface
+  'artifact' + builderId from .builders/<id>/ segment; DECIDE+document whether derivable builderId
+  enables builder-scoped modes. => decision: yes, enables Code Review/Builder Inspector applicability
+  scoped to that builder.
+- A3 Terminal identity (#1497): getActiveBuilderId() must key off verified terminal->builder map, never
+  a label. Already does (terminal-manager.ts:450: entry.terminal===active && map key builder-<id>) — CITE it.
+- A4 Webview input validation: validate mode∈ModeKind AND builderId∈known-builders before acting;
+  invalid→ignore. Phase 4 + test.
+- A5 [minor] Record 1-line rationale for "never emits {document-review,summary}" (Doc Review has no summary).
+CODEX (REQUEST_CHANGES, all HIGH — several real bugs):
+- C1 Terminal-exit proxy incomplete: getActiveBuilderId() still non-null after editor refocus → need
+  explicit LAST-FOCUSED-SURFACE state (editor vs terminal); report terminal only when last-focused=terminal.
+- C2 Clearing "on every trigger" WRONG: cursor moves / bg tab / registry refresh would wipe transient nav.
+  Compare STABLE SURFACE IDENTITY (kind+path+builderId); clear only on actual transition.
+- C3 SurfaceContext.surface is a pre-resolved single discriminator → resolver can't do precedence/overlap
+  tests. Change contract: SurfaceContext carries INDEPENDENT predicate signals; resolver applies precedence.
+  (CONTRACT CHANGE — re-flag to architect before gate.)
+- C4 Diff derivation underspecified: context keys can't be read back (setContext is write-only); use
+  TabInputTextDiff / vscode.changes input + diff-inject registry provider.get(fsPath)->builderId.
+- C5 Tests under src/contextual-panel/__tests__ WON'T RUN (vitest include = src/__tests__/**). Move to
+  src/__tests__/contextual-panel-*.test.ts.
+- C6 tsconfig sync: update tsconfig.json (exclude contextual-panel/webview) + tsconfig.webview.json
+  (include it) for DOM type-check. (Gemini also.)
+- C7 Manifest view needs "type":"webview".
+- C8 Spec says "seven" render targets but it's SIX (1+2+2+1). Spec frozen → enumerate 6 in plan, flag typo.
+- C9 Changelog not assigned to a phase → assign to Phase 4 deliverable.
+GEMINI (APPROVE): G1 tsconfig sync (=C6). G2 DI: PanelProvider needs OverviewCache, ReviewQueueStore,
+  TerminalManager, extensionUri injected at registration.
+CLAUDE (REQUEST_CHANGES, source-verified): confirms C5/C6/C7 + precedence-violation; NEW: diff side =
+  input.modified.fsPath (original is codev-diff: → misses builderId); WEBVIEW VISIBILITY lifecycle
+  (resolveWebviewView re-fires, can't post to hidden webview → cache+re-post on resolve+onDidChangeVisibility);
+  panel-placeholder.test.ts DELETE not modify (keep contributes-panel sidebar/PANEL_REVEALED_KEY asserts);
+  minor: security escape test explicit, enumerate targets, pick view id.
+
+### Plan revised (all folded) — verified vitest include / tsconfig / fsPath-side / createElement against source
+- All 5 architect + 9 Codex + Claude + 2 Gemini items adopted. Decisions locked: view id = NEW
+  codev.contextualPanel (remove placeholder); primitives use React.createElement (no JSX); tests →
+  src/__tests__/contextual-panel-*.test.ts; SurfaceContext = INDEPENDENT PREDICATES (artifact/builderDiff/
+  builderTerminal) so resolver does precedence; worktree artifact carries builderId + enables builder-scoped
+  applicability; render targets = SIX (spec typo "seven" flagged, spec frozen).
+- Rebuttal: 1049-plan-iter1-rebuttals.md.
+- CONTRACT CHANGES vs what architect reviewed: SurfaceContext shape (predicates not single discriminator),
+  diff derivation (TabInputTextDiff.modified + registry, not context key), worktree-artifact applicability,
+  message value-validation. MUST re-flag delta to architect before gate (their standing rule).
+- Next: commit "plan with multi-agent review"; re-flag contract delta to architect; then plan gate.
+
 ## Plan-phase notes (do NOT apply to spec — captured for when we reach PLAN)
 
 ### Placeholder dead-code cleanup (architect note 2026-08-14, verified against source)

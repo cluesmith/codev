@@ -4,20 +4,23 @@
 
 ## Executive Summary
 
-The spec's recommended substrate is a **webview-view panel** (Approach 1): a `WebviewViewProvider` registered in the `codevPanel` container, with a pure host-side `ModeResolver` feeding a React webview. This plan follows that, refined to the **React** variant of the substrate (the `MarkdownPreviewProvider` lineage: an esbuild IIFE bundle mounting React), so that Document Review's future content can host `<ArtifactCanvas>` without a later rewrite. It is the first `WebviewViewProvider` in the extension.
+The spec's recommended substrate is a **webview-view panel** (Approach 1): a `WebviewViewProvider` registered in the `codevPanel` container, with a pure host-side `ModeResolver` feeding a React webview. This plan follows that, refined to the **React** variant (the `MarkdownPreviewProvider` lineage: an esbuild IIFE bundle mounting React via `React.createElement` — **no JSX**, matching `src/markdown-preview/webview/main.ts`), so Document Review's future content can host `<ArtifactCanvas>` without a rewrite. It is the first `WebviewViewProvider` in the extension.
 
-The work decomposes into four dependency-ordered phases that mirror the spec's umbrella boundary — skeleton + resolver + switching + minimal navigation stubs, *no* real mode content:
+Four dependency-ordered phases mirror the spec's umbrella boundary — skeleton + resolver + switching + minimal navigation stubs, *no* real mode content:
 
 1. **Mode resolver + contract types** — the pure, VSCode-free decision core (load-bearing; fully unit-testable in isolation).
 2. **Panel surface + placeholder retirement** — the webview tab exists and renders a static shell; the vestigial `codev.placeholder` and its dead context-key flip are retired; manifest-invariant tests updated.
-3. **Context adapter + contextual mode switching** — the tab-based `SurfaceContext` derivation, the trigger set (including the terminal-exit proxy), and resolver→webview wiring so the panel follows the active surface.
-4. **Transient navigation + minimum summary stubs** — clickable pills and summary-list drill-in as transient (never-persisted) navigation, cleared on any active-surface change.
+3. **Context adapter + contextual mode switching** — tab-based `SurfaceContext` derivation, the trigger set (including the terminal-exit last-focus proxy), and resolver→webview wiring so the panel follows the active surface.
+4. **Transient navigation + minimum summary stubs** — clickable pills and summary-list drill-in as transient (never-persisted) navigation, cleared only on an actual surface transition.
 
-**Two cross-cutting implementation rules** (architect-directed) apply across phases 2–4:
-- **Local primitives with extraction seams for [#1549].** Build the panel's UI primitives (pill/segmented-header, list, row, empty-state) locally under `src/contextual-panel/webview/`, factored cleanly so #1549 can later extract them into a generalized artifact-canvas — but do **not** pre-build a shared layer here. #1549 extracts from proven code.
-- **No mode content.** Every mode body is a placeholder; the only "real" data touched is the minimal builder-id list in Phase 4's summary stub (cheaply enumerable), sufficient to make drill-in demonstrable.
+**Cross-cutting implementation rules (architect-directed), applied across phases 2–4:**
+- **Extension-local types.** `SurfaceContext`, `ManualSelection`, `ModeDescriptor`, and the webview message types are **extension-internal** and live under `apps/vscode/src/contextual-panel/` — deliberately **not** in `@cluesmith/codev-types` (wire contracts only; the only boundary these cross is this extension's own `postMessage`, which is not a published contract). If [#1549] later extracts primitives, presentation types may move into artifact-canvas; they still never enter codev-types unless an out-of-extension consumer appears.
+- **Local primitives with extraction seams for [#1549].** Build UI primitives (pill/segmented-header, list, row, empty-state) locally under `src/contextual-panel/webview/components/` with clean seams; do **not** pre-build a shared layer. #1549 extracts from proven code.
+- **No mode content.** Every mode body is a placeholder; the only real data touched is Phase 4's minimal builder-id list (cheap enumeration) for the summary stub.
 
-**Contract-surface note (process):** the sections marked **[CONTRACT SURFACE]** below — the resolver types (Phase 1), the `SurfaceContext` derivation + trigger set + terminal-exit proxy (Phase 3), and the host↔webview message contract (Phase 4) — are routed to the architect for review *before* the plan gate, per the standing instruction.
+**Render targets — six** (the spec's Success Criteria says "seven"; that is an off-by-one — the enumerated set below is **six**, since Document Review is detail-only; flagged to the architect as a frozen-spec typo): Document Review *detail*; Code Review *summary* + *detail*; Builder Inspector *summary* + *detail*; Attention *summary*.
+
+**Contract-surface note (process):** the **[CONTRACT SURFACE]** sections (Phase 1 types; Phase 3 `SurfaceContext` derivation + trigger set + exit proxy; Phase 4 message contract) were routed to the architect, who returned four notes (all folded below). Because cmap forced a shape change to `SurfaceContext` (independent predicate signals, so precedence lives in the resolver), the revised contract surfaces are re-flagged to the architect before the plan gate.
 
 ## Phases (Machine Readable)
 
@@ -42,37 +45,47 @@ The work decomposes into four dependency-ordered phases that mirror the spec's u
 
 #### Objective
 
-Deliver the pure, synchronous, VSCode-free decision core — the load-bearing surface of the whole feature — so it can be exhaustively unit-tested before any UI exists. This is the piece the spec calls out as most needing to be deterministic.
+Deliver the pure, synchronous, VSCode-free decision core — the load-bearing surface — so it can be exhaustively unit-tested before any UI exists.
 
 #### Files to Create / Modify
 
-- Create `apps/vscode/src/contextual-panel/types.ts` — the contract types: `ModeKind` (`'document-review' | 'code-review' | 'builder-inspector' | 'attention'`), `ModeLevel` (`'summary' | 'detail'`), `SurfaceContext`, `ManualSelection`, `ModeDescriptor`, and a `ModeApplicability` map.
-- Create `apps/vscode/src/contextual-panel/resolver.ts` — `resolveMode(surface: SurfaceContext, selection: ManualSelection | null): ModeDescriptor` plus an applicability helper.
-- Create `apps/vscode/src/contextual-panel/__tests__/resolver.test.ts` — Vitest unit tests.
+- Create `apps/vscode/src/contextual-panel/types.ts` — extension-local contract types (below).
+- Create `apps/vscode/src/contextual-panel/resolver.ts` — `resolveMode(surface, selection)`.
+- Create `apps/vscode/src/__tests__/contextual-panel-resolver.test.ts` — Vitest suite (**note the path: `src/__tests__/`, the only dir `vitest.config.ts` `include: ['src/__tests__/**/*.test.ts']` picks up**).
 
-#### [CONTRACT SURFACE] Contract definition
+#### [CONTRACT SURFACE] Contract definition (extension-local, NOT codev-types)
 
-- `SurfaceContext` (plain, host-derived): `{ surface: 'artifact' | 'builder-diff' | 'builder-terminal' | 'other' | 'none', resourcePath?: string, viewType?: string, builderId?: string }`.
+- `ModeKind = 'document-review' | 'code-review' | 'builder-inspector' | 'attention'`; `ModeLevel = 'summary' | 'detail'`.
+- **`SurfaceContext` carries independent predicate signals** (not a single pre-resolved discriminator), so the resolver applies precedence and overlap is genuinely testable:
+  ```
+  SurfaceContext {
+    artifact?:        { resourcePath: string; builderId?: string };  // builderId when housed under .builders/<id>/
+    builderDiff?:     { builderId: string };
+    builderTerminal?: { builderId: string };  // present only when the terminal is the last-focused surface (Phase 3)
+  }
+  ```
+  `other`/`none` = all three absent.
 - `ManualSelection` (transient, never persisted): `{ mode: ModeKind, builderId?: string }`.
 - `ModeDescriptor`: `{ kind: ModeKind, level: ModeLevel, context: { builderId?: string; resourcePath?: string }, applicability: Record<ModeKind, boolean> }`.
-- **Precedence (locked by the spec):** `builder-terminal → builder-diff → artifact-path → attention`. A `ManualSelection` overrides contextual resolution when present.
-- **Never emits `{ kind: 'document-review', level: 'summary' }`** — Document Review is detail-only.
-- **Never throws** — unknown/malformed input degrades to `attention`.
+- **Precedence (locked by spec):** `builderTerminal → builderDiff → artifact → attention`. A `ManualSelection`, when present, overrides contextual resolution.
+- **Applicability:** Code Review, Builder Inspector, and Attention are always applicable-for-navigation; Document Review is applicable only when an `artifact` predicate is present. **A worktree artifact whose `builderId` is derivable additionally marks Code Review + Builder Inspector applicable, scoped to that builder** (richer context for free — architect note A2).
+- **Never emits `{ kind: 'document-review', level: 'summary' }`** — *rationale: Document Review is inherently file-scoped and has no cross-builder summary level* (architect note A5).
+- **Never throws** — unknown/empty input degrades to `attention`.
 
 #### Deliverables
 
-- [ ] `types.ts` and `resolver.ts` implementing the contract above.
-- [ ] Unit tests covering: each surface → mode+level; precedence overlap (builder `codev/specs/*.md` in a diff session → `code-review`); `ManualSelection` overrides context; summary vs detail selection (transient with/without `builderId`); attention fallback; applicability per context; Document-Review-never-summary; malformed input → attention (no throw).
+- [ ] `types.ts`, `resolver.ts` per the contract.
+- [ ] Unit tests: each predicate → mode+level; **precedence overlap** (`artifact` + `builderDiff` both present → `code-review`); worktree-artifact builderId → Document Review detail *and* builder-scoped applicability; `ManualSelection` overrides; summary vs detail; attention fallback; applicability matrix; never-`{document-review,summary}`; malformed input → attention (no throw).
 
 #### Acceptance Criteria
 
-- [ ] Resolver is pure/synchronous with no VSCode/`node:` imports and no I/O.
-- [ ] Precedence order is encoded exactly once and asserted by the overlap test.
-- [ ] `pnpm --filter codev-vscode test:unit` (Vitest) passes for the new suite; `check-types` clean.
+- [ ] Resolver pure/synchronous; no VSCode/`node:` imports; no I/O.
+- [ ] Precedence encoded once, asserted by the overlap test.
+- [ ] `pnpm --filter codev-vscode test:unit` runs and passes the new suite (verified non-vacuous — the file is under `src/__tests__/`); `check-types` clean.
 
 #### Test Plan
 
-Vitest unit tests only (no VSCode host). One `describe` per branch of the resolver plus the applicability matrix and the malformed-input degradation case.
+Vitest only (no VSCode host). One `describe` per resolver branch + applicability matrix + malformed-degradation.
 
 ---
 
@@ -82,36 +95,38 @@ Vitest unit tests only (no VSCode host). One `describe` per branch of the resolv
 
 #### Objective
 
-Make the contextual `Codev` tab exist in the bottom panel and render a static themed shell (header strip + four pills + empty body), retiring the vestigial placeholder and its dead context-key flip in the same change. Delivers a visible, always-present panel tab; `Codev Dev` untouched.
+Make the contextual `Codev` tab exist and render a static themed shell (header + four pills + empty body), retiring the vestigial placeholder and its dead context-key flip in the same change. `Codev Dev` untouched.
 
 #### Files to Create / Modify
 
-- Modify `apps/vscode/package.json` — replace the `codev.placeholder` entry in `contributes.views.codevPanel` with the contextual `Codev` webview view (`codev.contextualPanel`, or reuse the `codev.placeholder` id repurposed); drop the `when: codev.panelContainerEmpty` gating. Leave `codev.dev` as is.
-- Create `apps/vscode/src/contextual-panel/panel-provider.ts` — the `WebviewViewProvider` (`resolveWebviewView`): builds the HTML with nonce/CSP/`localResourceRoots`, loads the bundled webview script, static shell only in this phase.
-- Create `apps/vscode/src/contextual-panel/webview/main.ts` — React entry (esbuild IIFE) rendering the header + pills + empty body; local primitives (`Pill`, `HeaderStrip`) under `webview/components/`.
-- Create `apps/vscode/src/contextual-panel/webview/components/` — local primitive components (extraction seams for [#1549]; not a shared package).
-- Modify `apps/vscode/esbuild.js` — add a webview bundle entry `src/contextual-panel/webview/main.ts` → `dist/webview/contextual-panel.js` (+ css), mirroring the markdown-preview `webviewConfig`.
-- Modify `apps/vscode/src/extension.ts` — register the provider via `registerWebviewViewProvider`; **retire the dead `setContext 'codev.panelContainerEmpty' false` flip (~line 555) and its now-stale `#813/#814/#815 "sibling tabs"` comment (~line 552).**
-- Delete `apps/vscode/src/views/panel-placeholder.ts` (the signpost provider) **and** remove its registration; the stale body/tooltip text advertising `#813/#814/#815` (lines 18/20) goes with it.
-- Modify manifest-invariant tests `apps/vscode/src/__tests__/contributes-panel.test.ts`, `panel-placeholder.test.ts`, `contributes-dev.test.ts` — update to the new always-present contextual view and the removal of the placeholder + `panelContainerEmpty` seed.
+- Modify `apps/vscode/package.json` — in `contributes.views.codevPanel`, **remove** the `codev.placeholder` entry and **add** `{ "id": "codev.contextualPanel", "name": "Codev", "type": "webview" }` (**`"type": "webview"` is required** — a `WebviewViewProvider` on a view lacking it does not render). `codev.dev` unchanged. (View id decision: new `codev.contextualPanel`; `codev.placeholder` removed entirely so the grep-clean criterion is satisfiable.)
+- Create `apps/vscode/src/contextual-panel/panel-provider.ts` — the `WebviewViewProvider` (`resolveWebviewView`): builds HTML with nonce/CSP/`localResourceRoots` (modeled on `src/markdown-preview/preview-template.ts`), loads the bundled script; static shell this phase. **Caches the last `ModeDescriptor` and re-posts it on `resolveWebviewView` and on `WebviewView.onDidChangeVisibility`** — a hidden webview cannot receive messages and `resolveWebviewView` re-fires on re-show, so a surface change made while the panel is collapsed must not leave it blank/stale on reopen.
+- Create `apps/vscode/src/contextual-panel/webview/main.ts` — React entry via `React.createElement` (no JSX), rendering header + pills + empty body.
+- Create `apps/vscode/src/contextual-panel/webview/components/` — local primitives (`Pill`, `HeaderStrip`), `createElement` style; extraction seams for [#1549].
+- Modify `apps/vscode/esbuild.js` — add a webview bundle entry `src/contextual-panel/webview/main.ts` → `dist/webview/contextual-panel.js`, mirroring `webviewConfig`.
+- Modify `apps/vscode/tsconfig.json` — add `src/contextual-panel/webview` to `exclude`; and `apps/vscode/tsconfig.webview.json` — add it to `include` (so browser DOM type-checking is correct and `check-types` — which runs both configs — passes).
+- Modify `apps/vscode/src/extension.ts` — register via `registerWebviewViewProvider('codev.contextualPanel', provider, { webviewOptions: { retainContextWhenHidden: … } })`, injecting `extensionUri`, `OverviewCache`, `ReviewQueueStore`, `TerminalManager` (needed in Phases 3–4). **Retire the dead `setContext 'codev.panelContainerEmpty' false` flip (~:555) and its stale `#813/#814/#815 "sibling tabs"` comment (~:552).**
+- Delete `apps/vscode/src/views/panel-placeholder.ts` + its registration (the stale `#813/#814/#815` body/tooltip text at lines 18/20 goes with it).
+- **Delete** `apps/vscode/src/__tests__/panel-placeholder.test.ts` (its subject `PanelPlaceholderProvider` is removed). Modify `contributes-panel.test.ts` (drop the placeholder/`panelContainerEmpty` assertions; **keep** its sidebar-view-list and `PANEL_REVEALED_KEY` assertions) and `contributes-dev.test.ts` (update its placeholder reference).
 
 #### Deliverables
 
-- [ ] Contextual `Codev` webview view registered in `codevPanel`, always present, rendering a static header + four pills + empty body.
-- [ ] Placeholder provider, its registration, the `panelContainerEmpty` flip, and the `#813/#814/#815` text/comment all removed.
-- [ ] esbuild produces `dist/webview/contextual-panel.js`.
-- [ ] Manifest-invariant tests updated and green.
-- [ ] Webview hardened: nonce-based CSP, constrained `localResourceRoots`.
+- [ ] `codev.contextualPanel` webview view registered, always present, `"type": "webview"`, rendering a static header + four pills + empty body.
+- [ ] Visibility lifecycle handled (cache + re-post on resolve and `onDidChangeVisibility`).
+- [ ] Placeholder provider, registration, the `panelContainerEmpty` flip, and the `#813/#814/#815` text/comment removed.
+- [ ] esbuild produces `dist/webview/contextual-panel.js`; both tsconfigs updated.
+- [ ] `panel-placeholder.test.ts` deleted; `contributes-panel.test.ts` / `contributes-dev.test.ts` updated (non-placeholder assertions preserved).
+- [ ] Webview hardened: nonce CSP, constrained `localResourceRoots`.
 
 #### Acceptance Criteria
 
-- [ ] The panel shows one contextual `Codev` tab plus the untouched `Codev Dev` tab.
-- [ ] No reference to `codev.panelContainerEmpty` or `codev.placeholder` remains (grep-clean across the extension).
-- [ ] `pnpm --filter codev-vscode test:unit` and `check-types` pass; the extension + webview bundles build.
+- [ ] Panel shows one contextual `Codev` tab + the untouched `Codev Dev` tab.
+- [ ] No reference to `codev.panelContainerEmpty` or `codev.placeholder` remains (grep-clean).
+- [ ] `test:unit` and `check-types` (both tsconfigs) pass; extension + webview bundles build.
 
 #### Test Plan
 
-Updated manifest text-invariant tests (assert the contextual view is contributed, `codev.dev` remains, and the placeholder/gate are gone). Manual: launch the Extension Development Host, open the bottom panel, confirm the `Codev` tab renders the header shell and `Codev Dev` is unaffected.
+Updated manifest text-invariant tests (contextual view contributed with `"type":"webview"`; `codev.dev` remains; placeholder/gate gone; sidebar/reveal assertions intact). Manual: launch the Extension Development Host, open the bottom panel, confirm the `Codev` tab renders the shell, collapse+reopen it (shell persists), `Codev Dev` unaffected.
 
 ---
 
@@ -121,38 +136,41 @@ Updated manifest text-invariant tests (assert the contextual view is contributed
 
 #### Objective
 
-Wire the panel to follow the active surface: derive `SurfaceContext` from the active tab, re-resolve on the right events, and render the resolved mode's pill + a per-mode detail *placeholder* body. Delivers the headline behavior (open a spec → Document Review; builder diff → Code Review; builder terminal → Builder Inspector; else Attention).
+Wire the panel to follow the active surface: derive `SurfaceContext` from the active tab (+ last-focus state), re-resolve on real transitions, and render the resolved mode's pill + a per-mode detail placeholder.
 
 #### Files to Create / Modify
 
-- Create `apps/vscode/src/contextual-panel/surface-context.ts` — the host adapter deriving `SurfaceContext` from the active tab.
-- Modify `apps/vscode/src/contextual-panel/panel-provider.ts` — subscribe to the trigger set, call `resolveMode`, `postMessage` the `ModeDescriptor`; escape header text derived from paths/builder ids.
-- Modify `apps/vscode/src/contextual-panel/webview/main.ts` — render active/greyed pills from `applicability`; Document Review pill disabled (with hover hint) when inapplicable; render a per-mode detail placeholder body.
-- Create `apps/vscode/src/contextual-panel/__tests__/surface-context.test.ts` and `panel-provider.test.ts` (mocked `vscode`).
+- Create `apps/vscode/src/contextual-panel/surface-context.ts` — the adapter (derivation + last-focus tracking + surface-identity comparison).
+- Modify `apps/vscode/src/contextual-panel/panel-provider.ts` — trigger wiring; call `resolveMode`; `postMessage` the `ModeDescriptor` (cache for re-post); **HTML-escape** header text derived from paths/builder ids.
+- Modify `apps/vscode/src/contextual-panel/webview/main.ts` — render active/greyed pills from `applicability`; Document Review pill disabled (hover hint) when inapplicable; per-mode detail placeholder body.
+- Create `apps/vscode/src/__tests__/contextual-panel-surface-context.test.ts` and `contextual-panel-provider.test.ts` (mocked `vscode`).
 
-#### [CONTRACT SURFACE] Surface derivation + trigger set
+#### [CONTRACT SURFACE] Surface derivation + trigger set (revised per cmap)
 
-- **Derivation (O(1), no I/O):** read `window.tabGroups.activeTabGroup.activeTab.input` → viewType/scheme + resource URI. Artifact = path matches `/\/codev\/(plans|specs|reviews)\//` (covers the `codev.markdownPreview` custom editor, where `activeTextEditor` is `undefined`). Builder-diff = active tab is the diff / `codev.activeEditorIsBuilderFile` true; builder id from the diff-inject registry `DiffInjectSessionEntry.builderId`. Builder-terminal = `getActiveBuilderId()` non-null.
-- **Trigger set:** `onDidChangeTabGroups` / `onDidChangeTabs`, `onDidChangeActiveTerminal`, `onDidChangeDiffInjectRegistry` (registry populates after diff activation).
-- **Terminal-exit proxy (the flagged feasibility item):** returning focus from a builder terminal to an already-active editor fires none of the above while `window.activeTerminal` stays set (documented in `vscode.d.ts` as "has focus OR most recently had focus"). Add `onDidChangeTextEditorSelection` as the click-into-editor proxy that lets the adapter demote the terminal surface. **Accept that some focus returns fire no event at all** — document this residual limitation rather than engineer around it.
-- On every trigger: clear any transient selection, re-resolve, post the descriptor.
+- **Derivation is O(1), no I/O, and reads the active *tab input* — not the write-only context key** (`codev.activeEditorIsBuilderFile` is set via `setContext` and cannot be read back):
+  - **artifact**: active tab resource path matches `/\/codev\/(plans|specs|reviews)\//` (covers `TabInputText` and the `TabInputCustom` `codev.markdownPreview` editor, where `activeTextEditor` is `undefined`). If the path contains a `.builders/<id>/` segment, set `artifact.builderId` from `<id>` (the common review case — architect note A2).
+  - **builderDiff**: active tab is a diff (`TabInputTextDiff`, or the `vscode.changes` multi-diff input) whose **`input.modified.fsPath`** (the right/worktree side) is registered in the diff-inject registry — builder id from `provider.get(input.modified.fsPath).builderId`. **Key on `modified`, not `input.original`** (the `original` side is the `codev-diff:` URI; the registry `fsPath` is documented as the right/worktree path — keying on `original` silently misses and loses the builder id). The over-broad context key is **not** used as the diff predicate.
+  - **builderTerminal**: `getActiveBuilderId()` (**terminal-manager's verified terminal→builder map — `terminal-manager.ts:450`, matched by `entry.terminal === activeTerminal` + the `builder-<id>` map key, never a tab label; this is the #1497-correct path** — architect note A3), **and** only when the last-focused surface is the terminal (see below).
+- **Last-focused-surface state** (fixes the exit path): the adapter tracks `lastFocused: 'editor' | 'terminal'`. `onDidChangeActiveTerminal` (to a builder terminal) sets `terminal`; `onDidChangeTextEditorSelection` and tab activation set `editor`. `builderTerminal` is emitted only while `lastFocused === 'terminal'`, so returning focus to an already-active editor demotes the terminal even though `window.activeTerminal` stays set (documented in `vscode.d.ts` as "has focus OR most recently had focus"). **Residual limitation, documented not engineered around:** some focus returns fire no event at all.
+- **Trigger set:** `onDidChangeTabGroups`/`onDidChangeTabs`, `onDidChangeActiveTerminal`, `onDidChangeDiffInjectRegistry` (registry populates after diff activation), `onDidChangeTextEditorSelection` (last-focus proxy).
+- **Clear-on-transition, not on-every-event:** each trigger recomputes a **stable surface identity** (`kind + resourcePath + builderId`). The transient `ManualSelection` (Phase 4) is cleared **only when that identity actually changes** — cursor moves, background-tab churn, and registry refreshes that leave the identity unchanged do **not** clear it.
 
 #### Deliverables
 
-- [ ] `surface-context.ts` adapter + trigger wiring in the provider.
-- [ ] Webview renders the resolved mode (active pill, greyed/disabled inapplicable pills, per-mode detail placeholder).
-- [ ] Tests: adapter maps each surface correctly (artifact incl. custom editor, builder-diff, builder-terminal, none); registry-not-yet-populated → re-resolve on registry change; terminal-exit proxy demotes the surface on editor selection; each trigger causes exactly one re-resolution.
+- [ ] `surface-context.ts` (derivation + last-focus + identity comparison) and trigger wiring.
+- [ ] Webview renders the resolved mode (active pill; greyed/disabled inapplicable pills; per-mode detail placeholder).
+- [ ] Tests: each predicate (artifact incl. custom editor; worktree-artifact builderId; builderDiff via `TabInputTextDiff.modified` + registry; builderTerminal gated by last-focus; none); registry-not-yet-populated → re-resolve on registry change; terminal→editor exit demotes terminal; identity-unchanged event does **not** clear selection; each real transition → one re-resolution.
 
 #### Acceptance Criteria
 
-- [ ] O(1) derivation, no filesystem/network on the switch path (asserted).
-- [ ] Custom-editor (`codev.markdownPreview`) spec → Document Review; multi-file diff → Code Review; builder terminal → Builder Inspector; unmatched → Attention.
-- [ ] The terminal-exit proxy path is exercised in tests; the residual "fires nothing" cases are documented in code comments.
+- [ ] O(1) derivation, no filesystem/network on the switch path (asserted); no reliance on reading back a context key.
+- [ ] Custom-editor spec → Document Review; `TabInputTextDiff` builder diff → Code Review (builder from `modified` side); builder terminal (last-focused) → Builder Inspector; return-to-editor exits Builder Inspector; unmatched → Attention.
+- [ ] Residual "fires nothing" cases documented in code comments.
 - [ ] `test:unit` + `check-types` pass.
 
 #### Test Plan
 
-Vitest with mocked `vscode` (per the `review-queue-store.test.ts` pattern): stub tab groups, active terminal, and the diff-inject registry; assert `SurfaceContext` per case and that each event triggers a single re-resolution. Manual (dev-approval rehearsal): open a spec (plain + Codev preview), a builder diff, and a builder terminal, and confirm the mode follows; confirm the terminal→editor exit.
+Vitest with mocked `vscode` (per `review-queue-store.test.ts`): stub `tabGroups`, `activeTerminal`, the diff-inject registry; assert `SurfaceContext` per case, the last-focus exit, and clear-only-on-transition. Manual dev-approval rehearsal: spec (plain + Codev preview), builder diff, builder terminal, and the terminal→editor exit.
 
 ---
 
@@ -162,55 +180,60 @@ Vitest with mocked `vscode` (per the `review-queue-store.test.ts` pattern): stub
 
 #### Objective
 
-Make the mode pills a transient navigation affordance and give the two builder-scoped modes a minimal summary ⇄ detail so navigation and drill-in are demonstrable — all without persistence and cleared on any active-surface change.
+Make the pills transient navigation and give the builder-scoped modes a minimal summary ⇄ detail so navigation and drill-in are demonstrable — no persistence, cleared only on a real surface transition.
 
 #### Files to Create / Modify
 
-- Create `apps/vscode/src/contextual-panel/messages.ts` — the host↔webview message contract.
-- Modify `apps/vscode/src/contextual-panel/panel-provider.ts` — hold the transient `ManualSelection` in memory; handle `mode-navigate` / `drill-in` messages; clear the selection on any active-surface change; enumerate builder ids for the summary stub from `ReviewQueueStore.buildersWithPending()` / `OverviewCache`.
-- Modify `apps/vscode/src/contextual-panel/webview/main.ts` and `webview/components/` — clickable navigable pills; a minimal summary list (builder-id rows) for Code Review / Builder Inspector with drill-in; local `List`/`Row`/`EmptyState` primitives (extraction seams for [#1549]).
-- Create/extend `apps/vscode/src/contextual-panel/__tests__/messages.test.ts` and provider tests for navigation + clear-on-change.
+- Create `apps/vscode/src/contextual-panel/messages.ts` — the host↔webview message contract + validation.
+- Modify `apps/vscode/src/contextual-panel/panel-provider.ts` — hold the transient `ManualSelection` in memory; handle validated `mode-navigate` / `drill-in`; clear on a real surface transition (Phase 3 identity); enumerate builder ids for the summary from `ReviewQueueStore.buildersWithPending()` / `OverviewCache`.
+- Modify `apps/vscode/src/contextual-panel/webview/main.ts` + `components/` — clickable navigable pills; minimal summary list (builder-id rows) for Code Review / Builder Inspector with drill-in; local `List`/`Row`/`EmptyState` primitives (seams for [#1549]).
+- Create `apps/vscode/src/__tests__/contextual-panel-messages.test.ts`; extend the provider test for navigation + clear-on-transition.
+- Modify `apps/vscode/CHANGELOG.md` and `docs/releases/UNRELEASED.md` — the user-facing entry for the contextual `Codev` panel (this phase makes the feature complete/user-visible; dual-changelog per convention).
 
-#### [CONTRACT SURFACE] Host↔webview message contract
+#### [CONTRACT SURFACE] Host↔webview message contract (revised per cmap)
 
 - Host→webview: `{ type: 'render', descriptor: ModeDescriptor, summary?: { builderIds: string[] } }`.
-- Webview→host: discriminated union `{ type: 'mode-navigate', mode: ModeKind } | { type: 'drill-in', mode: ModeKind, builderId: string }`.
-- Unknown/malformed inbound messages are ignored (validated allowlist).
-- Selection semantics: `mode-navigate` sets a transient `ManualSelection`; `drill-in` sets one with a `builderId`; **any** active-surface change (the Phase-3 triggers) clears it. Never written to `workspaceState`/`globalState`/configuration.
+- Webview→host: `{ type: 'mode-navigate', mode: ModeKind } | { type: 'drill-in', mode: ModeKind, builderId: string }`.
+- **Validate field *values*, not just the type** (architect note A4): reject unless `mode ∈ ModeKind` **and** (for `drill-in`) `builderId ∈` the known-builders set; unknown type *or* invalid value → **ignore**. Webview→host messages are lower-trust.
+- Selection semantics: `mode-navigate` sets a transient `ManualSelection`; `drill-in` sets one with a `builderId`; a real active-surface **transition** (Phase 3 identity change) clears it. Never written to `workspaceState`/`globalState`/configuration.
 
 #### Deliverables
 
-- [ ] Message contract module + validation.
+- [ ] Message module + value-level validation.
 - [ ] Clickable navigable pills (Code Review / Builder Inspector / Attention always navigable; Document Review disabled without an artifact).
-- [ ] Minimal summary list (builder-id stub) for the two builder-scoped modes, with row drill-in → detail placeholder for that builder.
-- [ ] Transient selection cleared on any active-surface change; no persistence key added anywhere.
-- [ ] Tests: navigate sets selection; drill-in attaches builder; surface change clears selection; unknown message ignored; no-persistence invariant (no `codev.contextualPanel.*` key, provider reads/writes no store).
+- [ ] Minimal summary list (builder-id stub) for the two builder-scoped modes; row drill-in → that builder's detail placeholder.
+- [ ] Transient selection cleared only on a real surface transition; no persistence key anywhere.
+- [ ] Changelog + UNRELEASED entries.
+- [ ] Tests: navigate sets selection; drill-in attaches builder; identity-changing surface transition clears; invalid `mode`/`builderId` ignored; no-persistence invariant (no `codev.contextualPanel.*` key; provider adds no store writes).
 
 #### Acceptance Criteria
 
-- [ ] Clicking a navigable pill switches the panel without changing the editor; the selection is discarded on the next active-surface change.
+- [ ] Clicking a navigable pill switches the panel without changing the editor; the selection is discarded on the next real surface transition.
 - [ ] Drilling into a summary row shows that builder's detail placeholder.
+- [ ] Invalid webview→host field values are ignored.
 - [ ] Grep confirms no persistence surface introduced.
 - [ ] `test:unit` + `check-types` pass; both bundles build.
 
 #### Test Plan
 
-Vitest (mocked `vscode`) for the message contract and the clear-on-change invariant. Dev-approval walkthrough (full spec scenario): open a spec → Document Review; builder diff → Code Review for that builder; builder terminal → Builder Inspector; click the Code Review pill with no diff open → Code Review summary list; drill into a row → that builder's detail; then switch editors → the panel follows context again (selection cleared).
+Vitest (mocked `vscode`) for the message contract, value validation, and clear-on-transition. Full dev-approval walkthrough: spec → Document Review; builder diff → Code Review for that builder; builder terminal → Builder Inspector; Code Review pill with no diff open → summary list; drill into a row → that builder's detail; switch editors → panel follows context again (selection cleared).
 
 ## Risks and Mitigation
 
 | Risk | Probability | Impact | Mitigation |
 |------|-------------|--------|------------|
-| Terminal→editor exit path fires no VSCode event, leaving Builder Inspector stuck | High if unaddressed | High | Phase 3 adds the `onDidChangeTextEditorSelection` proxy; document residual "fires nothing" cases; test the exit path; contract-surface section routed to architect pre-gate. |
-| First view-embedded webview surfaces lifecycle/CSP/bundle surprises | Medium | Medium | Model Phase 2 directly on the markdown-preview `webviewConfig` + provider; keep bodies as placeholders so scope is shell + switching. |
-| Placeholder retirement breaks the three manifest-invariant tests | High (expected) | Low | Update the three tests in the same Phase-2 commit; grep for residual `panelContainerEmpty`/`codev.placeholder`. |
-| Local primitives drift toward a premature shared layer | Medium | Medium | Build primitives locally with clean seams only; do not create a shared package here ([#1549] extracts later from proven code). |
-| Summary stub pulls in real mode content, blurring the umbrella boundary | Medium | Medium | Phase 4 summary renders builder *ids* only (cheap enumeration); rich per-row content stays with participating issues (#1037, files-not-yet-reviewed). |
-| Resolver drifts from O(1) (data fetched during resolve) | Low | Medium | Resolver is pure (Phase 1, no I/O); all data access lives in provider/render paths. |
+| Terminal→editor exit path fires no VSCode event, leaving Builder Inspector stuck | High if unaddressed | High | Phase 3 last-focused-surface state gates `builderTerminal`; `onDidChangeTextEditorSelection` proxy; residual cases documented; exit path tested. |
+| New tests silently don't run (wrong dir) → criteria pass vacuously | High if unaddressed | High | Tests under `src/__tests__/` (the only `vitest` include); verify the suite is non-vacuous. |
+| `check-types` breaks on the new webview dir | High if unaddressed | Medium | Phase 2 updates both `tsconfig.json` (exclude) and `tsconfig.webview.json` (include); `React.createElement` (no JSX) matches the existing convention. |
+| WebviewView hidden/re-show yields a blank/stale panel | Medium | Medium | Cache last `ModeDescriptor`; re-post on `resolveWebviewView` + `onDidChangeVisibility`. |
+| Over-broad `activeEditorIsBuilderFile` routes a plain-tab builder spec to Code Review | Medium | High | Derive `builderDiff` from `TabInputTextDiff.modified` + registry, not the context key; overlap test asserts a plain-tab spec → Document Review. |
+| Clearing transient nav on every event wipes the user's browse | Medium | Medium | Clear only on a real surface-identity transition; test identity-unchanged events do not clear. |
+| Placeholder retirement breaks manifest-invariant tests | High (expected) | Low | Delete `panel-placeholder.test.ts`; update the other two in the same commit, preserving non-placeholder assertions. |
+| Types leak into `codev-types` (permanent public surface) | Low | Medium | Types are extension-local under `src/contextual-panel/`; stated explicitly; no `codev-types` edit. |
+| Summary stub pulls in real mode content, blurring the umbrella boundary | Medium | Medium | Summary renders builder *ids* only; rich per-row content stays with participating issues (#1037, files-not-yet-reviewed). |
 
 ## Documentation Updates
 
-- `apps/vscode/CHANGELOG.md` — user-facing entry for the new contextual `Codev` panel tab (added when the feature lands; per the changelog-by-artifact convention this is extension code).
-- `docs/releases/UNRELEASED.md` — accumulate the release-note line per the dual-changelog convention.
-- No arch.md / lessons-learned.md change anticipated (no new system-shape invariant); revisit at the review phase.
-- The `#813/#814/#815` rescope and [#1549] extraction are tracked in their own issues — no doc change here.
+- `apps/vscode/CHANGELOG.md` + `docs/releases/UNRELEASED.md` — user-facing entry for the contextual `Codev` panel tab (**assigned to Phase 4**, when the feature is complete/user-visible).
+- No arch.md / lessons-learned.md change anticipated (no new system-shape invariant); revisit at review.
+- `#813/#814/#815` rescope and [#1549] extraction are tracked in their own issues — no doc change here.
