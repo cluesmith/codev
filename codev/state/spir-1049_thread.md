@@ -243,3 +243,16 @@ stubs; these three render their content into my mode render-targets in their own
   missing → 18 pre-existing test files + check-types failed on UNBUILT deps (not my code). After build:
   test:unit 69 files / 836 tests PASS (my 24 incl); check-types CLEAN. dist/ gitignored (not committed).
 - Next: signal PHASE_COMPLETE → porch consultation + checks → commit/next phase.
+
+### 2026-08-24 — Phase 1 cmap iter1 → fixed (commit af384f9bd)
+- Gemini APPROVE; Codex REQUEST_CHANGES (code untracked → diff had only docs); Claude COMMENT
+  (full suite/types/lint verified green; 2 substantive).
+- PROCESS MISS: signalled PHASE_COMPLETE with code UNTRACKED → reviewers saw only docs. Fixed: now
+  commit phase code BEFORE signalling. Lesson for phases 2-4: commit implementation first.
+- A2 was a NO-OP: resolveSelection dropped artifact.builderId. Realized it: scopedBuilderId =
+  drilledBuilderId ?? artifact?.builderId → clicking Code Review/Builder Inspector on a worktree
+  artifact lands on THAT builder's detail. +3 tests (worktree→detail scoped; plain artifact→summary).
+- Added source-scan PURITY guard test (resolver imports only ./types.js; no vscode/node:). Spec makes
+  no-I/O an automated criterion.
+- Expanded never-throws to 6 surfaces × 6 selections (incl builderId:42). 28 tests, types+lint clean.
+- Rebuttal: 1049-phase_1-iter1-rebuttals.md. Next: porch done (iter2) → re-consult → commit/Phase 2.
