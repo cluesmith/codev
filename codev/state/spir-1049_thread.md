@@ -326,3 +326,21 @@ stubs; these three render their content into my mode render-targets in their own
 - Also fixing P3-TODO-A (provider lifecycle comment) + P3-TODO-B (Pill: aria-disabled not disabled attr so
   title tooltip renders). Header text escaping = React auto-escape (descriptor via postMessage as DATA, never
   interpolated into HTML) — document it.
+
+### 2026-08-25 — IMPLEMENT Phase 3 done, verifying (commit e8baa9d4f)
+- Files: messages.ts (render/ready contract), surface-context.ts (PURE deriveSurfaceContext +
+  surfaceIdentity — split so vscode-free/testable), surface-reader.ts (vscode glue: classifyTab +
+  SurfaceContextReader + last-focus), panel-provider.ts (rewrite: triggers→resolve→post-on-identity-
+  change, cache + onDidChangeVisibility re-post, ready→repost, inject TerminalManager; fixed P3-TODO-A
+  comment), webview/main.ts (message-driven render, labelFor, per-mode placeholder), components.ts
+  (Pill aria-disabled = P3-TODO-B fix + pillsFromDescriptor), extension.ts (pass terminalManager+dispose).
+- Split surface-context.ts → pure core + surface-reader.ts (host) because importing vscode at module
+  top broke the pure vitest test. Mirrors resolver.ts purity.
+- Tests: surface-context (13 pure), provider (6, mocked vscode + diff registry) incl the terminal→editor
+  EXIT test (getActiveBuilderId stays 'b' but last-focus demotes → attention; the #1497/flagged-bug guard).
+- Multi-file diff has UNKNOWN tab input (no TabInputTextMultiDiff in 1.105) → builder from focused
+  sub-file (activeTextEditor), gated so normal-tab builder file isn't misread as diff.
+- Header text escaping = React auto-escape (descriptor posted as DATA, never HTML-interpolated) — documented.
+- Verify: 71 files / 862 tests, check-types + eslint + build all clean. Committed before signaling.
+- Visibility cache (relocated from P2) DONE here as promised.
+- Next: PHASE_COMPLETE → porch checks + cmap.
