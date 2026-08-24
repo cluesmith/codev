@@ -533,6 +533,9 @@ export async function activate(context: vscode.ExtensionContext) {
 	// set TreeView.badge — the activity dot the plan calls for while a dev runs.
 	const devProvider = new DevTreeProvider(connectionManager, terminalManager!);
 	const devView = vscode.window.createTreeView('codev.dev', { treeDataProvider: devProvider });
+	// Contextual bottom-panel view (#1049): resolves the active surface and posts a ModeDescriptor
+	// to its webview. Takes the terminal manager for the builder-terminal surface (getActiveBuilderId).
+	const contextualPanelProvider = new ContextualPanelProvider(context.extensionUri, terminalManager!);
 	context.subscriptions.push(
 		buildersView,
 		pullRequestsView,
@@ -543,9 +546,10 @@ export async function activate(context: vscode.ExtensionContext) {
 		vscode.window.registerTreeDataProvider('codev.status', statusProvider),
 		vscode.window.registerWebviewViewProvider(
 			ContextualPanelProvider.viewType,
-			new ContextualPanelProvider(context.extensionUri),
+			contextualPanelProvider,
 			{ webviewOptions: { retainContextWhenHidden: true } },
 		),
+		{ dispose: () => contextualPanelProvider.dispose() },
 		devView,
 		{ dispose: () => devProvider.dispose() },
 	);

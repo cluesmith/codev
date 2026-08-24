@@ -8,7 +8,7 @@
  */
 
 import * as React from 'react';
-import type { ModeKind } from '../types.js';
+import type { ModeDescriptor, ModeKind } from '../types.js';
 
 const h = React.createElement;
 
@@ -46,28 +46,37 @@ export function Pill(props: { pill: ModePill; onNavigate?: (mode: ModeKind) => v
     classes.push('cp-pill--disabled');
   }
 
-  let title: string | undefined;
+  // A native `disabled` button suppresses its `title` tooltip in Chromium, so the greyed-pill hover
+  // hint would never show. Use `aria-disabled` instead (also keeps the pill keyboard-discoverable)
+  // and simply withhold the click handler.
+  const buttonProps: React.ButtonHTMLAttributes<HTMLButtonElement> = {
+    type: 'button',
+    className: classes.join(' '),
+    'aria-pressed': pill.state === 'active',
+  };
   if (pill.state === 'disabled') {
-    title = `Open a spec, plan, or review to activate ${pill.label}`;
+    buttonProps['aria-disabled'] = true;
+    buttonProps.title = `Open a spec, plan, or review to activate ${pill.label}`;
   }
-
-  let onClick: (() => void) | undefined;
   if (pill.state === 'navigable' && onNavigate !== undefined) {
-    onClick = () => onNavigate(pill.mode);
+    buttonProps.onClick = () => onNavigate(pill.mode);
   }
 
-  return h(
-    'button',
-    {
-      type: 'button',
-      className: classes.join(' '),
-      disabled: pill.state === 'disabled',
-      'aria-pressed': pill.state === 'active',
-      title,
-      onClick,
-    },
-    pill.label,
-  );
+  return h('button', buttonProps, pill.label);
+}
+
+/** Map a resolved descriptor to the four pills' display states (active / navigable / disabled). */
+export function pillsFromDescriptor(descriptor: ModeDescriptor): ModePill[] {
+  return MODE_ORDER.map((mode) => {
+    let state: PillState = 'navigable';
+    if (!descriptor.applicability[mode]) {
+      state = 'disabled';
+    }
+    if (mode === descriptor.kind) {
+      state = 'active';
+    }
+    return { mode, label: MODE_LABELS[mode], state };
+  });
 }
 
 export function HeaderStrip(props: {

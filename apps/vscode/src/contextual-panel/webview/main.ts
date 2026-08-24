@@ -1,54 +1,90 @@
 /**
  * Webview entry for the contextual bottom panel.
  *
- * Phase 2 ships a STATIC shell: the header strip (context label + four mode pills) and an empty
- * body. Contextual resolution and host<->webview messaging arrive in Phase 3 — this file only
- * establishes the React (createElement, no JSX) substrate and the local primitives, so Document
- * Review can later host `<ArtifactCanvas>` and the other modes their own bodies.
+ * Message-driven: the host posts `{ type: 'render', descriptor }` after resolving the active
+ * surface; this renders the header (context label + pills from the descriptor's applicability) and
+ * a per-mode placeholder body. All descriptor-derived text (file paths, builder ids) is rendered
+ * through React as children — never `innerHTML` — so it is auto-escaped; the host never interpolates
+ * it into the HTML string. Mode navigation (clickable pills / drill-in) arrives in Phase 4.
  *
  * Bundled by esbuild as a browser IIFE (dist/webview/contextual-panel.js); type-checked by
- * tsconfig.webview.json (DOM lib), excluded from the host tsconfig.
+ * tsconfig.webview.json (DOM lib), excluded from the host tsconfig. No JSX (createElement).
  */
 
 import * as React from 'react';
-import { createRoot } from 'react-dom/client';
+import { createRoot, type Root } from 'react-dom/client';
 import './styles.css';
-import { HeaderStrip, MODE_LABELS, MODE_ORDER, type ModePill } from './components.js';
+import { HeaderStrip, MODE_LABELS, pillsFromDescriptor } from './components.js';
+import type { ModeDescriptor, ModeKind } from '../types.js';
+import type { HostToWebviewMessage } from '../messages.js';
 
 const h = React.createElement;
 
-/**
- * The shell's pill states. With no active context the contextual fallback is Attention, so it
- * shows active; Document Review is file-scoped and inapplicable with nothing open, so it is
- * disabled. The other two are navigable. Phase 3 replaces this with host-driven descriptors.
- */
-function buildShellPills(): ModePill[] {
-  return MODE_ORDER.map((mode) => {
-    let state: ModePill['state'] = 'navigable';
-    if (mode === 'attention') {
-      state = 'active';
+declare function acquireVsCodeApi(): { postMessage(message: { type: 'ready' }): void };
+const vscodeApi = acquireVsCodeApi();
+
+const BODY_PLACEHOLDER: Record<ModeKind, string> = {
+  'document-review': 'Review markers for this file will appear here (rendering owned by #859 / #945).',
+  'code-review': "This builder's pending comments and files-to-review will appear here (#1037).",
+  'builder-inspector': "This builder's phase, gate, activity, and message input will appear here.",
+  'attention': 'Pending gates, blocked builders, and queued comments across builders will appear here.',
+};
+
+function labelFor(descriptor: ModeDescriptor): React.ReactNode {
+  if (descriptor.kind === 'document-review') {
+    const path = descriptor.context.resourcePath ?? '';
+    const name = path.split('/').pop();
+    if (name !== undefined && name.length > 0) {
+      return name;
     }
-    if (mode === 'document-review') {
-      state = 'disabled';
+    return 'Document';
+  }
+  if (descriptor.kind === 'code-review' || descriptor.kind === 'builder-inspector') {
+    const modeLabel = MODE_LABELS[descriptor.kind];
+    if (descriptor.context.builderId !== undefined) {
+      return h(
+        React.Fragment,
+        null,
+        `${modeLabel} · `,
+        h('span', { className: 'cp-builder' }, descriptor.context.builderId),
+      );
     }
-    return { mode, label: MODE_LABELS[mode], state };
-  });
+    return modeLabel;
+  }
+  return MODE_LABELS[descriptor.kind];
 }
 
-function Panel(): React.ReactElement {
+function Panel(props: { descriptor: ModeDescriptor | undefined }): React.ReactElement {
+  const { descriptor } = props;
+  if (descriptor === undefined) {
+    return h('div', { className: 'cp-body' }, h('div', { className: 'cp-body-empty' }, 'Loading…'));
+  }
   return h(
     React.Fragment,
     null,
-    h(HeaderStrip, { contextLabel: 'Codev', pills: buildShellPills() }),
-    h(
-      'div',
-      { className: 'cp-body' },
-      h('div', { className: 'cp-body-empty' }, 'Nothing needs your attention right now.'),
-    ),
+    h(HeaderStrip, { contextLabel: labelFor(descriptor), pills: pillsFromDescriptor(descriptor) }),
+    h('div', { className: 'cp-body' }, h('div', { className: 'cp-body-empty' }, BODY_PLACEHOLDER[descriptor.kind])),
   );
 }
 
-const rootElement = document.getElementById('root');
-if (rootElement !== null) {
-  createRoot(rootElement).render(h(Panel));
+let root: Root | undefined;
+function render(descriptor: ModeDescriptor | undefined): void {
+  const rootElement = document.getElementById('root');
+  if (rootElement === null) {
+    return;
+  }
+  if (root === undefined) {
+    root = createRoot(rootElement);
+  }
+  root.render(h(Panel, { descriptor }));
 }
+
+window.addEventListener('message', (event: MessageEvent) => {
+  const message = event.data as HostToWebviewMessage | undefined;
+  if (message !== undefined && message.type === 'render') {
+    render(message.descriptor);
+  }
+});
+
+render(undefined);
+vscodeApi.postMessage({ type: 'ready' });
