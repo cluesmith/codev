@@ -364,3 +364,20 @@ stubs; these three render their content into my mode render-targets in their own
 - Claude non-blocking → PHASE 4 TODOs: (a) 'other' tabs share identity (edge, webview/settings); (b) disabled
   hint wording is artifact-specific (fine — DocReview only disable-able mode); (c) transitionIdOf omits
   level/applicability (re-verify when ManualSelection lands).
+
+### 2026-08-25 — IMPLEMENT Phase 4 (Transient navigation + summary stubs) — done, verifying (891b938c9)
+- messages.ts: NavigateMessage/DrillInMessage + parseNavigation (validates mode∈ModeKind AND
+  builderId∈known-builders; invalid→ignore). pills.ts: isModeKind.
+- provider: in-memory ManualSelection (NEVER persisted); onMessage → parseNavigation → set selection →
+  evaluate('manual'); evaluate('surface') CLEARS selection when surfaceKey changes (clear-on-transition);
+  summaryFor() = buildersWithPending() (code-review) / overview builder ids (builder-inspector); postId
+  includes summary ids so a queue/overview change re-posts. Injected ReviewQueueStore + OverviewCache.
+- webview: navigable pills → mode-navigate; SummaryList (builder-id rows) → drill-in; EmptyState.
+  local List/Row primitives + CSS (#1549 seams).
+- Tests: messages validation (8), provider navigation (navigate→summary, drill-in→detail, invalid
+  ignored, surface-change clears selection, summary re-post on queue change), no-persistence source+
+  manifest scan. 74 files / 890 tests, types+eslint+build clean.
+- CHANGELOG: NOT on this branch — per repo convention (UNRELEASED.md self-doc) it's the architect's
+  post-merge docs/vscode-changelog workflow (worktrees/changelog). Updated plan to reflect. Entry text
+  provided to architect below.
+- ALL 4 PHASES IMPLEMENTED. Next: PHASE_COMPLETE → cmap; then PR.
