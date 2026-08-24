@@ -70,4 +70,27 @@ D mechanism verification (reusable): PreToolUse.additionalContext on an ALLOW re
 undocumented; permissionDecisionReason on allow does NOT reach the model; systemMessage = UI
 notice. -> capture in review artifact lessons (architect request).
 
-Next: dev-approval gate.
+## dev-approval iteration — tokenizer rewrite (2026-08-25)
+
+Reviewer disliked the hand-rolled shell tokenizer (absoluteTokens) and asked for a built-in /
+library. Findings: no Node core shell lexer (util.parseArgs parses argv arrays, wrong tool);
+shell-quote is the right lib but the emitted .cjs is Node-core-only (no node_modules in
+worktrees/adopters), so it can't be required, and bundling it in adds machinery. Better move
+(reviewer agreed): drop the general tokenizer. We already KNOW both roots, so search the
+command for the literal main-root and inspect match boundaries.
+
+Rewrote guardBash: literal indexOf(mainRoot) scan; a match that continues into worktreeTail
+(=/.builders/<id>) is an allowed worktree ref (subsumes symlink case, no realpath); otherwise a
+subpath or bare-root-at-edge under main is denied; before/after boundary checks (isBoundary,
+narrow single-char predicate, NOT a tokenizer) reject prefix-of-longer-name false matches.
+Deleted absoluteTokens; guardBash no longer canonicalizes (guardWrite still does). Also
+mainCheckoutFor now lastIndexOf (correct/accurate main root when main path itself contains
+.builders; message-accuracy, not a behavior flip). GOTCHA fixed: a backtick in a code comment
+inside the emitted-script template literal closed the string early (build/vitest-transform
+caught it) — keep backticks out of that template.
+
+Tests now 91 pass (added: nested-.builders deny+message, bare-worktree-root+operator allow,
+sibling-worktree deny, prefix-superset 'wt-backup' deny). Deny-reason asserts literal roots
+(guard emits normalized, not realpath). Full build green.
+
+Next: push, tell reviewer revision ready; dev-approval stays pending.
