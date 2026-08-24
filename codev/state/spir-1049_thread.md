@@ -256,3 +256,14 @@ stubs; these three render their content into my mode render-targets in their own
   no-I/O an automated criterion.
 - Expanded never-throws to 6 surfaces × 6 selections (incl builderId:42). 28 tests, types+lint clean.
 - Rebuttal: 1049-phase_1-iter1-rebuttals.md. Next: porch done (iter2) → re-consult → commit/Phase 2.
+
+### 2026-08-24 — Phase 1 cmap iter2: ALL THREE APPROVE (HIGH)
+- Gemini/Codex/Claude all APPROVE. Applied Claude's 2 cheap non-blocking hardening notes to the
+  load-bearing core: (a) MODE_KINDS is now Record<ModeKind,true> — exhaustive by construction, a 5th
+  mode fails to compile until listed; (b) purity source-scan now also catches side-effect/dynamic
+  import + require (closed the from-only gap). 28 tests, types+lint clean.
+- CARRY TO PHASE 4 (Claude non-blocking note, confirm w/ architect before pills go live): manual
+  selection scopes to artifact.builderId but DROPS builderDiff/builderTerminal ids. Defensible per
+  spec walkthrough, but decide at Phase 4 whether clicking e.g. Builder Inspector while a diff is
+  active should scope to the diff's builder.
+- Next: commit, porch done (re-verify) → porch should commit phase + advance to Phase 2.

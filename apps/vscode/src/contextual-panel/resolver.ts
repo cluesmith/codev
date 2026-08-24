@@ -13,15 +13,17 @@ import type {
   SurfaceContext,
 } from './types.js';
 
-const MODE_KINDS: readonly ModeKind[] = [
-  'document-review',
-  'code-review',
-  'builder-inspector',
-  'attention',
-];
+// Exhaustive by construction: a `Record<ModeKind, true>` forces every union member to appear,
+// so adding a fifth `ModeKind` fails to compile until it is listed here (no silent drift).
+const MODE_KINDS: Record<ModeKind, true> = {
+  'document-review': true,
+  'code-review': true,
+  'builder-inspector': true,
+  'attention': true,
+};
 
 function isModeKind(value: unknown): value is ModeKind {
-  return typeof value === 'string' && (MODE_KINDS as readonly string[]).includes(value);
+  return typeof value === 'string' && Object.prototype.hasOwnProperty.call(MODE_KINDS, value);
 }
 
 /** A non-empty string, else undefined — defends the resolver against malformed input. */

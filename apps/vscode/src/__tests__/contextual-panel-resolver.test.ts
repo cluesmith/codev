@@ -263,9 +263,16 @@ describe('resolveMode — enforced purity (no host imports / no I/O)', () => {
       fileURLToPath(new URL('../contextual-panel/resolver.ts', import.meta.url)),
       'utf8',
     );
-    const importSpecifiers = [...src.matchAll(/\bfrom\s+['"]([^'"]+)['"]/g)].map((m) => m[1]);
-    expect(importSpecifiers).toEqual(['./types.js']);
-    expect(src).not.toMatch(/from\s+['"]vscode['"]/);
-    expect(src).not.toMatch(/from\s+['"]node:/);
+    // Catch every module-referencing form, not just `from '…'`: side-effect `import '…'`,
+    // dynamic `import('…')`, and `require('…')` — so an I/O import can't slip past the guard.
+    const specifiers = [
+      ...src.matchAll(/\bfrom\s+['"]([^'"]+)['"]/g),
+      ...src.matchAll(/\bimport\s+['"]([^'"]+)['"]/g),
+      ...src.matchAll(/\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g),
+      ...src.matchAll(/\brequire\s*\(\s*['"]([^'"]+)['"]\s*\)/g),
+    ].map((m) => m[1]);
+    expect(specifiers).toEqual(['./types.js']);
+    expect(src).not.toMatch(/\bimport\s*\(/); // no dynamic import
+    expect(src).not.toMatch(/\brequire\s*\(/); // no require
   });
 });
