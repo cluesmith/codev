@@ -112,6 +112,16 @@ Actual per-mode rendering is out of scope (owned by participating-feature issues
   registerWebviewViewProvider (first in the extension). React substrate (markdown-preview lineage) so
   Document Review can later host <ArtifactCanvas>.
 
+### 2026-08-24 — PLAN drafted (commit 91f1958d9)
+- 4 phases: (1) resolver+types [CONTRACT], (2) panel surface + placeholder retirement, (3) context
+  adapter + contextual switching [CONTRACT: SurfaceContext/triggers/exit-proxy], (4) transient nav +
+  summary stubs [CONTRACT: message contract]. React substrate (esbuild IIFE, markdown-preview lineage).
+- Signaled PLAN_DRAFTED → porch done → cmap task. Launched gemini/codex/claude plan consult (iter1) bg.
+- Per reminder #4: routed the 3 CONTRACT SURFACE sections to architect via afx send --file for pre-gate
+  review. HOLDING the plan gate until architect responds; will fold their notes + cmap into rebuttal.
+- afx send note: `--file` AUGMENTS a message, needs a message string too (not a replacement).
+- Next: read cmap verdicts + architect contract feedback → revise → rebuttal → plan gate.
+
 ## Plan-phase notes (do NOT apply to spec — captured for when we reach PLAN)
 
 ### Placeholder dead-code cleanup (architect note 2026-08-14, verified against source)
