@@ -94,6 +94,24 @@ Actual per-mode rendering is out of scope (owned by participating-feature issues
 - Rebuttal: 1049-specify-iter2-rebuttals.md. Gate still OPEN; porch state untouched.
 - Next: report verdicts to architect; ready for spec-approval when they approve.
 
+### 2026-08-24 — SPEC-APPROVAL GATE APPROVED (Amr, via VS Code button; architect ran porch approve w/ human attestation)
+- porch done 1049 → advanced to PLAN phase. Now writing codev/plans/1049-*.md.
+- 4 reminders carried from parked period (architect):
+  1. Terminal→editor EXIT path has NO backing VS Code event; onDidChangeTextEditorSelection is the
+     candidate proxy to design around (accept some returns fire nothing).
+  2. extension.ts:555 hides codev.placeholder unconditionally — repurpose must retire that dead flip
+     + stale text panel-placeholder.ts:18/20 + the :552 comment.
+  3. Build local primitives (pill/header/list-row) with EXTRACTION SEAMS for #1549, but do NOT
+     pre-build the shared layer (1549 extracts from proven code).
+  4. **PROCESS: plan sections touching CONTRACT SURFACES route to architect BEFORE my plan gate.**
+     Contract surfaces here = resolver contract (SurfaceContext/ManualSelection/ModeDescriptor types),
+     the SurfaceContext-derivation + trigger set (incl the exit-proxy), and the host↔webview message
+     contract. Must send these plan sections to architect for review before signaling done at the gate.
+- Recon: esbuild.js has extensionConfig + webviewConfig (markdown-preview React IIFE). New panel webview
+  = add entry src/contextual-panel/webview/main.ts → dist/webview/contextual-panel.js. Panel is a NEW
+  registerWebviewViewProvider (first in the extension). React substrate (markdown-preview lineage) so
+  Document Review can later host <ArtifactCanvas>.
+
 ## Plan-phase notes (do NOT apply to spec — captured for when we reach PLAN)
 
 ### Placeholder dead-code cleanup (architect note 2026-08-14, verified against source)
