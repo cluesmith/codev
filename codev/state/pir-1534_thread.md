@@ -84,3 +84,24 @@ lessons-learned.md Debugging section ("misleading instrument = stale/parallel mo
 two-models-drift + deletion-only structural mismatch + the textEditorDiffInformation proposed-API
 ceiling on direction c). Next: commit review+lesson, push, gh pr create (body = review file),
 porch done --pr, then porch runs CMAP once → pr gate.
+
+## CMAP iter1 → REQUEST_CHANGES ×2 (Codex, Claude); Gemini APPROVE
+
+Real finding (HIGH confidence, both): routing BOTH the press verbs and Cmd+K H through
+symbol-first `resolveCursorRef` silently broadened `forward-hunk` from the exact hunk to the
+whole enclosing symbol on an ordinary in-function edit (the most common press path), contradicting
+the plan's explicit regression promise. Also: review missing template-required "How to Test
+Locally"; minor rename-edge note.
+
+Resolved (this is genuinely correct + realigns with the plan's own promise, so fixed rather than
+just disclosed):
+- Split precedence: new pure `resolveHunkFirstRef` (hunk → symbol → file) for the two press verbs
+  (`resolvePressCursorRef`); Cmd+K H keeps symbol-first via `resolveCursorContextRef`
+  (`resolveCursorRef`). Both share the fresh re-parse. Deletion-only fix unaffected (no hunk →
+  degrades).
+- This departs from the architect kickoff's literal "symbol→hunk→file" shorthand for direction
+  (a) — disclosed prominently in the review's "Things to Look At During PR Review" + flagged to
+  the architect for Amr's confirmation; one-line flip if he wanted symbol-first.
+- Pinned both directions with tests (press-cursor-ref + diff-inject-ref). Added "How to Test
+  Locally" section; strengthened rename-edge note. Suite now 887 passed (was 882), tsc clean.
+Re-running CMAP on the fixed code before the gate.

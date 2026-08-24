@@ -30,8 +30,10 @@ import * as vscode from 'vscode';
 import {
   parseHunkRanges,
   resolveCursorRef,
+  resolveHunkFirstRef,
   type ChangedRange,
   type CursorRef,
+  type SymbolNode,
 } from '../diff-inject-ref.js';
 import { toSymbolNode, type DiffInjectSessionEntry } from '../diff-inject-codelens.js';
 
@@ -67,17 +69,45 @@ async function documentSymbols(uri: vscode.Uri): Promise<vscode.DocumentSymbol[]
   }
 }
 
+/** The fresh hunks + live symbols for a cursor resolution, fetched concurrently. */
+async function freshInputs(
+  entry: DiffInjectSessionEntry,
+  uri: vscode.Uri,
+): Promise<{ hunks: ChangedRange[]; symbols: SymbolNode[] }> {
+  const [hunks, symbols] = await Promise.all([freshHunks(entry), documentSymbols(uri)]);
+  return { hunks, symbols: symbols.map(toSymbolNode) };
+}
+
 /**
- * Resolve the reference a press should forward for `cursorLine` (1-based,
- * new-side), degrading symbol → hunk → file against a freshly re-parsed diff.
- * Never throws for a "no changed hunk" cursor — it returns the `file` kind, which
- * the callers surface with an honest note rather than the old misleading error.
+ * Resolve the reference the "forward the hunk under the cursor" PRESS verbs
+ * (`forward-hunk` / `feedback-hunk`) should forward for `cursorLine` (1-based,
+ * new-side), **hunk first**, against a freshly re-parsed diff. A press named for
+ * the hunk forwards the tight changed range when one covers the cursor, and only
+ * degrades hunk → symbol → file (never throwing) when none does — so a
+ * deletion-only cursor forwards the enclosing symbol / whole file with an honest
+ * note instead of the old misleading error.
  */
 export async function resolvePressCursorRef(
   entry: DiffInjectSessionEntry,
   uri: vscode.Uri,
   cursorLine: number,
 ): Promise<CursorRef> {
-  const [hunks, symbols] = await Promise.all([freshHunks(entry), documentSymbols(uri)]);
-  return resolveCursorRef(entry.relPath, symbols.map(toSymbolNode), hunks, cursorLine);
+  const { hunks, symbols } = await freshInputs(entry, uri);
+  return resolveHunkFirstRef(entry.relPath, symbols, hunks, cursorLine);
+}
+
+/**
+ * Resolve the reference the Cmd/Ctrl+K H keyboard verb
+ * (`forwardCursorContextToBuilder`, #1073) should forward, **symbol first** —
+ * that verb is "forward whatever context covers the cursor, most-specific-symbol
+ * first" by design. Uses the same fresh re-parse as the press path (it too read
+ * the stale open-time snapshot before #1534; its file fallback merely hid it).
+ */
+export async function resolveCursorContextRef(
+  entry: DiffInjectSessionEntry,
+  uri: vscode.Uri,
+  cursorLine: number,
+): Promise<CursorRef> {
+  const { hunks, symbols } = await freshInputs(entry, uri);
+  return resolveCursorRef(entry.relPath, symbols, hunks, cursorLine);
 }

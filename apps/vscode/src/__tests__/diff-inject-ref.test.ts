@@ -12,6 +12,7 @@ import {
   buildAllLensDescriptors,
   parseHunkRanges,
   resolveCursorRef,
+  resolveHunkFirstRef,
   type SymbolNode,
 } from '../diff-inject-ref.js';
 
@@ -246,6 +247,35 @@ describe('resolveCursorRef (symbol → hunk → file)', () => {
       kind: 'symbol',
       refText: 'a/b.ts:L5-L10 ',
       range: { start: 5, end: 10 },
+    });
+  });
+});
+
+describe('resolveHunkFirstRef (hunk → symbol → file — the press verbs)', () => {
+  it('prefers the HUNK over the enclosing symbol when both cover the cursor (the #1534 fix)', () => {
+    const symbols = [sym(K.Function, 3, 20)]; // L4-L21, spans the change
+    // The tight changed range wins, so forward-hunk forwards the hunk, not the whole function.
+    expect(resolveHunkFirstRef('a/b.ts', symbols, [{ start: 7, end: 9 }], 8)).toEqual({
+      kind: 'hunk',
+      refText: 'a/b.ts:L7-L9 ',
+      range: { start: 7, end: 9 },
+    });
+  });
+
+  it('degrades to the enclosing symbol when no hunk covers the cursor (e.g. a deletion-only spot)', () => {
+    const symbols = [sym(K.Function, 3, 20)]; // L4-L21
+    expect(resolveHunkFirstRef('a/b.ts', symbols, [], 8)).toEqual({
+      kind: 'symbol',
+      refText: 'a/b.ts:L4-L21 ',
+      range: { start: 4, end: 21 },
+    });
+  });
+
+  it('falls back to the bare file path when neither a hunk nor a symbol covers the cursor', () => {
+    const symbols = [sym(K.Function, 3, 20)]; // L4-L21
+    expect(resolveHunkFirstRef('a/b.ts', symbols, [{ start: 30, end: 42 }], 25)).toEqual({
+      kind: 'file',
+      refText: 'a/b.ts ',
     });
   });
 });

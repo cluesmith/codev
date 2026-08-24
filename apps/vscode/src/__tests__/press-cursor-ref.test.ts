@@ -31,7 +31,7 @@ vi.mock('node:child_process', () => ({
   },
 }));
 
-const { resolvePressCursorRef } = await import('../commands/press-cursor-ref.js');
+const { resolvePressCursorRef, resolveCursorContextRef } = await import('../commands/press-cursor-ref.js');
 
 /** A `vscode.DocumentSymbol`-shaped node (0-based lines) for the symbol seam. */
 function symbol(kind: number, startLine: number, endLine: number): unknown {
@@ -79,5 +79,28 @@ describe('resolvePressCursorRef', () => {
     h.state.gitStdout = null; // execFile rejects
     const ref = await resolvePressCursorRef(ENTRY, URI, 7); // 7 ∈ the frozen [5,9]
     expect(ref).toEqual({ kind: 'hunk', refText: 'src/a.ts:L5-L9 ', range: { start: 5, end: 9 } });
+  });
+
+  it('keeps the EXACT hunk range when the change sits inside a symbol — hunk-first, not the whole function (#1534 regression)', async () => {
+    // Ordinary modification inside a function: a hunk at 12-13 AND a Function symbol spanning 11-21 both cover the cursor.
+    h.state.gitStdout = '@@ -10,4 +12,2 @@\n+  const x = 1;\n+  const y = 2;\n';
+    h.state.symbols = [symbol(11 /* Function */, 10, 20)]; // 1-based 11..21
+    const ref = await resolvePressCursorRef(ENTRY, URI, 12);
+    expect(ref).toEqual({ kind: 'hunk', refText: 'src/a.ts:L12-L13 ', range: { start: 12, end: 13 } });
+  });
+});
+
+describe('resolveCursorContextRef (Cmd+K H — symbol-first, distinct from the press verbs)', () => {
+  beforeEach(() => {
+    h.state.gitStdout = null;
+    h.state.symbols = [];
+  });
+
+  it('forwards the ENCLOSING SYMBOL for the same in-function change the press verb keeps as a hunk', async () => {
+    // Identical inputs to the press-verb regression test above — only the precedence differs.
+    h.state.gitStdout = '@@ -10,4 +12,2 @@\n+  const x = 1;\n+  const y = 2;\n';
+    h.state.symbols = [symbol(11 /* Function */, 10, 20)]; // 1-based 11..21
+    const ref = await resolveCursorContextRef(ENTRY, URI, 12);
+    expect(ref).toEqual({ kind: 'symbol', refText: 'src/a.ts:L11-L21 ', range: { start: 11, end: 21 } });
   });
 });
