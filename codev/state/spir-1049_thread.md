@@ -267,3 +267,18 @@ stubs; these three render their content into my mode render-targets in their own
   spec walkthrough, but decide at Phase 4 whether clicking e.g. Builder Inspector while a diff is
   active should scope to the diff's builder.
 - Next: commit, porch done (re-verify) → porch should commit phase + advance to Phase 2.
+
+### 2026-08-25 — IMPLEMENT Phase 2 (Panel surface + placeholder retirement) — done, verifying
+- Created: contextual-panel/panel-provider.ts (WebviewViewProvider — FIRST in ext), panel-template.ts
+  (nonce/CSP HTML), webview/main.ts (React createElement static shell), webview/components.ts (Pill,
+  HeaderStrip local primitives — #1549 seams), webview/styles.css (--vscode-* tokens).
+- Wiring: esbuild.js 3rd IIFE bundle (dist/webview/contextual-panel.js/.css); tsconfig.json exclude +
+  tsconfig.webview.json include the webview dir; package.json codevPanel: codev.placeholder → 
+  codev.contextualPanel {type:webview}; extension.ts registerWebviewViewProvider (retainContextWhenHidden).
+- Retired placeholder: deleted views/panel-placeholder.ts + __tests__/panel-placeholder.test.ts +
+  the dead setContext panelContainerEmpty flip + :552 comment. Updated contributes-panel.test.ts
+  (contextual view + no-placeholder/no-gate asserts, kept sidebar+reveal-once) + contributes-dev comment.
+- COMMITTED FIRST this time (e5b8924f0) — learned from phase 1.
+- Verify: esbuild 3 bundles OK; check-types clean (both); eslint clean; vitest 68 files / 838 tests PASS.
+- Descriptor cache + re-post on visibility deferred to Phase 3 (when host posts descriptors) — noted.
+- Next: signal PHASE_COMPLETE → porch checks + cmap.
