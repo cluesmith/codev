@@ -229,3 +229,17 @@ stubs; these three render their content into my mode render-targets in their own
   porch approve on Amr's decision" was wrong wording; corrected.)
 - Plan-approval gate refreshed for Amr; HOLDING. Post-approval: architect runs porch approve, then I
   run porch done → begin Phase 1 (resolver + types).
+
+### 2026-08-24 — IMPLEMENT Phase 1 (Mode resolver + contract types) — done, verifying
+- plan-approval APPROVED by Amr (architect recorded via porch approve). porch done → implement, phase_1.
+- Created: apps/vscode/src/contextual-panel/types.ts (extension-local contract), resolver.ts (pure
+  resolveMode), src/__tests__/contextual-panel-resolver.test.ts (24 tests).
+- Design: SurfaceContext = independent predicates; resolver applies precedence terminal→diff→artifact
+  →attention; ManualSelection overrides only to an APPLICABLE mode (doc-review needs artifact); never
+  emits {document-review,summary} (forced detail); never throws (cleanString guards → attention).
+  Worktree artifact carries builderId into context (A2). Applicability: doc-review = artifact present,
+  others always true.
+- Env: had to build workspace deps (codev-types, codev-sdk, artifact-canvas) — worktree dist/ was
+  missing → 18 pre-existing test files + check-types failed on UNBUILT deps (not my code). After build:
+  test:unit 69 files / 836 tests PASS (my 24 incl); check-types CLEAN. dist/ gitignored (not committed).
+- Next: signal PHASE_COMPLETE → porch consultation + checks → commit/next phase.
