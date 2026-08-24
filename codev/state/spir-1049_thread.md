@@ -109,6 +109,16 @@ not just add the new view. Verified:
 - Existing manifest tests already flagged in spec Constraints (contributes-panel / panel-placeholder /
   contributes-dev) will need updating in lockstep.
 
+### #1549 — shared webview foundation (filed 2026-08-25, architect-directed)
+Spun off from a #1049 design discussion: no shared Codev webview component/style layer exists
+(only VSCode `--vscode-*` tokens); artifact-canvas is currently scoped to markdown artifacts only.
+Architect decision: EXPAND artifact-canvas into a general-purpose renderer (not a new package) —
+"a canvas is meant to be a general-purpose renderer". #1049 is the forcing function + first consumer.
+SEQUENCING (recorded so the plan honors it): #1049 must NOT block on #1549 — #1049 ships its few
+primitives (pill/header/list-row) LOCAL + small; #1549 extracts/generalizes them afterward using
+#1049 as proving ground. Keep #1049's plan self-contained; treat #1549 as a later extraction, not a
+dependency. Substrate decision for #1049 stands: React panel so Document Review can host <ArtifactCanvas>.
+
 ### #813/#814/#815 rescope ruling (architect, 2026-08-14)
 #813 (Recently Closed) / #814 (Team) / #815 (Status) are HELD pending this surface and will be
 rescoped as PARTICIPATING FEATURES rendering into the contextual panel's modes (e.g. Attention
