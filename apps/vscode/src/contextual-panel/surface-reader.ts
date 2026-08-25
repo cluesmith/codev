@@ -28,6 +28,12 @@ export function classifyTab(input: unknown): TabInfo {
   if (input instanceof vscode.TabInputCustom) {
     return { kind: 'custom', uriPath: input.uri.path, uriFsPath: input.uri.fsPath, viewType: input.viewType };
   }
+  if (input instanceof vscode.TabInputTerminal) {
+    // A terminal moved into the editor area. It carries no resource; classifying it (rather than
+    // letting it fall through to `other`) lets the provider recognise that activating it is terminal
+    // focus, not editor focus.
+    return { kind: 'terminal' };
+  }
   if (input === undefined || input === null) {
     return { kind: 'none' };
   }
@@ -69,6 +75,12 @@ export class SurfaceContextReader {
   /** The active tab's resource — the provider compares this to gate focus on real activation. */
   activeTabResource(): string {
     return tabResource(classifyTab(vscode.window.tabGroups.activeTabGroup?.activeTab?.input));
+  }
+
+  /** Whether the active tab is a terminal living in the editor area. Activating such a tab is terminal
+   *  focus (tracked by `onDidChangeActiveTerminal`), so the provider must not read it as editor focus. */
+  activeTabIsTerminal(): boolean {
+    return classifyTab(vscode.window.tabGroups.activeTabGroup?.activeTab?.input).kind === 'terminal';
   }
 
   /**

@@ -10,7 +10,8 @@
  *
  * Focus: the last-focused surface (editor vs terminal) drives the terminal-exit. It flips to
  * `terminal` on `onDidChangeActiveTerminal` and to `editor` on an editor selection, an active-editor
- * change, or a genuine tab *activation* (not background tab churn).
+ * change, or a genuine editor-tab *activation* (not background tab churn, and not activating a
+ * terminal that lives in the editor area — that is terminal focus).
  *
  * Visibility: registered with `retainContextWhenHidden: true`; the provider caches the last
  * descriptor and re-posts it on `onDidChangeVisibility` so a change made while hidden reaches the
@@ -128,7 +129,12 @@ export class ContextualPanelProvider implements vscode.WebviewViewProvider {
     const tabResource = this.reader.activeTabResource();
     if (tabResource !== this.lastTabResource) {
       this.lastTabResource = tabResource;
-      this.reader.noteEditorFocused();
+      // A terminal that lives in the editor area is a terminal surface, not an editor one — activating
+      // it is terminal focus (already tracked by onDidChangeActiveTerminal), so it must not demote a
+      // focused builder terminal to Attention.
+      if (!this.reader.activeTabIsTerminal()) {
+        this.reader.noteEditorFocused();
+      }
     }
     this.refresh();
   }

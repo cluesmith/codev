@@ -89,13 +89,20 @@ No `CONSULT_ERROR` encountered.
 - Routed: **cold** — `codev/resources/lessons-learned.md` (UI/UX + Testing) — (1) VSCode's multi-file diff (`vscode.changes`) has no typed tab input; classify it via `activeTextEditor` gated by the active tab's type so a normal-tab file isn't misread as a diff. (2) `window.activeTerminal` stays set after focus leaves a terminal, so a terminal-exit needs a last-focused-surface proxy (`onDidChangeTextEditorSelection`/`onDidChangeActiveTextEditor`), not `activeTerminal`. (3) Split webview logic into a pure core + a `vscode` host adapter so the core unit-tests without a host.
 - No **hot** (`lessons-critical.md`) change: these are VSCode-extension-specific, not cross-cutting must-knows; the hot file is at its cap.
 
+## Known Limitations (focus tracking)
+
+VS Code exposes no "which surface has focus" read and does not fire an event for every focus move, so the last-focused-surface proxy has bounded residuals. All self-heal on the next editor/terminal interaction; none can mis-render *builder* content as another builder's, and none block the skeleton.
+
+- **Terminal moved into the editor area** (`TabInputTerminal`): activating such a tab now classifies as **terminal** focus (not editor), so a focused builder terminal is no longer demoted to Attention by the tab event. (PR-cmap iter3, Codex — fixed + regression test.)
+- **Re-entering an already-active custom editor from a builder terminal** (Codex, iter3): when neither the active tab nor the active *text* editor changes (e.g. terminal → an already-open `codev.markdownPreview`), VS Code fires no event, so the panel can stay on Builder Inspector until the next editor interaction. This is the same inherent event-gap as the terminal re-entry case and is an **accepted residual** (Gemini + Claude APPROVE; Claude reviewed this path and judged it acceptable). Closing it fully would require focus polling, which the design deliberately avoids.
+- **Closing the last editor while a builder terminal is the active terminal** flips to Builder Inspector without actual terminal focus (documented in `terminalFocusLikely`); self-heals on the next editor interaction.
+
 ## Flaky Tests
 
 No flaky tests encountered. (An initial worktree run showed 18 test files failing to *load* because the workspace deps `codev-types` / `codev-sdk` / `artifact-canvas` had no built `dist/`; building them resolved it — an environment setup step, not a flaky test.)
 
 ## Follow-up Items
 
-- Dev-approval feel check: whether a zoom-out to summary on a stationary diff/terminal wants an explicit "back to context" affordance (Claude non-blocking).
 - Participating features render the real mode content into the exposed targets: #1037 (Code Review queue), #859/#945 (Document Review markers), files-not-yet-reviewed (Code Review checklist), #807 (Reader View candidate).
 - #1549 extracts the local webview primitives (pill/header/list/row) into a generalized artifact-canvas — from this proven code, not speculation.
 - Placeholder-retirement cleanup shipped in Phase 2 (the `#813/#814/#815` rescope is tracked on those issues).

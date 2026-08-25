@@ -18,7 +18,9 @@ export type FocusedSurface = 'editor' | 'terminal';
 
 /** A plain, host-free description of the active tab (produced by `classifyTab`). */
 export interface TabInfo {
-  kind: 'text' | 'diff' | 'custom' | 'other' | 'none';
+  /** `terminal` = a terminal living in the editor area (`TabInputTerminal`); it is a terminal
+   *  surface, never an editor one, so activating it must not demote a focused builder terminal. */
+  kind: 'text' | 'diff' | 'custom' | 'terminal' | 'other' | 'none';
   /** Posix path (for artifact matching) — `text` / `custom` tabs. */
   uriPath?: string;
   /** Fs path (the resourcePath value) — `text` / `custom` tabs. */

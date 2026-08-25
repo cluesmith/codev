@@ -28,11 +28,12 @@ const hoisted = vi.hoisted(() => {
   class TabInputCustom {
     constructor(public uri: { path: string; fsPath: string }, public viewType: string) {}
   }
-  return { state, TabInputText, TabInputTextDiff, TabInputCustom };
+  class TabInputTerminal {}
+  return { state, TabInputText, TabInputTextDiff, TabInputCustom, TabInputTerminal };
 });
 
 vi.mock('vscode', () => {
-  const { state, TabInputText, TabInputTextDiff, TabInputCustom } = hoisted;
+  const { state, TabInputText, TabInputTextDiff, TabInputCustom, TabInputTerminal } = hoisted;
   const capture = (name: string) => (fn: (arg?: unknown) => void) => {
     state.listeners[name] = fn;
     return { dispose() {} };
@@ -41,6 +42,7 @@ vi.mock('vscode', () => {
     TabInputText,
     TabInputTextDiff,
     TabInputCustom,
+    TabInputTerminal,
     Uri: { joinPath: () => ({ toString: () => 'asset-uri' }) },
     window: {
       get activeTextEditor() {
@@ -292,6 +294,25 @@ describe('ContextualPanelProvider — surface resolution', () => {
     hoisted.state.listeners['terminal']?.({});
     expect(last(posted).descriptor.kind).toBe('builder-inspector');
     hoisted.state.listeners['tabs']?.(); // same active tab → no demotion
+    expect(last(posted).descriptor.kind).toBe('builder-inspector');
+  });
+
+  it('does not demote a focused builder terminal when a terminal-in-editor-area tab activates', () => {
+    // A terminal moved into the editor area (TabInputTerminal) activating is terminal focus, not
+    // editor focus, so it must not read as an editor activation and knock Builder Inspector down.
+    hoisted.state.activeTabInput = textTab('/w/src/a.ts');
+    hoisted.state.activeBuilderId = 'spir-1049';
+    const provider = newProvider();
+    const { view, posted } = makeView();
+    provider.resolveWebviewView(view);
+
+    hoisted.state.listeners['terminal']?.({}); // focus the builder terminal → Builder Inspector
+    expect(last(posted).descriptor.kind).toBe('builder-inspector');
+
+    // The active tab changes to an editor-area terminal tab (a genuine activation, new resource) —
+    // must stay Builder Inspector rather than demote to Attention.
+    hoisted.state.activeTabInput = new (vscode as unknown as { TabInputTerminal: new () => unknown }).TabInputTerminal();
+    hoisted.state.listeners['tabs']?.();
     expect(last(posted).descriptor.kind).toBe('builder-inspector');
   });
 });
