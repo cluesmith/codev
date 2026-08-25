@@ -43,3 +43,34 @@ directly — named plainly in the plan.
 
 Plan written to `codev/plans/1552-vscode-review-flag-gestures-mu.md`, committed. Awaiting
 plan-approval (Amr's gate; architect relays; I run porch approve).
+
+## Plan gate APPROVED + implement done (2026-08-26)
+
+Amr approved the plan as presented, including the flagged unification (gutter+/context-menu/codelens
+Submit forwards in forward mode). Convention resolved: builder runs `porch approve` — I ran
+`porch approve 1552 plan-approval`. Recorded the unification as owner-approved-at-plan-gate; will
+note it in the review artifact (not a side effect).
+
+Implemented exactly as planned:
+- `review-queue/feedback.ts`: `route()` → warn "focus a builder diff first" on no anchor, else
+  `executeCommand(COMMENT_FOR_BUILDER_COMMAND, ...)`. Deleted DECK_FLAG_BODY + store/ref/uuid deps;
+  gestures take no args. Anchor resolvers unchanged (kept #1534 hunkAnchor degrade-to-file-with-note).
+- `comments/builder-review.ts` `codev.submitBuilderComment`: empty/whitespace → dispose no artifact;
+  forward mode → `forwardToBuilder(builderId, ref + body)` (ref has trailing space); comment mode →
+  enqueue trimmed body. Imports getDiffCodelensMode + buildBuilderFileRef/RangeRef.
+- `extension.ts:1260-1262`: dropped `{ store }` arg; refreshed the block comment.
+
+Tests: rewrote feedback.test.ts (7 tests), added builder-review-submit.test.ts (5 tests). Affected
+files: 4 files / 22 tests pass. check-types ✓, eslint ✓ on all changed files. AC grep for
+DECK_FLAG_BODY / "Flagged for review from Stream Deck" is empty.
+
+PRE-EXISTING UNRELATED RED (not mine, not fixing): 20 test FILES in apps/vscode fail at import time
+with `Cannot find package '@cluesmith/codev-sdk/reconnect-policy'` — the installed codev-sdk lacks
+that subpath export (stale workspace build). None are files I touched; my diff imports nothing from
+it. The 688 tests that load all pass. Noting for the review file per implement-phase guidance.
+
+Fences held: only feedback.ts + builder-review.ts + 3-line extension.ts wiring + tests. No streamdeck,
+no contextual-panel/OverviewCache, no types/Tower.
+
+Now at dev-approval gate (Amr's gate; evidence = native thread seen running on the gesture, Submit
+queues/forwards typed prose per mode, Cancel/empty nothing, DECK_FLAG_BODY gone).
