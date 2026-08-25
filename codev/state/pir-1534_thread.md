@@ -105,3 +105,25 @@ just disclosed):
 - Pinned both directions with tests (press-cursor-ref + diff-inject-ref). Added "How to Test
   Locally" section; strengthened rename-edge note. Suite now 887 passed (was 882), tsc clean.
 Re-running CMAP on the fixed code before the gate.
+
+## CMAP iter2 (fixed code) → Gemini APPROVE, Codex APPROVE, Claude COMMENT
+
+Precedence split cleared both REQUEST_CHANGES. Claude COMMENT flagged two stale doc comments
+(module header + hunkAnchor still said "symbol→hunk→file") — fixed, comment-only. porch next →
+pr gate pending with all-approve/comment.
+
+## pr gate — APPROVED (2026-08-25) & MERGED
+
+Amr approved via VS Code ("Approve the PR review gate for 1534"). Approved AS-IS — hunk-first
+precedence for the press verbs stands; he was shown the concrete example (3-line change vs the
+1,416-line activate()) and did not take the flip. Ran `porch approve 1534 pr` (last branch write),
+then FULL FREEZE per architect (shared-GH-identity branch protection → main architect admin-merges
+on attested provenance; I do not merge / --admin).
+
+Merge landed: PR #1550 MERGED at 02:05:37Z, merge commit 93874894d, two parents (ca4e4ce +
+cafc1a1) — true merge, not squash. Verified via `gh pr view 1550`. Ran `porch done 1534 --merged
+1550`; porch status = complete. Skipped porch's residual "merge the PR" task (already merged).
+Issue-close and cleanup are the architect's, not mine.
+
+Deck confirmation: never relayed; evidence record stayed honest end-to-end (unit + source
+verified, deck script handed to owner, NO "deck-verified" claim). PROJECT COMPLETE.
