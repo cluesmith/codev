@@ -66,6 +66,11 @@ export interface DiffInjectSessionEntry {
   relPath: string;
   /** Changed new-side line runs for the per-change lenses (empty = file/symbol lenses only). */
   hunks: ChangedRange[];
+  /** Diff base the `hunks` were parsed against (a branch name or SHA). Kept so a
+   *  press-time handler can re-run the single-file parse and defeat staleness (#1534). */
+  baseRef: string;
+  /** Absolute worktree root the diff belongs to — the `-C` dir for that re-parse (#1534). */
+  worktreePath: string;
 }
 
 /** Map a `vscode.DocumentSymbol` tree to the pure `SymbolNode` shape. Exported

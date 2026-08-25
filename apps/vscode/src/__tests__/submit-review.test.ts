@@ -97,7 +97,7 @@ beforeEach(() => {
 
 describe('resolveTargetBuilder', () => {
   it('prefers the active builder-diff file’s owner', async () => {
-    upsertDiffInjectEntry({ fsPath: '/wt/src/a.ts', builderId: 'pir-1', relPath: 'src/a.ts', hunks: [] });
+    upsertDiffInjectEntry({ fsPath: '/wt/src/a.ts', builderId: 'pir-1', relPath: 'src/a.ts', hunks: [], baseRef: 'main', worktreePath: '/wt' });
     h.state.activeEditorFsPath = '/wt/src/a.ts';
     const store = makeStore({ 'pir-2': [makeComment('x')] });
     expect(await resolveTargetBuilder(store as never)).toBe('pir-1');

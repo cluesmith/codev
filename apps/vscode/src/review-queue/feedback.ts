@@ -25,6 +25,7 @@ import {
   type DiffInjectSessionEntry,
 } from '../diff-inject-codelens.js';
 import { buildBuilderFileRef, buildBuilderRangeRef } from '../diff-inject-ref.js';
+import { resolvePressCursorRef } from '../commands/press-cursor-ref.js';
 import { deriveWorktreePath } from './reconcile.js';
 import type { LineRange } from './queue.js';
 import type { ReviewQueueStore } from './store.js';
@@ -57,18 +58,24 @@ function fileAnchor(): Anchor | undefined {
   return entry ? { entry, lineRange: null } : undefined;
 }
 
-/** The changed hunk under the cursor (mirrors `codev.forwardCurrentHunkToBuilder`). */
-function hunkAnchor(): Anchor | undefined {
+/** The changed hunk under the cursor (mirrors `codev.forwardCurrentHunkToBuilder`).
+ *  Resolves through the shared press helper (#1534): fresh single-file re-parse
+ *  with hunk → symbol → file precedence (hunk-first, so a hunk press keeps the
+ *  tight changed range), so a cursor on a deletion-only change or outside any
+ *  recorded range anchors the enclosing symbol / whole file with an honest note
+ *  instead of the old (misleading, when the cursor sat in green) error. */
+async function hunkAnchor(): Promise<Anchor | undefined> {
   const editor = vscode.window.activeTextEditor;
   const entry = activeEntry();
   if (!editor || !entry) { return undefined; }
-  const line = editor.selection.active.line + 1;
-  const hunk = entry.hunks.find(h => line >= h.start && line <= h.end);
-  if (!hunk) {
-    vscode.window.setStatusBarMessage('Codev: place the cursor in a changed hunk', 3000);
-    return undefined;
+  const cursorLine = editor.selection.active.line + 1; // 1-based new-side
+  const resolved = await resolvePressCursorRef(entry, editor.document.uri, cursorLine);
+  if (resolved.kind === 'file') {
+    vscode.window.setStatusBarMessage(
+      'Codev: no changed lines at the cursor — using the whole file (reopen the diff if it looks stale)', 3000);
+    return { entry, lineRange: null };
   }
-  return { entry, lineRange: { start: hunk.start, end: hunk.end } };
+  return { entry, lineRange: { start: resolved.range.start, end: resolved.range.end } };
 }
 
 /** The selection range, or the cursor line when the selection is empty (mirrors
@@ -123,5 +130,5 @@ async function route(deps: FeedbackDeps, anchor: Anchor | undefined): Promise<vo
 }
 
 export const feedbackFile = (deps: FeedbackDeps): Promise<void> => route(deps, fileAnchor());
-export const feedbackHunk = (deps: FeedbackDeps): Promise<void> => route(deps, hunkAnchor());
+export const feedbackHunk = async (deps: FeedbackDeps): Promise<void> => route(deps, await hunkAnchor());
 export const feedbackSelection = (deps: FeedbackDeps): Promise<void> => route(deps, selectionAnchor());

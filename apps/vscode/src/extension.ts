@@ -13,9 +13,10 @@ import { cleanupBuilder } from './commands/cleanup.js';
 import { openWorktreeWindow } from './commands/open-worktree-window.js';
 import { viewDiff, activateDiffView, openBuilderFileDiff } from './commands/view-diff.js';
 import { navigateDiff, navigateDiffToFirst, navigateBuilderDiffToFirst, diffFirstHunk, recordDiffNavPosition } from './commands/diff-nav.js';
-import { activateDiffInjectCodeLens, getDiffInjectEntry, onDidChangeDiffInjectRegistry, toSymbolNode } from './diff-inject-codelens.js';
+import { activateDiffInjectCodeLens, getDiffInjectEntry, onDidChangeDiffInjectRegistry } from './diff-inject-codelens.js';
 import { isStandaloneTextTab } from './diff-tab-input.js';
-import { buildBuilderRangeRef, buildBuilderFileRef, resolveCursorRef } from './diff-inject-ref.js';
+import { buildBuilderRangeRef, buildBuilderFileRef } from './diff-inject-ref.js';
+import { resolvePressCursorRef, resolveCursorContextRef } from './commands/press-cursor-ref.js';
 import { runWorktreeDev } from './commands/run-worktree-dev.js';
 import { stopWorktreeDev } from './commands/stop-worktree-dev.js';
 import { runWorkspaceDev, stopWorkspaceDev } from './commands/run-workspace-dev.js';
@@ -1285,43 +1286,45 @@ export async function activate(context: vscode.ExtensionContext) {
 			await vscode.commands.executeCommand(
 				'codev.forwardToBuilder', entry.builderId, buildBuilderFileRef(entry.relPath));
 		}),
-		// Forward the changed hunk under the cursor (the Forward Hunk action): the
-		// diff-inject session already carries the new-side hunk ranges (1-based).
+		// Forward the changed hunk under the cursor (the Forward Hunk action).
+		// Resolves through the shared press helper (#1534): a FRESH single-file
+		// re-parse defeats the open-time snapshot staleness, and hunk-first
+		// resolution keeps the tight changed range when a hunk covers the cursor,
+		// degrading hunk → symbol → file only when none does — so a cursor on a
+		// deletion-only change or outside any recorded range forwards the enclosing
+		// symbol / whole file with an honest note, instead of the old (and, when the
+		// cursor was visibly in green, misleading) error.
 		reg('codev.forwardCurrentHunkToBuilder', async () => {
 			const editor = vscode.window.activeTextEditor;
 			if (!editor) { return; }
 			const entry = getDiffInjectEntry(editor.document.uri.fsPath);
 			if (!entry) { return; }
-			const line = editor.selection.active.line + 1;
-			const hunk = entry.hunks.find(h => line >= h.start && line <= h.end);
-			if (!hunk) {
-				vscode.window.setStatusBarMessage('Codev: place the cursor in a changed hunk', 3000);
-				return;
+			const cursorLine = editor.selection.active.line + 1; // 1-based new-side
+			const resolved = await resolvePressCursorRef(entry, editor.document.uri, cursorLine);
+			if (resolved.kind === 'file') {
+				vscode.window.setStatusBarMessage(
+					'Codev: no changed lines at the cursor — forwarded the whole file (reopen the diff if it looks stale)', 3000);
 			}
-			await vscode.commands.executeCommand(
-				'codev.forwardToBuilder', entry.builderId, buildBuilderRangeRef(entry.relPath, hunk.start, hunk.end));
+			await vscode.commands.executeCommand('codev.forwardToBuilder', entry.builderId, resolved.refText);
 		}),
 		// Keyboard equivalent of a codelens click (#1073): forward whatever covers
 		// the cursor — the most specific enclosing symbol first, else the changed
 		// hunk, else the bare file path. Bound to Cmd/Ctrl+K H; `when` scopes it to
 		// builder-diff files with `editorTextFocus` (cursor only, no selection).
-		// All resolution lives in the pure `resolveCursorRef`; this handler only
-		// fetches the live symbols and reuses the shared `forwardToBuilder` inject
-		// path (no Enter, focus stays on the diff editor).
+		// Resolution + the fresh single-file re-parse live in `resolveCursorContextRef`
+		// (#1073, #1534) — SYMBOL-first (this verb forwards the most-specific enclosing
+		// symbol), distinct from the deck press verbs' hunk-first `resolvePressCursorRef`.
+		// Both share the fresh re-parse, so the keyboard path also resolves against live
+		// hunks (it too read the stale snapshot; its file fallback merely hid it). This
+		// handler reuses the shared `forwardToBuilder` inject path (no Enter, focus stays
+		// on the diff editor).
 		reg('codev.forwardCursorContextToBuilder', async () => {
 			const editor = vscode.window.activeTextEditor;
 			if (!editor) { return; }
 			const entry = getDiffInjectEntry(editor.document.uri.fsPath);
 			if (!entry) { return; }
 			const cursorLine = editor.selection.active.line + 1; // 1-based new-side
-			let symbols: vscode.DocumentSymbol[] = [];
-			try {
-				symbols = (await vscode.commands.executeCommand<vscode.DocumentSymbol[]>(
-					'vscode.executeDocumentSymbolProvider', editor.document.uri)) ?? [];
-			} catch {
-				symbols = [];
-			}
-			const resolved = resolveCursorRef(entry.relPath, symbols.map(toSymbolNode), entry.hunks, cursorLine);
+			const resolved = await resolveCursorContextRef(entry, editor.document.uri, cursorLine);
 			if (resolved.kind === 'file') {
 				vscode.window.setStatusBarMessage('Codev: forwarded file path (no symbol or hunk at cursor)', 3000);
 			}
