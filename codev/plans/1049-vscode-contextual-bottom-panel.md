@@ -7,6 +7,8 @@ validated: [gemini, codex, claude]
 
 **Specification**: [codev/specs/1049-vscode-contextual-bottom-panel.md](../specs/1049-vscode-contextual-bottom-panel.md)
 
+> **v3 (final — post-dev-approval simplification).** The shipped panel is **purely contextual**: no pills, no summary ⇄ detail, no drill-in, no transient navigation, no cross-builder lists (sidebar owns those). The resolver is `(SurfaceContext) → { kind, context }`; Attention is the **fallback view** when no artifact/diff/terminal is active, not a selectable mode. The `#921` Codev Dev **panel view was removed** (status-bar chip stays). Phase 4 (pills / summary stubs / navigation) and the pill-gesture / summary / applicability material below are **SUPERSEDED**; see issue #1049.
+
 ## Executive Summary
 
 The spec's recommended substrate is a **webview-view panel** (Approach 1): a `WebviewViewProvider` registered in the `codevPanel` container, with a pure host-side `ModeResolver` feeding a React webview. This plan follows that, refined to the **React** variant (the `MarkdownPreviewProvider` lineage: an esbuild IIFE bundle mounting React via `React.createElement` — **no JSX**, matching `src/markdown-preview/webview/main.ts`), so Document Review's future content can host `<ArtifactCanvas>` without a rewrite. It is the first `WebviewViewProvider` in the extension.

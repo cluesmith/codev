@@ -1,8 +1,10 @@
 # Review: VSCode Contextual Bottom Panel (mode resolver + Attention fallback)
 
+> **Post-dev-approval simplification (final state).** After building the four phases, the owner's live dev-approval reshaped the panel to be **purely contextual**: pills, summary ⇄ detail navigation, drill-in, and transient selection were **removed** (cross-builder browsing is the sidebar's job); the resolver became `(SurfaceContext) → { kind, context }`; Attention is now a **fallback view**, not a selectable mode. Separately, the `#921` **Codev Dev panel view was removed** (it created a redundant second "Codev" section — the status-bar chip stays, display-only). This is a net simplification; the compliance/consultation sections below cover the four-phase build, and this banner + issue #1049 describe the shipped end state.
+
 ## Summary
 
-Built the umbrella skeleton for a single contextual `Codev` bottom-panel tab that follows the active editor/terminal — Document Review, Code Review, Builder Inspector, or an Attention roll-up — with a pure mode resolver, a webview-view surface, transient (never-persisted) pill navigation, and minimum summary stubs. Four phases, all committed on `builder/spir-1049`; the extension's first `WebviewViewProvider`. Per-mode content rendering stays with the participating features (#1037, #859/#945, files-not-yet-reviewed).
+Built a single contextual `Codev` bottom-panel tab (the extension's first `WebviewViewProvider`) that follows the active editor/terminal — Document Review, Code Review, Builder Inspector, or the Attention fallback — with a pure mode resolver and a webview surface, **purely contextual with no selectable navigation** (see banner). Per-mode content rendering stays with the participating features (#1037, #859/#945, files-not-yet-reviewed). Built over four phases, then simplified at dev-approval.
 
 ## Spec Compliance
 

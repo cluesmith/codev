@@ -12,6 +12,8 @@ Keep implementation phases, file paths, code, and "first we will… then we will
 out of the spec — those belong in codev/plans/1049-*.md.
 -->
 
+> **v3 (final — post-dev-approval simplification).** The panel is **purely contextual**: it always shows the detail for the active surface, with **nothing selectable** — no pills, no summary ⇄ detail navigation, no drill-in, no cross-builder lists (the sidebar's Agents view owns cross-builder browsing). Modes: artifact → **Document Review**; builder diff → **Code Review** (that builder); builder terminal → **Builder Inspector** (that builder); nothing active → **Attention** as a *fallback view*, not a selectable mode. No pinning, no persisted state. The `#921` **Codev Dev panel view is removed** (redundant with the status-bar chip, which stays). **Any section below describing mode pills, transient navigation, summary ⇄ detail, or drill-in is SUPERSEDED by this banner and by issue #1049** (the current requirements).
+
 ## Problem Statement
 
 Codev has been moving activity surfaces into the VSCode bottom panel: the `Codev` scaffold placeholder tab and the `Codev Dev` tab already live there, and several planned features (pending review comments #1037, Reader View #807, future Recently-Closed / Team / Status detail) all want a panel home.
