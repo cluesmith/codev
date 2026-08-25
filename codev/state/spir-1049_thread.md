@@ -480,3 +480,15 @@ offering mode pills to browse. Purely contextual: no pinning, no persisted panel
      "Known Limitations (focus tracking)" in the review.
 - 78 files/919 tests, types+lint+build clean. Pushed f68eb8fab. Actionable finding fixed; residual is an
   owner/architect call at the pr gate. Holding pr gate for Amr.
+
+### 2026-08-25 — Spun off (to architect): review-flag prompt gap (OUT of #1049 scope)
+- Owner surfaced, while reviewing the live panel: flagging a hunk for review enqueues a promptless
+  fixed-body comment ("Flagged for review from Stream Deck.") for BOTH the deck dial and the VS Code
+  command (review-queue/feedback.ts route() → DECK_FLAG_BODY). Owner ruling: promptless must not exist;
+  every flag opens comment authoring (native inline CommentThread reply, multi-line + dictation,
+  Submit/Cancel), mirroring spec/plan authoring; typed text = body.
+- This is #1037/#1410 territory, NOT #1049 (frozen skeleton at pr gate). Did NOT edit the #1049 branch,
+  did NOT self-file. Drafted a ready-to-file issue (title + problem + 8 scenarios + acceptance criteria,
+  area/vscode, reuses createCommentController path) and afx-sent it to the architect to file/track.
+  Draft: scratchpad/review-flag-prompt-issue.md.
+- #1049 unchanged by this; still holding pr gate (iter3 2-1). Attention-body scope call still open.
