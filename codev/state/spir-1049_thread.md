@@ -433,3 +433,19 @@ offering mode pills to browse. Purely contextual: no pinning, no persisted panel
   a "back to context" affordance if it feels off). (2) drill-in on a builder that just left the known
   set is silently ignored (correct behavior — edge).
 - Next: porch advance → PR. All commits on builder/spir-1049. Open PR with gesture family in body.
+
+### 2026-08-25 — DEV-APPROVAL RESHAPE: purely-contextual panel + drop Codev Dev panel view
+- Owner (Amr) at dev-approval: (1) drop the Codev Dev PANEL VIEW (status-bar chip stays, now
+  display-only); (2) panel is PURELY CONTEXTUAL — no pills, no summaries, no drill-in, no manual
+  navigation (sidebar owns cross-builder); Attention = FALLBACK view, not selectable.
+- Reworked (big simplification): resolver.ts = (SurfaceContext)→{kind,context} (dropped ManualSelection/
+  level/applicability/summary). Deleted pills.ts, components.ts + their tests. messages.ts = render/ready
+  only (dropped navigate/drill-in/parseNavigation). provider dropped selection/summaryFor/isKnownBuilder/
+  store-DI. webview = context label + per-mode placeholder body (no pill row). surface-context/reader kept.
+- Dev panel: package.json removed codev.dev view + its 5 view/title menus; extension.ts removed
+  devProvider/devView/badge + DevTreeProvider import, chip now display-only (no command). Kept chip +
+  refreshDevSurface + devRunning key + codev.dev.* commands (palette). Updated contributes-dev.test.ts.
+- Updated issue #1049 (v3 purely-contextual), spec/plan/review banners, PR #1551 body.
+- 78 files / 917 tests, types+eslint+build clean. Pushed cc8814836. Re-running PR cmap (iter2).
+- Flagged to owner: chip is now display-only (no panel to focus) — confirm OK.
+- Still at pr gate (human approval) — NOT merging.
