@@ -33,6 +33,10 @@
     6. Re-cp the template back to UNRELEASED.md to start the next cycle
 -->
 
+## A contextual bottom panel that follows your focus (#1049, PR #1551)
+
+The VS Code panel area gains one `Codev` tab that mirrors whatever you are working with, purely contextually: an open spec/plan/review shows Document Review context, a builder's diff shows that builder's Code Review, a builder's terminal shows its Inspector, and with none of those active it falls back to a "what needs my attention" view. Nothing is pinned, chosen, or persisted — the sidebar keeps cross-builder navigation, and the panel simply follows focus and snaps when focus changes. This umbrella ships the surface, the context resolver, and the switching; the rich per-mode content arrives with its participating features (#1037, #859/#945, #1553). Also in this change: the separate "Codev Dev" panel view is removed — the dev status-bar chip now reveals the running dev terminal directly — and the old empty placeholder tab is retired.
+
 ## Polish
 
 - **Forward-hunk presses no longer error inside a visibly changed hunk.** The press validated the cursor against a diff snapshot taken when the diff opened, while dial navigation followed the live editor — so a builder committing after open, or a deletion-only change, failed exactly where the dial landed. Presses now re-check the diff at press time and degrade to symbol or whole-file with an honest note instead of erroring; forward-hunk keeps forwarding exactly the changed lines (#1534, PR #1550).
