@@ -103,6 +103,6 @@ No flaky tests encountered. (An initial worktree run showed 18 test files failin
 
 ## Follow-up Items
 
-- Participating features render the real mode content into the exposed targets: #1037 (Code Review queue), #859/#945 (Document Review markers), files-not-yet-reviewed (Code Review checklist), #807 (Reader View candidate).
+- Participating features render the real mode content into the exposed targets: #1037 (Code Review queue), #859/#945 (Document Review markers), **#1553 (Attention body — blocked builders / pending gates / queued comments)**, files-not-yet-reviewed (Code Review checklist), #807 (Reader View candidate). The Attention body ships as a placeholder here by frozen-criteria design; #1553 wires it to the existing `OverviewCache` render target (purely contextual, no new plumbing).
 - #1549 extracts the local webview primitives (pill/header/list/row) into a generalized artifact-canvas — from this proven code, not speculation.
 - Placeholder-retirement cleanup shipped in Phase 2 (the `#813/#814/#815` rescope is tracked on those issues).
