@@ -170,23 +170,22 @@ body {
   padding: 4px 6px;
 }
 
+/* Row badges are text-only labels, not filled chips. The row's left stripe already carries the
+   semantic color, and a filled pale-warning/error background pairs poorly with its own amber/red
+   foreground (washed-out on cream) and with the grey row-hover background. Colored text on the panel
+   (or hover) background keeps contrast in both themes and matches the sidebar's label style. */
 .cp-badge {
   font-size: 10px;
   white-space: nowrap;
-  padding: 1px 7px;
-  border-radius: 999px;
   color: var(--vscode-descriptionForeground);
-  background: var(--vscode-badge-background);
 }
 
 .cp-badge-gate {
   color: var(--vscode-notificationsWarningIcon-foreground, var(--vscode-charts-yellow));
-  background: var(--vscode-inputValidation-warningBackground, transparent);
 }
 
 .cp-badge-mail {
-  color: var(--vscode-editorError-foreground, var(--vscode-charts-red));
-  background: var(--vscode-inputValidation-errorBackground, transparent);
+  color: var(--vscode-notificationsErrorIcon-foreground, var(--vscode-charts-red));
 }
 
 .cp-badge-queued {
@@ -194,7 +193,7 @@ body {
 }
 
 .cp-badge-since {
-  opacity: 0.7;
+  color: var(--vscode-descriptionForeground);
 }
 
 .cp-count-num {
