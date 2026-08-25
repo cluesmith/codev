@@ -492,3 +492,11 @@ offering mode pills to browse. Purely contextual: no pinning, no persisted panel
   area/vscode, reuses createCommentController path) and afx-sent it to the architect to file/track.
   Draft: scratchpad/review-flag-prompt-issue.md.
 - #1049 unchanged by this; still holding pr gate (iter3 2-1). Attention-body scope call still open.
+
+### 2026-08-25 — Attention-body scope RULED (architect, per Amr): SKELETON
+- Ruling: merge with the placeholder Attention body; NO OverviewCache wiring in this lane (matches the
+  frozen success criteria — mode content is out of scope for #1049). Architect is filing the fast-follow
+  Attention tracking issue.
+- Action pending: add that issue number to the PR body + review participating-features list (next to
+  #1037, #859/#945, #807) once the architect sends it. No other change.
+- Holding pattern unchanged: pr gate + dev-approval pending with Amr. Not merging, not running porch approve.
