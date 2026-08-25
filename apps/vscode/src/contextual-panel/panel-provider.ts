@@ -25,7 +25,7 @@ import { onDidChangeDiffInjectRegistry } from '../diff-inject-codelens.js';
 import { resolveMode } from './resolver.js';
 import { SurfaceContextReader } from './surface-reader.js';
 import { renderContextualPanelHtml } from './panel-template.js';
-import { deriveAttention } from './attention.js';
+import { deriveAttention } from '@cluesmith/codev-sdk/builder-helpers';
 import { isReadyMessage, type HostToWebviewMessage } from './messages.js';
 import type { ModeDescriptor } from './types.js';
 

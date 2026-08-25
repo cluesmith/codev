@@ -136,6 +136,11 @@ body {
   background: var(--vscode-editorError-foreground, var(--vscode-charts-red));
 }
 
+.cp-row-waiting .cp-stripe {
+  /* The sidebar colors an idle-waiting builder with notificationsInfoIcon — match it here. */
+  background: var(--vscode-notificationsInfoIcon-foreground, var(--vscode-charts-blue));
+}
+
 .cp-row-queued .cp-stripe {
   background: var(--vscode-textLink-foreground);
 }
@@ -186,6 +191,10 @@ body {
 
 .cp-badge-mail {
   color: var(--vscode-notificationsErrorIcon-foreground, var(--vscode-charts-red));
+}
+
+.cp-badge-waiting {
+  color: var(--vscode-notificationsInfoIcon-foreground, var(--vscode-charts-blue));
 }
 
 .cp-badge-queued {

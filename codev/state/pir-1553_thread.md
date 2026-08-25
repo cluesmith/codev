@@ -74,6 +74,30 @@ earlier artifact mockup's hardcoded hexes never shipped. artifact-canvas uses it
 palette but re-skins to --vscode-* inside a webview, so everything collapses onto VS Code tokens.
 Green after: check-types, test:unit 944, esbuild, eslint.
 
+## dev-approval feedback round 2 (owner) — badge contrast
+Pale amber-on-cream badge (inputValidation-warningBackground) washed out, worse over grey row-hover.
+Fix (b2efca5c3): row badges now TEXT-ONLY (no filled pill) — colored label on panel/hover bg; left
+stripe already carries the semantic color. gate=notificationsWarningIcon-fg, mail=notificationsErrorIcon-fg,
+queued=textLink-fg. Also fixed latent blue-on-blue queued badge (was inheriting badge-background).
+Count pill stays filled blue (badge fg/bg pair). Green: check-types/944/esbuild/eslint.
+
+## dev-approval feedback round 3 (owner) — share the projection via SDK
+Owner challenged: AttentionSummary + deriveAttention should be shared, did I check types/sdk?
+Finding: codev-types = wire-contracts-only (correctly excluded). codev-sdk/builder-helpers.ts is
+the real precedent — it already hosts cross-client UI-policy projections over OverviewBuilder
+(isIdleWaiting + threshold), explicitly to stop VSCode/dashboard drift. No symbol was duplicated
+(only isIdleWaiting existed), but the projection belongs there.
+DEVIATION from approved plan (which declared these extension-local): owner chose option (a) —
+- MOVED deriveAttention + AttentionSummary/GateItem/CountItem/WaitingItem/AttentionBuilderRef into
+  packages/sdk/src/builder-helpers.ts (pure, env-agnostic, passes import-boundary; `now` injectable).
+- FOLDED IN isIdleWaiting: new `waiting` list (idle-past-threshold builders not already at a gate),
+  rendered as "Waiting on input" section, stripe/badge = notificationsInfoIcon (sidebar idle color).
+- Extension now imports deriveAttention (value, host-side) + types (type-only, webview) from
+  @cluesmith/codev-sdk/builder-helpers. RenderMessage envelope stays extension-local.
+- Deleted apps/vscode/.../attention.ts + its vscode test; added packages/sdk/.../builder-helpers.test.ts.
+Must rebuild sdk dist before vscode check-types (monorepo order). Green: sdk build/check-types/119
+tests; vscode check-types(both tsconfigs)/935 tests/esbuild/eslint. Record this deviation in review.
+
 ## Evidence limitation named for dev-approval
 Can't drive real blocked-builder/held-mail/queued-feedback state from the builder shell (needs live
 Tower with builders at gates). Cover projection+wiring via unit tests; render/empty-state in Ext Dev

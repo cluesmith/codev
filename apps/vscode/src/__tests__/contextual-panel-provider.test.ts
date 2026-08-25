@@ -10,7 +10,7 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type { ModeDescriptor } from '../contextual-panel/types.js';
-import type { AttentionSummary } from '../contextual-panel/attention.js';
+import type { AttentionSummary } from '@cluesmith/codev-sdk/builder-helpers';
 import type { OverviewBuilder, OverviewData } from '@cluesmith/codev-types';
 
 const hoisted = vi.hoisted(() => {
@@ -150,10 +150,12 @@ function builderRow(over: Partial<OverviewBuilder> & { id: string }): OverviewBu
   return {
     issueId: null,
     issueTitle: null,
+    phase: 'implement',
     blocked: null,
     blockedGate: null,
     blockedSince: null,
     prReady: false,
+    lastDataAt: null,
     ...over,
   } as OverviewBuilder;
 }

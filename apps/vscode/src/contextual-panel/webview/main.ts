@@ -16,7 +16,7 @@ import * as React from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import './styles.css';
 import type { ModeDescriptor, ModeKind } from '../types.js';
-import type { AttentionSummary, GateItem, CountItem } from '../attention.js';
+import type { AttentionBuilderRef, AttentionSummary, GateItem, WaitingItem, CountItem } from '@cluesmith/codev-sdk/builder-helpers';
 import type { HostToWebviewMessage } from '../messages.js';
 
 const h = React.createElement;
@@ -58,7 +58,7 @@ function label(descriptor: ModeDescriptor): React.ReactNode {
 }
 
 /** The builder id + its issue reference, shared by every Attention row. */
-function rowMain(item: GateItem | CountItem): React.ReactNode {
+function rowMain(item: AttentionBuilderRef): React.ReactNode {
   const issue = item.issueId !== null
     ? h('span', { className: 'cp-issue' }, `${item.issueId} · `)
     : null;
@@ -122,6 +122,17 @@ function gateRow(item: GateItem, index: number): React.ReactElement {
   );
 }
 
+function waitingRow(item: WaitingItem, index: number): React.ReactElement {
+  const age = since(item.since);
+  return h(
+    'div',
+    { className: 'cp-row cp-row-waiting', key: `${item.builderId}:${index}` },
+    h('span', { className: 'cp-stripe' }),
+    rowMain(item),
+    h('span', { className: 'cp-badge cp-badge-waiting' }, age.length > 0 ? `idle · ${age}` : 'idle'),
+  );
+}
+
 function countRow(item: CountItem, index: number, variant: 'mail' | 'queued', unit: string): React.ReactElement {
   const plural = item.count === 1 ? unit : `${unit}s`;
   return h(
@@ -155,6 +166,15 @@ function attentionBody(summary: AttentionSummary): React.ReactNode {
         React.Fragment,
         { key: 'gates' },
         section('Pending gates', summary.pendingGates.length, summary.pendingGates.map((item, i) => gateRow(item, i))),
+      ),
+    );
+  }
+  if (summary.waiting.length > 0) {
+    sections.push(
+      h(
+        React.Fragment,
+        { key: 'waiting' },
+        section('Waiting on input', summary.waiting.length, summary.waiting.map((item, i) => waitingRow(item, i))),
       ),
     );
   }

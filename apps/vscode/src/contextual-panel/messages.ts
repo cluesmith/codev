@@ -7,7 +7,7 @@
  */
 
 import type { ModeDescriptor } from './types.js';
-import type { AttentionSummary } from './attention.js';
+import type { AttentionSummary } from '@cluesmith/codev-sdk/builder-helpers';
 
 /** Host -> webview: render this resolved descriptor. */
 export interface RenderMessage {
