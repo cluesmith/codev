@@ -71,7 +71,8 @@ vi.mock('../utils/message-format.js', () => ({
   formatBuilderMessage: vi.fn((id: string, msg: string) => `[${id}] ${msg}`),
 }));
 
-vi.mock('../utils/server-utils.js', () => ({
+vi.mock('../utils/server-utils.js', async (importActual) => ({
+  ...(await importActual<typeof import('../utils/server-utils.js')>()),
   parseJsonBody: vi.fn(async () => ({})),
   isRequestAllowed: vi.fn(() => true),
 }));

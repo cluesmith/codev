@@ -28,6 +28,7 @@
  */
 
 import * as vscode from 'vscode';
+import * as path from 'node:path';
 import {
   serializeReviewMarker,
   markerAppendLine,
@@ -39,6 +40,8 @@ import { renderMarkdownPreviewHtml } from './preview-template.js';
 import type { HostToWebviewMessage, WebviewToHostMessage } from './messages.js';
 import type { ConnectionManager } from '../connection-manager.js';
 import { registerCanvasView } from './canvas-view-registry.js';
+import { builderIdForWorktreeFile } from './canvas-owner.js';
+import { fireActivity } from '../activity-hooks.js';
 import type { OverviewCache } from '../views/overview-data.js';
 
 /** globalState key for the per-user reading-mode preference (spec 1380 D4 — per-USER scope:
@@ -86,6 +89,17 @@ export class MarkdownPreviewProvider implements vscode.CustomTextEditorProvider,
      */
     private readonly connectionManager?: ConnectionManager,
   ) {}
+
+  /**
+   * The builder whose worktree contains this canvas artifact, or undefined for a
+   * main-repo artifact (which belongs to no builder). Matched against the Tower
+   * overview by worktree-path prefix — `viewPlanFile`/`viewSpecFile`/`viewReviewFile`
+   * open the artifact inside the builder's worktree, so the owning builder is the
+   * one whose `worktreePath` is a path prefix of the file (#1410).
+   */
+  private builderIdForCanvasFile(file: string): string | undefined {
+    return builderIdForWorktreeFile(this.overviewCache.getData()?.builders ?? [], file, path.sep);
+  }
 
   public resolveCustomTextEditor(
     document: vscode.TextDocument,
@@ -139,6 +153,25 @@ export class MarkdownPreviewProvider implements vscode.CustomTextEditorProvider,
         this.canvasViews.delete(canvasView);
         canvasView.dispose();
       });
+
+      // Canvas focus back-sync (#1410): when this canvas becomes the active panel,
+      // announce its owning builder via the `builder-active` activity hook — the
+      // symmetric counterpart of the diff editor's `announceActiveBuilderFromEditor`,
+      // so a controller (Stream Deck) following that hook re-targets the builder
+      // whose plan/spec/review you focused. Reuses the same event (no new hook to
+      // configure) and is deduped by `fireActivity`'s `lastFiredKey`.
+      const cm = this.connectionManager;
+      const announceActiveBuilder = (): void => {
+        const builderId = this.builderIdForCanvasFile(document.uri.fsPath);
+        if (builderId) {
+          fireActivity(cm.getWorkspacePath() ?? null, 'builder-active', { builder: builderId });
+        }
+      };
+      if (panel.active) { announceActiveBuilder(); }
+      const activeSub = panel.onDidChangeViewState((e) => {
+        if (e.webviewPanel.active) { announceActiveBuilder(); }
+      });
+      panel.onDidDispose(() => activeSub.dispose());
     }
 
     panel.webview.onDidReceiveMessage((msg: unknown) => {

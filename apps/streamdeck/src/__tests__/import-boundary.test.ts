@@ -70,7 +70,7 @@ const files = collectSourceFiles(srcRoot);
 describe('importSpecifiers extraction', () => {
   it('captures static, re-export, side-effect, and dynamic import forms', () => {
     const fixture = [
-      "import { TowerClient } from '@cluesmith/codev-sdk/controller';",
+      "import { createControllerClient } from '@cluesmith/codev-sdk/controller';",
       "export { helper } from './helper.js';",
       "import '@cluesmith/codev-core';",
       "const lazy = await import('@cluesmith/codev-types');",

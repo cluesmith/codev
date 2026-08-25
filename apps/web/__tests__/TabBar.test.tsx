@@ -4,6 +4,7 @@ import { TabBar, TAB_ICONS } from '../src/components/TabBar.js';
 import type { Tab } from '../src/hooks/useTabs.js';
 
 vi.mock('../src/lib/api.js', () => ({
+  getWebKey: () => null,
   deleteTab: vi.fn(() => Promise.resolve()),
 }));
 

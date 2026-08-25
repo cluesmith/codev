@@ -134,7 +134,11 @@ vi.mock('../servers/tower-utils.js', () => ({
   serveStaticFile: vi.fn(() => false),
 }));
 
-vi.mock('../utils/server-utils.js', () => ({
+// Keep the REAL request-auth helpers (CORS allowlist, key comparison, public-route
+// list) under test; only stub isRequestAllowed so route tests need not thread a
+// valid key, and parseJsonBody so bodies can be injected.
+vi.mock('../utils/server-utils.js', async (importActual) => ({
+  ...(await importActual<typeof import('../utils/server-utils.js')>()),
   isRequestAllowed: vi.fn(() => true),
   parseJsonBody: (...args: unknown[]) => mockParseJsonBody(...args),
 }));
@@ -272,15 +276,15 @@ describe('tower-routes', () => {
   // =========================================================================
 
   describe('security and CORS', () => {
-    it('returns 403 when isRequestAllowed returns false', async () => {
+    it('returns 401 when isRequestAllowed returns false', async () => {
       const { isRequestAllowed } = await import('../utils/server-utils.js');
       (isRequestAllowed as any).mockReturnValueOnce(false);
 
-      const req = makeReq('GET', '/health');
+      const req = makeReq('GET', '/api/terminals');
       const { res, statusCode } = makeRes();
       await handleRequest(req, res, makeCtx());
 
-      expect(statusCode()).toBe(403);
+      expect(statusCode()).toBe(401);
     });
 
     it('sets CORS headers for localhost origin', async () => {
@@ -292,12 +296,12 @@ describe('tower-routes', () => {
       expect(headers()['Access-Control-Allow-Methods']).toBe('GET, POST, PATCH, DELETE, OPTIONS');
     });
 
-    it('sets CORS headers for https origin', async () => {
+    it('does not reflect an arbitrary https origin (allowlist, not reflect-any)', async () => {
       const req = makeReq('GET', '/health', { origin: 'https://example.com' });
       const { res, headers } = makeRes();
       await handleRequest(req, res, makeCtx());
 
-      expect(headers()['Access-Control-Allow-Origin']).toBe('https://example.com');
+      expect(headers()['Access-Control-Allow-Origin']).toBeUndefined();
     });
 
     it('does not set CORS origin for non-matching origins', async () => {
@@ -306,6 +310,14 @@ describe('tower-routes', () => {
       await handleRequest(req, res, makeCtx());
 
       expect(headers()['Access-Control-Allow-Origin']).toBeUndefined();
+    });
+
+    it('allows the codev-tower-key header in CORS', async () => {
+      const req = makeReq('GET', '/health', { origin: 'http://localhost:3000' });
+      const { res, headers } = makeRes();
+      await handleRequest(req, res, makeCtx());
+
+      expect(headers()['Access-Control-Allow-Headers']).toContain('codev-tower-key');
     });
 
     it('handles OPTIONS preflight', async () => {
@@ -1018,7 +1030,7 @@ describe('tower-routes', () => {
 
   describe('GET /api/terminals/:id (Spec 1273 — lastDataAt on the wire)', () => {
     // Testing `session.info` alone would not pin this: the whole point of the
-    // phase is that the field reaches a *client*, so afx reset can measure
+    // phase is that the field reaches a *client*, so afx refresh can measure
     // output quiescence instead of assuming a builder's turn has ended before
     // typing /clear into its terminal. This asserts the serialised response.
     it('serialises lastDataAt as an epoch-ms number', async () => {

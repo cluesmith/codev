@@ -12,7 +12,6 @@
  * exactly one delivery path (and one per-agent write serializer).
  */
 
-import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { loadConfig } from '../../lib/config.js';
 import { terminalDeliverySignals, type PtySession } from '../../terminal/pty-session.js';
@@ -21,7 +20,11 @@ import { broadcastMessage, resolveAgentInRegistry, isResolveError } from './towe
 import { writeMessagePaced } from './message-write.js';
 import { classifyBuffer, type GateProfile, type GateVerdict } from './render-gate.js';
 import { resolveProfile } from './gate-profiles.js';
-import { harnessFromLaunchScript, type ContextFsPort } from '../commands/reset/context.js';
+import {
+  buildContextFsPort,
+  harnessFromLaunchScript,
+  type ContextFsPort,
+} from '../commands/reset/context.js';
 import { getGlobalDb } from '../db/index.js';
 import { getArchitectByName } from '../state.js';
 import { formatBuilderMessage } from '../utils/message-format.js';
@@ -69,29 +72,13 @@ export function setMailboxBroadcaster(fn: MailboxBroadcastFn): void {
 }
 
 /**
- * A node-fs adapter for {@link harnessFromLaunchScript}. Only `.read` is exercised
- * by that function, but `exists`/`listDirs` are implemented faithfully so the port
- * is honest and reusable rather than a lying stub.
+ * The shared node-fs adapter for {@link ContextFsPort}.
+ *
+ * Was a hand-rolled copy — one of three identical ones. A stub in any copy
+ * silently nulls the porch context for that path, and a regression test can only
+ * observe the copy it imports, so the implementations are now one.
  */
-const NODE_FS_PORT: ContextFsPort = {
-  exists: (p) => existsSync(p),
-  read: (p) => {
-    try {
-      return readFileSync(p, 'utf-8');
-    } catch {
-      return null;
-    }
-  },
-  listDirs: (p) => {
-    try {
-      return readdirSync(p, { withFileTypes: true })
-        .filter((d) => d.isDirectory())
-        .map((d) => d.name);
-    } catch {
-      return null;
-    }
-  },
-};
+const NODE_FS_PORT: ContextFsPort = buildContextFsPort();
 
 /**
  * The live, writable {@link PtySession} for an agent in a workspace, or `null`
@@ -143,7 +130,7 @@ export function resolveAgentForSession(
  * The classifier profile for a session, resolving the wrapped-launch case. A real
  * builder runs through `.builder-start.sh`, so `session.command` is the shell, not
  * the agent, and the pure {@link resolveProfile} returns `null`. We then read the
- * launch script (exactly as `afx reset` does) to recover the underlying harness
+ * launch script (exactly as `afx refresh` does) to recover the underlying harness
  * command and resolve against that. Still `null` → the delivery holds `no-profile`
  * (fail-safe by construction: an unknown agent is held and surfaced, never guessed
  * — this is what correctly trips on wrapper/boot/relaunch screens too).

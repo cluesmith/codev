@@ -43,6 +43,8 @@ const CLASSIFICATION = {
   'heading-prev': 'traversal',
   'column-forward': 'traversal',
   'column-back': 'traversal',
+  'viewport-down': 'traversal',
+  'viewport-up': 'traversal',
   'doc-start': 'non-traversal',
   'doc-end': 'non-traversal',
   'composer-open': 'non-traversal',

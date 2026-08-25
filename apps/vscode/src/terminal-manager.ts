@@ -120,6 +120,12 @@ export class TerminalManager {
    * terminal instead of attaching to the live one.
    */
   async openArchitect(terminalId: string, architectName: string = 'main', focus = false): Promise<void> {
+    // Invariant (#1497): `architectName` MUST be the terminal's true occupant.
+    // It is an address twice over here — the cache `key` below and the
+    // `injectArchitectText` lookup — so a caller passing a name that differs
+    // from the actual architect would cache one under another's key and
+    // misroute later injection. `openResolvedArchitect` (open-architect.ts)
+    // guarantees this by flowing the resolved occupant's own name.
     const key = `architect:${architectName}`;
     const existing = this.terminals.get(key);
     if (existing) {

@@ -70,7 +70,7 @@ export interface PtySessionInfo {
    *
    * Serialised alongside `status` because the two disagree in the case that
    * matters: a session whose shellper connection died reports status 'running'
-   * until teardown while every write to it is dropped (#1198). `afx reset`
+   * until teardown while every write to it is dropped (#1198). `afx refresh`
    * preflights on this so it refuses a terminal it cannot write to BEFORE
    * touching anything, rather than discovering it on the first send.
    */
@@ -81,7 +81,7 @@ export interface PtySessionInfo {
    * Serialised by `GET /api/terminals/:id`, which makes output quiescence
    * *measurable* by a client: an agent mid-turn emits continuously (spinner
    * frames, streamed tokens), so a stretch with no advance means the turn ended.
-   * `afx reset` uses this to avoid typing into a terminal that is still working.
+   * `afx refresh` uses this to avoid typing into a terminal that is still working.
    */
   lastDataAt: number;
 }

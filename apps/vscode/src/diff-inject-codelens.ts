@@ -68,8 +68,9 @@ export interface DiffInjectSessionEntry {
   hunks: ChangedRange[];
 }
 
-/** Map a `vscode.DocumentSymbol` tree to the pure `SymbolNode` shape. */
-function toSymbolNode(s: vscode.DocumentSymbol): SymbolNode {
+/** Map a `vscode.DocumentSymbol` tree to the pure `SymbolNode` shape. Exported
+ *  so the cursor-context forward command (#1073) can reuse the same mapper. */
+export function toSymbolNode(s: vscode.DocumentSymbol): SymbolNode {
   return {
     kind: s.kind as number,
     startLine: s.range.start.line,

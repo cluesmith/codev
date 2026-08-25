@@ -10,6 +10,7 @@ import * as path from 'node:path';
 import chalk from 'chalk';
 import { globSync } from 'glob';
 import type { ProjectState, Protocol, PlanPhase } from './types.js';
+import { stalledRefreshes, unacknowledgedRefreshes } from './context-refresh.js';
 import {
   readState,
   writeStateAndCommit,
@@ -143,6 +144,12 @@ function logCheckOverrides(
  *     "gate_requested_at": string | null,   // ISO timestamp
  *     "gate_approved_at": string | null     // ISO timestamp
  *   }
+ *
+ * `--json` also carries the Spec 1470 refresh fields: `context_refreshes` (the
+ * full history, each with `boundary`, `at`, and `acknowledged_at` once a builder
+ * has returned), `unacknowledged_refreshes` (the raw fact, any age), and
+ * `stalled_refreshes` (only those past the grace period, each with `ageMs`).
+ * Fields are ADDED; nothing pre-existing is removed or retyped.
  */
 export async function status(
   workspaceRoot: string,
@@ -177,6 +184,11 @@ export async function status(
       gate_status: gateStatus?.status ?? null,
       gate_requested_at: gateStatus?.requested_at ?? null,
       gate_approved_at: gateStatus?.approved_at ?? null,
+      // Spec 1470. Fields ADDED, none removed or retyped, so existing consumers
+      // (dashboard, VS Code tree) keep parsing unchanged.
+      context_refreshes: state.context_refreshes ?? [],
+      unacknowledged_refreshes: unacknowledgedRefreshes(state),
+      stalled_refreshes: stalledRefreshes(state, Date.now()),
     };
     process.stdout.write(JSON.stringify(out) + '\n');
     return;
@@ -212,7 +224,49 @@ export async function status(
 
       console.log(`${prefix}${icon(phase.status)} ${phase.id}: ${title}`);
     }
+  }
 
+  // Context refreshes (Spec 1470). Shown for any protocol that has them, not
+  // only phased ones — a boundary can fire on entering `plan` too.
+  const refreshes = state.context_refreshes ?? [];
+  if (refreshes.length > 0) {
+    const stalled = stalledRefreshes(state, Date.now());
+    console.log('');
+    console.log(chalk.bold('CONTEXT REFRESHES:'));
+    console.log('');
+    for (const r of refreshes) {
+      const done = r.acknowledged_at !== undefined;
+      const isStalled = stalled.some(sr => sr.boundary === r.boundary);
+      // Three states, not two: acknowledged, in flight, and stalled. Marking an
+      // in-flight refresh as a fault would cry wolf on every healthy one.
+      const mark = done ? chalk.green('✓') : isStalled ? chalk.yellow('!') : chalk.cyan('…');
+      const when = done
+        ? ''
+        : isStalled
+          ? chalk.yellow('  ← no builder has returned since')
+          : chalk.cyan('  ← refresh in flight');
+      console.log(`  ${mark} ${r.boundary}  ${chalk.gray(r.at)}${when}`);
+    }
+
+    if (stalled.length > 0) {
+      // The unattended failure this whole field exists to surface: the builder
+      // cleared and nothing came back. Say what to do, because the person
+      // reading this is not necessarily the person who built the feature.
+      console.log('');
+      console.log(
+        chalk.yellow(
+          `  ⚠ ${stalled.length} refresh(es) recorded but never acknowledged. A builder that ` +
+            `cleared and did not return looks idle, not broken.`,
+        ),
+      );
+      console.log(
+        chalk.gray('    Recover with:  ') +
+          `afx send <builder> "Read .builder-reorient.md, then run porch next"`,
+      );
+    }
+  }
+
+  {
     const currentPlanPhase = getCurrentPlanPhase(state.plan_phases);
     if (currentPlanPhase) {
       console.log('');

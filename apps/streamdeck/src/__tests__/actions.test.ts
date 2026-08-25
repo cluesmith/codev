@@ -1,10 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { CodevStore } from '../store.js';
-import type { TowerClient, TowerWorkspace } from '@cluesmith/codev-sdk/controller';
+import type { ControllerClient, TowerWorkspace } from '@cluesmith/codev-sdk/controller';
 import {
   CodevAction,
+  DevServerAction,
   BuilderAction,
+  ArchitectAction,
   ApproveGate,
+  SendQueueAction,
+  OpenTerminalAction,
+  OpenArchitectAction,
   PrNav,
   SpawnNav,
   DiffFileNav,
@@ -43,13 +48,13 @@ function makeStore() {
     }),
     getOverview,
     listWorkspaces,
-  } as unknown as TowerClient;
+  } as unknown as ControllerClient;
   const store = new CodevStore({ client, openUrl: (u) => { opened.push(u); } });
   store.workspaces = [workspace('/work/alpha', 'alpha', true)];
   store.overview = {
     builders: [
-      { id: 'pir-1', roleId: 'builder-pir-1', issueId: '101', issueTitle: 'Add the relay', blocked: 'plan review', blockedGate: 'plan-approval', protocolPhase: 'plan', progress: 45, worktreePath: '/work/alpha/.builders/pir-1' },
-      { id: 'pir-2', roleId: 'builder-pir-2', issueId: '102', issueTitle: 'Wire the dial', blocked: null, blockedGate: null, protocolPhase: 'implement', progress: 70, worktreePath: '/work/alpha/.builders/pir-2' },
+      { id: 'pir-1', roleId: 'builder-pir-1', issueId: '101', issueTitle: 'Add the relay', blocked: 'plan review', blockedGate: 'plan-approval', protocolPhase: 'plan', progress: 45, worktreePath: '/work/alpha/.builders/pir-1', spawnedByArchitect: 'main' },
+      { id: 'pir-2', roleId: 'builder-pir-2', issueId: '102', issueTitle: 'Wire the dial', blocked: null, blockedGate: null, protocolPhase: 'implement', progress: 70, worktreePath: '/work/alpha/.builders/pir-2', spawnedByArchitect: 'streamdeck' },
     ],
     pendingPRs: [{ id: '7', title: 'Fix', url: 'https://gh/pr/7' }],
     backlog: [{ id: '55', title: 'Add X' }],
@@ -67,6 +72,28 @@ const dial = (ticks: number) => ({
   payload: { ticks, settings: {} },
 });
 
+/** A placed Builder Action key at board (row, column) — a defined `coordinates` marks it
+ *  as an on-board key (not a multi-action instance), which #1465's windowing sorts by. */
+const bkey = (id: string, column: number, row = 0) => ({
+  id, isKey: () => true, isDial: () => false, coordinates: { column, row },
+  showAlert: vi.fn(), showOk: vi.fn(), setImage: vi.fn(), setTitle: vi.fn(),
+});
+/** A Builder Action key inside a multi-action: the SDK reports `coordinates: undefined`, so
+ *  #1465 excludes it from the window (no slot). */
+const multiKey = (id: string) => ({
+  id, isKey: () => true, isDial: () => false, coordinates: undefined,
+  showAlert: vi.fn(), showOk: vi.fn(), setImage: vi.fn(), setTitle: vi.fn(),
+});
+/** Place `n` builder keys left-to-right on row 0 (reading order) and return them. */
+function placeKeys(ba: BuilderAction, n: number) {
+  const keys = Array.from({ length: n }, (_, i) => bkey(`k${i}`, i));
+  keys.forEach((k) => ba.onWillAppear({ action: k, payload: { settings: {} } } as never));
+  return keys;
+}
+/** Press a placed key with optional PI settings (verb). */
+const pressKey = (ba: BuilderAction, action: unknown, settings: Record<string, unknown> = {}) =>
+  ba.onKeyDown({ action, payload: { settings } } as never);
+
 describe('verb keypads', () => {
   let ctx: ReturnType<typeof makeStore>;
   beforeEach(() => { ctx = makeStore(); });
@@ -75,7 +102,19 @@ describe('verb keypads', () => {
     const ev = keyEvent();
     await new CodevAction(ctx.store).onKeyDown(ev as never);
     expect(ctx.sent).toEqual([{ verb: 'refresh-overview', args: [], ws: '/work/alpha' }]);
-    expect(ev.action.showOk).toHaveBeenCalled();
+    // Success is silent now (no green checkmark); only failures alert.
+    expect(ev.action.showOk).not.toHaveBeenCalled();
+    expect(ev.action.showAlert).not.toHaveBeenCalled();
+  });
+
+  it('DevServerAction renders a composite face (play icon + "Dev" label), not a bare icon', () => {
+    const key = { isKey: () => true, setImage: vi.fn(), setTitle: vi.fn() };
+    new DevServerAction(ctx.store).onWillAppear({ action: key, payload: { settings: {} } } as never);
+    const arg = String(key.setImage.mock.calls.at(-1)?.[0] ?? '');
+    expect(arg.startsWith('data:image/svg+xml;base64,')).toBe(true);
+    const face = Buffer.from(arg.slice('data:image/svg+xml;base64,'.length), 'base64').toString('utf8');
+    expect(face).toContain('Dev');
+    expect(face).toContain('M8 5v14l11-7z'); // play glyph
   });
 
   it('CodevAction honors a settings verb override', async () => {
@@ -84,128 +123,432 @@ describe('verb keypads', () => {
   });
 
   it('BuilderAction defaults to Automatic — opens slot 1 builder’s current-phase artifact', async () => {
-    // pir-1 is blocked at plan-approval → Automatic resolves to open-plan.
-    await new BuilderAction(ctx.store).onKeyDown(keyEvent() as never);
+    // The first placed key is slot 0 → pir-1, blocked at plan-approval → Automatic = open-plan.
+    const ba = new BuilderAction(ctx.store);
+    const [k0] = placeKeys(ba, 1);
+    await pressKey(ba, k0);
     expect(ctx.sent[0]).toEqual({ verb: 'open-plan', args: ['pir-1'], ws: '/work/alpha' });
   });
 
   it('BuilderAction Automatic falls back to open-terminal for an unknown-state builder', async () => {
     ctx.store.overview = { builders: [{ id: 'pir-x', roleId: null, issueId: null, issueTitle: null, blocked: null, blockedGate: null, protocolPhase: '', progress: 0, worktreePath: '/w' }], pendingPRs: [], backlog: [], recentlyClosed: [] } as never;
-    await new BuilderAction(ctx.store).onKeyDown(keyEvent() as never);
+    const ba = new BuilderAction(ctx.store);
+    const [k0] = placeKeys(ba, 1);
+    await pressKey(ba, k0);
     expect(ctx.sent[0]).toEqual({ verb: 'open-terminal', args: ['pir-x'], ws: '/work/alpha' });
   });
 
   it('BuilderAction with an explicit verb fires it verbatim, ignoring phase', async () => {
-    await new BuilderAction(ctx.store).onKeyDown(keyEvent({ slot: '2', verb: 'open-terminal' }) as never);
+    // Two placed keys → the second (slot 1) is pir-2.
+    const ba = new BuilderAction(ctx.store);
+    const [, k1] = placeKeys(ba, 2);
+    await pressKey(ba, k1, { verb: 'open-terminal' });
     expect(ctx.sent[0]).toEqual({ verb: 'open-terminal', args: ['pir-2'], ws: '/work/alpha' });
   });
 
   it('BuilderAction Automatic opens the FIRST file diff (dial-ready), not the aggregate, for a diff-phase builder (#1414)', async () => {
-    // pir-2 is in `implement` → the phase artifact is the diff; Automatic remaps it to
+    // pir-2 (slot 1) is in `implement` → the phase artifact is the diff; Automatic remaps it to
     // `open-diff-first` so the SD+ dials step from file 1, never `view-diff` (aggregate).
-    await new BuilderAction(ctx.store).onKeyDown(keyEvent({ slot: '2' }) as never);
+    const ba = new BuilderAction(ctx.store);
+    const [, k1] = placeKeys(ba, 2);
+    await pressKey(ba, k1);
     expect(ctx.sent[0]).toEqual({ verb: 'open-diff-first', args: ['pir-2'], ws: '/work/alpha' });
   });
 
   it('BuilderAction explicit "View Diff" still fires view-diff (aggregate) verbatim (#1414)', async () => {
     // The PI View Diff option is unchanged: only Automatic remaps to open-diff-first.
-    await new BuilderAction(ctx.store).onKeyDown(keyEvent({ slot: '2', verb: 'view-diff' }) as never);
+    const ba = new BuilderAction(ctx.store);
+    const [, k1] = placeKeys(ba, 2);
+    await pressKey(ba, k1, { verb: 'view-diff' });
     expect(ctx.sent[0]).toEqual({ verb: 'view-diff', args: ['pir-2'], ws: '/work/alpha' });
   });
 
   it('BuilderAction press selects the slot builder (cursor follows)', async () => {
-    await new BuilderAction(ctx.store).onKeyDown(keyEvent({ slot: '2' }) as never);
+    const ba = new BuilderAction(ctx.store);
+    const [, k1] = placeKeys(ba, 2);
+    await pressKey(ba, k1);
     expect(ctx.store.selectedBuilder()?.id).toBe('pir-2');
   });
 });
 
 describe('slot keys', () => {
-  it('a slot past the end of the builder list alerts and sends nothing', async () => {
+  // renderTo hands setImage a base64 data URI (Stream Deck drops raw SVG strings); decode to
+  // assert on the underlying face.
+  const decodeFace = (action: { setImage: { mock: { calls: unknown[][] } } }): string => {
+    const arg = String(action.setImage.mock.calls.at(-1)?.[0] ?? '');
+    expect(arg.startsWith('data:image/svg+xml;base64,')).toBe(true);
+    return Buffer.from(arg.slice('data:image/svg+xml;base64,'.length), 'base64').toString('utf8');
+  };
+
+  it('a slot past the end of the fleet alerts and sends nothing', async () => {
     const ctx = makeStore(); // only 2 builders
-    const ev = keyEvent({ slot: '8' });
-    await new BuilderAction(ctx.store).onKeyDown(ev as never);
+    const ba = new BuilderAction(ctx.store);
+    const [, , k2] = placeKeys(ba, 3); // 3 keys → slot 2 has no builder
+    await pressKey(ba, k2);
     expect(ctx.sent).toHaveLength(0);
-    expect(ev.action.showAlert).toHaveBeenCalled();
+    expect(k2.showAlert).toHaveBeenCalled();
   });
 
-  // One SingletonAction instance serves every key of its type — these guard the
-  // per-instance fix (without it, all keys collided on shared state).
-  const slotKey = (id: string) => ({ id, isKey: () => true, setTitle: vi.fn() });
+  it('a multi-action key (no coordinates) has no slot — alerts and sends nothing', async () => {
+    const ctx = makeStore(); // 2 builders
+    const ba = new BuilderAction(ctx.store);
+    placeKeys(ba, 2); // two placed keys → window is 2 wide
+    const m = multiKey('M');
+    ba.onWillAppear({ action: m, payload: { settings: {} } } as never);
+    await pressKey(ba, m);
+    expect(ctx.sent).toHaveLength(0);
+    expect(m.showAlert).toHaveBeenCalled();
+  });
 
   it('renders each slot key against its own slot (different slots → different builders)', () => {
     const ctx = makeStore(); // pir-1 (#101), pir-2 (#102)
     const ba = new BuilderAction(ctx.store);
-    const a = slotKey('A');
-    const b = slotKey('B');
-    ba.onWillAppear({ action: a, payload: { settings: { slot: '1' } } } as never);
-    ba.onWillAppear({ action: b, payload: { settings: { slot: '2' } } } as never);
-    expect(a.setTitle).toHaveBeenLastCalledWith(expect.stringContaining('#101'));
-    expect(b.setTitle).toHaveBeenLastCalledWith(expect.stringContaining('#102'));
+    const [a, b] = placeKeys(ba, 2); // a at column 0, b at column 1
+    // The face is a composite SVG handed to setImage (not a title).
+    expect(decodeFace(a)).toContain('#101');
+    expect(decodeFace(b)).toContain('#102');
   });
 
-  it('renders the builder’s phase/blocked on a second line (live tile, merged from Fleet Slot)', () => {
-    const ctx = makeStore(); // pir-1 blocked "plan review", pir-2 phase "implement"
+  it('renders the builder’s state as a colour-coded, mapped face (mirrors the sidebar)', () => {
+    const ctx = makeStore(); // pir-1 blocked plan-approval, pir-2 phase "implement"
     const ba = new BuilderAction(ctx.store);
-    const a = slotKey('A');
-    const b = slotKey('B');
-    ba.onWillAppear({ action: a, payload: { settings: { slot: '1' } } } as never);
-    ba.onWillAppear({ action: b, payload: { settings: { slot: '2' } } } as never);
-    expect(a.setTitle).toHaveBeenLastCalledWith(expect.stringContaining('plan review')); // blocked label wins
-    expect(b.setTitle).toHaveBeenLastCalledWith(expect.stringContaining('implement')); // else the phase
+    const [a, b] = placeKeys(ba, 2);
+    // Blocked at plan-approval → mapped label "Plan" in warning yellow (not the wire "plan review").
+    const aSvg = decodeFace(a);
+    expect(aSvg).toContain('>Plan<');
+    expect(aSvg).toContain('#cca700');
+    // Active → phase label "Implement" in green.
+    const bSvg = decodeFace(b);
+    expect(bSvg).toContain('>Implement<');
+    expect(bSvg).toContain('#73c991');
+  });
+
+  it('renders the empty-slot face (labelled by position) when no builder occupies the slot', () => {
+    const ctx = makeStore(); // only 2 builders → the 3rd key's slot is empty
+    const ba = new BuilderAction(ctx.store);
+    const [, , k2] = placeKeys(ba, 3);
+    expect(decodeFace(k2)).toContain('Slot 3'); // position 2 → 1-based label "Slot 3"
   });
 
   it('re-renders every slot key on a store change (fixes stale-on-workspace-switch)', () => {
     const ctx = makeStore();
     const ba = new BuilderAction(ctx.store);
-    const a = slotKey('A');
-    const b = slotKey('B');
-    ba.onWillAppear({ action: a, payload: { settings: { slot: '1' } } } as never);
-    ba.onWillAppear({ action: b, payload: { settings: { slot: '2' } } } as never);
-    a.setTitle.mockClear();
-    b.setTitle.mockClear();
+    const [a, b] = placeKeys(ba, 2);
+    a.setImage.mockClear();
+    b.setImage.mockClear();
     ctx.store.setLevel('builders'); // any store change → onChange → render all keys
-    expect(a.setTitle).toHaveBeenCalled();
-    expect(b.setTitle).toHaveBeenCalled();
+    expect(a.setImage).toHaveBeenCalled();
+    expect(b.setImage).toHaveBeenCalled();
   });
 });
 
-describe('ApproveGate', () => {
-  it('fires approve-gate for the top blocked builder', async () => {
-    const ctx = makeStore();
+describe('ApproveGate (Row 2 — selected-scoped, #1410)', () => {
+  it('fires approve-gate for the SELECTED builder (not the top pending gate)', async () => {
+    const ctx = makeStore(); // selection defaults to pir-1 (blocked at plan-approval)
     await new ApproveGate(ctx.store).onKeyDown(keyEvent() as never);
     expect(ctx.sent[0]).toEqual({ verb: 'approve-gate', args: ['pir-1'], ws: '/work/alpha' });
   });
 
-  it('alerts and sends nothing when no gate is pending', async () => {
+  it('acts on whoever is selected: after selecting pir-2 it would target pir-2', async () => {
     const ctx = makeStore();
-    ctx.store.overview!.builders = ctx.store.overview!.builders.map((b) => ({ ...b, blocked: null }));
+    // Block pir-2 too, then select it — the key must follow the selection, not pir-1.
+    ctx.store.overview!.builders[1] = { ...ctx.store.overview!.builders[1], blockedGate: 'dev-approval' } as never;
+    ctx.store.syncToBuilder('pir-2');
+    await new ApproveGate(ctx.store).onKeyDown(keyEvent() as never);
+    expect(ctx.sent[0]).toEqual({ verb: 'approve-gate', args: ['pir-2'], ws: '/work/alpha' });
+  });
+
+  it('alerts and sends nothing when the selected builder is not blocked at a gate', async () => {
+    const ctx = makeStore();
+    ctx.store.syncToBuilder('pir-2'); // pir-2 is not blocked (blockedGate: null)
     const ev = keyEvent();
     await new ApproveGate(ctx.store).onKeyDown(ev as never);
     expect(ctx.sent).toHaveLength(0);
     expect(ev.action.showAlert).toHaveBeenCalled();
   });
+
+  it('renders the selected builder’s pending gate on the Approve face', () => {
+    const ctx = makeStore(); // pir-1 selected, blocked at plan-approval
+    const key = { id: 'G', isKey: () => true, setImage: vi.fn(), setTitle: vi.fn() };
+    new ApproveGate(ctx.store).onWillAppear({ action: key, payload: {} } as never);
+    const arg = String(key.setImage.mock.calls.at(-1)?.[0] ?? '');
+    expect(arg.startsWith('data:image/svg+xml;base64,')).toBe(true);
+    const face = Buffer.from(arg.slice('data:image/svg+xml;base64,'.length), 'base64').toString('utf8');
+    expect(face).toContain('Plan');    // the selected builder's gate label
+    expect(face).toContain('Approve'); // the action band
+    expect(face).toContain('#cca700'); // blocked → warning yellow
+    expect(key.setTitle).toHaveBeenCalledWith(''); // title layer suppressed
+  });
+});
+
+describe('SendQueueAction (Row 2 — flush, #1410)', () => {
+  it('badges the selected builder’s queued count and flushes on press', async () => {
+    const ctx = makeStore();
+    ctx.store.overview = { ...ctx.store.overview!, queuedFeedback: { 'pir-1': 3 } } as never;
+    const key = { id: 'S', isKey: () => true, setImage: vi.fn(), setTitle: vi.fn(), showOk: vi.fn(), showAlert: vi.fn() };
+    const action = new SendQueueAction(ctx.store);
+    action.onWillAppear({ action: key, payload: {} } as never);
+    const face = Buffer.from(String(key.setImage.mock.calls.at(-1)?.[0]).split(',')[1], 'base64').toString('utf8');
+    expect(face).toContain('Send Fb');
+    expect(face).toContain('>3<'); // badge
+    await action.onKeyDown({ action: key, payload: { settings: {} } } as never);
+    expect(ctx.sent[0]).toEqual({ verb: 'send-queue', args: ['pir-1'], ws: '/work/alpha' });
+  });
+
+  it('is inert (alerts, sends nothing) when the selected builder has no queued feedback', async () => {
+    const ctx = makeStore(); // no queuedFeedback on the fixture → 0
+    const key = { id: 'S', isKey: () => true, setImage: vi.fn(), setTitle: vi.fn(), showOk: vi.fn(), showAlert: vi.fn() };
+    await new SendQueueAction(ctx.store).onKeyDown({ action: key, payload: { settings: {} } } as never);
+    expect(ctx.sent).toHaveLength(0);
+    expect(key.showAlert).toHaveBeenCalled();
+  });
+});
+
+describe('OpenTerminalAction (Row 2 — per-builder, #1410)', () => {
+  it('opens the selected builder’s terminal', async () => {
+    const ctx = makeStore();
+    ctx.store.syncToBuilder('pir-2');
+    await new OpenTerminalAction(ctx.store).onKeyDown(keyEvent() as never);
+    expect(ctx.sent[0]).toEqual({ verb: 'open-terminal', args: ['pir-2'], ws: '/work/alpha' });
+  });
+
+  it('renders a plain label face (terminal glyph + "Builder"), not the builder id', () => {
+    const ctx = makeStore();
+    ctx.store.syncToBuilder('pir-2'); // issueId 102
+    const key = { isKey: () => true, setImage: vi.fn(), setTitle: vi.fn() };
+    new OpenTerminalAction(ctx.store).onWillAppear({ action: key, payload: { settings: {} } } as never);
+    const face = Buffer.from(String(key.setImage.mock.calls.at(-1)?.[0]).split(',')[1], 'base64').toString('utf8');
+    expect(face).toContain('Builder'); // label names the target kind (paired with Open Architect Terminal)
+    expect(face).toContain('rect x="3" y="5"'); // the terminal glyph
+    expect(face).not.toContain('#102'); // the builder id lives on Row 1's accent, not here
+    expect(key.setTitle).toHaveBeenCalledWith(''); // title layer suppressed
+  });
+});
+
+describe('Row 1 windowing (#1410, dynamic size #1465)', () => {
+  /** A store with `n` builders (ids b0..b(n-1)), selection at `cursor`, window `size` wide
+   *  (the count of placed builder keys the `BuilderAction` singleton would report). */
+  function windowedStore(n: number, cursor: number, size: number) {
+    const ctx = makeStore();
+    ctx.store.overview = {
+      builders: Array.from({ length: n }, (_, i) => ({
+        id: `b${i}`, roleId: `builder-b${i}`, issueId: String(100 + i), issueTitle: `Task ${i}`,
+        blocked: null, blockedGate: null, protocolPhase: 'implement', progress: 0, worktreePath: `/w/b${i}`,
+      })),
+      pendingPRs: [], backlog: [], recentlyClosed: [],
+    } as never;
+    ctx.store.cursor = { ...ctx.store.cursor, builder: cursor, level: 'builders' };
+    ctx.store.setBuilderWindowSize(size);
+    return ctx.store;
+  }
+
+  it('slot i shows builder i on page 0', () => {
+    const store = windowedStore(10, 0, 4);
+    expect([0, 1, 2, 3].map((i) => store.windowedBuilder(i)?.id)).toEqual(['b0', 'b1', 'b2', 'b3']);
+  });
+
+  it('scrolls a page (= the window width) when the selection moves past the window', () => {
+    const store = windowedStore(10, 4, 4); // selection on b4 → page 1
+    expect([0, 1, 2, 3].map((i) => store.windowedBuilder(i)?.id)).toEqual(['b4', 'b5', 'b6', 'b7']);
+  });
+
+  it('trailing slots are empty on a partial last page', () => {
+    const store = windowedStore(10, 9, 4); // selection on b9 → page 2 (b8, b9, -, -)
+    expect([0, 1, 2, 3].map((i) => store.windowedBuilder(i)?.id)).toEqual(['b8', 'b9', undefined, undefined]);
+  });
+
+  it('pages by the placed-key count, not a constant 4 — a 3-wide window puts b3 on slot 0', () => {
+    // The bug: with the old fixed 4, cursor on b3 gives windowStart 0, so b3 lands at slot 3 —
+    // a key that does not exist when only 3 are placed, hiding b3. Sized to 3, b3 is on slot 0.
+    const store = windowedStore(10, 3, 3);
+    expect([0, 1, 2].map((i) => store.windowedBuilder(i)?.id)).toEqual(['b3', 'b4', 'b5']);
+  });
+
+  it('INVARIANT: the selected builder is always on a rendered slot, for every cursor', () => {
+    // The core correctness guarantee. For each window size and each possible selection, the
+    // selected builder must resolve to some slot in [0, size) — never selectable-but-hidden.
+    for (const size of [3, 4]) {
+      for (const n of [3, 4, 5, 8, 11]) {
+        for (let cursor = 0; cursor < n; cursor++) {
+          const store = windowedStore(n, cursor, size);
+          const selectedId = store.selectedBuilder()?.id;
+          const shown = Array.from({ length: size }, (_, i) => store.windowedBuilder(i)?.id);
+          expect(shown).toContain(selectedId);
+        }
+      }
+    }
+  });
+
+  it('BuilderAction renders the windowed builder and accents the selected slot', () => {
+    vi.useFakeTimers();
+    try {
+      // 4 placed keys, selection on b5 (10 builders) → page 1 shows b4..b7; b5 is selected.
+      const store = windowedStore(10, 5, 4);
+      const ba = new BuilderAction(store);
+      const keys = Array.from({ length: 4 }, (_, i) => bkey(`k${i}`, i));
+      keys.forEach((k) => ba.onWillAppear({ action: k, payload: { settings: {} } } as never));
+      vi.advanceTimersByTime(60); // let the window settle so every slot reflects the final page
+      const face = (k: (typeof keys)[number]) =>
+        Buffer.from(String(k.setImage.mock.calls.at(-1)?.[0]).split(',')[1], 'base64').toString('utf8');
+      expect(face(keys[0])).toContain('#104'); // slot 0 → b4 (issueId 104)
+      expect(face(keys[1])).toContain('#105'); // slot 1 → b5 (selected)
+      expect(face(keys[1])).toContain('stroke-width="3"'); // selected accent ring
+      expect(face(keys[0])).not.toContain('stroke-width="3"'); // unselected slot has no ring
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('Row 1 window recompute (#1465)', () => {
+  /** A store with `n` builders, selection at `cursor`. */
+  function fleet(n: number, cursor: number) {
+    const ctx = makeStore();
+    ctx.store.overview = {
+      builders: Array.from({ length: n }, (_, i) => ({
+        id: `b${i}`, roleId: `builder-b${i}`, issueId: String(100 + i), issueTitle: `Task ${i}`,
+        blocked: null, blockedGate: null, protocolPhase: 'implement', progress: 0, worktreePath: `/w/b${i}`,
+      })),
+      pendingPRs: [], backlog: [], recentlyClosed: [],
+    } as never;
+    ctx.store.cursor = { ...ctx.store.cursor, builder: cursor, level: 'builders' };
+    return ctx.store;
+  }
+  const face = (k: { setImage: { mock: { calls: unknown[][] } } }) =>
+    Buffer.from(String(k.setImage.mock.calls.at(-1)?.[0]).split(',')[1], 'base64').toString('utf8');
+
+  it('window paging follows the placed-key count as keys appear and disappear', () => {
+    // Observe the window WIDTH through paging: windowStart = floor(cursor / size) * size.
+    const store = fleet(8, 3); // selection on b3
+    const ba = new BuilderAction(store);
+    const keys = Array.from({ length: 4 }, (_, i) => bkey(`k${i}`, i));
+    keys.forEach((k) => ba.onWillAppear({ action: k, payload: { settings: {} } } as never));
+    // 4 placed → windowStart floor(3/4)*4 = 0 → slot 0 = b0.
+    expect(store.windowedBuilder(0)?.id).toBe('b0');
+    ba.onWillDisappear({ action: keys[3], payload: { settings: {} } } as never);
+    // 3 placed → windowStart floor(3/3)*3 = 3 → slot 0 = b3.
+    expect(store.windowedBuilder(0)?.id).toBe('b3');
+  });
+
+  it('multi-action instances are excluded from the window count', () => {
+    // Selection on b3; three placed keys + a multi-action instance. If the multi-action key
+    // were counted the window would be 4 wide (windowStart 0 → slot 0 = b0); excluded, it is
+    // 3 wide (windowStart 3 → slot 0 = b3).
+    const store = fleet(8, 3);
+    const ba = new BuilderAction(store);
+    const keys = Array.from({ length: 3 }, (_, i) => bkey(`k${i}`, i));
+    keys.forEach((k) => ba.onWillAppear({ action: k, payload: { settings: {} } } as never));
+    ba.onWillAppear({ action: multiKey('M'), payload: { settings: {} } } as never);
+    expect(store.windowedBuilder(0)?.id).toBe('b3'); // still 3 wide
+  });
+
+  it('slots keys in (row, column) reading order regardless of arrival order or row', () => {
+    vi.useFakeTimers();
+    try {
+      // Keys arrive out of reading order and span two rows: a lower row and a higher column
+      // must each sort later. Reading order is (r0,c0)=A, (r0,c1)=B, (r1,c0)=C, (r1,c1)=D →
+      // slots 0..3 → builders b0..b3. Press each and confirm it targets the reading-order builder.
+      const store = fleet(8, 0);
+      const ba = new BuilderAction(store);
+      const A = bkey('A', 0, 0); // (row 0, col 0) — first
+      const B = bkey('B', 1, 0); // (row 0, col 1) — second
+      const C = bkey('C', 0, 1); // (row 1, col 0) — third: its row wins over its lower column
+      const D = bkey('D', 1, 1); // (row 1, col 1) — last
+      // Deliberately out of reading order:
+      [D, C, B, A].forEach((k) => ba.onWillAppear({ action: k, payload: { settings: {} } } as never));
+      vi.advanceTimersByTime(60);
+      const pressed: string[] = [];
+      const client = store.client as unknown as { sendCommand: ReturnType<typeof vi.fn> };
+      client.sendCommand.mockImplementation((_v: string, args: string[]) => {
+        pressed.push(args[0]);
+        return Promise.resolve({ ok: true, status: 200, data: { ok: true } });
+      });
+      return Promise.all(
+        [A, B, C, D].map((k) => ba.onKeyDown({ action: k, payload: { settings: { verb: 'noop' } } } as never)),
+      ).then(() => {
+        expect(pressed).toEqual(['b0', 'b1', 'b2', 'b3']); // A→b0, B→b1, C→b2, D→b3
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('debounced settle re-renders keys whose page shifted as later keys arrived', () => {
+    vi.useFakeTimers();
+    try {
+      // Selection on b4 (5 builders). Keys arrive one at a time; as the window grows the page
+      // start shifts, so an earlier key's builder changes and must be corrected on settle.
+      const store = fleet(5, 4);
+      const ba = new BuilderAction(store);
+      const keys = Array.from({ length: 3 }, (_, i) => bkey(`k${i}`, i));
+      keys.forEach((k) => ba.onWillAppear({ action: k, payload: { settings: {} } } as never));
+      // Before settle, k0 still shows its stale immediate render (windowStart was 4 when it
+      // appeared alone → b4). After the 3-wide window settles, windowStart is 3 → k0 shows b3.
+      vi.advanceTimersByTime(60);
+      expect(face(keys[0])).toContain('#103'); // b3
+      expect(face(keys[1])).toContain('#104'); // b4 (the selected builder — on a key)
+      // And the selected builder is visible on a slot, never hidden.
+      const shown = keys.map((k) => face(k));
+      expect(shown.some((s) => s.includes('#104'))).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('cursor paging stays coherent when the window size changes under a selection', () => {
+    // Selection on b3 (4 builders). With 3 keys the window is 3 wide → b3 on slot 0 (page 1).
+    const store = fleet(4, 3);
+    const ba = new BuilderAction(store);
+    const keys = Array.from({ length: 3 }, (_, i) => bkey(`k${i}`, i));
+    keys.forEach((k) => ba.onWillAppear({ action: k, payload: { settings: {} } } as never));
+    expect(store.windowedBuilder(0)?.id).toBe('b3'); // selected builder is shown
+    // A 4th key appears → window 4 wide → page 0 → b3 on slot 3. Still shown, no gap, no crash.
+    const k3 = bkey('k3', 3);
+    ba.onWillAppear({ action: k3, payload: { settings: {} } } as never);
+    const slots = [0, 1, 2, 3].map((i) => store.windowedBuilder(i)?.id);
+    expect(slots).toEqual(['b0', 'b1', 'b2', 'b3']);
+    expect(slots).toContain('b3'); // the selection remains on a rendered slot
+  });
+});
+
+describe('store readers (#1410)', () => {
+  it('feedbackMode defaults to forward, reads queue from the overview', () => {
+    const ctx = makeStore();
+    expect(ctx.store.feedbackMode()).toBe('forward');
+    ctx.store.overview = { ...ctx.store.overview!, feedbackMode: 'queue' } as never;
+    expect(ctx.store.feedbackMode()).toBe('queue');
+  });
+
+  it('queuedFeedback reads the per-builder map, 0 when absent', () => {
+    const ctx = makeStore();
+    expect(ctx.store.queuedFeedback('pir-1')).toBe(0);
+    ctx.store.overview = { ...ctx.store.overview!, queuedFeedback: { 'pir-1': 5 } } as never;
+    expect(ctx.store.queuedFeedback('pir-1')).toBe(5);
+    expect(ctx.store.queuedFeedback('pir-2')).toBe(0);
+    expect(ctx.store.queuedFeedback(undefined)).toBe(0);
+  });
 });
 
 describe('encoders', () => {
-  it('DiffFileNav in diff mode: rotate navigates, press forwards the file, touch jumps to first', async () => {
+  it('DiffFileNav in diff mode: rotate navigates, press submits feedback, touch jumps to first', async () => {
     const ctx = makeStore();
     ctx.store.syncToBuilder('pir-2'); // implement phase → diff mode
     const nav = new DiffFileNav(ctx.store);
     await nav.onDialRotate(dial(1) as never);   // next
     await nav.onDialRotate(dial(-2) as never);  // prev
-    await nav.onDialDown();                      // forward
+    await nav.onDialDown();                      // submit feedback (mode-neutral)
     await nav.onTouchTap();                       // first
-    expect(ctx.sent.map((s) => s.verb)).toEqual(['diff-next-file', 'diff-prev-file', 'forward-file', 'diff-first-file']);
+    expect(ctx.sent.map((s) => s.verb)).toEqual(['diff-next-file', 'diff-prev-file', 'feedback-file', 'diff-first-file']);
     expect(ctx.sent.every((s) => s.ws === '/work/alpha')).toBe(true);
     expect(ctx.canvasSent).toHaveLength(0); // diff mode never touches the canvas channel
   });
 
-  it('Diff dials forward their axis on a dial press (diff mode)', async () => {
+  it('Diff dials submit their axis as feedback on a dial press (diff mode, #1410)', async () => {
     const ctx = makeStore();
     ctx.store.syncToBuilder('pir-2'); // implement phase → diff mode
     await new DiffFileNav(ctx.store).onDialDown();
     await new DiffHunkNav(ctx.store).onDialDown();
-    expect(ctx.sent.map((s) => s.verb)).toEqual(['forward-file', 'forward-hunk']);
+    expect(ctx.sent.map((s) => s.verb)).toEqual(['feedback-file', 'feedback-hunk']);
   });
 
   it('canvas mode: coarse dial rotates headings (count = |ticks|), press cancels composer, tap resets to doc start', async () => {
@@ -292,15 +635,125 @@ describe('encoders', () => {
     expect(ctx.canvasSent).toHaveLength(0);
   });
 
-  it('ScrollNav scrolls the editor on rotate and forwards the selection on press', async () => {
+  it('ScrollNav diff mode: rotate relays byte-for-byte editorScroll, press submits the selection as feedback', async () => {
     const ctx = makeStore();
+    // State the mode the assertion depends on: pir-2 (implement, no gate) is the DIFF-mode builder.
+    // Since #1501 rotate is mode-aware, so this MUST select a diff-mode builder to exercise the
+    // editorScroll path — the default pir-1 fixture is canvas mode and drives the canvas channel
+    // instead. This is the first genuine coverage of diff-mode rotate; the old test silently rode
+    // the canvas fixture through then-mode-independent code.
+    ctx.store.syncToBuilder('pir-2');
     const nav = new ScrollNav(ctx.store);
     await nav.onDialRotate(dial(1) as never);  // down
     await nav.onDialRotate(dial(-1) as never); // up
     await nav.onDialDown();
     expect(ctx.sent[0]).toEqual({ verb: 'scroll', args: [{ to: 'down', by: 'line', value: 3, revealCursor: false }], ws: '/work/alpha' });
     expect((ctx.sent[1].args[0] as { to: string }).to).toBe('up');
-    expect(ctx.sent[2]).toEqual({ verb: 'forward-selection', args: [], ws: '/work/alpha' });
+    expect(ctx.sent[2]).toEqual({ verb: 'feedback-selection', args: [], ws: '/work/alpha' });
+    expect(ctx.canvasSent).toHaveLength(0); // diff mode never touches the canvas channel
+  });
+
+  it('ScrollNav canvas mode: rotate drives the canvas viewport-scroll (count = |ticks|), not editorScroll', async () => {
+    const ctx = makeStore(); // default selection pir-1 is blocked at plan-approval → canvas mode
+    const nav = new ScrollNav(ctx.store);
+    await nav.onDialRotate(dial(2) as never);   // down, 2 ticks
+    await nav.onDialRotate(dial(-1) as never);  // up, 1 tick
+    // Rotation reaches the artifact-canvas webview via the canvas channel, one call per event with
+    // count = |ticks|; the generic editorScroll relay is never touched. MRU targeting: workspace only.
+    expect(ctx.canvasSent).toEqual([
+      { command: 'viewport-down', target: { workspace: '/work/alpha' }, count: 2 },
+      { command: 'viewport-up', target: { workspace: '/work/alpha' }, count: 1 },
+    ]);
+    expect(ctx.sent).toHaveLength(0);
+    expect('file' in ctx.canvasSent[0].target).toBe(false);
+  });
+
+  it('ScrollNav canvas mode: a failed viewport-scroll renders its reason on the touchstrip', async () => {
+    const ctx = makeStore(); // pir-1 → canvas mode
+    ctx.canvasResult.value = { ok: false, code: 'no-canvas', error: 'no canvas open' };
+    const action = dial(1).action;
+    const nav = new ScrollNav(ctx.store);
+    nav.onWillAppear({ action, payload: {} } as never);
+    await nav.onDialRotate({ action, payload: { ticks: 1, settings: {} } } as never);
+    // The transient status takes line 2 for one cycle (as the review dials do); the qualifier stays.
+    expect(action.setFeedback.mock.calls.at(-1)?.[0]).toEqual({ title: 'Scroll · read only', value: 'Open artifact' });
+  });
+
+  it('ScrollNav legibility: diff-phase builder → line 1 = axis · delivery mode, line 2 = builder, NO bar (#1498)', () => {
+    const ctx = makeStore(); // no feedbackMode on the fixture → defaults to forward → "send"
+    ctx.store.syncToBuilder('pir-2'); // implement phase → diff mode (#102, "Wire the dial")
+    const action = { isDial: () => true, setFeedback: vi.fn() };
+    new ScrollNav(ctx.store).onWillAppear({ action, payload: {} } as never);
+    const fb = action.setFeedback.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+    expect(fb).toEqual({ title: 'Scroll · send', value: '#102 Wire the dial' });
+    // The dropped bar is load-bearing: assert no `bar` key so a regression that re-adds it is caught.
+    expect(fb).not.toHaveProperty('bar');
+  });
+
+  it('ScrollNav legibility: names the queue mode when the workspace queues (Scroll · queue)', () => {
+    const ctx = makeStore();
+    ctx.store.overview = { ...ctx.store.overview!, feedbackMode: 'queue' } as never;
+    ctx.store.syncToBuilder('pir-2'); // diff mode — the delivery-mode qualifier applies here
+    const action = { isDial: () => true, setFeedback: vi.fn() };
+    new ScrollNav(ctx.store).onWillAppear({ action, payload: {} } as never);
+    expect(action.setFeedback.mock.calls.at(-1)?.[0]).toMatchObject({ title: 'Scroll · queue' });
+  });
+
+  it('ScrollNav canvas mode: line 1 reads "Scroll · read only" (rotation scrolls, press inert), delivery mode suppressed', async () => {
+    const ctx = makeStore(); // default selection pir-1 is blocked at plan-approval → canvas mode
+    ctx.store.overview = { ...ctx.store.overview!, feedbackMode: 'queue' } as never; // must NOT leak into line 1
+    const action = { isDial: () => true, setFeedback: vi.fn() };
+    const nav = new ScrollNav(ctx.store);
+    nav.onWillAppear({ action, payload: {} } as never);
+    // The delivery mode is replaced entirely: neither `send` nor `queue`. Since #1501 rotation scrolls
+    // the canvas viewport (read only), but the press (diff-only feedback-selection) stays inert — so
+    // the qualifier names what works rather than a delivery mode the press cannot fire.
+    expect(action.setFeedback.mock.calls.at(-1)?.[0]).toEqual({ title: 'Scroll · read only', value: '#101 Add the relay' });
+    // The press is NOT gated on reviewMode (it no-ops server-side already); the deck still relays it.
+    await nav.onDialDown();
+    expect(ctx.sent).toEqual([{ verb: 'feedback-selection', args: [], ws: '/work/alpha' }]);
+  });
+
+  it('ScrollNav empty state: line 1 is a bare "Scroll" (no delivery mode), line 2 reads "No builder", press is a silent no-op (#1505)', async () => {
+    const ctx = makeStore();
+    ctx.store.overview = { builders: [], pendingPRs: [], backlog: [], recentlyClosed: [] } as never;
+    const action = { isDial: () => true, setFeedback: vi.fn() };
+    const nav = new ScrollNav(ctx.store);
+    nav.onWillAppear({ action, payload: {} } as never);
+    // With nothing selected the press is inert, so line 1 must not name a delivery mode it
+    // cannot fire: neither `send` nor `queue`, just the bare axis.
+    expect(action.setFeedback.mock.calls.at(-1)?.[0]).toEqual({ title: 'Scroll', value: 'No builder' });
+    await nav.onDialDown();
+    expect(ctx.sent).toHaveLength(0); // inert: no feedback-selection with nothing selected
+  });
+
+  it('ScrollNav empty state: the queue delivery mode does NOT leak into line 1 (#1505)', () => {
+    const ctx = makeStore();
+    ctx.store.overview = { builders: [], pendingPRs: [], backlog: [], recentlyClosed: [], feedbackMode: 'queue' } as never;
+    const action = { isDial: () => true, setFeedback: vi.fn() };
+    new ScrollNav(ctx.store).onWillAppear({ action, payload: {} } as never);
+    expect(action.setFeedback.mock.calls.at(-1)?.[0]).toEqual({ title: 'Scroll', value: 'No builder' });
+  });
+
+  it('ScrollNav empty state: rotation still relays the scroll verb with the workspace path — the half-live premise the bare "Scroll" rests on (#1505)', async () => {
+    const ctx = makeStore();
+    ctx.store.overview = { builders: [], pendingPRs: [], backlog: [], recentlyClosed: [] } as never;
+    const nav = new ScrollNav(ctx.store);
+    // The press is inert with nothing selected, but rotation is NOT: relaying `scroll` needs
+    // only the workspace path, never a builder. If a future edit early-returns onDialRotate on
+    // no builder (mirroring onDialDown), the dial goes fully inert and the bare "Scroll" line 1
+    // becomes a lie — this guard fails first.
+    await nav.onDialRotate(dial(1) as never);
+    expect(ctx.sent).toEqual([{ verb: 'scroll', args: [{ to: 'down', by: 'line', value: 3, revealCursor: false }], ws: '/work/alpha' }]);
+  });
+
+  it('ScrollNav re-renders line 2 on a store change (subscription wired)', () => {
+    const ctx = makeStore();
+    const action = { isDial: () => true, setFeedback: vi.fn() };
+    new ScrollNav(ctx.store).onWillAppear({ action, payload: {} } as never); // pir-1
+    expect(action.setFeedback.mock.calls.at(-1)?.[0]).toMatchObject({ value: '#101 Add the relay' });
+    ctx.store.syncToBuilder('pir-2'); // onChange → re-render
+    expect(action.setFeedback.mock.calls.at(-1)?.[0]).toMatchObject({ value: '#102 Wire the dial' });
   });
 
   it('PrNav opens the selected PR url on press', async () => {
@@ -474,6 +927,7 @@ describe('phaseArtifactVerb (shared resolver — recognised verb or undefined)',
     expect(phaseArtifactVerb(b({ protocolPhase: 'verify' }))).toBe('view-diff');
     expect(phaseArtifactVerb(b({ blockedGate: 'dev-approval' }))).toBe('view-diff');
     expect(phaseArtifactVerb(b({ blockedGate: 'pr' }))).toBe('view-diff');
+    expect(phaseArtifactVerb(b({ blockedGate: 'verify-approval' }))).toBe('view-diff'); // #1431: human reviewing finished work
   });
   it('gate beats phase (the stronger signal)', () => {
     expect(phaseArtifactVerb(b({ blockedGate: 'plan-approval', protocolPhase: 'implement' }))).toBe('open-plan');
@@ -500,6 +954,7 @@ describe('reviewMode (dial mode from the shared resolver)', () => {
     expect(reviewMode(b({ protocolPhase: 'review' }))).toBe('diff');
     expect(reviewMode(b({ blockedGate: 'dev-approval' }))).toBe('diff');
     expect(reviewMode(b({ blockedGate: 'pr' }))).toBe('diff');
+    expect(reviewMode(b({ blockedGate: 'verify-approval' }))).toBe('diff'); // #1431: dials navigate the diff while the human reviews finished work
   });
   it('an unknown phase, no live status, or no builder → none', () => {
     expect(reviewMode(b({}))).toBe('none');
@@ -629,15 +1084,24 @@ describe('ZoomNav zoom gesture', () => {
     expect(hunkAction.setFeedback).toHaveBeenCalledWith({ title: 'Blocks · Open/Submit', value: '#101 Add the relay', bar: 45 });
   });
 
-  it('legibility: diff-phase builder titles the dials Files/Changes', () => {
-    const ctx = makeStore();
+  it('legibility: diff-phase builder titles the dials with axis + delivery mode (Files · send)', () => {
+    const ctx = makeStore(); // no feedbackMode on the fixture → defaults to forward → "send"
     ctx.store.syncToBuilder('pir-2'); // implement phase → diff mode (#102, "Wire the dial", 70%)
     const fileAction = { isDial: () => true, setFeedback: vi.fn() };
     const hunkAction = { isDial: () => true, setFeedback: vi.fn() };
     new DiffFileNav(ctx.store).onWillAppear({ action: fileAction, payload: {} } as never);
     new DiffHunkNav(ctx.store).onWillAppear({ action: hunkAction, payload: {} } as never);
-    expect(fileAction.setFeedback).toHaveBeenCalledWith({ title: 'Files', value: '#102 Wire the dial', bar: 70 });
-    expect(hunkAction.setFeedback).toHaveBeenCalledWith({ title: 'Changes', value: '#102 Wire the dial', bar: 70 });
+    expect(fileAction.setFeedback).toHaveBeenCalledWith({ title: 'Files · send', value: '#102 Wire the dial', bar: 70 });
+    expect(hunkAction.setFeedback).toHaveBeenCalledWith({ title: 'Changes · send', value: '#102 Wire the dial', bar: 70 });
+  });
+
+  it('legibility: the diff touchstrip names the queue mode when the workspace queues (Files · queue)', () => {
+    const ctx = makeStore();
+    ctx.store.overview = { ...ctx.store.overview!, feedbackMode: 'queue' } as never;
+    ctx.store.syncToBuilder('pir-2'); // diff mode
+    const action = { isDial: () => true, setFeedback: vi.fn() };
+    new DiffFileNav(ctx.store).onWillAppear({ action, payload: {} } as never);
+    expect(action.setFeedback.mock.calls.at(-1)?.[0]).toMatchObject({ title: 'Files · queue' });
   });
 
   it('legibility: the dial re-titles when the selection moves between modes', () => {
@@ -647,7 +1111,7 @@ describe('ZoomNav zoom gesture', () => {
     nav.onWillAppear({ action, payload: {} } as never); // pir-1 → canvas
     expect(action.setFeedback.mock.calls.at(-1)?.[0]).toMatchObject({ title: 'Headings · Cancel' });
     ctx.store.syncToBuilder('pir-2'); // → diff; onChange re-renders
-    expect(action.setFeedback.mock.calls.at(-1)?.[0]).toMatchObject({ title: 'Files' });
+    expect(action.setFeedback.mock.calls.at(-1)?.[0]).toMatchObject({ title: 'Files · send' });
   });
 
   it('clears the previous workspace overview immediately on switch (no stale flash)', () => {
@@ -657,5 +1121,191 @@ describe('ZoomNav zoom gesture', () => {
     ctx.store.rotateCursor(1); // workspace 0 → 1, triggers re-fetch
     expect(ctx.store.overview).toBeNull();      // dropped synchronously, before the fetch
     expect(ctx.store.loadingOverview).toBe(true);
+  });
+});
+
+describe('OpenArchitectAction (Row 2 — open architect, #1463)', () => {
+  it('Builder mode (default): opens the selected builder’s spawning architect', async () => {
+    const ctx = makeStore(); // pir-1 selected, owner 'main'
+    await new OpenArchitectAction(ctx.store).onKeyDown(keyEvent() as never);
+    expect(ctx.sent[0]).toEqual({ verb: 'open-architect-terminal', args: ['main'], ws: '/work/alpha' });
+  });
+
+  it('Builder mode: follows the selection to a sibling-owned builder', async () => {
+    const ctx = makeStore();
+    ctx.store.syncToBuilder('pir-2'); // owner 'streamdeck'
+    await new OpenArchitectAction(ctx.store).onKeyDown(keyEvent() as never);
+    expect(ctx.sent[0]).toEqual({ verb: 'open-architect-terminal', args: ['streamdeck'], ws: '/work/alpha' });
+  });
+
+  it('Builder mode: inert (alerts, sends nothing) when the selected builder has no owner', async () => {
+    const ctx = makeStore();
+    ctx.store.overview!.builders[0].spawnedByArchitect = null;
+    const key = { id: 'A', isKey: () => true, setImage: vi.fn(), setTitle: vi.fn(), showOk: vi.fn(), showAlert: vi.fn() };
+    await new OpenArchitectAction(ctx.store).onKeyDown({ action: key, payload: { settings: {} } } as never);
+    expect(ctx.sent).toHaveLength(0);
+    expect(key.showAlert).toHaveBeenCalled();
+  });
+
+  it('Builder mode: inert when nothing is selected', async () => {
+    const ctx = makeStore();
+    ctx.store.overview = { builders: [], pendingPRs: [], backlog: [], recentlyClosed: [] } as never;
+    const key = { id: 'A', isKey: () => true, setImage: vi.fn(), setTitle: vi.fn(), showOk: vi.fn(), showAlert: vi.fn() };
+    await new OpenArchitectAction(ctx.store).onKeyDown({ action: key, payload: { settings: {} } } as never);
+    expect(ctx.sent).toHaveLength(0);
+    expect(key.showAlert).toHaveBeenCalled();
+  });
+
+  it('Main mode: opens main regardless of selection', async () => {
+    const ctx = makeStore();
+    ctx.store.syncToBuilder('pir-2'); // owner 'streamdeck', but Main mode ignores it
+    await new OpenArchitectAction(ctx.store).onKeyDown(keyEvent({ target: 'main' }) as never);
+    expect(ctx.sent[0]).toEqual({ verb: 'open-architect-terminal', args: ['main'], ws: '/work/alpha' });
+  });
+
+  it('alerts when the relay rejects the command', async () => {
+    const ctx = makeStore();
+    (ctx.store.client.sendCommand as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ ok: false, status: 500, data: { ok: false } });
+    const key = { id: 'A', isKey: () => true, setImage: vi.fn(), setTitle: vi.fn(), showOk: vi.fn(), showAlert: vi.fn() };
+    await new OpenArchitectAction(ctx.store).onKeyDown({ action: key, payload: { settings: {} } } as never);
+    expect(key.showAlert).toHaveBeenCalled();
+  });
+
+  it('renders the resolved architect name on the face (the safeguard), dim None when inert', () => {
+    const ctx = makeStore();
+    const action = new OpenArchitectAction(ctx.store);
+    const key = { id: 'A', isKey: () => true, setImage: vi.fn(), setTitle: vi.fn() };
+    action.onWillAppear({ action: key, payload: { settings: {} } } as never); // pir-1 → 'main'
+    const decode = (): string => Buffer.from(String(key.setImage.mock.calls.at(-1)?.[0]).split(',')[1], 'base64').toString('utf8');
+    expect(decode()).toContain('Architect');
+    expect(decode()).toContain('Main');
+
+    ctx.store.syncToBuilder('pir-2'); // onChange re-renders → 'streamdeck'
+    expect(decode()).toContain('Streamdeck');
+  });
+
+  it('renders the dim "None" inert face when no architect resolves', () => {
+    const ctx = makeStore();
+    ctx.store.overview = { builders: [], pendingPRs: [], backlog: [], recentlyClosed: [] } as never;
+    const key = { id: 'A', isKey: () => true, setImage: vi.fn(), setTitle: vi.fn() };
+    new OpenArchitectAction(ctx.store).onWillAppear({ action: key, payload: { settings: {} } } as never);
+    const face = Buffer.from(String(key.setImage.mock.calls.at(-1)?.[0]).split(',')[1], 'base64').toString('utf8');
+    expect(face).toContain('Architect');
+    expect(face).toContain('None');
+  });
+});
+
+// ── Architects board (#1495) ────────────────────────────────────────────────
+
+/** Decode the base64 SVG face handed to a key's `setImage`. */
+const decodeFace = (key: { setImage: { mock: { calls: unknown[][] } } }): string =>
+  Buffer.from(String(key.setImage.mock.calls.at(-1)?.[0]).split(',')[1], 'base64').toString('utf8');
+
+/** Put a live-architect list on the store's overview — the field #1495's board enumerates.
+ *  `ArchitectState` only needs `.name`; the overview is cast, so partial rows are fine. */
+function withArchitects(store: CodevStore, names: string[], builders: unknown[] = []): void {
+  store.overview = {
+    builders,
+    architects: names.map((name) => ({ name, port: 0, pid: 0 })),
+    pendingPRs: [],
+    backlog: [],
+    recentlyClosed: [],
+  } as never;
+}
+
+describe('store.architects() — the live-architect enumeration (#1495)', () => {
+  it('returns the names of OverviewData.architects, main-first then alphabetical', () => {
+    const { store } = makeStore();
+    // Deliberately NOT main-first at the source, so the sort (not the server order) is what proves out.
+    withArchitects(store, ['vscode', 'demos', 'main', 'security']);
+    expect(store.architects()).toEqual(['main', 'demos', 'security', 'vscode']);
+  });
+
+  it('lists an architect with ZERO builders (enumerates the live view, not the builders)', () => {
+    const { store } = makeStore();
+    // `reviewer` owns no builder but has a live session — it must still appear (the inverse of the
+    // dropped superset test: the board lists "architects that exist", not "that own work").
+    withArchitects(store, ['main', 'reviewer'], [{ id: 'b1', spawnedByArchitect: 'main' }]);
+    expect(store.architects()).toEqual(['main', 'reviewer']);
+  });
+
+  it('is empty when no architect has a live session', () => {
+    const { store } = makeStore();
+    withArchitects(store, []);
+    expect(store.architects()).toEqual([]);
+  });
+
+  it('does NOT inject main when main has no live session (unpinned — the safer failure)', () => {
+    const { store } = makeStore();
+    withArchitects(store, ['security', 'vscode']);
+    expect(store.architects()).toEqual(['security', 'vscode']);
+  });
+});
+
+describe('ArchitectAction — one key per live architect (#1495)', () => {
+  /** Place `n` architect keys left-to-right on row 0 and return the instance + keys. */
+  function place(store: CodevStore, n: number) {
+    const aa = new ArchitectAction(store);
+    const keys = Array.from({ length: n }, (_, i) => bkey(`a${i}`, i));
+    keys.forEach((k) => aa.onWillAppear({ action: k, payload: { settings: {} } } as never));
+    return { aa, keys };
+  }
+
+  it('key N (by coordinates) shows the Nth architect name', () => {
+    const { store } = makeStore();
+    withArchitects(store, ['main', 'security', 'streamdeck']);
+    const { keys } = place(store, 3);
+    expect(decodeFace(keys[0])).toContain('Main');
+    expect(decodeFace(keys[1])).toContain('Security');
+    expect(decodeFace(keys[2])).toContain('Streamdeck');
+  });
+
+  it('press opens that architect’s terminal and leaves the builder selection untouched', async () => {
+    const ctx = makeStore();
+    const builders = ctx.store.builders(); // preserve the makeStore fixture so a selection exists
+    withArchitects(ctx.store, ['main', 'streamdeck'], builders);
+    const before = ctx.store.selectedBuilder()?.id;
+    const { aa, keys } = place(ctx.store, 2);
+    await aa.onKeyDown({ action: keys[1], payload: { settings: {} } } as never);
+    expect(ctx.sent).toEqual([{ verb: 'open-architect-terminal', args: ['streamdeck'], ws: '/work/alpha' }]);
+    expect(ctx.store.selectedBuilder()?.id).toBe(before); // no selection/scope change
+  });
+
+  it('a slot past the end of the live list is inert — alerts, relays nothing', async () => {
+    const ctx = makeStore();
+    withArchitects(ctx.store, ['main']); // only one architect...
+    const { aa, keys } = place(ctx.store, 2); // ...but two keys placed
+    await aa.onKeyDown({ action: keys[1], payload: { settings: {} } } as never);
+    expect(keys[1].showAlert).toHaveBeenCalled();
+    expect(ctx.sent).toEqual([]);
+  });
+
+  it('a multi-action key (no coordinates) has no slot — alerts, relays nothing', async () => {
+    const ctx = makeStore();
+    withArchitects(ctx.store, ['main']);
+    const aa = new ArchitectAction(ctx.store);
+    const m = multiKey('m');
+    aa.onWillAppear({ action: m, payload: { settings: {} } } as never);
+    await aa.onKeyDown({ action: m, payload: { settings: {} } } as never);
+    expect(m.showAlert).toHaveBeenCalled();
+    expect(ctx.sent).toEqual([]);
+  });
+
+  it('an empty slot renders the dim inert "No architect" face, never blank', () => {
+    const { store } = makeStore();
+    withArchitects(store, ['main']);
+    const { keys } = place(store, 2);
+    expect(decodeFace(keys[1])).toContain('No architect');
+  });
+
+  it('re-renders when the overview architect list changes (store.onChange)', () => {
+    const { store } = makeStore();
+    withArchitects(store, ['main']);
+    const { keys } = place(store, 1);
+    expect(decodeFace(keys[0])).toContain('Main');
+    // A new overview brings a different architect into slot 0; an emit re-renders the placed keys.
+    withArchitects(store, ['security']);
+    store.rotateCursor(0); // no-op cursor move, but emits → onChange → renderAll
+    expect(decodeFace(keys[0])).toContain('Security');
   });
 });

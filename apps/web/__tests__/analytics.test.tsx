@@ -15,6 +15,7 @@ import type { AnalyticsResponse } from '../src/lib/api.js';
 const mockFetchAnalytics = vi.fn<(range: string, refresh?: boolean) => Promise<AnalyticsResponse>>();
 
 vi.mock('../src/lib/api.js', () => ({
+  getWebKey: () => null,
   fetchAnalytics: (...args: unknown[]) => mockFetchAnalytics(...(args as [string, boolean?])),
 }));
 

@@ -4,6 +4,7 @@ import { wireCommandProvider } from './command-relay.js';
 import { fireActivity, setActivityHooks } from './activity-hooks.js';
 import { loadActivityHooks } from './load-activity-hooks.js';
 import { TerminalManager } from './terminal-manager.js';
+import { openResolvedArchitect } from './open-architect.js';
 import { OverviewCache } from './views/overview-data.js';
 import { spawnBuilder } from './commands/spawn.js';
 import { sendMessage } from './commands/send.js';
@@ -12,9 +13,9 @@ import { cleanupBuilder } from './commands/cleanup.js';
 import { openWorktreeWindow } from './commands/open-worktree-window.js';
 import { viewDiff, activateDiffView, openBuilderFileDiff } from './commands/view-diff.js';
 import { navigateDiff, navigateDiffToFirst, navigateBuilderDiffToFirst, diffFirstHunk, recordDiffNavPosition } from './commands/diff-nav.js';
-import { activateDiffInjectCodeLens, getDiffInjectEntry, onDidChangeDiffInjectRegistry } from './diff-inject-codelens.js';
+import { activateDiffInjectCodeLens, getDiffInjectEntry, onDidChangeDiffInjectRegistry, toSymbolNode } from './diff-inject-codelens.js';
 import { isStandaloneTextTab } from './diff-tab-input.js';
-import { buildBuilderRangeRef, buildBuilderFileRef } from './diff-inject-ref.js';
+import { buildBuilderRangeRef, buildBuilderFileRef, resolveCursorRef } from './diff-inject-ref.js';
 import { runWorktreeDev } from './commands/run-worktree-dev.js';
 import { stopWorktreeDev } from './commands/stop-worktree-dev.js';
 import { runWorkspaceDev, stopWorkspaceDev } from './commands/run-workspace-dev.js';
@@ -40,8 +41,16 @@ import { activateReviewComments } from './comments/plan-review.js';
 import { activateBuilderReviewComments } from './comments/builder-review.js';
 import { ReviewQueueStore } from './review-queue/store.js';
 import { submitReview, discardReviewComments } from './review-queue/submit.js';
+import { feedbackFile, feedbackHunk, feedbackSelection } from './review-queue/feedback.js';
 import { activateSubmitReviewStatusBar } from './review-queue/status-bar.js';
+import { activateOverviewNudge } from './review-queue/overview-nudge.js';
 import { MarkdownPreviewProvider } from './markdown-preview/preview-provider.js';
+import {
+  steppedFontSize,
+  resolveWriteScope,
+  type FontSizeDirection,
+  type ConfigScope,
+} from './markdown-preview/font-size-control.js';
 import { BuilderSpawnHandler } from './builder-spawn-handler.js';
 import { BuilderTerminalLinkProvider, ReconnectTerminalLinkProvider, IssueRefTerminalLinkProvider } from './terminal-link-provider.js';
 import { computeBuildersToClose, roleIdsFromBuilders } from './prune-builder-terminals.js';
@@ -144,6 +153,32 @@ function extractIssueTitle(arg: IssueCommandArg): string | undefined {
 		return arg.issueTitle || undefined;
 	}
 	return undefined;
+}
+
+/** Map the pure `ConfigScope` onto the VS Code `ConfigurationTarget` enum (#1070). */
+function configTargetFor(scope: ConfigScope): vscode.ConfigurationTarget {
+	if (scope === 'workspaceFolder') {
+		return vscode.ConfigurationTarget.WorkspaceFolder;
+	}
+	if (scope === 'workspace') {
+		return vscode.ConfigurationTarget.Workspace;
+	}
+	return vscode.ConfigurationTarget.Global;
+}
+
+/**
+ * Step `codev.markdownPreview.fontSize` one click and persist it back (#1070). Writes to the scope
+ * the value already lives in (`resolveWriteScope`) so a workspace override cannot silently swallow
+ * the click. The provider's `onDidChangeConfiguration` re-render reflows the open preview.
+ *
+ * `getConfiguration` is called without a resource, so `inspect()` never surfaces a
+ * workspace-FOLDER value — the effective scopes here are global and workspace. `resolveWriteScope`
+ * still handles the folder case (unit-tested) as defensive cover if a resource is ever threaded in.
+ */
+async function stepMarkdownPreviewFontSize(direction: FontSizeDirection): Promise<void> {
+	const cfg = vscode.workspace.getConfiguration('codev.markdownPreview');
+	const next = steppedFontSize(cfg.get<number>('fontSize', 0), direction);
+	await cfg.update('fontSize', next, configTargetFor(resolveWriteScope(cfg.inspect('fontSize') ?? {})));
 }
 
 export async function activate(context: vscode.ExtensionContext) {
@@ -891,15 +926,16 @@ export async function activate(context: vscode.ExtensionContext) {
 					}
 				}
 
-				const match = architects.find(a => a.name === targetName);
-				const fallback = targetName === 'main' ? architects[0] : undefined;
-				const target = match ?? fallback;
-				if (target?.terminalId) {
-					await terminalManager?.openArchitect(target.terminalId, targetName, true);
-					return targetName;
-				}
-				vscode.window.showWarningMessage(`Codev: No '${targetName}' architect found — is the workspace activated?`);
-				return undefined;
+				// Issue 1497: resolve by exact name and open under the resolved
+				// architect's OWN name. A non-live `main` refuses with the existing
+				// warning rather than substituting `architects[0]` while presenting
+				// as `main` (which would cache the wrong architect under
+				// `architect:main` and capture text injected at `main`).
+				return await openResolvedArchitect(architects, targetName, {
+					openArchitect: (terminalId, name, focus) =>
+						terminalManager?.openArchitect(terminalId, name, focus) ?? Promise.resolve(),
+					warn: message => { vscode.window.showWarningMessage(message); },
+				});
 			} catch {
 				vscode.window.showErrorMessage('Codev: Failed to get workspace state');
 				return undefined;
@@ -1121,6 +1157,22 @@ export async function activate(context: vscode.ExtensionContext) {
 				'vscode.openWith', uri, MarkdownPreviewProvider.viewType, vscode.ViewColumn.Beside,
 			);
 		}),
+		// In-preview typography zoom (#1070). These step `codev.markdownPreview.fontSize` and write
+		// it back, so the title-bar buttons and the Settings editor stay one source of truth; the
+		// provider's `onDidChangeConfiguration` re-render reflows the open preview live. Surfaced as
+		// `editor/title` buttons gated on `activeCustomEditorId == codev.markdownPreview` (no
+		// keybindings in v1 — that key tracks the active editor, not focus, and would shadow
+		// workbench zoom from the terminal/sidebar; see plan #1070).
+		reg('codev.markdownPreview.increaseFontSize', () => stepMarkdownPreviewFontSize('increase')),
+		reg('codev.markdownPreview.decreaseFontSize', () => stepMarkdownPreviewFontSize('decrease')),
+		reg('codev.markdownPreview.resetFontSize', async () => {
+			// Reset restores the documented `0` sentinel ("use the built-in default") for BOTH
+			// typography knobs, so a user who tuned font size or line-height in Settings gets back to
+			// baseline from the surface. Written to the scope each value currently lives in.
+			const cfg = vscode.workspace.getConfiguration('codev.markdownPreview');
+			await cfg.update('fontSize', 0, configTargetFor(resolveWriteScope(cfg.inspect('fontSize') ?? {})));
+			await cfg.update('lineHeight', 0, configTargetFor(resolveWriteScope(cfg.inspect('lineHeight') ?? {})));
+		}),
 		regCli('codev.referenceIssueInArchitect', async (arg: IssueCommandArg) => {
 			// Inline-button action on a backlog row: open + focus the architect
 			// terminal, then type `#<id> "<title>" ` into its prompt without
@@ -1209,10 +1261,21 @@ export async function activate(context: vscode.ExtensionContext) {
 		// Submit Review + Discard (#1037): flush / drop the per-builder pending
 		// comment queue. Builder resolution: active diff's owner → sole pending
 		// builder → QuickPick.
-		reg('codev.submitReview', () =>
-			submitReview({ store: reviewQueueStore, terminalManager: terminalManager!, overviewCache })),
+		// The status-bar button invokes this with no arg (resolves the target
+		// builder itself); the deck's Send Fb key relays `send-queue [builderId]`,
+		// so an explicit id string flushes exactly that builder's queue (#1410).
+		reg('codev.submitReview', (builderId?: unknown) =>
+			submitReview(
+				{ store: reviewQueueStore, terminalManager: terminalManager!, overviewCache },
+				typeof builderId === 'string' ? builderId : undefined,
+			)),
 		reg('codev.discardReviewComments', () =>
 			discardReviewComments({ store: reviewQueueStore, terminalManager: terminalManager!, overviewCache })),
+		// Mode-neutral review feedback (#1410): the deck diff/scroll dials press
+		// these; each forwards immediately or enqueues per `codev.diffCodelensMode`.
+		reg('codev.feedbackCurrentFileToBuilder', () => feedbackFile({ store: reviewQueueStore })),
+		reg('codev.feedbackCurrentHunkToBuilder', () => feedbackHunk({ store: reviewQueueStore })),
+		reg('codev.feedbackSelectionToBuilder', () => feedbackSelection({ store: reviewQueueStore })),
 		// Diff codelens mode toggle (#1037): a single title-bar button per mode
 		// (VS Code toolbar buttons have no pressed state — same pattern as the
 		// Agents group-by cycle above); each command shows the mode clicking
@@ -1245,6 +1308,32 @@ export async function activate(context: vscode.ExtensionContext) {
 			}
 			await vscode.commands.executeCommand(
 				'codev.forwardToBuilder', entry.builderId, buildBuilderRangeRef(entry.relPath, hunk.start, hunk.end));
+		}),
+		// Keyboard equivalent of a codelens click (#1073): forward whatever covers
+		// the cursor — the most specific enclosing symbol first, else the changed
+		// hunk, else the bare file path. Bound to Cmd/Ctrl+K H; `when` scopes it to
+		// builder-diff files with `editorTextFocus` (cursor only, no selection).
+		// All resolution lives in the pure `resolveCursorRef`; this handler only
+		// fetches the live symbols and reuses the shared `forwardToBuilder` inject
+		// path (no Enter, focus stays on the diff editor).
+		reg('codev.forwardCursorContextToBuilder', async () => {
+			const editor = vscode.window.activeTextEditor;
+			if (!editor) { return; }
+			const entry = getDiffInjectEntry(editor.document.uri.fsPath);
+			if (!entry) { return; }
+			const cursorLine = editor.selection.active.line + 1; // 1-based new-side
+			let symbols: vscode.DocumentSymbol[] = [];
+			try {
+				symbols = (await vscode.commands.executeCommand<vscode.DocumentSymbol[]>(
+					'vscode.executeDocumentSymbolProvider', editor.document.uri)) ?? [];
+			} catch {
+				symbols = [];
+			}
+			const resolved = resolveCursorRef(entry.relPath, symbols.map(toSymbolNode), entry.hunks, cursorLine);
+			if (resolved.kind === 'file') {
+				vscode.window.setStatusBarMessage('Codev: forwarded file path (no symbol or hunk at cursor)', 3000);
+			}
+			await vscode.commands.executeCommand('codev.forwardToBuilder', entry.builderId, resolved.refText);
 		}),
 		reg('codev.openBuilderFileDiff', async (arg: unknown) => {
 			if (!(arg instanceof BuilderFileTreeItem)) { return; }
@@ -1402,6 +1491,10 @@ export async function activate(context: vscode.ExtensionContext) {
 	// counter. The batched submit itself is `codev.submitReview` above.
 	activateBuilderReviewComments(context, reviewQueueStore, overviewCache);
 	activateSubmitReviewStatusBar(context, reviewQueueStore);
+	// #1410: nudge Tower to rebuild + rebroadcast the overview on a queue mutation
+	// or a feedback-mode change, so the deck's Send Fb badge + dial mode-label
+	// update promptly (Tower has no watcher on the queue files / settings.json).
+	context.subscriptions.push(activateOverviewNudge(reviewQueueStore, connectionManager!));
 
 	// Codev Markdown Preview (#859): a read-only custom editor that renders a
 	// spec/plan/review in the shared artifact-canvas and adds review comments
