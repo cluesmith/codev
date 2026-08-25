@@ -508,3 +508,14 @@ offering mode pills to browse. Purely contextual: no pinning, no persisted panel
   Also refreshed PR body: test count 917→919; chip wording "display-only" → "retargeted to reveal the
   running dev terminal" (matches the iter2 revealDevTerminal change). Committed 562434619, PR body updated.
 - Holding pattern confirmed: pr gate + dev-approval with Amr. Not merging, not running porch approve.
+
+### 2026-08-25 — PR GATE APPROVED by Amr — gate record committed, branch FROZEN
+- pr gate for #1049 APPROVED by Amr (direct word in the architect's channel; recorded by architect via
+  porch approve --attestation; dev-review redirect session = feel-check evidence).
+- Committed the gate record (review "## PR Gate" section) as my LAST write; also corrected the stale
+  "display-only" chip wording in the review banner to match the shipped revealDevTerminal retarget.
+- FREEZING the branch now: no further writes. This gate commit bumps HEAD and restarts CI.
+- I do NOT merge and do NOT run porch done/approve. The architect merges on a fresh full-green run against
+  the post-gate stationary head (per-run headSha confirmed) and then handles the changelog + porch
+  done --merged from the banked changelog text.
+- Final state: 78 files/919 tests, types+lint+build clean locally; PR #1551 (Closes #1049); #1553 = Attention fast-follow.

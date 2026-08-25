@@ -1,10 +1,14 @@
 # Review: VSCode Contextual Bottom Panel (mode resolver + Attention fallback)
 
-> **Post-dev-approval simplification (final state).** After building the four phases, the owner's live dev-approval reshaped the panel to be **purely contextual**: pills, summary ⇄ detail navigation, drill-in, and transient selection were **removed** (cross-builder browsing is the sidebar's job); the resolver became `(SurfaceContext) → { kind, context }`; Attention is now a **fallback view**, not a selectable mode. Separately, the `#921` **Codev Dev panel view was removed** (it created a redundant second "Codev" section — the status-bar chip stays, display-only). This is a net simplification; the compliance/consultation sections below cover the four-phase build, and this banner + issue #1049 describe the shipped end state.
+> **Post-dev-approval simplification (final state).** After building the four phases, the owner's live dev-approval reshaped the panel to be **purely contextual**: pills, summary ⇄ detail navigation, drill-in, and transient selection were **removed** (cross-builder browsing is the sidebar's job); the resolver became `(SurfaceContext) → { kind, context }`; Attention is now a **fallback view**, not a selectable mode. Separately, the `#921` **Codev Dev panel view was removed** (it created a redundant second "Codev" section — the status-bar chip stays, retargeted to reveal the running dev terminal). This is a net simplification; the compliance/consultation sections below cover the four-phase build, and this banner + issue #1049 describe the shipped end state.
 
 ## Summary
 
 Built a single contextual `Codev` bottom-panel tab (the extension's first `WebviewViewProvider`) that follows the active editor/terminal — Document Review, Code Review, Builder Inspector, or the Attention fallback — with a pure mode resolver and a webview surface, **purely contextual with no selectable navigation** (see banner). Per-mode content rendering stays with the participating features (#1037, #859/#945, files-not-yet-reviewed). Built over four phases, then simplified at dev-approval.
+
+## PR Gate
+
+**APPROVED by Amr, 2026-08-25** (PR #1551). Recorded by the architect via `porch approve` with the attestation flag. The dev-approval redirect session (the owner's live reshaping of the panel to purely contextual) stands as the feel-check evidence. Three-way PR cmap concluded 2 APPROVE (Gemini, Claude-HIGH) / 1 REQUEST_CHANGES (Codex) at iter3: the actionable part of Codex's finding (terminal-in-editor-area tabs read as editor focus) was fixed; the residual (re-entering an already-active custom editor from a builder terminal fires no VS Code event) is documented under **Known Limitations** and was accepted by the two approving reviewers. This gate record is the builder's final write; the branch is frozen. The architect merges on a fresh full-green CI run against the post-gate stationary head and then runs the changelog + `porch done --merged` workflow.
 
 ## Spec Compliance
 
