@@ -1,7 +1,12 @@
 /**
- * Mode-neutral review feedback (#1410): the diff/scroll dial verbs route each
- * chunk forward-now (immediate PTY inject) or into the queue, following the
- * `codev.diffCodelensMode` setting, deriving both branches from the same anchor.
+ * Mode-neutral review feedback (#1410, #1552): the diff/scroll dial verbs turn
+ * each chunk (whole file / hunk-under-cursor / selection) into an AUTHORING
+ * gesture — they open the native comment reply box at the anchor via
+ * `codev.commentForBuilder`, the same entry point the comment codelens uses.
+ * There is no promptless path: a gesture never forwards a bare ref or enqueues
+ * a placeholder. The queue-vs-forward decision lives in the reply box's Submit
+ * (see builder-review.ts), not here. When no builder diff is focused, the
+ * gesture surfaces a message instead of doing nothing.
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
@@ -57,22 +62,12 @@ const { setDiffInjectSession } = await import('../diff-inject-codelens.js');
 
 const FS_PATH = '/w/alpha/.builders/pir-1/src/a.ts';
 
-/** Minimal in-memory ReviewQueueStore stand-in capturing worktree + queue writes. */
-function makeStore() {
-  const worktrees = new Map<string, string>();
-  const added: Array<{ builderId: string; comment: { file: string; lineRange: unknown; body: string } }> = [];
-  return {
-    store: {
-      getWorktreePath: (id: string) => worktrees.get(id),
-      registerWorktree: (id: string, wt: string) => { worktrees.set(id, wt); },
-      add: async (builderId: string, comment: { file: string; lineRange: unknown; body: string }) => { added.push({ builderId, comment }); },
-    },
-    worktrees,
-    added,
-  };
+/** The single `codev.commentForBuilder` invocation a gesture is expected to make. */
+function commentCalls() {
+  return h.state.executed.filter(e => e.command === 'codev.commentForBuilder');
 }
 
-describe('feedback mode-router (#1410)', () => {
+describe('feedback authoring-router (#1410, #1552)', () => {
   beforeEach(() => {
     h.state.mode = 'forward';
     h.state.activeFsPath = FS_PATH;
@@ -84,69 +79,55 @@ describe('feedback mode-router (#1410)', () => {
     setDiffInjectSession([{ fsPath: FS_PATH, builderId: 'pir-1', relPath: 'src/a.ts', hunks: [{ start: 5, end: 9 }], baseRef: 'main', worktreePath: '/w/alpha/.builders/pir-1' }]);
   });
 
-  it('forward mode: a file press injects immediately via forwardToBuilder', async () => {
-    const { store, added } = makeStore();
-    await feedbackFile({ store: store as never });
-    expect(h.state.executed).toEqual([{ command: 'codev.forwardToBuilder', args: ['pir-1', 'src/a.ts '] }]);
-    expect(added).toHaveLength(0); // nothing queued in forward mode
+  it('a file press opens the comment reply box at the whole-file anchor', async () => {
+    await feedbackFile();
+    expect(commentCalls()).toEqual([
+      { command: 'codev.commentForBuilder', args: ['pir-1', FS_PATH, 'src/a.ts', null] },
+    ]);
   });
 
-  it('comment mode: a file press enqueues a whole-file comment through the store', async () => {
+  it('opens the SAME authoring input in comment mode — the gesture never infers the mode', async () => {
     h.state.mode = 'comment';
-    const { store, added, worktrees } = makeStore();
-    await feedbackFile({ store: store as never });
-    expect(h.state.executed).toHaveLength(0); // no immediate forward
-    expect(added).toHaveLength(1);
-    expect(added[0].builderId).toBe('pir-1');
-    expect(added[0].comment.file).toBe('src/a.ts');
-    expect(added[0].comment.lineRange).toBeNull(); // whole file
-    expect(added[0].comment.body).toContain('Stream Deck');
-    // worktree derived from the diff entry (never guessed)
-    expect(worktrees.get('pir-1')).toBe('/w/alpha/.builders/pir-1');
+    await feedbackFile();
+    expect(commentCalls()).toEqual([
+      { command: 'codev.commentForBuilder', args: ['pir-1', FS_PATH, 'src/a.ts', null] },
+    ]);
   });
 
-  it('comment mode: a hunk press enqueues the changed-hunk range under the cursor', async () => {
-    h.state.mode = 'comment';
+  it('a hunk press opens the input anchored to the changed-hunk range under the cursor', async () => {
     h.state.selection = { active: { line: 6 }, start: { line: 6, character: 0 }, end: { line: 6, character: 0 }, isEmpty: true }; // line 7 ∈ [5,9]
-    const { store, added } = makeStore();
-    await feedbackHunk({ store: store as never });
-    expect(added[0].comment.lineRange).toEqual({ start: 5, end: 9 });
+    await feedbackHunk();
+    expect(commentCalls()[0].args[3]).toEqual({ start: 5, end: 9 });
   });
 
   it('a hunk press resolves against the FRESH git parse, not the stale frozen ranges (#1534)', async () => {
     // Frozen entry.hunks is [{5,9}] and does NOT cover line 20; the live diff does.
     h.state.gitStdout = '@@ -0,0 +20,2 @@\n+const added = 1;\n+const more = 2;\n';
     h.state.selection = { active: { line: 19 }, start: { line: 19, character: 0 }, end: { line: 19, character: 0 }, isEmpty: true }; // line 20
-    const { store } = makeStore();
-    await feedbackHunk({ store: store as never }); // forward mode (default)
-    expect(h.state.executed).toContainEqual({ command: 'codev.forwardToBuilder', args: ['pir-1', 'src/a.ts:L20-L21 '] });
+    await feedbackHunk();
+    expect(commentCalls()[0].args[3]).toEqual({ start: 20, end: 21 });
     expect(h.state.statusMessages).toHaveLength(0);
   });
 
   it('a hunk press with no changed lines at the cursor anchors the whole file with an honest note, never the old error (#1534)', async () => {
-    h.state.mode = 'comment';
     h.state.gitStdout = ''; // a fresh parse that records no ranges
     h.state.selection = { active: { line: 0 }, start: { line: 0, character: 0 }, end: { line: 0, character: 0 }, isEmpty: true }; // line 1 ∉ any hunk
-    const { store, added } = makeStore();
-    await feedbackHunk({ store: store as never });
-    expect(added[0].comment.lineRange).toBeNull(); // whole file, not an error
+    await feedbackHunk();
+    expect(commentCalls()[0].args[3]).toBeNull(); // whole file, not an error
     expect(h.state.statusMessages.join('\n')).toContain('no changed lines at the cursor');
     expect(h.state.statusMessages.join('\n')).not.toContain('place the cursor in a changed hunk');
   });
 
-  it('comment mode: a selection press enqueues the selected range', async () => {
-    h.state.mode = 'comment';
+  it('a selection press opens the input anchored to the selected range', async () => {
     h.state.selection = { active: { line: 2 }, start: { line: 2, character: 0 }, end: { line: 5, character: 4 }, isEmpty: false };
-    const { store, added } = makeStore();
-    await feedbackSelection({ store: store as never });
-    expect(added[0].comment.lineRange).toEqual({ start: 3, end: 6 });
+    await feedbackSelection();
+    expect(commentCalls()[0].args[3]).toEqual({ start: 3, end: 6 });
   });
 
-  it('does nothing when the focused editor is not a tracked builder diff', async () => {
+  it('warns instead of doing nothing when the focused editor is not a tracked builder diff', async () => {
     h.state.activeFsPath = '/some/unrelated/file.ts';
-    const { store, added } = makeStore();
-    await feedbackFile({ store: store as never });
-    expect(h.state.executed).toHaveLength(0);
-    expect(added).toHaveLength(0);
+    await feedbackFile();
+    expect(commentCalls()).toHaveLength(0);
+    expect(h.state.warnings.join('\n')).toContain('focus a builder diff first');
   });
 });
