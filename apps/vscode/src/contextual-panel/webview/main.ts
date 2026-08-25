@@ -155,7 +155,7 @@ function attentionBody(summary: AttentionSummary): React.ReactNode {
       'div',
       { className: 'cp-empty' },
       h('div', { className: 'cp-empty-msg' }, 'Nothing needs attention right now'),
-      h('div', { className: 'cp-empty-sub' }, 'No builders at a gate, no held mail, no queued feedback.'),
+      h('div', { className: 'cp-empty-sub' }, 'No builders at a gate, none waiting on input, no held mail, no queued feedback.'),
     );
   }
 
@@ -200,8 +200,10 @@ function attentionBody(summary: AttentionSummary): React.ReactNode {
 function body(descriptor: ModeDescriptor, attention: AttentionSummary | undefined): React.ReactNode {
   if (descriptor.kind === 'attention') {
     if (attention === undefined) {
-      // No payload yet (e.g. a stale pre-#1553 post) — render the honest empty state rather than a lie.
-      return h('div', { className: 'cp-body-empty' }, 'Nothing needs attention right now.');
+      // No payload attached yet — the provider always sends one in Attention mode, so this is only
+      // a transient pre-first-post frame. Render a neutral placeholder, not an empty-state claim
+      // (asserting "nothing needs attention" before the roll-up has arrived would be a lie).
+      return h('div', { className: 'cp-body-empty' }, 'Loading…');
     }
     return attentionBody(attention);
   }

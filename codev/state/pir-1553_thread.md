@@ -106,6 +106,19 @@ no dep-class transition), policy home correct, dedup+heldTotal sound. PR hold RE
 Review artifact logs the deviation as main framed it. Next: commit review, push, open PR, porch runs
 single CMAP pass, then pr gate. Branch freezes before pr gate; gate-record commit is last write.
 
+## CMAP iter1: Gemini APPROVE, Codex+Claude REQUEST_CHANGES — all addressed
+Both blockers were about the REVIEW ARTIFACT, not the impl (all 3 verified impl clean):
+1. Review missing mandated PIR sections Commits/Test Results/How to Test Locally → added.
+2. Arch/lessons routing DECLARED but not APPLIED → applied cold updates in-commit: arch.md (#1049
+   contextual-panel para) + lessons-learned.md (1 Architecture + 1 UI/UX lesson).
+Code nits fixed: empty-state sub-line now names "waiting"; EMPTY_ATTENTION shared singleton →
+emptyAttention() factory returning fresh object (+ regression test); attention-undefined branch
+renders neutral "Loading…" not an emptiness claim (Codex).
+Rebutted (non-blocking): since() untested — webview module not vitest-importable (top-level
+acquireVsCodeApi + CSS import); covered by manual verification.
+Rebuttal doc: codev/projects/1553-*/1553-review-iter1-rebuttals.md. Green: sdk 120, vscode 935,
+check-types both, esbuild, eslint. PIR single-pass — pr gate is the only remaining check.
+
 ## Evidence limitation named for dev-approval
 Can't drive real blocked-builder/held-mail/queued-feedback state from the builder shell (needs live
 Tower with builders at gates). Cover projection+wiring via unit tests; render/empty-state in Ext Dev

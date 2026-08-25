@@ -90,15 +90,19 @@ export interface AttentionSummary {
   isEmpty: boolean;
 }
 
-const EMPTY_ATTENTION: AttentionSummary = {
-  pendingGates: [],
-  waiting: [],
-  heldTotal: 0,
-  heldEscalated: false,
-  heldMail: [],
-  queuedFeedback: [],
-  isEmpty: true,
-};
+/** A fresh empty summary. A function (not a shared const) so a caller can never mutate a singleton
+ *  handed to the next caller — this helper is public package surface with unknown consumers. */
+function emptyAttention(): AttentionSummary {
+  return {
+    pendingGates: [],
+    waiting: [],
+    heldTotal: 0,
+    heldEscalated: false,
+    heldMail: [],
+    queuedFeedback: [],
+    isEmpty: true,
+  };
+}
 
 /**
  * Project the overview cache into the attention roll-up.
@@ -109,7 +113,7 @@ const EMPTY_ATTENTION: AttentionSummary = {
  */
 export function deriveAttention(data: OverviewData | null, now: number = Date.now()): AttentionSummary {
   if (data === null) {
-    return EMPTY_ATTENTION;
+    return emptyAttention();
   }
 
   const pendingGates: GateItem[] = [];

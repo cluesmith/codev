@@ -138,4 +138,12 @@ describe('deriveAttention', () => {
     const summary = deriveAttention(overview({ builders: [builderRow({ id: 'pir-1553' }), builderRow({ id: 'air-1108', lastDataAt: FRESH })] }), NOW);
     expect(summary.isEmpty).toBe(true);
   });
+
+  it('returns a fresh empty summary each call (no shared mutable singleton)', () => {
+    const first = deriveAttention(null, NOW);
+    first.pendingGates.push({ builderId: 'x', issueId: null, issueTitle: null, gate: 'plan review', since: null });
+    const second = deriveAttention(null, NOW);
+    expect(second.pendingGates).toEqual([]);
+    expect(first).not.toBe(second);
+  });
 });
