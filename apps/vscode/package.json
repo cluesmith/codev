@@ -850,31 +850,6 @@
           "command": "codev.reconnect",
           "when": "view == codev.status",
           "group": "navigation"
-        },
-        {
-          "command": "codev.dev.stop",
-          "when": "view == codev.dev && codev.devRunning",
-          "group": "navigation@1"
-        },
-        {
-          "command": "codev.dev.restart",
-          "when": "view == codev.dev && codev.devRunning",
-          "group": "navigation@2"
-        },
-        {
-          "command": "codev.dev.switchTarget",
-          "when": "view == codev.dev",
-          "group": "navigation@3"
-        },
-        {
-          "command": "codev.dev.showSidebar",
-          "when": "view == codev.dev && !(sideBarVisible && activeViewlet == 'workbench.view.extension.codev')",
-          "group": "navigation@4"
-        },
-        {
-          "command": "codev.dev.hideSidebar",
-          "when": "view == codev.dev && sideBarVisible && activeViewlet == 'workbench.view.extension.codev'",
-          "group": "navigation@4"
         }
       ],
       "comments/commentThread/context": [
@@ -1048,8 +1023,7 @@
         { "id": "codev.status", "name": "Status", "when": "codev.hasWorkspace || codev.ideMode", "visibility": "collapsed" }
       ],
       "codevPanel": [
-        { "id": "codev.contextualPanel", "name": "Codev", "type": "webview" },
-        { "id": "codev.dev", "name": "Codev Dev" }
+        { "id": "codev.contextualPanel", "name": "Codev", "type": "webview" }
       ]
     },
     "viewsWelcome": [

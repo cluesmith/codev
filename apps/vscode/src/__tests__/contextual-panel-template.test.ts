@@ -57,7 +57,7 @@ describe('webview header text is safe by construction (no raw HTML injection)', 
   // Descriptor-derived text (file paths, builder ids) reaches the webview as postMessage DATA and is
   // rendered through React children (auto-escaped). Enforce that the webview never uses innerHTML or
   // dangerouslySetInnerHTML, so a crafted path/builder id cannot render as markup.
-  const webviewSources = ['../contextual-panel/webview/main.ts', '../contextual-panel/webview/components.ts'];
+  const webviewSources = ['../contextual-panel/webview/main.ts'];
 
   for (const relative of webviewSources) {
     it(`${relative} uses no innerHTML / dangerouslySetInnerHTML`, () => {

@@ -1,16 +1,12 @@
 /**
  * WebviewViewProvider for the contextual `Codev` bottom-panel tab — the extension's first webview
- * *view*.
+ * *view*, and the sole view in the `codevPanel` container.
  *
- * It resolves the active surface (via `SurfaceContextReader` + the pure `resolveMode`, plus an
- * optional transient `ManualSelection` from pill navigation) on each trigger event and posts the
- * resulting `ModeDescriptor` to the webview. To keep the switch path O(1)-cheap it posts only when
- * the render would change (surface key + selection + descriptor + summary ids); a cursor move within
- * one surface posts nothing.
- *
- * Transient navigation: clicking a pill / drilling into a summary row sets an in-memory
- * `ManualSelection` (NEVER persisted). Any real active-surface change — a change in the raw surface
- * key — clears it, so the panel returns to following context.
+ * The panel is purely contextual: it resolves one mode from the active surface (via
+ * `SurfaceContextReader` + the pure `resolveMode`) and posts it to the webview, which renders a
+ * context label + a per-mode body. There is no manual navigation — no pills, no selection. To keep
+ * the switch path O(1)-cheap it posts only when the render would change (surface key + descriptor);
+ * a cursor move within one surface posts nothing.
  *
  * Focus: the last-focused surface (editor vs terminal) drives the terminal-exit. It flips to
  * `terminal` on `onDidChangeActiveTerminal` and to `editor` on an editor selection, an active-editor
@@ -23,18 +19,12 @@
 
 import * as vscode from 'vscode';
 import type { TerminalManager } from '../terminal-manager.js';
-import type { ReviewQueueStore } from '../review-queue/store.js';
-import type { OverviewCache } from '../views/overview-data.js';
 import { onDidChangeDiffInjectRegistry } from '../diff-inject-codelens.js';
 import { resolveMode } from './resolver.js';
 import { SurfaceContextReader } from './surface-reader.js';
 import { renderContextualPanelHtml } from './panel-template.js';
-import { isReadyMessage, parseNavigation, type HostToWebviewMessage } from './messages.js';
-import type { ManualSelection, ModeDescriptor, ModeKind } from './types.js';
-
-interface Summary {
-  builderIds: string[];
-}
+import { isReadyMessage, type HostToWebviewMessage } from './messages.js';
+import type { ModeDescriptor } from './types.js';
 
 export class ContextualPanelProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'codev.contextualPanel';
@@ -42,9 +32,7 @@ export class ContextualPanelProvider implements vscode.WebviewViewProvider {
   private view: vscode.WebviewView | undefined;
   private lastDescriptor: ModeDescriptor | undefined;
   private lastPostId: string | undefined;
-  private lastSurfaceKey: string | undefined;
   private lastTabResource: string | undefined;
-  private selection: ManualSelection | null = null;
   private readonly reader: SurfaceContextReader;
   private readonly disposables: vscode.Disposable[] = [];
   private readonly viewDisposables: vscode.Disposable[] = [];
@@ -52,8 +40,6 @@ export class ContextualPanelProvider implements vscode.WebviewViewProvider {
   constructor(
     private readonly extensionUri: vscode.Uri,
     terminalManager: TerminalManager,
-    private readonly reviewQueueStore: ReviewQueueStore,
-    private readonly overviewCache: OverviewCache,
   ) {
     this.reader = new SurfaceContextReader(() => terminalManager.getActiveBuilderId());
     this.disposables.push(
@@ -61,31 +47,29 @@ export class ContextualPanelProvider implements vscode.WebviewViewProvider {
         if (terminal !== undefined) {
           this.reader.noteTerminalFocused();
         }
-        this.evaluate('surface');
+        this.refresh();
       }),
-      // The terminal-exit proxy, gated to the active editor so a background editor's programmatic
-      // selection does not demote a focused terminal. Residual (accepted per spec): some focus
+      // The terminal-exit proxy: interacting with an editor (cursor move / click into it) means the
+      // editor is focused. Gate on the ACTIVE editor so a programmatic selection in a background
+      // visible editor does not demote a focused builder terminal. Residual (accepted): some focus
       // returns fire nothing.
       vscode.window.onDidChangeTextEditorSelection((event) => {
         if (event.textEditor === vscode.window.activeTextEditor) {
           this.reader.noteEditorFocused();
         }
-        this.evaluate('surface');
+        this.refresh();
       }),
-      // The active editor can change without a tab change when navigating between files inside a
+      // The active editor changes without a tab change when navigating between files inside a
       // multi-file diff (`vscode.changes`).
       vscode.window.onDidChangeActiveTextEditor((editor) => {
         if (editor !== undefined) {
           this.reader.noteEditorFocused();
         }
-        this.evaluate('surface');
+        this.refresh();
       }),
       vscode.window.tabGroups.onDidChangeTabs(() => this.onTabEvent()),
       vscode.window.tabGroups.onDidChangeTabGroups(() => this.onTabEvent()),
-      onDidChangeDiffInjectRegistry(() => this.evaluate('surface')),
-      // A summary's builder-id list can change under the panel; re-post if it does.
-      this.reviewQueueStore.onDidChangeQueue(() => this.evaluate('surface')),
-      this.overviewCache.onDidChange(() => this.evaluate('surface')),
+      onDidChangeDiffInjectRegistry(() => this.refresh()),
     );
   }
 
@@ -112,11 +96,11 @@ export class ContextualPanelProvider implements vscode.WebviewViewProvider {
       }),
     );
 
-    // Seed focus/transition state, then force the current descriptor to the fresh webview.
+    // Seed the active-tab resource so the first tab event that is mere background churn is not
+    // mistaken for an activation. The webview is fresh, so force the current descriptor to it.
     this.lastTabResource = this.reader.activeTabResource();
     this.lastPostId = undefined;
-    this.lastSurfaceKey = undefined;
-    this.evaluate('surface');
+    this.refresh();
   }
 
   dispose(): void {
@@ -142,114 +126,39 @@ export class ContextualPanelProvider implements vscode.WebviewViewProvider {
       this.lastTabResource = tabResource;
       this.reader.noteEditorFocused();
     }
-    this.evaluate('surface');
+    this.refresh();
   }
 
   private onMessage(message: unknown): void {
+    // The webview mounts and asks for the current descriptor. (There are no other inbound messages —
+    // the panel has no navigation.)
     if (isReadyMessage(message)) {
       this.repost();
-      return;
     }
-    const navigation = parseNavigation(message, (id) => this.isKnownBuilder(id));
-    if (navigation === null) {
-      return;
-    }
-    if (navigation.type === 'mode-navigate') {
-      this.selection = this.selectionForNavigate(navigation.mode);
-    } else {
-      this.selection = { mode: navigation.mode, builderId: navigation.builderId };
-    }
-    this.evaluate('manual');
   }
 
-  /**
-   * The transient selection for a pill click, as a complete gesture family:
-   *  - Clicking the mode you are ALREADY in returns `{ mode }` (no builder). For a builder-scoped
-   *    detail that zooms out to the summary; from a summary, or a detail-only mode (Document Review),
-   *    the resolved level is unchanged so the post dedup makes it a no-op. A2 scoping is NOT re-applied
-   *    once you are in a mode, so click-active-at-summary stays at summary even over a worktree artifact.
-   *  - First-navigating to a builder-scoped mode while viewing a worktree artifact scopes to that
-   *    artifact's builder (architect note A2 — richer context for free); otherwise it lands on the summary.
-   */
-  private selectionForNavigate(mode: ModeKind): ManualSelection {
-    const current = this.lastDescriptor;
-    if (current !== undefined && current.kind === mode) {
-      return { mode };
-    }
-    if (mode === 'code-review' || mode === 'builder-inspector') {
-      const builderId = this.reader.read().context.artifact?.builderId;
-      if (builderId !== undefined) {
-        return { mode, builderId };
-      }
-    }
-    return { mode };
-  }
-
-  /**
-   * Resolve and post. `surface` events clear the transient selection when the raw surface key
-   * changes; `manual` events (pill navigation) keep the selection they just set.
-   */
-  private evaluate(source: 'surface' | 'manual'): void {
+  /** Re-resolve the active surface and post only if the render (surface key + descriptor) changed. */
+  private refresh(): void {
     const { context, key } = this.reader.read();
-    if (source === 'surface' && key !== this.lastSurfaceKey) {
-      this.selection = null;
-    }
-    this.lastSurfaceKey = key;
-
-    const descriptor = resolveMode(context, this.selection);
-    const summary = this.summaryFor(descriptor);
+    const descriptor = resolveMode(context);
     this.lastDescriptor = descriptor;
-
-    // The render is fully determined by the descriptor + summary (not by whether a manual selection
-    // produced it), so a navigation that resolves to the same view as the context is a true no-op.
-    const summaryIds = summary === undefined ? '' : summary.builderIds.join(',');
-    const postId = [
-      key,
-      descriptor.kind,
-      descriptor.level,
-      descriptor.context.builderId ?? '',
-      descriptor.context.resourcePath ?? '',
-      summaryIds,
-    ].join('|');
+    const postId = [key, descriptor.kind, descriptor.context.builderId ?? '', descriptor.context.resourcePath ?? ''].join('|');
     if (postId !== this.lastPostId) {
       this.lastPostId = postId;
-      this.post(descriptor, summary);
+      this.post(descriptor);
     }
   }
 
   private repost(): void {
     if (this.lastDescriptor === undefined) {
-      this.evaluate('surface');
+      this.refresh();
       return;
     }
-    this.post(this.lastDescriptor, this.summaryFor(this.lastDescriptor));
+    this.post(this.lastDescriptor);
   }
 
-  /** Minimal summary stub: the builder ids the two builder-scoped summaries list (umbrella scope —
-   *  rich per-row content is owned by the participating features). */
-  private summaryFor(descriptor: ModeDescriptor): Summary | undefined {
-    if (descriptor.level !== 'summary') {
-      return undefined;
-    }
-    if (descriptor.kind === 'code-review') {
-      return { builderIds: this.reviewQueueStore.buildersWithPending() };
-    }
-    if (descriptor.kind === 'builder-inspector') {
-      return { builderIds: this.overviewBuilderIds() };
-    }
-    return undefined;
-  }
-
-  private overviewBuilderIds(): string[] {
-    return this.overviewCache.getData()?.builders.map((builder) => builder.id) ?? [];
-  }
-
-  private isKnownBuilder(id: string): boolean {
-    return this.overviewBuilderIds().includes(id) || this.reviewQueueStore.buildersWithPending().includes(id);
-  }
-
-  private post(descriptor: ModeDescriptor, summary: Summary | undefined): void {
-    const message: HostToWebviewMessage = { type: 'render', descriptor, summary };
+  private post(descriptor: ModeDescriptor): void {
+    const message: HostToWebviewMessage = { type: 'render', descriptor };
     this.view?.webview.postMessage(message);
   }
 

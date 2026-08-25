@@ -65,7 +65,6 @@ import { RecentlyClosedProvider } from './views/recently-closed.js';
 import { TeamProvider } from './views/team.js';
 import { StatusProvider } from './views/status.js';
 import { ContextualPanelProvider } from './contextual-panel/panel-provider.js';
-import { DevTreeProvider } from './views/dev.js';
 import { formatTargetName } from './views/dev-format.js';
 import { WorkspaceProvider } from './views/workspace.js';
 import { displayArchitectName, sortArchitectsForPicker } from './views/architect-display.js';
@@ -563,20 +562,11 @@ export async function activate(context: vscode.ExtensionContext) {
 	const workspaceProvider = new WorkspaceProvider(connectionManager, terminalManager!);
 	// Holds the CLI preflight row (#791); it self-refreshes on `onPreflightChange`.
 	const statusProvider = new StatusProvider(connectionManager);
-	// Codev Dev panel tab (#921) — the first real view in #812's codevPanel.
-	// createTreeView (not registerTreeDataProvider) so we hold the handle and can
-	// set TreeView.badge — the activity dot the plan calls for while a dev runs.
-	const devProvider = new DevTreeProvider(connectionManager, terminalManager!);
-	const devView = vscode.window.createTreeView('codev.dev', { treeDataProvider: devProvider });
-	// Contextual bottom-panel view (#1049): resolves the active surface and posts a ModeDescriptor
-	// to its webview. Takes the terminal manager (builder-terminal surface) and the review-queue +
-	// overview caches (the builder-id summary stubs and drill-in validation).
-	const contextualPanelProvider = new ContextualPanelProvider(
-		context.extensionUri,
-		terminalManager!,
-		reviewQueueStore,
-		overviewCache,
-	);
+	// Contextual bottom-panel view (#1049) — the sole view in #812's codevPanel. Resolves the active
+	// surface and posts a ModeDescriptor to its webview. Takes the terminal manager for the
+	// builder-terminal surface (getActiveBuilderId). (#921's Codev Dev panel view was removed —
+	// its status is carried by the status-bar chip below.)
+	const contextualPanelProvider = new ContextualPanelProvider(context.extensionUri, terminalManager!);
 	context.subscriptions.push(
 		buildersView,
 		pullRequestsView,
@@ -591,19 +581,15 @@ export async function activate(context: vscode.ExtensionContext) {
 			{ webviewOptions: { retainContextWhenHidden: true } },
 		),
 		{ dispose: () => contextualPanelProvider.dispose() },
-		devView,
-		{ dispose: () => devProvider.dispose() },
 	);
 
-	// Status-bar chip + title-bar gating for the dev surface (#921). Both derive
-	// from the single dev-terminal source of truth, so the chip, the Codev Dev
-	// tab, and the title-bar Stop/Restart actions stay in lockstep on every
-	// start/stop/swap. One subscription, named handler (no duplicate listeners).
+	// Status-bar chip for the dev surface (#921) — the always-visible "a dev is running" indicator,
+	// driven off the single dev-terminal source of truth. (#1049 removed the Codev Dev panel view;
+	// the chip is display-only now — there is no panel to focus.)
 	const updateDevChip = (target: string | null): void => {
 		if (target) {
 			if (!devChipItem) {
 				devChipItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 99);
-				devChipItem.command = 'codev.dev.focus'; // VSCode's auto view-focus command
 			}
 			// server-process (a running dev), not zap — $(zap) reads as AI/sparkle in VSCode.
 			devChipItem.text = `$(server-process) Dev: ${target}`;
@@ -611,7 +597,7 @@ export async function activate(context: vscode.ExtensionContext) {
 			// (VSCode API constraint), so the "prominent, not alarming" look
 			// (#921 design call #4) is applied via the foreground instead.
 			devChipItem.color = new vscode.ThemeColor('statusBarItem.prominentForeground');
-			devChipItem.tooltip = `Codev dev running for ${target}. Click to focus Codev Dev panel`;
+			devChipItem.tooltip = `Codev dev running for ${target}`;
 			devChipItem.show();
 		} else if (devChipItem) {
 			devChipItem.dispose();
@@ -623,11 +609,6 @@ export async function activate(context: vscode.ExtensionContext) {
 		const target = builderId ? formatTargetName(builderId) : null;
 		updateDevChip(target);
 		vscode.commands.executeCommand('setContext', 'codev.devRunning', target !== null);
-		// Activity dot on the Codev Dev tab while a dev runs — visible when the
-		// user is on another codevPanel tab (plan's tab-badge requirement).
-		devView.badge = target
-			? { value: 1, tooltip: `Dev running for ${target}` }
-			: undefined;
 	};
 	context.subscriptions.push(
 		terminalManager.onDidChangeDevTerminals(refreshDevSurface),
