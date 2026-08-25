@@ -500,3 +500,11 @@ offering mode pills to browse. Purely contextual: no pinning, no persisted panel
 - Action pending: add that issue number to the PR body + review participating-features list (next to
   #1037, #859/#945, #807) once the architect sends it. No other change.
 - Holding pattern unchanged: pr gate + dev-approval pending with Amr. Not merging, not running porch approve.
+
+### 2026-08-25 — #1553 (Attention fast-follow) referenced
+- Architect filed #1553 (area/vscode; participating feature, umbrella constraints inherited: existing
+  render target only, purely contextual, consider #1549 primitives without blocking).
+- Added it to the review participating-features list (next to #1037, #859/#945, #807) and to the PR body.
+  Also refreshed PR body: test count 917→919; chip wording "display-only" → "retargeted to reveal the
+  running dev terminal" (matches the iter2 revealDevTerminal change). Committed 562434619, PR body updated.
+- Holding pattern confirmed: pr gate + dev-approval with Amr. Not merging, not running porch approve.
