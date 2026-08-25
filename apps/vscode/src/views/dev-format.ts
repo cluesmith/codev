@@ -1,7 +1,10 @@
 /**
- * Pure formatting helpers for the Codev Dev surface (#921): the panel tab's
- * status header and the status-bar chip. Kept free of `vscode` imports so they
+ * Pure formatting helpers for the Codev Dev surface (#921), kept free of `vscode` imports so they
  * unit-test in plain node (vitest).
+ *
+ * `formatTargetName` still backs the status-bar chip. `formatUptime` / `extractDevPort` fed the Codev
+ * Dev *panel view*, which #1049 removed — they are RETAINED (pure, tested, no `vscode` coupling) for a
+ * future dev status surface rather than deleted; they are exercised only by `dev-format.test.ts` today.
  */
 
 /**

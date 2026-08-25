@@ -270,6 +270,7 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 
 ## Testing
 
+- [From #1049] Split webview/UI logic into a pure, `vscode`-free core and a thin host adapter so the load-bearing logic unit-tests without a VS Code host (mirrors #907/#1497: importing anything that value-imports `vscode` in a node vitest env fails to resolve). The resolver, surface-derivation, pill-model, and message-validation for the contextual panel are pure modules with no `vscode` import; a **source-scan test** (read the file, assert its only imports are the sibling types) keeps them pure — a guard cheaper than a runtime purity harness. The `vscode`-touching reader/provider is then covered by an integration test that mocks `vscode` via `vi.mock`.
 - [From #1497] A vitest unit test that (transitively) value-imports a workspace package needs that package's `dist` built first — vite resolves the runtime `exports.default → ./dist`, not the TS source. Type-only imports are elided, which is why most vscode `__tests__` never hit this and why the pre-existing `terminal-manager.test.ts` retreated to source-string assertions ("constructing a full `TerminalManager` requires heavyweight deps"). But a *behavioural* capture from a class buried behind such imports is viable: importing the real `TerminalManager` (it value-imports `@cluesmith/codev-types` + `codev-sdk` via `terminal-adapter`) worked once `codev-types`/`codev-sdk` were built, letting the test assert real `injectArchitectText` `sendText` routing instead of a source regex. It passes in CI because `test.yml` runs `pnpm build` before vitest; locally, build the deps first. Companion to #907 (esbuild's `default → ./dist` condition needs the package built) — the same dist-before-consume rule, on the vitest side.
 - [From #1401] **A guard is not a guard until you have watched it fail.** Two variants bit in one
   project. (a) A compile-time exhaustiveness check written as a bare conditional type alias
@@ -397,6 +398,17 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 
 ## UI/UX
 
+- [From #1049] VS Code's tab/focus model needs specific, tested signals, not the obvious API:
+  the multi-file diff (`vscode.changes`) has **no typed tab input** even in @types/vscode 1.105
+  (its `Tab.input` is `unknown`), so classify it via `activeTextEditor` gated by the active tab's
+  type — otherwise a builder file opened as a normal tab is misread as a diff. `window.activeTerminal`
+  stays set after focus leaves a terminal ("has focus OR most recently had focus"), so a
+  terminal-exit needs a last-focused-surface proxy (`onDidChangeTextEditorSelection` /
+  `onDidChangeActiveTextEditor`), not `activeTerminal`; some focus returns fire no event at all —
+  document that, don't engineer around it. `onDidChangeTabs` fires on background churn (dirty/pin/
+  label), so gate "editor focused" on a genuine active-tab *activation*. A webview view with
+  `retainContextWhenHidden` is NOT re-resolved on re-show — cache the last state and re-post on
+  `onDidChangeVisibility`.
 - [From #1463] A Stream Deck action's identity is its **UUID**, not its `Name`. Renaming a key's
   `Name`/`Tooltip`/face label (e.g. `Open Terminal` → `Open Builder Terminal`) leaves every
   already-placed instance working — the app re-labels it in place — **as long as the manifest UUID

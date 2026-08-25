@@ -412,6 +412,16 @@ export class TerminalManager {
     return out;
   }
 
+  /** Reveal the running dev terminal's tab — the dev status-bar chip's click target (#1049 removed
+   *  the Codev Dev panel, so the chip reveals the PTY's `Codev: <name> (dev)` terminal instead). */
+  revealDevTerminal(): void {
+    const first = this.listDevTerminals()[0];
+    if (first === undefined) {
+      return;
+    }
+    this.terminals.get(`dev-${first.builderId}`)?.terminal.show();
+  }
+
   /**
    * Open a shell terminal.
    */

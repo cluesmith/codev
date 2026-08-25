@@ -1,0 +1,57 @@
+/*
+ * Contextual panel webview styles. Theme-aware by construction: every colour is a `--vscode-*`
+ * token, so the panel tracks the reviewer's VS Code theme. Bundled by esbuild to
+ * dist/webview/contextual-panel.css. The panel is purely contextual — a one-line label + a body.
+ */
+
+:root {
+  color-scheme: light dark;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--vscode-panel-background, var(--vscode-editor-background));
+  color: var(--vscode-foreground);
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size);
+}
+
+#root {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+/* One-line context label (which builder / file the panel is showing) */
+.cp-header {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--vscode-panel-border, transparent);
+}
+
+.cp-context {
+  font-size: 12px;
+  color: var(--vscode-foreground);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: block;
+}
+
+.cp-context .cp-builder,
+.cp-context .cp-file {
+  color: var(--vscode-textLink-foreground);
+  font-family: var(--vscode-editor-font-family, monospace);
+}
+
+/* Body region (placeholder in this umbrella — mode content is owned by participating features) */
+.cp-body {
+  flex: 1;
+  padding: 12px;
+  overflow: auto;
+}
+
+.cp-body-empty {
+  color: var(--vscode-descriptionForeground);
+  font-size: 12px;
+}

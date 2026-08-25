@@ -305,18 +305,6 @@
         "icon": "$(arrow-swap)"
       },
       {
-        "command": "codev.dev.showSidebar",
-        "title": "Show Codev Sidebar",
-        "category": "Codev",
-        "icon": "$(eye)"
-      },
-      {
-        "command": "codev.dev.hideSidebar",
-        "title": "Hide Codev Sidebar",
-        "category": "Codev",
-        "icon": "$(eye-closed)"
-      },
-      {
         "command": "codev.openDevUrl",
         "title": "Codev: Open Dev URL"
       },
@@ -631,14 +619,6 @@
         {
           "command": "codev.dev.switchTarget",
           "when": "codev.hasDevCommand"
-        },
-        {
-          "command": "codev.dev.showSidebar",
-          "when": "false"
-        },
-        {
-          "command": "codev.dev.hideSidebar",
-          "when": "false"
         }
       ],
       "editor/context": [
@@ -850,31 +830,6 @@
           "command": "codev.reconnect",
           "when": "view == codev.status",
           "group": "navigation"
-        },
-        {
-          "command": "codev.dev.stop",
-          "when": "view == codev.dev && codev.devRunning",
-          "group": "navigation@1"
-        },
-        {
-          "command": "codev.dev.restart",
-          "when": "view == codev.dev && codev.devRunning",
-          "group": "navigation@2"
-        },
-        {
-          "command": "codev.dev.switchTarget",
-          "when": "view == codev.dev",
-          "group": "navigation@3"
-        },
-        {
-          "command": "codev.dev.showSidebar",
-          "when": "view == codev.dev && !(sideBarVisible && activeViewlet == 'workbench.view.extension.codev')",
-          "group": "navigation@4"
-        },
-        {
-          "command": "codev.dev.hideSidebar",
-          "when": "view == codev.dev && sideBarVisible && activeViewlet == 'workbench.view.extension.codev'",
-          "group": "navigation@4"
         }
       ],
       "comments/commentThread/context": [
@@ -1048,8 +1003,7 @@
         { "id": "codev.status", "name": "Status", "when": "codev.hasWorkspace || codev.ideMode", "visibility": "collapsed" }
       ],
       "codevPanel": [
-        { "id": "codev.placeholder", "name": "Codev", "when": "codev.panelContainerEmpty", "visibility": "collapsed" },
-        { "id": "codev.dev", "name": "Codev Dev" }
+        { "id": "codev.contextualPanel", "name": "Codev", "type": "webview" }
       ]
     },
     "viewsWelcome": [
