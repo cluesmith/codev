@@ -90,7 +90,9 @@ body {
 .cp-count-pill {
   font-family: var(--vscode-editor-font-family, monospace);
   font-size: 10px;
-  color: var(--vscode-descriptionForeground);
+  /* The badge foreground/background pair is contrast-guaranteed by the theme; pairing the count
+     with descriptionForeground left it grey-on-blue and barely legible in light themes. */
+  color: var(--vscode-badge-foreground);
   background: var(--vscode-badge-background);
   border-radius: 999px;
   padding: 0 6px;
@@ -124,7 +126,10 @@ body {
 }
 
 .cp-row-gate .cp-stripe {
-  background: var(--vscode-editorWarning-foreground, var(--vscode-charts-yellow));
+  /* The sidebar's Builders tree colors a blocked/at-gate builder with notificationsWarningIcon —
+     the amber bell. Use the SAME token here so the panel's "pending gate" amber matches the sidebar
+     the reviewer sees one pane over, rather than a near-but-different warning yellow. */
+  background: var(--vscode-notificationsWarningIcon-foreground, var(--vscode-charts-yellow));
 }
 
 .cp-row-mail .cp-stripe {
@@ -175,7 +180,7 @@ body {
 }
 
 .cp-badge-gate {
-  color: var(--vscode-editorWarning-foreground, var(--vscode-charts-yellow));
+  color: var(--vscode-notificationsWarningIcon-foreground, var(--vscode-charts-yellow));
   background: var(--vscode-inputValidation-warningBackground, transparent);
 }
 

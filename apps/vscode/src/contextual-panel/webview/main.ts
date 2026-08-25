@@ -193,10 +193,16 @@ function Panel(props: { descriptor: ModeDescriptor | undefined; attention: Atten
   if (descriptor === undefined) {
     return h('div', { className: 'cp-body' }, h('div', { className: 'cp-body-empty' }, 'Loading…'));
   }
+  // The one-line context header names the file/builder the panel is about — informative for the
+  // per-surface modes. Attention is the fallback (no single subject), so its header would be a static
+  // "Attention" duplicating the "Codev" panel tab; skip it and let the body reclaim the row.
+  const header = descriptor.kind === 'attention'
+    ? null
+    : h('div', { className: 'cp-header' }, h('span', { className: 'cp-context' }, label(descriptor)));
   return h(
     React.Fragment,
     null,
-    h('div', { className: 'cp-header' }, h('span', { className: 'cp-context' }, label(descriptor))),
+    header,
     h('div', { className: 'cp-body' }, body(descriptor, attention)),
   );
 }

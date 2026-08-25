@@ -59,6 +59,21 @@ Verify: check-types (extension+webview tsconfigs) clean, `test:unit` 944 pass, e
 eslint 0. Env-setup: had to build codev-types + codev-sdk + artifact-canvas dist first (known
 #1049 note, not a code issue).
 
+## dev-approval feedback round 1 (owner, via architect relay / direct)
+Color + layout polish on the running panel (light-theme screenshots):
+1. Gate amber realigned to the SIDEBAR's token `--vscode-notificationsWarningIcon-foreground`
+   (matches the Builders-tree blocked bell) for both the row stripe and the badge text; was
+   `editorWarning-foreground`/`charts-yellow` (near-but-different amber).
+2. Count pill was grey-on-blue (descriptionForeground on badge-background) → now the
+   contrast-guaranteed pair `--vscode-badge-foreground` on `--vscode-badge-background`.
+3. Dropped the redundant `.cp-header` for Attention mode only: the static "Attention" label
+   duplicated the "Codev" panel TAB and ate a full row. Other modes keep the header (it names
+   their file/builder). Body reclaims the row.
+Origin note for the record: shipped panel uses ONLY --vscode-* tokens (both themes free); the
+earlier artifact mockup's hardcoded hexes never shipped. artifact-canvas uses its own Primer
+palette but re-skins to --vscode-* inside a webview, so everything collapses onto VS Code tokens.
+Green after: check-types, test:unit 944, esbuild, eslint.
+
 ## Evidence limitation named for dev-approval
 Can't drive real blocked-builder/held-mail/queued-feedback state from the builder shell (needs live
 Tower with builders at gates). Cover projection+wiring via unit tests; render/empty-state in Ext Dev
