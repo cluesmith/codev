@@ -1160,6 +1160,8 @@ server must not import the client sdk.
 
 The VS Code extension (`apps/vscode`) is a thin client over Tower's existing API. It adds VS Code-specific UI on top of `TowerClient` from `@cluesmith/codev-sdk` — no Tower logic is reimplemented.
 
+**Contextual bottom panel (#1049, `src/contextual-panel/`).** The extension's first `WebviewViewProvider` (all other panel/sidebar views are trees). It splits a **pure, `vscode`-free core** — `resolver.ts` (`resolveMode`), `surface-context.ts` (`deriveSurfaceContext`/`surfaceKey`), `pills.ts`, `messages.ts` — from the `vscode`-touching host: `surface-reader.ts` (classifies the active tab, reads live state) and `panel-provider.ts` (subscribes the trigger set, posts a `ModeDescriptor`). The core is source-scan-tested to stay pure. Two VS Code gotchas the panel works around: the multi-file diff (`vscode.changes`) has **no typed tab input** even in 1.105 (classify via `activeTextEditor` gated by the active tab's type); and with `retainContextWhenHidden` the provider re-posts its cached descriptor on `onDidChangeVisibility` because `resolveWebviewView` does not re-fire. The panel is purely contextual — no pinning, no persisted state.
+
 ### Architecture
 
 ```

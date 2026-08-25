@@ -346,6 +346,17 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 
 ## UI/UX
 
+- [From #1049] VS Code's tab/focus model needs specific, tested signals, not the obvious API:
+  the multi-file diff (`vscode.changes`) has **no typed tab input** even in @types/vscode 1.105
+  (its `Tab.input` is `unknown`), so classify it via `activeTextEditor` gated by the active tab's
+  type — otherwise a builder file opened as a normal tab is misread as a diff. `window.activeTerminal`
+  stays set after focus leaves a terminal ("has focus OR most recently had focus"), so a
+  terminal-exit needs a last-focused-surface proxy (`onDidChangeTextEditorSelection` /
+  `onDidChangeActiveTextEditor`), not `activeTerminal`; some focus returns fire no event at all —
+  document that, don't engineer around it. `onDidChangeTabs` fires on background churn (dirty/pin/
+  label), so gate "editor focused" on a genuine active-tab *activation*. A webview view with
+  `retainContextWhenHidden` is NOT re-resolved on re-show — cache the last state and re-post on
+  `onDidChangeVisibility`.
 - [From #1179] `vscode.QuickPickItem` reserves the `kind` property for its separator enum
   (`QuickPickItemKind`), so a custom item type using `kind` as its own discriminator fails
   the `createQuickPick<T extends QuickPickItem>` constraint. Pick a different name
