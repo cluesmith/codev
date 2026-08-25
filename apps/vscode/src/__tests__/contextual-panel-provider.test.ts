@@ -10,6 +10,8 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type { ModeDescriptor } from '../contextual-panel/types.js';
+import type { AttentionSummary } from '@cluesmith/codev-sdk/builder-helpers';
+import type { OverviewBuilder, OverviewData } from '@cluesmith/codev-types';
 
 const hoisted = vi.hoisted(() => {
   const state = {
@@ -17,6 +19,7 @@ const hoisted = vi.hoisted(() => {
     activeEditorFsPath: undefined as string | undefined,
     activeBuilderId: null as string | null,
     diffBuilders: {} as Record<string, string>,
+    overviewData: null as unknown,
     listeners: {} as Record<string, (arg?: unknown) => void>,
   };
   class TabInputText {
@@ -85,6 +88,7 @@ const vscode = await import('vscode');
 interface RenderMessage {
   type: string;
   descriptor: ModeDescriptor;
+  attention?: AttentionSummary;
 }
 
 function makeView() {
@@ -123,10 +127,48 @@ function makeView() {
 
 function newProvider() {
   const terminalManager = { getActiveBuilderId: () => hoisted.state.activeBuilderId };
+  const overviewCache = {
+    getData: () => hoisted.state.overviewData as OverviewData | null,
+    onDidChange: (fn: () => void) => {
+      hoisted.state.listeners['overview'] = fn;
+      return { dispose() {} };
+    },
+  };
   return new ContextualPanelProvider(
     {} as unknown as import('vscode').Uri,
     terminalManager as unknown as import('../terminal-manager.js').TerminalManager,
+    overviewCache as unknown as import('../views/overview-data.js').OverviewCache,
   );
+}
+
+function fireOverviewChange(): void {
+  hoisted.state.listeners['overview']?.();
+}
+
+/** A minimal `OverviewBuilder` — only the fields `deriveAttention` reads carry real values. */
+function builderRow(over: Partial<OverviewBuilder> & { id: string }): OverviewBuilder {
+  return {
+    issueId: null,
+    issueTitle: null,
+    phase: 'implement',
+    blocked: null,
+    blockedGate: null,
+    blockedSince: null,
+    prReady: false,
+    lastDataAt: null,
+    ...over,
+  } as OverviewBuilder;
+}
+
+/** A minimal `OverviewData` carrying just what the Attention projection consumes. */
+function overview(over: Partial<OverviewData>): OverviewData {
+  return {
+    builders: [],
+    heldCount: 0,
+    mailboxEscalated: false,
+    queuedFeedback: {},
+    ...over,
+  } as OverviewData;
 }
 
 function textTab(path: string): unknown {
@@ -152,6 +194,7 @@ beforeEach(() => {
   hoisted.state.activeEditorFsPath = undefined;
   hoisted.state.activeBuilderId = null;
   hoisted.state.diffBuilders = {};
+  hoisted.state.overviewData = null;
   hoisted.state.listeners = {};
 });
 
@@ -314,5 +357,77 @@ describe('ContextualPanelProvider — surface resolution', () => {
     hoisted.state.activeTabInput = new (vscode as unknown as { TabInputTerminal: new () => unknown }).TabInputTerminal();
     hoisted.state.listeners['tabs']?.();
     expect(last(posted).descriptor.kind).toBe('builder-inspector');
+  });
+});
+
+describe('ContextualPanelProvider — Attention body from the overview cache (#1553)', () => {
+  it('carries the projected attention payload on an Attention post', () => {
+    hoisted.state.activeTabInput = textTab('/w/src/foo.ts'); // non-artifact → attention
+    hoisted.state.overviewData = overview({
+      builders: [builderRow({ id: 'pir-1553', issueId: '#1553', blocked: 'plan review', blockedSince: '2026-08-25T00:00:00Z' })],
+    });
+    const provider = newProvider();
+    const { view, posted } = makeView();
+    provider.resolveWebviewView(view);
+
+    expect(posted[0].descriptor.kind).toBe('attention');
+    expect(posted[0].attention?.isEmpty).toBe(false);
+    expect(posted[0].attention?.pendingGates).toEqual([
+      { builderId: 'pir-1553', issueId: '#1553', issueTitle: null, gate: 'plan review', since: '2026-08-25T00:00:00Z' },
+    ]);
+  });
+
+  it('projects the honest empty summary when nothing needs attention', () => {
+    hoisted.state.activeTabInput = textTab('/w/src/foo.ts');
+    hoisted.state.overviewData = overview({ builders: [builderRow({ id: 'pir-1553' })] });
+    const provider = newProvider();
+    const { view, posted } = makeView();
+    provider.resolveWebviewView(view);
+
+    expect(posted[0].descriptor.kind).toBe('attention');
+    expect(posted[0].attention?.isEmpty).toBe(true);
+  });
+
+  it('omits the attention payload on a non-Attention post', () => {
+    hoisted.state.activeTabInput = textTab('/w/codev/specs/x.md'); // artifact → document-review
+    hoisted.state.overviewData = overview({ builders: [builderRow({ id: 'pir-1553', blocked: 'plan review' })] });
+    const provider = newProvider();
+    const { view, posted } = makeView();
+    provider.resolveWebviewView(view);
+
+    expect(posted[0].descriptor.kind).toBe('document-review');
+    expect(posted[0].attention).toBeUndefined();
+  });
+
+  it('re-posts fresh attention data on an overview-cache change while in Attention mode', () => {
+    hoisted.state.activeTabInput = textTab('/w/src/foo.ts');
+    hoisted.state.overviewData = overview({ builders: [builderRow({ id: 'pir-1553' })] });
+    const provider = newProvider();
+    const { view, posted } = makeView();
+    provider.resolveWebviewView(view);
+    expect(posted).toHaveLength(1);
+    expect(posted[0].attention?.isEmpty).toBe(true);
+
+    // A gate opens; the cache refreshes (SSE) → the body re-posts with the new roll-up, same surface.
+    hoisted.state.overviewData = overview({
+      builders: [builderRow({ id: 'pir-1553', blocked: 'dev review' })],
+    });
+    fireOverviewChange();
+    expect(posted).toHaveLength(2);
+    expect(posted[1].descriptor.kind).toBe('attention');
+    expect(posted[1].attention?.pendingGates[0]?.gate).toBe('dev review');
+  });
+
+  it('does not post on an overview-cache change while in a non-Attention mode', () => {
+    hoisted.state.activeTabInput = textTab('/w/codev/specs/x.md'); // document-review
+    hoisted.state.overviewData = overview({ builders: [] });
+    const provider = newProvider();
+    const { view, posted } = makeView();
+    provider.resolveWebviewView(view);
+    expect(posted).toHaveLength(1);
+
+    hoisted.state.overviewData = overview({ builders: [builderRow({ id: 'pir-1553', blocked: 'plan review' })] });
+    fireOverviewChange();
+    expect(posted).toHaveLength(1); // unchanged — the cache does not drive non-Attention modes
   });
 });

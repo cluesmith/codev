@@ -20,10 +20,12 @@
 
 import * as vscode from 'vscode';
 import type { TerminalManager } from '../terminal-manager.js';
+import type { OverviewCache } from '../views/overview-data.js';
 import { onDidChangeDiffInjectRegistry } from '../diff-inject-codelens.js';
 import { resolveMode } from './resolver.js';
 import { SurfaceContextReader } from './surface-reader.js';
 import { renderContextualPanelHtml } from './panel-template.js';
+import { deriveAttention } from '@cluesmith/codev-sdk/builder-helpers';
 import { isReadyMessage, type HostToWebviewMessage } from './messages.js';
 import type { ModeDescriptor } from './types.js';
 
@@ -41,9 +43,18 @@ export class ContextualPanelProvider implements vscode.WebviewViewProvider {
   constructor(
     private readonly extensionUri: vscode.Uri,
     terminalManager: TerminalManager,
+    private readonly overviewCache: OverviewCache,
   ) {
     this.reader = new SurfaceContextReader(() => terminalManager.getActiveBuilderId());
     this.disposables.push(
+      // Attention is fed by the overview cache; when it refreshes (SSE tick) re-post so the body
+      // tracks live state. Only while the panel is actually showing Attention — other modes ignore
+      // the cache, so this posts nothing extra for them.
+      this.overviewCache.onDidChange(() => {
+        if (this.lastDescriptor?.kind === 'attention') {
+          this.repost();
+        }
+      }),
       vscode.window.onDidChangeActiveTerminal((terminal) => {
         if (terminal !== undefined) {
           this.reader.noteTerminalFocused();
@@ -168,7 +179,11 @@ export class ContextualPanelProvider implements vscode.WebviewViewProvider {
   }
 
   private post(descriptor: ModeDescriptor): void {
-    const message: HostToWebviewMessage = { type: 'render', descriptor };
+    // Attach the Attention roll-up only in Attention mode, projected fresh from the live cache so a
+    // re-post (visibility restore, or an SSE-driven refresh) always reflects current state.
+    const attention =
+      descriptor.kind === 'attention' ? deriveAttention(this.overviewCache.getData()) : undefined;
+    const message: HostToWebviewMessage = { type: 'render', descriptor, attention };
     this.view?.webview.postMessage(message);
   }
 
