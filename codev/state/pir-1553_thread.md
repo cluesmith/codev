@@ -98,6 +98,14 @@ DEVIATION from approved plan (which declared these extension-local): owner chose
 Must rebuild sdk dist before vscode check-types (monorepo order). Green: sdk build/check-types/119
 tests; vscode check-types(both tsconfigs)/935 tests/esbuild/eslint. Record this deviation in review.
 
+## dev-approval APPROVED (2026-08-25T22:02Z, Amr via VS Code) — I ran porch approve. Now in REVIEW.
+SDK move routing: architect routed the packages/sdk deviation to MAIN architect (their contract
+surface). Main's seat SATISFIED post-hoc with verification, no changes required (2026-08-25T22:04Z):
+import boundary held, single source, webview bundle clean (type-only webview / host-side value import,
+no dep-class transition), policy home correct, dedup+heldTotal sound. PR hold RELEASED.
+Review artifact logs the deviation as main framed it. Next: commit review, push, open PR, porch runs
+single CMAP pass, then pr gate. Branch freezes before pr gate; gate-record commit is last write.
+
 ## Evidence limitation named for dev-approval
 Can't drive real blocked-builder/held-mail/queued-feedback state from the builder shell (needs live
 Tower with builders at gates). Cover projection+wiring via unit tests; render/empty-state in Ext Dev
