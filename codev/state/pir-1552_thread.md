@@ -64,10 +64,11 @@ Tests: rewrote feedback.test.ts (7 tests), added builder-review-submit.test.ts (
 files: 4 files / 22 tests pass. check-types ✓, eslint ✓ on all changed files. AC grep for
 DECK_FLAG_BODY / "Flagged for review from Stream Deck" is empty.
 
-PRE-EXISTING UNRELATED RED (not mine, not fixing): 20 test FILES in apps/vscode fail at import time
-with `Cannot find package '@cluesmith/codev-sdk/reconnect-policy'` — the installed codev-sdk lacks
-that subpath export (stale workspace build). None are files I touched; my diff imports nothing from
-it. The 688 tests that load all pass. Noting for the review file per implement-phase guidance.
+RED RESOLVED (was stale-install, now green): the 20 import-time failures for
+`@cluesmith/codev-sdk/reconnect-policy` were a stale worktree node_modules link (installed before
+that subpath export landed on main) — same class as pir-1494's "Cannot find module three". Architect
+diagnosed it; `pnpm install --frozen-lockfile` at the worktree root cleared it. Full apps/vscode
+unit suite now 80 files / 935 tests all pass. Not a code issue; nothing in my diff changed for it.
 
 Fences held: only feedback.ts + builder-review.ts + 3-line extension.ts wiring + tests. No streamdeck,
 no contextual-panel/OverviewCache, no types/Tower.
