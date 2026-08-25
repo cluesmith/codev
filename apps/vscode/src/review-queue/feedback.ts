@@ -1,42 +1,35 @@
 /**
- * Mode-neutral review feedback (#1410): the Stream Deck diff dials and Scroll
- * dial press a single `feedback-*` verb, and this module routes each chunk
- * (whole file / hunk-under-cursor / selection) EITHER as an immediate PTY
- * forward OR into the per-builder pending-comment queue, following the
- * workspace's `codev.diffCodelensMode` setting — so the deck never infers the
- * mode. Both branches derive their anchor from the SAME resolver, so a given
- * dial press references the same file/range in either mode.
+ * Mode-neutral review feedback (#1410, #1552): the Stream Deck diff dials and
+ * Scroll dial press a single `feedback-*` verb, and this module turns each
+ * chunk (whole file / hunk-under-cursor / selection) into an **authoring**
+ * gesture — it opens the native inline comment reply box at the anchor, the
+ * same surface as spec/plan comment authoring, so the reviewer types or
+ * dictates the actual comment. There is no promptless path: a gesture never
+ * stamps a placeholder body or force-forwards a bare ref (#1552 removed the old
+ * promptless deck default).
  *
- * The queue branch mutates ONLY through `ReviewQueueStore` (the queue's single
- * source of truth, #1037): the status bar, inline threads, and Tower's
- * per-builder queued-feedback count all reflect a deck-driven enqueue for free.
+ * The queue-vs-forward decision does NOT live here: every gesture opens the
+ * same reply box (via `COMMENT_FOR_BUILDER_COMMAND`), and the reviewer's Submit
+ * is what enqueues (comment mode) or forwards ref + prose (forward mode), per
+ * `codev.diffCodelensMode` — see `comments/builder-review.ts`. So the deck
+ * still never infers the mode, and both branches derive their anchor from the
+ * SAME resolvers here.
  *
- * The feedback always targets the builder whose diff is FOCUSED (the diff-inject
- * entry's owner), never a separately-selected builder — a review comment must
- * attach to the file in front of the reviewer.
+ * The feedback always targets the builder whose diff is FOCUSED (the anchor is
+ * read from the active editor), never a separately-selected builder — a review
+ * comment must attach to the file in front of the reviewer. When no builder
+ * diff is focused, the gesture surfaces a clear message instead of a silent
+ * no-op, so a dial press over the wrong editor is legible.
  */
 
 import * as vscode from 'vscode';
-import { randomUUID } from 'node:crypto';
-import * as path from 'node:path';
 import {
   getDiffInjectEntry,
-  getDiffCodelensMode,
+  COMMENT_FOR_BUILDER_COMMAND,
   type DiffInjectSessionEntry,
 } from '../diff-inject-codelens.js';
-import { buildBuilderFileRef, buildBuilderRangeRef } from '../diff-inject-ref.js';
 import { resolvePressCursorRef } from '../commands/press-cursor-ref.js';
-import { deriveWorktreePath } from './reconcile.js';
 import type { LineRange } from './queue.js';
-import type { ReviewQueueStore } from './store.js';
-
-/** Body attached to a chunk flagged from the deck — a dial press carries no
- *  typed prose, so the comment's file + range are its substance. */
-const DECK_FLAG_BODY = 'Flagged for review from Stream Deck.';
-
-export interface FeedbackDeps {
-  store: ReviewQueueStore;
-}
 
 /** Where a feedback gesture points: the owning diff entry + range (null = whole file). */
 interface Anchor {
@@ -97,38 +90,22 @@ function selectionAnchor(): Anchor | undefined {
   return { entry, lineRange: { start, end } };
 }
 
-/** Route one anchor per the workspace mode: forward now (PTY) or enqueue. */
-async function route(deps: FeedbackDeps, anchor: Anchor | undefined): Promise<void> {
-  if (!anchor) { return; }
-  const { entry, lineRange } = anchor;
-  if (getDiffCodelensMode() === 'forward') {
-    // Immediate: the same low-level inject the forward CodeLens / commands use.
-    const ref = lineRange
-      ? buildBuilderRangeRef(entry.relPath, lineRange.start, lineRange.end)
-      : buildBuilderFileRef(entry.relPath);
-    await vscode.commands.executeCommand('codev.forwardToBuilder', entry.builderId, ref);
+/** Open the native comment reply box at the anchor so the reviewer authors the
+ *  comment (#1552). No anchor means no builder diff is focused — surface that
+ *  rather than doing nothing, so a dial press lands somewhere legible. */
+async function route(anchor: Anchor | undefined): Promise<void> {
+  if (!anchor) {
+    vscode.window.showWarningMessage('Codev: focus a builder diff first to flag it for review');
     return;
   }
-  // Queue: register the builder's worktree from the diff entry (derived, never
-  // guessed) so the write lands in the right worktree even when nothing has been
-  // queued this session, then mutate through the store.
-  if (!deps.store.getWorktreePath(entry.builderId)) {
-    const worktree = deriveWorktreePath(entry.fsPath, entry.relPath, path.sep);
-    if (!worktree) {
-      vscode.window.showWarningMessage('Codev: could not locate the builder worktree for this diff');
-      return;
-    }
-    deps.store.registerWorktree(entry.builderId, worktree);
-  }
-  await deps.store.add(entry.builderId, {
-    id: randomUUID(),
-    createdAt: new Date().toISOString(),
-    file: entry.relPath,
-    lineRange,
-    body: DECK_FLAG_BODY,
-  });
+  const { entry, lineRange } = anchor;
+  // The same authoring entry point the comment codelens uses: it creates AND
+  // focuses the reply box at the anchor (the active editor is `entry.fsPath`,
+  // since the anchor was read from it). Submit delivers per the current mode.
+  await vscode.commands.executeCommand(
+    COMMENT_FOR_BUILDER_COMMAND, entry.builderId, entry.fsPath, entry.relPath, lineRange);
 }
 
-export const feedbackFile = (deps: FeedbackDeps): Promise<void> => route(deps, fileAnchor());
-export const feedbackHunk = async (deps: FeedbackDeps): Promise<void> => route(deps, await hunkAnchor());
-export const feedbackSelection = (deps: FeedbackDeps): Promise<void> => route(deps, selectionAnchor());
+export const feedbackFile = (): Promise<void> => route(fileAnchor());
+export const feedbackHunk = async (): Promise<void> => route(await hunkAnchor());
+export const feedbackSelection = (): Promise<void> => route(selectionAnchor());

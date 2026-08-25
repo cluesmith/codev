@@ -1255,11 +1255,13 @@ export async function activate(context: vscode.ExtensionContext) {
 			)),
 		reg('codev.discardReviewComments', () =>
 			discardReviewComments({ store: reviewQueueStore, terminalManager: terminalManager!, overviewCache })),
-		// Mode-neutral review feedback (#1410): the deck diff/scroll dials press
-		// these; each forwards immediately or enqueues per `codev.diffCodelensMode`.
-		reg('codev.feedbackCurrentFileToBuilder', () => feedbackFile({ store: reviewQueueStore })),
-		reg('codev.feedbackCurrentHunkToBuilder', () => feedbackHunk({ store: reviewQueueStore })),
-		reg('codev.feedbackSelectionToBuilder', () => feedbackSelection({ store: reviewQueueStore })),
+		// Mode-neutral review feedback (#1410, #1552): the deck diff/scroll dials
+		// press these; each opens the native comment reply box at the anchor so the
+		// reviewer authors the comment, which Submit then forwards or enqueues per
+		// `codev.diffCodelensMode` (see review-queue/feedback.ts). No promptless path.
+		reg('codev.feedbackCurrentFileToBuilder', () => feedbackFile()),
+		reg('codev.feedbackCurrentHunkToBuilder', () => feedbackHunk()),
+		reg('codev.feedbackSelectionToBuilder', () => feedbackSelection()),
 		// Diff codelens mode toggle (#1037): a single title-bar button per mode
 		// (VS Code toolbar buttons have no pressed state — same pattern as the
 		// Agents group-by cycle above); each command shows the mode clicking

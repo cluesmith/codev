@@ -24,8 +24,10 @@ import {
   getDiffInjectEntry,
   getDiffInjectEntries,
   onDidChangeDiffInjectRegistry,
+  getDiffCodelensMode,
   COMMENT_FOR_BUILDER_COMMAND,
 } from '../diff-inject-codelens.js';
+import { buildBuilderFileRef, buildBuilderRangeRef } from '../diff-inject-ref.js';
 import { planThreadReconcile, deriveWorktreePath, clampAnchorLines, type RegisteredFile } from '../review-queue/reconcile.js';
 import type { ReviewQueueStore } from '../review-queue/store.js';
 import type { LineRange, PendingComment } from '../review-queue/queue.js';
@@ -278,24 +280,51 @@ export function activateBuilderReviewComments(
     await vscode.commands.executeCommand('workbench.action.addComment');
   });
 
-  // Submit button on an input thread → queue the comment. The input thread is
-  // disposed; the reconciler re-creates the canonical thread from the queue.
+  // Submit button on an input thread → deliver the authored comment. The diff
+  // codelens mode decides delivery (#1552): forward mode injects the ref +
+  // prose into the builder PTY now (the #789 forward path every forward verb
+  // uses), comment mode enqueues it for the batched Submit Review. This is the
+  // SINGLE authoring surface for both — so the gutter "+", the context-menu
+  // action, the comment codelens, and the deck flag gestures all deliver per
+  // the current mode (owner-approved at the #1552 plan gate). The input thread
+  // is disposed either way; in comment mode the reconciler re-creates the
+  // canonical thread from the queue.
   reg('codev.submitBuilderComment', async (reply: vscode.CommentReply) => {
     const thread = reply.thread;
+    // Empty / whitespace submit leaves nothing behind: no queue entry, no
+    // forward, no orphan thread. (Escape/Cancel already disposes the in-progress
+    // thread; this covers a Submit with a blank body.)
+    const body = reply.text.trim();
+    if (!body) { thread.dispose(); return; }
     const entry = getDiffInjectEntry(thread.uri.fsPath);
-    if (!entry || !registerEntryWorktree(entry)) {
+    if (!entry) {
       vscode.window.showWarningMessage('Codev: This file is not part of an active builder diff');
       return;
     }
     // A range-less thread is a file comment (the file-level lens flow).
     let lineRange: LineRange | null = null;
     if (thread.range) { lineRange = threadLineRange(thread); }
+
+    if (getDiffCodelensMode() === 'forward') {
+      const ref = lineRange
+        ? buildBuilderRangeRef(entry.relPath, lineRange.start, lineRange.end)
+        : buildBuilderFileRef(entry.relPath);
+      // The ref carries a trailing space, so `ref + body` reads "<ref> <prose>".
+      thread.dispose();
+      await vscode.commands.executeCommand('codev.forwardToBuilder', entry.builderId, ref + body);
+      return;
+    }
+
+    if (!registerEntryWorktree(entry)) {
+      vscode.window.showWarningMessage('Codev: This file is not part of an active builder diff');
+      return;
+    }
     const comment: PendingComment = {
       id: randomUUID(),
       createdAt: new Date().toISOString(),
       file: entry.relPath,
       lineRange,
-      body: reply.text,
+      body,
     };
     thread.dispose();
     await store.add(entry.builderId, comment);
