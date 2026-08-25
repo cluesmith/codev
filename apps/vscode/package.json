@@ -305,18 +305,6 @@
         "icon": "$(arrow-swap)"
       },
       {
-        "command": "codev.dev.showSidebar",
-        "title": "Show Codev Sidebar",
-        "category": "Codev",
-        "icon": "$(eye)"
-      },
-      {
-        "command": "codev.dev.hideSidebar",
-        "title": "Hide Codev Sidebar",
-        "category": "Codev",
-        "icon": "$(eye-closed)"
-      },
-      {
         "command": "codev.openDevUrl",
         "title": "Codev: Open Dev URL"
       },
@@ -631,14 +619,6 @@
         {
           "command": "codev.dev.switchTarget",
           "when": "codev.hasDevCommand"
-        },
-        {
-          "command": "codev.dev.showSidebar",
-          "when": "false"
-        },
-        {
-          "command": "codev.dev.hideSidebar",
-          "when": "false"
         }
       ],
       "editor/context": [

@@ -60,10 +60,14 @@ export class ContextualPanelProvider implements vscode.WebviewViewProvider {
         this.refresh();
       }),
       // The active editor changes without a tab change when navigating between files inside a
-      // multi-file diff (`vscode.changes`).
+      // multi-file diff (`vscode.changes`). It also fires with `undefined` as focus leaves the editor —
+      // the only signal for re-entering an already-active builder terminal (which fires no
+      // onDidChangeActiveTerminal), so that path re-activates Builder Inspector.
       vscode.window.onDidChangeActiveTextEditor((editor) => {
         if (editor !== undefined) {
           this.reader.noteEditorFocused();
+        } else if (this.reader.terminalFocusLikely()) {
+          this.reader.noteTerminalFocused();
         }
         this.refresh();
       }),

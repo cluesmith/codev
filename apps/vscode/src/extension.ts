@@ -19,7 +19,7 @@ import { buildBuilderRangeRef, buildBuilderFileRef, resolveCursorRef } from './d
 import { runWorktreeDev } from './commands/run-worktree-dev.js';
 import { stopWorktreeDev } from './commands/stop-worktree-dev.js';
 import { runWorkspaceDev, stopWorkspaceDev } from './commands/run-workspace-dev.js';
-import { stopDev, restartDev, switchDevTarget, showCodevSidebar, hideCodevSidebar } from './commands/dev-actions.js';
+import { stopDev, restartDev, switchDevTarget } from './commands/dev-actions.js';
 import { openDevUrl } from './commands/open-dev-url.js';
 import { pasteImage } from './commands/paste-image.js';
 import { openWorktreeFolder } from './commands/open-worktree-folder.js';
@@ -590,6 +590,8 @@ export async function activate(context: vscode.ExtensionContext) {
 		if (target) {
 			if (!devChipItem) {
 				devChipItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 99);
+				// #1049 removed the Codev Dev panel; the chip reveals the running dev PTY's terminal tab.
+				devChipItem.command = 'codev.dev.reveal';
 			}
 			// server-process (a running dev), not zap — $(zap) reads as AI/sparkle in VSCode.
 			devChipItem.text = `$(server-process) Dev: ${target}`;
@@ -597,7 +599,7 @@ export async function activate(context: vscode.ExtensionContext) {
 			// (VSCode API constraint), so the "prominent, not alarming" look
 			// (#921 design call #4) is applied via the foreground instead.
 			devChipItem.color = new vscode.ThemeColor('statusBarItem.prominentForeground');
-			devChipItem.tooltip = `Codev dev running for ${target}`;
+			devChipItem.tooltip = `Codev dev running for ${target}. Click to show the dev terminal`;
 			devChipItem.show();
 		} else if (devChipItem) {
 			devChipItem.dispose();
@@ -1361,10 +1363,9 @@ export async function activate(context: vscode.ExtensionContext) {
 			restartDev(connectionManager!, terminalManager!)),
 		regCli('codev.dev.switchTarget', () =>
 			switchDevTarget(connectionManager!, terminalManager!)),
-		reg('codev.dev.showSidebar', () =>
-			showCodevSidebar()),
-		reg('codev.dev.hideSidebar', () =>
-			hideCodevSidebar()),
+		// The dev status-bar chip's click target (#1049 removed the Codev Dev panel it used to focus).
+		reg('codev.dev.reveal', () =>
+			terminalManager!.revealDevTerminal()),
 		reg('codev.openDevUrl', (urlArg?: unknown) =>
 			openDevUrl(connectionManager!, typeof urlArg === 'string' ? urlArg : undefined)),
 		reg('codev.pasteImage', () =>

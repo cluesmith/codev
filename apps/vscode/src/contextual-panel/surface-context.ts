@@ -137,7 +137,7 @@ function builderIdFromPath(path: string): string | undefined {
  * A key identifying the raw active surface (not the resolved mode): the focused terminal's builder,
  * or the active tab's resource, or the multi-diff's focused file. Unlike the resolved descriptor,
  * this distinguishes two *different* ordinary files that both resolve to Attention — which is what a
- * transition (re-post, and the Phase 4 transient-selection clear) must detect. It is stable across
+ * transition (which the provider re-posts on) must detect. It is stable across
  * cursor moves within one surface.
  */
 export function surfaceKey(inputs: DeriveInputs): string {
@@ -150,7 +150,7 @@ export function surfaceKey(inputs: DeriveInputs): string {
   }
   if (tab.kind === 'text' || tab.kind === 'custom') {
     // Include kind + viewType so the same file's raw editor and its codev.markdownPreview are
-    // distinct surfaces — switching between them is a real transition (focus / re-post / Phase 4 clear).
+    // distinct surfaces — switching between them is a real transition (focus + re-post).
     return `tab:${tab.kind}:${tab.viewType ?? ''}:${tab.uriFsPath ?? ''}`;
   }
   if (inputs.activeEditorFsPath !== undefined) {

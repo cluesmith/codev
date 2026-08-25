@@ -1,6 +1,6 @@
 /**
  * Invariant: the contextual panel introduces NO persistence surface. It is purely contextual with
- * only in-memory transient navigation, so no source under `contextual-panel/` may touch
+ * only in-memory contextual state, so no source under `contextual-panel/` may touch
  * `workspaceState` / `globalState` / `getConfiguration`, and the manifest must contribute no
  * `codev.contextualPanel.*` configuration key.
  */

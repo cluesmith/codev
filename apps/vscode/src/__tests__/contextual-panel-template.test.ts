@@ -3,7 +3,8 @@
  *
  * The template is a pure string builder (no `vscode` import), so it is testable without a host.
  * These pin the security-relevant invariants — nonce-bound CSP, no inline/remote scripts, resources
- * scoped to the webview `cspSource` — which Phase 3 will extend with header-text escaping.
+ * scoped to the webview `cspSource`; header text is rendered as React children (auto-escaped), guarded
+ * by the no-innerHTML scan below.
  */
 
 import { readFileSync } from 'node:fs';

@@ -8,28 +8,30 @@ Built a single contextual `Codev` bottom-panel tab (the extension's first `Webvi
 
 ## Spec Compliance
 
-- [x] One contextual `Codev` panel tab; the scaffold placeholder repurposed; `Codev Dev` untouched (Phase 2)
-- [x] Purely contextual — no pinning/freezing/locking/persisted panel state; introduces no `workspaceState`/`globalState`/configuration key (Phase 2/4; asserted by `contextual-panel-no-persistence.test.ts`)
-- [x] `ModeResolver` is a pure, synchronous, VSCode-free function returning `ModeDescriptor` + applicability; enforced by a source-scan purity test (Phase 1)
-- [x] Predicate precedence explicit, total, fixed (`builder-terminal → builder-diff → artifact → attention`); overlap tested (Phase 1)
-- [x] Context derived from the active *tab* (not `activeTextEditor` alone) — custom editor (`codev.markdownPreview`) → Document Review, multi-file diff → Code Review; trigger set = tab-group + terminal + active-editor + selection + diff-registry (Phase 3)
-- [x] Builder attachment derived from the active surface (`getActiveBuilderId()` / diff-inject registry `builderId`), never persisted (Phase 3/4)
-- [x] Header renders four mode pills; active distinct; inapplicable greyed; Document Review disabled without an artifact via `aria-disabled` (Phase 2/3/4)
-- [x] Per-mode navigability defined; every applicable pill (incl. active) navigates; disabled is inert (Phase 4)
-- [x] Mode pills are transient navigation, discarded on any real active-surface change; never persisted (Phase 4)
-- [x] Attention fallback when nothing matches and no selection (Phase 1/3)
-- [x] O(1) resolution, no I/O on the switch path (automated); ~50 ms perceived latency is a dev-approval feel check (Phase 1/3)
-- [x] Render targets per mode/level (six: Doc Review detail; Code Review + Builder Inspector summary+detail; Attention summary); placeholder bodies + orchestration only, no mode content (Phase 2/3/4)
-- [x] Minimum navigation UI: builder-id summary stub + drill-in (Phase 4)
-- [x] Webview hardened: nonce CSP, `localResourceRoots`, validated message contract, header text React-escaped (source-scan) (Phase 2/3/4)
-- [x] Unit tests cover resolver branches, precedence overlap, applicability, transient nav, malformed-input degradation, provider event wiring, message contract, no-persistence (all phases)
-- [ ] Dev-approval walkthrough — **pending** (the contextual "feel" is verified live at the dev-approval gate, not from the PR diff; noted below)
+Reflects the **shipped, purely-contextual** design (issue #1049 v3). The frozen spec's pill / summary-detail / navigation criteria were **superseded by owner direction at dev-approval** (see Deviations) and are marked as such here rather than checked off.
+
+- [x] One contextual `Codev` panel tab — the **sole** view in `codevPanel` (scaffold placeholder repurposed); the `#921` Codev Dev **panel view is removed** (status-bar chip retained, retargeted to reveal the dev terminal)
+- [x] Purely contextual — no pinning/locking/persisted state; introduces no `workspaceState`/`globalState`/configuration key (asserted by `contextual-panel-no-persistence.test.ts`)
+- [x] `ModeResolver` is a pure, synchronous, VSCode-free function `(SurfaceContext) → { kind, context }`; enforced by a source-scan purity test
+- [x] Predicate precedence explicit, total, fixed (`builder-terminal → builder-diff → artifact → attention`); overlap tested
+- [x] Context derived from the active *tab* (not `activeTextEditor` alone) — custom editor (`codev.markdownPreview`) → Document Review, multi-file diff → Code Review; trigger set = tab-group + active-editor + selection + terminal-focus + diff-registry; terminal exit **and** re-entry handled
+- [x] The shown builder is derived from the active surface (`getActiveBuilderId()` / diff-inject registry `builderId`), never chosen, never persisted
+- [x] Attention is the **fallback view** when no artifact/diff/terminal is active — not a selectable mode
+- [x] Header is a one-line context label; **no pills / no switcher / no manual navigation / no cross-builder lists** (the sidebar owns cross-builder browsing)
+- [x] O(1) resolution, no I/O on the switch path (automated); ~50 ms perceived latency is a dev-approval feel check
+- [x] Per-mode render target + placeholder body; no mode content (owned by participating issues)
+- [x] Webview hardened: nonce CSP, `localResourceRoots`; header text React-escaped (no-innerHTML source-scan)
+- [x] Unit tests cover resolver branches, precedence overlap, malformed-input degradation, provider event wiring (incl. terminal exit/re-entry, multi-diff, background-churn), no-persistence
+- [x] Dev-approval walkthrough — **done**; it drove the purely-contextual simplification (see Deviations)
+- ~~Mode pills / per-mode navigability / transient pill navigation / summary ⇄ detail / drill-in / six summary+detail render targets~~ — **SUPERSEDED** by owner direction at dev-approval (removed; the panel is purely contextual)
 
 ## Deviations from Plan
 
+- **Purely-contextual simplification — a frozen-spec deviation by owner direction at dev-approval (documented, not silently shipped).** The approved (frozen) spec specified mode **pills**, **transient navigation**, **summary ⇄ detail**, and **drill-in**. At the live dev review the owner directed that the panel be purely contextual with nothing selectable: those layers were **removed** (cross-builder browsing is the sidebar's job) and Attention became a fallback view, not a selectable mode. This is recorded here and in the spec/plan/review banners + issue #1049 (the current requirements) so the divergence from the frozen spec is explicit. It supersedes the Phase-4 pill/navigation/A2-zoom-out work below (kept as build history).
+- **Codev Dev panel view removed (#921), by owner direction.** It created a redundant second "Codev" section beside the contextual view; the always-visible status-bar chip stays (retargeted to reveal the running dev PTY's terminal tab).
 - **Phase 2 — visibility cache relocated to Phase 3.** The descriptor cache + `onDidChangeVisibility` re-post was inseparable from descriptor *posting* (Phase 3); implementing it in Phase 2 would have been dead, untested scaffolding. Formally relocated in the plan (not dropped) with its own Phase 3 deliverable + test.
 - **DI-when-needed.** The provider took `extensionUri` in Phase 2, `TerminalManager` in Phase 3, and the two stores in Phase 4 — each injected in the phase whose code uses it (injecting unused deps trips `noUnusedLocals`). Recorded in the plan.
-- **A2 navigation-scoping moved from the pure resolver to the provider (Phase 4, architect-accepted).** cmap surfaced that the resolver's artifact fallback made the cross-builder summary unreachable in-mode (colliding with the frozen always-navigable criterion). Moved the policy to `selectionForNavigate` and added the active-pill zoom-out; the pure resolver is now just `builderId → detail, else summary`. Contextual A2 (a worktree artifact's Document Review carrying its builderId) is unchanged.
+- **A2 navigation-scoping / active-pill zoom-out (Phase 4) — SUPERSEDED and WITHDRAWN.** During Phase 4, cmap and the architect drove an active-pill zoom-out and moving A2 navigation-scoping to the provider. The purely-contextual simplification then removed the entire navigation/summary layer, so these are moot — the architect explicitly withdrew the zoom-out / A2-navigation requirements. Recorded as history; not carried as unmet.
 - **Changelog not on this branch.** Per the repo convention (self-documented in `docs/releases/UNRELEASED.md`), the `apps/vscode/CHANGELOG.md` + `UNRELEASED.md` entries land on the `docs/vscode-changelog` branch as the architect's post-merge workflow; the entry text is prepared in `codev/state/spir-1049_thread.md`.
 
 ## Consultation Feedback
@@ -56,7 +58,7 @@ Spec: 2 rounds (Gemini APPROVE both; Codex/Claude REQUEST_CHANGES → COMMENT). 
 
 ### Phase 4 — Transient navigation (Rounds 1–3)
 - **Active pill not clickable (no path back to summary)** (Codex, Claude) → **Addressed**: `pillIsInteractive`. **A2 fallback made the summary unreachable** (Codex; Claude called it intended) → **Addressed** by moving A2 to the provider + zoom-out (architect-accepted). **Complete gesture family (active-summary/Document-Review no-op; zoom-out transient)** (architect) → **Addressed** with dedicated tests.
-- Non-blocking (deferred to dev-approval): a zoom-out to summary on a stationary diff/terminal surface has no in-mode path back to the contextual detail — evaluate the feel.
+- Non-blocking, now **MOOT**: a Phase-4 zoom-out-on-stationary-surface concern — removed with the whole navigation layer at dev-approval.
 
 No `CONSULT_ERROR` encountered.
 

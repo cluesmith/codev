@@ -71,6 +71,22 @@ export class SurfaceContextReader {
     return tabResource(classifyTab(vscode.window.tabGroups.activeTabGroup?.activeTab?.input));
   }
 
+  /**
+   * Whether focus most likely just moved to a builder terminal. VS Code fires no terminal-focus event
+   * when re-entering the already-active terminal, but it does fire `onDidChangeActiveTextEditor(undefined)`
+   * as focus leaves the editor. So when the active editor becomes undefined, a builder terminal is the
+   * active terminal, and the active tab is not a custom editor (which would itself hold focus — the
+   * markdownPreview → Document Review case), the terminal is the new focus. (Best-effort: focus moving
+   * to another non-editor UI while a builder terminal is active is a rare false positive that self-heals
+   * on the next editor interaction.)
+   */
+  terminalFocusLikely(): boolean {
+    if (this.getActiveBuilderId() === null) {
+      return false;
+    }
+    return classifyTab(vscode.window.tabGroups.activeTabGroup?.activeTab?.input).kind !== 'custom';
+  }
+
   read(): SurfaceRead {
     const inputs = this.buildInputs();
     return { context: deriveSurfaceContext(inputs), key: surfaceKey(inputs) };

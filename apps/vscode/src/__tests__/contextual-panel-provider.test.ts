@@ -250,6 +250,25 @@ describe('ContextualPanelProvider — surface resolution', () => {
     expect(last(posted).descriptor.kind).toBe('attention');
   });
 
+  it('re-activates Builder Inspector when focus returns to the already-active terminal', () => {
+    hoisted.state.activeTabInput = textTab('/w/src/foo.ts');
+    hoisted.state.activeBuilderId = 'spir-1049';
+    const provider = newProvider();
+    const { view, posted } = makeView();
+    provider.resolveWebviewView(view);
+
+    hoisted.state.listeners['terminal']?.({}); // enter terminal → Builder Inspector
+    fireSelection(); // back to editor → attention
+    expect(last(posted).descriptor.kind).toBe('attention');
+
+    // Re-enter the SAME terminal: onDidChangeActiveTerminal does NOT fire (terminal unchanged), but
+    // the active editor becomes undefined. With a builder terminal active and a non-custom tab, that
+    // is the terminal regaining focus.
+    hoisted.state.activeEditorFsPath = undefined;
+    hoisted.state.listeners['activeEditor']?.(undefined);
+    expect(last(posted).descriptor.kind).toBe('builder-inspector');
+  });
+
   it('re-resolves when navigating between files inside a multi-file diff (active editor changes)', () => {
     hoisted.state.activeTabInput = { multiDiff: true }; // untyped input → 'other'
     hoisted.state.activeEditorFsPath = '/w/.builders/b/a.ts';
