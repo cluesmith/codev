@@ -567,7 +567,7 @@ export async function activate(context: vscode.ExtensionContext) {
 	// surface and posts a ModeDescriptor to its webview. Takes the terminal manager for the
 	// builder-terminal surface (getActiveBuilderId). (#921's Codev Dev panel view was removed —
 	// its status is carried by the status-bar chip below.)
-	const contextualPanelProvider = new ContextualPanelProvider(context.extensionUri, terminalManager!);
+	const contextualPanelProvider = new ContextualPanelProvider(context.extensionUri, terminalManager!, overviewCache);
 	context.subscriptions.push(
 		buildersView,
 		pullRequestsView,

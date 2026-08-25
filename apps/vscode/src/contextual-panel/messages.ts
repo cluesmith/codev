@@ -7,11 +7,18 @@
  */
 
 import type { ModeDescriptor } from './types.js';
+import type { AttentionSummary } from '@cluesmith/codev-sdk/builder-helpers';
 
 /** Host -> webview: render this resolved descriptor. */
 export interface RenderMessage {
   type: 'render';
   descriptor: ModeDescriptor;
+  /**
+   * The Attention roll-up, present only when `descriptor.kind === 'attention'`. Carried alongside
+   * the descriptor (not inside it) so `ModeDescriptor` — the pure resolver's output — stays free of
+   * overview data. Absent for every other mode.
+   */
+  attention?: AttentionSummary;
 }
 
 export type HostToWebviewMessage = RenderMessage;
