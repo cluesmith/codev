@@ -464,3 +464,19 @@ offering mode pills to browse. Purely contextual: no pinning, no persisted panel
   terminal"). Stale tooltip already fixed prior.
 - 78 files/918 tests, types+eslint+build clean. Pushed 06ef13297. Re-running PR cmap iter3.
 - Still holding pr gate for Amr.
+
+### 2026-08-25 — PR cmap iter3 (commit f68eb8fab): 2 APPROVE / 1 REQUEST_CHANGES
+- Gemini APPROVE. Claude APPROVE (HIGH) — reviewed the terminalFocusLikely path, called its residual
+  "real and documented … accepted trade-off." Codex REQUEST_CHANGES (HIGH), one issue (terminal focus edges).
+- Codex issue split:
+  1. Terminal-in-editor-area tabs (TabInputTerminal) read as EDITOR focus → demoted a focused builder
+     terminal. FIXED: classifyTab → kind 'terminal'; onTabEvent skips editor-note for terminal tabs
+     (that's terminal focus, already tracked by onDidChangeActiveTerminal). +regression test. Verified
+     TabInputTerminal in pinned @types/vscode 1.105.
+  2. Re-enter an already-active custom editor (markdownPreview) FROM a builder terminal → neither active
+     tab nor active text editor changes → VS Code fires NO event → can stay Builder Inspector until next
+     editor interaction. Inherent event-gap (same class as terminal re-entry); full close needs focus
+     polling the design avoids. ACCEPTED RESIDUAL — both other reviewers approve. Documented under new
+     "Known Limitations (focus tracking)" in the review.
+- 78 files/919 tests, types+lint+build clean. Pushed f68eb8fab. Actionable finding fixed; residual is an
+  owner/architect call at the pr gate. Holding pr gate for Amr.
