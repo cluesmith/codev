@@ -35,6 +35,7 @@
 
 ## Polish
 
+- **Forward-hunk presses no longer error inside a visibly changed hunk.** The press validated the cursor against a diff snapshot taken when the diff opened, while dial navigation followed the live editor — so a builder committing after open, or a deletion-only change, failed exactly where the dial landed. Presses now re-check the diff at press time and degrade to symbol or whole-file with an honest note instead of erroring; forward-hunk keeps forwarding exactly the changed lines (#1534, PR #1550).
 <!-- Small vscode items as bullets:
        - **<Headline>** (#<issue>, PR #<pr>). <One short paragraph of context.>
      Move out to its own ## section if the entry grows past ~3 sentences. -->
