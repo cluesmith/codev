@@ -110,6 +110,7 @@ function makeView() {
       onVisibility = fn;
       return { dispose() {} };
     },
+    onDidDispose: () => ({ dispose() {} }),
   };
   return {
     view: view as unknown as import('vscode').WebviewView,

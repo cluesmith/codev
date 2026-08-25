@@ -1,3 +1,8 @@
+---
+approved: 2026-08-24
+validated: [gemini, codex, claude]
+---
+
 # Specification: VSCode Contextual Bottom Panel (mode resolver + Attention fallback)
 
 <!--

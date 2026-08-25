@@ -8,23 +8,21 @@
 
 import type { ModeDescriptor, ModeKind } from './types.js';
 
-export const MODE_ORDER: readonly ModeKind[] = [
-  'document-review',
-  'code-review',
-  'builder-inspector',
-  'attention',
-];
-
-export function isModeKind(value: unknown): value is ModeKind {
-  return typeof value === 'string' && (MODE_ORDER as readonly string[]).includes(value);
-}
-
+// Exhaustive by construction: a `Record<ModeKind, string>` forces every union member to appear, so a
+// fifth `ModeKind` fails to compile until it is listed here. `MODE_ORDER` and `isModeKind` both derive
+// from it, so neither can drift (matching resolver.ts's `Record`-keyed `MODE_KINDS`).
 export const MODE_LABELS: Record<ModeKind, string> = {
   'document-review': 'Document Review',
   'code-review': 'Code Review',
   'builder-inspector': 'Builder Inspector',
   'attention': 'Attention',
 };
+
+export const MODE_ORDER: readonly ModeKind[] = Object.keys(MODE_LABELS) as ModeKind[];
+
+export function isModeKind(value: unknown): value is ModeKind {
+  return typeof value === 'string' && Object.prototype.hasOwnProperty.call(MODE_LABELS, value);
+}
 
 /** A single mode pill's display state, derived from the resolved descriptor. */
 export type PillState = 'active' | 'navigable' | 'disabled';

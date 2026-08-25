@@ -105,6 +105,11 @@ export class ContextualPanelProvider implements vscode.WebviewViewProvider {
           this.repost();
         }
       }),
+      webviewView.onDidDispose(() => {
+        if (this.view === webviewView) {
+          this.view = undefined;
+        }
+      }),
     );
 
     // Seed focus/transition state, then force the current descriptor to the fresh webview.
@@ -245,7 +250,7 @@ export class ContextualPanelProvider implements vscode.WebviewViewProvider {
 
   private post(descriptor: ModeDescriptor, summary: Summary | undefined): void {
     const message: HostToWebviewMessage = { type: 'render', descriptor, summary };
-    void this.view?.webview.postMessage(message);
+    this.view?.webview.postMessage(message);
   }
 
   private buildHtml(webview: vscode.Webview): string {
