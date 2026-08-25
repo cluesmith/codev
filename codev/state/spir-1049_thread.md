@@ -449,3 +449,18 @@ offering mode pills to browse. Purely contextual: no pinning, no persisted panel
 - 78 files / 917 tests, types+eslint+build clean. Pushed cc8814836. Re-running PR cmap (iter2).
 - Flagged to owner: chip is now display-only (no panel to focus) — confirm OK.
 - Still at pr gate (human approval) — NOT merging.
+
+### 2026-08-25 — PR cmap iter2 addressed (commit 06ef13297) + architect dev-chip directive
+- iter2: Gemini APPROVE; Codex+Claude REQUEST_CHANGES. Fixed:
+  * Terminal RE-ENTRY (editor→same terminal didn't reactivate Builder Inspector — activeTerminal doesn't
+    re-fire). Fix: onDidChangeActiveTextEditor(undefined) + terminalFocusLikely() (builder active + tab
+    not custom) → noteTerminalFocused. +regression test. Residual documented.
+  * Dead code: deleted views/dev.ts (DevTreeProvider); removed unreachable codev.dev.showSidebar/hideSidebar
+    (defs+palette+regs+dev-actions fns); retained+documented formatUptime/extractDevPort (test-only pure).
+  * Review Spec Compliance rewritten to shipped model (pills/summary/drill-in SUPERSEDED); Deviations
+    document frozen-spec redirect by owner; zoom-out/A2 marked withdrawn/moot. Stale comments fixed.
+- Architect dev-chip directive: retarget chip (not display-only) to reveal the dev PTY terminal —
+  DONE (terminalManager.revealDevTerminal() + codev.dev.reveal command; tooltip "Click to show the dev
+  terminal"). Stale tooltip already fixed prior.
+- 78 files/918 tests, types+eslint+build clean. Pushed 06ef13297. Re-running PR cmap iter3.
+- Still holding pr gate for Amr.
