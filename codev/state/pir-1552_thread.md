@@ -175,3 +175,24 @@ never close a real file editor. Full suite 952 pass; check-types+eslint clean.
 Residual: closeActiveEditor-as-discard inferred from trace (gated, safe), awaits Amr's re-test to confirm
 it visibly discards; asked architect to bundle-verify the exact Esc-bound discard id as the definitive
 option. Reported root cause to architect. Waiting on Amr to restart debug session + re-capture the tracer.
+
+## Architect DESIGN RULING — discard stands (2026-08-26) [RECORD IN REVIEW]
+
+Main bundle-verified all three trace facts at source and established there is NO native discard command:
+Esc IS workbench.action.hideComment and even used correctly only COLLAPSES the widget, draft surviving.
+So closeActiveEditor-gated-on-comment-input-focus is not a workaround — it is the ONLY true discard. KEEP it.
+Two verified reasons discard is correct (record in review; note hide-with-draft-survival as
+considered-and-rejected, reason 2 the decider):
+  1. Canvas parity: canvas composer-cancel → cancelComposer → setComposingLine(null) UNMOUNTS the composer,
+     destroying the draft (local React state). Same gesture, same meaning — dial-cancel discards in both modes.
+  2. Condition (b) safety: a hidden-but-surviving draft could be resurrected + SUBMITTED by a later
+     open-or-submit press = phantom submit of cancelled text. Discard makes that structurally impossible.
+
+Canvas precedent: canvas verbs are VIEW-scoped, not focus-scoped ("a remote driver never moved focus into
+the textarea", ArtifactCanvas.tsx:982-984). Native built-ins ARE focus-gated (submitComment no-ops without
+comment-editor focus). So the OPEN path must leave focus IN the input for a bare open→submit dial sequence.
+My open uses workbench.action.addComment, which focuses the reply input for RANGE comments (trace press 4:
+activeEditor=commentinput after a range open). The focus-detection fix then makes submit fire only while
+focused. Edge to watch: a hunk press that degrades to a whole-FILE comment (fileComment:true) — confirm on
+re-test whether it also leaves focus in the input; if not, that whole-file deck case needs a focus nudge.
+Amr can overrule discard at re-test (one-function swap to draft-survival) but discard is the presented design.
