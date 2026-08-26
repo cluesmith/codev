@@ -29,6 +29,22 @@
 > No re-gate (precedent: pir-1494's owner-redirect at dev-approval): the dev gate itself is the
 > checkpoint and stays pending Amr's re-test of the expanded build. Files stayed in-fence:
 > `review-queue/feedback.ts` + `comments/builder-review.ts` (+ the 3-line `extension.ts` wiring).
+>
+> ### Delta 2 — Option A itself was corrected during implementation (ruling B, shipped)
+>
+> Option A above is **superseded in two respects** by what dev-approval testing forced (full record
+> in `codev/reviews/1552-*.md`):
+> 1. **`cancel = workbench.action.hideComment` is wrong** — it only *collapses* the widget (draft
+>    survives); `closeActiveEditor` closes the host editor. There is **no native discard**. Dial
+>    cancel was therefore **dropped** (ruling B): `decideFeedbackAction` is now `open | submit | noop`
+>    — with a box open the **file dial is a no-op**, not cancel. Discard is the visible **Cancel
+>    button** (`codev.cancelBuilderComment`, disposes the thread). Thread-owning dial-cancel = **#1560**.
+> 2. **selection = inert** became **selection = open-or-submit** (mirrors the hunk dial, so whichever
+>    dial opened the box can also submit it).
+>
+> Composer-open state is tracked by OUR own flag (`composerOpen`, set only when this controller opens
+> a box), **not** a focused-comment-input probe — a CMAP finding: keying off the focused comment URI
+> would let a diff dial submit the plan/spec (`codev-review`) comment box.
 
 ## Understanding
 

@@ -136,11 +136,13 @@ rather than displacing a capped hot lesson.
 ## Things to Look At During PR Review
 
 - **`decideFeedbackAction` purity + the composer-open signal.** The dial vocabulary is `open | submit |
-  noop` (no cancel). `isBuilderComposerOpen()` unions our tracked flag with a live
-  `isCommentInputFocused()` check (active editor is a `commentinput-…` doc / `comment` scheme) — this
-  both recovers from a stale flag and ensures submit fires only while the box is focused, so the
-  focus-gated `editor.action.submitComment` reliably lands. Worth confirming the detection predicate is
-  robust to host vari/scheme differences (VS Code vs the IDE-bundled Codev Desktop build).
+  noop` (no cancel). `isBuilderComposerOpen()` reads **this controller's own `composerOpen` flag** (set
+  only when we open a box). It deliberately does **not** probe "is a comment input focused" — CMAP
+  (#1552) caught that a focus probe would let a diff-review dial submit the *plan/spec* review box
+  (`codev-review`, a second native comment controller on the same extension whose `commentinput-…`
+  URIs are indistinguishable). Submit stays reliable because `editor.action.submitComment` is
+  focus-gated host-side and the normal open→dictate→submit flow keeps the box focused; a stale flag
+  (native Escape) yields a no-op submit or an extra open, never a phantom submit.
 - **Mode-aware Submit unification** (owner-approved at the plan gate): in forward mode the gutter "+" /
   context-menu / codelens Submit forward too, not just the deck gestures. Intentional; called out so it
   reads as design, not drift.
