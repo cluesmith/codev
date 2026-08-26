@@ -139,3 +139,22 @@ STILL TO VERIFY at deck (Amr): (1) Submit now blue/right, Enter+Changes/Scroll d
 dial cancel — uses workbench.action.hideComment; if it still doesn't discard, the reliable fallback is
 the visible Cancel BUTTON (click = dispose, works), and I'll get the exact Esc-bound cancel command id
 from the architect (bundle-verified) rather than guess again.
+
+## Queue path VERIFIED working; dial submit/cancel still failing → added transmission diagnostic (2026-08-26)
+
+Amr reviewing shannon builder 4392: pending-comments.json has 6 comments, each with real typed prose
+(NO placeholder) — so the #1552 queue path WORKS end-to-end (submitted via button/Cmd+Enter). But deck
+DIAL submit/cancel still fails; earlier he saw "focus a builder diff first" on the 2nd dial press =
+gesture went to OPEN = composerOpen read false. Couldn't resolve by static reading (trace says it should
+be true), and repeated build/reload confusion (EDH loads dist/extension.js as-is; package.json refreshes
+on reload but compiled JS needs rebuild).
+
+Architect (both, via #1406 misroute + main relay): root-cause the transmission BEFORE proposing changes;
+report WHERE it is — if command-relay.ts or apps/streamdeck, that's out of fence (route, don't reach).
+Panel-body gap filed as #1559 (not this lane); contextual-panel fence re-confirmed.
+
+Added TEMP diagnostic (commit 5c5b5dbd2, revert before PR): traces every gesture + composer transition to
+a "Codev Feedback Debug" output channel, tagged [dial-diag-v1] (also proves build freshness). Bisects:
+no [dial-diag-v1] on a dial press → command never reaches host (relay/deck, OUT of fence); composerOpen=false
+on 2nd press → in-fence state bug; exec-but-no-effect → built-in behaviour. Waiting on Amr to reload EDH,
+open the channel, reproduce (open via dial → 2nd press submit; cancel dial), and share the output.
