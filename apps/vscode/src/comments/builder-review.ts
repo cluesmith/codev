@@ -63,6 +63,55 @@ function bodyText(body: string | vscode.MarkdownString): string {
   return body.value;
 }
 
+/**
+ * VS Code built-ins that drive the FOCUSED native comment reply box (#1552),
+ * so the deck feedback gestures can submit / cancel an open composer.
+ *
+ * Verified against the bundled workbench source (do not trust memory here):
+ *   - submit is `editor.action.submitComment` — the `editor.*` id. NOTE:
+ *     `workbench.action.submitComment` does NOT exist; wiring it would make
+ *     every submit a silent no-op.
+ *   - cancel/discard is `workbench.action.hideComment`.
+ * Bundle presence proves the id exists, not its exact focused-comment behaviour,
+ * so both stay flagged for host (EDH / Codev Desktop) confirmation.
+ */
+const SUBMIT_FOCUSED_COMMENT = 'editor.action.submitComment';
+const CANCEL_FOCUSED_COMMENT = 'workbench.action.hideComment';
+
+/**
+ * Whether a builder-review comment box is currently open — tracked here, in the
+ * composer's owner, so the deck feedback router (#1552) can drive it. Set true
+ * when we open a box; cleared when it submits or cancels.
+ *
+ * A native Escape dismissal is NOT observable via the stable comment API, so
+ * this flag can stale-stick `true`. The router treats that as cancel-biased: a
+ * stale flag can only cost a submit no-op or an extra open, never a phantom
+ * submit (SUBMIT runs the built-in, which no-ops when no comment editor is
+ * focused). Both executors clear the flag, so it self-heals on the next gesture.
+ */
+let composerOpen = false;
+
+/** True while a builder-review comment box is open (the deck router reads this). */
+export function isBuilderComposerOpen(): boolean { return composerOpen; }
+
+/**
+ * Submit the focused composer via VS Code's built-in (#1552). The built-in is a
+ * no-op when no comment editor is focused, so a stale `composerOpen` can never
+ * resurrect cancelled prose. Our `codev.submitBuilderComment` handler also
+ * clears the flag on a real submit; clearing here self-heals the no-op case.
+ */
+export async function submitActiveBuilderComposer(): Promise<void> {
+  await vscode.commands.executeCommand(SUBMIT_FOCUSED_COMMENT);
+  composerOpen = false;
+}
+
+/** Discard the focused in-progress composer via VS Code's built-in (#1552),
+ *  leaving nothing queued or forwarded. */
+export async function cancelActiveBuilderComposer(): Promise<void> {
+  await vscode.commands.executeCommand(CANCEL_FOCUSED_COMMENT);
+  composerOpen = false;
+}
+
 /** The 1-based inclusive range a thread's anchor denotes. */
 function threadLineRange(thread: vscode.CommentThread): LineRange {
   const range = thread.range;
@@ -75,6 +124,9 @@ export function activateBuilderReviewComments(
   store: ReviewQueueStore,
   overviewCache: OverviewCache,
 ): void {
+  // Reset composer state on (re)activation, so a reload never starts thinking a
+  // box is open (#1552).
+  composerOpen = false;
   const controller = vscode.comments.createCommentController(
     CONTROLLER_ID,
     'Codev Builder Review',
@@ -234,6 +286,9 @@ export function activateBuilderReviewComments(
   async function openCommentInput(fsPath: string, range: LineRange | null): Promise<void> {
     const editor = vscode.window.activeTextEditor;
     if (!editor || editor.document.uri.fsPath !== fsPath) { return; }
+    // A box is about to open and take focus — mark the composer open so the deck
+    // feedback gestures drive it (submit/cancel) instead of stacking threads (#1552).
+    composerOpen = true;
     if (range) {
       // endColumn spans the last line's content (clamped by the editor);
       // ending at column 1 would exclude the last line from the range
@@ -291,6 +346,9 @@ export function activateBuilderReviewComments(
   // canonical thread from the queue.
   reg('codev.submitBuilderComment', async (reply: vscode.CommentReply) => {
     const thread = reply.thread;
+    // Any Submit — empty or not — ends the composer, so the next deck gesture
+    // opens a fresh box rather than trying to drive a closed one (#1552).
+    composerOpen = false;
     // Empty / whitespace submit leaves nothing behind: no queue entry, no
     // forward, no orphan thread. (Escape/Cancel already disposes the in-progress
     // thread; this covers a Submit with a blank body.)
