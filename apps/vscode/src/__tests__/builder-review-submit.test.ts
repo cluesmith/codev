@@ -19,6 +19,7 @@ const h = vi.hoisted(() => {
   }
   const state = {
     mode: 'comment' as string,
+    activeFsPath: undefined as string | undefined,
     handlers: new Map<string, (...args: never[]) => unknown>(),
     executed: [] as Array<{ command: string; args: unknown[] }>,
   };
@@ -46,7 +47,10 @@ vi.mock('vscode', () => ({
     executeCommand: vi.fn(async (command: string, ...args: unknown[]) => { h.state.executed.push({ command, args }); }),
   },
   window: {
-    activeTextEditor: undefined,
+    get activeTextEditor() {
+      if (!h.state.activeFsPath) { return undefined; }
+      return { document: { uri: { fsPath: h.state.activeFsPath }, lineCount: 40, lineAt: () => ({ text: '' }) } };
+    },
     visibleTextEditors: [],
     onDidChangeActiveTextEditor: () => ({ dispose() {} }),
     showWarningMessage: vi.fn(),
@@ -59,7 +63,12 @@ vi.mock('vscode', () => ({
   languages: { registerCodeLensProvider: () => ({ dispose() {} }) },
 }));
 
-const { activateBuilderReviewComments } = await import('../comments/builder-review.js');
+const {
+  activateBuilderReviewComments,
+  isBuilderComposerOpen,
+  submitActiveBuilderComposer,
+  cancelActiveBuilderComposer,
+} = await import('../comments/builder-review.js');
 const { setDiffInjectSession } = await import('../diff-inject-codelens.js');
 
 const ENTRY = { fsPath: '/wt/pkg/src/a.ts', builderId: 'pir-9', relPath: 'pkg/src/a.ts', hunks: [], baseRef: 'main', worktreePath: '/wt' };
@@ -90,11 +99,21 @@ function forwardCalls() {
 beforeEach(() => {
   h.state.handlers.clear();
   h.state.executed = [];
+  h.state.activeFsPath = undefined;
   added.length = 0;
   setDiffInjectSession([]);
+  // activate resets composerOpen to false each run.
   activateBuilderReviewComments({ subscriptions: [] } as never, storeStub, overviewStub);
   setDiffInjectSession([ENTRY]);
 });
+
+/** Open a box via the authoring entry point the codelens + feedback gestures use. */
+function openBox() {
+  return h.state.handlers.get('codev.commentForBuilder') as (...a: unknown[]) => Promise<void>;
+}
+function builtinCalls() {
+  return h.state.executed.map(e => e.command);
+}
 
 describe('builder-review Submit delivery (#1552)', () => {
   it('comment mode: enqueues the authored prose with the thread range', async () => {
@@ -147,5 +166,56 @@ describe('builder-review Submit delivery (#1552)', () => {
     const thread = makeThread({ start: { line: 4 }, end: { line: 8 } });
     await submit()({ thread, text: '  trailing spaces kept out  ' });
     expect(added[0].comment.body).toBe('trailing spaces kept out');
+  });
+});
+
+describe('builder-review composer state + deck submit/cancel executors (#1552)', () => {
+  it('opening a box marks the composer open; Submit clears it', async () => {
+    expect(isBuilderComposerOpen()).toBe(false);
+    h.state.activeFsPath = ENTRY.fsPath; // openCommentInput requires the active editor to be the file
+    await openBox()('pir-9', ENTRY.fsPath, 'pkg/src/a.ts', null);
+    expect(isBuilderComposerOpen()).toBe(true);
+    // VS Code focused the reply box via the built-in add-comment command.
+    expect(builtinCalls()).toContain('workbench.action.addComment');
+
+    const thread = makeThread(undefined);
+    await submit()({ thread, text: 'a real comment' });
+    expect(isBuilderComposerOpen()).toBe(false);
+  });
+
+  it('submitActiveBuilderComposer drives the VERIFIED built-in editor.action.submitComment and clears the flag', async () => {
+    h.state.activeFsPath = ENTRY.fsPath;
+    await openBox()('pir-9', ENTRY.fsPath, 'pkg/src/a.ts', null);
+    expect(isBuilderComposerOpen()).toBe(true);
+    h.state.executed = [];
+    await submitActiveBuilderComposer();
+    // Must be editor.action.* — workbench.action.submitComment does not exist.
+    expect(builtinCalls()).toContain('editor.action.submitComment');
+    expect(builtinCalls()).not.toContain('workbench.action.submitComment');
+    expect(isBuilderComposerOpen()).toBe(false);
+  });
+
+  it('cancelActiveBuilderComposer drives workbench.action.hideComment and clears the flag', async () => {
+    h.state.activeFsPath = ENTRY.fsPath;
+    await openBox()('pir-9', ENTRY.fsPath, 'pkg/src/a.ts', null);
+    h.state.executed = [];
+    await cancelActiveBuilderComposer();
+    expect(builtinCalls()).toContain('workbench.action.hideComment');
+    expect(isBuilderComposerOpen()).toBe(false);
+  });
+
+  it('self-heal: a submit executor on a stale-open flag still runs only the (no-op) built-in and clears — never resurrects prose', async () => {
+    // Simulate a stale flag: a box was opened then dismissed by native Escape
+    // (unobservable), leaving composerOpen true with no focused editor.
+    h.state.activeFsPath = ENTRY.fsPath;
+    await openBox()('pir-9', ENTRY.fsPath, 'pkg/src/a.ts', null);
+    expect(isBuilderComposerOpen()).toBe(true);
+    h.state.executed = [];
+    added.length = 0;
+    await submitActiveBuilderComposer(); // built-in is a no-op host-side when nothing is focused
+    expect(builtinCalls()).toEqual(['editor.action.submitComment']); // nothing else fired
+    expect(added).toHaveLength(0); // no queue write, no phantom submit
+    expect(forwardCalls()).toHaveLength(0);
+    expect(isBuilderComposerOpen()).toBe(false); // healed
   });
 });
