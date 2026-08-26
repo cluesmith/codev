@@ -244,3 +244,22 @@ Next: push, open PR (--body-file the review), porch done --pr, then porch done t
 (advisory, max_iterations 1) → pr gate. At pr gate: branch freezes before gate recorded, gate-record commit
 is last write, silence through merge. If CI pends on known flakes (#1502-class browser job, #1558 Tower all-401)
 tell architect, don't retry.
+
+## CMAP iter1 + fixes → PR GATE pending (2026-08-26, PR #1561)
+
+Verdicts: Gemini APPROVE, Codex REQUEST_CHANGES, Claude COMMENT. Both flagged the same 2 substantive
+issues; I FIXED all 4 (rebuttal at 1552-review-iter1-rebuttals.md):
+1. Cross-controller composer detection — isBuilderComposerOpen() unioned in isCommentInputFocused(),
+   so a diff dial could submit the plan/spec (codev-review) comment box. Now reads OUR composerOpen
+   flag only (removed the focus probe); added a cross-controller regression test. Residual: narrow
+   stale-flag+plan-box edge, non-destructive, documented (#1560 removes it).
+2. Submit label "Queue Comment for Builder" misleading in default forward mode (forwards, not queues)
+   → mode-neutral "Send to Builder" + placeholder.
+3. feedback.test.ts stale header vocabulary → rewritten.
+4. Plan scope-delta still Option A (file=cancel/hideComment) → added Delta 2 recording ruling B.
+Also updated arch.md (composer flag not a focus probe + cross-controller reason) + review Things-to-Look-At.
+951 tests / check-types / eslint / build green. Commits f9880f77d; PR body refreshed.
+
+At PR GATE (pending). Branch FROZEN — no more writes until human decides; gate-record commit is the last
+write. CI on #1561 running (Artifact-Canvas Browser + Tower Integration = known-flaky watch). Notified
+architect with CMAP outcome. Waiting; do not retry flaky CI.
