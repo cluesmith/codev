@@ -121,3 +121,21 @@ handler). Pushed 9ed92b843. Full suite 80 files / 950 tests; check-types + eslin
 
 HOST-VERIFY (named, can't drive headlessly): that VS Code renders Submit (not Cancel) as the primary
 button so Enter/Changes-dial still SUBMIT after adding the second inline button — flagged to Amr.
+
+## Button reversal + selection-dial fixes (2026-08-26, commit 2da54ca32)
+
+Amr's screenshots: builder box rendered [Queue Comment grey/left] [Cancel blue/PRIMARY/right] — the
+REVERSE of the target [Cancel white/left] [Comment blue/right]. My inline@N guess was backwards:
+empirically @1 = rightmost+primary. Root-cause insight: because Cancel was primary, the deck submit
+(editor.action.submitComment fires the PRIMARY action) was triggering CANCEL — explaining "press
+again to submit doesn't work." Fixed: submit@1 (primary/right), cancel@2 (secondary/left).
+
+Also: Amr opens with the 3rd (Scroll/selection) dial and expects a 2nd press to submit; I'd made
+selection inert-when-open. Changed decideFeedbackAction so the FILE dial is the sole cancel and every
+other open dial (hunk, selection) is open-or-submit — whichever dial opened the box, 2nd press submits.
+Updated feedback.test (selection now submits). Full suite 80 files / 950 tests; check-types+eslint+build clean.
+
+STILL TO VERIFY at deck (Amr): (1) Submit now blue/right, Enter+Changes/Scroll dial submit; (2) Files
+dial cancel — uses workbench.action.hideComment; if it still doesn't discard, the reliable fallback is
+the visible Cancel BUTTON (click = dispose, works), and I'll get the exact Esc-bound cancel command id
+from the architect (bundle-verified) rather than guess again.
