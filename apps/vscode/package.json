@@ -411,12 +411,12 @@
       },
       {
         "command": "codev.submitBuilderComment",
-        "title": "Codev: Queue Comment for Builder",
+        "title": "Queue Comment for Builder",
         "enablement": "!commentIsEmpty"
       },
       {
         "command": "codev.cancelBuilderComment",
-        "title": "Codev: Cancel"
+        "title": "Cancel"
       },
       {
         "command": "codev.deleteBuilderComment",
