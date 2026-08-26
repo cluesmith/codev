@@ -76,16 +76,14 @@ export function logFeedbackDebug(msg: string): void {
  * VS Code built-ins that drive the FOCUSED native comment reply box (#1552),
  * so the deck feedback gestures can submit / cancel an open composer.
  *
- * Verified against the bundled workbench source (do not trust memory here):
- *   - submit is `editor.action.submitComment` — the `editor.*` id. NOTE:
- *     `workbench.action.submitComment` does NOT exist; wiring it would make
- *     every submit a silent no-op.
- *   - cancel/discard is `workbench.action.hideComment`.
- * Bundle presence proves the id exists, not its exact focused-comment behaviour,
- * so both stay flagged for host (EDH / Codev Desktop) confirmation.
+ * `editor.action.submitComment` is the submit id (the `editor.*` id — NOTE:
+ * `workbench.action.submitComment` does NOT exist; it would be a silent no-op).
+ * It only acts on a FOCUSED comment editor, so submit is gated on that focus via
+ * `isCommentInputFocused()`. Cancel does NOT use `workbench.action.hideComment`
+ * (proven via #1552 diagnostics NOT to discard the box); it closes the focused
+ * comment-input editor instead — see `cancelActiveBuilderComposer`.
  */
 const SUBMIT_FOCUSED_COMMENT = 'editor.action.submitComment';
-const CANCEL_FOCUSED_COMMENT = 'workbench.action.hideComment';
 
 /**
  * Whether a builder-review comment box is currently open — tracked here, in the
@@ -100,8 +98,24 @@ const CANCEL_FOCUSED_COMMENT = 'workbench.action.hideComment';
  */
 let composerOpen = false;
 
-/** True while a builder-review comment box is open (the deck router reads this). */
-export function isBuilderComposerOpen(): boolean { return composerOpen; }
+/** True when the focused editor IS a native comment reply box. VS Code makes the
+ *  in-progress comment input the active editor as a `commentinput-…` document
+ *  (observed via #1552 diagnostics); detecting it is more reliable than our own
+ *  flag, and it means submit/cancel run ONLY while the box is actually focused —
+ *  which is exactly when the built-ins (editor.action.submitComment /
+ *  closeActiveEditor) act on it. */
+function isCommentInputFocused(): boolean {
+  const uri = vscode.window.activeTextEditor?.document.uri;
+  if (!uri) { return false; }
+  return uri.scheme === 'comment' || uri.fsPath.includes('commentinput');
+}
+
+/** True while a builder-review comment box is open (the deck router reads this).
+ *  Union of our tracked flag and the live focused-comment-input signal, so a
+ *  stale flag can never strand the box (#1552). */
+export function isBuilderComposerOpen(): boolean {
+  return composerOpen || isCommentInputFocused();
+}
 
 /**
  * Submit the focused composer via VS Code's built-in (#1552). The built-in is a
@@ -115,11 +129,17 @@ export async function submitActiveBuilderComposer(): Promise<void> {
   composerOpen = false;
 }
 
-/** Discard the focused in-progress composer via VS Code's built-in (#1552),
- *  leaving nothing queued or forwarded. */
+/** Discard the focused in-progress composer (#1552), leaving nothing queued or
+ *  forwarded. `workbench.action.hideComment` was proven (via #1552 diagnostics)
+ *  NOT to discard the box; instead we close the focused comment-input editor,
+ *  which the box IS. This is GATED on the commentinput check so it can never
+ *  close a real file editor by mistake. */
 export async function cancelActiveBuilderComposer(): Promise<void> {
-  logFeedbackDebug(`cancelActiveBuilderComposer → exec ${CANCEL_FOCUSED_COMMENT} (composerOpen was ${composerOpen})`);
-  await vscode.commands.executeCommand(CANCEL_FOCUSED_COMMENT);
+  const onCommentInput = isCommentInputFocused();
+  logFeedbackDebug(`cancelActiveBuilderComposer → onCommentInput=${onCommentInput} (composerOpen was ${composerOpen})`);
+  if (onCommentInput) {
+    await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
+  }
   composerOpen = false;
 }
 
