@@ -1,5 +1,35 @@
 # PIR Plan: Review-flag gestures must author prose (native inline thread), no promptless default
 
+> ## Scope delta — owner-ruled at dev-approval (2026-08-26)
+>
+> **The scope below is SUPERSEDED in one respect.** The original plan assumed the native comment
+> box's own Submit/Cancel (keyboard `Cmd+Enter` / `Escape`, like spec/plan authoring) was enough.
+> Dev-approval testing showed it is not for the **deck-driven, dictation** workflow this feature
+> exists for: a Stream Deck dial can *open* the box but nothing on the deck can submit or cancel it,
+> because the diff-mode review dials — unlike the artifact-canvas composer (#1425) — have no
+> submit/cancel gesture. Amr (owner), testing at the deck, ruled in-session at the dev gate:
+>
+> > "we need to achieve parity first, the implementation is currently unusable."
+>
+> **Approved expansion (Option A, architect-ruled with three conditions):** VS Code becomes the
+> diff-mode *composer owner* and interprets the SAME `feedback-*` verbs contextually — while a
+> builder-review box is open, **hunk press = open-or-submit, file press = cancel, selection =
+> inert** — exactly mirroring the canvas composer. No deck or command-relay change; parity by
+> architecture. The state machine is a pure, unit-tested function (`decideFeedbackAction`), it is
+> cancel-biased (a stale-open flag can only cost a no-op or an extra open, never a phantom submit,
+> because SUBMIT runs VS Code's built-in `editor.action.submitComment`, a no-op when nothing is
+> focused), and the native-Escape staleness edge is documented as a bounded known limitation.
+> Built-in ids were verified against the bundled workbench source: submit = `editor.action.submitComment`
+> (NOT `workbench.action.submitComment`, which does not exist), cancel = `workbench.action.hideComment`.
+>
+> **Not built (recorded follow-up):** Option B — dedicated `submit-comment`/`cancel-comment` relay
+> verbs + deck-lane wiring — is the cleaner long-term shape if Option A's Escape edge proves real in
+> use. Deferred, not implemented here.
+>
+> No re-gate (precedent: pir-1494's owner-redirect at dev-approval): the dev gate itself is the
+> checkpoint and stays pending Amr's re-test of the expanded build. Files stayed in-fence:
+> `review-queue/feedback.ts` + `comments/builder-review.ts` (+ the 3-line `extension.ts` wiring).
+
 ## Understanding
 
 The three review-flag gestures — `codev.feedbackCurrentFileToBuilder`, `-CurrentHunkToBuilder`,

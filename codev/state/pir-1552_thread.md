@@ -75,3 +75,36 @@ no contextual-panel/OverviewCache, no types/Tower.
 
 Now at dev-approval gate (Amr's gate; evidence = native thread seen running on the gesture, Submit
 queues/forwards typed prose per mode, Cancel/empty nothing, DECK_FLAG_BODY gone).
+
+## Scope EXPANDED at dev-approval — deck composer parity (2026-08-26)
+
+Amr, testing at the deck, found the box opens via a dial but nothing on the deck can submit/cancel
+it (diff-mode review dials have no submit/cancel gesture, unlike the canvas composer #1425). He
+ruled: "we need to achieve parity first, the implementation is currently unusable." Architect
+approved Option A (VS Code = diff-mode composer owner, interprets the same feedback-* verbs
+contextually) with 3 conditions: (a) mirror canvas exactly — hunk=open-or-submit, file=cancel,
+selection=inert; (b) pure unit-tested cancel-biased state machine, never a phantom submit; (c)
+document the Escape-staleness edge. No re-gate (pir-1494 precedent). Fences held (feedback.ts +
+builder-review.ts only; no deck/relay change — parity by architecture).
+
+Key correction from architect (verified vs bundled workbench source): SUBMIT built-in is
+`editor.action.submitComment` (editor.*), NOT `workbench.action.submitComment` (does NOT exist);
+CANCEL is `workbench.action.hideComment` (confirmed). Both behind named constants, flagged for EDH
+confirmation (bundle presence proves id exists, not exact focused-comment behaviour).
+
+Implemented:
+- feedback.ts: pure `decideFeedbackAction(axis, composerOpen)` -> open|submit|cancel|noop
+  (modeled on decideApprovalRelay). gesture() reads isBuilderComposerOpen() and dispatches.
+- builder-review.ts: module `composerOpen` (single source), set true in openCommentInput, cleared
+  in submit handler + both executors. Exports isBuilderComposerOpen / submitActiveBuilderComposer
+  (editor.action.submitComment) / cancelActiveBuilderComposer (workbench.action.hideComment).
+- Tests: decideFeedbackAction (6 combos + stale-flag), gesture routing (open + submit/cancel/noop
+  branches), composer lifecycle + verified built-in ids + self-heal. Full apps/vscode suite 80
+  files / 949 tests pass; check-types ✓, eslint ✓; AC grep empty.
+
+Plan-delta (superseded-marker) recorded at top of plan file per architect. Option B
+(dedicated relay verbs + deck lane) noted as the cleaner follow-up, NOT built.
+
+Residual EDH-only evidence (named): the exact focused-comment behaviour of the two built-in ids,
+and end-to-end dial submit/cancel — only the running host (VS Code EDH or the new Codev Desktop.app)
+can confirm. Everything else unit-tested headlessly. dev gate stays pending Amr's re-test.
