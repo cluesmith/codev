@@ -154,7 +154,24 @@ report WHERE it is — if command-relay.ts or apps/streamdeck, that's out of fen
 Panel-body gap filed as #1559 (not this lane); contextual-panel fence re-confirmed.
 
 Added TEMP diagnostic (commit 5c5b5dbd2, revert before PR): traces every gesture + composer transition to
-a "Codev Feedback Debug" output channel, tagged [dial-diag-v1] (also proves build freshness). Bisects:
-no [dial-diag-v1] on a dial press → command never reaches host (relay/deck, OUT of fence); composerOpen=false
-on 2nd press → in-fence state bug; exec-but-no-effect → built-in behaviour. Waiting on Amr to reload EDH,
-open the channel, reproduce (open via dial → 2nd press submit; cancel dial), and share the output.
+a "Codev Feedback Debug" output channel, tagged [dial-diag-v1] (also proves build freshness).
+
+## ROOT CAUSE FOUND from the trace (2026-08-26, fix 36f4aaa73)
+
+VS Code persists output channels to disk (…/Code/logs/…/exthost/output_logging_…/1-Codev Feedback Debug.log),
+so I read Amr's actual dial-press trace. WHERE: IN MY FENCE (not relay/streamdeck — commands reach the host,
+routing decides correctly). The VS Code BUILT-INS were the problem:
+1. workbench.action.hideComment does NOT discard an in-progress comment box (trace: box stayed open,
+   activeEditor kept = …/commentinput-…md after exec).
+2. editor.action.submitComment no-ops unless the comment box is the FOCUSED editor (trace: submit fired
+   with activeEditor=a non-box file → no codev.submitBuilderComment FIRED after).
+3. Lever discovered: a focused comment box IS the active editor, as a `commentinput-…` document.
+
+FIX (36f4aaa73): isBuilderComposerOpen() = flag OR isCommentInputFocused() (live signal → stale-flag
+recovery + submit only fires while box focused so the built-in hits it). Cancel closes the focused
+comment-input editor via workbench.action.closeActiveEditor, GATED on isCommentInputFocused() so it can
+never close a real file editor. Full suite 952 pass; check-types+eslint clean.
+
+Residual: closeActiveEditor-as-discard inferred from trace (gated, safe), awaits Amr's re-test to confirm
+it visibly discards; asked architect to bundle-verify the exact Esc-bound discard id as the definitive
+option. Reported root cause to architect. Waiting on Amr to restart debug session + re-capture the tracer.
