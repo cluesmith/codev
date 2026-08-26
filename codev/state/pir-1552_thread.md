@@ -108,3 +108,16 @@ Plan-delta (superseded-marker) recorded at top of plan file per architect. Optio
 Residual EDH-only evidence (named): the exact focused-comment behaviour of the two built-in ids,
 and end-to-end dial submit/cancel — only the running host (VS Code EDH or the new Codev Desktop.app)
 can confirm. Everything else unit-tested headlessly. dev gate stays pending Amr's re-test.
+
+## Visible Cancel button added (2026-08-26)
+
+Amr, testing, reported "the cancel button is still not there" (screenshot: box has Submit + trash
+icon, no labelled Cancel). Root: my deck-parity work made the Files DIAL cancel (invisible), never
+added a UI button. Added codev.cancelBuilderComment: click disposes the in-progress thread + clears
+composerOpen (nothing queued/forwarded). package.json: command def + palette-hide + inline menu with
+cancel@1 / submit@2 so Submit stays primary/last (the button Enter + deck-submit trigger). Updated
+contributes-review-queue.test (builderCommands list) + builder-review-submit.test (cancel-button
+handler). Pushed 9ed92b843. Full suite 80 files / 950 tests; check-types + eslint + build clean.
+
+HOST-VERIFY (named, can't drive headlessly): that VS Code renders Submit (not Cancel) as the primary
+button so Enter/Changes-dial still SUBMIT after adding the second inline button — flagged to Amr.
