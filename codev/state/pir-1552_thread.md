@@ -212,3 +212,20 @@ dial-cancel dispose, but createCommentThread doesn't auto-focus (would regress d
 mitigation createCommentThread+addComment is unverified. (B) button-only cancel — ship dial open+submit +
 Cancel BUTTON discard (fully working, zero risk), file thread-owning dial-cancel as a follow-up spike. My lean: B.
 Awaiting ruling. Current state: submit-via-dial + Cancel-button-discard both work; dial-cancel is a safe no-op.
+
+## RULING B — dial cancel dropped, button-only discard (2026-08-26, f6ee2e5d2)
+
+Architect ruled B: ship button-only cancel. Applied — `decideFeedbackAction` is now purely open|submit|noop
+(cancel removed from the dial vocabulary). Box open: hunk & selection = open-or-submit (verified load-bearing
+path, untouched); FILE dial = defined no-op. Deleted the dead cancelActiveBuilderComposer executor. Visible
+Cancel button (codev.cancelBuilderComment → dispose thread) is the sole discard. Confirmed the architect's
+one point: Files-dial = defined no-op, never hide/close. Thread-owning dial-cancel = #1560 spike. 950 tests pass.
+
+REVIEW ARTIFACT must record (architect directive): the three-dead-ends dead-ends record; BOTH refutation
+ownerships (main owned the closeActiveEditor-closes-host implication; the reviewer/relaying architect owned
+building the discard ruling on bundle-presence-as-behaviour — Amr's live re-test refuted a claim two seats
+endorsed and none ran; the empirical test + neutralization c535b8f1e outranked both seats); B's three grounds
+(AC met by prompting; risk asymmetry of the thread-owning rework; API offers no native discard today); and
+#1560 as deliberate-decision-behind-spike. Still to do before PR: remove the [dial-diag-v1] tracer (commit
+5c5b5dbd2 onward); then review phase writes codev/reviews/1552-*. Dev gate → Amr's deck re-test (judges how
+button-cancel feels; can override B there).
