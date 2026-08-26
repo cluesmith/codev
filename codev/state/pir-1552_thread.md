@@ -226,6 +226,10 @@ ownerships (main owned the closeActiveEditor-closes-host implication; the review
 building the discard ruling on bundle-presence-as-behaviour — Amr's live re-test refuted a claim two seats
 endorsed and none ran; the empirical test + neutralization c535b8f1e outranked both seats); B's three grounds
 (AC met by prompting; risk asymmetry of the thread-owning rework; API offers no native discard today); and
-#1560 as deliberate-decision-behind-spike. Still to do before PR: remove the [dial-diag-v1] tracer (commit
-5c5b5dbd2 onward); then review phase writes codev/reviews/1552-*. Dev gate → Amr's deck re-test (judges how
-button-cancel feels; can override B there).
+#1560 as deliberate-decision-behind-spike.
+
+Tracer REMOVED (135ddd3e3): logFeedbackDebug + "Codev Feedback Debug" channel + all call sites + test-mock
+stubs stripped; grep for logFeedbackDebug/feedbackDbg/dial-diag empty; 950 tests pass. Also dropped the
+redundant "Codev:" prefix from the comment-box buttons (82de2b748) → "Cancel" / "Queue Comment for Builder".
+Production code now carries zero diagnostics. Remaining before PR: none code-side; review phase writes
+codev/reviews/1552-*. Dev gate → Amr's deck re-test (button-cancel confirmed working by Amr; can override B).
