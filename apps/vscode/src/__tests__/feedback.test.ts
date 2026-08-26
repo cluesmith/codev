@@ -44,6 +44,7 @@ vi.mock('../comments/builder-review.js', () => ({
   isBuilderComposerOpen: () => h.state.composerOpen,
   submitActiveBuilderComposer: vi.fn(async () => { h.state.submitCalls++; }),
   cancelActiveBuilderComposer: vi.fn(async () => { h.state.cancelCalls++; }),
+  logFeedbackDebug: vi.fn(),
 }));
 
 vi.mock('vscode', () => ({
