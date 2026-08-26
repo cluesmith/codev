@@ -388,6 +388,16 @@ export function activateBuilderReviewComments(
     await store.add(entry.builderId, comment);
   });
 
+  // Cancel button on an input thread → discard the in-progress box, leaving
+  // nothing queued or forwarded (#1552). VS Code hands us the thread, so a click
+  // disposes it directly (no dependency on a built-in). This is the VISIBLE
+  // counterpart to the deck Files-dial cancel and to the canvas composer's
+  // explicit Cancel — the box was missing a labelled discard next to Submit.
+  reg('codev.cancelBuilderComment', (reply: vscode.CommentReply) => {
+    composerOpen = false;
+    reply.thread.dispose();
+  });
+
   // Edit flow (#1055 pattern): flip to VS Code's inline edit surface;
   // reassigning `thread.comments` is required for a re-render.
   reg('codev.startEditBuilderComment', (comment: BuilderReviewComment) => {

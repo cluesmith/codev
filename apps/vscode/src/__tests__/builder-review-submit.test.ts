@@ -195,6 +195,20 @@ describe('builder-review composer state + deck submit/cancel executors (#1552)',
     expect(isBuilderComposerOpen()).toBe(false);
   });
 
+  it('the Cancel BUTTON (codev.cancelBuilderComment) disposes the box and clears the flag — nothing queued/forwarded', async () => {
+    h.state.activeFsPath = ENTRY.fsPath;
+    await openBox()('pir-9', ENTRY.fsPath, 'pkg/src/a.ts', null);
+    expect(isBuilderComposerOpen()).toBe(true);
+    added.length = 0;
+    const cancelButton = h.state.handlers.get('codev.cancelBuilderComment') as (reply: unknown) => void;
+    const thread = makeThread({ start: { line: 4 }, end: { line: 8 } });
+    cancelButton({ thread, text: 'half-typed prose' });
+    expect(thread.dispose).toHaveBeenCalled();
+    expect(added).toHaveLength(0);
+    expect(forwardCalls()).toHaveLength(0);
+    expect(isBuilderComposerOpen()).toBe(false);
+  });
+
   it('cancelActiveBuilderComposer drives workbench.action.hideComment and clears the flag', async () => {
     h.state.activeFsPath = ENTRY.fsPath;
     await openBox()('pir-9', ENTRY.fsPath, 'pkg/src/a.ts', null);

@@ -415,6 +415,10 @@
         "enablement": "!commentIsEmpty"
       },
       {
+        "command": "codev.cancelBuilderComment",
+        "title": "Codev: Cancel"
+      },
+      {
         "command": "codev.deleteBuilderComment",
         "title": "Codev: Delete Pending Comment",
         "icon": "$(trash)"
@@ -514,6 +518,10 @@
         },
         {
           "command": "codev.submitBuilderComment",
+          "when": "false"
+        },
+        {
+          "command": "codev.cancelBuilderComment",
           "when": "false"
         },
         {
@@ -839,8 +847,13 @@
           "when": "commentController == codev-review && commentThreadIsEmpty"
         },
         {
+          "command": "codev.cancelBuilderComment",
+          "group": "inline@1",
+          "when": "commentController == codev-builder-review && commentThreadIsEmpty"
+        },
+        {
           "command": "codev.submitBuilderComment",
-          "group": "inline",
+          "group": "inline@2",
           "when": "commentController == codev-builder-review && commentThreadIsEmpty"
         }
       ],

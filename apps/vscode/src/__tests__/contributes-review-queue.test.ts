@@ -70,6 +70,7 @@ describe('builder-review comment menus', () => {
     ];
     const builderCommands = [
       'codev.submitBuilderComment',
+      'codev.cancelBuilderComment',
       'codev.deleteBuilderComment',
       'codev.startEditBuilderComment',
       'codev.saveEditBuilderComment',
