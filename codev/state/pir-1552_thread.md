@@ -231,5 +231,16 @@ endorsed and none ran; the empirical test + neutralization c535b8f1e outranked b
 Tracer REMOVED (135ddd3e3): logFeedbackDebug + "Codev Feedback Debug" channel + all call sites + test-mock
 stubs stripped; grep for logFeedbackDebug/feedbackDbg/dial-diag empty; 950 tests pass. Also dropped the
 redundant "Codev:" prefix from the comment-box buttons (82de2b748) → "Cancel" / "Queue Comment for Builder".
-Production code now carries zero diagnostics. Remaining before PR: none code-side; review phase writes
-codev/reviews/1552-*. Dev gate → Amr's deck re-test (button-cancel confirmed working by Amr; can override B).
+Production code now carries zero diagnostics.
+
+## DEV-APPROVAL approved → REVIEW phase (2026-08-26)
+
+Amr approved dev-approval (verbatim relayed by architect, ratifying the whole parity arc via his own deck
+re-testing). Ran porch approve 1552 dev-approval (build+tests green). Wrote codev/reviews/1552-*.md with the
+full arc (parity gap + verbatim ruling, superseded-plan delta, three-dead-ends + both refutation ownerships,
+ruling B grounds, #1560/#1559). Routed 2 COLD governance updates: arch.md (VS Code Extension) two-composer
+ownership asymmetry; lessons-learned.md (Debugging) bundle-presence≠behaviour. Review commit ec83838ad.
+Next: push, open PR (--body-file the review), porch done --pr, then porch done triggers the single CMAP pass
+(advisory, max_iterations 1) → pr gate. At pr gate: branch freezes before gate recorded, gate-record commit
+is last write, silence through merge. If CI pends on known flakes (#1502-class browser job, #1558 Tower all-401)
+tell architect, don't retry.
