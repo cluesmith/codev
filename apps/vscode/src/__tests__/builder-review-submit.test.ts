@@ -210,20 +210,21 @@ describe('builder-review composer state + deck submit/cancel executors (#1552)',
     expect(isBuilderComposerOpen()).toBe(false);
   });
 
-  it('cancelActiveBuilderComposer CLOSES the focused comment-input editor (not the proven-inert hideComment)', async () => {
-    // VS Code makes the in-progress comment input the active editor as a commentinput-… doc.
+  it('cancelActiveBuilderComposer is a HARMLESS no-op — never closes an editor (there is no safe native discard; the Cancel button is the discard)', async () => {
+    // On the focused comment input.
     h.state.activeFsPath = '/cluesmith.codev-vscode/commentinput-abc-1.md';
     h.state.executed = [];
     await cancelActiveBuilderComposer();
-    expect(builtinCalls()).toContain('workbench.action.closeActiveEditor');
+    expect(builtinCalls()).not.toContain('workbench.action.closeActiveEditor');
     expect(builtinCalls()).not.toContain('workbench.action.hideComment');
+    expect(h.state.executed).toHaveLength(0);
   });
 
-  it('cancel is a SAFE no-op when a real file is focused — never closes a file editor', async () => {
-    h.state.activeFsPath = ENTRY.fsPath; // a real builder-diff file, not the comment input
+  it('cancel never closes an editor even when a real file is focused (no destructive command)', async () => {
+    h.state.activeFsPath = ENTRY.fsPath; // a real builder-diff file
     h.state.executed = [];
     await cancelActiveBuilderComposer();
-    expect(builtinCalls()).not.toContain('workbench.action.closeActiveEditor');
+    expect(h.state.executed).toHaveLength(0);
   });
 
   it('a focused comment input reads as composer-open even with the flag clear (stale-flag recovery)', () => {

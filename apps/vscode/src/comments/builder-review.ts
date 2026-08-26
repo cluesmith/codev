@@ -129,18 +129,22 @@ export async function submitActiveBuilderComposer(): Promise<void> {
   composerOpen = false;
 }
 
-/** Discard the focused in-progress composer (#1552), leaving nothing queued or
- *  forwarded. `workbench.action.hideComment` was proven (via #1552 diagnostics)
- *  NOT to discard the box; instead we close the focused comment-input editor,
- *  which the box IS. This is GATED on the commentinput check so it can never
- *  close a real file editor by mistake. */
+/**
+ * Dial cancel (#1552). A native comment DRAFT has no safe programmatic discard:
+ *   - `workbench.action.hideComment` only COLLAPSES the widget (draft survives →
+ *     could be resurrected + submitted later = phantom submit; violates cond. b),
+ *   - `workbench.action.closeActiveEditor` closes the HOST editor, not the draft
+ *     (observed: focus jumps to another window),
+ *   - submit-empty-as-discard is blocked by the submit button's `!commentIsEmpty`
+ *     enablement (an empty box has no enabled submit action to fire).
+ * VS Code only hands us the thread on an explicit button click, so the reliable
+ * discard is the visible **Cancel button** (`codev.cancelBuilderComment`, which
+ * disposes the thread). The dial therefore performs a HARMLESS no-op rather than
+ * a destructive editor close; the reviewer discards with the Cancel button until
+ * a thread-owning rework lands (deferred, see review / architect).
+ */
 export async function cancelActiveBuilderComposer(): Promise<void> {
-  const onCommentInput = isCommentInputFocused();
-  logFeedbackDebug(`cancelActiveBuilderComposer → onCommentInput=${onCommentInput} (composerOpen was ${composerOpen})`);
-  if (onCommentInput) {
-    await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
-  }
-  composerOpen = false;
+  logFeedbackDebug(`cancelActiveBuilderComposer → no safe programmatic discard; use the Cancel button (no-op). onCommentInput=${isCommentInputFocused()}`);
 }
 
 /** The 1-based inclusive range a thread's anchor denotes. */
