@@ -85,10 +85,10 @@ describe('decideFeedbackAction — pure composer state machine (#1552)', () => {
     expect(decideFeedbackAction('selection', false)).toEqual({ kind: 'open', axis: 'selection' });
   });
 
-  it('with a box open, mirrors the canvas composer: hunk submits, file cancels, selection is inert', () => {
+  it('with a box open, the file dial cancels and every other dial submits (open-or-submit)', () => {
     expect(decideFeedbackAction('hunk', true)).toEqual({ kind: 'submit' });
+    expect(decideFeedbackAction('selection', true)).toEqual({ kind: 'submit' });
     expect(decideFeedbackAction('file', true)).toEqual({ kind: 'cancel' });
-    expect(decideFeedbackAction('selection', true)).toEqual({ kind: 'noop' });
   });
 
   it('a stale-open flag decides submit for hunk — never a phantom cancel/open; the built-in no-op is what makes it safe', () => {
@@ -172,10 +172,10 @@ describe('feedback gesture routing (#1410, #1552)', () => {
     expect(commentCalls()).toHaveLength(0);
   });
 
-  it('box open: a selection press is inert — never submits, cancels, or stacks a second thread', async () => {
+  it('box open: a selection press SUBMITS (open-or-submit) — so the dial that opened the box can also submit it', async () => {
     h.state.composerOpen = true;
     await feedbackSelection();
-    expect(h.state.submitCalls).toBe(0);
+    expect(h.state.submitCalls).toBe(1);
     expect(h.state.cancelCalls).toBe(0);
     expect(commentCalls()).toHaveLength(0);
   });

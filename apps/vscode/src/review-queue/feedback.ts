@@ -10,16 +10,15 @@
  *
  * Deck composer parity (#1552, mirroring the artifact-canvas composer #1425):
  * VS Code is the *diff-mode owner*, so it interprets the SAME verbs contextually
- * — while a builder-review comment box is open, the deck drives it:
+ * — while a builder-review comment box is open, the deck drives it. The FILE
+ * dial is the dedicated cancel (the canvas Headings dial's composer-cancel);
+ * every OTHER open dial is open-or-submit, so whichever dial the reviewer opened
+ * with — hunk or selection — a second press submits:
  *
- *   - hunk press      → open-or-submit  (open a hunk comment; if one is already
- *                                        open, SUBMIT it — same dial, same as the
- *                                        canvas Blocks dial's composer-open-or-submit)
- *   - file press       → cancel-when-open (dismiss the open box; otherwise open a
- *                                        whole-file comment — the canvas Headings
- *                                        dial's composer-cancel)
- *   - selection press  → open a selection comment; inert while a box is open
- *                                        (no composer role, and never stacks a thread)
+ *   - hunk press      → open-or-submit  (open a hunk comment; press again to SUBMIT)
+ *   - selection press → open-or-submit  (open a selection comment; press again to SUBMIT)
+ *   - file press      → cancel-when-open (dismiss the open box; otherwise open a
+ *                                        whole-file comment)
  *
  * The queue-vs-forward decision is separate and lives in the reply box's Submit
  * (see `comments/builder-review.ts`): the box enqueues (comment mode) or forwards
@@ -66,23 +65,22 @@ export type FeedbackAction =
  * directly — including the self-heal edge below.
  *
  * With NO box open, every axis simply opens a comment at that axis. With a box
- * open, the gesture drives the composer, mirroring the canvas composer (#1425):
- * hunk = submit, file = cancel, selection = inert (it has no composer role and
- * must never stack a second thread).
+ * open, the FILE dial cancels (the canvas Headings dial's role) and every other
+ * dial submits, so whichever dial opened the box — hunk or selection — a second
+ * press submits. No open runs while a box is open, so threads never stack.
  *
  * CANCEL-BIASED / never a phantom submit: this function only *names* the action;
  * the SUBMIT action is executed via VS Code's built-in submit-comment, which is
  * a no-op when no comment editor is focused. So if `composerOpen` is stale (a
- * native Escape dismissed the box without notifying us), a hunk press decides
+ * native Escape dismissed the box without notifying us), a press decides
  * `submit` but the built-in no-ops — cancelled text is never resurrected — and
  * the caller then clears the flag, so the next press opens. A stale flag can
  * cost a no-op or an extra open, never a phantom submit.
  */
 export function decideFeedbackAction(axis: FeedbackAxis, composerOpen: boolean): FeedbackAction {
   if (!composerOpen) { return { kind: 'open', axis }; }
-  if (axis === 'hunk') { return { kind: 'submit' }; }
   if (axis === 'file') { return { kind: 'cancel' }; }
-  return { kind: 'noop' };
+  return { kind: 'submit' }; // hunk or selection: open-or-submit
 }
 
 /** Where a feedback gesture points: the owning diff entry + range (null = whole file). */

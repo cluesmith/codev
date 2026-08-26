@@ -847,12 +847,12 @@
           "when": "commentController == codev-review && commentThreadIsEmpty"
         },
         {
-          "command": "codev.cancelBuilderComment",
+          "command": "codev.submitBuilderComment",
           "group": "inline@1",
           "when": "commentController == codev-builder-review && commentThreadIsEmpty"
         },
         {
-          "command": "codev.submitBuilderComment",
+          "command": "codev.cancelBuilderComment",
           "group": "inline@2",
           "when": "commentController == codev-builder-review && commentThreadIsEmpty"
         }
