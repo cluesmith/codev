@@ -5,9 +5,10 @@
  * `codev.commentForBuilder`. There is no promptless path.
  *
  * Deck composer parity (#1552): while a builder-review box is OPEN, VS Code (the
- * diff-mode owner) interprets the SAME verbs to drive it — hunk = submit,
- * file = cancel, selection = inert — mirroring the canvas composer (#1425). The
- * queue-vs-forward decision lives in the box's Submit, not here.
+ * diff-mode owner) interprets the SAME verbs to drive it — hunk & selection =
+ * open-or-submit, file = no-op (dial cancel was dropped, ruling B; discard is the
+ * visible Cancel button). The queue-vs-forward decision lives in the box's Submit,
+ * not here.
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';

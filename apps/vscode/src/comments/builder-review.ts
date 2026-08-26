@@ -64,48 +64,37 @@ function bodyText(body: string | vscode.MarkdownString): string {
 }
 
 /**
- * VS Code built-ins that drive the FOCUSED native comment reply box (#1552),
- * so the deck feedback gestures can submit / cancel an open composer.
- *
- * `editor.action.submitComment` is the submit id (the `editor.*` id — NOTE:
- * `workbench.action.submitComment` does NOT exist; it would be a silent no-op).
- * It only acts on a FOCUSED comment editor, so submit is gated on that focus via
- * `isCommentInputFocused()`. Cancel does NOT use `workbench.action.hideComment`
- * (proven via #1552 diagnostics NOT to discard the box); it closes the focused
- * comment-input editor instead — see `cancelActiveBuilderComposer`.
+ * VS Code built-in that submits the FOCUSED native comment reply box (#1552),
+ * so a deck submit gesture can flush an open composer. `editor.action.submitComment`
+ * is the submit id (the `editor.*` id — NOTE: `workbench.action.submitComment`
+ * does NOT exist; it would be a silent no-op). It only acts on a FOCUSED comment
+ * editor, which is why the submit path is a no-op when the box has lost focus.
  */
 const SUBMIT_FOCUSED_COMMENT = 'editor.action.submitComment';
 
 /**
- * Whether a builder-review comment box is currently open — tracked here, in the
+ * Whether OUR builder-review comment box is currently open — tracked here, in the
  * composer's owner, so the deck feedback router (#1552) can drive it. Set true
- * when we open a box; cleared when it submits or cancels.
+ * only when WE open a box (`openCommentInput`); cleared when it submits.
  *
- * A native Escape dismissal is NOT observable via the stable comment API, so
- * this flag can stale-stick `true`. The router treats that as cancel-biased: a
- * stale flag can only cost a submit no-op or an extra open, never a phantom
- * submit (SUBMIT runs the built-in, which no-ops when no comment editor is
- * focused). Both executors clear the flag, so it self-heals on the next gesture.
+ * This is deliberately OUR flag, not a "focused-comment-input" probe: a second
+ * native comment controller (`codev-review`, plan/spec review) also opens
+ * `commentinput-…` editors, so keying off the focused comment URI would let a
+ * diff-review dial submit an unrelated plan/spec comment (CMAP #1552). The flag
+ * is scoped to this controller, so `isBuilderComposerOpen()` never mistakes a
+ * foreign comment box for ours.
+ *
+ * A native Escape dismissal is NOT observable via the stable comment API, so the
+ * flag can stale-stick `true`. That stays cancel-biased: a stale flag can only
+ * cost a submit no-op or an extra open, never a phantom submit — SUBMIT runs the
+ * built-in, which no-ops when no comment editor is focused, and the submit
+ * executor clears the flag, so it self-heals on the next gesture.
  */
 let composerOpen = false;
 
-/** True when the focused editor IS a native comment reply box. VS Code makes the
- *  in-progress comment input the active editor as a `commentinput-…` document
- *  (observed via #1552 diagnostics); detecting it is more reliable than our own
- *  flag, and it means submit/cancel run ONLY while the box is actually focused —
- *  which is exactly when the built-ins (editor.action.submitComment /
- *  closeActiveEditor) act on it. */
-function isCommentInputFocused(): boolean {
-  const uri = vscode.window.activeTextEditor?.document.uri;
-  if (!uri) { return false; }
-  return uri.scheme === 'comment' || uri.fsPath.includes('commentinput');
-}
-
-/** True while a builder-review comment box is open (the deck router reads this).
- *  Union of our tracked flag and the live focused-comment-input signal, so a
- *  stale flag can never strand the box (#1552). */
+/** True while OUR builder-review comment box is open (the deck router reads this). */
 export function isBuilderComposerOpen(): boolean {
-  return composerOpen || isCommentInputFocused();
+  return composerOpen;
 }
 
 /**
@@ -148,7 +137,9 @@ export function activateBuilderReviewComments(
   );
   controller.options = {
     prompt: 'Comment for builder',
-    placeHolder: 'Type review feedback for the builder, then Queue Comment',
+    // Mode-neutral wording (CMAP #1552): Submit queues in comment mode but
+    // FORWARDS to the PTY in the default forward mode, so "Queue" was misleading.
+    placeHolder: 'Type review feedback for the builder, then Send to Builder',
   };
   context.subscriptions.push(controller);
 

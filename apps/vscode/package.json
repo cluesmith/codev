@@ -411,7 +411,7 @@
       },
       {
         "command": "codev.submitBuilderComment",
-        "title": "Queue Comment for Builder",
+        "title": "Send to Builder",
         "enablement": "!commentIsEmpty"
       },
       {

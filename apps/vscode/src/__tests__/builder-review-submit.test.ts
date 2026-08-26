@@ -208,11 +208,19 @@ describe('builder-review composer state + deck submit/cancel executors (#1552)',
     expect(isBuilderComposerOpen()).toBe(false);
   });
 
-  it('a focused comment input reads as composer-open even with the flag clear (stale-flag recovery)', () => {
-    h.state.activeFsPath = '/cluesmith.codev-vscode/commentinput-xyz-1.md';
-    expect(isBuilderComposerOpen()).toBe(true);
+  it('does NOT treat a foreign comment box as ours: a focused commentinput with our flag clear reads composer-CLOSED (CMAP #1552 cross-controller)', () => {
+    // A plan/spec review box (the codev-review controller) also opens
+    // commentinput-… editors. With OUR flag clear, that must not read as our
+    // composer — else a diff-review dial would submit the unrelated plan comment.
+    h.state.activeFsPath = '/cluesmith.codev-vscode/commentinput-planreview-1.md';
+    expect(isBuilderComposerOpen()).toBe(false);
+  });
+
+  it('opening OUR box sets the flag; it does not depend on which editor is focused', async () => {
     h.state.activeFsPath = ENTRY.fsPath;
     expect(isBuilderComposerOpen()).toBe(false);
+    await openBox()('pir-9', ENTRY.fsPath, 'pkg/src/a.ts', null);
+    expect(isBuilderComposerOpen()).toBe(true);
   });
 
   it('self-heal: a submit executor on a stale-open flag still runs only the (no-op) built-in and clears — never resurrects prose', async () => {
