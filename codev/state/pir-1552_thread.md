@@ -260,6 +260,15 @@ issues; I FIXED all 4 (rebuttal at 1552-review-iter1-rebuttals.md):
 Also updated arch.md (composer flag not a focus probe + cross-controller reason) + review Things-to-Look-At.
 951 tests / check-types / eslint / build green. Commits f9880f77d; PR body refreshed.
 
-At PR GATE (pending). Branch FROZEN — no more writes until human decides; gate-record commit is the last
-write. CI on #1561 running (Artifact-Canvas Browser + Tower Integration = known-flaky watch). Notified
-architect with CMAP outcome. Waiting; do not retry flaky CI.
+At PR GATE (pending). Notified architect with CMAP outcome.
+
+## Owner-directed label change at the gate (2026-08-26, c8bc36bff)
+
+Amr, reviewing at the gate, asked "is it send or forward?" — the neutral "Send to Builder" was too
+vague. He chose mode-accurate labels (option B). Implemented: second command codev.forwardBuilderComment
+("Forward to Builder") shares the one delivery handler; mutually-exclusive when clauses on
+codev.diffCodelensMode show "Forward to Builder" in forward mode (default) and "Queue Comment for Builder"
+in comment mode — matching the codelens vocabulary. Placeholder neutralized. +2 tests (mode-gating +
+forward-command delivery); 953 pass, check-types/eslint/build green. Pushed, PR body refreshed, rebuttal
+updated. Re-frozen. Still at pr gate pending Amr's merge decision. CI known-flaky watch: Artifact-Canvas
+Browser + Tower Integration — will report, not retry.
