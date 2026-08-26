@@ -660,5 +660,7 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 
 ---
 
+- [From #1552] A built-in command id present in bundled source proves it **exists**, not what it **does** to your widget/state — bundle-presence is not behaviour-presence. Two architect seats endorsed a native-comment discard built on `workbench.action.closeActiveEditor` ("the only true discard — keep it"), reasoning from source reads; the owner's live re-test refuted it — it closed the *host editor* (focus jumped to another window), not the draft. What broke the deadlock was a captured runtime tracer (a scoped output channel logging each Stream Deck dial press) that recorded the actual behaviour: `editor.action.submitComment` no-ops unless the comment box is the *focused* editor; `hideComment` keeps the draft; there is no native discard. Verify a built-in's runtime behaviour against the live host before building a design on it, and treat two reviewers agreeing as *still unverified* until something actually runs it. Sibling to [From 799] — read the source, but the running host is ground truth; assert behaviour at the layer that actually fails.
+
 *Last updated: 2026-04-17 (Maintenance run 0007 — v3.0.0 pre-release)*
 *Source: codev/reviews/*

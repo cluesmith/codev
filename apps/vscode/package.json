@@ -411,8 +411,17 @@
       },
       {
         "command": "codev.submitBuilderComment",
-        "title": "Codev: Queue Comment for Builder",
+        "title": "Queue Comment for Builder",
         "enablement": "!commentIsEmpty"
+      },
+      {
+        "command": "codev.forwardBuilderComment",
+        "title": "Forward to Builder",
+        "enablement": "!commentIsEmpty"
+      },
+      {
+        "command": "codev.cancelBuilderComment",
+        "title": "Cancel"
       },
       {
         "command": "codev.deleteBuilderComment",
@@ -514,6 +523,14 @@
         },
         {
           "command": "codev.submitBuilderComment",
+          "when": "false"
+        },
+        {
+          "command": "codev.forwardBuilderComment",
+          "when": "false"
+        },
+        {
+          "command": "codev.cancelBuilderComment",
           "when": "false"
         },
         {
@@ -840,7 +857,17 @@
         },
         {
           "command": "codev.submitBuilderComment",
-          "group": "inline",
+          "group": "inline@1",
+          "when": "commentController == codev-builder-review && commentThreadIsEmpty && codev.diffCodelensMode == 'comment'"
+        },
+        {
+          "command": "codev.forwardBuilderComment",
+          "group": "inline@1",
+          "when": "commentController == codev-builder-review && commentThreadIsEmpty && codev.diffCodelensMode != 'comment'"
+        },
+        {
+          "command": "codev.cancelBuilderComment",
+          "group": "inline@2",
           "when": "commentController == codev-builder-review && commentThreadIsEmpty"
         }
       ],

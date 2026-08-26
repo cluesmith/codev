@@ -1,41 +1,92 @@
 /**
- * Mode-neutral review feedback (#1410): the Stream Deck diff dials and Scroll
- * dial press a single `feedback-*` verb, and this module routes each chunk
- * (whole file / hunk-under-cursor / selection) EITHER as an immediate PTY
- * forward OR into the per-builder pending-comment queue, following the
- * workspace's `codev.diffCodelensMode` setting — so the deck never infers the
- * mode. Both branches derive their anchor from the SAME resolver, so a given
- * dial press references the same file/range in either mode.
+ * Mode-neutral review feedback (#1410, #1552): the Stream Deck diff dials and
+ * Scroll dial press a single `feedback-*` verb, and this module turns each
+ * chunk (whole file / hunk-under-cursor / selection) into an **authoring**
+ * gesture — it opens the native inline comment reply box at the anchor, the
+ * same surface as spec/plan comment authoring, so the reviewer types or
+ * dictates the actual comment. There is no promptless path: a gesture never
+ * stamps a placeholder body or force-forwards a bare ref (#1552 removed the old
+ * promptless deck default).
  *
- * The queue branch mutates ONLY through `ReviewQueueStore` (the queue's single
- * source of truth, #1037): the status bar, inline threads, and Tower's
- * per-builder queued-feedback count all reflect a deck-driven enqueue for free.
+ * Deck composer parity (#1552, mirroring the artifact-canvas composer #1425):
+ * VS Code is the *diff-mode owner*, so it interprets the SAME verbs contextually
+ * — while a builder-review comment box is open, the content dials drive it:
  *
- * The feedback always targets the builder whose diff is FOCUSED (the diff-inject
- * entry's owner), never a separately-selected builder — a review comment must
- * attach to the file in front of the reviewer.
+ *   - hunk press      → open-or-submit  (open a hunk comment; press again to SUBMIT)
+ *   - selection press → open-or-submit  (open a selection comment; press again to SUBMIT)
+ *   - file press      → no-op while a box is open (open a whole-file comment when none is)
+ *
+ * DIAL CANCEL was DROPPED (ruling B, #1552): unlike the canvas composer — a React
+ * component that owns its draft and unmounts it on cancel — a native VS Code
+ * comment DRAFT has no safe programmatic discard (hideComment keeps the draft,
+ * closeActiveEditor closes the host editor, submit-empty is enablement-blocked).
+ * VS Code hands us the thread only on a click, so the discard is the visible
+ * **Cancel button** (`codev.cancelBuilderComment`). The thread-owning approach
+ * that would restore a dial cancel is the #1560 spike.
+ *
+ * The queue-vs-forward decision is separate and lives in the reply box's Submit
+ * (see `comments/builder-review.ts`): the box enqueues (comment mode) or forwards
+ * ref + prose (forward mode) per `codev.diffCodelensMode`. So the deck never
+ * infers either the composer action or the delivery mode; both are owned VS
+ * Code-side.
+ *
+ * The feedback always targets the builder whose diff is FOCUSED (the anchor is
+ * read from the active editor), never a separately-selected builder — a review
+ * comment must attach to the file in front of the reviewer. When no builder
+ * diff is focused, an OPEN gesture surfaces a clear message instead of a silent
+ * no-op, so a dial press over the wrong editor is legible.
  */
 
 import * as vscode from 'vscode';
-import { randomUUID } from 'node:crypto';
-import * as path from 'node:path';
 import {
   getDiffInjectEntry,
-  getDiffCodelensMode,
+  COMMENT_FOR_BUILDER_COMMAND,
   type DiffInjectSessionEntry,
 } from '../diff-inject-codelens.js';
-import { buildBuilderFileRef, buildBuilderRangeRef } from '../diff-inject-ref.js';
+import {
+  isBuilderComposerOpen,
+  submitActiveBuilderComposer,
+} from '../comments/builder-review.js';
 import { resolvePressCursorRef } from '../commands/press-cursor-ref.js';
-import { deriveWorktreePath } from './reconcile.js';
 import type { LineRange } from './queue.js';
-import type { ReviewQueueStore } from './store.js';
 
-/** Body attached to a chunk flagged from the deck — a dial press carries no
- *  typed prose, so the comment's file + range are its substance. */
-const DECK_FLAG_BODY = 'Flagged for review from Stream Deck.';
+/** The three feedback gestures, one per Stream Deck axis. */
+export type FeedbackAxis = 'file' | 'hunk' | 'selection';
 
-export interface FeedbackDeps {
-  store: ReviewQueueStore;
+/** What a feedback gesture does, given the axis and whether a composer box is
+ *  already open. A discriminated union so the caller dispatches exhaustively.
+ *  `cancel` is deliberately NOT in the dial vocabulary (ruling B, #1552): the
+ *  native comment draft has no safe programmatic discard, so cancel is the
+ *  visible Cancel button only. */
+export type FeedbackAction =
+  | { kind: 'open'; axis: FeedbackAxis }
+  | { kind: 'submit' }
+  | { kind: 'noop' };
+
+/**
+ * Pure composer state machine (#1552, modeled on `decideApprovalRelay`): given
+ * the gesture's axis and whether a builder-review comment box is currently open,
+ * decide what the press does. No `vscode`, so the four branches are unit-tested
+ * directly — including the self-heal edge below.
+ *
+ * With NO box open, every axis simply opens a comment at that axis. With a box
+ * open, the content dials (hunk, selection) submit — so whichever dial opened
+ * the box, a second press submits — and the FILE dial is a defined no-op (its
+ * old cancel role was dropped, ruling B). No open runs while a box is open, so
+ * threads never stack.
+ *
+ * CANCEL-BIASED / never a phantom submit: this function only *names* the action;
+ * SUBMIT is executed via VS Code's built-in submit-comment, which is a no-op
+ * when no comment editor is focused. So if `composerOpen` is stale (a native
+ * Escape dismissed the box without notifying us), a press decides `submit` but
+ * the built-in no-ops — cancelled text is never resurrected — and the caller
+ * clears the flag, so the next press opens. A stale flag can cost a no-op or an
+ * extra open, never a phantom submit.
+ */
+export function decideFeedbackAction(axis: FeedbackAxis, composerOpen: boolean): FeedbackAction {
+  if (!composerOpen) { return { kind: 'open', axis }; }
+  if (axis === 'file') { return { kind: 'noop' }; } // dial cancel dropped (#1560 spike); Cancel button discards
+  return { kind: 'submit' }; // hunk or selection: open-or-submit
 }
 
 /** Where a feedback gesture points: the owning diff entry + range (null = whole file). */
@@ -97,38 +148,33 @@ function selectionAnchor(): Anchor | undefined {
   return { entry, lineRange: { start, end } };
 }
 
-/** Route one anchor per the workspace mode: forward now (PTY) or enqueue. */
-async function route(deps: FeedbackDeps, anchor: Anchor | undefined): Promise<void> {
-  if (!anchor) { return; }
-  const { entry, lineRange } = anchor;
-  if (getDiffCodelensMode() === 'forward') {
-    // Immediate: the same low-level inject the forward CodeLens / commands use.
-    const ref = lineRange
-      ? buildBuilderRangeRef(entry.relPath, lineRange.start, lineRange.end)
-      : buildBuilderFileRef(entry.relPath);
-    await vscode.commands.executeCommand('codev.forwardToBuilder', entry.builderId, ref);
-    return;
-  }
-  // Queue: register the builder's worktree from the diff entry (derived, never
-  // guessed) so the write lands in the right worktree even when nothing has been
-  // queued this session, then mutate through the store.
-  if (!deps.store.getWorktreePath(entry.builderId)) {
-    const worktree = deriveWorktreePath(entry.fsPath, entry.relPath, path.sep);
-    if (!worktree) {
-      vscode.window.showWarningMessage('Codev: could not locate the builder worktree for this diff');
-      return;
-    }
-    deps.store.registerWorktree(entry.builderId, worktree);
-  }
-  await deps.store.add(entry.builderId, {
-    id: randomUUID(),
-    createdAt: new Date().toISOString(),
-    file: entry.relPath,
-    lineRange,
-    body: DECK_FLAG_BODY,
-  });
+/** Resolve the anchor for an OPEN gesture (only the open branch needs one). */
+async function resolveAnchor(axis: FeedbackAxis): Promise<Anchor | undefined> {
+  if (axis === 'file') { return fileAnchor(); }
+  if (axis === 'hunk') { return hunkAnchor(); }
+  return selectionAnchor();
 }
 
-export const feedbackFile = (deps: FeedbackDeps): Promise<void> => route(deps, fileAnchor());
-export const feedbackHunk = async (deps: FeedbackDeps): Promise<void> => route(deps, await hunkAnchor());
-export const feedbackSelection = (deps: FeedbackDeps): Promise<void> => route(deps, selectionAnchor());
+/** Run one feedback gesture: submit the open composer, or open the native comment
+ *  reply box at the anchor for the reviewer to author. */
+async function gesture(axis: FeedbackAxis): Promise<void> {
+  const action = decideFeedbackAction(axis, isBuilderComposerOpen());
+  if (action.kind === 'submit') { await submitActiveBuilderComposer(); return; }
+  if (action.kind === 'noop') { return; }
+  const anchor = await resolveAnchor(axis);
+  if (!anchor) {
+    vscode.window.showWarningMessage('Codev: focus a builder diff first to flag it for review');
+    return;
+  }
+  const { entry, lineRange } = anchor;
+  // The same authoring entry point the comment codelens uses: it creates AND
+  // focuses the reply box at the anchor (the active editor is `entry.fsPath`,
+  // since the anchor was read from it) and marks the composer open. Submit
+  // delivers per the current mode.
+  await vscode.commands.executeCommand(
+    COMMENT_FOR_BUILDER_COMMAND, entry.builderId, entry.fsPath, entry.relPath, lineRange);
+}
+
+export const feedbackFile = (): Promise<void> => gesture('file');
+export const feedbackHunk = (): Promise<void> => gesture('hunk');
+export const feedbackSelection = (): Promise<void> => gesture('selection');
