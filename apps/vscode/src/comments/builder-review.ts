@@ -129,23 +129,13 @@ export async function submitActiveBuilderComposer(): Promise<void> {
   composerOpen = false;
 }
 
-/**
- * Dial cancel (#1552). A native comment DRAFT has no safe programmatic discard:
- *   - `workbench.action.hideComment` only COLLAPSES the widget (draft survives →
- *     could be resurrected + submitted later = phantom submit; violates cond. b),
- *   - `workbench.action.closeActiveEditor` closes the HOST editor, not the draft
- *     (observed: focus jumps to another window),
- *   - submit-empty-as-discard is blocked by the submit button's `!commentIsEmpty`
- *     enablement (an empty box has no enabled submit action to fire).
- * VS Code only hands us the thread on an explicit button click, so the reliable
- * discard is the visible **Cancel button** (`codev.cancelBuilderComment`, which
- * disposes the thread). The dial therefore performs a HARMLESS no-op rather than
- * a destructive editor close; the reviewer discards with the Cancel button until
- * a thread-owning rework lands (deferred, see review / architect).
- */
-export async function cancelActiveBuilderComposer(): Promise<void> {
-  logFeedbackDebug(`cancelActiveBuilderComposer → no safe programmatic discard; use the Cancel button (no-op). onCommentInput=${isCommentInputFocused()}`);
-}
+// NOTE (#1552, ruling B): there is intentionally NO dial-cancel executor. A
+// native comment DRAFT has no safe programmatic discard — hideComment keeps the
+// draft, closeActiveEditor closes the HOST editor (observed: focus jumps windows),
+// and submit-empty is blocked by the submit button's `!commentIsEmpty` enablement.
+// VS Code hands us the thread only on a click, so the discard is the visible
+// Cancel button (`codev.cancelBuilderComment`, which disposes the thread). The
+// thread-owning rework that would restore a dial cancel is the #1560 spike.
 
 /** The 1-based inclusive range a thread's anchor denotes. */
 function threadLineRange(thread: vscode.CommentThread): LineRange {

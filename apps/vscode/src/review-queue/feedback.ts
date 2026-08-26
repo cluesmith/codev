@@ -10,15 +10,19 @@
  *
  * Deck composer parity (#1552, mirroring the artifact-canvas composer #1425):
  * VS Code is the *diff-mode owner*, so it interprets the SAME verbs contextually
- * — while a builder-review comment box is open, the deck drives it. The FILE
- * dial is the dedicated cancel (the canvas Headings dial's composer-cancel);
- * every OTHER open dial is open-or-submit, so whichever dial the reviewer opened
- * with — hunk or selection — a second press submits:
+ * — while a builder-review comment box is open, the content dials drive it:
  *
  *   - hunk press      → open-or-submit  (open a hunk comment; press again to SUBMIT)
  *   - selection press → open-or-submit  (open a selection comment; press again to SUBMIT)
- *   - file press      → cancel-when-open (dismiss the open box; otherwise open a
- *                                        whole-file comment)
+ *   - file press      → no-op while a box is open (open a whole-file comment when none is)
+ *
+ * DIAL CANCEL was DROPPED (ruling B, #1552): unlike the canvas composer — a React
+ * component that owns its draft and unmounts it on cancel — a native VS Code
+ * comment DRAFT has no safe programmatic discard (hideComment keeps the draft,
+ * closeActiveEditor closes the host editor, submit-empty is enablement-blocked).
+ * VS Code hands us the thread only on a click, so the discard is the visible
+ * **Cancel button** (`codev.cancelBuilderComment`). The thread-owning approach
+ * that would restore a dial cancel is the #1560 spike.
  *
  * The queue-vs-forward decision is separate and lives in the reply box's Submit
  * (see `comments/builder-review.ts`): the box enqueues (comment mode) or forwards
@@ -42,7 +46,6 @@ import {
 import {
   isBuilderComposerOpen,
   submitActiveBuilderComposer,
-  cancelActiveBuilderComposer,
   logFeedbackDebug,
 } from '../comments/builder-review.js';
 import { resolvePressCursorRef } from '../commands/press-cursor-ref.js';
@@ -52,11 +55,13 @@ import type { LineRange } from './queue.js';
 export type FeedbackAxis = 'file' | 'hunk' | 'selection';
 
 /** What a feedback gesture does, given the axis and whether a composer box is
- *  already open. A discriminated union so the caller dispatches exhaustively. */
+ *  already open. A discriminated union so the caller dispatches exhaustively.
+ *  `cancel` is deliberately NOT in the dial vocabulary (ruling B, #1552): the
+ *  native comment draft has no safe programmatic discard, so cancel is the
+ *  visible Cancel button only. */
 export type FeedbackAction =
   | { kind: 'open'; axis: FeedbackAxis }
   | { kind: 'submit' }
-  | { kind: 'cancel' }
   | { kind: 'noop' };
 
 /**
@@ -66,21 +71,22 @@ export type FeedbackAction =
  * directly — including the self-heal edge below.
  *
  * With NO box open, every axis simply opens a comment at that axis. With a box
- * open, the FILE dial cancels (the canvas Headings dial's role) and every other
- * dial submits, so whichever dial opened the box — hunk or selection — a second
- * press submits. No open runs while a box is open, so threads never stack.
+ * open, the content dials (hunk, selection) submit — so whichever dial opened
+ * the box, a second press submits — and the FILE dial is a defined no-op (its
+ * old cancel role was dropped, ruling B). No open runs while a box is open, so
+ * threads never stack.
  *
  * CANCEL-BIASED / never a phantom submit: this function only *names* the action;
- * the SUBMIT action is executed via VS Code's built-in submit-comment, which is
- * a no-op when no comment editor is focused. So if `composerOpen` is stale (a
- * native Escape dismissed the box without notifying us), a press decides
- * `submit` but the built-in no-ops — cancelled text is never resurrected — and
- * the caller then clears the flag, so the next press opens. A stale flag can
- * cost a no-op or an extra open, never a phantom submit.
+ * SUBMIT is executed via VS Code's built-in submit-comment, which is a no-op
+ * when no comment editor is focused. So if `composerOpen` is stale (a native
+ * Escape dismissed the box without notifying us), a press decides `submit` but
+ * the built-in no-ops — cancelled text is never resurrected — and the caller
+ * clears the flag, so the next press opens. A stale flag can cost a no-op or an
+ * extra open, never a phantom submit.
  */
 export function decideFeedbackAction(axis: FeedbackAxis, composerOpen: boolean): FeedbackAction {
   if (!composerOpen) { return { kind: 'open', axis }; }
-  if (axis === 'file') { return { kind: 'cancel' }; }
+  if (axis === 'file') { return { kind: 'noop' }; } // dial cancel dropped (#1560 spike); Cancel button discards
   return { kind: 'submit' }; // hunk or selection: open-or-submit
 }
 
@@ -157,7 +163,6 @@ async function gesture(axis: FeedbackAxis): Promise<void> {
   const action = decideFeedbackAction(axis, composerOpen);
   logFeedbackDebug(`gesture axis=${axis} composerOpen=${composerOpen} → ${action.kind} (activeEditor=${vscode.window.activeTextEditor?.document.uri.fsPath ?? 'none'})`);
   if (action.kind === 'submit') { await submitActiveBuilderComposer(); return; }
-  if (action.kind === 'cancel') { await cancelActiveBuilderComposer(); return; }
   if (action.kind === 'noop') { return; }
   const anchor = await resolveAnchor(axis);
   if (!anchor) {

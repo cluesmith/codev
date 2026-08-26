@@ -25,7 +25,6 @@ const h = vi.hoisted(() => {
     // Builder-review composer state + spies (mocked module below).
     composerOpen: false,
     submitCalls: 0,
-    cancelCalls: 0,
   };
   return { state };
 });
@@ -39,11 +38,10 @@ vi.mock('node:child_process', () => ({
   },
 }));
 
-// The composer owner: feedback.ts reads its open-state and drives submit/cancel.
+// The composer owner: feedback.ts reads its open-state and drives submit.
 vi.mock('../comments/builder-review.js', () => ({
   isBuilderComposerOpen: () => h.state.composerOpen,
   submitActiveBuilderComposer: vi.fn(async () => { h.state.submitCalls++; }),
-  cancelActiveBuilderComposer: vi.fn(async () => { h.state.cancelCalls++; }),
   logFeedbackDebug: vi.fn(),
 }));
 
@@ -86,10 +84,10 @@ describe('decideFeedbackAction — pure composer state machine (#1552)', () => {
     expect(decideFeedbackAction('selection', false)).toEqual({ kind: 'open', axis: 'selection' });
   });
 
-  it('with a box open, the file dial cancels and every other dial submits (open-or-submit)', () => {
+  it('with a box open, hunk & selection submit (open-or-submit); the file dial is a defined no-op (cancel dropped, ruling B)', () => {
     expect(decideFeedbackAction('hunk', true)).toEqual({ kind: 'submit' });
     expect(decideFeedbackAction('selection', true)).toEqual({ kind: 'submit' });
-    expect(decideFeedbackAction('file', true)).toEqual({ kind: 'cancel' });
+    expect(decideFeedbackAction('file', true)).toEqual({ kind: 'noop' });
   });
 
   it('a stale-open flag decides submit for hunk — never a phantom cancel/open; the built-in no-op is what makes it safe', () => {
@@ -110,7 +108,6 @@ describe('feedback gesture routing (#1410, #1552)', () => {
     h.state.gitStdout = null; // default: git rejects → fall back to the frozen entry.hunks
     h.state.composerOpen = false;
     h.state.submitCalls = 0;
-    h.state.cancelCalls = 0;
     setDiffInjectSession([{ fsPath: FS_PATH, builderId: 'pir-1', relPath: 'src/a.ts', hunks: [{ start: 5, end: 9 }], baseRef: 'main', worktreePath: '/w/alpha/.builders/pir-1' }]);
   });
 
@@ -161,14 +158,12 @@ describe('feedback gesture routing (#1410, #1552)', () => {
     h.state.composerOpen = true;
     await feedbackHunk();
     expect(h.state.submitCalls).toBe(1);
-    expect(h.state.cancelCalls).toBe(0);
     expect(commentCalls()).toHaveLength(0);
   });
 
-  it('box open: a file press CANCELS the open composer and opens nothing new', async () => {
+  it('box open: a file press is a defined NO-OP — no submit, no open (dial cancel dropped; the Cancel button discards)', async () => {
     h.state.composerOpen = true;
     await feedbackFile();
-    expect(h.state.cancelCalls).toBe(1);
     expect(h.state.submitCalls).toBe(0);
     expect(commentCalls()).toHaveLength(0);
   });
@@ -177,7 +172,6 @@ describe('feedback gesture routing (#1410, #1552)', () => {
     h.state.composerOpen = true;
     await feedbackSelection();
     expect(h.state.submitCalls).toBe(1);
-    expect(h.state.cancelCalls).toBe(0);
     expect(commentCalls()).toHaveLength(0);
   });
 });
