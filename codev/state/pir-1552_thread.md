@@ -272,3 +272,23 @@ in comment mode — matching the codelens vocabulary. Placeholder neutralized. +
 forward-command delivery); 953 pass, check-types/eslint/build green. Pushed, PR body refreshed, rebuttal
 updated. Re-frozen. Still at pr gate pending Amr's merge decision. CI known-flaky watch: Artifact-Canvas
 Browser + Tower Integration — will report, not retry.
+
+## CLOSEOUT — pr gate approved, MERGED (2026-08-26)
+
+pr gate APPROVED by Amr (relayed by architect); I ran porch approve 1552 pr (last write) then held full
+freeze. CI came back with ONE red — Tower Integration Tests (tower-api.e2e.test.ts:283, activateRes.ok
+false = the #1558 all-401 flake); confirmed unrelated (my diff is apps/vscode + codev docs only, zero
+Tower code), reported to architect, did NOT retry. Flake cleared on re-run → 7/7 green on the stationary
+head. Amr said merge; I relayed to the architect (merge is the architect's from the main end, never mine).
+
+MERGED: merge commit d005034a1 (two parents b0c3b7550 + df7153898, real merge not squash), by the main
+architect. Verified via gh pr view (state MERGED). Ran porch done 1552 --merged 1561. Issue-close +
+worktree cleanup are the ARCHITECT's, not mine.
+
+Final shape shipped: promptless flag default removed (native comment authoring); deck composer parity
+(open-or-submit on hunk/selection dials, mode-accurate Submit label Forward/Queue per codev.diffCodelensMode,
+Files-dial no-op, Cancel button discard); builder-scoped composer flag (no cross-controller leak). Gates:
+plan-approval ✓ dev-approval ✓ pr ✓. CMAP: Gemini APPROVE / Codex REQUEST_CHANGES / Claude COMMENT — all 4
+findings fixed. Follow-ups: #1560 (thread-owning dial-cancel spike), #1559 (contextual-panel Code Review
+rendering). Governance routed COLD: arch.md (two-composer ownership asymmetry) + lessons-learned.md
+(bundle-presence != behaviour). Lane complete.
