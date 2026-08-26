@@ -42,7 +42,6 @@ vi.mock('node:child_process', () => ({
 vi.mock('../comments/builder-review.js', () => ({
   isBuilderComposerOpen: () => h.state.composerOpen,
   submitActiveBuilderComposer: vi.fn(async () => { h.state.submitCalls++; }),
-  logFeedbackDebug: vi.fn(),
 }));
 
 vi.mock('vscode', () => ({

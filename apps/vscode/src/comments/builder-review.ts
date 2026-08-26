@@ -63,15 +63,6 @@ function bodyText(body: string | vscode.MarkdownString): string {
   return body.value;
 }
 
-// TEMPORARY dev-approval diagnostic (#1552): trace deck-dial composer events to a
-// dedicated output channel so the exact behaviour of a dial press can be captured
-// (View → Output → "Codev Feedback Debug"). The `dial-diag-v1` marker also proves
-// the running build includes this code. REMOVE before the PR.
-const feedbackDbg = vscode.window.createOutputChannel('Codev Feedback Debug');
-export function logFeedbackDebug(msg: string): void {
-  feedbackDbg.appendLine(`[dial-diag-v1] ${msg}`);
-}
-
 /**
  * VS Code built-ins that drive the FOCUSED native comment reply box (#1552),
  * so the deck feedback gestures can submit / cancel an open composer.
@@ -124,7 +115,6 @@ export function isBuilderComposerOpen(): boolean {
  * clears the flag on a real submit; clearing here self-heals the no-op case.
  */
 export async function submitActiveBuilderComposer(): Promise<void> {
-  logFeedbackDebug(`submitActiveBuilderComposer → exec ${SUBMIT_FOCUSED_COMMENT} (composerOpen was ${composerOpen})`);
   await vscode.commands.executeCommand(SUBMIT_FOCUSED_COMMENT);
   composerOpen = false;
 }
@@ -310,14 +300,10 @@ export function activateBuilderReviewComments(
    */
   async function openCommentInput(fsPath: string, range: LineRange | null): Promise<void> {
     const editor = vscode.window.activeTextEditor;
-    if (!editor || editor.document.uri.fsPath !== fsPath) {
-      logFeedbackDebug(`openCommentInput GUARD FAILED: activeEditor=${editor?.document.uri.fsPath ?? 'none'} wanted=${fsPath} → composer NOT opened`);
-      return;
-    }
+    if (!editor || editor.document.uri.fsPath !== fsPath) { return; }
     // A box is about to open and take focus — mark the composer open so the deck
-    // feedback gestures drive it (submit/cancel) instead of stacking threads (#1552).
+    // feedback gestures drive it (submit) instead of stacking threads (#1552).
     composerOpen = true;
-    logFeedbackDebug(`openCommentInput → composerOpen=true (${range ? `range ${range.start}-${range.end}` : 'file'})`);
     if (range) {
       // endColumn spans the last line's content (clamped by the editor);
       // ending at column 1 would exclude the last line from the range
@@ -375,7 +361,6 @@ export function activateBuilderReviewComments(
   // canonical thread from the queue.
   reg('codev.submitBuilderComment', async (reply: vscode.CommentReply) => {
     const thread = reply.thread;
-    logFeedbackDebug(`codev.submitBuilderComment FIRED (mode=${getDiffCodelensMode()}, textLen=${reply.text?.length ?? 0})`);
     // Any Submit — empty or not — ends the composer, so the next deck gesture
     // opens a fresh box rather than trying to drive a closed one (#1552).
     composerOpen = false;

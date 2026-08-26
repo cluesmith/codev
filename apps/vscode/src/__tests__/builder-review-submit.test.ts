@@ -54,7 +54,6 @@ vi.mock('vscode', () => ({
     visibleTextEditors: [],
     onDidChangeActiveTextEditor: () => ({ dispose() {} }),
     showWarningMessage: vi.fn(),
-    createOutputChannel: () => ({ appendLine() {}, dispose() {} }),
   },
   workspace: {
     textDocuments: [],

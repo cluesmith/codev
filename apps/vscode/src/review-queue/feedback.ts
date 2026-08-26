@@ -46,7 +46,6 @@ import {
 import {
   isBuilderComposerOpen,
   submitActiveBuilderComposer,
-  logFeedbackDebug,
 } from '../comments/builder-review.js';
 import { resolvePressCursorRef } from '../commands/press-cursor-ref.js';
 import type { LineRange } from './queue.js';
@@ -156,17 +155,14 @@ async function resolveAnchor(axis: FeedbackAxis): Promise<Anchor | undefined> {
   return selectionAnchor();
 }
 
-/** Run one feedback gesture: drive the open composer (submit/cancel), or open the
- *  native comment reply box at the anchor for the reviewer to author. */
+/** Run one feedback gesture: submit the open composer, or open the native comment
+ *  reply box at the anchor for the reviewer to author. */
 async function gesture(axis: FeedbackAxis): Promise<void> {
-  const composerOpen = isBuilderComposerOpen();
-  const action = decideFeedbackAction(axis, composerOpen);
-  logFeedbackDebug(`gesture axis=${axis} composerOpen=${composerOpen} → ${action.kind} (activeEditor=${vscode.window.activeTextEditor?.document.uri.fsPath ?? 'none'})`);
+  const action = decideFeedbackAction(axis, isBuilderComposerOpen());
   if (action.kind === 'submit') { await submitActiveBuilderComposer(); return; }
   if (action.kind === 'noop') { return; }
   const anchor = await resolveAnchor(axis);
   if (!anchor) {
-    logFeedbackDebug(`gesture axis=${axis} → open but NO ANCHOR (active editor is not a builder diff) → warning shown`);
     vscode.window.showWarningMessage('Codev: focus a builder diff first to flag it for review');
     return;
   }
