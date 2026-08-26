@@ -411,7 +411,12 @@
       },
       {
         "command": "codev.submitBuilderComment",
-        "title": "Send to Builder",
+        "title": "Queue Comment for Builder",
+        "enablement": "!commentIsEmpty"
+      },
+      {
+        "command": "codev.forwardBuilderComment",
+        "title": "Forward to Builder",
         "enablement": "!commentIsEmpty"
       },
       {
@@ -518,6 +523,10 @@
         },
         {
           "command": "codev.submitBuilderComment",
+          "when": "false"
+        },
+        {
+          "command": "codev.forwardBuilderComment",
           "when": "false"
         },
         {
@@ -849,7 +858,12 @@
         {
           "command": "codev.submitBuilderComment",
           "group": "inline@1",
-          "when": "commentController == codev-builder-review && commentThreadIsEmpty"
+          "when": "commentController == codev-builder-review && commentThreadIsEmpty && codev.diffCodelensMode == 'comment'"
+        },
+        {
+          "command": "codev.forwardBuilderComment",
+          "group": "inline@1",
+          "when": "commentController == codev-builder-review && commentThreadIsEmpty && codev.diffCodelensMode != 'comment'"
         },
         {
           "command": "codev.cancelBuilderComment",

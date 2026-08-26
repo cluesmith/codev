@@ -36,9 +36,12 @@ FIXED across the board:
 - **Source comments**: `feedback.test.ts` header rewritten (it still read "file = cancel, selection =
   inert"); the `SUBMIT_FOCUSED_COMMENT` doc block no longer references the removed
   `isCommentInputFocused()`; no obsolete cancel-executor references remain (grep-clean).
-- **Button label**: `"Queue Comment for Builder"` → **`"Send to Builder"`** (mode-neutral; the
-  placeholder likewise), since in the default `forward` mode Submit forwards to the PTY rather than
-  queueing.
+- **Button label**: the old single `"Queue Comment for Builder"` was misleading in the default
+  `forward` mode (Submit forwards to the PTY, it doesn't queue). Owner chose **mode-accurate labels**
+  over a neutral word: a second command `codev.forwardBuilderComment` ("Forward to Builder") shares
+  the one handler, and mutually-exclusive `when` clauses on `codev.diffCodelensMode` show **"Forward
+  to Builder"** in forward mode and **"Queue Comment for Builder"** in comment mode — matching the
+  codelens vocabulary exactly. The placeholder is neutral ("…then submit").
 
 ## Claude COMMENT (non-blocking; all addressed anyway)
 

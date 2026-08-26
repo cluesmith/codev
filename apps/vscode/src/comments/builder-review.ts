@@ -137,9 +137,10 @@ export function activateBuilderReviewComments(
   );
   controller.options = {
     prompt: 'Comment for builder',
-    // Mode-neutral wording (CMAP #1552): Submit queues in comment mode but
-    // FORWARDS to the PTY in the default forward mode, so "Queue" was misleading.
-    placeHolder: 'Type review feedback for the builder, then Send to Builder',
+    // Neutral hint (CMAP #1552): the submit button's label is mode-specific
+    // (Queue in comment mode, Forward in the default forward mode), so the
+    // placeholder stays generic rather than naming one delivery.
+    placeHolder: 'Type review feedback for the builder, then submit',
   };
   context.subscriptions.push(controller);
 
@@ -350,7 +351,13 @@ export function activateBuilderReviewComments(
   // the current mode (owner-approved at the #1552 plan gate). The input thread
   // is disposed either way; in comment mode the reconciler re-creates the
   // canonical thread from the queue.
-  reg('codev.submitBuilderComment', async (reply: vscode.CommentReply) => {
+  //
+  // Two command ids share this ONE handler so the button can carry a mode-accurate
+  // label (CMAP #1552): `codev.submitBuilderComment` ("Queue Comment for Builder",
+  // shown in comment mode) and `codev.forwardBuilderComment` ("Forward to Builder",
+  // shown in forward mode) — the menu `when` clauses gate which is visible, the
+  // handler's own mode branch does the real delivery, so the two can't drift.
+  const deliverBuilderComment = async (reply: vscode.CommentReply): Promise<void> => {
     const thread = reply.thread;
     // Any Submit — empty or not — ends the composer, so the next deck gesture
     // opens a fresh box rather than trying to drive a closed one (#1552).
@@ -392,7 +399,9 @@ export function activateBuilderReviewComments(
     };
     thread.dispose();
     await store.add(entry.builderId, comment);
-  });
+  };
+  reg('codev.submitBuilderComment', deliverBuilderComment);
+  reg('codev.forwardBuilderComment', deliverBuilderComment);
 
   // Cancel button on an input thread → discard the in-progress box, leaving
   // nothing queued or forwarded (#1552). VS Code hands us the thread, so a click

@@ -139,6 +139,18 @@ describe('builder-review Submit delivery (#1552)', () => {
     expect(thread.dispose).toHaveBeenCalled();
   });
 
+  it('codev.forwardBuilderComment shares the handler: in forward mode it forwards ref + prose', async () => {
+    h.state.mode = 'forward';
+    const forwardCmd = h.state.handlers.get('codev.forwardBuilderComment') as (reply: unknown) => Promise<void>;
+    expect(forwardCmd).toBeTypeOf('function');
+    const thread = makeThread({ start: { line: 4 }, end: { line: 8 } });
+    await forwardCmd({ thread, text: 'rename this' });
+    expect(forwardCalls()).toEqual([
+      { command: 'codev.forwardToBuilder', args: ['pir-9', 'pkg/src/a.ts:L5-L9 rename this'] },
+    ]);
+    expect(added).toHaveLength(0);
+  });
+
   it('forward mode, whole-file comment: forwards the file ref + prose', async () => {
     h.state.mode = 'forward';
     const thread = makeThread(undefined); // file comment
