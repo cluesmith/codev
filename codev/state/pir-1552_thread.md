@@ -196,3 +196,19 @@ activeEditor=commentinput after a range open). The focus-detection fix then make
 focused. Edge to watch: a hunk press that degrades to a whole-FILE comment (fileComment:true) — confirm on
 re-test whether it also leaves focus in the input; if not, that whole-file deck case needs a focus nudge.
 Amr can overrule discard at re-test (one-function swap to draft-survival) but discard is the presented design.
+
+## Re-test: SUBMIT works; CANCEL hits a hard native-API limit (2026-08-26, c535b8f1e)
+
+Amr re-tested: dial SUBMIT now works (focus-detection fix landed). Dial CANCEL via closeActiveEditor was
+HARMFUL — closed the HOST editor, focus jumped to a different VS Code window. Neutralized to a harmless
+no-op. All three discard routes are dead ends: hideComment collapses (draft survives, unsafe), closeActiveEditor
+closes host (wrong), submit-empty blocked by the submit button's `enablement: !commentIsEmpty` (no enabled
+submit action on an empty box). The ONE reliable discard is the visible Cancel BUTTON (VS Code hands us the
+thread on click → codev.cancelBuilderComment disposes it); the deck can't invoke it (no thread arg), and
+addComment never returns the thread (no onDidCreateCommentThread, no CommentThread.reveal).
+
+Asked architect to rule: (A) thread-owning rework — open via createCommentThread to get the handle for
+dial-cancel dispose, but createCommentThread doesn't auto-focus (would regress dictation + focus-gated submit);
+mitigation createCommentThread+addComment is unverified. (B) button-only cancel — ship dial open+submit +
+Cancel BUTTON discard (fully working, zero risk), file thread-owning dial-cancel as a follow-up spike. My lean: B.
+Awaiting ruling. Current state: submit-via-dial + Cancel-button-discard both work; dial-cancel is a safe no-op.
