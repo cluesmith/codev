@@ -36,3 +36,14 @@ keybindings. Phase 2 = Stream Deck dial + key-pair + relay verbs + face. Both co
 4 decision points surfaced for the reviewer: keybinding chord (cmd+k ]/[ pending verification),
 deck surface, deck-face architect support, and confirming the axis-dependent roster.
 Plan written to `codev/plans/1563-cycle-agent-terminals-from-key.md`. Awaiting plan-approval gate.
+
+### PLAN revised — Stream Deck surface (reviewer question: "4 dials already occupied?")
+Verified the shipped `Codev.streamDeckProfile` (Stream Deck+, DeviceType 7 = 4 dials + 8 keys):
+BOTH populated pages are full. Page 1 dials = Zoom/Review-Files/Review-Hunk/Scroll; keys = 4x
+Builder Action + Open-Architect/Open-Builder/Approve-Gate/Run-Dev. Page 2 dials = same; keys = 8x
+Architect Action. NO free dial or key in the default profile. Precedent: PrNav & SpawnNav dials
+exist in the manifest but are NOT placed in the shipped profile → accepted pattern is
+"manifest palette action, user places it." Revised Phase 2: key-pair is PRIMARY (works on all deck
+models), dial offered; default profile unchanged (option 2a, recommended) unless reviewer picks 2b
+(dedicated Page 3) or 2c (displace a dial). Keyboard commands remain the always-available primary
+path. Decision point 2 rewritten with 2a/2b/2c. Recommitted.
