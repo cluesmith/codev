@@ -141,25 +141,46 @@ flatten), roster ≤ 1 no-op, wrap-around next/previous, current = `-1` start be
 `partitionArchitectGroups` yields the same top-level order `architectRootChildren` renders (the
 anti-drift assertion).
 
-### Phase 2 — Stream Deck (dial + key-pair)
+### Phase 2 — Stream Deck (key-pair primary, dial offered)
+
+**The physical constraint (verified against the shipped profile).** `Codev.streamDeckProfile`
+targets the Stream Deck+ (DeviceType 7 = 4 dials + 8 keys). Both populated pages are **full**:
+Page 1 dials = Zoom · Review-Files · Review-Hunk · Scroll, keys = 4× Builder Action + Open
+Architect / Open Builder / Approve Gate / Run Dev; Page 2 dials = the same four, keys = 8×
+Architect Action. There is **no free dial and no free key** in the default profile.
+
+**Precedent that resolves it:** the `PR Navigator` and `Spawn from Backlog` dial actions already
+exist in the manifest but are **not placed** in the shipped profile. So the accepted pattern is:
+ship the action in the manifest palette, fully wired; the user drags it onto a slot they free, a
+custom page, or a larger deck (XL = 32 keys). The curated profile is a default, not a ceiling. This
+feature follows that pattern — **it displaces nothing** in the default profile. The always-available
+primary path is the Phase 1 keyboard commands; the deck is a secondary surface.
 
 **Relay verbs.** Add to `VERB_COMMANDS` (`apps/vscode/src/command-relay.ts:24`):
 `'focus-next-agent': 'codev.focusNextAgentTerminal'`,
 `'focus-prev-agent': 'codev.focusPreviousAgentTerminal'` (no args; the commands read VS Code's own
 active-terminal cursor).
 
-**Dial (primary surface, decision point 2).** New `AgentNav extends SingletonAction` in
-`actions.ts` (manifestId `com.cluesmith.codev.agent-nav`): `onDialRotate` → `dir(ev) > 0` sends
-`focus-next-agent`, else `focus-prev-agent`; `onDialDown` (press) opens/focuses the currently
-selected builder via the existing `open-terminal` verb (a sensible "jump to current" press; the
-review dial's `open | submit | noop` vocabulary is untouched — this is a separate dial). Rendered
-with `setFeedback` — line 1 a `'switch'`/terminal semantic, line 2 `selectedBuilderLine()`, bar =
-selected builder progress (reuse `ScrollNav`/`ReviewNav` patterns). Manifest `Encoder` entry +
-`layouts/dial.json`, registered in `plugin.ts`.
+**Key-pair (primary deck surface).** `FocusNextAgentKey` / `FocusPrevAgentKey extends VerbKey`
+firing the two verbs; faces via `labelFaceSvg('switch', 'Next Agent' / 'Prev Agent', color)`.
+Manifest `Keypad` entries, registered in `plugin.ts`. Keys are the primary because they work on
+**every** Stream Deck model (the + is the only one with dials) and are the easiest slot to free.
 
-**Key-pair fallback.** `FocusNextAgentKey` / `FocusPrevAgentKey extends VerbKey` firing the two
-verbs; faces via `labelFaceSvg('switch', 'Next Agent' / 'Prev Agent', color)`. Manifest `Keypad`
-entries, registered in `plugin.ts`.
+**Dial (offered, for users who free a slot).** `AgentNav extends SingletonAction` in `actions.ts`
+(manifestId `com.cluesmith.codev.agent-nav`): `onDialRotate` → `dir(ev) > 0` sends
+`focus-next-agent`, else `focus-prev-agent`; `onDialDown` (press) opens/focuses the currently
+selected builder via the existing `open-terminal` verb (a sensible "jump to current"; the review
+dial's `open | submit | noop` vocabulary is untouched — this is a separate dial). Rendered with
+`setFeedback` — line 1 a `'switch'`/terminal semantic, line 2 `selectedBuilderLine()`, bar =
+selected builder progress (reuse `ScrollNav`/`ReviewNav`). Manifest `Encoder` entry +
+`layouts/dial.json`, registered in `plugin.ts`. Like PrNav/SpawnNav, it is **not** auto-placed in
+the shipped profile (no free dial); the user drops it in.
+
+**Default-profile placement (decision point 2 — the reviewer's call).** Options: (2a) manifest-only,
+shipped profile unchanged — user places the keys/dial themselves (recommended, matches
+PrNav/SpawnNav); (2b) add a dedicated agent-nav page (Page 3: dial + Next/Prev keys + a current-agent
+tile) reached via a native Switch-Profile/Folder key, mirroring the Architect-roster Page 2 pattern;
+(2c) displace an existing dial/key (rejected unless the owner wants it — removes a capability).
 
 **Deck face — current agent.** The dial and keys render the currently selected agent from the
 deck's existing store sync. That sync is **builder-centric today** (`store.selectedBuilder()` via
@@ -190,16 +211,21 @@ Phase 1 (VS Code core):
   (`when: codev.hasWorkspace`).
 - `apps/vscode/src/__tests__/` — new test file for `agentCycleOrder()` + the anti-drift assertion.
 
-Phase 2 (Stream Deck):
+Phase 2 (Stream Deck) — the default `Codev.streamDeckProfile` is **not** modified under option 2a
+(no free slot; matches PrNav/SpawnNav). Option 2b would additionally add a Page 3 to the profile.
 - `apps/vscode/src/command-relay.ts:24` — two new verb→command allowlist entries.
-- `apps/streamdeck/src/actions.ts` — `AgentNav` (dial), `FocusNextAgentKey` / `FocusPrevAgentKey`
-  (keys).
+- `apps/streamdeck/src/actions.ts` — `FocusNextAgentKey` / `FocusPrevAgentKey` (keys, primary) +
+  `AgentNav` (dial, offered).
 - `apps/streamdeck/src/plugin.ts:40-56` — register the new actions.
-- `apps/streamdeck/com.cluesmith.codev.sdPlugin/manifest.json` — one `Encoder` action + two
-  `Keypad` actions (UUIDs matching the `manifestId`s).
+- `apps/streamdeck/com.cluesmith.codev.sdPlugin/manifest.json` — two `Keypad` actions + one
+  `Encoder` action (UUIDs matching the `manifestId`s); available in the palette.
 - `apps/streamdeck/src/face.ts` — only if a new face factory is needed beyond `labelFaceSvg`
   (expected: reuse existing).
-- `apps/streamdeck/src/__tests__/` — dial-direction + face tests.
+- `apps/streamdeck/README.md` — document the new actions (the README already documents dial/key
+  placement and the page-switch pattern).
+- `apps/streamdeck/com.cluesmith.codev.sdPlugin/Codev.streamDeckProfile` — only under option 2b
+  (add the agent-nav page).
+- `apps/streamdeck/src/__tests__/` — key/dial-direction + face tests.
 
 Docs:
 - `apps/vscode/CHANGELOG.md`, `docs/releases/UNRELEASED.md`.
@@ -240,16 +266,17 @@ Manual (dev-approval gate, run the worktree extension):
 - Keybinding: the chosen chord triggers Next/Prev; verify from an editor and from within an agent
   terminal.
 
-Manual (Stream Deck, if a deck is available at the gate):
-- Dial rotate → next/previous agent; press → focus current selected builder.
-- Key-pair (next/prev) fires the same motion.
-- Deck face shows the current builder id and updates as the selection follows focus.
+Manual (Stream Deck, if a deck is available at the gate) — drag the new actions onto a free slot
+first (no default-profile slot is free):
+- Key-pair (Next Agent / Prev Agent) fires the motion; faces show current builder id and follow focus.
+- Dial (if placed on a freed dial): rotate → next/previous agent; press → focus current selected builder.
 
 ## Phasing (commits within one PR)
 
 1. **Phase 1:** VS Code commands, shared `agentCycleOrder()` + `partitionArchitectGroups`,
    `getActiveArchitectName`, keybindings, unit tests, changelog.
-2. **Phase 2:** Stream Deck relay verbs, dial + key-pair actions, manifest, face, tests.
+2. **Phase 2:** Stream Deck relay verbs, key-pair (primary) + dial (offered) actions, manifest,
+   README, face, tests. The default profile is unchanged unless option 2b is chosen.
 
 PR opened during/after Phase 2 (or earlier if the architect wants to review the Phase 1 slice).
 
@@ -257,8 +284,10 @@ PR opened during/after Phase 2 (or earlier if the architect wants to review the 
 
 1. **Keybinding chord:** confirm the `cmd+k ]` / `cmd+k [` primary (pending verification) vs the
    `ctrl+alt` fallback vs palette-only.
-2. **Deck surface:** dedicated dial + key-pair (proposed) vs one only, and placement against the
-   current profile layout.
+2. **Deck surface / placement (all 4 dials + all 8 keys in the default profile are full):**
+   (2a) manifest-only, default profile unchanged, user places the keys/dial — recommended, matches
+   the unplaced PrNav/SpawnNav dials; (2b) add a dedicated agent-nav Page 3 reached by a
+   Switch-Profile/Folder key; (2c) displace an existing dial/key (rejected unless you want it).
 3. **Deck face architect support:** ship the builder-centric face now (proposed) and defer
    architect-name-on-face, or invest in an architect-focus activity event + deck architect-selection
    in this PR.
