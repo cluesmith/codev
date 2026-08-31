@@ -63,6 +63,18 @@ For the full walkthrough, see **[Getting Started](https://codevos.ai/getting-sta
 
 See [CLI Reference](codev/resources/commands/overview.md) for details.
 
+### Using Codev from VS Code
+
+**Prerequisite:** the extension does not bundle Codev. Install the CLI and initialize your project first (steps 1–3 above). The extension drives the same `afx`/Tower the npm install provides, and will fail to start Tower without it.
+
+With that in place, the extension turns VS Code into the cockpit for the whole workflow:
+
+1. Install **[Codev for VS Code](https://marketplace.visualstudio.com/items?itemName=cluesmith.codev-vscode)** from the Marketplace, or from **[Open VSX](https://open-vsx.org/extension/cluesmith/codev-vscode)** for Cursor, Kiro, and other VS Code-based editors.
+2. Open your Codev project. The extension auto-detects the workspace and connects to Tower, auto-starting it if it isn't running.
+3. Click the Codev icon in the Activity Bar and work from the sidebar: talk to the architect, spawn builders straight from your issue backlog, and watch every builder's live state (active, blocked at a gate, waiting on input). Review a builder's diff with inline comments that queue back to the agent, approve its gates, and run its branch with one click to try the change before any PR exists. Specs and plans open in an annotation viewer, and a contextual panel follows whatever you are looking at. The **"Get started with Codev"** walkthrough (Help → Welcome) tours the basics.
+
+The extension's full guide is in its [README](apps/vscode/README.md): the sidebar tour, the review flow, keyboard shortcuts, and runnable worktrees.
+
 ## Upgrading
 
 Upgrading is **two steps, not one** — the npm package and your projects' framework files update separately:
