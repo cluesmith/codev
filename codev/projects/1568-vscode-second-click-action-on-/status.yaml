@@ -1,0 +1,18 @@
+id: '1568'
+title: vscode-second-click-action-on-
+protocol: pir
+phase: plan
+plan_phases: []
+current_plan_phase: null
+gates:
+  plan-approval:
+    status: pending
+  dev-approval:
+    status: pending
+  pr:
+    status: pending
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-08-31T22:06:00.871Z'
+updated_at: '2026-08-31T22:06:00.872Z'
