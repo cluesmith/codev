@@ -1,7 +1,7 @@
 id: bugfix-1574
 title: tower-self-attesting-message-f
 protocol: bugfix
-phase: pr
+phase: verified
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -13,7 +13,7 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-09-01T11:50:08.201Z'
-updated_at: '2026-09-01T12:39:15.947Z'
+updated_at: '2026-09-01T12:39:38.654Z'
 pr_history:
   - phase: pr
     pr_number: 1575
