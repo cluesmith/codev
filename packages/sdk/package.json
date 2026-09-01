@@ -1,6 +1,6 @@
 {
   "name": "@cluesmith/codev-sdk",
-  "version": "3.3.1",
+  "version": "3.3.2",
   "description": "Client SDK for Tower: the single implementation of how anything talks to Tower. Environment-agnostic (browser, Node, React Native); auth and transport arrive as injected adapters.",
   "type": "module",
   "exports": {
