@@ -233,6 +233,11 @@ Projects currently in development (conceived through committed), sorted by prior
 
 ```yaml
 releases:
+  - version: "v3.3.2"
+    name: "Luxor"
+    status: released
+    target_date: "2026-09-01"
+    notes: "Message-delivery integrity patch, published straight to `@latest`. The agent-to-agent transport stops losing content silently: delivery is verified on the receiving terminal before being reported delivered, with unverified writes held and redelivered, a settle window before writing onto just-active composers, and a loud 48KB body ceiling with length echoed to the sender (#1573/PR #1577, addressing field reports #1564/#1521); gated deliveries and operator interrupts converge on one per-terminal lock, ending mid-write interleaving and false success (#1365/PR #1492); every delivered frame is self-attesting — recipient named in the header, reply channel stated on architect→builder frames (#1574/PR #1575, closes #1543/#1530). Cloud connectivity restored: the 3.3.1 local-key hardening had blocked the OAuth callback redirect that completes Connect to Codev Cloud (#1570/PR #1571 — nonce-authenticated public carve-out). Also carries the VS Code contextual bottom panel line (Spec 1049, PIRs #1534/#1552/#1553). Follow-ups filed, not shipped: #1576, #1578. Contributors: Waleed Kadous, @mohidmakhdoomi (PR #1492), Amr Elsayed."
   - version: "v3.3.1"
     name: "Luxor"
     status: released
