@@ -72,6 +72,22 @@ describe('isPublicRoute', () => {
     expect(isPublicRoute('DELETE', '/workspace/ENC/assets/app.js')).toBe(false);
   });
 
+  it('makes the cloud OAuth callback public but nothing else under /api/tunnel/ (#1570)', () => {
+    // A cross-site redirect from the cloud cannot carry the key header; the
+    // single-use nonce is the credential (handler 400s without a valid one).
+    expect(isPublicRoute('GET', '/api/tunnel/connect/callback')).toBe(true);
+    // The carve-out is exact-match — it must not widen to the tunnel surface.
+    expect(isPublicRoute('POST', '/api/tunnel/connect')).toBe(false);
+    expect(isPublicRoute('GET', '/api/tunnel/connect')).toBe(false);
+    expect(isPublicRoute('GET', '/api/tunnel/status')).toBe(false);
+    expect(isPublicRoute('POST', '/api/tunnel/disconnect')).toBe(false);
+    expect(isPublicRoute('GET', '/api/tunnel/disconnect')).toBe(false);
+    expect(isPublicRoute('GET', '/api/tunnel/connect/callback/extra')).toBe(false);
+    expect(isPublicRoute('GET', '/api/tunnel/')).toBe(false);
+    // Non-GET methods on the callback path stay keyed.
+    expect(isPublicRoute('POST', '/api/tunnel/connect/callback')).toBe(false);
+  });
+
   it('makes only the annotator shell + vendor public; its data/media routes stay keyed', () => {
     // Shell (iframe navigation) and vendor libs (<script>/<link>) — public.
     expect(isPublicRoute('GET', '/workspace/ENC/api/annotate/TAB/')).toBe(true);
@@ -204,6 +220,13 @@ describe('isRequestAllowed', () => {
   it('allows public routes with no key', () => {
     expect(isRequestAllowed(req('GET', '/health'))).toBe(true);
     expect(isRequestAllowed(req('GET', '/api/version'))).toBe(true);
+  });
+
+  it('lets the keyless cloud OAuth callback through, and nothing else on /api/tunnel/ (#1570)', () => {
+    expect(isRequestAllowed(req('GET', '/api/tunnel/connect/callback?nonce=n&token=t'))).toBe(true);
+    expect(isRequestAllowed(req('POST', '/api/tunnel/connect'))).toBe(false);
+    expect(isRequestAllowed(req('GET', '/api/tunnel/status'))).toBe(false);
+    expect(isRequestAllowed(req('POST', '/api/tunnel/disconnect'))).toBe(false);
   });
 
   it('rejects a privileged route with no key', () => {

@@ -472,6 +472,22 @@ describe('tower-tunnel', () => {
         expect(body()).toContain('Invalid or expired');
       });
 
+      it('registers nothing for an unknown nonce — the nonce gates the public route (#1570)', async () => {
+        // The route is keyless by design (a cross-site browser redirect cannot
+        // carry codev-tower-key), so the single-use nonce is what authenticates
+        // it. Without a valid one the handler must 400 and write no credentials.
+        mockConsumePendingRegistration.mockReturnValue(null);
+
+        const { res, body, statusCode } = makeRes();
+        const req = makeReq('GET', { url: '/api/tunnel/connect/callback?token=attacker-tok&nonce=never-minted' });
+        await handleTunnelEndpoint(req, res, 'connect/callback');
+
+        expect(statusCode()).toBe(400);
+        expect(body()).toContain('Invalid or expired');
+        expect(mockRedeemToken).not.toHaveBeenCalled();
+        expect(mockWriteCloudConfig).not.toHaveBeenCalled();
+      });
+
       it('completes registration with valid nonce and token', async () => {
         mockConsumePendingRegistration.mockReturnValue({
           nonce: 'valid-nonce',
