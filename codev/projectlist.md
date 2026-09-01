@@ -233,6 +233,16 @@ Projects currently in development (conceived through committed), sorted by prior
 
 ```yaml
 releases:
+  - version: "v3.3.1"
+    name: "Luxor"
+    status: released
+    target_date: "2026-08-18"
+    notes: "Stable landing of the Luxor (v3.3.x) line, cut the same day v3.3.0 was promoted from its `@next` soak to `@latest`; carries everything merged during the soak. VS Code gate approvals relay through the builder's owning architect under a `[USER via VS Code]` header instead of executing silently in the extension, refusing on offline/unknown owners (#1494/PR #1522). Tower authenticates every request to its local API — shared local key at a single choke point, WS-upgrade enforcement, fixed CORS allowlist, fail-closed under BRIDGE_MODE (PR #1421); breaking for hand-rolled clients (401 without the `codev-tower-key` header). Spec/plan review toolset: batched review comments on builder diffs (#1037/PR #1382), horizontal reading mode (#1380/PR #1398), title-bar zoom (#1070/PR #1461), keyboard forward of symbol/hunk (#1073/PR #1447). Stream Deck arc: SD+ two-zone cockpit (#1410/PR #1439), architects board + Open Architect Terminal (#1495/PR #1499, #1463/PR #1466), phase-following review dials (#1400/PR #1419), one smart key per builder (#1404/PR #1415), canvas command channel + hands-free comment flow (#1401/PR #1413, #1420/#1425), Scroll dial canvas scrolling (#1501/PR #1513), self-sizing builder row (#1465/PR #1468), finished two-page bundled profile (#1381/PR #1518). Infrastructure: sdk `/controller` becomes a true capability surface — breaking: no more `TowerClient` export (#1411/PR #1430); terminal reconnects replay a serialized screen snapshot (#1354/PR #1402); `afx reset` renamed `afx refresh` with a deprecated alias (#1489/PR #1490). Contributors: Amr Elsayed, Waleed Kadous."
+  - version: "v3.3.0"
+    name: "Luxor"
+    status: released
+    target_date: "2026-08-08"
+    notes: "Foundations release; soaked on `@next` from 2026-08-09 and promoted to `@latest` on 2026-08-18 alongside v3.3.1. The always-on prompt surface is rewritten around judgment rather than rules — 34,231 → 18,233 words across both trees with content relocated to on-demand skills (Spec 1280/PR #1362). `afx send` moves to mailbox-first delivery: persisted before the send returns, written only onto a render-gate-verified empty prompt, held mail visible everywhere (Spec 1313/PR #1330). Tunnel security fix (path bypass allowing remote tower deregistration, #1374) and tunnel resilience (watchdog, half-open retry, #1373). Also: `/arch-save` packaged context refresh (Spec 1307/PR #1335), configurable per-lane consultation (Spec 1286/PR #1341), `@cluesmith/codev-sdk` first npm publish (#1189/#1357), per-session submission lock (Spec 1273/PR #1320), builder crash-restart resume (#1233/PR #1356). Contributors: Waleed Kadous, Amr Elsayed, @mohidmakhdoomi (#1330, #1334, #1342)."
   - version: "v3.2.4"
     name: "Karnak"
     status: released

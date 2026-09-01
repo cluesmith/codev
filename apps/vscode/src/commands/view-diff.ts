@@ -374,6 +374,8 @@ export async function viewDiff(
       builderId: builder.id,
       relPath: plan.resourcePath,
       hunks: [],
+      baseRef,
+      worktreePath: wt,
     })),
   );
 
@@ -398,6 +400,8 @@ export async function viewDiff(
         builderId: builder.id,
         relPath: plan.resourcePath,
         hunks: hunksByPath.get(plan.resourcePath) ?? [],
+        baseRef,
+        worktreePath: wt,
       })),
     );
   } catch {
@@ -463,7 +467,10 @@ export async function registerFileInjectSession(args: {
   const fsPath = path.join(args.worktreePath, relPath);
   // Register immediately with no hunks so the symbol/file lenses render right
   // away — the git hunk computation below must not gate them.
-  upsertDiffInjectEntry({ fsPath, builderId: args.builderId, relPath, hunks: [] });
+  upsertDiffInjectEntry({
+    fsPath, builderId: args.builderId, relPath, hunks: [],
+    baseRef: args.baseRef, worktreePath: args.worktreePath,
+  });
   try {
     const { stdout } = await execFileAsync(
       'git',
@@ -472,7 +479,10 @@ export async function registerFileInjectSession(args: {
     );
     // Re-upsert with hunks; the provider's change event refreshes the lenses,
     // adding the per-hunk ones.
-    upsertDiffInjectEntry({ fsPath, builderId: args.builderId, relPath, hunks: parseHunkRanges(stdout) });
+    upsertDiffInjectEntry({
+      fsPath, builderId: args.builderId, relPath, hunks: parseHunkRanges(stdout),
+      baseRef: args.baseRef, worktreePath: args.worktreePath,
+    });
   } catch {
     // keep the symbol/file lenses already registered
   }

@@ -1,7 +1,7 @@
 {
   "UUID": "com.cluesmith.codev",
   "Name": "Codev",
-  "Version": "3.3.0.0",
+  "Version": "3.3.1.0",
   "Author": "Cluesmith",
   "Category": "Codev",
   "CategoryIcon": "icons/category",
@@ -275,10 +275,10 @@
         "Encoder"
       ],
       "Encoder": {
-        "layout": "layouts/label.json",
+        "layout": "layouts/title-value.json",
         "TriggerDescription": {
           "Rotate": "Scroll up / down",
-          "Push": "Forward selection to builder"
+          "Push": "Forward the selection to the builder now, or queue it, per workspace mode"
         }
       },
       "States": [

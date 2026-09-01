@@ -12,5 +12,5 @@
     "declaration": false,
     "declarationMap": false
   },
-  "include": ["src/markdown-preview/webview"]
+  "include": ["src/markdown-preview/webview", "src/contextual-panel/webview"]
 }

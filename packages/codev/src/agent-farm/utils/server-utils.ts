@@ -132,9 +132,15 @@ export function keysMatch(presented: string, expected: string): boolean {
 
 /**
  * Routes intentionally reachable without the key. Kept deliberately narrow:
- * pre-auth liveness/version probes, the Tower launcher shell, and the React
+ * pre-auth liveness/version probes, the Tower launcher shell, the React
  * dashboard's static assets (the page loads keyless, then authenticates its
- * own API/WebSocket calls with the key). Everything else requires the key.
+ * own API/WebSocket calls with the key), the annotator shell + vendor files,
+ * and the cloud OAuth callback. Everything else requires the key.
+ *
+ * The entries here are the paths a *browser navigation* reaches — a top-level
+ * redirect, an iframe load, a `<script>`/`<link>` tag — none of which can
+ * attach the `codev-tower-key` header. Each one therefore carries either no
+ * secret or its own credential; adding a route here means proving that.
  *
  * The privileged workspace `file` reader and every `api/` or `ws/` subpath are
  * explicitly excluded so a static-asset carve-out never exposes a data route.
@@ -145,6 +151,17 @@ export function isPublicRoute(method: string, pathname: string): boolean {
   if (pathname === '/health') return true;
   if (pathname === '/api/version') return true;
   if (pathname === '/' || pathname === '/index.html') return true;
+
+  // Cloud OAuth callback (#1570). cloud.codevos.ai ends registration by
+  // redirecting the browser here, and a cross-site top-level navigation cannot
+  // carry the key header — so the key check can only ever 401 the flow. The
+  // route is self-authenticating instead: the nonce IS the credential. It is
+  // single-use with a 5-minute TTL and can only be minted by an authenticated
+  // POST /api/tunnel/connect, and handleTunnelEndpoint 400s ("Invalid or
+  // expired registration link") without a valid one, so a keyless request
+  // registers nothing. Exact match only — never widen this to an /api/tunnel/
+  // prefix, which would expose the keyed status/disconnect routes.
+  if (pathname === '/api/tunnel/connect/callback') return true;
 
   // React SPA served under /workspace/<encoded>/... — static assets only. The
   // trailing subpath is optional: bare /workspace/<enc> serves the SPA shell,

@@ -79,6 +79,13 @@ vi.mock('../commands/spawn-roles.js', () => ({
 }));
 
 vi.mock('../commands/reset/context.js', () => ({
+  // The fs port moved here from three hand-rolled copies (Spec 1470); this mock
+  // must supply it or the module under test cannot construct its context.
+  buildContextFsPort: () => ({
+    exists: () => false,
+    read: () => null,
+    listDirs: () => null,
+  }),
   resolveBuilderContext: (opts: Record<string, unknown>) => ({
     builderId: opts.builderId,
     worktree: opts.worktree,

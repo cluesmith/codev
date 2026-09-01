@@ -26,6 +26,29 @@ ${content}
 }
 
 /**
+ * Format a message the VS Code extension relays on a human's behalf (#1494) to
+ * the architect, e.g. the Approve-gate button. The distinct `[USER via VS Code]`
+ * header lets the architect tell a button relay apart from a peer-architect
+ * instruction or the user typing directly in the pane. Wraps in a structured
+ * header/footer unless raw mode is requested.
+ */
+export function formatUserViaVsCodeMessage(message: string, fileContent?: string, raw: boolean = false): string {
+  let content = message;
+  if (fileContent) {
+    content += '\n\nAttached content:\n```\n' + fileContent + '\n```';
+  }
+
+  if (raw) {
+    return content;
+  }
+
+  const timestamp = new Date().toISOString();
+  return `### [USER via VS Code | ${timestamp}] ###
+${content}
+###############################`;
+}
+
+/**
  * Format a message from a builder to the architect.
  * Wraps in a structured header/footer unless raw mode is requested.
  */

@@ -167,7 +167,12 @@ export interface SendOptions {
   /**
    * Spec 1307: hold in Tower and deliver after this many seconds. Resolution
    * and authorization still happen at request time; only delivery is deferred.
-   * Not persisted — a Tower restart drops pending sends.
+   *
+   * Persisted, and deliberately so: the body is written to the durable mailbox
+   * with a `not_before` timestamp, so Tower holds no timer and a restart inside
+   * the window does not drop the send (see `servers/delayed-send.ts`). Only the
+   * Ctrl+C nudge of a delayed `--interrupt` is lost to a restart, because that
+   * one genuinely is an in-memory timer.
    *
    * Named `delay` here to match the user-facing `--delay` flag; it becomes
    * `deliverAfter` at the client and wire layers, where the question is *when
@@ -205,6 +210,41 @@ export interface ResetOptions {
   timeout?: number;      // Seconds to wait for the save-state receipt
   minBytes?: number;     // Minimum state-file size to count as substantive
   quietWindow?: number;  // ms of terminal silence that counts as turn-ended
+}
+
+/**
+ * Options for `afx self-refresh` (Spec 1470).
+ *
+ * NOTE what is absent: there is no `builder` field. This command refreshes the
+ * builder that RUNS it, and identity is derived from the worktree rather than
+ * supplied — so "cannot target another session" is structural rather than a
+ * validation rule a later edit could drop.
+ */
+export interface SelfRefreshOptions {
+  /** Mode flag, not a target: mint a challenge and print the save request. */
+  begin?: boolean;
+  /** Boundary id from porch (e.g. `enter:review`), bound into the challenge. */
+  boundary?: string;
+  /** Inline addendum appended to the re-orientation. */
+  note?: string;
+  /** Report what would happen; send nothing, clear nothing, consume nothing. */
+  dryRun?: boolean;
+  /** Proceed despite uncommitted tracked changes. Off by default. */
+  allowDirty?: boolean;
+  /** Override when the builder prompt file is gone. */
+  mode?: 'strict' | 'soft';
+  // The four below arrive from commander as STRINGS when typed as flags, and as
+  // numbers when called programmatically. Typed for both rather than `number`
+  // alone: declaring a type the runtime does not honour is a lie the compiler
+  // then helps enforce, and `boundedInt` parses either.
+  /** Minimum state-file size to count as substantive. */
+  minBytes?: string | number;
+  /** Seconds Tower holds the re-entry before delivering it. */
+  delay?: string | number;
+  /** ms the state file must be unchanged across two observations. */
+  stabilityWindow?: string | number;
+  /** ms after which an unused challenge is refused. */
+  challengeMaxAge?: string | number;
 }
 
 /**

@@ -25,7 +25,7 @@ import { loadForgeConfig } from '../../lib/forge.js';
 import { fetchIssue as fetchForgeIssue } from '../../lib/github.js';
 import { buildPromptFromTemplate, buildResumeNotice } from './spawn-roles.js';
 import { detectWorkspaceRoot, detectCurrentBuilderId } from './send.js';
-import { resolveBuilderContext } from './reset/context.js';
+import { buildContextFsPort, resolveBuilderContext } from './reset/context.js';
 import {
   formatResetReport,
   runReset,
@@ -109,19 +109,10 @@ export async function refresh(options: ResetOptions): Promise<void> {
   const userConfig = loadConfig(config.workspaceRoot);
 
   const context = resolveBuilderContext({
-    fs: {
-      exists: (p: string) => existsSync(p),
-      read: (p: string) => safeRead(p),
-      listDirs: (p: string) => {
-        try {
-          return readdirSync(p, { withFileTypes: true })
-            .filter(e => e.isDirectory())
-            .map(e => e.name);
-        } catch {
-          return null;
-        }
-      },
-    },
+    // Shared implementation — see `reset/context.ts`. Three hand-rolled copies
+    // of this port existed, and a stub in any one silently nulled the porch
+    // context for that path.
+    fs: buildContextFsPort(),
     builderId: builder.id,
     worktree: builder.worktree,
     branch: builder.branch,

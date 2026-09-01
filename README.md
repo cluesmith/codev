@@ -63,6 +63,44 @@ For the full walkthrough, see **[Getting Started](https://codevos.ai/getting-sta
 
 See [CLI Reference](codev/resources/commands/overview.md) for details.
 
+### Using Codev from VS Code
+
+**Prerequisite:** the extension does not bundle Codev. Install the CLI and initialize your project first (steps 1–3 above). The extension drives the same `afx`/Tower the npm install provides, and will fail to start Tower without it.
+
+With that in place, the extension turns VS Code into the cockpit for the whole workflow:
+
+1. Install **[Codev for VS Code](https://marketplace.visualstudio.com/items?itemName=cluesmith.codev-vscode)** from the Marketplace, or from **[Open VSX](https://open-vsx.org/extension/cluesmith/codev-vscode)** for Cursor, Kiro, and other VS Code-based editors.
+2. Open your Codev project. The extension auto-detects the workspace and connects to Tower, auto-starting it if it isn't running.
+3. Click the Codev icon in the Activity Bar and work from the sidebar: talk to the architect, spawn builders straight from your issue backlog, and watch every builder's live state (active, blocked at a gate, waiting on input). Review a builder's diff with inline comments that queue back to the agent, approve its gates, and run its branch with one click to try the change before any PR exists. Specs and plans open in an annotation viewer, and a contextual panel follows whatever you are looking at. The **"Get started with Codev"** walkthrough (Help → Welcome) tours the basics.
+
+The extension's full guide is in its [README](apps/vscode/README.md): the sidebar tour, the review flow, keyboard shortcuts, and runnable worktrees.
+
+## Upgrading
+
+Upgrading is **two steps, not one** — the npm package and your projects' framework files update separately:
+
+```bash
+# 1. Update the CLI (once per machine)
+npm install -g @cluesmith/codev@latest    # or @next for the release-candidate channel
+
+# 2. Update framework files (once per project/workspace)
+cd my-project
+codev update
+```
+
+`npm install -g` updates the binaries (`codev`, `afx`, `porch`, `consult`) and the built-in
+protocol skeleton. `codev update` then refreshes the files checked into each project —
+`CLAUDE.md`/`AGENTS.md`, protocol and resource files, skills — merging your local
+customizations. Skipping step 2 leaves your projects running old prompts against a new CLI,
+which is the most common source of "my agents stopped following the protocol" reports.
+
+**VS Code extension**: "Codev for VS Code" updates through the Marketplace like any
+extension (auto-update by default, or Extensions panel → Codev → Update). Keep it current
+with the CLI — Tower and the extension are versioned together.
+
+If Tower is running during an upgrade, restart it afterwards so it picks up the new code:
+`afx tower stop && afx tower start`.
+
 ## How It Works
 
 1. **Write a spec** — Describe what you want. The architect helps refine it.

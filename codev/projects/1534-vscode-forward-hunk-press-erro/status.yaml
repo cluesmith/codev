@@ -1,0 +1,30 @@
+id: '1534'
+title: vscode-forward-hunk-press-erro
+protocol: pir
+phase: review
+plan_phases: []
+current_plan_phase: null
+gates:
+  plan-approval:
+    status: approved
+    requested_at: '2026-08-19T22:43:57.065Z'
+    approved_at: '2026-08-19T23:10:12.057Z'
+  dev-approval:
+    status: approved
+    requested_at: '2026-08-19T23:20:42.268Z'
+    approved_at: '2026-08-24T23:16:04.796Z'
+  pr:
+    status: approved
+    requested_at: '2026-08-24T23:38:32.573Z'
+    approved_at: '2026-08-25T02:02:12.826Z'
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-08-19T22:39:48.722Z'
+updated_at: '2026-08-25T02:02:12.828Z'
+pr_history:
+  - phase: review
+    pr_number: 1550
+    branch: builder/pir-1534
+    created_at: '2026-08-24T23:20:14.179Z'
+pr_ready_for_human: false
