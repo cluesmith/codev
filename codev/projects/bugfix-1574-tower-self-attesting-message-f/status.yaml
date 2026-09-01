@@ -1,0 +1,21 @@
+id: bugfix-1574
+title: tower-self-attesting-message-f
+protocol: bugfix
+phase: pr
+plan_phases: []
+current_plan_phase: null
+gates:
+  pr:
+    status: pending
+    requested_at: '2026-09-01T12:09:44.350Z'
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-09-01T11:50:08.201Z'
+updated_at: '2026-09-01T12:09:44.351Z'
+pr_history:
+  - phase: pr
+    pr_number: 1575
+    branch: builder/bugfix-1574
+    created_at: '2026-09-01T12:09:38.368Z'
+pr_ready_for_human: true

@@ -265,7 +265,7 @@ function escalateHeldToOwner(info: HeldOwnerNoticeInfo, log: LogFn): boolean {
     workspacePath: info.workspacePath,
     toAgent: owner.agent,
     body,
-    formattedMessage: formatBuilderMessage(NOTICE_SENDER, body),
+    formattedMessage: formatBuilderMessage(NOTICE_SENDER, owner.agent, body),
     fromAgent: NOTICE_SENDER,
     fromWorkspace: info.workspacePath,
   });

@@ -116,6 +116,9 @@ export const REQUIRED_INLINE_MARKERS = [
   'Branch:',
   'State file:',
   'Full re-orientation:',
+  // #1574: the reply channel is load-bearing for a cleared builder, so a frame that
+  // loses it fails assembly rather than reaching one.
+  'Reply channel:',
 ] as const;
 
 /**
@@ -245,6 +248,10 @@ function buildInline(options: AssembleOptions): string {
   lines.push(
     `- Worktree: ${c.worktree}`,
     `- Branch: ${c.branch}`,
+    // #1574: a cleared builder has lost every prompt that taught it `afx send`.
+    // Stated as a channel, not an instruction to reply — an automatic re-entry
+    // frame explicitly says nobody is waiting on one.
+    '- Reply channel: `afx send architect "..."` (assistant text typed in your own terminal reaches nobody)',
     '',
     '### Do this now, in order',
     '',
