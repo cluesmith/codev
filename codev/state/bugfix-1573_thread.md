@@ -141,3 +141,43 @@ restored, all pass.
 `tower-routes.test.ts`'s `gateSession` double now echoes writes into its own mirror, because
 a real terminal does and the delivery path now depends on it. That is a more faithful fake,
 and a test wanting a swallowing terminal can still pass a `write` that skips the feed.
+
+### 2026-09-01 — CMAP round 1
+
+gemini=APPROVE, claude=APPROVE, **codex=REQUEST_CHANGES**. Codex was right, and the finding
+was the one thing solo review missed.
+
+**The hole: presence is not evidence.** `verifyEchoOnScreen` scanned the retained buffer for
+the header and answered true on any match. But a held attempt leaves its own echo in that
+same scrollback — so the *next* redelivery would match the copy the FIRST attempt left behind
+and mark the row delivered even if the retry's bytes were swallowed. The false receipt was
+not removed, only postponed by one redelivery. Two messages formatted in the same millisecond
+collide the same way.
+
+**Fix:** the port is now watch-then-verify. `watchEcho(session, needle)` is called
+immediately BEFORE the write and samples how many times the needle currently appears;
+`verify()` polls until the count is strictly GREATER. New evidence, not mere presence.
+Structuring it as a returned `EchoWatch` rather than two ports makes the ordering impossible
+to get wrong — you cannot verify without having sampled first.
+
+Two regression tests at the binding level, both against a real `SessionScreen`: a stale
+header from an earlier attempt plus a swallowed retry stays **false**, and a redelivery that
+does land is still **true** (the other half — without it, every redelivery after a held
+attempt would be permanently unconfirmable). Verified the first fails against a presence-only
+implementation. A delivery-level assertion pins the ordering: `['watch', 'write', 'verify']`.
+
+This also closes claude's separate note that a `--raw` send whose first line repeats text
+already in scrollback verified vacuously — that is the same bug, and counting fixes it too.
+
+Also from claude's review:
+- Deleted a stray `// eslint-disable-next-line no-console` left behind when I removed a debug
+  line from `send-delivery.test.ts`.
+- `commands/reset.ts` held a THIRD independent `48 * 1024` literal for its `--file` cap. Its
+  content rides the message body, so a drifted literal would let `afx refresh` accept a file
+  the send route then 400s. Now `MAX_FILE_SIZE = MAX_MESSAGE_BYTES` there too.
+
+Left as documented residuals rather than fixed here: unbounded redelivery when verification
+NEVER confirms (alt-screen harness with a body longer than the viewport) — escalation gives
+visibility but nothing stops the rewrite loop, worth a follow-up issue; and messages whose
+normalized first line is under 12 characters skip verification entirely, keeping the old
+behaviour rather than a rubber stamp.

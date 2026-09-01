@@ -18,6 +18,7 @@
 import { existsSync, readFileSync, readdirSync, writeFileSync, statSync } from 'node:fs';
 import { TowerClient } from '../lib/tower-client.js';
 import { logger, fatal } from '../utils/logger.js';
+import { MAX_MESSAGE_BYTES } from '../utils/message-format.js';
 import { findBuilderById } from '../lib/builder-lookup.js';
 import { getConfig } from '../utils/index.js';
 import { loadConfig } from '../../lib/config.js';
@@ -38,8 +39,13 @@ import type { IssuePayload } from './reset/reorient.js';
 import type { CustomHarnessConfig } from '../utils/harness.js';
 import type { ResetOptions } from '../types.js';
 
-/** Same cap `afx send --file` enforces. One rule for architect-supplied files. */
-const MAX_FILE_SIZE = 48 * 1024;
+/**
+ * Same cap `afx send --file` enforces. One rule for architect-supplied files — and now the same
+ * CONSTANT, not a third copy of the number (Issue #1573): the file's content rides the message
+ * body, which Tower's send route refuses above `MAX_MESSAGE_BYTES`, so a literal that drifted
+ * would let this command accept a file the route then rejects with a 400.
+ */
+const MAX_FILE_SIZE = MAX_MESSAGE_BYTES;
 
 /**
  * The one-line notice `afx reset` prints before doing the work (#1489).

@@ -89,9 +89,9 @@ interface Harness {
    */
   writeResult: boolean;
   /**
-   * What the fake `verifyEcho` port answers (Issue #1573). Default true (the header showed up
-   * on the terminal); set false to model a write whose bytes never reached the screen and
-   * assert the row is HELD rather than marked delivered.
+   * What the fake echo watch answers (Issue #1573). Default true (the header showed up on the
+   * terminal); set false to model a write whose bytes never reached the screen and assert the
+   * row is HELD rather than marked delivered.
    */
   echoVerified: boolean;
 }
@@ -139,7 +139,7 @@ function harness(): Harness {
         writes.push({ formattedMessage, noEnter });
         return h.writeResult ? { status: 'written' } : { status: 'dropped' };
       },
-      verifyEcho: () => Promise.resolve(h.echoVerified),
+      watchEcho: () => Promise.resolve({ verify: () => Promise.resolve(h.echoVerified) }),
       broadcast: (f) => broadcasts.push(f),
       onHeldStateChange: () => {
         h.heldChanges++;
@@ -1100,7 +1100,6 @@ describe('MailboxDrainer owner starvation notice (Spec 1313 round 3, change 3)',
     bytes = 50;
     h.setVerdict(CLEAN);
     await drainer.tick();
-    // eslint-disable-next-line no-console
     expect(h.ownerClears).toEqual([{ workspacePath: '/ws/a', toAgent: 'spir-1' }]);
     expect(drainer.notifiedOwnerAgents).toEqual([]);
     drainer.stop();

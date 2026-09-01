@@ -213,11 +213,10 @@ export interface DeliveryPorts {
    */
   clearHeldOwnerNotice?(workspacePath: string, toAgent: string): void;
   /**
-   * Did the message actually LAND on the receiving terminal (Issue #1573)? Called after a
-   * completed paced write and BEFORE `markDelivered`, with the normalized needle from
-   * {@link echoNeedle}. The live binding waits a short bounded interval for the needle to
-   * appear in the session's rendered mirror — the same buffer {@link DeliveryPorts.classify}
-   * reads — and answers true on the first sighting.
+   * Begin watching for evidence that a message actually LANDS on the receiving terminal
+   * (Issue #1573). Called with the normalized needle from {@link echoNeedle} immediately
+   * BEFORE the write; the returned {@link EchoWatch} is consulted after it and before
+   * `markDelivered`.
    *
    * This is the only end-to-end evidence the delivery path has. Everything upstream of it
    * proves the bytes were QUEUED, never that the terminal absorbed them: `session.write`
@@ -225,13 +224,19 @@ export interface DeliveryPorts {
    * the leading bytes (#1564) still produced a clean `written`, and the row was marked
    * delivered for a message the agent never saw whole.
    *
+   * Split into watch-then-verify rather than a single after-the-fact check because mere
+   * PRESENCE of the header proves nothing (CMAP round 1 — codex): a prior attempt's echo
+   * sits in the same scrollback, so a redelivery whose bytes were swallowed would match the
+   * copy the FIRST attempt left behind and be certified. The watch samples what the screen
+   * already showed, so verification can require evidence the write itself produced.
+   *
    * DELIBERATELY NARROW: presence of the header line, nothing else. No screen diffing, no
-   * repair, no per-harness branches. A `false` therefore means "could not confirm", not
+   * repair, no per-harness branches. A negative therefore means "could not confirm", not
    * "definitely lost" — so the caller HOLDS the row for the existing redelivery machinery
    * rather than dropping it, making the direction of error a duplicate delivery instead of
    * a silent loss.
    */
-  verifyEcho(session: DeliverySession, needle: string): Promise<boolean>;
+  watchEcho(session: DeliverySession, needle: string): Promise<EchoWatch>;
   log(message: string): void;
   now(): number;
 }
@@ -331,6 +336,19 @@ function isClassifierStuck(
  * schedule, so the cost of being early is at most one tick of latency.
  */
 export const SETTLE_BEFORE_WRITE_MS = 250;
+
+/**
+ * A pre-write sample of the receiving terminal, plus the confirmation that the write added
+ * something to it (Issue #1573). Returned by {@link DeliveryPorts.watchEcho}.
+ */
+export interface EchoWatch {
+  /**
+   * Did the message's header appear on the terminal as a result of the write this watch was
+   * opened for? Bounded — it waits a short interval and then answers false, which the caller
+   * treats as "could not confirm" and holds.
+   */
+  verify(): Promise<boolean>;
+}
 
 /**
  * Has the session's screen been quiet long enough to write onto (Issue #1573)?
@@ -591,6 +609,13 @@ export async function deliverAgentMail(
     return null;
   };
 
+  // Open the echo watch BEFORE the write (Issue #1573). It samples what the terminal already
+  // shows, so the check after the write can require evidence THIS write produced rather than
+  // accepting a copy an earlier attempt left in scrollback. Null when the message has no
+  // header distinctive enough to look for (see {@link echoNeedle}).
+  const needle = echoNeedle(current.formatted_message);
+  const echo = needle ? await ports.watchEcho(session, needle) : null;
+
   // Default to a hold so an unobserved result is the SAFE failure mode (hold, never a false
   // delivery); the try either assigns the real result or throws past this point.
   let result: WriteResult = { status: 'aborted', abort: { kind: 'hold', reason: 'busy' } };
@@ -666,8 +691,7 @@ export async function deliverAgentMail(
   // a row that never confirms visible. That inverts the failure this issue exists to remove —
   // the worst case becomes a duplicate delivery the agent can see, instead of a silent loss the
   // sender was told was a success.
-  const needle = echoNeedle(current.formatted_message);
-  if (needle && !(await ports.verifyEcho(session, needle))) {
+  if (echo && !(await echo.verify())) {
     ports.log(
       `[mailbox] write to ${toAgent} @ ${path.basename(workspacePath)} completed but its header ` +
         `never appeared on the terminal — holding ${row.id.slice(0, 8)}… for redelivery rather ` +

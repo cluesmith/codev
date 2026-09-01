@@ -169,7 +169,7 @@ describe('Spec 1470 — automatic re-entry delivery', () => {
           return true;
         },
         broadcast: () => {},
-        verifyEcho: () => Promise.resolve(true),
+        watchEcho: () => Promise.resolve({ verify: () => Promise.resolve(true) }),
         log: () => {},
         onHeldStateChange: () => {},
         onEscalation: () => {},

@@ -37,7 +37,7 @@ import {
   type WriteAbort,
   type WriteResult,
 } from '../servers/mailbox-delivery.js';
-import { verifyEchoOnScreen } from '../servers/mailbox-wiring.js';
+import { watchEchoOnScreen } from '../servers/mailbox-wiring.js';
 import { SessionScreen } from '../../terminal/session-screen.js';
 import type { GateProfile, GateVerdict } from '../servers/render-gate.js';
 
@@ -57,10 +57,12 @@ interface Harness {
   logs: string[];
   /** Formatted messages the write port accepted (one entry per completed paced write). */
   writes: string[];
-  /** What `verifyEcho` answers — false models a terminal that never showed the header. */
+  /** What the echo watch answers — false models a terminal that never showed the header. */
   echoVerified: boolean;
-  /** Needles `verifyEcho` was asked about, in order. */
+  /** Needles the echo watch was opened for, in order. */
   needles: string[];
+  /** Ordered trace of the write edge, to pin that the watch opens BEFORE the write. */
+  order: string[];
   /** Set by a test to run just before the in-lock precheck (models a race under the lock). */
   beforePrecheck: (() => void) | null;
   now: number;
@@ -95,6 +97,7 @@ function harness(overrides: Partial<DeliverySession> = {}): Harness {
     writes,
     echoVerified: true,
     needles: [],
+    order: [],
     beforePrecheck: null,
     now: NOW,
     ports: {
@@ -102,15 +105,22 @@ function harness(overrides: Partial<DeliverySession> = {}): Harness {
       resolveProfile: () => PROFILE,
       classify: () => Promise.resolve(CLEAN),
       writeMessage: (_s, formattedMessage, _noEnter, precheck): WriteResult => {
+        h.order.push('write');
         h.beforePrecheck?.();
         const abort: WriteAbort | null = precheck();
         if (abort) return { status: 'aborted', abort };
         writes.push(formattedMessage);
         return { status: 'written' };
       },
-      verifyEcho: (_s, needle) => {
+      watchEcho: (_s, needle) => {
         h.needles.push(needle);
-        return Promise.resolve(h.echoVerified);
+        h.order.push('watch');
+        return Promise.resolve({
+          verify: () => {
+            h.order.push('verify');
+            return Promise.resolve(h.echoVerified);
+          },
+        });
       },
       broadcast: (f) => broadcasts.push(f),
       onHeldStateChange: () => {},
@@ -252,6 +262,10 @@ describe('#1573 echo verification before markDelivered', () => {
     expect(h.broadcasts).toHaveLength(1);
     // Verification asks about the HEADER line only — never the body, never the footer.
     expect(h.needles).toEqual([normalizeForEcho(HEADER)]);
+    // The watch must OPEN BEFORE the write (CMAP round 1 — codex): its whole purpose is to
+    // sample what the terminal showed beforehand, so that confirmation requires evidence this
+    // write produced rather than a copy an earlier attempt left in scrollback.
+    expect(h.order).toEqual(['watch', 'write', 'verify']);
   });
 
   it('a row held by a failed verification is redelivered by the next pass', async () => {
@@ -318,57 +332,100 @@ describe('#1573 echo needle', () => {
   });
 });
 
-describe('#1573 verifyEchoOnScreen against a real screen mirror', () => {
+describe('#1573 watchEchoOnScreen against a real screen mirror', () => {
   /** A session double carrying a real `SessionScreen`, which is what the binding reads. */
   function sessionWithScreen(screen: SessionScreen | null): DeliverySession {
     return { gateScreen: screen } as unknown as DeliverySession;
   }
 
-  it('finds the header claude echoes into its composer', async () => {
+  const NEEDLE = echoNeedle(FORMATTED);
+
+  it('confirms the header claude echoes into its composer', async () => {
     const screen = new SessionScreen(110, 32);
+    screen.feed('❯ \r\n────────────────────\r\n');
+    const watch = await watchEchoOnScreen(sessionWithScreen(screen), NEEDLE);
+
     screen.feed(`❯ ${HEADER}\r\nplease review the plan\r\n`);
 
-    await expect(verifyEchoOnScreen(sessionWithScreen(screen), echoNeedle(FORMATTED))).resolves.toBe(true);
+    await expect(watch.verify()).resolves.toBe(true);
     screen.dispose();
   });
 
-  it('finds the markdown-stripped header claude renders after the message is submitted', async () => {
+  it('confirms the markdown-stripped header claude renders after the message is submitted', async () => {
     // The measured post-submit form: the `###` fences are consumed as an H3, so an exact-line
     // match would fail on every short claude delivery — the common case.
     const screen = new SessionScreen(110, 32);
+    const watch = await watchEchoOnScreen(sessionWithScreen(screen), NEEDLE);
+
     screen.feed('  [ARCHITECT INSTRUCTION | 2026-09-01T11:49:41.619Z]\r\n  please review the plan\r\n');
 
-    await expect(verifyEchoOnScreen(sessionWithScreen(screen), echoNeedle(FORMATTED))).resolves.toBe(true);
+    await expect(watch.verify()).resolves.toBe(true);
     screen.dispose();
   });
 
-  it('finds a header that scrolled out of the viewport into scrollback', async () => {
+  it('confirms a header that scrolled out of the viewport into scrollback', async () => {
     // A long message pushes its own header off the top while it is still being typed; the only
     // place it survives is scrollback, so the scan must reach past the viewport.
     const screen = new SessionScreen(110, 32);
+    const watch = await watchEchoOnScreen(sessionWithScreen(screen), NEEDLE);
+
     screen.feed(`❯ ${HEADER}\r\n`);
     screen.feed(Array.from({ length: 200 }, (_, i) => `body line ${i}`).join('\r\n') + '\r\n');
 
-    await expect(verifyEchoOnScreen(sessionWithScreen(screen), echoNeedle(FORMATTED))).resolves.toBe(true);
+    await expect(watch.verify()).resolves.toBe(true);
+    screen.dispose();
+  });
+
+  /**
+   * THE STALE-EVIDENCE REGRESSION (CMAP round 1 — codex). A first attempt left its header in
+   * scrollback and was held; the retry's bytes are then swallowed. Verifying mere PRESENCE
+   * would match the first attempt's copy and mark the retry delivered — reinstating the exact
+   * false receipt this issue exists to remove, one redelivery later.
+   */
+  it('does NOT accept a header an earlier attempt left in scrollback', async () => {
+    const screen = new SessionScreen(110, 32);
+    screen.feed(`❯ ${HEADER}\r\n`); // the previous attempt's echo, still on screen
+    screen.feed(Array.from({ length: 40 }, (_, i) => `agent output ${i}`).join('\r\n') + '\r\n');
+
+    const watch = await watchEchoOnScreen(sessionWithScreen(screen), NEEDLE);
+    // The retry is swallowed: nothing new reaches the screen.
+
+    await expect(watch.verify()).resolves.toBe(false);
+    screen.dispose();
+  });
+
+  it('confirms a REDELIVERY that does land, even with the earlier copy still on screen', async () => {
+    // The other half of the same rule: a second copy must still be confirmable, or every
+    // redelivery after a held attempt would be stuck reporting failure.
+    const screen = new SessionScreen(110, 32);
+    screen.feed(`❯ ${HEADER}\r\n`);
+    const watch = await watchEchoOnScreen(sessionWithScreen(screen), NEEDLE);
+
+    screen.feed(`❯ ${HEADER}\r\n`);
+
+    await expect(watch.verify()).resolves.toBe(true);
     screen.dispose();
   });
 
   it('reports false for a terminal that never showed the header, and for a session with no mirror', async () => {
     const screen = new SessionScreen(110, 32);
     screen.feed('❯ \r\n────────────────────\r\n');
+    const watch = await watchEchoOnScreen(sessionWithScreen(screen), NEEDLE);
 
-    await expect(verifyEchoOnScreen(sessionWithScreen(screen), echoNeedle(FORMATTED))).resolves.toBe(false);
+    await expect(watch.verify()).resolves.toBe(false);
     // No mirror means no output has ever been rendered, so nothing can have been echoed.
-    await expect(verifyEchoOnScreen(sessionWithScreen(null), echoNeedle(FORMATTED))).resolves.toBe(false);
+    const noMirror = await watchEchoOnScreen(sessionWithScreen(null), NEEDLE);
+    await expect(noMirror.verify()).resolves.toBe(false);
     screen.dispose();
   });
 
   it('returns as soon as the header appears, without waiting out its budget', async () => {
     const screen = new SessionScreen(110, 32);
+    const watch = await watchEchoOnScreen(sessionWithScreen(screen), NEEDLE);
     screen.feed(`❯ ${HEADER}\r\n`);
 
     const started = Date.now();
-    await verifyEchoOnScreen(sessionWithScreen(screen), echoNeedle(FORMATTED));
+    await watch.verify();
 
     // The full budget is 600ms; a hit on the first read must not pay any of it.
     expect(Date.now() - started).toBeLessThan(200);

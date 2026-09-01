@@ -96,7 +96,7 @@ function harness(): Harness {
       },
       onEscalation: () => {},
       onLiveness: () => {},
-      verifyEcho: () => Promise.resolve(true),
+      watchEcho: () => Promise.resolve({ verify: () => Promise.resolve(true) }),
       log: (m) => logs.push(m),
       now: () => h.now,
     },

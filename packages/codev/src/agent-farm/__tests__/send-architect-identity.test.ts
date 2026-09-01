@@ -112,7 +112,7 @@ function realSeamPorts(
     onHeldStateChange: () => {},
     onEscalation: () => {},
     onLiveness: () => {},
-    verifyEcho: () => Promise.resolve(true),
+    watchEcho: () => Promise.resolve({ verify: () => Promise.resolve(true) }),
     log: () => {},
     now: () => 1000,
   };

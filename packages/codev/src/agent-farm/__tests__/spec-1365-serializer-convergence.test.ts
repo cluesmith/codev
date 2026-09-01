@@ -485,7 +485,7 @@ function livePorts(sessions: Map<string, DeliverySession>, log: string[] = []): 
     onHeldStateChange: () => {},
     onEscalation: () => {},
     onLiveness: () => {},
-    verifyEcho: () => Promise.resolve(true),
+    watchEcho: () => Promise.resolve({ verify: () => Promise.resolve(true) }),
     log: (m) => log.push(m),
     now: () => 1000,
   };
