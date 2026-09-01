@@ -11,4 +11,9 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-09-01T11:38:13.671Z'
-updated_at: '2026-09-01T12:08:51.867Z'
+updated_at: '2026-09-01T12:09:39.806Z'
+pr_history:
+  - phase: pr
+    pr_number: 1577
+    branch: builder/bugfix-1573
+    created_at: '2026-09-01T12:09:39.805Z'
