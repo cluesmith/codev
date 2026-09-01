@@ -27,6 +27,7 @@ import {
   type HeldOwnerNoticeInfo,
 } from '../servers/mailbox-delivery.js';
 import type { GateProfile, GateVerdict } from '../servers/render-gate.js';
+import { formatArchitectToBuilderMessage } from '../utils/message-format.js';
 
 const PROFILE: GateProfile = { app: 'claude', markerPattern: /^❯/, regionEndPatterns: [] };
 const CLEAN: GateVerdict = { clean: true, detail: 'empty' };
@@ -184,6 +185,28 @@ describe('deliverAgentMail (Spec 1313, Phase 4)', () => {
     expect(h.writes).toEqual([{ formattedMessage: '[from architect] hi', noEnter: false }]);
     expect(mailbox.getById(db, row.id)?.status).toBe('delivered');
     expect(h.broadcasts[0]).toMatchObject({ type: 'message', content: 'hi', to: { agent: 'spir-1' } });
+  });
+
+  /**
+   * #1574: the bytes a builder actually sees must name the recipient the mailbox row
+   * was addressed to. Asserted end-to-end (real formatter → real row → real delivery →
+   * captured write) rather than on the formatter alone: a frame built with the wrong
+   * recipient would still pass a formatter-only test, and that is the exact failure —
+   * a frame attesting to an address that is not the row's.
+   */
+  it('a delivered row is self-attesting: the injected bytes carry the row\'s to_agent', async () => {
+    const h = harness();
+    h.setSession('spir-1', fakeSession());
+    const row = enqueue({ formattedMessage: formatArchitectToBuilderMessage('spir-1', 'hi') });
+
+    await deliverAgentMail(h.ports, db, '/ws/a', 'spir-1');
+
+    const stored = mailbox.getById(db, row.id)!;
+    expect(stored.status).toBe('delivered');
+    expect(h.writes[0].formattedMessage).toContain(`→ ${stored.to_agent}`);
+    // And the reply channel travels with it — the point-of-need reminder that
+    // survives a builder's `/clear` (the real #1530 defect).
+    expect(h.writes[0].formattedMessage).toContain('afx send architect');
   });
 
   it('busy gate → holds, sets reason=busy, writes nothing', async () => {

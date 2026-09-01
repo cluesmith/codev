@@ -55,8 +55,9 @@ vi.mock('../servers/tower-messages.js', () => ({
   isResolveError: vi.fn((r: unknown) => typeof r === 'object' && r !== null && 'code' in r),
 }));
 vi.mock('../utils/message-format.js', () => ({
-  formatArchitectMessage: vi.fn((msg: string) => msg),
-  formatBuilderMessage: vi.fn((id: string, msg: string) => `[${id}] ${msg}`),
+  formatArchitectMessage: vi.fn((_to: string, msg: string) => msg),
+  formatArchitectToBuilderMessage: vi.fn((_to: string, msg: string) => msg),
+  formatBuilderMessage: vi.fn((id: string, to: string, msg: string) => `[${id} → ${to}] ${msg}`),
 }));
 vi.mock('../utils/server-utils.js', async (importActual) => ({
   ...(await importActual<typeof import('../utils/server-utils.js')>()),
