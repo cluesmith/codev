@@ -17,7 +17,7 @@ import { loadConfig } from '../../lib/config.js';
 import { terminalDeliverySignals, type PtySession } from '../../terminal/pty-session.js';
 import { getWorkspaceTerminals, getTerminalManager } from './tower-terminals.js';
 import { broadcastMessage, resolveAgentInRegistry, isResolveError } from './tower-messages.js';
-import { writeMessagePaced } from './message-write.js';
+import { submitMessagePaced } from './message-write.js';
 import { classifyBuffer, type GateProfile, type GateVerdict } from './render-gate.js';
 import { resolveProfile } from './gate-profiles.js';
 import {
@@ -199,7 +199,11 @@ export function makeDeliveryPorts(log: LogFn): DeliveryPorts {
     getSessionForAgent: (ws, agent) => resolveLiveSessionForAgent(ws, agent),
     resolveProfile: (session) => resolveProfileForSession(session),
     classify: (session, profile) => classifyAgentScreen(session, profile),
-    writeMessage: (session, msg, noEnter) => writeMessagePaced(session, msg, noEnter),
+    // Issue #1365: the write edge takes the session's per-terminal submission lock as a
+    // LEAF inside the per-agent serializer, so a gated delivery and a concurrent
+    // `--interrupt`/`--escape` can no longer interleave. The precheck is the delivery
+    // module's, re-run inside that lock.
+    writeMessage: (session, msg, noEnter, precheck) => submitMessagePaced(session, msg, noEnter, precheck),
     broadcast: (frame) => broadcastDelivered(frame),
     onHeldStateChange: () => broadcastHeldStateChange(),
     onEscalation: (info) => broadcastEscalation(info),

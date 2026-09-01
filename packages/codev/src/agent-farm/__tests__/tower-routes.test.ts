@@ -21,7 +21,7 @@ import { SessionScreen } from '../../terminal/session-screen.js';
 // generation); submitToSession lets a test pre-occupy a session's lock to drive the
 // shutdown-during-lock-wait window deterministically.
 import { shutdownDelayedSends } from '../servers/delayed-send.js';
-import { submitToSession, resetSubmissionChains } from '../servers/session-submit.js';
+import { submitToSession, trySubmitToSession, resetSubmissionChains } from '../servers/session-submit.js';
 
 // ============================================================================
 // Mocks
@@ -222,11 +222,17 @@ function makeRes(): { res: http.ServerResponse; body: () => string; statusCode: 
  * requires that proven lower bound, else a bare marker is an indeterminate partial and is held).
  * `bytesWritten` is the monotone change token the delivery path samples.
  */
-function gateSession(mockWrite: (data: string) => void, ring: string, writable = true) {
+function gateSession(mockWrite: (data: string) => void, ring: string, writable = true, id = 'term-001') {
   const raw = `${ring}\r\n${'─'.repeat(20)}\r\n`;
   const gateScreen = new SessionScreen(80, 24);
   gateScreen.feed(raw);
   return {
+    // The per-terminal submission lock's key (Issue #1365). It MUST be a real, distinct id:
+    // this double reaches the live mailbox-wiring binding, and because the port is
+    // structurally typed an omitted `id` would compile and silently key every lock on the
+    // same `undefined` — serialization that looks present and is not. `submitMessagePaced`
+    // throws on a missing id so that mistake fails loudly instead of quietly.
+    id,
     // Model a live PTY: every write lands. The delivery path now threads the write's
     // boolean (Spec 1313 silent-loss fix), so a double whose write returned undefined
     // would read as a DROPPED write and be held. Wrap mockWrite so call-assertions still
@@ -1724,6 +1730,41 @@ describe('tower-routes', () => {
       // Message SHOULD be written — user is idle (Bugfix #492)
       expect(mockWrite).toHaveBeenCalled();
     });
+
+    it('a body-bearing interrupt that crosses the wait ceiling reports degraded (Issue #1365)', async () => {
+      // codex review of PR #1492: the interrupt claims its mailbox row `delivered` BEFORE the
+      // write (un-claiming would risk a double delivery), so if the ceiling expires and the
+      // write goes out unserialized — possibly interleaving with the delivery it skipped — an
+      // unqualified `delivered: true` would be a lie of omission. The response must say so.
+      mockParseJsonBody.mockResolvedValue({
+        to: 'architect', message: 'urgent', workspace: '/tmp/ws', options: { interrupt: true },
+      });
+      mockResolveTarget.mockReturnValue({
+        terminalId: 'term-ceiling', workspacePath: '/tmp/ws', agent: 'architect',
+      });
+      const mockWrite = vi.fn();
+      mockGetTerminalManager.mockReturnValue({
+        getSession: () => gateSession(mockWrite, '❯ ', true, 'term-ceiling'),
+        listSessions: () => [],
+      });
+
+      // Occupy the terminal with a DELIVERY write long enough to outlast the ceiling. A
+      // delivery is the only thing the ceiling is allowed to bypass.
+      const holder = trySubmitToSession('term-ceiling', () => 4000);
+
+      const req = makeReq('POST', '/api/send');
+      const ctx = makeCtx();
+      const { res, statusCode, body } = makeRes();
+      await handleRequest(req, res, ctx);
+
+      expect(statusCode()).toBe(200);
+      const parsed = JSON.parse(body());
+      expect(parsed.delivered).toBe(true); // claim-first is preserved...
+      expect(parsed.degraded).toBe(true); // ...but the sender is told it was not serialized
+      expect(parsed.degradedReason).toBe('submit-wait-ceiling-expired');
+      expect(mockWrite).toHaveBeenCalled(); // the escape hatch still landed
+      await holder;
+    }, 10_000);
   });
 
   // ==========================================================================

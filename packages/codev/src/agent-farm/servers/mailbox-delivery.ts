@@ -12,9 +12,16 @@
  * TWO deliberate exceptions write a body OUTSIDE this path, both explicit human
  * gate-bypasses documented at their `tower-routes.ts` call sites: immediate `--interrupt`
  * (Ctrl+C then the message) and `--escape` (a bare ESC). They are the operator's "I am at
- * this terminal now" actions and take the separate per-terminal submission lock
- * (`session-submit.ts`), not the per-agent serializer here — every autonomous/scheduled/
- * held send, by contrast, delivers through this gate.
+ * this terminal now" actions — every autonomous/scheduled/held send, by contrast, delivers
+ * through this gate.
+ *
+ * They are no longer on a DISJOINT lock, though (Issue #1365). This path's write edge takes
+ * the same per-terminal submission lock (`session-submit.ts`) those bypasses take, as a leaf
+ * inside the per-agent serializer below — so a `^C`/ESC can no longer land inside a
+ * delivery's own text→Enter window, clear or truncate the composer, and leave the row marked
+ * `delivered` for a message the agent never saw whole. Lock order is always per-agent →
+ * per-terminal; see `session-submit.ts` for the full boundary, including what the lock does
+ * NOT cover.
  *
  * This module replaces the in-memory `SendBuffer` (retired in this phase): held
  * messages now live in the durable `mailbox` table, so nothing is lost to a Tower
@@ -41,6 +48,7 @@ import {
 } from '../db/mailbox.js';
 import type { DbMailbox, MailboxReason } from '../db/types.js';
 import type { GateProfile, GateVerdict } from './render-gate.js';
+import type { PacedSubmitResult } from './message-write.js';
 import { KeyedSerializer } from './write-queue.js';
 
 /**
@@ -50,6 +58,13 @@ import { KeyedSerializer } from './write-queue.js';
  * imports the terminal layer.
  */
 export interface DeliverySession {
+  /**
+   * The live terminal/session id — the key of the per-terminal submission lock the write
+   * edge takes (Issue #1365). `PtySession` already carries it; a test double MUST supply a
+   * real, distinct one, and {@link submitMessagePaced} throws if it is missing rather than
+   * letting every lock collapse onto a single `undefined` key.
+   */
+  readonly id: string;
   /**
    * The session's MONOTONE cumulative output-byte counter (Spec 1313 render-gate round 2) —
    * the gate's change token. It advances on ANY new output and NEVER decreases, so two samples
@@ -79,6 +94,19 @@ export interface DeliverySession {
   write(data: string): boolean;
 }
 
+/**
+ * Why a gated write abandoned inside the per-terminal lock (Issue #1365), decided by
+ * {@link deliverAgentMail}'s precheck at the write instant rather than before the lock.
+ */
+export type WriteAbort =
+  /** Re-hold the row for this reason and retry on a later clean pass. */
+  | { kind: 'hold'; reason: MailboxReason }
+  /** The row was dismissed/superseded under us — a terminal state, so it must NOT be re-held. */
+  | { kind: 'row-resolved' };
+
+/** Outcome of the gated write edge. See {@link PacedSubmitResult}. */
+export type WriteResult = PacedSubmitResult<WriteAbort>;
+
 /** Broadcast frame for a delivered message (the dashboard/inbox message event). */
 export interface DeliveredBroadcast {
   type: 'message';
@@ -104,17 +132,29 @@ export interface DeliveryPorts {
    */
   classify(session: DeliverySession, profile: GateProfile): Promise<GateVerdict>;
   /**
-   * Write a formatted message (text + Enter, unless `noEnter`) to the session and
-   * report whether every byte reached the terminal. Resolves `true` when the paced
-   * write — including the trailing Enter — has fully completed; `false` when any
-   * write was dropped (#1198: a shellper socket that died mid-pace). The delivery
-   * `await`s it for two reasons: (1) completion chaining — the per-agent serializer
-   * holds the line until the submit is entirely on the wire, so the next delivery
-   * never starts mid-write; (2) the boolean gates markDelivered — a dropped write
-   * holds the row (`no-live-pty`) instead of falsely reporting delivery (Spec 1313
-   * integration review — the silent-loss finding).
+   * Write a formatted message (text + Enter, unless `noEnter`) to the session as ONE
+   * submission on the session's per-terminal lock, and report what actually happened.
+   * Resolves only once the paced write — trailing Enter included — has completed.
+   *
+   * The delivery `await`s it for two reasons: (1) completion chaining — the per-agent
+   * serializer holds the line until the submit is entirely on the wire, so the next
+   * delivery never starts mid-write; (2) the result gates markDelivered — anything but
+   * `written` must never be reported as delivered (Spec 1313 integration review — the
+   * silent-loss finding; Issue #1365 extended the same rule to in-lock refusals).
+   *
+   * `precheck` is invoked by the binding INSIDE the lock, immediately before the first
+   * byte, and returning non-null aborts with nothing written. It exists because taking
+   * the lock alone would only move the race: a delivery that classified a clean screen
+   * and then waited behind another submission would write onto the screen that
+   * submission just changed. All of the reason authority stays here in the delivery
+   * module — the binding only relays the verdict.
    */
-  writeMessage(session: DeliverySession, formattedMessage: string, noEnter: boolean): boolean | Promise<boolean>;
+  writeMessage(
+    session: DeliverySession,
+    formattedMessage: string,
+    noEnter: boolean,
+    precheck: () => WriteAbort | null,
+  ): WriteResult | Promise<WriteResult>;
   /** Emit the delivered-message broadcast frame. */
   broadcast(frame: DeliveredBroadcast): void;
   /**
@@ -423,11 +463,32 @@ export async function deliverAgentMail(
   // delivered off the paced-write timer.
   if (!session.writable) return hold('no-live-pty');
 
-  // Default false so an unobserved result is the SAFE failure mode (hold, never a false
-  // delivery); the try either assigns the real boolean or throws past this point.
-  let written = false;
+  // Re-validate EVERYTHING at the write instant, inside the per-terminal lock (Issue #1365).
+  // The three checks above (screen unchanged, session writable, row still held) were made
+  // before the lock; between them and the first byte another writer may hold the terminal,
+  // and this delivery may have waited. Without this, routing the write through the lock would
+  // merely relocate the race it exists to close: a delivery could write onto a screen that an
+  // `--interrupt`/`--escape` had just cleared. Cheap enough to repeat — a synchronous ring
+  // read and one indexed better-sqlite3 lookup.
+  //
+  // The residual it CANNOT close: `ringToken` counts OUTPUT bytes, so input written by a
+  // path that does not take this lock (the raw `/api/terminals/:id/write` passthrough, or a
+  // human's keystrokes over the WebSocket) can sit un-echoed on the line and read as
+  // unchanged. Serialization — not this precheck — is what makes the lock-taking writers
+  // safe; the echo-lag residual for the rest is #1473's territory.
+  const precheck = (): WriteAbort | null => {
+    if (!session.writable) return { kind: 'hold', reason: 'no-live-pty' };
+    if (ringToken(session, profile) !== tokenBefore) return { kind: 'hold', reason: 'busy' };
+    const stillHeld = getById(db, row.id);
+    if (!stillHeld || stillHeld.status !== 'held') return { kind: 'row-resolved' };
+    return null;
+  };
+
+  // Default to a hold so an unobserved result is the SAFE failure mode (hold, never a false
+  // delivery); the try either assigns the real result or throws past this point.
+  let result: WriteResult = { status: 'aborted', abort: { kind: 'hold', reason: 'busy' } };
   try {
-    written = await ports.writeMessage(session, current.formatted_message, current.no_enter === 1);
+    result = await ports.writeMessage(session, current.formatted_message, current.no_enter === 1, precheck);
   } finally {
     // Invalidate the memo on EVERY write outcome — a clean `true`, a dropped-write `false`, OR a
     // rejection — and BEFORE the markDelivered/held decisions below (CMAP round 3 moved it above the
@@ -447,15 +508,46 @@ export async function deliverAgentMail(
     memo?.delete(cacheKey);
   }
 
-  // A dropped PTY write (#1198) means zero-or-partial bytes reached the terminal — the exact silent
-  // loss this spec exists to prevent (Spec 1313 integration review — Codex). The t=0 `writable`
-  // precheck above cannot catch a socket that dies mid-pace (the text/lines/Enter fire across
-  // setTimeout gaps), so writeMessage threads the per-write result: `false` → no complete submit
-  // landed. Hold the row (`no-live-pty`, retried on the next clean gate pass) instead of marking it
-  // delivered. Any bytes already on the wire only make the line dirty; the render gate then holds on
-  // that draft until the session recovers or is torn down — it can never be marked delivered on a
-  // dead PTY.
-  if (!written) return hold('no-live-pty');
+  // Anything short of a complete submit holds the row — a delivery is marked delivered only when
+  // every byte, Enter included, reached the terminal.
+  //
+  //   • `dropped` — a PTY write was dropped (#1198): zero-or-partial bytes reached the terminal,
+  //     the exact silent loss this spec exists to prevent (Spec 1313 integration review — Codex).
+  //     The t=0 `writable` precheck cannot catch a socket that dies mid-pace (the text/lines/Enter
+  //     fire across setTimeout gaps). Any bytes already on the wire only make the line dirty; the
+  //     render gate then holds on that draft until the session recovers or is torn down.
+  //   • `contended` — another submission (an `--interrupt`/`--escape`, or a delivery to an agent
+  //     sharing this terminal) held the lock, so nothing was written. `busy` is the honest reason:
+  //     the line is occupied. Declining rather than queueing is deliberate — see
+  //     {@link trySubmitToSession}: the drainer walks agents sequentially, so a blocking wait here
+  //     would stall every OTHER agent's delivery behind this one terminal.
+  //   • `aborted` — the in-lock precheck refused, with nothing written. A `hold` abort re-holds for
+  //     the stated reason; `row-resolved` means the row was dismissed/superseded while we waited,
+  //     which is a TERMINAL state and must not be re-held (same handling as the pre-lock check
+  //     above, which this one backstops for the duration of the lock wait).
+  //   • `preempted` — the bytes went out, but an operator submission whose wait ceiling expired
+  //     wrote unserialized while they did, so the composer may have been cleared or truncated
+  //     under them. Hold rather than mark delivered. This trades a possible DUPLICATE (if the
+  //     message did land intact, the gate re-delivers it later) for never reporting a delivery
+  //     that did not happen — the same call the `dropped` branch already makes, and the failure
+  //     this whole issue exists to remove. It is the one hole the ceiling opens, and it is
+  //     detected by counting lock bypasses, not by re-reading the screen.
+  if (result.status === 'dropped') return hold('no-live-pty');
+  if (result.status === 'preempted') {
+    ports.log(
+      `[mailbox] write to ${toAgent} @ ${path.basename(workspacePath)} was raced by an unserialized ` +
+        `operator write — holding ${row.id.slice(0, 8)}… for redelivery rather than reporting it delivered`,
+    );
+    return hold('busy');
+  }
+  if (result.status === 'contended') return hold('busy');
+  if (result.status === 'aborted') {
+    if (result.abort.kind === 'row-resolved') {
+      ports.onHeldStateChange(); // the held set changed under us → refresh the indicator
+      return { delivered: [], reason: null };
+    }
+    return hold(result.abort.reason);
+  }
 
   // markDelivered is guarded (held→delivered only). If it did NOT transition, the row
   // was dismissed/superseded during the paced write — accept that terminal state and

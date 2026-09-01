@@ -64,10 +64,11 @@ import {
   type EnqueueInput,
 } from '../db/mailbox.js';
 import type { MailboxReason } from '../db/types.js';
-// Spec 1273 per-terminal submission lock — preserved across the Spec 1313 merge for
-// the two explicit human-bypass paths (escape + interrupt), which do NOT route
-// through the mailbox's per-agent serializer and so need their own anti-fusion lock.
-import { submitToSession } from './session-submit.js';
+// Spec 1273 per-terminal submission lock. Originally the anti-fusion lock for the two
+// explicit human-bypass paths (escape + interrupt); since Issue #1365 the gated mailbox
+// delivery path takes it too, so it now serializes the whole write edge of a terminal.
+// The operator paths pass a wait ceiling — see OPERATOR_SUBMIT_WAIT_CEILING_MS.
+import { submitToSession, OPERATOR_SUBMIT_WAIT_CEILING_MS } from './session-submit.js';
 // Spec 1307 `--delay` — Tower-side deferred delivery, re-homed onto the Spec 1313
 // mailbox (the merge that carried this feature was flattened by a later rebase, so it
 // is grafted here explicitly): the due-time callback enqueues to the mailbox and
@@ -1627,6 +1628,34 @@ function holdAndRespond(
   });
 }
 
+/** Machine-readable reason paired with `degraded: true` on an operator send response. */
+const DEGRADED_SUBMIT_REASON = 'submit-wait-ceiling-expired';
+
+/**
+ * Announce that an operator submission gave up waiting for the per-terminal lock and wrote
+ * unserialized (Issue #1365).
+ *
+ * This is the degraded path, and it is deliberately loud. The ceiling arms only against a
+ * DELIVERY write (behind another operator the wait stays unbounded, as before #1365), so what
+ * expiry falls back to is exactly the pre-#1365 operator-vs-delivery behaviour: two disjoint
+ * locks, no serialization. That one pair is therefore no worse than the old status quo — but
+ * it used to be invisible, and now it is not, here and in the `degraded` flag on the response.
+ */
+function logCeilingExpired(
+  ctx: RouteContext,
+  action: string,
+  toAgent: string,
+  terminalId: string,
+  waitedMs: number,
+): void {
+  ctx.log(
+    'WARN',
+    `${action} → ${toAgent} (terminal ${terminalId.slice(0, 8)}...) waited ${waitedMs}ms for an in-flight ` +
+      `write and proceeded UNSERIALIZED — it may interleave with that write. A message long enough to ` +
+      `hold the line this long is the usual cause.`,
+  );
+}
+
 /** Inputs for a delayed (`--delay`) send, captured from the parsed request. */
 interface DelayedSendParams {
   to: string;
@@ -1738,18 +1767,33 @@ function handleDelayedSend(
       if (!isStillLive()) return; // shutdown before/at due → drop the ^C nudge (body survives)
       if (terminalId) {
         let fired = false;
-        void submitToSession(terminalId, () => {
-          // Re-check EVERYTHING inside the lock: the queued submission can acquire the lock only
-          // AFTER a shutdown or a session teardown/respawn that landed while it waited behind an
-          // in-flight write. Re-fetch the session and re-check live + writable here; bail with no
-          // ^C otherwise (the body still delivers via the gate).
-          if (!isStillLive()) return 0;
-          const live = getTerminalManager().getSession(terminalId);
-          if (!live || !live.writable) return 0;
-          live.write('\x03'); // Ctrl+C only — end the turn; body follows via the gate
-          fired = true;
-          return 0; // no body, no Enter on this path
-        })
+        void submitToSession(
+          terminalId,
+          () => {
+            // Re-check EVERYTHING inside the lock: the queued submission can acquire the lock only
+            // AFTER a shutdown or a session teardown/respawn that landed while it waited behind an
+            // in-flight write. Re-fetch the session and re-check live + writable here; bail with no
+            // ^C otherwise (the body still delivers via the gate).
+            if (!isStillLive()) return 0;
+            const live = getTerminalManager().getSession(terminalId);
+            if (!live || !live.writable) return 0;
+            live.write('\x03'); // Ctrl+C only — end the turn; body follows via the gate
+            fired = true;
+            return 0; // no body, no Enter on this path
+          },
+          undefined,
+          // The same operator ceiling as the immediate paths (Issue #1365). This one fires
+          // UNATTENDED, so it is the writer most likely to meet a gated delivery mid-pace —
+          // which is precisely why the delayed `^C` must take this lock at all.
+          {
+            waitCeilingMs: OPERATOR_SUBMIT_WAIT_CEILING_MS,
+            onCeilingExpired: (waitedMs) => logCeilingExpired(ctx, 'delayed interrupt ^C', toAgent, terminalId, waitedMs),
+            // This is the one operator path whose write can be a NO-OP (the liveness re-check
+            // above). A degraded no-op raced nobody, so it must not bump the bypass counter —
+            // that would make a concurrent delivery hold and re-deliver for nothing.
+            wroteBytes: () => fired,
+          },
+        )
           .then(() =>
             ctx.log('INFO', fired
               ? `Delayed interrupt ^C fired → ${toAgent} (terminal ${terminalId.slice(0, 8)}...); body delivers via the gate`
@@ -1973,7 +2017,17 @@ async function handleSend(
   if (escape) {
     // Awaited: the response must not claim delivery before the ESC and its
     // Enter have actually been written (Spec 1273 verify).
-    await submitToSession(result.terminalId, () => writeEscapeToSession(session, noEnter));
+    // Issue #1365: escape is an operator submission — it blocks behind an in-flight write
+    // (including a gated mailbox delivery, which now takes this same lock) so its ESC and
+    // Enter can no longer truncate a delivery mid-pace, but only up to the wait ceiling.
+    let escapeDegraded = false;
+    await submitToSession(result.terminalId, () => writeEscapeToSession(session, noEnter), undefined, {
+      waitCeilingMs: OPERATOR_SUBMIT_WAIT_CEILING_MS,
+      onCeilingExpired: (waitedMs) => {
+        escapeDegraded = true;
+        logCeilingExpired(ctx, 'ESC', toAgent, result.terminalId, waitedMs);
+      },
+    });
     broadcastMessage({
       type: 'message',
       from: { project: path.basename(senderWorkspace), agent: from ?? 'unknown' },
@@ -1983,7 +2037,13 @@ async function handleSend(
       timestamp: new Date().toISOString(),
     });
     ctx.log('INFO', `Interrupt (ESC) sent: ${from ?? 'unknown'} → ${toAgent} (terminal ${result.terminalId.slice(0, 8)}...)`);
-    sendJson(res, 200, { ok: true, terminalId: result.terminalId, resolvedTo: toAgent, deferred: false });
+    sendJson(res, 200, {
+      ok: true,
+      terminalId: result.terminalId,
+      resolvedTo: toAgent,
+      deferred: false,
+      ...(escapeDegraded ? { degraded: true, degradedReason: DEGRADED_SUBMIT_REASON } : {}),
+    });
     return;
   }
 
@@ -2027,16 +2087,35 @@ async function handleSend(
     // during the 100 ms gap. `writeMessageToSession(..., 100)` schedules the text 100 ms after
     // the ^C (the settle) and returns the completion offset, so the lock is held until the
     // whole interrupt is on the wire; uncontended, it runs at once.
-    //   Scope of the guarantee: this serializes interrupt against interrupt/escape — the only
-    //   /api/send writers that take this per-terminal lock. It does NOT serialize against a
-    //   concurrent mailbox/backstop delivery (which writes through the per-AGENT serializer, a
-    //   disjoint lock); interrupt is the explicit gate-bypassing human action, and closing that
-    //   cross-path race would require the mailbox write edge to take this lock too (a separate,
-    //   larger change — flagged, not done here).
-    await submitToSession(result.terminalId, () => {
-      session.write('\x03'); // Ctrl+C
-      return writeMessageToSession(session, formattedMessage, noEnter, 100);
-    });
+    //   Scope of the guarantee (Issue #1365 — this used to end at "interrupt vs interrupt/escape"):
+    //   the gated mailbox delivery path now takes this SAME per-terminal lock, so an interrupt is
+    //   serialized against a concurrent delivery too. That closes the case where a `^C` landed
+    //   inside a delivery's own text→Enter window, clearing the composer while every byte still
+    //   reported success — the row read `delivered` for a message the agent never saw. The lock
+    //   order is per-agent → per-terminal (the delivery takes this one as a leaf), never the
+    //   reverse, so there is no cycle. See session-submit.ts for the full boundary.
+    // Whether this interrupt gave up waiting and wrote unserialized. It must reach the SENDER,
+    // not just the Tower log (codex review of PR #1492): the row above was claimed `delivered`
+    // before the write, so a degraded interrupt would otherwise report an unqualified success
+    // for a body that may have interleaved with the delivery it skipped. We keep the
+    // claim-first tradeoff (un-claiming risks a double delivery — see above) and tell the
+    // truth about it instead.
+    let degraded = false;
+    await submitToSession(
+      result.terminalId,
+      () => {
+        session.write('\x03'); // Ctrl+C
+        return writeMessageToSession(session, formattedMessage, noEnter, 100);
+      },
+      undefined,
+      {
+        waitCeilingMs: OPERATOR_SUBMIT_WAIT_CEILING_MS,
+        onCeilingExpired: (waitedMs) => {
+          degraded = true;
+          logCeilingExpired(ctx, 'interrupt', toAgent, result.terminalId, waitedMs);
+        },
+      },
+    );
     broadcastMessage({
       type: 'message',
       from: { project: path.basename(senderWorkspace), agent: from ?? 'unknown' },
@@ -2055,6 +2134,8 @@ async function handleSend(
       held: false,
       mailboxId: row.id,
       reason: null,
+      // Additive and present only when it happened, so older clients are unaffected.
+      ...(degraded ? { degraded: true, degradedReason: DEGRADED_SUBMIT_REASON } : {}),
     });
     return;
   }

@@ -58,6 +58,7 @@ function flipSession(command = 'claude'): FlipSession {
   let bytes = 0;
   let screen = new SessionScreen(COLS, ROWS);
   return {
+    id: 'term-flip',
     get bytesWritten() {
       return bytes;
     },
@@ -99,9 +100,11 @@ function realGatePorts(
       const { term, cols, rows } = await session.screen.read();
       return classifyBuffer(term, cols, rows, prof);
     },
-    writeMessage: (_s, msg, noEnter) => {
+    writeMessage: (_s, msg, noEnter, precheck) => {
+      const abort = precheck();
+      if (abort) return { status: 'aborted' as const, abort };
       writes.push({ msg, noEnter });
-      return true; // the write landed (Spec 1313: writeMessage reports delivery success)
+      return { status: 'written' as const }; // the write landed (Spec 1313: the port reports delivery success)
     },
     broadcast: (f) => broadcasts.push(f),
     onHeldStateChange: () => {},
