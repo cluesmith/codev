@@ -45,6 +45,9 @@ function fakeSession(overrides: Partial<DeliverySession> = {}): DeliverySession 
   return {
     id: 'term-fake',
     bytesWritten: 0,
+    // Old enough that the Issue #1573 settle window has long passed for the harness clock
+    // (`now` starts at 1000): a test that wants a still-painting screen overrides it.
+    lastDataAt: 0,
     info: { cols: 110, rows: 32 },
     command: 'claude',
     launchArgs: [],
@@ -85,6 +88,12 @@ interface Harness {
    * is HELD `no-live-pty`, not marked delivered.
    */
   writeResult: boolean;
+  /**
+   * What the fake `verifyEcho` port answers (Issue #1573). Default true (the header showed up
+   * on the terminal); set false to model a write whose bytes never reached the screen and
+   * assert the row is HELD rather than marked delivered.
+   */
+  echoVerified: boolean;
 }
 
 function harness(): Harness {
@@ -106,6 +115,7 @@ function harness(): Harness {
     ownerClears: [],
     now: 1000,
     writeResult: true,
+    echoVerified: true,
     setSession: (agent, s) => sessions.set(agent, s),
     setProfile: (p) => {
       profile = p;
@@ -129,6 +139,7 @@ function harness(): Harness {
         writes.push({ formattedMessage, noEnter });
         return h.writeResult ? { status: 'written' } : { status: 'dropped' };
       },
+      verifyEcho: () => Promise.resolve(h.echoVerified),
       broadcast: (f) => broadcasts.push(f),
       onHeldStateChange: () => {
         h.heldChanges++;
@@ -327,6 +338,9 @@ describe('deliverAgentMail (Spec 1313, Phase 4)', () => {
       get bytesWritten() {
         return bytes;
       },
+      // Settled (Issue #1573), so the hold this test asserts is attributable to the token
+      // moving under the classify — not to an unknown screen age.
+      lastDataAt: 0,
       info: { cols: 110, rows: 32 },
       command: 'claude',
       launchArgs: [],
@@ -554,6 +568,9 @@ describe('MailboxDrainer verdict memo (Spec 1313 render-gate follow-up)', () => 
     h.setSession('spir-1', {
       id: 'term-moving',
       get bytesWritten() { return bytes; },
+      // Issue #1573 settle-before-write: epoch 0 against the harness clock is a screen that
+      // stopped painting long ago, so this test still exercises the memo and nothing else.
+      lastDataAt: 0,
       info: { cols: 110, rows: 32 },
       command: 'claude',
       launchArgs: [],
@@ -1060,6 +1077,9 @@ describe('MailboxDrainer owner starvation notice (Spec 1313 round 3, change 3)',
     h.setSession('spir-1', {
       id: 'term-moving',
       get bytesWritten() { return bytes; },
+      // Issue #1573: the repaint that cleared the composer has already settled by the time a
+      // drainer tick sees it — ticks are 1.5 s apart, the settle window is 250 ms.
+      lastDataAt: 0,
       info: { cols: 110, rows: 32 },
       command: 'claude',
       launchArgs: [],
@@ -1080,6 +1100,7 @@ describe('MailboxDrainer owner starvation notice (Spec 1313 round 3, change 3)',
     bytes = 50;
     h.setVerdict(CLEAN);
     await drainer.tick();
+    // eslint-disable-next-line no-console
     expect(h.ownerClears).toEqual([{ workspacePath: '/ws/a', toAgent: 'spir-1' }]);
     expect(drainer.notifiedOwnerAgents).toEqual([]);
     drainer.stop();

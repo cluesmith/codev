@@ -838,6 +838,13 @@ export class TowerClient {
      * this instant. Omitted by older Tower binaries.
      */
     notBefore?: number;
+    /**
+     * Issue #1573: the exact byte length Tower accepted for this message body. Echoed back so
+     * the sender can see WHAT was sent, not just that a send happened — the failures behind
+     * this field (#1564) all looked like unqualified successes at the sender. Omitted by older
+     * Tower binaries.
+     */
+    bodyLength?: number;
   }> {
     const result = await this.request<{
       ok: boolean;
@@ -851,6 +858,7 @@ export class TowerClient {
       degraded?: boolean;
       degradedReason?: string;
       notBefore?: number;
+      bodyLength?: number;
     }>(
       '/api/send',
       {
@@ -888,6 +896,7 @@ export class TowerClient {
       degraded: result.data!.degraded,
       degradedReason: result.data!.degradedReason,
       notBefore: result.data!.notBefore,
+      bodyLength: result.data!.bodyLength,
     };
   }
 

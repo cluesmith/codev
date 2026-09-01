@@ -78,6 +78,15 @@ export interface DeliverySession {
    * {@link MailboxDrainer}). `PtySession` exposes it (sourced from `RingBuffer.bytesWritten`).
    */
   readonly bytesWritten: number;
+  /**
+   * Epoch ms of the session's most recent OUTPUT byte (Issue #1573 settle-before-write).
+   * `PtySession` tracks it at the same chokepoint that feeds the ring and the gate mirror.
+   * The delivery path requires a quiet interval here before it writes: the render gate
+   * proves a screen IS a clean prompt, but says nothing about whether it is still being
+   * PAINTED — a composer that repainted 1 ms ago classifies identically to one idle a
+   * minute, and writing into a settling composer is what ate the leading bytes in #1521.
+   */
+  readonly lastDataAt: number;
   readonly info: { cols: number; rows: number };
   readonly command: string;
   readonly launchArgs: string[];
@@ -203,6 +212,26 @@ export interface DeliveryPorts {
    * already-delivered notice. OPTIONAL, like {@link escalateHeldToOwner}.
    */
   clearHeldOwnerNotice?(workspacePath: string, toAgent: string): void;
+  /**
+   * Did the message actually LAND on the receiving terminal (Issue #1573)? Called after a
+   * completed paced write and BEFORE `markDelivered`, with the normalized needle from
+   * {@link echoNeedle}. The live binding waits a short bounded interval for the needle to
+   * appear in the session's rendered mirror — the same buffer {@link DeliveryPorts.classify}
+   * reads — and answers true on the first sighting.
+   *
+   * This is the only end-to-end evidence the delivery path has. Everything upstream of it
+   * proves the bytes were QUEUED, never that the terminal absorbed them: `session.write`
+   * returns true whenever the socket object is connected, so a receiving composer that ate
+   * the leading bytes (#1564) still produced a clean `written`, and the row was marked
+   * delivered for a message the agent never saw whole.
+   *
+   * DELIBERATELY NARROW: presence of the header line, nothing else. No screen diffing, no
+   * repair, no per-harness branches. A `false` therefore means "could not confirm", not
+   * "definitely lost" — so the caller HOLDS the row for the existing redelivery machinery
+   * rather than dropping it, making the direction of error a duplicate delivery instead of
+   * a silent loss.
+   */
+  verifyEcho(session: DeliverySession, needle: string): Promise<boolean>;
   log(message: string): void;
   now(): number;
 }
@@ -284,6 +313,77 @@ function isClassifierStuck(
   detail: GateVerdict['detail'] | undefined
 ): boolean {
   return reason === 'no-profile' || detail === 'no-region-end' || detail === 'no-composer-marker';
+}
+
+/**
+ * How long the receiving session's screen must have been QUIET before a gated delivery may
+ * write onto it (Issue #1573).
+ *
+ * The render gate answers "is this a clean prompt?" and nothing else — it has no stability
+ * requirement, so a composer captured 1 ms into its post-turn repaint passes exactly like one
+ * idle for a minute. Writing into that window is how #1521's leading bytes were eaten
+ * (`[USER via VS Code]` arriving as `ER via VS Code`). The quiescence drain trigger happened to
+ * be safe because it only fires after an output-idle debounce; the request path (`handleSend`'s
+ * immediate delivery attempt) and the `'submit'` fast trigger had no such gap. This gives all
+ * three the same floor.
+ *
+ * A hold here is cheap and self-correcting: the backstop drainer retries on its existing
+ * schedule, so the cost of being early is at most one tick of latency.
+ */
+export const SETTLE_BEFORE_WRITE_MS = 250;
+
+/**
+ * Has the session's screen been quiet long enough to write onto (Issue #1573)?
+ *
+ * Phrased as a positive `>=` rather than a negated `<` so that a session carrying no usable
+ * timestamp — the comparison yields NaN, and every NaN comparison is false — reads as NOT
+ * settled and holds. An unknown screen age is exactly the case that must not be written into.
+ */
+function settled(ports: DeliveryPorts, session: DeliverySession): boolean {
+  return ports.now() - session.lastDataAt >= SETTLE_BEFORE_WRITE_MS;
+}
+
+/**
+ * Minimum length of a normalized {@link echoNeedle} for it to be worth matching. Below this a
+ * needle is not distinctive enough to prove anything — a two-character raw message would match
+ * incidental screen text and turn verification into a rubber stamp. Short raw sends therefore
+ * skip verification (today's behavior) rather than being confirmed by an accident.
+ */
+const MIN_ECHO_NEEDLE_LENGTH = 12;
+
+/**
+ * Reduce text to its alphanumeric skeleton for echo matching (Issue #1573).
+ *
+ * Matching the header line literally does not survive contact with real harnesses. Measured
+ * 2026-09-01 against live PTYs: claude echoes `### [ARCHITECT INSTRUCTION | <ts>] ###`
+ * verbatim into its composer, then — once the message is SUBMITTED — re-renders it as
+ * `[ARCHITECT INSTRUCTION | <ts>]`, the `###` fences consumed as a markdown H3. codex keeps the
+ * fences. Dropping every non-alphanumeric byte makes both forms the same string, and
+ * incidentally absorbs the other three ways a TUI mangles a line it is only *displaying*: a
+ * `> `/`❯ ` quote prefix, indentation, and wrapping at the viewport width (line breaks vanish
+ * with everything else, so a header split across two rows still matches).
+ *
+ * It is a presence probe, not a fidelity check — it deliberately cannot tell you the body
+ * arrived intact, only that the head of the message reached the screen.
+ */
+export function normalizeForEcho(text: string): string {
+  return text.replace(/[^A-Za-z0-9]/g, '');
+}
+
+/**
+ * The needle {@link DeliveryPorts.verifyEcho} looks for: the formatted message's FIRST line,
+ * normalized. Returns `''` when it is too short to be distinctive (see
+ * {@link MIN_ECHO_NEEDLE_LENGTH}), which the caller reads as "skip verification".
+ *
+ * The first line and only the first line. A formatted send puts its `### [ARCHITECT
+ * INSTRUCTION | <iso timestamp>] ###` header there — long, and unique per message thanks to the
+ * timestamp. The TAIL would be the easier thing to find on a scrolled screen and is exactly the
+ * wrong choice: #1564's message arrived as its FINAL ~30 characters, so a footer needle would
+ * have certified the very corruption this check exists to catch.
+ */
+export function echoNeedle(formattedMessage: string): string {
+  const needle = normalizeForEcho(formattedMessage.split('\n', 1)[0]);
+  return needle.length >= MIN_ECHO_NEEDLE_LENGTH ? needle : '';
 }
 
 /**
@@ -436,6 +536,12 @@ export async function deliverAgentMail(
   // trivially.)
   if (ringToken(session, profile) !== tokenBefore) return hold('busy');
 
+  // Settle-before-write (Issue #1573). A clean verdict says the composer is EMPTY, not that it
+  // has finished being drawn. Require a quiet interval since the session's last output byte
+  // before putting anything on the line; see {@link SETTLE_BEFORE_WRITE_MS}. Re-checked inside
+  // the per-terminal lock below, because that is where the last byte before ours can land.
+  if (!settled(ports, session)) return hold('busy');
+
   // Clean, verified-empty prompt → deliver the oldest held message. Await the
   // write's paced completion so a serialized follow-up delivery never begins
   // until this message's text + Enter is fully on the wire.
@@ -479,6 +585,7 @@ export async function deliverAgentMail(
   const precheck = (): WriteAbort | null => {
     if (!session.writable) return { kind: 'hold', reason: 'no-live-pty' };
     if (ringToken(session, profile) !== tokenBefore) return { kind: 'hold', reason: 'busy' };
+    if (!settled(ports, session)) return { kind: 'hold', reason: 'busy' };
     const stillHeld = getById(db, row.id);
     if (!stillHeld || stillHeld.status !== 'held') return { kind: 'row-resolved' };
     return null;
@@ -547,6 +654,26 @@ export async function deliverAgentMail(
       return { delivered: [], reason: null };
     }
     return hold(result.abort.reason);
+  }
+
+  // The write completed — every byte, Enter included, was accepted by the session. That is
+  // still only proof the bytes were QUEUED (Issue #1573): `session.write` reports true whenever
+  // the socket object is connected, so a composer that ate the leading bytes (#1564) lands here
+  // looking identical to a clean delivery. Ask the screen before claiming success.
+  //
+  // A `false` here is "could not confirm", so the row is HELD, not dropped: the existing
+  // redelivery machinery retries it on a later clean gate, and the escalation path already makes
+  // a row that never confirms visible. That inverts the failure this issue exists to remove —
+  // the worst case becomes a duplicate delivery the agent can see, instead of a silent loss the
+  // sender was told was a success.
+  const needle = echoNeedle(current.formatted_message);
+  if (needle && !(await ports.verifyEcho(session, needle))) {
+    ports.log(
+      `[mailbox] write to ${toAgent} @ ${path.basename(workspacePath)} completed but its header ` +
+        `never appeared on the terminal — holding ${row.id.slice(0, 8)}… for redelivery rather ` +
+        `than reporting it delivered`,
+    );
+    return hold('busy');
   }
 
   // markDelivered is guarded (held→delivered only). If it did NOT transition, the row

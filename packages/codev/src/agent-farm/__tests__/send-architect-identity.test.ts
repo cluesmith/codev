@@ -54,7 +54,11 @@ const CLEAN_SCREEN = screen(`❯ ${DIM}Try "fix the flaky test"${RESET}`, '─�
  */
 class FakeShellper extends EventEmitter {
   connected = true;
-  lastDataAt = 1000;
+  // The session hydrates its own `lastDataAt` from this at attach, and the Issue #1573
+  // settle-before-write check reads it against the harness clock (`now: () => 1000`). Epoch 0
+  // is "this screen stopped painting long before now" — an idle architect prompt, which is
+  // what every case here models.
+  lastDataAt = 0;
   writeData: string[] = [];
   write(data: string | Buffer): boolean {
     this.writeData.push(typeof data === 'string' ? data : data.toString('utf-8'));
@@ -108,6 +112,7 @@ function realSeamPorts(
     onHeldStateChange: () => {},
     onEscalation: () => {},
     onLiveness: () => {},
+    verifyEcho: () => Promise.resolve(true),
     log: () => {},
     now: () => 1000,
   };

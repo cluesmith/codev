@@ -18,7 +18,7 @@ import { terminalDeliverySignals, type PtySession } from '../../terminal/pty-ses
 import { getWorkspaceTerminals, getTerminalManager } from './tower-terminals.js';
 import { broadcastMessage, resolveAgentInRegistry, isResolveError } from './tower-messages.js';
 import { submitMessagePaced } from './message-write.js';
-import { classifyBuffer, type GateProfile, type GateVerdict } from './render-gate.js';
+import { bufferLines, classifyBuffer, type GateProfile, type GateVerdict } from './render-gate.js';
 import { resolveProfile } from './gate-profiles.js';
 import {
   buildContextFsPort,
@@ -32,6 +32,7 @@ import { supersede as supersedeMailbox, dismissHeldWithKey, NOTICE_SUPERSEDE_PRE
 import path from 'node:path';
 import {
   MailboxDrainer,
+  normalizeForEcho,
   type DeliveryPorts,
   type DeliverySession,
   type DeliveredBroadcast,
@@ -176,6 +177,47 @@ export async function classifyAgentScreen(session: DeliverySession, profile: Gat
   return classifyBuffer(term, cols, rows, profile);
 }
 
+/**
+ * How long {@link verifyEchoOnScreen} waits for a delivered message's header to show up, and
+ * how often it re-reads while waiting (Issue #1573).
+ *
+ * Measured 2026-09-01 against live claude and codex PTYs: the header is on screen from the
+ * first sample after the write completes (the composer echoes it as it is typed, before the
+ * Enter that submits it), and remains present at every sample out to +5 s. The budget is
+ * therefore slack for a loaded machine, not the expected cost — the common case returns on the
+ * first read with no added latency. It is bounded because the `afx send` request path awaits
+ * this before answering the sender.
+ */
+const ECHO_VERIFY_TIMEOUT_MS = 600;
+const ECHO_VERIFY_POLL_MS = 50;
+
+/**
+ * Look for a delivered message's normalized header needle in the session's rendered mirror
+ * (Issue #1573) — the live binding for {@link DeliveryPorts.verifyEcho}.
+ *
+ * Reads the SAME `SessionScreen` the render gate classifies, so verification and gating can
+ * never disagree about what the terminal shows, and scans its full retained buffer rather than
+ * the viewport (a long message scrolls its own header into scrollback while it types).
+ * Answers true on the first sighting; a session with no mirror at all has produced no output
+ * and therefore cannot have echoed anything, which is a `false`, not a pass.
+ *
+ * Known residual, deliberately not designed around: a harness on the ALTERNATE screen buffer
+ * has no scrollback, so a message longer than one viewport can scroll its header out of reach
+ * and fail to confirm — the agy profile boots into the alternate buffer and was not measurable
+ * here (unauthenticated). The consequence is a redelivery, never a dropped message.
+ */
+export async function verifyEchoOnScreen(session: DeliverySession, needle: string): Promise<boolean> {
+  const screen = (session as PtySession).gateScreen;
+  if (!screen) return false;
+  const deadline = Date.now() + ECHO_VERIFY_TIMEOUT_MS;
+  for (;;) {
+    const { term } = await screen.read();
+    if (normalizeForEcho(bufferLines(term).join('\n')).includes(needle)) return true;
+    if (Date.now() >= deadline) return false;
+    await new Promise((resolve) => setTimeout(resolve, ECHO_VERIFY_POLL_MS));
+  }
+}
+
 /** Convert a delivered-message frame to the WebSocket bus shape and broadcast it. */
 function broadcastDelivered(frame: DeliveredBroadcast): void {
   broadcastMessage({
@@ -204,6 +246,9 @@ export function makeDeliveryPorts(log: LogFn): DeliveryPorts {
     // `--interrupt`/`--escape` can no longer interleave. The precheck is the delivery
     // module's, re-run inside that lock.
     writeMessage: (session, msg, noEnter, precheck) => submitMessagePaced(session, msg, noEnter, precheck),
+    // Issue #1573: the only end-to-end evidence that the bytes reached the terminal, asked for
+    // after the write and before the row is marked delivered.
+    verifyEcho: (session, needle) => verifyEchoOnScreen(session, needle),
     broadcast: (frame) => broadcastDelivered(frame),
     onHeldStateChange: () => broadcastHeldStateChange(),
     onEscalation: (info) => broadcastEscalation(info),

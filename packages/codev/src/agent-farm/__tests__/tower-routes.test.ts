@@ -237,7 +237,12 @@ function gateSession(mockWrite: (data: string) => void, ring: string, writable =
     // boolean (Spec 1313 silent-loss fix), so a double whose write returned undefined
     // would read as a DROPPED write and be held. Wrap mockWrite so call-assertions still
     // see it while the write reports success.
-    write: (data: string): boolean => { mockWrite(data); return true; },
+    // Issue #1573: a real terminal ECHOES what is typed into it, and the delivery path now
+    // requires that echo on the session's mirror before it will call a message delivered. The
+    // double models it (input lines are `\n`-separated; a terminal renders them `\r\n`), so a
+    // test asserting a delivery gets one — and a test that wants a terminal which SWALLOWS its
+    // input can hand in a `write` that skips the feed.
+    write: (data: string): boolean => { mockWrite(data); gateScreen.feed(data.replace(/\n/g, '\r\n')); return true; },
     pid: 1234,
     writable,
     isUserIdle: () => true,
@@ -247,6 +252,10 @@ function gateSession(mockWrite: (data: string) => void, ring: string, writable =
     cwd: '/tmp/ws',
     info: { cols: 80, rows: 24 },
     bytesWritten: raw.length,
+    // Issue #1573 settle-before-write: epoch 0 is "this screen stopped painting long ago", the
+    // normal state for a session sitting at an idle prompt. A test modelling a still-repainting
+    // composer overrides it with a recent timestamp.
+    lastDataAt: 0,
     gateScreen,
   };
 }
@@ -1445,6 +1454,52 @@ describe('tower-routes', () => {
       expect(parsed.deferred).toBe(false);
       expect(typeof parsed.mailboxId).toBe('string');
       expect(mockWrite).toHaveBeenCalled();
+    });
+
+    it('rejects an over-limit body loudly instead of paceing it onto the line (Issue #1573)', async () => {
+      // Nothing between the CLI flag and the PTY bytes bounded message size before this. An
+      // oversized body used to be written a line at a time and reported delivered whatever the
+      // composer made of it — the #1564 shape. Truncating would reproduce that on purpose, so
+      // the only honest answer is a refusal that names the limit.
+      mockParseJsonBody.mockResolvedValue({
+        to: 'architect',
+        message: 'x'.repeat(48 * 1024 + 1),
+        workspace: '/tmp/ws',
+      });
+      const req = makeReq('POST', '/api/send');
+      const { res, statusCode, body } = makeRes();
+
+      await handleRequest(req, res, makeCtx());
+
+      expect(statusCode()).toBe(400);
+      const parsed = JSON.parse(body());
+      expect(parsed.error).toBe('MESSAGE_TOO_LARGE');
+      expect(parsed.message).toContain('49153 bytes');
+      expect(parsed.message).toContain('48KB');
+      // The target was never even resolved — nothing reached a terminal.
+      expect(mockResolveTarget).not.toHaveBeenCalled();
+    });
+
+    it('accepts a body exactly at the limit and echoes bodyLength on the response (Issue #1573)', async () => {
+      const message = 'x'.repeat(48 * 1024);
+      mockParseJsonBody.mockResolvedValue({ to: 'architect', message, workspace: '/tmp/ws' });
+      mockResolveTarget.mockReturnValue({
+        terminalId: 'term-001',
+        workspacePath: '/tmp/ws',
+        agent: 'architect',
+      });
+      mockGetTerminalManager.mockReturnValue({
+        getSession: () => gateSession(vi.fn(), '❯ '),
+        listSessions: () => [],
+      });
+      const req = makeReq('POST', '/api/send');
+      const { res, statusCode, body } = makeRes();
+
+      await handleRequest(req, res, makeCtx());
+
+      expect(statusCode()).toBe(200);
+      // The sender is told WHAT was sent, not merely that a send happened.
+      expect(JSON.parse(body()).bodyLength).toBe(48 * 1024);
     });
 
     it('holds (no-live-pty) instead of dropping when the shellper connection is down (#1198, Spec 1313)', async () => {

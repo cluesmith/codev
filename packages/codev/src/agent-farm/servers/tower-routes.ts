@@ -49,7 +49,13 @@ import { fetchTeamGitHubData, type TeamMemberGitHubData } from '../../lib/team-g
 import { resolveTarget, resolveAgentInRegistry, broadcastMessage, isResolveError, type ResolveResult } from './tower-messages.js';
 import { handleCommandRoute, COMMAND_ROUTE } from './command-relay.js';
 import { handleCanvasRoute, CANVAS_ROUTE_PREFIX } from './canvas-relay.js';
-import { formatArchitectMessage, formatBuilderMessage, formatUserViaVsCodeMessage } from '../utils/message-format.js';
+import {
+  formatArchitectMessage,
+  formatBuilderMessage,
+  formatUserViaVsCodeMessage,
+  messageTooLargeError,
+  MAX_MESSAGE_BYTES,
+} from '../utils/message-format.js';
 import type { PtySession } from '../../terminal/pty-session.js';
 import { writeMessageToSession, writeEscapeToSession } from './message-write.js';
 import { makeDeliveryPorts, getMailboxDrainer } from './mailbox-wiring.js';
@@ -1625,6 +1631,7 @@ function holdAndRespond(
     held: true,
     reason,
     mailboxId: row.id,
+    bodyLength: Buffer.byteLength(input.body, 'utf8'),
   });
 }
 
@@ -1821,6 +1828,7 @@ function handleDelayedSend(
     deliverAfter,
     mailboxId: row.id,
     notBefore,
+    bodyLength: Buffer.byteLength(params.message, 'utf8'),
   });
 }
 
@@ -1844,6 +1852,18 @@ async function handleSend(
   if (!message) {
     res.writeHead(400, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: 'INVALID_PARAMS', message: 'Missing or empty "message" field' }));
+    return;
+  }
+
+  // Issue #1573: refuse an over-large body LOUDLY, here at the route rather than only at the
+  // CLI — `/api/send` is a public local route, and the CLI is not its only caller. Nothing
+  // downstream bounded message size, so an oversized body used to be paced onto the line one
+  // line at a time and reported delivered whatever the composer made of it. Rejecting is the
+  // only honest option: truncating would reproduce #1564 on purpose.
+  const bodyLength = Buffer.byteLength(message, 'utf8');
+  if (bodyLength > MAX_MESSAGE_BYTES) {
+    res.writeHead(400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'MESSAGE_TOO_LARGE', message: messageTooLargeError(bodyLength) }));
     return;
   }
 
@@ -2134,6 +2154,7 @@ async function handleSend(
       held: false,
       mailboxId: row.id,
       reason: null,
+      bodyLength,
       // Additive and present only when it happened, so older clients are unaffected.
       ...(degraded ? { degraded: true, degradedReason: DEGRADED_SUBMIT_REASON } : {}),
     });
@@ -2183,6 +2204,7 @@ async function handleSend(
       held: false,
       mailboxId: row.id,
       reason: null,
+      bodyLength,
     });
     return;
   }
@@ -2201,6 +2223,7 @@ async function handleSend(
     held: true,
     reason,
     mailboxId: row.id,
+    bodyLength,
   });
 }
 

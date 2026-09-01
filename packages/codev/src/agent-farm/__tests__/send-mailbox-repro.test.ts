@@ -65,6 +65,9 @@ function flipSession(command = 'claude'): FlipSession {
     get screen() {
       return screen;
     },
+    // Issue #1573 settle-before-write: this fake's clock is the harness's fixed `now: 1000`, so
+    // 0 is "quiet long before now" — an idle prompt, which is what every case here models.
+    lastDataAt: 0,
     info: { cols: COLS, rows: ROWS },
     command,
     launchArgs: [],
@@ -110,6 +113,7 @@ function realGatePorts(
     onHeldStateChange: () => {},
     onEscalation: () => {},
     onLiveness: () => {},
+    verifyEcho: () => Promise.resolve(true),
     log: () => {},
     now: () => 1000,
   };
