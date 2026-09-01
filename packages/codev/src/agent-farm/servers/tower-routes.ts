@@ -51,6 +51,7 @@ import { handleCommandRoute, COMMAND_ROUTE } from './command-relay.js';
 import { handleCanvasRoute, CANVAS_ROUTE_PREFIX } from './canvas-relay.js';
 import {
   formatArchitectMessage,
+  formatArchitectToBuilderMessage,
   formatBuilderMessage,
   formatUserViaVsCodeMessage,
   messageTooLargeError,
@@ -1530,19 +1531,27 @@ function liveTargetIdentity(result: ResolveResult): { toAgent: string; isArchite
   return { toAgent: archName ?? result.agent, isArchitectTarget: archName !== null };
 }
 
-/** Format a message per sender/target — preserves the pre-1313 formatting rules. */
+/**
+ * Format a message per sender/target — preserves the pre-1313 formatting rules.
+ *
+ * #1574: `toAgent` is the CANONICAL recipient the mailbox row is keyed on (the
+ * architect reverse-map for architect targets, the resolved agent id otherwise),
+ * so the header a recipient reads names the same identity the row was addressed
+ * to. Passing anything else here would make the frame attest to a fiction.
+ */
 function formatMessageForTarget(
   isArchitectTarget: boolean,
   from: string | undefined,
+  toAgent: string,
   message: string,
   raw: boolean,
 ): string {
   // #1494: a human's approval relayed by the VS Code extension gets its own
   // header, so the architect can tell it from a peer-architect instruction.
-  if (isArchitectTarget && from === VSCODE_USER_SENDER) return formatUserViaVsCodeMessage(message, undefined, raw);
-  if (isArchitectTarget && from) return formatBuilderMessage(from, message, undefined, raw); // builder → architect
-  if (!isArchitectTarget) return formatArchitectMessage(message, undefined, raw); // any → builder
-  return raw ? message : formatArchitectMessage(message, undefined, false); // unknown → architect
+  if (isArchitectTarget && from === VSCODE_USER_SENDER) return formatUserViaVsCodeMessage(toAgent, message, undefined, raw);
+  if (isArchitectTarget && from) return formatBuilderMessage(from, toAgent, message, undefined, raw); // builder → architect
+  if (!isArchitectTarget) return formatArchitectToBuilderMessage(toAgent, message, undefined, raw); // any → builder
+  return raw ? message : formatArchitectMessage(toAgent, message, undefined, false); // unknown → architect
 }
 
 /**
@@ -1567,9 +1576,12 @@ export async function deliverCronMessage(
   const ports = makeDeliveryPorts(log);
   // Preserve the pre-1313 cron framing: a message FROM the `af-cron` pseudo-builder,
   // regardless of whether the target is an architect or a builder.
+  //
+  // #1574: the frame names its recipient, which is only known AFTER resolution —
+  // so it is built per-branch rather than once up front. `base` carries everything
+  // that does not depend on the target.
   const base = {
     body: message,
-    formattedMessage: formatBuilderMessage(CRON_SENDER, message),
     supersedeKey: task.name,
   };
 
@@ -1578,6 +1590,7 @@ export async function deliverCronMessage(
     const { toAgent } = liveTargetIdentity(live);
     return deliverCronMail(ports, db, {
       ...base,
+      formattedMessage: formatBuilderMessage(CRON_SENDER, toAgent, message),
       workspacePath: live.workspacePath,
       toAgent,
       terminalId: live.terminalId,
@@ -1592,6 +1605,7 @@ export async function deliverCronMessage(
     if (!isResolveError(reg)) {
       return deliverCronMail(ports, db, {
         ...base,
+        formattedMessage: formatBuilderMessage(CRON_SENDER, reg.agent, message),
         workspacePath: reg.workspacePath,
         toAgent: reg.agent,
         terminalId: null,
@@ -1744,7 +1758,7 @@ function handleDelayedSend(
     return;
   }
 
-  const formattedMessage = formatMessageForTarget(isArchitectTarget, from, message, raw);
+  const formattedMessage = formatMessageForTarget(isArchitectTarget, from, toAgent, message, raw);
 
   // Persist NOW, at request time, with the due time. reason=null → SCHEDULED, not stuck.
   const row = enqueueMailbox(db, {
@@ -1941,7 +1955,7 @@ async function handleSend(
             workspacePath: reg.workspacePath,
             toAgent: reg.agent,
             body: message,
-            formattedMessage: formatMessageForTarget(reg.kind === 'architect', from, message, raw),
+            formattedMessage: formatMessageForTarget(reg.kind === 'architect', from, reg.agent, message, raw),
             fromAgent: from ?? null,
             fromWorkspace: senderWorkspace,
             noEnter,
@@ -1986,7 +2000,7 @@ async function handleSend(
         workspacePath: result.workspacePath,
         toAgent,
         body: message,
-        formattedMessage: formatMessageForTarget(isArchitectTarget, from, message, raw),
+        formattedMessage: formatMessageForTarget(isArchitectTarget, from, toAgent, message, raw),
         fromAgent: from ?? null,
         fromWorkspace: senderWorkspace,
         noEnter,
@@ -2017,7 +2031,7 @@ async function handleSend(
         workspacePath: result.workspacePath,
         toAgent,
         body: message,
-        formattedMessage: formatMessageForTarget(isArchitectTarget, from, message, raw),
+        formattedMessage: formatMessageForTarget(isArchitectTarget, from, toAgent, message, raw),
         fromAgent: from ?? null,
         fromWorkspace: senderWorkspace,
         noEnter,
@@ -2067,7 +2081,7 @@ async function handleSend(
     return;
   }
 
-  const formattedMessage = formatMessageForTarget(isArchitectTarget, from, message, raw);
+  const formattedMessage = formatMessageForTarget(isArchitectTarget, from, toAgent, message, raw);
 
   // NB: `--delay` (deliverAfter) is handled earlier by handleDelayedSend, before this
   // immediate-path block — a delayed send is resolved + persisted at request time and does

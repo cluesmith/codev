@@ -204,3 +204,27 @@ issues), claude=COMMENT with five findings. Addressed:
   and **re-normalizing the buffer once per poll** while the request waits: both documented at
   the binding as residuals. Both fail in the safe direction (a redelivery), and the second is
   off the happy path entirely — the measured case confirms on the first read.
+
+### 2026-09-01 — gate approved, rebased onto #1575
+
+Waleed approved the PR; #1575 (self-attesting frames, #1574) landed first and touches the same
+two files, so per second-lands-rebases I merged `origin/main`.
+
+Two conflicts, both additive-vs-additive and resolved by keeping both sides:
+`message-format.ts` (my size-limit exports next to their `recipient`/`REPLY_HINT`/`FOOTER`
+helpers) and `tower-routes.ts` (one import block).
+
+**The composition question was whether #1574's new frame breaks header matching. It does not,
+and it improves it.** The header is now `### [ARCHITECT INSTRUCTION → <toAgent> | <ts>] ###`.
+My needle is derived from the actual `formatted_message` at runtime, so it picked the new shape
+up for free; the arrow is punctuation and normalizes away, while the recipient NAME stays in the
+needle. That makes verification recipient-specific: a frame delivered to the wrong agent cannot
+satisfy the right agent's check. Confirmed against the real formatter — frame is still 3 lines
+(so #1574's own constraint about `PACED_WRITE_LINE_THRESHOLD` holds, and the write path my
+change guards is unchanged), and the markdown-rendered form still normalizes to the same needle.
+
+Fixtures now BUILD the frame with `formatArchitectToBuilderMessage` instead of hand-writing it.
+That is the real lesson from this rebase: my hand-copied `### [ARCHITECT INSTRUCTION | ts] ###`
+would have kept passing while the frame it modelled drifted away from what the delivery path
+writes. Deriving it means the next frame change fails in this suite instead of in the field.
+Added an explicit assertion that the recipient segment reaches the needle.

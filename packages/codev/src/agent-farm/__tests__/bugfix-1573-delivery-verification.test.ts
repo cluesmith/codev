@@ -40,13 +40,23 @@ import {
 import { watchEchoOnScreen } from '../servers/mailbox-wiring.js';
 import { SessionScreen } from '../../terminal/session-screen.js';
 import type { GateProfile, GateVerdict } from '../servers/render-gate.js';
+import { formatArchitectToBuilderMessage } from '../utils/message-format.js';
 
 const PROFILE: GateProfile = { app: 'claude', markerPattern: /^❯/, regionEndPatterns: [] };
 const CLEAN: GateVerdict = { clean: true, detail: 'empty' };
 
-/** The real formatted shape of an architect→builder send: a `###`-fenced header, then a body. */
-const HEADER = '### [ARCHITECT INSTRUCTION | 2026-09-01T11:49:41.619Z] ###';
-const FORMATTED = `${HEADER}\nplease review the plan\n###############################`;
+/**
+ * The real formatted shape of an architect→builder send, built by the PRODUCTION formatter
+ * rather than hand-written. The frame is not this suite's to invent: #1574 made every header
+ * self-attesting (`→ <recipient>`) and moved the reply hint onto the closing delimiter, and a
+ * hand-copied fixture would have gone on passing while the needle it models drifted away from
+ * the frame the delivery path actually writes. Deriving both from the formatter means a future
+ * frame change that breaks header matching fails HERE.
+ */
+const FORMATTED = formatArchitectToBuilderMessage('spir-1', 'please review the plan');
+const HEADER = FORMATTED.split('\n', 1)[0];
+/** The same header as claude re-renders it on submit: `###` fences consumed as a markdown H3. */
+const HEADER_AS_MARKDOWN = HEADER.replace(/^### /, '').replace(/ ###$/, '');
 
 const NOW = 1_000_000;
 
@@ -310,13 +320,18 @@ describe('#1573 echo needle', () => {
     // composer, then re-renders it markdown-stripped once submitted; codex keeps the fences.
     const needle = echoNeedle(FORMATTED);
     const claudeComposer = `❯ ${HEADER}`;
-    const claudeSubmitted = '  [ARCHITECT INSTRUCTION | 2026-09-01T11:49:41.619Z]';
-    const wrappedAcrossRows = '> ### [ARCHITECT INSTRUCTION |\n  2026-09-01T11:49:41.619Z] ###';
+    const claudeSubmitted = `  ${HEADER_AS_MARKDOWN}`;
+    const wrappedAcrossRows = `> ${HEADER.slice(0, 30)}\n  ${HEADER.slice(30)}`;
 
     expect(needle).not.toBe('');
     for (const rendered of [claudeComposer, claudeSubmitted, wrappedAcrossRows]) {
       expect(normalizeForEcho(rendered)).toContain(needle);
     }
+    // #1574's recipient segment is part of what gets matched: the arrow is punctuation and
+    // normalizes away, but the recipient NAME stays in the needle, so a frame delivered to the
+    // wrong agent could not satisfy the right agent's verification.
+    expect(HEADER).toContain('→ spir-1');
+    expect(needle).toContain(normalizeForEcho('spir-1'));
   });
 
   it('is the FIRST line, never the tail', () => {
@@ -357,7 +372,7 @@ describe('#1573 watchEchoOnScreen against a real screen mirror', () => {
     const screen = new SessionScreen(110, 32);
     const watch = await watchEchoOnScreen(sessionWithScreen(screen), NEEDLE);
 
-    screen.feed('  [ARCHITECT INSTRUCTION | 2026-09-01T11:49:41.619Z]\r\n  please review the plan\r\n');
+    screen.feed(`  ${HEADER_AS_MARKDOWN}\r\n  please review the plan\r\n`);
 
     await expect(watch.verify()).resolves.toBe(true);
     screen.dispose();
