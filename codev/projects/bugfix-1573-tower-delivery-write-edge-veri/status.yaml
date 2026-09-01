@@ -1,7 +1,7 @@
 id: bugfix-1573
 title: tower-delivery-write-edge-veri
 protocol: bugfix
-phase: fix
+phase: pr
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -11,4 +11,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-09-01T11:38:13.671Z'
-updated_at: '2026-09-01T11:54:00.822Z'
+updated_at: '2026-09-01T12:08:51.867Z'
