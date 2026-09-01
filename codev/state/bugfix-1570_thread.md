@@ -73,3 +73,32 @@ hot/cold-tier materialization, protocol-drift-audit, session-manager, …). All 
 `packages/codev/skeleton/`, which `pnpm build`'s `copy-skeleton` step creates. Verified
 pre-existing by reverting `arch.md` and re-running (same failures). After
 `pnpm --filter @cluesmith/codev build`: **0 failures, full suite green.**
+
+## PR (2026-08-31)
+
+[PR #1571](https://github.com/cluesmith/codev/pull/1571) — "Fix #1570: allow the cloud
+OAuth callback through Tower's local-key check". @amrmelsayed cc'd in the body per the
+architect's instruction, since #1421 is where the regression originates.
+
+**CMAP: gemini=APPROVE, codex=APPROVE, claude=APPROVE** (all HIGH confidence, no blocking
+issues). First dispatch of all three failed with "Multiple projects found" — from a builder
+worktree `consult --type pr` still needs `--project-id bugfix-1570`. Worth knowing; the
+phase prompt's example omits it.
+
+Claude's lane added two non-blocking notes, both recorded in the PR and neither acted on:
+
+1. The callback branch doesn't call `rejectIfProxied` the way `connect`/`disconnect` do.
+   Pre-existing, and doubly mitigated — I checked `lib/tunnel-client.ts:71`, where
+   `BLOCKED_PATH_SEGMENT = /(^|\/)api\/tunnel\//` refuses to proxy *any* `/api/tunnel/`
+   path inbound (normalized against `%2F` and dot segments), so the carve-out is
+   unreachable from the cloud side; the nonce gate holds regardless. Adding the call
+   would exceed the issue's scope, so it is flagged for @amrmelsayed's threat-model
+   read rather than changed.
+2. Manual E2E still needs a `@next` release. #1570 auto-closes on merge; the real OAuth
+   round-trip should be run against an installed Tower before it counts as done.
+
+Also verified by that lane: no parser differential between the auth check and the router
+(both `new URL(...)`, same normalization, neither percent-decodes), and no caller passes a
+custom `origin`, so exact-match is provably sufficient.
+
+Waiting at the `pr` gate.
