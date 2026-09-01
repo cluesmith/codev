@@ -72,6 +72,19 @@ describe('recipient in every delivered wrapper (#1574)', () => {
     expect(formatBuilderMessage('af-cron', 'main', body)).toContain('→ main');
   });
 
+  /**
+   * The type system requires `toAgent`, but required-and-empty renders
+   * `[BUILDER x MESSAGE →  | ts]` — a frame that looks self-attesting and attests
+   * to nothing. Refused rather than rendered: presence of a label is not presence
+   * of a value (`reorient.ts` states the same doctrine for its frame).
+   */
+  it('refuses to render a frame with an empty recipient', () => {
+    expect(() => formatArchitectToBuilderMessage('', body)).toThrow(/without a recipient/);
+    expect(() => formatBuilderMessage('af-cron', '', body)).toThrow(/without a recipient/);
+    expect(() => formatUserViaVsCodeMessage('', body)).toThrow(/without a recipient/);
+    expect(() => formatArchitectMessage('', body)).toThrow(/without a recipient/);
+  });
+
   it('leaves --raw sends unwrapped, so they gain no header', () => {
     expect(formatArchitectToBuilderMessage('bugfix-1574', body, undefined, true)).toBe(body);
     expect(formatBuilderMessage('bugfix-1574', 'main', body, undefined, true)).toBe(body);

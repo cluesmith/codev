@@ -61,6 +61,9 @@ describe('re-entry frame names the reply channel (#1574)', () => {
       context: makeContext(overrides),
       statePath: STATE_PATH,
       buildSpawnPrompt: spawnPromptPort,
+      // A porch lane refuses to assemble without its re-entry notice (R3), so the
+      // port is always supplied; the non-porch lane simply never calls it.
+      buildResumeNotice: () => '## RESUME SESSION\n\nRun `porch next`.\n',
     });
   }
 
@@ -75,8 +78,20 @@ describe('re-entry frame names the reply channel (#1574)', () => {
     expect(inline).toContain('afx send architect');
   });
 
-  it('states it on the bare task lane too — the lane with no porch prompts at all', () => {
-    const { inline } = assemble({ isBareTask: true, taskText: 'do a thing' });
+  it('states it on a porch lane too, which renders a different tail of the frame', () => {
+    // `buildInline` branches on `porch` for its closing step, and only there —
+    // exercising the bare-task flag would re-run the identical code path and
+    // document a branch that does not exist.
+    const { inline } = assemble({
+      porch: {
+        projectId: 'bugfix-1574',
+        projectName: '1574-self-attesting-frames',
+        protocol: 'bugfix',
+        phase: 'fix',
+        statusPath: '/ws/.builders/task-abc/codev/projects/1574-x/status.yaml',
+      } as ResolvedBuilderContext['porch'],
+    });
+    expect(inline).toContain('porch next');
     expect(inline).toContain('afx send architect');
   });
 });

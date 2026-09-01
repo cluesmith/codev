@@ -140,3 +140,34 @@ untouched — the best available evidence that the write path really is unchange
 the line count at 3 with the reason, so a future trailing-line "improvement" fails here rather
 than silently re-crossing the threshold. `FOOTER` is now a named constant carrying the same
 rationale.
+
+## PR + CMAP (2026-09-01)
+
+PR #1575. **CMAP: gemini=APPROVE, codex=APPROVE, claude=APPROVE** — all three HIGH confidence,
+no blocking issues. Claude's review independently verified the things worth verifying: no stale
+formatter callers anywhere in `packages/`, nothing downstream parses the frame, both reset lanes
+(`self.ts:792` and `index.ts:355`) route through `assembleReorientation` so the reply channel
+reaches self-refresh *and* architect-driven resets, and the skeleton mirror is already correct.
+
+Four non-blocking findings; acted on three, filed one.
+
+1. **`arch.md` paragraph scrambled — real, mine, fixed.** My paragraph split carried three #1494
+   sentences into the new #1574 paragraph, stranding "That third class exists…" from its
+   antecedent. Restored to the end of the #1494 paragraph.
+2. **Builder→builder sends carry a misdirecting reply hint.** `!isArchitectTarget` is *any* →
+   builder, so if builder A sends to builder B, B reads `(reply: afx send architect "…")` —
+   routing B's reply to B's architect, not back to A. Filed as **#1576**, with the analysis that
+   it is the same underlying gap as #1521 item 3 (the frame knows its recipient but not its
+   sender's kind) and the two are worth doing together. Not fixed here: it needs sender-identity
+   work in `commands/send.ts`, a #1573 file.
+3. **`toAgent` type-required but not runtime-validated — fixed.** `formatBuilderMessage('x', '',
+   body)` rendered `[BUILDER x MESSAGE →  | ts]`: a frame that looks self-attesting and attests
+   to nothing, which is exactly the defect class this lane closes. `recipient()` now throws.
+   Checked the blast radius before adding it: `handleRequest` wraps route dispatch in a
+   try/catch → 500, and formatting happens BEFORE `enqueueMailbox`, so an empty recipient fails
+   loudly to the sender rather than persisting or delivering a bogus frame. Matches the repo's
+   fail-fast-no-fallbacks rule and the doctrine `reorient.ts:176` already states.
+4. **Test nit — fixed.** The "bare task lane" case re-ran the identical unconditional
+   `lines.push`; `buildInline` has no bare-task branch, so the test documented a branch that
+   does not exist. Replaced with a porch-lane case, which does exercise a different tail of the
+   frame (and needs `buildResumeNotice`, or R3 refuses to assemble).

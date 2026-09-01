@@ -13,8 +13,24 @@
  * optional: a frame that silently omits the recipient is exactly the defect.
  */
 
-/** Recipient segment of a header. Kept in one place so all variants agree. */
+/**
+ * Recipient segment of a header. Kept in one place so all variants agree.
+ *
+ * Empty is REFUSED, not rendered. The type system requires `toAgent`, but a
+ * required-and-empty string yields `[BUILDER x MESSAGE →  | ts]` — a frame that
+ * looks self-attesting and attests to nothing, which is the very defect class
+ * #1574 exists to close. Same doctrine `reorient.ts` states for its frame:
+ * presence of a label is not presence of a value. Throwing surfaces as a 500 to
+ * the sender via `handleRequest`'s catch, BEFORE the row is enqueued — a loud
+ * failure, never a bogus frame persisted or delivered.
+ */
 function recipient(toAgent: string): string {
+  if (!toAgent) {
+    throw new Error(
+      'Cannot format a delivered message frame without a recipient. ' +
+        'A frame that names no recipient cannot be verified by the agent reading it (#1574).',
+    );
+  }
   return ` → ${toAgent}`;
 }
 
