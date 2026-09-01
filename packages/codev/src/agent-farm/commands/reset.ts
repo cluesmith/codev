@@ -18,7 +18,7 @@
 import { existsSync, readFileSync, readdirSync, writeFileSync, statSync } from 'node:fs';
 import { TowerClient } from '../lib/tower-client.js';
 import { logger, fatal } from '../utils/logger.js';
-import { MAX_MESSAGE_BYTES } from '../utils/message-format.js';
+import { MAX_MESSAGE_BYTES, messageLimitError } from '../utils/message-format.js';
 import { findBuilderById } from '../lib/builder-lookup.js';
 import { getConfig } from '../utils/index.js';
 import { loadConfig } from '../../lib/config.js';
@@ -230,6 +230,11 @@ function buildTerminalPort(
       return { exists: true, lastDataAt: t.lastDataAt, writable: t.writable };
     },
     async sendMessage(message: string) {
+      // Issue #1573: the route now refuses an over-limit body, and this command's prompt
+      // carries the `--file` addendum inside it — so the total, not just the file, has to be
+      // checked, and it is better checked here than discovered as a 400.
+      const tooLarge = messageLimitError(message);
+      if (tooLarge) throw new Error(tooLarge);
       const result = await client.sendMessage(target, message, {
         from,
         workspace,
@@ -247,6 +252,8 @@ function buildTerminalPort(
      * verified manual recipe used.
      */
     async sendRaw(text: string) {
+      const tooLarge = messageLimitError(text);
+      if (tooLarge) throw new Error(tooLarge);
       const result = await client.sendMessage(target, text, {
         from,
         workspace,

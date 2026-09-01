@@ -17,7 +17,7 @@ import { loadState } from '../state.js';
 import { getGlobalDbPath } from '../db/index.js';
 import { normalizeWorkspacePath } from '../utils/workspace-path.js';
 import { TowerClient } from '../lib/tower-client.js';
-import { MAX_MESSAGE_BYTES, messageTooLargeError } from '../utils/message-format.js';
+import { MAX_MESSAGE_BYTES, messageLimitError } from '../utils/message-format.js';
 
 /**
  * `--file` attachment cap. One constant with the message-body ceiling (Issue #1573): the file's
@@ -311,10 +311,8 @@ export async function send(options: SendOptions): Promise<void> {
   // Mirror Tower's body ceiling here (Issue #1573) so the refusal is local, immediate and
   // identically worded, instead of a 400 the user has to interpret. Checked AFTER the --file
   // append because that content travels in the same body and counts against the same limit.
-  const bodyBytes = Buffer.byteLength(message, 'utf8');
-  if (bodyBytes > MAX_MESSAGE_BYTES) {
-    fatal(messageTooLargeError(bodyBytes));
-  }
+  const tooLarge = messageLimitError(message);
+  if (tooLarge) fatal(tooLarge);
 
   logger.header('Sending Instruction');
 

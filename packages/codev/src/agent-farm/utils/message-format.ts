@@ -33,6 +33,18 @@ export function messageTooLargeError(bytes: number): string {
 }
 
 /**
+ * The over-limit error for `message`, or null when it is within the ceiling (Issue #1573).
+ *
+ * The one place the byte count and the ceiling meet, so every local boundary that sends a body
+ * — `afx send`, `afx refresh`'s prompt + `--file` addendum — fails the same way with the same
+ * wording, instead of some of them discovering the limit as a 400 from the route.
+ */
+export function messageLimitError(message: string): string | null {
+  const bytes = Buffer.byteLength(message, 'utf8');
+  return bytes > MAX_MESSAGE_BYTES ? messageTooLargeError(bytes) : null;
+}
+
+/**
  * Format a message from the architect to a builder.
  * Wraps in a structured header/footer unless raw mode is requested.
  */

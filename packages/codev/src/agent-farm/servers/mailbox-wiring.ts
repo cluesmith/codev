@@ -223,10 +223,16 @@ async function countEchoOnScreen(screen: SessionScreen, needle: string): Promise
  * A session with no mirror has produced no output and therefore cannot echo anything, so its
  * watch verifies `false` rather than passing.
  *
- * Known residual, deliberately not designed around: a harness on the ALTERNATE screen buffer
- * has no scrollback, so a message longer than one viewport can scroll its header out of reach
- * and fail to confirm — the agy profile boots into the alternate buffer and was not measurable
- * here (unauthenticated). The consequence is a redelivery, never a dropped message.
+ * Known residuals, all of which fail in the SAFE direction (a redelivery, never a dropped
+ * message), and none of which are designed around here:
+ *   - a harness on the ALTERNATE screen buffer has no scrollback, so a message longer than one
+ *     viewport can scroll its header out of reach and never confirm. The agy profile boots into
+ *     the alternate buffer and was not measurable here (unauthenticated).
+ *   - a very long write can evict the pre-write copy from the 1000-line mirror, so the count
+ *     comes back equal rather than greater and a genuine delivery reads as unconfirmed.
+ *   - an unconfirmed delivery re-reads and re-normalizes the retained buffer once per poll
+ *     while the `afx send` request waits. Bounded by the timeout, and off the happy path
+ *     entirely — the measured case confirms on the first read.
  */
 export async function watchEchoOnScreen(session: DeliverySession, needle: string): Promise<EchoWatch> {
   const screen = (session as PtySession).gateScreen;

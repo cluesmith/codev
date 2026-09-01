@@ -181,3 +181,26 @@ NEVER confirms (alt-screen harness with a body longer than the viewport) — esc
 visibility but nothing stops the rewrite loop, worth a follow-up issue; and messages whose
 normalized first line is under 12 characters skip verification entirely, keeping the old
 behaviour rather than a rubber stamp.
+
+### 2026-09-01 — CMAP round 2
+
+gemini=APPROVE, codex=APPROVE (flipped — the stale-evidence hole is closed, no remaining
+issues), claude=COMMENT with five findings. Addressed:
+
+- **Unbounded redelivery** (claude's headline; "bound it or file the follow-up before merge").
+  Filed **#1578**. Not bounded here: the issue owner prescribed hold-on-absence explicitly,
+  and every way to bound it means either a new mailbox column or accepting a false delivery
+  after N attempts — a decision that belongs to whoever owns that trade, not to this bugfix.
+  Claude is right that the "escalation makes it loud, not a loop" premise does not survive
+  contact with the drainer: `markEscalated` sets a flag and fires an SSE event, it does not
+  stop redelivery.
+- **`afx refresh --file` near 48KB would now fail as a route 400** — real regression I
+  introduced by unifying the constant. Added a shared `messageLimitError` helper and called it
+  in reset's `sendMessage`/`sendRaw` ports, so the refusal is local and identically worded.
+  `send.ts` now uses the same helper instead of its own inline byte count.
+- **Stale `{@link DeliveryPorts.verifyEcho}`** doc link → `watchEcho`. **PR body said 16
+  tests, file has 18** → corrected.
+- **Count false-negative when a long write evicts the earlier copy** from the 1000-line mirror,
+  and **re-normalizing the buffer once per poll** while the request waits: both documented at
+  the binding as residuals. Both fail in the safe direction (a redelivery), and the second is
+  off the happy path entirely — the measured case confirms on the first read.

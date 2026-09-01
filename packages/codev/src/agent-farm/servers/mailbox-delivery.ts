@@ -389,7 +389,7 @@ export function normalizeForEcho(text: string): string {
 }
 
 /**
- * The needle {@link DeliveryPorts.verifyEcho} looks for: the formatted message's FIRST line,
+ * The needle {@link DeliveryPorts.watchEcho} opens on: the formatted message's FIRST line,
  * normalized. Returns `''` when it is too short to be distinctive (see
  * {@link MIN_ECHO_NEEDLE_LENGTH}), which the caller reads as "skip verification".
  *
