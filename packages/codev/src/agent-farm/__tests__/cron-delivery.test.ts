@@ -34,6 +34,7 @@ function fakeSession(): DeliverySession {
   return {
     id: 'term-1',
     bytesWritten: 0,
+    lastDataAt: 0,
     info: { cols: 110, rows: 32 },
     command: 'claude',
     launchArgs: [],
@@ -95,6 +96,7 @@ function harness(): Harness {
       },
       onEscalation: () => {},
       onLiveness: () => {},
+      watchEcho: () => Promise.resolve({ verify: () => Promise.resolve(true) }),
       log: (m) => logs.push(m),
       now: () => h.now,
     },

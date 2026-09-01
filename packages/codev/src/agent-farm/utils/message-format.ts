@@ -14,6 +14,45 @@
  */
 
 /**
+ * Hard ceiling on a single message BODY, in bytes (Issue #1573).
+ *
+ * Nothing between the CLI flag and the PTY bytes bounded message size before this: only
+ * the generic 1 MiB HTTP body cap and the `--file` attachment cap. A body far past what a
+ * composer can absorb is exactly the shape that arrived truncated in #1564 (a ~1,900-char
+ * send landing as its final ~30 chars) — and it did so while the sender read
+ * `[ok] Message delivered`. So the limit is enforced LOUDLY at both boundaries (the CLI,
+ * so the failure is local and immediate, and `POST /api/send`, because the route is
+ * public) and the message is NEVER silently truncated.
+ *
+ * The value matches the pre-existing `--file` attachment bound rather than inventing a
+ * second number: `--file` content is appended to the body, so one shared ceiling is the
+ * only way the two cannot disagree.
+ */
+export const MAX_MESSAGE_BYTES = 48 * 1024;
+
+/** The over-limit error text, shared by the CLI precheck and the route (one wording). */
+export function messageTooLargeError(bytes: number): string {
+  return (
+    `Message body is ${bytes} bytes, over the ${MAX_MESSAGE_BYTES}-byte (48KB) limit. ` +
+    `A body this large cannot be typed into an agent's composer reliably — it is refused ` +
+    `rather than silently truncated. Split it into smaller sends, or write it to a file ` +
+    `and send the path for the agent to read.`
+  );
+}
+
+/**
+ * The over-limit error for `message`, or null when it is within the ceiling (Issue #1573).
+ *
+ * The one place the byte count and the ceiling meet, so every local boundary that sends a body
+ * — `afx send`, `afx refresh`'s prompt + `--file` addendum — fails the same way with the same
+ * wording, instead of some of them discovering the limit as a 400 from the route.
+ */
+export function messageLimitError(message: string): string | null {
+  const bytes = Buffer.byteLength(message, 'utf8');
+  return bytes > MAX_MESSAGE_BYTES ? messageTooLargeError(bytes) : null;
+}
+
+/**
  * Recipient segment of a header. Kept in one place so all variants agree.
  *
  * Empty is REFUSED, not rendered. The type system requires `toAgent`, but a

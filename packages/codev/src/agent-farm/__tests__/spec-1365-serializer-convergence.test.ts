@@ -464,6 +464,7 @@ function sessionFor(session: { id: string; write(d: string): boolean }): Deliver
   return {
     id: session.id,
     bytesWritten: 0,
+    lastDataAt: 0,
     info: { cols: 110, rows: 32 },
     command: 'claude',
     launchArgs: [],
@@ -484,6 +485,7 @@ function livePorts(sessions: Map<string, DeliverySession>, log: string[] = []): 
     onHeldStateChange: () => {},
     onEscalation: () => {},
     onLiveness: () => {},
+    watchEcho: () => Promise.resolve({ verify: () => Promise.resolve(true) }),
     log: (m) => log.push(m),
     now: () => 1000,
   };

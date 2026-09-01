@@ -151,6 +151,7 @@ describe('Spec 1470 — automatic re-entry delivery', () => {
     function portsWith(verdict: GateVerdict, writes: string[]): DeliveryPorts {
       const session = {
         bytesWritten: 1,
+        lastDataAt: 0,
         info: { cols: 80, rows: 24 },
         command: 'claude',
         launchArgs: [],
@@ -168,6 +169,7 @@ describe('Spec 1470 — automatic re-entry delivery', () => {
           return true;
         },
         broadcast: () => {},
+        watchEcho: () => Promise.resolve({ verify: () => Promise.resolve(true) }),
         log: () => {},
         onHeldStateChange: () => {},
         onEscalation: () => {},

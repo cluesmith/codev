@@ -15,10 +15,11 @@
 import { homedir } from 'node:os';
 import { loadConfig } from '../../lib/config.js';
 import { terminalDeliverySignals, type PtySession } from '../../terminal/pty-session.js';
+import type { SessionScreen } from '../../terminal/session-screen.js';
 import { getWorkspaceTerminals, getTerminalManager } from './tower-terminals.js';
 import { broadcastMessage, resolveAgentInRegistry, isResolveError } from './tower-messages.js';
 import { submitMessagePaced } from './message-write.js';
-import { classifyBuffer, type GateProfile, type GateVerdict } from './render-gate.js';
+import { bufferLines, classifyBuffer, type GateProfile, type GateVerdict } from './render-gate.js';
 import { resolveProfile } from './gate-profiles.js';
 import {
   buildContextFsPort,
@@ -32,6 +33,8 @@ import { supersede as supersedeMailbox, dismissHeldWithKey, NOTICE_SUPERSEDE_PRE
 import path from 'node:path';
 import {
   MailboxDrainer,
+  normalizeForEcho,
+  type EchoWatch,
   type DeliveryPorts,
   type DeliverySession,
   type DeliveredBroadcast,
@@ -176,6 +179,77 @@ export async function classifyAgentScreen(session: DeliverySession, profile: Gat
   return classifyBuffer(term, cols, rows, profile);
 }
 
+/**
+ * How long {@link watchEchoOnScreen}'s verification waits for a delivered message's header to
+ * show up, and how often it re-reads while waiting (Issue #1573).
+ *
+ * Measured 2026-09-01 against live claude and codex PTYs: the header is on screen from the
+ * first sample after the write completes (the composer echoes it as it is typed, before the
+ * Enter that submits it), and remains present at every sample out to +5 s. The budget is
+ * therefore slack for a loaded machine, not the expected cost — the common case returns on the
+ * first read with no added latency. It is bounded because the `afx send` request path awaits
+ * this before answering the sender.
+ */
+const ECHO_VERIFY_TIMEOUT_MS = 600;
+const ECHO_VERIFY_POLL_MS = 50;
+
+/**
+ * How many times `needle` appears in the session's rendered mirror right now.
+ *
+ * A COUNT rather than a boolean because presence alone is not evidence (CMAP round 1 — codex):
+ * a previous delivery attempt's echo sits in the same scrollback, so "the header is on screen"
+ * would certify a retry whose bytes the composer swallowed. Comparing against a pre-write
+ * sample is what ties the evidence to the write that is being judged.
+ *
+ * Reads the SAME `SessionScreen` the render gate classifies, so verification and gating can
+ * never disagree about what the terminal shows, and scans its full retained buffer rather than
+ * the viewport — a long message scrolls its own header into scrollback while it types.
+ */
+async function countEchoOnScreen(screen: SessionScreen, needle: string): Promise<number> {
+  const { term } = await screen.read();
+  const text = normalizeForEcho(bufferLines(term).join('\n'));
+  let count = 0;
+  for (let at = text.indexOf(needle); at !== -1; at = text.indexOf(needle, at + needle.length)) count++;
+  return count;
+}
+
+/**
+ * Open an echo watch on a session (Issue #1573) — the live binding for
+ * {@link DeliveryPorts.watchEcho}.
+ *
+ * Samples the terminal BEFORE the write, then `verify()` polls until the needle appears MORE
+ * often than it did in that sample. New evidence, not mere presence.
+ *
+ * A session with no mirror has produced no output and therefore cannot echo anything, so its
+ * watch verifies `false` rather than passing.
+ *
+ * Known residuals, all of which fail in the SAFE direction (a redelivery, never a dropped
+ * message), and none of which are designed around here:
+ *   - a harness on the ALTERNATE screen buffer has no scrollback, so a message longer than one
+ *     viewport can scroll its header out of reach and never confirm. The agy profile boots into
+ *     the alternate buffer and was not measurable here (unauthenticated).
+ *   - a very long write can evict the pre-write copy from the 1000-line mirror, so the count
+ *     comes back equal rather than greater and a genuine delivery reads as unconfirmed.
+ *   - an unconfirmed delivery re-reads and re-normalizes the retained buffer once per poll
+ *     while the `afx send` request waits. Bounded by the timeout, and off the happy path
+ *     entirely — the measured case confirms on the first read.
+ */
+export async function watchEchoOnScreen(session: DeliverySession, needle: string): Promise<EchoWatch> {
+  const screen = (session as PtySession).gateScreen;
+  if (!screen) return { verify: () => Promise.resolve(false) };
+  const before = await countEchoOnScreen(screen, needle);
+  return {
+    verify: async (): Promise<boolean> => {
+      const deadline = Date.now() + ECHO_VERIFY_TIMEOUT_MS;
+      for (;;) {
+        if (await countEchoOnScreen(screen, needle) > before) return true;
+        if (Date.now() >= deadline) return false;
+        await new Promise((resolve) => setTimeout(resolve, ECHO_VERIFY_POLL_MS));
+      }
+    },
+  };
+}
+
 /** Convert a delivered-message frame to the WebSocket bus shape and broadcast it. */
 function broadcastDelivered(frame: DeliveredBroadcast): void {
   broadcastMessage({
@@ -204,6 +278,9 @@ export function makeDeliveryPorts(log: LogFn): DeliveryPorts {
     // `--interrupt`/`--escape` can no longer interleave. The precheck is the delivery
     // module's, re-run inside that lock.
     writeMessage: (session, msg, noEnter, precheck) => submitMessagePaced(session, msg, noEnter, precheck),
+    // Issue #1573: the only end-to-end evidence that the bytes reached the terminal — opened
+    // before the write, consulted before the row is marked delivered.
+    watchEcho: (session, needle) => watchEchoOnScreen(session, needle),
     broadcast: (frame) => broadcastDelivered(frame),
     onHeldStateChange: () => broadcastHeldStateChange(),
     onEscalation: (info) => broadcastEscalation(info),
