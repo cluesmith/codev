@@ -1,5 +1,18 @@
 # Change Log
 
+## [3.3.2] - 2026-09-02
+
+### What's new
+
+- **Flagging for review now asks what you want to say.** The flag-file, flag-hunk and flag-selection gestures open VS Code's native inline comment box at the anchor instead of silently recording a canned placeholder note. Type your feedback and submit — in comment mode it joins the review queue, in forward mode it goes straight to the builder's terminal with the reference attached; the button is labelled for whichever will happen. Cancelling or submitting nothing leaves nothing behind. The same mode-awareness applies wherever you author a builder comment: forward mode delivers on submit, comment mode queues.
+- **The Codev panel's Attention view shows real workspace state.** The contextual panel's fallback view — what you see when no specific document, diff, or terminal is focused — now renders live data instead of a placeholder: pending gates with how long each has waited, held mail (including escalations), and queued review feedback that hasn't been sent yet. It updates as the workspace changes, and says plainly when nothing needs attention.
+- **A contextual `Codev` bottom-panel tab that follows your focus.** One panel tab, purely contextual: open a spec, plan, or review and it shows Document Review context; focus a builder's diff and it becomes that builder's Code Review; focus a builder's terminal and it becomes that builder's Inspector; otherwise it falls back to a "what needs my attention" view. There is nothing to pin, navigate, or persist — the sidebar remains the home of cross-builder navigation, and the panel simply mirrors what you are looking at, snapping the moment your focus changes. This release ships the panel surface, the context resolver, and the switching; each mode's rich content arrives with its own feature (#1037 review comments, #859/#945 markers, #1553 attention roll-up). The old empty "Codev" placeholder tab is retired.
+- **The dev status-bar chip now reveals the dev terminal.** The chip shown while a dev process runs opens the running dev terminal on click. The separate "Codev Dev" panel view is removed — the terminal itself is the surface, and the chip is how you reach it.
+
+### Fixes
+
+- **Forwarding a hunk works where your cursor actually is.** Pressing forward-hunk or queueing hunk feedback no longer errors "place the cursor in a changed hunk" while the cursor is visibly inside a change. The press now checks the builder's current diff at the moment you press — not a snapshot from when the diff was opened — so a builder committing more work no longer invalidates your cursor, and deletion-only changes degrade gracefully instead of erroring. When nothing changed sits at the cursor, the press forwards the whole file with a note saying so. Forward-hunk still forwards exactly the changed lines; `Cmd/Ctrl+K H` keeps its forward-the-symbol behaviour, now also against a fresh diff.
+
 ## [3.3.1] - 2026-08-18
 
 ### What's new
