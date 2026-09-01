@@ -228,3 +228,20 @@ That is the real lesson from this rebase: my hand-copied `### [ARCHITECT INSTRUC
 would have kept passing while the frame it modelled drifted away from what the delivery path
 writes. Deriving it means the next frame change fails in this suite instead of in the field.
 Added an explicit assertion that the recipient segment reaches the needle.
+
+### 2026-09-01 — merged and closed out
+
+PR #1577 admin-merged as `ff684153b` at 12:48Z (GitHub blocked a formal review because the
+architect account authored the branch; the review is a PR comment instead). Recorded with
+`porch done --merged 1577`; project is at `verified`.
+
+Closeout per the architect:
+- Completion stats posted on #1573.
+- #1564 and #1521 left **OPEN** with comments explaining which change addresses each and what
+  field evidence should close them. Neither is verified by a reproduction of the original
+  failure — only by tests — so closing them now would be claiming more than was demonstrated.
+- One stranded porch commit for the records PR: `5d717a278` (`chore(porch): bugfix-1573 PR
+  #1577 merged`) — the status.yaml transition porch wrote after the merge, so it could not have
+  ridden the PR.
+
+Total: 70 minutes, one iteration, no rollbacks, 2 CMAP rounds.
