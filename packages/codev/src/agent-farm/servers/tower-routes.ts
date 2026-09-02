@@ -60,7 +60,7 @@ import {
 import type { PtySession } from '../../terminal/pty-session.js';
 import { writeMessageToSession, writeEscapeToSession } from './message-write.js';
 import { makeDeliveryPorts, getMailboxDrainer } from './mailbox-wiring.js';
-import { deliverAgentMailSerialized, type DeliveryPorts } from './mailbox-delivery.js';
+import { deliverAgentMailSerialized, type DeliveryOutcome, type DeliveryPorts } from './mailbox-delivery.js';
 import { deliverCronMail, CRON_SENDER, type CronDeliveryResult } from './cron-delivery.js';
 import {
   enqueue as enqueueMailbox,
@@ -2199,8 +2199,12 @@ async function handleSend(
     getSessionForAgent: (ws, agent) =>
       ws === result.workspacePath && agent === toAgent ? session : basePorts.getSessionForAgent(ws, agent),
   };
+  // Issue #1584: keep the outcome — it carries whether the delivered message's header was
+  // actually seen on the receiving terminal, which is the only thing the sender can act on now
+  // that an unconfirmed delivery is recorded rather than re-written.
+  let outcome: DeliveryOutcome | null = null;
   try {
-    await deliverAgentMailSerialized(ports, db, result.workspacePath, toAgent);
+    outcome = await deliverAgentMailSerialized(ports, db, result.workspacePath, toAgent);
   } catch (err) {
     // A gate/write error leaves the row HELD (markDelivered only runs on a
     // completed write); the backstop drainer will retry. Report held, not a 500.
@@ -2219,6 +2223,11 @@ async function handleSend(
       mailboxId: row.id,
       reason: null,
       bodyLength,
+      // Additive (Issue #1584). Present only when this request's own delivery pass ran the echo
+      // check: `false` means the bytes were written and accepted but the header never appeared
+      // on the terminal — delivered, flagged, and NOT re-written. Absent (verification skipped,
+      // or another pass delivered the row) reads as it always did.
+      ...(outcome?.verified === undefined ? {} : { verified: outcome.verified }),
     });
     return;
   }

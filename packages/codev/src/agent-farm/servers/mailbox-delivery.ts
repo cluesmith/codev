@@ -237,7 +237,12 @@ export interface DeliveryPorts {
    * a silent loss.
    */
   watchEcho(session: DeliverySession, needle: string): Promise<EchoWatch>;
-  log(message: string): void;
+  /**
+   * Tower log line. `level` defaults to `INFO`; the delivery path passes `WARN` for the one
+   * case an operator must be able to find after the fact — a delivery whose echo never
+   * confirmed (Issue #1584), which is recorded as delivered rather than re-written.
+   */
+  log(message: string, level?: 'INFO' | 'WARN'): void;
   now(): number;
 }
 
@@ -292,6 +297,19 @@ export interface DeliveryOutcome {
   delivered: string[];
   /** When nothing was delivered, why the agent's mail stays held; null if delivered or the mailbox was empty. */
   reason: MailboxReason | null;
+  /**
+   * Issue #1584: whether the delivered message's header was actually SEEN on the receiving
+   * terminal. Present only when a delivery happened AND the message had a needle worth
+   * matching ({@link echoNeedle}) — `true` when the echo confirmed, `false` when it did not.
+   * Absent means verification was skipped (a body with no distinctive first line) or nothing
+   * was delivered, and reads exactly as it did before this field existed.
+   *
+   * A `false` is "could not confirm", never "definitely lost". The row is delivered and
+   * flagged `escalated` either way, because a completed write must never be re-written — the
+   * #1573 hold-and-redeliver it replaces is what re-injected one message dozens of times
+   * (#1583). This field is how the sender is told, instead.
+   */
+  verified?: boolean;
   /**
    * The gate's internal detail when a `busy` hold came from the render-gate (Spec 1313
    * render-gate hardening) — telemetry only. Distinguishes a legitimately-occupied line
@@ -681,23 +699,46 @@ export async function deliverAgentMail(
     return hold(result.abort.reason);
   }
 
-  // The write completed — every byte, Enter included, was accepted by the session. That is
-  // still only proof the bytes were QUEUED (Issue #1573): `session.write` reports true whenever
-  // the socket object is connected, so a composer that ate the leading bytes (#1564) lands here
-  // looking identical to a clean delivery. Ask the screen before claiming success.
+  // THE POINT OF NO RETURN (Issue #1584). Past this line the write COMPLETED — every byte,
+  // Enter included, was accepted by the session — so the row is at-least-once delivered and
+  // must NEVER be written again. Nothing below may `hold(...)`: a hold puts the row back in
+  // the drainer's held set, and the next clean-prompt pass re-writes the WHOLE message with
+  // no attempt cap anywhere in this module. That is exactly what #1583 saw in the field —
+  // one `afx send --file` re-injected dozens of times, byte-identical, silently (a `busy`
+  // hold is excluded from {@link isClassifierStuck}, so no streak ever escalates it).
   //
-  // A `false` here is "could not confirm", so the row is HELD, not dropped: the existing
-  // redelivery machinery retries it on a later clean gate, and the escalation path already makes
-  // a row that never confirms visible. That inverts the failure this issue exists to remove —
-  // the worst case becomes a duplicate delivery the agent can see, instead of a silent loss the
-  // sender was told was a success.
-  if (echo && !(await echo.verify())) {
-    ports.log(
-      `[mailbox] write to ${toAgent} @ ${path.basename(workspacePath)} completed but its header ` +
-        `never appeared on the terminal — holding ${row.id.slice(0, 8)}… for redelivery rather ` +
-        `than reporting it delivered`,
-    );
-    return hold('busy');
+  // Only PRE-write prechecks may hold, and every hold above this point is one: the branches
+  // between the write and here wrote NOTHING (`contended`, `aborted`) or produced a write that
+  // cannot be trusted to have landed (`dropped` — bytes lost mid-pace to a dead socket;
+  // `preempted` — an unserialized operator submission may have cleared or truncated the
+  // composer under them). Only `written` reaches this line, and only `written` is the
+  // at-least-once guarantee that forbids a re-write.
+  //
+  // Echo verification (Issue #1573) still runs — it is the only end-to-end evidence the bytes
+  // reached the terminal — but its answer now decides what we TELL people, not whether we
+  // write again. `false` means "could not confirm", never "definitely lost": the honest
+  // response is to record the delivery, flag it, and say so to the sender.
+  let verified: boolean | undefined;
+  if (echo) {
+    // One bounded RE-verify window before giving up. `verify()` polls to its own deadline and
+    // then answers false; a second call opens a fresh window against the SAME pre-write sample,
+    // so it still requires evidence THIS write produced. It accommodates a slow renderer
+    // without writing a single byte, and the total stays inside the sender's patience (~1.5 s)
+    // because the request path awaits this.
+    verified = (await echo.verify()) || (await echo.verify());
+    if (!verified) {
+      // Not a hold — a flagged delivery. The `escalated` column is set while the row is still
+      // `held` (markEscalated is held-only) so it survives onto the delivered row, and the
+      // sender is told via `verified: false` in the send response.
+      markEscalated(db, row.id, ports.now());
+      ports.log(
+        `[mailbox] delivered-unverified ${row.id.slice(0, 8)}… → ${toAgent} @ ` +
+          `${path.basename(workspacePath)} (terminal ${session.id}, needle ${needle.length} chars): ` +
+          `the write completed but its header never appeared on the terminal. Recorded as ` +
+          `delivered and flagged — NOT re-written (Issue #1584).`,
+        'WARN',
+      );
+    }
   }
 
   // markDelivered is guarded (held→delivered only). If it did NOT transition, the row
@@ -710,7 +751,7 @@ export async function deliverAgentMail(
   ports.broadcast(broadcastForRow(current, ports.now()));
   ports.onHeldStateChange(); // a held row left the set → refresh the indicator count
   ports.log(`[mailbox] delivered ${row.id} → ${toAgent} @ ${path.basename(workspacePath)}`);
-  return { delivered: [row.id], reason: null };
+  return { delivered: [row.id], reason: null, ...(verified === undefined ? {} : { verified }) };
 }
 
 /**

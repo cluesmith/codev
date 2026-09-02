@@ -189,6 +189,11 @@ export async function classifyAgentScreen(session: DeliverySession, profile: Gat
  * therefore slack for a loaded machine, not the expected cost — the common case returns on the
  * first read with no added latency. It is bounded because the `afx send` request path awaits
  * this before answering the sender.
+ *
+ * Issue #1584: the delivery path calls `verify()` at most TWICE (a second window for a slow
+ * renderer, no bytes written), so this constant is half the worst-case wait a sender sees —
+ * ~1.2 s. Raising it raises that, and the answer is no longer a retry decision: an unconfirmed
+ * delivery is recorded as delivered-unverified, never re-written.
  */
 const ECHO_VERIFY_TIMEOUT_MS = 600;
 const ECHO_VERIFY_POLL_MS = 50;
@@ -287,7 +292,7 @@ export function makeDeliveryPorts(log: LogFn): DeliveryPorts {
     onLiveness: (info) => surfaceLiveness(info, log),
     escalateHeldToOwner: (info) => escalateHeldToOwner(info, log),
     clearHeldOwnerNotice: (ws, agent) => clearHeldOwnerNotice(ws, agent),
-    log: (m) => log('INFO', m),
+    log: (m, level) => log(level ?? 'INFO', m),
     now: () => Date.now(),
   };
 }
