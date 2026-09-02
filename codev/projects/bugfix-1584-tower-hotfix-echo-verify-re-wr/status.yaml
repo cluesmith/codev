@@ -1,7 +1,7 @@
 id: bugfix-1584
 title: tower-hotfix-echo-verify-re-wr
 protocol: bugfix
-phase: pr
+phase: verified
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -13,5 +13,5 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-09-02T14:02:15.761Z'
-updated_at: '2026-09-02T16:14:11.495Z'
+updated_at: '2026-09-02T16:14:16.873Z'
 pr_ready_for_human: false
