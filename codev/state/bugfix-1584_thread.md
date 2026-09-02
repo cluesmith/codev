@@ -103,3 +103,40 @@ build: **5372 passed, 0 failed, 48 skipped** across 273 files.
 exited 0 without reviewing. `--project-id bugfix-1584` fixes it. Worth an issue if it recurs.
 
 CMAP verdicts: gemini=APPROVE (no issues, 12.8s). codex + claude pending.
+
+### CMAP round 1 — gemini=APPROVE, codex=REQUEST_CHANGES, claude=COMMENT
+
+Both non-approvals were correct. Fixed rather than rebutted.
+
+**codex #1 (critical, and I had missed it):** the point of no return was not DURABLE. The row
+stayed `held` in the database through up to ~1.2 s of verification, so a Tower crash/restart in
+that window — or an `echo.verify()` that *rejects* rather than answering — left it held and
+re-writable by the next tick. My item-3 audit had looked only for `hold(...)` calls and missed
+the throw path. Fix: `markDelivered` now runs **immediately** after `status === 'written'`,
+before any further await (better-sqlite3 is synchronous, so there is no window at all);
+verification is now pure reporting downstream of a committed delivery, and a rejection is caught
+and treated as unconfirmed.
+
+**codex #2:** the `escalated` flag reaches nobody. A *delivered* row is excluded from
+`heldSummaryForWorkspace`, `afx inbox` and the held-count indicator, so for a cron/backstop
+delivery the only trace was a log line. My earlier judgment call (don't fire `onEscalation`
+because its title says "held past escalation age") was right about the wording and wrong to stop
+there. Fix: a new optional `DeliveryPorts.onUnverifiedDelivery` port, bound to the same generic
+`notification` SSE channel `surfaceLiveness` uses, with truthful wording — "delivered but not
+confirmed on screen … will NOT be sent again".
+
+Required a delivered-only `markEscalatedDelivered` in `db/mailbox.ts`: the ordering fix means
+the verdict is known only after the row has left `held`, where the existing held-only
+`markEscalated` would silently no-op. Added as a separate function rather than relaxing
+`markEscalated`'s guard, which is what makes the drainer's escalation pass safe to call blindly.
+
+**claude (COMMENT), all real:** three doc blocks left behind now asserted the *inverted* safety
+property — `watchEcho` and `EchoWatch.verify` in `mailbox-delivery.ts` still said the caller
+holds for redelivery ("a duplicate delivery instead of a silent loss"), and `watchEchoOnScreen`
+in `mailbox-wiring.ts` still called its residuals "safe (a redelivery, never a dropped
+message)". Those residuals ARE the #1583 trigger. All three rewritten. Its fourth point — issue
+item 4 was only covered indirectly — is now a direct test: 12 unverified deliveries in a row
+produce 12 writes and zero `onLiveness` calls (LIVENESS_STREAK_THRESHOLD is 10).
+
+Five new tests, three of which fail against the pre-CMAP commit (verified by swapping the module
+back in): commits-before-verifying, verify-throws, and the notice.

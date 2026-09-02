@@ -44,6 +44,7 @@ import {
   pruneTerminal,
   findEscalatable,
   markEscalated,
+  markEscalatedDelivered,
   findStarvingAgents,
 } from '../db/mailbox.js';
 import type { DbMailbox, MailboxReason } from '../db/types.js';
@@ -232,11 +233,30 @@ export interface DeliveryPorts {
    *
    * DELIBERATELY NARROW: presence of the header line, nothing else. No screen diffing, no
    * repair, no per-harness branches. A negative therefore means "could not confirm", not
-   * "definitely lost" — so the caller HOLDS the row for the existing redelivery machinery
-   * rather than dropping it, making the direction of error a duplicate delivery instead of
-   * a silent loss.
+   * "definitely lost".
+   *
+   * What the caller does with a negative CHANGED in Issue #1584: it no longer holds the row for
+   * redelivery. The bytes are already out, so a redelivery is a re-injection — and because the
+   * residuals below recur for the same message every time, holding produced an unbounded loop
+   * (#1583). The row is committed as delivered, flagged `escalated`, and reported to the sender
+   * as `verified: false`. This watch is evidence for a REPORT, never a retry decision.
    */
   watchEcho(session: DeliverySession, needle: string): Promise<EchoWatch>;
+  /**
+   * Raise a human-visible notice for a delivery whose write completed but whose echo never
+   * confirmed (Issue #1584). The row is marked `delivered` + `escalated`, and a DELIVERED row
+   * is invisible to every held-scoped surface — `afx inbox`, the held-count indicator,
+   * `heldSummaryForWorkspace` — so without this the only trace of an unconfirmed delivery is a
+   * log line. That is fine for an interactive `afx send` (the sender gets `verified: false`)
+   * and not fine for a cron or backstop delivery, which has no sender waiting.
+   *
+   * Deliberately NOT `onEscalation`: that event means "held past the escalation age" and its
+   * binding says so in its title, which would be a false statement about a delivered row.
+   *
+   * Metadata only (no message body), per the spec's redaction rule. OPTIONAL, so unit fakes
+   * that do not exercise it may omit it.
+   */
+  onUnverifiedDelivery?(info: UnverifiedDeliveryInfo): void;
   /**
    * Tower log line. `level` defaults to `INFO`; the delivery path passes `WARN` for the one
    * case an operator must be able to find after the fact — a delivery whose echo never
@@ -275,6 +295,19 @@ export interface LivenessInfo {
   toAgent: string;
   /** Consecutive not-clean (`no-profile`) checks at the moment the streak crossed the threshold. */
   streak: number;
+}
+
+/**
+ * Metadata for a delivery that completed its write but could not be confirmed on the receiving
+ * terminal (Issue #1584). Ids and addresses only — no message body, per the spec's redaction
+ * rule — since this rides the SSE bus to the dashboard's notification surface.
+ */
+export interface UnverifiedDeliveryInfo {
+  workspacePath: string;
+  toAgent: string;
+  mailboxId: string;
+  /** The terminal the bytes were written to, for correlating against its transcript. */
+  terminalId: string;
 }
 
 /**
@@ -363,7 +396,10 @@ export interface EchoWatch {
   /**
    * Did the message's header appear on the terminal as a result of the write this watch was
    * opened for? Bounded — it waits a short interval and then answers false, which the caller
-   * treats as "could not confirm" and holds.
+   * treats as "could not confirm" and REPORTS (Issue #1584): the row is delivered and flagged,
+   * never re-written. Callable more than once; each call opens a fresh window against the same
+   * pre-write sample, and the delivery path uses a second one to give a slow renderer more time
+   * without putting a byte on the line.
    */
   verify(): Promise<boolean>;
 }
@@ -714,36 +750,16 @@ export async function deliverAgentMail(
   // composer under them). Only `written` reaches this line, and only `written` is the
   // at-least-once guarantee that forbids a re-write.
   //
-  // Echo verification (Issue #1573) still runs — it is the only end-to-end evidence the bytes
-  // reached the terminal — but its answer now decides what we TELL people, not whether we
-  // write again. `false` means "could not confirm", never "definitely lost": the honest
-  // response is to record the delivery, flag it, and say so to the sender.
-  let verified: boolean | undefined;
-  if (echo) {
-    // One bounded RE-verify window before giving up. `verify()` polls to its own deadline and
-    // then answers false; a second call opens a fresh window against the SAME pre-write sample,
-    // so it still requires evidence THIS write produced. It accommodates a slow renderer
-    // without writing a single byte, and the total stays inside the sender's patience (~1.5 s)
-    // because the request path awaits this.
-    verified = (await echo.verify()) || (await echo.verify());
-    if (!verified) {
-      // Not a hold — a flagged delivery. The `escalated` column is set while the row is still
-      // `held` (markEscalated is held-only) so it survives onto the delivered row, and the
-      // sender is told via `verified: false` in the send response.
-      markEscalated(db, row.id, ports.now());
-      ports.log(
-        `[mailbox] delivered-unverified ${row.id.slice(0, 8)}… → ${toAgent} @ ` +
-          `${path.basename(workspacePath)} (terminal ${session.id}, needle ${needle.length} chars): ` +
-          `the write completed but its header never appeared on the terminal. Recorded as ` +
-          `delivered and flagged — NOT re-written (Issue #1584).`,
-        'WARN',
-      );
-    }
-  }
-
-  // markDelivered is guarded (held→delivered only). If it did NOT transition, the row
-  // was dismissed/superseded during the paced write — accept that terminal state and
-  // do not broadcast a delivery for it.
+  // COMMIT THE DELIVERY FIRST, before any further await or fallible call (CMAP round 1 — Codex).
+  // The point of no return is only real if it is DURABLE: while the row still reads `held` in
+  // the database it is re-writable by the next drainer tick, so leaving it held across ~1.2 s of
+  // verification would reopen the loop for any interruption of that window — a Tower crash or
+  // restart, or a `verify()` that rejects instead of answering. `markDelivered` is synchronous
+  // (better-sqlite3), so ordering it here leaves no window at all.
+  //
+  // markDelivered is guarded (held→delivered only). If it did NOT transition, the row was
+  // dismissed/superseded during the paced write — accept that terminal state and do not
+  // broadcast a delivery for it.
   if (!markDelivered(db, row.id, ports.now())) {
     ports.onHeldStateChange();
     return { delivered: [], reason: null };
@@ -751,6 +767,51 @@ export async function deliverAgentMail(
   ports.broadcast(broadcastForRow(current, ports.now()));
   ports.onHeldStateChange(); // a held row left the set → refresh the indicator count
   ports.log(`[mailbox] delivered ${row.id} → ${toAgent} @ ${path.basename(workspacePath)}`);
+
+  // Echo verification (Issue #1573) still runs — it is the only end-to-end evidence the bytes
+  // reached the terminal — but it is now pure REPORTING, downstream of a delivery that is
+  // already committed. `false` means "could not confirm", never "definitely lost".
+  let verified: boolean | undefined;
+  if (echo) {
+    // One bounded RE-verify window before giving up. `verify()` polls to its own deadline and
+    // then answers false; a second call opens a fresh window against the SAME pre-write sample,
+    // so it still requires evidence THIS write produced. It accommodates a slow renderer
+    // without writing a single byte, and the total stays inside the sender's patience (~1.5 s)
+    // because the request path awaits this.
+    //
+    // A REJECTION is unconfirmed, not an error to propagate: the bytes are out and the row is
+    // committed, so throwing here would only deny the sender the `verified` answer and log a
+    // spurious delivery failure.
+    try {
+      verified = (await echo.verify()) || (await echo.verify());
+    } catch (err) {
+      verified = false;
+      ports.log(`[mailbox] echo verification errored for ${row.id.slice(0, 8)}…: ${String(err)}`, 'WARN');
+    }
+    if (!verified) {
+      // The row is already `delivered`, so this is the delivered-only counterpart of the
+      // drainer's held-only `markEscalated`.
+      markEscalatedDelivered(db, row.id, ports.now());
+      ports.log(
+        `[mailbox] delivered-unverified ${row.id.slice(0, 8)}… → ${toAgent} @ ` +
+          `${path.basename(workspacePath)} (terminal ${session.id}, needle ${needle.length} chars): ` +
+          `the write completed but its header never appeared on the terminal. Recorded as ` +
+          `delivered and flagged — NOT re-written (Issue #1584).`,
+        'WARN',
+      );
+      // Raise it where a human will see it. The sender's `verified: false` covers an
+      // interactive `afx send`, but a cron or backstop delivery has no sender waiting on a
+      // response, and a DELIVERED row is invisible to every held-scoped surface (`afx inbox`,
+      // the held-count indicator) — without this its only trace is a log line (CMAP round 1 —
+      // Codex).
+      ports.onUnverifiedDelivery?.({
+        workspacePath,
+        toAgent,
+        mailboxId: row.id,
+        terminalId: session.id,
+      });
+    }
+  }
   return { delivered: [row.id], reason: null, ...(verified === undefined ? {} : { verified }) };
 }
 

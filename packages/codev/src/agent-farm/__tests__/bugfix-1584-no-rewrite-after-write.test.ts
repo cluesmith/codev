@@ -29,6 +29,8 @@ import {
   type DeliveryPorts,
   type DeliverySession,
   type DeliveredBroadcast,
+  type LivenessInfo,
+  type UnverifiedDeliveryInfo,
   type WriteAbort,
   type WriteResult,
 } from '../servers/mailbox-delivery.js';
@@ -60,6 +62,12 @@ interface Harness {
   echoVerified: boolean;
   /** How many times a watch's `verify()` was consulted, across all watches. */
   verifyCalls: number;
+  /** Unverified-delivery notices raised through the port. */
+  notices: UnverifiedDeliveryInfo[];
+  /** Liveness escalations raised through the port (must stay empty — issue item 4). */
+  liveness: LivenessInfo[];
+  /** The row's DB status at the moment `verify()` was first consulted. */
+  statusAtVerify: string | undefined;
 }
 
 function harness(): Harness {
@@ -80,6 +88,9 @@ function harness(): Harness {
     writes: [],
     echoVerified: false,
     verifyCalls: 0,
+    notices: [],
+    liveness: [],
+    statusAtVerify: undefined,
     ports: {
       getSessionForAgent: () => h.session,
       resolveProfile: () => PROFILE,
@@ -100,7 +111,8 @@ function harness(): Harness {
       broadcast: (f) => h.broadcasts.push(f),
       onHeldStateChange: () => {},
       onEscalation: () => {},
-      onLiveness: () => {},
+      onLiveness: (info) => h.liveness.push(info),
+      onUnverifiedDelivery: (info) => h.notices.push(info),
       log: (message, level) => h.logs.push({ message, level }),
       now: () => NOW,
     },
@@ -212,6 +224,107 @@ describe('#1584 a completed write is never re-written', () => {
     expect(out.delivered).toEqual([]);
     expect(h.writes).toEqual([]);
     expect(mailbox.getById(db, row.id)?.status).toBe('held');
+  });
+
+  /**
+   * DURABILITY of the point of no return (CMAP round 1 — Codex). Committing the row only AFTER
+   * verification would leave it `held` for up to ~1.2 s: a Tower crash or restart inside that
+   * window, and the next drainer tick re-writes the message. The commit must therefore precede
+   * every await that follows the write, which this pins by reading the row's status from the
+   * database at the instant `verify()` is first consulted.
+   */
+  it('commits the row to delivered BEFORE it starts verifying', async () => {
+    const h = harness();
+    const row = enqueue();
+    h.ports.watchEcho = () =>
+      Promise.resolve({
+        verify: () => {
+          h.verifyCalls++;
+          h.statusAtVerify ??= mailbox.getById(db, row.id)?.status;
+          return Promise.resolve(false);
+        },
+      });
+
+    await deliverAgentMail(h.ports, db, '/ws/a', 'spir-1');
+
+    expect(h.statusAtVerify).toBe('delivered');
+  });
+
+  it('treats a verification that THROWS as unconfirmed, not as a delivery failure', async () => {
+    // A rejection used to propagate out of the delivery pass, leaving the row `held` — the same
+    // re-writable state the hold did. The bytes are already out, so the only honest answer is
+    // "could not confirm".
+    const h = harness();
+    h.ports.watchEcho = () =>
+      Promise.resolve({ verify: () => Promise.reject(new Error('screen read failed')) });
+    const row = enqueue();
+
+    const out = await deliverAgentMail(h.ports, db, '/ws/a', 'spir-1');
+
+    expect(out).toEqual({ delivered: [row.id], reason: null, verified: false });
+    const stored = mailbox.getById(db, row.id);
+    expect(stored?.status).toBe('delivered');
+    expect(stored?.escalated).toBe(1);
+    expect(h.logs.some((l) => l.level === 'WARN' && l.message.includes('screen read failed'))).toBe(true);
+
+    const drainer = new MailboxDrainer({ intervalMs: 999_999 });
+    drainer.start(h.ports, db);
+    await drainer.tick();
+    drainer.stop();
+
+    expect(h.writes).toEqual([FORMATTED]);
+  });
+
+  it('raises a human-visible notice, since a delivered row is invisible to every held surface', async () => {
+    // `afx inbox`, the held-count indicator and heldSummaryForWorkspace all filter on `held`, so
+    // the escalated flag alone reaches nobody. An interactive send learns this from
+    // `verified: false`; a cron or backstop delivery has no sender waiting (CMAP round 1 — Codex).
+    const h = harness();
+    const row = enqueue();
+
+    await deliverAgentMail(h.ports, db, '/ws/a', 'spir-1');
+
+    expect(h.notices).toEqual([
+      { workspacePath: '/ws/a', toAgent: 'spir-1', mailboxId: row.id, terminalId: 'term-1584' },
+    ]);
+    expect(mailbox.heldSummaryForWorkspace(db, '/ws/a', NOW).total).toBe(0);
+  });
+
+  it('raises no notice when verification confirms', async () => {
+    const h = harness();
+    h.echoVerified = true;
+    enqueue();
+
+    await deliverAgentMail(h.ports, db, '/ws/a', 'spir-1');
+
+    expect(h.notices).toEqual([]);
+  });
+
+  /**
+   * Issue item 4, confirmed rather than assumed. `isClassifierStuck` excludes `busy`, which is
+   * what kept the old loop silent. There is no longer a busy-hold after a completed write, so a
+   * repeated unverified delivery must never accumulate a streak or raise liveness telemetry —
+   * the reason is `null` on every pass, because every pass is a delivery.
+   */
+  it('never accumulates a not-clean streak for unverified deliveries', async () => {
+    const h = harness();
+    const drainer = new MailboxDrainer({ intervalMs: 999_999 });
+    drainer.start(h.ports, db);
+
+    for (let i = 0; i < 12; i++) {
+      mailbox.enqueue(
+        db,
+        { workspacePath: '/ws/a', toAgent: 'spir-1', body: `m${i}`, formattedMessage: FORMATTED },
+        NOW,
+      );
+      await drainer.tick();
+    }
+    drainer.stop();
+
+    // Twelve messages, twelve writes — one each, never a repeat.
+    expect(h.writes).toHaveLength(12);
+    // LIVENESS_STREAK_THRESHOLD is 10; a busy-hold streak would have crossed it by now.
+    expect(h.liveness).toEqual([]);
   });
 
   /**
