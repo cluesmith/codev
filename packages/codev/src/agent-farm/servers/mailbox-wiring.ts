@@ -290,7 +290,8 @@ export function makeDeliveryPorts(log: LogFn): DeliveryPorts {
     // module's, re-run inside that lock.
     writeMessage: (session, msg, noEnter, precheck) => submitMessagePaced(session, msg, noEnter, precheck),
     // Issue #1573: the only end-to-end evidence that the bytes reached the terminal — opened
-    // before the write, consulted before the row is marked delivered.
+    // before the write. Issue #1584: consulted AFTER the row is marked delivered, because the
+    // commit is what makes a completed write un-repeatable; this only decides what we report.
     watchEcho: (session, needle) => watchEchoOnScreen(session, needle),
     broadcast: (frame) => broadcastDelivered(frame),
     onHeldStateChange: () => broadcastHeldStateChange(),

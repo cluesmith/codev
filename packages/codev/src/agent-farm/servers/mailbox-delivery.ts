@@ -216,8 +216,9 @@ export interface DeliveryPorts {
   /**
    * Begin watching for evidence that a message actually LANDS on the receiving terminal
    * (Issue #1573). Called with the normalized needle from {@link echoNeedle} immediately
-   * BEFORE the write; the returned {@link EchoWatch} is consulted after it and before
-   * `markDelivered`.
+   * BEFORE the write; the returned {@link EchoWatch} is consulted AFTER `markDelivered`
+   * (Issue #1584 — the delivery is committed first, so verification cannot leave the row in a
+   * re-writable state), and its answer becomes the `verified` report, not a retry decision.
    *
    * This is the only end-to-end evidence the delivery path has. Everything upstream of it
    * proves the bytes were QUEUED, never that the terminal absorbed them: `session.write`

@@ -140,3 +140,25 @@ produce 12 writes and zero `onLiveness` calls (LIVENESS_STREAK_THRESHOLD is 10).
 
 Five new tests, three of which fail against the pre-CMAP commit (verified by swapping the module
 back in): commits-before-verifying, verify-throws, and the notice.
+
+### CMAP round 2 — gemini=APPROVE, codex=COMMENT, claude=APPROVE
+
+Re-ran all three after the round-1 fixes (the changes were substantial: a reordering, a new db
+function, a new port + binding).
+
+- **gemini=APPROVE**, no issues.
+- **claude=APPROVE.** Three non-blocking minors, all of which it recommends folding into #1578
+  rather than this hotfix: (a) unverified-delivery notices are un-deduplicated and would be
+  noisy on a harness that NEVER echoes; (b) the double `verify()` is equivalent to doubling the
+  timeout for the real binding — a timeout parameter would express it more honestly than "a
+  second look"; (c) `dropped`/`preempted` still hold after bytes may have hit the wire
+  (pre-existing, documented at the point-of-no-return comment, worth recording as a residual).
+- **codex=COMMENT** (up from REQUEST_CHANGES — it confirmed both round-1 findings resolved).
+  Two staleness findings, both mine and both fixed: the PR body still described the *pre*-
+  reorder design (verification while held, `markEscalated`, no notification, "seven tests"), and
+  two comments — the `watchEcho` port doc and its wiring binding — still said the echo is
+  consulted BEFORE `markDelivered`. PR body rewritten; both comments corrected.
+
+Nothing was rebutted across either round. Every finding from both non-approving lanes was real.
+
+Residuals to record on #1578 at the gate: claude's (a), (b) and (c) above.
