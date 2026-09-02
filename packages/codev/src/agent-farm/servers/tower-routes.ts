@@ -2223,11 +2223,15 @@ async function handleSend(
       mailboxId: row.id,
       reason: null,
       bodyLength,
-      // Additive (Issue #1584). Present only when this request's own delivery pass ran the echo
-      // check: `false` means the bytes were written and accepted but the header never appeared
-      // on the terminal — delivered, flagged, and NOT re-written. Absent (verification skipped,
-      // or another pass delivered the row) reads as it always did.
-      ...(outcome?.verified === undefined ? {} : { verified: outcome.verified }),
+      // Additive (Issue #1584). `false` means the bytes were written and accepted but the header
+      // never appeared on the terminal — delivered, flagged, and NOT re-written. Reported only
+      // when THIS row is the one our own pass delivered: a pass picks the agent's OLDEST held
+      // row, so without the id check a concurrent drainer delivery of this row could be
+      // reported with another message's verification. Absent (verification skipped, or someone
+      // else's pass delivered it) reads exactly as it did before this field existed.
+      ...(outcome?.delivered.includes(row.id) && outcome.verified !== undefined
+        ? { verified: outcome.verified }
+        : {}),
     });
     return;
   }
