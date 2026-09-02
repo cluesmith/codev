@@ -1,0 +1,18 @@
+id: '1592'
+title: vscode-issue-view-omits-core-m
+protocol: pir
+phase: plan
+plan_phases: []
+current_plan_phase: null
+gates:
+  plan-approval:
+    status: pending
+  dev-approval:
+    status: pending
+  pr:
+    status: pending
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-09-02T22:57:29.962Z'
+updated_at: '2026-09-02T22:57:29.963Z'
