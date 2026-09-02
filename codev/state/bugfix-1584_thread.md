@@ -84,3 +84,22 @@ in and re-running); the 7th is the pre-write-hold guard, which should pass on bo
 
 Updated (not deleted) the two #1573 tests that pinned hold-and-redeliver, plus route
 (`tower-routes.test.ts`) and CLI (`send.test.ts`) coverage for `verified`.
+
+## 2026-09-02 — PR
+
+PR #1585 opened (`Fixes #1584`). Three commits: the fix, the tests + this thread, and a
+follow-up tightening (report `verified` only for the row *this* request's pass delivered — a
+pass picks the agent's OLDEST held row, so without an id check a concurrent drainer delivery
+of our row could be reported with another message's verification result).
+
+**Environment note for whoever picks this up:** the worktree arrived with no `node_modules`
+and no `packages/codev/skeleton/`. 12 test files (adopt, update, hot/cold-tier, protocol-drift,
+consult, consolidate, spawn-retirement, session-manager, …) fail until `pnpm install` +
+`pnpm --filter "@cluesmith/codev^..." build` + `pnpm build` in `packages/codev`. I confirmed
+the identical per-file failure counts at HEAD before building, so none were mine. After the
+build: **5372 passed, 0 failed, 48 skipped** across 273 files.
+
+`consult` did NOT auto-detect the project from builder context — it listed every project and
+exited 0 without reviewing. `--project-id bugfix-1584` fixes it. Worth an issue if it recurs.
+
+CMAP verdicts: gemini=APPROVE (no issues, 12.8s). codex + claude pending.
