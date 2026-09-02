@@ -35,6 +35,7 @@ import {
   MailboxDrainer,
   normalizeForEcho,
   type EchoWatch,
+  type UnverifiedDeliveryInfo,
   type DeliveryPorts,
   type DeliverySession,
   type DeliveredBroadcast,
@@ -189,6 +190,11 @@ export async function classifyAgentScreen(session: DeliverySession, profile: Gat
  * therefore slack for a loaded machine, not the expected cost — the common case returns on the
  * first read with no added latency. It is bounded because the `afx send` request path awaits
  * this before answering the sender.
+ *
+ * Issue #1584: the delivery path calls `verify()` at most TWICE (a second window for a slow
+ * renderer, no bytes written), so this constant is half the worst-case wait a sender sees —
+ * ~1.2 s. Raising it raises that, and the answer is no longer a retry decision: an unconfirmed
+ * delivery is recorded as delivered-unverified, never re-written.
  */
 const ECHO_VERIFY_TIMEOUT_MS = 600;
 const ECHO_VERIFY_POLL_MS = 50;
@@ -223,16 +229,21 @@ async function countEchoOnScreen(screen: SessionScreen, needle: string): Promise
  * A session with no mirror has produced no output and therefore cannot echo anything, so its
  * watch verifies `false` rather than passing.
  *
- * Known residuals, all of which fail in the SAFE direction (a redelivery, never a dropped
- * message), and none of which are designed around here:
+ * Known residuals — these are why a negative is "could not confirm", not "not delivered". Issue
+ * #1584: they are also why a negative must NOT trigger a redelivery. Each recurs for the same
+ * message on every attempt, so holding-and-rewriting on one of them is a loop that cannot
+ * converge — #1583 saw a message re-injected dozens of times on exactly the second one. The
+ * caller now commits the delivery and reports it unverified instead. None is designed around
+ * here; #1578 tracks smarter verification:
  *   - a harness on the ALTERNATE screen buffer has no scrollback, so a message longer than one
  *     viewport can scroll its header out of reach and never confirm. The agy profile boots into
  *     the alternate buffer and was not measurable here (unauthenticated).
  *   - a very long write can evict the pre-write copy from the 1000-line mirror, so the count
  *     comes back equal rather than greater and a genuine delivery reads as unconfirmed.
  *   - an unconfirmed delivery re-reads and re-normalizes the retained buffer once per poll
- *     while the `afx send` request waits. Bounded by the timeout, and off the happy path
- *     entirely — the measured case confirms on the first read.
+ *     while the `afx send` request waits. Bounded by the timeout (and by the delivery path's
+ *     two windows, ~1.2 s total), and off the happy path entirely — the measured case confirms
+ *     on the first read.
  */
 export async function watchEchoOnScreen(session: DeliverySession, needle: string): Promise<EchoWatch> {
   const screen = (session as PtySession).gateScreen;
@@ -279,15 +290,19 @@ export function makeDeliveryPorts(log: LogFn): DeliveryPorts {
     // module's, re-run inside that lock.
     writeMessage: (session, msg, noEnter, precheck) => submitMessagePaced(session, msg, noEnter, precheck),
     // Issue #1573: the only end-to-end evidence that the bytes reached the terminal — opened
-    // before the write, consulted before the row is marked delivered.
+    // before the write. Issue #1584: consulted AFTER the row is marked delivered, because the
+    // commit is what makes a completed write un-repeatable; this only decides what we report.
     watchEcho: (session, needle) => watchEchoOnScreen(session, needle),
     broadcast: (frame) => broadcastDelivered(frame),
     onHeldStateChange: () => broadcastHeldStateChange(),
     onEscalation: (info) => broadcastEscalation(info),
     onLiveness: (info) => surfaceLiveness(info, log),
+    // Issue #1584: an unconfirmed delivery is committed, not retried, so this notice is the
+    // only human-facing trace for a cron/backstop send with no sender waiting on a response.
+    onUnverifiedDelivery: (info) => surfaceUnverifiedDelivery(info),
     escalateHeldToOwner: (info) => escalateHeldToOwner(info, log),
     clearHeldOwnerNotice: (ws, agent) => clearHeldOwnerNotice(ws, agent),
-    log: (m) => log('INFO', m),
+    log: (m, level) => log(level ?? 'INFO', m),
     now: () => Date.now(),
   };
 }
@@ -427,6 +442,28 @@ function surfaceLiveness(info: LivenessInfo, log: LogFn): void {
     type: 'notification',
     title: 'Mailbox: delivery blocked (unrecognized app)',
     body: `${where} — its screen never classifies as a ready prompt, so held messages will not deliver. A classifier profile may need updating.`,
+    workspace: info.workspacePath,
+  });
+}
+
+/**
+ * Surface an unconfirmed delivery (Issue #1584) on the generic `notification` SSE channel that
+ * {@link surfaceLiveness} already uses — human title/body, no message body.
+ *
+ * Deliberately NOT the `mailbox-escalation` event: that one means "held past the escalation
+ * age", and saying that about a row we just delivered would be false. The wording here states
+ * exactly what is and is not known — the bytes went out, the screen never showed them, and it
+ * will not be sent again.
+ */
+function surfaceUnverifiedDelivery(info: UnverifiedDeliveryInfo): void {
+  const where = `${info.toAgent} @ ${path.basename(info.workspacePath)}`;
+  mailboxBroadcaster?.({
+    type: 'notification',
+    title: 'Mailbox: delivered but not confirmed on screen',
+    body:
+      `${where} — the message was written to terminal ${info.terminalId.slice(0, 8)}… and every byte was ` +
+      `accepted, but its header never appeared on that screen. It is recorded as delivered and will NOT ` +
+      `be sent again (mailbox id ${info.mailboxId.slice(0, 8)}…). Check the agent's transcript.`,
     workspace: info.workspacePath,
   });
 }

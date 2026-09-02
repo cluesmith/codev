@@ -253,6 +253,34 @@ describe('send command', () => {
       expect(successMessages.some((m) => m.includes('(1234 bytes)'))).toBe(true);
     });
 
+    it('says so when Tower could not confirm the message reached the terminal (Issue #1584)', async () => {
+      // Tower now records an unconfirmed delivery instead of re-writing it — re-writing is what
+      // re-injected one message dozens of times in #1583 — so this line is the ONLY place the
+      // sender learns the echo never came back.
+      mockSendMessage.mockResolvedValue({
+        ok: true, resolvedTo: 'builder-spir-109', bodyLength: 1234, verified: false,
+      });
+
+      await send({ builder: 'builder-spir-109', message: 'hi' });
+
+      const successMessages = vi.mocked(logger.success).mock.calls.map((c) => String(c[0]));
+      expect(successMessages.some((m) => m.includes('unverified — header not seen on the terminal'))).toBe(true);
+    });
+
+    it('prints the plain delivered line when verification confirmed or does not apply (Issue #1584)', async () => {
+      // `verified: true` and an absent field (older Tower, or a body with no header worth
+      // matching) must read exactly as they always did — the field is additive.
+      for (const extra of [{ verified: true }, {}]) {
+        vi.mocked(logger.success).mockClear();
+        mockSendMessage.mockResolvedValue({ ok: true, resolvedTo: 'builder-spir-109', bodyLength: 7, ...extra });
+
+        await send({ builder: 'builder-spir-109', message: 'hi' });
+
+        const successMessages = vi.mocked(logger.success).mock.calls.map((c) => String(c[0]));
+        expect(successMessages.some((m) => m === 'Message delivered to builder-spir-109 (7 bytes)')).toBe(true);
+      }
+    });
+
     it('throws on file not found', async () => {
       await expect(
         send({ builder: 'builder-spir-109', message: 'Test', file: '/tmp/missing.txt' }),

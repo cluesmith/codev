@@ -845,6 +845,15 @@ export class TowerClient {
      * Tower binaries.
      */
     bodyLength?: number;
+    /**
+     * Issue #1584: whether the delivered message's header was actually SEEN on the receiving
+     * terminal. `false` = the bytes were written and accepted, but the terminal never showed
+     * them — the message is recorded as delivered and flagged, and is deliberately NOT
+     * re-written (re-writing is what re-injected one message dozens of times in #1583).
+     * Absent = verification was skipped or does not apply; older Tower binaries omit it, and
+     * absent reads exactly as `true` always did.
+     */
+    verified?: boolean;
   }> {
     const result = await this.request<{
       ok: boolean;
@@ -859,6 +868,7 @@ export class TowerClient {
       degradedReason?: string;
       notBefore?: number;
       bodyLength?: number;
+      verified?: boolean;
     }>(
       '/api/send',
       {
@@ -897,6 +907,7 @@ export class TowerClient {
       degradedReason: result.data!.degradedReason,
       notBefore: result.data!.notBefore,
       bodyLength: result.data!.bodyLength,
+      verified: result.data!.verified,
     };
   }
 

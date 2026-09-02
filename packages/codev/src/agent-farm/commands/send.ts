@@ -399,7 +399,13 @@ export async function send(options: SendOptions): Promise<void> {
         // echo exists for (#1564: a ~1,900-char message arriving as its final ~30) all read as
         // an unqualified success at the sender.
         const size = result.bodyLength !== undefined ? ` (${result.bodyLength} bytes)` : '';
-        logger.success(`Message delivered to ${result.resolvedTo ?? target}${size}`);
+        // Issue #1584: say so when the bytes were accepted but the terminal never showed them.
+        // Tower records that row as delivered and does NOT re-write it — re-writing is what
+        // re-injected one message dozens of times in #1583 — so this line is the only place the
+        // sender learns the delivery was unconfirmed. `verified` absent (older Tower, or a body
+        // with no header worth matching) keeps today's wording.
+        const unverified = result.verified === false ? ' (unverified — header not seen on the terminal)' : '';
+        logger.success(`Message delivered to ${result.resolvedTo ?? target}${size}${unverified}`);
         // Issue #1365: an interrupt/escape that gave up waiting for the terminal's submission
         // lock wrote unserialized, so its bytes may have interleaved with the delivery it
         // skipped. The row is claimed `delivered` before the write (un-claiming would risk a
