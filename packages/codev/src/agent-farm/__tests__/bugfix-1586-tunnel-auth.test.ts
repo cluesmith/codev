@@ -23,6 +23,7 @@ vi.mock('@cluesmith/codev-core/auth', () => ({
 }));
 
 import { isRequestAllowed, resetExpectedKeyCache } from '../utils/server-utils.js';
+import { ensureLocalKey } from '@cluesmith/codev-core/auth';
 
 /** The public authority the cloud edge puts on tunnel-borne requests. */
 const CLOUD_HOST = 'cloud.codevos.ai';
@@ -53,8 +54,9 @@ async function stopServer(server: http.Server): Promise<void> {
  * `/api/state` is a keyed route; `/` is on the public allowlist but still
  * subject to the Host guard.
  */
-function createGuardedServer(): http.Server {
+function createGuardedServer(seen?: http.IncomingHttpHeaders[]): http.Server {
   return http.createServer((req, res) => {
+    seen?.push(req.headers);
     if (!isRequestAllowed(req)) {
       res.writeHead(401, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ error: 'Unauthorized', host: req.headers.host }));
@@ -72,6 +74,7 @@ describe('#1586 tunnel-borne request authentication', () => {
 
   beforeEach(() => {
     resetExpectedKeyCache();
+    (ensureLocalKey as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => TEST_KEY);
   });
 
   afterEach(async () => {
@@ -136,6 +139,28 @@ describe('#1586 tunnel-borne request authentication', () => {
     expect(body.headers['codev-tower-key']).toBe(TEST_KEY);
     expect(body.headers['codev-web-key']).toBeUndefined();
     expect(body.headers['x-codev-tunnel-proxy']).toBe('1');
+  });
+
+  it('fails closed when no local key is readable — strips the forged key and stamps none', async () => {
+    (ensureLocalKey as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      throw new Error('~/.agent-farm is unwritable');
+    });
+    const seen: http.IncomingHttpHeaders[] = [];
+
+    await connect(createGuardedServer(seen));
+
+    const response = await mockServer.sendRequest({
+      path: '/api/state',
+      headers: { host: CLOUD_HOST, 'codev-tower-key': 'forged-key' },
+    });
+
+    // The request still reaches the local server, but unkeyed — so Tower rejects
+    // it, exactly as it did before this stamp existed. What must never happen is
+    // the cloud side's forged key surviving into the local request.
+    expect(seen).toHaveLength(1);
+    expect(seen[0]['codev-tower-key']).toBeUndefined();
+    expect(seen[0].host).toMatch(/^localhost:\d+$/);
+    expect(response.status).toBe(401);
   });
 
   it('still refuses tunnel management endpoints, keyed or not', async () => {

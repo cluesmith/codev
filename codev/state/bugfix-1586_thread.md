@@ -110,3 +110,19 @@ Gotcha: an H2 CONNECT stream rejects a `host` header (`NGHTTP2_PROTOCOL_ERROR`)
 
 Worktree had no `node_modules`; `pnpm install --frozen-lockfile` plus building
 `codev-types`/`codev-core` was needed before vitest could resolve imports.
+
+## CMAP (2026-09-02) — 3× APPROVE, HIGH confidence
+
+gemini APPROVE · codex APPROVE · claude APPROVE. No blocking issues from any
+lane. Claude raised three non-blocking items, all addressed:
+
+- **Per-session remote credential** — filed as #1589 (the follow-up the issue
+  itself designates as out of scope, cc @amrmelsayed).
+- **Fail-closed branch untested** — added a sixth test: with `ensureLocalKey`
+  throwing, the local server sees the request with *no* `codev-tower-key` and a
+  localhost Host, and rejects it 401. This pins that the forged inbound key is
+  stripped even when we have nothing to stamp in its place — the branch the
+  commit message claims but nothing previously exercised.
+- **Branch behind main** — merged `origin/main` (porch records only, no code).
+
+CI on PR #1588: all 7 checks green.
