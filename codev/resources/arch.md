@@ -1996,6 +1996,8 @@ consult -m claude spec 42
 
 **Complementary controls that predate the key** (still in force): `/api/tunnel/*` rejects tunnel-borne requests outright (PR #1374), and `via=tunnel/local` attribution logs every proxied request. The cloud edge (codevos.ai) still owns *remote user* authentication; the local key authenticates *local* actors to their own Tower.
 
+**Tunnel-borne requests are stamped local** (#1586, PR #1588): `TunnelClient` runs inside the Tower process and is itself a local actor, so it strips any inbound `Host`, key, or proxy-marker headers from cloud-proxied requests and stamps `Host: localhost:<port>`, the tunnel marker, and the local key. The key check stays the single choke point (no tunnel exemption, `/api/tunnel/*` refusal unchanged), and the remote browser, once past cloud-edge auth, receives the same injected local key a local browser does; per-session scoping/revocation is tracked in #1589.
+
 > **Superseded ruling** (issue #1375, 2026-08-09): Tower briefly had an explicit no-internal-auth-by-design position — localhost binding as the local boundary, the cloud edge as the remote one. Security advisory GHSA-xvjp-7748-v88v reversed it nine days later: localhost binding proves same-*machine*, not same-actor, and any local process could reach every management route. The key model above is the current authority; the trust boundary honesty to preserve is that browser-path key delivery still relaxes "same user" to "same machine reaching loopback."
 
 ## Integration Points
