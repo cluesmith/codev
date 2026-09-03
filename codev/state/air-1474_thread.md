@@ -107,3 +107,41 @@ byte-identically from the raw captures) — the defect was in the check, not the
   keep the 110×32 geometry — the cursor anchor compares row indices, so a different width moves
   the wrap points and invalidates the committed fixtures.
 - Related issue filed by the architect: #1488 (the AIR `e2e_tests` check is a no-op).
+
+## Merge of main (2026-09-03, resumed session)
+
+The branch had gone 770 commits behind and PR #1491 reported CONFLICTING. Merged `origin/main`
+in (not rebased — this repo merges, never squashes). Exactly one file conflicted,
+`packages/codev/src/agent-farm/servers/render-gate.ts`, and it was adjacency, not disagreement:
+#1573 inserted a new exported `bufferLines(term)` directly above `findMarkerRow`, whose doc
+comment and signature this branch had rewritten for the cursor-row/palette anchors. Kept both
+sides verbatim; nothing of #1573's was dropped.
+
+The two functions are worth keeping straight, since they now sit adjacent:
+
+- `screenLines()` — viewport only. The gate's classification path; the #1474 anchoring lives here.
+- `bufferLines()` — viewport plus scrollback (#1573), for post-delivery echo verification only.
+  Not a classification input, and the marker anchoring does not touch it.
+
+Premise re-verified on current main: `AGY_MARKER = /^> /` is still at `gate-profiles.ts:72`;
+the only commit to that file since the merge-base was the unrelated `afx reset` → `afx refresh`
+rename, which nothing of ours references.
+
+### A false alarm worth recording
+
+The first post-merge `pnpm test` reported 14 failures in `request-auth.test.ts` and
+`tower-routes.test.ts` — `WS_KEY_PROTOCOL_PREFIX` and `TOWER_KEY_HEADER` arriving `undefined`.
+None were ours and none were real: `packages/types/dist` was from Aug 17, so the constants main
+had added since simply did not exist in the built artifact the tests import. `pnpm build` then
+failed too, but only at the asset step — main added a `three` dependency this worktree's
+`node_modules` predated.
+
+`pnpm install` → `pnpm build` (exit 0) → `pnpm test`: **275 files passed, 3 skipped, 0 failed;
+5477 tests passed, 48 skipped.** Typecheck clean. The render-gate suite is 66 now rather than
+the 55 recorded above — main's own additions to that file merged in cleanly alongside ours.
+
+So: a stale worktree, not a broken merge. Anyone resuming a long-parked builder here should
+`pnpm install && pnpm build` *before* believing a test failure.
+
+Merge commit `818337fa2`, pushed. PR #1491 now reports MERGEABLE. Still **not merged** and the
+issue is still open — deliberate, unchanged: this cohort is not a maintainer of cluesmith/codev.
