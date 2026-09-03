@@ -86,7 +86,7 @@ vi.mock('vscode', () => ({
 const { activateBuilderReviewComments } = await import('../comments/builder-review.js');
 const { setDiffInjectSession } = await import('../diff-inject-codelens.js');
 
-const ENTRY = { fsPath: '/wt/pkg/src/a.ts', builderId: 'pir-9', relPath: 'pkg/src/a.ts', hunks: [] };
+const ENTRY = { fsPath: '/wt/pkg/src/a.ts', builderId: 'pir-9', relPath: 'pkg/src/a.ts', hunks: [], baseRef: 'main', worktreePath: '/wt' };
 const DOC = { uri: { fsPath: ENTRY.fsPath }, lineCount: 40 };
 
 const storeStub = {

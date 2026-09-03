@@ -31,7 +31,7 @@ export async function disconnectTunnel(connectionManager: ConnectionManager): Pr
     },
     'Disconnect',
   );
-  if (choice !== 'Disconnect') return;
+  if (choice !== 'Disconnect') {return;}
 
   await client.signalTunnel('disconnect');
   vscode.window.showInformationMessage('Codev: Tower deregistered from Codev Cloud');

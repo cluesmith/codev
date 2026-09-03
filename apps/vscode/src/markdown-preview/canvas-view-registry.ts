@@ -40,6 +40,8 @@ const CANVAS_COMMANDS = [
   'heading-prev',
   'column-forward',
   'column-back',
+  'viewport-down',
+  'viewport-up',
   'doc-start',
   'doc-end',
   'composer-open',

@@ -27,18 +27,21 @@ import { version } from '../../version.js';
 const execAsync = promisify(exec);
 import type { SessionManager } from '../../terminal/session-manager.js';
 import type { PtySessionInfo } from '../../terminal/pty-session.js';
-import type { BuilderSpawnedPayload, DashboardState, ArchitectState, TowerVersionInfo } from '@cluesmith/codev-types';
+import type { BuilderSpawnedPayload, DashboardState, ArchitectState, TowerVersionInfo, HeldMessage } from '@cluesmith/codev-types';
 import { getBuilders, setArchitectByName } from '../state.js';
 import { DEFAULT_COLS, defaultSessionOptions } from '../../terminal/index.js';
 import type { SSEClient, WorkspaceTerminals } from './tower-types.js';
 import type { TerminalManager } from '../../terminal/pty-manager.js';
-import { parseJsonBody, isRequestAllowed } from '../utils/server-utils.js';
+import { parseJsonBody, isRequestAllowed, isAllowedOrigin, isAllowedHost, getExpectedKey, escapeHtml } from '../utils/server-utils.js';
+import { TOWER_KEY_HEADER, LEGACY_WEB_KEY_HEADER, VSCODE_USER_SENDER } from '@cluesmith/codev-types';
 import {
   isRateLimited,
   normalizeWorkspacePath,
   getLanguageForExt,
   getMimeTypeForFile,
   serveStaticFile,
+  persistableCommand,
+  logSessionIdentity,
 } from './tower-utils.js';
 import { handleTunnelEndpoint } from './tower-tunnel.js';
 import { getWorktreeConfig, getActivityHooks } from '../utils/config.js';
@@ -48,11 +51,18 @@ import { fetchTeamGitHubData, type TeamMemberGitHubData } from '../../lib/team-g
 import { resolveTarget, resolveAgentInRegistry, broadcastMessage, isResolveError, type ResolveResult } from './tower-messages.js';
 import { handleCommandRoute, COMMAND_ROUTE } from './command-relay.js';
 import { handleCanvasRoute, CANVAS_ROUTE_PREFIX } from './canvas-relay.js';
-import { formatArchitectMessage, formatBuilderMessage } from '../utils/message-format.js';
+import {
+  formatArchitectMessage,
+  formatArchitectToBuilderMessage,
+  formatBuilderMessage,
+  formatUserViaVsCodeMessage,
+  messageTooLargeError,
+  MAX_MESSAGE_BYTES,
+} from '../utils/message-format.js';
 import type { PtySession } from '../../terminal/pty-session.js';
 import { writeMessageToSession, writeEscapeToSession } from './message-write.js';
 import { makeDeliveryPorts, getMailboxDrainer } from './mailbox-wiring.js';
-import { deliverAgentMailSerialized, type DeliveryPorts } from './mailbox-delivery.js';
+import { deliverAgentMailSerialized, type DeliveryOutcome, type DeliveryPorts } from './mailbox-delivery.js';
 import { deliverCronMail, CRON_SENDER, type CronDeliveryResult } from './cron-delivery.js';
 import {
   enqueue as enqueueMailbox,
@@ -63,10 +73,11 @@ import {
   type EnqueueInput,
 } from '../db/mailbox.js';
 import type { MailboxReason } from '../db/types.js';
-// Spec 1273 per-terminal submission lock — preserved across the Spec 1313 merge for
-// the two explicit human-bypass paths (escape + interrupt), which do NOT route
-// through the mailbox's per-agent serializer and so need their own anti-fusion lock.
-import { submitToSession } from './session-submit.js';
+// Spec 1273 per-terminal submission lock. Originally the anti-fusion lock for the two
+// explicit human-bypass paths (escape + interrupt); since Issue #1365 the gated mailbox
+// delivery path takes it too, so it now serializes the whole write edge of a terminal.
+// The operator paths pass a wait ceiling — see OPERATOR_SUBMIT_WAIT_CEILING_MS.
+import { submitToSession, OPERATOR_SUBMIT_WAIT_CEILING_MS } from './session-submit.js';
 // Spec 1307 `--delay` — Tower-side deferred delivery, re-homed onto the Spec 1313
 // mailbox (the merge that carried this feature was flattened by a later rebase, so it
 // is grafted here explicitly): the due-time callback enqueues to the mailbox and
@@ -229,29 +240,38 @@ export async function handleRequest(
   res: http.ServerResponse,
   ctx: RouteContext,
 ): Promise<void> {
-  // Security: Validate Host and Origin headers
-  if (!isRequestAllowed(req)) {
-    res.writeHead(403, { 'Content-Type': 'text/plain' });
-    res.end('Forbidden');
-    return;
-  }
-
-  // CORS headers — allow localhost and tunnel proxy origins
+  // CORS headers — reflect only allowlisted origins (advisory Layer 3).
   const origin = req.headers.origin;
-  if (origin && (
-    origin.startsWith('http://localhost:') ||
-    origin.startsWith('http://127.0.0.1:') ||
-    origin.startsWith('https://')
-  )) {
+  if (origin && isAllowedOrigin(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
   }
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Allow-Headers', `Content-Type, ${TOWER_KEY_HEADER}, ${LEGACY_WEB_KEY_HEADER}`);
   res.setHeader('Cache-Control', 'no-store');
 
+  // A CORS preflight carries no credentials and performs no action, so it is
+  // answered before the key check — otherwise browser clients could never
+  // complete the preflight that precedes an authenticated request.
   if (req.method === 'OPTIONS') {
     res.writeHead(200);
     res.end();
+    return;
+  }
+
+  // Request authentication (advisory GHSA-xvjp-7748-v88v): every route outside
+  // the narrow public-route allowlist must present the shared local key. This
+  // is the single HTTP choke point every route passes through. CORS above is
+  // defense-in-depth only — a no-preflight "simple" request still lands here.
+  if (!isRequestAllowed(req)) {
+    // Log the reason so a broken legitimate client (disallowed Host vs missing
+    // key) is diagnosable — a bare 401 is indistinguishable from either side.
+    const reason = isAllowedHost(req.headers.host)
+      ? 'missing or invalid key'
+      : `disallowed Host "${req.headers.host ?? ''}"`;
+    ctx.log('WARN', `401 ${req.method ?? 'GET'} ${req.url ?? '/'} — ${reason}`);
+    res.writeHead(401, { 'Content-Type': 'text/plain' });
+    res.end('Unauthorized');
     return;
   }
 
@@ -822,8 +842,14 @@ async function handleTerminalCreate(
           } else {
             entry.shells.set(roleId, session.id);
           }
+          // PIR #1475: prefer the identity the shellper reports. A fresh spawn is
+          // the no-op case (it reports back what we just asked for), but routing
+          // it through the same accessor keeps one rule everywhere: the row
+          // records what is RUNNING, not what was requested.
+          logSessionIdentity(ctx.log, 'terminal-create', session.id, ptySession, command ?? null);
           saveTerminalSession(session.id, workspacePath, termType, roleId, shellperInfo.pid,
-            shellperInfo.socketPath, shellperInfo.pid, shellperInfo.startTime, label ?? null, cwd ?? null, command ?? null);
+            shellperInfo.socketPath, shellperInfo.pid, shellperInfo.startTime, label ?? null, cwd ?? null,
+            persistableCommand(ptySession) ?? command ?? null);
           ctx.log('INFO', `Registered shellper terminal ${session.id} as ${termType} "${roleId}" for workspace ${workspacePath}`);
         }
       } catch (shellperErr) {
@@ -1513,16 +1539,27 @@ function liveTargetIdentity(result: ResolveResult): { toAgent: string; isArchite
   return { toAgent: archName ?? result.agent, isArchitectTarget: archName !== null };
 }
 
-/** Format a message per sender/target — preserves the pre-1313 formatting rules. */
+/**
+ * Format a message per sender/target — preserves the pre-1313 formatting rules.
+ *
+ * #1574: `toAgent` is the CANONICAL recipient the mailbox row is keyed on (the
+ * architect reverse-map for architect targets, the resolved agent id otherwise),
+ * so the header a recipient reads names the same identity the row was addressed
+ * to. Passing anything else here would make the frame attest to a fiction.
+ */
 function formatMessageForTarget(
   isArchitectTarget: boolean,
   from: string | undefined,
+  toAgent: string,
   message: string,
   raw: boolean,
 ): string {
-  if (isArchitectTarget && from) return formatBuilderMessage(from, message, undefined, raw); // builder → architect
-  if (!isArchitectTarget) return formatArchitectMessage(message, undefined, raw); // any → builder
-  return raw ? message : formatArchitectMessage(message, undefined, false); // unknown → architect
+  // #1494: a human's approval relayed by the VS Code extension gets its own
+  // header, so the architect can tell it from a peer-architect instruction.
+  if (isArchitectTarget && from === VSCODE_USER_SENDER) return formatUserViaVsCodeMessage(toAgent, message, undefined, raw);
+  if (isArchitectTarget && from) return formatBuilderMessage(from, toAgent, message, undefined, raw); // builder → architect
+  if (!isArchitectTarget) return formatArchitectToBuilderMessage(toAgent, message, undefined, raw); // any → builder
+  return raw ? message : formatArchitectMessage(toAgent, message, undefined, false); // unknown → architect
 }
 
 /**
@@ -1547,9 +1584,12 @@ export async function deliverCronMessage(
   const ports = makeDeliveryPorts(log);
   // Preserve the pre-1313 cron framing: a message FROM the `af-cron` pseudo-builder,
   // regardless of whether the target is an architect or a builder.
+  //
+  // #1574: the frame names its recipient, which is only known AFTER resolution —
+  // so it is built per-branch rather than once up front. `base` carries everything
+  // that does not depend on the target.
   const base = {
     body: message,
-    formattedMessage: formatBuilderMessage(CRON_SENDER, message),
     supersedeKey: task.name,
   };
 
@@ -1558,6 +1598,7 @@ export async function deliverCronMessage(
     const { toAgent } = liveTargetIdentity(live);
     return deliverCronMail(ports, db, {
       ...base,
+      formattedMessage: formatBuilderMessage(CRON_SENDER, toAgent, message),
       workspacePath: live.workspacePath,
       toAgent,
       terminalId: live.terminalId,
@@ -1572,6 +1613,7 @@ export async function deliverCronMessage(
     if (!isResolveError(reg)) {
       return deliverCronMail(ports, db, {
         ...base,
+        formattedMessage: formatBuilderMessage(CRON_SENDER, reg.agent, message),
         workspacePath: reg.workspacePath,
         toAgent: reg.agent,
         terminalId: null,
@@ -1611,7 +1653,36 @@ function holdAndRespond(
     held: true,
     reason,
     mailboxId: row.id,
+    bodyLength: Buffer.byteLength(input.body, 'utf8'),
   });
+}
+
+/** Machine-readable reason paired with `degraded: true` on an operator send response. */
+const DEGRADED_SUBMIT_REASON = 'submit-wait-ceiling-expired';
+
+/**
+ * Announce that an operator submission gave up waiting for the per-terminal lock and wrote
+ * unserialized (Issue #1365).
+ *
+ * This is the degraded path, and it is deliberately loud. The ceiling arms only against a
+ * DELIVERY write (behind another operator the wait stays unbounded, as before #1365), so what
+ * expiry falls back to is exactly the pre-#1365 operator-vs-delivery behaviour: two disjoint
+ * locks, no serialization. That one pair is therefore no worse than the old status quo — but
+ * it used to be invisible, and now it is not, here and in the `degraded` flag on the response.
+ */
+function logCeilingExpired(
+  ctx: RouteContext,
+  action: string,
+  toAgent: string,
+  terminalId: string,
+  waitedMs: number,
+): void {
+  ctx.log(
+    'WARN',
+    `${action} → ${toAgent} (terminal ${terminalId.slice(0, 8)}...) waited ${waitedMs}ms for an in-flight ` +
+      `write and proceeded UNSERIALIZED — it may interleave with that write. A message long enough to ` +
+      `hold the line this long is the usual cause.`,
+  );
 }
 
 /** Inputs for a delayed (`--delay`) send, captured from the parsed request. */
@@ -1695,7 +1766,7 @@ function handleDelayedSend(
     return;
   }
 
-  const formattedMessage = formatMessageForTarget(isArchitectTarget, from, message, raw);
+  const formattedMessage = formatMessageForTarget(isArchitectTarget, from, toAgent, message, raw);
 
   // Persist NOW, at request time, with the due time. reason=null → SCHEDULED, not stuck.
   const row = enqueueMailbox(db, {
@@ -1725,18 +1796,33 @@ function handleDelayedSend(
       if (!isStillLive()) return; // shutdown before/at due → drop the ^C nudge (body survives)
       if (terminalId) {
         let fired = false;
-        void submitToSession(terminalId, () => {
-          // Re-check EVERYTHING inside the lock: the queued submission can acquire the lock only
-          // AFTER a shutdown or a session teardown/respawn that landed while it waited behind an
-          // in-flight write. Re-fetch the session and re-check live + writable here; bail with no
-          // ^C otherwise (the body still delivers via the gate).
-          if (!isStillLive()) return 0;
-          const live = getTerminalManager().getSession(terminalId);
-          if (!live || !live.writable) return 0;
-          live.write('\x03'); // Ctrl+C only — end the turn; body follows via the gate
-          fired = true;
-          return 0; // no body, no Enter on this path
-        })
+        void submitToSession(
+          terminalId,
+          () => {
+            // Re-check EVERYTHING inside the lock: the queued submission can acquire the lock only
+            // AFTER a shutdown or a session teardown/respawn that landed while it waited behind an
+            // in-flight write. Re-fetch the session and re-check live + writable here; bail with no
+            // ^C otherwise (the body still delivers via the gate).
+            if (!isStillLive()) return 0;
+            const live = getTerminalManager().getSession(terminalId);
+            if (!live || !live.writable) return 0;
+            live.write('\x03'); // Ctrl+C only — end the turn; body follows via the gate
+            fired = true;
+            return 0; // no body, no Enter on this path
+          },
+          undefined,
+          // The same operator ceiling as the immediate paths (Issue #1365). This one fires
+          // UNATTENDED, so it is the writer most likely to meet a gated delivery mid-pace —
+          // which is precisely why the delayed `^C` must take this lock at all.
+          {
+            waitCeilingMs: OPERATOR_SUBMIT_WAIT_CEILING_MS,
+            onCeilingExpired: (waitedMs) => logCeilingExpired(ctx, 'delayed interrupt ^C', toAgent, terminalId, waitedMs),
+            // This is the one operator path whose write can be a NO-OP (the liveness re-check
+            // above). A degraded no-op raced nobody, so it must not bump the bypass counter —
+            // that would make a concurrent delivery hold and re-deliver for nothing.
+            wroteBytes: () => fired,
+          },
+        )
           .then(() =>
             ctx.log('INFO', fired
               ? `Delayed interrupt ^C fired → ${toAgent} (terminal ${terminalId.slice(0, 8)}...); body delivers via the gate`
@@ -1764,6 +1850,7 @@ function handleDelayedSend(
     deliverAfter,
     mailboxId: row.id,
     notBefore,
+    bodyLength: Buffer.byteLength(params.message, 'utf8'),
   });
 }
 
@@ -1787,6 +1874,18 @@ async function handleSend(
   if (!message) {
     res.writeHead(400, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: 'INVALID_PARAMS', message: 'Missing or empty "message" field' }));
+    return;
+  }
+
+  // Issue #1573: refuse an over-large body LOUDLY, here at the route rather than only at the
+  // CLI — `/api/send` is a public local route, and the CLI is not its only caller. Nothing
+  // downstream bounded message size, so an oversized body used to be paced onto the line one
+  // line at a time and reported delivered whatever the composer made of it. Rejecting is the
+  // only honest option: truncating would reproduce #1564 on purpose.
+  const bodyLength = Buffer.byteLength(message, 'utf8');
+  if (bodyLength > MAX_MESSAGE_BYTES) {
+    res.writeHead(400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'MESSAGE_TOO_LARGE', message: messageTooLargeError(bodyLength) }));
     return;
   }
 
@@ -1864,7 +1963,7 @@ async function handleSend(
             workspacePath: reg.workspacePath,
             toAgent: reg.agent,
             body: message,
-            formattedMessage: formatMessageForTarget(reg.kind === 'architect', from, message, raw),
+            formattedMessage: formatMessageForTarget(reg.kind === 'architect', from, reg.agent, message, raw),
             fromAgent: from ?? null,
             fromWorkspace: senderWorkspace,
             noEnter,
@@ -1909,7 +2008,7 @@ async function handleSend(
         workspacePath: result.workspacePath,
         toAgent,
         body: message,
-        formattedMessage: formatMessageForTarget(isArchitectTarget, from, message, raw),
+        formattedMessage: formatMessageForTarget(isArchitectTarget, from, toAgent, message, raw),
         fromAgent: from ?? null,
         fromWorkspace: senderWorkspace,
         noEnter,
@@ -1940,7 +2039,7 @@ async function handleSend(
         workspacePath: result.workspacePath,
         toAgent,
         body: message,
-        formattedMessage: formatMessageForTarget(isArchitectTarget, from, message, raw),
+        formattedMessage: formatMessageForTarget(isArchitectTarget, from, toAgent, message, raw),
         fromAgent: from ?? null,
         fromWorkspace: senderWorkspace,
         noEnter,
@@ -1960,7 +2059,17 @@ async function handleSend(
   if (escape) {
     // Awaited: the response must not claim delivery before the ESC and its
     // Enter have actually been written (Spec 1273 verify).
-    await submitToSession(result.terminalId, () => writeEscapeToSession(session, noEnter));
+    // Issue #1365: escape is an operator submission — it blocks behind an in-flight write
+    // (including a gated mailbox delivery, which now takes this same lock) so its ESC and
+    // Enter can no longer truncate a delivery mid-pace, but only up to the wait ceiling.
+    let escapeDegraded = false;
+    await submitToSession(result.terminalId, () => writeEscapeToSession(session, noEnter), undefined, {
+      waitCeilingMs: OPERATOR_SUBMIT_WAIT_CEILING_MS,
+      onCeilingExpired: (waitedMs) => {
+        escapeDegraded = true;
+        logCeilingExpired(ctx, 'ESC', toAgent, result.terminalId, waitedMs);
+      },
+    });
     broadcastMessage({
       type: 'message',
       from: { project: path.basename(senderWorkspace), agent: from ?? 'unknown' },
@@ -1970,11 +2079,17 @@ async function handleSend(
       timestamp: new Date().toISOString(),
     });
     ctx.log('INFO', `Interrupt (ESC) sent: ${from ?? 'unknown'} → ${toAgent} (terminal ${result.terminalId.slice(0, 8)}...)`);
-    sendJson(res, 200, { ok: true, terminalId: result.terminalId, resolvedTo: toAgent, deferred: false });
+    sendJson(res, 200, {
+      ok: true,
+      terminalId: result.terminalId,
+      resolvedTo: toAgent,
+      deferred: false,
+      ...(escapeDegraded ? { degraded: true, degradedReason: DEGRADED_SUBMIT_REASON } : {}),
+    });
     return;
   }
 
-  const formattedMessage = formatMessageForTarget(isArchitectTarget, from, message, raw);
+  const formattedMessage = formatMessageForTarget(isArchitectTarget, from, toAgent, message, raw);
 
   // NB: `--delay` (deliverAfter) is handled earlier by handleDelayedSend, before this
   // immediate-path block — a delayed send is resolved + persisted at request time and does
@@ -2014,16 +2129,35 @@ async function handleSend(
     // during the 100 ms gap. `writeMessageToSession(..., 100)` schedules the text 100 ms after
     // the ^C (the settle) and returns the completion offset, so the lock is held until the
     // whole interrupt is on the wire; uncontended, it runs at once.
-    //   Scope of the guarantee: this serializes interrupt against interrupt/escape — the only
-    //   /api/send writers that take this per-terminal lock. It does NOT serialize against a
-    //   concurrent mailbox/backstop delivery (which writes through the per-AGENT serializer, a
-    //   disjoint lock); interrupt is the explicit gate-bypassing human action, and closing that
-    //   cross-path race would require the mailbox write edge to take this lock too (a separate,
-    //   larger change — flagged, not done here).
-    await submitToSession(result.terminalId, () => {
-      session.write('\x03'); // Ctrl+C
-      return writeMessageToSession(session, formattedMessage, noEnter, 100);
-    });
+    //   Scope of the guarantee (Issue #1365 — this used to end at "interrupt vs interrupt/escape"):
+    //   the gated mailbox delivery path now takes this SAME per-terminal lock, so an interrupt is
+    //   serialized against a concurrent delivery too. That closes the case where a `^C` landed
+    //   inside a delivery's own text→Enter window, clearing the composer while every byte still
+    //   reported success — the row read `delivered` for a message the agent never saw. The lock
+    //   order is per-agent → per-terminal (the delivery takes this one as a leaf), never the
+    //   reverse, so there is no cycle. See session-submit.ts for the full boundary.
+    // Whether this interrupt gave up waiting and wrote unserialized. It must reach the SENDER,
+    // not just the Tower log (codex review of PR #1492): the row above was claimed `delivered`
+    // before the write, so a degraded interrupt would otherwise report an unqualified success
+    // for a body that may have interleaved with the delivery it skipped. We keep the
+    // claim-first tradeoff (un-claiming risks a double delivery — see above) and tell the
+    // truth about it instead.
+    let degraded = false;
+    await submitToSession(
+      result.terminalId,
+      () => {
+        session.write('\x03'); // Ctrl+C
+        return writeMessageToSession(session, formattedMessage, noEnter, 100);
+      },
+      undefined,
+      {
+        waitCeilingMs: OPERATOR_SUBMIT_WAIT_CEILING_MS,
+        onCeilingExpired: (waitedMs) => {
+          degraded = true;
+          logCeilingExpired(ctx, 'interrupt', toAgent, result.terminalId, waitedMs);
+        },
+      },
+    );
     broadcastMessage({
       type: 'message',
       from: { project: path.basename(senderWorkspace), agent: from ?? 'unknown' },
@@ -2042,6 +2176,9 @@ async function handleSend(
       held: false,
       mailboxId: row.id,
       reason: null,
+      bodyLength,
+      // Additive and present only when it happened, so older clients are unaffected.
+      ...(degraded ? { degraded: true, degradedReason: DEGRADED_SUBMIT_REASON } : {}),
     });
     return;
   }
@@ -2070,8 +2207,12 @@ async function handleSend(
     getSessionForAgent: (ws, agent) =>
       ws === result.workspacePath && agent === toAgent ? session : basePorts.getSessionForAgent(ws, agent),
   };
+  // Issue #1584: keep the outcome — it carries whether the delivered message's header was
+  // actually seen on the receiving terminal, which is the only thing the sender can act on now
+  // that an unconfirmed delivery is recorded rather than re-written.
+  let outcome: DeliveryOutcome | null = null;
   try {
-    await deliverAgentMailSerialized(ports, db, result.workspacePath, toAgent);
+    outcome = await deliverAgentMailSerialized(ports, db, result.workspacePath, toAgent);
   } catch (err) {
     // A gate/write error leaves the row HELD (markDelivered only runs on a
     // completed write); the backstop drainer will retry. Report held, not a 500.
@@ -2089,6 +2230,16 @@ async function handleSend(
       held: false,
       mailboxId: row.id,
       reason: null,
+      bodyLength,
+      // Additive (Issue #1584). `false` means the bytes were written and accepted but the header
+      // never appeared on the terminal — delivered, flagged, and NOT re-written. Reported only
+      // when THIS row is the one our own pass delivered: a pass picks the agent's OLDEST held
+      // row, so without the id check a concurrent drainer delivery of this row could be
+      // reported with another message's verification. Absent (verification skipped, or someone
+      // else's pass delivered it) reads exactly as it did before this field existed.
+      ...(outcome?.delivered.includes(row.id) && outcome.verified !== undefined
+        ? { verified: outcome.verified }
+        : {}),
     });
     return;
   }
@@ -2107,6 +2258,7 @@ async function handleSend(
     held: true,
     reason,
     mailboxId: row.id,
+    bodyLength,
   });
 }
 
@@ -2120,15 +2272,47 @@ async function handleSend(
  * redaction rule): id, addresses, why-held reason, escalation flag, and enqueue time —
  * the message BODY is deliberately never surfaced here (it travels only over the live
  * terminal stream on delivery). `escalated` is normalized from SQLite's 0/1 to a bool.
+ *
+ * Issue 1450: `workspaceOverride` lets the workspace-scoped route
+ * (`/workspace/<base64>/api/inbox`, which backs the dashboard's held-mail popover) pass the
+ * workspace resolved from the URL prefix, exactly as `handleOverview` / `handleAnalytics` do.
+ * The override arrives already normalized by the prefix decoder, so `normalizeWorkspacePath`
+ * re-running on it is a safe no-op.
+ *
+ * Two separate widening hazards are closed here, because a scoped caller must never receive
+ * another workspace's held mail:
+ *   - `??` (not `||`) means `?workspace=` can never take effect once an override was passed.
+ *   - An EMPTY override does not fall through to the unscoped all-workspaces listing; it
+ *     scopes to a path that matches nothing. Today the dispatcher 400s a missing prefix so
+ *     this is unreachable, but "unreachable" is a property of the caller, not of this
+ *     function, and the safe failure for a scoped call is zero rows, never every row.
+ * The all-workspaces listing therefore remains reachable only when NO override was passed —
+ * the Tower-level route without `?workspace=`, the direct-caller convenience the CLI never uses.
+ *
+ * NOTE: this lists ALL held rows, including pre-due `--delay` rows, while the badge count
+ * (`heldSummaryForWorkspace`) excludes them — see the `HeldMessage` type for why the two
+ * legitimately disagree.
  */
-function handleInboxList(res: http.ServerResponse, url: URL): void {
-  const rawWorkspace = url.searchParams.get('workspace');
+// Exported as a narrow test seam (Issue 1450): the empty-override branch below cannot be
+// reached through `handleRequest` — the workspace dispatcher rejects a missing or non-absolute
+// prefix with a 400 before this runs — so the only way to pin that guard's behaviour is to call
+// the handler directly. Production callers go through the two route tables, not this export.
+export function handleInboxList(res: http.ServerResponse, url: URL, workspaceOverride?: string): void {
+  const scoped = workspaceOverride !== undefined;
+  const rawWorkspace = workspaceOverride ?? url.searchParams.get('workspace');
   // Normalize to the stored realpath key (mailbox workspace_path is normalized at
   // enqueue — tower-routes handleSend / holdAndRespond — matching overview.ts). Without
   // this a symlinked workspace root would miss its own held rows.
-  const workspace = rawWorkspace ? normalizeWorkspacePath(rawWorkspace) : undefined;
+  // `scoped ? '' : undefined` on the empty branch: '' matches no workspace_path, so a scoped
+  // call with a blank override returns nothing rather than widening to every workspace.
+  const workspace = rawWorkspace
+    ? normalizeWorkspacePath(rawWorkspace)
+    : (scoped ? '' : undefined);
   const rows = listHeldMailbox(getGlobalDb(), workspace);
-  const projected = rows.map((r) => ({
+  // Annotated, not inferred: `HeldMessage` is the shared contract this route owes its
+  // clients, so a projection that drifts from it (a dropped field, or a `body` slipping in)
+  // fails the server build rather than only surprising the dashboard at runtime.
+  const projected: HeldMessage[] = rows.map((r) => ({
     id: r.id,
     workspacePath: r.workspace_path,
     toAgent: r.to_agent,
@@ -2369,11 +2553,67 @@ function handleDashboard(res: http.ServerResponse, ctx: RouteContext): void {
 
   try {
     const template = fs.readFileSync(ctx.templatePath, 'utf-8');
-    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-    res.end(template);
+    sendKeyInjectedHtml(res, template);
   } catch (err) {
     res.writeHead(500, { 'Content-Type': 'text/plain' });
     res.end('Error loading template: ' + (err as Error).message);
+  }
+}
+
+/**
+ * Same-origin key injection (advisory GHSA-xvjp-7748-v88v Layer 4). Writes the
+ * shared local key into an HTML shell Tower serves (tower.html or the React SPA
+ * index.html) so the page can authenticate its own API/WebSocket calls, without
+ * embedding a readable secret in the shipped template. The key is hex, so
+ * JSON.stringify yields a safe `<script>`-embeddable literal.
+ *
+ * tower.html carries an explicit placeholder; the built SPA index.html does not,
+ * so the script is inserted before `</head>` there — ahead of the deferred SPA
+ * module, so `window.__CODEV_TOWER_KEY__` is set before the app's first request.
+ */
+function injectWebKey(html: string): string {
+  const key = getExpectedKey();
+  // Only embed a well-formed hex key. `ensureLocalKey` always produces 64 hex
+  // chars; validating before embedding means a hand-edited or third-party-written
+  // key file containing e.g. `</script>` can never become stored XSS in a shell.
+  // A malformed key yields no injection (clients then fail closed with 401).
+  const injection = key && /^[0-9a-f]{64}$/.test(key)
+    ? `<script>window.__CODEV_TOWER_KEY__ = ${JSON.stringify(key)};</script>`
+    : '';
+  if (html.includes('<!-- CODEV_TOWER_KEY_INJECTION -->')) {
+    return html.replace('<!-- CODEV_TOWER_KEY_INJECTION -->', injection);
+  }
+  if (injection && html.includes('</head>')) {
+    return html.replace('</head>', `${injection}</head>`);
+  }
+  return html;
+}
+
+/**
+ * Send a key-injected HTML shell. Strips the CORS `Access-Control-Allow-Origin`
+ * header set by the front door: this response body carries the key, and the
+ * shell is only ever loaded by a same-origin navigation, so it must never be
+ * readable by a cross-origin `fetch` (advisory GHSA-xvjp-7748-v88v). Same-origin
+ * reads are unaffected; the key check still guards the actual API routes.
+ */
+function sendKeyInjectedHtml(res: http.ServerResponse, template: string): void {
+  res.removeHeader('Access-Control-Allow-Origin');
+  res.removeHeader('Vary');
+  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+  res.end(injectWebKey(template));
+}
+
+/**
+ * Serve the React dashboard's index.html with the key injected (SPA shell + SPA
+ * client-side-routing fallback). Returns false if the file cannot be read.
+ */
+function serveDashboardIndex(dashboardPath: string, res: http.ServerResponse): boolean {
+  try {
+    const html = fs.readFileSync(path.join(dashboardPath, 'index.html'), 'utf-8');
+    sendKeyInjectedHtml(res, html);
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -2449,23 +2689,24 @@ async function handleWorkspaceRoutes(
   // 3. React dashboard is available
   // 4. Workspace doesn't need to be running for static files
   if (!isApiCall && !isWsPath && ctx.hasReactDashboard) {
-    // Determine which static file to serve
-    let staticPath: string;
-    if (!subPath || subPath === '' || subPath === 'index.html') {
-      staticPath = path.join(ctx.reactDashboardPath, 'index.html');
+    // The SPA shell (index.html) is served with the shared key injected same-origin
+    // (advisory GHSA-xvjp-7748-v88v) so a direct navigation to a workspace URL can
+    // authenticate without first visiting the Tower root. Other static assets
+    // (JS/CSS/images) carry no secret and stream as-is.
+    const isIndex = !subPath || subPath === '' || subPath === 'index.html';
+    if (isIndex) {
+      if (serveDashboardIndex(ctx.reactDashboardPath, res)) {
+        return;
+      }
     } else {
-      // Check if it's a static asset
-      staticPath = path.join(ctx.reactDashboardPath, subPath);
+      const staticPath = path.join(ctx.reactDashboardPath, subPath);
+      if (serveStaticFile(staticPath, res)) {
+        return;
+      }
     }
 
-    // Try to serve the static file
-    if (serveStaticFile(staticPath, res)) {
-      return;
-    }
-
-    // SPA fallback: serve index.html for client-side routing
-    const indexPath = path.join(ctx.reactDashboardPath, 'index.html');
-    if (serveStaticFile(indexPath, res)) {
+    // SPA fallback: serve the (key-injected) index.html for client-side routing.
+    if (serveDashboardIndex(ctx.reactDashboardPath, res)) {
       return;
     }
   }
@@ -2631,6 +2872,20 @@ async function handleWorkspaceRoutes(
     // GET /api/overview - Work view overview data (Spec 0126 Phase 4)
     if (req.method === 'GET' && apiPath === 'overview') {
       return handleOverview(res, url, workspacePath, ctx);
+    }
+
+    // GET /api/inbox - held mailbox rows for THIS workspace (Issue 1450). Backs the
+    // dashboard's clickable held-mail counter. Reuses the Tower-level handler with the
+    // workspace resolved from the /workspace/<base64>/ prefix, the same way `overview`
+    // and `analytics` above do — the dashboard calls relative `./api/...` and has no
+    // absolute workspace path of its own to pass as `?workspace=`.
+    //
+    // Deliberately an EXACT match on 'inbox', not a prefix: `inbox/:id` (which returns the
+    // message BODY) and `inbox/:id/dismiss` (which mutates) do not match, fall through to
+    // the 404 below, and so stay off the dashboard surface. That is what keeps this read
+    // path inside Spec 1313's redaction rule and decision 8 (dismissal is CLI-only).
+    if (req.method === 'GET' && apiPath === 'inbox') {
+      return handleInboxList(res, url, workspacePath);
     }
 
     // POST /api/overview/refresh - Invalidate overview cache (Spec 0126 Phase 4)
@@ -2888,8 +3143,11 @@ async function handleWorkspaceShellCreate(
 
         const entry = getWorkspaceTerminalsEntry(workspacePath);
         entry.shells.set(shellId, session.id);
+        // PIR #1475: hydrated identity wins; a fresh spawn reports back `shellCmd`.
+        logSessionIdentity(ctx.log, 'shell-create', session.id, ptySession, shellCmd);
         saveTerminalSession(session.id, workspacePath, 'shell', shellId, shellperInfo.pid,
-          shellperInfo.socketPath, shellperInfo.pid, shellperInfo.startTime, session.label, workspacePath, shellCmd);
+          shellperInfo.socketPath, shellperInfo.pid, shellperInfo.startTime, session.label, workspacePath,
+          persistableCommand(ptySession) ?? shellCmd);
 
         shellCreated = true;
         res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -3529,15 +3787,23 @@ function handleWorkspaceAnnotate(
       const fileName = path.basename(filePath);
       const fileSize = fs.statSync(filePath).size;
 
+      // The shell carries the injected key (advisory GHSA-xvjp-7748-v88v), so a
+      // maliciously-named file must not become XSS (which would read the key).
+      // HTML-escape values that land in markup/attributes (safe in the JS string
+      // contexts too — it blocks `<`, `"`, `'`), and for the JSON-in-<script>
+      // value escape `<` so a filename containing `</script>` can't break out.
+      const safeFileName = escapeHtml(fileName);
+      const safeFilePath = escapeHtml(filePath);
+      const filePathJson = JSON.stringify(filePath).replace(/</g, '\\u003c');
       if (is3D) {
-        html = html.replace(/\{\{FILE\}\}/g, fileName);
-        html = html.replace(/\{\{FILE_PATH_JSON\}\}/g, JSON.stringify(filePath));
-        html = html.replace(/\{\{FORMAT\}\}/g, ext);
+        html = html.replace(/\{\{FILE\}\}/g, safeFileName);
+        html = html.replace(/\{\{FILE_PATH_JSON\}\}/g, filePathJson);
+        html = html.replace(/\{\{FORMAT\}\}/g, escapeHtml(ext));
       } else {
-        html = html.replace(/\{\{FILE\}\}/g, fileName);
-        html = html.replace(/\{\{FILE_PATH\}\}/g, filePath);
+        html = html.replace(/\{\{FILE\}\}/g, safeFileName);
+        html = html.replace(/\{\{FILE_PATH\}\}/g, safeFilePath);
         html = html.replace(/\{\{BUILDER_ID\}\}/g, '');
-        html = html.replace(/\{\{LANG\}\}/g, getLanguageForExt(ext));
+        html = html.replace(/\{\{LANG\}\}/g, escapeHtml(getLanguageForExt(ext)));
         html = html.replace(/\{\{IS_MARKDOWN\}\}/g, String(isMarkdown));
         html = html.replace(/\{\{IS_IMAGE\}\}/g, String(isImage));
         html = html.replace(/\{\{IS_VIDEO\}\}/g, String(isVideo));
@@ -3554,20 +3820,24 @@ function handleWorkspaceAnnotate(
         } else if (isPdf) {
           initScript = `initPdf(${fileSize});`;
         } else {
-          initScript = `fetch('file').then(r=>r.text()).then(init);`;
+          initScript = `fetch('file',{headers:authHeaders()}).then(r=>r.text()).then(init);`;
         }
         html = html.replace('// FILE_CONTENT will be injected by the server', initScript);
       }
 
-      // Handle ?line= query param for scroll-to-line
+      // Handle ?line= query param for scroll-to-line. Validate as a bare integer
+      // before interpolating into the script — untrusted query input must never
+      // reach the key-bearing shell's markup unescaped.
       const lineParam = url.searchParams.get('line');
-      if (lineParam) {
+      if (lineParam && /^\d+$/.test(lineParam)) {
         const scrollScript = `<script>window.addEventListener('load',()=>{setTimeout(()=>{const el=document.querySelector('[data-line="${lineParam}"]');if(el){el.scrollIntoView({block:'center'});el.classList.add('highlighted-line');}},200);})</script>`;
         html = html.replace('</body>', `${scrollScript}</body>`);
       }
 
-      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-      res.end(html);
+      // Same-origin key injection so the annotator's fetches can authenticate
+      // (advisory GHSA-xvjp-7748-v88v). The shell is public (iframe navigation);
+      // its data/media sub-routes stay keyed.
+      sendKeyInjectedHtml(res, html);
     } catch (err) {
       res.writeHead(500, { 'Content-Type': 'text/plain' });
       res.end(`Failed to serve annotator: ${(err as Error).message}`);

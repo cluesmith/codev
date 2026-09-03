@@ -12,9 +12,16 @@
  * TWO deliberate exceptions write a body OUTSIDE this path, both explicit human
  * gate-bypasses documented at their `tower-routes.ts` call sites: immediate `--interrupt`
  * (Ctrl+C then the message) and `--escape` (a bare ESC). They are the operator's "I am at
- * this terminal now" actions and take the separate per-terminal submission lock
- * (`session-submit.ts`), not the per-agent serializer here — every autonomous/scheduled/
- * held send, by contrast, delivers through this gate.
+ * this terminal now" actions — every autonomous/scheduled/held send, by contrast, delivers
+ * through this gate.
+ *
+ * They are no longer on a DISJOINT lock, though (Issue #1365). This path's write edge takes
+ * the same per-terminal submission lock (`session-submit.ts`) those bypasses take, as a leaf
+ * inside the per-agent serializer below — so a `^C`/ESC can no longer land inside a
+ * delivery's own text→Enter window, clear or truncate the composer, and leave the row marked
+ * `delivered` for a message the agent never saw whole. Lock order is always per-agent →
+ * per-terminal; see `session-submit.ts` for the full boundary, including what the lock does
+ * NOT cover.
  *
  * This module replaces the in-memory `SendBuffer` (retired in this phase): held
  * messages now live in the durable `mailbox` table, so nothing is lost to a Tower
@@ -37,10 +44,12 @@ import {
   pruneTerminal,
   findEscalatable,
   markEscalated,
+  markEscalatedDelivered,
   findStarvingAgents,
 } from '../db/mailbox.js';
 import type { DbMailbox, MailboxReason } from '../db/types.js';
 import type { GateProfile, GateVerdict } from './render-gate.js';
+import type { PacedSubmitResult } from './message-write.js';
 import { KeyedSerializer } from './write-queue.js';
 
 /**
@@ -50,6 +59,13 @@ import { KeyedSerializer } from './write-queue.js';
  * imports the terminal layer.
  */
 export interface DeliverySession {
+  /**
+   * The live terminal/session id — the key of the per-terminal submission lock the write
+   * edge takes (Issue #1365). `PtySession` already carries it; a test double MUST supply a
+   * real, distinct one, and {@link submitMessagePaced} throws if it is missing rather than
+   * letting every lock collapse onto a single `undefined` key.
+   */
+  readonly id: string;
   /**
    * The session's MONOTONE cumulative output-byte counter (Spec 1313 render-gate round 2) —
    * the gate's change token. It advances on ANY new output and NEVER decreases, so two samples
@@ -63,6 +79,15 @@ export interface DeliverySession {
    * {@link MailboxDrainer}). `PtySession` exposes it (sourced from `RingBuffer.bytesWritten`).
    */
   readonly bytesWritten: number;
+  /**
+   * Epoch ms of the session's most recent OUTPUT byte (Issue #1573 settle-before-write).
+   * `PtySession` tracks it at the same chokepoint that feeds the ring and the gate mirror.
+   * The delivery path requires a quiet interval here before it writes: the render gate
+   * proves a screen IS a clean prompt, but says nothing about whether it is still being
+   * PAINTED — a composer that repainted 1 ms ago classifies identically to one idle a
+   * minute, and writing into a settling composer is what ate the leading bytes in #1521.
+   */
+  readonly lastDataAt: number;
   readonly info: { cols: number; rows: number };
   readonly command: string;
   readonly launchArgs: string[];
@@ -78,6 +103,19 @@ export interface DeliverySession {
   readonly writable: boolean;
   write(data: string): boolean;
 }
+
+/**
+ * Why a gated write abandoned inside the per-terminal lock (Issue #1365), decided by
+ * {@link deliverAgentMail}'s precheck at the write instant rather than before the lock.
+ */
+export type WriteAbort =
+  /** Re-hold the row for this reason and retry on a later clean pass. */
+  | { kind: 'hold'; reason: MailboxReason }
+  /** The row was dismissed/superseded under us — a terminal state, so it must NOT be re-held. */
+  | { kind: 'row-resolved' };
+
+/** Outcome of the gated write edge. See {@link PacedSubmitResult}. */
+export type WriteResult = PacedSubmitResult<WriteAbort>;
 
 /** Broadcast frame for a delivered message (the dashboard/inbox message event). */
 export interface DeliveredBroadcast {
@@ -104,17 +142,29 @@ export interface DeliveryPorts {
    */
   classify(session: DeliverySession, profile: GateProfile): Promise<GateVerdict>;
   /**
-   * Write a formatted message (text + Enter, unless `noEnter`) to the session and
-   * report whether every byte reached the terminal. Resolves `true` when the paced
-   * write — including the trailing Enter — has fully completed; `false` when any
-   * write was dropped (#1198: a shellper socket that died mid-pace). The delivery
-   * `await`s it for two reasons: (1) completion chaining — the per-agent serializer
-   * holds the line until the submit is entirely on the wire, so the next delivery
-   * never starts mid-write; (2) the boolean gates markDelivered — a dropped write
-   * holds the row (`no-live-pty`) instead of falsely reporting delivery (Spec 1313
-   * integration review — the silent-loss finding).
+   * Write a formatted message (text + Enter, unless `noEnter`) to the session as ONE
+   * submission on the session's per-terminal lock, and report what actually happened.
+   * Resolves only once the paced write — trailing Enter included — has completed.
+   *
+   * The delivery `await`s it for two reasons: (1) completion chaining — the per-agent
+   * serializer holds the line until the submit is entirely on the wire, so the next
+   * delivery never starts mid-write; (2) the result gates markDelivered — anything but
+   * `written` must never be reported as delivered (Spec 1313 integration review — the
+   * silent-loss finding; Issue #1365 extended the same rule to in-lock refusals).
+   *
+   * `precheck` is invoked by the binding INSIDE the lock, immediately before the first
+   * byte, and returning non-null aborts with nothing written. It exists because taking
+   * the lock alone would only move the race: a delivery that classified a clean screen
+   * and then waited behind another submission would write onto the screen that
+   * submission just changed. All of the reason authority stays here in the delivery
+   * module — the binding only relays the verdict.
    */
-  writeMessage(session: DeliverySession, formattedMessage: string, noEnter: boolean): boolean | Promise<boolean>;
+  writeMessage(
+    session: DeliverySession,
+    formattedMessage: string,
+    noEnter: boolean,
+    precheck: () => WriteAbort | null,
+  ): WriteResult | Promise<WriteResult>;
   /** Emit the delivered-message broadcast frame. */
   broadcast(frame: DeliveredBroadcast): void;
   /**
@@ -163,7 +213,57 @@ export interface DeliveryPorts {
    * already-delivered notice. OPTIONAL, like {@link escalateHeldToOwner}.
    */
   clearHeldOwnerNotice?(workspacePath: string, toAgent: string): void;
-  log(message: string): void;
+  /**
+   * Begin watching for evidence that a message actually LANDS on the receiving terminal
+   * (Issue #1573). Called with the normalized needle from {@link echoNeedle} immediately
+   * BEFORE the write; the returned {@link EchoWatch} is consulted AFTER `markDelivered`
+   * (Issue #1584 — the delivery is committed first, so verification cannot leave the row in a
+   * re-writable state), and its answer becomes the `verified` report, not a retry decision.
+   *
+   * This is the only end-to-end evidence the delivery path has. Everything upstream of it
+   * proves the bytes were QUEUED, never that the terminal absorbed them: `session.write`
+   * returns true whenever the socket object is connected, so a receiving composer that ate
+   * the leading bytes (#1564) still produced a clean `written`, and the row was marked
+   * delivered for a message the agent never saw whole.
+   *
+   * Split into watch-then-verify rather than a single after-the-fact check because mere
+   * PRESENCE of the header proves nothing (CMAP round 1 — codex): a prior attempt's echo
+   * sits in the same scrollback, so a redelivery whose bytes were swallowed would match the
+   * copy the FIRST attempt left behind and be certified. The watch samples what the screen
+   * already showed, so verification can require evidence the write itself produced.
+   *
+   * DELIBERATELY NARROW: presence of the header line, nothing else. No screen diffing, no
+   * repair, no per-harness branches. A negative therefore means "could not confirm", not
+   * "definitely lost".
+   *
+   * What the caller does with a negative CHANGED in Issue #1584: it no longer holds the row for
+   * redelivery. The bytes are already out, so a redelivery is a re-injection — and because the
+   * residuals below recur for the same message every time, holding produced an unbounded loop
+   * (#1583). The row is committed as delivered, flagged `escalated`, and reported to the sender
+   * as `verified: false`. This watch is evidence for a REPORT, never a retry decision.
+   */
+  watchEcho(session: DeliverySession, needle: string): Promise<EchoWatch>;
+  /**
+   * Raise a human-visible notice for a delivery whose write completed but whose echo never
+   * confirmed (Issue #1584). The row is marked `delivered` + `escalated`, and a DELIVERED row
+   * is invisible to every held-scoped surface — `afx inbox`, the held-count indicator,
+   * `heldSummaryForWorkspace` — so without this the only trace of an unconfirmed delivery is a
+   * log line. That is fine for an interactive `afx send` (the sender gets `verified: false`)
+   * and not fine for a cron or backstop delivery, which has no sender waiting.
+   *
+   * Deliberately NOT `onEscalation`: that event means "held past the escalation age" and its
+   * binding says so in its title, which would be a false statement about a delivered row.
+   *
+   * Metadata only (no message body), per the spec's redaction rule. OPTIONAL, so unit fakes
+   * that do not exercise it may omit it.
+   */
+  onUnverifiedDelivery?(info: UnverifiedDeliveryInfo): void;
+  /**
+   * Tower log line. `level` defaults to `INFO`; the delivery path passes `WARN` for the one
+   * case an operator must be able to find after the fact — a delivery whose echo never
+   * confirmed (Issue #1584), which is recorded as delivered rather than re-written.
+   */
+  log(message: string, level?: 'INFO' | 'WARN'): void;
   now(): number;
 }
 
@@ -199,6 +299,19 @@ export interface LivenessInfo {
 }
 
 /**
+ * Metadata for a delivery that completed its write but could not be confirmed on the receiving
+ * terminal (Issue #1584). Ids and addresses only — no message body, per the spec's redaction
+ * rule — since this rides the SSE bus to the dashboard's notification surface.
+ */
+export interface UnverifiedDeliveryInfo {
+  workspacePath: string;
+  toAgent: string;
+  mailboxId: string;
+  /** The terminal the bytes were written to, for correlating against its transcript. */
+  terminalId: string;
+}
+
+/**
  * Metadata for a held row that has crossed the escalation age. Carries NO message body
  * (ids + metadata only, per the spec's redaction rule) — this rides the SSE bus to the
  * dashboard/VSCode indicator, which is count/attention only.
@@ -218,6 +331,19 @@ export interface DeliveryOutcome {
   delivered: string[];
   /** When nothing was delivered, why the agent's mail stays held; null if delivered or the mailbox was empty. */
   reason: MailboxReason | null;
+  /**
+   * Issue #1584: whether the delivered message's header was actually SEEN on the receiving
+   * terminal. Present only when a delivery happened AND the message had a needle worth
+   * matching ({@link echoNeedle}) — `true` when the echo confirmed, `false` when it did not.
+   * Absent means verification was skipped (a body with no distinctive first line) or nothing
+   * was delivered, and reads exactly as it did before this field existed.
+   *
+   * A `false` is "could not confirm", never "definitely lost". The row is delivered and
+   * flagged `escalated` either way, because a completed write must never be re-written — the
+   * #1573 hold-and-redeliver it replaces is what re-injected one message dozens of times
+   * (#1583). This field is how the sender is told, instead.
+   */
+  verified?: boolean;
   /**
    * The gate's internal detail when a `busy` hold came from the render-gate (Spec 1313
    * render-gate hardening) — telemetry only. Distinguishes a legitimately-occupied line
@@ -244,6 +370,93 @@ function isClassifierStuck(
   detail: GateVerdict['detail'] | undefined
 ): boolean {
   return reason === 'no-profile' || detail === 'no-region-end' || detail === 'no-composer-marker';
+}
+
+/**
+ * How long the receiving session's screen must have been QUIET before a gated delivery may
+ * write onto it (Issue #1573).
+ *
+ * The render gate answers "is this a clean prompt?" and nothing else — it has no stability
+ * requirement, so a composer captured 1 ms into its post-turn repaint passes exactly like one
+ * idle for a minute. Writing into that window is how #1521's leading bytes were eaten
+ * (`[USER via VS Code]` arriving as `ER via VS Code`). The quiescence drain trigger happened to
+ * be safe because it only fires after an output-idle debounce; the request path (`handleSend`'s
+ * immediate delivery attempt) and the `'submit'` fast trigger had no such gap. This gives all
+ * three the same floor.
+ *
+ * A hold here is cheap and self-correcting: the backstop drainer retries on its existing
+ * schedule, so the cost of being early is at most one tick of latency.
+ */
+export const SETTLE_BEFORE_WRITE_MS = 250;
+
+/**
+ * A pre-write sample of the receiving terminal, plus the confirmation that the write added
+ * something to it (Issue #1573). Returned by {@link DeliveryPorts.watchEcho}.
+ */
+export interface EchoWatch {
+  /**
+   * Did the message's header appear on the terminal as a result of the write this watch was
+   * opened for? Bounded — it waits a short interval and then answers false, which the caller
+   * treats as "could not confirm" and REPORTS (Issue #1584): the row is delivered and flagged,
+   * never re-written. Callable more than once; each call opens a fresh window against the same
+   * pre-write sample, and the delivery path uses a second one to give a slow renderer more time
+   * without putting a byte on the line.
+   */
+  verify(): Promise<boolean>;
+}
+
+/**
+ * Has the session's screen been quiet long enough to write onto (Issue #1573)?
+ *
+ * Phrased as a positive `>=` rather than a negated `<` so that a session carrying no usable
+ * timestamp — the comparison yields NaN, and every NaN comparison is false — reads as NOT
+ * settled and holds. An unknown screen age is exactly the case that must not be written into.
+ */
+function settled(ports: DeliveryPorts, session: DeliverySession): boolean {
+  return ports.now() - session.lastDataAt >= SETTLE_BEFORE_WRITE_MS;
+}
+
+/**
+ * Minimum length of a normalized {@link echoNeedle} for it to be worth matching. Below this a
+ * needle is not distinctive enough to prove anything — a two-character raw message would match
+ * incidental screen text and turn verification into a rubber stamp. Short raw sends therefore
+ * skip verification (today's behavior) rather than being confirmed by an accident.
+ */
+const MIN_ECHO_NEEDLE_LENGTH = 12;
+
+/**
+ * Reduce text to its alphanumeric skeleton for echo matching (Issue #1573).
+ *
+ * Matching the header line literally does not survive contact with real harnesses. Measured
+ * 2026-09-01 against live PTYs: claude echoes `### [ARCHITECT INSTRUCTION | <ts>] ###`
+ * verbatim into its composer, then — once the message is SUBMITTED — re-renders it as
+ * `[ARCHITECT INSTRUCTION | <ts>]`, the `###` fences consumed as a markdown H3. codex keeps the
+ * fences. Dropping every non-alphanumeric byte makes both forms the same string, and
+ * incidentally absorbs the other three ways a TUI mangles a line it is only *displaying*: a
+ * `> `/`❯ ` quote prefix, indentation, and wrapping at the viewport width (line breaks vanish
+ * with everything else, so a header split across two rows still matches).
+ *
+ * It is a presence probe, not a fidelity check — it deliberately cannot tell you the body
+ * arrived intact, only that the head of the message reached the screen.
+ */
+export function normalizeForEcho(text: string): string {
+  return text.replace(/[^A-Za-z0-9]/g, '');
+}
+
+/**
+ * The needle {@link DeliveryPorts.watchEcho} opens on: the formatted message's FIRST line,
+ * normalized. Returns `''` when it is too short to be distinctive (see
+ * {@link MIN_ECHO_NEEDLE_LENGTH}), which the caller reads as "skip verification".
+ *
+ * The first line and only the first line. A formatted send puts its `### [ARCHITECT
+ * INSTRUCTION | <iso timestamp>] ###` header there — long, and unique per message thanks to the
+ * timestamp. The TAIL would be the easier thing to find on a scrolled screen and is exactly the
+ * wrong choice: #1564's message arrived as its FINAL ~30 characters, so a footer needle would
+ * have certified the very corruption this check exists to catch.
+ */
+export function echoNeedle(formattedMessage: string): string {
+  const needle = normalizeForEcho(formattedMessage.split('\n', 1)[0]);
+  return needle.length >= MIN_ECHO_NEEDLE_LENGTH ? needle : '';
 }
 
 /**
@@ -396,6 +609,12 @@ export async function deliverAgentMail(
   // trivially.)
   if (ringToken(session, profile) !== tokenBefore) return hold('busy');
 
+  // Settle-before-write (Issue #1573). A clean verdict says the composer is EMPTY, not that it
+  // has finished being drawn. Require a quiet interval since the session's last output byte
+  // before putting anything on the line; see {@link SETTLE_BEFORE_WRITE_MS}. Re-checked inside
+  // the per-terminal lock below, because that is where the last byte before ours can land.
+  if (!settled(ports, session)) return hold('busy');
+
   // Clean, verified-empty prompt → deliver the oldest held message. Await the
   // write's paced completion so a serialized follow-up delivery never begins
   // until this message's text + Enter is fully on the wire.
@@ -423,11 +642,40 @@ export async function deliverAgentMail(
   // delivered off the paced-write timer.
   if (!session.writable) return hold('no-live-pty');
 
-  // Default false so an unobserved result is the SAFE failure mode (hold, never a false
-  // delivery); the try either assigns the real boolean or throws past this point.
-  let written = false;
+  // Re-validate EVERYTHING at the write instant, inside the per-terminal lock (Issue #1365).
+  // The three checks above (screen unchanged, session writable, row still held) were made
+  // before the lock; between them and the first byte another writer may hold the terminal,
+  // and this delivery may have waited. Without this, routing the write through the lock would
+  // merely relocate the race it exists to close: a delivery could write onto a screen that an
+  // `--interrupt`/`--escape` had just cleared. Cheap enough to repeat — a synchronous ring
+  // read and one indexed better-sqlite3 lookup.
+  //
+  // The residual it CANNOT close: `ringToken` counts OUTPUT bytes, so input written by a
+  // path that does not take this lock (the raw `/api/terminals/:id/write` passthrough, or a
+  // human's keystrokes over the WebSocket) can sit un-echoed on the line and read as
+  // unchanged. Serialization — not this precheck — is what makes the lock-taking writers
+  // safe; the echo-lag residual for the rest is #1473's territory.
+  const precheck = (): WriteAbort | null => {
+    if (!session.writable) return { kind: 'hold', reason: 'no-live-pty' };
+    if (ringToken(session, profile) !== tokenBefore) return { kind: 'hold', reason: 'busy' };
+    if (!settled(ports, session)) return { kind: 'hold', reason: 'busy' };
+    const stillHeld = getById(db, row.id);
+    if (!stillHeld || stillHeld.status !== 'held') return { kind: 'row-resolved' };
+    return null;
+  };
+
+  // Open the echo watch BEFORE the write (Issue #1573). It samples what the terminal already
+  // shows, so the check after the write can require evidence THIS write produced rather than
+  // accepting a copy an earlier attempt left in scrollback. Null when the message has no
+  // header distinctive enough to look for (see {@link echoNeedle}).
+  const needle = echoNeedle(current.formatted_message);
+  const echo = needle ? await ports.watchEcho(session, needle) : null;
+
+  // Default to a hold so an unobserved result is the SAFE failure mode (hold, never a false
+  // delivery); the try either assigns the real result or throws past this point.
+  let result: WriteResult = { status: 'aborted', abort: { kind: 'hold', reason: 'busy' } };
   try {
-    written = await ports.writeMessage(session, current.formatted_message, current.no_enter === 1);
+    result = await ports.writeMessage(session, current.formatted_message, current.no_enter === 1, precheck);
   } finally {
     // Invalidate the memo on EVERY write outcome — a clean `true`, a dropped-write `false`, OR a
     // rejection — and BEFORE the markDelivered/held decisions below (CMAP round 3 moved it above the
@@ -447,19 +695,72 @@ export async function deliverAgentMail(
     memo?.delete(cacheKey);
   }
 
-  // A dropped PTY write (#1198) means zero-or-partial bytes reached the terminal — the exact silent
-  // loss this spec exists to prevent (Spec 1313 integration review — Codex). The t=0 `writable`
-  // precheck above cannot catch a socket that dies mid-pace (the text/lines/Enter fire across
-  // setTimeout gaps), so writeMessage threads the per-write result: `false` → no complete submit
-  // landed. Hold the row (`no-live-pty`, retried on the next clean gate pass) instead of marking it
-  // delivered. Any bytes already on the wire only make the line dirty; the render gate then holds on
-  // that draft until the session recovers or is torn down — it can never be marked delivered on a
-  // dead PTY.
-  if (!written) return hold('no-live-pty');
+  // Anything short of a complete submit holds the row — a delivery is marked delivered only when
+  // every byte, Enter included, reached the terminal.
+  //
+  //   • `dropped` — a PTY write was dropped (#1198): zero-or-partial bytes reached the terminal,
+  //     the exact silent loss this spec exists to prevent (Spec 1313 integration review — Codex).
+  //     The t=0 `writable` precheck cannot catch a socket that dies mid-pace (the text/lines/Enter
+  //     fire across setTimeout gaps). Any bytes already on the wire only make the line dirty; the
+  //     render gate then holds on that draft until the session recovers or is torn down.
+  //   • `contended` — another submission (an `--interrupt`/`--escape`, or a delivery to an agent
+  //     sharing this terminal) held the lock, so nothing was written. `busy` is the honest reason:
+  //     the line is occupied. Declining rather than queueing is deliberate — see
+  //     {@link trySubmitToSession}: the drainer walks agents sequentially, so a blocking wait here
+  //     would stall every OTHER agent's delivery behind this one terminal.
+  //   • `aborted` — the in-lock precheck refused, with nothing written. A `hold` abort re-holds for
+  //     the stated reason; `row-resolved` means the row was dismissed/superseded while we waited,
+  //     which is a TERMINAL state and must not be re-held (same handling as the pre-lock check
+  //     above, which this one backstops for the duration of the lock wait).
+  //   • `preempted` — the bytes went out, but an operator submission whose wait ceiling expired
+  //     wrote unserialized while they did, so the composer may have been cleared or truncated
+  //     under them. Hold rather than mark delivered. This trades a possible DUPLICATE (if the
+  //     message did land intact, the gate re-delivers it later) for never reporting a delivery
+  //     that did not happen — the same call the `dropped` branch already makes, and the failure
+  //     this whole issue exists to remove. It is the one hole the ceiling opens, and it is
+  //     detected by counting lock bypasses, not by re-reading the screen.
+  if (result.status === 'dropped') return hold('no-live-pty');
+  if (result.status === 'preempted') {
+    ports.log(
+      `[mailbox] write to ${toAgent} @ ${path.basename(workspacePath)} was raced by an unserialized ` +
+        `operator write — holding ${row.id.slice(0, 8)}… for redelivery rather than reporting it delivered`,
+    );
+    return hold('busy');
+  }
+  if (result.status === 'contended') return hold('busy');
+  if (result.status === 'aborted') {
+    if (result.abort.kind === 'row-resolved') {
+      ports.onHeldStateChange(); // the held set changed under us → refresh the indicator
+      return { delivered: [], reason: null };
+    }
+    return hold(result.abort.reason);
+  }
 
-  // markDelivered is guarded (held→delivered only). If it did NOT transition, the row
-  // was dismissed/superseded during the paced write — accept that terminal state and
-  // do not broadcast a delivery for it.
+  // THE POINT OF NO RETURN (Issue #1584). Past this line the write COMPLETED — every byte,
+  // Enter included, was accepted by the session — so the row is at-least-once delivered and
+  // must NEVER be written again. Nothing below may `hold(...)`: a hold puts the row back in
+  // the drainer's held set, and the next clean-prompt pass re-writes the WHOLE message with
+  // no attempt cap anywhere in this module. That is exactly what #1583 saw in the field —
+  // one `afx send --file` re-injected dozens of times, byte-identical, silently (a `busy`
+  // hold is excluded from {@link isClassifierStuck}, so no streak ever escalates it).
+  //
+  // Only PRE-write prechecks may hold, and every hold above this point is one: the branches
+  // between the write and here wrote NOTHING (`contended`, `aborted`) or produced a write that
+  // cannot be trusted to have landed (`dropped` — bytes lost mid-pace to a dead socket;
+  // `preempted` — an unserialized operator submission may have cleared or truncated the
+  // composer under them). Only `written` reaches this line, and only `written` is the
+  // at-least-once guarantee that forbids a re-write.
+  //
+  // COMMIT THE DELIVERY FIRST, before any further await or fallible call (CMAP round 1 — Codex).
+  // The point of no return is only real if it is DURABLE: while the row still reads `held` in
+  // the database it is re-writable by the next drainer tick, so leaving it held across ~1.2 s of
+  // verification would reopen the loop for any interruption of that window — a Tower crash or
+  // restart, or a `verify()` that rejects instead of answering. `markDelivered` is synchronous
+  // (better-sqlite3), so ordering it here leaves no window at all.
+  //
+  // markDelivered is guarded (held→delivered only). If it did NOT transition, the row was
+  // dismissed/superseded during the paced write — accept that terminal state and do not
+  // broadcast a delivery for it.
   if (!markDelivered(db, row.id, ports.now())) {
     ports.onHeldStateChange();
     return { delivered: [], reason: null };
@@ -467,7 +768,52 @@ export async function deliverAgentMail(
   ports.broadcast(broadcastForRow(current, ports.now()));
   ports.onHeldStateChange(); // a held row left the set → refresh the indicator count
   ports.log(`[mailbox] delivered ${row.id} → ${toAgent} @ ${path.basename(workspacePath)}`);
-  return { delivered: [row.id], reason: null };
+
+  // Echo verification (Issue #1573) still runs — it is the only end-to-end evidence the bytes
+  // reached the terminal — but it is now pure REPORTING, downstream of a delivery that is
+  // already committed. `false` means "could not confirm", never "definitely lost".
+  let verified: boolean | undefined;
+  if (echo) {
+    // One bounded RE-verify window before giving up. `verify()` polls to its own deadline and
+    // then answers false; a second call opens a fresh window against the SAME pre-write sample,
+    // so it still requires evidence THIS write produced. It accommodates a slow renderer
+    // without writing a single byte, and the total stays inside the sender's patience (~1.5 s)
+    // because the request path awaits this.
+    //
+    // A REJECTION is unconfirmed, not an error to propagate: the bytes are out and the row is
+    // committed, so throwing here would only deny the sender the `verified` answer and log a
+    // spurious delivery failure.
+    try {
+      verified = (await echo.verify()) || (await echo.verify());
+    } catch (err) {
+      verified = false;
+      ports.log(`[mailbox] echo verification errored for ${row.id.slice(0, 8)}…: ${String(err)}`, 'WARN');
+    }
+    if (!verified) {
+      // The row is already `delivered`, so this is the delivered-only counterpart of the
+      // drainer's held-only `markEscalated`.
+      markEscalatedDelivered(db, row.id, ports.now());
+      ports.log(
+        `[mailbox] delivered-unverified ${row.id.slice(0, 8)}… → ${toAgent} @ ` +
+          `${path.basename(workspacePath)} (terminal ${session.id}, needle ${needle.length} chars): ` +
+          `the write completed but its header never appeared on the terminal. Recorded as ` +
+          `delivered and flagged — NOT re-written (Issue #1584).`,
+        'WARN',
+      );
+      // Raise it where a human will see it. The sender's `verified: false` covers an
+      // interactive `afx send`, but a cron or backstop delivery has no sender waiting on a
+      // response, and a DELIVERED row is invisible to every held-scoped surface (`afx inbox`,
+      // the held-count indicator) — without this its only trace is a log line (CMAP round 1 —
+      // Codex).
+      ports.onUnverifiedDelivery?.({
+        workspacePath,
+        toAgent,
+        mailboxId: row.id,
+        terminalId: session.id,
+      });
+    }
+  }
+  return { delivered: [row.id], reason: null, ...(verified === undefined ? {} : { verified }) };
 }
 
 /**

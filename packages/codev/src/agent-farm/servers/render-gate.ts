@@ -181,6 +181,28 @@ function screenLines(term: HeadlessTerminal, rows: number): string[] {
 }
 
 /**
+ * Every line the mirror still holds — scrollback AND viewport — right-trimmed (Issue #1573).
+ *
+ * The gate itself deliberately reads only the viewport ({@link screenLines}): a composer lives
+ * at the bottom of the screen, and history is noise for classifying it. Echo verification wants
+ * the opposite reach. A long message pushes its own header off the top while it is still being
+ * typed, so the only place the header survives is scrollback — measured with a 300-line send,
+ * where the header sat at buffer line 6 under a viewport starting at 209.
+ *
+ * Bounded by the mirror's own `SCREEN_SCROLLBACK` (1000 lines), and read once per delivery
+ * rather than per gate check, so the O(history) scan is not on any hot path.
+ */
+export function bufferLines(term: HeadlessTerminal): string[] {
+  const buf = term.buffer.active;
+  const lines: string[] = [];
+  for (let i = 0; i < buf.length; i++) {
+    const line = buf.getLine(i);
+    lines.push(line ? line.translateToString(true).trimEnd() : '');
+  }
+  return lines;
+}
+
+/**
  * Last row index that is the profile's composer marker, or -1 when no row qualifies.
  *
  * The text match (`markerPattern`) is the necessary condition; a profile may demand

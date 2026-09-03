@@ -1,5 +1,5 @@
 /**
- * `afx reset` — the command surface over the reset state machine (Spec 1273).
+ * `afx refresh` — the command surface over the refresh state machine (Spec 1273).
  *
  * This file is deliberately thin. It does three things and nothing else:
  * resolves the target, binds REAL implementations to the orchestrator's ports,
@@ -7,7 +7,7 @@
  * lives in `reset/index.ts`, where it is testable without Tower, a PTY, or a
  * live builder.
  *
- * That split is the point. The dangerous part of reset is the ordering, and
+ * That split is the point. The dangerous part of a refresh is the ordering, and
  * ordering is only provable if the thing that decides it has no I/O in it.
  *
  * Addressing, workspace detection and sender identity are reused verbatim from
@@ -18,6 +18,7 @@
 import { existsSync, readFileSync, readdirSync, writeFileSync, statSync } from 'node:fs';
 import { TowerClient } from '../lib/tower-client.js';
 import { logger, fatal } from '../utils/logger.js';
+import { MAX_MESSAGE_BYTES, messageLimitError } from '../utils/message-format.js';
 import { findBuilderById } from '../lib/builder-lookup.js';
 import { getConfig } from '../utils/index.js';
 import { loadConfig } from '../../lib/config.js';
@@ -25,7 +26,7 @@ import { loadForgeConfig } from '../../lib/forge.js';
 import { fetchIssue as fetchForgeIssue } from '../../lib/github.js';
 import { buildPromptFromTemplate, buildResumeNotice } from './spawn-roles.js';
 import { detectWorkspaceRoot, detectCurrentBuilderId } from './send.js';
-import { resolveBuilderContext } from './reset/context.js';
+import { buildContextFsPort, resolveBuilderContext } from './reset/context.js';
 import {
   formatResetReport,
   runReset,
@@ -38,16 +39,41 @@ import type { IssuePayload } from './reset/reorient.js';
 import type { CustomHarnessConfig } from '../utils/harness.js';
 import type { ResetOptions } from '../types.js';
 
-/** Same cap `afx send --file` enforces. One rule for architect-supplied files. */
-const MAX_FILE_SIZE = 48 * 1024;
+/**
+ * Same cap `afx send --file` enforces. One rule for architect-supplied files — and now the same
+ * CONSTANT, not a third copy of the number (Issue #1573): the file's content rides the message
+ * body, which Tower's send route refuses above `MAX_MESSAGE_BYTES`, so a literal that drifted
+ * would let this command accept a file the route then rejects with a 400.
+ */
+const MAX_FILE_SIZE = MAX_MESSAGE_BYTES;
 
-export async function reset(options: ResetOptions): Promise<void> {
+/**
+ * The one-line notice `afx reset` prints before doing the work (#1489).
+ *
+ * Exported so the deprecation is pinned by a test rather than by whoever
+ * happens to read the CLI wiring: an alias that stops announcing itself is an
+ * alias nobody migrates off, and this one is scheduled for removal.
+ */
+export const RESET_ALIAS_NOTICE =
+  'afx reset has been renamed to afx refresh; this alias will be removed in a future release';
+
+/**
+ * Announce the deprecated spelling on **stderr**.
+ *
+ * stdout carries the run report, which is read by humans and occasionally piped;
+ * a deprecation line does not belong in it.
+ */
+export function warnResetAlias(): void {
+  process.stderr.write(`${RESET_ALIAS_NOTICE}\n`);
+}
+
+export async function refresh(options: ResetOptions): Promise<void> {
   const target = options.builder;
   if (!target) {
-    fatal('Must specify a builder. Usage: afx reset <builder>');
+    fatal('Must specify a builder. Usage: afx refresh <builder>');
   }
 
-  logger.header('Builder Context Reset');
+  logger.header('Builder Context Refresh');
 
   const workspace = detectWorkspaceRoot() ?? undefined;
 
@@ -59,23 +85,23 @@ export async function reset(options: ResetOptions): Promise<void> {
   }
 
   // `findBuilderById`, NOT `getBuilder`: the latter matches the id EXACTLY, so
-  // `afx reset 1273` would fail against a builder registered as `aspir-1273`
-  // while `afx send 1273` reached it fine. Reset must resolve targets the same
-  // way every other builder-addressed command does — a reset that cannot be
-  // addressed the way the architect already types addresses is a reset that
+  // `afx refresh 1273` would fail against a builder registered as `aspir-1273`
+  // while `afx send 1273` reached it fine. Refresh must resolve targets the same
+  // way every other builder-addressed command does — a refresh that cannot be
+  // addressed the way the architect already types addresses is one that
   // gets typed wrong under pressure. `findBuilderById` also reports AMBIGUOUS
   // with the candidate list rather than silently picking one.
   const builder = findBuilderById(target);
   if (!builder) {
     fatal(
       `No builder '${target}' in this workspace (or the id is ambiguous — see above). ` +
-        `Check 'afx status'. Reset needs the registry row for the worktree and branch.`,
+        `Check 'afx status'. Refresh needs the registry row for the worktree and branch.`,
     );
   }
   if (!builder.worktree || !builder.branch) {
     fatal(
       `Builder '${target}' has an incomplete registry row (worktree='${builder.worktree}', ` +
-        `branch='${builder.branch}'). Refusing to reset against unresolved state.`,
+        `branch='${builder.branch}'). Refusing to refresh against unresolved state.`,
     );
   }
 
@@ -89,19 +115,10 @@ export async function reset(options: ResetOptions): Promise<void> {
   const userConfig = loadConfig(config.workspaceRoot);
 
   const context = resolveBuilderContext({
-    fs: {
-      exists: (p: string) => existsSync(p),
-      read: (p: string) => safeRead(p),
-      listDirs: (p: string) => {
-        try {
-          return readdirSync(p, { withFileTypes: true })
-            .filter(e => e.isDirectory())
-            .map(e => e.name);
-        } catch {
-          return null;
-        }
-      },
-    },
+    // Shared implementation — see `reset/context.ts`. Three hand-rolled copies
+    // of this port existed, and a stub in any one silently nulled the porch
+    // context for that path.
+    fs: buildContextFsPort(),
     builderId: builder.id,
     worktree: builder.worktree,
     branch: builder.branch,
@@ -145,14 +162,14 @@ export async function reset(options: ResetOptions): Promise<void> {
     console.log(formatResetReport(result));
 
     if (result.outcome === 'aborted') {
-      // Non-zero: an aborted reset is a failure the caller must see, even though
+      // Non-zero: an aborted refresh is a failure the caller must see, even though
       // it is the SAFE outcome. Silence here would let a script treat "refused
       // to clear" as "cleared".
       process.exitCode = 1;
       return;
     }
 
-    logger.success(`Builder ${target} reset and re-oriented.`);
+    logger.success(`Builder ${target} refreshed and re-oriented.`);
     logger.info(`State file: ${result.statePath} (${result.stateBytes} bytes)`);
   } catch (err) {
     if (err instanceof ResetPreflightError) {
@@ -213,6 +230,11 @@ function buildTerminalPort(
       return { exists: true, lastDataAt: t.lastDataAt, writable: t.writable };
     },
     async sendMessage(message: string) {
+      // Issue #1573: the route now refuses an over-limit body, and this command's prompt
+      // carries the `--file` addendum inside it — so the total, not just the file, has to be
+      // checked, and it is better checked here than discovered as a 400.
+      const tooLarge = messageLimitError(message);
+      if (tooLarge) throw new Error(tooLarge);
       const result = await client.sendMessage(target, message, {
         from,
         workspace,
@@ -230,6 +252,8 @@ function buildTerminalPort(
      * verified manual recipe used.
      */
     async sendRaw(text: string) {
+      const tooLarge = messageLimitError(text);
+      if (tooLarge) throw new Error(tooLarge);
       const result = await client.sendMessage(target, text, {
         from,
         workspace,
@@ -297,9 +321,9 @@ function buildAddendum(options: ResetOptions): string | undefined {
 /**
  * Fetch issue metadata for the long form, best-effort.
  *
- * A forge outage must not block a reset: phase 5 renders an explicit "could not
+ * A forge outage must not block a refresh: phase 5 renders an explicit "could not
  * be fetched" gap with a `gh issue view` recovery line, which is strictly better
- * than aborting a reset the architect needs, and strictly better than silently
+ * than aborting a refresh the architect needs, and strictly better than silently
  * omitting requirements.
  */
 async function fetchIssuePayload(

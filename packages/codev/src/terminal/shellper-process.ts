@@ -86,6 +86,12 @@ export class ShellperProcess extends EventEmitter {
   // reconnect as fresh activity. Initialised to startTime so a brand-new
   // shellper that has emitted nothing yet still reports a sane value.
   private lastDataAt: number = Date.now();
+  // PIR #1475: the argv this shellper's CURRENT PTY was spawned with, sent in
+  // every WELCOME as the authoritative statement of the session's app identity.
+  // Written by spawnPty(), so it tracks SPAWN replacements as well as the
+  // original launch. Null only in the window before the first spawn.
+  private ptyCommand: string | null = null;
+  private ptyArgs: string[] = [];
   private exited = false;
   // Exit info retained after the PTY exits so clients that connect *after*
   // exit still learn the session ended. Without this, a fast-exiting command
@@ -134,6 +140,12 @@ export class ShellperProcess extends EventEmitter {
   ): void {
     this.exited = false;
     this.exitInfo = null;
+    // PIR #1475: record what we are ACTUALLY spawning, for the WELCOME frame.
+    // Set here rather than in start() so the SPAWN-frame replacement path
+    // (handleSpawn) updates it too — a relaunched PTY must report its current
+    // argv, not the one this shellper was born with.
+    this.ptyCommand = command;
+    this.ptyArgs = [...args];
     const pty = this.ptyFactory();
     this.pty = pty;
     pty.spawn(command, args, {
@@ -378,9 +390,15 @@ export class ShellperProcess extends EventEmitter {
       // #1215: this build always sends REPLAY below, even when empty —
       // advertise that guarantee so the client can skip its full wait.
       alwaysSendsReplay: true,
+      // PIR #1475: the authoritative app identity. Omitted entirely before the
+      // first spawn, so the peer sees the same shape an older shellper sends and
+      // falls back to its persisted command rather than adopting a half-identity.
+      ...(this.ptyCommand ? { command: this.ptyCommand, args: this.ptyArgs } : {}),
     });
     socket.write(welcome);
-    this.log(`WELCOME sent: pid=${pid}, version=${PROTOCOL_VERSION}`);
+    this.log(
+      `WELCOME sent: pid=${pid}, version=${PROTOCOL_VERSION}, command=${this.ptyCommand ?? '(unspawned)'}`,
+    );
 
     // Send replay buffer. #1198: never emit a frame the peer's parser must
     // drop — a long-lived TUI session's replay (newline-free, unbounded

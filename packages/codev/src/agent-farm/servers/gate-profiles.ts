@@ -155,7 +155,7 @@ export interface AppIdentity {
  * launches — a builder run through `.builder-start.sh` whose `command` is the
  * shell, not the agent — resolve to `null` here; the delivery wiring (Phase 4)
  * supplies the resolved agent command for those (it already reads the launch
- * script to identify the harness, as `afx reset` does). Fail-safe by
+ * script to identify the harness, as `afx refresh` does). Fail-safe by
  * construction: an unresolved identity is held and surfaced, never guessed.
  */
 export function resolveProfile(identity: AppIdentity): GateProfile | null {

@@ -67,7 +67,47 @@ export interface IShellperClient extends EventEmitter {
    * is an older one that doesn't send the field.
    */
   readonly lastDataAt: number;
+  /**
+   * argv[0] the shellper reported it actually spawned the PTY with (PIR #1475),
+   * or null when it sent no usable identity — an older shellper that omits the
+   * WELCOME fields, or a payload that failed validation.
+   *
+   * OPTIONAL on the interface, always present on {@link ShellperClient}. Test
+   * doubles are the reason: `tower-shellper-integration.test.ts` implements this
+   * interface for real (required members would break its typecheck), while
+   * several others are `as unknown as IShellperClient` casts whose objects yield
+   * `undefined` at runtime rather than `null`. Consumers must therefore treat
+   * absent/null/empty identically — use a falsy check, never `!== null`.
+   */
+  readonly welcomeCommand?: string | null;
+  /**
+   * argv[1..] paired with {@link IShellperClient.welcomeCommand}. The pair is one
+   * capability: both are set together or both are null, so a caller that has a
+   * command can trust these args belong to it.
+   */
+  readonly welcomeArgs?: string[] | null;
 }
+
+// PIR #1475: bounds on the WELCOME identity payload — a sanity check against a
+// garbled frame, NOT a security boundary (the frame already arrives over an
+// owner-only socket and is capped at MAX_FRAME_SIZE by the parser).
+//
+// These are deliberately generous, and the arg bound is on the TOTAL rather than
+// per-argument. A per-arg cap of 4096 looked reasonable and was wrong in the
+// field: an architect launches with `--append-system-prompt <entire role doc>`,
+// several KB in a single argument. Because rejection is atomic, that cap threw
+// away the whole identity and silently sent every architect down the config
+// fallback — the exact sessions this feature exists to make authoritative.
+// Bound the aggregate instead, well above any real argv and far below the frame
+// cap. A command is a path, so PATH_MAX is the right shape of limit for it.
+//
+// The args bound is measured in real UTF-8 BYTES (`Buffer.byteLength`), not
+// `String.length` — the latter counts UTF-16 code units, which would hand a
+// non-ASCII argv up to ~3x the nominal budget. The command bound stays in chars
+// deliberately: it is a path-shaped sanity check, not an allocation guard.
+const MAX_IDENTITY_COMMAND_LENGTH = 4096;
+const MAX_IDENTITY_ARGS = 256;
+const MAX_IDENTITY_ARGS_TOTAL_BYTES = 512 * 1024;
 
 export class ShellperClient extends EventEmitter implements IShellperClient {
   private socket: net.Socket | null = null;
@@ -104,6 +144,12 @@ export class ShellperClient extends EventEmitter implements IShellperClient {
   // an older shellper never sends this field, so waitForReplay() must not
   // assume an empty REPLAY is coming for it.
   private _alwaysSendsReplay = false;
+  // PIR #1475: the shellper's own statement of what it spawned, hydrated on
+  // WELCOME and refreshed when Tower itself issues a SPAWN. Null means "no
+  // usable identity" — an older shellper, or a payload that failed validation —
+  // and consumers fall back to the persisted launch command.
+  private _welcomeCommand: string | null = null;
+  private _welcomeArgs: string[] | null = null;
 
   constructor(
     private readonly socketPath: string,
@@ -135,6 +181,85 @@ export class ShellperClient extends EventEmitter implements IShellperClient {
    */
   get lastDataAt(): number {
     return this._lastDataAt;
+  }
+
+  /** argv[0] the shellper reported spawning, or null (PIR #1475). */
+  get welcomeCommand(): string | null {
+    return this._welcomeCommand;
+  }
+
+  /** argv[1..] paired with {@link ShellperClient.welcomeCommand}, or null. */
+  get welcomeArgs(): string[] | null {
+    return this._welcomeArgs;
+  }
+
+  /**
+   * Adopt a reported identity, ATOMICALLY (PIR #1475).
+   *
+   * The command and args are one capability, so anything short of a fully valid
+   * pair rejects BOTH and leaves the client with no identity — the caller then
+   * falls back to the persisted launch command rather than acting on half a
+   * truth. Rejected: a non-string or empty/whitespace-only command (an empty
+   * string would otherwise overwrite a good persisted value, and `''` is what
+   * `createSessionRaw` uses for "unknown"), an over-long command, a non-array or
+   * non-string-element args list, and args that exceed the count/length bounds.
+   *
+   * Validation is about coherence, not spoof-resistance: a WELCOME payload is
+   * trusted because it arrives over an owner-only socket (mode 0600 inside the
+   * 0700 run dir) from a PID/start-time-validated shellper — NOT because a
+   * semantically bogus command would fail safely. It would not: `resolveProfile`
+   * matches by substring, so a garbled string containing `claude` resolves a real
+   * profile.
+   */
+  private setIdentity(command: unknown, args: unknown): void {
+    // A shellper that states NO identity is the legacy case, and silence is the
+    // right response. A shellper that states one we then throw away is not: that
+    // is the failure mode this project already shipped once (a per-argument bound
+    // an architect's multi-KB `--append-system-prompt` tripped), and it was
+    // invisible because a rejection and a legacy shellper look identical
+    // downstream — both land on `source=config`. Warn only in the second case, so
+    // a recurrence is visible where it happens instead of being inferred.
+    const reject = (why: string): void => {
+      this._welcomeCommand = null;
+      this._welcomeArgs = null;
+      if (command !== undefined || args !== undefined) {
+        console.warn(`[shellper-client] discarding WELCOME identity from ${this.socketPath}: ${why}`);
+      }
+    };
+    const trimmed = typeof command === 'string' ? command.trim() : '';
+    if (!trimmed || trimmed.length > MAX_IDENTITY_COMMAND_LENGTH) {
+      reject(
+        typeof command === 'string'
+          ? `command is empty or exceeds ${MAX_IDENTITY_COMMAND_LENGTH} chars (${command.length})`
+          : `command is ${typeof command}, expected string`,
+      );
+      return;
+    }
+    let resolvedArgs: string[] = [];
+    if (args !== undefined) {
+      if (!Array.isArray(args)) {
+        reject(`args is ${typeof args}, expected array`);
+        return;
+      }
+      if (args.length > MAX_IDENTITY_ARGS) {
+        reject(`args has ${args.length} elements, limit ${MAX_IDENTITY_ARGS}`);
+        return;
+      }
+      if (!args.every((a) => typeof a === 'string')) {
+        reject('args contains a non-string element');
+        return;
+      }
+      // Byte length, not `String.length`: the latter counts UTF-16 code units, so a
+      // non-ASCII argv would silently get several times the nominal budget.
+      const total = (args as string[]).reduce((n, a) => n + Buffer.byteLength(a, 'utf8'), 0);
+      if (total > MAX_IDENTITY_ARGS_TOTAL_BYTES) {
+        reject(`args total ${total} bytes, limit ${MAX_IDENTITY_ARGS_TOTAL_BYTES}`);
+        return;
+      }
+      resolvedArgs = args as string[];
+    }
+    this._welcomeCommand = trimmed;
+    this._welcomeArgs = resolvedArgs;
   }
 
   /**
@@ -245,6 +370,10 @@ export class ShellperClient extends EventEmitter implements IShellperClient {
               // it (falsy default stands); waitForReplay() uses this to pick
               // its timeout.
               this._alwaysSendsReplay = welcome.alwaysSendsReplay === true;
+              // PIR #1475: hydrate the authoritative app identity. Old shellpers
+              // omit both fields, leaving them null so consumers fall back to the
+              // persisted command.
+              this.setIdentity(welcome.command, welcome.args);
               // Replay any buffered frames received before WELCOME
               for (const buffered of preWelcomeBuffer) {
                 this.handleFrame(buffered);
@@ -342,6 +471,15 @@ export class ShellperClient extends EventEmitter implements IShellperClient {
   spawn(msg: SpawnMessage): void {
     if (!this._connected || !this.socket) return;
     this.socket.write(encodeSpawn(msg));
+    // PIR #1475: Tower issued this relaunch, so the identity it just asked for
+    // is the identity the shellper will report on its next WELCOME. Adopt it now
+    // rather than waiting for a reconnect that an ordinary SPAWN never triggers —
+    // otherwise every consumer reading through this client (PtySession.command,
+    // and through it the render gate) would stay pinned to the pre-relaunch value
+    // for the rest of the session. Deliberately AFTER the connected guard and the
+    // write: a dropped SPAWN must not leave us claiming an argv the shellper
+    // never received.
+    this.setIdentity(msg.command, msg.args);
   }
 
   ping(): void {

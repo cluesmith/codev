@@ -140,7 +140,7 @@ Then **stay in the interactive session**. Do not exit. Wait for the user's next 
 
 - **Don't write `codev/reviews/<id>-<slug>.md` in this phase** — it's the next phase's artifact, with a different shape (retrospective with arch + lessons updates)
 - Don't add features not in the plan — scope creep is a `BLOCKED` signal, not a free expansion
-- Don't run `porch approve` yourself
+- Don't run `porch approve` on your own initiative — only when the architect relays the human's approval
 - Don't push to the default branch — only to your builder branch
 - Don't squash commits — let the merge commit preserve history
 - Don't open the PR yet — that's the `review` phase
