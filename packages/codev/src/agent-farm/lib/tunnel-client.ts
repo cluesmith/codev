@@ -17,6 +17,8 @@ import https from 'node:https';
 import { Duplex } from 'node:stream';
 import { URL } from 'node:url';
 import WebSocket, { createWebSocketStream } from 'ws';
+import { TOWER_KEY_HEADER, LEGACY_WEB_KEY_HEADER } from '@cluesmith/codev-types';
+import { getExpectedKey } from '../utils/server-utils.js';
 import { backoffDelayMs } from './reconnect-backoff.js';
 
 export interface TunnelClientOptions {
@@ -83,12 +85,46 @@ const BLOCKED_PATH_SEGMENT = /(^|\/)api\/tunnel\//;
  */
 export const TUNNEL_PROXY_HEADER = 'x-codev-tunnel-proxy';
 
-/** Strip any caller-supplied proxy marker, then stamp our own. */
-function stampProxyMarker(headers: Record<string, string | string[]>): void {
+/**
+ * Headers this client owns outright: whatever the cloud side sent under these
+ * names is dropped before ours is stamped, so none of them can be forged or
+ * suppressed from outside (#1586).
+ */
+const CLIENT_OWNED_HEADERS = new Set([
+  TUNNEL_PROXY_HEADER,
+  TOWER_KEY_HEADER,
+  LEGACY_WEB_KEY_HEADER,
+  'host',
+]);
+
+/**
+ * Rewrite the headers of a tunnel-borne request into what a *local* caller
+ * would have sent (#1586).
+ *
+ * Tower authenticates local actors with the shared local key and rejects any
+ * `Host` outside its allowlist (advisory GHSA-xvjp-7748-v88v). A request that
+ * arrives through the tunnel carries the cloud edge's `Host` and no key, so
+ * without this it is rejected twice over — the Host guard runs even ahead of
+ * the public-route allowlist, so every page 401s too, not just the API.
+ *
+ * The cloud edge has already authenticated the remote user; `TunnelClient`
+ * runs inside the Tower process and is itself a local actor, so it
+ * legitimately holds the key. Host, key and proxy marker are stamped together
+ * here so the three can never drift apart.
+ */
+function stampLocalHeaders(
+  headers: Record<string, string | string[]>,
+  localPort: number
+): void {
   for (const key of Object.keys(headers)) {
-    if (key.toLowerCase() === TUNNEL_PROXY_HEADER) delete headers[key];
+    if (CLIENT_OWNED_HEADERS.has(key.toLowerCase())) delete headers[key];
   }
+  headers['Host'] = `localhost:${localPort}`;
   headers[TUNNEL_PROXY_HEADER] = '1';
+  // Fails closed: with no local key readable, the request goes on unkeyed and
+  // Tower rejects it, exactly as it did before this stamp existed.
+  const key = getExpectedKey();
+  if (key) headers[TOWER_KEY_HEADER] = key;
 }
 
 /** Heartbeat ping interval — send a WebSocket ping every 30 seconds */
@@ -734,12 +770,11 @@ export class TunnelClient {
   private handleWebSocketConnect(stream: http2.ServerHttp2Stream, headers: http2.IncomingHttpHeaders): void {
     const path = headers[':path'] as string || '/';
 
-    // WebSocket CONNECT: proxy to local server. The upgrade goes to localhost,
-    // so the Host must be localhost too — Tower's Host guard (advisory
-    // GHSA-xvjp-7748-v88v) rejects the tunnel's public :authority, and the HTTP
-    // proxy path already lets Node default Host to localhost. Matching it here
-    // keeps tunneled terminals working.
-    const localHost = `localhost:${this.options.localPort}`;
+    // WebSocket CONNECT: proxy to local server. `stampLocalHeaders` rewrites
+    // Host to localhost — Tower's Host guard (advisory GHSA-xvjp-7748-v88v)
+    // rejects the tunnel's public authority. The browser's own
+    // `Sec-WebSocket-Protocol: codev-key.<KEY>` offer is forwarded untouched
+    // and is what authenticates the upgrade.
 
     // Forward non-hop-by-hop headers from the H2 CONNECT to the local WS upgrade
     const forwardHeaders: Record<string, string | string[]> = {
@@ -747,17 +782,15 @@ export class TunnelClient {
       'Connection': 'Upgrade',
       'Sec-WebSocket-Version': '13',
       'Sec-WebSocket-Key': randomBytes(16).toString('base64'),
-      'Host': localHost,
     };
     for (const [key, value] of Object.entries(headers)) {
       if (key.startsWith(':')) continue;
       if (HOP_BY_HOP_HEADERS.has(key.toLowerCase())) continue;
-      if (key.toLowerCase() === 'host') continue; // Already set
       if (value !== undefined) {
         forwardHeaders[key] = value as string | string[];
       }
     }
-    stampProxyMarker(forwardHeaders);
+    stampLocalHeaders(forwardHeaders, this.options.localPort);
 
     // Make HTTP/1.1 WebSocket upgrade request to localhost
     const wsReq = http.request({
@@ -821,7 +854,7 @@ export class TunnelClient {
         reqHeaders[key] = value as string | string[];
       }
     }
-    stampProxyMarker(reqHeaders);
+    stampLocalHeaders(reqHeaders, this.options.localPort);
 
     const proxyReq = http.request(
       {
