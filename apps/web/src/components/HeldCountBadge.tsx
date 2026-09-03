@@ -37,7 +37,7 @@
  */
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import type { HeldMessage } from '../lib/api.js';
-import { formatHeldAge, formatHeldDuration, formatHoldVerdict, isScheduled } from '../lib/heldMail.js';
+import { formatHeldAge, formatHeldDuration, isScheduled } from '../lib/heldMail.js';
 
 export interface HeldCountBadgeProps {
   /** Count of currently-held ELIGIBLE rows across the workspace (`OverviewData.heldCount`). */
@@ -65,10 +65,7 @@ function HeldRow({ message, now }: { message: HeldMessage; now: number }) {
   const when = scheduled
     ? `→${formatHeldDuration(message.notBefore! - now)}`
     : formatHeldAge(message.createdAt, now);
-  // Issue #1482: the gate detail rides along as a `reason:detail` sub-code, exactly as
-  // `afx inbox` renders it — a popover that says `busy` where the CLI says `busy:user-text`
-  // would have the two surfaces describing the same row differently.
-  const reason = scheduled ? 'scheduled' : formatHoldVerdict(message.reason, message.detail);
+  const reason = scheduled ? 'scheduled' : (message.reason ?? 'held');
   return (
     <li className={`held-row${message.escalated ? ' held-row--attention' : ''}`} data-testid="held-row">
       <span className="held-row-addresses">{fromTo}</span>
