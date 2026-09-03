@@ -181,3 +181,46 @@ e2e configs that want the live Tower on 4100 and reports hundreds of false failu
 CI runs `pnpm test`.
 
 PR #1486 remains **unmerged by design** — we are not cluesmith/codev maintainers.
+
+## Maintainer review round (CHANGES_REQUESTED, PR #1486)
+
+Three required changes, all real when I checked them against the branch.
+
+**1. The architect label leaked into the BUILDER branch.** `senderHeaderLabel` routed on
+`architectHeaderLabel`'s *result*, so "returned the fallback" meant two different things —
+"not an architect" and "an architect whose name is unshowable" — and the second fell
+through to `BUILDER <sender>`. My own doc comment promised otherwise. The case that makes
+it bite: `architect-3` is the **default auto-numbered architect name**, so this was the
+common path, not an edge one. Fixed by testing the prefix independently of name validity,
+mirroring `looksLikeBuilderId` (which excludes `architect*` for exactly this reason).
+
+Worth recording as a general shape: *routing on a validator's fallback value conflates
+"not this kind" with "this kind, malformed."* Two distinct questions, one return value.
+The fix is to ask about kind and validity separately.
+
+**2. `from` was unbounded — and my own change amplified it.** The body has been bounded
+since #1573; the sender was still taken verbatim from a public local route. On its own
+that is a framing risk. Combined with the content-sized `FROM → TO` column *this PR
+introduced*, one oversized stored sender sets the padding for **every** row. Fixed at the
+boundary with the same predicate the formatter uses (`isSafeSenderId`,
+`MAX_SENDER_ID_LENGTH`), rejecting rather than dropping — a message delivered under a
+silently-discarded sender is the unattributed frame this PR exists to remove. The inbox
+ceiling is defence in depth for pre-existing rows, and a pair of maximum-length legitimate
+ids still renders whole (asserted, so nobody mistakes it for the 22-char truncation).
+
+Lesson: a fix that makes a surface size itself to data inherits that data's bounds. I
+widened the column without asking what bounded the value.
+
+**3. arch.md still described the pre-PR mapping**, and its "do not build on this header as
+proof" caveat covered only `[USER via VS Code]`. `ARCHITECT:<name>` is equally
+caller-controlled — shape validation bounds what can be *rendered*, it does not prove
+*authenticity* — so the caveat now names both. That is the #1094 laundering concern.
+No skeleton mirror exists (`codev-skeleton/resources` has no arch.md).
+
+Acknowledged as follow-ups, deliberately NOT in this PR: giving the VS Code extension's
+send an architect `from` (it renders `? → builder` today), and threading
+`senderHeaderLabel` through the any → builder path so builder → builder frames stop
+claiming ARCHITECT (overlaps #1576).
+
+Verification: `pnpm test` 5497 passed / 0 failed (10 new tests), `tsc` clean. Nothing
+under `apps/` touched, so its separate suite was not needed.
