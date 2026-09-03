@@ -89,3 +89,37 @@ on its own. That measurement is now `render-gate.test.ts`'s dimension-sensitivit
 changes no behaviour, it is the executable statement of the premise the rest of the issue rests
 on.
 
+
+## 2026-09-03 — dev-approval evidence round
+
+Architect asked for running evidence rather than description. Induced 5 of 6 items live from
+this worktree's build against an ISOLATED database (`NODE_ENV=test` + `AF_TEST_DB`), so the
+user's live `global.db` was never opened. Full transcript committed at
+`codev/state/1482-dev-approval-evidence.md`.
+
+**Item 3 (`afx send` held line) could not be induced.** `send.ts:340` is `new TowerClient()`
+with no port, so the CLI reaches only the live Tower on 4100. Declined to point evidence at a
+real Tower with real agents behind it. Worth noting as a testability observation, not a defect
+of this change: `inbox.ts` takes `options.port` and is drivable against a stub; `send.ts` is
+not. Nothing in scope here, but it is why one item has no live transcript.
+
+**The architect caught that my reported test gap was too narrow.** I said "no test asserts the
+send CLI's held sentence"; the truth was that NOTHING referenced `utils/hold-verdict.ts` at
+all — the whole new module was untested, including `isUnverifiableVerdict`, which gates a
+user-visible warning about permanently-stuck mail. Lesson for me: when I notice one uncovered
+line, check whether the module around it is covered before reporting the gap's size. I
+reported the symptom I happened to trip over rather than sweeping for the boundary.
+
+Added `hold-verdict.test.ts` (9) and `send-hold-warning.test.ts` (6). The latter drives the
+real `send()` with a mocked Tower client, and had two wrinkles worth recording:
+- `vi.mock` of `lib/tower-client.js` must spread `importOriginal()` — the module also exports
+  `AGENT_FARM_DIR` and `DEFAULT_TOWER_PORT`, and a bare factory breaks unrelated imports.
+- `detectCurrentBuilderId()` keys off cwd and ABORTS inside a `.builders/<id>/` path when it
+  cannot resolve a canonical id from global.db (#1094 anti-spoofing). The suite runs from
+  exactly such a path, so the tests chdir to a temp dir; the sender then resolves as
+  `architect`, which is what an operator in a workspace root actually is.
+
+**Mutation-checked both new suites** rather than trusting green: forced `isUnverifiableVerdict`
+to `return false` and `formatVerdict` to drop the detail → 8 failures. Restored byte-for-byte
+(`git diff` empty), re-ran green. Worth doing for any test written to close a gap someone else
+found — a test that cannot fail is worse than the gap, because it ends the conversation.
