@@ -253,3 +253,79 @@ Claude also noticed the worktree mutating mid-review. That was me fixing finding
 read. Fair observation and worth avoiding: a review of a moving tree costs the reviewer real
 effort re-deriving state.
 
+## 2026-09-03 — Maintainer review on PR #1604 (CHANGES_REQUESTED)
+
+Three required, four non-blocking. All seven done. Every required item verified against the
+branch first; all three were real.
+
+### The one that matters: I asserted a safety property the code did not have
+
+The `user-text` starvation notice still ended with `afx interrupt <id>` — hedged as "only if
+you are sure nobody is mid-thought" — while this PR's body told the reader the notice does not
+suggest interrupting for a user-text hold. **The maintainer's context: the #1583 loop this week
+was aggravated by an operator literally following that advice.**
+
+Two separate failures, and the second is the worse one:
+
+1. **The hedge was doing no work.** The notice is headed "Mailbox delivery is STUCK". An
+   operator reading that treats the remedy line as the instruction, and "only if you are sure"
+   is unfalsifiable from outside the other person's head — by the definition of this verdict
+   there IS someone mid-thought. Safety text that depends on the reader declining the action it
+   names is not a safeguard.
+2. **This is the SECOND time my PR body claimed something the code did not do** (the first was
+   "Playwright is not installed"). Both times the claim was plausible, both times I wrote it
+   from intent rather than from the file. The pattern is writing prose about behaviour I
+   designed instead of behaviour I re-read. The architect told me to re-read the whole body
+   against the code before pushing; I did, and found stale test counts and a
+   "ported copy" description that the sdk move had just invalidated.
+
+**Lesson: a claim about what code does is a test that has not been written yet.** The remedy
+text was unasserted because `formatOwnerNoticeBody` was private with no test file at all —
+operator-facing instructions during an incident, shipped with zero coverage. It is now exported
+and pinned by 15 tests, including a branch-ORDER test: if the `user-text` check ever moves below
+the generic `detail` check, a typing human silently falls into the interrupt advice again. The
+defect branches keep the suggestion, asserted separately — removing it everywhere would be the
+opposite failure, stranding mail that genuinely never clears.
+
+### The shared formatter was not shareable, which is why I had duplicated it
+
+`hold-verdict.ts` lived in the CLI package, where `apps/web` and `apps/vscode` cannot reach it.
+That is *exactly why* I had ported a copy into `heldMail.ts` — and I wrote a careful comment
+explaining the port instead of noticing that the explanation was the bug. A formatter that
+exists to stop two surfaces drifting, which must be copied to be used, prevents nothing.
+
+Moved to `packages/sdk`, deleted the duplicate outright (and its duplicated tests — a second
+copy of the tests is the same drift in miniature), and all three renderers now call one
+function. Boundary checked carefully first, because #1189 says codev-core and codev-sdk must
+never import each other: `packages/codev` is `@cluesmith/codev`, the CLI, **not**
+`@cluesmith/codev-core` (that is `packages/core`). The CLI already imports the sdk in several
+places, `packages/core` never referenced the module, and `hold-verdict.ts` has no imports at
+all. The sdk's `import-boundary.test.ts` passes.
+
+**Lesson: when you find yourself writing a comment justifying a duplicate, the comment is
+evidence the thing is in the wrong place.** I documented the constraint instead of questioning
+it.
+
+### The dead field on the surface operators actually see
+
+`escalationToastText` rendered only `payload.reason`; `MailboxEscalationPayload.detail` had been
+on the wire since Phase 1 and was never read. I had counted the SSE payload as a "surfaced"
+destination because I put the field IN it — but shipping data to a renderer that ignores it is
+not surfacing it. Worth remembering when I list the surfaces a change reaches: the test is
+whether a human sees it, not whether the bytes arrive.
+
+### Non-blocking, all four done
+
+`isClassifierStuck` now delegates to `isUnverifiableVerdict` (kept as a thin typed wrapper, not
+collapsed — the two callers genuinely want different types). `MailboxEscalationPayload.detail`
+made required to match `HeldMessage.detail` and its own sibling `reason`; optionality was
+governing the producer's obligation, not a consumer's tolerance, and the wire is unchanged.
+409 `RESIZE_DROPPED` added to both arch.md endpoint listings. Schema pin re-checked against
+origin/main immediately before pushing — still cc83b6a32 at v17, no collision.
+
+### Suites, all four, because the root one covers one package
+
+codev 5527 · sdk 129 · web 377 · vscode 964 · playwright 6. Root `pnpm test` is
+`--filter @cluesmith/codev` and covers none of the last three; I now state all four in the PR
+body rather than letting one green number imply coverage it does not have.
+

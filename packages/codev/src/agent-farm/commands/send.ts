@@ -18,7 +18,7 @@ import { getGlobalDbPath } from '../db/index.js';
 import { normalizeWorkspacePath } from '../utils/workspace-path.js';
 import { TowerClient } from '../lib/tower-client.js';
 import { MAX_MESSAGE_BYTES, messageLimitError } from '../utils/message-format.js';
-import { formatVerdict, isUnverifiableVerdict } from '../utils/hold-verdict.js';
+import { formatVerdict, isUnverifiableVerdict } from '@cluesmith/codev-sdk/hold-verdict';
 
 /**
  * `--file` attachment cap. One constant with the message-body ceiling (Issue #1573): the file's

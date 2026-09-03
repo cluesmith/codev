@@ -48,7 +48,14 @@ export interface MailboxEscalationPayload {
    * clears when they finish) | `'no-region-end'` | `'no-composer-marker'` (the classifier
    * could not verify the composer at all — a drifted profile, a torn frame, or Tower's
    * dimensions diverging from the real PTY; this hold does NOT clear on its own).
-   * `null` for a non-gate hold. Additive and optional so older clients are unaffected.
+   * `null` for a non-gate hold.
+   *
+   * REQUIRED, matching `HeldMessage.detail` and this payload's own `reason` (maintainer
+   * review, PR #1604). Optionality here would have governed the PRODUCER's obligation, not a
+   * consumer's tolerance — a client that ignores the field reads `undefined` either way, and
+   * the wire is unchanged. There is exactly one producer (`broadcastEscalation`), it always
+   * sets the field, and requiring it means a future producer has to decide rather than
+   * silently omit the diagnostic.
    */
-  detail?: string | null;
+  detail: string | null;
 }

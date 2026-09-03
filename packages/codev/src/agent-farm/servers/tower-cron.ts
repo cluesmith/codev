@@ -12,7 +12,7 @@ import * as yaml from 'js-yaml';
 import { parseCronExpression, isDue } from './tower-cron-parser.js';
 import type { CronSchedule } from './tower-cron-parser.js';
 import { CRON_SENDER, type CronDeliveryResult } from './cron-delivery.js';
-import { formatVerdict } from '../utils/hold-verdict.js';
+import { formatVerdict } from '@cluesmith/codev-sdk/hold-verdict';
 import { getGlobalDb } from '../db/index.js';
 
 // ============================================================================

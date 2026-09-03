@@ -51,7 +51,7 @@ import type { DbMailbox, MailboxGateDetail, MailboxReason } from '../db/types.js
 import type { GateProfile, GateVerdict } from './render-gate.js';
 import type { PacedSubmitResult } from './message-write.js';
 import { KeyedSerializer } from './write-queue.js';
-import { formatVerdict } from '../utils/hold-verdict.js';
+import { formatVerdict, isUnverifiableVerdict } from '@cluesmith/codev-sdk/hold-verdict';
 
 /**
  * The structural view of a live PTY session the delivery path needs. `PtySession`
@@ -387,12 +387,21 @@ export interface DeliveryOutcome {
  * `busy`/`user-text` streak is deliberately excluded (a human legitimately at the line).
  * Shared by `recordStreak` and the cooldown branch of {@link MailboxDrainer.tick} so a
  * skipped tick and a real pass agree on what counts as classifier-stuck (CMAP round 3).
+ *
+ * This is the POLICY-side name for the same question `isUnverifiableVerdict` answers for the
+ * presentation surfaces, so it delegates rather than restating the rule (maintainer review,
+ * PR #1604). Two copies of "which verdicts never clear on their own" is one edit away from an
+ * escalation policy and an operator-facing remedy disagreeing about the same row. The wrapper
+ * is kept rather than collapsed to a single function because the two callers want different
+ * types: this one is typed on the DB/gate unions and reads naturally beside the escalation
+ * policy it serves, while the shared predicate takes the plain strings the CLI, the dashboard
+ * and the VS Code toast actually hold.
  */
 function isClassifierStuck(
   reason: MailboxReason | null,
   detail: GateVerdict['detail'] | undefined
 ): boolean {
-  return reason === 'no-profile' || detail === 'no-region-end' || detail === 'no-composer-marker';
+  return isUnverifiableVerdict(reason, detail);
 }
 
 /**

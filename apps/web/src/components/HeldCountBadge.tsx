@@ -37,7 +37,8 @@
  */
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import type { HeldMessage } from '../lib/api.js';
-import { formatHeldAge, formatHeldDuration, formatHoldVerdict, isScheduled } from '../lib/heldMail.js';
+import { formatVerdict } from '@cluesmith/codev-sdk/hold-verdict';
+import { formatHeldAge, formatHeldDuration, isScheduled } from '../lib/heldMail.js';
 
 export interface HeldCountBadgeProps {
   /** Count of currently-held ELIGIBLE rows across the workspace (`OverviewData.heldCount`). */
@@ -65,10 +66,12 @@ function HeldRow({ message, now }: { message: HeldMessage; now: number }) {
   const when = scheduled
     ? `→${formatHeldDuration(message.notBefore! - now)}`
     : formatHeldAge(message.createdAt, now);
-  // Issue #1482: the gate detail rides along as a `reason:detail` sub-code, exactly as
-  // `afx inbox` renders it — a popover that says `busy` where the CLI says `busy:user-text`
-  // would have the two surfaces describing the same row differently.
-  const reason = scheduled ? 'scheduled' : formatHoldVerdict(message.reason, message.detail);
+  // Issue #1482: the gate detail rides along as a `reason:detail` sub-code, from the SAME
+  // formatter `afx inbox` uses (`@cluesmith/codev-sdk/hold-verdict`) rather than a ported
+  // copy — a popover that says `busy` where the CLI says `busy:user-text` would have the two
+  // surfaces describing the same row differently, and a duplicated formatter is how that
+  // drift happens quietly.
+  const reason = scheduled ? 'scheduled' : formatVerdict(message.reason, message.detail);
   return (
     <li className={`held-row${message.escalated ? ' held-row--attention' : ''}`} data-testid="held-row">
       <span className="held-row-addresses">{fromTo}</span>

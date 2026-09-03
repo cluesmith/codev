@@ -16,7 +16,7 @@
 import { getTowerClient, DEFAULT_TOWER_PORT } from '../lib/tower-client.js';
 import { logger, fatal } from '../utils/logger.js';
 import { getConfig } from '../utils/config.js';
-import { formatVerdict } from '../utils/hold-verdict.js';
+import { formatVerdict } from '@cluesmith/codev-sdk/hold-verdict';
 
 /** One held row as returned by GET /api/inbox — metadata only, never the body. */
 interface InboxRow {

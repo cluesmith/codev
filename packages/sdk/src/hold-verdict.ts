@@ -39,9 +39,11 @@ export function formatVerdict(
  * `no-live-pty` (no session at all). This is the "will it clear on its own?" question, and
  * the answer decides which remedy an operator should reach for.
  *
- * The delivery module keeps its own `isClassifierStuck` for the liveness-streak decision;
- * that one is deliberately typed on the DB unions and lives next to the escalation policy it
- * serves. This is the presentation-side counterpart, for surfaces that hold strings.
+ * The delivery module's `isClassifierStuck` DELEGATES to this — it is a thin wrapper typed on
+ * the DB/gate unions, kept because it reads naturally beside the escalation policy it serves.
+ * This is the single definition of "will this hold clear on its own?", and it must stay that
+ * way: an escalation policy and an operator-facing remedy that disagree about the same row is
+ * the failure mode the sharing exists to prevent.
  */
 export function isUnverifiableVerdict(
   reason: string | null | undefined,

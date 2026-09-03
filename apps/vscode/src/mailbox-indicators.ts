@@ -13,6 +13,7 @@
 
 import * as path from 'node:path';
 import type { MailboxEscalationPayload } from '@cluesmith/codev-types';
+import { formatVerdict } from '@cluesmith/codev-sdk/hold-verdict';
 
 /**
  * Status-bar segment for held mail, e.g. ` · $(mail) 2 held`. Returns the empty
@@ -114,11 +115,20 @@ export function composeActivityBadge(
  * Human-facing text for the `mailbox-escalation` toast. Metadata only — the
  * payload never carries a message body (spec redaction rule), so neither does
  * this. Points the reader at `afx inbox`, the read/dismiss surface.
+ *
+ * Renders the gate detail as a `reason:detail` sub-code (Issue #1482) through the SAME
+ * formatter the CLI and the dashboard use (`@cluesmith/codev-sdk/hold-verdict`). This toast is
+ * the surface a VS Code operator actually sees — often the only one — and a bare `busy` there
+ * cannot distinguish `busy:user-text` (a human is typing; it clears itself) from
+ * `busy:no-region-end` (the classifier cannot verify the composer; it never clears). The
+ * detail was already on the wire in `MailboxEscalationPayload` and simply went unrendered.
  */
 export function escalationToastText(payload: MailboxEscalationPayload): string {
   const seconds = Math.max(0, Math.round(payload.ageMs / 1000));
-  const reason = payload.reason ? ` (${payload.reason})` : '';
-  return `Codev: a message to ${payload.toAgent} has been held ${seconds}s${reason} — past the escalation age. Review with: afx inbox`;
+  // No fallback text: an escalation with no reason recorded should read as a bare age, not as
+  // the word "held" twice over, so the parenthetical is dropped entirely rather than filled in.
+  const verdict = payload.reason || payload.detail ? ` (${formatVerdict(payload.reason, payload.detail)})` : '';
+  return `Codev: a message to ${payload.toAgent} has been held ${seconds}s${verdict} — past the escalation age. Review with: afx inbox`;
 }
 
 /**

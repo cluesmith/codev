@@ -419,7 +419,7 @@ All terminal sessions are managed by the Terminal Manager (`packages/codev/src/t
 POST /api/terminals              # Create PTY session
 GET  /api/terminals              # List sessions
 DELETE /api/terminals/:id        # Kill session
-POST /api/terminals/:id/resize   # Resize (cols, rows)
+POST /api/terminals/:id/resize   # Resize (cols, rows) -> 200 applied | 409 RESIZE_DROPPED | 404
 PATCH /api/terminals/:id/rename  # Rename shell session (Spec 468)
 
 # WebSocket connection per terminal
@@ -777,7 +777,7 @@ Clients may ignore unknown event types — older clients silently drop `builder-
 | `GET` | `/api/terminals` | List all PTY sessions |
 | `GET` | `/api/terminals/:id` | Get PTY session metadata |
 | `DELETE` | `/api/terminals/:id` | Kill PTY session |
-| `POST` | `/api/terminals/:id/resize` | Resize PTY session |
+| `POST` | `/api/terminals/:id/resize` | Resize PTY session. **200** with the APPLIED dims; **409 `RESIZE_DROPPED`** when the session exists but the resize never reached its process (dims unchanged); **404** only for an unknown id (#1482) |
 | `GET` | `/api/terminals/:id/output` | Get ring buffer output |
 | `WS` | `/ws/terminal/:id` | WebSocket terminal connection |
 

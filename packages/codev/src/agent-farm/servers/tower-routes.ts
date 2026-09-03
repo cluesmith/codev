@@ -73,7 +73,7 @@ import {
   type EnqueueInput,
 } from '../db/mailbox.js';
 import type { MailboxReason } from '../db/types.js';
-import { formatVerdict } from '../utils/hold-verdict.js';
+import { formatVerdict } from '@cluesmith/codev-sdk/hold-verdict';
 // Spec 1273 per-terminal submission lock. Originally the anti-fusion lock for the two
 // explicit human-bypass paths (escape + interrupt); since Issue #1365 the gated mailbox
 // delivery path takes it too, so it now serializes the whole write edge of a terminal.

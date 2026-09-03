@@ -13,7 +13,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { formatVerdict, isUnverifiableVerdict } from '../utils/hold-verdict.js';
+import { formatVerdict, isUnverifiableVerdict } from '../hold-verdict.js';
 
 describe('formatVerdict (Issue #1482)', () => {
   it('joins reason and detail as a sub-code when a detail is present', () => {

@@ -13,7 +13,9 @@ remedy was `afx interrupt`: for the first case, *advice to interrupt a person mi
 
 This PR makes the two distinguishable, and then fixes the defect that manufactures the second
 one. The gate's `GateVerdict.detail` now survives onto the held row (migration v18) and reaches
-every operator surface as a `reason:detail` sub-code, so the notice can branch. Underneath,
+every operator surface as a `reason:detail` sub-code — `afx inbox`, `afx send`, the dashboard
+popover and the VS Code escalation toast, all through one shared formatter in the sdk — so the
+notice can branch. Underneath,
 `PtySession.resize()` no longer moves Tower's dimensions — and re-wraps the gate's
 classification mirror — before confirming the resize reached the process, which is how a
 dropped shellper write silently desynchronised the mirror from the real TUI and produced
@@ -25,41 +27,51 @@ enough to strand mail forever**, and that measurement is now a test.
 
 ## Files Changed
 
+- `apps/vscode/src/__tests__/mailbox-indicators.test.ts` (+40 / -0)
+- `apps/vscode/src/mailbox-indicators.ts` (+12 / -2)
+- `apps/web/__tests__/HeldCountBadge.test.tsx` (+70 / -0)
+- `apps/web/src/components/HeldCountBadge.tsx` (+7 / -1)
 - `codev/plans/1482-f1-tower-vs-pty-dimension-dive.md` (+287 / -0)
-- `codev/projects/1482-f1-tower-vs-pty-dimension-dive/1482-dev-approval-evidence.md` (+319 / -0)
-- `codev/projects/1482-f1-tower-vs-pty-dimension-dive/status.yaml` (+22 / -0)
-- `codev/resources/arch.md` (+3 / -1)
-- `codev/resources/lessons-learned.md` (+12 / -0)
-- `codev/reviews/1482-f1-tower-vs-pty-dimension-dive.md` (+241 / -0)
-- `codev/state/pir-1482_thread.md` (+177 / -0)
-- `packages/codev/src/agent-farm/__tests__/hold-verdict.test.ts` (+81 / -0)
+- `codev/projects/1482-f1-tower-vs-pty-dimension-dive/1482-dev-approval-evidence.md` (+415 / -0)
+- `codev/projects/1482-f1-tower-vs-pty-dimension-dive/1482-review-iter1-rebuttals.md` (+152 / -0)
+- `codev/projects/1482-f1-tower-vs-pty-dimension-dive/status.yaml` (+29 / -0)
+- `codev/resources/arch.md` (+5 / -3)
+- `codev/resources/lessons-learned.md` (+22 / -0)
+- `codev/reviews/1482-f1-tower-vs-pty-dimension-dive.md` (+411 / -0)
+- `codev/state/pir-1482_thread.md` (+255 / -0)
+- `packages/codev/src/agent-farm/__tests__/e2e/issue-1482-held-popover-detail.test.ts` (+170 / -0)
+- `packages/codev/src/agent-farm/__tests__/mailbox-owner-notice.test.ts` (+99 / -0)
 - `packages/codev/src/agent-farm/__tests__/render-gate.test.ts` (+78 / -0)
 - `packages/codev/src/agent-farm/__tests__/send-architect-identity.test.ts` (+5 / -3)
-- `packages/codev/src/agent-farm/__tests__/send-delivery.test.ts` (+140 / -1)
+- `packages/codev/src/agent-farm/__tests__/send-delivery.test.ts` (+219 / -1)
 - `packages/codev/src/agent-farm/__tests__/send-hold-warning.test.ts` (+126 / -0)
 - `packages/codev/src/agent-farm/__tests__/spec-1313-migration.test.ts` (+125 / -2)
 - `packages/codev/src/agent-farm/commands/inbox.ts` (+47 / -4)
 - `packages/codev/src/agent-farm/commands/send.ts` (+21 / -4)
 - `packages/codev/src/agent-farm/db/index.ts` (+1 / -0)
-- `packages/codev/src/agent-farm/db/mailbox.ts` (+36 / -13)
+- `packages/codev/src/agent-farm/db/mailbox.ts` (+48 / -13)
 - `packages/codev/src/agent-farm/db/migrations.ts` (+28 / -1)
 - `packages/codev/src/agent-farm/db/schema.ts` (+1 / -0)
 - `packages/codev/src/agent-farm/db/types.ts` (+23 / -0)
 - `packages/codev/src/agent-farm/servers/cron-delivery.ts` (+9 / -2)
-- `packages/codev/src/agent-farm/servers/mailbox-delivery.ts` (+47 / -5)
-- `packages/codev/src/agent-farm/servers/mailbox-wiring.ts` (+48 / -5)
+- `packages/codev/src/agent-farm/servers/mailbox-delivery.ts` (+57 / -6)
+- `packages/codev/src/agent-farm/servers/mailbox-wiring.ts` (+63 / -6)
 - `packages/codev/src/agent-farm/servers/tower-cron.ts` (+3 / -2)
 - `packages/codev/src/agent-farm/servers/tower-routes.ts` (+33 / -4)
 - `packages/codev/src/agent-farm/servers/tower-websocket.ts` (+10 / -1)
-- `packages/codev/src/agent-farm/utils/hold-verdict.ts` (+51 / -0)
+- `packages/codev/src/terminal/__tests__/pty-manager.test.ts` (+64 / -0)
 - `packages/codev/src/terminal/__tests__/pty-session-resize.test.ts` (+191 / -0)
+- `packages/codev/src/terminal/__tests__/welcome-identity.test.ts` (+99 / -0)
 - `packages/codev/src/terminal/pty-manager.ts` (+34 / -4)
 - `packages/codev/src/terminal/pty-session.ts` (+119 / -12)
 - `packages/codev/src/terminal/shellper-client.ts` (+55 / -0)
 - `packages/codev/src/terminal/shellper-main.ts` (+20 / -3)
+- `packages/sdk/package.json` (+4 / -0)
+- `packages/sdk/src/__tests__/hold-verdict.test.ts` (+81 / -0)
+- `packages/sdk/src/hold-verdict.ts` (+53 / -0)
 - `packages/sdk/src/tower-client.ts` (+11 / -0)
 - `packages/types/src/api.ts` (+9 / -0)
-- `packages/types/src/sse.ts` (+9 / -0)
+- `packages/types/src/sse.ts` (+16 / -0)
 
 ## Commits
 
@@ -77,13 +89,19 @@ enough to strand mail forever**, and that measurement is now a test.
 ## Test Results
 
 - `pnpm build`: ✓ pass (run by porch's gate checks)
-- `pnpm test`: ✓ pass — **278 test files passed / 3 skipped; 5521 tests passed / 48 skipped**,
-  exit 0, on the final tree (up from 5495 before the consultation fixes: +26).
-- **`apps/web` runs separately and is NOT covered by root `pnpm test`** — that script is
-  `pnpm --filter @cluesmith/codev test`, so the dashboard suites need `cd apps/web && npx
-  vitest run`. Stating it because it is easy to read a green root run as covering the popover
-  change, and it does not: ✓ **33 files, 381 passed / 1 skipped**, including the 9 new
-  formatter/component tests.
+- `pnpm test`: ✓ pass — **278 test files passed / 3 skipped; 5527 tests passed / 48 skipped**,
+  exit 0, on the final tree.
+- **Root `pnpm test` covers only `@cluesmith/codev`** — the script is
+  `pnpm --filter @cluesmith/codev test`, so it does **not** run the sdk, the dashboard, or the
+  VS Code extension. Stating it because a green root run looks like it covers the popover and
+  the toast, and it covers neither. All four run clean:
+
+  | Package | Command | Result |
+  |---|---|---|
+  | `@cluesmith/codev` | `pnpm test` | 278 files, **5527 passed** / 48 skipped |
+  | `@cluesmith/codev-sdk` | `cd packages/sdk && npx vitest run` | 11 files, **129 passed** |
+  | `apps/web` | `cd apps/web && npx vitest run` | 33 files, **377 passed** / 1 skipped |
+  | `apps/vscode` | `cd apps/vscode && npx vitest run` | 80 files, **964 passed** |
 - **Playwright** (real chromium, throwaway Tower on 14100): ✓ **6 passed**. Not part of either
   vitest run; the recipe is under "How to Test Locally".
 - **Manual verification at the `dev-approval` gate**: five of six live-behaviour items were
@@ -111,9 +129,14 @@ enough to strand mail forever**, and that measurement is now a test.
 | `setHeldVerdict` changed-only, at the repository | 6 | `send-delivery.test.ts` |
 | `resizeSession` dropped-vs-unknown + 409/404/200 | 4 | `pty-manager.test.ts` |
 | WELCOME **geometry** hydration (real frames) | 16 | `welcome-identity.test.ts` |
-| Ported `formatHoldVerdict` (dashboard) | 4 | `apps/web/__tests__/heldMail.test.ts` |
 | Popover render (jsdom) | 5 | `apps/web/__tests__/HeldCountBadge.test.tsx` |
 | **Popover render (real chromium)** | 6 | `e2e/issue-1482-held-popover-detail.test.ts` |
+| Owner-notice remedy text (maintainer req. 1) | 15 | `mailbox-owner-notice.test.ts` |
+| VS Code escalation toast detail (req. 2) | 8 | `apps/vscode/…/mailbox-indicators.test.ts` |
+
+`hold-verdict.test.ts` (9) moved to `packages/sdk/src/__tests__/` with the module. The four
+ported-formatter tests in `heldMail.test.ts` were **deleted** rather than moved — the sdk suite
+owns that function now, and a duplicated test is the same drift the move exists to remove.
 
 The last two suites were **mutation-checked rather than trusted green**: forcing
 `isUnverifiableVerdict` to `return false` and `formatVerdict` to drop the detail produced 8
@@ -289,6 +312,72 @@ defaults to it and my scratch config set the port only in `webServer.env`, which
 mocked in-page; live `global.db` mtime unchanged), but luck rather than design. The committed
 test now throws if `TOWER_TEST_PORT` is unset instead of defaulting, so it cannot recur.
 
+## Maintainer Review (waleedkadous) — Three Required Changes, All Landed
+
+All three verified against the branch before acting; every one was real. Four non-blocking
+items also done.
+
+**REQUIRED 1 — the `user-text` notice still named `afx interrupt`, and this PR body said it
+did not.** The branch ended: *"Remedy: check with them first; `afx inbox` inspects the queue,
+and `afx interrupt <id>` clears the composer only if you are sure nobody is mid-thought."* The
+hedge was doing no work: operators read the remedy line of a notice headed "delivery is STUCK"
+as the instruction, and by the definition of this verdict the person at that composer is
+mid-thought. **The #1583 loop this week was aggravated by an operator following exactly this
+advice** — not hypothetical. The branch now names no command that touches the terminal at all:
+it says the hold usually needs nothing, offers `afx inbox` to inspect, and suggests talking to
+whoever is at the terminal.
+
+`formatOwnerNoticeBody` was private and had no test file, which is precisely why operator-facing
+remedy prose shipped unasserted. It is now exported and pinned by 15 tests
+(`mailbox-owner-notice.test.ts`): the safe branch contains neither `afx interrupt` nor
+`interrupt` in any casing, at any streak or held-count; the defect branches (`no-region-end`,
+`no-composer-marker`, `no-profile`, and the bare fallback) still *do* offer it, because there
+nothing clears the hold on its own and there is no human to protect; and one test pins the
+branch **order**, so moving the `user-text` check below the generic `detail` check can never
+silently route a typing human into the interrupt advice again.
+
+**This is the second time this PR body asserted something the code did not do.** I re-read the
+whole body against the code before pushing rather than fixing only the sentence quoted.
+
+**REQUIRED 2 — the VS Code escalation toast could not tell the two holds apart.**
+`escalationToastText` rendered only `payload.reason` while `MailboxEscalationPayload.detail`
+was already on the wire and unread — dead data on the surface an operator actually sees. It now
+renders the compound sub-code through the **shared** formatter, with 8 new tests including one
+asserting the exact string matches what the CLI produces for the same row.
+
+**REQUIRED 3 — `hold-verdict.ts` moved to `packages/sdk`.** It sat in the CLI package where
+`apps/web` and `apps/vscode` could not reach it, which is exactly why a copy had been ported
+into `heldMail.ts`. A shared formatter that cannot be shared prevents no drift. Now at
+`packages/sdk/src/hold-verdict.ts`, exported as `@cluesmith/codev-sdk/hold-verdict`, with its
+test suite moved alongside it.
+
+**The ported duplicate is deleted, not deferred** — `HeldCountBadge` imports the moved module
+directly, and the duplicated *tests* went with it (a second copy of the formatter's tests is
+the same drift in miniature). All three renderers — `afx inbox`/`afx send`, the dashboard
+popover, the VS Code toast — now call one function. **Nothing was deferred to a follow-up AIR.**
+
+Boundary checked: `packages/codev` is `@cluesmith/codev` (the CLI), **not** `@cluesmith/codev-core`
+— it already depends on and imports the sdk, so the six CLI call sites rewire cleanly without
+touching #1189. `packages/core` never referenced the module. `hold-verdict.ts` has zero imports,
+no `node:*`, no `vscode`, and the sdk keeps its single `codev-types` dependency; the sdk's own
+`import-boundary.test.ts` passes.
+
+**Non-blocking, all four done:**
+
+- `isClassifierStuck` now **delegates** to `isUnverifiableVerdict` rather than restating the
+  rule. Kept as a thin wrapper because the two callers want different types — the policy side
+  is typed on the DB/gate unions and reads naturally beside the escalation policy; the shared
+  predicate takes the plain strings the CLI, dashboard and toast actually hold.
+- `MailboxEscalationPayload.detail` is now **required**, matching `HeldMessage.detail` and its
+  own sibling `reason`. Optionality governed the *producer's* obligation, not a consumer's
+  tolerance — a client ignoring the field reads `undefined` either way and the wire is
+  unchanged. There is one producer, it always set the field, and requiring it means a future
+  producer must decide rather than silently omit the diagnostic.
+- 409 `RESIZE_DROPPED` added to **both** endpoint listings in `arch.md` (the table at ~780 and
+  the REST block at ~422), with the 200/409/404 split spelled out.
+- Schema pin re-checked immediately before pushing: `origin/main` is still `cc83b6a32`,
+  `GLOBAL_CURRENT_VERSION = 17`, zero `Migration v18`. No collision.
+
 ## How to Test Locally
 
 - **View diff**: VSCode sidebar → right-click builder `pir-1482` → **Review Diff**
@@ -305,8 +394,14 @@ What to verify:
   plus the CLI's "could not verify that composer" warning, which must **not** appear for
   `user-text`.
 - Leave a message held past the owner-notice threshold → the notice names the occupied-composer
-  case and its confirmation count, and does **not** suggest `afx interrupt` for a `user-text`
-  hold.
+  case and its confirmation count, and its remedy line names **no command that touches the
+  terminal** — no `afx interrupt`, hedged or otherwise. (This was asserted here before it was
+  true; see the maintainer-review section. It is now pinned by
+  `mailbox-owner-notice.test.ts`, which asserts the rendered string contains neither
+  `afx interrupt` nor the word `interrupt`, while a companion block asserts the defect
+  branches still *do* offer it.)
+- With VS Code open on the workspace, let a row escalate → the toast reads
+  `(busy:user-text)` / `(busy:no-region-end)`, not a bare `(busy)`.
 - Resize a terminal in the dashboard/VSCode viewer; dims track it, no WARN. Then kill the
   shellper socket, resize again: the WARN fires, the REST route answers 409 `RESIZE_DROPPED`,
   and the session's dims do **not** move.
