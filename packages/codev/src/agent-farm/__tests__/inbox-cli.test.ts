@@ -5,6 +5,7 @@
 // and send/cron-delivery unit tests; here we test only the CLI surface.
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { MAX_SENDER_ID_LENGTH } from '../utils/message-format.js';
 
 const mockRequest = vi.hoisted(() => vi.fn());
 
@@ -188,6 +189,43 @@ describe('inboxList', () => {
       await inboxList();
 
       expect(fromToCell().cell).toBe('? → spir-1');
+    });
+
+    // Maintainer review (PR #1486): sizing to content means ONE oversized stored value
+    // sets the padding for EVERY row. `POST /api/send` now refuses such a sender, so
+    // this is defence in depth for rows written before that check — and it must not
+    // become the 22-char truncation again, which was the defect.
+    it('shows a pair of maximum-length legitimate ids whole', async () => {
+      const maxFrom = `architect:${'a'.repeat(MAX_SENDER_ID_LENGTH - 'architect:'.length)}`;
+      const maxTo = 'b'.repeat(MAX_SENDER_ID_LENGTH);
+      mockRequest.mockResolvedValue({
+        ok: true,
+        status: 200,
+        data: [row({ fromAgent: maxFrom, toAgent: maxTo })],
+      });
+
+      await inboxList();
+
+      const { cell, width } = fromToCell();
+      expect(cell).toBe(`${maxFrom} → ${maxTo}`);
+      expect(cell).not.toContain('…');
+      expect(width).toBeGreaterThanOrEqual(cell.length);
+    });
+
+    it('caps a stored sender that exceeds the identity bound, and does not pad every row to it', async () => {
+      mockRequest.mockResolvedValue({
+        ok: true,
+        status: 200,
+        data: [row({ fromAgent: 'x'.repeat(200_000), toAgent: 'spir-1' })],
+      });
+
+      await inboxList();
+
+      const { cell, width } = fromToCell();
+      const ceiling = MAX_SENDER_ID_LENGTH * 2 + ' → '.length;
+      expect(cell.length).toBe(ceiling);
+      expect(cell.endsWith('…')).toBe(true);
+      expect(width).toBeLessThanOrEqual(ceiling + 2);
     });
   });
 });

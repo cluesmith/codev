@@ -48,8 +48,25 @@ export function architectHeaderLabel(sender?: string): string {
  * An agent identity safe to interpolate into `### [...] ###` framing: no newline, no
  * `#`, no bracket, no whitespace. Covers every real id — canonical `builder-<proto>-<n>`,
  * bare worktree names, `architect:<name>`, and the `af-cron` pseudo-sender.
+ *
+ * The length bound is a real bound, not decoration: `from` reaches the mailbox from a
+ * public local route, and `afx inbox` sizes its `FROM → TO` column to the widest stored
+ * value — so an unbounded identity is a rendering cost as well as a framing risk.
  */
-const SAFE_SENDER_ID = /^[A-Za-z0-9._:-]{1,128}$/;
+export const MAX_SENDER_ID_LENGTH = 128;
+const SAFE_SENDER_ID = new RegExp(`^[A-Za-z0-9._:-]{1,${MAX_SENDER_ID_LENGTH}}$`);
+
+/**
+ * Is `sender` an identity this codebase is willing to store and render whole?
+ *
+ * Exported so the `POST /api/send` boundary can enforce the SAME contract the header
+ * formatter does, instead of the two drifting apart (maintainer review, PR #1486). A
+ * value that fails here is refused at the route rather than persisted, so nothing
+ * downstream — the frame, `afx inbox`, the dashboard — has to defend against it alone.
+ */
+export function isSafeSenderId(sender: string): boolean {
+  return SAFE_SENDER_ID.test(sender);
+}
 
 /**
  * The role-and-identity label for ANY sender: `ARCHITECT[:<name>]` for an architect,
@@ -68,12 +85,20 @@ const SAFE_SENDER_ID = /^[A-Za-z0-9._:-]{1,128}$/;
  * builder → architect path, but the chokepoint is the place to close it (CMAP round 2,
  * codex). An unshowable identity degrades to `BUILDER <unknown>`: the recipient sees an
  * unattributed message rather than a forged header.
+ *
+ * The architect prefix is detected INDEPENDENTLY of whether the name validates
+ * (maintainer review, PR #1486). Routing on `architectHeaderLabel`'s RESULT conflated
+ * "not an architect" with "an architect whose name is unshowable", so every malformed
+ * architect identity fell through to the builder branch and was relabelled: capital
+ * `architect:Main`, the empty `architect:`, and — not hypothetical — the default
+ * auto-numbered `architect-3` all rendered as `BUILDER architect-3`, a wrong role on a
+ * real identity, which is the exact defect this function exists to prevent. The prefix
+ * test mirrors `looksLikeBuilderId`, which excludes `architect*` for the same reason, so
+ * the two agree on what is not a builder.
  */
 export function senderHeaderLabel(sender: string): string {
   const bare = sender.toLowerCase();
-  if (bare === 'architect' || bare === 'arch') return 'ARCHITECT';
-  const architect = architectHeaderLabel(sender);
-  if (architect !== 'ARCHITECT') return architect;
+  if (bare === 'arch' || bare.startsWith('architect')) return architectHeaderLabel(sender);
   return SAFE_SENDER_ID.test(sender) ? `BUILDER ${sender}` : 'BUILDER <unknown>';
 }
 

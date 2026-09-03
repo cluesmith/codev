@@ -16,6 +16,7 @@
 import { getTowerClient, DEFAULT_TOWER_PORT } from '../lib/tower-client.js';
 import { logger, fatal } from '../utils/logger.js';
 import { getConfig } from '../utils/config.js';
+import { MAX_SENDER_ID_LENGTH } from '../utils/message-format.js';
 
 /** One held row as returned by GET /api/inbox — metadata only, never the body. */
 interface InboxRow {
@@ -138,7 +139,16 @@ export async function inboxList(options: InboxListOptions = {}): Promise<void> {
   });
 
   const fromToHeader = 'FROM → TO';
-  const fromToWidth = Math.max(fromToHeader.length, ...cells.map((c) => c.fromTo.length)) + 2;
+  // Sized to content, so a long-but-legitimate agent id is never cut mid-name (issue
+  // #1478 — the old fixed 22 silently truncated them). The ceiling is defence in depth,
+  // not the old truncation returning: `POST /api/send` now refuses a sender longer than
+  // MAX_SENDER_ID_LENGTH, so a pair of valid ids cannot reach it, and rows persisted
+  // before that check existed cannot make every row in the table pad to their width.
+  const maxFromToWidth = MAX_SENDER_ID_LENGTH * 2 + ' → '.length;
+  const shown = cells.map((c) =>
+    c.fromTo.length > maxFromToWidth ? `${c.fromTo.slice(0, maxFromToWidth - 1)}…` : c.fromTo,
+  );
+  const fromToWidth = Math.max(fromToHeader.length, ...shown.map((c) => c.length)) + 2;
   const widths = [38, 6, 13, fromToWidth, 14];
   logger.row(['ID', 'AGE', 'REASON', fromToHeader, 'WORKSPACE'], widths);
   logger.row(
@@ -146,12 +156,12 @@ export async function inboxList(options: InboxListOptions = {}): Promise<void> {
     widths,
   );
 
-  for (const cell of cells) {
+  cells.forEach((cell, i) => {
     logger.row(
-      [cell.id, cell.age, cell.reason.slice(0, 13), cell.fromTo, cell.workspace.slice(0, 14)],
+      [cell.id, cell.age, cell.reason.slice(0, 13), shown[i], cell.workspace.slice(0, 14)],
       widths,
     );
-  }
+  });
 
   logger.blank();
   logger.info('Show a message body: afx inbox show <id>   ·   Dismiss: afx inbox dismiss <id>');

@@ -56,6 +56,7 @@ import {
   formatArchitectToBuilderMessage,
   formatBuilderMessage,
   formatUserViaVsCodeMessage,
+  isSafeSenderId,
   messageTooLargeError,
   MAX_MESSAGE_BYTES,
 } from '../utils/message-format.js';
@@ -1900,6 +1901,27 @@ async function handleSend(
 
   // Optional fields
   const from = typeof body.from === 'string' ? body.from : undefined;
+
+  // Maintainer review (PR #1486): `from` was the one unguarded field on this route — the
+  // body above is bounded by MAX_MESSAGE_BYTES, but the sender was taken verbatim, and
+  // `/api/send` is a public local route whose only well-behaved caller is the CLI. It is
+  // stored on the mailbox row and rendered by every attribution surface, and `afx inbox`
+  // now sizes its `FROM → TO` column to the widest value it holds — so an unbounded
+  // identity is a rendering cost paid by every row, not just its own. Enforced with the
+  // SAME predicate the header formatter uses, so the boundary and the renderer cannot
+  // disagree about what an identity is. Refused rather than silently dropped or
+  // truncated: a message delivered under a quietly-discarded sender is exactly the
+  // unattributed frame this PR exists to fix.
+  if (from !== undefined && !isSafeSenderId(from)) {
+    res.writeHead(400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      error: 'INVALID_PARAMS',
+      message:
+        'Invalid "from" field: a sender identity must be 1-128 characters of ' +
+        '[A-Za-z0-9._:-] (no whitespace, brackets or newlines).',
+    }));
+    return;
+  }
   const workspace = typeof body.workspace === 'string' ? body.workspace : undefined;
   const fromWorkspace = typeof body.fromWorkspace === 'string' ? body.fromWorkspace : undefined;
   const options = typeof body.options === 'object' && body.options !== null
