@@ -1,7 +1,7 @@
 id: '1482'
 title: f1-tower-vs-pty-dimension-dive
 protocol: pir
-phase: implement
+phase: review
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -19,4 +19,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-09-03T17:52:10.158Z'
-updated_at: '2026-09-03T18:43:23.177Z'
+updated_at: '2026-09-03T18:43:32.037Z'
