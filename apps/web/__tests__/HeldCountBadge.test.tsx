@@ -13,6 +13,10 @@ function row(over: Partial<HeldMessage> = {}): HeldMessage {
     toAgent: 'cost',
     fromAgent: 'architect',
     reason: 'busy',
+    // Required on HeldMessage (Issue #1482). Defaulted here so the fixture typechecks on its
+    // own terms — apps/web's tsconfig excludes __tests__, so an omission would go unnoticed
+    // until someone widened the include.
+    detail: null,
     escalated: false,
     createdAt: Date.now() - 90_000, // 1m ago
     notBefore: null,
@@ -421,5 +425,71 @@ describe('HeldCountBadge', () => {
     expect(removed).toContain('keydown');
     expect(removed).toContain('mousedown');
     removeSpy.mockRestore();
+  });
+
+  // ---------------------------------------------------------------- Issue #1482
+  // The popover is the surface an operator reaches for without a terminal. Showing a bare
+  // `busy` there, while `afx inbox` shows `busy:user-text`, means the two surfaces describe
+  // the same row differently — and the operator cannot tell "a human is typing, this clears
+  // itself" from "the classifier is stuck, this never clears" from the dashboard at all.
+
+  it('renders the gate detail as a `reason:detail` sub-code', async () => {
+    render(
+      <HeldCountBadge
+        count={1}
+        escalated={false}
+        loadMessages={() => Promise.resolve([row({ reason: 'busy', detail: 'user-text' })])}
+      />,
+    );
+    await open();
+    expect((await screen.findByTestId('held-row')).textContent).toContain('busy:user-text');
+  });
+
+  it.each(['no-region-end', 'no-composer-marker'] as const)(
+    'renders the unverifiable detail %s, the class of hold that never clears itself',
+    async (detail) => {
+      render(
+        <HeldCountBadge
+          count={1}
+          escalated={false}
+          loadMessages={() => Promise.resolve([row({ reason: 'busy', detail })])}
+        />,
+      );
+      await open();
+      expect((await screen.findByTestId('held-row')).textContent).toContain(`busy:${detail}`);
+    },
+  );
+
+  it('still renders a bare reason when the row carries no detail', async () => {
+    render(
+      <HeldCountBadge
+        count={1}
+        escalated={false}
+        loadMessages={() => Promise.resolve([row({ reason: 'no-live-pty', detail: null })])}
+      />,
+    );
+    await open();
+    const text = (await screen.findByTestId('held-row')).textContent!;
+    expect(text).toContain('no-live-pty');
+    expect(text).not.toContain('no-live-pty:');
+  });
+
+  it('a scheduled row still reads "scheduled", detail notwithstanding', async () => {
+    // A scheduled row is waiting on the clock, not stuck behind a composer. Leaking a stale
+    // gate detail onto it would describe a problem that does not exist.
+    const now = Date.now();
+    render(
+      <HeldCountBadge
+        count={1}
+        escalated={false}
+        loadMessages={() =>
+          Promise.resolve([row({ reason: 'busy', detail: 'user-text', notBefore: now + 30_000 })])
+        }
+      />,
+    );
+    await open();
+    const text = (await screen.findByTestId('held-row')).textContent!;
+    expect(text).toContain('scheduled');
+    expect(text).not.toContain('user-text');
   });
 });

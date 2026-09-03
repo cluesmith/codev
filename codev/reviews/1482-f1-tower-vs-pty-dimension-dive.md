@@ -77,8 +77,15 @@ enough to strand mail forever**, and that measurement is now a test.
 ## Test Results
 
 - `pnpm build`: ✓ pass (run by porch's gate checks)
-- `pnpm test`: ✓ pass — **278 test files passed / 3 skipped; 5495 tests passed / 48 skipped**,
-  exit 0, on the final tree. ~40 tests are new.
+- `pnpm test`: ✓ pass — **278 test files passed / 3 skipped; 5521 tests passed / 48 skipped**,
+  exit 0, on the final tree (up from 5495 before the consultation fixes: +26).
+- **`apps/web` runs separately and is NOT covered by root `pnpm test`** — that script is
+  `pnpm --filter @cluesmith/codev test`, so the dashboard suites need `cd apps/web && npx
+  vitest run`. Stating it because it is easy to read a green root run as covering the popover
+  change, and it does not: ✓ **33 files, 381 passed / 1 skipped**, including the 9 new
+  formatter/component tests.
+- **Playwright** (real chromium, throwaway Tower on 14100): ✓ **6 passed**. Not part of either
+  vitest run; the recipe is under "How to Test Locally".
 - **Manual verification at the `dev-approval` gate**: five of six live-behaviour items were
   induced from this worktree's build and captured verbatim in
   `codev/projects/1482-f1-tower-vs-pty-dimension-dive/1482-dev-approval-evidence.md` — the
@@ -86,7 +93,10 @@ enough to strand mail forever**, and that measurement is now a test.
   with their streak counts, the dropped-resize WARN with dimensions that did **not** move, and
   the attach-reconciliation WARN naming both geometries. The human approved on that evidence.
   Everything ran under `NODE_ENV=test` + `AF_TEST_DB` against an isolated database; the user's
-  live `~/.agent-farm/global.db` was never opened.
+  live `~/.agent-farm/global.db` was never opened (mtime still `Aug 22 14:30` afterwards).
+- **Browser verification (added after the PR consultation)**: the dashboard popover was driven
+  in real chromium against the built dashboard bundle, served by a throwaway Tower on port
+  14100 — captured verbatim in the evidence file §9b. See "A retracted claim" below.
 
 ### New tests, by area
 
@@ -98,6 +108,12 @@ enough to strand mail forever**, and that measurement is now a test.
 | Gate dimension sensitivity (characterization) | 3 | `render-gate.test.ts` |
 | `formatVerdict` / `isUnverifiableVerdict` | 9 | `hold-verdict.test.ts` |
 | Send CLI warn-line branch | 6 | `send-hold-warning.test.ts` |
+| `setHeldVerdict` changed-only, at the repository | 6 | `send-delivery.test.ts` |
+| `resizeSession` dropped-vs-unknown + 409/404/200 | 4 | `pty-manager.test.ts` |
+| WELCOME **geometry** hydration (real frames) | 16 | `welcome-identity.test.ts` |
+| Ported `formatHoldVerdict` (dashboard) | 4 | `apps/web/__tests__/heldMail.test.ts` |
+| Popover render (jsdom) | 5 | `apps/web/__tests__/HeldCountBadge.test.tsx` |
+| **Popover render (real chromium)** | 6 | `e2e/issue-1482-held-popover-detail.test.ts` |
 
 The last two suites were **mutation-checked rather than trusted green**: forcing
 `isUnverifiableVerdict` to `return false` and `formatVerdict` to drop the detail produced 8
@@ -148,17 +164,10 @@ Routed **COLD only**, same cap reasoning. `codev/resources/lessons-learned.md`:
 
 ## Things to Look At During PR Review
 
-**Two gaps were approved knowingly at the `dev-approval` gate. Flagging them here so nobody has
-to discover them.**
+**One gap was approved knowingly at the `dev-approval` gate. Flagging it here so nobody has to
+discover it.**
 
-1. **The dashboard held-mail popover still renders a bare `busy`** where `afx inbox` shows
-   `busy:user-text`. The render change was written and then deliberately **reverted**
-   (`908dfaaad`): this worktree cannot browser-verify UI — `.codev/config.json` is absent so
-   there is no `worktree.devCommand` for `afx dev`, and Playwright is not installed — and the
-   project requires a browser check before a UI change is called done. `HeldMessage.detail` and
-   the `/api/inbox` projection are both in place, so it is a two-line change for whoever can run
-   the dashboard. **Not an oversight; a refusal to claim a verification that was not performed.**
-2. **Evidence item 3 (the `afx send` held CLI line) is covered by test, not induced live.**
+1. **Evidence item 3 (the `afx send` held CLI line) is covered by test, not induced live.**
    `commands/send.ts` constructs `new TowerClient()` with no port, so the CLI can only reach the
    live Tower on 4100 — and pointing gate evidence at a real Tower with real agents behind it was
    not acceptable. The branch is covered by `send-hold-warning.test.ts` (6 tests) driving the
@@ -168,11 +177,11 @@ to discover them.**
 
 **Beyond what the plan specified** — both deliberate, both worth a reviewer's eye:
 
-3. **The REST resize routes now answer 409 `RESIZE_DROPPED`** (distinguished from 404 by an
+2. **The REST resize routes now answer 409 `RESIZE_DROPPED`** (distinguished from 404 by an
    explicit existence check). The old code answered **200 and echoed back the requested
    dimensions** — which is precisely how the divergence stayed invisible. This is an API
    behaviour change on an existing route, not just an internal fix.
-4. **`CronDeliveryResult` gained `detail`.** Not in the plan. A cron send has no human waiting on
+3. **`CronDeliveryResult` gained `detail`.** Not in the plan. A cron send has no human waiting on
    a response, so its log line is the *only* place that hold is ever described.
 
 **The subtle one.** Phase 3 adopts the shellper's WELCOME geometry and then re-sends the
@@ -185,9 +194,15 @@ only thing that authorises a re-send. **Worth re-reading that interaction specif
 
 **Migration collision surface.** This adds **v18**; `origin/main` was at **v17** when this
 branched and was re-verified still at v17 (`cc83b6a32`) immediately before opening the PR. A
-maintainer merging this *after* another schema PR must re-check for a v18 collision — note it
-would show up in two places, `GLOBAL_CURRENT_VERSION` in `db/migrations.ts` **and** the pinned
-source assertion in `send-architect-identity.test.ts` that reads it back.
+maintainer merging this *after* another schema PR must re-check for a v18 collision, and it
+would surface in **two** places — the second of which is non-obvious, which is the whole value
+of this warning:
+
+- `GLOBAL_CURRENT_VERSION` in `packages/codev/src/agent-farm/db/migrations.ts:29`
+- **`packages/codev/src/agent-farm/__tests__/send-architect-identity.test.ts:247,250`**, which
+  asserts `'GLOBAL_CURRENT_VERSION = 18'` and `'Migration v18'` against the source *text*.
+  Nothing in that file's name suggests it is schema-coupled, so a colliding schema PR lands as
+  a failing test in a file the author has no reason to look at.
 
 **Conflict surface with two parked PRs.** Both are green and ahead of this one; whichever merges
 second may need a trivial rebase, this one included.
@@ -212,11 +227,74 @@ cell reads `architect:main -> pir-1`. That is the **pre-existing 22-character FR
 truncation**, not fallout from widening the REASON column 13→20. Checked before shipping so a
 reviewer does not file it against this change.
 
+## 3-Way Consultation — Both Blocking Verdicts, and What Changed
+
+PIR runs one advisory consultation pass and never re-reviews it, so the dispositions below are
+the only record of what was done. **Gemini: `KEY_ISSUES: None`. Codex: `REQUEST_CHANGES`
+(HIGH). Claude: `REQUEST_CHANGES` (HIGH).** Codex and Claude independently found the *same*
+top defect, which is the strongest signal in the set. Every finding was verified against the
+source before acting — none was taken on the reviewer's word.
+
+**1. `setHeldVerdict` did not carry the guard the docs credited it with — FIXED.**
+Both reviewers. At HEAD the statement was unconditional; the changed-only guard lived only at
+`mailbox-delivery.ts:584` and `:630`, while the plan, this review and `arch.md` all said the
+repository function did it. No live bug, but the owner starvation notice reads elapsed time off
+`updated_at`, so one new caller would have broken it silently against documentation that said
+otherwise. The predicate now lives in the SQL — `AND (reason IS NOT ? OR detail IS NOT ?)`,
+`IS NOT` rather than `<>` because both columns are nullable and `NULL <> NULL` is NULL, not
+false. Call-site guards kept as defence in depth. **6 new tests** drive the function directly,
+past those guards, including the null no-op case that a `<>` predicate would have let through.
+`arch.md` corrected to describe where the guard actually lives.
+
+**2. The dashboard revert rested on a false premise — RETRACTED, change restored and verified.**
+Codex. I had reported "Playwright is not installed"; it is (`1.62.1`, declared in
+`packages/codev/package.json`, browser binaries cached, and `apps/web` has a plain `vite` dev
+script). The revert was pre-authorized *conditionally* on browser verification being
+infeasible, and that condition was false. `formatHoldVerdict` and the `HeldCountBadge` render
+are restored, with **4 + 5** unit/component tests and **6 real-chromium tests**. Evidence in
+§9/§9b of the evidence file.
+
+**3. Resize regression coverage was thin — FIXED.** Codex, in three parts, all confirmed:
+`pty-manager.test.ts` covered only the happy path and unknown-id→null, so nothing distinguished
+a *dropped* resize from an *unknown session* — the exact ambiguity that forced the REST
+existence check; no test anywhere asserted 409 vs 404; and the attach test supplied
+`welcomeCols`/`welcomeRows` through `Object.defineProperty` on a fake emitter, never proving
+`ShellperClient` hydrates them from a real WELCOME frame. Now **4** manager/route tests
+(dropped→null with dims unmoved, 409, 404, 200-with-applied-dims) and **17** hydration tests
+against real frames via `miniShellper`, including both-or-neither atomicity and independence
+from the #1475 identity pair.
+
+**4. Three minor findings from Claude — all FIXED.** The `HeldCountBadge` test fixture omitted
+the now-required `HeldMessage.detail` (latent only because `apps/web`'s tsconfig excludes
+`__tests__`); a comment in `tower-routes.ts` `holdAndRespond` had been orphaned from the
+`detail: null` it explains by a blank line, reading as if code had been deleted; and the
+truncation example in `inbox.ts` said `busy:no-composer-m…` where `truncate(…, 20)` actually
+yields `busy:no-composer-ma…` (verified by running it).
+
+**Claude also flagged that the worktree was changing mid-review** — correct, and it was me
+fixing finding 1 while the review ran. Resolved by committing; the suite result quoted above is
+from the final tree.
+
+**A retracted claim, kept visible rather than edited away.** An earlier version of this review
+told the reader the dashboard gap was a deliberate, tooling-forced choice. That was wrong, and
+it reached a human as verified fact before it was caught. It is called out here because a PR
+body that quietly loses a false claim teaches nobody; the mechanism (checking `node_modules/.bin`
+at the root of a pnpm monorepo, and reading `npx`'s auto-fetch as evidence of installation) is
+worth more to the next reader than a clean diff.
+
+**One more mistake worth the reviewer's attention.** The first runs of the new browser test
+silently pointed at **port 4100 — the live Tower** — because the repo's playwright config
+defaults to it and my scratch config set the port only in `webServer.env`, which is the
+*server's* environment, not the *runner's*. Read-only and provably harmless (all `/api/*` routes
+mocked in-page; live `global.db` mtime unchanged), but luck rather than design. The committed
+test now throws if `TOWER_TEST_PORT` is unset instead of defaulting, so it cannot recur.
+
 ## How to Test Locally
 
 - **View diff**: VSCode sidebar → right-click builder `pir-1482` → **Review Diff**
-- **Run dev**: `afx dev pir-1482` (note: no `worktree.devCommand` is configured in this repo, so
-  this is not available here — see gap 1 above)
+- **Run dev**: `afx dev pir-1482` is unavailable (no `worktree.devCommand` in this repo), but
+  `apps/web` has a plain `vite` dev script and the dashboard can be served directly — see the
+  browser-check recipe below.
 - **Read what was actually exercised, without attaching to a terminal**:
   `codev/projects/1482-f1-tower-vs-pty-dimension-dive/1482-dev-approval-evidence.md`
 
@@ -234,8 +312,14 @@ What to verify:
   and the session's dims do **not** move.
 - Restart Tower with a live shellper at a non-default geometry: adopted dims match the
   shellper's, and a held message to that agent delivers.
-- Dashboard held-mail popover: **currently still shows a bare `busy`** — that is gap 1, not a
-  test failure.
+- Dashboard held-mail popover: shows the same compound sub-code the CLI does. To re-run the
+  browser check yourself, against a throwaway Tower rather than your live one:
+  ```
+  pnpm build
+  NODE_ENV=test AF_TEST_DB=scratch.db node packages/codev/dist/agent-farm/servers/tower-server.js 14100 &
+  cd packages/codev && TOWER_TEST_PORT=14100 npx playwright test issue-1482-held-popover-detail
+  ```
+  The test refuses to run without `TOWER_TEST_PORT` rather than defaulting to 4100.
 
 ## Flaky Tests
 

@@ -265,9 +265,18 @@ export function markDelivered(db: Database.Database, id: string, now: number = D
  * new reason beside the previous reason's detail. Callers that hold for a NON-gate cause pass
  * `detail: null` so a stale detail can never outlive the verdict that produced it.
  *
- * `updated_at` therefore keeps meaning "when this row's verdict last MOVED" — the delivery
- * pass only calls this when the pair actually changed, which is what lets the starvation
- * notice say how long a composer has been occupied without a second timestamp column.
+ * `updated_at` therefore keeps meaning "when this row's verdict last MOVED", and that is
+ * enforced HERE, by the `(reason IS NOT ? OR detail IS NOT ?)` predicate — not merely by the
+ * callers that happen to check first. The delivery pass does guard before calling (see
+ * `mailbox-delivery.ts`), but a guard living only at the call site is one new caller away from
+ * silently breaking the starvation notice, which reads elapsed time off `updated_at` to say how
+ * long a composer has been occupied. `IS NOT` rather than `<>` because both columns are
+ * nullable and SQL's `<>` is not null-safe: `NULL <> NULL` is NULL, not false, so a
+ * `null`→`null` no-op would slip through the predicate and bump the timestamp anyway.
+ *
+ * Returns true only when a held row's verdict actually moved. A repeat of the same pair, a
+ * terminal row, and an unknown id are all `false` — callers wanting "does this row exist"
+ * should ask {@link getById}, not this.
  */
 export function setHeldVerdict(
   db: Database.Database,
@@ -277,8 +286,11 @@ export function setHeldVerdict(
   now: number = Date.now()
 ): boolean {
   const info = db
-    .prepare("UPDATE mailbox SET reason = ?, detail = ?, updated_at = ? WHERE id = ? AND status = 'held'")
-    .run(reason, detail, now, id);
+    .prepare(
+      "UPDATE mailbox SET reason = ?, detail = ?, updated_at = ? " +
+        "WHERE id = ? AND status = 'held' AND (reason IS NOT ? OR detail IS NOT ?)"
+    )
+    .run(reason, detail, now, id, reason, detail);
   return info.changes > 0;
 }
 

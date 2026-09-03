@@ -1334,3 +1334,82 @@ describe('Issue #1482 — gate detail persisted on the held row', () => {
     drainer.stop();
   });
 });
+
+describe('Issue #1482 — setHeldVerdict enforces changed-only AT THE REPOSITORY', () => {
+  // Codex flagged at the PR consultation that the changed-only guard lived only at the two
+  // call sites in mailbox-delivery.ts, while the plan, the review and arch.md all credited
+  // the repository function with it. These tests drive setHeldVerdict DIRECTLY — no delivery
+  // pass, no call-site guard in the way — so the invariant is pinned where it is claimed.
+  //
+  // It matters because the owner starvation notice reads elapsed time off `updated_at` to say
+  // how long a composer has been occupied. A caller that re-writes an unchanged verdict every
+  // tick would reset that clock and the notice would never fire.
+  let db: Database.Database;
+  beforeEach(() => {
+    db = new Database(':memory:');
+    db.exec(GLOBAL_SCHEMA);
+  });
+  afterEach(() => db.close());
+
+  const held = (now = 1000) =>
+    mailbox.enqueue(db, { workspacePath: '/ws/a', toAgent: 'spir-1', body: 'hi', formattedMessage: 'M' }, now);
+
+  it('a repeated (reason, detail) pair does NOT bump updated_at', () => {
+    const row = held();
+    expect(mailbox.setHeldVerdict(db, row.id, 'busy', 'user-text', 2000)).toBe(true);
+    const first = mailbox.getById(db, row.id)!.updated_at;
+
+    // Same verdict re-asserted 5s later — the composer has not moved, so neither should the clock.
+    expect(mailbox.setHeldVerdict(db, row.id, 'busy', 'user-text', 7000)).toBe(false);
+    expect(mailbox.getById(db, row.id)!.updated_at).toBe(first);
+  });
+
+  it('a repeated NULL detail does not bump either — the null-safe half of the predicate', () => {
+    // `<>` would not catch this: NULL <> NULL is NULL, not false, so a `<>`-based predicate
+    // lets the no-op through and silently bumps the timestamp. This is the case that pins `IS NOT`.
+    const row = held();
+    expect(mailbox.setHeldVerdict(db, row.id, 'no-live-pty', null, 2000)).toBe(true);
+    const first = mailbox.getById(db, row.id)!.updated_at;
+
+    expect(mailbox.setHeldVerdict(db, row.id, 'no-live-pty', null, 7000)).toBe(false);
+    expect(mailbox.getById(db, row.id)!.updated_at).toBe(first);
+  });
+
+  it('a changed detail alone (same reason) DOES bump — the verdict really moved', () => {
+    const row = held();
+    mailbox.setHeldVerdict(db, row.id, 'busy', 'user-text', 2000);
+
+    expect(mailbox.setHeldVerdict(db, row.id, 'busy', 'no-region-end', 7000)).toBe(true);
+    const stored = mailbox.getById(db, row.id)!;
+    expect(stored.updated_at).toBe(7000);
+    expect(stored.detail).toBe('no-region-end');
+  });
+
+  it('a changed reason alone (same null detail) DOES bump', () => {
+    const row = held();
+    mailbox.setHeldVerdict(db, row.id, 'busy', null, 2000);
+
+    expect(mailbox.setHeldVerdict(db, row.id, 'no-live-pty', null, 7000)).toBe(true);
+    expect(mailbox.getById(db, row.id)!.updated_at).toBe(7000);
+  });
+
+  it('dropping a detail to null (same reason) DOES bump — a stale detail must not outlive its verdict', () => {
+    const row = held();
+    mailbox.setHeldVerdict(db, row.id, 'busy', 'user-text', 2000);
+
+    expect(mailbox.setHeldVerdict(db, row.id, 'busy', null, 7000)).toBe(true);
+    const stored = mailbox.getById(db, row.id)!;
+    expect(stored.updated_at).toBe(7000);
+    expect(stored.detail).toBeNull();
+  });
+
+  it('never touches a terminal row, and returns false for an unknown id', () => {
+    const row = held();
+    mailbox.markDelivered(db, row.id, 3000);
+    const delivered = mailbox.getById(db, row.id)!;
+
+    expect(mailbox.setHeldVerdict(db, row.id, 'busy', 'user-text', 9000)).toBe(false);
+    expect(mailbox.getById(db, row.id)!.updated_at).toBe(delivered.updated_at);
+    expect(mailbox.setHeldVerdict(db, 'no-such-id', 'busy', 'user-text', 9000)).toBe(false);
+  });
+});

@@ -359,3 +359,102 @@ describe('PIR #1475 — WELCOME identity: ShellperClient hydration', () => {
     expect(client.welcomeCommand).toBe('claude');
   });
 });
+
+describe('Issue #1482 — WELCOME geometry: ShellperClient hydration', () => {
+  // Codex flagged at the PR consultation that the attach test in pty-session-resize.test.ts
+  // supplies `welcomeCols`/`welcomeRows` through `Object.defineProperty` on a fake emitter —
+  // which proves what PtySession does with the pair, but never that ShellperClient actually
+  // hydrates it from a WELCOME frame. These drive a real handshake against `miniShellper`, so
+  // the two halves of the reconciliation path are each pinned against a real frame.
+  //
+  // The pair is the whole point: attach adopts it as the real PTY's geometry and re-wraps the
+  // render gate's classification mirror with it. A half-adopted geometry is worse than none —
+  // a mirror at the right columns and a nonsense row count classifies no better than one at
+  // the wrong size, and a bad classification is an indefinite hold.
+  let socketPath: string;
+  let cleanups: Array<() => void>;
+
+  beforeEach(() => {
+    socketPath = tmpSocketPath('shellper-client-geometry-');
+    cleanups = [];
+  });
+
+  afterEach(() => {
+    for (const fn of cleanups) fn();
+  });
+
+  async function connectWith(welcome: unknown): Promise<ShellperClient> {
+    const server = miniShellper(socketPath, welcome);
+    cleanups.push(server.close);
+    const client = new ShellperClient(socketPath);
+    cleanups.push(() => client.disconnect());
+    await client.connect();
+    return client;
+  }
+
+  it('hydrates the geometry the shellper reported on WELCOME', async () => {
+    // The divergence case from the issue: the real PTY is 139x63 while Tower believes 104x101.
+    const client = await connectWith({ ...BASE_WELCOME, cols: 139, rows: 63 });
+    expect(client.welcomeCols).toBe(139);
+    expect(client.welcomeRows).toBe(63);
+  });
+
+  it('hydrates independently of the identity pair (#1475) — they are separate capabilities', async () => {
+    // An invalid IDENTITY must not throw away a perfectly good GEOMETRY. (This is the exact
+    // mistake a scripted edit made during implementation: the geometry reset landed inside
+    // setIdentity's reject path.)
+    const client = await connectWith({ ...BASE_WELCOME, cols: 139, rows: 63, command: 42, args: [] });
+    expect(client.welcomeCommand).toBeNull();
+    expect(client.welcomeArgs).toBeNull();
+    expect(client.welcomeCols).toBe(139);
+    expect(client.welcomeRows).toBe(63);
+  });
+
+  it('a valid identity does not disturb the geometry either', async () => {
+    const client = await connectWith({
+      ...BASE_WELCOME, cols: 139, rows: 63, command: 'claude', args: ['--resume', 'x'],
+    });
+    expect(client.welcomeCommand).toBe('claude');
+    expect(client.welcomeCols).toBe(139);
+    expect(client.welcomeRows).toBe(63);
+  });
+
+  // Both-or-neither: every unusable shape must null out BOTH, never leave one usable half.
+  const REJECTED_GEOMETRY: Array<[string, Record<string, unknown>]> = [
+    ['zero cols', { cols: 0, rows: 63 }],
+    ['zero rows', { cols: 139, rows: 0 }],
+    ['negative cols', { cols: -1, rows: 63 }],
+    ['negative rows', { cols: 139, rows: -1 }],
+    ['non-integer cols', { cols: 139.5, rows: 63 }],
+    ['non-integer rows', { cols: 139, rows: 63.5 }],
+    ['non-numeric cols', { cols: '139', rows: 63 }],
+    ['non-numeric rows', { cols: 139, rows: null }],
+    ['NaN cols', { cols: Number.NaN, rows: 63 }],
+    ['absurd cols (over 10000)', { cols: 10_001, rows: 63 }],
+    ['absurd rows (over 10000)', { cols: 139, rows: 10_001 }],
+  ];
+
+  for (const [label, geometry] of REJECTED_GEOMETRY) {
+    it(`rejects both dimensions atomically: ${label}`, async () => {
+      const client = await connectWith({ ...BASE_WELCOME, ...geometry });
+      expect(client.welcomeCols).toBeNull();
+      expect(client.welcomeRows).toBeNull();
+    });
+  }
+
+  it('accepts the boundary value 10000 on both axes', async () => {
+    const client = await connectWith({ ...BASE_WELCOME, cols: 10_000, rows: 10_000 });
+    expect(client.welcomeCols).toBe(10_000);
+    expect(client.welcomeRows).toBe(10_000);
+  });
+
+  it('leaves both null when a legacy WELCOME omits the geometry entirely', async () => {
+    const { cols: _c, rows: _r, ...noGeometry } = BASE_WELCOME;
+    const client = await connectWith(noGeometry);
+    expect(client.welcomeCols).toBeNull();
+    expect(client.welcomeRows).toBeNull();
+    // And the handshake still completes — an old shellper must not be un-attachable.
+    expect(client.connected).toBe(true);
+  });
+});
+

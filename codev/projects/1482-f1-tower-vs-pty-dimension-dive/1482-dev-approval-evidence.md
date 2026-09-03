@@ -310,10 +310,106 @@ The SDK's own suites (including `import-boundary.test.ts`) pass: 10 files, 120 t
 why `formatVerdict` was **not** shared with `apps/web` — the dashboard got a ported copy, which
 was then reverted along with the rest of the unverifiable UI change.
 
-## 9. Known gap carried to the gate
+## 9. The dashboard popover — RETRACTED GAP, now verified in a browser — LIVE
 
-The dashboard held-mail popover still renders a bare `busy` where `afx inbox` renders
-`busy:user-text`. The render change was written, then reverted (commit `908dfaaad`) because
-this worktree cannot browser-verify it: Playwright is not installed and the repo has no
-`worktree.devCommand` for `afx dev`. `HeldMessage.detail` and the `/api/inbox` projection
-remain, so it is a two-line change for whoever can run the dashboard.
+**Section 9 previously said this could not be browser-verified. That was wrong, and the claim
+under it was false.** It read: *"Playwright is not installed and the repo has no
+`worktree.devCommand` for `afx dev`."* The second half is true and irrelevant; the first half
+is simply untrue. Checked properly, after `codex` challenged it at the PR consultation:
+
+```
+$ npx playwright --version
+Version 1.62.1
+
+$ grep -n playwright packages/codev/package.json
+35:    "test:e2e:playwright": "pnpm exec playwright test",
+61:    "@playwright/test": "^1.58.0",
+69:    "playwright": "^1.58.0",
+
+$ ls ~/.cache/ms-playwright
+chromium-1217  chromium-1228  chromium_headless_shell-1217  chromium_headless_shell-1228
+ffmpeg-1011  firefox-1532
+
+$ python3 -c "import json;print(json.load(open('apps/web/package.json'))['scripts']['dev'])"
+vite
+```
+
+Playwright, its browser binaries, and a plain `vite` dev script were all present the whole
+time. The missing `worktree.devCommand` blocks `afx dev`; it does not block serving the
+dashboard directly. The revert (`908dfaaad`) was pre-authorized **conditionally on browser
+verification being infeasible**, and that condition was false — so the render change has been
+restored and actually verified.
+
+### 9a. How it was run — against a THROWAWAY Tower, not the live one
+
+```
+node dist/agent-farm/servers/tower-server.js 14100      # NODE_ENV=test, AF_TEST_DB=test-pir1482-popover.db
+TOWER_TEST_PORT=14100 npx playwright test issue-1482-held-popover-detail
+```
+
+**A mistake worth recording, because it is the exact trap this discipline exists to catch.**
+The first attempts of this test silently ran against **port 4100 — the user's live Tower**. The
+repo's `playwright.config.ts` defaults `TOWER_TEST_PORT` to 4100 with `reuseExistingServer:
+true`, and my scratch config set the port only in `webServer.env`, which is the *server*
+process's environment, not the *test runner's*. So the runner fell back to the 4100 default
+while a correctly-isolated Tower sat unused on 14100. It was read-only — every `/api/*` route
+the test reads was mocked in-page, and it only navigated and clicked a popover — and the live
+`~/.agent-farm/global.db` mtime is unchanged (`Aug 22 14:30`, verified after the run). But it
+was luck, not design. The symptom was confusing rather than loud: the page rendered a
+`title` string (`Review with: afx inbox`) that exists nowhere in `apps/web`, which is what
+finally proved the browser was talking to a different server than the one being tested.
+
+The committed test now **refuses to run without an explicit port** rather than defaulting to
+4100, so this cannot recur silently.
+
+### 9b. The captured output — 3 rows, real chromium, real dashboard bundle
+
+```
+URL: http://localhost:14100/workspace/L2hvbWUvdXNlci9jb2RlL2NvZGV2X3Jvb3QvY29kZXYvLmJ1aWxkZXJzL3Bpci0xNDgy/
+BADGE: 3 held
+BADGE TITLE: 3 held messages awaiting a clear prompt. Click to list them.
+ROW: architect → pir-14821m · busy:user-text
+ROW: architect → spir-13135m · busy:no-region-end
+ROW: architect → air-10571m · no-live-pty
+POPOVER HTML:
+<div class="held-popover" id="_r_0_" data-testid="held-popover" aria-live="polite" aria-busy="false"><section class="held-group"><h2 class="held-group-title">Held (3)</h2><ul class="held-list" data-testid="held-group-held"><li class="held-row" data-testid="held-row"><span class="held-row-addresses">architect → pir-1482</span><span class="held-row-meta">1m · busy:user-text</span></li><li class="held-row" data-testid="held-row"><span class="held-row-addresses">architect → spir-1313</span><span class="held-row-meta">5m · busy:no-region-end</span></li><li class="held-row" data-testid="held-row"><span class="held-row-addresses">architect → air-1057</span><span class="held-row-meta">1m · no-live-pty</span></li></ul></section><p class="held-popover-foot">Ids and dismissal: <code>afx inbox</code></p></div>
+```
+
+The full suite, same browser, same server:
+
+```
+Running 6 tests using 1 worker
+[1/6] ... renders busy:user-text — the hold that clears itself
+[2/6] ... renders busy:no-region-end — the hold that never clears
+[3/6] ... renders busy:no-composer-marker
+[4/6] ... renders a bare reason when the row carries no detail
+[5/6] ... a scheduled row still reads "scheduled", detail notwithstanding
+[6/6] ... distinct rows keep distinct verdicts side by side
+  6 passed (2.5s)
+```
+
+**On rendering fidelity, asked explicitly:** the popover does **not** truncate or wrap
+differently from the CLI. `afx inbox` clips the REASON cell at 20 characters, so
+`busy:no-composer-marker` shows there as `busy:no-composer-ma…`; the popover has no column
+budget and renders it in full. That is a difference in *available width*, not in the rendered
+verdict — both surfaces name the same sub-code, which is the property that matters. A
+screenshot was taken and inspected: three rows, each legible, no clipping, no overflow.
+
+## 10. Follow-up fixes made after the PR consultation
+
+`codex` and `claude` both returned REQUEST_CHANGES, and both independently found the same
+defect: `setHeldVerdict` wrote **unconditionally**, while the plan, the review and `arch.md`
+all credited the repository function with the changed-only guard. The guard existed only at
+the two call sites in `mailbox-delivery.ts` (`:584`, `:630`). No live bug — but the owner
+starvation notice reads elapsed time off `updated_at`, so one new caller would have broken it
+silently, with the docs actively misleading whoever wrote it. Fixed in the repository:
+
+```sql
+UPDATE mailbox SET reason = ?, detail = ?, updated_at = ?
+ WHERE id = ? AND status = 'held' AND (reason IS NOT ? OR detail IS NOT ?)
+```
+
+`IS NOT` rather than `<>`, because both columns are nullable and `NULL <> NULL` is NULL rather
+than false — a `<>` predicate would let a `null`→`null` no-op through and bump the timestamp
+anyway. Six repository-level regression tests drive `setHeldVerdict` directly, past the call-
+site guards, including that null case.

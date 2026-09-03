@@ -175,3 +175,81 @@ Also noted by the architect, worth keeping as a habit rather than an anecdote: m
 the new suites was the right instinct, because *a test that cannot fail is the defect #1471 exists
 to fix.* Writing a test to close a gap someone else found, and not checking that it bites, would
 have shipped a second instance of the bug the repo already has an issue open about.
+
+## 2026-09-03 — PR #1604, and what the consultation caught
+
+PR opened, then porch's single advisory 3-way pass ran. **Gemini: no issues. Codex and Claude:
+both REQUEST_CHANGES, HIGH confidence, and both independently found the same top defect.** That
+agreement is the useful signal — two models converging on one thing beats either alone.
+
+### The finding that mattered most, and why my documentation was the actual bug
+
+`setHeldVerdict` wrote unconditionally. The changed-only guard I had described in the plan, the
+review AND `arch.md` lived only at the two call sites in `mailbox-delivery.ts`. There was no
+live bug — the delivery pass does guard — so it would have been easy to rebut as "behaviour is
+correct, docs are close enough."
+
+That would have been wrong. The owner starvation notice reads elapsed time off `updated_at` to
+say how long a composer has been occupied. A future caller writing an unchanged verdict every
+tick resets that clock and the notice never fires — and that caller would have been *reading
+documentation that told them the repository already protected them*. Correct behaviour plus
+misleading docs is a trap with a fuse on it. Fixed at the layer that claims it, with a null-safe
+`IS NOT` predicate (a `<>` predicate silently fails the `null`→`null` case, which is exactly the
+`no-live-pty` re-hold), and six tests that drive the function directly, past the call-site
+guards.
+
+**Lesson: when a reviewer says "the guard is not where you said it is", the fix is rarely to
+correct the sentence. Move the guard.**
+
+### The dashboard revert was built on a claim I never checked
+
+I told the architect, and the architect told the human, that Playwright was not installed. It
+was: 1.62.1, declared in `packages/codev/package.json` with a `test:e2e:playwright` script,
+browser binaries cached in `~/.cache/ms-playwright`, and `apps/web` carrying a plain `vite` dev
+script. The missing `worktree.devCommand` blocks `afx dev` and nothing else.
+
+The revert had been pre-authorized *conditionally* on browser verification being infeasible.
+The condition was false, so the authorization never applied — the architect's words: "the
+fallback does not apply and never did." Restored the render and the ported `formatHoldVerdict`,
+added component tests, and drove it in real chromium.
+
+**Lesson: a conditional authorization is only as good as the condition. I treated "the reviewer
+pre-approved this fallback" as the load-bearing fact, when the load-bearing fact was my own
+unverified claim underneath it.** I was careful to disclose the gap prominently and refuse to
+claim an unperformed verification — that instinct was right and it is what made the gap
+reviewable. But disclosure is not verification. I should have spent two minutes running
+`npx playwright --version` before spending a commit on the revert.
+
+### And a near-miss I want on the record
+
+The first runs of the new browser test pointed at **port 4100 — the user's live Tower**. The
+repo's `playwright.config.ts` defaults `TOWER_TEST_PORT` to 4100 with `reuseExistingServer:
+true`; my scratch config set the port in `webServer.env`, which is the *server* process's
+environment, not the *test runner's*. So the runner used the 4100 default while a properly
+isolated Tower idled on 14100.
+
+Read-only, all `/api/*` routes mocked in-page, and the live `global.db` mtime is unchanged
+(`Aug 22 14:30`) — but that is luck, not design. I had built the isolation and then failed to
+verify the isolation was in effect. What eventually gave it away was a rendered `title` string
+(`Review with: afx inbox`) that exists nowhere in `apps/web` — I had spent several rounds
+theorising about stale bundles and React hydration races before checking `page.url()`, which
+would have answered it immediately.
+
+**Two lessons.** First: when isolating a test from a live system, assert the isolation
+(`page.url()`, the port, the db path) as the FIRST diagnostic, not the last. Second: an
+env var set on a child process is not set for the parent — and the failure mode is silence,
+because the default was a working server. The committed test now throws when `TOWER_TEST_PORT`
+is unset instead of defaulting to 4100.
+
+### Also fixed, from Claude
+
+Three small real ones: the `HeldCountBadge` fixture omitted the now-required `HeldMessage.detail`
+(latent only because `apps/web`'s tsconfig excludes `__tests__` — worth remembering that a
+green typecheck there proves less than it looks); an orphaned comment in `tower-routes.ts`
+separated from the `detail: null` it explained; and a truncation example in `inbox.ts` off by
+one character, which I verified by actually running `truncate()` rather than eyeballing it.
+
+Claude also noticed the worktree mutating mid-review. That was me fixing finding 1 while it
+read. Fair observation and worth avoiding: a review of a moving tree costs the reviewer real
+effort re-deriving state.
+

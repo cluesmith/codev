@@ -1654,9 +1654,6 @@ function holdAndRespond(
     'INFO',
     `Message held (${reason}) → ${input.toAgent} @ ${path.basename(input.workspacePath)} (mailbox ${row.id.slice(0, 8)}...)`,
   );
-  // A hold from THIS path is always a non-gate one (no live PTY), so it carries no gate detail
-  // (Issue #1482). Reported explicitly rather than omitted so the held response has one shape.
-
   // A new held row appeared → refresh the held-count indicator (Spec 1313, Phase 7).
   ctx.broadcastNotification({ type: 'overview-changed', title: 'Held mail changed', body: `held ${reason}` });
   sendJson(res, 200, {
@@ -1667,6 +1664,9 @@ function holdAndRespond(
     delivered: false,
     held: true,
     reason,
+    // A hold from THIS path is always a non-gate one (no live PTY), so it carries no gate
+    // detail (Issue #1482). Reported explicitly rather than omitted so the held response has
+    // one shape whichever path produced it.
     detail: null,
     mailboxId: row.id,
     bodyLength: Buffer.byteLength(input.body, 'utf8'),

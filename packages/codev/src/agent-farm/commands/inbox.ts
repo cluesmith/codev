@@ -153,7 +153,7 @@ export async function inboxList(options: InboxListOptions = {}): Promise<void> {
 
   // REASON is 20 wide, not 13 (Issue #1482): it now carries the gate detail as a `reason:detail`
   // sub-code, and `busy:no-region-end` (18) has to fit. Only `busy:no-composer-marker` truncates,
-  // and it stays unambiguous at 20 (`busy:no-composer-m…`). A sub-code rather than a sixth column
+  // and it stays unambiguous at 20 (`busy:no-composer-ma…`). A sub-code rather than a sixth column
   // — the table is already five wide, and the detail is meaningless without the reason it
   // qualifies, so the two belong in one cell.
   const widths = [38, 6, 20, 22, 14];
