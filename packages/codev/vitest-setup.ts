@@ -2,7 +2,7 @@
  * Global test harness — sandboxes every user-global side effect a suite can
  * reach (#1323). Wired into all three vitest configs via `setupFiles`.
  *
- * Two escapes motivated this file:
+ * Three escapes motivated this file:
  *
  *  1. Any test that reached the gemini consult lane without pinning
  *     `CODEV_AGY_BIN` resolved the developer's REAL `agy` binary and spawned it.
@@ -11,6 +11,9 @@
  *  2. In-process tests ran under the developer's real `HOME`, so every
  *     `recordMetrics()` call appended junk rows (with temp-dir workspace paths)
  *     to the real `~/.codev/metrics.db`, silently skewing `consult stats`.
+ *  3. Suites reaching core auth read AND created the developer's real
+ *     `~/.agent-farm/local-key` (#1597) — see the `CODEV_AGENT_FARM_DIR` pin
+ *     below.
  *
  * Both are failures of *omission*: safety depended on each test remembering to
  * opt out. This harness inverts that — the sandbox is on by default and a test
