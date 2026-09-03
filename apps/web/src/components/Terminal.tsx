@@ -9,10 +9,11 @@ import { FilePathLinkProvider, FilePathDecorationManager } from '../lib/filePath
 import { VirtualKeyboard, type ModifierState } from './VirtualKeyboard.js';
 import { useMediaQuery } from '../hooks/useMediaQuery.js';
 import { MOBILE_BREAKPOINT } from '../lib/constants.js';
-import { uploadPasteImage } from '../lib/api.js';
+import { uploadPasteImage, getWebKey } from '../lib/api.js';
 import { ScrollController } from '../lib/scrollController.js';
 import { EscapeBuffer } from '../lib/escapeBuffer.js';
 import { BackoffController, classifyUpgradeError } from '@cluesmith/codev-sdk/reconnect-policy';
+import { terminalWsProtocols } from '@cluesmith/codev-types';
 
 /**
  * Floating controls overlay for terminal windows — refresh (re-fit + resize)
@@ -445,7 +446,11 @@ export function Terminal({ wsPath, onFileOpen, persistent, toolbarExtra, onPerma
     /** Create a WebSocket connection, optionally resuming from a sequence number. */
     const connect = (resumeSeq?: number) => {
       const wsUrl = resumeSeq !== undefined ? `${wsBase}?resume=${resumeSeq}` : wsBase;
-      const ws = new WebSocket(wsUrl);
+      // Request authentication (advisory GHSA-xvjp-7748-v88v): browsers cannot
+      // set headers on a WebSocket, so the shared key travels as a subprotocol
+      // (validated at the upgrade), alongside the marker protocol Tower echoes.
+      const protocols = terminalWsProtocols(getWebKey());
+      const ws = protocols ? new WebSocket(wsUrl, protocols) : new WebSocket(wsUrl);
       ws.binaryType = 'arraybuffer';
       wsRef.current = ws;
 

@@ -27,6 +27,7 @@ import {
   type HeldOwnerNoticeInfo,
 } from '../servers/mailbox-delivery.js';
 import type { GateProfile, GateVerdict } from '../servers/render-gate.js';
+import { formatArchitectToBuilderMessage } from '../utils/message-format.js';
 
 const PROFILE: GateProfile = { app: 'claude', markerPattern: /^❯/, regionEndPatterns: [] };
 const CLEAN: GateVerdict = { clean: true, detail: 'empty' };
@@ -43,7 +44,11 @@ const BUSY: GateVerdict = { clean: false, reason: 'busy', detail: 'user-text' };
 function fakeSession(overrides: Partial<DeliverySession> = {}): DeliverySession & { writes: string[] } {
   const writes: string[] = [];
   return {
+    id: 'term-fake',
     bytesWritten: 0,
+    // Old enough that the Issue #1573 settle window has long passed for the harness clock
+    // (`now` starts at 1000): a test that wants a still-painting screen overrides it.
+    lastDataAt: 0,
     info: { cols: 110, rows: 32 },
     command: 'claude',
     launchArgs: [],
@@ -84,6 +89,12 @@ interface Harness {
    * is HELD `no-live-pty`, not marked delivered.
    */
   writeResult: boolean;
+  /**
+   * What the fake echo watch answers (Issue #1573). Default true (the header showed up on the
+   * terminal); set false to model a write whose bytes never reached the screen and assert the
+   * row is HELD rather than marked delivered.
+   */
+  echoVerified: boolean;
 }
 
 function harness(): Harness {
@@ -105,6 +116,7 @@ function harness(): Harness {
     ownerClears: [],
     now: 1000,
     writeResult: true,
+    echoVerified: true,
     setSession: (agent, s) => sessions.set(agent, s),
     setProfile: (p) => {
       profile = p;
@@ -120,10 +132,15 @@ function harness(): Harness {
       resolveProfile: () => profile,
       classify: (session: DeliverySession, p: GateProfile): Promise<GateVerdict> =>
         classifyOverride ? classifyOverride(session, p) : Promise.resolve(verdict),
-      writeMessage: (_s, formattedMessage, noEnter) => {
+      writeMessage: (_s, formattedMessage, noEnter, precheck) => {
+        // Mirror the live binding's ordering: the precheck runs INSIDE the lock, before the
+        // first byte (Issue #1365), so an abort must record no write at all.
+        const abort = precheck();
+        if (abort) return { status: 'aborted', abort };
         writes.push({ formattedMessage, noEnter });
-        return h.writeResult;
+        return h.writeResult ? { status: 'written' } : { status: 'dropped' };
       },
+      watchEcho: () => Promise.resolve({ verify: () => Promise.resolve(h.echoVerified) }),
       broadcast: (f) => broadcasts.push(f),
       onHeldStateChange: () => {
         h.heldChanges++;
@@ -179,6 +196,28 @@ describe('deliverAgentMail (Spec 1313, Phase 4)', () => {
     expect(h.writes).toEqual([{ formattedMessage: '[from architect] hi', noEnter: false }]);
     expect(mailbox.getById(db, row.id)?.status).toBe('delivered');
     expect(h.broadcasts[0]).toMatchObject({ type: 'message', content: 'hi', to: { agent: 'spir-1' } });
+  });
+
+  /**
+   * #1574: the bytes a builder actually sees must name the recipient the mailbox row
+   * was addressed to. Asserted end-to-end (real formatter → real row → real delivery →
+   * captured write) rather than on the formatter alone: a frame built with the wrong
+   * recipient would still pass a formatter-only test, and that is the exact failure —
+   * a frame attesting to an address that is not the row's.
+   */
+  it('a delivered row is self-attesting: the injected bytes carry the row\'s to_agent', async () => {
+    const h = harness();
+    h.setSession('spir-1', fakeSession());
+    const row = enqueue({ formattedMessage: formatArchitectToBuilderMessage('spir-1', 'hi') });
+
+    await deliverAgentMail(h.ports, db, '/ws/a', 'spir-1');
+
+    const stored = mailbox.getById(db, row.id)!;
+    expect(stored.status).toBe('delivered');
+    expect(h.writes[0].formattedMessage).toContain(`→ ${stored.to_agent}`);
+    // And the reply channel travels with it — the point-of-need reminder that
+    // survives a builder's `/clear` (the real #1530 defect).
+    expect(h.writes[0].formattedMessage).toContain('afx send architect');
   });
 
   it('busy gate → holds, sets reason=busy, writes nothing', async () => {
@@ -318,9 +357,13 @@ describe('deliverAgentMail (Spec 1313, Phase 4)', () => {
     // (the false-clean the gate exists to prevent).
     let bytes = 0;
     const session: DeliverySession = {
+      id: 'term-moving',
       get bytesWritten() {
         return bytes;
       },
+      // Settled (Issue #1573), so the hold this test asserts is attributable to the token
+      // moving under the classify — not to an unknown screen age.
+      lastDataAt: 0,
       info: { cols: 110, rows: 32 },
       command: 'claude',
       launchArgs: [],
@@ -422,7 +465,7 @@ describe('deliverAgentMailSerialized — concurrent-send serialization (Spec 131
     h.ports.writeMessage = (_s, formattedMessage, noEnter) =>
       Promise.resolve().then(() => {
         h.writes.push({ formattedMessage, noEnter });
-        return true; // the write landed (Spec 1313: writeMessage reports delivery success)
+        return { status: 'written' as const }; // the write landed (Spec 1313: the port reports delivery success)
       });
     h.setSession('spir-1', fakeSession());
     mailbox.enqueue(db, { workspacePath: '/ws/a', toAgent: 'spir-1', body: '1', formattedMessage: 'F' }, 1000);
@@ -546,7 +589,11 @@ describe('MailboxDrainer verdict memo (Spec 1313 render-gate follow-up)', () => 
     let bytes = 7;
     // A moving token needs a live getter (a fakeSession spread would freeze bytesWritten to its value).
     h.setSession('spir-1', {
+      id: 'term-moving',
       get bytesWritten() { return bytes; },
+      // Issue #1573 settle-before-write: epoch 0 against the harness clock is a screen that
+      // stopped painting long ago, so this test still exercises the memo and nothing else.
+      lastDataAt: 0,
       info: { cols: 110, rows: 32 },
       command: 'claude',
       launchArgs: [],
@@ -604,6 +651,7 @@ describe('MailboxDrainer verdict memo (Spec 1313 render-gate follow-up)', () => 
     h.ports.writeMessage = (_s, formattedMessage, noEnter) => {
       h.writes.push({ formattedMessage, noEnter });
       if (formattedMessage === 'm1') mailbox.dismiss(db, m1.id, 1002); // operator dismisses during the paced write
+      return { status: 'written' as const };
     };
     const drainer = new MailboxDrainer({ intervalMs: 999999 });
     drainer.start(h.ports, db);
@@ -618,8 +666,8 @@ describe('MailboxDrainer verdict memo (Spec 1313 render-gate follow-up)', () => 
   it('invalidates the memo even when writeMessage REJECTS after partial output (CMAP round 4 — Codex)', async () => {
     const h = harness();
     // Round-4 completion of Fix 1: memo.delete must run on a write REJECTION too (via try/finally),
-    // not only a clean return. writeMessage's port contract is boolean|Promise<boolean>, so a binding
-    // could reject after putting bytes on the wire; without the finally the stale CLEAN survives and a
+    // not only a clean return. writeMessage's port contract is WriteResult|Promise<WriteResult>, so a
+    // binding could reject after putting bytes on the wire; without the finally the stale CLEAN survives and a
     // follow-up could memo-hit it. Here writeMessage records partial output then rejects → the row
     // stays held (deliverAgentMail throws, caught by the per-agent tick guard) → the NEXT tick must
     // re-classify fresh, not memo-hit. Static ring, so a re-classify can only come from invalidation.
@@ -1050,7 +1098,11 @@ describe('MailboxDrainer owner starvation notice (Spec 1313 round 3, change 3)',
     // verdict memo re-classifies (a static token would serve the cached BUSY and never deliver).
     let bytes = 1;
     h.setSession('spir-1', {
+      id: 'term-moving',
       get bytesWritten() { return bytes; },
+      // Issue #1573: the repaint that cleared the composer has already settled by the time a
+      // drainer tick sees it — ticks are 1.5 s apart, the settle window is 250 ms.
+      lastDataAt: 0,
       info: { cols: 110, rows: 32 },
       command: 'claude',
       launchArgs: [],

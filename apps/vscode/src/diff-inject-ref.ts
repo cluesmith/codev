@@ -292,25 +292,78 @@ export function resolveCursorRef(
   hunks: ChangedRange[],
   cursorLine: number,
 ): CursorRef {
+  const symbol = smallestEnclosingSymbol(relPath, symbols, cursorLine);
+  if (symbol) {
+    return { kind: 'symbol', refText: buildBuilderRangeRef(relPath, symbol.start, symbol.end), range: symbol };
+  }
+  const hunk = enclosingHunk(hunks, cursorLine);
+  if (hunk) {
+    return { kind: 'hunk', refText: buildBuilderRangeRef(relPath, hunk.start, hunk.end), range: hunk };
+  }
+  return { kind: 'file', refText: buildBuilderFileRef(relPath) };
+}
+
+/**
+ * Resolve the reference for a cursor on `cursorLine`, **hunk first** — the
+ * precedence the "forward the hunk under the cursor" press verbs want (#1534):
+ *
+ *   1. **Hunk** — the changed range containing the cursor. A press named
+ *      "forward-hunk"/"feedback-hunk" forwards the *tight changed lines*, so when
+ *      a change covers the cursor it wins over the enclosing symbol; forwarding
+ *      the whole function on an ordinary in-function edit would silently broaden
+ *      the scope the verb names.
+ *   2. **Symbol** — the smallest forwardable symbol enclosing the cursor, used
+ *      only when no changed range covers it (e.g. a deletion-only spot the dial
+ *      rotation stopped on has no new-side hunk). Degrade instead of erroring.
+ *   3. **File** — the bare path, when neither covers the cursor.
+ *
+ * Contrast `resolveCursorRef` (symbol first), which the Cmd/Ctrl+K H keyboard
+ * verb keeps — that verb is "forward whatever context covers the cursor,
+ * most-specific-symbol-first" by its own design (#1073).
+ */
+export function resolveHunkFirstRef(
+  relPath: string,
+  symbols: SymbolNode[],
+  hunks: ChangedRange[],
+  cursorLine: number,
+): CursorRef {
+  const hunk = enclosingHunk(hunks, cursorLine);
+  if (hunk) {
+    return { kind: 'hunk', refText: buildBuilderRangeRef(relPath, hunk.start, hunk.end), range: hunk };
+  }
+  const symbol = smallestEnclosingSymbol(relPath, symbols, cursorLine);
+  if (symbol) {
+    return { kind: 'symbol', refText: buildBuilderRangeRef(relPath, symbol.start, symbol.end), range: symbol };
+  }
+  return { kind: 'file', refText: buildBuilderFileRef(relPath) };
+}
+
+/** The changed range containing `cursorLine`, if any. */
+function enclosingHunk(hunks: ChangedRange[], cursorLine: number): ChangedRange | undefined {
+  return hunks.find(h => cursorLine >= h.start && cursorLine <= h.end);
+}
+
+/**
+ * The smallest *forwardable* symbol range enclosing `cursorLine`, or undefined.
+ * "Forwardable" is exactly the symbol set the codelens exposes
+ * (`buildSymbolLensDescriptors`), so the keyboard lands on the same range a lens
+ * click would; among overlapping candidates the smallest span wins (a method
+ * inside a class beats the class). `buildSymbolLensDescriptors` skips a symbol
+ * anchored on line 0 (it collides with the file-level lens), so a declaration
+ * starting on file line 1 has no candidate here and falls through — the same
+ * "keyboard == codelens click" gap the lens itself has.
+ */
+function smallestEnclosingSymbol(
+  relPath: string,
+  symbols: SymbolNode[],
+  cursorLine: number,
+): ChangedRange | undefined {
   let best: ChangedRange | undefined;
-  // `buildSymbolLensDescriptors` skips a symbol anchored on line 0 (it collides
-  // with the file-level lens), so a declaration starting on file line 1 has no
-  // symbol candidate here and falls through to the hunk/file steps — the same
-  // "keyboard == codelens click" gap the lens itself has.
   for (const lens of buildSymbolLensDescriptors(relPath, symbols)) {
     const range = lens.range;
     if (!range) { continue; } // the file-level lens has no range
     if (cursorLine < range.start || cursorLine > range.end) { continue; }
     if (!best || range.end - range.start < best.end - best.start) { best = range; }
   }
-  if (best) {
-    return { kind: 'symbol', refText: buildBuilderRangeRef(relPath, best.start, best.end), range: best };
-  }
-
-  const hunk = hunks.find(h => cursorLine >= h.start && cursorLine <= h.end);
-  if (hunk) {
-    return { kind: 'hunk', refText: buildBuilderRangeRef(relPath, hunk.start, hunk.end), range: hunk };
-  }
-
-  return { kind: 'file', refText: buildBuilderFileRef(relPath) };
+  return best;
 }

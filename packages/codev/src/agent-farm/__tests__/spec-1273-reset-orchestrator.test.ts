@@ -130,12 +130,14 @@ function makeFs(script: {
 const CURRENT_NONCE = { value: '' };
 
 /**
- * What the terminal already contains before the clear: reset's own messages.
+ * What the terminal already contains before the clear: the refresh's own messages.
  *
- * Deliberately includes the save request's "CONTEXT RESET INCOMING" header,
- * because that string matches the confirmation pattern. If the window logic
- * regresses, these lines leak into the check and confirmation goes true for the
- * wrong reason — which is exactly the bug this models.
+ * The first line deliberately matches the confirmation pattern. Until #1489 the
+ * save request literally opened "CONTEXT RESET INCOMING", which is how this
+ * false-positive was found; the header now reads "CONTEXT REFRESH" and no longer
+ * collides. The window logic must not depend on that luck — anything in the
+ * pre-clear window has to be excluded by construction — so the fixture keeps a
+ * colliding line.
  */
 const PRE_CLEAR_BUFFER = [
   'CONTEXT RESET INCOMING — save your working state now.',
@@ -263,7 +265,7 @@ describe('Spec 1273 — reset orchestrator: happy path', () => {
     // Two messages: the save request, then the re-orientation.
     expect(terminal.messages).toHaveLength(2);
     expect(terminal.messages[0]).toContain('.builder-state.md');
-    expect(terminal.messages[1]).toContain('CONTEXT RESET');
+    expect(terminal.messages[1]).toContain('CONTEXT REFRESH');
   });
 
   it('delivers /clear down the RAW channel, never the escape channel', async () => {
@@ -273,7 +275,7 @@ describe('Spec 1273 — reset orchestrator: happy path', () => {
     // escape channel sends an interrupt instead of typing `/clear`. Every
     // observable signal would still look like success: the send returns ok, the
     // terminal goes quiet (an ESC ends the turn), the re-orientation arrives.
-    // The only thing that would not happen is the reset.
+    // The only thing that would not happen is the clear.
     const terminal = makeTerminal({ quietness: QUIET });
     const result = await runReset(baseOptions({ terminal }) as never);
 
@@ -295,16 +297,16 @@ describe('Spec 1273 — reset orchestrator: happy path', () => {
     expect(names(result.steps)).not.toContain('clear-confirmed');
   });
 
-  it('does NOT match reset\'s own save-request text still sitting in the buffer', async () => {
-    // The save request opens with "CONTEXT RESET INCOMING", which matches the
-    // confirmation pattern. It is in the buffer on every run because reset put
-    // it there moments earlier. Scanning the whole buffer therefore confirmed
-    // the clear using reset's own words — the second false-positive in this
-    // check, after the echoed `/clear`.
+  it('does NOT match text already sitting in the buffer before the clear', async () => {
+    // Pre-#1489 the save request opened with "CONTEXT RESET INCOMING", which
+    // matches the confirmation pattern, and it was in the buffer on every run
+    // because the command put it there moments earlier. Scanning the whole
+    // buffer therefore confirmed the clear using the command's own words — the
+    // second false-positive in this check, after the echoed `/clear`.
     //
     // The fix is structural rather than a better regex: only output produced
-    // AFTER the clear is considered, so anything reset wrote is excluded by
-    // construction. PRE_CLEAR_BUFFER carries that exact header.
+    // AFTER the clear is considered, so anything the command wrote is excluded
+    // by construction. PRE_CLEAR_BUFFER carries a line that would still match.
     const terminal = makeTerminal({ quietness: QUIET, recentOutput: '> ' });
     const result = await runReset(baseOptions({ terminal }) as never);
 
@@ -635,7 +637,7 @@ describe('Spec 1273 — CLI-facing behaviour', () => {
     // Not even the long-form file: a dry run must not alter the worktree either.
     expect(fs.writes).toHaveLength(0);
     // But it still proves assembly succeeded — that is the point of the run.
-    expect(result.payload?.inline).toContain('CONTEXT RESET');
+    expect(result.payload?.inline).toContain('CONTEXT REFRESH');
   });
 
   it('places the addendum in the delivered payload', async () => {

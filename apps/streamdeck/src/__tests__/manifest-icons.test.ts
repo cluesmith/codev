@@ -98,6 +98,32 @@ describe('#1440 dedicated action icons', () => {
 });
 
 /**
+ * #1495: the `switch` icon is the plugin's ONE shipped asset with no manifest reference — it is not
+ * an action, it is artwork for a NATIVE Stream Deck Switch-Profile / Folder key, consumed only by a
+ * README instruction pointing a human at a path inside the installed `.sdPlugin`. The generic loop
+ * above walks `manifest.Actions` and so structurally cannot see it (nothing references it), so it
+ * needs the explicit form the pinned action icons use — otherwise these four PNGs are the only
+ * shipped icons exempt from the convention that pins every other one. (The `architect-action` icon,
+ * by contrast, IS an action icon and is already covered by the generic loop.)
+ */
+describe('#1495 switch icon (manifest-less, native-key artwork)', () => {
+  it('ships all four PNGs the README points at', () => {
+    for (const ref of ['icons/switch', 'icons/list/switch']) {
+      for (const png of pngVariants(ref)) {
+        expect(existsSync(png), `missing ${png}`).toBe(true);
+      }
+    }
+  });
+
+  it('ships at the convention sizes (key 72/144, list 20/40)', () => {
+    expect(pngSize(join(pluginDir, 'icons/switch.png'))).toEqual({ w: 72, h: 72 });
+    expect(pngSize(join(pluginDir, 'icons/switch@2x.png'))).toEqual({ w: 144, h: 144 });
+    expect(pngSize(join(pluginDir, 'icons/list/switch.png'))).toEqual({ w: 20, h: 20 });
+    expect(pngSize(join(pluginDir, 'icons/list/switch@2x.png'))).toEqual({ w: 40, h: 40 });
+  });
+});
+
+/**
  * #1444: the catch-all `Codev Action` was re-glyphed off the terminal picture (which now belongs to
  * the dedicated open-terminal action from #1440) onto the Codev brand mark. Its manifest references
  * are unchanged — only the pixels behind `icons/action` were regenerated — so these guards pin both

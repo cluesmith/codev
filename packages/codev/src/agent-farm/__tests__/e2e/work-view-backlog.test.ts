@@ -11,7 +11,8 @@
  * Run: npx playwright test work-view-backlog
  */
 
-import { test, expect } from '@playwright/test';
+import { test, expect } from './tower-auth.js';
+import { towerAuthHeaders } from './tower-key.js';
 import { resolve } from 'node:path';
 
 const TOWER_URL = `http://localhost:${process.env.TOWER_TEST_PORT || '4100'}`;
@@ -149,7 +150,7 @@ test.describe('Work view: backlog clickability and artifacts', () => {
     await page.locator('.work-section').first().waitFor({ state: 'visible', timeout: 15_000 });
 
     // Check the overview API for recently closed items
-    const res = await page.request.get(`${API_URL}/api/overview`);
+    const res = await page.request.get(`${API_URL}/api/overview`, { headers: towerAuthHeaders() });
     const data = await res.json();
 
     if (data.recentlyClosed && data.recentlyClosed.length > 0) {

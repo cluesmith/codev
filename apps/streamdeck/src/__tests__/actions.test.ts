@@ -5,6 +5,7 @@ import {
   CodevAction,
   DevServerAction,
   BuilderAction,
+  ArchitectAction,
   ApproveGate,
   SendQueueAction,
   OpenTerminalAction,
@@ -634,8 +635,14 @@ describe('encoders', () => {
     expect(ctx.canvasSent).toHaveLength(0);
   });
 
-  it('ScrollNav scrolls the editor on rotate and submits the selection as feedback on press', async () => {
+  it('ScrollNav diff mode: rotate relays byte-for-byte editorScroll, press submits the selection as feedback', async () => {
     const ctx = makeStore();
+    // State the mode the assertion depends on: pir-2 (implement, no gate) is the DIFF-mode builder.
+    // Since #1501 rotate is mode-aware, so this MUST select a diff-mode builder to exercise the
+    // editorScroll path — the default pir-1 fixture is canvas mode and drives the canvas channel
+    // instead. This is the first genuine coverage of diff-mode rotate; the old test silently rode
+    // the canvas fixture through then-mode-independent code.
+    ctx.store.syncToBuilder('pir-2');
     const nav = new ScrollNav(ctx.store);
     await nav.onDialRotate(dial(1) as never);  // down
     await nav.onDialRotate(dial(-1) as never); // up
@@ -643,6 +650,110 @@ describe('encoders', () => {
     expect(ctx.sent[0]).toEqual({ verb: 'scroll', args: [{ to: 'down', by: 'line', value: 3, revealCursor: false }], ws: '/work/alpha' });
     expect((ctx.sent[1].args[0] as { to: string }).to).toBe('up');
     expect(ctx.sent[2]).toEqual({ verb: 'feedback-selection', args: [], ws: '/work/alpha' });
+    expect(ctx.canvasSent).toHaveLength(0); // diff mode never touches the canvas channel
+  });
+
+  it('ScrollNav canvas mode: rotate drives the canvas viewport-scroll (count = |ticks|), not editorScroll', async () => {
+    const ctx = makeStore(); // default selection pir-1 is blocked at plan-approval → canvas mode
+    const nav = new ScrollNav(ctx.store);
+    await nav.onDialRotate(dial(2) as never);   // down, 2 ticks
+    await nav.onDialRotate(dial(-1) as never);  // up, 1 tick
+    // Rotation reaches the artifact-canvas webview via the canvas channel, one call per event with
+    // count = |ticks|; the generic editorScroll relay is never touched. MRU targeting: workspace only.
+    expect(ctx.canvasSent).toEqual([
+      { command: 'viewport-down', target: { workspace: '/work/alpha' }, count: 2 },
+      { command: 'viewport-up', target: { workspace: '/work/alpha' }, count: 1 },
+    ]);
+    expect(ctx.sent).toHaveLength(0);
+    expect('file' in ctx.canvasSent[0].target).toBe(false);
+  });
+
+  it('ScrollNav canvas mode: a failed viewport-scroll renders its reason on the touchstrip', async () => {
+    const ctx = makeStore(); // pir-1 → canvas mode
+    ctx.canvasResult.value = { ok: false, code: 'no-canvas', error: 'no canvas open' };
+    const action = dial(1).action;
+    const nav = new ScrollNav(ctx.store);
+    nav.onWillAppear({ action, payload: {} } as never);
+    await nav.onDialRotate({ action, payload: { ticks: 1, settings: {} } } as never);
+    // The transient status takes line 2 for one cycle (as the review dials do); the qualifier stays.
+    expect(action.setFeedback.mock.calls.at(-1)?.[0]).toEqual({ title: 'Scroll · read only', value: 'Open artifact' });
+  });
+
+  it('ScrollNav legibility: diff-phase builder → line 1 = axis · delivery mode, line 2 = builder, NO bar (#1498)', () => {
+    const ctx = makeStore(); // no feedbackMode on the fixture → defaults to forward → "send"
+    ctx.store.syncToBuilder('pir-2'); // implement phase → diff mode (#102, "Wire the dial")
+    const action = { isDial: () => true, setFeedback: vi.fn() };
+    new ScrollNav(ctx.store).onWillAppear({ action, payload: {} } as never);
+    const fb = action.setFeedback.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+    expect(fb).toEqual({ title: 'Scroll · send', value: '#102 Wire the dial' });
+    // The dropped bar is load-bearing: assert no `bar` key so a regression that re-adds it is caught.
+    expect(fb).not.toHaveProperty('bar');
+  });
+
+  it('ScrollNav legibility: names the queue mode when the workspace queues (Scroll · queue)', () => {
+    const ctx = makeStore();
+    ctx.store.overview = { ...ctx.store.overview!, feedbackMode: 'queue' } as never;
+    ctx.store.syncToBuilder('pir-2'); // diff mode — the delivery-mode qualifier applies here
+    const action = { isDial: () => true, setFeedback: vi.fn() };
+    new ScrollNav(ctx.store).onWillAppear({ action, payload: {} } as never);
+    expect(action.setFeedback.mock.calls.at(-1)?.[0]).toMatchObject({ title: 'Scroll · queue' });
+  });
+
+  it('ScrollNav canvas mode: line 1 reads "Scroll · read only" (rotation scrolls, press inert), delivery mode suppressed', async () => {
+    const ctx = makeStore(); // default selection pir-1 is blocked at plan-approval → canvas mode
+    ctx.store.overview = { ...ctx.store.overview!, feedbackMode: 'queue' } as never; // must NOT leak into line 1
+    const action = { isDial: () => true, setFeedback: vi.fn() };
+    const nav = new ScrollNav(ctx.store);
+    nav.onWillAppear({ action, payload: {} } as never);
+    // The delivery mode is replaced entirely: neither `send` nor `queue`. Since #1501 rotation scrolls
+    // the canvas viewport (read only), but the press (diff-only feedback-selection) stays inert — so
+    // the qualifier names what works rather than a delivery mode the press cannot fire.
+    expect(action.setFeedback.mock.calls.at(-1)?.[0]).toEqual({ title: 'Scroll · read only', value: '#101 Add the relay' });
+    // The press is NOT gated on reviewMode (it no-ops server-side already); the deck still relays it.
+    await nav.onDialDown();
+    expect(ctx.sent).toEqual([{ verb: 'feedback-selection', args: [], ws: '/work/alpha' }]);
+  });
+
+  it('ScrollNav empty state: line 1 is a bare "Scroll" (no delivery mode), line 2 reads "No builder", press is a silent no-op (#1505)', async () => {
+    const ctx = makeStore();
+    ctx.store.overview = { builders: [], pendingPRs: [], backlog: [], recentlyClosed: [] } as never;
+    const action = { isDial: () => true, setFeedback: vi.fn() };
+    const nav = new ScrollNav(ctx.store);
+    nav.onWillAppear({ action, payload: {} } as never);
+    // With nothing selected the press is inert, so line 1 must not name a delivery mode it
+    // cannot fire: neither `send` nor `queue`, just the bare axis.
+    expect(action.setFeedback.mock.calls.at(-1)?.[0]).toEqual({ title: 'Scroll', value: 'No builder' });
+    await nav.onDialDown();
+    expect(ctx.sent).toHaveLength(0); // inert: no feedback-selection with nothing selected
+  });
+
+  it('ScrollNav empty state: the queue delivery mode does NOT leak into line 1 (#1505)', () => {
+    const ctx = makeStore();
+    ctx.store.overview = { builders: [], pendingPRs: [], backlog: [], recentlyClosed: [], feedbackMode: 'queue' } as never;
+    const action = { isDial: () => true, setFeedback: vi.fn() };
+    new ScrollNav(ctx.store).onWillAppear({ action, payload: {} } as never);
+    expect(action.setFeedback.mock.calls.at(-1)?.[0]).toEqual({ title: 'Scroll', value: 'No builder' });
+  });
+
+  it('ScrollNav empty state: rotation still relays the scroll verb with the workspace path — the half-live premise the bare "Scroll" rests on (#1505)', async () => {
+    const ctx = makeStore();
+    ctx.store.overview = { builders: [], pendingPRs: [], backlog: [], recentlyClosed: [] } as never;
+    const nav = new ScrollNav(ctx.store);
+    // The press is inert with nothing selected, but rotation is NOT: relaying `scroll` needs
+    // only the workspace path, never a builder. If a future edit early-returns onDialRotate on
+    // no builder (mirroring onDialDown), the dial goes fully inert and the bare "Scroll" line 1
+    // becomes a lie — this guard fails first.
+    await nav.onDialRotate(dial(1) as never);
+    expect(ctx.sent).toEqual([{ verb: 'scroll', args: [{ to: 'down', by: 'line', value: 3, revealCursor: false }], ws: '/work/alpha' }]);
+  });
+
+  it('ScrollNav re-renders line 2 on a store change (subscription wired)', () => {
+    const ctx = makeStore();
+    const action = { isDial: () => true, setFeedback: vi.fn() };
+    new ScrollNav(ctx.store).onWillAppear({ action, payload: {} } as never); // pir-1
+    expect(action.setFeedback.mock.calls.at(-1)?.[0]).toMatchObject({ value: '#101 Add the relay' });
+    ctx.store.syncToBuilder('pir-2'); // onChange → re-render
+    expect(action.setFeedback.mock.calls.at(-1)?.[0]).toMatchObject({ value: '#102 Wire the dial' });
   });
 
   it('PrNav opens the selected PR url on press', async () => {
@@ -1081,5 +1192,120 @@ describe('OpenArchitectAction (Row 2 — open architect, #1463)', () => {
     const face = Buffer.from(String(key.setImage.mock.calls.at(-1)?.[0]).split(',')[1], 'base64').toString('utf8');
     expect(face).toContain('Architect');
     expect(face).toContain('None');
+  });
+});
+
+// ── Architects board (#1495) ────────────────────────────────────────────────
+
+/** Decode the base64 SVG face handed to a key's `setImage`. */
+const decodeFace = (key: { setImage: { mock: { calls: unknown[][] } } }): string =>
+  Buffer.from(String(key.setImage.mock.calls.at(-1)?.[0]).split(',')[1], 'base64').toString('utf8');
+
+/** Put a live-architect list on the store's overview — the field #1495's board enumerates.
+ *  `ArchitectState` only needs `.name`; the overview is cast, so partial rows are fine. */
+function withArchitects(store: CodevStore, names: string[], builders: unknown[] = []): void {
+  store.overview = {
+    builders,
+    architects: names.map((name) => ({ name, port: 0, pid: 0 })),
+    pendingPRs: [],
+    backlog: [],
+    recentlyClosed: [],
+  } as never;
+}
+
+describe('store.architects() — the live-architect enumeration (#1495)', () => {
+  it('returns the names of OverviewData.architects, main-first then alphabetical', () => {
+    const { store } = makeStore();
+    // Deliberately NOT main-first at the source, so the sort (not the server order) is what proves out.
+    withArchitects(store, ['vscode', 'demos', 'main', 'security']);
+    expect(store.architects()).toEqual(['main', 'demos', 'security', 'vscode']);
+  });
+
+  it('lists an architect with ZERO builders (enumerates the live view, not the builders)', () => {
+    const { store } = makeStore();
+    // `reviewer` owns no builder but has a live session — it must still appear (the inverse of the
+    // dropped superset test: the board lists "architects that exist", not "that own work").
+    withArchitects(store, ['main', 'reviewer'], [{ id: 'b1', spawnedByArchitect: 'main' }]);
+    expect(store.architects()).toEqual(['main', 'reviewer']);
+  });
+
+  it('is empty when no architect has a live session', () => {
+    const { store } = makeStore();
+    withArchitects(store, []);
+    expect(store.architects()).toEqual([]);
+  });
+
+  it('does NOT inject main when main has no live session (unpinned — the safer failure)', () => {
+    const { store } = makeStore();
+    withArchitects(store, ['security', 'vscode']);
+    expect(store.architects()).toEqual(['security', 'vscode']);
+  });
+});
+
+describe('ArchitectAction — one key per live architect (#1495)', () => {
+  /** Place `n` architect keys left-to-right on row 0 and return the instance + keys. */
+  function place(store: CodevStore, n: number) {
+    const aa = new ArchitectAction(store);
+    const keys = Array.from({ length: n }, (_, i) => bkey(`a${i}`, i));
+    keys.forEach((k) => aa.onWillAppear({ action: k, payload: { settings: {} } } as never));
+    return { aa, keys };
+  }
+
+  it('key N (by coordinates) shows the Nth architect name', () => {
+    const { store } = makeStore();
+    withArchitects(store, ['main', 'security', 'streamdeck']);
+    const { keys } = place(store, 3);
+    expect(decodeFace(keys[0])).toContain('Main');
+    expect(decodeFace(keys[1])).toContain('Security');
+    expect(decodeFace(keys[2])).toContain('Streamdeck');
+  });
+
+  it('press opens that architect’s terminal and leaves the builder selection untouched', async () => {
+    const ctx = makeStore();
+    const builders = ctx.store.builders(); // preserve the makeStore fixture so a selection exists
+    withArchitects(ctx.store, ['main', 'streamdeck'], builders);
+    const before = ctx.store.selectedBuilder()?.id;
+    const { aa, keys } = place(ctx.store, 2);
+    await aa.onKeyDown({ action: keys[1], payload: { settings: {} } } as never);
+    expect(ctx.sent).toEqual([{ verb: 'open-architect-terminal', args: ['streamdeck'], ws: '/work/alpha' }]);
+    expect(ctx.store.selectedBuilder()?.id).toBe(before); // no selection/scope change
+  });
+
+  it('a slot past the end of the live list is inert — alerts, relays nothing', async () => {
+    const ctx = makeStore();
+    withArchitects(ctx.store, ['main']); // only one architect...
+    const { aa, keys } = place(ctx.store, 2); // ...but two keys placed
+    await aa.onKeyDown({ action: keys[1], payload: { settings: {} } } as never);
+    expect(keys[1].showAlert).toHaveBeenCalled();
+    expect(ctx.sent).toEqual([]);
+  });
+
+  it('a multi-action key (no coordinates) has no slot — alerts, relays nothing', async () => {
+    const ctx = makeStore();
+    withArchitects(ctx.store, ['main']);
+    const aa = new ArchitectAction(ctx.store);
+    const m = multiKey('m');
+    aa.onWillAppear({ action: m, payload: { settings: {} } } as never);
+    await aa.onKeyDown({ action: m, payload: { settings: {} } } as never);
+    expect(m.showAlert).toHaveBeenCalled();
+    expect(ctx.sent).toEqual([]);
+  });
+
+  it('an empty slot renders the dim inert "No architect" face, never blank', () => {
+    const { store } = makeStore();
+    withArchitects(store, ['main']);
+    const { keys } = place(store, 2);
+    expect(decodeFace(keys[1])).toContain('No architect');
+  });
+
+  it('re-renders when the overview architect list changes (store.onChange)', () => {
+    const { store } = makeStore();
+    withArchitects(store, ['main']);
+    const { keys } = place(store, 1);
+    expect(decodeFace(keys[0])).toContain('Main');
+    // A new overview brings a different architect into slot 0; an emit re-renders the placed keys.
+    withArchitects(store, ['security']);
+    store.rotateCursor(0); // no-op cursor move, but emits → onChange → renderAll
+    expect(decodeFace(keys[0])).toContain('Security');
   });
 });

@@ -18,8 +18,13 @@ import { getGlobalDbPath } from '../db/index.js';
 import { normalizeWorkspacePath } from '../utils/workspace-path.js';
 import { TowerClient } from '../lib/tower-client.js';
 import { ARCHITECT_NAME_PATTERN, MAX_ARCHITECT_NAME_LENGTH } from '../utils/architect-name.js';
+import { MAX_MESSAGE_BYTES, messageLimitError } from '../utils/message-format.js';
 
-const MAX_FILE_SIZE = 48 * 1024; // 48KB limit per spec
+/**
+ * `--file` attachment cap. One constant with the message-body ceiling (Issue #1573): the file's
+ * content is APPENDED to the message, so two independent numbers could only ever disagree.
+ */
+const MAX_FILE_SIZE = MAX_MESSAGE_BYTES;
 
 /**
  * Detect workspace root from CWD by walking up to find .git or .codev/config.json.
@@ -339,6 +344,12 @@ export async function send(options: SendOptions): Promise<void> {
     message = message + '\n\nAttached content:\n```\n' + fileContent + '\n```';
   }
 
+  // Mirror Tower's body ceiling here (Issue #1573) so the refusal is local, immediate and
+  // identically worded, instead of a 400 the user has to interpret. Checked AFTER the --file
+  // append because that content travels in the same body and counts against the same limit.
+  const tooLarge = messageLimitError(message);
+  if (tooLarge) fatal(tooLarge);
+
   logger.header('Sending Instruction');
 
   // Detect workspace for target resolution and sender provenance
@@ -422,7 +433,29 @@ export async function send(options: SendOptions): Promise<void> {
             `It delivers automatically when the prompt is clear.`,
         );
       } else {
-        logger.success(`Message delivered to ${result.resolvedTo ?? target}`);
+        // Issue #1573: report WHAT was sent, not just that a send happened. The failures this
+        // echo exists for (#1564: a ~1,900-char message arriving as its final ~30) all read as
+        // an unqualified success at the sender.
+        const size = result.bodyLength !== undefined ? ` (${result.bodyLength} bytes)` : '';
+        // Issue #1584: say so when the bytes were accepted but the terminal never showed them.
+        // Tower records that row as delivered and does NOT re-write it — re-writing is what
+        // re-injected one message dozens of times in #1583 — so this line is the only place the
+        // sender learns the delivery was unconfirmed. `verified` absent (older Tower, or a body
+        // with no header worth matching) keeps today's wording.
+        const unverified = result.verified === false ? ' (unverified — header not seen on the terminal)' : '';
+        logger.success(`Message delivered to ${result.resolvedTo ?? target}${size}${unverified}`);
+        // Issue #1365: an interrupt/escape that gave up waiting for the terminal's submission
+        // lock wrote unserialized, so its bytes may have interleaved with the delivery it
+        // skipped. The row is claimed `delivered` before the write (un-claiming would risk a
+        // double delivery), so without this the sender would read an unqualified success for a
+        // possibly-mangled body. Warn rather than fail: the write did happen.
+        if (result.degraded) {
+          logger.warn(
+            `...but it was NOT serialized against a write already in flight on that terminal ` +
+              `(${result.degradedReason ?? 'wait ceiling expired'}), so it may have interleaved. ` +
+              `Check the agent's prompt before assuming it read cleanly.`,
+          );
+        }
       }
     } catch (error) {
       fatal(error instanceof Error ? error.message : String(error));

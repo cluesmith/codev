@@ -1,3 +1,4 @@
+import { TOWER_KEY_HEADER } from '@cluesmith/codev-types';
 import { getApiBase } from './constants.js';
 
 // Shared types from @cluesmith/codev-types
@@ -27,10 +28,28 @@ function apiUrl(endpoint: string): string {
   return base + clean;
 }
 
+/**
+ * Resolve the shared local key (advisory GHSA-xvjp-7748-v88v). Prefer the value
+ * Tower injects same-origin at serve time (`window.__CODEV_TOWER_KEY__`) so a
+ * direct navigation to a workspace URL works without first visiting the Tower
+ * shell; fall back to a previously stored value. The injected value is persisted
+ * so later same-origin requests keep working.
+ */
+export function getWebKey(): string | null {
+  const injected = (window as unknown as { __CODEV_TOWER_KEY__?: string }).__CODEV_TOWER_KEY__;
+  if (injected) {
+    try { localStorage.setItem('codev-tower-key', injected); } catch { /* storage may be unavailable */ }
+    return injected;
+  }
+  return localStorage.getItem('codev-tower-key');
+}
+
 function getAuthHeaders(): Record<string, string> {
-  const token = localStorage.getItem('codev-web-key');
+  const token = getWebKey();
   if (token) {
-    return { Authorization: `Bearer ${token}` };
+    // Request authentication (advisory GHSA-xvjp-7748-v88v): Tower reads the
+    // shared local key from the codev-tower-key header.
+    return { [TOWER_KEY_HEADER]: token };
   }
   return {};
 }
@@ -72,6 +91,7 @@ export type {
   OverviewBacklogItem,
   OverviewRecentlyClosed,
   OverviewData,
+  HeldMessage,
   ProtocolStats,
   AnalyticsResponse,
 } from '@cluesmith/codev-types';
@@ -81,6 +101,7 @@ import type {
   AnalyticsResponse,
   TeamApiResponse,
   OverviewData,
+  HeldMessage,
   DashboardState,
 } from '@cluesmith/codev-types';
 
@@ -101,6 +122,23 @@ export async function fetchTeam(): Promise<TeamApiResponse> {
 export async function fetchOverview(): Promise<OverviewData> {
   const res = await fetch(apiUrl('api/overview'), { headers: getAuthHeaders() });
   if (!res.ok) throw new Error(`Failed to fetch overview: ${res.status}`);
+  return res.json();
+}
+
+/**
+ * Issue 1450: the workspace's currently-held mailbox rows — the payload behind the
+ * held-mail popover, and the same projection `afx inbox` renders.
+ *
+ * Hits the workspace-scoped `GET /api/inbox`, which resolves the workspace server-side from
+ * the `/workspace/<base64>/` URL prefix (the dashboard has no absolute workspace path of its
+ * own). Metadata only — never message bodies.
+ *
+ * Called lazily, on popover open, rather than folded into the 2.5s overview poll: this is a
+ * cold path that only matters when the user asks.
+ */
+export async function fetchInbox(): Promise<HeldMessage[]> {
+  const res = await fetch(apiUrl('api/inbox'), { headers: getAuthHeaders() });
+  if (!res.ok) throw new Error(`Failed to fetch held messages: ${res.status}`);
   return res.json();
 }
 

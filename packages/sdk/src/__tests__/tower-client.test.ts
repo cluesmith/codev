@@ -21,25 +21,25 @@ const KEY = 'deadbeef';
 const opts = (fetchFn: typeof fetch) => ({ port: 4100, getAuthKey: () => KEY, fetchFn });
 
 describe('TowerClient auth seam', () => {
-  it('sends the codev-web-key header when a key provider is injected', async () => {
+  it('sends the codev-tower-key header when a key provider is injected', async () => {
     const { impl, calls } = jsonFetch(200, { ok: true });
     await new TowerClient(opts(impl)).sendCommand('view-diff', ['0809']);
     const headers = calls[0].init!.headers as Record<string, string>;
-    expect(headers['codev-web-key']).toBe(KEY);
+    expect(headers['codev-tower-key']).toBe(KEY);
   });
 
   it('omits the auth header when the injected provider has no key', async () => {
     const { impl, calls } = jsonFetch(200, { ok: true });
     await new TowerClient({ port: 4100, getAuthKey: () => null, fetchFn: impl }).sendCommand('refresh-overview');
     const headers = calls[0].init!.headers as Record<string, string>;
-    expect(headers['codev-web-key']).toBeUndefined();
+    expect(headers['codev-tower-key']).toBeUndefined();
   });
 
   it('defaults to NO auth when no provider is injected (issue #1189 contract)', async () => {
     const { impl, calls } = jsonFetch(200, { ok: true });
     await new TowerClient({ port: 4100, fetchFn: impl }).getHealth();
     const headers = calls[0].init!.headers as Record<string, string>;
-    expect(headers['codev-web-key']).toBeUndefined();
+    expect(headers['codev-tower-key']).toBeUndefined();
   });
 });
 
@@ -171,7 +171,7 @@ describe('TowerClient SSE subscription', () => {
 
     await vi.waitFor(() => expect(calls.length).toBe(1));
     const headers = calls[0].init!.headers as Record<string, string>;
-    expect(headers['codev-web-key']).toBe(KEY);
+    expect(headers['codev-tower-key']).toBe(KEY);
     expect(headers['Accept']).toBe('text/event-stream');
     stop();
     releaseSleep();

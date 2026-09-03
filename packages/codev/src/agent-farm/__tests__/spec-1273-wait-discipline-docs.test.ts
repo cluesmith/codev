@@ -29,6 +29,12 @@ const COMMAND_DOCS = [
   'codev-skeleton/resources/commands/agent-farm.md',
 ];
 const SKILL_DOCS = ['.claude/skills/afx/SKILL.md', '.codex/skills/afx/SKILL.md'];
+// The skeleton twins — what ADOPTERS install, as opposed to the two above, which
+// only this workspace's agents ever read.
+const SKELETON_SKILL_DOCS = [
+  'codev-skeleton/.claude/skills/afx/SKILL.md',
+  'codev-skeleton/.codex/skills/afx/SKILL.md',
+];
 
 describe('Spec 1273 phase 7 — wait discipline reaches the builder role doc', () => {
   for (const doc of ROLE_DOCS) {
@@ -58,7 +64,7 @@ describe('Spec 1273 phase 7 — wait discipline reaches the builder role doc', (
       it('names the escape hatch so a stuck builder knows it can be reached', () => {
         const text = read(doc);
         expect(text).toContain('afx interrupt');
-        expect(text).toContain('afx reset');
+        expect(text).toContain('afx refresh');
       });
     });
   }
@@ -76,13 +82,13 @@ describe('Spec 1273 phase 7 — wait discipline reaches the builder role doc', (
 describe('Spec 1273 phase 7 — both commands are documented where they are looked up', () => {
   for (const doc of COMMAND_DOCS) {
     describe(doc, () => {
-      it('documents afx reset and afx interrupt', () => {
+      it('documents afx refresh and afx interrupt', () => {
         const text = read(doc);
-        expect(text).toContain('### afx reset');
+        expect(text).toContain('### afx refresh');
         expect(text).toContain('### afx interrupt');
       });
 
-      it('documents every reset flag the CLI accepts', () => {
+      it('documents every refresh flag the CLI accepts', () => {
         // Kept in sync with cli.ts's registration by hand; a flag that exists
         // and is undocumented is a flag nobody uses.
         const text = read(doc);
@@ -112,19 +118,53 @@ describe('Spec 1273 phase 7 — both commands are documented where they are look
 
 describe('Spec 1273 phase 7 — both skill trees, not just the Claude one', () => {
   for (const doc of SKILL_DOCS) {
-    it(`${doc} lists afx reset and afx interrupt`, () => {
+    it(`${doc} lists afx refresh and afx interrupt`, () => {
       // The repo maintains parallel Claude and Codex skill trees. Updating only
       // the Claude one leaves Codex-driven agents unable to discover the
-      // commands — they would have no reason to believe reset exists.
+      // commands — they would have no reason to believe refresh exists.
       expect(existsSync(resolve(REPO, doc))).toBe(true);
       const text = read(doc);
-      expect(text).toContain('## afx reset');
+      expect(text).toContain('## afx refresh');
       expect(text).toContain('## afx interrupt');
     });
   }
 
   it('keeps the two skill trees byte-identical', () => {
     const [claude, codex] = SKILL_DOCS.map(read);
+    expect(claude).toBe(codex);
+  });
+});
+
+describe('#1489 — the SKELETON skill trees, which are what adopters install', () => {
+  // Found during #1489 and fixed there. Spec 1273 added `afx interrupt` and the
+  // context-refresh command to the four doc trees it knew about, but the two
+  // skeleton skill files were not among them: they sat at a pre-1273 revision
+  // whose headings stopped at `afx cron`. Nothing failed, because the assertions
+  // above only ever looked at the ROOT skill trees — so adopters could not
+  // discover either command, and no test could see that they could not.
+  //
+  // This is the same class of defect the file was written to catch, one tree
+  // further out. Asserting the skeleton copies closes the gap.
+  for (const doc of SKELETON_SKILL_DOCS) {
+    it(`${doc} lists afx refresh and afx interrupt`, () => {
+      expect(existsSync(resolve(REPO, doc))).toBe(true);
+      const text = read(doc);
+      expect(text).toContain('## afx refresh');
+      expect(text).toContain('## afx interrupt');
+    });
+
+    it(`${doc} leads with refresh and marks reset deprecated, not the reverse`, () => {
+      // An adopter reading this file must come away typing `afx refresh`. A
+      // stale copy that documents `afx reset` as the command would teach the
+      // spelling we are retiring.
+      const text = read(doc);
+      expect(text).not.toContain('## afx reset');
+      expect(text).toMatch(/`afx reset` is a deprecated alias/);
+    });
+  }
+
+  it('keeps the two skeleton skill trees byte-identical', () => {
+    const [claude, codex] = SKELETON_SKILL_DOCS.map(read);
     expect(claude).toBe(codex);
   });
 });

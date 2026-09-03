@@ -1,6 +1,11 @@
 export {
   FRAME_CONTROL,
   FRAME_DATA,
+  TOWER_KEY_HEADER,
+  LEGACY_WEB_KEY_HEADER,
+  WS_MARKER_PROTOCOL,
+  WS_KEY_PROTOCOL_PREFIX,
+  terminalWsProtocols,
   type ControlMessage,
   type DecodedFrame,
 } from './websocket.js';
@@ -11,6 +16,8 @@ export {
   type BuilderSpawnedPayload,
   type MailboxEscalationPayload,
 } from './sse.js';
+
+export { VSCODE_USER_SENDER } from './messaging.js';
 
 export {
   type CommandRequest,
@@ -52,6 +59,7 @@ export {
   type OverviewBacklogItem,
   type OverviewRecentlyClosed,
   type OverviewData,
+  type HeldMessage,
   type IssueView,
   type PRView,
   type IssueSearchItem,

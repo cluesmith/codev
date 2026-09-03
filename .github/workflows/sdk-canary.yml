@@ -17,9 +17,8 @@ name: Published-SDK Canary
 
 on:
   workflow_dispatch:
-  # Enable after the sdk's first npm publish:
-  # schedule:
-  #   - cron: '0 6 * * 1'  # Mondays 06:00 UTC
+  schedule:
+    - cron: '0 6 * * 1'  # Mondays 06:00 UTC
 
 jobs:
   canary:

@@ -1,0 +1,119 @@
+# bugfix-1502 — CI: Artifact-Canvas Browser Tests hangs indefinitely
+
+## Investigate phase
+
+### What the issue + architect direction establish (verified against artifacts)
+- Stalling step is **`Install Playwright Chromium`** (`.github/workflows/test.yml:134-136`,
+  `pnpm exec playwright install --with-deps chromium`). The `Run artifact-canvas browser tests`
+  step never starts. Confirmed via job step state on two hung runs (issue comments).
+- **Zero `timeout-minutes`** anywhere in `.github/workflows/` (grepped all 5 workflow files).
+  GitHub's 6-hour default applies, which is why a stalled step reads as "running for hours".
+- Intermittent: run `32095039750` (pir-1498) passed the same job in **3m58s** while
+  `32093117702` (pir-1497) and `32085216485` (main #1493 merge) never finished.
+- Healthy duration reaches at least **3m58s**; the old "~1m09s baseline" is wrong — do NOT
+  size the timeout off it.
+- **Ruled out** (architect): playwright.config.ts webServer / `--strictPort 5199`. Tests never
+  start, so the webServer is never invoked.
+
+### Actions taken
+- Cancelled both hung runs (32093117702, 32085216485) — authorized by architect — to retrieve
+  the partial `Install Playwright Chromium` log (in-progress jobs return BlobNotFound).
+- Polling for both to conclude, then will fetch the job log.
+
+### Required fix
+- Add `timeout-minutes` to the `Artifact-Canvas Browser Tests` job, sized off healthy durations
+  (~4 min) with headroom. Converts a silent multi-hour stall into a fast visible failure.
+- Consider bounding the other jobs in test.yml too — argue either way in the PR.
+
+### ROOT CAUSE — confirmed from cancelled-run logs
+Both hung runs stalled at the **identical point** inside `Install Playwright Chromium`:
+the `apt-get update` that `playwright install --with-deps` runs to install Chromium's
+system libs.
+
+- pir-1497 (95579121785): last line `Get:7 https://archive.ubuntu.com/ubuntu noble-security
+  InRelease` at 02:50:02Z, then NOTHING until the cancel at 03:54:38Z (~64 min of silence).
+- main (95556232101): last line `Get:7 https://archive.ubuntu.com/ubuntu noble-security
+  InRelease` at 00:38:23Z, then NOTHING until cancel at 03:54:39Z (~3h of silence).
+
+Signature: the runner's fast `azure.archive.ubuntu.com` mirror is `Ign`-ored (unreachable),
+forcing fallback to public `archive.ubuntu.com`. The index fetch there stalls indefinitely.
+apt has no default network timeout on this fetch, and there is no `timeout-minutes` on the
+step/job/workflow, so GitHub's 6h default lets it pend for hours. Intermittent because it
+depends on that transient mirror/network condition.
+
+Narrowest supported claim: **the apt index-fetch phase of `--with-deps` stalls**. The tests
+never start (webServer/strictPort ruled out, correctly).
+
+### Fix decision (minimal, BUGFIX scope)
+- **Required + guaranteed**: add `timeout-minutes` to the canvas-browser job (healthy job
+  ~4min → bound 15, ~3.7x headroom). Converts silent multi-hour stall → fast visible failure.
+- **Defense in depth**: add bounds to the other 4 jobs too (all healthy 1–3min → 10min).
+  Argue in PR; a workflow with zero timeouts is one hiccup from the same stall.
+- **NOT doing** (argue in PR): dropping `--with-deps` (risks browser-launch breakage; the
+  intermittent hang can't be cheaply CI-verified away — trades a mitigated hang for a possible
+  breakage); caching `~/.cache/ms-playwright` (does NOT skip the apt phase, so wouldn't fix
+  THIS stall — it only removes the browser-binary download).
+
+### Regression test
+Parse `.github/workflows/test.yml` with `js-yaml` (already a codev dep) and assert each job
+carries a numeric `timeout-minutes`. Fails on current main (zero timeouts), passes with fix.
+Precedent: `packages/codev/src/__tests__/bugfix-566-dashboard-e2e-gh-token.test.ts`.
+
+Scope: 1 YAML edit + 1 test file. Well under 300 LOC. Fits BUGFIX.
+
+## PR phase
+- PR #1507 opened. Fixes #1502.
+- CMAP (3-way, --issue 1502 needed to disambiguate from builder context):
+  - gemini = APPROVE (HIGH, no issues)
+  - codex  = COMMENT (HIGH) — nit: PR body said "four node-only jobs = 10" but `unit` is 15.
+             Fixed the PR body (description-only, no re-run needed).
+  - claude = APPROVE (HIGH). Non-blocking: other workflows (dashboard-e2e, e2e,
+             post-release-e2e, sdk-canary) remain unbounded — candidate follow-up issue to
+             raise with the architect (not self-filing, per scope discipline).
+- No REQUEST_CHANGES; the one actionable item (PR-body accuracy) is addressed.
+- Handing off at the pr gate; waiting for architect approval before merge.
+
+## Gate status
+- Architect posted integration-review APPROVE on PR #1507 (verified claims against artifacts).
+- Other-workflows unbounded gap filed by architect as #1509 (not folded into this PR).
+- Architect explicit: the pr gate is the OWNER's, not the architect's. Integration APPROVE is
+  NOT merge authorization. Holding at the pr gate; will not run `porch approve` or merge until
+  the owner gives the word, then follow the merge task from `porch next`.
+
+## Reopened at architect's direction — stronger fix
+Amr asked whether a timeout is the best we can do. It is not.
+- Verified in-repo: dashboard-e2e.yml:42 runs `playwright install chromium` (NO --with-deps) on
+  ubuntu-latest, then launches Chromium (line 44-49). 8 consecutive successful scheduled runs on
+  main (08-10 → 08-17). So Chromium's system libs are already on the runner image and the apt
+  phase --with-deps triggers buys nothing.
+- Change: dropped --with-deps from test.yml install step → removes the SOLE log-confirmed stall
+  at its source. KEPT all timeout-minutes bounds as a backstop (not either-or): an unbounded job
+  conceals its own failure, which is #1502's real lesson.
+- --retries: argued AGAINST (not copied from sibling). Retries re-run failed tests not the
+  install step (wouldn't touch this stall), and the canvas suite is deterministic layout
+  invariants where a retry masks real regressions. Different character from dashboard-e2e's async
+  Tower/gh flows.
+- Verification is this PR's own canvas-browser CI run: if canvas needs a lib the dashboard
+  doesn't, it surfaces as a browser launch failure → restore --with-deps + rely on timeout, and
+  say so. Not claiming certainty.
+- Re-running CMAP round 2 on the updated PR.
+
+## Verification + CMAP rounds 2/3
+- Canvas-browser CI on this PR (run 32098830832): SUCCESS in 45s. Install step (no --with-deps)
+  and browser-test step both green → Chromium launches without --with-deps. This is the
+  architect's cheap verification; it passed, so no fallback needed.
+- CMAP r2 (pre-assertion commit): gemini=APPROVE, claude=APPROVE, codex=REQUEST_CHANGES.
+  Codex's two points, both now resolved:
+    (1) regression test only guarded timeouts → added assertion that canvas install excludes
+        --with-deps (tamper-proven: fails when --with-deps reintroduced, passes without).
+    (2) canvas verification unchecked → verified green above.
+- CMAP r3 running on final commit (0bacf777, includes the new assertion) so all three see it.
+
+## CMAP round 3 (final commit with assertion) — all APPROVE
+- gemini = APPROVE (HIGH, none)
+- codex  = APPROVE (HIGH, none) — flipped from REQUEST_CHANGES; both its points resolved.
+- claude = APPROVE (HIGH, none blocking). Actioned its non-blocking notes: ticked the satisfied
+  canvas checkbox in PR body; merged origin/main (branch was 8 behind) so CI validates integrated
+  state. Left its forward-compat note (timeout assertion vs a hypothetical `jobs.<id>.uses`
+  reusable-workflow job) unaddressed — speculative; all current jobs are `runs-on`.
+- Re-firing pr gate. Still the OWNER's gate — will not merge until his word.

@@ -148,9 +148,16 @@ describe('Spec 786 Phase 6 — extension.ts architect commands', () => {
     // command returning the name that was actually opened, whether it came
     // from an explicit arg, the multi-architect QuickPick, or the
     // single-architect 'main' default.
+    //
+    // Issue 1497: the resolve-and-open step now delegates to
+    // `openResolvedArchitect` (open-architect.ts), which returns the resolved
+    // occupant's OWN name (never the requested name when they differ) and
+    // refuses a non-live `main` instead of substituting `architects[0]`. The
+    // command awaits and returns that. Behavioural coverage of the returned
+    // name and the refusal lives in open-architect-not-live-main.test.ts.
     const openBlock = EXT_SRC.split("reg('codev.openArchitectTerminal'")[1] ?? '';
     expect(openBlock).toMatch(/Promise<string \| undefined>/);
-    expect(openBlock).toMatch(/return targetName/);
+    expect(openBlock).toMatch(/return await openResolvedArchitect\(architects, targetName,/);
   });
 
   it('codev.referenceIssueInArchitect injects into the architect resolved by the open command', () => {

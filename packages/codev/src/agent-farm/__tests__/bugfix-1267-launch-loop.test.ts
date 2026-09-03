@@ -141,12 +141,12 @@ describe('buildLaunchLoop — clean exit reruns fresh (Bugfix #1267)', () => {
     expect(invocations[1]).toBe('--append-system-prompt|two words|');
   });
 
-  // `afx reset` refuses to type into a builder whose harness it cannot name, and
+  // `afx refresh` refuses to type into a builder whose harness it cannot name, and
   // it names it by scanning `.builder-start.sh` for a command-position harness
   // binary. The dual-launcher shape adds `codev_launch=…` / `"$codev_launch"`
   // lines that scanner has never seen — this is the guard that they neither
   // shadow the real harness line nor get mistaken for one.
-  it('stays identifiable to afx reset harness detection', () => {
+  it('stays identifiable to afx refresh harness detection', () => {
     const loop = buildLaunchLoop(
       "claude --model opus --resume 'abc'",
       `claude --model opus --append-system-prompt "$(cat '/wt/.builder-role.md')"`,

@@ -252,7 +252,7 @@ export interface TowerClientOptions {
   host?: string;
   /**
    * Injectable auth key provider. Defaults to no auth (requests carry no
-   * `codev-web-key` header). Consumers entitled to the local key inject a
+   * `codev-tower-key` header). Consumers entitled to the local key inject a
    * reader; see the module header for the per-environment profiles.
    */
   getAuthKey?: () => string | null;
@@ -322,7 +322,7 @@ export class TowerClient {
         'Content-Type': 'application/json',
       };
       if (authKey) {
-        headers['codev-web-key'] = authKey;
+        headers['codev-tower-key'] = authKey;
       }
 
       const response = await this.fetchFn(`${this.baseUrl}${path}`, {
@@ -720,7 +720,7 @@ export class TowerClient {
    * Deliberately does NOT route through request<T>(): that helper force-sets
    * `Content-Type: application/json` after spreading options.headers, so a
    * binary content-type can't pass through. This mirrors request()'s auth
-   * (codev-web-key), timeout, and error-normalization for a raw binary body.
+   * (codev-tower-key), timeout, and error-normalization for a raw binary body.
    */
   async pasteImage(
     workspacePath: string,
@@ -731,7 +731,7 @@ export class TowerClient {
       const authKey = this.getAuthKey();
       const headers: Record<string, string> = { 'Content-Type': mime };
       if (authKey) {
-        headers['codev-web-key'] = authKey;
+        headers['codev-tower-key'] = authKey;
       }
       // A typed-array view isn't reliably assignable to fetch's BodyInit
       // across lib versions; an ArrayBuffer slice always is.
@@ -822,11 +822,38 @@ export class TowerClient {
     reason?: string;
     mailboxId?: string;
     /**
+     * Issue #1365: an `interrupt`/`escape` submission that gave up waiting for the terminal's
+     * submission lock and wrote UNSERIALIZED, so its bytes may have interleaved with the
+     * delivery write it skipped. Present only when it happened; absent means normally
+     * serialized. It matters most for `interrupt`, whose mailbox row is claimed `delivered`
+     * BEFORE the write (un-claiming would risk a double delivery), so `delivered: true` alone
+     * would otherwise be an unqualified success for a possibly-mangled body.
+     */
+    degraded?: boolean;
+    /** Machine-readable companion to {@link degraded} (`submit-wait-ceiling-expired`). */
+    degradedReason?: string;
+    /**
      * Spec 1313 round 3: due time (epoch ms) of a scheduled (`deliverAfter`) send. Present
      * only when `scheduled` — the row is persisted at request time and delivers not before
      * this instant. Omitted by older Tower binaries.
      */
     notBefore?: number;
+    /**
+     * Issue #1573: the exact byte length Tower accepted for this message body. Echoed back so
+     * the sender can see WHAT was sent, not just that a send happened — the failures behind
+     * this field (#1564) all looked like unqualified successes at the sender. Omitted by older
+     * Tower binaries.
+     */
+    bodyLength?: number;
+    /**
+     * Issue #1584: whether the delivered message's header was actually SEEN on the receiving
+     * terminal. `false` = the bytes were written and accepted, but the terminal never showed
+     * them — the message is recorded as delivered and flagged, and is deliberately NOT
+     * re-written (re-writing is what re-injected one message dozens of times in #1583).
+     * Absent = verification was skipped or does not apply; older Tower binaries omit it, and
+     * absent reads exactly as `true` always did.
+     */
+    verified?: boolean;
   }> {
     const result = await this.request<{
       ok: boolean;
@@ -837,7 +864,11 @@ export class TowerClient {
       held?: boolean;
       reason?: string | null;
       mailboxId?: string;
+      degraded?: boolean;
+      degradedReason?: string;
       notBefore?: number;
+      bodyLength?: number;
+      verified?: boolean;
     }>(
       '/api/send',
       {
@@ -872,7 +903,11 @@ export class TowerClient {
       held: result.data!.held,
       reason: result.data!.reason ?? undefined,
       mailboxId: result.data!.mailboxId,
+      degraded: result.data!.degraded,
+      degradedReason: result.data!.degradedReason,
       notBefore: result.data!.notBefore,
+      bodyLength: result.data!.bodyLength,
+      verified: result.data!.verified,
     };
   }
 
@@ -948,7 +983,7 @@ export class TowerClient {
         'Content-Type': 'application/json',
       };
       if (authKey) {
-        headers['codev-web-key'] = authKey;
+        headers['codev-tower-key'] = authKey;
       }
       const response = await this.fetchFn(`${this.baseUrl}${path}`, {
         ...options,
@@ -1085,7 +1120,7 @@ export class TowerClient {
           const authKey = this.getAuthKey();
           const headers: Record<string, string> = { Accept: 'text/event-stream' };
           if (authKey) {
-            headers['codev-web-key'] = authKey;
+            headers['codev-tower-key'] = authKey;
           }
           const res = await this.fetchFn(`${this.baseUrl}/api/events`, {
             headers,

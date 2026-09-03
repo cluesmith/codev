@@ -7,7 +7,7 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import type { Protocol, ProtocolPhase, BuildConfig, VerifyConfig, OnCompleteConfig, CheckDef, CheckOverrides } from './types.js';
+import type { Protocol, ProtocolPhase, BuildConfig, VerifyConfig, OnCompleteConfig, CheckDef, CheckOverrides, ContextRefreshConfig } from './types.js';
 import { resolveCodevFile, getSkeletonDir } from '../../lib/skeleton.js';
 
 // ============================================================================
@@ -81,6 +81,126 @@ function findProtocolFile(workspaceRoot: string, protocolName: string): string |
 }
 
 /**
+ * Parse and validate a protocol's `context_refresh` block (Spec 1470).
+ *
+ * ## Why this rejects rather than ignores
+ *
+ * There is no runtime schema validation anywhere in porch — `loadProtocol` is
+ * `JSON.parse` plus this hand-rolled normalizer, and `protocol-schema.json` is
+ * editor tooling that validates nothing at run time. So an unresolvable
+ * declaration has no other layer to catch it: a boundary naming a phase the
+ * protocol does not have would simply never match a transition, and the protocol
+ * author would see a feature that is configured, reports no error, and silently
+ * never fires.
+ *
+ * A context refresh that does not happen is invisible by nature — the builder
+ * just keeps accumulating context — so this is the ONLY place the mistake can
+ * be made loud. Every rejection names the offending value, because "invalid
+ * context_refresh" sends the author back to guess which of several keys is wrong.
+ *
+ * @param raw   The `context_refresh` value as it appears in protocol.json
+ * @param phases Already-normalized phases, used to prove each boundary resolves
+ * @param protocolName For error messages
+ */
+function normalizeContextRefresh(
+  raw: unknown,
+  phases: ProtocolPhase[],
+  protocolName: string,
+): ContextRefreshConfig | undefined {
+  // ONLY `undefined` means "omitted". An explicit `null` is a configuration
+  // act that would silently do nothing, which is the same silent no-op this
+  // function exists to reject — and all three schemas type this key as an
+  // object, so `null` violates them too. An author who wants no refreshes omits
+  // the key.
+  if (raw === undefined) return undefined;
+
+  const fail = (msg: string): never => {
+    throw new Error(`Invalid protocol '${protocolName}': context_refresh ${msg}`);
+  };
+
+  if (raw === null) {
+    return fail('is null; omit the key entirely to declare no refresh boundaries');
+  }
+
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    return fail(`must be an object, got ${Array.isArray(raw) ? 'array' : typeof raw}`);
+  }
+
+  const obj = raw as Record<string, unknown>;
+
+  // Unknown keys are rejected rather than ignored: a typo'd key
+  // ("on_entry" for "on_enter") is indistinguishable from "declared nothing"
+  // if we skip it, which is the silent-no-op failure this whole function exists
+  // to prevent.
+  const KNOWN = new Set(['on_enter', 'on_plan_phase_advance']);
+  for (const key of Object.keys(obj)) {
+    if (!KNOWN.has(key)) {
+      return fail(`has unknown key '${key}' (expected one of: ${[...KNOWN].join(', ')})`);
+    }
+  }
+
+  let on_enter: string[] | undefined;
+  if (obj.on_enter !== undefined) {
+    if (!Array.isArray(obj.on_enter)) {
+      return fail(`on_enter must be an array of phase ids, got ${typeof obj.on_enter}`);
+    }
+    const phaseIds = new Set(phases.map(p => p.id));
+    for (const entry of obj.on_enter) {
+      if (typeof entry !== 'string') {
+        return fail(`on_enter entries must be strings, got ${typeof entry}`);
+      }
+      if (!phaseIds.has(entry)) {
+        return fail(
+          `on_enter names phase '${entry}', which this protocol does not have ` +
+            `(phases: ${[...phaseIds].join(', ')})`,
+        );
+      }
+      // The protocol's FIRST phase is never transitioned INTO — `porch init`
+      // sets it directly as the starting state, and every transition site moves
+      // to a SUCCESSOR. So an entry boundary on it would validate cleanly and
+      // then never fire: the same silent no-op rejected just above for
+      // `on_plan_phase_advance`, and the reason this validator exists.
+      if (entry === phases[0]?.id) {
+        return fail(
+          `on_enter names '${entry}', which is this protocol's first phase. A project ` +
+            `STARTS there rather than transitioning into it, so the boundary could never fire`,
+        );
+      }
+    }
+    // Duplicates resolve fine but say something the author did not mean — a
+    // boundary cannot fire twice on one transition. Rejecting keeps the runtime
+    // in step with the schemas' `uniqueItems`, so the two cannot disagree.
+    const seen = new Set<string>();
+    for (const entry of obj.on_enter as string[]) {
+      if (seen.has(entry)) return fail(`on_enter lists phase '${entry}' more than once`);
+      seen.add(entry);
+    }
+    on_enter = obj.on_enter as string[];
+  }
+
+  let on_plan_phase_advance: boolean | undefined;
+  if (obj.on_plan_phase_advance !== undefined) {
+    if (typeof obj.on_plan_phase_advance !== 'boolean') {
+      return fail(
+        `on_plan_phase_advance must be a boolean, got ${typeof obj.on_plan_phase_advance}`,
+      );
+    }
+    // A protocol with no per_plan_phase phase never advances between plan
+    // phases, so `true` here is a declaration that can never fire — the exact
+    // silent no-op this validator exists to reject.
+    if (obj.on_plan_phase_advance && !phases.some(p => p.type === 'per_plan_phase')) {
+      return fail(
+        `on_plan_phase_advance is true, but this protocol has no 'per_plan_phase' phase, ` +
+          `so the boundary could never fire`,
+      );
+    }
+    on_plan_phase_advance = obj.on_plan_phase_advance;
+  }
+
+  return { on_enter, on_plan_phase_advance };
+}
+
+/**
  * Normalize protocol JSON to our simplified Protocol type
  */
 function normalizeProtocol(json: unknown): Protocol {
@@ -149,6 +269,7 @@ function normalizeProtocol(json: unknown): Protocol {
     phases,
     checks,
     phase_completion,
+    context_refresh: normalizeContextRefresh(obj.context_refresh, phases, obj.name as string),
   };
 }
 
