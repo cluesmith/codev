@@ -69,6 +69,12 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 
 ## Architecture
 
+- [From #1482] A function that returns a failure boolean is only as honest as its callers. `PtySession.resize()` correctly returned `false` when the resize never reached the process — and all three callers discarded it, so a dropped resize silently moved Tower's dimensions while the kernel winsize stayed put. When adding a fallible return to a long-lived API, grep every call site in the same change; an unchecked failure signal is worse than none, because it reads as handled.
+
+- [From #1482] Two-state models fail at the third state. Tracking a resize as *requested* vs *applied* looked sufficient and was not: on attach, re-sending whenever `requested !== applied` fired for a session whose constructor defaults merely differed from the live geometry, immediately reverting the adoption it was paired with. The missing bit was **outstanding**, not *different* — an explicit flag set when a resize is dropped and cleared when one lands. Before modelling state as a comparison between two values, ask what a third value would mean; "these disagree" and "someone is still waiting" are different questions.
+
+- [From #1482] Commit derived state only after the thing it describes is confirmed. The bug's shape was assigning dimensions on entry and re-wrapping a dependent mirror before learning whether the underlying operation succeeded. Order matters more than the check itself: do the fallible thing, then commit.
+
 - [From #1428] Twinned per-app *presentation* maps kept aligned by sync-note comments are an
   accepted pattern (owner-ruled), not a violation of the "consolidate duplicates rather than
   syncing" lesson. When two apps must present the same vocabulary but can't/shouldn't cross-import
@@ -203,6 +209,12 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 - [secfix-1] Adding the first **runtime (value)** import of a workspace package that was previously only **type-imported** (`import type`, erased at build) requires moving that dep from `devDependencies` to `dependencies` in the importing package. A devDependency is not installed for a published/deployed consumer, so the packaged build throws `Cannot find module` at **module load** — before any logger initializes, so it surfaces as a silent boot crash (e.g. a 30s startup timeout with zero log lines), not an obvious error. It is invisible to build+test because the monorepo symlinks everything at dev time. Verify the **packaged** artifact: `pnpm --filter <pkg> deploy --prod --legacy <dir>` (or a throwaway-prefix `npm install` of the tarballs) resolves only real `dependencies`, mimicking a published install — then load the entry module from it. Also update any hand-rolled local-install/packaging script that packs a *hand-picked subset* of workspace packages: it must now pack the newly-runtime dep too, or the install can't satisfy it.
 
 ## Process
+
+- [From #1482] An ignore rule usually states its reason next to itself — read the comment before reaching for `git add -f`. Committing a gate-evidence file under `codev/state/` needed a force because `.gitignore` ignores `codev/state/*.md`; two lines above, the rule explained itself ("Architect state files are per-person; builder `*_thread.md` files ARE versioned"), which was enough to show that a per-project artifact simply belonged elsewhere. Flagging the override in the commit message beat doing it silently, but diagnosing it beat both. When a path fights you, the rule is a claim about intent, not an obstacle.
+
+- [From #1482] Report the boundary of a gap, not the instance you tripped over. Having noticed one uncovered line ("no test asserts the send CLI's held sentence"), the honest scope was wider — nothing referenced the module at all, including the predicate gating a user-visible warning about permanently-stuck mail. When surfacing missing coverage, check whether the surrounding module is covered before naming the gap's size.
+
+- [From #1482] When writing a test to close a gap someone else found, mutation-check it before claiming it. Forcing the predicate to `return false` and dropping the formatter's detail produced 8 failures, then the module was restored byte-for-byte and both suites re-run green. A test that cannot fail is worse than the gap it purports to close, because it ends the conversation.
 
 - [From #1347] For device-facing surfaces, PIR's dev-approval gate earns its cost precisely where automated checks are blind: the live-hardware pass caught Marketplace icon-spec violations (list icons must be white monochrome — `streamdeck validate` doesn't check this), a branding watermark colliding with the runtime-rendered key titles, and a stale extension host silently breaking follow-focus. Budget gate time for the real device, not just the diff.
 
