@@ -27,7 +27,7 @@ import { version } from '../../version.js';
 const execAsync = promisify(exec);
 import type { SessionManager } from '../../terminal/session-manager.js';
 import type { PtySessionInfo } from '../../terminal/pty-session.js';
-import type { BuilderSpawnedPayload, DashboardState, ArchitectState, TowerVersionInfo } from '@cluesmith/codev-types';
+import type { BuilderSpawnedPayload, DashboardState, ArchitectState, TowerVersionInfo, HeldMessage } from '@cluesmith/codev-types';
 import { getBuilders, setArchitectByName } from '../state.js';
 import { DEFAULT_COLS, defaultSessionOptions } from '../../terminal/index.js';
 import type { SSEClient, WorkspaceTerminals } from './tower-types.js';
@@ -2264,15 +2264,47 @@ async function handleSend(
  * redaction rule): id, addresses, why-held reason, escalation flag, and enqueue time —
  * the message BODY is deliberately never surfaced here (it travels only over the live
  * terminal stream on delivery). `escalated` is normalized from SQLite's 0/1 to a bool.
+ *
+ * Issue 1450: `workspaceOverride` lets the workspace-scoped route
+ * (`/workspace/<base64>/api/inbox`, which backs the dashboard's held-mail popover) pass the
+ * workspace resolved from the URL prefix, exactly as `handleOverview` / `handleAnalytics` do.
+ * The override arrives already normalized by the prefix decoder, so `normalizeWorkspacePath`
+ * re-running on it is a safe no-op.
+ *
+ * Two separate widening hazards are closed here, because a scoped caller must never receive
+ * another workspace's held mail:
+ *   - `??` (not `||`) means `?workspace=` can never take effect once an override was passed.
+ *   - An EMPTY override does not fall through to the unscoped all-workspaces listing; it
+ *     scopes to a path that matches nothing. Today the dispatcher 400s a missing prefix so
+ *     this is unreachable, but "unreachable" is a property of the caller, not of this
+ *     function, and the safe failure for a scoped call is zero rows, never every row.
+ * The all-workspaces listing therefore remains reachable only when NO override was passed —
+ * the Tower-level route without `?workspace=`, the direct-caller convenience the CLI never uses.
+ *
+ * NOTE: this lists ALL held rows, including pre-due `--delay` rows, while the badge count
+ * (`heldSummaryForWorkspace`) excludes them — see the `HeldMessage` type for why the two
+ * legitimately disagree.
  */
-function handleInboxList(res: http.ServerResponse, url: URL): void {
-  const rawWorkspace = url.searchParams.get('workspace');
+// Exported as a narrow test seam (Issue 1450): the empty-override branch below cannot be
+// reached through `handleRequest` — the workspace dispatcher rejects a missing or non-absolute
+// prefix with a 400 before this runs — so the only way to pin that guard's behaviour is to call
+// the handler directly. Production callers go through the two route tables, not this export.
+export function handleInboxList(res: http.ServerResponse, url: URL, workspaceOverride?: string): void {
+  const scoped = workspaceOverride !== undefined;
+  const rawWorkspace = workspaceOverride ?? url.searchParams.get('workspace');
   // Normalize to the stored realpath key (mailbox workspace_path is normalized at
   // enqueue — tower-routes handleSend / holdAndRespond — matching overview.ts). Without
   // this a symlinked workspace root would miss its own held rows.
-  const workspace = rawWorkspace ? normalizeWorkspacePath(rawWorkspace) : undefined;
+  // `scoped ? '' : undefined` on the empty branch: '' matches no workspace_path, so a scoped
+  // call with a blank override returns nothing rather than widening to every workspace.
+  const workspace = rawWorkspace
+    ? normalizeWorkspacePath(rawWorkspace)
+    : (scoped ? '' : undefined);
   const rows = listHeldMailbox(getGlobalDb(), workspace);
-  const projected = rows.map((r) => ({
+  // Annotated, not inferred: `HeldMessage` is the shared contract this route owes its
+  // clients, so a projection that drifts from it (a dropped field, or a `body` slipping in)
+  // fails the server build rather than only surprising the dashboard at runtime.
+  const projected: HeldMessage[] = rows.map((r) => ({
     id: r.id,
     workspacePath: r.workspace_path,
     toAgent: r.to_agent,
@@ -2832,6 +2864,20 @@ async function handleWorkspaceRoutes(
     // GET /api/overview - Work view overview data (Spec 0126 Phase 4)
     if (req.method === 'GET' && apiPath === 'overview') {
       return handleOverview(res, url, workspacePath, ctx);
+    }
+
+    // GET /api/inbox - held mailbox rows for THIS workspace (Issue 1450). Backs the
+    // dashboard's clickable held-mail counter. Reuses the Tower-level handler with the
+    // workspace resolved from the /workspace/<base64>/ prefix, the same way `overview`
+    // and `analytics` above do — the dashboard calls relative `./api/...` and has no
+    // absolute workspace path of its own to pass as `?workspace=`.
+    //
+    // Deliberately an EXACT match on 'inbox', not a prefix: `inbox/:id` (which returns the
+    // message BODY) and `inbox/:id/dismiss` (which mutates) do not match, fall through to
+    // the 404 below, and so stay off the dashboard surface. That is what keeps this read
+    // path inside Spec 1313's redaction rule and decision 8 (dismissal is CLI-only).
+    if (req.method === 'GET' && apiPath === 'inbox') {
+      return handleInboxList(res, url, workspacePath);
     }
 
     // POST /api/overview/refresh - Invalidate overview cache (Spec 0126 Phase 4)

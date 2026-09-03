@@ -1,0 +1,30 @@
+id: '1450'
+title: dashboard-make-the-held-mail-c
+protocol: pir
+phase: verified
+plan_phases: []
+current_plan_phase: null
+gates:
+  plan-approval:
+    status: approved
+    requested_at: '2026-08-18T03:18:45.785Z'
+    approved_at: '2026-08-18T03:34:52.094Z'
+  dev-approval:
+    status: approved
+    requested_at: '2026-08-18T03:50:13.800Z'
+    approved_at: '2026-08-18T04:03:07.050Z'
+  pr:
+    status: approved
+    requested_at: '2026-08-18T04:15:40.636Z'
+    approved_at: '2026-08-18T04:17:21.430Z'
+iteration: 1
+build_complete: true
+history: []
+started_at: '2026-08-18T03:14:21.212Z'
+updated_at: '2026-08-18T04:17:30.488Z'
+pr_history:
+  - phase: review
+    pr_number: 1510
+    branch: builder/pir-1450
+    created_at: '2026-08-18T04:06:13.523Z'
+pr_ready_for_human: false

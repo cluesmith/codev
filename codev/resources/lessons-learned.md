@@ -292,6 +292,20 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
   Playwright spec while the unit and browser suites both passed, because Playwright transpiles
   per file with no project-wide type check. Run `check-types` after the last **file** is added,
   not after the last logic change.
+- [From #1450] **A browser assertion can pass while proving nothing — assert its precondition in
+  the same test.** A z-index check did `elementFromPoint` at the popover's centre and confirmed
+  the popover was on top: green, and worthless, because `document.querySelector('.xterm')` had
+  returned the *left* pane's terminal, which can never overlap a top-right panel. The hazard
+  (xterm's WebGL canvas painting over an unlayered element) was never exercised. The fix is to
+  assert the setup, not just the property: "a terminal genuinely overlaps this rect" **and then**
+  "the panel wins at every sampled point". Same shape as the #1401 guard lesson — if a check
+  cannot distinguish the bug from its absence, it is decoration.
+- [From #1450] Two Playwright mechanics worth knowing on this dashboard: `waitUntil:
+  'networkidle'` can **never** fire (the SSE stream at `/api/events` stays open for the page's
+  lifetime — use `domcontentloaded` plus an explicit element wait), and a lazily-fetched panel
+  must be waited on by its *loaded* content, or assertions read the "Loading…" state instead.
+  Also assert the **status code** of the endpoint under test: an auth failure renders as a tidy
+  error state that looks like a working UI, so "the panel showed something" is not evidence.
 - [From #1380] jsdom cannot express CSS layout (fragmentation, multicol, client rects) — for
   layout-dependent features, commit a real-browser (Playwright) fixture **alongside the first
   layout CSS**, and have it assert invariants (fragment-rect counts, reachability), not the
