@@ -6,16 +6,17 @@ plan_phases: []
 current_plan_phase: null
 gates:
   pr:
-    status: pending
+    status: approved
     requested_at: '2026-09-02T16:27:50.680Z'
+    approved_at: '2026-09-03T15:29:33.198Z'
 iteration: 1
 build_complete: false
 history: []
 started_at: '2026-09-02T16:15:15.952Z'
-updated_at: '2026-09-02T16:27:50.681Z'
+updated_at: '2026-09-03T15:29:33.199Z'
 pr_history:
   - phase: pr
     pr_number: 1588
     branch: builder/bugfix-1586
     created_at: '2026-09-02T16:27:48.390Z'
-pr_ready_for_human: true
+pr_ready_for_human: false
