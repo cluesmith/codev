@@ -126,3 +126,27 @@ lane. Claude raised three non-blocking items, all addressed:
 - **Branch behind main** — merged `origin/main` (porch records only, no code).
 
 CI on PR #1588: all 7 checks green.
+
+## MERGED (2026-09-03)
+
+PR #1588 merged 11:21 UTC by @amrmelsayed (owner-approved lane) as
+`3591ad1d3`. Issue #1586 auto-closed by the `Fixes` line; completion stats
+posted as a comment.
+
+Amr also pushed `db08a16bc` onto the branch before merging — an arch.md
+Decision 8 entry recording the Host + local-key stamping. Merged into the
+branch here so nothing was lost.
+
+`porch approve ... pr` failed its first run: it commits state then pushes, and
+the push was rejected non-fast-forward because of that unseen commit. The gate
+approval *was* already committed locally, so the fix was to merge origin and
+push — not to re-run approve. Worth knowing: a partial `porch approve` failure
+is a push failure, not a state failure; check `git log` before assuming the
+approval didn't take.
+
+Porch commits after the merge are stranded on the branch and need a records PR:
+`d6ed709b2` (pr gate-approved), `623fd2577` (PR #1588 merged),
+`b760f1205` (protocol complete), plus this thread update.
+
+Field verification through the real cloud edge remains open and is
+architect-driven post-release — I cannot exercise cloud.codevos.ai from here.
