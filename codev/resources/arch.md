@@ -203,7 +203,7 @@ Shell / Claude / Builder process
 #### Shellper Lifecycle
 
 1. **Spawn**: Tower calls `SessionManager.createSession()`, which spawns `shellper-main.js` as a detached child (`child_process.spawn` with `detached: true`). Shellper writes PID + start time to stdout, then Tower calls `child.unref()`.
-2. **Connect**: Tower connects to the shellper's Unix socket at `~/.codev/run/shellper-{sessionId}.sock` via `ShellperClient`. Handshake: Tower sends HELLO, shellper responds with WELCOME (pid, cols, rows, startTime).
+2. **Connect**: Tower connects to the shellper's Unix socket at `~/.codev/run/shellper-{sessionId}.sock` via `ShellperClient`. Handshake: Tower sends HELLO, shellper responds with WELCOME (pid, cols, rows, startTime, plus optional `lastDataAt`, `alwaysSendsReplay`, and the spawned `command`/`args`). The identity fields are **authoritative** (PIR #1475): `PtySession.command` reads through to what the shellper says it actually spawned — refreshed across reconnects and SPAWN relaunches — and falls back to the persisted `terminal_sessions.command` (Spec 1313) only when the shellper reports none. Every field ADDED to WELCOME after v1 (`lastDataAt`, `alwaysSendsReplay`, `command`/`args`) is optional-by-design — the v1 core (`version`, `pid`, `cols`, `rows`, `startTime`) is still required — so `PROTOCOL_VERSION` never has to move: the client rejects any shellper OLDER than itself, so a bump would disconnect every live pre-upgrade shellper on the first restart after an upgrade.
 3. **Data flow**: Shellper forwards PTY output as DATA frames to Tower. Tower pipes DATA frames to all attached WebSocket clients via PtySession.
 4. **Tower restart**: Shellpers continue running as orphaned OS processes. On restart, Tower queries SQLite for sessions with `shellper_socket IS NOT NULL`, validates PID + start time, reconnects via Unix socket, and receives REPLAY frame with buffered output.
 5. **Kill**: Tower sends SIGTERM via SIGNAL frame, waits 5s, SIGKILL if needed. Cleans up socket file.
@@ -278,7 +278,7 @@ Binary frame format: `[1-byte type] [4-byte big-endian length] [payload]`
 | REPLAY | 0x05 | Shellper->Tower | Replay buffer dump on connect |
 | PING/PONG | 0x06/0x07 | Both | Keepalive |
 | HELLO | 0x08 | Tower->Shellper | Handshake (JSON: version) |
-| WELCOME | 0x09 | Shellper->Tower | Handshake response (JSON: pid, cols, rows, startTime) |
+| WELCOME | 0x09 | Shellper->Tower | Handshake response (JSON: required `version`, `pid`, `cols`, `rows`, `startTime`; optional post-v1 additions `lastDataAt`, `alwaysSendsReplay`, and the spawned `command`/`args` — the authoritative identity, PIR #1475) |
 | SPAWN | 0x0A | Tower->Shellper | Restart child process (JSON: command, args, cwd, env) |
 
 Max frame payload: 16MB. Unknown frame types are silently ignored.

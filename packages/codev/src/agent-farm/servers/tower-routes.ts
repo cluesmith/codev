@@ -40,6 +40,8 @@ import {
   getLanguageForExt,
   getMimeTypeForFile,
   serveStaticFile,
+  persistableCommand,
+  logSessionIdentity,
 } from './tower-utils.js';
 import { handleTunnelEndpoint } from './tower-tunnel.js';
 import { getWorktreeConfig, getActivityHooks } from '../utils/config.js';
@@ -840,8 +842,14 @@ async function handleTerminalCreate(
           } else {
             entry.shells.set(roleId, session.id);
           }
+          // PIR #1475: prefer the identity the shellper reports. A fresh spawn is
+          // the no-op case (it reports back what we just asked for), but routing
+          // it through the same accessor keeps one rule everywhere: the row
+          // records what is RUNNING, not what was requested.
+          logSessionIdentity(ctx.log, 'terminal-create', session.id, ptySession, command ?? null);
           saveTerminalSession(session.id, workspacePath, termType, roleId, shellperInfo.pid,
-            shellperInfo.socketPath, shellperInfo.pid, shellperInfo.startTime, label ?? null, cwd ?? null, command ?? null);
+            shellperInfo.socketPath, shellperInfo.pid, shellperInfo.startTime, label ?? null, cwd ?? null,
+            persistableCommand(ptySession) ?? command ?? null);
           ctx.log('INFO', `Registered shellper terminal ${session.id} as ${termType} "${roleId}" for workspace ${workspacePath}`);
         }
       } catch (shellperErr) {
@@ -3135,8 +3143,11 @@ async function handleWorkspaceShellCreate(
 
         const entry = getWorkspaceTerminalsEntry(workspacePath);
         entry.shells.set(shellId, session.id);
+        // PIR #1475: hydrated identity wins; a fresh spawn reports back `shellCmd`.
+        logSessionIdentity(ctx.log, 'shell-create', session.id, ptySession, shellCmd);
         saveTerminalSession(session.id, workspacePath, 'shell', shellId, shellperInfo.pid,
-          shellperInfo.socketPath, shellperInfo.pid, shellperInfo.startTime, session.label, workspacePath, shellCmd);
+          shellperInfo.socketPath, shellperInfo.pid, shellperInfo.startTime, session.label, workspacePath,
+          persistableCommand(ptySession) ?? shellCmd);
 
         shellCreated = true;
         res.writeHead(200, { 'Content-Type': 'application/json' });

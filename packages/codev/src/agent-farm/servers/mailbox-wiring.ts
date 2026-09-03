@@ -139,16 +139,25 @@ export function resolveAgentForSession(
  * (fail-safe by construction: an unknown agent is held and surfaced, never guessed
  * — this is what correctly trips on wrapper/boot/relaunch screens too).
  *
- * Stale-identity note (Spec 1313): `session.command` is now sourced from the
- * persisted `terminal_sessions.command` on reconnect. If it ever goes stale (a
- * user re-points `shell.architect` at a different harness and the shellper later
- * auto-restarts into it while the row still names the old one), this can resolve
- * the WRONG profile — but it fails CLOSED today, not misdelivered: CLAUDE_PROFILE
- * and CODEX_PROFILE are behaviourally identical (same marker + region patterns),
- * and any cross-family mismatch (e.g. agy's `> ` marker) fails the composer-marker
- * test → not clean → held. That safety is a property of the current profile TABLE,
- * not of this design; the day codex/claude markers diverge, stale identity becomes
- * a live bug and the authoritative fix is WELCOME-frame hydration (see review).
+ * Identity precedence (PIR #1475): `session.command` is AUTHORITATIVE where it can
+ * be — it reads through to the identity the attached shellper states in its WELCOME
+ * frame, i.e. the argv the process that owns the PTY actually spawned, refreshed
+ * across reconnects and SPAWN relaunches. Only when no shellper identity is
+ * available (a local node-pty session, a pre-#1475 shellper still running from
+ * before an upgrade, or a payload that failed validation) does it fall back to the
+ * Spec 1313 chain: the persisted `terminal_sessions.command`, then the legacy
+ * self-heal from config. So the stale-row hazard this comment used to describe — a
+ * user re-points `shell.architect` at a different harness while the row still names
+ * the old one — no longer decides the profile for a shellper-backed session; the
+ * running process does.
+ *
+ * The fallback tier keeps its original safety property, and it is worth knowing why
+ * it is thin: a stale command fails CLOSED rather than misdelivering only because
+ * CLAUDE_PROFILE and CODEX_PROFILE are behaviourally identical (same marker + region
+ * patterns) and any cross-family mismatch (e.g. agy's `> ` marker) fails the
+ * composer-marker test → not clean → held. That is a property of the current profile
+ * TABLE, not of the design. It matters less now that the authoritative tier exists,
+ * but it is still what protects the fallback the day codex/claude markers diverge.
  */
 export function resolveProfileForSession(session: DeliverySession): GateProfile | null {
   const direct = resolveProfile({ command: session.command, args: session.launchArgs });

@@ -1,0 +1,82 @@
+PIR #1475 — dev-approval evidence (WELCOME-frame identity hydration)
+isolated Tower on port 14782 / 14783 — NOT 4100
+tower build: /home/user/code/codev_root/codev/.builders/pir-1475/packages/codev/dist/agent-farm/servers/tower-server.js
+started: 2026-08-18T07:46:57.072Z
+live Tower on 4100 before: LISTENING
+claude shim: /home/user/.agent-farm/test-workspaces/pir1475-rWQvGQ/bin/claude
+
+workspace: /home/user/.agent-farm/test-workspaces/pir1475-rWQvGQ/ws-6Wt3bC
+terminal:  6980df10-3906-4333-835d-2ccdc3e0e9d7 (real shellper-backed PTY running the claude shim)
+
+==============================================================================
+STEP 2+3 — baseline delivery, and identity hydrated from WELCOME
+==============================================================================
+  tower: [2026-08-18T07:46:57.514Z] [INFO] [identity] terminal-create 6980df10-3906-4333-835d-2ccdc3e0e9d7: identity hydrated from WELCOME — command=/home/user/.agent-farm/test-workspaces/pir1475-rWQvGQ/bin/claude, source=welcome, row=/home/user/.agent-farm/test-workspaces/pir1475-rWQvGQ/bin/claude
+  PASS  Tower logged identity hydrated from WELCOME (source=welcome)
+  PASS  the hydrated command is the process actually running (the claude shim)
+  send → status=200 delivered=true held=false reason=null
+  PASS  the body reached the PTY — the render gate resolved a profile and delivered
+  PASS  the session row records what is RUNNING — row=/home/user/.agent-farm/test-workspaces/pir1475-rWQvGQ/bin/claude
+
+==============================================================================
+STEP 4 — Tower restart: reconcile adopts the live shellper, WELCOME beats a drifted row
+==============================================================================
+  PASS  staged: the row now names a harness the process is NOT running
+  PASS  the isolated Tower is down (the shellper keeps running, as designed)
+  tower: [2026-08-18T07:46:58.043Z] [INFO] [identity] reconcile-adopt 6a25eed0-5b3d-4d2a-ac88-935fcb72417a: identity hydrated from WELCOME — command=/home/user/.agent-farm/test-workspaces/pir1475-rWQvGQ/bin/claude, source=welcome, row=/home/user/.agent-farm/test-workspaces/pir1475-rWQvGQ/bin/claude
+  tower: [2026-08-18T07:46:58.051Z] [INFO] [identity] reconcile-adopt 6980df10-3906-4333-835d-2ccdc3e0e9d7: identity hydrated from WELCOME — command=/home/user/.agent-farm/test-workspaces/pir1475-rWQvGQ/bin/claude, source=welcome, row=agy
+  PASS  reconcile adopted the still-running shellper after the restart
+  PASS  identity came from WELCOME, not the row
+  PASS  the log shows the drifted row it overrode
+  PASS  the adopted identity is the running process
+  PASS  persist-back CORRECTED the drifted row — row=/home/user/.agent-farm/test-workspaces/pir1475-rWQvGQ/bin/claude
+  send → status=200 delivered=true held=false reason=null
+  PASS  delivery works after the restart — and would NOT have under the drifted row (agy marker ≠ ❯)
+
+==============================================================================
+STEP 5 — clean-exit SPAWN relaunch (no Tower restart): identity read through the live client
+==============================================================================
+  architect terminal: f266df92-f315-4a83-b0d9-27ec0af96a9b (agent "architect:evidence")
+  tower: [2026-08-18T07:46:58.650Z] [INFO] [identity] architect-launch-sibling f266df92-f315-4a83-b0d9-27ec0af96a9b: identity hydrated from WELCOME — command=/home/user/.agent-farm/test-workspaces/pir1475-rWQvGQ/bin-canonical/claude, source=welcome, row=/home/user/.agent-farm/test-workspaces/pir1475-rWQvGQ/bin-canonical/claude
+  baseline send → status=200 delivered=true held=false reason=null error=
+  PASS  baseline: the architect receives mail before the relaunch
+  tower: [2026-08-18T07:47:00.528Z] [INFO] Architect 'evidence' exited cleanly; rerunning with a fresh session 4f5f26d7… in /home/user/.agent-farm/test-workspaces/pir1475-rWQvGQ/ws-1m3ljZ
+  tower: [2026-08-18T07:47:00.528Z] [INFO] Session a9f000d3-a59c-4151-be15-7863082fe430 exited cleanly (code 0, no signal); rerunning harness without recovery
+  PASS  the harness exited cleanly and Tower re-spawned it through the SAME shellper (no reconnect)
+  terminal after relaunch: id=f266df92-f315-4a83-b0d9-27ec0af96a9b status=running
+  post-relaunch send → status=200 delivered=true held=false reason=null
+  PASS  the message reaches the RELAUNCHED harness, with NO Tower restart
+  note  identity VALUE cannot change here: both relaunch paths swap args/env only — session.options.command is never mutated (#1338). The read-through vs snapshot distinction is pinned by the unit test.
+
+==============================================================================
+STEP 7 — wrapped builder launch: delivery via the .builder-start.sh backstop (no regression)
+==============================================================================
+  tower: [2026-08-18T07:47:05.970Z] [INFO] [identity] terminal-create 3972ca66-45c4-4a6d-8d27-4749b34dc049: identity hydrated from WELCOME — command=/bin/bash, source=welcome, row=/bin/bash
+  PASS  WELCOME reports the WRAPPER (/bin/bash), exactly as before this change
+  send → status=200 delivered=true held=false
+  PASS  the wrapped builder still receives mail — the launch-script backstop is untouched
+
+==============================================================================
+STEP 6 — legacy (pre-#1475) shellper: source=config, delivery works, legacy NULL row stays NULL
+==============================================================================
+  tower: [2026-08-18T07:47:06.832Z] [INFO] [identity] terminal-create e6194947-60a2-401c-bffa-442438bf7035: identity fell back to recorded command — command=/home/user/.agent-farm/test-workspaces/pir1475-rWQvGQ/bin/claude, source=config, row=/home/user/.agent-farm/test-workspaces/pir1475-rWQvGQ/bin/claude
+  PASS  a legacy shellper sends no identity → Tower falls back to the recorded command
+  send → status=200 delivered=true held=false
+  PASS  delivery still works on the fallback path — the Spec 1313 SSOT is intact
+  PASS  staged: a pre-v16 row with command NULL
+  tower: [2026-08-18T07:47:07.605Z] [INFO] [identity] reconcile-adopt 718e622e-f6d6-4e77-b137-4d54dbae3399: identity fell back to recorded command — command=claude, source=config, row=claude
+  tower: [2026-08-18T07:47:07.612Z] [INFO] [identity] reconcile-adopt e6194947-60a2-401c-bffa-442438bf7035: identity fell back to recorded command — command=unknown, source=config, row=null
+  PASS  reconcile fell back for the legacy shellper
+  PASS  the legacy NULL row is STILL NULL after reconcile (never written as "") — row=null
+
+==============================================================================
+LIVE TOWER UNTOUCHED
+==============================================================================
+  live Tower on 4100 after: LISTENING
+  PASS  the live Tower on 4100 is exactly as it was
+
+==============================================================================
+RESULT
+==============================================================================
+  23/23 checks passed
+  ALL EXECUTED CHECKS PASSED
