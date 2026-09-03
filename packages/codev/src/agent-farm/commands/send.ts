@@ -18,6 +18,7 @@ import { getGlobalDbPath } from '../db/index.js';
 import { normalizeWorkspacePath } from '../utils/workspace-path.js';
 import { TowerClient } from '../lib/tower-client.js';
 import { MAX_MESSAGE_BYTES, messageLimitError } from '../utils/message-format.js';
+import { formatVerdict, isUnverifiableVerdict } from '../utils/hold-verdict.js';
 
 /**
  * `--file` attachment cap. One constant with the message-body ceiling (Issue #1573): the file's
@@ -204,7 +205,7 @@ async function readStdin(): Promise<string> {
  */
 interface SendToAllResults {
   delivered: string[];
-  held: Array<{ id: string; reason?: string; mailboxId?: string }>;
+  held: Array<{ id: string; reason?: string; detail?: string; mailboxId?: string }>;
   /** Spec 1307 `--delay`: accepted for later delivery, not sent now. */
   scheduled: string[];
   failed: string[];
@@ -254,7 +255,12 @@ async function sendToAll(
       if (result.scheduled) {
         results.scheduled.push(builder.id);
       } else if (result.held) {
-        results.held.push({ id: builder.id, reason: result.reason, mailboxId: result.mailboxId });
+        results.held.push({
+          id: builder.id,
+          reason: result.reason,
+          detail: result.detail, // Issue #1482: which kind of hold, not just that it held
+          mailboxId: result.mailboxId,
+        });
       } else {
         results.delivered.push(builder.id);
       }
@@ -345,7 +351,9 @@ export async function send(options: SendOptions): Promise<void> {
       logger.success(`Delivered to ${results.delivered.length} builder(s): ${results.delivered.join(', ')}`);
     }
     if (results.held.length > 0) {
-      const detail = results.held.map((h) => `${h.id} (${h.reason ?? 'pending'})`).join(', ');
+      const detail = results.held
+        .map((h) => `${h.id} (${formatVerdict(h.reason, h.detail, 'pending')})`)
+        .join(', ');
       logger.info(
         `Held for ${results.held.length} builder(s): ${detail}. ` +
           `Each delivers automatically when its prompt is clear.`,
@@ -390,10 +398,19 @@ export async function send(options: SendOptions): Promise<void> {
         logger.info('Persisted and durable across a Tower restart; delivers onto a clear prompt when due. Inspect/cancel: afx inbox.');
       } else if (result.held) {
         logger.info(
-          `Message held for ${result.resolvedTo ?? target} (${result.reason ?? 'pending'})` +
+          `Message held for ${result.resolvedTo ?? target} (${formatVerdict(result.reason, result.detail, 'pending')})` +
             `${result.mailboxId ? ` — mailbox id ${result.mailboxId}` : ''}. ` +
             `It delivers automatically when the prompt is clear.`,
         );
+        // Issue #1482: a hold the gate could not classify will NOT clear on its own, so saying
+        // "it delivers automatically" and stopping there would be misleading for exactly the
+        // case that needs a human. Say so, once, only for that case.
+        if (isUnverifiableVerdict(result.reason, result.detail)) {
+          logger.warn(
+            `The render gate could not verify that composer (${result.detail ?? result.reason}), ` +
+              `so this hold will not clear by itself — inspect with 'afx inbox'.`,
+          );
+        }
       } else {
         // Issue #1573: report WHAT was sent, not just that a send happened. The failures this
         // echo exists for (#1564: a ~1,900-char message arriving as its final ~30) all read as

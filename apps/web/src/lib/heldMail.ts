@@ -46,3 +46,26 @@ export function formatHeldAge(createdAt: number, now: number): string {
 export function isScheduled(notBefore: number | null, now: number): boolean {
   return notBefore != null && notBefore > now;
 }
+
+/**
+ * The hold verdict as one cell: `reason:detail` when the render gate recorded a detail, else
+ * the bare reason (Issue #1482).
+ *
+ * `busy:user-text` means a human is at that composer and the hold clears by itself;
+ * `busy:no-region-end` / `busy:no-composer-marker` mean the classifier could not verify the
+ * composer at all, and that hold does NOT clear on its own. A popover showing only `busy`
+ * cannot tell an operator which of those they are looking at.
+ *
+ * Ported, not imported, for the same reason as the formatters above — `formatVerdict` lives in
+ * `packages/codev/src/agent-farm/utils/hold-verdict.ts`, which is server-side and off-limits to
+ * the web app (#1189). Keep the two in step: the popover and `afx inbox` must render the same
+ * row identically.
+ */
+export function formatHoldVerdict(
+  reason: string | null | undefined,
+  detail: string | null | undefined,
+  fallback = 'held',
+): string {
+  const base = reason ?? fallback;
+  return detail ? `${base}:${detail}` : base;
+}

@@ -23,7 +23,7 @@
 
 import type Database from 'better-sqlite3';
 import { randomUUID } from 'node:crypto';
-import type { DbMailbox, MailboxReason } from './types.js';
+import type { DbMailbox, MailboxGateDetail, MailboxReason } from './types.js';
 
 /**
  * Fields a caller supplies to persist a new held row. The repository fills in the
@@ -58,11 +58,11 @@ export interface EnqueueInput {
 const INSERT_SQL = `
   INSERT INTO mailbox (
     id, workspace_path, to_agent, terminal_id, from_agent, from_workspace,
-    body, formatted_message, no_enter, status, reason, supersede_key,
+    body, formatted_message, no_enter, status, reason, detail, supersede_key,
     escalated, not_before, created_at, updated_at, resolved_at
   ) VALUES (
     @id, @workspace_path, @to_agent, @terminal_id, @from_agent, @from_workspace,
-    @body, @formatted_message, @no_enter, @status, @reason, @supersede_key,
+    @body, @formatted_message, @no_enter, @status, @reason, @detail, @supersede_key,
     @escalated, @not_before, @created_at, @updated_at, @resolved_at
   )
 `;
@@ -80,6 +80,10 @@ function buildRow(input: EnqueueInput, now: number): DbMailbox {
     no_enter: input.noEnter ? 1 : 0,
     status: 'held',
     reason: input.reason ?? null,
+    // A brand-new row has no gate verdict yet: the only reasons available at enqueue are the
+    // non-gate ones (`no-live-pty` from holdAndRespond), which never carry a detail. The first
+    // delivery pass sets it (Issue #1482).
+    detail: null,
     supersede_key: input.supersedeKey ?? null,
     escalated: 0,
     not_before: input.notBefore ?? null,
@@ -242,28 +246,39 @@ export function heldSummaryForWorkspace(
 export function markDelivered(db: Database.Database, id: string, now: number = Date.now()): boolean {
   const info = db
     .prepare(
-      "UPDATE mailbox SET status = 'delivered', reason = NULL, updated_at = ?, resolved_at = ? WHERE id = ? AND status = 'held'"
+      "UPDATE mailbox SET status = 'delivered', reason = NULL, detail = NULL, updated_at = ?, resolved_at = ? WHERE id = ? AND status = 'held'"
     )
     .run(now, now, id);
   return info.changes > 0;
 }
 
 /**
- * Refresh the why-held `reason` on a still-held row (informational — the value
- * `afx inbox` shows and the send response reports). Only touches `held` rows, so
- * it can never relabel or resurrect a terminal row. Returns true if a held row was
- * updated. The delivery pass calls this so a held row's reason tracks the current
- * gate verdict (e.g. `busy` → `no-live-pty` when the terminal dies).
+ * Refresh the why-held verdict — `reason` AND its gate `detail` — on a still-held row
+ * (informational: the values `afx inbox`, the send response, the escalation broadcast and the
+ * owner starvation notice report). Only touches `held` rows, so it can never relabel or
+ * resurrect a terminal row. Returns true if a held row was updated. The delivery pass calls
+ * this so a held row's verdict tracks the current gate verdict (e.g. `busy` → `no-live-pty`
+ * when the terminal dies).
+ *
+ * ONE statement, not two (Issue #1482): the pair is a single verdict, and writing it in two
+ * updates would leave a window — and a second `updated_at` bump — where a reader could see a
+ * new reason beside the previous reason's detail. Callers that hold for a NON-gate cause pass
+ * `detail: null` so a stale detail can never outlive the verdict that produced it.
+ *
+ * `updated_at` therefore keeps meaning "when this row's verdict last MOVED" — the delivery
+ * pass only calls this when the pair actually changed, which is what lets the starvation
+ * notice say how long a composer has been occupied without a second timestamp column.
  */
-export function setHeldReason(
+export function setHeldVerdict(
   db: Database.Database,
   id: string,
   reason: MailboxReason | null,
+  detail: MailboxGateDetail | null,
   now: number = Date.now()
 ): boolean {
   const info = db
-    .prepare("UPDATE mailbox SET reason = ?, updated_at = ? WHERE id = ? AND status = 'held'")
-    .run(reason, now, id);
+    .prepare("UPDATE mailbox SET reason = ?, detail = ?, updated_at = ? WHERE id = ? AND status = 'held'")
+    .run(reason, detail, now, id);
   return info.changes > 0;
 }
 
@@ -324,6 +339,13 @@ export interface StarvingAgent {
   count: number;
   /** Representative why-held reason (held rows for one agent share the gate's verdict). */
   reason: MailboxReason | null;
+  /**
+   * Representative gate detail beside {@link reason} (Issue #1482) — the same MAX() aggregate,
+   * for the same reason: an agent's held rows all carry the verdict of the last delivery pass.
+   * It is what lets the owner starvation notice distinguish "a human is at the composer" from
+   * "the classifier cannot verify this composer", which have different remedies.
+   */
+  detail: MailboxGateDetail | null;
 }
 
 /**
@@ -342,7 +364,8 @@ export function findStarvingAgents(db: Database.Database, now: number = Date.now
       `SELECT workspace_path AS workspacePath, to_agent AS toAgent,
               MIN(${ESCALATION_START_SQL}) AS stuckSince,
               COUNT(*) AS count,
-              MAX(reason) AS reason
+              MAX(reason) AS reason,
+              MAX(detail) AS detail
          FROM mailbox
         WHERE status = 'held'
           AND (not_before IS NULL OR not_before <= ?)

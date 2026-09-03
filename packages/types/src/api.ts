@@ -616,6 +616,15 @@ export interface HeldMessage {
   fromAgent: string | null;
   /** Why the render gate held it: `'busy' | 'no-profile' | 'no-live-pty'`; `null` if unset. */
   reason: string | null;
+  /**
+   * The gate's detail behind a `busy` reason (Issue #1482):
+   * `'user-text'` — a draft or menu occupies the composer; a human is at the line and the hold
+   * clears by itself. `'no-region-end'` / `'no-composer-marker'` — the classifier could not
+   * verify the composer at all (a drifted profile, a torn frame, or Tower's dimensions
+   * diverging from the real PTY); this hold does NOT clear on its own.
+   * `null` for a non-gate hold (`no-live-pty`, `no-profile`) and once delivered.
+   */
+  detail: string | null;
   /** True once the row has crossed the escalation age. A pre-due row never escalates. */
   escalated: boolean;
   /** Enqueue time, epoch ms — the basis for the displayed age. */
