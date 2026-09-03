@@ -18,6 +18,7 @@
 import { existsSync, readFileSync, readdirSync, writeFileSync, statSync } from 'node:fs';
 import { TowerClient } from '../lib/tower-client.js';
 import { logger, fatal } from '../utils/logger.js';
+import { MAX_MESSAGE_BYTES, messageLimitError } from '../utils/message-format.js';
 import { findBuilderById } from '../lib/builder-lookup.js';
 import { getConfig } from '../utils/index.js';
 import { loadConfig } from '../../lib/config.js';
@@ -25,7 +26,7 @@ import { loadForgeConfig } from '../../lib/forge.js';
 import { fetchIssue as fetchForgeIssue } from '../../lib/github.js';
 import { buildPromptFromTemplate, buildResumeNotice } from './spawn-roles.js';
 import { detectWorkspaceRoot, detectCurrentBuilderId } from './send.js';
-import { resolveBuilderContext } from './reset/context.js';
+import { buildContextFsPort, resolveBuilderContext } from './reset/context.js';
 import {
   formatResetReport,
   runReset,
@@ -38,8 +39,13 @@ import type { IssuePayload } from './reset/reorient.js';
 import type { CustomHarnessConfig } from '../utils/harness.js';
 import type { ResetOptions } from '../types.js';
 
-/** Same cap `afx send --file` enforces. One rule for architect-supplied files. */
-const MAX_FILE_SIZE = 48 * 1024;
+/**
+ * Same cap `afx send --file` enforces. One rule for architect-supplied files — and now the same
+ * CONSTANT, not a third copy of the number (Issue #1573): the file's content rides the message
+ * body, which Tower's send route refuses above `MAX_MESSAGE_BYTES`, so a literal that drifted
+ * would let this command accept a file the route then rejects with a 400.
+ */
+const MAX_FILE_SIZE = MAX_MESSAGE_BYTES;
 
 /**
  * The one-line notice `afx reset` prints before doing the work (#1489).
@@ -109,19 +115,10 @@ export async function refresh(options: ResetOptions): Promise<void> {
   const userConfig = loadConfig(config.workspaceRoot);
 
   const context = resolveBuilderContext({
-    fs: {
-      exists: (p: string) => existsSync(p),
-      read: (p: string) => safeRead(p),
-      listDirs: (p: string) => {
-        try {
-          return readdirSync(p, { withFileTypes: true })
-            .filter(e => e.isDirectory())
-            .map(e => e.name);
-        } catch {
-          return null;
-        }
-      },
-    },
+    // Shared implementation — see `reset/context.ts`. Three hand-rolled copies
+    // of this port existed, and a stub in any one silently nulled the porch
+    // context for that path.
+    fs: buildContextFsPort(),
     builderId: builder.id,
     worktree: builder.worktree,
     branch: builder.branch,
@@ -233,6 +230,11 @@ function buildTerminalPort(
       return { exists: true, lastDataAt: t.lastDataAt, writable: t.writable };
     },
     async sendMessage(message: string) {
+      // Issue #1573: the route now refuses an over-limit body, and this command's prompt
+      // carries the `--file` addendum inside it — so the total, not just the file, has to be
+      // checked, and it is better checked here than discovered as a 400.
+      const tooLarge = messageLimitError(message);
+      if (tooLarge) throw new Error(tooLarge);
       const result = await client.sendMessage(target, message, {
         from,
         workspace,
@@ -250,6 +252,8 @@ function buildTerminalPort(
      * verified manual recipe used.
      */
     async sendRaw(text: string) {
+      const tooLarge = messageLimitError(text);
+      if (tooLarge) throw new Error(tooLarge);
       const result = await client.sendMessage(target, text, {
         from,
         workspace,

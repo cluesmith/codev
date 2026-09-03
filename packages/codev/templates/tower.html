@@ -1667,6 +1667,11 @@
 
     async function fetchCloudStatus() {
       try {
+        // Served through the tunnel, /api/tunnel/* is local-only — blocked at
+        // the tunnel edge and again by Tower (#1370), so this poll can only
+        // ever 403 (#1599). The widget renders nothing cloud-served anyway;
+        // skip the forbidden request instead of paying it every refresh.
+        if (isCloudServed()) return null;
         const res = await authFetch('./api/tunnel/status');
         if (res.status === 404) return null;
         if (!res.ok) return { state: 'error' };
@@ -1674,6 +1679,16 @@
       } catch {
         return null;
       }
+    }
+
+    // Is this page being viewed through Codev Cloud rather than served by the
+    // local Tower directly? One shared predicate for the tunnel-status poll
+    // and the cloud widget render, so the two can never drift (#1599).
+    // Exact-or-subdomain match, not a bare suffix — `endsWith('codevos.ai')`
+    // would also match an unrelated `evilcodevos.ai` (CMAP).
+    function isCloudServed() {
+      const h = window.location.hostname;
+      return h === 'codevos.ai' || h.endsWith('.codevos.ai');
     }
 
     function formatUptime(ms) {
@@ -1723,7 +1738,7 @@
       noteCloudStateChange(status && status.state ? status.state : null);
 
       // When accessed through codevos.ai, cloud status is irrelevant
-      if (window.location.hostname.endsWith('codevos.ai')) {
+      if (isCloudServed()) {
         el.innerHTML = '';
         return;
       }

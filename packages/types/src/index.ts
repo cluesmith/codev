@@ -17,6 +17,8 @@ export {
   type MailboxEscalationPayload,
 } from './sse.js';
 
+export { VSCODE_USER_SENDER } from './messaging.js';
+
 export {
   type CommandRequest,
   type CommandResult,
@@ -57,6 +59,7 @@ export {
   type OverviewBacklogItem,
   type OverviewRecentlyClosed,
   type OverviewData,
+  type HeldMessage,
   type IssueView,
   type PRView,
   type IssueSearchItem,

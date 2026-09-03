@@ -1,16 +1,15 @@
 /**
- * Invariants for the Codev panel container scaffolding (#812):
+ * Invariants for the Codev panel container (#812 scaffolding, repurposed by #1049):
  * - a `panel` viewsContainer `codevPanel` is declared with the Codev icon;
  * - the activitybar container is untouched;
- * - the panel hosts the placeholder view, gated by the
- *   `codev.panelContainerEmpty` context key and collapsed by default;
+ * - the panel hosts the contextual `Codev` webview view (`codev.contextualPanel`), which
+ *   replaced the vestigial `codev.placeholder` signpost + its `codev.panelContainerEmpty` gate;
  * - the existing sidebar views are unchanged (regression guard);
- * - extension.ts wires the placeholder provider and the context key.
+ * - extension.ts wires the webview view provider and reveals the panel once.
  *
- * Note: once #921 added the real `codev.dev` view, the panel is no longer
- * empty — the context key is seeded `false` and a second view is present. Those
- * invariants are covered in contributes-dev.test.ts; this file keeps the
- * #812 scaffolding guards (placeholder shape, sidebar regression).
+ * #1049 retired the placeholder (it could never render — `codev.dev` unconditionally seeded the
+ * gate key false) and the dead context-key flip; those guards are replaced by the contextual-view
+ * and no-placeholder assertions below. `codev.dev` invariants live in contributes-dev.test.ts.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -43,16 +42,20 @@ describe('codevPanel viewsContainer (#812)', () => {
   });
 });
 
-describe('codevPanel placeholder view (#812)', () => {
-  it('registers the placeholder view, gated and collapsed', () => {
+describe('codevPanel contextual view (#1049)', () => {
+  it('hosts the contextual Codev webview view', () => {
     const panelViews = views.codevPanel ?? [];
-    const placeholder = panelViews.find((v) => v.id === 'codev.placeholder');
-    expect(placeholder).toMatchObject({
-      id: 'codev.placeholder',
-      name: 'Codev',
-      when: 'codev.panelContainerEmpty',
-      visibility: 'collapsed',
-    });
+    const contextual = panelViews.find((v) => v.id === 'codev.contextualPanel');
+    expect(contextual).toMatchObject({ id: 'codev.contextualPanel', name: 'Codev', type: 'webview' });
+  });
+
+  it('retired the placeholder view and its panelContainerEmpty gate', () => {
+    const panelIds = (views.codevPanel ?? []).map((v) => v.id);
+    expect(panelIds).not.toContain('codev.placeholder');
+    const anyGate = Object.values(views)
+      .flat()
+      .some((v) => v.when?.includes('codev.panelContainerEmpty'));
+    expect(anyGate).toBe(false);
   });
 
   it('leaves the seven sidebar views unchanged', () => {
@@ -69,17 +72,16 @@ describe('codevPanel placeholder view (#812)', () => {
   });
 });
 
-describe('extension.ts wiring (#812)', () => {
-  it('registers the placeholder provider', () => {
+describe('extension.ts wiring (#1049)', () => {
+  it('registers the contextual panel webview view provider', () => {
     expect(EXT_SRC).toMatch(
-      /registerTreeDataProvider\(['"]codev\.placeholder['"], new PanelPlaceholderProvider\(\)\)/,
+      /registerWebviewViewProvider\(\s*ContextualPanelProvider\.viewType/,
     );
   });
 
-  it('seeds the panelContainerEmpty context key false (a real panel view is registered, #921)', () => {
-    expect(EXT_SRC).toMatch(
-      /setContext['"],\s*['"]codev\.panelContainerEmpty['"],\s*false/,
-    );
+  it('no longer registers the placeholder provider or flips panelContainerEmpty', () => {
+    expect(EXT_SRC).not.toMatch(/PanelPlaceholderProvider/);
+    expect(EXT_SRC).not.toMatch(/codev\.panelContainerEmpty/);
   });
 
   it('reveals the panel once on first run, guarded by globalState', () => {

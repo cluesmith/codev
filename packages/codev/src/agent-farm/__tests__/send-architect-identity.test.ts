@@ -54,7 +54,11 @@ const CLEAN_SCREEN = screen(`❯ ${DIM}Try "fix the flaky test"${RESET}`, '─�
  */
 class FakeShellper extends EventEmitter {
   connected = true;
-  lastDataAt = 1000;
+  // The session hydrates its own `lastDataAt` from this at attach, and the Issue #1573
+  // settle-before-write check reads it against the harness clock (`now: () => 1000`). Epoch 0
+  // is "this screen stopped painting long before now" — an idle architect prompt, which is
+  // what every case here models.
+  lastDataAt = 0;
   writeData: string[] = [];
   write(data: string | Buffer): boolean {
     this.writeData.push(typeof data === 'string' ? data : data.toString('utf-8'));
@@ -97,15 +101,18 @@ function realSeamPorts(
     // The REAL production classify seam (Spec 1313 round 2): read the session's persistent
     // mirror (seeded here via attachShellper's replay) and classify its viewport.
     classify: (s, prof) => classifyAgentScreen(s, prof),
-    writeMessage: (s, msg, noEnter) => {
+    writeMessage: (s, msg, noEnter, precheck) => {
+      const abort = precheck();
+      if (abort) return { status: 'aborted' as const, abort };
       writes.push({ msg, noEnter });
       s.write(msg); // drive the real session's write path (fake shellper records it)
-      return true; // the write landed (Spec 1313: writeMessage reports delivery success)
+      return { status: 'written' as const }; // the write landed (Spec 1313: the port reports delivery success)
     },
     broadcast: (f) => broadcasts.push(f),
     onHeldStateChange: () => {},
     onEscalation: () => {},
     onLiveness: () => {},
+    watchEcho: () => Promise.resolve({ verify: () => Promise.resolve(true) }),
     log: () => {},
     now: () => 1000,
   };
@@ -229,7 +236,9 @@ describe('Spec 1313 — migration + self-heal source guards', () => {
   const read = (rel: string) => fs.readFileSync(path.resolve(import.meta.dirname, rel), 'utf-8');
 
   it('db migration v16 is registered, bumps the version, and adds the command column', () => {
-    const dbSrc = read('../db/index.ts');
+    // Issue #1476: the migration chain moved out of db/index.ts into db/migrations.ts
+    // (`runGlobalMigrations`), which the migration tests now drive directly.
+    const dbSrc = read('../db/migrations.ts');
     // The version constant MUST advance — else a fresh install records only 1..15
     // and the v16 block only converges on a later open (the omission #23 flagged).
     // It now sits at 17 (Spec 1313 round 3 added the not_before mailbox migration);

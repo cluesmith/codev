@@ -635,8 +635,14 @@ describe('encoders', () => {
     expect(ctx.canvasSent).toHaveLength(0);
   });
 
-  it('ScrollNav scrolls the editor on rotate and submits the selection as feedback on press', async () => {
+  it('ScrollNav diff mode: rotate relays byte-for-byte editorScroll, press submits the selection as feedback', async () => {
     const ctx = makeStore();
+    // State the mode the assertion depends on: pir-2 (implement, no gate) is the DIFF-mode builder.
+    // Since #1501 rotate is mode-aware, so this MUST select a diff-mode builder to exercise the
+    // editorScroll path — the default pir-1 fixture is canvas mode and drives the canvas channel
+    // instead. This is the first genuine coverage of diff-mode rotate; the old test silently rode
+    // the canvas fixture through then-mode-independent code.
+    ctx.store.syncToBuilder('pir-2');
     const nav = new ScrollNav(ctx.store);
     await nav.onDialRotate(dial(1) as never);  // down
     await nav.onDialRotate(dial(-1) as never); // up
@@ -644,6 +650,33 @@ describe('encoders', () => {
     expect(ctx.sent[0]).toEqual({ verb: 'scroll', args: [{ to: 'down', by: 'line', value: 3, revealCursor: false }], ws: '/work/alpha' });
     expect((ctx.sent[1].args[0] as { to: string }).to).toBe('up');
     expect(ctx.sent[2]).toEqual({ verb: 'feedback-selection', args: [], ws: '/work/alpha' });
+    expect(ctx.canvasSent).toHaveLength(0); // diff mode never touches the canvas channel
+  });
+
+  it('ScrollNav canvas mode: rotate drives the canvas viewport-scroll (count = |ticks|), not editorScroll', async () => {
+    const ctx = makeStore(); // default selection pir-1 is blocked at plan-approval → canvas mode
+    const nav = new ScrollNav(ctx.store);
+    await nav.onDialRotate(dial(2) as never);   // down, 2 ticks
+    await nav.onDialRotate(dial(-1) as never);  // up, 1 tick
+    // Rotation reaches the artifact-canvas webview via the canvas channel, one call per event with
+    // count = |ticks|; the generic editorScroll relay is never touched. MRU targeting: workspace only.
+    expect(ctx.canvasSent).toEqual([
+      { command: 'viewport-down', target: { workspace: '/work/alpha' }, count: 2 },
+      { command: 'viewport-up', target: { workspace: '/work/alpha' }, count: 1 },
+    ]);
+    expect(ctx.sent).toHaveLength(0);
+    expect('file' in ctx.canvasSent[0].target).toBe(false);
+  });
+
+  it('ScrollNav canvas mode: a failed viewport-scroll renders its reason on the touchstrip', async () => {
+    const ctx = makeStore(); // pir-1 → canvas mode
+    ctx.canvasResult.value = { ok: false, code: 'no-canvas', error: 'no canvas open' };
+    const action = dial(1).action;
+    const nav = new ScrollNav(ctx.store);
+    nav.onWillAppear({ action, payload: {} } as never);
+    await nav.onDialRotate({ action, payload: { ticks: 1, settings: {} } } as never);
+    // The transient status takes line 2 for one cycle (as the review dials do); the qualifier stays.
+    expect(action.setFeedback.mock.calls.at(-1)?.[0]).toEqual({ title: 'Scroll · read only', value: 'Open artifact' });
   });
 
   it('ScrollNav legibility: diff-phase builder → line 1 = axis · delivery mode, line 2 = builder, NO bar (#1498)', () => {
@@ -666,15 +699,16 @@ describe('encoders', () => {
     expect(action.setFeedback.mock.calls.at(-1)?.[0]).toMatchObject({ title: 'Scroll · queue' });
   });
 
-  it('ScrollNav canvas mode: line 1 reads "Scroll · editor only" (both gestures inert), mode label suppressed', async () => {
+  it('ScrollNav canvas mode: line 1 reads "Scroll · read only" (rotation scrolls, press inert), delivery mode suppressed', async () => {
     const ctx = makeStore(); // default selection pir-1 is blocked at plan-approval → canvas mode
     ctx.store.overview = { ...ctx.store.overview!, feedbackMode: 'queue' } as never; // must NOT leak into line 1
     const action = { isDial: () => true, setFeedback: vi.fn() };
     const nav = new ScrollNav(ctx.store);
     nav.onWillAppear({ action, payload: {} } as never);
-    // The delivery mode is replaced entirely: neither `send` nor `queue`, because in canvas
-    // mode rotation (editorScroll) and the press (diff-only feedback-selection) are both inert.
-    expect(action.setFeedback.mock.calls.at(-1)?.[0]).toEqual({ title: 'Scroll · editor only', value: '#101 Add the relay' });
+    // The delivery mode is replaced entirely: neither `send` nor `queue`. Since #1501 rotation scrolls
+    // the canvas viewport (read only), but the press (diff-only feedback-selection) stays inert — so
+    // the qualifier names what works rather than a delivery mode the press cannot fire.
+    expect(action.setFeedback.mock.calls.at(-1)?.[0]).toEqual({ title: 'Scroll · read only', value: '#101 Add the relay' });
     // The press is NOT gated on reviewMode (it no-ops server-side already); the deck still relays it.
     await nav.onDialDown();
     expect(ctx.sent).toEqual([{ verb: 'feedback-selection', args: [], ws: '/work/alpha' }]);

@@ -21,7 +21,7 @@ import { SessionScreen } from '../../terminal/session-screen.js';
 // generation); submitToSession lets a test pre-occupy a session's lock to drive the
 // shutdown-during-lock-wait window deterministically.
 import { shutdownDelayedSends } from '../servers/delayed-send.js';
-import { submitToSession, resetSubmissionChains } from '../servers/session-submit.js';
+import { submitToSession, trySubmitToSession, resetSubmissionChains } from '../servers/session-submit.js';
 
 // ============================================================================
 // Mocks
@@ -222,16 +222,27 @@ function makeRes(): { res: http.ServerResponse; body: () => string; statusCode: 
  * requires that proven lower bound, else a bare marker is an indeterminate partial and is held).
  * `bytesWritten` is the monotone change token the delivery path samples.
  */
-function gateSession(mockWrite: (data: string) => void, ring: string, writable = true) {
+function gateSession(mockWrite: (data: string) => void, ring: string, writable = true, id = 'term-001') {
   const raw = `${ring}\r\n${'─'.repeat(20)}\r\n`;
   const gateScreen = new SessionScreen(80, 24);
   gateScreen.feed(raw);
   return {
+    // The per-terminal submission lock's key (Issue #1365). It MUST be a real, distinct id:
+    // this double reaches the live mailbox-wiring binding, and because the port is
+    // structurally typed an omitted `id` would compile and silently key every lock on the
+    // same `undefined` — serialization that looks present and is not. `submitMessagePaced`
+    // throws on a missing id so that mistake fails loudly instead of quietly.
+    id,
     // Model a live PTY: every write lands. The delivery path now threads the write's
     // boolean (Spec 1313 silent-loss fix), so a double whose write returned undefined
     // would read as a DROPPED write and be held. Wrap mockWrite so call-assertions still
     // see it while the write reports success.
-    write: (data: string): boolean => { mockWrite(data); return true; },
+    // Issue #1573: a real terminal ECHOES what is typed into it, and the delivery path now
+    // requires that echo on the session's mirror before it will call a message delivered. The
+    // double models it (input lines are `\n`-separated; a terminal renders them `\r\n`), so a
+    // test asserting a delivery gets one — and a test that wants a terminal which SWALLOWS its
+    // input can hand in a `write` that skips the feed.
+    write: (data: string): boolean => { mockWrite(data); gateScreen.feed(data.replace(/\n/g, '\r\n')); return true; },
     pid: 1234,
     writable,
     isUserIdle: () => true,
@@ -241,6 +252,10 @@ function gateSession(mockWrite: (data: string) => void, ring: string, writable =
     cwd: '/tmp/ws',
     info: { cols: 80, rows: 24 },
     bytesWritten: raw.length,
+    // Issue #1573 settle-before-write: epoch 0 is "this screen stopped painting long ago", the
+    // normal state for a session sitting at an idle prompt. A test modelling a still-repainting
+    // composer overrides it with a recent timestamp.
+    lastDataAt: 0,
     gateScreen,
   };
 }
@@ -1441,6 +1456,52 @@ describe('tower-routes', () => {
       expect(mockWrite).toHaveBeenCalled();
     });
 
+    it('rejects an over-limit body loudly instead of paceing it onto the line (Issue #1573)', async () => {
+      // Nothing between the CLI flag and the PTY bytes bounded message size before this. An
+      // oversized body used to be written a line at a time and reported delivered whatever the
+      // composer made of it — the #1564 shape. Truncating would reproduce that on purpose, so
+      // the only honest answer is a refusal that names the limit.
+      mockParseJsonBody.mockResolvedValue({
+        to: 'architect',
+        message: 'x'.repeat(48 * 1024 + 1),
+        workspace: '/tmp/ws',
+      });
+      const req = makeReq('POST', '/api/send');
+      const { res, statusCode, body } = makeRes();
+
+      await handleRequest(req, res, makeCtx());
+
+      expect(statusCode()).toBe(400);
+      const parsed = JSON.parse(body());
+      expect(parsed.error).toBe('MESSAGE_TOO_LARGE');
+      expect(parsed.message).toContain('49153 bytes');
+      expect(parsed.message).toContain('48KB');
+      // The target was never even resolved — nothing reached a terminal.
+      expect(mockResolveTarget).not.toHaveBeenCalled();
+    });
+
+    it('accepts a body exactly at the limit and echoes bodyLength on the response (Issue #1573)', async () => {
+      const message = 'x'.repeat(48 * 1024);
+      mockParseJsonBody.mockResolvedValue({ to: 'architect', message, workspace: '/tmp/ws' });
+      mockResolveTarget.mockReturnValue({
+        terminalId: 'term-001',
+        workspacePath: '/tmp/ws',
+        agent: 'architect',
+      });
+      mockGetTerminalManager.mockReturnValue({
+        getSession: () => gateSession(vi.fn(), '❯ '),
+        listSessions: () => [],
+      });
+      const req = makeReq('POST', '/api/send');
+      const { res, statusCode, body } = makeRes();
+
+      await handleRequest(req, res, makeCtx());
+
+      expect(statusCode()).toBe(200);
+      // The sender is told WHAT was sent, not merely that a send happened.
+      expect(JSON.parse(body()).bodyLength).toBe(48 * 1024);
+    });
+
     it('holds (no-live-pty) instead of dropping when the shellper connection is down (#1198, Spec 1313)', async () => {
       // Pre-1313 this returned 503 and dropped the message. Now the send is
       // persisted and held; the backstop redelivers when the connection recovers.
@@ -1721,9 +1782,76 @@ describe('tower-routes', () => {
       expect(parsed.ok).toBe(true);
       expect(parsed.delivered).toBe(true);
       expect(parsed.deferred).toBe(false);
+      // Issue #1584: the terminal double echoes what is written to it, so the delivery is
+      // CONFIRMED and the sender is told so.
+      expect(parsed.verified).toBe(true);
       // Message SHOULD be written — user is idle (Bugfix #492)
       expect(mockWrite).toHaveBeenCalled();
     });
+
+    it('reports verified:false for a terminal that swallows the write (Issue #1584)', async () => {
+      // The #1583 loop: the write completes, the terminal never shows the header. Tower used to
+      // re-hold the row, and every later clean-prompt pass re-wrote the whole message. It is now
+      // recorded as delivered and the sender is told it could not be confirmed.
+      mockParseJsonBody.mockResolvedValue({ to: 'architect', message: 'hello', workspace: '/tmp/ws' });
+      mockResolveTarget.mockReturnValue({
+        terminalId: 'term-swallow', workspacePath: '/tmp/ws', agent: 'architect',
+      });
+      const mockWrite = vi.fn();
+      // Same double, minus the echo: every byte is accepted, nothing reaches the mirror.
+      const swallowing = {
+        ...gateSession(mockWrite, '❯ ', true, 'term-swallow'),
+        write: (data: string): boolean => { mockWrite(data); return true; },
+      };
+      mockGetTerminalManager.mockReturnValue({ getSession: () => swallowing, listSessions: () => [] });
+      const req = makeReq('POST', '/api/send');
+      const ctx = makeCtx();
+      const { res, statusCode, body } = makeRes();
+
+      await handleRequest(req, res, ctx);
+
+      expect(statusCode()).toBe(200);
+      const parsed = JSON.parse(body());
+      expect(parsed.delivered).toBe(true);
+      expect(parsed.held).toBe(false);
+      expect(parsed.verified).toBe(false);
+      expect(mockWrite).toHaveBeenCalled();
+    }, 10_000);
+
+    it('a body-bearing interrupt that crosses the wait ceiling reports degraded (Issue #1365)', async () => {
+      // codex review of PR #1492: the interrupt claims its mailbox row `delivered` BEFORE the
+      // write (un-claiming would risk a double delivery), so if the ceiling expires and the
+      // write goes out unserialized — possibly interleaving with the delivery it skipped — an
+      // unqualified `delivered: true` would be a lie of omission. The response must say so.
+      mockParseJsonBody.mockResolvedValue({
+        to: 'architect', message: 'urgent', workspace: '/tmp/ws', options: { interrupt: true },
+      });
+      mockResolveTarget.mockReturnValue({
+        terminalId: 'term-ceiling', workspacePath: '/tmp/ws', agent: 'architect',
+      });
+      const mockWrite = vi.fn();
+      mockGetTerminalManager.mockReturnValue({
+        getSession: () => gateSession(mockWrite, '❯ ', true, 'term-ceiling'),
+        listSessions: () => [],
+      });
+
+      // Occupy the terminal with a DELIVERY write long enough to outlast the ceiling. A
+      // delivery is the only thing the ceiling is allowed to bypass.
+      const holder = trySubmitToSession('term-ceiling', () => 4000);
+
+      const req = makeReq('POST', '/api/send');
+      const ctx = makeCtx();
+      const { res, statusCode, body } = makeRes();
+      await handleRequest(req, res, ctx);
+
+      expect(statusCode()).toBe(200);
+      const parsed = JSON.parse(body());
+      expect(parsed.delivered).toBe(true); // claim-first is preserved...
+      expect(parsed.degraded).toBe(true); // ...but the sender is told it was not serialized
+      expect(parsed.degradedReason).toBe('submit-wait-ceiling-expired');
+      expect(mockWrite).toHaveBeenCalled(); // the escape hatch still landed
+      await holder;
+    }, 10_000);
   });
 
   // ==========================================================================

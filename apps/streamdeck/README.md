@@ -279,8 +279,13 @@ builder (+ its phase and position); PR / Spawn show the item + `i/N`.
   previous block, **push** = open the composer, **tap** = walk forward to the next
   commented block. The touch strip names the live mode (`Changes · send` /
   `Changes · queue`, or `Blocks`).
-- **Scroll** — rotate = scroll the focused editor's viewport (caret stays put);
-  **push** = submit the current selection as feedback.
+- **Scroll** — phase-aware viewport scroll (caret stays put). *Diff phase*: rotate =
+  scroll the focused editor's viewport. *Spec/plan phase*: rotate = scroll the artifact
+  canvas viewport (the editor scroll can't reach a webview, so the dial drives the canvas
+  directly). **push** = submit the current selection as feedback — builder-diff-only, so the
+  press stays inert on a spec/plan canvas (the dial is half-live there: rotation scrolls,
+  press does not). The touch strip names the mode (`Scroll · send` / `Scroll · queue` in diff
+  phase, `Scroll · read only` on a canvas).
 
 **Dials collect, keys commit.** A diff dial press submits a chunk via a
 **mode-neutral** verb (`feedback-file` / `feedback-hunk` / `feedback-selection`);

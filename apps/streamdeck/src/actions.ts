@@ -827,7 +827,11 @@ interface CanvasSpec {
 function canvasErrorLine(code: CanvasCommandClientErrorCode): string {
   if (code === 'no-canvas') return 'Open artifact';
   if (code === 'unreachable') return 'Tower offline';
-  return 'Error'; // invalid-request: defensive — we only ever send valid commands
+  // invalid-request. NOT unreachable: it fires on VERSION SKEW, when a Tower whose canvas-relay
+  // allowlist predates a newly added command rejects that command. On hardware this renders as
+  // `Error`, and the first move is to check which Tower is actually running (see
+  // lessons-learned.md, Testing, the stale-Tower entry from #1501) rather than the deck code.
+  return 'Error';
 }
 
 /** Line-2 text for a builder-scoped dial: the selected builder as `#issue title`
@@ -1017,10 +1021,18 @@ export class DiffHunkNav extends ReviewNav {
 const SCROLL_LINES_PER_TICK = 3;
 
 /**
- * Scroll dial: rotate scrolls the focused editor's viewport up/down (so you can
- * read a diff without the keyboard); a dial press submits the current selection as
- * feedback (forwarded now or queued per the workspace setting, #1410). Scroll is a
- * viewport move (`revealCursor: false`), so select your text first, then scroll/submit.
+ * Scroll dial: rotate scrolls the viewport up/down so you can read without the keyboard; a
+ * dial press submits the current selection as feedback (forwarded now or queued per the
+ * workspace setting, #1410). Rotation is phase-aware, mirroring the review dials' split
+ * (#1501): in diff/text-editor mode it relays `editorScroll` of the focused editor; in canvas
+ * mode (a spec/plan under review) the focused surface is the artifact-canvas webview, which
+ * `editorScroll` cannot reach, so rotation drives the canvas's own viewport-scroll command.
+ * Scroll is a viewport move (`revealCursor: false`), so select your text first, then
+ * scroll/submit.
+ *
+ * The PRESS is builder-diff-only by design (#1498) and is NOT phase-switched: on a canvas its
+ * `feedback-selection` anchor has no diff entry, so it stays inert there. So on a canvas the
+ * dial is half-live — rotation scrolls, press does not.
  *
  * Like the review dials, the touchstrip narrates itself (#1498): a `store.onChange`
  * subscription re-renders `setFeedback` on every overview tick, so
@@ -1028,9 +1040,9 @@ const SCROLL_LINES_PER_TICK = 3;
  *   - **line 1** pairs the axis with a qualifier. In diff/text-editor mode that is the
  *     LIVE delivery mode (`Scroll · queue` / `Scroll · send`, #1410) — the press is the
  *     one mode-dependent gesture on the board, so naming its mode is what keeps a press
- *     from ever being a surprise. In canvas mode (a spec/plan under review) it is
- *     `Scroll · editor only` instead: both gestures are inert on a canvas, so line 1 must
- *     not claim a live mode (see `renderTo`);
+ *     from ever being a surprise. In canvas mode it is `Scroll · read only`: rotation scrolls
+ *     the canvas (you can read), but the press is inert, so line 1 names what works rather
+ *     than a delivery mode the press cannot fire (see `renderTo`);
  *   - **line 2** names the selected builder the press acts on (`No builder` when none —
  *     a visibly inert empty state, never a live-looking static word).
  *
@@ -1043,6 +1055,8 @@ const SCROLL_LINES_PER_TICK = 3;
 export class ScrollNav extends SingletonAction {
   override readonly manifestId = 'com.cluesmith.codev.scroll-nav';
   private current?: DialAction;
+  /** Transient canvas-error line; shown until the next overview tick clears it (as `ReviewNav`). */
+  private status?: string;
   constructor(private readonly store: CodevStore) {
     super();
     this.store.onChange(() => this.render());
@@ -1057,6 +1071,32 @@ export class ScrollNav extends SingletonAction {
     this.current = undefined;
   }
   override async onDialRotate(ev: DialRotateEvent): Promise<void> {
+    // Canvas mode (a spec/plan under review): the focused surface is the artifact-canvas webview,
+    // which `editorScroll` cannot reach, so drive the canvas's own viewport-scroll command instead
+    // (#1501) — the raw scroll the mouse wheel does natively, which this dial cannot deliver as a
+    // DOM event. Keyed on `'canvas'` SPECIFICALLY, never "not diff": in `'none'` mode (no builder
+    // or unknown phase) rotation must still take the `editorScroll` path below, so a canvas command
+    // never fires with nothing selected. Mirrors the `ReviewNav` mode split.
+    if (reviewMode(this.store.selectedBuilder()) === 'canvas') {
+      const workspace = this.store.selectedWorkspacePath();
+      if (!workspace) return; // no active workspace to target
+      const command = dir(ev) >= 0 ? 'viewport-down' : 'viewport-up';
+      // One call per rotate event: count = |ticks| (N steps), never a burst of single-tick sends.
+      const res = await this.store.client.sendCanvasCommand(
+        command,
+        { workspace },
+        { count: Math.abs(ev.payload.ticks) || 1 },
+      );
+      if (res.ok) {
+        this.status = undefined;
+      } else {
+        this.status = canvasErrorLine(res.code);
+      }
+      if (this.current) this.renderTo(this.current);
+      return;
+    }
+    // Diff / text-editor mode (and `none`): relay `editorScroll` of the focused editor's viewport.
+    // Unchanged from before this dial learned canvas mode.
     const to = dir(ev) >= 0 ? 'down' : 'up';
     await this.store.client.sendCommand(
       'scroll',
@@ -1074,22 +1114,26 @@ export class ScrollNav extends SingletonAction {
     // enqueue by VSCode per the workspace setting.
     await this.store.client.sendCommand('feedback-selection', [], this.store.selectedWorkspacePath());
   }
+  /** onChange re-render: a fresh overview clears the transient canvas-error line (as `ReviewNav`). */
   private render(): void {
+    this.status = undefined;
     if (this.current) this.renderTo(this.current);
   }
   /** Line 1 = axis · qualifier; line 2 = the selected builder the press acts on
-   *  (`No builder` when none). No bar (Decision 2).
+   *  (`No builder` when none). No bar (Decision 2). A pending canvas error takes line 2 for one
+   *  cycle, exactly as the review dials do.
    *
    *  In diff/text-editor mode the qualifier is the live delivery mode (`send`/`queue`,
-   *  #1410) so the press is never a surprise. In CANVAS mode (a spec/plan under review) it
-   *  is `editor only` instead: both gestures are inert there, so line 1 must not claim a
-   *  live scroll or delivery mode. Rotation relays `editorScroll`, which needs an active
-   *  text editor; the press (`feedback-selection`) is a diff-only gesture whose anchor
-   *  requires a builder-diff entry — and a spec/plan opens in the artifact-canvas webview,
-   *  which is neither. The qualifier names where the dial DOES work rather than reading as
-   *  a fault. (#1501 would restore ROTATION on a canvas via a canvas viewport-scroll
-   *  command, but the press stays diff-bound by design, so this does not simply collapse
-   *  back to `send`/`queue` when #1501 lands — the two gestures have different scopes.)
+   *  #1410) so the press is never a surprise. In CANVAS mode (a spec/plan under review) it is
+   *  `read only`: since #1501 ROTATION scrolls the artifact-canvas viewport (you can scroll to
+   *  read), but the press (`feedback-selection`) stays inert — its anchor requires a builder-diff
+   *  entry, which a spec/plan in the webview never has. `read only` names what DOES work and
+   *  implies the press will not act, continuing this branch's habit of naming where the dial works
+   *  rather than reading as a fault. It is deliberately NOT `no send`: `send`/`queue` are the two
+   *  DELIVERY modes, so `no send` invites the reading "not sending, therefore queuing" — the exact
+   *  wrong inference, since the press is inert, not queuing. (Before #1501 both gestures were inert
+   *  on a canvas and this read `editor only`; rotation now works, so the label moved but did not
+   *  collapse back to `send`/`queue` — the two gestures have different scopes.)
    *
    *  With NO builder selected the press is inert too (`onDialDown` returns early), so the
    *  delivery-mode qualifier is suppressed and line 1 reads a bare `Scroll` (#1505) — the
@@ -1104,12 +1148,15 @@ export class ScrollNav extends SingletonAction {
     }
     let qualifier: string;
     if (reviewMode(b) === 'canvas') {
-      qualifier = 'editor only';
+      qualifier = 'read only';
     } else if (this.store.feedbackMode() === 'queue') {
       qualifier = 'queue';
     } else {
       qualifier = 'send';
     }
-    void action.setFeedback({ title: `Scroll · ${qualifier}`, value: selectedBuilderLine(this.store) });
+    void action.setFeedback({
+      title: `Scroll · ${qualifier}`,
+      value: this.status ?? selectedBuilderLine(this.store),
+    });
   }
 }

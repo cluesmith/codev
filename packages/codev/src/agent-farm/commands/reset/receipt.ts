@@ -160,10 +160,21 @@ export function verifyReceipt(options: VerifyReceiptOptions): ReceiptObservation
   const content = fs.read(statePath);
   if (content === null) return { status: 'missing' };
 
-  // Match on the nonce token rather than the whole marker line: a builder that
-  // reproduces the nonce but alters the comment's spacing has still proved
-  // freshness, and failing that file would discard a real save over whitespace.
-  if (!content.includes(nonce)) return { status: 'wrong-nonce', bytes };
+  // The nonce must appear in the FIRST LINE — not merely somewhere in the file.
+  //
+  // "Somewhere" is trivially satisfied by echoing the save request back: that
+  // text contains the marker and runs ~2KB, so `cp <request> .builder-state.md`
+  // cleared every gate — nonce present, over the size floor, stable. That is not
+  // an attack, it is what an agent does when it mistakes instructions for a
+  // template, and the request already TELLS it the file "MUST begin with this
+  // exact line". This enforces what we ask for.
+  //
+  // Still matched on the nonce TOKEN rather than the exact marker string, so a
+  // builder that reproduces the nonce with different comment spacing is still
+  // accepted — discarding a real save over whitespace would be a false rejection
+  // of work that cost the builder real effort.
+  const firstLine = content.split('\n', 1)[0] ?? '';
+  if (!firstLine.includes(nonce)) return { status: 'wrong-nonce', bytes };
 
   if (bytes < minBytes) return { status: 'too-small', bytes };
 
@@ -194,7 +205,7 @@ export function describeReceiptFailure(
     case 'missing':
       return `${statePath} was never written. The builder may not have read the request (if it is wedged mid-turn, retry with --interrupt-first).`;
     case 'wrong-nonce':
-      return `${statePath} exists (${observation.bytes} bytes) but does not carry this run's nonce — it is stale, left by an earlier refresh. Refusing to clear on superseded state.`;
+      return `${statePath} exists (${observation.bytes} bytes) but does not carry this run's nonce ON ITS FIRST LINE. Either it is stale (left by an earlier refresh) or the nonce appears further down — which happens when the save request is echoed back rather than answered. Refusing to clear on superseded or echoed state.`;
     case 'too-small':
       return `${statePath} carries the nonce but is only ${observation.bytes} bytes (minimum ${minBytes}). That is a stub, not a working-state save. Override with --min-bytes if this is genuinely all there was.`;
     case 'still-growing':

@@ -9,6 +9,9 @@ jobs:
   unit:
     name: Unit Tests
     runs-on: ubuntu-latest
+    # Healthy runs finish in ~2-3 min; bound well above that so a stall fails
+    # visibly instead of pending for GitHub's 6-hour default (see #1502).
+    timeout-minutes: 15
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -115,6 +118,10 @@ jobs:
   canvas-browser:
     name: Artifact-Canvas Browser Tests
     runs-on: ubuntu-latest
+    # Backstop for #1502. The stall's root cause is removed below (see the install
+    # step), but every job stays bounded regardless: an unbounded job conceals its
+    # own failure, which is #1502's real lesson. Healthy runs finish in ~4 min.
+    timeout-minutes: 15
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -131,9 +138,16 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
+      # Root cause of #1502: `--with-deps` runs `apt-get update` to install Chromium's
+      # system libraries, and that apt index fetch intermittently stalls indefinitely
+      # (the fast azure.archive.ubuntu.com mirror is Ign-ored, and apt has no network
+      # timeout on the fallback to archive.ubuntu.com). Those libraries are already
+      # present on the ubuntu-latest image: the sibling dashboard-e2e workflow installs
+      # Chromium the same way without `--with-deps` and launches it successfully on
+      # every scheduled run. Dropping the flag removes the stalling apt phase entirely.
       - name: Install Playwright Chromium
         working-directory: packages/artifact-canvas
-        run: pnpm exec playwright install --with-deps chromium
+        run: pnpm exec playwright install chromium
 
       # Real-browser fragmentation regression suite (spec 1380): jsdom cannot express CSS
       # multi-column fragmentation, so the spike-derived invariants run against Chromium here.
@@ -144,6 +158,8 @@ jobs:
   integration:
     name: Tower Integration Tests
     runs-on: ubuntu-latest
+    # Healthy runs finish in ~2 min; bound above that so a stall fails visibly (#1502).
+    timeout-minutes: 10
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -179,6 +195,8 @@ jobs:
   cli:
     name: CLI Integration Tests
     runs-on: ubuntu-latest
+    # Healthy runs finish in ~1 min; bound above that so a stall fails visibly (#1502).
+    timeout-minutes: 10
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -214,6 +232,8 @@ jobs:
   package:
     name: Package Install Verification
     runs-on: ubuntu-latest
+    # Healthy runs finish in ~2 min; bound above that so a stall fails visibly (#1502).
+    timeout-minutes: 10
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4

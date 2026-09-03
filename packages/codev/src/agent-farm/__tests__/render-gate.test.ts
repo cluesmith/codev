@@ -17,11 +17,17 @@ import { describe, it, expect } from 'vitest';
 import { readdirSync, readFileSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
 import { fileURLToPath } from 'node:url';
+import xtermHeadless from '@xterm/headless';
+import type { Terminal as HeadlessTerminal } from '@xterm/headless';
 import { RingBuffer } from '../../terminal/ring-buffer.js';
 import { SessionScreen } from '../../terminal/session-screen.js';
 import { classifyScreen, classifyBuffer } from '../servers/render-gate.js';
-import type { RingSnapshot, GateProfile } from '../servers/render-gate.js';
+import type { RingSnapshot, GateProfile, GateVerdict } from '../servers/render-gate.js';
 import { CLAUDE_PROFILE, CODEX_PROFILE, AGY_PROFILE, resolveProfile } from '../servers/gate-profiles.js';
+
+// Default-imported for the same CJS-interop reason `render-gate.ts` documents (the named export
+// is not statically analyzable); the negative control below builds its own throwaway terminal.
+const { Terminal } = xtermHeadless;
 
 const COLS = 110;
 const ROWS = 32;
@@ -172,37 +178,23 @@ describe('render-gate — synthetic branch coverage (Spec 1313)', () => {
 });
 
 describe('render-gate — whole-ring render at any size (Spec 1313 D2 + over-ceiling removal)', () => {
-  it('renders a realistic large (~4MB) ring WHOLE within a CI-aware budget', async () => {
+  it('renders a realistic large (~4MB) ring WHOLE (no tail slice, no size cap)', async () => {
     // The D2 fix renders the whole coherent ring (no 1MB tail slice). Build ~4MB of
     // newline-free filler so it lands in the ring's unbounded `partial` (the claude
     // full-screen-TUI shape, #1047) rather than being truncated by the 1000-line cap;
     // a busy composer tail follows. The whole ring renders (no slice, no size cap) — the
     // real steady-state path (largest real capture ≈ 3MB).
+    // (This test carried a wall-clock budget until #1471; the classifier's COST is now
+    // pinned deterministically by the op-count suite below, which measures the production
+    // mirror path rather than this transient one. What survives here is the correctness
+    // half: a 4MB ring renders whole and classifies its busy tail.)
     const filler = 'x'.repeat(4 * 1024 * 1024);
     const raw = filler + '\r\n' + screen('❯ occupied prompt tail', '──────');
     const snap = snapshotFromRaw(raw);
     expect(snap.replay.length).toBeGreaterThan(4 * 1024 * 1024);
 
-    // Warm up (JIT + first-parse), then assert the MIN over several runs. The min
-    // strips GC/scheduling outliers, approximating the classifier's steady-state
-    // compute cost. (Spike: 67ms @4MB; this env under vitest ~90ms.)
-    await classifyScreen(snap, CLAUDE_PROFILE); // warm-up (discarded)
-    let best = Infinity;
-    let verdict;
-    for (let i = 0; i < 5; i++) {
-      const t0 = performance.now();
-      verdict = await classifyScreen(snap, CLAUDE_PROFILE);
-      best = Math.min(best, performance.now() - t0);
-    }
-    // eslint-disable-next-line no-console
-    console.log(`[render-gate] whole-render @${Math.round(snap.replay.length / 1024)}KB best-of-5 = ${best.toFixed(1)}ms`);
-    expect(verdict?.clean).toBe(false); // the tail is a busy prompt
-    // CI-aware bound: locally a tight-but-safe bound (the real steady-state signal);
-    // on shared/loaded GitHub runners only a catastrophic-regression ceiling (an order
-    // of magnitude below an O(n²) blow-up at 4MB). Retuned from the old 1MB seed-cap
-    // bound now that the whole ring renders. See review doc "Flaky Tests".
-    const budgetMs = process.env.CI ? 800 : 250;
-    expect(best).toBeLessThan(budgetMs);
+    const verdict = await classifyScreen(snap, CLAUDE_PROFILE);
+    expect(verdict.clean).toBe(false); // the tail is a busy prompt
   });
 
   it('renders a ring ABOVE the old over-ceiling WHOLE and classifies its empty composer CLEAN', async () => {
@@ -304,6 +296,201 @@ describe('render-gate — PRODUCTION data path: capped ring TEARS, persistent mi
       screen.dispose();
     });
   }
+});
+
+describe('render-gate — deterministic op count: one classify is O(viewport), not O(ring size) (#1471)', () => {
+  // Replaces the wall-clock budget this file used to assert on the whole-ring render. A timing
+  // bound measures the MACHINE, not the algorithm: the identical code that best-of-5'd well under
+  // the 250ms local ceiling on an idle box measured 391.7ms pinned to one contended core. So the
+  // bound either flakes on a loaded runner or gets loosened until it no longer catches the
+  // regression it exists for (its history: 75ms → 250 → a CI-aware 800).
+  //
+  // The cost property the gate actually guarantees post round-2 is algorithmic, and it belongs to
+  // the PRODUCTION path: classification reads the session's persistent bounded `SessionScreen`
+  // mirror, so one classify touches a viewport (rows × cols cells) and nothing else, however much
+  // output the session has produced. Counting the classifier's buffer reads pins exactly that — in
+  // integers, which cannot flake.
+
+  const CHUNK = 64 * 1024; // PTY output arrives in chunks; matches the production feed above
+  const GATE_COLS = 139;
+  const GATE_ROWS = 65;
+
+  /** The work one classify does: buffer reads, plus any bytes it parses (it must parse none). */
+  interface OpCounts {
+    lineReads: number;
+    cellReads: number;
+    bytesParsed: number;
+  }
+
+  type MirrorLine = NonNullable<ReturnType<HeadlessTerminal['buffer']['active']['getLine']>>;
+  type MirrorCell = Parameters<MirrorLine['getCell']>[1];
+
+  /** Delegate a property to `target` with `this` bound to it — xterm's are prototype accessors. */
+  function passthrough<T extends object>(target: T, prop: string | symbol): unknown {
+    const value = Reflect.get(target, prop, target);
+    return typeof value === 'function' ? (value as (...args: never[]) => unknown).bind(target) : value;
+  }
+
+  function countingLine(line: MirrorLine, ops: OpCounts): MirrorLine {
+    return new Proxy(line, {
+      get(target, prop) {
+        if (prop !== 'getCell') return passthrough(target, prop);
+        return (col: number, cell?: MirrorCell) => {
+          ops.cellReads++;
+          return target.getCell(col, cell);
+        };
+      },
+    });
+  }
+
+  /**
+   * A read-counting facade over a live terminal. `classifyBuffer` takes the terminal as a parameter
+   * and only READS it, so the test can hand it this proxy and count the work the REAL classifier
+   * does — no production instrumentation, nothing stubbed out from under the code under test.
+   */
+  function countingTerm(term: HeadlessTerminal, ops: OpCounts): HeadlessTerminal {
+    // Resolved per access rather than captured, so the facade follows a normal→alternate buffer
+    // switch the way the classifier's own `term.buffer.active` read does.
+    const countingBuffer = (buffer: HeadlessTerminal['buffer']['active']) =>
+      new Proxy(buffer, {
+        get(target, prop) {
+          if (prop !== 'getLine') return passthrough(target, prop);
+          return (y: number) => {
+            ops.lineReads++;
+            const line = target.getLine(y);
+            return line && countingLine(line, ops);
+          };
+        },
+      });
+    return new Proxy(term, {
+      get(target, prop) {
+        if (prop === 'write') {
+          return (data: string, cb?: () => void) => {
+            ops.bytesParsed += data.length; // a classify re-parsing its input would show up here
+            return target.write(data, cb);
+          };
+        }
+        if (prop !== 'buffer') return passthrough(target, prop);
+        return new Proxy(target.buffer, {
+          get: (bufTarget, bufProp) =>
+            bufProp === 'active' ? countingBuffer(bufTarget.active) : passthrough(bufTarget, bufProp),
+        });
+      },
+    });
+  }
+
+  /** Feed a stream into a persistent mirror exactly as `PtySession.onPtyData` does: chunked. */
+  function mirrorOf(raw: string): SessionScreen {
+    const mirror = new SessionScreen(GATE_COLS, GATE_ROWS);
+    for (let i = 0; i < raw.length; i += CHUNK) mirror.feed(raw.slice(i, i + CHUNK));
+    return mirror;
+  }
+
+  /**
+   * The production classify with its ops counted. This is `classifyAgentScreen`'s body
+   * (`mailbox-wiring.ts`) — `screen.read()` → `classifyBuffer` — inlined because the facade has to
+   * sit between those two calls. So this suite pins the ALGORITHM's cost, not the call-site wiring;
+   * that the gate reads the mirror rather than the ring is covered by the "PRODUCTION data path"
+   * suite above.
+   */
+  async function classifyCounted(mirror: SessionScreen): Promise<{ verdict: GateVerdict; ops: OpCounts }> {
+    const { term, cols, rows } = await mirror.read();
+    const ops: OpCounts = { lineReads: 0, cellReads: 0, bytesParsed: 0 };
+    const verdict = classifyBuffer(countingTerm(term, ops), cols, rows, CLAUDE_PROFILE);
+    return { verdict, ops };
+  }
+
+  // A full repaint (ED2 + cursor home) into an idle claude composer. Both streams below END in
+  // this, so the two mirrors hold the SAME final screen and differ only in the history behind it —
+  // which is the whole point: identical screen ⇒ identical work, whatever the ring did.
+  const IDLE_REPAINT = '\x1b[2J\x1b[H' + screen(`❯ ${DIM}Try "refactor doctor.ts"${RESET}`, '──────────────────────');
+  const HUGE_HISTORY = 'x'.repeat(4 * 1024 * 1024) + '\r\n' + IDLE_REPAINT;
+
+  it('4 MB of history and ~200 bytes of history cost byte-identical work (the wall clock cannot say this)', async () => {
+    const tiny = mirrorOf(IDLE_REPAINT);
+    const huge = mirrorOf(HUGE_HISTORY);
+    try {
+      const small = await classifyCounted(tiny);
+      const big = await classifyCounted(huge);
+
+      expect(small.verdict).toMatchObject({ clean: true, detail: 'empty' });
+      expect(big.verdict).toEqual(small.verdict); // same screen ⇒ same verdict
+      // The replacement assertion: 20000× the history, exactly the same classifier work.
+      expect(big.ops).toEqual(small.ops);
+    } finally {
+      tiny.dispose();
+      huge.dispose();
+    }
+  });
+
+  it('one classify reads at most one viewport and parses nothing', async () => {
+    // The hard geometric bound. `screenLines` reads `rows` lines; the composer scan re-reads only
+    // the region rows and at most `cols` cells each. A regression that walked scrollback or
+    // re-rendered history — the failure the old timing bound was there to catch — blows both.
+    //
+    // Note `cols × rows` is the EXACT worst case (region rows × cols, plus the ghost-tail
+    // look-ahead's second pass over one row), not a loose ceiling: a future second per-cell
+    // look-ahead would trip it with no O(history) regression involved. That is deliberate — such a
+    // change doubles the gate's per-check work and deserves a decision, not a silent pass.
+    const mirror = mirrorOf(HUGE_HISTORY);
+    try {
+      const { verdict, ops } = await classifyCounted(mirror);
+      expect(verdict.clean).toBe(true);
+      expect(ops.lineReads).toBeLessThanOrEqual(GATE_ROWS * 2);
+      expect(ops.cellReads).toBeLessThanOrEqual(GATE_COLS * GATE_ROWS);
+      expect(ops.bytesParsed).toBe(0); // classification READS a parsed screen; it never re-renders
+    } finally {
+      mirror.dispose();
+    }
+  });
+
+  it('repeated classifies of a static screen cost the same each time (no accumulation)', async () => {
+    // The backstop re-checks every held agent on a timer, so per-classify cost must be flat in the
+    // number of checks as well as in ring size. (The delivery path additionally memoizes the
+    // verdict per `ringToken`; this pins the underlying classify, memo or no memo.)
+    const mirror = mirrorOf(HUGE_HISTORY);
+    try {
+      const first = await classifyCounted(mirror);
+      const second = await classifyCounted(mirror);
+      const third = await classifyCounted(mirror);
+      expect(second.ops).toEqual(first.ops);
+      expect(third.ops).toEqual(first.ops);
+    } finally {
+      mirror.dispose();
+    }
+  });
+
+  it('negative control: the retired whole-ring path re-parses the WHOLE ring on EVERY classify', async () => {
+    // Honesty check — the op count above is only meaningful if it can tell the two cost models
+    // apart. Classify the same screen TWICE the pre-round-2 way: a throwaway terminal fed the whole
+    // replay per classify, which is what `classifyScreen` still does for the fixture suite. Same
+    // verdict and the same per-classify cell reads as the mirror, but ~4 MB parsed EVERY time
+    // instead of zero — and that gap is what the wall-clock budget was proxying for, now asserted
+    // directly. Two rounds, not one, so "per classify" is exercised rather than inferred.
+    const mirror = mirrorOf(HUGE_HISTORY);
+    const viaMirror = await classifyCounted(mirror);
+    mirror.dispose();
+
+    const ops: OpCounts = { lineReads: 0, cellReads: 0, bytesParsed: 0 };
+    const ROUNDS = 2;
+    for (let i = 0; i < ROUNDS; i++) {
+      const term = new Terminal({ cols: GATE_COLS, rows: GATE_ROWS, allowProposedApi: true, scrollback: 2000 });
+      try {
+        const counting = countingTerm(term, ops);
+        await new Promise<void>((resolve) => counting.write(HUGE_HISTORY, resolve));
+        expect(classifyBuffer(counting, GATE_COLS, GATE_ROWS, CLAUDE_PROFILE)).toEqual(viaMirror.verdict);
+      } finally {
+        term.dispose();
+      }
+    }
+
+    // The screen work is identical — it is the same screen — so the ONLY difference between the two
+    // cost models is the re-parse, and it scales with the number of classifies, not the viewport.
+    expect(ops.cellReads).toBe(viaMirror.ops.cellReads * ROUNDS);
+    expect(viaMirror.ops.bytesParsed).toBe(0);
+    expect(ops.bytesParsed).toBe(HUGE_HISTORY.length * ROUNDS);
+    expect(ops.bytesParsed).toBeGreaterThan(8 * 1024 * 1024);
+  });
 });
 
 describe('render-gate — claude suggested-command ghost (Spec 1313 render-gate hardening)', () => {

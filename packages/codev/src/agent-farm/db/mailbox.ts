@@ -282,6 +282,26 @@ export function markEscalated(db: Database.Database, id: string, now: number = D
 }
 
 /**
+ * Flag an already-DELIVERED row as escalated (Issue #1584) — visibility only, and the
+ * counterpart to {@link markEscalated} for the one case that flags a row *after* it has left
+ * the held set: a delivery whose write completed but whose echo never confirmed.
+ *
+ * A separate function rather than a relaxed guard on {@link markEscalated}, because that one's
+ * held-only contract is what makes the drainer's escalation pass safe to call blindly. Here the
+ * ordering is the point: the row is marked `delivered` FIRST (that commit is what makes the
+ * write un-repeatable even across a crash), so by the time the verdict is known the held-only
+ * guard would silently no-op and the flag would be lost.
+ *
+ * Delivered-only and idempotent (the `escalated = 0` guard). Returns true if it flipped.
+ */
+export function markEscalatedDelivered(db: Database.Database, id: string, now: number = Date.now()): boolean {
+  const info = db
+    .prepare("UPDATE mailbox SET escalated = 1, updated_at = ? WHERE id = ? AND status = 'delivered' AND escalated = 0")
+    .run(now, id);
+  return info.changes > 0;
+}
+
+/**
  * Supersede-key prefix for architect starvation notices (Spec 1313 round 3, change 3). A
  * notice row carries `${NOTICE_SUPERSEDE_PREFIX}<starving-agent>` so (a) one pending notice
  * per starving agent coalesces via {@link supersede}, and (b) notice rows are recognizable by
