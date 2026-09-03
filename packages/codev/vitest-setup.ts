@@ -82,6 +82,23 @@ if (!process.env.CODEV_METRICS_DB) {
   process.env.CODEV_METRICS_DB = join(metricsDir, 'metrics.db');
 }
 
+// Point the whole user-global Agent Farm tree (cloud credentials, `local-key`,
+// `global.db`) into the sandbox (#1597). Without this, `ensureLocalKey()` —
+// reached in-process via the e2e fetch patch and `towerWsProtocols()`, and by
+// any suite touching core auth — read AND created the developer's real
+// `~/.agent-farm/local-key`. Auth stays consistent end-to-end because both
+// sides derive from the same call: `createIsolatedAgentFarmDir()` seeds each
+// spawned test Tower with a copy of whatever key `ensureLocalKey()` resolves
+// here. The env var must be set before `@cluesmith/codev-core` is first
+// imported (its key path is a module-load const); `setupFiles` order guarantees
+// that for `vitest-e2e-setup.ts`. A pre-set value is respected — exporting
+// `CODEV_AGENT_FARM_DIR` is the one named way to point suites elsewhere.
+if (!process.env.CODEV_AGENT_FARM_DIR) {
+  const agentFarmDir = join(sandbox, '.agent-farm');
+  mkdirSync(agentFarmDir, { recursive: true, mode: 0o700 });
+  process.env.CODEV_AGENT_FARM_DIR = agentFarmDir;
+}
+
 if (firstRun) {
   process.on('exit', () => {
     try {

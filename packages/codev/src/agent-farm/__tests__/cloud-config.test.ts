@@ -2,23 +2,40 @@
  * Tests for cloud-config module (Spec 0097 Phase 1)
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, afterAll, vi } from 'vitest';
 import { mkdirSync, writeFileSync, existsSync, readFileSync, statSync, rmSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
 
 // vi.hoisted runs before vi.mock hoisting, so TEST_DIR is available
-const { TEST_DIR, AGENT_FARM_DIR, CONFIG_PATH } = vi.hoisted(() => {
+const { TEST_DIR, AGENT_FARM_DIR, CONFIG_PATH, PREV_AGENT_FARM_DIR_ENV } = vi.hoisted(() => {
   const { resolve } = require('node:path');
   const { tmpdir } = require('node:os');
   const { randomBytes } = require('node:crypto');
   const testDir = resolve(tmpdir(), `cloud-config-test-${randomBytes(4).toString('hex')}`);
+  const agentFarmDir = resolve(testDir, '.agent-farm');
+  // The vitest harness pins CODEV_AGENT_FARM_DIR into its per-run sandbox
+  // (#1597), and core's AGENT_FARM_DIR reads that env var BEFORE consulting
+  // homedir — so the homedir mock below no longer redirects it. Re-pin the
+  // env to this suite's dir before the module graph evaluates; afterAll
+  // restores the harness value so later files stay sandboxed.
+  const prevEnv = process.env.CODEV_AGENT_FARM_DIR;
+  process.env.CODEV_AGENT_FARM_DIR = agentFarmDir;
   return {
     TEST_DIR: testDir,
-    AGENT_FARM_DIR: resolve(testDir, '.agent-farm'),
-    CONFIG_PATH: resolve(testDir, '.agent-farm', 'cloud-config.json'),
+    AGENT_FARM_DIR: agentFarmDir,
+    CONFIG_PATH: resolve(agentFarmDir, 'cloud-config.json'),
+    PREV_AGENT_FARM_DIR_ENV: prevEnv,
   };
+});
+
+afterAll(() => {
+  if (PREV_AGENT_FARM_DIR_ENV === undefined) {
+    delete process.env.CODEV_AGENT_FARM_DIR;
+  } else {
+    process.env.CODEV_AGENT_FARM_DIR = PREV_AGENT_FARM_DIR_ENV;
+  }
 });
 
 vi.mock('node:os', async () => {
