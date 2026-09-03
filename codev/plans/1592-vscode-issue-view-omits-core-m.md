@@ -85,6 +85,27 @@ Design notes for the reviewers:
   (`tower-client.ts:531`) is likewise generic `request<IssueView>`. Both omissions are
   deliberate — flagged here so the reviewer knows nothing was missed.
 
+### Acceptance criteria (main-architect stakeholder ruling, binding)
+
+Ratified by the types/sdk/core stakeholder seat. These are conditions on the Section A work,
+not open questions:
+
+1. **Field-level doc comments on BOTH mirrored declarations** (rider, binding). Each new
+   field carries a doc comment on both `IssueView` (`packages/types/src/api.ts`) and
+   `IssueViewResult` (`packages/codev/src/lib/forge-contracts.ts`), the way the existing
+   `url` comment already appears in both files. The comments must include the
+   `milestone: … | null` rationale (GitHub emits a literal `null` when unset; guarded on
+   `milestone?.title`) and the forge-neutral optionality note (all fields optional so a
+   forge/script that omits them degrades gracefully).
+2. **Both mirrored declarations change in the SAME commit** (remit condition). Extending
+   `IssueViewResult` in `forge-contracts.ts` is within this lane's remit on the condition
+   that `IssueView` (api.ts) and `IssueViewResult` (forge-contracts.ts) are edited together
+   in a single commit, field-for-field parallel — the two never drift across commits.
+3. **Field shapes ratified as proposed**: nested `{login}` / `{name}`, `createdAt: string`,
+   `milestone: { title } | null`; all optional per the `url` precedent. No Tower-route or
+   SDK edit.
+4. **PRView follow-up endorsed**: filed as a separate issue at completion (not in this PR).
+
 ---
 
 ## Section B — Implementation Surface (vscode lane)
