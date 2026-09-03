@@ -33,9 +33,7 @@ Requests proxied in through the Codev Cloud tunnel carried neither, so browsing
 a Tower via cloud.codevos.ai failed even with a healthy tunnel. The tunnel
 client now stamps both onto tunnel-borne requests before handing them to Tower
 (failing closed when no key is available), restoring the cloud dashboard and
-workspace browsing end to end. One honest caveat: terminal sessions through the
-cloud additionally depend on a cloud-edge WebSocket fix that deploys server-side
-and independently of this package.
+workspace browsing end to end.
 
 ## Breaking changes
 
@@ -51,5 +49,13 @@ afx tower stop && afx tower start
 ## Contributors
 
 - **M Waleed Kadous (@waleedkadous)** — delivery integrity and cloud access:
-  drove both fixes through BUGFIX lanes (PRs #1585, #1588).
-- Builders working under the BUGFIX protocol across the PRs in this release.
+  drove both headline fixes through BUGFIX lanes (PRs #1585, #1588).
+- **Amr Elsayed (@amrmelsayed)** — release hardening and live verification:
+  test-harness sandboxing, remote-shell polish, and docs corrections
+  (PRs #1591, #1598, #1600), plus the live cloud-path verification that gated
+  this release.
+- **Mohid Makhdoomi (@mohidmakhdoomi)** — belated credit from 3.3.2: authored
+  the serializer convergence at the terminal write edge (#1365, PR #1492), the
+  foundation this release's mailbox fix builds on. Final rebase and landing by
+  @waleedkadous.
+- Builders working under the BUGFIX protocol across PRs #1585 and #1588.
