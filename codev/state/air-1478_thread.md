@@ -139,3 +139,45 @@ misled until that lands.
 The worktree had no `node_modules` and no `.codev/`. Needed `pnpm install --frozen-lockfile` plus
 `pnpm --filter "@cluesmith/codev^..." build` (the `@cluesmith/codev-sdk/*` subpath exports resolve
 to built `dist/`, so tests importing `utils/architect-name.ts` fail until the sdk is built).
+
+## Conflict resolution (resumed session, 2026-09-03)
+
+Main moved 770 commits under a parked PR. Merged `origin/main` into `builder/air-1478`
+(merge, not rebase — repo precedent). Four conflicts, all in files this PR owns.
+
+Two changes had landed on the exact surface I was fixing:
+
+- **#1574 self-attesting frames** reshaped every formatter to take `toAgent` FIRST and
+  append a `→ <recipient>` segment, and added `formatArchitectToBuilderMessage` (the
+  reply-hint variant) as the real any → builder path.
+- **#1494** added a `[USER via VS Code]` branch to `formatMessageForTarget`, which also
+  moved (now `tower-routes.ts:1555`) and grew to six call sites.
+
+**Is my composer half now redundant? No.** #1574 names the RECIPIENT, #1478 names the
+SENDER — orthogonal questions ("was this addressed to me?" vs "who sent it?"), and
+neither carried the other. The merged header carries both:
+`### [ARCHITECT:main INSTRUCTION → spir-9 | <ts>] ###`. Nothing was re-added as a
+duplicate; `sender` is simply the 5th param now, threaded on one branch.
+
+The one thing that DID need re-shaping: my original hunk called `formatArchitectMessage`
+directly on the any → builder branch. Post-#1574 that branch goes through
+`formatArchitectToBuilderMessage`, so the sender needed an extra hop — a name that
+stopped at the inner function would never reach the surface the issue is about. Pinned
+with a new unit test rather than left to the end-to-end route test alone.
+
+`formatMessageForTarget`'s signature is unchanged, so **all six call sites already pass
+`from`** — no call-site fallout. The send-side root cause is untouched by the merge and
+still the fix (`detectCurrentBuilderId() ?? architectSenderId()`). The inbox
+de-truncation applied cleanly; the doc row survived in both trees.
+
+Test fallout, both mechanical: main renamed reset's export `reset` → `refresh`, and my
+two header regexes predated the `→ recipient` segment. Updated the regexes to assert the
+recipient as well as the name, so a regression in either half fails loudly.
+
+**Verification:** `pnpm test` (the CI invocation) 5487 passed / 0 failed; `tsc --noEmit`
+clean; `send-integration.e2e.test.ts` 7 passed on its own port 14600. Note for the next
+reader: a bare `npx vitest run` from the repo ROOT is the wrong command — it sweeps in
+e2e configs that want the live Tower on 4100 and reports hundreds of false failures.
+CI runs `pnpm test`.
+
+PR #1486 remains **unmerged by design** — we are not cluesmith/codev maintainers.
