@@ -1684,8 +1684,11 @@
     // Is this page being viewed through Codev Cloud rather than served by the
     // local Tower directly? One shared predicate for the tunnel-status poll
     // and the cloud widget render, so the two can never drift (#1599).
+    // Exact-or-subdomain match, not a bare suffix — `endsWith('codevos.ai')`
+    // would also match an unrelated `evilcodevos.ai` (CMAP).
     function isCloudServed() {
-      return window.location.hostname.endsWith('codevos.ai');
+      const h = window.location.hostname;
+      return h === 'codevos.ai' || h.endsWith('.codevos.ai');
     }
 
     function formatUptime(ms) {
