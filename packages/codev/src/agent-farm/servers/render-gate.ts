@@ -219,7 +219,8 @@ export function bufferLines(term: HeadlessTerminal): string[] {
  * drifts fails toward `no-composer-marker` ⇒ hold, never toward a false clean.
  *
  * `cursorRow` is viewport-relative, matching `lines`' indexing from `viewportY` (the same
- * convention {@link isGhostCursorCell} uses).
+ * convention {@link isGhostCursorCell} uses) — the caller converts it from xterm's
+ * baseY-relative `cursorY`.
  */
 function findMarkerRow(
   lines: string[],
@@ -344,8 +345,13 @@ export function classifyBuffer(
   const top = buf.viewportY;
   const cell = buf.getNullCell();
   const probe = buf.getNullCell(); // scratch cell for the ghost-tail look-ahead (never clobbers `cell`)
-  // Cursor position is viewport-relative (matching `row`, which indexes from `viewportY`).
-  const cursorRow = buf.cursorY;
+  // Cursor position, made viewport-relative to match `lines`/`row`, which index from
+  // `viewportY`. `cursorY` is baseY-relative, NOT viewport-relative — the two coincide only
+  // while the viewport sits at the bottom of the scrollback, which is the usual case but not
+  // xterm's contract. Converting through baseY costs nothing and removes the assumption; the
+  // marker anchor below compares row indices, so a stale scroll position would otherwise
+  // move the cursor off the composer row and hold forever.
+  const cursorRow = buf.baseY + buf.cursorY - top;
   const cursorCol = buf.cursorX;
 
   const markerRow = findMarkerRow(lines, profile, buf, top, cursorRow, cell);

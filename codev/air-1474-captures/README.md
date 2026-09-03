@@ -3,8 +3,10 @@
 The tooling that produced the real agy fixtures in
 `packages/codev/src/agent-farm/__tests__/fixtures/gate/agy-*.txt`, committed so that
 re-measuring against a future agy starts from a script rather than from a PR description.
-(Same intent as the Spec 1313 capture harness.) Nothing here runs in CI — the fixtures are
-the committed artifact; this is how to regenerate them.
+(Same intent as the Spec 1313 capture harness.) Almost nothing here runs in CI — the fixtures
+are the committed artifact; this is how to regenerate them. The one exception is
+`sanitize.py --selftest`, which `air-1474-sanitize-ordering.test.ts` runs on every build,
+because its failure mode is committing someone's username.
 
 ## Requirements
 
@@ -41,9 +43,24 @@ python3 codev/air-1474-captures/sanitize.py /tmp/agy-idle.raw \
   packages/codev/src/agent-farm/__tests__/fixtures/gate/agy-idle.clean.txt
 ```
 
-It prints a `leaks=[]` line — treat a non-empty list as a blocker. Replacements are
-**same-length**, so the rendered screen is unchanged; no SGR attribute is ever retouched,
-because the attributes are the measurement.
+It prints a `leaks=[]` line. A non-empty list is not merely a warning: the script refuses,
+and **no output file is written at all** — every check runs before anything reaches the
+filesystem, so a leaking capture cannot be sitting there for a careless `git add` to pick up.
+(It did in the first version, which wrote first and checked second; PR #1491 review.)
+
+Replacements are **same-length**, so the rendered screen is unchanged; no SGR attribute is ever
+retouched, because the attributes are the measurement. A cwd shorter than the placeholder comes
+back truncated (`/home/agent/p`) — that is expected and is not a leak.
+
+Redaction covers `/tmp/…`, `/home/…` and `/Users/…`, the last so a macOS capture cannot pass
+the check while carrying a username. The prefixes the scrubber rewrites and the prefixes the
+leak check inspects are the same list; keep them that way if you add one.
+
+Prove the refusal still works after touching any of it:
+
+```bash
+python3 codev/air-1474-captures/sanitize.py --selftest
+```
 
 ## Geometry
 

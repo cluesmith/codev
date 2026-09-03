@@ -145,3 +145,62 @@ So: a stale worktree, not a broken merge. Anyone resuming a long-parked builder 
 
 Merge commit `818337fa2`, pushed. PR #1491 now reports MERGEABLE. Still **not merged** and the
 issue is still open — deliberate, unchanged: this cohort is not a maintainer of cluesmith/codev.
+
+## Maintainer review round (2026-09-03)
+
+CHANGES_REQUESTED on PR #1491 — one blocking item, two non-blocking. The render-gate change
+itself reviewed as approve-quality; the blocking item was in my capture tooling.
+
+### Blocking: sanitize.py wrote the unsafe file before checking for leaks
+
+The ordering was write-then-check, so on a leak the fixture was already on disk and the
+"REFUSING to sanitize" message was false by the time it printed — `git add` could reach it in
+the window. My earlier fix had corrected the leak *predicate* and left the *ordering* alone,
+which is a good reminder that fixing the thing you noticed is not the same as fixing the thing
+that is wrong. Now check-then-write: nothing reaches the filesystem until every check has run.
+Chose that over delete-on-failure — a guarantee that depends on cleanup running is weaker than
+one that never creates the file.
+
+Also added `/Users/…` to `PATH_RE`. Without it a macOS capture sanitizes "successfully" while
+leaking a username, because the leak check only inspects what that same pattern finds. The
+scrubber's prefixes and the checker's prefixes have to be one list, not two.
+
+Writing the `--selftest` turned up a **second** defect, in the predicate I had already "fixed":
+same-length substitution truncates a cwd shorter than the placeholder, so `/home/ab/x` becomes
+`/home/agent/p`, which failed `startswith(PLACEHOLDER_PATH)` and was reported as a leak. Every
+short-cwd capture would have been unsanitizable. Fail-safe, so it would have looked like a
+mysterious refusal rather than a leak — the kind of thing that gets worked around by disabling
+the check. `is_placeholder()` now accepts prefixes of the placeholder too. Re-verified all seven
+committed fixtures against the widened predicate: still `leaks=[]`.
+
+The selftest is wired into CI (`air-1474-sanitize-ordering.test.ts`, skips if python3 is
+absent). The rest of the harness stays out of CI — it needs an authenticated agy and a PTY —
+but this one part's failure mode is committing someone's username, so it runs.
+
+### Non-blocking, taken: cursorY is baseY-relative
+
+`classifyBuffer` read `buf.cursorY` alongside `top = buf.viewportY`, which assumes
+`viewportY === baseY`. True for every screen the mirror produces today, but not xterm's
+contract, and the anchors had just made the cursor row the thing that gates delivery.
+
+I expected to write a defensive test and instead measured a real false clean. Scroll the
+viewport up, and the unconverted row lands on a **stale composer still in scrollback** — empty,
+palette-12, rule beneath it — so the region bounds and classifies `empty`. CLEAN, while the
+live composer sits off-view holding a half-typed draft. Verified against the built old code
+(`{clean: true, detail: 'empty'}`) and the fixed code (`no-composer-marker`). So this was not
+hygiene: reachable any time something scrolls the mirror's viewport, and nothing in the tree
+promises nothing ever will. `buf.baseY + buf.cursorY - top` removes it.
+
+The regression test pins the rigging itself — that the viewport is genuinely off the bottom,
+that the two conventions disagree, and that the row the old reading picked really was a
+marker+rule pair — so it fails loudly if a future xterm turns it into a tautology. Both new
+tests mutation-checked: revert either fix and the matching test fails.
+
+### Non-blocking, deliberately NOT done here
+
+Idle-session profile drift is silent: `onLiveness` gates on recent output, so a re-themed agy
+sitting idle holds forever with no alarm — the same shape as the bare-`>` bug this PR fixes.
+The maintainer suggests classifier-stuck escalation or an `afx doctor` check that classifies
+each live mirror once. Real gap, genuinely good catch, separate feature; the architect is
+filing it. Same for `markerFgPalette` needing to accept multiple colors before agy ships a
+truecolor theme.

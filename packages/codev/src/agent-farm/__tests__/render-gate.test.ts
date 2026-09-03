@@ -430,6 +430,67 @@ describe('render-gate — PRODUCTION data path: capped ring TEARS, persistent mi
   }
 });
 
+describe('render-gate — the cursor row is viewport-relative, not baseY-relative (#1474 review)', () => {
+  /**
+   * xterm's `cursorY` is relative to `baseY`, while `screenLines`/`markerRow` index from
+   * `viewportY`. Those coincide only while the viewport sits at the bottom of the scrollback,
+   * which is every case the mirror produces today — so reading `cursorY` as if it were
+   * viewport-relative was correct by coincidence, not by contract. Since the agy anchors made
+   * the cursor row the thing that gates delivery, the coincidence became load-bearing.
+   *
+   * This is the failure it permitted, measured rather than argued: scroll the viewport up, and
+   * the unconverted row lands on a STALE composer still sitting in scrollback — an empty one,
+   * with its rule beneath it, so the region bounds and classifies `empty`. CLEAN, on a screen
+   * whose live composer is off-view holding a half-typed draft. That is a delivery onto a busy
+   * terminal, the exact corruption the mailbox-first design exists to rule out.
+   */
+  const STALE_ROW = 18; // where the stale, EMPTY composer sits in history
+  const CURSOR_ROW = 8; // 1-based; the live cursor, parked above the fold
+  const SCROLL_BACK = 4; // viewport lifted off the bottom
+
+  /** Raw PTY bytes for a session whose live composer is busy and whose history holds a stale one. */
+  function scrolledBackMirror(): string {
+    const lines: string[] = [];
+    for (let i = 0; i < 44; i++) lines.push(`transcript line ${i}`);
+    // A stale composer + its rule, scrolled into history: empty, palette-12 marker,
+    // indistinguishable from a live one by text and attributes alone.
+    lines[STALE_ROW] = `${PAL12}>${FG} ${PAL8}Accept-edits mode: file edits auto-approved${FG}`;
+    lines[STALE_ROW + 1] = '──────────';
+    // The LIVE composer at the bottom, holding user text — the screen must classify busy.
+    lines.push(`${PAL12}>${FG} half-typed draft`, '──────────');
+    return lines.map((l) => l + '\r\n').join('') + cursorAt(CURSOR_ROW, 3);
+  }
+
+  it('a scrolled-back viewport holds instead of anchoring to a stale composer in scrollback', async () => {
+    const screenMirror = new SessionScreen(COLS, ROWS);
+    screenMirror.feed(scrolledBackMirror());
+    const { term } = await screenMirror.read();
+    term.scrollLines(-SCROLL_BACK);
+    const buf = term.buffer.active;
+
+    // The rigging is only meaningful while the viewport is genuinely off the bottom and the
+    // two conventions disagree — pin that, so a future xterm change fails here loudly rather
+    // than turning the assertion below into a tautology.
+    expect(buf.viewportY).toBeLessThan(buf.baseY);
+    const unconverted = buf.cursorY;
+    const converted = buf.baseY + buf.cursorY - buf.viewportY;
+    expect(converted).not.toBe(unconverted);
+
+    // And the row the OLD reading would have anchored to really is a marker+rule pair — i.e.
+    // this test would have produced a false CLEAN, not merely a different row index.
+    const rowText = (i: number) => buf.getLine(buf.viewportY + i)?.translateToString(true).trimEnd() ?? '';
+    expect(rowText(unconverted)).toMatch(/^> /);
+    expect(rowText(unconverted + 1)).toMatch(/^─/);
+
+    expect(classifyBuffer(term, COLS, ROWS, AGY_PROFILE)).toEqual({
+      clean: false,
+      reason: 'busy',
+      detail: 'no-composer-marker',
+    });
+    screenMirror.dispose();
+  });
+});
+
 describe('render-gate — deterministic op count: one classify is O(viewport), not O(ring size) (#1471)', () => {
   // Replaces the wall-clock budget this file used to assert on the whole-ring render. A timing
   // bound measures the MACHINE, not the algorithm: the identical code that best-of-5'd well under
