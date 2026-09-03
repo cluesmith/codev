@@ -95,7 +95,7 @@ on.
 Architect asked for running evidence rather than description. Induced 5 of 6 items live from
 this worktree's build against an ISOLATED database (`NODE_ENV=test` + `AF_TEST_DB`), so the
 user's live `global.db` was never opened. Full transcript committed at
-`codev/state/1482-dev-approval-evidence.md`.
+`codev/projects/1482-f1-tower-vs-pty-dimension-dive/1482-dev-approval-evidence.md`.
 
 **Item 3 (`afx send` held line) could not be induced.** `send.ts:340` is `new TowerClient()`
 with no port, so the CLI reaches only the live Tower on 4100. Declined to point evidence at a
@@ -123,3 +123,55 @@ real `send()` with a mocked Tower client, and had two wrinkles worth recording:
 to `return false` and `formatVerdict` to drop the detail → 8 failures. Restored byte-for-byte
 (`git diff` empty), re-ran green. Worth doing for any test written to close a gap someone else
 found — a test that cannot fail is worse than the gap, because it ends the conversation.
+
+### The evidence file's home — I was right to flag it, wrong about where it goes
+
+I committed the evidence under `codev/state/` with `git add -f`, because that was the path I
+was given and `.gitignore:15` ignores `codev/state/*.md`. I flagged the override in the commit
+message rather than doing it silently. The architect's answer: the instinct was right, the path
+was wrong. `.gitignore:14-16` states the reason for that rule outright — *architect state files
+are per-person; builder `*_thread.md` files ARE versioned (#1192)*. Gate evidence is neither of
+those things, so it was never in scope for that directory.
+
+Correct home is the versioned per-project directory, which already existed for this project and
+is where `.md` supporting artifacts have always shipped (only `*.txt` iteration logs are ignored
+there, `.gitignore:65`):
+
+    codev/projects/1482-f1-tower-vs-pty-dimension-dive/1482-dev-approval-evidence.md
+
+`git mv`'d, and the un-forcing was *proved* rather than assumed: `git check-ignore -v` on the new
+path exits 1 with no output (on the old path it still prints `.gitignore:15`), and I unstaged the
+new path so it fell back to untracked `??`, then re-added it with a plain `git add` — no `-f`.
+It is tracked by the normal rules. `codev/state/` holds only this thread log again.
+
+**The generalisable bit:** an ignore rule carries a *reason*, and the reason is usually written
+next to it. When a path fights you, read the comment above the rule before reaching for `-f`.
+Here it said "per-person", and one glance would have told me a gate evidence record is not that —
+the override was avoidable, not just flaggable. Flagging a smell beats suppressing it silently,
+but diagnosing it beats both.
+
+### Three things the architect asked be carried into the review doc
+
+Recording verbatim so they survive a context refresh. **These are directions for
+`codev/reviews/1482-f1-tower-vs-pty-dimension-dive.md`, not optional colour.**
+
+1. **Item 4 leads the Summary.** The user-visible harm this issue removes is not diagnosability
+   in the abstract — it is that *"the old single body offered `afx interrupt` for every hold. In
+   the first case above that is advice to interrupt a human mid-draft."* The owner starvation
+   notice told an operator to interrupt someone who was simply typing. Splitting the notice into
+   a safe branch and a defect branch is the strongest argument in the PR; lead with it.
+2. **Keep the FROM→TO truncation note.** Evidence item 1 calls out that `architect:main -> pir-1`
+   is the PRE-EXISTING 22-char FROM→TO truncation, not a regression from widening the REASON
+   column 13→20. The architect's point: that distinction is what stops a reviewer filing a false
+   bug against this PR, and it is the kind of thing that usually goes unsaid. Say it.
+3. **Keep my own correction verbatim in the evidence file.** I had earlier summarised the dropped-
+   resize WARN as firing from `resizeSession`; it actually fires on the WebSocket control-message
+   paths. The architect explicitly thanked me for correcting my own summary rather than letting a
+   wrong claim ride into the human's review, and asked that the correction stay in the evidence
+   file word-for-word. Do not tidy it away when writing the review — a corrected claim with its
+   correction attached is more trustworthy than a claim that was quietly right the second time.
+
+Also noted by the architect, worth keeping as a habit rather than an anecdote: mutation-checking
+the new suites was the right instinct, because *a test that cannot fail is the defect #1471 exists
+to fix.* Writing a test to close a gap someone else found, and not checking that it bites, would
+have shipped a second instance of the bug the repo already has an issue open about.
