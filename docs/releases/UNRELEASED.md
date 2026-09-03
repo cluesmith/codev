@@ -48,9 +48,6 @@ npm install -g @cluesmith/codev@3.3.3
 afx tower stop && afx tower start
 ```
 
-The VS Code extension is unchanged this release — the Marketplace listing
-(`Codev` extension by `cluesmith.codev`) stays at 3.3.2.
-
 ## Contributors
 
 - **M Waleed Kadous (@waleedkadous)** — delivery integrity and cloud access:
