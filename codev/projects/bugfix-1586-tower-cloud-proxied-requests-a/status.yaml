@@ -1,7 +1,7 @@
 id: bugfix-1586
 title: tower-cloud-proxied-requests-a
 protocol: bugfix
-phase: pr
+phase: verified
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -13,7 +13,7 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-09-02T16:15:15.952Z'
-updated_at: '2026-09-03T15:29:57.116Z'
+updated_at: '2026-09-03T15:30:03.067Z'
 pr_history:
   - phase: pr
     pr_number: 1588
