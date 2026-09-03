@@ -138,8 +138,20 @@ export class PtySession extends EventEmitter {
   // SessionManager's in-place reconnect delivers a replacement client.
   private _closeGraceTimer: ReturnType<typeof setTimeout> | null = null;
   private shellperPid = -1;
+  // APPLIED geometry (Issue #1482): the dimensions a resize actually reached the process with.
+  // Everything that must agree with the real TUI reads these — `info`, and above all the gate
+  // mirror, whose classification is only valid if it wraps the way the app's own layout does.
+  // They move in `resize()` ONLY after the underlying resize is confirmed; see that method.
   private cols: number;
   private rows: number;
+  // REQUESTED geometry (Issue #1482): the last dimensions anyone ASKED for, applied or not.
+  // Kept separately so a resize that arrives before the process exists — or one dropped by a
+  // disconnected shellper — is not simply lost: `spawn()` starts the process at the requested
+  // size, and the attach path re-sends it once a connection is back. Without this pair, the
+  // fix for a dropped resize (don't commit dims) would regress the pre-spawn resize, which
+  // used to work precisely because the assignment was unconditional.
+  private requestedCols: number;
+  private requestedRows: number;
   private exitCode: number | undefined;
   private logFd: number | null = null;
   private logBytes: number = 0;
@@ -161,6 +173,8 @@ export class PtySession extends EventEmitter {
     this.label = config.label;
     this.cols = config.cols;
     this.rows = config.rows;
+    this.requestedCols = config.cols;
+    this.requestedRows = config.rows;
     this.createdAt = new Date().toISOString();
     this.ringBuffer = new RingBuffer(config.ringBufferLines ?? 1000);
     this.diskLogEnabled = config.diskLogEnabled ?? true;
@@ -180,6 +194,12 @@ export class PtySession extends EventEmitter {
       this.logFd = fs.openSync(this.logPath, 'a');
     }
 
+    // Spawn at the REQUESTED geometry (Issue #1482): a viewer that resized before the process
+    // existed had its resize dropped by the `status === 'running'` guard in `resize()`, and the
+    // request is honoured here instead. Applied and requested are equal for a session nobody
+    // resized, so this is a no-op in the common case.
+    this.cols = this.requestedCols;
+    this.rows = this.requestedRows;
     this.pty = nodePty.spawn(this.config.command, this.config.args, {
       name: 'xterm-256color',
       cols: this.cols,
@@ -563,24 +583,48 @@ export class PtySession extends EventEmitter {
   /**
    * Resize the PTY or shellper.
    * Returns false when the resize was dropped (#1198).
+   *
+   * COMMIT-ON-SUCCESS (Issue #1482). This used to assign `this.cols`/`this.rows` and resize the
+   * gate mirror on entry, BEFORE finding out whether the resize could reach the process. When
+   * it could not — a dropped shellper write, or no live process at all — Tower's dimensions and
+   * the classification mirror moved while the kernel winsize, and therefore the TUI's own
+   * layout, did not. The render gate then classified a screen re-wrapped at a geometry the app
+   * never adopted: the composer's bounding rule lands on a different row, `findRegionEnd`
+   * returns -1, and every message to that agent holds `busy`/`no-region-end` FOREVER. That is
+   * the indefinite false-busy this issue is named for, and it starts with a boolean nobody read.
+   *
+   * So: record the request, attempt the resize, and move the applied geometry only if it
+   * landed. The request survives in `requestedCols`/`requestedRows` for `spawn()` and for the
+   * re-send on re-attach, so nothing is lost by declining to commit — only the false belief is.
+   *
+   * Callers must not ignore the return value; a dropped resize means Tower and the process now
+   * disagree about the geometry until something re-sends it.
    */
   resize(cols: number, rows: number): boolean {
+    // The request stands whether or not it lands — see the field comments.
+    this.requestedCols = cols;
+    this.requestedRows = rows;
+
+    let applied = false;
+    if (this._shellperBacked) {
+      applied = this.shellperClient !== null && this.status === 'running'
+        ? this.shellperClient.resize(cols, rows)
+        : false;
+    } else if (this.pty && this.status === 'running') {
+      this.pty.resize(cols, rows);
+      applied = true;
+    }
+    if (!applied) return false;
+
     this.cols = cols;
     this.rows = rows;
     // Keep the gate mirror at the live geometry (Spec 1313) so the classified screen wraps
-    // identically to what the user sees; no-op before the mirror's first output / after teardown.
+    // identically to what the user sees; no-op before the mirror's first output / after
+    // teardown. Safe to do after the process resize rather than before it: the app's repaint
+    // arrives as output on a later tick, so the mirror is always re-sized before the first byte
+    // drawn at the new geometry reaches it.
     this._gateScreen?.resize(cols, rows);
-    if (this._shellperBacked) {
-      if (this.shellperClient && this.status === 'running') {
-        return this.shellperClient.resize(cols, rows);
-      }
-      return false;
-    }
-    if (this.pty && this.status === 'running') {
-      this.pty.resize(cols, rows);
-      return true;
-    }
-    return false;
+    return true;
   }
 
   /** Kill the PTY process or send signal to shellper. */

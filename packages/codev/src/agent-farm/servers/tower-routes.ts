@@ -978,8 +978,19 @@ async function handleTerminalRoutes(
       }
       const info = manager.resizeSession(terminalId, body.cols, body.rows);
       if (!info) {
-        res.writeHead(404, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'NOT_FOUND', message: `Session ${terminalId} not found` }));
+        // Issue #1482: a resize that did not reach the process is NOT a missing session, and it
+        // is not a success either — echoing back the requested dimensions (what a 200 here used
+        // to do) is how Tower came to believe a geometry the TUI never adopted.
+        if (!manager.getSession(terminalId)) {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'NOT_FOUND', message: `Session ${terminalId} not found` }));
+        } else {
+          res.writeHead(409, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            error: 'RESIZE_DROPPED',
+            message: `Session ${terminalId} did not accept the resize (no live process or dropped shellper write); dimensions unchanged`,
+          }));
+        }
         return;
       }
       res.writeHead(200, { 'Content-Type': 'application/json' });
