@@ -38,7 +38,18 @@ const INV = '\x1b[7m'; // SGR-7 inverse (claude's software block cursor over the
 const INV_OFF = '\x1b[27m'; // SGR-27 inverse off
 const PAL8 = '\x1b[38;5;8m'; // agy's placeholder gray
 const PAL12 = '\x1b[38;5;12m'; // agy's marker / selected-option bright blue
+const PAL4 = '\x1b[38;5;4m'; // agy's transcript echo of a submitted turn (`> <message>`)
 const FG = '\x1b[39m'; // reset foreground to default
+
+/**
+ * Park the cursor at a 1-based row/col. agy's profile anchors its marker to the cursor
+ * row (#1474), so a synthetic agy screen must place the cursor the way the real TUI does
+ * — on the composer input row. Absolute positioning, so it is independent of how the
+ * `RingBuffer` round-trip rewrites line endings.
+ */
+function cursorAt(row: number, col: number): string {
+  return `\x1b[${row};${col}H`;
+}
 
 /** Production data path: raw PTY bytes → RingBuffer.pushData → getAll().join('\n'). */
 function snapshotFromRaw(raw: string, cols = COLS, rows = ROWS): RingSnapshot {
@@ -63,7 +74,7 @@ function profileForFixture(name: string): GateProfile {
 describe('render-gate — real captured fixtures (Spec 1313)', () => {
   const fixtures = readdirSync(FIXTURE_DIR).filter((f) => f.endsWith('.txt')).sort();
 
-  it('the required states are all captured (claude+codex idle/draft/menu/picker, agy idle/draft/trust, wrapper/boot)', () => {
+  it('the required states are all captured (claude+codex idle/draft/menu/picker, agy idle/bare-marker/draft/menu/trust/turn-echo/torn, wrapper/boot)', () => {
     for (const required of [
       'claude-idle.clean',
       'claude-draft.busy',
@@ -76,6 +87,11 @@ describe('render-gate — real captured fixtures (Spec 1313)', () => {
       'agy-idle.clean',
       'agy-draft.busy',
       'agy-trust.busy',
+      // #1474 — the states that pin the tightened agy marker (all real captures).
+      'agy-menu.busy',
+      'agy-baremarker.clean',
+      'agy-turn-echo.clean',
+      'agy-torn-echo.busy',
       'wrapper-boot.busy',
     ]) {
       expect(fixtures.some((f) => f.startsWith(required))).toBe(true);
@@ -91,6 +107,53 @@ describe('render-gate — real captured fixtures (Spec 1313)', () => {
       if (!expectClean) expect(verdict.reason).toBe('busy');
     });
   }
+
+  /**
+   * #1474 — the tightened agy marker, asserted on REAL agy 1.1.13 captures. The filename
+   * loop above already pins each verdict; these pin the *reason*, which is the whole point:
+   * on every one of these screens the old text-only `/^> /` marker selected a row that is
+   * not the composer (or missed the composer entirely), so the region it bounded was the
+   * wrong region. Getting `busy` out of a mis-bounded region is luck, not a guarantee.
+   */
+  describe('agy marker anchors (#1474)', () => {
+    const verdictFor = async (name: string) =>
+      classifyScreen(snapshotFromRaw(readFileSync(`${FIXTURE_DIR}/${name}`, 'utf8')), AGY_PROFILE);
+
+    it('the slash menu: the marker is the composer, NOT the menu selection row below it', async () => {
+      // The menu's selected item renders `> /add-dir …` in palette-12 — the same glyph AND
+      // the same color as the composer marker — and it sits BELOW the composer, so
+      // last-match-wins picked it. Only the cursor row separates them. `user-text` here is
+      // the `/` the user typed into the composer: the right region, counted correctly.
+      expect(await verdictFor('agy-menu.busy.txt')).toMatchObject({ clean: false, detail: 'user-text' });
+    });
+
+    it('the trust dialog: no composer on screen at all ⇒ no-composer-marker', async () => {
+      // Its selected `> Yes, I trust this folder` option is palette-12 too, but the cursor
+      // is parked off that row. Held for the honest reason — there is no composer — rather
+      // than by the incidental absence of a rule line beneath the option.
+      expect(await verdictFor('agy-trust.busy.txt')).toMatchObject({ clean: false, detail: 'no-composer-marker' });
+    });
+
+    it('a torn mid-repaint frame: the palette-4 turn echo is never mistaken for a composer', async () => {
+      // Real bytes, cut mid-repaint (the shape #1361 documents for the adopt seed): the
+      // composer row is gone and the only `> ` row left is agy's echo of the submitted
+      // message. That row must not become a marker — this is the false-CLEAN direction.
+      expect(await verdictFor('agy-torn-echo.busy.txt')).toMatchObject({ clean: false, detail: 'no-composer-marker' });
+    });
+
+    it('a turn echo ABOVE an empty composer does not steal the marker (still clean)', async () => {
+      // The companion to the torn case: when the composer IS on screen, an earlier `> `
+      // echo must not shift the verdict. Guards against over-tightening into a false HOLD.
+      expect(await verdictFor('agy-turn-echo.clean.txt')).toMatchObject({ clean: true, detail: 'empty' });
+    });
+
+    it('the bare `>` composer (no-hint mode) is recognized — closes a pre-existing false HOLD', async () => {
+      // agy renders the empty composer as a bare `>` in its no-hint mode; right-trimmed
+      // that is `">"`, which `/^> /` never matched, so EVERY message to an agy in that mode
+      // was held forever. The marker's separator is now `\s|$`.
+      expect(await verdictFor('agy-baremarker.clean.txt')).toMatchObject({ clean: true, detail: 'empty' });
+    });
+  });
 
   it('a marker-less screen is busy under BOTH profiles (wrapper/boot is app-agnostic)', async () => {
     const raw = readFileSync(`${FIXTURE_DIR}/wrapper-boot.busy.txt`, 'utf8');
@@ -152,10 +215,44 @@ describe('render-gate — synthetic branch coverage (Spec 1313)', () => {
   it('agy: `> ` marker + palette-8 (gray) hint → clean; default-fg draft → busy', async () => {
     // agy de-emphasizes its idle hint with a FOREGROUND COLOR (palette-8), not
     // SGR-dim — so the placeholder rule is color-keyed for agy (placeholderFgPalette).
-    const idle = snapshotFromRaw(screen(`${PAL12}>${FG} ${PAL8}Accept-edits mode: file edits auto-approved${FG}`, '──────'));
-    const draft = snapshotFromRaw(screen(`${PAL12}>${FG} review the mailbox change`, '──────'));
+    // The cursor sits on the composer row, as the real TUI leaves it (#1474).
+    const idle = snapshotFromRaw(
+      screen(`${PAL12}>${FG} ${PAL8}Accept-edits mode: file edits auto-approved${FG}`, '──────') + cursorAt(1, 3)
+    );
+    const draft = snapshotFromRaw(screen(`${PAL12}>${FG} review the mailbox change`, '──────') + cursorAt(1, 28));
     expect((await classifyScreen(idle, AGY_PROFILE)).clean).toBe(true);
     expect((await classifyScreen(draft, AGY_PROFILE)).clean).toBe(false);
+  });
+
+  it('agy: the marker must be the CURSOR row — an identical `> ` row elsewhere is not a composer (#1474)', async () => {
+    // Same bytes as the clean idle screen above, with the cursor parked off the marker row
+    // (a menu selection cursor, a dialog option, a mid-repaint frame). No row qualifies as
+    // the composer, so the gate holds instead of bounding a region around a row that merely
+    // looks like a prompt.
+    const parked = snapshotFromRaw(
+      screen(`${PAL12}>${FG} ${PAL8}Accept-edits mode: file edits auto-approved${FG}`, '──────') + cursorAt(2, 1)
+    );
+    expect(await classifyScreen(parked, AGY_PROFILE)).toMatchObject({ clean: false, detail: 'no-composer-marker' });
+  });
+
+  it('agy: the marker GLYPH must render in the profile palette — a palette-4 turn echo is not a composer (#1474)', async () => {
+    // agy echoes each submitted message into the transcript as `> <message>` in palette-4.
+    // Even with the cursor on that row, the marker's own color rules it out.
+    const echo = snapshotFromRaw(screen(`${PAL4}> deploy the hotfix${FG}`, '──────') + cursorAt(1, 3));
+    expect(await classifyScreen(echo, AGY_PROFILE)).toMatchObject({ clean: false, detail: 'no-composer-marker' });
+  });
+
+  it('agy: a bare `>` composer (no-hint mode) is a marker — the separator is `\\s|$`, not a literal space (#1474)', async () => {
+    const bare = snapshotFromRaw(screen(`${PAL12}>${FG}`, '──────') + cursorAt(1, 3));
+    expect(await classifyScreen(bare, AGY_PROFILE)).toMatchObject({ clean: true, detail: 'empty' });
+  });
+
+  it('the agy anchors are per-profile data — claude/codex are unchanged by cursor position (#1474)', async () => {
+    // CLAUDE_PROFILE/CODEX_PROFILE set neither anchor, so an idle claude composer stays
+    // clean with the cursor anywhere. Pins that the tightening did not leak into the
+    // profiles measured against the other two TUIs.
+    const parked = snapshotFromRaw(screen(`❯ ${DIM}Try "refactor doctor.ts"${RESET}`, '──────') + cursorAt(2, 1));
+    expect((await classifyScreen(parked, CLAUDE_PROFILE)).clean).toBe(true);
   });
 
   it('agy: only palette-8 is placeholder — a non-gray (palette-12) option still counts (trust-dialog guard)', async () => {
@@ -166,7 +263,12 @@ describe('render-gate — synthetic branch coverage (Spec 1313)', () => {
     // bounds the region so the color-counting branch runs and palette-12 is the sole
     // occupancy signal. (Dual protection: a real dialog with NO rule below fails safe
     // the OTHER way — via the no-region-end guard — also busy, never a blind confirm.)
-    const trust = snapshotFromRaw(screen(`${PAL12}>${FG} ${PAL12}Yes, I trust this folder${FG}`, '──────'));
+    // The cursor is placed ON the option row deliberately (#1474): that is the one shape
+    // the marker anchors CANNOT reject — the option is palette-12, like the composer marker
+    // — so this pins the layer that still catches it, the occupancy count.
+    const trust = snapshotFromRaw(
+      screen(`${PAL12}>${FG} ${PAL12}Yes, I trust this folder${FG}`, '──────') + cursorAt(1, 3)
+    );
     const v = await classifyScreen(trust, AGY_PROFILE);
     expect(v.clean).toBe(false);
     expect(v.detail).toBe('user-text');
@@ -296,6 +398,97 @@ describe('render-gate — PRODUCTION data path: capped ring TEARS, persistent mi
       screen.dispose();
     });
   }
+
+  /**
+   * agy path-parity (#1474). The agy anchors are the first classifier input that depends on
+   * CURSOR STATE rather than on cell text/attributes, and the cursor is the one thing the two
+   * gate paths could plausibly disagree about: the transient path renders a replay into a
+   * THROWAWAY terminal, while production reads a LONG-LIVED mirror fed the byte stream
+   * incrementally. Same bytes, same verdict — asserted per fixture, so a future divergence
+   * (a mirror that resizes, reseeds, or scrolls the cursor out of the viewport) fails here
+   * rather than silently in delivery.
+   *
+   * Each fixture is fed twice: once in production-sized chunks, and once in 7-byte chunks that
+   * deliberately SPLIT escape sequences across `feed()` calls — the cursor-positioning CSI
+   * (`ESC[<row>;<col>H`, and the relative `ESC[2A`/`ESC[2C` agy actually emits) is exactly what
+   * a torn chunk boundary would corrupt, and a mis-parsed cursor is now a verdict change.
+   */
+  for (const name of readdirSync(FIXTURE_DIR).filter((f) => f.startsWith('agy') && f.endsWith('.txt')).sort()) {
+    it(`${name}: persistent mirror agrees with the transient path (agy cursor-state parity)`, async () => {
+      const raw = readFileSync(`${FIXTURE_DIR}/${name}`, 'utf8');
+      const expected = await classifyScreen(snapshotFromRaw(raw), AGY_PROFILE);
+      expect(expected.clean).toBe(name.includes('.clean.')); // the transient path is itself correct
+
+      for (const chunkSize of [CHUNK, 7]) {
+        const screen = new SessionScreen(COLS, ROWS);
+        for (let i = 0; i < raw.length; i += chunkSize) screen.feed(raw.slice(i, i + chunkSize));
+        const { term } = await screen.read();
+        expect(classifyBuffer(term, COLS, ROWS, AGY_PROFILE), `chunkSize=${chunkSize}`).toEqual(expected);
+        screen.dispose();
+      }
+    });
+  }
+});
+
+describe('render-gate — the cursor row is viewport-relative, not baseY-relative (#1474 review)', () => {
+  /**
+   * xterm's `cursorY` is relative to `baseY`, while `screenLines`/`markerRow` index from
+   * `viewportY`. Those coincide only while the viewport sits at the bottom of the scrollback,
+   * which is every case the mirror produces today — so reading `cursorY` as if it were
+   * viewport-relative was correct by coincidence, not by contract. Since the agy anchors made
+   * the cursor row the thing that gates delivery, the coincidence became load-bearing.
+   *
+   * This is the failure it permitted, measured rather than argued: scroll the viewport up, and
+   * the unconverted row lands on a STALE composer still sitting in scrollback — an empty one,
+   * with its rule beneath it, so the region bounds and classifies `empty`. CLEAN, on a screen
+   * whose live composer is off-view holding a half-typed draft. That is a delivery onto a busy
+   * terminal, the exact corruption the mailbox-first design exists to rule out.
+   */
+  const STALE_ROW = 18; // where the stale, EMPTY composer sits in history
+  const CURSOR_ROW = 8; // 1-based; the live cursor, parked above the fold
+  const SCROLL_BACK = 4; // viewport lifted off the bottom
+
+  /** Raw PTY bytes for a session whose live composer is busy and whose history holds a stale one. */
+  function scrolledBackMirror(): string {
+    const lines: string[] = [];
+    for (let i = 0; i < 44; i++) lines.push(`transcript line ${i}`);
+    // A stale composer + its rule, scrolled into history: empty, palette-12 marker,
+    // indistinguishable from a live one by text and attributes alone.
+    lines[STALE_ROW] = `${PAL12}>${FG} ${PAL8}Accept-edits mode: file edits auto-approved${FG}`;
+    lines[STALE_ROW + 1] = '──────────';
+    // The LIVE composer at the bottom, holding user text — the screen must classify busy.
+    lines.push(`${PAL12}>${FG} half-typed draft`, '──────────');
+    return lines.map((l) => l + '\r\n').join('') + cursorAt(CURSOR_ROW, 3);
+  }
+
+  it('a scrolled-back viewport holds instead of anchoring to a stale composer in scrollback', async () => {
+    const screenMirror = new SessionScreen(COLS, ROWS);
+    screenMirror.feed(scrolledBackMirror());
+    const { term } = await screenMirror.read();
+    term.scrollLines(-SCROLL_BACK);
+    const buf = term.buffer.active;
+
+    // The rigging is only meaningful while the viewport is genuinely off the bottom and the
+    // two conventions disagree — pin that, so a future xterm change fails here loudly rather
+    // than turning the assertion below into a tautology.
+    expect(buf.viewportY).toBeLessThan(buf.baseY);
+    const unconverted = buf.cursorY;
+    const converted = buf.baseY + buf.cursorY - buf.viewportY;
+    expect(converted).not.toBe(unconverted);
+
+    // And the row the OLD reading would have anchored to really is a marker+rule pair — i.e.
+    // this test would have produced a false CLEAN, not merely a different row index.
+    const rowText = (i: number) => buf.getLine(buf.viewportY + i)?.translateToString(true).trimEnd() ?? '';
+    expect(rowText(unconverted)).toMatch(/^> /);
+    expect(rowText(unconverted + 1)).toMatch(/^─/);
+
+    expect(classifyBuffer(term, COLS, ROWS, AGY_PROFILE)).toEqual({
+      clean: false,
+      reason: 'busy',
+      detail: 'no-composer-marker',
+    });
+    screenMirror.dispose();
+  });
 });
 
 describe('render-gate — deterministic op count: one classify is O(viewport), not O(ring size) (#1471)', () => {

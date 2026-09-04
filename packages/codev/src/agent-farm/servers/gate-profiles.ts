@@ -65,11 +65,20 @@ export const CODEX_PROFILE: GateProfile = {
 };
 
 /**
- * agy (Antigravity CLI 1.1.8) composer marker: a `> ` prompt glyph at the input
- * row start — a different glyph from claude/codex's `❯`/`›`, so its own pattern.
- * (Measured, Spec 1313 Phase 3; the marker cell renders palette-12 bright-blue.)
+ * agy (Antigravity CLI) composer marker: a `>` prompt glyph at the input row start — a
+ * different glyph from claude/codex's `❯`/`›`, so its own pattern. The trailing separator
+ * is `\s|$` rather than a literal space because agy's no-hint mode renders the empty
+ * composer as a BARE `>`, which right-trims to `">"` (measured on 1.1.13, #1474) — the
+ * old `/^> /` never matched it, so the gate held every message to an agy in that mode
+ * forever.
+ *
+ * This text pattern is deliberately NOT the whole marker test. `> ` is ordinary output —
+ * and, measured on real agy screens, it is also agy's own slash-menu selection cursor and
+ * the per-turn transcript echo of each submitted message. The composer is identified by
+ * this pattern PLUS the two anchors on {@link AGY_PROFILE} below; broaden or narrow the
+ * three together, never this line alone.
  */
-const AGY_MARKER = /^> /;
+const AGY_MARKER = /^>(\s|$)/;
 
 /**
  * agy composer profile (Spec 1313 Phase 3 — net-new measurement). agy breaks the
@@ -82,12 +91,35 @@ const AGY_MARKER = /^> /;
  * option is palette-12, counted) — so a blind Enter never confirms filesystem
  * trust. Region bounds reuse the shared rule-line/status patterns (agy brackets
  * its composer with `─────` rules, like claude).
+ *
+ * The two marker ANCHORS (#1474) exist because `> ` alone does not identify agy's
+ * composer. Measured on real agy 1.1.13 captures (`fixtures/gate/agy-*.txt`), a live
+ * screen routinely carries OTHER `> ` rows, and last-match-wins picked them over the
+ * composer:
+ *   - the slash-menu selection cursor (`> /add-dir …`) — palette-12 like the composer,
+ *     and rendered BELOW it, so it won the marker scan outright;
+ *   - the transcript echo of every submitted turn (`> <the message you sent>`), palette-4,
+ *     one per conversation turn;
+ *   - the trust dialog's selected option — palette-12, with no composer on screen at all.
+ * Hence `markerRequiresCursorRow: true` (only the live input row holds the cursor — menu
+ * and dialog rows never do) and `markerFgPalette: 12` (the marker glyph's own color, which
+ * separates the composer from the palette-4 transcript echo). Both were measured stable
+ * across agy's modes, including the bare-`>` no-hint mode.
+ *
+ * Direction of failure, deliberately: an agy re-theme, or a cursor parked off the composer
+ * (e.g. a single mid-repaint frame), yields NO marker ⇒ `no-composer-marker` ⇒ the message
+ * is held and re-checked, never delivered onto a screen we failed to understand. A
+ * sustained hold escalates through the mailbox-delivery liveness telemetry
+ * (`recordStreak`) — the same drift path {@link REGION_END_PATTERNS} documents — so widen
+ * these anchors ONLY from a real capture.
  */
 export const AGY_PROFILE: GateProfile = {
   app: 'agy',
   markerPattern: AGY_MARKER,
   regionEndPatterns: REGION_END_PATTERNS,
   placeholderFgPalette: 8,
+  markerRequiresCursorRow: true,
+  markerFgPalette: 12,
 };
 
 /** Registry keyed by the harness name `detectHarnessFromCommand` returns. */
