@@ -89,6 +89,27 @@ Cache model (for reference): content lives in an in-memory `Map` bounded to open
 
 Verification after each: full vscode suite green (970 passed), check-types clean.
 
+## Review phase (2026-09-04)
+
+Amr approved dev-approval (head dcc1cfbef). Advanced to review:
+- Wrote `codev/reviews/1592-…md`; added COLD lesson (content-provider recovery).
+- **PR #1616** opened (review file as body, Fixes #1592), recorded with porch.
+- **PRView follow-up = issue #1617** filed.
+- **CMAP ran** (2026-09-04 ~20:22–24Z, head 5963bd149): Gemini APPROVE, Claude APPROVE,
+  **Codex REQUEST_CHANGES** (real: duplicate forge fetch on manual open).
+- Fixed all real findings pre-gate (commits up to `3128ee5`): codex duplicate-fetch guard
+  (`shouldFetchOnDocOpen`) + regression test; in-flight refresh guard; gitlab/gitea omit
+  absent optional scalars (no null); `poster`→`user` doc comment; drop cosmetic exec.
+  Recorded the CMAP verdicts + dispositions in the review doc.
+- Verified: vscode 973 passed, codev github 67, check-types clean.
+
+**Routing correction:** `afx send architect` routes to MAIN, not my spawning (vscode)
+architect. Must use `architect:vscode`. Earlier gate/scope/changelog notes went to main —
+re-sending to architect:vscode.
+
+**Changelog:** still NOT on-branch (per UNRELEASED.md template = docs/vscode-changelog
+branch, architect step). Confirmed by Claude's CMAP note as matching repo practice.
+
 ## Next
-Still at **dev-approval** gate (Amr's). Will NOT run `porch approve` until the architect
-relays his decision. Then review phase: open PR, run CMAP, write review, file PRView follow-up.
+Push fixes, then `porch next` to request the **pr** gate on the corrected head, then FREEZE
+the branch (no pushes after gate request — CI + Amr's attestation key off the SHA).

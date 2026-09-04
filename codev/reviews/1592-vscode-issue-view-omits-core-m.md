@@ -88,6 +88,30 @@ For reviewers pulling the branch:
   - An issue with no assignees / no milestone omits those lines.
   - Restored-tab recovery: open an issue preview, reload the window (or relaunch before Tower connects) — the tab shows "Content unavailable" briefly, then fills in once Tower connects, rather than staying stuck.
 
+## 3-Way Consultation (CMAP)
+
+Ran once (single advisory pass, `max_iterations: 1`) on 2026-09-04 ~20:22–20:24Z against
+head `5963bd149`. Outputs: `codev/projects/1592-vscode-issue-view-omits-core-m/1592-review-iter1-{gemini,codex,claude}.txt`.
+
+| Reviewer | Verdict | Confidence |
+|---|---|---|
+| Gemini (agy) | APPROVE | HIGH |
+| Claude Opus (Agent SDK) | APPROVE | HIGH |
+| GPT-5.6 Sol (Codex) | REQUEST_CHANGES | HIGH |
+
+Findings and dispositions (all fixes on this branch, commits `3128ee5` and its two parents):
+
+1. **[Codex — REQUEST_CHANGES, blocking] Duplicate forge request on normal open.** `viewBacklogIssue` cached the issue then opened the document, and the new `onDidOpenTextDocument` handler re-fetched it immediately — two `getIssue` calls per manual open, violating the plan's no-extra-requests requirement. **Fixed:** the open-event refresh is now guarded by `shouldFetchOnDocOpen(uri, isCached)`, which skips when content is already cached (manual open) and fires only for an uncached restored tab. Regression test added in `view-issue-refresh.test.ts` pinning both directions.
+2. **[Claude] Presets emitted `author: null` / `createdAt: null` when absent** while the contract declares those optional-not-nullable (only `milestone` is `| null`). **Fixed:** gitlab/gitea now add those keys only when present (merge-when-present), so an absent optional scalar is omitted, not null; arrays stay `[]`; `milestone` null passthrough remains contract-valid. Re-validated jq against full and all-absent sample payloads.
+3. **[Claude] Stale doc comment** said Gitea maps `poster.login`; the shipped REST-passthrough script maps `.user.login`. **Fixed** in both mirrored declarations (same commit).
+4. **[Claude] `refreshNow()` could burst** (O(N²) `getIssue` on an N-tab restore, no in-flight guard). **Fixed:** a single `refreshInFlight` guard coalesces concurrent passes.
+5. **[Claude] Cosmetic `exec` in the gitlab script** (`exec … | jq` only replaces the subshell). **Fixed:** dropped `exec`.
+6. **[Claude] Changelog step absent** (`apps/vscode/CHANGELOG.md` + `docs/releases/UNRELEASED.md`). **Not added on-branch** — per the `UNRELEASED.md` template these per-PR entries live on the `docs/vscode-changelog` branch (architect step); Claude noted this matches actual repo practice. Flagged to `architect:vscode` for the changelog-branch step or an on-branch instruction.
+7. **[Claude] Scope note** — the restored-preview recovery fix is outside the approved plan; disclosed here and requested by Amr at the dev-approval gate.
+8. **[Claude — nits]** the `fetchIssue` passthrough test is near-tautological (kept: it guards a future field-stripping refactor). No action.
+
+Single-pass advisory record: the correctness backstop for the Codex finding is the fix + regression test above plus Amr's `pr`-gate review, not a second AI pass.
+
 ## Follow-ups
 
 - **PRView / `GET /api/pr` has the analogous contract gap** (`PrViewResult` `forge-contracts.ts` / `PRView` `api.ts` lack labels/assignees/createdAt), but there is no in-editor PR render surface (`getPR`'s only consumer opens the browser). A separate issue will be filed at completion rather than expanding this PR.
