@@ -37,6 +37,12 @@ REPO="$(gitea_repo)" || exit 1
 # Capture before piping: POSIX sh has no pipefail, so `tea api … | jq` would
 # report jq's exit status rather than a failed fetch.
 ISSUE="$(tea api "repos/${REPO}/issues/${CODEV_ISSUE_ID}")" || exit 1
+# jq given empty input emits nothing and exits 0, so an empty body at exit 0
+# would slip past the validator below rather than failing.
+if [ -z "$ISSUE" ]; then
+  echo "gitea forge: empty \`tea api\` response for issue ${CODEV_ISSUE_ID}" >&2
+  exit 1
+fi
 printf '%s' "$ISSUE" | jq -e '
   if (type == "object")
      and ((.title | type) == "string")
@@ -62,9 +68,12 @@ printf '%s' "$ISSUE" | jq --argjson comments "$COMMENTS_JSON" '{
       body: (.body // ""),
       state,
       url: (.html_url // .url),
+      # The array itself is validated above; its ELEMENTS are whatever the
+      # server sent, so each field is defaulted to the type the contract
+      # declares rather than emitting nulls into IssueViewResult.comments.
       comments: [ $comments[] | {
-        body: (.body // ""),
-        createdAt: .created_at,
-        author: {login: .user.login}
+        body: (if (.body | type) == "string" then .body else "" end),
+        createdAt: (if (.created_at | type) == "string" then .created_at else "" end),
+        author: {login: (if (.user.login | type) == "string" then .user.login else "" end)}
       } ]
     }'

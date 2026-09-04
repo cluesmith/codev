@@ -30,6 +30,13 @@ REPO="$(gitea_repo)" || exit 1
 # reports jq's exit status, so a failed fetch would surface as jq's exit-0 on
 # empty stdin rather than an error.
 PR="$(tea api "repos/${REPO}/pulls/${CODEV_PR_NUMBER}")" || exit 1
+# An empty body at exit 0 would give jq nothing to work on: it emits no output
+# and exits 0, so the script would "succeed" with empty stdout instead of
+# failing. The validator below never runs on an empty response, so guard here.
+if [ -z "$PR" ]; then
+  echo "gitea forge: empty \`tea api\` response for pull ${CODEV_PR_NUMBER}" >&2
+  exit 1
+fi
 printf '%s' "$PR" | jq '
   if (type == "object")
      and ((.number | type) == "number")
@@ -53,6 +60,8 @@ printf '%s' "$PR" | jq '
   author: {login: .user.login},
   baseRefName: .base.ref,
   headRefName: .head.ref,
-  additions: (.additions // 0),
-  deletions: (.deletions // 0)
+  # Type-checked, not just defaulted: the contract types these as numbers, and
+  # a non-numeric value here would be passed straight through.
+  additions: (if (.additions | type) == "number" then .additions else 0 end),
+  deletions: (if (.deletions | type) == "number" then .deletions else 0 end)
 }'

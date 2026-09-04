@@ -48,15 +48,19 @@ gitea_repo() {
 #     subtracted explicitly.
 #   - CODEV_SINCE_DATE, which callers set to either a full timestamp
 #     (`github.ts`) or a bare `YYYY-MM-DD` (`team-update.ts`). A bare date is
-#     read as midnight UTC.
+#     read as midnight UTC, and a timestamp with no offset at all is read as
+#     UTC too.
 #
-# Unparseable input yields null, and every caller treats null as "don't know" —
-# keep the item, keep walking. A surprising format therefore degrades to the old
-# unbounded behavior rather than silently dropping data.
+# Input that isn't a recognizable date yields null, and every caller treats null
+# as "don't know" — keep the item, keep walking — so a surprising format
+# degrades to the old unbounded behavior rather than silently dropping data.
+# This is shape validation, not a calendar: `2026-02-30` is normalized by
+# `fromdateiso8601` into March rather than rejected. That only matters for a
+# hand-written cutoff, and lands it a day or two off rather than anywhere wild.
 GITEA_JQ_LIB='
 def gitea_epoch:
   if type == "string" then
-    ((capture("^(?<d>\\d{4}-\\d{2}-\\d{2})(T(?<t>\\d{2}:\\d{2}:\\d{2})(\\.\\d+)?(?<o>Z|[+-]\\d{2}:\\d{2})?)?$")) // null) as $c
+    ((capture("^(?<d>\\d{4}-\\d{2}-\\d{2})(T(?<t>\\d{2}:\\d{2}:\\d{2})(\\.\\d+)?(?<o>Z|[+-](0\\d|1[0-4]):[0-5]\\d)?)?$")) // null) as $c
     | if $c == null then null
       # `try`: the regex only proves the SHAPE. `2026-13-99` matches it and then
       # makes `fromdateiso8601` throw, which would abort the script with a raw
@@ -90,14 +94,21 @@ GITEA_MAX_PAGES=100
 # Usage: tea_api_paged "repos/<owner>/<repo>/pulls" "state=all" ["<jq stop filter>"]
 #   $1 = API path (no page params)
 #   $2 = extra query string (may be empty), e.g. "state=open"
-#   $3 = optional jq program run on each page's array; when it outputs `true`
-#        the walk stops after that page. Used by `recently-merged` to bound the
-#        walk with CODEV_SINCE_DATE. It must be conservative: a false negative
-#        just costs another page, a false positive silently truncates.
+#   $3 = optional jq program run on each page's array, with the PREVIOUS page
+#        bound as `$prev` (`null` on page 1); when it outputs `true` the walk
+#        stops after that page. Used by `recently-merged` to bound the walk with
+#        CODEV_SINCE_DATE — `$prev` is what lets it check ordering ACROSS a page
+#        boundary and not just within one page. It must be conservative: a false
+#        negative just costs another page, a false positive silently truncates.
 #
 # Loops page=1,2,3… appending "&limit=<N>&page=<page>", concatenates each page's
 # array, and stops when a page returns fewer than the requested limit (the last
 # page), an empty/blank response, or the caller's stop filter fires.
+#
+# A page that parses but ISN'T an array is a hard error, not a stop condition.
+# `tea api` exits 0 on HTTP errors and prints the error body, and `jq length` is
+# 0 for both `null` and `{}` — so an error body mid-walk used to look exactly
+# like an exhausted list and return the partial array at exit 0.
 #
 # Reaching GITEA_MAX_PAGES without any of those terminal conditions means we do
 # NOT know we have the whole list. Returning the partial array at exit 0 would
@@ -113,6 +124,7 @@ tea_api_paged() {
   _acc='[]'
   _page_size=''
   _terminal=''
+  _prev=''
   while [ "$_page" -le "$GITEA_MAX_PAGES" ]; do
     if [ -n "$_query" ]; then
       _url="${_path}?${_query}&limit=${GITEA_PAGE_LIMIT}&page=${_page}"
@@ -125,19 +137,27 @@ tea_api_paged() {
       _terminal=1
       break
     fi
-    _count="$(printf '%s' "$_resp" | jq 'length')" || return 1
+    # Length AND type in one jq pass; a non-array page is prefixed with "!".
+    _count="$(printf '%s' "$_resp" | jq -r 'if type == "array" then length else "!" + type end')" || return 1
+    case "$_count" in
+      '!'*)
+        echo "gitea forge: page ${_page} of '${_path}' is not an array but a ${_count#!} (an HTTP error body reaches us at exit 0); refusing to return a truncated result" >&2
+        return 1
+        ;;
+    esac
     if [ "$_count" -eq 0 ]; then
       _terminal=1
       break
     fi
     _acc="$(printf '%s\n%s' "$_acc" "$_resp" | jq -s 'add')" || return 1
     if [ -n "$_stop" ]; then
-      _hit="$(printf '%s' "$_resp" | jq "$_stop")" || return 1
+      _hit="$(printf '%s' "$_resp" | jq --argjson prev "${_prev:-null}" "$_stop")" || return 1
       if [ "$_hit" = "true" ]; then
         _terminal=1
         break
       fi
     fi
+    _prev="$_resp"
     # A server whose max_response_items is tuned below GITEA_PAGE_LIMIT
     # truncates every page to its own cap, not the requested limit — so
     # stopping when a page is shorter than the *requested* limit would break

@@ -15,8 +15,15 @@
 # otherwise. The response is captured before the pipe because POSIX sh has no
 # pipefail: `tea api user | jq` would report jq's status, not tea's.
 USER_JSON="$(tea api user)" || exit 1
+# jq given empty input emits nothing and exits 0, so an empty body at exit 0
+# would leave the script "succeeding" with no username at all.
+if [ -z "$USER_JSON" ]; then
+  echo "gitea forge: empty \`tea api user\` response" >&2
+  exit 1
+fi
 printf '%s' "$USER_JSON" | jq -r '
-  if (type == "object") and ((.login | type) == "string") and (.login != "")
+  if (type == "object") and ((.login | type) == "string")
+     and ((.login | test("^\\s*$")) | not)
   then .login
   else
     ("gitea forge: unexpected `tea api user` response: "

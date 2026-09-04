@@ -89,6 +89,11 @@ case "$2" in
     # error body on stdout with no \`.login\`, at exit status 0.
     if [ -n "$FAKE_TEA_USER_ERROR" ]; then
       echo '{"message":"token does not exist","url":"https://git.example.com/api/swagger"}'
+    elif [ -n "$FAKE_TEA_USER_EMPTY" ]; then
+      # exit 0, nothing on stdout — jq would emit nothing and exit 0 too.
+      : 
+    elif [ -n "$FAKE_TEA_USER_BLANK" ]; then
+      echo '{"login":"   ","id":7}'
     else
       echo '{"login":"octo","id":7}'
     fi ;;
@@ -186,13 +191,46 @@ case "$2" in
     jq -cn '[range(5)|{number:(5000+.),title:"pad",html_url:"u",body:"",state:"open",merged:false,created_at:"d",updated_at:"2026-07-09T00:00:00Z",user:{login:"pad"},requested_reviewers:[],draft:false,head:{ref:"pad"}}]' ;;
 
   # --- recently-merged bounded by CODEV_SINCE_DATE ------------------------
-  # Page 1 is a full 50 items sorted by updated_at DESC and reaches back past
-  # the cutoff (2026-07-05T00:00:00Z): two merges after it, then 48 older ones.
-  # Page 2 ERRORS, so a clean exit proves the walk stopped at page 1.
+  # Cutoff for these fixtures is 2026-07-05T00:00:00Z.
+  # Page 1: 50 items, strictly descending by updated_at, ALL after the cutoff
+  #   (2026-07-09T00:00 down to 2026-07-06T20:00) — two of them merged, the
+  #   second carrying a +02:00 offset rather than \`Z\`. The walk must NOT stop
+  #   here: nothing has crossed the cutoff yet, and page 1 alone proves nothing
+  #   about ordering anyway.
+  # Page 2: 50 items continuing the descent (2026-07-06T19:00 down to
+  #   2026-07-04T18:00) and so crossing the cutoff — one merge above it, one
+  #   below. The order survives the page boundary, so the walk stops here.
+  # Page 3: ERRORS, so a clean exit proves the walk stopped at page 2.
   "repos/acme/dated/pulls?state=closed&sort=recentupdate&limit=50&page=1")
-    jq -cn '[{number:10,title:"Recent merge",html_url:"https://git.example.com/acme/dated/pulls/10",body:"r",state:"closed",merged:true,merged_at:"2026-07-08T10:00:00Z",created_at:"2026-07-01T00:00:00Z",updated_at:"2026-07-08T10:00:00Z",head:{ref:"feature/recent"}},{number:9,title:"Also recent",html_url:"u",body:"",state:"closed",merged:true,merged_at:"2026-07-06T09:00:00+02:00",created_at:"2026-06-01T00:00:00Z",updated_at:"2026-07-06T09:00:00+02:00",head:{ref:"feature/offset"}}] + [range(48)|{number:(6000+.),title:"old",html_url:"u",body:"",state:"closed",merged:true,merged_at:"2026-06-01T00:00:00Z",created_at:"2026-05-01T00:00:00Z",updated_at:"2026-06-01T00:00:00Z",head:{ref:"old"}}]' ;;
+    jq -cn '[{number:10,title:"Recent merge",html_url:"https://git.example.com/acme/dated/pulls/10",body:"r",state:"closed",merged:true,merged_at:"2026-07-09T00:00:00Z",created_at:"2026-07-01T00:00:00Z",updated_at:"2026-07-09T00:00:00Z",head:{ref:"feature/recent"}},{number:9,title:"Offset merge",html_url:"u",body:"",state:"closed",merged:true,merged_at:"2026-07-08T22:00:00+02:00",created_at:"2026-06-01T00:00:00Z",updated_at:"2026-07-08T22:00:00+02:00",head:{ref:"feature/offset"}}] + [range(48)|(1783537200 - (. * 3600)) as $u|{number:(6000+.),title:"p1 pad",html_url:"u",body:"",state:"closed",merged:false,created_at:"2026-05-01T00:00:00Z",updated_at:($u|todateiso8601),head:{ref:"pad"}}]' ;;
   "repos/acme/dated/pulls?state=closed&sort=recentupdate&limit=50&page=2")
-    echo "fake-tea: dated page 2 requested" >&2; exit 9 ;;
+    jq -cn '[range(50)|(1783364400 - (. * 3600)) as $u|{number:(6100+.),title:"p2",html_url:"u",body:"",state:"closed",merged:(. == 0 or . == 49),merged_at:(if (. == 0 or . == 49) then ($u|todateiso8601) else null end),created_at:"2026-05-01T00:00:00Z",updated_at:($u|todateiso8601),head:{ref:"p2"}}]' ;;
+  "repos/acme/dated/pulls?state=closed&sort=recentupdate&limit=50&page=3")
+    echo "fake-tea: dated page 3 requested" >&2; exit 9 ;;
+
+  # --- the reviewer counterexample: a server that IGNORES sort but happens to
+  # return an internally descending page 1 that is entirely older than the
+  # cutoff, with a genuinely recent merge sitting on page 2. Stopping on
+  # page-local ordering alone would silently drop that merge. ---
+  "repos/acme/lagging/pulls?state=closed&sort=recentupdate&limit=50&page=1")
+    jq -cn '[range(50)|(1780876800 - (. * 3600)) as $u|{number:(8000+.),title:"old",html_url:"u",body:"",state:"closed",merged:false,created_at:"2026-05-01T00:00:00Z",updated_at:($u|todateiso8601),head:{ref:"old"}}]' ;;
+  "repos/acme/lagging/pulls?state=closed&sort=recentupdate&limit=50&page=2")
+    echo '[{"number":8100,"title":"Late merge of an old PR","html_url":"https://git.example.com/acme/lagging/pulls/8100","body":"l","state":"closed","merged":true,"merged_at":"2026-07-07T00:00:00Z","created_at":"2026-01-01T00:00:00Z","updated_at":"2026-07-07T00:00:00Z","head":{"ref":"feature/late"}}]' ;;
+
+  # --- non-array pages at exit 0: \`jq length\` is 0 for both \`{}\` and \`null\`,
+  # so an error body used to look exactly like an exhausted list. ---
+  "repos/acme/errorpage/pulls?state=open&limit=50&page=1")
+    jq -cn '[range(50)|{number:(9000+.),title:"pad",html_url:"u",body:"",state:"open",created_at:"d",user:{login:"pad"},requested_reviewers:[],draft:false}]' ;;
+  "repos/acme/errorpage/pulls?state=open&limit=50&page=2")
+    echo '{"message":"internal server error","url":"https://git.example.com/api/swagger"}' ;;
+  "repos/acme/errorpage/pulls?state=all&limit=50&page=1")
+    jq -cn '[range(50)|{number:(9000+.),state:"open",merged:false,head:{ref:"pad"}}]' ;;
+  "repos/acme/errorpage/pulls?state=all&limit=50&page=2")
+    echo 'null' ;;
+
+  # --- empty bodies at exit 0 (pull/issue 0) ------------------------------
+  repos/acme/widgets/pulls/0) : ;;
+  repos/acme/widgets/issues/0) : ;;
 
   # --- server that IGNORES sort=recentupdate ------------------------------
   # Page 1 is a full 50 items in arbitrary update order that includes items
@@ -567,9 +605,9 @@ describe.skipIf(!jqAvailable)('bugfix #1137: gitea preset routes reads through `
   });
 
   it('recently-merged bounds its walk with CODEV_SINCE_DATE', () => {
-    // Page 1 is sorted by updated_at DESC and reaches back past the cutoff, so
-    // the walk must stop there. The fixture's page 2 errors, so a clean exit is
-    // itself the assertion that no second request was made.
+    // Page 1 is entirely after the cutoff; page 2 continues the same descent
+    // and crosses it, so the walk stops there. The fixture's page 3 errors, so
+    // a clean exit is itself the assertion that no third request was made.
     const { status, stdout, stderr } = runScriptFull('recently-merged.sh', {
       CODEV_REPO: 'acme/dated',
       CODEV_SINCE_DATE: '2026-07-05T00:00:00Z',
@@ -577,18 +615,37 @@ describe.skipIf(!jqAvailable)('bugfix #1137: gitea preset routes reads through `
     expect(stderr).toBe('');
     expect(status).toBe(0);
     const merged = JSON.parse(stdout);
-    // Only the two merges after the cutoff — the 48 older ones on the same page
-    // are filtered out. The second one carries a +02:00 offset rather than `Z`,
-    // pinning that Gitea's server-timezone timestamps compare correctly.
+    // Three merges above the cutoff (two on page 1, one on page 2); page 2 also
+    // carries one merged BELOW it, which must be filtered out.
     expect(merged.map((p: { number: number }) => p.number).sort((a: number, b: number) => a - b))
-      .toEqual([9, 10]);
+      .toEqual([9, 10, 6100]);
     expect(merged[0]).toMatchObject({
       number: 10,
       title: 'Recent merge',
       url: 'https://git.example.com/acme/dated/pulls/10',
-      mergedAt: '2026-07-08T10:00:00Z',
+      mergedAt: '2026-07-09T00:00:00Z',
       headRefName: 'feature/recent',
     });
+    // #9's merged_at is `+02:00`, not `Z`. It survives the cutoff comparison
+    // only because the offset is parsed rather than compared lexicographically.
+    expect(merged.find((p: { number: number }) => p.number === 9)).toMatchObject({
+      mergedAt: '2026-07-08T22:00:00+02:00',
+      headRefName: 'feature/offset',
+    });
+  });
+
+  it('recently-merged does not stop on page 1 alone, however well ordered', () => {
+    // The reviewer counterexample. A server that ignores `sort=recentupdate`
+    // can still return an internally descending page 1 — here one entirely
+    // older than the cutoff — while a genuinely recent merge sits on page 2.
+    // Stopping on page-local ordering would silently drop it, so a stop needs
+    // ordering that survives a page boundary, which this fixture breaks.
+    const merged = JSON.parse(runScript('recently-merged.sh', {
+      CODEV_REPO: 'acme/lagging',
+      CODEV_SINCE_DATE: '2026-07-05T00:00:00Z',
+    }));
+    expect(merged).toHaveLength(1);
+    expect(merged[0]).toMatchObject({ number: 8100, headRefName: 'feature/late' });
   });
 
   it('recently-merged accepts a bare YYYY-MM-DD CODEV_SINCE_DATE', () => {
@@ -601,19 +658,60 @@ describe.skipIf(!jqAvailable)('bugfix #1137: gitea preset routes reads through `
     });
     expect(stderr).toBe('');
     expect(status).toBe(0);
-    expect(JSON.parse(stdout).map((p: { number: number }) => p.number).sort()).toEqual([10, 9]);
+    expect(JSON.parse(stdout).map((p: { number: number }) => p.number)
+      .sort((a: number, b: number) => a - b)).toEqual([9, 10, 6100]);
   });
 
   it('an unparseable CODEV_SINCE_DATE falls back to the unbounded walk', () => {
     // Degrade toward MORE work, never toward silently dropping merges: with no
-    // usable cutoff the stop filter must not fire, so page 2 IS requested (and
-    // this fixture's page 2 errors, which is how we can see it happened).
+    // usable cutoff the stop filter must not fire, so page 3 IS requested (and
+    // this fixture's page 3 errors, which is how we can see it happened).
     const { status, stderr } = runScriptFull('recently-merged.sh', {
       CODEV_REPO: 'acme/dated',
       CODEV_SINCE_DATE: 'last tuesday',
     });
     expect(status).not.toBe(0);
-    expect(stderr).toContain('dated page 2 requested');
+    expect(stderr).toContain('dated page 3 requested');
+  });
+
+  it('a non-array page mid-walk is an error, not the end of the list', () => {
+    // `tea api` exits 0 on HTTP errors, and `jq length` is 0 for both `{}` and
+    // `null` — so an error body looked exactly like an exhausted list and the
+    // paginator returned the pages it had at exit 0.
+    const asObject = runScriptFull('pr-list.sh', { CODEV_REPO: 'acme/errorpage' });
+    expect(asObject.status).not.toBe(0);
+    expect(asObject.stdout.trim()).toBe('');
+    expect(asObject.stderr).toContain('not an array');
+
+    const asNull = runScriptFull('pr-exists.sh', {
+      CODEV_BRANCH_NAME: 'pad',
+      CODEV_REPO: 'acme/errorpage',
+    });
+    expect(asNull.status).not.toBe(0);
+    expect(asNull.stdout.trim()).toBe('');
+    expect(asNull.stderr).toContain('not an array');
+  });
+
+  it('an empty body at exit 0 fails instead of succeeding silently', () => {
+    // jq given empty stdin emits nothing and exits 0, so without an explicit
+    // guard these scripts "succeed" with empty stdout and the validators never
+    // run at all.
+    for (const [script, env] of [
+      ['pr-view.sh', { CODEV_PR_NUMBER: '0' }],
+      ['issue-view.sh', { CODEV_ISSUE_ID: '0' }],
+      ['user-identity.sh', { FAKE_TEA_USER_EMPTY: '1' }],
+    ] as Array<[string, Record<string, string>]>) {
+      const { status, stdout, stderr } = runScriptFull(script, env);
+      expect(status, script).not.toBe(0);
+      expect(stdout.trim(), script).toBe('');
+      expect(stderr, script).toContain('empty');
+    }
+  });
+
+  it('user-identity rejects a whitespace-only login', () => {
+    const { status, stdout } = runScriptFull('user-identity.sh', { FAKE_TEA_USER_BLANK: '1' });
+    expect(status).not.toBe(0);
+    expect(stdout.trim()).toBe('');
   });
 
   it('gitea_epoch normalizes Gitea\'s server-timezone timestamps', () => {

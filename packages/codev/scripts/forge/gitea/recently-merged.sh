@@ -27,26 +27,44 @@
 # we ask the server for update-time-descending order and stop at the first page
 # that reaches back past the cutoff.
 #
-# The stop filter refuses to trust the sort blindly: it fires only when the
-# page is ACTUALLY non-increasing in `updated_at` (proving the server honored
-# `sort=recentupdate`) AND some item on it predates the cutoff. A server that
-# ignores the parameter falls back to the full walk rather than silently
-# dropping merges. `updated_at >= merged_at` always holds — a merge updates the
-# PR — so nothing merged after the cutoff can sit beyond the first page whose
-# update times have fallen behind it. Timestamps go through `gitea_epoch`
-# because Gitea emits RFC3339 in the server's timezone, not necessarily `Z`.
+# The stop filter does not take the sort on trust. What it actually needs is
+# the ORDERING, not the parameter, so it checks for the ordering directly and
+# fires only when all of this holds:
+#   - the current page is non-increasing in `updated_at`,
+#   - the PREVIOUS page was too, and its oldest entry is no older than this
+#     page's newest — i.e. the order survives a page boundary, so page-local
+#     sorting or a coincidentally-descending first page isn't enough,
+#   - some entry on this page predates the cutoff.
+# Never on page 1: with nothing to compare against, one internally-descending
+# page proves nothing about the pages behind it. Costing one extra request is
+# the right trade against dropping a merge.
+#
+# Given that ordering, `updated_at >= merged_at` (a merge updates the PR) means
+# nothing merged after the cutoff can sit beyond the first page whose update
+# times have fallen behind it. A server that ignores `sort=recentupdate` fails
+# these checks and we fall back to the full walk — slower, never wrong.
+#
+# Timestamps go through `gitea_epoch` because Gitea emits RFC3339 in the
+# server's timezone, not necessarily `Z`.
 . "$(dirname "$0")/_lib.sh"
 REPO="$(gitea_repo)" || exit 1
 
 if [ -n "$CODEV_SINCE_DATE" ]; then
   QUERY="state=closed&sort=recentupdate"
+  # `$prev` is the previous page, bound by tea_api_paged (null on page 1).
   STOP="${GITEA_JQ_LIB}"'
-    [ .[] | (.updated_at | gitea_epoch) ] as $t
+    def descending: . as $a | [ range(($a | length) - 1) | $a[.] >= $a[. + 1] ] | all;
+    def times: [ .[] | (.updated_at | gitea_epoch) ];
+
+    times as $t
+    | ($prev | if . == null then null else times end) as $p
     | (env.CODEV_SINCE_DATE | gitea_epoch) as $since
     | ($since != null)
-      and (($t | length) > 0)
-      and ([ $t[] | . != null ] | all)
-      and ([ range(($t | length) - 1) | $t[.] >= $t[.+ 1] ] | all)
+      and ($p != null)
+      and (($t | length) > 0) and (($p | length) > 0)
+      and ([ $t[] | . != null ] | all) and ([ $p[] | . != null ] | all)
+      and ($t | descending) and ($p | descending)
+      and (($p | min) >= ($t | max))
       and (($t | min) < $since)
   '
 else
