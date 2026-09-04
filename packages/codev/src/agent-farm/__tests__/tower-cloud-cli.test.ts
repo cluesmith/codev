@@ -5,15 +5,30 @@
  * with mocked readline, browser, and HTTP interactions.
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, afterAll, vi } from 'vitest';
 import { mkdirSync, rmSync } from 'node:fs';
 
-// Redirect homedir to temp dir
-const TEST_DIR = vi.hoisted(() => {
+// Redirect homedir to temp dir. The vitest harness also pins
+// CODEV_AGENT_FARM_DIR into its per-run sandbox (#1597), and core's
+// AGENT_FARM_DIR reads that env var BEFORE consulting homedir — so the
+// homedir mock alone no longer redirects it. Re-pin the env to this suite's
+// dir before the module graph evaluates; afterAll restores the harness value.
+const { TEST_DIR, PREV_AGENT_FARM_DIR_ENV } = vi.hoisted(() => {
   const { resolve } = require('node:path');
   const { tmpdir } = require('node:os');
   const { randomBytes } = require('node:crypto');
-  return resolve(tmpdir(), `tower-cli-test-${randomBytes(4).toString('hex')}`);
+  const testDir = resolve(tmpdir(), `tower-cli-test-${randomBytes(4).toString('hex')}`);
+  const prevEnv = process.env.CODEV_AGENT_FARM_DIR;
+  process.env.CODEV_AGENT_FARM_DIR = resolve(testDir, '.agent-farm');
+  return { TEST_DIR: testDir, PREV_AGENT_FARM_DIR_ENV: prevEnv };
+});
+
+afterAll(() => {
+  if (PREV_AGENT_FARM_DIR_ENV === undefined) {
+    delete process.env.CODEV_AGENT_FARM_DIR;
+  } else {
+    process.env.CODEV_AGENT_FARM_DIR = PREV_AGENT_FARM_DIR_ENV;
+  }
 });
 
 // Queue of answers for readline prompts (shifted one at a time)

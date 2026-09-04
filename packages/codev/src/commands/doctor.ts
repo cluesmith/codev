@@ -1049,7 +1049,7 @@ export async function doctor(): Promise<number> {
       console.log('');
     }
 
-    // Full forge concept reporting: all 15 concepts with resolution source and executable check
+    // Full forge concept reporting: all 18 concepts with resolution source and executable check
     const forgeConfig = loadForgeConfig(workspaceRoot);
     const provider = forgeConfig?.provider ?? 'github';
     console.log(chalk.bold('Forge Concepts') + ` (provider: ${provider})`);
@@ -1067,7 +1067,7 @@ export async function doctor(): Promise<number> {
       }
     }
 
-    // Report all 15 concepts with source and executable availability
+    // Report all 18 concepts with source and executable availability
     const resolutions = resolveAllConcepts(forgeConfig);
     const missingExecs = new Set<string>();
 

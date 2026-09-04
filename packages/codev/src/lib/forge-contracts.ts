@@ -111,13 +111,17 @@ export interface PrListItem {
   mergedAt?: string;
   author?: { login: string };
   /**
-   * Logins of users requested as reviewers. Emitted by every forge's `pr-list`
-   * script (GitHub flattens gh's reviewer objects to logins; GitLab/Gitea emit
-   * `[]` as they expose no GitHub-equivalent per-user review-request list).
-   * Consumed by the VSCode PR sidebar to bucket "review-requested" PRs.
+   * Logins of users requested as reviewers. Every preset populates it for real:
+   * GitHub flattens gh's reviewer objects to logins, GitLab maps glab's
+   * `.reviewers[].username`, and Gitea maps the REST `requested_reviewers[]`
+   * (team reviewers carry no login and are dropped). Consumed by the VSCode PR
+   * sidebar to bucket "review-requested" PRs.
    */
   reviewRequests: string[];
-  /** Whether the PR is a draft. GitLab/Gitea emit `false` (not exposed). */
+  /**
+   * Whether the PR is a draft. Every preset reports it for real — GitLab from
+   * the merge request's `draft`/WIP flag, Gitea from the REST `draft` flag.
+   */
   isDraft: boolean;
 }
 
@@ -169,6 +173,24 @@ export interface PrViewResult {
   headRefName: string;
   additions: number;
   deletions: number;
+}
+
+/**
+ * Output of the `pr-create` concept command.
+ *
+ * Inputs are environment variables, like every other concept:
+ * `CODEV_PR_TITLE` (required), `CODEV_PR_BODY` (required — set it to `''` for
+ * an empty body; an *absent* one is rejected rather than silently posting a
+ * bodyless PR), and the optional `CODEV_PR_BASE`, `CODEV_PR_HEAD`,
+ * `CODEV_PR_REPO`, `CODEV_PR_DRAFT`. The gitea script also reads the optional
+ * `CODEV_PR_LOGIN` (tea's `--login`, for multi-login hosts). A failed creation
+ * exits non-zero rather than emitting JSON.
+ */
+export interface PrCreateResult {
+  /** The created PR's number (`iid` on GitLab, `index` on Gitea). */
+  number: number;
+  /** The created PR's **browser/web** URL — never an API endpoint. */
+  url: string;
 }
 
 /** Output of the `pr-diff` concept command: raw diff text, not JSON. */

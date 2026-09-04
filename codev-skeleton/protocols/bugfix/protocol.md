@@ -27,7 +27,8 @@ refactor surrounding code, fix unrelated bugs (file separate issues), or add fea
 [Bugfix #42] Test: regression for unencoded username
 ```
 
-**PR** — open with `gh pr create`, body carrying Summary, Root Cause, Fix and Test Plan plus
+**PR** — open with the `pr-create` forge concept command the PR-phase prompt hands you (`gh
+pr create` on GitHub), body carrying Summary, Root Cause, Fix and Test Plan plus
 `Fixes #<N>` so the issue closes on merge. Run one CMAP pass (Gemini, Codex, Claude), record
 each verdict, and address or rebut every `REQUEST_CHANGES`. Notify the architect with the
 verdicts, then `porch done <id>` and wait.

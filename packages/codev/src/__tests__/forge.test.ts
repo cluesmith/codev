@@ -72,6 +72,19 @@ beforeAll(() => {
     '#!/bin/sh\necho "diff --git a/file.ts b/file.ts"\necho "--- a/file.ts"\necho "+++ b/file.ts"\n');
   chmodSync(join(MOCK_SCRIPTS_DIR, 'diff-output.sh'), 0o755);
 
+  // Script opening with `. "$(dirname "$0")/_lib.sh"` — the shape #1146's read
+  // scripts use. Without treating `.`/`source` as builtins, extractExecutable
+  // would report the executable as literally "." and `codev doctor` would warn
+  // that "." is missing from PATH instead of naming the real CLI (gh).
+  writeFileSync(join(MOCK_SCRIPTS_DIR, 'lib.sh'), '#!/bin/sh\n');
+  chmodSync(join(MOCK_SCRIPTS_DIR, 'lib.sh'), 0o755);
+  writeFileSync(join(MOCK_SCRIPTS_DIR, 'dot-source.sh'),
+    `#!/bin/sh\n. "\${0%/*}/lib.sh"\ngh issue view "$1"\n`);
+  chmodSync(join(MOCK_SCRIPTS_DIR, 'dot-source.sh'), 0o755);
+  writeFileSync(join(MOCK_SCRIPTS_DIR, 'source-keyword.sh'),
+    `#!/bin/sh\nsource "\${0%/*}/lib.sh"\ngh issue view "$1"\n`);
+  chmodSync(join(MOCK_SCRIPTS_DIR, 'source-keyword.sh'), 0o755);
+
   // .codev/config.json with forge overrides
   mkdirSync(join(TEST_DIR, '.codev'), { recursive: true });
   writeFileSync(join(TEST_DIR, '.codev', 'config.json'), JSON.stringify({
@@ -307,7 +320,7 @@ describe('executeForgeCommandSync', () => {
 // =============================================================================
 
 describe('getKnownConcepts', () => {
-  it('returns all 17 known concept names', () => {
+  it('returns all 18 known concept names', () => {
     const concepts = getKnownConcepts();
     expect(concepts).toContain('issue-view');
     expect(concepts).toContain('pr-list');
@@ -320,13 +333,14 @@ describe('getKnownConcepts', () => {
     expect(concepts).toContain('user-identity');
     expect(concepts).toContain('team-activity');
     expect(concepts).toContain('on-it-timestamps');
+    expect(concepts).toContain('pr-create');
     expect(concepts).toContain('pr-merge');
     expect(concepts).toContain('pr-search');
     expect(concepts).toContain('pr-view');
     expect(concepts).toContain('pr-diff');
     expect(concepts).toContain('auth-status');
     expect(concepts).toContain('repo-archive');
-    expect(concepts.length).toBe(17);
+    expect(concepts.length).toBe(18);
   });
 });
 
@@ -503,6 +517,36 @@ describe('provider presets', () => {
     expect(teamActivity?.command).toBeNull();
   });
 
+  it('linear provider falls through to the gh default for pr-create (spec 719)', () => {
+    // Linear is a hybrid forge: it owns issues, and every PR concept falls
+    // through to the github default. Disabling pr-create here would make Linear
+    // the one provider that can merge a PR but not open one — spec 719 fixed
+    // `buildPresetFromScripts` precisely so missing PR scripts fall through.
+    const config = { provider: 'linear' };
+    // getForgeCommand is the resolver porch actually calls to substitute
+    // {{pr_create_command}}, so pin it directly, not just the doctor view.
+    expect(getForgeCommand('pr-create', config)).toBe(getForgeCommand('pr-create', null));
+    const prCreate = resolveAllConcepts(config).find(r => r.concept === 'pr-create');
+    expect(prCreate?.source).toBe('default');
+    expect(prCreate?.command).toContain('github/pr-create.sh');
+    expect(prCreate?.executable).toBe('gh');
+    // The sibling PR concepts fall through the same way.
+    const prMerge = resolveAllConcepts(config).find(r => r.concept === 'pr-merge');
+    expect(prMerge?.source).toBe('default');
+  });
+
+  it('linear provider leaves no concept unresolvable (hybrid model guard)', () => {
+    // Class-level guard for spec 719: issue concepts resolve to linear scripts,
+    // every other concept falls through to gh. Only the two concepts linear
+    // genuinely cannot serve are disabled. This fails loudly if anyone disables
+    // a PR concept again, rather than only catching pr-create by name.
+    const resolutions = resolveAllConcepts({ provider: 'linear' });
+    const disabled = resolutions.filter(r => r.source === 'disabled').map(r => r.concept);
+    expect(disabled.sort()).toEqual(['on-it-timestamps', 'team-activity']);
+    expect(resolutions.every(r => r.command !== null)).toBe(false); // the two above
+    expect(resolutions.filter(r => r.source !== 'disabled').every(r => r.executable !== null)).toBe(true);
+  });
+
   it('linear provider resolves issue-view as preset', () => {
     const config = { provider: 'linear' };
     const resolutions = resolveAllConcepts(config);
@@ -549,9 +593,9 @@ describe('graceful degradation when command not found', () => {
 // =============================================================================
 
 describe('resolveAllConcepts', () => {
-  it('returns all 17 concepts with default source when no config', () => {
+  it('returns all 18 concepts with default source when no config', () => {
     const resolutions = resolveAllConcepts();
-    expect(resolutions).toHaveLength(17);
+    expect(resolutions).toHaveLength(18);
     expect(resolutions.every(r => r.source === 'default')).toBe(true);
     expect(resolutions.every(r => r.executable !== null)).toBe(true);
   });
@@ -600,5 +644,52 @@ describe('resolveAllConcepts', () => {
     const recentlyClosed = resolutions.find(r => r.concept === 'recently-closed');
     // Default command is: if [ -n "$CODEV_SINCE_DATE" ]; then gh issue list ...
     expect(recentlyClosed?.executable).toBe('gh');
+  });
+
+  it.each(['dot-source.sh', 'source-keyword.sh'])(
+    'skips `.`/`source` when a script opens by sourcing a helper (%s)',
+    (script) => {
+      // #1146's read scripts open with `. "$(dirname "$0")/_lib.sh"`. Without
+      // treating `.`/`source` as builtins, this reports the executable as "."
+      // (or "source") and `codev doctor` warns that's missing from PATH,
+      // instead of naming the real CLI the script actually needs.
+      const config = { 'issue-view': join(MOCK_SCRIPTS_DIR, script) };
+      const resolutions = resolveAllConcepts(config);
+      const issueView = resolutions.find(r => r.concept === 'issue-view');
+      expect(issueView?.executable).toBe('gh');
+    },
+  );
+
+  // SHELL_BUILTINS governs the *inline-command* branch too, not just the
+  // script-file branch above — so adding `.`/`source` to that list changed
+  // behavior for inline user overrides as well. Pinned here because that half
+  // of the change was otherwise untested.
+  it.each([
+    '. /etc/forge/env.sh; gh issue view "$1"',
+    'source /etc/forge/env.sh; gh issue view "$1"',
+  ])('scans past `.`/`source` to the real CLI in an inline command (%s)', (command) => {
+    // Both branches must agree. Returning null here would make doctor print a
+    // ✓ for this override without ever checking that `gh` is installed, since
+    // it treats a null executable as "nothing to check".
+    const config = { 'issue-view': command };
+    const issueView = resolveAllConcepts(config).find(r => r.concept === 'issue-view');
+    expect(issueView?.source).toBe('override');
+    expect(issueView?.command).toBe(command);
+    expect(issueView?.executable).toBe('gh');
+  });
+
+  it('returns null for an inline command that is only builtins', () => {
+    // Nothing to check is the right answer when there genuinely is no CLI.
+    const config = { 'issue-view': 'set -e; export FOO=1' };
+    const issueView = resolveAllConcepts(config).find(r => r.concept === 'issue-view');
+    expect(issueView?.executable).toBeNull();
+  });
+
+  it('still reports a relative script path, which only starts with a dot', () => {
+    // `.` is skipped as a builtin only when it *is* the whole token — a
+    // `./tool` override must still be reported as the executable to check.
+    const config = { 'issue-view': './bin/my-forge issue view "$1"' };
+    const issueView = resolveAllConcepts(config).find(r => r.concept === 'issue-view');
+    expect(issueView?.executable).toBe('./bin/my-forge');
   });
 });

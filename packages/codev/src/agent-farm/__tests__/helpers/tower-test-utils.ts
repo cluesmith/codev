@@ -134,10 +134,12 @@ async function findAvailablePort(startPort: number): Promise<number> {
  * files into the real directory.
  *
  * The shared local key is copied in rather than left to be regenerated: the
- * test process authenticates its own HTTP/WS calls with the key from the real
- * directory (see `vitest-e2e-setup.ts` and `towerWsProtocols()`), so both sides
- * must present the same value or every request 401s. The key is the only thing
- * carried over — no cloud config, no DB, no log.
+ * test process authenticates its own HTTP/WS calls with whatever key
+ * `ensureLocalKey()` resolves in this process — the harness-sandboxed
+ * directory since #1597, never the developer's real one (see
+ * `vitest-setup.ts`, `vitest-e2e-setup.ts` and `towerWsProtocols()`) — so both
+ * sides must present the same value or every request 401s. The key is the only
+ * thing carried over — no cloud config, no DB, no log.
  */
 export function createIsolatedAgentFarmDir(): string {
   const dir = mkdtempSync(resolve(tmpdir(), 'codev-af-'));

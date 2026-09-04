@@ -13,7 +13,7 @@ import { EventEmitter } from 'node:events';
 import Database from 'better-sqlite3';
 import { GLOBAL_SCHEMA } from '../db/schema.js';
 import * as mailbox from '../db/mailbox.js';
-import { handleRequest } from '../servers/tower-routes.js';
+import { handleRequest, handleInboxList } from '../servers/tower-routes.js';
 import type { RouteContext } from '../servers/tower-routes.js';
 
 // The one db seam tower-routes uses: return a real in-memory DB, reseeded per test.
@@ -331,5 +331,186 @@ describe('GET /api/inbox/:id', () => {
     // which must reject any non-GET method rather than act on it.
     await handleRequest(makeReq('PUT', `/api/inbox/${row.id}`), res, makeCtx());
     expect(res._statusCode).toBe(405);
+  });
+});
+
+// ============================================================================
+// Issue 1450 — the WORKSPACE-SCOPED inbox route (/workspace/<b64>/api/inbox)
+//
+// The dashboard is served under /workspace/<base64-path>/ and calls its API with relative
+// `./api/...`, which lands in the workspace-scoped dispatcher rather than the Tower-level
+// route table. Before this change that dispatcher had no `inbox` branch, so the held-mail
+// popover's fetch 404'd. These tests pin the branch's scoping, its read-only-ness, and the
+// non-reachability that the redaction argument depends on.
+//
+// `WS` ('/home/user/project') does not exist on disk, so `normalizeWorkspacePath` falls back
+// to `resolve()` and returns it unchanged — the seeded rows and the decoded prefix agree.
+// The harness mocks `decodeWorkspacePath` as plain base64url (see the preamble).
+// ============================================================================
+
+/** The dashboard's URL for a workspace's held mail. */
+function wsInboxUrl(workspace: string, suffix = ''): string {
+  return `/workspace/${Buffer.from(workspace).toString('base64url')}/api/inbox${suffix}`;
+}
+
+describe('GET /workspace/<b64>/api/inbox (Issue 1450)', () => {
+  it('lists the held rows for the workspace named in the URL prefix', async () => {
+    const row = seedHeld();
+    const res = makeRes();
+    await handleRequest(makeReq('GET', wsInboxUrl(WS)), res, makeCtx());
+
+    expect(res._statusCode).toBe(200);
+    const rows = JSON.parse(res._body) as Array<Record<string, unknown>>;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      id: row.id,
+      workspacePath: WS,
+      toAgent: 'spir-1',
+      fromAgent: 'architect',
+      reason: 'busy',
+      escalated: false,
+    });
+  });
+
+  it('never surfaces the message body (Spec 1313 redaction rule)', async () => {
+    seedHeld();
+    const res = makeRes();
+    await handleRequest(makeReq('GET', wsInboxUrl(WS)), res, makeCtx());
+
+    expect(res._body).not.toContain('SECRET BODY');
+    expect(JSON.parse(res._body)[0]).not.toHaveProperty('body');
+  });
+
+  it('scopes to the URL workspace — another workspace\'s held mail is excluded', async () => {
+    const mine = seedHeld();
+    seedHeld({ workspacePath: '/home/user/other-project', toAgent: 'other-1' });
+
+    const res = makeRes();
+    await handleRequest(makeReq('GET', wsInboxUrl(WS)), res, makeCtx());
+
+    const rows = JSON.parse(res._body) as Array<{ id: string }>;
+    expect(rows).toHaveLength(1);
+    expect(rows[0].id).toBe(mine.id);
+  });
+
+  it('ignores ?workspace= — the prefix wins, so a query param cannot redirect the scope', async () => {
+    const mine = seedHeld();
+    seedHeld({ workspacePath: '/home/user/other-project', toAgent: 'other-1' });
+
+    const res = makeRes();
+    await handleRequest(
+      makeReq('GET', `${wsInboxUrl(WS)}?workspace=${encodeURIComponent('/home/user/other-project')}`),
+      res,
+      makeCtx(),
+    );
+
+    const rows = JSON.parse(res._body) as Array<{ id: string; workspacePath: string }>;
+    expect(rows).toHaveLength(1);
+    expect(rows[0].id).toBe(mine.id);
+    expect(rows[0].workspacePath).toBe(WS);
+  });
+
+  it('an EMPTY override scopes to nothing rather than widening to every workspace', async () => {
+    // Defensive: the dispatcher 400s a missing prefix, so a blank override is unreachable
+    // from the route today. But "unreachable" is a property of the caller, and the safe
+    // failure for a scoped call is zero rows, never every workspace's held mail.
+    seedHeld();
+    seedHeld({ workspacePath: '/home/user/other-project', toAgent: 'other-1' });
+
+    const res = makeRes();
+    handleInboxList(res, new URL('http://localhost/api/inbox'), '');
+
+    expect(JSON.parse(res._body)).toEqual([]);
+  });
+
+  it('lists pre-due --delay rows too, so the popover can group them as scheduled', async () => {
+    // This is the asymmetry Issue 1450's popover has to render: `listHeld` (this route) has
+    // no not_before filter, while `heldSummaryForWorkspace` (the badge count) does. The
+    // count is therefore a LOWER BOUND on this list's length, by design.
+    const due = seedHeld({ toAgent: 'due-agent' });
+    const preDue = seedHeld({ toAgent: 'scheduled-agent', notBefore: 9_999_999_999_999 });
+
+    const res = makeRes();
+    await handleRequest(makeReq('GET', wsInboxUrl(WS)), res, makeCtx());
+
+    const rows = JSON.parse(res._body) as Array<{ id: string; notBefore: number | null }>;
+    expect(rows.map((r) => r.id).sort()).toEqual([due.id, preDue.id].sort());
+    expect(rows.find((r) => r.id === preDue.id)?.notBefore).toBe(9_999_999_999_999);
+
+    // And the count surface excludes it — the two numbers legitimately differ.
+    expect(mailbox.heldSummaryForWorkspace(holder.db, WS, 2000).total).toBe(1);
+  });
+
+  it('omits rows that are no longer held', async () => {
+    const kept = seedHeld({ toAgent: 'kept' });
+    const dismissed = seedHeld({ toAgent: 'gone' });
+    mailbox.dismiss(holder.db, dismissed.id, 5000);
+
+    const res = makeRes();
+    await handleRequest(makeReq('GET', wsInboxUrl(WS)), res, makeCtx());
+
+    const rows = JSON.parse(res._body) as Array<{ id: string }>;
+    expect(rows).toHaveLength(1);
+    expect(rows[0].id).toBe(kept.id);
+  });
+
+  it('returns an empty list (not an error) when nothing is held', async () => {
+    const res = makeRes();
+    await handleRequest(makeReq('GET', wsInboxUrl(WS)), res, makeCtx());
+    expect(res._statusCode).toBe(200);
+    expect(JSON.parse(res._body)).toEqual([]);
+  });
+
+  // -------------------------------------------------------------- non-reachability
+  // The branch matches 'inbox' EXACTLY. These three assertions are what let the dashboard
+  // be described as a metadata-only, read-only surface: the body route and the mutating
+  // route simply do not exist under the workspace prefix.
+
+  it('does not expose the body-bearing single-row route under the workspace prefix', async () => {
+    const row = seedHeld();
+    const res = makeRes();
+    await handleRequest(makeReq('GET', wsInboxUrl(WS, `/${row.id}`)), res, makeCtx());
+
+    expect(res._statusCode).toBe(404);
+    expect(res._body).not.toContain('SECRET BODY');
+  });
+
+  it('does not expose dismiss under the workspace prefix — and the row survives', async () => {
+    const row = seedHeld();
+    const res = makeRes();
+    await handleRequest(makeReq('POST', wsInboxUrl(WS, `/${row.id}/dismiss`)), res, makeCtx());
+
+    expect(res._statusCode).toBe(404);
+    expect(mailbox.listHeld(holder.db, WS)).toHaveLength(1); // still held, not dismissed
+  });
+
+  it('rejects a non-GET method on the list route without mutating anything', async () => {
+    seedHeld();
+    const res = makeRes();
+    await handleRequest(makeReq('POST', wsInboxUrl(WS)), res, makeCtx());
+
+    expect(res._statusCode).toBe(404); // no POST branch → falls through to the API 404
+    expect(mailbox.listHeld(holder.db, WS)).toHaveLength(1);
+  });
+
+  it('leaves the Tower-level route behaviour unchanged (regression guard)', async () => {
+    const mine = seedHeld();
+    seedHeld({ workspacePath: '/home/user/other-project', toAgent: 'other-1' });
+
+    // Explicit ?workspace= still scopes...
+    const scoped = makeRes();
+    await handleRequest(
+      makeReq('GET', `/api/inbox?workspace=${encodeURIComponent(WS)}`),
+      scoped,
+      makeCtx(),
+    );
+    const scopedRows = JSON.parse(scoped._body) as Array<{ id: string }>;
+    expect(scopedRows).toHaveLength(1);
+    expect(scopedRows[0].id).toBe(mine.id);
+
+    // ...and omitting it still lists every workspace (the direct-caller convenience).
+    const all = makeRes();
+    await handleRequest(makeReq('GET', '/api/inbox'), all, makeCtx());
+    expect(JSON.parse(all._body)).toHaveLength(2);
   });
 });
