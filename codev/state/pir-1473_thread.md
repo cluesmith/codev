@@ -63,3 +63,87 @@ entirely and stays unobservable. Different boundary (already listed as uncovered
 `session-submit.ts:56-58`); will be documented in the review rather than papered over.
 
 Plan committed; sitting at `plan-approval`.
+
+## 2026-09-04 — Plan revision 2 (post-consult)
+
+Architect ran a 2-way consult (claude + codex) plus their own verification: REQUEST CHANGES, three
+blockers. I re-verified every claim against the source before revising — all held, and two were
+worse than described.
+
+### Blocker 1 — terminal reply traffic counts as human input (the one that reshapes the design)
+
+`Terminal.tsx:639` forwards everything xterm emits on `onData`, and xterm emits terminal *replies*
+through that same event. The client filter (`:655-661`) covers only DA/CPR/DECRPM and only while
+`rc.initialPhase` is true — set on connect (`:421`, `:462`), cleared by `flushInitialBuffer`
+(`:469`) on a short timer. So for a session's whole steady-state life the filter is OFF, and focus
+(`ESC[I`/`ESC[O`) and mouse reports are never filtered in any phase.
+
+This is the self-trip route my revision-1 `'delivery'` origin could not close, and I missed it:
+our write → repaint → query → browser reply → counted as foreign input. Worse than latency —
+`busy` is excluded from `isClassifierStuck`, so a chatty attached client would starve an agent
+silently, forever.
+
+Fix: server-side `stripTerminalReplies()` in `handleUserInput`, unconditional (afx attach, VS Code
+webview and mobile clients don't share the client filter). Signal-only — the bytes still reach the
+PTY, because the app asked for the reply.
+
+Left `composing` alone deliberately: replies already spuriously call `startComposing()`, but
+`stopComposing` drives the `'submit'` fast trigger and I'm not perturbing a delivery trigger inside
+a delivery-safety issue. Confirmed `get composing()` has no production consumer, so leaving it
+costs nothing. Follow-up in the review.
+
+### Blocker 2 — `racedByInput` was in the one place it would be suppressed
+
+The `verified === false` escalation is nested inside `if (echo)` (`:819-858`), and `echo` is null
+for short/raw sends. Worse: for the Enter-truncation case the needle is the message's FIRST line,
+which landed — so `verified` comes back **true** while the tail was lost, and `racedByInput` is the
+only signal for that failure. Moved outside the block, plus a `cause` discriminator on
+`UnverifiedDeliveryInfo` (an operator can't currently distinguish "header never appeared" from "a
+human typed into it mid-write" — different remedies).
+
+### Blocker 3 — types and four runtime-only fake breakages
+
+`WritableSession` needs `inputSeq`. Took codex's construction for the `tracked` wrapper: hard-code
+`session.write(data, 'delivery')` rather than threading an origin param, because a 1-arg function
+IS assignable to a 2-arg type — TS would not catch a forgotten forward, and the failure mode is
+"mail never delivers". Verified `submitMessagePaced` has exactly ONE production caller
+(`mailbox-wiring.ts:301`), so hard-coding cannot mis-tag an operator write.
+
+Four doubles break at runtime, not compile time: `tower-routes.test.ts:226` (NaN → every send test
+in the file holds), `tower-websocket.test.ts:61`, `spec-1313-paced-write-drop.test.ts:33-45`, and
+`send-architect-identity.test.ts:108` (calls `s.write(msg)` on a REAL session to simulate a
+delivery — adding fields doesn't fix it, it must pass `'delivery'`).
+
+### Decisions I had to make and record
+
+- **`lastInputAt > lastDataAt`** (claude's constant-free R2 signal): evaluated, REJECTED as
+  primary. It deadlocks permanently on a keystroke that provokes no output — the condition never
+  clears, `busy` never escalates, that agent's mail never delivers. The reply filter removes the
+  reply-driven deadlock, not the ignored-keystroke one. Recorded as the next tightening in BOUNDED
+  form (hold while un-echoed, capped ~1s, then fall back) if the dev-gate measurement says 300 ms
+  is too loose.
+- **Counter naming:** `.length` is UTF-16 code units, so `inputBytes` would lie → `inputSeq`,
+  documented as a change counter that exists to differ, not to total.
+- **"Closes R2" → "bounds R2".** Named the surviving residuals in the plan, the code comments and
+  (later) the review. Gave the 300 ms a rollback criterion.
+- **"A keystroke removes nothing" was wrong** — a human Enter mid-write submits our partial body;
+  `^U`/`^W`/`^C` truncate. Flag-not-hold survives, but the WARN text has to say "may have been
+  truncated or submitted early".
+- **Delayed `^C` rationale was wrong** — `tower-routes.ts:1834` is documented as firing UNATTENDED.
+  It should still count, but for the reason that it changes composer state, not "a human is there".
+- **Counter's real justification restated:** claude was right that the settle alone largely covers
+  headline R1. The counter is load-bearing for (a) waits longer than the settle —
+  `OPERATOR_SUBMIT_WAIT_CEILING_MS = 2000`, so a lock wait can be 2 s between sample and precheck —
+  and (b) verdict-memo invalidation, which no settle bounds. Named both, or a future reader deletes
+  the counter as redundant.
+
+### Two corrections in my favour (architect's own grep)
+
+- `isUserIdle`/`lastInputAt` have NO production consumers — Spec 403 is a test constraint, not a
+  live one. The gate becomes `lastInputAt`'s first real consumer.
+- `QUIESCENCE_DEBOUNCE_MS = 500` > 300, so quiescence-triggered passes are automatically
+  input-settled in the normal case. But I had to sharpen the `'submit'` claim the other way:
+  `scheduleDrain` runs in a microtask, so that pass is now *provably always* held, not "largely
+  unaffected".
+
+Revision 2 committed. Still at `plan-approval`.
