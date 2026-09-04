@@ -77,7 +77,16 @@ export async function handleTerminalWebSocket(ws: WebSocket, session: PtySession
           const cols = msg.payload.cols as number;
           const rows = msg.payload.rows as number;
           if (typeof cols === 'number' && typeof rows === 'number') {
-            session.resize(cols, rows);
+            // Issue #1482: this is the viewer's geometry, and the render gate classifies the
+            // session's mirror at the geometry Tower believes. A resize that never reached the
+            // process leaves those two disagreeing, which is how mail comes to be held `busy`
+            // indefinitely — so a drop is logged rather than discarded.
+            if (!session.resize(cols, rows)) {
+              console.warn(
+                `[tower-ws] resize dropped for session ${session.id}: ${cols}x${rows} not applied ` +
+                  `(no live process or dropped shellper write) — dimensions unchanged`,
+              );
+            }
           }
         } else if (msg.type === 'ping') {
           if (ws.readyState === WebSocket.OPEN) {

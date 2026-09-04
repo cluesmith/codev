@@ -267,6 +267,7 @@ CREATE TABLE IF NOT EXISTS mailbox (
   status TEXT NOT NULL DEFAULT 'held'
     CHECK(status IN ('held', 'delivered', 'superseded', 'dismissed')),
   reason TEXT CHECK(reason IN ('busy', 'no-profile', 'no-live-pty')),  -- why-held; null once delivered
+  detail TEXT,                            -- Issue #1482: the gate verdict's detail behind a busy hold ('user-text' = a human at the line; 'no-region-end'/'no-composer-marker' = the classifier could not verify). Null for non-gate holds and once delivered. NO CHECK on purpose -- SQLite cannot ALTER one in, so migration v18 could not match it and a fresh install would diverge from an upgraded one; the value set is enforced in TypeScript (MailboxGateDetail)
   supersede_key TEXT,                     -- cron-only; null for direct sends
   escalated INTEGER NOT NULL DEFAULT 0,   -- set once escalation age crossed (visibility only)
   not_before INTEGER,                     -- epoch ms; delayed-send due time (Spec 1313 round 3, --delay). null = deliver ASAP; a row is deliverable only when not_before IS NULL OR not_before <= now

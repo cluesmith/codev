@@ -77,10 +77,12 @@ describe('PR close-keyword directive (#685)', () => {
    *
    * New directive text added for #685 must use `<N>` placeholders, not
    * `{{issue.number}}`, inside the PR body template (the lines between
-   * `gh pr create ... --body "$(cat <<'EOF'` and the matching `EOF`).
+   * `CODEV_PR_BODY="$(cat <<'EOF'` and the matching `EOF`). #1455 moved the
+   * body from `gh pr create --body` into that environment variable, so the
+   * match accepts either spelling.
    *
-   * The bugfix prompt's `{{issue.number}}` in `gh pr create --title` and in
-   * the notification `afx send architect` command predates this fix and is
+   * The bugfix prompt's `{{issue.number}}` in the PR title and in the
+   * notification `afx send architect` command predates this fix and is
    * out of scope — this test only guards the PR body template itself.
    */
   const prBodyTargets: PromptTarget[] = [
@@ -95,7 +97,9 @@ describe('PR close-keyword directive (#685)', () => {
     '$protocol PR body template does not contain unrendered {{issue...}} tokens',
     ({ relPath }) => {
       const content = fs.readFileSync(path.join(repoRoot, relPath), 'utf-8');
-      const bodyMatch = content.match(/--body\s+"\$\(cat\s+<<\s*'(\w+)'([\s\S]*?)^\1\s*$/m);
+      const bodyMatch = content.match(
+        /(?:--body|CODEV_PR_BODY=)\s*"\$\(cat\s+<<\s*'(\w+)'([\s\S]*?)^\1\s*$/m,
+      );
       expect(bodyMatch, `PR body template not found in ${relPath}`).not.toBeNull();
       const body = bodyMatch![2];
       expect(body, `${relPath} PR body contains {{issue.*}}`).not.toMatch(/\{\{issue\./);

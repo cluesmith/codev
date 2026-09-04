@@ -25,7 +25,7 @@
 
 import type Database from 'better-sqlite3';
 import { supersede, getById, countHeldWithKey } from '../db/mailbox.js';
-import type { MailboxReason } from '../db/types.js';
+import type { MailboxGateDetail, MailboxReason } from '../db/types.js';
 import { deliverAgentMailSerialized, type DeliveryPorts } from './mailbox-delivery.js';
 
 /** The pseudo-agent identity every cron notification is sent as. */
@@ -46,6 +46,12 @@ export interface CronDeliveryResult {
   outcome: CronOutcome;
   /** Why held, when `held`/`superseded`; null when `delivered`/`unresolved`. */
   reason: MailboxReason | null;
+  /**
+   * The gate detail behind a `busy` reason (Issue #1482); null for a non-gate hold and for
+   * `delivered`/`unresolved`. A cron send has no human waiting on a response, so its LOG line
+   * is the only place this hold is ever described — which is exactly why it needs the detail.
+   */
+  detail: MailboxGateDetail | null;
   /** The persisted row id (audit); null only when `unresolved`. */
   mailboxId: string | null;
 }
@@ -117,7 +123,7 @@ export async function deliverCronMail(
 
   const stored = getById(db, row.id);
   if (stored?.status === 'delivered') {
-    return { outcome: 'delivered', reason: null, mailboxId: row.id };
+    return { outcome: 'delivered', reason: null, detail: null, mailboxId: row.id };
   }
   // Held. `reason` is set by the delivery pass when it holds; default to `busy` for
   // the rare case where an older row for the same agent delivered first and left ours
@@ -125,6 +131,7 @@ export async function deliverCronMail(
   return {
     outcome: replacedPrior ? 'superseded' : 'held',
     reason: stored?.reason ?? 'busy',
+    detail: stored?.detail ?? null,
     mailboxId: row.id,
   };
 }

@@ -40,17 +40,18 @@ import {
   getById,
   listHeld,
   markDelivered,
-  setHeldReason,
+  setHeldVerdict,
   pruneTerminal,
   findEscalatable,
   markEscalated,
   markEscalatedDelivered,
   findStarvingAgents,
 } from '../db/mailbox.js';
-import type { DbMailbox, MailboxReason } from '../db/types.js';
+import type { DbMailbox, MailboxGateDetail, MailboxReason } from '../db/types.js';
 import type { GateProfile, GateVerdict } from './render-gate.js';
 import type { PacedSubmitResult } from './message-write.js';
 import { KeyedSerializer } from './write-queue.js';
+import { formatVerdict, isUnverifiableVerdict } from '@cluesmith/codev-sdk/hold-verdict';
 
 /**
  * The structural view of a live PTY session the delivery path needs. `PtySession`
@@ -279,10 +280,26 @@ export interface HeldOwnerNoticeInfo {
   toAgent: string;
   /** Its current why-held reason (busy/no-profile/no-live-pty), if the gate set one. */
   reason: MailboxReason | null;
+  /**
+   * The gate detail behind a `busy` reason (Issue #1482), if one is recorded. This is what
+   * decides WHICH notice the owner gets: `user-text` means a human is legitimately at the
+   * composer (it will clear when they finish), while `no-region-end`/`no-composer-marker`
+   * means the classifier cannot verify the composer at all and the mail will never deliver
+   * on its own. Different situations, different remedies, so different wording.
+   */
+  detail: MailboxGateDetail | null;
   /** How long the oldest eligible held row has been stuck, in ms. */
   ageMs: number;
   /** How many eligible held rows are backed up for the agent. */
   heldCount: number;
+  /**
+   * How many CONSECUTIVE not-clean gate checks this agent's mail has seen (Issue #1482) — the
+   * drainer's existing per-agent streak, not new state. It turns "held ~7m" into "held ~7m,
+   * re-confirmed across 41 checks", which is the difference between a plausible pause and a
+   * composer that is genuinely, continuously occupied. 0 when no streak is being tracked
+   * (e.g. a notice pass on a Tower that just restarted).
+   */
+  streak: number;
 }
 
 /**
@@ -323,6 +340,12 @@ export interface EscalationInfo {
   /** How long the row had been held when it escalated, in ms. */
   ageMs: number;
   reason: MailboxReason | null;
+  /**
+   * The gate detail behind a `busy` reason (Issue #1482), read off the row. Null for a
+   * non-gate hold. Carried onto the SSE payload so a dashboard/VSCode toast can say WHY the
+   * row is stuck, not merely that it is.
+   */
+  detail: MailboxGateDetail | null;
 }
 
 /** Outcome of one delivery pass over an agent's held mail. */
@@ -364,12 +387,21 @@ export interface DeliveryOutcome {
  * `busy`/`user-text` streak is deliberately excluded (a human legitimately at the line).
  * Shared by `recordStreak` and the cooldown branch of {@link MailboxDrainer.tick} so a
  * skipped tick and a real pass agree on what counts as classifier-stuck (CMAP round 3).
+ *
+ * This is the POLICY-side name for the same question `isUnverifiableVerdict` answers for the
+ * presentation surfaces, so it delegates rather than restating the rule (maintainer review,
+ * PR #1604). Two copies of "which verdicts never clear on their own" is one edit away from an
+ * escalation policy and an operator-facing remedy disagreeing about the same row. The wrapper
+ * is kept rather than collapsed to a single function because the two callers want different
+ * types: this one is typed on the DB/gate unions and reads naturally beside the escalation
+ * policy it serves, while the shared predicate takes the plain strings the CLI, the dashboard
+ * and the VS Code toast actually hold.
  */
 function isClassifierStuck(
   reason: MailboxReason | null,
   detail: GateVerdict['detail'] | undefined
 ): boolean {
-  return reason === 'no-profile' || detail === 'no-region-end' || detail === 'no-composer-marker';
+  return isUnverifiableVerdict(reason, detail);
 }
 
 /**
@@ -551,9 +583,14 @@ export async function deliverAgentMail(
   const held = findHeldForAgent(db, workspacePath, toAgent, ports.now());
   if (held.length === 0) return { delivered: [], reason: null };
 
+  // Every NON-gate hold, plus the post-classify re-holds (token moved / not settled). It
+  // deliberately nulls `detail` (Issue #1482): a detail describes a gate verdict, and holding
+  // for `no-live-pty` — or re-holding a screen that moved under us — is not one. Leaving the
+  // previous detail in place would let `afx inbox` keep asserting "a human is at the composer"
+  // about a session whose PTY has since died.
   const hold = (reason: MailboxReason): DeliveryOutcome => {
     for (const row of held) {
-      if (row.reason !== reason) setHeldReason(db, row.id, reason, ports.now());
+      if (row.reason !== reason || row.detail !== null) setHeldVerdict(db, row.id, reason, null, ports.now());
     }
     return { delivered: [], reason };
   };
@@ -594,8 +631,14 @@ export async function deliverAgentMail(
     // Carry the gate detail so a sustained classifier-stuck streak (a drifted profile
     // or an unrenderable frame) escalates to liveness telemetry instead of holding silently.
     const reason = verdict.reason ?? 'busy';
+    // `empty` is the CLEAN detail and cannot reach here (a clean verdict does not take this
+    // branch); narrowing it away keeps the persisted set to the three not-clean values the
+    // column's type admits.
+    const detail = verdict.detail === 'empty' ? null : verdict.detail;
     for (const row of held) {
-      if (row.reason !== reason) setHeldReason(db, row.id, reason, ports.now());
+      if (row.reason !== reason || row.detail !== detail) {
+        setHeldVerdict(db, row.id, reason, detail, ports.now());
+      }
     }
     return { delivered: [], reason, detail: verdict.detail };
   }
@@ -1047,10 +1090,11 @@ export class MailboxDrainer {
         mailboxId: row.id,
         ageMs,
         reason: row.reason,
+        detail: row.detail,
       });
       ports.log(
         `[mailbox] ESCALATED ${row.id.slice(0, 8)}… → ${row.to_agent} @ ${path.basename(row.workspace_path)} ` +
-          `(held ${Math.round(ageMs / 1000)}s, reason ${row.reason ?? 'held'}) — visibility only, not delivered`
+          `(held ${Math.round(ageMs / 1000)}s, reason ${formatVerdict(row.reason, row.detail)}) — visibility only, not delivered`
       );
     }
     // A row's escalated flag flipped → the overview-derived `mailboxEscalated` attention
@@ -1101,8 +1145,15 @@ export class MailboxDrainer {
           workspacePath: agent.workspacePath,
           toAgent: agent.toAgent,
           reason: agent.reason,
+          // Issue #1482: the gate detail decides which notice the owner gets, and the streak
+          // says how many consecutive checks confirmed it. Both are already tracked — the
+          // detail on the row (aggregated by findStarvingAgents), the streak in the drainer's
+          // own map — so this costs no new state, just carrying what we have to where the
+          // human reads it.
+          detail: agent.detail,
           ageMs: now - agent.stuckSince,
           heldCount: agent.count,
+          streak: this.notCleanStreak.get(key) ?? 0,
         });
         if (enqueued) this.notifiedAgents.add(key);
       }

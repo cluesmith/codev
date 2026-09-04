@@ -241,11 +241,13 @@ describe('Spec 1313 — migration + self-heal source guards', () => {
     const dbSrc = read('../db/migrations.ts');
     // The version constant MUST advance — else a fresh install records only 1..15
     // and the v16 block only converges on a later open (the omission #23 flagged).
-    // It now sits at 17 (Spec 1313 round 3 added the not_before mailbox migration);
-    // both v16 and v17 must be registered under it.
-    expect(dbSrc).toContain('GLOBAL_CURRENT_VERSION = 17');
+    // It now sits at 18 (Spec 1313 round 3 added the not_before mailbox migration at v17;
+    // Issue #1482 added the mailbox detail column at v18); v16, v17 and v18 must all be
+    // registered under it.
+    expect(dbSrc).toContain('GLOBAL_CURRENT_VERSION = 18');
     expect(dbSrc).toContain('Migration v16');
     expect(dbSrc).toContain('Migration v17');
+    expect(dbSrc).toContain('Migration v18');
     expect(dbSrc).toContain('ALTER TABLE terminal_sessions ADD COLUMN command TEXT');
     // Fresh installs get the column from GLOBAL_SCHEMA, not the migration.
     expect(read('../db/schema.ts')).toMatch(/terminal_sessions[\s\S]*command TEXT/);

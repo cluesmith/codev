@@ -17,6 +17,7 @@ import { getTowerClient, DEFAULT_TOWER_PORT } from '../lib/tower-client.js';
 import { logger, fatal } from '../utils/logger.js';
 import { getConfig } from '../utils/config.js';
 import { MAX_SENDER_ID_LENGTH } from '../utils/message-format.js';
+import { formatVerdict } from '@cluesmith/codev-sdk/hold-verdict';
 
 /** One held row as returned by GET /api/inbox — metadata only, never the body. */
 interface InboxRow {
@@ -25,6 +26,7 @@ interface InboxRow {
   toAgent: string;
   fromAgent: string | null;
   reason: string | null; // 'busy' | 'no-profile' | 'no-live-pty'
+  detail: string | null; // Issue #1482: 'user-text' | 'no-region-end' | 'no-composer-marker'; null for a non-gate hold
   escalated: boolean;
   createdAt: number; // epoch ms
   /**
@@ -63,6 +65,7 @@ interface InboxMessage {
   fromWorkspace: string | null;
   status: string; // 'held' | 'delivered' | 'superseded' | 'dismissed'
   reason: string | null; // 'busy' | 'no-profile' | 'no-live-pty'
+  detail: string | null; // Issue #1482: 'user-text' | 'no-region-end' | 'no-composer-marker'; null for a non-gate hold
   escalated: boolean;
   body: string;
   createdAt: number; // epoch ms
@@ -88,6 +91,36 @@ function formatDuration(ms: number): string {
 /** Compact human age ("5s", "3m", "2h", "1d") from an epoch-ms timestamp. */
 function formatAge(createdAt: number, now: number): string {
   return formatDuration(now - createdAt);
+}
+
+/**
+ * Fit `text` into `width`, marking a cut with an ellipsis rather than silently losing the tail
+ * (Issue #1482). The REASON column's values are now compound (`busy:no-composer-marker`), and a
+ * bare `.slice()` would render one of them as a shorter value that reads like a DIFFERENT
+ * verdict. The ellipsis is one character, so the visible prefix is `width - 1`.
+ */
+function truncate(text: string, width: number): string {
+  return text.length <= width ? text : `${text.slice(0, width - 1)}…`;
+}
+
+/**
+ * One line explaining a gate detail, for `afx inbox show` (Issue #1482).
+ *
+ * The split that matters to an operator is "will this clear by itself?": `user-text` will (a
+ * human is at the composer), the other two will not (the classifier cannot find a bounded
+ * composer region at all, so no amount of waiting helps).
+ */
+function describeDetail(detail: string): string {
+  switch (detail) {
+    case 'user-text':
+      return 'a draft or menu occupies the composer; a human is at the line and delivery resumes when it clears';
+    case 'no-region-end':
+      return 'the composer marker was found but nothing bounds the region below it (a partial frame, or dimensions that do not match the real terminal) — this will not clear on its own';
+    case 'no-composer-marker':
+      return 'no composer marker on screen at all (a boot/wrapper screen, a drifted app profile, or an unrenderable frame) — this will not clear on its own';
+    default:
+      return 'unrecognized gate detail';
+  }
 }
 
 /**
@@ -132,7 +165,9 @@ export async function inboxList(options: InboxListOptions = {}): Promise<void> {
     return {
       id: row.id,
       age: preDue ? `→${formatDuration(row.notBefore! - now)}` : formatAge(row.createdAt, now),
-      reason: preDue ? 'scheduled' : `${row.reason ?? 'held'}${row.escalated ? '!' : ''}`,
+      reason: preDue
+        ? 'scheduled'
+        : `${formatVerdict(row.reason, row.detail)}${row.escalated ? '!' : ''}`,
       fromTo: `${row.fromAgent ?? '?'} → ${row.toAgent}`,
       workspace: row.workspacePath.split('/').pop() || row.workspacePath,
     };
@@ -149,16 +184,19 @@ export async function inboxList(options: InboxListOptions = {}): Promise<void> {
     c.fromTo.length > maxFromToWidth ? `${c.fromTo.slice(0, maxFromToWidth - 1)}…` : c.fromTo,
   );
   const fromToWidth = Math.max(fromToHeader.length, ...shown.map((c) => c.length)) + 2;
-  const widths = [38, 6, 13, fromToWidth, 14];
+  // REASON is 20 wide, not 13 (Issue #1482): it carries the gate detail as a `reason:detail`
+  // sub-code, and `busy:no-region-end` (18) has to fit. Only `busy:no-composer-marker` truncates,
+  // and it stays unambiguous at 20 (`busy:no-composer-ma…`).
+  const widths = [38, 6, 20, fromToWidth, 14];
   logger.row(['ID', 'AGE', 'REASON', fromToHeader, 'WORKSPACE'], widths);
   logger.row(
-    ['─'.repeat(36), '─'.repeat(5), '─'.repeat(12), '─'.repeat(fromToWidth - 1), '─'.repeat(13)],
+    ['─'.repeat(36), '─'.repeat(5), '─'.repeat(19), '─'.repeat(fromToWidth - 1), '─'.repeat(13)],
     widths,
   );
 
   cells.forEach((cell, i) => {
     logger.row(
-      [cell.id, cell.age, cell.reason.slice(0, 13), shown[i], cell.workspace.slice(0, 14)],
+      [cell.id, cell.age, truncate(cell.reason, 20), shown[i], cell.workspace.slice(0, 14)],
       widths,
     );
   });
@@ -190,6 +228,9 @@ export async function inboxShow(id: string, options: InboxShowOptions = {}): Pro
   logger.header(`Message ${row.id}`);
   logger.kv('Status', `${row.status}${row.escalated ? ' (escalated)' : ''}`);
   logger.kv('Reason', row.reason ?? '—');
+  // Issue #1482: spelled out rather than shown as the list's `reason:detail` sub-code, because
+  // this is the view an operator opens when the sub-code is the thing they do not understand.
+  if (row.detail) logger.kv('Detail', `${row.detail} — ${describeDetail(row.detail)}`);
   logger.kv('From → To', `${from} → ${row.toAgent}`);
   logger.kv('Workspace', row.workspacePath);
   logger.kv('Created', new Date(row.createdAt).toISOString());
