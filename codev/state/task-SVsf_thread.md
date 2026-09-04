@@ -126,3 +126,14 @@ five the review named. Fixing `user-identity`'s exit-0-on-error handling require
 `tea api user` before the jq pipe, which moves `tea` off the first substantive line — so
 without a header of its own, the fix for one review item would have caused the regression a
 different item was closing.
+
+## Flaky Tests
+
+`shellper-husk-sweep.e2e.test.ts` > "reaps a genuine husk (unregistered + childless) on the
+next periodic tick" (Tower Integration Tests) failed once on the first CI run of the pushed
+branch and passed on re-run with no code change. It asserts `isAlive(pid)` immediately after
+`createPersistentTerminal` returns — a process-liveness race, PIR #1227's territory. Nothing
+in this PR touches Tower: the diff is gitea forge scripts, `forge-contracts.ts` comments, two
+skill docs and one test file. Left alone rather than skipped, since one observation is not
+enough to call it chronically flaky; noted here so the next person who sees it red has a
+prior.
