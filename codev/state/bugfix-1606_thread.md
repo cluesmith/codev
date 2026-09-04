@@ -124,4 +124,17 @@ step the diff and the strip no longer reads `Files · send` when there's nothing
 
 Non-substantial changes (docs + comment, zero behavior change), so CMAP was not re-run.
 Sent the single gate notification with all three verdicts; ran `porch done` to fire the pr gate.
-Awaiting architect approval (`porch approve bugfix-1606 pr`) before merge.
+
+## At the pr gate — holding (2026-09-04)
+
+Architect review of PR #1607: **APPROVE**. Rulings:
+- **Scope call decided**: PR stays as-is. The MAINTAIN/EXPERIMENT/SPIKE phase registrations
+  (Claude's point 3) are now **follow-up issue #1609** (architect's lane) — do NOT expand this PR.
+- The `investigate`-by-id RESEARCH-nuance handling and the `phaseArtifactVerb` split note both
+  confirmed correct.
+- The **pr gate word rests with the owner** (a CMAP/architect APPROVE is not gate authorization).
+  The owner's decision and the physical-deck hardware check (once he links the deck to this
+  worktree build) are both in motion. Architect: "hold at the gate."
+
+**Status: holding at the pr gate. Not running `porch approve` — awaiting the owner's explicit
+gate decision.** Nothing actionable for me until then.
