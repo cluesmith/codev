@@ -175,3 +175,130 @@ that exists and invite a duplicate retry; and the stale "15 concepts" counts in 
 
 Re-verified live afterwards: PR #17 on the Forgejo scratch repo, body/base/head correct on the
 server, closed and branch deleted.
+
+---
+
+## Maintainer-side finish (builder `task-H71_`, 2026-09-03)
+
+waleedkadous reviewed with `changes requested` and then decided the maintainer would push
+the remaining items directly onto this branch rather than hand the contributor a list —
+`maintainerCanModify` was on. No rebase, no squash: every existing commit and its authorship
+stands, and this work is a commit on top.
+
+### The must-fix reverses our own previous advice
+
+CMAP round 4 (the integration reviewer's, on the PR) asked for `pr-create` to be added to the
+Linear preset's disabled list, reasoning that Linear ships no `pr-create.sh` so it would
+silently fall through to `gh pr create` — the #1455 bug class. The contributor took it in
+`eb7072695`, correctly, as the reviewer stated it.
+
+The reviewer was wrong, and this is the interesting part of the whole PR. **Fall-through is the
+design, not the bug**, for Linear specifically. Spec 719 says so in as many words: Linear is a
+*hybrid* forge that owns issues while PRs stay on GitHub, and 719 exists partly to fix
+`buildPresetFromScripts`, which used to set `null` for script-less concepts —
+"this fundamentally breaks the hybrid forge model."
+
+The tell is local and cheap: Linear's preset disables only `team-activity` and
+`on-it-timestamps`. `pr-merge`, `pr-view`, `pr-diff`, `pr-search`, `pr-exists` all fall through
+untouched. Disabling `pr-create` alone would have made Linear the one provider able to *merge*
+a PR it cannot *open*. An asymmetry that stark inside a single preset is worth a second look
+before acting on it.
+
+Generalizing: "silent fall-through" is the #1455 bug class only where the fallback tool cannot
+do the job. For Gitea and GitLab, `gh` genuinely cannot open the PR — falling through is a
+silent failure. For Linear, `gh` is the *correct* tool, because the repository really is on
+GitHub. Same mechanism, opposite verdict; the provider's nature decides which.
+
+### Also taken (both small, both from the maintainer's review)
+
+- `doctor.ts:1052,1070` still said "all 15 concepts"; `KNOWN_CONCEPTS` has 18. The PR had
+  already corrected the same drift in `forge.ts` and `arch.md` and missed these two.
+- `eb7072695` added `.`/`source` to `SHELL_BUILTINS`, which governs **both** branches of
+  `extractExecutable`. The contributor tested the script-file branch; the inline-command branch
+  had no coverage. Writing that test is what exposed the defect below.
+
+### Deferred, deliberately, as issues
+
+- #1610 — the ~75-word `pr-create` paragraph is copied into 10 prompt files (5 protocols × 2
+  trees), with an 11th differently-worded variant in PIR. `{{> include}}` is the established
+  mechanism and Spec 1280 pushed hard on prompt size.
+- #1611 — PIR's review prompt still hardcodes `gh pr edit`/`pr view`/`pr merge` *after* the
+  newly-routed create. The `view`/`merge` two bypass concepts that already ship, so a Gitea
+  user's forge config is silently ignored at the merge. Worth noting `pr_create_command` is
+  currently the only substitution `porch/prompts.ts` wires (`prompts.ts:124`), so routing those
+  needs new substitutions, and `pr-edit` needs a whole new concept.
+
+### Gotcha for the next builder in this worktree
+
+`.builders/task-H71_` had no `node_modules`. `pnpm --filter … build` fails with
+`tsc: command not found`, and piping it to `tail` masks the non-zero exit — it reads as green.
+Run `pnpm install` first, and check the exit status, not the last ten lines.
+
+Verified: build clean, full suite **4905 passed / 48 skipped / 0 failed**, exactly +3 over the
+contributor's 4902 baseline, matching the net test count (−1 replaced, +4 added).
+
+
+### CMAP on the delta: codex REQUEST_CHANGES · claude REQUEST_CHANGES
+
+Both lanes were right, and both findings changed the shipped code. Worth recording because in
+each case my first instinct was to defend the original call.
+
+**codex — the `doctor.test.ts` mock is stale, not just its comment.** I had left it alone
+reasoning that "all 15 concepts" *accurately* described that file's own 15-item fixture. True
+as stated, and beside the point: the fixture omits `issue-search`, `repo-archive`, and —
+the part that matters — `pr-create`, the concept this very PR adds. So doctor's rendering of
+the new concept was never exercised. Synced to all 18, with a check that the list equals
+`KNOWN_CONCEPTS`. Lesson: "the comment matches the code" is not the same question as "the code
+is right."
+
+**claude — the inline branch of `extractExecutable` had become a silent-success hole.**
+This is the real find. `SHELL_BUILTINS` governs two branches that now disagreed:
+
+| branch | on hitting a builtin |
+|---|---|
+| script-file (`:214-227`) | keeps scanning, finds `gh` |
+| inline (`:239-243`) | returned `null` immediately |
+
+And `doctor.ts` reads `r.executable ? commandExists(r.executable) : true` — a null executable
+means *nothing to check*. So after `eb7072695`, an inline override `. env.sh; gh issue view "$1"`
+rendered `✓ issue-view override —` and doctor never checked that `gh` existed. Before the
+change it at least warned, albeit about the wrong thing. That is #1455's own failure shape
+reappearing inside the reporter built for #1455.
+
+I had been about to *pin that as correct* — my test asserted `executable: null` and my comment
+called it "the honest answer." A green test with a confident comment is how a gap becomes
+canon; the next contributor to notice it would have read the test as intent and backed out.
+The inline branch now scans past builtins like its sibling, and the tests assert `'gh'`.
+
+Scope call, made explicitly rather than by default: this was **not** on the maintainer's
+MUST/SHOULD/SKIP list. Fixed anyway because (a) it is four lines, (b) the defect is introduced
+by this PR rather than pre-existing, so it is not the "pre-existing → file an issue" class the
+SKIP items were, and (c) shipping the alternative meant shipping a test that entrenched it.
+Flagged prominently on the PR so the maintainer can drop it.
+
+Also taken from the claude lane: sibling-style `toContain('github/pr-create.sh')`; a
+class-level guard asserting Linear disables *only* `team-activity`/`on-it-timestamps` (catches
+any future PR-concept disable, not just `pr-create` by name); and one sentence in
+`codev/resources/commands/forge.md` — a file this PR already edits, with no skeleton twin —
+recording that `linear` exists and is hybrid. It had shipped undocumented since spec 719.
+
+### Process scar: a reviewer mutated the worktree mid-commit
+
+The claude lane mutation-tests findings by editing files. It re-added `'pr-create'` to
+`forge.ts:134` to prove my replacement test bites — and my `git commit` landed *inside that
+window*. The result, `82631e270`, carried the new comment saying "falls through" directly above
+a line that still disabled it: a commit that contradicted its own message, failed its own new
+test, and whose message quoted a passing suite that was never run against that tree. It was
+caught only because the reviewer reported what it had done.
+
+Nothing had been pushed, so the two maintainer commits were rebuilt from the corrected tree
+(contributor commits never touched; a backup ref was cut first and the working tree verified
+byte-identical across the `--soft` reset).
+
+Takeaway for anyone running consult lanes with file access against a live worktree: they can
+write. Either run them against a scratch copy, or don't commit while a lane is in flight —
+`git status` immediately before `git commit` is not enough when another process is editing
+between the two.
+
+Final: build clean, full suite **4907 passed / 48 skipped / 0 failed**, +5 over the
+contributor's 4902 baseline (−1 replaced, +6 added).
