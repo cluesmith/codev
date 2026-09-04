@@ -1,7 +1,7 @@
 id: '1592'
 title: vscode-issue-view-omits-core-m
 protocol: pir
-phase: plan
+phase: implement
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -17,4 +17,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-09-02T22:57:29.962Z'
-updated_at: '2026-09-04T09:02:33.158Z'
+updated_at: '2026-09-04T09:02:40.257Z'
