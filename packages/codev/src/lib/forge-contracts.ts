@@ -79,13 +79,17 @@ export interface PrListItem {
   mergedAt?: string;
   author?: { login: string };
   /**
-   * Logins of users requested as reviewers. Emitted by every forge's `pr-list`
-   * script (GitHub flattens gh's reviewer objects to logins; GitLab/Gitea emit
-   * `[]` as they expose no GitHub-equivalent per-user review-request list).
-   * Consumed by the VSCode PR sidebar to bucket "review-requested" PRs.
+   * Logins of users requested as reviewers. Every preset populates it for real:
+   * GitHub flattens gh's reviewer objects to logins, GitLab maps glab's
+   * `.reviewers[].username`, and Gitea maps the REST `requested_reviewers[]`
+   * (team reviewers carry no login and are dropped). Consumed by the VSCode PR
+   * sidebar to bucket "review-requested" PRs.
    */
   reviewRequests: string[];
-  /** Whether the PR is a draft. GitLab/Gitea emit `false` (not exposed). */
+  /**
+   * Whether the PR is a draft. Every preset reports it for real — GitLab from
+   * the merge request's `draft`/WIP flag, Gitea from the REST `draft` flag.
+   */
   isDraft: boolean;
 }
 

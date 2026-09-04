@@ -140,6 +140,16 @@ Some Gitea concepts (`pr-search`, `pr-diff`) are disabled by default since `tea`
 }
 ```
 
+**`CODEV_REPO` means two different things.** For `repo-archive` it is an *input*: the
+`owner/repo` of the foreign repository to download, supplied by the caller. For the Gitea
+preset's read concepts (`pr-view`, `pr-list`, `pr-exists`, `issue-view`, `recently-merged`) it
+is an *override*: `tea api` needs an explicit `owner/repo` in the endpoint path, and those
+scripts default to deriving it from the `origin` remote, so `CODEV_REPO` only comes into play
+when that derivation is wrong or unavailable (a worktree with no `origin`, or reading a
+different repo than the checkout). The scripts fail fast with a message naming `CODEV_REPO`
+rather than issuing a `repos//…` request. Exporting `CODEV_REPO` globally therefore retargets
+every Gitea read at that repo — set it per invocation instead.
+
 ### Custom Forge (any platform)
 
 For unsupported platforms, configure each concept individually:

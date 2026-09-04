@@ -47,6 +47,8 @@ Built-in presets: `github` (default), `gitlab` (via `glab`), `gitea` (via `tea`)
 
 **Note:** Non-GitHub presets are best-effort. Output schemas may differ from GitHub's JSON contracts. Non-conforming JSON returns `null` — consumers handle this gracefully. Override individual concepts if a preset doesn't match your CLI version.
 
+**`CODEV_REPO` is overloaded.** For `repo-archive` it is an input: the `owner/repo` to download. For the Gitea preset's read concepts (`pr-view`, `pr-list`, `pr-exists`, `issue-view`, `recently-merged`) it is an override — `tea api` needs an explicit `owner/repo` in the endpoint path, which those scripts otherwise derive from the `origin` remote. Set it per invocation, not in your environment: exported globally it retargets every Gitea read at that repo.
+
 ### Disabling concepts
 
 Set a concept to `null` to disable it:
