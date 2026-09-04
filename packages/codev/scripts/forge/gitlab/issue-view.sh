@@ -10,12 +10,17 @@
 #   assignees[].username -> assignees[].login
 #   labels[]           -> labels[].name  (newer glab emits label objects; older emits strings)
 #   milestone.title    -> milestone.title (null when unset)
-# Best-effort preset (Spec 589): fields GitLab doesn't expose stay absent.
-exec glab issue view "$CODEV_ISSUE_ID" --output json | jq '. + {
-  url: .web_url,
-  author: (if .author then {login: .author.username} else null end),
-  createdAt: .created_at,
-  assignees: [(.assignees // [])[] | {login: .username}],
-  labels: [(.labels // [])[] | if type == "string" then {name: .} else {name: .name} end],
-  milestone: (if .milestone then {title: .milestone.title} else null end)
-}'
+# Best-effort preset (Spec 589): fields GitLab doesn't expose stay absent. The
+# contract's optional fields are added only when present (via `+ {…}` merges) so
+# an absent field is OMITTED, not emitted as null — `author?`/`createdAt?` are not
+# nullable (only `milestone` is). `exec` is dropped: with a pipe it would replace
+# only the glab subshell, not the whole pipeline, so it's misleading here.
+glab issue view "$CODEV_ISSUE_ID" --output json | jq '
+  .
+  + {url: .web_url}
+  + {assignees: [(.assignees // [])[] | {login: .username}]}
+  + {labels: [(.labels // [])[] | if type == "string" then {name: .} else {name: .name} end]}
+  + (if .author.username then {author: {login: .author.username}} else {} end)
+  + (if .created_at then {createdAt: .created_at} else {} end)
+  + (if .milestone then {milestone: {title: .milestone.title}} else {} end)
+'

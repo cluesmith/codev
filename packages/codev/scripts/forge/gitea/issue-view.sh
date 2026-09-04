@@ -76,13 +76,10 @@ printf '%s' "$ISSUE" | jq --argjson comments "$COMMENTS_JSON" '{
       body: (.body // ""),
       state,
       url: (.html_url // .url),
-      # Optional metadata (IssueView #1592). Each is defaulted defensively so a
-      # missing or oddly-typed field yields null/[] rather than a jq error.
-      author: (if (.user.login | type) == "string" then {login: .user.login} else null end),
-      createdAt: (if (.created_at | type) == "string" then .created_at else null end),
+      # assignees/labels are optional ARRAYS — always emit (possibly empty), never
+      # null. Elements are defaulted to the contract-declared type.
       assignees: [ (.assignees // [])[] | {login: (if (.login | type) == "string" then .login else "" end)} ],
       labels: [ (.labels // [])[] | {name: (if (.name | type) == "string" then .name else "" end)} ],
-      milestone: (if (.milestone | type) == "object" then {title: (.milestone.title // "")} else null end),
       # The array itself is validated above; its ELEMENTS are whatever the
       # server sent, so each field is defaulted to the type the contract
       # declares rather than emitting nulls into IssueViewResult.comments.
@@ -91,4 +88,10 @@ printf '%s' "$ISSUE" | jq --argjson comments "$COMMENTS_JSON" '{
         createdAt: (if (.created_at | type) == "string" then .created_at else "" end),
         author: {login: (if (.user.login | type) == "string" then .user.login else "" end)}
       } ]
-    }'
+    }
+    # Optional metadata (IssueView #1592) added only when present, so an absent
+    # field is OMITTED rather than emitted as null (author?/createdAt? are not
+    # nullable; milestone is emitted only when set).
+    + (if (.user.login | type) == "string" then {author: {login: .user.login}} else {} end)
+    + (if (.created_at | type) == "string" then {createdAt: .created_at} else {} end)
+    + (if (.milestone | type) == "object" then {milestone: {title: (.milestone.title // "")}} else {} end)'
