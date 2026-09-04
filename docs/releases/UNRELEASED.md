@@ -39,6 +39,9 @@
        - **<Headline>** (#<issue>, PR #<pr>). <One short paragraph of context.>
      Move out to its own ## section if the entry grows past ~3 sentences. -->
 
+- **Issue preview shows author, date, labels, assignees, and milestone** (#1592, PR #1616). The in-editor issue view now renders a metadata block under the title, omitting any line whose data the forge does not supply. The forge issue-view concept and the shared issue contract gained the same five optional fields, so every forge preset degrades gracefully.
+- **Restored issue previews recover instead of sticking on "Content unavailable"** (#1592, PR #1616). A preview tab restored on launch before Tower connected now refreshes once the connection is up.
+
 ## Other fixes (dashboard, porch, infrastructure)
 
 <!-- Non-vscode work that ships in the npm release. Same bullet shape as Polish. -->
