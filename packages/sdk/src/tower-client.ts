@@ -820,6 +820,15 @@ export class TowerClient {
     delivered?: boolean;
     held?: boolean;
     reason?: string;
+    /**
+     * Issue #1482: the render gate's detail behind a `busy` reason —
+     * `'user-text'` (a draft or menu occupies the composer; a human is at the line and the
+     * hold clears by itself) vs `'no-region-end'` / `'no-composer-marker'` (the classifier
+     * could not verify the composer at all — a drifted profile, a torn frame, or Tower's
+     * dimensions diverging from the real PTY, and this hold does NOT clear on its own).
+     * Absent/null for a non-gate hold and from older Tower binaries.
+     */
+    detail?: string;
     mailboxId?: string;
     /**
      * Issue #1365: an `interrupt`/`escape` submission that gave up waiting for the terminal's
@@ -863,6 +872,7 @@ export class TowerClient {
       delivered?: boolean;
       held?: boolean;
       reason?: string | null;
+      detail?: string | null;
       mailboxId?: string;
       degraded?: boolean;
       degradedReason?: string;
@@ -902,6 +912,7 @@ export class TowerClient {
       delivered: result.data!.delivered,
       held: result.data!.held,
       reason: result.data!.reason ?? undefined,
+      detail: result.data!.detail ?? undefined,
       mailboxId: result.data!.mailboxId,
       degraded: result.data!.degraded,
       degradedReason: result.data!.degradedReason,

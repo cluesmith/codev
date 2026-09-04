@@ -52,6 +52,10 @@
       "types": "./dist/review-markers.d.ts",
       "default": "./dist/review-markers.js"
     },
+    "./hold-verdict": {
+      "types": "./dist/hold-verdict.d.ts",
+      "default": "./dist/hold-verdict.js"
+    },
     "./controller": {
       "types": "./dist/controller.d.ts",
       "default": "./dist/controller.js"
