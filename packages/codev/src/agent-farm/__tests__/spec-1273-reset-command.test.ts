@@ -25,6 +25,7 @@ const {
   mockFindBuilderById,
   mockFatal,
   mockRunReset,
+  mockArchitectSenderId,
 } = vi.hoisted(() => ({
   mockSendMessage: vi.fn(),
   mockIsRunning: vi.fn(),
@@ -37,6 +38,7 @@ const {
     throw new Error(`FATAL: ${msg}`);
   }),
   mockRunReset: vi.fn(),
+  mockArchitectSenderId: vi.fn(() => 'architect:main'),
 }));
 
 vi.mock('../lib/tower-client.js', () => ({
@@ -51,6 +53,8 @@ vi.mock('../lib/tower-client.js', () => ({
 vi.mock('../commands/send.js', () => ({
   detectWorkspaceRoot: mockDetectWorkspaceRoot,
   detectCurrentBuilderId: mockDetectCurrentBuilderId,
+  // Issue #1478: a non-builder sender is the SPECIFIC architect, `architect:<name>`.
+  architectSenderId: mockArchitectSenderId,
 }));
 
 vi.mock('../lib/builder-lookup.js', () => ({
@@ -153,6 +157,17 @@ describe('afx refresh — command surface (Spec 1273)', () => {
     await refresh({ builder: '1273' });
 
     expect(mockFindBuilderById).toHaveBeenCalledWith('1273');
+  });
+
+  // Issue #1478: reset's own header promises sender identity is "reused verbatim from
+  // `afx send`". Pin it: a revert to an inline `?? 'architect'` stops calling the shared
+  // helper and fails here, instead of silently giving one architect two `from_agent` forms.
+  it('resolves the sender through the shared architect identity, not an inline literal', async () => {
+    const { refresh } = await import('../commands/reset.js');
+
+    await refresh({ builder: '1273' });
+
+    expect(mockArchitectSenderId).toHaveBeenCalled();
   });
 
   it('aborts when the target cannot be resolved or is ambiguous', async () => {

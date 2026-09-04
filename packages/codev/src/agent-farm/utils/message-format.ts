@@ -13,6 +13,95 @@
  * optional: a frame that silently omits the recipient is exactly the defect.
  */
 
+import { ARCHITECT_NAME_PATTERN, MAX_ARCHITECT_NAME_LENGTH } from './architect-name.js';
+
+/**
+ * The header label for an architect-framed message (issue #1478).
+ *
+ * An architect sender travels as the address form `architect:<name>` (see
+ * `commands/send.ts`), which we surface as `ARCHITECT:<name>` so the recipient can
+ * tell WHICH architect is directing it — the same attribution builder → architect
+ * messages have always carried. Any other sender (a builder → builder send, cron, or
+ * an unattributed call) keeps the historical bare `ARCHITECT` label.
+ *
+ * The name is VALIDATED before interpolation, not merely trimmed: `from` arrives from
+ * a `POST /api/send` body, so an unchecked name could forge `### [...] ###` framing in
+ * the recipient's composer. `ARCHITECT_NAME_PATTERN` is anchored `[a-z][a-z0-9-]*`, so
+ * anything carrying a bracket, newline or space degrades to the bare label rather than
+ * reaching the header. (`validateArchitectName` is deliberately NOT used here — it
+ * rejects the reserved default `main`, which is the most common real sender.)
+ */
+export function architectHeaderLabel(sender?: string): string {
+  // Case-insensitive prefix, because `parseAddress` treats addresses that way — a
+  // hand-rolled `from: 'Architect:main'` must not be labelled a BUILDER. The NAME itself
+  // stays strictly validated (the pattern is lowercase-only), so a mixed-case name is
+  // not a real architect name and degrades to the bare label.
+  if (!sender || !sender.toLowerCase().startsWith('architect:')) return 'ARCHITECT';
+  const name = sender.slice('architect:'.length).trim();
+  if (name.length > MAX_ARCHITECT_NAME_LENGTH || !ARCHITECT_NAME_PATTERN.test(name)) {
+    return 'ARCHITECT';
+  }
+  return `ARCHITECT:${name}`;
+}
+
+/**
+ * An agent identity safe to interpolate into `### [...] ###` framing: no newline, no
+ * `#`, no bracket, no whitespace. Covers every real id — canonical `builder-<proto>-<n>`,
+ * bare worktree names, `architect:<name>`, and the `af-cron` pseudo-sender.
+ *
+ * The length bound is a real bound, not decoration: `from` reaches the mailbox from a
+ * public local route, and `afx inbox` sizes its `FROM → TO` column to the widest stored
+ * value — so an unbounded identity is a rendering cost as well as a framing risk.
+ */
+export const MAX_SENDER_ID_LENGTH = 128;
+const SAFE_SENDER_ID = new RegExp(`^[A-Za-z0-9._:-]{1,${MAX_SENDER_ID_LENGTH}}$`);
+
+/**
+ * Is `sender` an identity this codebase is willing to store and render whole?
+ *
+ * Exported so the `POST /api/send` boundary can enforce the SAME contract the header
+ * formatter does, instead of the two drifting apart (maintainer review, PR #1486). A
+ * value that fails here is refused at the route rather than persisted, so nothing
+ * downstream — the frame, `afx inbox`, the dashboard — has to defend against it alone.
+ */
+export function isSafeSenderId(sender: string): boolean {
+  return SAFE_SENDER_ID.test(sender);
+}
+
+/**
+ * The role-and-identity label for ANY sender: `ARCHITECT[:<name>]` for an architect,
+ * `BUILDER <id>` for everything else (builders, and the `af-cron` pseudo-sender).
+ *
+ * Without this, the architect → architect path renders an architect under a hardcoded
+ * `BUILDER ` prefix — `### [BUILDER architect:main MESSAGE …] ###`, a wrong role paired
+ * with a real identity (CMAP round 1, claude). The label follows the sender's shape, so
+ * one rule covers every direction.
+ *
+ * Every branch validates before interpolating, so this is a total chokepoint: the
+ * architect branch via {@link architectHeaderLabel}, the builder branch via
+ * `SAFE_SENDER_ID`. Without the second check an identity that merely LOOKS architect-
+ * shaped (`architect:x] ###…`) fails name validation and lands in the builder branch,
+ * where it would forge framing verbatim — the hole predates this change on the
+ * builder → architect path, but the chokepoint is the place to close it (CMAP round 2,
+ * codex). An unshowable identity degrades to `BUILDER <unknown>`: the recipient sees an
+ * unattributed message rather than a forged header.
+ *
+ * The architect prefix is detected INDEPENDENTLY of whether the name validates
+ * (maintainer review, PR #1486). Routing on `architectHeaderLabel`'s RESULT conflated
+ * "not an architect" with "an architect whose name is unshowable", so every malformed
+ * architect identity fell through to the builder branch and was relabelled: capital
+ * `architect:Main`, the empty `architect:`, and — not hypothetical — the default
+ * auto-numbered `architect-3` all rendered as `BUILDER architect-3`, a wrong role on a
+ * real identity, which is the exact defect this function exists to prevent. The prefix
+ * test mirrors `looksLikeBuilderId`, which excludes `architect*` for the same reason, so
+ * the two agree on what is not a builder.
+ */
+export function senderHeaderLabel(sender: string): string {
+  const bare = sender.toLowerCase();
+  if (bare === 'arch' || bare.startsWith('architect')) return architectHeaderLabel(sender);
+  return SAFE_SENDER_ID.test(sender) ? `BUILDER ${sender}` : 'BUILDER <unknown>';
+}
+
 /**
  * Hard ceiling on a single message BODY, in bytes (Issue #1573).
  *
@@ -106,8 +195,17 @@ function withBody(message: string, fileContent?: string): string {
  * it at itself. Builder-bound sends use {@link formatArchitectToBuilderMessage}.
  *
  * Wraps in a structured header/footer unless raw mode is requested.
+ *
+ * `sender` names the originating agent (issue #1478). It attributes the header when
+ * it is an `architect:<name>` identity; raw mode stays unattributed, as before.
  */
-export function formatArchitectMessage(toAgent: string, message: string, fileContent?: string, raw: boolean = false): string {
+export function formatArchitectMessage(
+  toAgent: string,
+  message: string,
+  fileContent?: string,
+  raw: boolean = false,
+  sender?: string,
+): string {
   const content = withBody(message, fileContent);
 
   if (raw) {
@@ -115,7 +213,7 @@ export function formatArchitectMessage(toAgent: string, message: string, fileCon
   }
 
   const timestamp = new Date().toISOString();
-  return `### [ARCHITECT INSTRUCTION${recipient(toAgent)} | ${timestamp}] ###
+  return `### [${architectHeaderLabel(sender)} INSTRUCTION${recipient(toAgent)} | ${timestamp}] ###
 ${content}
 ${FOOTER}`;
 }
@@ -127,9 +225,19 @@ ${FOOTER}`;
  * party with no reply affordance of its own, and it is the party that loses its
  * porch prompts to a `/clear`. `--raw` sends are unchanged — no wrapper, so no
  * hint. Line count is unchanged from the plain frame; see {@link FOOTER}.
+ *
+ * `sender` is passed straight through to {@link formatArchitectMessage} (issue #1478):
+ * this variant IS the production any → builder path, so a name that stopped here would
+ * never reach the surface the issue is about.
  */
-export function formatArchitectToBuilderMessage(toAgent: string, message: string, fileContent?: string, raw: boolean = false): string {
-  const frame = formatArchitectMessage(toAgent, message, fileContent, raw);
+export function formatArchitectToBuilderMessage(
+  toAgent: string,
+  message: string,
+  fileContent?: string,
+  raw: boolean = false,
+  sender?: string,
+): string {
+  const frame = formatArchitectMessage(toAgent, message, fileContent, raw, sender);
   if (raw) return frame;
   return frame.slice(0, -FOOTER.length) + `${FOOTER}  ${REPLY_HINT}`;
 }
@@ -157,6 +265,10 @@ ${FOOTER}`;
 /**
  * Format a message from a builder to the architect.
  * Wraps in a structured header/footer unless raw mode is requested.
+ *
+ * `builderId` is the sender's identity; the header names its role from that shape
+ * (see {@link senderHeaderLabel}), so an architect → architect send reads
+ * `ARCHITECT:<name> MESSAGE` rather than being mislabelled `BUILDER architect:<name>`.
  */
 export function formatBuilderMessage(builderId: string, toAgent: string, message: string, fileContent?: string, raw: boolean = false): string {
   const content = withBody(message, fileContent);
@@ -166,7 +278,7 @@ export function formatBuilderMessage(builderId: string, toAgent: string, message
   }
 
   const timestamp = new Date().toISOString();
-  return `### [BUILDER ${builderId} MESSAGE${recipient(toAgent)} | ${timestamp}] ###
+  return `### [${senderHeaderLabel(builderId)} MESSAGE${recipient(toAgent)} | ${timestamp}] ###
 ${content}
 ${FOOTER}`;
 }

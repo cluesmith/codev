@@ -16,6 +16,7 @@
 import { getTowerClient, DEFAULT_TOWER_PORT } from '../lib/tower-client.js';
 import { logger, fatal } from '../utils/logger.js';
 import { getConfig } from '../utils/config.js';
+import { MAX_SENDER_ID_LENGTH } from '../utils/message-format.js';
 import { formatVerdict } from '@cluesmith/codev-sdk/hold-verdict';
 
 /** One held row as returned by GET /api/inbox — metadata only, never the body. */
@@ -151,35 +152,54 @@ export async function inboxList(options: InboxListOptions = {}): Promise<void> {
 
   logger.header(`Held messages (${rows.length})`);
 
-  // REASON is 20 wide, not 13 (Issue #1482): it now carries the gate detail as a `reason:detail`
-  // sub-code, and `busy:no-region-end` (18) has to fit. Only `busy:no-composer-marker` truncates,
-  // and it stays unambiguous at 20 (`busy:no-composer-ma…`). A sub-code rather than a sixth column
-  // — the table is already five wide, and the detail is meaningless without the reason it
-  // qualifies, so the two belong in one cell.
-  const widths = [38, 6, 20, 22, 14];
-  logger.row(['ID', 'AGE', 'REASON', 'FROM → TO', 'WORKSPACE'], widths);
-  logger.row(
-    ['─'.repeat(36), '─'.repeat(5), '─'.repeat(19), '─'.repeat(21), '─'.repeat(13)],
-    widths,
-  );
-
   const now = Date.now();
-  for (const row of rows) {
-    const wsName = row.workspacePath.split('/').pop() || row.workspacePath;
-    const fromTo = `${row.fromAgent ?? '?'} → ${row.toAgent}`;
+  // Render the cells first so the FROM → TO column can be sized to its content
+  // (issue #1478). That column exists to answer "who sent this, to whom?", and a
+  // fixed 22-char slice cut long builder ids and `architect:<name>` senders
+  // mid-name — silently rendering an identity the operator can't act on.
+  const cells = rows.map((row) => {
     // Spec 1313 round 3: a pre-due delayed (`--delay`) row is SCHEDULED, not stuck — render
     // its due countdown ("→15s") in the AGE column and "scheduled" as the reason, so a delayed
     // send that is simply waiting for its due time is not mistaken for a starving held message.
     const preDue = row.notBefore != null && row.notBefore > now;
-    const ageCell = preDue ? `→${formatDuration(row.notBefore! - now)}` : formatAge(row.createdAt, now);
-    const reason = preDue
-      ? 'scheduled'
-      : `${formatVerdict(row.reason, row.detail)}${row.escalated ? '!' : ''}`;
+    return {
+      id: row.id,
+      age: preDue ? `→${formatDuration(row.notBefore! - now)}` : formatAge(row.createdAt, now),
+      reason: preDue
+        ? 'scheduled'
+        : `${formatVerdict(row.reason, row.detail)}${row.escalated ? '!' : ''}`,
+      fromTo: `${row.fromAgent ?? '?'} → ${row.toAgent}`,
+      workspace: row.workspacePath.split('/').pop() || row.workspacePath,
+    };
+  });
+
+  const fromToHeader = 'FROM → TO';
+  // Sized to content, so a long-but-legitimate agent id is never cut mid-name (issue
+  // #1478 — the old fixed 22 silently truncated them). The ceiling is defence in depth,
+  // not the old truncation returning: `POST /api/send` now refuses a sender longer than
+  // MAX_SENDER_ID_LENGTH, so a pair of valid ids cannot reach it, and rows persisted
+  // before that check existed cannot make every row in the table pad to their width.
+  const maxFromToWidth = MAX_SENDER_ID_LENGTH * 2 + ' → '.length;
+  const shown = cells.map((c) =>
+    c.fromTo.length > maxFromToWidth ? `${c.fromTo.slice(0, maxFromToWidth - 1)}…` : c.fromTo,
+  );
+  const fromToWidth = Math.max(fromToHeader.length, ...shown.map((c) => c.length)) + 2;
+  // REASON is 20 wide, not 13 (Issue #1482): it carries the gate detail as a `reason:detail`
+  // sub-code, and `busy:no-region-end` (18) has to fit. Only `busy:no-composer-marker` truncates,
+  // and it stays unambiguous at 20 (`busy:no-composer-ma…`).
+  const widths = [38, 6, 20, fromToWidth, 14];
+  logger.row(['ID', 'AGE', 'REASON', fromToHeader, 'WORKSPACE'], widths);
+  logger.row(
+    ['─'.repeat(36), '─'.repeat(5), '─'.repeat(19), '─'.repeat(fromToWidth - 1), '─'.repeat(13)],
+    widths,
+  );
+
+  cells.forEach((cell, i) => {
     logger.row(
-      [row.id, ageCell, truncate(reason, 20), fromTo.slice(0, 22), wsName.slice(0, 14)],
+      [cell.id, cell.age, truncate(cell.reason, 20), shown[i], cell.workspace.slice(0, 14)],
       widths,
     );
-  }
+  });
 
   logger.blank();
   logger.info('Show a message body: afx inbox show <id>   ·   Dismiss: afx inbox dismiss <id>');
