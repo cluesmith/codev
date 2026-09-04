@@ -308,4 +308,118 @@ describe('generate-image', () => {
       expect(call.contents[3]).toBe('Combine these images');
     });
   });
+
+  describe('atlas provider', () => {
+    const originalFetch = global.fetch;
+
+    afterEach(() => {
+      global.fetch = originalFetch;
+      vi.useRealTimers();
+    });
+
+    it('exits with error when ATLASCLOUD_API_KEY is not set', async () => {
+      delete process.env.ATLASCLOUD_API_KEY;
+
+      await expect(
+        generateImage('test prompt', { provider: 'atlas' } as GenerateImageOptions)
+      ).rejects.toThrow('process.exit called');
+      expect(mockConsoleError).toHaveBeenCalledWith(
+        expect.stringContaining('ATLASCLOUD_API_KEY environment variable not set')
+      );
+    });
+
+    it('rejects an unknown provider', async () => {
+      await expect(
+        generateImage('test prompt', { provider: 'nope' } as GenerateImageOptions)
+      ).rejects.toThrow('process.exit called');
+      expect(mockConsoleError).toHaveBeenCalledWith(
+        expect.stringContaining("Invalid provider 'nope'")
+      );
+    });
+
+    it('refuses reference images instead of ignoring them', async () => {
+      process.env.ATLASCLOUD_API_KEY = 'test-atlas-key';
+      vi.mocked(existsSync).mockReturnValue(true);
+
+      await expect(
+        generateImage('test prompt', {
+          provider: 'atlas',
+          ref: ['style.png'],
+        } as GenerateImageOptions)
+      ).rejects.toThrow('process.exit called');
+      expect(mockConsoleError).toHaveBeenCalledWith(
+        expect.stringContaining('--ref is not supported with --provider atlas')
+      );
+    });
+
+    it('submits aspect_ratio, polls the prediction and names the file after its bytes', async () => {
+      process.env.ATLASCLOUD_API_KEY = 'test-atlas-key';
+      // Not Buffer.from(array): its .buffer is a pooled ArrayBuffer with an
+      // offset, so slicing it from 0 would hand back the wrong bytes.
+      const jpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]);
+      const calls: Array<{ url: string; init?: RequestInit }> = [];
+      global.fetch = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+        const href = String(url);
+        calls.push({ url: href, init });
+        if (href.endsWith('/generateImage')) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ data: { id: 'pred-1', status: 'processing' } }),
+          } as Response;
+        }
+        if (href.includes('/prediction/')) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              data: { status: 'completed', outputs: ['https://cdn.example/a.jpg'] },
+            }),
+          } as Response;
+        }
+        return {
+          ok: true,
+          status: 200,
+          arrayBuffer: async () => jpeg.buffer,
+        } as Response;
+      }) as unknown as typeof fetch;
+
+      await generateImage('test prompt', {
+        provider: 'atlas',
+        aspect: '16:9',
+        output: 'output.png',
+      } as GenerateImageOptions);
+
+      const submitted = JSON.parse(String(calls[0]?.init?.body));
+      expect(submitted.aspect_ratio).toBe('16:9');
+      expect(submitted.model).toBe('google/nano-banana-pro/text-to-image');
+      // api.atlascloud.ai rejects some default User-Agents with 403/1010.
+      expect((calls[0]?.init?.headers as Record<string, string>)['User-Agent']).toBeTruthy();
+      expect(calls[1]?.url).toContain('/prediction/pred-1');
+      // The model returns JPEG, so the .png target must not be used verbatim.
+      expect(vi.mocked(writeFileSync)).toHaveBeenCalledWith('output.jpg', expect.anything());
+    }, 20000);
+
+    it('reports a failed prediction', async () => {
+      process.env.ATLASCLOUD_API_KEY = 'test-atlas-key';
+      global.fetch = vi.fn(async (url: string | URL | Request) => {
+        const href = String(url);
+        if (href.endsWith('/generateImage')) {
+          return { ok: true, status: 200, json: async () => ({ data: { id: 'pred-2' } }) } as Response;
+        }
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ data: { status: 'failed', error: 'content policy' } }),
+        } as Response;
+      }) as unknown as typeof fetch;
+
+      await expect(
+        generateImage('test prompt', { provider: 'atlas' } as GenerateImageOptions)
+      ).rejects.toThrow('process.exit called');
+      expect(mockConsoleError).toHaveBeenCalledWith(
+        expect.stringContaining('Atlas generation failed: content policy')
+      );
+    }, 20000);
+  });
 });
