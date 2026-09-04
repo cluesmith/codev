@@ -3,9 +3,10 @@
  *
  * `renderIssue` turns an `IssueView` into the markdown shown in the in-editor
  * issue preview. These tests pin the metadata block added under the title
- * (opened-by + date, labels, assignees, milestone) and, crucially, the
- * omit-when-absent behavior: a field the forge didn't supply produces no line,
- * and an issue with no metadata at all renders exactly as it did before #1592.
+ * (state + labels on one line, then opened-by + date, assignees, milestone) and,
+ * crucially, the omit-when-absent behavior: a field the forge didn't supply
+ * produces no line, and an issue with no metadata renders exactly as it did
+ * before #1592. Count-sensitive labels use the singular form for one item.
  *
  * Like `view-issue-column.test.ts`, `view-issue.ts` imports `vscode` and `new`s
  * an `EventEmitter` at module load, so the minimal mock below just lets that
@@ -38,8 +39,13 @@ function baseIssue(overrides: Partial<IssueView> = {}): IssueView {
   };
 }
 
+/** The single line of `md` that contains `needle` (for same-line assertions). */
+function lineContaining(md: string, needle: string): string {
+  return md.split('\n').find((l) => l.includes(needle)) ?? '';
+}
+
 describe('renderIssue metadata block', () => {
-  it('renders opened-by+date, labels, assignees, and milestone under the title', () => {
+  it('renders state+labels on one line, then opened-by+date, assignees, milestone', () => {
     const md = renderIssue('1592', baseIssue({
       author: { login: 'amrmelsayed' },
       createdAt: '2026-09-02T22:51:59Z',
@@ -49,22 +55,37 @@ describe('renderIssue metadata block', () => {
     }));
 
     expect(md).toContain('# #1592 Fix the thing');
-    expect(md).toContain('**State:** open');
     expect(md).toContain('**Opened by** @amrmelsayed on 2026-09-02');
     expect(md).toContain('**Labels:** area/cross-cutting, area/vscode');
     expect(md).toContain('**Assignees:** @alice, @bob');
     expect(md).toContain('**Milestone:** v3.4.0');
 
-    // Order: state, then opened-by, then labels, then assignees, then milestone.
+    // State and labels share one line.
+    const stateLine = lineContaining(md, '**State:**');
+    expect(stateLine).toContain('**State:** open');
+    expect(stateLine).toContain('**Labels:** area/cross-cutting, area/vscode');
+
+    // Order: state/labels line, then opened-by, then assignees, then milestone.
     const iState = md.indexOf('**State:**');
     const iOpened = md.indexOf('**Opened by**');
-    const iLabels = md.indexOf('**Labels:**');
     const iAssignees = md.indexOf('**Assignees:**');
     const iMilestone = md.indexOf('**Milestone:**');
     expect(iState).toBeLessThan(iOpened);
-    expect(iOpened).toBeLessThan(iLabels);
-    expect(iLabels).toBeLessThan(iAssignees);
+    expect(iOpened).toBeLessThan(iAssignees);
     expect(iAssignees).toBeLessThan(iMilestone);
+  });
+
+  it('uses singular "Label" / "Assignee" for a single item', () => {
+    const md = renderIssue('7', baseIssue({
+      labels: [{ name: 'bug' }],
+      assignees: [{ login: 'alice' }],
+    }));
+    expect(md).toContain('**Label:** bug');
+    expect(md).not.toContain('**Labels:**');
+    expect(md).toContain('**Assignee:** @alice');
+    expect(md).not.toContain('**Assignees:**');
+    // The single label still shares the state line.
+    expect(lineContaining(md, '**State:**')).toContain('**Label:** bug');
   });
 
   it('renders the date as a YYYY-MM-DD prefix of the ISO timestamp', () => {
@@ -75,9 +96,9 @@ describe('renderIssue metadata block', () => {
 
   it('shows only the present fields when a subset of metadata is supplied', () => {
     const md = renderIssue('7', baseIssue({ labels: [{ name: 'bug' }] }));
-    expect(md).toContain('**Labels:** bug');
+    expect(md).toContain('**Label:** bug');
     expect(md).not.toContain('**Opened');
-    expect(md).not.toContain('**Assignees:**');
+    expect(md).not.toContain('**Assignee');
     expect(md).not.toContain('**Milestone:**');
   });
 
@@ -94,8 +115,10 @@ describe('renderIssue metadata block', () => {
 
   it('omits empty label and assignee arrays', () => {
     const md = renderIssue('7', baseIssue({ labels: [], assignees: [] }));
-    expect(md).not.toContain('**Labels:**');
-    expect(md).not.toContain('**Assignees:**');
+    expect(md).not.toContain('**Label');
+    expect(md).not.toContain('**Assignee');
+    // State still renders alone on its line.
+    expect(lineContaining(md, '**State:**')).toBe('**State:** open');
   });
 
   it('renders identically to the pre-#1592 output when no metadata is present', () => {

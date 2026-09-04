@@ -118,19 +118,24 @@ function openedByLine(issue: IssueView): string | undefined {
 }
 
 export function renderIssue(issueId: string, issue: IssueView): string {
-  // Each metadata line is its own markdown paragraph (blank-separated) so it
-  // renders on its own line, the same way `**State:**` already did. Lines whose
-  // data is absent are simply never pushed.
-  const metaLines: string[] = [`**State:** ${issue.state}`];
+  // The metadata block sits under the title. State and labels share the first
+  // line (labels read as status chips alongside the state); the rest are their
+  // own blank-separated paragraphs so each renders on its own line. Lines whose
+  // data is absent are never pushed, and the count-sensitive labels use the
+  // singular form when there is exactly one.
+  let stateLine = `**State:** ${issue.state}`;
+  if (issue.labels && issue.labels.length > 0) {
+    const labelLabel = issue.labels.length === 1 ? 'Label' : 'Labels';
+    stateLine += `  ·  **${labelLabel}:** ${issue.labels.map((l) => l.name).join(', ')}`;
+  }
+  const metaLines: string[] = [stateLine];
 
   const opened = openedByLine(issue);
   if (opened) { metaLines.push(opened); }
 
-  if (issue.labels && issue.labels.length > 0) {
-    metaLines.push(`**Labels:** ${issue.labels.map((l) => l.name).join(', ')}`);
-  }
   if (issue.assignees && issue.assignees.length > 0) {
-    metaLines.push(`**Assignees:** ${issue.assignees.map((a) => `@${a.login}`).join(', ')}`);
+    const assigneeLabel = issue.assignees.length === 1 ? 'Assignee' : 'Assignees';
+    metaLines.push(`**${assigneeLabel}:** ${issue.assignees.map((a) => `@${a.login}`).join(', ')}`);
   }
   if (issue.milestone?.title) {
     metaLines.push(`**Milestone:** ${issue.milestone.title}`);
