@@ -1,7 +1,7 @@
 {
   "UUID": "com.cluesmith.codev",
   "Name": "Codev",
-  "Version": "3.3.0.0",
+  "Version": "3.3.2.0",
   "Author": "Cluesmith",
   "Category": "Codev",
   "CategoryIcon": "icons/category",
@@ -64,9 +64,9 @@
       ]
     },
     {
-      "Name": "Open Terminal",
+      "Name": "Open Builder Terminal",
       "UUID": "com.cluesmith.codev.open-terminal",
-      "Tooltip": "Open the selected builder's terminal — the per-builder complement to Builder Action's open-artifact.",
+      "Tooltip": "Open the selected builder's terminal — the per-builder complement to Builder Action's open-artifact. Paired with Open Architect Terminal.",
       "Icon": "icons/list/open-terminal",
       "Controllers": [
         "Keypad"
@@ -74,6 +74,22 @@
       "States": [
         {
           "Image": "icons/open-terminal",
+          "TitleAlignment": "bottom"
+        }
+      ]
+    },
+    {
+      "Name": "Open Architect Terminal",
+      "UUID": "com.cluesmith.codev.open-architect",
+      "Tooltip": "Open an architect's terminal. Builder mode (default): the architect that spawned the selected builder. Main mode: always the workspace's main architect. The face shows the resolved architect's name.",
+      "Icon": "icons/list/open-architect",
+      "Controllers": [
+        "Keypad"
+      ],
+      "PropertyInspectorPath": "ui/open-architect.html",
+      "States": [
+        {
+          "Image": "icons/open-architect",
           "TitleAlignment": "bottom"
         }
       ]
@@ -114,7 +130,7 @@
     {
       "Name": "Builder Action",
       "UUID": "com.cluesmith.codev.builder-action",
-      "Tooltip": "Live tile for the Nth builder (set the slot in the property inspector). Shows its issue + phase; press selects the builder and opens the artifact for its current phase (spec / plan / diff), or a fixed verb you choose.",
+      "Tooltip": "Live tile for a builder — its slot is where you place the key (the selectors self-order left to right, top row first). Shows its issue + phase; press selects the builder and opens the artifact for its current phase (spec / plan / diff), or a fixed verb you choose.",
       "Icon": "icons/list/builder-action",
       "Controllers": [
         "Keypad"
@@ -123,6 +139,21 @@
       "States": [
         {
           "Image": "icons/builder-action",
+          "TitleAlignment": "bottom"
+        }
+      ]
+    },
+    {
+      "Name": "Architect Action",
+      "UUID": "com.cluesmith.codev.architect-action",
+      "Tooltip": "Live tile for an architect — its slot is where you place the key (the keys self-order left to right, top row first). Shows the Nth live architect's name; press opens that architect's terminal. Place these on a second page/profile and switch to it with a native Stream Deck Switch Profile or Folder key.",
+      "Icon": "icons/list/architect-action",
+      "Controllers": [
+        "Keypad"
+      ],
+      "States": [
+        {
+          "Image": "icons/architect-action",
           "TitleAlignment": "bottom"
         }
       ]
@@ -244,10 +275,10 @@
         "Encoder"
       ],
       "Encoder": {
-        "layout": "layouts/label.json",
+        "layout": "layouts/title-value.json",
         "TriggerDescription": {
           "Rotate": "Scroll up / down",
-          "Push": "Forward selection to builder"
+          "Push": "Forward the selection to the builder now, or queue it, per workspace mode"
         }
       },
       "States": [

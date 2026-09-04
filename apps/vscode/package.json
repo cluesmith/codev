@@ -3,7 +3,7 @@
   "publisher": "cluesmith",
   "displayName": "Codev for VS Code",
   "description": "Codev helps humans and agents co-develop both the context and the code of the project.",
-  "version": "3.3.0",
+  "version": "3.3.2",
   "license": "Apache-2.0",
   "icon": "icons/codev.png",
   "pricing": "Free",
@@ -70,6 +70,20 @@
           "light": "icons/codev-light.svg",
           "dark": "icons/codev-dark.svg"
         }
+      },
+      {
+        "command": "codev.markdownPreview.increaseFontSize",
+        "title": "Codev: Increase Markdown Preview Font Size",
+        "icon": "$(zoom-in)"
+      },
+      {
+        "command": "codev.markdownPreview.decreaseFontSize",
+        "title": "Codev: Decrease Markdown Preview Font Size",
+        "icon": "$(zoom-out)"
+      },
+      {
+        "command": "codev.markdownPreview.resetFontSize",
+        "title": "Codev: Reset Markdown Preview Font Size"
       },
       {
         "command": "codev.forwardSelectionToBuilder",
@@ -291,18 +305,6 @@
         "icon": "$(arrow-swap)"
       },
       {
-        "command": "codev.dev.showSidebar",
-        "title": "Show Codev Sidebar",
-        "category": "Codev",
-        "icon": "$(eye)"
-      },
-      {
-        "command": "codev.dev.hideSidebar",
-        "title": "Hide Codev Sidebar",
-        "category": "Codev",
-        "icon": "$(eye-closed)"
-      },
-      {
         "command": "codev.openDevUrl",
         "title": "Codev: Open Dev URL"
       },
@@ -409,8 +411,17 @@
       },
       {
         "command": "codev.submitBuilderComment",
-        "title": "Codev: Queue Comment for Builder",
+        "title": "Queue Comment for Builder",
         "enablement": "!commentIsEmpty"
+      },
+      {
+        "command": "codev.forwardBuilderComment",
+        "title": "Forward to Builder",
+        "enablement": "!commentIsEmpty"
+      },
+      {
+        "command": "codev.cancelBuilderComment",
+        "title": "Cancel"
       },
       {
         "command": "codev.deleteBuilderComment",
@@ -440,6 +451,21 @@
           "group": "navigation"
         },
         {
+          "command": "codev.markdownPreview.decreaseFontSize",
+          "when": "activeCustomEditorId == codev.markdownPreview",
+          "group": "navigation@1"
+        },
+        {
+          "command": "codev.markdownPreview.increaseFontSize",
+          "when": "activeCustomEditorId == codev.markdownPreview",
+          "group": "navigation@2"
+        },
+        {
+          "command": "codev.markdownPreview.resetFontSize",
+          "when": "activeCustomEditorId == codev.markdownPreview",
+          "group": "1_run"
+        },
+        {
           "command": "codev.diffCodelensUseForward",
           "when": "codev.activeEditorIsBuilderFile && codev.diffCodelensMode == 'comment'",
           "group": "navigation"
@@ -454,6 +480,18 @@
         {
           "command": "codev.openMarkdownPreview",
           "when": "resourceLangId == markdown && resourcePath =~ /\\/codev\\/(plans|specs|reviews)\\//"
+        },
+        {
+          "command": "codev.markdownPreview.increaseFontSize",
+          "when": "activeCustomEditorId == codev.markdownPreview"
+        },
+        {
+          "command": "codev.markdownPreview.decreaseFontSize",
+          "when": "activeCustomEditorId == codev.markdownPreview"
+        },
+        {
+          "command": "codev.markdownPreview.resetFontSize",
+          "when": "activeCustomEditorId == codev.markdownPreview"
         },
         {
           "command": "codev.agentsCycleGroupFromStage",
@@ -485,6 +523,14 @@
         },
         {
           "command": "codev.submitBuilderComment",
+          "when": "false"
+        },
+        {
+          "command": "codev.forwardBuilderComment",
+          "when": "false"
+        },
+        {
+          "command": "codev.cancelBuilderComment",
           "when": "false"
         },
         {
@@ -590,14 +636,6 @@
         {
           "command": "codev.dev.switchTarget",
           "when": "codev.hasDevCommand"
-        },
-        {
-          "command": "codev.dev.showSidebar",
-          "when": "false"
-        },
-        {
-          "command": "codev.dev.hideSidebar",
-          "when": "false"
         }
       ],
       "editor/context": [
@@ -809,31 +847,6 @@
           "command": "codev.reconnect",
           "when": "view == codev.status",
           "group": "navigation"
-        },
-        {
-          "command": "codev.dev.stop",
-          "when": "view == codev.dev && codev.devRunning",
-          "group": "navigation@1"
-        },
-        {
-          "command": "codev.dev.restart",
-          "when": "view == codev.dev && codev.devRunning",
-          "group": "navigation@2"
-        },
-        {
-          "command": "codev.dev.switchTarget",
-          "when": "view == codev.dev",
-          "group": "navigation@3"
-        },
-        {
-          "command": "codev.dev.showSidebar",
-          "when": "view == codev.dev && !(sideBarVisible && activeViewlet == 'workbench.view.extension.codev')",
-          "group": "navigation@4"
-        },
-        {
-          "command": "codev.dev.hideSidebar",
-          "when": "view == codev.dev && sideBarVisible && activeViewlet == 'workbench.view.extension.codev'",
-          "group": "navigation@4"
         }
       ],
       "comments/commentThread/context": [
@@ -844,7 +857,17 @@
         },
         {
           "command": "codev.submitBuilderComment",
-          "group": "inline",
+          "group": "inline@1",
+          "when": "commentController == codev-builder-review && commentThreadIsEmpty && codev.diffCodelensMode == 'comment'"
+        },
+        {
+          "command": "codev.forwardBuilderComment",
+          "group": "inline@1",
+          "when": "commentController == codev-builder-review && commentThreadIsEmpty && codev.diffCodelensMode != 'comment'"
+        },
+        {
+          "command": "codev.cancelBuilderComment",
+          "group": "inline@2",
           "when": "commentController == codev-builder-review && commentThreadIsEmpty"
         }
       ],
@@ -1007,8 +1030,7 @@
         { "id": "codev.status", "name": "Status", "when": "codev.hasWorkspace || codev.ideMode", "visibility": "collapsed" }
       ],
       "codevPanel": [
-        { "id": "codev.placeholder", "name": "Codev", "when": "codev.panelContainerEmpty", "visibility": "collapsed" },
-        { "id": "codev.dev", "name": "Codev Dev" }
+        { "id": "codev.contextualPanel", "name": "Codev", "type": "webview" }
       ]
     },
     "viewsWelcome": [

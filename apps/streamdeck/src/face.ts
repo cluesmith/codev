@@ -44,7 +44,7 @@ const STATE_COLOR: Record<BuilderState, string> = {
 };
 
 /** The glyphs the face can draw: a gate shape when blocked, the bolt otherwise. */
-export type GlyphKey = 'bolt' | 'book' | 'checklist' | 'code' | 'pull-request' | 'verified' | 'bell' | 'comment' | 'terminal' | 'play';
+export type GlyphKey = 'bolt' | 'book' | 'checklist' | 'code' | 'pull-request' | 'verified' | 'bell' | 'comment' | 'terminal' | 'play' | 'architect' | 'switch';
 
 /**
  * Gate id → glyph. The streamdeck twin of `gateIconFor` in `apps/vscode/src/views/builder-row.ts`
@@ -78,6 +78,13 @@ const GLYPHS: Record<GlyphKey, (color: string) => string> = {
   comment: (c) => stroked(c, '<path d="M4 5h16v11H10l-4 4v-4H4z"/>'),
   terminal: (c) => stroked(c, '<rect x="3" y="5" width="18" height="14" rx="1.5"/><path d="M7 10l3 2.5-3 2.5"/><path d="M12.5 15h4"/>'),
   play: (c) => `<path d="M8 5v14l11-7z" fill="${c}"/>`, // VS Code's Run/Start-Dev affordance
+  // architect: a person mark — the architect you talk to (#1463). No trailing comment: the icon
+  // render script (scripts/render-action-icons.mjs) parses this exact line and rejects one.
+  architect: (c) => stroked(c, '<circle cx="12" cy="8" r="3.5"/><path d="M5.5 20a6.5 6.5 0 0 1 13 0"/>'),
+  // switch: two opposed arrows — the Builders/Architects board toggle (#1495). Rendered onto a
+  // Codev key ground so a native Switch-Profile / Folder key blends with the plugin's own keys. No
+  // trailing comment ON the entry line: the icon render script parses that line and rejects one.
+  switch: (c) => stroked(c, '<path d="M4 9h13"/><path d="M14 6l3 3-3 3"/><path d="M20 15H7"/><path d="M10 18l-3-3 3-3"/>'),
 };
 
 /** Wrap line-glyph paths in a shared stroke group (round caps/joins, like the codicons). */
@@ -230,6 +237,59 @@ export function labelFaceSvg(icon: GlyphKey, label: string, color: string): stri
   return svg(`${BG}${iconZone(icon, color)}${DIVIDER}${centeredLine(label)}`);
 }
 
+/** Capitalize the first letter of an architect name for display. The wire name is lowercase
+ *  (`[a-z][a-z0-9-]*`), so `main` → `Main`, `streamdeck` → `Streamdeck`. Deck-local, NOT a twin of
+ *  VS Code's uppercase `displayArchitectName` (which marks a mixed architect tier the deck lacks);
+ *  the deck's own band labels are Title-case. */
+export function capitalizeFirst(name: string): string {
+  if (!name) return '';
+  return name.charAt(0).toUpperCase() + name.slice(1);
+}
+
+/**
+ * The Row-2 **[Open Architect]** key face (#1463): a person glyph over a title/subtitle band. The
+ * title is the constant `Architect`; the subtitle is the RESOLVED architect name — and the subtitle
+ * is the safeguard, not decoration: it shows who a press would summon before you press. When no
+ * architect resolves (Builder mode with nothing selected / no owner), the whole face DIMS and the
+ * subtitle reads `None` — visibly unavailable, never a normal-looking key that silently does nothing.
+ */
+export function architectFaceSvg(name: string | undefined): string {
+  if (name === undefined) {
+    return svg(
+      `${BG}${iconZone('architect', '#63636b')}${DIVIDER}` +
+        `${primaryLine('Architect', '#63636b')}${secondaryLine('None', '#63636b')}`,
+    );
+  }
+  return svg(
+    `${BG}${iconZone('architect', '#a9a9b2')}${DIVIDER}` +
+      `${primaryLine('Architect')}${secondaryLine(capitalizeFirst(name))}`,
+  );
+}
+
+/**
+ * The Architect Action key face (#1495): the architect glyph over that architect's NAME — one
+ * key per live architect on the Architects board. Unlike the Open Architect key (which titles a
+ * single resolved target `Architect` / name), an enumeration key IS the name, so the name is the
+ * prominent line, shrink-to-fit for long names. `undefined` — a slot past the end of the
+ * enumerated list, or an empty board during a Tower restart — renders VISIBLY INERT (dim glyph +
+ * dim `No architect`), never blank-but-live; these are physical key placements that cannot
+ * vanish, so an emptied board must read as inert and self-corrects on the next overview. No
+ * active/accent state: the board carries no scope, so nothing is "selected".
+ */
+export function architectKeyFaceSvg(name: string | undefined): string {
+  if (name === undefined) {
+    return svg(
+      `${BG}${iconZone('architect', '#63636b')}${DIVIDER}` +
+        `<text ${textAttrs(36, 55, 12, 500)}${fit('No architect', 9)} fill="#63636b">No architect</text>`,
+    );
+  }
+  const label = capitalizeFirst(name);
+  return svg(
+    `${BG}${iconZone('architect', '#a9a9b2')}${DIVIDER}` +
+      `<text ${textAttrs(36, 55, 14, 600)}${fit(label, 9)} fill="#f4f4f6">${escapeXml(label)}</text>`,
+  );
+}
+
 /** Shared face frame: the rounded key ground and the hairline that splits icon zone from text band. */
 const BG = '<rect width="72" height="72" rx="12" fill="#1b1b1e"/>';
 const DIVIDER = '<line x1="14" y1="35" x2="58" y2="35" stroke="#333338" stroke-width="1"/>';
@@ -245,13 +305,13 @@ function fit(text: string, maxChars: number): string {
   if (text.length <= maxChars) return '';
   return ' textLength="60" lengthAdjust="spacingAndGlyphs"';
 }
-/** Primary datum: bold, high-contrast (issue number / pending count). */
-function primaryLine(text: string): string {
-  return `<text ${textAttrs(36, 50, 16, 700)}${fit(text, 6)} fill="#f4f4f6">${escapeXml(text)}</text>`;
+/** Primary datum: bold, high-contrast (issue number / pending count). `color` dims it for inert faces. */
+function primaryLine(text: string, color = '#f4f4f6'): string {
+  return `<text ${textAttrs(36, 50, 16, 700)}${fit(text, 6)} fill="${color}">${escapeXml(text)}</text>`;
 }
-/** Secondary label: muted, below the primary line. */
-function secondaryLine(text: string): string {
-  return `<text ${textAttrs(36, 63, 12, 500)}${fit(text, 9)} fill="#a9a9b2">${escapeXml(text)}</text>`;
+/** Secondary label: muted, below the primary line. `color` dims it for inert faces. */
+function secondaryLine(text: string, color = '#a9a9b2'): string {
+  return `<text ${textAttrs(36, 63, 12, 500)}${fit(text, 9)} fill="${color}">${escapeXml(text)}</text>`;
 }
 /** A single muted line centered in the band, when there is no primary datum (empty slot / no gates). */
 function centeredLine(text: string): string {

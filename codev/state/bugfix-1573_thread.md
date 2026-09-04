@@ -1,0 +1,247 @@
+# bugfix-1573 thread — Tower delivery write-edge: verify-or-retry, settle-before-write, loud size limit (#1573)
+
+Protocol: BUGFIX (strict). Area: area/tower. Residuals of #1564 / #1521 left open
+after PIR #1365 (PR #1492).
+
+## What the change is
+Three changes at the post-#1492 converged write edge (`mailbox-delivery.ts` +
+`mailbox-wiring.ts` + `tower-routes.ts` + `commands/send.ts`):
+
+1. **Settle-before-write** — require `now − session.lastDataAt ≥ 250ms` immediately
+   before the write, else hold `busy`.
+2. **Loud 48KB body limit + `bodyLength` echo** — reject at the route and mirror at
+   the CLI; never silently truncate.
+3. **Echo-verification before `markDelivered`** — after the paced write, poll the
+   session's rendered mirror for the message's header line; absent → hold, not
+   `delivered`.
+
+## Log
+
+### 2026-09-01 — investigate
+
+Root cause confirmed by reading the post-#1492 code (no guessing):
+
+- `[ok] Message delivered` means only "frames queued on a connected socket".
+  `submitMessagePaced` (`servers/message-write.ts`) returns `written` when every
+  `session.write()` returned true; `ShellperClient.write` returns true iff the
+  socket object is connected. `deliverAgentMail` (`servers/mailbox-delivery.ts:555`)
+  calls `markDelivered` on that alone — no echo, no ACK.
+- The render gate has **no stability requirement**: `deliverAgentMail` samples
+  `ringToken` before/after `classify` (TOCTOU), but never consults
+  `session.lastDataAt` (`terminal/pty-session.ts:823`). A screen that repainted 1ms
+  ago passes identically to one idle a minute. The quiescence drain trigger has an
+  accidental 500ms settle; the request path (`handleSend` → immediate
+  `deliverAgentMailSerialized`) and the `'submit'` fast trigger have none.
+- No size limit exists between the CLI flag and the PTY bytes — only the generic
+  1MiB HTTP body cap and `MAX_FILE_SIZE = 48KB` on `--file`
+  (`commands/send.ts:21`).
+
+#### Measurement: is header echo-verification viable? (decides change 3)
+
+The issue's scope guard asks for this to be cut if it can't be done narrowly and
+reliably. Rather than guess, I drove **real harnesses through a real PTY**
+(`node-pty`, 117x64) with the production paced write (line-by-line, 10ms gaps,
+80ms then `\r`), then rendered the accumulated output into a headless xterm
+(`scrollback: 1000`) — the same mirror shape the gate classifies — and searched
+for the header at +200/500/1000/2000/5000ms.
+
+| harness | body | buffer | header found |
+|---|---|---|---|
+| claude (2.1.252) | 20 lines | normal | **exact form NO**, normalized YES, from +200ms |
+| claude | 300 lines / 24.9KB | normal (scrollback) | exact YES at buffer line 6, all samples |
+| codex (0.146.0) | 20 lines | normal | exact YES, all samples |
+| agy | 12 lines | **alternate** | unmeasured — agy produced 1.7KB and never rendered a composer here (unauthenticated) |
+
+The one surprise, and it is load-bearing: **claude markdown-renders the header on
+submit.** While typing, the composer echoes `### [ARCHITECT INSTRUCTION | <ts>] ###`
+verbatim; once submitted, the transcript shows `[ARCHITECT INSTRUCTION | <ts>]` —
+the `###` fences are consumed as an H3. An exact-line match would therefore fail on
+*every short claude delivery*, which is the common case. A **normalized** match
+(strip everything but `[A-Za-z0-9]` on both sides, substring-compare) survives that,
+survives line wrapping and any `> `/`❯ ` prefix, and stays harness-agnostic — no
+per-harness branch.
+
+Long messages are safe for a different reason: the composer echo scrolls into
+scrollback while typing and is never erased, so the exact header is still at buffer
+line 6 of a 300-line send.
+
+Decisions taken from this:
+- Needle = **header line only**, normalized. Not the footer: #1564's shape was
+  "arrived as its final ~30 chars", so a tail needle would pass the very bug.
+- Residual risk, documented not designed around: **agy uses the alternate screen**
+  (`type=alternate` at boot), which has no scrollback, so a message longer than the
+  viewport could scroll its header away → unverifiable → redelivery. Unmeasured
+  because agy is not authenticated in this environment.
+- Verification passes on composer echo too, so a *swallowed Enter* (typed but not
+  submitted) still verifies. Not closed here: distinguishing composer from transcript
+  is the classifier's job and is explicitly out of scope. The dirty composer holds
+  all following mail, so it surfaces.
+
+Scope: three focused edits plus tests, well under the 300 LOC BUGFIX ceiling.
+Proceeding to fix.
+
+Probe scripts live in the session scratchpad (not committed).
+
+### 2026-09-01 — fix
+
+Three changes plus tests; 378 lines added across 15 files, most of it comment and test.
+
+**1. Settle-before-write.** `DeliverySession` gains `lastDataAt` (PtySession already tracked
+it). `deliverAgentMail` requires `now − lastDataAt ≥ SETTLE_BEFORE_WRITE_MS` (250) both
+before the per-terminal lock and again inside the precheck, mirroring how the other three
+write-instant conditions are already double-checked. Phrased as a positive `>=` via a
+`settled()` helper so a session with no usable timestamp yields NaN → **not** settled → hold.
+A fail-open there would have been worse than no check, and one existing test double
+(tower-routes' `gateSession`) did in fact lack the field.
+
+**2. Loud 48KB limit.** `MAX_MESSAGE_BYTES` + `messageTooLargeError` in `utils/message-format.ts`,
+imported by both boundaries. The CLI checks AFTER the `--file` append — attachment content
+travels in the same body — and `MAX_FILE_SIZE` is now defined as `MAX_MESSAGE_BYTES` so the
+two cannot drift. Route answers 400 `MESSAGE_TOO_LARGE` before resolving the target.
+`bodyLength` rides every send response that carried a body (delivered, held, interrupt,
+delayed) through the SDK to `afx send`'s success line.
+
+*Behaviour change worth flagging:* a `--file` attachment at or near 48KB plus any message
+text now fails where it previously went through. That is the tightening working as intended
+— such a body could never have been typed into a composer reliably — but it is a real
+change, not a no-op.
+
+**3. Echo verification.** New required `verifyEcho` port, called after a `written` result and
+before `markDelivered`. Made REQUIRED rather than optional (`escalateHeldToOwner`'s pattern):
+an optional port a future ports-construction forgets is a silent return of the exact bug.
+Live binding `verifyEchoOnScreen` polls the session's `gateScreen` — the same mirror the gate
+classifies — every 50ms for up to 600ms, scanning the full retained buffer (`bufferLines`,
+new export in `render-gate.ts`) rather than the viewport.
+
+The needle is the formatted message's first line, run through `normalizeForEcho` (strip all
+non-alphanumerics). That is what makes it work: claude renders `### [ARCHITECT INSTRUCTION |
+<ts>] ###` verbatim in the composer, then markdown-strips the fences on submit, so a literal
+match would fail on every short claude delivery. Normalizing also absorbs quote prefixes,
+indentation and wrapping. Needles under 12 normalized chars are skipped rather than
+rubber-stamped.
+
+**Dropped: the optional sacrificial leading newline (issue item 4).** `writeMessageToSession`
+would send a bare `\n` as its own first write, and whether a harness treats that as "insert
+newline" or "submit" is exactly the per-harness behaviour I could not measure for codex and
+agy. An empty submit ahead of every message is a worse failure than the head-eating it
+guards against, which settle-before-write already addresses. The issue marks the item
+optional and says to drop it at the first sign of harness weirdness.
+
+**Tests.** New `bugfix-1573-delivery-verification.test.ts` (16 tests): settle window (inside /
+at boundary / in-lock re-check / NaN), the control test (completed write + unshown header →
+held, not delivered, no broadcast), confirmed delivery, redelivery of a held row, short-needle
+skip, needle normalization against the three measured rendered forms, and `verifyEchoOnScreen`
+against a real `SessionScreen` (composer form, markdown-stripped form, scrolled-into-scrollback,
+absent, early return). Route tests for over-limit / at-limit / `bodyLength`; CLI tests for the
+local refusal, the `--file` interaction and the byte-count echo.
+
+Verified the tests are real: with the settle and verify branches disabled, 6 of the 16 fail;
+restored, all pass.
+
+`tower-routes.test.ts`'s `gateSession` double now echoes writes into its own mirror, because
+a real terminal does and the delivery path now depends on it. That is a more faithful fake,
+and a test wanting a swallowing terminal can still pass a `write` that skips the feed.
+
+### 2026-09-01 — CMAP round 1
+
+gemini=APPROVE, claude=APPROVE, **codex=REQUEST_CHANGES**. Codex was right, and the finding
+was the one thing solo review missed.
+
+**The hole: presence is not evidence.** `verifyEchoOnScreen` scanned the retained buffer for
+the header and answered true on any match. But a held attempt leaves its own echo in that
+same scrollback — so the *next* redelivery would match the copy the FIRST attempt left behind
+and mark the row delivered even if the retry's bytes were swallowed. The false receipt was
+not removed, only postponed by one redelivery. Two messages formatted in the same millisecond
+collide the same way.
+
+**Fix:** the port is now watch-then-verify. `watchEcho(session, needle)` is called
+immediately BEFORE the write and samples how many times the needle currently appears;
+`verify()` polls until the count is strictly GREATER. New evidence, not mere presence.
+Structuring it as a returned `EchoWatch` rather than two ports makes the ordering impossible
+to get wrong — you cannot verify without having sampled first.
+
+Two regression tests at the binding level, both against a real `SessionScreen`: a stale
+header from an earlier attempt plus a swallowed retry stays **false**, and a redelivery that
+does land is still **true** (the other half — without it, every redelivery after a held
+attempt would be permanently unconfirmable). Verified the first fails against a presence-only
+implementation. A delivery-level assertion pins the ordering: `['watch', 'write', 'verify']`.
+
+This also closes claude's separate note that a `--raw` send whose first line repeats text
+already in scrollback verified vacuously — that is the same bug, and counting fixes it too.
+
+Also from claude's review:
+- Deleted a stray `// eslint-disable-next-line no-console` left behind when I removed a debug
+  line from `send-delivery.test.ts`.
+- `commands/reset.ts` held a THIRD independent `48 * 1024` literal for its `--file` cap. Its
+  content rides the message body, so a drifted literal would let `afx refresh` accept a file
+  the send route then 400s. Now `MAX_FILE_SIZE = MAX_MESSAGE_BYTES` there too.
+
+Left as documented residuals rather than fixed here: unbounded redelivery when verification
+NEVER confirms (alt-screen harness with a body longer than the viewport) — escalation gives
+visibility but nothing stops the rewrite loop, worth a follow-up issue; and messages whose
+normalized first line is under 12 characters skip verification entirely, keeping the old
+behaviour rather than a rubber stamp.
+
+### 2026-09-01 — CMAP round 2
+
+gemini=APPROVE, codex=APPROVE (flipped — the stale-evidence hole is closed, no remaining
+issues), claude=COMMENT with five findings. Addressed:
+
+- **Unbounded redelivery** (claude's headline; "bound it or file the follow-up before merge").
+  Filed **#1578**. Not bounded here: the issue owner prescribed hold-on-absence explicitly,
+  and every way to bound it means either a new mailbox column or accepting a false delivery
+  after N attempts — a decision that belongs to whoever owns that trade, not to this bugfix.
+  Claude is right that the "escalation makes it loud, not a loop" premise does not survive
+  contact with the drainer: `markEscalated` sets a flag and fires an SSE event, it does not
+  stop redelivery.
+- **`afx refresh --file` near 48KB would now fail as a route 400** — real regression I
+  introduced by unifying the constant. Added a shared `messageLimitError` helper and called it
+  in reset's `sendMessage`/`sendRaw` ports, so the refusal is local and identically worded.
+  `send.ts` now uses the same helper instead of its own inline byte count.
+- **Stale `{@link DeliveryPorts.verifyEcho}`** doc link → `watchEcho`. **PR body said 16
+  tests, file has 18** → corrected.
+- **Count false-negative when a long write evicts the earlier copy** from the 1000-line mirror,
+  and **re-normalizing the buffer once per poll** while the request waits: both documented at
+  the binding as residuals. Both fail in the safe direction (a redelivery), and the second is
+  off the happy path entirely — the measured case confirms on the first read.
+
+### 2026-09-01 — gate approved, rebased onto #1575
+
+Waleed approved the PR; #1575 (self-attesting frames, #1574) landed first and touches the same
+two files, so per second-lands-rebases I merged `origin/main`.
+
+Two conflicts, both additive-vs-additive and resolved by keeping both sides:
+`message-format.ts` (my size-limit exports next to their `recipient`/`REPLY_HINT`/`FOOTER`
+helpers) and `tower-routes.ts` (one import block).
+
+**The composition question was whether #1574's new frame breaks header matching. It does not,
+and it improves it.** The header is now `### [ARCHITECT INSTRUCTION → <toAgent> | <ts>] ###`.
+My needle is derived from the actual `formatted_message` at runtime, so it picked the new shape
+up for free; the arrow is punctuation and normalizes away, while the recipient NAME stays in the
+needle. That makes verification recipient-specific: a frame delivered to the wrong agent cannot
+satisfy the right agent's check. Confirmed against the real formatter — frame is still 3 lines
+(so #1574's own constraint about `PACED_WRITE_LINE_THRESHOLD` holds, and the write path my
+change guards is unchanged), and the markdown-rendered form still normalizes to the same needle.
+
+Fixtures now BUILD the frame with `formatArchitectToBuilderMessage` instead of hand-writing it.
+That is the real lesson from this rebase: my hand-copied `### [ARCHITECT INSTRUCTION | ts] ###`
+would have kept passing while the frame it modelled drifted away from what the delivery path
+writes. Deriving it means the next frame change fails in this suite instead of in the field.
+Added an explicit assertion that the recipient segment reaches the needle.
+
+### 2026-09-01 — merged and closed out
+
+PR #1577 admin-merged as `ff684153b` at 12:48Z (GitHub blocked a formal review because the
+architect account authored the branch; the review is a PR comment instead). Recorded with
+`porch done --merged 1577`; project is at `verified`.
+
+Closeout per the architect:
+- Completion stats posted on #1573.
+- #1564 and #1521 left **OPEN** with comments explaining which change addresses each and what
+  field evidence should close them. Neither is verified by a reproduction of the original
+  failure — only by tests — so closing them now would be claiming more than was demonstrated.
+- One stranded porch commit for the records PR: `5d717a278` (`chore(porch): bugfix-1573 PR
+  #1577 merged`) — the status.yaml transition porch wrote after the merge, so it could not have
+  ridden the PR.
+
+Total: 70 minutes, one iteration, no rollbacks, 2 CMAP rounds.

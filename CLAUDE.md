@@ -68,7 +68,7 @@ a human decision.
 - Never hand-edit `status.yaml` — only porch commands modify project state.
 - Run `afx` commands only from the main workspace root, never from inside a builder worktree — spawning from a worktree nests builders and breaks the workspace.
 - Never kill a shellper process without verifying it is an orphan (match each PID to its workspace via Tower) — an 'extra' shellper may be a live architect session.
-- Never restart or stop Tower without explicit human permission — it kills every running builder session.
+- Never restart or stop Tower without explicit human permission. Builder sessions survive a restart (detached shellpers), but Tower-mediated messaging, dashboards, and gate delivery drop until it is back.
 
 ## Gates
 

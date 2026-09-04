@@ -218,12 +218,18 @@
     </div>
   </div>
 
-  <!-- Three.js ES Modules via import map -->
+  <!-- Three.js ES Modules — vendored locally (three@0.160.0), served same-origin
+       from the annotator's vendor/ route. NO remote code runs in this page: it is
+       key-injected (advisory GHSA-xvjp-7748-v88v), so loading executable modules
+       from a CDN would expose window.__CODEV_TOWER_KEY__ to that CDN. -->
   <script type="importmap">
   {
     "imports": {
-      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+      "three": "vendor/three.module.js",
+      "three/addons/loaders/STLLoader.js": "vendor/three-STLLoader.js",
+      "three/addons/loaders/3MFLoader.js": "vendor/three-3MFLoader.js",
+      "three/addons/controls/TrackballControls.js": "vendor/three-TrackballControls.js",
+      "fflate": "vendor/three-fflate.module.js"
     }
   }
   </script>
@@ -233,6 +239,24 @@
     import { STLLoader } from 'three/addons/loaders/STLLoader.js';
     import { ThreeMFLoader } from 'three/addons/loaders/3MFLoader.js';
     import { TrackballControls } from 'three/addons/controls/TrackballControls.js';
+
+    // Request authentication (advisory GHSA-xvjp-7748-v88v): Tower injects the
+    // shared local key into this page same-origin; model/mtime requests send it
+    // via the codev-tower-key header. Three.js loaders carry it through
+    // loader.setRequestHeader(authHeaders()).
+    function getWebKey() {
+      if (window.__CODEV_TOWER_KEY__) {
+        try { localStorage.setItem('codev-tower-key', window.__CODEV_TOWER_KEY__); } catch (e) {}
+        return window.__CODEV_TOWER_KEY__;
+      }
+      return localStorage.getItem('codev-tower-key');
+    }
+    function authHeaders(extra) {
+      const key = getWebKey();
+      const headers = extra ? Object.assign({}, extra) : {};
+      if (key) headers['codev-tower-key'] = key;
+      return headers;
+    }
 
     // Configuration (injected by server with proper escaping)
     const FILE_PATH = {{FILE_PATH_JSON}};  // JSON-encoded by server
@@ -370,6 +394,7 @@
 
     function loadSTL() {
       const loader = new STLLoader();
+      loader.setRequestHeader(authHeaders());
 
       loader.load(
         'api/model',
@@ -412,6 +437,7 @@
 
     function load3MF() {
       const loader = new ThreeMFLoader();
+      loader.setRequestHeader(authHeaders());
 
       loader.load(
         'api/model',
@@ -715,7 +741,7 @@
 
     async function checkForChanges() {
       try {
-        const res = await fetch('api/mtime');
+        const res = await fetch('api/mtime', { headers: authHeaders() });
         if (res.ok) {
           const data = await res.json();
           if (lastMtime === null) {
@@ -769,6 +795,7 @@
 
     function reloadSTL() {
       const loader = new STLLoader();
+      loader.setRequestHeader(authHeaders());
       loader.load('api/model?t=' + Date.now(), (geometry) => {
         // Center geometry in XY
         geometry.computeBoundingBox();
@@ -811,6 +838,7 @@
 
     function reload3MF() {
       const loader = new ThreeMFLoader();
+      loader.setRequestHeader(authHeaders());
       loader.load('api/model?t=' + Date.now(), (group) => {
         // 3MF uses Z-up natively, which matches our coordinate system
 

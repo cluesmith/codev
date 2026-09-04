@@ -83,6 +83,8 @@ const ENTRY = {
   builderId: 'pir-9',
   relPath: 'pkg/src/a.ts',
   hunks: [{ start: 5, end: 8 }],
+  baseRef: 'main',
+  worktreePath: '/wt',
 };
 
 const DOC = { uri: { fsPath: ENTRY.fsPath, toString: () => `file://${ENTRY.fsPath}` }, lineCount: 100 };

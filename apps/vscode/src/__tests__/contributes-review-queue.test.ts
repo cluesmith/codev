@@ -60,6 +60,21 @@ describe('editor/title mode toggle', () => {
   });
 });
 
+describe('builder-review submit button is mode-labelled', () => {
+  it('shows Queue in comment mode and Forward in forward mode via mutually exclusive when clauses (CMAP #1552)', () => {
+    const queue = entry('comments/commentThread/context', 'codev.submitBuilderComment');
+    const forward = entry('comments/commentThread/context', 'codev.forwardBuilderComment');
+    // Same inline slot so exactly one is the primary Submit button per mode.
+    expect(queue?.group).toBe('inline@1');
+    expect(forward?.group).toBe('inline@1');
+    expect(queue?.when).toContain("codev.diffCodelensMode == 'comment'");
+    expect(forward?.when).toContain("codev.diffCodelensMode != 'comment'");
+    const cmds = PKG.contributes.commands as Array<{ command: string; title: string }>;
+    expect(cmds.find(c => c.command === 'codev.submitBuilderComment')?.title).toBe('Queue Comment for Builder');
+    expect(cmds.find(c => c.command === 'codev.forwardBuilderComment')?.title).toBe('Forward to Builder');
+  });
+});
+
 describe('builder-review comment menus', () => {
   it('scopes every entry to the codev-builder-review controller', () => {
     const sections = [
@@ -70,6 +85,8 @@ describe('builder-review comment menus', () => {
     ];
     const builderCommands = [
       'codev.submitBuilderComment',
+      'codev.forwardBuilderComment',
+      'codev.cancelBuilderComment',
       'codev.deleteBuilderComment',
       'codev.startEditBuilderComment',
       'codev.saveEditBuilderComment',

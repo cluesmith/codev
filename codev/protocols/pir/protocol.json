@@ -1,5 +1,5 @@
 {
-  "$schema": "../../protocol-schema.json",
+  "$schema": "../protocol-schema.json",
   "name": "pir",
   "alias": "plan-implement-review",
   "version": "1.0.0",

@@ -32,7 +32,9 @@ const AGENT = 'main';
 /** A minimal DeliverySession fake (records writes). */
 function fakeSession(): DeliverySession {
   return {
+    id: 'term-1',
     bytesWritten: 0,
+    lastDataAt: 0,
     info: { cols: 110, rows: 32 },
     command: 'claude',
     launchArgs: [],
@@ -81,9 +83,12 @@ function harness(): Harness {
       getSessionForAgent: () => session,
       resolveProfile: () => profile,
       classify: (_session: DeliverySession, _p: GateProfile): Promise<GateVerdict> => Promise.resolve(verdict),
-      writeMessage: (_s, formattedMessage, noEnter) => {
+      writeMessage: (_s, formattedMessage, noEnter, precheck) => {
+        // The precheck runs INSIDE the per-terminal lock in the live binding (Issue #1365).
+        const abort = precheck();
+        if (abort) return { status: 'aborted', abort };
         writes.push({ formattedMessage, noEnter });
-        return true; // the write landed (Spec 1313: writeMessage reports delivery success)
+        return { status: 'written' }; // the write landed (Spec 1313: the port reports delivery success)
       },
       broadcast: (f) => broadcasts.push(f),
       onHeldStateChange: () => {
@@ -91,6 +96,7 @@ function harness(): Harness {
       },
       onEscalation: () => {},
       onLiveness: () => {},
+      watchEcho: () => Promise.resolve({ verify: () => Promise.resolve(true) }),
       log: (m) => logs.push(m),
       now: () => h.now,
     },

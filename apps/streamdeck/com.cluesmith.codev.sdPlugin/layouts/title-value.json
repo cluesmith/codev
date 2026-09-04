@@ -1,0 +1,24 @@
+{
+  "$schema": "https://schemas.elgato.com/streamdeck/plugins/layout.json",
+  "id": "codev-title-value",
+  "items": [
+    {
+      "key": "title",
+      "type": "text",
+      "rect": [8, 8, 184, 28],
+      "font": { "size": 18 },
+      "alignment": "left",
+      "text-overflow": "ellipsis",
+      "color": "#ffffff"
+    },
+    {
+      "key": "value",
+      "type": "text",
+      "rect": [8, 40, 184, 22],
+      "font": { "size": 13 },
+      "alignment": "left",
+      "text-overflow": "ellipsis",
+      "color": "#a0a0a0"
+    }
+  ]
+}

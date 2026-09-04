@@ -96,3 +96,93 @@ describe('#1440 dedicated action icons', () => {
     expect(pngSize(join(pluginDir, `icons/list/${name}@2x.png`))).toEqual({ w: 40, h: 40 });
   });
 });
+
+/**
+ * #1495: the `switch` icon is the plugin's ONE shipped asset with no manifest reference — it is not
+ * an action, it is artwork for a NATIVE Stream Deck Switch-Profile / Folder key, consumed only by a
+ * README instruction pointing a human at a path inside the installed `.sdPlugin`. The generic loop
+ * above walks `manifest.Actions` and so structurally cannot see it (nothing references it), so it
+ * needs the explicit form the pinned action icons use — otherwise these four PNGs are the only
+ * shipped icons exempt from the convention that pins every other one. (The `architect-action` icon,
+ * by contrast, IS an action icon and is already covered by the generic loop.)
+ */
+describe('#1495 switch icon (manifest-less, native-key artwork)', () => {
+  it('ships all four PNGs the README points at', () => {
+    for (const ref of ['icons/switch', 'icons/list/switch']) {
+      for (const png of pngVariants(ref)) {
+        expect(existsSync(png), `missing ${png}`).toBe(true);
+      }
+    }
+  });
+
+  it('ships at the convention sizes (key 72/144, list 20/40)', () => {
+    expect(pngSize(join(pluginDir, 'icons/switch.png'))).toEqual({ w: 72, h: 72 });
+    expect(pngSize(join(pluginDir, 'icons/switch@2x.png'))).toEqual({ w: 144, h: 144 });
+    expect(pngSize(join(pluginDir, 'icons/list/switch.png'))).toEqual({ w: 20, h: 20 });
+    expect(pngSize(join(pluginDir, 'icons/list/switch@2x.png'))).toEqual({ w: 40, h: 40 });
+  });
+});
+
+/**
+ * #1444: the catch-all `Codev Action` was re-glyphed off the terminal picture (which now belongs to
+ * the dedicated open-terminal action from #1440) onto the Codev brand mark. Its manifest references
+ * are unchanged — only the pixels behind `icons/action` were regenerated — so these guards pin both
+ * the still-shared filenames and the fix itself: the action image must no longer be the terminal.
+ */
+describe('#1444 re-glyphed Codev Action', () => {
+  function action(uuid: string): ManifestAction {
+    const found = manifest.Actions.find((a) => a.UUID === uuid);
+    if (!found) throw new Error(`action ${uuid} not in manifest`);
+    return found;
+  }
+
+  it('keeps the action referencing its own icon filenames', () => {
+    const a = action('com.cluesmith.codev.action');
+    expect(a.Icon).toBe('icons/list/action');
+    expect(a.States[0].Image).toBe('icons/action');
+  });
+
+  it('action icons ship at the convention sizes', () => {
+    expect(pngSize(join(pluginDir, 'icons/action.png'))).toEqual({ w: 72, h: 72 });
+    expect(pngSize(join(pluginDir, 'icons/action@2x.png'))).toEqual({ w: 144, h: 144 });
+    expect(pngSize(join(pluginDir, 'icons/list/action.png'))).toEqual({ w: 20, h: 20 });
+    expect(pngSize(join(pluginDir, 'icons/list/action@2x.png'))).toEqual({ w: 40, h: 40 });
+  });
+});
+
+/**
+ * #1463: the Open Architect action ships its own dedicated icon, rendered from the `architect`
+ * glyph in face.ts (same pipeline as #1440). Pin the manifest references and the convention sizes.
+ */
+describe('#1463 Open Architect action icon', () => {
+  function action(uuid: string): ManifestAction {
+    const found = manifest.Actions.find((a) => a.UUID === uuid);
+    if (!found) throw new Error(`action ${uuid} not in manifest`);
+    return found;
+  }
+
+  it('points at its own dedicated icon', () => {
+    const a = action('com.cluesmith.codev.open-architect');
+    expect(a.Icon).toBe('icons/list/open-architect');
+    expect(a.States[0].Image).toBe('icons/open-architect');
+  });
+
+  it('open-architect icons ship at the convention sizes', () => {
+    expect(pngSize(join(pluginDir, 'icons/open-architect.png'))).toEqual({ w: 72, h: 72 });
+    expect(pngSize(join(pluginDir, 'icons/open-architect@2x.png'))).toEqual({ w: 144, h: 144 });
+    expect(pngSize(join(pluginDir, 'icons/list/open-architect.png'))).toEqual({ w: 20, h: 20 });
+    expect(pngSize(join(pluginDir, 'icons/list/open-architect@2x.png'))).toEqual({ w: 40, h: 40 });
+  });
+
+  // The collision the issue reports: before the re-glyph, action and open-terminal drew the same
+  // terminal picture. The two key faces must no longer be byte-identical.
+  it.each(['icons/action.png', 'icons/action@2x.png', 'icons/list/action.png', 'icons/list/action@2x.png'])(
+    '%s no longer collides with the open-terminal asset',
+    (ref) => {
+      const terminalRef = ref.replace('action', 'open-terminal');
+      const actionBytes = readFileSync(join(pluginDir, ref));
+      const terminalBytes = readFileSync(join(pluginDir, terminalRef));
+      expect(actionBytes.equals(terminalBytes)).toBe(false);
+    },
+  );
+});

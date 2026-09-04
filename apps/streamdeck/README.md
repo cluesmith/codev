@@ -10,8 +10,112 @@ and runs it. The plugin holds no Tower state and never edits files directly.
 - **Auth**: reads `~/.agent-farm/local-key` and sends it as the `codev-web-key`
   header (never generates it — Tower owns the key).
 
-Architecture and design decisions live in the pre-migration repo's `PLAN.md`
-(see [History](#history)).
+The **[Design](#design)** section explains why the plugin is shaped this way; the
+[History](#history) section records where it came from.
+
+## Design
+
+The rest of this README is the *what*; this section is the *why*. These decisions
+shape everything above.
+
+**A stateless controller, not a second client.** The plugin holds no Tower state
+and edits no files. It is a remote: it reads the overview Tower already computes
+and POSTs verbs Tower already routes. Everything authoritative lives elsewhere.
+Tower owns workspace, builder, and gate state plus the auth key; VSCode owns the
+working tree, the review queue, and the composer. The deck only projects that
+state onto keys and dials and fires intents back. The payoff is that the device
+is disposable: unplug it, restart it, or run two of them, and nothing is lost or
+forked, because there was never a second copy of the truth to reconcile. It also
+means every surface (deck, VSCode sidebar, web dashboard) reflects one state, so a
+change made on any of them shows up on all of them.
+
+**Canonical verbs over a command relay, not direct editor control.** The plugin
+never speaks to VSCode directly. It POSTs a small, fixed vocabulary of canonical
+verbs to Tower's command relay (`/api/command`), and the focused VSCode window
+maps each verb to a `codev.*` command. The decoupling is deliberate: the deck does
+not need to know how many editors are open, which one is focused, or how a command
+is implemented. Tower routes the verb to the focused window, and each verb is
+stamped with the active workspace, so one Tower serving several workspaces sends
+each command to the right place. New editor behavior is a new `codev.*` handler,
+and the deck's verb set barely moves.
+
+**One shared selection, because the board is a single instrument.** Row 1 selects a
+builder, Row 2 acts on it, and the dials review it, with all three pointed at the
+same builder. That coherence is the design, not a coincidence: a Row 1 press is
+select-and-open in one gesture, and focusing a builder's diff or canvas in VSCode
+moves the deck's selection back to it (via the `builder-active` activity hook).
+Without one binding selection the three zones would drift and every press would
+carry a "which builder?" ambiguity. With it, the board reads as one instrument
+aimed at one target.
+
+**Keys commit, dials review, mapped to the hardware.** The interaction model splits
+along the SD+'s two physical controls. A key is a discrete, labelled surface, so
+keys carry commits: select, approve, run, flush. An encoder is a continuous cursor,
+so dials carry review, the one task that is inherently "scan an ordered list and
+pick a target." Reviewing a diff walks files, then hunks, then changes; reviewing a
+spec walks headings, then blocks. That is a rotate-to-cursor, push-to-act motion,
+exactly what a dial is for and what a grid of keys is not. So the dials are
+phase-aware review cursors and the keys are the commit buttons: "dials collect,
+keys commit."
+
+**The canvas owns composer state; the deck stays mode-neutral.** A dial press does
+not decide what happens to the feedback it submits. It relays a mode-neutral verb
+(`feedback-file`, `feedback-hunk`, `feedback-selection`); VSCode forwards it to the
+builder now or queues it, per the `codev.diffCodelensMode` workspace setting, and
+**Send Feedback** flushes a queue. All of that (the queue, the delivery mode, the
+composed text) lives in VSCode, the surface that actually renders the artifact. The
+deck renders no artifact content and holds no composer state, so it cannot fall out
+of sync with what you are reading; the touch strip only names the live mode so a
+press is never a surprise. Keeping composer state where the canvas is, and off the
+device, is what lets the deck stay a stateless remote.
+
+**Gate approval is never silent, by design.** The deck can surface a gate's approval
+modal in VSCode, but it can never approve on the device. Approving a spec, plan, or
+PR is a human decision with consequences, so it always lands in front of you in the
+editor, where the artifact is, rather than behind a one-touch key on a desk
+peripheral. Silent one-touch approval is deliberately out of scope for that reason,
+not for want of a spare key.
+
+**The Architects board is an enumeration, not a scope.** A second board of **Architect
+Action** keys lists the workspace's live architects, one key each — you reach it with a
+*native* Stream Deck page/profile switch, not a plugin mode. Two decisions shape it.
+First, it does **not** filter the builders board: pressing an architect opens that
+architect's terminal and changes nothing about the shared builder selection, because a
+builder already links back to its architect, and a "list architects" *mode* would leave
+Row 2 and the review dials with nothing coherent to act on. Second, the list is the
+**live-session view** (`OverviewData.architects`), not the architects derived from the
+builders' `spawnedByArchitect`: the board *summons*, so it must list every architect that
+exists — including one that owns no builders — or that architect would be permanently
+unopenable. That is safe here where it would not be for a single-target key: this board
+enumerates candidates and still delegates resolution (and the "no such architect" warning)
+to VSCode, so a stale or incomplete list yields a key that **fails loudly** on press, never
+one that silently opens the wrong person. For the same reason `main` is **sorted** first
+but never **pinned** — an injected `main` pressed while `main` is briefly offscreen would
+resolve to whoever sorts first, opening the wrong terminal under main's own label (#1497);
+an absent key is the safer, self-correcting failure.
+
+**A native switch, not a plugin one.** The Builders and Architects boards are two
+placements (a second page, a folder, or a second profile) that you flip between with Stream
+Deck's own navigation — the plugin ships a Codev-styled *switch* icon so a native switch key
+blends with the rest, but drives no page flip itself. A plugin-driven toggle
+(`switchToProfile`) waits on bundled-profile authoring (deferred with #1381/#1440); the
+native route delivers the button today without it.
+
+**Wiring the native switch.** Pick whichever native mechanism you prefer — none of them is a
+Codev action; the plugin only supplies the icon (`com.cluesmith.codev.sdPlugin/icons/switch.png`,
+`@2x` for retina):
+
+- **Swipe (no key).** Put page 1 (builders) and page 2 (architects) in one profile and swipe
+  the touchscreen / tap the page dots. This is the simplest, and needs no switch key at all.
+- **Folder key.** Select the Architect keys → **Create Folder**; a native **Back** key returns.
+  Click the folder key → set its image to `switch.png`.
+- **Switch Profile key.** Put the Architect keys on a second profile, then drag Stream Deck's
+  built-in **Switch Profile** action onto a key on each profile (pointing at the other) → set
+  each one's image to `switch.png`.
+
+Within a single profile there is no built-in *key* that jumps to a specific page, so a switch
+*button* (as opposed to a swipe) means a Folder or a second profile — the page-jump key is the
+deferred `switchToProfile` work above.
 
 ## Hardware
 
@@ -25,53 +129,79 @@ but degrades by model:
 
 ## Recommended layout (Stream Deck +)
 
-A two-zone board bound by one shared selection: **Row 1 selects, Row 2 acts on
-the selection, the dials review it.**
+**Two pages in one profile, one shared selection.** Page 1 is the builders board
+(Row 1 selects, Row 2 acts on the selection); page 2 is the architects board. You
+**swipe** between them (the Stream Deck + touchscreen / page dots). The **same four
+dials** serve both pages — swiping doesn't change the selected builder, so the review
+dials keep reviewing it whichever page is showing.
 
 ```
-┌──────────────────────────────────────────────────────────┐
-│  STREAM DECK +                                             │
-│                                                            │
-│  ┌────────┐  ┌────────┐  ┌────────┐  ┌────────┐           │
-│  │ Builder│  │ Builder│  │ Builder│  │ Builder│  Row 1:    │
-│  │ slot 1 │  │ slot 2 │  │ slot 3 │  │ slot 4 │  selectors │
-│  └────────┘  └────────┘  └────────┘  └────────┘           │
-│  ┌────────┐  ┌────────┐  ┌────────┐  ┌────────┐           │
-│  │Approve │  │  Dev   │  │Send Fb │  │  Open  │  Row 2:    │
-│  │ Gate   │  │ Server │  │  (N)   │  │  Term  │  palette   │
-│  └────────┘  └────────┘  └────────┘  └────────┘           │
-│  ┌──────────────────────────────────────────────┐         │
-│  │  touch strip: each dial's title + live detail  │         │
-│  └──────────────────────────────────────────────┘         │
-│      ◉            ◉            ◉            ◉               │
-│   Select        Review       Review       Scroll  4 dials  │
-│   (Zoom)        Files        Changes               /PR     │
-└──────────────────────────────────────────────────────────┘
+Page 1 — Builders
+┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐
+│ Builder│ │ Builder│ │ Builder│ │ Builder│  Row 1
+│  (1st) │ │  (2nd) │ │  (3rd) │ │  (4th) │
+└────────┘ └────────┘ └────────┘ └────────┘
+┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐
+│OpenArch│ │  Bldr  │ │Approve │ │  Dev   │  Row 2
+│ (bldr) │ │  Term  │ │ Gate   │ │ Server │
+└────────┘ └────────┘ └────────┘ └────────┘
+
+              ⇅ swipe
+
+Page 2 — Architects
+┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐
+│  Arch  │ │  Arch  │ │  Arch  │ │  Arch  │  Row 1
+│ (main) │ │  (2nd) │ │  (3rd) │ │  (4th) │
+└────────┘ └────────┘ └────────┘ └────────┘
+┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐
+│  Arch  │ │  Arch  │ │No arch │ │No arch │  Row 2
+│  (5th) │ │  (6th) │ │(empty) │ │(empty) │
+└────────┘ └────────┘ └────────┘ └────────┘
+
+  ◉            ◉            ◉            ◉     ← the SAME four dials on both pages
+Select       Review       Review       Scroll
+(Zoom)       Files        Changes
 ```
 
-- **Row 1 — fleet selectors.** Four **Builder Action** keys, one per slot (1–4).
-  They are a **4-wide window** onto the fleet: with more than four builders the
-  **Select dial** (Zoom Navigator rotate) scrolls the window to builders 5–8, 9–N,
-  and the slot holding the current selection is accented. Press selects the builder
-  (Row 2 + the dials follow) and opens its phase artifact.
-- **Row 2 — action palette**, fixed in place, always acting on the **selected**
-  builder: **Approve Gate · Dev Server · Send Feedback (N) · Open Terminal**.
+- **Page 1, Row 1 — builder selectors.** Four **Builder Action** keys: a **window**
+  onto the fleet whose width is exactly the number of keys you place (four here), not a
+  fixed count. The keys self-order by physical position (left to right, top row first),
+  so there are no slot numbers to set. With more builders than keys the **Select dial**
+  (Zoom Navigator rotate) scrolls the window a page at a time, and the slot holding the
+  selection is accented. Press selects the builder (Row 2 + the dials follow) and opens
+  its phase artifact. There is no `main`-anchor key here any more — page 2 reaches every
+  architect, `main` included, so Row 1 is all builders.
+- **Page 1, Row 2 — action palette**, fixed, always acting on the **selected** builder:
+  **Open Architect Terminal (builder mode) · Open Builder Terminal · Approve Gate · Dev
+  Server**. The architect key is pinned to **builder** mode — it opens the *selected
+  builder's* owning architect (the per-builder complement); reaching any *other*
+  architect is page 2's job, so this key needn't carry `main`.
+- **Page 2 — architects board.** **Architect Action** keys, one per live architect,
+  self-ordering left-to-right then top-to-bottom **across both rows** — so `main` is
+  top-left and the eight slots hold up to eight architects (fill Row 2 to see more than
+  four). Press opens that architect's terminal. Trailing slots past the live list read a
+  dim **No architect**. This page sets **no scope**: the selection stays the builder you
+  left on page 1, which is why the shared dials keep working here unchanged.
 
-Nothing is fixed — drag whatever you want onto each slot in the Stream Deck app.
-The 5th encoder, **Spawn from Backlog**, can swap onto a dial in place of any of
-the four above (e.g. replace PR Nav when you are triaging the backlog).
+Nothing is fixed — drag whatever you want onto each slot in the Stream Deck app. On
+page 2 the **PR Navigator** and **Spawn from Backlog** encoders make a natural
+fleet-level dial strip (neither needs a selected builder) if you'd rather not mirror
+page 1's review dials.
 
 ## Actions
 
 ### Keys
 
-- **Builder Action** (Row 1) — a live tile for a builder **slot**, but as a 4-wide
-  **window** onto the fleet, not a fixed index: slot N shows the Nth builder on the
-  current page, and the **Select dial** scrolls the page so a fleet larger than four
-  is fully reachable. It shows the builder's issue + phase, accents the slot holding
-  the selection, and on press selects the builder (Row 2 + the dials follow) and
-  opens its phase artifact. The default press verb is **Automatic** (the current
-  phase's spec / plan / diff); pick a fixed verb in the PI to always run that.
+- **Builder Action** (Row 1) — a live tile for a builder **slot**, as a **window**
+  onto the fleet whose width is the number of these keys you placed (not a fixed
+  index): the key's slot is its position among them (reading order, row then column),
+  so the Nth key shows the Nth builder on the current page, and the **Select dial**
+  scrolls the page so a fleet larger than the window is fully reachable. Because the
+  window matches the placed keys, a builder is never selectable while shown on no key.
+  It shows the builder's issue + phase, accents the slot holding the selection, and on
+  press selects the builder (Row 2 + the dials follow) and opens its phase artifact.
+  The default press verb is **Automatic** (the current phase's spec / plan / diff);
+  pick a fixed verb in the PI to always run that.
 - **Approve Gate** (Row 2) — the **single** approve affordance. Acts on the
   **selected** builder: the face shows its pending gate (e.g. `Plan · Approve`), and
   press surfaces that gate's **approval modal in the focused VSCode window** for you
@@ -81,14 +211,44 @@ the four above (e.g. replace PR Nav when you are triaging the backlog).
   feedback. The badge `N` mirrors that builder's queued count from the overview:
   in immediate mode `N` stays 0 and the key is inert; in queue mode `N` climbs and
   a press sends the batch (VSCode's Submit Review).
-- **Open Terminal** (Row 2) — opens the selected builder's terminal (the
-  per-builder complement to Builder Action, which opens the phase artifact). To
-  reach a blocked builder off the current window, scroll the Select dial — blocked
-  builders show gate-colored faces, and the Zoom dial's touchstrip shows the
-  workspace's pending-gate count.
+- **Open Builder Terminal** (Row 2) — opens the selected builder's terminal (the
+  per-builder complement to Builder Action, which opens the phase artifact; the
+  face reads **Builder** over a terminal glyph). To reach a blocked builder off the
+  current window, scroll the Select dial — blocked builders show gate-colored
+  faces, and the Zoom dial's touchstrip shows the workspace's pending-gate count.
+- **Open Architect Terminal** (Row 2) — opens an architect's terminal in VSCode.
+  The sibling of Open Builder Terminal. Two
+  Property-Inspector modes: **Builder** (default) follows the selected builder and
+  opens the architect that spawned it (`spawnedByArchitect`), and is inert
+  (dimmed, "None") when nothing is selected or the builder has no recorded owner;
+  **Main** always opens the workspace's `main` architect. The key face shows the
+  resolved architect's name — the constant title `Architect` over the name — so you
+  see who a press would summon before pressing. Recommended home is **Row 2 in Builder
+  mode** with the other builder-scoped keys (the recommended layout above), so it opens
+  the *selected builder's* architect; reaching **any other** architect — `main` included —
+  is now the **Architects board's** job (**Architect Action**, below), so this key needn't
+  carry Main mode. Known edges (Main mode): when `main` isn't live, VSCode opens the first
+  architect while the face still reads `Main` (the #1497 residual — the mode reflects your
+  configured intent); and a live architect registration behind a dead terminal opens a
+  session nobody reads (the deck can't detect it). Main mode remains available and is
+  selection-independent, so it can sit on any spare key if you want a fixed `main` shortcut
+  on the main board.
+- **Architect Action** (Architects board) — a live tile for an architect, one key per
+  live architect. Like Builder Action it **self-orders** by placement (reading order,
+  row then column), so the Nth key shows the Nth architect; the list is the workspace's
+  live architects (`main` first, then alphabetical), including architects that own no
+  builders. Press **opens that architect's terminal** — it sets no scope, moves no
+  selection, and touches neither Row 2 nor the dials. A key past the end of the list
+  renders a dim, inert **No architect** face. Place several on a second page/profile (or a
+  folder) and reach them with a native Stream Deck **Switch Profile** / **Folder** key
+  (the plugin ships a *switch* icon to put on it). Distinct from **Open Architect
+  Terminal**, which resolves a *single* target (the selected builder's owner, or `main`)
+  on the main board; this is the full enumeration on its own board.
 - **Codev Action** — fires a workspace verb. Choose it in the Property Inspector
   (Open Architect/Builder Terminal, View Diff, Send Message, Spawn Builder,
-  Refresh Overview). Defaults to Refresh Overview.
+  Refresh Overview). Defaults to Refresh Overview. (The Open Architect Terminal
+  entry here is the generic manual picker — the dedicated **Open Architect
+  Terminal** key above is the builder-scoped, face-labelled complement.)
 
 Each dial's touch strip shows a **title + a live value**, refreshed over SSE:
 the Zoom Navigator shows the workspace (+ builder/gate counts) or the selected
@@ -119,8 +279,13 @@ builder (+ its phase and position); PR / Spawn show the item + `i/N`.
   previous block, **push** = open the composer, **tap** = walk forward to the next
   commented block. The touch strip names the live mode (`Changes · send` /
   `Changes · queue`, or `Blocks`).
-- **Scroll** — rotate = scroll the focused editor's viewport (caret stays put);
-  **push** = submit the current selection as feedback.
+- **Scroll** — phase-aware viewport scroll (caret stays put). *Diff phase*: rotate =
+  scroll the focused editor's viewport. *Spec/plan phase*: rotate = scroll the artifact
+  canvas viewport (the editor scroll can't reach a webview, so the dial drives the canvas
+  directly). **push** = submit the current selection as feedback — builder-diff-only, so the
+  press stays inert on a spec/plan canvas (the dial is half-live there: rotation scrolls,
+  press does not). The touch strip names the mode (`Scroll · send` / `Scroll · queue` in diff
+  phase, `Scroll · read only` on a canvas).
 
 **Dials collect, keys commit.** A diff dial press submits a chunk via a
 **mode-neutral** verb (`feedback-file` / `feedback-hunk` / `feedback-selection`);
@@ -260,17 +425,18 @@ Functional — build/type/unit-verified and validated end-to-end on physical
 hardware (Stream Deck +, live Tower; versioned in lockstep with the codev
 workspace since 3.3.0). The dial touch strips render title + a live value via
 `setFeedback`; a richer SVG/icon render layer (badges, colour by state) is still
-out of scope. Also deliberately out of scope (see the pre-migration `PLAN.md`):
-silent one-touch gate approval. (Editor scrolling, originally out of scope there,
-was since implemented as the Scroll dial.) The `/api/command` route inherits
+out of scope. Silent one-touch gate approval is also deliberately out of scope
+(see [Design](#design) for the reason). (Editor scrolling, once out of scope, was
+since implemented as the Scroll dial.) The `/api/command` route inherits
 Tower's current auth posture; a Tower-auth follow-up is tracked separately.
 
 ## History
 
-This plugin was imported into the monorepo (issue #1347) from
-[`cluesmith/codev-integrations`](https://github.com/cluesmith/codev-integrations)
-at commit `77be3d0` (`packages/streamdeck`), as part of the #1189 SDK
-consolidation: its `@cluesmith/codev-client` dependency was absorbed into
-`@cluesmith/codev-sdk`, and the plugin became the sdk's first
-outside-the-original-trio consumer. Pre-migration history (including the
-original `PLAN.md` design document) lives in that repo.
+This plugin was imported into the monorepo under issue #1347 from the
+pre-migration repository at commit `77be3d0` (`packages/streamdeck`), as part of
+the #1189 SDK consolidation: its `@cluesmith/codev-client` dependency was absorbed
+into `@cluesmith/codev-sdk`, and the plugin became the sdk's first
+outside-the-original-trio consumer. The design rationale that once lived only in
+that repository's planning document now lives in-tree, under [Design](#design)
+(issue #1390); the pre-migration repository, which holds the earlier development
+history, is slated for retirement after the sdk's first npm publish.

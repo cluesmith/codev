@@ -224,6 +224,63 @@ describe('send command', () => {
       ).rejects.toThrow('File too large');
     });
 
+    it('refuses an over-limit message body locally, before contacting Tower (Issue #1573)', async () => {
+      // Mirrors Tower's ceiling at the CLI so the refusal is immediate and identically worded
+      // rather than a 400 the user has to interpret.
+      await expect(
+        send({ builder: 'builder-spir-109', message: 'x'.repeat(48 * 1024 + 1) }),
+      ).rejects.toThrow(/over the 49152-byte \(48KB\) limit/);
+      expect(mockSendMessage).not.toHaveBeenCalled();
+    });
+
+    it('counts --file content against the same body limit (Issue #1573)', async () => {
+      // The attachment is APPENDED to the message, so a per-file cap alone would let a
+      // just-under-limit file plus a message sail past the ceiling Tower enforces.
+      await expect(
+        send({ builder: 'builder-spir-109', message: 'x'.repeat(48 * 1024), file: '/tmp/test-file.txt' }),
+      ).rejects.toThrow(/over the 49152-byte \(48KB\) limit/);
+      expect(mockSendMessage).not.toHaveBeenCalled();
+    });
+
+    it('reports the delivered byte count when Tower echoes it (Issue #1573)', async () => {
+      // #1564 and #1521 both read as unqualified successes at the sender. Printing what was
+      // actually accepted is what makes a truncation visible from the sending side.
+      mockSendMessage.mockResolvedValue({ ok: true, resolvedTo: 'builder-spir-109', bodyLength: 1234 });
+
+      await send({ builder: 'builder-spir-109', message: 'hi' });
+
+      const successMessages = vi.mocked(logger.success).mock.calls.map((c) => String(c[0]));
+      expect(successMessages.some((m) => m.includes('(1234 bytes)'))).toBe(true);
+    });
+
+    it('says so when Tower could not confirm the message reached the terminal (Issue #1584)', async () => {
+      // Tower now records an unconfirmed delivery instead of re-writing it — re-writing is what
+      // re-injected one message dozens of times in #1583 — so this line is the ONLY place the
+      // sender learns the echo never came back.
+      mockSendMessage.mockResolvedValue({
+        ok: true, resolvedTo: 'builder-spir-109', bodyLength: 1234, verified: false,
+      });
+
+      await send({ builder: 'builder-spir-109', message: 'hi' });
+
+      const successMessages = vi.mocked(logger.success).mock.calls.map((c) => String(c[0]));
+      expect(successMessages.some((m) => m.includes('unverified — header not seen on the terminal'))).toBe(true);
+    });
+
+    it('prints the plain delivered line when verification confirmed or does not apply (Issue #1584)', async () => {
+      // `verified: true` and an absent field (older Tower, or a body with no header worth
+      // matching) must read exactly as they always did — the field is additive.
+      for (const extra of [{ verified: true }, {}]) {
+        vi.mocked(logger.success).mockClear();
+        mockSendMessage.mockResolvedValue({ ok: true, resolvedTo: 'builder-spir-109', bodyLength: 7, ...extra });
+
+        await send({ builder: 'builder-spir-109', message: 'hi' });
+
+        const successMessages = vi.mocked(logger.success).mock.calls.map((c) => String(c[0]));
+        expect(successMessages.some((m) => m === 'Message delivered to builder-spir-109 (7 bytes)')).toBe(true);
+      }
+    });
+
     it('throws on file not found', async () => {
       await expect(
         send({ builder: 'builder-spir-109', message: 'Test', file: '/tmp/missing.txt' }),

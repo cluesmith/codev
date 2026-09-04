@@ -16,7 +16,9 @@ Add to `.codev/config.json`:
 }
 ```
 
-Available providers: `github` (default), `gitlab` (uses `glab` CLI), `gitea` (uses `tea` CLI).
+Available providers: `github` (default), `gitlab` (uses `glab` CLI), `gitea` (uses `tea` CLI), `linear` (uses the Linear API).
+
+`linear` is a **hybrid** provider: it serves the issue concepts, and every PR concept deliberately falls through to the `gh` default, because the repository itself still lives on GitHub. Only `team-activity` and `on-it-timestamps` are disabled.
 
 > **Note:** Non-GitHub presets are best-effort. Their CLI tools may produce output schemas that differ from GitHub's JSON contracts. Codev handles this gracefully — concepts that return non-conforming JSON are treated as unavailable (null). If a preset command doesn't work correctly for your setup, override the individual concept with a command that produces the expected output.
 
@@ -70,6 +72,7 @@ Set a concept to `null` to disable it. The feature that uses it will gracefully 
 | `issue-list` | — | JSON array | List issues |
 | `issue-comment` | `CODEV_ISSUE_ID`, `CODEV_COMMENT_BODY` | — | Post issue comment |
 | `pr-exists` | `CODEV_BRANCH_NAME` | truthy/falsy | Check if PR exists for branch |
+| `pr-create` | `CODEV_PR_TITLE`, `CODEV_PR_BODY`, `CODEV_PR_BASE`, `CODEV_PR_HEAD`, `CODEV_PR_REPO`, `CODEV_PR_DRAFT` | JSON `{number, url}` | Open a PR (title + body required — set the body to `""` for none; rest optional. Gitea also reads `CODEV_PR_LOGIN`) |
 | `pr-merge` | `CODEV_PR_NUMBER` | — | Merge a PR |
 | `pr-search` | `CODEV_SEARCH_QUERY` | JSON array | Search PRs |
 | `pr-view` | `CODEV_PR_NUMBER`, `CODEV_INCLUDE_COMMENTS` | JSON or text | View PR details |
@@ -193,4 +196,15 @@ Example script (`scripts/forge/issue-view.sh`):
 curl -s "https://forge.example.com/api/issues/$CODEV_ISSUE_ID" \
   -H "Authorization: Bearer $FORGE_TOKEN" \
   | jq '{title: .title, body: .description, state: .state}'
+```
+
+`codev doctor` reports the executable each concept needs on `PATH`, inferred from the script's
+first substantive command. A script that opens with `set -e` or an input guard should say so
+explicitly instead:
+
+```bash
+#!/bin/sh
+# forge-executable: tea
+set -e
+...
 ```

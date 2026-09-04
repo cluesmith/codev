@@ -5,8 +5,10 @@ import { CodevStore } from './store.js';
 import {
   CodevAction,
   BuilderAction,
+  ArchitectAction,
   DevServerAction,
   OpenTerminalAction,
+  OpenArchitectAction,
   ApproveGate,
   SendQueueAction,
   ZoomNav,
@@ -38,8 +40,10 @@ const store = new CodevStore({
 const actions = [
   new CodevAction(store),
   new BuilderAction(store),
+  new ArchitectAction(store),
   new DevServerAction(store),
   new OpenTerminalAction(store),
+  new OpenArchitectAction(store),
   new ApproveGate(store),
   new SendQueueAction(store),
   new ZoomNav(store),

@@ -12,7 +12,7 @@
  * Run: npx playwright test dashboard-bugs
  */
 
-import { test, expect } from '@playwright/test';
+import { test, expect } from './tower-auth.js';
 import { resolve } from 'node:path';
 
 const TOWER_URL = 'http://localhost:4100';

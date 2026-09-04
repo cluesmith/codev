@@ -32,14 +32,14 @@ protocol is safe and needs no porch change.
 | `dev-approval` | pre-PR | **PIR's distinctive gate** — reviews the *running* worktree via `afx dev` |
 | `pr` | post-PR | Reviews on GitHub, then approves; porch wakes the builder to merge |
 
-The `pr` gate makes the merge trigger **structured porch state** rather than free text in the
-builder's pane — closing the self-merge class where a builder infers authorization from
-ambiguous prose.
+The `pr` gate holds the merge behind porch state: the human approves, the architect relays that
+approval, and the builder records it with `porch approve pr` before porch hands over the merge task.
 
 **Gates do not notify the architect automatically.** Porch broadcasts `overview-changed` over
 SSE; the VSCode Builders tree renders the blocked state with a bell and raises a toast. CLI
 users see it via the builder pane or `porch pending`. The builder's job at any gate is: write
-the artifact, commit, signal, wait — never to invoke `porch approve` itself.
+the artifact, commit, signal, wait — then run `porch approve` when the architect relays the human's
+approval, never on your own initiative.
 
 ## Rejection is iteration, not a command
 

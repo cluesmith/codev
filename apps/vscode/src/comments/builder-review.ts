@@ -24,8 +24,10 @@ import {
   getDiffInjectEntry,
   getDiffInjectEntries,
   onDidChangeDiffInjectRegistry,
+  getDiffCodelensMode,
   COMMENT_FOR_BUILDER_COMMAND,
 } from '../diff-inject-codelens.js';
+import { buildBuilderFileRef, buildBuilderRangeRef } from '../diff-inject-ref.js';
 import { planThreadReconcile, deriveWorktreePath, clampAnchorLines, type RegisteredFile } from '../review-queue/reconcile.js';
 import type { ReviewQueueStore } from '../review-queue/store.js';
 import type { LineRange, PendingComment } from '../review-queue/queue.js';
@@ -61,6 +63,59 @@ function bodyText(body: string | vscode.MarkdownString): string {
   return body.value;
 }
 
+/**
+ * VS Code built-in that submits the FOCUSED native comment reply box (#1552),
+ * so a deck submit gesture can flush an open composer. `editor.action.submitComment`
+ * is the submit id (the `editor.*` id — NOTE: `workbench.action.submitComment`
+ * does NOT exist; it would be a silent no-op). It only acts on a FOCUSED comment
+ * editor, which is why the submit path is a no-op when the box has lost focus.
+ */
+const SUBMIT_FOCUSED_COMMENT = 'editor.action.submitComment';
+
+/**
+ * Whether OUR builder-review comment box is currently open — tracked here, in the
+ * composer's owner, so the deck feedback router (#1552) can drive it. Set true
+ * only when WE open a box (`openCommentInput`); cleared when it submits.
+ *
+ * This is deliberately OUR flag, not a "focused-comment-input" probe: a second
+ * native comment controller (`codev-review`, plan/spec review) also opens
+ * `commentinput-…` editors, so keying off the focused comment URI would let a
+ * diff-review dial submit an unrelated plan/spec comment (CMAP #1552). The flag
+ * is scoped to this controller, so `isBuilderComposerOpen()` never mistakes a
+ * foreign comment box for ours.
+ *
+ * A native Escape dismissal is NOT observable via the stable comment API, so the
+ * flag can stale-stick `true`. That stays cancel-biased: a stale flag can only
+ * cost a submit no-op or an extra open, never a phantom submit — SUBMIT runs the
+ * built-in, which no-ops when no comment editor is focused, and the submit
+ * executor clears the flag, so it self-heals on the next gesture.
+ */
+let composerOpen = false;
+
+/** True while OUR builder-review comment box is open (the deck router reads this). */
+export function isBuilderComposerOpen(): boolean {
+  return composerOpen;
+}
+
+/**
+ * Submit the focused composer via VS Code's built-in (#1552). The built-in is a
+ * no-op when no comment editor is focused, so a stale `composerOpen` can never
+ * resurrect cancelled prose. Our `codev.submitBuilderComment` handler also
+ * clears the flag on a real submit; clearing here self-heals the no-op case.
+ */
+export async function submitActiveBuilderComposer(): Promise<void> {
+  await vscode.commands.executeCommand(SUBMIT_FOCUSED_COMMENT);
+  composerOpen = false;
+}
+
+// NOTE (#1552, ruling B): there is intentionally NO dial-cancel executor. A
+// native comment DRAFT has no safe programmatic discard — hideComment keeps the
+// draft, closeActiveEditor closes the HOST editor (observed: focus jumps windows),
+// and submit-empty is blocked by the submit button's `!commentIsEmpty` enablement.
+// VS Code hands us the thread only on a click, so the discard is the visible
+// Cancel button (`codev.cancelBuilderComment`, which disposes the thread). The
+// thread-owning rework that would restore a dial cancel is the #1560 spike.
+
 /** The 1-based inclusive range a thread's anchor denotes. */
 function threadLineRange(thread: vscode.CommentThread): LineRange {
   const range = thread.range;
@@ -73,13 +128,19 @@ export function activateBuilderReviewComments(
   store: ReviewQueueStore,
   overviewCache: OverviewCache,
 ): void {
+  // Reset composer state on (re)activation, so a reload never starts thinking a
+  // box is open (#1552).
+  composerOpen = false;
   const controller = vscode.comments.createCommentController(
     CONTROLLER_ID,
     'Codev Builder Review',
   );
   controller.options = {
     prompt: 'Comment for builder',
-    placeHolder: 'Type review feedback for the builder, then Queue Comment',
+    // Neutral hint (CMAP #1552): the submit button's label is mode-specific
+    // (Queue in comment mode, Forward in the default forward mode), so the
+    // placeholder stays generic rather than naming one delivery.
+    placeHolder: 'Type review feedback for the builder, then submit',
   };
   context.subscriptions.push(controller);
 
@@ -232,6 +293,9 @@ export function activateBuilderReviewComments(
   async function openCommentInput(fsPath: string, range: LineRange | null): Promise<void> {
     const editor = vscode.window.activeTextEditor;
     if (!editor || editor.document.uri.fsPath !== fsPath) { return; }
+    // A box is about to open and take focus — mark the composer open so the deck
+    // feedback gestures drive it (submit) instead of stacking threads (#1552).
+    composerOpen = true;
     if (range) {
       // endColumn spans the last line's content (clamped by the editor);
       // ending at column 1 would exclude the last line from the range
@@ -278,27 +342,75 @@ export function activateBuilderReviewComments(
     await vscode.commands.executeCommand('workbench.action.addComment');
   });
 
-  // Submit button on an input thread → queue the comment. The input thread is
-  // disposed; the reconciler re-creates the canonical thread from the queue.
-  reg('codev.submitBuilderComment', async (reply: vscode.CommentReply) => {
+  // Submit button on an input thread → deliver the authored comment. The diff
+  // codelens mode decides delivery (#1552): forward mode injects the ref +
+  // prose into the builder PTY now (the #789 forward path every forward verb
+  // uses), comment mode enqueues it for the batched Submit Review. This is the
+  // SINGLE authoring surface for both — so the gutter "+", the context-menu
+  // action, the comment codelens, and the deck flag gestures all deliver per
+  // the current mode (owner-approved at the #1552 plan gate). The input thread
+  // is disposed either way; in comment mode the reconciler re-creates the
+  // canonical thread from the queue.
+  //
+  // Two command ids share this ONE handler so the button can carry a mode-accurate
+  // label (CMAP #1552): `codev.submitBuilderComment` ("Queue Comment for Builder",
+  // shown in comment mode) and `codev.forwardBuilderComment` ("Forward to Builder",
+  // shown in forward mode) — the menu `when` clauses gate which is visible, the
+  // handler's own mode branch does the real delivery, so the two can't drift.
+  const deliverBuilderComment = async (reply: vscode.CommentReply): Promise<void> => {
     const thread = reply.thread;
+    // Any Submit — empty or not — ends the composer, so the next deck gesture
+    // opens a fresh box rather than trying to drive a closed one (#1552).
+    composerOpen = false;
+    // Empty / whitespace submit leaves nothing behind: no queue entry, no
+    // forward, no orphan thread. (Escape/Cancel already disposes the in-progress
+    // thread; this covers a Submit with a blank body.)
+    const body = reply.text.trim();
+    if (!body) { thread.dispose(); return; }
     const entry = getDiffInjectEntry(thread.uri.fsPath);
-    if (!entry || !registerEntryWorktree(entry)) {
+    if (!entry) {
       vscode.window.showWarningMessage('Codev: This file is not part of an active builder diff');
       return;
     }
     // A range-less thread is a file comment (the file-level lens flow).
     let lineRange: LineRange | null = null;
     if (thread.range) { lineRange = threadLineRange(thread); }
+
+    if (getDiffCodelensMode() === 'forward') {
+      const ref = lineRange
+        ? buildBuilderRangeRef(entry.relPath, lineRange.start, lineRange.end)
+        : buildBuilderFileRef(entry.relPath);
+      // The ref carries a trailing space, so `ref + body` reads "<ref> <prose>".
+      thread.dispose();
+      await vscode.commands.executeCommand('codev.forwardToBuilder', entry.builderId, ref + body);
+      return;
+    }
+
+    if (!registerEntryWorktree(entry)) {
+      vscode.window.showWarningMessage('Codev: This file is not part of an active builder diff');
+      return;
+    }
     const comment: PendingComment = {
       id: randomUUID(),
       createdAt: new Date().toISOString(),
       file: entry.relPath,
       lineRange,
-      body: reply.text,
+      body,
     };
     thread.dispose();
     await store.add(entry.builderId, comment);
+  };
+  reg('codev.submitBuilderComment', deliverBuilderComment);
+  reg('codev.forwardBuilderComment', deliverBuilderComment);
+
+  // Cancel button on an input thread → discard the in-progress box, leaving
+  // nothing queued or forwarded (#1552). VS Code hands us the thread, so a click
+  // disposes it directly (no dependency on a built-in). This is the VISIBLE
+  // counterpart to the deck Files-dial cancel and to the canvas composer's
+  // explicit Cancel — the box was missing a labelled discard next to Submit.
+  reg('codev.cancelBuilderComment', (reply: vscode.CommentReply) => {
+    composerOpen = false;
+    reply.thread.dispose();
   });
 
   // Edit flow (#1055 pattern): flip to VS Code's inline edit surface;
