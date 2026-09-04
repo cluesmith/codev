@@ -94,5 +94,34 @@ Verification (from the worktree, apps/streamdeck):
 
 No skeleton mirror needed (apps/ is app code, single copy; not a codev/↔codev-skeleton framework file).
 
-Next: PR phase (porch runs the gemini+codex consultation there). Will note here when the PR is
-up for the architect's streamdeck-link hardware check.
+## PR — up
+
+PR #1607 opened: https://github.com/cluesmith/codev/pull/1607 (Fixes #1606). Body carries the
+metadata-vs-registered-list trade-off note per the architect's call.
+
+CMAP dispatched (gemini/codex/claude, `--type pr`). Note: consult auto-detect failed with
+"Multiple projects found" from this worktree — had to pass `--project-id bugfix-1606` explicitly.
+Awaiting three verdicts before notifying the architect + running `porch done` (fires the pr gate).
+
+**@architect: hardware check** — once you approve, this is ready for your streamdeck-link
+verification: select a BUGFIX builder (investigate/fix) and confirm the Files/Changes dials now
+step the diff and the strip no longer reads `Files · send` when there's nothing to review.
+
+## CMAP verdicts (3/3)
+
+- **gemini: APPROVE** (HIGH) — no issues.
+- **codex: APPROVE** (HIGH) — no issues.
+- **claude: COMMENT** (HIGH) — three points, all addressed or triaged:
+  1. Plugin README stale on the dial vocabulary → **fixed** (commit f73e3f8): README now lists
+     the BUGFIX/AIR investigate/fix/pr phases and the honest `No review target` state.
+  2. `DIFF_REVIEW_PHASES` comment attributed `investigate` to BUGFIX alone (RESEARCH uses it
+     too) → **fixed** (same commit): registered by name, note corrected.
+  3. MAINTAIN `maintain` / EXPERIMENT `execute`,`analyze` / SPIKE `spike` still resolve to
+     `none` (dead dials on a diff, though the honest label now stops them lying). Claude flags
+     this as an **architect scope call, not a blocker** — out of #1606's investigate/fix/pr
+     scope. **Raised to the architect** in the gate notification; recommend a follow-up issue
+     rather than expanding this PR.
+
+Non-substantial changes (docs + comment, zero behavior change), so CMAP was not re-run.
+Sent the single gate notification with all three verdicts; ran `porch done` to fire the pr gate.
+Awaiting architect approval (`porch approve bugfix-1606 pr`) before merge.
