@@ -430,7 +430,7 @@ export interface IssueView {
   /**
    * Login/handle of the user who opened the issue, when the forge concept
    * supplies it: GitHub `author.login`, GitLab `author.username`, Gitea
-   * `poster.login`, Linear `creator.displayName`. Optional so the contract
+   * `user.login`, Linear `creator.displayName`. Optional so the contract
    * stays forge-neutral — a forge/script that omits it degrades gracefully
    * (the consumer drops the "opened by" attribution).
    */
