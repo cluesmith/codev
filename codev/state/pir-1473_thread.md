@@ -147,3 +147,104 @@ delivery — adding fields doesn't fix it, it must pass `'delivery'`).
   unaffected".
 
 Revision 2 committed. Still at `plan-approval`.
+
+## 2026-09-04 — Plan revision 3 (post 3-way CMAP)
+
+Verdicts split: gemini APPROVE, claude 3 blockers, codex 4. Architect adjudicated the
+disagreements against source. I re-verified everything myself before accepting — including
+enumerating the pinned xterm 5.5.0 bundle rather than relaying the review's table. All six items
+confirmed, and my own enumeration turned up a hazard nobody raised.
+
+### The hazard nobody raised — case sensitivity
+
+The adopted final-byte rule is `/\x1b\[[?>=]?[0-9;]*\$?[cnty]/g`. If that character class ever
+carries an `i` flag it eats `ESC[C` (Right arrow), `ESC[1;5C` (Ctrl-Right), `ESC[F`/`ESC[H`
+(home/end) and `ESC[Z` (shift-Tab) — silently re-opening R1 for ordinary keyboard navigation,
+which is the exact corruption this issue exists to close. Pinned by explicit survival tests.
+
+I confirmed the rule is safe against the bundle's full key table: key finals are
+`~ A B C D F H I O Z` plus `R` and `M`/`m`. Nothing a key can produce ends in lowercase c/n/t/y.
+
+### What I verified in the bundle myself
+
+Emitted: DA1 `ESC[?1;2c` `ESC[?6c`; DA2 `ESC[>0;276;0c` `ESC[>83;40003;0c` `ESC[>85;95;0c`;
+DSR `ESC[0n`; XTWINOPS `ESC[4;h;w t` `ESC[6;h;w t` `ESC[8;rows;cols t`; CPR `ESC[r;cR`;
+DECXCPR `ESC[?r;cR` (TWO params — my revision-2 pattern demanded three); DECRPM
+`ESC[<?>f;v$y`; OSC colour terminated by ST. So revision 2's "self-trip completely closed"
+was FALSE — DSR and XTWINOPS are precisely the output-provoked class.
+
+### Reversal 1 — mouse reports must COUNT, not be stripped
+
+claude and codex directly contradicted each other, so I checked. Codex is right: the mouse
+encoders build their string from a DOM-derived event object `{col,row,button,action}` and hand it
+to the generic `triggerDataEvent` path — not a parser reply callback. A mouse report is a human
+action that changes the composer (click moves the cursor, middle-click pastes, drag selects).
+Stripping it re-opens R1 for mouse-driven TUIs. Row removed.
+
+Focus reports (`ESC[I`/`ESC[O`) stay stripped and that is consistent: focus cannot alter composer
+CONTENT, and a click that could carries its own mouse report, which is now preserved.
+
+### Reversal 2 — build the one-shot re-drain now, don't defer it
+
+"Measure first" is the right instinct against a speculative optimisation and the wrong one against
+a proven certainty. The submit-trigger hold is analytic: `stopComposing` emits `'submit'`
+synchronously after `recordUserInput`, and `scheduleDrain` runs in a microtask, so
+`lastInputAt === now` at that pass, always. Nothing left to measure. And one timer mitigates three
+things at once — the submit case, the navigation-key case, and the escalation-blind residual
+below.
+
+### My own false claim, corrected
+
+Revision 2 justified the counter partly on "a delivery can sit on the lock for up to 2s".
+FALSE — verified: `trySubmitToSession` returns false immediately on contention
+(`session-submit.ts:479`); deliveries DECLINE, they never wait. `OPERATOR_SUBMIT_WAIT_CEILING_MS`
+is what an operator waits while a DELIVERY holds the line — the opposite direction. I quoted that
+asymmetry in my own plan and then argued from the wrong side of it. It matters because these
+justifications become a code comment, and a false one there is worse than none.
+
+Real justification: memo invalidation (sufficient alone — a CachedVerdict survives across backstop
+ticks, bounded by no settle), plus the unbounded awaits inside the gap (`await classify` at :626
+AND `await watchEcho` at :715, the latter scanning up to 1000 mirror lines).
+
+### Other fixes
+
+- The interactive sender was STILL being told `verified: true` on an input-raced delivery —
+  `tower-routes.ts:2288-2289` surfaces only `outcome.verified` and `send.ts:462` warns only on
+  `=== false`. So the exact Enter-truncation case section 6 exists for reported plain success.
+  Added result-level `unverifiedCause` threaded to the CLI; precedence `'input-raced'` wins; the
+  WARN no longer prints "needle 0 chars".
+- Deleted `'pre-recorded'` — an unenforced bypass asserting something the type cannot check.
+  Filter moves inside `write()`'s external branch: 3 origins → 2, raw route covered free.
+- `WritableSession` as specified would not compile (`tracked` literal lacked a required field).
+  Split: `WritableSession` keeps the 1-arg write; the paced seam takes
+  `& { id: string; readonly inputSeq: number }`.
+
+### Decide-item nobody had named: the escalation-blind input hold
+
+`hold('busy')` nulls `detail` (:591-596) and plain `busy` is excluded from `isClassifierStuck`
+(:400-405). So a missed reply RECURRING under 300ms holds indefinitely and silently; the only net
+is `escalateHeldToOwner` at ~180s, skipped for architects — a starved architect would be entirely
+silent. My revision-2 line "a spurious hold the backstop clears" was too optimistic.
+
+Chose BOTH halves: a `'recent-input'` gate detail (so `afx inbox` says `busy:recent-input` through
+the existing shared formatter) AND a consecutive-input-hold counter WARNing at ~60 holds (≈90s —
+a human types in bursts; 90s of unbroken sub-300ms input is a machine). The detail must NOT join
+`isUnverifiableVerdict` — it sits beside `user-text`, and escalating it would false-alarm on every
+ordinary typist. That predicate is an allow-list, so adding the value is inert there by
+construction.
+
+### Corrections to my own residual list
+
+Residual 3 now says an `afx attach` client is wholly out of scope — its input AND its terminal's
+replies. It connects straight to the shellper socket (`commands/attach.ts:141-142`) and never
+touches `PtySession`. Consequence for the test plan: manual step 1 CANNOT be run against
+`afx attach` — logging at `handleUserInput` would show zero chunks and read as a false pass.
+Substituted the VS Code integrated terminal (different xterm build, and the surface whose reply
+set may differ).
+
+Also noted the general rule behind the `send-architect-identity` breakage: `recordUserInput()`
+uses `Date.now()` while the gate uses `ports.now()`, so ANY test pairing a fake clock with a real
+`PtySession` breaks and adding fields never fixes it. Adding an injectable clock to
+`PtySessionConfig` as the seam.
+
+Revision 3 committed. Still at `plan-approval`.

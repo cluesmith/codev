@@ -3,187 +3,214 @@
 Issue: [#1473](https://github.com/cluesmith/codev/issues/1473) — "Render gate: fuller close of
 the gate→write input race (R7 staleness) and input-echo-lag residual"
 
-**Revision 2** — addresses the 2-way consult (claude + codex) and architect verification posted as
-[issue comment 5545347014](https://github.com/cluesmith/codev/issues/1473#issuecomment-5545347014).
-The design shape is unchanged (two mechanisms, fail-safe `'external'` default, flag-not-hold past
-the point of no return); the three blockers are fixed and every decide/document item is answered
-below. **I re-verified each reviewer claim against the source myself** — every one held, and two of
-them turned out to be worse than described. Where my re-check *changed* the answer, it is called
-out inline.
+**Revision 3** — addresses the 3-way CMAP + architect adjudication in
+[comment 5545685246](https://github.com/cluesmith/codev/issues/1473#issuecomment-5545685246)
+(gemini APPROVE, claude 3 blockers, codex 4; gemini's approve discounted, and I agree it should be —
+it asserts the self-trip is closed, which §1 below disproves).
+
+The design shape is unchanged and endorsed by all three reviewers: `'external'` default, hard-coded
+`'delivery'` wrapper, counter + clock, flag-not-hold, and the `lastInputAt > lastDataAt` rejection.
+Revision 3 fixes six blocking items, answers two decide-items, and **reverses two of my own
+positions** (mouse stripping; deferring the re-drain).
+
+**I verified every item against source before accepting it**, including enumerating the pinned
+xterm bundle myself rather than relaying the review's table. That turned up **one hazard nobody
+raised** — see §1's case-sensitivity note, which would have eaten every arrow key.
 
 ## Understanding
 
 ### What is actually left open
 
-The architect's pre-spawn comment re-pinned the issue against `03bc5213e`. I re-checked every row
-against the files; it holds.
-
 **The output side is closed.** `ringToken()` (`mailbox-delivery.ts:520`) is sampled at `:606`,
-re-checked pre-lock at `:653`, and re-checked again *inside* the per-terminal lock at `:703`
-(`precheck`, #1365). `SETTLE_BEFORE_WRITE_MS = 250` + `settled()` (`:422`, `:447`) gate on output
-quiescence before the write; `watchEcho`/`echoNeedle`/`verify()` (#1573, #1584) confirm the write's
-own echo after it. The Notes' "consider an explicit post-write echo settle" therefore **already
-landed, as #1573** — it must not be redone.
+re-checked pre-lock at `:653` and again inside the per-terminal lock at `:703` (#1365).
+`SETTLE_BEFORE_WRITE_MS = 250` + `settled()` gate on output quiescence (#1573); `watchEcho`/
+`verify()` confirm the write's echo (#1573, #1584). The issue's "consider a post-write echo settle"
+**already landed as #1573** and must not be redone.
 
-**The input side has no observation at all.** That is the whole of what remains:
+**The input side has no observation at all:**
 
-- `ringToken` = `` `${session.bytesWritten}:${cols}x${rows}:${app}` `` (`:521`), and `bytesWritten`
-  is the ring's **output** counter (`pty-session.ts:930-931` → `RingBuffer.bytesWritten`).
-- `settled()` keys on `session.lastDataAt`, and `_lastDataAt` is assigned in exactly one place —
-  `onPtyData` (`pty-session.ts:514-516`), i.e. **output**.
-- `PtySession.write()` (`pty-session.ts:628-640`), the single funnel for user input, records
-  **nothing**: no counter, no timestamp.
+- `ringToken` = `` `${session.bytesWritten}:${cols}x${rows}:${app}` `` (`:521`); `bytesWritten` is
+  the ring's **output** counter (`pty-session.ts:930-931`).
+- `settled()` keys on `lastDataAt`, assigned only in `onPtyData` (`pty-session.ts:514-516`) — again
+  **output**.
+- `PtySession.write()` (`:628-640`), the single funnel for user input, records **nothing**.
 
-The code says so itself in three places, and names this issue as the owner:
-`mailbox-delivery.ts:696-700`, `mailbox-delivery.ts:735-737` ("PTY INPUT does not advance the ring
-— only OUTPUT does"), and `session-submit.ts:121-127`.
+Three comment blocks say so and name this issue as owner: `mailbox-delivery.ts:696-700`, `:735-737`,
+`session-submit.ts:121-127`.
 
-### The two residuals, restated precisely
+### The two residuals
 
-1. **R1 — gate→write input race (the R7 staleness case).** A keystroke lands *after* `tokenBefore`
-   is sampled at `:606`. Both re-checks compare an output counter the keystroke did not move, so
-   until the TUI happens to echo it the guard reads "unchanged" and the write proceeds onto a line
-   the human has started typing on. Our Enter then submits their half-typed draft as the agent's
-   message.
-2. **R2 — input-echo lag.** A keystroke lands *before* the sample and has not been echoed into the
-   ring yet. No counter comparison can catch this — both samples agree, correctly — and the
-   classifier reads a genuinely empty composer, because the character is still in flight through
-   WS → Tower → shellper → PTY → app render. This one needs a *clock*, not a counter.
+1. **R1 — gate→write input race (R7 staleness).** A keystroke lands *after* `tokenBefore` is
+   sampled. Both re-checks compare an output counter it did not move, so until the TUI echoes it the
+   guard reads "unchanged" and we write onto a line the human has started typing on. Our Enter then
+   submits their half-typed draft as the agent's message.
+2. **R2 — input-echo lag.** A keystroke lands *before* the sample and is not yet echoed. No counter
+   comparison can catch it — both samples agree, correctly — and the classifier reads a genuinely
+   empty composer. This needs a *clock*.
 
-### An existing partial chokepoint, and why it cannot simply be consumed
+### Why `lastInputAt` cannot simply be consumed
 
-`PtySession.handleUserInput()` (`pty-session.ts:949-957`) is the documented single chokepoint for
-live keyboard input (`tower-websocket.ts:72,100`; `pty-manager.ts:324,330`) and already calls
-`recordUserInput()` → `_lastInputAt`. So a timestamp exists; the gate never consults it.
+`handleUserInput()` (`pty-session.ts:949-957`) already records `_lastInputAt`, but `Terminal.tsx:639`
+forwards **everything** xterm emits on `onData` to it, and xterm emits terminal **replies** through
+that same event. The client strips only DA/CPR/DECRPM (`Terminal.tsx:655-661`) and **only while
+`rc.initialPhase` is true** — set on connect (`:421`, `:462`), cleared by `flushInitialBuffer`
+(`:469`) on a short timer. For a session's entire steady-state life the filter is **off**.
 
-**It cannot be consumed as-is, and this is Blocker 1.** `Terminal.tsx:639` forwards *everything*
-xterm.js emits on `onData` to that chokepoint, and xterm emits terminal **replies** through the
-same event. The client strips only DA/DA2, CPR and DECRPM (`Terminal.tsx:655-661`) and **only while
-`rc.initialPhase` is true** — I traced the flag: set on every connect (`:421`, `:462`), cleared by
-`flushInitialBuffer` (`:469`) on a short post-connect timer. For the entire steady-state life of a
-session the filter is **off**. Focus reports (`ESC[I`/`ESC[O`) and mouse reports are never filtered
-at all, in any phase.
-
-Consuming `lastInputAt` without a server-side filter would therefore produce:
-
-1. **False holds with no human present** — replies are provoked *by output*, so they cluster
-   exactly where deliveries cluster.
-2. **A self-trip route the `'delivery'` origin cannot close.** Our paced write causes a repaint;
-   the repaint carries a query; the browser replies; the reply counts as foreign input. This is the
-   honest answer to the architect's self-trip question, and revision 1 missed it entirely.
-3. **Starvation, not merely latency.** `busy` is excluded from `isClassifierStuck` (`:404`), so a
-   terminal with a chatty attached client would never escalate — it would silently never deliver.
-
-`inputSeq` and `lastInputAt` are therefore only trustworthy behind a server-side reply filter, and
-the filter is a precondition of the whole design rather than a refinement of it.
+Consuming the timestamp raw would produce false holds with no human present, a self-trip route the
+`'delivery'` origin cannot close (our write → repaint → app query → browser reply → counted as
+input), and **starvation**: `busy` is excluded from `isClassifierStuck` (`:400-405`), so a chatty
+attached client would silently never deliver. A server-side reply filter is therefore a
+**precondition** of the design, not a refinement.
 
 ## Proposed Change
 
-### 1. Server-side terminal-reply filter (Blocker 1) — `terminal-replies.ts` (new)
-
-A pure, exported, unit-testable function:
+### 1. Server-side terminal-reply filter — `terminal-replies.ts` (new)
 
 ```ts
 export function stripTerminalReplies(data: string): string
 ```
 
-It removes complete, well-formed reply sequences and returns the residue. The enumerated set:
+**I enumerated every CSI/OSC/DCS emission site in the pinned bundle myself**
+(`node_modules/.pnpm/@xterm+xterm@5.5.0/…/lib/xterm.js`). What it can emit:
 
-| Reply | Pattern |
-|---|---|
-| Primary/secondary/tertiary DA | `\x1b\[[?>=][0-9;]*c` |
-| CPR / DECXCPR | `\x1b\[[0-9]+;[0-9]+R`, `\x1b\[\?[0-9]+;[0-9]+;[01]R` |
-| DECRPM (mode report) | `\x1b\[\??[0-9;]*\$y` |
-| Focus in / out | `\x1b\[I`, `\x1b\[O` |
-| Mouse — SGR / X10 | `\x1b\[<[0-9;]+[Mm]`, `\x1b\[M[\s\S]{3}` |
-| DECRQSS reply (DCS) | `\x1bP[0-9]\$r[^\x1b]*\x1b\\` |
-| XTVERSION | `\x1bP>\|[^\x1b]*\x1b\\` |
-| OSC colour replies | `\x1b\][0-9;]+;rgb:[0-9a-fA-F/]+(\x07\|\x1b\\)` |
+| Emission | Literal in the bundle | Treatment |
+|---|---|---|
+| DA1 | `ESC[?1;2c`, `ESC[?6c` | strip |
+| DA2 | `ESC[>0;276;0c`, `ESC[>83;40003;0c`, `ESC[>85;95;0c` | strip |
+| DSR | `ESC[0n` | strip — **was missing** |
+| XTWINOPS | `ESC[4;h;w t`, `ESC[6;h;w t`, `ESC[8;rows;cols t` | strip — **was missing** |
+| CPR | `ESC[<row>;<col>R` | strip |
+| DECXCPR | `ESC[?<row>;<col>R` — **two** params | strip — **my pattern required three** |
+| DECRPM | `ESC[<?>…$y` | strip |
+| OSC colour | `ESC]<n>;rgb:…` + **ST** | strip |
+| Mouse SGR / X10 | `ESC[<b;col;rowM\|m`, `ESC[M` + 3 bytes | **COUNT — do not strip** (§1b) |
+| Focus | `ESC[I`, `ESC[O` | strip (see below) |
 
-**Server-side and unconditional**, because `afx attach`, the VS Code webview and mobile clients do
-not share the client-side filter. Anchored, specific patterns only — never a blanket "starts with
-`ESC[`", which would eat real function keys and arrow keys.
+The three gaps are exactly the output-provoked class, so **revision 2's "self-trip completely
+closed" was false**. Corrected.
 
-**Where it applies, and where it deliberately does not.** It decides the *gate signal* only; the
-bytes still reach the PTY verbatim, because the application asked for the reply. It runs in
-`handleUserInput` and nowhere else — the raw `POST /api/terminals/:id/write` passthrough
-(`tower-routes.ts:960`) is a programmatic writer that no terminal replies through, so it keeps the
-plain fail-safe default.
+**The rule.** Taking claude's final-byte rule for the CSI family, since no key sequence xterm can
+produce ends in `c`, `n`, `t` or `y` — I confirmed this against the bundle's full key table (finals
+are `~ A B C D F H I O Z`, plus `R` and `M`/`m`):
 
-**Failure directions, both acceptable and asymmetric in the right way.** Over-stripping (a human
-types something the filter matches) yields an uncounted keystroke — *exactly today's behaviour*, so
-never a regression. Under-stripping (a reply the table misses) yields a spurious HOLD that the
-backstop clears. Neither can write onto a draft.
+```ts
+/\x1b\[[?>=]?[0-9;]*\$?[cnty]/g      // DA / DSR / XTWINOPS / DECRPM, incl. forms nobody enumerated
+/\x1b\[\??[0-9]+;[0-9]+R/g           // CPR + DECXCPR (correct arity)
+/\x1b\[\?[0-9;]*u/g                  // kitty-keyboard reply, if the VS Code fork ever answers one
+/\x1b\[[IO]/g                        // focus in / out
+/\x1bP[0-9]\$r[^\x1b]*\x1b\\/g       // DECRQSS
+/\x1bP>\|[^\x1b]*\x1b\\/g            // XTVERSION — dead weight for stock xterm; kept for the fork
+/\x1b\][0-9;]+;rgb:[0-9a-fA-F\/]+(?:\x07|\x1b\\)/g   // OSC colour, BEL or ST
+```
 
-**Bracketed paste** (`ESC[200~`…`ESC[201~`) is deliberately *not* stripped: the content between the
-markers is real user input and must count.
+**HAZARD NOBODY RAISED — the character class must be case-sensitive.** `ESC[C` is Right-arrow and
+`ESC[1;5C` is Ctrl-Right. An `i` flag on `[cnty]` would strip **every arrow key, `F`/`H` home/end,
+and shift-Tab** from the gate signal — silently re-opening R1 for ordinary keyboard navigation,
+which is the exact corruption this issue exists to close. The regexes carry `g` only, never `i`, and
+a test asserts `ESC[C`, `ESC[1;5C`, `ESC[A`–`ESC[D`, `ESC[F`, `ESC[H`, `ESC[Z` and `ESC[15~` all
+**survive**.
 
-**Scope note — `composing` is left alone.** Today a reply containing no `\r` calls
-`startComposing()`, so replies already mark a session as composing with no human present. That is a
-real latent bug, but `composing`/`stopComposing` drive the `'submit'` fast trigger
-(`pty-session.ts:984`), and I am not perturbing a delivery trigger inside an issue about delivery
-safety. I confirmed `get composing()` (`:988`) has **no production consumer** outside
-`pty-session.ts` — so the blast radius of leaving it is nil. It goes in the review as a follow-up.
+The `?` in the kitty pattern is what keeps it off real kitty-encoded keystrokes; the module doc
+states the table is derived from a **pinned** dependency, so a version bump is a review trigger.
 
-### 2. `PtySession` observes input — fail-safe by default (`pty-session.ts`)
+**Where it applies.** Inside `write()`'s `'external'` branch — see §2 — so the raw
+`POST /api/terminals/:id/write` route gets it for free. Signal-only: the full chunk still reaches
+the PTY verbatim, because the application asked for the reply. (Blocking a DA reply would hang
+every attached terminal; a test pins it.)
+
+**Failure directions.** Over-strip → an uncounted keystroke, i.e. *exactly today's behaviour*, never
+a regression. Under-strip → a spurious hold — but see the decide-item in §8, which is why that is no
+longer simply "the backstop clears it".
+
+**Bracketed paste is not stripped**, and the filter is content-blind: a reply-shaped sequence
+*inside* a paste would be stripped from the signal while the surrounding pasted text still counts.
+Intended, pinned by a test, and in the over-strip (safe) direction.
+
+**Focus reports are stripped, deliberately, and this is consistent with §1b.** A focus report cannot
+alter composer *content*; a click that could carries its own mouse report, which is preserved. So
+stripping focus costs no R1 coverage while stopping an alt-tab from holding delivery.
+
+**`composing` is left alone** (all three reviewers agreed). Replies already spuriously call
+`startComposing()`, but `stopComposing` drives the `'submit'` trigger and I will not perturb a
+delivery trigger inside a delivery-safety issue. `get composing()` (`:988`) has no production
+consumer, so the cost of leaving it is nil. Follow-up in the review.
+
+### 1b. Mouse reports COUNT as input — reversing revision 2
+
+I checked the bundle rather than taking either reviewer's word, because claude and codex directly
+contradicted each other. **Codex is right.** The mouse encoders build their string from a DOM-derived
+event object (`{col,row,button,action}`) and hand it to the generic `triggerDataEvent` path — they
+are not a parser reply callback. A mouse report is a **human action that can change the composer**:
+a click moves the cursor, a middle-click pastes, a drag selects. Stripping it re-opens R1 for
+mouse-driven TUIs — the corruption direction this issue exists to close.
+
+Revision 2's mouse row is **removed**. Claude's opposite suggestion (also filter the urxvt 1015 form)
+would have widened the hole. The flooding concern is real but correctly bounded: motion tracking
+holds delivery only while the mouse is actually moving, and clears 300 ms after it stops — the
+fail-safe direction.
+
+### 2. `PtySession` observes input — two origins, filter inside `write()` (CMAP item D)
 
 ```ts
 export type WriteOrigin =
   /** Default — an unknown/foreign writer. Counts as input. */
   | 'external'
   /** The gated delivery's own paced write. Must never trip the gate's input signal. */
-  | 'delivery'
-  /** The caller already recorded the (filtered) signal for this chunk — see handleUserInput. */
-  | 'pre-recorded';
+  | 'delivery';
 
-write(data: string, origin: WriteOrigin = 'external'): boolean
-```
-
-The `'external'` default is the spine of the design, and both reviewers endorsed keeping it:
-counting only at known chokepoints and opting *in* is precisely how the current hole was made. A
-future input path is covered the moment it exists, and becoming invisible to the gate requires
-saying so out loud.
-
-`handleUserInput` becomes:
-
-```ts
-handleUserInput(data: string): void {
-  const human = stripTerminalReplies(data);
-  if (human) this.recordUserInput(human);   // filtered signal — replies bump nothing
-  if (data.includes('\r') || data.includes('\n')) this.stopComposing();
-  else this.startComposing();               // unchanged, per §1's scope note
-  this.write(data, 'pre-recorded');         // full chunk still reaches the PTY
+write(data: string, origin: WriteOrigin = 'external'): boolean {
+  if (origin === 'external') {
+    const human = stripTerminalReplies(data);
+    if (human) this.recordUserInput(human);
+  }
+  …existing write…
 }
 ```
 
-**Counter naming (decide-item).** `.length` is UTF-16 code units, not bytes, so `inputBytes` would
-lie. The field is named **`inputSeq`** and documented as *a monotone change counter — it exists to
-differ, not to total*; it advances by `data.length`. A change token needs only monotone increment,
-and `.length` is the cheap choice on an input hot path.
+**`'pre-recorded'` is deleted.** Both blocking reviewers were right and gemini's defence missed the
+point: nothing couples that value to an actual recording, so a future caller passing it while
+recording nothing is invisible input — the precise failure `'external'` exists to prevent, and the
+same "compiles fine, mail never delivers" shape as the 1-arg/2-arg hazard. Moving the filter inside
+`write()` collapses three origins to two, gets the raw route covered for free, keeps `composing` on
+raw data per §1, and leaves the delivery path untouched. `write()` is synchronous with no await, so
+record-then-write is atomic with respect to the event loop.
 
-**`recordUserInput()` keeps its signature and behaviour** (`typing-awareness.test.ts:63-161`
-asserts it moves `lastInputAt`); it gains an optional chunk argument for the `inputSeq` bump. The
-now-duplicate call inside `handleUserInput` is replaced by the filtered one above, and `write()`'s
-`'external'` branch calls it too, so keyboard input and raw-route input can never diverge again.
+`handleUserInput` therefore reduces to its composing/submit logic plus a plain `this.write(data)`.
 
-**Return-path semantics (decide-item).** The bump happens on the `'external'` branch **regardless
-of the write's return value**, including a dropped write to a dead shellper socket. The question
-the counter answers is "did a foreign writer put input at this session?", not "did it land". A
-dropped write cannot then mask itself as `busy` instead of `no-live-pty`, because `precheck` tests
-`session.writable` *before* the token (`:702` before `:703`).
+**Naming.** `.length` is UTF-16 code units, so `inputBytes` would lie. The field is **`inputSeq`**,
+documented as *a monotone change counter — it exists to differ, not to total*, advancing by
+`data.length`.
 
-**Monotonicity, stated precisely (decide-item).** The *token* is not globally monotone — geometry
-and resolved app can change back and forth. The *counters* are, and that plus the
-session-object-identity guard is what preserves `CachedVerdict`'s non-aliasing argument (`:536`).
-`_inputSeq` must therefore **never reset**, including across a spawn relaunch and `attachShellper`
-(`:263-267`), both of which replace the PTY while keeping the same `PtySession` object. Note
-`attachShellper` *does* hydrate `_lastDataAt` from the shellper's tracker; `_inputSeq` and
-`_lastInputAt` get no such hydration and must be left untouched there. A test pins this.
+**Return-path semantics.** The bump happens on the `'external'` branch **regardless of the write's
+return value**. The question is "did a foreign writer put input at this session?", not "did it
+land". A dropped write cannot mask itself as `busy` instead of `no-live-pty`, because `precheck`
+tests `session.writable` *before* the token (`:702` before `:703`).
 
-### 3. The delivery's own write opts out (`message-write.ts`)
+**Monotonicity, precisely.** The *token* is not globally monotone (geometry and app can change back
+and forth); the *counters* are, and that plus the session-object-identity guard preserves
+`CachedVerdict`'s non-aliasing argument (`:536`). `_inputSeq` must **never reset** — including across
+a spawn relaunch and `attachShellper` (`:263-267`), which replace the PTY while keeping the
+`PtySession` object. Note `attachShellper` *does* hydrate `_lastDataAt` from the shellper's tracker;
+`_inputSeq`/`_lastInputAt` get no such hydration and must be left untouched. A test pins this.
 
-Per codex's construction, which is the safer one and which I verified is safe here: the origin is
-**hard-coded in the `tracked` wrapper**, not threaded as a parameter through the general helpers.
+**Injectable clock.** `recordUserInput` uses `Date.now()` while the gate uses `ports.now()`, which is
+the general rule behind the `send-architect-identity` breakage (see Files). `PtySessionConfig` gains
+an optional `clock?: () => number` (default `Date.now`) used by `recordUserInput`, so a test can pair
+a fake clock with a real `PtySession`. Existing tests survive today only because `attachShellper`
+hydrates `_lastDataAt`; `_lastInputAt` has no such seam, and this adds one.
+
+### 3. The delivery's write opts out — and the types split (CMAP item F)
+
+Revision 2 was **uncompilable**: it showed `const tracked: WritableSession = { write: … }` with no
+`inputSeq` while making `inputSeq` required on `WritableSession`. `message-write.ts` is inside
+`packages/codev/tsconfig.json`, so that is a build break. Split the types:
+
+- `WritableSession` — unchanged, one-arg `write`. All `writeEscapeToSession` /
+  `writeMessageToSession` need, and it spares fake churn in helpers that never needed the field.
+- The paced-delivery seam: `submitMessagePaced(session: WritableSession & { id: string; readonly inputSeq: number }, …)`.
+- The inner `tracked` adapter stays the minimal write-only `WritableSession` shape.
+
+The origin is **hard-coded in the wrapper**, per codex's construction:
 
 ```ts
 const tracked: WritableSession = {
@@ -195,44 +222,39 @@ const tracked: WritableSession = {
 };
 ```
 
-This is Blocker 3's sharpest point: a 1-arg function **is** assignable to a 2-arg function type, so
-TypeScript would not have caught a wrapper that forgot to forward an origin parameter, and the
-failure mode is "mail never delivers". Hard-coding removes the opportunity.
-
-**I verified this cannot mis-tag an operator write.** `submitMessagePaced` has exactly *one*
-production caller — `mailbox-wiring.ts:301`, the delivery `writeMessage` port. The operator
-bypasses use `writeEscapeToSession`/`writeMessageToSession` directly under `submitToSession`
-(`tower-routes.ts:2113`, `:2197`), and the delayed `^C` calls `live.write('\x03')` raw
-(`tower-routes.ts:1834`) — all three keep the `'external'` default and correctly count.
-
-`WritableSession` (`message-write.ts:11-20`) also gains `readonly inputSeq: number`, which §5 needs.
+A 1-arg function **is** assignable to a 2-arg function type, so TypeScript would not catch a wrapper
+that forgot to forward an origin parameter, and the failure mode is "mail never delivers".
+Hard-coding removes the opportunity. **Verified safe:** `submitMessagePaced` has exactly one
+production caller (`mailbox-wiring.ts:301`, the delivery `writeMessage` port); the operator bypasses
+use `writeEscapeToSession`/`writeMessageToSession` under `submitToSession` (`tower-routes.ts:2113`,
+`:2197`) and the delayed `^C` calls `live.write('\x03')` raw (`:1834`) — all keep `'external'` and
+correctly count.
 
 ### 4. The gate consumes both signals (`mailbox-delivery.ts`)
 
-`DeliverySession` (`:60-105`) gains `readonly inputSeq: number` and `readonly lastInputAt: number`,
-documented like the existing `bytesWritten`/`lastDataAt` pair.
+`DeliverySession` (`:60-105`) gains `readonly inputSeq: number` and `readonly lastInputAt: number`.
 
 **Counter → token (R1):**
 
 ```ts
-function ringToken(session, profile) {
-  return `${session.bytesWritten}:${session.inputSeq}:${session.info.cols}x${session.info.rows}:${profile.app}`;
-}
+`${session.bytesWritten}:${session.inputSeq}:${session.info.cols}x${session.info.rows}:${profile.app}`
 ```
 
-**Restating why the counter is load-bearing (decide-item).** Claude is right that the headline R1
-case is largely covered by the settle alone — a post-sample keystroke is by construction <300 ms
-old at both check points. The counter earns its place on two other cases, and without naming them a
-future reader will delete it as redundant:
+**Why the counter earns its place — corrected (CMAP item E).** Revision 2 argued a delivery "can sit on the
+per-terminal lock for up to 2 s". **That is false, and I verified it:** `submitMessagePaced` →
+`trySubmitToSession` returns `false` immediately when `isSubmissionInFlight`
+(`session-submit.ts:479`) — deliveries **decline**, they never wait. `OPERATOR_SUBMIT_WAIT_CEILING_MS`
+is what an *operator* waits under while a *delivery* holds the line, the opposite direction. Revision
+2 quoted that asymmetry itself and then argued from the wrong side. This matters because these cases
+become a code comment, and a false justification there is worse than none. The real two:
 
-- **Waits longer than the settle.** `OPERATOR_SUBMIT_WAIT_CEILING_MS = 2000` (`session-submit.ts:223`),
-  so a delivery can sit on the per-terminal lock for up to 2 s between `tokenBefore` and the in-lock
-  `precheck`. A keystroke landing early in that wait is >300 ms old by the time `precheck` runs and
-  passes the settle cleanly. Only the counter catches it. Slow classifies are the same shape.
-- **Verdict-memo invalidation.** A `CachedVerdict` entry survives across backstop ticks, so the gap
-  between the cached classify and its reuse is unbounded by any settle. Without `inputSeq` in the
-  token, a CLEAN verdict can be reused across a keystroke — the caveat the code currently admits at
-  `:735-737`, which this retires verbatim.
+- **Verdict-memo invalidation** — correct and *sufficient alone*. A `CachedVerdict` survives across
+  backstop ticks, so the gap between the cached classify and its reuse is bounded by no settle.
+  Without `inputSeq` in the token a CLEAN verdict can be reused across a keystroke — the caveat the
+  code admits at `:735-737`, retired verbatim.
+- **Unbounded awaits inside the gap.** `tokenBefore` (`:606`) → `precheck` contains
+  `await ports.classify` (`:626`) **and** `await ports.watchEcho` (`:715`), the latter flushing and
+  scanning up to 1000 mirror lines. Neither is bounded by 300 ms on a loaded box.
 
 **Clock → settle (R2):**
 
@@ -243,250 +265,334 @@ function inputSettled(ports, session): boolean {
 }
 ```
 
-Checked at both places `settled()` is checked — pre-lock (`:659`) and in-lock `precheck` (`:704`) —
-holding `'busy'` exactly as the output settle does, and phrased as a positive `>=` for the same NaN
-reason `settled()` documents. 300 ms is one notch above the output settle's 250 ms because the
-input round trip is strictly longer than the output one it must cover. `_lastInputAt` initialises
-to `0`, so a session that has never received input is settled from birth.
+Checked at both places `settled()` is — pre-lock (`:659`) and in-lock `precheck` (`:704`) — phrased
+as a positive `>=` for the same NaN reason `settled()` documents. 300 ms is one notch above the
+output settle's 250 ms because the input round trip is strictly longer than the output one it
+covers. `_lastInputAt` initialises to `0`, so a session that never received input is settled from
+birth.
 
-**This BOUNDS R2; it does not close it (decide-item).** Revision 1 said "closes", which overclaims.
-Two cases survive by construction, and they are named in the plan, in the code comment, and in the
-review: input older than 300 ms whose echo is still delayed, and input still in flight from the
-browser when the sample is taken. The dev-gate measurement (Test Plan) exists to size the bound
-honestly, with the rollback criterion stated there.
+**This BOUNDS R2; it does not close it.** Surviving by construction: input older than 300 ms whose
+echo is still delayed, and input in flight from the browser at sample time. Named in the plan, the
+code comments and the review, with the rollback criterion in the Test Plan.
 
-### 5. During the paced write (`message-write.ts`)
+### 5. During the paced write
 
 Sections 1–4 cover everything up to the first byte. Between the first byte and the Enter there is
-still an 80 ms-to-seconds window (long bodies pace at 10 ms/line). Bytes are out by then, so this is
-a **reporting** problem.
+still an 80 ms-to-seconds window. Bytes are out by then, so this is a **reporting** problem: sample
+`inputSeq` before the write, compare after, surface `| { status: 'written'; racedByInput?: boolean }`.
 
-Mirror the existing `watchBypasses` shape: sample `session.inputSeq` before the write, compare
-after, and surface it on the result — `| { status: 'written'; racedByInput?: boolean }`.
+**`racedByInput` is omitted when false**, so the exact `{status:'written'}` assertions in
+`spec-1365-serializer-convergence.test.ts` keep passing.
 
-**Flag, not hold — the opposite call from `preempted`, on purpose.** `preempted` holds because an
-operator `^C`/ESC may have cleared the composer, so the message plausibly never landed. Re-writing
-a message that *did* land is the #1584 re-injection failure, and there is no attempt cap anywhere
-in the module.
+**Flag, not hold.** `preempted` holds because an operator `^C`/ESC may have *cleared* the composer.
+Re-writing a message that landed is the #1584 re-injection failure, and there is no attempt cap in
+the module. But the wording must be honest: a human **Enter** mid-write submits our partial body and
+`^U`/`^W`/`^C` truncate it, so the WARN says **"may have been truncated or submitted early"**.
 
-**Correction to revision 1 (decide-item).** I wrote "a keystroke removes nothing." That is wrong: a
-human **Enter** mid-paced-write submits our partial body, and `^U`/`^W`/`^C` truncate it. The
-flag-not-hold decision survives — re-writing is still the worse outcome — but the WARN text must
-say the message **may have been truncated or submitted early**, not merely that stray characters
-were added.
+### 6. Report it to every operator surface, including the sender (CMAP item C)
 
-### 6. Escalate `racedByInput` independently of echo (Blocker 2)
+Revision 2 threaded `cause` into `UnverifiedDeliveryInfo` and stopped — leaving the **primary**
+surface wrong. I verified: `tower-routes.ts:2288-2289` surfaces only `outcome.verified`, and
+`commands/send.ts:462` prints its warning **only** on `verified === false`. So in the exact case §5
+exists for — Enter truncation, where the needle is the first line, it landed, `verified === true` —
+the row is escalated and the dashboard notified while the human who ran the send is told plain
+"Message delivered". Same for `racedByInput` with no needle, where `verified` is absent entirely.
 
-I confirmed the `verified === false` escalation is nested inside `if (echo)`
-(`mailbox-delivery.ts:819-858`), and that `echo` is `null` whenever `echoNeedle()` returns `''`.
-Revision 1's "joins the existing path" was therefore wrong twice over:
+- **`unverifiedCause?: 'no-echo' | 'input-raced'`** on `DeliveryOutcome`, threaded through
+  `/api/send` → the send response type → `commands/send.ts`. **Not** overloaded onto `verified`,
+  which would mean two different things at one call site.
+- **Precedence: `'input-raced'` wins** when both are true — it is the more actionable remedy.
+- The escalation decision moves outside `if (echo)`:
+  `const unverified = result.racedByInput === true || verified === false;` — escalating exactly once.
+- The WARN at `:840-841` interpolates `needle.length`, which now runs with `needle === ''` and would
+  print "needle 0 chars". **Branch the text, don't append to it.**
+- `UnverifiedDeliveryInfo` (`:323`) gains the same `cause`, threaded into
+  `surfaceUnverifiedDelivery` (`mailbox-wiring.ts:524-535`), whose body currently hard-codes "its
+  header never appeared on that screen".
 
-- **short/raw sends have no needle**, so the flag would be dropped entirely;
-- **the Enter-truncation case makes `verified` come back `true`** — the needle is the message's
-  *first line*, which landed — while the tail was lost. `racedByInput` is the only signal for that
-  failure, and the one place revision 1 put it is the one place it would be suppressed.
+### 7. Decide — the one-shot re-drain: **BUILD IT NOW** (reversing revision 2)
 
-So:
+Revision 2 deferred this to measurement. Claude is right that there is nothing left to measure:
+`stopComposing` emits `'submit'` synchronously right after `recordUserInput`, and
+`mailbox-wiring.ts:600` wires `'submit'` to `scheduleDrain`, which runs in a **microtask** — so
+`lastInputAt === now` at that pass, **always**, analytically. "Measure first" is the right instinct
+against a speculative optimisation; it is the wrong instinct against a proven certainty.
 
-```ts
-const unverified = result.racedByInput === true || verified === false;
-```
+And one timer is simultaneously the mitigation for **three** things: the submit-trigger hold, the
+navigation-key case (a key provoking no output otherwise costs a full 1.5 s backstop period), and
+the escalation-blind residual in §8 — because a hold that re-arms itself shrinks the starvation
+window from "forever" to "one settle".
 
-evaluated **outside** the `if (echo)` block, escalating exactly once. `UnverifiedDeliveryInfo`
-(`:323`) gains a discriminator — `cause: 'no-echo' | 'input-raced'` — threaded into the WARN text
-and into `surfaceUnverifiedDelivery`'s notification body (`mailbox-wiring.ts:524-535`), whose text
-currently hard-codes "its header never appeared on that screen". An operator today cannot tell
-"header never appeared" from "a human typed into it mid-write"; these are different remedies.
+**Design, keeping the pure module pure:** `DeliveryOutcome` gains `retryAfterMs?: number`, set only
+when a pass held *solely* on `inputSettled`. The drainer (which already owns timers and the
+generation guard) arms a coalesced per-agent `setTimeout` for that delay + a small margin, then
+calls `scheduleDrain`. Cleared in `stop()` alongside the existing timers, and generation-guarded
+exactly like `scheduleDrain` (`:1234`).
 
-### 7. Comments that currently document the hole
+### 8. Decide — the escalation-blind input hold: **a gate detail AND a counter**
 
-Three blocks assert this residual is open and name #1473; all must be updated in the same change or
-the codebase will contradict itself: `mailbox-delivery.ts:696-700`, `mailbox-delivery.ts:735-737`,
-`session-submit.ts:121-127`. Each must state the **surviving** residuals from §4 and §5 rather than
-claiming closure.
+The residual none of us had named, and it is real: an input-caused hold calls `hold('busy')`, which
+**nulls `detail`** (`:591-596`), and plain `busy` is excluded from `isClassifierStuck` (`:400-405`).
+So #1482's whole diagnostic axis is lost for this new hold class and nothing escalates it. Revision
+2's "a spurious hold the backstop clears" was too optimistic: a missed reply **recurring under
+300 ms** (an app polling geometry every repaint) holds indefinitely, and the only net —
+`escalateHeldToOwner` at ~180 s — is skipped for architects, so a starved architect is entirely
+silent.
+
+Both halves, because they answer different questions:
+
+- **A gate detail `'recent-input'`** added to `MailboxGateDetail` (`db/types.ts:115`), carried by a
+  `hold(reason, detail)` variant rather than the detail-nulling `hold`. `afx inbox` and the send
+  response then say `busy:recent-input` — "waiting on recent terminal input" — through the existing
+  shared `formatVerdict`, no formatter change needed.
+- **It must NOT join `isUnverifiableVerdict`** (`sdk/hold-verdict.ts:47-52`). It sits beside
+  `user-text`: a human at the line is a hold that clears on its own, and escalating it would
+  false-alarm on every ordinary typist (Constraint 1). Adding the value is therefore automatically
+  correct there — the predicate is an allow-list.
+- **A consecutive-input-hold counter** on the drainer, WARN-logged at a threshold (~60 consecutive
+  holds ≈ 90 s). A human types in bursts; 90 s of unbroken sub-300 ms input is a machine, not a
+  person. This is a diagnostic, not an escalation — it leaves a trace for the starved-architect case
+  without wiring a false-alarm path.
+
+Note §7's re-drain also attacks this from the other side: it shortens each cycle, so the counter
+crosses its threshold sooner and the evidence arrives faster.
+
+### 9. Comments that currently document the hole
+
+`mailbox-delivery.ts:696-700`, `:735-737`, `session-submit.ts:121-127` all assert this residual is
+open and name #1473. Each must state the **surviving** residuals from §4, §5 and the list below —
+never claim closure.
 
 ## Files to Change
 
 **Phase 1 — input observation + reply filter**
 
-- `packages/codev/src/terminal/terminal-replies.ts` — new; `stripTerminalReplies`
-- `packages/codev/src/terminal/pty-session.ts:628-640` — `WriteOrigin` param; bump on `'external'`
-- `packages/codev/src/terminal/pty-session.ts:930-971` — `get inputSeq()`; re-doc
-  `recordUserInput`/`lastInputAt` as the gate's input signal
-- `packages/codev/src/terminal/pty-session.ts:949-957` — `handleUserInput` filtered bump +
-  `'pre-recorded'` write
-- `packages/codev/src/terminal/pty-session.ts:263-267` — assert `attachShellper` leaves `_inputSeq`
-  and `_lastInputAt` untouched
+- `packages/codev/src/terminal/terminal-replies.ts` — new; `stripTerminalReplies`, pinned-dependency
+  doc note
+- `packages/codev/src/terminal/pty-session.ts:628-640` — `WriteOrigin`; filter + bump inside the
+  `'external'` branch
+- `packages/codev/src/terminal/pty-session.ts:930-971` — `get inputSeq()`; `recordUserInput(chunk?)`;
+  re-doc `lastInputAt` as the gate's input signal
+- `packages/codev/src/terminal/pty-session.ts:949-957` — `handleUserInput` reduces to
+  composing/submit + `this.write(data)`
+- `packages/codev/src/terminal/pty-session.ts:42-60` — `PtySessionConfig.clock?: () => number`
+- `packages/codev/src/terminal/pty-session.ts:263-267` — `attachShellper` must not touch `_inputSeq`
+  / `_lastInputAt`
 - new: `packages/codev/src/terminal/__tests__/terminal-replies.test.ts`
 
 **Phase 2 — gate consumption**
 
-- `packages/codev/src/agent-farm/servers/message-write.ts:11-20` — `WritableSession.inputSeq`
+- `packages/codev/src/agent-farm/servers/message-write.ts:11-20,162-168` — type split (§3)
 - `packages/codev/src/agent-farm/servers/message-write.ts:189-195` — `tracked` hard-codes `'delivery'`
 - `packages/codev/src/agent-farm/servers/mailbox-delivery.ts:60-105` — `DeliverySession` fields
 - `packages/codev/src/agent-farm/servers/mailbox-delivery.ts:520-522` — `ringToken` folds `inputSeq`
-- `packages/codev/src/agent-farm/servers/mailbox-delivery.ts:415-450` — `INPUT_SETTLE_BEFORE_WRITE_MS`
-  + `inputSettled()`
+- `packages/codev/src/agent-farm/servers/mailbox-delivery.ts:415-450` —
+  `INPUT_SETTLE_BEFORE_WRITE_MS` + `inputSettled()`
+- `packages/codev/src/agent-farm/servers/mailbox-delivery.ts:588-596` — `hold(reason, detail)` variant
 - `packages/codev/src/agent-farm/servers/mailbox-delivery.ts:653-710` — both check points
+- `packages/codev/src/agent-farm/db/types.ts:115` — `'recent-input'` on `MailboxGateDetail`
 
-**Phase 3 — during-write watch + reporting**
+**Phase 3 — during-write watch + full reporting chain**
 
 - `packages/codev/src/agent-farm/servers/message-write.ts:120-134,180-218` — `racedByInput`
-- `packages/codev/src/agent-farm/servers/mailbox-delivery.ts:323-329` — `cause` discriminator
-- `packages/codev/src/agent-farm/servers/mailbox-delivery.ts:815-860` — `unverified` outside `if (echo)`
+  (omitted when false)
+- `packages/codev/src/agent-farm/servers/mailbox-delivery.ts:323-329` — `cause` on
+  `UnverifiedDeliveryInfo`
+- `packages/codev/src/agent-farm/servers/mailbox-delivery.ts:815-860` — `unverified` outside
+  `if (echo)`; branched WARN text; `unverifiedCause` on `DeliveryOutcome`
+- `packages/codev/src/agent-farm/servers/tower-routes.ts:2288-2289` — surface `unverifiedCause`
+- `packages/codev/src/agent-farm/commands/send.ts:462` — cause-aware sender warning
 - `packages/codev/src/agent-farm/servers/mailbox-wiring.ts:524-535` — cause-aware notification text
+- SDK/type surface for the `/api/send` response (whichever declares `verified`)
 
-**Phase 4 — comments, review, thread** (§7, plus `codev/reviews/1473-…md`,
+**Phase 4 — re-drain + starvation diagnostics**
+
+- `packages/codev/src/agent-farm/servers/mailbox-delivery.ts` — `retryAfterMs` on `DeliveryOutcome`;
+  drainer timer (coalesced, generation-guarded, cleared in `stop()`); consecutive-input-hold counter
+  + WARN
+
+**Phase 5 — comments, review, thread** (§9, plus `codev/reviews/1473-…md`,
 `codev/state/pir-1473_thread.md`)
 
-**Test doubles to migrate** — the four the architect caught break at **runtime, not compile time**;
-I confirmed all four, and add the nine `DeliverySession` fakes:
+**Test doubles to migrate — not all one class:**
 
-- `tower-routes.test.ts:226` `gateSession` — structural, reaches the live wiring binding. Missing
-  `lastInputAt` → `now() − undefined` → NaN → `inputSettled()` false → **every send test in the file
-  holds instead of delivering**
-- `tower-websocket.test.ts:61` `makeSession` — same shape
-- `spec-1313-paced-write-drop.test.ts:33-45` — a `WritableSession & {id}` with no `inputSeq`
+- `spec-1313-paced-write-drop.test.ts:33-45` — breaks at **compile** time (annotated
+  `WritableSession & {id}` literal). The §3 type split may make this a no-op; verify rather than
+  assume.
+- `tower-routes.test.ts:226` `gateSession` — **runtime**. Structural, reaches the live wiring
+  binding; missing `lastInputAt` → `now() − undefined` → NaN → `inputSettled()` false → **every send
+  test in this file holds instead of delivering**. This description fits *this file alone*.
+- `tower-websocket.test.ts:61` `makeSession` — **runtime**, but it exercises WS delegation only and
+  does **not** reach the live mailbox binding. Correction to revision 2, which lumped it in.
 - `send-architect-identity.test.ts:108` — calls `s.write(msg)` on a **real** session to simulate a
-  delivery; under the new default that becomes external input. Adding fields does not fix it — it
-  must pass `'delivery'`
+  delivery; under the new default that becomes external input. **The general rule:**
+  `recordUserInput()` uses `Date.now()` while the gate uses `ports.now()`, so *any* test pairing a
+  fake clock with a real `PtySession` breaks, and adding fields never fixes it. These survive today
+  only because `attachShellper` hydrates `_lastDataAt`; `_lastInputAt` has no such seam — which is
+  what §2's injectable clock adds. Fix: pass `'delivery'` (or use the real paced writer) **and**
+  inject the clock.
+- `send-integration.e2e.test.ts:244,570,597` — uses the raw route, unlisted in revision 2. It
+  survives only because the redelivery wait is 12 s ≫ 300 ms. Make that **deliberate** with a
+  comment, not lucky.
 - `DeliverySession` fakes: `spec-1470-reentry-delivery`, `send-architect-identity`, `cron-delivery`,
   `bugfix-1584-no-rewrite-after-write`, `send-mailbox-repro`, `bugfix-1573-delivery-verification`,
   `spec-1365-serializer-convergence`, `spec-1307-send-delay`, `send-delivery`
 - `typing-awareness.test.ts:63-161` — **must keep passing unchanged**; `recordUserInput()` stays a
   real assignment, never a no-op
 
-No `codev-skeleton/` mirror: this is product source under `packages/`, not framework template
-content.
+No `codev-skeleton/` mirror: product source under `packages/`, not framework template content.
+`Terminal.tsx` is **read but not modified** — the filter is deliberately server-side, because
+`afx attach`, the VS Code webview and mobile clients do not share the client-side one.
 
 ## Risks & Alternatives Considered
 
-### Latency — restated with the numbers, and sharpened
+### Latency
 
-- **`QUIESCENCE_DEBOUNCE_MS = 500` (`pty-session.ts:40`) > 300**, so any quiescence-triggered pass
-  is automatically input-settled whenever the last input preceded the last output byte — the normal
-  case, since the TUI echoes. This is the main delivery trigger and it is unaffected.
-- **The `'submit'` trigger is now *provably always* held, not "largely unaffected".**
-  `mailbox-wiring.ts:600` wires `'submit'` to `scheduleDrain`, which runs in a microtask, so
-  `lastInputAt === now` at that pass, always. Revision 1 hedged this; it is a certainty. The cost is
-  bounded: that body slips to the quiescence trigger ≥500 ms later, which would usually have held on
-  the *output* settle anyway.
-- **"Only bites while actively typing" was too narrow** (codex). A single navigation key that
-  provokes no output can cost close to a full backstop period (1.5 s), because nothing re-triggers a
-  drain until the next tick.
-- **The delayed `^C` rationale in revision 1 was wrong.** `tower-routes.ts:1834` is documented three
-  lines below as firing **UNATTENDED**, so "a human is standing at that terminal" does not apply. It
-  should still count — it changes composer state, and a delivery must not write across it — but the
-  consequence must be stated: the `scheduleDrain` nudge right after it is now guaranteed to hold,
-  slipping the body to the quiescence trigger.
-
-**Mitigation deferred, not missing.** A one-shot re-drain armed at the settle's remaining ms would
-recover the `'submit'` case. It is a small follow-up, and I would rather measure at the dev gate
-than build it speculatively — the gate exists for exactly this.
+- **`QUIESCENCE_DEBOUNCE_MS = 500` (`pty-session.ts:40`) > 300**, so any quiescence-triggered pass is
+  automatically input-settled whenever the last input preceded the last output byte — the normal
+  case, since the TUI echoes. That is the main delivery trigger, and it is unaffected.
+- **The `'submit'` trigger is now provably always held** (§7), which is why the re-drain is built
+  rather than deferred.
+- **A single navigation key with no output** would otherwise cost close to a full backstop period
+  (1.5 s); the re-drain covers this too.
+- **The delayed `^C`** (`tower-routes.ts:1834`) fires **UNATTENDED**, so revision 1's "a human is
+  standing there" was wrong. It counts because it changes composer state. Consequence: the
+  `scheduleDrain` nudge right after it now holds — and the re-drain is what recovers it.
 
 ### Other risks
 
-- **Self-trip.** Two routes, not one. (a) Our own paced write — closed structurally by §3's
-  hard-coded `'delivery'`, plus a test that runs a real multi-line paced write and asserts
-  `inputSeq` is unchanged across it. (b) **Our write → repaint → query → browser reply → counted as
-  input** — closed only by §1's filter. A regression in either presents as "mail never delivers".
-- **A new input path forgets to count.** Inverted by the `'external'` default: an author must
-  deliberately opt out.
-- **Test-fake churn.** Optional fields would avoid it but make `undefined` timestamps read as NaN →
-  hold, breaking the same tests while letting production compile a port that silently reads "no
-  input". Required fields, migrated fakes.
+- **Self-trip — two routes.** (a) Our own paced write: closed structurally by §3's hard-coded
+  `'delivery'`, plus a test asserting `inputSeq` unchanged across a real multi-line paced write.
+  (b) **Our write → repaint → query → browser reply → counted as input**: closed only by §1's filter,
+  and only now that DSR/XTWINOPS/DECXCPR-arity are in it. A regression in either presents as "mail
+  never delivers".
+- **An over-broad filter eats real keys.** The case-sensitivity hazard in §1, plus anchored patterns
+  only — never a blanket "starts with `ESC[`". Pinned by survival tests.
+- **A new input path forgets to count** — inverted by the `'external'` default.
+- **Test-fake churn** — optional fields would let production compile a port that silently reads "no
+  input" while breaking the same tests via NaN. Required fields, migrated fakes.
+- **A `MailboxGateDetail` value is a DB-typed union** (§8). Additive only; existing rows keep `null`,
+  and `formatVerdict`/`isUnverifiableVerdict` are allow-list-shaped so the new value is correctly
+  inert in the escalation path without editing either.
 
-### Surviving residuals — stated in the plan, the code and the review
+### Surviving residuals — stated in the plan, the code comments and the review
 
 1. **R2 is bounded, not closed** (§4): input older than 300 ms whose echo is still delayed, and
    input in flight from the browser at sample time.
 2. **During-write races are reported, not prevented** (§5). Bytes are already out.
-3. **Input via a directly-attached shellper client** never passes through this `PtySession` and
-   stays unobservable. A different boundary, already listed as uncovered at `session-submit.ts:56-58`.
-4. **A reply the §1 table misses** counts as input → a spurious hold the backstop clears.
+3. **An `afx attach` client is wholly out of scope** — *its input and its terminal's replies alike*.
+   It connects straight to the shellper socket (`commands/attach.ts:141-142`) and never touches
+   `PtySession`, so nothing here observes it. (Corrected from revision 2, which implied only input
+   was out of scope — and which is also why manual step 1 cannot be run against `afx attach`.)
+4. **A reply the §1 table misses** counts as input → a hold. Now visible as `busy:recent-input` and
+   counted (§8) rather than silent.
 
-The issue is a *narrowing*, and the code comments will say so rather than asserting #1473 is closed.
+The issue is a **narrowing**. The code comments will say so.
 
-### Alternative — `lastInputAt > lastDataAt` instead of a constant (evaluated; rejected, with the reason recorded)
+### Alternative — `lastInputAt > lastDataAt` (evaluated; rejected, unchanged)
 
-Claude's proposal: "input arrived and nothing has been painted since" is constant-free and also
-covers the >300 ms un-echoed residual. It is genuinely stronger on coverage. **Rejected as the
-primary mechanism because it can deadlock permanently.** An input that provokes *no output ever* —
-a key the TUI ignores — leaves the condition true forever: the gate holds `busy`, `busy` is excluded
-from `isClassifierStuck` (`:404`), so nothing escalates and that agent's mail never delivers. Trading
-a bounded 300 ms hold for an unbounded silent one is the wrong direction for an issue whose entire
-premise is fail-safe hardening.
+Constant-free and stronger on coverage, but it **deadlocks permanently**: an input that provokes no
+output ever — a key the TUI ignores — leaves the condition true forever, the gate holds `busy`,
+`busy` is excluded from `isClassifierStuck`, nothing escalates, and that agent's mail never
+delivers. Trading a bounded 300 ms hold for an unbounded silent one is the wrong direction. The
+reply filter removes the *reply*-driven deadlock, not the ignored-keystroke one. Recorded as the
+next tightening in **bounded** form (hold while un-echoed, capped ~1 s, then fall back to the settle)
+if measurement shows 300 ms is too loose. §8's detail + counter also makes such a deadlock *visible*,
+which it would not have been before.
 
-The architect's note that it is viable "only if Blocker 1 is fixed first" is necessary but not
-sufficient: the filter removes the *reply*-driven deadlock, not the ignored-keystroke one.
+### Alternatives unchanged
 
-**Recorded as the natural next tightening, in bounded form.** If the dev-gate measurement shows
-300 ms is too loose, the right move is `lastInputAt > lastDataAt` **capped by a ceiling** (hold while
-un-echoed, up to ~1 s, then fall back to the settle) — coverage without the deadlock. I am not
-building it now because it adds a second constant and a second mechanism to close a residual I
-cannot yet demonstrate.
-
-### Alternatives previously considered, unchanged
-
-- **Make `bytesWritten` count input too.** Rejected: it is the ring's output counter and the mirror
-  flush loop compares it in lockstep (`pty-session.ts:780-786`); input bumping it would make that
-  loop spin.
-- **Settle only, no counter.** Rejected — see §4's two load-bearing cases (2 s lock waits, memo
-  invalidation).
-- **Counter only, no settle.** Rejected: cannot see input that landed before the sample and has not
-  echoed. Both samples agree, correctly.
-- **Hold on a during-write race.** Rejected: re-writes a message that landed (#1584).
+- **Make `bytesWritten` count input too** — rejected: the mirror flush loop compares it in lockstep
+  (`pty-session.ts:780-786`); input bumping it would make that loop spin.
+- **Settle only, no counter** — rejected: memo invalidation and the unbounded awaits (§4).
+- **Counter only, no settle** — rejected: cannot see input that landed before the sample.
+- **Hold on a during-write race** — rejected: re-writes a message that landed (#1584).
+- **Client-side filtering** (extending `Terminal.tsx`'s `initialPhase` filter to all phases) —
+  rejected: three other clients don't share it, and a security/correctness signal must not depend on
+  a cooperative client.
 
 ## Test Plan
 
 ### Unit (`vitest`, `packages/codev`)
 
-- **Reply filter:** each row of §1's table is stripped; arrow keys, function keys, a bare `ESC`,
-  Ctrl-chars, UTF-8 text and bracketed-paste content all survive; a mixed chunk
-  (`"a" + CPR + "b"`) yields `"ab"`.
-- **Signal plumbing:** `write(d)` bumps `inputSeq` by `d.length` and moves `lastInputAt`;
-  `write(d, 'delivery')` moves neither; `write(d, 'pre-recorded')` moves neither. A dropped write
-  (`false`) still bumps on the `'external'` branch. `handleUserInput` with a pure DA reply bumps
-  **nothing**; with real text bumps. The raw `/api/terminals/:id/write` route bumps.
-  `attachShellper` leaves both untouched. `typing-awareness.test.ts` passes unchanged.
-- **R1:** `classify` resolves asynchronously with `inputSeq` incremented during the await → held
-  `'busy'`, `writeMessage` never called. Same with the increment inside the in-lock `precheck`
-  window. **Plus the two cases the counter exists for:** an increment during a >300 ms simulated
-  lock wait (which the settle alone would pass), and a `CachedVerdict` that must not be reused
-  across an increment.
-- **R2:** clean, output-settled screen with `lastInputAt = now − 100` → held `'busy'`; `now − 400`
-  → delivered; boundary at exactly 300 ms.
-- **Self-trip:** a real `submitMessagePaced` over a 5-line body → `written`, and `inputSeq` is
-  unchanged across the whole paced write.
-- **During-write race + Blocker 2, all four quadrants:** `racedByInput` with (a) `verified === true`,
-  (b) no echo needle at all, (c) `verified === false` — escalating **exactly once** in each, with
-  the right `cause`; and (d) no race, `verified === true` → no escalation. In every case the row
-  stays `delivered` and is never re-written (the #1584 invariant).
-- Full existing suite green — especially `tower-routes`, `tower-websocket`,
-  `spec-1313-paced-write-drop`, `bugfix-1584-no-rewrite-after-write`,
-  `spec-1365-serializer-convergence`, `bugfix-1573-delivery-verification`, `render-gate`,
-  `typing-awareness`.
+**Reply filter** — the highest-value tests, since a mistake here is silent in both directions:
+
+- Every literal the pinned bundle can emit is stripped: `ESC[?1;2c`, `ESC[?6c`, `ESC[>0;276;0c`,
+  `ESC[>83;40003;0c`, `ESC[>85;95;0c`, `ESC[0n`, `ESC[4;24;80t`, `ESC[6;16;8t`, `ESC[8;24;80t`,
+  `ESC[12;40R`, `ESC[?12;40R`, `ESC[?2004$y`, `ESC[2004$y`, OSC colour with **BEL** and with **ST**
+  (separately), DECRQSS.
+- **Survival (the case-sensitivity hazard):** `ESC[A`–`ESC[D`, `ESC[C`, `ESC[1;5C`, `ESC[1;3A`,
+  `ESC[F`, `ESC[H`, `ESC[Z`, `ESC[15~`, `ESC[3~`, a bare `ESC`, Ctrl-chars, UTF-8 text.
+- **Mouse survives and counts** (§1b): SGR `ESC[<0;10;5M` / `ESC[<0;10;5m`, and X10 `ESC[M` + 3 bytes.
+- Mixed chunk `"a" + CPR + "b"` → `"ab"`. Reply-shaped bytes inside bracketed paste → documented
+  behaviour, pinned.
+- The doc-comment claim that the table is pinned-version-derived: a test naming the version.
+
+**Signal plumbing:**
+
+- `write(d)` bumps `inputSeq` by `d.length` and moves `lastInputAt`; `write(d, 'delivery')` moves
+  neither. A dropped write (`false`) still bumps on the `'external'` branch.
+- `handleUserInput(DA_REPLY)` → `inputSeq` **unchanged** *and* **the PTY received the reply
+  verbatim**. This is the one way the change breaks every attached terminal (apps block waiting on
+  their DA/DSR replies), so it is asserted explicitly.
+- The raw `/api/terminals/:id/write` route bumps, and gets the filter (§2) for free.
+- **The operator bypasses still count as `'external'`** — one assertion on `writeEscapeToSession`
+  stops a future refactor tagging them `'delivery'`.
+- `attachShellper` leaves `_inputSeq`/`_lastInputAt` untouched. `typing-awareness.test.ts` passes
+  unchanged.
+
+**Gate:**
+
+- **R1:** `classify` resolving asynchronously with `inputSeq` incremented during the await → held
+  `busy:recent-input`, `writeMessage` never called. Same for the in-lock `precheck` window. Plus the
+  two cases the counter exists for (§4): an increment across a slow `watchEcho`, and a
+  `CachedVerdict` that must not be reused across an increment.
+- **R2:** clean, output-settled screen with `lastInputAt = now − 100` → held; `now − 400` →
+  delivered; boundary at exactly 300 ms.
+- **Self-trip:** a real `submitMessagePaced` over a 5-line body → `written`, `inputSeq` unchanged
+  across the whole paced write.
+- **Detail + counter (§8):** an input hold records `detail: 'recent-input'`;
+  `isUnverifiableVerdict('busy','recent-input')` is **false**; the consecutive counter WARNs at its
+  threshold and resets on a delivery.
+- **Re-drain (§7):** a pass held solely on `inputSettled` returns `retryAfterMs`; the drainer arms
+  exactly one coalesced timer; `stop()` clears it; a stale generation does not fire.
+
+**Reporting, all four quadrants (§5–6):** `racedByInput` with (a) `verified === true`, (b) **no echo
+needle at all**, (c) `verified === false` → escalates **exactly once** with `cause: 'input-raced'`
+winning precedence in (c); and (d) no race, `verified === true` → no escalation. In every case the
+row stays `delivered` and is never re-written (#1584). Plus: the sender's `/api/send` response
+carries `unverifiedCause` and `commands/send.ts` prints the right warning in each; the WARN text
+does not say "needle 0 chars"; `{status:'written'}` exact-match assertions still pass.
+
+**Full existing suite green** — especially `tower-routes`, `tower-websocket`,
+`spec-1313-paced-write-drop`, `send-integration.e2e`, `bugfix-1584-no-rewrite-after-write`,
+`spec-1365-serializer-convergence`, `bugfix-1573-delivery-verification`, `render-gate`,
+`typing-awareness`, `hold-verdict`.
 
 ### Manual, against a running Tower at the dev-approval gate
 
-This is why the issue is PIR — "verified against a running terminal, not only unit tests."
+This is why the issue is PIR — verified against a running terminal, not only unit tests.
 
-1. **The reply-traffic measurement (Blocker 1's direct evidence).** Browser attached, hands **off**
-   the keyboard, agent running: log every `handleUserInput` chunk for 60 s, and log what the filter
-   strips vs. keeps. Expected: zero surviving residue. This runs *first* — if replies still get
-   through, nothing downstream is trustworthy. Repeat for the VS Code webview and `afx attach`.
-2. **The 300 ms calibration.** Log the observed keystroke→echo gap across claude and codex, local
-   and shellper-backed. **Rollback criterion:** if p99 exceeds 300 ms, raise the constant to
-   p99 + margin; if that would need to go past ~500 ms, adopt the bounded `lastInputAt > lastDataAt`
-   refinement instead of a larger constant, and re-open the plan.
-3. `afx send` to a builder while typing into that builder's composer → the message holds, the draft
-   is untouched, `afx inbox` shows `busy`. ~10× at different points in the keystroke stream.
-4. Stop typing → delivers on the next backstop tick (≤ ~1.8 s).
-5. Idle terminal → `afx send` still delivers promptly; measure the delta against `main` to confirm
-   no regression on the common path. Separately measure the `'submit'`-trigger case, which §"Latency"
-   predicts is now always deferred to quiescence.
-6. `--interrupt` / `--escape` mid-delivery still behave as #1365 defines (`preempted` → hold), and
-   the delayed `^C` still fires and now correctly counts as input.
+1. **Reply-traffic measurement (§1's direct evidence), run FIRST.** Browser attached, hands **off**
+   the keyboard, agent running: log every `handleUserInput` chunk for 60 s plus what the filter
+   strips vs. keeps. Expected: zero surviving residue. If replies still get through, nothing
+   downstream is trustworthy. **Repeat on the VS Code integrated terminal** — a different xterm
+   build, and the one surface whose reply set may differ. **Not `afx attach`**: it bypasses
+   `PtySession` entirely (residual 3), so logging there shows zero chunks and would read as a false
+   pass.
+2. **The 300 ms calibration.** Log the keystroke→echo gap across claude and codex, local and
+   shellper-backed. **Rollback criterion:** if p99 > 300 ms, raise the constant to p99 + margin; if
+   that would need to exceed ~500 ms, adopt the bounded `lastInputAt > lastDataAt` refinement
+   instead of a larger constant, and re-open the plan.
+3. **Mouse (§1b).** Click into a builder's composer mid-`afx send` → the message holds. This is the
+   assertion that would have failed under revision 2.
+4. `afx send` while typing into the target's composer → holds, draft untouched, `afx inbox` shows
+   **`busy:recent-input`**. ~10× at different points in the keystroke stream.
+5. Stop typing → delivers on the **re-drain** (≈300 ms), not the 1.5 s backstop. Measure both, since
+   §7 is the claim being tested.
+6. Idle terminal → `afx send` still delivers promptly; delta against `main` to confirm no regression
+   on the common path.
+7. `--interrupt` / `--escape` mid-delivery still behave as #1365 defines (`preempted` → hold); the
+   delayed `^C` fires and now correctly counts as input.
 
-Cross-platform: n/a (server-side Node). The only client-side file read is `Terminal.tsx`, and it is
-**not modified** — the filter is deliberately server-side.
+Cross-platform: n/a (server-side Node).
