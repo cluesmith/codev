@@ -138,3 +138,22 @@ Architect review of PR #1607: **APPROVE**. Rulings:
 
 **Status: holding at the pr gate. Not running `porch approve` — awaiting the owner's explicit
 gate decision.** Nothing actionable for me until then.
+
+## Owner scope correction: pr-only (2026-09-04, at the gate)
+
+Owner ruled directly: **only the `pr` phase should be diffable, NOT `investigate`/`fix`** — those
+are work-in-progress (partial/no diff yet), so they are not a review target. This supersedes the
+issue #1606 Fix text (which had listed investigate/fix) and the architect's earlier "as-is" ruling.
+
+Narrowed the fix:
+- `DIFF_REVIEW_PHASES` = `{pr}` only; rewrote the note to record investigate/fix as deliberately
+  EXCLUDED (owner ruling), so no future reader re-adds them.
+- investigate/fix now resolve to `none` → inert dials with the honest `No review target` label.
+  The value of the fix there is the honest label, not live dials.
+- Tests: `pr` phase → diff (behavioral + unit); investigate/fix → none (behavioral + unit);
+  guard + none-label tests updated. 248 pass; tsc + build clean.
+- README + PR #1607 body updated to pr-only.
+
+This is a real behavior change from the CMAP'd version (investigate/fix diff→none), but it's a
+scope REDUCTION on the same mechanism the reviewers blessed. Notifying the architect; will offer
+to re-run CMAP if they want. Awaiting the owner's gate word on the corrected PR.

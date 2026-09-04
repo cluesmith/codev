@@ -549,29 +549,28 @@ export function zoomInVerb(b: OverviewBuilder): string {
 export type ReviewMode = 'diff' | 'canvas' | 'none';
 
 /**
- * Phase ids that review as a DIFF but that `phaseArtifactVerb` deliberately does NOT
- * auto-open. A builder in these phases has no spec/plan document to hand off, and (for
- * `investigate`) may not have code yet either, so the auto-open action key keeps opening a
- * terminal — but the review dials should still drive the (growing) diff rather than lie or
- * die (#1606):
+ * Phase ids whose review dials drive a DIFF, but that `phaseArtifactVerb` deliberately does
+ * NOT auto-open (so the Builder Action key and Zoom keep their behavior — see the guard test):
  *
- *   - `investigate` (BUGFIX; also RESEARCH's diagnosis phase): the builder's whole working
- *     life reviews as a diff. RESEARCH's `investigate` produces worktree changes too, so diff
- *     mode is correct there as well — the id is registered by name, not by owning protocol.
- *   - `fix` (BUGFIX): the whole working life reviews as a diff.
- *   - `pr` (BUGFIX + AIR): by the pr *phase* the work already exists as a diff (owner
- *     ruling 2026-09-04), even before the pr *gate* is requested (`blockedGate === 'pr'`
- *     already resolves to diff via `phaseArtifactVerb`).
+ *   - `pr` (BUGFIX + AIR): by the pr *phase* the work already exists as a finished diff
+ *     (owner ruling 2026-09-04), even before the pr *gate* is requested (`blockedGate === 'pr'`
+ *     already resolves to diff via `phaseArtifactVerb`). This closes the window where an AIR /
+ *     BUGFIX builder's dials were dead between entering the pr phase and the gate firing.
+ *
+ * Deliberately EXCLUDED, do not re-add without an owner ruling: BUGFIX `investigate` / `fix`
+ * are work-in-progress (owner ruling 2026-09-04). Their diff is partial or not yet written, so
+ * they are not a review target; the dials stay `none` (inert, with an honest `No review target`
+ * label, not the old lie), matching `phaseArtifactVerb`, which opens a terminal there.
  *
  * REGISTRATION NOTE (mirrors Tower's GATE_LABELS pattern, face.ts): `protocol.json` phase
  * metadata carries no field expressing review mode (only id/name/type/steps/transition/
- * gate), and the SDK's `PHASE_TO_STAGE` folds `investigate → plan` (canvas — wrong here)
- * and drives the VSCode Builders tree, so neither can be reused verbatim. A new protocol
- * whose phases review as a diff registers its phase id here (or maps onto
- * `phaseArtifactVerb`'s SPIR/PIR vocabulary). An unregistered phase resolves to `none` —
- * visibly inert with an honest label, never a silent lie.
+ * gate), and the SDK's `PHASE_TO_STAGE` drives the VSCode Builders tree with different
+ * semantics, so neither can be reused verbatim. A new protocol whose phases review as a
+ * finished diff registers its phase id here (or maps onto `phaseArtifactVerb`'s SPIR/PIR
+ * vocabulary). An unregistered phase resolves to `none`, visibly inert with an honest label,
+ * never a silent lie.
  */
-const DIFF_REVIEW_PHASES = new Set(['investigate', 'fix', 'pr']);
+const DIFF_REVIEW_PHASES = new Set(['pr']);
 
 /**
  * The review mode for a builder: a builder still writing its spec/plan reviews as a
