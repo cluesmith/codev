@@ -212,6 +212,7 @@ Store in `~/.bashrc` or `~/.profile` on the instance:
 export ANTHROPIC_API_KEY="sk-ant-..."
 export OPENAI_API_KEY="sk-..."
 export GEMINI_API_KEY="..."
+export ATLASCLOUD_API_KEY="..."   # optional: codev generate-image -p atlas
 ```
 
 ## Comparison Matrix

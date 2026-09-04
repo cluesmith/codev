@@ -31,6 +31,14 @@ const ATLAS_BASE_URL = 'https://api.atlascloud.ai/api/v1/model';
 const ATLAS_MODEL = 'google/nano-banana-pro/text-to-image';
 const ATLAS_POLL_INTERVAL_MS = 5000;
 const ATLAS_TIMEOUT_MS = 300_000;
+// Per-request bounds. ATLAS_TIMEOUT_MS caps the poll loop as a whole, but it is
+// only checked between requests, so each fetch carries its own deadline.
+const ATLAS_REQUEST_TIMEOUT_MS = 30_000;
+const ATLAS_DOWNLOAD_TIMEOUT_MS = 120_000;
+// The only status Atlas documents for a prediction that is still running
+// (https://www.atlascloud.ai/docs/en/predictions lists exactly processing,
+// completed and failed). Anything else is unrecognized and fails, named.
+const ATLAS_IN_PROGRESS_STATUSES = new Set(['processing']);
 // api.atlascloud.ai rejects some clients' default User-Agent with 403 (error
 // code 1010), so every request sends an explicit one.
 const ATLAS_USER_AGENT = 'codev-generate-image/1';
@@ -73,13 +81,16 @@ function readPrompt(promptOrPath: string): string {
 }
 
 /**
- * Name a downloaded image after its actual bytes.
+ * Check that the downloaded bytes really are an image, and name the file after
+ * the container they turned out to be.
  *
  * Atlas serves whatever container the model produced (JPEG for Nano Banana
  * Pro), so writing those bytes into the default `output.png` would mislabel
- * the file.
+ * the file. Bytes that are not a recognised image are not written at all: a
+ * 200 response carrying an HTML error body must never land in output.png
+ * under a green "Image saved". Exits rather than returning on that path.
  */
-function withDetectedExtension(output: string, bytes: Buffer): string {
+function targetPathForImageBytes(output: string, bytes: Buffer): string {
   const detected =
     bytes.subarray(0, 3).toString('hex') === 'ffd8ff'
       ? 'jpg'
@@ -89,7 +100,15 @@ function withDetectedExtension(output: string, bytes: Buffer): string {
             bytes.subarray(8, 12).toString('ascii') === 'WEBP'
           ? 'webp'
           : null;
-  if (!detected) return output;
+  if (!detected) {
+    console.error(
+      chalk.red('Error:') +
+        ` Atlas returned ${bytes.length} bytes that are not a JPEG, PNG or WebP image` +
+        ` (starts with ${bytes.subarray(0, 8).toString('hex') || '<empty>'}).` +
+        ' Nothing was written.'
+    );
+    process.exit(1);
+  }
   const current = output.toLowerCase().split('.').pop();
   if (current === detected || (detected === 'jpg' && current === 'jpeg')) return output;
   const renamed = output.replace(/\.[^./\\]+$/, '') + '.' + detected;
@@ -98,29 +117,81 @@ function withDetectedExtension(output: string, bytes: Buffer): string {
 }
 
 /**
- * Generate through Atlas Cloud: submit a job, poll the prediction, download.
+ * One Atlas exchange - connect, stream and parse - under a single deadline.
+ *
+ * ATLAS_TIMEOUT_MS bounds the poll loop as a whole, but it is only checked
+ * between requests: without a signal, a single stalled connection hangs the
+ * command forever. The signal also stays armed while the body streams, so the
+ * body read belongs inside the guard too - otherwise a poll that answers 200
+ * with an HTML error page, or a download aborted mid-stream, escapes as a raw
+ * SyntaxError or TimeoutError stack instead of a clear message.
  */
-async function generateViaAtlas(
+async function atlasRequest<T>(
+  url: string,
+  what: string,
+  timeoutMs: number,
+  read: (response: Response) => Promise<T>,
+  init: RequestInit = {}
+): Promise<T> {
+  // Resolved inside the try, acted on outside it, so that reporting a failure
+  // never lands in our own catch.
+  let outcome: { ok: true; body: T } | { ok: false; detail: string };
+  try {
+    const response = await fetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) });
+    outcome = response.ok
+      ? { ok: true, body: await read(response) }
+      : { ok: false, detail: ` (${response.status}): ${await response.text()}` };
+  } catch (error) {
+    outcome = {
+      ok: false,
+      detail:
+        error instanceof Error && error.name === 'TimeoutError'
+          ? `: no response within ${timeoutMs}ms`
+          : `: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+  if (!outcome.ok) {
+    console.error(chalk.red('Error:') + ` Atlas ${what} failed${outcome.detail}`.trimEnd());
+    process.exit(1);
+  }
+  return outcome.body;
+}
+
+/**
+ * Generate through Atlas Cloud: submit a job, poll the prediction, download.
+ *
+ * The cadence and the overall budget are parameters rather than constants so
+ * tests can drive the loop without sleeping for real. Nothing but tests passes
+ * them; the CLI uses the defaults.
+ */
+export async function generateViaAtlas(
   promptText: string,
   output: string,
   aspect: AspectRatio,
   resolution: Resolution,
-  refs: string[]
+  refs: string[],
+  options: { pollIntervalMs?: number; timeoutMs?: number } = {}
 ): Promise<void> {
+  const pollIntervalMs = options.pollIntervalMs ?? ATLAS_POLL_INTERVAL_MS;
+  const timeoutMs = options.timeoutMs ?? ATLAS_TIMEOUT_MS;
+
+  // Argument problems are reported before credential problems, so that
+  // `--provider atlas --ref x` names the unsupported flag rather than a
+  // missing key the user would not have needed anyway.
+  if (refs.length > 0) {
+    console.error(
+      chalk.red('Error:') +
+        ' --ref is not supported with --provider atlas (this path is text-to-image only).\n' +
+        'Use --provider gemini for reference images.'
+    );
+    process.exit(1);
+  }
   const apiKey = process.env.ATLASCLOUD_API_KEY;
   if (!apiKey) {
     console.error(
       chalk.red('Error:') +
         ' ATLASCLOUD_API_KEY environment variable not set.\n' +
         'Get an API key at https://www.atlascloud.ai/console'
-    );
-    process.exit(1);
-  }
-  if (refs.length > 0) {
-    console.error(
-      chalk.red('Error:') +
-        ' --ref is not supported with --provider atlas (this path is text-to-image only).\n' +
-        'Use --provider gemini for reference images.'
     );
     process.exit(1);
   }
@@ -139,64 +210,77 @@ async function generateViaAtlas(
     'User-Agent': ATLAS_USER_AGENT,
   };
 
-  const submitResponse = await fetch(`${ATLAS_BASE_URL}/generateImage`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({ model: ATLAS_MODEL, prompt: promptText, aspect_ratio: aspect }),
-  });
-  if (!submitResponse.ok) {
-    console.error(
-      chalk.red('Error:') + ` Atlas submit failed (${submitResponse.status}): ${await submitResponse.text()}`
-    );
-    process.exit(1);
-  }
-  const submitted = (await submitResponse.json()) as { data?: { id?: string } };
-  const predictionId = submitted.data?.id;
-  if (!predictionId) {
+  const submitted = (await atlasRequest(
+    `${ATLAS_BASE_URL}/generateImage`,
+    'submit',
+    ATLAS_REQUEST_TIMEOUT_MS,
+    (response) => response.json() as Promise<unknown>,
+    {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ model: ATLAS_MODEL, prompt: promptText, aspect_ratio: aspect }),
+    }
+  )) as { data?: { id?: unknown } } | null;
+  const predictionId = submitted?.data?.id;
+  if (typeof predictionId !== 'string' || predictionId === '') {
     console.error(chalk.red('Error:') + ' Atlas did not return a prediction id');
     process.exit(1);
   }
 
-  const deadline = Date.now() + ATLAS_TIMEOUT_MS;
+  const deadline = Date.now() + timeoutMs;
   for (;;) {
-    if (Date.now() > deadline) {
-      console.error(chalk.red('Error:') + ` Atlas prediction ${predictionId} timed out`);
-      process.exit(1);
-    }
-    await new Promise((done) => setTimeout(done, ATLAS_POLL_INTERVAL_MS));
-    const pollResponse = await fetch(
-      `${ATLAS_BASE_URL}/prediction/${encodeURIComponent(predictionId)}`,
-      { headers }
-    );
-    if (!pollResponse.ok) {
+    await new Promise((done) => setTimeout(done, pollIntervalMs));
+    // Checked after the sleep, not before it: a pre-sleep check can pass on a
+    // budget that expires during the sleep, and then spend a whole further
+    // request on it.
+    if (Date.now() >= deadline) {
       console.error(
-        chalk.red('Error:') + ` Atlas poll failed (${pollResponse.status}): ${await pollResponse.text()}`
+        chalk.red('Error:') + ` Atlas prediction ${predictionId} timed out after ${timeoutMs}ms`
       );
       process.exit(1);
     }
-    const polled = (await pollResponse.json()) as {
-      data?: { status?: string; outputs?: string[]; error?: string };
-    };
-    const status = polled.data?.status;
+    const polled = (await atlasRequest(
+      `${ATLAS_BASE_URL}/prediction/${encodeURIComponent(predictionId)}`,
+      'poll',
+      ATLAS_REQUEST_TIMEOUT_MS,
+      (response) => response.json() as Promise<unknown>,
+      { headers }
+    )) as { data?: { status?: unknown; outputs?: unknown[]; error?: unknown } } | null;
+    const status = polled?.data?.status;
     if (status === 'completed') {
-      const url = polled.data?.outputs?.[0];
-      if (!url) {
+      const url = polled?.data?.outputs?.[0];
+      if (typeof url !== 'string' || url === '') {
         console.error(chalk.red('Error:') + ' Atlas completed without an image URL');
         process.exit(1);
       }
-      const download = await fetch(url);
-      if (!download.ok) {
-        console.error(chalk.red('Error:') + ` Atlas image download failed (${download.status})`);
-        process.exit(1);
-      }
-      const bytes = Buffer.from(await download.arrayBuffer());
-      const target = withDetectedExtension(output, bytes);
+      // No Atlas headers here: the CDN is a different origin and must never
+      // see the API key.
+      const bytes = Buffer.from(
+        await atlasRequest(url, 'image download', ATLAS_DOWNLOAD_TIMEOUT_MS, (response) =>
+          response.arrayBuffer()
+        )
+      );
+      const target = targetPathForImageBytes(output, bytes);
       writeFileSync(target, bytes);
       console.log(chalk.green('Image saved to') + ` ${target}`);
       return;
     }
     if (status === 'failed') {
-      console.error(chalk.red('Error:') + ` Atlas generation failed: ${polled.data?.error ?? 'unknown'}`);
+      const detail = polled?.data?.error;
+      console.error(
+        chalk.red('Error:') +
+          ` Atlas generation failed: ${typeof detail === 'string' && detail !== '' ? detail : 'unknown'}`
+      );
+      process.exit(1);
+    }
+    if (typeof status !== 'string' || !ATLAS_IN_PROGRESS_STATUSES.has(status)) {
+      // Polling on past a status we don't understand burns the full timeout and
+      // then reports it as one, which is a lie about what happened.
+      console.error(
+        chalk.red('Error:') +
+          ` Atlas prediction ${predictionId} reported an unrecognized status: ` +
+          (status === undefined ? '(none)' : String(status))
+      );
       process.exit(1);
     }
   }

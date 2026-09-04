@@ -1,6 +1,6 @@
 ---
 name: generate-image
-description: AI image generation via Gemini, or Atlas Cloud with `-p atlas`. Use when the user wants to generate, create, or make an image, or when you need to create visual assets like logos, diagrams, or illustrations. Requires GEMINI_API_KEY or GOOGLE_API_KEY.
+description: AI image generation via Gemini, or Atlas Cloud with `-p atlas`. Use when the user wants to generate, create, or make an image, or when you need to create visual assets like logos, diagrams, or illustrations. Requires GEMINI_API_KEY or GOOGLE_API_KEY, or ATLASCLOUD_API_KEY when using `-p atlas`.
 ---
 
 # generate-image - AI Image Generation
