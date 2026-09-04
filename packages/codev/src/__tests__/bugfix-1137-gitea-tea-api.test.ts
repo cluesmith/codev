@@ -35,6 +35,21 @@
  *     actually observed on page 1, not the requested limit, so a server whose
  *     `max_response_items` is tuned below the requested limit doesn't stop
  *     after page 1 while more pages remain.
+ *
+ * Maintainer review follow-up (2026-09-03, waleedkadous):
+ *   - the five scripts that source `_lib.sh` (plus `user-identity`, whose fix
+ *     below moves `tea` off the first substantive line) declare
+ *     `# forge-executable: tea` so `codev doctor` reports the real CLI instead
+ *     of `.` / `tea_api_paged` / `printf`.
+ *   - `tea_api_paged` FAILS at the `GITEA_MAX_PAGES` ceiling instead of
+ *     returning a partial array at exit 0.
+ *   - `pr-view`, `user-identity` and `issue-view` validate the response shape
+ *     before normalizing: `tea api` exits 0 on HTTP errors and prints the error
+ *     body, which used to become an all-null contract object (leaking the error
+ *     body's own `url` as the browser page) or the literal username `null`.
+ *   - `recently-merged` honors `CODEV_SINCE_DATE`, bounding a walk that would
+ *     otherwise cover the repo's entire merge history inside forge's 30s
+ *     timeout.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -42,6 +57,7 @@ import {
   chmodSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
@@ -69,7 +85,13 @@ fi
 [ "$1" = "api" ] || { echo "fake-tea: unsupported: $*" >&2; exit 3; }
 case "$2" in
   user)
-    echo '{"login":"octo","id":7}' ;;
+    # FAKE_TEA_USER_ERROR reproduces \`tea api\`'s exit-0-on-HTTP-error: an
+    # error body on stdout with no \`.login\`, at exit status 0.
+    if [ -n "$FAKE_TEA_USER_ERROR" ]; then
+      echo '{"message":"token does not exist","url":"https://git.example.com/api/swagger"}'
+    else
+      echo '{"login":"octo","id":7}'
+    fi ;;
   repos/acme/widgets/pulls/42)
     echo '{"number":42,"title":"Add widget","body":"PR body","state":"open","html_url":"https://git.example.com/acme/widgets/pulls/42","url":"https://git.example.com/api/v1/repos/acme/widgets/pulls/42","user":{"login":"alice"},"base":{"ref":"main"},"head":{"ref":"feature/x"},"additions":10,"deletions":3}' ;;
 
@@ -136,6 +158,51 @@ case "$2" in
     echo '{"number":98,"title":"No comments reachable","body":"body","state":"open","html_url":"https://git.example.com/acme/widgets/issues/98","comments":5}' ;;
   repos/acme/widgets/issues/98/comments)
     echo "fake-tea: comments endpoint down" >&2; exit 7 ;;
+
+  # --- error bodies at exit 0 -------------------------------------------
+  # \`tea api\` exits 0 on an HTTP error and prints the error body. These
+  # fixtures reproduce that exactly: exit status 0, an error OBJECT on stdout.
+  # Note the \`url\` key — Gitea's error bodies carry one (the swagger link),
+  # which an unvalidated normalizer would ship as the PR/issue browser page.
+  repos/acme/widgets/pulls/404)
+    echo '{"message":"pull request does not exist [id: 0, index: 404]","url":"https://git.example.com/api/swagger"}' ;;
+  repos/acme/widgets/issues/404)
+    echo '{"message":"issue does not exist [id: 0, index: 404]","url":"https://git.example.com/api/swagger"}' ;;
+  # issue 97: the issue itself is fine, but its comments endpoint answers with
+  # an error OBJECT at exit 0 (not a blank body and not a failure), which used
+  # to reach \`jq --argjson\` and blow up with a raw iteration error.
+  repos/acme/widgets/issues/97)
+    echo '{"number":97,"title":"Comments error body","body":"body","state":"open","html_url":"https://git.example.com/acme/widgets/issues/97","comments":3}' ;;
+  repos/acme/widgets/issues/97/comments)
+    echo '{"message":"token does not have at least one of required scope(s): [read:issue]","url":"https://git.example.com/api/swagger"}' ;;
+
+  # --- endless pagination: every page is a full 50 items, forever, so no
+  # terminal short/empty page is ever reached and the GITEA_MAX_PAGES ceiling
+  # fires. Proves the paginator errors rather than returning a partial array. ---
+  # (5 items/page, not 50: the paginator's short-page check compares against
+  # the size observed on page 1, so a uniform page size of any value is never
+  # "short" — this just keeps a 100-page walk cheap in CI.)
+  repos/acme/endless/pulls*)
+    jq -cn '[range(5)|{number:(5000+.),title:"pad",html_url:"u",body:"",state:"open",merged:false,created_at:"d",updated_at:"2026-07-09T00:00:00Z",user:{login:"pad"},requested_reviewers:[],draft:false,head:{ref:"pad"}}]' ;;
+
+  # --- recently-merged bounded by CODEV_SINCE_DATE ------------------------
+  # Page 1 is a full 50 items sorted by updated_at DESC and reaches back past
+  # the cutoff (2026-07-05T00:00:00Z): two merges after it, then 48 older ones.
+  # Page 2 ERRORS, so a clean exit proves the walk stopped at page 1.
+  "repos/acme/dated/pulls?state=closed&sort=recentupdate&limit=50&page=1")
+    jq -cn '[{number:10,title:"Recent merge",html_url:"https://git.example.com/acme/dated/pulls/10",body:"r",state:"closed",merged:true,merged_at:"2026-07-08T10:00:00Z",created_at:"2026-07-01T00:00:00Z",updated_at:"2026-07-08T10:00:00Z",head:{ref:"feature/recent"}},{number:9,title:"Also recent",html_url:"u",body:"",state:"closed",merged:true,merged_at:"2026-07-06T09:00:00+02:00",created_at:"2026-06-01T00:00:00Z",updated_at:"2026-07-06T09:00:00+02:00",head:{ref:"feature/offset"}}] + [range(48)|{number:(6000+.),title:"old",html_url:"u",body:"",state:"closed",merged:true,merged_at:"2026-06-01T00:00:00Z",created_at:"2026-05-01T00:00:00Z",updated_at:"2026-06-01T00:00:00Z",head:{ref:"old"}}]' ;;
+  "repos/acme/dated/pulls?state=closed&sort=recentupdate&limit=50&page=2")
+    echo "fake-tea: dated page 2 requested" >&2; exit 9 ;;
+
+  # --- server that IGNORES sort=recentupdate ------------------------------
+  # Page 1 is a full 50 items in arbitrary update order that includes items
+  # older than the cutoff. The stop filter must NOT fire (the page isn't
+  # non-increasing), so the walk continues to the short page 2 and the merge
+  # that lives there is still reported.
+  "repos/acme/unsorted/pulls?state=closed&sort=recentupdate&limit=50&page=1")
+    jq -cn '[range(50)|{number:(7000+.),title:"mixed",html_url:"u",body:"",state:"closed",merged:false,created_at:"c",updated_at:(if (. % 2) == 0 then "2026-06-01T00:00:00Z" else "2026-07-09T00:00:00Z" end),head:{ref:"mixed"}}]' ;;
+  "repos/acme/unsorted/pulls?state=closed&sort=recentupdate&limit=50&page=2")
+    echo '[{"number":7100,"title":"Deep recent merge","html_url":"https://git.example.com/acme/unsorted/pulls/7100","body":"d","state":"closed","merged":true,"merged_at":"2026-07-07T00:00:00Z","created_at":"2026-07-01T00:00:00Z","updated_at":"2026-07-07T00:00:00Z","head":{"ref":"feature/deep-unsorted"}}]' ;;
 
   *) echo "fake-tea: no fixture for: $2" >&2; exit 4 ;;
 esac
@@ -417,5 +484,184 @@ describe.skipIf(!jqAvailable)('bugfix #1137: gitea preset routes reads through `
     } finally {
       rmSync(garbage, { recursive: true, force: true });
     }
+  });
+
+  // --- maintainer review follow-up (2026-09-03) ----------------------------
+
+  it('every script that hides `tea` behind a helper declares forge-executable', () => {
+    // `codev doctor` infers the CLI a concept needs from the script's first
+    // substantive line. In these six that line is `. _lib.sh` / an assignment /
+    // `printf`, none of which is on PATH, so doctor reported them as missing
+    // tools and stopped checking for `tea`. The `# forge-executable:` header
+    // (#1458) declares it explicitly.
+    for (const name of [
+      'pr-exists.sh',
+      'pr-list.sh',
+      'pr-view.sh',
+      'recently-merged.sh',
+      'issue-view.sh',
+      'user-identity.sh',
+    ]) {
+      const src = readFileSync(join(giteaDir, name), 'utf-8');
+      expect(src, name).toMatch(/^#\s*forge-executable:\s*tea$/m);
+    }
+  });
+
+  it('pagination fails loudly at the page ceiling instead of truncating', () => {
+    // Every page from this repo is a full 50 items, so no terminal short/empty
+    // page is ever reached. Returning the partial array at exit 0 would be the
+    // silent truncation the paginator exists to prevent — for `pr-exists` it
+    // reads as "no PR exists" and passes a porch pr_exists gate.
+    const { status, stdout, stderr } = runScriptFull('pr-exists.sh', {
+      CODEV_BRANCH_NAME: 'feature/x',
+      CODEV_REPO: 'acme/endless',
+    });
+    expect(status).not.toBe(0);
+    expect(stdout.trim()).toBe('');
+    expect(stderr).toContain('page ceiling');
+    // 100 sequential fake-`tea` + jq invocations; the default 5s is too tight.
+  }, 30_000);
+
+  it('pr-view fails with the server message on an error body (not an all-null PR)', () => {
+    // `tea api` exits 0 and prints the error body. Unvalidated, that produced a
+    // structurally valid PrViewResult with every field null except `url`, which
+    // took the error body's own `url` — the swagger link — and shipped it as
+    // the PR's browser page.
+    const { status, stdout, stderr } = runScriptFull('pr-view.sh', { CODEV_PR_NUMBER: '404' });
+    expect(status).not.toBe(0);
+    expect(stdout.trim()).toBe('');
+    expect(stderr).toContain('pull request does not exist');
+    expect(stderr).not.toContain('swagger');
+  });
+
+  it('user-identity fails on an error body instead of printing "null"', () => {
+    const { status, stdout, stderr } = runScriptFull('user-identity.sh', {
+      FAKE_TEA_USER_ERROR: '1',
+    });
+    expect(status).not.toBe(0);
+    expect(stdout.trim()).toBe('');
+    expect(stderr).toContain('token does not exist');
+  });
+
+  it('issue-view fails with the server message on an error body', () => {
+    const { status, stdout, stderr } = runScriptFull('issue-view.sh', { CODEV_ISSUE_ID: '404' });
+    expect(status).not.toBe(0);
+    expect(stdout.trim()).toBe('');
+    expect(stderr).toContain('issue does not exist');
+    // The issue is validated BEFORE its comments are fetched, so a bad id
+    // doesn't also warn about degraded comments on an issue that isn't there
+    // (and doesn't spend a request on them).
+    expect(stderr).not.toContain('comments fetch failed');
+  });
+
+  it('issue-view degrades to [] when the comments endpoint answers with an error OBJECT', () => {
+    // Distinct from issue 98 (comments fetch FAILS): here the fetch succeeds at
+    // exit 0 with an error object, which reached `jq --argjson` and blew up
+    // with a raw iteration error instead of the warned [] degrade.
+    const { status, stdout, stderr } = runScriptFull('issue-view.sh', { CODEV_ISSUE_ID: '97' });
+    expect(status).toBe(0);
+    const issue = JSON.parse(stdout);
+    expect(issue.title).toBe('Comments error body');
+    expect(issue.comments).toEqual([]);
+    expect(stderr).toContain('comments fetch failed for issue 97');
+  });
+
+  it('recently-merged bounds its walk with CODEV_SINCE_DATE', () => {
+    // Page 1 is sorted by updated_at DESC and reaches back past the cutoff, so
+    // the walk must stop there. The fixture's page 2 errors, so a clean exit is
+    // itself the assertion that no second request was made.
+    const { status, stdout, stderr } = runScriptFull('recently-merged.sh', {
+      CODEV_REPO: 'acme/dated',
+      CODEV_SINCE_DATE: '2026-07-05T00:00:00Z',
+    });
+    expect(stderr).toBe('');
+    expect(status).toBe(0);
+    const merged = JSON.parse(stdout);
+    // Only the two merges after the cutoff — the 48 older ones on the same page
+    // are filtered out. The second one carries a +02:00 offset rather than `Z`,
+    // pinning that Gitea's server-timezone timestamps compare correctly.
+    expect(merged.map((p: { number: number }) => p.number).sort((a: number, b: number) => a - b))
+      .toEqual([9, 10]);
+    expect(merged[0]).toMatchObject({
+      number: 10,
+      title: 'Recent merge',
+      url: 'https://git.example.com/acme/dated/pulls/10',
+      mergedAt: '2026-07-08T10:00:00Z',
+      headRefName: 'feature/recent',
+    });
+  });
+
+  it('recently-merged accepts a bare YYYY-MM-DD CODEV_SINCE_DATE', () => {
+    // `github.ts` passes a full ISO timestamp but `team-update.ts` passes a bare
+    // date, so both must bound the walk. A bare date reads as midnight UTC —
+    // same cutoff as the test above, same fixture, same result.
+    const { status, stdout, stderr } = runScriptFull('recently-merged.sh', {
+      CODEV_REPO: 'acme/dated',
+      CODEV_SINCE_DATE: '2026-07-05',
+    });
+    expect(stderr).toBe('');
+    expect(status).toBe(0);
+    expect(JSON.parse(stdout).map((p: { number: number }) => p.number).sort()).toEqual([10, 9]);
+  });
+
+  it('an unparseable CODEV_SINCE_DATE falls back to the unbounded walk', () => {
+    // Degrade toward MORE work, never toward silently dropping merges: with no
+    // usable cutoff the stop filter must not fire, so page 2 IS requested (and
+    // this fixture's page 2 errors, which is how we can see it happened).
+    const { status, stderr } = runScriptFull('recently-merged.sh', {
+      CODEV_REPO: 'acme/dated',
+      CODEV_SINCE_DATE: 'last tuesday',
+    });
+    expect(status).not.toBe(0);
+    expect(stderr).toContain('dated page 2 requested');
+  });
+
+  it('gitea_epoch normalizes Gitea\'s server-timezone timestamps', () => {
+    // Gitea marshals RFC3339 in the SERVER's timezone, so `Z` is not
+    // guaranteed. These four spell the same instant; a lexicographic compare
+    // would order them wrongly, which is why the offset is parsed out.
+    const program = `. "${join(giteaDir, '_lib.sh')}"; `
+      + `printf '%s' "$INPUT" | jq -c "\${GITEA_JQ_LIB} [ .[] | gitea_epoch ]"`;
+    const out = execFileSync('sh', ['-c', program], {
+      encoding: 'utf-8',
+      env: {
+        ...runEnv,
+        INPUT: JSON.stringify([
+          '2026-07-05T12:00:00Z',
+          '2026-07-05T14:00:00+02:00',
+          '2026-07-05T10:00:00-02:00',
+          '2026-07-05T12:00:00.123Z',
+          '2026-07-05',        // bare date -> midnight UTC
+          '2026-13-99',        // right shape, impossible date -> null, not a throw
+          'garbage',
+          null,
+          42,
+        ]),
+      },
+    }).trim();
+    expect(JSON.parse(out)).toEqual([
+      1783252800, 1783252800, 1783252800, 1783252800,
+      1783209600,
+      null, null, null, null,
+    ]);
+  });
+
+  it('recently-merged keeps walking when the server ignores sort=recentupdate', () => {
+    // The since-date bound must not cost data on a server that doesn't honor
+    // the sort parameter: page 1 contains items older than the cutoff but is
+    // NOT in descending update order, so the stop filter must not fire and the
+    // merge that lives only on page 2 must still be reported.
+    const merged = JSON.parse(runScript('recently-merged.sh', {
+      CODEV_REPO: 'acme/unsorted',
+      CODEV_SINCE_DATE: '2026-07-05T00:00:00Z',
+    }));
+    expect(merged).toHaveLength(1);
+    expect(merged[0]).toMatchObject({ number: 7100, headRefName: 'feature/deep-unsorted' });
+  });
+
+  it('recently-merged without CODEV_SINCE_DATE still walks the whole history', () => {
+    // The unbounded path is unchanged: no `sort` parameter, every page walked.
+    const merged = JSON.parse(runScript('recently-merged.sh'));
+    expect(merged).toHaveLength(2); // #40 (page 1) + #901 (page 2)
   });
 });

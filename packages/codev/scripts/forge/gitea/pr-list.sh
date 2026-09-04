@@ -1,5 +1,6 @@
 #!/bin/sh
 # Forge concept: pr-list (Gitea via tea CLI) — open pulls
+# forge-executable: tea
 # Output: JSON [{number, title, url, reviewDecision, body, createdAt, author,
 #                reviewRequests, isDraft}]  (PrListItem in forge-contracts.ts)
 #

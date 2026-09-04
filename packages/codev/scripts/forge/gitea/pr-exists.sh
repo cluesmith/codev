@@ -1,5 +1,6 @@
 #!/bin/sh
 # Forge concept: pr-exists (Gitea via tea CLI)
+# forge-executable: tea
 # Input: CODEV_BRANCH_NAME
 # Output: "true" or "false"
 #

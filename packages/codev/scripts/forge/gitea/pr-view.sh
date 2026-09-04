@@ -1,5 +1,6 @@
 #!/bin/sh
 # Forge concept: pr-view (Gitea via tea CLI)
+# forge-executable: tea
 # Input: CODEV_PR_NUMBER
 # Output: JSON {title, body, state, url, author{login}, baseRefName, headRefName,
 #               additions, deletions}  (see PrViewResult in forge-contracts.ts)
@@ -15,9 +16,36 @@
 # API endpoint (would render raw JSON in a browser), so map `html_url` and fall
 # back to `url` only if it's absent — the same choice PIR #1179 made when this
 # concept still went through `tea pulls view`.
+#
+# SHAPE VALIDATION. `tea api` exits 0 on an HTTP error and prints the error
+# BODY, e.g. {"message":"pull does not exist [index: 42]","url":"…/swagger"}.
+# Normalizing that unchecked produced a structurally valid, entirely wrong
+# contract object at exit 0 — every field null except `url`, which took the
+# error body's own `url` (the swagger link) and shipped it to callers as the
+# PR's browser page. Required fields are type-checked first and anything else
+# is a hard failure carrying the server's message on stderr.
 . "$(dirname "$0")/_lib.sh"
 REPO="$(gitea_repo)" || exit 1
-tea api "repos/${REPO}/pulls/${CODEV_PR_NUMBER}" | jq '{
+# Capture before piping: in POSIX sh (no pipefail) a `tea api … | jq` pipeline
+# reports jq's exit status, so a failed fetch would surface as jq's exit-0 on
+# empty stdin rather than an error.
+PR="$(tea api "repos/${REPO}/pulls/${CODEV_PR_NUMBER}")" || exit 1
+printf '%s' "$PR" | jq '
+  if (type == "object")
+     and ((.number | type) == "number")
+     and ((.title | type) == "string")
+     and ((.state | type) == "string")
+     and ((.user.login | type) == "string")
+     and ((.base.ref | type) == "string")
+     and ((.head.ref | type) == "string")
+  then .
+  else
+    ("gitea forge: unexpected `tea api` response for pull "
+      + (env.CODEV_PR_NUMBER // "?") + ": "
+      + (if type == "object" then (.message // tostring) else tostring end)
+      + "\n") | halt_error(1)
+  end
+  | {
   title,
   body: (.body // ""),
   state,

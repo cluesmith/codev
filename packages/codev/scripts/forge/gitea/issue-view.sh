@@ -1,5 +1,6 @@
 #!/bin/sh
 # Forge concept: issue-view (Gitea via tea CLI)
+# forge-executable: tea
 # Input: CODEV_ISSUE_ID
 # Output: JSON {title, body, state, url, comments[]}  (IssueViewResult)
 #
@@ -16,19 +17,47 @@
 #
 # Gitea's issue object reports `comments` as an integer count, not the array
 # the contract requires (consumers call `.comments.filter(...)`), so the
-# comments array is fetched separately and merged in. A failed/empty comments
-# fetch degrades to [], but warns on stderr so the degraded path is
-# distinguishable from a genuinely uncommented issue (stdout stays pure JSON —
-# it's parsed by forge.ts).
+# comments array is fetched separately and merged in. A failed comments fetch
+# degrades to [], but warns on stderr so the degraded path is distinguishable
+# from a genuinely uncommented issue (stdout stays pure JSON — it's parsed by
+# forge.ts). `tea api` exits 0 on HTTP errors and prints the error BODY, so the
+# degrade check tests for an actual JSON array rather than only for a blank
+# response — an error OBJECT reached `--argjson` and blew up with a raw jq
+# parse/iteration error instead of the warned [] degrade.
+#
+# SHAPE VALIDATION. Same exit-0-on-error problem for the issue itself: an error
+# body normalized into an all-null IssueViewResult whose `url` was the error
+# body's own `url`. Required fields are type-checked before normalizing and
+# anything else is a hard failure carrying the server's message on stderr.
 . "$(dirname "$0")/_lib.sh"
 REPO="$(gitea_repo)" || exit 1
+# Fetch and validate the issue BEFORE its comments, so a bad issue id reports
+# only its own error instead of preceding it with a comments-degrade warning
+# about an issue that doesn't exist — and doesn't spend a request on it.
+# Capture before piping: POSIX sh has no pipefail, so `tea api … | jq` would
+# report jq's exit status rather than a failed fetch.
+ISSUE="$(tea api "repos/${REPO}/issues/${CODEV_ISSUE_ID}")" || exit 1
+printf '%s' "$ISSUE" | jq -e '
+  if (type == "object")
+     and ((.title | type) == "string")
+     and ((.state | type) == "string")
+     and (((.html_url // .url) | type) == "string")
+     and ((.number | type) == "number")
+  then .
+  else
+    ("gitea forge: unexpected `tea api` response for issue "
+      + (env.CODEV_ISSUE_ID // "?") + ": "
+      + (if type == "object" then (.message // tostring) else tostring end)
+      + "\n") | halt_error(1)
+  end' >/dev/null || exit 1
+
 COMMENTS_JSON="$(tea api "repos/${REPO}/issues/${CODEV_ISSUE_ID}/comments" 2>/dev/null)"
-if [ -z "$COMMENTS_JSON" ]; then
+if [ -z "$COMMENTS_JSON" ] || ! printf '%s' "$COMMENTS_JSON" | jq -e 'type == "array"' >/dev/null 2>&1; then
   echo "gitea forge: comments fetch failed for issue ${CODEV_ISSUE_ID}; reporting 0 comments" >&2
   COMMENTS_JSON="[]"
 fi
-tea api "repos/${REPO}/issues/${CODEV_ISSUE_ID}" \
-  | jq --argjson comments "$COMMENTS_JSON" '{
+
+printf '%s' "$ISSUE" | jq --argjson comments "$COMMENTS_JSON" '{
       title,
       body: (.body // ""),
       state,
