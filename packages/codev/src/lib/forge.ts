@@ -127,11 +127,11 @@ function getProviderPresets(): Record<string, Record<string, string | null>> {
     github: getDefaultCommands(),
     gitlab: buildPresetFromScripts('gitlab', ['team-activity', 'on-it-timestamps']),
     gitea: buildPresetFromScripts('gitea', ['team-activity', 'on-it-timestamps', 'pr-search', 'pr-diff']),
-    // pr-create is explicitly disabled (not just "no script") — Linear has no PR
-    // concept of its own, and without this it silently falls through to the
-    // github default (`gh pr create`) instead of failing loudly. That's the
-    // exact silent-fallthrough bug class #1455 closes.
-    linear: buildPresetFromScripts('linear', ['team-activity', 'on-it-timestamps', 'pr-create']),
+    // Linear is a hybrid forge (spec 719): it owns *issues*, while every PR
+    // concept — pr-create included — deliberately falls through to the github
+    // default. Disabling pr-create here would leave Linear the one provider
+    // that can merge a PR but not open one.
+    linear: buildPresetFromScripts('linear', ['team-activity', 'on-it-timestamps']),
   };
   return _providerPresets;
 }
@@ -235,12 +235,17 @@ function extractExecutable(command: string): string | null {
   // Shell conditional: extract first command after "then"
   const thenMatch = trimmed.match(/then\s+(\S+)/);
   if (thenMatch) return thenMatch[1];
-  // Pipe: first command
-  const first = trimmed.split(/[|;]/).map(s => s.trim())[0];
-  // Skip shell builtins
-  const token = first.split(/\s+/)[0];
-  if (SHELL_BUILTINS.includes(token)) return null;
-  return token || null;
+  // First substantive segment of a pipe/sequence. Builtins are *skipped*, not
+  // returned as null: `doctor` treats a null executable as "nothing to check"
+  // (doctor.ts, `execInstalled`), so bailing at the first builtin would report
+  // `. env.sh; gh issue view "$1"` as healthy without ever checking for `gh` —
+  // the silent success #1455 is about, inside the reporter for it. This mirrors
+  // the script-file branch above, which also scans past builtins to the real CLI.
+  for (const segment of trimmed.split(/[|;]/)) {
+    const token = segment.trim().split(/\s+/)[0];
+    if (token && !SHELL_BUILTINS.includes(token)) return token;
+  }
+  return null;
 }
 
 // =============================================================================

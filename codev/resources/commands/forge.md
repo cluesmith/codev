@@ -16,7 +16,9 @@ Add to `.codev/config.json`:
 }
 ```
 
-Available providers: `github` (default), `gitlab` (uses `glab` CLI), `gitea` (uses `tea` CLI).
+Available providers: `github` (default), `gitlab` (uses `glab` CLI), `gitea` (uses `tea` CLI), `linear` (uses the Linear API).
+
+`linear` is a **hybrid** provider: it serves the issue concepts, and every PR concept deliberately falls through to the `gh` default, because the repository itself still lives on GitHub. Only `team-activity` and `on-it-timestamps` are disabled.
 
 > **Note:** Non-GitHub presets are best-effort. Their CLI tools may produce output schemas that differ from GitHub's JSON contracts. Codev handles this gracefully — concepts that return non-conforming JSON are treated as unavailable (null). If a preset command doesn't work correctly for your setup, override the individual concept with a command that produces the expected output.
 

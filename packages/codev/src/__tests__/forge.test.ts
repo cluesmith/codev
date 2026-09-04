@@ -517,15 +517,34 @@ describe('provider presets', () => {
     expect(teamActivity?.command).toBeNull();
   });
 
-  it('linear provider disables pr-create instead of falling through to gh (#1455)', () => {
-    // Linear has no PR concept of its own and ships no pr-create script. Without
-    // an explicit disable, it would silently fall through to the github default
-    // (`gh pr create`) — the exact silent-fallthrough bug class #1455 closes.
+  it('linear provider falls through to the gh default for pr-create (spec 719)', () => {
+    // Linear is a hybrid forge: it owns issues, and every PR concept falls
+    // through to the github default. Disabling pr-create here would make Linear
+    // the one provider that can merge a PR but not open one — spec 719 fixed
+    // `buildPresetFromScripts` precisely so missing PR scripts fall through.
     const config = { provider: 'linear' };
-    expect(getForgeCommand('pr-create', config)).toBeNull();
+    // getForgeCommand is the resolver porch actually calls to substitute
+    // {{pr_create_command}}, so pin it directly, not just the doctor view.
+    expect(getForgeCommand('pr-create', config)).toBe(getForgeCommand('pr-create', null));
     const prCreate = resolveAllConcepts(config).find(r => r.concept === 'pr-create');
-    expect(prCreate?.source).toBe('disabled');
-    expect(prCreate?.command).toBeNull();
+    expect(prCreate?.source).toBe('default');
+    expect(prCreate?.command).toContain('github/pr-create.sh');
+    expect(prCreate?.executable).toBe('gh');
+    // The sibling PR concepts fall through the same way.
+    const prMerge = resolveAllConcepts(config).find(r => r.concept === 'pr-merge');
+    expect(prMerge?.source).toBe('default');
+  });
+
+  it('linear provider leaves no concept unresolvable (hybrid model guard)', () => {
+    // Class-level guard for spec 719: issue concepts resolve to linear scripts,
+    // every other concept falls through to gh. Only the two concepts linear
+    // genuinely cannot serve are disabled. This fails loudly if anyone disables
+    // a PR concept again, rather than only catching pr-create by name.
+    const resolutions = resolveAllConcepts({ provider: 'linear' });
+    const disabled = resolutions.filter(r => r.source === 'disabled').map(r => r.concept);
+    expect(disabled.sort()).toEqual(['on-it-timestamps', 'team-activity']);
+    expect(resolutions.every(r => r.command !== null)).toBe(false); // the two above
+    expect(resolutions.filter(r => r.source !== 'disabled').every(r => r.executable !== null)).toBe(true);
   });
 
   it('linear provider resolves issue-view as preset', () => {
@@ -640,4 +659,37 @@ describe('resolveAllConcepts', () => {
       expect(issueView?.executable).toBe('gh');
     },
   );
+
+  // SHELL_BUILTINS governs the *inline-command* branch too, not just the
+  // script-file branch above — so adding `.`/`source` to that list changed
+  // behavior for inline user overrides as well. Pinned here because that half
+  // of the change was otherwise untested.
+  it.each([
+    '. /etc/forge/env.sh; gh issue view "$1"',
+    'source /etc/forge/env.sh; gh issue view "$1"',
+  ])('scans past `.`/`source` to the real CLI in an inline command (%s)', (command) => {
+    // Both branches must agree. Returning null here would make doctor print a
+    // ✓ for this override without ever checking that `gh` is installed, since
+    // it treats a null executable as "nothing to check".
+    const config = { 'issue-view': command };
+    const issueView = resolveAllConcepts(config).find(r => r.concept === 'issue-view');
+    expect(issueView?.source).toBe('override');
+    expect(issueView?.command).toBe(command);
+    expect(issueView?.executable).toBe('gh');
+  });
+
+  it('returns null for an inline command that is only builtins', () => {
+    // Nothing to check is the right answer when there genuinely is no CLI.
+    const config = { 'issue-view': 'set -e; export FOO=1' };
+    const issueView = resolveAllConcepts(config).find(r => r.concept === 'issue-view');
+    expect(issueView?.executable).toBeNull();
+  });
+
+  it('still reports a relative script path, which only starts with a dot', () => {
+    // `.` is skipped as a builtin only when it *is* the whole token — a
+    // `./tool` override must still be reported as the executable to check.
+    const config = { 'issue-view': './bin/my-forge issue view "$1"' };
+    const issueView = resolveAllConcepts(config).find(r => r.concept === 'issue-view');
+    expect(issueView?.executable).toBe('./bin/my-forge');
+  });
 });
