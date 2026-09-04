@@ -157,3 +157,16 @@ Narrowed the fix:
 This is a real behavior change from the CMAP'd version (investigate/fix diff→none), but it's a
 scope REDUCTION on the same mechanism the reviewers blessed. Notifying the architect; will offer
 to re-run CMAP if they want. Awaiting the owner's gate word on the corrected PR.
+
+## pr gate APPROVED + protocol advanced (2026-09-04 09:18)
+
+Amr approved the pr gate via VS Code at 09:18 on the pr-only code head **dbc1fcc87** (architect
+relayed it as `porch approve`, human-approved). The approval landing on the pr-only head also
+authenticates the pr-only scope ruling.
+
+Ran `porch done` → **PROTOCOL COMPLETE** (advanced to the verified/terminal state). Branch in sync
+with origin.
+
+**MERGE IS NOT MINE.** Architect instruction: the merge still needs Amr's explicit per-PR word
+plus his admin bypass (branch protection); the architect handles it when Amr's words land. So I am
+NOT running `gh pr merge` and NOT running `porch done` again (the post-merge step). **Holding.**
