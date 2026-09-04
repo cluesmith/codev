@@ -10,6 +10,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+import type * as vscode from 'vscode';
 
 const h = vi.hoisted(() => ({ docs: [] as Array<{ uri: { scheme: string; path: string } }> }));
 
@@ -26,10 +27,14 @@ vi.mock('vscode', () => ({
   },
 }));
 
-const { openIssueDocIds } = await import('../commands/view-issue.js');
+const { openIssueDocIds, shouldFetchOnDocOpen } = await import('../commands/view-issue.js');
 
 function doc(scheme: string, path: string): { uri: { scheme: string; path: string } } {
   return { uri: { scheme, path } };
+}
+
+function uri(scheme: string, path: string): vscode.Uri {
+  return { scheme, path } as unknown as vscode.Uri;
 }
 
 describe('openIssueDocIds', () => {
@@ -51,5 +56,22 @@ describe('openIssueDocIds', () => {
   it('returns an empty array when no previews are open', () => {
     h.docs = [];
     expect(openIssueDocIds()).toEqual([]);
+  });
+});
+
+describe('shouldFetchOnDocOpen', () => {
+  it('does NOT fetch when the opened issue is already cached (manual View Issue)', () => {
+    // Regression for the duplicate-fetch: viewBacklogIssue caches then opens, so
+    // the open event sees isCached === true and must not re-fetch.
+    expect(shouldFetchOnDocOpen(uri('codev-issue', '4795.md'), true)).toBe(false);
+  });
+
+  it('fetches when a codev-issue doc opens with no cached content (restored tab)', () => {
+    expect(shouldFetchOnDocOpen(uri('codev-issue', '4710.md'), false)).toBe(true);
+  });
+
+  it('never fetches for non-issue documents, cached or not', () => {
+    expect(shouldFetchOnDocOpen(uri('file', '/repo/src/foo.ts'), false)).toBe(false);
+    expect(shouldFetchOnDocOpen(uri('git', '/repo/src/foo.ts'), true)).toBe(false);
   });
 });

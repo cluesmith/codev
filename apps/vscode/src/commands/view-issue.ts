@@ -48,6 +48,11 @@ class IssueContentProvider implements vscode.TextDocumentContentProvider {
     return true;
   }
 
+  /** Whether rendered content is already cached for `issueId`. */
+  has(issueId: string): boolean {
+    return this.contents.has(issueId);
+  }
+
   /** Drop a cached entry — called when its preview's TextDocument closes. */
   forget(issueId: string): void {
     this.contents.delete(issueId);
@@ -90,6 +95,17 @@ export function openIssueDocIds(): string[] {
     if (id) { ids.push(id); }
   }
   return ids;
+}
+
+/**
+ * Whether opening `uri` should trigger a fetch. True only for a codev-issue
+ * document that has no cached content yet — i.e. a tab VSCode restored on launch.
+ * A manual "View Issue" caches the content *before* opening the document, so its
+ * open event is already `isCached === true` and must NOT re-fetch (that was a
+ * duplicate forge request per issue — the plan's no-extra-requests requirement).
+ */
+export function shouldFetchOnDocOpen(uri: vscode.Uri, isCached: boolean): boolean {
+  return issueIdFromUri(uri) !== undefined && !isCached;
 }
 
 /**
@@ -188,7 +204,12 @@ export function activateIssueView(
   // connection is up instead of staying stuck. SSE bursts are absorbed by the
   // leading-edge throttle; the dedup'ing `set` absorbs no-op refetches.
   let lastRefreshAt = 0;
+  let refreshInFlight = false;
   const refreshOpenPreviews = async (): Promise<void> => {
+    // Coalesce concurrent passes: several triggers can fire at once (e.g. a
+    // window restore firing N open events), and each pass already covers every
+    // open preview, so a second overlapping pass is pure duplicate work.
+    if (refreshInFlight) { return; }
     if (Date.now() - lastRefreshAt < REFRESH_THROTTLE_MS) { return; }
     const client = connectionManager.getClient();
     const workspacePath = connectionManager.getWorkspacePath();
@@ -197,15 +218,20 @@ export function activateIssueView(
       // heartbeat after the connection completes still fetches immediately.
       return;
     }
+    refreshInFlight = true;
     lastRefreshAt = Date.now();
-    const issueIds = new Set<string>([...provider.knownIssueIds(), ...openIssueDocIds()]);
-    for (const issueId of issueIds) {
-      try {
-        const issue = await client.getIssue(issueId, workspacePath);
-        if (issue) { provider.set(issueId, renderIssue(issueId, issue)); }
-      } catch {
-        // Benign — keep the last good content; next tick may succeed.
+    try {
+      const issueIds = new Set<string>([...provider.knownIssueIds(), ...openIssueDocIds()]);
+      for (const issueId of issueIds) {
+        try {
+          const issue = await client.getIssue(issueId, workspacePath);
+          if (issue) { provider.set(issueId, renderIssue(issueId, issue)); }
+        } catch {
+          // Benign — keep the last good content; next tick may succeed.
+        }
       }
+    } finally {
+      refreshInFlight = false;
     }
   };
 
@@ -226,10 +252,13 @@ export function activateIssueView(
       const issueId = issueIdFromUri(doc.uri);
       if (issueId) { provider.forget(issueId); }
     }),
-    // A codev-issue document opening (including a tab VSCode restores after the
-    // extension activates) fetches immediately instead of waiting for a heartbeat.
+    // A codev-issue document opening with no cached content yet (a tab VSCode
+    // restored after the extension activated) fetches immediately instead of
+    // waiting for a heartbeat. A manual "View Issue" already cached the content
+    // before opening, so its open event is skipped — no duplicate fetch.
     vscode.workspace.onDidOpenTextDocument((doc) => {
-      if (issueIdFromUri(doc.uri)) { refreshNow(); }
+      const id = issueIdFromUri(doc.uri);
+      if (id !== undefined && shouldFetchOnDocOpen(doc.uri, provider.has(id))) { refreshNow(); }
     }),
     // When Tower finishes connecting (or reconnecting), fill any preview that
     // opened while disconnected — this is what unsticks a tab restored on launch
