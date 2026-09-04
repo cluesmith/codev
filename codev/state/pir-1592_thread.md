@@ -71,6 +71,24 @@ UNRELEASED.md template, VS Code changelog/release-notes entries live on the sepa
 
 **PRView:** follow-up issue to file at completion. **CMAP:** runs in review phase after PR.
 
+## Dev-gate review feedback (2026-09-04)
+
+Amr tested the running build and gave feedback; addressed on-branch:
+- **7b6a797eb** — State + label(s) on one line (`**State:** OPEN · **Label:** area/agent`);
+  singular `Label`/`Assignee` for a single item (plural otherwise).
+- **a51cfbec6** — Fixed a **pre-existing** race: a preview tab VSCode restores on launch
+  (before Tower connects) showed "Content unavailable" and stayed stuck, because the
+  refresh loop only re-fetched `knownIssueIds()` (cache keys set this session). Now refresh
+  iterates OPEN codev-issue documents (`openIssueDocIds()`), doesn't burn the throttle while
+  disconnected, and fetches immediately on `onStateChange('connected')` /
+  `onDidOpenTextDocument` / activation. New `view-issue-refresh.test.ts` (3). Flagged the
+  scope expansion to the architect (Amr requested it at the gate).
+
+Cache model (for reference): content lives in an in-memory `Map` bounded to open previews;
+`onDidCloseTextDocument -> forget()` deletes on tab close; not persisted (empty on launch).
+
+Verification after each: full vscode suite green (970 passed), check-types clean.
+
 ## Next
-At **dev-approval** gate (Amr's). Will NOT run `porch approve` until the architect relays
-his decision. Then review phase: open PR, run CMAP, write review, file PRView follow-up.
+Still at **dev-approval** gate (Amr's). Will NOT run `porch approve` until the architect
+relays his decision. Then review phase: open PR, run CMAP, write review, file PRView follow-up.
