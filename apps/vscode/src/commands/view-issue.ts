@@ -77,6 +77,22 @@ function issueIdFromUri(uri: vscode.Uri): string | undefined {
 }
 
 /**
+ * Ids of every currently-open codev-issue preview document. This is the
+ * authoritative "what's on screen" set — including a preview tab VSCode restored
+ * on launch, which has an open document but (until fetched) no cache entry. The
+ * refresh loop iterates these so a restored tab gets filled once Tower connects,
+ * rather than staying stuck on the "Content unavailable" fallback.
+ */
+export function openIssueDocIds(): string[] {
+  const ids: string[] = [];
+  for (const doc of vscode.workspace.textDocuments) {
+    const id = issueIdFromUri(doc.uri);
+    if (id) { ids.push(id); }
+  }
+  return ids;
+}
+
+/**
  * Pick the editor group for the issue preview with the same count-then-pick
  * model the builder/shell terminals use (#804, terminal-manager.ts): target
  * group 2 when a second group already exists, else group 1. Reading layout
@@ -164,19 +180,26 @@ export function activateIssueView(
   connectionManager: ConnectionManager,
   overviewCache: OverviewCache,
 ): void {
-  // Re-fetch every open preview on each heartbeat from overviewCache —
-  // that emitter already coalesces the 60s sidebar poll with Tower's SSE
-  // events. SSE bursts (frequent during builder activity) are absorbed
-  // by the leading-edge throttle.
+  // Re-fetch open previews on each heartbeat from overviewCache — that emitter
+  // already coalesces the 60s sidebar poll with Tower's SSE events. We iterate
+  // the *currently open* codev-issue documents (not just entries already in the
+  // cache), so a preview tab VSCode restored on launch — before Tower connected,
+  // so it never got content and shows "Content unavailable" — is filled once the
+  // connection is up instead of staying stuck. SSE bursts are absorbed by the
+  // leading-edge throttle; the dedup'ing `set` absorbs no-op refetches.
   let lastRefreshAt = 0;
-  const refreshTracked = async (): Promise<void> => {
-    const now = Date.now();
-    if (now - lastRefreshAt < REFRESH_THROTTLE_MS) { return; }
-    lastRefreshAt = now;
+  const refreshOpenPreviews = async (): Promise<void> => {
+    if (Date.now() - lastRefreshAt < REFRESH_THROTTLE_MS) { return; }
     const client = connectionManager.getClient();
     const workspacePath = connectionManager.getWorkspacePath();
-    if (!client || !workspacePath || connectionManager.getState() !== 'connected') { return; }
-    for (const issueId of provider.knownIssueIds()) {
+    if (!client || !workspacePath || connectionManager.getState() !== 'connected') {
+      // Not connected yet — leave the throttle window untouched so the first
+      // heartbeat after the connection completes still fetches immediately.
+      return;
+    }
+    lastRefreshAt = Date.now();
+    const issueIds = new Set<string>([...provider.knownIssueIds(), ...openIssueDocIds()]);
+    for (const issueId of issueIds) {
       try {
         const issue = await client.getIssue(issueId, workspacePath);
         if (issue) { provider.set(issueId, renderIssue(issueId, issue)); }
@@ -186,19 +209,41 @@ export function activateIssueView(
     }
   };
 
+  // Force an immediate pass, bypassing the throttle. Used when the connection
+  // transitions to connected and when a preview document opens, so recovery is
+  // prompt rather than waiting up to REFRESH_THROTTLE_MS for the next heartbeat.
+  const refreshNow = (): void => {
+    lastRefreshAt = 0;
+    void refreshOpenPreviews();
+  };
+
   context.subscriptions.push(
     vscode.workspace.registerTextDocumentContentProvider(SCHEME, provider),
     // Drop cache entries when the markdown preview tab closes (and VSCode
     // therefore unloads the underlying codev-issue: TextDocument). Keeps
-    // the cache shaped to exactly what's currently visible — refresh loop
-    // never iterates closed previews.
+    // the cache shaped to exactly what's currently visible.
     vscode.workspace.onDidCloseTextDocument((doc) => {
       const issueId = issueIdFromUri(doc.uri);
       if (issueId) { provider.forget(issueId); }
     }),
-    overviewCache.onDidChange(refreshTracked),
+    // A codev-issue document opening (including a tab VSCode restores after the
+    // extension activates) fetches immediately instead of waiting for a heartbeat.
+    vscode.workspace.onDidOpenTextDocument((doc) => {
+      if (issueIdFromUri(doc.uri)) { refreshNow(); }
+    }),
+    // When Tower finishes connecting (or reconnecting), fill any preview that
+    // opened while disconnected — this is what unsticks a tab restored on launch
+    // before the connection was ready.
+    connectionManager.onStateChange((state) => {
+      if (state === 'connected') { refreshNow(); }
+    }),
+    overviewCache.onDidChange(refreshOpenPreviews),
     { dispose: () => provider.dispose() },
   );
+
+  // Cover activation-while-already-connected with tabs already restored (e.g. an
+  // extension-host reload): fetch them right away rather than on the next tick.
+  refreshNow();
 }
 
 export async function viewBacklogIssue(
