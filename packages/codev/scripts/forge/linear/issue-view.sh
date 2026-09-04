@@ -1,7 +1,13 @@
 #!/bin/sh
 # Forge concept: issue-view (Linear via GraphQL API)
 # Input: CODEV_ISSUE_ID (e.g. "ENG-123")
-# Output: JSON {title, body, state, url, comments[]}
+# Output: JSON {title, body, state, url, author, createdAt, assignees, labels, milestone, comments[]}
+#
+# Maps Linear's fields into the forge-neutral IssueView shape. Linear has a
+# single `assignee` (emitted as a one-element `assignees` array) and `project`
+# rather than milestones (mapped into `milestone.title`). These fields are
+# optional by contract, so anything Linear leaves null degrades to an omitted
+# line. Best-effort preset (Spec 589).
 set -e
 
 if [ -z "$LINEAR_API_KEY" ]; then
@@ -18,7 +24,7 @@ curl -sf -X POST https://api.linear.app/graphql \
   -H "Content-Type: application/json" \
   -H "Authorization: $LINEAR_API_KEY" \
   -d "$(jq -n --arg id "$CODEV_ISSUE_ID" '{
-    query: "query($id: String!) { issueVcsByFilter: issues(filter: { identifier: { eq: $id } }) { nodes { title url description state { name } comments { nodes { body createdAt user { displayName } } } } } }",
+    query: "query($id: String!) { issueVcsByFilter: issues(filter: { identifier: { eq: $id } }) { nodes { title url description createdAt state { name } creator { displayName } assignee { displayName } labels { nodes { name } } project { name } comments { nodes { body createdAt user { displayName } } } } } }",
     variables: { id: $id }
   }')" \
   | jq 'if (.data.issueVcsByFilter.nodes | length) == 0 then
@@ -29,6 +35,11 @@ curl -sf -X POST https://api.linear.app/graphql \
       url: .url,
       body: (.description // ""),
       state: .state.name,
+      author: (if .creator then { login: .creator.displayName } else null end),
+      createdAt: .createdAt,
+      assignees: (if .assignee then [{ login: .assignee.displayName }] else [] end),
+      labels: [(.labels.nodes // [])[] | { name: .name }],
+      milestone: (if .project then { title: .project.name } else null end),
       comments: [.comments.nodes[] | {
         body: .body,
         createdAt: .createdAt,

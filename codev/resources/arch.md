@@ -203,7 +203,7 @@ Shell / Claude / Builder process
 #### Shellper Lifecycle
 
 1. **Spawn**: Tower calls `SessionManager.createSession()`, which spawns `shellper-main.js` as a detached child (`child_process.spawn` with `detached: true`). Shellper writes PID + start time to stdout, then Tower calls `child.unref()`.
-2. **Connect**: Tower connects to the shellper's Unix socket at `~/.codev/run/shellper-{sessionId}.sock` via `ShellperClient`. Handshake: Tower sends HELLO, shellper responds with WELCOME (pid, cols, rows, startTime).
+2. **Connect**: Tower connects to the shellper's Unix socket at `~/.codev/run/shellper-{sessionId}.sock` via `ShellperClient`. Handshake: Tower sends HELLO, shellper responds with WELCOME (pid, cols, rows, startTime, plus optional `lastDataAt`, `alwaysSendsReplay`, and the spawned `command`/`args`). The identity fields are **authoritative** (PIR #1475): `PtySession.command` reads through to what the shellper says it actually spawned — refreshed across reconnects and SPAWN relaunches — and falls back to the persisted `terminal_sessions.command` (Spec 1313) only when the shellper reports none. Every field ADDED to WELCOME after v1 (`lastDataAt`, `alwaysSendsReplay`, `command`/`args`) is optional-by-design — the v1 core (`version`, `pid`, `cols`, `rows`, `startTime`) is still required — so `PROTOCOL_VERSION` never has to move: the client rejects any shellper OLDER than itself, so a bump would disconnect every live pre-upgrade shellper on the first restart after an upgrade.
 3. **Data flow**: Shellper forwards PTY output as DATA frames to Tower. Tower pipes DATA frames to all attached WebSocket clients via PtySession.
 4. **Tower restart**: Shellpers continue running as orphaned OS processes. On restart, Tower queries SQLite for sessions with `shellper_socket IS NOT NULL`, validates PID + start time, reconnects via Unix socket, and receives REPLAY frame with buffered output.
 5. **Kill**: Tower sends SIGTERM via SIGNAL frame, waits 5s, SIGKILL if needed. Cleans up socket file.
@@ -278,7 +278,7 @@ Binary frame format: `[1-byte type] [4-byte big-endian length] [payload]`
 | REPLAY | 0x05 | Shellper->Tower | Replay buffer dump on connect |
 | PING/PONG | 0x06/0x07 | Both | Keepalive |
 | HELLO | 0x08 | Tower->Shellper | Handshake (JSON: version) |
-| WELCOME | 0x09 | Shellper->Tower | Handshake response (JSON: pid, cols, rows, startTime) |
+| WELCOME | 0x09 | Shellper->Tower | Handshake response (JSON: required `version`, `pid`, `cols`, `rows`, `startTime`; optional post-v1 additions `lastDataAt`, `alwaysSendsReplay`, and the spawned `command`/`args` — the authoritative identity, PIR #1475) |
 | SPAWN | 0x0A | Tower->Shellper | Restart child process (JSON: command, args, cwd, env) |
 
 Max frame payload: 16MB. Unknown frame types are silently ignored.
@@ -659,6 +659,30 @@ As of v2.0.0 (Spec 0090 Phase 4), Agent Farm uses a **Tower Single Daemon** arch
 3. **SQLite (global.db) tracks terminal sessions and workspace metadata**: Shellper metadata (`shellper_socket`, `shellper_pid`, `shellper_start_time`), custom labels (Spec 468), and workspace associations persist across restarts
 4. **Tower serves React dashboard directly**: No separate dashboard-server processes - Tower serves `/workspace/<encoded>/` routes
 5. **WebSocket paths include workspace context**: Format is `/workspace/<base64url>/ws/terminal/<id>`
+
+##### Two route tables, and why a "working" endpoint can still 404 for the dashboard (Issue 1450)
+
+`tower-routes.ts` dispatches HTTP through **two independent tables**, and registering in one
+does not register in the other:
+
+| | Tower-level `ROUTES` map (~`:180`) | Workspace-scoped dispatcher (`handleWorkspaceRoutes`) |
+|---|---|---|
+| URL | `/api/<thing>` | `/workspace/<base64url>/api/<thing>` |
+| Callers | CLI (`afx …` via the Tower client), direct HTTP | **The React dashboard** |
+| Workspace | from `?workspace=`, else "first known" | decoded + normalized from the URL prefix |
+
+The dashboard's `getApiBase()` returns `'./'`, so every call it makes is **relative** and lands
+in the second table. It never decodes its own workspace path — the server resolves it from the
+prefix, which is why workspace-scoped handlers take a `workspaceOverride` argument
+(`handleOverview`, `handleAnalytics`, `handleInboxList`) that **wins over** `?workspace=` so a
+query param cannot redirect a scoped call to another workspace's data.
+
+Consequence: a CLI-facing endpoint being live and tested says nothing about whether the
+dashboard can reach it. `GET /api/inbox` had backed `afx inbox` since Spec 1313 while
+`./api/inbox` 404'd for the dashboard. When wiring a dashboard feature to an existing endpoint,
+check the workspace-scoped dispatcher, not just the `ROUTES` map. The exact-vs-prefix match
+there is also a security boundary: matching `'inbox'` exactly keeps `inbox/:id` (body-bearing)
+and `inbox/:id/dismiss` (mutating) unreachable from the browser surface.
 
 #### State Split Problem & Reconciliation
 
@@ -1815,7 +1839,21 @@ Spec 1313 replaced Spec 403's in-memory, timer-based, force-flushing `SendBuffer
 
 #### Escalation & visibility (never delivery)
 
-A held row past the escalation age (`DEFAULT_ESCALATION_MS`, default 60s; `.codev/config.json` `mailbox.escalationSeconds`) is flagged `escalated` and emits the `mailbox-escalation` SSE event — **visibility only, never a delivery trigger**. Every held-state change (hold/deliver/supersede/dismiss) fires `overview-changed` so the dashboard/VSCode held-count indicators stay live (`setMailboxBroadcaster(broadcastNotification)` wires the boot-time drainer, which has no `RouteContext`, into the SSE fan-out). `afx inbox` lists held rows (workspace-scoped; metadata only, never bodies), `afx inbox show <id>` displays a single row including its body (the one body-surfacing CLI view; works on a row of any status), and `afx inbox dismiss <id>` soft-marks a row dismissed (any workspace operator; CLI-only). Terminal rows (delivered/superseded/dismissed) are pruned after `mailbox.retentionDays` (default 30) by the drainer; **held rows are never pruned**. Cron delivers through the same gate via `deliverCronMessage` (`cron-delivery.ts`) with a per-task supersede key (a newer run replaces the older *held* row) and logs the real outcome.
+A held row past the escalation age (`DEFAULT_ESCALATION_MS`, default 60s; `.codev/config.json` `mailbox.escalationSeconds`) is flagged `escalated` and emits the `mailbox-escalation` SSE event — **visibility only, never a delivery trigger**. Every held-state change (hold/deliver/supersede/dismiss) fires `overview-changed` so the dashboard/VSCode held-count indicators stay live (`setMailboxBroadcaster(broadcastNotification)` wires the boot-time drainer, which has no `RouteContext`, into the SSE fan-out). `afx inbox` lists held rows (workspace-scoped; metadata only, never bodies), `afx inbox show <id>` displays a single row including its body (the one body-surfacing CLI view; works on a row of any status), and `afx inbox dismiss <id>` soft-marks a row dismissed (any workspace operator; CLI-only).
+
+**The held COUNT and the held LIST disagree by design — do not "fix" it (Issue 1450).** The
+count (`heldSummaryForWorkspace`, behind `OverviewData.heldCount` and every badge/alarm surface)
+filters `not_before IS NULL OR not_before <= now`; the list (`listHeld`, behind `GET /api/inbox`)
+has **no** `not_before` filter. So a pre-due `--delay` send is listed but not counted, and
+`heldCount <= inbox.length` always. This is deliberate: a scheduled send is "scheduled, not
+stuck" and must not raise an attention indicator. Any surface rendering both must show the split
+rather than reconcile it — `afx inbox` labels pre-due rows `scheduled`, and the dashboard popover
+groups `Held (N)` (N === the badge count) above a separate `Scheduled (M)`. The corollary is that
+with 0 due and 1 scheduled row the badge does not render at all, so a scheduled-only state is
+visible **only** in `afx inbox`; changing that means changing what the badge counts, not how the
+list is filtered.
+
+Terminal rows (delivered/superseded/dismissed) are pruned after `mailbox.retentionDays` (default 30) by the drainer; **held rows are never pruned**. Cron delivers through the same gate via `deliverCronMessage` (`cron-delivery.ts`) with a per-task supersede key (a newer run replaces the older *held* row) and logs the real outcome.
 
 #### Address Resolution
 
@@ -1996,6 +2034,8 @@ consult -m claude spec 42
 
 **Complementary controls that predate the key** (still in force): `/api/tunnel/*` rejects tunnel-borne requests outright (PR #1374), and `via=tunnel/local` attribution logs every proxied request. The cloud edge (codevos.ai) still owns *remote user* authentication; the local key authenticates *local* actors to their own Tower.
 
+**Tunnel-borne requests are stamped local** (#1586, PR #1588): `TunnelClient` runs inside the Tower process and is itself a local actor, so it strips any inbound `Host`, key, or proxy-marker headers from cloud-proxied requests and stamps `Host: localhost:<port>`, the tunnel marker, and the local key. The key check stays the single choke point (no tunnel exemption, `/api/tunnel/*` refusal unchanged), and the remote browser, once past cloud-edge auth, receives the same injected local key a local browser does; per-session scoping/revocation is tracked in #1589.
+
 > **Superseded ruling** (issue #1375, 2026-08-09): Tower briefly had an explicit no-internal-auth-by-design position — localhost binding as the local boundary, the cloud edge as the remote one. Security advisory GHSA-xvjp-7748-v88v reversed it nine days later: localhost binding proves same-*machine*, not same-actor, and any local process could reach every management route. The key model above is the current authority; the trust boundary honesty to preserve is that browser-path key delivery still relaxes "same user" to "same machine reaching loopback."
 
 ## Integration Points
@@ -2028,7 +2068,7 @@ All interactions with the repository hosting platform (GitHub by default) are ro
 
 **Configuration**: `.codev/config.json` `forge` section maps concept names to shell commands. Set to `null` to disable a concept. Omit to use the default (`gh`-based) command.
 
-**15 concepts**: `issue-view`, `pr-list`, `issue-list`, `issue-comment`, `pr-exists`, `recently-closed`, `recently-merged`, `user-identity`, `team-activity`, `on-it-timestamps`, `pr-merge`, `pr-search`, `pr-view`, `pr-diff`, `auth-status`.
+**18 concepts**: `issue-view`, `pr-list`, `issue-list`, `issue-search`, `issue-comment`, `pr-exists`, `recently-closed`, `recently-merged`, `user-identity`, `team-activity`, `on-it-timestamps`, `pr-create`, `pr-merge`, `pr-search`, `pr-view`, `pr-diff`, `auth-status`, `repo-archive`.
 
 **Environment variables**: Each concept receives `CODEV_*` env vars (e.g., `CODEV_ISSUE_NUMBER`, `CODEV_PR_NUMBER`) that the command uses to parameterize its output.
 

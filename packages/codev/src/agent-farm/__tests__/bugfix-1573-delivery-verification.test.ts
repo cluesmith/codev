@@ -238,27 +238,32 @@ describe('#1573 echo verification before markDelivered', () => {
   }
 
   /**
-   * THE CONTROL TEST for this issue. Every upstream signal says success — the gate was clean,
-   * the paced write completed, every `session.write` returned true — and the terminal never
-   * showed the message. Before this change that combination produced `delivered` plus a
-   * broadcast, which is precisely the false receipt #1564 and #1521 were reported as.
+   * THE CONTROL TEST for this issue, REWRITTEN for #1584 rather than deleted — the scenario is
+   * unchanged, the contract is not. Every upstream signal says success (clean gate, completed
+   * paced write, every `session.write` true) and the terminal never showed the message.
+   *
+   * #1573 answered that with a hold, so the drainer re-wrote the whole message on the next clean
+   * pass, with no attempt cap — and #1583 saw one `afx send --file` re-injected dozens of times.
+   * A completed write is at-least-once delivered, so the answer is now: record it, flag it, tell
+   * the sender it could not be confirmed, and never write it again.
    */
-  it('a completed write whose header never reaches the screen is HELD, not delivered', async () => {
+  it('a completed write whose header never reaches the screen is delivered-unverified, not held', async () => {
     const h = harness();
     h.echoVerified = false;
     const row = enqueue();
 
     const out = await deliverAgentMail(h.ports, db, '/ws/a', 'spir-1');
 
-    expect(out).toEqual({ delivered: [], reason: 'busy' });
-    // The bytes DID go out — this is a hold for redelivery, not a claim that nothing happened.
+    expect(out).toEqual({ delivered: [row.id], reason: null, verified: false });
+    // Written exactly once — the property the whole hotfix exists for.
     expect(h.writes).toEqual([FORMATTED]);
     const stored = mailbox.getById(db, row.id);
-    expect(stored?.status).toBe('held');
-    expect(stored?.reason).toBe('busy');
-    // No delivery broadcast: the dashboard must not show a message the agent never saw.
-    expect(h.broadcasts).toEqual([]);
-    expect(h.logs.join('\n')).toContain('never appeared on the terminal');
+    expect(stored?.status).toBe('delivered');
+    // Flagged, so an unconfirmed delivery is discoverable rather than silent.
+    expect(stored?.escalated).toBe(1);
+    // The bytes went out, so the delivery IS broadcast — the agent may well have seen it.
+    expect(h.broadcasts).toHaveLength(1);
+    expect(h.logs.join('\n')).toContain('delivered-unverified');
   });
 
   it('a confirmed header marks the row delivered and broadcasts it', async () => {
@@ -278,22 +283,54 @@ describe('#1573 echo verification before markDelivered', () => {
     expect(h.order).toEqual(['watch', 'write', 'verify']);
   });
 
-  it('a row held by a failed verification is redelivered by the next pass', async () => {
-    // The hold is the whole safety argument: the direction of error becomes a duplicate
-    // delivery the agent can see, never a silent loss the sender was told was a success.
+  it('a row whose verification failed is never written a second time (#1584)', async () => {
+    // The inverse of the assertion this test carried under #1573, and the exact loop #1583
+    // reported: the row left `held`, so every later clean-prompt pass re-wrote the whole
+    // message. Nothing re-holds a completed write now, so the second pass has nothing to send.
     const h = harness();
     h.echoVerified = false;
     const row = enqueue();
 
     await deliverAgentMail(h.ports, db, '/ws/a', 'spir-1');
-    expect(mailbox.getById(db, row.id)?.status).toBe('held');
+    expect(mailbox.getById(db, row.id)?.status).toBe('delivered');
 
-    h.echoVerified = true;
+    const second = await deliverAgentMail(h.ports, db, '/ws/a', 'spir-1');
+
+    expect(second).toEqual({ delivered: [], reason: null });
+    expect(h.writes).toEqual([FORMATTED]);
+  });
+
+  it('reports verified:true on the confirmed path and does not flag the row', async () => {
+    const h = harness();
+    const row = enqueue();
+
     const out = await deliverAgentMail(h.ports, db, '/ws/a', 'spir-1');
 
-    expect(out.delivered).toEqual([row.id]);
-    expect(h.writes).toEqual([FORMATTED, FORMATTED]);
-    expect(mailbox.getById(db, row.id)?.status).toBe('delivered');
+    expect(out).toEqual({ delivered: [row.id], reason: null, verified: true });
+    expect(mailbox.getById(db, row.id)?.escalated).toBe(0);
+  });
+
+  it('gives a slow renderer a second verify window before recording it unverified', async () => {
+    // No bytes are written between the two windows — this is a second LOOK, not a retry. A
+    // terminal that paints the header late is confirmed rather than flagged.
+    const h = harness();
+    let attempt = 0;
+    h.ports.watchEcho = () =>
+      Promise.resolve({
+        verify: () => {
+          attempt++;
+          h.order.push('verify');
+          return Promise.resolve(attempt > 1);
+        },
+      });
+    const row = enqueue();
+
+    const out = await deliverAgentMail(h.ports, db, '/ws/a', 'spir-1');
+
+    expect(out).toEqual({ delivered: [row.id], reason: null, verified: true });
+    expect(attempt).toBe(2);
+    expect(h.writes).toEqual([FORMATTED]);
+    expect(mailbox.getById(db, row.id)?.escalated).toBe(0);
   });
 
   it('skips verification for a message too short to have a distinctive header', async () => {
@@ -309,8 +346,10 @@ describe('#1573 echo verification before markDelivered', () => {
 
     const out = await deliverAgentMail(h.ports, db, '/ws/a', 'spir-1');
 
-    expect(out.delivered).toEqual([row.id]);
+    expect(out).toEqual({ delivered: [row.id], reason: null });
     expect(h.needles).toEqual([]);
+    // No needle → no evidence either way, so `verified` is absent rather than a guess.
+    expect('verified' in out).toBe(false);
   });
 });
 

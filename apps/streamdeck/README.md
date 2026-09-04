@@ -266,16 +266,20 @@ builder (+ its phase and position); PR / Spawn show the item + `i/N`.
 - **Spawn from Backlog** — rotate the backlog; **push** spawns a builder for the
   selected issue (VSCode prompts for the protocol).
 - **Review: Files / Headings** — phase-aware coarse review dial. The selected
-  builder's phase picks the mode. *Diff phase* (implement / review, or blocked at
-  dev-approval / pr): rotate = next / previous file, **push** = submit the current
-  file as feedback, **tap** = jump to the first file. *Spec/plan phase* (specify /
-  plan, or blocked at spec-approval / plan-approval): rotate = next / previous heading
-  in the artifact canvas, **push** = open the composer at the focused block, **tap** =
-  jump to the document top. The touch strip names the live mode and, in diff phase,
-  the delivery mode (`Files · send` vs `Files · queue`).
-- **Review: Changes / Blocks** — phase-aware fine review dial, same mode split.
-  *Diff phase*: rotate = next / previous change, **push** = submit the current change
-  as feedback, **tap** = jump to the first change. *Spec/plan phase*: rotate = next /
+  builder's phase picks the mode. *Diff phase* (implement / review / verify, the
+  BUGFIX/AIR pr phase, or blocked at dev-approval / pr / verify-approval): rotate =
+  next / previous file, **push** = submit the current file as feedback, **tap** = jump
+  to the first file. *Spec/plan phase* (specify / plan, or blocked at spec-approval /
+  plan-approval): rotate = next / previous heading in the artifact canvas, **push** =
+  open the composer at the focused block, **tap** = jump to the document top. When the
+  selected builder has no reviewable artifact (an `init` / no-live-status builder, or a
+  work-in-progress BUGFIX investigate / fix phase), both dials go inert and the strip
+  reads `No review target` rather than a mode label. The touch strip names the live mode
+  and, in diff phase, the delivery mode (`Files · send` vs `Files · queue`).
+- **Review: Changes / Blocks** — phase-aware fine review dial, same mode split
+  (including the inert `No review target` state on a builder with no reviewable
+  artifact). *Diff phase*: rotate = next / previous change, **push** = submit the current
+  change as feedback, **tap** = jump to the first change. *Spec/plan phase*: rotate = next /
   previous block, **push** = open the composer, **tap** = walk forward to the next
   commented block. The touch strip names the live mode (`Changes · send` /
   `Changes · queue`, or `Blocks`).

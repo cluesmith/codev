@@ -635,6 +635,53 @@ describe('encoders', () => {
     expect(ctx.canvasSent).toHaveLength(0);
   });
 
+  it('BUGFIX pr-phase builder: the review dials drive the diff (dead before the pr gate fired, #1606)', async () => {
+    const ctx = makeStore();
+    // A BUGFIX/AIR builder in the pr *phase*, not yet blocked at the pr *gate* (blockedGate null).
+    // Before #1606 this resolved to reviewMode 'none' and every gesture no-opped until the gate.
+    ctx.store.overview = {
+      builders: [{ id: 'bugfix-1', roleId: null, issueId: '1606', issueTitle: 'Review dials', blocked: null, blockedGate: null, protocolPhase: 'pr', progress: 95, worktreePath: '/w' }],
+      pendingPRs: [], backlog: [], recentlyClosed: [],
+    } as never;
+    const nav = new DiffFileNav(ctx.store);
+    await nav.onDialRotate(dial(1) as never); // next file
+    await nav.onDialDown();                    // submit feedback
+    await nav.onTouchTap();                     // first file
+    expect(ctx.sent.map((s) => s.verb)).toEqual(['diff-next-file', 'feedback-file', 'diff-first-file']);
+    expect(ctx.canvasSent).toHaveLength(0); // diff mode never touches the canvas channel
+  });
+
+  it('BUGFIX investigate builder: the review dials stay inert (WIP is not a review target, #1606)', async () => {
+    const ctx = makeStore();
+    // Owner ruling: investigate/fix are work-in-progress, so the dials are none-mode and no-op.
+    ctx.store.overview = {
+      builders: [{ id: 'bugfix-1', roleId: null, issueId: '1606', issueTitle: 'Review dials', blocked: null, blockedGate: null, protocolPhase: 'investigate', progress: 10, worktreePath: '/w' }],
+      pendingPRs: [], backlog: [], recentlyClosed: [],
+    } as never;
+    const nav = new DiffFileNav(ctx.store);
+    await nav.onDialRotate(dial(1) as never);
+    await nav.onDialDown();
+    await nav.onTouchTap();
+    expect(ctx.sent).toHaveLength(0);       // no diff verbs
+    expect(ctx.canvasSent).toHaveLength(0); // no canvas commands
+  });
+
+  it('legibility: a none-mode builder\'s strip says "No review target", not the diff label (#1606)', () => {
+    const ctx = makeStore();
+    // A porch `init`-phase (or soft/shell/task) builder: genuinely nothing to review. The strip
+    // must NOT borrow the diff label (`Files · send`) while every gesture is inert — that lie is
+    // the compounding half of #1606.
+    ctx.store.overview = {
+      builders: [{ id: 'task-x', roleId: null, issueId: null, issueTitle: null, blocked: null, blockedGate: null, protocolPhase: 'init', progress: 0, worktreePath: '/w' }],
+      pendingPRs: [], backlog: [], recentlyClosed: [],
+    } as never;
+    const fileAction = { isDial: () => true, setFeedback: vi.fn() };
+    new DiffFileNav(ctx.store).onWillAppear({ action: fileAction, payload: {} } as never);
+    const fb = fileAction.setFeedback.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+    expect(fb.title).toBe('No review target');
+    expect(fb.title).not.toBe('Files · send'); // the old lie
+  });
+
   it('ScrollNav diff mode: rotate relays byte-for-byte editorScroll, press submits the selection as feedback', async () => {
     const ctx = makeStore();
     // State the mode the assertion depends on: pir-2 (implement, no gate) is the DIFF-mode builder.
@@ -939,6 +986,17 @@ describe('phaseArtifactVerb (shared resolver — recognised verb or undefined)',
     // The two callers diverge exactly here: dial → view-diff, Builder Action → open-terminal.
     expect(zoomInVerb(b({}))).toBe('view-diff');
   });
+  it('leaves BUGFIX investigate/fix and the pr PHASE unrecognised — the review dials own that vocabulary (#1606)', () => {
+    // Deliberate split: `phaseArtifactVerb` stays SPIR/PIR-scoped so the auto-open action key
+    // keeps opening a terminal and Zoom falls back to view-diff. Only `reviewMode` maps the pr
+    // phase to diff (see DIFF_REVIEW_PHASES); investigate/fix stay none as work-in-progress. If
+    // this ever changes, reconsider the Builder Action key's open-terminal→open-diff-first side
+    // effect first.
+    expect(phaseArtifactVerb(b({ protocolPhase: 'investigate' }))).toBeUndefined();
+    expect(phaseArtifactVerb(b({ protocolPhase: 'fix' }))).toBeUndefined();
+    expect(phaseArtifactVerb(b({ protocolPhase: 'pr' }))).toBeUndefined();
+    expect(zoomInVerb(b({ protocolPhase: 'pr' }))).toBe('view-diff'); // Zoom already correct for the pr phase
+  });
 });
 
 describe('reviewMode (dial mode from the shared resolver)', () => {
@@ -956,9 +1014,23 @@ describe('reviewMode (dial mode from the shared resolver)', () => {
     expect(reviewMode(b({ blockedGate: 'pr' }))).toBe('diff');
     expect(reviewMode(b({ blockedGate: 'verify-approval' }))).toBe('diff'); // #1431: dials navigate the diff while the human reviews finished work
   });
-  it('an unknown phase, no live status, or no builder → none', () => {
+  it('the BUGFIX+AIR pr PHASE → diff (#1606: dead between entering the pr phase and the gate firing)', () => {
+    // The pr *phase* (BUGFIX `investigate/fix/pr`, AIR `implement/pr`) holds a finished diff, so
+    // the dials go live before the pr *gate* is requested. The pr *gate* already resolved to diff
+    // via phaseArtifactVerb (blockedGate 'pr', line above) — this covers the phase before it.
+    expect(reviewMode(b({ protocolPhase: 'pr' }))).toBe('diff');
+  });
+  it('BUGFIX work-in-progress phases investigate/fix → none (owner ruling: WIP is not a review target)', () => {
+    // #1606 owner ruling 2026-09-04: investigate/fix are work-in-progress (partial/no diff yet),
+    // so the dials stay inert with the honest "No review target" label rather than driving a
+    // half-written diff. Only the pr phase (finished work) is diffable.
+    expect(reviewMode(b({ protocolPhase: 'investigate' }))).toBe('none');
+    expect(reviewMode(b({ protocolPhase: 'fix' }))).toBe('none');
+  });
+  it('an unknown phase, no live status, or no builder → none (init/soft/shell/task have nothing to review)', () => {
     expect(reviewMode(b({}))).toBe('none');
     expect(reviewMode(b({ protocolPhase: 'mystery' }))).toBe('none');
+    expect(reviewMode(b({ protocolPhase: 'init' }))).toBe('none'); // #1606: porch init phase stays none
     expect(reviewMode(undefined)).toBe('none');
   });
 });

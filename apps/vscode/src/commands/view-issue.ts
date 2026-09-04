@@ -48,6 +48,11 @@ class IssueContentProvider implements vscode.TextDocumentContentProvider {
     return true;
   }
 
+  /** Whether rendered content is already cached for `issueId`. */
+  has(issueId: string): boolean {
+    return this.contents.has(issueId);
+  }
+
   /** Drop a cached entry — called when its preview's TextDocument closes. */
   forget(issueId: string): void {
     this.contents.delete(issueId);
@@ -77,6 +82,33 @@ function issueIdFromUri(uri: vscode.Uri): string | undefined {
 }
 
 /**
+ * Ids of every currently-open codev-issue preview document. This is the
+ * authoritative "what's on screen" set — including a preview tab VSCode restored
+ * on launch, which has an open document but (until fetched) no cache entry. The
+ * refresh loop iterates these so a restored tab gets filled once Tower connects,
+ * rather than staying stuck on the "Content unavailable" fallback.
+ */
+export function openIssueDocIds(): string[] {
+  const ids: string[] = [];
+  for (const doc of vscode.workspace.textDocuments) {
+    const id = issueIdFromUri(doc.uri);
+    if (id) { ids.push(id); }
+  }
+  return ids;
+}
+
+/**
+ * Whether opening `uri` should trigger a fetch. True only for a codev-issue
+ * document that has no cached content yet — i.e. a tab VSCode restored on launch.
+ * A manual "View Issue" caches the content *before* opening the document, so its
+ * open event is already `isCached === true` and must NOT re-fetch (that was a
+ * duplicate forge request per issue — the plan's no-extra-requests requirement).
+ */
+export function shouldFetchOnDocOpen(uri: vscode.Uri, isCached: boolean): boolean {
+  return issueIdFromUri(uri) !== undefined && !isCached;
+}
+
+/**
  * Pick the editor group for the issue preview with the same count-then-pick
  * model the builder/shell terminals use (#804, terminal-manager.ts): target
  * group 2 when a second group already exists, else group 1. Reading layout
@@ -90,11 +122,61 @@ export function pickIssuePreviewColumn(groupCount: number): vscode.ViewColumn {
   return vscode.ViewColumn.One;
 }
 
-function renderIssue(issueId: string, issue: IssueView): string {
+/**
+ * Render an ISO 8601 timestamp as its `YYYY-MM-DD` date prefix (no locale
+ * dependency, matching the terse style already used for comment headers).
+ * Falls back to the raw string when it isn't in the expected form.
+ */
+function formatIssueDate(iso: string): string {
+  const match = /^\d{4}-\d{2}-\d{2}/.exec(iso);
+  if (match) { return match[0]; }
+  return iso;
+}
+
+/**
+ * The "opened by … on …" attribution line, collapsing author + creation date
+ * onto one line. Returns just the present fragment when only one is available,
+ * or undefined when the forge supplied neither (so the caller omits the line).
+ */
+function openedByLine(issue: IssueView): string | undefined {
+  const login = issue.author?.login;
+  let date: string | undefined;
+  if (issue.createdAt) { date = formatIssueDate(issue.createdAt); }
+
+  if (login && date) { return `**Opened by** @${login} on ${date}`; }
+  if (login) { return `**Opened by** @${login}`; }
+  if (date) { return `**Opened** ${date}`; }
+  return undefined;
+}
+
+export function renderIssue(issueId: string, issue: IssueView): string {
+  // The metadata block sits under the title. State and labels share the first
+  // line (labels read as status chips alongside the state); the rest are their
+  // own blank-separated paragraphs so each renders on its own line. Lines whose
+  // data is absent are never pushed, and the count-sensitive labels use the
+  // singular form when there is exactly one.
+  let stateLine = `**State:** ${issue.state}`;
+  if (issue.labels && issue.labels.length > 0) {
+    const labelLabel = issue.labels.length === 1 ? 'Label' : 'Labels';
+    stateLine += `  ·  **${labelLabel}:** ${issue.labels.map((l) => l.name).join(', ')}`;
+  }
+  const metaLines: string[] = [stateLine];
+
+  const opened = openedByLine(issue);
+  if (opened) { metaLines.push(opened); }
+
+  if (issue.assignees && issue.assignees.length > 0) {
+    const assigneeLabel = issue.assignees.length === 1 ? 'Assignee' : 'Assignees';
+    metaLines.push(`**${assigneeLabel}:** ${issue.assignees.map((a) => `@${a.login}`).join(', ')}`);
+  }
+  if (issue.milestone?.title) {
+    metaLines.push(`**Milestone:** ${issue.milestone.title}`);
+  }
+
   const lines: string[] = [
     `# #${issueId} ${issue.title}`,
     '',
-    `**State:** ${issue.state}`,
+    metaLines.join('\n\n'),
     '',
     issue.body?.trim() ? issue.body : '_No description._',
   ];
@@ -114,41 +196,83 @@ export function activateIssueView(
   connectionManager: ConnectionManager,
   overviewCache: OverviewCache,
 ): void {
-  // Re-fetch every open preview on each heartbeat from overviewCache —
-  // that emitter already coalesces the 60s sidebar poll with Tower's SSE
-  // events. SSE bursts (frequent during builder activity) are absorbed
-  // by the leading-edge throttle.
+  // Re-fetch open previews on each heartbeat from overviewCache — that emitter
+  // already coalesces the 60s sidebar poll with Tower's SSE events. We iterate
+  // the *currently open* codev-issue documents (not just entries already in the
+  // cache), so a preview tab VSCode restored on launch — before Tower connected,
+  // so it never got content and shows "Content unavailable" — is filled once the
+  // connection is up instead of staying stuck. SSE bursts are absorbed by the
+  // leading-edge throttle; the dedup'ing `set` absorbs no-op refetches.
   let lastRefreshAt = 0;
-  const refreshTracked = async (): Promise<void> => {
-    const now = Date.now();
-    if (now - lastRefreshAt < REFRESH_THROTTLE_MS) { return; }
-    lastRefreshAt = now;
+  let refreshInFlight = false;
+  const refreshOpenPreviews = async (): Promise<void> => {
+    // Coalesce concurrent passes: several triggers can fire at once (e.g. a
+    // window restore firing N open events), and each pass already covers every
+    // open preview, so a second overlapping pass is pure duplicate work.
+    if (refreshInFlight) { return; }
+    if (Date.now() - lastRefreshAt < REFRESH_THROTTLE_MS) { return; }
     const client = connectionManager.getClient();
     const workspacePath = connectionManager.getWorkspacePath();
-    if (!client || !workspacePath || connectionManager.getState() !== 'connected') { return; }
-    for (const issueId of provider.knownIssueIds()) {
-      try {
-        const issue = await client.getIssue(issueId, workspacePath);
-        if (issue) { provider.set(issueId, renderIssue(issueId, issue)); }
-      } catch {
-        // Benign — keep the last good content; next tick may succeed.
-      }
+    if (!client || !workspacePath || connectionManager.getState() !== 'connected') {
+      // Not connected yet — leave the throttle window untouched so the first
+      // heartbeat after the connection completes still fetches immediately.
+      return;
     }
+    refreshInFlight = true;
+    lastRefreshAt = Date.now();
+    try {
+      const issueIds = new Set<string>([...provider.knownIssueIds(), ...openIssueDocIds()]);
+      for (const issueId of issueIds) {
+        try {
+          const issue = await client.getIssue(issueId, workspacePath);
+          if (issue) { provider.set(issueId, renderIssue(issueId, issue)); }
+        } catch {
+          // Benign — keep the last good content; next tick may succeed.
+        }
+      }
+    } finally {
+      refreshInFlight = false;
+    }
+  };
+
+  // Force an immediate pass, bypassing the throttle. Used when the connection
+  // transitions to connected and when a preview document opens, so recovery is
+  // prompt rather than waiting up to REFRESH_THROTTLE_MS for the next heartbeat.
+  const refreshNow = (): void => {
+    lastRefreshAt = 0;
+    void refreshOpenPreviews();
   };
 
   context.subscriptions.push(
     vscode.workspace.registerTextDocumentContentProvider(SCHEME, provider),
     // Drop cache entries when the markdown preview tab closes (and VSCode
     // therefore unloads the underlying codev-issue: TextDocument). Keeps
-    // the cache shaped to exactly what's currently visible — refresh loop
-    // never iterates closed previews.
+    // the cache shaped to exactly what's currently visible.
     vscode.workspace.onDidCloseTextDocument((doc) => {
       const issueId = issueIdFromUri(doc.uri);
       if (issueId) { provider.forget(issueId); }
     }),
-    overviewCache.onDidChange(refreshTracked),
+    // A codev-issue document opening with no cached content yet (a tab VSCode
+    // restored after the extension activated) fetches immediately instead of
+    // waiting for a heartbeat. A manual "View Issue" already cached the content
+    // before opening, so its open event is skipped — no duplicate fetch.
+    vscode.workspace.onDidOpenTextDocument((doc) => {
+      const id = issueIdFromUri(doc.uri);
+      if (id !== undefined && shouldFetchOnDocOpen(doc.uri, provider.has(id))) { refreshNow(); }
+    }),
+    // When Tower finishes connecting (or reconnecting), fill any preview that
+    // opened while disconnected — this is what unsticks a tab restored on launch
+    // before the connection was ready.
+    connectionManager.onStateChange((state) => {
+      if (state === 'connected') { refreshNow(); }
+    }),
+    overviewCache.onDidChange(refreshOpenPreviews),
     { dispose: () => provider.dispose() },
   );
+
+  // Cover activation-while-already-connected with tabs already restored (e.g. an
+  // extension-host reload): fetch them right away rather than on the next tick.
+  refreshNow();
 }
 
 export async function viewBacklogIssue(

@@ -1782,9 +1782,41 @@ describe('tower-routes', () => {
       expect(parsed.ok).toBe(true);
       expect(parsed.delivered).toBe(true);
       expect(parsed.deferred).toBe(false);
+      // Issue #1584: the terminal double echoes what is written to it, so the delivery is
+      // CONFIRMED and the sender is told so.
+      expect(parsed.verified).toBe(true);
       // Message SHOULD be written — user is idle (Bugfix #492)
       expect(mockWrite).toHaveBeenCalled();
     });
+
+    it('reports verified:false for a terminal that swallows the write (Issue #1584)', async () => {
+      // The #1583 loop: the write completes, the terminal never shows the header. Tower used to
+      // re-hold the row, and every later clean-prompt pass re-wrote the whole message. It is now
+      // recorded as delivered and the sender is told it could not be confirmed.
+      mockParseJsonBody.mockResolvedValue({ to: 'architect', message: 'hello', workspace: '/tmp/ws' });
+      mockResolveTarget.mockReturnValue({
+        terminalId: 'term-swallow', workspacePath: '/tmp/ws', agent: 'architect',
+      });
+      const mockWrite = vi.fn();
+      // Same double, minus the echo: every byte is accepted, nothing reaches the mirror.
+      const swallowing = {
+        ...gateSession(mockWrite, '❯ ', true, 'term-swallow'),
+        write: (data: string): boolean => { mockWrite(data); return true; },
+      };
+      mockGetTerminalManager.mockReturnValue({ getSession: () => swallowing, listSessions: () => [] });
+      const req = makeReq('POST', '/api/send');
+      const ctx = makeCtx();
+      const { res, statusCode, body } = makeRes();
+
+      await handleRequest(req, res, ctx);
+
+      expect(statusCode()).toBe(200);
+      const parsed = JSON.parse(body());
+      expect(parsed.delivered).toBe(true);
+      expect(parsed.held).toBe(false);
+      expect(parsed.verified).toBe(false);
+      expect(mockWrite).toHaveBeenCalled();
+    }, 10_000);
 
     it('a body-bearing interrupt that crosses the wait ceiling reports degraded (Issue #1365)', async () => {
       // codex review of PR #1492: the interrupt claims its mailbox row `delivered` BEFORE the
