@@ -549,17 +549,41 @@ export function zoomInVerb(b: OverviewBuilder): string {
 export type ReviewMode = 'diff' | 'canvas' | 'none';
 
 /**
+ * Phase ids that review as a DIFF but that `phaseArtifactVerb` deliberately does NOT
+ * auto-open. A builder in these phases has no spec/plan document to hand off, and (for
+ * `investigate`) may not have code yet either, so the auto-open action key keeps opening a
+ * terminal — but the review dials should still drive the (growing) diff rather than lie or
+ * die (#1606):
+ *
+ *   - `investigate`, `fix` (BUGFIX): the builder's whole working life reviews as a diff.
+ *   - `pr` (BUGFIX + AIR): by the pr *phase* the work already exists as a diff (owner
+ *     ruling 2026-09-04), even before the pr *gate* is requested (`blockedGate === 'pr'`
+ *     already resolves to diff via `phaseArtifactVerb`).
+ *
+ * REGISTRATION NOTE (mirrors Tower's GATE_LABELS pattern, face.ts): `protocol.json` phase
+ * metadata carries no field expressing review mode (only id/name/type/steps/transition/
+ * gate), and the SDK's `PHASE_TO_STAGE` folds `investigate → plan` (canvas — wrong here)
+ * and drives the VSCode Builders tree, so neither can be reused verbatim. A new protocol
+ * whose phases review as a diff registers its phase id here (or maps onto
+ * `phaseArtifactVerb`'s SPIR/PIR vocabulary). An unregistered phase resolves to `none` —
+ * visibly inert with an honest label, never a silent lie.
+ */
+const DIFF_REVIEW_PHASES = new Set(['investigate', 'fix', 'pr']);
+
+/**
  * The review mode for a builder: a builder still writing its spec/plan reviews as a
- * canvas (`open-spec` / `open-plan`), one with a diff reviews as a diff (`view-diff`),
- * and an unknown/no-status builder has neither. Derived from the shared phase/gate
- * resolver so the wire source stays single (`blockedGate` beats `protocolPhase`; never
- * guessed) — this is the same resolver family #1404's press keys off.
+ * canvas (`open-spec` / `open-plan`), one with a diff reviews as a diff (`view-diff`, or a
+ * `DIFF_REVIEW_PHASES` phase), and an unknown/no-status builder has neither. The
+ * canvas/diff-verb split derives from the shared phase/gate resolver (`blockedGate` beats
+ * `protocolPhase`; never guessed) — the same resolver family #1404's press keys off; the
+ * extra diff phases are the review-dial-only vocabulary `phaseArtifactVerb` omits.
  */
 export function reviewMode(b: OverviewBuilder | undefined): ReviewMode {
   if (!b) return 'none';
   const verb = phaseArtifactVerb(b);
   if (verb === 'open-spec' || verb === 'open-plan') return 'canvas';
   if (verb === 'view-diff') return 'diff';
+  if (DIFF_REVIEW_PHASES.has(b.protocolPhase ?? '')) return 'diff';
   return 'none';
 }
 
@@ -902,11 +926,16 @@ abstract class ReviewNav extends SingletonAction {
   private renderTo(action: DialAction): void {
     // Canvas line 1 pairs the rotate axis with the press meaning (`Blocks · Open/Submit`,
     // `Headings · Cancel`); diff mode pairs its axis with the feedback delivery mode
-    // (`Files · queue` vs `Files · send`, #1410) so a press is never a surprise.
-    const label =
-      this.mode() === 'canvas'
-        ? `${this.canvas.label} · ${this.canvas.pressLabel}`
-        : `${this.diff.label} · ${this.store.feedbackMode() === 'queue' ? 'queue' : 'send'}`;
+    // (`Files · queue` vs `Files · send`, #1410) so a press is never a surprise. `none`
+    // states its own emptiness (`No review target`) rather than borrowing the diff label —
+    // every gesture in `none` mode is inert, so the strip must not imply otherwise (#1606).
+    const mode = this.mode();
+    let label = 'No review target';
+    if (mode === 'canvas') {
+      label = `${this.canvas.label} · ${this.canvas.pressLabel}`;
+    } else if (mode === 'diff') {
+      label = `${this.diff.label} · ${this.store.feedbackMode() === 'queue' ? 'queue' : 'send'}`;
+    }
     const b = this.store.selectedBuilder();
     void action.setFeedback({
       title: label,
