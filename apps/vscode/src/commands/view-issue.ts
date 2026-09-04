@@ -90,11 +90,56 @@ export function pickIssuePreviewColumn(groupCount: number): vscode.ViewColumn {
   return vscode.ViewColumn.One;
 }
 
-function renderIssue(issueId: string, issue: IssueView): string {
+/**
+ * Render an ISO 8601 timestamp as its `YYYY-MM-DD` date prefix (no locale
+ * dependency, matching the terse style already used for comment headers).
+ * Falls back to the raw string when it isn't in the expected form.
+ */
+function formatIssueDate(iso: string): string {
+  const match = /^\d{4}-\d{2}-\d{2}/.exec(iso);
+  if (match) { return match[0]; }
+  return iso;
+}
+
+/**
+ * The "opened by … on …" attribution line, collapsing author + creation date
+ * onto one line. Returns just the present fragment when only one is available,
+ * or undefined when the forge supplied neither (so the caller omits the line).
+ */
+function openedByLine(issue: IssueView): string | undefined {
+  const login = issue.author?.login;
+  let date: string | undefined;
+  if (issue.createdAt) { date = formatIssueDate(issue.createdAt); }
+
+  if (login && date) { return `**Opened by** @${login} on ${date}`; }
+  if (login) { return `**Opened by** @${login}`; }
+  if (date) { return `**Opened** ${date}`; }
+  return undefined;
+}
+
+export function renderIssue(issueId: string, issue: IssueView): string {
+  // Each metadata line is its own markdown paragraph (blank-separated) so it
+  // renders on its own line, the same way `**State:**` already did. Lines whose
+  // data is absent are simply never pushed.
+  const metaLines: string[] = [`**State:** ${issue.state}`];
+
+  const opened = openedByLine(issue);
+  if (opened) { metaLines.push(opened); }
+
+  if (issue.labels && issue.labels.length > 0) {
+    metaLines.push(`**Labels:** ${issue.labels.map((l) => l.name).join(', ')}`);
+  }
+  if (issue.assignees && issue.assignees.length > 0) {
+    metaLines.push(`**Assignees:** ${issue.assignees.map((a) => `@${a.login}`).join(', ')}`);
+  }
+  if (issue.milestone?.title) {
+    metaLines.push(`**Milestone:** ${issue.milestone.title}`);
+  }
+
   const lines: string[] = [
     `# #${issueId} ${issue.title}`,
     '',
-    `**State:** ${issue.state}`,
+    metaLines.join('\n\n'),
     '',
     issue.body?.trim() ? issue.body : '_No description._',
   ];
