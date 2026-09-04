@@ -29,7 +29,7 @@ vi.mock('node:fs', async () => {
 });
 
 // Import after mocks are set up
-import { generateImage, GenerateImageOptions } from '../commands/generate-image.js';
+import { generateImage, generateViaAtlas, GenerateImageOptions } from '../commands/generate-image.js';
 
 describe('generate-image', () => {
   const originalEnv = process.env;
@@ -41,7 +41,10 @@ describe('generate-image', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // A copy, so a test that sets or deletes a key cannot leak into the next
+    // one or into the real environment; afterEach puts the original back.
     process.env = { ...originalEnv, GEMINI_API_KEY: 'test-api-key' };
+    delete process.env.ATLASCLOUD_API_KEY;
   });
 
   afterEach(() => {
@@ -306,6 +309,400 @@ describe('generate-image', () => {
       expect(call.contents[1].inlineData.mimeType).toBe('image/jpeg');
       expect(call.contents[2].inlineData.mimeType).toBe('image/webp');
       expect(call.contents[3]).toBe('Combine these images');
+    });
+  });
+
+  describe('atlas provider', () => {
+    const originalFetch = global.fetch;
+
+    // A recognisable JPEG header. Not Buffer.from(array): its .buffer is a
+    // pooled ArrayBuffer with an offset, so slicing it from 0 would hand back
+    // the wrong bytes.
+    const JPEG_BYTES = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]);
+
+    type FetchCall = { url: string; init?: RequestInit };
+
+    /**
+     * Install a fetch stub over the three Atlas hops and record every call.
+     *
+     * `polls` is consumed one entry per poll; the last entry repeats.
+     */
+    function stubAtlas(options: {
+      submit?: Partial<Response> & { json?: () => Promise<unknown>; text?: () => Promise<string> };
+      polls?: Array<Partial<Response> & { json?: () => Promise<unknown>; text?: () => Promise<string> }>;
+      download?: Partial<Response> & {
+        arrayBuffer?: () => Promise<ArrayBuffer>;
+        text?: () => Promise<string>;
+      };
+    }): FetchCall[] {
+      const calls: FetchCall[] = [];
+      let pollIndex = 0;
+      global.fetch = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+        const href = String(url);
+        calls.push({ url: href, init });
+        if (href.endsWith('/generateImage')) {
+          return (options.submit ?? {
+            ok: true,
+            status: 200,
+            json: async () => ({ data: { id: 'pred-1', status: 'processing' } }),
+          }) as Response;
+        }
+        if (href.includes('/prediction/')) {
+          const polls = options.polls ?? [
+            {
+              ok: true,
+              status: 200,
+              json: async () => ({
+                data: { status: 'completed', outputs: ['https://cdn.example/a.jpg'] },
+              }),
+            },
+          ];
+          const poll = polls[Math.min(pollIndex, polls.length - 1)];
+          pollIndex += 1;
+          return poll as Response;
+        }
+        return (options.download ?? {
+          ok: true,
+          status: 200,
+          arrayBuffer: async () => JPEG_BYTES.buffer,
+        }) as Response;
+      }) as unknown as typeof fetch;
+      return calls;
+    }
+
+    /** Drive the Atlas path with no sleep between polls. */
+    function runAtlas(output = 'output.png', aspect: '1:1' | '16:9' = '1:1') {
+      return generateViaAtlas('test prompt', output, aspect, '1K', [], { pollIntervalMs: 0 });
+    }
+
+    beforeEach(() => {
+      process.env.ATLASCLOUD_API_KEY = 'test-atlas-key';
+    });
+
+    afterEach(() => {
+      global.fetch = originalFetch;
+      vi.useRealTimers();
+    });
+
+    it('exits with error when ATLASCLOUD_API_KEY is not set', async () => {
+      delete process.env.ATLASCLOUD_API_KEY;
+
+      await expect(
+        generateImage('test prompt', { provider: 'atlas' } as GenerateImageOptions)
+      ).rejects.toThrow('process.exit called');
+      expect(mockConsoleError).toHaveBeenCalledWith(
+        expect.stringContaining('ATLASCLOUD_API_KEY environment variable not set')
+      );
+    });
+
+    it('rejects an unknown provider', async () => {
+      await expect(
+        generateImage('test prompt', { provider: 'nope' } as GenerateImageOptions)
+      ).rejects.toThrow('process.exit called');
+      expect(mockConsoleError).toHaveBeenCalledWith(
+        expect.stringContaining("Invalid provider 'nope'")
+      );
+    });
+
+    it('refuses reference images instead of ignoring them', async () => {
+      vi.mocked(existsSync).mockReturnValue(true);
+
+      await expect(
+        generateImage('test prompt', {
+          provider: 'atlas',
+          ref: ['style.png'],
+        } as GenerateImageOptions)
+      ).rejects.toThrow('process.exit called');
+      expect(mockConsoleError).toHaveBeenCalledWith(
+        expect.stringContaining('--ref is not supported with --provider atlas')
+      );
+    });
+
+    it('submits aspect_ratio, polls the prediction and names the file after its bytes', async () => {
+      const calls = stubAtlas({});
+
+      await runAtlas('output.png', '16:9');
+
+      const submitted = JSON.parse(String(calls[0]?.init?.body));
+      expect(submitted.aspect_ratio).toBe('16:9');
+      expect(submitted.model).toBe('google/nano-banana-pro/text-to-image');
+      // api.atlascloud.ai rejects some default User-Agents with 403/1010.
+      expect((calls[0]?.init?.headers as Record<string, string>)['User-Agent']).toBeTruthy();
+      expect(calls[1]?.url).toContain('/prediction/pred-1');
+      // The model returns JPEG, so the .png target must not be used verbatim.
+      expect(vi.mocked(writeFileSync)).toHaveBeenCalledWith('output.jpg', expect.anything());
+    });
+
+    it('sends the API key to Atlas and never to the CDN', async () => {
+      const calls = stubAtlas({});
+
+      await runAtlas();
+
+      const [submit, poll, download] = calls;
+      // Read through Headers, not as a plain object: a Headers instance
+      // serialises to {}, so an object-only assertion would pass while the
+      // credential leaked.
+      const authOf = (call?: FetchCall) => new Headers(call?.init?.headers ?? {}).get('authorization');
+      expect(authOf(submit)).toBe('Bearer test-atlas-key');
+      expect(authOf(poll)).toBe('Bearer test-atlas-key');
+      expect(download?.url).toBe('https://cdn.example/a.jpg');
+      // The CDN is a different origin: it must not see the credential at all.
+      expect(authOf(download)).toBeNull();
+      expect(JSON.stringify(download?.init ?? {})).not.toContain('test-atlas-key');
+    });
+
+    it('bounds every request with a timeout signal, not merely a signal', async () => {
+      // AbortSignal.timeout specifically: a plain AbortController signal is
+      // also an AbortSignal but never fires, so asserting the type alone would
+      // pass on code that has no deadline at all.
+      const timeoutSpy = vi.spyOn(AbortSignal, 'timeout');
+      const calls = stubAtlas({});
+
+      await runAtlas();
+
+      expect(calls).toHaveLength(3);
+      for (const call of calls) {
+        expect(call.init?.signal).toBeInstanceOf(AbortSignal);
+      }
+      // submit, poll, then the larger budget for the image download.
+      expect(timeoutSpy.mock.calls.map(([ms]) => ms)).toEqual([30_000, 30_000, 120_000]);
+      timeoutSpy.mockRestore();
+    });
+
+    it('keeps polling while the prediction is in progress', async () => {
+      const calls = stubAtlas({
+        polls: [
+          { ok: true, status: 200, json: async () => ({ data: { status: 'processing' } }) },
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              data: { status: 'completed', outputs: ['https://cdn.example/a.jpg'] },
+            }),
+          },
+        ],
+      });
+
+      await runAtlas();
+
+      expect(calls.filter((c) => c.url.includes('/prediction/'))).toHaveLength(2);
+      expect(vi.mocked(writeFileSync)).toHaveBeenCalledWith('output.jpg', expect.anything());
+    });
+
+    it('reports a failed submit', async () => {
+      stubAtlas({
+        submit: { ok: false, status: 401, text: async () => 'bad key' },
+      });
+
+      await expect(runAtlas()).rejects.toThrow('process.exit called');
+      expect(mockConsoleError).toHaveBeenCalledWith(
+        expect.stringContaining('Atlas submit failed (401): bad key')
+      );
+      expect(vi.mocked(writeFileSync)).not.toHaveBeenCalled();
+    });
+
+    it('reports a missing prediction id', async () => {
+      stubAtlas({
+        submit: { ok: true, status: 200, json: async () => ({ data: {} }) },
+      });
+
+      await expect(runAtlas()).rejects.toThrow('process.exit called');
+      expect(mockConsoleError).toHaveBeenCalledWith(
+        expect.stringContaining('did not return a prediction id')
+      );
+    });
+
+    it('reports a failed poll', async () => {
+      stubAtlas({
+        polls: [{ ok: false, status: 500, text: async () => 'upstream boom' }],
+      });
+
+      await expect(runAtlas()).rejects.toThrow('process.exit called');
+      expect(mockConsoleError).toHaveBeenCalledWith(
+        expect.stringContaining('Atlas poll failed (500): upstream boom')
+      );
+      expect(vi.mocked(writeFileSync)).not.toHaveBeenCalled();
+    });
+
+    it('reports a failed prediction', async () => {
+      stubAtlas({
+        polls: [
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({ data: { status: 'failed', error: 'content policy' } }),
+          },
+        ],
+      });
+
+      await expect(runAtlas()).rejects.toThrow('process.exit called');
+      expect(mockConsoleError).toHaveBeenCalledWith(
+        expect.stringContaining('Atlas generation failed: content policy')
+      );
+    });
+
+    it('fails immediately on an unrecognized status instead of polling to the timeout', async () => {
+      const calls = stubAtlas({
+        polls: [{ ok: true, status: 200, json: async () => ({ data: { status: 'cancelled' } }) }],
+      });
+
+      await expect(runAtlas()).rejects.toThrow('process.exit called');
+      expect(mockConsoleError).toHaveBeenCalledWith(
+        expect.stringContaining('unrecognized status: cancelled')
+      );
+      // One poll, not a full ATLAS_TIMEOUT_MS of them reported as a timeout.
+      expect(calls.filter((c) => c.url.includes('/prediction/'))).toHaveLength(1);
+    });
+
+    it('fails when a completed prediction carries no image URL', async () => {
+      stubAtlas({
+        polls: [
+          { ok: true, status: 200, json: async () => ({ data: { status: 'completed', outputs: [] } }) },
+        ],
+      });
+
+      await expect(runAtlas()).rejects.toThrow('process.exit called');
+      expect(mockConsoleError).toHaveBeenCalledWith(
+        expect.stringContaining('completed without an image URL')
+      );
+      expect(vi.mocked(writeFileSync)).not.toHaveBeenCalled();
+    });
+
+    it('fails when the image URL is not a string', async () => {
+      stubAtlas({
+        polls: [
+          {
+            ok: true,
+            status: 200,
+            json: async () => ({ data: { status: 'completed', outputs: [{ url: 'nested' }] } }),
+          },
+        ],
+      });
+
+      await expect(runAtlas()).rejects.toThrow('process.exit called');
+      expect(mockConsoleError).toHaveBeenCalledWith(
+        expect.stringContaining('completed without an image URL')
+      );
+      expect(vi.mocked(writeFileSync)).not.toHaveBeenCalled();
+    });
+
+    it('reports a failed download', async () => {
+      stubAtlas({ download: { ok: false, status: 404, text: async () => 'not found' } });
+
+      await expect(runAtlas()).rejects.toThrow('process.exit called');
+      expect(mockConsoleError).toHaveBeenCalledWith(
+        expect.stringContaining('Atlas image download failed (404)')
+      );
+      expect(vi.mocked(writeFileSync)).not.toHaveBeenCalled();
+    });
+
+    it('refuses to write bytes that are not a recognised image', async () => {
+      // A 200 carrying an HTML error body must not land in output.png under a
+      // green "Image saved".
+      const html = new TextEncoder().encode('<!doctype html><h1>502 Bad Gateway</h1>');
+      stubAtlas({
+        download: { ok: true, status: 200, arrayBuffer: async () => html.buffer },
+      });
+
+      await expect(runAtlas()).rejects.toThrow('process.exit called');
+      expect(mockConsoleError).toHaveBeenCalledWith(
+        expect.stringContaining('not a JPEG, PNG or WebP image')
+      );
+      expect(vi.mocked(writeFileSync)).not.toHaveBeenCalled();
+    });
+
+    it('routes --provider atlas through the Atlas path with the CLI options', async () => {
+      // The only test that exercises generateImage -> generateViaAtlas argument
+      // passing (the rest call generateViaAtlas directly), so it is what would
+      // catch a swapped `output`/`aspect`. Fake timers keep the real 5s poll
+      // cadence free.
+      vi.useFakeTimers();
+      const calls = stubAtlas({});
+
+      const run = generateImage('test prompt', {
+        provider: 'atlas',
+        aspect: '16:9',
+        output: 'dispatch.png',
+      } as GenerateImageOptions);
+      await vi.advanceTimersByTimeAsync(5000);
+      await run;
+
+      expect(JSON.parse(String(calls[0]?.init?.body)).aspect_ratio).toBe('16:9');
+      expect(vi.mocked(writeFileSync)).toHaveBeenCalledWith('dispatch.jpg', expect.anything());
+    });
+
+    it('gives up when the overall budget is spent instead of polling forever', async () => {
+      const calls = stubAtlas({
+        polls: [{ ok: true, status: 200, json: async () => ({ data: { status: 'processing' } }) }],
+      });
+
+      // The budget expires *during* the first sleep. Checking the deadline
+      // before sleeping instead of after would miss that and spend one more
+      // request on an already-dead budget.
+      await expect(
+        generateViaAtlas('test prompt', 'output.png', '1:1', '1K', [], {
+          pollIntervalMs: 5,
+          timeoutMs: 1,
+        })
+      ).rejects.toThrow('process.exit called');
+      expect(mockConsoleError).toHaveBeenCalledWith(expect.stringContaining('timed out after 1ms'));
+      expect(calls.filter((c) => c.url.includes('/prediction/'))).toHaveLength(0);
+    });
+
+    it('rejects a prediction id that is not a string', async () => {
+      stubAtlas({
+        submit: { ok: true, status: 200, json: async () => ({ data: { id: 12345 } }) },
+      });
+
+      await expect(runAtlas()).rejects.toThrow('process.exit called');
+      expect(mockConsoleError).toHaveBeenCalledWith(
+        expect.stringContaining('did not return a prediction id')
+      );
+    });
+
+    it('reports an HTML error page served as a 200 poll response', async () => {
+      // The body read is inside the timeout guard, so a JSON parse failure is
+      // reported like any other poll failure instead of escaping as a raw
+      // SyntaxError stack.
+      stubAtlas({
+        polls: [
+          {
+            ok: true,
+            status: 200,
+            json: async () => {
+              throw new SyntaxError('Unexpected token \'<\', "<!doctype "... is not valid JSON');
+            },
+          },
+        ],
+      });
+
+      await expect(runAtlas()).rejects.toThrow('process.exit called');
+      expect(mockConsoleError).toHaveBeenCalledWith(
+        expect.stringContaining('Atlas poll failed: Unexpected token')
+      );
+      expect(vi.mocked(writeFileSync)).not.toHaveBeenCalled();
+    });
+
+    it('reports a download aborted mid-stream instead of a raw TimeoutError', async () => {
+      // AbortSignal.timeout stays armed while the body streams, so the abort
+      // can land on arrayBuffer() rather than on fetch().
+      const aborted = new Error('The operation was aborted due to timeout');
+      aborted.name = 'TimeoutError';
+      stubAtlas({
+        download: {
+          ok: true,
+          status: 200,
+          arrayBuffer: async () => {
+            throw aborted;
+          },
+        },
+      });
+
+      await expect(runAtlas()).rejects.toThrow('process.exit called');
+      expect(mockConsoleError).toHaveBeenCalledWith(
+        expect.stringContaining('Atlas image download failed: no response within 120000ms')
+      );
+      expect(vi.mocked(writeFileSync)).not.toHaveBeenCalled();
     });
   });
 });
