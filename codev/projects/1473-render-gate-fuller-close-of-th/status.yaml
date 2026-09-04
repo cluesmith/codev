@@ -1,7 +1,7 @@
 id: '1473'
 title: render-gate-fuller-close-of-th
 protocol: pir
-phase: plan
+phase: implement
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -17,4 +17,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-09-04T18:58:10.213Z'
-updated_at: '2026-09-04T19:59:02.490Z'
+updated_at: '2026-09-04T19:59:06.757Z'
