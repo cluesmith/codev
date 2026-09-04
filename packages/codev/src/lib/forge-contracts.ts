@@ -29,6 +29,38 @@ export interface IssueViewResult {
    * forge-neutral (a forge script that doesn't emit it degrades gracefully).
    */
   url?: string;
+  /**
+   * Login/handle of the user who opened the issue, when the forge concept
+   * supplies it: GitHub `author.login`, GitLab `author.username`, Gitea
+   * `user.login`, Linear `creator.displayName`. Optional so the contract
+   * stays forge-neutral — a forge/script that omits it degrades gracefully
+   * (the consumer drops the "opened by" attribution).
+   */
+  author?: { login: string };
+  /**
+   * ISO 8601 creation timestamp, when the forge concept supplies it. Optional
+   * for forge-neutral degradation, same as `url`.
+   */
+  createdAt?: string;
+  /**
+   * Assignee logins/handles, when the forge concept supplies them: absent when
+   * the forge doesn't expose them, empty when the issue is unassigned. Optional
+   * per the forge-neutral degradation contract.
+   */
+  assignees?: Array<{ login: string }>;
+  /**
+   * Issue labels, when the forge concept supplies them: absent when the forge
+   * doesn't expose labels, empty when the issue has none. Optional per the
+   * forge-neutral degradation contract.
+   */
+  labels?: Array<{ name: string }>;
+  /**
+   * The issue's milestone, when set. GitHub emits a literal `null` when the
+   * issue has no milestone (hence `| null`, not merely optional); consumers
+   * guard on `milestone?.title`, so both absent and null render nothing.
+   * Optional/nullable per the forge-neutral degradation contract.
+   */
+  milestone?: { title: string } | null;
   comments: Array<{
     body: string;
     createdAt: string;

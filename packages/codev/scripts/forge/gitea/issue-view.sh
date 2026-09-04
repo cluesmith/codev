@@ -2,7 +2,7 @@
 # Forge concept: issue-view (Gitea via tea CLI)
 # forge-executable: tea
 # Input: CODEV_ISSUE_ID
-# Output: JSON {title, body, state, url, comments[]}  (IssueViewResult)
+# Output: JSON {title, body, state, url, author, createdAt, assignees, labels, milestone, comments[]}  (IssueViewResult)
 #
 # `tea issues view N --output json` returns a flattened single-element list
 # (no body/html_url/url), so route through the raw REST passthrough. `tea api`
@@ -14,6 +14,11 @@
 # `url` is mapped to the issue's browser page (`html_url`); Gitea's own `url`
 # is the API endpoint (would render raw JSON in a browser), so we fall back to
 # it only if `html_url` is absent.
+#
+# author/createdAt/assignees/labels/milestone are mapped from the Gitea REST
+# issue object (user.login, created_at, assignees[].login, labels[].name,
+# milestone.title). All are optional by contract, so a field Gitea doesn't
+# expose stays absent/null and the consumer omits it rather than crashing.
 #
 # Gitea's issue object reports `comments` as an integer count, not the array
 # the contract requires (consumers call `.comments.filter(...)`), so the
@@ -71,6 +76,10 @@ printf '%s' "$ISSUE" | jq --argjson comments "$COMMENTS_JSON" '{
       body: (.body // ""),
       state,
       url: (.html_url // .url),
+      # assignees/labels are optional ARRAYS — always emit (possibly empty), never
+      # null. Elements are defaulted to the contract-declared type.
+      assignees: [ (.assignees // [])[] | {login: (if (.login | type) == "string" then .login else "" end)} ],
+      labels: [ (.labels // [])[] | {name: (if (.name | type) == "string" then .name else "" end)} ],
       # The array itself is validated above; its ELEMENTS are whatever the
       # server sent, so each field is defaulted to the type the contract
       # declares rather than emitting nulls into IssueViewResult.comments.
@@ -79,4 +88,10 @@ printf '%s' "$ISSUE" | jq --argjson comments "$COMMENTS_JSON" '{
         createdAt: (if (.created_at | type) == "string" then .created_at else "" end),
         author: {login: (if (.user.login | type) == "string" then .user.login else "" end)}
       } ]
-    }'
+    }
+    # Optional metadata (IssueView #1592) added only when present, so an absent
+    # field is OMITTED rather than emitted as null (author?/createdAt? are not
+    # nullable; milestone is emitted only when set).
+    + (if (.user.login | type) == "string" then {author: {login: .user.login}} else {} end)
+    + (if (.created_at | type) == "string" then {createdAt: .created_at} else {} end)
+    + (if (.milestone | type) == "object" then {milestone: {title: (.milestone.title // "")}} else {} end)'
