@@ -73,6 +73,7 @@ import {
   type EnqueueInput,
 } from '../db/mailbox.js';
 import type { MailboxReason } from '../db/types.js';
+import { formatVerdict } from '@cluesmith/codev-sdk/hold-verdict';
 // Spec 1273 per-terminal submission lock. Originally the anti-fusion lock for the two
 // explicit human-bypass paths (escape + interrupt); since Issue #1365 the gated mailbox
 // delivery path takes it too, so it now serializes the whole write edge of a terminal.
@@ -977,8 +978,19 @@ async function handleTerminalRoutes(
       }
       const info = manager.resizeSession(terminalId, body.cols, body.rows);
       if (!info) {
-        res.writeHead(404, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'NOT_FOUND', message: `Session ${terminalId} not found` }));
+        // Issue #1482: a resize that did not reach the process is NOT a missing session, and it
+        // is not a success either — echoing back the requested dimensions (what a 200 here used
+        // to do) is how Tower came to believe a geometry the TUI never adopted.
+        if (!manager.getSession(terminalId)) {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'NOT_FOUND', message: `Session ${terminalId} not found` }));
+        } else {
+          res.writeHead(409, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            error: 'RESIZE_DROPPED',
+            message: `Session ${terminalId} did not accept the resize (no live process or dropped shellper write); dimensions unchanged`,
+          }));
+        }
         return;
       }
       res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -1622,7 +1634,7 @@ export async function deliverCronMessage(
   }
 
   log('WARN', `Cron '${task.name}': target '${task.target}' not found — message not delivered`);
-  return { outcome: 'unresolved', reason: null, mailboxId: null };
+  return { outcome: 'unresolved', reason: null, detail: null, mailboxId: null };
 }
 
 /**
@@ -1652,6 +1664,10 @@ function holdAndRespond(
     delivered: false,
     held: true,
     reason,
+    // A hold from THIS path is always a non-gate one (no live PTY), so it carries no gate
+    // detail (Issue #1482). Reported explicitly rather than omitted so the held response has
+    // one shape whichever path produced it.
+    detail: null,
     mailboxId: row.id,
     bodyLength: Buffer.byteLength(input.body, 'utf8'),
   });
@@ -2176,6 +2192,7 @@ async function handleSend(
       held: false,
       mailboxId: row.id,
       reason: null,
+      detail: null,
       bodyLength,
       // Additive and present only when it happened, so older clients are unaffected.
       ...(degraded ? { degraded: true, degradedReason: DEGRADED_SUBMIT_REASON } : {}),
@@ -2244,7 +2261,14 @@ async function handleSend(
     return;
   }
   const reason: MailboxReason = stored?.reason ?? 'busy';
-  ctx.log('INFO', `Message held (${reason}): ${from ?? 'unknown'} → ${toAgent} (mailbox ${row.id.slice(0, 8)}...)`);
+  // Issue #1482: read the detail back off the row the delivery pass just refreshed, rather
+  // than re-deriving it — the row is the record every other surface reads, so the sender's
+  // response and `afx inbox` can never disagree about the same hold.
+  const detail = stored?.detail ?? null;
+  ctx.log(
+    'INFO',
+    `Message held (${formatVerdict(reason, detail)}): ${from ?? 'unknown'} → ${toAgent} (mailbox ${row.id.slice(0, 8)}...)`,
+  );
   // The message stayed held → a new held row is in the set; refresh the indicator
   // count (Spec 1313, Phase 7). The delivered branch above needs no fire — the
   // delivery path's onHeldStateChange already broadcast when the row left the set.
@@ -2257,6 +2281,7 @@ async function handleSend(
     delivered: false,
     held: true,
     reason,
+    detail,
     mailboxId: row.id,
     bodyLength,
   });
@@ -2318,6 +2343,9 @@ export function handleInboxList(res: http.ServerResponse, url: URL, workspaceOve
     toAgent: r.to_agent,
     fromAgent: r.from_agent,
     reason: r.reason,
+    // Issue #1482: the gate verdict behind a `busy` hold, so `afx inbox` and the dashboard
+    // popover can distinguish an occupied composer from one the classifier could not read.
+    detail: r.detail,
     escalated: r.escalated === 1,
     createdAt: r.created_at,
     // Spec 1313 round 3: due time of a pre-due delayed (`--delay`) row; null = deliver-ASAP.
@@ -2394,6 +2422,7 @@ function handleInboxShow(
     fromWorkspace: row.from_workspace,
     status: row.status,
     reason: row.reason,
+    detail: row.detail,  // Issue #1482: the gate verdict behind a `busy` hold
     escalated: row.escalated === 1,
     body: row.body,
     createdAt: row.created_at,

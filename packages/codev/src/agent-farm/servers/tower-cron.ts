@@ -12,6 +12,7 @@ import * as yaml from 'js-yaml';
 import { parseCronExpression, isDue } from './tower-cron-parser.js';
 import type { CronSchedule } from './tower-cron-parser.js';
 import { CRON_SENDER, type CronDeliveryResult } from './cron-delivery.js';
+import { formatVerdict } from '@cluesmith/codev-sdk/hold-verdict';
 import { getGlobalDb } from '../db/index.js';
 
 // ============================================================================
@@ -339,13 +340,13 @@ async function deliverMessage(task: CronTask, message: string): Promise<void> {
     case 'superseded':
       deps.log(
         'INFO',
-        `Cron message held (${result.reason ?? 'busy'}), superseding the prior held run: ${CRON_SENDER} → ${task.target} (task '${task.name}')`,
+        `Cron message held (${formatVerdict(result.reason, result.detail, 'busy')}), superseding the prior held run: ${CRON_SENDER} → ${task.target} (task '${task.name}')`,
       );
       break;
     case 'held':
       deps.log(
         'INFO',
-        `Cron message held (${result.reason ?? 'busy'}): ${CRON_SENDER} → ${task.target} (task '${task.name}')`,
+        `Cron message held (${formatVerdict(result.reason, result.detail, 'busy')}): ${CRON_SENDER} → ${task.target} (task '${task.name}')`,
       );
       break;
     case 'unresolved':

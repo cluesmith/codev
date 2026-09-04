@@ -26,7 +26,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 /** Current migration version — bump when adding new migrations. */
-export const GLOBAL_CURRENT_VERSION = 17;
+export const GLOBAL_CURRENT_VERSION = 18;
 
 export interface GlobalMigrationOptions {
   /**
@@ -538,5 +538,32 @@ export function runGlobalMigrations(
     }
     db.prepare('INSERT INTO _migrations (version) VALUES (17)').run();
     log('[info] Added not_before column to mailbox (Spec 1313 durable --delay)');
+  }
+
+  // Migration v18: Add detail column to mailbox (Issue #1482 — the gate verdict's detail).
+  // The render gate already distinguishes a legitimately-occupied composer (`user-text` — a
+  // human at the line, the safe and intended hold) from a composer it CANNOT verify
+  // (`no-region-end`/`no-composer-marker` — a drifted profile, a torn frame, or a dims
+  // divergence, which will never clear on its own). That distinction lived only in memory on
+  // `DeliveryOutcome.detail`, so every operator surface — `afx inbox`, the send response, the
+  // held/escalation logs, the owner starvation notice — showed a bare `busy` for both. The two
+  // cases have DIFFERENT remedies, so the row has to carry which one it is.
+  //
+  // Deliberately NO CHECK constraint, unlike the sibling `reason` column: SQLite cannot add one
+  // via ALTER TABLE, so a CHECK present in GLOBAL_SCHEMA and absent here would make a fresh
+  // install and an upgraded install structurally different — the exact convergence the
+  // migration suite asserts. The value set is enforced in TypeScript (`MailboxGateDetail`).
+  // Same PRAGMA-gated ADD COLUMN shape as v16/v17: a blanket try/catch would let a real ALTER
+  // failure be recorded as "migrated", and every subsequent mailbox write (which now names
+  // `detail`) would then fail against a table missing it.
+  const v18 = db.prepare('SELECT version FROM _migrations WHERE version = 18').get();
+  if (!v18) {
+    const hasDetail = (db.prepare(`PRAGMA table_info(mailbox)`).all() as Array<{ name: string }>)
+      .some((c) => c.name === 'detail');
+    if (!hasDetail) {
+      db.exec(`ALTER TABLE mailbox ADD COLUMN detail TEXT`);
+    }
+    db.prepare('INSERT INTO _migrations (version) VALUES (18)').run();
+    log('[info] Added detail column to mailbox (Issue #1482 gate-verdict detail)');
   }
 }

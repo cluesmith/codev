@@ -1,0 +1,29 @@
+id: '1482'
+title: f1-tower-vs-pty-dimension-dive
+protocol: pir
+phase: review
+plan_phases: []
+current_plan_phase: null
+gates:
+  plan-approval:
+    status: approved
+    requested_at: '2026-09-03T17:59:08.303Z'
+    approved_at: '2026-09-03T18:01:46.981Z'
+  dev-approval:
+    status: approved
+    requested_at: '2026-09-03T18:24:42.539Z'
+    approved_at: '2026-09-03T18:43:23.176Z'
+  pr:
+    status: pending
+    requested_at: '2026-09-03T23:04:47.075Z'
+iteration: 1
+build_complete: true
+history: []
+started_at: '2026-09-03T17:52:10.158Z'
+updated_at: '2026-09-03T23:04:47.075Z'
+pr_history:
+  - phase: review
+    pr_number: 1604
+    branch: builder/pir-1482
+    created_at: '2026-09-03T18:47:23.282Z'
+pr_ready_for_human: true

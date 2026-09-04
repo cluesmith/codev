@@ -427,6 +427,38 @@ export interface IssueView {
    * gracefully when it's absent (e.g. a forge script that doesn't emit it).
    */
   url?: string;
+  /**
+   * Login/handle of the user who opened the issue, when the forge concept
+   * supplies it: GitHub `author.login`, GitLab `author.username`, Gitea
+   * `user.login`, Linear `creator.displayName`. Optional so the contract
+   * stays forge-neutral — a forge/script that omits it degrades gracefully
+   * (the consumer drops the "opened by" attribution).
+   */
+  author?: { login: string };
+  /**
+   * ISO 8601 creation timestamp, when the forge concept supplies it. Optional
+   * for forge-neutral degradation, same as `url`.
+   */
+  createdAt?: string;
+  /**
+   * Assignee logins/handles, when the forge concept supplies them: absent when
+   * the forge doesn't expose them, empty when the issue is unassigned. Optional
+   * per the forge-neutral degradation contract.
+   */
+  assignees?: Array<{ login: string }>;
+  /**
+   * Issue labels, when the forge concept supplies them: absent when the forge
+   * doesn't expose labels, empty when the issue has none. Optional per the
+   * forge-neutral degradation contract.
+   */
+  labels?: Array<{ name: string }>;
+  /**
+   * The issue's milestone, when set. GitHub emits a literal `null` when the
+   * issue has no milestone (hence `| null`, not merely optional); consumers
+   * guard on `milestone?.title`, so both absent and null render nothing.
+   * Optional/nullable per the forge-neutral degradation contract.
+   */
+  milestone?: { title: string } | null;
   comments: Array<{
     body: string;
     createdAt: string;
@@ -616,6 +648,15 @@ export interface HeldMessage {
   fromAgent: string | null;
   /** Why the render gate held it: `'busy' | 'no-profile' | 'no-live-pty'`; `null` if unset. */
   reason: string | null;
+  /**
+   * The gate's detail behind a `busy` reason (Issue #1482):
+   * `'user-text'` — a draft or menu occupies the composer; a human is at the line and the hold
+   * clears by itself. `'no-region-end'` / `'no-composer-marker'` — the classifier could not
+   * verify the composer at all (a drifted profile, a torn frame, or Tower's dimensions
+   * diverging from the real PTY); this hold does NOT clear on its own.
+   * `null` for a non-gate hold (`no-live-pty`, `no-profile`) and once delivered.
+   */
+  detail: string | null;
   /** True once the row has crossed the escalation age. A pre-due row never escalates. */
   escalated: boolean;
   /** Enqueue time, epoch ms — the basis for the displayed age. */

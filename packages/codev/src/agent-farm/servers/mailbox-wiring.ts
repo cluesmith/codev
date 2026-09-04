@@ -29,6 +29,7 @@ import {
 import { getGlobalDb } from '../db/index.js';
 import { getArchitectByName } from '../state.js';
 import { formatBuilderMessage } from '../utils/message-format.js';
+import { formatVerdict } from '@cluesmith/codev-sdk/hold-verdict';
 import { supersede as supersedeMailbox, dismissHeldWithKey, NOTICE_SUPERSEDE_PREFIX } from '../db/mailbox.js';
 import path from 'node:path';
 import {
@@ -324,14 +325,65 @@ function noticeSupersedeKey(toAgent: string): string {
   return `${NOTICE_SUPERSEDE_PREFIX}${toAgent}`;
 }
 
-/** Human-readable notice body (metadata only — never the starved messages' contents). */
-function formatOwnerNoticeBody(info: HeldOwnerNoticeInfo): string {
+/**
+ * Human-readable notice body (metadata only — never the starved messages' contents).
+ *
+ * TWO notices, not one (Issue #1482). The old single body said "its composer never classifies
+ * as a ready prompt" and offered `afx interrupt` for every hold, which is wrong advice in the
+ * commonest case: when the detail is `user-text` a human is sitting at that composer with a
+ * draft, and interrupting them is the last thing the owner should do. The gate has always
+ * known which case it is; now the row carries it, so the notice can say it.
+ *
+ * The `streak` — how many consecutive gate checks re-confirmed the same verdict — is what
+ * separates "held ~7m" (which could be one unlucky sample) from "held ~7m, re-confirmed across
+ * 41 checks" (which cannot be).
+ *
+ * Exported for unit testing. This text is operator-facing INSTRUCTIONS during an incident, and
+ * it went un-asserted long enough to ship a remedy line naming `afx interrupt` at a composer a
+ * human was actively typing in. Prose that tells someone what to do to a live terminal is
+ * behaviour, and gets tested like behaviour.
+ */
+export function formatOwnerNoticeBody(info: HeldOwnerNoticeInfo): string {
   const mins = Math.max(1, Math.round(info.ageMs / 60_000));
   const plural = info.heldCount === 1 ? 'message' : 'messages';
-  return (
+  const confirmed = info.streak > 1 ? `, re-confirmed across ${info.streak} consecutive gate checks` : '';
+  const head =
     `Mailbox delivery is STUCK for builder '${info.toAgent}' @ ${path.basename(info.workspacePath)}. ` +
-    `${info.heldCount} ${plural} held ~${mins}m (reason: ${info.reason ?? 'held'}) — its composer never classifies as a ready prompt, ` +
-    `so nothing is being delivered (cron nudges included). ` +
+    `${info.heldCount} ${plural} held ~${mins}m (${formatVerdict(info.reason, info.detail)}${confirmed}).`;
+
+  if (info.detail === 'user-text') {
+    // The SAFE hold: the classifier positively identified a draft or menu in the composer.
+    //
+    // This branch names NO command that touches the terminal, deliberately — not even hedged
+    // with "only if you are sure". An operator reading a notice headed "delivery is STUCK"
+    // treats the remedy line as the instruction, and the person at that composer is mid-thought
+    // by definition of this verdict. The #1583 loop was aggravated by exactly that: an operator
+    // followed an `afx interrupt` suggestion out of this notice. A hedge is not a safeguard
+    // when the surrounding text reads as an incident.
+    return (
+      `${head} Its composer has been OCCUPIED that whole time — a draft or an open menu is on ` +
+      `the line, which usually means a human is working there, and delivery resumes by itself ` +
+      `the moment the line clears. ` +
+      `Remedy: usually none — let it clear. 'afx inbox' inspects the queue (metadata only, ` +
+      `never bodies) if you want to see what is waiting, and talking to whoever is at that ` +
+      `terminal is the only other thing worth doing.`
+    );
+  }
+  if (info.detail || info.reason === 'no-profile') {
+    // The DEFECT class: the gate could not verify the composer at all, so nothing will clear
+    // this without intervention.
+    return (
+      `${head} The render gate CANNOT VERIFY that composer — this is not a busy human, it is a ` +
+      `classifier that cannot find a bounded composer region, so the mail will never deliver on ` +
+      `its own. Usual causes: a drifted TUI profile, a torn/mid-repaint frame, or Tower's ` +
+      `terminal dimensions diverging from the real PTY (Issue #1482). ` +
+      `Remedy: 'afx inbox' to inspect; resizing the viewer forces a repaint; ` +
+      `'afx interrupt ${info.toAgent}' clears a stuck composer.`
+    );
+  }
+  return (
+    `${head} Its composer never classifies as a ready prompt, so nothing is being delivered ` +
+    `(cron nudges included). ` +
     `Remedy: run 'afx inbox' to inspect; 'afx interrupt ${info.toAgent}' clears a stuck composer.`
   );
 }
@@ -376,7 +428,8 @@ function escalateHeldToOwner(info: HeldOwnerNoticeInfo, log: LogFn): boolean {
   log(
     'WARN',
     `[mailbox] STARVATION notice → ${owner.agent} about ${info.toAgent} @ ${path.basename(info.workspacePath)} ` +
-      `(${info.heldCount} held ~${Math.round(info.ageMs / 1000)}s, reason ${info.reason ?? 'held'})`,
+      `(${info.heldCount} held ~${Math.round(info.ageMs / 1000)}s, ${formatVerdict(info.reason, info.detail)}` +
+      `${info.streak > 1 ? `, streak ${info.streak}` : ''})`,
   );
   return true;
 }
@@ -418,6 +471,10 @@ function broadcastEscalation(info: EscalationInfo): void {
     mailboxId: info.mailboxId,
     ageMs: info.ageMs,
     reason: info.reason,
+    // Issue #1482: a client showing only `busy` cannot tell an occupied composer from one the
+    // gate could not read. The wire is additive — an older client that ignores the field is
+    // unaffected — but the TYPE is required, so this producer cannot forget it.
+    detail: info.detail,
   };
   mailboxBroadcaster?.({
     type: 'mailbox-escalation',

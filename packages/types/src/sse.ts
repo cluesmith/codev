@@ -42,4 +42,20 @@ export interface MailboxEscalationPayload {
   ageMs: number;
   /** Why it is held: 'busy' | 'no-profile' | 'no-live-pty' (null if unset). */
   reason: string | null;
+  /**
+   * The render gate's detail behind a `busy` reason (Issue #1482):
+   * `'user-text'` (a draft/menu occupies the composer — a human is at the line, and the hold
+   * clears when they finish) | `'no-region-end'` | `'no-composer-marker'` (the classifier
+   * could not verify the composer at all — a drifted profile, a torn frame, or Tower's
+   * dimensions diverging from the real PTY; this hold does NOT clear on its own).
+   * `null` for a non-gate hold.
+   *
+   * REQUIRED, matching `HeldMessage.detail` and this payload's own `reason` (maintainer
+   * review, PR #1604). Optionality here would have governed the PRODUCER's obligation, not a
+   * consumer's tolerance — a client that ignores the field reads `undefined` either way, and
+   * the wire is unchanged. There is exactly one producer (`broadcastEscalation`), it always
+   * sets the field, and requiring it means a future producer has to decide rather than
+   * silently omit the diagnostic.
+   */
+  detail: string | null;
 }

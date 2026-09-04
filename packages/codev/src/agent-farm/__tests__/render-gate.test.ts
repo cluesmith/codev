@@ -789,3 +789,81 @@ describe('resolveProfile — strict, fail-safe app identity (Spec 1313)', () => 
     expect(resolveProfile({ command: 'opencode' })).toBeNull();
   });
 });
+
+/**
+ * Issue #1482 — the classifier IS dimension-sensitive, and that is why the dimensions have to
+ * be right.
+ *
+ * This suite changes no behaviour; it is the executable statement of the premise the rest of
+ * #1482 rests on. The gate renders a byte stream into a headless terminal at a given geometry
+ * and looks for a composer marker with a bounding rule beneath it. Wrap the same bytes at a
+ * different width and the composer's rule lands on a different row — or the marker line is
+ * split — and a screen that classifies CLEAN at its true size classifies BUSY at a size a few
+ * columns off. Nothing recovers from that on its own: the row holds `busy` forever.
+ *
+ * Two things follow, and both are deliberate:
+ *   - The fix is NOT to make the classifier tolerant. Widening the search for a region end is
+ *     how status chrome below the composer gets counted as user text, or worse, how an
+ *     unbounded region returns a false CLEAN — the corruption direction the whole gate exists
+ *     to prevent. Fail-toward-hold stays.
+ *   - The fix is to keep Tower's dimensions equal to the process's, which is what the resize
+ *     and attach-reconciliation changes in this issue do.
+ *
+ * If a future change makes this test fail because the verdicts no longer differ, that is worth
+ * reading carefully: either the classifier became dimension-insensitive (check what it gave up
+ * to get there) or this fixture stopped exercising the boundary.
+ *
+ * Uses the already-committed 6 KB `claude-smallring-idle` capture at its true 139×63 — no new
+ * fixture, and nothing copied out of the (uncommitted, multi-MB) capture rig.
+ */
+describe('render-gate — dimension sensitivity (Issue #1482)', () => {
+  const load = (name: string) => gunzipSync(readFileSync(`${FIXTURE_DIR}/${name}`)).toString('utf8');
+  const TRUE_COLS = 139;
+  const TRUE_ROWS = 63;
+
+  it('classifies CLEAN at the geometry it was captured at', async () => {
+    const replay = load('claude-smallring-idle.replay.bin.gz');
+    const verdict = await classifyScreen(
+      { replay, cols: TRUE_COLS, rows: TRUE_ROWS },
+      CLAUDE_PROFILE
+    );
+    expect(verdict.clean).toBe(true);
+    expect(verdict.detail).toBe('empty');
+  });
+
+  it('a FOUR-column disagreement flips the same bytes to an indefinite busy', async () => {
+    // The measured axis in this issue's refinement: today's captures are column-sensitive.
+    // Swept over this fixture at rows 61/63/65 and columns 131/135/139/143 — at the true 63
+    // rows, 139 and 143 classify CLEAN while 135 and 131 both classify `busy:no-region-end`.
+    // Four columns. That is well inside what a dropped resize, or a dimension restored from
+    // the database after a Tower restart, can produce — and `no-region-end` never clears on
+    // its own, so every message to that agent would hold forever.
+    const replay = load('claude-smallring-idle.replay.bin.gz');
+    const narrower = await classifyScreen(
+      { replay, cols: TRUE_COLS - 4, rows: TRUE_ROWS },
+      CLAUDE_PROFILE
+    );
+    expect(narrower.clean).toBe(false);
+    expect(narrower.reason).toBe('busy');
+    expect(narrower.detail).toBe('no-region-end');
+
+    // It fails in the SAFE direction — a geometry the gate cannot trust never yields a false
+    // CLEAN, only a hold. That is the invariant the fix must not trade away.
+    const verdicts = await Promise.all(
+      [TRUE_COLS - 8, TRUE_COLS - 4].map((cols) =>
+        classifyScreen({ replay, cols, rows: TRUE_ROWS }, CLAUDE_PROFILE)
+      )
+    );
+    for (const v of verdicts) expect(v.reason).toBe('busy');
+  });
+
+  it('a badly wrong geometry loses the composer entirely', async () => {
+    // 80x24 is the classic default a session falls back to when nothing negotiated a size.
+    const replay = load('claude-smallring-idle.replay.bin.gz');
+    const verdict = await classifyScreen({ replay, cols: 80, rows: 24 }, CLAUDE_PROFILE);
+    expect(verdict.clean).toBe(false);
+    // Held, and held for a reason a human can now READ off the row — which is what the first
+    // phase of this issue added. Before it, this and a human mid-draft were both just `busy`.
+    expect(['no-composer-marker', 'no-region-end', 'user-text']).toContain(verdict.detail);
+  });
+});
