@@ -555,7 +555,10 @@ export type ReviewMode = 'diff' | 'canvas' | 'none';
  * terminal — but the review dials should still drive the (growing) diff rather than lie or
  * die (#1606):
  *
- *   - `investigate`, `fix` (BUGFIX): the builder's whole working life reviews as a diff.
+ *   - `investigate` (BUGFIX; also RESEARCH's diagnosis phase): the builder's whole working
+ *     life reviews as a diff. RESEARCH's `investigate` produces worktree changes too, so diff
+ *     mode is correct there as well — the id is registered by name, not by owning protocol.
+ *   - `fix` (BUGFIX): the whole working life reviews as a diff.
  *   - `pr` (BUGFIX + AIR): by the pr *phase* the work already exists as a diff (owner
  *     ruling 2026-09-04), even before the pr *gate* is requested (`blockedGate === 'pr'`
  *     already resolves to diff via `phaseArtifactVerb`).
