@@ -139,6 +139,24 @@ export interface PrViewResult {
   deletions: number;
 }
 
+/**
+ * Output of the `pr-create` concept command.
+ *
+ * Inputs are environment variables, like every other concept:
+ * `CODEV_PR_TITLE` (required), `CODEV_PR_BODY` (required — set it to `''` for
+ * an empty body; an *absent* one is rejected rather than silently posting a
+ * bodyless PR), and the optional `CODEV_PR_BASE`, `CODEV_PR_HEAD`,
+ * `CODEV_PR_REPO`, `CODEV_PR_DRAFT`. The gitea script also reads the optional
+ * `CODEV_PR_LOGIN` (tea's `--login`, for multi-login hosts). A failed creation
+ * exits non-zero rather than emitting JSON.
+ */
+export interface PrCreateResult {
+  /** The created PR's number (`iid` on GitLab, `index` on Gitea). */
+  number: number;
+  /** The created PR's **browser/web** URL — never an API endpoint. */
+  url: string;
+}
+
 /** Output of the `pr-diff` concept command: raw diff text, not JSON. */
 // Returns diff text on stdout. Use `raw: true` option.
 
