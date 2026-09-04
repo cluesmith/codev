@@ -21,9 +21,10 @@
 # degrades to [], but warns on stderr so the degraded path is distinguishable
 # from a genuinely uncommented issue (stdout stays pure JSON — it's parsed by
 # forge.ts). `tea api` exits 0 on HTTP errors and prints the error BODY, so the
-# degrade check tests for an actual JSON array rather than only for a blank
-# response — an error OBJECT reached `--argjson` and blew up with a raw jq
-# parse/iteration error instead of the warned [] degrade.
+# degrade check tests for an actual JSON array of objects rather than only for a
+# blank response — an error OBJECT reached `--argjson` and blew up with a raw jq
+# parse/iteration error instead of the warned [] degrade, and a non-object
+# element would do the same on `.body`.
 #
 # SHAPE VALIDATION. Same exit-0-on-error problem for the issue itself: an error
 # body normalized into an all-null IssueViewResult whose `url` was the error
@@ -53,12 +54,14 @@ printf '%s' "$ISSUE" | jq -e '
   else
     ("gitea forge: unexpected `tea api` response for issue "
       + (env.CODEV_ISSUE_ID // "?") + ": "
-      + (if type == "object" then (.message // tostring) else tostring end)
+      + ((.message // .) | tostring)
       + "\n") | halt_error(1)
   end' >/dev/null || exit 1
 
 COMMENTS_JSON="$(tea api "repos/${REPO}/issues/${CODEV_ISSUE_ID}/comments" 2>/dev/null)"
-if [ -z "$COMMENTS_JSON" ] || ! printf '%s' "$COMMENTS_JSON" | jq -e 'type == "array"' >/dev/null 2>&1; then
+if [ -z "$COMMENTS_JSON" ] \
+  || ! printf '%s' "$COMMENTS_JSON" \
+     | jq -e 'type == "array" and all(.[]; type == "object")' >/dev/null 2>&1; then
   echo "gitea forge: comments fetch failed for issue ${CODEV_ISSUE_ID}; reporting 0 comments" >&2
   COMMENTS_JSON="[]"
 fi

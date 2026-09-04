@@ -228,6 +228,41 @@ case "$2" in
   "repos/acme/errorpage/pulls?state=all&limit=50&page=2")
     echo 'null' ;;
 
+  # --- exactly-full last page: 100 pages of 5, and page 101 is empty. The
+  # ceiling is reached with every page full, but nothing is actually missing —
+  # the list length was just an exact multiple of the page size. The probe past
+  # the ceiling must find that out instead of failing a complete result.
+  # (The page=101 pattern must precede the catch-all glob below it.) ---
+  repos/acme/exact/pulls*page=101)
+    echo '[]' ;;
+  repos/acme/exact/pulls*)
+    jq -cn '[range(5)|{number:(5500+.),title:"pad",html_url:"u",body:"",state:"open",created_at:"d",user:{login:"pad"},requested_reviewers:[],draft:false}]' ;;
+
+  # --- heavy pages: each item carries a ~3KB body, so a 50-item page is ~150KB
+  # — past Linux MAX_ARG_STRLEN (128KiB), the per-argument cap that applies
+  # regardless of ARG_MAX. Passing a page to the stop filter through
+  # \`--argjson\` blows up with E2BIG there while passing fine on macOS, which
+  # has no per-arg cap. Same shape as acme/dated: page 1 all recent, page 2
+  # crosses the cutoff, page 3 is a poison pill. ---
+  "repos/acme/heavy/pulls?state=closed&sort=recentupdate&limit=50&page=1")
+    jq -cn '[range(50)|(1783537200 - (. * 3600)) as $u|{number:(7500+.),title:"heavy",html_url:"u",body:("x" * 3000),state:"closed",merged:(. == 0),merged_at:(if . == 0 then ($u|todateiso8601) else null end),created_at:"2026-05-01T00:00:00Z",updated_at:($u|todateiso8601),head:{ref:"heavy"}}]' ;;
+  "repos/acme/heavy/pulls?state=closed&sort=recentupdate&limit=50&page=2")
+    jq -cn '[range(50)|(1783357200 - (. * 3600)) as $u|{number:(7600+.),title:"heavy",html_url:"u",body:("x" * 3000),state:"closed",merged:false,created_at:"2026-05-01T00:00:00Z",updated_at:($u|todateiso8601),head:{ref:"heavy"}}]' ;;
+  "repos/acme/heavy/pulls?state=closed&sort=recentupdate&limit=50&page=3")
+    echo "fake-tea: heavy page 3 requested" >&2; exit 9 ;;
+
+  # --- a non-string \`.message\`, as a proxy or gateway between tea and Gitea
+  # can produce. String-concatenating it into the error text throws a raw jq
+  # error instead of the legible message these blocks exist to give. ---
+  repos/acme/widgets/pulls/500)
+    echo '{"message":{"nested":"upstream refused"},"url":"https://git.example.com/api/swagger"}' ;;
+  # issue 96: comments come back as an array of NON-objects, which reaches
+  # \`$comments[] | .body\` and dies with "Cannot index number with body".
+  repos/acme/widgets/issues/96)
+    echo '{"number":96,"title":"Scalar comments","body":"body","state":"open","html_url":"https://git.example.com/acme/widgets/issues/96","comments":2}' ;;
+  repos/acme/widgets/issues/96/comments)
+    echo '[1,2]' ;;
+
   # --- empty bodies at exit 0 (pull/issue 0) ------------------------------
   repos/acme/widgets/pulls/0) : ;;
   repos/acme/widgets/issues/0) : ;;
@@ -301,7 +336,16 @@ describe.skipIf(!jqAvailable)('bugfix #1137: gitea preset routes reads through `
     execFileSync('git', ['init', '-q'], { cwd: repoDir });
     execFileSync('git', ['remote', 'add', 'origin', 'git@git.example.com:acme/widgets.git'], { cwd: repoDir });
 
-    runEnv = { ...process.env, PATH: `${binDir}:${process.env.PATH ?? ''}` };
+    // Hermetic: the scripts read CODEV_* from the environment, and several tests
+    // assert on the ABSENCE of one (recently-merged with no CODEV_SINCE_DATE
+    // must walk unbounded). Inheriting the developer's shell — or a codev
+    // invocation path that exports CODEV_REPO — would quietly change what is
+    // being tested, so every CODEV_* is stripped from the base env and each
+    // test supplies exactly the ones it means.
+    const inherited = Object.fromEntries(
+      Object.entries(process.env).filter(([k]) => !k.startsWith('CODEV_')),
+    );
+    runEnv = { ...inherited, PATH: `${binDir}:${process.env.PATH ?? ''}` };
   });
 
   afterAll(() => {
@@ -532,6 +576,11 @@ describe.skipIf(!jqAvailable)('bugfix #1137: gitea preset routes reads through `
     // `printf`, none of which is on PATH, so doctor reported them as missing
     // tools and stopped checking for `tea`. The `# forge-executable:` header
     // (#1458) declares it explicitly.
+    //
+    // This asserts the declaration is PRESENT, not that doctor reads it:
+    // `extractExecutable` only learns to honor the header when #1458 lands, and
+    // until then it still reports `.` for these five. The header is an inert
+    // comment in the meantime, which is why it is safe to add first.
     for (const name of [
       'pr-exists.sh',
       'pr-list.sh',
@@ -706,6 +755,49 @@ describe.skipIf(!jqAvailable)('bugfix #1137: gitea preset routes reads through `
       expect(stdout.trim(), script).toBe('');
       expect(stderr, script).toContain('empty');
     }
+  });
+
+  it('an exactly-full last page at the ceiling is not mistaken for truncation', () => {
+    // 100 full pages then an empty page 101: the ceiling is reached with every
+    // page full, but the list length was just an exact multiple of the page
+    // size and nothing is missing. Failing here would be a hard error on a
+    // complete result.
+    const list = JSON.parse(runScript('pr-list.sh', { CODEV_REPO: 'acme/exact' }));
+    expect(list).toHaveLength(500); // 100 pages x 5
+  }, 30_000);
+
+  it('the stop filter handles pages larger than the Linux per-argument cap', () => {
+    // Each page here is ~150KB, past Linux MAX_ARG_STRLEN (128KiB) — the cap on
+    // a SINGLE argv string, which applies regardless of ARG_MAX. Handing the
+    // page to the stop filter through `--argjson` fails with E2BIG on Linux
+    // while passing on macOS, which has no per-argument cap; both pages go in
+    // on stdin instead. This assertion is therefore mostly load-bearing on CI.
+    const { status, stdout, stderr } = runScriptFull('recently-merged.sh', {
+      CODEV_REPO: 'acme/heavy',
+      CODEV_SINCE_DATE: '2026-07-05T00:00:00Z',
+    });
+    expect(stderr).toBe('');
+    expect(status).toBe(0);
+    const merged = JSON.parse(stdout);
+    expect(merged).toHaveLength(1);
+    expect(merged[0]).toMatchObject({ number: 7500, headRefName: 'heavy' });
+  });
+
+  it('reports a non-string `.message` instead of dying on the concatenation', () => {
+    // A proxy or gateway between tea and Gitea can put an object there.
+    const { status, stdout, stderr } = runScriptFull('pr-view.sh', { CODEV_PR_NUMBER: '500' });
+    expect(status).not.toBe(0);
+    expect(stdout.trim()).toBe('');
+    expect(stderr).toContain('upstream refused');
+    expect(stderr).not.toContain('jq: error');
+  });
+
+  it('issue-view degrades when the comments array holds non-objects', () => {
+    // `[1,2]` passes an outer type check but dies on `$comments[] | .body`.
+    const { status, stdout, stderr } = runScriptFull('issue-view.sh', { CODEV_ISSUE_ID: '96' });
+    expect(status).toBe(0);
+    expect(JSON.parse(stdout).comments).toEqual([]);
+    expect(stderr).toContain('comments fetch failed for issue 96');
   });
 
   it('user-identity rejects a whitespace-only login', () => {

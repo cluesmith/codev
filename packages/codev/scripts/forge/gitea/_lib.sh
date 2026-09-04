@@ -88,6 +88,24 @@ GITEA_PAGE_LIMIT=50
 # an ERROR, not a stop condition (see below).
 GITEA_MAX_PAGES=100
 
+# Build one page URL. Split out so the ceiling probe below builds it the same
+# way the loop does.
+gitea_page_url() {
+  if [ -n "$2" ]; then
+    printf '%s?%s&limit=%s&page=%s' "$1" "$2" "$GITEA_PAGE_LIMIT" "$3"
+  else
+    printf '%s?limit=%s&page=%s' "$1" "$GITEA_PAGE_LIMIT" "$3"
+  fi
+}
+
+# Echo a page response's item count, or "!<type>" if it isn't a JSON array.
+# `tea api` exits 0 on HTTP errors and prints the error body, and `jq length` is
+# 0 for both `null` and `{}` — so without the type check an error body mid-walk
+# looks exactly like an exhausted list.
+gitea_page_count() {
+  printf '%s' "$1" | jq -r 'if type == "array" then length else "!" + type end'
+}
+
 # Fetch a paginated Gitea list endpoint and emit ONE concatenated JSON array on
 # stdout, so the caller's existing jq normalizer sees the same shape as before.
 #
@@ -101,21 +119,18 @@ GITEA_MAX_PAGES=100
 #        boundary and not just within one page. It must be conservative: a false
 #        negative just costs another page, a false positive silently truncates.
 #
-# Loops page=1,2,3… appending "&limit=<N>&page=<page>", concatenates each page's
-# array, and stops when a page returns fewer than the requested limit (the last
-# page), an empty/blank response, or the caller's stop filter fires.
+# Loops page=1,2,3… concatenating each page's array, and stops when a page
+# returns fewer than the requested limit (the last page), an empty/blank
+# response, or the caller's stop filter fires.
 #
-# A page that parses but ISN'T an array is a hard error, not a stop condition.
-# `tea api` exits 0 on HTTP errors and prints the error body, and `jq length` is
-# 0 for both `null` and `{}` — so an error body mid-walk used to look exactly
-# like an exhausted list and return the partial array at exit 0.
-#
-# Reaching GITEA_MAX_PAGES without any of those terminal conditions means we do
-# NOT know we have the whole list. Returning the partial array at exit 0 would
-# be exactly the silent-truncation class this paginator exists to prevent (a
-# short `pr-exists` walk reads as "no PR exists" and passes a porch pr_exists
-# gate on a repo we simply failed to finish reading), so it fails loudly
-# instead: stderr message, non-zero return, no stdout.
+# Reaching GITEA_MAX_PAGES with every page full means we do NOT know we have the
+# whole list. Returning the partial array at exit 0 would be exactly the silent
+# truncation this paginator exists to prevent (a short `pr-exists` walk reads as
+# "no PR exists" and passes a porch pr_exists gate on a repo we simply failed to
+# finish reading), so it fails loudly instead: stderr message, non-zero return,
+# no stdout. One probe request first, because a list whose length is an exact
+# multiple of the page size hits the ceiling with nothing actually missing, and
+# failing on a complete result would be its own bug.
 tea_api_paged() {
   _path="$1"
   _query="$2"
@@ -126,19 +141,13 @@ tea_api_paged() {
   _terminal=''
   _prev=''
   while [ "$_page" -le "$GITEA_MAX_PAGES" ]; do
-    if [ -n "$_query" ]; then
-      _url="${_path}?${_query}&limit=${GITEA_PAGE_LIMIT}&page=${_page}"
-    else
-      _url="${_path}?limit=${GITEA_PAGE_LIMIT}&page=${_page}"
-    fi
-    _resp="$(tea api "$_url")" || return 1
+    _resp="$(tea api "$(gitea_page_url "$_path" "$_query" "$_page")")" || return 1
     # Blank body or an empty array → no more pages.
     if [ -z "$_resp" ]; then
       _terminal=1
       break
     fi
-    # Length AND type in one jq pass; a non-array page is prefixed with "!".
-    _count="$(printf '%s' "$_resp" | jq -r 'if type == "array" then length else "!" + type end')" || return 1
+    _count="$(gitea_page_count "$_resp")" || return 1
     case "$_count" in
       '!'*)
         echo "gitea forge: page ${_page} of '${_path}' is not an array but a ${_count#!} (an HTTP error body reaches us at exit 0); refusing to return a truncated result" >&2
@@ -151,13 +160,19 @@ tea_api_paged() {
     fi
     _acc="$(printf '%s\n%s' "$_acc" "$_resp" | jq -s 'add')" || return 1
     if [ -n "$_stop" ]; then
-      _hit="$(printf '%s' "$_resp" | jq --argjson prev "${_prev:-null}" "$_stop")" || return 1
+      # Both pages go in on STDIN, not through `--argjson`. Linux caps a single
+      # argv string at MAX_ARG_STRLEN (128KiB) regardless of ARG_MAX, and a
+      # 50-item Gitea pulls page — each object embedding full `base.repo` and
+      # `head.repo` objects — is routinely ~90KiB and can exceed it. macOS has
+      # no per-argument cap, so this would have passed locally and failed on CI
+      # and on every Linux adopter.
+      _hit="$(printf '%s\n%s\n' "${_prev:-null}" "$_resp" \
+        | jq -n "[inputs] as \$i | \$i[0] as \$prev | \$i[1] | ( $_stop )")" || return 1
       if [ "$_hit" = "true" ]; then
         _terminal=1
         break
       fi
     fi
-    _prev="$_resp"
     # A server whose max_response_items is tuned below GITEA_PAGE_LIMIT
     # truncates every page to its own cap, not the requested limit — so
     # stopping when a page is shorter than the *requested* limit would break
@@ -168,8 +183,29 @@ tea_api_paged() {
       _terminal=1
       break
     fi
+    _prev="$_resp"
     _page=$((_page + 1))
   done
+
+  if [ -z "$_terminal" ]; then
+    # Ceiling reached with every page full. Probe one past it: if there is
+    # nothing there, the list length was just an exact multiple of the page
+    # size and what we have is complete.
+    _resp="$(tea api "$(gitea_page_url "$_path" "$_query" "$((GITEA_MAX_PAGES + 1))")")" || return 1
+    if [ -z "$_resp" ]; then
+      _terminal=1
+    else
+      _count="$(gitea_page_count "$_resp")" || return 1
+      case "$_count" in
+        '!'*)
+          echo "gitea forge: page $((GITEA_MAX_PAGES + 1)) of '${_path}' is not an array but a ${_count#!} (an HTTP error body reaches us at exit 0); refusing to return a truncated result" >&2
+          return 1
+          ;;
+      esac
+      [ "$_count" -eq 0 ] && _terminal=1
+    fi
+  fi
+
   if [ -z "$_terminal" ]; then
     echo "gitea forge: pagination for '${_path}' reached the ${GITEA_MAX_PAGES}-page ceiling without a terminal page; refusing to return a truncated result" >&2
     return 1

@@ -49,7 +49,7 @@ printf '%s' "$PR" | jq '
   else
     ("gitea forge: unexpected `tea api` response for pull "
       + (env.CODEV_PR_NUMBER // "?") + ": "
-      + (if type == "object" then (.message // tostring) else tostring end)
+      + ((.message // .) | tostring)
       + "\n") | halt_error(1)
   end
   | {

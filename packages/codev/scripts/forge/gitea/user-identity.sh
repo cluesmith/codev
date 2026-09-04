@@ -27,6 +27,6 @@ printf '%s' "$USER_JSON" | jq -r '
   then .login
   else
     ("gitea forge: unexpected `tea api user` response: "
-      + (if type == "object" then (.message // tostring) else tostring end)
+      + ((.message // .) | tostring)
       + "\n") | halt_error(1)
   end'
