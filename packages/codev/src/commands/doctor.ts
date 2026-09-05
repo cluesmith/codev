@@ -208,14 +208,17 @@ export function checkTowerEnv(
     };
   }
 
-  // Tower is clean but sessions it spawned before the restart are not — the
-  // case a daemon-only check would call "ok" while agents stay unresumable.
+  // Sessions spawned before the restart are still contaminated — the case a
+  // daemon-only check would call "ok" while agents stay unresumable. Shellpers
+  // outlive Tower, so this holds whether or not a Tower is running now; only
+  // the wording changes, since "Tower is clean" is not true of an absent Tower.
   if (contaminatedSessions > 0) {
+    const lead = env ? 'Tower is clean, but' : 'No Tower running, but';
     return {
       status: 'warn',
       markers,
       contaminatedSessions,
-      summary: `Tower is clean, but ${contaminatedSessions} running session(s) still carry Claude Code session markers`,
+      summary: `${lead} ${contaminatedSessions} running session(s) still carry Claude Code session markers`,
       recommendation: TOWER_ENV_SESSION_HINT,
     };
   }
@@ -268,6 +271,11 @@ export function readProcessEnv(pid: number): Record<string, string> | null {
     if (eq <= 0) continue;
     env[token.slice(0, eq)] = token.slice(eq + 1);
   }
+  // No pairs parsed means `ps` showed us no environment at all — another user's
+  // process, or a platform where `e` is not honoured. Returning `{}` here would
+  // read downstream as "an environment with no markers", i.e. a clean bill of
+  // health for a process we never actually inspected. Say "unknown" instead.
+  if (Object.keys(env).length === 0) return null;
   return env;
 }
 

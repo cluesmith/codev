@@ -256,6 +256,17 @@ describe('bugfix-1219 — codev doctor surfaces a contaminated Tower', () => {
     expect(result.summary).toContain('1 running session(s) already carry them');
   });
 
+  it('says "no Tower running" rather than "Tower is clean" when there is none', () => {
+    // Shellpers outlive Tower, so contaminated sessions with no Tower running is
+    // a reachable state — and calling an absent Tower "clean" is just false.
+    const result = checkTowerEnv(() => null, () => [
+      { ...clean(), CLAUDE_CODE_CHILD_SESSION: 'true' },
+    ]);
+    expect(result.status).toBe('warn');
+    expect(result.summary).toContain('No Tower running');
+    expect(result.summary).not.toContain('Tower is clean');
+  });
+
   it('never tells the user a plain Tower restart is sufficient on its own', () => {
     // `afx tower stop` deliberately leaves shellpers running, so a hint that
     // stopped at "restart Tower" would read as a full fix and would not be one.
@@ -266,6 +277,15 @@ describe('bugfix-1219 — codev doctor surfaces a contaminated Tower', () => {
 });
 
 describe('bugfix-1219 — readProcessEnv', () => {
+  it('returns null, not an empty env, when ps shows no environment', () => {
+    // pid 1 (launchd/init) belongs to root: `ps eww` prints its argv but no env.
+    // `{}` would read downstream as "inspected, and clean" — a clean bill of
+    // health for a process we never actually saw inside.
+    const env = readProcessEnv(1);
+    expect(env === null || Object.keys(env).length > 0).toBe(true);
+  });
+
+
   it('reads a live process env without mistaking argv for variables', () => {
     // Self-check against this very process: `ps` is the only portable reader on
     // macOS (no /proc), and the argv-subtraction it depends on is the fragile
