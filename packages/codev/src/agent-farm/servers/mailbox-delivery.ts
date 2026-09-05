@@ -1275,6 +1275,25 @@ export class MailboxDrainer {
   }
 
   /**
+   * Arm the input re-drain for a pass this drainer did not itself run (Issue #1473).
+   *
+   * The `afx send` REQUEST path calls `deliverAgentMailSerialized` directly rather than going
+   * through the drainer, so its outcome — `retryAfterMs` included — never reached
+   * {@link armInputRetry}. The visible consequence was that a send arriving while the terminal
+   * had just been typed at fell through to the quiescence trigger or the backstop, which is
+   * precisely the latency the re-drain exists to remove, in the one case an operator is sitting
+   * there watching. Measured, not theorised: the dev-approval evidence run timed that pass at
+   * the quiescence debounce rather than one settle.
+   *
+   * A no-op before the drainer is started, and idempotent per agent — the timer coalesces, so a
+   * request-path arm and a backstop arm for the same agent cannot stack.
+   */
+  noteOutcome(workspacePath: string, toAgent: string, outcome: DeliveryOutcome): void {
+    if (!this.ports || !this.db) return;
+    this.armInputRetry(agentKey(workspacePath, toAgent), workspacePath, toAgent, outcome, this.generation);
+  }
+
+  /**
    * Arm the one-shot input re-drain and track the consecutive-input-hold diagnostic
    * (Issue #1473). Called from both pass sites, exactly where {@link recordStreak} is, so the
    * backstop tick and the fast trigger behave identically.

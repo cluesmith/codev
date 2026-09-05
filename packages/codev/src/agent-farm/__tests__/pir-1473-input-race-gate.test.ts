@@ -514,6 +514,37 @@ describe('Issue #1473 — the gate→write input race', () => {
       expect(mailbox.getById(db, row.id)?.status).toBe('delivered');
     });
 
+    it('arms a retry for a pass run OUTSIDE the drainer (the afx send request path)', async () => {
+      // The `afx send` request path calls the delivery directly rather than going through the
+      // drainer, so its outcome never reached the retry arming — and a send landing on a
+      // just-typed-at terminal fell through to the quiescence trigger or the backstop, in the
+      // one case an operator is sitting there watching it. Found by MEASURING the running
+      // Tower at the dev-approval gate, not by a unit test, which is why this one exists.
+      const h = harness();
+      const row = enqueue();
+      h.session.inputAt = NOW - 100;
+      drainer.start(h.ports, db);
+
+      const outcome = await deliverAgentMail(h.ports, db, WS, AGENT);
+      expect(outcome.retryAfterMs).toBeDefined();
+      expect(drainer.pendingInputRetries).toEqual([]); // nothing armed by the direct pass itself
+
+      drainer.noteOutcome(WS, AGENT, outcome);
+      expect(drainer.pendingInputRetries).toEqual([agentKey(WS, AGENT)]);
+
+      h.now = NOW + 1000;
+      await vi.advanceTimersByTimeAsync(INPUT_SETTLE_BEFORE_WRITE_MS + 100);
+      expect(mailbox.getById(db, row.id)?.status).toBe('delivered');
+    });
+
+    it('noteOutcome is a no-op before the drainer is started', () => {
+      const h = harness();
+      const stopped = new MailboxDrainer({ intervalMs: 60_000 });
+      stopped.noteOutcome(WS, AGENT, { delivered: [], reason: 'busy', retryAfterMs: 50 });
+      expect(stopped.pendingInputRetries).toEqual([]);
+      expect(h.writes).toHaveLength(0);
+    });
+
     it('arms nothing for a hold that is not an input hold', async () => {
       const h = harness();
       enqueue();

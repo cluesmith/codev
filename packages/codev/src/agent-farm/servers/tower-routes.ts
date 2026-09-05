@@ -2269,6 +2269,12 @@ async function handleSend(
     // completed write); the backstop drainer will retry. Report held, not a 500.
     ctx.log('ERROR', `Delivery attempt errored for ${toAgent} (row ${row.id.slice(0, 8)}... stays held): ${(err as Error).message}`);
   }
+  // Issue #1473: this pass ran OUTSIDE the drainer, so hand it the outcome — otherwise a hold
+  // on recent terminal input arms no re-drain here, and the send an operator is watching falls
+  // through to the quiescence trigger or the backstop instead of clearing after one settle.
+  // That is exactly the latency the re-drain exists to remove, in the case where somebody is
+  // waiting for it. A no-op for every other outcome.
+  if (outcome) getMailboxDrainer().noteOutcome(result.workspacePath, toAgent, outcome);
   const stored = getMailboxById(db, row.id);
   if (stored?.status === 'delivered') {
     ctx.log('INFO', `Message delivered: ${from ?? 'unknown'} → ${toAgent} (terminal ${result.terminalId.slice(0, 8)}...)`);
