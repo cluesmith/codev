@@ -32,8 +32,8 @@ import { resolveAgyBin, AGY_OAUTH_MARKERS } from './consult/index.js';
 import { checkCachedAgyAuth, recordAgyAuthState } from './consult/agy-auth-cache.js';
 import { AGENT_FARM_DIR } from '@cluesmith/codev-core/constants';
 import { findClaudeSessionMarkers } from '../lib/agent-env.js';
-import { getProcessesOnPort } from '../agent-farm/commands/tower.js';
-import { DEFAULT_TOWER_PORT } from '../agent-farm/lib/tower-client.js';
+import { getProcessesOnPort } from '../agent-farm/utils/port.js';
+import { DEFAULT_TOWER_PORT } from '@cluesmith/codev-sdk/constants';
 import {
   measureSessionLogs,
   resolveLogRetentionDays,

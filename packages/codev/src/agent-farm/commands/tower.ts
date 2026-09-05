@@ -8,7 +8,6 @@ import http from 'node:http';
 import { logger, fatal } from '../utils/logger.js';
 import { spawn } from 'node:child_process';
 import { getConfig } from '../utils/config.js';
-import { execSync } from 'node:child_process';
 import { DEFAULT_TOWER_PORT, AGENT_FARM_DIR } from '../lib/tower-client.js';
 import { ensureLocalKey } from '@cluesmith/codev-core/auth';
 import { TOWER_KEY_HEADER } from '@cluesmith/codev-types';
@@ -17,6 +16,7 @@ import Database from 'better-sqlite3';
 import { getGlobalDbPath } from '../db/index.js';
 import { activeStateDbPath, planMigration } from '../db/consolidate.js';
 import { sanitizeAgentEnv, findClaudeSessionMarkers } from '../../lib/agent-env.js';
+import { getProcessesOnPort } from '../utils/port.js';
 
 // Log file location
 const LOG_FILE = resolve(AGENT_FARM_DIR, 'tower.log');
@@ -159,29 +159,7 @@ async function waitForServer(port: number): Promise<boolean> {
   return false;
 }
 
-/**
- * Get the PID(s) of the process *listening* on a port (the server), not its
- * clients.
- *
- * `-sTCP:LISTEN` is load-bearing (#991): without it, `lsof -ti :PORT` also
- * returns every process holding an *established* client socket to the port —
- * notably the VSCode extension host (its SSE stream + terminal WebSockets) and
- * dashboard browsers. `afx tower stop` SIGTERMs whatever this returns, so the
- * unfiltered form would kill the editor's extension host (and every open
- * terminal with it), not just the Tower server.
- */
-export function getProcessesOnPort(port: number): number[] {
-  try {
-    const result = execSync(`lsof -ti :${port} -sTCP:LISTEN 2>/dev/null`, { encoding: 'utf-8' });
-    return result
-      .trim()
-      .split('\n')
-      .map((line) => parseInt(line, 10))
-      .filter((pid) => !isNaN(pid));
-  } catch {
-    return [];
-  }
-}
+export { getProcessesOnPort } from '../utils/port.js';
 
 /**
  * Start the tower dashboard
