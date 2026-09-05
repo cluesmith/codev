@@ -114,6 +114,7 @@ const SPAWN_SITES = [
   'agent-farm/servers/tower-routes.ts', // builder terminals and workspace shells
   'agent-farm/servers/tower-instances.ts', // architect launch
   'agent-farm/servers/tower-terminals.ts', // architect reconnect / auto-restart
+  'agent-farm/servers/tower-cron.ts',    // cron tasks, which may launch an agent
   'terminal/session-manager.ts',        // the shellper daemon
 ];
 
