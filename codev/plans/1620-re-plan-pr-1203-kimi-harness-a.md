@@ -158,7 +158,9 @@ What that changes for *our* work — stated here because it is not free:
 - CMAP (gemini + codex + claude, parallel, background) after the implementation commits and again after the tests, per the repo's consultation rule.
 - `codev/reviews/1620-…md` records every KEY_ISSUE from the 2026-09-04 3-way review as **addressed** or **explicitly dispositioned**. *I do not have the raw lane output* — the issue body's scope items 1–6 are its distillation, and I will work from those unless the architect hands me the transcript. Asked at the gate.
 - Update `codev/resources/arch.md`'s Kimi subsection to the shipped design (it still describes the seed bootstrap) and route new lessons by tier.
-- A courteous comment on PR #1203 summarising exactly what changed and why, crediting Mohid's original work, plus a rewritten PR description.
+- A courteous comment on PR #1203 summarising exactly what changed and why, crediting Mohid's
+  original work, plus a rewritten PR description — both **drafted to `/tmp` for human approval, not
+  posted by this lane** (see *Outward communication*).
 - Follow-up issues filed **before merge, not open-ended**, each referencing #1203: `PreToolUse`
   write-guard parity for Kimi builders (#1018 class); a `codev doctor` premise probe for the
   box-growth assumption; Kimi echo-verification tolerance (#1578).
@@ -177,8 +179,9 @@ What that changes for *our* work — stated here because it is not free:
   reads the flag as a fault.
 
 ---
-- **A handoff checklist for @mohidmakhdoomi, posted as a PR comment the moment the implementation
-  commits are pushed** — specific enough that his round is one pass, not a negotiation:
+- **A handoff checklist for @mohidmakhdoomi** — specific enough that his round is one pass, not a
+  negotiation. **This lane drafts it to `/tmp` and does not post it** (see *Outward communication*
+  below); the human approves it and it goes out over the architect's account:
 
   ```bash
   gh pr checkout 1203 && git pull          # our merge + commits are on your branch
@@ -244,6 +247,26 @@ three lanes, and where this plan answers it. This table is the skeleton of the r
 | claude | No `PreToolUse` write guard while kimi is documented as supported | **Item 7** — follow-up filed before merge and referenced from the docs *where kimi is documented as supported*, per claude's own bound |
 | claude | Kimi echo behaviour unmeasured against #1573/#1584; the 7/7 demo predates that path | **Item 7 checklist step 4** — @mohidmakhdoomi measures it; the ~2.2 s predicted cost and his result both go in the review doc |
 | claude | §7 *(not a KEY_ISSUE, but it found a real one)* — confirm what a builder self-send attributes to | **Item 2g** — chasing it surfaced an unguarded race that can drop a Kimi builder's task entirely |
+
+---
+
+## Outward communication
+
+**Standing rule (architect, 2026-09-05): this lane does not post to PR #1203 or any thread of
+@mohidmakhdoomi's.** Every outward artefact — the handoff checklist, the rewritten PR description,
+the summary comment crediting his work — is **drafted to a `/tmp/pir-1620-*.md` file and handed to
+the architect**, and the human approves each one before it goes out. Nothing this lane writes
+reaches an external contributor without that approval.
+
+Two things this rule does **not** cover, so they are not left ambiguous:
+
+- **Commits pushed to `builder/pir-1201` continue**, because that is the deliverable the architect
+  set out (build on Mohid's branch, merge-only, no rebase). They are the work, not a message.
+- **Reading** the PR and its threads (`gh pr view`, `gh pr diff`, `gh pr checkout`) continues — it
+  is how the lane stays correct.
+
+Recorded here rather than only in the thread log so a future reader of this plan cannot mistake
+"post the checklist on #1203" for an instruction to this lane.
 
 ---
 

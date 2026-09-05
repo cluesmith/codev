@@ -141,3 +141,28 @@ What the revision actually changed, beyond deleting two work items:
 
 The review doc will state plainly that live re-verification was not performed by this lane, and
 name the 0.34.0 → 0.41.0 drift.
+
+## 2026-09-05 — standing rule: no outward posts from this lane
+
+Architect standing rule: do not post to PR #1203 or any of @mohidmakhdoomi's threads. Every outward
+artefact — handoff checklist, PR description, summary comment — is drafted to `/tmp` and the human
+approves it before it goes out.
+
+Verified I had not already done so: `gh pr view 1203 --comments` and `--json reviews` show the last
+entries are Mohid's (2026-08-09) and Waleed's (2026-09-04, 2026-09-05). My `gh` use has been
+read-only (`pr view`, `pr diff`, `pr checkout`); the only writes were the commits the architect
+asked for on the branch.
+
+Folded the rule into the plan as its own **Outward communication** section rather than leaving it in
+this log, because item 7 previously said the checklist would be "posted as a PR comment the moment
+the implementation commits are pushed" — a future reader could have taken that as an instruction to
+this lane. The section also names the two things the rule does *not* cover, so they are not
+ambiguous later: pushing commits to `builder/pir-1201` continues (that is the deliverable, not a
+message), and reading the PR continues.
+
+First outward draft is ready for approval: `/tmp/pir-1620-draft-mohid-checklist.md` — the seven-step
+handoff. Written to be received by a contributor whose work sat for 26 days through no fault of his:
+opens by owning the delay, states plainly that the live verification is a request rather than an
+assignment, flags step 2 as able to block the merge, says a negative echo result is a good outcome
+rather than a failure, and surfaces the two places we reversed his judgement (`multi-row-draft`
+escalation, the trust refusals) as things to argue with rather than as decisions handed down.
