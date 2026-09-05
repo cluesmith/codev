@@ -181,3 +181,13 @@ NOT acted on, deliberately:
   "dies with this review thread". The concern is right, but the architect explicitly holds that one
   for the human and told me not to file it. Raised it with them instead of acting. A reviewer being
   correct does not override an explicit instruction about whose call it is.
+
+### Gate reached
+
+`porch check 1477` (pr phase): pr_exists ✓, e2e_tests ✓. `porch done 1477` → **GATE REQUIRED: pr**.
+
+Stopped here. The pr gate is a HUMAN approval gate — I do not run `porch approve 1477 pr` until the
+architect relays an explicit human decision. Architect notified; parked.
+
+Protocol trace so far: implement (build ✓ / tests ✓) → pr (pr_exists ✓ / e2e_tests ✓) → pr gate
+[WAITING]. Nothing left for me to do on #1477 until the gate is approved.
