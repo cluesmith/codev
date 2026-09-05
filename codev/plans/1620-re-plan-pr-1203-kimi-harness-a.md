@@ -73,6 +73,30 @@ writeMessage: (session, msg, noEnter, precheck) =>
 
 **2f. Drop the PR's `render-gate.test.ts` / `spawn-worktree.test.ts` / `harness.test.ts` stubs that model the old write edge**, and re-express those assertions against `submitMessagePaced`'s result union.
 
+**2g. Task queueing races builder registration — a real defect, found chasing claude's §7.**
+The generated Kimi script queues the task with `afx send <builderId> "$(cat .builder-prompt.txt)"`,
+run with cwd inside the worktree. Two problems, both verified against main:
+
+- **The race.** `spawn.ts` calls `upsertBuilder` **after** `startBuilderSession` returns (`spawn.ts:482`
+  then `:488`), but the script's first act is that `afx send`. `detectCurrentBuilderId()` resolves the
+  *sender* from cwd and **throws** `BuilderIdResolutionError` when no builder row exists yet
+  (`commands/send.ts:167` — "Refusing to send with an unverified identity"), which `fatal()`s the CLI.
+  The script's `if afx send …; then` then fails, prints its warning, and **does not retry within that
+  launch** — so the builder starts with a role and no mission, and the only trace is one line in the
+  PTY. Today this is saved solely by node's startup latency exceeding one local HTTP round-trip.
+  **Fix: give `codev_queue_task` a bounded retry** (~30 s, a few seconds apart) before it warns.
+  Script-local, no change to the shared spawn path. Reordering `upsertBuilder` ahead of
+  `startBuilderSession` is the tempting root fix and is **rejected**: the row carries `terminalId`,
+  which only exists after the session starts, so it would mean two upserts on the path every harness
+  shares — real blast radius to fix a Kimi-only symptom.
+- **The attribution.** Sender resolves to the builder's *own* id, so the task arrives framed
+  `### [BUILDER <id> MESSAGE → <id> | …] ###` — a builder's opening mission presented as a peer
+  message from itself. There is no self-send guard anywhere in `handleSend`. `.builder-prompt.txt` is
+  already a fully-framed spawn prompt, so **plan: pass `--raw`** and let it arrive as itself. Echo
+  verification still works — `watchEchoOnScreen` compares against a pre-write *count*, so a stable
+  first line is fine. This is verified end-to-end at the dev-approval gate rather than asserted; if
+  `--raw` reads badly, the fallback is a small explicit-attribution flag on `afx send`.
+
 ### 3. Workspace-trust pre-write — the security change (#1328 class)
 
 `ensureKimiWorkspaceTrust` (`utils/kimi-session-discovery.ts:456`) currently writes a trust record for any worktree, unconditionally, whenever a Kimi builder spawns. Kimi's folder trust gates exactly one thing — whether **project-level MCP servers** load from the folder — so writing it blind is a silent grant of "load whatever MCP servers this checkout ships" on the user's behalf. Two independent refusals, both defaulting to *do nothing*:
@@ -119,7 +143,42 @@ Install the current `@moonshot-ai/kimi-code` (0.41.0 today; floor stays 0.33.0, 
 - `codev/reviews/1620-…md` records every KEY_ISSUE from the 2026-09-04 3-way review as **addressed** or **explicitly dispositioned**. *I do not have the raw lane output* — the issue body's scope items 1–6 are its distillation, and I will work from those unless the architect hands me the transcript. Asked at the gate.
 - Update `codev/resources/arch.md`'s Kimi subsection to the shipped design (it still describes the seed bootstrap) and route new lessons by tier.
 - A courteous comment on PR #1203 summarising exactly what changed and why, crediting Mohid's original work, plus a rewritten PR description.
-- Follow-up issues filed, each referencing #1203: `PreToolUse` write-guard parity for Kimi builders (#1018 class); a `codev doctor` premise probe for the box-growth assumption; Kimi echo-verification tolerance (#1578).
+- Follow-up issues filed **before merge, not open-ended**, each referencing #1203: `PreToolUse`
+  write-guard parity for Kimi builders (#1018 class); a `codev doctor` premise probe for the
+  box-growth assumption; Kimi echo-verification tolerance (#1578).
+- **The write-guard gap is bounded by both lanes that raised it.** codex accepts it as follow-up
+  *"if maintainers explicitly accept that limitation"* — so the review doc records that acceptance
+  explicitly, in the maintainer's words, rather than implying it. claude is stricter: if it is
+  follow-up, it *"should gate documenting kimi as supported, not be open-ended"* — so the
+  `agent-farm.md` paragraph (both trees) states the gap **where Kimi is documented as supported**,
+  with the follow-up issue number, and the stale *"kimi has no documented hook seam"* claim is
+  corrected (kimi has documented blocking `PreToolUse` hooks since 0.32.0, which is what makes the
+  follow-up achievable rather than impossible).
+- **Echo-verification cost recorded, not discovered later.** claude's §6 computes it: `enterDelayMs`
+  1000 plus two 600 ms verify windows makes a Kimi `afx send` cost ~2.2 s worst case, and every
+  message may report `delivered-unverified`. Item 5 measures whether it actually does; either way the
+  number goes in the review doc as an accepted cost, so nobody reads the flag as a fault.
+
+---
+
+## KEY_ISSUES disposition (2026-09-04 3-way review)
+
+Raw lane output received from the architect after the plan was drafted. Every KEY_ISSUE from all
+three lanes, and where this plan answers it. This table is the skeleton of the review doc.
+
+| Lane | KEY_ISSUE | Where answered |
+|---|---|---|
+| gemini | *(none — APPROVE)* | Its two integration notes (0.33.0 floor is correct; write-guard as follow-up is appropriate) are honoured in items 5 and 7. |
+| codex | Trust pre-write silently enables repo-controlled MCP servers; refuse on project MCP config, preferably behind an explicit opt-in | **Item 3** — both refusals, opt-in defaulting to off |
+| codex | The approved plan no longer describes the implementation | **Item 4** — `codev/plans/1201-…md` rewritten this phase, re-approved at this gate |
+| codex | Write-guard limitation acceptable as follow-up *only if maintainers explicitly accept it* | **Item 7** — acceptance recorded in the maintainer's own words in the review doc |
+| claude | Branch `CONFLICTING`, 1,603 behind; `writeMessagePaced`, `findMarkerRow`, `launchLoopTail` all moved | **Items 1, 2a, 2e** (and the correction: `launchLoopTail` did *not* move on main — the PR relocates it, and that relocation is kept, which claude's own integration notes also recommend) |
+| claude | New `GateVerdict` details bypass #1482: absent from `MailboxGateDetail` / `isUnverifiableVerdict`, predicate re-forked locally | **Item 2d** — fork deleted, both details added in all three places, plus an exhaustiveness test |
+| claude | `multi-row-draft` holds on geometry but is excluded from the stuck set; no doctor probe covers the box-growth premise | **Item 2d** — we take the *escalate* branch of claude's own "either escalate or add a doctor probe"; the probe is filed as a follow-up. Note this supersedes the `multi-row-draft → false` parenthetical in claude's §2, which its §3 then argues against. |
+| claude | Trust pre-write should refuse when the worktree carries project-level MCP config | **Item 3a** |
+| claude | No `PreToolUse` write guard while kimi is documented as supported | **Item 7** — follow-up filed before merge and referenced from the docs *where kimi is documented as supported*, per claude's own bound |
+| claude | Kimi echo behaviour unmeasured against #1573/#1584; the 7/7 demo predates that path | **Item 5** (measurement) + **item 7** (the ~2.2 s cost recorded) |
+| claude | §7 *(not a KEY_ISSUE, but it found a real one)* — confirm what a builder self-send attributes to | **Item 2g** — chasing it surfaced an unguarded race that can drop a Kimi builder's task entirely |
 
 ---
 

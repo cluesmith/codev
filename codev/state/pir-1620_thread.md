@@ -69,3 +69,42 @@ implements. Both go to the `plan-approval` gate together.
 
 **Open question for the architect:** I do not have the raw 2026-09-04 3-way lane output, only
 the issue body's distillation of it. Working from the distillation unless the transcript turns up.
+
+## 2026-09-04 (later) — raw CMAP lanes received, plan revised
+
+Architect supplied the three raw lanes (`/tmp/pir-1620-cmap-1203-{gemini,codex,claude}.md`) and
+confirmed four of my calls: keep the `launchLoopTail` relocation (his issue line was a misread of
+the claude lane, which actually recommends keeping the move); `harnessOptions.kimi.autoTrustWorkspace`
+accepted; `multi-row-draft` escalating accepted; the `markerFgPalette` `getCell(0)` generalization
+approved as part of the merge.
+
+Auditing my plan against the raw KEY_ISSUES (rather than the issue body's distillation) found
+**four gaps**, now closed:
+
+1. **A real defect, found chasing claude's §7** — "confirm what a builder self-send attributes to".
+   The generated script queues the task with `afx send <builderId>` from inside the worktree.
+   `spawn.ts:482` starts the session and only *then* `spawn.ts:488` calls `upsertBuilder`, while
+   `detectCurrentBuilderId()` **throws** when no builder row exists yet (`send.ts:167`). Lose that
+   race and the CLI `fatal`s, the script's `if afx send` fails, it warns once and does **not retry
+   within that launch** — a Kimi builder starts with a role and no mission. Today only node's
+   startup latency saves it. Fix is a bounded retry in `codev_queue_task`; reordering `upsertBuilder`
+   is rejected (the row carries `terminalId`, so it would mean two upserts on the path every harness
+   shares). Separately the sender resolves to the builder's own id, so the task arrives framed as a
+   peer message from itself — `--raw` instead, verified at the gate.
+2. **Write-guard follow-up must be bounded.** codex accepts it "if maintainers explicitly accept
+   that limitation"; claude says it "should gate documenting kimi as supported, not be open-ended".
+   So: file the issue before merge, reference it from the docs *where kimi is documented as
+   supported*, correct the stale "no hook seam" claim, and record the maintainer's acceptance in the
+   maintainer's own words.
+3. **Echo-verification cost** — claude's §6 computes ~2.2 s per Kimi `afx send` (1000 ms Enter + two
+   600 ms windows) with possible `delivered-unverified` on every message. Recorded as an accepted
+   cost rather than discovered post-merge.
+4. **A disposition table** naming every KEY_ISSUE from all three lanes and where the plan answers it —
+   the skeleton of the review doc, since the acceptance bar is "addressed or explicitly dispositioned".
+
+One conflict inside the claude lane worth recording: its §2 asserts `multi-row-draft → false` in
+`isUnverifiableVerdict`, while its §3 argues that leaving it out of the stuck set makes the rule's
+own failure mode silent and permanent, and asks for escalation *or* a doctor probe. We take the
+escalate branch, which the architect confirmed. Noted in the table so nobody reads §2 as unaddressed.
+
+Still waiting on the human for: plan approval, and the Kimi-credentials decision (items 3+5).
